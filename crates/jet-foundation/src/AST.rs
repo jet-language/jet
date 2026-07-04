@@ -931,8 +931,16 @@ pub struct Contribution {
 #[derive(Debug)]
 pub enum ContribValue {
     /// `env.<name>:` — any expression, typically `Env { … }` (or a bare `{ … }`,
-    /// U18). modeval field-checks it.
+    /// U18). modeval field-checks it. Only the legacy contribution form
+    /// (`module dev { env.dev: Env.{ … } }`, teaches E1229) still produces
+    /// this; it has no dev `services:` support (U12) — see `Env` below.
     Expr(Expr),
+    /// `env.<name>:` in the canonical role-module form (`module env.<name> {
+    /// … }`, D-JPK-MODBODY1=A) — bare `field: expr` pairs plus, distinct from
+    /// jetos `system.*.services` (U11), a dev-supervised `services: { … }`
+    /// map (U12), reusing the exact same `services_map()` grammar as
+    /// `System`.
+    Env(EnvLit),
     /// `system.<name>:` — a `System` record (U11).
     System(SystemLit),
     /// `image.<name>:` — an `Image` record (U14).
@@ -945,11 +953,25 @@ impl ContribValue {
     pub fn span(&self) -> Span {
         match self {
             ContribValue::Expr(e) => e.span(),
+            ContribValue::Env(e) => e.span,
             ContribValue::System(s) => s.span,
             ContribValue::Image(i) => i.span,
             ContribValue::Fleet(f) => f.span,
         }
     }
+}
+
+/// U12/D-JPK-MODBODY1=A: an `env.<name>: { … }` role-module body — bare
+/// `field: expr` settings (packages/prompt/…, modeval field-checks each) plus
+/// a dev-supervised `services: { name: { … }, … }` map, captured with the
+/// same `ServiceEntry` grammar `System.services` uses (U12's `Service` stays
+/// one open record either way — only the downstream capture/interpretation
+/// differs between the jetos and dev planes, never the grammar).
+#[derive(Debug)]
+pub struct EnvLit {
+    pub fields: Vec<(String, Span, Expr)>,
+    pub services: Vec<ServiceEntry>,
+    pub span: Span,
 }
 
 /// U11/U18: a `System { target, packages, services, options }` record. The

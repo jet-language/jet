@@ -21,6 +21,12 @@ pub struct EvaluatedModule {
     /// U15: `fleet.<name>:` contributions, captured (parse/cross-check now;
     /// ssh realization rides single-host jetos, Phase D).
     pub fleets: Vec<FleetPlan>,
+    /// U12: dev-supervised `services:` entries captured from every `env.<name>`
+    /// role-module in this module, in source order. Distinct from the jetos
+    /// `system.<name>.services` capture (`ServicePlan` above) — a different
+    /// Rust type and evaluator (`ModuleEval::DevService`), even though the
+    /// `Service` grammar itself is the one ratified shape (U12).
+    pub dev_services: Vec<DevServicePlan>,
 }
 
 /// U11: a field-checked `system.<name>: { … }` contribution, captured so the
@@ -48,6 +54,44 @@ pub struct ServicePlan {
     pub enable: bool,
     /// Any further open-record fields, rendered to display strings, in source
     /// order. (e.g. `ports: [22]`.)
+    pub extra: Vec<(String, String)>,
+}
+
+/// U12: one captured dev-supervised `Service` record under an `env.<name>`
+/// role-module's `services:` map (`ContribValue::Env`/`EnvLit::services`).
+/// Distinct from `ServicePlan` (the jetos `system.*.services` capture): same
+/// ratified `Service` grammar (open record, required `enable`), but jetpack's
+/// dev-runtime tier (`Jetpack::Services`) owns and interprets every field
+/// here — there is no downstream Nix-option consumer the way jetos services
+/// have (Phase D), so an unrecognized `extra` key is a supervision-time
+/// error (E1262), not silently-forwarded metadata.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct DevServicePlan {
+    /// The service name (the map key), e.g. `redis`.
+    pub name: String,
+    /// The required `enable` flag (U12) — `false` captures the service
+    /// (so `jet services logs` etc still knows its name) without supervising it.
+    pub enable: bool,
+    /// `ports: [Int]` — TCP ports the service listens on. The first port is
+    /// the default readiness probe target when no explicit `ready:` is given.
+    pub ports: Vec<i64>,
+    /// `init: "…"` — the shell command that starts the service. Falls back to
+    /// the built-in catalog's command when the name matches a known service
+    /// and this is unset.
+    pub init: Option<String>,
+    /// `shutdown: "…"` — the shell command that stops the service. Falls back
+    /// to a plain `SIGTERM`/`SIGKILL` of the supervised pid when unset.
+    pub shutdown: Option<String>,
+    /// `data_dir: "…"` — override for the persisted-state directory, which
+    /// otherwise defaults to `.jet/services/<name>/data`.
+    pub data_dir: Option<String>,
+    /// `ready: "…"` — a shell command polled until it exits 0; the readiness
+    /// contract. Falls back to a TCP connect on `ports[0]` when unset and
+    /// `ports` is non-empty, else to a bare process-alive check.
+    pub ready: Option<String>,
+    /// Any further field, captured verbatim as a display string (open record,
+    /// U12) — checked against the known keys above at supervision time, not
+    /// at field-check time (E1262).
     pub extra: Vec<(String, String)>,
 }
 
@@ -114,4 +158,8 @@ pub struct EnvPlan {
     pub images: Vec<ImagePlan>,
     /// U15: every captured `Fleet`, validated so each host names a known system.
     pub fleets: Vec<FleetPlan>,
+    /// U12: every captured dev-supervised `Service`, across all evaluated
+    /// modules, in source order. `jetpack services <verb>`/`jetpack dev`'s
+    /// health gate are the only consumers — the jetos tier never reads this.
+    pub dev_services: Vec<DevServicePlan>,
 }

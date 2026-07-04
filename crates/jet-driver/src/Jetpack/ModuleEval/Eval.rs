@@ -9,12 +9,13 @@ use std::path::Path;
 use crate::Comptime;
 use crate::Diagnostics::Diagnostic;
 use crate::Syntax;
-use crate::AST::{ContribValue, Contribution, Expr, Func, Item, ModuleDecl, Namespace};
+use crate::AST::{ContribValue, Contribution, EnvLit, Expr, Func, Item, ModuleDecl, Namespace};
 
 use super::super::Merge::{self, EntryContribution, MergeError, MergedEntry, Scalar};
+use super::DevService::evaluate_dev_service;
 use super::Diagnostics::{not_a_namespace_literal, packages_not_a_list, wrong_namespace_type};
 use super::System::{evaluate_fleet, evaluate_image, evaluate_system};
-use super::Types::EvaluatedModule;
+use super::Types::{DevServicePlan, EvaluatedModule};
 
 /// Parse `src` and evaluate every enabled module it declares. `base_dir`
 /// resolves `embed_file` inside contribution expressions, same as ordinary
@@ -83,11 +84,17 @@ fn evaluate_module<'a>(
     let mut systems = Vec::new();
     let mut images = Vec::new();
     let mut fleets = Vec::new();
+    let mut dev_services = Vec::new();
     for c in &m.contributions {
         match (&c.namespace, &c.value) {
             (Namespace::Env, ContribValue::Expr(_)) => {
                 let entry = evaluate_env_contribution(c, src, base_dir, funcs)?;
                 entries.push(((c.namespace, c.path.clone()), entry));
+            }
+            (Namespace::Env, ContribValue::Env(lit)) => {
+                let (entry, services) = evaluate_env_role(lit, src, base_dir, funcs)?;
+                entries.push(((c.namespace, c.path.clone()), entry));
+                dev_services.extend(services);
             }
             (Namespace::System, ContribValue::System(lit)) => {
                 systems.push(evaluate_system(&c.path, lit, src, base_dir, funcs)?);
@@ -109,6 +116,7 @@ fn evaluate_module<'a>(
         systems,
         images,
         fleets,
+        dev_services,
     })
 }
 
@@ -177,6 +185,19 @@ fn evaluate_env_contribution(
         return Err(wrong_namespace_type(expected, type_name, value.span()));
     }
 
+    evaluate_env_fields(&fields, src, base_dir, funcs)
+}
+
+/// Shared field-loop for both `env.<name>:` producer shapes (the legacy
+/// `Expr::StructLit`'s fields and the canonical role-module's `EnvLit::fields`):
+/// `packages:` reuses the Pkg-sugar text slice; everything else is a pure
+/// comptime scalar setting.
+fn evaluate_env_fields(
+    fields: &[(String, crate::Diagnostics::Span, Expr)],
+    src: &str,
+    base_dir: &Path,
+    funcs: &HashMap<String, &Func>,
+) -> Result<EntryContribution, Diagnostic> {
     let mut entry = EntryContribution::default();
     let extern_names = HashSet::new();
     let globals = HashMap::new();
@@ -194,6 +215,24 @@ fn evaluate_env_contribution(
         }
     }
     Ok(entry)
+}
+
+/// U12/D-JPK-MODBODY1=A: evaluate a canonical `env.<name>: { … }` role-module
+/// body (`EnvLit`) — the same scalar/package fields as the legacy form, plus a
+/// dev-supervised `services:` map, field-checked and captured as
+/// `DevServicePlan`s (distinct from the jetos `system.*.services` capture).
+fn evaluate_env_role(
+    lit: &EnvLit,
+    src: &str,
+    base_dir: &Path,
+    funcs: &HashMap<String, &Func>,
+) -> Result<(EntryContribution, Vec<DevServicePlan>), Diagnostic> {
+    let entry = evaluate_env_fields(&lit.fields, src, base_dir, funcs)?;
+    let mut services = Vec::new();
+    for s in &lit.services {
+        services.push(evaluate_dev_service(s, base_dir, funcs)?);
+    }
+    Ok((entry, services))
 }
 
 /// Pull the package list out of a `packages: [ … ]` field by slicing its

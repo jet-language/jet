@@ -1304,6 +1304,7 @@ pub const JETPACK_VERBS: &[&str] = &[
     DEV_SUBCOMMAND,
     CONFIG_SUBCOMMAND,
     BRIDGE_SUBCOMMAND,
+    SERVICES_SUBCOMMAND,
 ];
 
 /// U16 (card c9jetpackgates): `jet env -p <pkg>...` — ad-hoc nixpkgs packages
@@ -1337,6 +1338,30 @@ pub const FOREIGN_DEVENV_FILE: &str = "devenv.nix";
 /// services (U12 no-op today), then run the project's `fn dev()` or fall back
 /// to `fn run()`.
 pub const DEV_SUBCOMMAND: &str = "dev";
+
+/// U12 (card c9jetpackgates): `jetpack services <verb>` supervises the
+/// project's dev `services:` processes under `.jet/services/<name>/` —
+/// `up`/`down` start/stop the enabled set (or one named service), `health`
+/// one-shot probes readiness, `logs` prints a service's captured
+/// stdout/stderr. Distinct from the jetos `system.*.services` tier (Phase D,
+/// untouched): this dev tier runs plain child processes via `std::process`,
+/// never a system service manager.
+pub const SERVICES_SUBCOMMAND: &str = "services";
+pub const SERVICES_VERB_UP: &str = "up";
+pub const SERVICES_VERB_DOWN: &str = "down";
+pub const SERVICES_VERB_HEALTH: &str = "health";
+pub const SERVICES_VERB_LOGS: &str = "logs";
+pub const SERVICES_VERBS: &[&str] = &[
+    SERVICES_VERB_UP,
+    SERVICES_VERB_DOWN,
+    SERVICES_VERB_HEALTH,
+    SERVICES_VERB_LOGS,
+];
+
+/// U12: the per-project supervised-services state dir name, nested under the
+/// project's `.jet/` managed folder — `.jet/services/<name>/{pid,stdout.log,
+/// stderr.log,data/}`.
+pub const SERVICES_STATE_DIR: &str = "services";
 
 /// U19: `jetpack config <verb>` — today only `trust` pattern management.
 pub const CONFIG_SUBCOMMAND: &str = "config";
@@ -1466,6 +1491,24 @@ pub const SYSTEM_FIELD_OPTIONS: &str = "options";
 
 /// U12 (ratified 2026-06-16): the required first field of every `Service` record.
 pub const SERVICE_FIELD_ENABLE: &str = "enable";
+
+/// U12 (ratified 2026-06-16 — supervised-services slice, card c9jetpackgates):
+/// the recognized fields of a **dev-supervised** `Service` (an entry under an
+/// `env.<name>` role-module's `services:` map). `Service` stays the one
+/// ratified open record either way (same grammar as `system.*.services`,
+/// `SYSTEM_FIELD_SERVICES`/`SERVICE_FIELD_ENABLE` reused verbatim) — only the
+/// dev-runtime tier (`Jetpack::Services`) interprets these particular keys,
+/// to start/probe/stop the supervised process: `ports` (the `[Int]` TCP ports
+/// it listens on), `init` (the shell command that starts it), `shutdown` (the
+/// shell command that stops it, else a plain signal), `data_dir` (its
+/// persisted-state directory, else `.jet/services/<name>/data`), and `ready`
+/// (a shell command polled until it exits 0 — the readiness contract, else a
+/// TCP probe on `ports[0]`, else a bare process-alive check).
+pub const DEV_SERVICE_FIELD_PORTS: &str = "ports";
+pub const DEV_SERVICE_FIELD_INIT: &str = "init";
+pub const DEV_SERVICE_FIELD_SHUTDOWN: &str = "shutdown";
+pub const DEV_SERVICE_FIELD_DATA_DIR: &str = "data_dir";
+pub const DEV_SERVICE_FIELD_READY: &str = "ready";
 
 /// U13 (ratified 2026-06-16): the typed platform values a `System.target` (and a
 /// cross-compile `Image.target`) may hold — `linux.x64` / `linux.arm64`. Written

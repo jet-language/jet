@@ -669,6 +669,7 @@ fn main() {
                 | "debug"
                 | "push"
                 | "bridge"
+                | "services"
                 | "publish"
                 | "yank"
                 | "keygen"
@@ -749,6 +750,7 @@ fn main() {
             | "serve"
             | "push"
             | "bridge"
+            | "services"
             | "add"
             | "remove"
             | "bind"
@@ -969,6 +971,17 @@ fn main() {
             exit(EngineDispatch::dispatch(
                 jet::Syntax::JETPACK_BINARY_NAME,
                 "bridge",
+                &raw,
+            ));
+        }
+        "services" => {
+            // U12 (card c9jetpackgates): `jet services up/down/health/logs`
+            // supervises the project's dev `services:` processes. D-JPK-
+            // DISPATCH1=B: dispatched to the jetpack engine exactly like
+            // `push`/`bridge`/`config`, never linked in-process.
+            exit(EngineDispatch::dispatch(
+                jet::Syntax::JETPACK_BINARY_NAME,
+                "services",
                 &raw,
             ));
         }

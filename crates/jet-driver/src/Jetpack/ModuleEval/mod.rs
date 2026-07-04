@@ -18,6 +18,7 @@
 //! see commit 2b3825e), so this module owns the only pass that gives module
 //! bodies meaning.
 
+mod DevService;
 mod Diagnostics;
 mod Eval;
 mod Source;
@@ -28,7 +29,8 @@ pub use Diagnostics::merge_error_to_diagnostic;
 pub use Eval::{evaluate_modules, evaluate_source, merge_all, pkg_ref};
 pub use Source::{evaluate_env, is_module_surface};
 pub use Types::{
-    EnvPlan, EvaluatedModule, FleetPlan, HostPlan, ImagePlan, OptionPlan, ServicePlan, SystemPlan,
+    DevServicePlan, EnvPlan, EvaluatedModule, FleetPlan, HostPlan, ImagePlan, OptionPlan,
+    ServicePlan, SystemPlan,
 };
 
 #[cfg(test)]
@@ -662,6 +664,109 @@ module fleet.prod { hosts: { only: system.web } }
         let src = "module fleet.prod { }";
         let err = evaluate_env(src, &base_dir()).unwrap_err();
         assert_eq!(err.code, "E1245");
+    }
+
+    // ── U12: dev-supervised services (`env.<name> { services: { … } }`) ──
+
+    /// The canonical role-module form captures a `services:` map into
+    /// `DevServicePlan`s, distinct from (and alongside) ordinary scalar/
+    /// `packages:` fields — the recognized control fields (`ports`/`init`/
+    /// `ready`) come back typed, not as display-string `extra`.
+    #[test]
+    fn dev_services_are_captured_with_typed_fields() {
+        let src = r#"
+module env.dev {
+    prompt: "wordstats",
+    services: {
+        redis: { enable: true, ports: [6380], init: "redis-server --port 6380", ready: "redis-cli -p 6380 ping" },
+        worker: { enable: false },
+    }
+}
+"#;
+        let plan = evaluate_env(src, &base_dir()).unwrap();
+        assert_eq!(plan.prompt.as_deref(), Some("wordstats"));
+        assert_eq!(plan.dev_services.len(), 2);
+        let redis = &plan.dev_services[0];
+        assert_eq!(redis.name, "redis");
+        assert!(redis.enable);
+        assert_eq!(redis.ports, vec![6380]);
+        assert_eq!(redis.init.as_deref(), Some("redis-server --port 6380"));
+        assert_eq!(redis.ready.as_deref(), Some("redis-cli -p 6380 ping"));
+        assert!(redis.extra.is_empty());
+        let worker = &plan.dev_services[1];
+        assert_eq!(worker.name, "worker");
+        assert!(!worker.enable);
+    }
+
+    /// A field jetpack's dev-runtime tier doesn't recognize is captured in
+    /// `extra` (open record, U12) rather than rejected at field-check time —
+    /// `Jetpack::Services` is the one that flags it (E1262), not modeval.
+    #[test]
+    fn dev_service_unrecognized_field_lands_in_extra() {
+        let src = r#"
+module env.dev {
+    services: { redis: { enable: true, prot: 6380 } }
+}
+"#;
+        let plan = evaluate_env(src, &base_dir()).unwrap();
+        assert_eq!(
+            plan.dev_services[0].extra,
+            vec![("prot".to_string(), "6380".to_string())]
+        );
+    }
+
+    /// A dev service with no `enable` is E0975 — the exact same diagnostic
+    /// (and required-field rule) as a jetos `system.*.services` entry (U12's
+    /// `Service` is one ratified grammar either way).
+    #[test]
+    fn dev_service_without_enable_is_e0975() {
+        let src = "module env.dev { services: { redis: { ports: [6379] } } }";
+        let err = evaluate_env(src, &base_dir()).unwrap_err();
+        assert_eq!(err.code, "E0975");
+    }
+
+    /// `services:` under `env.*` never contaminates the jetos `system.*`
+    /// capture (`ServicePlan`) — they're wholly separate lists on the plan.
+    #[test]
+    fn dev_services_and_jetos_services_are_independent() {
+        let src = r#"
+module env.dev {
+    services: { redis: { enable: true } }
+}
+module system.box {
+    target: linux.x64,
+    services: { openssh: { enable: true } }
+}
+"#;
+        let plan = evaluate_env(src, &base_dir()).unwrap();
+        assert_eq!(plan.dev_services.len(), 1);
+        assert_eq!(plan.dev_services[0].name, "redis");
+        assert_eq!(plan.systems[0].services.len(), 1);
+        assert_eq!(plan.systems[0].services[0].name, "openssh");
+    }
+
+    /// I5: the committed jetpack-typed fixture is the executable spec for
+    /// U12 dev services.
+    #[test]
+    fn committed_services_example_field_checks_clean() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/jetpack-typed/services.jet");
+        let src = std::fs::read_to_string(&path).unwrap();
+        let dir = path.parent().unwrap();
+        let plan = evaluate_env(&src, dir).unwrap();
+        assert_eq!(plan.dev_services.len(), 3);
+        let redis = &plan.dev_services[0];
+        assert_eq!(redis.name, "redis");
+        assert!(redis.enable);
+        assert!(redis.init.is_none(), "redis relies on the built-in catalog");
+        let worker = &plan.dev_services[1];
+        assert_eq!(worker.name, "worker");
+        assert_eq!(worker.ports, vec![8080]);
+        assert_eq!(worker.init.as_deref(), Some("worker --port 8080"));
+        assert!(worker.ready.is_some());
+        let cache = &plan.dev_services[2];
+        assert_eq!(cache.name, "cache");
+        assert!(!cache.enable);
     }
 
     #[test]

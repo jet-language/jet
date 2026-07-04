@@ -119,6 +119,11 @@ impl<'a> Parser<'a> {
         // Env bodies collect bare `field: expr` pairs into an inferred record
         // (U18); system/image bodies reuse their dedicated field parsers.
         let mut env_fields: Vec<(String, Span, Expr)> = Vec::new();
+        // U12: a dev `services: { name: { … }, … }` map, reusing the exact
+        // `services_map()` grammar `system.<name>.services` already parses —
+        // captured separately from `env_fields` because it isn't a bare
+        // `field: expr` pair (see `EnvLit`).
+        let mut env_services: Vec<crate::AST::ServiceEntry> = Vec::new();
         let mut system_fields: Vec<crate::AST::SystemField> = Vec::new();
         let mut image_fields: Vec<crate::AST::ImageField> = Vec::new();
         let mut fleet_fields: Vec<crate::AST::FleetField> = Vec::new();
@@ -146,8 +151,15 @@ impl<'a> Parser<'a> {
                     Namespace::Env => {
                         let (field, field_span) = self.expect_ident("for a field name")?;
                         self.expect(TokKind::Colon, "after a field name")?;
-                        let value = self.expr()?;
-                        env_fields.push((field, field_span, value));
+                        // U12: `services:` is a dev-supervised map, not a bare
+                        // scalar/list field — parse it with the same
+                        // dedicated grammar `System.services` uses.
+                        if field == Syntax::SYSTEM_FIELD_SERVICES {
+                            env_services.extend(self.services_map()?);
+                        } else {
+                            let value = self.expr()?;
+                            env_fields.push((field, field_span, value));
+                        }
                         if matches!(self.peek().kind, TokKind::Comma) {
                             self.bump();
                         }
@@ -178,13 +190,9 @@ impl<'a> Parser<'a> {
         let body_span = Span::new(body_start, end);
 
         let value = match namespace {
-            Namespace::Env => crate::AST::ContribValue::Expr(Expr::StructLit {
-                type_name: String::new(),
-                type_args: Vec::new(),
-                import_ns: None,
-                as_trait: None,
+            Namespace::Env => crate::AST::ContribValue::Env(crate::AST::EnvLit {
                 fields: env_fields,
-                inferred: true,
+                services: env_services,
                 span: body_span,
             }),
             Namespace::System => crate::AST::ContribValue::System(crate::AST::SystemLit {

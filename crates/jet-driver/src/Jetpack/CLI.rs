@@ -9,6 +9,7 @@ use super::ManifestTOML;
 use super::Output::{self, Theme};
 use super::Provider::{self, ProviderError};
 use super::RefSpec::{self, ProviderKind};
+use super::Services;
 use super::Shell::{self, Env, ShellKind};
 use super::Store::{self, Roots};
 use super::Trust;
@@ -127,6 +128,7 @@ pub fn main(args: Vec<String>) -> i32 {
         "push" => cmd_push(&theme, &parsed),
         v if v == Syntax::BRIDGE_SUBCOMMAND => cmd_bridge(&theme, &parsed),
         v if v == Syntax::OS_SUBCOMMAND => cmd_os(&theme, &parsed),
+        v if v == Syntax::SERVICES_SUBCOMMAND => cmd_services(&theme, &parsed),
         "help" | "--help" | "-h" => {
             println!("{}", usage());
             0
@@ -395,6 +397,11 @@ struct RunPlan {
     refs: Vec<RefSpec::RefSpec>,
     table: RefSpec::SourceTable,
     label: String,
+    /// U12: dev-supervised `services:` entries the typed env surface
+    /// declared, empty for the Phase-1 directive surface (which predates
+    /// U12). `jetpack services <verb>` and `jet dev`'s health gate are the
+    /// only readers.
+    dev_services: Vec<ModuleEval::DevServicePlan>,
 }
 
 /// Build a plan from the project `env.jet` (the no-explicit-ref path). `Err`
@@ -437,6 +444,7 @@ fn load_project_plan(theme: &Theme) -> Result<RunPlan, i32> {
         refs,
         table,
         label: ef.prompt_label(),
+        dev_services: Vec::new(),
     })
 }
 
@@ -459,13 +467,28 @@ fn typed_plan_with_defaults(
     })?;
     let mut table = plan.table;
     table.merge_defaults(toml_defaults);
-    let refs = classify_all(theme, plan.package_refs.iter().map(String::as_str), &table)?;
+    // U12: a dev service with no explicit `init:` that matches the built-in
+    // catalog implicitly depends on that catalog's package (e.g. `redis: {
+    // enable: true }` needs `redis-server` on PATH) — fold its ref in
+    // alongside the author's own `packages:` so it realizes the same way.
+    let mut package_refs = plan.package_refs;
+    for svc in &plan.dev_services {
+        if svc.enable && svc.init.is_none() {
+            if let Some(pkg_ref) = Services::catalog_pkg_ref(&svc.name) {
+                if !package_refs.iter().any(|r| r == pkg_ref) {
+                    package_refs.push(pkg_ref.to_string());
+                }
+            }
+        }
+    }
+    let refs = classify_all(theme, package_refs.iter().map(String::as_str), &table)?;
     Ok(RunPlan {
         refs,
         table,
         label: plan
             .prompt
             .unwrap_or_else(|| Syntax::JETPACK_PROMPT_LABEL.to_string()),
+        dev_services: plan.dev_services,
     })
 }
 
@@ -508,6 +531,7 @@ fn cmd_run(theme: &Theme, parsed: &Parsed) -> i32 {
                 refs: vec![spec],
                 table: cwd_table(),
                 label: Syntax::JETPACK_PROMPT_LABEL.to_string(),
+                dev_services: Vec::new(),
             },
             Err(_) => return 2,
         },
@@ -589,6 +613,7 @@ fn cmd_enter(theme: &Theme, parsed: &Parsed) -> i32 {
             refs: Vec::new(),
             table: RefSpec::SourceTable::empty(),
             label: Syntax::JETPACK_PROMPT_LABEL.to_string(),
+            dev_services: Vec::new(),
         }
     };
 
@@ -798,7 +823,7 @@ fn cmd_dev(theme: &Theme, parsed: &Parsed) -> i32 {
         return 1;
     };
 
-    if let Err(code) = wait_for_services_ready(&env) {
+    if let Err(code) = wait_for_services_ready(theme, &project_dir, &env, &plan.dev_services) {
         return code;
     }
 
@@ -815,15 +840,186 @@ fn cmd_dev(theme: &Theme, parsed: &Parsed) -> i32 {
     Shell::run_command(&env, &cmd)
 }
 
-/// U12 (supervised services) is unimplemented — this is a deliberate no-op,
-/// not a fake "waiting for services…" message. It takes the composed `Env` so
-/// the day U12 ships, this gains a real health-check loop against the
-/// project's `services:` and gates on it right here — the one call site
-/// `jetpack dev` already runs before starting the project — with no change
-/// needed at the call site itself.
-fn wait_for_services_ready(_env: &Env) -> Result<(), i32> {
+/// U12: bring up every enabled dev `services:` entry and block until each is
+/// healthy (or E1261 on timeout) before `jetpack dev` runs the project's
+/// `fn dev()`/`fn run()`. Takes the composed `Env` so a catalog binary (e.g.
+/// `redis-server`, realized alongside the project's own packages) resolves
+/// on PATH the same way the project's own command does.
+fn wait_for_services_ready(
+    theme: &Theme,
+    project_dir: &Path,
+    env: &Env,
+    services: &[ModuleEval::DevServicePlan],
+) -> Result<(), i32> {
+    for svc in services {
+        if !svc.enable {
+            continue;
+        }
+        theme.detail(&format!("waiting for service `{}` to become healthy…", svc.name));
+        bring_up_one(theme, project_dir, env, svc).map_err(|_| 2)?;
+    }
     Ok(())
 }
+
+/// Bring up one enabled service and block until it's healthy: E1262 for an
+/// unrecognized field, a plain error if it can't be started at all, E1261 on
+/// a readiness timeout. Shared by `wait_for_services_ready` (the `jet dev`
+/// health gate) and `cmd_services`'s `up` verb so the two never drift.
+fn bring_up_one(
+    theme: &Theme,
+    project_dir: &Path,
+    env: &Env,
+    svc: &ModuleEval::DevServicePlan,
+) -> Result<(), ()> {
+    if let Some(field) = Services::unknown_field(svc) {
+        theme.error_coded(
+            "E1262",
+            &format!("service `{}` has a field jetpack doesn't recognize: `{field}`", svc.name),
+            "a dev-supervised `Service` stays open at parse time, but jetpack's dev-runtime tier is the only consumer of its fields — an unrecognized key is almost always a typo.",
+            "rename it to one of `enable`, `ports`, `init`, `shutdown`, `data_dir`, `ready`, or remove it.",
+        );
+        return Err(());
+    }
+    if let Err(msg) = Services::up_one(project_dir, env, svc) {
+        theme.error(&format!("couldn't start service `{}`", svc.name), &msg, "");
+        return Err(());
+    }
+    if Services::wait_healthy(project_dir, svc, service_health_timeout()) {
+        Ok(())
+    } else {
+        theme.error_coded(
+            "E1261",
+            &format!("service `{}` never became healthy", svc.name),
+            "jetpack waited for its readiness contract (`ready:`, else a TCP probe on its first `ports:` entry, else a bare process-alive check) and it never passed.",
+            &format!("check `jetpack services logs {}` for what it printed, and confirm its `init`/`ready` commands are correct.", svc.name),
+        );
+        Err(())
+    }
+}
+
+/// U12: the readiness-poll ceiling `wait_for_services_ready`/`cmd_services`'s
+/// `up` verb allow a service before reporting E1261. Not yet user-configurable
+/// (no ratified field for it) — 15s comfortably covers a local dev dependency
+/// (redis, a small HTTP mock, …) starting cold. `JETPACK_SERVICE_HEALTH_TIMEOUT_MS`
+/// overrides it for tests that need to exercise the E1261 timeout path quickly
+/// (mirrors `JETPACK_ROOT`/`JETPACK_FIXTURES`'s test-only env-var escape hatch).
+fn service_health_timeout() -> std::time::Duration {
+    std::env::var("JETPACK_SERVICE_HEALTH_TIMEOUT_MS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .map(std::time::Duration::from_millis)
+        .unwrap_or(std::time::Duration::from_secs(15))
+}
+
+/// `jetpack services up|down|health|logs [<name>]` (U12). With no `<name>`,
+/// every declared dev service is targeted; `logs` requires exactly one name.
+fn cmd_services(theme: &Theme, parsed: &Parsed) -> i32 {
+    let Some(verb) = parsed.positional.first().cloned() else {
+        theme.error(
+            "`jetpack services` needs a verb",
+            &format!("known verbs: {}.", Syntax::SERVICES_VERBS.join(", ")),
+            "try `jetpack services up`.",
+        );
+        return 2;
+    };
+    let name = parsed.positional.get(1).cloned();
+
+    let plan = match load_project_plan(theme) {
+        Ok(plan) => plan,
+        Err(code) => return code,
+    };
+    let project_dir = std::env::current_dir().unwrap_or_default();
+    let targets: Vec<&ModuleEval::DevServicePlan> = plan
+        .dev_services
+        .iter()
+        .filter(|s| name.as_deref().is_none_or(|n| n == s.name))
+        .collect();
+    if targets.is_empty() {
+        let headline = match &name {
+            Some(n) => format!("no dev service named `{n}`"),
+            None => "this project declares no dev `services:`".to_string(),
+        };
+        theme.error(
+            &headline,
+            "declare one under an `env.<name> { services: { … } }` role-module (U12).",
+            "",
+        );
+        return 2;
+    }
+
+    match verb.as_str() {
+        v if v == Syntax::SERVICES_VERB_LOGS => {
+            let Some(n) = &name else {
+                theme.error(
+                    "`jetpack services logs` needs a service name",
+                    "logs are per service.",
+                    "try `jetpack services logs <name>`.",
+                );
+                return 2;
+            };
+            print!("{}", Services::logs(&project_dir, n));
+            0
+        }
+        v if v == Syntax::SERVICES_VERB_UP => {
+            let roots = Store::resolve();
+            if roots.dev_mode {
+                theme.detail(&theme.gray("dev mode: no write access to /etc/jet"));
+            }
+            let Some(env) = compose_env(theme, &roots, &parsed.flags, &plan) else {
+                return 1;
+            };
+            for svc in &targets {
+                if !svc.enable {
+                    theme.detail(&format!("service `{}` is disabled, skipping", svc.name));
+                    continue;
+                }
+                if bring_up_one(theme, &project_dir, &env, svc).is_err() {
+                    return 2;
+                }
+                theme.ok(&format!("service `{}` is up", svc.name));
+            }
+            0
+        }
+        v if v == Syntax::SERVICES_VERB_DOWN => {
+            for svc in &targets {
+                Services::down_one(&project_dir, svc);
+                theme.ok(&format!("service `{}` is down", svc.name));
+            }
+            0
+        }
+        v if v == Syntax::SERVICES_VERB_HEALTH => {
+            let mut all_healthy = true;
+            for svc in &targets {
+                let (label, healthy) = match Services::health_one(&project_dir, svc) {
+                    Services::Health::Disabled => ("disabled", true),
+                    Services::Health::NotRunning => ("not running", false),
+                    Services::Health::Unhealthy => ("unhealthy", false),
+                    Services::Health::Healthy => ("healthy", true),
+                };
+                all_healthy &= healthy;
+                if healthy {
+                    theme.ok(&format!("service `{}`: {label}", svc.name));
+                } else {
+                    theme.error(&format!("service `{}`: {label}", svc.name), "", "");
+                }
+            }
+            if all_healthy {
+                0
+            } else {
+                1
+            }
+        }
+        other => {
+            theme.error(
+                &format!("`{other}` is not a `jetpack services` verb"),
+                &format!("known verbs: {}.", Syntax::SERVICES_VERBS.join(", ")),
+                "try `jetpack services up`.",
+            );
+            2
+        }
+    }
+}
+
 
 /// The sibling `jet` binary next to the running `jetpack` process, falling
 /// back to a bare PATH lookup. Mirrors `Source/EngineDispatch.rs`'s
@@ -1568,6 +1764,10 @@ usage:
   {bin} remove <source>:<package>      remove a package from ./{pack}
   {bin} os switch [<config>]@<host>    build + activate a machine from a config.jet
   {bin} os build  [<config>]@<host>    build a machine generation, don't activate
+  {bin} services up   [<name>]         start dev services declared under env.*
+  {bin} services down [<name>]         stop them
+  {bin} services health [<name>]       one-shot readiness check
+  {bin} services logs <name>           print a service's captured stdout/stderr
 
 refs:
   nixpkgs:fastfetch                    a package from nixpkgs
