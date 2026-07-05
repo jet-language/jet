@@ -430,6 +430,86 @@ fn looks_like_jet_source(arg: &str) -> bool {
     Path::new(&format!("{}.{}", arg, jet::Syntax::FILE_EXT)).exists()
 }
 
+/// U16 (D-JPK-BRIDGE1=A): `nix run nixpkgs#fastfetch` parity.
+///
+/// Top-level `jet run nixpkgs@tool` is not a Jet source compile; it is the
+/// package-engine path, with the ratified `provider@target` spelling. Lower it
+/// to `jetpack run nixpkgs:tool -- tool`, preserving the offline fixture flags
+/// used by the same provider path and forwarding user args after `--`.
+fn dispatch_nixpkgs_run(raw: &[String], target: &str, sep: Option<usize>) -> Option<i32> {
+    let (source, package) = target.split_once('@')?;
+    if source != jet::Syntax::REF_SOURCE_NIXPKGS || package.is_empty() {
+        return None;
+    }
+
+    let before_sep = sep.map_or(raw, |i| &raw[..i]);
+    let mut fwd = vec![
+        "run".to_string(),
+        format!(
+            "{}{}{}",
+            jet::Syntax::REF_SOURCE_NIXPKGS,
+            jet::Syntax::REF_SEPARATOR,
+            package
+        ),
+    ];
+    let mut command_args = Vec::new();
+    let mut saw_run = false;
+    let mut saw_target = false;
+    let mut i = 0usize;
+    while i < before_sep.len() {
+        let a = &before_sep[i];
+        if !saw_run && a == "run" {
+            saw_run = true;
+            i += 1;
+            continue;
+        }
+        if !saw_target && a == target {
+            saw_target = true;
+            i += 1;
+            continue;
+        }
+        match a.as_str() {
+            "--no-color" | "--offline" => fwd.push(a.clone()),
+            "--fixtures" => {
+                fwd.push(a.clone());
+                if let Some(value) = before_sep.get(i + 1) {
+                    fwd.push(value.clone());
+                    i += 1;
+                }
+            }
+            "--color=never" => fwd.push("--no-color".to_string()),
+            s if s.starts_with("--") => {
+                eprintln!(
+                    "Error [E2102]: `{}` isn't a flag `jet run nixpkgs@…` understands",
+                    s
+                );
+                eprintln!(
+                    " Why: this form forwards only package-run flags before `--`; tool arguments go after `--`"
+                );
+                eprintln!(
+                    " Fix: write `jet run nixpkgs@{} -- {}` to pass it to the tool.",
+                    package, s
+                );
+                return Some(ExitCodes::USAGE);
+            }
+            other => command_args.push(other.to_string()),
+        }
+        i += 1;
+    }
+
+    fwd.push("--".to_string());
+    fwd.push(package.to_string());
+    fwd.extend(command_args);
+    if let Some(i) = sep {
+        fwd.extend(raw[i + 1..].iter().cloned());
+    }
+    Some(EngineDispatch::dispatch(
+        jet::Syntax::JETPACK_BINARY_NAME,
+        "run",
+        &fwd,
+    ))
+}
+
 /// The bare-`jet` greeting (D-DX): friendly, exit 0, not a usage error.
 /// Shown when argv is flags-only with no subcommand (not for a bare `jet` —
 /// that starts the REPL per c6vz465).
@@ -733,6 +813,14 @@ fn main() {
             exit(status.code().unwrap_or(ExitCodes::OK));
         }
         unknown_subcommand(cmd);
+    }
+
+    if cmd == "run" {
+        if let Some(target) = args.get(1).map(|s| s.as_str()) {
+            if let Some(code) = dispatch_nixpkgs_run(&raw, target, passthrough_sep) {
+                exit(code);
+            }
+        }
     }
 
     // D-JPK-TOOLCHAIN1=A (#179): a version-pinned project hands off to its

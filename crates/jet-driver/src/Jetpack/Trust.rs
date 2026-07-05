@@ -3,9 +3,8 @@
 //! `jetpack enter` (`jet env`) and `jetpack dev` (project-level `jet dev`)
 //! both realize a project's declared env — code the project author wrote,
 //! not the user. First entry to a repo whose env definition is trust-sensitive
-//! (today: it declares any package ref/source — U12 services and U13 secrets
-//! don't exist yet, but [`is_trust_sensitive`] is the one place they register
-//! their own trigger later, see its doc comment) shows a summary and asks.
+//! (today: it declares any package ref/source, or U13 secrets) shows a summary
+//! and asks.
 //! Accepting persists a grant keyed by [`env_definition_hash`], so the same
 //! (unchanged) env never re-prompts; `--trust` is a one-shot bypass that
 //! persists nothing. `jetpack config trust add/list/remove` manages durable
@@ -63,14 +62,16 @@ fn append_line(path: &Path, line: &str) {
 }
 
 /// A stable hash over the env definition's trust-sensitive content: every
-/// realized ref (sorted) plus every declared named source (sorted, via
-/// `SourceTable::trust_lines`). U12 (services) / U13 (secrets) fold their own
-/// rendered form in here the day they ship, so a hash change re-prompts.
-pub fn env_definition_hash(refs: &[RefSpec], table: &SourceTable) -> String {
+/// realized ref (sorted), every declared named source (sorted, via
+/// `SourceTable::trust_lines`), and every U13 declared secret name (sorted).
+/// A change in any of those re-prompts.
+pub fn env_definition_hash(refs: &[RefSpec], table: &SourceTable, secrets: &[String]) -> String {
     let mut ref_lines: Vec<String> = refs.iter().map(|r| r.raw.clone()).collect();
     ref_lines.sort();
     let mut source_lines = table.trust_lines();
     source_lines.sort();
+    let mut secret_lines = secrets.to_vec();
+    secret_lines.sort();
     let mut content = String::new();
     for line in &ref_lines {
         content.push_str(line);
@@ -78,6 +79,11 @@ pub fn env_definition_hash(refs: &[RefSpec], table: &SourceTable) -> String {
     }
     content.push_str("--sources--\n");
     for line in &source_lines {
+        content.push_str(line);
+        content.push('\n');
+    }
+    content.push_str("--secrets--\n");
+    for line in &secret_lines {
         content.push_str(line);
         content.push('\n');
     }
@@ -183,12 +189,13 @@ pub fn gate(
     project_dir: &Path,
     refs: &[RefSpec],
     table: &SourceTable,
+    secrets: &[String],
     bypass: bool,
 ) -> Result<(), i32> {
-    if !is_trust_sensitive(refs) {
+    if !is_trust_sensitive_ext(refs, !secrets.is_empty()) {
         return Ok(());
     }
-    let hash = env_definition_hash(refs, table);
+    let hash = env_definition_hash(refs, table, secrets);
     if bypass || is_trusted(store, project_dir, &hash) {
         return Ok(());
     }
@@ -206,11 +213,15 @@ pub fn gate(
         return Err(2);
     }
     theme.note(&format!(
-        "first entry to this project — it declares {} package(s):",
-        refs.len()
+        "first entry to this project — it declares {} package(s) and {} secret(s):",
+        refs.len(),
+        secrets.len()
     ));
     for r in refs {
         theme.detail(&r.raw);
+    }
+    for s in secrets {
+        theme.detail(&format!("secret:{s}"));
     }
     eprint!("  trust this environment? [y/N] ");
     {
@@ -323,6 +334,7 @@ mod tests {
     #[test]
     fn empty_refs_are_never_trust_sensitive() {
         assert!(!is_trust_sensitive(&[]));
+        assert!(is_trust_sensitive_ext(&[], true));
     }
 
     #[test]
@@ -333,16 +345,33 @@ mod tests {
     #[test]
     fn hash_is_stable_and_order_independent() {
         let table = SourceTable::empty();
-        let a = env_definition_hash(&[ref_spec("nixpkgs:a"), ref_spec("nixpkgs:b")], &table);
-        let b = env_definition_hash(&[ref_spec("nixpkgs:b"), ref_spec("nixpkgs:a")], &table);
+        let a = env_definition_hash(
+            &[ref_spec("nixpkgs:a"), ref_spec("nixpkgs:b")],
+            &table,
+            &["stripe".to_string(), "db".to_string()],
+        );
+        let b = env_definition_hash(
+            &[ref_spec("nixpkgs:b"), ref_spec("nixpkgs:a")],
+            &table,
+            &["db".to_string(), "stripe".to_string()],
+        );
         assert_eq!(a, b);
     }
 
     #[test]
     fn hash_changes_when_refs_change() {
         let table = SourceTable::empty();
-        let a = env_definition_hash(&[ref_spec("nixpkgs:a")], &table);
-        let b = env_definition_hash(&[ref_spec("nixpkgs:a"), ref_spec("nixpkgs:b")], &table);
+        let a = env_definition_hash(&[ref_spec("nixpkgs:a")], &table, &[]);
+        let b = env_definition_hash(&[ref_spec("nixpkgs:a"), ref_spec("nixpkgs:b")], &table, &[]);
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn hash_changes_when_secrets_change() {
+        let table = SourceTable::empty();
+        let refs = [ref_spec("nixpkgs:a")];
+        let a = env_definition_hash(&refs, &table, &["stripe".to_string()]);
+        let b = env_definition_hash(&refs, &table, &["db".to_string()]);
         assert_ne!(a, b);
     }
 
@@ -352,7 +381,7 @@ mod tests {
         let store = dir.join("trust");
         let table = SourceTable::empty();
         let refs = [ref_spec("nixpkgs:fastfetch")];
-        let hash = env_definition_hash(&refs, &table);
+        let hash = env_definition_hash(&refs, &table, &[]);
         assert!(!is_trusted(&store, &dir, &hash));
         grant_hash(&store, &hash);
         assert!(is_trusted(&store, &dir, &hash));

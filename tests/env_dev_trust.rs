@@ -67,6 +67,17 @@ fn write_package_project(dir: &std::path::Path, main_src: &str) {
     fs::write(dir.join("main.jet"), main_src).unwrap();
 }
 
+/// A project whose env only declares secrets — no packages. U13 still makes
+/// this trust-sensitive because entering it may decrypt repo secrets.
+fn write_secret_project(dir: &std::path::Path, main_src: &str) {
+    fs::write(
+        dir.join("env.jet"),
+        "module env.dev { secrets: [\"db_password\"] }\n",
+    )
+    .unwrap();
+    fs::write(dir.join("main.jet"), main_src).unwrap();
+}
+
 /// `jetpack enter` (`jet env`) realizes the declared env and drops into a
 /// shell / runs a one-off command — it must NEVER run a project's own
 /// `fn run()`/`fn dev()` (U19's env/dev split). Regression test: the world's
@@ -164,6 +175,94 @@ fn dev_untrusted_non_interactive_is_e1255() {
     assert!(stderr.contains("E1255"), "stderr: {stderr}");
     // Never got as far as running the project.
     assert!(!String::from_utf8_lossy(&out.stdout).contains("DEV-RAN"));
+}
+
+/// A secrets-only env is trust-sensitive even without packages: non-interactive
+/// entry refuses before trying to decrypt or run project code.
+#[test]
+fn dev_secret_env_untrusted_non_interactive_is_e1255() {
+    let proj = Scratch::new("dev-secret-untrusted");
+    let root = Scratch::new("dev-secret-untrusted-root");
+    let home = Scratch::new("dev-secret-untrusted-home");
+    write_secret_project(&proj.path, "fn dev() { print(\"DEV-RAN\"); }\n");
+    let out = jetpack()
+        .args(["dev", "--no-color"])
+        .current_dir(&proj.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("HOME", &home.path)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("E1255"), "stderr: {stderr}");
+    assert!(!String::from_utf8_lossy(&out.stdout).contains("DEV-RAN"));
+}
+
+/// With trust granted, `jet dev` validates declared secret names before entry.
+/// No store exists here, so the check is a clean E1263 and the project never
+/// runs.
+#[test]
+fn dev_declared_missing_secret_is_e1263() {
+    let proj = Scratch::new("dev-secret-missing");
+    let root = Scratch::new("dev-secret-missing-root");
+    let home = Scratch::new("dev-secret-missing-home");
+    write_secret_project(&proj.path, "fn dev() { print(\"DEV-RAN\"); }\n");
+    let out = jetpack()
+        .args(["dev", "--no-color", "--trust"])
+        .current_dir(&proj.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("HOME", &home.path)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("E1263"), "stderr: {stderr}");
+    assert!(stderr.contains("db_password"), "stderr: {stderr}");
+    assert!(!String::from_utf8_lossy(&out.stdout).contains("DEV-RAN"));
+}
+
+/// `jet env` uses the same U13 validation before entering the shell or running
+/// a one-off command.
+#[test]
+fn env_declared_missing_secret_is_e1263() {
+    let proj = Scratch::new("env-secret-missing");
+    let root = Scratch::new("env-secret-missing-root");
+    let home = Scratch::new("env-secret-missing-home");
+    write_secret_project(&proj.path, "fn run() { print(\"SHOULD-NOT-RUN\"); }\n");
+    let out = jetpack()
+        .args(["enter", "--no-color", "--trust", "--", "echo", "entered"])
+        .current_dir(&proj.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("HOME", &home.path)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("E1263"), "stderr: {stderr}");
+    assert!(stderr.contains("db_password"), "stderr: {stderr}");
+    assert!(!String::from_utf8_lossy(&out.stdout).contains("entered"));
+}
+
+/// A typed env that only declares secrets still counts as the project's own
+/// env; passive `flake.nix` auto-detection must not steal the command.
+#[test]
+fn secret_env_beats_foreign_flake_autodetect() {
+    let proj = Scratch::new("secret-env-beats-flake");
+    let root = Scratch::new("secret-env-beats-flake-root");
+    let home = Scratch::new("secret-env-beats-flake-home");
+    write_secret_project(&proj.path, "fn run() { print(\"SHOULD-NOT-RUN\"); }\n");
+    fs::write(proj.path.join("flake.nix"), "{ outputs = _: {}; }\n").unwrap();
+    let out = jetpack()
+        .args(["enter", "--no-color", "--", "echo", "entered"])
+        .current_dir(&proj.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("HOME", &home.path)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("E1255"), "stderr: {stderr}");
+    assert!(!stderr.contains("E1256"), "stderr: {stderr}");
 }
 
 /// `--trust` is the one-shot bypass: same untrusted project, but the run

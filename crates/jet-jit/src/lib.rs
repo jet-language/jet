@@ -1913,23 +1913,6 @@ impl LowerCtx<'_, '_> {
         self.load_place(trimmed)
     }
 
-    fn scrutinee_bool(&mut self, cond: &str) -> Result<Value, String> {
-        if let Some((lhs, rhs)) = cond.split_once(" == ") {
-            let l = self.scrutinee_value(lhs.trim())?;
-            if rhs.trim().contains("::") {
-                let disc = self
-                    .meta
-                    .enum_variant_disc(rhs.trim())
-                    .ok_or_else(|| format!("jit enum cond `{rhs}`"))?;
-                let r = self.b.ins().iconst(types::I64, disc);
-                return Ok(self.bool_from_icmp(IntCC::Equal, l, r));
-            }
-            let r = self.scrutinee_value(rhs.trim())?;
-            return Ok(self.bool_from_icmp(IntCC::Equal, l, r));
-        }
-        Err(format!("jit switch cond unsupported `{cond}`"))
-    }
-
     fn method_key(recv_ty: &Type, method_rust: &str) -> Option<String> {
         let type_name = user_type_name(recv_ty)?;
         let method = method_rust.strip_prefix("user_").unwrap_or(method_rust);

@@ -3,17 +3,14 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 209,
-    "rev": 69,
+    "nextNum": 216,
+    "rev": 137,
     "ui": {
       "toggled": [
         "dec-group:syntax",
         "dec-group:runtime",
         "dec-group:other",
         "board-sidequests",
-        "epoch:e8",
-        "epoch:e5",
-        "epoch:e6",
         "board-frozen"
       ]
     },
@@ -8548,13 +8545,18 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "blockedBy": [],
       "workOrder": 17613,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-05",
+          "by": "codex",
+          "text": "U13 remaining env/dev wiring complete. `EnvPlan.secrets` now survives into `RunPlan`; `jet env` and project-level `jet dev` include declared secrets in the trust-sensitive hash, gate secrets-only envs with E1255, validate each declared name before entry with E1263, and keep secrets-only typed envs from falling through to passive foreign-flake auto-detect. Added env/dev integration tests for secrets-only trust, missing-secret validation on env and dev, and flake auto-detect precedence; added Trust unit coverage for secret-sensitive hashes. Verification: targeted Trust unit tests green; `cargo test --test env_dev_trust` green; `cargo test --test secrets` green; full `cargo test --workspace` ran until the known `engine_dispatch` parallel Text-file-busy flake, then isolated `cargo test -p jet --test engine_dispatch` green."
+        },
         {
           "at": "2026-07-03",
           "by": "agent",
@@ -8853,13 +8855,18 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "blockedBy": [],
       "workOrder": 17616,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-05",
+          "by": "codex",
+          "text": "U16 remaining `jet run nixpkgs@tool` parity shipped. Top-level `jet run nixpkgs@name` now dispatches to the jetpack engine as `jetpack run nixpkgs:name -- name`, preserving `--offline`/`--fixtures`/color-off forwarding and forwarding tool args after `--`; this avoids treating provider refs as Jet source paths and uses the already-realized package runner. Added an end-to-end test through the real `jet` binary with an offline nixpkgs fixture. Verification: `cargo test --test jetpack top_level_jet_run_nixpkgs_at_tool_execs_tool` green; `cargo test --test jetpack` green; `cargo test --test cli` green. Full `cargo test --workspace` ran through all integration tests and then failed in isolated `jet-codegen --lib` TIR coverage assertions for optional/recursive cases; no codegen files were touched, and rerunning `cargo test -p jet-codegen --lib` reproduces the same unrelated failure."
+        },
         {
           "at": "2026-07-03",
           "by": "agent",
@@ -9283,13 +9290,18 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P1",
-      "plan": null,
+      "plan": "U20 implementation plan (D-JPK-ADAPTER1=A, D-JPK-ADAPTNAME1=A):\n\nGoal: make an adapted external source a normal realized Pkg, with `Pkg.adapt(name:, source:, deps:, recipe:)`, `Recipe.*`, `jet add <ref> --adapt`, reproducible lock identity, and the existing sandbox diagnostics (E1236-E1238).\n\n1. Spec/doc cleanup: update docs/spec/spec.md and epoch-4 plan docs so `Pkg.adapt` + `Recipe.prebuilt/copy/cargo/go/node/cmake/make/build` are current law, not pending ballot text. Keep D-JPK-ADAPTNAME1 in syntax-decisions as the source of syntax truth.\n\n2. Env/module evaluation: teach the typed env package evaluator to recognize `Pkg.adapt(...)` entries inside `packages:`. Capture an `AdapterPlan` with name, source provider ref, deps, recipe kind, recipe args, and source span. Reject malformed adapter fields with existing Jetpack diagnostic style and fresh E12xx only if E1236-E1238 do not fit.\n\n3. Recipe surface: map `Recipe.prebuilt(...)` and `Recipe.copy(...)` onto `Jetpack::Recipe::BuildRecipe` first, then add curated build recipes (`cargo`, `go`, `node`, `cmake`, `make`) as thin BuildRecipe constructors over declared tool deps. `Recipe.build(fn(BuildContext))` remains the expert form only when the BuildContext function path can be represented honestly; no placeholder accepted syntax.\n\n4. Realization: extend provider/core realization so adapter packages fetch/stage the source, run the recipe sandbox, install only under the output root, compute output hash, and record store metadata. Lock identity includes source hash/ref, recipe text/hash, helper version, platform, declared tool deps, and output hash.\n\n5. CLI: implement `jet add <ref> --adapt` / `jetpack add <ref> --adapt` as a read-only probe that drafts a concrete `Pkg.adapt(...)` snippet for obvious prebuilt/copy/cargo/go/node/cmake/make cases. It must never run upstream code during probe. Ambiguous/no metadata gets a clear diagnostic naming the manual `Pkg.adapt` path.\n\n6. Tests: add module-eval tests for `Pkg.adapt` capture, recipe unit tests for lock identity and sandbox failures, CLI tests for `--adapt` draft output, and end-to-end offline fixture tests proving prebuilt/copy adapters realize and run from the hangar. Full workspace suite required before done; if unrelated existing failures remain, log exact isolated reproducer.",
       "blockedBy": [],
       "workOrder": 17620,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-05",
+          "by": "codex",
+          "text": "Planning lane completed for U20. Added a concrete end-to-end plan for `Pkg.adapt(...)`, `Recipe.*`, adapter realization/lock identity, `jet add --adapt`, sandbox diagnostics, docs, and tests. No new owner decision needed: D-JPK-ADAPTER1=A and D-JPK-ADAPTNAME1=A already ratified. Advanced card to ready."
+        },
         {
           "at": "2026-07-03",
           "by": "agent",
@@ -10122,6 +10134,207 @@
         }
       ],
       "created": "2026-07-05T10:20:48.416Z",
+      "updated": "2026-07-05"
+    },
+    {
+      "id": "c0cevzhr",
+      "num": 209,
+      "title": "LSP v2 — professional editor engine",
+      "body": "Audit 2026-07-05: jet lsp serves hover/defn/refs/rename/completion/semantic-tokens/inlay/fmt/code-actions — but full-document sync (re-sends whole file per keystroke), no outline (documentSymbol), no workspace symbols, no signature help, no folding, no occurrences highlight, no call hierarchy, no snippets. Owner: 'LSP seems substantially insufficient.' Two decisions: engine architecture (D-LSP1) and capability bar (D-LSP2).",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": "LSP v2 under D-LSP1=C (one incremental compiler service) + D-LSP2=A (full LSP 3.17 parity, beginner-first order). Implement on master (this plan was authored from the stale tower-platform worktree; all paths verified against master). Invariants: I2 front end owns every message, I3 checking lives in sema, I6 zero external crates in the compiler — the query engine is std-only.\n\nArchitecture (D-LSP1=C): a demand-driven incremental query engine — inputs (file text, module graph roots) and derived queries (tokens-of-file, ast-of-file, module-graph, types-of-item, diagnostics-of-file, symbols-of-file, callers-of-item), each memoized with precise dependency tracking and a global revision counter. jet check, jet dev, the REPL, and jet lsp become clients of the same engine, so editor answers can never disagree with the compiler. jet-semindex's ratified query API (D-SEMINDEX1) is the persistence/format layer, fed by the engine instead of batch runs.\n\nBuild order:\n1. Engine core: new crate crates/jet-queries (std-only). Query trait + memo table + dependency edges + revision invalidation. Wrap existing lexer/parser/sema entry points as queries without changing their internals (I3). Unit tests: edit one file of a 3-file project, prove only dependent queries recompute (counter assertions).\n2. LSP on the engine: rewrite Source/LSP/Check.rs request paths to engine queries; keep the JSON/protocol layer. Differential gate: LSP publishDiagnostics byte-identical to `jet check --json` for every tests/ui fixture (new tests/lsp differential test — this is the no-two-brains exit).\n3. Incremental sync: textDocumentSync 2 (range edits) in Server.rs + rope-or-line-table doc storage in Position.rs. Latency test: single-keystroke edit on a 2,000-line fixture re-checks in <10ms warm (test with counters, not wall-clock flake; a wall-clock smoke stays #[ignore] for local runs).\n4. Wave 1 — beginner-critical (ships before anything else user-visible): signatureHelp (trigger '(' and ','; params + doc comment from AST), documentSymbol (nested outline: fns, structs+methods, enums, traits, modules), completion quality pass (labels get type signatures; keyword completions context-filtered).\n5. Wave 2 — navigation: workspaceSymbol (engine project view), foldingRange (blocks, comments, use-groups), documentHighlight (occurrences via resolution, read vs write kinds — v5 & writes light differently), selectionRange (AST-walk expand).\n6. Wave 3 — power: completion auto-import (insert `use` on commit) + snippet support (fn call parens, .{ } constructor), prepareRename (reject keywords/foreign symbols with Jet-voiced message), semanticTokens range + delta (keep full as fallback), inlayHint refinements (param names at call sites, off-by-default toggle).\n7. Wave 4 — hierarchy + long tail: callHierarchy (incoming/outgoing via callers-of-item query), typeHierarchy (impl/trait relations), documentLink (use-paths + doc URLs), codeLens (run/test lens over #Test fns, off by default). Advertise only what ships: initialize_response in Server.rs grows per wave, never ahead of tests.\n8. Engine serves the CLI: `jet check` and `jet dev` reuse the warm engine in watch/daemon mode (D-DEV4 loop); differential battery from E2-M4 must stay green (interpreter parity untouched).\n\nExit criteria (all must hold — no partial done):\n- Every capability advertised in initialize_response has a passing test in tests/lsp.rs (capability-coverage meta-test enumerates the JSON and fails on untested ones).\n- Differential gate (stage 2) green across all ui fixtures.\n- Incremental-recompute unit proofs green; keystroke path does not re-run whole-file sema when edit is local to one item.\n- tests/lsp/, tests/dev.rs, tests/repl.rs, full suite green.\n- docs: editors/vscode/README.md + editors/zed/README.md feature tables updated; architecture.md gains the query-engine section (R-rules untouched).\n\nGates: none open — D-LSP1/D-LSP2 ratified 2026-07-05. Log both in docs/spec/syntax-decisions.md tooling section during stage 1 commit.\n\nDelegation: stages 1–3 sequential (one agent, non-isolated — worktree agents branch stale bases); waves 4–7 parallelizable per-feature after stage 3 lands. sonnet for feature waves, opus for stage 1 engine design review before code.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-05",
+          "by": "claude-main",
+          "text": "[handoff] Plan on card. D-LSP1=C, D-LSP2=A ratified. Next: stage 1 — crates/jet-queries engine core on MASTER (this card was authored from the stale tower-platform worktree; do not build there). Full exit criteria in plan; no partial done."
+        },
+        {
+          "at": "2026-07-05",
+          "by": "owner",
+          "text": "Activated into epoch e3 track"
+        }
+      ],
+      "created": "2026-07-05T11:30:08.292Z",
+      "updated": "2026-07-05"
+    },
+    {
+      "id": "c0vg0lj7",
+      "num": 210,
+      "title": "Highlighting: one source of truth across editors",
+      "body": "Audit 2026-07-05: three hand-kept grammars drift — vscode tmLanguage 164 lines, tree-sitter 998, zed highlights.scm 136, vs 569 registered tokens in Syntax.rs (I7). The v5 'copy' verb (shipped S4) is highlighted in NO grammar; VS Code, Zed, and GitHub color the same file differently. Owner: 'even code highlighting doesnt seem consistent.' Decision D-HL1.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": "Highlighting single source of truth under D-HL1=D (grammars generated from Syntax.rs + LSP semantic-token overlay, CI drift gate). Implement on master. Invariant I7: Syntax.rs is already the registry every user-typeable token must live in — this card makes that fact enforce coloring.\n\nBuild order:\n1. Classify the registry: extend crates/jet-foundation/src/Syntax.rs entries with a highlight class per token (keyword.control / keyword.declaration / keyword.ownership / marker / operator / sigil / literal-prefix ...). Mechanical: a const table or attribute alongside each existing entry; no token strings move. Any token without a class = compile error in the generator, so future ratifications can't skip it.\n2. Generator: `jet devtools grammars` in Source/CmdDevTools.rs. Emits BEGIN/END GENERATED sections inside: editors/vscode/syntaxes/jet.tmLanguage.json (keyword/marker/operator patterns), editors/tree-sitter/grammar.js keyword externals (or a generated keywords.js the grammar requires), editors/zed/languages/jet/highlights.scm keyword block. Hand-written structure rules (strings, comments, interpolation, blocks) stay outside the markers and are preserved byte-for-byte on regeneration. Generator is deterministic (sorted output) so regeneration is diff-stable.\n3. Drift gate: tests/grammar.rs gains every_syntax_token_is_highlighted — for each user-typeable token in Syntax.rs, assert presence in each grammar's generated section, and assert the generated sections match a fresh in-memory generation (stale-file detection). Red today (copy, ^, & missing) until stage 2 output is committed. This test joins the CI PR gate (#211).\n4. Semantic overlay: extend Source/LSP semantic tokens — add token types/modifiers for v5 ownership (& write-borrow, ^ move, copy verb), markers (#Test/#Unsafe/... as decorator-class), retired/foreign keywords (E03xx teaching-error spellings) explicitly NOT keyword-colored. editors/vscode/package.json semanticTokenScopes maps the new types; zed extension.toml equivalents. Fixture test: canon.jet + examples/features/memory/ownership.jet token dumps snapshot-tested in tests/lsp.rs.\n5. Regenerate all three grammars, run editors/*/install.sh locally, verify canon.jet renders consistently in VS Code + Zed; screenshot pair in the card log. GitHub rendering uses the committed tmLanguage — verified by the drift test alone.\n6. Docs: editors/README pointers; note in syntax-decisions.md tooling section (D-HL1=D logged); CLAUDE.md syntax-decision protocol gains one line: 'ratifying syntax = run jet devtools grammars, commit regenerated sections' (the drift test makes forgetting red anyway).\n\nExit criteria:\n- cargo test --test grammar green, including staleness check.\n- Semantic-token snapshots green for canon.jet + ownership.jet + copy_verb.jet.\n- `copy`, `^`, `&`, and every S75/S76/v5 token colored in all three grammars; retired spellings (val, var, dotless construction) not keyword-colored anywhere.\n- Full suite green; zed grammar-repo stays untracked (build artifact — .gitignore already covers it).\n\nGates: none — D-HL1 ratified 2026-07-05. No new user-typeable syntax, so no formatter work.\n\nDelegation: stages 1–2 one sonnet agent (single subsystem); stage 4 separate agent after 2 lands; stage 3 test written FIRST (red) per workflow loop.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-05",
+          "by": "claude-main",
+          "text": "[handoff] Plan on card. D-HL1=D ratified. Next: stage 3 drift test written FIRST (red), then stage 1 Syntax.rs classes + stage 2 generator. Build on MASTER."
+        },
+        {
+          "at": "2026-07-05",
+          "by": "owner",
+          "text": "Activated into epoch e3 track"
+        }
+      ],
+      "created": "2026-07-05T11:30:26.857Z",
+      "updated": "2026-07-05"
+    },
+    {
+      "id": "c0wa2hf8",
+      "num": 211,
+      "title": "CI and quality gates — the professional bar",
+      "body": "Audit 2026-07-05: CI runs 5 of ~70 test targets (lib, truthfulness, diagnostic_snapshots, golden, cross) — lsp, fmt, repl, jetpack, workspace, web_build, ownership etc. never run on PR. CI also still calls frozen tools/Tower/Tower.mjs (MOVED.md says don't). No clippy/rustfmt/warning gate; no perf-regression or fuzz cadence. Decisions: D-CI1 gate composition, D-CI2 warning policy.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e6",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": "CI + quality gates under D-CI1=A (full suite sharded on every PR; nightly perf/fuzz/coverage/multi-OS) and D-CI2=A (zero-warning gate with card-referenced #[expect]). Implement on master.\n\nBuild order:\n1. Warning sweep first (D-CI2): fix or #[expect(lint, reason = \"#<card>: <why>\")] every current warning across the workspace. Known: scrutinee_bool in crates/jet-jit/src/lib.rs:1916 gets #[expect(dead_code, reason = \"#125: JIT tier-1a scrutinee lowering, wired in next stage\")]. Rule goes in CLAUDE.md style section: dead code without a card-referenced expect is deletable on sight; expects self-expire (unfulfilled-expectation errors when the code goes live).\n2. Lint config: [workspace.lints] in root Cargo.toml — rust.warnings = deny in CI (via RUSTFLAGS=-Dwarnings in the workflow, not in the manifest, so local iteration stays friendly); clippy correctness+suspicious groups on, style/pedantic off (house conventions win). rustfmt.toml matching current formatting (verify `cargo fmt --check` is near-clean first; if a one-time format commit is needed it is its own mechanical commit, no logic changes).\n3. Shard the suite: 4 PR jobs with an explicit shard map (a checked-in list, e.g. tools/ci/shards.toml): shard-1 front-end (lexer/parser/fmt/grammar/ui/ui_lint/syntax_reconciliation...), shard-2 sema (ownership/generics/effects/typestate/pure/taint...), shard-3 codegen+examples (golden/canon/cross/corelib/release_gates...), shard-4 tooling (lsp/repl/debug/dev/jetpack/pkg/workspace/web_*/observe/cli...). Meta-test tools/ci/shards-complete (or tests/ci_shards.rs): every tests/*.rs file assigned to exactly one shard, fails on unassigned new files — no silent coverage loss, ever.\n4. Rewrite .github/workflows/ci.yml: keep nix toolchain job skeleton; PR = build + 4 shard jobs (nix develop -c cargo test --test <list>) + cargo fmt --check + clippy + tower status via NEW path (node Tower/tower.mjs status — the frozen tools/Tower/Tower.mjs step dies) + aarch64 QEMU smoke as today. Cache /nix and cargo target dir keyed on flake.lock+Cargo.lock so shard wall-clock stays near today's.\n5. Nightly workflow (.github/workflows/nightly.yml): full suite on ubuntu + macos; perf ratchet via tools/perf/ci-perf-check.sh against tools/perf/baseline.json (regression = red + auto card via tower CLI); fuzz cadence — run tests/fuzz_sema.rs in extended mode (env-gated iteration count) 30 min; coverage report (nix devshell tool; CI-side only, not a compiler dep — I6 untouched) published as artifact with a ratchet floor once a baseline exists.\n6. Failure→card automation: nightly failure step runs `node Tower/tower.mjs card add --kind bug ...` with the failing job link (guard against duplicates by title search first).\n7. Canary proof: after everything lands, a deliberate throwaway PR breaking a previously-unrun target (e.g. tests/repl.rs) must go red; record the run link on this card, then close the canary.\n\nExit criteria:\n- PR CI executes every tests/*.rs target (shard meta-test green and enforced).\n- cargo build clean under -Dwarnings on Linux+macOS; every expect carries a card reference.\n- Frozen tools/Tower path gone from CI; new tower status step green.\n- Nightly runs green end-to-end once; perf ratchet demonstrably fails on an injected slowdown (test the tester, then revert).\n- Canary PR proof recorded.\n\nGates: none — D-CI1/D-CI2 ratified 2026-07-05. Note: grammar-drift step from #210 joins the PR gate when #210 lands; leave a commented step referencing #210.\n\nDelegation: stage 1 sweep is mechanical (haiku/sonnet); stages 3–5 one sonnet agent (single-file workflow edits test poorly in parallel); verify by running the shard lists locally once (nix develop -c cargo test --test <shard list>) before pushing.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-05",
+          "by": "claude-main",
+          "text": "[handoff] Plan on card. D-CI1=A, D-CI2=A ratified. Next: stage 1 warning sweep (scrutinee_bool jet-jit lib.rs:1916 -> #[expect] ref #125), then shards. Build on MASTER. Canary-PR proof required before done."
+        },
+        {
+          "at": "2026-07-05",
+          "by": "owner",
+          "text": "Activated into epoch e6 track"
+        }
+      ],
+      "created": "2026-07-05T11:30:26.908Z",
+      "updated": "2026-07-05"
+    },
+    {
+      "id": "c0x3v19y",
+      "num": 212,
+      "title": "Game development stack",
+      "body": "Master-of-all gap: no way to open a window, draw, play sound, or read a gamepad. #181 (UE design study) done, #182 (Blueprint editor) planned — but no runtime game/graphics stack exists or is carded. Decision D-GAME1: stdlib primitives vs flagship engine package vs bindings-first vs defer. New external deps (wgpu/winit-class) need owner I6 sign-off — that call is inside the ballot.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": "Game development stack under D-GAME1=B: flagship engine package on public stdlib primitives; ratified core.raylib bridge (D-RAYLIB1) ships first as the interim path; wgpu/winit-class I6 bridge deps approved by the ratification, native replacements owed post-E3. Implement on master. Invariants: I1 (safe by default — no unsafe leaks past bridge internals), I2 (engine errors are Jet-voiced, never wgpu/raylib panics), I6 (bridge pattern per crates/jet-driver FFI bridge precedent — external crates live in emitted bridge templates, never in the jet Cargo.toml).\n\nStage 0 — remaining owner gates (BALLOT FIRST; public-surface code blocked on these):\n- D-GAME2 (raised 2026-07-05, on this card): the engine package's name + namespace. Rich menu, jet/aviation theme.\n- D-GAME3 (to raise at end of design stage 3): the beginner-facing frame-loop/scene API shape — developed as a decision card with worked Pong/breakout examples per option, agent-reviewed, then balloted. Do NOT guess this surface; owner decides from concrete use cases.\nStages 1–2 below have no unratified surface and proceed immediately.\n\nBuild order:\n1. core.raylib bridge (D-RAYLIB1, already ratified): package under corelib/ following the core.archive template (manifest + bridge template emission via the FFI.rs pattern). Full binding coverage for 2D + basic 3D + audio + input; Jet-voiced errors for missing native deps (nixpkgs interim path per ratified native-deps policy; clear no-Nix message). Examples: examples/features/game/raylib_pong.jet + golden test (headless: raylib offscreen/CI skip-if-no-display guard like existing ui tests). This alone closes 'Jet cannot open a window.'\n2. Stdlib primitives (expert tier, public): core.window (winit-class bridge), core.gpu (wgpu-class bridge: surface, pipeline, buffers, WGSL passthrough), core.audio (cpal-class), core.input (events, gamepad). Thin, honest, documented per stdlib-api-laws.md. Each ships an example + test; GPU tests render offscreen and hash pixels (lavapipe/swiftshader in the nix devshell for CI determinism).\n3. Engine design study → D-GAME3 ballot: design the batteries layer on top of the primitives — window+frame loop, sprites/atlases, text, shapes, camera, input map, audio playback, scene/entity layer informed by the #181 UE study (gameplay tags/abilities where they fit Jet). Deliverable is the decision card with 2–4 genuinely different API shapes, each a complete worked Pong, reviewed by a second agent, then balloted. STOP public engine code until D-GAME2 + D-GAME3 ratify; stages 1–2 and internals continue meanwhile.\n4. Engine implementation (post-ratification): 2D first. Feature order: window+loop → sprites+transforms → input map → text → audio → camera/viewport → scene tree → asset pipeline (load png/wav/ttf via existing core.files; hot-reload assets under jet dev). Every feature ships example + golden test (I5). `jet run pong.jet` opens a window with zero manifest (R9 ceremony-free stays true).\n5. Blueprint alignment: engine scene/entity data model shaped for #182's bidirectional visual editor (data-driven scenes serializable via serde path); joint review with #182's plan before freezing the scene format.\n6. Docs: a 'make a game' beginner walkthrough (afternoon-Pong) in docs/reference; entries in core-library.md; maturity tags per #155 conventions.\n\nExit criteria:\n- Stage 1: raylib_pong.jet runs on a dev machine; golden/type-check tests green in CI (display-gated execution documented).\n- Stage 2: each primitive has example + test; offscreen GPU hash test green in CI; no `unsafe` outside bridge internals (golden.rs unsafe-grep stays green — mind the bare-word rule in generated code).\n- Stage 4: pong + breakout + one audio-visual demo under examples/features/game/, all golden-tested; engine package installable via jetpack path; beginner walkthrough verified start-to-finish on a clean machine.\n- Full suite green at every stage boundary; each stage is a separate reviewed commit series.\n\nGates: D-GAME2 open (ballot on this card); D-GAME3 owed by stage 3. New bridge crates beyond wgpu/winit/cpal-class scope need a fresh I6 ballot.\n\nDelegation: stage 1 one sonnet agent; stage 2 parallelizable per-primitive after core.window lands; stage 3 design = opus + reviewer; stage 4 sequential feature agents, non-isolated, full suite re-run by the orchestrator at each boundary.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-05",
+          "by": "claude-main",
+          "text": "[handoff] Plan on card. D-GAME1=B, D-RAYLIB1 ratified; D-GAME2 (engine name) OPEN on this card — owner pick pending; D-GAME3 (API shape) owed at plan stage 3. Stages 1-2 (core.raylib bridge + primitives) may proceed now on MASTER; public engine surface blocked on D-GAME2/3."
+        },
+        {
+          "at": "2026-07-05",
+          "by": "owner",
+          "text": "Activated into epoch e3 track"
+        }
+      ],
+      "created": "2026-07-05T11:30:26.958Z",
+      "updated": "2026-07-05"
+    },
+    {
+      "id": "c0xz4xqx",
+      "num": 213,
+      "title": "HTTPS by default in core.http",
+      "body": "core.net/core.http default build is plain-HTTP; https needs opt-in core.tls (jet-net: 'HTTPS requires a TLS feature; the default build is HTTP-only'). Nearly every real API is https — first-week beginners hit this wall. Decision D-TLS1: how TLS becomes default (vendored rustls bridge -> native post-E3, system TLS, or status quo).",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": "HTTPS by default under D-TLS1=A: rustls in the default build via the I6 FFI-bridge pattern, certificate verification pinned to system trust roots, native Jet TLS post-E3 only behind an external security-audit gate. Implement on master. Invariants: I2 (every TLS failure is a Jet-voiced diagnostic — rustls/OS error text never reaches the user raw), I4 (every new diagnostic gets a code + what/why/fix + ui snapshot), I6 (rustls rides the bridge like wasmtime/age precedents — D-DEP-CRYPTO1 governance, not a compiler dep).\n\nBuild order:\n1. jet-net grows a default-on TLS path: rustls + system trust roots (rustls-native-certs-class) behind the existing fetch API in crates/jet-net; ureq's tls feature wired accordingly. Default build = https works; a no-tls build flag remains for freestanding/size-gated targets (release_gates.rs budgets re-checked — if the size budget breaks, that goes back to the owner as a question, not a silent budget bump).\n2. core.http / core.net client: https URLs work in `jet run` with zero manifest. The E-code path 'https needs core.tls' dies for the client; core.tls package remains for advanced config (pinning, client certs, custom roots) per option A's decided scope.\n3. Server side: extend the #17 HTTP server surface with TLS serving — API shape follows the existing ratified server surface (.tls(cert, key) style continuation of the #17 mandate; if the shape needs anything beyond a method on the existing builder, STOP and ballot it — do not invent surface).\n4. Diagnostics (product copy, snapshot-pinned): new E42xx family — certificate invalid/expired/hostname mismatch, handshake failure, no trust roots found (the minimal-container case: name the fix — install ca-certificates), protocol errors. Each: docs/spec/diagnostics.md entry, jet explain page, tests/ui snapshot. The front end translates every rustls error class; an untranslated class panicking through = P0 per I2.\n5. Tests without network: local test server with self-signed + valid-chain fixtures under tests/fixtures (generate once, check in; regeneration script documented); happy-path https fetch, each E42xx provoked deliberately. CI never touches the internet.\n6. Example: examples/features/net/https_fetch.jet against the fixture server (env-pointed base URL so the example text reads like the real world but the test stays hermetic); golden-tested (I5).\n7. Record the security gate: release-policy.md gains the D-TLS1 clause — native-TLS may replace rustls as default only after external audit + interop battery (vs rustls and OpenSSL test vectors); syntax-decisions.md logs D-TLS1=A in the stdlib section; roadmap.md deferred-registry paragraph updated (TLS line now says https default via rustls bridge).\n\nExit criteria:\n- Fresh clone, default build: https fetch example runs (fixture server) — no package, no manifest.\n- All E42xx snapshots green; jet explain covers each; diagnostics_coverage.rs enforced.\n- Freestanding/size budgets green or explicitly re-balloted.\n- core.tls advanced path still works (its existing tests stay green).\n- Full suite green; docs (release-policy, syntax-decisions, roadmap, core-library.md) updated in the same series.\n\nGates: none open — D-TLS1 ratified 2026-07-05 (rustls bridge dep approved therein). Server-API shape stop-condition in stage 3 is conditional, not standing.\n\nDelegation: stages 1–2 one sonnet agent; stage 4 diagnostics copy is product writing — draft + snapshot, reviewer agent reads against diagnostics.md voice before commit; stage 5 fixtures alongside stage 1.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-05",
+          "by": "claude-main",
+          "text": "[handoff] Plan on card. D-TLS1=A ratified (rustls bridge dep approved, system trust roots). Next: stage 1 jet-net default TLS + stage 5 fixtures together, on MASTER. Stage 3 stop-condition: any server API beyond existing builder shape -> ballot, don't invent."
+        },
+        {
+          "at": "2026-07-05",
+          "by": "owner",
+          "text": "Activated into epoch e3 track"
+        }
+      ],
+      "created": "2026-07-05T11:30:27.010Z",
+      "updated": "2026-07-05"
+    },
+    {
+      "id": "c3gg6ghs",
+      "num": 214,
+      "title": "Change \"jet run nixpkgs@cowsay\" to \"jet run nixpkgs",
+      "body": "Change \"jet run nixpkgs@cowsay\" to \"jet run nixpkgs:cowsay\" to match jetpack source:package style.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P3",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-05",
+          "by": "owner",
+          "text": "Activated into epoch e4 track"
+        },
+        {
+          "at": "2026-07-05",
+          "text": "Promoted from Ideas"
+        }
+      ],
+      "created": "2026-07-05T11:35:35.054Z",
+      "updated": "2026-07-05"
+    },
+    {
+      "id": "c4g593nd",
+      "num": 215,
+      "title": "Update jetpack run package to show clearly that a package is running/was run. Wh",
+      "body": "Update jetpack run package to show clearly that a package is running/was run. When running cowsay with no input args, looked like jetpack shell was frozen",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P3",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-05",
+          "by": "owner",
+          "text": "Activated into epoch e4 track"
+        },
+        {
+          "at": "2026-07-05",
+          "text": "Promoted from Ideas"
+        }
+      ],
+      "created": "2026-07-05T11:35:45.919Z",
       "updated": "2026-07-05"
     }
   ],
@@ -22525,6 +22738,437 @@
       "created": "2026-07-04T14:26:33.728Z",
       "outcome": "A",
       "ratifiedAt": "2026-07-04"
+    },
+    {
+      "id": "D-LSP1",
+      "cardId": "c0cevzhr",
+      "group": "tooling",
+      "title": "Editor engine architecture",
+      "gist": "What machinery answers the editor: today's per-file re-checker, a grown semantic index, or one incremental compiler service shared by everything.",
+      "explainer": "Glossary. LSP = the background program editors (VS Code, Zed, Cursor) talk to for errors, completion, rename, go-to-definition. Incremental = after a keystroke, re-analyze only what changed, not the whole file or project. Semantic index = a persistent map of every symbol in the project (where defined, where used), kept up to date as you type. Today jet lsp re-parses and re-checks a whole file on each request and mostly sees one file at a time; jet-semindex exists as a separate batch tool.",
+      "story": "Priya has a 30-file Jet web service open in VS Code. Every keystroke re-checks her 2,000-line file from scratch; renaming a function she can only trust for files that are open; the outline pane is empty; project-wide symbol search finds nothing. She never reads the compiler's carefully written error copy — she judges Jet entirely by this laggy hour in her editor. The engine choice decides the ceiling for every editor feature Jet will ever have.",
+      "inWild": "// service/routes.jet — one of 30 files\nuse app.store\nuse app.auth\n\nfn handle(req: Request) -> Response {\n    user :: auth.current(req)      // F12 here must jump across files\n    orders :: store.orders_for(user.id)\n    return render(orders)\n}\n\n// Rename `orders_for` across the project, mid-edit, with store.jet unsaved\n// in another window. The engine must see the whole project, updated live,\n// in milliseconds — that is the bar every serious language tool meets.",
+      "detail": "Recommend C. One semantic brain is the only shape where editor truth and compiler truth cannot drift (I8), it makes jet check/jet dev warm-instant for free, and #182's bidirectional visual editor needs exactly this engine. B is the fallback shape if C is declined — it reaches feature parity sooner but permanently owns a two-brain alignment burden.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Extend the per-request checker",
+          "detail": "Keep today's shape: each LSP request re-runs parse+check on the current file, plus targeted cross-file lookups. Add features one by one on top. Stays closest to today's shape, but every feature re-derives the world; big files pay full re-check per keystroke, and project-wide answers (rename, find-references, symbols) stay best-effort rather than guaranteed.",
+          "code": "// What today's shape gives — and its ceiling:\n$ edit routes.jet (2,000 lines)\n  keystroke -> re-parse + re-check whole file   ~80ms today, grows with file\n  F12 on auth.current      ok (single hop)\n  rename orders_for        edits OPEN files; closed callers found by re-scan,\n                           no guarantee mid-edit state is consistent\n  workspace symbol search  full project re-scan per query"
+        },
+        {
+          "key": "B",
+          "name": "Index-backed engine (grow jet-semindex)",
+          "detail": "Promote jet-semindex (whose versioned query API is already ratified, D-SEMINDEX1) from batch tool to the live heart of the LSP: a persistent project-wide symbol database, updated incrementally on every change. All features (rename, references, symbols, outline, call hierarchy) become index queries. The compiler front end stays as-is; the LSP maintains the index beside it. This is the gopls / clangd shape.",
+          "code": "$ jet lsp   # first open: index 30 files once (~1s), then:\n  keystroke -> re-index one file's symbols       ~few ms\n  rename orders_for        index knows all 14 callers, open or closed\n  workspace symbol 'ord'   instant — index lookup\n  call hierarchy           who-calls-whom already materialized\n// Risk to own: two brains — checker semantics vs index semantics\n// must be kept in agreement by tests, or they drift."
+        },
+        {
+          "key": "C",
+          "name": "One incremental compiler service",
+          "detail": "Rebuild the front end as a demand-driven, incremental query engine (parse-of-file, types-of-item, callers-of-fn — each cached, each invalidated precisely), and make jet check, jet dev, the REPL, and the LSP all clients of that one engine. There is exactly one semantic brain, so editor answers can never disagree with the compiler (I8: one way to mean it). This is the TypeScript model — tsserver IS the compiler — and the road rust-analyzer wishes rustc had taken from the start. Largest rebuild; also the foundation the self-host era and #182 (Blueprint visual editor, which needs live bidirectional semantics) will stand on.",
+          "code": "$ jet lsp        # same engine as jet check — literally the same queries\n  keystroke -> invalidate routes.jet's parse query; types re-derive\n               only for items whose inputs changed   ~1-5ms\n  rename orders_for        exact: the engine's own resolution data\n  editor squiggles         byte-identical to `jet check` output, always\n$ jet check      # warm daemon answers from the same cache — instant\n// One brain: a fix to type inference fixes the editor the same second."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "TypeScript",
+          "note": "tsserver is the compiler — one incremental engine serves tsc, editors, everything. Widely considered the best editor experience in the industry; never drifts.",
+          "code": "tsc --watch and VS Code share one Program instance model"
+        },
+        {
+          "lang": "Rust",
+          "note": "The cautionary tale: rust-analyzer is a second front end beside rustc. Years of duplicated work, subtle disagreements, and a still-running project (polonius/chalk era) to merge them back.",
+          "code": "rustc says error; rust-analyzer says fine — the bug class Jet can refuse to have"
+        },
+        {
+          "lang": "Go",
+          "note": "gopls is index-backed (option B shape) over the go/types checker. Excellent, but gopls and the compiler have disagreed, and keeping them aligned is ongoing work.",
+          "code": "gopls: persistent file cache + per-package invalidation"
+        }
+      ],
+      "rec": "C",
+      "status": "ratified",
+      "created": "2026-07-05T11:39:57.185Z",
+      "outcome": "C",
+      "ratifiedAt": "2026-07-05"
+    },
+    {
+      "id": "D-LSP2",
+      "cardId": "c0cevzhr",
+      "group": "tooling",
+      "title": "Editor capability bar",
+      "gist": "Which editor features jet lsp must serve — full protocol parity, a curated professional dozen, or beginner-first waves.",
+      "explainer": "What exists today: hover, go-to-definition, references, rename, dot-completion, semantic tokens, inlay hints, formatting, code actions. What is missing: outline (the file's structure pane), workspace symbol search, signature help (parameter hints while typing a call), folding, highlight-other-occurrences, incremental sync (today the editor re-sends the whole file every keystroke), snippet/auto-import completion, call hierarchy, prepare-rename validation, semantic token deltas. 'Full parity' means every LSP 3.17 feature that makes sense for Jet.",
+      "story": "Ben, week one with Jet, types `svc.request(` and waits for parameter hints that never come — he opens the docs in a browser to remember the four arguments. Ctrl+Shift+O for the file outline: empty. Ctrl+T to find a type project-wide: nothing. Each miss is a moment where the language that promises magic out-of-the-box feels like a prototype. The capability bar decides what 'Jet has great tooling' means, feature by feature.",
+      "inWild": "// Ben is mid-call. In Python/TS/Rust the editor shows the signature\n// as he types. In Jet today, silence:\n\nfn run() {\n    svc :: Http.serve(          // <- signature help: MISSING\n    ...\n}\n\n// Outline pane for a 400-line file with 12 fns, 3 structs: EMPTY.\n// Ctrl+T 'Orders' across 30 files: NO RESULTS.\n// Editing a 2,000-line file: whole file re-sent per keystroke.",
+      "detail": "Recommend A, delivered in C's order (signature help + outline first). Master-of-all means the tooling bar is parity, not a subset; every advertised capability carries a test, so the surface stays honest (I4 spirit). Effort is the currency we spend.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Full LSP 3.17 parity",
+          "detail": "Everything applicable to Jet, as one program with exit criteria: incremental sync, outline, workspace symbols, signature help, folding, occurrences, selection ranges, snippets + auto-import completion, prepare-rename, semantic token range+delta, call hierarchy, type hierarchy, document links, code lens (off by default). Each feature lands with an lsp test and a line in the editor README. Delivery ordered by beginner impact (signature help and outline first), but the bar is: all of it.",
+          "code": "// Exit criteria, testable:\n$ cargo test --test lsp\n  signature_help_mid_call ........ ok\n  document_symbol_outline ........ ok\n  workspace_symbol_cross_file .... ok\n  incremental_sync_partial_edit .. ok\n  folding_regions ................ ok\n  occurrences_highlight .......... ok\n  completion_auto_import ......... ok\n  call_hierarchy_incoming ........ ok\n  ... (every capability advertised = every capability tested)"
+        },
+        {
+          "key": "B",
+          "name": "Curated professional dozen",
+          "detail": "The ~12 features that define how a language feels, then stop: incremental sync, signature help, outline, workspace symbols, folding, occurrences, snippets + auto-import, prepare-rename, semantic deltas, call hierarchy. Skip long-tail protocol surface (type hierarchy, document links, code lens, monikers) until someone asks. Smaller advertised surface, honestly complete.",
+          "code": "// capabilities response advertises exactly what is excellent,\n// nothing speculative:\n\"documentSymbolProvider\": true,\n\"workspaceSymbolProvider\": true,\n\"signatureHelpProvider\": { \"triggerCharacters\": [\"(\", \",\"] },\n\"foldingRangeProvider\": true,\n\"textDocumentSync\": 2,   // incremental\n// absent: codeLens, typeHierarchy, moniker, documentLink"
+        },
+        {
+          "key": "C",
+          "name": "Beginner-first waves, re-decide between waves",
+          "detail": "Wave 1: signature help, outline, completion quality (auto-import, snippets). Wave 2: workspace symbols, incremental sync, folding, occurrences. Wave 3: call hierarchy, code lens, the rest. Owner reviews after each wave and re-aims. Most control, three decisions instead of one.",
+          "code": "// Wave 1 ships alone; Ben's three misses die first:\nsvc :: Http.serve(   // signature card appears: serve(port: Int, handler: fn...)\n// outline pane: 12 fns, 3 structs, nested\n// completion on `Ord` offers `Orders` + adds `use app.orders`"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "rust-analyzer",
+          "note": "Ships essentially full parity plus extensions; that completeness is a large part of Rust's professional reputation.",
+          "code": "outline, signature help, 30+ assists, call/type hierarchy, semantic deltas"
+        },
+        {
+          "lang": "gopls",
+          "note": "Deliberately curated (option B shape) — smaller surface, everything it advertises is polished.",
+          "code": "no code lens by default; core dozen kept excellent"
+        }
+      ],
+      "rec": "A",
+      "status": "ratified",
+      "created": "2026-07-05T11:39:57.237Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-05"
+    },
+    {
+      "id": "D-HL1",
+      "cardId": "c0vg0lj7",
+      "group": "tooling",
+      "title": "Highlighting source of truth",
+      "gist": "Where the coloring rules live, so VS Code, Zed, GitHub, and the docs all color Jet identically and new syntax is never missed.",
+      "explainer": "Today there are three hand-written grammars that each independently guess at Jet: a TextMate grammar for VS Code/GitHub (164 lines), a tree-sitter grammar for Zed and code parsing (998 lines), and Zed highlight queries (136 lines). The real token registry — Syntax.rs, where invariant I7 says every user-typeable keyword and sigil must live — has 568 entries and none of the grammars is checked against it. Semantic tokens = the LSP can also send exact, compiler-derived coloring to live editors, on top of any grammar.",
+      "story": "Marco writes the v5 memory example and pushes it. In VS Code `copy` is plain white — the grammar predates S4. On GitHub the PR diff colors differently than his editor did. In Zed, a third coloring. His reviewer asks 'is `copy` even a keyword?' Every ratified decision that ships new syntax silently rots three grammars, and nothing fails when it happens.",
+      "inWild": "// v5 ownership — shipped, golden-tested, and mis-colored everywhere:\nfn bump(n: &Int) {          // `&` write-borrow: inconsistent across editors\n    n += 1\n}\nfn archive(name: ^String) -> String {  // `^` move: same\n    return name\n}\nfn run() {\n    name: String :: \"vault\"\n    saved :: copy name       // `copy` (D-CAP2): highlighted in ZERO grammars\n    print(saved)\n}\n// Meanwhile retired spellings from old epochs still light up as keywords.",
+      "detail": "Recommend D. I7 already makes Syntax.rs the registry — generating from it is the 'one way to mean it' answer (I8), and the semantic overlay is what makes in-editor coloring compiler-exact. The CI drift gate turns 'grammar rot' from a silent decay into a red build.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Generate grammars from Syntax.rs",
+          "detail": "A build step reads the I7 registry and emits the keyword/sigil/marker layers of all three grammars (tmLanguage JSON, tree-sitter keyword tables, Zed queries). Hand-written parts shrink to structure rules (strings, comments, blocks). A CI drift test fails the moment Syntax.rs gains a token the grammars don't color. Ratifying new syntax updates every editor in the same commit, mechanically.",
+          "code": "$ jet devtools grammars   # or build.rs step\n  wrote editors/vscode/syntaxes/jet.tmLanguage.json   (generated section)\n  wrote editors/tree-sitter/keywords.js                (generated)\n  wrote editors/zed/languages/jet/highlights.scm       (generated section)\n$ cargo test --test grammar\n  every_syntax_token_is_highlighted ... ok   // 568/568 covered, or red"
+        },
+        {
+          "key": "B",
+          "name": "tree-sitter grammar is canon",
+          "detail": "The tree-sitter grammar (already the richest, 998 lines, and what GitHub/Zed natively consume) becomes the single hand-maintained source; tmLanguage and Zed queries are generated or derived from it; a CI test checks it covers every Syntax.rs token. One grammar to maintain, but it is maintained by hand — new syntax still requires remembering to edit it, the test just makes forgetting loud.",
+          "code": "$ cargo test --test grammar\n  tree_sitter_covers_syntax_rs ... FAILED\n  missing: `copy` (D-CAP2), `^` move sigil (D-MEM1)\n  fix: add to editors/tree-sitter/grammar.js, regenerate derived grammars"
+        },
+        {
+          "key": "C",
+          "name": "Semantic tokens carry the truth; grammars stay minimal",
+          "detail": "Invest in the LSP's compiler-derived coloring (exact by construction — it knows a type from a variable, a live keyword from a retired one) as the primary experience in VS Code/Zed/Cursor. Grammars remain small lexical fallbacks for places the LSP can't reach (GitHub diffs, docs sites, quick views). Perfect where the LSP runs; GitHub and docs remain only roughly right.",
+          "code": "// In-editor: compiler-exact via semantic tokens\nsaved :: copy name    // `copy` colored as keyword.move by the LSP itself\n// On GitHub: whatever the minimal fallback grammar knows — approximate"
+        },
+        {
+          "key": "D",
+          "name": "Generated lexical base + semantic overlay (A + C)",
+          "detail": "Both layers, each doing what only it can: Syntax.rs generates the keyword layer of all grammars (so GitHub, docs, and cold files are always current — no human step, CI-gated), and LSP semantic tokens refine live editors with compiler-exact coloring on top. New ratified syntax colors correctly everywhere in the same commit that lands it.",
+          "code": "// same file, three surfaces, one truth:\n// GitHub diff      -> generated tmLanguage: `copy`/`^`/`&` correct (lexical)\n// VS Code editing  -> semantic tokens: `name` param vs field vs type, exact\n// jet doc html     -> generated grammar: matches both\n$ cargo test --test grammar   // drift = red, forever"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "rust-analyzer semantic tokens over a hand-kept TextMate base — the in-editor half is superb, but the TextMate grammar drifts and GitHub coloring lags new syntax for months.",
+          "code": "async closures colored wrong on GitHub long after stabilization"
+        },
+        {
+          "lang": "Zig",
+          "note": "zls semantic tokens + community grammars; same drift problem, editors disagree.",
+          "code": ""
+        },
+        {
+          "lang": "Kotlin",
+          "note": "JetBrains model: the compiler IS the highlighter in-IDE (option C taken to the limit) — flawless there, but everywhere outside the IDE depends on separate grammars.",
+          "code": ""
+        }
+      ],
+      "rec": "D",
+      "status": "ratified",
+      "created": "2026-07-05T11:39:57.295Z",
+      "outcome": "D",
+      "ratifiedAt": "2026-07-05"
+    },
+    {
+      "id": "D-CI1",
+      "cardId": "c0wa2hf8",
+      "group": "tooling",
+      "title": "What a change must pass before it lands",
+      "gist": "How much of the test suite (and which extra gates) run on every pull request versus nightly.",
+      "explainer": "Today CI runs 5 of the ~70 test files: unit tests, truthfulness, diagnostic snapshots, golden examples, cross-compile. The other 65 — LSP, formatter, REPL, jetpack, workspace, web build, ownership, debugger, everything else — only run when a developer remembers to run them locally. CI also still calls the frozen old board path (tools/Tower/Tower.mjs). 'Sharded' = split the suite across parallel CI machines so the wall-clock stays short. 'Ratchet' = a number (coverage, binary size, compile time) that may improve but never regress.",
+      "story": "A contributor's PR goes green in 12 minutes and merges. It broke jet fmt's round-trip, two REPL commands, and a jetpack flow — none of which CI ran. The breakage surfaces days later on someone else's machine, bisecting costs an afternoon, and 'CI is green' quietly stops meaning anything. For a language whose examples are the executable spec (I5), the suite that isn't run is a spec that isn't enforced.",
+      "inWild": "# .github/workflows/ci.yml — the entire test gate today:\n- run: nix develop -c cargo test --lib\n- run: nix develop -c cargo test --test truthfulness\n- run: nix develop -c cargo test --test diagnostic_snapshots\n- run: nix develop -c cargo test --test golden\n- run: nix develop -c cargo test --test cross\n# not run on any PR, ever: lsp, fmt, repl, jetpack, workspace, web_build,\n# ownership, debug, modules, generics, effects ... (65 files)\n# also: - run: nix develop -c node tools/Tower/Tower.mjs status   # frozen dir, per MOVED.md",
+      "detail": "Recommend A. The suite is the spec (I4/I5); a gate that skips 65 of 70 files lets the spec be broken silently, and this repo has already paid that bisect tax. Whichever option wins, the frozen tools/Tower CI step is corrected as part of it.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Everything on every PR; nightly adds the slow science",
+          "detail": "PR gate = the full cargo test suite, sharded across parallel jobs, plus grammar-drift and docs-build checks. Nightly = multi-OS matrix (Linux/macOS), perf-regression harness (tools/perf) with ratchets, fuzzing cadence, coverage report. Green means green: no change lands without the whole spec passing. Costs more CI minutes; sharding keeps wall-clock near today's.",
+          "code": "# PR (sharded, ~4 parallel jobs):\ntest-shard-1: lexer parser fmt grammar ui...\ntest-shard-2: sema ownership generics effects...\ntest-shard-3: golden examples, codegen, cross\ntest-shard-4: lsp repl debug jetpack workspace web...\ngates: grammar-drift, docs-build, tower status (new path)\n# nightly: macOS + Linux, perf ratchet, fuzz 30min, coverage"
+        },
+        {
+          "key": "B",
+          "name": "Two lanes: fast PR, full suite gates the merge",
+          "detail": "PR lane stays fast (today's five targets + build + lint), and the full suite runs in a merge queue / on master after merge, auto-reverting or red-flagging on failure. Cheap PRs, but a window exists where broken code is on master and someone else pulls it.",
+          "code": "PR:     12 min — compile, golden, snapshots, lint\nmerge:  full suite on the merge commit; failure -> auto-revert + card\n# the gap: between merge and full-suite result, master may be broken"
+        },
+        {
+          "key": "C",
+          "name": "Full suite nightly only",
+          "detail": "PRs unchanged; one nightly run of everything files a card on failure. Minimal CI spend; a full day of changes can land between a breakage and its discovery, and the bisect cost returns.",
+          "code": "nightly: cargo test (all) -> on failure: tower card add --kind bug ..."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust (rustc)",
+          "note": "Nothing merges without the full suite: bors merge queue, every PR fully tested on the merge commit. This is why 'rustc is green' is trusted absolutely.",
+          "code": "@bors r+ -> full CI on the exact merge -> only then master moves"
+        },
+        {
+          "lang": "Go",
+          "note": "TryBots on every CL run the broad suite; slower builders complete post-submit. Two-lane, but the fast lane is already broad.",
+          "code": ""
+        }
+      ],
+      "rec": "A",
+      "status": "ratified",
+      "created": "2026-07-05T11:39:57.349Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-05"
+    },
+    {
+      "id": "D-CI2",
+      "cardId": "c0wa2hf8",
+      "group": "tooling",
+      "title": "Warning and style policy for the compiler codebase",
+      "gist": "Whether the Rust codebase must build warning-free, and how work-in-progress code marks itself so cleanup never amputates a feature.",
+      "explainer": "The workspace currently builds with warnings allowed (one live dead-code warning in jet-jit today). Rust's `#[expect(lint, reason = \"...\")]` is a lint gate that also fails when the lint stops firing — so an exception can't outlive its cause. `-D warnings` in CI = any new warning is a red build. rustfmt/clippy = the standard Rust formatter and lint suite; both are configurable and neither touches this repo's PascalCase file naming.",
+      "story": "An agent sweeping the codebase sees `fn scrutinee_bool` flagged dead and deletes it — not knowing it's the next stage of the JIT, mid-build on another card. The reverse also happens: genuinely dead code survives for months because nobody can tell it from in-progress work. This repo has hit both. The policy question: does 'dead code' explain itself, or does every reader have to guess?",
+      "inWild": "warning: method `scrutinee_bool` is never used\n    --> crates/jet-jit/src/lib.rs:1916\n// Is this (a) leftover to delete, or (b) card #125's next stage?\n// Today: nothing in the code says. An agent guessed wrong once already\n// (C FFI work was reverted); the safe answer is to never clean anything,\n// which is how codebases silt up.",
+      "detail": "Recommend A. It resolves the standing tension between 'keep the build clean' and 'dead code may be an unbuilt feature' by making the code say which it is — and the expect self-expires when the feature lands.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Warning-free gate + card-referenced expects",
+          "detail": "CI adds `-D warnings`, `cargo fmt --check`, and a curated clippy set (correctness + suspicious lints on; style lints that fight house conventions off). Every intentional exception must be `#[expect(dead_code, reason = \"#125: JIT tier-1a, wired in next stage\")]` — self-documenting, and when the code goes live the expect itself errors and gets removed. Dead code without a card reference is deletable on sight, by rule.",
+          "code": "#[expect(dead_code, reason = \"#125: JIT tier-1a scrutinee lowering, next stage\")]\nfn scrutinee_bool(&mut self, cond: &str) -> Result<Value, String> { ... }\n\n$ cargo build   # clean — zero noise, every exception explains itself\n# ...later, when #125 wires it in:\nerror: this lint expectation is unfulfilled  // <- expect must be deleted: self-expiring"
+        },
+        {
+          "key": "B",
+          "name": "Warning-free except dead_code",
+          "detail": "`-D warnings` for everything else; dead_code stays advisory so in-progress features need no annotation. Keeps builds mostly clean but preserves exactly today's ambiguity for the one lint where ambiguity has already caused damage.",
+          "code": "$ cargo build\nwarning: method `scrutinee_bool` is never used   // still: delete or feature?"
+        },
+        {
+          "key": "C",
+          "name": "Status quo — warnings advisory",
+          "detail": "No gate. Warnings accumulate until someone sweeps; sweeps risk deleting in-progress work; the build output slowly stops being read.",
+          "code": "$ cargo build 2>&1 | wc -l   # a number that only grows"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Go",
+          "note": "Unused variable is a compile error, full stop — the language forces option A's discipline with no escape hatch.",
+          "code": "declared and not used: x   // does not compile"
+        },
+        {
+          "lang": "Rust ecosystem",
+          "note": "`#[expect]` (stable 1.81) was added precisely for this: exceptions that expire themselves.",
+          "code": "#[expect(dead_code, reason = \"used by feature X, PR #402\")]"
+        }
+      ],
+      "rec": "A",
+      "status": "ratified",
+      "created": "2026-07-05T11:39:57.407Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-05"
+    },
+    {
+      "id": "D-GAME1",
+      "cardId": "c0x3v19y",
+      "group": "stdlib",
+      "title": "How Jet gets a game/graphics stack",
+      "gist": "What 'making a game in Jet' looks like: bare stdlib primitives, a batteries-included flagship engine, official bindings to existing engines, or wait.",
+      "explainer": "Baseline already decided: D-RAYLIB1 ratified a first-party core.raylib bridge package (FFI-bridge pattern) for cross-platform games and visual demos — that ships regardless. It is not built yet, so today Jet still cannot open a window; and a C bridge is a floor, not a strategy. This ballot decides what Jet's own stack ABOVE that floor is. Primitives = low-level building blocks (window, GPU surface, audio out, input events) on which anyone can build an engine. Engine = the batteries layer (sprites, scenes, cameras, asset loading, game loop) that lets a beginner make Pong in an afternoon. Under I6, stdlib sub-libraries may bootstrap on external crates (wgpu/winit class) through the established FFI-bridge pattern until end of Epoch 3, then go native — any new external dep is exactly the approval this ballot grants or withholds.",
+      "story": "A 15-year-old picks her first language because she wants to make a game — the single most common reason beginners pick one. Python has pygame, Lua has LÖVE, C# has Unity. Jet — whose north star is Blueprint-class friendliness (#182) and which already studied UE's gameplay architecture (#181) — has to say 'we can't open a window.' Meanwhile UE6 dropping Blueprint is the market gap #182 exists to take; a visual editor with no runtime to drive is a body without legs.",
+      "inWild": "// The demo that sells a language in 10 seconds — what does this file\n// need to look like, and does `jet run pong.jet` just work?\nuse core.game\n\nfn run() {\n    game :: Game.window(\"Pong\", 800, 600)\n    ball := Ball.{x: 400.0, y: 300.0, dx: 4.0, dy: 3.0}\n    game.each_frame(fn(frame) {\n        ball.step(frame.input)\n        frame.draw.circle(ball.x, ball.y, 8.0)\n    })\n}",
+      "detail": "Recommend B, 2D first. It is the beginner-magic priority made concrete (afternoon Pong), gives #182's visual editor its runtime, and keeps the expert tier honest underneath (primitives are public, not internal). The ratified core.raylib bridge (D-RAYLIB1) ships first as the interim path and stays as a compatibility package; the flagship engine bootstraps GPU/window/audio via the I6 FFI-bridge pattern (wgpu/winit-class crates) with the native replacement owed post-E3 — approving this option approves those bridge deps.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Stdlib primitives only",
+          "detail": "Ship core.window, core.gpu, core.audio, core.input — thin, honest, expert-shaped. Engines grow in the package ecosystem. Beginners face raw GPU concepts (pipelines, buffers) before their first sprite; the afternoon-Pong story doesn't exist until someone else builds it.",
+          "code": "use core.gpu\nfn run() {\n    win :: Window.open(\"Pong\", 800, 600)\n    surface :: gpu.surface(win)\n    pipeline :: surface.pipeline(shader)   // beginner meets WGSL on day one\n    loop { ... }\n}"
+        },
+        {
+          "key": "B",
+          "name": "Flagship engine package on stdlib primitives",
+          "detail": "Both layers, matching Jet's dual-facet identity: primitives (option A) beneath, plus a first-party batteries engine — window/loop/sprites/text/audio/input, 2D first, scene tree, asset pipeline — so `jet run pong.jet` opens a window with zero setup. Becomes the runtime #182's visual editor drives and the living proof of the beginner promise. Largest first-party surface to own and keep excellent.",
+          "code": "$ jet run pong.jet\n[window opens; paddles move; 60fps]\n// the inWild file above, verbatim — that IS the API\n// experts drop a layer: use core.gpu directly, same program (I8 both tiers)"
+        },
+        {
+          "key": "C",
+          "name": "core.raylib is the whole story for now",
+          "detail": "Build the already-ratified D-RAYLIB1 bridge and stop there: raylib for 2D/3D, wgpu-level bindings later via next-gen FFI (#180). A real game path exists soonest, but the beginner types a foreign API with foreign docs and foreign error messages — the anti-thesis of front-end-owns-every-error — and a native Jet-shaped stack still has to be decided someday.",
+          "code": "use ffi.raylib as rl\nfn run() {\n    rl.InitWindow(800, 600, \"Pong\")   // C naming, C docs, C error culture\n    while !rl.WindowShouldClose() { ... }\n}"
+        },
+        {
+          "key": "D",
+          "name": "Defer past Epoch 3",
+          "detail": "Nothing until the jetos/self-host era. Honest sequencing-wise, but 'replace every language' keeps a hole in the domain that recruits the most beginners, and #182 stays a body without legs.",
+          "code": "$ jet run pong.jet\nerror: no window/graphics capability exists in this epoch"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Lua / LÖVE",
+          "note": "The beginner gold standard: one file, a draw callback, a window. Thousands learned programming through it.",
+          "code": "function love.draw() love.graphics.circle(\"fill\", x, y, 8) end"
+        },
+        {
+          "lang": "Jai",
+          "note": "A language built BY game development — its credibility flows from shipping a real game with it. Games are how systems languages prove themselves fun.",
+          "code": ""
+        },
+        {
+          "lang": "Rust / bevy",
+          "note": "Ecosystem-grown engine (option A's bet). Excellent — after ~5 years, and beginners still rate Rust gamedev 'hard mode'.",
+          "code": ""
+        },
+        {
+          "lang": "Zig / mach",
+          "note": "First-party-adjacent engine on stdlib primitives — the option B shape, earlier in its life.",
+          "code": ""
+        }
+      ],
+      "rec": "B",
+      "status": "ratified",
+      "created": "2026-07-05T11:39:57.460Z",
+      "outcome": "B",
+      "ratifiedAt": "2026-07-05"
+    },
+    {
+      "id": "D-TLS1",
+      "cardId": "c0xz4xqx",
+      "group": "stdlib",
+      "title": "HTTPS out of the box",
+      "gist": "Whether fetching an https:// URL works in a fresh Jet install, and which TLS engine makes it work.",
+      "explainer": "TLS is the encryption layer behind https — essentially every real API requires it. Today core.http's default build is plain-HTTP only; https needs the separate opt-in core.tls package. The engine choices: rustls = the widely-audited memory-safe TLS library the Rust world standardized on; system TLS = whatever the OS ships (OpenSSL on Linux, Security.framework on macOS, Schannel on Windows). Under I6, a vendored library rides the FFI-bridge pattern until end of Epoch 3, after which a native implementation is owed — and TLS is cryptographic code, so 'native' carries a real security obligation, noted per option.",
+      "story": "Ana, week one, writes a weather CLI. `http.get(\"https://api.open-meteo.com/...\")` — error: TLS not available, install core.tls. She has never heard of TLS; she copied a URL from API docs like every tutorial on earth. In Python, Go, Deno, and even curl, that line just works. The batteries-included language fails on the second program a beginner ever writes.",
+      "inWild": "use core.http\n\nfn run() {\n    resp :: http.get(\"https://api.open-meteo.com/v1/forecast?latitude=52\")\n    print(resp.body)\n}\n\n$ jet run weather.jet\nerror: `https` needs TLS, which this build doesn't include\n  fix: add the `core.tls` package to pkg.jet\n// Ana has no pkg.jet — she has one file and a dream.",
+      "detail": "Recommend A. Batteries-included is the ranked priority and https is the battery; rustls is the audited, memory-safe interim consistent with how every other stdlib bridge dep works. The post-E3 native rewrite must be explicitly security-gated — cryptography is the one place 'we rewrote it ourselves' needs outside eyes before it ships as default.",
+      "options": [
+        {
+          "key": "A",
+          "name": "rustls in the default build (bridge now, native post-E3)",
+          "detail": "Vendor rustls through the established I6 FFI-bridge pattern so https works in every build with zero setup — the Go model. Post-E3 the native-Jet replacement is owed like every other bridge dep; because this one is cryptography, that replacement must carry an explicit security gate (external audit / interop test battery against rustls+OpenSSL) before it may become the default. Approving A approves the rustls bridge dep (I6 owner gate — same governance as the ratified D-DEP-CRYPTO1 seal/sign backend, a separate decision this one does not reopen) and pins certificate verification to system trust roots.",
+          "code": "$ jet run weather.jet\n{\"latitude\":52.0,\"hourly\":{...}}   // it just works\n\n// server side too:\nsvc :: Http.serve(443, handler).tls(cert, key)   // one line, no package"
+        },
+        {
+          "key": "B",
+          "name": "System TLS via C FFI",
+          "detail": "Bind the OS engine per platform (OpenSSL / Security.framework / Schannel). No vendored crypto, OS owns the patching — but three platform code paths with three behavior sets, error messages that surface OS-specific failure modes (the front end must translate all of them, I2-style), and Linux minimal containers often lack OpenSSL, so 'it just works' gains an asterisk exactly where services deploy.",
+          "code": "$ jet run weather.jet          # macOS: works (Security.framework)\n$ docker run scratch-image jet # error: libssl.so.3 not found\n  fix: install openssl in the image   // the asterisk"
+        },
+        {
+          "key": "C",
+          "name": "Status quo — core.tls stays opt-in",
+          "detail": "No default TLS; the error message gets friendlier. Keeps the compiler distribution crypto-free, keeps Ana's weather app broken until she learns what TLS is.",
+          "code": "$ jet run weather.jet\nerror[E4102]: `https` needs the TLS package\n  what: this build speaks plain HTTP only\n  fix: `jet pkg add core.tls` — then this line works unchanged"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Go",
+          "note": "crypto/tls is native in the standard library — the reason `go run` scripts against any API with zero setup. The end-state option A aims at.",
+          "code": "http.Get(\"https://...\")   // day one, no packages"
+        },
+        {
+          "lang": "Deno",
+          "note": "Ships rustls inside the runtime — exactly option A's interim shape, permanently.",
+          "code": "await fetch(\"https://...\")"
+        },
+        {
+          "lang": "Python",
+          "note": "ssl module wraps system OpenSSL (option B) — historically the source of an entire genre of cross-platform certificate bugs ('pip SSL error' has 100k+ search results).",
+          "code": ""
+        }
+      ],
+      "rec": "A",
+      "status": "ratified",
+      "created": "2026-07-05T11:39:57.512Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-05"
+    },
+    {
+      "id": "D-GAME2",
+      "cardId": "c0x3v19y",
+      "group": "stdlib",
+      "title": "Name of the flagship game engine package",
+      "gist": "What the batteries game engine is called — the word in every beginner's first `use` line and every tutorial title.",
+      "explainer": "D-GAME1=B ratified a first-party engine package on stdlib primitives. Primitives keep plain core.* names (core.window, core.gpu, core.audio, core.input — descriptive, not brandable). The engine itself needs a name: either a plain stdlib slot (core.game) or a branded first-party package in the jet/jetpack/jetos naming canon. The name appears in code (`use …`), in the install line, in docs titles, in search results ('… tutorial'), and eventually on #182's visual editor.",
+      "story": "Every game made in Jet starts with this word, and the community will name itself after it ('the … engine', '… jam'). Unity, Godot, LÖVE, bevy — engine names outgrow their languages. Jet's pick decides whether the engine reads as a stdlib feature (core.game) or as a flagship product with its own identity, the way jetpack is to packaging.",
+      "inWild": "// the first line of every tutorial, forever:\nuse core.game        // or: use airshow / use barnstorm / use afterburner / use slipstream\n\nfn run() {\n    g :: Game.window(\"Pong\", 800, 600)\n    g.each_frame(fn(frame) {\n        frame.draw.circle(400.0, 300.0, 8.0)\n    })\n}\n// and the search that finds it: '<name> pong tutorial'",
+      "detail": "Recommend B (airshow). Flagship product deserves a flagship name in the aviation canon; airshow is the one that means 'flying as play' without explanation, is short enough for a use line typed daily, and searches cleanly. A is the fallback if the owner wants the engine to read as pure stdlib.",
+      "options": [
+        {
+          "key": "A",
+          "name": "core.game",
+          "detail": "Plain stdlib slot. Zero-brand, maximally discoverable — a beginner browsing the core library finds it alphabetically; no new word to learn. Reads as a language feature, not a product; harder to talk about ('the Jet game module') and 'core.game tutorial' is a weak search term.",
+          "code": "use core.game\n$ jet run pong.jet          // built in — nothing to add\n// docs: 'Games with core.game'"
+        },
+        {
+          "key": "B",
+          "name": "airshow",
+          "detail": "Aerial spectacle — flying as performance and play, which is exactly what a game engine is for. Short, easy to say in any language, clean verb-adjacent energy ('built with Airshow'). Searchable and brandable without whimsy overload.",
+          "code": "use airshow\n$ jetpack add airshow\n// docs: 'Airshow: make your first game in an afternoon'\n// community: 'Airshow jam', awesome-airshow"
+        },
+        {
+          "key": "C",
+          "name": "barnstorm",
+          "detail": "The barnstormers were the 1920s pilots who flew town to town putting on shows — entertainment flying, the historical heart of the theme. Doubles as a verb with momentum ('barnstorming demo'). Longer word; slightly opaque to non-native speakers.",
+          "code": "use barnstorm\n$ jetpack add barnstorm\n// docs: 'Barnstorm: games in Jet'"
+        },
+        {
+          "key": "D",
+          "name": "afterburner",
+          "detail": "Raw speed and spectacle — the flame out the back of the jet. Instantly evocative, performance-flavored; risks reading as a perf tool rather than a creative one, and it's a long word to type in every use line.",
+          "code": "use afterburner\n$ jetpack add afterburner\n// docs: 'Afterburner engine guide'"
+        },
+        {
+          "key": "E",
+          "name": "slipstream",
+          "detail": "The smooth air behind a fast mover — flow, ease, being carried along. Gentle and pretty; less game-flavored than B/C (could name a networking or async library just as well).",
+          "code": "use slipstream\n$ jetpack add slipstream\n// docs: 'Slipstream: 2D games in Jet'"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Lua / LÖVE",
+          "note": "A branded engine name (not lua.game) is what the community organized around — LÖVE jams, LÖVE forums — while staying tiny and beginner-first.",
+          "code": "require('love')  — the name IS the ecosystem"
+        },
+        {
+          "lang": "Rust / bevy",
+          "note": "Same: the engine brand carries the game-dev identity; 'bevy tutorial' is a precise search, 'rust game module' is not.",
+          "code": ""
+        }
+      ],
+      "rec": "B",
+      "status": "open",
+      "created": "2026-07-05T12:09:08.605Z"
     }
   ],
   "questions": [
@@ -23671,9 +24315,484 @@
       "status": "tagged",
       "created": "2026-07-01T14:22:59.905Z",
       "cardId": "caffiunify"
+    },
+    {
+      "id": "b16ikq9i",
+      "text": "Change \"jet run nixpkgs@cowsay\" to \"jet run nixpkgs:cowsay\" to match jetpack source:package style.",
+      "note": "",
+      "level": null,
+      "tags": [],
+      "status": "tagged",
+      "created": "2026-07-05T11:30:07.936Z",
+      "cardId": "c3gg6ghs"
+    },
+    {
+      "id": "b2zg4ncw",
+      "text": "Update jetpack run package to show clearly that a package is running/was run. When running cowsay with no input args, looked like jetpack shell was frozen",
+      "note": "",
+      "level": null,
+      "tags": [],
+      "status": "tagged",
+      "created": "2026-07-05T11:31:36.756Z",
+      "cardId": "c4g593nd"
     }
   ],
   "events": [
+    {
+      "at": "2026-07-05T12:09:39.233Z",
+      "by": "claude-main",
+      "action": "message.send",
+      "ref": "msgajfxs4t",
+      "note": "→ owner: Plans attached to #209-#213; all handoff-ready. #209 LSP eng"
+    },
+    {
+      "at": "2026-07-05T12:09:27.652Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0xz4xqx",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-05T12:09:27.601Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0x3v19y",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-05T12:09:27.546Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0wa2hf8",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-05T12:09:27.495Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0vg0lj7",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-05T12:09:27.439Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0cevzhr",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-05T12:09:27.385Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0xz4xqx",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-05T12:09:27.332Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0wa2hf8",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-05T12:09:27.277Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0vg0lj7",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-05T12:09:27.222Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0cevzhr",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-05T12:09:08.605Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-GAME2",
+      "note": "Name of the flagship game engine package"
+    },
+    {
+      "at": "2026-07-05T12:09:08.549Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0xz4xqx",
+      "note": "plan"
+    },
+    {
+      "at": "2026-07-05T12:09:08.495Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0x3v19y",
+      "note": "plan"
+    },
+    {
+      "at": "2026-07-05T12:09:08.442Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0wa2hf8",
+      "note": "plan"
+    },
+    {
+      "at": "2026-07-05T12:09:08.384Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0vg0lj7",
+      "note": "plan"
+    },
+    {
+      "at": "2026-07-05T12:09:08.330Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0cevzhr",
+      "note": "plan"
+    },
+    {
+      "at": "2026-07-05T12:04:59.002Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msg9sxb7u5",
+      "note": "→ codex-1: [tower] greenlit: #214 #215. Board is current; pick up with "
+    },
+    {
+      "at": "2026-07-05T12:04:59.002Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msg8sxaraa",
+      "note": "→ claude-main: [tower] greenlit: #214 #215. Board is current; pick up with "
+    },
+    {
+      "at": "2026-07-05T12:03:28.977Z",
+      "by": "owner",
+      "action": "card.activate",
+      "ref": "c4g593nd",
+      "note": ""
+    },
+    {
+      "at": "2026-07-05T12:03:26.656Z",
+      "by": "owner",
+      "action": "card.activate",
+      "ref": "c3gg6ghs",
+      "note": ""
+    },
+    {
+      "at": "2026-07-05T11:47:27.044Z",
+      "by": "owner",
+      "action": "card.activate",
+      "ref": "c0xz4xqx",
+      "note": ""
+    },
+    {
+      "at": "2026-07-05T11:47:26.990Z",
+      "by": "owner",
+      "action": "card.activate",
+      "ref": "c0x3v19y",
+      "note": ""
+    },
+    {
+      "at": "2026-07-05T11:47:26.934Z",
+      "by": "owner",
+      "action": "card.activate",
+      "ref": "c0wa2hf8",
+      "note": ""
+    },
+    {
+      "at": "2026-07-05T11:47:26.880Z",
+      "by": "owner",
+      "action": "card.activate",
+      "ref": "c0vg0lj7",
+      "note": ""
+    },
+    {
+      "at": "2026-07-05T11:47:26.819Z",
+      "by": "owner",
+      "action": "card.activate",
+      "ref": "c0cevzhr",
+      "note": ""
+    },
+    {
+      "at": "2026-07-05T11:47:06.808Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-TLS1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-05T11:47:06.752Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-GAME1",
+      "note": "B"
+    },
+    {
+      "at": "2026-07-05T11:47:06.696Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-CI2",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-05T11:47:06.641Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-CI1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-05T11:47:06.584Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-HL1",
+      "note": "D"
+    },
+    {
+      "at": "2026-07-05T11:47:06.528Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-LSP2",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-05T11:47:06.475Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-LSP1",
+      "note": "C"
+    },
+    {
+      "at": "2026-07-05T11:46:29.780Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msg78fnktd",
+      "note": "→ codex-1: [tower] 7 decisions ratified: D-LSP1→C · D-LSP2→A · D-HL1→D "
+    },
+    {
+      "at": "2026-07-05T11:46:29.780Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msg68fn1wn",
+      "note": "→ claude-main: [tower] 7 decisions ratified: D-LSP1→C · D-LSP2→A · D-HL1→D "
+    },
+    {
+      "at": "2026-07-05T11:44:59.757Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-TLS1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-05T11:44:49.350Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-GAME1",
+      "note": "B"
+    },
+    {
+      "at": "2026-07-05T11:44:12.042Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-CI2",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-05T11:43:53.703Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-CI1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-05T11:43:35.226Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-HL1",
+      "note": "D"
+    },
+    {
+      "at": "2026-07-05T11:42:40.344Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-LSP2",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-05T11:42:06.186Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-LSP1",
+      "note": "C"
+    },
+    {
+      "at": "2026-07-05T11:40:06.196Z",
+      "by": "claude-main",
+      "action": "message.send",
+      "ref": "msg50nm5xn",
+      "note": "→ owner: Quality-program ballots ready in Decide: #209 LSP v2 (D-LSP1"
+    },
+    {
+      "at": "2026-07-05T11:39:57.512Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-TLS1",
+      "note": "HTTPS out of the box"
+    },
+    {
+      "at": "2026-07-05T11:39:57.460Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-GAME1",
+      "note": "How Jet gets a game/graphics stack"
+    },
+    {
+      "at": "2026-07-05T11:39:57.408Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-CI2",
+      "note": "Warning and style policy for the compiler codebase"
+    },
+    {
+      "at": "2026-07-05T11:39:57.349Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-CI1",
+      "note": "What a change must pass before it lands"
+    },
+    {
+      "at": "2026-07-05T11:39:57.296Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-HL1",
+      "note": "Highlighting source of truth"
+    },
+    {
+      "at": "2026-07-05T11:39:57.238Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-LSP2",
+      "note": "Editor capability bar"
+    },
+    {
+      "at": "2026-07-05T11:39:57.185Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-LSP1",
+      "note": "Editor engine architecture"
+    },
+    {
+      "at": "2026-07-05T11:35:53.295Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c4g593nd",
+      "note": "kind"
+    },
+    {
+      "at": "2026-07-05T11:35:49.403Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c4g593nd",
+      "note": "track"
+    },
+    {
+      "at": "2026-07-05T11:35:48.442Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c4g593nd",
+      "note": "epoch"
+    },
+    {
+      "at": "2026-07-05T11:35:45.919Z",
+      "by": "owner",
+      "action": "card.add",
+      "ref": "c4g593nd",
+      "note": "Update jetpack run package to show clearly that a package is running/was run. Wh"
+    },
+    {
+      "at": "2026-07-05T11:35:42.965Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c3gg6ghs",
+      "note": "kind"
+    },
+    {
+      "at": "2026-07-05T11:35:38.902Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c3gg6ghs",
+      "note": "track"
+    },
+    {
+      "at": "2026-07-05T11:35:37.755Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c3gg6ghs",
+      "note": "epoch"
+    },
+    {
+      "at": "2026-07-05T11:35:35.054Z",
+      "by": "owner",
+      "action": "card.add",
+      "ref": "c3gg6ghs",
+      "note": "Change \"jet run nixpkgs@cowsay\" to \"jet run nixpkgs"
+    },
+    {
+      "at": "2026-07-05T11:32:48.608Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c0wa2hf8",
+      "note": "epoch"
+    },
+    {
+      "at": "2026-07-05T11:31:36.756Z",
+      "by": "owner",
+      "action": "idea.add",
+      "ref": "b2zg4ncw",
+      "note": "Update jetpack run package to show clearly that a package is"
+    },
+    {
+      "at": "2026-07-05T11:30:27.011Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0xz4xqx",
+      "note": "HTTPS by default in core.http"
+    },
+    {
+      "at": "2026-07-05T11:30:26.958Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0x3v19y",
+      "note": "Game development stack"
+    },
+    {
+      "at": "2026-07-05T11:30:26.908Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0wa2hf8",
+      "note": "CI and quality gates — the professional bar"
+    },
+    {
+      "at": "2026-07-05T11:30:26.857Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0vg0lj7",
+      "note": "Highlighting: one source of truth across editors"
+    },
+    {
+      "at": "2026-07-05T11:30:08.292Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0cevzhr",
+      "note": "LSP v2 — professional editor engine"
+    },
+    {
+      "at": "2026-07-05T11:30:07.936Z",
+      "by": "owner",
+      "action": "idea.add",
+      "ref": "b16ikq9i",
+      "note": "Change \"jet run nixpkgs@cowsay\" to \"jet run nixpkgs:cowsay\" "
+    },
     {
       "at": "2026-07-05T10:52:37.423Z",
       "by": "codex",
@@ -24011,6 +25130,72 @@
       "file": null,
       "at": "2026-07-05T09:52:58.138Z",
       "deliveredAt": "2026-07-05T09:52:58.156Z",
+      "readAt": null
+    },
+    {
+      "id": "msg50nm5xn",
+      "from": "claude-main",
+      "to": "owner",
+      "text": "Quality-program ballots ready in Decide: #209 LSP v2 (D-LSP1 engine architecture, D-LSP2 capability bar), #210 highlighting single source of truth (D-HL1), #211 CI + quality gates (D-CI1, D-CI2), #212 game dev stack (D-GAME1 — includes the I6 dep call), #213 HTTPS by default (D-TLS1 — includes the rustls I6 dep call). All agent-reviewed; recs marked.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-05T11:40:06.196Z",
+      "deliveredAt": null,
+      "readAt": "2026-07-05T12:04:02.766Z"
+    },
+    {
+      "id": "msg68fn1wn",
+      "from": "tower",
+      "to": "claude-main",
+      "text": "[tower] 7 decisions ratified: D-LSP1→C · D-LSP2→A · D-HL1→D · D-CI1→A · D-CI2→A · D-GAME1→B · D-TLS1→A. Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-05T11:46:29.780Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg78fnktd",
+      "from": "tower",
+      "to": "codex-1",
+      "text": "[tower] 7 decisions ratified: D-LSP1→C · D-LSP2→A · D-HL1→D · D-CI1→A · D-CI2→A · D-GAME1→B · D-TLS1→A. Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-05T11:46:29.780Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg8sxaraa",
+      "from": "tower",
+      "to": "claude-main",
+      "text": "[tower] greenlit: #214 #215. Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-05T12:04:59.002Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg9sxb7u5",
+      "from": "tower",
+      "to": "codex-1",
+      "text": "[tower] greenlit: #214 #215. Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-05T12:04:59.002Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msgajfxs4t",
+      "from": "claude-main",
+      "to": "owner",
+      "text": "Plans attached to #209-#213; all handoff-ready. #209 LSP engine, #210 highlighting, #211 CI gates, #213 HTTPS: ready/implement lane. #212 game stack: one new ballot D-GAME2 (engine package name — 5 candidates, rec: airshow) awaits your pick; raylib bridge + primitives stages proceed meanwhile. All implementation happens on master.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-05T12:09:39.233Z",
+      "deliveredAt": null,
       "readAt": null
     }
   ]

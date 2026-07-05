@@ -18,6 +18,10 @@ fn jetpack() -> Command {
     Command::new(env!("CARGO_BIN_EXE_jetpack"))
 }
 
+fn jet() -> Command {
+    Command::new(env!("CARGO_BIN_EXE_jet"))
+}
+
 /// A throwaway directory under the system temp dir, removed on drop.
 struct Scratch {
     path: PathBuf,
@@ -554,6 +558,40 @@ fn enter_flake_with_no_foreign_flake_present_is_friendly() {
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("no foreign flake"), "stderr: {stderr}");
+}
+
+#[test]
+fn top_level_jet_run_nixpkgs_at_tool_execs_tool() {
+    // U16: `nix run nixpkgs#tool` parity at the public `jet` front door. The
+    // top-level spelling uses provider refs (`nixpkgs@tool`) and lowers to the
+    // same jetpack realization path as `jetpack run nixpkgs:tool -- tool`.
+    let root = Scratch::new("jet-run-nixpkgs-root");
+    let proj = Scratch::new("jet-run-nixpkgs-proj");
+    let fixtures = Scratch::new("jet-run-nixpkgs-fx");
+    let out = Scratch::new("jet-run-nixpkgs-out");
+    write_runnable_fixture(&fixtures.path, &out.path);
+    let output = jet()
+        .args([
+            "run",
+            "nixpkgs@greet",
+            "--no-color",
+            "--offline",
+            "--fixtures",
+        ])
+        .arg(&fixtures.path)
+        .current_dir(&proj.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        "hello from jetpack"
+    );
 }
 
 // ── U16: `jetpack bridge flake` ──

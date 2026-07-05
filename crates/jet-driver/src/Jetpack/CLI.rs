@@ -417,6 +417,10 @@ struct RunPlan {
     /// U12). `jetpack services <verb>` and `jet dev`'s health gate are the
     /// only readers.
     dev_services: Vec<ModuleEval::DevServicePlan>,
+    /// U13: every declared `secrets: ["name", …]` entry from the typed env
+    /// surface. `jet env`/`jet dev` trust-gate on this and validate the names
+    /// exist before entering the environment.
+    secrets: Vec<String>,
 }
 
 /// Build a plan from the project `env.jet` (the no-explicit-ref path). `Err`
@@ -460,6 +464,7 @@ fn load_project_plan(theme: &Theme) -> Result<RunPlan, i32> {
         table,
         label: ef.prompt_label(),
         dev_services: Vec::new(),
+        secrets: Vec::new(),
     })
 }
 
@@ -504,6 +509,7 @@ fn typed_plan_with_defaults(
             .prompt
             .unwrap_or_else(|| Syntax::JETPACK_PROMPT_LABEL.to_string()),
         dev_services: plan.dev_services,
+        secrets: plan.secrets,
     })
 }
 
@@ -547,6 +553,7 @@ fn cmd_run(theme: &Theme, parsed: &Parsed) -> i32 {
                 table: cwd_table(),
                 label: Syntax::JETPACK_PROMPT_LABEL.to_string(),
                 dev_services: Vec::new(),
+                secrets: Vec::new(),
             },
             Err(_) => return 2,
         },
@@ -630,6 +637,7 @@ fn cmd_enter(theme: &Theme, parsed: &Parsed) -> i32 {
             table: RefSpec::SourceTable::empty(),
             label: Syntax::JETPACK_PROMPT_LABEL.to_string(),
             dev_services: Vec::new(),
+            secrets: Vec::new(),
         }
     };
 
@@ -658,8 +666,13 @@ fn cmd_enter(theme: &Theme, parsed: &Parsed) -> i32 {
         &project_dir,
         &plan.refs,
         &plan.table,
+        &plan.secrets,
         parsed.flags.trust,
     ) {
+        return code;
+    }
+
+    if let Err(code) = validate_declared_secrets(theme, &project_dir, &plan.secrets) {
         return code;
     }
 
@@ -700,7 +713,12 @@ fn project_declares_env(dir: &Path) -> bool {
     };
     if ModuleEval::is_module_surface(&src) {
         return ModuleEval::evaluate_env(&src, dir)
-            .map(|p| !p.package_refs.is_empty() || p.prompt.is_some())
+            .map(|p| {
+                !p.package_refs.is_empty()
+                    || p.prompt.is_some()
+                    || !p.dev_services.is_empty()
+                    || !p.secrets.is_empty()
+            })
             .unwrap_or(true);
     }
     let ef = EnvFile::parse(&src);
@@ -835,8 +853,13 @@ fn cmd_dev(theme: &Theme, parsed: &Parsed) -> i32 {
         &project_dir,
         &plan.refs,
         &plan.table,
+        &plan.secrets,
         parsed.flags.trust,
     ) {
+        return code;
+    }
+
+    if let Err(code) = validate_declared_secrets(theme, &project_dir, &plan.secrets) {
         return code;
     }
 
@@ -862,6 +885,36 @@ fn cmd_dev(theme: &Theme, parsed: &Parsed) -> i32 {
     // of its own, so everything here is pass-through.
     cmd.extend(parsed.positional.iter().cloned());
     Shell::run_command(&env, &cmd)
+}
+
+/// U13: before `jet env`/`jet dev` enters a trusted project environment, every
+/// declared `secrets: ["name", …]` entry must exist in `.jet/secrets.age`.
+/// Values stay inside `Secrets::get` and are dropped immediately; this is a
+/// presence check, not env-var injection.
+fn validate_declared_secrets(
+    theme: &Theme,
+    project_dir: &Path,
+    names: &[String],
+) -> Result<(), i32> {
+    for name in names {
+        match Secrets::get(project_dir, name) {
+            Ok(Some(_)) => {}
+            Ok(None) => {
+                theme.error_coded(
+                    "E1263",
+                    &format!("no secret named `{name}`"),
+                    "this environment declares that secret, but the encrypted store doesn't have an entry with this name.",
+                    &format!("set it first with `jetpack secrets set {name} <value>`, or check the spelling."),
+                );
+                return Err(2);
+            }
+            Err(msg) => {
+                theme.error(&format!("couldn't read `{name}`"), &msg, "");
+                return Err(2);
+            }
+        }
+    }
+    Ok(())
 }
 
 /// U12: bring up every enabled dev `services:` entry and block until each is
