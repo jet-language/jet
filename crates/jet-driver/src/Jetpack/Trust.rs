@@ -112,13 +112,25 @@ pub fn is_trust_sensitive_ext(refs: &[RefSpec], secrets_declared: bool) -> bool 
 /// Already trusted: an exact hash grant, or a pattern matching `project_dir`.
 pub fn is_trusted(store: &Path, project_dir: &Path, hash: &str) -> bool {
     let project_str = project_dir.to_string_lossy();
+    let canonical_project = project_dir
+        .canonicalize()
+        .ok()
+        .map(|p| p.to_string_lossy().into_owned());
     let target_hash_line = format!("{HASH_PREFIX}{hash}");
     for line in read_lines(store) {
         if line == target_hash_line {
             return true;
         }
         if let Some(pattern) = line.strip_prefix(PATTERN_PREFIX) {
-            if matches_pattern(pattern, &project_str) {
+            if matches_pattern(pattern, &project_str)
+                || canonical_project
+                    .as_deref()
+                    .is_some_and(|subject| matches_pattern(pattern, subject))
+                || matches_canonical_pattern(pattern, &project_str)
+                || canonical_project
+                    .as_deref()
+                    .is_some_and(|subject| matches_canonical_pattern(pattern, subject))
+            {
                 return true;
             }
         }
@@ -132,6 +144,22 @@ fn matches_pattern(pattern: &str, subject: &str) -> bool {
     match pattern.strip_suffix('*') {
         Some(prefix) => subject.starts_with(prefix),
         None => subject == pattern || subject.starts_with(pattern),
+    }
+}
+
+fn matches_canonical_pattern(pattern: &str, subject: &str) -> bool {
+    let (prefix, wildcard) = match pattern.strip_suffix('*') {
+        Some(prefix) => (prefix, true),
+        None => (pattern, false),
+    };
+    let Ok(canonical_prefix) = Path::new(prefix).canonicalize() else {
+        return false;
+    };
+    let canonical = canonical_prefix.to_string_lossy();
+    if wildcard {
+        subject.starts_with(canonical.as_ref())
+    } else {
+        subject == canonical.as_ref() || subject.starts_with(canonical.as_ref())
     }
 }
 
@@ -409,6 +437,17 @@ mod tests {
         add_pattern(&store, "/home/dev/");
         assert!(is_trusted(&store, Path::new("/home/dev/anything"), "h"));
         assert!(!is_trusted(&store, Path::new("/home/other"), "h"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn pattern_matching_tolerates_canonical_path_aliases() {
+        let dir = scratch("canonical_alias");
+        let store = dir.join("trust");
+        let lexical = dir.to_string_lossy().to_string();
+        add_pattern(&store, &format!("{lexical}*"));
+        let canonical = dir.canonicalize().unwrap();
+        assert!(is_trusted(&store, &canonical, "h"));
         std::fs::remove_dir_all(&dir).ok();
     }
 

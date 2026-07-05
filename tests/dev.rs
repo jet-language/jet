@@ -20,6 +20,15 @@ use jet::Interpreter::{dev_iteration, RunOutcome};
 use jet::JitBackend::{InterpreterBackend, JitBackend};
 use jet_jit::CraneliftBackend;
 
+fn skip_if_cranelift_host_unsupported() -> bool {
+    if jet_jit::cranelift_host_supported() {
+        false
+    } else {
+        eprintln!("note: cranelift-jit host path unsupported on this architecture; skipping resident JIT assertion");
+        true
+    }
+}
+
 /// c77: the differential battery covers EVERY `examples/features/*.jet`, not a
 /// hand-curated subset — so the battery can never quietly shrink. Each example
 /// either runs in the interpreter (and its stdout must match the compiled
@@ -28,6 +37,14 @@ use jet_jit::CraneliftBackend;
 /// a test failure.
 fn example_path(stem: &str) -> String {
     format!("examples/features/{}.jet", stem)
+}
+
+fn host_expected_stdout(stem: &str) -> Option<&'static str> {
+    match stem {
+        "lowlevel/os_target_gating" if cfg!(target_os = "macos") => Some("macos: appkit\n"),
+        "lowlevel/os_target_gating" if cfg!(target_os = "windows") => Some("windows: win32\n"),
+        _ => None,
+    }
 }
 
 /// All `.jet` files directly under a topic directory of `examples/features/`
@@ -282,7 +299,14 @@ fn interpreter_matches_expected_golden() {
         let expected_path = root.join(format!("examples/features/expected/{}.out", stem));
         match dev_iteration(&file, false, true) {
             RunOutcome::Ran { stdout, .. } => {
-                if let Ok(expected) = fs::read_to_string(&expected_path) {
+                if let Some(expected) = host_expected_stdout(&stem) {
+                    assert_eq!(
+                        stdout, expected,
+                        "`{}`: interpreter output differs from host expected output",
+                        stem
+                    );
+                    checked += 1;
+                } else if let Ok(expected) = fs::read_to_string(&expected_path) {
                     assert_eq!(
                         stdout, expected,
                         "`{}`: interpreter output differs from expected golden",
@@ -362,6 +386,9 @@ fn task_program_hits_e2201_in_interpreter_mode() {
 /// c139 M4: task programs inside `jit_covers` run via default `jet dev` (Cranelift), not E2201.
 #[test]
 fn task_program_runs_via_jit() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
     let file = "examples/features/concurrency/tasks.jet";
     let mut bundle = jet::Loader::load_entry(file).expect("tasks bundle should load");
     let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
@@ -399,6 +426,9 @@ fn task_program_runs_via_jit() {
 /// c139 M4: scheduler/channel spawn stress example is jit-covered and runs.
 #[test]
 fn scheduler_spawn_runs_via_jit() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
     let file = "examples/features/concurrency/scheduler_spawn.jet";
     let mut bundle = jet::Loader::load_entry(file).expect("bundle should load");
     let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
@@ -463,6 +493,9 @@ fn try_anyway_skips_the_boundary_scan() {
 /// stdout to the interpreter baseline.
 #[test]
 fn cranelift_backend_matches_hello() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
     let file = "examples/features/basics/hello.jet";
     let mut bundle = jet::Loader::load_entry(file).expect("hello bundle should load");
     let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
@@ -523,6 +556,9 @@ fn checked_bundle_from_path(file: &str) -> jet::AST::ProgramBundle {
 }
 
 fn assert_cranelift_matches_interpreter(src: &str, tag: &str) {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
     let p = std::env::temp_dir().join(format!("jet_jit_m3_{tag}.jet"));
     fs::write(&p, src).unwrap();
     let shown = p.to_string_lossy().to_string();
@@ -553,6 +589,9 @@ fn golden_stdout(stem: &str) -> String {
 }
 
 fn assert_cranelift_three_way(file: &str, stem: &str) {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
     let mut bundle = jet::Loader::load_entry(file).expect("bundle should load");
     let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
     let errors: Vec<_> = diags
@@ -724,6 +763,9 @@ fn jit_covered_example_stems() -> Vec<String> {
 /// c139 M3+: three-way differential (JIT == interpreter == AOT) on jit-covered examples.
 #[test]
 fn cranelift_three_way_differential_battery() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
     let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
     if !have_rustc {
         eprintln!("note: rustc not found; skipping three-way JIT differential battery");
@@ -866,6 +908,9 @@ fn cranelift_covers_string_print() {
 /// live runtime state; restart tears it down.
 #[test]
 fn cranelift_hot_swap_preserves_live_state() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
     fn checked_bundle(src: &str, tag: &str) -> jet::AST::ProgramBundle {
         let mut b = bundle_of(src, tag);
         let diags = jet::Sema::check_bundle(&mut b, jet::Sema::CompileMode::Run);
@@ -931,6 +976,9 @@ fn cranelift_hot_swap_preserves_live_state() {
 /// which took the whole `jet dev` server down with it.
 #[test]
 fn cranelift_trap_then_hot_swap_continues() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
     fn checked_bundle(src: &str, tag: &str) -> jet::AST::ProgramBundle {
         let mut b = bundle_of(src, tag);
         let diags = jet::Sema::check_bundle(&mut b, jet::Sema::CompileMode::Run);

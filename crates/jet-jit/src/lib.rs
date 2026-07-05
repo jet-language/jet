@@ -3202,7 +3202,16 @@ fn resident_hot_swap(program: &JitProgram) -> Result<RunOutcome, String> {
     resident_invoke()
 }
 
+pub fn cranelift_host_supported() -> bool {
+    // cranelift-jit 0.112's PLT path panics on non-x86_64 hosts. Keep the
+    // default dev path safe by delegating to the tier-0 backend there.
+    cfg!(target_arch = "x86_64")
+}
+
 fn try_resident(bundle: &ProgramBundle) -> Option<Result<RunOutcome, String>> {
+    if !cranelift_host_supported() {
+        return None;
+    }
     let program = TIR::lower_jit_program(bundle)?;
     if !jit_covers_program(&program) {
         return None;
@@ -3211,6 +3220,9 @@ fn try_resident(bundle: &ProgramBundle) -> Option<Result<RunOutcome, String>> {
 }
 
 fn try_resident_hot_swap(bundle: &ProgramBundle) -> Option<Result<RunOutcome, String>> {
+    if !cranelift_host_supported() {
+        return None;
+    }
     let program = TIR::lower_jit_program(bundle)?;
     if !jit_covers_program(&program) {
         return None;
@@ -3219,6 +3231,9 @@ fn try_resident_hot_swap(bundle: &ProgramBundle) -> Option<Result<RunOutcome, St
 }
 
 fn try_resident_restart(bundle: &ProgramBundle) -> Option<Result<RunOutcome, String>> {
+    if !cranelift_host_supported() {
+        return None;
+    }
     let program = TIR::lower_jit_program(bundle)?;
     if !jit_covers_program(&program) {
         return None;
@@ -3248,6 +3263,9 @@ pub fn jit_dump_mixed_switch_conds(bundle: &ProgramBundle) -> Vec<String> {
 /// Test hook: try JIT-compile a checked bundle; surfaces lowering errors.
 #[doc(hidden)]
 pub fn try_compile_bundle(bundle: &ProgramBundle) -> Result<(), String> {
+    if !cranelift_host_supported() {
+        return Err("cranelift-jit host path unsupported on this architecture".to_string());
+    }
     let program = TIR::lower_jit_program(bundle).ok_or_else(|| {
         format!(
             "lower_jit_program returned None ({})",

@@ -1127,9 +1127,29 @@ fn stable_cargo_detail(stderr: &str) -> String {
                 && !t.contains("waiting for other jobs")
                 && !(t.starts_with("Compiling ") && !t.contains("jet_ffi_"))
         })
-        .map(|line| normalize_ffi_cache_path(line))
+        .map(|line| normalize_ffi_crate_name(&normalize_ffi_cache_path(line)))
         .collect();
     indent_block(&kept.join("\n"))
+}
+
+fn normalize_ffi_crate_name(line: &str) -> String {
+    let marker = "jet_ffi_";
+    let mut out = String::new();
+    let mut rest = line;
+    while let Some(idx) = rest.find(marker) {
+        out.push_str(&rest[..idx]);
+        let after = &rest[idx + marker.len()..];
+        let hash_len = after.chars().take_while(|c| c.is_ascii_hexdigit()).count();
+        if hash_len == 16 {
+            out.push_str("jet_ffi_<hash>");
+            rest = &after[hash_len..];
+        } else {
+            out.push_str(marker);
+            rest = after;
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 /// Keep ui snapshots stable across machines (`/home/…/.cache/jet/ffi/…` → `~/.cache/jet/ffi/…`).
@@ -1152,9 +1172,8 @@ fn normalize_ffi_cache_path(line: &str) -> String {
     if hash_len != 16 {
         return line.to_string();
     }
-    let hash = &rest[..hash_len];
     let suffix = &rest[hash_len..];
-    format!("{}~/.cache/jet/ffi/{}{}", &line[..path_start], hash, suffix)
+    format!("{}~/.cache/jet/ffi/<hash>{}", &line[..path_start], suffix)
 }
 
 fn tool_error(msg: &str) -> Vec<Diagnostic> {
