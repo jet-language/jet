@@ -40,6 +40,12 @@ function hl(src) {
 }
 const codeBlock = (s) => `<pre class="code">${hl(s || '')}</pre>`;
 
+function listenCmd(name, kind) {
+  const prefix = S?.cli || 'node Tower/tower.mjs';
+  const kindPart = kind && kind !== 'agent' ? ` --kind ${kind}` : '';
+  return `${prefix} agent listen --name ${name}${kindPart}`;
+}
+
 // ---- api ------------------------------------------------------------------
 let toastTimer = null;
 function toast(text, err = false) {
@@ -467,7 +473,7 @@ function viewAgents() {
 
   if (!list.length && !THREAD) {
     $('#thread-slot').appendChild(el(`<div class="empty"><div class="empty__glyph">▸</div>
-      <div>No agents yet. An agent appears when it runs<br><code style="font-family:var(--mono);font-size:12px">tower agent listen --name &lt;name&gt;</code><br>or when you add one and send the first message.</div></div>`));
+      <div>No agents yet. An agent appears when it runs<br><code style="font-family:var(--mono);font-size:12px">${esc(listenCmd('<name>'))}</code><br>or when you add one and send the first message.</div></div>`));
     return;
   }
   $('#thread-slot').appendChild(threadPane(THREAD, ts.get(THREAD)));
@@ -488,7 +494,7 @@ function threadPane(name, thread) {
       <div class="thread__log" id="log"></div>
       ${!on ? `<div class="invite">
         <div class="invite__t">This agent isn't listening. Messages queue — or connect it:</div>
-        <code class="invite__cmd">tower agent listen --name ${esc(name)}${a?.kind && a.kind !== 'agent' ? ` --kind ${esc(a.kind)}` : ''}</code>
+        <code class="invite__cmd">${esc(listenCmd(name, a?.kind))}</code>
         <button class="btn btn--sm" data-copy>Copy</button>
       </div>` : ''}
       <div class="composer">
