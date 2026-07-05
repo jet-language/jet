@@ -109,19 +109,54 @@ pub struct OptionPlan {
     pub value: String,
 }
 
-/// U14: a field-checked `image.<name>: { … }` contribution, captured for the
-/// jetos tier. `target`/`packages`/`services`/`options` are inherited from the
-/// referenced `System` at realize time (gap #4), so they are not stored here.
+/// D-JPK-IMAGE1 (=A, ratified 2026-07-01): which referent an `Image`'s `from:`
+/// names, and so which realize tier owns it. `Iso` is the original U14 shape
+/// (disk images from a `System`, Phase D jetos installer tier, owner-gated,
+/// untouched by this slice). `Oci` is the new container tier (built from a
+/// `Package`, native — no jetos/Phase D gate).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImageKind {
+    Iso,
+    Oci,
+}
+
+/// U14/D-JPK-IMAGE1: a field-checked `image.<name>: { … }` contribution.
+/// `Iso`: `target`/`packages`/`services`/`options` are inherited from the
+/// referenced `System` at realize time (Phase D, gap #4), so they are not
+/// stored here. `Oci`: built natively now (no jetos tier involved) from the
+/// referenced `Package`'s realized binary plus `expose`/`env_vars`/`files`/`base`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImagePlan {
     /// The contribution path — the `<name>` in `image.<name>`.
     pub name: String,
-    /// U14: the source system this image is built from (`from: system.<name>`).
+    /// Which referent `from:` names, and which tier realizes this image.
+    pub kind: ImageKind,
+    /// `Iso`: the source system's name (`from: system.<name>`).
+    /// `Oci`: the source package's name (`from: packages.<name>`).
     pub from: String,
-    /// U14: the disk-image format (`iso` default / `qcow` / `raw`).
+    /// `Iso` only: the disk-image format (`iso` default / `qcow` / `raw`).
+    /// Empty for `Oci`.
     pub format: String,
-    /// U14: an explicit cross-compile target, if any (else inherited from system).
+    /// `Iso` only: an explicit cross-compile target, if any (else inherited
+    /// from system). `None` for `Oci`.
     pub target: Option<String>,
+    /// `Oci` only: `expose: [Int]` — TCP ports recorded as `ExposedPorts` in
+    /// the OCI image config. Sorted + deduped for reproducibility.
+    pub expose: Vec<i64>,
+    /// `Oci` only: `env_vars: [KEY: "value"]` — baked into the OCI image
+    /// config's `Env` list. Source order follows the map's key order
+    /// (`CtValue::Map` is a `BTreeMap`, so this is already sorted by key).
+    pub env_vars: Vec<(String, String)>,
+    /// `Oci` only: `files: ["path", …]` — extra project-relative paths layered
+    /// into the image alongside the package binary. Sorted before layering so
+    /// the tar layer is byte-identical regardless of declaration order.
+    pub files: Vec<String>,
+    /// `Oci` only: `base: oci("<ref>")` — a base-image escape hatch (D-JPK-
+    /// IMAGE1 option A). Captured but not yet realized: building from a base
+    /// needs a native registry-pull client, which doesn't exist yet, so `jet
+    /// image` reports this honestly rather than silently building from
+    /// scratch instead.
+    pub base: Option<String>,
 }
 
 /// U15: a field-checked `fleet.<name>: { hosts: { … } }` contribution, captured

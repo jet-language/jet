@@ -72,6 +72,28 @@ tower init | serve | import
 for rich payloads; cards accept `#num` or id; `--by <name>` attributes every
 write; `--expect-rev N` gives optimistic concurrency (exit 2 on conflict).
 
+## Live + remote
+
+- **SSE** — the UI updates over `/api/stream` the instant anything changes;
+  passive updates never disturb reading, typing, or an open ballot.
+- **Auth (opt-in)** — set `"auth": {"token": "…"}` in `.tower/config.json` to
+  require a key from non-localhost devices (`/?key=<token>` once per device;
+  localhost always exempt). Without it the board is open to your LAN/tailnet.
+- **PWA + push** — installable app; the ◍ notify button subscribes the
+  device to payload-less web push (new ballot / agent message / verify).
+- **Batched agent wake** — ratifications and greenlights within
+  `notifyBatchSeconds` (default 90) collapse into ONE `[tower]` message per
+  listening agent, so a ballot session doesn't spin up an agent per decision.
+- **Undo** — every owner action shows an Undo toast (`tower undo` in the
+  CLI); rev-guarded so it can never revert another agent's interleaved write.
+- **Attachments** — 📎 in the composer (or `tower message send --attach x.png`);
+  images render inline.
+- **Git linking** — `tower githook` installs a post-commit hook: commits
+  mentioning `#12` append themselves to that card's log.
+- **⌘K** — jump to any card, ballot, or agent; `j/k` walk the Now queue.
+- **Digest** — "since you were away" summary at the top of Now with a
+  Caught-up button.
+
 ## Reliability
 
 - All writes go through the CLI/HTTP API: input validation (bad enums and

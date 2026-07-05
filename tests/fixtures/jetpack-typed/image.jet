@@ -1,0 +1,27 @@
+// image.jet — the typed `.Oci` container surface (U14, D-JPK-IMAGE1=A), the
+// executable spec for `Image` field-checking and capture on the container tier.
+//
+// `image.<name>` has two referents (D-JPK-IMAGE1): `from: system.<name>` (the
+// `.Iso`/`.Qcow`/`.Raw` disk-image tier, `tests/fixtures/jetpack-typed/system.jet`
+// covers that shape) or `from: packages.<name>` (the `.Oci` container tier,
+// this file). `kind:` is a leading-dot enum value and optional — it's inferred
+// from which `from:` keyword is written, but may be stated explicitly too.
+//
+// `packages: { server: executable }` in `pkg.jet` (this repo's own manifest
+// pattern, mirrored here inline via the fixture's own declared package) is
+// what an `.Oci` image's `from:` cross-checks against (E1267 rejects a
+// `library`-kind or undeclared package).
+//
+// `expose`/`env_vars`/`files` are `.Oci`-only fields: exposed TCP ports, an
+// env-var map (string keys must be quoted — this is a generic Jet map
+// literal, not string-free sugar), and extra project-relative files layered
+// alongside the package binary. `base:` is captured but not yet realized (no
+// native registry-pull client exists yet); leaving it unset here keeps this
+// fixture buildable end-to-end with `jet image server`.
+module image.server {
+    kind: .Oci
+    from: packages.server
+    expose: [8080, 8443]
+    env_vars: ["RUST_LOG": "info"]
+    files: ["config/app.toml"]
+}

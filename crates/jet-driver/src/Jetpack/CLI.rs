@@ -5,6 +5,7 @@
 
 use super::Bridge;
 use super::Components;
+use super::Image;
 use super::ManifestTOML;
 use super::Output::{self, Theme};
 use super::Provider::{self, ProviderError};
@@ -38,6 +39,10 @@ struct Flags {
     /// foreign-flake fallback; jetpack's own composed shells are already
     /// PATH-only, so this is a no-op there today.
     pure: bool,
+    /// D-JPK-IMAGE1: `jet image <name> --push <ref>` — the registry ref to
+    /// push to. Always honestly gated (E1268): pushing needs TLS support that
+    /// doesn't exist yet, so this is only ever read to report that gate.
+    push: Option<String>,
 }
 
 /// Result of separating flags, positional args, and a trailing `-- cmd`.
@@ -57,6 +62,7 @@ fn parse_args(args: &[String]) -> Parsed {
         packages: Vec::new(),
         flake: false,
         pure: false,
+        push: None,
     };
     let mut positional = Vec::new();
     let mut command = None;
@@ -73,6 +79,12 @@ fn parse_args(args: &[String]) -> Parsed {
             a if a == Syntax::TRUST_BYPASS_FLAG => flags.trust = true,
             a if a == Syntax::ENV_FLAG_FLAKE => flags.flake = true,
             a if a == Syntax::ENV_FLAG_PURE => flags.pure = true,
+            a if a == Syntax::IMAGE_FLAG_PUSH => {
+                i += 1;
+                if let Some(r) = args.get(i) {
+                    flags.push = Some(r.clone());
+                }
+            }
             "--fixtures" => {
                 i += 1;
                 if let Some(dir) = args.get(i) {
@@ -127,6 +139,7 @@ pub fn main(args: Vec<String>) -> i32 {
         "add" => cmd_add(&theme, &parsed),
         "remove" => cmd_remove(&theme, &parsed),
         "push" => cmd_push(&theme, &parsed),
+        v if v == Syntax::IMAGE_SUBCOMMAND => cmd_image(&theme, &parsed),
         v if v == Syntax::BRIDGE_SUBCOMMAND => cmd_bridge(&theme, &parsed),
         v if v == Syntax::OS_SUBCOMMAND => cmd_os(&theme, &parsed),
         v if v == Syntax::SERVICES_SUBCOMMAND => cmd_services(&theme, &parsed),
@@ -1826,6 +1839,154 @@ fn cmd_push(theme: &Theme, parsed: &Parsed) -> i32 {
 /// from a foreign `flake.nix`'s devShell into jetpack's own `env.*` module
 /// form. Never edits the project's `env.jet`; the shim prints to stdout for
 /// the user to review and merge (I8 — one canonical env surface).
+/// D-JPK-IMAGE1 (=A, ratified 2026-07-01, c9jetpackgates): `jet image <name>`
+/// builds the named `.Oci` `image.<name>` module contribution into a native
+/// OCI layout (`Jetpack::Image`). `.Iso` images ride the jetos installer tier
+/// (Phase D, owner-gated — untouched here); `--push` is honestly gated on TLS
+/// (E1268), never a fake push.
+fn cmd_image(theme: &Theme, parsed: &Parsed) -> i32 {
+    let dir = std::env::current_dir().unwrap_or_default();
+    let Ok(src) = std::fs::read_to_string(EnvFile::path_in(&dir)) else {
+        theme.error(
+            "no image here",
+            &format!(
+                "there is no {} declaring any `image.<name>`.",
+                Syntax::ENV_FILE
+            ),
+            "declare `module image.<name> { kind: .Oci, from: packages.<name> }`, then `jet image <name>`.",
+        );
+        return 2;
+    };
+    let plan = match ModuleEval::evaluate_env(&src, &dir) {
+        Ok(p) => p,
+        Err(d) => {
+            eprint!(
+                "{}",
+                crate::Diagnostics::render_all(Syntax::ENV_FILE, &src, std::slice::from_ref(&d))
+            );
+            return 2;
+        }
+    };
+
+    let available: Vec<String> = plan.images.iter().map(|i| i.name.clone()).collect();
+    let declared = || {
+        if available.is_empty() {
+            format!("no `image.<name>` is declared in {}.", Syntax::ENV_FILE)
+        } else {
+            format!("declared images: {}.", available.join(", "))
+        }
+    };
+    let Some(name) = parsed.positional.first() else {
+        theme.error("build which image?", &declared(), "name an image: `jet image <name>`.");
+        return 2;
+    };
+
+    let Some(image) = plan.images.iter().find(|i| &i.name == name) else {
+        theme.error(
+            &format!("no image `{name}`"),
+            &declared(),
+            "declare `module image.<name> { … }`, or build an existing image.",
+        );
+        return 2;
+    };
+
+    if image.kind != ModuleEval::ImageKind::Oci {
+        theme.error(
+            &format!("`{name}` is a `.Iso` disk image, not a container"),
+            "U14: `.Iso`/`.Qcow`/`.Raw` disk images ride the jetos installer tier, which is gated (Phase D, owner greenlight required) — `jet image` only builds `.Oci` containers today.",
+            "build an `.Oci` image instead, or track the jetos realization tier for disk images.",
+        );
+        return 2;
+    }
+
+    if let Some(push_ref) = &parsed.flags.push {
+        theme.error_coded(
+            "E1268",
+            &format!("`jet image {name}` can't push to `{push_ref}` yet"),
+            "D-JPK-IMAGE1: pushing to a registry needs TLS support for the connection, which jetpack doesn't have yet — `jet image` never fakes a push.",
+            &format!(
+                "build without `--push` (`jet image {name}`) and push the OCI layout with another tool for now; `--push` will work once TLS lands."
+            ),
+        );
+        return 2;
+    }
+
+    if let Some(base) = &image.base {
+        theme.error(
+            &format!("`base: oci(\"{base}\")` isn't realized yet"),
+            "D-JPK-IMAGE1: layering onto a base image needs a native registry-pull client, which doesn't exist yet — `jet image` never silently builds from scratch instead of the requested base.",
+            "drop `base:` to build a from-scratch image, or track the registry-pull client.",
+        );
+        return 2;
+    }
+
+    // D-JPK-IMAGE1: build from what `jet build` already realized. Jetpack has
+    // no dependency on the compiler's own build machinery (the dependency
+    // runs the other way — `jet` depends on `jet-driver`, not vice versa), so
+    // this mirrors, rather than calls into, `jet build`'s `build/<name>`
+    // output convention (`Source/CmdCompile.rs::bin_path`).
+    let bin_path = dir.join("build").join(&image.from);
+    let Ok(bin_data) = std::fs::read(&bin_path) else {
+        theme.error(
+            &format!("`{}` isn't built yet", image.from),
+            &format!(
+                "`jet image {name}` needs `{}` already built at `{}`.",
+                image.from,
+                bin_path.display()
+            ),
+            &format!("run `jet build` first, then `jet image {name}`."),
+        );
+        return 2;
+    };
+
+    let mut files = vec![Image::LayerFile {
+        path: format!("usr/local/bin/{}", image.from),
+        data: bin_data,
+        mode: 0o755,
+    }];
+    for rel in &image.files {
+        let Ok(data) = std::fs::read(dir.join(rel)) else {
+            theme.error(
+                &format!("`{rel}` (from `files:`) doesn't exist"),
+                &format!("`image.{name}`'s `files:` names `{rel}`, relative to the project dir."),
+                "fix the path, or remove it from `files:`.",
+            );
+            return 2;
+        };
+        files.push(Image::LayerFile {
+            path: rel.trim_start_matches('/').to_string(),
+            data,
+            mode: 0o644,
+        });
+    }
+
+    let spec = Image::BuildSpec {
+        files,
+        entrypoint: vec![format!("/usr/local/bin/{}", image.from)],
+        env: image.env_vars.clone(),
+        expose: image.expose.clone(),
+    };
+    let out_dir = dir.join(".jet").join("images").join(name);
+    match Image::build(&spec, &out_dir, name) {
+        Ok(built) => {
+            theme.ok(&format!(
+                "built image `{name}` -> {} ({})",
+                out_dir.display(),
+                built.manifest_digest
+            ));
+            0
+        }
+        Err(e) => {
+            theme.error(
+                &format!("couldn't build image `{name}`"),
+                &e.to_string(),
+                "check that the output directory is writable.",
+            );
+            2
+        }
+    }
+}
+
 fn cmd_bridge(theme: &Theme, parsed: &Parsed) -> i32 {
     match parsed.positional.first().map(String::as_str) {
         Some(v) if v == Syntax::BRIDGE_VERB_FLAKE => {
@@ -1904,6 +2065,8 @@ usage:
   {bin} services down [<name>]         stop them
   {bin} services health [<name>]       one-shot readiness check
   {bin} services logs <name>           print a service's captured stdout/stderr
+  {bin} image <name>                   build a declared `.Oci` image into a native OCI layout
+  {bin} image <name> --push <ref>      (gated on TLS support, E1268 — not yet)
 
 refs:
   nixpkgs:fastfetch                    a package from nixpkgs
@@ -1920,6 +2083,7 @@ flags:
   -p <pkg>...                          (enter) ad-hoc nixpkgs packages, not declared anywhere
   --flake                              (enter) force the foreign flake.nix/devenv.nix fallback
   --pure                               (enter) isolate the shell from the host environment
+  --push <ref>                         (image) push after building — gated on TLS, E1268
 ",
         bin = bin,
         pack = Syntax::ENV_FILE,

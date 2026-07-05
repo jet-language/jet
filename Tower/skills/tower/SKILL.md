@@ -55,7 +55,14 @@ session, arm a listener in the background so each owner message wakes you:
 
 Treat owner messages like interrupts: answer or act, then resume. When you
 finish a work item, a one-line report to the owner
-(`tower message send --to owner …`) is how progress reaches their phone.
+(`tower message send --to owner …`) is how progress reaches their phone
+(`--attach shot.png` for screenshots — images render inline).
+
+Also: keep `tower agent status --name <me> --text "building #12 — tests
+green"` fresh when you switch tasks (shows live in the owner's roster), and
+treat a `[tower]` system message ("N decisions ratified … greenlit: …") as
+one signal that the board changed — run `tower next` once, don't fan out
+per item.
 
 ## Session loop
 

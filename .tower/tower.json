@@ -4,19 +4,19 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 190,
-    "rev": 1,
+    "rev": 39,
     "ui": {
       "toggled": [
         "dec-group:syntax",
         "dec-group:runtime",
         "dec-group:other",
         "board-sidequests",
-        "epoch:e7",
         "epoch:e8",
         "epoch:e5",
         "epoch:e6"
       ]
-    }
+    },
+    "digestCursor": "2026-07-04T19:42:25.465Z"
   },
   "epochs": [
     {
@@ -347,11 +347,16 @@
       "kind": "task",
       "track": "epoch",
       "epoch": "e4",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "tools/Tower/docs/sidequests/plugin-target.md",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-04",
+          "by": "orchestrator",
+          "text": "c81 (plugin target) fully built + independently re-verified (orchestrator, clean). D-PLUGIN1=B/D-DEP-WASM1=A/D-PLUGIN-EXPORT1=A/D-PLUGIN-VERSION1=A all confirmed ratified before building - no owner gate remained. target: plugin compiles to a wasm32 Component Model module; host loads via wasmtime with an EMPTY Linker (deny-by-default, zero host imports ever, no #Unsafe gate needed - sandbox is the safety boundary by construction). New core.plugin.load/.call/.call_int Jet-facing API (mirrors core.db handle style). New Codegen/Plugin.rs (wit world + wasm32 guest wrappers), Prelude/Plugin.rs (wasmtime host bridge via FFI-bridge pattern, I6-safe), guest build pipeline rustc wasm32-unknown-unknown cdylib -> wasm-tools component embed/new (wasm-tools added to flake.nix devShell). D-PLUGIN-EXPORT1/VERSION1 re-grounded on post-S2 ApiFreeze.rs snapshot/diff mechanism (new PluginExport.rs) since the original D-CAP4 machinery they cited was deleted in the memory-v5 migration - ratified intent unchanged, only the underlying mechanism moved, no new owner decision needed for this. New diagnostics E1257 (incompatible interface change) E1258 (capability-denied) E1259 (toolchain failure) E1260 (unsupported export shape). Documented scope boundaries (not gaps): v1 call surface is Int/Float only (Text needs Component Model memory-based string ABI, real follow-on), only top-level pub fns collected (not module-nested). New example plugin_mathkit, golden-enforced. Full nix develop -c cargo test --workspace: 0 failed except known pre-existing #189. Committed 3f3e2693 (carefully excluded unrelated concurrent Tower-app changes sitting in the same working tree from this commit)."
+        },
         {
           "at": "2026-07-03",
           "by": "agent",
@@ -404,7 +409,7 @@
         }
       ],
       "created": "2026-06-21T00:00:00Z",
-      "updated": "2026-07-03",
+      "updated": "2026-07-04",
       "workOrder": 22
     },
     {
@@ -5601,6 +5606,11 @@
       "blockedBy": [],
       "log": [
         {
+          "at": "2026-07-04",
+          "by": "orchestrator",
+          "text": "Small tractable interpreter clusters pass: 4/6 closed + independently re-verified (orchestrator, clean). HOF bare-fn-value calling (new fn_value() helper + Expr::CallValue arm), labeled break/continue (Jet spells it break @name/continue @name per D-LABEL1, new Flow::BreakLabel/ContinueLabel), tuple literals (lower to CtValue::Struct reusing struct machinery, canonicalized field order; also implemented previously-unhandled BindPattern::Tuple destructure and Expr::Copy as a bonus find), move ^ interpretation (turned out to need zero interpreter change - sema already hard-forbids reading a moved name, narrowed the mutable-arg boundary to Write only). Skipped + documented as genuinely bigger not ambiguous: typed CLI entry fn run(args: T) (needs full @Cli argparse-derive replication), writeback through &-params (needs call_func to expose its frame post-execution, real new plumbing). dev_default_matches_compiled_binary: 108/147 boundary before -> 123/132 boundary after. Full nix develop -c cargo test --workspace: 0 failed except known pre-existing #189. Committed+pushed 6d22b10e. Remaining: 2 medium items above + the big subsystems (serde, bigint/decimal, crypto, reactive/UI comptime stack) — card stays in building."
+        },
+        {
           "at": "2026-07-03",
           "by": "agent",
           "text": "P0 FIXED + verified independently (build clean, cargo test --test dev 30/30 green incl. new tests, full cargo test --workspace green except one pre-existing unrelated failure fixed in passing — tests/ui/incomparable_eq.fixed.jet used struct Bag, now a reserved builtin name; renamed to Basket, confirmed via git-stash that this predates all JIT work). The bug: crates/jet-jit host trap fns (Collections.rs trap_index/list_get/list_set/list_slice, lib.rs jet_trap_overflow, Concurrency.rs x2) called std::process::exit(70) directly — correct for jet run's own subprocess, fatal for jet dev, which runs JIT-compiled native code IN-PROCESS inside the resident watch server: any ordinary runtime panic (overflow, list/slice OOB, a couple concurrency panics) killed the whole dev server instead of reporting and continuing. Confirmed unsound to fix via panic!()+catch_unwind (checked cranelift-jit 0.112.3 source: no unwind tables emitted for JIT frames — unwinding through them is UB, ruled out categorically per I1). Real fix: JitRuntime.trapped flag + LowerCtx::emit_trap_check, called after every host call that can trap AND after every jet-fn-to-jet-fn call (so traps propagate transitively through callees) — branches to the function epilogue with a dummy return, never unwinds. resident_invoke checks the flag after main returns, converts it to the SAME E0953 diagnostic voice the tier-0 interpreter already uses (parity, not a new code), and resets per-run heap state (lists/strings/structs/channels/senders/tasks/task_controls) so the next hot-reload iteration in the same process starts clean. New regression test tests/dev.rs::cranelift_trap_then_hot_swap_continues proves trap-then-continue in one resident process.\n\nAlso added the permanent test this bug was actually caught by, and the real card-125 exit gate going forward: tests/dev.rs::dev_default_matches_compiled_binary — exercises the DEFAULT jet dev backend (CraneliftBackend+fallback, what the CLI actually runs), not the forced-interpreter-only path the older c77 battery uses. Current true state (this test's own count): 116 ran (default==compiled) / 133 boundary-asserted / 249 total.\n\nCategorized the 133 remaining boundary stems — roughly 36 are genuinely correct, working-as-intended boundaries: clock/sleep reads (4), file/env/process ambient effects (8), Tier-2 #Impure-gated (2, already E3410 as designed), FFI/#Unsafe/C-library (7), deliberate E0953 panics (5), and unwidened concurrency spawn/channel examples that need a real scheduler (the ones NOT already jit-covered — 6, plus 5 net/http siblings in the same boat, 11 total lumped with concurrency). The remaining ~97 are real, not-yet-attempted comptime-interpreter coverage gaps, clustering into distinct follow-on subsystems: HOF/bare-fn-value calling (6, likely small — HOF dispatch exists for methods per batch2 but not bare fn values/lambda params), labeled break/continue (1), tuple literals (1), variadics spread (1), typed CLI entry fn run(args:T) (2, flagged before as regression-prone), struct/enum Debug-interpolation (2), move-binding ^ interpretation (4), writeback ~ interpretation (7), field-assignment/self-mutation (2), collection types+methods Deque/Set/.view/.filter_map/.take/HLL (7), arena/gc .new() constructors (5), serde encoders CSV/TOML/YAML/JSON-decode (9, large subsystem), text BigInt/Decimal/dates (4, large subsystem), crypto comptime primitives (4, large subsystem), io comptime helpers archive/compress/db/log/path/scope_guard/live-terminal (10), reactive/UI comptime stack signal/layout/backends (11, large subsystem), plus ~16 miscellaneous singles (?? loop control, #Transact, yield/generators, Reader/Cursor, Vec3/SIMD, sized-int casts, Sql, measurement, Bag, resident persist, par_map).\n\nStatus: staying in building, NOT done — do not close on the old alternate-exit-clause misreading again. Real remaining work is the ~97-item follow-on list above; several are properly-scoped subsystems in their own right (serde, text/bigint-decimal, crypto, reactive/UI), not a quick pass. Owner asked to move to epoch 4 next in this session; picking that up now. Next agent picking this back up: start with the small tractable clusters (HOF bare-fn calling, labeled loops, tuples, CLI entry, Debug-interpolation, move/writeback interpretation) before the big subsystems."
@@ -5689,7 +5699,7 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-30"
+      "updated": "2026-07-04"
     },
     {
       "milestoneId": null,
@@ -7725,6 +7735,21 @@
       "log": [
         {
           "at": "2026-07-04",
+          "by": "orchestrator",
+          "text": "U13 secrets shipped + independently re-verified (orchestrator, clean, real end-to-end live check: CLI writes store, separately compiled Jet program decrypts and reads correct value). core.vault.get(name) (core.secrets was already taken by unrelated D-TTLVAL1). New Secret effect root (12th), mandatory grant #(Secret) even with zero other declared effects (E1264) - agent found+fixed a real bug where the check initially inflated against the whole-program maximal effect set, would've forced #(Secret) onto every FFI-using program; fixed to a fixpoint over direct call edges only. Build tier denies Secret unconditionally, no escape hatch (E1265) - a decrypted secret must never reach a build artifact. Real age crate crypto bridge (X25519+ChaCha20Poly1305), I6-safe via existing hidden-FFI-bridge mechanism, new jet-secrets-helper binary. Store: .jet/secrets.age (committed ciphertext) + .jet/secrets-recipients (committed plaintext keys) + ~/.jet/keys/secrets.identity (local 0600). jetpack secrets keygen/set/get/recipients CLI. secrets: env-plan capture shipped; env-entry pre-validation wiring + Trust::gate integration explicitly deferred (documented, small remaining piece). New E1263/E1264/E1265. Full nix develop -c cargo test --workspace: 0 failed except known pre-existing #189. Committed+pushed 28974239. Remaining: U14 images/OCI (last jetpack backlog item) + the small secrets pre-validation wiring deferral."
+        },
+        {
+          "at": "2026-07-04",
+          "by": "orchestrator",
+          "text": "U12 supervised services shipped + independently re-verified (orchestrator, clean). services: in env.* reuses the existing services_map() grammar (System already had it); new DevServicePlan (ports/init/shutdown/data_dir/ready) via new ModuleEval/DevService.rs evaluator mirroring System's evaluate_service. New Jetpack/Services.rs runtime, std::process only (I6), own-process-group spawn so down kills leader+children together, detached reaper thread to avoid zombies. jetpack services up/down/health/logs CLI verb; jet dev's wait_for_services_ready no-op (U19's plug point) now really health-gates before fn dev()/fn run(). New E1261 service-health-timeout, E1262 unknown-service-field (both CLI-level per judgment call: Service stays an open record per ratified U12, E1262 fires at supervision time not parse time, to avoid contradicting the ratified open-record decision). Catalog seeded with redis only (postgres needs initdb, too much for a seed list, documented as extend-here). Full nix develop -c cargo test --workspace: 0 failed except known pre-existing #189 (agent again self-reported 8 phantom jet-codegen failures that did not reproduce in orchestrator's own clean run - now the 7th+ time this exact pattern has appeared across different agents and never once reproduced independently; treating as environment-specific to agent sandboxes, not a real repo bug). Committed+pushed 971c5f52. Remaining: U13 secrets, U14 images."
+        },
+        {
+          "at": "2026-07-04",
+          "by": "orchestrator",
+          "text": "3 real bugs found via live owner testing of jet env/-p cowsay, fixed+verified+committed a3b5a870: (1) Store::can_write treated an already-existing dir as writable without probing (create_dir_all no-ops on existing dirs regardless of permission) - real bug on a machine with a stale root-owned /etc/jet from a prior install; fixed with an actual write-probe (create+remove a marker file). (2) cmd_enter's foreign-flake auto-detect never checked for an explicit -p request, silently discarding ad-hoc packages whenever a project had a foreign flake.nix and no env.jet; fixed by requiring packages.is_empty() in the auto-detect condition, so -p now overrides the passive fallback (--flake still forces it). (3) enter_foreign_flake shelled to a raw unbranded nix develop, indistinguishable from a plain nix shell; added Shell::branded_shell() reusing the native path's cyan-label prompt generation, wired into the interactive branch. All verified live (cowsay actually ran end to end) plus full nix develop -c cargo test --workspace, 0 failed except known pre-existing #189."
+        },
+        {
+          "at": "2026-07-04",
           "by": "agent",
           "text": "U16 nix bridge shipped + independently re-verified (orchestrator): jet env -p <pkg>... ad-hoc nixpkgs packages (become ordinary RefSpecs, same trust gate/realize path); foreign flake.nix/devenv.nix auto-detect only when project has no env.* modules, --flake forces it, --pure threaded through; jetpack bridge flake reads a flake's devShell and prints a deterministic module env.dev { packages: [...] } shim (already-ratified D-JPK-MODBODY1 syntax, no new grammar) + L0204 per untranslatable field. New crates/jet-driver/src/Jetpack/Bridge.rs. Trust-gated (new Trust::gate_flake). Diagnostics E1256 bridge-no-nix, L0204 devenv-unmappable-field (plan-doc E0995/next-L02xx stale, E09xx saturated through E0999, same gap U11/U19 hit). DEFERRED, flagged not guessed: jet run nixpkgs@fastfetch top-level wiring - jetpack run nixpkgs:fastfetch already works today; agent judged wiring jet run itself too high-blast-radius (heaviest golden/completions-tested dispatch path) for an @ vs : syntax detail the plan doc never pinned down precisely. Full nix develop -c cargo test --workspace: 0 failed. Remaining in this card: jet-run-nixpkgs-ad-hoc wiring (deferred above), U12 services, U13 secrets, U14 images (Phase D jetos stays owner-gated)."
         },
@@ -8255,12 +8280,47 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e4",
-      "phase": "building",
+      "phase": "done",
       "priority": "P1",
       "plan": "tools/Tower/docs/plans/memory-v5-migration.md",
       "blockedBy": [],
       "workOrder": null,
       "log": [
+        {
+          "at": "2026-07-04",
+          "by": "orchestrator",
+          "text": "Stage S9 (final verification gate) PASSED — THE ENTIRE 9-STAGE MEMORY MODEL V5 MIGRATION IS NOW COMPLETE (S1-S9 all shipped). S9 checklist: full nix develop -c cargo test --workspace clean (0 failed except known pre-existing #189); fresh ./target/debug/jet (not stale nix-store jet) smoke test on all 9 core examples/features/memory/*.jet run correctly inside the nix devshell env (ownership, ref_field, copy_verb, string_view, shared_config, entity_world, entity_tree, no_alloc_policy all print expected output; pool_stale_id correctly panics with the expected stale-Id message, that IS its intended demonstration). Summary of the whole migration: S1 glyph flip (& is write sigil, ~ deleted, ^ unchanged) -> S2 sema enforcement (unmarked=Read strict, Infer/elevation/CapabilityFreeze deleted, L0201->E0209 hard error) -> S3 second-class borrows deleted (-> &T returns, &T fields, #Ref/E0207/E0427 gone) -> S4 copy verb (.clone() deleted as user syntax, copy x is the one spelling) -> S5 view values (zero-copy String.trim/.after/.before from immutable locals, E2307) -> S6 Shared<T>/Pool<T>/Id<T> (built after 2 owner mini-ballots resolved unspecified API surface) -> S7 policy no_alloc floors (built after 1 owner mini-ballot resolved enforcement semantics, E0921) -> S8 docs+diagnostics sweep (found+fixed a real greenfield violation in live shipped error text, full spec.md memory chapter rewrite) -> S9 final gate, this entry. Total: ~9 commits across the whole card (771d4b0b, d91d6002, 17b5b1b5, 6b42ae41, c2b14380, 706692dc, 62c2d712, e63a416d, plus the usability-fix and decree commits interleaved). 3 owner ballots were correctly raised and resolved along the way rather than guessed (D-SHARED-API1, D-POOLID-API1, D-NOALLOC-SEM1, all ratified option A). cmemgreenfield card is DONE."
+        },
+        {
+          "at": "2026-07-04",
+          "by": "orchestrator",
+          "text": "Stage S8 (docs sweep) shipped + independently re-verified (orchestrator, clean). Found and fixed a real greenfield-rule violation in LIVE shipped error text (E1102/E1106 still said & results are shared views/shared-view fields - pre-v5 concepts leaking into current diagnostics, not just docs). Restored diagnostic registry stubs that S1-S3 had deleted outright instead of marking retired-by (matches the file's own never-reuse-renumber convention). Rewrote spec.md's memory chapter end to end grounded in examples/features/memory/*.jet. syntax-decisions.md supersession notes added for D-CAP7/D-CAP8/D-REF-SHORTHAND1/2. Confirmed the 9 core memory examples form a coherent complete v5 reading sequence, no gaps. Full nix develop -c cargo test --workspace: 0 failed except known pre-existing #189. Committed+pushed e63a416d. S1-S8 all shipped - only S9 (final verification gate) remains to fully close this 9-stage migration."
+        },
+        {
+          "at": "2026-07-04",
+          "by": "orchestrator",
+          "text": "Stage S7 (policy no_alloc) shipped + independently re-verified (orchestrator, clean after cleaning up a real ENOSPC - session accumulated ~500 leftover /tmp/nix-shell.* dirs across dozens of nix develop invocations, filled the 31G tmpfs to 100%, caused 5 genuine engine_dispatch test failures; rm -rf'd them, confirmed clean rerun, will watch disk going forward). Built exactly per D-NOALLOC-SEM1=A: local-only check (no call-graph walk, unlike @Pure fn), denylist of 4 shapes (string interpolation, List/Map push/insert by method-name match, struct/enum literal with heap-owning field via new type_owns_heap helper, explicit copy of heap type). New E0921. Documented gap not silent: bare collection literals aren't flagged (ratified denylist names exactly 4 shapes). Full nix develop -c cargo test --workspace: 0 failed except known pre-existing #189. Committed+pushed 62c2d712. S1-S7 of the 9-stage migration now all shipped. Ready for S8 (docs sweep: spec.md memory chapter full rewrite, syntax-decisions.md supersession notes for D-CAP7/D-CAP8/D-REF-SHORTHAND1/2/L0201) then S9 (final verification gate)."
+        },
+        {
+          "at": "2026-07-04",
+          "by": "orchestrator",
+          "text": "Stage S6 (Shared<T>/Pool<T>/Id<T>) shipped + independently re-verified (orchestrator, clean after one confirmed flake). Both types built exactly per the 2 ratified mini-ballots: Shared<T> (D-SHARED-API1=A) - Shared.new(x)/.read(f)/.edit(f) closure-scoped locking (Arc<RwLock<T>> internally, cheap-clone handle passes sendability check across tasks.spawn). Pool<T>/Id<T> (D-POOLID-API1=A) - .new()/.add()/pool[id] index (read+write)/.ids()/.remove(), stale-Id access is a runtime panic matching existing array-bounds-panic precedent (not a new diagnostic code), Id<T>? uses existing option syntax. E0120's fix-it dropped its (coming soon) qualifier. 3 new examples golden-enforced (shared config across tasks, entity world, parent-pointer tree) plus a stale-Id panic fixture. Full nix develop -c cargo test --workspace: 0 failed except known pre-existing #189 (one run hit an unrelated nix eval-cache lock flake, confirmed non-reproducible). Committed+pushed 706692dc. Ready for S7 (policy no_alloc, also now ratified)."
+        },
+        {
+          "at": "2026-07-04",
+          "by": "orchestrator",
+          "text": "Stage S7 (policy floors) INVESTIGATED, BLOCKED - same shape as S6, correctly stopped rather than guessed. Surface syntax (policy no_alloc as bare module-top item) is ratified/trivial/safe. But no_alloc's ENFORCEMENT semantics are unspec'd: what counts as an allocation (String concat, List push, Map insert, closure capture-by-value, copy of heap type, struct/enum literal with heap field - none named in/out of scope anywhere), and whether the check is local-only (module's own fn bodies) or interprocedural (walks call graph like @Pure's existing Effects.rs solve() - proven buildable in this codebase, just needs a ruling on whether to reuse it here, and on FFI/extern-rust opacity). Filed ballot D-NOALLOC-SEM1 on this card (option A local-only+denylist recommended for a faster first cut, B interprocedural reusing Effects.rs, C shown-for-completeness). S6 AND S7 are now both owner-blocked - the memory-v5 migration is stalled pending 3 total ballots (D-SHARED-API1, D-POOLID-API1, D-NOALLOC-SEM1) until the owner rules. S8 (docs sweep) explicitly rides every stage and finishes last per its own text, S9 (final gate) needs everything else - both correctly wait too rather than doing partial/premature work. Pivoting to other backlog (c81 plugin target / c2hizkhl JIT tier-1a follow-on / jetpack U12-U14) per standing instruction to work opportunistically when main goals stall on owner decisions."
+        },
+        {
+          "at": "2026-07-04",
+          "by": "orchestrator",
+          "text": "Stage S6 (Shared<T>/Pool<T>/Id<T>) INVESTIGATED, BLOCKED - no code built, correctly stopped rather than guessed. Both type NAMES are ratified via D-MEM1's own decision row, but their construction/access API surface only exists as gallery worked examples (memory-v5-gallery.md sections 6/8/10, each explicitly marked *(Shared: proposed)*/*(Pool/Id: proposed)* in its own header) with zero corresponding decision rows in syntax-decisions.md. Filed 2 owner mini-ballots per the migration plan's own gate ('any owner-facing spelling not already fixed by ratified proposal text gets a mini-ballot BEFORE this stage builds it'): D-SHARED-API1 (constructor + .read()/.edit() closure-callback API vs RAII guard alternative) and D-POOLID-API1 (construction/.add()/indexing/.ids() iteration + the actually-unspecified part: stale-Id access behavior - panic vs checked/fallible, plus .remove() spelling). Both filed on this card via the new Tower decision system. Per the plan's own dependency graph (S6/S7 after S2, not after each other), pivoting to S7 (policy floors) while these sit in the owner queue - S7 doesn't depend on S6."
+        },
+        {
+          "at": "2026-07-04",
+          "by": "orchestrator",
+          "text": "Stage S5 (view values) shipped + independently re-verified (orchestrator, clean). [T] slice zero-copy views already existed (D-DYNARRAY1, predates this migration) - only String.trim()/.after()/.before() needed the change. Bound to an immutable (::) LOCAL binding, these now return a genuine &str borrow into the receiver's buffer whenever sema proves the binding can't outlive its owner; no new Jet-level type (String stays singular). Legal surface deliberately narrow (chain trim/after/before, interpolate, or copy to materialize) - everything else is new E2307, enforced at one general choke point after the agent found scattered per-site checks both double-reported and missed real cases (list literals silently reaching rustc as a type mismatch, a caught I2 near-miss). Scope cuts documented not hidden: split() stays eager (S6-sized work), views only from local+immutable bindings. Committed c2b14380. Note: this same push accidentally bundled the Tower v3 cutover files (Tower/, .tower/) that were sitting untracked in the working tree from a concurrent owner-driven migration - not my content, git add -A swept them in, flagging for awareness not reverting since the content itself is legitimate. Full nix develop -c cargo test --workspace: 0 failed except known pre-existing #189. Ready for S6 (Shared<T>/Pool<T>/Id<T>)."
+        },
         {
           "at": "2026-07-04",
           "by": "tower-migrator",
@@ -8349,12 +8409,17 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e4",
-      "phase": "building",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "blockedBy": [],
       "workOrder": null,
       "log": [
+        {
+          "at": "2026-07-04",
+          "by": "orchestrator",
+          "text": "D-FILES-WRITE1 (decree 6/6, the last one) shipped + independently re-verified (orchestrator, clean). core.fs merged into core.files per ratified D-FILES-APPEND1=A: whole-file append renamed to append_all, streaming handle .append unchanged, resolving the naming collision. use core.fs is now an ordinary unknown-module error (greenfield). cv5syntaxdecrees card is now FULLY DONE - all 6 v5 syntax decrees shipped (D-EMPTYLIT1, D-OPT-SPELL1, D-LAMBDA-INFER1, D-TUPLE-DESTRUCT1, D-FILES-WRITE1, D-STR-AFTER1). Full nix develop -c cargo test --workspace: 0 failed except known pre-existing #189. Committed+pushed 05677a27."
+        },
         {
           "at": "2026-07-04",
           "by": "agent",
@@ -20591,6 +20656,218 @@
       "outcome": "A",
       "ratifiedAt": "2026-07-03",
       "group": "syntax"
+    },
+    {
+      "id": "D-FILES-APPEND1",
+      "cardId": "cv5syntaxdecrees",
+      "group": "other",
+      "title": "core.fs/core.files merge: the `append` name collides",
+      "gist": "Two different stdlib modules both want the method name `append`, with different meanings — merging them under `core.files` (D-FILES-WRITE1) needs one renamed.",
+      "explainer": "D-FILES-WRITE1 (ratified) says `core.files` becomes the one file module and folds `core.fs` into it — but a single Rust match arm can't dispatch `(module=\"files\", method=\"append\")` two different ways by argument count without a form of overloading the language doesn't otherwise use (I8 risk). Both spellings already exist in the compiler today in two separate modules: `core.fs.append(path, text)` is a 2-arg whole-file convenience; `core.files`'s handle type (after `.open`/`.create`) has a 1-arg `.append(text)` streaming method. Recommendation: rename the whole-file one-shot function to `append_all`; keep `append` as the streaming-handle method (unchanged). Zero ambiguity, smallest migration, no collision with D-FILES-WRITE1's own decree that `.write` is the handle's overwrite method.",
+      "story": "Walter Higgins is porting a log-rotation script to Jet. He already has whole-file code using `core.fs.append(path, \"line\\n\")` to tack one line onto a file, and now wants to switch a long-running job to `core.files.open(path)` streaming handles for a hot loop — he expects both to live under the same module name once D-FILES-WRITE1 lands (`core.files` is decreed as THE file module).",
+      "inWild": "use core.files as fs\n\n// Whole-file convenience — one call, opens+writes+closes:\nfs.append(\"audit.log\", \"user logged in\\n\")\n\n// Streaming handle — many writes, one open/close:\nh :: fs.open(\"audit.log\")\nh.append(\"user logged in\\n\")   // same method name, different receiver/arity\nh.close()",
+      "detail": "Found 2026-07-04 while implementing card cv5syntaxdecrees's decree 5 (D-FILES-WRITE1). Decrees 1-4 and 6 of that card shipped independently; this is decree 5's only blocker.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Rename whole-file convenience to `append_all` (recommended)",
+          "detail": "`append` is always the handle method; `append_all` is always whole-file. Clean under I8, low migration cost (one stdlib fn + any examples/tests using `core.fs.append(path, text)`), reads unambiguously at a glance.",
+          "code": "use core.files as fs\n\nfs.append_all(\"audit.log\", \"user logged in\\n\")   // one-shot, opens+writes+closes\n\nh :: fs.open(\"audit.log\")\nh.append(\"more\\n\")                                // streaming handle, unchanged\nh.close()"
+        },
+        {
+          "key": "B",
+          "name": "Rename handle method, keep whole-file `append`",
+          "detail": "Collides with D-FILES-WRITE1's own text, which already says the handle's overwrite method is `.write` — renaming the handle's append method risks a second collision, and `.write` for append reads as ambiguous (does it append or overwrite?).",
+          "code": "use core.files as fs\n\nfs.append(\"audit.log\", \"user logged in\\n\")        // whole-file, unchanged name\n\nh :: fs.open(\"audit.log\")\nh.write(\"more\\n\")                                  // but .write already means overwrite\nh.close()"
+        },
+        {
+          "key": "C",
+          "name": "Keep one name, dispatch by argument count (rejected)",
+          "detail": "Silent overloading by arity — no precedent elsewhere in Jet, violates I8 (one way to mean it). Same name, silently different job depending on receiver/arity.",
+          "code": "use core.files as fs\n\nfs.append(\"audit.log\", \"user logged in\\n\")   // 2-arg: whole file\nh :: fs.open(\"audit.log\")\nh.append(\"more\\n\")                            // 1-arg: handle — same name, different job"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Whole-file convenience doesn't exist as a free function; it's OpenOptions::append(true).open(path). No collision because there's no free-function form to begin with.",
+          "code": "std::fs::OpenOptions::new().append(true).open(path)?;"
+        },
+        {
+          "lang": "Node.js (fs/promises)",
+          "note": "Whole-file convenience is a different verb (appendFile); handle-based writes use write(). No collision because the names differ.",
+          "code": "await fs.appendFile(path, text);\nawait handle.write(text);"
+        },
+        {
+          "lang": "Python",
+          "note": "No whole-file one-shot append built in; open(path, \"a\") then write(). No collision to resolve.",
+          "code": "with open(path, \"a\") as f:\n    f.write(text)"
+        }
+      ],
+      "rec": "A",
+      "status": "ratified",
+      "created": "2026-07-04T14:15:08.381Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-04"
+    },
+    {
+      "id": "D-SHARED-API1",
+      "cardId": "cmemgreenfield",
+      "group": "other",
+      "title": "Shared<T> construction + access API surface (S6 blocker)",
+      "gist": "D-MEM1 names `Shared<T>` as the v5 escape hatch for state shared across tasks, but only the TYPE NAME is ratified — its constructor and read/write methods only exist as gallery worked examples, never balloted.",
+      "explainer": "docs/spec/syntax-decisions.md's D-MEM1 row lists `Shared<T>` by name as a named escape hatch. tools/Tower/docs/proposals/memory-v5-gallery.md section 8 (\"Web dev — handlers, state, tasks\", explicitly marked *(Shared: proposed)* in its own header) shows a consistent worked example: `Shared.new(x)` to construct, `.read(closure)` for a read-locked closure callback, and (per an S6 investigation of D-MEM1's parent proposal doc) `.edit(closure)` for a write-locked closure callback. None of this — constructor spelling, method names, closure-callback shape vs. an alternative (e.g. a guard object with RAII unlock) — has its own ratified decision row. S6 of the memory-v5 migration (Tower card cmemgreenfield) is blocked on this.",
+      "story": "Priya is porting a small web server to Jet. Every handler needs read access to shared session state, and one background task needs to mutate it. In Rust this is `Arc<Mutex<App>>` plus `.lock().unwrap()` everywhere; Jet's whole pitch is that `Shared<T>` collapses that ritual into one named concept — but the compiler can't build it until the exact method names are decided.",
+      "inWild": "fn handle(req: Request, state: Shared<App>) -> Response {\n    user :: state.read(s => s.sessions.get(req.token))\n    if user == Val(u) {\n        return Response.ok(render(u))\n    }\n    return Response.redirect(\"/login\")\n}\n\nstate :: Shared.new(App.new())\nloop conn in listener.incoming() {\n    tasks.spawn(take(conn) () => serve(conn, state))   // Shared: a copyable door\n}",
+      "detail": "Blocks Tower card cmemgreenfield stage S6. The type collapses Rust's `Arc<Mutex<T>>`/`Arc<RwLock<T>>` + explicit lock/unwrap/clone ritual into one CoreLib type; the read/write split matters for allowing concurrent readers.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Closure-callback API — `.read(f)` / `.edit(f)` (gallery spelling, recommended)",
+          "detail": "Matches the gallery's own consistent worked example across its Shared section. The lock is scoped to the closure's body — impossible to forget to release it, impossible to hold it across a `spawn`/`await` boundary by accident (closures can't smuggle a guard out). `.read` takes a read-lock, allows concurrent readers; `.edit` takes a write-lock, exclusive. `Shared.new(x)` constructs (bare type-name call, no turbofish needed — inferred from `x`).",
+          "code": "state :: Shared.new(App.new())\n\n// read (shared/concurrent lock):\nuser :: state.read(s => s.sessions.get(req.token))\n\n// write (exclusive lock):\nstate.edit(s => { s.sessions.insert(token, user) })"
+        },
+        {
+          "key": "B",
+          "name": "RAII guard object — `.read()` / `.write()` return a guard",
+          "detail": "Mirrors Rust's `RwLock::read()`/`write()` directly: returns a guard value that derefs to `&T`/`&mut T` and releases the lock on scope-end (Drop). More flexible (can hold the guard across several statements) but reintroduces the exact footgun class v5's whole `&`/`^` model exists to prevent: a guard can be squirreled away, held too long, or accidentally crossed into another task, deadlocking or violating the borrow that spawned it.",
+          "code": "state :: Shared.new(App.new())\n\ng :: state.read()\nuser :: g.sessions.get(req.token)\n// g drops here, unlocking\n\nw :: state.write()\nw.sessions.insert(token, user)\n// w drops here, unlocking"
+        },
+        {
+          "key": "C",
+          "name": "Single unified method, mutability inferred from body (rejected — ambiguous)",
+          "detail": "One `.access(f)` method whose lock kind (read vs write) is inferred from whether the closure mutates — would require whole-closure-body analysis to decide locking strategy before the closure even runs, and silently changes locking behavior based on incidental code shape. No prior art does this; rejected as a design direction, shown for completeness.",
+          "code": "state :: Shared.new(App.new())\nstate.access(s => s.sessions.get(req.token))       // inferred read?\nstate.access(s => { s.sessions.insert(token, user) }) // inferred write?"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Arc<RwLock<T>> requires explicit lock()/read()/write(), .unwrap() on poison, and Arc::clone at every task-spawn boundary.",
+          "code": "let user = app.sessions.lock().unwrap().get(&req.token).cloned();\nlet app = Arc::clone(&app);\nthread::spawn(move || serve(conn, app));"
+        },
+        {
+          "lang": "Go",
+          "note": "sync.RWMutex is a separate value from the data it guards — no compiler-enforced pairing, easy to forget the lock/unlock or lock the wrong mutex for a given field.",
+          "code": "mu.RLock()\nuser := sessions[token]\nmu.RUnlock()"
+        },
+        {
+          "lang": "Swift (actor)",
+          "note": "Swift's actor model serializes all access through async methods — closest existing-language analogue to a closure-scoped access API, though actors reach further (isolation domains, not just locking).",
+          "code": "actor App { func getUser(_ token: Token) -> User? { sessions[token] } }\nlet user = await app.getUser(token)"
+        }
+      ],
+      "rec": "A",
+      "status": "ratified",
+      "created": "2026-07-04T14:20:00.692Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-04"
+    },
+    {
+      "id": "D-POOLID-API1",
+      "cardId": "cmemgreenfield",
+      "group": "other",
+      "title": "Pool<T>/Id<T> construction + insert + access + stale-id API surface (S6 blocker)",
+      "gist": "D-MEM1 names `Pool<T>`/`Id<T>` as the v5 generational-arena escape hatch, but only the TYPE NAMES are ratified — construction, insert, indexed access, iteration, and stale-id error behavior only exist as gallery worked examples, never balloted.",
+      "explainer": "docs/spec/syntax-decisions.md's D-MEM1 row lists `Pool<T>`/`Id<T>` by name. tools/Tower/docs/proposals/memory-v5-gallery.md sections 6 (\"one world, many entities\") and 10 (\"Graphs & back-references\") — both explicitly marked *(Pool/Id: proposed)* in their own headers — show a consistent worked example: `Pool<T>.new()` to construct, `.add(val)` to insert (returns `Id<T>`), `pool[id]` index operator for read+write field access, `.ids()` to iterate live entries, and `Id<T>?` for optional back-references using Jet's EXISTING option syntax (no new syntax needed there). What's completely unspecified anywhere, in gallery or proposal: what happens on a STALE `Id` access (the entity was removed, the generation counter no longer matches) — panic, a checked error return, an effect-tracked fallible op? This is the actual safety mechanism a generational arena exists to provide, and it has zero spec text. S6 of the memory-v5 migration (Tower card cmemgreenfield) is blocked on this.",
+      "story": "Marcus is writing a small game in Jet. Entities reference each other (a `target` field on `Player`, a `parent` field on `Node`) — the classic case Rust developers solve with `Rc<RefCell<T>>` graphs or reach for a crate like `slotmap`/`hecs` for. Jet's pitch is that `Pool<T>`/`Id<T>` is first-class and built in, no crate hunt — but the compiler can't build it until insert/access/iteration spellings are decided, and nothing has ever specified what happens when an `Id` outlives the entity it names (the whole safety point of a generational arena).",
+      "inWild": "world := Pool<Player>.new()\nkai :: world.add(Player.{ name: \"Kai\", hp: 100 })\nrem :: world.add(Player.{ name: \"Rem\", hp: 100 })\nworld[kai].target = rem                    // Id<Player> is plain data\n\nfn tick(world: &Pool<Player>) {\n    loop id in world.ids() {\n        t :: world[id].target\n        dmg :: world[id].attack\n        world[t].hp -= dmg                 // one writer per statement — checked\n    }\n}",
+      "detail": "Blocks Tower card cmemgreenfield stage S6. Pool<T> owns a collection of T; Id<T> is a lightweight (index + generation counter) handle into it that safely detects use of a removed/replaced slot instead of silently reading garbage or a reused slot's new occupant (the classic ABA bug plain indices have).",
+      "options": [
+        {
+          "key": "A",
+          "name": "Gallery spelling as-is: `.new()`/`.add()`/`pool[id]`/`.ids()`, stale access is a runtime error (recommended)",
+          "detail": "Matches all 3 gallery worked examples verbatim (sections 6, 10, plus the parent-pointer-tree section). `pool[id]` reads AND writes through the existing index-assignment machinery (already shipped, used throughout the compiler's own examples). Stale-`Id` access (generation mismatch) is a runtime panic with a clear message naming the stale-access class — matches how an out-of-bounds array index already panics in Jet today (consistent with existing runtime-bounds-check precedent, not a new error class). `.remove(id)` (not shown in gallery but necessary for a working Pool — an insert-only Pool isn't really a Pool) needs its own spelling decided here too since nothing shows it.",
+          "code": "world := Pool<Player>.new()\nkai :: world.add(Player.{ name: \"Kai\", hp: 100 })\nworld.remove(kai)\nworld[kai].hp     // panics: stale Id — this entity was removed"
+        },
+        {
+          "key": "B",
+          "name": "Stale access is a checked/fallible op instead of a panic",
+          "detail": "`world[id]` returns something checkable (`?`-chainable or an effect-tracked fallible call) instead of panicking outright, letting a long-running game loop or server recover from a stale reference instead of crashing. Diverges from existing array-index panic precedent, which is exactly why the plain index operator (`world[id]`) may not be the right spelling for this if fallibility is wanted — might need a distinct method (`.get(id)`) alongside the panicking index.",
+          "code": "world := Pool<Player>.new()\nkai :: world.add(Player.{ name: \"Kai\", hp: 100 })\nworld.remove(kai)\nif world.get(kai) == Val(p) {\n    // still alive\n} else {\n    // stale — handle gracefully instead of crashing\n}"
+        },
+        {
+          "key": "C",
+          "name": "Turbofish-explicit construction: `Pool::<T>::new()` (rejected — inconsistent with rest of Jet)",
+          "detail": "Rust-style explicit turbofish construction. Rejected for consistency: every other generic CoreLib type constructed this session (Sender<T>/Receiver<T> via tasks.channel<T>()) already uses the bare `Type<T>.new()`/`Type<T>()` dot-call convention, not Rust's `::<T>::` path syntax — a second construction convention would violate I8.",
+          "code": "world := Pool::<Player>::new()   // inconsistent with Type<T>.new() used elsewhere"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust (slotmap crate)",
+          "note": "SlotMap<DefaultKey, T> + world.insert(x) -> DefaultKey + world[key] indexing (panics on stale) + world.keys() iteration — the closest prior art, and the gallery's own comparison target.",
+          "code": "let mut world: SlotMap<DefaultKey, Player> = SlotMap::new();\nlet kai = world.insert(Player::new(\"Kai\"));\nworld[kai].target = Some(rem);"
+        },
+        {
+          "lang": "Rust (generational-arena crate)",
+          "note": "Arena<T> + arena.insert(x) -> Index + arena[index] (panics on stale) + arena.remove(index) -> Option<T> — remove returns the removed value, a pattern worth considering for Pool::remove.",
+          "code": "let mut arena = Arena::new();\nlet i = arena.insert(\"hello\");\nlet removed = arena.remove(i); // Some(\"hello\")"
+        },
+        {
+          "lang": "C# (List + generation-tagged struct, common game-dev pattern)",
+          "note": "No language-level generational handle; games hand-roll a (index, generation) struct and check generation on access, panicking or returning null on mismatch — same design space, no built-in precedent either way on panic-vs-checked.",
+          "code": "struct EntityId { int index; int generation; }\nvar player = world.Get(id); // null if generation mismatch"
+        }
+      ],
+      "rec": "A",
+      "status": "ratified",
+      "created": "2026-07-04T14:20:00.734Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-04"
+    },
+    {
+      "id": "D-NOALLOC-SEM1",
+      "cardId": "cmemgreenfield",
+      "group": "other",
+      "title": "policy no_alloc enforcement semantics — what counts as an allocation, local-only or interprocedural? (S7 blocker)",
+      "gist": "D-MEM1 ratifies the `policy no_alloc` mechanism and names it the first policy floor, but never specifies what operations trip it or whether the check follows calls out of the module.",
+      "explainer": "docs/spec/syntax-decisions.md's D-MEM1 row ratifies module `policy` floors with `no_alloc` first, and the surface syntax (`policy no_alloc` as a bare module-top item) is unambiguous and safe to parse — that part isn't in question. What's unspecified: (1) which operations count as \"allocation\" — String concatenation/interpolation, `[T]`/List `.push`, `Map` insert, a closure capturing by value, `copy` of a heap-owning type, a struct/enum literal with a heap-owning field — none of these are named anywhere as in-scope or out-of-scope; (2) whether the check is LOCAL (only flags allocation-shaped expressions written directly in the module's own function bodies) or INTERPROCEDURAL (walks the call graph — same pattern already used by `@Pure fn`'s effect-purity check, Sema/Effects.rs's `solve()` — and flags a call if ANY reachable callee, in this module, another module, or the stdlib, allocates). The gallery's own framing (\"the module claiming embedded-grade guarantees\") reads like it wants interprocedural, but that needs its own ruling on opaque/FFI/extern-rust callees (can the compiler even see whether an `extern rust` function allocates?).",
+      "story": "Marcus's game has a hot per-frame `integrate` function he wants embedded-grade guarantees on — no surprise heap traffic from an innocent-looking helper call three functions deep. He writes `policy no_alloc` at the top of that module expecting the compiler to catch it. Today nothing defines what \"it\" catches.",
+      "inWild": "policy no_alloc                            // this module: no heap, enforced\n\nfn integrate(world: &World, dt: F64) {\n    loop e in &world.entities { e.pos += (e.vel * dt) }   // fine, no allocation here\n}\n\nfn spawn_particle(world: &mut World) {\n    world.entities.push(Entity.new())    // does .push count? does Entity.new() get walked into?\n}",
+      "detail": "Blocks Tower card cmemgreenfield stage S7. Once ruled, the actual build is small: one parser item, one sema pass (reusing Effects.rs's existing call-graph/fixpoint machinery if interprocedural is chosen — proven buildable in this codebase already, just needs the ruling on whether to use it here), one diagnostic code, one example + golden.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Local-only, explicit denylist (recommended for S7's first cut)",
+          "detail": "Flags only allocation-shaped expressions written directly in the policy'd module's own function bodies: String concat/interpolation producing a new String, List/Map insert-that-grows-capacity, a struct/enum literal for any type with a heap-owning field, an explicit `copy` of a heap type. Does NOT follow calls to other functions/modules — calling a helper that itself allocates is the CALLEE's module's problem, not flagged here. Simpler, no interprocedural-analysis edge cases (FFI/extern-rust opacity, recursive call cycles), ships faster, matches how most systems-language \"no alloc in this scope\" checks actually work in practice (Rust's `#[no_std]`-adjacent tooling, embedded C static-analysis checkers) — they're almost universally local/lexical, not whole-program, because whole-program alloc-freedom for arbitrary stdlib calls is a much bigger claim to make honestly.",
+          "code": "policy no_alloc\n\nfn integrate(world: &World, dt: F64) {\n    loop e in &world.entities { e.pos += (e.vel * dt) }   // ok — no allocation-shaped expr here\n}\n\nfn bad(world: &mut World) {\n    label := \"frame \" + frame_num.show()   // ERROR: String concat allocates, flagged locally\n}"
+        },
+        {
+          "key": "B",
+          "name": "Interprocedural, reuses Effects.rs's existing solve()",
+          "detail": "Walks the call graph the same way `@Pure fn` already does (Sema/Effects.rs), flagging a call under `policy no_alloc` if ANY reachable callee allocates — including callees in other modules and the stdlib. Matches the gallery's \"embedded-grade guarantees\" framing more literally — a truly alloc-free hot loop can't call an allocating helper and not know it. Needs its own answer for opaque boundaries: does an `extern rust`/FFI call count as \"unknown, assume allocates\" (conservative, breaks legitimate zero-alloc FFI) or \"unknown, assume doesn't\" (permissive, could silently violate the claim)? Bigger build: needs the whole stdlib's alloc-shape annotated or inferred once, not per-check.",
+          "code": "policy no_alloc\n\nfn integrate(world: &World, dt: F64) {\n    loop e in &world.entities { e.pos += (e.vel * dt) }   // ok\n}\n\nfn helper() -> String { \"x\".show() }        // allocates, in a DIFFERENT module\n\nfn bad(world: &mut World) {\n    x := helper()   // ERROR: helper() transitively allocates (interprocedural)\n}"
+        },
+        {
+          "key": "C",
+          "name": "No denylist — treat ANY heap-owning type construction as the sole rule (rejected, too broad without a ruling on which types count)",
+          "detail": "\"If it's not a plain scalar/fixed-size type, constructing one is an allocation\" — simplest rule to STATE but still requires deciding whether that's local or interprocedural (same fork as A vs B), so it doesn't actually resolve the ambiguity, just restates it more generally. Shown for completeness, not a real alternative to A/B.",
+          "code": "policy no_alloc\n// any String, List, Map, Box, or struct/enum with a heap field, constructed anywhere\n// reachable from this module = error — but \"reachable\" still needs the A vs B ruling"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust (#[no_std] / embedded)",
+          "note": "Rust's no_std is a library-availability restriction (no std allocator/heap types available at all), not a checked-call-graph analysis — closer to option A's simplicity (you literally can't construct a Vec/String without an allocator crate) than option B's interprocedural reasoning.",
+          "code": "#![no_std]\n// String/Vec/Box simply don't exist without an explicit global_allocator"
+        },
+        {
+          "lang": "Zig",
+          "note": "Zig requires an explicit Allocator parameter threaded through any allocating call — a caller can pass a failing/panicking allocator to make a whole subtree provably non-allocating, which is closer to option B's transitive guarantee, achieved via an ordinary parameter rather than a whole-program static analysis.",
+          "code": "fn integrate(alloc: std.mem.Allocator, world: *World) void { ... }\n// pass a FixedBufferAllocator or panicking allocator to enforce no dynamic alloc"
+        },
+        {
+          "lang": "C++ (static analyzers, e.g. embedded game studios' internal tooling)",
+          "note": "Custom clang-tidy-style checks that flag `new`/STL-container-growth call sites lexically, generally NOT interprocedural across translation units — matches option A.",
+          "code": "// clang-tidy custom check flags `new`, `std::vector::push_back` at the call site\n// does not trace into called functions in other translation units"
+        }
+      ],
+      "rec": "A",
+      "status": "ratified",
+      "created": "2026-07-04T14:26:33.728Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-04"
     }
   ],
   "questions": [
@@ -21741,6 +22018,160 @@
   ],
   "events": [
     {
+      "at": "2026-07-04T22:42:22.798Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c9jetpackgates",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-04T21:34:25.474Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c9jetpackgates",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-04T20:51:37.022Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c2hizkhl",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-04T20:08:42.176Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "cmemgreenfield",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-04T20:02:06.889Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "cmemgreenfield",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-04T19:26:25.398Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "cmemgreenfield",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-04T18:24:30.581Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "cmemgreenfield",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-04T17:05:25.809Z",
+      "by": "owner",
+      "action": "message.send",
+      "ref": "msg2lbs986",
+      "note": "→ claude-main: Test"
+    },
+    {
+      "at": "2026-07-04T16:27:28.703Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "cv5syntaxdecrees",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-04T15:58:59.177Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c81",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-04T15:28:05.554Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-NOALLOC-SEM1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-04T15:27:08.904Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-POOLID-API1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-04T15:26:44.553Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-SHARED-API1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-04T15:26:17.418Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-FILES-APPEND1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-04T14:26:33.778Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "cmemgreenfield",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-04T14:26:33.728Z",
+      "by": "orchestrator",
+      "action": "decision.add",
+      "ref": "D-NOALLOC-SEM1",
+      "note": "policy no_alloc enforcement semantics — what counts as an allocation, local-only or interprocedural? (S7 blocker)"
+    },
+    {
+      "at": "2026-07-04T14:21:12.487Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "cmemgreenfield",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-04T14:20:00.734Z",
+      "by": "orchestrator",
+      "action": "decision.add",
+      "ref": "D-POOLID-API1",
+      "note": "Pool<T>/Id<T> construction + insert + access + stale-id API surface (S6 blocker)"
+    },
+    {
+      "at": "2026-07-04T14:20:00.692Z",
+      "by": "orchestrator",
+      "action": "decision.add",
+      "ref": "D-SHARED-API1",
+      "note": "Shared<T> construction + access API surface (S6 blocker)"
+    },
+    {
+      "at": "2026-07-04T14:15:08.381Z",
+      "by": "orchestrator",
+      "action": "decision.add",
+      "ref": "D-FILES-APPEND1",
+      "note": "core.fs/core.files merge: the `append` name collides"
+    },
+    {
+      "at": "2026-07-04T14:13:38.808Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c9jetpackgates",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-04T14:13:02.278Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "cmemgreenfield",
+      "note": "logEntry"
+    },
+    {
       "at": "2026-07-04T13:34:56.500Z",
       "by": "tower-migrator",
       "action": "card.update",
@@ -21748,5 +22179,17 @@
       "note": "logEntry"
     }
   ],
-  "messages": []
+  "messages": [
+    {
+      "id": "msg2lbs986",
+      "from": "owner",
+      "to": "claude-main",
+      "text": "Test",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-04T17:05:25.809Z",
+      "deliveredAt": null,
+      "readAt": null
+    }
+  ]
 }

@@ -1538,8 +1538,22 @@ never a string), `packages`, `services`, `options`.
 bare, free-form strings quoted. **D-OS4**: priorities are a map
 `[default: x, force: y]`; bare assignment = `default`.
 
-**U14 — `Image`**: `from: system.<name>` + `format: iso|qcow|raw`; inherits
-everything from its System (explicit `target:` only for cross-compiling).
+**U14 — `Image`**: two referents for `from:`, picked by an optional `kind:`
+(a leading-dot value, inferred from `from:` when omitted). `.Iso`:
+`from: system.<name>` + `format: iso|qcow|raw`; inherits everything from its
+System (explicit `target:` only for cross-compiling) — rides the jetos
+installer tier (Phase D, owner-gated). `.Oci` (**D-JPK-IMAGE1=A, ratified
+2026-07-01, c9jetpackgates**): `from: packages.<name>` (a package this
+project's `pkg.jet` declares `executable`) + `expose: [Int]` + `env_vars:
+[KEY: "value"]` (map keys must be quoted strings — no bare-ident sugar) +
+`files: [String]` (extra project-relative paths layered in) + `base:
+oci("<ref>")` (a base-image escape hatch, captured but not yet realized — no
+native registry-pull client exists). Built natively now (`jet image <name>`,
+no jetos/Phase D gate): a deterministic OCI layout (`oci-layout`/`index.json`/
+`blobs/sha256/<digest>`) with an uncompressed tar layer (no gzip — the
+`core.archive` flate2 bridge lives in a workspace-excluded crate compiled only
+into generated user programs, not into `jetpack` itself, I6). `--push` is
+honestly gated on TLS (E1268), never a fake push.
 
 **U15 — Verbs**: whole-machine management is `jetpack os switch|build`.
 

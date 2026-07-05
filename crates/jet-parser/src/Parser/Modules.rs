@@ -1008,19 +1008,27 @@ impl<'a> Parser<'a> {
         self.expect(TokKind::Colon, "after an `Image` field name")?;
         let value = match name.as_str() {
             Syntax::IMAGE_FIELD_FROM => {
-                // `from: system.<name>` — the `system` keyword then the name.
-                let (kw, kw_span) = self.expect_ident("for `system`, e.g. `system.halcyon`")?;
-                if kw != Syntax::NS_SYSTEM {
+                // D-JPK-IMAGE1: `from: system.<name>` (the `.Iso` tier) or
+                // `from: packages.<name>` (the `.Oci` tier) — the `system`/
+                // `packages` keyword then the name.
+                let (kw, kw_span) =
+                    self.expect_ident("for `system` or `packages`, e.g. `system.halcyon` or `packages.cli`")?;
+                if kw != Syntax::NS_SYSTEM && kw != Syntax::IMAGE_FROM_PACKAGES {
                     return Err(image_from_not_system(kw_span));
                 }
-                self.expect(TokKind::Dot, "after `system`")?;
+                self.expect(TokKind::Dot, "after `system`/`packages`")?;
                 // S84: `from: system.<name>` may reference a kebab-case System
-                // name; must read the same way the definition does so the E0978
-                // cross-check still string-matches.
-                let (sys, sys_span) = self.expect_dashed_name("for the system name")?;
+                // (or package) name; must read the same way the definition does
+                // so the E0978/E1267 cross-checks still string-match.
+                let (name, name_span) = self.expect_dashed_name("for the name")?;
+                let source = if kw == Syntax::NS_SYSTEM {
+                    crate::AST::ImageFromRef::System(name)
+                } else {
+                    crate::AST::ImageFromRef::Package(name)
+                };
                 crate::AST::ImageFieldValue::From {
-                    system: sys,
-                    span: Span::new(kw_span.start, sys_span.end),
+                    source,
+                    span: Span::new(kw_span.start, name_span.end),
                 }
             }
             Syntax::IMAGE_FIELD_FORMAT => {

@@ -670,6 +670,7 @@ fn main() {
                 | "push"
                 | "bridge"
                 | "services"
+                | "image"
                 | "publish"
                 | "yank"
                 | "keygen"
@@ -751,6 +752,7 @@ fn main() {
             | "push"
             | "bridge"
             | "services"
+            | "image"
             | "add"
             | "remove"
             | "bind"
@@ -982,6 +984,17 @@ fn main() {
             exit(EngineDispatch::dispatch(
                 jet::Syntax::JETPACK_BINARY_NAME,
                 "services",
+                &raw,
+            ));
+        }
+        "image" => {
+            // U14 (D-JPK-IMAGE1=A, card c9jetpackgates): `jet image <name>`
+            // builds a declared `.Oci` image into a native OCI layout.
+            // D-JPK-DISPATCH1=B: dispatched to the jetpack engine exactly
+            // like `push`/`bridge`/`services`, never linked in-process.
+            exit(EngineDispatch::dispatch(
+                jet::Syntax::JETPACK_BINARY_NAME,
+                "image",
                 &raw,
             ));
         }

@@ -43,7 +43,13 @@ tower agent listen --name claude-main --kind claude
 Each owner message arrives as a `[owner] …` line and should be treated as an
 interrupt: answer or act (`tower message send --to owner --text "…" --by
 claude-main`), then resume. Report completions the same way — that's what
-reaches his phone. Catch up after gaps: `tower message list --unread --for claude-main`.
+reaches his phone (`--attach shot.png` for screenshots). Catch up after
+gaps: `tower message list --unread --for claude-main`.
+
+Keep `tower agent status --name claude-main --text "building #187 — tests
+green"` fresh when switching tasks (shows live in his roster). A `[tower]`
+system message ("N decisions ratified … greenlit: …") is ONE signal that the
+board changed — run `tower next` once; do not fan out an agent per item.
 
 ## Scope & work order — Epoch 3 burndown
 

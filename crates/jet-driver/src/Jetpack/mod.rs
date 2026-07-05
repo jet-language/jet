@@ -15,6 +15,7 @@ pub mod Components;
 pub mod EffectBudget;
 pub mod Envelope;
 pub mod EnvFile;
+pub mod Image;
 pub mod JSON;
 pub mod JetOS;
 pub mod JetPin;

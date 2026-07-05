@@ -1306,6 +1306,7 @@ pub const JETPACK_VERBS: &[&str] = &[
     BRIDGE_SUBCOMMAND,
     SERVICES_SUBCOMMAND,
     SECRETS_SUBCOMMAND,
+    IMAGE_SUBCOMMAND,
 ];
 
 /// U16 (card c9jetpackgates): `jet env -p <pkg>...` — ad-hoc nixpkgs packages
@@ -1348,6 +1349,14 @@ pub const DEV_SUBCOMMAND: &str = "dev";
 /// untouched): this dev tier runs plain child processes via `std::process`,
 /// never a system service manager.
 pub const SERVICES_SUBCOMMAND: &str = "services";
+/// D-JPK-IMAGE1 (=A, ratified 2026-07-01, c9jetpackgates): `jet image <name>`
+/// builds the named `image.<name>` module contribution into a hangar OCI
+/// layout (the `.Oci` kind only — `.Iso` rides the jetos installer tier,
+/// Phase D, owner-gated, untouched). `--push <ref>` is honestly gated (E1268)
+/// until TLS support lands for registry pushes.
+pub const IMAGE_SUBCOMMAND: &str = "image";
+pub const IMAGE_FLAG_PUSH: &str = "--push";
+
 pub const SERVICES_VERB_UP: &str = "up";
 pub const SERVICES_VERB_DOWN: &str = "down";
 pub const SERVICES_VERB_HEALTH: &str = "health";
@@ -1564,6 +1573,31 @@ pub const IMAGE_FIELD_FORMAT: &str = "format";
 pub const IMAGE_FORMAT_ISO: &str = "iso";
 pub const IMAGE_FORMAT_QCOW: &str = "qcow";
 pub const IMAGE_FORMAT_RAW: &str = "raw";
+
+/// D-JPK-IMAGE1 (=A, ratified 2026-07-01, c9jetpackgates): the keyword after
+/// `from:` that selects the OCI-container referent (`from: packages.<name>`,
+/// the sibling of the original `from: system.<name>`, `NS_SYSTEM`).
+pub const IMAGE_FROM_PACKAGES: &str = "packages";
+
+/// D-JPK-IMAGE1: an `Image`'s optional `kind:` — a leading-dot enum literal
+/// (`.Oci`/`.Iso`, D-ENUMDOT2) picking which referent `from:` names. Omitted,
+/// it infers from `from:` itself (`system.*` → Iso, `packages.*` → Oci); written,
+/// it must agree with `from:` or name a real kind (E1266 `image-unknown-kind`).
+pub const IMAGE_KIND_ISO: &str = "Iso";
+pub const IMAGE_KIND_OCI: &str = "Oci";
+
+/// D-JPK-IMAGE1: the `.Oci`-only fields — exposed TCP ports (`[Int]`), env vars
+/// (a `[KEY: "value"]` map), extra files layered into the image (`[String]`
+/// project-relative paths), and an optional base image escape hatch
+/// (`base: oci("<ref>")`, unrealized — no registry-pull client yet, D-JPK-
+/// RINGSHIP1/D-JPK-BUILDTOOL1 territory, honestly gated rather than faked).
+pub const IMAGE_FIELD_KIND: &str = "kind";
+pub const IMAGE_FIELD_EXPOSE: &str = "expose";
+pub const IMAGE_FIELD_ENV_VARS: &str = "env_vars";
+pub const IMAGE_FIELD_FILES: &str = "files";
+pub const IMAGE_FIELD_BASE: &str = "base";
+/// The `oci(...)` call name inside `base: oci("<ref>")`.
+pub const IMAGE_BASE_FN: &str = "oci";
 
 /// U3 (ratified 2026-06-16): project environment file (`env` namespace) and the
 /// master jetos system config (`system`/`image` namespaces, default dir ~/.jet/).

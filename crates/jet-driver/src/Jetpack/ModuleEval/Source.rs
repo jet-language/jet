@@ -15,9 +15,10 @@ use super::super::RefSpec::{self, ProviderKind, SourceTable};
 use super::Diagnostics::{
     bad_import_directive, bad_source_ref, discovered_module_imports, find_dir_missing,
     fleet_unknown_system, image_from_unknown_system, merge_error_to_diagnostic,
+    oci_from_non_executable,
 };
 use super::Eval::{evaluate_modules, merge_all, parse_program, pkg_ref};
-use super::Types::{EnvPlan, FleetPlan, ImagePlan, SystemPlan};
+use super::Types::{EnvPlan, FleetPlan, ImageKind, ImagePlan, SystemPlan};
 
 /// True when `src` uses the typed `module { … }` surface (U3/U8) rather than
 /// the Phase-1 `pkg.*` directive surface. The CLI routes loading on this: a
@@ -83,13 +84,34 @@ pub fn evaluate_env(src: &str, base_dir: &Path) -> Result<EnvPlan, Diagnostic> {
         secrets.extend(module.secrets.iter().cloned());
     }
     let system_names: Vec<String> = systems.iter().map(|s| s.name.clone()).collect();
+    // D-JPK-IMAGE1: an `.Oci` image's `from: packages.<name>` cross-checks against
+    // this project's own `pkg.jet` `packages:` block (E1267) — a different
+    // manifest than the `env.jet`/`config.jet` this pass is evaluating, so it's
+    // loaded fresh here rather than threaded through as a plan field.
+    let manifest = super::super::PackageManifest::PackManifest::load(base_dir).and_then(|r| r.ok());
     for image in &images {
-        if !system_names.contains(&image.from) {
-            return Err(image_from_unknown_system(
-                &image.name,
-                &image.from,
-                &system_names,
-            ));
+        match image.kind {
+            ImageKind::Iso => {
+                if !system_names.contains(&image.from) {
+                    return Err(image_from_unknown_system(
+                        &image.name,
+                        &image.from,
+                        &system_names,
+                    ));
+                }
+            }
+            ImageKind::Oci => {
+                let kind = manifest.as_ref().and_then(|m| m.package_kind(&image.from));
+                let is_executable =
+                    matches!(kind, Some(super::super::PackageManifest::PackageKind::Executable));
+                if !is_executable {
+                    let is_library = matches!(
+                        kind,
+                        Some(super::super::PackageManifest::PackageKind::Library)
+                    );
+                    return Err(oci_from_non_executable(&image.name, &image.from, is_library));
+                }
+            }
         }
     }
     // U15: every fleet host must reference a known system (E1242).

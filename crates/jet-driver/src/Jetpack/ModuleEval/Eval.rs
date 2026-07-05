@@ -103,7 +103,7 @@ fn evaluate_module<'a>(
                 systems.push(evaluate_system(&c.path, lit, src, base_dir, funcs)?);
             }
             (Namespace::Image, ContribValue::Image(lit)) => {
-                images.push(evaluate_image(&c.path, lit)?);
+                images.push(evaluate_image(&c.path, lit, src, base_dir, funcs)?);
             }
             (Namespace::Fleet, ContribValue::Fleet(lit)) => {
                 fleets.push(evaluate_fleet(&c.path, lit, src)?);

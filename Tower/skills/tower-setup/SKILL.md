@@ -55,6 +55,17 @@ Migrating an older board: `tower import <old-tower.json> --name "<Project>"`
   7878, set another port here so `tower message`/`tower agents` reach the
   right server.
 
+## Remote access, push, git linking
+
+- First `tower serve` generates VAPID push keys; the owner enables push
+  per-device with **◍ notify**. Auth is OPT-IN: set `"auth": {"token": "…"}`
+  in config.json to require a key from non-localhost devices (unlock screen
+  asks once per device; localhost always exempt).
+- `tower githook` installs a post-commit hook so commits mentioning `#12`
+  append to that card's log — install it once per repo.
+- `notifyBatchSeconds` (default 90) controls how ratification/greenlight
+  notifications batch before waking listening agents.
+
 ## First work session
 
 1. Create the structure: `tower epoch add e1 --name "…" --goal "…"`,

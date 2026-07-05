@@ -1065,12 +1065,23 @@ pub struct ImageField {
     pub span: Span,
 }
 
-/// The parsed value of one `Image` field (U14).
+/// D-JPK-IMAGE1 (=A, ratified 2026-07-01): what an `Image`'s `from:` names —
+/// a `System` (the `.Iso`/`.Qcow`/`.Raw` disk-image tier, U14 original shape) or
+/// a `Package` (the `.Oci` container tier, same card). One `from:` keyword,
+/// two referent namespaces; `kind:` (explicit or inferred from which one is
+/// written) picks the interpretation.
+#[derive(Debug, Clone)]
+pub enum ImageFromRef {
+    System(String),
+    Package(String),
+}
+
+/// The parsed value of one `Image` field (U14/D-JPK-IMAGE1).
 #[derive(Debug)]
 pub enum ImageFieldValue {
-    /// `from: system.<name>` — references a `System` by name. Stores the name and
+    /// `from: system.<name>` or `from: packages.<name>` — stores which one and
     /// the whole value span.
-    From { system: String, span: Span },
+    From { source: ImageFromRef, span: Span },
     /// `format: iso` — a bare format keyword. Stores the word and its span.
     Format { word: String, span: Span },
     /// `target: linux.x64` — an explicit cross-compile platform (U14).
@@ -1079,7 +1090,10 @@ pub enum ImageFieldValue {
         arch: String,
         span: Span,
     },
-    /// Any other field — captured so modeval can reject restated inherited fields.
+    /// Any other field (`kind`/`expose`/`env_vars`/`files`/`base`, D-JPK-IMAGE1,
+    /// or a genuinely unknown one) — captured as a raw `Expr` so modeval can
+    /// dispatch on the field name (`Comptime::evaluate` for the OCI fields) or
+    /// reject a restated/unknown one.
     Other(Expr),
 }
 
