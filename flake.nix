@@ -50,39 +50,48 @@
 
         # `jet` in the dev shell: run the cargo-built debug binary from anywhere
         # in the repo, with rustc + cc on PATH for `jet build`/`jet run`.
-        jetDev = pkgs.writeShellScriptBin "jet" ''
-          set -euo pipefail
-          root="''${JET_ROOT:-}"
-          if [ -z "$root" ]; then
-            dir="$PWD"
-            while [ "$dir" != "/" ]; do
-              if [ -f "$dir/Cargo.toml" ] && [ -f "$dir/flake.nix" ]; then
-                root="$dir"
-                break
-              fi
-              dir=$(dirname "$dir")
-            done
-          fi
-          root="''${root:-$PWD}"
-          bin="$root/target/debug/jet"
-          export PATH="${jetRuntimePath}:$PATH"
-          if [ ! -x "$bin" ]; then
-            echo "jet: no debug binary at $bin" >&2
-            echo "fix: cargo build" >&2
-            exit 1
-          fi
-          exec "$bin" "$@"
-        '';
+        mkJetDevBin =
+          name:
+          pkgs.writeShellScriptBin name ''
+            set -euo pipefail
+            root="''${JET_ROOT:-}"
+            if [ -z "$root" ]; then
+              dir="$PWD"
+              while [ "$dir" != "/" ]; do
+                if [ -f "$dir/Cargo.toml" ] && [ -f "$dir/flake.nix" ]; then
+                  root="$dir"
+                  break
+                fi
+                dir=$(dirname "$dir")
+              done
+            fi
+            root="''${root:-$PWD}"
+            bin="$root/target/debug/${name}"
+            export PATH="${jetRuntimePath}:$PATH"
+            if [ ! -x "$bin" ]; then
+              echo "jet: no debug binary at $bin" >&2
+              echo "fix: cargo build" >&2
+              exit 1
+            fi
+            exec "$bin" "$@"
+          '';
+        jetDev = mkJetDevBin "jet";
+        jetpackDev = mkJetDevBin "jetpack";
       in
       {
         packages = {
           default = jet;
           inherit jet;
+          jetpack = jet;
         };
 
         apps.default = {
           type = "app";
           program = "${jet}/bin/jet";
+        };
+        apps.jetpack = {
+          type = "app";
+          program = "${jet}/bin/jetpack";
         };
 
         devShells.default = pkgs.mkShell {
@@ -105,6 +114,7 @@
             emscripten
             lldb
             jetDev
+            jetpackDev
             # D-UIDEVSHELL1=A (ratified 2026-07-03, c134 Phase 8): native Linux
             # UI backend links libgtk-4 via the S59 C-FFI path (`use c.gtk4` →
             # `pkg-config gtk4`). pkg-config + gtk4 dev headers enter the dev
@@ -120,6 +130,7 @@
             echo "Jet dev shell"
             echo "  build:    cargo build"
             echo "  run:      jet run examples/features/basics/hello.jet"
+            echo "  package:  jetpack help"
             echo "  search:   rg \"pattern\" docs Source tests"
             echo "  LSP:      jet lsp        (tests: cargo test --test lsp)"
             echo "  editor:   editors/vscode/install.sh   (Cursor/VS Code)"
