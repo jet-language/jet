@@ -72,8 +72,9 @@ pub fn ensure_bridge_helper() -> Result<PathBuf, Diagnostic> {
                 .next()
                 .unwrap_or_else(|| bridge_error("the crypto bridge failed to build"))
         })?;
-    link.helper_bin_path
-        .ok_or_else(|| bridge_error("the crypto helper binary was not produced by the bridge build"))
+    link.helper_bin_path.ok_or_else(|| {
+        bridge_error("the crypto helper binary was not produced by the bridge build")
+    })
 }
 
 /// Generate a fresh Ed25519 keypair for `registry`, writing the seed (0600) and
@@ -252,9 +253,7 @@ fn hex_decode(s: &str) -> Result<Vec<u8>, String> {
     let mut out = Vec::with_capacity(s.len() / 2);
     let mut i = 0;
     while i < bytes.len() {
-        let hi = (bytes[i] as char)
-            .to_digit(16)
-            .ok_or("invalid hex digit")?;
+        let hi = (bytes[i] as char).to_digit(16).ok_or("invalid hex digit")?;
         let lo = (bytes[i + 1] as char)
             .to_digit(16)
             .ok_or("invalid hex digit")?;
@@ -302,7 +301,11 @@ fn base64_decode(s: &str) -> Result<Vec<u8>, String> {
             _ => None,
         }
     }
-    let s: Vec<u8> = s.trim().bytes().filter(|&c| c != b'\n' && c != b'\r').collect();
+    let s: Vec<u8> = s
+        .trim()
+        .bytes()
+        .filter(|&c| c != b'\n' && c != b'\r')
+        .collect();
     if s.len() % 4 != 0 {
         return Err("base64 length not a multiple of 4".to_string());
     }
@@ -370,7 +373,11 @@ mod tests {
             &b"foobar"[..],
         ] {
             let enc = base64_encode(input);
-            assert_eq!(base64_decode(&enc).unwrap(), input, "roundtrip for {input:?}");
+            assert_eq!(
+                base64_decode(&enc).unwrap(),
+                input,
+                "roundtrip for {input:?}"
+            );
         }
         // Known vector.
         assert_eq!(base64_encode(b"foobar"), "Zm9vYmFy");

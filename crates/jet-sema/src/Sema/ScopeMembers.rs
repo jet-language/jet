@@ -20,9 +20,9 @@
 //! `jet test` harness. `#Test`/`#Bench` bodies are validated only under their
 //! own modes (they are not compiled otherwise, mirroring the rest of sema).
 
-use crate::AST::{ElseBranch, Expr, Item, Stmt, TraitImplBlock};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
+use crate::AST::{ElseBranch, Expr, Item, Stmt, TraitImplBlock};
 
 /// Validate every scope-member statement in the program. Runs in every mode
 /// (not just `jet test`): a malformed member is a structural error that `jet
@@ -81,7 +81,16 @@ fn check_marker_body(marker: &str, body: &[Stmt], diags: &mut Vec<Diagnostic>) {
                 span,
                 ..
             } => {
-                validate_member(marker, name, args, args_span, i == 0, *dot_span, *span, diags);
+                validate_member(
+                    marker,
+                    name,
+                    args,
+                    args_span,
+                    i == 0,
+                    *dot_span,
+                    *span,
+                    diags,
+                );
                 // Members inside a member's body are nested → E0618.
                 reject_nested(mbody, diags);
             }

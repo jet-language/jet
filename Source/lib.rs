@@ -16,8 +16,8 @@
 pub use jet_driver::{
     // Top-level re-exports from Compile module:
     bundle_uses_unsafe,
-    CanonicalAST,
     CBind,
+    CanonicalAST,
     Capabilities,
     Codegen,
     Collections,
@@ -511,8 +511,7 @@ pub fn eval_pure_program(src: &str, file: &str) -> Result<String, Vec<Diagnostic
         .unwrap_or(std::path::Path::new("."));
     let mut sink = Comptime::DevSink::new();
     let program = Comptime::ProgramInfo::empty();
-    Comptime::run_main(main_fn, &func_map, base_dir, &mut sink, &program)
-        .map_err(|d| vec![d])?;
+    Comptime::run_main(main_fn, &func_map, base_dir, &mut sink, &program).map_err(|d| vec![d])?;
     let text = sink.stdout;
     // Render the captured output as a JSON string.
     let json = if text.trim().is_empty() {

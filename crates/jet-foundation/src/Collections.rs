@@ -105,9 +105,7 @@ pub fn builtin_method_return(
         // whether the call reaches `finish_builtin_method`) — sema's
         // `finish_pool_add`/`finish_pool_remove`/the `("Pool","ids")` arm fully
         // recompute it from the receiver's real element type.
-        Type::Apply { name, args } if name == "Pool" => {
-            pool_method_return(args, method, arg_count)
-        }
+        Type::Apply { name, args } if name == "Pool" => pool_method_return(args, method, arg_count),
         // D-MEM1 S6 (D-SHARED-API1=A): `Shared<T>.read(f)`/`.edit(f)`. Same
         // placeholder-gate note as `Pool` above — `finish_shared_read`/
         // `finish_shared_edit` compute the real (closure-derived) return type.

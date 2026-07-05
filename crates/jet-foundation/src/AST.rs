@@ -1460,12 +1460,19 @@ impl Param {
     /// form. `is_trait_name` lets each crate plug in its own trait-name lookup
     /// (`TraitRegistry::is_trait_name` in sema, `Cx::trait_names` in codegen) —
     /// the classification rule itself lives once, here.
-    pub fn variadic_trait_bounds(&self, is_trait_name: impl Fn(&str) -> bool) -> Option<Vec<String>> {
+    pub fn variadic_trait_bounds(
+        &self,
+        is_trait_name: impl Fn(&str) -> bool,
+    ) -> Option<Vec<String>> {
         if !self.variadic {
             return None;
         }
         if let Some(list) = &self.variadic_bound_list {
-            return if list.is_empty() { None } else { Some(list.clone()) };
+            return if list.is_empty() {
+                None
+            } else {
+                Some(list.clone())
+            };
         }
         if let Type::Named(n) = &self.ty {
             if !n.is_empty() && is_trait_name(n) {

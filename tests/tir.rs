@@ -1053,10 +1053,7 @@ fn run() {
 ";
     let (code, stdout) = build_and_run("tir_string_after_before", src);
     assert_eq!(code, 0);
-    assert_eq!(
-        stdout,
-        "jet.dev\nnate\nno-separator\nno-separator\n"
-    );
+    assert_eq!(stdout, "jet.dev\nnate\nno-separator\nno-separator\n");
 }
 
 /// Map methods: insert, get, contains_key, keys, values, len, clear. BTreeMap
@@ -4207,8 +4204,7 @@ fn run() {
     // own `Clone` impl is a cheap handle clone, so plain `.clone()` replaces the
     // old `Arc::clone(&…)` text.)
     assert!(
-        out.rust
-            .contains("user_noop(&(((*user_h)).clone()));"),
+        out.rust.contains("user_noop(&(((*user_h)).clone()));"),
         "shared auto-clone free-call arg not byte-exact:\n{}",
         out.rust
     );

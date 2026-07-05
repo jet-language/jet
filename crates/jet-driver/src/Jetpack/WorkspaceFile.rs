@@ -91,7 +91,10 @@ pub fn load(dir: &Path) -> Option<Result<WorkspacePlan, Diagnostic>> {
             Some(evaluate(&src, dir))
         }
         _ => Some(Err(e1239_ambiguous_workspace(
-            &declaring.iter().map(|(p, _)| p.as_path()).collect::<Vec<_>>(),
+            &declaring
+                .iter()
+                .map(|(p, _)| p.as_path())
+                .collect::<Vec<_>>(),
         ))),
     }
 }
@@ -103,9 +106,9 @@ fn declares_workspace_module(src: &str) -> bool {
     let Ok(program) = crate::Parser::parse(&toks) else {
         return false;
     };
-    program.items.iter().any(|item| {
-        matches!(item, Item::Module(m) if m.name == Syntax::NS_WORKSPACE && !m.disabled)
-    })
+    program.items.iter().any(
+        |item| matches!(item, Item::Module(m) if m.name == Syntax::NS_WORKSPACE && !m.disabled),
+    )
 }
 
 /// E1239: two or more files declare `module workspace` — the index must be

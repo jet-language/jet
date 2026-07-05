@@ -102,14 +102,20 @@ pub fn evaluate_env(src: &str, base_dir: &Path) -> Result<EnvPlan, Diagnostic> {
             }
             ImageKind::Oci => {
                 let kind = manifest.as_ref().and_then(|m| m.package_kind(&image.from));
-                let is_executable =
-                    matches!(kind, Some(super::super::PackageManifest::PackageKind::Executable));
+                let is_executable = matches!(
+                    kind,
+                    Some(super::super::PackageManifest::PackageKind::Executable)
+                );
                 if !is_executable {
                     let is_library = matches!(
                         kind,
                         Some(super::super::PackageManifest::PackageKind::Library)
                     );
-                    return Err(oci_from_non_executable(&image.name, &image.from, is_library));
+                    return Err(oci_from_non_executable(
+                        &image.name,
+                        &image.from,
+                        is_library,
+                    ));
                 }
             }
         }

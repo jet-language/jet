@@ -280,8 +280,8 @@ pub(crate) fn net_handle_rust_type(name: &str) -> Option<&'static str> {
 // Re-export from Syntax so submodules (lower.rs, subset.rs) find them via `use super::*`.
 pub(crate) use crate::Syntax::alloc_handle_rust_type;
 pub(crate) use crate::Syntax::args_handle_rust_type;
-pub(crate) use crate::Syntax::reflect_handle_rust_type;
 pub(crate) use crate::Syntax::binary_text_handle_rust_type;
+pub(crate) use crate::Syntax::reflect_handle_rust_type;
 
 impl Cx {
     pub(crate) fn field_rust_type(&self, owner: &str, edge: &str, ty: &Type) -> String {
@@ -673,7 +673,9 @@ impl Cx {
             // `DecodeResult` shadows the core one — falls through to the plain
             // user-generic arm below instead.
             Type::Apply { name, args }
-                if name == "DecodeResult" && !args.is_empty() && !self.type_names.contains(name) =>
+                if name == "DecodeResult"
+                    && !args.is_empty()
+                    && !self.type_names.contains(name) =>
             {
                 format!(
                     "{}jet_std::DecodeResult<{}>",
@@ -757,7 +759,10 @@ impl Cx {
             // see the type's doc comment); join defensively rather than assume.
             Type::TraitObject(t) => format!(
                 "Box<dyn {}>",
-                t.iter().map(|n| Generics::user_trait_rust(n)).collect::<Vec<_>>().join(" + ")
+                t.iter()
+                    .map(|n| Generics::user_trait_rust(n))
+                    .collect::<Vec<_>>()
+                    .join(" + ")
             ),
             Type::Fn { params, ret, .. } => self.rust_fn_trait(params, ret.as_deref(), false),
             Type::Tuple(fields) => tuple_struct_name(&tuple_fields_plain(fields)),
@@ -1175,7 +1180,10 @@ pub(crate) fn build_cx_items(
                     cx.method_rets
                         .insert((s.name.clone(), m.name.clone()), m.return_type.clone());
                 }
-                if s.derives.iter().any(|(t, _)| t == Syntax::CONTRACT_PATCHABLE) {
+                if s.derives
+                    .iter()
+                    .any(|(t, _)| t == Syntax::CONTRACT_PATCHABLE)
+                {
                     cx.patchable.insert(s.name.clone());
                     let patch = format!("{}.Patch", s.name);
                     let base_ty = Type::Named(s.name.clone());
@@ -1193,10 +1201,8 @@ pub(crate) fn build_cx_items(
                             (AccessConvention::Move, base_ty),
                         ],
                     );
-                    cx.method_rets.insert(
-                        (s.name.clone(), "diff".to_string()),
-                        Some(patch_ty.clone()),
-                    );
+                    cx.method_rets
+                        .insert((s.name.clone(), "diff".to_string()), Some(patch_ty.clone()));
                     cx.method_sigs.insert(
                         (patch.clone(), "merge".to_string()),
                         vec![(AccessConvention::Move, patch_ty.clone())],
@@ -1576,7 +1582,8 @@ pub(crate) fn field_type_hashable(
         Type::IntN { .. } => true,
         Type::Option(inner) => field_type_hashable(inner, types, param_names),
         Type::Result { ok, err } => {
-            field_type_hashable(ok, types, param_names) && field_type_hashable(err, types, param_names)
+            field_type_hashable(ok, types, param_names)
+                && field_type_hashable(err, types, param_names)
         }
         Type::List(inner) => field_type_hashable(inner, types, param_names),
         Type::Named(n) if Generics::is_type_var_name(n) || param_names.contains(n.as_str()) => true,
@@ -1588,7 +1595,9 @@ pub(crate) fn field_type_hashable(
         // D-MEM1 S6: same `Pool`/`Id` split as `field_type_comparable` above.
         Type::Apply { name, .. } if name == "Pool" => false,
         Type::Apply { name, .. } if name == "Id" => true,
-        Type::Apply { args, .. } => args.iter().all(|a| field_type_hashable(a, types, param_names)),
+        Type::Apply { args, .. } => args
+            .iter()
+            .all(|a| field_type_hashable(a, types, param_names)),
         Type::Tuple(fields) => fields
             .iter()
             .all(|(_, t)| field_type_hashable(t, types, param_names)),

@@ -725,7 +725,10 @@ impl<'a> Checker<'a> {
                                 *kind = IndexKind::User(n.clone());
                             }
                             // D-MEM1 S6: `pool[id] = v` — generation-checked write.
-                            Some(Type::Apply { name, args: pool_args }) if name == "Pool" => {
+                            Some(Type::Apply {
+                                name,
+                                args: pool_args,
+                            }) if name == "Pool" => {
                                 *kind = IndexKind::Pool;
                                 let is_matching_id = matches!(
                                     &idx_ty,
@@ -1379,7 +1382,9 @@ impl<'a> Checker<'a> {
             Stmt::Yield(e, span) => {
                 let resolved_ret = self.ret.clone().map(|t| self.resolve_type(t));
                 let elem_ty = match &resolved_ret {
-                    Some(Type::Apply { name, args }) if name == Syntax::TYPE_STREAM && args.len() == 1 => {
+                    Some(Type::Apply { name, args })
+                        if name == Syntax::TYPE_STREAM && args.len() == 1 =>
+                    {
                         Some(args[0].clone())
                     }
                     _ => None,
@@ -1410,7 +1415,8 @@ impl<'a> Checker<'a> {
                                 Syntax::TYPE_STREAM,
                                 elem_ty.show()
                             ),
-                            "every `yield` in a generator must hand back the stream's element type".to_string(),
+                            "every `yield` in a generator must hand back the stream's element type"
+                                .to_string(),
                             type_fix_hint(&elem_ty, &got),
                             Some(e.span()),
                         ));
@@ -1614,7 +1620,9 @@ impl<'a> Checker<'a> {
                             }
                             // D-DYNARRAY1: `loop x in window` — a `View<T>` iterates its
                             // elements read-only, same shape as `loop x in a_list`.
-                            Some(Type::Apply { name, args }) if name == "View" && args.len() == 1 => {
+                            Some(Type::Apply { name, args })
+                                if name == "View" && args.len() == 1 =>
+                            {
                                 self.declare_loop_var(var.clone(), *var_span, &args[0]);
                             }
                             Some(other) => {
@@ -3064,9 +3072,11 @@ impl<'a> Checker<'a> {
                             format!("construct a `{}`: `{}({})`", dt, dt, "expr"),
                             Some(b.init.span()),
                         ));
-                    } else if let Some(diag) =
-                        crate::Sema::Diagnostics::typed_text_mismatch(&annot, &actual, b.init.span())
-                    {
+                    } else if let Some(diag) = crate::Sema::Diagnostics::typed_text_mismatch(
+                        &annot,
+                        &actual,
+                        b.init.span(),
+                    ) {
                         self.diags.push(diag);
                     } else {
                         self.diags.push(Diagnostic::error(

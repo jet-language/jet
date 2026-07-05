@@ -250,8 +250,13 @@ fn set_octal(header: &mut [u8; 512], offset: usize, len: usize, value: u64) {
 /// re-sorted so a caller that hand-builds a `BuildSpec` some other way still
 /// gets a deterministic `Env` order.
 pub fn sorted_env(entries: &[(String, String)]) -> Vec<(String, String)> {
-    let map: BTreeMap<&str, &str> = entries.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
-    map.into_iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+    let map: BTreeMap<&str, &str> = entries
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect();
+    map.into_iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect()
 }
 
 #[cfg(test)]
@@ -350,8 +355,10 @@ mod tests {
             files: vec![f2, f1],
             ..spec_a.clone()
         };
-        let dir_a = std::env::temp_dir().join(format!("jet-oci-test-order-a-{}", std::process::id()));
-        let dir_b = std::env::temp_dir().join(format!("jet-oci-test-order-b-{}", std::process::id()));
+        let dir_a =
+            std::env::temp_dir().join(format!("jet-oci-test-order-a-{}", std::process::id()));
+        let dir_b =
+            std::env::temp_dir().join(format!("jet-oci-test-order-b-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir_a);
         let _ = fs::remove_dir_all(&dir_b);
 
@@ -377,8 +384,10 @@ mod tests {
             files: vec![bin("usr/local/bin/app", "version two")],
             ..spec_a.clone()
         };
-        let dir_a = std::env::temp_dir().join(format!("jet-oci-test-diff-a-{}", std::process::id()));
-        let dir_b = std::env::temp_dir().join(format!("jet-oci-test-diff-b-{}", std::process::id()));
+        let dir_a =
+            std::env::temp_dir().join(format!("jet-oci-test-diff-a-{}", std::process::id()));
+        let dir_b =
+            std::env::temp_dir().join(format!("jet-oci-test-diff-b-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir_a);
         let _ = fs::remove_dir_all(&dir_b);
 
@@ -395,7 +404,11 @@ mod tests {
     fn manual_dump_for_tar_inspection() {
         let files = vec![
             bin("usr/local/bin/app", "hello binary contents"),
-            LayerFile { path: "etc/app.conf".to_string(), data: b"key=value\n".to_vec(), mode: 0o644 },
+            LayerFile {
+                path: "etc/app.conf".to_string(),
+                data: b"key=value\n".to_vec(),
+                mode: 0o644,
+            },
         ];
         let refs: Vec<&LayerFile> = files.iter().collect();
         let tar = build_tar(&refs);

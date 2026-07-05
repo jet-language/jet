@@ -108,7 +108,8 @@ pub fn keygen(force: bool) -> Result<(PathBuf, String), String> {
         .ok_or_else(|| "keygen produced no recipient".to_string())?
         .to_string();
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| format!("couldn't create keys directory: {e}"))?;
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("couldn't create keys directory: {e}"))?;
     }
     std::fs::write(&path, &identity).map_err(|e| format!("couldn't write identity: {e}"))?;
     set_mode(&path, 0o600);
@@ -163,7 +164,8 @@ pub fn read_store(project_dir: &Path) -> Result<Vec<(String, String)>, String> {
             identity_path().display()
         )
     })?;
-    let ciphertext = std::fs::read(&path).map_err(|e| format!("couldn't read `{}`: {e}", path.display()))?;
+    let ciphertext =
+        std::fs::read(&path).map_err(|e| format!("couldn't read `{}`: {e}", path.display()))?;
     let helper = ensure_bridge_helper()?;
     let cmd = format!("decrypt {} {}", identity.trim(), hex_encode(&ciphertext));
     let plaintext_hex = run_helper(&helper, &cmd)?;
@@ -186,7 +188,11 @@ pub fn write_store(project_dir: &Path, pairs: &[(String, String)]) -> Result<(),
     }
     let helper = ensure_bridge_helper()?;
     let plaintext = encode_pairs(pairs);
-    let cmd = format!("encrypt {} {}", recipients.join(","), hex_encode(&plaintext));
+    let cmd = format!(
+        "encrypt {} {}",
+        recipients.join(","),
+        hex_encode(&plaintext)
+    );
     let ciphertext_hex = run_helper(&helper, &cmd)?;
     let ciphertext = hex_decode(&ciphertext_hex)?;
     let path = store_path(project_dir);
@@ -197,8 +203,10 @@ pub fn write_store(project_dir: &Path, pairs: &[(String, String)]) -> Result<(),
     // half-written store — the temp file holds ciphertext only, same as the
     // final path.
     let tmp = path.with_extension("age.tmp");
-    std::fs::write(&tmp, &ciphertext).map_err(|e| format!("couldn't write `{}`: {e}", tmp.display()))?;
-    std::fs::rename(&tmp, &path).map_err(|e| format!("couldn't finalize `{}`: {e}", path.display()))?;
+    std::fs::write(&tmp, &ciphertext)
+        .map_err(|e| format!("couldn't write `{}`: {e}", tmp.display()))?;
+    std::fs::rename(&tmp, &path)
+        .map_err(|e| format!("couldn't finalize `{}`: {e}", path.display()))?;
     Ok(())
 }
 
@@ -321,9 +329,7 @@ fn hex_decode(s: &str) -> Result<Vec<u8>, String> {
     let mut out = Vec::with_capacity(s.len() / 2);
     let mut i = 0;
     while i < bytes.len() {
-        let hi = (bytes[i] as char)
-            .to_digit(16)
-            .ok_or("invalid hex digit")?;
+        let hi = (bytes[i] as char).to_digit(16).ok_or("invalid hex digit")?;
         let lo = (bytes[i + 1] as char)
             .to_digit(16)
             .ok_or("invalid hex digit")?;
@@ -382,7 +388,10 @@ mod tests {
         ));
         let _ = std::fs::create_dir_all(&dir);
         assert!(add_recipient(&dir, "age1exampleexampleexample"));
-        assert!(!add_recipient(&dir, "age1exampleexampleexample"), "idempotent");
+        assert!(
+            !add_recipient(&dir, "age1exampleexampleexample"),
+            "idempotent"
+        );
         assert_eq!(list_recipients(&dir), vec!["age1exampleexampleexample"]);
         std::fs::remove_dir_all(&dir).ok();
     }

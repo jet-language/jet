@@ -1243,10 +1243,7 @@ fn run() {
         None,
     );
     assert_eq!(code, 0, "migration codec program failed: {stderr}");
-    assert_eq!(
-        stdout,
-        "localhost\ntrue\nv1\n2\nlocalhost\ntrue\nv1->v2\n"
-    );
+    assert_eq!(stdout, "localhost\ntrue\nv1\n2\nlocalhost\ntrue\nv1->v2\n");
     let _ = fs::remove_dir_all(&dir);
 }
 

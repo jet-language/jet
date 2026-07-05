@@ -12,7 +12,7 @@
 
 use std::fs;
 use std::io::{Read, Write};
-use std::net::TcpStream;
+use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
@@ -24,6 +24,14 @@ fn have_tool(name: &str) -> bool {
 
 fn jet_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_jet"))
+}
+
+fn unused_local_port() -> u16 {
+    TcpListener::bind(("127.0.0.1", 0))
+        .expect("bind an ephemeral localhost port")
+        .local_addr()
+        .expect("read local addr")
+        .port()
 }
 
 /// Minimal blocking HTTP/1.1 GET over a raw `TcpStream` — the same shape of
@@ -228,41 +236,29 @@ fn jet_dev_web_serves_and_rebuilds_on_save() {
 // Section: user-defined `fn dev()` entry mode (was tests/web_dev_fn.rs)
 // ============================================================================
 
-const FN_FIXTURE_SRC: &str = r#"use core.devserver as devserver
+fn fn_fixture_src(port: u16, greeting: &str) -> String {
+    format!(
+        r#"use core.devserver as devserver
 
-fn dev() {
+fn dev() {{
     server :: devserver.for_app("app.jet")
-    server.port(8181)
+    server.port({port})
     server.serve()
+}}
+
+fn run() {{
+    print("{greeting}")
+}}
+"#
+    )
 }
 
-fn run() {
-    print("hello, world")
-}
-"#;
-
-/// Same source with one literal changed, so a rebuild produces different
-/// `app.js` output than the initial build — proof a save actually triggers a
-/// recompile rather than re-serving a cached response.
-const FN_FIXTURE_SRC_EDITED: &str = r#"use core.devserver as devserver
-
-fn dev() {
-    server :: devserver.for_app("app.jet")
-    server.port(8181)
-    server.serve()
-}
-
-fn run() {
-    print("hello there")
-}
-"#;
-
-/// Polls for the server to come up on the fixed port `8181` the fixture's
-/// own `dev()` passes to `.port(...)` — never a blind `sleep`.
+/// Polls for the server to come up on the port the fixture's own `dev()` passes
+/// to `.port(...)` — never a blind `sleep`.
 fn wait_for_server_up(port: u16, timeout: Duration) {
     let start = Instant::now();
     loop {
-        if http_get(port, "/__jet_dev_version").is_some() {
+        if matches!(http_get(port, "/__jet_dev_version"), Some((200, _))) {
             return;
         }
         if start.elapsed() > timeout {
@@ -293,7 +289,8 @@ fn jet_dev_runs_user_defined_dev_fn_and_rebuilds_on_save() {
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     let src_path = dir.join("app.jet");
-    fs::write(&src_path, FN_FIXTURE_SRC).unwrap();
+    let port = unused_local_port();
+    fs::write(&src_path, fn_fixture_src(port, "hello, world")).unwrap();
 
     let mut child = Command::new(jet_bin())
         .args(["dev", "app.jet"])
@@ -333,7 +330,6 @@ fn jet_dev_runs_user_defined_dev_fn_and_rebuilds_on_save() {
     });
     let guard = KillOnDrop(child);
 
-    let port: u16 = 8181;
     wait_for_server_up(port, Duration::from_secs(30));
 
     let (status, version_body) =
@@ -348,7 +344,7 @@ fn jet_dev_runs_user_defined_dev_fn_and_rebuilds_on_save() {
         "served app.js from the user's own dev() server should be non-empty"
     );
 
-    fs::write(&src_path, FN_FIXTURE_SRC_EDITED).unwrap();
+    fs::write(&src_path, fn_fixture_src(port, "hello there")).unwrap();
     let new_version = wait_for_version_change(port, &baseline_version, Duration::from_secs(20));
     assert_ne!(new_version, baseline_version);
 
@@ -376,20 +372,23 @@ fn jet_dev_app_zero_arg_watches_launched_file() {
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     let src_path = dir.join("app.jet");
+    let port = unused_local_port();
     fs::write(
         &src_path,
-        r#"use core.devserver as devserver
+        format!(
+            r#"use core.devserver as devserver
 
-fn dev() {
+fn dev() {{
     server :: devserver.app()
-    server.port(8182)
+    server.port({port})
     server.serve()
-}
+}}
 
-fn run() {
+fn run() {{
     print("hello, world")
-}
-"#,
+}}
+"#
+        ),
     )
     .unwrap();
 
@@ -426,7 +425,6 @@ fn run() {
     });
     let guard = KillOnDrop(child);
 
-    let port: u16 = 8182;
     wait_for_server_up(port, Duration::from_secs(30));
 
     let (status, version_body) =

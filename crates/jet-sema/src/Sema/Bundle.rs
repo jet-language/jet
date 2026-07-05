@@ -1720,11 +1720,11 @@ pub(crate) fn check_bundle_opts(
     // Force the same `CORELIB_PRELUDE` inclusion a hand-written
     // `use core.args` would trigger (any key works; the caller only checks
     // "is this set empty").
-    if bundle
-        .modules
-        .iter()
-        .any(|m| m.items.iter().any(|i| matches!(i, Item::Struct(s) if s.derives.iter().any(|(t, _)| t == "Cli"))))
-    {
+    if bundle.modules.iter().any(|m| {
+        m.items
+            .iter()
+            .any(|i| matches!(i, Item::Struct(s) if s.derives.iter().any(|(t, _)| t == "Cli")))
+    }) {
         used_core.insert("core.args::spec".to_string());
     }
     // D-MEM1 S6: `Shared<T>`/`Pool<T>`/`Id<T>` need `CORELIB_PRELUDE`'s `jet_std`

@@ -5,8 +5,8 @@ use crate::Numeric::{allows_float_money, is_money_like_name};
 use crate::Syntax;
 use crate::Traits::TraitRegistry;
 use crate::AST::{
-    AccessConvention, ConstAttr, DistinctDef, ElseBranch, EnumDef, Expr, Func, IfStmt, Item,
-    Param, Program, RustConstKind, Stmt, StructDef, Type,
+    AccessConvention, ConstAttr, DistinctDef, ElseBranch, EnumDef, Expr, Func, IfStmt, Item, Param,
+    Program, RustConstKind, Stmt, StructDef, Type,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -18,8 +18,7 @@ impl<'a> Checker<'a> {
             // D-ANY-JAI1: the `...[TraitA, TraitB]` bound-list form parses `ty`
             // as an unused `Type::Named("")` placeholder (the real bound list is
             // `variadic_bound_list`) — nothing to declared-type-check there.
-            let skip_type_check = (p.name == Syntax::KW_SELF
-                || p.variadic_bound_list.is_some())
+            let skip_type_check = (p.name == Syntax::KW_SELF || p.variadic_bound_list.is_some())
                 && matches!(&p.ty, Type::Named(n) if n.is_empty());
             if !skip_type_check {
                 let pty = self.resolve_type(p.ty.clone());
@@ -827,8 +826,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
             Some(sig) => {
                 // E0122: in Run mode plain run must return Unit. A single typed
                 // CLI parameter is checked later in Bundle.
-                if mode == CompileMode::Run && sig.params.is_empty() && sig.return_type.is_some()
-                {
+                if mode == CompileMode::Run && sig.params.is_empty() && sig.return_type.is_some() {
                     let span = prog.items.iter().find_map(|i| match i {
                         Item::Func(f) if f.name == "run" => Some(f.name_span),
                         _ => None,
@@ -1789,7 +1787,9 @@ pub(crate) fn register_struct(
         },
     );
     if !computed_fields.is_empty() {
-        registry.computed_fields.insert(s.name.clone(), computed_fields);
+        registry
+            .computed_fields
+            .insert(s.name.clone(), computed_fields);
     }
     legacy.insert(
         s.name.clone(),

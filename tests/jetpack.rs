@@ -429,13 +429,7 @@ fn enter_dash_p_adds_adhoc_package_with_no_manifest_at_all() {
     let out = Scratch::new("dashp-out");
     write_runnable_fixture(&fixtures.path, &out.path);
     let output = jetpack()
-        .args([
-            "enter",
-            "--no-color",
-            "--trust",
-            "--offline",
-            "--fixtures",
-        ])
+        .args(["enter", "--no-color", "--trust", "--offline", "--fixtures"])
         .arg(&fixtures.path)
         .args(["-p", "greet", "--", "greet"])
         .current_dir(&proj.path)
@@ -462,13 +456,7 @@ fn enter_dash_p_merges_with_project_declared_packages() {
     let out = base.join("greet-out");
     write_runnable_fixture(&fixtures, &out);
     let output = jetpack()
-        .args([
-            "enter",
-            "--no-color",
-            "--trust",
-            "--offline",
-            "--fixtures",
-        ])
+        .args(["enter", "--no-color", "--trust", "--offline", "--fixtures"])
         .arg(&fixtures)
         .args(["-p", "greet", "--", "sh", "-c", "hello && greet"])
         .current_dir(&proj)
@@ -611,7 +599,10 @@ fn bridge_flake_prints_shim_and_warns_on_unmapped_shell_hook() {
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("module env.dev {"), "stdout: {stdout}");
-    assert!(stdout.contains("packages: [fd, ripgrep]"), "stdout: {stdout}");
+    assert!(
+        stdout.contains("packages: [fd, ripgrep]"),
+        "stdout: {stdout}"
+    );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("L0204"), "stderr: {stderr}");
     assert!(stderr.contains("shellHook"), "stderr: {stderr}");
@@ -1380,7 +1371,10 @@ fn jet_build_reports_source_states() {
         String::from_utf8_lossy(&first.stderr)
     );
     let out1 = String::from_utf8_lossy(&first.stderr);
-    assert!(out1.contains("built"), "first build must report `built`: {out1}");
+    assert!(
+        out1.contains("built"),
+        "first build must report `built`: {out1}"
+    );
     assert!(
         out1.contains("1 built"),
         "summary must count the built package: {out1}"
@@ -1393,7 +1387,10 @@ fn jet_build_reports_source_states() {
         out2.contains("cached"),
         "re-build of the same content must report `cached`: {out2}"
     );
-    assert!(out2.contains("1 cached"), "summary must count the cache hit: {out2}");
+    assert!(
+        out2.contains("1 cached"),
+        "summary must count the cache hit: {out2}"
+    );
 }
 
 #[test]
@@ -1464,8 +1461,14 @@ fn jet_audit_reads_without_exec() {
         String::from_utf8_lossy(&out.stderr)
     );
     let report = String::from_utf8_lossy(&out.stderr);
-    assert!(report.contains("read-only, no build ran"), "audit is read-only: {report}");
-    assert!(report.contains("provenance"), "audit reports provenance: {report}");
+    assert!(
+        report.contains("read-only, no build ran"),
+        "audit is read-only: {report}"
+    );
+    assert!(
+        report.contains("provenance"),
+        "audit reports provenance: {report}"
+    );
     // Audit must not run a build: it never prints the realize progress line.
     assert!(
         !report.contains("resolving"),
@@ -1500,7 +1503,10 @@ fn jet_hangar_du_counts_source_built_objects() {
         String::from_utf8_lossy(&out.stderr)
     );
     let report = String::from_utf8_lossy(&out.stderr);
-    assert!(report.contains("built"), "du must mark source-built objects: {report}");
+    assert!(
+        report.contains("built"),
+        "du must mark source-built objects: {report}"
+    );
     assert!(
         report.contains("1 built from source"),
         "du summary must count source-built objects honestly: {report}"

@@ -128,7 +128,14 @@ fn sanitize_package_name(name: &str) -> String {
     }
     let out = out.trim_end_matches('-').to_string();
     if out.is_empty() || !out.chars().next().unwrap().is_ascii_alphabetic() {
-        format!("plugin-{}", if out.is_empty() { "export".to_string() } else { out })
+        format!(
+            "plugin-{}",
+            if out.is_empty() {
+                "export".to_string()
+            } else {
+                out
+            }
+        )
     } else {
         out
     }
@@ -138,7 +145,11 @@ fn sanitize_package_name(name: &str) -> String {
 /// the manifest `export:` field value, or the package/payload name when
 /// omitted (resolved by the caller — driver-layer manifest lookup, not
 /// codegen's concern, I3).
-pub fn emit_plugin(bundle: &ProgramBundle, whole_program_rust: &str, export_name: &str) -> PluginArtifacts {
+pub fn emit_plugin(
+    bundle: &ProgramBundle,
+    whole_program_rust: &str,
+    export_name: &str,
+) -> PluginArtifacts {
     let sanitized = sanitize_package_name(export_name);
     let entry_items = &bundle.modules[bundle.entry].items;
 
@@ -190,7 +201,9 @@ pub fn emit_plugin(bundle: &ProgramBundle, whole_program_rust: &str, export_name
     );
 
     let mut guest_rust = String::from(whole_program_rust);
-    guest_rust.push_str("\n// c81 / D-PLUGIN-EXPORT1=A: generated export wrappers (jet-codegen/Plugin.rs).\n");
+    guest_rust.push_str(
+        "\n// c81 / D-PLUGIN-EXPORT1=A: generated export wrappers (jet-codegen/Plugin.rs).\n",
+    );
     guest_rust.push_str(&wrapper_fns);
 
     PluginArtifacts {

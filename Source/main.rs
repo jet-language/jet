@@ -44,7 +44,9 @@ use CmdPkg::{
 };
 use CmdSchema::run_schema;
 use CmdSemIndex::run_semindex;
-use CmdSupply::{run_audit, run_key_backup, run_keygen, run_publish, run_sbom, run_vendor, run_yank};
+use CmdSupply::{
+    run_audit, run_key_backup, run_keygen, run_publish, run_sbom, run_vendor, run_yank,
+};
 
 /// How diagnostics should be presented this run, resolved once from flags +
 /// environment and threaded through the diagnostic-printing helpers.
@@ -1580,7 +1582,11 @@ fn maybe_dispatch_pinned_toolchain(raw: &[String]) {
                 .env(jet::Syntax::TOOLCHAIN_EXEC_MARKER_ENV, &version)
                 .status()
                 .unwrap_or_else(|e| {
-                    eprintln!("error: couldn't exec the pinned toolchain `{}`: {}", binary.display(), e);
+                    eprintln!(
+                        "error: couldn't exec the pinned toolchain `{}`: {}",
+                        binary.display(),
+                        e
+                    );
                     exit(ExitCodes::USER_ERROR);
                 });
             exit(status.code().unwrap_or(ExitCodes::USER_ERROR));

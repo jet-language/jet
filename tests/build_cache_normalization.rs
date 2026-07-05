@@ -18,11 +18,8 @@ static COUNTER: AtomicU64 = AtomicU64::new(0);
 /// varies), load its pre-sema bundle, and return the cache key.
 fn key_with(src: &str, profile_tag: &str, version: &str) -> String {
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let dir: PathBuf = std::env::temp_dir().join(format!(
-        "jet-buildnorm-{}-{}",
-        std::process::id(),
-        n
-    ));
+    let dir: PathBuf =
+        std::env::temp_dir().join(format!("jet-buildnorm-{}-{}", std::process::id(), n));
     std::fs::create_dir_all(&dir).unwrap();
     let file = dir.join("prog.jet");
     std::fs::write(&file, src).unwrap();

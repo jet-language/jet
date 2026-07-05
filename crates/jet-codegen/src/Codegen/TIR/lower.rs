@@ -1568,7 +1568,9 @@ pub(crate) fn lower_forin_collection(
 ///  - anything else → `Plain`.
 fn is_binding_free_user_variant_pattern_test(pattern: &Pattern, cx: &Cx) -> bool {
     match pattern {
-        Pattern::Variant { variant, bindings, .. } => {
+        Pattern::Variant {
+            variant, bindings, ..
+        } => {
             bindings.is_empty()
                 && !is_json_variant(variant)
                 && !is_key_variant(variant)
@@ -1742,11 +1744,16 @@ pub(crate) fn lower_if_cond(
             );
         }
     }
-    if let Expr::PatternTest { subject, pattern, .. } = cond {
+    if let Expr::PatternTest {
+        subject, pattern, ..
+    } = cond
+    {
         if is_binding_free_user_variant_pattern_test(pattern, cx) {
             let subj = lower_expr(subject, cx, env);
             let enum_type = match pattern {
-                Pattern::Variant { variant, .. } => cx.variant_owner.get(variant).map(String::as_str),
+                Pattern::Variant { variant, .. } => {
+                    cx.variant_owner.get(variant).map(String::as_str)
+                }
                 _ => None,
             };
             let pat_str = emit_match_pattern(cx, pattern, enum_type);
@@ -2022,10 +2029,7 @@ fn lower_struct_pattern_bindings(
 /// `str_match_scan_closure_ex` in full-match mode (the `if == {}` shape).
 fn str_match_scan_closure(pattern: &Pattern, cx: &Cx) -> (String, Vec<(String, Type)>) {
     let Pattern::StrMatch { parts, .. } = pattern else {
-        return (
-            "(|| -> Option<()> { Some(()) })()".to_string(),
-            Vec::new(),
-        );
+        return ("(|| -> Option<()> { Some(()) })()".to_string(), Vec::new());
     };
     str_match_scan_closure_ex(parts, cx, "_jet_switch_subject.as_str()", true)
 }
@@ -2145,9 +2149,7 @@ pub(crate) fn str_match_scan_closure_ex(
         .collect();
     let mut tuple_tys: Vec<String> = holes.iter().map(|(_, t)| cx.rust_type(t)).collect();
     if !require_full_match {
-        body.push_str(
-            "let __jet_consumed: usize = __jet_sm_orig_len - __jet_sm.len();\n",
-        );
+        body.push_str("let __jet_consumed: usize = __jet_sm_orig_len - __jet_sm.len();\n");
         tuple_vars.push("__jet_consumed".to_string());
         tuple_tys.push("usize".to_string());
     }
@@ -2242,7 +2244,12 @@ fn lower_str_match_pattern_bindings(pattern: &Pattern, cx: &Cx, env: &mut LowerE
     if holes.is_empty() {
         return Vec::new();
     }
-    let tuple_ty_str = tuple_join(&holes.iter().map(|(_, t)| cx.rust_type(t)).collect::<Vec<_>>());
+    let tuple_ty_str = tuple_join(
+        &holes
+            .iter()
+            .map(|(_, t)| cx.rust_type(t))
+            .collect::<Vec<_>>(),
+    );
     // `TStmt::Let` always mangles its `name` at emission (Codegen/TIR/emit.rs),
     // so the tuple temp's REFERENCED name must go through the same `mangle`.
     let tuple_local = "__jet_sm_tuple";
@@ -3102,7 +3109,8 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             // plain `.clone()` on that would hand back another `&str` (the
             // wrong Rust type for `ty: Type::String`), not an owned `String`;
             // `.to_string()` is the correct materialization here.
-            let is_view_copy = matches!(&**inner, Expr::Ident(name, _) if env.is_string_view_local(name));
+            let is_view_copy =
+                matches!(&**inner, Expr::Ident(name, _) if env.is_string_view_local(name));
             let kind = if is_view_copy {
                 TExprKind::MaterializeView(Box::new(operand))
             } else {
@@ -3840,19 +3848,14 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             // D-PATCH1: partial `T.Patch.{ … }` — fill omitted fields with `None`,
             // wrap provided scalars in `Some(…)`.
             if type_name.ends_with(".Patch")
-                && cx.patchable
+                && cx
+                    .patchable
                     .iter()
                     .any(|b| format!("{b}.Patch") == *type_name)
             {
-                let provided: std::collections::HashMap<_, _> = fields
-                    .iter()
-                    .map(|(n, _, fe)| (n.as_str(), fe))
-                    .collect();
-                let all = cx
-                    .struct_fields
-                    .get(type_name)
-                    .cloned()
-                    .unwrap_or_default();
+                let provided: std::collections::HashMap<_, _> =
+                    fields.iter().map(|(n, _, fe)| (n.as_str(), fe)).collect();
+                let all = cx.struct_fields.get(type_name).cloned().unwrap_or_default();
                 let tfields = all
                     .iter()
                     .map(|(fname, fty)| {
@@ -4048,8 +4051,9 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     .get(type_name)
                     .is_some_and(|c| c.contains(member))
                 {
-                    let field_ty = struct_field_type(cx, &Type::Named(type_name.to_string()), member)
-                        .unwrap_or(Type::Int);
+                    let field_ty =
+                        struct_field_type(cx, &Type::Named(type_name.to_string()), member)
+                            .unwrap_or(Type::Int);
                     return TExpr {
                         ty: field_ty,
                         kind: TExprKind::Field {
@@ -4338,9 +4342,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 Type::Map { value, .. } => (**value).clone(),
                 Type::FixedList { elem, .. } => (**elem).clone(),
                 // D-DYNARRAY1: `window[i]` on a `View<T>`.
-                Type::Apply { name, args } if name == "View" && args.len() == 1 => {
-                    args[0].clone()
-                }
+                Type::Apply { name, args } if name == "View" && args.len() == 1 => args[0].clone(),
                 _ => Type::Int,
             };
             // D-SOA1: `xs[i]` on a columnar list gathers the logical `S` from the
@@ -4629,9 +4631,9 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             }
         }
         Expr::Paren(inner, _) => lower_expr(inner, cx, env),
-        Expr::PatternTest { subject, pattern, .. }
-            if is_binding_free_user_variant_pattern_test(pattern, cx) =>
-        {
+        Expr::PatternTest {
+            subject, pattern, ..
+        } if is_binding_free_user_variant_pattern_test(pattern, cx) => {
             lower_binding_free_variant_pattern_test(subject, pattern, cx, env)
         }
         _ => unreachable!("expression not in TIR subset"),
@@ -4683,7 +4685,10 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
     // before the `Type::Named`-only path below. User-type-wins (D-SHIFT1
     // precedent): a user struct named `DecodeResult` shadows the core one.
     if let Type::Apply { name, .. } = recv_ty {
-        if name == "DecodeResult" && !cx.type_names.contains(name) && matches!(member, "value" | "migration") {
+        if name == "DecodeResult"
+            && !cx.type_names.contains(name)
+            && matches!(member, "value" | "migration")
+        {
             return Some(member.to_string());
         }
         return None;
@@ -4757,7 +4762,10 @@ pub(crate) fn struct_field_type(cx: &Cx, recv_ty: &Type, field: &str) -> Option<
     // first so a same-named user field always wins.
     if let Type::Apply { name, args } = recv_ty {
         if let Some(fields) = cx.struct_fields.get(name) {
-            return fields.iter().find(|(f, _)| f == field).map(|(_, t)| t.clone());
+            return fields
+                .iter()
+                .find(|(f, _)| f == field)
+                .map(|(_, t)| t.clone());
         }
         if name == "DecodeResult" {
             return match field {
@@ -6593,10 +6601,9 @@ pub(crate) fn lambda_body_ty_expecting(
     fn bind_params(lam: &Lambda, env: &LowerEnv, expected_params: Option<&[Type]>) -> LowerEnv {
         let mut lam_env = clone_env(env);
         for (i, p) in lam.params.iter().enumerate() {
-            let ty = p
-                .ty
-                .clone()
-                .or_else(|| expected_params.and_then(|ps| ps.get(i)).cloned());
+            let ty =
+                p.ty.clone()
+                    .or_else(|| expected_params.and_then(|ps| ps.get(i)).cloned());
             lam_env.locals.insert(p.name.clone(), (mangle(&p.name), ty));
         }
         lam_env
@@ -7251,10 +7258,9 @@ pub(crate) fn lower_lambda_expecting(
     // s.field.method())` is the first caller to actually chain a method off a
     // bare closure param's field, which is what surfaced the gap).
     for (i, p) in lam.params.iter().enumerate() {
-        let ty = p
-            .ty
-            .clone()
-            .or_else(|| expected_params.and_then(|ps| ps.get(i)).cloned());
+        let ty =
+            p.ty.clone()
+                .or_else(|| expected_params.and_then(|ps| ps.get(i)).cloned());
         lam_env.bind(&p.name, mangle(&p.name), ty);
     }
     // The rendered param list: `name[: ty]`, exactly as `emit_lambda`. A bare

@@ -767,7 +767,8 @@ fn lock_file_content_hash_roundtrip() {
         effects: vec![],
 
         effect_grants: vec![],
-        envelope: None,    };
+        envelope: None,
+    };
     let lock = LockFile {
         version: 1,
         packages: vec![pkg],
@@ -777,7 +778,8 @@ fn lock_file_content_hash_roundtrip() {
             path: "packages/hello".into(),
         }],
         comptime_inputs: vec![],
-        toolchains: Vec::new(),    };
+        toolchains: Vec::new(),
+    };
     let serialized = jet::Lock::write(&lock);
     assert!(
         serialized.contains("content-hash = \"sha256-deadbeef\""),
@@ -1683,11 +1685,13 @@ fn make_test_lock(name: &str, version: &str, fp: &str) -> jet::Lock::LockFile {
             effects: vec![],
 
             effect_grants: vec![],
-            envelope: None,        }],
+            envelope: None,
+        }],
         root_dependencies: vec![name.into()],
         workspace_members: vec![],
         comptime_inputs: Vec::new(),
-        toolchains: Vec::new(),    }
+        toolchains: Vec::new(),
+    }
 }
 
 #[test]
@@ -1785,7 +1789,8 @@ fn e1217_missing_locked_revision() {
         root_dependencies: vec![],
         workspace_members: vec![],
         comptime_inputs: Vec::new(),
-        toolchains: Vec::new(),    };
+        toolchains: Vec::new(),
+    };
     let err = verify_all_manifest_deps_locked(&mf, &empty_lock)
         .expect_err("missing locked revision must fail");
     assert_eq!(err.code, "E1217");
@@ -2005,8 +2010,14 @@ fn cli_publish_pushes_index_and_enforces_immutability_e1234() {
     );
 
     let index = read_index_file(&bare, "textkit").expect("index file must exist in registry");
-    assert!(index.contains("\"name\":\"textkit\""), "index line:\n{index}");
-    assert!(index.contains("\"version\":\"1.2.0\""), "index line:\n{index}");
+    assert!(
+        index.contains("\"name\":\"textkit\""),
+        "index line:\n{index}"
+    );
+    assert!(
+        index.contains("\"version\":\"1.2.0\""),
+        "index line:\n{index}"
+    );
     assert!(index.contains("\"yanked\":false"), "index line:\n{index}");
 
     // S2/D-MEM1: `jet publish` now unconditionally snapshots the public-fn
@@ -2029,7 +2040,10 @@ fn cli_publish_pushes_index_and_enforces_immutability_e1234() {
         "republishing an existing version must fail"
     );
     let stderr2 = String::from_utf8_lossy(&out2.stderr);
-    assert!(stderr2.contains("E1234"), "republish must cite E1234:\n{stderr2}");
+    assert!(
+        stderr2.contains("E1234"),
+        "republish must cite E1234:\n{stderr2}"
+    );
 
     let _ = fs::remove_dir_all(&tmp);
 }

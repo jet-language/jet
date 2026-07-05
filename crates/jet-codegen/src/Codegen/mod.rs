@@ -411,11 +411,15 @@ fn strip_unused_txn_prelude(out: String) -> String {
 fn strip_unused_term_prelude(out: String) -> String {
     // Fast path: if the term dispatchers are referenced in user code (after the
     // prelude), keep the whole term section.
-    let prelude_end = [out.find("fn user_"), out.find("pub fn user_"), out.find("fn main()")]
-        .into_iter()
-        .flatten()
-        .min()
-        .unwrap_or(out.len());
+    let prelude_end = [
+        out.find("fn user_"),
+        out.find("pub fn user_"),
+        out.find("fn main()"),
+    ]
+    .into_iter()
+    .flatten()
+    .min()
+    .unwrap_or(out.len());
     let user_code = &out[prelude_end..];
     if user_code.contains("jet_term_enter") || user_code.contains("jet_term_read_key") {
         return out;
@@ -1006,10 +1010,7 @@ fn emit_test_body(cx: &Cx, body: &[crate::AST::Stmt], out: &mut String) {
 /// of `main` on those targets, so nothing references it.
 fn uses_gtk_backend(bundle: &ProgramBundle) -> bool {
     bundle.active_os == Syntax::OsTarget::Linux
-        && bundle
-            .used_core
-            .iter()
-            .any(|u| u == "core.ui::gtk_backend")
+        && bundle.used_core.iter().any(|u| u == "core.ui::gtk_backend")
 }
 
 pub fn emit_bundle(bundle: &ProgramBundle, _mode: CompileMode, link: Option<&FfiLink>) -> String {

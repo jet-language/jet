@@ -6,7 +6,9 @@ use super::*;
 use crate::Collections::is_map_key_type;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
-use crate::AST::{AccessConvention, Call, CallArg, EnumLitArg, Expr, IndexKind, StrPart, Type, UnOp};
+use crate::AST::{
+    AccessConvention, Call, CallArg, EnumLitArg, Expr, IndexKind, StrPart, Type, UnOp,
+};
 use std::collections::HashSet;
 
 impl<'a> Checker<'a> {
@@ -40,7 +42,6 @@ impl<'a> Checker<'a> {
         }
         ty
     }
-
 
     pub(crate) fn infer_inner(&mut self, e: &mut Expr) -> Option<Type> {
         // D-EMPTYLIT1: an empty `[]` always parses as `Expr::ListLit`. When the
@@ -220,7 +221,9 @@ impl<'a> Checker<'a> {
                 };
                 let span = *str_span;
                 let old = std::mem::replace(e, Expr::Absent(span));
-                let Expr::Str(parts, _) = old else { unreachable!() };
+                let Expr::Str(parts, _) = old else {
+                    unreachable!()
+                };
                 // Rewrite to `Call { name: "Sql"|"Html", args }` — a literal
                 // segment then a hole, alternating, always closing on a
                 // literal (`literals.len() == holes.len() + 1`). Codegen
@@ -409,7 +412,8 @@ impl<'a> Checker<'a> {
                             .to_string(),
                         format!(
                             "give away a copy instead (`{} {}`) where it moved",
-                            Syntax::KW_COPY, name
+                            Syntax::KW_COPY,
+                            name
                         ),
                         Some(*span),
                     ));
@@ -670,7 +674,10 @@ impl<'a> Checker<'a> {
                 // duplication) — flagged regardless of whether it's cloneable.
                 if self.no_alloc && type_owns_heap(&inner_t, self.registry) {
                     self.diags.push(no_alloc_violation(
-                        format!("`copy` of `{}` allocates — it owns heap data", inner_t.show()),
+                        format!(
+                            "`copy` of `{}` allocates — it owns heap data",
+                            inner_t.show()
+                        ),
                         *span,
                     ));
                 }
@@ -845,7 +852,10 @@ impl<'a> Checker<'a> {
                 // that owns heap data (directly or transitively) allocates.
                 if self.no_alloc && type_owns_heap(&Type::Named(type_name.clone()), self.registry) {
                     self.diags.push(no_alloc_violation(
-                        format!("constructing `{}` here allocates — it owns heap data", type_name),
+                        format!(
+                            "constructing `{}` here allocates — it owns heap data",
+                            type_name
+                        ),
                         *span,
                     ));
                 }
@@ -898,7 +908,10 @@ impl<'a> Checker<'a> {
                 // that owns heap data (directly or transitively) allocates.
                 if self.no_alloc && type_owns_heap(&Type::Named(type_name.clone()), self.registry) {
                     self.diags.push(no_alloc_violation(
-                        format!("constructing `{}` here allocates — it owns heap data", type_name),
+                        format!(
+                            "constructing `{}` here allocates — it owns heap data",
+                            type_name
+                        ),
                         *span,
                     ));
                 }
@@ -936,7 +949,10 @@ impl<'a> Checker<'a> {
                 } else {
                     self.diags.push(Diagnostic::error(
                         "E0308",
-                        format!("bare `{}` needs a known optional type here", Syntax::LIT_NULL),
+                        format!(
+                            "bare `{}` needs a known optional type here",
+                            Syntax::LIT_NULL
+                        ),
                         format!(
                             "`{}` only fits where a `T?` is expected (S32)",
                             Syntax::LIT_NULL
@@ -1519,8 +1535,7 @@ impl<'a> Checker<'a> {
             // precedent, not a new diagnostic code — see `jet_pool_get`).
             Type::Apply { name, args } if name == "Pool" && args.len() == 1 => {
                 *kind = IndexKind::Pool;
-                let is_matching_id =
-                    matches!(&idx_ty, Type::Apply { name, args: id_args } if name == "Id" && id_args.first() == args.first());
+                let is_matching_id = matches!(&idx_ty, Type::Apply { name, args: id_args } if name == "Id" && id_args.first() == args.first());
                 if !is_matching_id {
                     self.diags.push(Diagnostic::error(
                         "E0112",
@@ -1528,7 +1543,8 @@ impl<'a> Checker<'a> {
                             "`Pool` indexes need a matching `Id<T>`, not {}",
                             idx_ty.show()
                         ),
-                        "a pool slot is only reached through the `Id<T>` its own `.add()` returned".to_string(),
+                        "a pool slot is only reached through the `Id<T>` its own `.add()` returned"
+                            .to_string(),
                         "index with the `Id<T>` handle from `.add(...)`".to_string(),
                         Some(index.span()),
                     ));

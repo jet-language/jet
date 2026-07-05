@@ -973,7 +973,9 @@ fn cranelift_trap_then_hot_swap_continues() {
     // the crashed run's partial heap.
     let out = match backend.hot_swap("run", &recovers, false) {
         Ok(RunOutcome::Ran { stdout, .. }) => stdout,
-        Ok(RunOutcome::Problems(ds)) => panic!("hot_swap after a trap produced diagnostics: {ds:?}"),
+        Ok(RunOutcome::Problems(ds)) => {
+            panic!("hot_swap after a trap produced diagnostics: {ds:?}")
+        }
         Err(ds) => panic!("hot_swap after a trap errored: {ds:?}"),
     };
     assert_eq!(out, "recovered\n");

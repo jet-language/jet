@@ -1,10 +1,8 @@
 //! D-PATCH1 (card #181): `@[Patchable]` derive — synthetic `T.Patch` type + apply/diff/merge.
 
-use crate::AST::{
-    AccessConvention, Field, Item, StructDef, Type,
-};
 use crate::Diagnostics::Diagnostic;
 use crate::Syntax;
+use crate::AST::{AccessConvention, Field, Item, StructDef, Type};
 
 use super::{MethodSig, TypeDef, TypeRegistry};
 
@@ -79,7 +77,10 @@ fn validate_patchable_struct(s: &StructDef) -> Option<Diagnostic> {
     if !s.type_params.is_empty() {
         return Some(Diagnostic::error(
             "E0336",
-            format!("`@[Patchable]` on generic struct `{}` isn't supported yet", s.name),
+            format!(
+                "`@[Patchable]` on generic struct `{}` isn't supported yet",
+                s.name
+            ),
             "`T.Patch` codegen needs a concrete field list — generic patches are a follow-on"
                 .to_string(),
             "remove the type parameters, or drop `@[Patchable]` for now".to_string(),
@@ -94,8 +95,7 @@ fn validate_patchable_struct(s: &StructDef) -> Option<Diagnostic> {
                     "`@[Patchable]` struct `{}` field `{}` has function type",
                     s.name, f.name
                 ),
-                "patches are data values — function-typed fields can't be patched"
-                    .to_string(),
+                "patches are data values — function-typed fields can't be patched".to_string(),
                 "store a callable handle type instead, or drop `@[Patchable]`".to_string(),
                 Some(f.name_span),
             ));
@@ -145,10 +145,7 @@ pub(crate) fn register_patchable_methods(items: &[Item], registry: &mut TypeRegi
                     return_type: Some(patch_ty.clone()),
                     is_static: true,
                     self_conv: None,
-                    param_info: vec![
-                        ("new".to_string(), false),
-                        ("old".to_string(), false),
-                    ],
+                    param_info: vec![("new".to_string(), false), ("old".to_string(), false)],
                     defaults: vec![None, None],
                     must_use: false,
                 },

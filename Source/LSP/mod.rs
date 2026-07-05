@@ -69,7 +69,8 @@ mod tests {
 
     #[test]
     fn symbol_db_finds_function() {
-        let src = "fn greet(name: String) {\n    print(name);\n}\nfn run() {\n    greet(\"world\");\n}\n";
+        let src =
+            "fn greet(name: String) {\n    print(name);\n}\nfn run() {\n    greet(\"world\");\n}\n";
         let (_, bundle, facts) = check_document_with_bundle("test.jet", src);
         let bundle = bundle.expect("bundle");
         let db = build_symbol_db(&bundle, &facts);

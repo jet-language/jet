@@ -502,7 +502,8 @@ fn write_sbom_for_build(file: &str, bin: &Path) {
         root_dependencies: Vec::new(),
         workspace_members: Vec::new(),
         comptime_inputs: Vec::new(),
-        toolchains: Vec::new(),    });
+        toolchains: Vec::new(),
+    });
 
     let sbom = jet::Publish::emit_spdx(&lock, &name, &version);
     let out = bin.with_extension("spdx");
@@ -956,7 +957,11 @@ fn native_cache_key(file: &str, profile_tag: &str, mode_tag: &str) -> Option<Str
         manifest_fingerprint(file),
         mode_tag,
     );
-    Some(jet::CanonicalAST::ast_cache_key(&bundle, profile_tag, &salt))
+    Some(jet::CanonicalAST::ast_cache_key(
+        &bundle,
+        profile_tag,
+        &salt,
+    ))
 }
 
 /// E2-M15 / E3302: check that rustc knows the requested cross-compilation target.
@@ -1289,9 +1294,7 @@ pub(crate) fn write_plugin_artifacts(
             component_wasm_path.to_str().unwrap(),
         ])
         .output()
-        .map_err(|e| {
-            PluginBuildError::ToolFailure(format!("couldn't run `wasm-tools` ({e})"))
-        })?;
+        .map_err(|e| PluginBuildError::ToolFailure(format!("couldn't run `wasm-tools` ({e})")))?;
     if !new.status.success() {
         return Err(PluginBuildError::ToolFailure(format!(
             "`wasm-tools component new` failed\n{}",

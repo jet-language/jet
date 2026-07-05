@@ -3,9 +3,9 @@
 //! check — for the second, mutually-exclusive `#Target(Os.*)` axis of the
 //! same `#Target(...)` marker family.
 
-use crate::AST::{Expr, Func, Item, LambdaBody, Pattern, ProgramBundle, Stmt, SwitchArm, Type};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax::{self, OsTarget as Os};
+use crate::AST::{Expr, Func, Item, LambdaBody, Pattern, ProgramBundle, Stmt, SwitchArm, Type};
 use std::collections::HashMap;
 
 /// D-OSTARGET2=B (ratified 2026-07-03): fold every `comptime if build.os == {
@@ -93,9 +93,7 @@ fn desugar_child_blocks(stmt: &mut Stmt, active: Os, diags: &mut Vec<Diagnostic>
         Stmt::Assign { value, .. } => desugar_expr(value, active, diags),
         Stmt::Return(Some(e), _) => desugar_expr(e, active, diags),
         Stmt::If(ifs) => desugar_if(ifs, active, diags),
-        Stmt::While { body, .. } | Stmt::For { body, .. } => {
-            desugar_stmts(body, active, diags)
-        }
+        Stmt::While { body, .. } | Stmt::For { body, .. } => desugar_stmts(body, active, diags),
         Stmt::Switch {
             arms, else_body, ..
         } => {

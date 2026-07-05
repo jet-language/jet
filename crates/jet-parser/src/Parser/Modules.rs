@@ -110,7 +110,7 @@ impl<'a> Parser<'a> {
             }
         };
         self.bump(); // `.`
-        // S84: role names may be kebab-case (`system.my-host`).
+                     // S84: role names may be kebab-case (`system.my-host`).
         let (path, path_span) = self.expect_dashed_name("for the role name")?;
         self.expect(TokKind::LBrace, "to open the module body")?;
 
@@ -1011,8 +1011,9 @@ impl<'a> Parser<'a> {
                 // D-JPK-IMAGE1: `from: system.<name>` (the `.Iso` tier) or
                 // `from: packages.<name>` (the `.Oci` tier) — the `system`/
                 // `packages` keyword then the name.
-                let (kw, kw_span) =
-                    self.expect_ident("for `system` or `packages`, e.g. `system.halcyon` or `packages.cli`")?;
+                let (kw, kw_span) = self.expect_ident(
+                    "for `system` or `packages`, e.g. `system.halcyon` or `packages.cli`",
+                )?;
                 if kw != Syntax::NS_SYSTEM && kw != Syntax::IMAGE_FROM_PACKAGES {
                     return Err(image_from_not_system(kw_span));
                 }

@@ -1391,10 +1391,8 @@ pub const SECRETS_VERBS: &[&str] = &[
 ];
 pub const SECRETS_RECIPIENTS_VERB_ADD: &str = "add";
 pub const SECRETS_RECIPIENTS_VERB_LIST: &str = "list";
-pub const SECRETS_RECIPIENTS_VERBS: &[&str] = &[
-    SECRETS_RECIPIENTS_VERB_ADD,
-    SECRETS_RECIPIENTS_VERB_LIST,
-];
+pub const SECRETS_RECIPIENTS_VERBS: &[&str] =
+    &[SECRETS_RECIPIENTS_VERB_ADD, SECRETS_RECIPIENTS_VERB_LIST];
 /// U13: the `--force` flag on `jetpack secrets keygen`, overwriting an
 /// existing identity. Reuses the bare string rather than minting a new flag
 /// constant family — mirrors `jet keygen --force`'s own flag spelling
@@ -1764,16 +1762,16 @@ pub const MANIFEST_FIELD_EDITION: &str = "edition";
 /// D-RINGLAYER1=A: optional package runtime-layer ceiling in `payload: { … }`.
 pub const MANIFEST_FIELD_LAYER: &str = "layer";
 
+pub use crate::OsTarget::{
+    os_target_build_context, os_target_dispatch_arm, os_target_dispatch_exhaustive,
+    os_target_mixed_axis, os_target_unmatched_call, OsTarget,
+};
 pub use crate::RingLayer::{
     core_module_layer, core_usage_layer, layer_ceiling_exceeded, RuntimeLayer,
 };
 pub use crate::WebPartition::{
     is_abi_safe_type, web_abi_type, web_cross_partition, web_target_browser, WebBucket,
     WebPartitionMarker,
-};
-pub use crate::OsTarget::{
-    os_target_build_context, os_target_dispatch_arm, os_target_dispatch_exhaustive,
-    os_target_mixed_axis, os_target_unmatched_call, OsTarget,
 };
 
 /// S52 (ratified M12; amended 2026-06-16, U2): the unified single lockfile lives

@@ -343,7 +343,8 @@ impl<'a> Parser<'a> {
                 ));
             }
         }
-        while matches!(self.peek().kind, TokKind::Dot) && matches!(self.peek2().kind, TokKind::Int(_))
+        while matches!(self.peek().kind, TokKind::Dot)
+            && matches!(self.peek2().kind, TokKind::Int(_))
         {
             self.bump(); // `.`
             let TokKind::Int(n) = self.peek().kind else {
@@ -2302,8 +2303,7 @@ impl<'a> Parser<'a> {
                     Diagnostic::error(
                         "E0003",
                         format!("`#Target(Os.{os_name})` is not a known native OS"),
-                        "native OS targets are `Os.Linux`, `Os.Macos`, or `Os.Windows`"
-                            .to_string(),
+                        "native OS targets are `Os.Linux`, `Os.Macos`, or `Os.Windows`".to_string(),
                         format!(
                             "write `#Target(Os.{})`, `#Target(Os.{})`, or `#Target(Os.{})`",
                             Syntax::TARGET_OS_LINUX,
@@ -3046,63 +3046,61 @@ impl<'a> Parser<'a> {
         } else {
             self.expect_ident("for a parameter name")?
         };
-        let (ty, ty_span, variadic, variadic_bound_list) = if matches!(
-            self.peek().kind,
-            TokKind::Colon
-        ) {
-            self.bump();
-            // D-MEM1: the capability sigil rides the type side — `name: &T`/`^T`.
-            // (Receivers carry it on `self` instead: `&self`, parsed above.)
-            if let Some(type_cap) = self.parse_capability_sigil() {
-                // A real pre-name marker (not the unmarked `Read` default) plus a
-                // type-side sigil is two markers (E0029).
-                if convention != AccessConvention::Read {
-                    self.diags.push(Diagnostic::error(
-                        "E0029",
-                        format!("`{}` has two capability markers", name),
-                        "a parameter's access capability is written once — on the type \
-                         (`name: &Type`), or on `self` for a receiver"
-                            .to_string(),
-                        "keep the sigil on the type and remove the other".to_string(),
-                        Some(name_span),
-                    ));
-                }
-                convention = type_cap;
-            }
-            // D-VARIADIC1: `name: ...T` — variadic rest parameter (last position only).
-            if matches!(self.peek().kind, TokKind::DotDotDot) {
+        let (ty, ty_span, variadic, variadic_bound_list) =
+            if matches!(self.peek().kind, TokKind::Colon) {
                 self.bump();
-                // D-ANY-JAI1/D-VARARGBOUND1: `...[TraitA, TraitB]` — an explicit
-                // trait-bound list. `[` never starts a legal *concrete* variadic
-                // element type here (list `[T]` and map `[K, V]` types don't make
-                // sense as a rest-parameter's own element type spelled this way),
-                // so this position always means a bound list. Bare `...Trait` /
-                // `...T` both go through `type_()` unchanged — sema tells a
-                // trait name from a concrete type the same way `resolve_type_name`
-                // already does elsewhere.
-                if matches!(self.peek().kind, TokKind::LBracket) {
-                    let (bounds, bracket_span) = self.parse_bracket_trait_bound_list()?;
-                    (Type::Named(String::new()), bracket_span, true, Some(bounds))
+                // D-MEM1: the capability sigil rides the type side — `name: &T`/`^T`.
+                // (Receivers carry it on `self` instead: `&self`, parsed above.)
+                if let Some(type_cap) = self.parse_capability_sigil() {
+                    // A real pre-name marker (not the unmarked `Read` default) plus a
+                    // type-side sigil is two markers (E0029).
+                    if convention != AccessConvention::Read {
+                        self.diags.push(Diagnostic::error(
+                            "E0029",
+                            format!("`{}` has two capability markers", name),
+                            "a parameter's access capability is written once — on the type \
+                         (`name: &Type`), or on `self` for a receiver"
+                                .to_string(),
+                            "keep the sigil on the type and remove the other".to_string(),
+                            Some(name_span),
+                        ));
+                    }
+                    convention = type_cap;
+                }
+                // D-VARIADIC1: `name: ...T` — variadic rest parameter (last position only).
+                if matches!(self.peek().kind, TokKind::DotDotDot) {
+                    self.bump();
+                    // D-ANY-JAI1/D-VARARGBOUND1: `...[TraitA, TraitB]` — an explicit
+                    // trait-bound list. `[` never starts a legal *concrete* variadic
+                    // element type here (list `[T]` and map `[K, V]` types don't make
+                    // sense as a rest-parameter's own element type spelled this way),
+                    // so this position always means a bound list. Bare `...Trait` /
+                    // `...T` both go through `type_()` unchanged — sema tells a
+                    // trait name from a concrete type the same way `resolve_type_name`
+                    // already does elsewhere.
+                    if matches!(self.peek().kind, TokKind::LBracket) {
+                        let (bounds, bracket_span) = self.parse_bracket_trait_bound_list()?;
+                        (Type::Named(String::new()), bracket_span, true, Some(bounds))
+                    } else {
+                        let (t, ts) = self.type_()?;
+                        (t, ts, true, None)
+                    }
                 } else {
                     let (t, ts) = self.type_()?;
-                    (t, ts, true, None)
+                    (t, ts, false, None)
                 }
+            } else if name == Syntax::KW_SELF {
+                // S27: receiver type is the owning struct/enum; sema fills it in.
+                (Type::Named(String::new()), name_span, false, None)
             } else {
-                let (t, ts) = self.type_()?;
-                (t, ts, false, None)
-            }
-        } else if name == Syntax::KW_SELF {
-            // S27: receiver type is the owning struct/enum; sema fills it in.
-            (Type::Named(String::new()), name_span, false, None)
-        } else {
-            return Err(Diagnostic::error(
-                "E0003",
-                format!("expected `:` after the parameter `{}`", name),
-                "every parameter except `self` needs a type after its name".to_string(),
-                format!("write `{}: Type`", name),
-                Some(name_span),
-            ));
-        };
+                return Err(Diagnostic::error(
+                    "E0003",
+                    format!("expected `:` after the parameter `{}`", name),
+                    "every parameter except `self` needs a type after its name".to_string(),
+                    format!("write `{}: Type`", name),
+                    Some(name_span),
+                ));
+            };
         // S61: optional trailing `= expr` default value.
         let default = if matches!(self.peek().kind, TokKind::Eq) {
             self.bump();
@@ -3562,7 +3560,10 @@ impl<'a> Parser<'a> {
     /// stamps the OS gate onto the resulting `ImplDef` afterward — no need to
     /// thread a new parameter through every `impl` parse path or its other
     /// caller (`Modules.rs`'s inline-module item loop calls this same helper).
-    pub(super) fn os_gated_impl(&mut self, os: crate::Syntax::OsTarget) -> Result<Item, Diagnostic> {
+    pub(super) fn os_gated_impl(
+        &mut self,
+        os: crate::Syntax::OsTarget,
+    ) -> Result<Item, Diagnostic> {
         // S6-R: a synthetic statement-terminator `;` may follow the marker
         // line (same as the `TokKind::Semi` skip at the top of the top-level
         // item loop) — swallow it before checking what actually follows.
@@ -4069,7 +4070,10 @@ impl<'a> Parser<'a> {
                 // set by the single-prefix `@PublishedSchema struct …` form
                 // (`published_schema_struct_def`). A schema published this way
                 // silently skipped E0910 migration validation. Mirror that form here.
-                if let Some(m) = markers.iter().find(|m| m.name == Syntax::ATTR_PUBLISHED_SCHEMA) {
+                if let Some(m) = markers
+                    .iter()
+                    .find(|m| m.name == Syntax::ATTR_PUBLISHED_SCHEMA)
+                {
                     s.is_published_schema = true;
                     s.published_schema_span = Some(m.span);
                 }

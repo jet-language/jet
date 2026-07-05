@@ -378,7 +378,10 @@ impl<'a> Interp<'a> {
             }
             Stmt::If(ifs) => self.exec_if(ifs, scope),
             Stmt::While {
-                cond, body, span, label,
+                cond,
+                body,
+                span,
+                label,
             } => {
                 let label = label.as_ref().map(|(n, _)| n.as_str());
                 loop {
@@ -530,9 +533,7 @@ impl<'a> Interp<'a> {
             Stmt::Live { span, .. } => Err(unsupported("a `live` block", *span)),
             // D-DOTSCOPE1: `.setup`/`.expect_fail`/`.timeout`/`.skip` are `jet test`
             // harness constructs — the comptime interpreter never runs them.
-            Stmt::ScopeMember { span, .. } => {
-                Err(unsupported("a scope-member block", *span))
-            }
+            Stmt::ScopeMember { span, .. } => Err(unsupported("a scope-member block", *span)),
             // D-DET1: `assume_deterministic { … }` is semantically transparent — it
             // only suspends the sema determinism check. The interpreter just runs
             // its body (the suspension is a no-op at comptime, which is already pure).
@@ -867,7 +868,11 @@ impl<'a> Interp<'a> {
                 .get(name)
                 .or_else(|| self.globals.get(name))
                 .cloned()
-                .or_else(|| self.funcs.get(name.as_str()).map(|f| fn_value(name, f, *span)))
+                .or_else(|| {
+                    self.funcs
+                        .get(name.as_str())
+                        .map(|f| fn_value(name, f, *span))
+                })
                 .ok_or_else(|| unsupported(&format!("the name `{}`", name), *span)),
             Expr::Unary(op, inner, span) => {
                 let v = self.eval(inner, scope)?;

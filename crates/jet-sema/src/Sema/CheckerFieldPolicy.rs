@@ -34,8 +34,8 @@ use super::*;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
 use crate::AST::{
-    AccessConvention, EnumLitArg, Expr, Field, Func, Item, OrFallback, Param, Pattern, StrPart,
-    Stmt, StructDef, StructPatField, Type,
+    AccessConvention, EnumLitArg, Expr, Field, Func, Item, OrFallback, Param, Pattern, Stmt,
+    StrPart, StructDef, StructPatField, Type,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -88,11 +88,12 @@ fn check_computed_field_cycles(s: &StructDef, diags: &mut Vec<Diagnostic>) -> bo
         Gray,
         Black,
     }
-    let mut color: HashMap<&str, Color> =
-        names.iter().map(|&n| (n, Color::White)).collect();
+    let mut color: HashMap<&str, Color> = names.iter().map(|&n| (n, Color::White)).collect();
     let mut reported: HashSet<&str> = HashSet::new();
-    let span_of: HashMap<&str, Span> =
-        computed.iter().map(|f| (f.name.as_str(), f.name_span)).collect();
+    let span_of: HashMap<&str, Span> = computed
+        .iter()
+        .map(|f| (f.name.as_str(), f.name_span))
+        .collect();
 
     fn dfs<'a>(
         node: &'a str,
@@ -129,18 +130,21 @@ fn check_computed_field_cycles(s: &StructDef, diags: &mut Vec<Diagnostic>) -> bo
 
     for &n in &names {
         if color[n] == Color::White {
-            dfs(n, &deps, &mut color, &span_of, &s.name, &mut reported, diags);
+            dfs(
+                n,
+                &deps,
+                &mut color,
+                &span_of,
+                &s.name,
+                &mut reported,
+                diags,
+            );
         }
     }
     !reported.is_empty()
 }
 
-fn e0338_computed_field_cycle(
-    struct_name: &str,
-    field: &str,
-    via: &str,
-    span: Span,
-) -> Diagnostic {
+fn e0338_computed_field_cycle(struct_name: &str, field: &str, via: &str, span: Span) -> Diagnostic {
     let what = if field == via {
         format!(
             "computed field `{}.{}` references itself",
@@ -224,9 +228,7 @@ fn rewrite_self_field_refs(expr: &mut Expr, names: &HashSet<String>) {
         | Expr::Present(inner, _)
         | Expr::Try(inner, _, _) => rewrite_self_field_refs(inner, names),
         Expr::OptField { base, .. } => rewrite_self_field_refs(base, names),
-        Expr::MethodCall {
-            receiver, args, ..
-        } => {
+        Expr::MethodCall { receiver, args, .. } => {
             rewrite_self_field_refs(receiver, names);
             for a in args {
                 rewrite_self_field_refs(&mut a.expr, names);

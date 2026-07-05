@@ -35,7 +35,8 @@ pub fn store_path() -> PathBuf {
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."));
-    home.join(Syntax::CONFIG_DEFAULT_DIR).join(Syntax::TRUST_FILE)
+    home.join(Syntax::CONFIG_DEFAULT_DIR)
+        .join(Syntax::TRUST_FILE)
 }
 
 fn read_lines(path: &Path) -> Vec<String> {
@@ -298,8 +299,8 @@ pub fn gate_flake(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::RefSpec::Source;
+    use super::*;
 
     fn scratch(tag: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(

@@ -506,7 +506,8 @@ fn fleet_host_not_system(span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0003",
         "a fleet host must name a system".to_string(),
-        "U15: each `hosts:` entry maps a host to a `System`, written `<host>: system.<name>`".to_string(),
+        "U15: each `hosts:` entry maps a host to a `System`, written `<host>: system.<name>`"
+            .to_string(),
         "write `<host>: system.<name>`, e.g. `web1: system.web`".to_string(),
         Some(span),
     )

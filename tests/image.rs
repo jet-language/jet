@@ -116,9 +116,11 @@ fn oci_from_library_source_is_rejected() {
     let src = fs::read_to_string(scratch.path.join("env.jet")).unwrap();
     let err = evaluate_env(&src, &scratch.path).unwrap_err();
     assert_eq!(err.code, "E1267");
-    let rendered =
-        jet::Diagnostics::render_all("env.jet", &src, std::slice::from_ref(&err));
-    assert!(rendered.contains("non-executable package `app`"), "{rendered}");
+    let rendered = jet::Diagnostics::render_all("env.jet", &src, std::slice::from_ref(&err));
+    assert!(
+        rendered.contains("non-executable package `app`"),
+        "{rendered}"
+    );
     assert!(rendered.contains("declared `library`"), "{rendered}");
 }
 
@@ -186,8 +188,7 @@ fn image_build_is_reproducible_end_to_end() {
             .output()
             .unwrap();
         assert_eq!(out.status.code(), Some(0));
-        let index =
-            fs::read_to_string(scratch.path.join(".jet/images/server/index.json")).unwrap();
+        let index = fs::read_to_string(scratch.path.join(".jet/images/server/index.json")).unwrap();
         index
     };
     let a = digest_of();

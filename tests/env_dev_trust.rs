@@ -76,10 +76,7 @@ fn env_enter_runs_no_project_function() {
     let proj = Scratch::new("enter-no-fn");
     let root = Scratch::new("enter-no-fn-root");
     let home = Scratch::new("enter-no-fn-home");
-    write_packageless_project(
-        &proj.path,
-        "fn run() { print(\"SHOULD-NOT-RUN\"); }\n",
-    );
+    write_packageless_project(&proj.path, "fn run() { print(\"SHOULD-NOT-RUN\"); }\n");
     let out = jetpack()
         .args(["enter", "--no-color", "--", "echo", "entered"])
         .current_dir(&proj.path)
@@ -194,10 +191,7 @@ fn dev_trust_flag_bypasses() {
     assert!(stdout.contains("DEV-RAN"), "stdout: {stdout}");
     // `--trust` is one-shot: it must not have persisted a grant.
     let trust_file = home.path.join(".jet").join("trust");
-    assert!(
-        !trust_file.exists(),
-        "`--trust` must never persist a grant"
-    );
+    assert!(!trust_file.exists(), "`--trust` must never persist a grant");
 }
 
 /// `jetpack config trust add <pattern>` pre-authorizes matching projects with

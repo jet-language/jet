@@ -936,8 +936,7 @@ impl<'a> Checker<'a> {
                         "`tasks.channel` needs a type argument to infer the element type"
                             .to_string(),
                         "the element type `T` can't be guessed without `<T>`".to_string(),
-                        "call it with an explicit type argument: `tasks.channel<T>()`"
-                            .to_string(),
+                        "call it with an explicit type argument: `tasks.channel<T>()`".to_string(),
                         Some(span),
                     ));
                     return None;
@@ -2368,7 +2367,11 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
 /// for the one reserved core type that carries a generic type argument
 /// (`Type::Apply`, not `Type::Named`); see the `Type::Apply` arm in
 /// `CheckerInfer/expr.rs`'s member-access resolver.
-pub(crate) fn core_generic_struct_field(type_name: &str, field: &str, args: &[Type]) -> Option<Type> {
+pub(crate) fn core_generic_struct_field(
+    type_name: &str,
+    field: &str,
+    args: &[Type],
+) -> Option<Type> {
     if type_name == "DecodeResult" {
         return match field {
             "value" => args.first().cloned(),
@@ -3561,9 +3564,7 @@ pub fn core_fixed_sig(
     let list_u8 = Type::List(Box::new(u8_ty()));
     let io_unit = result_ty(unit.clone(), io.clone());
     match (module, name) {
-        ("core.files", "read") => {
-            Some((vec![(read, string.clone())], Some(result_ty(string, io))))
-        }
+        ("core.files", "read") => Some((vec![(read, string.clone())], Some(result_ty(string, io)))),
         ("core.files", "read_bytes") => Some((
             vec![(read, Type::String)],
             Some(result_ty(list_u8, io_error_ty())),
@@ -4359,7 +4360,13 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         // D-JSONVERB1: `to_string`/`to_string_pretty` (compact/pretty); `parse` → dynamic
         // JSON value; `decode` → lenient typed decode (D-JSON3). D-MIGRATE3=A:
         // `decode_traced<T>` rides alongside `decode` on every format.
-        "core.encoding.json" => &["parse", "decode", "decode_traced", "to_string", "to_string_pretty"],
+        "core.encoding.json" => &[
+            "parse",
+            "decode",
+            "decode_traced",
+            "to_string",
+            "to_string_pretty",
+        ],
         // D-SERDE6: typed `decode<T>` rides every format submodule alongside `parse`.
         "core.encoding.csv" => &["parse", "decode", "decode_traced", "to_string"],
         "core.encoding.toml" => &["parse", "decode", "decode_traced", "to_string"],

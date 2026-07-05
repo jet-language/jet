@@ -632,7 +632,9 @@ fn collect_funcs_and_info<'a>(
         for item in &module.items {
             if let Item::Const(c) = item {
                 if let Some(v) = &c.ct {
-                    info.globals.entry(c.name.clone()).or_insert_with(|| v.clone());
+                    info.globals
+                        .entry(c.name.clone())
+                        .or_insert_with(|| v.clone());
                 }
             }
         }
@@ -713,9 +715,7 @@ fn walk_items_for_interp<'a>(
                 if let Some(body) = &cm.body {
                     for it in body {
                         if let Item::Func(f) = it {
-                            funcs
-                                .entry(format!("{}__{}", cm.name, f.name))
-                                .or_insert(f);
+                            funcs.entry(format!("{}__{}", cm.name, f.name)).or_insert(f);
                             // Bare-name fallback: a private sibling call inside
                             // the module, or an unaliased `use mod.item`
                             // selective import — see `collect_funcs_and_info`.
@@ -778,8 +778,9 @@ fn dev_boundary_from_comptime(d: Diagnostic) -> Diagnostic {
             .strip_suffix(" can't run at compile time yet")
             .unwrap_or(&d.what)
             .replace(" at compile time", ""),
-        "E0951" => "code that touches the outside world (network, filesystem, or environment)"
-            .to_string(),
+        "E0951" => {
+            "code that touches the outside world (network, filesystem, or environment)".to_string()
+        }
         _ => return d,
     };
     boundary_diag(&Boundary {

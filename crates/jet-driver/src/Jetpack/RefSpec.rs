@@ -673,11 +673,8 @@ mod tests {
     #[test]
     fn colon_form_wins_over_index() {
         // An explicit `source:package` is never shadowed by the index.
-        let table = SourceTable::from_decls([(
-            "nixpkgs".to_string(),
-            "u".to_string(),
-            ProviderKind::Nix,
-        )]);
+        let table =
+            SourceTable::from_decls([("nixpkgs".to_string(), "u".to_string(), ProviderKind::Nix)]);
         let r = classify_with_workspace("nixpkgs:logging", &table, &ws_index()).unwrap();
         assert_eq!(r.source, Source::Nixpkgs);
         assert_eq!(r.package, "logging");
@@ -688,8 +685,9 @@ mod tests {
         // With no workspace, a bare ref is still a plain missing-source error —
         // member resolution is a monorepo-only feature, never a surprise when
         // there is no workspace at all.
-        let err = classify_with_workspace("logging", &SourceTable::empty(), &WorkspaceIndex::empty())
-            .expect_err("no workspace → not a member");
+        let err =
+            classify_with_workspace("logging", &SourceTable::empty(), &WorkspaceIndex::empty())
+                .expect_err("no workspace → not a member");
         assert!(
             matches!(err, RefError::MissingSeparator(_)),
             "expected MissingSeparator, got {err:?}"

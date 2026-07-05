@@ -227,14 +227,16 @@ fn lock_roundtrip_layer_metadata() {
         inferred_layer: Some(jet::Syntax::RuntimeLayer::Std),
         effects: vec![],
         effect_grants: vec![],
-        envelope: None,    };
+        envelope: None,
+    };
     let lock = LockFile {
         version: 1,
         packages: vec![pkg],
         root_dependencies: vec![],
         workspace_members: vec![],
         comptime_inputs: vec![],
-        toolchains: Vec::new(),    };
+        toolchains: Vec::new(),
+    };
     let raw = jet::Lock::write(&lock);
     let parsed = jet::Lock::parse(&raw).unwrap();
     assert_eq!(

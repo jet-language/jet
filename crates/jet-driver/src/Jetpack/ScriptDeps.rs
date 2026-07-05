@@ -21,8 +21,8 @@
 //! Anything else is E1253 — an honest "can't resolve yet", never a fake
 //! success (I2/I3).
 
-use crate::AST::{ImportDecl, ImportKind, InlineVersion, Program};
 use crate::Diagnostics::{Diagnostic, Span};
+use crate::AST::{ImportDecl, ImportKind, InlineVersion, Program};
 use crate::SHA256::{sha256_hex, tree_hash};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -202,7 +202,10 @@ pub fn e1253(dep: &InlineDep, reason: &Unresolved) -> Diagnostic {
     };
     Diagnostic::error(
         "E1253",
-        format!("inline dependency `{}#{}` didn't resolve", dep.name, dep.selector),
+        format!(
+            "inline dependency `{}#{}` didn't resolve",
+            dep.name, dep.selector
+        ),
         why,
         fix,
         Some(dep.span),

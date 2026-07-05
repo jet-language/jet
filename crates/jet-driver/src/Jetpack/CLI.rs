@@ -586,8 +586,9 @@ fn cmd_enter(theme: &Theme, parsed: &Parsed) -> i32 {
     // `--flake` (an equally explicit signal) can still force the foreign
     // shell over ad-hoc packages.
     let foreign = foreign_flake_path(&project_dir);
-    let auto_detect_wants_foreign =
-        foreign.is_some() && !project_declares_env(&project_dir) && parsed.flags.packages.is_empty();
+    let auto_detect_wants_foreign = foreign.is_some()
+        && !project_declares_env(&project_dir)
+        && parsed.flags.packages.is_empty();
     if parsed.flags.flake || auto_detect_wants_foreign {
         let Some(flake_path) = foreign else {
             theme.error(
@@ -713,7 +714,12 @@ fn project_declares_env(dir: &Path) -> bool {
 /// the same trust store as a declared env, keyed on the flake's content
 /// (`Trust::gate_flake`) since arbitrary flake.nix text is untrusted input
 /// the moment jetpack shells out to it.
-fn enter_foreign_flake(theme: &Theme, project_dir: &Path, flake_path: &Path, parsed: &Parsed) -> i32 {
+fn enter_foreign_flake(
+    theme: &Theme,
+    project_dir: &Path,
+    flake_path: &Path,
+    parsed: &Parsed,
+) -> i32 {
     if !Provider::nix_on_path() {
         theme.error_coded(
             "E1256",
@@ -842,7 +848,10 @@ fn cmd_dev(theme: &Theme, parsed: &Parsed) -> i32 {
         return code;
     }
 
-    theme.status(&format!("running {}", theme.bold(&entry.display().to_string())));
+    theme.status(&format!(
+        "running {}",
+        theme.bold(&entry.display().to_string())
+    ));
     let mut cmd = vec![
         find_jet_binary(),
         Syntax::DEV_SUBCOMMAND.to_string(),
@@ -870,7 +879,10 @@ fn wait_for_services_ready(
         if !svc.enable {
             continue;
         }
-        theme.detail(&format!("waiting for service `{}` to become healthy…", svc.name));
+        theme.detail(&format!(
+            "waiting for service `{}` to become healthy…",
+            svc.name
+        ));
         bring_up_one(theme, project_dir, env, svc).map_err(|_| 2)?;
     }
     Ok(())
@@ -1069,7 +1081,10 @@ fn cmd_secrets(theme: &Theme, parsed: &Parsed) -> i32 {
             let Some(sub) = parsed.positional.get(1).cloned() else {
                 theme.error(
                     "`jetpack secrets recipients` needs a verb",
-                    &format!("known verbs: {}.", Syntax::SECRETS_RECIPIENTS_VERBS.join(", ")),
+                    &format!(
+                        "known verbs: {}.",
+                        Syntax::SECRETS_RECIPIENTS_VERBS.join(", ")
+                    ),
                     "try `jetpack secrets recipients list`.",
                 );
                 return 2;
@@ -1100,7 +1115,10 @@ fn cmd_secrets(theme: &Theme, parsed: &Parsed) -> i32 {
                 other => {
                     theme.error(
                         &format!("`{other}` is not a `jetpack secrets recipients` verb"),
-                        &format!("known verbs: {}.", Syntax::SECRETS_RECIPIENTS_VERBS.join(", ")),
+                        &format!(
+                            "known verbs: {}.",
+                            Syntax::SECRETS_RECIPIENTS_VERBS.join(", ")
+                        ),
                         "try `jetpack secrets recipients list`.",
                     );
                     2
@@ -1108,8 +1126,7 @@ fn cmd_secrets(theme: &Theme, parsed: &Parsed) -> i32 {
             }
         }
         v if v == Syntax::SECRETS_VERB_SET => {
-            let (Some(name), Some(value)) =
-                (parsed.positional.get(1), parsed.positional.get(2))
+            let (Some(name), Some(value)) = (parsed.positional.get(1), parsed.positional.get(2))
             else {
                 theme.error(
                     "`jetpack secrets set` needs a name and a value",
@@ -1169,7 +1186,6 @@ fn cmd_secrets(theme: &Theme, parsed: &Parsed) -> i32 {
     }
 }
 
-
 /// The sibling `jet` binary next to the running `jetpack` process, falling
 /// back to a bare PATH lookup. Mirrors `Source/EngineDispatch.rs`'s
 /// same-directory-then-PATH search in the other direction; jetpack never
@@ -1219,9 +1235,9 @@ fn has_dev_or_run_entry(file: &Path) -> bool {
     let Ok(prog) = crate::Parser::parse(&toks) else {
         return false;
     };
-    prog.items.iter().any(|i| {
-        matches!(i, crate::AST::Item::Func(f) if f.name == "dev" || f.name == "run")
-    })
+    prog.items
+        .iter()
+        .any(|i| matches!(i, crate::AST::Item::Func(f) if f.name == "dev" || f.name == "run"))
 }
 
 /// `jetpack config trust add/list/remove` (U19) — durable glob/prefix patterns
@@ -1580,8 +1596,14 @@ fn cmd_audit(theme: &Theme) -> i32 {
                 &e.envelope.provenance
             }
         ));
-        theme.detail(&format!("  output-hash: {}", theme.gray(&e.envelope.output_hash)));
-        theme.detail(&format!("  platform:    {}", theme.gray(&e.envelope.platform)));
+        theme.detail(&format!(
+            "  output-hash: {}",
+            theme.gray(&e.envelope.output_hash)
+        ));
+        theme.detail(&format!(
+            "  platform:    {}",
+            theme.gray(&e.envelope.platform)
+        ));
     }
     0
 }
@@ -1772,7 +1794,10 @@ fn cmd_push(theme: &Theme, parsed: &Parsed) -> i32 {
     let Ok(src) = std::fs::read_to_string(EnvFile::path_in(&dir)) else {
         theme.error(
             "no fleet here",
-            &format!("there is no {} declaring any `fleet.<name>`.", Syntax::ENV_FILE),
+            &format!(
+                "there is no {} declaring any `fleet.<name>`.",
+                Syntax::ENV_FILE
+            ),
             "declare `module fleet.<name> { hosts: { … } }`, then `jet push <name>`.",
         );
         return 2;
@@ -1877,7 +1902,11 @@ fn cmd_image(theme: &Theme, parsed: &Parsed) -> i32 {
         }
     };
     let Some(name) = parsed.positional.first() else {
-        theme.error("build which image?", &declared(), "name an image: `jet image <name>`.");
+        theme.error(
+            "build which image?",
+            &declared(),
+            "name an image: `jet image <name>`.",
+        );
         return 2;
     };
 

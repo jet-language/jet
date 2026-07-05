@@ -180,7 +180,10 @@ pub fn run(
                     Diagnostic::error(
                         "E1237",
                         format!("build step could not install `{src}`"),
-                        format!("copying `{}` into the output root failed: {e}", from.display()),
+                        format!(
+                            "copying `{}` into the output root failed: {e}",
+                            from.display()
+                        ),
                         "make sure the source file exists in the staged tree.".to_string(),
                         None,
                     )
@@ -291,7 +294,10 @@ fn do_exec(
             Diagnostic::error(
                 "E1238",
                 format!("build tool `{tool}` failed to run"),
-                format!("the realized tool at {} could not be executed: {e}", exe.display()),
+                format!(
+                    "the realized tool at {} could not be executed: {e}",
+                    exe.display()
+                ),
                 "make sure the tool dependency realized correctly.".to_string(),
                 None,
             )
@@ -358,7 +364,8 @@ fn e1236_offline(url: &str) -> Diagnostic {
         "E1236",
         "a build step needs the network but the build is offline".to_string(),
         format!("`--offline` forbids any network fetch; `{url}` is not in the local fetch cache."),
-        "run once online to populate the cache, or `jet vendor` the source and rebuild.".to_string(),
+        "run once online to populate the cache, or `jet vendor` the source and rebuild."
+            .to_string(),
         None,
     )
 }
@@ -371,7 +378,8 @@ fn e1236_no_transport(url: &str) -> Diagnostic {
             "`{url}` is a remote URL; the build seam holds no network capability by itself \
              (zero-external-crate compiler)."
         ),
-        "provide a `file://` mirror, or `jet vendor` the source so the build is offline.".to_string(),
+        "provide a `file://` mirror, or `jet vendor` the source so the build is offline."
+            .to_string(),
         None,
     )
 }
@@ -418,7 +426,9 @@ pub fn e1238(tool: &str) -> Diagnostic {
         "build tools must be realized `Pkg` dependencies of the package, so the build is \
          reproducible. A build never falls through to host `/usr/bin`."
             .to_string(),
-        format!("add `{tool}` as a build dependency in `pkg.jet` so it is realized into the hangar."),
+        format!(
+            "add `{tool}` as a build dependency in `pkg.jet` so it is realized into the hangar."
+        ),
         None,
     )
 }
@@ -440,7 +450,12 @@ mod tests {
         p
     }
 
-    fn ctx_at<'a>(base: &'a Path, src: &'a Path, out: &'a Path, cache: &'a Path) -> BuildContext<'a> {
+    fn ctx_at<'a>(
+        base: &'a Path,
+        src: &'a Path,
+        out: &'a Path,
+        cache: &'a Path,
+    ) -> BuildContext<'a> {
         let _ = base;
         BuildContext {
             source_dir: src,
@@ -549,7 +564,10 @@ mod tests {
         assert_eq!(report.fetches.len(), 1);
         assert_eq!(report.fetches[0].sha256, sha);
         assert!(report.effects.iter().any(|e| e == "net.fetch"));
-        assert!(cache.join(&sha).is_file(), "locked source must be cached by hash");
+        assert!(
+            cache.join(&sha).is_file(),
+            "locked source must be cached by hash"
+        );
 
         // Now the upstream source disappears and we go offline — the re-build is
         // still satisfiable from the cache, no network.
@@ -602,7 +620,10 @@ mod tests {
             }],
         };
         let h = recipe.recipe_hash();
-        assert!(trust_first_build(&h, &trust), "first build is newly trusted");
+        assert!(
+            trust_first_build(&h, &trust),
+            "first build is newly trusted"
+        );
         assert!(
             !trust_first_build(&h, &trust),
             "second build is already trusted"

@@ -49,17 +49,20 @@ fn jet_test_members_example_output() {
         return;
     }
     let example = root.join("examples/features/tooling/test_members.jet");
-    let out = Command::new(&jet).arg("test").arg(&example).output().unwrap();
+    let out = Command::new(&jet)
+        .arg("test")
+        .arg(&example)
+        .output()
+        .unwrap();
     assert!(
         out.status.success(),
         "scope-member example failed:\nstdout: {}\nstderr: {}",
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );
-    let expected = fs::read_to_string(
-        root.join("examples/features/expected/tooling/test_members.test.out"),
-    )
-    .expect("test_members.test.out");
+    let expected =
+        fs::read_to_string(root.join("examples/features/expected/tooling/test_members.test.out"))
+            .expect("test_members.test.out");
     assert_eq!(String::from_utf8_lossy(&out.stdout), expected);
 }
 
@@ -73,8 +76,15 @@ fn jet_scope_expect_fail_passing_region_fails() {
         return;
     }
     let fixture = root.join("tests/fixtures/scope_expect_fail_passes.jet");
-    let out = Command::new(&jet).arg("test").arg(&fixture).output().unwrap();
-    assert!(!out.status.success(), "a passing expect_fail region must fail");
+    let out = Command::new(&jet)
+        .arg("test")
+        .arg(&fixture)
+        .output()
+        .unwrap();
+    assert!(
+        !out.status.success(),
+        "a passing expect_fail region must fail"
+    );
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stdout.contains("FAIL"), "expected a FAIL line:\n{}", stdout);
@@ -95,7 +105,11 @@ fn jet_scope_setup_failure_fails_test() {
         return;
     }
     let fixture = root.join("tests/fixtures/scope_setup_fail.jet");
-    let out = Command::new(&jet).arg("test").arg(&fixture).output().unwrap();
+    let out = Command::new(&jet)
+        .arg("test")
+        .arg(&fixture)
+        .output()
+        .unwrap();
     assert!(!out.status.success(), "a failing setup must fail the test");
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
@@ -118,7 +132,11 @@ fn jet_scope_timeout_exceeded_fails() {
         return;
     }
     let fixture = root.join("tests/fixtures/scope_timeout_exceeded.jet");
-    let out = Command::new(&jet).arg("test").arg(&fixture).output().unwrap();
+    let out = Command::new(&jet)
+        .arg("test")
+        .arg(&fixture)
+        .output()
+        .unwrap();
     assert!(!out.status.success(), "an over-budget timeout must fail");
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);

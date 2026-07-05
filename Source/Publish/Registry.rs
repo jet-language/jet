@@ -133,11 +133,7 @@ pub fn ensure_index_clone(registry: &RegistryConfig) -> Result<PathBuf, Diagnost
 /// commit identity so a fresh scratch clone (which has none) can commit. A
 /// "nothing to commit" state is idempotent success (re-running publish/yank with
 /// bytes already recorded). Any other git failure is E1235.
-pub fn push_index(
-    registry: &RegistryConfig,
-    repo: &Path,
-    message: &str,
-) -> Result<(), Diagnostic> {
+pub fn push_index(registry: &RegistryConfig, repo: &Path, message: &str) -> Result<(), Diagnostic> {
     let run = |args: &[&str]| Command::new("git").args(args).current_dir(repo).output();
     // A scratch clone may carry no user identity; set one so `commit` works.
     let _ = run(&["config", "user.email", "jet-publish@localhost"]);
@@ -145,18 +141,29 @@ pub fn push_index(
 
     let add = run(&["add", "-A"]).map_err(|e| e1235(&registry.url, &e.to_string()))?;
     if !add.status.success() {
-        return Err(e1235(&registry.url, String::from_utf8_lossy(&add.stderr).trim()));
+        return Err(e1235(
+            &registry.url,
+            String::from_utf8_lossy(&add.stderr).trim(),
+        ));
     }
-    let commit = run(&["commit", "-m", message]).map_err(|e| e1235(&registry.url, &e.to_string()))?;
+    let commit =
+        run(&["commit", "-m", message]).map_err(|e| e1235(&registry.url, &e.to_string()))?;
     if !commit.status.success() {
         let so = String::from_utf8_lossy(&commit.stdout);
         if !so.contains("nothing to commit") {
-            return Err(e1235(&registry.url, String::from_utf8_lossy(&commit.stderr).trim()));
+            return Err(e1235(
+                &registry.url,
+                String::from_utf8_lossy(&commit.stderr).trim(),
+            ));
         }
     }
-    let push = run(&["push", "origin", "HEAD"]).map_err(|e| e1235(&registry.url, &e.to_string()))?;
+    let push =
+        run(&["push", "origin", "HEAD"]).map_err(|e| e1235(&registry.url, &e.to_string()))?;
     if !push.status.success() {
-        return Err(e1235(&registry.url, String::from_utf8_lossy(&push.stderr).trim()));
+        return Err(e1235(
+            &registry.url,
+            String::from_utf8_lossy(&push.stderr).trim(),
+        ));
     }
     Ok(())
 }
@@ -246,7 +253,12 @@ pub fn resolve_and_verify(
     let live: Vec<IndexEntry> = all.iter().filter(|e| !e.yanked).cloned().collect();
     let mut warnings = Vec::new();
     for e in &live {
-        warnings.extend(verify_index_entry(&all, e, registry.require_signed, &registry.name)?);
+        warnings.extend(verify_index_entry(
+            &all,
+            e,
+            registry.require_signed,
+            &registry.name,
+        )?);
     }
     Ok((live, warnings))
 }

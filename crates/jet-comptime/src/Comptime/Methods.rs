@@ -7,7 +7,9 @@ use std::collections::HashMap;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::AST::{CallArg, Expr, Func, LambdaBody, StrPart, Type, UnOp};
 
-use super::Builtins::{apply_method, apply_mutating, apply_static_type_method, as_bool, as_int, cmp};
+use super::Builtins::{
+    apply_method, apply_mutating, apply_static_type_method, as_bool, as_int, cmp,
+};
 use super::Diagnostics::{comptime_panic, unsupported};
 use super::Diagnostics::{EARLY_RETURN_CODE, ERR_PROPAGATE_CODE};
 use super::Interpreter::{Flow, Interp};
@@ -368,10 +370,16 @@ impl<'a> Interp<'a> {
         span: Span,
     ) -> Result<CtValue, Diagnostic> {
         let CtValue::Closure(data) = f else {
-            return Err(unsupported("calling this value (it isn't a function)", span));
+            return Err(unsupported(
+                "calling this value (it isn't a function)",
+                span,
+            ));
         };
         if data.lambda.params.len() != args.len() {
-            return Err(unsupported("this closure (wrong number of arguments)", span));
+            return Err(unsupported(
+                "this closure (wrong number of arguments)",
+                span,
+            ));
         }
         let mut frame = data.captured.clone();
         for (p, a) in data.lambda.params.iter().zip(args) {
@@ -402,9 +410,9 @@ impl<'a> Interp<'a> {
         span: Span,
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {
-        let arg = args.first().ok_or_else(|| {
-            unsupported(&format!("`{}` (wrong number of arguments)", name), span)
-        })?;
+        let arg = args
+            .first()
+            .ok_or_else(|| unsupported(&format!("`{}` (wrong number of arguments)", name), span))?;
         let Some((lo, hi)) = range else {
             return self.eval(&arg.expr, scope);
         };
@@ -691,7 +699,12 @@ impl<'a> Interp<'a> {
                 // D-CTEFFECT1: Tier-2 effect calls require an #Impure gate (or REPL sandbox).
                 let is_tier2 = matches!(
                     module.as_str(),
-                    "core.files" | "core.env" | "core.io" | "core.exec" | "core.net" | "core.process"
+                    "core.files"
+                        | "core.env"
+                        | "core.io"
+                        | "core.exec"
+                        | "core.net"
+                        | "core.process"
                 );
                 if is_tier2 {
                     if self.impure_depth == 0 {
@@ -763,7 +776,11 @@ impl<'a> Interp<'a> {
         // above (capitalized `Type.Variant(…)` wins first).
         if let Expr::Ident(name, _) = receiver {
             if !scope.contains_key(name.as_str()) {
-                if let Some(f) = self.methods.get(&(name.clone(), method.to_string())).copied() {
+                if let Some(f) = self
+                    .methods
+                    .get(&(name.clone(), method.to_string()))
+                    .copied()
+                {
                     if f.params.len() == args.len() {
                         let mut frame = HashMap::new();
                         for (p, a) in f.params.iter().zip(args) {
@@ -795,7 +812,10 @@ impl<'a> Interp<'a> {
         if let Expr::Ident(name, _) = receiver {
             if name == "Option" && method == "lift2" && !scope.contains_key("Option") {
                 if args.len() != 3 {
-                    return Err(unsupported("`Option.lift2` (wrong number of arguments)", span));
+                    return Err(unsupported(
+                        "`Option.lift2` (wrong number of arguments)",
+                        span,
+                    ));
                 }
                 let f = self.eval(&args[0].expr, scope)?;
                 let a = self.eval(&args[1].expr, scope)?;
@@ -864,7 +884,8 @@ impl<'a> Interp<'a> {
                 // (D-BIND4 `:=` receiver) — key every element once, sort the
                 // keyed pairs, then write the reordered list back through the
                 // same lvalue path `push`/`pop`/… use.
-                (CtValue::List(xs), "sort_by") if matches!(receiver, Expr::Ident(..) | Expr::Field(..)) =>
+                (CtValue::List(xs), "sort_by")
+                    if matches!(receiver, Expr::Ident(..) | Expr::Field(..)) =>
                 {
                     let f = self.eval(&args[0].expr, scope)?;
                     let mut keyed = Vec::with_capacity(xs.len());
@@ -1009,10 +1030,16 @@ fn as_bytes(v: &CtValue, span: Span) -> Result<Vec<u8>, Diagnostic> {
             .iter()
             .map(|x| match x {
                 CtValue::Int(n) if (0..=255).contains(n) => Ok(*n as u8),
-                _ => Err(unsupported("a `[U8]` list with an out-of-range element", span)),
+                _ => Err(unsupported(
+                    "a `[U8]` list with an out-of-range element",
+                    span,
+                )),
             })
             .collect(),
-        _ => Err(unsupported("non-`[U8]` argument to comptime encoding call", span)),
+        _ => Err(unsupported(
+            "non-`[U8]` argument to comptime encoding call",
+            span,
+        )),
     }
 }
 
@@ -1051,9 +1078,7 @@ fn base64_encode(bytes: Vec<u8>) -> String {
         let b1 = chunk.get(1).copied();
         let b2 = chunk.get(2).copied();
         out.push(BASE64_ALPHABET[(b0 >> 2) as usize] as char);
-        out.push(
-            BASE64_ALPHABET[(((b0 & 0x03) << 4) | (b1.unwrap_or(0) >> 4)) as usize] as char,
-        );
+        out.push(BASE64_ALPHABET[(((b0 & 0x03) << 4) | (b1.unwrap_or(0) >> 4)) as usize] as char);
         out.push(match b1 {
             Some(b1) => {
                 BASE64_ALPHABET[(((b1 & 0x0f) << 2) | (b2.unwrap_or(0) >> 6)) as usize] as char
@@ -1070,7 +1095,10 @@ fn base64_encode(bytes: Vec<u8>) -> String {
 
 fn base64_decode(s: &str) -> Option<Vec<u8>> {
     fn digit(c: u8) -> Option<u8> {
-        BASE64_ALPHABET.iter().position(|&d| d == c).map(|i| i as u8)
+        BASE64_ALPHABET
+            .iter()
+            .position(|&d| d == c)
+            .map(|i| i as u8)
     }
     let s = s.trim_end_matches('=');
     let bytes = s.as_bytes();
@@ -1438,10 +1466,7 @@ fn apply_core_call(
             let s = as_string(one(0)?, span)?;
             Ok(match hex_decode(s) {
                 Some(bytes) => CtValue::ResOk(Box::new(CtValue::Bytes(bytes))),
-                None => CtValue::ResErr(Box::new(CtValue::Str(format!(
-                    "`{}` isn't valid hex",
-                    s
-                )))),
+                None => CtValue::ResErr(Box::new(CtValue::Str(format!("`{}` isn't valid hex", s)))),
             })
         }
         ("core.encoding.base64", "encode") => {
@@ -1459,9 +1484,9 @@ fn apply_core_call(
             })
         }
         // --- core.text.unicode (std-only Unicode scalar helpers, pure) ---
-        ("core.text.unicode", "scalar_count") => {
-            Ok(CtValue::Int(as_string(one(0)?, span)?.chars().count() as i64))
-        }
+        ("core.text.unicode", "scalar_count") => Ok(CtValue::Int(
+            as_string(one(0)?, span)?.chars().count() as i64,
+        )),
         ("core.text.unicode", "byte_count") => {
             Ok(CtValue::Int(as_string(one(0)?, span)?.len() as i64))
         }
@@ -1475,27 +1500,32 @@ fn apply_core_call(
             Ok(CtValue::Str(as_string(one(0)?, span)?.to_uppercase()))
         }
         ("core.text.unicode", "scalars") => Ok(CtValue::List(
-            as_string(one(0)?, span)?.chars().map(CtValue::Char).collect(),
+            as_string(one(0)?, span)?
+                .chars()
+                .map(CtValue::Char)
+                .collect(),
         )),
         // --- impure / build-time I/O → teaching diagnostic (reached only when
         // no #Impure gate intercepts first in eval_method) ---
-        ("core.files", _) | ("core.env", _) | ("core.io", _) | ("core.exec", _) | ("core.net", _) => {
-            Err(Diagnostic::error(
-                "E3410",
-                format!(
-                    "`{}.{}()` is a Tier-2 comptime effect — it requires a `#Impure` gate",
-                    module, method
-                ),
-                "ambient I/O (filesystem, environment, process) is not allowed in \
+        ("core.files", _)
+        | ("core.env", _)
+        | ("core.io", _)
+        | ("core.exec", _)
+        | ("core.net", _) => Err(Diagnostic::error(
+            "E3410",
+            format!(
+                "`{}.{}()` is a Tier-2 comptime effect — it requires a `#Impure` gate",
+                module, method
+            ),
+            "ambient I/O (filesystem, environment, process) is not allowed in \
                  pure comptime evaluation"
-                    .to_string(),
-                format!(
-                    "wrap the comptime binding in `#Impure(\"reason\") {{ … }}` and \
+                .to_string(),
+            format!(
+                "wrap the comptime binding in `#Impure(\"reason\") {{ … }}` and \
                          pass `--allow-impure` to the build"
-                ),
-                Some(span),
-            ))
-        }
+            ),
+            Some(span),
+        )),
         // --- unknown / not yet whitelisted ---
         _ => {
             if repl_mode {

@@ -306,7 +306,12 @@ impl<'a> Checker<'a> {
     /// wording says so rather than claiming it "doesn't live long enough"
     /// (unlike `View<T>`, which needs its own escape check since a `List`
     /// re-assignment/return is otherwise silent). `what` describes the use site.
-    pub(crate) fn report_string_view_unsupported_use(&mut self, name: &str, what: &str, span: Span) {
+    pub(crate) fn report_string_view_unsupported_use(
+        &mut self,
+        name: &str,
+        what: &str,
+        span: Span,
+    ) {
         let owner = self
             .string_views
             .get(name)
@@ -866,7 +871,13 @@ impl<'a> Checker<'a> {
     /// fix menu: `^name` when this call is `name`'s last use (safe to move),
     /// or `copy name` (D-CAP2, D-MEM1/S4)/reorder when `name` is still used
     /// afterward (moving now would break that later use).
-    pub(crate) fn e0209_implicit_clone(&self, what: String, why: String, name: &str, span: Span) -> Diagnostic {
+    pub(crate) fn e0209_implicit_clone(
+        &self,
+        what: String,
+        why: String,
+        name: &str,
+        span: Span,
+    ) -> Diagnostic {
         let fix = if self.is_name_live_after(name) {
             format!(
                 "`{name}` is used again after this call, so `{}{name}` would break that later use — write `{} {name}` to pass a copy, or reorder so this call is `{name}`'s last use and write `{}{name}`",

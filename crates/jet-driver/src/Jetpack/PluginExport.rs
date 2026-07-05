@@ -14,9 +14,9 @@
 //! `plugin__` namespace so a plugin's frozen interface never collides with an
 //! ordinary library package's frozen API in the same project.
 
-use crate::AST::{Item, ProgramBundle};
 use crate::Diagnostics::Diagnostic;
 use crate::Sema::ApiFreeze;
+use crate::AST::{Item, ProgramBundle};
 
 /// The manifest `export:` field, or the payload/package name, or (no manifest
 /// at all) the entry file's stem — in that priority order (D-PLUGIN-EXPORT1=A:

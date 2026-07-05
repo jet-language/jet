@@ -952,7 +952,11 @@ fn expand_unknown_lens_golden() {
 #[test]
 fn expand_missing_file_is_user_error() {
     let out = Command::new(jet()).arg("expand").output().unwrap();
-    assert_eq!(out.status.code(), Some(1), "missing entry file is USER_ERROR");
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "missing entry file is USER_ERROR"
+    );
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
         stderr.contains("needs an entry file"),
@@ -988,7 +992,11 @@ fn expand_compile_error_reports_ordinary_diagnostics() {
 #[test]
 fn stale_manifest_name_pack_jet_is_e1226() {
     let dir = isolated_cwd("stale_pack_jet");
-    fs::write(dir.join("pack.jet"), "payload: { name: \"x\", version: \"0.1.0\" }\n").unwrap();
+    fs::write(
+        dir.join("pack.jet"),
+        "payload: { name: \"x\", version: \"0.1.0\" }\n",
+    )
+    .unwrap();
     let out = Command::new(jet())
         .arg("add")
         .arg("dep")
@@ -999,9 +1007,18 @@ fn stale_manifest_name_pack_jet_is_e1226() {
         .output()
         .unwrap();
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("E1226"), "expected E1226 in stderr:\n{stderr}");
-    assert!(stderr.contains("pack.jet"), "names the found file:\n{stderr}");
-    assert!(stderr.contains("pkg.jet"), "names the fix target:\n{stderr}");
+    assert!(
+        stderr.contains("E1226"),
+        "expected E1226 in stderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("pack.jet"),
+        "names the found file:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("pkg.jet"),
+        "names the fix target:\n{stderr}"
+    );
 }
 
 #[test]
@@ -1015,8 +1032,14 @@ fn stale_manifest_name_jet_toml_is_e1226() {
         .output()
         .unwrap();
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("E1226"), "expected E1226 in stderr:\n{stderr}");
-    assert!(stderr.contains("jet.toml"), "names the found file:\n{stderr}");
+    assert!(
+        stderr.contains("E1226"),
+        "expected E1226 in stderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("jet.toml"),
+        "names the found file:\n{stderr}"
+    );
 }
 
 #[test]
@@ -1031,8 +1054,14 @@ fn stale_manifest_name_payload_jet_is_e1226() {
         .output()
         .unwrap();
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("E1226"), "expected E1226 in stderr:\n{stderr}");
-    assert!(stderr.contains("payload.jet"), "names the found file:\n{stderr}");
+    assert!(
+        stderr.contains("E1226"),
+        "expected E1226 in stderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("payload.jet"),
+        "names the found file:\n{stderr}"
+    );
 }
 
 /// `jetpack.toml` is a different, still-live file (D-JPK-FILES repo

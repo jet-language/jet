@@ -105,9 +105,7 @@ fn jet_trap_overflow(op: &str) {
     let msg = match op {
         "add" => "this addition overflows the value's type (the result is outside its range)",
         "sub" => "this subtraction overflows the value's type (the result is outside its range)",
-        "mul" => {
-            "this multiplication overflows the value's type (the result is outside its range)"
-        }
+        "mul" => "this multiplication overflows the value's type (the result is outside its range)",
         "div" => "this division can't be done (dividing by zero, or overflow)",
         _ => "this operation overflows the value's type (the result is outside its range)",
     };
@@ -933,10 +931,9 @@ fn jit_covers_func_detail(tir: &TFunc, callees: &HashSet<String>) -> Option<Stri
 
 fn jit_covers_program(program: &JitProgram) -> bool {
     let names: HashSet<String> = program.funcs.iter().map(|f| f.name.clone()).collect();
-    let main_ok = program
-        .funcs
-        .iter()
-        .any(|f| f.name == "run" && f.params.is_empty() && f.ret.is_none() && jit_covers_func(f, &names));
+    let main_ok = program.funcs.iter().any(|f| {
+        f.name == "run" && f.params.is_empty() && f.ret.is_none() && jit_covers_func(f, &names)
+    });
     if !main_ok {
         return false;
     }
@@ -3460,10 +3457,9 @@ pub fn jit_covers_bundle_detail(bundle: &ProgramBundle) -> String {
         );
     };
     let names: HashSet<String> = program.funcs.iter().map(|f| f.name.clone()).collect();
-    let main_ok = program
-        .funcs
-        .iter()
-        .any(|f| f.name == "run" && f.params.is_empty() && f.ret.is_none() && jit_covers_func(f, &names));
+    let main_ok = program.funcs.iter().any(|f| {
+        f.name == "run" && f.params.is_empty() && f.ret.is_none() && jit_covers_func(f, &names)
+    });
     if !main_ok {
         for f in &program.funcs {
             if f.name == "run" {

@@ -1038,7 +1038,10 @@ pub fn rust_type_name_assoc(ty: &Type, assoc: &HashSet<String>) -> String {
         // doc comment) — join defensively rather than assume, never panic on I2.
         Type::TraitObject(t) => format!(
             "Box<dyn {}>",
-            t.iter().map(|n| format!("user_{n}")).collect::<Vec<_>>().join(" + ")
+            t.iter()
+                .map(|n| format!("user_{n}"))
+                .collect::<Vec<_>>()
+                .join(" + ")
         ),
         Type::Option(inner) => format!("Option<{}>", rust_type_name_assoc(inner, assoc)),
         Type::Map { key, value } => format!(
@@ -1078,20 +1081,24 @@ pub fn emit_trait_def(t: &TraitDef, out: &mut String) {
                         AccessConvention::Write => "&mut self".to_string(),
                         AccessConvention::Move => "self".to_string(),
                         // D-CAP9: Share/Raw follow Read until specialized.
-                        AccessConvention::Read | AccessConvention::Share | AccessConvention::Raw => {
-                            "&self".to_string()
-                        }
+                        AccessConvention::Read
+                        | AccessConvention::Share
+                        | AccessConvention::Raw => "&self".to_string(),
                     }
                 } else {
                     // Match the convention applied by emit_trait_method / rust_param_type.
                     let base = rust_type_name_assoc(&p.ty, &assoc);
                     let rust_ty = match p.convention {
-                        AccessConvention::Read | AccessConvention::Share | AccessConvention::Raw
+                        AccessConvention::Read
+                        | AccessConvention::Share
+                        | AccessConvention::Raw
                             if p.ty.is_scalar() =>
                         {
                             base
                         }
-                        AccessConvention::Read | AccessConvention::Share | AccessConvention::Raw => {
+                        AccessConvention::Read
+                        | AccessConvention::Share
+                        | AccessConvention::Raw => {
                             format!("&{}", base)
                         }
                         AccessConvention::Write => format!("&mut {}", base),

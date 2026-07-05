@@ -76,14 +76,21 @@ fn secrets_keygen_set_get_roundtrip_no_plaintext_on_disk() {
         .env("JET_KEYS_DIR", keys.path.to_str().unwrap())
         .output()
         .expect("run jetpack secrets keygen");
-    assert!(keygen_out.status.success(), "keygen failed: {}", String::from_utf8_lossy(&keygen_out.stderr));
+    assert!(
+        keygen_out.status.success(),
+        "keygen failed: {}",
+        String::from_utf8_lossy(&keygen_out.stderr)
+    );
     let keygen_text = strip_ansi(&String::from_utf8_lossy(&keygen_out.stderr));
     let recipient = keygen_text
         .lines()
         .find_map(|l| l.split_once("recipient: ").map(|(_, v)| v.trim()))
         .expect("keygen must print a recipient line")
         .to_string();
-    assert!(recipient.starts_with("age1"), "recipient should be an age1... string: {recipient}");
+    assert!(
+        recipient.starts_with("age1"),
+        "recipient should be an age1... string: {recipient}"
+    );
 
     let add_out = jetpack()
         .current_dir(&proj.path)
@@ -108,7 +115,11 @@ fn secrets_keygen_set_get_roundtrip_no_plaintext_on_disk() {
         .env("JET_KEYS_DIR", keys.path.to_str().unwrap())
         .output()
         .expect("run jetpack secrets set");
-    assert!(set_out.status.success(), "set failed: {}", String::from_utf8_lossy(&set_out.stderr));
+    assert!(
+        set_out.status.success(),
+        "set failed: {}",
+        String::from_utf8_lossy(&set_out.stderr)
+    );
 
     // The no-plaintext invariant: scan every file under the project dir
     // (the encrypted store, the recipients file, anything else jetpack might
@@ -141,7 +152,11 @@ fn secrets_keygen_set_get_roundtrip_no_plaintext_on_disk() {
         .env("JET_KEYS_DIR", keys.path.to_str().unwrap())
         .output()
         .expect("run jetpack secrets get");
-    assert!(get_out.status.success(), "get failed: {}", String::from_utf8_lossy(&get_out.stderr));
+    assert!(
+        get_out.status.success(),
+        "get failed: {}",
+        String::from_utf8_lossy(&get_out.stderr)
+    );
     assert_eq!(
         String::from_utf8_lossy(&get_out.stdout).trim(),
         PLAINTEXT,
@@ -189,9 +204,15 @@ fn secrets_get_missing_entry_is_e1263() {
         .env("JET_KEYS_DIR", keys.path.to_str().unwrap())
         .output()
         .expect("run jetpack secrets get");
-    assert!(!get_out.status.success(), "get on a missing entry must fail (nonzero exit)");
+    assert!(
+        !get_out.status.success(),
+        "get on a missing entry must fail (nonzero exit)"
+    );
     let stderr = strip_ansi(&String::from_utf8_lossy(&get_out.stderr));
-    assert!(stderr.contains("E1263"), "expected E1263 in stderr, got:\n{stderr}");
+    assert!(
+        stderr.contains("E1263"),
+        "expected E1263 in stderr, got:\n{stderr}"
+    );
 }
 
 /// `jetpack secrets get <name>` with no store at all (never `set` anything)
@@ -209,7 +230,10 @@ fn secrets_get_with_no_store_at_all_is_e1263() {
         .expect("run jetpack secrets get");
     assert!(!get_out.status.success());
     let stderr = strip_ansi(&String::from_utf8_lossy(&get_out.stderr));
-    assert!(stderr.contains("E1263"), "expected E1263 in stderr, got:\n{stderr}");
+    assert!(
+        stderr.contains("E1263"),
+        "expected E1263 in stderr, got:\n{stderr}"
+    );
 }
 
 fn walk(dir: &std::path::Path) -> Vec<PathBuf> {

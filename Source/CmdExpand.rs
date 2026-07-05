@@ -11,9 +11,9 @@
 use std::path::{Path, PathBuf};
 use std::process::exit;
 
-use jet::AST::{Item, ProgramBundle};
-use jet::Sema::SemIndexEffectFacts;
 use jet::ExitCodes;
+use jet::Sema::SemIndexEffectFacts;
+use jet::AST::{Item, ProgramBundle};
 
 /// One registered lens: name, one-line description for `--facts <unknown>`
 /// listings and the bare-form group header, and the renderer that turns a

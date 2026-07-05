@@ -2031,10 +2031,9 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
         // if-let condition shape, JSON/Key keep their existing routes.
         Expr::PatternTest {
             subject,
-            pattern:
-                Pattern::Variant {
-                    variant, bindings, ..
-                },
+            pattern: Pattern::Variant {
+                variant, bindings, ..
+            },
             ..
         } if bindings.is_empty()
             && !is_json_variant(variant)

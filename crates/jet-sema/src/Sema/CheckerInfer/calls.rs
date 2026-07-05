@@ -1285,14 +1285,18 @@ impl<'a> Checker<'a> {
             // or, failing that, the binding's type annotation — same fallback shape
             // as `Deque.new()`/`Bag.new()` above.
             if type_name == "Pool" && method == "new" && args.is_empty() {
-                let elem_ty = type_args.first().cloned().unwrap_or_else(|| {
-                    match &self.expected_type {
-                        Some(Type::Apply { name, args, .. }) if name == "Pool" && !args.is_empty() => {
-                            args[0].clone()
-                        }
-                        _ => Type::Int,
-                    }
-                });
+                let elem_ty =
+                    type_args
+                        .first()
+                        .cloned()
+                        .unwrap_or_else(|| match &self.expected_type {
+                            Some(Type::Apply { name, args, .. })
+                                if name == "Pool" && !args.is_empty() =>
+                            {
+                                args[0].clone()
+                            }
+                            _ => Type::Int,
+                        });
                 let ret = Type::Apply {
                     name: "Pool".to_string(),
                     args: vec![elem_ty],
@@ -1327,8 +1331,12 @@ impl<'a> Checker<'a> {
                 if args.len() != 1 {
                     self.diags.push(Diagnostic::error(
                         "E0104",
-                        format!("`Reader.over` takes one `[U8]` argument, got {}", args.len()),
-                        "`Reader.over` wraps a byte list in a consuming, fallible cursor".to_string(),
+                        format!(
+                            "`Reader.over` takes one `[U8]` argument, got {}",
+                            args.len()
+                        ),
+                        "`Reader.over` wraps a byte list in a consuming, fallible cursor"
+                            .to_string(),
                         "write `Reader.over(some_bytes)`".to_string(),
                         Some(span),
                     ));
@@ -1348,8 +1356,12 @@ impl<'a> Checker<'a> {
                 if args.len() != 1 {
                     self.diags.push(Diagnostic::error(
                         "E0104",
-                        format!("`Cursor.over` takes one `String` argument, got {}", args.len()),
-                        "`Cursor.over` wraps a string in a consuming, fallible text cursor".to_string(),
+                        format!(
+                            "`Cursor.over` takes one `String` argument, got {}",
+                            args.len()
+                        ),
+                        "`Cursor.over` wraps a string in a consuming, fallible text cursor"
+                            .to_string(),
                         "write `Cursor.over(some_string)`".to_string(),
                         Some(span),
                     ));
@@ -1439,7 +1451,8 @@ impl<'a> Checker<'a> {
             // hole's text into the query string); `.text()` reads the escaped Html.
             if n == "Sql" && matches!(method, "template" | "params") {
                 if !args.is_empty() {
-                    self.diags.push(wrong_core_arity(method, 0, args.len(), span));
+                    self.diags
+                        .push(wrong_core_arity(method, 0, args.len(), span));
                 }
                 *recv_type_out = Some(n.clone());
                 return Some(if method == "template" {
@@ -1450,7 +1463,8 @@ impl<'a> Checker<'a> {
             }
             if n == "Html" && method == "text" {
                 if !args.is_empty() {
-                    self.diags.push(wrong_core_arity(method, 0, args.len(), span));
+                    self.diags
+                        .push(wrong_core_arity(method, 0, args.len(), span));
                 }
                 *recv_type_out = Some(n.clone());
                 return Some(Type::String);
@@ -1724,7 +1738,8 @@ impl<'a> Checker<'a> {
             if handle_ty == "Cursor" && method == Syntax::METHOD_TAKE_PATTERN {
                 *recv_type_out = Some("Cursor".to_string());
                 if args.len() != 1 {
-                    self.diags.push(wrong_core_arity(method, 1, args.len(), span));
+                    self.diags
+                        .push(wrong_core_arity(method, 1, args.len(), span));
                     return Some(result_ty(unit_ty(), Type::String));
                 }
                 let Expr::StrMatchLit(parts, lit_span) = &args[0].expr else {
@@ -1742,7 +1757,12 @@ impl<'a> Checker<'a> {
                 let _ = lit_span;
                 let mut holes: Vec<(String, Type)> = Vec::new();
                 for part in parts {
-                    if let crate::AST::StrMatchPart::Hole { name, ty, span: hole_span } = part {
+                    if let crate::AST::StrMatchPart::Hole {
+                        name,
+                        ty,
+                        span: hole_span,
+                    } = part
+                    {
                         let bound_ty = self.str_match_hole_type(name, ty, *hole_span);
                         holes.push((name.clone(), bound_ty));
                     }
@@ -2005,9 +2025,7 @@ impl<'a> Checker<'a> {
                 }
             }
             // D-RENDERTGT2=A (c133 M1/M2): UI backend measure/layout/paint/on_event.
-            if handle_ty == "NullBackend"
-                || handle_ty == "TuiBackend"
-                || handle_ty == "GtkBackend"
+            if handle_ty == "NullBackend" || handle_ty == "TuiBackend" || handle_ty == "GtkBackend"
             {
                 if let Some(ret) =
                     ui_backend_method_return(handle_ty, method, args.len(), span, &mut self.diags)
@@ -2129,16 +2147,22 @@ impl<'a> Checker<'a> {
         // `finish_builtin_method`, reached the same way Signal/Derived reach it.
         if let Type::Apply { name, .. } = &recv_ty {
             if name == "Pool" {
-                if let Some(ret) = Collections::builtin_method_return(&recv_ty, method, args.len(), false) {
-                    let result = self.finish_builtin_method(receiver, method, &recv_ty, args, span, ret);
+                if let Some(ret) =
+                    Collections::builtin_method_return(&recv_ty, method, args.len(), false)
+                {
+                    let result =
+                        self.finish_builtin_method(receiver, method, &recv_ty, args, span, ret);
                     *recv_type_out = Some("Pool".to_string());
                     return result;
                 }
             }
         }
         if let Type::Shared(_) = &recv_ty {
-            if let Some(ret) = Collections::builtin_method_return(&recv_ty, method, args.len(), false) {
-                let result = self.finish_builtin_method(receiver, method, &recv_ty, args, span, ret);
+            if let Some(ret) =
+                Collections::builtin_method_return(&recv_ty, method, args.len(), false)
+            {
+                let result =
+                    self.finish_builtin_method(receiver, method, &recv_ty, args, span, ret);
                 *recv_type_out = Some("Shared".to_string());
                 return result;
             }
@@ -2436,15 +2460,13 @@ impl<'a> Checker<'a> {
             // just the first, so a call inside the body can reach a method on any of
             // them. First match wins (S48 single-trait dispatch is the n=1 case of
             // this loop, unchanged).
-            let sig = trait_names
-                .iter()
-                .find_map(|tn| {
-                    self.trait_reg
-                        .traits
-                        .get(tn)
-                        .and_then(|t| t.methods.get(method))
-                        .map(|msig| (tn, msig))
-                });
+            let sig = trait_names.iter().find_map(|tn| {
+                self.trait_reg
+                    .traits
+                    .get(tn)
+                    .and_then(|t| t.methods.get(method))
+                    .map(|msig| (tn, msig))
+            });
             if let Some((trait_name, msig)) = sig {
                 *recv_type_out = Some(trait_name.clone());
                 let ret = msig.return_type.clone();
@@ -2464,7 +2486,10 @@ impl<'a> Checker<'a> {
                 many => (
                     format!(
                         "none of {} has a method `{method}`",
-                        many.iter().map(|t| format!("`{t}`")).collect::<Vec<_>>().join(" + ")
+                        many.iter()
+                            .map(|t| format!("`{t}`"))
+                            .collect::<Vec<_>>()
+                            .join(" + ")
                     ),
                     format!("add `fn {method}(…)` to one of the bound traits"),
                 ),
@@ -3993,7 +4018,13 @@ impl<'a> Checker<'a> {
 
 /// D-ANY-JAI1/D-VARARGBOUND1 (c7jaiany): E1313 — a trait-bounded variadic
 /// call-site argument doesn't implement one of the bound trait(s).
-fn e1313(arg_ty_name: &str, trait_name: &str, param_name: &str, fn_name: &str, span: Span) -> Diagnostic {
+fn e1313(
+    arg_ty_name: &str,
+    trait_name: &str,
+    param_name: &str,
+    fn_name: &str,
+    span: Span,
+) -> Diagnostic {
     Diagnostic::error(
         "E1313",
         format!("`{arg_ty_name}` doesn't implement `{trait_name}`"),

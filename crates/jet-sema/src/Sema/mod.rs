@@ -841,9 +841,9 @@ mod OsTarget;
 mod Protocol;
 mod Purity;
 mod Registration;
-mod ScopeMembers;
 pub mod Schema;
 mod SchemaMigration;
+mod ScopeMembers;
 mod State;
 mod Taint;
 mod WebPartition;
@@ -851,9 +851,9 @@ mod WebPartition;
 pub(crate) use Bundle::*;
 pub(crate) use Captures::*;
 pub(crate) use CheckerCli::*;
+pub use CheckerCoreLib::*;
 pub(crate) use CheckerFieldPolicy::*;
 pub(crate) use CheckerPatchable::*;
-pub use CheckerCoreLib::*;
 pub(crate) use Diagnostics::*;
 pub(crate) use Effects::*;
 pub(crate) use Purity::*;
@@ -878,9 +878,9 @@ pub use Effects::SemIndexEffectFacts;
 // D-EFFTREE1: also export the tree helpers — jet-driver's EffectBudget and
 // manifest parsing need root validation and ancestor-subsumption coverage
 // too, not just the bare enum.
+pub(crate) use CheckerInline::{check_inline_always_fn, e0918_address_taken};
 pub use Effects::{effect_covers, effect_root, parse_effect_name, show_set, Effect, EffectSet};
 pub use Purity::{check_pure_fn, check_pure_program_root, e3401, e3402, e3403};
-pub(crate) use CheckerInline::{check_inline_always_fn, e0918_address_taken};
 pub use Registration::{check, check_with_mode, effect_key};
 pub use FFI::{e3202, e3301, e3302, e3303};
 // D-MIGRATE2C: `jet schema status` reuses the schema-migration diff.

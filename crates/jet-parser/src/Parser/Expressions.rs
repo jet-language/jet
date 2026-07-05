@@ -1244,10 +1244,7 @@ impl<'a> Parser<'a> {
                     ) =>
             {
                 let span = self.bump().span;
-                self.expect(
-                    TokKind::LParen,
-                    &format!("after `{}`", Syntax::LIT_VALUE),
-                )?;
+                self.expect(TokKind::LParen, &format!("after `{}`", Syntax::LIT_VALUE))?;
                 let inner = self.expr()?;
                 self.expect(
                     TokKind::RParen,
@@ -1437,10 +1434,7 @@ impl<'a> Parser<'a> {
                 if canonical == Syntax::LIT_NULL {
                     Ok(Expr::Absent(t.span))
                 } else {
-                    self.expect(
-                        TokKind::LParen,
-                        &format!("after `{}`", Syntax::LIT_VALUE),
-                    )?;
+                    self.expect(TokKind::LParen, &format!("after `{}`", Syntax::LIT_VALUE))?;
                     let inner = self.expr()?;
                     self.expect(
                         TokKind::RParen,
@@ -2091,8 +2085,8 @@ impl<'a> Parser<'a> {
             TokKind::Ident(name) if name == Syntax::LIT_VALUE => {
                 let start = self.bump().span;
                 self.expect(TokKind::LParen, &format!("after `{}`", Syntax::LIT_VALUE))?;
-                let (binding, binding_span) = self
-                    .expect_ident(&format!("inside `{}(...)`", Syntax::LIT_VALUE))?;
+                let (binding, binding_span) =
+                    self.expect_ident(&format!("inside `{}(...)`", Syntax::LIT_VALUE))?;
                 self.expect(
                     TokKind::RParen,
                     &format!("after the binding in `{}(...)`", Syntax::LIT_VALUE),
@@ -2704,7 +2698,10 @@ impl<'a> Parser<'a> {
     /// Shared by `parse_lambda`/`parse_bare_lambda`: the body after `=>` and
     /// the lambda's overall end offset. `fallback_end` is used only for an
     /// empty block body (no statements to read an end span from).
-    fn lambda_arrow_body(&mut self, fallback_end: usize) -> Result<(LambdaBody, usize), Diagnostic> {
+    fn lambda_arrow_body(
+        &mut self,
+        fallback_end: usize,
+    ) -> Result<(LambdaBody, usize), Diagnostic> {
         let body = if matches!(self.peek().kind, TokKind::LBrace) {
             self.expect(TokKind::LBrace, "to open the lambda body")?;
             LambdaBody::Block(self.block_stmts())

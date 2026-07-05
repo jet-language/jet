@@ -1659,7 +1659,12 @@ impl<'a> Checker<'a> {
                 }
                 let mut result = HashMap::new();
                 for part in parts {
-                    let StrMatchPart::Hole { name, ty, span: hole_span } = part else {
+                    let StrMatchPart::Hole {
+                        name,
+                        ty,
+                        span: hole_span,
+                    } = part
+                    else {
                         continue;
                     };
                     let bound_ty = self.str_match_hole_type(name, ty, *hole_span);

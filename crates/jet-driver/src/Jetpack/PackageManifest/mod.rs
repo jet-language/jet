@@ -150,7 +150,9 @@ pub enum Target {
     /// Model module. `export` is the `.wit` world name (D-PLUGIN-EXPORT1=A,
     /// `export:` target field) — `None` when omitted, defaulting to the
     /// package name at build time.
-    Plugin { export: Option<String> },
+    Plugin {
+        export: Option<String>,
+    },
 }
 
 /// One entry in the `packages: { … }` block (U10 + D-TGT1). `targets` is empty when

@@ -120,7 +120,10 @@ fn fmt_comptime_os_switch_round_trips() {
         "expected the else arm preserved, got:\n{out}"
     );
     let twice = jet::format_source(&out).expect("comptime OS switch output should re-fmt");
-    assert_eq!(out, twice, "comptime OS switch formatting must be idempotent");
+    assert_eq!(
+        out, twice,
+        "comptime OS switch formatting must be idempotent"
+    );
 }
 
 #[test]
@@ -1831,7 +1834,10 @@ fn fmt_verbatim_derive_body_comment_not_duplicated() {
         1,
         "derive-body comment must not duplicate, got:\n{out}"
     );
-    assert_eq!(out, src, "derive block with an internal comment must already be canonical");
+    assert_eq!(
+        out, src,
+        "derive block with an internal comment must already be canonical"
+    );
     let twice = jet::format_source(&out).expect("second fmt should succeed");
     assert_eq!(out, twice, "derive-body comment fmt must be idempotent");
 }
@@ -1858,7 +1864,10 @@ fn fmt_preserves_trait_associated_type() {
         out.contains("type Elem\n"),
         "trait's `type Elem` associated-type declaration must not be dropped, got:\n{out}"
     );
-    assert_eq!(out, src, "trait with an associated type must already be canonical");
+    assert_eq!(
+        out, src,
+        "trait with an associated type must already be canonical"
+    );
     let twice = jet::format_source(&out).expect("second fmt should succeed");
     assert_eq!(out, twice, "trait assoc-type fmt must be idempotent");
 }
@@ -1915,7 +1924,10 @@ fn fmt_preserves_web_partition_markers() {
             tag.trim_end()
         );
     }
-    assert_eq!(out, src, "web-partition-marked fns must already be canonical");
+    assert_eq!(
+        out, src,
+        "web-partition-marked fns must already be canonical"
+    );
     let twice = jet::format_source(&out).expect("second fmt should succeed");
     assert_eq!(out, twice, "web partition marker fmt must be idempotent");
 }

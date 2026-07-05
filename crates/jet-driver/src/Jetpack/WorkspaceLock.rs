@@ -85,7 +85,8 @@ fn empty_lock() -> LockFile {
         root_dependencies: Vec::new(),
         workspace_members: Vec::new(),
         comptime_inputs: Vec::new(),
-        toolchains: Vec::new(),    }
+        toolchains: Vec::new(),
+    }
 }
 
 // ── check that Syntax::PAYLOAD_FILE is accessible (used for doc purposes) ─────

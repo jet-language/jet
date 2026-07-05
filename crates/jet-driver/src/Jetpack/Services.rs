@@ -329,10 +329,7 @@ pub fn wait_healthy(project_dir: &Path, plan: &DevServicePlan, timeout: Duration
 pub fn logs(project_dir: &Path, name: &str) -> String {
     let dir = service_dir(project_dir, name);
     let mut out = String::new();
-    for (label, path) in [
-        ("stdout", stdout_path(&dir)),
-        ("stderr", stderr_path(&dir)),
-    ] {
+    for (label, path) in [("stdout", stdout_path(&dir)), ("stderr", stderr_path(&dir))] {
         let mut buf = String::new();
         if File::open(&path)
             .and_then(|mut f| f.read_to_string(&mut buf))

@@ -64,7 +64,9 @@ impl OsTarget {
     /// names a recognizable OS, else the host OS. Reuses the existing
     /// `--target=` cross-compile flag (E2-M15) — no second flag for this.
     pub fn active(triple: Option<&str>) -> Self {
-        triple.and_then(Self::from_triple).unwrap_or_else(Self::host)
+        triple
+            .and_then(Self::from_triple)
+            .unwrap_or_else(Self::host)
     }
 }
 
@@ -242,7 +244,10 @@ mod tests {
 
     #[test]
     fn active_falls_back_to_host_for_unrecognized_triple() {
-        assert_eq!(OsTarget::active(Some("wasm32-unknown-unknown")), OsTarget::host());
+        assert_eq!(
+            OsTarget::active(Some("wasm32-unknown-unknown")),
+            OsTarget::host()
+        );
         assert_eq!(OsTarget::active(None), OsTarget::host());
     }
 }

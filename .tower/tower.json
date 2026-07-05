@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 209,
-    "rev": 68,
+    "rev": 69,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -8330,11 +8330,16 @@
       "kind": "bug",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-05",
+          "by": "codex",
+          "text": "Fixed and verified. Root cause was test harness fragility, not devserver routing: the fn-dev tests used fixed ports 8181/8182 and wait_for_server_up accepted any response from /__jet_dev_version, so a stale unrelated server could make the test proceed and then /app.js returned 404. Hardened tests to allocate ephemeral localhost ports and require a 200 version response before proceeding. Verified with nix develop -c cargo test --test web_dev (3/3 pass)."
+        },
         {
           "at": "2026-07-04",
           "by": "agent",
@@ -8342,7 +8347,7 @@
         }
       ],
       "created": "2026-07-04",
-      "updated": "2026-07-04"
+      "updated": "2026-07-05"
     },
     {
       "id": "c0y1mo9y",
@@ -23669,6 +23674,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-05T10:52:37.423Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c9webdevfn404",
+      "note": "phase,logEntry"
+    },
     {
       "at": "2026-07-05T10:23:39.075Z",
       "by": "codex",

@@ -154,7 +154,10 @@ mod tests {
         assert!(!e.platform.is_empty());
         assert!(e.provenance.contains("mine:hello"));
         assert!(e.provenance.contains("core-source"));
-        assert!(e.signature.is_empty(), "signature slot stays empty until #13");
+        assert!(
+            e.signature.is_empty(),
+            "signature slot stays empty until #13"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 }

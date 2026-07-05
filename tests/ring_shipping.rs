@@ -32,7 +32,10 @@ fn ring_module_realizes_from_hangar() {
         !Syntax::is_ring_module_staged("http"),
         "with no toolchain object, no ring is staged"
     );
-    assert_eq!(Loader::resolve_ring_module("http"), RingResolution::Embedded);
+    assert_eq!(
+        Loader::resolve_ring_module("http"),
+        RingResolution::Embedded
+    );
 
     // A fixture toolchain object that carries prebuilt `http` and `regex`
     // artifacts → those rings become staged and resolve from the hangar object;

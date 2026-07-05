@@ -85,7 +85,9 @@ pub(crate) fn aliasing_mut_after_read(name: &str, span: Span) -> Diagnostic {
         "while something is being looked at, nobody else may be changing it".to_string(),
         format!(
             "drop the extra use of `{}`, or copy first with `{} {}`",
-            name, Syntax::KW_COPY, name
+            name,
+            Syntax::KW_COPY,
+            name
         ),
         Some(span),
     )
@@ -267,7 +269,8 @@ fn type_owns_heap_rec(ty: &Type, registry: &TypeRegistry, visiting: &mut HashSet
         Type::Map { .. } => true,
         Type::Option(inner) => type_owns_heap_rec(inner, registry, visiting),
         Type::Result { ok, err } => {
-            type_owns_heap_rec(ok, registry, visiting) || type_owns_heap_rec(err, registry, visiting)
+            type_owns_heap_rec(ok, registry, visiting)
+                || type_owns_heap_rec(err, registry, visiting)
         }
         // A plain function value/pointer carries no heap-owned data at the
         // type level (a closure's captured environment isn't tracked here).
@@ -287,14 +290,18 @@ fn type_owns_heap_rec(ty: &Type, registry: &TypeRegistry, visiting: &mut HashSet
                 Some(TypeDef::Enum { variants, .. }) => variants.values().any(|(_, p)| match p {
                     VariantPayload::Unit => false,
                     VariantPayload::Single(t, _) => type_owns_heap_rec(t, registry, visiting),
-                    VariantPayload::Named(fs) => {
-                        fs.iter().any(|f| type_owns_heap_rec(&f.ty, registry, visiting))
-                    }
+                    VariantPayload::Named(fs) => fs
+                        .iter()
+                        .any(|f| type_owns_heap_rec(&f.ty, registry, visiting)),
                 }),
                 // D-DIST1: a distinct type wraps a base type — heap-owning iff
                 // the base is (e.g. `UserId :: distinct String`).
-                Some(TypeDef::Distinct { base, .. }) => type_owns_heap_rec(base, registry, visiting),
-                Some(TypeDef::Alias { target, .. }) => type_owns_heap_rec(target, registry, visiting),
+                Some(TypeDef::Distinct { base, .. }) => {
+                    type_owns_heap_rec(base, registry, visiting)
+                }
+                Some(TypeDef::Alias { target, .. }) => {
+                    type_owns_heap_rec(target, registry, visiting)
+                }
                 None => false,
             };
             visiting.remove(name);
@@ -315,7 +322,8 @@ fn type_owns_heap_rec(ty: &Type, registry: &TypeRegistry, visiting: &mut HashSet
         }
         Type::Apply { name, .. } if name == "Id" => false,
         Type::Apply { name, args } => {
-            args.iter().any(|a| type_owns_heap_rec(a, registry, visiting))
+            args.iter()
+                .any(|a| type_owns_heap_rec(a, registry, visiting))
                 || matches!(
                     registry.types.get(name),
                     Some(TypeDef::Struct { fields, .. }) if fields.iter().any(|(_, _, fty, _)| type_owns_heap_rec(fty, registry, visiting))
@@ -477,11 +485,7 @@ pub(crate) fn missing_pattern_coverage(
                 }
                 false
             };
-            let missing: Vec<_> = order
-                .iter()
-                .filter(|v| !leaf_covered(v))
-                .cloned()
-                .collect();
+            let missing: Vec<_> = order.iter().filter(|v| !leaf_covered(v)).cloned().collect();
             if missing.is_empty() {
                 None
             } else {
@@ -697,15 +701,13 @@ pub(crate) fn types_comparable(ty: &Type, registry: &TypeRegistry) -> bool {
 pub(crate) fn incomparable_field(ty: &Type, registry: &TypeRegistry) -> Option<String> {
     match ty {
         Type::Named(name) => match registry.types.get(name) {
-            Some(TypeDef::Struct { fields, .. }) => {
-                fields.iter().find_map(|(fname, _, fty, _)| {
-                    if !types_comparable(fty, registry) {
-                        Some(fname.clone())
-                    } else {
-                        None
-                    }
-                })
-            }
+            Some(TypeDef::Struct { fields, .. }) => fields.iter().find_map(|(fname, _, fty, _)| {
+                if !types_comparable(fty, registry) {
+                    Some(fname.clone())
+                } else {
+                    None
+                }
+            }),
             Some(TypeDef::Enum { variants, .. }) => {
                 variants.values().find_map(|(_, payload)| match payload {
                     VariantPayload::Unit => None,

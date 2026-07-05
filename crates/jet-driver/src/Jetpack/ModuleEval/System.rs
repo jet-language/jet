@@ -21,7 +21,9 @@ use super::Diagnostics::{
     unknown_record_field,
 };
 use super::Eval::{check_build_io, extract_packages};
-use super::Types::{FleetPlan, HostPlan, ImageKind, ImagePlan, OptionPlan, ServicePlan, SystemPlan};
+use super::Types::{
+    FleetPlan, HostPlan, ImageKind, ImagePlan, OptionPlan, ServicePlan, SystemPlan,
+};
 
 /// U11/U12/U13/U18: field-check a `system.<name>: { … }` record and capture it as
 /// a `SystemPlan`. Validates that every field is one of the four known `System`

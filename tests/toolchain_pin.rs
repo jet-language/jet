@@ -56,9 +56,15 @@ fn init_report_and_update_roundtrip() {
     let out = run(&["update", "jet", "0.4"], &dir);
     assert!(out.status.success(), "update jet failed: {out:?}");
     let lock = std::fs::read_to_string(dir.join(".jet/lock")).unwrap();
-    assert!(lock.contains("[[toolchain]]"), "lock has no toolchain:\n{lock}");
+    assert!(
+        lock.contains("[[toolchain]]"),
+        "lock has no toolchain:\n{lock}"
+    );
     assert!(lock.contains("channel = \"0.4\""), "lock channel:\n{lock}");
-    assert!(lock.contains("version = \"0.4.0\""), "lock version:\n{lock}");
+    assert!(
+        lock.contains("version = \"0.4.0\""),
+        "lock version:\n{lock}"
+    );
 
     // `jet toolchain` now reports the locked exact version + object id.
     let out = run(&["toolchain"], &dir);
@@ -129,7 +135,11 @@ fn platform_miss_reports_e1251() {
 #[test]
 fn init_refuses_to_clobber_reports_e1252() {
     let dir = scratch("clobber");
-    write(&dir, "pkg.jet", "payload: { name: \"x\", version: \"1\" }\n");
+    write(
+        &dir,
+        "pkg.jet",
+        "payload: { name: \"x\", version: \"1\" }\n",
+    );
     let out = run(&["init"], &dir);
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(err.contains("E1252"), "expected E1252:\n{err}");

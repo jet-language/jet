@@ -622,7 +622,12 @@ fn try_sparse_member_fetch(
             .unwrap_or(false)
     };
     let git_out = |args: &[&str]| -> Option<String> {
-        let o = Command::new("git").arg("-C").arg(&tmp).args(args).output().ok()?;
+        let o = Command::new("git")
+            .arg("-C")
+            .arg(&tmp)
+            .args(args)
+            .output()
+            .ok()?;
         if o.status.success() {
             Some(String::from_utf8_lossy(&o.stdout).into_owned())
         } else {
@@ -2032,7 +2037,8 @@ mod tests {
             let pkg = base.join(tag);
             std::fs::create_dir_all(&pkg).unwrap();
             std::fs::write(pkg.join("Cargo.toml"), "[package]\nname=\"math\"\n").unwrap();
-            let rlib = build_rlib_from_cargo(&pkg, &hangar, &tc).expect("pinned build produced rlib");
+            let rlib =
+                build_rlib_from_cargo(&pkg, &hangar, &tc).expect("pinned build produced rlib");
             let bytes = std::fs::read(&rlib).unwrap();
             // The rlib lands inside the object, and the scratch is swept.
             assert!(rlib.starts_with(pkg.to_string_lossy().as_ref()));
@@ -2046,7 +2052,10 @@ mod tests {
         let a = build_once("pkg-a");
         let b = build_once("pkg-b");
         assert_eq!(a, b"PINNED-RLIB-BYTES", "the pinned toolchain's cargo ran");
-        assert_eq!(a, b, "output is stable across builds with the pinned toolchain");
+        assert_eq!(
+            a, b,
+            "output is stable across builds with the pinned toolchain"
+        );
         std::fs::remove_dir_all(&base).ok();
     }
 

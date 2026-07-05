@@ -332,7 +332,6 @@ pub fn core_effect(module: &str, method: &str) -> Option<Effect> {
     })
 }
 
-
 /// D-TXN2: the irreversible effects — a network, filesystem, or subprocess
 /// effect that, once performed, cannot be rolled back. These are rejected when
 /// reached directly inside a `#Transact { … }` block (E0746). The remaining
@@ -1190,7 +1189,10 @@ pub(crate) fn check_secret_grants(
             return;
         }
         let declared = declared_set(f);
-        if !declared.iter().any(|e| effect_root(e) == Effect::Secret.name()) {
+        if !declared
+            .iter()
+            .any(|e| effect_root(e) == Effect::Secret.name())
+        {
             let span = f
                 .declared_effects
                 .as_ref()
@@ -1234,7 +1236,9 @@ pub(crate) fn check_secret_grants(
 /// deliberately ignoring `EffectSummary.maximal` (an opaque `extern rust`
 /// call is not "reading a secret" for this specific mandatory-grant purpose;
 /// see `check_secret_grants`'s doc comment).
-fn solve_secret_reach(summaries: &HashMap<String, EffectSummary>) -> std::collections::HashSet<String> {
+fn solve_secret_reach(
+    summaries: &HashMap<String, EffectSummary>,
+) -> std::collections::HashSet<String> {
     let mut reaches: std::collections::HashSet<String> = summaries
         .iter()
         .filter(|(_, s)| effect_set_has_root(&s.direct, Effect::Secret))
@@ -1269,7 +1273,10 @@ pub fn e1264(fn_name: &str, span: Span) -> Diagnostic {
          effects, there is no silently-inferred default here, so a function must opt in even with \
          no other `#(…)` bound at all."
             .to_string(),
-        format!("add `#(Secret)` to `{}`'s signature (or widen an existing `#(…)` list to cover it)", fn_name),
+        format!(
+            "add `#(Secret)` to `{}`'s signature (or widen an existing `#(…)` list to cover it)",
+            fn_name
+        ),
         Some(span),
     )
 }

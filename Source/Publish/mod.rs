@@ -323,7 +323,8 @@ mod tests {
             inferred_layer: None,
             effects: Vec::new(),
             effect_grants: Vec::new(),
-            envelope: None,        }
+            envelope: None,
+        }
     }
 
     fn make_lock(pkgs: Vec<LockedPackage>) -> LockFile {
@@ -333,7 +334,8 @@ mod tests {
             root_dependencies: vec![],
             workspace_members: Vec::new(),
             comptime_inputs: Vec::new(),
-            toolchains: Vec::new(),        }
+            toolchains: Vec::new(),
+        }
     }
 
     #[test]

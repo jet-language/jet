@@ -117,7 +117,10 @@ fn compile_bundle_path_opts_full(
     // before U11's L0203, so the gap went unnoticed).
     let mut errors = Vec::new();
     let mut lints = Vec::new();
-    for d in std::mem::take(&mut bundle.parse_teaching).into_iter().chain(diags) {
+    for d in std::mem::take(&mut bundle.parse_teaching)
+        .into_iter()
+        .chain(diags)
+    {
         match d.severity {
             Severity::Error => errors.push(d),
             Severity::Lint => lints.push(d),
@@ -422,7 +425,10 @@ pub fn compile_bundle_path_with_entry(
     // `compile_bundle_path_opts_dbg` — `parse_teaching` rides along here too.
     let mut errors = Vec::new();
     let mut lints = Vec::new();
-    for d in std::mem::take(&mut bundle.parse_teaching).into_iter().chain(diags) {
+    for d in std::mem::take(&mut bundle.parse_teaching)
+        .into_iter()
+        .chain(diags)
+    {
         match d.severity {
             Severity::Error => errors.push(d),
             Severity::Lint => lints.push(d),

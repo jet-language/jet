@@ -135,9 +135,7 @@ pub(crate) fn emit_tir_method(
     if let Some(conv) = self_conv {
         params.push(
             match conv {
-                AccessConvention::Read | AccessConvention::Share | AccessConvention::Raw => {
-                    "&self"
-                }
+                AccessConvention::Read | AccessConvention::Share | AccessConvention::Raw => "&self",
                 AccessConvention::Write => "&mut self",
                 AccessConvention::Move => "self",
             }
@@ -867,10 +865,7 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
                 // elapsed against the budget. Does not interrupt a hang.
                 ScopeMemberKind::Timeout(nanos) => {
                     out.push_str(&format!("{}{{\n", pad));
-                    out.push_str(&format!(
-                        "{}let __start = std::time::Instant::now();\n",
-                        ip
-                    ));
+                    out.push_str(&format!("{}let __start = std::time::Instant::now();\n", ip));
                     emit_tir_stmts(body, cx, out, inner);
                     out.push_str(&format!("{}let __elapsed = __start.elapsed();\n", ip));
                     out.push_str(&format!(

@@ -258,12 +258,20 @@ pub(super) fn apply_method(
                 _ => Vec::new(),
             }))
         }
-        (CtValue::Struct { type_name, fields }, "name") if type_name == "__ReflectField" => Ok(
-            fields.iter().find(|(n, _)| n == "name").map(|(_, v)| v.clone()).unwrap_or(CtValue::Unit),
-        ),
-        (CtValue::Struct { type_name, fields }, "value") if type_name == "__ReflectField" => Ok(
-            fields.iter().find(|(n, _)| n == "value").map(|(_, v)| v.clone()).unwrap_or(CtValue::Unit),
-        ),
+        (CtValue::Struct { type_name, fields }, "name") if type_name == "__ReflectField" => {
+            Ok(fields
+                .iter()
+                .find(|(n, _)| n == "name")
+                .map(|(_, v)| v.clone())
+                .unwrap_or(CtValue::Unit))
+        }
+        (CtValue::Struct { type_name, fields }, "value") if type_name == "__ReflectField" => {
+            Ok(fields
+                .iter()
+                .find(|(n, _)| n == "value")
+                .map(|(_, v)| v.clone())
+                .unwrap_or(CtValue::Unit))
+        }
         // D-HOLE1: `.zip` — pair two `Option`s, `None` if either is absent.
         // `(v, "zip")` rather than guarding to `CtValue::Some`/`None` because
         // both arms of the pairing need the same fallback.
@@ -312,14 +320,18 @@ pub(super) fn apply_method(
             Some(n) => CtValue::Some(Box::new(n.clone())),
             None => CtValue::None(Type::Int),
         }),
-        (v @ CtValue::Enum { .. }, "text") => Ok(match super::JsonInterp::json_payload(v, "Text") {
-            Some(s) => CtValue::Some(Box::new(s.clone())),
-            None => CtValue::None(Type::String),
-        }),
-        (v @ CtValue::Enum { .. }, "bool") => Ok(match super::JsonInterp::json_payload(v, "Bool") {
-            Some(b) => CtValue::Some(Box::new(b.clone())),
-            None => CtValue::None(Type::Bool),
-        }),
+        (v @ CtValue::Enum { .. }, "text") => {
+            Ok(match super::JsonInterp::json_payload(v, "Text") {
+                Some(s) => CtValue::Some(Box::new(s.clone())),
+                None => CtValue::None(Type::String),
+            })
+        }
+        (v @ CtValue::Enum { .. }, "bool") => {
+            Ok(match super::JsonInterp::json_payload(v, "Bool") {
+                Some(b) => CtValue::Some(Box::new(b.clone())),
+                None => CtValue::None(Type::Bool),
+            })
+        }
         (v @ CtValue::Enum { .. }, "float") => {
             Ok(match super::JsonInterp::json_payload(v, "Float") {
                 Some(f) => CtValue::Some(Box::new(f.clone())),

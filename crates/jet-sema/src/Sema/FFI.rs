@@ -286,9 +286,9 @@ pub(crate) fn ffi_named_type_ok(name: &str, registry: &TypeRegistry) -> bool {
         return true;
     }
     match registry.types.get(name) {
-        Some(TypeDef::Struct { fields, .. }) => fields
-            .iter()
-            .all(|(_, _, ty, _)| is_ffi_type(ty, registry)),
+        Some(TypeDef::Struct { fields, .. }) => {
+            fields.iter().all(|(_, _, ty, _)| is_ffi_type(ty, registry))
+        }
         Some(TypeDef::Enum { variants, .. }) => {
             variants.values().all(|(_, payload)| match payload {
                 VariantPayload::Unit => true,

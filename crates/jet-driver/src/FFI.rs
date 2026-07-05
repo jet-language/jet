@@ -361,7 +361,10 @@ pub fn build_bridge(
     // is expected — the helper binary exists too (a bridge cached before c146
     // landed would have the rlib but no helper, so fall through to rebuild).
     let helper_ready = helper_bin.as_ref().map(|p| p.is_file()).unwrap_or(true)
-        && secrets_helper_bin.as_ref().map(|p| p.is_file()).unwrap_or(true);
+        && secrets_helper_bin
+            .as_ref()
+            .map(|p| p.is_file())
+            .unwrap_or(true);
 
     // Fast path (cache hit): the key is content-derived from the exact
     // extern-rust signature / dep set, so an rlib already sitting at this

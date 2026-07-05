@@ -1638,7 +1638,9 @@ pub enum TBuiltinOp {
     /// `remove(k)` on a map → `(recv).remove(&(a0).clone())`.
     RemoveMap,
     /// `remove(i)` on a list → `jet_list_remove(&mut (recv), a0, file, line)`.
-    RemoveList { line: usize },
+    RemoveList {
+        line: usize,
+    },
     /// `get(k)` on a map → `(recv).get(&(a0).clone()).cloned()`.
     GetMap,
     /// `get(i)` on a list → `(recv).get(a0 as usize).cloned()`.
@@ -1685,7 +1687,9 @@ pub enum TBuiltinOp {
     /// `repeat(n)` → `(recv).repeat(a0 as usize)`.
     Repeat,
     /// `slice(a, b)` → `jet_string_slice(&(recv), a0, a1, file, line)`.
-    Slice { line: usize },
+    Slice {
+        line: usize,
+    },
     /// D-STR-AFTER1: `after(sep)` → `jet_string_after(&(recv), &a0)`. Substring
     /// strictly after the first `sep`; `sep` absent → the whole original string
     /// (mirrors `.replace`'s no-match-is-identity convention).
@@ -1731,16 +1735,23 @@ pub enum TBuiltinOp {
     Windows,
     /// `enumerate()` → inline emit building `JetTup_<hash>` struct. The struct name
     /// is embedded here at lowering so emit is a pure formatter.
-    Enumerate { tuple_struct: String },
+    Enumerate {
+        tuple_struct: String,
+    },
     /// `zip([U])` → inline emit building `JetTup_<hash>` struct.
-    Zip { tuple_struct: String },
+    Zip {
+        tuple_struct: String,
+    },
     // D-HOLE1: Option combinators.
     /// `zip(U?)` on `T?` → `(recv).clone().zip((a0).clone()).map(|(x,y)| Struct{…})`
     /// (Rust's native `Option::zip`, wrapped into the named-tuple struct). `elem_ty`
     /// (`(a: T, b: U)`) is the resolved pair type — carried so the call's own `TExpr`
     /// type is total (not the generic table's placeholder), even though it's rarely
     /// load-bearing in emit (a binding carries sema's `b.ty`).
-    OptionZip { tuple_struct: String, elem_ty: Type },
+    OptionZip {
+        tuple_struct: String,
+        elem_ty: Type,
+    },
     // D-COLLBREADTH1=A: Set<T> operations.
     /// `Set.from([...])` — recv is the list: `(recv).into_iter().collect::<std::collections::HashSet<_>>()`.
     SetFrom,
@@ -1781,7 +1792,9 @@ pub enum TBuiltinOp {
     // one of those emits a plain Rust slice/`.get`/`.first`/… call that a
     // `&[T]` receiver satisfies exactly as a `Vec<T>` does.
     /// `list.view(a..b)` → `jet_view_new(&(recv), a0, a1, file, line)`.
-    ViewNew { line: usize },
+    ViewNew {
+        line: usize,
+    },
 }
 
 /// c109 Phase 13: a resolved handle-method op, one per handle arm of
