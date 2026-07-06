@@ -318,7 +318,7 @@ fn render_outcome_timed(
     mode: OutputMode,
 ) {
     match outcome {
-        jet::Interpreter::RunOutcome::Ran { stdout, stderr } => {
+        jet::Interpreter::RunOutcome::Ran { stdout, stderr, .. } => {
             print!("{}", stdout);
             if !stderr.is_empty() {
                 eprint!("{}", stderr);

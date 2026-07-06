@@ -38,7 +38,15 @@ impl JitBackend for InterpreterBackend {
         try_anyway: bool,
     ) -> Result<RunOutcome, Vec<Diagnostic>> {
         match run_checked(bundle, try_anyway) {
-            RunOutcome::Ran { stdout, stderr } => Ok(RunOutcome::Ran { stdout, stderr }),
+            RunOutcome::Ran {
+                stdout,
+                stderr,
+                exit_code,
+            } => Ok(RunOutcome::Ran {
+                stdout,
+                stderr,
+                exit_code,
+            }),
             RunOutcome::Problems(diags) => Err(diags),
         }
     }

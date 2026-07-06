@@ -138,16 +138,13 @@ fn store_task(join: JetSchedulerJoin<i64>, control: Arc<JetTaskControl>) -> i64 
 }
 
 fn task_ids_from_list(rt: &mut super::JitRuntime, list: i64) -> Vec<i64> {
-    rt.lists
-        .get(list as usize)
+    rt.heap
+        .clone_int_list(list)
         .expect("jit task combinator: bad list handle")
-        .clone()
 }
 
 fn store_i64_list(rt: &mut super::JitRuntime, values: Vec<i64>) -> i64 {
-    let id = rt.lists.len() as i64;
-    rt.lists.push(values);
-    id
+    rt.heap.alloc_int_list(values)
 }
 
 fn take_task_entries(

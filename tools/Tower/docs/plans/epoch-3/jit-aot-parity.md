@@ -2,7 +2,16 @@
 
 Goal: one canonical typed IR after sema, consumed by both backends; a shared
 runtime; a mechanical coverage gate; CI that makes divergence impossible to
-ship. `jet dev` is the fast design/build/refine tier; `jet build`/`jet run`
+ship. Jet competes on two fronts:
+
+- **AOT wins the systems tier** — C, C++, Rust, Go, Zig, Odin: slower
+  compile/install loop is acceptable when the payoff is better optimized native
+  binaries, deployment performance, and expert control.
+- **JIT wins the rapid-iteration tier** — JavaScript/TypeScript, Python, data
+  analysis, web/app development, exploratory tooling: instant design/test/refine
+  cycles matter, with some optimization left on the table by design.
+
+`jet dev`/JIT is the fast design/build/refine tier; `jet build`/`jet run`
 through AOT is the slower-to-compile, better-optimized release tier. Anything
 that works through AOT must work through the dev tier in some backend path, with
 the same observable behavior; backend coverage gaps are Jet's problem, not the
@@ -280,7 +289,9 @@ Fallback ladder:
 
 The observable contract for every AOT-runnable program is identical stdout,
 stderr, exit code, diagnostics, panics, and side effects under `jet dev` and
-the AOT path. Speed may differ; semantics must not.
+the AOT path. Speed may differ; semantics must not. JIT may intentionally skip
+AOT-grade optimization to preserve edit-run latency; AOT may intentionally spend
+more compile time to beat systems-language release performance.
 
 ---
 
@@ -447,6 +458,14 @@ blocks Phase 0+ work.
 
 ### Owner direction recorded 2026-07-06
 
+Jet must replace both systems languages and rapid-iteration dynamic stacks.
+The AOT compiler is how Jet competes with and beats C, C++, Rust, Go, Zig, and
+Odin: native binaries, strong optimization, safety by default, expert control
+behind explicit gates. The JIT/dev tier is how Jet competes with and beats
+JavaScript/TypeScript, Python, data-analysis notebooks, web dev loops, and other
+interactive scripting stacks: fast edit-run feedback, resident state where safe,
+and no release-build wait while designing.
+
 `jet dev`/JIT exists for rapid design, testing, and refinement. AOT exists for
 slower compile time in exchange for better release optimization and binary
 performance. A program developed under `jet dev` must be 100% reproducible when
@@ -455,6 +474,12 @@ panics, and side effects. Anything possible through AOT must be possible under
 `jet dev` in some backend path. If JIT-native execution cannot host a feature
 yet, Jet falls back internally (shared host shim, resident platform runtime, or
 AOT subprocess). The user does not carry the backend gap.
+
+The intended user story: build/test/design/refine at JIT speed, then compile
+the final product through AOT and get the same program with stronger release
+optimization. JIT is not a second language, a subset, or a toy interpreter. AOT
+is not a behavior-changing release compiler. They are two performance tiers for
+one semantic contract.
 
 This answers the previously suspected owner gates:
 
@@ -508,8 +533,10 @@ fallback-status wording.
 
 ## Executor Checklist (ordered; hand to Codex as-is)
 
-1. Read this doc, `docs/spec/architecture.md`, card #125 (`.tower/tower.json`,
-   card num 125), `crates/jet-codegen/src/Codegen/TIR/mod.rs` header,
+1. Read `.agents/prompts/OrchestrationPrompt.md` first and run as the
+   orchestrating agent described there. Then read this doc,
+   `docs/spec/architecture.md`, card #125 (`.tower/tower.json`, card num 125),
+   `crates/jet-codegen/src/Codegen/TIR/mod.rs` header,
    `crates/jet-jit/src/lib.rs` header.
 2. Rewrite #125 `plan` to reference this doc + phases; create the §6 subcards
    with blockedBy edges; set workOrder.

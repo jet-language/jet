@@ -13,13 +13,18 @@ use crate::AST::ProgramBundle;
 /// What a single dev/serve iteration produced.
 ///
 /// Identical shape to the AOT compilation result (Q2 hard rule):
-/// `Ran.stdout`/`Ran.stderr` are byte-identical to the compiled binary's output.
+/// `Ran.stdout`/`Ran.stderr`/`Ran.exit_code` are byte-identical to the compiled
+/// binary's output.
 #[derive(Debug, Clone)]
 pub enum RunOutcome {
-    /// The program ran to completion. `stdout`/`stderr` are byte-identical
-    /// to the compiled program (Q2 — enforced by the differential battery in
-    /// `tests/dev.rs`).
-    Ran { stdout: String, stderr: String },
+    /// The program ran to completion. `stdout`/`stderr`/`exit_code` are
+    /// byte-identical to the compiled program (Q2 — enforced by the
+    /// differential battery in `tests/dev.rs`).
+    Ran {
+        stdout: String,
+        stderr: String,
+        exit_code: i32,
+    },
     /// Front-end or runtime diagnostics. Includes E2201 boundary notes and
     /// E2202 fuel stops.
     Problems(Vec<Diagnostic>),

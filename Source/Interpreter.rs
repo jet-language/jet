@@ -605,6 +605,7 @@ pub fn run_checked(bundle: &ProgramBundle, try_anyway: bool) -> RunOutcome {
         Ok(()) => RunOutcome::Ran {
             stdout: sink.stdout,
             stderr: sink.stderr,
+            exit_code: 0,
         },
         Err(d) => RunOutcome::Problems(vec![dev_boundary_from_comptime(d)]),
     }

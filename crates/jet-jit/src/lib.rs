@@ -40,6 +40,7 @@ use jet_codegen::Codegen::TIR::{
 };
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 
 thread_local! {
     /// Compiled module + entry symbol; re-linked on hot_swap.
@@ -55,9 +56,7 @@ pub(crate) struct JitRuntime {
     source_file: String,
     stdout: String,
     stderr: String,
-    strings: Vec<String>,
-    lists: Vec<Vec<i64>>,
-    structs_f64: Vec<Vec<f64>>,
+    heap: jet_rt::JetArena,
     invocations: u64,
     channels: Vec<JetSchedulerChannel<i64>>,
     senders: Vec<JetSchedulerSender<i64>>,
@@ -93,9 +92,22 @@ fn with_runtime_mut<F: FnOnce(&mut JitRuntime)>(f: F) {
     Concurrency::with_runtime_mut(f);
 }
 
-fn render_float(v: f64) -> String {
-    // Match `JetShow for f64` (`format!("{:?}", self)` in Core.rs).
-    format!("{v:?}")
+fn with_runtime_trap<F: FnOnce(&mut JitRuntime)>(f: F) {
+    Concurrency::with_runtime_mut(|rt| {
+        if catch_unwind(AssertUnwindSafe(|| f(rt))).is_err() {
+            rt.set_trap("the JIT runtime helper panicked");
+        }
+    });
+}
+
+fn with_runtime_result<R: Default, F: FnOnce(&mut JitRuntime) -> R>(default: R, f: F) -> R {
+    Concurrency::with_runtime_mut(|rt| match catch_unwind(AssertUnwindSafe(|| f(rt))) {
+        Ok(value) => value,
+        Err(_) => {
+            rt.set_trap("the JIT runtime helper panicked");
+            default
+        }
+    })
 }
 
 /// Record an arithmetic overflow/div-by-zero trap. Returns normally (the
@@ -166,8 +178,8 @@ extern "C" fn jet_jit_print_i64(v: i64) {
 }
 
 extern "C" fn jet_jit_print_f64(v: f64) {
-    with_runtime_mut(|rt| {
-        rt.stdout.push_str(&render_float(v));
+    with_runtime_trap(|rt| {
+        rt.stdout.push_str(&jet_rt::display_f64(v));
         rt.stdout.push('\n');
     });
 }
@@ -191,7 +203,7 @@ extern "C" fn jet_jit_print_char(v: i32) {
 
 extern "C" fn jet_jit_print_str(id: i64) {
     with_runtime_mut(|rt| {
-        if let Some(s) = rt.strings.get(id as usize) {
+        if let Some(s) = rt.heap.get_string(id) {
             rt.stdout.push_str(s);
             rt.stdout.push('\n');
         }
@@ -199,19 +211,15 @@ extern "C" fn jet_jit_print_str(id: i64) {
 }
 
 extern "C" fn jet_jit_str_begin() -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let id = rt.strings.len() as i64;
-        rt.strings.push(String::new());
-        id
-    })
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_empty_string())
 }
 
 extern "C" fn jet_jit_str_push_lit(buf_id: i64, lit_id: i64) {
     with_runtime_mut(|rt| {
-        let Some(lit) = rt.strings.get(lit_id as usize).cloned() else {
+        let Some(lit) = rt.heap.clone_string(lit_id) else {
             return;
         };
-        if let Some(buf) = rt.strings.get_mut(buf_id as usize) {
+        if let Some(buf) = rt.heap.get_string_mut(buf_id) {
             buf.push_str(&lit);
         }
     });
@@ -219,23 +227,23 @@ extern "C" fn jet_jit_str_push_lit(buf_id: i64, lit_id: i64) {
 
 extern "C" fn jet_jit_str_push_i64(buf_id: i64, v: i64) {
     with_runtime_mut(|rt| {
-        if let Some(buf) = rt.strings.get_mut(buf_id as usize) {
+        if let Some(buf) = rt.heap.get_string_mut(buf_id) {
             buf.push_str(&v.to_string());
         }
     });
 }
 
 extern "C" fn jet_jit_str_push_f64(buf_id: i64, v: f64) {
-    with_runtime_mut(|rt| {
-        if let Some(buf) = rt.strings.get_mut(buf_id as usize) {
-            buf.push_str(&render_float(v));
+    with_runtime_trap(|rt| {
+        if let Some(buf) = rt.heap.get_string_mut(buf_id) {
+            buf.push_str(&jet_rt::display_f64(v));
         }
     });
 }
 
 extern "C" fn jet_jit_str_push_bool(buf_id: i64, v: i8) {
     with_runtime_mut(|rt| {
-        if let Some(buf) = rt.strings.get_mut(buf_id as usize) {
+        if let Some(buf) = rt.heap.get_string_mut(buf_id) {
             buf.push_str(if v == 0 { "false" } else { "true" });
         }
     });
@@ -243,7 +251,7 @@ extern "C" fn jet_jit_str_push_bool(buf_id: i64, v: i8) {
 
 extern "C" fn jet_jit_str_push_char(buf_id: i64, v: i32) {
     with_runtime_mut(|rt| {
-        if let Some(buf) = rt.strings.get_mut(buf_id as usize) {
+        if let Some(buf) = rt.heap.get_string_mut(buf_id) {
             match char::from_u32(v as u32) {
                 Some(ch) => buf.push(ch),
                 None => buf.push('?'),
@@ -254,114 +262,133 @@ extern "C" fn jet_jit_str_push_char(buf_id: i64, v: i32) {
 
 extern "C" fn jet_jit_str_push_str(buf_id: i64, str_id: i64) {
     with_runtime_mut(|rt| {
-        let Some(s) = rt.strings.get(str_id as usize).cloned() else {
+        let Some(s) = rt.heap.clone_string(str_id) else {
             return;
         };
-        if let Some(buf) = rt.strings.get_mut(buf_id as usize) {
+        if let Some(buf) = rt.heap.get_string_mut(buf_id) {
             buf.push_str(&s);
         }
     });
 }
 
 extern "C" fn jet_jit_str_eq(a: i64, b: i64) -> i8 {
-    Concurrency::with_runtime_mut(|rt| {
-        match (
-            rt.strings.get(a as usize).map(String::as_str),
-            rt.strings.get(b as usize).map(String::as_str),
-        ) {
-            (Some(x), Some(y)) => i8::from(x == y),
-            _ => 0,
-        }
+    Concurrency::with_runtime_mut(|rt| match (rt.heap.get_string(a), rt.heap.get_string(b)) {
+        (Some(x), Some(y)) => i8::from(x == y),
+        _ => 0,
     })
 }
 
 extern "C" fn jet_jit_str_len(id: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        rt.strings
-            .get(id as usize)
-            .map(|s| s.chars().count() as i64)
+    with_runtime_result(0, |rt| {
+        rt.heap
+            .get_string(id)
+            .map(jet_rt::string_len_chars)
             .unwrap_or(0)
     })
 }
 
 extern "C" fn jet_jit_str_trim(id: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
+    with_runtime_result(0, |rt| {
         let text = rt
-            .strings
-            .get(id as usize)
-            .map(|s| s.trim().to_string())
+            .heap
+            .get_string(id)
+            .map(jet_rt::string_trim)
             .unwrap_or_default();
-        let out = rt.strings.len() as i64;
-        rt.strings.push(text);
-        out
+        rt.heap.alloc_string(text)
     })
 }
 
 extern "C" fn jet_jit_str_to_upper(id: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
+    with_runtime_result(0, |rt| {
         let text = rt
-            .strings
-            .get(id as usize)
-            .map(|s| s.to_uppercase())
+            .heap
+            .get_string(id)
+            .map(jet_rt::string_to_upper)
             .unwrap_or_default();
-        let out = rt.strings.len() as i64;
-        rt.strings.push(text);
-        out
+        rt.heap.alloc_string(text)
     })
 }
 
 extern "C" fn jet_jit_str_to_lower(id: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
+    with_runtime_result(0, |rt| {
         let text = rt
-            .strings
-            .get(id as usize)
-            .map(|s| s.to_lowercase())
+            .heap
+            .get_string(id)
+            .map(jet_rt::string_to_lower)
             .unwrap_or_default();
-        let out = rt.strings.len() as i64;
-        rt.strings.push(text);
-        out
+        rt.heap.alloc_string(text)
     })
 }
 
 extern "C" fn jet_jit_str_replace(id: i64, from_id: i64, to_id: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let text = rt.strings.get(id as usize).cloned().unwrap_or_default();
-        let from = rt
-            .strings
-            .get(from_id as usize)
-            .cloned()
-            .unwrap_or_default();
-        let to = rt.strings.get(to_id as usize).cloned().unwrap_or_default();
-        let out = rt.strings.len() as i64;
-        rt.strings.push(text.replace(&from, &to));
-        out
+    with_runtime_result(0, |rt| {
+        let text = rt.heap.clone_string(id).unwrap_or_default();
+        let from = rt.heap.clone_string(from_id).unwrap_or_default();
+        let to = rt.heap.clone_string(to_id).unwrap_or_default();
+        rt.heap
+            .alloc_string(jet_rt::string_replace(&text, &from, &to))
     })
 }
 
-extern "C" fn jet_jit_struct_new_f64(n: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let id = rt.structs_f64.len() as i64;
-        rt.structs_f64.push(vec![0.0; n as usize]);
-        id
-    })
+extern "C" fn jet_jit_struct_new(n: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_record(n as usize))
+}
+
+extern "C" fn jet_jit_struct_get_i64(h: i64, idx: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| rt.heap.record_get_int(h, idx).unwrap_or(0))
 }
 
 extern "C" fn jet_jit_struct_get_f64(h: i64, idx: i64) -> f64 {
+    Concurrency::with_runtime_mut(|rt| rt.heap.record_get_float(h, idx).unwrap_or(0.0))
+}
+
+extern "C" fn jet_jit_struct_get_bool(h: i64, idx: i64) -> i8 {
+    Concurrency::with_runtime_mut(|rt| i8::from(rt.heap.record_get_bool(h, idx).unwrap_or(false)))
+}
+
+extern "C" fn jet_jit_struct_get_char(h: i64, idx: i64) -> i32 {
     Concurrency::with_runtime_mut(|rt| {
-        rt.structs_f64
-            .get(h as usize)
-            .and_then(|s| s.get(idx as usize).copied())
-            .unwrap_or(0.0)
+        rt.heap
+            .record_get_char(h, idx)
+            .map(|c| c as i32)
+            .unwrap_or(0)
     })
+}
+
+extern "C" fn jet_jit_struct_get_str(h: i64, idx: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| rt.heap.record_get_string(h, idx).unwrap_or(0))
+}
+
+extern "C" fn jet_jit_struct_set_i64(h: i64, idx: i64, v: i64) {
+    with_runtime_mut(|rt| {
+        let _ = rt.heap.record_set_int(h, idx, v);
+    });
 }
 
 extern "C" fn jet_jit_struct_set_f64(h: i64, idx: i64, v: f64) {
     with_runtime_mut(|rt| {
-        if let Some(s) = rt.structs_f64.get_mut(h as usize) {
-            if let Some(slot) = s.get_mut(idx as usize) {
-                *slot = v;
-            }
-        }
+        let _ = rt.heap.record_set_float(h, idx, v);
+    });
+}
+
+extern "C" fn jet_jit_struct_set_bool(h: i64, idx: i64, v: i8) {
+    with_runtime_mut(|rt| {
+        let _ = rt.heap.record_set_bool(h, idx, v != 0);
+    });
+}
+
+extern "C" fn jet_jit_struct_set_char(h: i64, idx: i64, v: i32) {
+    with_runtime_mut(|rt| {
+        let Some(ch) = char::from_u32(v as u32) else {
+            return;
+        };
+        let _ = rt.heap.record_set_char(h, idx, ch);
+    });
+}
+
+extern "C" fn jet_jit_struct_set_str(h: i64, idx: i64, v: i64) {
+    with_runtime_mut(|rt| {
+        let _ = rt.heap.record_set_string(h, idx, v);
     });
 }
 
@@ -388,9 +415,17 @@ struct HostFns {
     str_to_upper: FuncId,
     str_to_lower: FuncId,
     str_replace: FuncId,
-    struct_new_f64: FuncId,
+    struct_new: FuncId,
+    struct_get_i64: FuncId,
     struct_get_f64: FuncId,
+    struct_get_bool: FuncId,
+    struct_get_char: FuncId,
+    struct_get_str: FuncId,
+    struct_set_i64: FuncId,
     struct_set_f64: FuncId,
+    struct_set_bool: FuncId,
+    struct_set_char: FuncId,
+    struct_set_str: FuncId,
     is_trapped: FuncId,
     coll: Collections::CollectionsHostFns,
     conc: Concurrency::ConcurrencyHostFns,
@@ -421,17 +456,46 @@ fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     builder.symbol("jet_jit_str_to_upper", jet_jit_str_to_upper as *const u8);
     builder.symbol("jet_jit_str_to_lower", jet_jit_str_to_lower as *const u8);
     builder.symbol("jet_jit_str_replace", jet_jit_str_replace as *const u8);
+    builder.symbol("jet_jit_struct_new", jet_jit_struct_new as *const u8);
     builder.symbol(
-        "jet_jit_struct_new_f64",
-        jet_jit_struct_new_f64 as *const u8,
+        "jet_jit_struct_get_i64",
+        jet_jit_struct_get_i64 as *const u8,
     );
     builder.symbol(
         "jet_jit_struct_get_f64",
         jet_jit_struct_get_f64 as *const u8,
     );
     builder.symbol(
+        "jet_jit_struct_get_bool",
+        jet_jit_struct_get_bool as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_struct_get_char",
+        jet_jit_struct_get_char as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_struct_get_str",
+        jet_jit_struct_get_str as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_struct_set_i64",
+        jet_jit_struct_set_i64 as *const u8,
+    );
+    builder.symbol(
         "jet_jit_struct_set_f64",
         jet_jit_struct_set_f64 as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_struct_set_bool",
+        jet_jit_struct_set_bool as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_struct_set_char",
+        jet_jit_struct_set_char as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_struct_set_str",
+        jet_jit_struct_set_str as *const u8,
     );
     builder.symbol("jet_jit_is_trapped", jet_jit_is_trapped as *const u8);
     Collections::register_collections_symbols(&mut builder);
@@ -495,14 +559,38 @@ fn declare_host_fns(
     let mut sig_struct_new = Signature::new(cc);
     sig_struct_new.params.push(AbiParam::new(types::I64));
     sig_struct_new.returns.push(AbiParam::new(types::I64));
-    let mut sig_struct_get = Signature::new(cc);
-    sig_struct_get.params.push(AbiParam::new(types::I64));
-    sig_struct_get.params.push(AbiParam::new(types::I64));
-    sig_struct_get.returns.push(AbiParam::new(types::F64));
-    let mut sig_struct_set = Signature::new(cc);
-    sig_struct_set.params.push(AbiParam::new(types::I64));
-    sig_struct_set.params.push(AbiParam::new(types::I64));
-    sig_struct_set.params.push(AbiParam::new(types::F64));
+    let mut sig_struct_get_i64 = Signature::new(cc);
+    sig_struct_get_i64.params.push(AbiParam::new(types::I64));
+    sig_struct_get_i64.params.push(AbiParam::new(types::I64));
+    sig_struct_get_i64.returns.push(AbiParam::new(types::I64));
+    let mut sig_struct_get_f64 = Signature::new(cc);
+    sig_struct_get_f64.params.push(AbiParam::new(types::I64));
+    sig_struct_get_f64.params.push(AbiParam::new(types::I64));
+    sig_struct_get_f64.returns.push(AbiParam::new(types::F64));
+    let mut sig_struct_get_i8 = Signature::new(cc);
+    sig_struct_get_i8.params.push(AbiParam::new(types::I64));
+    sig_struct_get_i8.params.push(AbiParam::new(types::I64));
+    sig_struct_get_i8.returns.push(AbiParam::new(types::I8));
+    let mut sig_struct_get_i32 = Signature::new(cc);
+    sig_struct_get_i32.params.push(AbiParam::new(types::I64));
+    sig_struct_get_i32.params.push(AbiParam::new(types::I64));
+    sig_struct_get_i32.returns.push(AbiParam::new(types::I32));
+    let mut sig_struct_set_i64 = Signature::new(cc);
+    sig_struct_set_i64.params.push(AbiParam::new(types::I64));
+    sig_struct_set_i64.params.push(AbiParam::new(types::I64));
+    sig_struct_set_i64.params.push(AbiParam::new(types::I64));
+    let mut sig_struct_set_f64 = Signature::new(cc);
+    sig_struct_set_f64.params.push(AbiParam::new(types::I64));
+    sig_struct_set_f64.params.push(AbiParam::new(types::I64));
+    sig_struct_set_f64.params.push(AbiParam::new(types::F64));
+    let mut sig_struct_set_i8 = Signature::new(cc);
+    sig_struct_set_i8.params.push(AbiParam::new(types::I64));
+    sig_struct_set_i8.params.push(AbiParam::new(types::I64));
+    sig_struct_set_i8.params.push(AbiParam::new(types::I8));
+    let mut sig_struct_set_i32 = Signature::new(cc);
+    sig_struct_set_i32.params.push(AbiParam::new(types::I64));
+    sig_struct_set_i32.params.push(AbiParam::new(types::I64));
+    sig_struct_set_i32.params.push(AbiParam::new(types::I32));
     let mut sig_is_trapped = Signature::new(cc);
     sig_is_trapped.returns.push(AbiParam::new(types::I64));
 
@@ -535,9 +623,17 @@ fn declare_host_fns(
         str_to_upper: import("jet_jit_str_to_upper", &sig_str_unary_i64)?,
         str_to_lower: import("jet_jit_str_to_lower", &sig_str_unary_i64)?,
         str_replace: import("jet_jit_str_replace", &sig_str_replace)?,
-        struct_new_f64: import("jet_jit_struct_new_f64", &sig_struct_new)?,
-        struct_get_f64: import("jet_jit_struct_get_f64", &sig_struct_get)?,
-        struct_set_f64: import("jet_jit_struct_set_f64", &sig_struct_set)?,
+        struct_new: import("jet_jit_struct_new", &sig_struct_new)?,
+        struct_get_i64: import("jet_jit_struct_get_i64", &sig_struct_get_i64)?,
+        struct_get_f64: import("jet_jit_struct_get_f64", &sig_struct_get_f64)?,
+        struct_get_bool: import("jet_jit_struct_get_bool", &sig_struct_get_i8)?,
+        struct_get_char: import("jet_jit_struct_get_char", &sig_struct_get_i32)?,
+        struct_get_str: import("jet_jit_struct_get_str", &sig_struct_get_i64)?,
+        struct_set_i64: import("jet_jit_struct_set_i64", &sig_struct_set_i64)?,
+        struct_set_f64: import("jet_jit_struct_set_f64", &sig_struct_set_f64)?,
+        struct_set_bool: import("jet_jit_struct_set_bool", &sig_struct_set_i8)?,
+        struct_set_char: import("jet_jit_struct_set_char", &sig_struct_set_i32)?,
+        struct_set_str: import("jet_jit_struct_set_str", &sig_struct_set_i64)?,
         is_trapped: import("jet_jit_is_trapped", &sig_is_trapped)?,
         coll,
         conc,
@@ -568,6 +664,14 @@ fn jit_scalar_type(ty: &Type) -> bool {
 
 fn jit_list_int_type(ty: &Type) -> bool {
     matches!(ty, Type::List(inner) if matches!(inner.as_ref(), Type::Int))
+}
+
+fn jit_list_float_type(ty: &Type) -> bool {
+    matches!(ty, Type::List(inner) if matches!(inner.as_ref(), Type::Float))
+}
+
+fn jit_list_native_type(ty: &Type) -> bool {
+    jit_list_int_type(ty) || jit_list_float_type(ty)
 }
 
 fn jit_list_task_int_type(ty: &Type) -> bool {
@@ -611,7 +715,7 @@ fn jit_enum_type(ty: &Type) -> bool {
 }
 
 fn jit_compound_type(ty: &Type) -> bool {
-    jit_list_int_type(ty)
+    jit_list_native_type(ty)
         || jit_list_task_int_type(ty)
         || jit_struct_type(ty)
         || jit_tuple_type(ty)
@@ -690,10 +794,10 @@ fn jit_covers_expr(expr: &TExpr, callees: &HashSet<String>) -> bool {
             }
         }
         TExprKind::ListLit(elems) => {
-            (jit_list_int_type(&expr.ty)
-                && elems
-                    .iter()
-                    .all(|e| matches!(&e.ty, Type::Int) && jit_covers_expr(e, callees)))
+            (jit_list_native_type(&expr.ty)
+                && elems.iter().all(|e| {
+                    matches!(&e.ty, Type::Int | Type::Float) && jit_covers_expr(e, callees)
+                }))
                 || (jit_list_task_int_type(&expr.ty)
                     && elems.iter().all(|e| jit_covers_expr(e, callees)))
         }
@@ -704,7 +808,7 @@ fn jit_covers_expr(expr: &TExpr, callees: &HashSet<String>) -> bool {
             ..
         } => {
             !is_map
-                && jit_list_int_type(&base.ty)
+                && jit_list_native_type(&base.ty)
                 && matches!(&index.ty, Type::Int)
                 && jit_covers_expr(base, callees)
                 && jit_covers_expr(index, callees)
@@ -712,7 +816,7 @@ fn jit_covers_expr(expr: &TExpr, callees: &HashSet<String>) -> bool {
         TExprKind::Slice {
             base, start, end, ..
         } => {
-            jit_list_int_type(&base.ty)
+            jit_list_native_type(&base.ty)
                 && matches!(&start.ty, Type::Int)
                 && matches!(&end.ty, Type::Int)
                 && jit_covers_expr(base, callees)
@@ -867,12 +971,13 @@ fn jit_covers_builtin_op(
                     .all(|a| matches!(&a.ty, Type::String) && jit_covers_expr(a, callees))
         }
         TBuiltinOp::Push => {
-            jit_list_int_type(&recv.ty)
+            jit_list_native_type(&recv.ty)
                 && args.len() == 1
-                && matches!(&args[0].ty, Type::Int)
+                && matches!(&args[0].ty, Type::Int | Type::Float)
                 && jit_covers_expr(&args[0], callees)
         }
-        TBuiltinOp::Sort | TBuiltinOp::LenList => jit_list_int_type(&recv.ty) && args.is_empty(),
+        TBuiltinOp::Sort => jit_list_int_type(&recv.ty) && args.is_empty(),
+        TBuiltinOp::LenList => jit_list_native_type(&recv.ty) && args.is_empty(),
         TBuiltinOp::GetList => {
             jit_list_int_type(&recv.ty)
                 && args.len() == 1
@@ -880,7 +985,7 @@ fn jit_covers_builtin_op(
                 && jit_covers_expr(&args[0], callees)
         }
         TBuiltinOp::JoinSep => {
-            jit_list_int_type(&recv.ty)
+            jit_list_native_type(&recv.ty)
                 && args.len() == 1
                 && matches!(&args[0].ty, Type::String)
                 && jit_covers_expr(&args[0], callees)
@@ -987,9 +1092,9 @@ fn jit_covers_stmt(stmt: &TStmt, callees: &HashSet<String>) -> bool {
             value,
         } => {
             !is_map
-                && jit_list_int_type(&base.ty)
+                && jit_list_native_type(&base.ty)
                 && matches!(&index.ty, Type::Int)
-                && matches!(&value.ty, Type::Int)
+                && matches!(&value.ty, Type::Int | Type::Float)
                 && jit_covers_expr(base, callees)
                 && jit_covers_expr(index, callees)
                 && jit_covers_expr(value, callees)
@@ -1788,9 +1893,11 @@ impl LowerCtx<'_, '_> {
                 let idx = self.lower_expr(index)?;
                 let val = self.lower_expr(value)?;
                 let line = self.b.ins().iconst(types::I32, 1);
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.coll.list_set, self.b.func);
+                let host_id = match &value.ty {
+                    Type::Float => self.host.coll.list_set_f64,
+                    _ => self.host.coll.list_set,
+                };
+                let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
                 self.b.ins().call(host_ref, &[list, idx, val, line]);
                 self.emit_trap_check()?;
             }
@@ -1993,8 +2100,7 @@ impl LowerCtx<'_, '_> {
 
     fn lower_string_lit(&mut self, parts: &[TStrPart]) -> Result<Value, String> {
         if let Some(text) = flatten_string(parts) {
-            let id = self.runtime.strings.len() as i64;
-            self.runtime.strings.push(text);
+            let id = self.runtime.heap.alloc_string(text);
             return Ok(self.b.ins().iconst(types::I64, id));
         }
         let begin_ref = self
@@ -2005,8 +2111,7 @@ impl LowerCtx<'_, '_> {
         for part in parts {
             match part {
                 TStrPart::Lit(s) => {
-                    let lit_id = self.runtime.strings.len() as i64;
-                    self.runtime.strings.push(s.clone());
+                    let lit_id = self.runtime.heap.alloc_string(s.clone());
                     let lit_const = self.b.ins().iconst(types::I64, lit_id);
                     let host_ref = self
                         .module
@@ -2092,21 +2197,23 @@ impl LowerCtx<'_, '_> {
         let n = self.b.ins().iconst(types::I64, values.len() as i64);
         let new_ref = self
             .module
-            .declare_func_in_func(self.host.struct_new_f64, self.b.func);
+            .declare_func_in_func(self.host.struct_new, self.b.func);
         let new_call = self.b.ins().call(new_ref, &[n]);
         let handle = self.b.inst_results(new_call)[0];
         for (i, value) in values.iter().enumerate() {
             let raw = self.lower_expr(value)?;
-            let val = match value.ty {
-                Type::Float => raw,
-                Type::Int => self.b.ins().fcvt_from_sint(types::F64, raw),
+            let host_id = match &value.ty {
+                Type::Int => self.host.struct_set_i64,
+                Type::Float => self.host.struct_set_f64,
+                Type::Bool => self.host.struct_set_bool,
+                Type::Char => self.host.struct_set_char,
+                Type::String => self.host.struct_set_str,
+                other if clif_ty(other) == Some(types::I64) => self.host.struct_set_i64,
                 _ => return Err(format!("jit record field unsupported: {:?}", value.ty)),
             };
             let idx = self.b.ins().iconst(types::I64, i as i64);
-            let set_ref = self
-                .module
-                .declare_func_in_func(self.host.struct_set_f64, self.b.func);
-            self.b.ins().call(set_ref, &[handle, idx, val]);
+            let set_ref = self.module.declare_func_in_func(host_id, self.b.func);
+            self.b.ins().call(set_ref, &[handle, idx, raw]);
         }
         Ok(handle)
     }
@@ -2132,20 +2239,22 @@ impl LowerCtx<'_, '_> {
             .ok_or_else(|| format!("jit field `{field_rust}` on `{type_name}`"))?
             as i64;
         let idx_val = self.b.ins().iconst(types::I64, idx);
-        let host_ref = self
-            .module
-            .declare_func_in_func(self.host.struct_get_f64, self.b.func);
-        let call = self.b.ins().call(host_ref, &[handle, idx_val]);
-        let raw = self.b.inst_results(call)[0];
         let field_ty = self
             .meta
             .struct_field_type(type_name, field_rust)
             .unwrap_or_else(|| fallback_ty.clone());
-        Ok(match field_ty {
-            Type::Float => raw,
-            Type::Int => self.b.ins().fcvt_to_sint(types::I64, raw),
+        let host_id = match &field_ty {
+            Type::Int => self.host.struct_get_i64,
+            Type::Float => self.host.struct_get_f64,
+            Type::Bool => self.host.struct_get_bool,
+            Type::Char => self.host.struct_get_char,
+            Type::String => self.host.struct_get_str,
+            other if clif_ty(other) == Some(types::I64) => self.host.struct_get_i64,
             other => return Err(format!("jit field type unsupported: {other:?}")),
-        })
+        };
+        let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+        let call = self.b.ins().call(host_ref, &[handle, idx_val]);
+        Ok(self.b.inst_results(call)[0])
     }
 
     fn lower_tuple_destructure(
@@ -2174,7 +2283,7 @@ impl LowerCtx<'_, '_> {
         Ok(())
     }
 
-    fn lower_list_lit(&mut self, elems: &[TExpr]) -> Result<Value, String> {
+    fn lower_list_lit(&mut self, list_ty: &Type, elems: &[TExpr]) -> Result<Value, String> {
         let new_ref = self
             .module
             .declare_func_in_func(self.host.coll.list_new, self.b.func);
@@ -2182,9 +2291,11 @@ impl LowerCtx<'_, '_> {
         let handle = self.b.inst_results(new_call)[0];
         for e in elems {
             let v = self.lower_expr(e)?;
-            let push_ref = self
-                .module
-                .declare_func_in_func(self.host.coll.list_push, self.b.func);
+            let push_id = match list_ty {
+                ty if jit_list_float_type(ty) => self.host.coll.list_push_f64,
+                _ => self.host.coll.list_push,
+            };
+            let push_ref = self.module.declare_func_in_func(push_id, self.b.func);
             self.b.ins().call(push_ref, &[handle, v]);
         }
         Ok(handle)
@@ -2445,7 +2556,7 @@ impl LowerCtx<'_, '_> {
                 self.b.seal_block(merge);
                 Ok(self.b.block_params(merge)[0])
             }
-            TExprKind::ListLit(elems) => self.lower_list_lit(elems),
+            TExprKind::ListLit(elems) => self.lower_list_lit(&expr.ty, elems),
             TExprKind::Index {
                 base,
                 index,
@@ -2458,9 +2569,11 @@ impl LowerCtx<'_, '_> {
                 let list = self.lower_expr(base)?;
                 let idx = self.lower_expr(index)?;
                 let line_const = self.b.ins().iconst(types::I32, *line as i64);
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.coll.list_get, self.b.func);
+                let host_id = match &expr.ty {
+                    Type::Float => self.host.coll.list_get_f64,
+                    _ => self.host.coll.list_get,
+                };
+                let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
                 let call = self.b.ins().call(host_ref, &[list, idx, line_const]);
                 let result = self.b.inst_results(call)[0];
                 self.emit_trap_check()?;
@@ -2628,9 +2741,11 @@ impl LowerCtx<'_, '_> {
             }
             TBuiltinOp::Push => {
                 let v = self.lower_expr(&args[0])?;
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.coll.list_push, self.b.func);
+                let host_id = match &args[0].ty {
+                    Type::Float => self.host.coll.list_push_f64,
+                    _ => self.host.coll.list_push,
+                };
+                let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
                 self.b.ins().call(host_ref, &[recv_val, v]);
                 Ok(self.b.ins().iconst(types::I8, 0))
             }
@@ -3410,14 +3525,12 @@ fn fresh_runtime() -> JitRuntime {
         source_file: String::new(),
         stdout: String::new(),
         stderr: String::new(),
-        strings: Vec::new(),
+        heap: jet_rt::JetArena::default(),
         invocations: 0,
         channels: Vec::new(),
         senders: Vec::new(),
         tasks: Vec::new(),
         task_controls: Vec::new(),
-        lists: Vec::new(),
-        structs_f64: Vec::new(),
         trapped: None,
     }
 }
@@ -3444,9 +3557,7 @@ fn jit_panic_diag(msg: &str) -> Diagnostic {
 /// into the following one. `source_file`/`invocations` are run-loop
 /// bookkeeping, not per-run heap, and are left alone.
 fn reset_run_heap(rt: &mut JitRuntime) {
-    rt.strings.clear();
-    rt.lists.clear();
-    rt.structs_f64.clear();
+    rt.heap.clear();
     rt.channels.clear();
     rt.senders.clear();
     rt.tasks.clear();
@@ -3529,6 +3640,7 @@ fn resident_invoke() -> Result<RunOutcome, String> {
         Ok(RunOutcome::Ran {
             stdout: runtime.stdout.clone(),
             stderr: runtime.stderr.clone(),
+            exit_code: 0,
         })
     })
 }
@@ -3669,6 +3781,250 @@ pub fn jit_dump_main_stmts(bundle: &ProgramBundle) -> Vec<String> {
         .enumerate()
         .map(|(i, s)| format!("{i}:{}", jit_stmt_tag(s)))
         .collect()
+}
+
+/// Test hook: observed TIR statement/expression tags in lowered `run`.
+#[doc(hidden)]
+pub fn jit_dump_main_ops(bundle: &ProgramBundle) -> Vec<String> {
+    let Some(program) = TIR::lower_jit_program(bundle) else {
+        return vec!["TStmt::<no program>".into()];
+    };
+    let Some(m) = program.funcs.iter().find(|f| f.name == "run") else {
+        return vec!["TStmt::<no run>".into()];
+    };
+    let mut out = Vec::new();
+    collect_stmt_ops(&m.body, &mut out);
+    out.sort();
+    out
+}
+
+fn collect_stmt_ops(stmts: &[TStmt], out: &mut Vec<String>) {
+    for stmt in stmts {
+        out.push(format!("TStmt::{}", jit_stmt_tag(stmt)));
+        match stmt {
+            TStmt::Let { init, .. }
+            | TStmt::TupleDestructure { init, .. }
+            | TStmt::StructDestructure { init, .. }
+            | TStmt::ListDestructure { init, .. } => collect_expr_ops(init, out),
+            TStmt::Assign { value, .. } | TStmt::Return(Some(value)) | TStmt::ExprStmt(value) => {
+                collect_expr_ops(value, out)
+            }
+            TStmt::If {
+                cond,
+                then_body,
+                else_body,
+                ..
+            } => {
+                collect_if_cond_ops(cond, out);
+                collect_stmt_ops(then_body, out);
+                if let Some(body) = else_body {
+                    collect_stmt_ops(body, out);
+                }
+            }
+            TStmt::Loop { body, .. }
+            | TStmt::Region(body)
+            | TStmt::Unsafe(body)
+            | TStmt::Inline(body)
+            | TStmt::Live { body }
+            | TStmt::ScopeMember { body, .. } => collect_stmt_ops(body, out),
+            TStmt::While { cond, body, .. } => {
+                collect_expr_ops(cond, out);
+                collect_stmt_ops(body, out);
+            }
+            TStmt::CountedLoop {
+                init,
+                cond,
+                step,
+                body,
+                ..
+            } => {
+                collect_stmt_ops(std::slice::from_ref(init.as_ref()), out);
+                collect_expr_ops(cond, out);
+                collect_stmt_ops(std::slice::from_ref(step.as_ref()), out);
+                collect_stmt_ops(body, out);
+            }
+            TStmt::Range {
+                start,
+                end,
+                step,
+                body,
+                ..
+            } => {
+                collect_expr_ops(start, out);
+                collect_expr_ops(end, out);
+                if let Some(step) = step {
+                    collect_expr_ops(step, out);
+                }
+                collect_stmt_ops(body, out);
+            }
+            TStmt::IndexAssign {
+                base, index, value, ..
+            }
+            | TStmt::IndexHookAssign {
+                base, index, value, ..
+            } => {
+                collect_expr_ops(base, out);
+                collect_expr_ops(index, out);
+                collect_expr_ops(value, out);
+            }
+            TStmt::MathSwizzleAssign { base, value, .. } => {
+                collect_expr_ops(base, out);
+                collect_expr_ops(value, out);
+            }
+            TStmt::ForIn { body, .. }
+            | TStmt::EnumMatch {
+                else_body: Some(body),
+                ..
+            }
+            | TStmt::Layout { body, .. }
+            | TStmt::ContextBlock { body, .. }
+            | TStmt::Transact { body, .. } => collect_stmt_ops(body, out),
+            TStmt::MixedSwitch {
+                arms, else_body, ..
+            } => {
+                for (cond, body) in arms {
+                    collect_expr_ops(cond, out);
+                    collect_stmt_ops(body, out);
+                }
+                if let Some(body) = else_body {
+                    collect_stmt_ops(body, out);
+                }
+            }
+            TStmt::RangeSwitch {
+                arms, else_body, ..
+            } => {
+                for (_, _, body) in arms {
+                    collect_stmt_ops(body, out);
+                }
+                collect_stmt_ops(else_body, out);
+            }
+            TStmt::Return(None)
+            | TStmt::Break(_)
+            | TStmt::Continue(_)
+            | TStmt::EnumMatch {
+                else_body: None, ..
+            }
+            | TStmt::Reactive { .. }
+            | TStmt::LineMarker(_) => {}
+        }
+    }
+}
+
+fn collect_if_cond_ops(cond: &TIfCond, out: &mut Vec<String>) {
+    match cond {
+        TIfCond::Plain(e) => collect_expr_ops(e, out),
+        TIfCond::IfLet { subj, .. }
+        | TIfCond::IsNone { subj, .. }
+        | TIfCond::Matches { subj, .. } => collect_expr_ops(subj, out),
+    }
+}
+
+fn collect_expr_ops(expr: &TExpr, out: &mut Vec<String>) {
+    out.push(format!("TExprKind::{}", jit_expr_tag(expr)));
+    match &expr.kind {
+        TExprKind::Print(inner)
+        | TExprKind::Clone(inner)
+        | TExprKind::MaterializeView(inner)
+        | TExprKind::DistinctRaw(inner)
+        | TExprKind::Present(inner)
+        | TExprKind::Ok(inner)
+        | TExprKind::Err(inner)
+        | TExprKind::Deref(inner)
+        | TExprKind::RawOf(inner)
+        | TExprKind::LayoutLit { inner } => collect_expr_ops(inner, out),
+        TExprKind::Unary { operand, .. } => collect_expr_ops(operand, out),
+        TExprKind::Binary { lhs, rhs, .. } | TExprKind::LayoutCompare { lhs, rhs, .. } => {
+            collect_expr_ops(lhs, out);
+            collect_expr_ops(rhs, out);
+        }
+        TExprKind::CompareChain { operands, .. } => {
+            for operand in operands {
+                collect_expr_ops(operand, out);
+            }
+        }
+        TExprKind::StrLit(parts) => {
+            for part in parts {
+                if let TStrPart::Interp(e, _) = part {
+                    collect_expr_ops(e, out);
+                }
+            }
+        }
+        TExprKind::Call { args, .. }
+        | TExprKind::MethodCall { args, .. }
+        | TExprKind::FnFieldCall { args, .. }
+        | TExprKind::StaticCall { args, .. } => {
+            for arg in args {
+                collect_expr_ops(&arg.value, out);
+            }
+        }
+        TExprKind::StructLit { fields, .. } => {
+            for field in fields {
+                collect_expr_ops(&field.1, out);
+            }
+        }
+        TExprKind::TupleLit { fields, .. } => {
+            for field in fields {
+                collect_expr_ops(&field.1, out);
+            }
+        }
+        TExprKind::EnumLit { payload, .. } => match payload {
+            TEnumPayload::Unit => {}
+            TEnumPayload::Positional(vals) => {
+                for v in vals {
+                    collect_expr_ops(&v.value, out);
+                }
+            }
+            TEnumPayload::Named(vals) => {
+                for (_, v) in vals {
+                    collect_expr_ops(&v.value, out);
+                }
+            }
+        },
+        TExprKind::ListLit(elems) => {
+            for elem in elems {
+                collect_expr_ops(elem, out);
+            }
+        }
+        TExprKind::Index { base, index, .. }
+        | TExprKind::IndexHook { base, index, .. }
+        | TExprKind::MathLaneIndex { base, index, .. }
+        | TExprKind::ColumnarGather { base, index, .. } => {
+            collect_expr_ops(base, out);
+            collect_expr_ops(index, out);
+        }
+        TExprKind::Slice {
+            base, start, end, ..
+        } => {
+            collect_expr_ops(base, out);
+            collect_expr_ops(start, out);
+            collect_expr_ops(end, out);
+        }
+        TExprKind::BuiltinMethod { recv, args, .. } => {
+            collect_expr_ops(recv, out);
+            for arg in args {
+                collect_expr_ops(arg, out);
+            }
+        }
+        TExprKind::CoreCall { args, .. } => {
+            for arg in args {
+                collect_expr_ops(arg, out);
+            }
+        }
+        TExprKind::IfExpr {
+            cond,
+            then_body,
+            then_value,
+            else_body,
+            else_value,
+        } => {
+            collect_expr_ops(cond, out);
+            collect_stmt_ops(then_body, out);
+            collect_expr_ops(then_value, out);
+            collect_stmt_ops(else_body, out);
+            collect_expr_ops(else_value, out);
+        }
+        _ => {}
+    }
 }
 
 /// Test hook: count select recv/timer arms on the first `SelectWait` in `run`.

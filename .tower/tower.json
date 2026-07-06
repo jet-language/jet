@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 219,
-    "rev": 308,
+    "rev": 309,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -5603,6 +5603,11 @@
       "plan": "JIT/AOT parity by construction. Canonical plan: tools/Tower/docs/plans/epoch-3/jit-aot-parity.md. Orchestration: implementation agent must first read .agents/prompts/OrchestrationPrompt.md and run as that orchestrator. Owner direction 2026-07-06: Jet wins two fronts. AOT targets C/C++/Rust/Go/Zig/Odin territory with optimized native binaries and expert control; JIT/dev targets JS/TS/Python/data-analysis/web-dev loops with rapid design/test/refine. Every AOT-runnable program must run under jet dev in some backend path with identical stdout/stderr/exit/diagnostics/panics/side effects. Native JIT lowering is preferred for speed; transparent shared-runtime/platform/AOT-subprocess fallback is valid when resident JIT hosting is unsafe or incomplete. User never owns backend gaps. No parity ballots remain. Exit: dev_default_matches_compiled_binary covers stdout+stderr+exit for every example, gap manifest contains only transparent internal fallback reasons, no jit_covers whitelist remains, R12 documents two consumers/one IR, full suite + jet-verify green.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "Phase 2 record slice implemented: JIT records moved from raw Vec<Vec<f64>> into jet-rt JetArena as JetVal::Record with typed Int/Float/Bool/Char/String field set/get shims. Added cranelift_covers_mixed_record_fields plus existing float-list coverage. Three-way battery now runs 40 covered golden stems. Verified: nix develop -c cargo test -p jet-rt; nix develop -c cargo test --test dev cranelift_covers_mixed_record_fields -- --exact --nocapture; nix develop -c cargo test --test dev cranelift_covers_float_lists -- --exact --nocapture; nix develop -c cargo test --test dev cranelift_three_way_differential_battery -- --exact --nocapture; nix develop -c cargo test --test dev jit_coverage_audit -- --exact --nocapture; nix develop -c cargo test --test dev cranelift_hot_swap_preserves_live_state -- --exact --nocapture; nix develop -c cargo test --test dev cranelift_trap_then_hot_swap_continues -- --exact --nocapture; nix develop -c rustfmt --check touched Rust files. Results green; audit ratchet remains 79/178."
+        },
         {
           "at": "2026-07-06",
           "by": "codex-main",

@@ -1,4 +1,4 @@
-//! M5: list host shims for the Cranelift JIT (`Vec<i64>` handles).
+//! M5: list host shims for the Cranelift JIT (`JetArena` list handles).
 
 use super::Concurrency;
 
@@ -12,124 +12,135 @@ fn trap_index() {
 }
 
 extern "C" fn jet_jit_list_new() -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let id = rt.lists.len() as i64;
-        rt.lists.push(Vec::new());
-        id
-    })
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_empty_list())
 }
 
 extern "C" fn jet_jit_list_push(list: i64, v: i64) {
     Concurrency::with_runtime_mut(|rt| {
-        rt.lists
-            .get_mut(list as usize)
-            .expect("jit list push: bad handle")
-            .push(v);
+        rt.heap
+            .list_push_int(list, v)
+            .expect("jit list push: bad handle");
+    });
+}
+
+extern "C" fn jet_jit_list_push_f64(list: i64, v: f64) {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.heap
+            .list_push_float(list, v)
+            .expect("jit list push f64: bad handle");
     });
 }
 
 extern "C" fn jet_jit_list_len(list: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        rt.lists
-            .get(list as usize)
-            .expect("jit list len: bad handle")
-            .len() as i64
-    })
+    Concurrency::with_runtime_mut(|rt| rt.heap.list_len(list).expect("jit list len: bad handle"))
 }
 
 extern "C" fn jet_jit_list_get(list: i64, idx: i64, _line: u32) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let xs = rt
-            .lists
-            .get(list as usize)
-            .expect("jit list get: bad handle");
-        if idx < 0 || (idx as usize) >= xs.len() {
+    Concurrency::with_runtime_mut(|rt| match rt.heap.list_get_int(list, idx) {
+        Some(value) => value,
+        None => {
+            if rt.heap.list_len(list).is_none() {
+                panic!("jit list get: bad handle");
+            }
             rt.set_trap("index out of bounds: the index is outside the list");
-            return 0;
+            0
         }
-        xs[idx as usize]
+    })
+}
+
+extern "C" fn jet_jit_list_get_f64(list: i64, idx: i64, _line: u32) -> f64 {
+    Concurrency::with_runtime_mut(|rt| match rt.heap.list_get_float(list, idx) {
+        Some(value) => value,
+        None => {
+            if rt.heap.list_len(list).is_none() {
+                panic!("jit list get f64: bad handle");
+            }
+            rt.set_trap("index out of bounds: the index is outside the list");
+            0.0
+        }
     })
 }
 
 /// `0` = absent; otherwise `value + 1`.
 extern "C" fn jet_jit_list_get_opt(list: i64, idx: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        let xs = rt
-            .lists
-            .get(list as usize)
-            .expect("jit list get_opt: bad handle");
-        if idx < 0 || (idx as usize) >= xs.len() {
-            return 0;
+        if rt.heap.list_len(list).is_none() {
+            panic!("jit list get_opt: bad handle");
         }
-        xs[idx as usize] + 1
+        rt.heap.list_get_int(list, idx).map(|v| v + 1).unwrap_or(0)
     })
 }
 
 extern "C" fn jet_jit_list_set(list: i64, idx: i64, v: i64, _line: u32) {
     Concurrency::with_runtime_mut(|rt| {
-        let xs = rt
-            .lists
-            .get_mut(list as usize)
-            .expect("jit list set: bad handle");
-        if idx < 0 || (idx as usize) >= xs.len() {
-            trap_index();
-            return;
+        if rt.heap.list_len(list).is_none() {
+            panic!("jit list set: bad handle");
         }
-        xs[idx as usize] = v;
+        if rt.heap.list_set_int(list, idx, v).is_none() {
+            trap_index();
+        }
+    });
+}
+
+extern "C" fn jet_jit_list_set_f64(list: i64, idx: i64, v: f64, _line: u32) {
+    Concurrency::with_runtime_mut(|rt| {
+        if rt.heap.list_len(list).is_none() {
+            panic!("jit list set f64: bad handle");
+        }
+        if rt.heap.list_set_float(list, idx, v).is_none() {
+            trap_index();
+        }
     });
 }
 
 extern "C" fn jet_jit_list_sort(list: i64) {
     Concurrency::with_runtime_mut(|rt| {
-        rt.lists
-            .get_mut(list as usize)
+        rt.heap
+            .list_sort_int(list)
             .expect("jit list sort: bad handle")
-            .sort_unstable();
     });
 }
 
 extern "C" fn jet_jit_list_slice(list: i64, start: i64, end: i64, _line: u32) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        let xs = rt
-            .lists
-            .get(list as usize)
-            .expect("jit list slice: bad handle");
-        if start < 0 || end < start || end > xs.len() as i64 {
-            rt.set_trap("slice out of bounds: the range is outside the list");
-            return 0;
+        if rt.heap.list_len(list).is_none() {
+            panic!("jit list slice: bad handle");
         }
-        let slice = xs[start as usize..end as usize].to_vec();
-        let id = rt.lists.len() as i64;
-        rt.lists.push(slice);
-        id
+        match rt.heap.list_slice(list, start, end) {
+            Some(id) => id,
+            None => {
+                rt.set_trap("slice out of bounds: the range is outside the list");
+                0
+            }
+        }
     })
 }
 
 extern "C" fn jet_jit_list_join_str(list: i64, sep_id: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let xs = rt
-            .lists
-            .get(list as usize)
-            .expect("jit list join: bad handle")
-            .clone();
-        let sep = rt.strings.get(sep_id as usize).cloned().unwrap_or_default();
+            .heap
+            .clone_int_list(list)
+            .expect("jit list join: bad handle");
+        let sep = rt.heap.clone_string(sep_id).unwrap_or_default();
         let joined = xs
             .iter()
             .map(|v| v.to_string())
             .collect::<Vec<_>>()
             .join(&sep);
-        let id = rt.strings.len() as i64;
-        rt.strings.push(joined);
-        id
+        rt.heap.alloc_string(joined)
     })
 }
 
 pub(crate) struct CollectionsHostFns {
     pub list_new: cranelift_module::FuncId,
     pub list_push: cranelift_module::FuncId,
+    pub list_push_f64: cranelift_module::FuncId,
     pub list_get: cranelift_module::FuncId,
+    pub list_get_f64: cranelift_module::FuncId,
     pub list_get_opt: cranelift_module::FuncId,
     pub list_set: cranelift_module::FuncId,
+    pub list_set_f64: cranelift_module::FuncId,
     pub list_len: cranelift_module::FuncId,
     pub list_sort: cranelift_module::FuncId,
     pub list_slice: cranelift_module::FuncId,
@@ -139,9 +150,12 @@ pub(crate) struct CollectionsHostFns {
 pub(crate) fn register_collections_symbols(builder: &mut cranelift_jit::JITBuilder) {
     builder.symbol("jet_jit_list_new", jet_jit_list_new as *const u8);
     builder.symbol("jet_jit_list_push", jet_jit_list_push as *const u8);
+    builder.symbol("jet_jit_list_push_f64", jet_jit_list_push_f64 as *const u8);
     builder.symbol("jet_jit_list_get", jet_jit_list_get as *const u8);
+    builder.symbol("jet_jit_list_get_f64", jet_jit_list_get_f64 as *const u8);
     builder.symbol("jet_jit_list_get_opt", jet_jit_list_get_opt as *const u8);
     builder.symbol("jet_jit_list_set", jet_jit_list_set as *const u8);
+    builder.symbol("jet_jit_list_set_f64", jet_jit_list_set_f64 as *const u8);
     builder.symbol("jet_jit_list_len", jet_jit_list_len as *const u8);
     builder.symbol("jet_jit_list_sort", jet_jit_list_sort as *const u8);
     builder.symbol("jet_jit_list_slice", jet_jit_list_slice as *const u8);
@@ -160,15 +174,23 @@ pub(crate) fn declare_collections_host_fns(
     let mut sig_push = Signature::new(cc);
     sig_push.params.push(AbiParam::new(types::I64));
     sig_push.params.push(AbiParam::new(types::I64));
+    let mut sig_push_f64 = Signature::new(cc);
+    sig_push_f64.params.push(AbiParam::new(types::I64));
+    sig_push_f64.params.push(AbiParam::new(types::F64));
     let mut sig_len = Signature::new(cc);
     sig_len.params.push(AbiParam::new(types::I64));
     sig_len.returns.push(AbiParam::new(types::I64));
     let mut sig_get = sig_len.clone();
     sig_get.params.push(AbiParam::new(types::I64));
     sig_get.params.push(AbiParam::new(types::I32));
+    let mut sig_get_f64 = sig_get.clone();
+    sig_get_f64.returns.clear();
+    sig_get_f64.returns.push(AbiParam::new(types::F64));
     let mut sig_get_opt = sig_len.clone();
     sig_get_opt.params.push(AbiParam::new(types::I64));
     let sig_set = sig_get.clone();
+    let mut sig_set_f64 = sig_get_f64.clone();
+    sig_set_f64.returns.clear();
     let mut sig_sort = sig_len.clone();
     sig_sort.returns.clear();
     let mut sig_slice = sig_get.clone();
@@ -185,9 +207,12 @@ pub(crate) fn declare_collections_host_fns(
     Ok(CollectionsHostFns {
         list_new: import("jet_jit_list_new", &sig_new)?,
         list_push: import("jet_jit_list_push", &sig_push)?,
+        list_push_f64: import("jet_jit_list_push_f64", &sig_push_f64)?,
         list_get: import("jet_jit_list_get", &sig_get)?,
+        list_get_f64: import("jet_jit_list_get_f64", &sig_get_f64)?,
         list_get_opt: import("jet_jit_list_get_opt", &sig_get_opt)?,
         list_set: import("jet_jit_list_set", &sig_set)?,
+        list_set_f64: import("jet_jit_list_set_f64", &sig_set_f64)?,
         list_len: import("jet_jit_list_len", &sig_len)?,
         list_sort: import("jet_jit_list_sort", &sig_sort)?,
         list_slice: import("jet_jit_list_slice", &sig_slice)?,
