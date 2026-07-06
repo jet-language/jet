@@ -294,7 +294,7 @@ fn print_jit_op_report() {
         {
             continue;
         }
-        let covered = jet_jit::jit_covers_bundle(&bundle);
+        let covered = jet_jit::resident_jit_safe_bundle(&bundle);
         for tag in jet_jit::jit_dump_main_ops(&bundle) {
             let entry = ops.entry(tag).or_default();
             if covered {
@@ -585,7 +585,7 @@ fn task_program_hits_e2201_in_interpreter_mode() {
     }
 }
 
-/// c139 M4: task programs inside `jit_covers` run via default `jet dev` (Cranelift), not E2201.
+/// c139 M4: task programs inside `resident_jit_safe` run via default `jet dev` (Cranelift), not E2201.
 #[test]
 fn task_program_runs_via_jit() {
     if skip_if_cranelift_host_unsupported() {
@@ -600,9 +600,9 @@ fn task_program_runs_via_jit() {
         .collect();
     assert!(errors.is_empty(), "tasks must type-check");
     assert!(
-        jet_jit::jit_covers_bundle(&bundle),
-        "tasks must be jit-covered: {}",
-        jet_jit::jit_covers_bundle_detail(&bundle)
+        jet_jit::resident_jit_safe_bundle(&bundle),
+        "tasks must be resident-safe: {}",
+        jet_jit::resident_jit_safe_bundle_detail(&bundle)
     );
     jet_jit::try_compile_bundle(&bundle)
         .unwrap_or_else(|e| panic!("tasks JIT compile failed: {e}"));
@@ -688,7 +688,7 @@ fn dev_default_aot_fallback_matches_io_log() {
     assert_eq!(got, expected);
 }
 
-/// c139 M4: scheduler/channel spawn stress example is jit-covered and runs.
+/// c139 M4: scheduler/channel spawn stress example is resident-safe and runs.
 #[test]
 fn scheduler_spawn_runs_via_jit() {
     if skip_if_cranelift_host_unsupported() {
@@ -703,9 +703,9 @@ fn scheduler_spawn_runs_via_jit() {
         .collect();
     assert!(errors.is_empty(), "scheduler_spawn must type-check");
     assert!(
-        jet_jit::jit_covers_bundle(&bundle),
-        "scheduler_spawn must be jit-covered: {}",
-        jet_jit::jit_covers_bundle_detail(&bundle)
+        jet_jit::resident_jit_safe_bundle(&bundle),
+        "scheduler_spawn must be resident-safe: {}",
+        jet_jit::resident_jit_safe_bundle_detail(&bundle)
     );
     jet_jit::try_compile_bundle(&bundle)
         .unwrap_or_else(|e| panic!("scheduler_spawn JIT compile failed: {e}"));
@@ -877,7 +877,7 @@ fn assert_cranelift_three_way(file: &str, stem: &str) {
         .collect();
     assert!(errors.is_empty(), "`{stem}` must type-check");
     assert!(
-        jet_jit::jit_covers_bundle(&bundle) && jet_jit::try_compile_bundle(&bundle).is_ok(),
+        jet_jit::resident_jit_safe_bundle(&bundle) && jet_jit::try_compile_bundle(&bundle).is_ok(),
         "`{stem}` must be resident-JIT safe for three-way differential"
     );
 
@@ -926,7 +926,7 @@ fn assert_cranelift_three_way(file: &str, stem: &str) {
 }
 
 #[test]
-fn jit_coverage_detail_smoke() {
+fn resident_jit_safety_detail_smoke() {
     for stem in [
         "basics/compound",
         "basics/switch",
@@ -938,7 +938,7 @@ fn jit_coverage_detail_smoke() {
         let file = format!("examples/features/{stem}.jet");
         let mut bundle = jet::Loader::load_entry(&file).expect("load");
         jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
-        let detail = jet_jit::jit_covers_bundle_detail(&bundle);
+        let detail = jet_jit::resident_jit_safe_bundle_detail(&bundle);
         let stmts = jet_jit::jit_dump_main_stmts(&bundle);
         let funcs = jet_jit::jit_program_func_names(&bundle);
         eprintln!("{stem}: {detail}");
@@ -959,7 +959,7 @@ fn jit_coverage_detail_smoke() {
             eprintln!("  mixed: {c}");
         }
         for fn_name in ["show", "next", "label", "describe"] {
-            if let Some(d) = jet_jit::jit_func_coverage_detail(&bundle, fn_name) {
+            if let Some(d) = jet_jit::resident_jit_func_safety_detail(&bundle, fn_name) {
                 eprintln!("  {fn_name}: {d}");
             }
         }
@@ -970,7 +970,7 @@ fn jit_coverage_detail_smoke() {
 }
 
 #[test]
-fn jit_covers_labeled_loop_control() {
+fn resident_jit_safe_labeled_loop_control() {
     let file = "examples/features/basics/labeled_loops.jet";
     let mut bundle = jet::Loader::load_entry(file).expect("load");
     let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
@@ -980,14 +980,14 @@ fn jit_covers_labeled_loop_control() {
         .collect();
     assert!(errors.is_empty(), "labeled loop example must type-check");
     assert!(
-        jet_jit::jit_covers_bundle(&bundle),
+        jet_jit::resident_jit_safe_bundle(&bundle),
         "labeled break/continue should stay JIT-covered: {}",
-        jet_jit::jit_covers_bundle_detail(&bundle)
+        jet_jit::resident_jit_safe_bundle_detail(&bundle)
     );
 }
 
 #[test]
-fn jit_covers_increment_decrement() {
+fn resident_jit_safe_increment_decrement() {
     let file = "examples/features/basics/increment.jet";
     let mut bundle = jet::Loader::load_entry(file).expect("load");
     let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
@@ -997,14 +997,14 @@ fn jit_covers_increment_decrement() {
         .collect();
     assert!(errors.is_empty(), "increment example must type-check");
     assert!(
-        jet_jit::jit_covers_bundle(&bundle),
+        jet_jit::resident_jit_safe_bundle(&bundle),
         "prefix/postfix ++/-- should stay JIT-covered: {}",
-        jet_jit::jit_covers_bundle_detail(&bundle)
+        jet_jit::resident_jit_safe_bundle_detail(&bundle)
     );
 }
 
 #[test]
-fn jit_covers_named_tuples() {
+fn resident_jit_safe_named_tuples() {
     let file = "examples/features/basics/tuples.jet";
     let mut bundle = jet::Loader::load_entry(file).expect("load");
     let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
@@ -1014,14 +1014,14 @@ fn jit_covers_named_tuples() {
         .collect();
     assert!(errors.is_empty(), "tuple example must type-check");
     assert!(
-        jet_jit::jit_covers_bundle(&bundle),
+        jet_jit::resident_jit_safe_bundle(&bundle),
         "named tuple literal/access/equality/destructure should stay JIT-covered: {}",
-        jet_jit::jit_covers_bundle_detail(&bundle)
+        jet_jit::resident_jit_safe_bundle_detail(&bundle)
     );
 }
 
 #[test]
-fn jit_covers_chained_comparison() {
+fn resident_jit_safe_chained_comparison() {
     let file = "examples/features/operators/chained_comparison.jet";
     let mut bundle = jet::Loader::load_entry(file).expect("load");
     let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
@@ -1034,14 +1034,14 @@ fn jit_covers_chained_comparison() {
         "chained comparison example must type-check"
     );
     assert!(
-        jet_jit::jit_covers_bundle(&bundle),
+        jet_jit::resident_jit_safe_bundle(&bundle),
         "same-direction chained comparisons should stay JIT-covered: {}",
-        jet_jit::jit_covers_bundle_detail(&bundle)
+        jet_jit::resident_jit_safe_bundle_detail(&bundle)
     );
 }
 
 #[test]
-fn jit_covers_string_method_chain() {
+fn resident_jit_safe_string_method_chain() {
     let file = "examples/features/basics/method_chain.jet";
     let mut bundle = jet::Loader::load_entry(file).expect("load");
     let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
@@ -1051,19 +1051,19 @@ fn jit_covers_string_method_chain() {
         .collect();
     assert!(errors.is_empty(), "method-chain example must type-check");
     assert!(
-        jet_jit::jit_covers_bundle(&bundle),
+        jet_jit::resident_jit_safe_bundle(&bundle),
         "pure string method chains should stay JIT-covered: {}",
-        jet_jit::jit_covers_bundle_detail(&bundle)
+        jet_jit::resident_jit_safe_bundle_detail(&bundle)
     );
 }
 
-/// Audit which type-checked examples are jit-covered. The committed manifest is
+/// Audit which type-checked examples are resident-safe. The committed manifest is
 /// a ratchet baseline: any coverage movement is deliberate and reviewed.
 #[test]
 fn jit_coverage_audit() {
     let (covered, gaps) = collect_jit_coverage();
     let (expected_covered, expected_gaps, _) = parse_jit_gap_manifest();
-    eprintln!("jit-covered ({}):", covered.len());
+    eprintln!("resident-safe ({}):", covered.len());
     for s in &covered {
         eprintln!("  {s}");
     }
@@ -1099,7 +1099,9 @@ fn jit_covered_example_stems() -> Vec<String> {
         {
             continue;
         }
-        if jet_jit::jit_covers_bundle(&bundle) && jet_jit::try_compile_bundle(&bundle).is_ok() {
+        if jet_jit::resident_jit_safe_bundle(&bundle)
+            && jet_jit::try_compile_bundle(&bundle).is_ok()
+        {
             stems.push(stem_of(&root, &path));
         }
     }
@@ -1107,7 +1109,7 @@ fn jit_covered_example_stems() -> Vec<String> {
     stems
 }
 
-/// c139 M3+: three-way differential (JIT == interpreter == AOT) on jit-covered examples.
+/// c139 M3+: three-way differential (JIT == interpreter == AOT) on resident-safe examples.
 #[test]
 fn cranelift_three_way_differential_battery() {
     if skip_if_cranelift_host_unsupported() {
@@ -1123,7 +1125,7 @@ fn cranelift_three_way_differential_battery() {
     let jit_covered_stems = jit_covered_example_stems();
     assert!(
         !jit_covered_stems.is_empty(),
-        "expected at least one jit-covered example"
+        "expected at least one resident-safe example"
     );
     let mut ran = 0usize;
     for stem in &jit_covered_stems {
@@ -1135,7 +1137,7 @@ fn cranelift_three_way_differential_battery() {
         ran += 1;
     }
     eprintln!(
-        "three-way battery: {} ran / {} jit-covered (with goldens)",
+        "three-way battery: {} ran / {} resident-safe (with goldens)",
         ran,
         jit_covered_stems.len()
     );
@@ -1351,9 +1353,9 @@ fn cranelift_trap_then_hot_swap_continues() {
     let recovers = checked_bundle("fn run() {\n    print(\"recovered\")\n}\n", "jit_trap_v2");
 
     assert!(
-        jet_jit::jit_covers_bundle(&panics),
-        "trap fixture must be jit-covered: {}",
-        jet_jit::jit_covers_bundle_detail(&panics)
+        jet_jit::resident_jit_safe_bundle(&panics),
+        "trap fixture must be resident-safe: {}",
+        jet_jit::resident_jit_safe_bundle_detail(&panics)
     );
 
     let mut backend = CraneliftBackend::new(InterpreterBackend::new());

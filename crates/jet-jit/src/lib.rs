@@ -1,10 +1,10 @@
 //! c139 (D-JITDEP1 / D-JIT2=A) — Cranelift JIT tier-1 backend.
 //!
 //! Architecture: CraneliftBackend<F: JitBackend> where F is the tier-0
-//! fallback. M0 delegates everything to F; M1 adds jit_covers() and
+//! fallback. M0 delegates everything to F; M1 adds resident_jit_safe() and
 //! lower_tir_clif() to actually compile + run the covered subset natively.
 //! M2 keeps a resident JIT module + live runtime heap across hot_swap.
-//! M3 widens jit_covers: arithmetic, bindings, if/else, calls, loops,
+//! M3 widens resident_jit_safe: arithmetic, bindings, if/else, calls, loops,
 //! compound assign, &&/|| short-circuit.
 //! M4: tasks/channels/spawn via scheduler host shims (D-ASYNCRT1=A).
 
@@ -679,10 +679,10 @@ fn flatten_string(parts: &[TStrPart]) -> Option<String> {
     Some(out)
 }
 
-fn jit_covers_string_parts(parts: &[TStrPart], callees: &HashSet<String>) -> bool {
+fn resident_safe_string_parts(parts: &[TStrPart], callees: &HashSet<String>) -> bool {
     parts.iter().all(|p| match p {
         TStrPart::Lit(_) => true,
-        TStrPart::Interp(e, _) => jit_covers_expr(e, callees),
+        TStrPart::Interp(e, _) => resident_safe_expr(e, callees),
     })
 }
 
@@ -774,14 +774,14 @@ fn jit_value_type(ty: &Type) -> bool {
     }
 }
 
-fn jit_covers_expr(expr: &TExpr, callees: &HashSet<String>) -> bool {
+fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> bool {
     match &expr.kind {
-        TExprKind::Print(inner) => jit_covers_expr(inner, callees),
+        TExprKind::Print(inner) => resident_safe_expr(inner, callees),
         TExprKind::Call { name, args } => {
             if !callees.contains(name) {
                 return false;
             }
-            args.iter().all(|a| jit_covers_call_arg(a, callees))
+            args.iter().all(|a| resident_safe_call_arg(a, callees))
         }
         TExprKind::CoreCall {
             module,
@@ -796,16 +796,16 @@ fn jit_covers_expr(expr: &TExpr, callees: &HashSet<String>) -> bool {
             if module == "core.tasks" && method == "channel" {
                 return false;
             }
-            jit_covers_expr_list(args, callees)
+            resident_safe_expr_list(args, callees)
         }
         TExprKind::CoreClosureCall { kind } => match kind {
             TCoreClosureKind::Spawn { .. } => true,
             _ => false,
         },
         TExprKind::HandleMethod { recv, op, args } => {
-            jit_covers_expr(recv, callees)
-                && args.iter().all(|a| jit_covers_expr(a, callees))
-                && jit_covers_handle_op(op, recv, args)
+            resident_safe_expr(recv, callees)
+                && args.iter().all(|a| resident_safe_expr(a, callees))
+                && resident_safe_handle_op(op, recv, args)
         }
         TExprKind::OrFallback {
             value,
@@ -813,21 +813,21 @@ fn jit_covers_expr(expr: &TExpr, callees: &HashSet<String>) -> bool {
             is_option,
         } => {
             if *is_option {
-                jit_covers_expr(value, callees)
+                resident_safe_expr(value, callees)
                     && matches!(fallback, TOrFallback::Value(_) | TOrFallback::Panic(_))
             } else {
                 !is_option
-                    && jit_covers_expr(value, callees)
+                    && resident_safe_expr(value, callees)
                     && matches!(fallback, TOrFallback::Panic(_))
             }
         }
         TExprKind::ListLit(elems) => {
             (jit_list_native_type(&expr.ty)
                 && elems.iter().all(|e| {
-                    matches!(&e.ty, Type::Int | Type::Float) && jit_covers_expr(e, callees)
+                    matches!(&e.ty, Type::Int | Type::Float) && resident_safe_expr(e, callees)
                 }))
                 || (jit_list_task_int_type(&expr.ty)
-                    && elems.iter().all(|e| jit_covers_expr(e, callees)))
+                    && elems.iter().all(|e| resident_safe_expr(e, callees)))
         }
         TExprKind::Index {
             base,
@@ -838,8 +838,8 @@ fn jit_covers_expr(expr: &TExpr, callees: &HashSet<String>) -> bool {
             !is_map
                 && jit_list_native_type(&base.ty)
                 && matches!(&index.ty, Type::Int)
-                && jit_covers_expr(base, callees)
-                && jit_covers_expr(index, callees)
+                && resident_safe_expr(base, callees)
+                && resident_safe_expr(index, callees)
         }
         TExprKind::Slice {
             base, start, end, ..
@@ -847,29 +847,35 @@ fn jit_covers_expr(expr: &TExpr, callees: &HashSet<String>) -> bool {
             jit_list_native_type(&base.ty)
                 && matches!(&start.ty, Type::Int)
                 && matches!(&end.ty, Type::Int)
-                && jit_covers_expr(base, callees)
-                && jit_covers_expr(start, callees)
-                && jit_covers_expr(end, callees)
+                && resident_safe_expr(base, callees)
+                && resident_safe_expr(start, callees)
+                && resident_safe_expr(end, callees)
         }
         TExprKind::BuiltinMethod { recv, op, args } => {
-            jit_covers_builtin_op(op, recv, args, callees)
+            resident_safe_builtin_op(op, recv, args, callees)
         }
         TExprKind::StructLit { fields, .. } => {
-            jit_struct_type(&expr.ty) && fields.iter().all(|(_, v, _)| jit_covers_expr(v, callees))
+            jit_struct_type(&expr.ty)
+                && fields
+                    .iter()
+                    .all(|(_, v, _)| resident_safe_expr(v, callees))
         }
         TExprKind::TupleLit { fields, .. } => {
-            jit_tuple_type(&expr.ty) && jit_covers_tuple_fields(fields, callees)
+            jit_tuple_type(&expr.ty) && resident_safe_tuple_fields(fields, callees)
         }
-        TExprKind::Field { recv, .. } => jit_covers_expr(recv, callees),
+        TExprKind::Field { recv, .. } => resident_safe_expr(recv, callees),
         TExprKind::MethodCall { recv, args, .. } => {
-            jit_covers_expr(recv, callees) && args.iter().all(|a| jit_covers_call_arg(a, callees))
+            resident_safe_expr(recv, callees)
+                && args.iter().all(|a| resident_safe_call_arg(a, callees))
         }
-        TExprKind::StaticCall { args, .. } => args.iter().all(|a| jit_covers_call_arg(a, callees)),
+        TExprKind::StaticCall { args, .. } => {
+            args.iter().all(|a| resident_safe_call_arg(a, callees))
+        }
         TExprKind::EnumLit { payload, .. } => {
-            jit_enum_type(&expr.ty) && jit_covers_enum_payload(payload, callees)
+            jit_enum_type(&expr.ty) && resident_safe_enum_payload(payload, callees)
         }
         TExprKind::Present(inner) | TExprKind::Ok(inner) | TExprKind::Err(inner) => {
-            jit_covers_expr(inner, callees)
+            resident_safe_expr(inner, callees)
         }
         TExprKind::Absent => true,
         _ if !jit_value_type(&expr.ty) => false,
@@ -877,10 +883,10 @@ fn jit_covers_expr(expr: &TExpr, callees: &HashSet<String>) -> bool {
         | TExprKind::FloatLit(_)
         | TExprKind::BoolLit(_)
         | TExprKind::CharLit(_) => true,
-        TExprKind::StrLit(parts) => jit_covers_string_parts(parts, callees),
+        TExprKind::StrLit(parts) => resident_safe_string_parts(parts, callees),
         TExprKind::Local(_) => true,
         TExprKind::Unary { op, operand } => {
-            matches!(op, UnOp::Neg | UnOp::Not) && jit_covers_expr(operand, callees)
+            matches!(op, UnOp::Neg | UnOp::Not) && resident_safe_expr(operand, callees)
         }
         TExprKind::IncDec { ty, .. } => matches!(ty, Type::Int),
         TExprKind::Binary {
@@ -893,18 +899,18 @@ fn jit_covers_expr(expr: &TExpr, callees: &HashSet<String>) -> bool {
             if matches!(op, BinOp::And | BinOp::Or) {
                 return matches!(&lhs.ty, Type::Bool)
                     && matches!(&rhs.ty, Type::Bool)
-                    && jit_covers_expr(lhs, callees)
-                    && jit_covers_expr(rhs, callees);
+                    && resident_safe_expr(lhs, callees)
+                    && resident_safe_expr(rhs, callees);
             }
             if *overflow && (!matches!(&lhs.ty, Type::Int) || !matches!(&rhs.ty, Type::Int)) {
                 return false;
             }
-            jit_covers_expr(lhs, callees) && jit_covers_expr(rhs, callees)
+            resident_safe_expr(lhs, callees) && resident_safe_expr(rhs, callees)
         }
         TExprKind::CompareChain { operands, ops } => {
             operands.len() == ops.len() + 1
                 && operands.iter().all(|e| {
-                    matches!(&e.ty, Type::Int | Type::Float) && jit_covers_expr(e, callees)
+                    matches!(&e.ty, Type::Int | Type::Float) && resident_safe_expr(e, callees)
                 })
                 && ops
                     .iter()
@@ -918,38 +924,38 @@ fn jit_covers_expr(expr: &TExpr, callees: &HashSet<String>) -> bool {
             else_value,
         } => {
             matches!(&cond.ty, Type::Bool)
-                && then_body.iter().all(|s| jit_covers_stmt(s, callees))
-                && jit_covers_expr(then_value, callees)
-                && else_body.iter().all(|s| jit_covers_stmt(s, callees))
-                && jit_covers_expr(else_value, callees)
+                && then_body.iter().all(|s| resident_safe_stmt(s, callees))
+                && resident_safe_expr(then_value, callees)
+                && else_body.iter().all(|s| resident_safe_stmt(s, callees))
+                && resident_safe_expr(else_value, callees)
         }
-        TExprKind::Clone(inner) => jit_covers_expr(inner, callees),
+        TExprKind::Clone(inner) => resident_safe_expr(inner, callees),
         TExprKind::TaskGroupAll { tasks } => {
-            jit_list_int_type(&expr.ty) && jit_covers_task_list_expr(tasks, callees)
+            jit_list_int_type(&expr.ty) && resident_safe_task_list_expr(tasks, callees)
         }
         TExprKind::TaskGroupRace { tasks } | TExprKind::TaskGroupAny { tasks } => {
-            matches!(&expr.ty, Type::Int) && jit_covers_task_list_expr(tasks, callees)
+            matches!(&expr.ty, Type::Int) && resident_safe_task_list_expr(tasks, callees)
         }
         TExprKind::SelectStart => true,
         TExprKind::SelectRecv { builder, channel } => {
-            jit_covers_expr(builder, callees)
+            resident_safe_expr(builder, callees)
                 && jit_concurrency_type(&channel.ty)
-                && jit_covers_expr(channel, callees)
+                && resident_safe_expr(channel, callees)
         }
         TExprKind::SelectAfter { builder, millis } => {
-            jit_covers_expr(builder, callees)
+            resident_safe_expr(builder, callees)
                 && matches!(&millis.ty, Type::Int)
-                && jit_covers_expr(millis, callees)
+                && resident_safe_expr(millis, callees)
         }
-        TExprKind::SelectRead { builder, .. } => jit_covers_expr(builder, callees),
+        TExprKind::SelectRead { builder, .. } => resident_safe_expr(builder, callees),
         TExprKind::SelectWait { builder } => {
-            jit_value_type(&expr.ty) && jit_covers_select_wait(builder, callees)
+            jit_value_type(&expr.ty) && resident_safe_select_wait(builder, callees)
         }
         _ => false,
     }
 }
 
-fn jit_covers_call_arg(arg: &TCallArg, callees: &HashSet<String>) -> bool {
+fn resident_safe_call_arg(arg: &TCallArg, callees: &HashSet<String>) -> bool {
     // TIR marks non-scalar params as `borrow`; JIT passes them by handle/discriminant.
     (!arg.borrow || jit_value_type(&arg.value.ty))
         && !arg.mut_borrow
@@ -958,32 +964,34 @@ fn jit_covers_call_arg(arg: &TCallArg, callees: &HashSet<String>) -> bool {
         && arg.fn_coerce.is_none()
         && !arg.widen_to_vec
         && (!jit_struct_type(&arg.value.ty) || arg.borrow)
-        && jit_covers_expr(&arg.value, callees)
+        && resident_safe_expr(&arg.value, callees)
 }
 
-fn jit_covers_enum_payload(payload: &TEnumPayload, callees: &HashSet<String>) -> bool {
+fn resident_safe_enum_payload(payload: &TEnumPayload, callees: &HashSet<String>) -> bool {
     match payload {
         TEnumPayload::Unit => true,
-        TEnumPayload::Positional(vals) => vals.iter().all(|a| jit_covers_expr(&a.value, callees)),
+        TEnumPayload::Positional(vals) => {
+            vals.iter().all(|a| resident_safe_expr(&a.value, callees))
+        }
         TEnumPayload::Named(fields) => fields
             .iter()
-            .all(|(_, a)| jit_covers_expr(&a.value, callees)),
+            .all(|(_, a)| resident_safe_expr(&a.value, callees)),
     }
 }
 
-fn jit_covers_tuple_fields(fields: &[(String, TExpr)], callees: &HashSet<String>) -> bool {
+fn resident_safe_tuple_fields(fields: &[(String, TExpr)], callees: &HashSet<String>) -> bool {
     fields.iter().all(|(_, value)| {
-        matches!(&value.ty, Type::Int | Type::Float) && jit_covers_expr(value, callees)
+        matches!(&value.ty, Type::Int | Type::Float) && resident_safe_expr(value, callees)
     })
 }
 
-fn jit_covers_builtin_op(
+fn resident_safe_builtin_op(
     op: &TBuiltinOp,
     recv: &TExpr,
     args: &[TExpr],
     callees: &HashSet<String>,
 ) -> bool {
-    if !jit_covers_expr(recv, callees) {
+    if !resident_safe_expr(recv, callees) {
         return false;
     }
     match op {
@@ -996,13 +1004,13 @@ fn jit_covers_builtin_op(
                 && args.len() == 2
                 && args
                     .iter()
-                    .all(|a| matches!(&a.ty, Type::String) && jit_covers_expr(a, callees))
+                    .all(|a| matches!(&a.ty, Type::String) && resident_safe_expr(a, callees))
         }
         TBuiltinOp::Push => {
             jit_list_native_type(&recv.ty)
                 && args.len() == 1
                 && matches!(&args[0].ty, Type::Int | Type::Float)
-                && jit_covers_expr(&args[0], callees)
+                && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::Sort => jit_list_int_type(&recv.ty) && args.is_empty(),
         TBuiltinOp::LenList => jit_list_native_type(&recv.ty) && args.is_empty(),
@@ -1010,29 +1018,29 @@ fn jit_covers_builtin_op(
             jit_list_int_type(&recv.ty)
                 && args.len() == 1
                 && matches!(&args[0].ty, Type::Int)
-                && jit_covers_expr(&args[0], callees)
+                && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::JoinSep => {
             jit_list_native_type(&recv.ty)
                 && args.len() == 1
                 && matches!(&args[0].ty, Type::String)
-                && jit_covers_expr(&args[0], callees)
+                && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::Slice { .. } => {
             jit_list_int_type(&recv.ty)
                 && args.len() == 2
                 && matches!(&args[0].ty, Type::Int)
                 && matches!(&args[1].ty, Type::Int)
-                && jit_covers_expr(&args[0], callees)
-                && jit_covers_expr(&args[1], callees)
+                && resident_safe_expr(&args[0], callees)
+                && resident_safe_expr(&args[1], callees)
         }
         _ => false,
     }
 }
 
-fn jit_covers_stmt(stmt: &TStmt, callees: &HashSet<String>) -> bool {
+fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> bool {
     match stmt {
-        TStmt::Let { init, .. } => jit_covers_expr(init, callees),
+        TStmt::Let { init, .. } => resident_safe_expr(init, callees),
         // D-TUPLE-DESTRUCT1: `(tx, rx) := tasks.channel<T>()` — the one
         // tuple-destructure shape this tier covers (general `TupleDestructure` /
         // `StructDestructure` / `ListDestructure` are not covered at all otherwise;
@@ -1054,13 +1062,13 @@ fn jit_covers_stmt(stmt: &TStmt, callees: &HashSet<String>) -> bool {
                             Type::Tuple(fields) => fields.len(),
                             _ => 0,
                         }
-                    && jit_covers_expr(init, callees))
+                    && resident_safe_expr(init, callees))
         }
         TStmt::Assign {
             value, clone_value, ..
-        } => !clone_value && jit_covers_expr(value, callees),
-        TStmt::Return(ret) => ret.as_ref().is_none_or(|e| jit_covers_expr(e, callees)),
-        TStmt::ExprStmt(e) => jit_covers_expr(e, callees),
+        } => !clone_value && resident_safe_expr(value, callees),
+        TStmt::Return(ret) => ret.as_ref().is_none_or(|e| resident_safe_expr(e, callees)),
+        TStmt::ExprStmt(e) => resident_safe_expr(e, callees),
         TStmt::If {
             cond,
             then_body,
@@ -1068,21 +1076,21 @@ fn jit_covers_stmt(stmt: &TStmt, callees: &HashSet<String>) -> bool {
             ..
         } => {
             let cond_ok = match cond {
-                TIfCond::Plain(e) => matches!(&e.ty, Type::Bool) && jit_covers_expr(e, callees),
+                TIfCond::Plain(e) => matches!(&e.ty, Type::Bool) && resident_safe_expr(e, callees),
                 TIfCond::Matches { .. } => false,
                 TIfCond::IfLet { .. } | TIfCond::IsNone { .. } => false,
             };
             cond_ok
-                && then_body.iter().all(|s| jit_covers_stmt(s, callees))
+                && then_body.iter().all(|s| resident_safe_stmt(s, callees))
                 && else_body
                     .as_ref()
-                    .is_none_or(|b| b.iter().all(|s| jit_covers_stmt(s, callees)))
+                    .is_none_or(|b| b.iter().all(|s| resident_safe_stmt(s, callees)))
         }
-        TStmt::Loop { body, .. } => body.iter().all(|s| jit_covers_stmt(s, callees)),
+        TStmt::Loop { body, .. } => body.iter().all(|s| resident_safe_stmt(s, callees)),
         TStmt::While { cond, body, .. } => {
             matches!(&cond.ty, Type::Bool)
-                && jit_covers_expr(cond, callees)
-                && body.iter().all(|s| jit_covers_stmt(s, callees))
+                && resident_safe_expr(cond, callees)
+                && body.iter().all(|s| resident_safe_stmt(s, callees))
         }
         TStmt::CountedLoop {
             init,
@@ -1091,11 +1099,11 @@ fn jit_covers_stmt(stmt: &TStmt, callees: &HashSet<String>) -> bool {
             body,
             ..
         } => {
-            jit_covers_stmt(init, callees)
+            resident_safe_stmt(init, callees)
                 && matches!(&cond.ty, Type::Bool)
-                && jit_covers_expr(cond, callees)
-                && jit_covers_stmt(step, callees)
-                && body.iter().all(|s| jit_covers_stmt(s, callees))
+                && resident_safe_expr(cond, callees)
+                && resident_safe_stmt(step, callees)
+                && body.iter().all(|s| resident_safe_stmt(s, callees))
         }
         TStmt::Range {
             start,
@@ -1107,10 +1115,10 @@ fn jit_covers_stmt(stmt: &TStmt, callees: &HashSet<String>) -> bool {
             matches!(&start.ty, Type::Int)
                 && matches!(&end.ty, Type::Int)
                 && step.as_ref().is_none_or(|s| matches!(&s.ty, Type::Int))
-                && jit_covers_expr(start, callees)
-                && jit_covers_expr(end, callees)
-                && step.as_ref().is_none_or(|s| jit_covers_expr(s, callees))
-                && body.iter().all(|s| jit_covers_stmt(s, callees))
+                && resident_safe_expr(start, callees)
+                && resident_safe_expr(end, callees)
+                && step.as_ref().is_none_or(|s| resident_safe_expr(s, callees))
+                && body.iter().all(|s| resident_safe_stmt(s, callees))
         }
         TStmt::Break(_) | TStmt::Continue(_) => true,
         TStmt::IndexAssign {
@@ -1123,9 +1131,9 @@ fn jit_covers_stmt(stmt: &TStmt, callees: &HashSet<String>) -> bool {
                 && jit_list_native_type(&base.ty)
                 && matches!(&index.ty, Type::Int)
                 && matches!(&value.ty, Type::Int | Type::Float)
-                && jit_covers_expr(base, callees)
-                && jit_covers_expr(index, callees)
-                && jit_covers_expr(value, callees)
+                && resident_safe_expr(base, callees)
+                && resident_safe_expr(index, callees)
+                && resident_safe_expr(value, callees)
         }
         TStmt::ForIn {
             var2,
@@ -1137,36 +1145,36 @@ fn jit_covers_stmt(stmt: &TStmt, callees: &HashSet<String>) -> bool {
             var2.is_none()
                 && method_kind.is_none()
                 && !columnar
-                && body.iter().all(|s| jit_covers_stmt(s, callees))
+                && body.iter().all(|s| resident_safe_stmt(s, callees))
         }
         TStmt::EnumMatch {
             arms, else_body, ..
         } => {
             arms.iter()
-                .all(|a| a.body.iter().all(|s| jit_covers_stmt(s, callees)))
+                .all(|a| a.body.iter().all(|s| resident_safe_stmt(s, callees)))
                 && else_body
                     .as_ref()
-                    .is_none_or(|b| b.iter().all(|s| jit_covers_stmt(s, callees)))
+                    .is_none_or(|b| b.iter().all(|s| resident_safe_stmt(s, callees)))
         }
         TStmt::MixedSwitch {
             arms, else_body, ..
         } => {
             arms.iter()
-                .all(|(_, b)| b.iter().all(|s| jit_covers_stmt(s, callees)))
+                .all(|(_, b)| b.iter().all(|s| resident_safe_stmt(s, callees)))
                 && else_body
                     .as_ref()
-                    .is_none_or(|b| b.iter().all(|s| jit_covers_stmt(s, callees)))
+                    .is_none_or(|b| b.iter().all(|s| resident_safe_stmt(s, callees)))
         }
-        TStmt::Region(body) => body.iter().all(|s| jit_covers_stmt(s, callees)),
+        TStmt::Region(body) => body.iter().all(|s| resident_safe_stmt(s, callees)),
         _ => false,
     }
 }
 
-fn jit_covers_func(tir: &TFunc, callees: &HashSet<String>) -> bool {
-    jit_covers_func_detail(tir, callees).is_none()
+fn resident_safe_func(tir: &TFunc, callees: &HashSet<String>) -> bool {
+    resident_safe_func_detail(tir, callees).is_none()
 }
 
-fn jit_covers_func_detail(tir: &TFunc, callees: &HashSet<String>) -> Option<String> {
+fn resident_safe_func_detail(tir: &TFunc, callees: &HashSet<String>) -> Option<String> {
     if !matches!(tir.kind, TFuncKind::TopLevel | TFuncKind::Method { .. }) {
         return Some("not top-level".into());
     }
@@ -1182,22 +1190,22 @@ fn jit_covers_func_detail(tir: &TFunc, callees: &HashSet<String>) -> Option<Stri
         }
     }
     for (i, s) in tir.body.iter().enumerate() {
-        if !jit_covers_stmt(s, callees) {
+        if !resident_safe_stmt(s, callees) {
             return Some(format!("body stmt {i}"));
         }
     }
     None
 }
 
-fn jit_covers_program(program: &JitProgram) -> bool {
+fn resident_safe_program(program: &JitProgram) -> bool {
     let names: HashSet<String> = program.funcs.iter().map(|f| f.name.clone()).collect();
     let main_ok = program.funcs.iter().any(|f| {
-        f.name == "run" && f.params.is_empty() && f.ret.is_none() && jit_covers_func(f, &names)
+        f.name == "run" && f.params.is_empty() && f.ret.is_none() && resident_safe_func(f, &names)
     });
     if !main_ok {
         return false;
     }
-    if !program.funcs.iter().all(|f| jit_covers_func(f, &names)) {
+    if !program.funcs.iter().all(|f| resident_safe_func(f, &names)) {
         return false;
     }
     let spawn_sites = count_spawn_sites(program);
@@ -1207,7 +1215,7 @@ fn jit_covers_program(program: &JitProgram) -> bool {
     program
         .spawn_lambdas
         .iter()
-        .all(|lam| jit_covers_spawn_lambda(lam, &names))
+        .all(|lam| resident_safe_spawn_lambda(lam, &names))
 }
 
 fn count_spawn_sites(program: &JitProgram) -> usize {
@@ -1322,23 +1330,23 @@ fn count_spawn_sites_expr(expr: &TExpr, n: &mut usize) {
     }
 }
 
-fn jit_covers_expr_list(exprs: &[TExpr], callees: &HashSet<String>) -> bool {
-    exprs.iter().all(|e| jit_covers_expr(e, callees))
+fn resident_safe_expr_list(exprs: &[TExpr], callees: &HashSet<String>) -> bool {
+    exprs.iter().all(|e| resident_safe_expr(e, callees))
 }
 
-fn jit_covers_task_list_expr(tasks: &TExpr, callees: &HashSet<String>) -> bool {
-    jit_list_task_int_type(&tasks.ty) && jit_covers_expr(tasks, callees)
+fn resident_safe_task_list_expr(tasks: &TExpr, callees: &HashSet<String>) -> bool {
+    jit_list_task_int_type(&tasks.ty) && resident_safe_expr(tasks, callees)
 }
 
-fn jit_covers_select_wait(builder: &TExpr, callees: &HashSet<String>) -> bool {
+fn resident_safe_select_wait(builder: &TExpr, callees: &HashSet<String>) -> bool {
     let (recvs, afters) = collect_select_arms_jit(builder);
     !recvs.is_empty()
         && recvs
             .iter()
-            .all(|ch| jit_concurrency_type(&ch.ty) && jit_covers_expr(ch, callees))
+            .all(|ch| jit_concurrency_type(&ch.ty) && resident_safe_expr(ch, callees))
         && afters
             .iter()
-            .all(|ms| matches!(&ms.ty, Type::Int) && jit_covers_expr(ms, callees))
+            .all(|ms| matches!(&ms.ty, Type::Int) && resident_safe_expr(ms, callees))
 }
 
 fn collect_select_arms_jit<'a>(builder: &'a TExpr) -> (Vec<&'a TExpr>, Vec<&'a TExpr>) {
@@ -1371,14 +1379,14 @@ fn collect_select_arms_jit<'a>(builder: &'a TExpr) -> (Vec<&'a TExpr>, Vec<&'a T
     (recvs, afters)
 }
 
-fn jit_covers_spawn_lambda(lam: &TJitSpawnLambda, callees: &HashSet<String>) -> bool {
+fn resident_safe_spawn_lambda(lam: &TJitSpawnLambda, callees: &HashSet<String>) -> bool {
     if lam.captures.len() > 4 {
         return false;
     }
     if !lam
         .captures
         .iter()
-        .all(|c| jit_value_type(&c.ty) && jit_covers_capture_policy(c))
+        .all(|c| jit_value_type(&c.ty) && resident_safe_capture_policy(c))
     {
         return false;
     }
@@ -1389,15 +1397,15 @@ fn jit_covers_spawn_lambda(lam: &TJitSpawnLambda, callees: &HashSet<String>) -> 
         return false;
     }
     match &lam.body {
-        TJitSpawnBody::Expr(e) => jit_covers_expr(e, callees),
+        TJitSpawnBody::Expr(e) => resident_safe_expr(e, callees),
         TJitSpawnBody::Block { prefix, tail } => {
-            prefix.iter().all(|s| jit_covers_stmt(s, callees))
-                && tail.as_ref().is_none_or(|t| jit_covers_expr(t, callees))
+            prefix.iter().all(|s| resident_safe_stmt(s, callees))
+                && tail.as_ref().is_none_or(|t| resident_safe_expr(t, callees))
         }
     }
 }
 
-fn jit_covers_capture_policy(c: &JitSpawnCapture) -> bool {
+fn resident_safe_capture_policy(c: &JitSpawnCapture) -> bool {
     if c.clone_at_spawn {
         matches!(&c.ty, Type::Apply { name, .. } if name == "Sender")
     } else {
@@ -1405,7 +1413,7 @@ fn jit_covers_capture_policy(c: &JitSpawnCapture) -> bool {
     }
 }
 
-fn jit_covers_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool {
+fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool {
     match op {
         THandleOp::TaskJoin | THandleOp::TaskCancel => {
             args.is_empty() && jit_concurrency_type(&recv.ty)
@@ -1645,7 +1653,7 @@ impl LowerCtx<'_, '_> {
                 self.vars.insert(TIR::local_place(name), var);
             }
             // D-TUPLE-DESTRUCT1: `(tx, rx) := tasks.channel<T>()`. The coverage gate
-            // (`jit_covers_stmt`) admitted only this exact shape: a 2-element
+            // (`resident_safe_stmt`) admitted only this exact shape: a 2-element
             // `TupleDestructure` whose init is the `tasks.channel` producer, canonical
             // field order `(sender, receiver)`. Reproduce the old single-handle
             // `let ch := tasks.channel(); s := ch.sender();` host calls — `channel_new`
@@ -3824,7 +3832,7 @@ fn try_resident(bundle: &ProgramBundle) -> Option<Result<RunOutcome, String>> {
         return None;
     }
     let program = TIR::lower_jit_program(bundle)?;
-    if !jit_covers_program(&program) {
+    if !resident_safe_program(&program) {
         return None;
     }
     Some(resident_run_fresh(&program))
@@ -3835,7 +3843,7 @@ fn try_resident_hot_swap(bundle: &ProgramBundle) -> Option<Result<RunOutcome, St
         return None;
     }
     let program = TIR::lower_jit_program(bundle)?;
-    if !jit_covers_program(&program) {
+    if !resident_safe_program(&program) {
         return None;
     }
     Some(resident_hot_swap(&program))
@@ -3846,7 +3854,7 @@ fn try_resident_restart(bundle: &ProgramBundle) -> Option<Result<RunOutcome, Str
         return None;
     }
     let program = TIR::lower_jit_program(bundle)?;
-    if !jit_covers_program(&program) {
+    if !resident_safe_program(&program) {
         return None;
     }
     Some(resident_run_fresh(&program))
@@ -3899,13 +3907,13 @@ pub fn jit_program_func_names(bundle: &ProgramBundle) -> Vec<String> {
     program.funcs.iter().map(|f| f.name.clone()).collect()
 }
 
-/// Test hook: per-function jit coverage detail (`None` = covered).
+/// Test hook: per-function resident safety detail (`None` = covered).
 #[doc(hidden)]
-pub fn jit_func_coverage_detail(bundle: &ProgramBundle, name: &str) -> Option<String> {
+pub fn resident_jit_func_safety_detail(bundle: &ProgramBundle, name: &str) -> Option<String> {
     let program = TIR::lower_jit_program(bundle)?;
     let names: HashSet<String> = program.funcs.iter().map(|f| f.name.clone()).collect();
     let f = program.funcs.iter().find(|f| f.name == name)?;
-    jit_covers_func_detail(f, &names)
+    resident_safe_func_detail(f, &names)
 }
 
 /// Test hook: dump lowered run stmt tags.
@@ -4195,19 +4203,19 @@ pub fn jit_main_uncovered_detail(bundle: &ProgramBundle) -> Option<String> {
     let names: HashSet<String> = program.funcs.iter().map(|f| f.name.clone()).collect();
     let m = program.funcs.iter().find(|f| f.name == "run")?;
     for (i, s) in m.body.iter().enumerate() {
-        if jit_covers_stmt(s, &names) {
+        if resident_safe_stmt(s, &names) {
             continue;
         }
         if let TStmt::Region(body) = s {
             for (j, inner) in body.iter().enumerate() {
-                if !jit_covers_stmt(inner, &names) {
+                if !resident_safe_stmt(inner, &names) {
                     let extra = if let TStmt::Let { init, .. } = inner {
                         if let TExprKind::TaskGroupAll { tasks } = &init.kind {
                             format!(
                                 ", init=TaskGroupAll tasks={} list_ok={} tasks_ok={}",
                                 jit_expr_tag(tasks),
                                 jit_list_task_int_type(&tasks.ty),
-                                jit_covers_expr(tasks, &names)
+                                resident_safe_expr(tasks, &names)
                             )
                         } else {
                             format!(", init={}", jit_expr_tag(init))
@@ -4296,15 +4304,15 @@ pub fn tir_lower_fail_reason(bundle: &ProgramBundle) -> String {
     TIR::lower_jit_program_fail_reason(bundle)
 }
 
-/// Test hook: whether the bundle's entry module is inside `jit_covers`.
+/// Test hook: whether the bundle's entry module is inside `resident_jit_safe`.
 #[doc(hidden)]
-pub fn jit_covers_bundle(bundle: &ProgramBundle) -> bool {
-    jit_covers_bundle_detail(bundle).is_empty()
+pub fn resident_jit_safe_bundle(bundle: &ProgramBundle) -> bool {
+    resident_jit_safe_bundle_detail(bundle).is_empty()
 }
 
 /// Test hook: empty string when covered; otherwise a short failure reason.
 #[doc(hidden)]
-pub fn jit_covers_bundle_detail(bundle: &ProgramBundle) -> String {
+pub fn resident_jit_safe_bundle_detail(bundle: &ProgramBundle) -> String {
     let Some(program) = TIR::lower_jit_program(bundle) else {
         return format!(
             "lower_jit_program returned None ({})",
@@ -4313,21 +4321,21 @@ pub fn jit_covers_bundle_detail(bundle: &ProgramBundle) -> String {
     };
     let names: HashSet<String> = program.funcs.iter().map(|f| f.name.clone()).collect();
     let main_ok = program.funcs.iter().any(|f| {
-        f.name == "run" && f.params.is_empty() && f.ret.is_none() && jit_covers_func(f, &names)
+        f.name == "run" && f.params.is_empty() && f.ret.is_none() && resident_safe_func(f, &names)
     });
     if !main_ok {
         for f in &program.funcs {
             if f.name == "run" {
-                if let Some(d) = jit_covers_func_detail(f, &names) {
-                    return format!("run not jit-covered: {d}");
+                if let Some(d) = resident_safe_func_detail(f, &names) {
+                    return format!("run not resident-safe: {d}");
                 }
             }
         }
-        return "run not jit-covered".to_string();
+        return "run not resident-safe".to_string();
     }
     for f in &program.funcs {
-        if !jit_covers_func(f, &names) {
-            return format!("func `{}` not jit-covered", f.name);
+        if !resident_safe_func(f, &names) {
+            return format!("func `{}` not resident-safe", f.name);
         }
     }
     let spawn_sites = count_spawn_sites(&program);
@@ -4338,8 +4346,8 @@ pub fn jit_covers_bundle_detail(bundle: &ProgramBundle) -> String {
         );
     }
     for (i, lam) in program.spawn_lambdas.iter().enumerate() {
-        if !jit_covers_spawn_lambda(lam, &names) {
-            return format!("spawn lambda {i} not jit-covered");
+        if !resident_safe_spawn_lambda(lam, &names) {
+            return format!("spawn lambda {i} not resident-safe");
         }
     }
     String::new()
@@ -4355,7 +4363,7 @@ pub fn resident_invocations_for_test() -> u64 {
 ///
 /// `F` is the tier-0 fallback (always `InterpreterBackend` in practice).
 /// M0: every method delegates to `fallback`.
-/// M1: `run` JIT-compiles functions inside `jit_covers()` and delegates only
+/// M1: `run` JIT-compiles functions inside `resident_jit_safe()` and delegates only
 ///     the uncovered remainder to `fallback`.
 /// M2: `hot_swap` re-links changed code in the resident process; `restart`
 ///     tears down live state.
