@@ -70,7 +70,7 @@ fn compiled_binary_output(
     i: usize,
     stem: &str,
     file: &str,
-) -> Option<ProgramOutput> {
+) -> ProgramOutput {
     let src = fs::read_to_string(file).unwrap();
     let compiled = match jet::compile_with_path(&src, file) {
         Ok(c) => c,
@@ -83,24 +83,46 @@ fn compiled_binary_output(
     let rs = dir.join(format!("jet_{tag}_{}.rs", i));
     let bin = dir.join(format!("jet_{tag}_{}", i));
     fs::write(&rs, &compiled.rust).unwrap();
-    let out = Command::new("rustc")
+    let mut rustc_cmd = Command::new("rustc");
+    rustc_cmd
         .args(["--edition", "2021"])
         .arg(&rs)
         .arg("-o")
-        .arg(&bin)
-        .output()
-        .unwrap();
+        .arg(&bin);
+    if let Some(link) = &compiled.ffi {
+        rustc_cmd
+            .arg("--extern")
+            .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
+        if link.deps_dir.is_dir() {
+            rustc_cmd
+                .arg("-L")
+                .arg(format!("dependency={}", link.deps_dir.display()));
+        }
+    }
+    let clinks = jet::resolve_c_links(file).unwrap_or_else(|diags| {
+        panic!(
+            "`{}` ran in dev but AOT C-link resolution failed:\n{}",
+            stem,
+            jet::render_diagnostics(file, &src, &diags)
+        )
+    });
+    for arg in clinks {
+        rustc_cmd.arg(arg);
+    }
+    let out = rustc_cmd.output().unwrap();
     if !out.status.success() {
-        // Some examples need linker inputs outside this standalone rustc path
-        // (FFI/C/system libraries). Their dev boundary is asserted elsewhere.
-        return None;
+        panic!(
+            "`{}` ran in dev but generated Rust failed to build:\n{}",
+            stem,
+            String::from_utf8_lossy(&out.stderr)
+        );
     }
     let run = Command::new(&bin).output().unwrap();
-    Some(ProgramOutput::ran(
+    ProgramOutput::ran(
         String::from_utf8_lossy(&run.stdout).to_string(),
         String::from_utf8_lossy(&run.stderr).to_string(),
         run.status.code().unwrap_or(1),
-    ))
+    )
 }
 
 /// All `.jet` files directly under a topic directory of `examples/features/`
@@ -243,7 +265,22 @@ fn normalize_for_parity(stem: &str, mut out: ProgramOutput) -> ProgramOutput {
     if stem == "io/log_human" {
         out.stderr = normalize_text_log_timestamps(&out.stderr);
     }
+    if stem == "ui/ui_native_linux" {
+        out.stderr = normalize_gtk_loader_path(&out.stderr);
+    }
     out
+}
+
+fn normalize_gtk_loader_path(s: &str) -> String {
+    let marker = ": symbol lookup error: ";
+    if !s.contains("libgtk-4.so.1") || !s.contains("undefined symbol") {
+        return s.to_string();
+    }
+    if let Some((_, rest)) = s.split_once(marker) {
+        format!("<jet-ui-binary>{marker}{rest}")
+    } else {
+        s.to_string()
+    }
 }
 
 fn normalize_json_log_timestamps(s: &str) -> String {
@@ -371,9 +408,7 @@ fn interpreter_matches_compiled_binary() {
         };
         ran += 1;
 
-        let Some(compiled) = compiled_binary_output(&dir, "dev_diff", i, stem, &file) else {
-            continue;
-        };
+        let compiled = compiled_binary_output(&dir, "dev_diff", i, stem, &file);
 
         let interpreted = normalize_for_parity(stem, interpreted);
         let compiled = normalize_for_parity(stem, compiled);
@@ -456,10 +491,7 @@ fn dev_default_matches_compiled_binary() {
         };
         ran += 1;
 
-        let Some(compiled) = compiled_binary_output(&dir, "dev_default_diff", i, stem, &file)
-        else {
-            continue;
-        };
+        let compiled = compiled_binary_output(&dir, "dev_default_diff", i, stem, &file);
 
         let interpreted = normalize_for_parity(stem, interpreted);
         let compiled = normalize_for_parity(stem, compiled);
@@ -662,8 +694,7 @@ fn dev_default_runs_env_program_via_aot_fallback() {
         RunOutcome::Ran { .. } => panic!("interpreter unexpectedly ran core.env program"),
     }
 
-    let expected = compiled_binary_output(&dir, "aot_fallback", 0, "env_fallback", &shown)
-        .expect("fixture should compile through the AOT path");
+    let expected = compiled_binary_output(&dir, "aot_fallback", 0, "env_fallback", &shown);
     let got = match dev_iteration(&shown, false, false) {
         RunOutcome::Ran {
             stdout,
@@ -683,8 +714,7 @@ fn dev_default_runs_env_program_via_aot_fallback() {
 fn dev_default_aot_fallback_matches_io_log() {
     let dir = std::env::temp_dir();
     let file = "examples/features/io/log.jet";
-    let expected = compiled_binary_output(&dir, "aot_fallback_log", 0, "io/log", file)
-        .expect("io/log should compile through the AOT path");
+    let expected = compiled_binary_output(&dir, "aot_fallback_log", 0, "io/log", file);
     let got = match dev_iteration(file, false, false) {
         RunOutcome::Ran {
             stdout,
@@ -705,8 +735,7 @@ fn dev_default_aot_fallback_runs_resident_boundaries() {
     let dir = std::env::temp_dir();
     for stem in ["concurrency/task_controls", "memory/entity_tree"] {
         let file = example_path(stem);
-        let expected = compiled_binary_output(&dir, "aot_fallback_resident", 0, stem, &file)
-            .unwrap_or_else(|| panic!("{stem} should compile through the AOT path"));
+        let expected = compiled_binary_output(&dir, "aot_fallback_resident", 0, stem, &file);
         let got = match dev_iteration(&file, false, false) {
             RunOutcome::Ran {
                 stdout,
