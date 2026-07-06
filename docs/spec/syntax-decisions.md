@@ -1605,6 +1605,11 @@ default. **D-JPK-DISCOVER1**: `jet search`/`jet info` + LSP completions from
 a local offline index. **D-JPK-BUILDDBG1**: failed builds keep the scratch
 dir; `--shell-on-fail`; `jet explain <ref>`; `jet logs <pkg>`.
 
+**D-LSP1 / D-LSP2**: LSP v2 uses one incremental compiler-service query cache
+(`crates/jet-queries`) shared by editor requests, with full applicable LSP
+3.17 coverage. Every advertised capability must have a named test in
+`tests/lsp.rs`.
+
 **D-HL1**: highlighting is generated lexical base plus semantic overlay.
 `Syntax.rs` owns all user-typeable tokens; `jet devtools grammars` regenerates
 VS Code/TextMate, tree-sitter, and Zed generated sections, and

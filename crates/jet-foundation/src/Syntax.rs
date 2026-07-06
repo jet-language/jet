@@ -3338,6 +3338,7 @@ fn is_zed_anonymous_word_token(s: &str) -> bool {
             | "comptime"
             | "const"
             | "continue"
+            | "copy"
             | "derive"
             | "distinct"
             | "else"

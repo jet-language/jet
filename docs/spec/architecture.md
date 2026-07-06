@@ -59,6 +59,16 @@ depend only on each other through path dependencies. Runtime-side crates such as
 `jet-jit` and `jet-net` are separate workspace members with their own
 owner-approved dependency posture.
 
+### Incremental Compiler Service
+
+D-LSP1 makes editor tooling a client of the front end, not a second checker.
+`crates/jet-queries` is a std-only demand cache for file inputs and derived
+queries. The LSP stores open-buffer text as query inputs, memoizes lexing,
+diagnostics, checked bundles, and fix data through that cache, and invalidates
+only dependencies whose input revision changed. D-LSP2 requires every
+advertised LSP capability to have named coverage in `tests/lsp.rs`; the server
+must not advertise speculative features.
+
 ## Rules
 
 - **R1 — Codegen is dumb.** No checks, no decisions, no "see if rustc

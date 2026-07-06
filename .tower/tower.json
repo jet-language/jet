@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 219,
-    "rev": 293,
+    "rev": 308,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -5600,9 +5600,54 @@
       "phase": "building",
       "priority": "P0",
       "workOrder": 10,
-      "plan": "jit-cranelift — M4 functional parity with AOT: (1) wire `dev_iteration` through CraneliftBackend by default (D-JIT2; done 2026-06-30); (2) expand CLIF lowering + host runtime for tasks/channels/spawn (scheduler), then structs/enums/collections/Core per `tir_covers`; (3) align `jit_covers` gate with `tir_covers` (try-compile, never silent interpreter fallback for AOT-covered programs); (4) three-way differential battery on full `examples/features/*.jet` set; (5) `jet dev` on `160_scheduler_spawn.jet` and task programs without E2201. Exit: byte-identical stdout vs AOT for every tir-covered example, or named tested gap only.",
+      "plan": "JIT/AOT parity by construction. Canonical plan: tools/Tower/docs/plans/epoch-3/jit-aot-parity.md. Orchestration: implementation agent must first read .agents/prompts/OrchestrationPrompt.md and run as that orchestrator. Owner direction 2026-07-06: Jet wins two fronts. AOT targets C/C++/Rust/Go/Zig/Odin territory with optimized native binaries and expert control; JIT/dev targets JS/TS/Python/data-analysis/web-dev loops with rapid design/test/refine. Every AOT-runnable program must run under jet dev in some backend path with identical stdout/stderr/exit/diagnostics/panics/side effects. Native JIT lowering is preferred for speed; transparent shared-runtime/platform/AOT-subprocess fallback is valid when resident JIT hosting is unsafe or incomplete. User never owns backend gaps. No parity ballots remain. Exit: dev_default_matches_compiled_binary covers stdout+stderr+exit for every example, gap manifest contains only transparent internal fallback reasons, no jit_covers whitelist remains, R12 documents two consumers/one IR, full suite + jet-verify green.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "Phase 2 list-widening slice implemented: JetArena now stores Float values in lists; JIT collection ABI gained f64 push/get/set; jit_covers and lowering now admit simple [Float] literals, push, index, assignment, len, and slices. Added cranelift_covers_float_lists regression. Verified: nix develop -c cargo test --test dev cranelift_covers_float_lists -- --exact --nocapture; nix develop -c cargo test -p jet-rt; nix develop -c cargo test --test dev jit_covers_string_method_chain -- --exact --nocapture; nix develop -c cargo test --test dev cranelift_three_way_differential_battery -- --exact --nocapture; nix develop -c cargo test --test dev cranelift_hot_swap_preserves_live_state -- --exact --nocapture; nix develop -c cargo test --test dev cranelift_trap_then_hot_swap_continues -- --exact --nocapture; nix develop -c cargo test --test dev jit_coverage_audit -- --exact --nocapture; nix develop -c rustfmt --check touched Rust files. Results green; example ratchet unchanged at 79/178 because the new proof is an inline dev regression, not an examples/features stem."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "Phase 2 list-foundation slice implemented: Int lists moved from jet-jit raw Vec<Vec<i64>> side heap into jet-rt JetArena as JetVal::List; collection and concurrency task-list shims now share arena handles. This keeps current i64 ABI stable and prepares typed list values for the next widening slice. Verified: nix develop -c cargo test -p jet-rt; nix develop -c cargo test --test dev jit_covers_string_method_chain -- --exact --nocapture; nix develop -c cargo test --test dev cranelift_three_way_differential_battery -- --exact --nocapture; nix develop -c cargo test --test dev cranelift_hot_swap_preserves_live_state -- --exact --nocapture; nix develop -c cargo test --test dev cranelift_trap_then_hot_swap_continues -- --exact --nocapture; nix develop -c cargo test --test dev jit_coverage_audit -- --exact --nocapture; nix develop -c rustfmt --check crates/jet-rt/src/lib.rs crates/jet-jit/src/lib.rs crates/jet-jit/src/Collections.rs crates/jet-jit/src/Concurrency.rs. Results green; ratchet unchanged at 79/178."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "Phase 1/2 slice extended. Phase 1 shim rule applied to shared-helper calls: JIT float/string helpers now run through catch_unwind wrappers that set the existing trap flag instead of unwinding across JIT frames. Phase 2 first value-model slice landed: jet-rt owns JetVal/JetArena for String handles; jet-jit no longer keeps a raw Vec<String> side heap, while i64 handle ABI stays stable. Verified: nix develop -c cargo test -p jet-rt; nix develop -c cargo test --test dev jit_covers_string_method_chain -- --exact --nocapture; nix develop -c cargo test --test dev cranelift_three_way_differential_battery -- --exact --nocapture; nix develop -c cargo test --test dev cranelift_hot_swap_preserves_live_state -- --exact --nocapture; nix develop -c cargo test --test dev cranelift_trap_then_hot_swap_continues -- --exact --nocapture; nix develop -c cargo test --test dev jit_coverage_audit -- --exact --nocapture; nix develop -c rustfmt --check crates/jet-rt/src/lib.rs crates/jet-jit/src/lib.rs crates/jet-jit/src/Collections.rs. Results green; ratchet unchanged at 79/178."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "Phase 1 seed implemented: added zero-dep crates/jet-rt and rerouted JIT float display/string helpers through shared runtime helpers. AOT emitted prelude left unchanged in this seed. Verified: nix develop -c cargo test -p jet-rt; nix develop -c cargo test --test dev jit_covers_string_method_chain -- --exact --nocapture; nix develop -c cargo test --test dev cranelift_backend_matches_hello -- --exact --nocapture; nix develop -c cargo test --test dev cranelift_three_way_differential_battery -- --exact --nocapture; nix develop -c cargo test --test dev jit_coverage_audit -- --exact --nocapture; nix develop -c rustfmt --check crates/jet-rt/src/lib.rs crates/jet-jit/src/lib.rs. Results green; coverage ratchet unchanged at 79 native-covered / 178 gaps."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "Starting Phase 1 seed. Intent: create zero-dep crates/jet-rt runtime crate and move the first shared display/format primitive there; reroute jet-jit string/float display shims through jet-rt while leaving AOT emitted prelude text byte-identical. Expected files/tests: Cargo.toml, crates/jet-rt/*, crates/jet-jit/Cargo.toml, crates/jet-jit/src/lib.rs; verify with targeted jet-jit/dev tests and touched-file rustfmt."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "Phase 0 baseline slice implemented. RunOutcome now carries exit_code; interpreter/default-dev parity batteries compare stdout+stderr+exit code against compiled binaries. jit_coverage_audit is no longer ignored and ratchets against tests/jit_gaps.txt (79 covered / 178 gaps), with observed TIR op coverage report. Manifest records two current stderr parity divergences: errors/typed_error_families missing error trace in dev tier; serde/json_coerce missing structured log stderr in dev tier. Verified: nix develop -c cargo test --test dev jit_coverage_audit -- --nocapture (green); nix develop -c cargo test --test dev interpreter_matches_compiled_binary -- --exact --nocapture (119 ran / 138 boundaries / 2 manifested divergences, green); nix develop -c cargo test --test dev dev_default_matches_compiled_binary -- --exact --nocapture (125 ran / 132 boundaries / 2 manifested divergences, green); nix develop -c cargo test --test dev jit_covers_implies_tir_lowers -- --exact --nocapture (green); nix develop -c cargo test --test dev -- --nocapture (37 passed, green); nix develop -c rustfmt --check touched files (green). Global cargo fmt --check is blocked by unrelated pre-existing Jetpack formatting diffs."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "Starting Phase 0 from tools/Tower/docs/plans/epoch-3/jit-aot-parity.md. Intent: extend dev parity batteries to compare stdout/stderr/exit code, turn jit_coverage_audit into a committed ratchet baseline, add per-TIR-op coverage reporting, and create initial tests/jit_gaps manifest if needed. Expected files/tests: tests/dev.rs, crates/jet-foundation/src/JitBackend.rs, Source/JitBackend.rs, Source/Interpreter.rs, crates/jet-jit/src/lib.rs, tests/jit_gaps.*; targeted verification nix develop -c cargo test --test dev dev_default_matches_compiled_binary interpreter_matches_compiled_binary jit_coverage_audit jit_covers_implies_tir_lowers."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "[handoff] JIT/AOT parity plan amended with competitive split: AOT beats systems languages via optimized native release builds; JIT beats dynamic stacks via fast design/test/refine loops. Fresh implementer must start with .agents/prompts/OrchestrationPrompt.md. No new owner ballots surfaced."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "[handoff] JIT/AOT parity plan updated from owner direction: full parity means reproducible behavior across jet dev and AOT, with JIT as fast dev tier and transparent fallback allowed when needed. No owner ballots remain for the parity contract; card plan now points at tools/Tower/docs/plans/epoch-3/jit-aot-parity.md."
+        },
         {
           "at": "2026-07-06",
           "by": "codex-main",
@@ -10384,12 +10429,27 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P1",
       "plan": "LSP v2 under D-LSP1=C (one incremental compiler service) + D-LSP2=A (full LSP 3.17 parity, beginner-first order). Implement on master (this plan was authored from the stale tower-platform worktree; all paths verified against master). Invariants: I2 front end owns every message, I3 checking lives in sema, I6 zero external crates in the compiler — the query engine is std-only.\n\nArchitecture (D-LSP1=C): a demand-driven incremental query engine — inputs (file text, module graph roots) and derived queries (tokens-of-file, ast-of-file, module-graph, types-of-item, diagnostics-of-file, symbols-of-file, callers-of-item), each memoized with precise dependency tracking and a global revision counter. jet check, jet dev, the REPL, and jet lsp become clients of the same engine, so editor answers can never disagree with the compiler. jet-semindex's ratified query API (D-SEMINDEX1) is the persistence/format layer, fed by the engine instead of batch runs.\n\nBuild order:\n1. Engine core: new crate crates/jet-queries (std-only). Query trait + memo table + dependency edges + revision invalidation. Wrap existing lexer/parser/sema entry points as queries without changing their internals (I3). Unit tests: edit one file of a 3-file project, prove only dependent queries recompute (counter assertions).\n2. LSP on the engine: rewrite Source/LSP/Check.rs request paths to engine queries; keep the JSON/protocol layer. Differential gate: LSP publishDiagnostics byte-identical to `jet check --json` for every tests/ui fixture (new tests/lsp differential test — this is the no-two-brains exit).\n3. Incremental sync: textDocumentSync 2 (range edits) in Server.rs + rope-or-line-table doc storage in Position.rs. Latency test: single-keystroke edit on a 2,000-line fixture re-checks in <10ms warm (test with counters, not wall-clock flake; a wall-clock smoke stays #[ignore] for local runs).\n4. Wave 1 — beginner-critical (ships before anything else user-visible): signatureHelp (trigger '(' and ','; params + doc comment from AST), documentSymbol (nested outline: fns, structs+methods, enums, traits, modules), completion quality pass (labels get type signatures; keyword completions context-filtered).\n5. Wave 2 — navigation: workspaceSymbol (engine project view), foldingRange (blocks, comments, use-groups), documentHighlight (occurrences via resolution, read vs write kinds — v5 & writes light differently), selectionRange (AST-walk expand).\n6. Wave 3 — power: completion auto-import (insert `use` on commit) + snippet support (fn call parens, .{ } constructor), prepareRename (reject keywords/foreign symbols with Jet-voiced message), semanticTokens range + delta (keep full as fallback), inlayHint refinements (param names at call sites, off-by-default toggle).\n7. Wave 4 — hierarchy + long tail: callHierarchy (incoming/outgoing via callers-of-item query), typeHierarchy (impl/trait relations), documentLink (use-paths + doc URLs), codeLens (run/test lens over #Test fns, off by default). Advertise only what ships: initialize_response in Server.rs grows per wave, never ahead of tests.\n8. Engine serves the CLI: `jet check` and `jet dev` reuse the warm engine in watch/daemon mode (D-DEV4 loop); differential battery from E2-M4 must stay green (interpreter parity untouched).\n\nExit criteria (all must hold — no partial done):\n- Every capability advertised in initialize_response has a passing test in tests/lsp.rs (capability-coverage meta-test enumerates the JSON and fails on untested ones).\n- Differential gate (stage 2) green across all ui fixtures.\n- Incremental-recompute unit proofs green; keystroke path does not re-run whole-file sema when edit is local to one item.\n- tests/lsp/, tests/dev.rs, tests/repl.rs, full suite green.\n- docs: editors/vscode/README.md + editors/zed/README.md feature tables updated; architecture.md gains the query-engine section (R-rules untouched).\n\nGates: none open — D-LSP1/D-LSP2 ratified 2026-07-05. Log both in docs/spec/syntax-decisions.md tooling section during stage 1 commit.\n\nDelegation: stages 1–3 sequential (one agent, non-isolated — worktree agents branch stale bases); waves 4–7 parallelizable per-feature after stage 3 lands. sonnet for feature waves, opus for stage 1 engine design review before code.",
       "blockedBy": [],
       "assignee": "codex-lsp",
       "log": [
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "codex-main scoped close: owner confirmed JIT/AOT parity failures are a separate active lane. Re-verified #209 on current live tree: cargo test --test lsp 38/38; cargo test -p jet-queries 4/4; cargo test --test grammar 15/15; node --check editors/vscode/extension.js; node --check editors/tree-sitter/grammar.js. Subagent review findings addressed: auto-imports/document links/workspace scans now use initialize rootUri/workspaceFolders with project-root fallback, and nested src/main.jet regressions cover root-relative use paths. Closing #209 done; unrelated JIT/AOT failures remain with the parity agent."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "codex-main verification pass: landed final #209 LSP tail (documentLink + codeLens handlers, VS Code run/test commands, closed-file workspace symbols/completions, canonical root-aware use auto-imports, workspace-root document links) and nested rootUri regressions. Subagent reviewer found root-relative import/link bug; fixed and re-ran. Green targeted proof: cargo test --test lsp 38/38; cargo test -p jet-queries 4/4; cargo test --test grammar 15/15; node --check editors/vscode/extension.js; cargo build; jet run examples/features/basics/hello.jet. Strict repo proof: full workspace unskipped still blocked by known tests/golden ui_native_linux GTK symbol g_get_monotonic_time_ns; workspace with --skip examples_compile_and_run progresses to jet-codegen unit tests then fails unrelated TIR coverage assertions in crates/jet-codegen/src/Codegen/TIR/mod.rs (optional/recursive coverage, no local diff in jet-codegen). Card moved to verify, not done, until repo-level blockers are cleared or owner accepts them as out-of-scope."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "codex-main orchestration start: using OrchestrationPrompt.md. Scout remaining LSP v2 exit criteria, delegate bounded fixes, then main runs final verification. No new syntax gates expected; full suite last."
+        },
         {
           "at": "2026-07-06",
           "by": "codex-main",
@@ -10469,12 +10529,27 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "verify",
+      "phase": "done",
       "priority": "P1",
       "plan": "Highlighting single source of truth under D-HL1=D (grammars generated from Syntax.rs + LSP semantic-token overlay, CI drift gate). Implement on master. Invariant I7: Syntax.rs is already the registry every user-typeable token must live in — this card makes that fact enforce coloring.\n\nBuild order:\n1. Classify the registry: extend crates/jet-foundation/src/Syntax.rs entries with a highlight class per token (keyword.control / keyword.declaration / keyword.ownership / marker / operator / sigil / literal-prefix ...). Mechanical: a const table or attribute alongside each existing entry; no token strings move. Any token without a class = compile error in the generator, so future ratifications can't skip it.\n2. Generator: `jet devtools grammars` in Source/CmdDevTools.rs. Emits BEGIN/END GENERATED sections inside: editors/vscode/syntaxes/jet.tmLanguage.json (keyword/marker/operator patterns), editors/tree-sitter/grammar.js keyword externals (or a generated keywords.js the grammar requires), editors/zed/languages/jet/highlights.scm keyword block. Hand-written structure rules (strings, comments, interpolation, blocks) stay outside the markers and are preserved byte-for-byte on regeneration. Generator is deterministic (sorted output) so regeneration is diff-stable.\n3. Drift gate: tests/grammar.rs gains every_syntax_token_is_highlighted — for each user-typeable token in Syntax.rs, assert presence in each grammar's generated section, and assert the generated sections match a fresh in-memory generation (stale-file detection). Red today (copy, ^, & missing) until stage 2 output is committed. This test joins the CI PR gate (#211).\n4. Semantic overlay: extend Source/LSP semantic tokens — add token types/modifiers for v5 ownership (& write-borrow, ^ move, copy verb), markers (#Test/#Unsafe/... as decorator-class), retired/foreign keywords (E03xx teaching-error spellings) explicitly NOT keyword-colored. editors/vscode/package.json semanticTokenScopes maps the new types; zed extension.toml equivalents. Fixture test: canon.jet + examples/features/memory/ownership.jet token dumps snapshot-tested in tests/lsp.rs.\n5. Regenerate all three grammars, run editors/*/install.sh locally, verify canon.jet renders consistently in VS Code + Zed; screenshot pair in the card log. GitHub rendering uses the committed tmLanguage — verified by the drift test alone.\n6. Docs: editors/README pointers; note in syntax-decisions.md tooling section (D-HL1=D logged); CLAUDE.md syntax-decision protocol gains one line: 'ratifying syntax = run jet devtools grammars, commit regenerated sections' (the drift test makes forgetting red anyway).\n\nExit criteria:\n- cargo test --test grammar green, including staleness check.\n- Semantic-token snapshots green for canon.jet + ownership.jet + copy_verb.jet.\n- `copy`, `^`, `&`, and every S75/S76/v5 token colored in all three grammars; retired spellings (val, var, dotless construction) not keyword-colored anywhere.\n- Full suite green; zed grammar-repo stays untracked (build artifact — .gitignore already covers it).\n\nGates: none — D-HL1 ratified 2026-07-05. No new user-typeable syntax, so no formatter work.\n\nDelegation: stages 1–2 one sonnet agent (single subsystem); stage 4 separate agent after 2 lands; stage 3 test written FIRST (red) per workflow loop.",
       "blockedBy": [],
       "assignee": "codex-highlight",
       "log": [
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "codex-main scoped close: owner confirmed JIT/AOT parity failures are a separate active lane. Re-verified #210 on current live tree: cargo test --test grammar 15/15; cargo test --test lsp 38/38; cargo test -p jet-queries 4/4; node --check editors/tree-sitter/grammar.js; node --check editors/vscode/extension.js. Subagent review findings addressed: Zed coverage test now ignores comments and compares actual query string literals; copy is emitted in Zed generated query via Syntax.rs classification; generated tree-sitter/Zed assets updated. Closing #210 done; unrelated JIT/AOT failures remain with the parity agent."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "codex-main verification pass: fixed final Zed drift hole after subagent review (Zed query test now extracts actual non-comment query literals; Syntax.rs now classifies copy as a Zed anonymous word token; regenerated Zed/tree-sitter metadata). Green targeted proof: cargo test --test grammar 15/15; cargo test --test lsp 38/38; cargo test -p jet-queries 4/4; node --check editors/tree-sitter/grammar.js; node --check editors/vscode/extension.js; cargo build; jet run examples/features/basics/hello.jet; editors/zed/install.sh succeeded earlier; VSIX packaging succeeded earlier. Strict repo proof: full workspace unskipped still blocked by known tests/golden ui_native_linux GTK symbol g_get_monotonic_time_ns; workspace with --skip examples_compile_and_run progresses through grammar/lsp/dev and later suites, then fails unrelated jet-codegen TIR coverage unit assertions in crates/jet-codegen/src/Codegen/TIR/mod.rs. #210 remains verify, not done, until repo-level blockers are cleared or owner accepts them as out-of-scope."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "codex-main orchestration start: using OrchestrationPrompt.md. Independent subagent verifies highlighting exit criteria and drift/editor evidence; main reruns targeted gates and closes only after proof."
+        },
         {
           "at": "2026-07-06",
           "by": "codex-main",
@@ -25034,6 +25109,83 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-06T16:17:46.510Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0vg0lj7",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-06T16:17:40.974Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0cevzhr",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-06T16:16:29.376Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0vg0lj7",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-06T16:16:21.165Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0cevzhr",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-06T16:01:41.592Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c2hizkhl",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-06T16:00:22.898Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c2hizkhl",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-06T15:45:55.464Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c2hizkhl",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-06T15:36:52.175Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c2hizkhl",
+      "note": "plan,logEntry"
+    },
+    {
+      "at": "2026-07-06T15:34:34.298Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0vg0lj7",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-06T15:34:34.275Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0cevzhr",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-06T15:34:24.352Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c2hizkhl",
+      "note": "plan,logEntry"
+    },
     {
       "at": "2026-07-06T14:47:21.117Z",
       "by": "codex-main",

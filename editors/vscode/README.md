@@ -3,7 +3,8 @@
 Extension id: **`jet-lang.jet`** (publisher `jet-lang`, name `jet`).
 Generated TextMate syntax highlighting + LSP: diagnostics, quick-fixes,
 formatting, semantic tokens (full/range/delta), inlay hints, navigation,
-rename, call hierarchy, and type hierarchy.
+rename, document links, run/test code lenses, call hierarchy, and type
+hierarchy.
 
 ## Setup
 
@@ -55,6 +56,9 @@ nix develop -c cargo test --test grammar
 The LSP semantic overlay refines live editor coloring for ownership (`copy`,
 `^`, `&`) and markers (`#Test`, `#Unsafe`, `@Pure`). Retired/foreign spellings
 are not colored as live syntax.
+
+Code lenses use **Jet: Run File** and **Jet: Test File**, which open a terminal
+running the same `jet` binary the language server uses.
 
 ## Verify
 

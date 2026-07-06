@@ -82,10 +82,6 @@ fn every_highlight_token_is_in_each_generated_section() {
             "editors/tree-sitter/grammar.js",
             generated_section("editors/tree-sitter/grammar.js"),
         ),
-        (
-            "editors/zed/languages/jet/highlights.scm",
-            generated_section("editors/zed/languages/jet/highlights.scm"),
-        ),
     ];
 
     for token in jet::Syntax::highlighted_tokens_sorted() {
@@ -98,6 +94,27 @@ fn every_highlight_token_is_in_each_generated_section() {
             );
         }
     }
+}
+
+#[test]
+fn zed_generated_query_covers_anonymous_highlight_words() {
+    let anonymous = extract_anonymous_node_types("editors/tree-sitter/src/node-types.json");
+    let section = generated_section("editors/zed/languages/jet/highlights.scm");
+    let actual = extract_zed_query_string_literals(&section)
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+    let expected = jet::Syntax::highlighted_tokens_sorted()
+        .into_iter()
+        .filter(|token| zed_generated_class(token.class))
+        .filter(|token| is_word_token(token.text))
+        .filter(|token| anonymous.contains(token.text))
+        .map(|token| token.text.to_string())
+        .collect::<BTreeSet<_>>();
+
+    assert_eq!(
+        actual, expected,
+        "Zed generated query drifted from anonymous grammar literals"
+    );
 }
 
 #[test]
@@ -139,6 +156,20 @@ fn section_has_token(section: &str, token: &str) -> bool {
     section.contains(token) || section.contains(&escaped) || section.contains(&json_escaped)
 }
 
+fn zed_generated_class(class: jet::Syntax::HighlightClass) -> bool {
+    !matches!(
+        class,
+        jet::Syntax::HighlightClass::MarkerDirective | jet::Syntax::HighlightClass::MarkerContract
+    )
+}
+
+fn is_word_token(s: &str) -> bool {
+    s.chars().all(|c| c == '_' || c.is_ascii_alphanumeric())
+        && s.chars()
+            .next()
+            .is_some_and(|c| c == '_' || c.is_ascii_alphabetic())
+}
+
 fn extract_anonymous_node_types(path: &str) -> BTreeSet<String> {
     let text = fs::read_to_string(path).unwrap_or_else(|e| panic!("{path}: {e}"));
     let mut out = BTreeSet::new();
@@ -167,17 +198,23 @@ fn extract_anonymous_node_types(path: &str) -> BTreeSet<String> {
 }
 
 fn extract_zed_query_string_literals(query: &str) -> Vec<String> {
-    query
-        .lines()
-        .filter_map(|line| {
-            let trimmed = line.trim();
-            if trimmed.starts_with('"') {
-                json_string_value(trimmed).map(str::to_string)
-            } else {
-                None
-            }
-        })
-        .collect()
+    let mut out = Vec::new();
+    for line in query.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with(';') {
+            continue;
+        }
+        let mut rest = trimmed;
+        while let Some(start) = rest.find('"') {
+            rest = &rest[start + 1..];
+            let Some(end) = rest.find('"') else {
+                break;
+            };
+            out.push(rest[..end].to_string());
+            rest = &rest[end + 1..];
+        }
+    }
+    out
 }
 
 fn json_string_value(line: &str) -> Option<&str> {

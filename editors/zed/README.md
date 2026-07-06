@@ -2,8 +2,9 @@
 
 Zed dev extension: generated Tree-sitter lexical highlighting plus `jet lsp`
 for diagnostics, completion, hover, go-to-definition, rename, semantic tokens
-(full/range/delta), inlay hints, quick-fixes, document symbols, folding,
-selection ranges, call hierarchy, and type hierarchy.
+(full/range/delta), inlay hints, quick-fixes, document symbols, document
+links, code lenses, folding, selection ranges, call hierarchy, and type
+hierarchy.
 
 ## Setup
 

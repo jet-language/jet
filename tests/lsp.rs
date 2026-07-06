@@ -157,6 +157,8 @@ const LSP_CAPABILITY_COVERAGE: &[(&str, &str)] = &[
     ("foldingRangeProvider", "lsp_wave2_navigation_features"),
     ("documentHighlightProvider", "lsp_wave2_navigation_features"),
     ("selectionRangeProvider", "lsp_wave2_navigation_features"),
+    ("documentLinkProvider", "lsp_document_links_and_code_lenses"),
+    ("codeLensProvider", "lsp_document_links_and_code_lenses"),
     ("hoverProvider", "lsp_hover_returns_signature"),
     ("definitionProvider", "lsp_definition_returns_location"),
     ("referencesProvider", "lsp_references_finds_all_uses"),
@@ -1144,6 +1146,68 @@ fn lsp_completion_returns_items() {
 }
 
 #[test]
+fn lsp_completion_returns_snippets_and_auto_imports() {
+    let jet = jet_bin();
+    if !jet.exists() {
+        return;
+    }
+
+    let root = std::env::temp_dir().join(format!("lsp_auto_import_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(root.join("app")).expect("create LSP auto-import dirs");
+    std::fs::create_dir_all(root.join("src")).expect("create LSP source dirs");
+    std::fs::write(
+        root.join("app/store.jet"),
+        "fn ImportedHelper() -> Int {\n    return 1\n}\nfn run() {}\n",
+    )
+    .expect("write imported module");
+    let path = root.join("src/main.jet");
+    let uri = format!("file://{}", path.display());
+    let root_uri = format!("file://{}", root.display());
+    let source = "fn run() {\n    \n}\n";
+    std::fs::write(&path, source).expect("write main module");
+
+    run_transcript(
+        source,
+        &[
+            TranscriptStep::Send {
+                msg: format!(
+                    r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"rootUri":"{}","capabilities":{{}}}}}}"#,
+                    root_uri
+                ),
+                expect_contains: Some(vec!["completionProvider".to_string()]),
+            },
+            TranscriptStep::Send {
+                msg: r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#.to_string(),
+                expect_contains: None,
+            },
+            TranscriptStep::Open {
+                uri: uri.clone(),
+                expect_notification: true,
+            },
+            TranscriptStep::Send {
+                msg: format!(
+                    r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/completion","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":1,"character":4}}}}}}"#,
+                    uri
+                ),
+                expect_contains: Some(vec![
+                    "\"label\":\"bind immut (inferred)\"".to_string(),
+                    "\"insertTextFormat\":2".to_string(),
+                    "\"label\":\"ImportedHelper\"".to_string(),
+                    "\"additionalTextEdits\"".to_string(),
+                    "use app.store\\n".to_string(),
+                ]),
+            },
+            TranscriptStep::Send {
+                msg: r#"{"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}}"#.to_string(),
+                expect_contains: Some(vec!["result".to_string()]),
+            },
+        ],
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn lsp_completion_uses_local_discovery_index_for_packages_and_options() {
     let jet = jet_bin();
     if !jet.exists() {
@@ -1250,6 +1314,84 @@ fn lsp_completion_uses_local_discovery_index_for_packages_and_options() {
     );
     drop(stdin);
     let _ = child.wait();
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn lsp_document_links_and_code_lenses() {
+    let jet = jet_bin();
+    if !jet.exists() {
+        return;
+    }
+
+    let root = std::env::temp_dir().join(format!("lsp_links_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(root.join("app")).expect("create LSP link dirs");
+    std::fs::create_dir_all(root.join("src")).expect("create LSP source dirs");
+    std::fs::write(root.join("app/store.jet"), "fn run() {}\n").expect("write link target");
+    let path = root.join("src/main.jet");
+    let uri = format!("file://{}", path.display());
+    let root_uri = format!("file://{}", root.display());
+    let target_uri = format!("file://{}", root.join("app/store.jet").display());
+    let source = "use app.store\n\nfn run() {\n    print(1)\n}\n\n#Test(\"smoke\") {\n    expect(1 == 1)\n}\n";
+    std::fs::write(&path, source).expect("write link source");
+
+    run_transcript(
+        source,
+        &[
+            TranscriptStep::Send {
+                msg: format!(
+                    r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"rootUri":"{}","capabilities":{{}}}}}}"#,
+                    root_uri
+                ),
+                expect_contains: Some(vec![
+                    "documentLinkProvider".to_string(),
+                    "codeLensProvider".to_string(),
+                ]),
+            },
+            TranscriptStep::Send {
+                msg: r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#.to_string(),
+                expect_contains: None,
+            },
+            TranscriptStep::Open {
+                uri: uri.clone(),
+                expect_notification: true,
+            },
+            TranscriptStep::Send {
+                msg: format!(
+                    r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/documentLink","params":{{"textDocument":{{"uri":"{}"}}}}}}"#,
+                    uri
+                ),
+                expect_contains: Some(vec![
+                    "\"target\"".to_string(),
+                    target_uri.clone(),
+                    r#""start":{"line":0,"character":4}"#.to_string(),
+                ]),
+            },
+            TranscriptStep::Send {
+                msg: format!(
+                    r#"{{"jsonrpc":"2.0","id":3,"method":"workspace/symbol","params":{{"query":"run"}}}}"#,
+                ),
+                expect_contains: Some(vec!["\"location\"".to_string(), target_uri.clone()]),
+            },
+            TranscriptStep::Send {
+                msg: format!(
+                    r#"{{"jsonrpc":"2.0","id":4,"method":"textDocument/codeLens","params":{{"textDocument":{{"uri":"{}"}}}}}}"#,
+                    uri
+                ),
+                expect_contains: Some(vec![
+                    "\"title\":\"Run file\"".to_string(),
+                    "\"command\":\"jet.runFile\"".to_string(),
+                    "\"title\":\"Run test\"".to_string(),
+                    "\"command\":\"jet.testFile\"".to_string(),
+                ]),
+            },
+            TranscriptStep::Send {
+                msg: r#"{"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}}"#.to_string(),
+                expect_contains: Some(vec!["result".to_string()]),
+            },
+        ],
+    );
     let _ = std::fs::remove_dir_all(root);
 }
 

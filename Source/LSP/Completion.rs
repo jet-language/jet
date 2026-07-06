@@ -203,6 +203,7 @@ pub(crate) fn compute_completions(
     src: &str,
     offset: usize,
     current_path: &str,
+    workspace_root: Option<&str>,
     discovery: Option<&DiscoveryIndex>,
 ) -> Vec<CompletionItem> {
     let mut items: Vec<CompletionItem> = Vec::new();
@@ -356,10 +357,15 @@ pub(crate) fn compute_completions(
         if mp == current_path || mp.is_empty() {
             return None;
         }
-        if src.contains(&format!("\"{}\"", mp)) {
+        let statement = use_statement_for_module(current_path, workspace_root, mp)?;
+        let already_imported = statement.trim().strip_prefix("use ").is_some_and(|module| {
+            src.lines()
+                .any(|line| line.trim() == format!("use {module}"))
+        });
+        if already_imported {
             return None; // already imported
         }
-        Some(format!("import \"{}\";\n", mp))
+        Some(statement)
     };
 
     // All top-level definitions
@@ -540,6 +546,27 @@ pub(crate) fn compute_completions(
     }
 
     items
+}
+
+fn use_statement_for_module(
+    current_path: &str,
+    workspace_root: Option<&str>,
+    module_path: &str,
+) -> Option<String> {
+    let current_dir = std::path::Path::new(current_path).parent()?;
+    let base = workspace_root
+        .map(std::path::Path::new)
+        .unwrap_or(current_dir);
+    let module = std::path::Path::new(module_path);
+    let rel = module.strip_prefix(base).ok()?;
+    let rel = rel.to_string_lossy();
+    let rel = rel.trim_end_matches(".jet");
+    let module_name = rel
+        .split(std::path::MAIN_SEPARATOR)
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(".");
+    (!module_name.is_empty()).then(|| format!("use {}\n", module_name))
 }
 
 fn context_is_package_ref(src: &str, offset: usize) -> Option<(String, String)> {

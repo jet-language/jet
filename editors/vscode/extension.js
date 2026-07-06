@@ -47,6 +47,23 @@ function findServer(workspaceFolder) {
   return "jet";
 }
 
+function shellQuote(value) {
+  return `"${String(value).replace(/(["\\$`])/g, "\\$1")}"`;
+}
+
+function uriArgToPath(uriArg) {
+  if (typeof uriArg === "string" && uriArg.startsWith("file:")) {
+    return vscode.Uri.parse(uriArg).fsPath;
+  }
+  return vscode.window.activeTextEditor?.document.uri.fsPath;
+}
+
+function runJetInTerminal(serverPath, args) {
+  const terminal = vscode.window.createTerminal("Jet");
+  terminal.show();
+  terminal.sendText([shellQuote(serverPath), ...args.map(shellQuote)].join(" "));
+}
+
 function activate(context) {
   const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   const serverPath = findServer(workspaceFolder);
@@ -72,6 +89,18 @@ function activate(context) {
     vscode.commands.registerCommand("jet.restartServer", async () => {
       if (client) {
         await client.restart();
+      }
+    }),
+    vscode.commands.registerCommand("jet.runFile", (uriArg) => {
+      const file = uriArgToPath(uriArg);
+      if (file) {
+        runJetInTerminal(serverPath, ["run", file]);
+      }
+    }),
+    vscode.commands.registerCommand("jet.testFile", (uriArg) => {
+      const file = uriArgToPath(uriArg);
+      if (file) {
+        runJetInTerminal(serverPath, ["test", file]);
       }
     })
   );

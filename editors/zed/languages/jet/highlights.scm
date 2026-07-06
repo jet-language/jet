@@ -100,6 +100,10 @@
 ] @keyword
 
 ; keyword.ownership: copy uninit
+[
+  "copy"
+] @keyword
+
 ; keyword.other: it self
 [
   "self"

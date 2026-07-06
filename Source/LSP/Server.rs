@@ -51,6 +51,7 @@ impl Document {
 
 struct Server {
     docs: HashMap<String, Document>,
+    workspace_roots: Vec<String>,
     /// URIs of documents that changed since last diagnostic publish (D-LSP3).
     dirty: std::collections::HashSet<String>,
     /// D-LSP1 stage 1: shared query engine for memoized document facts.
@@ -62,6 +63,7 @@ impl Server {
     fn new() -> Self {
         Server {
             docs: HashMap::new(),
+            workspace_roots: Vec::new(),
             dirty: std::collections::HashSet::new(),
             queries: std::cell::RefCell::new(QueryEngine::new()),
             shutdown: false,
@@ -254,7 +256,10 @@ fn handle_request(
         None
     };
     let out = match method {
-        "initialize" => Some(initialize_response(id)),
+        "initialize" => {
+            configure_workspace_roots(server, params);
+            Some(initialize_response(id))
+        }
         "shutdown" => {
             server.shutdown = true;
             Some(response(id, "null"))
@@ -268,6 +273,8 @@ fn handle_request(
         "textDocument/foldingRange" => folding_range_response(server, params, id),
         "textDocument/documentHighlight" => document_highlight_response(server, params, id),
         "textDocument/selectionRange" => selection_range_response(server, params, id),
+        "textDocument/documentLink" => document_link_response(server, params, id),
+        "textDocument/codeLens" => code_lens_response(server, params, id),
         "textDocument/hover" => hover_response(server, params, id),
         "textDocument/definition" => definition_response(server, params, id),
         "textDocument/references" => references_response(server, params, id),
@@ -306,6 +313,33 @@ fn record_lsp_latency(method: &str, us: u128) {
         .open("jet-lsp-timing.json")
     {
         let _ = writeln!(f, "{{\"method\":\"{}\",\"us\":{}}}", method, us);
+    }
+}
+
+fn configure_workspace_roots(server: &mut Server, params: Option<&JsonValue>) {
+    let mut roots = Vec::new();
+    if let Some(params) = params {
+        if let Some(JsonValue::Array(folders)) = json_get(params, "workspaceFolders") {
+            for folder in folders {
+                if let Some(uri) = json_get(folder, "uri").and_then(json_str) {
+                    push_workspace_root(&mut roots, uri_to_path(uri));
+                }
+            }
+        }
+        if let Some(uri) = json_get(params, "rootUri").and_then(json_str) {
+            push_workspace_root(&mut roots, uri_to_path(uri));
+        }
+        if let Some(path) = json_get(params, "rootPath").and_then(json_str) {
+            push_workspace_root(&mut roots, path.to_string());
+        }
+    }
+    server.workspace_roots = roots;
+}
+
+fn push_workspace_root(roots: &mut Vec<String>, path: String) {
+    let path = normalize_path(&path);
+    if !path.is_empty() && !roots.iter().any(|root| root == &path) {
+        roots.push(path);
     }
 }
 
@@ -361,6 +395,8 @@ fn initialize_response(id: &JsonValue) -> String {
     "foldingRangeProvider": true,
     "documentHighlightProvider": true,
     "selectionRangeProvider": true,
+    "documentLinkProvider": { "resolveProvider": false },
+    "codeLensProvider": { "resolveProvider": false },
     "hoverProvider": true,
     "definitionProvider": true,
     "referencesProvider": true,
@@ -640,13 +676,22 @@ fn completion_response(
     let offset = lsp_pos_to_offset(&doc.text, lsp_pos);
 
     let checked = server.check_with_bundle(doc);
-    let db = match checked.bundle {
+    let mut db = match checked.bundle {
         Some(b) => build_symbol_db(&b, &checked.facts),
         None => SymbolDB::new(),
     };
+    merge_workspace_defs(server, doc, &mut db);
 
     let discovery = load_discovery_index(&doc.path);
-    let items = compute_completions(&db, &doc.text, offset, &doc.path, discovery.as_ref());
+    let workspace_root = workspace_root_for_path(server, &doc.path);
+    let items = compute_completions(
+        &db,
+        &doc.text,
+        offset,
+        &doc.path,
+        workspace_root.as_deref(),
+        discovery.as_ref(),
+    );
     let mut json_items = String::new();
     for (i, item) in items.iter().enumerate() {
         if i > 0 {
@@ -778,18 +823,27 @@ fn workspace_symbol_response(
         .to_ascii_lowercase();
     let mut items = String::new();
     let mut first = true;
-    let mut docs = server.docs.values().collect::<Vec<_>>();
-    docs.sort_by(|a, b| a.path.cmp(&b.path));
-    for doc in docs {
-        let checked = server.check_with_bundle(doc);
-        let db = match checked.bundle {
-            Some(b) => build_symbol_db(&b, &checked.facts),
-            None => SymbolDB::new(),
+    let root_hint = server.docs.values().next().map(|doc| doc.path.as_str());
+    let mut docs = workspace_sources(server, root_hint);
+    docs.sort_by(|a, b| a.0.cmp(&b.0));
+    for (path, text) in docs {
+        let db = if let Some(doc) = server.docs.values().find(|doc| doc.path == path) {
+            let checked = server.check_with_bundle(doc);
+            match checked.bundle {
+                Some(b) => build_symbol_db(&b, &checked.facts),
+                None => SymbolDB::new(),
+            }
+        } else {
+            let (_diags, bundle, facts) = check_document_with_bundle(&path, &text);
+            match bundle {
+                Some(b) => build_symbol_db(&b, &facts),
+                None => SymbolDB::new(),
+            }
         };
         let mut defs = db
             .defs
             .iter()
-            .filter(|def| def.module_path == doc.path)
+            .filter(|def| def.module_path == path)
             .filter_map(|def| document_symbol_kind(&def.kind).map(|kind| (def, kind)))
             .filter(|(def, _)| query.is_empty() || def.name.to_ascii_lowercase().contains(&query))
             .collect::<Vec<_>>();
@@ -799,8 +853,8 @@ fn workspace_symbol_response(
                 items.push(',');
             }
             first = false;
-            let uri = path_to_uri(&doc.path);
-            let range = range_json(byte_span_to_range(&doc.text, def.def_span));
+            let uri = path_to_uri(&path);
+            let range = range_json(byte_span_to_range(&text, def.def_span));
             items.push_str(&format!(
                 r#"{{"name":"{}","kind":{},"location":{{"uri":"{}","range":{}}}}}"#,
                 json_escape(&def.name),
@@ -924,6 +978,33 @@ fn selection_range_response(
         out.push_str(&selection_range_json(&ranges));
     }
     Some(response(id, &format!("[{}]", out)))
+}
+
+fn document_link_response(
+    server: &Server,
+    params: Option<&JsonValue>,
+    id: &JsonValue,
+) -> Option<String> {
+    let params = params?;
+    let td = json_get(params, "textDocument")?;
+    let uri = json_get(td, "uri").and_then(json_str)?;
+    let doc = server.docs.get(uri)?;
+    let workspace_root = workspace_root_for_path(server, &doc.path);
+    let links = document_links_for(&doc.path, workspace_root.as_deref(), &doc.text);
+    Some(response(id, &format!("[{}]", links.join(","))))
+}
+
+fn code_lens_response(
+    server: &Server,
+    params: Option<&JsonValue>,
+    id: &JsonValue,
+) -> Option<String> {
+    let params = params?;
+    let td = json_get(params, "textDocument")?;
+    let uri = json_get(td, "uri").and_then(json_str)?;
+    let doc = server.docs.get(uri)?;
+    let lenses = code_lenses_for(uri, &doc.text);
+    Some(response(id, &format!("[{}]", lenses.join(","))))
 }
 
 fn prepare_call_hierarchy_response(
@@ -1663,6 +1744,76 @@ fn type_hierarchy_item_params(params: Option<&JsonValue>) -> Option<(&str, &str)
     Some((uri, name))
 }
 
+fn merge_workspace_defs(server: &Server, current: &Document, db: &mut SymbolDB) {
+    for (path, text) in workspace_sources(server, Some(&current.path)) {
+        if path == current.path {
+            continue;
+        }
+        let (_diags, bundle, facts) = check_document_with_bundle(&path, &text);
+        if let Some(bundle) = bundle {
+            let mut other = build_symbol_db(&bundle, &facts);
+            db.defs.append(&mut other.defs);
+            db.refs.append(&mut other.refs);
+            db.calls.append(&mut other.calls);
+            db.hover.append(&mut other.hover);
+            db.inlay.append(&mut other.inlay);
+        }
+    }
+}
+
+fn workspace_sources(server: &Server, root_hint: Option<&str>) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for doc in server.docs.values() {
+        if seen.insert(doc.path.clone()) {
+            out.push((doc.path.clone(), doc.text.clone()));
+        }
+    }
+    let Some(path) = root_hint else {
+        return out;
+    };
+    let root = workspace_root_for_path(server, path).unwrap_or_else(|| {
+        normalize_path_buf(
+            std::path::Path::new(path)
+                .parent()
+                .unwrap_or_else(|| std::path::Path::new(".")),
+        )
+    });
+    let mut files = Vec::new();
+    collect_jet_files(std::path::Path::new(&root), &mut files);
+    files.sort();
+    for path in files.into_iter().take(256) {
+        let display = path.to_string_lossy().to_string();
+        if seen.contains(&display) {
+            continue;
+        }
+        if let Ok(text) = std::fs::read_to_string(&path) {
+            seen.insert(display.clone());
+            out.push((display, text));
+        }
+    }
+    out
+}
+
+fn collect_jet_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with('.') || matches!(name.as_ref(), "target" | "node_modules") {
+            continue;
+        }
+        if path.is_dir() {
+            collect_jet_files(&path, out);
+        } else if path.extension().and_then(|s| s.to_str()) == Some("jet") {
+            out.push(path);
+        }
+    }
+}
+
 fn module_source<'a>(bundle: &'a ProgramBundle, path: &str) -> Option<&'a str> {
     bundle
         .modules
@@ -1951,6 +2102,148 @@ fn selection_range_json(ranges: &[LspRange]) -> String {
     json
 }
 
+fn document_links_for(path: &str, workspace_root: Option<&str>, src: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let fallback_base = std::path::Path::new(path)
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."));
+    let base = workspace_root
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from(normalize_path_buf(fallback_base)));
+    for (line_idx, line) in src.lines().enumerate() {
+        let trimmed = line.trim_start();
+        if !trimmed.starts_with("use ") {
+            continue;
+        }
+        let indent = line.len().saturating_sub(trimmed.len());
+        let path_start = indent + "use ".len();
+        let after_use = &line[path_start..];
+        let import_len = after_use
+            .find(|c: char| c.is_whitespace() || c == '{')
+            .unwrap_or(after_use.len());
+        if import_len == 0 {
+            continue;
+        }
+        let import = &after_use[..import_len];
+        let Some(target) = resolve_use_target(&base, import) else {
+            continue;
+        };
+        let range = LspRange {
+            start: LspPos {
+                line: line_idx as u32,
+                character: path_start as u32,
+            },
+            end: LspPos {
+                line: line_idx as u32,
+                character: (path_start + import_len) as u32,
+            },
+        };
+        out.push(format!(
+            r#"{{"range":{},"target":"{}"}}"#,
+            range_json(range),
+            json_escape(&target)
+        ));
+    }
+    out
+}
+
+fn resolve_use_target(base: &std::path::Path, import: &str) -> Option<String> {
+    if import.starts_with("core.") {
+        let doc =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/reference/core-library.md");
+        return doc.exists().then(|| path_to_uri(&doc.to_string_lossy()));
+    }
+    let rel = import.replace('.', "/") + ".jet";
+    let path = base.join(rel);
+    path.exists().then(|| path_to_uri(&path.to_string_lossy()))
+}
+
+fn workspace_root_for_path(server: &Server, path: &str) -> Option<String> {
+    let path = normalize_path(path);
+    let path_ref = std::path::Path::new(&path);
+    server
+        .workspace_roots
+        .iter()
+        .filter(|root| path_ref.starts_with(root.as_str()))
+        .max_by_key(|root| root.len())
+        .cloned()
+        .or_else(|| project_root_marker(&path))
+}
+
+fn project_root_marker(path: &str) -> Option<String> {
+    let mut dir = std::path::Path::new(path).parent()?;
+    loop {
+        if dir.join("pkg.jet").exists()
+            || dir.join("Jet.toml").exists()
+            || dir.join("jet.toml").exists()
+            || dir.join(".git").exists()
+        {
+            return Some(normalize_path_buf(dir));
+        }
+        dir = dir.parent()?;
+    }
+}
+
+fn code_lenses_for(uri: &str, src: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for (idx, line) in src.lines().enumerate() {
+        let trimmed = line.trim_start();
+        let indent = line.len().saturating_sub(trimmed.len());
+        if trimmed.starts_with("fn run") {
+            out.push(code_lens_json(
+                idx,
+                indent,
+                line.len(),
+                "Run file",
+                "jet.runFile",
+                &[uri.to_string()],
+            ));
+        } else if trimmed.starts_with("#Test") {
+            out.push(code_lens_json(
+                idx,
+                indent,
+                line.len(),
+                "Run test",
+                "jet.testFile",
+                &[uri.to_string(), idx.to_string()],
+            ));
+        }
+    }
+    out
+}
+
+fn code_lens_json(
+    line: usize,
+    start: usize,
+    end: usize,
+    title: &str,
+    command: &str,
+    args: &[String],
+) -> String {
+    let range = LspRange {
+        start: LspPos {
+            line: line as u32,
+            character: start as u32,
+        },
+        end: LspPos {
+            line: line as u32,
+            character: end as u32,
+        },
+    };
+    let arguments = args
+        .iter()
+        .map(|arg| format!(r#""{}""#, json_escape(arg)))
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        r#"{{"range":{},"command":{{"title":"{}","command":"{}","arguments":[{}]}}}}"#,
+        range_json(range),
+        json_escape(title),
+        json_escape(command),
+        arguments
+    )
+}
+
 // ── URI / path utilities ──────────────────────────────────────────────────────
 
 fn uri_to_path(uri: &str) -> String {
@@ -1971,6 +2264,17 @@ fn path_to_uri(path: &str) -> String {
     } else {
         format!("file://{}", path)
     }
+}
+
+fn normalize_path(path: &str) -> String {
+    normalize_path_buf(std::path::Path::new(path))
+}
+
+fn normalize_path_buf(path: &std::path::Path) -> String {
+    path.canonicalize()
+        .unwrap_or_else(|_| path.to_path_buf())
+        .to_string_lossy()
+        .to_string()
 }
 
 fn load_discovery_index(path: &str) -> Option<crate::Jetpack::Discovery::Index> {
