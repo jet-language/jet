@@ -138,6 +138,16 @@ must not advertise speculative features.
   build-time steps (S56 user derives, comptime). (D-CTCODEGEN1=A, ratified
   2026-06-25; pairs with D-METADERIVE1=A, which makes a user derive's output a
   source fragment for exactly this reason.)
+- **R12 — Two consumers, one executable IR.** Every executable TIR variant is
+  owned by two consumers: the Rust emitter for AOT binaries and the dev/JIT
+  lowerer for `jet dev`. The Rust emitter and the JIT lowerer must both handle
+  executable TIR exhaustively, wildcard-free, either by real lowering or by a
+  named internal unsupported reason that falls through transparently to the
+  next dev tier. A feature PR is incomplete unless its example/golden proves
+  the AOT path and `tests/dev.rs::dev_default_matches_compiled_binary` proves
+  default `jet dev` has the same stdout, stderr, exit code, diagnostics,
+  panics, and side effects. Native JIT coverage is a performance tier; semantic
+  parity is mandatory.
 
 ## Exit codes (stable contract)
 

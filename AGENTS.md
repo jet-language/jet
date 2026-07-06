@@ -14,7 +14,7 @@ has final say on all user-facing syntax.
 
 1. docs/spec/philosophy.md — ranked priorities; settles all arguments
 2. docs/spec/syntax-decisions.md — what syntax you may use; never invent any
-3. docs/spec/architecture.md — pipeline + rules R1–R7
+3. docs/spec/architecture.md — pipeline + rules R1–R12
 4. docs/spec/diagnostics.md — error voice + format; snapshot-pinned
 5. docs/spec/roadmap.md — current milestone and exit criteria
 
@@ -94,8 +94,9 @@ as skills, every other agent reads them as files:
 
 Pick the next roadmap item → write the failing test first (ui fixture or
 example) → spec it in docs/spec/spec.md → implement parser → sema → codegen →
-all tests green → update docs touched → done means: tests pass, docs
-match behavior, no invariant bent.
+JIT/dev parity through the same executable TIR (R12) → all tests green →
+update docs touched → done means: tests pass, docs match behavior, no
+invariant bent.
 
 While iterating, run targeted tests (`cargo test --test <name>`); run the
 full suite once at the end of a card, before claiming done. Never trust a
