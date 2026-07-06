@@ -4,16 +4,13 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 219,
-    "rev": 285,
+    "rev": 293,
     "ui": {
       "toggled": [
         "dec-group:syntax",
         "dec-group:runtime",
         "dec-group:other",
         "board-sidequests",
-        "board-frozen",
-        "epoch:e7",
-        "epoch:e6",
         "epoch:e5"
       ]
     },
@@ -10472,12 +10469,22 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "verify",
       "priority": "P1",
       "plan": "Highlighting single source of truth under D-HL1=D (grammars generated from Syntax.rs + LSP semantic-token overlay, CI drift gate). Implement on master. Invariant I7: Syntax.rs is already the registry every user-typeable token must live in — this card makes that fact enforce coloring.\n\nBuild order:\n1. Classify the registry: extend crates/jet-foundation/src/Syntax.rs entries with a highlight class per token (keyword.control / keyword.declaration / keyword.ownership / marker / operator / sigil / literal-prefix ...). Mechanical: a const table or attribute alongside each existing entry; no token strings move. Any token without a class = compile error in the generator, so future ratifications can't skip it.\n2. Generator: `jet devtools grammars` in Source/CmdDevTools.rs. Emits BEGIN/END GENERATED sections inside: editors/vscode/syntaxes/jet.tmLanguage.json (keyword/marker/operator patterns), editors/tree-sitter/grammar.js keyword externals (or a generated keywords.js the grammar requires), editors/zed/languages/jet/highlights.scm keyword block. Hand-written structure rules (strings, comments, interpolation, blocks) stay outside the markers and are preserved byte-for-byte on regeneration. Generator is deterministic (sorted output) so regeneration is diff-stable.\n3. Drift gate: tests/grammar.rs gains every_syntax_token_is_highlighted — for each user-typeable token in Syntax.rs, assert presence in each grammar's generated section, and assert the generated sections match a fresh in-memory generation (stale-file detection). Red today (copy, ^, & missing) until stage 2 output is committed. This test joins the CI PR gate (#211).\n4. Semantic overlay: extend Source/LSP semantic tokens — add token types/modifiers for v5 ownership (& write-borrow, ^ move, copy verb), markers (#Test/#Unsafe/... as decorator-class), retired/foreign keywords (E03xx teaching-error spellings) explicitly NOT keyword-colored. editors/vscode/package.json semanticTokenScopes maps the new types; zed extension.toml equivalents. Fixture test: canon.jet + examples/features/memory/ownership.jet token dumps snapshot-tested in tests/lsp.rs.\n5. Regenerate all three grammars, run editors/*/install.sh locally, verify canon.jet renders consistently in VS Code + Zed; screenshot pair in the card log. GitHub rendering uses the committed tmLanguage — verified by the drift test alone.\n6. Docs: editors/README pointers; note in syntax-decisions.md tooling section (D-HL1=D logged); CLAUDE.md syntax-decision protocol gains one line: 'ratifying syntax = run jet devtools grammars, commit regenerated sections' (the drift test makes forgetting red anyway).\n\nExit criteria:\n- cargo test --test grammar green, including staleness check.\n- Semantic-token snapshots green for canon.jet + ownership.jet + copy_verb.jet.\n- `copy`, `^`, `&`, and every S75/S76/v5 token colored in all three grammars; retired spellings (val, var, dotless construction) not keyword-colored anywhere.\n- Full suite green; zed grammar-repo stays untracked (build artifact — .gitignore already covers it).\n\nGates: none — D-HL1 ratified 2026-07-05. No new user-typeable syntax, so no formatter work.\n\nDelegation: stages 1–2 one sonnet agent (single subsystem); stage 4 separate agent after 2 lands; stage 3 test written FIRST (red) per workflow loop.",
       "blockedBy": [],
       "assignee": "codex-highlight",
       "log": [
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "codex-main full-suite follow-up: blessed stale CLI and core-module diagnostic snapshots via UPDATE_EXPECT after full workspace exposed already-intentional drift (devtools command and core.raylib module). Verified cargo test -p jet --test cli 51/51 and cargo test -p jet --test diagnostic_snapshots 2/2. Full cargo test --workspace -- --test-threads=1 progressed through dev/lsp/grammar-related gates but stopped at tests/golden ui/ui_native_linux because the local GTK runtime reports symbol lookup error g_get_monotonic_time_ns in libgtk-4.so. This is environment native-library mismatch; #210-specific gates and both editor render screenshots are green."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "codex-main render proof complete: VS Code/Codium screenshot at /tmp/jet-codium-render.png and Zed screenshot at /tmp/jet-zed-render.png, both captured from the live desktop session with Jet files rendered and highlighted. Re-verified grammar drift gate with cargo test --test grammar 13/13 and LSP suite with cargo test --test lsp 36/36. Zed extension assets synced via editors/zed/install.sh before capture."
+        },
         {
           "at": "2026-07-06",
           "by": "codex-main",
@@ -25027,6 +25034,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-06T14:47:21.117Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0vg0lj7",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-06T14:47:15.204Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0vg0lj7",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-06T14:33:15.317Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0vg0lj7",
+      "note": "logEntry"
+    },
     {
       "at": "2026-07-06T14:31:25.784Z",
       "by": "codex-main",

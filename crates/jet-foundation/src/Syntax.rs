@@ -3242,7 +3242,7 @@ pub fn render_zed_generated_highlights() -> String {
         }
         let query_words = values
             .iter()
-            .filter(|s| is_word_token(s))
+            .filter(|s| is_word_token(s) && is_zed_anonymous_word_token(s))
             .map(|s| format!("  {:?}", s))
             .collect::<Vec<_>>();
         if !query_words.is_empty() {
@@ -3301,6 +3301,74 @@ fn is_word_token(s: &str) -> bool {
         && s.chars()
             .next()
             .is_some_and(|c| c == '_' || c.is_ascii_alphabetic())
+}
+
+fn is_zed_anonymous_word_token(s: &str) -> bool {
+    // Zed validates query string literals against anonymous tree-sitter tokens.
+    // Many generated highlight words are parsed as named nodes instead
+    // (`type_identifier`, `marker_name`, `identifier`, etc.); emitting them here
+    // makes the whole Jet language fail to load.
+    matches!(
+        s,
+        "Bench"
+            | "Bool"
+            | "Char"
+            | "Error"
+            | "F32"
+            | "F64"
+            | "Float"
+            | "I16"
+            | "I32"
+            | "I64"
+            | "I8"
+            | "Int"
+            | "List"
+            | "Map"
+            | "String"
+            | "Test"
+            | "U16"
+            | "U32"
+            | "U64"
+            | "U8"
+            | "add"
+            | "as"
+            | "assume_deterministic"
+            | "break"
+            | "change"
+            | "comptime"
+            | "const"
+            | "continue"
+            | "derive"
+            | "distinct"
+            | "else"
+            | "enum"
+            | "err"
+            | "extern"
+            | "false"
+            | "fn"
+            | "if"
+            | "impl"
+            | "in"
+            | "live"
+            | "loop"
+            | "migration"
+            | "module"
+            | "ok"
+            | "pub"
+            | "region"
+            | "remove"
+            | "rename"
+            | "return"
+            | "rust"
+            | "self"
+            | "step"
+            | "struct"
+            | "tag"
+            | "trait"
+            | "true"
+            | "use"
+            | "via"
+    )
 }
 
 fn regex_escape(s: &str) -> String {

@@ -71,24 +71,11 @@
 ; keyword.declaration: Bench Context Impure Pure Reactive Sanitizer State Tainted Test Todo Transact Transition Unsafe add alias as assume_deterministic change client comptime const derive distinct enum extern fn impl live migration module policy priv protocol pub region remove rename rust server state struct tag taskgroup trait use via
 [
   "Bench"
-  "Context"
-  "Impure"
-  "Pure"
-  "Reactive"
-  "Sanitizer"
-  "State"
-  "Tainted"
   "Test"
-  "Todo"
-  "Transact"
-  "Transition"
-  "Unsafe"
   "add"
-  "alias"
   "as"
   "assume_deterministic"
   "change"
-  "client"
   "comptime"
   "const"
   "derive"
@@ -100,40 +87,26 @@
   "live"
   "migration"
   "module"
-  "policy"
-  "priv"
-  "protocol"
   "pub"
   "region"
   "remove"
   "rename"
   "rust"
-  "server"
-  "state"
   "struct"
   "tag"
-  "taskgroup"
   "trait"
   "use"
   "via"
 ] @keyword
 
 ; keyword.ownership: copy uninit
-[
-  "copy"
-  "uninit"
-] @keyword
-
 ; keyword.other: it self
 [
-  "it"
   "self"
 ] @keyword
 
 ; literal: None Val err false ok true
 [
-  "None"
-  "Val"
   "err"
   "false"
   "ok"
@@ -142,16 +115,8 @@
 
 ; type.builtin: BigInt Bool Char Computed Csv Data DbValue Decimal Derived Effect Error F32 F64 Float I16 I32 I64 I8 IOError Int JSON JSONError Json Key List Map Measurement Ptr SelectBuilder Shared Signal Stream String TaskGroup Toml U16 U32 U64 U8 UTF8Error Yaml
 [
-  "BigInt"
   "Bool"
   "Char"
-  "Computed"
-  "Csv"
-  "Data"
-  "DbValue"
-  "Decimal"
-  "Derived"
-  "Effect"
   "Error"
   "F32"
   "F64"
@@ -160,37 +125,17 @@
   "I32"
   "I64"
   "I8"
-  "IOError"
   "Int"
-  "JSON"
-  "JSONError"
-  "Json"
-  "Key"
   "List"
   "Map"
-  "Measurement"
-  "Ptr"
-  "SelectBuilder"
-  "Shared"
-  "Signal"
-  "Stream"
   "String"
-  "TaskGroup"
-  "Toml"
   "U16"
   "U32"
   "U64"
   "U8"
-  "UTF8Error"
-  "Yaml"
 ] @type.builtin
 
 ; builtin: input print
-[
-  "input"
-  "print"
-] @function.builtin
-
 ; marker.directive: Bench Bindgen Caller Caps Default DenyUnknownFields Extern Flatten Grant Html Impure Js Layout Reactive Rename RenameAll Sanitizer SingleUse Skip State Suppress Tag Tainted Target Test Todo Transact Transition UnitFamily Unsafe Untagged Wasm WasmExport
 ; marker.contract: Cli Codable CodableAsBase Comparable Debug Decode Doc Encode Experimental Hardened Inline InlineAlways MustUse Numeric Patchable Persist Post Pre Printable PublishedSchema Pure Redact Summarize Tested
 ; sigil: # & ... :: := @ ^

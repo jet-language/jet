@@ -112,10 +112,84 @@ fn syntax_keyword_list_tokens_are_classified_for_highlighting() {
     }
 }
 
+#[test]
+fn zed_highlight_query_mentions_only_grammar_literals() {
+    let anonymous = extract_anonymous_node_types("editors/tree-sitter/src/node-types.json");
+    let query = fs::read_to_string("editors/zed/languages/jet/highlights.scm")
+        .expect("read zed highlights query");
+    let mut bad = Vec::new();
+
+    for token in extract_zed_query_string_literals(&query) {
+        if !anonymous.contains(&token) {
+            bad.push(token);
+        }
+    }
+
+    bad.sort();
+    bad.dedup();
+    assert!(
+        bad.is_empty(),
+        "Zed rejects query strings that are not anonymous grammar literals: {bad:?}"
+    );
+}
+
 fn section_has_token(section: &str, token: &str) -> bool {
     let escaped = regex_escape(token);
     let json_escaped = escaped.replace('\\', "\\\\");
     section.contains(token) || section.contains(&escaped) || section.contains(&json_escaped)
+}
+
+fn extract_anonymous_node_types(path: &str) -> BTreeSet<String> {
+    let text = fs::read_to_string(path).unwrap_or_else(|e| panic!("{path}: {e}"));
+    let mut out = BTreeSet::new();
+    let mut current_type: Option<String> = None;
+    let mut current_named: Option<bool> = None;
+
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if line.starts_with("  {") {
+            current_type = None;
+            current_named = None;
+        } else if trimmed.starts_with("\"type\":") && current_type.is_none() {
+            current_type = json_field_string_value(trimmed).map(str::to_string);
+        } else if trimmed.starts_with("\"named\":") && current_named.is_none() {
+            current_named = Some(trimmed.contains("true"));
+        } else if line.starts_with("  }") {
+            if current_named == Some(false) {
+                if let Some(t) = current_type.take() {
+                    out.insert(t);
+                }
+            }
+        }
+    }
+
+    out
+}
+
+fn extract_zed_query_string_literals(query: &str) -> Vec<String> {
+    query
+        .lines()
+        .filter_map(|line| {
+            let trimmed = line.trim();
+            if trimmed.starts_with('"') {
+                json_string_value(trimmed).map(str::to_string)
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn json_string_value(line: &str) -> Option<&str> {
+    let first = line.find('"')?;
+    let rest = &line[first + 1..];
+    let second = rest.find('"')?;
+    Some(&rest[..second])
+}
+
+fn json_field_string_value(line: &str) -> Option<&str> {
+    let colon = line.find(':')?;
+    json_string_value(line[colon + 1..].trim())
 }
 
 fn regex_escape(s: &str) -> String {
