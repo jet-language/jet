@@ -283,6 +283,9 @@ fn handle_request(
         "textDocument/prepareCallHierarchy" => prepare_call_hierarchy_response(server, params, id),
         "callHierarchy/incomingCalls" => call_hierarchy_incoming_response(server, params, id),
         "callHierarchy/outgoingCalls" => call_hierarchy_outgoing_response(server, params, id),
+        "textDocument/prepareTypeHierarchy" => prepare_type_hierarchy_response(server, params, id),
+        "typeHierarchy/supertypes" => type_hierarchy_supertypes_response(server, params, id),
+        "typeHierarchy/subtypes" => type_hierarchy_subtypes_response(server, params, id),
         "workspace/executeCommand" => execute_command_response(server, params, id),
         _ => Some(response(id, "null")),
     };
@@ -381,6 +384,7 @@ fn initialize_response(id: &JsonValue) -> String {
     },
     "inlayHintProvider": true,
     "callHierarchyProvider": true,
+    "typeHierarchyProvider": true,
     "executeCommandProvider": {
       "commands": ["jet.impact"]
     }
@@ -1057,6 +1061,90 @@ fn call_hierarchy_outgoing_response(
     Some(response(id, &format!("[{}]", out)))
 }
 
+fn prepare_type_hierarchy_response(
+    server: &Server,
+    params: Option<&JsonValue>,
+    id: &JsonValue,
+) -> Option<String> {
+    let params = params?;
+    let td = json_get(params, "textDocument")?;
+    let uri = json_get(td, "uri").and_then(json_str)?;
+    let doc = server.docs.get(uri)?;
+    let pos = json_get(params, "position")?;
+    let line = json_int(json_get(pos, "line")?)? as u32;
+    let character = json_int(json_get(pos, "character")?)? as u32;
+    let offset = lsp_pos_to_offset(&doc.text, LspPos { line, character });
+
+    let checked = server.check_with_bundle(doc);
+    let db = match checked.bundle {
+        Some(b) => build_symbol_db(&b, &checked.facts),
+        None => SymbolDB::new(),
+    };
+    let item = db
+        .defs
+        .iter()
+        .find(|def| {
+            def.module_path == doc.path
+                && def.def_span.start <= offset
+                && offset <= def.def_span.end
+        })
+        .and_then(|def| type_hierarchy_item_json(def, &doc.text));
+    match item {
+        Some(item) => Some(response(id, &format!("[{}]", item))),
+        None => Some(response(id, "null")),
+    }
+}
+
+fn type_hierarchy_supertypes_response(
+    server: &Server,
+    params: Option<&JsonValue>,
+    id: &JsonValue,
+) -> Option<String> {
+    let (uri, name) = type_hierarchy_item_params(params)?;
+    let doc = server.docs.get(uri)?;
+    let checked = server.check_with_bundle(doc);
+    let bundle = checked.bundle?;
+    let db = build_symbol_db(&bundle, &checked.facts);
+    let mut out = Vec::new();
+    for trait_name in type_hierarchy_trait_impls(&bundle, name) {
+        if let Some(def) = db
+            .defs
+            .iter()
+            .find(|def| def.name == trait_name && matches!(def.kind, SymKind::Trait | SymKind::Tag))
+        {
+            let src = module_source(&bundle, &def.module_path).unwrap_or(&doc.text);
+            if let Some(item) = type_hierarchy_item_json(def, src) {
+                out.push(item);
+            }
+        }
+    }
+    Some(response(id, &format!("[{}]", out.join(","))))
+}
+
+fn type_hierarchy_subtypes_response(
+    server: &Server,
+    params: Option<&JsonValue>,
+    id: &JsonValue,
+) -> Option<String> {
+    let (uri, name) = type_hierarchy_item_params(params)?;
+    let doc = server.docs.get(uri)?;
+    let checked = server.check_with_bundle(doc);
+    let bundle = checked.bundle?;
+    let db = build_symbol_db(&bundle, &checked.facts);
+    let mut out = Vec::new();
+    for subtype in type_hierarchy_subtype_names(&bundle, name) {
+        if let Some(def) = db.defs.iter().find(|def| {
+            def.name == subtype && matches!(def.kind, SymKind::Struct { .. } | SymKind::Enum { .. })
+        }) {
+            let src = module_source(&bundle, &def.module_path).unwrap_or(&doc.text);
+            if let Some(item) = type_hierarchy_item_json(def, src) {
+                out.push(item);
+            }
+        }
+    }
+    Some(response(id, &format!("[{}]", out.join(","))))
+}
+
 fn hover_response(server: &Server, params: Option<&JsonValue>, id: &JsonValue) -> Option<String> {
     let params = params?;
     let td = json_get(params, "textDocument")?;
@@ -1547,6 +1635,84 @@ fn call_hierarchy_item_json(def: &jet_semindex::SymDef, src: &str) -> Option<Str
         range,
         range
     ))
+}
+
+fn type_hierarchy_item_json(def: &jet_semindex::SymDef, src: &str) -> Option<String> {
+    let kind = match def.kind {
+        SymKind::Struct { .. } => 23,
+        SymKind::Enum { .. } => 10,
+        SymKind::Trait | SymKind::Tag => 11,
+        _ => return None,
+    };
+    let uri = path_to_uri(&def.module_path);
+    let range = range_json(byte_span_to_range(src, def.def_span));
+    Some(format!(
+        r#"{{"name":"{}","kind":{},"uri":"{}","range":{},"selectionRange":{}}}"#,
+        json_escape(&def.name),
+        kind,
+        json_escape(&uri),
+        range,
+        range
+    ))
+}
+
+fn type_hierarchy_item_params(params: Option<&JsonValue>) -> Option<(&str, &str)> {
+    let item = json_get(params?, "item")?;
+    let uri = json_get(item, "uri").and_then(json_str)?;
+    let name = json_get(item, "name").and_then(json_str)?;
+    Some((uri, name))
+}
+
+fn module_source<'a>(bundle: &'a ProgramBundle, path: &str) -> Option<&'a str> {
+    bundle
+        .modules
+        .iter()
+        .find(|module| module.display == path)
+        .map(|module| module.source.as_str())
+}
+
+fn type_hierarchy_trait_impls(bundle: &ProgramBundle, type_name: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for module in &bundle.modules {
+        for item in &module.items {
+            match item {
+                crate::AST::Item::Struct(s) if s.name == type_name => {
+                    out.extend(s.trait_impls.iter().map(|tb| tb.trait_name.clone()));
+                }
+                crate::AST::Item::Enum(e) if e.name == type_name => {
+                    out.extend(e.trait_impls.iter().map(|tb| tb.trait_name.clone()));
+                }
+                _ => {}
+            }
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
+fn type_hierarchy_subtype_names(bundle: &ProgramBundle, trait_name: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for module in &bundle.modules {
+        for item in &module.items {
+            match item {
+                crate::AST::Item::Struct(s)
+                    if s.trait_impls.iter().any(|tb| tb.trait_name == trait_name) =>
+                {
+                    out.push(s.name.clone());
+                }
+                crate::AST::Item::Enum(e)
+                    if e.trait_impls.iter().any(|tb| tb.trait_name == trait_name) =>
+                {
+                    out.push(e.name.clone());
+                }
+                _ => {}
+            }
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
 }
 
 fn short_symbol_name(name: &str) -> &str {

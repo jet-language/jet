@@ -3,7 +3,7 @@
 Extension id: **`jet-lang.jet`** (publisher `jet-lang`, name `jet`).
 Generated TextMate syntax highlighting + LSP: diagnostics, quick-fixes,
 formatting, semantic tokens (full/range/delta), inlay hints, navigation,
-rename, and call hierarchy.
+rename, call hierarchy, and type hierarchy.
 
 ## Setup
 

@@ -185,6 +185,9 @@ pub(super) struct Interp<'a> {
     /// (registered as `(module_alias, fn_name)`). `eval_method` consults this
     /// before falling back to the built-in `apply_method` dispatch.
     pub(super) methods: &'a HashMap<(String, String), &'a Func>,
+    /// c139/D-DISPLAYDBG: struct definitions by Jet type name, used only to
+    /// mirror codegen's `JetDebug` field order and `@[Redact]` handling.
+    pub(super) structs: &'a HashMap<String, &'a crate::AST::StructDef>,
     /// c139: `(TypeName, field) -> expr` for D-FIELDPOL1 computed fields
     /// (`name: T => expr`). Sema has already rewritten sibling names to
     /// `self.<field>` inside `expr`, so evaluating it just needs `self` bound
@@ -840,7 +843,7 @@ impl<'a> Interp<'a> {
                                 // `{value@Debug}` always uses the built-in
                                 // (auto-derived-Debug-shaped) rendering, never
                                 // a user `Display` impl.
-                                StrFormat::Debug => s.push_str(&v.jet_show()),
+                                StrFormat::Debug => s.push_str(&self.debug_value(&v)),
                             }
                         }
                     }

@@ -327,7 +327,11 @@ fn jetpack_missing_build_log_golden() {
         .env("JETPACK_ROOT", &root)
         .output()
         .unwrap();
-    assert_eq!(out.status.code(), Some(2), "missing log is usage-class error");
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "missing log is usage-class error"
+    );
     let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
     check_snapshot("e1274_missing_build_log.txt", &stderr);
 }

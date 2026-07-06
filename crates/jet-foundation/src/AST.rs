@@ -3229,7 +3229,7 @@ impl CtValue {
     /// program's derived `Debug` impl would (I2). Distinct from `jet_show`,
     /// which is the user-facing `Display`-style rendering `print` uses at the
     /// top level (e.g. an unquoted string).
-    fn debug_rust(&self) -> String {
+    pub fn debug_rust(&self) -> String {
         match self {
             CtValue::Int(n) => n.to_string(),
             CtValue::Float(f) => format!("{:?}", f),

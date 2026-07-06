@@ -4087,7 +4087,10 @@ fn core_call_args_in_subset(
     if module == "core.http.server" && method == "serve" && args.len() == 3 {
         return args.iter().enumerate().all(|(idx, a)| {
             let label_ok = if idx == 2 {
-                matches!(a.label.as_ref().map(|(label, _)| label.as_str()), Some("tls"))
+                matches!(
+                    a.label.as_ref().map(|(label, _)| label.as_str()),
+                    Some("tls")
+                )
             } else {
                 a.label.is_none()
             };

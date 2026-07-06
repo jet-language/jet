@@ -183,6 +183,7 @@ const LSP_CAPABILITY_COVERAGE: &[(&str, &str)] = &[
         "callHierarchyProvider",
         "lsp_wave3_prepare_rename_semantic_range_and_call_hierarchy",
     ),
+    ("typeHierarchyProvider", "lsp_type_hierarchy_trait_impls"),
     (
         "executeCommandProvider",
         "lsp_execute_command_impact_returns_report",
@@ -1525,6 +1526,72 @@ fn lsp_wave3_prepare_rename_semantic_range_and_call_hierarchy() {
                     "\"to\"".to_string(),
                     "\"name\":\"add\"".to_string(),
                     "\"fromRanges\"".to_string(),
+                ]),
+            },
+            TranscriptStep::Send {
+                msg: r#"{"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}}"#.to_string(),
+                expect_contains: Some(vec!["result".to_string()]),
+            },
+        ],
+    );
+}
+
+#[test]
+fn lsp_type_hierarchy_trait_impls() {
+    let jet = jet_bin();
+    if !jet.exists() {
+        return;
+    }
+    let source = "trait Renderable {\n    fn render(self) -> String\n}\n\nstruct Button {\n    label: String\n    impl Renderable {\n        fn render(self) -> String {\n            return self.label\n        }\n    }\n}\n\nfn run() {\n    b :: Button.{label: \"ok\"}\n    print(b.render())\n}\n";
+    let uri = "file:///tmp/lsp_type_hierarchy_test.jet";
+    let button_item = format!(r#"{{"name":"Button","kind":23,"uri":"{}"}}"#, uri);
+    let trait_item = format!(r#"{{"name":"Renderable","kind":11,"uri":"{}"}}"#, uri);
+
+    run_transcript(
+        source,
+        &[
+            TranscriptStep::Send {
+                msg:
+                    r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#
+                        .to_string(),
+                expect_contains: Some(vec!["\"typeHierarchyProvider\": true".to_string()]),
+            },
+            TranscriptStep::Send {
+                msg: r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#.to_string(),
+                expect_contains: None,
+            },
+            TranscriptStep::Open {
+                uri: uri.to_string(),
+                expect_notification: true,
+            },
+            TranscriptStep::Send {
+                msg: format!(
+                    r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/prepareTypeHierarchy","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":4,"character":7}}}}}}"#,
+                    uri
+                ),
+                expect_contains: Some(vec![
+                    "\"name\":\"Button\"".to_string(),
+                    "\"kind\":23".to_string(),
+                ]),
+            },
+            TranscriptStep::Send {
+                msg: format!(
+                    r#"{{"jsonrpc":"2.0","id":3,"method":"typeHierarchy/supertypes","params":{{"item":{}}}}}"#,
+                    button_item
+                ),
+                expect_contains: Some(vec![
+                    "\"name\":\"Renderable\"".to_string(),
+                    "\"kind\":11".to_string(),
+                ]),
+            },
+            TranscriptStep::Send {
+                msg: format!(
+                    r#"{{"jsonrpc":"2.0","id":4,"method":"typeHierarchy/subtypes","params":{{"item":{}}}}}"#,
+                    trait_item
+                ),
+                expect_contains: Some(vec![
+                    "\"name\":\"Button\"".to_string(),
+                    "\"kind\":23".to_string(),
                 ]),
             },
             TranscriptStep::Send {

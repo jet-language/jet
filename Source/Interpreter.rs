@@ -185,14 +185,6 @@ fn boundary_scan(bundle: &ProgramBundle) -> Option<Boundary> {
                     if let Some(b) = scan_stmts_for_mut_arg(&f.body) {
                         return Some(b);
                     }
-                    // c77 (Q2 hard rule): interpolating a whole struct/enum
-                    // value (`"{g}"`) formats via Rust's derived `Debug` in the
-                    // compiled build, which the interpreter's value printer does
-                    // not reproduce byte-for-byte. Stop at the boundary rather
-                    // than diverge.
-                    if let Some(b) = scan_stmts_for_struct_interp(&f.body) {
-                        return Some(b);
-                    }
                 }
                 _ => {}
             }
@@ -389,153 +381,6 @@ fn expr_mut_arg(e: &Expr) -> Option<Boundary> {
     }
 }
 
-/// c77: flag a function body that interpolates a whole struct/enum value
-/// (`"{g}"` where `g` was bound to a `Type { … }`/`Type.Variant(…)` literal).
-/// Tracks locals bound to struct/enum literals as it walks, then flags an
-/// interpolation of such a local.
-fn scan_stmts_for_struct_interp(stmts: &[Stmt]) -> Option<Boundary> {
-    let mut struct_locals: std::collections::HashSet<String> = std::collections::HashSet::new();
-    scan_block_for_struct_interp(stmts, &mut struct_locals)
-}
-
-fn scan_block_for_struct_interp(
-    stmts: &[Stmt],
-    locals: &mut std::collections::HashSet<String>,
-) -> Option<Boundary> {
-    for s in stmts {
-        match s {
-            Stmt::Val(b) => {
-                if let Some(found) = expr_struct_interp(&b.init, locals) {
-                    return Some(found);
-                }
-                if !b.name.is_empty() && expr_is_struct_or_enum_lit(&b.init) {
-                    locals.insert(b.name.clone());
-                }
-            }
-            Stmt::Expr(e) => {
-                if let Some(found) = expr_struct_interp(e, locals) {
-                    return Some(found);
-                }
-            }
-            Stmt::Assign { value, .. } => {
-                if let Some(found) = expr_struct_interp(value, locals) {
-                    return Some(found);
-                }
-            }
-            Stmt::Return(Some(e), _) => {
-                if let Some(found) = expr_struct_interp(e, locals) {
-                    return Some(found);
-                }
-            }
-            Stmt::If(ifs) => {
-                if let Some(found) = scan_if_for_struct_interp(ifs, locals) {
-                    return Some(found);
-                }
-            }
-            Stmt::While { body, .. }
-            | Stmt::Loop { body, .. }
-            | Stmt::For { body, .. }
-            | Stmt::CountedLoop { body, .. } => {
-                if let Some(found) = scan_block_for_struct_interp(body, locals) {
-                    return Some(found);
-                }
-            }
-            Stmt::Switch {
-                arms, else_body, ..
-            } => {
-                for a in arms {
-                    if let Some(found) = scan_block_for_struct_interp(&a.body, locals) {
-                        return Some(found);
-                    }
-                }
-                if let Some(b) = else_body {
-                    if let Some(found) = scan_block_for_struct_interp(b, locals) {
-                        return Some(found);
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-    None
-}
-
-fn scan_if_for_struct_interp(
-    ifs: &crate::AST::IfStmt,
-    locals: &mut std::collections::HashSet<String>,
-) -> Option<Boundary> {
-    if let Some(b) = expr_struct_interp(&ifs.cond, locals) {
-        return Some(b);
-    }
-    if let Some(b) = scan_block_for_struct_interp(&ifs.then_body, locals) {
-        return Some(b);
-    }
-    match &ifs.else_branch {
-        Some(crate::AST::ElseBranch::ElseIf(inner)) => scan_if_for_struct_interp(inner, locals),
-        Some(crate::AST::ElseBranch::Else(body)) => scan_block_for_struct_interp(body, locals),
-        None => None,
-    }
-}
-
-fn expr_is_struct_or_enum_lit(e: &Expr) -> bool {
-    matches!(
-        e,
-        Expr::StructLit { .. } | Expr::EnumLit { .. } | Expr::TupleLit(..)
-    )
-}
-
-/// Find a `"{local}"` interpolation of a known struct/enum local anywhere in
-/// `e` (recurses into calls, operators, and nested string parts).
-fn expr_struct_interp(e: &Expr, locals: &std::collections::HashSet<String>) -> Option<Boundary> {
-    match e {
-        Expr::Str(parts, span) => {
-            for p in parts {
-                if let crate::AST::StrPart::Interp(inner, _) = p {
-                    if let Expr::Ident(name, _) = inner.as_ref() {
-                        if locals.contains(name) {
-                            return Some(Boundary {
-                                feature: "prints a whole struct or enum value via `{…}` interpolation (its format isn't interpreted yet)".to_string(),
-                                span: Some(*span),
-                            });
-                        }
-                    }
-                    if let Some(b) = expr_struct_interp(inner, locals) {
-                        return Some(b);
-                    }
-                }
-            }
-            None
-        }
-        Expr::Call(c) => c
-            .args
-            .iter()
-            .find_map(|a| expr_struct_interp(&a.expr, locals)),
-        Expr::MethodCall { receiver, args, .. } => {
-            expr_struct_interp(receiver, locals).or_else(|| {
-                args.iter()
-                    .find_map(|a| expr_struct_interp(&a.expr, locals))
-            })
-        }
-        Expr::CallValue { callee, args, .. } => expr_struct_interp(callee, locals).or_else(|| {
-            args.iter()
-                .find_map(|a| expr_struct_interp(&a.expr, locals))
-        }),
-        Expr::Unary(_, inner, _)
-        | Expr::IncDec { operand: inner, .. }
-        | Expr::Deref(inner, _)
-        | Expr::RawOf(inner, _)
-        | Expr::Copy(inner, _)
-        | Expr::Field(inner, _, _) => expr_struct_interp(inner, locals),
-        Expr::Binary(_, l, r, _) => {
-            expr_struct_interp(l, locals).or_else(|| expr_struct_interp(r, locals))
-        }
-        Expr::Index { base, index, .. } => {
-            expr_struct_interp(base, locals).or_else(|| expr_struct_interp(index, locals))
-        }
-        _ => None,
-    }
-}
-
 /// Collect every top-level function across all modules into the flat name→func
 /// map the comptime evaluator expects. (Module-qualified user functions aren't
 /// dev-interpreted yet; they surface as E0956 if called.)
@@ -665,6 +510,7 @@ fn walk_items_for_interp<'a>(
                 }
             }
             Item::Struct(s) => {
+                info.structs.entry(s.name.clone()).or_insert(s);
                 for m in &s.methods {
                     info.methods
                         .entry((s.name.clone(), m.name.clone()))

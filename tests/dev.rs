@@ -454,6 +454,18 @@ fn scheduler_spawn_runs_via_jit() {
     assert_eq!(got.trim(), "1000");
 }
 
+#[test]
+fn dev_default_interprets_display_debug_interpolation() {
+    let file = "examples/features/types/display_debug.jet";
+    let got = match dev_iteration(file, false, false) {
+        RunOutcome::Ran { stdout, .. } => stdout,
+        RunOutcome::Problems(ds) => {
+            panic!("display/debug interpolation should run in default dev, got: {ds:?}")
+        }
+    };
+    assert_eq!(got, golden_stdout("types/display_debug"));
+}
+
 /// D-DEV1 "try anyway": the opt-in flag skips the boundary scan and attempts
 /// execution. For a task program it then fails honestly at whatever
 /// unsupported construct it actually hits during interpretation, rather than
@@ -739,6 +751,43 @@ fn jit_covers_named_tuples() {
     assert!(
         jet_jit::jit_covers_bundle(&bundle),
         "named tuple literal/access/equality/destructure should stay JIT-covered: {}",
+        jet_jit::jit_covers_bundle_detail(&bundle)
+    );
+}
+
+#[test]
+fn jit_covers_chained_comparison() {
+    let file = "examples/features/operators/chained_comparison.jet";
+    let mut bundle = jet::Loader::load_entry(file).expect("load");
+    let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let errors: Vec<_> = diags
+        .into_iter()
+        .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+        .collect();
+    assert!(
+        errors.is_empty(),
+        "chained comparison example must type-check"
+    );
+    assert!(
+        jet_jit::jit_covers_bundle(&bundle),
+        "same-direction chained comparisons should stay JIT-covered: {}",
+        jet_jit::jit_covers_bundle_detail(&bundle)
+    );
+}
+
+#[test]
+fn jit_covers_string_method_chain() {
+    let file = "examples/features/basics/method_chain.jet";
+    let mut bundle = jet::Loader::load_entry(file).expect("load");
+    let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let errors: Vec<_> = diags
+        .into_iter()
+        .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+        .collect();
+    assert!(errors.is_empty(), "method-chain example must type-check");
+    assert!(
+        jet_jit::jit_covers_bundle(&bundle),
+        "pure string method chains should stay JIT-covered: {}",
         jet_jit::jit_covers_bundle_detail(&bundle)
     );
 }

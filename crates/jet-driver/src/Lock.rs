@@ -223,10 +223,7 @@ pub fn write(lock: &LockFile) -> String {
         out.push('\n');
         out.push_str("[[source_channel]]\n");
         out.push_str(&format!("name = \"{}\"\n", escape_str(&source.name)));
-        out.push_str(&format!(
-            "channel = \"{}\"\n",
-            escape_str(&source.channel)
-        ));
+        out.push_str(&format!("channel = \"{}\"\n", escape_str(&source.channel)));
         out.push_str(&format!("exact = \"{}\"\n", escape_str(&source.exact)));
     }
 

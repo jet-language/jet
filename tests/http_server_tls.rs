@@ -83,8 +83,7 @@ fn run() {
 }
 "#;
 
-    let err = jet::compile(src)
-        .expect_err("unlabeled third server argument should be rejected");
+    let err = jet::compile(src).expect_err("unlabeled third server argument should be rejected");
     let rendered = jet::render_diagnostics("tests/http_server_tls/bad_label.jet", src, &err);
     assert!(rendered.contains("Error [E0125]"), "{rendered}");
     assert!(

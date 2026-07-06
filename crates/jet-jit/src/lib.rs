@@ -275,6 +275,69 @@ extern "C" fn jet_jit_str_eq(a: i64, b: i64) -> i8 {
     })
 }
 
+extern "C" fn jet_jit_str_len(id: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.strings
+            .get(id as usize)
+            .map(|s| s.chars().count() as i64)
+            .unwrap_or(0)
+    })
+}
+
+extern "C" fn jet_jit_str_trim(id: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let text = rt
+            .strings
+            .get(id as usize)
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default();
+        let out = rt.strings.len() as i64;
+        rt.strings.push(text);
+        out
+    })
+}
+
+extern "C" fn jet_jit_str_to_upper(id: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let text = rt
+            .strings
+            .get(id as usize)
+            .map(|s| s.to_uppercase())
+            .unwrap_or_default();
+        let out = rt.strings.len() as i64;
+        rt.strings.push(text);
+        out
+    })
+}
+
+extern "C" fn jet_jit_str_to_lower(id: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let text = rt
+            .strings
+            .get(id as usize)
+            .map(|s| s.to_lowercase())
+            .unwrap_or_default();
+        let out = rt.strings.len() as i64;
+        rt.strings.push(text);
+        out
+    })
+}
+
+extern "C" fn jet_jit_str_replace(id: i64, from_id: i64, to_id: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let text = rt.strings.get(id as usize).cloned().unwrap_or_default();
+        let from = rt
+            .strings
+            .get(from_id as usize)
+            .cloned()
+            .unwrap_or_default();
+        let to = rt.strings.get(to_id as usize).cloned().unwrap_or_default();
+        let out = rt.strings.len() as i64;
+        rt.strings.push(text.replace(&from, &to));
+        out
+    })
+}
+
 extern "C" fn jet_jit_struct_new_f64(n: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let id = rt.structs_f64.len() as i64;
@@ -320,6 +383,11 @@ struct HostFns {
     str_push_char: FuncId,
     str_push_str: FuncId,
     str_eq: FuncId,
+    str_len: FuncId,
+    str_trim: FuncId,
+    str_to_upper: FuncId,
+    str_to_lower: FuncId,
+    str_replace: FuncId,
     struct_new_f64: FuncId,
     struct_get_f64: FuncId,
     struct_set_f64: FuncId,
@@ -348,6 +416,11 @@ fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     builder.symbol("jet_jit_str_push_char", jet_jit_str_push_char as *const u8);
     builder.symbol("jet_jit_str_push_str", jet_jit_str_push_str as *const u8);
     builder.symbol("jet_jit_str_eq", jet_jit_str_eq as *const u8);
+    builder.symbol("jet_jit_str_len", jet_jit_str_len as *const u8);
+    builder.symbol("jet_jit_str_trim", jet_jit_str_trim as *const u8);
+    builder.symbol("jet_jit_str_to_upper", jet_jit_str_to_upper as *const u8);
+    builder.symbol("jet_jit_str_to_lower", jet_jit_str_to_lower as *const u8);
+    builder.symbol("jet_jit_str_replace", jet_jit_str_replace as *const u8);
     builder.symbol(
         "jet_jit_struct_new_f64",
         jet_jit_struct_new_f64 as *const u8,
@@ -409,6 +482,14 @@ fn declare_host_fns(
     sig_str_eq.params.push(AbiParam::new(types::I64));
     sig_str_eq.params.push(AbiParam::new(types::I64));
     sig_str_eq.returns.push(AbiParam::new(types::I8));
+    let mut sig_str_unary_i64 = Signature::new(cc);
+    sig_str_unary_i64.params.push(AbiParam::new(types::I64));
+    sig_str_unary_i64.returns.push(AbiParam::new(types::I64));
+    let mut sig_str_replace = Signature::new(cc);
+    sig_str_replace.params.push(AbiParam::new(types::I64));
+    sig_str_replace.params.push(AbiParam::new(types::I64));
+    sig_str_replace.params.push(AbiParam::new(types::I64));
+    sig_str_replace.returns.push(AbiParam::new(types::I64));
     let mut sig_str_begin = Signature::new(cc);
     sig_str_begin.returns.push(AbiParam::new(types::I64));
     let mut sig_struct_new = Signature::new(cc);
@@ -449,6 +530,11 @@ fn declare_host_fns(
         str_push_char: import("jet_jit_str_push_char", &sig_str_push_char)?,
         str_push_str: import("jet_jit_str_push_str", &sig_str_push_lit)?,
         str_eq: import("jet_jit_str_eq", &sig_str_eq)?,
+        str_len: import("jet_jit_str_len", &sig_str_unary_i64)?,
+        str_trim: import("jet_jit_str_trim", &sig_str_unary_i64)?,
+        str_to_upper: import("jet_jit_str_to_upper", &sig_str_unary_i64)?,
+        str_to_lower: import("jet_jit_str_to_lower", &sig_str_unary_i64)?,
+        str_replace: import("jet_jit_str_replace", &sig_str_replace)?,
         struct_new_f64: import("jet_jit_struct_new_f64", &sig_struct_new)?,
         struct_get_f64: import("jet_jit_struct_get_f64", &sig_struct_get)?,
         struct_set_f64: import("jet_jit_struct_set_f64", &sig_struct_set)?,
@@ -683,6 +769,15 @@ fn jit_covers_expr(expr: &TExpr, callees: &HashSet<String>) -> bool {
             }
             jit_covers_expr(lhs, callees) && jit_covers_expr(rhs, callees)
         }
+        TExprKind::CompareChain { operands, ops } => {
+            operands.len() == ops.len() + 1
+                && operands.iter().all(|e| {
+                    matches!(&e.ty, Type::Int | Type::Float) && jit_covers_expr(e, callees)
+                })
+                && ops
+                    .iter()
+                    .all(|op| matches!(op, BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge))
+        }
         TExprKind::IfExpr {
             cond,
             then_body,
@@ -760,6 +855,17 @@ fn jit_covers_builtin_op(
         return false;
     }
     match op {
+        TBuiltinOp::LenString => matches!(&recv.ty, Type::String) && args.is_empty(),
+        TBuiltinOp::Trim | TBuiltinOp::ToUpper | TBuiltinOp::ToLower => {
+            matches!(&recv.ty, Type::String) && args.is_empty()
+        }
+        TBuiltinOp::Replace => {
+            matches!(&recv.ty, Type::String)
+                && args.len() == 2
+                && args
+                    .iter()
+                    .all(|a| matches!(&a.ty, Type::String) && jit_covers_expr(a, callees))
+        }
         TBuiltinOp::Push => {
             jit_list_int_type(&recv.ty)
                 && args.len() == 1
@@ -2149,6 +2255,7 @@ impl LowerCtx<'_, '_> {
                 }
                 self.lower_binary(*op, *overflow, *line, lhs, rhs)
             }
+            TExprKind::CompareChain { operands, ops } => self.lower_compare_chain(operands, ops),
             TExprKind::Call { name, args } => {
                 let func_id = self
                     .func_ids
@@ -2482,6 +2589,43 @@ impl LowerCtx<'_, '_> {
     ) -> Result<Value, String> {
         let recv_val = self.lower_expr(recv)?;
         match op {
+            TBuiltinOp::LenString => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.str_len, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            TBuiltinOp::Trim => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.str_trim, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            TBuiltinOp::ToUpper => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.str_to_upper, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            TBuiltinOp::ToLower => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.str_to_lower, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            TBuiltinOp::Replace => {
+                let from = self.lower_expr(&args[0])?;
+                let to = self.lower_expr(&args[1])?;
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.str_replace, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val, from, to]);
+                Ok(self.b.inst_results(call)[0])
+            }
             TBuiltinOp::Push => {
                 let v = self.lower_expr(&args[0])?;
                 let host_ref = self
@@ -2698,6 +2842,51 @@ impl LowerCtx<'_, '_> {
         self.b.switch_to_block(merge_block);
         self.b.seal_block(merge_block);
         Ok(self.b.block_params(merge_block)[0])
+    }
+
+    fn lower_compare_chain(&mut self, operands: &[TExpr], ops: &[BinOp]) -> Result<Value, String> {
+        if operands.len() != ops.len() + 1 {
+            return Err("jit compare chain arity mismatch".to_string());
+        }
+        let vals: Result<Vec<_>, _> = operands.iter().map(|e| self.lower_expr(e)).collect();
+        let vals = vals?;
+        let mut acc = self.b.ins().iconst(types::I8, 1);
+        for (i, op) in ops.iter().enumerate() {
+            let lhs_ty = self.expr_arith_type(&operands[i]);
+            let rhs_ty = self.expr_arith_type(&operands[i + 1]);
+            if lhs_ty != rhs_ty {
+                return Err("jit compare chain mixed operand types".to_string());
+            }
+            let cmp = match (&lhs_ty, op) {
+                (Type::Int, BinOp::Lt) => {
+                    self.bool_from_icmp(IntCC::SignedLessThan, vals[i], vals[i + 1])
+                }
+                (Type::Int, BinOp::Gt) => {
+                    self.bool_from_icmp(IntCC::SignedGreaterThan, vals[i], vals[i + 1])
+                }
+                (Type::Int, BinOp::Le) => {
+                    self.bool_from_icmp(IntCC::SignedLessThanOrEqual, vals[i], vals[i + 1])
+                }
+                (Type::Int, BinOp::Ge) => {
+                    self.bool_from_icmp(IntCC::SignedGreaterThanOrEqual, vals[i], vals[i + 1])
+                }
+                (Type::Float, BinOp::Lt) => {
+                    self.bool_from_fcmp(FloatCC::LessThan, vals[i], vals[i + 1])
+                }
+                (Type::Float, BinOp::Gt) => {
+                    self.bool_from_fcmp(FloatCC::GreaterThan, vals[i], vals[i + 1])
+                }
+                (Type::Float, BinOp::Le) => {
+                    self.bool_from_fcmp(FloatCC::LessThanOrEqual, vals[i], vals[i + 1])
+                }
+                (Type::Float, BinOp::Ge) => {
+                    self.bool_from_fcmp(FloatCC::GreaterThanOrEqual, vals[i], vals[i + 1])
+                }
+                _ => return Err("jit compare chain operator unsupported".to_string()),
+            };
+            acc = self.b.ins().band(acc, cmp);
+        }
+        Ok(acc)
     }
 
     fn lower_incdec(

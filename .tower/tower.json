@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 219,
-    "rev": 277,
+    "rev": 285,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -5592,7 +5592,7 @@
     },
     {
       "milestoneId": null,
-      "assignee": "claude-main",
+      "assignee": "codex-main",
       "id": "c2hizkhl",
       "num": 125,
       "title": "JIT tier-1a: Cranelift JIT (dev-loop hot-reload) — c139",
@@ -5606,6 +5606,26 @@
       "plan": "jit-cranelift — M4 functional parity with AOT: (1) wire `dev_iteration` through CraneliftBackend by default (D-JIT2; done 2026-06-30); (2) expand CLIF lowering + host runtime for tasks/channels/spawn (scheduler), then structs/enums/collections/Core per `tir_covers`; (3) align `jit_covers` gate with `tir_covers` (try-compile, never silent interpreter fallback for AOT-covered programs); (4) three-way differential battery on full `examples/features/*.jet` set; (5) `jet dev` on `160_scheduler_spawn.jet` and task programs without E2201. Exit: byte-identical stdout vs AOT for every tir-covered example, or named tested gap only.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "Dev Display/Debug interpolation slice landed: jet dev now interprets struct Display and Debug interpolation with compiled-output parity, including @Redact in Debug and generated JetShow fallback for structs without Display impls. Removed the stale struct interpolation E2201 boundary. Added dev_default_interprets_display_debug_interpolation. Verified: cargo test --test dev dev_default_interprets_display_debug_interpolation exact; dev_default_matches_compiled_binary exact now 125 ran / 132 boundaries; jit_coverage_audit ignored exact remains 79 covered / 178 gaps; jit_covers_implies_tir_lowers exact green; cargo test --test dev serialized green with 36 passed / 1 ignored."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "JIT string-method slice landed: resident string host shims now cover len, trim, to_upper, to_lower, and replace; JIT gate/lowering accepts pure string method chains. Added jit_covers_string_method_chain. Verified: cargo test --test dev jit_covers_string_method_chain exact; cranelift_three_way_differential_battery exact green with 38 ran / 39 covered-with-goldens; jit_coverage_audit ignored exact now 79 covered / 178 gaps; jit_covers_implies_tir_lowers exact green."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "JIT compare-chain slice landed: TExprKind::CompareChain now passes jit_covers for scalar relational chains and lowers to CLIF by evaluating operands once and ANDing adjacent comparisons. Added jit_covers_chained_comparison. Verified: cargo test --test dev jit_covers_chained_comparison exact; cargo test --test dev jit_coverage_audit ignored exact now 75 covered / 182 gaps; cargo test --test dev jit_covers_implies_tir_lowers exact."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "codex-main taking over E3 burndown per owner request. Previous assignee claude-main is not online in Tower roster; starting from latest JIT gap state. First slice: measure current dev/JIT parity gaps and pick smallest remaining systemic cluster."
+        },
         {
           "at": "2026-07-06",
           "by": "claude-main",
@@ -10375,6 +10395,11 @@
       "log": [
         {
           "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "codex-main: typeHierarchy slice landed. LSP now advertises typeHierarchyProvider and handles textDocument/prepareTypeHierarchy, typeHierarchy/supertypes, and typeHierarchy/subtypes for Jet trait/tag impl relationships over checked open documents. Added capability coverage entry and lsp_type_hierarchy_trait_impls transcript; updated VS Code and Zed feature docs. Verified: cargo test --test lsp lsp_type_hierarchy_trait_impls exact; cargo test --test lsp green with 36/36."
+        },
+        {
+          "at": "2026-07-06",
           "by": "codex-lsp",
           "text": "codex-lsp: honesty/meta slice landed. Added initialize capability coverage meta-test that enumerates advertised capabilities (including rename prepare + semantic full/range/delta facets) and requires a named LSP test marker for each. Added semanticTokens/full/delta as honest full-token fallback with resultId while keeping full + range. Added small coverage tests for formatting/rangeFormatting and workspace/executeCommand jet.impact so old advertised caps are covered too. Updated VS Code/Zed READMEs for semantic full/range/delta + current LSP feature surface. Targeted test green: nix develop -c cargo test --test lsp (35/35). Still building: typeHierarchy (not advertised), completion snippet/auto-import polish (not newly advertised), true project-wide workspace symbols beyond open docs, AST-precise folding/selection, full resolution write-kind accuracy, full ui-fixture differential battery, item-granular recompute proofs, CLI/dev/REPL shared engine."
         },
@@ -10453,6 +10478,11 @@
       "blockedBy": [],
       "assignee": "codex-highlight",
       "log": [
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "codex-main verification: grammar drift gate green with cargo test --test grammar 13/13; VS Code/Codium render proof captured in a real desktop session using isolated user-data-dir and /tmp/jet-codium-extensions. Screenshot: /tmp/jet-codium-render.png. The screenshot shows Codium rendering a .jet file with generated grammar highlighting. Spectacle required desktop-session access, so screenshot capture was run outside the repo sandbox; capture succeeded."
+        },
         {
           "at": "2026-07-06",
           "by": "codex-main",
@@ -24997,6 +25027,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-06T14:31:25.784Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0vg0lj7",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-06T14:29:01.441Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0cevzhr",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-06T14:25:23.558Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c2hizkhl",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-06T14:08:51.140Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c2hizkhl",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-06T14:06:45.118Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c2hizkhl",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-06T14:03:18.244Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c2hizkhl",
+      "note": "assignee,logEntry"
+    },
     {
       "at": "2026-07-06T13:54:05.195Z",
       "by": "claude-main",

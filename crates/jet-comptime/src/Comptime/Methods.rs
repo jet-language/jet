@@ -355,7 +355,92 @@ impl<'a> Interp<'a> {
                 }
             }
         }
-        Ok(v.jet_show())
+        Ok(self.display_fallback_value(v))
+    }
+
+    fn display_fallback_value(&self, v: &CtValue) -> String {
+        match v {
+            CtValue::Struct { type_name, fields } => {
+                let Some(def) = self.structs.get(type_name) else {
+                    return v.jet_show();
+                };
+                if def
+                    .fields
+                    .iter()
+                    .any(|field| matches!(field.ty, Type::Fn { .. }))
+                {
+                    return format!("{type_name} {{ ... }}");
+                }
+                if def.type_params.is_empty() {
+                    let parts: Vec<String> = def
+                        .fields
+                        .iter()
+                        .filter(|field| field.computed.is_none())
+                        .map(|field| {
+                            let rendered = fields
+                                .iter()
+                                .find(|(name, _)| name == &field.name)
+                                .map(|(_, value)| value.debug_rust())
+                                .unwrap_or_else(|| CtValue::Unit.debug_rust());
+                            format!("user_{}: {}", field.name, rendered)
+                        })
+                        .collect();
+                    return format!("user_{type_name} {{ {} }}", parts.join(", "));
+                }
+                let parts: Vec<String> = def
+                    .fields
+                    .iter()
+                    .map(|field| {
+                        let rendered = fields
+                            .iter()
+                            .find(|(name, _)| name == &field.name)
+                            .map(|(_, value)| value.jet_show())
+                            .unwrap_or_else(|| CtValue::Unit.jet_show());
+                        format!("{}: {}", field.name, rendered)
+                    })
+                    .collect();
+                format!("{type_name}({})", parts.join(", "))
+            }
+            _ => v.jet_show(),
+        }
+    }
+
+    pub(super) fn debug_value(&self, v: &CtValue) -> String {
+        match v {
+            CtValue::Struct { type_name, fields } => {
+                let Some(def) = self.structs.get(type_name) else {
+                    return v.debug_rust();
+                };
+                if def
+                    .fields
+                    .iter()
+                    .any(|field| matches!(field.ty, Type::Fn { .. }))
+                {
+                    return format!("{type_name} {{ ... }}");
+                }
+                if def.fields.is_empty() {
+                    return format!("{type_name} {{}}");
+                }
+                let parts: Vec<String> = def
+                    .fields
+                    .iter()
+                    .map(|field| {
+                        if field.redact {
+                            format!("{}: [redacted]", field.name)
+                        } else {
+                            let rendered = fields
+                                .iter()
+                                .find(|(name, _)| name == &field.name)
+                                .map(|(_, value)| value.debug_rust())
+                                .unwrap_or_else(|| CtValue::Unit.debug_rust());
+                            format!("{}: {}", field.name, rendered)
+                        }
+                    })
+                    .collect();
+                format!("{type_name} {{ {} }}", parts.join(", "))
+            }
+            _ => v.debug_rust(),
+        }
     }
 
     /// c139: invoke a closure value (`(x) => x > 3`) with already-evaluated
