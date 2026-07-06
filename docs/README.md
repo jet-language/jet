@@ -32,8 +32,9 @@ These are binding. When they disagree with anything else, they win.
 
 Plans live in [`tools/Tower/docs/plans/`](../tools/Tower/docs/plans/):
 active epoch plan ([epoch-3/](../tools/Tower/docs/plans/epoch-3/)), the
-[jetpack & jetos](../tools/Tower/docs/plans/epoch-4/README.md) track
-(package manager + OS), and sidequests (one reviewed plan per in-flight task,
+[jetpack](../tools/Tower/docs/plans/epoch-4/README.md) track
+(package manager + environments), jetos/visual-configuration cards in Tower
+Epoch 7, and sidequests (one reviewed plan per in-flight task,
 deleted once shipped). Epoch 1 & 2 highlights are in
 [roadmap.md](spec/roadmap.md). See [plans/README.md](../tools/Tower/docs/plans/README.md) for the
 implementing-agent protocol.

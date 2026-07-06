@@ -3,18 +3,21 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 228,
-    "rev": 384,
+    "nextNum": 261,
+    "rev": 497,
     "ui": {
       "toggled": [
         "dec-group:syntax",
         "dec-group:runtime",
         "dec-group:other",
-        "board-sidequests",
-        "epoch:e4",
         "epoch:e8",
+        "epoch:e7",
+        "epoch:e6",
+        "epoch:e4",
         "epoch:e5",
-        "epoch:e6"
+        "board-frozen",
+        "board-sidequests",
+        "epoch:e3"
       ]
     },
     "digestCursor": "2026-07-04T19:42:25.465Z"
@@ -53,10 +56,10 @@
     },
     {
       "status": "planned",
-      "goal": "The package-manager and OS layer (jetos is built on jetpack, so the whole ecosystem track lives here): jetpack environments replacing nix-shell, package build-from-source, registry + publish, content-addressed store, monorepo workspaces, package signing, programmable builds, then jetos — a declarative machine with an installable ISO.",
+      "goal": "The package-manager and environment layer: jetpack environments replacing nix-shell, package build-from-source, registry/publish, content-addressed store, monorepo workspaces, package signing, programmable builds, providers, catalogs, locks, and migration importers. jetos moves to Epoch 7 on top of this substrate.",
       "id": "e4",
       "num": 4,
-      "name": "jetpack & jetos",
+      "name": "jetpack",
       "order": 4,
       "exitCriteria": [
         "jetpack run replaces nix-shell",
@@ -67,7 +70,7 @@
     },
     {
       "status": "planned",
-      "goal": "Programmable builds and compile-time metaprogramming on E3's reflection/derive foundation: build-as-Jet (fn build(b: BuildContext), D-BUILDENTRY1/D-BUILDPOLICY1), gated build-time I/O, stdlib-only DSL syntax islands (D-EXT1), and reserved derive/bound attributes. Full Jai message loop and proc macros stay parked in E7 (post-self-host, c154); reader macros / grammar mutation closed won't-do (D-EXT1).",
+      "goal": "Programmable builds and compile-time metaprogramming on E3 reflection/derive foundations: build-as-Jet (fn build(b: BuildContext)), gated build-time I/O, generated source modules, stdlib-only DSL syntax islands, typed build graph/actions/toolchains/cache/scheduler, and public read-only front-end APIs. Jai-style AST mutation/message-loop/user macros are rejected by D-METAMUTATE1=A; practical power stays non-mutating.",
       "id": "e5",
       "num": 5,
       "name": "Metaprogramming",
@@ -93,10 +96,10 @@
     },
     {
       "status": "planned",
-      "goal": "Expert-tier language and runtime controls: explicit opt-in low-level power, sharper performance tuning, and the advanced features that stay out of the beginner path.",
+      "goal": "Declarative OS and visual configuration: jetos on top of jetpack, risk-aware activation/proof, generations, installable system image, source-backed Studio GUI, and Blueprint-class visual editing as a late-epoch projection over canonical Jet.",
       "id": "e7",
       "num": 7,
-      "name": "Advanced",
+      "name": "jetos",
       "order": 7,
       "exitCriteria": [
         "Explicit opt-in low-level controls",
@@ -196,12 +199,22 @@
       "body": "Named OS generations.",
       "kind": "idea",
       "track": "epoch",
-      "epoch": "e4",
-      "phase": "frozen",
+      "epoch": "e7",
+      "phase": "planning",
       "priority": "P2",
       "plan": "tools/Tower/docs/plans/epoch-4/jetos-generations.md",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-06",
+          "by": "owner",
+          "text": "Activated into epoch e7 track"
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "Moved into E7 after epoch repurpose: jetos now owns OS-generation work."
+        },
         {
           "at": "2026-07-03",
           "by": "agent",
@@ -229,7 +242,8 @@
         }
       ],
       "created": "2026-06-19T00:00:00Z",
-      "updated": "2026-07-03"
+      "updated": "2026-07-06",
+      "workOrder": 8600
     },
     {
       "milestoneId": null,
@@ -552,12 +566,17 @@
       "body": "Build polished end-to-end showcase slices before adding more isolated features: CLI, server, low-level/freestanding, web, and game. Each slice should prove real workflows: docs, tests, packaging, diagnostics, performance, and deployment.",
       "kind": "task",
       "track": "sidequest",
-      "epoch": "e4",
-      "phase": "frozen",
+      "epoch": null,
+      "phase": "planning",
       "priority": "P2",
       "plan": "flagship-vertical-slices",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-06",
+          "by": "owner",
+          "text": "Activated into sidequest track"
+        },
         {
           "at": "2026-07-03",
           "by": "agent",
@@ -590,7 +609,7 @@
         }
       ],
       "created": "2026-06-22T00:00:00Z",
-      "updated": "2026-07-03",
+      "updated": "2026-07-06",
       "workOrder": 99999
     },
     {
@@ -767,11 +786,16 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e5",
-      "phase": "frozen",
+      "phase": "planning",
       "priority": "P3",
       "plan": "Evidence-gated reserve only. Build a serde manual bound override only after a real generic @[Codable]/@[Encode]/@[Decode] fixture proves inferred bounds are wrong or too strict. Until then D-SERDE11=A reserves the idea without adding a second bound mechanism.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-06",
+          "by": "owner",
+          "text": "Activated into epoch e5 track"
+        },
         {
           "at": "2026-07-06",
           "by": "codex-1",
@@ -802,16 +826,26 @@
       "assignee": null,
       "id": "c154",
       "num": 15,
-      "title": "Full Jai metaprogramming (message loop / user macros) — post-self-host",
-      "body": "Deferred top rung of the D-METADEPTH1 ladder (owner answered A = reflection/derives only for v1; full Jai parked here per owner: 'Ensure full jai is tracked as a frozen card for later consideration'). Option C: user/build code receives every decl after typecheck and may inspect, rewrite, and inject AST + define macros. Requires reversing the no-macros non-goal and bending I3/I8, so it is explicitly post-self-host and off the v1 table. Devil's-advocate analysis (full-jai vs A across beginner/student/power-user/enterprise) lives on the D-METADEPTH1 ballot card Owner Q5 and in syntax-decisions.md.",
+      "title": "Rejected: Jai-style AST mutation/message-loop/user macros",
+      "body": "D-METAMUTATE1=A rejected Jai-style AST mutation, message loops, and user macros. This card is closed done; practical Jai power is tracked by the non-mutating E5 stack: additive generated modules, typed build actions, read-only program/build graph enforcement, stdlib DSL whitelist, public front-end APIs, and policy passes.",
       "kind": "idea",
       "track": "epoch",
       "epoch": "e7",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
-      "plan": "Far-horizon mutation/message-loop plan: decide D-METAMUTATE1 explicitly. Default recommendation rejects mutation and covers practical Jai power through additive generated modules, typed actions, read-only program/build graph enforcement, stdlib DSL whitelist, and public front-end APIs. No implementation until owner ratifies a non-rejected path.",
+      "plan": "Closed rejected. Do not implement AST mutation/message-loop/user macros unless the owner reopens D-METAMUTATE1 with a new ballot.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "Renamed and narrowed after closure so #15 cannot look like active future work."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "Closed as rejected: D-METAMUTATE1=A rejects Jai-style AST mutation/message-loop/user macros. Non-mutating power remains tracked by E5 build/metaprogramming cards."
+        },
         {
           "at": "2026-07-06",
           "text": "All decisions ratified; advanced out of deciding."
@@ -5093,50 +5127,6 @@
     {
       "milestoneId": null,
       "assignee": null,
-      "id": "c27iyznj",
-      "num": 115,
-      "title": "Ask-your-codebase query engine (\"where can balance go negative?\")",
-      "body": "Ideas.md: structural questions over the codebase. Should ride the semantic-index API. New.",
-      "kind": "feature",
-      "track": "epoch",
-      "epoch": "e5",
-      "phase": "frozen",
-      "priority": "P3",
-      "plan": "D-ASKCODE1=B implementation plan: (1) wait for D-SEMINDEX1 API; (2) implement read-only query engine over symbols, call graph, effects, dataflow facts, and diagnostics; (3) CLI `jet query` with stable JSON output; (4) LSP command for same queries; (5) tests for balance-negative style query over fixture project; (6) docs.",
-      "blockedBy": [],
-      "log": [
-        {
-          "at": "2026-07-03",
-          "by": "agent",
-          "text": "E4 prep: retagged e4→e5 + frozen per already-ratified D-ASKCODE1=B (query-DSL surface ballot deferred to e5). Prereqs (D-SEMINDEX1, D-IMPACT1/jet impact) already shipped — at e5 kickoff only the surface ballot remains (drafted, rec A: extend jet impact --where). Plan: tools/Tower/docs/plans/epoch-4/ask-codebase-query.md."
-        },
-        {
-          "at": "2026-07-02",
-          "text": "Reconciled per D-ASKCODE1=B: query-DSL ballot opens in Epoch 5. Note: D-SEMINDEX1 semantic index already shipped (c1oixt2m, e3 done) — prerequisite met early; e5 design point stands."
-        },
-        {
-          "at": "2026-06-28",
-          "text": "Implementation-ready plan added from decision sweep."
-        },
-        {
-          "at": "2026-06-28",
-          "text": "All decisions ratified; advanced out of deciding."
-        },
-        {
-          "at": "2026-06-28",
-          "text": "D-ASKCODE1: added Epoch 6 defer option per owner instruction."
-        },
-        {
-          "at": "2026-06-26",
-          "text": "Carded from Ideas.md sweep (L164). Full design ballot attached — owner decides proceed/direction."
-        }
-      ],
-      "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-07-03"
-    },
-    {
-      "milestoneId": null,
-      "assignee": null,
       "id": "c28iz2c4",
       "num": 116,
       "title": "Content-addressed definitions/names (Unison-style)",
@@ -5583,7 +5573,7 @@
       "body": "Ideas.md: call existing JS/npm and Swift ecosystems from day one. Only C/Rust FFI and package plans exist. New. Bundle-risk: JS/npm vs Swift are separate interop tracks.",
       "kind": "feature",
       "track": "epoch",
-      "epoch": "e7",
+      "epoch": "e3",
       "phase": "ready",
       "priority": "P0",
       "workOrder": 21,
@@ -5592,6 +5582,11 @@
         "c2fizfx3"
       ],
       "log": [
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "Moved from E7 to E3: JS/npm and Swift interop is unblocked by done web-backend prerequisite and belongs in product pillars."
+        },
         {
           "at": "2026-07-03",
           "by": "agent",
@@ -5640,7 +5635,7 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-07-03"
+      "updated": "2026-07-06"
     },
     {
       "milestoneId": null,
@@ -6507,12 +6502,17 @@
       "body": "Ideas.md: adjust to battery/network/load/carbon or fidelity under load. New/library/framework; no card. Bundle-risk: environmental signals vs adaptation policies are separate.",
       "kind": "idea",
       "track": "epoch",
-      "epoch": "e7",
+      "epoch": "e3",
       "phase": "planning",
       "priority": "P3",
       "plan": null,
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "Moved from E7 to E3: adaptive runtime policy is not prerequisite-gated; keep low priority planning."
+        },
         {
           "at": "2026-06-30",
           "text": "Activated into epoch e7 track"
@@ -6527,7 +6527,8 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-30"
+      "updated": "2026-07-06",
+      "workOrder": 760
     },
     {
       "milestoneId": null,
@@ -6717,12 +6718,17 @@
       "body": "Ideas.md: multi-answer/failure-driven computation beyond comprehensions. New/Reopen — research notes caution against the full version.",
       "kind": "feature",
       "track": "epoch",
-      "epoch": "e7",
+      "epoch": "e3",
       "phase": "planning",
       "priority": "P3",
       "plan": null,
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "Moved from E7 to E3: logic-programming subset is a language-product feature; plan/ballot exact scope before implementation."
+        },
         {
           "at": "2026-06-30",
           "text": "Activated into epoch e7 track"
@@ -6737,7 +6743,8 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-30"
+      "updated": "2026-07-06",
+      "workOrder": 770
     },
     {
       "milestoneId": null,
@@ -6748,12 +6755,17 @@
       "body": "Ideas.md: merge by semantic identity rather than text. New/far-horizon; not carded.",
       "kind": "idea",
       "track": "epoch",
-      "epoch": "e7",
+      "epoch": "e3",
       "phase": "planning",
       "priority": "P3",
       "plan": null,
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "Moved from E7 to E3: structural merge is a product/tooling pillar and prerequisite for later visual editing."
+        },
         {
           "at": "2026-07-02",
           "text": "Absorbed c30j0s6u (VC merges understand program structure) — same idea, one card. Scope note: likely wants a stable AST and possibly self-hosting first; correctly far-horizon."
@@ -6776,7 +6788,8 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-07-02"
+      "updated": "2026-07-06",
+      "workOrder": 780
     },
     {
       "milestoneId": null,
@@ -7901,12 +7914,22 @@
       "body": "Owner directive (2026-07-03): do NOT build jetos yet; the implementation plan is the deliverable, and Phase D work stays gated on explicit owner greenlight. Plan: tools/Tower/docs/plans/epoch-4/jetos-implementation.md (stages OS0→OS1→OS2→OS3∥OS4→OS-ISO→OS-VM, worked examples, exit criteria, dep edges to Phase A–C). The plan raises 10 owner-facing ballot rows (D-JPK-OSOPT1 option decl/private spelling, D-JPK-OSVERB1 jet os verb set, D-JPK-OSHOST1 host selection, D-JPK-OSGEN1 generation naming, D-JPK-OSNS1 std namespace naming menu, D-JPK-OSINIT1 systemd vs native init, D-JPK-OSSECRET1 secrets-on-disk, D-JPK-OSBRAND1 ISO branding, D-JPK-OSDISK1 partition/fs defaults, D-JPK-OSDISABLE1 disable marker) — see the plan's Ballot rows table. On unfreeze: develop these to ballot-ready in tower.json BEFORE any Phase D code (ballot-first).",
       "kind": "idea",
       "track": "epoch",
-      "epoch": "e4",
-      "phase": "frozen",
+      "epoch": "e7",
+      "phase": "planning",
       "priority": "P2",
       "plan": "tools/Tower/docs/plans/epoch-4/jetos-implementation.md",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-06",
+          "by": "owner",
+          "text": "Activated into epoch e7 track"
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "Moved into E7 after epoch repurpose: jetos realization belongs in the jetos epoch."
+        },
         {
           "at": "2026-07-03",
           "by": "agent",
@@ -7914,7 +7937,8 @@
         }
       ],
       "created": "2026-07-03",
-      "updated": "2026-07-03"
+      "updated": "2026-07-06",
+      "workOrder": 8500
     },
     {
       "milestoneId": null,
@@ -8072,12 +8096,17 @@
       "body": "Owner directive (2026-07-02): reopen FFI structure with the bar set at revolutionary UX/DX — it should be almost trivial to use almost any other language as a wrapper/binding, so in-situ replacements are easy and Jet can tap ALL developments of other ecosystems immediately. This ballot picks the shared architecture (surface law); per-language depth (binder strategy for Python, JS, Swift, …) follows as one ballot each on that frame. Existing ratifications are inputs, not casualties: S50 (extern rust), S59 (C namespaces + bindgen/overlay — already the C instance of the recommended shape), D-NPMTYPE1 (typed npm stubs), D-JSWIFTFFI1 (JS first, Swift via C-ABI later). Ballot D-FFI-UNIFY1 attached.",
       "kind": "idea",
       "track": "epoch",
-      "epoch": "e7",
+      "epoch": "e3",
       "phase": "ready",
       "priority": "P1",
       "plan": "tools/Tower/docs/plans/epoch-4/ffi-interop-program.md",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "Moved from E7 to E3: next-generation FFI is not prerequisite-gated and is a core product-pillar feature."
+        },
         {
           "at": "2026-07-03",
           "by": "agent",
@@ -8107,7 +8136,7 @@
         }
       ],
       "created": "2026-07-02T16:45:00.450Z",
-      "updated": "2026-07-03",
+      "updated": "2026-07-06",
       "workOrder": 20
     },
     {
@@ -8214,12 +8243,17 @@
       "body": "Owner directive (2026-07-02): a FULLY functional Blueprint-style visual editor for Jet is VERY important, especially since Blueprint will no longer be in UE6 — an open market gap Jet can fill. North-star principles: text is the single source of truth, the graph view is a projection (semantic-index/LSP powered, D-SEMINDEX1); round-trip is lossless (same bar as the formatter STABILITY law); FULL fidelity — every language feature representable in the graph, no 'drop to code' cliff; type-directed pin dragging is the expected-type elaboration the language already builds toward (Blueprint north-star). Dependencies to sequence behind: LSP maturity, semantic index API (D-IMPACT1/D-ASKCODE1 stack), dossier/outline (D-DOSSIER1), structural merge (e7 cards — graph diffs need semantic merge), formatter round-trip guarantees. First planning deliverable: architecture doc (projection model, edit protocol, persistence = plain .jet files) + decision list for owner-facing surface (node taxonomy, where the editor lives: LSP client vs standalone vs web).",
       "kind": "idea",
       "track": "epoch",
-      "epoch": "e6",
+      "epoch": "e7",
       "phase": "planning",
       "priority": "P1",
       "plan": "tools/Tower/docs/proposals/blueprint-editor.md",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "Moved from E6 to E7 per owner direction: Blueprint-class visual editor belongs beside jetos GUI and should land near the end."
+        },
         {
           "at": "2026-07-02",
           "text": "Proposal written for owner review: tools/Tower/docs/proposals/blueprint-editor.md — projection model, fidelity strategy, live-execution demo, architecture, 4 phases, 6 future ballot rows (D-BPE-*), naming menu."
@@ -8231,7 +8265,8 @@
         }
       ],
       "created": "2026-07-02T16:45:00.523Z",
-      "updated": "2026-07-02"
+      "updated": "2026-07-06",
+      "workOrder": 9950
     },
     {
       "milestoneId": null,
@@ -10757,17 +10792,22 @@
       "id": "c0x3v19y",
       "num": 212,
       "title": "Bare-minimum game bridge: core.raylib skeleton",
-      "body": "Owner narrowed scope 2026-07-06: Epoch 3 card #212 is the BARE MINIMUM only. Done means core.raylib exists as a typed compiler-known package skeleton, has a display-gated example, reaches parser -> sema -> codegen, and emits no unsafe. Full native raylib, primitives, and core.game scene-first engine are deferred to Epoch 7 successor card.",
+      "body": "Owner narrowed scope 2026-07-06: Epoch 3 card #212 is the BARE MINIMUM only. Done means core.raylib exists as a typed compiler-known package skeleton, has a display-gated example, reaches parser -> sema -> codegen, and emits no unsafe. Full native raylib, primitives, and core.game scene-first engine are now tracked by #238 in Epoch 3.",
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
       "phase": "done",
       "priority": "P2",
-      "plan": "Bare-minimum Epoch 3 scope only: core.raylib skeleton with package metadata, compiler-known typed no-op window/draw/color surface, display-gated/type-check example examples/features/game/raylib_window.jet, docs reflecting skeleton status, and targeted tests proving parser -> sema -> codegen emits raylib calls with no unsafe. Full native raylib bridge, public primitives, and core.game scene-first engine are deferred to Epoch 7 successor card created by codex-main.",
+      "plan": "Bare-minimum Epoch 3 scope only: core.raylib skeleton with package metadata, compiler-known typed no-op window/draw/color surface, display-gated/type-check example examples/features/game/raylib_window.jet, docs reflecting skeleton status, and targeted tests proving parser -> sema -> codegen emits raylib calls with no unsafe. Full native raylib bridge, public primitives, and core.game scene-first engine are tracked by #238 in Epoch 3.",
       "blockedBy": [],
       "assignee": "codex-game-plan",
       "log": [
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "Scope pointer updated: full game stack moved from old E7 successor to canonical E3 card #238."
+        },
         {
           "at": "2026-07-06",
           "by": "codex-main",
@@ -11014,18 +11054,28 @@
     {
       "id": "c0p3x8f2",
       "num": 216,
-      "title": "Full game development stack (core.game + primitives)",
-      "body": "Deferred from #212 per owner 2026-07-06: Epoch 3 only keeps the bare-minimum core.raylib skeleton. Full game stack moves here: native core.raylib bridge, core.window/core.gpu/core.audio/core.input primitives, and core.game scene-first engine per D-GAME1=B, D-GAME2=A, D-GAME3=C. Resume in Epoch 7.",
+      "title": "Absorbed by #238: old full game stack tracker",
+      "body": "Closed as absorbed by #238, the canonical Epoch 3 stable core.game substrate card. Historical context: this was created when full game work was deferred out of #212; owner later moved non-gated E7 work into E3.",
       "kind": "feature",
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": null,
-      "phase": "frozen",
+      "phase": "done",
       "priority": "P2",
-      "plan": "Epoch 7 deferred full game stack. Start from #212 bare-minimum skeleton. Build order: (1) native core.raylib bridge with dependency sourcing/lock hashing, real window/draw/input/audio/timing, Jet diagnostics, display/headless verification; (2) public primitives core.window/core.gpu/core.audio/core.input, each with example/tests; (3) core.game scene-first + frame hook hybrid per D-GAME3=C, with typed scene data, assets, input map, audio, camera, hot reload; (4) Blueprint/#182 round-trip review before freezing scene format; (5) beginner Pong/Breakout/audio-visual demos. No owner gates currently open; any new bridge deps beyond approved wgpu/winit/cpal-class need fresh I6 approval.",
+      "plan": "No work here. Use #238.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "Body/plan cleaned after absorption into #238."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "Closed as absorbed by #238, now the canonical E3 core.game substrate card."
+        },
         {
           "at": "2026-07-06",
           "by": "codex-main",
@@ -11297,6 +11347,786 @@
         }
       ],
       "created": "2026-07-06T17:13:05.327Z",
+      "updated": "2026-07-06"
+    },
+    {
+      "id": "c07589v1",
+      "num": 228,
+      "title": "World-domination language and Jetpack ballots",
+      "body": "Umbrella decision host for the 2026-07-06 world-domination review. No implementation cards are created here; each feature card waits until the owner ratifies its ballot. Durable proposal artifact: tools/Tower/docs/ballots/world-domination-review-2026-07-06.md",
+      "kind": "idea",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "Converted 14 ratified world-domination ballots into planning cards: D-WD1, D-WD2, D-WD3, D-WD4, D-WD5, D-WD6, D-WD7, D-WD8, D-WD9, D-WD10, D-WD11, D-WD12, D-WD14, D-WD15. One proposed auxiliary ballot was deleted before ballot creation."
+        },
+        {
+          "at": "2026-07-06",
+          "text": "All decisions ratified; advanced out of deciding."
+        }
+      ],
+      "created": "2026-07-06T19:06:52.331Z",
+      "updated": "2026-07-06"
+    },
+    {
+      "id": "c0pzvvjc",
+      "num": 229,
+      "title": "Universal trust grants across Jet and Jetpack",
+      "body": "Ratified decision: D-WD1 = B (Unified grants (recommended)).\nSource ballot: tools/Tower/docs/ballots/world-domination-review-2026-07-06.md.\n\nHow Jet shows and controls package, build, environment, and OS authority.\n\nChosen direction: One effect/grant graph spans code, packages, builds, envs, services, images, fleets, and jetos activation. Beginners see intent summaries; experts expand to exact authority and policy. Weakness fixed: prompt overload is collapsed by intent, with deep audit one key away.\n\nGuardrails:\n- Preserve magic defaults plus full expert control from the ballot.\n- Before adding any new user-typeable syntax, manifest field, command spelling, marker, provider prefix, or diagnostic code, raise a follow-up Tower ballot.\n- No implementation card may ship a stub: docs, examples, diagnostics, tests, and verification must land with behavior.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "Plan seed from D-WD1:\n1. Re-read the ratified ballot and current spec/Tower plans for overlap.\n2. Split into vertical slices if the feature spans compiler, Core, Jetpack, GUI, and OS surfaces.\n3. Queue exact-syntax/subsurface ballots before parser, manifest, CLI, or API surface changes.\n4. Implement the first ungated vertical slice end to end with executable examples and diagnostics.\n5. Prove beginner default UX and expert audit/control UX with tests or transcripts.",
+      "blockedBy": [],
+      "workOrder": 500,
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "Created from ratified D-WD1=B on umbrella #228."
+        }
+      ],
+      "created": "2026-07-06T19:15:48.959Z",
+      "updated": "2026-07-06"
+    },
+    {
+      "id": "c1pzxnsn",
+      "num": 230,
+      "title": "Semantic dossier: one explainable artifact view",
+      "body": "Ratified decision: D-WD2 = B (Dossier umbrella (recommended)).\nSource ballot: tools/Tower/docs/ballots/world-domination-review-2026-07-06.md.\n\nWhether every Jet artifact gets one explainable dossier view.\n\nChosen direction: `jet dossier` is one beginner command over named existing fact lenses. Experts keep stable lens names and JSON schemas. Weakness fixed: no junk drawer because every section must be owned by an existing fact producer.\n\nGuardrails:\n- Preserve magic defaults plus full expert control from the ballot.\n- Before adding any new user-typeable syntax, manifest field, command spelling, marker, provider prefix, or diagnostic code, raise a follow-up Tower ballot.\n- No implementation card may ship a stub: docs, examples, diagnostics, tests, and verification must land with behavior.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e6",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": "Plan seed from D-WD2:\n1. Re-read the ratified ballot and current spec/Tower plans for overlap.\n2. Split into vertical slices if the feature spans compiler, Core, Jetpack, GUI, and OS surfaces.\n3. Queue exact-syntax/subsurface ballots before parser, manifest, CLI, or API surface changes.\n4. Implement the first ungated vertical slice end to end with executable examples and diagnostics.\n5. Prove beginner default UX and expert audit/control UX with tests or transcripts.",
+      "blockedBy": [],
+      "workOrder": 620,
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "Created from ratified D-WD2=B on umbrella #228."
+        }
+      ],
+      "created": "2026-07-06T19:15:48.959Z",
+      "updated": "2026-07-06"
+    },
+    {
+      "id": "c2pzz3qb",
+      "num": 231,
+      "title": "Strict package graph plus workspace catalogs",
+      "body": "Ratified decision: D-WD3 = B (Strict graph plus catalogs (recommended)).\nSource ballot: tools/Tower/docs/ballots/world-domination-review-2026-07-06.md.\n\nHow Jetpack prevents hidden dependencies and workspace version drift.\n\nChosen direction: Each package sees only declared deps; catalogs centralize shared versions. Weakness fixed: the error offers one command to add the missing dep to the right package or catalog.\n\nGuardrails:\n- Preserve magic defaults plus full expert control from the ballot.\n- Before adding any new user-typeable syntax, manifest field, command spelling, marker, provider prefix, or diagnostic code, raise a follow-up Tower ballot.\n- No implementation card may ship a stub: docs, examples, diagnostics, tests, and verification must land with behavior.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "Plan seed from D-WD3:\n1. Re-read the ratified ballot and current spec/Tower plans for overlap.\n2. Split into vertical slices if the feature spans compiler, Core, Jetpack, GUI, and OS surfaces.\n3. Queue exact-syntax/subsurface ballots before parser, manifest, CLI, or API surface changes.\n4. Implement the first ungated vertical slice end to end with executable examples and diagnostics.\n5. Prove beginner default UX and expert audit/control UX with tests or transcripts.",
+      "blockedBy": [],
+      "workOrder": 501,
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "Created from ratified D-WD3=B on umbrella #228."
+        }
+      ],
+      "created": "2026-07-06T19:15:48.959Z",
+      "updated": "2026-07-06"
+    },
+    {
+      "id": "c3q000dw",
+      "num": 232,
+      "title": "Explainable semantic lockfiles and lock merge",
+      "body": "Ratified decision: D-WD4 = B (Explainable semantic lock (recommended)).\nSource ballot: tools/Tower/docs/ballots/world-domination-review-2026-07-06.md.\n\nHow `.jet/lock` is inspected, reviewed, and merged.\n\nChosen direction: Lock entries carry exact identity plus human rationale: owner package, policy, source, provenance, hash, platform, update command. Weakness fixed: rationale is separate from deterministic identity so review can collapse unchanged metadata.\n\nGuardrails:\n- Preserve magic defaults plus full expert control from the ballot.\n- Before adding any new user-typeable syntax, manifest field, command spelling, marker, provider prefix, or diagnostic code, raise a follow-up Tower ballot.\n- No implementation card may ship a stub: docs, examples, diagnostics, tests, and verification must land with behavior.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": "Plan seed from D-WD4:\n1. Re-read the ratified ballot and current spec/Tower plans for overlap.\n2. Split into vertical slices if the feature spans compiler, Core, Jetpack, GUI, and OS surfaces.\n3. Queue exact-syntax/subsurface ballots before parser, manifest, CLI, or API surface changes.\n4. Implement the first ungated vertical slice end to end with executable examples and diagnostics.\n5. Prove beginner default UX and expert audit/control UX with tests or transcripts.",
+      "blockedBy": [],
+      "workOrder": 502,
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "Created from ratified D-WD4=B on umbrella #228."
+        }
+      ],
+      "created": "2026-07-06T19:15:48.960Z",
+      "updated": "2026-07-06"
+    },
+    {
+      "id": "c4q00utv",
+      "num": 233,
+      "title": "Migration importers from foreign ecosystems",
+      "body": "Ratified decision: D-WD5 = B (Editable importers (recommended)).\nSource ballot: tools/Tower/docs/ballots/world-domination-review-2026-07-06.md.\n\nWhether Jet adoption gets first-class importers from other ecosystems.\n\nChosen direction: Importers generate role modules, deps, adapters, FFI stubs, and TODO diagnostics. Weakness fixed: output is canonical Jet source, not hidden compat state; `jet migrate native` tracks replacement progress.\n\nGuardrails:\n- Preserve magic defaults plus full expert control from the ballot.\n- Before adding any new user-typeable syntax, manifest field, command spelling, marker, provider prefix, or diagnostic code, raise a follow-up Tower ballot.\n- No implementation card may ship a stub: docs, examples, diagnostics, tests, and verification must land with behavior.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "Plan seed from D-WD5:\n1. Re-read the ratified ballot and current spec/Tower plans for overlap.\n2. Split into vertical slices if the feature spans compiler, Core, Jetpack, GUI, and OS surfaces.\n3. Queue exact-syntax/subsurface ballots before parser, manifest, CLI, or API surface changes.\n4. Implement the first ungated vertical slice end to end with executable examples and diagnostics.\n5. Prove beginner default UX and expert audit/control UX with tests or transcripts.",
+      "blockedBy": [],
+      "workOrder": 503,
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "Created from ratified D-WD5=B on umbrella #228."
+        }
+      ],
+      "created": "2026-07-06T19:15:48.960Z",
+      "updated": "2026-07-06"
+    },
+    {
+      "id": "c5q01s7b",
+      "num": 234,
+      "title": "Federated Jetpack providers under one authority graph",
+      "body": "Ratified decision: D-WD6 = B (Federated providers under Jetpack authority (recommended)).\nSource ballot: tools/Tower/docs/ballots/world-domination-review-2026-07-06.md.\n\nHow Jetpack ingests npm, PyPI, Cargo, SwiftPM, Nix, GitHub, and binary sources.\n\nChosen direction: Foreign registries are metadata sources; Jetpack owns fetch, lock, sandbox, build effects, signatures, audit, and replacement overlays. Weakness fixed: broad reach does not grant broad trust.\n\nGuardrails:\n- Preserve magic defaults plus full expert control from the ballot.\n- Before adding any new user-typeable syntax, manifest field, command spelling, marker, provider prefix, or diagnostic code, raise a follow-up Tower ballot.\n- No implementation card may ship a stub: docs, examples, diagnostics, tests, and verification must land with behavior.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "Plan seed from D-WD6:\n1. Re-read the ratified ballot and current spec/Tower plans for overlap.\n2. Split into vertical slices if the feature spans compiler, Core, Jetpack, GUI, and OS surfaces.\n3. Queue exact-syntax/subsurface ballots before parser, manifest, CLI, or API surface changes.\n4. Implement the first ungated vertical slice end to end with executable examples and diagnostics.\n5. Prove beginner default UX and expert audit/control UX with tests or transcripts.",
+      "blockedBy": [],
+      "workOrder": 504,
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "Created from ratified D-WD6=B on umbrella #228."
+        }
+      ],
+      "created": "2026-07-06T19:15:48.960Z",
+      "updated": "2026-07-06"
+    },
+    {
+      "id": "c6q02qhw",
+      "num": 235,
+      "title": "jetos Studio: GUI over canonical Jet modules",
+      "body": "Ratified decision: D-WD7 = B (GUI writes Jet modules (recommended)).\nSource ballot: tools/Tower/docs/ballots/world-domination-review-2026-07-06.md.\n\nWhether declarative OS config gets a first-party GUI over canonical Jet modules.\n\nChosen direction: Studio is a source editor over typed modules: toggles, search, conflict fixes, and diff preview write canonical Jet. Weakness fixed: no split-brain JSON; expert mode opens exact module, option, graph, and provenance.\n\nGuardrails:\n- Preserve magic defaults plus full expert control from the ballot.\n- Before adding any new user-typeable syntax, manifest field, command spelling, marker, provider prefix, or diagnostic code, raise a follow-up Tower ballot.\n- No implementation card may ship a stub: docs, examples, diagnostics, tests, and verification must land with behavior.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e7",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": "Plan seed from D-WD7:\n1. Re-read the ratified ballot and current spec/Tower plans for overlap.\n2. Split into vertical slices if the feature spans compiler, Core, Jetpack, GUI, and OS surfaces.\n3. Queue exact-syntax/subsurface ballots before parser, manifest, CLI, or API surface changes.\n4. Implement the first ungated vertical slice end to end with executable examples and diagnostics.\n5. Prove beginner default UX and expert audit/control UX with tests or transcripts.",
+      "blockedBy": [],
+      "workOrder": 9900,
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "Kept in E7 and moved late in work order: jetos Studio GUI should land near the end of the jetos epoch."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "Created from ratified D-WD7=B on umbrella #228."
+        }
+      ],
+      "created": "2026-07-06T19:15:48.960Z",
+      "updated": "2026-07-06"
+    },
+    {
+      "id": "c7q03g01",
+      "num": 236,
+      "title": "jetos risk-aware proof before switch",
+      "body": "Ratified decision: D-WD8 = B (Risk-aware proof pipeline (recommended)).\nSource ballot: tools/Tower/docs/ballots/world-domination-review-2026-07-06.md.\n\nHow jetos tests OS changes before activation.\n\nChosen direction: Plan/diff always; VM proof and rollback proof required for boot/kernel/filesystem/service-risk classes and CI policy. Weakness fixed: small edits stay light, dangerous edits get proof.\n\nGuardrails:\n- Preserve magic defaults plus full expert control from the ballot.\n- Before adding any new user-typeable syntax, manifest field, command spelling, marker, provider prefix, or diagnostic code, raise a follow-up Tower ballot.\n- No implementation card may ship a stub: docs, examples, diagnostics, tests, and verification must land with behavior.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e7",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "Plan seed from D-WD8:\n1. Re-read the ratified ballot and current spec/Tower plans for overlap.\n2. Split into vertical slices if the feature spans compiler, Core, Jetpack, GUI, and OS surfaces.\n3. Queue exact-syntax/subsurface ballots before parser, manifest, CLI, or API surface changes.\n4. Implement the first ungated vertical slice end to end with executable examples and diagnostics.\n5. Prove beginner default UX and expert audit/control UX with tests or transcripts.",
+      "blockedBy": [],
+      "workOrder": 9000,
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "Moved from E4 to E7: jetos proof-before-switch belongs in the jetos epoch."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "Created from ratified D-WD8=B on umbrella #228."
+        }
+      ],
+      "created": "2026-07-06T19:15:48.960Z",
+      "updated": "2026-07-06"
+    },
+    {
+      "id": "c8q043mt",
+      "num": 237,
+      "title": "Typed data Core plus accelerator bridges",
+      "body": "Ratified decision: D-WD9 = B (Core data floor plus accelerators (recommended)).\nSource ballot: tools/Tower/docs/ballots/world-domination-review-2026-07-06.md.\n\nWhether data analysis becomes a first-party Core domain.\n\nChosen direction: Ship typed tables/series/stats/plot basics in Core; Python/R/GPU bridges accelerate gaps. Weakness fixed: every bridge-heavy workflow exposes native replacement status.\n\nGuardrails:\n- Preserve magic defaults plus full expert control from the ballot.\n- Before adding any new user-typeable syntax, manifest field, command spelling, marker, provider prefix, or diagnostic code, raise a follow-up Tower ballot.\n- No implementation card may ship a stub: docs, examples, diagnostics, tests, and verification must land with behavior.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": "Plan seed from D-WD9:\n1. Re-read the ratified ballot and current spec/Tower plans for overlap.\n2. Split into vertical slices if the feature spans compiler, Core, Jetpack, GUI, and OS surfaces.\n3. Queue exact-syntax/subsurface ballots before parser, manifest, CLI, or API surface changes.\n4. Implement the first ungated vertical slice end to end with executable examples and diagnostics.\n5. Prove beginner default UX and expert audit/control UX with tests or transcripts.",
+      "blockedBy": [],
+      "workOrder": 430,
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "Created from ratified D-WD9=B on umbrella #228."
+        }
+      ],
+      "created": "2026-07-06T19:15:48.960Z",
+      "updated": "2026-07-06"
+    },
+    {
+      "id": "c9q0534j",
+      "num": 238,
+      "title": "Stable core.game substrate",
+      "body": "Ratified decision: D-WD10 = B (Stable game substrate (recommended)).\nSource ballot: tools/Tower/docs/ballots/world-domination-review-2026-07-06.md.\n\nWhether Jet gets a blessed game-dev substrate.\n\nChosen direction: Core owns assets, ECS, input, fixed-step timing, replay, editor hooks, and budgets; renderer/audio/editor backends are packages. Weakness fixed: engine sprawl is avoided by making Core the substrate, not one monolithic engine.\n\nGuardrails:\n- Preserve magic defaults plus full expert control from the ballot.\n- Before adding any new user-typeable syntax, manifest field, command spelling, marker, provider prefix, or diagnostic code, raise a follow-up Tower ballot.\n- No implementation card may ship a stub: docs, examples, diagnostics, tests, and verification must land with behavior.\n\nAbsorbs prior card #216 (full game development stack). Keep #238 as the canonical D-WD10 core.game substrate card.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "Plan seed from D-WD10:\n1. Re-read the ratified ballot and current spec/Tower plans for overlap.\n2. Split into vertical slices if the feature spans compiler, Core, Jetpack, GUI, and OS surfaces.\n3. Queue exact-syntax/subsurface ballots before parser, manifest, CLI, or API surface changes.\n4. Implement the first ungated vertical slice end to end with executable examples and diagnostics.\n5. Prove beginner default UX and expert audit/control UX with tests or transcripts.\n\nPrior detailed stack plan from #216: native bridge, core.window/core.gpu/core.audio/core.input primitives, scene-first core.game, deterministic replay, assets, input, audio, camera, hot reload, and demos.",
+      "blockedBy": [],
+      "workOrder": 700,
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "Moved from E7 to E3 per owner direction; absorbs old frozen #216 full-game-stack tracking."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "Created from ratified D-WD10=B on umbrella #228."
+        }
+      ],
+      "created": "2026-07-06T19:15:48.960Z",
+      "updated": "2026-07-06"
+    },
+    {
+      "id": "caq065h8",
+      "num": 239,
+      "title": "Typed embedded and freestanding target profiles",
+      "body": "Ratified decision: D-WD11 = B (Typed target profiles (recommended)).\nSource ballot: tools/Tower/docs/ballots/world-domination-review-2026-07-06.md.\n\nHow Jet scales down to microcontrollers, kernels, and no-OS targets.\n\nChosen direction: Board/target profiles make hidden defaults explicit only when embedded/kernels are selected. Expert controls memory, linker, allocator, panic, volatile, and audit output. Weakness fixed: normal Jet never sees target jargon.\n\nGuardrails:\n- Preserve magic defaults plus full expert control from the ballot.\n- Before adding any new user-typeable syntax, manifest field, command spelling, marker, provider prefix, or diagnostic code, raise a follow-up Tower ballot.\n- No implementation card may ship a stub: docs, examples, diagnostics, tests, and verification must land with behavior.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "Plan seed from D-WD11:\n1. Re-read the ratified ballot and current spec/Tower plans for overlap.\n2. Split into vertical slices if the feature spans compiler, Core, Jetpack, GUI, and OS surfaces.\n3. Queue exact-syntax/subsurface ballots before parser, manifest, CLI, or API surface changes.\n4. Implement the first ungated vertical slice end to end with executable examples and diagnostics.\n5. Prove beginner default UX and expert audit/control UX with tests or transcripts.",
+      "blockedBy": [],
+      "workOrder": 701,
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "Moved from E7 to E3: embedded/freestanding target profiles are not prerequisite-gated and support the E3 freestanding flagship."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "Created from ratified D-WD11=B on umbrella #228."
+        }
+      ],
+      "created": "2026-07-06T19:15:48.960Z",
+      "updated": "2026-07-06"
+    },
+    {
+      "id": "cbq06v8j",
+      "num": 240,
+      "title": "Progressive proof and replay mode",
+      "body": "Ratified decision: D-WD12 = B (Progressive proof and replay (recommended)).\nSource ballot: tools/Tower/docs/ballots/world-domination-review-2026-07-06.md.\n\nHow Jet turns contracts, tests, budgets, and replay into a correctness product.\n\nChosen direction: `jet prove` layers contracts, refinements, effects, budgets, property tests, and replay facts. Weakness fixed: beginner face is tests/contracts/replay; deeper solvers are opt-in lenses with Jet diagnostics.\n\nGuardrails:\n- Preserve magic defaults plus full expert control from the ballot.\n- Before adding any new user-typeable syntax, manifest field, command spelling, marker, provider prefix, or diagnostic code, raise a follow-up Tower ballot.\n- No implementation card may ship a stub: docs, examples, diagnostics, tests, and verification must land with behavior.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e6",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "Plan seed from D-WD12:\n1. Re-read the ratified ballot and current spec/Tower plans for overlap.\n2. Split into vertical slices if the feature spans compiler, Core, Jetpack, GUI, and OS surfaces.\n3. Queue exact-syntax/subsurface ballots before parser, manifest, CLI, or API surface changes.\n4. Implement the first ungated vertical slice end to end with executable examples and diagnostics.\n5. Prove beginner default UX and expert audit/control UX with tests or transcripts.",
+      "blockedBy": [],
+      "workOrder": 621,
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "Created from ratified D-WD12=B on umbrella #228."
+        }
+      ],
+      "created": "2026-07-06T19:15:48.960Z",
+      "updated": "2026-07-06"
+    },
+    {
+      "id": "ccq07pav",
+      "num": 241,
+      "title": "Typed performance budget profiles",
+      "body": "Ratified decision: D-WD14 = B (Typed budgets (recommended)).\nSource ballot: tools/Tower/docs/ballots/world-domination-review-2026-07-06.md.\n\nWhether performance expectations are declared and enforced as product facts.\n\nChosen direction: Budgets attach to packages/envs/services and feed build, bench, dev, dossier, and CI. Weakness fixed: deterministic budgets are hard gates; statistical budgets use pinned baselines and trend policy.\n\nGuardrails:\n- Preserve magic defaults plus full expert control from the ballot.\n- Before adding any new user-typeable syntax, manifest field, command spelling, marker, provider prefix, or diagnostic code, raise a follow-up Tower ballot.\n- No implementation card may ship a stub: docs, examples, diagnostics, tests, and verification must land with behavior.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e6",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": "Plan seed from D-WD14:\n1. Re-read the ratified ballot and current spec/Tower plans for overlap.\n2. Split into vertical slices if the feature spans compiler, Core, Jetpack, GUI, and OS surfaces.\n3. Queue exact-syntax/subsurface ballots before parser, manifest, CLI, or API surface changes.\n4. Implement the first ungated vertical slice end to end with executable examples and diagnostics.\n5. Prove beginner default UX and expert audit/control UX with tests or transcripts.",
+      "blockedBy": [],
+      "workOrder": 622,
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "Created from ratified D-WD14=B on umbrella #228."
+        }
+      ],
+      "created": "2026-07-06T19:15:48.960Z",
+      "updated": "2026-07-06"
+    },
+    {
+      "id": "cdq08h16",
+      "num": 242,
+      "title": "Compatibility-proved native replacement overlays",
+      "body": "Ratified decision: D-WD15 = B (Compatibility-proved overlays (recommended)).\nSource ballot: tools/Tower/docs/ballots/world-domination-review-2026-07-06.md.\n\nHow Jet replaces foreign packages with native Jet without changing call sites.\n\nChosen direction: A Jet package declares it replaces a foreign surface only after compatibility proof over public types, effects, errors, examples, and golden fixtures. Weakness fixed: semantic mismatch is visible before the overlay is allowed.\n\nGuardrails:\n- Preserve magic defaults plus full expert control from the ballot.\n- Before adding any new user-typeable syntax, manifest field, command spelling, marker, provider prefix, or diagnostic code, raise a follow-up Tower ballot.\n- No implementation card may ship a stub: docs, examples, diagnostics, tests, and verification must land with behavior.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "Plan seed from D-WD15:\n1. Re-read the ratified ballot and current spec/Tower plans for overlap.\n2. Split into vertical slices if the feature spans compiler, Core, Jetpack, GUI, and OS surfaces.\n3. Queue exact-syntax/subsurface ballots before parser, manifest, CLI, or API surface changes.\n4. Implement the first ungated vertical slice end to end with executable examples and diagnostics.\n5. Prove beginner default UX and expert audit/control UX with tests or transcripts.",
+      "blockedBy": [],
+      "workOrder": 505,
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "Created from ratified D-WD15=B on umbrella #228."
+        }
+      ],
+      "created": "2026-07-06T19:15:48.960Z",
+      "updated": "2026-07-06"
+    },
+    {
+      "id": "c0yfycf0",
+      "num": 243,
+      "title": "Decision: implement fallible fn run() ratification",
+      "body": "Audit found S80 ratified in the language law while current semantic checks still reject a fallible entrypoint. Owner needs one source of truth before agents patch docs or compiler behavior.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": "cleanup-ballot-s80-run",
+      "blockedBy": [],
+      "workOrder": 81000,
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-06",
+          "text": "All decisions ratified; advanced out of deciding."
+        }
+      ],
+      "created": "2026-07-06T19:40:23.152Z",
+      "updated": "2026-07-06"
+    },
+    {
+      "id": "c008rjua",
+      "num": 244,
+      "title": "Decision: web backend must lower through TIR",
+      "body": "Audit found web code paths that can drift from R7/R12 by emitting from AST-shaped data instead of the same executable TIR as dev/JIT/AOT. Owner needs to decide whether web gets a carve-out.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": "cleanup-ballot-web-tir",
+      "blockedBy": [],
+      "workOrder": 81010,
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-06",
+          "text": "All decisions ratified; advanced out of deciding."
+        }
+      ],
+      "created": "2026-07-06T19:40:23.261Z",
+      "updated": "2026-07-06"
+    },
+    {
+      "id": "c01zneco",
+      "num": 245,
+      "title": "Decision: remove regex from jet-comptime",
+      "body": "Audit found a compiler-adjacent external dependency in `jet-comptime`. If this path owns compile-time semantics, I6 needs either cleanup or an owner-approved carve-out.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": "cleanup-ballot-comptime-regex",
+      "blockedBy": [],
+      "workOrder": 81020,
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-06",
+          "text": "All decisions ratified; advanced out of deciding."
+        }
+      ],
+      "created": "2026-07-06T19:40:23.366Z",
+      "updated": "2026-07-06"
+    },
+    {
+      "id": "c03r9twk",
+      "num": 246,
+      "title": "Decision: freeze jetos-only syntax until research clears",
+      "body": "Audit found roadmap language saying jetos is research/frozen while syntax law and plans include jetos-facing surface. Owner needs to choose whether those spellings are live law or research examples.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": "cleanup-ballot-jetos-freeze",
+      "blockedBy": [],
+      "workOrder": 81030,
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-06",
+          "text": "All decisions ratified; advanced out of deciding."
+        }
+      ],
+      "created": "2026-07-06T19:40:23.473Z",
+      "updated": "2026-07-06"
+    },
+    {
+      "id": "c05kimvm",
+      "num": 247,
+      "title": "Decision: require reasons on Unsafe gates",
+      "body": "Audit found the invariant spelling requires `#Unsafe(\"reason\")`, but parser/docs need a single rule for bare Unsafe and function-level Unsafe.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": "cleanup-ballot-unsafe-reason",
+      "blockedBy": [],
+      "workOrder": 81040,
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-06",
+          "text": "All decisions ratified; advanced out of deciding."
+        }
+      ],
+      "created": "2026-07-06T19:40:23.583Z",
+      "updated": "2026-07-06"
+    },
+    {
+      "id": "c07cc0xi",
+      "num": 248,
+      "title": "Decision: canonical collection type spellings",
+      "body": "Audit found `List<T>`/`List[Task]`/`Map<K,V>` style prose beside bracket collection forms. This is user-typeable syntax, so owner decides the canonical path before cleanup.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": "cleanup-ballot-list-map",
+      "blockedBy": [],
+      "workOrder": 81050,
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-06",
+          "text": "All decisions ratified; advanced out of deciding."
+        }
+      ],
+      "created": "2026-07-06T19:40:23.690Z",
+      "updated": "2026-07-06"
+    },
+    {
+      "id": "c0960ixv",
+      "num": 249,
+      "title": "Decision: bench marker argument shape",
+      "body": "Audit found `#Bench \"name\"` as an outlier beside paren marker calls like `#Test(\"name\")`. Owner decides whether Bench is an intentional exception.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": "cleanup-ballot-bench-marker",
+      "blockedBy": [],
+      "workOrder": 81060,
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-06",
+          "text": "All decisions ratified; advanced out of deciding."
+        }
+      ],
+      "created": "2026-07-06T19:40:23.800Z",
+      "updated": "2026-07-06"
+    },
+    {
+      "id": "c0b193fq",
+      "num": 250,
+      "title": "Decision: runtime layer naming without std",
+      "body": "Audit found public wording/config using `std` as a runtime layer while docs also say never use std/stdlib for Core. Owner needs one naming rule.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": "cleanup-ballot-runtime-layer-name",
+      "blockedBy": [],
+      "workOrder": 81070,
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-06",
+          "text": "All decisions ratified; advanced out of deciding."
+        }
+      ],
+      "created": "2026-07-06T19:40:23.913Z",
+      "updated": "2026-07-06"
+    },
+    {
+      "id": "c0cts3wa",
+      "num": 251,
+      "title": "Cleanup: current-law spec grammar sweep",
+      "body": "Sweep `docs/spec/spec.md` and adjacent spec prose for stale grammar: retired `~`, prefix labels, old dispatch examples, `main`, `std` wording, and placeholders that no longer match syntax decisions. Acceptance: every example either compiles under current law or is explicitly labeled foreign/research/staged.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "cleanup-spec-grammar-current-law",
+      "blockedBy": [],
+      "workOrder": 82000,
+      "assignee": null,
+      "log": [],
+      "created": "2026-07-06T19:40:24.021Z",
+      "updated": "2026-07-06"
+    },
+    {
+      "id": "c0dow3j1",
+      "num": 252,
+      "title": "Cleanup: CLI command registry single source",
+      "body": "Remove/merge the stale `Source/CLISpec.rs` registry beside `Source/main.rs` and add a guard that prevents a second command registry from reappearing. Acceptance: help/dispatch docs/tests read from one source.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "cleanup-cli-single-registry",
+      "blockedBy": [],
+      "workOrder": 82010,
+      "assignee": null,
+      "log": [],
+      "created": "2026-07-06T19:40:24.074Z",
+      "updated": "2026-07-06"
+    },
+    {
+      "id": "c0ek7qxw",
+      "num": 253,
+      "title": "Cleanup: diagnostics registry dedupe and guard",
+      "body": "Deduplicate diagnostics codes and align stale references: known audit hits include `E3101`, `E2101`/`E2102`/`L2101`, and `E0956`. Add a duplicate-code-row test for `docs/spec/diagnostics.md`.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "cleanup-diagnostics-registry-guard",
+      "blockedBy": [],
+      "workOrder": 82020,
+      "assignee": null,
+      "log": [],
+      "created": "2026-07-06T19:40:24.126Z",
+      "updated": "2026-07-06"
+    },
+    {
+      "id": "c0feknxg",
+      "num": 254,
+      "title": "Cleanup: reserved filename and role-module canon sweep",
+      "body": "Reconcile `env.jet`, `workspace.jet`, role-module docs, and plans with D-JPK-FILENAME2 and D-JPK-MODBODY1. Acceptance: no doc teaches a reserved filename or module body shape outside the ratified law.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "cleanup-reserved-filename-role-modules",
+      "blockedBy": [],
+      "workOrder": 82030,
+      "assignee": null,
+      "log": [],
+      "created": "2026-07-06T19:40:24.177Z",
+      "updated": "2026-07-06"
+    },
+    {
+      "id": "c0gb9bdv",
+      "num": 255,
+      "title": "Cleanup: open ballot queue regeneration",
+      "body": "Regenerate or delete stale open-ballot prose in `tools/Tower/docs/ballots/decision-ballots.md`, including stale `D-FILES-APPEND1`, so the document mirrors live Tower decisions instead of preserving old queue state.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": "cleanup-ballot-queue-regeneration",
+      "blockedBy": [],
+      "workOrder": 82040,
+      "assignee": null,
+      "log": [],
+      "created": "2026-07-06T19:40:24.232Z",
+      "updated": "2026-07-06"
+    },
+    {
+      "id": "c0h70w7o",
+      "num": 256,
+      "title": "Cleanup: syntax reconciliation guard expansion",
+      "body": "Expand `tests/syntax_reconciliation.rs` coverage beyond the current narrow needles so `docs/spec`, diagnostics text, Source/crates docs, examples, and UI fixtures cannot retain retired spellings silently.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "cleanup-syntax-reconciliation-guard",
+      "blockedBy": [],
+      "workOrder": 82050,
+      "assignee": null,
+      "log": [],
+      "created": "2026-07-06T19:40:24.286Z",
+      "updated": "2026-07-06"
+    },
+    {
+      "id": "c0i3x9hd",
+      "num": 257,
+      "title": "Cleanup: TIR wording and stale fallback references",
+      "body": "Replace stale comments/docs/tests that describe AST fallback paths with current TIR-only wording, or mark historical fixtures as pre-c109 reference output. Acceptance: no active plan implies AST fallback is still a valid execution path.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": "cleanup-tir-wording-fallbacks",
+      "blockedBy": [],
+      "workOrder": 82060,
+      "assignee": null,
+      "log": [],
+      "created": "2026-07-06T19:40:24.341Z",
+      "updated": "2026-07-06"
+    },
+    {
+      "id": "c0iz6z6g",
+      "num": 258,
+      "title": "Cleanup: world-domination plan slicing",
+      "body": "Split generic world-domination seeds (#229-242) into concrete plan docs or vertical slices, and make D-WD2 an umbrella over existing D-DOSSIER1 instead of a duplicate reporting mechanism.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": "cleanup-world-domination-slicing",
+      "blockedBy": [],
+      "workOrder": 82070,
+      "assignee": null,
+      "log": [],
+      "created": "2026-07-06T19:40:24.393Z",
+      "updated": "2026-07-06"
+    },
+    {
+      "id": "c0jukau5",
+      "num": 259,
+      "title": "Cleanup: core/std naming rubric sweep",
+      "body": "Apply the Core naming law consistently: fix `docs/spec/stdlib-api-laws.md` title/body drift, acronym conflicts with S66, stale `&mut` wording, and any user-facing `std`/`stdlib` copy not covered by a ratified exception.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "cleanup-core-std-naming-rubric",
+      "blockedBy": [],
+      "workOrder": 82080,
+      "assignee": null,
+      "log": [],
+      "created": "2026-07-06T19:40:24.446Z",
+      "updated": "2026-07-06"
+    },
+    {
+      "id": "c0kqui18",
+      "num": 260,
+      "title": "Cleanup: formal core placeholder sweep",
+      "body": "Replace retired `let`/`match`/`for` placeholders in formal-core docs with canonical Jet forms, or label them clearly as foreign/math notation. Acceptance: formal docs no longer teach retired Jet syntax by accident.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": "cleanup-formal-core-placeholders",
+      "blockedBy": [],
+      "workOrder": 82090,
+      "assignee": null,
+      "log": [],
+      "created": "2026-07-06T19:40:24.500Z",
       "updated": "2026-07-06"
     }
   ],
@@ -13810,74 +14640,6 @@
       "status": "ratified",
       "outcome": "A",
       "ratifiedAt": "2026-06-27"
-    },
-    {
-      "id": "D-ASKCODE1",
-      "cardId": "c27iyznj",
-      "title": "Should Jet build a query engine for structural/semantic questions over the codebase?",
-      "gist": "A query engine would answer 'where can balance go negative?' by running structured queries over the semantic index. D-SEMINDEX1 (E4), D-IMPACT1, and D-CODEMOD1 are already ratified, forming the tooling stack this would sit on top of. The real question has two parts the ballot conflates: (1) timing — after the index ships (B) or now (A); and (2) surface — a new string DSL (new syntax ballot required, I8 risk) or typed Jet closures over the index API (I8-correct, no new syntax). If the answer to (2) is typed closures, the design can proceed now as a core.index core library module without a DSL ballot. If the answer is a string DSL, B is the correct sequencing. Extending the already-ratified `jet impact` with predicate filters (Option E) may cover the use case without any of these risks.",
-      "explainer": "This feature depends entirely on the semantic-index API existing and exposing the right dataflow/effects information. Without that foundation it cannot be built. If the semantic index is designed well, a query layer is a natural extension — it becomes the primary way to drive impact-analysis, refactoring tools, and the LSP. The crux here is not whether this is a good idea (it is) but whether to plan it now or wait until the semantic-index API is stable. Sequencing risk: if we design the query DSL before the index API is settled, the query layer will need to be reworked. The safe path is to ratify the semantic-index API first, then return here.",
-      "story": "I refactored a shared Account struct and I want to know every path through the codebase where the balance field could go negative — not just 'who reads it' but 'who can write a negative value to it'.",
-      "inWild": "// Hypothetical query (depends on semantic-index API)\njet query 'mutations(Account.balance) where value < 0'\n// Output:\n// src/billing.jet:142  withdrawal() — unchecked subtraction\n// src/refunds.jet:87   apply_refund() — no floor check",
-      "detail": "Adversarial pass (2026-06-28): Three decisions in the query engine's dependency chain are now ratified — D-SEMINDEX1 (E4 exit criterion), D-IMPACT1, D-CODEMOD1. Key findings: (1) Option A's \"design with queries in mind\" argument is moot; the index is already designed. (2) A string-based query DSL requires a separate D-* syntax ballot (I7) before Option A can be implemented. (3) I8 risk: typed Jet closures over the index API cover the query use case without a second mechanism. (4) D-IMPACT1 already enumerates write sites for a field; the query engine's unique value is predicate filtering, which Option E (extend `jet impact --where`) covers without a new CLI command or DSL. (5) Options B and D are now concretely distinguishable: B ≈ Epoch 5, D ≈ Epoch 6+.",
-      "options": [
-        {
-          "key": "A",
-          "name": "Extend `jet impact --where <jet-expression>` — no new command or DSL (recommended)",
-          "detail": "D-IMPACT1 (ratified) already enumerates call sites, write sites, and dependents. The query engine's unique value is predicate-based semantic filtering on top of that enumeration. Extend `jet impact` with a `--where` clause accepting typed Jet expression syntax, type-checked by sema against the semantic index model. Avoids: a new top-level `jet query` CLI command, an I8 violation (two codebase-introspection mechanisms), a new syntax ballot (predicate is Jet, not a string DSL), and sequencing risk of designing a DSL before the index is stable. Gates on D-SEMINDEX1/c96 (Epoch 4 exit criterion).",
-          "code": "$ jet impact Account.balance --where \"value < 0\"\nsrc/billing.jet:142  withdrawal() — unchecked subtraction\nsrc/refunds.jet:87   apply_refund() — no floor check\n\n// Type-checked at sema against the semantic index model\n// No new CLI command; extends ratified jet impact\n// Gates on D-SEMINDEX1/c96 (Epoch 4)"
-        },
-        {
-          "key": "B",
-          "name": "Defer until semantic index ships (Epoch 5)",
-          "detail": "No meaningful query layer design is possible without knowing the index's type model and data shape. D-SEMINDEX1 is an Epoch 4 exit criterion; earliest meaningful design point is Epoch 5. At that point, a full D-* ballot for the query DSL surface (I7 compliance) opens. The typed-closure vs string-DSL question must be answered there. Interim: `jet lsp references` + manual grep.",
-          "code": "// Status quo: manual grep / LSP references\njet lsp references Account.balance\n// returns raw reference list, no semantic filtering\n// Epoch 5 revisit: jet impact --where / typed query surface"
-        },
-        {
-          "key": "C",
-          "name": "Expose a typed `core.index.SemanticIndex` API — no CLI command",
-          "detail": "Expose a stable `core.index.SemanticIndex` type in the core library. Queries are typed Jet closures over that type — no DSL, no new syntax, no I8 conflict. Beginners get IDE completion and type errors. Experts get the full Jet language as the predicate expression. This makes Option A's `--where` surface trivially implementable on top later. Gates on the same D-SEMINDEX1/c96 dependency.",
-          "code": "import core.index\n\njet_index.query(codebase, fn(node) {\n    node.kind == .write\n    && node.field == \"balance\"\n    && node.value < 0\n})"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Best current",
-          "note": "Sourcegraph and CodeQL answer semantic codebase questions over indexed program graphs.",
-          "code": "repo query: callers of foo"
-        },
-        {
-          "lang": "Kythe (Google)",
-          "note": "Cross-language semantic index with a graph query API. Query engine is a separate layer built on top of the index. Jet would follow the same separation.",
-          "code": "// Kythe query (simplified)\n/kythe/node?ticket=kythe://corpus?path=src/billing.go#balance"
-        },
-        {
-          "lang": "CodeQL (GitHub)",
-          "note": "Separate query language (QL) over a relational semantic model of the codebase. Flagship differentiator for security/refactoring at scale.",
-          "code": "from MethodAccess ma\nwhere ma.getMethod().getName() = \"withdraw\"\n  and not ma.getArgument(0).isPositive()\nselect ma"
-        }
-      ],
-      "rec": "A",
-      "status": "ratified",
-      "group": "tooling",
-      "bestCurrent": "Sourcegraph / CodeQL: Sourcegraph and CodeQL answer semantic codebase questions over indexed program graphs.",
-      "recommendation": "Extend the ratified `jet impact` with `--where` predicate filters — no new command, no string DSL, no I8 violation (Option A). Gates on D-SEMINDEX1/c96 stability.",
-      "log": [
-        {
-          "at": "2026-06-28",
-          "text": "Ballot cleanup: rec key fixed, detail deduplicated, naming corrected."
-        },
-        {
-          "at": "2026-06-28",
-          "text": "Adversarial pass complete: options hardened, challenges documented in detail field."
-        },
-        {
-          "at": "2026-06-28",
-          "text": "Ballot tightened: collapsed to 3 options, Option A is the unified optimal recommendation (adversarial pass + recommendation fused), rec moved to A."
-        }
-      ],
-      "outcome": "B",
-      "ratifiedAt": "2026-06-28"
     },
     {
       "id": "D-CADEFS1",
@@ -25017,6 +25779,1149 @@
       "created": "2026-07-06T17:16:20.782Z",
       "outcome": "A",
       "ratifiedAt": "2026-07-06"
+    },
+    {
+      "id": "D-WD1",
+      "cardId": "c07589v1",
+      "group": "safety",
+      "title": "Universal trust grants",
+      "gist": "How Jet shows and controls package, build, environment, and OS authority.",
+      "explainer": "Best of both worlds: magic default summary for Betty, full authority graph for Hank, one revocable model everywhere.",
+      "story": "Betty opens a new web-service repo. It wants to fetch npm packages, run one build recipe, start Postgres, and decrypt two dev secrets. She needs one plain trust screen; Hank on security needs the exact hosts, files, commands, cache keys, and revocation handle.",
+      "inWild": "module env.dev {\n    packages: [npm.vite, default.postgres]\n    services: { postgres: { enable: true, port: 5432 } }\n    secrets: { STRIPE_KEY: secret(\"stripe-dev\") }\n}\n\n$ jet dev\nTrust needed for env.dev\n  Network: npm registry\n  Build: vite postinstall blocked unless granted\n  Service: postgres on 5432\n  Secret: stripe-dev\nAllow once, always for this env hash, or inspect?",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Code effects only",
+          "detail": "`#(Net, Secret)` stays a language/runtime fact. Jetpack has separate prompts for package fetches, build recipes, services, secrets, and OS activation. This keeps language effects narrow but makes users learn multiple trust models.",
+          "code": "$ jet dev\npackage manager asks for network\nbuild asks for script permission\nservice manager asks to start postgres\nprogram asks for Secret effect"
+        },
+        {
+          "key": "B",
+          "name": "Unified grants (recommended)",
+          "detail": "One effect/grant graph spans code, packages, builds, envs, services, images, fleets, and jetos activation. Beginners see intent summaries; experts expand to exact authority and policy. Weakness fixed: prompt overload is collapsed by intent, with deep audit one key away.",
+          "code": "$ jet dev\nTrust env.dev?  npm network, vite build recipe, postgres service, stripe-dev secret\n  [allow once] [allow for this env hash] [inspect]\n\n$ jet grant inspect env.dev\nnetwork: registry.npmjs.org\ncommands: vite build recipe\nservice: postgres:5432\nsecret: stripe-dev\ncache key: sha256:..."
+        },
+        {
+          "key": "C",
+          "name": "CLI permissions only",
+          "detail": "Use Deno-style flags such as `--allow-net` and `--allow-secret` for runtime code. Familiar for scripts, but package/build/env/OS authority remains outside the same model.",
+          "code": "$ jet run app.jet --allow-net=api.stripe.com --allow-secret=STRIPE_KEY\n$ jetpack enter   # separate trust model for packages/services"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Deno",
+          "note": "Clear scoped runtime permissions, but package/build/env/OS authority is not the same graph.",
+          "code": "deno run --allow-net=example.com main.ts"
+        },
+        {
+          "lang": "npm",
+          "note": "Install scripts have broad historical trust problems; Jet should default-deny and summarize intent.",
+          "code": "npm install"
+        },
+        {
+          "lang": "Nix",
+          "note": "Sandboxing is strong, but the authority model is not beginner-visible as one product surface.",
+          "code": "nix build"
+        }
+      ],
+      "rec": "B",
+      "status": "ratified",
+      "created": "2026-07-06T19:06:52.352Z",
+      "outcome": "B",
+      "ratifiedAt": "2026-07-06"
+    },
+    {
+      "id": "D-WD2",
+      "cardId": "c07589v1",
+      "group": "tooling",
+      "title": "Semantic dossier",
+      "gist": "Whether every Jet artifact gets one explainable dossier view.",
+      "explainer": "Beginner gets one command; expert gets precise lenses and machine-readable facts.",
+      "story": "Doris reviews a PR that changes a server type and an env module. She wants API drift, effects, dependency graph, generated code, migrations, performance budgets, and deployment impact without remembering six commands. Earl still wants stable JSON for CI.",
+      "inWild": "$ jet dossier src/server.jet\nFacts\n  public API: 2 changed functions\n  effects: Net added to charge()\n  generated: 1 Codable derive\n  package graph: stripe-sdk updated\n  env impact: env.dev gains STRIPE_KEY\n\n$ jet dossier src/server.jet --lens effects --json",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Separate commands only",
+          "detail": "Keep `semindex`, `expand`, `graph`, `audit`, `bench`, and Jetpack explain commands separate. Experts can compose them, but beginners do not know where to start.",
+          "code": "$ jet semindex --json\n$ jet graph\n$ jet audit\n$ jet expand --facts inline\n$ jet explain-build server"
+        },
+        {
+          "key": "B",
+          "name": "Dossier umbrella (recommended)",
+          "detail": "`jet dossier` is one beginner command over named existing fact lenses. Experts keep stable lens names and JSON schemas. Weakness fixed: no junk drawer because every section must be owned by an existing fact producer.",
+          "code": "$ jet dossier package api\napi - public changes\nbuild - cache/provenance\nruntime - effects/budgets\ndeploy - env/image/system impact\n\n$ jet dossier package api --lens build --json"
+        },
+        {
+          "key": "C",
+          "name": "IDE-only dossier",
+          "detail": "Show dossiers in editor panels only. This is discoverable in rich UI, but CLI review and CI lose the same first-class view.",
+          "code": "# Editor: Dossier panel\n# CLI fallback: use semindex/graph/audit manually"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Cargo",
+          "note": "`cargo tree` is useful but only covers dependency shape.",
+          "code": "cargo tree -d"
+        },
+        {
+          "lang": "Nix",
+          "note": "Derivation graphs exist, but users often need extra tooling to understand impact.",
+          "code": "nix why-depends"
+        },
+        {
+          "lang": "Jet",
+          "note": "Jet already has semindex/expand/build/audit facts; the missing piece is one product view.",
+          "code": "jet dossier src/server.jet"
+        }
+      ],
+      "rec": "B",
+      "status": "ratified",
+      "created": "2026-07-06T19:06:52.370Z",
+      "outcome": "B",
+      "ratifiedAt": "2026-07-06"
+    },
+    {
+      "id": "D-WD3",
+      "cardId": "c07589v1",
+      "group": "tooling",
+      "title": "Strict package graph and catalogs",
+      "gist": "How Jetpack prevents hidden dependencies and workspace version drift.",
+      "explainer": "Strict by default plus catalogs gives correctness and low-update toil.",
+      "story": "Priya maintains a monorepo with 40 packages. A test passes because a root env happened to expose a tool. The release package does not declare it, so CI fails later. She wants strictness without version-update busywork.",
+      "inWild": "module workspace {\n    catalog: {\n        http: \"2.4.1\"\n        ui: \"1.8.0\"\n    }\n    members: find(\"./packages\")\n}\n\ndeps: { http: catalog.http }",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Ambient workspace visibility",
+          "detail": "Packages can see tools/deps installed at the workspace or env root. Beginner friction is low, but hidden dependencies return.",
+          "code": "module env.dev { packages: [default.protoc] }\n# package api can call protoc even though api never declared it"
+        },
+        {
+          "key": "B",
+          "name": "Strict graph plus catalogs (recommended)",
+          "detail": "Each package sees only declared deps; catalogs centralize shared versions. Weakness fixed: the error offers one command to add the missing dep to the right package or catalog.",
+          "code": "Error [E12xx]: package api used protoc but did not declare it\n Why: packages only see their own declared graph\n Fix: run jet add protoc --to api, or add it to workspace catalog\n\n$ jet add http --catalog backend"
+        },
+        {
+          "key": "C",
+          "name": "Per-package locks only",
+          "detail": "Every member owns its versions and lock. Isolation is clear, but monorepo-wide upgrades and duplicate-version control get worse.",
+          "code": "packages/api/.jet/lock\npackages/web/.jet/lock\n# http appears at 2.3.0 and 2.4.1 until manually reconciled"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "pnpm",
+          "note": "Strict dependency visibility and catalogs are praised for reducing hidden deps and duplicated versions.",
+          "code": "dependencies: { \"react\": \"catalog:\" }"
+        },
+        {
+          "lang": "Cargo",
+          "note": "Workspaces share resolution, but feature/version unification can surprise users.",
+          "code": "cargo tree -d"
+        },
+        {
+          "lang": "Python",
+          "note": "Virtualenv isolation helps, but project/workspace version policy is spread across tools.",
+          "code": "python -m venv .venv"
+        }
+      ],
+      "rec": "B",
+      "status": "ratified",
+      "created": "2026-07-06T19:06:52.388Z",
+      "outcome": "B",
+      "ratifiedAt": "2026-07-06"
+    },
+    {
+      "id": "D-WD4",
+      "cardId": "c07589v1",
+      "group": "tooling",
+      "title": "Explainable lockfiles",
+      "gist": "How `.jet/lock` is inspected, reviewed, and merged.",
+      "explainer": "Exact machine identity plus human explanation gives reproducibility and reviewability.",
+      "story": "Amara rebases a package update and sees a lock conflict. She should not edit hashes or rerun a resolver blindly; she needs to know which package pulled the change, why it is safe, and what command reconciles it.",
+      "inWild": "$ jet lock explain textkit\ntextkit 1.4.2\n  required by: api, cli\n  selected by: catalog.text\n  integrity: sha256:...\n  cache: hit linux.x64\n\n$ jet lock merge\nconflict: textkit version vs feature policy\nFix: choose catalog bump, keep old version, or split policy",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Generated lock only",
+          "detail": "Treat lock conflicts as generated-file churn: rerun the resolver. Reproducibility stays, but intent and reviewability stay weak.",
+          "code": "$ jet update\n# .jet/lock rewritten; reviewer sees hashes and versions only"
+        },
+        {
+          "key": "B",
+          "name": "Explainable semantic lock (recommended)",
+          "detail": "Lock entries carry exact identity plus human rationale: owner package, policy, source, provenance, hash, platform, update command. Weakness fixed: rationale is separate from deterministic identity so review can collapse unchanged metadata.",
+          "code": "$ jet lock why-dupe regex\nregex 1.x used by legacy-parser\nregex 2.x used by web-router\nFix: jet update regex --unify, or add split-policy reason\n\n$ jet lock merge --explain"
+        },
+        {
+          "key": "C",
+          "name": "Human-authored lock",
+          "detail": "Users edit lock decisions directly. This is transparent, but risks invalid/tampered identity and breaks generated integrity.",
+          "code": ".jet/lock:\n  textkit: 1.4.2   # edited manually"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Cargo",
+          "note": "Manifest stays broad, lock stores exact versions.",
+          "code": "Cargo.toml + Cargo.lock"
+        },
+        {
+          "lang": "npm",
+          "note": "Package lock records exact install tree and is committed.",
+          "code": "package-lock.json"
+        },
+        {
+          "lang": "Research",
+          "note": "Lockfile studies report maintenance and interpretation pain; Jet can make that a product surface.",
+          "code": "jet lock explain"
+        }
+      ],
+      "rec": "B",
+      "status": "ratified",
+      "created": "2026-07-06T19:06:52.405Z",
+      "outcome": "B",
+      "ratifiedAt": "2026-07-06"
+    },
+    {
+      "id": "D-WD5",
+      "cardId": "c07589v1",
+      "group": "tooling",
+      "title": "Migration importers",
+      "gist": "Whether Jet adoption gets first-class importers from other ecosystems.",
+      "explainer": "Best path: instant on-ramp, editable source, and visible native replacement.",
+      "story": "Walter has a TypeScript app, Python data scripts, a Rust CLI, a Nix flake, and a Dockerfile. Jet should let him consume, coexist, and replace incrementally, with generated Jet he can inspect and edit.",
+      "inWild": "$ jet import package.json\n$ jet import pyproject.toml\n$ jet import Cargo.toml\n$ jet import flake.nix\n$ jet import Dockerfile\n\n# generated role modules + deps + adapters + TODO diagnostics",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Manual migration guides",
+          "detail": "Document how to rewrite projects by hand. This keeps generated source out, but adoption starts with a cliff.",
+          "code": "# docs: Translating package.json to pkg.jet\n# user writes everything by hand"
+        },
+        {
+          "key": "B",
+          "name": "Editable importers (recommended)",
+          "detail": "Importers generate role modules, deps, adapters, FFI stubs, and TODO diagnostics. Weakness fixed: output is canonical Jet source, not hidden compat state; `jet migrate native` tracks replacement progress.",
+          "code": "$ jet import package.json\ncreated pkg.jet\ncreated modules/env.web.jet\ncreated .jet/bindings/js/plotly.jet\nTODO [JSMIG1]: package chartjs uses dynamic plugin loading; inspect stub"
+        },
+        {
+          "key": "C",
+          "name": "Runtime compatibility shims",
+          "detail": "Run foreign ecosystems mostly as-is under Jetpack. Fast start, but projects stay foreign-shaped and native migration is not structural.",
+          "code": "deps: { app: node@\".\" }\n$ jet run node.app"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "TypeScript",
+          "note": "Won adoption by coexisting with JavaScript and preserving migration paths.",
+          "code": "allowJs + gradual typing"
+        },
+        {
+          "lang": "Nix",
+          "note": "Can consume many ecosystems, but translating a project still requires Nix knowledge.",
+          "code": "buildNpmPackage / poetry2nix"
+        },
+        {
+          "lang": "Docker",
+          "note": "Dockerfiles are a universal deployment input; Jet should import them into image role modules.",
+          "code": "FROM node:22"
+        }
+      ],
+      "rec": "B",
+      "status": "ratified",
+      "created": "2026-07-06T19:06:52.421Z",
+      "outcome": "B",
+      "ratifiedAt": "2026-07-06"
+    },
+    {
+      "id": "D-WD6",
+      "cardId": "c07589v1",
+      "group": "tooling",
+      "title": "Federated Jetpack providers",
+      "gist": "How Jetpack ingests npm, PyPI, Cargo, SwiftPM, Nix, GitHub, and binary sources.",
+      "explainer": "Jetpack gets global reach while keeping one authority graph.",
+      "story": "Noor wants numpy, plotly, ripgrep, raylib, and a GitHub binary tool in one reproducible env. She should get reach without inheriting each ecosystem's trust and install behavior.",
+      "inWild": "deps: {\n    numpy: py@\"==2.1\"\n    plotly: js@\"plotly.js@2\"\n    rg: nixpkgs@ripgrep\n}\n\nmodule env.dev {\n    packages: [Pkg.adapt(name: \"weirdctl\", source: github@acme/weirdctl#abc,\n        recipe: Recipe.prebuilt(bin: \"weirdctl\"))]\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Jet registry first",
+          "detail": "Only Jet registry and manual adapters are first-class. Native purity is high, but users cannot tap the world's useful software immediately.",
+          "code": "deps: { textkit: \"1.0\" }\n# numpy/plotly require hand adapters"
+        },
+        {
+          "key": "B",
+          "name": "Federated providers under Jetpack authority (recommended)",
+          "detail": "Foreign registries are metadata sources; Jetpack owns fetch, lock, sandbox, build effects, signatures, audit, and replacement overlays. Weakness fixed: broad reach does not grant broad trust.",
+          "code": "$ jet add py:numpy\nlocked: pypi numpy 2.1 sha256:...\npermissions: native extension, no install script granted\nreplacement: none yet"
+        },
+        {
+          "key": "C",
+          "name": "Shell out to native managers",
+          "detail": "Let npm/pip/cargo/swift run their own install flows inside envs. Reach is high, but lock/provenance/sandbox semantics fragment.",
+          "code": "$ jet env\nruns: npm install\nruns: pip install -r requirements.txt"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "npm/PyPI",
+          "note": "Unmatched reach, high supply-chain exposure.",
+          "code": "npm install / pip install"
+        },
+        {
+          "lang": "Nix",
+          "note": "Strong reproducibility and binary substitution, but separate language and package definitions.",
+          "code": "nixpkgs"
+        },
+        {
+          "lang": "Cargo",
+          "note": "Integrated package/build UX, but mostly Rust-only.",
+          "code": "cargo add serde"
+        }
+      ],
+      "rec": "B",
+      "status": "ratified",
+      "created": "2026-07-06T19:06:52.439Z",
+      "outcome": "B",
+      "ratifiedAt": "2026-07-06"
+    },
+    {
+      "id": "D-WD7",
+      "cardId": "c07589v1",
+      "group": "tooling",
+      "title": "jetos Studio",
+      "gist": "Whether declarative OS config gets a first-party GUI over canonical Jet modules.",
+      "explainer": "Best hybrid: GUI-first for beginners, source-first for truth and experts.",
+      "story": "Eli wants declarative Linux with rollback but does not want to learn the config language before enabling Steam, Flatpak, fonts, backups, and SSH. Mira is an expert and wants exact source diffs, options, and provenance.",
+      "inWild": "$ jetos studio\n# GUI toggles edit modules/system/laptop.jet\n\nmodule system.laptop {\n    packages: [default.steam, default.ghostty]\n    services: { openssh: { enable: true } }\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Text/CLI only",
+          "detail": "Keep OS management like NixOS: source files and commands. Experts are served; mainstream users face the language before the value.",
+          "code": "$ editor modules/system/laptop.jet\n$ jetos switch laptop"
+        },
+        {
+          "key": "B",
+          "name": "GUI writes Jet modules (recommended)",
+          "detail": "Studio is a source editor over typed modules: toggles, search, conflict fixes, and diff preview write canonical Jet. Weakness fixed: no split-brain JSON; expert mode opens exact module, option, graph, and provenance.",
+          "code": "jetos Studio:\n  Enable OpenSSH [on]\n  Preview diff:\n    services: { openssh: { enable: true } }\n  Apply -> writes modules/system/laptop.jet"
+        },
+        {
+          "key": "C",
+          "name": "GUI-owned state",
+          "detail": "The GUI stores its own config and exports Jet when asked. Beginner UI is clean, but source of truth splits immediately.",
+          "code": ".jetos/studio.json\n# export to Jet later"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "NixOS",
+          "note": "Rollback/declarative power, but code-first OS UX.",
+          "code": "configuration.nix"
+        },
+        {
+          "lang": "macOS/Windows",
+          "note": "Great settings UX, weak declarative reproducibility.",
+          "code": "System Settings"
+        },
+        {
+          "lang": "Home Assistant",
+          "note": "Friendly GUI plus YAML history shows both the promise and split-brain risk.",
+          "code": "UI edits config"
+        }
+      ],
+      "rec": "B",
+      "status": "ratified",
+      "created": "2026-07-06T19:06:52.456Z",
+      "outcome": "B",
+      "ratifiedAt": "2026-07-06"
+    },
+    {
+      "id": "D-WD8",
+      "cardId": "c07589v1",
+      "group": "runtime",
+      "title": "jetos proof before switch",
+      "gist": "How jetos tests OS changes before activation.",
+      "explainer": "Keep safe defaults without slowing harmless edits; experts can set policy.",
+      "story": "Ren updates GPU drivers and filesystem options. Before changing the boot default, they want a plan, VM boot, service health checks, and rollback proof. A tiny font package change should not feel like launching a moon mission.",
+      "inWild": "$ jetos switch laptop --plan\n$ jetos test laptop --vm\n$ jetos switch laptop --name pre-gpu\n$ jetos rollback",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Build/switch/rollback",
+          "detail": "Offer the NixOS-style baseline: build a generation, switch, and rollback. Good core, but risky classes are discovered after activation.",
+          "code": "$ jetos switch laptop\n$ jetos rollback"
+        },
+        {
+          "key": "B",
+          "name": "Risk-aware proof pipeline (recommended)",
+          "detail": "Plan/diff always; VM proof and rollback proof required for boot/kernel/filesystem/service-risk classes and CI policy. Weakness fixed: small edits stay light, dangerous edits get proof.",
+          "code": "$ jetos switch laptop\nPlan: boot/kernel risk detected\nFix: run jetos test laptop --vm, or policy override with #Unsafe(\"reason\")"
+        },
+        {
+          "key": "C",
+          "name": "GUI preview only",
+          "detail": "Show plan and risk in Studio. Friendly, but headless CI and server admins lose the same gate.",
+          "code": "jetos Studio: preview boot risk\n# no CLI proof artifact"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "NixOS",
+          "note": "`test`, `build-vm`, and rollback are loved primitives.",
+          "code": "nixos-rebuild test; nixos-rebuild build-vm"
+        },
+        {
+          "lang": "Kubernetes",
+          "note": "Rollout health and rollback are expected for services.",
+          "code": "kubectl rollout status"
+        },
+        {
+          "lang": "Jetpack",
+          "note": "Already models generations/hangar; jetos can add risk-aware activation.",
+          "code": "jetos generations"
+        }
+      ],
+      "rec": "B",
+      "status": "ratified",
+      "created": "2026-07-06T19:06:52.473Z",
+      "outcome": "B",
+      "ratifiedAt": "2026-07-06"
+    },
+    {
+      "id": "D-WD9",
+      "cardId": "c07589v1",
+      "group": "stdlib",
+      "title": "Typed data Core",
+      "gist": "Whether data analysis becomes a first-party Core domain.",
+      "explainer": "Native typed floor plus foreign accelerators gives reach now and conquest path later.",
+      "story": "June reads CSV, joins telemetry, computes stats, calls a Python model for one step, and ships a native dashboard. Jet should not require Python for the whole workflow, but should borrow Python reach while Core grows.",
+      "inWild": "use core.data\nuse core.stats\nuse py.numpy as np\n\nfn run() -> Unit ? {\n    rows :: data.csv<Row>(\"events.csv\")?\n    daily :: rows.group_by(.day).summarize(count: count(), p95: p95(.latency))\n    print(daily)\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Interop-only data",
+          "detail": "Use Python/R/JS packages for data work. Reach is immediate, but Jet has no native data identity.",
+          "code": "use py.pandas as pd\nfn run() { df :: pd.read_csv(\"events.csv\") }"
+        },
+        {
+          "key": "B",
+          "name": "Core data floor plus accelerators (recommended)",
+          "detail": "Ship typed tables/series/stats/plot basics in Core; Python/R/GPU bridges accelerate gaps. Weakness fixed: every bridge-heavy workflow exposes native replacement status.",
+          "code": "rows :: data.csv<Row>(\"events.csv\")?\nmodel :: py.sklearn.load(\"model.pkl\")\njet migrate native --domain data"
+        },
+        {
+          "key": "C",
+          "name": "SQL-only data",
+          "detail": "Make databases/query blocks the main data story. Strong for DBs, weak for notebooks, files, arrays, and local analysis.",
+          "code": "#Sql<Row> { select * from events }"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Python",
+          "note": "Wins data through batteries and ecosystem, but packaging/native deps leak friction.",
+          "code": "pandas / numpy"
+        },
+        {
+          "lang": "Julia",
+          "note": "Strong numeric syntax/perf, smaller ecosystem than Python.",
+          "code": "DataFrames.jl"
+        },
+        {
+          "lang": "R",
+          "note": "Excellent statistics workflow, less general systems/app story.",
+          "code": "tidyverse"
+        }
+      ],
+      "rec": "B",
+      "status": "ratified",
+      "created": "2026-07-06T19:06:52.488Z",
+      "outcome": "B",
+      "ratifiedAt": "2026-07-06"
+    },
+    {
+      "id": "D-WD10",
+      "cardId": "c07589v1",
+      "group": "stdlib",
+      "title": "Game development lane",
+      "gist": "Whether Jet gets a blessed game-dev substrate.",
+      "explainer": "Substrate plus replaceable backends gives beginner workflow and expert control.",
+      "story": "Imani builds a 2D game, then an editor, then a 3D prototype. She needs assets, hot reload, ECS, fixed-step simulation, input, audio, GPU, deterministic replay, and editor hooks without giving up low-level control.",
+      "inWild": "use core.game\n\nfn tick(world: &World, dt: Seconds) {\n    world.query(Position, Velocity).each((e) => {\n        e.Position += e.Velocity * dt\n    })\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Graphics bridge only",
+          "detail": "Bless `core.raylib`/graphics wrappers and let game architecture grow in packages. Good for samples, not a world-class game workflow.",
+          "code": "use core.raylib\nfn run() { raylib.draw_circle(...) }"
+        },
+        {
+          "key": "B",
+          "name": "Stable game substrate (recommended)",
+          "detail": "Core owns assets, ECS, input, fixed-step timing, replay, editor hooks, and budgets; renderer/audio/editor backends are packages. Weakness fixed: engine sprawl is avoided by making Core the substrate, not one monolithic engine.",
+          "code": "module game.app {\n    assets: find(\"assets\")\n    replay: deterministic\n    renderer: packages.wgpu\n}"
+        },
+        {
+          "key": "C",
+          "name": "Third-party engines only",
+          "detail": "Let Godot/Unity/custom engines bind to Jet. Interop works, but Jet does not become the best language for game code itself.",
+          "code": "use c.godot\n# Jet scripts foreign engine APIs"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Unity/Godot",
+          "note": "Great workflow and editors; language/runtime control is not Jet-shaped.",
+          "code": "scripts + editor"
+        },
+        {
+          "lang": "Rust",
+          "note": "Powerful but fragmented game ecosystem.",
+          "code": "bevy/rapier/wgpu"
+        },
+        {
+          "lang": "Zig/Odin/Jai",
+          "note": "Attract game devs through control and simple builds; Jet can add batteries and safety.",
+          "code": "manual engine stack"
+        }
+      ],
+      "rec": "B",
+      "status": "ratified",
+      "created": "2026-07-06T19:06:52.504Z",
+      "outcome": "B",
+      "ratifiedAt": "2026-07-06"
+    },
+    {
+      "id": "D-WD11",
+      "cardId": "c07589v1",
+      "group": "runtime",
+      "title": "Embedded and freestanding profiles",
+      "gist": "How Jet scales down to microcontrollers, kernels, and no-OS targets.",
+      "explainer": "One language, invisible defaults for beginners, complete target control for experts.",
+      "story": "Tessa writes firmware for a sensor board. She wants no allocator, fixed memory, volatile/MMIO gates, linker script control, panic policy, and the same Jet diagnostics. Her web teammates should never see any of it.",
+      "inWild": "#Target(Embedded.CortexM4)\nmodule system.board {\n    memory: { flash: 1024KiB, ram: 256KiB }\n    allocator: none\n    panic: abort\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Freestanding build flags",
+          "detail": "Expose `jet build --freestanding --target ...` and rely on low-level code when needed. Expert path exists; product guidance is thin.",
+          "code": "$ jet build firmware.jet --freestanding --target thumbv7em-none-eabihf"
+        },
+        {
+          "key": "B",
+          "name": "Typed target profiles (recommended)",
+          "detail": "Board/target profiles make hidden defaults explicit only when embedded/kernels are selected. Expert controls memory, linker, allocator, panic, volatile, and audit output. Weakness fixed: normal Jet never sees target jargon.",
+          "code": "module system.board {\n    target: embedded.cortex-m4\n    memory: { flash: 1024KiB, ram: 256KiB }\n    mmio: audit\n}"
+        },
+        {
+          "key": "C",
+          "name": "Separate Jet dialect",
+          "detail": "Make embedded Jet a different surface with its own defaults. It can be lean, but violates one-language identity.",
+          "code": "firmware.jet uses embedded-only syntax\napp.jet uses normal Jet syntax"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Zig",
+          "note": "Excellent target/control story.",
+          "code": "zig build-exe -target ..."
+        },
+        {
+          "lang": "Rust embedded",
+          "note": "Safe and powerful, but many crates/tool concepts surface early.",
+          "code": "no_std + embedded-hal"
+        },
+        {
+          "lang": "C",
+          "note": "Ubiquitous control with weak safety/default tooling.",
+          "code": "linker scripts + headers"
+        }
+      ],
+      "rec": "B",
+      "status": "ratified",
+      "created": "2026-07-06T19:06:52.520Z",
+      "outcome": "B",
+      "ratifiedAt": "2026-07-06"
+    },
+    {
+      "id": "D-WD12",
+      "cardId": "c07589v1",
+      "group": "safety",
+      "title": "Proof and replay mode",
+      "gist": "How Jet turns contracts, tests, budgets, and replay into a correctness product.",
+      "explainer": "Progressive proof preserves beginner ergonomics and gives experts real evidence.",
+      "story": "Omar ships payment code and a distributed job runner. He wants contract checks, property tests, budget enforcement, deterministic replay, and proof reports before deploy, without raw solver errors becoming the user interface.",
+      "inWild": "@Pre(amount > 0)\n@Post(result.authorized == true)\nfn charge(amount: Money) -> Receipt ? #(Net) { ... }\n\n$ jet prove src/payments.jet\n$ jet replay --from trace.jtr --until panic",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Tests and contracts only",
+          "detail": "Keep today's practical path: tests, contracts, and diagnostics. Useful, but proof/replay are not unified product surfaces.",
+          "code": "jet test\njet bench\n# replay/proof separate or absent"
+        },
+        {
+          "key": "B",
+          "name": "Progressive proof and replay (recommended)",
+          "detail": "`jet prove` layers contracts, refinements, effects, budgets, property tests, and replay facts. Weakness fixed: beginner face is tests/contracts/replay; deeper solvers are opt-in lenses with Jet diagnostics.",
+          "code": "$ jet prove src/payments.jet\nproved: @Pre/@Post for 12 funcs\nchecked: 4 budgets\nneeds test: network timeout path\n\n$ jet prove --lens bounds --json"
+        },
+        {
+          "key": "C",
+          "name": "Formal verification first",
+          "detail": "Make proof obligations central before code ships. Strong guarantees, but daily Jet becomes proof-tool-shaped.",
+          "code": "fn charge(...) -> Receipt\nproof { forall amount: Money where amount > 0 ... }"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Compile-time memory safety proof is a major adoption driver.",
+          "code": "borrow checker"
+        },
+        {
+          "lang": "Dafny/SPARK",
+          "note": "Strong verification, high ceremony.",
+          "code": "requires/ensures/proofs"
+        },
+        {
+          "lang": "Property testing",
+          "note": "Practical confidence with shrinking; Jet can integrate it with contracts.",
+          "code": "quickcheck/proptest"
+        }
+      ],
+      "rec": "B",
+      "status": "ratified",
+      "created": "2026-07-06T19:06:52.539Z",
+      "outcome": "B",
+      "ratifiedAt": "2026-07-06"
+    },
+    {
+      "id": "D-WD14",
+      "cardId": "c07589v1",
+      "group": "tooling",
+      "title": "Performance budget profiles",
+      "gist": "Whether performance expectations are declared and enforced as product facts.",
+      "explainer": "Budgets make performance visible without hiding expert policy knobs.",
+      "story": "Mei owns a latency-sensitive HTTP service. She wants startup, allocation, binary size, p99 latency, and generated-unsafe budgets in CI, with local runs that explain what changed.",
+      "inWild": "module perf.server {\n    budgets: {\n        startup: 20ms\n        alloc_per_request: 0\n        p99_latency: 5ms\n        binary_size: 3MiB\n    }\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Benchmarks only",
+          "detail": "Use `jet bench` and human review. Flexible, but regressions are easy to miss or debate.",
+          "code": "$ jet bench\np99_latency: 7ms"
+        },
+        {
+          "key": "B",
+          "name": "Typed budgets (recommended)",
+          "detail": "Budgets attach to packages/envs/services and feed build, bench, dev, dossier, and CI. Weakness fixed: deterministic budgets are hard gates; statistical budgets use pinned baselines and trend policy.",
+          "code": "$ jet build --release\nError [E14xx]: binary_size budget exceeded: 3.4MiB > 3MiB\nFix: inspect jet dossier --lens size, raise budget, or use profile small"
+        },
+        {
+          "key": "C",
+          "name": "Optimizer promises",
+          "detail": "Rely on compiler/runtime to optimize without user budgets. Nice default story, but no explicit contract for teams.",
+          "code": "$ jet build --release\n# no declared perf contract"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Go",
+          "note": "Simple deployment and predictable operational profile are valued.",
+          "code": "go test -bench"
+        },
+        {
+          "lang": "Rust",
+          "note": "Peak performance is excellent, but tuning often spreads across flags/crates/profilers.",
+          "code": "cargo bench + perf"
+        },
+        {
+          "lang": "Web tooling",
+          "note": "Bundle-size budgets are common because teams need explicit gates.",
+          "code": "size-limit"
+        }
+      ],
+      "rec": "B",
+      "status": "ratified",
+      "created": "2026-07-06T19:06:52.555Z",
+      "outcome": "B",
+      "ratifiedAt": "2026-07-06"
+    },
+    {
+      "id": "D-WD15",
+      "cardId": "c07589v1",
+      "group": "tooling",
+      "title": "Native replacement overlays",
+      "gist": "How Jet replaces foreign packages with native Jet without changing call sites.",
+      "explainer": "This turns interop into conquest: same surface, native implementation, proven fit.",
+      "story": "A team starts with `js.plotly` and `py.numpy`. Later `core.plot` and `core.linalg` mature. They need to swap implementations without rewriting every import and call.",
+      "inWild": "deps: {\n    plotly: js@\"plotly.js@2\"\n    plotly_native: core.plot replaces js.plotly\n}\n\n$ jet migrate native plotly",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Manual rewrites",
+          "detail": "Teams edit imports and call sites when native packages mature. Clear, but migration cost delays replacement.",
+          "code": "use js.plotly as plotly\n# later:\nuse core.plot as plotly\n# fix call mismatches by hand"
+        },
+        {
+          "key": "B",
+          "name": "Compatibility-proved overlays (recommended)",
+          "detail": "A Jet package declares it replaces a foreign surface only after compatibility proof over public types, effects, errors, examples, and golden fixtures. Weakness fixed: semantic mismatch is visible before the overlay is allowed.",
+          "code": "core.plot replaces js.plotly {\n    surface: generated(js.plotly)\n    examples: inherit\n}\n\n$ jet replace js.plotly with core.plot\nproved: 94% surface compatible\nblocked: dynamic plugin API needs adapter"
+        },
+        {
+          "key": "C",
+          "name": "Permanent interop",
+          "detail": "Keep foreign packages as normal forever. Reach stays high, but native Jet never absorbs the ecosystem.",
+          "code": "deps: { plotly: js@\"plotly.js@2\" }\n# no native replacement contract"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "TypeScript",
+          "note": "Preserved JavaScript surfaces while strengthening types.",
+          "code": "gradual replacement"
+        },
+        {
+          "lang": "Nix overlays",
+          "note": "Can replace package definitions, but not API compatibility.",
+          "code": "overlay = final: prev: { ... }"
+        },
+        {
+          "lang": "Cargo semver",
+          "note": "API compatibility matters; Jet can prove more with examples/effects.",
+          "code": "cargo semver-checks"
+        }
+      ],
+      "rec": "B",
+      "status": "ratified",
+      "created": "2026-07-06T19:06:52.578Z",
+      "outcome": "B",
+      "ratifiedAt": "2026-07-06"
+    },
+    {
+      "id": "D-S80-RUN1",
+      "cardId": "c0yfycf0",
+      "group": "syntax",
+      "title": "Optional run return and failure annotations",
+      "gist": "Whether beginners may keep bare `fn run()` while experts can type an explicit fallible entrypoint.",
+      "explainer": "`Unit` is Jet's \"nothing meaningful is returned\" type, like `void` in C/Java or `()` in Rust. A bare `fn run() { ... }` means `fn run() -> Unit { ... }` by default. The ballot is not asking whether beginners must write `Unit`; they do not. It asks whether experts may opt into the explicit fallible form `fn run() -> Unit ?`.",
+      "story": "Priya writes a tiny deploy tool. A beginner should type `fn run() { ... }` and never learn return-type ceremony. Later, Priya wants startup failure to flow with `?`, so she writes the expert form `fn run() -> Unit ?`. Both spell the same entrypoint name; the annotation only states what the function returns and whether failure can escape.",
+      "inWild": "// Beginner path: no return annotation, no failure ceremony.\nfn run() {\n    print(\"hello\")\n}\n\n// Expert path: explicit return type and fallible startup.\nfn run() -> Unit ? {\n    cfg :: File.read(\"deploy.toml\")?\n    deploy(cfg)?\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Bare run by default, explicit fallible run for experts",
+          "detail": "Beginners write `fn run() { ... }`. The compiler treats that as returning `Unit` and infallible. Experts may write `fn run() -> Unit ?` when startup can fail and they want `?` to propagate from the entrypoint. `run` remains the only entrypoint name.",
+          "code": "fn run() {\n    print(\"hello\")\n}\n\nfn run() -> Unit ? {\n    text :: File.read(\"config.toml\")?\n    print(text)\n}"
+        },
+        {
+          "key": "B",
+          "name": "Bare run only for now",
+          "detail": "Only `fn run() { ... }` is accepted today. Fallible startup must be handled inside the body. This keeps the entrypoint rule tiny, but makes normal CLI/file setup noisier once users need `?`.",
+          "code": "fn run() {\n    match File.read(\"config.toml\") == {\n        Ok(text) -> print(text)\n        Err(e) -> crash(e)\n    }\n}"
+        },
+        {
+          "key": "C",
+          "name": "Require explicit return annotations on run",
+          "detail": "Every entrypoint writes its return type: `fn run() -> Unit`. This is explicit, but spends ceremony on every beginner program and conflicts with the magic-out-of-the-box entrypoint goal.",
+          "code": "fn run() -> Unit {\n    print(\"hello\")\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "`main` can omit the return type for the simple path or return `Result` for fallible startup.",
+          "code": "fn main() { println!(\"hi\"); }\nfn main() -> Result<(), Error> { run()?; Ok(()) }"
+        },
+        {
+          "lang": "Go",
+          "note": "`main` cannot return an error; startup failures are handled manually.",
+          "code": "func main() { if err := run(); err != nil { log.Fatal(err) } }"
+        }
+      ],
+      "rec": "A",
+      "status": "ratified",
+      "created": "2026-07-06T19:40:23.207Z",
+      "outcome": "A",
+      "comment": "But instead of \"Unit\" use Void",
+      "ratifiedAt": "2026-07-06"
+    },
+    {
+      "id": "D-WEBTIR1",
+      "cardId": "c008rjua",
+      "group": "web-ui",
+      "title": "Web backend TIR boundary",
+      "gist": "Whether browser builds must use the same executable TIR as every other target.",
+      "explainer": "",
+      "story": "Mara ports a Jet UI from native dev mode to the browser. A branch works in one target and not the other because the web emitter read older AST shapes instead of the checked TIR. That breaks the promise that rustc and target backends never become alternate semantic judges.",
+      "inWild": "fn view(todo: Todo) -> View {\n    button.{ on_click: fn() { todo.done = !todo.done } }\n}\n\n$ jet run app.jet\n$ jet build --target web app.jet\n# Both must execute the same checked meaning.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "TIR-only web execution",
+          "detail": "All executable web bodies lower through sema/TIR first. Unsupported web features produce Jet diagnostics before emission. This keeps one semantic pipeline and one source of truth across dev, JIT, AOT, and web.",
+          "code": "$ jet build --target web app.jet\nError [E-WEB001]: this effect is not available in the browser target\nFix: move file IO behind a server boundary or choose a native target."
+        },
+        {
+          "key": "B",
+          "name": "Explicit web carve-out",
+          "detail": "Allow the web backend to keep a separate AST emitter for a documented subset. The docs must say web is a distinct semantic path with its own conformance suite. This is a real exception to R7/R12.",
+          "code": "// web subset path\nfn view() -> View { ... }\n// Non-view logic must still compile through normal TIR elsewhere."
+        },
+        {
+          "key": "C",
+          "name": "Freeze web target until TIR-ready",
+          "detail": "Stop growing the web backend until all executable emission can come from TIR. This avoids split semantics, but browser examples remain frozen while the backend catches up.",
+          "code": "$ jet build --target web app.jet\nError: web target is frozen until TIR lowering is complete."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Elm",
+          "note": "One typed core feeds JavaScript output; JS is not a second checker.",
+          "code": "Elm source -> typed core -> JS"
+        },
+        {
+          "lang": "TypeScript",
+          "note": "The compiler can emit JS even with type errors unless configured; Jet should not copy that split.",
+          "code": "tsc --noEmitOnError"
+        }
+      ],
+      "rec": "A",
+      "status": "ratified",
+      "created": "2026-07-06T19:40:23.314Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-06"
+    },
+    {
+      "id": "D-COMPTIME-REGEX1",
+      "cardId": "c01zneco",
+      "group": "tooling",
+      "title": "External regex dependency in compile-time path",
+      "gist": "Whether a compile-time semantic path may keep an external regex dependency.",
+      "explainer": "",
+      "story": "Nora adds a compile-time helper and expects the compiler surface to stay std-only. The dependency graph shows regex in `jet-comptime`; if that crate participates in compiler semantics, it weakens I6 and makes future bootstrapping less honest.",
+      "inWild": "#Comptime {\n    schema :: parse_schema(include_str(\"api.schema\"))\n}\n\n# If parse_schema rides a compiler semantic path, its dependencies become compiler policy.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Remove the dependency",
+          "detail": "Replace regex use with a small std-only scanner or parser in the compile-time path. If regex-like power is needed for user code, it belongs in stdlib/runtime code, not the compiler semantic core.",
+          "code": "// compiler-side scanner: std-only\nfn scan_ident(src: &str) -> Token { ... }"
+        },
+        {
+          "key": "B",
+          "name": "Approve a narrow I6 carve-out",
+          "detail": "Keep regex in `jet-comptime` and document that this crate is allowed an external dependency until a named removal date. The carve-out is explicit and owner-owned.",
+          "code": "// I6 exception: jet-comptime may depend on regex until <date/card>."
+        },
+        {
+          "key": "C",
+          "name": "Move regex behind a tool boundary",
+          "detail": "Keep compiler semantics std-only, but let a separate generated-data/tooling step use regex outside the compiler trust boundary. The generated artifact is checked into the repo and audited.",
+          "code": "$ jet devtools generate-comptime-tables\n# tool may use regex; compiler reads generated tables only."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust compiler",
+          "note": "The compiler has strict dependency policy; procedural tools and libraries have different rules.",
+          "code": "rustc deps != crates.io app deps"
+        },
+        {
+          "lang": "Go",
+          "note": "The standard toolchain favors small self-contained compiler machinery.",
+          "code": "go tool compile"
+        }
+      ],
+      "rec": "A",
+      "status": "ratified",
+      "created": "2026-07-06T19:40:23.419Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-06"
+    },
+    {
+      "id": "D-JETOS-FREEZE1",
+      "cardId": "c03r9twk",
+      "group": "research",
+      "title": "jetos syntax freeze boundary",
+      "gist": "Whether jetos-only surface is live syntax law or research-only until the OS lane reopens.",
+      "explainer": "",
+      "story": "Ari reads the syntax decisions and sees OS configuration examples. Another agent reads the roadmap and sees jetos frozen for research. One starts implementing commands; the other deletes examples. The board needs one boundary.",
+      "inWild": "module system.laptop {\n    services: { openssh: { enable: true } }\n}\n\n$ jetos switch laptop\n# Is this live law, research copy, or Jetpack-adjacent env/image work?",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Research-only jetos surface",
+          "detail": "Move OS-only spellings to a research appendix and keep only Jetpack-active env/image/generation pieces live. Syntax law stops implying jetos commands/modules are buildable today.",
+          "code": "// docs/research/jetos.md\nmodule system.laptop { ... }\n// docs/spec/syntax-decisions.md only keeps ratified non-OS syntax."
+        },
+        {
+          "key": "B",
+          "name": "Frozen but ratified",
+          "detail": "Keep the current jetos surface in syntax law, but mark it frozen and not implementation-ready. Agents may align docs around it, but must not implement new jetos behavior until the freeze lifts.",
+          "code": "// syntax decision note:\n// jetos module syntax is ratified/frozen; implementation work blocked until OS lane opens."
+        },
+        {
+          "key": "C",
+          "name": "Make jetos surface live now",
+          "detail": "Treat current jetos examples as active language/product law and unblock implementation cards that use them. This makes the roadmap freeze obsolete and requires immediate cleanup of roadmap wording.",
+          "code": "$ jetos switch laptop\n# live product surface; docs/tests must track it."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "NixOS",
+          "note": "OS module syntax is product law, not research prose.",
+          "code": "services.openssh.enable = true;"
+        },
+        {
+          "lang": "Swift Evolution",
+          "note": "Accepted proposals distinguish implemented, accepted, and deferred states.",
+          "code": "Status: Accepted / Implemented / Deferred"
+        }
+      ],
+      "rec": "A",
+      "status": "ratified",
+      "created": "2026-07-06T19:40:23.528Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-06"
+    },
+    {
+      "id": "D-UNSAFE-REASON1",
+      "cardId": "c05kimvm",
+      "group": "safety",
+      "title": "Unsafe gate reason requirement",
+      "gist": "Whether every user-written Unsafe gate must include a non-empty audit reason.",
+      "explainer": "",
+      "story": "Sol reviews generated unsafe blocks before a release. A region labeled only `#Unsafe` says nothing about why the escape hatch exists. A region labeled with a reason can be audited, searched, and challenged.",
+      "inWild": "#Unsafe(\"calls platform mmap; pointer never escapes\") {\n    map_page(addr, len)\n}\n\n#Unsafe(\"SIMD intrinsic needs target_feature\") fn dot(a: Vec4, b: Vec4) -> Float { ... }",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Require non-empty reasons everywhere",
+          "detail": "Both block and function Unsafe forms require a non-empty string. The compiler stores the reason for audit output and rejects empty or missing reasons with a Jet diagnostic.",
+          "code": "#Unsafe(\"FFI call audited in docs/mem.md\") {\n    c_call()\n}\n\n#Unsafe { c_call() }\n// Error: Unsafe needs an audit reason."
+        },
+        {
+          "key": "B",
+          "name": "Allow bare Unsafe with lint",
+          "detail": "Bare `#Unsafe` compiles, but strict profiles and CI can reject it. Beginner code still never sees Unsafe by default; expert experiments are quick, but audit quality depends on policy.",
+          "code": "#Unsafe { c_call() }\n// lint: add an audit reason before release."
+        },
+        {
+          "key": "C",
+          "name": "Require reasons for blocks only",
+          "detail": "Unsafe blocks require reasons; `#Unsafe fn` may be bare because the function name is considered the audit anchor. This is less consistent and makes function-level gates easier to under-document.",
+          "code": "#Unsafe(\"manual aliasing proof\") { ... }\n#Unsafe fn fast_copy(...) { ... }"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "`unsafe` has no required reason; many teams add comments by convention.",
+          "code": "unsafe { ptr.add(1).read() }"
+        },
+        {
+          "lang": "Clippy/team policy",
+          "note": "Some Rust teams require SAFETY comments by lint/review.",
+          "code": "// SAFETY: pointer came from slice bounds check\nunsafe { ... }"
+        }
+      ],
+      "rec": "A",
+      "status": "ratified",
+      "created": "2026-07-06T19:40:23.635Z",
+      "outcome": "B",
+      "ratifiedAt": "2026-07-06"
+    },
+    {
+      "id": "D-LISTMAP-CANON1",
+      "cardId": "c07cc0xi",
+      "group": "syntax",
+      "title": "Collection shorthand and named collection canon",
+      "gist": "Whether Jet uses short bracket forms for default list/map and named generic types for specialized collections.",
+      "explainer": "The useful split is common-shape shorthand versus specific data-structure name. Lists and default maps are semantic defaults, so shorthand can reduce noise. Specialized collections encode performance/order/hash policy, so their names should stay visible: `HashMap<K, V>`, `Deque<T>`, `Set<T>`. The sharp edge is map shorthand: comma form `[K, V]` is compact but can read like pair/tuple/list; colon form `[K: V]` makes key-to-value meaning clearer and matches map literals/field association.",
+      "story": "Bea learns Jet from examples. Lists and maps are everywhere, so short notation helps. But when she reaches `HashMap`, `BTreeMap`, `Deque`, or `SmallVec`, she needs a consistent named-type rule that scales without inventing a new shorthand for every container.",
+      "inWild": "// Common containers stay light.\nlet users: [User] = load_users()?\nlet by_id: [UserId: User] = index(users)\n\n// Specific containers keep their policy in the name.\nlet cache: HashMap<UserId, User> = HashMap.new()\nlet queue: Deque<Job> = Deque.new()",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Hybrid: `[T]`, `[K: V]`, named specific collections",
+          "detail": "Default list and default map get short forms. Specific collection types use Rust-style named generics: `HashMap<K, V>`, `BTreeMap<K, V>`, `Deque<T>`, `Set<T>`. This gives beginners compact common cases and experts visible data-structure policy.",
+          "code": "let names: [Text] = [\"Ada\", \"Grace\"]\nlet ages: [Text: Int] = [\"Ada\": 36]\nlet fast: HashMap<Text, Int> = HashMap.new()"
+        },
+        {
+          "key": "B",
+          "name": "Rust-style named generics for everything",
+          "detail": "Use `List<T>`, `Map<K, V>`, `HashMap<K, V>` everywhere. Very consistent and searchable; common types are noisier and Jet loses the lightweight feel of list/map shorthand.",
+          "code": "let names: List<Text> = List.of(\"Ada\", \"Grace\")\nlet ages: Map<Text, Int> = Map.of(\"Ada\", 36)\nlet fast: HashMap<Text, Int> = HashMap.new()"
+        },
+        {
+          "key": "C",
+          "name": "Comma map shorthand: `[T]`, `[K, V]`, named specific collections",
+          "detail": "Matches the proposed `[Map, MapVal]` shape most directly: list has one bracket argument, map has two. Compact and symmetric with generic argument lists, but `[K, V]` can be mistaken for a pair/tuple/list-of-two-types rather than key-to-value mapping.",
+          "code": "let names: [Text] = [\"Ada\", \"Grace\"]\nlet ages: [Text, Int] = [\"Ada\": 36]\nlet fast: HashMap<Text, Int> = HashMap.new()"
+        },
+        {
+          "key": "D",
+          "name": "No collection shorthand",
+          "detail": "Every collection is a named type. This is maximally explicit, but spends the most ceremony on the two containers users write constantly.",
+          "code": "let names: List<Text> = List.of(\"Ada\")\nlet ages: Map<Text, Int> = Map.of(\"Ada\", 36)"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Named collection types make data-structure policy visible.",
+          "code": "Vec<T>\nHashMap<K, V>\nBTreeMap<K, V>"
+        },
+        {
+          "lang": "Swift",
+          "note": "Short forms for common list/map, named types when policy matters.",
+          "code": "[User]\n[UserId: User]\nSet<User>"
+        },
+        {
+          "lang": "TypeScript",
+          "note": "Both shorthand and named forms exist for arrays; too many equivalents can fragment style.",
+          "code": "User[]\nArray<User>"
+        }
+      ],
+      "rec": "A",
+      "status": "ratified",
+      "created": "2026-07-06T19:40:23.744Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-06"
+    },
+    {
+      "id": "D-BENCH-MARKER1",
+      "cardId": "c0960ixv",
+      "group": "syntax",
+      "title": "Bench marker spelling",
+      "gist": "Whether benchmark markers use parenthesized arguments like other marker calls.",
+      "explainer": "",
+      "story": "Theo writes tests and benchmarks in the same file. `#Test(\"fast path\")` and `#Bench \"fast path\"` look like two marker grammars even though both attach metadata to a function.",
+      "inWild": "#Test(\"parses dates\") fn parses_dates() { ... }\n#Bench \"parse throughput\" fn bench_parse() { ... }",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Use `#Bench(\"name\")`",
+          "detail": "Bench follows the same parenthesized marker-call shape as Test and other metadata markers. This gives one parser/documentation rule for marker arguments.",
+          "code": "#Bench(\"parse throughput\") fn bench_parse() { ... }"
+        },
+        {
+          "key": "B",
+          "name": "Bless `#Bench \"name\"` as an exception",
+          "detail": "Keep the space-string form specifically for benchmarks. It reads nicely, but creates a special marker grammar users must learn.",
+          "code": "#Bench \"parse throughput\" fn bench_parse() { ... }"
+        },
+        {
+          "key": "C",
+          "name": "Accept both spellings",
+          "detail": "Both forms compile and the formatter normalizes one. This is a transition path only; as permanent law it is two spellings for one semantic job.",
+          "code": "#Bench \"parse throughput\" fn a() { ... }\n#Bench(\"parse throughput\") fn b() { ... }"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Attributes use one bracketed argument form.",
+          "code": "#[bench]\n#[ignore = \"slow\"]"
+        },
+        {
+          "lang": "Swift",
+          "note": "Attributes with arguments use parentheses.",
+          "code": "@available(macOS 14, *)"
+        }
+      ],
+      "rec": "A",
+      "status": "ratified",
+      "created": "2026-07-06T19:40:23.858Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-06"
+    },
+    {
+      "id": "D-RING-LAYER1",
+      "cardId": "c0b193fq",
+      "group": "runtime",
+      "title": "Runtime profile name canon",
+      "gist": "What Jet calls the target environment a program expects.",
+      "explainer": "`Runtime profile` means the environment contract for a build target. Examples: `bare` = no OS services, `alloc` = heap but no hosted OS, `hosted` = normal OS process with files/network/time. The audit issue is naming: current prose/examples used `std`, but Jet docs also say user-facing library naming is `Core`, never `std`/`stdlib`. The decision is whether the public profile name should avoid `std` too.",
+      "story": "Lena configures a package for normal desktop/server use. Another package targets a tiny embedded board. They need a word for \"what runtime services exist here\": no OS, heap only, or full OS/filesystem/network. The old ballot called that a ring layer; clearer wording is runtime profile.",
+      "inWild": "module pkg.profile {\n    runtime: hosted\n    deps: [core.fs, core.net]\n}\n\nmodule firmware.board {\n    runtime: bare\n    allocator: none\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Use `runtime: hosted` for the normal OS profile",
+          "detail": "`hosted` means the program runs with normal OS services. `bare`/`alloc` can name smaller targets later. Core remains the library brand; `std` disappears from user-facing runtime config.",
+          "code": "module pkg.profile {\n    runtime: hosted\n    deps: [core.fs]\n}"
+        },
+        {
+          "key": "B",
+          "name": "Keep `layer: std` as a runtime exception",
+          "detail": "`std` remains the public name for the normal runtime layer, with a written exception saying the no-std rule applies only to library names. Existing examples stay familiar to Rust users, but the naming law has a special case.",
+          "code": "module pkg.profile {\n    layer: std\n}"
+        },
+        {
+          "key": "C",
+          "name": "Use `runtime: core`",
+          "detail": "The normal profile uses the Core brand. This avoids `std`, but overloads Core-the-library with runtime availability and can make embedded/no-OS profiles harder to explain.",
+          "code": "module pkg.profile {\n    runtime: core\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "`std`, `core`, and `alloc` are library tiers; the names are powerful but easy to confuse with target/runtime policy.",
+          "code": "#![no_std]\nextern crate alloc;"
+        },
+        {
+          "lang": "Zig",
+          "note": "Target/environment choices are separate from the standard-library import name.",
+          "code": "@import(\"std\")\n-target wasm32-freestanding"
+        },
+        {
+          "lang": "C",
+          "note": "Hosted versus freestanding is a long-standing environment distinction.",
+          "code": "hosted implementation\nfreestanding implementation"
+        }
+      ],
+      "rec": "A",
+      "status": "ratified",
+      "created": "2026-07-06T19:40:23.967Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-06"
     }
   ],
   "questions": [
@@ -25961,6 +27866,45 @@
       "created": "2026-07-06T11:56:21.768Z",
       "answeredAt": "2026-07-06",
       "answeredBy": "codex-main"
+    },
+    {
+      "id": "qvihj95o",
+      "cardId": "c0b193fq",
+      "decisionId": "D-RING-LAYER1",
+      "by": "owner",
+      "kind": "question",
+      "text": "I dont understand what the ring layer is or what this means. Please explain better.",
+      "status": "answered",
+      "answer": "You were right: \"ring layer\" was jargon. The thing being chosen is the name for a target runtime profile: does this program expect a normal OS (`hosted`), a smaller heap-only environment (`alloc`), or bare metal (`bare`)? The actual cleanup concern is that `std` appears as a public profile name while the docs say Jet uses `Core`, not `std`/`stdlib`, for user-facing library naming. I updated the ballot to say `runtime profile` and to show concrete `runtime: hosted` / `runtime: bare` examples.",
+      "created": "2026-07-06T19:49:04.615Z",
+      "answeredAt": "2026-07-06",
+      "answeredBy": "codex-audit"
+    },
+    {
+      "id": "qwhdiobs",
+      "cardId": "c07cc0xi",
+      "decisionId": "D-LISTMAP-CANON1",
+      "by": "owner",
+      "kind": "question",
+      "text": "Give me tradeoffs of [List] and [Map, MapVal] style shorthands for the two most common types, but then the consistent rust style List<Type> for more specific collection types (HashMap<Type>, etc)",
+      "status": "answered",
+      "answer": "Tradeoff: shorthand for the two dominant containers keeps daily Jet light (`[User]`, map shorthand), while Rust-style named generics keep specific collection policy visible (`HashMap<K, V>`, `Deque<T>`). Main risk is two generic-looking systems: brackets for defaults, angle brackets for named structures. For map shorthand specifically, comma form `[K, V]` is compact but reads like a pair/tuple; colon form `[K: V]` better says key maps to value and matches map literals. I updated the ballot with both the hybrid recommendation and the exact comma-style variant as a separate option.",
+      "created": "2026-07-06T19:53:36.645Z",
+      "answeredAt": "2026-07-06",
+      "answeredBy": "codex-audit"
+    },
+    {
+      "id": "qztpbt0g",
+      "cardId": "c0yfycf0",
+      "decisionId": "D-S80-RUN1",
+      "by": "owner",
+      "kind": "question",
+      "text": "I dont understand what the Unit type is. Also, marking the \"run\" executable as fallible should be optional. A beginner should be able to type \"fn run() {...}\" and be off to the races. An expert should be able to specify that there is a return type for the run entry point & that it can be fallible",
+      "status": "answered",
+      "answer": "`Unit` means \"returns no meaningful value\" — same job as Rust `()` or C/Java `void`. Beginners never need to type it: `fn run() { ... }` is the magic-path spelling and implies `Unit`. I updated the ballot so Option A is explicitly the hybrid you described: beginner `fn run() { ... }` stays valid, while experts can opt into `fn run() -> Unit ?` when entrypoint setup can fail and `?` should propagate.",
+      "created": "2026-07-06T19:57:12.892Z",
+      "answeredAt": "2026-07-06",
+      "answeredBy": "codex-audit"
     }
   ],
   "ideas": [
@@ -26216,6 +28160,874 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-06T20:06:46.543Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msg13cuclhb",
+      "note": "→ codex-1: [tower] 2 decisions ratified: D-LISTMAP-CANON1→A · D-RING-LA"
+    },
+    {
+      "at": "2026-07-06T20:06:46.543Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msg12cubbaz",
+      "note": "→ claude-main: [tower] 2 decisions ratified: D-LISTMAP-CANON1→A · D-RING-LA"
+    },
+    {
+      "at": "2026-07-06T20:05:16.513Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-RING-LAYER1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-06T20:04:30.715Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-LISTMAP-CANON1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-06T20:04:12.058Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msg11dxq0bu",
+      "note": "→ codex-1: [tower] 1 decision ratified: D-S80-RUN1→A (\"But instead of \""
+    },
+    {
+      "at": "2026-07-06T20:04:12.058Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msg10dxpeng",
+      "note": "→ claude-main: [tower] 1 decision ratified: D-S80-RUN1→A (\"But instead of \""
+    },
+    {
+      "at": "2026-07-06T20:02:42.026Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-S80-RUN1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-06T20:00:14.289Z",
+      "by": "codex-audit",
+      "action": "question.answer",
+      "ref": "qvihj95o",
+      "note": ""
+    },
+    {
+      "at": "2026-07-06T20:00:14.235Z",
+      "by": "codex-audit",
+      "action": "decision.update",
+      "ref": "D-RING-LAYER1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-06T20:00:14.179Z",
+      "by": "codex-audit",
+      "action": "question.answer",
+      "ref": "qwhdiobs",
+      "note": ""
+    },
+    {
+      "at": "2026-07-06T20:00:14.123Z",
+      "by": "codex-audit",
+      "action": "decision.update",
+      "ref": "D-LISTMAP-CANON1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-06T20:00:14.067Z",
+      "by": "codex-audit",
+      "action": "question.answer",
+      "ref": "qztpbt0g",
+      "note": ""
+    },
+    {
+      "at": "2026-07-06T20:00:14.011Z",
+      "by": "codex-audit",
+      "action": "decision.update",
+      "ref": "D-S80-RUN1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-06T19:57:12.892Z",
+      "by": "owner",
+      "action": "question.add",
+      "ref": "qztpbt0g",
+      "note": ""
+    },
+    {
+      "at": "2026-07-06T19:56:32.591Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msgyb73k4x",
+      "note": "→ codex-1: [tower] 2 decisions ratified: D-COMPTIME-REGEX1→A · D-WEBTIR"
+    },
+    {
+      "at": "2026-07-06T19:56:32.591Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msgxb72xb3",
+      "note": "→ claude-main: [tower] 2 decisions ratified: D-COMPTIME-REGEX1→A · D-WEBTIR"
+    },
+    {
+      "at": "2026-07-06T19:55:02.565Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-WEBTIR1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-06T19:53:52.083Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-COMPTIME-REGEX1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-06T19:53:36.645Z",
+      "by": "owner",
+      "action": "question.add",
+      "ref": "qwhdiobs",
+      "note": ""
+    },
+    {
+      "at": "2026-07-06T19:49:04.615Z",
+      "by": "owner",
+      "action": "question.add",
+      "ref": "qvihj95o",
+      "note": ""
+    },
+    {
+      "at": "2026-07-06T19:45:39.712Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msgudrwlpm",
+      "note": "→ codex-1: [tower] 3 decisions ratified: D-JETOS-FREEZE1→A · D-UNSAFE-R"
+    },
+    {
+      "at": "2026-07-06T19:45:39.712Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msgtdrw46f",
+      "note": "→ claude-main: [tower] 3 decisions ratified: D-JETOS-FREEZE1→A · D-UNSAFE-R"
+    },
+    {
+      "at": "2026-07-06T19:44:09.680Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-BENCH-MARKER1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-06T19:43:22.935Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-UNSAFE-REASON1",
+      "note": "B"
+    },
+    {
+      "at": "2026-07-06T19:42:53.491Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-JETOS-FREEZE1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-06T19:40:24.501Z",
+      "by": "codex-audit",
+      "action": "card.add",
+      "ref": "c0kqui18",
+      "note": "Cleanup: formal core placeholder sweep"
+    },
+    {
+      "at": "2026-07-06T19:40:24.446Z",
+      "by": "codex-audit",
+      "action": "card.add",
+      "ref": "c0jukau5",
+      "note": "Cleanup: core/std naming rubric sweep"
+    },
+    {
+      "at": "2026-07-06T19:40:24.394Z",
+      "by": "codex-audit",
+      "action": "card.add",
+      "ref": "c0iz6z6g",
+      "note": "Cleanup: world-domination plan slicing"
+    },
+    {
+      "at": "2026-07-06T19:40:24.341Z",
+      "by": "codex-audit",
+      "action": "card.add",
+      "ref": "c0i3x9hd",
+      "note": "Cleanup: TIR wording and stale fallback references"
+    },
+    {
+      "at": "2026-07-06T19:40:24.286Z",
+      "by": "codex-audit",
+      "action": "card.add",
+      "ref": "c0h70w7o",
+      "note": "Cleanup: syntax reconciliation guard expansion"
+    },
+    {
+      "at": "2026-07-06T19:40:24.232Z",
+      "by": "codex-audit",
+      "action": "card.add",
+      "ref": "c0gb9bdv",
+      "note": "Cleanup: open ballot queue regeneration"
+    },
+    {
+      "at": "2026-07-06T19:40:24.178Z",
+      "by": "codex-audit",
+      "action": "card.add",
+      "ref": "c0feknxg",
+      "note": "Cleanup: reserved filename and role-module canon sweep"
+    },
+    {
+      "at": "2026-07-06T19:40:24.127Z",
+      "by": "codex-audit",
+      "action": "card.add",
+      "ref": "c0ek7qxw",
+      "note": "Cleanup: diagnostics registry dedupe and guard"
+    },
+    {
+      "at": "2026-07-06T19:40:24.074Z",
+      "by": "codex-audit",
+      "action": "card.add",
+      "ref": "c0dow3j1",
+      "note": "Cleanup: CLI command registry single source"
+    },
+    {
+      "at": "2026-07-06T19:40:24.022Z",
+      "by": "codex-audit",
+      "action": "card.add",
+      "ref": "c0cts3wa",
+      "note": "Cleanup: current-law spec grammar sweep"
+    },
+    {
+      "at": "2026-07-06T19:40:23.968Z",
+      "by": "codex-audit",
+      "action": "decision.add",
+      "ref": "D-RING-LAYER1",
+      "note": "Runtime layer name canon"
+    },
+    {
+      "at": "2026-07-06T19:40:23.913Z",
+      "by": "codex-audit",
+      "action": "card.add",
+      "ref": "c0b193fq",
+      "note": "Decision: runtime layer naming without std"
+    },
+    {
+      "at": "2026-07-06T19:40:23.858Z",
+      "by": "codex-audit",
+      "action": "decision.add",
+      "ref": "D-BENCH-MARKER1",
+      "note": "Bench marker spelling"
+    },
+    {
+      "at": "2026-07-06T19:40:23.800Z",
+      "by": "codex-audit",
+      "action": "card.add",
+      "ref": "c0960ixv",
+      "note": "Decision: bench marker argument shape"
+    },
+    {
+      "at": "2026-07-06T19:40:23.745Z",
+      "by": "codex-audit",
+      "action": "decision.add",
+      "ref": "D-LISTMAP-CANON1",
+      "note": "Collection type spelling canon"
+    },
+    {
+      "at": "2026-07-06T19:40:23.690Z",
+      "by": "codex-audit",
+      "action": "card.add",
+      "ref": "c07cc0xi",
+      "note": "Decision: canonical collection type spellings"
+    },
+    {
+      "at": "2026-07-06T19:40:23.636Z",
+      "by": "codex-audit",
+      "action": "decision.add",
+      "ref": "D-UNSAFE-REASON1",
+      "note": "Unsafe gate reason requirement"
+    },
+    {
+      "at": "2026-07-06T19:40:23.583Z",
+      "by": "codex-audit",
+      "action": "card.add",
+      "ref": "c05kimvm",
+      "note": "Decision: require reasons on Unsafe gates"
+    },
+    {
+      "at": "2026-07-06T19:40:23.528Z",
+      "by": "codex-audit",
+      "action": "decision.add",
+      "ref": "D-JETOS-FREEZE1",
+      "note": "jetos syntax freeze boundary"
+    },
+    {
+      "at": "2026-07-06T19:40:23.473Z",
+      "by": "codex-audit",
+      "action": "card.add",
+      "ref": "c03r9twk",
+      "note": "Decision: freeze jetos-only syntax until research clears"
+    },
+    {
+      "at": "2026-07-06T19:40:23.419Z",
+      "by": "codex-audit",
+      "action": "decision.add",
+      "ref": "D-COMPTIME-REGEX1",
+      "note": "External regex dependency in compile-time path"
+    },
+    {
+      "at": "2026-07-06T19:40:23.366Z",
+      "by": "codex-audit",
+      "action": "card.add",
+      "ref": "c01zneco",
+      "note": "Decision: remove regex from jet-comptime"
+    },
+    {
+      "at": "2026-07-06T19:40:23.314Z",
+      "by": "codex-audit",
+      "action": "decision.add",
+      "ref": "D-WEBTIR1",
+      "note": "Web backend TIR boundary"
+    },
+    {
+      "at": "2026-07-06T19:40:23.261Z",
+      "by": "codex-audit",
+      "action": "card.add",
+      "ref": "c008rjua",
+      "note": "Decision: web backend must lower through TIR"
+    },
+    {
+      "at": "2026-07-06T19:40:23.207Z",
+      "by": "codex-audit",
+      "action": "decision.add",
+      "ref": "D-S80-RUN1",
+      "note": "Fallible run entrypoint source of truth"
+    },
+    {
+      "at": "2026-07-06T19:40:23.152Z",
+      "by": "codex-audit",
+      "action": "card.add",
+      "ref": "c0yfycf0",
+      "note": "Decision: implement fallible fn run() ratification"
+    },
+    {
+      "at": "2026-07-06T19:36:06.345Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msgszbuvu7",
+      "note": "→ codex-1: [tower] greenlit: #2 #186 #14 #9. Board is current; pick up "
+    },
+    {
+      "at": "2026-07-06T19:36:06.345Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msgrzbuav5",
+      "note": "→ claude-main: [tower] greenlit: #2 #186 #14 #9. Board is current; pick up "
+    },
+    {
+      "at": "2026-07-06T19:34:36.315Z",
+      "by": "owner",
+      "action": "card.activate",
+      "ref": "c123",
+      "note": ""
+    },
+    {
+      "at": "2026-07-06T19:34:30.296Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c123",
+      "note": "epoch"
+    },
+    {
+      "at": "2026-07-06T19:34:11.837Z",
+      "by": "owner",
+      "action": "card.delete",
+      "ref": "c27iyznj",
+      "note": "Ask-your-codebase query engine (\"where can balance go negative?\")"
+    },
+    {
+      "at": "2026-07-06T19:34:01.164Z",
+      "by": "owner",
+      "action": "card.activate",
+      "ref": "c147",
+      "note": ""
+    },
+    {
+      "at": "2026-07-06T19:33:32.181Z",
+      "by": "owner",
+      "action": "card.activate",
+      "ref": "cjetos",
+      "note": ""
+    },
+    {
+      "at": "2026-07-06T19:33:14.394Z",
+      "by": "owner",
+      "action": "card.activate",
+      "ref": "c27",
+      "note": ""
+    },
+    {
+      "at": "2026-07-06T19:28:21.869Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0p3x8f2",
+      "note": "title,body,plan,logEntry"
+    },
+    {
+      "at": "2026-07-06T19:28:21.869Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c154",
+      "note": "title,body,plan,logEntry"
+    },
+    {
+      "at": "2026-07-06T19:27:22.810Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "cablueprint",
+      "note": "epoch,workOrder,logEntry"
+    },
+    {
+      "at": "2026-07-06T19:27:22.810Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c6q02qhw",
+      "note": "epoch,workOrder,logEntry"
+    },
+    {
+      "at": "2026-07-06T19:27:22.810Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c7q03g01",
+      "note": "epoch,workOrder,logEntry"
+    },
+    {
+      "at": "2026-07-06T19:27:22.810Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "cjetos",
+      "note": "epoch,workOrder,logEntry"
+    },
+    {
+      "at": "2026-07-06T19:27:22.810Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c27",
+      "note": "epoch,workOrder,logEntry"
+    },
+    {
+      "at": "2026-07-06T19:27:22.810Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "caq065h8",
+      "note": "epoch,phase,workOrder,logEntry"
+    },
+    {
+      "at": "2026-07-06T19:27:22.810Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0p3x8f2",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-06T19:27:22.810Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c9q0534j",
+      "note": "epoch,phase,workOrder,logEntry"
+    },
+    {
+      "at": "2026-07-06T19:27:22.810Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c2zj0p7p",
+      "note": "epoch,phase,workOrder,logEntry"
+    },
+    {
+      "at": "2026-07-06T19:27:22.810Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c2yj0nk5",
+      "note": "epoch,phase,workOrder,logEntry"
+    },
+    {
+      "at": "2026-07-06T19:27:22.810Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c2sj0bd9",
+      "note": "epoch,phase,workOrder,logEntry"
+    },
+    {
+      "at": "2026-07-06T19:27:22.810Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c2giziub",
+      "note": "epoch,phase,workOrder,logEntry"
+    },
+    {
+      "at": "2026-07-06T19:27:22.810Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "caffiunify",
+      "note": "epoch,phase,workOrder,logEntry"
+    },
+    {
+      "at": "2026-07-06T19:27:22.810Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c154",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-06T19:21:13.710Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c6q02qhw",
+      "note": "epoch"
+    },
+    {
+      "at": "2026-07-06T19:17:24.164Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c07589v1",
+      "note": "log cleanup: remove deleted auxiliary ballot wording"
+    },
+    {
+      "at": "2026-07-06T19:16:55.177Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c07589v1",
+      "note": "log cleanup: remove deleted AI ballot handle"
+    },
+    {
+      "at": "2026-07-06T19:15:48.960Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c07589v1",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-06T19:15:48.960Z",
+      "by": "codex-main",
+      "action": "card.add",
+      "ref": "cdq08h16",
+      "note": "Compatibility-proved native replacement overlays"
+    },
+    {
+      "at": "2026-07-06T19:15:48.960Z",
+      "by": "codex-main",
+      "action": "card.add",
+      "ref": "ccq07pav",
+      "note": "Typed performance budget profiles"
+    },
+    {
+      "at": "2026-07-06T19:15:48.960Z",
+      "by": "codex-main",
+      "action": "card.add",
+      "ref": "cbq06v8j",
+      "note": "Progressive proof and replay mode"
+    },
+    {
+      "at": "2026-07-06T19:15:48.960Z",
+      "by": "codex-main",
+      "action": "card.add",
+      "ref": "caq065h8",
+      "note": "Typed embedded and freestanding target profiles"
+    },
+    {
+      "at": "2026-07-06T19:15:48.960Z",
+      "by": "codex-main",
+      "action": "card.add",
+      "ref": "c9q0534j",
+      "note": "Stable core.game substrate"
+    },
+    {
+      "at": "2026-07-06T19:15:48.960Z",
+      "by": "codex-main",
+      "action": "card.add",
+      "ref": "c8q043mt",
+      "note": "Typed data Core plus accelerator bridges"
+    },
+    {
+      "at": "2026-07-06T19:15:48.960Z",
+      "by": "codex-main",
+      "action": "card.add",
+      "ref": "c7q03g01",
+      "note": "jetos risk-aware proof before switch"
+    },
+    {
+      "at": "2026-07-06T19:15:48.960Z",
+      "by": "codex-main",
+      "action": "card.add",
+      "ref": "c6q02qhw",
+      "note": "jetos Studio: GUI over canonical Jet modules"
+    },
+    {
+      "at": "2026-07-06T19:15:48.960Z",
+      "by": "codex-main",
+      "action": "card.add",
+      "ref": "c5q01s7b",
+      "note": "Federated Jetpack providers under one authority graph"
+    },
+    {
+      "at": "2026-07-06T19:15:48.960Z",
+      "by": "codex-main",
+      "action": "card.add",
+      "ref": "c4q00utv",
+      "note": "Migration importers from foreign ecosystems"
+    },
+    {
+      "at": "2026-07-06T19:15:48.960Z",
+      "by": "codex-main",
+      "action": "card.add",
+      "ref": "c3q000dw",
+      "note": "Explainable semantic lockfiles and lock merge"
+    },
+    {
+      "at": "2026-07-06T19:15:48.959Z",
+      "by": "codex-main",
+      "action": "card.add",
+      "ref": "c2pzz3qb",
+      "note": "Strict package graph plus workspace catalogs"
+    },
+    {
+      "at": "2026-07-06T19:15:48.959Z",
+      "by": "codex-main",
+      "action": "card.add",
+      "ref": "c1pzxnsn",
+      "note": "Semantic dossier: one explainable artifact view"
+    },
+    {
+      "at": "2026-07-06T19:15:48.959Z",
+      "by": "codex-main",
+      "action": "card.add",
+      "ref": "c0pzvvjc",
+      "note": "Universal trust grants across Jet and Jetpack"
+    },
+    {
+      "at": "2026-07-06T19:14:47.943Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msgqow2uih",
+      "note": "→ codex-1: [tower] 14 decisions ratified: D-WD1→B · D-WD2→B · D-WD3→B ·"
+    },
+    {
+      "at": "2026-07-06T19:14:47.943Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msgpow27ds",
+      "note": "→ claude-main: [tower] 14 decisions ratified: D-WD1→B · D-WD2→B · D-WD3→B ·"
+    },
+    {
+      "at": "2026-07-06T19:13:17.910Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-WD15",
+      "note": "B"
+    },
+    {
+      "at": "2026-07-06T19:13:03.684Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-WD14",
+      "note": "B"
+    },
+    {
+      "at": "2026-07-06T19:12:51.660Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-WD12",
+      "note": "B"
+    },
+    {
+      "at": "2026-07-06T19:12:33.748Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-WD11",
+      "note": "B"
+    },
+    {
+      "at": "2026-07-06T19:12:24.247Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-WD10",
+      "note": "B"
+    },
+    {
+      "at": "2026-07-06T19:12:06.233Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-WD9",
+      "note": "B"
+    },
+    {
+      "at": "2026-07-06T19:11:46.614Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-WD8",
+      "note": "B"
+    },
+    {
+      "at": "2026-07-06T19:11:06.656Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-WD7",
+      "note": "B"
+    },
+    {
+      "at": "2026-07-06T19:11:00.725Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-WD6",
+      "note": "B"
+    },
+    {
+      "at": "2026-07-06T19:10:53.576Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-WD5",
+      "note": "B"
+    },
+    {
+      "at": "2026-07-06T19:10:41.111Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-WD4",
+      "note": "B"
+    },
+    {
+      "at": "2026-07-06T19:10:21.786Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-WD3",
+      "note": "B"
+    },
+    {
+      "at": "2026-07-06T19:09:46.899Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-WD2",
+      "note": "B"
+    },
+    {
+      "at": "2026-07-06T19:09:32.308Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-WD1",
+      "note": "B"
+    },
+    {
+      "at": "2026-07-06T19:06:52.578Z",
+      "by": "codex",
+      "action": "decision.add",
+      "ref": "D-WD15",
+      "note": "Native replacement overlays"
+    },
+    {
+      "at": "2026-07-06T19:06:52.555Z",
+      "by": "codex",
+      "action": "decision.add",
+      "ref": "D-WD14",
+      "note": "Performance budget profiles"
+    },
+    {
+      "at": "2026-07-06T19:06:52.539Z",
+      "by": "codex",
+      "action": "decision.add",
+      "ref": "D-WD12",
+      "note": "Proof and replay mode"
+    },
+    {
+      "at": "2026-07-06T19:06:52.520Z",
+      "by": "codex",
+      "action": "decision.add",
+      "ref": "D-WD11",
+      "note": "Embedded and freestanding profiles"
+    },
+    {
+      "at": "2026-07-06T19:06:52.504Z",
+      "by": "codex",
+      "action": "decision.add",
+      "ref": "D-WD10",
+      "note": "Game development lane"
+    },
+    {
+      "at": "2026-07-06T19:06:52.488Z",
+      "by": "codex",
+      "action": "decision.add",
+      "ref": "D-WD9",
+      "note": "Typed data Core"
+    },
+    {
+      "at": "2026-07-06T19:06:52.473Z",
+      "by": "codex",
+      "action": "decision.add",
+      "ref": "D-WD8",
+      "note": "jetos proof before switch"
+    },
+    {
+      "at": "2026-07-06T19:06:52.456Z",
+      "by": "codex",
+      "action": "decision.add",
+      "ref": "D-WD7",
+      "note": "jetos Studio"
+    },
+    {
+      "at": "2026-07-06T19:06:52.439Z",
+      "by": "codex",
+      "action": "decision.add",
+      "ref": "D-WD6",
+      "note": "Federated Jetpack providers"
+    },
+    {
+      "at": "2026-07-06T19:06:52.421Z",
+      "by": "codex",
+      "action": "decision.add",
+      "ref": "D-WD5",
+      "note": "Migration importers"
+    },
+    {
+      "at": "2026-07-06T19:06:52.405Z",
+      "by": "codex",
+      "action": "decision.add",
+      "ref": "D-WD4",
+      "note": "Explainable lockfiles"
+    },
+    {
+      "at": "2026-07-06T19:06:52.388Z",
+      "by": "codex",
+      "action": "decision.add",
+      "ref": "D-WD3",
+      "note": "Strict package graph and catalogs"
+    },
+    {
+      "at": "2026-07-06T19:06:52.370Z",
+      "by": "codex",
+      "action": "decision.add",
+      "ref": "D-WD2",
+      "note": "Semantic dossier"
+    },
+    {
+      "at": "2026-07-06T19:06:52.352Z",
+      "by": "codex",
+      "action": "decision.add",
+      "ref": "D-WD1",
+      "note": "Universal trust grants"
+    },
+    {
+      "at": "2026-07-06T19:06:52.331Z",
+      "by": "codex",
+      "action": "card.add",
+      "ref": "c07589v1",
+      "note": "World-domination language and Jetpack ballots"
+    },
     {
       "at": "2026-07-06T18:00:38.138Z",
       "by": "codex-1",
@@ -28725,6 +31537,138 @@
       "cardId": null,
       "file": null,
       "at": "2026-07-06T17:57:37.088Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msgpow27ds",
+      "from": "tower",
+      "to": "claude-main",
+      "text": "[tower] 14 decisions ratified: D-WD1→B · D-WD2→B · D-WD3→B · D-WD4→B · D-WD5→B · D-WD6→B · D-WD7→B · D-WD8→B · D-WD9→B · D-WD10→B · D-WD11→B · D-WD12→B · D-WD14→B · D-WD15→B. Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-06T19:14:47.943Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msgqow2uih",
+      "from": "tower",
+      "to": "codex-1",
+      "text": "[tower] 14 decisions ratified: D-WD1→B · D-WD2→B · D-WD3→B · D-WD4→B · D-WD5→B · D-WD6→B · D-WD7→B · D-WD8→B · D-WD9→B · D-WD10→B · D-WD11→B · D-WD12→B · D-WD14→B · D-WD15→B. Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-06T19:14:47.943Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msgrzbuav5",
+      "from": "tower",
+      "to": "claude-main",
+      "text": "[tower] greenlit: #2 #186 #14 #9. Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-06T19:36:06.345Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msgszbuvu7",
+      "from": "tower",
+      "to": "codex-1",
+      "text": "[tower] greenlit: #2 #186 #14 #9. Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-06T19:36:06.345Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msgtdrw46f",
+      "from": "tower",
+      "to": "claude-main",
+      "text": "[tower] 3 decisions ratified: D-JETOS-FREEZE1→A · D-UNSAFE-REASON1→B · D-BENCH-MARKER1→A. Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-06T19:45:39.712Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msgudrwlpm",
+      "from": "tower",
+      "to": "codex-1",
+      "text": "[tower] 3 decisions ratified: D-JETOS-FREEZE1→A · D-UNSAFE-REASON1→B · D-BENCH-MARKER1→A. Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-06T19:45:39.712Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msgxb72xb3",
+      "from": "tower",
+      "to": "claude-main",
+      "text": "[tower] 2 decisions ratified: D-COMPTIME-REGEX1→A · D-WEBTIR1→A. Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-06T19:56:32.591Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msgyb73k4x",
+      "from": "tower",
+      "to": "codex-1",
+      "text": "[tower] 2 decisions ratified: D-COMPTIME-REGEX1→A · D-WEBTIR1→A. Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-06T19:56:32.591Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg10dxpeng",
+      "from": "tower",
+      "to": "claude-main",
+      "text": "[tower] 1 decision ratified: D-S80-RUN1→A (\"But instead of \"Unit\" use Void\"). Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-06T20:04:12.058Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg11dxq0bu",
+      "from": "tower",
+      "to": "codex-1",
+      "text": "[tower] 1 decision ratified: D-S80-RUN1→A (\"But instead of \"Unit\" use Void\"). Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-06T20:04:12.058Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg12cubbaz",
+      "from": "tower",
+      "to": "claude-main",
+      "text": "[tower] 2 decisions ratified: D-LISTMAP-CANON1→A · D-RING-LAYER1→A. Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-06T20:06:46.543Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg13cuclhb",
+      "from": "tower",
+      "to": "codex-1",
+      "text": "[tower] 2 decisions ratified: D-LISTMAP-CANON1→A · D-RING-LAYER1→A. Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-06T20:06:46.543Z",
       "deliveredAt": null,
       "readAt": null
     }

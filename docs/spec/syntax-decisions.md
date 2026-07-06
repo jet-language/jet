@@ -1573,6 +1573,55 @@ honest error otherwise) — never the host cargo/rustc. Same source + same
 pinned toolchain → same output hash → portable cache hits; the toolchain id
 enters output provenance.
 
+**World-domination ratifications (D-WD1–12, D-WD14–15 = B, ratified
+2026-07-06, c07589v1)**: these decisions set product law and planning
+direction, not a blanket approval of every illustrative syntax snippet in the
+ballot. Any new user-typeable keyword, marker, manifest field, provider prefix,
+command spelling, or diagnostic code still needs its own Tower ballot before
+implementation.
+
+- **D-WD1**: one grant graph spans code effects, packages, builds, envs,
+  services, images, fleets, and jetos activation. Beginner UX summarizes by
+  intent; expert UX exposes exact authority, provenance, cache keys, and
+  revocation.
+- **D-WD2**: `jet dossier` is the umbrella explain view over named existing fact
+  lenses. Each section must be owned by a real fact producer; experts get stable
+  lenses and JSON schemas.
+- **D-WD3**: Jetpack package visibility is strict by default; workspace catalogs
+  centralize shared versions. Missing-dependency diagnostics should offer the
+  right `jet add`/catalog fix.
+- **D-WD4**: `.jet/lock` is exact machine identity plus explainable rationale,
+  provenance, owner package, policy, platform, and semantic merge support.
+- **D-WD5**: migration importers generate editable canonical Jet source, role
+  modules, deps, adapters, FFI stubs, and TODO diagnostics; native migration
+  progress is tracked.
+- **D-WD6**: npm, PyPI, Cargo, SwiftPM, Nix, GitHub, and binary sources are
+  federated metadata providers under Jetpack's fetch, lock, sandbox, audit,
+  signature, and replacement-overlay authority.
+- **D-WD7**: jetos Studio is a GUI/source editor over canonical Jet modules,
+  with diff preview and expert provenance; no GUI-owned split-brain state.
+- **D-WD8**: jetos activation always has plan/diff, with VM proof and rollback
+  proof required for risk classes such as boot, kernel, filesystem, and service
+  changes.
+- **D-WD9**: Core gets a typed data floor (tables, series, stats, plotting
+  basics) while Python/R/GPU bridges cover gaps and expose native replacement
+  status.
+- **D-WD10**: `core.game` is a stable game substrate: assets, ECS, input,
+  fixed-step timing, deterministic replay, editor hooks, and budgets; renderer,
+  audio, and editor backends remain replaceable packages.
+- **D-WD11**: embedded/freestanding work uses typed target profiles that expose
+  memory, linker, allocator, panic, volatile/MMIO, and audit controls only when
+  such targets are selected.
+- **D-WD12**: `jet prove` becomes a progressive proof/replay product over
+  contracts, refinements, effects, budgets, property tests, and replay facts;
+  solvers are opt-in lenses with Jet diagnostics.
+- **D-WD14**: performance budgets attach to packages/envs/services and feed
+  build, bench, dev, dossier, and CI; deterministic budgets are hard gates,
+  statistical budgets use pinned baselines and trend policy.
+- **D-WD15**: native replacement overlays require compatibility proof across
+  public types, effects, errors, examples, and golden fixtures before a native
+  Jet package can replace a foreign surface without call-site rewrites.
+
 **D-JPK-ADAPTNAME1 (=A, ratified 2026-07-03, c9jetpackgates)**: adapter
 spellings confirmed as `Pkg.adapt(name:, source:, recipe:)` + the `Recipe.*`
 family (`Recipe.prebuilt/copy/cargo/go/node/cmake/make`, expert

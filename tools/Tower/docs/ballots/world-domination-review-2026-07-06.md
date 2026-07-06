@@ -1,7 +1,9 @@
 # Jet world-domination review
 
-Status: proposal artifact, not ratified. No Tower cards were created. Use this
-as the approval menu for converting ideas into cards or owner ballots.
+Status: ratified 2026-07-06. The owner chose option B for D-WD1–D-WD12,
+D-WD14, and D-WD15. One proposed auxiliary ballot was deleted before ballot
+creation. Tower card #228 hosted the decisions; follow-up planning cards are
+#229–#242.
 
 Goal: make Jet the language people reach for when they want Python's reach,
 Rust's safety/performance, Go's deployment, TypeScript's app ergonomics, Nix's
@@ -81,6 +83,26 @@ top.
 - Hybrid: one semantic graph covers code, build, package, env, image, machine,
   and fleet. Different entrypoints are views over the same graph.
 
+## Second-pass rule
+
+Do not pick a weaker option because the best option has hard edges. Keep the
+best option and bridge the edge:
+
+- If magic hides too much, add `explain`, `dossier`, `--json`, generated-source
+  views, provenance, and policy knobs.
+- If expert control scares beginners, put it behind typed grants, profiles,
+  role modules, and explicit commands.
+- If broad ecosystem interop risks supply-chain chaos, route every provider
+  through one locked graph, one trust model, one sandbox policy, and one
+  replacement path.
+- If a GUI risks split-brain state, make it a source editor over canonical Jet
+  modules with diff preview and round-trip preservation.
+- If reproducibility creates opaque locks, make the lock explainable and
+  semantically mergeable.
+- If native Core ambition risks waiting for the world to be rewritten, use
+  foreign providers as migration bridges and prove native replacements can
+  export the same surface.
+
 ## Top approval candidates
 
 ### D-WD1: capability grants as the universal trust surface
@@ -115,6 +137,11 @@ widely distrusted; Nix sandboxing is strong but not beginner-visible.
 
 Rec: B. One trust model is the clean conquest weapon.
 
+Weakness flip: a universal trust model can become a scary wall of prompts. Fix:
+summarize by intent for beginners ("this repo wants npm network, one build
+recipe, Postgres, and two secrets"), then let experts expand to exact effects,
+files, hosts, commands, cache keys, and revocable grants.
+
 Group: ecosystem.
 
 ### D-WD2: semantic dossier as first-class tooling
@@ -145,6 +172,11 @@ Comparison: Cargo has `tree`; pnpm has workspace views; Nix has derivation
 graphs; Jet can unify graph, diagnostics, effects, generated code, and policy.
 
 Rec: B.
+
+Weakness flip: an umbrella command can become a junk drawer. Fix: `jet dossier`
+is only a view over named facts already owned by `semindex`, `expand`,
+`audit`, `graph`, `bench`, and Jetpack provenance. Beginner gets one command;
+expert gets stable lenses and JSON schemas.
 
 Group: tooling.
 
@@ -181,6 +213,10 @@ surprises. Jet should be strict by default and explain every duplicate.
 
 Rec: B.
 
+Weakness flip: strictness can feel like "why can't my code see the thing that
+is obviously installed?" Fix: diagnostics show the missing declaration and offer
+one command to add it to the right package or workspace catalog.
+
 Group: packages.
 
 ### D-WD4: lockfile explain and merge strategy
@@ -211,6 +247,10 @@ interpret locks. Cargo and npm commit exact trees; Jet can add rationale and
 safe merge.
 
 Rec: B.
+
+Weakness flip: explainable locks add metadata and potential noise. Fix:
+separate machine identity from human rationale, keep the lock deterministic,
+and make review tools collapse unchanged rationale by default.
 
 Group: packages.
 
@@ -243,6 +283,10 @@ Comparison: TypeScript won by coexistence with JS. Jet should go broader:
   npm/PyPI/Cargo/SwiftPM/Nix/Docker become on-ramps, not forever crutches.
 
 Rec: B.
+
+Weakness flip: importers can produce ugly generated Jet and trap users in
+compat mode. Fix: imported output is editable role-module source with TODO
+diagnostics, replacement overlays, and `jet migrate native` progress tracking.
 
 Group: interop.
 
@@ -277,6 +321,11 @@ build; Jetpack should ingest reach through one locked graph.
 
 Rec: B.
 
+Weakness flip: provider federation can recreate npm/PyPI chaos. Fix: all
+foreign package managers become metadata sources, never authority sources:
+Jetpack owns fetch, lock, sandbox, build effects, signatures, audit, and
+replacement.
+
 Group: packages.
 
 ### D-WD7: jetos Studio GUI
@@ -307,6 +356,10 @@ truth. Jetos can have both.
 
 Rec: B.
 
+Weakness flip: a GUI can hide the model and create a second product. Fix:
+every toggle edits Jet source, every screen has a diff, and expert mode can
+open the exact module/option/provenance without leaving the GUI.
+
 Group: jetos.
 
 ### D-WD8: OS dry-run, VM proof, and power-cut simulation
@@ -334,6 +387,10 @@ Comparison: NixOS `test`, `build-vm`, and rollbacks are loved. Jetos should
 make them the default path with clearer output and CI artifacts.
 
 Rec: B.
+
+Weakness flip: VM proof can slow small edits. Fix: default to plan/diff for
+minor local changes, require VM proof for boot/kernel/filesystem/service-risk
+classes, and let policy make proof mandatory in CI.
 
 Group: jetos.
 
@@ -371,6 +428,10 @@ Python during transition.
 
 Rec: B.
 
+Weakness flip: a native data stack risks being thin compared with Python. Fix:
+ship a typed Core floor, use Python/R as accelerator bridges, and require every
+bridge-heavy workflow to have a visible native replacement path.
+
 Group: core.
 
 ### D-WD10: game-dev standard lane
@@ -406,6 +467,10 @@ control plus batteries.
 
 Rec: B.
 
+Weakness flip: a game lane can sprawl into a whole engine too early. Fix:
+make `core.game` the stable substrate (assets, ECS, input, replay, timing,
+editor hooks) and keep renderer/audio/editor backends as replaceable packages.
+
 Group: core.
 
 ### D-WD11: embedded and freestanding profiles
@@ -437,6 +502,10 @@ one language and make target constraints typed.
 
 Rec: B.
 
+Weakness flip: embedded profiles can leak target jargon into normal Jet. Fix:
+profiles are invisible until `#Target(Embedded.*)` or a board module appears;
+then every hidden default becomes auditable and overrideable.
+
 Group: low-level.
 
 ### D-WD12: proof and replay mode
@@ -466,36 +535,11 @@ should make proof progressive.
 
 Rec: B.
 
+Weakness flip: proof mode can become solver-shaped ceremony. Fix: keep
+contracts/tests/replay as the beginner face; deeper proof is an opt-in lens
+with Jet diagnostics, never raw solver output.
+
 Group: static-guarantees.
-
-### D-WD13: AI-assisted codebase workbench, local and auditable
-
-Gist: choose whether Jet tooling includes a first-party codebase assistant over
-the semantic index.
-
-Story: Dana asks "what breaks if I change this type?" The answer should cite
-real symbols, tests, effects, and generated code, not hallucinate.
-
-In wild:
-
-```text
-jet ask "can UserId and AccountId mix anywhere?"
-jet ask --fix "replace this Python adapter with native Jet"
-```
-
-Options:
-
-- A: No AI surface. Safe, but leaves best DX on the table.
-- B: Local-first assistant over semindex/dossier/test facts, with patch
-  provenance. Recommended.
-- C: Cloud-only assistant. Powerful, weaker trust story.
-
-Comparison: Developers increasingly use AI, but raw chat lacks project truth.
-Jet can make AI a compiler-backed tool, not a guessing box.
-
-Rec: B.
-
-Group: tooling.
 
 ### D-WD14: performance budget profiles
 
@@ -530,6 +574,10 @@ visible and enforceable.
 
 Rec: B.
 
+Weakness flip: budgets can become flaky CI. Fix: distinguish hard deterministic
+budgets (binary size, allocation count, generated unsafe count) from statistical
+budgets (latency, throughput), with pinned hardware baselines and trend gates.
+
 Group: tooling.
 
 ### D-WD15: native package replacement overlays
@@ -560,6 +608,10 @@ Comparison: TypeScript preserved JS call sites; Jet should preserve package
 surfaces while replacing implementations.
 
 Rec: B.
+
+Weakness flip: replacement overlays can hide semantic mismatch. Fix: require
+compatibility proof over public types, effects, errors, examples, and golden
+fixtures before an overlay can claim it replaces a foreign package.
 
 Group: interop.
 
@@ -671,5 +723,5 @@ Adversarial pass:
 5. D-WD5 migration importers and D-WD6 provider federation.
 6. D-WD7 jetos Studio product design, without ratifying jetos syntax yet.
 7. D-WD9 data stack, D-WD10 game lane, D-WD11 embedded profiles.
-8. D-WD2 dossier and D-WD13 AI workbench as one tooling push.
-
+8. D-WD2 dossier as the transparency push that keeps every magic default
+   inspectable.

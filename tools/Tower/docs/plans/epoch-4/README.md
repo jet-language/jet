@@ -1,8 +1,8 @@
-# Epoch 4 — jetpack / jetos tracking file
+# Epoch 4 — jetpack tracking file
 
-**Status:** active plan, refreshed 2026-07-02 from Tower card
-`c9jetpackgates` and today's follow-up decisions. This folder now has three
-tracked files:
+**Status:** active jetpack plan, refreshed 2026-07-06 after jetos moved to
+Epoch 7. This folder owns the package-manager/environment substrate that jetos
+will later consume. It has three tracked files:
 
 - [`README.md`](README.md) — current decisions, status, and sequencing.
 - [`vision.md`](vision.md) — product / UX target.

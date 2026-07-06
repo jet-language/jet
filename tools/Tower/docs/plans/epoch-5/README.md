@@ -1,7 +1,9 @@
-# Epoch 5 — Jai metaprogramming
+# Epoch 5 — Metaprogramming
 
-**Charter (owner, 2026-06-26 restructure):** E5 = Jai metaprogramming (renumbered from E4 in the 2026-07-02 epoch swap with jetpack/jetos; historical E4-M* / D-E4EXIT1 identifiers keep their names) — Jai-class
-build-time power under Jet's authority model. Canonical design + executable
+**Charter (owner, 2026-06-26 restructure, amended by D-METAMUTATE1=A):** E5 =
+Jai-class build-time power under Jet's authority model, without Jai-style AST
+mutation/message-loop/user macros. Historical E4-M* / D-E4EXIT1 identifiers keep
+their names. Canonical design + executable
 implementation plan: [`metaprogramming.md`](metaprogramming.md) (§15 is the
 plan; do not duplicate it here).
 
@@ -39,7 +41,7 @@ Build order (§15.1 DAG): **M1 → M4 ∥ (M2, M3) → M5 → M6**.
 | ~~c1mixqcn #94~~ | shipped `$` splice + `comptime {}` lower rung — not a macro/mutation card |
 | c2kizq8n #128 | stdlib-only DSL block ballot D-DSLBLOCK1 |
 | c147 #14 | serde bound-override reserve (D-SERDE11=A) — frozen, evidence-gated, not an exit item |
-| c154 #15 | explicit Jai-style mutation/message-loop ballot D-METAMUTATE1 |
+| ~~c154 #15~~ | closed rejected — D-METAMUTATE1=A; no AST mutation/message-loop/user macros |
 | c0p8ieer #219 | D-BUILDTARGET1=A typed targets — ready to implement |
 | c0q9le33 #220 | D-BUILDACTION1=A declared actions — ready to implement |
 | c0ravub0 #221 | D-BUILDTOOLCHAIN1=A + D-BUILDPROBE1=A — ready to implement |

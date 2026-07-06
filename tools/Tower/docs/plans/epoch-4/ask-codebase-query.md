@@ -19,8 +19,8 @@ prerequisite (index) ships early; the ballot itself is still gated to e5.
 
 Card #115's `epoch` field is `e4`. That doesn't match its own ratified
 decision (`D-ASKCODE1=B`, Epoch 5) or the epoch definitions in
-`tools/Tower/tower.json` (`e4` = jetpack/jetos package-and-OS layer; `e5` =
-metaprogramming/build-as-Jet — the query engine has never been e4 scope
+Tower (`e4` = jetpack package/environment substrate; `e5` =
+metaprogramming/build-as-Jet; `e7` = jetos — the query engine has never been e4 scope
 under either epoch taxonomy). Recommend retagging the card to `e5` next time
 someone with tower.json write access touches it. Not done here (write scope
 for this task is plan files only).

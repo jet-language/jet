@@ -30,8 +30,9 @@ executable spec: a milestone ships with new `examples/` programs and new
 | Open owner ballots | [`decision-ballots.md`](../../tools/Tower/docs/ballots/decision-ballots.md) |
 | Epoch 1 highlights (done) | See "Epoch 1 — development highlights" below |
 | Epoch 2 highlights (done) | See "Epoch 2 — development highlights" below |
-| Epoch 5 (Jai metaprogramming) plan | [`tools/Tower/docs/plans/epoch-5/`](../../tools/Tower/docs/plans/epoch-5/) → [`metaprogramming.md`](../../tools/Tower/docs/plans/epoch-5/metaprogramming.md) |
-| Jetpack & jetos sequencing + live status | [`tools/Tower/docs/plans/epoch-4/`](../../tools/Tower/docs/plans/epoch-4/) |
+| Epoch 5 metaprogramming plan | [`tools/Tower/docs/plans/epoch-5/`](../../tools/Tower/docs/plans/epoch-5/) → [`metaprogramming.md`](../../tools/Tower/docs/plans/epoch-5/metaprogramming.md) |
+| Jetpack sequencing + live status | [`tools/Tower/docs/plans/epoch-4/`](../../tools/Tower/docs/plans/epoch-4/) |
+| jetos + visual configuration | Tower Epoch 7 cards (#2, #182, #186, #235, #236) |
 | Implementing-agent protocol | [`tools/Tower/docs/plans/README.md`](../../tools/Tower/docs/plans/README.md) |
 
 Plans are gated on ratified decisions in `syntax-decisions.md` (see
@@ -167,13 +168,16 @@ git-based dependencies. Jetpack hangar cleanup uses `jet clean`. The built-in HT
 client (`core.http`) supports default HTTPS through the D-TLS1 rustls bridge;
 registry push remains a separate protocol/tooling follow-up.
 
-### Jetpack & jetos
+### Jetpack and jetos
 
-**jetos is deferred to post-Epoch-3** (owner, 2026-06-18) — research track only;
-do not ratify its config/surface syntax during Epoch 2 or 3. **Jetpack** Phase 1
-environments and the typed `module { … }` surface stay active: see
-[`jetpack-jetos/README.md`](../../tools/Tower/docs/plans/epoch-4/README.md) for
-the live built-vs-pending status and current decisions.
+**Jetpack** is Epoch 4. It owns the package-manager and environment substrate:
+providers, strict package graphs, catalogs, explainable locks, migration
+importers, hangar/cache, signing, build-from-source, and no-Nix behavior.
+
+**jetos** is Epoch 7. It builds on jetpack and owns declarative OS activation,
+proof-before-switch, generations, installable images, source-backed Studio, and
+the Blueprint-class visual editor. jetos surface syntax still requires Tower
+ballots before implementation.
 
 ### Epoch 1 tail
 
@@ -198,9 +202,12 @@ duplicated here:
   dogfood portfolio of complex/fringe Jet projects proving readability and
   reason-about-ability, and the memory model adversarially proven as solid as
   Rust's borrow checker. Tracked in Tower cards #217 (readiness gate) and #218
-  (full port); jetos as a shipped OS product stays post-Epoch-3 research
-  (owner, 2026-06-18); jetos surface syntax is not ratified in Epoch 2/3
+  (full port).
 - Comptime layer 3 / user-defined derives (S56) → Epoch 3
+- Jai-style AST mutation/message-loop/user macros → rejected by D-METAMUTATE1=A
+  and closed in Tower #15. Practical power stays in the non-mutating stack:
+  generated source modules, typed build actions, read-only front-end APIs,
+  stdlib DSL blocks, and policy passes.
 - Formal core / desugaring map → **Epoch 6** (D-FORMALCORE1=C); placeholder at
   [`docs/spec/formal-core.md`](formal-core.md); enforcement deferred until sema is frozen
 - Time-travel variable history (reversible execution / runtime value timeline)
