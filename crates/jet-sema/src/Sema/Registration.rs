@@ -100,6 +100,16 @@ impl<'a> Checker<'a> {
         // like an `#Unsafe { … }` block — its reason is the audit note. Mark the
         // whole body unsafe so `drop(x)` of a `#SingleUse` value is permitted
         // (and any other unsafe-gated operation is reachable directly).
+        if f.is_unsafe && f.unsafe_reason.is_none() {
+            self.diags.push(Diagnostic::lint(
+                "L3101",
+                "this `#Unsafe` function has no reason".to_string(),
+                "every gated function records why callers can rely on its unsafe contract"
+                    .to_string(),
+                "add the reason: `#Unsafe(\"why this is safe\") fn ...`".to_string(),
+                f.unsafe_span.or(Some(f.name_span)),
+            ));
+        }
         if f.is_reactive {
             if f.is_pure {
                 self.diags.push(Diagnostic::error(
@@ -1074,6 +1084,8 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                     params: Vec::new(),
                     return_type: None,
                     is_unsafe: false,
+                    unsafe_reason: None,
+                    unsafe_span: None,
                     is_pure: false,
                     is_reactive: false,
                     is_sanitizer: false,
@@ -2122,8 +2134,8 @@ pub(crate) fn check_func_body(
         det_suppress: 0,
         context_depth: 0,
         context_allocator_active: false,
-        // S58 (E2-M13): an `@unsafe fn` body is itself an audited region — its
-        // statements may use low-level ops directly without a nested `@unsafe`
+        // S58 (E2-M13): an `#Unsafe fn` body is itself an audited region — its
+        // statements may use low-level ops directly without a nested `#Unsafe`
         // block. Calling such a fn is gated separately (E3103).
         in_unsafe: f.is_unsafe,
         suppress_must_use: false,
@@ -2259,6 +2271,8 @@ pub(crate) fn check_error_conv_body(
         }],
         return_type: Some(Type::Named(ec.to_ty.clone())),
         is_unsafe: false,
+        unsafe_reason: None,
+        unsafe_span: None,
         is_pure: false,
         is_reactive: false,
         is_must_use: false,
@@ -2581,6 +2595,8 @@ pub(crate) fn synthesize_delegation_method(
         params,
         return_type: sig.return_type.clone(),
         is_unsafe: false,
+        unsafe_reason: None,
+        unsafe_span: None,
         is_pure: false,
         is_reactive: false,
         is_must_use: false,
@@ -2637,6 +2653,8 @@ pub(crate) fn synthesize_default_method(
         params,
         return_type: sig.return_type.clone(),
         is_unsafe: false,
+        unsafe_reason: None,
+        unsafe_span: None,
         is_pure: false,
         is_reactive: false,
         is_must_use: false,

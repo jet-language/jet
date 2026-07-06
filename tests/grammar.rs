@@ -559,7 +559,7 @@ pub fn shell() -> [JSON] {
     ];
 }
 
-fn use_collections(items: [String], counts: [String, Int]) {}
+fn use_collections(items: [String], counts: [String: Int]) {}
 "#;
     let (toks, lex_diags) = jet::Lexer::lex(src);
     assert!(lex_diags.is_empty(), "lex diagnostics: {lex_diags:?}");

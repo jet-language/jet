@@ -172,6 +172,8 @@ mod tests {
             params: Vec::new(),
             return_type: Some(Type::Named("String".to_string())),
             is_unsafe: false,
+            unsafe_reason: None,
+            unsafe_span: None,
             is_pure: false,
             is_sanitizer: false,
             is_reactive: false,

@@ -238,7 +238,7 @@ impl<'a> Parser<'a> {
             TokKind::LBracket => Err(Diagnostic::error(
                 "E0034",
                 format!("`{type_name}[...]` isn't how Jet writes generic types"),
-                "square brackets start collection types like `[Int]` or `[String, Int]`, and collection values like `[1, 2]`"
+                "square brackets start collection types like `[Int]` or `[String: Int]`, and collection values like `[1, 2]`"
                     .to_string(),
                 "write angle brackets for generic arguments, or use `[Int]` for a list type".to_string(),
                 Some(self.peek().span),
@@ -416,10 +416,10 @@ impl<'a> Parser<'a> {
             TokKind::LBracket => {
                 self.bump();
                 let first = self.type_generic_arg("list/map type")?;
-                if matches!(self.peek().kind, TokKind::Comma) {
+                if matches!(self.peek().kind, TokKind::Colon) {
                     self.bump();
                     let value = self.type_generic_arg("map value")?;
-                    self.expect(TokKind::RBracket, "after the value type in `[K, V]`")?;
+                    self.expect(TokKind::RBracket, "after the value type in `[K: V]`")?;
                     Type::Map {
                         key: Box::new(first),
                         value: Box::new(value),
@@ -525,25 +525,6 @@ impl<'a> Parser<'a> {
                         ));
                         Type::String
                     }
-                    Syntax::TYPE_LIST => {
-                        self.expect_type_args_open("List")?;
-                        let inner = self.type_generic_arg("List")?;
-                        if !self.type_generic_truncated {
-                            self.maybe_close_type_args("after a list element type")?;
-                        }
-                        Type::List(Box::new(inner))
-                    }
-                    Syntax::TYPE_MAP => {
-                        self.expect_type_args_open("Map")?;
-                        let key = self.type_generic_arg("Map key")?;
-                        self.expect(TokKind::Comma, "between the two types in `Map<K, V>`")?;
-                        let value = self.type_generic_arg("Map value")?;
-                        self.maybe_close_type_args("after the value type in `Map<K, V>`")?;
-                        Type::Map {
-                            key: Box::new(key),
-                            value: Box::new(value),
-                        }
-                    }
                     Syntax::TYPE_CHAR => Type::Char,
                     Syntax::FOREIGN_DYN => {
                         self.diags.push(Generics::e0036(Syntax::FOREIGN_DYN, start));
@@ -568,52 +549,6 @@ impl<'a> Parser<'a> {
                             }
                         } else {
                             Type::Named("Box".to_string())
-                        }
-                    }
-                    Syntax::FOREIGN_VEC => {
-                        self.diags.push(Diagnostic::error(
-                            "E0028",
-                            format!(
-                                "{} uses `{}`, not `{}`",
-                                Syntax::LANG_NAME,
-                                Syntax::TYPE_LIST,
-                                Syntax::FOREIGN_VEC
-                            ),
-                            format!("`{}` is the list type", Syntax::TYPE_LIST),
-                            format!(
-                                "replace `{}` with `{}<...>`",
-                                Syntax::FOREIGN_VEC,
-                                Syntax::TYPE_LIST
-                            ),
-                            Some(start),
-                        ));
-                        self.expect_type_args_open("List")?;
-                        let inner = self.type_generic_arg("List")?;
-                        self.maybe_close_type_args("after a list element type")?;
-                        Type::List(Box::new(inner))
-                    }
-                    Syntax::FOREIGN_HASHMAP | Syntax::FOREIGN_DICT => {
-                        let foreign = name.clone();
-                        self.diags.push(Diagnostic::error(
-                            "E0028",
-                            format!(
-                                "{} uses `{}`, not `{}`",
-                                Syntax::LANG_NAME,
-                                Syntax::TYPE_MAP,
-                                foreign
-                            ),
-                            format!("`{}` is the map type", Syntax::TYPE_MAP),
-                            format!("replace `{}` with `{}<K, V>`", foreign, Syntax::TYPE_MAP),
-                            Some(start),
-                        ));
-                        self.expect_type_args_open("Map")?;
-                        let key = self.type_generic_arg("Map key")?;
-                        self.expect(TokKind::Comma, "between the two types in `Map<K, V>`")?;
-                        let value = self.type_generic_arg("Map value")?;
-                        self.maybe_close_type_args("after the value type in `Map<K, V>`")?;
-                        Type::Map {
-                            key: Box::new(key),
-                            value: Box::new(value),
                         }
                     }
                     Syntax::TYPE_SHARED => {

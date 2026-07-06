@@ -148,8 +148,8 @@ pub(super) fn image_bad_format(word: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0976",
         format!("`{word}` isn't a disk-image format"),
-        "U14: an image is built as one of three formats — `iso`, `qcow`, or `raw`".to_string(),
-        "write `format: iso`, `format: qcow`, or `format: raw`".to_string(),
+        "D-JETOS-FREEZE1: disk-image formats are frozen jetos research; Jetpack only builds `.Oci` images today".to_string(),
+        "use `kind: .Oci` for an active image, or keep disk-image notes in the jetos research appendix".to_string(),
         Some(span),
     )
 }
@@ -159,8 +159,8 @@ pub(super) fn image_missing_from(span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0977",
         "this `Image` has no `from`".to_string(),
-        "U14: an image is built from a system — `from: system.<name>` names which one".to_string(),
-        "add `from: system.<name>`, e.g. `from: system.halcyon`".to_string(),
+        "D-JPK-IMAGE1: active Jetpack images are OCI containers built from a package; `system.*` disk images are frozen jetos research".to_string(),
+        "add `from: packages.<name>` for an `.Oci` image".to_string(),
         Some(span),
     )
 }
@@ -170,8 +170,8 @@ pub(super) fn image_restated_field(field: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0977",
         format!("an image doesn't restate `{field}`"),
-        "U14: `packages`, `services`, and `options` are inherited from the system the image is built from — they are written once on the system, never on the image".to_string(),
-        format!("remove `{field}` from the image; set it on the system instead. (Only an explicit `target:` may be restated, for cross-compiling.)"),
+        "D-JETOS-FREEZE1: fields inherited from `system.*` belong to frozen jetos disk-image research, not active `.Oci` images".to_string(),
+        format!("remove `{field}` from the active image; use package/env inputs instead"),
         Some(span),
     )
 }
@@ -186,8 +186,8 @@ pub(super) fn image_from_unknown_system(image: &str, system: &str, known: &[Stri
     Diagnostic::error(
         "E0978",
         format!("the image `{image}` is built from an unknown system `{system}`"),
-        "U14: `from: system.<name>` must name a `System` defined by some module contribution; the image inherits that system's target, packages, services, and options".to_string(),
-        format!("define `system.{system}: {{ … }}`, or point `from:` at an existing system ({hint})"),
+        "D-JETOS-FREEZE1: `from: system.<name>` is frozen jetos disk-image research; Jetpack's active image path uses `from: packages.<name>`".to_string(),
+        format!("use `from: packages.<name>` for an `.Oci` image, or keep the system image as research capture ({hint})"),
         None,
     )
 }
@@ -198,8 +198,8 @@ pub(super) fn fleet_unknown_field(field: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E1244",
         format!("`{field}` isn't a field of `Fleet`"),
-        "U15: a `Fleet` has one field — `hosts`, a map of host names to `System` refs".to_string(),
-        format!("remove `{field}`; a fleet is written `fleet.<name> {{ hosts: {{ … }} }}`"),
+        "D-JETOS-FREEZE1: fleet deployment remains frozen jetos research; only `hosts` is captured for planning".to_string(),
+        format!("remove `{field}`; captured fleets use `hosts: {{ … }}`"),
         Some(span),
     )
 }
@@ -209,8 +209,8 @@ pub(super) fn fleet_missing_hosts(span: Span) -> Diagnostic {
     Diagnostic::error(
         "E1245",
         "this `Fleet` has no `hosts`".to_string(),
-        "U15: a fleet deploys a map of named hosts, each to a `System` ref".to_string(),
-        "add `hosts: { web1: system.<name> }`".to_string(),
+        "D-JETOS-FREEZE1: fleet deployment is frozen jetos research, but captured fleets still name hosts for later planning".to_string(),
+        "add `hosts: { web1: system.<name> }` if this is research capture".to_string(),
         Some(span),
     )
 }
@@ -230,8 +230,8 @@ pub(super) fn fleet_unknown_system(
     Diagnostic::error(
         "E1242",
         format!("the fleet `{fleet}` host `{host}` names an unknown system `{system}`"),
-        "U15: each `hosts:` entry maps a host to a `System` defined by some module contribution; the host deploys that system's closure".to_string(),
-        format!("define `system.{system}: {{ … }}`, or point the host at an existing system ({hint})"),
+        "D-JETOS-FREEZE1: fleets are frozen jetos research capture; captured hosts must still point at a captured system so the plan is coherent".to_string(),
+        format!("define captured `system.{system}: {{ … }}`, or point the host at an existing captured system ({hint})"),
         None,
     )
 }
@@ -242,8 +242,8 @@ pub(super) fn image_unknown_kind(word: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E1266",
         format!("`{word}` isn't an image kind"),
-        "D-JPK-IMAGE1: an image's `kind:` is one of two leading-dot values — `.Oci` (a container, built `from: packages.<name>`) or `.Iso` (a disk image, built `from: system.<name>`)".to_string(),
-        "write `kind: .Oci` or `kind: .Iso`".to_string(),
+        "D-JPK-IMAGE1 + D-JETOS-FREEZE1: active Jetpack images use `.Oci`; `.Iso` disk images are frozen jetos research capture".to_string(),
+        "write `kind: .Oci` for active Jetpack images".to_string(),
         Some(span),
     )
 }
@@ -251,15 +251,23 @@ pub(super) fn image_unknown_kind(word: &str, span: Span) -> Diagnostic {
 /// E1266: an explicit `kind:` disagrees with what this image's `from:` names
 /// (D-JPK-IMAGE1) — e.g. `kind: .Oci` alongside `from: system.<name>`.
 pub(super) fn image_kind_from_mismatch(kind: &str, span: Span) -> Diagnostic {
-    let (wants, got) = if kind == crate::Syntax::IMAGE_KIND_OCI {
-        ("packages.<name>", "system.<name>")
+    let (wants, got, status) = if kind == crate::Syntax::IMAGE_KIND_OCI {
+        (
+            "packages.<name>",
+            "system.<name>",
+            "active `.Oci` images are built from packages",
+        )
     } else {
-        ("system.<name>", "packages.<name>")
+        (
+            "system.<name>",
+            "packages.<name>",
+            "`.Iso` disk images are frozen jetos research capture",
+        )
     };
     Diagnostic::error(
         "E1266",
         format!("`kind: .{kind}` doesn't match this image's `from:`"),
-        format!("D-JPK-IMAGE1: a `.{kind}` image is built `from: {wants}`, but this image's `from:` names a `{got}`"),
+        format!("D-JPK-IMAGE1: {status}; this `from:` names a `{got}`"),
         format!("change `from:` to `{wants}`, or change `kind:` to match what `from:` names"),
         Some(span),
     )

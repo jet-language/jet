@@ -244,6 +244,21 @@ pub fn compile_web_with_path(src: &str, file: &str) -> Result<CompileOutput, Vec
         Ok(link) => link,
         Err(ffi_diags) => return Err(ffi_diags),
     };
+    let web_tir_errors: Vec<_> = Codegen::validate_web_tir_support(&bundle, ffi.as_ref())
+        .into_iter()
+        .map(|miss| {
+            Diagnostics::Diagnostic::error(
+                "E-WEB-TIR-UNSUPPORTED",
+                format!("web output cannot compile `{}` yet", miss.func_name),
+                "web builds use the same checked executable body path as native builds; this function uses a construct the web output cannot lower today".to_string(),
+                "move the unsupported work behind a Wasm export that uses covered Jet constructs, or simplify this function for the web target".to_string(),
+                Some(miss.span),
+            )
+        })
+        .collect();
+    if !web_tir_errors.is_empty() {
+        return Err(web_tir_errors);
+    }
     let rust = Codegen::emit_bundle(&bundle, Sema::CompileMode::Run, ffi.as_ref());
     let web = Some(Codegen::emit_web(
         &bundle,

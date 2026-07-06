@@ -319,7 +319,7 @@ fn fmt_canonicalizes_collection_type_sugar() {
     ];
 }
 
-fn use_collections(items: List<String>, counts: Map<String, Int>) {}
+fn use_collections(items: [String], counts: [String: Int]) {}
 "#;
     let out = jet::format_source(src).expect("fmt should accept collection type sugar");
     assert!(
@@ -327,7 +327,7 @@ fn use_collections(items: List<String>, counts: Map<String, Int>) {}
         "expected list return shorthand, got:\n{out}"
     );
     assert!(
-        out.contains("items: [String], counts: [String, Int]"),
+        out.contains("items: [String], counts: [String: Int]"),
         "expected bracket collection type formatting, got:\n{out}"
     );
     assert!(
@@ -892,6 +892,21 @@ fn fmt_impure_block_no_reason_round_trips() {
     );
     let twice = jet::format_source(&out).expect("#Impure (no reason) fmt must re-fmt");
     assert_eq!(out, twice, "#Impure (no reason) fmt must be idempotent");
+}
+
+#[test]
+fn fmt_unsafe_reasons_escape_strings() {
+    // D-UNSAFE-REASON1=B: unsafe block/function reasons are normal string
+    // literals, so fmt must preserve quotes/backslashes as parseable Jet.
+    let src = "use core.mem\n\n#Unsafe(\"caller says \\\"ok\\\"\") fn raw() -> Int {\n    return 1\n}\n\nfn run() {\n    #Unsafe(\"path C:\\\\tmp\") {\n        print(\"{raw()}\")\n    }\n}\n";
+    let out = jet::format_source(src).expect("fmt should succeed on unsafe reasons");
+    assert!(
+        out.contains("#Unsafe(\"caller says \\\"ok\\\"\")")
+            && out.contains("#Unsafe(\"path C:\\\\tmp\")"),
+        "unsafe reason escaping broke:\n{out}"
+    );
+    let twice = jet::format_source(&out).expect("unsafe reason fmt must re-fmt");
+    assert_eq!(out, twice, "unsafe reason fmt must be idempotent");
 }
 
 #[test]

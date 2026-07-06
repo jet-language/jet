@@ -557,7 +557,7 @@ pub fn e0036(keyword: &str, span: Span) -> Diagnostic {
         ),
         "a trait in type position means dynamic dispatch — Jet handles the details for you"
             .to_string(),
-        "write the trait name, like `Shape` or `List<Shape>`".to_string(),
+        "write the trait name, like `Shape`".to_string(),
         Some(span),
     )
 }
@@ -598,7 +598,7 @@ pub fn rust_extra_jetdebug_bounds(params: &[TypeParam]) -> HashMap<String, Vec<S
 
 /// Collect every type-parameter name (drawn from `param_names`) that the type
 /// `ty` mentions anywhere in its structure. A type parameter `T` appears as
-/// `Type::Named("T")`; nested positions (`[T]`, `Map<String, T>`, `Box<T>`, …)
+/// `Type::Named("T")`; nested positions (`[T]`, `[String: T]`, `Box<T>`, …)
 /// count too.
 pub fn collect_type_param_mentions(
     ty: &Type,

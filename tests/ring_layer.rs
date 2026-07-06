@@ -1,4 +1,4 @@
-//! D-RINGLAYER1=A M1: runtime layer inference and package ceilings.
+//! D-RINGLAYER1=A M1: runtime profile inference and package ceilings.
 
 use std::fs;
 use std::path::PathBuf;
@@ -16,7 +16,7 @@ fn manifest_parses_layer_ceiling() {
 payload: {
     name: "embed",
     version: "0.1.0",
-    layer: alloc,
+    runtime: alloc,
 }
 "#;
     let pm = jet::Jetpack::PackageManifest::parse(raw).unwrap();
@@ -27,7 +27,17 @@ payload: {
 
 #[test]
 fn manifest_rejects_unknown_layer() {
-    let raw = "payload: { name: \"x\", version: \"1\", layer: heap }";
+    let raw = "payload: { name: \"x\", version: \"1\", runtime: heap }";
+    let err = jet::Jetpack::PackageManifest::parse(raw).unwrap_err();
+    assert!(matches!(
+        err,
+        jet::Jetpack::PackageManifest::ManifestError::BadLayer { .. }
+    ));
+}
+
+#[test]
+fn manifest_rejects_retired_std_runtime_name() {
+    let raw = "payload: { name: \"x\", version: \"1\", runtime: std }";
     let err = jet::Jetpack::PackageManifest::parse(raw).unwrap_err();
     assert!(matches!(
         err,
@@ -100,7 +110,7 @@ fn ceiling_blocks_std_import() {
     let dir = tmp_project("ceiling");
     fs::write(
         dir.join("pkg.jet"),
-        "payload: { name: \"m\", version: \"0.1.0\", layer: core }\n",
+        "payload: { name: \"m\", version: \"0.1.0\", runtime: core }\n",
     )
     .unwrap();
     let main = r#"
@@ -126,7 +136,7 @@ fn alloc_ceiling_allows_mem_not_fs() {
     let dir = tmp_project("alloc_ok");
     fs::write(
         dir.join("pkg.jet"),
-        "payload: { name: \"m\", version: \"0.1.0\", layer: alloc }\n",
+        "payload: { name: \"m\", version: \"0.1.0\", runtime: alloc }\n",
     )
     .unwrap();
     let main = r#"
@@ -182,7 +192,7 @@ fn ceiling_blocks_ambient_input_helper() {
     let dir = tmp_project("input_ceiling");
     fs::write(
         dir.join("pkg.jet"),
-        "payload: { name: \"m\", version: \"0.1.0\", layer: core }\n",
+        "payload: { name: \"m\", version: \"0.1.0\", runtime: core }\n",
     )
     .unwrap();
     let main = r#"

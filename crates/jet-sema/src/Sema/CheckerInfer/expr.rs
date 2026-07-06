@@ -1399,7 +1399,7 @@ impl<'a> Checker<'a> {
             self.diags.push(Diagnostic::error(
                 "E0501",
                 "an empty map needs a type".to_string(),
-                "write `[]` only where the map type is already known, like `var m: [String, Int] = []`"
+                "write `[]` only where the map type is already known, like `var m: [String: Int] = []`"
                     .to_string(),
                 "add a type annotation on the binding".to_string(),
                 Some(span),

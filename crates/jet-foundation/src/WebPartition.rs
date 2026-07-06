@@ -63,7 +63,7 @@ impl WebPartitionMarker {
     }
 }
 
-/// D-JSBIND1=A: scalars, `String`, and homogeneous `List` / `Map<String, _>` of ABI-safe
+/// D-JSBIND1=A: scalars, `String`, and homogeneous `[T]` / `[String: T]` of ABI-safe
 /// element types. `Named` / `Apply` Codable structs and enums are checked in sema where
 /// the bundle's type definitions are available.
 pub fn is_abi_safe_type(ty: &Type) -> bool {

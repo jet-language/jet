@@ -117,7 +117,7 @@
   "true"
 ] @constant.builtin
 
-; type.builtin: BigInt Bool Char Computed Csv Data DbValue Decimal Derived Effect Error F32 F64 Float I16 I32 I64 I8 IOError Int JSON JSONError Json Key List Map Measurement Ptr SelectBuilder Shared Signal Stream String TaskGroup Toml U16 U32 U64 U8 UTF8Error Void Yaml
+; type.builtin: BTreeMap BigInt Bool Char Computed Csv Data DbValue Decimal Deque Derived Effect Error F32 F64 Float HashMap I16 I32 I64 I8 IOError Int JSON JSONError Json Key Measurement Ptr SelectBuilder Set Shared Signal Stream String TaskGroup Toml U16 U32 U64 U8 UTF8Error Void Yaml
 [
   "Bool"
   "Char"
@@ -130,8 +130,6 @@
   "I64"
   "I8"
   "Int"
-  "List"
-  "Map"
   "String"
   "U16"
   "U32"

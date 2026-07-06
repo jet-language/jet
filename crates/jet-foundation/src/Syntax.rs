@@ -204,12 +204,14 @@ pub const KW_YIELD: &str = "yield";
 /// D-STREAMYIELD1: the generator return-type constructor `Stream<T>`.
 pub const TYPE_STREAM: &str = "Stream";
 
-/// D-UNSAFE2 (ratified 2026-06-22, opt B; prev S58 2026-06-12): the audited
+/// D-UNSAFE2 (ratified 2026-06-22, opt B; prev S58 2026-06-12) and
+/// D-UNSAFE-REASON1=B (ratified 2026-07-06): the audited
 /// expert gate. Block form: `#Unsafe("reason") { … }`. Whole-function form:
-/// `#Unsafe("reason") fn`. The reason is the argument of `#Unsafe` itself;
-/// the separate `#Audit` marker is retired (E0055). The bare lowercase `unsafe`
-/// keyword (FOREIGN_UNSAFE) is the rejected foreign spelling, recognized only
-/// to emit a teaching error.
+/// `#Unsafe("reason") fn`. Bare `#Unsafe { … }` / `#Unsafe fn` compile and
+/// emit L3101. The reason is the argument of `#Unsafe` itself; the separate
+/// `#Audit` marker is retired (E0055). The bare lowercase `unsafe` keyword
+/// (FOREIGN_UNSAFE) is the rejected foreign spelling, recognized only to emit a
+/// teaching error.
 pub const KW_UNSAFE: &str = "Unsafe";
 
 /// D-CTEFFECT1 (ratified 2026-06-25): `#Impure("reason") { … }` — the audited
@@ -341,7 +343,7 @@ pub const MEM_FROM_ADDR: &str = "from_addr";
 pub const MEM_VOLATILE_READ: &str = "volatile_read";
 
 /// S58 (ratified 2026-06-12): `mem.address_of(x)` — the address of a value as
-/// an Int (taking a pointer is inert; using it needs `@unsafe`).
+/// an Int (taking a pointer is inert; using it needs `#Unsafe`).
 pub const MEM_ADDRESS_OF: &str = "address_of";
 
 /// D-ALLOC1 (ratified 2026-06-19): arena allocator type name.
@@ -541,12 +543,16 @@ pub const TYPE_EFFECT: &str = "Effect";
 /// D-HONESTNUM1=A: the science measurement type name.
 pub const TYPE_MEASUREMENT: &str = "Measurement";
 
-/// S33 (ratified M5): legacy list type constructor.
-/// S65 (ratified 2026-06-15): `[T]` is canonical; `List<T>` remains accepted.
+/// D-LISTMAP-CANON1=A: legacy list spelling; `[T]` is canonical.
 pub const TYPE_LIST: &str = "List";
 
-/// S38 (ratified M5): map type constructor.
+/// D-LISTMAP-CANON1=A: legacy default map spelling; `[K: V]` is canonical.
 pub const TYPE_MAP: &str = "Map";
+/// D-LISTMAP-CANON1=A: named specific collection types.
+pub const TYPE_HASH_MAP: &str = "HashMap";
+pub const TYPE_BTREE_MAP: &str = "BTreeMap";
+pub const TYPE_DEQUE: &str = "Deque";
+pub const TYPE_SET: &str = "Set";
 
 /// S41 (ratified M5): character type.
 pub const TYPE_CHAR: &str = "Char";
@@ -920,8 +926,8 @@ pub const BUILTIN_EMBED_BYTES: &str = "embed_bytes";
 /// recognized only to emit the E0052 teaching error pointing at `#Test("name")`.
 pub const KW_TEST: &str = "Test";
 
-/// D-BENCH1 (ratified 2026-06-24): top-level region-benchmark block, written as
-/// the marker `#Bench "name" { … }` — the exact sibling of `#Test "name" { … }`.
+/// D-BENCH1 + D-BENCH-MARKER1=A: top-level region-benchmark block, written as
+/// the marker `#Bench("name") { … }` — the exact sibling of `#Test("name") { … }`.
 /// The existing `jet bench` verb (D-TOOL5) discovers and runs these, reporting
 /// per-region ops/sec + ns/iter (today it times a whole program). PascalCase
 /// marker per D-CASING1, joining the `#Test`/`@Pure`/`#Todo`/`#Caps` family.
@@ -1220,7 +1226,6 @@ pub const FOREIGN_PIPE_CLOSURE: &str = "|";
 
 /// S14 (M5): foreign collection spellings for teaching errors.
 pub const FOREIGN_VEC: &str = "Vec";
-pub const FOREIGN_HASHMAP: &str = "HashMap";
 pub const FOREIGN_DICT: &str = "dict";
 pub const FOREIGN_APPEND: &str = "append";
 
@@ -2232,9 +2237,11 @@ pub const JET_TYPE_LIST: &[&str] = &[
     TYPE_STRING,
     TYPE_VOID,
     TYPE_CHAR,
-    TYPE_LIST,
-    TYPE_MAP,
     TYPE_SHARED,
+    TYPE_HASH_MAP,
+    TYPE_BTREE_MAP,
+    TYPE_DEQUE,
+    TYPE_SET,
     TYPE_I8,
     TYPE_I16,
     TYPE_I32,
@@ -2848,15 +2855,23 @@ pub const JET_HIGHLIGHT_TOKENS: &[HighlightToken] = &[
         class: HighlightClass::TypeBuiltin,
     },
     HighlightToken {
-        text: TYPE_LIST,
-        class: HighlightClass::TypeBuiltin,
-    },
-    HighlightToken {
-        text: TYPE_MAP,
-        class: HighlightClass::TypeBuiltin,
-    },
-    HighlightToken {
         text: TYPE_SHARED,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_HASH_MAP,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_BTREE_MAP,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_DEQUE,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_SET,
         class: HighlightClass::TypeBuiltin,
     },
     HighlightToken {

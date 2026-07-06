@@ -281,6 +281,8 @@ mod tests {
             params,
             return_type: ret,
             is_unsafe: false,
+            unsafe_reason: None,
+            unsafe_span: None,
             is_pure: false,
             is_reactive: false,
             is_sanitizer: false,

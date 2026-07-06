@@ -2509,6 +2509,8 @@ pub(crate) fn check_module_bodies(
                     params: t.params.clone(),
                     return_type: None,
                     is_unsafe: false,
+                    unsafe_reason: None,
+                    unsafe_span: None,
                     is_pure: false,
                     is_reactive: false,
                     is_must_use: false,
@@ -2558,6 +2560,8 @@ pub(crate) fn check_module_bodies(
                     params: Vec::new(),
                     return_type: None,
                     is_unsafe: false,
+                    unsafe_reason: None,
+                    unsafe_span: None,
                     is_pure: false,
                     is_reactive: false,
                     is_must_use: false,
@@ -2691,8 +2695,8 @@ pub(crate) fn check_func_body_bundle(
         det_suppress: 0,
         context_depth: 0,
         context_allocator_active: false,
-        // S58 (E2-M13): an `@unsafe fn` body is itself an audited region — its
-        // statements may use low-level ops directly without a nested `@unsafe`
+        // S58 (E2-M13): an `#Unsafe fn` body is itself an audited region — its
+        // statements may use low-level ops directly without a nested `#Unsafe`
         // block. Calling such a fn is gated separately (E3103).
         in_unsafe: f.is_unsafe,
         suppress_must_use: false,

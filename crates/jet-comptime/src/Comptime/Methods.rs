@@ -1629,13 +1629,13 @@ fn apply_core_call(
     }
 }
 
-fn regex_pattern(args: &[CtValue], span: Span) -> Result<regex::Regex, Diagnostic> {
+fn regex_pattern(args: &[CtValue], span: Span) -> Result<super::RegexLite::RegexLite, Diagnostic> {
     let pat = as_string(
         args.first()
             .ok_or_else(|| unsupported("regex call: missing pattern argument", span))?,
         span,
     )?;
-    regex::Regex::new(pat).map_err(|e| {
+    super::RegexLite::RegexLite::parse(pat).map_err(|e| {
         Diagnostic::error(
             "E0956",
             format!("bad regex pattern: {}", e),
@@ -1664,7 +1664,7 @@ fn regex_find(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
         span,
     )?;
     Ok(CtValue::ResOk(Box::new(match re.find(text) {
-        Some(m) => CtValue::Some(Box::new(CtValue::Str(m.as_str().to_string()))),
+        Some(m) => CtValue::Some(Box::new(CtValue::Str(text[m.start..m.end].to_string()))),
         None => CtValue::None(crate::AST::Type::String),
     })))
 }
@@ -1677,8 +1677,9 @@ fn regex_find_all(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic>
         span,
     )?;
     let items: Vec<CtValue> = re
-        .find_iter(text)
-        .map(|m| CtValue::Str(m.as_str().to_string()))
+        .find_all(text)
+        .into_iter()
+        .map(|m| CtValue::Str(m.to_string()))
         .collect();
     Ok(CtValue::ResOk(Box::new(CtValue::List(items))))
 }
@@ -1692,6 +1693,7 @@ fn regex_split(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
     )?;
     let items: Vec<CtValue> = re
         .split(text)
+        .into_iter()
         .map(|s| CtValue::Str(s.to_string()))
         .collect();
     Ok(CtValue::ResOk(Box::new(CtValue::List(items))))
@@ -1710,7 +1712,7 @@ fn regex_replace(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> 
         span,
     )?;
     Ok(CtValue::ResOk(Box::new(CtValue::Str(
-        re.replace_all(text, rep).into_owned(),
+        re.replace_all(text, rep),
     ))))
 }
 
@@ -1721,13 +1723,16 @@ fn regex_match(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
             .ok_or_else(|| unsupported("regex.match: missing text argument", span))?,
         span,
     )?;
-    Ok(CtValue::ResOk(Box::new(match re.captures(text) {
-        Some(caps) => {
-            let groups: Vec<CtValue> = (0..caps.len())
+    Ok(CtValue::ResOk(Box::new(match re.find(text) {
+        Some(m) => {
+            let groups: Vec<CtValue> = m
+                .groups
+                .iter()
                 .map(|i| {
-                    caps.get(i)
-                        .map(|m| CtValue::Some(Box::new(CtValue::Str(m.as_str().to_string()))))
-                        .unwrap_or_else(|| CtValue::None(crate::AST::Type::String))
+                    i.map(|(start, end)| {
+                        CtValue::Some(Box::new(CtValue::Str(text[start..end].to_string())))
+                    })
+                    .unwrap_or_else(|| CtValue::None(crate::AST::Type::String))
                 })
                 .collect();
             CtValue::Some(Box::new(CtValue::Struct {

@@ -153,9 +153,11 @@ impl<'a> Fmt<'a> {
                 // D-UNSAFE2: the reason is the argument of `#Unsafe` itself; the
                 // separate `#Audit` line is retired.
                 match audit {
-                    Some(reason) => {
-                        self.write(&format!("#{}(\"{}\") {{", Syntax::KW_UNSAFE, reason))
-                    }
+                    Some(reason) => self.write(&format!(
+                        "#{}(\"{}\") {{",
+                        Syntax::KW_UNSAFE,
+                        escape_str_lit(reason)
+                    )),
                     None => self.write(&format!("#{} {{", Syntax::KW_UNSAFE)),
                 }
                 self.newline();

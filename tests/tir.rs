@@ -521,7 +521,7 @@ fn map_literal_index_insert_and_iteration() {
     }
     let src = "\
 fn run() {
-    counts: [String, Int] := []
+    counts: [String: Int] := []
     counts[\"banana\"] = 3
     counts[\"apple\"] = 5
     print(counts[\"apple\"])
@@ -696,7 +696,7 @@ fn map_literal_with_entries() {
         return;
     }
     let src = "\
-fn scores() -> [String, Int] {
+fn scores() -> [String: Int] {
     return [\"a\": 1, \"b\": 2]
 }
 fn run() {
@@ -1065,7 +1065,7 @@ fn map_builtin_methods() {
     }
     let src = "\
 fn run() {
-    m: [String, Int] := []
+    m: [String: Int] := []
     m.insert(\"banana\", 3)
     m.insert(\"apple\", 5)
     print(m.len())
@@ -1096,14 +1096,14 @@ fn drop_first(xs: [Int]) -> Int {
     r := ys.remove(0)
     return ys.len()
 }
-fn drop_key(m: [String, Int]) -> Int {
+fn drop_key(m: [String: Int]) -> Int {
     m2 := m
     r := m2.remove(\"a\")
     return m2.len()
 }
 fn run() {
     print(drop_first([10, 20, 30]))
-    counts: [String, Int] := []
+    counts: [String: Int] := []
     counts[\"a\"] = 1
     counts[\"b\"] = 2
     print(drop_key(counts))
@@ -3008,7 +3008,7 @@ fn run() {
 /// round-trip (the coupled prelude-`JSON` slice). `main` routes through the TIR:
 /// `json.parse(raw) ?? panic`, `if data == Object(entries)` (JSON if-let), `JSON.Text`/
 /// `JSON.Boolean`/`JSON.Object` construction (non-mangled `jet_std::Json::…`), a Map
-/// index over `[String, JSON]`, and `json.to_string`. rustc accepting proves byte-parity.
+/// index over `[String: JSON]`, and `json.to_string`. rustc accepting proves byte-parity.
 #[test]
 fn json_value_construct_match_render() {
     if !have_rustc() {
@@ -3022,7 +3022,7 @@ fn run() {
     if data == Object(entries) {
         print(entries.len())
     }
-    obj: [String, Json] := []
+    obj: [String: Json] := []
     obj[\"name\"] = Json.Text(\"jet\")
     obj[\"ok\"] = Json.Bool(true)
     obj[\"none\"] = Json.Null
@@ -4141,8 +4141,8 @@ fn comptime_local_is_literal_data() {
         return;
     }
     let src = "\
-fn build() -> List<Int> {
-    xs: List<Int> := []
+fn build() -> [Int] {
+    xs: [Int] := []
     loop i in 1..3 {
         xs.push(i * 10)
     }
@@ -4273,7 +4273,7 @@ fn run() {
 }
 
 /// c109: an indexed map-assign whose index BASE is a struct field read
-/// (`s.scores["a"] = 1`, `scores: Map<String, Int>`). The `LValue::Index` gate
+/// (`s.scores["a"] = 1`, `scores: [String: Int]`). The `LValue::Index` gate
 /// admits a field-read base + the sema-resolved `IndexKind::Map`; `main` routes
 /// through the TIR and the assign emits the `jet_map_insert` helper form
 /// byte-for-byte. Runs (insert then index-read prints the value).
@@ -4284,7 +4284,7 @@ fn indexed_map_assign_through_field() {
     }
     let src = "\
 struct S {
-    scores: Map<String, Int>
+    scores: [String: Int]
 }
 
 fn run() {
@@ -4317,7 +4317,7 @@ fn map_builtin_on_struct_field_receiver() {
     }
     let src = "\
 struct S {
-    scores: Map<String, Int>
+    scores: [String: Int]
 }
 
 fn run() {

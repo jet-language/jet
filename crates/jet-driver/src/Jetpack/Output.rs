@@ -131,7 +131,10 @@ impl Theme {
     /// ledger row prints over a clean slate.
     pub fn spinner(&self, msg: &str) -> Spinner {
         if !self.color {
-            return Spinner { stop: None, handle: None };
+            return Spinner {
+                stop: None,
+                handle: None,
+            };
         }
         let stop = Arc::new(AtomicBool::new(false));
         let flag = stop.clone();

@@ -97,7 +97,7 @@ fn maybe() -> (Int?) {
 }
 
 fn run() {
-    m: Map<String, Int> := []
+    m: [String: Int] := []
     m["k"] = 7
     x :: maybe() ?? m["k"]
     print(x)
@@ -138,7 +138,7 @@ fn run() {
 fn map_assign_through_field_uses_map_helper() {
     let src = r#"
 struct S {
-    scores: Map<String, Int>
+    scores: [String: Int]
 }
 
 fn run() {
@@ -160,7 +160,7 @@ fn struct_literal_field_knows_expected_type() {
     // `[]` in a struct literal used to fail with a spurious E0501.
     let src = r#"
 struct S {
-    scores: Map<String, Int>
+    scores: [String: Int]
 }
 
 fn run() {
@@ -270,7 +270,7 @@ fn run() {
 fn statement_can_start_with_self() {
     let src = r#"
 struct Crate {
-    items: List<Int>
+    items: [Int]
 
     fn add(&self, n: Int) {
         self.items.push(n)
@@ -291,7 +291,7 @@ fn builtin_mutator_on_read_self_is_error() {
     expect_error(
         r#"
 struct Crate {
-    items: List<Int>
+    items: [Int]
 
     fn add(self, n: Int) {
         self.items.push(n)

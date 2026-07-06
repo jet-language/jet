@@ -17,7 +17,7 @@ const JET_HIGHLIGHT_KEYWORD_DECLARATION = ["Bench", "Context", "Impure", "Pure",
 const JET_HIGHLIGHT_KEYWORD_OWNERSHIP = ["copy", "uninit"];
 const JET_HIGHLIGHT_KEYWORD_OTHER = ["it", "self"];
 const JET_HIGHLIGHT_LITERAL = ["None", "Val", "err", "false", "ok", "true"];
-const JET_HIGHLIGHT_TYPE_BUILTIN = ["BigInt", "Bool", "Char", "Computed", "Csv", "Data", "DbValue", "Decimal", "Derived", "Effect", "Error", "F32", "F64", "Float", "I16", "I32", "I64", "I8", "IOError", "Int", "JSON", "JSONError", "Json", "Key", "List", "Map", "Measurement", "Ptr", "SelectBuilder", "Shared", "Signal", "Stream", "String", "TaskGroup", "Toml", "U16", "U32", "U64", "U8", "UTF8Error", "Void", "Yaml"];
+const JET_HIGHLIGHT_TYPE_BUILTIN = ["BTreeMap", "BigInt", "Bool", "Char", "Computed", "Csv", "Data", "DbValue", "Decimal", "Deque", "Derived", "Effect", "Error", "F32", "F64", "Float", "HashMap", "I16", "I32", "I64", "I8", "IOError", "Int", "JSON", "JSONError", "Json", "Key", "Measurement", "Ptr", "SelectBuilder", "Set", "Shared", "Signal", "Stream", "String", "TaskGroup", "Toml", "U16", "U32", "U64", "U8", "UTF8Error", "Void", "Yaml"];
 const JET_HIGHLIGHT_BUILTIN = ["input", "print"];
 const JET_HIGHLIGHT_MARKER_DIRECTIVE = ["Bench", "Bindgen", "Caller", "Caps", "Default", "DenyUnknownFields", "Extern", "Flatten", "Grant", "Html", "Impure", "Js", "Layout", "Reactive", "Rename", "RenameAll", "Sanitizer", "SingleUse", "Skip", "Sql", "State", "Suppress", "Tag", "Tainted", "Target", "Test", "Todo", "Transact", "Transition", "UnitFamily", "Unsafe", "Untagged", "Wasm", "WasmExport"];
 const JET_HIGHLIGHT_MARKER_CONTRACT = ["Cli", "Codable", "CodableAsBase", "Comparable", "Debug", "Decode", "Doc", "Encode", "Experimental", "Hardened", "Inline", "InlineAlways", "MustUse", "Numeric", "Patchable", "Persist", "Post", "Pre", "Printable", "PublishedSchema", "Pure", "Redact", "Summarize", "Tested"];
@@ -469,6 +469,7 @@ module.exports = grammar({
         "Bool",
         "String",
         "Char",
+        "Void",
         "Error",
         "I8",
         "I16",
@@ -505,15 +506,11 @@ module.exports = grammar({
       choice(
         seq("[", $._type, "]"),
         seq("[", $._type, "#", $.integer_literal, "]"),
-        seq("List", "<", $._type, ">"),
       ),
 
-    // `[K, V]` map, or `Map<K, V>` (S38/S65).
+    // `[K: V]` map (D-LISTMAP-CANON1=A).
     map_type: ($) =>
-      choice(
-        seq("[", $._type, ",", $._type, "]"),
-        seq("Map", "<", $._type, ",", $._type, ">"),
-      ),
+      seq("[", $._type, ":", $._type, "]"),
 
     // `#Pure fn(T) -> U` or `#(Io) fn(T) -> U` callback type (D-EFF2).
     fn_type: ($) =>

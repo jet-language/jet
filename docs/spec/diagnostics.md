@@ -332,6 +332,7 @@ before continuing.
 | E-WEB-ABI-TYPE | sema | a JS/WASM boundary type is not ABI-safe (D-JSBIND1) |
 | E-WEB-CROSS-PARTITION | sema | a function in one web bucket calls a function in another (D-WASM1) |
 | E-WEB-TARGET-BROWSER | sema | a Wasm-pinned function also carries the `Browser` effect (D-WASM1) |
+| E-WEB-TIR-UNSUPPORTED | driver | a web-targeted executable body is outside the checked TIR boundary (D-WEBTIR1) |
 | E-OSTARGET-MIXED-AXIS | sema | a `#Target(Os.*)`-gated impl's file/module also carries a web-bucket ceiling (D-OSTARGET1) |
 | E-OSTARGET-UNMATCHED-CALL | sema | a function/method not gated to match takes or returns a value of a `#Target(Os.*)`-gated type (D-OSTARGET1) |
 | E-OSTARGET-BUILD-CONTEXT | sema | a `comptime if … == { }` OS switch's subject is not `build.os` (D-OSTARGET2) |
@@ -350,7 +351,7 @@ before continuing.
 | E3104 | sema  | value allocated in an arena used after `arena.reset()` or `arena.free()` (D-ALLOC-D) |
 | E3110 | sema  | invalid swizzle lane on vector/SIMD type (D-SWIZZLE1) |
 | E3111 | sema  | overlapping write swizzle repeats a lane (D-SWIZZLE1) |
-| L3101 | sema  | `#Unsafe` block missing its reason argument — write `#Unsafe("…") { … }` (D-UNSAFE2) |
+| L3101 | sema  | `#Unsafe` block/function missing its reason argument — add `#Unsafe("…")` (D-UNSAFE2, D-UNSAFE-REASON1) |
 | L3102 | sema  | `#Impure` block missing its reason argument — write `#Impure("…") { … }` (D-CTEFFECT1) |
 | E3201 | jet   | C library `<lib>` not found (hangar + pkg-config) |
 | E3202 | sema  | pointer/gated type crosses C boundary outside `#Unsafe` / `core.mem` |
@@ -439,9 +440,9 @@ before continuing.
 | E0973 | jetpack | `target` (or cross-compile platform) isn't a known platform value (U13) |
 | E0974 | jetpack | a `System` has no `target` (U11) |
 | E0975 | jetpack | a `Service` has no `enable`, or `enable` isn't `true`/`false` (U12) |
-| E0976 | jetpack | an `Image` `format:` isn't `iso` / `qcow` / `raw` (U14) |
-| E0977 | jetpack | an `Image` has no `from`, or restates an inherited field (U14) |
-| E0978 | jetpack | an `Image` `from:` references an unknown `System` (U14) |
+| E0976 | jetpack | an `Image` uses a frozen disk-image format (D-JETOS-FREEZE1) |
+| E0977 | jetpack | an `Image` has no active `from`, or restates a frozen system field (D-JETOS-FREEZE1) |
+| E0978 | jetpack | an `Image` `from:` references a frozen/unknown `System` (D-JETOS-FREEZE1) |
 | E0979 | jetpack | a `jetpack os` target has no `@host` selector (U16) |
 | E0980 | jetpack | a `jetpack os` `@host` names a `System` the config doesn't define (U16) |
 | E0981 | jetpack | a `jetpack os` config file doesn't exist (U16) |
@@ -452,7 +453,7 @@ before continuing.
 | E1003 | sema  | integer literal out of range for its width |
 | E1004 | sema  | unknown item in core module |
 | E1005 | sema  | overflow opt-in not wrapping a single integer op |
-| E1006 | sema  | `use core.*` import or emitted helper exceeds package `layer:` ceiling (D-RINGLAYER1) |
+| E1006 | sema  | `use core.*` import or emitted helper exceeds package `runtime:` ceiling (D-RINGLAYER1) |
 | E1301 | sema  | `ArgsSpec.flag` or `ParsedArgs.flag` called with wrong arity (D-ARGS1) |
 | E1302 | sema  | `ArgsSpec.option` or `ParsedArgs.option` called with wrong arity (D-ARGS1) |
 | E1303 | sema  | `ArgsSpec.positional` or `ParsedArgs.positional` called with wrong arity (D-ARGS1) |
@@ -518,10 +519,10 @@ before continuing.
 | E1239 | jet   | `module workspace` declared in more than one file (discovery-by-declaration, D-JPK-FILENAME2) |
 | E1240 | jet   | no realized Rust toolchain and no Nix to build an `extern rust` bridge dep (D-JPK-BUILDTOOL1) |
 | E1241 | jet   | a staged `core.<ring>` artifact is missing for the active platform (D-JPK-RINGSHIP1) |
-| E1242 | jet   | a `fleet.<name>` host references a `system.<name>` no contribution defines (U15, D-JPK-FLEET1) |
+| E1242 | jet   | a captured `fleet.<name>` host references an unknown captured `system.<name>` (D-JETOS-FREEZE1) |
 | E1243 | jet   | `jet push <fleet>` on a valid fleet — deployment gated on single-host jetos realization (U15, Phase D) |
-| E1244 | jet   | an unknown field on a `Fleet` record — the one field is `hosts` (U15, D-JPK-FLEET1) |
-| E1245 | jet   | a `Fleet` with no `hosts:` map (U15, D-JPK-FLEET1) |
+| E1244 | jet   | an unknown field on a captured `Fleet` record (D-JETOS-FREEZE1) |
+| E1245 | jet   | a captured `Fleet` with no `hosts:` map (D-JETOS-FREEZE1) |
 | E1246 | jet   | a package signature doesn't verify against its pinned public key (D-PKGSIGN1) |
 | E1247 | jet   | a registry with `require_signed: true` served an unsigned package (D-PKGSIGN1) |
 | E1248 | jet   | `jet keygen` refused: a signing key already exists (use `--force`) (D-PKGSIGN1) |
@@ -542,7 +543,7 @@ before continuing.
 | E1263 | jetpack | `jetpack secrets get <name>` names an entry that isn't in the encrypted store (U13) |
 | E1264 | sema  | a function reaches `core.vault.get` without declaring the `Secret` effect (U13, D-JPK-SECRETCRYPTO1) |
 | E1265 | comptime | `core.vault.get` reached from a build-time (comptime) context — secrets are never readable at build time (U13) |
-| E1266 | jet   | an `Image`'s `kind:` isn't `.Oci`/`.Iso`, or disagrees with what `from:` names (U14, D-JPK-IMAGE1) |
+| E1266 | jet   | an `Image`'s `kind:` isn't active `.Oci`, or disagrees with what `from:` names (D-JPK-IMAGE1, D-JETOS-FREEZE1) |
 | E1267 | jet   | an `.Oci` image's `from: packages.<name>` doesn't name an `executable`-kind package (U14, D-JPK-IMAGE1) |
 | E1268 | jetpack | `jet image <name> --push` — gated on TLS support for registry pushes, which doesn't exist yet (U14, D-JPK-IMAGE1) |
 | E1269 | jet   | an `.Oci` image field (`kind`/`expose`/`env_vars`/`files`/`base`) isn't shaped the way D-JPK-IMAGE1 spells it (U14) |
@@ -712,9 +713,9 @@ CLI.
 | E0973 | A `target` (or cross-compile platform) names a platform Jet doesn't know. | U13: a `target` is a typed platform value, not quoted text — it must be `linux.x64` or `linux.arm64`, so it type-checks and LSP-completes. | Write `target: linux.x64` or `target: linux.arm64`. |
 | E0974 | A `System` has no `target`. | U11: every machine names the platform it runs on with a typed `target`. | Add `target: linux.x64` (or `linux.arm64`). |
 | E0975 | A `Service` has no `enable`, or its `enable` isn't a yes/no value. | U12: every `Service` is an open record whose required first field is `enable: Bool`. | Add `enable: true` (or `false`) to the service. |
-| E0976 | An `Image` `format:` isn't one of the three disk-image formats. | U14: an image is built as `iso`, `qcow`, or `raw` (default `iso`). | Write `format: iso`, `format: qcow`, or `format: raw`. |
-| E0977 | An `Image` has no `from`, or restates a field it inherits from its system. | U14: an image is built `from: system.<name>` and inherits that system's `packages`/`services`/`options` — they are written once on the system. | Add `from: system.<name>`, or remove the inherited field (only an explicit `target:` may be restated, for cross-compiling). |
-| E0978 | An `Image` `from:` references a system no contribution defines. | U14: `from: system.<name>` must name a `System` defined by some module, because the image inherits its target, packages, services, and options. | Define `system.<name>: { … }`, or point `from:` at an existing system. |
+| E0976 | An `Image` uses a frozen disk-image format. | D-JETOS-FREEZE1: `iso`, `qcow`, and `raw` disk images are jetos research capture; Jetpack only builds `.Oci` images today. | Use `kind: .Oci` for an active image, or keep disk-image notes in the jetos research appendix. |
+| E0977 | An `Image` has no active `from`, or restates a frozen system-inherited field. | Active Jetpack images are OCI containers built `from: packages.<name>`; `system.*` disk images are frozen jetos research. | Add `from: packages.<name>` for an `.Oci` image, or remove fields inherited from frozen `system.*` research. |
+| E0978 | An `Image` `from:` references a frozen/unknown system. | D-JETOS-FREEZE1: `from: system.<name>` is frozen jetos disk-image research; Jetpack's active image path uses `from: packages.<name>`. | Use `from: packages.<name>` for an `.Oci` image, or keep the system image as research capture. |
 | E0979 | A `jetpack os` target was given with no `@host` selector. | U16: `jetpack os <verb>` takes `[<config-path>]@<host>`; the `@host` segment selects which `System` in the config to apply, and it is required. | Write `jetpack os switch @<host>` (default config) or `jetpack os switch ./config.jet@<host>`. |
 | E0980 | A `jetpack os` `@host` selector names a system the config doesn't define. | U16: the `@host` selector picks which `System` to apply; it must name a `system.<name>:` contribution the config defines. | Define `system.<host>: { … }`, or select one of the systems the config already defines. |
 | E0981 | The `jetpack os` config file (named, or the default `~/.jet/config.jet`) doesn't exist. | U16: `jetpack os <verb>` loads `[<config-path>]@<host>`; with no path prefix it defaults to `~/.jet/config.jet`. | Create the config file, or pass an explicit path before the `@`, e.g. `jetpack os switch ./config.jet@<host>`. |
@@ -978,7 +979,7 @@ operations that can violate memory safety. Ordinary Jet never reaches these.
 | E3102 | `{item}` is part of the low-level tier. | Naming `Ptr`, `volatile_read`, or an allocator needs the discovery gate. | Add `use core.mem;` at the top of the file. |
 | E3103 | `{fn}` is an `#Unsafe` function. | Its contract can't be checked by the compiler, so the caller must vouch for it. | Call it inside `#Unsafe("…") { … }`. |
 | E3104 | `{arena}` was already {reset/freed}; this value lives in `{arena}` which is gone. | Calling `arena.reset()` or `arena.free()` invalidates all values allocated in it. | Move the `alloc` call before the `reset`/`free`, or create a new allocator. |
-| L3101 | This `#Unsafe` block has no reason. | Every gated region records, in one line, why it can't break memory safety. | Add the reason: `#Unsafe("why this is safe") { … }`. |
+| L3101 | This `#Unsafe` block/function has no reason. | Every gated region/function records, in one line, why it can't break memory safety. | Add the reason: `#Unsafe("why this is safe") { … }` or `#Unsafe("why this is safe") fn ...`. |
 | L3102 | This `#Impure` block has no reason. | Every comptime effect gate records, in one line, why ambient I/O is needed. | Add the reason: `#Impure("reading build config") { … }`. |
 
 ## Comptime effect tiers (D-CTEFFECT1)
@@ -1048,6 +1049,7 @@ reported as **E0119** (unknown name).
 | E-WEB-CROSS-PARTITION | `{caller}` is compiled to {caller_bucket} but calls `{callee}`, which lives in {callee_bucket}. | The web backend keeps DOM/view code in JS and compute in WASM; a direct call across that boundary is not allowed yet (D-WASM1). | Move the call behind a generated bridge, colocate both functions in the same bucket, or adjust `#Target` / `#Wasm` / `#Js` markers. Run `jet build --target web --explain-partition` to audit assignments. |
 | E-WEB-ABI-TYPE | `{type}` cannot cross the JS/WASM boundary {context}. | Web exports and imports only admit ABI-safe types: scalars, `String`, `List`/`Map` of ABI-safe values, and `@[Codable]` structs/enums whose fields are ABI-safe (D-JSBIND1). | Use a scalar, `String`, a `List`/`Map` of ABI-safe values, or add `@[Codable]` to the struct/enum and keep every field ABI-safe. |
 | E-WEB-TARGET-BROWSER | `{fn}` is pinned to Wasm but uses the `Browser` effect. | A Wasm-pinned function cannot call browser/DOM APIs directly; the partition keeps view code in JS (D-WASM1). | Remove the `#Wasm` / `#WasmExport` pin, move browser work into a `#Js` function, or drop the browser API calls. |
+| E-WEB-TIR-UNSUPPORTED | Web output cannot compile `{fn}` yet. | Web builds use the same checked executable body path as native builds; this function uses a construct the web output cannot lower today (D-WEBTIR1). | Move the unsupported work behind a Wasm export that uses covered Jet constructs, or simplify this function for the web target. |
 
 ## Native OS platform gating diagnostics (c134, D-OSTARGET1)
 
@@ -1297,10 +1299,10 @@ snapshots in `tests/jetpack.rs` (the `tests/ui/` harness only renders front-end
 | E1238 | Build tool `{tool}` is not a realized dependency. | Build tools must be realized `Pkg` dependencies so the build is reproducible; a build never falls through to host `/usr/bin` (D-JPK-ADAPTER1). | Add `{tool}` as a build dependency in `pkg.jet` so it is realized into the hangar. |
 | E1240 | No Rust build toolchain is available to build this package. | Building an `extern rust` bridge dependency needs a pinned Rust toolchain realized into the hangar, or Nix; neither is present (D-JPK-BUILDTOOL1). | Run `jet update jet` to realize the pinned toolchain, or install Nix so the bridge builds through the compatibility provider. |
 | E1241 | The staged `core.{ring}` artifact is missing for this platform. | The active toolchain object carries prebuilt ring artifacts, but none for `core.{ring}` on this platform (D-JPK-RINGSHIP1). | The build falls back to the compiler-embedded `core.{ring}`; to ship the staged artifact, realize a toolchain object built for this platform (`jet update jet`). |
-| E1242 | The fleet `{fleet}` host `{host}` names an unknown system `{system}`. | Each `hosts:` entry maps a host to a `System` defined by some module contribution; the host deploys that system's closure (U15, D-JPK-FLEET1). A typo or missing `system.<name>` would otherwise deploy nothing. | Define `system.{system}: { … }`, or point the host at an existing system. |
+| E1242 | The fleet `{fleet}` host `{host}` names an unknown captured system `{system}`. | D-JETOS-FREEZE1: fleets are frozen jetos research capture; captured hosts must still point at a captured system so the plan is coherent. | Define captured `system.{system}: { … }`, or point the host at an existing captured system. |
 | E1243 | Fleet `{fleet}` is validated, but `jet push` is not available yet. | The fleet's hosts parse and cross-check clean, but rolling a fleet out over ssh needs single-host jetos realization, which is gated (U15; Phase D, owner greenlight required). `jet push` never fakes a deploy. | Until the jetos realization tier lands, `jet push` captures and validates fleets without deploying them. |
-| E1244 | `{field}` isn't a field of `Fleet`. | A `Fleet` has one field — `hosts`, a map of host names to `System` refs (U15). | Remove `{field}`; a fleet is written `fleet.<name> { hosts: { … } }`. |
-| E1245 | This `Fleet` has no `hosts`. | A fleet deploys a map of named hosts, each to a `System` ref (U15). | Add `hosts: { web1: system.<name> }`. |
+| E1244 | `{field}` isn't a captured `Fleet` field. | D-JETOS-FREEZE1: fleet deployment remains frozen jetos research; only `hosts` is captured for planning. | Remove `{field}`; captured fleets use `hosts: { … }`. |
+| E1245 | This captured `Fleet` has no `hosts`. | D-JETOS-FREEZE1: fleet deployment is frozen jetos research, but captured fleets still name hosts for later planning. | Add `hosts: { web1: system.<name> }` if this is research capture. |
 | E1246 | Signature verification failed for `{name}` {version}: the signature doesn't match the recorded public key. | This means the package was tampered with after signing, or the index entry is corrupt — the author's Ed25519 signature over the content hash no longer checks out (D-PKGSIGN1). | Do not use this version. Re-run `jet fetch` after clearing the store entry; if the problem persists, report it — this should never happen for an untampered registry. |
 | E1247 | Registry `{registry}` requires signed packages (`require_signed: true`) but `{name}` {version} has no signature. | The registry is configured to accept only author-signed releases; an unsigned entry can't be trusted under that policy (D-PKGSIGN1). | Use a different registry, or ask the package author to publish a signed release (`jet publish` auto-signs by default — they likely used `--no-sign`). |
 | E1248 | `jet keygen` refused: a signing key already exists at `{path}`. | Overwriting it would orphan every package you've published under the old key — consumers who pinned it (TOFU) would see a key-rotation warning on your next publish (D-PKGSIGN1). | Use `jet keygen --force` if you're sure (e.g. the old key was compromised), or back it up first with `jet key backup`. |
@@ -1321,7 +1323,7 @@ snapshots in `tests/jetpack.rs` (the `tests/ui/` harness only renders front-end
 | E1263 | No secret named `{name}`. | `jetpack secrets get {name}` decrypted the store (`.jet/secrets.age`) fine, but it has no entry called `{name}` (U13). | Set it first with `jetpack secrets set {name} <value>`, or check the spelling. |
 | E1264 | `{fn}` reads a secret but doesn't declare the `Secret` effect. | Reading a secret (`core.vault.get`) always requires an explicit grant (U13, D-JPK-SECRETCRYPTO1) — unlike every other effect, there is no silently-inferred default: a bare `fn` with no `#(…)` list, or one that omits `Secret`, is rejected even though the same function calling `core.files`/`core.net` with no declared bound at all would pass silently. | Add `#(Secret)` to `{fn}`'s signature (or widen an existing `#(…)` list to cover it). |
 | E1265 | `core.vault.get` can't be reached from a build-time context. | Module-field/comptime evaluation (`pkg.jet`, `env.jet`, …) runs before secrets are ever decrypted (U13) — a repo's encrypted store is only ever opened at ordinary runtime (`core.vault.get` inside a `#(Secret)`-graned function), and unlike the Tier-2 comptime effect gate (E3410/E3411), there is no `#Impure`/`--allow-impure` escape hatch here: a build artifact must never bake in a decrypted secret. | Move the secret read out of comptime/module-field evaluation and into ordinary runtime code. |
-| E1266 | `` `<word>` isn't an image kind `` (or `` `kind: .<word>` doesn't match this image's `from:` ``). | D-JPK-IMAGE1: an `Image`'s `kind:` is a leading-dot value — `.Oci` (a container, built `from: packages.<name>`) or `.Iso` (a disk image, built `from: system.<name>`). Written, it must agree with which one `from:` actually names; omitted, it infers from `from:` itself. | Write `kind: .Oci` or `kind: .Iso`, matching `from:`, or drop `kind:` and let it infer. |
+| E1266 | `` `<word>` isn't an active image kind `` (or `` `kind: .<word>` doesn't match this image's `from:` ``). | D-JPK-IMAGE1 + D-JETOS-FREEZE1: active Jetpack images use `.Oci`; `.Iso` disk images are frozen jetos research capture. | Write `kind: .Oci` for active Jetpack images, or keep `.Iso` only as research capture. |
 | E1267 | The image `{image}` is built from a non-executable package `{package}`. | D-JPK-IMAGE1: an `.Oci` image's `from: packages.<name>` must name a package this project's `pkg.jet` declares `executable` — a `library`-kind package has no binary to containerize, and an undeclared name can't be confirmed either way. | Declare `{package}: executable` in `pkg.jet`, or point `from:` at an existing executable package. |
 | E1268 | `` `jet image <name>` can't push to `<ref>` yet. `` | D-JPK-IMAGE1: `--push` speaks the registry protocol, which needs TLS support jetpack doesn't have yet. `jet image` builds the OCI layout natively either way; it just never fakes the push. | Build without `--push`, then push the OCI layout with another tool for now; `--push` will work once TLS lands. |
 | E1269 | `` `<field>` isn't shaped like <expected>. `` | D-JPK-IMAGE1: an `.Oci` image's `kind`/`expose`/`env_vars`/`files`/`base` fields each have one fixed shape (a bare leading-dot value, a list of ports, a string-keyed map, a list of paths, `oci("<ref>")`) — `Image` is a closed record, so a misshapen recognized field is rejected rather than silently ignored. | Rewrite the field to match its documented shape. |

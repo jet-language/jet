@@ -9,7 +9,7 @@ will later consume. It has three tracked files:
 - [`implementation.md`](implementation.md) — executable agent plan.
 
 Older split files were folded into these three: `unified-ecosystem.md`,
-`jetos-design.md`, `IMPLEMENTATION-STATUS.md`,
+`jetos-design.md` (now frozen research), `IMPLEMENTATION-STATUS.md`,
 `payload-env-separation.md`, and `ad-hoc-adapters.md`.
 
 World-domination follow-up slices live beside the main plan:
@@ -31,9 +31,10 @@ The latest decisions override stale prose in older Epoch 4 notes:
   `D-JPK-FILENAME2=B` keeps the shipped `pkg.jet` name and amends the U18
   two-names text. Do not rename fixtures or docs back to `pack.jet`.
 - **Role namespaces live in module declaration names.**
-  `D-JPK-MODBODY1=A`: write `module env.dev { packages: [...] }`,
-  `module system.laptop { ... }`, `module image.server { ... }`,
-  `module fleet.prod { ... }`. The shipped contribution form
+  `D-JPK-MODBODY1=A`: active Jetpack work writes `module env.dev { ... }`
+  and `module image.server { ... }` for OCI images. `system.*`, disk images,
+  OS generations, and activation commands are frozen jetos research by
+  D-JETOS-FREEZE1, not current Epoch 4 build scope. The shipped contribution form
   `module dev { env.dev: Env.{ ... } }` becomes teaching syntax, not a second
   canonical form.
 - **Only `pkg.jet` is a reserved filename.**
@@ -63,9 +64,9 @@ required role filenames.
 | U12 | `D-JPK-SERVICE1` | A | `services:` in `env.*`; jetpack supervises project-local processes; `jet services up/down/health/logs`; `jet dev` health-gates before running code. |
 | U13 | `D-JPK-SECRET1` | A | `secret("name")`; encrypted repo file; activation-time memory-only decrypt; reads require `Secret` effect; no plaintext in hangar. |
 | U13a | `D-JPK-SECRETCRYPTO1` | A | Use a vetted crypto bridge for age-style encryption; compiler stays zero-external-crate. |
-| U14 | `D-JPK-IMAGE1` | A | `image.*` can build `.Oci` containers and `.Iso` installers. OCI layout is direct from hangar objects. |
+| U14 | `D-JPK-IMAGE1` | A | `image.*` can build `.Oci` containers. `.Iso` installers are frozen jetos research. OCI layout is direct from hangar objects. |
 | U14a | `D-JPK-OCITOOL1` | C | Native/std-only deterministic OCI layout now; registry push gated on TLS, with temporary `skopeo` bridge allowed only as staging. |
-| U15 | `D-JPK-FLEET1` | A | `fleet.*` host maps and `jet push`; parse/capture now, realization waits for single-host jetos. |
+| U15 | `D-JPK-FLEET1` | A | Fleet host maps remain research/capture only; rollout waits for Epoch 7 jetos ballots. |
 | U16 | `D-JPK-BRIDGE1` | A | `jet env -p`, foreign `flake.nix`/`devenv.nix` consumption, `jet run nixpkgs@tool`, `jet bridge flake`. |
 | U17 | `D-JPK-OSNAME1` | A | Spell the OS `jetos`. |
 | U18 | `D-JPK-TWONAMES1` + follow-ups | amended | One reserved file (`pkg.jet`) and one user command (`jet`); role modules discovered by declaration; engines dispatched as executables. |
@@ -92,7 +93,9 @@ Built before this refresh:
   `edition`, with package diagnostics in E12xx.
 - Typed module evaluation exists for the older contribution form:
   `EnvPlan`, `SystemPlan`, `ServicePlan`, `ImagePlan`, `find("./modules")`,
-  source merge, and diagnostics around E0960-E0983.
+  source merge, and diagnostics around E0960-E0983. D-JETOS-FREEZE1 makes the
+  `SystemPlan`/whole-machine pieces inert research until Epoch 7; do not treat
+  them as shipped OS syntax.
 - Providers `core` and `nix` realize into the hangar; `.jet/lock` exists.
 - `workspace.jet` / `module workspace { members: ... }` partially exists from
   earlier cards, but U18 follow-up changes the filename rule: `workspace` is a
@@ -113,8 +116,7 @@ Phase A — foundation
 
 Phase B — independent surfaces
   U11 script deps
-  U14 image capture / native OCI layout
-  U15 fleet parse/capture
+  U14 OCI image capture / native OCI layout
   U19 env/dev split + trust gate
 
 Phase C — env runtime
@@ -122,7 +124,7 @@ Phase C — env runtime
   U13 secrets
   U16 Nix bridge
 
-Phase D — jetos realization
+Frozen research — jetos realization (Epoch 7)
   single-host switch/generations/rollback
   fleet push realization
   ISO / VM test harness
@@ -134,10 +136,10 @@ Edges:
   process dispatch.
 - U19 gates U12, U13, and U16 because it defines what `jet env`, `jet dev`,
   and trust mean.
-- U14 parse/capture can land before real push support; registry push waits on
-  TLS.
-- U15 surface can land before realization; `jet push` must give an honest gated
-  message until single-host jetos exists.
+- U14 OCI parse/capture can land before registry push support; registry push
+  waits on TLS. Disk images wait for Epoch 7 jetos.
+- Fleet rollout and `jet push` wait for Epoch 7 jetos ballots; no jetos
+  implementation is active in Epoch 4.
 - U24 envelope fields (output hash, platform, signature slot, provenance) land
   in Phase A with the hangar/lock schema — they are the reason CACHE1 was
   decided early; the protocol itself is a later card.
@@ -153,10 +155,13 @@ Edges:
 
 ---
 
-## jetos Parity Baseline
+## jetos Research Appendix
 
-jetos must be able to represent the current HalcyonOmega NixOS setup audited
-from `/home/nate/nixos` on 2026-06-15. Required coverage:
+Frozen by D-JETOS-FREEZE1. These notes preserve the target, but no `system.*`,
+fleet rollout, disk-image, generation, or activation spelling here is current
+syntax law. Future Epoch 7 ballots must re-open the exact surface. jetos should
+eventually represent the current HalcyonOmega NixOS setup audited from
+`/home/nate/nixos` on 2026-06-15. Required coverage:
 
 - pinned stable/unstable nixpkgs and external inputs;
 - multi-host configs, ISO host, hardware config, variants;

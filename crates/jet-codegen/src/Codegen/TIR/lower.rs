@@ -4253,7 +4253,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             }
         }
         // c109 Phase 5: a map literal `[k: v, …]` / `[:]`. Keys/values lower as-is;
-        // the result type is `[K, V]` from the first entry (empty `[:]` → unresolved
+        // the result type is `[K: V]` from the first entry (empty `[:]` → unresolved
         // placeholder, type-inferred by Rust from context like `vec![]`).
         Expr::MapLit(entries, _) => {
             let tentries: Vec<(TExpr, TExpr)> = entries

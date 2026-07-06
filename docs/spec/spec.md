@@ -695,7 +695,7 @@ Example: `examples/features/tooling/tests.jet`; scope members in
 
 ## `#Bench` region benchmarks + perf timing (c121, D-BENCH1) — done
 
-**`#Bench "name" { … }`** (D-BENCH1) is the exact sibling of `#Test`: a
+**`#Bench("name") { … }`** (D-BENCH1, D-BENCH-MARKER1) is the exact sibling of `#Test`: a
 top-level block whose body parses like a parameterless function (and may use
 `require`/`require_eq`). **`jet run`** / **`jet build`** ignore bench blocks. A
 file with `#Bench` blocks runs per-region under **`jet bench`** — each region's
@@ -814,10 +814,11 @@ emits **zero** `unsafe` (the I1 amendment, D-LL1, recorded in `architecture.md`)
 - **Audit gate** — `#Unsafe("reason") { … }` opens the operations that can
   violate memory safety (pointer build/deref, volatile access). The reason
   string is the argument to `#Unsafe` itself (D-UNSAFE2; the former separate
-  `#Audit("…")` line is retired → **E0055**). A missing reason argument is
-  lint **L3101**. `#Unsafe("reason") fn` marks a whole-function contract; its
-  body is itself an audited region, and calling it requires an enclosing
-  `#Unsafe` block → **E3103**.
+  `#Audit("…")` line is retired → **E0055**). Under **D-UNSAFE-REASON1=B**,
+  bare `#Unsafe { … }` and bare `#Unsafe fn` compile and emit lint **L3101**.
+  `#Unsafe("reason") fn` marks a whole-function contract; its body is itself
+  an audited region, and calling it requires an enclosing `#Unsafe` block →
+  **E3103**.
 - **Operations** — prefix `*x` takes a raw pointer to `x`; postfix `p.*`
   dereferences it. `mem.address_of(x)` is inert (a plain address as `Int`) and
   legal outside a gate. Using a low-level op outside `#Unsafe` → **E3101**.
@@ -1048,7 +1049,7 @@ explicit prefix **`take(name)`** on the lambda (**E0802**). Self-recursion throu
 the binding is rejected (**E0804**). Calling a non-function → **E0803**.
 
 **Collection methods:** `map`, `filter`, `each`, `find`, `any`, `all`,
-`sort_by`, `reduce` on `[T]`; `each` on `[K, V]` (two parameters).
+`sort_by`, `reduce` on `[T]`; `each` on `[K: V]` (two parameters).
 
 **D-ITER1 — lazy iterator adapter set (c105):** `take(n)`, `skip(n)`, `step_by(n)`,
 `dedup()`, `chunks(n)`, `windows(n)`, `take_while(f)`, `skip_while(f)`, `flat_map(f)`,
@@ -1150,7 +1151,7 @@ returns.
 
 Combinators are methods on the group handle only (no detached work):
 
-- `g.all([t1, t2, …]) -> List[T]` — every task must succeed; fail-fast cancels
+- `g.all([t1, t2, …]) -> [Task]` — every task must succeed; fail-fast cancels
   siblings and exits with `panic: a task panicked` (example `169_all_failfast.jet`).
 - `g.race([t1, t2, …]) -> T` — first **successful** result wins; losers are
   cancelled (D-RACEWIN1; example `167_race_cancel.jet`).
@@ -1183,12 +1184,12 @@ values to reserved namespaces. Many modules may share a file.
 ```ebnf
 module      = "module" dashed-name "{" contribution* "}" ;
 contribution = namespace "." dashed-name ":" expr [","] ;
-namespace   = "env" | "system" | "image" ;
+namespace   = "env" | "image" ;
 dashed-name = ident { "-" ident } ;                (* S84: kebab-case names *)
 ```
 
-- **Dashed names (S84):** package / module / system / image / env **names** may
-  be kebab-case — `module web-app`, `system.my-host`, `image.halcyon-iso` —
+- **Dashed names (S84):** package / module / image / env **names** may
+  be kebab-case — `module web-app`, `env.web-tools`, `image.halcyon-oci` —
   matching nixpkgs/npm convention. A `-` joins two segments only when it is
   *span-adjacent* to both (no surrounding whitespace), so a spaced `a - b` stays
   subtraction; this is a parser rule (`expect_dashed_name`), not a lexer or
@@ -1197,12 +1198,20 @@ dashed-name = ident { "-" ident } ;                (* S84: kebab-case names *)
 - **Disable with a leading underscore:** `module _name { … }` parses with
   `disabled = true` (the name begins with `_`); it is not discovered or merged
   (U3, one-character reversible toggle).
-- **Reserved namespaces** are `env` → `Env` (dev environment), `system` →
-  `System` (whole machine), `image` → `Image` (disk image). Any other namespace
-  is **E0960** (parse).
+- **Active reserved namespaces** are `env` → `Env` (dev environment) and
+  `image` → `Image` (OCI container image). Whole-machine `system.*`, disk
+  images, OS generations, and activation commands are frozen jetos research,
+  not current Jetpack syntax law.
 - **`env.<name>:` values reuse the ordinary expression parser** — typically a
   struct literal (`Env.{ packages: […], prompt: "…" }`), so lists and strings
   work with no new grammar.
+- **`image.<name>:` values are Jetpack OCI images.** Active fields are
+  `kind: .Oci` (optional when `from: packages.<name>` makes it clear),
+  `from: packages.<name>`, `expose: [Int]`, `env_vars: ["KEY": "value"]`,
+  `files: [String]`, and `base: oci("<ref>")`. `base:` is captured but not yet
+  realized because registry-pull is gated on TLS/native-client work. `.Iso`,
+  `.Qcow`, `.Raw`, and `from: system.<name>` are jetos installer research, not
+  a buildable Jetpack image surface today.
 - **Ad-hoc adapters (U20):** an `env.<name>.packages` list may contain
   `Pkg.adapt(name:, source:, recipe:)`. `source:` is a provider ref such as
   `path@vendor/tool`; this U20 slice realizes `Recipe.copy()` and
@@ -1247,48 +1256,18 @@ dashed-name = ident { "-" ident } ;                (* S84: kebab-case names *)
   metadata refresh. Network-class verbs (`add`, `update`, `outdated`,
   publish/cache sync) refuse `--offline`, and a missing local object reports
   E1276 instead of fetching or timing out.
-- **`system.<name>:` and `image.<name>:` values use dedicated typed parsers**
-  (U11/U13/U14) — the `options` list (`net.hostName: laptop`), the typed
-  `target` value (`linux.x64`), and the `Service` map don't fit the ordinary
-  expression grammar.
-
 Stage 1a is parser-only for the AST shape; the jetpack module evaluator
 (`Source/Jetpack/ModuleEval.rs`) gives these contributions meaning (field-checking +
 capture into a plan model). The U5 merge engine consumes `env` contributions.
 
-### `System` / `Service` / `Image` (U11–U14, U18; modeval field-check + capture)
+### Jetpack Services And Secrets
 
-```ebnf
-system_lit  = [ "System" "." ] "{" system_field { "," system_field } [ "," ] "}" ;
-system_field = "target"   ":" platform
-             | "packages" ":" list
-             | "services" ":" service_map
-             | "options"  ":" option_list ;
-platform    = ident "." ident ;                    (* U13: linux.x64 / linux.arm64 *)
-service_map = "{" { ident ":" service_rec [ "," ] } "}" ;
-service_rec = [ "Service" "." ] "{" { ident ":" expr [ "," ] } "}" ;
-option_list = "[" { dotted_key ":" expr [ "," ] } "]" ;
-dotted_key  = ident { "." ident } ;
-image_lit   = [ "Image" "." ] "{" image_field { "," image_field } [ "," ] "}" ;
-image_field = "from"   ":" "system" "." dashed-name  (* U14: required; S84 name *)
-            | "format" ":" ident                   (* U14: iso | qcow | raw, default iso *)
-            | "target" ":" platform ;              (* U14: cross-compile only *)
-```
-
-- **U11 — `System` fields.** A `System` has exactly four fields: `target` (a
-  typed platform value, required), `packages` (a `Pkg` list, U6 sugar applies),
-  `services` (a keyed `Service` map), and `options` (an ordered key/value list).
-  Any other field is **E0972**; a missing `target` is **E0974**.
-- **U13 — `target` & `options`.** `target` is a typed platform value
-  (`linux.x64` / `linux.arm64`), never a quoted string — an unknown platform is
-  **E0973**. `options:` is an ordered **list** of dotted-key `key: value` entries
-  (`net.hostName: laptop`, `time.timeZone: "Europe/London"`) — no `set(…)`
-  wrapper. Values that are jet identifiers or typed values are written bare; only
-  free-form strings (timezones, paths) keep quotes.
-- **U12 — `Service` is an open record.** Each service under `services:` is a bare
-  `{ … }` (type inferred, U18) whose first field is `enable: Bool` (required —
-  missing is **E0975**, non-Bool is **E0975**); any further fields are allowed.
-- **U13 — `secrets:` (D-JPK-SECRETCRYPTO1).** An `env.<name>` role-module may
+- **Dev services (D-JPK-SERVICE1):** an `env.<name>` role-module may carry
+  `services: { name: { enable: Bool, ... } }`. These are project-local
+  processes managed by Jetpack for the dev loop (`jetpack services
+  up/down/health/logs`). They are not system services and do not imply jetos
+  activation.
+- **Secrets (D-JPK-SECRETCRYPTO1):** an `env.<name>` role-module may
   declare `secrets: ["name", …]` — a plain `[String]` list, no dedicated
   grammar. Each name is one this env expects to find in the project's
   encrypted repo store (`.jet/secrets.age`, managed by `jetpack secrets
@@ -1296,59 +1275,15 @@ image_field = "from"   ":" "system" "." dashed-name  (* U14: required; S84 name 
   gated by the `Secret` effect (**E1264** if ungranted) and unconditionally
   denied at build/comptime time (**E1265**, no `#Impure` escape hatch).
   `jetpack secrets get <name>` on a name absent from the store is **E1263**.
-- **U14 — `Image` derives from a `System`.** An `Image` has `from: system.<name>`
-  (required — missing is **E0977**; an unknown system is **E0978**) and an
-  optional `format:` ∈ {`iso`, `qcow`, `raw`}, default `iso` (anything else is
-  **E0976**). `packages`/`services`/`options` are inherited from the system and
-  must not be restated (**E0977**); only `target:` may be restated, for
-  cross-compiling.
-- **U18 — inferred constructors.** Under a typed namespace (`system.<name>:`,
-  `image.<name>:`, `env.<name>:`) or a typed field (`services:` holds `Service`s)
-  the type name is optional: a bare `{ … }` elaborates to it. The explicit
-  `System.{ … }` / `Image.{ … }` / `Service.{ … }` / `Env.{ … }` form stays legal
-  (dot-prefixed by D-DOTCTOR2 — `System { … }` etc. without the dot is E0320).
 
-The evaluator captures each `system.<name>:` into a `SystemPlan` and each
-`image.<name>:` into an `ImagePlan` (`Source/Jetpack/ModuleEval.rs`), carried on
-`EnvPlan` so the jetos realize tier can consume them; the dev-shell path ignores
-them.
+### jetos Research Appendix (Frozen)
 
-### `jetpack os <verb> [<config-path>]@<host>` — the jetos tier (U15/U16)
-
-Whole-machine management (the jetos tier) is a **subcommand group of `jetpack`**,
-not a separate `jetos` binary and not part of the `jet` tool (**U15**). Two verbs,
-mirroring `nixos-rebuild`:
-
-- `jetpack os build [<config-path>]@<host>` — realize the system into a generation.
-- `jetpack os switch [<config-path>]@<host>` — build, then **activate** it.
-
-```ebnf
-os_command = "jetpack" "os" os_verb os_target ;
-os_verb    = "switch" | "build" ;
-os_target  = [ config_path ] "@" host ;            (* U16; split on the FINAL @ *)
-```
-
-- **U16 — the `@host` target.** The target is `[<config-path>]@<host>`. Everything
-  after the **final** `@` is `<host>` (so a path may itself contain `@`); the
-  optional prefix names the config file. The `@host` selector picks which captured
-  `System` to apply and is **required** (no selector → **E0979**). An empty path
-  defaults to `~/.jet/config.jet`. A config file that doesn't exist → **E0981**; a
-  `<host>` no `system.<name>:` contribution defines → **E0980** (the error lists
-  the systems the config does define).
-
-The config is loaded through the **same** typed-module path as `env.jet`
-(`modeval::evaluate_env`), so `System` field-checking + capture is reused verbatim.
-
-**Activation model (internal mechanics, not user-facing syntax).** Each build
-realizes the selected system's packages through the existing provider boundary
-into the shared hangar (codegen/realize stays dumb, I3), then assembles a
-content-addressed **generation directory** under `<root>/systems/<host>-<fp>/`
-holding a `manifest.json` (target, realized packages, services, options).
-Services/options are recorded as **intent** — never started, there is no daemon
-yet (D-OS2..D-OS6 remain open). `switch` additionally flips two pointers under
-`<root>/systems/`: `current` (the active generation) and `default` (the boot
-default). Store layout and symlinks are internal mechanics, so they need no
-syntax ratification; boot/test verbs are a later chunk.
+D-JETOS-FREEZE1 moves whole-machine `System`, disk-image, OS generation, and
+activation spellings out of current law. Old sketches such as `system.<name>`,
+`Service` as a system-service record, `.Iso`/`.Qcow`/`.Raw`, and `jetpack os
+...` are research notes only until Epoch 7 reopens them with fresh ballots.
+Current Jetpack may capture some inert fields for migration experiments, but
+docs and syntax law must not describe them as buildable OS commands or modules.
 
 ## Fan-out operator `f.[a, b, c]` (S75) and fixed-size list `[T#N]` (S76)
 

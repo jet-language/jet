@@ -37,7 +37,7 @@ pub use Plugin::{emit_plugin, plugin_export_shape, PluginArtifacts, PluginScalar
 pub(crate) use Statement::*;
 pub(crate) use Tuples::*;
 pub(crate) use Utils::*;
-pub use Web::{emit_web, WebArtifacts};
+pub use Web::{emit_web, validate_web_tir_support, WebArtifacts, WebTirUnsupported};
 
 /// Emitted at the top of every program: core runtime helpers used by generated Rust.
 const PRELUDE: &str = include_str!("../Prelude/Core.rs");
@@ -1326,7 +1326,7 @@ pub fn emit_bundle_tests_cov(
 }
 
 /// D-BENCH1: emit a benchmark harness binary — every definition plus a `main`
-/// that times each `#Bench "…" { }` region and reports ns/iter + ops/sec.
+/// that times each `#Bench("…") { }` region and reports ns/iter + ops/sec.
 /// Mirrors `emit_bundle_tests`; the only divergence is the per-block tail,
 /// which wraps each body in an auto-scaled timed loop instead of a pass/fail
 /// check. Each body is emitted exactly like a `#Test` body (a bare statement

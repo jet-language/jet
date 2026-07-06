@@ -483,6 +483,17 @@ fn compile_web_file_loads() {
 }
 
 #[test]
+fn web_body_outside_tir_is_diagnostic() {
+    let src = include_str!("ui/web_tir_unsupported.jet");
+    let diags = jet::compile_web_with_path(src, "tests/ui/web_tir_unsupported.jet")
+        .expect_err("web compile should reject bodies outside TIR");
+    assert!(
+        diags.iter().any(|d| d.code == "E-WEB-TIR-UNSUPPORTED"),
+        "expected E-WEB-TIR-UNSUPPORTED, got {diags:?}"
+    );
+}
+
+#[test]
 fn web_hello_dom_shim_roundtrip() {
     if !have_tool("rustc") || !have_tool("node") {
         eprintln!("note: skipping web_build hello (need rustc + node)");

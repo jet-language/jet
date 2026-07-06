@@ -1608,33 +1608,6 @@ impl<'a> Parser<'a> {
                 ));
                 return self.expr_primary(allow_struct_lit);
             }
-            TokKind::Ident(name)
-                if matches!(
-                    name.as_str(),
-                    Syntax::FOREIGN_VEC | Syntax::FOREIGN_HASHMAP | Syntax::FOREIGN_DICT
-                ) =>
-            {
-                let t = self.bump();
-                let foreign = name.clone();
-                let canonical = if foreign == Syntax::FOREIGN_VEC {
-                    Syntax::TYPE_LIST
-                } else {
-                    Syntax::TYPE_MAP
-                };
-                self.diags.push(Diagnostic::error(
-                    "E0028",
-                    format!(
-                        "{} uses `{}`, not `{}`",
-                        Syntax::LANG_NAME,
-                        canonical,
-                        foreign
-                    ),
-                    format!("`{}` is the built-in collection type", canonical),
-                    format!("replace `{}` with `{}`", foreign, canonical),
-                    Some(t.span),
-                ));
-                return self.expr_primary(allow_struct_lit);
-            }
             TokKind::Ident(name) if name == Syntax::FOREIGN_AS => {
                 let t = self.bump();
                 self.diags.push(Diagnostic::error(

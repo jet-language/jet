@@ -415,7 +415,14 @@ impl<'a> Fmt<'a> {
     fn fmt_func(&mut self, f: &Func, top_level: bool) {
         // S58 (E2-M13): `#Unsafe` whole-function contract sits on its own line.
         if f.is_unsafe {
-            self.write(&format!("#{}", Syntax::KW_UNSAFE));
+            match &f.unsafe_reason {
+                Some(reason) => self.write(&format!(
+                    "#{}(\"{}\")",
+                    Syntax::KW_UNSAFE,
+                    escape_str_lit(reason)
+                )),
+                None => self.write(&format!("#{}", Syntax::KW_UNSAFE)),
+            }
             self.newline();
         }
         // D-WASM1: `#Wasm` / `#Js` / `#WasmExport` per-function web partition

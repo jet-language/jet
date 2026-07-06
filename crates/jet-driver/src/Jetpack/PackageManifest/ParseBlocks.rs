@@ -31,7 +31,7 @@ pub(super) fn parse_package(body: &str) -> Result<PackageMeta, ManifestError> {
             "repository" => meta.repository = Some(v),
             "jet" => meta.jet_constraint = Some(v),
             "target" => meta.target = Some(v),
-            "layer" => {
+            "runtime" => {
                 let raw = value.trim().trim_matches('"');
                 meta.layer = Some(crate::Syntax::RuntimeLayer::parse_manifest(raw).ok_or_else(
                     || ManifestError::BadLayer {

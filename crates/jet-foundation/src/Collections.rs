@@ -1,4 +1,4 @@
-//! M5 built-in collection and string surface (List, Map, Char, String API).
+//! M5 built-in collection and string surface (`[T]`, `[K: V]`, Char, String API).
 //! M8 adds closure-powered methods (`map`, `filter`, …).
 //! Sema calls into this module; codegen mirrors the same method names.
 
@@ -7,12 +7,12 @@ use crate::AST::Type;
 
 /// Built-in type names that users cannot redefine (E0106).
 pub const RESERVED_TYPES: &[&str] = &[
-    Syntax::TYPE_LIST,
-    Syntax::TYPE_MAP,
+    Syntax::TYPE_HASH_MAP,
+    Syntax::TYPE_BTREE_MAP,
     Syntax::TYPE_CHAR,
-    "Set",
+    Syntax::TYPE_SET,
     "Bag",
-    "Deque",
+    Syntax::TYPE_DEQUE,
     Syntax::TYPE_BIGINT,
     Syntax::TYPE_DECIMAL,
     // D-DYNARRAY1: `View<T>` is deliberately NOT reserved here (unlike `Set`/
@@ -361,7 +361,7 @@ fn list_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
         ("min_by" | "max_by", 1) => Some(Some(Type::Option(Box::new(inner.clone())))),
         // D-ITER1: fold(init, f: (acc,T)->acc) → acc; placeholder; sema refines from init.
         ("fold", 2) => Some(Some(Type::Int)),
-        // D-ITER1: group_by(f: T->K) → [K, [T]] (Map<K, List<T>>); sema refines K.
+        // D-ITER1: group_by(f: T->K) -> [K: [T]]; sema refines K.
         ("group_by", 1) => Some(Some(Type::Map {
             key: Box::new(Type::String), // placeholder; sema refines
             value: Box::new(Type::List(Box::new(inner.clone()))),

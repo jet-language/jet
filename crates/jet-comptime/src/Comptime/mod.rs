@@ -14,14 +14,15 @@
 //! i64 `Int`, IEEE f64 `Float` (S21 display via `{:?}`), char-counted
 //! `String` (S41), and `BTreeMap` ordering (S38).
 
-mod Builtins;
 pub mod Build;
+mod Builtins;
 mod Diagnostics;
 mod Interpreter;
 mod JsonInterp;
 mod Methods;
 mod Purity;
 mod Reflect;
+mod RegexLite;
 mod Value;
 
 use std::collections::{HashMap, HashSet};

@@ -752,6 +752,8 @@ impl<'a> Parser<'a> {
                                     is_pub,
                                     is_package_pub,
                                     false,
+                                    None,
+                                    None,
                                     false,
                                     false,
                                     None,
@@ -857,7 +859,7 @@ impl<'a> Parser<'a> {
                 }
                 // S43 (D-CASING1 follow-on): `#Test "name" { … }`.
                 TokKind::Hash if self.at_test_def() => self.test_def().map(Item::Test),
-                // D-BENCH1: `#Bench "name" { … }`.
+                // D-BENCH1 + D-BENCH-MARKER1=A: `#Bench("name") { … }`.
                 TokKind::Hash if self.at_bench_def() => self.bench_def().map(Item::Bench),
                 // S14: bare lowercase `test "name" { … }` is the retired spelling (E0052).
                 TokKind::Ident(n) if n == Syntax::FOREIGN_TEST && self.foreign_test_follows() => {
@@ -1069,8 +1071,8 @@ impl<'a> Parser<'a> {
                         Some(t.span),
                     ));
                     self.func_after_fn(
-                        false, false, false, false, false, None, None, false, None, false, None,
-                        false, false, None,
+                        false, false, false, None, None, false, false, None, None, false, None,
+                        false, None, false, false, None,
                     )
                     .map(Item::Func)
                 }
@@ -1230,19 +1232,20 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// D-BENCH1: true when the cursor is at the `#Bench` marker — the exact
-    /// sibling of `at_test_def`.
+    /// D-BENCH1/D-BENCH-MARKER1=A: true when cursor is at `#Bench`.
     pub(super) fn at_bench_def(&self) -> bool {
         matches!(self.peek().kind, TokKind::Hash)
             && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_BENCH)
     }
 
-    /// Parse `#Bench "name" { … }` (D-BENCH1). Structurally identical to
+    /// Parse `#Bench("name") { … }` (D-BENCH1/D-BENCH-MARKER1=A). Structurally identical to
     /// `test_def`; there is no retired lowercase spelling for benches.
     pub(super) fn bench_def(&mut self) -> Result<crate::AST::BenchDef, Diagnostic> {
         self.expect(TokKind::Hash, "before `Bench`")?;
         self.bump(); // the `Bench` marker ident (guaranteed by at_bench_def)
+        self.expect(TokKind::LParen, "after `#Bench`")?;
         let (name, name_span) = self.expect_marker_name(Syntax::KW_BENCH)?;
+        self.expect(TokKind::RParen, "to close `#Bench(…)`")?;
         self.expect(TokKind::LBrace, "to open the benchmark body")?;
         let body = self.block_stmts();
         Ok(crate::AST::BenchDef {
@@ -1660,6 +1663,8 @@ impl<'a> Parser<'a> {
             is_pub,
             is_package_pub,
             false,
+            None,
+            None,
             false,
             false,
             None,
@@ -1705,16 +1710,20 @@ impl<'a> Parser<'a> {
     /// or bare `#Unsafe fn …` (reason-less; L3101 fires in sema). The body is
     /// checked like any other fn; the contract is enforced at call sites (E3103).
     fn unsafe_fn(&mut self) -> Result<Func, Diagnostic> {
+        let start = self.peek().span;
         self.expect(TokKind::Hash, "before `Unsafe`")?;
         self.expect_kw(TokKind::KwUnsafe, "to mark a whole-function contract")?;
+        let marker_span = Span::new(start.start, self.toks[self.pos - 1].span.end);
         // Optional `("reason")` argument.
+        let mut reason = None;
         if matches!(self.peek().kind, TokKind::LParen) {
             self.bump(); // `(`
-            let _ = self.expect_plain_string(
+            let (value, _) = self.expect_plain_string(
                 "for the safety reason",
                 "`#Unsafe` takes one piece of quoted text explaining why the function is safe to call",
                 "write: #Unsafe(\"caller must ensure …\") fn …",
             )?;
+            reason = Some(value);
             self.expect(TokKind::RParen, "after the safety reason")?;
             // S6-R: when `#Unsafe("reason")` is on its own line above `fn`,
             // the lexer inserts a synthetic `;` after `)`. Skip it.
@@ -1728,6 +1737,8 @@ impl<'a> Parser<'a> {
             is_pub,
             is_package_pub,
             true,
+            reason,
+            Some(marker_span),
             false,
             false,
             None,
@@ -2782,6 +2793,8 @@ impl<'a> Parser<'a> {
             is_pub,
             is_package_pub,
             false,
+            None,
+            None,
             is_pure,
             is_sanitizer,
             state_requires,
@@ -2802,6 +2815,8 @@ impl<'a> Parser<'a> {
         is_pub: bool,
         is_package_pub: bool,
         is_unsafe: bool,
+        unsafe_reason: Option<String>,
+        unsafe_span: Option<Span>,
         is_pure: bool,
         is_sanitizer: bool,
         state_requires: Option<(String, Span)>,
@@ -2897,6 +2912,8 @@ impl<'a> Parser<'a> {
                 params,
                 return_type,
                 is_unsafe,
+                unsafe_reason,
+                unsafe_span,
                 is_pure,
                 is_sanitizer,
                 is_reactive,
@@ -2927,6 +2944,8 @@ impl<'a> Parser<'a> {
             params,
             return_type,
             is_unsafe,
+            unsafe_reason,
+            unsafe_span,
             is_pure,
             is_sanitizer,
             is_reactive,
@@ -2965,6 +2984,8 @@ impl<'a> Parser<'a> {
             is_pub,
             is_package_pub,
             is_unsafe,
+            None,
+            None,
             is_pure,
             is_sanitizer,
             state_requires,
@@ -3072,7 +3093,7 @@ impl<'a> Parser<'a> {
                     self.bump();
                     // D-ANY-JAI1/D-VARARGBOUND1: `...[TraitA, TraitB]` — an explicit
                     // trait-bound list. `[` never starts a legal *concrete* variadic
-                    // element type here (list `[T]` and map `[K, V]` types don't make
+                    // element type here (list `[T]` and map `[K: V]` types don't make
                     // sense as a rest-parameter's own element type spelled this way),
                     // so this position always means a bound list. Bare `...Trait` /
                     // `...T` both go through `type_()` unchanged — sema tells a
@@ -4360,6 +4381,8 @@ impl<'a> Parser<'a> {
             is_pub,
             is_package_pub,
             false,
+            None,
+            None,
             is_pure,
             is_sanitizer,
             state_requires,

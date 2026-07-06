@@ -86,7 +86,7 @@ pub(crate) fn check_extern_fn(
 /// whose fields are all C-safe. Aggregates (`[T]`, `[K,V]`, `T?`, `T ? E`) have
 /// no stable C ABI and are rejected (E3203). Pointers (`Ptr<T>`, M13/S58) belong
 /// to the gated tier: a `Ptr<T>` in a C signature fires E3202 unless it is behind
-/// `use core.mem` + `@unsafe`.
+/// `use core.mem` + `#Unsafe`.
 pub(crate) fn is_c_abi_type(ty: &Type, registry: &TypeRegistry) -> bool {
     match ty {
         Type::Int | Type::Float | Type::Bool | Type::Char | Type::String => true,
@@ -147,8 +147,8 @@ pub(crate) fn e3203(ty: &Type, span: Span) -> Diagnostic {
 }
 
 /// E3202 — a pointer type (`Ptr<T>`, S58) appears by value in a C FFI signature
-/// outside an `@unsafe` / `core.mem` region. Ordinary C-FFI code passes by-value
-/// scalars and `String`; pointers must stay behind `use core.mem` + `@unsafe`.
+/// outside an `#Unsafe` / `core.mem` region. Ordinary C-FFI code passes by-value
+/// scalars and `String`; pointers must stay behind `use core.mem` + `#Unsafe`.
 /// Reachable since the M13 pointer tier shipped (commit cd4713d).
 pub fn e3202(ty: &str, span: Span) -> Diagnostic {
     Diagnostic::error(

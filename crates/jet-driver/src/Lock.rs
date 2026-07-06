@@ -35,9 +35,9 @@ pub struct LockedPackage {
     pub content_hash: Option<String>,
     /// Direct dependency names.
     pub dependencies: Vec<String>,
-    /// D-RINGLAYER1=A: optional `layer:` ceiling from `pkg.jet` payload.
+    /// D-RINGLAYER1=A: optional `runtime:` ceiling from `pkg.jet` payload.
     pub layer: Option<crate::Syntax::RuntimeLayer>,
-    /// D-RINGLAYER1=A M2: minimum runtime layer inferred at last build.
+    /// D-RINGLAYER1=A M2: minimum runtime profile inferred at last build.
     pub inferred_layer: Option<crate::Syntax::RuntimeLayer>,
     /// D-EFFBUDGET1: this dependency's effect provenance — the effect names
     /// (D-EFF4 vocabulary) its code was found to use at the last build.
@@ -657,7 +657,7 @@ pub fn load(project_root: &Path) -> Option<LockFile> {
     parse(&raw).ok()
 }
 
-/// D-RINGLAYER1=A M2: persist inferred runtime layer for the root package after build.
+/// D-RINGLAYER1=A M2: persist inferred runtime profile for the root package after build.
 pub fn record_inferred_layer(
     project_root: &Path,
     package_name: &str,
@@ -776,7 +776,7 @@ pub fn record_source_channel(project_root: &Path, source: LockedSourceChannel) {
     let _ = std::fs::write(lock_path, write(&lock));
 }
 
-/// D-RINGLAYER1=A M2: set manifest `layer:` ceiling on locked packages at fetch time.
+/// D-RINGLAYER1=A M2: set manifest `runtime:` ceiling on locked packages at fetch time.
 pub fn layer_from_manifest(manifest: &Manifest) -> Option<crate::Syntax::RuntimeLayer> {
     manifest.package.layer
 }

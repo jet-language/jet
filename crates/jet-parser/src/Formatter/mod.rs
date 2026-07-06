@@ -845,7 +845,7 @@ fn escape_str_multiline(s: &str) -> String {
     out
 }
 
-fn escape_str_lit(s: &str) -> String {
+pub(super) fn escape_str_lit(s: &str) -> String {
     let mut out = String::new();
     for ch in s.chars() {
         match ch {

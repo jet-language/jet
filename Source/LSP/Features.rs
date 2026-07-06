@@ -494,7 +494,6 @@ pub(crate) fn is_foreign_semantic_word(name: &str) -> bool {
             | crate::Syntax::FOREIGN_SANITIZER
             | crate::Syntax::FOREIGN_LAMBDA
             | crate::Syntax::FOREIGN_VEC
-            | crate::Syntax::FOREIGN_HASHMAP
             | crate::Syntax::FOREIGN_DICT
             | crate::Syntax::FOREIGN_APPEND
             | crate::Syntax::FOREIGN_THROW

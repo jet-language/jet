@@ -32,7 +32,7 @@ executable spec: a milestone ships with new `examples/` programs and new
 | Epoch 2 highlights (done) | See "Epoch 2 — development highlights" below |
 | Epoch 5 metaprogramming plan | [`tools/Tower/docs/plans/epoch-5/`](../../tools/Tower/docs/plans/epoch-5/) → [`metaprogramming.md`](../../tools/Tower/docs/plans/epoch-5/metaprogramming.md) |
 | Jetpack sequencing + live status | [`tools/Tower/docs/plans/epoch-4/`](../../tools/Tower/docs/plans/epoch-4/) |
-| jetos + visual configuration | Tower Epoch 7 cards (#2, #182, #186, #235, #236) |
+| jetos + visual configuration | Epoch 7 research appendix; frozen by D-JETOS-FREEZE1 until fresh ballots |
 | Implementing-agent protocol | [`tools/Tower/docs/plans/README.md`](../../tools/Tower/docs/plans/README.md) |
 
 Plans are gated on ratified decisions in `syntax-decisions.md` (see
@@ -176,8 +176,9 @@ importers, hangar/cache, signing, build-from-source, and no-Nix behavior.
 
 **jetos** is Epoch 7. It builds on jetpack and owns declarative OS activation,
 proof-before-switch, generations, installable images, source-backed Studio, and
-the Blueprint-class visual editor. jetos surface syntax still requires Tower
-ballots before implementation.
+the Blueprint-class visual editor. D-JETOS-FREEZE1 keeps jetos-only command and
+module spellings in research notes; they are not current syntax law and still
+require fresh Tower ballots before implementation.
 
 ### Epoch 1 tail
 

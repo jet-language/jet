@@ -26,9 +26,9 @@ pub struct CompileOutput {
     /// D-PLUGIN1=B / D-DEP-WASM1=A (c81): plugin guest artifacts when
     /// `--target=plugin` (the `.wit` world + wasm32 guest Rust source).
     pub plugin: Option<crate::Codegen::PluginArtifacts>,
-    /// D-RINGLAYER1=A M2: minimum runtime layer inferred from imports + helpers.
+    /// D-RINGLAYER1=A M2: minimum runtime profile inferred from imports + helpers.
     pub inferred_layer: crate::Syntax::RuntimeLayer,
-    /// D-RINGLAYER1=A: optional `layer:` ceiling from `pkg.jet`.
+    /// D-RINGLAYER1=A: optional `runtime:` ceiling from `pkg.jet`.
     pub layer_ceiling: Option<crate::Syntax::RuntimeLayer>,
 }
 

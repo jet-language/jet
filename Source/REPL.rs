@@ -252,8 +252,8 @@ impl Session {
             CtValue::Char(_) => format!(": Char {} 'a'", sigil),
             CtValue::Str(_) => format!(": String {} \"\"", sigil),
             CtValue::Bytes(_) => format!(": [U8] {} []", sigil),
-            CtValue::List(_) => format!(": List<Int> {} []", sigil),
-            CtValue::Map(_) => format!(": Map<String, Int> {} [:]", sigil),
+            CtValue::List(_) => format!(": [Int] {} []", sigil),
+            CtValue::Map(_) => format!(": [String: Int] {} [:]", sigil),
             CtValue::Some(_) | CtValue::None(_) => return, // skip Option for now
             CtValue::ResOk(_) | CtValue::ResErr(_) => return, // skip Result for now
             CtValue::Struct { .. } => {

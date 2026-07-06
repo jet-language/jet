@@ -190,7 +190,7 @@ pub struct PackageMeta {
     pub description: Option<String>,
     pub license: Option<String>,
     pub repository: Option<String>,
-    /// D-RINGLAYER1=A: optional runtime-layer ceiling from `layer:` in `payload`.
+    /// D-RINGLAYER1=A: optional runtime ceiling from `runtime:` in `payload`.
     pub layer: Option<crate::Syntax::RuntimeLayer>,
 }
 
@@ -392,10 +392,10 @@ fn to_diagnostic(path: &Path, err: &ManifestError) -> Diagnostic {
         ManifestError::BadLayer { value } => e1206(
             &file,
             &format!(
-                "`layer` must be `{}`, `{}`, or `{}`, not `{value}`",
+                "`runtime` must be `{}`, `{}`, or `{}`, not `{value}`",
                 Syntax::RuntimeLayer::CORE,
                 Syntax::RuntimeLayer::ALLOC,
-                Syntax::RuntimeLayer::STD,
+                Syntax::RuntimeLayer::HOSTED,
             ),
         ),
         ManifestError::BadEffectsBlock { detail } => e1221(&file, detail),

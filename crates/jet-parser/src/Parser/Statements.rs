@@ -497,7 +497,7 @@ impl<'a> Parser<'a> {
                     self.bump();
                     break;
                 }
-                // S6-R: a block statement (`if`/`loop`/`@unsafe`/nested `{}`)
+                // S6-R: a block statement (`if`/`loop`/`#Unsafe`/nested `{}`)
                 // ends with `}`, after which the lexer inserts a synthetic
                 // terminator. Those statements don't consume their own
                 // terminator, so skip a stray one here.

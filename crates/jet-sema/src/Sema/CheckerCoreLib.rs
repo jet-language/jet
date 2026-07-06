@@ -255,7 +255,7 @@ impl<'a> Checker<'a> {
     }
 
     /// S58 (E2-M13): `alias.Ptr<T>.from_addr(addr)`. Gated by `use core.mem`
-    /// (E3102) and an enclosing `@unsafe` block (E3101). Returns `Ptr<T>`.
+    /// (E3102) and an enclosing `#Unsafe` block (E3101). Returns `Ptr<T>`.
     pub(crate) fn infer_ptr_from_addr(
         &mut self,
         alias: &str,
@@ -587,7 +587,7 @@ impl<'a> Checker<'a> {
                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
                     return None;
                 }
-                // Taking an address is inert (S58): legal outside `@unsafe`.
+                // Taking an address is inert (S58): legal outside `#Unsafe`.
                 let arg = args.get_mut(0)?;
                 self.infer(&mut arg.expr);
                 let _ = alias_span;

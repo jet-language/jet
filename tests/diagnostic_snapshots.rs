@@ -109,6 +109,9 @@ fn ui_snapshots() {
         // `jet build --target=plugin`'s front end so plugin-only diagnostics
         // (E1257-E1260) can exercise the gate.
         let plugin_target = src.lines().any(|l| l.trim() == "// @plugin_target");
+        // D-WEBTIR1=A: files marked `// @web_target` compile through the web
+        // preflight so web-only executable-body diagnostics get UI snapshots.
+        let web_target = src.lines().any(|l| l.trim() == "// @web_target");
         let actual = if all_diags {
             let diags = jet::check_with_path(&file_arg);
             if diags.is_empty() {
@@ -128,6 +131,11 @@ fn ui_snapshots() {
             }
         } else if plugin_target {
             match jet::compile_plugin(&file_arg) {
+                Err(diags) => jet::render_diagnostics(&shown_path, &src, &diags),
+                Ok(_) => "(no errors)\n".to_string(),
+            }
+        } else if web_target {
+            match jet::compile_web(&file_arg) {
                 Err(diags) => jet::render_diagnostics(&shown_path, &src, &diags),
                 Ok(_) => "(no errors)\n".to_string(),
             }

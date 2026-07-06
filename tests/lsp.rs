@@ -2569,9 +2569,11 @@ fn c44_lsp_types_derive_from_syntax() {
         Syntax::TYPE_BOOL,
         Syntax::TYPE_STRING,
         Syntax::TYPE_CHAR,
-        Syntax::TYPE_LIST,
-        Syntax::TYPE_MAP,
         Syntax::TYPE_SHARED,
+        Syntax::TYPE_HASH_MAP,
+        Syntax::TYPE_BTREE_MAP,
+        Syntax::TYPE_DEQUE,
+        Syntax::TYPE_SET,
     ];
     for ty in &required_types {
         assert!(

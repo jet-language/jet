@@ -34,7 +34,9 @@ const FORBIDDEN: &[&str] = &[
     // from "call position," so this list intentionally omits both `mem.Ptr<` and
     // bare `Ptr<` rather than false-flag the still-shipped call form.
     "List<",
+    "List[",
     "Map<",
+    "#Bench \"",
     "#[Serialize",
     "Serialize]",
     "#[Deserialize",

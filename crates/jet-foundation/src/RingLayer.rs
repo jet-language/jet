@@ -1,12 +1,12 @@
 //! D-RINGLAYER1=A: runtime layer classification for core modules.
 //!
-//! Layers form a total order: `core ⊂ alloc ⊂ std`. The compiler infers a
-//! package's minimum layer from `use core.*` imports and emitted helper usage,
-//! and rejects imports/helpers above an optional `layer:` ceiling in `pkg.jet`.
+//! Profiles form a total order: `core ⊂ alloc ⊂ hosted`. The compiler infers a
+//! package's minimum runtime profile from `use core.*` imports and emitted helper usage,
+//! and rejects imports/helpers above an optional `runtime:` ceiling in `pkg.jet`.
 
 use crate::Syntax;
 
-/// Minimum runtime capability a package needs: heap-free core, allocator, or full OS std.
+/// Minimum runtime capability a package needs: heap-free core, allocator, or hosted OS runtime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub enum RuntimeLayer {
     #[default]
@@ -18,14 +18,14 @@ pub enum RuntimeLayer {
 impl RuntimeLayer {
     pub const CORE: &'static str = "core";
     pub const ALLOC: &'static str = "alloc";
-    pub const STD: &'static str = "std";
+    pub const HOSTED: &'static str = "hosted";
 
-    /// Parse a `layer:` manifest value (`core`, `alloc`, or `std`).
+    /// Parse a `runtime:` manifest value (`core`, `alloc`, or `hosted`).
     pub fn parse_manifest(value: &str) -> Option<Self> {
         match value.trim() {
             Self::CORE => Some(RuntimeLayer::Core),
             Self::ALLOC => Some(RuntimeLayer::Alloc),
-            Self::STD => Some(RuntimeLayer::Std),
+            Self::HOSTED => Some(RuntimeLayer::Std),
             _ => None,
         }
     }
@@ -34,7 +34,7 @@ impl RuntimeLayer {
         match self {
             RuntimeLayer::Core => Self::CORE,
             RuntimeLayer::Alloc => Self::ALLOC,
-            RuntimeLayer::Std => Self::STD,
+            RuntimeLayer::Std => Self::HOSTED,
         }
     }
 }
@@ -84,7 +84,7 @@ fn layer_of_normalized(module: &str) -> RuntimeLayer {
         | "jet.log"
         | "jet.regex" => RuntimeLayer::Alloc,
 
-        // ── std: OS I/O, networking, processes ─────────────────────────────
+        // ── hosted: OS I/O, networking, processes ──────────────────────────
         "core.io" | "core.env" | "core.process" | "core.files" | "core.path"
         | "core.net" | "core.term" | "core.time" | "core.time.date" | "core.time.datetime"
         | "core.tasks" | "jet.http" | "core.http.client" | "core.http.server" | "core.archive"
@@ -115,7 +115,7 @@ pub fn core_usage_layer(usage: &str) -> Option<RuntimeLayer> {
     core_module_layer(module)
 }
 
-/// E1006 — a `use core.*` import or emitted helper exceeds the package `layer:` ceiling.
+/// E1006 — a `use core.*` import or emitted helper exceeds the package `runtime:` ceiling.
 pub fn layer_ceiling_exceeded(
     module: &str,
     needed: RuntimeLayer,
@@ -124,7 +124,7 @@ pub fn layer_ceiling_exceeded(
     import_chain: Option<&str>,
 ) -> crate::Diagnostics::Diagnostic {
     let mut why = format!(
-        "this package declares `layer: {}` in `{}`, which caps imports at the `{}` layer; `{module}` is a `{}` module",
+        "this package declares `runtime: {}` in `{}`, which caps imports at the `{}` runtime profile; `{module}` needs `{}`",
         ceiling.as_str(),
         Syntax::PAYLOAD_FILE,
         ceiling.as_str(),
@@ -136,12 +136,12 @@ pub fn layer_ceiling_exceeded(
     crate::Diagnostics::Diagnostic::error(
         "E1006",
         format!(
-            "`{module}` needs the `{}` runtime layer",
+            "`{module}` needs `runtime: {}`",
             needed.as_str()
         ),
         why,
         format!(
-            "remove the import or helper use, raise the ceiling to `layer: {}` in `{}`, or use a `{}`-layer alternative",
+            "remove the import or helper use, raise the ceiling to `runtime: {}` in `{}`, or use a `{}` runtime alternative",
             needed.as_str(),
             Syntax::PAYLOAD_FILE,
             ceiling.as_str(),

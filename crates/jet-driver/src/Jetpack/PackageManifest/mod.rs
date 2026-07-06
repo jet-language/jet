@@ -133,7 +133,7 @@ pub struct PackageMeta {
     pub repository: Option<String>,
     /// Toolchain constraint, e.g. `jet: ">=1.0.0"` (E1208).
     pub jet_constraint: Option<String>,
-    /// D-RINGLAYER1=A: optional runtime-layer ceiling (`core` / `alloc` / `std`).
+    /// D-RINGLAYER1=A: optional runtime ceiling (`core` / `alloc` / `hosted`).
     pub layer: Option<crate::Syntax::RuntimeLayer>,
     /// D-WEBDEFAULT1 (ratified 2026-07-01, c134): `target: "web"` — this package's default
     /// CLI backend, the manifest-level counterpart to a loose file's
@@ -276,7 +276,7 @@ pub enum ManifestError {
     /// D-BUILDPROFILE1: a `build { }` profile entry is malformed — missing the
     /// `Build.{ optimize: … }` value shape or has an unknown optimize level.
     BadBuildProfile { name: String, reason: &'static str },
-    /// D-RINGLAYER1=A: `layer:` in `payload` is not `core`, `alloc`, or `std`.
+    /// D-RINGLAYER1=A: `runtime:` in `payload` is not `core`, `alloc`, or `hosted`.
     BadLayer { value: String },
     /// D-EFFBUDGET1 (E1221): a malformed `effects:`/`grants:` block — an
     /// unknown field, a non-list value, or an effect name outside D-EFF4.

@@ -59,9 +59,9 @@ Diagnostic:
 - `E1226` `old-manifest-filename`: "`pack.jet` is not the package manifest name;
   Jet reads `pkg.jet`." Fix: rename to `pkg.jet`.
 
-Acceptance test: a repo with `module workspace`, `module env.dev`, and
-`module system.laptop` in arbitrary file names is discovered; only `pkg.jet` is
-reserved.
+Acceptance test: a repo with `module workspace` and `module env.dev` in
+arbitrary file names is discovered; only `pkg.jet` is reserved. `system.*`
+examples are frozen jetos research until Epoch 7.
 
 ### A3. Module declaration role form (`D-JPK-MODBODY1=A`)
 
@@ -71,8 +71,9 @@ Goal: canonicalize role modules as declaration names:
 Work:
 
 1. Parser accepts dotted role names in module declarations:
-   `env.<name>`, `system.<name>`, `image.<name>`, `fleet.<name>`, `workspace`,
-   and future `build`.
+   active `env.<name>`, OCI `image.<name>`, `workspace`, and future `build`.
+   `system.<name>`/`fleet.<name>` stay research/capture-only until Epoch 7
+   reopens jetos.
 2. Desugar canonical declarations into the existing contribution IR so the merge
    engine can be reused.
 3. Emit a teaching diagnostic for the old form
@@ -152,14 +153,15 @@ Semantics:
 
 - `module image.name { kind: .Oci, from: packages.x }` builds deterministic OCI
   layout from hangar objects.
-- `.Iso` rides the jetos installer tier.
+- `.Iso` rides the frozen jetos installer research tier; do not implement in
+  Epoch 4.
 - `--push` is gated on TLS; temporary `skopeo` bridge may exist but is not the
   core image contract.
 
 Touch points:
 
-- Extend `ImagePlan`: `kind`, package `from`, system `from` for ISO, `expose`,
-  `env_vars`, `files`, `base`.
+- Extend `ImagePlan`: `kind`, package `from`, `expose`, `env_vars`, `files`,
+  `base`. `system from` for ISO remains frozen jetos research.
 - New native OCI layout builder: layer tar, gzip, sha256, config JSON, manifest.
 - `jet image <name>` via engine dispatch.
 
@@ -180,15 +182,14 @@ Tests:
 
 Semantics:
 
-- `module fleet.prod { hosts: { web1: system.web.{ ... } } }`.
-- Parse/capture/cross-check now.
-- Real ssh deploy waits for single-host jetos and image/closure realization.
+- Frozen by D-JETOS-FREEZE1. Fleet host maps and ssh rollout wait for Epoch 7
+  jetos ballots.
+- Existing capture experiments may stay inert; do not add user-facing build or
+  deploy behavior in Epoch 4.
 
 Touch points:
 
-- `FleetPlan`, `HostPlan`, `RolloutPlan`.
-- Cross-check host system refs.
-- `jet push <fleet>` command gives honest gated message until Phase D.
+- Preserve inert research notes only.
 
 Diagnostics:
 
@@ -327,12 +328,12 @@ Tests:
 
 ---
 
-## Phase D — jetos realization
+## Frozen Research — jetos realization
 
-**GATED — owner greenlight required before any Phase D work.** Full plan
-(OS0–OS4, OS-ISO, OS-VM: stages, exit criteria, tests, dependency edges, ballot
-rows) lives in [`jetos-implementation.md`](jetos-implementation.md). Do not start
-until Phase A–C prereqs land *and* the owner greenlights.
+**Frozen by D-JETOS-FREEZE1.** Full plan (OS0–OS4, OS-ISO, OS-VM: stages, exit
+criteria, tests, dependency edges, ballot rows) lives in
+[`jetos-implementation.md`](jetos-implementation.md) as research appendix only.
+Do not start until Epoch 7 reopens exact syntax and command ballots.
 
 ---
 

@@ -60,7 +60,7 @@ pub enum Type {
     /// S41 (M5): Unicode scalar value.
     Char,
     List(Box<Type>),
-    /// S38 (M5): keyed collection `Map<K, V>`.
+    /// S38/D-LISTMAP-CANON1=A: keyed collection `[K: V]`.
     Map {
         key: Box<Type>,
         value: Box<Type>,
@@ -257,7 +257,7 @@ impl Type {
             Type::String => "String (text)".to_string(),
             Type::Char => "Char (one character)".to_string(),
             Type::List(inner) => format!("[{}]", inner.name()),
-            Type::Map { key, value } => format!("[{}, {}]", key.name(), value.name()),
+            Type::Map { key, value } => format!("[{}: {}]", key.name(), value.name()),
             Type::Shared(inner) => format!("Shared<{}>", inner.name()),
             Type::Option(inner) => format!("{}?", inner.name()),
             Type::Result { ok, err } => format!("{} ? {}", ok.name(), err.name()),
@@ -317,7 +317,7 @@ impl Type {
             Type::String => "String".to_string(),
             Type::Char => "Char".to_string(),
             Type::List(inner) => format!("[{}]", inner.name()),
-            Type::Map { key, value } => format!("[{}, {}]", key.name(), value.name()),
+            Type::Map { key, value } => format!("[{}: {}]", key.name(), value.name()),
             Type::Shared(inner) => format!("Shared<{}>", inner.name()),
             Type::Option(inner) => format!("{}?", inner.name()),
             Type::Result { ok, err } => format!("{} ? {}", ok.name(), err.name()),
@@ -640,9 +640,9 @@ pub struct ProgramBundle {
     /// Core-module imports and C imports are absent (they have no loaded module index).
     /// Empty for single-module bundles created inline (compile_src / check_eval paths).
     pub import_targets: std::collections::HashMap<(usize, Span), usize>,
-    /// D-RINGLAYER1: optional `layer:` ceiling from `pkg.jet`.
+    /// D-RINGLAYER1: optional `runtime:` ceiling from `pkg.jet`.
     pub layer_ceiling: Option<crate::RingLayer::RuntimeLayer>,
-    /// D-RINGLAYER1: inferred minimum runtime layer for this package.
+    /// D-RINGLAYER1: inferred minimum runtime profile for this package.
     pub inferred_layer: crate::RingLayer::RuntimeLayer,
     /// D-WASM1: resolved web bucket per mangled function key (filled by sema).
     pub web_partitions: std::collections::HashMap<String, crate::WebPartition::WebBucket>,
@@ -798,7 +798,7 @@ pub enum Item {
     Const(ConstDef),
     /// S43 (M6): `#Test "name" { … }` — only at file top level.
     Test(TestDef),
-    /// D-BENCH1 (ratified 2026-06-24): `#Bench "name" { … }` — a region
+    /// D-BENCH1/D-BENCH-MARKER1=A: `#Bench("name") { … }` — a region
     /// benchmark, the exact sibling of `#Test`. Run by `jet bench`.
     Bench(BenchDef),
     /// S50 (M7): `extern rust "crate@version" { … }`.
@@ -1401,7 +1401,7 @@ pub struct TestDef {
     pub body: Vec<Stmt>,
 }
 
-/// D-BENCH1: `#Bench "name" { … }` — identical structure to `TestDef`. The
+/// D-BENCH1/D-BENCH-MARKER1=A: `#Bench("name") { … }` — identical structure to `TestDef`. The
 /// body is a bare statement list timed by the generated bench harness.
 #[derive(Debug)]
 pub struct BenchDef {
@@ -1425,10 +1425,13 @@ pub struct Func {
     pub type_params: Vec<TypeParam>,
     pub params: Vec<Param>,
     pub return_type: Option<Type>,
-    /// S58 (E2-M13): `@unsafe` on the line before `fn` — a whole-function
-    /// contract. Calling such a function requires an enclosing `@unsafe`
-    /// block (else E3103).
+    /// S58 (E2-M13): `#Unsafe` on the line before `fn` — a whole-function
+    /// contract. Calling such a function requires an enclosing `#Unsafe`
+    /// block (else E3103). D-UNSAFE-REASON1=B: the reason is optional but
+    /// missing it emits L3101.
     pub is_unsafe: bool,
+    pub unsafe_reason: Option<String>,
+    pub unsafe_span: Option<Span>,
     /// S60 (E2-M16): `pure fn` — impure calls inside the body are E3401.
     pub is_pure: bool,
     /// D-TAINT1 (ratified 2026-06-21): `#Sanitizer fn` — the blessed taint-strip
@@ -2201,9 +2204,9 @@ pub enum Stmt {
         span: Span,
         label: Option<(String, Span)>,
     },
-    /// S58 (E2-M13): `@unsafe { … }` audited region. `audit` carries the
-    /// `@audit("…")` reason on the line above, when present (lint L3101 fires
-    /// when it is `None`). `body` is the gated statements.
+    /// S58 (E2-M13): `#Unsafe { … }` audited region. `audit` carries the
+    /// optional reason argument. D-UNSAFE-REASON1=B: missing reason emits
+    /// L3101 but does not block compilation. `body` is the gated statements.
     Unsafe {
         audit: Option<String>,
         body: Vec<Stmt>,
@@ -2945,7 +2948,7 @@ pub enum Expr {
     },
     /// S58 (E2-M13): `mem.Ptr<T>.from_addr(addr)` — build a typed pointer from
     /// an integer address. The element type `elem` is the `<T>` argument; the
-    /// result type is `Ptr<elem>`. Only legal inside an `@unsafe` region in a
+    /// result type is `Ptr<elem>`. Only legal inside an `#Unsafe` region in a
     /// module that did `use core.mem` (else E3101/E3102).
     PtrFromAddr {
         /// The module alias the call came through (`mem` in the example).
@@ -3058,7 +3061,7 @@ pub struct FuncSig {
     pub return_type: Option<Type>,
     /// S50: declared in `extern rust`, implemented by the FFI bridge.
     pub is_extern: bool,
-    /// S58 (E2-M13): `@unsafe fn` — calling it requires an enclosing `@unsafe`
+    /// S58 (E2-M13): `#Unsafe fn` — calling it requires an enclosing `#Unsafe`
     /// block (E3103).
     pub is_unsafe: bool,
     /// S60 (E2-M16): `pure fn` — this function is free of ambient I/O and

@@ -1,8 +1,13 @@
 //! D-WEBBACKEND1 / D-WEBKIND1 / D-DOMGEN1 (c123 M2): WASM + JS web backend emission.
 
+use super::{
+    build_cx_items, bundle_extern_funcs, populate_cx_from_bundle, register_foreign_enum_variants,
+    update_cloneability_with_foreign_types, Cx, TIR,
+};
+use crate::Diagnostics::Span;
 use crate::Sema::CompileMode;
 use crate::Syntax;
-use crate::AST::{Expr, FfiLink, Item, ProgramBundle, Stmt, Type};
+use crate::AST::{Expr, FfiLink, Func, Item, ProgramBundle, Stmt, Type};
 use jet_foundation::WebPartition::{WebBucket, WebPartitionMarker};
 
 /// Generated web backend artifacts (WASM Rust, JS loader/app, DOM shim, manifest).
@@ -26,6 +31,14 @@ pub struct WebArtifacts {
 }
 
 const DOM_RUNTIME: &str = include_str!("../Prelude/DomRuntime.js");
+
+/// D-WEBTIR1=A: data-only fact reported by codegen's TIR coverage gate.
+/// The driver/API layer owns the user-facing diagnostic text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WebTirUnsupported {
+    pub func_name: String,
+    pub span: Span,
+}
 
 #[derive(Clone)]
 struct FuncWeb {
@@ -55,6 +68,60 @@ pub fn emit_web(
         index_html: emit_index_html(),
         explicit_html_path: bundle.modules[bundle.entry].html_path.clone(),
     }
+}
+
+/// D-WEBTIR1=A: every executable web body must pass through the same checked
+/// TIR boundary as native code before the AST-shaped web emitter is allowed to
+/// read it. A miss is a Jet diagnostic, not silent JS/WASM drift.
+pub fn validate_web_tir_support(
+    bundle: &ProgramBundle,
+    link: Option<&FfiLink>,
+) -> Vec<WebTirUnsupported> {
+    let extern_funcs = bundle_extern_funcs(bundle);
+    let mut diags = Vec::new();
+    for (i, module) in bundle.modules.iter().enumerate() {
+        let mut cx = build_cx_items(
+            &module.items,
+            &module.source,
+            &module.display,
+            link,
+            &extern_funcs,
+        );
+        populate_cx_from_bundle(&mut cx, bundle, i);
+        register_foreign_enum_variants(&mut cx, bundle, i);
+        update_cloneability_with_foreign_types(&mut cx, &module.items);
+        validate_web_items_tir(&module.items, &cx, &mut diags);
+    }
+    diags
+}
+
+fn validate_web_items_tir(items: &[Item], cx: &Cx, diags: &mut Vec<WebTirUnsupported>) {
+    for item in items {
+        match item {
+            Item::Func(f) => validate_web_func_tir(f, cx, diags),
+            Item::CodeModule(cm) => {
+                if let Some(body) = &cm.body {
+                    validate_web_items_tir(body, cx, diags);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn validate_web_func_tir(f: &Func, cx: &Cx, diags: &mut Vec<WebTirUnsupported>) {
+    *cx.current_type_params.borrow_mut() = f.type_params.iter().map(|p| p.name.clone()).collect();
+    let covered = f.pre.is_empty() && f.post.is_empty() && TIR::tir_covers(f, cx);
+    if covered {
+        let _ = TIR::lower_func(f, cx);
+        cx.current_type_params.borrow_mut().clear();
+        return;
+    }
+    cx.current_type_params.borrow_mut().clear();
+    diags.push(WebTirUnsupported {
+        func_name: f.name.clone(),
+        span: f.name_span,
+    });
 }
 
 fn emit_index_html() -> String {

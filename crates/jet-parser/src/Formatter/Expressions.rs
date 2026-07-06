@@ -70,7 +70,7 @@ impl<'a> Fmt<'a> {
             Type::Map { key, value } => {
                 self.write("[");
                 self.fmt_type(key);
-                self.write(", ");
+                self.write(": ");
                 self.fmt_type(value);
                 self.write("]");
             }

@@ -1,13 +1,13 @@
-# jetos — implementation plan (Phase D)
+# jetos — research appendix (frozen)
 
-**GATED — owner greenlight required before any Phase D work.** jetos is not
-being built. This file is the deliverable; nothing here ships until the owner
-says go, and the ballot rows at the end must be decided first.
+**Frozen by D-JETOS-FREEZE1.** jetos is not being built. This file preserves
+research only; nothing here is current syntax law or Epoch 4 implementation
+scope. Epoch 7 must reopen exact module, command, generation, image, and
+activation ballots before any fixture, parser, evaluator, or CLI work.
 
-**Card:** `#2 c27` (jetos generations) folds in here. **Prereqs:** Phase A
-(dispatch seam, `pkg.jet` canon, `module system.laptop` role form), Phase B/C
-(hangar realization, services, secrets, Nix bridge, image `.Iso` tier). Do not
-start OS0 until those land.
+**Card:** `#2 c27` (jetos generations) folds in here as frozen research.
+Historical prereqs named Phase A/B/C surfaces; D-JETOS-FREEZE1 supersedes that
+sequencing. Do not start OS0 until Epoch 7 re-ratifies the surface.
 
 Run everything through `nix develop -c`. Zero external crates in the compiler
 (I6). Every diagnostic needs `docs/spec/diagnostics.md` + a snapshot (I4).

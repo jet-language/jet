@@ -378,8 +378,11 @@ Dot-construction `px.{100}` also valid.
 
 **D-TYPEALIAS1 — Aliases**: `alias X = Y` transparent aliases, scoped to
 shortening generic spellings only — not primitive/unit newtypes (use
-`distinct`). **D-TYPE-ALIAS-CANON1**: `[T]`, `[K, V]`, `*T` are the only
-container/pointer spellings; `List<T>`/`Map<K,V>`/`Ptr<T>` are dead.
+`distinct`). **D-TYPE-ALIAS-CANON1** + **D-LISTMAP-CANON1=A**: `[T]`, `[K: V]`, `*T`
+are the only default container/pointer spellings; `List<T>`/`Map<K,V>`/`Ptr<T>`
+are dead. Named specific collection spellings stay named rather than short
+bracket forms; shipped today: `Deque<T>` and `Set<T>`. `HashMap<K,V>` and
+`BTreeMap<K,V>` are reserved names for the specialized map implementations.
 
 **D-BIGINT1**: Core `BigInt`, explicit construction `BigInt(…)`/`BigInt("…")`;
 `Int` never auto-promotes (E0130–E0133). **D-DECIMAL1**: arbitrary-precision
@@ -408,14 +411,14 @@ content-addressed definitions (D-CADEFS1, frozen).
 
 **S38 / D-EMPTYLIT1 — Map literal**: `["key": value, …]`. **D-EMPTYLIT1**
 *(ratified 2026-07-04)*: `[]` is the ONE empty-collection spelling for both
-list and map — type-directed from the expected-type context (a `[K, V]`
+list and map — type-directed from the expected-type context (a `[K: V]`
 binding/field/return/arg makes empty `[]` a map, same as `[T]` makes it a
 list). `[:]` is retired; `[` immediately followed by `:` is an ordinary
 parse error (E0003), no special-cased teaching text.
 
 **S65 — List type shorthand**: `[T]` is the canonical list-type spelling.
 
-**S64 — Map shorthand & entry iteration**: `[K, V]` is the canonical map-type
+**S64 — Map shorthand & entry iteration**: `[K: V]` is the canonical map-type
 spelling. One-binding map iteration yields `.key`/`.value` entries;
 two-binding `loop name, amount in fruits` also supported.
 
@@ -561,9 +564,10 @@ access E0605/E0609.
 **U3 — Module declarations**: `module name { … }` is the single outermost
 construct; multiple per file; leading `_` disables a module. Modules never
 import each other — they contribute to the merged whole. Reserved
-namespaces: `env` (`Env`), `system` (`System`), `image` (`Image`),
+namespaces currently live for Jetpack: `env` (`Env`), OCI `image` (`Image`),
 `workspace`. **D-JPK-MODBODY1**: role namespaces live in the declaration
-name — `module env.dev { packages: […] }`, `module system.laptop { … }`.
+name — `module env.dev { packages: […] }`, `module image.server { … }`.
+`system.*` is frozen jetos research under D-JETOS-FREEZE1.
 
 **U8 — Manifest fields nest in the module body**: a module's `sources:`
 (`name: provider@target` entries, merged by key) and `imports:` are fields
@@ -590,7 +594,7 @@ attaches traits; `::` exists only inside `extern rust` path strings. Orphan
 rule applies. v1: signatures plus D-LIB2's associated types and default
 bodies.
 
-**S48 — Dynamic dispatch**: a trait name in type position (`List<Shape>`,
+**S48 — Dynamic dispatch**: a trait name in type position (`[Shape]`,
 `fn f(s: Shape)`) means automatic boxing + dynamic dispatch; `<T: Shape>`
 means monomorphization. No user-facing `dyn`.
 
@@ -979,8 +983,9 @@ decisions).
 **S58 — Two gates, one keyword**: `use core.mem` is the discovery gate
 (allocators, `*T`, layout/repr, volatile). `#Unsafe("reason") { … }` /
 `#Unsafe("reason") fn` is the audit gate (**D-UNSAFE2** — the reason is the
-gate's argument; missing reason L3101; whole-fn form requires an enclosing
-`#Unsafe` at call sites). Gated ops: deref `p.*`, raw-pointer-of `*x`,
+gate's argument; **D-UNSAFE-REASON1=B** — bare `#Unsafe { … }` / `#Unsafe fn`
+compile and emit L3101; whole-fn form requires an enclosing `#Unsafe` at call
+sites). Gated ops: deref `p.*`, raw-pointer-of `*x`,
 pointer math, transmute-class casts, FFI pointer crossings (outside the gate:
 E0208). Address-of is `mem.address_of(x)`. `mem.cast_ptr<T>(p)` is the cast
 primitive (D-CASTPTR1); no compact pointer-chain syntax (D-POINTERCHAIN1).
@@ -1063,7 +1068,7 @@ package; optional `test { entry: … }` target adds an out-of-tree file.
 param type E0613. **D-TEST4**: fenced ```jet blocks in `///` docs run as
 doctests; `EXPR // => VALUE` compares JetShow output (E2901).
 
-**D-BENCH1**: `#Bench "name" { … }` region benchmarks, run by `jet bench`
+**D-BENCH1 / D-BENCH-MARKER1=A**: `#Bench("name") { … }` region benchmarks, run by `jet bench`
 (ops/sec + ns/iter); the `benchmark` manifest target points `jet bench` at a
 package entry.
 
@@ -1639,44 +1644,29 @@ family (`Recipe.prebuilt/copy/cargo/go/node/cmake/make`, expert
 
 **U1 — manifest history**: superseded — see D-JPK-FILES above (`pkg.jet`).
 
-### jetos
+### Jetpack Images
 
-**U11 — `System`**: fields `target` (typed platform value, `linux.x64`,
-never a string), `packages`, `services`, `options`.
+**D-JPK-IMAGE1 (=A, ratified 2026-07-01, c9jetpackgates)**: active `image.*`
+syntax is OCI-only: `from: packages.<name>` (a package this project's `pkg.jet`
+declares `executable`) + optional `kind: .Oci`, `expose: [Int]`, `env_vars:
+[KEY: "value"]` (map keys must be quoted strings — no bare-ident sugar),
+`files: [String]`, and `base: oci("<ref>")` (captured but not yet realized; no
+native registry-pull client exists). `jet image <name>` builds a deterministic
+OCI layout (`oci-layout`/`index.json`/`blobs/sha256/<digest>`) with an
+uncompressed tar layer. `--push` is honestly gated on TLS (E1268), never a fake
+push.
 
-**U12 — `Service`**: open record, first field `enable: Bool`
-(`openssh: { enable: true, ports: [22] }`); bare `{ … }` under `services:`.
+### jetos Research Appendix (Frozen)
 
-**U13 — `options:`**: ordered list of dotted `key: value` pairs; Jet values
-bare, free-form strings quoted. **D-OS4**: priorities are a map
-`[default: x, force: y]`; bare assignment = `default`.
-
-**U14 — `Image`**: two referents for `from:`, picked by an optional `kind:`
-(a leading-dot value, inferred from `from:` when omitted). `.Iso`:
-`from: system.<name>` + `format: iso|qcow|raw`; inherits everything from its
-System (explicit `target:` only for cross-compiling) — rides the jetos
-installer tier (Phase D, owner-gated). `.Oci` (**D-JPK-IMAGE1=A, ratified
-2026-07-01, c9jetpackgates**): `from: packages.<name>` (a package this
-project's `pkg.jet` declares `executable`) + `expose: [Int]` + `env_vars:
-[KEY: "value"]` (map keys must be quoted strings — no bare-ident sugar) +
-`files: [String]` (extra project-relative paths layered in) + `base:
-oci("<ref>")` (a base-image escape hatch, captured but not yet realized — no
-native registry-pull client exists). Built natively now (`jet image <name>`,
-no jetos/Phase D gate): a deterministic OCI layout (`oci-layout`/`index.json`/
-`blobs/sha256/<digest>`) with an uncompressed tar layer (no gzip — the
-`core.archive` flate2 bridge lives in a workspace-excluded crate compiled only
-into generated user programs, not into `jetpack` itself, I6). `--push` is
-honestly gated on TLS (E1268), never a fake push.
-
-**U15 — Verbs**: whole-machine management is `jetpack os switch|build`.
-
-**U16 — Target selector**: `[<config-path>]@<host>`, default path
-`~/.jet/config.jet`; `@host` picks the System.
-
-**D-OS6**: user scope `user.<name>.*` with `user.me` alias.
-**D-JPK-OSNAME1**: the OS is named **jetos**. **D-JPK-DISPATCH1**: verbs
-dispatch by executable name (`jetpack`, `jetos`), never linked into the
-compiler process.
+**D-JETOS-FREEZE1 (=A, ratified 2026-07-06)**: jetos-only spellings are
+research notes, not current syntax law. Frozen sketches include `System`
+fields, whole-machine `Service` records, `options:` merge priority forms,
+`.Iso`/`.Qcow`/`.Raw` images from `system.<name>`, `jetpack os
+switch|build`, `[<config-path>]@<host>`, `user.<name>.*`, and any implication
+that OS generations/activation build today. Epoch 7 must reopen these with
+fresh ballots before implementation. Product name remains **jetos**
+(D-JPK-OSNAME1), and engine verbs still cross a separate executable process
+seam when that tier exists (D-JPK-DISPATCH1).
 
 ### CLI & tooling
 

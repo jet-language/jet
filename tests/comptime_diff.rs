@@ -125,8 +125,8 @@ fn comptime_matches_runtime() {
 fn local_comptime_is_literal_data() {
     let stdout = compile_and_run(
         r#"
-fn build() -> List<Int> {
-    xs: List<Int> := []
+fn build() -> [Int] {
+    xs: [Int] := []
     loop i in 1..3 {
         xs.push(i * 10)
     }

@@ -116,7 +116,7 @@ fn b4_for_in_field_subject_parses_body_not_struct_lit() {
         "b4_for_field_subject",
         r#"
 struct Holder {
-    items: [String, Int]
+    items: [String: Int]
 }
 fn run() {
     h := Holder.{ items: [] }
