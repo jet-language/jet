@@ -313,43 +313,170 @@ serialization, org-wide rules, baked data, generated bindings, asset
 pipelines, build orchestration) maps to a rung. What they lose is the
 ability to be *invisible*. That is the point.
 
-## 12. The build-graph expansion (later, ballots held)
+## 12. The build-graph expansion (ratified)
 
-`fn build` returning a source list is the MVP shape, not the final one. Full
-parity with CMake/Bazel/Ninja/Gradle — so no one ever reaches for Make —
-means growing `BuildPlan` into a typed graph. The five foundation ballots
-ratified 2026-07-01, so the hold is released; **which bundles enter Epoch 5
-is balloted as D-E4EXIT1** (raised 2026-07-02 on c1nixrpd). Held-back scope:
+`fn build` is ordinary Jet code. Helpers, loops, parsers, branches, reusable
+generators, and policy functions do the work; builder calls appear only where
+values cross into the build graph. `BuildPlan` is the returned graph boundary,
+not a JSON-shaped DSL.
 
-- **Targets:** executable, static/shared library, test, bench, doc, asset
-  bundle, custom action, install/package/publish, plugin, (later) system
-  image. Tests/benches become graph nodes, not ad-hoc paths.
-- **Actions:** declared inputs/outputs/argv/env/caps — a step with no
-  declared outputs is a side effect, not a build step. Shell strings are a
-  Tier-2 legacy escape hatch.
-- **Transitive usage requirements:** CMake's one durable idea, typed —
-  exported flags, link libs, generated headers propagate through target deps
-  under explicit rules, never ambient globals.
-- **Toolchains:** typed host/target triples, SDKs, signing identities;
-  digests in lock.
-- **Cache:** action keys = content hashes + tool digest + argv + env +
-  toolchain + compiler version + policy; local first, remote later, remote
-  execution only after sandboxing is solid.
-- **Scheduler:** parallel with resource pools (cpu/memory/linker/console);
-  deterministic ordering where output order matters.
-- **Probes:** typed `find_program`/`pkg_config`/`has_header`/`compile_check`
-  replacing configure scripts; each declares whether it is reproducible.
-- **Introspection:** `jet graph`, `jet query`, why-did-this-rebuild,
-  what-generated-this-file, compile-database and IDE-model export.
-- **Build plugins:** same sandbox/capability model (WASM Component substrate,
-  D-PLUGIN1/D-DEP-WASM1 posture); org policy can deny third-party plugins.
-- **Legacy interop:** CMake/Make/Gradle called as Tier-2 legacy actions with
-  declared inputs/outputs — a migration ramp under policy, never the
-  foundation.
+Full parity with CMake/Bazel/Ninja/Gradle means `BuildPlan` grows into a typed
+graph. D-E4EXIT1=C makes that part of the Epoch 5 exit bar, and the 2026-07-06
+ballots ratified the graph shape:
 
-Each of these becomes its own decision bundle (`D-BUILDACTION1`,
-`D-BUILDTARGET1`, `D-BUILDTOOLCHAIN1`, `D-BUILDCACHE1`, `D-BUILDPROBE1`,
-`D-BUILDLOCK1`) when the foundation ballots land.
+- **D-BUILDTARGET1=A / #219:** targets are registered with
+  `b.add_executable`, `b.add_library`, `b.add_test`, `b.add_bench`,
+  `b.add_asset_bundle`, `b.add_doc`, `b.add_install`, `b.add_package`, and
+  `b.add_publish`; each returns a typed handle.
+- **D-BUILDACTION1=A / #220:** `b.action(name, inputs, outputs, run, caps)`;
+  outputless command targets are explicit, visible, uncached, and
+  capability-gated.
+- **D-BUILDTOOLCHAIN1=A / #221:** default host toolchain is inferred;
+  non-default builds use typed toolchain handles with recorded host/target
+  triples, SDKs, signing identities, and tool digests.
+- **D-BUILDPROBE1=A / #221:** typed `find_program`, `pkg_config`,
+  `has_header`, and `compile_check`; each result is reproducible or ambient.
+- **D-BUILDCACHE1=A / #222:** action key = inputs + outputs + argv + env +
+  caps + tool digest + target + policy + toolchain + compiler version +
+  generated source hashes.
+- **D-BUILDREMOTE1=A / #222:** remote cache and remote execution are separate
+  policy grants; remote execution waits on sandbox/provenance proof.
+- **D-BUILDSCHED1=A / #223:** deterministic graph scheduler with automatic
+  parallelism and named pools: cpu, memory, linker, console, gpu.
+- **D-BUILDQUERY1=A / #224:** `jet graph`, `jet query build`, and
+  `jet explain-build <target/file/action>` share graph/provenance data with
+  the LSP.
+- **D-BUILDLEGACY1=A / #225:** CMake/Make/Gradle/npm/cargo wrappers are Tier-2
+  legacy actions with declared inputs, outputs, and caps; optional graph import
+  stays inside the wrapper.
+- **D-BUILDPLUGIN1=A / #226:** one plugin contract covers first-party Jet build
+  libraries and packaged/third-party WASM component plugins under policy.
+- **D-FRONTENDAPI1=A / #227:** public read-only `core.compiler`
+  lexer/parser/check/semindex/source-map APIs plus CLI JSON mirror.
+- **D-DSLBLOCK1=A / #128:** stdlib-only PascalCase directive DSL blocks, fixed
+  in `Syntax.rs`, not third-party grammar mutation.
+- **D-METAMUTATE1=A / #15:** Jai-style AST mutation/message loop/user macros
+  are rejected; additive generation, graph APIs, DSL blocks, and front-end APIs
+  carry the power surface.
+
+### 12.1 Practice shape
+
+Build files must feel like Jet programs, not manifest data. Simple generation:
+
+```jet
+fn build(b: BuildContext) #(Fs) -> BuildPlan ? {
+    schema :: b.embed("schema/app.sql")?
+    b.generate("db_client", make_db_client(schema))?
+
+    app :: b.add_executable("ledger",
+        sources: ["src/run.jet"],
+        generated: ["db_client"])
+
+    return b.plan(default: app)
+}
+
+fn make_db_client(schema: String) -> String {
+    tables :: parse_tables(schema)
+    out := "module db_client {\n"
+
+    loop table in tables {
+        out += make_table_api(table)
+    }
+
+    return out + "}\n"
+}
+```
+
+Asset pipeline plus tests:
+
+```jet
+fn build(b: BuildContext) #(Fs, Exec) -> BuildPlan ? {
+    atlas :: b.action("pack-sprites",
+        inputs: b.find("assets/sprites/*.png")?,
+        outputs: ["build/sprites.atlas"],
+        run: ["atlas-pack", "assets/sprites", "build/sprites.atlas"],
+        caps: #(Fs, Exec))
+
+    b.generate("sprite_ids", make_sprite_enum(atlas.outputs[0]))?
+
+    game :: b.add_executable("game",
+        sources: ["src/game.jet"],
+        generated: ["sprite_ids"],
+        deps: [atlas])
+
+    b.add_test("game-tests",
+        sources: ["tests/game.jet"],
+        deps: [game])
+
+    return b.plan(default: game)
+}
+```
+
+Org policy as code:
+
+```jet
+fn build(b: BuildContext) -> BuildPlan ? {
+    require_timeouts(b.program)
+    require_archival(b.program)
+
+    service :: b.add_executable("service", sources: ["src/run.jet"])
+    return b.plan(default: service)
+}
+
+fn require_timeouts(p: ProgramInfo) {
+    loop f in p.functions() {
+        if f.effects.has("Net") and not f.params.has("timeout") {
+            f.error(code: "ORG_NET01",
+                what: "network function has no timeout",
+                why: "company services must fail predictably",
+                fix: "add a `timeout` parameter")
+        }
+    }
+}
+```
+
+Public front-end toolkit use, outside the compiler:
+
+```jet
+use core.compiler as jc
+
+fn run() -> Unit ? {
+    source :: files.read("src/run.jet")?
+    parsed :: jc.parse(source)?
+    checked :: jc.check(parsed)?
+
+    loop f in checked.functions() {
+        if f.effects.has("Net") {
+            print("{f.name} touches the network")
+        }
+    }
+}
+```
+
+### 12.2 Adversarial hardening
+
+- If examples read like JSON builders, lead with helper functions, parsing,
+  loops, reusable generators, and typed handles. `b.add_*` declares each target
+  once; `b.plan(...)` remains the graph handoff.
+- If source-list MVP cannot replace Make/CMake/Bazel, build #95 through the
+  ratified typed target/action graph before calling it implementation-ready.
+- If actions become shell in nicer clothes, cached actions require declared
+  outputs. Side-effect commands are separate, visible, uncached, and gated.
+- If policy feels hostile for solo users, support single-file TTY prompt and
+  `--allow-<effect>` grants. Package/workspace policy appears only when scale
+  needs it.
+- If build concepts overwhelm beginners, no `fn build` means default pipeline.
+  `jet run file.jet` stays the first experience.
+- If Bazel transitions/aspects tempt hidden mutation, use typed target configs
+  and read-only graph/program queries. No arbitrary rewrite pass.
+- If parser/lexer exposure leaks internals, expose a versioned read-only
+  `core.compiler` value API. Internal compiler crates stay private.
+- If DSL blocks become reader macros, keep a fixed stdlib whitelist in
+  `Syntax.rs`; reject third-party grammar mutation.
+- If generated source becomes unreadable noise, require materialized files,
+  lock hashes, source provenance, LSP navigation, and `jet explain-build`.
+- If legacy interop smuggles ambient authority, keep wrappers Tier-2 with
+  declared inputs/outputs/caps. CI can ban them.
 
 ## 13. Tooling — the Blueprint test
 
@@ -389,21 +516,31 @@ D-WORKSPACE1/2 + D-MONOREF1 workspace · U10 `pkg.jet`.
 | D-BUILDGEN1 | A | generated modules materialize under `.jet/generated/<package>/`, never committed, additive-only, lock-hashed |
 | D-METADEPTH2 | B | read-only post-sema program snapshot + structured `b.error` from the build entry only |
 
-**Frozen:** c154 (e7) — full Jai message loop / user macros, rung C.
+**Ratified 2026-07-06:** D-BUILDTARGET1=A, D-BUILDACTION1=A,
+D-BUILDTOOLCHAIN1=A, D-BUILDPROBE1=A, D-BUILDCACHE1=A, D-BUILDREMOTE1=A,
+D-BUILDSCHED1=A, D-BUILDQUERY1=A, D-BUILDLEGACY1=A, D-BUILDPLUGIN1=A,
+D-FRONTENDAPI1=A, D-DSLBLOCK1=A, D-METAMUTATE1=A.
 
-**Sequencing after ratification:** `fetch(url, sha256:)` backend ✅ shipped →
-entry + BuildContext + generate + plan (MVP: executable/library/test/custom
-targets, `.jet/generated/`, local action cache, lock records) → explain/audit
-surfaces → workspace composition + policy → enforce API (D-METADEPTH2=B, now
-ratified) → build-graph expansion bundles (§12).
+**Parked:** c147 #14 remains a frozen evidence-gated serde-bound reserve.
+`$` splice + `comptime {}` on #94 are shipped lower rungs, not a mutation
+surface. #38 stays closed as authority/effects duplicate of #95.
+
+**Sequencing after ratification:** `fetch(url, sha256:)` backend shipped →
+entry + BuildContext + generate + plan foundation → typed targets/actions
+(D-BUILDTARGET1=A + D-BUILDACTION1=A) → explain/audit surfaces → workspace
+composition + policy → enforce API (D-METADEPTH2=B, now ratified) →
+follow-on build-system parity bundles (§12).
 
 ---
 
 ## 15. Implementation plan — card c1nixrpd (e4)
 
-Executable plan for the five ratified ballots. Read §§4–8 for rationale; this
-section is what an implementer builds. Everything runs through the **existing
-comptime interpreter** (`crates/jet-comptime`) — extend it, do not greenfield.
+Executable plan for the five ratified foundation ballots, plus the now-ratified
+target/action graph gates from D-E4EXIT1=C. Do not call #95 implementation
+ready until the typed target/action graph is implemented coherently; a
+source-list plan no longer meets the exit bar. Read §§4–8 for rationale; this section is
+what an implementer builds. Everything runs through the **existing comptime
+interpreter** (`crates/jet-comptime`) — extend it, do not greenfield.
 The build entry is a `CtValue`-level program the driver runs after sema; its
 methods dispatch beside the shipped `emit`/`embed`/`find` in
 `Comptime/Methods.rs`. `BuildContext`/`BuildPlan` are `CtValue::Struct`s.
@@ -414,7 +551,8 @@ methods dispatch beside the shipped `emit`/`embed`/`find` in
 Comptime/Methods.rs::eval_net_fetch` — string URL + required `sha256:` label,
 content verified against the pin, recorded as a `ComptimeInput` (`url:{url}` +
 hash) in the lock inputs. `find`/`embed` (D-CTFIND1/D-CTIO1) likewise ship.
-No upstream implementation gate remains; §15 is buildable top to bottom.
+No upstream implementation gate remains for the foundation mechanics. Graph
+exit still waits on target/action graph implementation.
 
 ### 15.1 Sequencing DAG
 
@@ -439,7 +577,9 @@ No upstream implementation gate remains; §15 is buildable top to bottom.
   GEN1/POLICY1. Requires one driver staging change (§15.6): run sema → hand the
   entry a *checked* snapshot → then compile the plan.
 
-Build order: **ENTRY1 → METADEPTH2 ∥ (GEN1, POLICY1) → SCOPE1**.
+Build order: **ENTRY1 → METADEPTH2 ∥ (GEN1, POLICY1) → SCOPE1 → typed
+targets/actions**. The last step is ratified by D-BUILDTARGET1=A and
+D-BUILDACTION1=A; implementation lives on #219/#220.
 
 ### 15.2 D-BUILDENTRY1=B — the build entry
 
@@ -465,8 +605,10 @@ b.embed(path: String)           -> String ?       // D-CTIO1,  Tier 1
 b.fetch(url: String, sha256: String) -> Bytes ?   // D-NETDEP1, Tier 1 (backend shipped)
 b.plan(sources: [String], generated: [String], assets: [String]) -> BuildPlan
 ```
-`BuildPlan` is an opaque `CtValue::Struct` naming `sources`/`generated`/
-`assets` (grows into the §12 typed graph later — MVP is these three lists).
+`BuildPlan` is an opaque `CtValue::Struct`. The foundation can prove
+entry/run/materialization with `sources`/`generated`/`assets`, but the shipped
+Epoch 5 shape must use the typed target/action graph ratified by
+D-BUILDTARGET1=A and D-BUILDACTION1=A.
 
 **Lands in.**
 - Detection + selection + staging: `crates/jet-driver/src/Driver/mod.rs` — new

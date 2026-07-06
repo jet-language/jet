@@ -120,6 +120,20 @@ The owner is CEO/CTO; his decisions are the only allowed bottleneck — he
 never waits on you for a plan or a decision, and nothing reaches him that an
 agent hasn't already reviewed.
 
+Before any plan or ballot reaches the owner, run the **two-facet pass**:
+
+- **Beginner pass:** assume the reader is learning Jet for the first time and
+  wants magic out of the box. Defaults should require no ceremony, no policy
+  jargon, and no build-system knowledge unless the user opts in.
+- **Expert pass:** assume the reader knows exactly what they want and needs
+  full control over targets, effects, generated code, toolchains, scheduling,
+  caching, and audit output.
+- **Hybrid pass:** do not present artificially siloed options when a single
+  canonical mechanism can provide both surfaces. Prefer one semantic mechanism
+  with ergonomic entrypoints, defaults, and expert overrides over mutually
+  exclusive beginner-vs-expert designs. This is I8-compatible when the compiler
+  treats the entrypoints identically.
+
 ## Communication — caveman default
 
 All agent chatter — status updates, analysis, plans, sub-agent briefs and

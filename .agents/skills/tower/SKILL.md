@@ -168,6 +168,11 @@ them all or the card isn't ballot-ready:
 Rules:
 - Give a rich menu of original syntax candidates, never 2–3 derivative ones. Never
   invent syntax that contradicts a ratified decision — read `syntax-decisions.md`.
+- Run the two-facet pass before the ballot reaches the owner: a first-time
+  beginner should get magic out of the box, and an expert should get exact
+  opt-in control. Do not make those separate options when one canonical
+  mechanism can support both with safe defaults, ergonomic entrypoints, and
+  explicit overrides.
 - **ID must be Tower-parseable** (`D-…` or `S<digits>-…`) and must not collide with
   a ratified id: `rg "\bD-XXX\b" docs/spec/syntax-decisions.md`.
 - **Implementation difficulty must never appear** in a tradeoff, an option ranking,

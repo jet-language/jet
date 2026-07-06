@@ -1456,7 +1456,10 @@ opt-in (D-PKGSIGN1). `jet vendor`, `jet audit`, `jet build --sbom`
 (D-SUPPLY1; E1217/E1218). Store is content-addressed (D-CASTORE1).
 
 **Build system** *(D-BUILDENTRY1, D-BUILDPOLICY1, D-BUILDSCOPE1, D-BUILDGEN1,
-D-BUILDPROFILE1, D-BUILDNORM1)*: compile-time build entry is
+D-BUILDPROFILE1, D-BUILDNORM1, D-BUILDTARGET1, D-BUILDACTION1,
+D-BUILDTOOLCHAIN1, D-BUILDPROBE1, D-BUILDCACHE1, D-BUILDREMOTE1,
+D-BUILDSCHED1, D-BUILDQUERY1, D-BUILDLEGACY1, D-BUILDPLUGIN1,
+D-FRONTENDAPI1, D-DSLBLOCK1, D-METAMUTATE1)*: compile-time build entry is
 `fn build(b: BuildContext)`, living in the unit's own definition file (beside
 `fn run` / in `pkg.jet` / in `workspace.jet`); `jet build` runs it when
 defined, else the batteries pipeline. Build code is tiered: Tier 1
@@ -1465,7 +1468,44 @@ permission + provenance; deps never get Tier 2 implicitly. Generated source
 lands under `.jet/generated/`, never committed; lock records source+output
 hashes. Profiles: `Build.{optimize, debug_info, small, panic, features,
 env}`, selected by explicit flag (`--release`/`--profile=<name>`), never
-ambient env. Build cache hashes at AST level.
+ambient env.
+
+D-BUILDTARGET1=A: build targets are registered once with `b.add_executable`,
+`b.add_library`, `b.add_test`, `b.add_bench`, `b.add_asset_bundle`,
+`b.add_doc`, `b.add_install`, `b.add_package`, and `b.add_publish`; each call
+returns a typed handle and `b.plan()` / `b.plan(default: target)` returns the
+registered graph. D-BUILDACTION1=A: `b.action(name, inputs, outputs, run,
+caps)` declares cached actions; side-effect-only commands are explicit,
+uncached, visible, and capability-gated. D-BUILDTOOLCHAIN1=A: default host
+toolchain is inferred; non-default builds use typed toolchain handles from
+jetpack/toolchain deps, with host/target triples, SDKs, and signing identities
+recorded. D-BUILDPROBE1=A: configure checks are typed probes, each classified
+as reproducible or ambient.
+
+D-BUILDCACHE1=A: local action cache is automatic; the key includes inputs,
+outputs, argv, env, caps, tool digest, target, policy, toolchain, compiler
+version, and generated source hashes. D-BUILDREMOTE1=A: local is default;
+remote cache and remote execution are separate policy grants, and remote
+execution waits on sandbox/provenance proof. D-BUILDSCHED1=A: the scheduler is
+deterministic with automatic parallelism and named resource pools (`cpu`,
+`memory`, `linker`, `console`, `gpu`). D-BUILDQUERY1=A: graph inspection is
+`jet graph`, `jet query build`, and `jet explain-build <target/file/action>`,
+with the LSP using the same graph/provenance model.
+
+D-BUILDLEGACY1=A: legacy CMake/Make/Gradle/npm/cargo builds are Tier-2
+wrappers with declared inputs, outputs, and caps; optional graph import lives
+inside the same wrapper and CI can ban it. D-BUILDPLUGIN1=A: one build-plugin
+contract covers first-party Jet build libraries and packaged/third-party WASM
+component plugins under policy; both emit the same BuildPlan graph. D-FRONTENDAPI1=A:
+`core.compiler` exposes stable read-only lexer/parser/check/semindex/source-map
+value APIs plus a CLI JSON mirror; internal compiler crates stay private and no
+AST mutation enters compilation. D-DSLBLOCK1=A: stdlib-only PascalCase
+directive DSL blocks such as `#Sql<Row> { ... }` and `#Html { ... }` are a
+fixed whitelist in `Syntax.rs`; third-party grammar mutation is rejected.
+D-METAMUTATE1=A: Jai-style AST mutation/message loop/user macros are rejected;
+the power surface is additive generated modules/overlays, registered
+targets/actions, read-only program/build graph enforcement, DSL blocks, and
+front-end APIs.
 
 **Migrations** *(D-MIGRATE1, D-MIGRATE2A–F)*: `@PublishedSchema` types
 snapshot field layout; a breaking change without a migration is E0910.

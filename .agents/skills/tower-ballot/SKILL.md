@@ -30,6 +30,22 @@ owner **picks**; never pre-empt the pick.
 - **`group`** — one of the project's `decisionGroups` (see `.tower/config.json`)
   so the queue stays organized.
 
+## Required review pass
+
+Before adding or updating a ballot, run this pass and reflect it in the
+recommendation/options:
+
+- **Beginner:** a first-time Jet user should get magic out of the box. The
+  recommended path must keep defaults ceremony-free and hide expert knobs until
+  they are needed.
+- **Expert:** an experienced user must be able to control the exact graph,
+  authority, generated code, toolchain, cache, scheduler, and audit behavior
+  behind explicit opt-in surfaces.
+- **Hybrid:** do not force siloed options when the best design is one
+  canonical mechanism with multiple ergonomic entrypoints. Prefer hybrids that
+  preserve I8: one semantic operation, flexible arrangement/writing style,
+  project policy can enforce a preferred style.
+
 ## Mechanics
 
 ```
@@ -62,6 +78,10 @@ owner if it's urgent: `tower message send --to owner --text "ballot D-CACHE1 rea
   (`tower decision list --json`).
 - Never invent choices that contradict an already-ratified decision — read
   the project's ratified record first.
+- Do not make beginner ease and expert control separate mutually exclusive
+  choices unless they truly require different semantics. First look for a
+  single mechanism that gives both: safe defaults, explicit control, and
+  auditability.
 - Implementation difficulty must never appear in a tradeoff, ranking, or
   recommendation. Rank on the project's actual priorities.
 - When the owner ratifies with a comment, **honor every word** — a question

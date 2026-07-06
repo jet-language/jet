@@ -256,6 +256,15 @@ pub const WEB_TARGET_DEFAULT_WEB: &str = "Web";
 /// builds, replacing the silent `<stem>.html` filename convention.
 pub const ATTR_HTML: &str = "Html";
 
+/// D-DSLBLOCK1=A (ratified 2026-07-06): `#Sql<Row> { ... }` — a stdlib-owned,
+/// checked DSL block. Third-party DSL block markers are not user-extensible.
+pub const DSL_BLOCK_SQL: &str = "Sql";
+
+/// D-DSLBLOCK1=A: initial fixed stdlib DSL block marker whitelist. `Html`
+/// reuses `ATTR_HTML`; block form (`#Html { ... }`) is distinct from the
+/// existing file-level companion-page form (`#Html("path.html")`).
+pub const STDLIB_DSL_BLOCK_MARKERS: &[&str] = &[DSL_BLOCK_SQL, ATTR_HTML];
+
 /// D-OSTARGET1=A (ratified 2026-07-01, c134): `#Target(Os. … )` namespace — the
 /// second, mutually-exclusive axis of the `#Target(...)` marker family
 /// (`Wasm`/`Js`/`Web` above are the first, web-bucket axis). Attaches at
@@ -2403,6 +2412,7 @@ pub const DIRECTIVE_MARKERS: &[&str] = &[
     ATTR_JS,
     ATTR_WASM_EXPORT,
     ATTR_HTML,
+    DSL_BLOCK_SQL,
     // ATTR_UNINIT intentionally absent (D-UNINIT-SENTINEL1): `#Uninit` is
     // retired outright, not merely on the wrong plane, so `@Uninit` isn't
     // taught "add `#`" — it falls through to an ordinary unknown-marker error.
@@ -3431,6 +3441,12 @@ pub fn is_contract_marker(name: &str) -> bool {
 /// confusable set? Used to detect `@` written before a directive name.
 pub fn is_directive_marker(name: &str) -> bool {
     DIRECTIVE_MARKERS.contains(&name)
+}
+
+/// D-DSLBLOCK1=A: is `name` one of the stdlib-owned DSL block markers allowed
+/// to claim a checked syntax island?
+pub fn is_stdlib_dsl_block_marker(name: &str) -> bool {
+    STDLIB_DSL_BLOCK_MARKERS.contains(&name)
 }
 
 // D-UNITLIT1: unit-suffix numeric literals (`500ms`) are not an enumerable
