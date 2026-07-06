@@ -505,8 +505,19 @@ fn user_type_name(ty: &Type) -> Option<&str> {
     }
 }
 
+fn record_type_key(ty: &Type) -> Option<String> {
+    match ty {
+        Type::Tuple(_) => Some(ty.name()),
+        _ => user_type_name(ty).map(str::to_string),
+    }
+}
+
 fn jit_struct_type(ty: &Type) -> bool {
     user_type_name(ty).is_some()
+}
+
+fn jit_tuple_type(ty: &Type) -> bool {
+    matches!(ty, Type::Tuple(fields) if fields.iter().all(|(_, t)| matches!(t.as_ref(), Type::Int | Type::Float)))
 }
 
 fn jit_enum_type(ty: &Type) -> bool {
@@ -517,6 +528,7 @@ fn jit_compound_type(ty: &Type) -> bool {
     jit_list_int_type(ty)
         || jit_list_task_int_type(ty)
         || jit_struct_type(ty)
+        || jit_tuple_type(ty)
         || jit_enum_type(ty)
         || jit_optional_scalar_type(ty)
 }
@@ -627,6 +639,9 @@ fn jit_covers_expr(expr: &TExpr, callees: &HashSet<String>) -> bool {
         TExprKind::StructLit { fields, .. } => {
             jit_struct_type(&expr.ty) && fields.iter().all(|(_, v, _)| jit_covers_expr(v, callees))
         }
+        TExprKind::TupleLit { fields, .. } => {
+            jit_tuple_type(&expr.ty) && jit_covers_tuple_fields(fields, callees)
+        }
         TExprKind::Field { recv, .. } => jit_covers_expr(recv, callees),
         TExprKind::MethodCall { recv, args, .. } => {
             jit_covers_expr(recv, callees) && args.iter().all(|a| jit_covers_call_arg(a, callees))
@@ -729,6 +744,12 @@ fn jit_covers_enum_payload(payload: &TEnumPayload, callees: &HashSet<String>) ->
     }
 }
 
+fn jit_covers_tuple_fields(fields: &[(String, TExpr)], callees: &HashSet<String>) -> bool {
+    fields.iter().all(|(_, value)| {
+        matches!(&value.ty, Type::Int | Type::Float) && jit_covers_expr(value, callees)
+    })
+}
+
 fn jit_covers_builtin_op(
     op: &TBuiltinOp,
     recv: &TExpr,
@@ -782,12 +803,19 @@ fn jit_covers_stmt(stmt: &TStmt, callees: &HashSet<String>) -> bool {
         // on it for the sender handle — same two host calls, now both fired at the
         // producer site instead of at a later `.sender()` call.
         TStmt::TupleDestructure { init, binds, .. } => {
-            binds.len() == 2
+            (binds.len() == 2
                 && matches!(
                     &init.kind,
                     TExprKind::CoreCall { module, method, args }
                         if module == "core.tasks" && method == "channel" && args.is_empty()
-                )
+                ))
+                || (jit_tuple_type(&init.ty)
+                    && binds.len()
+                        == match &init.ty {
+                            Type::Tuple(fields) => fields.len(),
+                            _ => 0,
+                        }
+                    && jit_covers_expr(init, callees))
         }
         TStmt::Assign {
             value, clone_value, ..
@@ -1176,6 +1204,7 @@ fn clif_ty(ty: &Type) -> Option<types::Type> {
     if jit_list_int_type(ty)
         || jit_list_task_int_type(ty)
         || jit_struct_type(ty)
+        || jit_tuple_type(ty)
         || jit_enum_type(ty)
     {
         return Some(types::I64);
@@ -1383,26 +1412,34 @@ impl LowerCtx<'_, '_> {
             // `let ch := tasks.channel(); s := ch.sender();` host calls — `channel_new`
             // for the receiver handle, then `channel_sender` on it for the sender
             // handle — both fired here instead of at a later `.sender()` call.
-            TStmt::TupleDestructure { binds, .. } => {
-                let ch_ref = self
-                    .module
-                    .declare_func_in_func(self.host.conc.channel_new, self.b.func);
-                let ch_call = self.b.ins().call(ch_ref, &[]);
-                let ch_val = self.b.inst_results(ch_call)[0];
-                let tx_ref = self
-                    .module
-                    .declare_func_in_func(self.host.conc.channel_sender, self.b.func);
-                let tx_call = self.b.ins().call(tx_ref, &[ch_val]);
-                let tx_val = self.b.inst_results(tx_call)[0];
-                // `binds[i].0` is already the mangled Rust name (`mangle(elem.name)`,
-                // set at TIR lowering — unlike plain `Let.name`, which is the raw Jet
-                // name and needs `local_place`'s own `mangle` call). Use it directly.
-                let tx_var = self.fresh_var(types::I64);
-                self.b.def_var(tx_var, tx_val);
-                self.vars.insert(binds[0].0.clone(), tx_var);
-                let ch_var = self.fresh_var(types::I64);
-                self.b.def_var(ch_var, ch_val);
-                self.vars.insert(binds[1].0.clone(), ch_var);
+            TStmt::TupleDestructure { init, binds, .. } => {
+                if matches!(
+                    &init.kind,
+                    TExprKind::CoreCall { module, method, args }
+                        if module == "core.tasks" && method == "channel" && args.is_empty()
+                ) {
+                    let ch_ref = self
+                        .module
+                        .declare_func_in_func(self.host.conc.channel_new, self.b.func);
+                    let ch_call = self.b.ins().call(ch_ref, &[]);
+                    let ch_val = self.b.inst_results(ch_call)[0];
+                    let tx_ref = self
+                        .module
+                        .declare_func_in_func(self.host.conc.channel_sender, self.b.func);
+                    let tx_call = self.b.ins().call(tx_ref, &[ch_val]);
+                    let tx_val = self.b.inst_results(tx_call)[0];
+                    // `binds[i].0` is already the mangled Rust name (`mangle(elem.name)`,
+                    // set at TIR lowering — unlike plain `Let.name`, which is the raw Jet
+                    // name and needs `local_place`'s own `mangle` call). Use it directly.
+                    let tx_var = self.fresh_var(types::I64);
+                    self.b.def_var(tx_var, tx_val);
+                    self.vars.insert(binds[0].0.clone(), tx_var);
+                    let ch_var = self.fresh_var(types::I64);
+                    self.b.def_var(ch_var, ch_val);
+                    self.vars.insert(binds[1].0.clone(), ch_var);
+                } else {
+                    self.lower_tuple_destructure(init, binds)?;
+                }
             }
             TStmt::Assign {
                 place, op, value, ..
@@ -1941,15 +1978,24 @@ impl LowerCtx<'_, '_> {
         Some(format!("{type_name}::{method}"))
     }
 
-    fn lower_struct_lit(&mut self, fields: &[(String, TExpr, bool)]) -> Result<Value, String> {
-        let n = self.b.ins().iconst(types::I64, fields.len() as i64);
+    fn lower_record_fields<'f>(
+        &mut self,
+        fields: impl Iterator<Item = &'f TExpr>,
+    ) -> Result<Value, String> {
+        let values: Vec<&TExpr> = fields.collect();
+        let n = self.b.ins().iconst(types::I64, values.len() as i64);
         let new_ref = self
             .module
             .declare_func_in_func(self.host.struct_new_f64, self.b.func);
         let new_call = self.b.ins().call(new_ref, &[n]);
         let handle = self.b.inst_results(new_call)[0];
-        for (i, (_, v, _)) in fields.iter().enumerate() {
-            let val = self.lower_expr(v)?;
+        for (i, value) in values.iter().enumerate() {
+            let raw = self.lower_expr(value)?;
+            let val = match value.ty {
+                Type::Float => raw,
+                Type::Int => self.b.ins().fcvt_from_sint(types::F64, raw),
+                _ => return Err(format!("jit record field unsupported: {:?}", value.ty)),
+            };
             let idx = self.b.ins().iconst(types::I64, i as i64);
             let set_ref = self
                 .module
@@ -1957,6 +2003,68 @@ impl LowerCtx<'_, '_> {
             self.b.ins().call(set_ref, &[handle, idx, val]);
         }
         Ok(handle)
+    }
+
+    fn lower_struct_lit(&mut self, fields: &[(String, TExpr, bool)]) -> Result<Value, String> {
+        self.lower_record_fields(fields.iter().map(|(_, value, _)| value))
+    }
+
+    fn lower_tuple_lit(&mut self, fields: &[(String, TExpr)]) -> Result<Value, String> {
+        self.lower_record_fields(fields.iter().map(|(_, value)| value))
+    }
+
+    fn lower_record_field(
+        &mut self,
+        handle: Value,
+        type_name: &str,
+        field_rust: &str,
+        fallback_ty: &Type,
+    ) -> Result<Value, String> {
+        let idx = self
+            .meta
+            .struct_field_index(type_name, field_rust)
+            .ok_or_else(|| format!("jit field `{field_rust}` on `{type_name}`"))? as i64;
+        let idx_val = self.b.ins().iconst(types::I64, idx);
+        let host_ref = self
+            .module
+            .declare_func_in_func(self.host.struct_get_f64, self.b.func);
+        let call = self.b.ins().call(host_ref, &[handle, idx_val]);
+        let raw = self.b.inst_results(call)[0];
+        let field_ty = self
+            .meta
+            .struct_field_type(type_name, field_rust)
+            .unwrap_or_else(|| fallback_ty.clone());
+        Ok(match field_ty {
+            Type::Float => raw,
+            Type::Int => self.b.ins().fcvt_to_sint(types::I64, raw),
+            other => return Err(format!("jit field type unsupported: {other:?}")),
+        })
+    }
+
+    fn lower_tuple_destructure(
+        &mut self,
+        init: &TExpr,
+        binds: &[(String, String)],
+    ) -> Result<(), String> {
+        let handle = self.lower_expr(init)?;
+        let type_name = record_type_key(&init.ty).ok_or("jit tuple destructure type")?;
+        for (local, field_rust) in binds {
+            let fallback_ty = match &init.ty {
+                Type::Tuple(fields) => fields
+                    .iter()
+                    .find(|(name, _)| TIR::local_place(name) == *field_rust)
+                    .map(|(_, ty)| ty.as_ref().clone())
+                    .unwrap_or(Type::Int),
+                _ => Type::Int,
+            };
+            let value = self.lower_record_field(handle, &type_name, field_rust, &fallback_ty)?;
+            let clif = clif_ty(&fallback_ty)
+                .ok_or_else(|| format!("jit tuple destructure unsupported: {fallback_ty:?}"))?;
+            let var = self.fresh_var(clif);
+            self.b.def_var(var, value);
+            self.vars.insert(local.clone(), var);
+        }
+        Ok(())
     }
 
     fn lower_list_lit(&mut self, elems: &[TExpr]) -> Result<Value, String> {
@@ -2272,36 +2380,15 @@ impl LowerCtx<'_, '_> {
                 self.lower_builtin_method(recv, op, args, &expr.ty)
             }
             TExprKind::StructLit { fields, .. } => self.lower_struct_lit(fields),
+            TExprKind::TupleLit { fields, .. } => self.lower_tuple_lit(fields),
             TExprKind::Field {
                 recv, field_rust, ..
             } => {
                 let handle = self.lower_expr(recv)?;
-                let type_name = user_type_name(&recv.ty)
-                    .map(str::to_string)
+                let type_name = record_type_key(&recv.ty)
                     .or_else(|| self.method_struct.clone())
                     .ok_or("jit field recv type")?;
-                let idx = self
-                    .meta
-                    .struct_field_index(&type_name, field_rust)
-                    .ok_or_else(|| format!("jit field `{field_rust}` on `{type_name}`"))?
-                    as i64;
-                let idx_val = self.b.ins().iconst(types::I64, idx);
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.struct_get_f64, self.b.func);
-                let call = self.b.ins().call(host_ref, &[handle, idx_val]);
-                let raw = self.b.inst_results(call)[0];
-                let field_ty = self
-                    .meta
-                    .struct_field_type(&type_name, field_rust)
-                    .unwrap_or_else(|| expr.ty.clone());
-                Ok(match field_ty {
-                    Type::Float => raw,
-                    Type::Int => self.b.ins().fcvt_to_sint(types::I64, raw),
-                    other => {
-                        return Err(format!("jit field type unsupported: {other:?}"));
-                    }
-                })
+                self.lower_record_field(handle, &type_name, field_rust, &expr.ty)
             }
             TExprKind::MethodCall {
                 recv,
@@ -2645,9 +2732,7 @@ impl LowerCtx<'_, '_> {
         else {
             return None;
         };
-        let type_name = user_type_name(&recv.ty)
-            .map(str::to_string)
-            .or_else(|| self.method_struct.clone())?;
+        let type_name = record_type_key(&recv.ty).or_else(|| self.method_struct.clone())?;
         self.meta.struct_field_type(&type_name, field_rust)
     }
 
@@ -2695,6 +2780,9 @@ impl LowerCtx<'_, '_> {
         }
         let lhs_ty = self.expr_arith_type(lhs);
         let _rhs_ty = self.expr_arith_type(rhs);
+        if matches!(op, BinOp::Eq | BinOp::Ne) && matches!(lhs_ty, Type::Tuple(_)) {
+            return self.lower_tuple_eq(op, &lhs_ty, l, r);
+        }
         Ok(match (&lhs_ty, op) {
             (Type::Int, BinOp::Add) => self.b.ins().iadd(l, r),
             (Type::Int, BinOp::Sub) => self.b.ins().isub(l, r),
@@ -2742,6 +2830,37 @@ impl LowerCtx<'_, '_> {
             }
             _ => return Err("jit binary op unsupported".to_string()),
         })
+    }
+
+    fn lower_tuple_eq(
+        &mut self,
+        op: BinOp,
+        ty: &Type,
+        lhs: Value,
+        rhs: Value,
+    ) -> Result<Value, String> {
+        let Type::Tuple(fields) = ty else {
+            return Err("jit tuple equality needs tuple type".to_string());
+        };
+        let type_name = record_type_key(ty).ok_or("jit tuple equality type")?;
+        let mut acc = self.b.ins().iconst(types::I8, 1);
+        for (name, field_ty) in fields {
+            let field_rust = TIR::local_place(name);
+            let left = self.lower_record_field(lhs, &type_name, &field_rust, field_ty)?;
+            let right = self.lower_record_field(rhs, &type_name, &field_rust, field_ty)?;
+            let eq = match field_ty.as_ref() {
+                Type::Int => self.bool_from_icmp(IntCC::Equal, left, right),
+                Type::Float => self.bool_from_fcmp(FloatCC::Equal, left, right),
+                other => return Err(format!("jit tuple equality unsupported: {other:?}")),
+            };
+            acc = self.b.ins().band(acc, eq);
+        }
+        if matches!(op, BinOp::Ne) {
+            let one = self.b.ins().iconst(types::I8, 1);
+            Ok(self.b.ins().isub(one, acc))
+        } else {
+            Ok(acc)
+        }
     }
 
     fn bool_from_icmp(&mut self, cc: IntCC, l: Value, r: Value) -> Value {

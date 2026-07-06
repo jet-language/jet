@@ -726,6 +726,23 @@ fn jit_covers_increment_decrement() {
     );
 }
 
+#[test]
+fn jit_covers_named_tuples() {
+    let file = "examples/features/basics/tuples.jet";
+    let mut bundle = jet::Loader::load_entry(file).expect("load");
+    let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let errors: Vec<_> = diags
+        .into_iter()
+        .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+        .collect();
+    assert!(errors.is_empty(), "tuple example must type-check");
+    assert!(
+        jet_jit::jit_covers_bundle(&bundle),
+        "named tuple literal/access/equality/destructure should stay JIT-covered: {}",
+        jet_jit::jit_covers_bundle_detail(&bundle)
+    );
+}
+
 /// Audit which type-checked examples are jit-covered (run with `--ignored`).
 #[test]
 #[ignore]

@@ -182,6 +182,25 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
             _ => {}
         }
     }
+    for (_, fields) in collect_tuple_shapes(&module.items) {
+        let tuple_ty = Type::Tuple(
+            fields
+                .iter()
+                .map(|(name, ty)| (name.clone(), Box::new(ty.clone())))
+                .collect(),
+        );
+        struct_fields.insert(
+            tuple_ty.name(),
+            fields
+                .iter()
+                .map(|(name, _)| format!("user_{}", name))
+                .collect(),
+        );
+        struct_field_types.insert(
+            tuple_ty.name(),
+            fields.iter().map(|(_, ty)| ty.clone()).collect(),
+        );
+    }
     Some(JitProgram {
         source_file: module.display.clone(),
         funcs,
