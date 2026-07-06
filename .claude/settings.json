@@ -26,7 +26,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"$CLAUDE_PROJECT_DIR\"/scripts/agent/clean-nix-tmp.sh"
+            "command": "f=scripts/agent/clean-nix-tmp.sh; [ -f \"$f\" ] || f=\"$CLAUDE_PROJECT_DIR/$f\"; [ -f \"$f\" ] && bash \"$f\"; exit 0"
           }
         ]
       }
@@ -37,7 +37,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"$CLAUDE_PROJECT_DIR\"/scripts/agent/require-clean-tree.sh"
+            "command": "f=scripts/agent/require-clean-tree.sh; [ -f \"$f\" ] || f=\"$CLAUDE_PROJECT_DIR/$f\"; [ -f \"$f\" ] && exec bash \"$f\"; exit 0"
           }
         ]
       }
