@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 219,
-    "rev": 309,
+    "rev": 310,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -5603,6 +5603,11 @@
       "plan": "JIT/AOT parity by construction. Canonical plan: tools/Tower/docs/plans/epoch-3/jit-aot-parity.md. Orchestration: implementation agent must first read .agents/prompts/OrchestrationPrompt.md and run as that orchestrator. Owner direction 2026-07-06: Jet wins two fronts. AOT targets C/C++/Rust/Go/Zig/Odin territory with optimized native binaries and expert control; JIT/dev targets JS/TS/Python/data-analysis/web-dev loops with rapid design/test/refine. Every AOT-runnable program must run under jet dev in some backend path with identical stdout/stderr/exit/diagnostics/panics/side effects. Native JIT lowering is preferred for speed; transparent shared-runtime/platform/AOT-subprocess fallback is valid when resident JIT hosting is unsafe or incomplete. User never owns backend gaps. No parity ballots remain. Exit: dev_default_matches_compiled_binary covers stdout+stderr+exit for every example, gap manifest contains only transparent internal fallback reasons, no jit_covers whitelist remains, R12 documents two consumers/one IR, full suite + jet-verify green.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "Phase 6 fallback-ladder seed implemented: default jet dev now wraps the Cranelift fallback backend with transparent AOT subprocess execution for run-to-completion bundles before interpreter boundaries. Added env/core effect and io/log regressions; parity normalizes nondeterministic log timestamps while still comparing stdout, stderr, and exit code. Resident bundles skip subprocess fallback so dev cannot hang on server/loop gaps. Verified: nix develop -c cargo test --test dev dev_default_runs_env_program_via_aot_fallback -- --exact --nocapture; nix develop -c cargo test --test dev dev_default_aot_fallback_matches_io_log -- --exact --nocapture; nix develop -c cargo test --test dev cranelift_hot_swap_preserves_live_state -- --exact --nocapture; nix develop -c cargo test --test dev dev_default_matches_compiled_binary -- --exact --nocapture; nix develop -c cargo test --test dev interpreter_matches_compiled_binary -- --exact --nocapture; nix develop -c cargo test --test dev jit_coverage_audit -- --exact --nocapture; nix develop -c rustfmt --check Source/JitBackend.rs Source/Interpreter.rs tests/dev.rs. Results green; default battery now 249 default==compiled, 8 named boundaries, 0 divergences."
+        },
         {
           "at": "2026-07-06",
           "by": "codex-main",

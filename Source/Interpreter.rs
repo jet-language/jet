@@ -668,12 +668,13 @@ pub fn dev_run_bundle(
     try_anyway: bool,
     use_interpreter: bool,
 ) -> RunOutcome {
-    use crate::JitBackend::{InterpreterBackend, JitBackend};
+    use crate::JitBackend::{AotFallbackBackend, InterpreterBackend, JitBackend};
     if use_interpreter {
         let mut backend = InterpreterBackend::new();
         backend.run(bundle, try_anyway)
     } else {
-        let mut backend = jet_jit::CraneliftBackend::new(InterpreterBackend::new());
+        let mut backend =
+            jet_jit::CraneliftBackend::new(AotFallbackBackend::new(InterpreterBackend::new()));
         backend.run(bundle, try_anyway)
     }
 }

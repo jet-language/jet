@@ -240,6 +240,47 @@ fn is_manifested_parity_divergence(stem: &str, entries: &[String]) -> bool {
     })
 }
 
+fn normalize_for_parity(stem: &str, mut out: ProgramOutput) -> ProgramOutput {
+    if matches!(stem, "io/log" | "serde/json_coerce") {
+        out.stderr = normalize_json_log_timestamps(&out.stderr);
+    }
+    if stem == "io/log_human" {
+        out.stderr = normalize_text_log_timestamps(&out.stderr);
+    }
+    out
+}
+
+fn normalize_json_log_timestamps(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(pos) = rest.find("\"ts\":") {
+        out.push_str(&rest[..pos]);
+        out.push_str("\"ts\":<ts>");
+        let mut tail = &rest[pos + "\"ts\":".len()..];
+        let digits = tail.bytes().take_while(|b| b.is_ascii_digit()).count();
+        tail = &tail[digits..];
+        rest = tail;
+    }
+    out.push_str(rest);
+    out
+}
+
+fn normalize_text_log_timestamps(s: &str) -> String {
+    s.lines()
+        .map(|line| {
+            let Some((level, rest)) = line.split_once(' ') else {
+                return line.to_string();
+            };
+            let Some((_, msg)) = rest.split_once(" | ") else {
+                return line.to_string();
+            };
+            format!("{level} <ts> | {msg}")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        + if s.ends_with('\n') { "\n" } else { "" }
+}
+
 fn print_jit_op_report() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let mut ops: std::collections::BTreeMap<String, (usize, usize)> =
@@ -338,6 +379,8 @@ fn interpreter_matches_compiled_binary() {
             continue;
         };
 
+        let interpreted = normalize_for_parity(stem, interpreted);
+        let compiled = normalize_for_parity(stem, compiled);
         if interpreted != compiled {
             if is_manifested_parity_divergence(stem, &manifested_divergences) {
                 manifested += 1;
@@ -418,6 +461,8 @@ fn dev_default_matches_compiled_binary() {
             continue;
         };
 
+        let interpreted = normalize_for_parity(stem, interpreted);
+        let compiled = normalize_for_parity(stem, compiled);
         if interpreted != compiled {
             if is_manifested_parity_divergence(stem, &manifested_divergences) {
                 manifested += 1;
@@ -582,6 +627,69 @@ fn task_program_runs_via_jit() {
         got.trim(),
         "JIT output drifted from dev_iteration"
     );
+}
+
+/// c125 Phase 6 seed: uncovered effectful programs run under default dev via
+/// transparent AOT subprocess fallback. Interpreter mode keeps the honest
+/// E2201 boundary; the default backend owns the gap.
+#[test]
+fn dev_default_runs_env_program_via_aot_fallback() {
+    let dir = std::env::temp_dir().join(format!("jet_dev_aot_fallback_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("env_fallback.jet");
+    fs::write(
+        &file,
+        "use core.env as env\nfn run() {\n    print(env.current_dir())\n}\n",
+    )
+    .unwrap();
+    let shown = file.to_string_lossy().to_string();
+
+    match dev_iteration(&shown, false, true) {
+        RunOutcome::Problems(diags) => {
+            assert!(
+                diags.iter().any(|d| d.code == "E2201"),
+                "interpreter mode should still name the boundary: {diags:?}"
+            );
+        }
+        RunOutcome::Ran { .. } => panic!("interpreter unexpectedly ran core.env program"),
+    }
+
+    let expected = compiled_binary_output(&dir, "aot_fallback", 0, "env_fallback", &shown)
+        .expect("fixture should compile through the AOT path");
+    let got = match dev_iteration(&shown, false, false) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => ProgramOutput::ran(stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => {
+            panic!("default dev should AOT-fallback-run core.env program: {diags:?}")
+        }
+    };
+    let got = normalize_for_parity("env_fallback", got);
+    let expected = normalize_for_parity("env_fallback", expected);
+    assert_eq!(got, expected);
+}
+
+#[test]
+fn dev_default_aot_fallback_matches_io_log() {
+    let dir = std::env::temp_dir();
+    let file = "examples/features/io/log.jet";
+    let expected = compiled_binary_output(&dir, "aot_fallback_log", 0, "io/log", file)
+        .expect("io/log should compile through the AOT path");
+    let got = match dev_iteration(file, false, false) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => ProgramOutput::ran(stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => {
+            panic!("default dev should AOT-fallback-run io/log: {diags:?}")
+        }
+    };
+    let got = normalize_for_parity("io/log", got);
+    let expected = normalize_for_parity("io/log", expected);
+    assert_eq!(got, expected);
 }
 
 /// c139 M4: scheduler/channel spawn stress example is jit-covered and runs.
