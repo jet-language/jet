@@ -246,6 +246,8 @@ impl<'a> Checker<'a> {
             ("core.mem", "Fixed") => Some(Type::Named(Syntax::MEM_FIXED.to_string())),
             // D-OPTGC1: `gc.Gc` sentinel — `.new<T>(value)` constructs a traced handle.
             ("core.gc", "Gc") => Some(Type::Named(Syntax::GC_TYPE.to_string())),
+            // D-FIDELITY-API1=A: `core.perf.Perf` static API sentinel.
+            ("core.perf", "Perf") => Some(Type::Named("Perf".to_string())),
             _ => {
                 self.diags.push(unknown_core_item(module, name, span));
                 let _ = alias_span;
@@ -4122,9 +4124,14 @@ pub fn core_fixed_sig(
             vec![],
             Some(Type::Named(crate::Syntax::TYPE_KEY.to_string())),
         )),
-        // D-ADAPTFID1=A: adaptive fidelity signal.
+        // D-FIDELITY-API1=A: runtime-global fidelity signal.
         ("core.perf", "fidelity") => Some((vec![], Some(float))),
-        ("core.perf", "set_fidelity") => Some((vec![(read, float)], Some(unit))),
+        ("core.perf", "default_fidelity") => Some((vec![], Some(float.clone()))),
+        ("core.perf", "override_fidelity") => Some((
+            vec![(read, float)],
+            Some(result_ty(unit.clone(), Type::String)),
+        )),
+        ("core.perf", "reset_fidelity") => Some((vec![], Some(unit))),
         // D-DECIMAL1: exact decimal parse from string.
         ("core.numeric", "decimal") => Some((
             vec![(read, string.clone())],
@@ -4600,8 +4607,14 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         "core.numeric" => &["decimal"],
         // D-PENDING1=B: Loadable<T,E> constructors.
         "core.async.loadable" => &["idle", "loading", "loaded", "failed"],
-        // D-ADAPTFID1=A: adaptive fidelity signal.
-        "core.perf" => &["fidelity", "set_fidelity"],
+        // D-FIDELITY-API1=A: runtime-global fidelity signal.
+        "core.perf" => &[
+            "Perf",
+            "fidelity",
+            "default_fidelity",
+            "override_fidelity",
+            "reset_fidelity",
+        ],
         // D-RENDERTGT2=A (c133 M1): UI backend seam.
         "core.ui" => &[
             "null_backend",

@@ -3463,6 +3463,14 @@ pub(crate) fn static_method_call_in_subset(
             .iter()
             .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
     }
+    if type_name == "Perf"
+        && !cx.type_names.contains("Perf")
+        && core_call_covered("core.perf", method)
+    {
+        return args
+            .iter()
+            .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
+    }
     // c109 Phase 25: a STATIC constructor `Type.new(args)` is the Phase-7 static-call
     // shape (`recv_type == None`, receiver a covered type-name ident, `(Type, "new") ∈
     // method_sigs`) — NOT a builtin/instance intercept. `emit_builtin_method` has no

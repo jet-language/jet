@@ -12,6 +12,7 @@ use crate::Types::{CallEdge, SemIndex};
 /// The semantic kind of a defined symbol (LSP-facing; uses AST types internally).
 #[derive(Debug, Clone)]
 pub enum SymKind {
+    Module,
     Function {
         params: Vec<(String, AST::Type)>,
         ret: Option<AST::Type>,
@@ -45,6 +46,7 @@ pub enum SymKind {
 /// One named definition in the program.
 #[derive(Debug, Clone)]
 pub struct SymDef {
+    pub identity: String,
     pub name: String,
     pub def_span: Span,
     pub module_path: String,
@@ -57,6 +59,7 @@ pub struct SymRef {
     pub name: String,
     pub span: Span,
     pub module_path: String,
+    pub scope_identity: Option<String>,
 }
 
 /// Hover entry: an expression/token span + text to show on hover.
@@ -88,11 +91,13 @@ pub struct SymbolDB {
 struct CallerFrame {
     name: String,
     owner: Option<String>,
+    identity: String,
 }
 
 struct WalkCtx<'a> {
     db: &'a mut SymbolDB,
     caller: Option<CallerFrame>,
+    scope_identity: String,
 }
 
 impl SymbolDB {
@@ -143,6 +148,57 @@ fn caller_key(frame: &CallerFrame) -> String {
     effect_key(frame.owner.as_deref(), &frame.name)
 }
 
+fn root_identity(mp: &str) -> String {
+    format!("module:{mp}")
+}
+
+fn module_identity(scope: &str, name: &str) -> String {
+    format!("module:{scope}::{name}")
+}
+
+fn type_identity(scope: &str, name: &str) -> String {
+    format!("type:{scope}::{name}")
+}
+
+fn member_identity(scope: &str, parent: &str, kind: &str, name: &str) -> String {
+    format!("{kind}:{scope}::{parent}.{name}")
+}
+
+fn callable_identity(scope: &str, owner: Option<&str>, name: &str, _f: &AST::Func) -> String {
+    match owner {
+        Some(owner) => format!("method:{scope}::{owner}.{name}"),
+        None => format!("fn:{scope}::{name}"),
+    }
+}
+
+fn trait_method_identity(scope: &str, owner: &str, sig: &AST::TraitMethodSig) -> String {
+    format!("method:{scope}::{owner}.{}", sig.name)
+}
+
+fn active_scope<'a, 'b>(ctx: &'a WalkCtx<'b>) -> &'a str {
+    ctx.caller
+        .as_ref()
+        .map(|c| c.identity.as_str())
+        .unwrap_or(&ctx.scope_identity)
+}
+
+fn local_identity(scope: &str, kind: &str, name: &str) -> String {
+    format!("{kind}:{scope}::{name}")
+}
+
+fn scoped_local_identity(ctx: &WalkCtx<'_>, kind: &str, name: &str) -> String {
+    local_identity(active_scope(ctx), kind, name)
+}
+
+fn scoped_ref(name: String, span: Span, mp: &str, ctx: &WalkCtx<'_>) -> SymRef {
+    SymRef {
+        name,
+        span,
+        module_path: mp.to_string(),
+        scope_identity: Some(active_scope(ctx).to_string()),
+    }
+}
+
 fn record_call(ctx: &mut WalkCtx<'_>, mp: &str, callee: &str, span: Span) {
     if let Some(caller) = &ctx.caller {
         ctx.db.calls.push(CallEdge {
@@ -171,6 +227,7 @@ pub fn build_symbol_db(bundle: &ProgramBundle, facts: &SemIndexEffectFacts) -> S
         let mut ctx = WalkCtx {
             db: &mut db,
             caller: None,
+            scope_identity: root_identity(&mp),
         };
         for item in &module.items {
             collect_item(item, &mp, module, &mut ctx);
@@ -188,6 +245,7 @@ pub fn build_index(bundle: &ProgramBundle, facts: &SemIndexEffectFacts) -> SemIn
 fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<'_>) {
     match item {
         Item::Func(f) => {
+            let fn_identity = callable_identity(&ctx.scope_identity, None, &f.name, f);
             let params: Vec<(String, AST::Type)> = f
                 .params
                 .iter()
@@ -195,6 +253,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                 .map(|p| (p.name.clone(), p.ty.clone()))
                 .collect();
             let sym = SymDef {
+                identity: fn_identity.clone(),
                 name: f.name.clone(),
                 def_span: f.name_span,
                 module_path: mp.to_string(),
@@ -216,6 +275,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                     continue;
                 }
                 ctx.db.defs.push(SymDef {
+                    identity: local_identity(&fn_identity, "param", &p.name),
                     name: p.name.clone(),
                     def_span: p.name_span,
                     module_path: mp.to_string(),
@@ -232,6 +292,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                 CallerFrame {
                     name: f.name.clone(),
                     owner: None,
+                    identity: fn_identity,
                 },
                 |ctx| {
                     collect_stmts(&f.body, mp, module, ctx);
@@ -245,6 +306,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                 .map(|f| (f.name.clone(), f.ty.clone()))
                 .collect();
             ctx.db.defs.push(SymDef {
+                identity: type_identity(&ctx.scope_identity, &s.name),
                 name: s.name.clone(),
                 def_span: s.name_span,
                 module_path: mp.to_string(),
@@ -259,6 +321,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
             });
             for f in &s.fields {
                 ctx.db.defs.push(SymDef {
+                    identity: member_identity(&ctx.scope_identity, &s.name, "field", &f.name),
                     name: f.name.clone(),
                     def_span: f.name_span,
                     module_path: mp.to_string(),
@@ -274,8 +337,11 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                 });
             }
             for meth in &s.methods {
+                let method_identity =
+                    callable_identity(&ctx.scope_identity, Some(&s.name), &meth.name, meth);
                 let hover_text = hover_for_fn(meth);
                 ctx.db.defs.push(SymDef {
+                    identity: method_identity.clone(),
                     name: meth.name.clone(),
                     def_span: meth.name_span,
                     module_path: mp.to_string(),
@@ -297,6 +363,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                 for p in &meth.params {
                     if p.name != Syntax::KW_SELF {
                         ctx.db.defs.push(SymDef {
+                            identity: local_identity(&method_identity, "param", &p.name),
                             name: p.name.clone(),
                             def_span: p.name_span,
                             module_path: mp.to_string(),
@@ -312,17 +379,21 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                     CallerFrame {
                         name: meth_name,
                         owner: Some(owner.clone()),
+                        identity: method_identity,
                     },
                     |ctx| collect_stmts(body, mp, module, ctx),
                 );
             }
             for tb in &s.trait_impls {
                 for meth in &tb.methods {
+                    let method_identity =
+                        callable_identity(&ctx.scope_identity, Some(&s.name), &meth.name, meth);
                     with_caller(
                         ctx,
                         CallerFrame {
                             name: meth.name.clone(),
                             owner: Some(s.name.clone()),
+                            identity: method_identity,
                         },
                         |ctx| collect_stmts(&meth.body, mp, module, ctx),
                     );
@@ -332,6 +403,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
         Item::Enum(e) => {
             let variants: Vec<String> = e.variants.iter().map(|v| v.name.clone()).collect();
             ctx.db.defs.push(SymDef {
+                identity: type_identity(&ctx.scope_identity, &e.name),
                 name: e.name.clone(),
                 def_span: e.name_span,
                 module_path: mp.to_string(),
@@ -346,6 +418,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
             });
             for v in &e.variants {
                 ctx.db.defs.push(SymDef {
+                    identity: member_identity(&ctx.scope_identity, &e.name, "variant", &v.name),
                     name: v.name.clone(),
                     def_span: v.name_span,
                     module_path: mp.to_string(),
@@ -360,7 +433,10 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                 });
             }
             for meth in &e.methods {
+                let method_identity =
+                    callable_identity(&ctx.scope_identity, Some(&e.name), &meth.name, meth);
                 ctx.db.defs.push(SymDef {
+                    identity: method_identity.clone(),
                     name: meth.name.clone(),
                     def_span: meth.name_span,
                     module_path: mp.to_string(),
@@ -379,17 +455,21 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                     CallerFrame {
                         name: meth.name.clone(),
                         owner: Some(e.name.clone()),
+                        identity: method_identity,
                     },
                     |ctx| collect_stmts(&meth.body, mp, module, ctx),
                 );
             }
             for tb in &e.trait_impls {
                 for meth in &tb.methods {
+                    let method_identity =
+                        callable_identity(&ctx.scope_identity, Some(&e.name), &meth.name, meth);
                     with_caller(
                         ctx,
                         CallerFrame {
                             name: meth.name.clone(),
                             owner: Some(e.name.clone()),
+                            identity: method_identity,
                         },
                         |ctx| collect_stmts(&meth.body, mp, module, ctx),
                     );
@@ -398,6 +478,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
         }
         Item::Trait(t) => {
             ctx.db.defs.push(SymDef {
+                identity: type_identity(&ctx.scope_identity, &t.name),
                 name: t.name.clone(),
                 def_span: t.name_span,
                 module_path: mp.to_string(),
@@ -410,6 +491,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
             });
             for sig in &t.methods {
                 ctx.db.defs.push(SymDef {
+                    identity: trait_method_identity(&ctx.scope_identity, &t.name, sig),
                     name: sig.name.clone(),
                     def_span: sig.name_span,
                     module_path: mp.to_string(),
@@ -427,6 +509,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
         }
         Item::Tag(t) => {
             ctx.db.defs.push(SymDef {
+                identity: type_identity(&ctx.scope_identity, &t.name),
                 name: t.name.clone(),
                 def_span: t.name_span,
                 module_path: mp.to_string(),
@@ -440,7 +523,10 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
         }
         Item::Impl(i) => {
             for meth in &i.methods {
+                let method_identity =
+                    callable_identity(&ctx.scope_identity, Some(&i.type_name), &meth.name, meth);
                 ctx.db.defs.push(SymDef {
+                    identity: method_identity.clone(),
                     name: meth.name.clone(),
                     def_span: meth.name_span,
                     module_path: mp.to_string(),
@@ -457,6 +543,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                 for p in &meth.params {
                     if p.name != Syntax::KW_SELF {
                         ctx.db.defs.push(SymDef {
+                            identity: local_identity(&method_identity, "param", &p.name),
                             name: p.name.clone(),
                             def_span: p.name_span,
                             module_path: mp.to_string(),
@@ -469,6 +556,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                     CallerFrame {
                         name: meth.name.clone(),
                         owner: Some(i.type_name.clone()),
+                        identity: method_identity,
                     },
                     |ctx| collect_stmts(&meth.body, mp, module, ctx),
                 );
@@ -476,6 +564,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
         }
         Item::Const(c) => {
             ctx.db.defs.push(SymDef {
+                identity: format!("const:{}::{}", ctx.scope_identity, c.name),
                 name: c.name.clone(),
                 def_span: c.name_span,
                 module_path: mp.to_string(),
@@ -495,12 +584,34 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
             collect_stmts(&b.body, mp, module, ctx);
         }
         Item::ExternRust(_) => {}
-        // Stage 1a: modules aren't yet indexed for symbols/hover.
-        Item::Module(_) => {}
+        Item::Module(m) => {
+            ctx.db.defs.push(SymDef {
+                identity: module_identity(&ctx.scope_identity, &m.name),
+                name: m.name.clone(),
+                def_span: m.name_span,
+                module_path: mp.to_string(),
+                kind: SymKind::Module,
+            });
+        }
         // S59: C FFI boundary modules aren't yet indexed for symbols/hover.
         Item::CModule(_) => {}
-        // Code modules aren't yet indexed for symbols/hover.
-        Item::CodeModule(_) => {}
+        Item::CodeModule(m) => {
+            let identity = module_identity(&ctx.scope_identity, &m.name);
+            ctx.db.defs.push(SymDef {
+                identity: identity.clone(),
+                name: m.name.clone(),
+                def_span: m.name_span,
+                module_path: mp.to_string(),
+                kind: SymKind::Module,
+            });
+            if let Some(body) = &m.body {
+                let prev = std::mem::replace(&mut ctx.scope_identity, identity);
+                for item in body {
+                    collect_item(item, mp, module, ctx);
+                }
+                ctx.scope_identity = prev;
+            }
+        }
         // D-DIST1: distinct types aren't yet indexed for symbols/hover.
         Item::Distinct(_) => {}
         // D-TYPEALIAS1: type aliases aren't yet indexed for symbols/hover.
@@ -572,6 +683,7 @@ fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, ctx: &mut Wal
             ..
         } => {
             ctx.db.defs.push(SymDef {
+                identity: scoped_local_identity(ctx, "local", var),
                 name: var.clone(),
                 def_span: *var_span,
                 module_path: mp.to_string(),
@@ -582,6 +694,7 @@ fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, ctx: &mut Wal
             });
             if let Some((v2, s2)) = var2 {
                 ctx.db.defs.push(SymDef {
+                    identity: scoped_local_identity(ctx, "local", v2),
                     name: v2.clone(),
                     def_span: *s2,
                     module_path: mp.to_string(),
@@ -632,6 +745,7 @@ fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, ctx: &mut Wal
             cond, body, init, ..
         } => {
             ctx.db.defs.push(SymDef {
+                identity: scoped_local_identity(ctx, "local", &init.name),
                 name: init.name.clone(),
                 def_span: init.name_span,
                 module_path: mp.to_string(),
@@ -710,11 +824,9 @@ fn collect_if(if_stmt: &AST::IfStmt, mp: &str, module: &LoadedModule, ctx: &mut 
 fn collect_lvalue(lv: &AST::LValue, mp: &str, ctx: &mut WalkCtx<'_>) {
     match lv {
         AST::LValue::Local { name, name_span } => {
-            ctx.db.refs.push(SymRef {
-                name: name.clone(),
-                span: *name_span,
-                module_path: mp.to_string(),
-            });
+            ctx.db
+                .refs
+                .push(scoped_ref(name.clone(), *name_span, mp, ctx));
         }
         AST::LValue::Index { base, index, .. } => {
             collect_expr(base, mp, ctx);
@@ -730,6 +842,7 @@ fn collect_binding(b: &AST::Binding, mp: &str, ctx: &mut WalkCtx<'_>) {
     if let Some(pat) = &b.pattern {
         for n in pat.names() {
             ctx.db.defs.push(SymDef {
+                identity: scoped_local_identity(ctx, "local", &n.name),
                 name: n.name.clone(),
                 def_span: n.span,
                 module_path: mp.to_string(),
@@ -746,6 +859,7 @@ fn collect_binding(b: &AST::Binding, mp: &str, ctx: &mut WalkCtx<'_>) {
     // has_explicit_annotation: user wrote `: Type` — ty_span is Some iff the annotation is in source
     let has_explicit = b.ty_span.is_some();
     ctx.db.defs.push(SymDef {
+        identity: scoped_local_identity(ctx, "local", &b.name),
         name: b.name.clone(),
         def_span: b.name_span,
         module_path: mp.to_string(),
@@ -782,19 +896,13 @@ fn collect_expr(e: &AST::Expr, mp: &str, ctx: &mut WalkCtx<'_>) {
     match e {
         AST::Expr::PtrFromAddr { addr, .. } => collect_expr(addr, mp, ctx),
         AST::Expr::Ident(name, span) => {
-            ctx.db.refs.push(SymRef {
-                name: name.clone(),
-                span: *span,
-                module_path: mp.to_string(),
-            });
+            ctx.db.refs.push(scoped_ref(name.clone(), *span, mp, ctx));
         }
         AST::Expr::Call(call) => {
             record_call(ctx, mp, &call.name, call.name_span);
-            ctx.db.refs.push(SymRef {
-                name: call.name.clone(),
-                span: call.name_span,
-                module_path: mp.to_string(),
-            });
+            ctx.db
+                .refs
+                .push(scoped_ref(call.name.clone(), call.name_span, mp, ctx));
             for arg in &call.args {
                 collect_expr(&arg.expr, mp, ctx);
             }
@@ -808,22 +916,16 @@ fn collect_expr(e: &AST::Expr, mp: &str, ctx: &mut WalkCtx<'_>) {
         } => {
             collect_expr(receiver, mp, ctx);
             record_call(ctx, mp, method, *method_span);
-            ctx.db.refs.push(SymRef {
-                name: method.clone(),
-                span: *method_span,
-                module_path: mp.to_string(),
-            });
+            ctx.db
+                .refs
+                .push(scoped_ref(method.clone(), *method_span, mp, ctx));
             for arg in args {
                 collect_expr(&arg.expr, mp, ctx);
             }
         }
         AST::Expr::Field(base, field, span) => {
             collect_expr(base, mp, ctx);
-            ctx.db.refs.push(SymRef {
-                name: field.clone(),
-                span: *span,
-                module_path: mp.to_string(),
-            });
+            ctx.db.refs.push(scoped_ref(field.clone(), *span, mp, ctx));
         }
         AST::Expr::OptField {
             base,
@@ -832,11 +934,9 @@ fn collect_expr(e: &AST::Expr, mp: &str, ctx: &mut WalkCtx<'_>) {
             ..
         } => {
             collect_expr(base, mp, ctx);
-            ctx.db.refs.push(SymRef {
-                name: member.clone(),
-                span: *member_span,
-                module_path: mp.to_string(),
-            });
+            ctx.db
+                .refs
+                .push(scoped_ref(member.clone(), *member_span, mp, ctx));
         }
         AST::Expr::Binary(_, l, r, _) => {
             collect_expr(l, mp, ctx);
@@ -929,6 +1029,7 @@ fn collect_expr(e: &AST::Expr, mp: &str, ctx: &mut WalkCtx<'_>) {
         AST::Expr::Lambda(l) => {
             for p in &l.params {
                 ctx.db.defs.push(SymDef {
+                    identity: scoped_local_identity(ctx, "param", &p.name),
                     name: p.name.clone(),
                     def_span: p.name_span,
                     module_path: mp.to_string(),

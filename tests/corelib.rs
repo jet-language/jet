@@ -1301,6 +1301,90 @@ fn run() {
 }
 
 #[test]
+fn perf_static_api_lowers_to_core_helpers() {
+    let out = compile_temp(
+        "perf_static.jet",
+        r#"
+fn run() -> Void ? {
+    print(Perf.default_fidelity())
+    Perf.override_fidelity(0.25)?
+    print(Perf.fidelity())
+    Perf.reset_fidelity()
+}
+"#,
+    );
+    assert!(out.rust.contains("jet_perf_default_fidelity()"));
+    assert!(out.rust.contains("jet_perf_override_fidelity(0.25"));
+    assert!(out.rust.contains("jet_perf_fidelity()"));
+    assert!(out.rust.contains("jet_perf_reset_fidelity()"));
+}
+
+#[test]
+fn perf_set_fidelity_alias_is_not_exported() {
+    let src = r#"
+use core.perf as Perf
+
+fn run() -> Void ? {
+    Perf.set_fidelity(0.25)?
+}
+"#;
+    let dir = std::env::temp_dir().join(format!("jet_corelib_perf_alias_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("perf_alias.jet");
+    fs::write(&path, src).unwrap();
+    let shown = path.to_string_lossy();
+    let diags = jet::compile_with_path(src, &shown).expect_err("set_fidelity alias must not exist");
+    let rendered = jet::render_diagnostics(&shown, src, &diags);
+    assert!(
+        rendered.contains("set_fidelity"),
+        "diagnostic should name retired alias, got:\n{rendered}"
+    );
+    assert!(
+        rendered.contains("has no item"),
+        "diagnostic should reject retired alias, got:\n{rendered}"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn perf_override_is_range_checked_and_resettable() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc {
+        eprintln!("note: skipping perf runtime test (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_corelib_perf_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "perf_runtime",
+        r#"
+use core.perf as Perf
+
+fn run() -> Void ? {
+    print(Perf.default_fidelity())
+    Perf.override_fidelity(0.25)?
+    print(Perf.fidelity())
+    Perf.reset_fidelity()
+    print(Perf.fidelity())
+    Perf.override_fidelity(1.25)?
+}
+"#,
+        &[],
+        None,
+    );
+    assert_eq!(code, 1, "out-of-range override should fail");
+    assert_eq!(stdout, "1.0\n0.25\n1.0\n");
+    assert!(
+        stderr.contains("core.perf.Perf.override_fidelity needs 0.0 through 1.0"),
+        "range error should be in Jet runtime terms, got {stderr:?}"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn option_zip_and_lift2_combinators() {
     // D-HOLE1: `.zip`/`Option.lift2` — both present -> a present result; either
     // absent -> `None`. No general "hole" type; these are plain library combinators

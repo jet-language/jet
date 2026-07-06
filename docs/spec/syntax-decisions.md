@@ -1276,7 +1276,11 @@ HTTP/1.1+2+WebSocket
 `core.science.measurement` (D-HONESTNUM1, unbuilt). Opt-in `Gc<T>` module
 for cyclic data (D-OPTGC1, gated on its I6 ballot). Approximate/sketch algos
 are libraries (D-APPROX1); parallelism stays explicit `par_*`
-(D-AUTOPAR1); adaptive fidelity is a manual knob (D-ADAPTFID1).
+(D-AUTOPAR1); adaptive fidelity is a manual runtime-global knob:
+`core.perf.Perf.fidelity()`, `default_fidelity()`, `override_fidelity(v)?`,
+and `reset_fidelity()` (D-FIDELITY-API1=A). No automatic adaptive scheduler or
+platform-signal providers ship in Epoch 3 (D-ADAPTRT1=C,
+D-ADAPT-PROVIDER1=A).
 
 **Reactive & UI stack** *(D-REACT1, D-REACTCORE1, D-SIGNAL1, D-RENDERTGT1/2,
 D-UITREE1, D-STYLESHAPE1, D-MOTIONTIME1, D-LAYOUT1, D-OWNCOMP1, D-A11Y1,

@@ -1183,6 +1183,18 @@ impl<'a> Checker<'a> {
             if self.registry.method(type_name, method).is_some() {
                 return self.check_static_method(type_name, method, span, args);
             }
+            // D-FIDELITY-API1=A: `core.perf.Perf` static API. `use core.perf as Perf`
+            // remains accepted as the existing module-alias path.
+            if type_name == "Perf" && !self.registry.contains("Perf") {
+                return self.infer_core_call(
+                    "core.perf",
+                    method,
+                    receiver.span(),
+                    span,
+                    type_args,
+                    args,
+                );
+            }
             if let Some(ty) = builtin_type_from_ident(type_name) {
                 if let Some(ret) = Collections::builtin_method_return(&ty, method, args.len(), true)
                 {

@@ -1,8 +1,11 @@
 use jet::Comptime::Build::{
-    ActionCache, ActionSpec, BuildCapability, BuildContext, BuildError, BuildProvenance,
-    LinkerIdentity, LockRecord, ProbeKind, ProbeSpec, ProvenanceSource, ReproducibilityClass,
-    SdkIdentity, SigningIdentitySpec, TargetKind, TargetSpec, ToolchainRole, ToolchainSpec,
+    ActionCache, ActionCacheProvenance, ActionCacheStatus, ActionOutcome, ActionSpec,
+    BuildCapability, BuildContext, BuildError, BuildProvenance, CacheHitReason, CacheMissReason,
+    LinkerIdentity, LocalCas, LockRecord, ProbeKind, ProbeSpec, ProvenanceSource,
+    RemoteActionRequest, RemoteCachePolicy, RemoteDeniedReason, ReproducibilityClass, SdkIdentity,
+    SigningIdentitySpec, TargetKind, TargetSpec, ToolchainRole, ToolchainSpec,
 };
+use std::fs;
 
 #[test]
 fn registers_typed_targets_and_default_plan() {
@@ -435,4 +438,407 @@ fn action_outputs_have_one_owner_in_the_plan() {
             second_action: "generate-b".to_string(),
         }
     );
+}
+
+#[test]
+fn action_keys_are_deterministic_and_cover_cache_contract() {
+    fn key(
+        argv: &[&str],
+        env_value: &str,
+        input: &str,
+        output: &str,
+        cap: BuildCapability,
+        target_triple: &str,
+        probe_package: &str,
+        signer_label: &str,
+        label_value: &str,
+    ) -> String {
+        let mut b = BuildContext::new();
+        let toolchain = b
+            .toolchain(
+                "tc",
+                ToolchainSpec::target(
+                    target_triple,
+                    BuildProvenance::jetpack_dependency(
+                        format!("toolchain.{target_triple}#2026.07"),
+                        LockRecord::new(format!("toolchain:{target_triple}"), "sha256:tc"),
+                    ),
+                ),
+            )
+            .unwrap();
+        let probe = b
+            .probe(
+                "probe",
+                ProbeSpec::pkg_config(probe_package)
+                    .with_reproducibility(ReproducibilityClass::Reproducible)
+                    .with_provenance(BuildProvenance::jetpack_dependency(
+                        format!("pkg-config:{probe_package}#1"),
+                        LockRecord::new(format!("probe:{probe_package}"), "sha256:probe"),
+                    )),
+            )
+            .unwrap();
+        let signer = b
+            .signing_identity(
+                "signer",
+                SigningIdentitySpec::new(
+                    signer_label,
+                    BuildProvenance::user_declared(
+                        format!("keychain:{signer_label}"),
+                        Some(LockRecord::new("signing:release", "sha256:signer")),
+                    ),
+                ),
+            )
+            .unwrap();
+        let action = b
+            .action(
+                "compile",
+                ActionSpec::cached(argv.iter().copied())
+                    .with_inputs([input])
+                    .with_outputs([output])
+                    .with_env("MODE", env_value)
+                    .with_cap(cap)
+                    .with_toolchain(toolchain)
+                    .with_probe(probe)
+                    .with_signing_identity(signer)
+                    .with_label("profile", label_value),
+            )
+            .unwrap();
+        let plan = b.plan().unwrap();
+        plan.action_key(action).unwrap().as_str().to_string()
+    }
+
+    let base = key(
+        &["jetc", "--emit", "obj"],
+        "release",
+        "src/main.jet",
+        "build/main.o",
+        BuildCapability::Exec,
+        "x86_64-linux",
+        "sqlite3",
+        "developer-id:ACME",
+        "release",
+    );
+    assert_eq!(
+        base,
+        key(
+            &["jetc", "--emit", "obj"],
+            "release",
+            "src/main.jet",
+            "build/main.o",
+            BuildCapability::Exec,
+            "x86_64-linux",
+            "sqlite3",
+            "developer-id:ACME",
+            "release",
+        )
+    );
+    assert_ne!(
+        base,
+        key(
+            &["jetc", "--emit", "asm"],
+            "release",
+            "src/main.jet",
+            "build/main.o",
+            BuildCapability::Exec,
+            "x86_64-linux",
+            "sqlite3",
+            "developer-id:ACME",
+            "release",
+        )
+    );
+    assert_ne!(
+        base,
+        key(
+            &["jetc", "--emit", "obj"],
+            "debug",
+            "src/main.jet",
+            "build/main.o",
+            BuildCapability::Exec,
+            "x86_64-linux",
+            "sqlite3",
+            "developer-id:ACME",
+            "release",
+        )
+    );
+    assert_ne!(
+        base,
+        key(
+            &["jetc", "--emit", "obj"],
+            "release",
+            "src/lib.jet",
+            "build/main.o",
+            BuildCapability::Exec,
+            "x86_64-linux",
+            "sqlite3",
+            "developer-id:ACME",
+            "release",
+        )
+    );
+    assert_ne!(
+        base,
+        key(
+            &["jetc", "--emit", "obj"],
+            "release",
+            "src/main.jet",
+            "build/lib.o",
+            BuildCapability::Exec,
+            "x86_64-linux",
+            "sqlite3",
+            "developer-id:ACME",
+            "release",
+        )
+    );
+    assert_ne!(
+        base,
+        key(
+            &["jetc", "--emit", "obj"],
+            "release",
+            "src/main.jet",
+            "build/main.o",
+            BuildCapability::Fs,
+            "x86_64-linux",
+            "sqlite3",
+            "developer-id:ACME",
+            "release",
+        )
+    );
+    assert_ne!(
+        base,
+        key(
+            &["jetc", "--emit", "obj"],
+            "release",
+            "src/main.jet",
+            "build/main.o",
+            BuildCapability::Exec,
+            "aarch64-linux-musl",
+            "sqlite3",
+            "developer-id:ACME",
+            "release",
+        )
+    );
+    assert_ne!(
+        base,
+        key(
+            &["jetc", "--emit", "obj"],
+            "release",
+            "src/main.jet",
+            "build/main.o",
+            BuildCapability::Exec,
+            "x86_64-linux",
+            "openssl",
+            "developer-id:ACME",
+            "release",
+        )
+    );
+    assert_ne!(
+        base,
+        key(
+            &["jetc", "--emit", "obj"],
+            "release",
+            "src/main.jet",
+            "build/main.o",
+            BuildCapability::Exec,
+            "x86_64-linux",
+            "sqlite3",
+            "developer-id:OTHER",
+            "release",
+        )
+    );
+    assert_ne!(
+        base,
+        key(
+            &["jetc", "--emit", "obj"],
+            "release",
+            "src/main.jet",
+            "build/main.o",
+            BuildCapability::Exec,
+            "x86_64-linux",
+            "sqlite3",
+            "developer-id:ACME",
+            "coverage",
+        )
+    );
+}
+
+#[test]
+fn local_cas_round_trips_blobs_and_restores_declared_outputs() {
+    let root = std::env::temp_dir().join(format!(
+        "jet_build_cache_{}_{}",
+        std::process::id(),
+        "restore"
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(root.join("work/build")).unwrap();
+
+    let cas = LocalCas::new(root.join("cache"));
+    let digest = cas.put_blob(b"hello cache").unwrap();
+    assert_eq!(cas.read_blob(&digest).unwrap(), b"hello cache");
+
+    let mut b = BuildContext::new();
+    let action = b
+        .action(
+            "emit",
+            ActionSpec::cached(["jetc", "src/main.jet"]).with_outputs(["build/out.txt"]),
+        )
+        .unwrap();
+    let plan = b.plan().unwrap();
+    let key = plan.action_key(action).unwrap();
+    fs::write(root.join("work/build/out.txt"), "compiled bytes").unwrap();
+
+    let record = cas
+        .capture_declared_outputs(
+            &root.join("work"),
+            plan.action(action).unwrap(),
+            key,
+            ActionOutcome::Succeeded { exit_code: 0 },
+            ActionCacheProvenance::miss(CacheMissReason::NoLocalActionRecord),
+        )
+        .unwrap();
+    fs::write(root.join("work/build/out.txt"), "stale").unwrap();
+
+    cas.restore_declared_outputs(&root.join("work"), &record)
+        .unwrap();
+    assert_eq!(
+        fs::read_to_string(root.join("work/build/out.txt")).unwrap(),
+        "compiled bytes"
+    );
+    assert_eq!(record.outputs[0].byte_len, "compiled bytes".len() as u64);
+
+    let hex = digest.as_str().strip_prefix("sha256:").unwrap();
+    let blob = cas
+        .root()
+        .join("blobs")
+        .join("sha256")
+        .join(&hex[..2])
+        .join(&hex[2..]);
+    fs::write(&blob, "corrupt").unwrap();
+    let err = cas.read_blob(&digest).unwrap_err();
+    assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+    cas.put_blob(b"hello cache").unwrap();
+    assert_eq!(cas.read_blob(&digest).unwrap(), b"hello cache");
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn action_key_changes_when_declared_input_contents_change() {
+    let root = std::env::temp_dir().join(format!(
+        "jet_build_cache_{}_{}",
+        std::process::id(),
+        "inputs"
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(root.join("work/src")).unwrap();
+
+    let cas = LocalCas::new(root.join("cache"));
+    let mut b = BuildContext::new();
+    let action = b
+        .action(
+            "compile",
+            ActionSpec::cached(["jetc", "src/main.jet"])
+                .with_inputs(["src/main.jet"])
+                .with_outputs(["build/main.o"]),
+        )
+        .unwrap();
+    let plan = b.plan().unwrap();
+    let action_ref = plan.action(action).unwrap();
+
+    fs::write(root.join("work/src/main.jet"), "fn run() { print(1) }").unwrap();
+    let first_inputs = cas
+        .snapshot_declared_inputs(&root.join("work"), action_ref)
+        .unwrap();
+    let first = plan.action_key_with_inputs(action, &first_inputs).unwrap();
+
+    fs::write(root.join("work/src/main.jet"), "fn run() { print(2) }").unwrap();
+    let second_inputs = cas
+        .snapshot_declared_inputs(&root.join("work"), action_ref)
+        .unwrap();
+    let second = plan.action_key_with_inputs(action, &second_inputs).unwrap();
+
+    assert_ne!(first, second);
+    assert_eq!(first_inputs[0].path.as_str(), "src/main.jet");
+    assert_ne!(first_inputs[0].digest, second_inputs[0].digest);
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[cfg(unix)]
+#[test]
+fn cache_restore_replaces_output_symlink_instead_of_following_it() {
+    use std::os::unix::fs::symlink;
+
+    let root = std::env::temp_dir().join(format!(
+        "jet_build_cache_{}_{}",
+        std::process::id(),
+        "symlink"
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(root.join("work/build")).unwrap();
+    fs::write(root.join("outside.txt"), "outside").unwrap();
+
+    let cas = LocalCas::new(root.join("cache"));
+    let mut b = BuildContext::new();
+    let action = b
+        .action(
+            "emit",
+            ActionSpec::cached(["jetc", "src/main.jet"]).with_outputs(["build/out.txt"]),
+        )
+        .unwrap();
+    let plan = b.plan().unwrap();
+    let key = plan.action_key(action).unwrap();
+    fs::write(root.join("work/build/out.txt"), "compiled bytes").unwrap();
+    let record = cas
+        .capture_declared_outputs(
+            &root.join("work"),
+            plan.action(action).unwrap(),
+            key,
+            ActionOutcome::Succeeded { exit_code: 0 },
+            ActionCacheProvenance::miss(CacheMissReason::NoLocalActionRecord),
+        )
+        .unwrap();
+
+    fs::remove_file(root.join("work/build/out.txt")).unwrap();
+    symlink(root.join("outside.txt"), root.join("work/build/out.txt")).unwrap();
+    cas.restore_declared_outputs(&root.join("work"), &record)
+        .unwrap();
+
+    assert_eq!(
+        fs::read_to_string(root.join("outside.txt")).unwrap(),
+        "outside"
+    );
+    assert_eq!(
+        fs::read_to_string(root.join("work/build/out.txt")).unwrap(),
+        "compiled bytes"
+    );
+    assert!(!fs::symlink_metadata(root.join("work/build/out.txt"))
+        .unwrap()
+        .file_type()
+        .is_symlink());
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn cache_provenance_records_hit_miss_and_remote_denial() {
+    let hit = ActionCacheProvenance::hit(CacheHitReason::LocalActionRecordMatched);
+    assert_eq!(
+        hit.status,
+        ActionCacheStatus::Hit(CacheHitReason::LocalActionRecordMatched)
+    );
+    let miss = ActionCacheProvenance::miss(CacheMissReason::ActionKeyChanged);
+    assert_eq!(
+        miss.status,
+        ActionCacheStatus::Miss(CacheMissReason::ActionKeyChanged)
+    );
+
+    let policy = RemoteCachePolicy::disabled_until_grant_and_sandbox_proof();
+    for request in [
+        RemoteActionRequest::CacheRead,
+        RemoteActionRequest::CacheWrite,
+        RemoteActionRequest::Execute,
+    ] {
+        let denial = policy.check(request).unwrap_err();
+        assert_eq!(denial.request, request);
+        assert_eq!(
+            denial.reason,
+            RemoteDeniedReason::MissingGrantAndSandboxProof
+        );
+    }
 }

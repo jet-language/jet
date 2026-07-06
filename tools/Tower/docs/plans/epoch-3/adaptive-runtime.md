@@ -9,12 +9,16 @@ This doc keeps the full runtime deferred and gives a narrow implementation path 
 ## Current law
 
 - D-ADAPTRT1=C: full adaptive runtime is declined/deferred as niche; apps handle adaptation ad hoc or through platform APIs.
-- D-ADAPTFID1=A: a library fidelity signal with read and manual override is ratified.
+- D-FIDELITY-API1=A: `core.perf.Perf` is a runtime-global signal with
+  `fidelity()`, `default_fidelity()`, `override_fidelity(v)?`, and
+  `reset_fidelity()`.
+- D-ADAPT-PROVIDER1=A: no platform providers in Epoch 3.
 - D-CARBON1=C: carbon/battery policy folds into adaptive runtime later; no standalone carbon feature.
 - I8 rejects a second invisible scheduling/policy model. Automatic runtime degradation would be a second mechanism unless separately ratified.
 - Beginner defaults must not change program behavior behind the user's back.
 
-Exact module/API names for the fidelity signal and any platform signal exposure are not settled here.
+Exact fidelity API names are settled. Platform signal providers remain research
+notes unless a future decision promotes them.
 
 ## Vertical slices
 
@@ -34,15 +38,13 @@ Exact module/API names for the fidelity signal and any platform signal exposure 
 
 ## Dependency order
 
-1. Ratify exact API surface for the fidelity signal.
+1. Ratify exact API surface for the fidelity signal. Done: D-FIDELITY-API1=A.
 2. Implement read, override, reset, and range validation.
 3. Add one explicit consumer in a domain that already needs it, likely `core.game` budgets or plotting quality.
 4. Record platform-signal provider requirements as future ballots, not implementation.
 
 ## Owner ballots needed
 
-- D-FIDELITY-API1: exact module path, type, read/override/reset names, and whether the value is process-local, task-local, or runtime-global.
-- D-ADAPT-PROVIDER1: any future platform signal provider surface for battery, thermal, load, network, or carbon.
 - D-ADAPT-POLICY1: any automatic degradation or scheduling policy; not allowed by current law.
 
 ## Adversarial tradeoffs

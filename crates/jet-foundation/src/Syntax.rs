@@ -3625,8 +3625,8 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     // D-PENDING1=B (ratified 2026-06-26): Loadable<T, E> — async UI state machine
     // (Idle / Loading / Loaded(T) / Failed(E)). Pure stdlib enum; no external crates.
     "core.async.loadable",
-    // D-ADAPTFID1=A (ratified 2026-06-26): Perf.fidelity() / Perf.set_fidelity() —
-    // adaptive quality/perf knob backed by a global atomic f32.
+    // D-FIDELITY-API1=A (ratified 2026-07-06): core.perf.Perf static API —
+    // runtime-global quality/perf knob, with manual override/reset only.
     "core.perf",
     // D-RENDERTGT1=A + D-RENDERTGT2=A (c133 M1): render-target backend trait seam.
     "core.ui",

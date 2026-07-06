@@ -1,20 +1,18 @@
-// D-ADAPTFID1=A: Perf.fidelity() — adaptive quality/perf knob.
+// D-FIDELITY-API1=A: Perf fidelity signal — explicit app-read quality/perf knob.
 use core.perf as Perf
 
-fn run() {
-    // Default: full quality (1.0).
-    f :: Perf.fidelity()
-    print(f)
-    // App degrades at half quality.
-    Perf.set_fidelity(0.5)
-    f2 :: Perf.fidelity()
-    print(f2)
-    // Low quality path.
-    Perf.set_fidelity(0.1)
+fn run() -> Void ? {
+    print(Perf.default_fidelity())
+    print(Perf.fidelity())
+
+    Perf.override_fidelity(0.5)?
+    print(Perf.fidelity())
+
+    Perf.override_fidelity(0.1)?
     if Perf.fidelity() < 0.5 {
         print("low quality mode")
     }
-    // Restore full quality.
-    Perf.set_fidelity(1.0)
+
+    Perf.reset_fidelity()
     print(Perf.fidelity())
 }

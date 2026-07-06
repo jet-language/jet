@@ -12,7 +12,8 @@ pub use Build::{
     build_index, build_symbol_db, HoverEntry, InlayHint, SymDef, SymKind, SymRef, SymbolDB,
 };
 pub use Types::{
-    CallEdge, EffectFact, SemIndex, SourceSpan, SymbolDef, SymbolKind, SymbolRef, SCHEMA_VERSION,
+    CallEdge, EffectFact, SemIndex, SourceSpan, StructuralAudit, SymbolDef, SymbolKind, SymbolRef,
+    SCHEMA_VERSION,
 };
 
 use jet_foundation::Diagnostics::Diagnostic;
@@ -70,7 +71,7 @@ mod tests {
 
     #[test]
     fn schema_version_constant() {
-        assert_eq!(SCHEMA_VERSION, 1);
+        assert_eq!(SCHEMA_VERSION, 2);
     }
 
     #[test]
@@ -103,8 +104,9 @@ mod tests {
         let path = fixture("basics/hello.jet");
         let idx = open(&path).expect("hello example should index");
         let json = idx.to_json();
-        assert!(json.contains("\"schema_version\":1"));
+        assert!(json.contains("\"schema_version\":2"));
         assert!(json.contains("\"definitions\""));
+        assert!(json.contains("\"identity\""));
         assert!(json.contains("\"references\""));
         assert!(json.contains("\"calls\""));
         assert!(json.contains("\"effects\""));

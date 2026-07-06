@@ -568,6 +568,37 @@ Every draw — including `bool`/`pick`/`shuffle` — needs a `&Rng` receiver, an
 
 ---
 
+### `core.perf` — fidelity signal
+
+`core.perf.Perf` is one runtime-global quality/performance signal. Runtime does
+not skip work, reschedule tasks, or change cleanup policy. App code reads the
+signal and chooses behavior.
+
+```jet
+use core.perf as Perf
+
+fn run() -> Void ? {
+    if Perf.fidelity() < 0.5 {
+        print("low quality mode")
+    }
+    Perf.override_fidelity(0.25)?   // tests or explicit app policy
+    Perf.reset_fidelity()
+}
+```
+
+| Function | Returns | What it does |
+|----------|---------|--------------|
+| `fidelity()` | `Float` | Current value, from `0.0` lowest quality through `1.0` full quality |
+| `default_fidelity()` | `Float` | The default value, `1.0` |
+| `override_fidelity(v)` | `Void ? String` | Set the process-global value; rejects values outside `0.0..1.0` |
+| `reset_fidelity()` | nothing | Restore `default_fidelity()` |
+
+Platform battery, thermal, network, load, and carbon providers do not ship in
+Epoch 3 (D-ADAPT-PROVIDER1=A). Automatic adaptive scheduling is declined
+(D-ADAPTRT1=C).
+
+---
+
 ### `core.time` — clock and delays
 
 Time in Core is **Unix milliseconds** only — no dates, time zones, or

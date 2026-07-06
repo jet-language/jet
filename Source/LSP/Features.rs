@@ -54,6 +54,7 @@ pub(crate) fn compute_hover(
         let name = find_ident_at(tokens, offset)?;
         if let Some(def) = db.defs.iter().find(|d| d.name == name) {
             match &def.kind {
+                SymKind::Module => format!("module `{}`", name),
                 SymKind::Function { params, ret } => {
                     let ps: Vec<String> = params
                         .iter()

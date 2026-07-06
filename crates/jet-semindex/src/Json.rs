@@ -36,6 +36,7 @@ fn json_span_raw(span: Span) -> String {
 
 fn json_kind(kind: &SymbolKind) -> String {
     match kind {
+        SymbolKind::Module => "{\"kind\":\"module\"}".to_string(),
         SymbolKind::Function { params, ret } => {
             let ps: Vec<String> = params
                 .iter()
@@ -91,7 +92,8 @@ fn json_kind(kind: &SymbolKind) -> String {
 
 fn json_def(d: &SymbolDef) -> String {
     format!(
-        "{{\"name\":{},\"module\":{},\"span\":{},\"detail\":{}}}",
+        "{{\"identity\":{},\"name\":{},\"module\":{},\"span\":{},\"detail\":{}}}",
+        json_str(&d.identity),
         json_str(&d.name),
         json_str(&d.module_path),
         json_span(d.def_span),
@@ -100,10 +102,15 @@ fn json_def(d: &SymbolDef) -> String {
 }
 
 fn json_ref(r: &SymbolRef) -> String {
+    let scope_json = match &r.scope_identity {
+        Some(scope) => json_str(scope),
+        None => "null".to_string(),
+    };
     format!(
-        "{{\"name\":{},\"module\":{},\"span\":{}}}",
+        "{{\"name\":{},\"module\":{},\"scope_identity\":{},\"span\":{}}}",
         json_str(&r.name),
         json_str(&r.module_path),
+        scope_json,
         json_span(r.span)
     )
 }
@@ -153,6 +160,7 @@ impl SemIndex {
 #[allow(dead_code)]
 pub(crate) fn lsp_sym_kind_json(kind: &SymKind) -> String {
     match kind {
+        SymKind::Module => "{\"kind\":\"module\"}".to_string(),
         SymKind::Function { params, ret } => {
             let ps: Vec<String> = params
                 .iter()
@@ -223,6 +231,7 @@ pub(crate) fn lsp_sym_kind_json(kind: &SymKind) -> String {
 pub(crate) fn convert_defs(defs: &[SymDef]) -> Vec<SymbolDef> {
     defs.iter()
         .map(|d| SymbolDef {
+            identity: d.identity.clone(),
             name: d.name.clone(),
             module_path: d.module_path.clone(),
             def_span: d.def_span.into(),
@@ -236,6 +245,7 @@ pub(crate) fn convert_refs(refs: &[SymRef]) -> Vec<SymbolRef> {
         .map(|r| SymbolRef {
             name: r.name.clone(),
             module_path: r.module_path.clone(),
+            scope_identity: r.scope_identity.clone(),
             span: r.span.into(),
         })
         .collect()
@@ -243,6 +253,7 @@ pub(crate) fn convert_refs(refs: &[SymRef]) -> Vec<SymbolRef> {
 
 fn convert_kind(kind: &SymKind) -> SymbolKind {
     match kind {
+        SymKind::Module => SymbolKind::Module,
         SymKind::Function { params, ret } => SymbolKind::Function {
             params: params.iter().map(|(n, t)| (n.clone(), t.name())).collect(),
             ret: ret.as_ref().map(|t| t.name()),

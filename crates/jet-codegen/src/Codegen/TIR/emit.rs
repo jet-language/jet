@@ -3706,9 +3706,13 @@ pub(crate) fn emit_tir_core_call(
         ("core.io", "eprint") => format!("eprintln!(\"{{}}\", ({}).jet_show())", arg(0)),
         // D-TERM1 (ratified 2026-06-22): terminal direct-input.
         ("core.term", "read_key") => format!("{}()", helper("jet_term_read_key")),
-        // D-ADAPTFID1=A: adaptive fidelity signal — global atomic f32.
+        // D-FIDELITY-API1=A: runtime-global fidelity signal.
         ("core.perf", "fidelity") => format!("jet_perf_fidelity()"),
-        ("core.perf", "set_fidelity") => format!("jet_perf_set_fidelity({})", arg(0)),
+        ("core.perf", "default_fidelity") => format!("jet_perf_default_fidelity()"),
+        ("core.perf", "override_fidelity") => {
+            format!("jet_perf_override_fidelity({})", arg(0))
+        }
+        ("core.perf", "reset_fidelity") => format!("jet_perf_reset_fidelity()"),
         // D-RENDERTGT2=A (c133 M1): UI backend seam constructors.
         ("core.ui", "null_backend") => format!("{}jet_ui_null()", cx.root_prefix),
         ("core.ui", "tui_backend") => format!("{}jet_ui_tui()", cx.root_prefix),

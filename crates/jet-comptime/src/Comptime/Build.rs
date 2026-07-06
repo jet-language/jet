@@ -4,7 +4,11 @@
 //! router will call. It intentionally contains no user-facing syntax and no
 //! scheduling/cache execution policy.
 
+use crate::SHA256;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::fs;
+use std::io;
+use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static NEXT_CONTEXT: AtomicU64 = AtomicU64::new(1);
@@ -271,6 +275,9 @@ pub struct ActionSpec {
     pub caps: BTreeSet<BuildCapability>,
     pub cache: ActionCache,
     pub toolchain: Option<ToolchainHandle>,
+    pub probes: Vec<ProbeHandle>,
+    pub signing_identity: Option<SigningIdentityHandle>,
+    pub labels: BTreeMap<String, String>,
 }
 
 impl ActionSpec {
@@ -287,6 +294,9 @@ impl ActionSpec {
             caps: BTreeSet::new(),
             cache: ActionCache::Cached,
             toolchain: None,
+            probes: Vec::new(),
+            signing_identity: None,
+            labels: BTreeMap::new(),
         }
     }
 
@@ -335,6 +345,21 @@ impl ActionSpec {
         self.toolchain = Some(toolchain);
         self
     }
+
+    pub fn with_probe(mut self, probe: ProbeHandle) -> Self {
+        self.probes.push(probe);
+        self
+    }
+
+    pub fn with_signing_identity(mut self, identity: SigningIdentityHandle) -> Self {
+        self.signing_identity = Some(identity);
+        self
+    }
+
+    pub fn with_label(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.labels.insert(key.into(), value.into());
+        self
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -348,6 +373,269 @@ pub struct BuildAction {
     pub caps: BTreeSet<BuildCapability>,
     pub cache: ActionCache,
     pub toolchain: ToolchainHandle,
+    pub probes: Vec<ProbeHandle>,
+    pub signing_identity: Option<SigningIdentityHandle>,
+    pub labels: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ActionKey(String);
+
+impl ActionKey {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ContentDigest(String);
+
+impl ContentDigest {
+    pub fn from_bytes(bytes: &[u8]) -> Self {
+        ContentDigest(format!("sha256:{}", SHA256::sha256_hex(bytes)))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActionOutcome {
+    Succeeded { exit_code: i32 },
+    Failed { exit_code: i32 },
+    RestoredFromCache,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CacheHitReason {
+    LocalActionRecordMatched,
+    DeclaredOutputsRestored,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CacheMissReason {
+    NoLocalActionRecord,
+    ActionKeyChanged,
+    DeclaredOutputMissing,
+    RemoteDenied,
+    UncachedAction,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActionCacheStatus {
+    Hit(CacheHitReason),
+    Miss(CacheMissReason),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActionCacheProvenance {
+    pub status: ActionCacheStatus,
+    pub remote_policy: RemoteCachePolicy,
+}
+
+impl ActionCacheProvenance {
+    pub fn hit(reason: CacheHitReason) -> Self {
+        ActionCacheProvenance {
+            status: ActionCacheStatus::Hit(reason),
+            remote_policy: RemoteCachePolicy::disabled_until_grant_and_sandbox_proof(),
+        }
+    }
+
+    pub fn miss(reason: CacheMissReason) -> Self {
+        ActionCacheProvenance {
+            status: ActionCacheStatus::Miss(reason),
+            remote_policy: RemoteCachePolicy::disabled_until_grant_and_sandbox_proof(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RemoteActionRequest {
+    CacheRead,
+    CacheWrite,
+    Execute,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RemoteDeniedReason {
+    MissingGrantAndSandboxProof,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RemoteCacheDenied {
+    pub request: RemoteActionRequest,
+    pub reason: RemoteDeniedReason,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RemoteCachePolicy {
+    DisabledUntilGrantAndSandboxProof,
+}
+
+impl RemoteCachePolicy {
+    pub fn disabled_until_grant_and_sandbox_proof() -> Self {
+        RemoteCachePolicy::DisabledUntilGrantAndSandboxProof
+    }
+
+    pub fn check(self, request: RemoteActionRequest) -> Result<(), RemoteCacheDenied> {
+        match self {
+            RemoteCachePolicy::DisabledUntilGrantAndSandboxProof => Err(RemoteCacheDenied {
+                request,
+                reason: RemoteDeniedReason::MissingGrantAndSandboxProof,
+            }),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActionOutputRecord {
+    pub path: BuildPath,
+    pub digest: ContentDigest,
+    pub byte_len: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActionInputSnapshot {
+    pub path: BuildPath,
+    pub digest: ContentDigest,
+    pub byte_len: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActionResultRecord {
+    pub key: ActionKey,
+    pub outcome: ActionOutcome,
+    pub outputs: Vec<ActionOutputRecord>,
+    pub provenance: ActionCacheProvenance,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocalCas {
+    root: PathBuf,
+}
+
+impl LocalCas {
+    pub fn new(root: impl Into<PathBuf>) -> Self {
+        LocalCas { root: root.into() }
+    }
+
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    pub fn put_blob(&self, bytes: &[u8]) -> io::Result<ContentDigest> {
+        let digest = ContentDigest::from_bytes(bytes);
+        let path = self.blob_path(&digest);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        if path.exists() {
+            let existing = fs::read(&path)?;
+            if ContentDigest::from_bytes(&existing) != digest {
+                fs::write(path, bytes)?;
+            }
+        } else {
+            fs::write(path, bytes)?;
+        }
+        Ok(digest)
+    }
+
+    pub fn read_blob(&self, digest: &ContentDigest) -> io::Result<Vec<u8>> {
+        let bytes = fs::read(self.blob_path(digest))?;
+        let actual = ContentDigest::from_bytes(&bytes);
+        if &actual != digest {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("CAS blob digest mismatch: expected {}", digest.as_str()),
+            ));
+        }
+        Ok(bytes)
+    }
+
+    pub fn snapshot_declared_inputs(
+        &self,
+        base: &Path,
+        action: &BuildAction,
+    ) -> io::Result<Vec<ActionInputSnapshot>> {
+        let mut inputs = Vec::new();
+        for input in &action.inputs {
+            let path = resolve_under(base, input.as_str())?;
+            let bytes = fs::read(path)?;
+            let digest = self.put_blob(&bytes)?;
+            inputs.push(ActionInputSnapshot {
+                path: input.clone(),
+                digest,
+                byte_len: bytes.len() as u64,
+            });
+        }
+        Ok(inputs)
+    }
+
+    pub fn capture_declared_outputs(
+        &self,
+        base: &Path,
+        action: &BuildAction,
+        key: ActionKey,
+        outcome: ActionOutcome,
+        provenance: ActionCacheProvenance,
+    ) -> io::Result<ActionResultRecord> {
+        let mut outputs = Vec::new();
+        for output in &action.outputs {
+            let path = resolve_under(base, output.as_str())?;
+            let bytes = fs::read(path)?;
+            let digest = self.put_blob(&bytes)?;
+            outputs.push(ActionOutputRecord {
+                path: output.clone(),
+                digest,
+                byte_len: bytes.len() as u64,
+            });
+        }
+        Ok(ActionResultRecord {
+            key,
+            outcome,
+            outputs,
+            provenance,
+        })
+    }
+
+    pub fn restore_declared_outputs(
+        &self,
+        base: &Path,
+        record: &ActionResultRecord,
+    ) -> io::Result<()> {
+        for output in &record.outputs {
+            let path = resolve_under(base, output.path.as_str())?;
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            let bytes = self.read_blob(&output.digest)?;
+            let tmp = path.with_extension(format!("jet-cache-restore-{}.tmp", std::process::id()));
+            fs::write(&tmp, bytes)?;
+            match fs::symlink_metadata(&path) {
+                Ok(meta) if meta.file_type().is_dir() => {
+                    fs::remove_dir_all(&path)?;
+                }
+                Ok(_) => {
+                    fs::remove_file(&path)?;
+                }
+                Err(err) if err.kind() == io::ErrorKind::NotFound => {}
+                Err(err) => return Err(err),
+            }
+            fs::rename(tmp, path)?;
+        }
+        Ok(())
+    }
+
+    fn blob_path(&self, digest: &ContentDigest) -> PathBuf {
+        let hex = digest.0.strip_prefix("sha256:").unwrap_or(digest.as_str());
+        let (prefix, rest) = hex.split_at(2);
+        self.root
+            .join("blobs")
+            .join("sha256")
+            .join(prefix)
+            .join(rest)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -709,6 +997,25 @@ impl BuildPlan {
         self.actions.get(action.id.0)
     }
 
+    pub fn action_key(&self, action: ActionHandle) -> Result<ActionKey, BuildError> {
+        self.action_key_with_inputs(action, &[])
+    }
+
+    pub fn action_key_with_inputs(
+        &self,
+        action: ActionHandle,
+        inputs: &[ActionInputSnapshot],
+    ) -> Result<ActionKey, BuildError> {
+        if action.context != self.context {
+            return Err(BuildError::UnknownAction(action.id));
+        }
+        let action = self
+            .actions
+            .get(action.id.0)
+            .ok_or(BuildError::UnknownAction(action.id))?;
+        Ok(canonical_action_key(self, action, inputs))
+    }
+
     pub fn toolchain(&self, toolchain: ToolchainHandle) -> Option<&BuildToolchain> {
         if toolchain.context != self.context {
             return None;
@@ -1043,6 +1350,9 @@ impl BuildContext {
             caps: spec.caps,
             cache: spec.cache,
             toolchain,
+            probes: spec.probes,
+            signing_identity: spec.signing_identity,
+            labels: spec.labels,
         });
         Ok(ActionHandle {
             id,
@@ -1130,6 +1440,12 @@ impl BuildContext {
         validate_action(name, spec)?;
         if let Some(toolchain) = spec.toolchain {
             self.check_toolchain_ref(toolchain)?;
+        }
+        for probe in &spec.probes {
+            self.check_probe_ref(*probe)?;
+        }
+        if let Some(identity) = spec.signing_identity {
+            self.check_signing_identity_ref(identity)?;
         }
         Ok(())
     }
@@ -1237,6 +1553,238 @@ pub enum BuildError {
     UnknownToolchain(ToolchainId),
     UnknownSigningIdentity(SigningIdentityId),
     UnknownProbe(ProbeId),
+}
+
+fn canonical_action_key(
+    plan: &BuildPlan,
+    action: &BuildAction,
+    inputs: &[ActionInputSnapshot],
+) -> ActionKey {
+    let mut w = KeyWriter::new();
+    w.str("jet.action-key.v1");
+    w.str("argv");
+    w.vec_str(action.argv.iter().map(String::as_str));
+    w.str("env");
+    w.map_str(&action.env);
+    w.str("inputs");
+    w.vec_str(action.inputs.iter().map(BuildPath::as_str));
+    w.str("input-snapshots");
+    let mut snapshots = inputs.iter().collect::<Vec<_>>();
+    snapshots.sort_by(|a, b| a.path.cmp(&b.path));
+    w.bytes
+        .extend_from_slice(&(snapshots.len() as u64).to_be_bytes());
+    for snapshot in snapshots {
+        w.str(snapshot.path.as_str());
+        w.str(snapshot.digest.as_str());
+        w.bytes.extend_from_slice(&snapshot.byte_len.to_be_bytes());
+    }
+    w.str("outputs");
+    w.vec_str(action.outputs.iter().map(BuildPath::as_str));
+    w.str("caps");
+    for cap in &action.caps {
+        encode_capability(&mut w, cap);
+    }
+    w.str("cache");
+    encode_action_cache(&mut w, action.cache);
+    w.str("toolchain");
+    encode_toolchain(&mut w, &plan.toolchains[action.toolchain.id.0]);
+    w.str("probes");
+    for probe in &action.probes {
+        encode_probe(&mut w, plan, &plan.probes[probe.id.0]);
+    }
+    w.str("signing");
+    match action.signing_identity {
+        Some(identity) => {
+            w.bool(true);
+            encode_signing_identity(&mut w, &plan.signing_identities[identity.id.0]);
+        }
+        None => w.bool(false),
+    }
+    w.str("labels");
+    w.map_str(&action.labels);
+    ActionKey(format!("act-sha256:{}", SHA256::sha256_hex(&w.bytes)))
+}
+
+fn encode_action_cache(w: &mut KeyWriter, cache: ActionCache) {
+    match cache {
+        ActionCache::Cached => w.str("cached"),
+        ActionCache::UncachedPhony => w.str("uncached-phony"),
+    }
+}
+
+fn encode_capability(w: &mut KeyWriter, cap: &BuildCapability) {
+    match cap {
+        BuildCapability::Fs => w.str("fs"),
+        BuildCapability::Exec => w.str("exec"),
+        BuildCapability::Net => w.str("net"),
+        BuildCapability::Env => w.str("env"),
+        BuildCapability::Toolchain => w.str("toolchain"),
+        BuildCapability::Cache => w.str("cache"),
+        BuildCapability::Custom(value) => {
+            w.str("custom");
+            w.str(value);
+        }
+    }
+}
+
+fn encode_toolchain(w: &mut KeyWriter, toolchain: &BuildToolchain) {
+    w.str(&toolchain.name);
+    match toolchain.role {
+        ToolchainRole::Host => w.str("host"),
+        ToolchainRole::Target => w.str("target"),
+    }
+    w.str(&toolchain.host_triple);
+    w.str(&toolchain.target_triple);
+    match &toolchain.sdk {
+        Some(sdk) => {
+            w.bool(true);
+            w.str(&sdk.name);
+            w.str(&sdk.version);
+            encode_provenance(w, &sdk.provenance);
+        }
+        None => w.bool(false),
+    }
+    match &toolchain.linker {
+        Some(linker) => {
+            w.bool(true);
+            w.str(&linker.name);
+            encode_provenance(w, &linker.provenance);
+        }
+        None => w.bool(false),
+    }
+    encode_provenance(w, &toolchain.provenance);
+}
+
+fn encode_signing_identity(w: &mut KeyWriter, identity: &BuildSigningIdentity) {
+    w.str(&identity.name);
+    w.str(&identity.label);
+    encode_provenance(w, &identity.provenance);
+}
+
+fn encode_probe(w: &mut KeyWriter, plan: &BuildPlan, probe: &BuildProbe) {
+    w.str(&probe.name);
+    match &probe.kind {
+        ProbeKind::FindProgram { program } => {
+            w.str("find-program");
+            w.str(program);
+        }
+        ProbeKind::PkgConfig {
+            package,
+            min_version,
+        } => {
+            w.str("pkg-config");
+            w.str(package);
+            match min_version {
+                Some(version) => {
+                    w.bool(true);
+                    w.str(version);
+                }
+                None => w.bool(false),
+            }
+        }
+        ProbeKind::HeaderCheck { header } => {
+            w.str("header-check");
+            w.str(header);
+        }
+        ProbeKind::CompileCheck {
+            name,
+            includes,
+            code,
+        } => {
+            w.str("compile-check");
+            w.str(name);
+            w.vec_str(includes.iter().map(String::as_str));
+            w.str(code);
+        }
+    }
+    match probe.reproducibility {
+        ReproducibilityClass::Reproducible => w.str("reproducible"),
+        ReproducibilityClass::Ambient => w.str("ambient"),
+    }
+    encode_provenance(w, &probe.provenance);
+    encode_toolchain(w, &plan.toolchains[probe.toolchain.id.0]);
+}
+
+fn encode_provenance(w: &mut KeyWriter, provenance: &BuildProvenance) {
+    match &provenance.source {
+        ProvenanceSource::InferredHost => w.str("inferred-host"),
+        ProvenanceSource::JetpackDependency(dep) => {
+            w.str("jetpack-dependency");
+            w.str(dep);
+        }
+        ProvenanceSource::AmbientRecord(record) => {
+            w.str("ambient-record");
+            w.str(record);
+        }
+        ProvenanceSource::UserDeclared(source) => {
+            w.str("user-declared");
+            w.str(source);
+        }
+    }
+    match &provenance.lock {
+        Some(lock) => {
+            w.bool(true);
+            w.str(&lock.key);
+            w.str(&lock.digest);
+        }
+        None => w.bool(false),
+    }
+}
+
+struct KeyWriter {
+    bytes: Vec<u8>,
+}
+
+impl KeyWriter {
+    fn new() -> Self {
+        KeyWriter { bytes: Vec::new() }
+    }
+
+    fn str(&mut self, value: &str) {
+        self.bytes
+            .extend_from_slice(&(value.len() as u64).to_be_bytes());
+        self.bytes.extend_from_slice(value.as_bytes());
+    }
+
+    fn bool(&mut self, value: bool) {
+        self.bytes.push(u8::from(value));
+    }
+
+    fn vec_str<'a>(&mut self, values: impl IntoIterator<Item = &'a str>) {
+        let values: Vec<&str> = values.into_iter().collect();
+        self.bytes
+            .extend_from_slice(&(values.len() as u64).to_be_bytes());
+        for value in values {
+            self.str(value);
+        }
+    }
+
+    fn map_str(&mut self, map: &BTreeMap<String, String>) {
+        self.bytes
+            .extend_from_slice(&(map.len() as u64).to_be_bytes());
+        for (key, value) in map {
+            self.str(key);
+            self.str(value);
+        }
+    }
+}
+
+fn resolve_under(base: &Path, rel: &str) -> io::Result<PathBuf> {
+    let path = Path::new(rel);
+    let mut out = PathBuf::from(base);
+    for component in path.components() {
+        match component {
+            Component::Normal(part) => out.push(part),
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "build output path escapes base directory",
+                ));
+            }
+        }
+    }
+    Ok(out)
 }
 
 fn check_name(name: String, kind: NameKind) -> Result<String, BuildError> {

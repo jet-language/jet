@@ -6177,6 +6177,19 @@ pub(crate) fn lower_method_call(
                 },
             };
         }
+        // D-FIDELITY-API1=A: `Perf.fidelity()` / `Perf.override_fidelity(v)?`
+        // lower to the same core call shape as `use core.perf as Perf`.
+        if type_name == "Perf" && !cx.type_names.contains("Perf") {
+            let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
+            return TExpr {
+                ty: core_call_return_ty("core.perf", method),
+                kind: TExprKind::CoreCall {
+                    module: "core.perf".to_string(),
+                    method: method.to_string(),
+                    args: targs,
+                },
+            };
+        }
         // D-COLLBREADTH1=A: `Set.from([...])` → collect list into HashSet.
         // Lower the list arg as the recv of a SetFrom BuiltinMethod.
         if type_name == "Set" && method == "from" && args.len() == 1 {
