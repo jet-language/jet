@@ -208,6 +208,9 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         // D-DBDRIVER1: the tagged SQL parameter/column value + its error type.
         "DbValue" => Some("DbValue"),
         "DbError" => Some("DbError"),
+        // D-RAYLIB1=A: display-gated graphics bridge skeleton types.
+        "RaylibWindow" => Some("RaylibWindow"),
+        "RaylibColor" => Some("RaylibColor"),
         // D-TYPEDTEXT1=D: `Sql`/`Html` — this table's `.is_some()` is only a
         // "known core value type" gate for the TIR subset check; the actual Rust
         // spelling for these two comes from the earlier explicit `rust_type` arms
@@ -261,6 +264,16 @@ pub(crate) fn file_handle_rust_type(name: &str) -> Option<&'static str> {
         "DbConnection" => Some("JetDbConnection"),
         // D-DEP-WASM1=A / D-PLUGIN1=B (c81): the sandboxed WASM plugin handle.
         "Plugin" => Some("JetPlugin"),
+        _ => None,
+    }
+}
+
+/// D-RAYLIB1=A: raylib skeleton handle/value types are top-level prelude
+/// structs, like file/net handles, not members of `mod jet_std`.
+pub(crate) fn raylib_handle_rust_type(name: &str) -> Option<&'static str> {
+    match name {
+        "RaylibWindow" => Some("RaylibWindow"),
+        "RaylibColor" => Some("RaylibColor"),
         _ => None,
     }
 }
@@ -455,6 +468,7 @@ impl Cx {
             Type::Named(name) if name == "HttpMux" => "JetHttpMux".to_string(),
             Type::Named(name) if name == "HttpSrvReq" => "JetHttpSrvReq".to_string(),
             Type::Named(name) if name == "HttpSrvResp" => "JetHttpSrvResp".to_string(),
+            Type::Named(name) if name == "HttpServerTls" => "JetHttpServerTls".to_string(),
             // c97/D-STRPARSE1: the builtin parse error (`Int.parse`, `Float.parse`,
             // `String.to_int`) erases to a plain message — never user-constructed.
             // A user enum named `ParseError` (in `type_names`) keeps its own lowering.
@@ -519,6 +533,16 @@ impl Cx {
                     "{}{}",
                     self.root_prefix,
                     file_handle_rust_type(name).unwrap()
+                )
+            }
+            // D-RAYLIB1=A: the bare-minimum raylib bridge skeleton lives in the
+            // top-level corelib prelude today, so generated user bindings must
+            // reference `RaylibWindow`/`RaylibColor` directly.
+            Type::Named(name) if raylib_handle_rust_type(name).is_some() => {
+                format!(
+                    "{}{}",
+                    self.root_prefix,
+                    raylib_handle_rust_type(name).unwrap()
                 )
             }
             // E2-M10: networking opaque types are top-level in the prelude.
@@ -1700,5 +1724,21 @@ fn walk_type_edge(
         }
         Type::Char => {}
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn raylib_skeleton_types_lower_to_core_prelude_types() {
+        assert_eq!(core_rust_type_name("RaylibWindow"), Some("RaylibWindow"));
+        assert_eq!(core_rust_type_name("RaylibColor"), Some("RaylibColor"));
+        assert_eq!(
+            raylib_handle_rust_type("RaylibWindow"),
+            Some("RaylibWindow")
+        );
+        assert_eq!(raylib_handle_rust_type("RaylibColor"), Some("RaylibColor"));
     }
 }

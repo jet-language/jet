@@ -59,6 +59,206 @@ fn json_string(s: &str) -> String {
     out
 }
 
+#[derive(Debug)]
+struct DecodedSemanticToken {
+    text: String,
+    token_type: u32,
+    modifiers: u32,
+}
+
+fn semantic_data_from_response(resp: &str) -> Vec<u32> {
+    let data_key = "\"data\"";
+    let start = resp.find(data_key).expect("semantic token data");
+    let after_key = &resp[start + data_key.len()..];
+    let array_start = after_key.find('[').expect("data array");
+    let after_array = &after_key[array_start + 1..];
+    let array_end = after_array.find(']').expect("data array end");
+    after_array[..array_end]
+        .split(',')
+        .filter_map(|n| n.trim().parse::<u32>().ok())
+        .collect()
+}
+
+fn decode_semantic_tokens(src: &str, resp: &str) -> Vec<DecodedSemanticToken> {
+    let data = semantic_data_from_response(resp);
+    let lines: Vec<&str> = src.lines().collect();
+    let mut out = Vec::new();
+    let mut line = 0u32;
+    let mut start = 0u32;
+
+    for chunk in data.chunks_exact(5) {
+        line += chunk[0];
+        start = if chunk[0] == 0 {
+            start + chunk[1]
+        } else {
+            chunk[1]
+        };
+        let len = chunk[2];
+        let text = lines
+            .get(line as usize)
+            .and_then(|line_text| {
+                let s = start as usize;
+                let e = s + len as usize;
+                line_text.get(s..e)
+            })
+            .unwrap_or("")
+            .to_string();
+        out.push(DecodedSemanticToken {
+            text,
+            token_type: chunk[3],
+            modifiers: chunk[4],
+        });
+    }
+    out
+}
+
+fn assert_semantic_token(
+    tokens: &[DecodedSemanticToken],
+    text: &str,
+    token_type: u32,
+    modifier: u32,
+) {
+    assert!(
+        tokens.iter().any(|t| {
+            t.text == text && t.token_type == token_type && (t.modifiers & modifier) != 0
+        }),
+        "missing semantic token `{}` type {} modifier {}; got {:?}",
+        text,
+        token_type,
+        modifier,
+        tokens
+    );
+}
+
+const LSP_CAPABILITY_COVERAGE: &[(&str, &str)] = &[
+    (
+        "textDocumentSync",
+        "lsp_incremental_sync_range_edit_updates_document",
+    ),
+    (
+        "documentFormattingProvider",
+        "lsp_formatting_and_range_formatting_return_edits",
+    ),
+    (
+        "documentRangeFormattingProvider",
+        "lsp_formatting_and_range_formatting_return_edits",
+    ),
+    ("codeActionProvider", "lsp_teaching_autocorrect_let_to_val"),
+    ("completionProvider", "lsp_completion_returns_items"),
+    (
+        "signatureHelpProvider",
+        "lsp_signature_help_returns_active_parameter",
+    ),
+    (
+        "documentSymbolProvider",
+        "lsp_document_symbol_returns_checked_outline",
+    ),
+    ("workspaceSymbolProvider", "lsp_wave2_navigation_features"),
+    ("foldingRangeProvider", "lsp_wave2_navigation_features"),
+    ("documentHighlightProvider", "lsp_wave2_navigation_features"),
+    ("selectionRangeProvider", "lsp_wave2_navigation_features"),
+    ("hoverProvider", "lsp_hover_returns_signature"),
+    ("definitionProvider", "lsp_definition_returns_location"),
+    ("referencesProvider", "lsp_references_finds_all_uses"),
+    ("renameProvider", "lsp_rename_produces_workspace_edit"),
+    (
+        "renameProvider.prepare",
+        "lsp_wave3_prepare_rename_semantic_range_and_call_hierarchy",
+    ),
+    ("semanticTokensProvider", "lsp_semantic_tokens_returns_data"),
+    (
+        "semanticTokensProvider.full",
+        "lsp_semantic_tokens_returns_data",
+    ),
+    (
+        "semanticTokensProvider.range",
+        "lsp_wave3_prepare_rename_semantic_range_and_call_hierarchy",
+    ),
+    (
+        "semanticTokensProvider.delta",
+        "lsp_semantic_tokens_delta_returns_full_fallback",
+    ),
+    ("inlayHintProvider", "lsp_inlay_hints_returns_type_labels"),
+    (
+        "callHierarchyProvider",
+        "lsp_wave3_prepare_rename_semantic_range_and_call_hierarchy",
+    ),
+    (
+        "executeCommandProvider",
+        "lsp_execute_command_impact_returns_report",
+    ),
+];
+
+fn advertised_capabilities(init: &str) -> Vec<String> {
+    let Some(cap_start) = init.find("\"capabilities\"") else {
+        return Vec::new();
+    };
+    let Some(open_rel) = init[cap_start..].find('{') else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut escape = false;
+    let mut string_start = 0usize;
+    let mut last_string: Option<String> = None;
+    let bytes = init.as_bytes();
+    let mut i = cap_start + open_rel;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if in_string {
+            if escape {
+                escape = false;
+            } else if b == b'\\' {
+                escape = true;
+            } else if b == b'"' {
+                last_string = Some(init[string_start..i].to_string());
+                in_string = false;
+            }
+            i += 1;
+            continue;
+        }
+        match b {
+            b'"' => {
+                in_string = true;
+                string_start = i + 1;
+            }
+            b'{' => depth += 1,
+            b'}' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    break;
+                }
+            }
+            b':' if depth == 1 => {
+                if let Some(key) = last_string.take() {
+                    out.push(key);
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+
+    if init.contains("\"renameProvider\"") && init.contains("\"prepareProvider\": true") {
+        out.push("renameProvider.prepare".to_string());
+    }
+    if init.contains("\"semanticTokensProvider\"") {
+        if init.contains("\"full\"") {
+            out.push("semanticTokensProvider.full".to_string());
+        }
+        if init.contains("\"range\": true") {
+            out.push("semanticTokensProvider.range".to_string());
+        }
+        if init.contains("\"delta\": true") {
+            out.push("semanticTokensProvider.delta".to_string());
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
 // ── JSON transcript runner (A1) ──────────────────────────────────────────────
 //
 // Loads every tests/lsp/*.json file and replays it against a live server.
@@ -430,6 +630,59 @@ fn lsp_json_transcripts() {
     }
 }
 
+#[test]
+fn lsp_initialize_capabilities_have_named_test_coverage() {
+    let jet = jet_bin();
+    if !jet.exists() {
+        return;
+    }
+
+    let mut child = Command::new(&jet)
+        .arg("lsp")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn jet lsp");
+    let mut stdin = child.stdin.take().expect("stdin");
+    let mut stdout = child.stdout.take().expect("stdout");
+
+    send_msg(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#,
+    );
+    let init = read_msg(&mut stdout);
+    let advertised = advertised_capabilities(&init);
+    assert!(
+        !advertised.is_empty(),
+        "initialize response did not expose capabilities: {init}"
+    );
+
+    let source = include_str!("lsp.rs");
+    for cap in advertised {
+        let marker = LSP_CAPABILITY_COVERAGE
+            .iter()
+            .find_map(|(covered, marker)| (*covered == cap).then_some(*marker))
+            .unwrap_or_else(|| panic!("advertised capability `{cap}` lacks coverage entry"));
+        assert!(
+            source.contains(marker),
+            "coverage marker `{marker}` for `{cap}` is not present in tests/lsp.rs"
+        );
+    }
+
+    send_msg(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}}"#,
+    );
+    let _ = read_msg(&mut stdout);
+    send_msg(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","method":"exit","params":{}}"#,
+    );
+    drop(stdin);
+    let _ = child.wait();
+}
+
 // ── M6 v0 regression tests (must keep working) ───────────────────────────────
 
 #[test]
@@ -515,6 +768,221 @@ fn lsp_teaching_autocorrect_let_to_val() {
     );
     drop(stdin);
     let _ = child.wait();
+}
+
+#[test]
+fn lsp_incremental_sync_range_edit_updates_document() {
+    let jet = jet_bin();
+    if !jet.exists() {
+        return;
+    }
+
+    let mut child = Command::new(&jet)
+        .arg("lsp")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn jet lsp");
+
+    let mut stdin = child.stdin.take().expect("stdin");
+    let mut stdout = child.stdout.take().expect("stdout");
+
+    send_msg(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#,
+    );
+    let init = read_msg(&mut stdout);
+    assert!(
+        init.contains(r#""textDocumentSync": 2"#) || init.contains(r#""textDocumentSync":2"#),
+        "expected incremental sync, got: {}",
+        init
+    );
+    send_msg(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#,
+    );
+
+    let uri = "file:///tmp/lsp_incremental_test.jet";
+    let src = "fn run() {\n    x :: 1\n}\n";
+    let open = format!(
+        r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{}","languageId":"jet","version":1,"text":{}}}}}}}"#,
+        uri,
+        json_string(src)
+    );
+    send_msg(&mut stdin, &open);
+    let _ = read_msg(&mut stdout);
+
+    let change = format!(
+        r#"{{"jsonrpc":"2.0","method":"textDocument/didChange","params":{{"textDocument":{{"uri":"{}","version":2}},"contentChanges":[{{"range":{{"start":{{"line":1,"character":4}},"end":{{"line":1,"character":10}}}},"rangeLength":6,"text":"let x = 1"}}]}}}}"#,
+        uri
+    );
+    send_msg(&mut stdin, &change);
+
+    let req = format!(
+        r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/semanticTokens/full","params":{{"textDocument":{{"uri":"{}"}}}}}}"#,
+        uri
+    );
+    send_msg(&mut stdin, &req);
+    let diag = read_msg(&mut stdout);
+    assert!(
+        diag.contains("publishDiagnostics") && diag.contains("E0009"),
+        "expected range edit to trigger E0009 diagnostics, got: {}",
+        diag
+    );
+    let tokens = read_msg(&mut stdout);
+    assert!(
+        tokens.contains(r#""id":2"#) && tokens.contains(r#""data""#),
+        "expected semantic token response after dirty flush, got: {}",
+        tokens
+    );
+
+    send_msg(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":3,"method":"shutdown","params":{}}"#,
+    );
+    let _ = read_msg(&mut stdout);
+    send_msg(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","method":"exit","params":{}}"#,
+    );
+    drop(stdin);
+    let _ = child.wait();
+}
+
+#[test]
+fn lsp_check_json_matches_jet_check_json_for_diagnostic_fixture() {
+    let jet = jet_bin();
+    if !jet.exists() {
+        return;
+    }
+
+    let path = std::env::temp_dir().join(format!(
+        "lsp_json_diff_{}_{}.jet",
+        std::process::id(),
+        "binding"
+    ));
+    let src = "fn run() {\n    let x = 1\n}\n";
+    std::fs::write(&path, src).expect("write diagnostic fixture");
+
+    let out = Command::new(&jet)
+        .arg("check")
+        .arg(&path)
+        .arg("--json")
+        .output()
+        .expect("jet check --json");
+    assert!(
+        !out.status.success(),
+        "diagnostic fixture should fail: status={}",
+        out.status
+    );
+    let cli_json = String::from_utf8_lossy(&out.stderr).to_string();
+
+    let file = path.to_string_lossy();
+    let lsp_diags: Vec<_> = jet::check_document(&file, src)
+        .into_iter()
+        .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+        .collect();
+    let lsp_json = jet::render_all_json(&file, src, &lsp_diags);
+
+    assert_eq!(cli_json, lsp_json);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn lsp_formatting_and_range_formatting_return_edits() {
+    let jet = jet_bin();
+    if !jet.exists() {
+        return;
+    }
+    let source = "fn run(){\nprint(1)\n}\n";
+    let uri = "file:///tmp/lsp_formatting_test.jet";
+
+    run_transcript(
+        source,
+        &[
+            TranscriptStep::Send {
+                msg:
+                    r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#
+                        .to_string(),
+                expect_contains: Some(vec![
+                    "documentFormattingProvider".to_string(),
+                    "documentRangeFormattingProvider".to_string(),
+                ]),
+            },
+            TranscriptStep::Send {
+                msg: r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#.to_string(),
+                expect_contains: None,
+            },
+            TranscriptStep::Open {
+                uri: uri.to_string(),
+                expect_notification: true,
+            },
+            TranscriptStep::Send {
+                msg: format!(
+                    r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/formatting","params":{{"textDocument":{{"uri":"{}"}},"options":{{"tabSize":4,"insertSpaces":true}}}}}}"#,
+                    uri
+                ),
+                expect_contains: Some(vec!["\"newText\"".to_string(), "\"range\"".to_string()]),
+            },
+            TranscriptStep::Send {
+                msg: format!(
+                    r#"{{"jsonrpc":"2.0","id":3,"method":"textDocument/rangeFormatting","params":{{"textDocument":{{"uri":"{}"}},"range":{{"start":{{"line":0,"character":0}},"end":{{"line":3,"character":0}}}},"options":{{"tabSize":4,"insertSpaces":true}}}}}}"#,
+                    uri
+                ),
+                expect_contains: Some(vec!["\"newText\"".to_string(), "\"range\"".to_string()]),
+            },
+            TranscriptStep::Send {
+                msg: r#"{"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}}"#.to_string(),
+                expect_contains: Some(vec!["result".to_string()]),
+            },
+        ],
+    );
+}
+
+#[test]
+fn lsp_execute_command_impact_returns_report() {
+    let jet = jet_bin();
+    if !jet.exists() {
+        return;
+    }
+    let source = "fn add(a: Int, b: Int) -> Int {\n    return a + b\n}\nfn run() {\n    print(add(1, 2))\n}\n";
+    let uri = "file:///tmp/lsp_execute_impact_test.jet";
+
+    run_transcript(
+        source,
+        &[
+            TranscriptStep::Send {
+                msg:
+                    r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#
+                        .to_string(),
+                expect_contains: Some(vec!["executeCommandProvider".to_string()]),
+            },
+            TranscriptStep::Send {
+                msg: r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#.to_string(),
+                expect_contains: None,
+            },
+            TranscriptStep::Open {
+                uri: uri.to_string(),
+                expect_notification: true,
+            },
+            TranscriptStep::Send {
+                msg: format!(
+                    r#"{{"jsonrpc":"2.0","id":2,"method":"workspace/executeCommand","params":{{"command":"jet.impact","arguments":["{}","add",2]}}}}"#,
+                    uri
+                ),
+                expect_contains: Some(vec![
+                    "\"symbol\":\"add\"".to_string(),
+                    "\"found\":true".to_string(),
+                    "\"upstream_callers\"".to_string(),
+                ]),
+            },
+            TranscriptStep::Send {
+                msg: r#"{"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}}"#.to_string(),
+                expect_contains: Some(vec!["result".to_string()]),
+            },
+        ],
+    );
 }
 
 #[test]
@@ -665,6 +1133,488 @@ fn lsp_completion_returns_items() {
                     uri
                 ),
                 expect_contains: Some(vec!["items".to_string(), "greet".to_string()]),
+            },
+            TranscriptStep::Send {
+                msg: r#"{"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}}"#.to_string(),
+                expect_contains: Some(vec!["result".to_string()]),
+            },
+        ],
+    );
+}
+
+#[test]
+fn lsp_completion_uses_local_discovery_index_for_packages_and_options() {
+    let jet = jet_bin();
+    if !jet.exists() {
+        return;
+    }
+
+    let root = std::env::temp_dir().join(format!("lsp_discovery_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).expect("create discovery fixture dir");
+
+    let mut index = jet::Jetpack::Discovery::Index::default();
+    index.add_package(jet::Jetpack::Discovery::PackageRecord {
+        source: "default".to_string(),
+        name: "postgres_16".to_string(),
+        reference: "default:postgres_16".to_string(),
+        version: "16.4".to_string(),
+        platforms: vec!["linux".to_string()],
+        docs: "Postgres fixture from local discovery index".to_string(),
+        provenance: "test".to_string(),
+        options: vec![
+            jet::Jetpack::Discovery::OptionField {
+                name: "ready".to_string(),
+                default: "process/port probe".to_string(),
+                docs: "Command polled until ready.".to_string(),
+            },
+            jet::Jetpack::Discovery::OptionField {
+                name: "data_dir".to_string(),
+                default: ".jet/services/db/data".to_string(),
+                docs: "Persisted state directory.".to_string(),
+            },
+        ],
+    });
+    jet::Jetpack::Discovery::write(&root, &index).expect("write local discovery index");
+
+    let path = root.join("main.jet");
+    let uri = format!("file://{}", path.display());
+    let source = "module env.dev {\n    env.dev: Env.{\n        packages: [default.post]\n        services: { db: Service.{ re } }\n    }\n}\n";
+    std::fs::write(&path, source).expect("write LSP source");
+
+    let mut child = Command::new(&jet)
+        .arg("lsp")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn jet lsp");
+
+    let mut stdin = child.stdin.take().expect("stdin");
+    let mut stdout = child.stdout.take().expect("stdout");
+
+    send_msg(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#,
+    );
+    let init = read_msg(&mut stdout);
+    assert!(init.contains("completionProvider"), "init: {init}");
+    send_msg(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#,
+    );
+
+    let open = format!(
+        r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{}","languageId":"jet","version":1,"text":{}}}}}}}"#,
+        uri,
+        json_string(source)
+    );
+    send_msg(&mut stdin, &open);
+    let _ = read_msg(&mut stdout);
+
+    let package_offset = source.find("default.post").unwrap() + "default.post".len();
+    let package_pos = jet::LSP::byte_offset_to_lsp(source, package_offset);
+    let package_req = format!(
+        r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/completion","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":{},"character":{}}}}}}}"#,
+        uri, package_pos.line, package_pos.character
+    );
+    send_msg(&mut stdin, &package_req);
+    let package_resp = read_msg(&mut stdout);
+    assert!(
+        package_resp.contains("postgres_16") && package_resp.contains("package from default"),
+        "package discovery completion missing: {package_resp}"
+    );
+
+    let option_offset = source.find("Service.{ re").unwrap() + "Service.{ re".len();
+    let option_pos = jet::LSP::byte_offset_to_lsp(source, option_offset);
+    let option_req = format!(
+        r#"{{"jsonrpc":"2.0","id":3,"method":"textDocument/completion","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":{},"character":{}}}}}}}"#,
+        uri, option_pos.line, option_pos.character
+    );
+    send_msg(&mut stdin, &option_req);
+    let option_resp = read_msg(&mut stdout);
+    assert!(
+        option_resp.contains("\"ready\"") && option_resp.contains("Command polled until ready."),
+        "option discovery completion missing: {option_resp}"
+    );
+
+    send_msg(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}}"#,
+    );
+    let _ = read_msg(&mut stdout);
+    send_msg(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","method":"exit","params":{}}"#,
+    );
+    drop(stdin);
+    let _ = child.wait();
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn lsp_signature_help_returns_active_parameter() {
+    let jet = jet_bin();
+    if !jet.exists() {
+        return;
+    }
+    let source = "fn add(a: Int, b: Int) -> Int {\n    return a + b;\n}\nfn run() {\n    val r = add(1, 2);\n}\n";
+    let uri = "file:///tmp/lsp_signature_help_test.jet";
+
+    run_transcript(
+        source,
+        &[
+            TranscriptStep::Send {
+                msg:
+                    r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#
+                        .to_string(),
+                expect_contains: Some(vec!["signatureHelpProvider".to_string()]),
+            },
+            TranscriptStep::Send {
+                msg: r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#.to_string(),
+                expect_contains: None,
+            },
+            TranscriptStep::Open {
+                uri: uri.to_string(),
+                expect_notification: true,
+            },
+            TranscriptStep::Send {
+                msg: format!(
+                    r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/signatureHelp","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":4,"character":18}}}}}}"#,
+                    uri
+                ),
+                expect_contains: Some(vec![
+                    "fn add(a: Int, b: Int) -> Int".to_string(),
+                    "\"activeParameter\":1".to_string(),
+                    "b: Int".to_string(),
+                ]),
+            },
+            TranscriptStep::Send {
+                msg: r#"{"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}}"#.to_string(),
+                expect_contains: Some(vec!["result".to_string()]),
+            },
+        ],
+    );
+}
+
+#[test]
+fn lsp_document_symbol_returns_checked_outline() {
+    let jet = jet_bin();
+    if !jet.exists() {
+        return;
+    }
+    let source = "struct Point { x: Int }\nenum Color { Red Green }\nfn add(a: Int, b: Int) -> Int {\n    return a + b;\n}\n";
+    let uri = "file:///tmp/lsp_document_symbol_test.jet";
+
+    run_transcript(
+        source,
+        &[
+            TranscriptStep::Send {
+                msg:
+                    r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#
+                        .to_string(),
+                expect_contains: Some(vec!["documentSymbolProvider".to_string()]),
+            },
+            TranscriptStep::Send {
+                msg: r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#.to_string(),
+                expect_contains: None,
+            },
+            TranscriptStep::Open {
+                uri: uri.to_string(),
+                expect_notification: true,
+            },
+            TranscriptStep::Send {
+                msg: format!(
+                    r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/documentSymbol","params":{{"textDocument":{{"uri":"{}"}}}}}}"#,
+                    uri
+                ),
+                expect_contains: Some(vec![
+                    "\"name\":\"Point\"".to_string(),
+                    "\"kind\":23".to_string(),
+                    "\"name\":\"Color\"".to_string(),
+                    "\"kind\":10".to_string(),
+                    "\"name\":\"add\"".to_string(),
+                    "\"kind\":12".to_string(),
+                ]),
+            },
+            TranscriptStep::Send {
+                msg: r#"{"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}}"#.to_string(),
+                expect_contains: Some(vec!["result".to_string()]),
+            },
+        ],
+    );
+}
+
+#[test]
+fn lsp_wave2_navigation_features() {
+    let jet = jet_bin();
+    if !jet.exists() {
+        return;
+    }
+    let source = "// file note one\n// file note two\n\nfn add(a: Int, b: Int) -> Int {\n    total :: a + b\n    return total\n}\n\nfn run() {\n    value :: add(1, 2)\n    print(value)\n}\n";
+    let uri = "file:///tmp/lsp_wave2_nav_test.jet";
+
+    run_transcript(
+        source,
+        &[
+            TranscriptStep::Send {
+                msg:
+                    r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#
+                        .to_string(),
+                expect_contains: Some(vec![
+                    "workspaceSymbolProvider".to_string(),
+                    "foldingRangeProvider".to_string(),
+                    "documentHighlightProvider".to_string(),
+                    "selectionRangeProvider".to_string(),
+                ]),
+            },
+            TranscriptStep::Send {
+                msg: r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#.to_string(),
+                expect_contains: None,
+            },
+            TranscriptStep::Open {
+                uri: uri.to_string(),
+                expect_notification: true,
+            },
+            TranscriptStep::Send {
+                msg: r#"{"jsonrpc":"2.0","id":2,"method":"workspace/symbol","params":{"query":"add"}}"#
+                    .to_string(),
+                expect_contains: Some(vec![
+                    "\"name\":\"add\"".to_string(),
+                    "\"kind\":12".to_string(),
+                    "\"location\"".to_string(),
+                ]),
+            },
+            TranscriptStep::Send {
+                msg: format!(
+                    r#"{{"jsonrpc":"2.0","id":3,"method":"textDocument/foldingRange","params":{{"textDocument":{{"uri":"{}"}}}}}}"#,
+                    uri
+                ),
+                expect_contains: Some(vec![
+                    "\"kind\":\"comment\"".to_string(),
+                    "\"startLine\":0".to_string(),
+                    "\"endLine\":1".to_string(),
+                    "\"kind\":\"region\"".to_string(),
+                    "\"startLine\":3".to_string(),
+                    "\"endLine\":6".to_string(),
+                ]),
+            },
+            TranscriptStep::Send {
+                msg: format!(
+                    r#"{{"jsonrpc":"2.0","id":4,"method":"textDocument/documentHighlight","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":9,"character":14}}}}}}"#,
+                    uri
+                ),
+                expect_contains: Some(vec![
+                    "\"kind\":3".to_string(),
+                    "\"kind\":2".to_string(),
+                    "\"range\"".to_string(),
+                ]),
+            },
+            TranscriptStep::Send {
+                msg: format!(
+                    r#"{{"jsonrpc":"2.0","id":5,"method":"textDocument/selectionRange","params":{{"textDocument":{{"uri":"{}"}},"positions":[{{"line":9,"character":14}}]}}}}"#,
+                    uri
+                ),
+                expect_contains: Some(vec![
+                    "\"parent\"".to_string(),
+                    r#""start":{"line":9,"character":13}"#.to_string(),
+                    r#""end":{"line":9,"character":16}"#.to_string(),
+                ]),
+            },
+            TranscriptStep::Send {
+                msg: r#"{"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}}"#.to_string(),
+                expect_contains: Some(vec!["result".to_string()]),
+            },
+        ],
+    );
+}
+
+#[test]
+fn lsp_wave3_prepare_rename_semantic_range_and_call_hierarchy() {
+    let jet = jet_bin();
+    if !jet.exists() {
+        return;
+    }
+    let source = "fn add(a: Int, b: Int) -> Int {\n    return a + b\n}\n\nfn caller() {\n    result :: add(1, 2)\n    print(result)\n}\n\nfn run() {\n    caller()\n}\n";
+    let uri = "file:///tmp/lsp_wave3_power_test.jet";
+    let add_item = format!(
+        r#"{{"name":"add","kind":12,"uri":"{}","range":{{"start":{{"line":0,"character":3}},"end":{{"line":0,"character":6}}}},"selectionRange":{{"start":{{"line":0,"character":3}},"end":{{"line":0,"character":6}}}}}}"#,
+        uri
+    );
+    let caller_item = format!(
+        r#"{{"name":"caller","kind":12,"uri":"{}","range":{{"start":{{"line":4,"character":3}},"end":{{"line":4,"character":9}}}},"selectionRange":{{"start":{{"line":4,"character":3}},"end":{{"line":4,"character":9}}}}}}"#,
+        uri
+    );
+
+    run_transcript(
+        source,
+        &[
+            TranscriptStep::Send {
+                msg:
+                    r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#
+                        .to_string(),
+                expect_contains: Some(vec![
+                    "\"prepareProvider\": true".to_string(),
+                    "\"range\": true".to_string(),
+                    "\"callHierarchyProvider\": true".to_string(),
+                ]),
+            },
+            TranscriptStep::Send {
+                msg: r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#.to_string(),
+                expect_contains: None,
+            },
+            TranscriptStep::Open {
+                uri: uri.to_string(),
+                expect_notification: true,
+            },
+            TranscriptStep::Send {
+                msg: format!(
+                    r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/prepareRename","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":0,"character":3}}}}}}"#,
+                    uri
+                ),
+                expect_contains: Some(vec![
+                    "\"placeholder\":\"add\"".to_string(),
+                    r#""start":{"line":0,"character":3}"#.to_string(),
+                    r#""end":{"line":0,"character":6}"#.to_string(),
+                ]),
+            },
+            TranscriptStep::Send {
+                msg: format!(
+                    r#"{{"jsonrpc":"2.0","id":3,"method":"textDocument/prepareRename","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":0,"character":0}}}}}}"#,
+                    uri
+                ),
+                expect_contains: Some(vec![
+                    "\"error\"".to_string(),
+                    "`fn` is Jet syntax, not a name you can rename".to_string(),
+                ]),
+            },
+            TranscriptStep::Send {
+                msg: format!(
+                    r#"{{"jsonrpc":"2.0","id":4,"method":"textDocument/semanticTokens/range","params":{{"textDocument":{{"uri":"{}"}},"range":{{"start":{{"line":0,"character":0}},"end":{{"line":2,"character":1}}}}}}}}"#,
+                    uri
+                ),
+                expect_contains: Some(vec!["\"data\":[".to_string()]),
+            },
+            TranscriptStep::Send {
+                msg: format!(
+                    r#"{{"jsonrpc":"2.0","id":5,"method":"textDocument/prepareCallHierarchy","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":0,"character":3}}}}}}"#,
+                    uri
+                ),
+                expect_contains: Some(vec![
+                    "\"name\":\"add\"".to_string(),
+                    "\"kind\":12".to_string(),
+                ]),
+            },
+            TranscriptStep::Send {
+                msg: format!(
+                    r#"{{"jsonrpc":"2.0","id":6,"method":"callHierarchy/incomingCalls","params":{{"item":{}}}}}"#,
+                    add_item
+                ),
+                expect_contains: Some(vec![
+                    "\"from\"".to_string(),
+                    "\"name\":\"caller\"".to_string(),
+                    "\"fromRanges\"".to_string(),
+                ]),
+            },
+            TranscriptStep::Send {
+                msg: format!(
+                    r#"{{"jsonrpc":"2.0","id":7,"method":"callHierarchy/outgoingCalls","params":{{"item":{}}}}}"#,
+                    caller_item
+                ),
+                expect_contains: Some(vec![
+                    "\"to\"".to_string(),
+                    "\"name\":\"add\"".to_string(),
+                    "\"fromRanges\"".to_string(),
+                ]),
+            },
+            TranscriptStep::Send {
+                msg: r#"{"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}}"#.to_string(),
+                expect_contains: Some(vec!["result".to_string()]),
+            },
+        ],
+    );
+}
+
+#[test]
+fn lsp_prepare_rename_rejects_foreign_symbol() {
+    let jet = jet_bin();
+    if !jet.exists() {
+        return;
+    }
+    let source = "fn val() {}\n";
+    let uri = "file:///tmp/lsp_prepare_rename_foreign_test.jet";
+
+    run_transcript(
+        source,
+        &[
+            TranscriptStep::Send {
+                msg:
+                    r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#
+                        .to_string(),
+                expect_contains: Some(vec!["prepareProvider".to_string()]),
+            },
+            TranscriptStep::Send {
+                msg: r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#.to_string(),
+                expect_contains: None,
+            },
+            TranscriptStep::Open {
+                uri: uri.to_string(),
+                expect_notification: true,
+            },
+            TranscriptStep::Send {
+                msg: format!(
+                    r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/prepareRename","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":0,"character":3}}}}}}"#,
+                    uri
+                ),
+                expect_contains: Some(vec![
+                    "\"error\"".to_string(),
+                    "`val` is a retired foreign spelling, not a Jet symbol you can rename"
+                        .to_string(),
+                ]),
+            },
+            TranscriptStep::Send {
+                msg: r#"{"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}}"#.to_string(),
+                expect_contains: Some(vec!["result".to_string()]),
+            },
+        ],
+    );
+}
+
+#[test]
+fn lsp_semantic_tokens_delta_returns_full_fallback() {
+    let jet = jet_bin();
+    if !jet.exists() {
+        return;
+    }
+    let source = "fn run() {\n    value :: 1\n    print(value)\n}\n";
+    let uri = "file:///tmp/lsp_semantic_delta_test.jet";
+
+    run_transcript(
+        source,
+        &[
+            TranscriptStep::Send {
+                msg:
+                    r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#
+                        .to_string(),
+                expect_contains: Some(vec![
+                    "\"full\": { \"delta\": true }".to_string(),
+                    "\"range\": true".to_string(),
+                ]),
+            },
+            TranscriptStep::Send {
+                msg: r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#.to_string(),
+                expect_contains: None,
+            },
+            TranscriptStep::Open {
+                uri: uri.to_string(),
+                expect_notification: true,
+            },
+            TranscriptStep::Send {
+                msg: format!(
+                    r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/semanticTokens/full/delta","params":{{"textDocument":{{"uri":"{}"}},"previousResultId":"stale"}}}}"#,
+                    uri
+                ),
+                expect_contains: Some(vec!["\"resultId\"".to_string(), "\"data\":[".to_string()]),
             },
             TranscriptStep::Send {
                 msg: r#"{"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}}"#.to_string(),
@@ -836,6 +1786,114 @@ fn lsp_semantic_tokens_returns_data() {
             },
         ],
     );
+}
+
+#[test]
+fn lsp_semantic_tokens_classify_ownership_markers_and_skip_retired_words() {
+    let jet = jet_bin();
+    if !jet.exists() {
+        return;
+    }
+
+    let source = r#"#Test("semantic") {
+}
+#Unsafe("audit") fn archive(name: ^String, slot: &Int) -> String {
+    saved :: copy name
+    return saved
+}
+@Pure fn clean(x: Int) -> Int { return x }
+fn run() {
+    val old = 1
+    while true { break }
+    mut borrowed
+    take borrowed
+    view borrowed
+}
+"#;
+    let uri = "file:///tmp/lsp_semantic_highlight_stage4.jet";
+
+    let mut child = Command::new(&jet)
+        .arg("lsp")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn jet lsp");
+
+    let mut stdin = child.stdin.take().expect("stdin");
+    let mut stdout = child.stdout.take().expect("stdout");
+
+    send_msg(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#,
+    );
+    let init = read_msg(&mut stdout);
+    for expected in ["ownership", "decorator", "move", "writeBorrow", "copy"] {
+        assert!(
+            init.contains(expected),
+            "initialize response missing `{expected}`: {init}"
+        );
+    }
+    send_msg(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#,
+    );
+
+    let open = format!(
+        r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{}","languageId":"jet","version":1,"text":{}}}}}}}"#,
+        uri,
+        json_string(source)
+    );
+    send_msg(&mut stdin, &open);
+    let _ = read_msg(&mut stdout);
+
+    let req = format!(
+        r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/semanticTokens/full","params":{{"textDocument":{{"uri":"{}"}}}}}}"#,
+        uri
+    );
+    send_msg(&mut stdin, &req);
+    let response = read_msg(&mut stdout);
+    assert!(
+        response.contains(r#""id":2"#) && response.contains(r#""data""#),
+        "expected semantic token response, got: {response}"
+    );
+
+    const TOKEN_OWNERSHIP: u32 = 12;
+    const TOKEN_DECORATOR: u32 = 13;
+    const MOD_MOVE: u32 = 1 << 2;
+    const MOD_WRITE_BORROW: u32 = 1 << 3;
+    const MOD_COPY: u32 = 1 << 4;
+    const MOD_DIRECTIVE: u32 = 1 << 5;
+    const MOD_CONTRACT: u32 = 1 << 6;
+
+    let tokens = decode_semantic_tokens(source, &response);
+    assert_semantic_token(&tokens, "copy", TOKEN_OWNERSHIP, MOD_COPY);
+    assert_semantic_token(&tokens, "^", TOKEN_OWNERSHIP, MOD_MOVE);
+    assert_semantic_token(&tokens, "&", TOKEN_OWNERSHIP, MOD_WRITE_BORROW);
+    assert_semantic_token(&tokens, "#", TOKEN_DECORATOR, MOD_DIRECTIVE);
+    assert_semantic_token(&tokens, "Test", TOKEN_DECORATOR, MOD_DIRECTIVE);
+    assert_semantic_token(&tokens, "Unsafe", TOKEN_DECORATOR, MOD_DIRECTIVE);
+    assert_semantic_token(&tokens, "@", TOKEN_DECORATOR, MOD_CONTRACT);
+    assert_semantic_token(&tokens, "Pure", TOKEN_DECORATOR, MOD_CONTRACT);
+
+    for retired in ["val", "while", "mut", "take", "view"] {
+        assert!(
+            !tokens.iter().any(|t| t.text == retired),
+            "retired/foreign spelling `{retired}` should not emit semantic token: {tokens:?}"
+        );
+    }
+
+    send_msg(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":3,"method":"shutdown","params":{}}"#,
+    );
+    let _ = read_msg(&mut stdout);
+    send_msg(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","method":"exit","params":{}}"#,
+    );
+    drop(stdin);
+    let _ = child.wait();
 }
 
 #[test]

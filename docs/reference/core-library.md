@@ -1263,13 +1263,15 @@ These shipped in Epoch 2:
 
 | Package | What it unlocks |
 |---------|-----------------|
-| `core.http` | HTTP client + server, blocking networking (plain HTTP; TLS requires `core.tls`) |
+| `core.http` | HTTP client + server, blocking networking; HTTPS works by default in the client via rustls + system roots (D-TLS1); server HTTPS uses `serve(..., tls: Server.tls(cert, key))` (D-TLSSERVE1) |
 | `core.regex` | grep-class tools, text validation |
 | `core.log` | Structured logging / tracing / metrics |
 | `core.time` | Calendar dates, time zones, formatted dates |
 | `core.crypto` | Hash, HMAC, vetted random primitives |
 | `core.reactive` | Signals, derived values, effects (opt-in reactivity, D-REACT1) |
 | `core.archive` | gzip compress/decompress, zip read/write, tar add/get/list (D-DEP-ARCHIVE1) |
+| `core.raylib` | Graphics bridge skeleton: typed window/draw/color calls for display-gated examples (D-RAYLIB1); native raylib link follows |
+| `core.game` | Flagship game engine, scene-first with a frame hook (`Scene` + `scene.on_frame`) per D-GAME1/2/3; not implemented yet |
 | `core.compress.gzip` | standalone gzip compress/decompress, no archive container (D-CODECS1) |
 | `core.compress.zstd` | standalone zstd compress/decompress, no archive container (D-CODECS1) |
 | `core.db` | SQLite — parameterized `DbConnection.query`/`.query_one`/`.execute`/`.begin`/`.commit`/`.rollback`/`.close` via rusqlite bundled (D-DBDRIVER1) |

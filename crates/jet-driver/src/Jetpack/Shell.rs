@@ -56,12 +56,13 @@ impl Env {
                 parts.push(dir);
             }
         }
-        for dir in base_path.split(':').filter(|s| !s.is_empty()) {
+        let sep = super::Platform::path_separator();
+        for dir in base_path.split(sep).filter(|s| !s.is_empty()) {
             if seen.insert(dir) {
                 parts.push(dir);
             }
         }
-        parts.join(":")
+        parts.join(&sep.to_string())
     }
 
     fn apply(&self, cmd: &mut Command) {
@@ -279,8 +280,9 @@ mod tests {
     #[test]
     fn composes_path_prepended_and_deduped() {
         let env = env_with(&["/a/bin", "/b/bin", "/a/bin"]);
-        let path = env.composed_path("/usr/bin:/b/bin");
-        assert_eq!(path, "/a/bin:/b/bin:/usr/bin");
+        let sep = super::super::Platform::path_separator();
+        let path = env.composed_path(&format!("/usr/bin{sep}/b/bin"));
+        assert_eq!(path, format!("/a/bin{sep}/b/bin{sep}/usr/bin"));
     }
 
     #[test]

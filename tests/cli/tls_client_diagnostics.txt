@@ -1,0 +1,11 @@
+Error [E4201]: TLS handshake with `localhost` failed
+ Why: `https://localhost/data.txt` reached the server, but the connection did not complete a secure HTTPS handshake
+ Fix: verify the URL points at an HTTPS server, not plain HTTP; for local tests, start the TLS fixture server
+
+Error [E4202]: TLS certificate for `api.example.test` could not be trusted
+ Why: `https://api.example.test/data` presented a certificate Jet could not verify for that host
+ Fix: use a certificate whose subject matches the host and chains to a trusted root; for tests, trust the local fixture CA explicitly
+
+Error [E4203]: HTTPS could not find system certificate roots
+ Why: Jet uses rustls with the system trust store for default HTTPS, but no usable roots were available
+ Fix: install the system certificate bundle (for example `ca-certificates`) or run in an image that includes it

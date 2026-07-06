@@ -11,6 +11,20 @@
 // Run `tree-sitter generate` in this directory after editing, then rebuild the
 // wasm via editors/zed/install.sh (FORCE=1).
 
+// BEGIN GENERATED JET SYNTAX HIGHLIGHTS
+const JET_HIGHLIGHT_KEYWORD_CONTROL = ["break", "continue", "else", "if", "in", "loop", "return", "step"];
+const JET_HIGHLIGHT_KEYWORD_DECLARATION = ["Bench", "Context", "Impure", "Pure", "Reactive", "Sanitizer", "State", "Tainted", "Test", "Todo", "Transact", "Transition", "Unsafe", "add", "alias", "as", "assume_deterministic", "change", "client", "comptime", "const", "derive", "distinct", "enum", "extern", "fn", "impl", "live", "migration", "module", "policy", "priv", "protocol", "pub", "region", "remove", "rename", "rust", "server", "state", "struct", "tag", "taskgroup", "trait", "use", "via"];
+const JET_HIGHLIGHT_KEYWORD_OWNERSHIP = ["copy", "uninit"];
+const JET_HIGHLIGHT_KEYWORD_OTHER = ["it", "self"];
+const JET_HIGHLIGHT_LITERAL = ["None", "Val", "err", "false", "ok", "true"];
+const JET_HIGHLIGHT_TYPE_BUILTIN = ["BigInt", "Bool", "Char", "Computed", "Csv", "Data", "DbValue", "Decimal", "Derived", "Effect", "Error", "F32", "F64", "Float", "I16", "I32", "I64", "I8", "IOError", "Int", "JSON", "JSONError", "Json", "Key", "List", "Map", "Measurement", "Ptr", "SelectBuilder", "Shared", "Signal", "Stream", "String", "TaskGroup", "Toml", "U16", "U32", "U64", "U8", "UTF8Error", "Yaml"];
+const JET_HIGHLIGHT_BUILTIN = ["input", "print"];
+const JET_HIGHLIGHT_MARKER_DIRECTIVE = ["Bench", "Bindgen", "Caller", "Caps", "Default", "DenyUnknownFields", "Extern", "Flatten", "Grant", "Html", "Impure", "Js", "Layout", "Reactive", "Rename", "RenameAll", "Sanitizer", "SingleUse", "Skip", "State", "Suppress", "Tag", "Tainted", "Target", "Test", "Todo", "Transact", "Transition", "UnitFamily", "Unsafe", "Untagged", "Wasm", "WasmExport"];
+const JET_HIGHLIGHT_MARKER_CONTRACT = ["Cli", "Codable", "CodableAsBase", "Comparable", "Debug", "Decode", "Doc", "Encode", "Experimental", "Hardened", "Inline", "InlineAlways", "MustUse", "Numeric", "Patchable", "Persist", "Post", "Pre", "Printable", "PublishedSchema", "Pure", "Redact", "Summarize", "Tested"];
+const JET_HIGHLIGHT_SIGIL = ["#", "&", "...", "::", ":=", "@", "^"];
+const JET_HIGHLIGHT_OPERATOR = ["!", "!=", "%", "%=", "&&", "&=", "*", "*=", "+", "++", "+=", "-", "--", "-=", "->", "..", ".[", ".{", "/", "/=", "<", "<<", "<<=", "<=", "==", "=>", ">", ">=", ">>", ">>=", "?", "?.", "??", "^=", "|", "|=", "||"];
+// END GENERATED JET SYNTAX HIGHLIGHTS
+
 module.exports = grammar({
   name: "jet",
 
@@ -404,7 +418,7 @@ module.exports = grammar({
     // ── Param list ─────────────────────────────────────────────────────────
     param_list: ($) => seq("(", commaSep(choice($.self_param, $.param)), ")"),
 
-    // Receiver: `self`, `~self`, `^self`, `&self` (D-CAP7).
+    // Receiver: `self`, `^self`, `&self` (D-MEM1).
     self_param: ($) => seq(optional($.capability_sigil), "self"),
 
     // A parameter, with an optional default value `clamp: Bool = false`.
@@ -443,10 +457,10 @@ module.exports = grammar({
 
     named_type_field: ($) => seq($.identifier, ":", $._type),
 
-    // `~T` write, `^T` move, `&T` share, `*T` raw pointer (D-CAP7).
+    // `^T` move, `&T` write, `*T` raw pointer (D-MEM1).
     capability_type: ($) => prec(2, seq($.capability_sigil, $._type)),
 
-    capability_sigil: (_) => choice("~", "^", "&", "*"),
+    capability_sigil: (_) => choice("^", "&", "*"),
 
     primitive_type: (_) =>
       choice(
@@ -656,6 +670,7 @@ module.exports = grammar({
         $.char_literal,
         $.identifier,
         $.type_identifier,
+        $.copy_expr,
         $.primitive_type,
         $.call_expr,
         $.turbofish_call,
@@ -695,6 +710,8 @@ module.exports = grammar({
     // A value-fact marker riding an expression: `#Tainted input` (D-TAINT1), or
     // a bare marker value such as the typed hole `#Todo` (D-TOOL2).
     marked_expr: ($) => prec.right(seq($.attribute, optional($._expr))),
+
+    copy_expr: ($) => prec.right(6, seq("copy", $._expr)),
 
     // A type-applied member access: `mem.Ptr<Int>.from_addr(…)` — a generic
     // applied to a path before a further `.method`. The `<` is adjacent.
@@ -923,7 +940,7 @@ module.exports = grammar({
     lambda_param: ($) =>
       seq(field("name", $.identifier), optional(seq(":", $._type))),
 
-    // Call-site capability sigils: `~x`, `^x`, `&x`, `*x` (D-CAP7).
+    // Call-site capability sigils: `^x`, `&x`, `*x` (D-MEM1).
     capability_expr: ($) => prec.right(6, seq($.capability_sigil, $._expr)),
 
     binary_expr: ($) => {

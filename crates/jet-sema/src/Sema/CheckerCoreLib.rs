@@ -1491,9 +1491,14 @@ impl<'a> Checker<'a> {
                 return Some(Type::Named("HttpMux".to_string()));
             }
             ("core.http.server", "serve") => {
-                if args.len() != 2 {
-                    self.diags
-                        .push(wrong_core_arity("serve", 2, args.len(), span));
+                if args.len() != 2 && args.len() != 3 {
+                    self.diags.push(Diagnostic::error(
+                        "E0104",
+                        format!("`serve` expects 2 arguments, or 3 with `tls:`, got {}", args.len()),
+                        "HTTPS serving uses the named `tls:` option so plaintext and TLS share one entry point".to_string(),
+                        "write `Server.serve(addr, mux)` or `Server.serve(addr, mux, tls: Server.tls(cert, key))`".to_string(),
+                        Some(span),
+                    ));
                     for a in args.iter_mut() {
                         self.infer(&mut a.expr);
                     }
@@ -1502,10 +1507,48 @@ impl<'a> Checker<'a> {
                 self.expect_core_arg("serve", 0, &Type::String, &mut args[0]);
                 // second arg is a Mux — just infer it
                 self.infer(&mut args[1].expr);
+                if args.len() == 3 {
+                    match args[2].label.as_ref().map(|(label, span)| (label.as_str(), *span)) {
+                        Some(("tls", _)) => {}
+                        Some((label, label_span)) => self.diags.push(Diagnostic::error(
+                            "E0125",
+                            format!("`serve` has no option named `{label}` here"),
+                            "the third HTTP server argument is a named TLS option, not a positional value".to_string(),
+                            "write `tls: Server.tls(cert, key)`".to_string(),
+                            Some(label_span),
+                        )),
+                        None => self.diags.push(Diagnostic::error(
+                            "E0125",
+                            "`serve` needs `tls:` before the third argument".to_string(),
+                            "the label makes the transport switch explicit at the call site".to_string(),
+                            "write `Server.serve(addr, mux, tls: Server.tls(cert, key))`".to_string(),
+                            Some(args[2].span),
+                        )),
+                    }
+                    self.expect_core_arg(
+                        "serve",
+                        2,
+                        &Type::Named("HttpServerTls".to_string()),
+                        &mut args[2],
+                    );
+                }
                 return Some(Type::Result {
                     ok: Box::new(unit_ty()),
                     err: Box::new(Type::String),
                 });
+            }
+            ("core.http.server", "tls") => {
+                if args.len() != 2 {
+                    self.diags
+                        .push(wrong_core_arity("tls", 2, args.len(), span));
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
+                    return None;
+                }
+                self.expect_core_arg("tls", 0, &Type::String, &mut args[0]);
+                self.expect_core_arg("tls", 1, &Type::String, &mut args[1]);
+                return Some(Type::Named("HttpServerTls".to_string()));
             }
             ("core.http.server", "response") => {
                 if args.len() != 2 {
@@ -2282,7 +2325,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // D-TIMEDEPTH1=A: civil-time types.
         | "Date" | "DateTime"
         // D-NETDEP1=A / D-HTTPLIB1=A: HTTP types.
-        | "HttpClientReq" | "HttpClientResp" | "HttpMux" | "HttpSrvReq" | "HttpSrvResp"
+        | "HttpClientReq" | "HttpClientResp" | "HttpMux" | "HttpSrvReq" | "HttpSrvResp" | "HttpServerTls"
         // D-TYPEDTEXT1=D: typed text — a checked query/markup template built by
         // expected-type elaboration of a string literal (E0149 guards a plain
         // runtime `String` from filling this position).
@@ -3970,6 +4013,46 @@ pub fn core_fixed_sig(
             vec![(read, Type::List(Box::new(u8_ty())))],
             Some(Type::String),
         )),
+        // D-RAYLIB1=A: first bounded `core.raylib` skeleton. These are typed,
+        // deterministic no-op stubs in codegen until the native raylib bridge
+        // is wired; the surface is intentionally tiny and display-gated.
+        ("core.raylib" | "jet.raylib", "window_open") => Some((
+            vec![(read, Type::Int), (read, Type::Int), (read, Type::String)],
+            Some(Type::Named("RaylibWindow".to_string())),
+        )),
+        ("core.raylib" | "jet.raylib", "window_should_close") => Some((
+            vec![(read, Type::Named("RaylibWindow".to_string()))],
+            Some(Type::Bool),
+        )),
+        ("core.raylib" | "jet.raylib", "begin_drawing") => {
+            Some((vec![(read, Type::Named("RaylibWindow".to_string()))], None))
+        }
+        ("core.raylib" | "jet.raylib", "clear_background") => {
+            Some((vec![(read, Type::Named("RaylibColor".to_string()))], None))
+        }
+        ("core.raylib" | "jet.raylib", "draw_text") => Some((
+            vec![
+                (read, Type::String),
+                (read, Type::Int),
+                (read, Type::Int),
+                (read, Type::Int),
+                (read, Type::Named("RaylibColor".to_string())),
+            ],
+            None,
+        )),
+        ("core.raylib" | "jet.raylib", "end_drawing") => Some((vec![], None)),
+        ("core.raylib" | "jet.raylib", "close_window") => {
+            Some((vec![(read, Type::Named("RaylibWindow".to_string()))], None))
+        }
+        ("core.raylib" | "jet.raylib", "color") => Some((
+            vec![
+                (read, Type::Int),
+                (read, Type::Int),
+                (read, Type::Int),
+                (read, Type::Int),
+            ],
+            Some(Type::Named("RaylibColor".to_string())),
+        )),
         // D-CODECS1: core.compress.gzip / core.compress.zstd — standalone codec APIs,
         // separate from core.archive. `compress` takes `[U8]` and is infallible;
         // `decompress` is fallible (malformed compressed stream → `Err(String)`),
@@ -4488,6 +4571,17 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
             "tar_get",
             "tar_names_json",
         ],
+        // D-RAYLIB1=A: typed bridge skeleton.
+        "jet.raylib" => &[
+            "window_open",
+            "window_should_close",
+            "begin_drawing",
+            "clear_background",
+            "draw_text",
+            "end_drawing",
+            "close_window",
+            "color",
+        ],
         // D-CODECS1: standalone compression codecs, separate from core.archive.
         "core.compress.gzip" => &["compress", "decompress"],
         "core.compress.zstd" => &["compress", "decompress"],
@@ -4544,7 +4638,7 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         "core.time.datetime" => &["from_timestamp", "now"],
         // D-NETDEP1=A / D-HTTPLIB1=A / D-HTTPLIB2=B: HTTP library.
         "core.http.client" => &["get", "post", "request"],
-        "core.http.server" => &["mux", "serve", "response"],
+        "core.http.server" => &["mux", "serve", "response", "tls"],
         // U13 (D-JPK-SECRETCRYPTO1): decrypted-repo-secret read, age-style
         // crypto FFI bridge.
         "core.vault" => &["get"],
@@ -5100,4 +5194,28 @@ pub fn reflect_method_return(type_name: &str, method: &str, n_args: usize) -> Op
 
 pub fn is_reflect_type_name(name: &str) -> bool {
     matches!(name, "Value" | "Field")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn raylib_skeleton_signatures_are_registered() {
+        let window = core_fixed_sig("jet.raylib", "window_open")
+            .expect("raylib window_open signature")
+            .1
+            .expect("window_open return type");
+        assert_eq!(window, Type::Named("RaylibWindow".to_string()));
+
+        let color = core_fixed_sig("jet.raylib", "color")
+            .expect("raylib color signature")
+            .1
+            .expect("color return type");
+        assert_eq!(color, Type::Named("RaylibColor".to_string()));
+
+        let items = core_module_items("jet.raylib");
+        assert!(items.contains(&"draw_text".to_string()));
+        assert!(items.contains(&"close_window".to_string()));
+    }
 }

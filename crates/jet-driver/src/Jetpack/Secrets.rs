@@ -120,6 +120,8 @@ pub fn keygen(force: bool) -> Result<(PathBuf, String), String> {
 /// [`recipients_path`] if not already present. Returns `false` if already
 /// there (idempotent, same shape as `Trust::add_pattern`).
 pub fn add_recipient(project_dir: &Path, recipient: &str) -> bool {
+    let _guard =
+        super::RuntimePolicy::acquire_lock(&super::Store::managed_dir(project_dir), "secrets").ok();
     let path = recipients_path(project_dir);
     let recipient = recipient.trim();
     if list_recipients(project_dir).iter().any(|r| r == recipient) {
@@ -178,6 +180,9 @@ pub fn read_store(project_dir: &Path) -> Result<Vec<(String, String)>, String> {
 /// wire bytes exist only in this process's memory and on the helper
 /// subprocess's stdin/stdout pipe, never a file.
 pub fn write_store(project_dir: &Path, pairs: &[(String, String)]) -> Result<(), String> {
+    let _guard =
+        super::RuntimePolicy::acquire_lock(&super::Store::managed_dir(project_dir), "secrets")
+            .map_err(|e| e.to_string())?;
     let recipients = list_recipients(project_dir);
     if recipients.is_empty() {
         return Err(
@@ -352,6 +357,8 @@ fn set_mode(_path: &Path, _mode: u32) {}
 mod tests {
     use super::*;
 
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn pairs_wire_round_trips() {
         let pairs = vec![
@@ -371,11 +378,10 @@ mod tests {
 
     #[test]
     fn identity_path_honors_env_override() {
-        std::env::set_var("JET_KEYS_DIR", "/tmp/jet_secrets_test_keys_dir");
-        assert_eq!(
-            identity_path(),
-            PathBuf::from("/tmp/jet_secrets_test_keys_dir").join("secrets.identity")
-        );
+        let _guard = ENV_LOCK.lock().unwrap();
+        let dir = std::env::temp_dir().join("jet_secrets_test_keys_dir");
+        std::env::set_var("JET_KEYS_DIR", &dir);
+        assert_eq!(identity_path(), dir.join("secrets.identity"));
         std::env::remove_var("JET_KEYS_DIR");
     }
 
@@ -403,6 +409,7 @@ mod tests {
     /// helpers above.
     #[test]
     fn crypto_round_trip_through_bridge() {
+        let _guard = ENV_LOCK.lock().unwrap();
         let dir = std::env::temp_dir().join(format!(
             "jet_secrets_bridge_rt_{}_{:?}",
             std::process::id(),

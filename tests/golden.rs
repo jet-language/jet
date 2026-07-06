@@ -242,6 +242,17 @@ fn examples_compile_and_run() {
             checked += 1;
             continue;
         }
+        // D-RAYLIB1 stage 1: `core.raylib` is display-gated. The example is
+        // still front-end checked and codegen-emitted above; build/run waits for
+        // an explicit display opt-in until the native raylib bridge lands.
+        let needs_raylib_display = stem == "game/raylib_window";
+        if needs_raylib_display && std::env::var("JET_RAYLIB_DISPLAY").as_deref() != Ok("1") {
+            eprintln!(
+                "note: skipping examples/features/{stem}.jet build (set JET_RAYLIB_DISPLAY=1)"
+            );
+            checked += 1;
+            continue;
+        }
 
         if have_rustc {
             // stem contains '/' (topic/name) — flatten for the temp filename.

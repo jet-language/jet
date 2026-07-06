@@ -2023,7 +2023,8 @@ impl LowerCtx<'_, '_> {
         let idx = self
             .meta
             .struct_field_index(type_name, field_rust)
-            .ok_or_else(|| format!("jit field `{field_rust}` on `{type_name}`"))? as i64;
+            .ok_or_else(|| format!("jit field `{field_rust}` on `{type_name}`"))?
+            as i64;
         let idx_val = self.b.ins().iconst(types::I64, idx);
         let host_ref = self
             .module

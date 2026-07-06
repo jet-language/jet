@@ -317,6 +317,21 @@ fn explain_golden() {
     check_snapshot("explain_E2001.txt", &stdout);
 }
 
+#[test]
+fn jetpack_missing_build_log_golden() {
+    let cwd = isolated_cwd(&line!().to_string());
+    let root = cwd.join("jetpack-root");
+    let out = Command::new(jet())
+        .args(["logs", "definitely_missing", "--no-color"])
+        .current_dir(&cwd)
+        .env("JETPACK_ROOT", &root)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2), "missing log is usage-class error");
+    let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+    check_snapshot("e1274_missing_build_log.txt", &stderr);
+}
+
 fn is_code(s: &str) -> bool {
     let b = s.as_bytes();
     b.len() == 5 && (b[0] == b'E' || b[0] == b'L') && b[1..].iter().all(|c| c.is_ascii_digit())

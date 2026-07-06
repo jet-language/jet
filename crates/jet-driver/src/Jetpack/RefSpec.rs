@@ -141,6 +141,22 @@ impl SourceTable {
         self.named.keys().cloned().collect()
     }
 
+    /// Declared source records, sorted by name. Used by channel-locking verbs
+    /// to walk source refs without exposing the map itself.
+    pub fn declarations(&self) -> Vec<(String, String, ProviderKind)> {
+        self.named
+            .iter()
+            .map(|(name, e)| (name.clone(), e.upstream.clone(), e.via))
+            .collect()
+    }
+
+    /// Replace one declared source's upstream after reading an exact lock entry.
+    pub fn set_upstream(&mut self, name: &str, upstream: String) {
+        if let Some(entry) = self.named.get_mut(name) {
+            entry.upstream = upstream;
+        }
+    }
+
     /// Merge `other` into this table, filling in names that are not already
     /// declared here. `self` wins on conflict — inline declarations take
     /// priority over `jetpack.toml` fallbacks.
@@ -479,7 +495,58 @@ fn edit_distance(a: &str, b: &str) -> usize {
 pub struct ProviderRef {
     pub provider: Source,
     pub target: String,
+    pub channel: Option<ChannelRef>,
     pub raw: String,
+}
+
+/// D-JPK-CHANNEL1=A: a source ref tracking intent, resolved only by update
+/// verbs and stored exact in `.jet/lock`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChannelRef {
+    Latest,
+    Main,
+    SemverMask(String),
+}
+
+impl ChannelRef {
+    pub fn parse_selector(selector: &str) -> Option<ChannelRef> {
+        match selector {
+            "latest" => Some(ChannelRef::Latest),
+            "main" => Some(ChannelRef::Main),
+            s if is_semver_mask(s) => Some(ChannelRef::SemverMask(s.to_string())),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(&self) -> &str {
+        match self {
+            ChannelRef::Latest => "latest",
+            ChannelRef::Main => "main",
+            ChannelRef::SemverMask(s) => s,
+        }
+    }
+}
+
+fn is_semver_mask(s: &str) -> bool {
+    let Some(rest) = s.strip_prefix('v') else {
+        return false;
+    };
+    let Some(series) = rest.strip_suffix(".x") else {
+        return false;
+    };
+    !series.is_empty() && series.chars().all(|c| c.is_ascii_digit())
+}
+
+/// Split an upstream/source target at `#` when that selector is a channel.
+/// Exact selectors such as `#v1.2.3` are left untouched.
+pub fn split_channel_ref(s: &str) -> (&str, Option<ChannelRef>) {
+    match s.rsplit_once('#') {
+        Some((base, selector)) => match ChannelRef::parse_selector(selector) {
+            Some(ch) => (base, Some(ch)),
+            None => (s, None),
+        },
+        None => (s, None),
+    }
 }
 
 /// Classify a `provider@target` source ref against the built-in providers.
@@ -503,9 +570,11 @@ pub fn classify_provider_ref(raw: &str) -> Result<ProviderRef, RefError> {
             })
         }
     };
+    let (_, channel) = split_channel_ref(target);
     Ok(ProviderRef {
         provider,
         target: target.to_string(),
+        channel,
         raw: raw.to_string(),
     })
 }
@@ -569,6 +638,34 @@ mod tests {
             Err(RefError::UnknownSource { source, .. }) => assert_eq!(source, "brew"),
             other => panic!("expected UnknownSource, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn provider_ref_marks_channel_selectors() {
+        assert_eq!(
+            classify_provider_ref("github@openai/codex#latest")
+                .unwrap()
+                .channel,
+            Some(ChannelRef::Latest)
+        );
+        assert_eq!(
+            classify_provider_ref("github@openai/codex#main")
+                .unwrap()
+                .channel,
+            Some(ChannelRef::Main)
+        );
+        assert_eq!(
+            classify_provider_ref("github@openai/codex#v0.x")
+                .unwrap()
+                .channel,
+            Some(ChannelRef::SemverMask("v0.x".to_string()))
+        );
+        assert_eq!(
+            classify_provider_ref("github@openai/codex#v0.50.1")
+                .unwrap()
+                .channel,
+            None
+        );
     }
 
     #[test]

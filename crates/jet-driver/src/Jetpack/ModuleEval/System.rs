@@ -46,7 +46,7 @@ pub(super) fn evaluate_system(
                 target = Some(check_platform(os, arch, *span)?);
             }
             SystemFieldValue::Packages(value) => {
-                packages.extend(extract_packages(value, src)?);
+                packages.extend(extract_packages(value, src)?.packages);
             }
             SystemFieldValue::Services(entries) => {
                 for e in entries {

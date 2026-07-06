@@ -412,7 +412,8 @@ mod tests {
         ];
         let refs: Vec<&LayerFile> = files.iter().collect();
         let tar = build_tar(&refs);
-        fs::write("/tmp/jet-oci-manual-check.tar", &tar).unwrap();
+        let path = std::env::temp_dir().join("jet-oci-manual-check.tar");
+        fs::write(path, &tar).unwrap();
     }
 
     #[test]

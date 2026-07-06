@@ -1175,15 +1175,17 @@ loader crash (I2).
 Any crate-backed capability ships as a Jet package wrapping the crate via
 `extern rust`, source vendored + hash-pinned (D-BFS1). Owner-sanctioned
 bootstrap wraps (all carry a native-ize obligation): `regex` (D-REGEX1,
-`core.regex`), rustls (`core.tls`, D-NET1/D-HTTPLIB4 — embedded webpki
-roots, no system TLS), zip/tar/flate2 (`core.archive`, D-DEP-ARCHIVE1),
+`core.regex`), rustls bridge (D-NET1/D-HTTPLIB4; `core.http` client default
+HTTPS via rustls + system roots, D-TLS1=A; `core.tls` reserved for advanced
+client TLS config), zip/tar/flate2 (`core.archive`, D-DEP-ARCHIVE1),
 rusqlite-bundled (`core.db`, D-DEP-DB1), ureq/hyper/tungstenite
 (`core.http`, D-NETDEP1/D-HTTPLIB3), Cranelift (`jet-jit`, D-JITDEP1),
 wasmtime (plugins, D-DEP-WASM1), age-style crypto bridge
 (D-JPK-SECRETCRYPTO1). `jet repl` stays std-only (D-REPL18). Raylib ships as
-first-party `core.raylib` bridge package (D-RAYLIB1). npm interop = typed
-first-party stub packages, no `.d.ts` parsing (D-NPMTYPE1); Swift interop
-waits on native-UI/C-ABI work (D-JSWIFTFFI1).
+first-party `core.raylib` bridge package (D-RAYLIB1); `core.game` is the
+scene-first game engine layered above it (D-GAME1=B, D-GAME2=A, D-GAME3=C).
+npm interop = typed first-party stub packages, no `.d.ts` parsing
+(D-NPMTYPE1); Swift interop waits on native-UI/C-ABI work (D-JSWIFTFFI1).
 
 ### Core library
 
@@ -1192,6 +1194,16 @@ waits on native-UI/C-ABI work (D-JSWIFTFFI1).
 **S51 — Core library**: exported as the `core` module — `use core.files`,
 `use core.io as io`; dot paths select submodules; never quoted paths. `core`
 is compiler-reserved (see D-CORENS1).
+
+**D-GAME1 / D-GAME2 / D-GAME3 — Game stack** *(ratified 2026-07-05/06,
+card #212)*: Jet ships a first-party game stack: public primitives plus a
+batteries engine. The engine name is `core.game` (D-GAME2=A). The beginner
+API is scene-first with a frame hook (D-GAME3=C): a `Scene` owns sprites,
+shapes, sounds, camera, and input bindings as durable editable data, and
+`scene.on_frame((frame) => { ... })` attaches small game logic to that scene.
+The frame hook is not a second engine model; it is script on the scene. The
+already-ratified `core.raylib` bridge package (D-RAYLIB1=A) remains the
+interim compatibility floor beneath the native-shaped stack.
 
 **D-FILES-WRITE1 — `core.fs`/`core.files` merge** *(ratified/shipped
 2026-07-04, cv5syntaxdecrees)*: one `core.files` module for both whole-file
@@ -1248,9 +1260,12 @@ v4/v7 (D-UUIDENC1).
 `Matrix<M,N>` substrate (const-generic substrate unbuilt) (D-MATHLIB1,
 D-LINALG1). `core.db`: backend-neutral `Driver` trait, parameterized-only
 API, SQLite first; explicit `.begin/.commit/.rollback` distinct from
-`#Transact` (D-DBDRIVER1). `core.http`: client+server submodules; server is
+`#Transact` (D-DBDRIVER1). `core.http`: client+server submodules; client
+supports HTTPS by default via rustls + system roots (D-TLS1=A); server is
 plain `fn(req: Request) -> Response` on a `mux` (`mux.get("/path", handler)`,
-`req.params["id"]`, `http.serve(addr, mux)?`); HTTP/1.1+2+WebSocket
+`req.params["id"]`, `Server.serve(addr, mux)?`) with HTTPS enabled by the named
+option `Server.serve(addr, mux, tls: Server.tls(cert, key))` (D-TLSSERVE1=A);
+HTTP/1.1+2+WebSocket
 (D-HTTPLIB1–3, D-ROUTE1; unbuilt — c164). Compression
 `core.compress.{gzip,zstd}` (D-CODECS1). Measurement-with-uncertainty in
 `core.science.measurement` (D-HONESTNUM1, unbuilt). Opt-in `Gc<T>` module
@@ -1589,6 +1604,13 @@ discovery. **D-REF3**: borrowed-return + cleanup-scope inlay hints on by
 default. **D-JPK-DISCOVER1**: `jet search`/`jet info` + LSP completions from
 a local offline index. **D-JPK-BUILDDBG1**: failed builds keep the scratch
 dir; `--shell-on-fail`; `jet explain <ref>`; `jet logs <pkg>`.
+
+**D-HL1**: highlighting is generated lexical base plus semantic overlay.
+`Syntax.rs` owns all user-typeable tokens; `jet devtools grammars` regenerates
+VS Code/TextMate, tree-sitter, and Zed generated sections, and
+`tests/grammar.rs` fails on drift. LSP semantic tokens refine live editors for
+ownership (`copy`, `^`, `&`) and markers; retired/foreign spellings are not
+colored as live syntax.
 
 **D-RECONCILE-SCOPE1 / D-CANON-SOURCE1**: syntax reconciliation is a strict
 repo-wide purge of stale spellings; canonical truth is `Syntax.rs` + this

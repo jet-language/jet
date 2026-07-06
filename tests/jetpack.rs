@@ -80,6 +80,57 @@ fn write_runnable_fixture(fixtures: &Path, out_dir: &Path) {
     fs::write(fixtures.join("nixpkgs-greet.json"), json).unwrap();
 }
 
+fn write_channel_fixture(fixtures: &Path, base: &str, channel: &str, exact: &str) {
+    fs::create_dir_all(fixtures).unwrap();
+    fs::write(
+        fixtures.join("channels.txt"),
+        format!("{base} {channel} {exact}\n"),
+    )
+    .unwrap();
+}
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+}
+
+fn write_hangar_meta(
+    root: &Path,
+    id: &str,
+    name: &str,
+    version: &str,
+    output_hash: &str,
+    last_used_at: Option<u64>,
+) -> PathBuf {
+    let dir = root.join("hangar").join(id);
+    fs::create_dir_all(&dir).unwrap();
+    let timestamps = last_used_at
+        .map(|ts| format!("  \"realized_at\": \"{ts}\",\n  \"last_used_at\": \"{ts}\",\n"))
+        .unwrap_or_default();
+    fs::write(
+        dir.join("meta.json"),
+        format!(
+            "{{\n  \"name\": \"{name}\",\n  \"version\": \"{version}\",\n  \"ref\": \"nixpkgs:{name}\",\n  \"out\": \"/nix/store/{name}\",\n  \"bin\": \"/nix/store/{name}/bin\",\n  \"rlib\": \"\",\n  \"output_hash\": \"{output_hash}\",\n  \"platform\": \"test\",\n  \"signature\": \"\",\n  \"provenance\": \"fixture\",\n{timestamps}  \"end\": \"meta\"\n}}"
+        ),
+    )
+    .unwrap();
+    dir
+}
+
+fn write_lock_with_live_output(project: &Path, name: &str, version: &str, output_hash: &str) {
+    let dot = project.join(".jet");
+    fs::create_dir_all(&dot).unwrap();
+    fs::write(
+        dot.join("lock"),
+        format!(
+            "version = 1\n\n[[package]]\nname = \"{name}\"\nversion = \"{version}\"\nsource = {{ path = \".\" }}\nfingerprint = \"sha256-test\"\ndependencies = []\noutput-hash = \"{output_hash}\"\n\n[root]\ndependencies = [\"{name}\"]\n"
+        ),
+    )
+    .unwrap();
+}
+
 #[test]
 fn build_resolves_fixture_ref() {
     let root = Scratch::new("root");
@@ -119,6 +170,181 @@ fn list_shows_realized_package() {
 }
 
 #[test]
+fn clean_removes_only_stale_unreferenced_hangar_objects() {
+    let root = Scratch::new("root");
+    let stale = write_hangar_meta(&root.path, "old-1", "old", "1.0", "sha256-old", Some(1));
+    let fresh = write_hangar_meta(
+        &root.path,
+        "fresh-1",
+        "fresh",
+        "1.0",
+        "sha256-fresh",
+        Some(now_secs()),
+    );
+    fs::write(stale.join("payload"), "old bytes").unwrap();
+    fs::write(fresh.join("payload"), "fresh bytes").unwrap();
+
+    let out = jetpack()
+        .args(["clean", "--no-color"])
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(!stale.exists(), "stale object should be collected");
+    assert!(fresh.exists(), "fresh object should be kept");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("removed 1 stale object"),
+        "stderr: {stderr}"
+    );
+}
+
+#[test]
+fn clean_keeps_lock_reachable_and_legacy_unknown_hangar_objects() {
+    let root = Scratch::new("root");
+    let project = Scratch::new("proj");
+    let live = write_hangar_meta(&root.path, "live-1", "live", "1.0", "sha256-live", Some(1));
+    let legacy = write_hangar_meta(&root.path, "legacy-1", "legacy", "1.0", "", None);
+    write_lock_with_live_output(&project.path, "live", "1.0", "sha256-live");
+
+    let out = jetpack()
+        .args(["clean", "--no-color"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(live.exists(), "lock-reachable object should be kept");
+    assert!(
+        legacy.exists(),
+        "legacy object without timestamps should be kept"
+    );
+}
+
+#[test]
+fn clean_sweeps_orphan_build_scratch_but_keeps_active_scratch() {
+    let root = Scratch::new("root");
+    let scratch = root.path.join("hangar/build-scratch");
+    let orphan = scratch.join("orphan");
+    let active = scratch.join("active");
+    fs::create_dir_all(&orphan).unwrap();
+    fs::create_dir_all(&active).unwrap();
+    fs::write(orphan.join("tmp"), "dead").unwrap();
+    fs::write(active.join(".active"), "").unwrap();
+    fs::write(active.join("tmp"), "live").unwrap();
+
+    let out = jetpack()
+        .args(["clean", "--no-color"])
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(!orphan.exists(), "orphan scratch should be swept");
+    assert!(active.exists(), "active scratch marker protects scratch");
+}
+
+#[test]
+fn clean_optimizes_duplicate_files_inside_hangar_only() {
+    let root = Scratch::new("root");
+    let first = write_hangar_meta(
+        &root.path,
+        "dup-a",
+        "dupa",
+        "1.0",
+        "sha256-a",
+        Some(now_secs()),
+    );
+    let second = write_hangar_meta(
+        &root.path,
+        "dup-b",
+        "dupb",
+        "1.0",
+        "sha256-b",
+        Some(now_secs()),
+    );
+    fs::write(first.join("blob"), "same payload").unwrap();
+    fs::write(second.join("blob"), "same payload").unwrap();
+
+    let out = jetpack()
+        .args(["clean", "--no-color"])
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("optimized 1 file"), "stderr: {stderr}");
+    assert_eq!(
+        fs::read_to_string(first.join("blob")).unwrap(),
+        "same payload"
+    );
+    assert_eq!(
+        fs::read_to_string(second.join("blob")).unwrap(),
+        "same payload"
+    );
+}
+
+#[test]
+fn jet_clean_delegates_to_jetpack_clean() {
+    let root = Scratch::new("root");
+    let stale = write_hangar_meta(&root.path, "old-top", "oldtop", "1.0", "", Some(1));
+
+    let out = jet()
+        .args(["clean", "--no-color"])
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(!stale.exists(), "`jet clean` should collect via jetpack");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("cleaned hangar"), "stderr: {stderr}");
+}
+
+#[test]
+fn build_runs_opportunistic_clean_after_success() {
+    let root = Scratch::new("root");
+    let stale = write_hangar_meta(&root.path, "old-auto", "oldauto", "1.0", "", Some(1));
+
+    let out = jetpack()
+        .args(["build", "nixpkgs:fastfetch", "--no-color", "--offline"])
+        .env("JETPACK_ROOT", &root.path)
+        .env("JETPACK_FIXTURES", example_fixtures())
+        .env("JETPACK_AUTO_CLEAN_ALWAYS", "1")
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        !stale.exists(),
+        "successful build should run opportunistic clean"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("auto-cleaned hangar"), "stderr: {stderr}");
+}
+
+#[test]
 fn run_dash_dash_executes_in_env_and_returns_status() {
     let root = Scratch::new("root");
     let fixtures = Scratch::new("fx");
@@ -145,6 +371,36 @@ fn run_dash_dash_executes_in_env_and_returns_status() {
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert_eq!(stdout.trim(), "hello from jetpack");
+}
+
+#[test]
+fn run_explicit_package_without_command_runs_package_visibly() {
+    let root = Scratch::new("root");
+    let fixtures = Scratch::new("fx");
+    let out_dir = Scratch::new("out");
+    write_runnable_fixture(&fixtures.path, &out_dir.path);
+
+    let output = jetpack()
+        .args(["run", "nixpkgs:greet", "--no-color", "--offline"])
+        .env("JETPACK_ROOT", &root.path)
+        .env("JETPACK_FIXTURES", &fixtures.path)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        "hello from jetpack"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("running nixpkgs:greet -> greet"),
+        "stderr: {stderr}"
+    );
+    assert!(stderr.contains("(no args)"), "stderr: {stderr}");
 }
 
 #[test]
@@ -275,6 +531,496 @@ fn run_with_project_env_file_resolves_declared_packages() {
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("fastfetch"), "stderr: {stderr}");
+}
+
+#[test]
+fn typed_env_copy_adapter_realizes_local_source() {
+    let proj = Scratch::new("proj");
+    let root = Scratch::new("root");
+    let vendor = proj.join("vendor/tool");
+    fs::create_dir_all(vendor.join("share")).unwrap();
+    fs::write(vendor.join("share/readme.txt"), "adapted\n").unwrap();
+    fs::write(
+        proj.join("env.jet"),
+        r#"
+module dev {
+    env.dev: Env.{
+        packages: [
+            Pkg.adapt(
+                name: "tool",
+                source: path@vendor/tool,
+                recipe: Recipe.copy()
+            )
+        ],
+    }
+}
+"#,
+    )
+    .unwrap();
+    let output = jetpack()
+        .args(["build", "--no-color"])
+        .current_dir(&proj.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let entries = fs::read_dir(root.path.join("hangar"))
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .collect::<Vec<_>>();
+    assert!(
+        entries.iter().any(
+            |p| fs::read_to_string(p.join("share/readme.txt")).unwrap_or_default() == "adapted\n"
+        ),
+        "adapter output missing copied file: {entries:?}"
+    );
+}
+
+#[test]
+fn typed_env_prebuilt_adapter_runs_from_path() {
+    let proj = Scratch::new("proj");
+    let root = Scratch::new("root");
+    let vendor = proj.join("vendor/weirdctl");
+    fs::create_dir_all(&vendor).unwrap();
+    let bin = vendor.join("weirdctl");
+    fs::write(&bin, "#!/bin/sh\necho weird ok\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    fs::write(
+        proj.join("env.jet"),
+        r#"
+module dev {
+    env.dev: Env.{
+        packages: [
+            Pkg.adapt(
+                name: "weirdctl",
+                source: path@vendor/weirdctl,
+                recipe: Recipe.prebuilt(bin: "weirdctl", as: "weirdctl")
+            )
+        ],
+    }
+}
+"#,
+    )
+    .unwrap();
+    let output = jetpack()
+        .args(["run", "--no-color", "--", "weirdctl"])
+        .current_dir(&proj.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "weird ok");
+}
+
+#[test]
+fn no_nix_nixpkgs_package_reports_e1272() {
+    let root = Scratch::new("root");
+    let output = jetpack()
+        .args(["build", "nixpkgs:postgres", "--no-color"])
+        .env("JETPACK_ROOT", &root.path)
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("E1272"), "stderr: {stderr}");
+    assert!(stderr.contains("nixpkgs:postgres"), "stderr: {stderr}");
+    assert!(stderr.contains("install Nix"), "stderr: {stderr}");
+    assert!(stderr.contains("--adapt"), "stderr: {stderr}");
+    assert!(!stderr.contains("E1256"), "stderr: {stderr}");
+    assert!(!stderr.contains("couldn't run `nix`"), "stderr: {stderr}");
+}
+
+#[test]
+fn no_nix_ad_hoc_package_reports_e1272() {
+    let proj = Scratch::new("proj");
+    let root = Scratch::new("root");
+    let output = jetpack()
+        .args([
+            "enter",
+            "-p",
+            "postgres",
+            "--no-color",
+            "--trust",
+            "--",
+            "true",
+        ])
+        .current_dir(&proj.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("E1272"), "stderr: {stderr}");
+    assert!(stderr.contains("nixpkgs:postgres"), "stderr: {stderr}");
+}
+
+#[test]
+fn no_nix_mixed_env_realizes_core_then_reports_nix_hole() {
+    let (base, proj, root) = core_hello_project("no-nix-mixed");
+    fs::write(
+        proj.join("env.jet"),
+        fs::read_to_string(proj.join("env.jet")).unwrap().replace(
+            "pkg.packages([\"mine:hello\"])",
+            "pkg.packages([\"mine:hello\", \"nixpkgs:postgres\"])",
+        ),
+    )
+    .unwrap();
+    let output = jetpack()
+        .args(["build", "--no-color"])
+        .current_dir(&proj)
+        .env("JETPACK_ROOT", &root)
+        .env("HOME", base.join("home"))
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("hello built"), "stderr: {stderr}");
+    assert!(stderr.contains("E1272"), "stderr: {stderr}");
+    assert!(stderr.contains("nixpkgs:postgres"), "stderr: {stderr}");
+    let metas = fs::read_dir(root.join("hangar"))
+        .unwrap()
+        .flatten()
+        .filter_map(|e| fs::read_to_string(e.path().join("meta.json")).ok())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(metas.contains("\"name\": \"hello\""), "metas: {metas}");
+}
+
+#[test]
+fn no_nix_json_lists_realized_refs_and_holes() {
+    let (base, proj, root) = core_hello_project("no-nix-json");
+    fs::write(
+        proj.join("env.jet"),
+        fs::read_to_string(proj.join("env.jet")).unwrap().replace(
+            "pkg.packages([\"mine:hello\"])",
+            "pkg.packages([\"mine:hello\", \"nixpkgs:postgres\"])",
+        ),
+    )
+    .unwrap();
+    let output = jetpack()
+        .args(["build", "--no-color", "--json"])
+        .current_dir(&proj)
+        .env("JETPACK_ROOT", &root)
+        .env("HOME", base.join("home"))
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"code\":\"E1272\""), "stdout: {stdout}");
+    assert!(
+        stdout.contains("\"realized\":[\"mine:hello\"]"),
+        "stdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"holes\":[\"nixpkgs:postgres\"]"),
+        "stdout: {stdout}"
+    );
+}
+
+#[test]
+fn typed_env_bad_adapter_is_e1270() {
+    let proj = Scratch::new("proj");
+    let root = Scratch::new("root");
+    fs::write(
+        proj.join("env.jet"),
+        r#"
+module dev {
+    env.dev: Env.{
+        packages: [
+            Pkg.adapt(
+                name: "broken",
+                source: path@vendor/broken,
+                recipe: Recipe.build()
+            )
+        ],
+    }
+}
+"#,
+    )
+    .unwrap();
+    let output = jetpack()
+        .args(["build", "--no-color"])
+        .current_dir(&proj.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("E1270"), "stderr: {stderr}");
+}
+
+#[test]
+fn channel_update_writes_exact_lock_and_build_uses_it_offline() {
+    let proj = Scratch::new("proj");
+    let root = Scratch::new("root");
+    let fixtures = Scratch::new("fx");
+    fs::write(
+        proj.join("env.jet"),
+        r#"
+module dev {
+    sources: { default: github@acme/tools#latest }
+    env.dev: Env.{ packages: [default.greet] }
+}
+"#,
+    )
+    .unwrap();
+    write_channel_fixture(
+        &fixtures.path,
+        "github:acme/tools",
+        "latest",
+        "github:acme/tools#v1.2.0",
+    );
+    fs::write(
+        fixtures.join("default-greet.json"),
+        r#"[{"outputs":{"out":"/nix/store/0000000000000000000000000000000a-greet-1.2.0"}}]"#,
+    )
+    .unwrap();
+
+    let update = jetpack()
+        .args(["update", "--no-color", "--fixtures"])
+        .arg(&fixtures.path)
+        .current_dir(&proj.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert!(
+        update.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&update.stderr)
+    );
+    let lock = fs::read_to_string(proj.join(".jet/lock")).unwrap();
+    assert!(lock.contains("[[source_channel]]"), "lock: {lock}");
+    assert!(lock.contains("channel = \"latest\""), "lock: {lock}");
+    assert!(
+        lock.contains("exact = \"github:acme/tools#v1.2.0\""),
+        "lock: {lock}"
+    );
+
+    let build = jetpack()
+        .args(["build", "--no-color", "--offline"])
+        .current_dir(&proj.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("JETPACK_FIXTURES", &fixtures.path)
+        .output()
+        .unwrap();
+    assert!(
+        build.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+}
+
+#[test]
+fn channel_build_without_lock_is_e1271() {
+    let proj = Scratch::new("proj");
+    let root = Scratch::new("root");
+    fs::write(
+        proj.join("env.jet"),
+        r#"
+module dev {
+    sources: { default: github@acme/tools#latest }
+    env.dev: Env.{ packages: [default.greet] }
+}
+"#,
+    )
+    .unwrap();
+    let out = jetpack()
+        .args(["build", "--no-color", "--offline"])
+        .current_dir(&proj.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("E1271"), "stderr: {stderr}");
+    assert!(
+        stderr.contains("jetpack update default"),
+        "stderr: {stderr}"
+    );
+}
+
+#[test]
+fn channel_update_accepts_main_and_semver_mask() {
+    let proj = Scratch::new("proj");
+    let root = Scratch::new("root");
+    let fixtures = Scratch::new("fx");
+    fs::write(
+        proj.join("env.jet"),
+        r#"
+module dev {
+    sources: {
+        trunk: github@acme/tools#main,
+        stable: github@acme/tools#v0.x,
+    }
+    env.dev: Env.{ packages: [trunk.greet, stable.greet] }
+}
+"#,
+    )
+    .unwrap();
+    fs::create_dir_all(&fixtures.path).unwrap();
+    fs::write(
+        fixtures.join("channels.txt"),
+        "github:acme/tools main github:acme/tools#abc123\n\
+         github:acme/tools v0.x github:acme/tools#v0.9.4\n",
+    )
+    .unwrap();
+
+    let out = jetpack()
+        .args(["update", "--no-color", "--fixtures"])
+        .arg(&fixtures.path)
+        .current_dir(&proj.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let lock = fs::read_to_string(proj.join(".jet/lock")).unwrap();
+    assert!(lock.contains("name = \"trunk\""), "lock: {lock}");
+    assert!(lock.contains("channel = \"main\""), "lock: {lock}");
+    assert!(
+        lock.contains("exact = \"github:acme/tools#abc123\""),
+        "lock: {lock}"
+    );
+    assert!(lock.contains("name = \"stable\""), "lock: {lock}");
+    assert!(lock.contains("channel = \"v0.x\""), "lock: {lock}");
+    assert!(
+        lock.contains("exact = \"github:acme/tools#v0.9.4\""),
+        "lock: {lock}"
+    );
+}
+
+#[test]
+fn outdated_reports_newer_channel_without_mutating_lock() {
+    let proj = Scratch::new("proj");
+    let root = Scratch::new("root");
+    let fixtures = Scratch::new("fx");
+    fs::write(
+        proj.join("env.jet"),
+        r#"
+module dev {
+    sources: { default: github@acme/tools#latest }
+    env.dev: Env.{ packages: [default.greet] }
+}
+"#,
+    )
+    .unwrap();
+    fs::create_dir_all(proj.join(".jet")).unwrap();
+    fs::write(
+        proj.join(".jet/lock"),
+        "version = 1\n\n[[source_channel]]\nname = \"default\"\nchannel = \"latest\"\nexact = \"github:acme/tools#v1.2.0\"\n\n[root]\ndependencies = []\n",
+    )
+    .unwrap();
+    write_channel_fixture(
+        &fixtures.path,
+        "github:acme/tools",
+        "latest",
+        "github:acme/tools#v1.3.0",
+    );
+
+    let out = jetpack()
+        .args(["outdated", "--no-color", "--fixtures"])
+        .arg(&fixtures.path)
+        .current_dir(&proj.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("v1.2.0"), "stderr: {stderr}");
+    assert!(stderr.contains("v1.3.0"), "stderr: {stderr}");
+    let lock = fs::read_to_string(proj.join(".jet/lock")).unwrap();
+    assert!(
+        lock.contains("exact = \"github:acme/tools#v1.2.0\""),
+        "lock mutated: {lock}"
+    );
+}
+
+#[test]
+fn top_level_jet_outdated_dispatches_to_jetpack() {
+    let proj = Scratch::new("proj");
+    let root = Scratch::new("root");
+    let fixtures = Scratch::new("fx");
+    fs::write(
+        proj.join("env.jet"),
+        r#"
+module dev {
+    sources: { default: github@acme/tools#latest }
+    env.dev: Env.{ packages: [default.greet] }
+}
+"#,
+    )
+    .unwrap();
+    fs::create_dir_all(proj.join(".jet")).unwrap();
+    fs::write(
+        proj.join(".jet/lock"),
+        "version = 1\n\n[[source_channel]]\nname = \"default\"\nchannel = \"latest\"\nexact = \"github:acme/tools#v1.2.0\"\n\n[root]\ndependencies = []\n",
+    )
+    .unwrap();
+    write_channel_fixture(
+        &fixtures.path,
+        "github:acme/tools",
+        "latest",
+        "github:acme/tools#v1.3.0",
+    );
+
+    let out = jet()
+        .args(["outdated", "--no-color", "--fixtures"])
+        .arg(&fixtures.path)
+        .current_dir(&proj.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("v1.2.0"), "stderr: {stderr}");
+    assert!(stderr.contains("v1.3.0"), "stderr: {stderr}");
+}
+
+#[test]
+fn add_adapt_prints_snippet_without_editing_env() {
+    let proj = Scratch::new("proj");
+    let output = jetpack()
+        .args(["add", "path:vendor/weirdctl", "--adapt", "--no-color"])
+        .current_dir(&proj.path)
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Pkg.adapt("), "stdout: {stdout}");
+    assert!(
+        stdout.contains("source: path@vendor/weirdctl"),
+        "stdout: {stdout}"
+    );
+    assert!(!proj.join("env.jet").exists());
 }
 
 #[test]
@@ -561,9 +1307,9 @@ fn enter_flake_with_no_foreign_flake_present_is_friendly() {
 }
 
 #[test]
-fn top_level_jet_run_nixpkgs_at_tool_execs_tool() {
+fn top_level_jet_run_nixpkgs_colon_tool_execs_tool() {
     // U16: `nix run nixpkgs#tool` parity at the public `jet` front door. The
-    // top-level spelling uses provider refs (`nixpkgs@tool`) and lowers to the
+    // top-level spelling uses CLI refs (`nixpkgs:tool`) and lowers to the
     // same jetpack realization path as `jetpack run nixpkgs:tool -- tool`.
     let root = Scratch::new("jet-run-nixpkgs-root");
     let proj = Scratch::new("jet-run-nixpkgs-proj");
@@ -573,7 +1319,7 @@ fn top_level_jet_run_nixpkgs_at_tool_execs_tool() {
     let output = jet()
         .args([
             "run",
-            "nixpkgs@greet",
+            "nixpkgs:greet",
             "--no-color",
             "--offline",
             "--fixtures",
@@ -591,6 +1337,12 @@ fn top_level_jet_run_nixpkgs_at_tool_execs_tool() {
     assert_eq!(
         String::from_utf8_lossy(&output.stdout).trim(),
         "hello from jetpack"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        stderr.matches("running nixpkgs:greet -> greet").count(),
+        1,
+        "stderr: {stderr}"
     );
 }
 
@@ -1179,10 +1931,8 @@ fn offline_without_fixtures_errors() {
         .unwrap();
     assert!(!out.status.success());
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        stderr.contains("offline mode needs fixtures"),
-        "stderr: {stderr}"
-    );
+    assert!(stderr.contains("E1276"), "stderr: {stderr}");
+    assert!(stderr.contains("nixpkgs:fastfetch"), "stderr: {stderr}");
 }
 
 // ── D-JPK-FILES Phase 2b: jetpack.toml wiring ─────────────────────────────

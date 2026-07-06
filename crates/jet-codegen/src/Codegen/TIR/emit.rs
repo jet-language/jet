@@ -3562,6 +3562,61 @@ pub(crate) fn emit_tir_core_call(
         ("core.archive", "tar_names_json") => {
             format!("{}(&({}))", regex_fn("jet_archive_tar_names_json"), arg(0))
         }
+        // D-RAYLIB1=A: typed no-op bridge skeleton. `core.raylib` currently
+        // normalizes to the internal `jet.raylib` key.
+        ("core.raylib" | "jet.raylib", "window_open") => {
+            format!(
+                "{}jet_raylib_window_open({}, {}, &({}))",
+                cx.root_prefix,
+                arg(0),
+                arg(1),
+                arg(2)
+            )
+        }
+        ("core.raylib" | "jet.raylib", "window_should_close") => {
+            format!(
+                "{}jet_raylib_window_should_close(&({}))",
+                cx.root_prefix,
+                arg(0)
+            )
+        }
+        ("core.raylib" | "jet.raylib", "begin_drawing") => {
+            format!("{}jet_raylib_begin_drawing(&({}))", cx.root_prefix, arg(0))
+        }
+        ("core.raylib" | "jet.raylib", "clear_background") => {
+            format!(
+                "{}jet_raylib_clear_background(&({}))",
+                cx.root_prefix,
+                arg(0)
+            )
+        }
+        ("core.raylib" | "jet.raylib", "draw_text") => {
+            format!(
+                "{}jet_raylib_draw_text(&({}), {}, {}, {}, &({}))",
+                cx.root_prefix,
+                arg(0),
+                arg(1),
+                arg(2),
+                arg(3),
+                arg(4)
+            )
+        }
+        ("core.raylib" | "jet.raylib", "end_drawing") => {
+            format!("{}jet_raylib_end_drawing()", cx.root_prefix)
+        }
+        ("core.raylib" | "jet.raylib", "close_window") => {
+            format!("{}jet_raylib_close_window(&({}))", cx.root_prefix, arg(0))
+        }
+        ("core.raylib" | "jet.raylib", "color") => {
+            format!(
+                "{}jet_raylib_color({}, {}, {}, {})",
+                cx.root_prefix,
+                arg(0),
+                arg(1),
+                arg(2),
+                arg(3)
+            )
+        }
         // D-CODECS1: core.compress.gzip / core.compress.zstd — standalone codec APIs
         // (separate from core.archive) via the FFI bridge crate. `compress` is
         // infallible; `decompress` returns a Rust `Result<Vec<u8>, String>` which is
@@ -3741,10 +3796,20 @@ pub(crate) fn emit_tir_core_call(
         }
         // D-NETDEP1=A / D-HTTPLIB1=A: HTTP server constructors (CoreLib, no prefix needed).
         ("core.http.server", "mux") => format!("jet_http_mux_new()"),
+        ("core.http.server", "serve") if args.len() == 3 => {
+            let ffi = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
+            format!(
+                "jet_http_mux_serve_tls(&({}), {}, {}, |cert, key| {ffi}::jet_http_server_tls_validate_impl(cert, key), |cert, key, stream, handler| {ffi}::jet_http_server_tls_handle_impl(cert, key, stream, handler))",
+                arg(0),
+                arg(1),
+                arg(2)
+            )
+        }
         ("core.http.server", "serve") => format!("jet_http_mux_serve(&({}), {})", arg(0), arg(1)),
         ("core.http.server", "response") => {
             format!("jet_http_srv_response({}, &({}))", arg(0), arg(1))
         }
+        ("core.http.server", "tls") => format!("jet_http_srv_tls(&({}), &({}))", arg(0), arg(1)),
         // D-TIMEDEPTH1=A: civil-time constructors.
         ("core.time.date", "new") => format!("JetDate::new({}, {}, {})", arg(0), arg(1), arg(2)),
         ("core.time.date", "today") => format!("JetDate::today_utc()"),

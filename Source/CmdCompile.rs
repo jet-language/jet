@@ -503,6 +503,7 @@ fn write_sbom_for_build(file: &str, bin: &Path) {
         workspace_members: Vec::new(),
         comptime_inputs: Vec::new(),
         toolchains: Vec::new(),
+        source_channels: Vec::new(),
     });
 
     let sbom = jet::Publish::emit_spdx(&lock, &name, &version);
@@ -1546,6 +1547,16 @@ pub(crate) fn build(
             report_problems(mode, file, "", &[diag]);
             exit(ExitCodes::USER_ERROR);
         }
+        if let Some(linker) = missing_linker(&stderr) {
+            eprintln!("Error [L2101]: rustc could not find linker `{}`.", linker);
+            eprintln!(
+                " Why: Jet uses rustc as its backend, and rustc needs a C linker to produce a native binary."
+            );
+            eprintln!(
+                " Fix: run from `nix develop`, or install a C toolchain (`gcc`/`clang`; on Debian/Ubuntu: `build-essential`, on Arch: `base-devel`)."
+            );
+            exit(ExitCodes::USER_ERROR);
+        }
         eprintln!("internal compiler error: the generated Rust did not compile.");
         eprintln!(
             "This is a bug in {}, NOT in your program. Please report it,",
@@ -1668,9 +1679,24 @@ fn missing_c_lib(stderr: &str) -> Option<String> {
     None
 }
 
+/// Scan a failed rustc stderr for a missing system linker. This is an
+/// environment/toolchain problem (L2101), not a generated-Rust ICE.
+fn missing_linker(stderr: &str) -> Option<String> {
+    for line in stderr.lines() {
+        if let Some(rest) = line.split("linker `").nth(1) {
+            if let Some((name, tail)) = rest.split_once('`') {
+                if !name.is_empty() && tail.contains("not found") {
+                    return Some(name.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod missing_c_lib_tests {
-    use super::missing_c_lib;
+    use super::{missing_c_lib, missing_linker};
 
     #[test]
     fn detects_ld_cannot_find() {
@@ -1692,5 +1718,18 @@ mod missing_c_lib_tests {
         // A real rustc type error must keep the ICE path (returns None here).
         let stderr = "error[E0308]: mismatched types\n --> build/main.rs:3:5\n";
         assert_eq!(missing_c_lib(stderr), None);
+    }
+
+    #[test]
+    fn detects_missing_system_linker() {
+        let stderr =
+            "error: linker `cc` not found\n  |\n  = note: No such file or directory (os error 2)\n";
+        assert_eq!(missing_linker(stderr).as_deref(), Some("cc"));
+    }
+
+    #[test]
+    fn genuine_codegen_error_is_not_a_missing_linker() {
+        let stderr = "error[E0425]: cannot find type `RaylibWindow` in module `jet_std`\n";
+        assert_eq!(missing_linker(stderr), None);
     }
 }

@@ -1,8 +1,9 @@
 # Jet — Zed
 
-Zed dev extension: syntax highlighting (minimal Tree-sitter grammar) plus
-`jet lsp` for diagnostics, completion, hover, go-to-definition, rename,
-semantic tokens, and quick-fixes.
+Zed dev extension: generated Tree-sitter lexical highlighting plus `jet lsp`
+for diagnostics, completion, hover, go-to-definition, rename, semantic tokens
+(full/range/delta), inlay hints, quick-fixes, document symbols, folding,
+selection ranges, and call hierarchy.
 
 ## Setup
 
@@ -65,9 +66,21 @@ to `x :: 1` or `x := 1`.
 
 ## Grammar note
 
-`grammars/jet.wasm` is prebuilt by `install.sh`. Grammar **sources** live in
-`grammar-repo/`; Zed clones them into `grammars/jet/` on install (that folder is
-removed by `install.sh` so checkout stays clean).
+`grammars/jet.wasm` is prebuilt by `install.sh`. Authoritative grammar sources
+live in `editors/tree-sitter/`; `install.sh` syncs them into `grammar-repo/`,
+which Zed clones into `grammars/jet/` on install (that folder is removed by
+`install.sh` so checkout stays clean).
+
+Lexical token lists are generated from `crates/jet-foundation/src/Syntax.rs`:
+
+```bash
+nix develop -c cargo run --bin jet -- devtools grammars
+nix develop -c cargo test --test grammar
+```
+
+The LSP semantic overlay refines live editor coloring for ownership (`copy`,
+`^`, `&`) and markers (`#Test`, `#Unsafe`, `@Pure`). Retired/foreign spellings
+are not colored as live syntax.
 
 ## Reinstall after changes
 

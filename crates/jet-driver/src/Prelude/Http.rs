@@ -1,6 +1,7 @@
-// core.http.client bridge runtime (D-NETDEP1=A, D-HTTPLIB4=B).
+// core.http.client bridge runtime (D-NETDEP1=A, D-HTTPLIB4=B, D-TLS1=A).
 //
 // Emitted into the hidden FFI bridge crate when a Jet program uses `core.http.client`.
+// Cargo enables ureq's rustls + native-certs features for default HTTPS.
 // All public functions use ONLY primitive types (String, i64, Vec<String>) so they are
 // compatible with the main generated program without cross-crate struct sharing.
 // JetHttpClientReq / JetHttpClientResp are defined in CoreLib.rs (embedded in the
@@ -15,7 +16,10 @@ pub fn jet_http_client_get_impl(url: &String) -> Result<(i64, String, Vec<String
 }
 
 /// Perform an HTTP POST with a string body.
-pub fn jet_http_client_post_impl(url: &String, body: &String) -> Result<(i64, String, Vec<String>), String> {
+pub fn jet_http_client_post_impl(
+    url: &String,
+    body: &String,
+) -> Result<(i64, String, Vec<String>), String> {
     jet_http_client_send_impl("POST", url, &[], Some(body.as_str()), None)
 }
 
@@ -46,9 +50,21 @@ pub fn jet_http_client_send_impl(
     match result {
         Ok(resp) => {
             let status = resp.status() as i64;
-            let known = ["content-type", "content-length", "location", "server", "date",
-                         "cache-control", "etag", "last-modified", "set-cookie", "vary",
-                         "access-control-allow-origin", "x-request-id", "authorization"];
+            let known = [
+                "content-type",
+                "content-length",
+                "location",
+                "server",
+                "date",
+                "cache-control",
+                "etag",
+                "last-modified",
+                "set-cookie",
+                "vary",
+                "access-control-allow-origin",
+                "x-request-id",
+                "authorization",
+            ];
             let mut flat: Vec<String> = Vec::new();
             for name in &known {
                 if let Some(v) = resp.header(name) {

@@ -2864,9 +2864,7 @@ pub(crate) fn method_call_in_subset(
                         let submodule = format!("{}.{}", ns, leaf);
                         if crate::Syntax::is_known_core_module(&submodule) {
                             return core_call_covered(&submodule, method)
-                                && args.iter().all(|a| {
-                                    a.label.is_none() && expr_in_subset(&a.expr, cx, locals)
-                                });
+                                && core_call_args_in_subset(&submodule, method, args, cx, locals);
                         }
                     }
                 }
@@ -2882,9 +2880,7 @@ pub(crate) fn method_call_in_subset(
                         return true;
                     }
                     return core_call_covered(module, method)
-                        && args
-                            .iter()
-                            .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
+                        && core_call_args_in_subset(module, method, args, cx, locals);
                 }
                 // Shape (i) [c109 Phase 14]: a qualified cross-module call
                 // `alias.method(args)` — a `pub use` re-export (`reexport_calls`), a
@@ -3751,7 +3747,14 @@ pub(crate) fn is_devserver_method_name(method: &str, nargs: usize) -> bool {
 pub(crate) fn is_http_type(recv_type: Option<&str>) -> bool {
     matches!(
         recv_type,
-        Some("HttpClientReq" | "HttpClientResp" | "HttpMux" | "HttpSrvReq" | "HttpSrvResp")
+        Some(
+            "HttpClientReq"
+                | "HttpClientResp"
+                | "HttpMux"
+                | "HttpSrvReq"
+                | "HttpSrvResp"
+                | "HttpServerTls",
+        )
     )
 }
 
@@ -4066,12 +4069,33 @@ pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
     if matches!(module, "core.http.client" | "core.http.server")
         && matches!(
             method,
-            "get" | "post" | "request" | "mux" | "serve" | "response"
+            "get" | "post" | "request" | "mux" | "serve" | "response" | "tls"
         )
     {
         return true;
     }
     crate::Sema::core_fixed_sig(module, method).is_some()
+}
+
+fn core_call_args_in_subset(
+    module: &str,
+    method: &str,
+    args: &[crate::AST::CallArg],
+    cx: &Cx,
+    locals: &std::collections::HashSet<String>,
+) -> bool {
+    if module == "core.http.server" && method == "serve" && args.len() == 3 {
+        return args.iter().enumerate().all(|(idx, a)| {
+            let label_ok = if idx == 2 {
+                matches!(a.label.as_ref().map(|(label, _)| label.as_str()), Some("tls"))
+            } else {
+                a.label.is_none()
+            };
+            label_ok && expr_in_subset(&a.expr, cx, locals)
+        });
+    }
+    args.iter()
+        .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals))
 }
 
 /// c109 Phase 13: is a closure-taking core call (`tasks.spawn`/`http.serve`/
@@ -4511,6 +4535,7 @@ pub(crate) fn core_call_return_ty(module: &str, method: &str) -> Type {
         }
         ("core.http.client", "request") => return Type::Named("HttpClientReq".to_string()),
         ("core.http.server", "mux") => return Type::Named("HttpMux".to_string()),
+        ("core.http.server", "tls") => return Type::Named("HttpServerTls".to_string()),
         ("core.http.server", "serve") => {
             return Type::Result {
                 ok: Box::new(Type::Tuple(vec![])),

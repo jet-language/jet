@@ -303,7 +303,7 @@ Semantics:
 - `jet env -p nodejs ripgrep`.
 - `jet env` detects foreign `flake.nix`/`devenv.nix` only when no `env.*`
   modules exist; `--flake` forces it.
-- `jet run nixpkgs@fastfetch`.
+- `jet run nixpkgs:fastfetch`.
 - `jet bridge flake` emits generated shim.
 
 Touch points:

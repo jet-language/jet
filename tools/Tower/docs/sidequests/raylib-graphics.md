@@ -1,6 +1,7 @@
 # Raylib graphics package
 
-**Card:** c60 / coivmgi. **Decision:** D-RAYLIB1=A. **Status:** ready to build.
+**Card:** c60 / coivmgi. **Decision:** D-RAYLIB1=A. **Status:** stage-1 skeleton
+in progress via #212.
 
 ## Goal
 
@@ -21,6 +22,8 @@ This is a package/bridge, not compiler surface.
 ## Build Plan
 
 1. Add package metadata for `core.raylib`, dependency sourcing, and lock hashing.
+   Stage 1 starts with the package metadata plus a typed no-op compiler skeleton so
+   CI can type-check display-gated examples before native raylib is available.
 2. Generate C bridge bindings for window lifecycle, drawing, texture load/free, input,
    audio, timing, and error conversion.
 3. Expose Jet wrappers: `Window.open`, `should_close`, `draw.begin/end`, `draw.text`,
@@ -34,4 +37,3 @@ This is a package/bridge, not compiler surface.
   raylib supports it.
 - Build tests on Linux in Nix; document platform smoke requirements for macOS/Windows.
 - Ensure `cargo tree -p jet` remains free of raylib dependencies.
-

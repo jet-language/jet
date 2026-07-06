@@ -106,6 +106,21 @@ impl Theme {
         }
         eprintln!();
     }
+
+    /// A coded warning block: `warning[L0205]: <headline>`.
+    pub fn warning_coded(&self, code: &str, headline: &str, why: &str, fix: &str) {
+        eprintln!();
+        eprintln!(
+            "  {} {}",
+            self.yellow(&format!("warning[{code}]:")),
+            self.bold(headline)
+        );
+        eprintln!("    {}", why);
+        if !fix.is_empty() {
+            eprintln!("    {} {}", self.gray("fix:"), fix);
+        }
+        eprintln!();
+    }
 }
 
 /// Render a ref-classification failure as a friendly diagnostic.

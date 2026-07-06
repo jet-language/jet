@@ -236,6 +236,7 @@ fn lock_roundtrip_layer_metadata() {
         workspace_members: vec![],
         comptime_inputs: vec![],
         toolchains: Vec::new(),
+        source_channels: Vec::new(),
     };
     let raw = jet::Lock::write(&lock);
     let parsed = jet::Lock::parse(&raw).unwrap();

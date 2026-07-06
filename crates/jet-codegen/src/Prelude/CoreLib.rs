@@ -3292,6 +3292,47 @@ struct JetPlugin {
     handle: u64,
 }
 
+// -- core.raylib bridge skeleton (D-RAYLIB1=A) --------------------------------
+// This is the bounded stage-1 surface: typed handles and no-op functions so
+// examples can be front-end/type checked without requiring a display server or
+// native raylib. The next slice replaces these bodies with the real bridge.
+#[derive(Clone, Debug)]
+struct RaylibWindow {
+    width: i64,
+    height: i64,
+    title: String,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct RaylibColor {
+    r: i64,
+    g: i64,
+    b: i64,
+    a: i64,
+}
+
+fn jet_raylib_window_open(width: i64, height: i64, title: &String) -> RaylibWindow {
+    RaylibWindow { width, height, title: title.clone() }
+}
+
+fn jet_raylib_window_should_close(_window: &RaylibWindow) -> bool {
+    true
+}
+
+fn jet_raylib_begin_drawing(_window: &RaylibWindow) {}
+
+fn jet_raylib_clear_background(_color: &RaylibColor) {}
+
+fn jet_raylib_draw_text(_text: &String, _x: i64, _y: i64, _size: i64, _color: &RaylibColor) {}
+
+fn jet_raylib_end_drawing() {}
+
+fn jet_raylib_close_window(_window: &RaylibWindow) {}
+
+fn jet_raylib_color(r: i64, g: i64, b: i64, a: i64) -> RaylibColor {
+    RaylibColor { r, g, b, a }
+}
+
 // ── Typed Path API (D-PATHFS1) ────────────────────────────────────────────────
 #[derive(Clone, Debug)]
 struct JetPath {
@@ -5288,9 +5329,8 @@ fn jet_http_client_response_header(resp: &JetHttpClientResp, name: &String) -> O
 
 
 // ── D-HTTPLIB1=A / D-HTTPLIB2=B: core.http.server — function-first mux ───────
-// Pure std, no external crates (I6). HTTP/1.1 blocking server with path-param
-// extraction and a typed mux surface. HTTP/2 and WebSocket require the bridge
-// crate and are tracked as follow-up work.
+// Plain HTTP is pure std. D-TLSSERVE1=A routes server TLS through the hidden
+// rustls bridge only when the named `tls:` option is used.
 
 #[derive(Clone)]
 struct JetHttpSrvResp {
@@ -5319,6 +5359,12 @@ struct JetHttpMuxRoute {
 #[derive(Clone)]
 struct JetHttpMux(std::sync::Arc<std::sync::Mutex<Vec<JetHttpMuxRoute>>>);
 
+#[derive(Clone)]
+struct JetHttpServerTls {
+    cert_pem: String,
+    key_pem: String,
+}
+
 impl JetHttpMux {
     fn new() -> Self { JetHttpMux(std::sync::Arc::new(std::sync::Mutex::new(Vec::new()))) }
     fn add<F>(&self, method: &str, pattern: &str, f: F)
@@ -5333,6 +5379,10 @@ impl JetHttpMux {
 }
 
 fn jet_http_mux_new() -> JetHttpMux { JetHttpMux::new() }
+
+fn jet_http_srv_tls(cert_pem: &String, key_pem: &String) -> JetHttpServerTls {
+    JetHttpServerTls { cert_pem: cert_pem.clone(), key_pem: key_pem.clone() }
+}
 
 fn jet_http_mux_add<F>(mux: &JetHttpMux, method: &str, pattern: &str, f: F)
 where F: Fn(JetHttpSrvReq) -> JetHttpSrvResp + Send + Sync + 'static
@@ -5366,6 +5416,46 @@ fn jet_http_mux_serve(addr: &String, mux: JetHttpMux) -> Result<(), String> {
             let resp = jet_http_mux_dispatch(&m, req);
             let text = jet_http_srv_format(&resp);
             let _ = stream.write_all(text.as_bytes());
+        });
+    }
+}
+
+fn jet_http_mux_serve_tls<V, H>(
+    addr: &String,
+    mux: JetHttpMux,
+    tls: JetHttpServerTls,
+    validate: V,
+    handle: H,
+) -> Result<(), String>
+where
+    V: Fn(&String, &String) -> Result<(), String>,
+    H: Fn(&String, &String, std::net::TcpStream, Box<dyn FnOnce(String) -> String + Send>) -> Result<(), String>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+{
+    validate(&tls.cert_pem, &tls.key_pem)?;
+    let listener = std::net::TcpListener::bind(addr.as_str())
+        .map_err(|e| format!("bind on `{}` failed: {}", addr, e))?;
+    let mux = std::sync::Arc::new(mux);
+    loop {
+        let (stream, _peer) = match listener.accept() {
+            Ok(x) => x,
+            Err(e) => { eprintln!("http TLS accept failed: {}", e); continue; }
+        };
+        let m = mux.clone();
+        let tls_cfg = tls.clone();
+        let handle_one = handle.clone();
+        std::thread::spawn(move || {
+            let dispatch = Box::new(move |raw: String| {
+                let req = jet_http_srv_parse(&raw);
+                let resp = jet_http_mux_dispatch(&m, req);
+                jet_http_srv_format(&resp)
+            });
+            if let Err(e) = handle_one(&tls_cfg.cert_pem, &tls_cfg.key_pem, stream, dispatch) {
+                eprintln!("http TLS connection failed: {}", e);
+            }
         });
     }
 }

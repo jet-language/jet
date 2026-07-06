@@ -153,19 +153,39 @@ fn read_pid(dir: &Path) -> Option<u32> {
 /// other way for an arbitrary (non-child) pid, so this shells out to `kill
 /// -0` (the POSIX "is it there" no-op signal), same rationale as `down`.
 fn is_alive(pid: u32) -> bool {
-    Command::new("kill")
-        .args(["-0", &pid.to_string()])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+    #[cfg(windows)]
+    {
+        let filter = format!("PID eq {pid}");
+        return Command::new("tasklist")
+            .args(["/FI", &filter, "/FO", "CSV", "/NH"])
+            .output()
+            .map(|o| {
+                o.status.success()
+                    && String::from_utf8_lossy(&o.stdout).contains(&format!("\"{pid}\""))
+            })
+            .unwrap_or(false);
+    }
+    #[cfg(not(windows))]
+    {
+        Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    }
 }
 
 /// Start `plan` if it isn't already running (idempotent). `env` composes the
 /// same PATH the project's realized packages live on, so a catalog binary
 /// (e.g. `redis-server`) resolves without the caller needing its own shell.
 pub fn up_one(project_dir: &Path, env: &ShellEnv, plan: &DevServicePlan) -> Result<(), String> {
+    let _guard = super::RuntimePolicy::acquire_lock(
+        &super::Store::managed_dir(project_dir),
+        "services-state",
+    )
+    .map_err(|e| e.to_string())?;
     if !plan.enable {
         return Ok(());
     }
@@ -179,10 +199,8 @@ pub fn up_one(project_dir: &Path, env: &ShellEnv, plan: &DevServicePlan) -> Resu
     }
     let stdout = File::create(stdout_path(&resolved.dir)).map_err(|e| e.to_string())?;
     let stderr = File::create(stderr_path(&resolved.dir)).map_err(|e| e.to_string())?;
-    let mut cmd = Command::new("sh");
-    cmd.arg("-c")
-        .arg(&resolved.init)
-        .current_dir(&resolved.data_dir)
+    let mut cmd = super::Platform::shell_command(&resolved.init);
+    cmd.current_dir(&resolved.data_dir)
         .stdin(Stdio::null())
         .stdout(Stdio::from(stdout))
         .stderr(Stdio::from(stderr));
@@ -194,6 +212,7 @@ pub fn up_one(project_dir: &Path, env: &ShellEnv, plan: &DevServicePlan) -> Resu
     // child of its own, `down` signals the *group* (`kill -<pid>`) and
     // reaches whichever process is actually still running, without also
     // hitting jetpack's own process group.
+    #[cfg(unix)]
     std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
     let child = cmd
         .spawn()
@@ -219,6 +238,11 @@ pub fn up_one(project_dir: &Path, env: &ShellEnv, plan: &DevServicePlan) -> Resu
 /// Stop `plan` if a supervised pid is on record — `SIGTERM`, a short grace
 /// wait, then `SIGKILL` if it's still alive.
 pub fn down_one(project_dir: &Path, plan: &DevServicePlan) {
+    let _guard = super::RuntimePolicy::acquire_lock(
+        &super::Store::managed_dir(project_dir),
+        "services-state",
+    )
+    .ok();
     let dir = service_dir(project_dir, &plan.name);
     let Some(pid) = read_pid(&dir) else { return };
     if !is_alive(pid) {
@@ -226,8 +250,13 @@ pub fn down_one(project_dir: &Path, plan: &DevServicePlan) {
         return;
     }
     if let Some(shutdown) = &plan.shutdown {
-        let _ = Command::new("sh").arg("-c").arg(shutdown).status();
+        let _ = super::Platform::shell_command(shutdown).status();
     } else {
+        #[cfg(windows)]
+        let _ = Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .status();
+        #[cfg(not(windows))]
         // Negative pid = the whole process group `up_one` created (pgid ==
         // the leader's own pid), so a multi-statement `init` script's
         // eventual child (e.g. `redis-server`, after some setup steps) is
@@ -243,6 +272,11 @@ pub fn down_one(project_dir: &Path, plan: &DevServicePlan) {
         std::thread::sleep(Duration::from_millis(100));
     }
     if is_alive(pid) {
+        #[cfg(windows)]
+        let _ = Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .status();
+        #[cfg(not(windows))]
         let _ = Command::new("kill")
             .args(["-KILL", "--", &format!("-{pid}")])
             .status();
@@ -284,9 +318,7 @@ pub fn health_one(project_dir: &Path, plan: &DevServicePlan) -> Health {
 
 fn probe_ready(resolved: &Resolved) -> bool {
     if let Some(ready) = &resolved.ready {
-        return Command::new("sh")
-            .arg("-c")
-            .arg(ready)
+        return super::Platform::shell_command(ready)
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status()

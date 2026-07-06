@@ -736,7 +736,9 @@ fn core_module_items_covers_known_core_modules() {
 
     // D-CORENS-CANON1: most ring packages still normalize to legacy `jet.*`
     // internal dispatch keys. `core.archive` is already canonical end-to-end.
-    let ring_names = ["log", "crypto", "http", "regex", "reactive", "db", "plugin"];
+    let ring_names = [
+        "log", "crypto", "http", "regex", "reactive", "raylib", "db", "plugin",
+    ];
     let known_raw = jet::Loader::KNOWN_CORE_MODULES;
     let known: std::collections::BTreeSet<String> = known_raw
         .iter()

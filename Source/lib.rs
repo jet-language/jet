@@ -43,6 +43,7 @@ pub use jet_driver::{
     FFI,
     SHA256,
 };
+pub use jet_queries as Queries;
 pub mod BuildCache;
 pub mod CLI;
 pub mod Debug;

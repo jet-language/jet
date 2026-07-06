@@ -95,11 +95,18 @@ pub fn prepare(bundle: &ProgramBundle) -> Result<Option<FfiLink>, Vec<Diagnostic
             || u == "core.compress.zstd"
             || u.starts_with("core.compress.zstd::")
     });
-    // D-NETDEP1=A / D-HTTPLIB4=B: ureq + rustls for core.http.client TLS support.
+    // D-NETDEP1=A / D-HTTPLIB4=B / D-TLS1=A: ureq + rustls with system trust
+    // roots for core.http.client TLS support.
     let needs_http_client = bundle
         .used_core
         .iter()
         .any(|u| u == "core.http.client" || u.starts_with("core.http.client::"));
+    // D-TLSSERVE1=A: server-side TLS uses rustls through the hidden bridge
+    // only when the named `tls:` option is constructed.
+    let needs_http_server_tls = bundle
+        .used_core
+        .iter()
+        .any(|u| u == "core.http.server::tls");
     // D-DEP-CRYPTO1=A: RustCrypto AEAD + Ed25519 for core.crypto envelope APIs.
     let needs_crypto = bundle.used_core.iter().any(|u| {
         u == "jet.crypto"
@@ -124,6 +131,7 @@ pub fn prepare(bundle: &ProgramBundle) -> Result<Option<FfiLink>, Vec<Diagnostic
         && !needs_archive
         && !needs_db
         && !needs_http_client
+        && !needs_http_server_tls
         && !needs_crypto
         && !needs_compress
         && !needs_plugin
@@ -132,12 +140,13 @@ pub fn prepare(bundle: &ProgramBundle) -> Result<Option<FfiLink>, Vec<Diagnostic
         return Ok(None);
     }
 
-    build_bridge(
+    build_bridge_full(
         &entries,
         needs_regex,
         needs_archive,
         needs_db,
         needs_http_client,
+        needs_http_server_tls,
         needs_crypto,
         needs_compress,
         needs_plugin,
@@ -166,13 +175,25 @@ pub const TAR_CRATE_SPEC: (&str, &str) = ("tar", "0");
 /// Lives only here — never in the compiler's Cargo.toml (I6).
 pub const DB_CRATE_SPEC: (&str, &str) = ("rusqlite", "0.31");
 
-/// The `ureq` crate version that backs `core.http.client` (D-NETDEP1=A, D-HTTPLIB4=B).
-/// rustls is pulled in automatically via `ureq`'s `tls` feature flag.
+/// The `ureq` crate version that backs `core.http.client`
+/// (D-NETDEP1=A, D-HTTPLIB4=B, D-TLS1=A).
+/// rustls is pulled in by `tls`; system roots by `native-certs`.
 /// Lives only here — never in the compiler's Cargo.toml (I6).
 pub const HTTP_CLIENT_CRATE_SPEC: (&str, &str) = ("ureq", "2");
 
 /// Hand-written HTTP client runtime emitted into the bridge crate when `core.http.client` is used.
 const HTTP_CLIENT_RUNTIME: &str = include_str!("Prelude/Http.rs");
+
+/// The `rustls` crate version that backs `core.http.server` TLS
+/// (D-TLSSERVE1=A). Lives only here — never in the compiler's Cargo.toml (I6).
+pub const HTTP_SERVER_TLS_CRATE_SPEC: (&str, &str) = ("rustls", "0.23");
+
+/// PEM parser used by the server TLS bridge.
+pub const HTTP_SERVER_TLS_PEMFILE_CRATE_SPEC: (&str, &str) = ("rustls-pemfile", "2");
+
+/// Hand-written HTTP server TLS runtime emitted into the bridge crate when
+/// `core.http.server.tls` is used.
+const HTTP_SERVER_TLS_RUNTIME: &str = include_str!("Prelude/HttpServerTls.rs");
 
 /// Crate dependency specs that require non-trivial TOML values (e.g. feature flags).
 /// These are emitted verbatim as the right-hand side of the `name = …` line.
@@ -181,7 +202,14 @@ const FEATURED_DEPS: &[(&str, &str)] = &[
         "rusqlite",
         "{ version = \"0.31\", features = [\"bundled\"] }",
     ),
-    ("ureq", "{ version = \"2\", features = [\"tls\"] }"),
+    (
+        "ureq",
+        "{ version = \"2\", default-features = false, features = [\"tls\", \"native-certs\"] }",
+    ),
+    (
+        "rustls",
+        "{ version = \"0.23\", default-features = false, features = [\"ring\", \"std\", \"tls12\"] }",
+    ),
     (
         "wasmtime",
         "{ version = \"26\", features = [\"component-model\"] }",
@@ -263,6 +291,32 @@ pub fn build_bridge(
     needs_plugin: bool,
     needs_secrets: bool,
 ) -> Result<FfiLink, Vec<Diagnostic>> {
+    build_bridge_full(
+        entries,
+        needs_regex,
+        needs_archive,
+        needs_db,
+        needs_http_client,
+        false,
+        needs_crypto,
+        needs_compress,
+        needs_plugin,
+        needs_secrets,
+    )
+}
+
+fn build_bridge_full(
+    entries: &[ExternEntry],
+    needs_regex: bool,
+    needs_archive: bool,
+    needs_db: bool,
+    needs_http_client: bool,
+    needs_http_server_tls: bool,
+    needs_crypto: bool,
+    needs_compress: bool,
+    needs_plugin: bool,
+    needs_secrets: bool,
+) -> Result<FfiLink, Vec<Diagnostic>> {
     let mut deps = collect_crate_deps(entries);
     if needs_regex {
         deps.insert(
@@ -285,6 +339,16 @@ pub fn build_bridge(
         deps.insert(
             HTTP_CLIENT_CRATE_SPEC.0.to_string(),
             HTTP_CLIENT_CRATE_SPEC.1.to_string(),
+        );
+    }
+    if needs_http_server_tls {
+        deps.insert(
+            HTTP_SERVER_TLS_CRATE_SPEC.0.to_string(),
+            HTTP_SERVER_TLS_CRATE_SPEC.1.to_string(),
+        );
+        deps.insert(
+            HTTP_SERVER_TLS_PEMFILE_CRATE_SPEC.0.to_string(),
+            HTTP_SERVER_TLS_PEMFILE_CRATE_SPEC.1.to_string(),
         );
     }
     if needs_crypto {
@@ -330,6 +394,7 @@ pub fn build_bridge(
         needs_archive,
         needs_db,
         needs_http_client,
+        needs_http_server_tls,
         needs_crypto,
         needs_compress,
         needs_plugin,
@@ -431,6 +496,7 @@ pub fn build_bridge(
             needs_archive,
             needs_db,
             needs_http_client,
+            needs_http_server_tls,
             needs_crypto,
             needs_compress,
             needs_plugin,
@@ -810,6 +876,7 @@ fn cache_key_full(
     needs_archive: bool,
     needs_db: bool,
     needs_http_client: bool,
+    needs_http_server_tls: bool,
     needs_crypto: bool,
     needs_compress: bool,
     needs_plugin: bool,
@@ -830,6 +897,9 @@ fn cache_key_full(
     }
     if needs_http_client {
         needs_http_client.hash(&mut h);
+    }
+    if needs_http_server_tls {
+        needs_http_server_tls.hash(&mut h);
     }
     if needs_crypto {
         needs_crypto.hash(&mut h);
@@ -943,6 +1013,7 @@ fn emit_wrapper_lib(
     needs_archive: bool,
     needs_db: bool,
     needs_http_client: bool,
+    needs_http_server_tls: bool,
     needs_crypto: bool,
     needs_compress: bool,
     needs_plugin: bool,
@@ -970,6 +1041,12 @@ fn emit_wrapper_lib(
     if needs_http_client {
         // D-NETDEP1=A: the HTTP client runtime is the only place `ureq` is touched.
         out.push_str(HTTP_CLIENT_RUNTIME);
+        out.push('\n');
+    }
+    if needs_http_server_tls {
+        // D-TLSSERVE1=A: the server TLS runtime is the only place serving
+        // touches rustls.
+        out.push_str(HTTP_SERVER_TLS_RUNTIME);
         out.push('\n');
     }
     if needs_crypto {

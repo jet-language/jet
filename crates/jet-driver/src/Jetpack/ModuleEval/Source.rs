@@ -18,7 +18,7 @@ use super::Diagnostics::{
     oci_from_non_executable,
 };
 use super::Eval::{evaluate_modules, merge_all, parse_program, pkg_ref};
-use super::Types::{EnvPlan, FleetPlan, ImageKind, ImagePlan, SystemPlan};
+use super::Types::{AdapterPlan, EnvPlan, FleetPlan, ImageKind, ImagePlan, SystemPlan};
 
 /// True when `src` uses the typed `module { … }` surface (U3/U8) rather than
 /// the Phase-1 `pkg.*` directive surface. The CLI routes loading on this: a
@@ -76,12 +76,14 @@ pub fn evaluate_env(src: &str, base_dir: &Path) -> Result<EnvPlan, Diagnostic> {
     let mut fleets: Vec<FleetPlan> = Vec::new();
     let mut dev_services: Vec<super::Types::DevServicePlan> = Vec::new();
     let mut secrets: Vec<String> = Vec::new();
+    let mut adapters: Vec<AdapterPlan> = Vec::new();
     for module in &modules {
         systems.extend(module.systems.iter().cloned());
         images.extend(module.images.iter().cloned());
         fleets.extend(module.fleets.iter().cloned());
         dev_services.extend(module.dev_services.iter().cloned());
         secrets.extend(module.secrets.iter().cloned());
+        adapters.extend(module.adapters.iter().cloned());
     }
     let system_names: Vec<String> = systems.iter().map(|s| s.name.clone()).collect();
     // D-JPK-IMAGE1: an `.Oci` image's `from: packages.<name>` cross-checks against
@@ -161,6 +163,7 @@ pub fn evaluate_env(src: &str, base_dir: &Path) -> Result<EnvPlan, Diagnostic> {
     Ok(EnvPlan {
         table,
         package_refs,
+        adapters,
         prompt,
         systems,
         images,
@@ -330,7 +333,8 @@ fn infer_provider_kind(pref: &RefSpec::ProviderRef, base_dir: &Path) -> Provider
     use super::super::RefSpec::Source;
     match pref.provider {
         Source::Path => {
-            let target = Path::new(&pref.target);
+            let (target, _) = RefSpec::split_channel_ref(&pref.target);
+            let target = Path::new(target);
             let dir = if target.is_absolute() {
                 target.to_path_buf()
             } else {

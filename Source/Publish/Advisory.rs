@@ -174,7 +174,7 @@ pub fn e2604(package: &str, version: &str, expected: &str, actual: &str) -> Diag
             expected, actual
         ),
         format!(
-            "re-run `jet fetch` after removing the corrupt store entry (`jet gc --force`). If the problem persists, the upstream source may have been altered; audit the change before proceeding."
+            "re-run `jet fetch` after cleaning stale Jetpack hangar entries (`jet clean`). If the problem persists, the upstream source may have been altered; audit the change before proceeding."
         ),
         None,
     )

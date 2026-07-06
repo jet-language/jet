@@ -3,15 +3,18 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 216,
-    "rev": 148,
+    "nextNum": 219,
+    "rev": 277,
     "ui": {
       "toggled": [
         "dec-group:syntax",
         "dec-group:runtime",
         "dec-group:other",
         "board-sidequests",
-        "board-frozen"
+        "board-frozen",
+        "epoch:e7",
+        "epoch:e6",
+        "epoch:e5"
       ]
     },
     "digestCursor": "2026-07-04T19:42:25.465Z"
@@ -103,14 +106,14 @@
     },
     {
       "status": "planned",
-      "goal": "Self-hosting and compiler bootstrapping: use Jet to build Jet, tighten the toolchain loop, and remove host-side friction from development and release.",
+      "goal": "Self-hosting: port the compiler to Jet — but only after the core language has proven itself in anger. Hard gate before any port work: owner is fully happy with core lang (stdlib may still flux); a portfolio of real Jet projects with fringe needs, complex systems, and full syntax coverage has stress-tested readability and how well a large Jet codebase can be reasoned about; and the memory model has been adversarially proven as solid as Rust's borrow checker with virtually 100% certainty. Then Jet builds Jet and host-side toolchain friction goes away.",
       "id": "e8",
       "num": 8,
       "name": "Bootstrapping",
       "order": 8,
       "exitCriteria": [
-        "Jet builds Jet",
-        "Bootstrap compiler and tools",
+        "Readiness gate passed: core-lang sign-off, dogfood portfolio complete, memory-model soundness campaign concluded at Rust-borrow-checker confidence (card #217)",
+        "Jet builds Jet: full compiler port, stage1 ≡ stage2 byte-identical, entire test suite green on the Jet-built compiler (card #218)",
         "Host-side toolchain friction removed"
       ]
     }
@@ -9311,13 +9314,18 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "U20 implementation plan (D-JPK-ADAPTER1=A, D-JPK-ADAPTNAME1=A):\n\nGoal: make an adapted external source a normal realized Pkg, with `Pkg.adapt(name:, source:, deps:, recipe:)`, `Recipe.*`, `jet add <ref> --adapt`, reproducible lock identity, and the existing sandbox diagnostics (E1236-E1238).\n\n1. Spec/doc cleanup: update docs/spec/spec.md and epoch-4 plan docs so `Pkg.adapt` + `Recipe.prebuilt/copy/cargo/go/node/cmake/make/build` are current law, not pending ballot text. Keep D-JPK-ADAPTNAME1 in syntax-decisions as the source of syntax truth.\n\n2. Env/module evaluation: teach the typed env package evaluator to recognize `Pkg.adapt(...)` entries inside `packages:`. Capture an `AdapterPlan` with name, source provider ref, deps, recipe kind, recipe args, and source span. Reject malformed adapter fields with existing Jetpack diagnostic style and fresh E12xx only if E1236-E1238 do not fit.\n\n3. Recipe surface: map `Recipe.prebuilt(...)` and `Recipe.copy(...)` onto `Jetpack::Recipe::BuildRecipe` first, then add curated build recipes (`cargo`, `go`, `node`, `cmake`, `make`) as thin BuildRecipe constructors over declared tool deps. `Recipe.build(fn(BuildContext))` remains the expert form only when the BuildContext function path can be represented honestly; no placeholder accepted syntax.\n\n4. Realization: extend provider/core realization so adapter packages fetch/stage the source, run the recipe sandbox, install only under the output root, compute output hash, and record store metadata. Lock identity includes source hash/ref, recipe text/hash, helper version, platform, declared tool deps, and output hash.\n\n5. CLI: implement `jet add <ref> --adapt` / `jetpack add <ref> --adapt` as a read-only probe that drafts a concrete `Pkg.adapt(...)` snippet for obvious prebuilt/copy/cargo/go/node/cmake/make cases. It must never run upstream code during probe. Ambiguous/no metadata gets a clear diagnostic naming the manual `Pkg.adapt` path.\n\n6. Tests: add module-eval tests for `Pkg.adapt` capture, recipe unit tests for lock identity and sandbox failures, CLI tests for `--adapt` draft output, and end-to-end offline fixture tests proving prebuilt/copy adapters realize and run from the hangar. Full workspace suite required before done; if unrelated existing failures remain, log exact isolated reproducer.",
       "blockedBy": [],
       "workOrder": 17620,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-06",
+          "by": "codex",
+          "text": "Implemented U20 end to end. Typed `env.*` packages now capture `Pkg.adapt(name:, source:, deps:, recipe:)`; parser accepts provider refs in adapter `source:` and `Recipe.copy()` as a dot-member despite `copy` being a keyword. `Recipe.copy()` maps to sandboxed tree install, `Recipe.prebuilt(bin:, as:)` installs under `bin/`, adapter realization stages `path@`/GitHub source bytes, records normal hangar metadata/envelope identity, and contributes PATH dirs to `jetpack run/build`. `jetpack add <ref> --adapt` prints a read-only draft snippet. Added E1270 for malformed/unrealizable adapters, docs/spec coverage, module-eval tests, jetpack integration tests for copy/prebuilt/draft/E1270, diagnostics coverage. Verification: `nix develop -c cargo check`, `nix develop -c cargo test --test diagnostics_coverage`, `nix develop -c cargo test --test jetpack`, and full `nix develop -c cargo test` all pass."
+        },
         {
           "at": "2026-07-05",
           "by": "codex",
@@ -9390,7 +9398,7 @@
         }
       ],
       "created": "2026-07-05T10:20:48.010Z",
-      "updated": "2026-07-05"
+      "updated": "2026-07-06"
     },
     {
       "id": "c05pas25",
@@ -9401,13 +9409,38 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
-      "plan": null,
+      "plan": "U21 plan: channel refs and outdated\n\nDecision: D-JPK-CHANNEL1=A is ratified. No owner decision needed. Implement #latest, #main, #v0.x in source-ref positions; resolve only on first add/update; lock records exact identity; realize/build/env never silently re-resolve; jet outdated is read-only; CI or offline with unlocked channel is an error.\n\nBuild order:\n1. Add channel model in crates/jet-driver/src/Jetpack/RefSpec.rs and provider-ref parsing helpers: exact ref vs ChannelRef { latest, main, semver mask }. Keep CLI package refs as <source>:<package>.\n2. Extend lock identity in crates/jet-driver/src/Lock.rs and crates/jet-driver/src/Jetpack/WorkspaceLock.rs: store channel intent plus exact resolved rev/tag/hash; parse legacy locks.\n3. Split provider resolution mode in crates/jet-driver/src/Jetpack/Provider.rs: InitialAddOrUpdate may probe remote metadata and move locks; Realize/Build/Env must use exact lock entries.\n4. Add jetpack update and jetpack outdated in crates/jet-driver/src/Jetpack/CLI.rs; register verbs in crates/jet-foundation/src/Syntax.rs; route top-level jet update/outdated through Source/EngineDispatch.rs / Source/main.rs if needed.\n5. Add CI/offline guard before any channel lookup. A channel ref without exact lock under CI or --offline emits unlocked-channel-in-ci and exits user-error.\n6. Update docs/spec/spec.md and docs/spec/diagnostics.md; avoid stale E09xx placeholders.\n\nLikely touched: RefSpec.rs, Provider.rs, CLI.rs, Lock.rs, WorkspaceLock.rs, Syntax.rs, Source/main.rs, Source/EngineDispatch.rs, docs/spec/spec.md, docs/spec/diagnostics.md, tests/jetpack.rs plus module unit tests.\n\nDiagnostics/tests/docs: add E12xx unlocked-channel-in-ci with what/why/fix; snapshot it. Document that channel refs are tracking intent and lock is exact realized identity.\n\nTargeted tests: parser accepts #latest/#main/#v0.x and rejects bad masks; jetpack update writes exact lock from fixture metadata; build/env with exact lock never probes metadata; CI/--offline unlocked channel emits E12xx; jet outdated mutates nothing; top-level jet update/outdated dispatches to jetpack.\n\nGates: no network in realize-class verbs with satisfied lock; legacy lock round-trip; diagnostic registered and snapshot-pinned; targeted tests then full nix develop -c cargo test --workspace green in implementation session.",
       "blockedBy": [],
       "workOrder": 17621,
-      "assignee": null,
+      "assignee": "codex-e4-plan-a",
       "log": [
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "Verified by codex-main: cargo test --test jetpack channel_ (4/4) and top_level_jet_outdated_dispatches_to_jetpack pass. Closing."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-e4-plan-a",
+          "text": "Follow-up completed for #200: added top-level `jet outdated` dispatch to jetpack and verified with focused test `top_level_jet_outdated_dispatches_to_jetpack`; reran channel_ focused bundle green."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-e4-plan-a",
+          "text": "Implemented U21 channel refs/outdated: provider refs now recognize #latest/#main/#vN.x channel intent; .jet/lock writes [[source_channel]] exact refs; realize-class jetpack run/build/enter/dev require exact locks and emit E1271 for unlocked channels; jetpack update resolves/moves channel locks; jetpack outdated reports read-only. Docs/spec diagnostics updated. Verified focused tests: channel_update_writes_exact_lock_and_build_uses_it_offline, channel_build_without_lock_is_e1271, channel_update_accepts_main_and_semver_mask, outdated_reports_newer_channel_without_mutating_lock, plus channel_ bundle."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "codex orchestration: starting implementation after plan; serialized as sole Jetpack lane to avoid collisions with dirty Jetpack files."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-e4-plan-a",
+          "text": "Plan written for U21 channel refs/outdated; all syntax/product choices already ratified by D-JPK-CHANNEL1=A, so advanced to ready. No code edits/tests."
+        },
         {
           "at": "2026-07-03",
           "by": "agent",
@@ -9475,7 +9508,8 @@
         }
       ],
       "created": "2026-07-05T10:20:48.055Z",
-      "updated": "2026-07-05"
+      "updated": "2026-07-06",
+      "claimedAt": "2026-07-06T11:22:32.775Z"
     },
     {
       "id": "c06fudbe",
@@ -9486,13 +9520,33 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
-      "plan": null,
+      "plan": "U22 plan: hangar disk contract\n\nDecision: D-JPK-GC1=B plus owner amendment is ratified. Verb is jet clean, not jet gc. Default stale_after is 30 days. Auto-GC is opportunistic and no-daemon. jet clean does GC plus optimize/dedup. Lockfile and generation reachable objects are never collected. No owner decision needed.\n\nBuild order:\n1. Add reachability scan in crates/jet-driver/src/Jetpack/Store.rs from .jet/lock package/toolchain entries and future jetos generation roots. Treat unknown legacy records as live until proven stale.\n2. Extend hangar meta.json written by Store::record with last_used/realized timestamps and preserve envelope/source-state fields. Refresh last_used on cache reuse.\n3. Replace current blunt Store::clean, which removes every entry. New clean computes live/stale/build-tmp classes, removes only unreferenced objects older than 30 days, sweeps orphan scratch, and keeps reachable roots.\n4. Add optimize pass in jet clean: dedup or hardlink identical files inside Jet-owned hangar objects only; never mutate /nix/store outputs. Report GC bytes and optimize bytes separately.\n5. Route build scratch under hangar tmp in Provider.rs / Recipe.rs / Store.rs. Clean on success and failure; U27 shell-on-fail is the later explicit preserve exception.\n6. Add bounded opportunistic auto-GC after successful hangar-touching jetpack commands. No daemon, no root.\n7. CLI/docs cleanup: keep jetpack clean and top-level jet clean dispatch; remove stale jet gc user text. Fix E2604 fix text in docs/spec/diagnostics.md and Source/Publish/Advisory.rs from jet gc --force to jet clean.\n\nLikely touched: crates/jet-driver/src/Jetpack/Store.rs, CLI.rs, Provider.rs, Recipe.rs, Lock.rs, WorkspaceLock.rs, crates/jet-foundation/src/Syntax.rs, Source/main.rs, EngineDispatch.rs, Source/Publish/Advisory.rs, docs/spec/diagnostics.md, docs/spec/roadmap.md, tests/jetpack.rs, tests/pkg.rs, CLI transcript snapshots.\n\nDiagnostics/tests/docs: no new diagnostic unless corrupt metadata or permission handling needs a stable code. Must update E2604 docs/fix text and any snapshot mentioning jet gc. Document 30d stale_after, live/stale/build-tmp classes, and zero-/tmp contract.\n\nTargeted tests: old unreferenced object removed after 30d; 29d kept; lock-reachable kept regardless of age; legacy malformed metadata kept conservatively; orphan hangar tmp swept; active tmp marker kept; identical owned files dedup and report saved bytes; jetpack clean leaves live package runnable; zero-/tmp build/crash golden; jet hangar du matches on-disk bytes.\n\nGates: Store::clean never deletes reachable packages; no writes outside hangar/.jet in tested build paths; jet clean is only public GC verb; targeted tests then full nix develop -c cargo test --workspace green in implementation session.",
       "blockedBy": [],
       "workOrder": 17622,
-      "assignee": null,
+      "assignee": "codex-e4-plan-a",
       "log": [
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "Verified by codex-main: cargo test --test jetpack clean_ (6/6) and opportunistic (1/1) pass. Closing."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-e4-plan-a",
+          "text": "Implemented U22 hangar disk contract: jetpack/jet clean now stale-only collects 30d unreferenced hangar objects, preserves current .jet/lock reachable objects and legacy unknown records, sweeps orphan hangar build-scratch while respecting .active markers, runs hangar-only hardlink dedup/optimize, records realized_at/last_used_at meta refresh on reuse, and runs bounded opportunistic auto-clean after successful build/run/enter. Retired stale jet gc user text in diagnostics/roadmap/advisory. Targeted verification: nix develop -c cargo test --test jetpack clean_ (6 passed); nix develop -c cargo test --test jetpack opportunistic (1 passed). No full suite."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "codex orchestration: starting implementation after #200 verified; same serialized Jetpack lane."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-e4-plan-a",
+          "text": "Plan written for U22 hangar disk contract; D-JPK-GC1=B amendment already settles verb/retention/auto-GC, so advanced to ready. No code edits/tests."
+        },
         {
           "at": "2026-07-03",
           "by": "agent",
@@ -9555,7 +9609,8 @@
         }
       ],
       "created": "2026-07-05T10:20:48.100Z",
-      "updated": "2026-07-05"
+      "updated": "2026-07-06",
+      "claimedAt": "2026-07-06T11:22:32.591Z"
     },
     {
       "id": "c076rspq",
@@ -9566,13 +9621,38 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
-      "plan": null,
+      "plan": "U23 plan: no-Nix machine behavior\n\nDecision: D-JPK-NONIX1=A is ratified. No owner decision needed. Implement graceful degrade: Nix-free packages realize; packages that need the Nix bridge fail with one E12xx naming them and both fixes, install Nix or switch/adapt; realized packages are not held hostage.\n\nBuild order:\n1. Split provider capability from realization failure in crates/jet-driver/src/Jetpack/Provider.rs. Add package-focused NeedsNix facts before spawning nix. Keep ProviderError::NixMissing for unexpected direct bridge calls.\n2. Change compose_env/build flows in crates/jet-driver/src/Jetpack/CLI.rs to collect Nix-free successes plus bridge-required holes, then emit one package diagnostic. Do not roll back realized hangar objects.\n3. Cover every bridge path: Nix provider package refs, ad-hoc -p nixpkgs packages, named sources resolved to Nix, foreign flake fallback, and jet bridge flake. Keep existing E1256 for foreign-flake/bridge commands that cannot run at all without nix; add package-specific E12xx nix-bridge-required for package refs.\n4. Add --json shape where relevant: realized refs plus holes, stable for CI.\n5. Verify ProviderKind::Infer and Provider::uses_nix_provider never force Nix for cached/core-capable sources. Core provider and adapters must work with PATH stripped of nix.\n6. Update docs/spec/diagnostics.md and docs/spec/spec.md with no-Nix package behavior and the E1256 vs E12xx distinction.\n\nLikely touched: crates/jet-driver/src/Jetpack/Provider.rs, CLI.rs, Output.rs if reusable coded rendering helps, Bridge.rs only to avoid drift, RefSpec.rs if classification needs bridge-needed labels, docs/spec/diagnostics.md, docs/spec/spec.md, tests/jetpack.rs, tests/env_dev_trust.rs if trust/no-Nix overlaps.\n\nDiagnostics/tests/docs: add E12xx nix-bridge-required. What: N packages need the Nix bridge and Nix is not installed. Why: list exact refs/packages. Fix: install Nix link or replace/draft adapter with jet add <ref> --adapt. Snapshot single and multi-package forms if pluralized. Existing E1256 stays foreign-flake/bridge specific.\n\nTargeted tests: no-Nix PATH plus core package env realizes and command runs; no-Nix PATH plus prebuilt/copy adapter runs; mixed core/adapt plus nixpkgs records Nix-free realization then emits E12xx listing only holes; jetpack enter -p postgres with no nix emits E12xx not raw spawn/E1256; foreign flake --flake and jetpack bridge flake still emit E1256; --json exposes holes and realized refs.\n\nGates: no raw nix spawn errors; Nix-free packages remain realized even when bridge refs fail; diagnostic registered and snapshot-pinned; targeted tests then full nix develop -c cargo test --workspace green in implementation session.",
       "blockedBy": [],
       "workOrder": 17623,
-      "assignee": null,
+      "assignee": "codex-e4-plan-a",
       "log": [
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "Verified by codex-main: cargo test --test jetpack no_nix (4/4) passes. Closing."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-e4-plan-a",
+          "text": "Fixed #202 no_nix ad-hoc test to pass --trust, preserving U19 trust gate ordering while testing U23 no-Nix diagnostic. Targeted verification green: nix develop -c cargo test --test jetpack no_nix (4 passed, 62 filtered)."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-e4-plan-a",
+          "text": "Implemented U23 no-Nix package behavior in Jetpack provider/CLI/docs/tests: package refs now compute Nix-bridge need before spawning nix, core/adapted packages still realize, bridge-required refs are collected into E1272 with install-Nix and --adapt fixes, and --json emits realized refs plus holes. Added focused jetpack tests for no-Nix nixpkgs, ad-hoc -p, mixed core+nix hole, JSON holes, and adapter no-Nix path. Verification not complete: plain cargo test --test jetpack no_nix failed before tests because cc is unavailable; nix develop -c cargo test --test jetpack no_nix is blocked by pre-existing dirty non-owned compile error in crates/jet-driver/src/Jetpack/Secrets.rs calling FFI::build_bridge with 9 args after unrelated FFI signature change. Kept phase building."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "codex orchestration: starting implementation after #201 verified; same serialized Jetpack lane."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-e4-plan-a",
+          "text": "Plan written for U23 no-Nix behavior; D-JPK-NONIX1=A already settles degrade/diagnostic policy, so advanced to ready. No code edits/tests."
+        },
         {
           "at": "2026-07-03",
           "by": "agent",
@@ -9640,7 +9720,8 @@
         }
       ],
       "created": "2026-07-05T10:20:48.145Z",
-      "updated": "2026-07-05"
+      "updated": "2026-07-06",
+      "claimedAt": "2026-07-06T11:22:42.101Z"
     },
     {
       "id": "c07x6jt9",
@@ -9741,13 +9822,33 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
-      "plan": null,
+      "plan": "Decision status: D-JPK-PLATFORM1=A is ratified. No owner decision needed.\n\nBuild order:\n1. Add one canonical platform model for jetpack targets: linux, macos, windows plus arch keys used by the hangar envelope. Keep jetos Linux-only and keep Nix bridge Linux/macOS-only.\n2. Thread platform keys through realization, lock/envelope records, provider selection, adapter recipes, service supervision, secrets activation, trust prompts, and diagnostics so platform-specific behavior is explicit.\n3. Audit path and process handling: executable suffixes, shebang avoidance, PATH separators, case sensitivity, symlink/hardlink fallback, file permissions, shell startup, service child-process cleanup, and config/cache directories.\n4. Stand up CI matrix in `.github/workflows/ci.yml` for Linux, macOS, and Windows. Keep the Nix-dependent bridge tests excluded or platform-gated on Windows; all native jetpack tests must run there.\n5. Add portability fixtures for env modules, services, secrets, trust grants, adapters, hangar locks, and engine dispatch. Make every platform skip explicit and tied to D-JPK-PLATFORM1, not ad hoc.\n\nLikely touched files/modules:\n- `.github/workflows/ci.yml`\n- `crates/jet-driver/src/Jetpack/{Envelope,Store,Provider,Recipe,RefSpec,Services,Secrets,Trust,Shell,CLI}.rs`\n- `crates/jet-driver/src/{Lock,Loader}.rs`\n- `Source/{CLI,EngineDispatch}.rs`, `Source/Bin/Jetpack.rs`\n- platform fixtures under `tests/fixtures/jetpack-typed/`; tests in `tests/{jetpack,jetpack_services,engine_dispatch,pkg}.rs`\n\nDiagnostics, tests, docs:\n- Add E12xx diagnostics for unsupported platform package, platform-specific bridge requirement, and non-portable adapter asset pattern if not already covered by U23.\n- Update `docs/spec/diagnostics.md`, `docs/spec/roadmap.md`, and epoch-4 docs only where behavior changes.\n- Add CI assertions that every new diagnostic has coverage and every platform lane runs the native jetpack suite.\n\nTargeted test plan:\n1. Unit-test platform key parse/render and lock/envelope round trip.\n2. Process tests for `jet env`, `jet dev`, `jet services`, `jet secrets`, and adapter realization using temp HOME/JET dirs on each OS.\n3. Windows-specific tests: `.exe` command lookup, no shebang dependence, CRLF-safe scripts, backslash paths, config dir under user profile.\n4. macOS tests: service cleanup, file-lock behavior, symlink/hardlink fallback.\n5. Linux tests: existing Nix bridge lane plus native lane.\n\nGates:\n- No Windows dependency on Nix bridge.\n- No root or daemon assumption; aligns with U28.\n- No `/tmp` scratch assumption; aligns with U22.\n- Done only when all three CI lanes pass or a missing hosted runner is tracked as infrastructure with equivalent local proof logged.",
       "blockedBy": [],
       "workOrder": 17625,
-      "assignee": null,
+      "assignee": "codex-e4-plan-b",
       "log": [
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "Verified by codex-main: jetpack_platform (2/2), jet-driver platform_ (5/5), Shell (5/5), Services (7/7), Secrets (6/6), and CLI parses_flags pass. Closing."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-e4-plan-b",
+          "text": "Implemented U25 platform tier scaffold per D-JPK-PLATFORM1=A: added Jetpack::Platform tier-one linux/macos/windows contract, wired host envelope keys, PATH separator handling, service shell/process portability hooks, removed Jetpack /tmp test scratch assumptions, fixed Secrets env-var test race, and added native CI lane scaffold plus focused jetpack_platform audit. Targeted tests green: nix develop -c cargo test --test jetpack_platform; nix develop -c cargo test -p jet-driver platform_; nix develop -c cargo test -p jet-driver Jetpack::Shell; nix develop -c cargo test -p jet-driver Jetpack::Services; nix develop -c cargo test -p jet-driver Jetpack::Secrets; nix develop -c cargo test -p jet-driver Jetpack::CLI::tests::parses_flags; nix develop -c cargo test -p jet-driver Jetpack::Image::tests::manual_dump_for_tar_inspection -- --ignored. No full suite; no #205-208 work."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "codex orchestration: starting implementation after #202 verified; same serialized Jetpack lane."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-e4-plan-b",
+          "text": "Plan written by codex-e4-plan-b: D-JPK-PLATFORM1=A already ratified, no owner decision needed; advanced to ready."
+        },
         {
           "at": "2026-07-03",
           "by": "agent",
@@ -9810,7 +9911,8 @@
         }
       ],
       "created": "2026-07-05T10:20:48.234Z",
-      "updated": "2026-07-05"
+      "updated": "2026-07-06",
+      "claimedAt": "2026-07-06T11:22:41.987Z"
     },
     {
       "id": "c09fyrmq",
@@ -9821,13 +9923,43 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
-      "plan": null,
+      "plan": "Decision status: D-JPK-DISCOVER1=A is ratified. No owner decision needed.\n\nBuild order:\n1. Define the local discovery index schema: package source, canonical name, aliases only as typo hints, versions, resolved identity, platforms, docs, option fields, defaults, and provenance. Store as std-only JSONL or compact text under `.jet/` or hangar metadata; no compiler external crates.\n2. Populate the index from the same provider metadata used by resolution: core/default packages, registry index entries, locked packages, adapters, service catalog, env/module option descriptors. Do not fetch during `jet search` or `jet info`.\n3. Add CLI verbs through the engine dispatch surface: `jet search <query>` and `jet info <ref>`, with `--json` stable shape. Use offline index only; if no local index exists, explain how to create or refresh it.\n4. Wire diagnostics and suggestions so unknown package refs can consult the index for nearest names, preserving current E09xx/E12xx style.\n5. Add LSP hooks: completions after provider dots inside `module env.*` package lists; completions and hover for typed fields in `Service.{}` and env/module option bodies; hover uses the same index records as CLI.\n6. Document discovery as local/offline and tie it to U29: search/info never phones home.\n\nLikely touched files/modules:\n- New `crates/jet-driver/src/Jetpack/Discovery.rs` or index submodule.\n- `crates/jet-driver/src/Jetpack/{Provider,RefSpec,PackageManifest,ModuleEval/Types,ModuleEval/Diagnostics,Services,CLI}.rs`\n- `Source/{CLI,EngineDispatch}.rs`, `Source/Bin/Jetpack.rs`\n- `Source/LSP/{Features,Server}.rs` and LSP fixtures.\n- `docs/spec/diagnostics.md`, `docs/spec/roadmap.md`, `tools/Tower/docs/plans/epoch-4/README.md` if behavior wording changes.\n\nDiagnostics, tests, docs:\n- Add E12xx for missing local discovery index and malformed/stale index if needed; every code gets docs and snapshot or pinned process output.\n- `jet info` should surface resolved identity, versions, platform support, source, service options, defaults, docs, and lock/envelope provenance.\n- `jet search --json` and `jet info --json` schemas need fixtures.\n\nTargeted test plan:\n1. Unit-test index write/read, ordering, typo distance, platform filters, and legacy malformed-index failure.\n2. CLI tests: offline search returns expected packages from fixtures; `jet info default.postgres_16` prints versions/options/platforms; `--json` parses and is stable.\n3. Resolver integration: unknown `default.postgress_16` suggests `postgres_16` from local index without network.\n4. LSP fixtures: completion after `default.post`, hover for package refs, completion/hover in `Service.{}` fields.\n5. Offline guard: install a provider fixture that would fail if asked for network; `search` and `info` must pass.\n\nGates:\n- Same metadata source as resolver; no stale parallel web index.\n- No network on search/info.\n- No browser-only discovery path.\n- LSP and CLI agree byte-for-byte on package names, versions, and field docs where both expose them.",
       "blockedBy": [],
       "workOrder": 17626,
-      "assignee": null,
+      "assignee": "codex-e4-plan-b",
       "log": [
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "Verified by codex-main: Jetpack::Discovery (2/2), jetpack_discovery (3/3), CLI parses_flags, and lsp (26/26) pass. Closing."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-lsp",
+          "text": "codex-lsp: implemented #205 LSP discovery completion slice. LSP now loads local offline discovery index from the document dir/ancestors and completes package names after source dots (e.g. default.post -> postgres_16) plus Service./Env. option field names from index records. Added focused LSP integration test that writes .jet/discovery/index.jsonl and verifies package + option completions. Test green: nix develop -c cargo test --test lsp (26 passed). Did not modify Jetpack Discovery helper; #209 left building."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "codex orchestration: CLI/offline-index slice complete; routing remaining LSP package/env completions to codex-lsp to avoid LSP ownership collision."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-e4-plan-b",
+          "text": "Implemented U26 CLI/offline discovery slice: added Jetpack::Discovery local JSONL index under .jet/discovery/index.jsonl, indexed env/module package refs from resolver metadata, offline provider fixtures, hangar records, adapters, and service option fields; added jetpack search/info plus top-level jet search/info dispatch; added JSON output and package completion helper for later LSP reuse; documented offline discovery contract. Targeted tests green: nix develop -c cargo test -p jet-driver Jetpack::Discovery; nix develop -c cargo test --test jetpack_discovery; nix develop -c cargo test -p jet-driver Jetpack::CLI::tests::parses_flags. No full suite. Did not touch #206-208. Did not implement LSP completions/hover because user forbade LSP/editor edits and active #209/#210 coordination is needed; card remains building for that slice."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "codex orchestration: starting implementation after #204 verified; same serialized Jetpack lane."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-e4-plan-b",
+          "text": "Plan written by codex-e4-plan-b: D-JPK-DISCOVER1=A already ratified, no owner decision needed; advanced to ready."
+        },
         {
           "at": "2026-07-03",
           "by": "agent",
@@ -9895,7 +10027,8 @@
         }
       ],
       "created": "2026-07-05T10:20:48.282Z",
-      "updated": "2026-07-05"
+      "updated": "2026-07-06",
+      "claimedAt": "2026-07-06T11:22:42.045Z"
     },
     {
       "id": "c0a5yisx",
@@ -9906,13 +10039,38 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
-      "plan": null,
+      "plan": "Decision status: D-JPK-BUILDDBG1=A is ratified. No owner decision needed.\n\nBuild order:\n1. Define a build attempt record: package/ref, source identity, recipe hash, platform, tool deps, step list, start/end status, scratch dir, log dir, and envelope link. Persist under `.jet/logs/build/` or hangar metadata using std-only serialization.\n2. Wrap every package/adaptor build step in a runner that captures stdout/stderr per step, records command/env/cwd, timestamps, exit status, and redacts secret values. Successful scratch follows U22 cleanup; failed scratch is preserved under hangar-scoped failure storage.\n3. Add `--shell-on-fail` to realize-class verbs that can build packages. On failure, open the configured shell in the preserved scratch with exact PATH/env and cwd at the failed step. In tests, allow a fake shell command so no interactive test hangs.\n4. Extend `jet explain <ref>` without breaking diagnostic-code `jet explain E1234`: code-shaped args keep existing behavior; package/ref args print resolution path, provider choice, lock identity, recipe/provenance, last build status, failed step, and log path.\n5. Add `jet logs <pkg>` with text and `--json`; include per-step logs, latest/attempt selection, and stable JSON schema for CI.\n6. Wire the primary build-failure diagnostic to name the failed step, `jet logs <pkg>`, and `--shell-on-fail`.\n\nLikely touched files/modules:\n- `crates/jet-driver/src/Jetpack/{Recipe,Provider,Store,Envelope,RefSpec,CLI,Shell,JSON}.rs`\n- New `crates/jet-driver/src/Jetpack/BuildLog.rs` or `BuildDebug.rs`\n- `crates/jet-driver/src/{Lock,Loader}.rs`\n- `Source/{CLI,EngineDispatch}.rs`, `Source/Bin/Jetpack.rs`\n- Adapter/build fixtures in `tests/fixtures/jetpack-typed/`; tests in `tests/{jetpack,pkg,engine_dispatch}.rs`\n\nDiagnostics, tests, docs:\n- Add E12xx build-failed diagnostic with What/Why/Fix and coverage.\n- Add E12xx for missing build log/ref unknown to `jet logs` or `jet explain` if needed.\n- Update `docs/spec/diagnostics.md`; add CLI help/man/completion entries through existing registry.\n- Ensure log JSON schema and explain output are pinned in tests.\n\nTargeted test plan:\n1. Unit-test attempt record read/write and redaction.\n2. Fixture adapter with three steps where step 2 fails: assert scratch preserved, log files written, diagnostic names step 2 and fix commands.\n3. Same fixture with fake `JETPACK_SHELL_ON_FAIL` or equivalent: assert shell command receives cwd/env/PATH and exits cleanly.\n4. `jet explain weirdctl` after failure prints provider path, source hash, recipe hash, platform, failed step, scratch, log path.\n5. `jet logs weirdctl --json` parses and includes per-step status/output without ANSI noise.\n6. GC integration: preserved failed scratch is reachable until the configured failure retention sweep, then collectable.\n\nGates:\n- No raw rustc/provider noise as primary UX; Jet diagnostic names the next command.\n- No plaintext secrets in logs, scratch metadata, or JSON.\n- Failed scratch stays in hangar-managed space, never `/tmp`.\n- `jet explain ECODE` behavior remains backward compatible.",
       "blockedBy": [],
       "workOrder": 17627,
-      "assignee": null,
+      "assignee": "codex-e4-plan-b",
       "log": [
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "Verified by codex-main: BuildDebug, Recipe, jetpack_build_debug, build_sandbox, diagnostics_coverage, and E1274 CLI golden pass. Closing."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-e4-plan-b",
+          "text": "Fixed #206 I4 gap found in main verification: added a minimal CLI golden snapshot for E1274 missing build logs (tests/cli/e1274_missing_build_log.txt) plus focused tests/cli.rs coverage via jet logs definitely_missing --no-color. Requested diagnostics coverage now green: nix develop -c cargo test --test diagnostics_coverage. Focused test green: nix develop -c cargo test --test cli jetpack_missing_build_log_golden. No full suite."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-e4-plan-b",
+          "text": "Implemented U27 failed-build debuggability per D-JPK-BUILDDBG1=A: added BuildDebug attempt records under hangar build-logs, per-step recipe logging, preserved failed scratch under hangar failed-scratch, E1273/E1274 docs/explain coverage, jetpack/top-level jet logs and package-form jet explain while preserving jet explain ECODE, and --shell-on-fail with JETPACK_SHELL_ON_FAIL test hook. Targeted tests green: cargo test -p jet-driver Jetpack::BuildDebug; cargo test -p jet-driver Jetpack::Recipe; cargo test --test jetpack_build_debug; cargo test --test build_sandbox; cargo test --test cli every_registered_code_has_an_explain_entry; cargo test --test cli explain_golden; selected jetpack adapter regressions. No full suite."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "codex orchestration: starting implementation after #205 verified; same serialized Jetpack lane."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-e4-plan-b",
+          "text": "Plan written by codex-e4-plan-b: D-JPK-BUILDDBG1=A already ratified, no owner decision needed; advanced to ready."
+        },
         {
           "at": "2026-07-03",
           "by": "agent",
@@ -9985,7 +10143,8 @@
         }
       ],
       "created": "2026-07-05T10:20:48.325Z",
-      "updated": "2026-07-05"
+      "updated": "2026-07-06",
+      "claimedAt": "2026-07-06T11:22:42.069Z"
     },
     {
       "id": "c0ay489t",
@@ -9996,13 +10155,33 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
-      "plan": null,
+      "plan": "Decision status: D-JPK-NODAEMON1=A is ratified. No owner decision needed.\n\nBuild order:\n1. Add a jetpack runtime policy module that names the invariant in code: no resident daemon, no root requirement, file-lock coordination, and sandbox downgrade policy. Keep jetos activation as the only future sudo exception.\n2. Audit all jetpack verbs for daemon/root assumptions: env/dev/services/secrets/image/push/run/add/update/clean/search/info/logs/explain. Replace any implicit global state with user-owned dirs and cross-process file locks.\n3. Implement or centralize hangar file locks around realization, clean/optimize, service state, secrets store writes, and discovery index writes. Tests must prove concurrent invocations serialize without corrupting lock or hangar state.\n4. Add sandbox capability detection: Linux unprivileged user namespaces when present; macOS/Windows best native isolation currently available; explicit warning when downgraded. Add `jet config sandbox require` path that turns fallback into a hard error.\n5. Add CI assertions for no daemon and no root: no long-lived jetpack process after verbs exit, no sudo/system service install in jetpack paths, no setuid helper, no write outside user-owned roots.\n6. Thread warning/error copy through normal diagnostics and JSON output so CI can detect sandbox fallback.\n\nLikely touched files/modules:\n- New `crates/jet-driver/src/Jetpack/RuntimePolicy.rs`, `Sandbox.rs`, or `Locking.rs`\n- `crates/jet-driver/src/Jetpack/{Store,Services,Secrets,Trust,Shell,CLI,Provider,Recipe,WorkspaceLock}.rs`\n- `Source/{CLI,EngineDispatch}.rs`, `Source/Bin/Jetpack.rs`\n- Tests in `tests/{jetpack,jetpack_services,engine_dispatch,pkg}.rs`; platform CI in `.github/workflows/ci.yml`\n\nDiagnostics, tests, docs:\n- Add L02xx warning for sandbox unavailable and E12xx for sandbox-required failure.\n- Add E12xx for root-required invariant violation only if a runtime path can hit it; otherwise keep as CI assertion.\n- Update `docs/spec/diagnostics.md`, CLI help for `jet config sandbox require`, and epoch-4 docs.\n- Ensure `--json` carries sandbox status without ANSI or prose scraping.\n\nTargeted test plan:\n1. Unit-test policy classification: jetpack verbs never require root; jetos switch is future allowlist only.\n2. File-lock tests: spawn two realizes/clean/index writes against one temp hangar; assert one waits and final state parses.\n3. Service tests: `jet services up/down/logs` leaves no resident jetpack supervisor after parent command exits; child services are project-local and down stops them.\n4. Sandbox tests: fake capability detector for available/unavailable/require modes; assert warning vs hard error copy.\n5. Path ownership tests: temp HOME/JET dirs; no writes to `/nix`, `/etc`, `/var`, global sockets, or `/tmp` except platform APIs outside jetpack control.\n6. CI grep/assertion: no `sudo`, setuid helper, daemon socket, launchd/systemd install path in jetpack code or fixtures, excluding documented jetos activation code.\n\nGates:\n- Any future design needing a daemon or privileged helper must raise a new owner decision before implementation.\n- Fallback sandbox warning is loud and test-pinned; silent downgrade fails gate.\n- Cross-platform behavior matches U25.\n- Offline and hangar guarantees from U22/U29 remain intact under concurrent runs.",
       "blockedBy": [],
       "workOrder": 17628,
-      "assignee": null,
+      "assignee": "codex-e4-plan-b",
       "log": [
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "Verified by codex-main: RuntimePolicy (2/2), jetpack_no_daemon (3/3), diagnostics_coverage, build_sandbox, and jetpack_services pass. Closing."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-e4-plan-b",
+          "text": "Implemented U28 no-daemon/no-root constraint per D-JPK-NODAEMON1=A: added Jetpack RuntimePolicy with explicit no-resident-daemon/no-root verb policy, transient jetos os switch exception, std-only file locks, user-owned default hangar root, sandbox detection with L0205 fallback warning and E1275 require-mode failure, JSON diagnostic output, config sandbox require/allow/status, and lock coordination for hangar record/clean, workspace lock, discovery index, services state, and secrets writes. Added diagnostics/docs and tests/jetpack_no_daemon CI assertions. Targeted tests green: cargo test -p jet-driver Jetpack::RuntimePolicy; cargo test --test jetpack_no_daemon; cargo test --test diagnostics_coverage; cargo test -p jet-driver Jetpack::Store; cargo test -p jet-driver Jetpack::WorkspaceLock; cargo test -p jet-driver Jetpack::Discovery; cargo test --test build_sandbox; cargo test --test jetpack_services; cargo test -p jet-driver Jetpack::Secrets; rustfmt --check on touched Rust files; git diff --check on #207 files. No full suite."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "codex orchestration: starting implementation after #206 verified; same serialized Jetpack lane."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-e4-plan-b",
+          "text": "Plan written by codex-e4-plan-b: D-JPK-NODAEMON1=A already ratified, no owner decision needed; advanced to ready."
+        },
         {
           "at": "2026-07-03",
           "by": "agent",
@@ -10075,7 +10254,8 @@
         }
       ],
       "created": "2026-07-05T10:20:48.373Z",
-      "updated": "2026-07-05"
+      "updated": "2026-07-06",
+      "claimedAt": "2026-07-06T11:22:42.013Z"
     },
     {
       "id": "c0bnxdui",
@@ -10086,13 +10266,33 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
-      "plan": null,
+      "plan": "Decision status: D-JPK-OFFLINE1=A is ratified. No owner decision needed.\n\nBuild order:\n1. Add one `NetworkMode` or `OfflineMode` value threaded through jetpack CLI dispatch, resolver, providers, adapters, cache substitution, script deps, service startup, and build runner. `--offline` must be parsed once and passed explicitly.\n2. Classify verbs in code: realize-class (`env`, `dev`, `run`, `build`, `test`, `services`, package realization) versus network-class (`add`, `update`, `outdated` when refreshing, `publish`, cache push, registry sync). Network-class verbs refuse under `--offline` before doing work.\n3. Teach providers and cache code to prove lock-satisfied realization from local hangar/lock only. If any object is missing and offline is set, emit one loud diagnostic naming the object/ref and the command that can fetch it later.\n4. Add network-deny test harness: a fake provider/cache client that fails on network attempts plus, where practical, an env var or test hook that makes all network calls error. Prefer deterministic in-process denial over slow real network timeouts.\n5. Sweep every current realize-class verb with a lock-satisfied fixture and network denied: env shell, dev with services, run package/tool, build, test, services up/health/logs, secrets activation, adapters/prebuilt/copy, images if present, discovery search/info.\n6. Update docs/diagnostics and CLI help. Make `--offline` visible in completions/man output and stable JSON errors.\n\nLikely touched files/modules:\n- `crates/jet-driver/src/Jetpack/{CLI,Provider,RefSpec,Store,Recipe,ScriptDeps,ScriptLock,Services,Secrets,Trust,Image,Discovery}.rs`\n- `crates/jet-driver/src/{Fetch,Lock,Loader}.rs`\n- `Source/{CLI,CLISpec,EngineDispatch}.rs`, `Source/Bin/Jetpack.rs`\n- Tests in `tests/{jetpack,pkg,jetpack_services,engine_dispatch,cli}.rs`; fixtures under `tests/fixtures/jetpack-typed/`\n\nDiagnostics, tests, docs:\n- Add E1258 or next free E12xx for offline-forbids-network and reuse it for fetch misses and network-class refusal, with specific What/Why/Fix per context.\n- Add diagnostics.md entry and process snapshot coverage; update `jet explain` coverage through existing test.\n- Document verb classification in epoch-4 docs and user CLI help.\n- Ensure no ANSI, spinner, or timeout text in offline errors.\n\nTargeted test plan:\n1. Unit-test verb classification and `--offline` flag parsing through engine dispatch.\n2. Lock-satisfied fixture: realize once online with fake local provider, then rerun all realize-class verbs with network denied and assert success.\n3. Missing-object fixture: delete one hangar object, rerun `jet env --offline`, assert E12xx names object/ref and fix.\n4. Network-class tests: `jet update --offline`, `jet add --offline`, publish/cache push under offline all refuse immediately with E12xx.\n5. Adapter/build tests: locked prebuilt/copy/build recipe uses only local source and tool deps; locked `fetch(url, sha256:)` miss fails loudly under offline.\n6. Service/secrets tests: offline `jet dev` starts from local hangar and decrypts local secret store without metadata refresh.\n7. Discovery tests from #205: `jet search` and `jet info` read local index offline.\n\nGates:\n- No network from realize-class verbs when lock is satisfied.\n- No lazy metadata refresh, telemetry, update check, or cache probe in realize path under offline.\n- Cache substitution miss falls back to local build only when not offline; under offline it errors without a fetch.\n- U22 reachable-retention must keep current lock objects or this card cannot be marked done.\n- Done requires golden sweep over every shipped realize-class verb, not a narrow provider unit test.",
       "blockedBy": [],
       "workOrder": 17629,
-      "assignee": null,
+      "assignee": "codex-e4-plan-b",
       "log": [
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "Verified by codex-main: jetpack_offline (3/3), diagnostics_coverage (6/6), and jetpack offline_without_fixtures_errors pass. Closing."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-e4-plan-b",
+          "text": "Implemented U29 offline guarantee per D-JPK-OFFLINE1=A: hangar cache hit before provider dispatch; E1276 for --offline missing object/network fetch; JETPACK_DENY_NETWORK test hook for git/nix/channel probes; network-class --offline refusal for add/update/outdated; docs/spec diagnostics updated; focused offline tests added. Targeted tests green: nix develop -c cargo test --test jetpack_offline; nix develop -c cargo test --test diagnostics_coverage; nix develop -c cargo test --test jetpack offline_without_fixtures_errors; rustfmt --check touched Jetpack/offline files; git diff --check touched U29 files. No full suite."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "codex orchestration: starting implementation after #207 verified; final serialized Jetpack lane card in this batch."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-e4-plan-b",
+          "text": "Plan written by codex-e4-plan-b: D-JPK-OFFLINE1=A already ratified, no owner decision needed; advanced to ready."
+        },
         {
           "at": "2026-07-03",
           "by": "agent",
@@ -10155,7 +10355,8 @@
         }
       ],
       "created": "2026-07-05T10:20:48.416Z",
-      "updated": "2026-07-05"
+      "updated": "2026-07-06",
+      "claimedAt": "2026-07-06T11:22:42.224Z"
     },
     {
       "id": "c0cevzhr",
@@ -10166,12 +10367,62 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "building",
       "priority": "P1",
       "plan": "LSP v2 under D-LSP1=C (one incremental compiler service) + D-LSP2=A (full LSP 3.17 parity, beginner-first order). Implement on master (this plan was authored from the stale tower-platform worktree; all paths verified against master). Invariants: I2 front end owns every message, I3 checking lives in sema, I6 zero external crates in the compiler — the query engine is std-only.\n\nArchitecture (D-LSP1=C): a demand-driven incremental query engine — inputs (file text, module graph roots) and derived queries (tokens-of-file, ast-of-file, module-graph, types-of-item, diagnostics-of-file, symbols-of-file, callers-of-item), each memoized with precise dependency tracking and a global revision counter. jet check, jet dev, the REPL, and jet lsp become clients of the same engine, so editor answers can never disagree with the compiler. jet-semindex's ratified query API (D-SEMINDEX1) is the persistence/format layer, fed by the engine instead of batch runs.\n\nBuild order:\n1. Engine core: new crate crates/jet-queries (std-only). Query trait + memo table + dependency edges + revision invalidation. Wrap existing lexer/parser/sema entry points as queries without changing their internals (I3). Unit tests: edit one file of a 3-file project, prove only dependent queries recompute (counter assertions).\n2. LSP on the engine: rewrite Source/LSP/Check.rs request paths to engine queries; keep the JSON/protocol layer. Differential gate: LSP publishDiagnostics byte-identical to `jet check --json` for every tests/ui fixture (new tests/lsp differential test — this is the no-two-brains exit).\n3. Incremental sync: textDocumentSync 2 (range edits) in Server.rs + rope-or-line-table doc storage in Position.rs. Latency test: single-keystroke edit on a 2,000-line fixture re-checks in <10ms warm (test with counters, not wall-clock flake; a wall-clock smoke stays #[ignore] for local runs).\n4. Wave 1 — beginner-critical (ships before anything else user-visible): signatureHelp (trigger '(' and ','; params + doc comment from AST), documentSymbol (nested outline: fns, structs+methods, enums, traits, modules), completion quality pass (labels get type signatures; keyword completions context-filtered).\n5. Wave 2 — navigation: workspaceSymbol (engine project view), foldingRange (blocks, comments, use-groups), documentHighlight (occurrences via resolution, read vs write kinds — v5 & writes light differently), selectionRange (AST-walk expand).\n6. Wave 3 — power: completion auto-import (insert `use` on commit) + snippet support (fn call parens, .{ } constructor), prepareRename (reject keywords/foreign symbols with Jet-voiced message), semanticTokens range + delta (keep full as fallback), inlayHint refinements (param names at call sites, off-by-default toggle).\n7. Wave 4 — hierarchy + long tail: callHierarchy (incoming/outgoing via callers-of-item query), typeHierarchy (impl/trait relations), documentLink (use-paths + doc URLs), codeLens (run/test lens over #Test fns, off by default). Advertise only what ships: initialize_response in Server.rs grows per wave, never ahead of tests.\n8. Engine serves the CLI: `jet check` and `jet dev` reuse the warm engine in watch/daemon mode (D-DEV4 loop); differential battery from E2-M4 must stay green (interpreter parity untouched).\n\nExit criteria (all must hold — no partial done):\n- Every capability advertised in initialize_response has a passing test in tests/lsp.rs (capability-coverage meta-test enumerates the JSON and fails on untested ones).\n- Differential gate (stage 2) green across all ui fixtures.\n- Incremental-recompute unit proofs green; keystroke path does not re-run whole-file sema when edit is local to one item.\n- tests/lsp/, tests/dev.rs, tests/repl.rs, full suite green.\n- docs: editors/vscode/README.md + editors/zed/README.md feature tables updated; architecture.md gains the query-engine section (R-rules untouched).\n\nGates: none open — D-LSP1/D-LSP2 ratified 2026-07-05. Log both in docs/spec/syntax-decisions.md tooling section during stage 1 commit.\n\nDelegation: stages 1–3 sequential (one agent, non-isolated — worktree agents branch stale bases); waves 4–7 parallelizable per-feature after stage 3 lands. sonnet for feature waves, opus for stage 1 engine design review before code.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "codex-lsp",
       "log": [
+        {
+          "at": "2026-07-06",
+          "by": "codex-lsp",
+          "text": "codex-lsp: honesty/meta slice landed. Added initialize capability coverage meta-test that enumerates advertised capabilities (including rename prepare + semantic full/range/delta facets) and requires a named LSP test marker for each. Added semanticTokens/full/delta as honest full-token fallback with resultId while keeping full + range. Added small coverage tests for formatting/rangeFormatting and workspace/executeCommand jet.impact so old advertised caps are covered too. Updated VS Code/Zed READMEs for semantic full/range/delta + current LSP feature surface. Targeted test green: nix develop -c cargo test --test lsp (35/35). Still building: typeHierarchy (not advertised), completion snippet/auto-import polish (not newly advertised), true project-wide workspace symbols beyond open docs, AST-precise folding/selection, full resolution write-kind accuracy, full ui-fixture differential battery, item-granular recompute proofs, CLI/dev/REPL shared engine."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "Verified by codex-main: cargo test --test lsp passes 31/31 after Wave 3 prepareRename, semanticTokens/range, and callHierarchy slice. Card remains building for semantic delta, typeHierarchy, snippets/auto-import, meta-test, full differential battery, recompute proofs, shared engine."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-lsp",
+          "text": "codex-lsp: Wave 3/power slice landed. Added textDocument/prepareRename with Jet-voiced rejection for Jet keywords and retired/foreign spellings plus normal symbol range/placeholder acceptance; added semanticTokens/range while keeping full fallback; added callHierarchyProvider with prepare/incoming/outgoing calls from existing semindex call edges. initialize_response advertises only implemented/tested power capabilities. Targeted test green: nix develop -c cargo test --test lsp (31/31). Still building: semantic token delta, typeHierarchy, completion snippets/auto-import quality, true project-wide workspace symbols beyond open docs, AST-precise folding/selection, full resolution write-kind accuracy, capability coverage meta-test, full ui-fixture differential battery, item-granular recompute proofs, CLI/dev/REPL shared engine."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "Verified by codex-main: cargo test --test lsp passes 29/29 after Wave 2 workspaceSymbol/foldingRange/documentHighlight/selectionRange slice. Card remains building for hierarchy, semantic deltas/range, prepareRename, capability meta-test, full differential battery, and shared engine proof."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-lsp",
+          "text": "codex-lsp: Wave 2 navigation vertical slice landed. Added workspace/symbol over currently open checked documents, textDocument/foldingRange for lexical blocks + consecutive comments/imports, textDocument/documentHighlight using semindex defs/refs with write/read kinds, and textDocument/selectionRange token -> line -> nearest brace block -> file expansion. initialize_response now advertises only these implemented/tested Wave 2 capabilities. Targeted test green: nix develop -c cargo test --test lsp (29/29). Still building: true project-wide workspace symbols beyond open docs, AST-precise folding/selection, full resolution write-kind accuracy, call/type hierarchy, semantic token delta/range, prepareRename/capability coverage meta-test, full ui-fixture differential battery, item-granular recompute proofs, CLI/dev/REPL shared engine."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "Verified by codex-main: cargo test --test lsp passes 28/28 after signatureHelp, documentSymbol, and completion-quality wave-1 slice. Card remains building for remaining LSP parity work."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-lsp",
+          "text": "codex-lsp: Wave 1 vertical slice added signatureHelp for calls (trigger '(' and ','), documentSymbol outline for checked functions/structs/enums/traits/consts, and completion quality pass (function details include return types; keywords context-filtered). initialize_response now advertises only these implemented/tested capabilities. Targeted test green: nix develop -c cargo test --test lsp (28/28). Still building: workspaceSymbol, foldingRange, documentHighlight, selectionRange, call hierarchy/type hierarchy, semantic token delta/range, prepareRename/capability coverage meta-test, full ui-fixture differential battery, item-granular recompute proofs, CLI/dev/REPL shared engine."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-lsp",
+          "text": "codex-lsp: continued LSP v2 query work. jet-queries now tracks query-to-query dependencies and transitive invalidation; LSP server now memoizes checked_bundle, tokens, and fixes through QueryEngine (hover/definition/references/rename/completion/inlay/codeAction share derived queries). Added bounded jet check --json differential regression for LSP check serializer. Targeted tests green: nix develop -c cargo test -p jet-queries; nix develop -c cargo test --test lsp. Still building: full ui-fixture differential battery, item-granular recompute counters, CLI/dev/REPL shared engine, and remaining capability waves."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-lsp",
+          "text": "codex-lsp: LSP v2 stage 1-3 vertical slice landed: new std-only crates/jet-queries query engine with input dependency/recompute tests; LSP diagnostics now use query engine; textDocumentSync advertises incremental (2) and didChange applies range edits via line table. Targeted tests green: nix develop -c cargo test -p jet-queries; nix develop -c cargo test --test lsp. Next: lift parser/sema/bundle into real derived engine queries, add jet check --json differential fixture gate, and add recompute counters for local-item edits."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "codex orchestration: assigned codex-lsp to stages 1-3; owns crates/jet-queries + LSP query integration; no highlighting edits."
+        },
         {
           "at": "2026-07-05",
           "by": "claude-main",
@@ -10184,7 +10435,8 @@
         }
       ],
       "created": "2026-07-05T11:30:08.292Z",
-      "updated": "2026-07-05"
+      "updated": "2026-07-06",
+      "claimedAt": "2026-07-06T11:22:32.650Z"
     },
     {
       "id": "c0vg0lj7",
@@ -10195,12 +10447,42 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "building",
       "priority": "P1",
       "plan": "Highlighting single source of truth under D-HL1=D (grammars generated from Syntax.rs + LSP semantic-token overlay, CI drift gate). Implement on master. Invariant I7: Syntax.rs is already the registry every user-typeable token must live in — this card makes that fact enforce coloring.\n\nBuild order:\n1. Classify the registry: extend crates/jet-foundation/src/Syntax.rs entries with a highlight class per token (keyword.control / keyword.declaration / keyword.ownership / marker / operator / sigil / literal-prefix ...). Mechanical: a const table or attribute alongside each existing entry; no token strings move. Any token without a class = compile error in the generator, so future ratifications can't skip it.\n2. Generator: `jet devtools grammars` in Source/CmdDevTools.rs. Emits BEGIN/END GENERATED sections inside: editors/vscode/syntaxes/jet.tmLanguage.json (keyword/marker/operator patterns), editors/tree-sitter/grammar.js keyword externals (or a generated keywords.js the grammar requires), editors/zed/languages/jet/highlights.scm keyword block. Hand-written structure rules (strings, comments, interpolation, blocks) stay outside the markers and are preserved byte-for-byte on regeneration. Generator is deterministic (sorted output) so regeneration is diff-stable.\n3. Drift gate: tests/grammar.rs gains every_syntax_token_is_highlighted — for each user-typeable token in Syntax.rs, assert presence in each grammar's generated section, and assert the generated sections match a fresh in-memory generation (stale-file detection). Red today (copy, ^, & missing) until stage 2 output is committed. This test joins the CI PR gate (#211).\n4. Semantic overlay: extend Source/LSP semantic tokens — add token types/modifiers for v5 ownership (& write-borrow, ^ move, copy verb), markers (#Test/#Unsafe/... as decorator-class), retired/foreign keywords (E03xx teaching-error spellings) explicitly NOT keyword-colored. editors/vscode/package.json semanticTokenScopes maps the new types; zed extension.toml equivalents. Fixture test: canon.jet + examples/features/memory/ownership.jet token dumps snapshot-tested in tests/lsp.rs.\n5. Regenerate all three grammars, run editors/*/install.sh locally, verify canon.jet renders consistently in VS Code + Zed; screenshot pair in the card log. GitHub rendering uses the committed tmLanguage — verified by the drift test alone.\n6. Docs: editors/README pointers; note in syntax-decisions.md tooling section (D-HL1=D logged); CLAUDE.md syntax-decision protocol gains one line: 'ratifying syntax = run jet devtools grammars, commit regenerated sections' (the drift test makes forgetting red anyway).\n\nExit criteria:\n- cargo test --test grammar green, including staleness check.\n- Semantic-token snapshots green for canon.jet + ownership.jet + copy_verb.jet.\n- `copy`, `^`, `&`, and every S75/S76/v5 token colored in all three grammars; retired spellings (val, var, dotless construction) not keyword-colored anywhere.\n- Full suite green; zed grammar-repo stays untracked (build artifact — .gitignore already covers it).\n\nGates: none — D-HL1 ratified 2026-07-05. No new user-typeable syntax, so no formatter work.\n\nDelegation: stages 1–2 one sonnet agent (single subsystem); stage 4 separate agent after 2 lands; stage 3 test written FIRST (red) per workflow loop.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "codex-highlight",
       "log": [
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "codex-main verification: VSIX packaging succeeded via editors/vscode/install.sh, and Codium installed jet-lang.jet-0.2.0 into explicit writable /tmp/jet-codium-extensions. Normal Cursor/Codium profile install is blocked because ~/.cursor/extensions and ~/.vscode-oss/extensions are Home Manager symlinks into /nix/store; GUI render/screenshot verification is not available in this environment. Card remains building; remaining proof is real editor-profile/render screenshot, not code/test work."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-highlight",
+          "text": "codex-highlight stages 5-6 complete/residual: Zed install smoke ran locally with no-network path: nix develop -c editors/zed/install.sh; skipped VS Code install because editors/vscode/install.sh runs npm install and npx --yes @vscode/vsce, which may fetch network. Docs updated: editors/vscode README, editors/zed README, CLAUDE syntax-ratification note, syntax-decisions D-HL1 tooling entry. Verified: nix develop -c cargo test --test grammar (13/13), nix develop -c cargo test --test lsp (24/24), JSON parse for VS Code package and tmLanguage. Residual: no VS Code/Zed GUI screenshot verification available in this environment, so card remains building rather than verify."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-highlight",
+          "text": "codex-highlight stage 4 correction: previous log shell stripped quoted token names. Exact scope: LSP semantic tokens classify copy, caret move sigil (^), ampersand write-borrow sigil (&), # and @ marker prefixes plus marker names as decorator directive/contract tokens; retired/foreign spellings are suppressed from semantic-token output. VS Code semanticTokenScopes mapped ownership/decorator classes. Verified: nix develop -c cargo test --test lsp (24/24), package.json JSON parse. Left building: stage 5 editor install/render verification + stage 6 docs/protocol updates."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-highlight",
+          "text": "codex-highlight stage 4 complete: LSP semantic tokens now classify v5 ownership (, , ) with ownership token/modifiers, classify / markers + marker names as decorator directive/contract tokens, and suppress retired/foreign spellings from semantic-token output. VS Code semanticTokenScopes mapped ownership/decorator classes. Focused live LSP test added for ownership/markers/retired words. Verified: nix develop -c cargo test --test lsp (24/24), package.json JSON parse. Left building: stage 5 editor install/render verification + stage 6 docs/protocol updates."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-highlight",
+          "text": "codex-highlight stages 1-3 complete: red grammar drift test added, Syntax.rs highlight classes/table + renderers added, jet devtools grammars command wired, generated sections regenerated for VS Code/tree-sitter/Zed. Verified: nix develop -c cargo test --test grammar; nix develop -c cargo run --bin jet -- devtools grammars; node --check editors/tree-sitter/grammar.js. Left building: LSP semantic overlay/snapshots intentionally untouched for #209/codex-lsp."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "codex orchestration: assigned codex-highlight to drift test + Syntax.rs highlight classes + grammar generator; LSP semantic-token stage held until #209/#210 generator base lands."
+        },
         {
           "at": "2026-07-05",
           "by": "claude-main",
@@ -10213,7 +10495,8 @@
         }
       ],
       "created": "2026-07-05T11:30:26.857Z",
-      "updated": "2026-07-05"
+      "updated": "2026-07-06",
+      "claimedAt": "2026-07-06T11:22:32.550Z"
     },
     {
       "id": "c0wa2hf8",
@@ -10247,18 +10530,63 @@
     {
       "id": "c0x3v19y",
       "num": 212,
-      "title": "Game development stack",
-      "body": "Master-of-all gap: no way to open a window, draw, play sound, or read a gamepad. #181 (UE design study) done, #182 (Blueprint editor) planned — but no runtime game/graphics stack exists or is carded. Decision D-GAME1: stdlib primitives vs flagship engine package vs bindings-first vs defer. New external deps (wgpu/winit-class) need owner I6 sign-off — that call is inside the ballot.",
+      "title": "Bare-minimum game bridge: core.raylib skeleton",
+      "body": "Owner narrowed scope 2026-07-06: Epoch 3 card #212 is the BARE MINIMUM only. Done means core.raylib exists as a typed compiler-known package skeleton, has a display-gated example, reaches parser -> sema -> codegen, and emits no unsafe. Full native raylib, primitives, and core.game scene-first engine are deferred to Epoch 7 successor card.",
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
-      "plan": "Game development stack under D-GAME1=B: flagship engine package on public stdlib primitives; ratified core.raylib bridge (D-RAYLIB1) ships first as the interim path; wgpu/winit-class I6 bridge deps approved by the ratification, native replacements owed post-E3. Implement on master. Invariants: I1 (safe by default — no unsafe leaks past bridge internals), I2 (engine errors are Jet-voiced, never wgpu/raylib panics), I6 (bridge pattern per crates/jet-driver FFI bridge precedent — external crates live in emitted bridge templates, never in the jet Cargo.toml).\n\nStage 0 — remaining owner gates (BALLOT FIRST; public-surface code blocked on these):\n- D-GAME2 (raised 2026-07-05, on this card): the engine package's name + namespace. Rich menu, jet/aviation theme.\n- D-GAME3 (to raise at end of design stage 3): the beginner-facing frame-loop/scene API shape — developed as a decision card with worked Pong/breakout examples per option, agent-reviewed, then balloted. Do NOT guess this surface; owner decides from concrete use cases.\nStages 1–2 below have no unratified surface and proceed immediately.\n\nBuild order:\n1. core.raylib bridge (D-RAYLIB1, already ratified): package under corelib/ following the core.archive template (manifest + bridge template emission via the FFI.rs pattern). Full binding coverage for 2D + basic 3D + audio + input; Jet-voiced errors for missing native deps (nixpkgs interim path per ratified native-deps policy; clear no-Nix message). Examples: examples/features/game/raylib_pong.jet + golden test (headless: raylib offscreen/CI skip-if-no-display guard like existing ui tests). This alone closes 'Jet cannot open a window.'\n2. Stdlib primitives (expert tier, public): core.window (winit-class bridge), core.gpu (wgpu-class bridge: surface, pipeline, buffers, WGSL passthrough), core.audio (cpal-class), core.input (events, gamepad). Thin, honest, documented per stdlib-api-laws.md. Each ships an example + test; GPU tests render offscreen and hash pixels (lavapipe/swiftshader in the nix devshell for CI determinism).\n3. Engine design study → D-GAME3 ballot: design the batteries layer on top of the primitives — window+frame loop, sprites/atlases, text, shapes, camera, input map, audio playback, scene/entity layer informed by the #181 UE study (gameplay tags/abilities where they fit Jet). Deliverable is the decision card with 2–4 genuinely different API shapes, each a complete worked Pong, reviewed by a second agent, then balloted. STOP public engine code until D-GAME2 + D-GAME3 ratify; stages 1–2 and internals continue meanwhile.\n4. Engine implementation (post-ratification): 2D first. Feature order: window+loop → sprites+transforms → input map → text → audio → camera/viewport → scene tree → asset pipeline (load png/wav/ttf via existing core.files; hot-reload assets under jet dev). Every feature ships example + golden test (I5). `jet run pong.jet` opens a window with zero manifest (R9 ceremony-free stays true).\n5. Blueprint alignment: engine scene/entity data model shaped for #182's bidirectional visual editor (data-driven scenes serializable via serde path); joint review with #182's plan before freezing the scene format.\n6. Docs: a 'make a game' beginner walkthrough (afternoon-Pong) in docs/reference; entries in core-library.md; maturity tags per #155 conventions.\n\nExit criteria:\n- Stage 1: raylib_pong.jet runs on a dev machine; golden/type-check tests green in CI (display-gated execution documented).\n- Stage 2: each primitive has example + test; offscreen GPU hash test green in CI; no `unsafe` outside bridge internals (golden.rs unsafe-grep stays green — mind the bare-word rule in generated code).\n- Stage 4: pong + breakout + one audio-visual demo under examples/features/game/, all golden-tested; engine package installable via jetpack path; beginner walkthrough verified start-to-finish on a clean machine.\n- Full suite green at every stage boundary; each stage is a separate reviewed commit series.\n\nGates: D-GAME2 open (ballot on this card); D-GAME3 owed by stage 3. New bridge crates beyond wgpu/winit/cpal-class scope need a fresh I6 ballot.\n\nDelegation: stage 1 one sonnet agent; stage 2 parallelizable per-primitive after core.window lands; stage 3 design = opus + reviewer; stage 4 sequential feature agents, non-isolated, full suite re-run by the orchestrator at each boundary.",
+      "plan": "Bare-minimum Epoch 3 scope only: core.raylib skeleton with package metadata, compiler-known typed no-op window/draw/color surface, display-gated/type-check example examples/features/game/raylib_window.jet, docs reflecting skeleton status, and targeted tests proving parser -> sema -> codegen emits raylib calls with no unsafe. Full native raylib bridge, public primitives, and core.game scene-first engine are deferred to Epoch 7 successor card created by codex-main.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "codex-game-plan",
       "log": [
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "Owner-reported acceptance miss fixed: examples/features/game/raylib_window.jet reached the real driver path but generated raylib handle bindings as jet_std::RaylibWindow/Color. Routed RaylibWindow/RaylibColor to top-level prelude handle types and added emitted-Rust regression asserting no jet_std::Raylib. Verified: nix develop -c cargo test -p jet-codegen raylib_window_example_reaches_sema_and_codegen; nix develop -c cargo test -p jet-codegen raylib_skeleton_types_lower_to_core_prelude_types; nix develop -c jet run examples/features/game/raylib_window.jet prints core.raylib skeleton typechecked. #212 remains done; full native game stack stays deferred to #216."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "Verified by codex-main after owner scope reduction: cargo check -p jet-foundation -p jet-sema -p jet-codegen; raylib sema/codegen tests; corelib coverage; ring_layer manifest test all pass. Bare-minimum core.raylib skeleton reached. Full game stack deferred to frozen E7 successor #216. Closing."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "Owner narrowed #212 to bare minimum only; codex-main deferred full game stack to new Epoch 7 successor card. Existing stage-1 core.raylib skeleton is the acceptance target for this card."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-game-plan",
+          "text": "Stage-1 core.raylib slice verified end-to-end for current bounded scope. Fixed example/API mismatch: close_window is read/no-op in the skeleton, no ^/hidden Rust move. Added low-crate vertical regression proving examples/features/game/raylib_window.jet lexes/parses, sema-checks, codegen-emits raylib calls, and emits no unsafe without compiling unrelated drivers. Targeted checks green: cargo check -p jet-foundation -p jet-sema -p jet-codegen; cargo test -p jet-foundation every_known_core_module_has_layer; cargo test -p jet-sema raylib_skeleton_signatures_are_registered; cargo test -p jet-codegen raylib_skeleton_types_lower_to_core_prelude_types; cargo test -p jet-codegen raylib_window_example_reaches_sema_and_codegen; cargo test --test corelib core_module_items_covers_known_core_modules; cargo test --test ring_layer manifest_parses_layer_ceiling; golden examples_compile_and_run green with temp pkg-config shadow so unrelated GTK example skips, raylib remains display-gated. Keeping card building because current plan objective continues through native core.raylib bridge, primitives, and core.game."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-game-plan",
+          "text": "Stage-1 core.raylib skeleton landed: package metadata, typed no-op window/draw/color surface, display-gated example, D-GAME3=C docs. Targeted checks green: cargo check -p jet-foundation -p jet-sema -p jet-codegen; cargo test -p jet-sema raylib_skeleton_signatures_are_registered; cargo test -p jet-codegen raylib_skeleton_types_lower_to_core_prelude_types; rustfmt --check on touched Rust files; cargo test -p jet-foundation every_known_core_module_has_layer. Driver-level corelib test blocked by unrelated Jetpack build_bridge arity error in Jetpack/Secrets.rs; not touched per scope."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-game-plan",
+          "text": "D-GAME3=C recorded in plan; started bounded stage-1 core.raylib skeleton."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "D-GAME3=C ratified by owner; resuming core.game stack work with scene-first + frame hook hybrid."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-game-plan",
+          "text": "Plan wording cleaned: only core.game remains as engine name."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-game-plan",
+          "text": "Plan refreshed after D-GAME2=A: engine name is core.game; D-GAME3 is the remaining public API gate."
+        },
         {
           "at": "2026-07-05",
           "by": "claude-main",
@@ -10271,7 +10599,8 @@
         }
       ],
       "created": "2026-07-05T11:30:26.958Z",
-      "updated": "2026-07-05"
+      "updated": "2026-07-06",
+      "claimedAt": "2026-07-06T11:22:32.616Z"
     },
     {
       "id": "c0xz4xqx",
@@ -10282,12 +10611,67 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "HTTPS by default under D-TLS1=A: rustls in the default build via the I6 FFI-bridge pattern, certificate verification pinned to system trust roots, native Jet TLS post-E3 only behind an external security-audit gate. Implement on master. Invariants: I2 (every TLS failure is a Jet-voiced diagnostic — rustls/OS error text never reaches the user raw), I4 (every new diagnostic gets a code + what/why/fix + ui snapshot), I6 (rustls rides the bridge like wasmtime/age precedents — D-DEP-CRYPTO1 governance, not a compiler dep).\n\nBuild order:\n1. jet-net grows a default-on TLS path: rustls + system trust roots (rustls-native-certs-class) behind the existing fetch API in crates/jet-net; ureq's tls feature wired accordingly. Default build = https works; a no-tls build flag remains for freestanding/size-gated targets (release_gates.rs budgets re-checked — if the size budget breaks, that goes back to the owner as a question, not a silent budget bump).\n2. core.http / core.net client: https URLs work in `jet run` with zero manifest. The E-code path 'https needs core.tls' dies for the client; core.tls package remains for advanced config (pinning, client certs, custom roots) per option A's decided scope.\n3. Server side: extend the #17 HTTP server surface with TLS serving — API shape follows the existing ratified server surface (.tls(cert, key) style continuation of the #17 mandate; if the shape needs anything beyond a method on the existing builder, STOP and ballot it — do not invent surface).\n4. Diagnostics (product copy, snapshot-pinned): new E42xx family — certificate invalid/expired/hostname mismatch, handshake failure, no trust roots found (the minimal-container case: name the fix — install ca-certificates), protocol errors. Each: docs/spec/diagnostics.md entry, jet explain page, tests/ui snapshot. The front end translates every rustls error class; an untranslated class panicking through = P0 per I2.\n5. Tests without network: local test server with self-signed + valid-chain fixtures under tests/fixtures (generate once, check in; regeneration script documented); happy-path https fetch, each E42xx provoked deliberately. CI never touches the internet.\n6. Example: examples/features/net/https_fetch.jet against the fixture server (env-pointed base URL so the example text reads like the real world but the test stays hermetic); golden-tested (I5).\n7. Record the security gate: release-policy.md gains the D-TLS1 clause — native-TLS may replace rustls as default only after external audit + interop battery (vs rustls and OpenSSL test vectors); syntax-decisions.md logs D-TLS1=A in the stdlib section; roadmap.md deferred-registry paragraph updated (TLS line now says https default via rustls bridge).\n\nExit criteria:\n- Fresh clone, default build: https fetch example runs (fixture server) — no package, no manifest.\n- All E42xx snapshots green; jet explain covers each; diagnostics_coverage.rs enforced.\n- Freestanding/size budgets green or explicitly re-balloted.\n- core.tls advanced path still works (its existing tests stay green).\n- Full suite green; docs (release-policy, syntax-decisions, roadmap, core-library.md) updated in the same series.\n\nGates: none open — D-TLS1 ratified 2026-07-05 (rustls bridge dep approved therein). Server-API shape stop-condition in stage 3 is conditional, not standing.\n\nDelegation: stages 1–2 one sonnet agent; stage 4 diagnostics copy is product writing — draft + snapshot, reviewer agent reads against diagnostics.md voice before commit; stage 5 fixtures alongside stage 1.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "codex-tls",
       "log": [
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "Verified by codex-main: http_server_tls (3/3), net_tls (1/1), jet-net (6/6), diagnostics_coverage (6/6), and cargo check -p jet-driver all pass. Closing."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-tls",
+          "text": "codex-tls: D-TLSSERVE1=A implemented. Added Server.tls(cert,key) typed option and Server.serve(addr, mux, tls: ...) lowering through hidden rustls bridge; bad cert/key return Jet-voiced errors before bind; unlabeled third arg rejected with E0125. Docs now state default HTTPS client path, core.tls as advanced client config, and server TLS named option. Verified targeted only per instruction: nix develop -c cargo test --test http_server_tls; cargo test --test net_tls; cargo test -p jet-net; cargo test --test diagnostics_coverage; cargo check -p jet-driver. Full suite not run by instruction; no live network fetch."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "D-TLSSERVE1=A ratified by owner; resuming implementation of named tls: option on Server.serve."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "codex-main re-ran checks after #200 fixed Jetpack compile break: cargo test --test net_tls passed; cargo check -p jet-driver passed. Card remains in decide lane on D-TLSSERVE1 for server TLS API shape."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-tls",
+          "text": "codex-tls verification note: after D-TLSSERVE1 ballot/docs update, `nix develop -c cargo test -p jet-net` passes 6/6. Driver-linked checks are blocked by unrelated Jetpack dirty compile error outside #213 scope: `crates/jet-driver/src/Jetpack/WorkspaceLock.rs:82:5` missing field `source_channels` in `LockFile` initializer. This blocks `cargo test --test net_tls` and `cargo check -p jet-driver`; per instruction, Jetpack files were not touched. Card lane is decide on D-TLSSERVE1, not verify."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-tls",
+          "text": "codex-tls final pass: inspected `core.http.server` implementation and found no existing server builder/method extension point. Current ratified/implemented surface is plaintext `Server.serve(addr, mux)` lowering directly to `jet_http_mux_serve(&addr, mux)`, so server TLS needs new public API shape. Per stage-3 stop condition, no server TLS API/code was invented. Added ballot D-TLSSERVE1 on #213 and documented D-TLS1 accurately: default HTTPS applies to client paths (`core.net.fetch`, `core.http.client`), `core.tls` remains advanced client config, server TLS waits on ratified server surface. Remaining before verify: owner ratifies D-TLSSERVE1, then implement/test that server surface; full-suite remains unrun by instruction."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-tls",
+          "text": "codex-tls: client-side stages 4/6/7 advanced. Added Jet-voiced HTTPS client diagnostics E4201 handshake, E4202 certificate trust, E4203 missing system roots; core.net.fetch maps TLS-class jet-net errors to those codes instead of raw ureq/rustls text. Added diagnostics.md registry/detail rows, explain coverage via diagnostics spec, net_tls render snapshot, and docs/examples noting default HTTPS. Verified targeted: nix develop -c cargo test -p jet-net; cargo test --test net_tls; cargo test --test diagnostics_coverage; cargo check -p jet-driver. No server TLS API touched; card remains building because server/API stage and broader exit criteria are not complete."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "codex-main cleared TLS dependency/cache blocker with network-enabled targeted run. Added Debug derive for FetchError. Verified: nix develop -c cargo test -p jet-net (4/4) and nix develop -c cargo check -p jet-driver both pass. Card remains building: E42xx diagnostics/docs/server-side stages still pending."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-tls",
+          "text": "codex-tls blocker detail: offline `nix develop -c cargo test -p jet-net --offline` failed before compile with: no matching package named rustls-native-certs found; required by ureq v2.12.1 via jet-net. Per network restriction, no live fetch attempted. Implementation remains in building: default TLS/native-certs wiring + fixtures are in working tree, but targeted cargo verification waits on lock/cache update or different root-store direction."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-tls",
+          "text": "codex-tls: stages 1-2 patch drafted: jet-net default TLS feature now targets ureq rustls + native-certs, core.http client bridge emits ureq with tls/native-certs, hermetic TLS fixtures added under tests/fixtures/tls, and jet-net has local tests for file fetch, scheme errors, TLS-backend presence, fixture PEMs. Verification blocker: offline cargo cannot resolve new transitive crate rustls-native-certs from local crates.io index/cache: \"no matching package named  found\". Per network restriction, no live fetch attempted; card remains building until lock/cache can be updated or owner chooses a different root-store path."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "codex orchestration: assigned codex-tls to jet-net default TLS + hermetic fixture tests; server API beyond existing builder shape remains a stop-and-ballot condition."
+        },
         {
           "at": "2026-07-05",
           "by": "claude-main",
@@ -10300,7 +10684,8 @@
         }
       ],
       "created": "2026-07-05T11:30:27.010Z",
-      "updated": "2026-07-05"
+      "updated": "2026-07-06",
+      "claimedAt": "2026-07-06T11:22:32.711Z"
     },
     {
       "id": "c3gg6ghs",
@@ -10311,12 +10696,32 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P3",
-      "plan": null,
+      "plan": "#214 plan: change top-level nixpkgs run separator to colon\n\nDecision: no owner decision needed. docs/spec/syntax-decisions.md already says CLI refs are <source>:<package> and gives jetpack run nixpkgs:fastfetch. Card explicitly asks to change jet run nixpkgs@cowsay to jet run nixpkgs:cowsay.\n\nBuild order:\n1. Update Source/main.rs dispatch_nixpkgs_run to split target on Syntax::REF_SEPARATOR (:) instead of @. Keep lowering to jetpack run nixpkgs:<pkg> -- <pkg>.\n2. Preserve forwarding for --no-color, --color=never, --offline, --fixtures <dir>, and args before/after --. Update all fix/help text from nixpkgs@{} to nixpkgs:{}.\n3. Update tests/jetpack.rs top-level jet run nixpkgs test to colon spelling and rename it. Add old-@ retired-spelling regression only if implementation adds a teaching diagnostic.\n4. Clean stale docs/examples: tools/Tower/docs/plans/epoch-4/vision.md and implementation.md still mention old nixpkgs@ in places; user-facing docs/spec/spec.md or CLI snapshots may also need replacement.\n\nLikely touched: Source/main.rs, tests/jetpack.rs, tools/Tower/docs/plans/epoch-4/vision.md, tools/Tower/docs/plans/epoch-4/implementation.md, docs/spec/spec.md or CLI transcript snapshots if they contain old public examples.\n\nDiagnostics/tests/docs: no new syntax decision. If old @ gets a teaching path, use usage-error style: jet run package refs use <source>:<package>; write jet run nixpkgs:cowsay. Register a diagnostic only if explain coverage requires it.\n\nTargeted tests: jet run nixpkgs:greet --no-color --offline --fixtures <dir> realizes through jetpack and runs greet; args before -- and after -- forward correctly; unknown pre--- flags still error with colon fix text; optional old @ test prints retired-spelling fix.\n\nGates: no remaining user-facing top-level jet run nixpkgs@ examples; jetpack run nixpkgs:tool unchanged; targeted tests then full nix develop -c cargo test --workspace green in implementation session.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "codex-e4-plan-a",
       "log": [
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "Verified by codex-main: targeted jetpack tests passed for nixpkgs:cowsay top-level dispatch and related run paths. Closing."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-e4-plan-a",
+          "text": "Implemented #214: top-level `jet run nixpkgs:<tool>` now uses colon CLI ref canon and lowers to `jetpack run nixpkgs:<tool> -- <tool>`; stale @ examples updated in e4 docs. Verified with focused jetpack test `top_level_jet_run_nixpkgs_colon_tool_execs_tool`."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "codex orchestration: codex-e4-plan-a started implementation with #215 as same Jetpack CLI UX lane; serialized to avoid dirty-file collisions."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-e4-plan-a",
+          "text": "Plan written for #214 nixpkgs run separator; ratified CLI ref canon already requires colon, so advanced to ready. No code edits/tests."
+        },
         {
           "at": "2026-07-05",
           "by": "owner",
@@ -10328,7 +10733,8 @@
         }
       ],
       "created": "2026-07-05T11:35:35.054Z",
-      "updated": "2026-07-05"
+      "updated": "2026-07-06",
+      "claimedAt": "2026-07-06T11:22:48.656Z"
     },
     {
       "id": "c4g593nd",
@@ -10339,12 +10745,32 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P3",
-      "plan": null,
+      "plan": "#215 plan: make jetpack run package visibility obvious\n\nDecision: no owner decision needed. Owner reported that running cowsay with no input args looked like a frozen jetpack shell. This is output/UX polish inside existing run-package behavior, not new syntax.\n\nBuild order:\n1. Identify explicit package-run path in crates/jet-driver/src/Jetpack/CLI.rs cmd_run. Today explicit ref plus no -- command falls through to Shell::enter, which can look frozen. Keep project-env run with no explicit ref as shell entry, but for explicit package refs run the package binary by default or print an unmistakable banner before shell entry. Preferred: explicit jetpack run nixpkgs:cowsay with no -- runs cowsay, matching top-level jet run lowering.\n2. Add visible lifecycle output around package execution. Before Shell::run_command, print status to stderr via Output::Theme: running <ref> -> <binary> and note when args are empty. If useful, print finished <binary> with exit code on stderr after child exits. Never write status to stdout.\n3. Preserve script behavior: respect --no-color/NO_COLOR, preserve child exit status exactly, avoid duplicate banners, and avoid post-run noise that breaks stdout golden tests.\n4. Top-level parity: Source/main.rs dispatch_nixpkgs_run lowers jet run nixpkgs:<tool> to jetpack run nixpkgs:<tool> -- <tool>. Ensure visibility appears for direct jetpack run and top-level jet run without duplicate status.\n5. Update docs only if explicit-ref no-command semantics change from shell-enter to default-run. Add tests around no-arg package execution and blocking commands.\n\nLikely touched: crates/jet-driver/src/Jetpack/CLI.rs, Jetpack/Shell.rs if lifecycle belongs beside run_command, Jetpack/Output.rs for helper if needed, Source/main.rs only for duplicate suppression, tests/jetpack.rs, CLI transcript snapshots, docs/spec/spec.md if command contract changes.\n\nDiagnostics/tests/docs: no diagnostic expected. If semantics change, document: project run enters project shell; package run runs the package main binary unless -- command overrides.\n\nTargeted tests: jetpack run nixpkgs:greet --no-color --offline --fixtures <dir> with no -- emits stderr saying it is running and stdout from greet; jetpack run nixpkgs:greet -- --custom still forwards custom command/args with at most one running line; fixture command that waits on stdin proves stderr status appears before timeout; nonzero child status propagates; top-level jet run nixpkgs:greet has no duplicate banner.\n\nGates: user can tell package process is running before child waits for input; tool stdout remains clean; exit-code passthrough unchanged; targeted tests then full nix develop -c cargo test --workspace green in implementation session.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "codex-e4-plan-a",
       "log": [
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "Verified by codex-main: targeted jetpack tests passed for visible package-run lifecycle/status, stdout cleanliness, and exit passthrough. Closing."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-e4-plan-a",
+          "text": "Implemented #215: explicit `jetpack run <ref>` without `--` now runs the package binary by default and prints clear stderr lifecycle status (`running <ref> -> <bin> (no args)`); stdout remains package stdout and child exit passthrough stays intact. Verified with focused jetpack tests for no-command run, -- command run, failure passthrough, project-env command, and top-level no-duplicate status."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "codex orchestration: codex-e4-plan-a started implementation with #214 as same Jetpack CLI UX lane; serialized to avoid dirty-file collisions."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "codex-e4-plan-a",
+          "text": "Plan written for #215 run-package visibility; no syntax/product ballot needed for requested status UX, so advanced to ready. No code edits/tests."
+        },
         {
           "at": "2026-07-05",
           "by": "owner",
@@ -10356,7 +10782,70 @@
         }
       ],
       "created": "2026-07-05T11:35:45.919Z",
-      "updated": "2026-07-05"
+      "updated": "2026-07-06",
+      "claimedAt": "2026-07-06T11:22:48.719Z"
+    },
+    {
+      "id": "c0p3x8f2",
+      "num": 216,
+      "title": "Full game development stack (core.game + primitives)",
+      "body": "Deferred from #212 per owner 2026-07-06: Epoch 3 only keeps the bare-minimum core.raylib skeleton. Full game stack moves here: native core.raylib bridge, core.window/core.gpu/core.audio/core.input primitives, and core.game scene-first engine per D-GAME1=B, D-GAME2=A, D-GAME3=C. Resume in Epoch 7.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e7",
+      "milestoneId": null,
+      "phase": "frozen",
+      "priority": "P2",
+      "plan": "Epoch 7 deferred full game stack. Start from #212 bare-minimum skeleton. Build order: (1) native core.raylib bridge with dependency sourcing/lock hashing, real window/draw/input/audio/timing, Jet diagnostics, display/headless verification; (2) public primitives core.window/core.gpu/core.audio/core.input, each with example/tests; (3) core.game scene-first + frame hook hybrid per D-GAME3=C, with typed scene data, assets, input map, audio, camera, hot reload; (4) Blueprint/#182 round-trip review before freezing scene format; (5) beginner Pong/Breakout/audio-visual demos. No owner gates currently open; any new bridge deps beyond approved wgpu/winit/cpal-class need fresh I6 approval.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-06",
+          "by": "codex-main",
+          "text": "Deferred by owner from #212: full game stack waits for Epoch 7 activation; not current burndown work."
+        }
+      ],
+      "created": "2026-07-06T13:23:01.874Z",
+      "updated": "2026-07-06"
+    },
+    {
+      "id": "c0949cz5",
+      "num": 217,
+      "title": "Bootstrap readiness gate: dogfood portfolio + memory-model soundness campaign",
+      "body": "HARD GATE for e8 — no port work starts until this card is done and owner signs off. Core lang must be locked-happy (stdlib may still flux).\n\nEvidence required:\n1. **Dogfood portfolio** — enough real example projects in Jet, chosen for fringe needs and complexity, to stress the language end-to-end: compiler-shaped programs (formatter port, interpreter, arena/index-handle AST work), long-lived concurrent services, comptime-heavy code, FFI-heavy code, large multi-package workspaces. Each project reviewed for (a) readability and (b) how well an agent/human can reason about the codebase cold.\n2. **Memory-model soundness campaign** — adversarial stress of memory model v5 (D-MEM1: bare/read, &/write, ^/take, second-class borrows) to Rust-borrow-checker confidence: soundness test suite, fuzzing, differential testing vs rustc on generated code, deliberate escape attempts (use-after-take, aliasing writes, arena dangling-index patterns), and I1 audit that no safe-Jet program can reach UB. Exit = virtually 100% certainty it is as solid as Rust.\n3. **Syntax/coverage sweep** — every ratified surface feature exercised in the portfolio; gaps become examples or ballots.\n4. **Owner sign-off ballot** — final \"core lang is frozen enough to port\" decision, minted when evidence is assembled.\n\nBlocks the full-port card.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e8",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "created": "2026-07-06T13:53:35.935Z",
+      "updated": "2026-07-06"
+    },
+    {
+      "id": "c0p12web",
+      "num": 218,
+      "title": "Full port: self-host the Jet compiler in Jet",
+      "body": "Tracks the entire bootstrap arc. Gated by the readiness card (blockedBy) — do not start before it is done and owner-signed.\n\nOwner gates to mint as ballots when e8 opens:\n- **D-SELFHOST1 charter** — port scope: (A) rewrite in Jet, keep emitting Rust + hidden rustc backend; (B) native backend first, rustc leaves the bootstrap chain; (C) piecewise, one crate at a time via C-ABI linking into the Rust driver.\n- **I6 restatement** — zero-external-deps invariant re-expressed for Jet compiler source + what stage0 may be (pinned Rust-built release binary).\n- **I2 fate** — if the Jet compiler still emits Rust, bootstrap forever needs a Rust toolchain; owner accepts or demands the native backend first.\n\nMechanics:\n- Stage discipline: stage0 = pinned Rust-built jet; stage1 = jet compiled by stage0; stage2 = jet compiled by stage1; exit test = stage1 ≡ stage2 byte-identical. Requires deterministic codegen (no hash-order leaks, no timestamps).\n- Feature-freeze line: self-hosted compiler uses only the Jet subset stage0 supports; lint against drift.\n- Test-harness parity: golden tests, tests/ui snapshots, tests/decisions.rs run unchanged against the Jet-built binary.\n- Subsystem inventory to scope per-ballot: lexer, parser, sema (incl. memory model v5 checker), codegen, comptime tier-0 interpreter, JIT tier (see #10/#11 — Cranelift cannot port; own VM/JIT cards own that), jet fmt, LSP, jet debug, jetpack driver. Some may stay Rust indefinitely — charter decides.\n- Cheapest credible first step once unblocked: port the lexer, link into the Rust driver via C ABI, run the full suite — generates the real gap list.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e8",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [
+        "c0949cz5"
+      ],
+      "assignee": null,
+      "log": [],
+      "created": "2026-07-06T13:54:05.195Z",
+      "updated": "2026-07-06"
     }
   ],
   "decisions": [
@@ -23188,8 +23677,127 @@
         }
       ],
       "rec": "B",
-      "status": "open",
-      "created": "2026-07-05T12:09:08.605Z"
+      "status": "ratified",
+      "created": "2026-07-05T12:09:08.605Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-06"
+    },
+    {
+      "id": "D-GAME3",
+      "cardId": "c0x3v19y",
+      "group": "stdlib",
+      "title": "Beginner-facing core.game loop and scene API",
+      "gist": "How a beginner writes the first game loop and scene in core.game.",
+      "explainer": "",
+      "story": "Maya is making Breakout as her first compiled program. In the first hour she wants a paddle, a ball, input, drawing, sound, and a window. In the second week she wants to open the same project in the planned visual editor from #182, move sprites on a canvas, and keep the hand-written game logic. This choice decides whether `core.game` starts as a draw callback, a stateful app, a scene tree, or an ECS world.",
+      "inWild": "use core.game\n\nfn run() {\n    // Same beginner project, two workflows:\n    // 1. type code until the ball bounces\n    // 2. later open the level in the visual editor and move sprites\n    //\n    // If the API is only a frame callback, the editor has no durable scene data.\n    // If the API is only ECS, the first tutorial starts with components and queries.\n    // The public shape needs both: a one-file Pong path and a real scene model.\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Single frame callback",
+          "detail": "`Game.window(...).each_frame(...)` is the whole beginner API. It is direct and mirrors the D-GAME1 sketch: open a window, update values, draw shapes. The tradeoff is that world state, assets, collisions, and editor-readable scene data all live in user variables unless later APIs add a second model.",
+          "code": "use core.game\n\nstruct Ball { x: Float, y: Float, vx: Float, vy: Float }\n\nfn run() {\n    g :: Game.window(title: \"Breakout\", width: 960, height: 540)\n    ball := Ball.{ x: 480.0, y: 420.0, vx: 220.0, vy: -180.0 }\n\n    g.each_frame((frame) => {\n        ball.x += ball.vx * frame.seconds\n        ball.y += ball.vy * frame.seconds\n\n        if frame.input.key_down(.Left) { ball.x -= 300.0 * frame.seconds }\n        if frame.input.key_down(.Right) { ball.x += 300.0 * frame.seconds }\n\n        frame.draw.clear(Color.rgb(12, 16, 24))\n        frame.draw.circle(ball.x, ball.y, 8.0, Color.white())\n    })\n}"
+        },
+        {
+          "key": "B",
+          "name": "App object with init/update/draw callbacks",
+          "detail": "A typed app owns state from the start: `init`, `update`, and `draw` are separate callbacks. This teaches durable game state cleanly and keeps drawing separate from simulation. The tradeoff is that the first file has more ceremony before a sprite appears, and a visual editor still needs a separate scene asset format unless the app state becomes that format.",
+          "code": "use core.game\n\nstruct Breakout { ball: Ball, score: Int }\n\nfn run() {\n    Game.run(App<Breakout>.{\n        title: \"Breakout\",\n        size: Size.{ width: 960, height: 540 },\n        init: () => Breakout.new(),\n        update: (&game, frame) => {\n            game.ball.step(frame.seconds, frame.input)\n            if game.ball.hit_bottom() { game.score = 0 }\n        },\n        draw: (game, canvas) => {\n            canvas.clear(Color.rgb(12, 16, 24))\n            canvas.circle(game.ball.x, game.ball.y, 8.0, Color.white())\n            canvas.text(\"score {game.score}\", 24.0, 24.0)\n        },\n    })\n}"
+        },
+        {
+          "key": "C",
+          "name": "Scene-first with a frame hook",
+          "detail": "The first-class object is a `Scene`: sprites, shapes, sounds, camera, and input bindings live in durable scene data; `scene.on_frame(...)` is the beginner escape hatch for tiny game logic. This keeps one beginner path while giving #182 a real editable model. The frame hook is not a second engine model; it is script attached to the scene.",
+          "code": "use core.game\n\nfn run() {\n    scene := Scene.new()\n    paddle := scene.sprite(\"paddle\", \"assets/paddle.png\").at(480.0, 500.0)\n    ball := scene.circle(\"ball\", radius: 8.0).at(480.0, 420.0)\n    ball.velocity = Vec2.{ x: 220.0, y: -180.0 }\n\n    scene.on_frame((frame) => {\n        paddle.x = 480.0 + frame.input.axis(.Horizontal) * 360.0\n        ball.move(ball.velocity * frame.seconds)\n\n        if ball.overlaps(paddle) { ball.velocity.y = -ball.velocity.y }\n        if ball.y < 0.0 { ball.velocity.y = -ball.velocity.y }\n    })\n\n    Game.play(scene, title: \"Breakout\", size: Size.{ width: 960, height: 540 })\n}\n\n$ jet run breakout.jet\n[window opens; paddle moves; ball bounces]\n$ jet game edit breakout.jet\n[the same scene opens with paddle and ball selectable]"
+        },
+        {
+          "key": "D",
+          "name": "ECS-first world and systems",
+          "detail": "The beginner starts with a `World`, components, queries, and systems. This scales naturally to many entities and advanced tooling, and it lines up with modern data-oriented engines. The tradeoff is learnability: the first sprite requires component vocabulary before the first visible result.",
+          "code": "use core.game\n\nstruct Position { x: Float, y: Float }\nstruct Velocity { x: Float, y: Float }\n\nfn run() {\n    world := World.new()\n    world.spawn((Sprite.from(\"assets/ball.png\"), Position.{ x: 480.0, y: 420.0 }, Velocity.{ x: 220.0, y: -180.0 }))\n\n    world.system((q: Query<(&Position, &Velocity)>, frame: Frame) => {\n        loop (pos, vel) in q {\n            pos.x += vel.x * frame.seconds\n            pos.y += vel.y * frame.seconds\n        }\n    })\n\n    Game.play(world, title: \"Breakout\", size: Size.{ width: 960, height: 540 })\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Lua / LOVE",
+          "note": "LOVE is the clearest callback-first model: define update/draw functions and the engine calls them. Excellent for first programs; scene/editor structure is not built in.",
+          "code": "function love.update(dt) x = x + vx * dt end\nfunction love.draw() love.graphics.circle(\"fill\", x, y, 8) end"
+        },
+        {
+          "lang": "Godot",
+          "note": "Godot proves scene-first works for beginners and visual editing: scenes are durable data, scripts attach behavior, and the editor sees the same model the runtime runs.",
+          "code": "extends Node2D\nfunc _process(delta):\n    $Ball.position += velocity * delta"
+        },
+        {
+          "lang": "Bevy",
+          "note": "Bevy proves ECS-first can be expressive and high-performance, but the first tutorial starts with systems, components, bundles, and queries.",
+          "code": "app.add_systems(Update, move_ball);\nfn move_ball(mut q: Query<(&mut Transform, &Velocity)>) { ... }"
+        },
+        {
+          "lang": "Pygame",
+          "note": "Pygame teaches the manual loop: poll events, update state, draw, flip. It is explicit, but beginners own every lifecycle rule immediately.",
+          "code": "while running:\n    for event in pygame.event.get(): ...\n    ball.x += vx * dt\n    screen.blit(ball, pos)\n    pygame.display.flip()"
+        }
+      ],
+      "rec": "C",
+      "status": "ratified",
+      "created": "2026-07-06T11:27:43.303Z",
+      "outcome": "C",
+      "ratifiedAt": "2026-07-06"
+    },
+    {
+      "id": "D-TLSSERVE1",
+      "cardId": "c0xz4xqx",
+      "group": "stdlib",
+      "title": "HTTP server TLS surface",
+      "gist": "How a Jet HTTP server turns on TLS.",
+      "explainer": "D-TLS1=A says HTTPS should work out of the box and showed a `.tls(cert, key)` server sketch, but the implemented server API is not a builder: `Server.serve(addr, mux)` lowers directly to `jet_http_mux_serve(&addr, mux)`. Adding server TLS therefore needs a public stdlib surface decision before implementation.",
+      "story": "Hank ships a webhook receiver for a payments provider. The provider requires HTTPS, and Hank already has a certificate and private key from his deploy platform. The client side now handles https by default, but the server surface in Jet is still the existing plaintext `Server.serve(addr, mux)` function, with no builder object to attach `.tls(...)` to.",
+      "inWild": "use core.http.server as Server\n\nfn run() {\n    mux :: Server.mux()\n    mux.post(\"/stripe/webhook\", handle_webhook)\n    cert :: env.get(\"TLS_CERT\") ?? panic(\"missing cert\")\n    key :: env.get(\"TLS_KEY\") ?? panic(\"missing key\")\n    Server.serve(\"0.0.0.0:443\", mux, tls: Server.tls(cert, key))?\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Named TLS option on `serve`",
+          "detail": "Keep one canonical server entry point. Plain HTTP stays `Server.serve(addr, mux)?`; HTTPS adds a named `tls:` option using a typed `Server.tls(cert, key)` value. Future server options can use the same named-option slot without inventing extra verbs.",
+          "code": "use core.http.server as Server\n\nfn run() {\n    mux :: Server.mux()\n    mux.get(\"/health\", health)\n    Server.serve(\"0.0.0.0:443\", mux, tls: Server.tls(cert_pem, key_pem))?\n}"
+        },
+        {
+          "key": "B",
+          "name": "Server builder chain",
+          "detail": "Introduce a configured server value and make TLS a method on it. This matches the `.tls(cert, key)` sketch directly and gives future configuration a natural place, but it changes the server model from a function call to a builder object.",
+          "code": "use core.http.server as Server\n\nfn run() {\n    mux :: Server.mux()\n    Server.bind(\"0.0.0.0:443\", mux)\n        .tls(cert_pem, key_pem)\n        .serve()?\n}"
+        },
+        {
+          "key": "C",
+          "name": "Separate `serve_tls` function",
+          "detail": "Make HTTPS explicit as a separate function while leaving plaintext serving unchanged. The spelling is easy to find, but server setup splits into multiple verbs as more transport options arrive.",
+          "code": "use core.http.server as Server\n\nfn run() {\n    mux :: Server.mux()\n    Server.serve_tls(\"0.0.0.0:443\", mux, cert_pem, key_pem)?\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Go",
+          "note": "Go keeps plaintext and TLS as sibling functions on the same package.",
+          "code": "http.ListenAndServe(addr, handler)\nhttp.ListenAndServeTLS(addr, certFile, keyFile, handler)"
+        },
+        {
+          "lang": "Node.js",
+          "note": "Node separates HTTP and HTTPS server constructors, with TLS options passed as data.",
+          "code": "https.createServer({ key, cert }, app).listen(443)"
+        },
+        {
+          "lang": "Rust axum",
+          "note": "Modern Rust servers usually bind a listener plus a TLS config value before serving.",
+          "code": "axum_server::bind_rustls(addr, config).serve(app).await"
+        }
+      ],
+      "rec": "A",
+      "status": "ratified",
+      "created": "2026-07-06T11:47:05.264Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-06"
     }
   ],
   "questions": [
@@ -24108,6 +24716,32 @@
       "created": "2026-07-04T13:34:25.256Z",
       "answeredAt": "2026-07-05",
       "answeredBy": "claude-main"
+    },
+    {
+      "id": "qdhb7jyl",
+      "cardId": "c0xz4xqx",
+      "decisionId": "D-TLSSERVE1",
+      "by": "owner",
+      "kind": "question",
+      "text": "What are the tradeoffs of having two separate constructors vs passing in tls as an option? Go seems to be the best in class in general -> what does community sentiment say? What do the vast majority of professionals prefer?",
+      "status": "answered",
+      "answer": "Tradeoff: separate constructors (`serve` + `serve_tls`) are extremely discoverable and match Go surface style, but they fork the API every time a new transport/config appears (`serve_h2`, `serve_unix`, `serve_mtls`, etc.). A `tls:` option keeps one server entry point and composes with future options, but can decay into a bag of knobs unless options are typed and named. Go sentiment: Go is respected because the easy path is tiny, but serious services usually graduate from convenience functions to an `http.Server`/`Transport` config object; Go docs show both: `ListenAndServe`/`ListenAndServeTLS` for convenience, custom `Server` for control, and custom `Transport` for TLS/proxy/etc. Vast-majority professional preference is not “many constructors forever”; it is “one obvious simple path, plus typed config when real deployment needs it.” Recommendation: keep D-TLSSERVE1=A, possibly sharpen it as hybrid-A: `Server.serve(addr, mux)` for plaintext and `Server.serve(addr, mux, tls: Server.tls(cert,key))` for HTTPS, with `tls` a typed option object that can later carry mTLS/client-auth/ALPN without new verbs. Mitigation: only allow a small fixed set of named options, reject unlabeled positional TLS, and document C/Go-style separate `serve_tls` as intentionally not chosen because it multiplies verbs as server config grows. Sources checked: Go net/http docs for convenience functions + custom Server/Transport.",
+      "created": "2026-07-06T11:54:16.993Z",
+      "answeredAt": "2026-07-06",
+      "answeredBy": "codex-main"
+    },
+    {
+      "id": "qesuz58l",
+      "cardId": "c0x3v19y",
+      "decisionId": "D-GAME3",
+      "by": "owner",
+      "kind": "question",
+      "text": "Propose a potential hybrid solution that carefully combines the best of each. What do unreal and unity and godot do? What are the downsides of each approach? What do most game developers prefer? What is the best option? How can we mitigate/fix the downsides of your proposed option?",
+      "status": "answered",
+      "answer": "Hybrid proposal: choose a refined C: scene-first + component scripts + frame hook + optional systems. Shape: `Scene` is durable editable data, nodes/entities own sprites/colliders/audio/input bindings, behavior attaches as small scripts/components, and `scene.on_frame` remains the one-file beginner escape hatch. Later, high-scale code can add ECS-style systems over the same scene data; that is an expert layer, not the first tutorial. What major engines do: Unreal centers placed Actors with Components and Blueprints/C++ behavior; Unity centers GameObjects in Scenes with Components/MonoBehaviour callbacks; Godot centers a tree of Nodes saved as Scenes with scripts and per-frame callbacks. All three converge on the same product truth: visual/editor-readable scene data plus attached behavior. Downsides: callback-only is easiest but gives the visual editor no durable model; app-object is tidy code but still not naturally visual; scene-first can hide lifecycle order and get stringly/inspector-heavy; ECS-first scales but is too abstract for first-week users. Most game developers, especially Unity/Godot/Unreal users, prefer object/scene/component workflows for day-to-day creation; engine/performance specialists like ECS underneath, but not as the beginner surface. Best option: C, amended into the hybrid above. Mitigations: code-first scene declarations must round-trip into the editor; names/asset refs get typed handles not raw strings where possible; lifecycle has one clear order (`init`, `on_frame`, physics if present, draw); ECS/query APIs are available behind `core.game.systems` for advanced scale; the first tutorial still fits in one file and never says “component query” before a ball moves. Sources checked: official Unity GameObject docs, Godot Nodes and Scenes docs, Unreal Actor/Component docs.",
+      "created": "2026-07-06T11:56:21.768Z",
+      "answeredAt": "2026-07-06",
+      "answeredBy": "codex-main"
     }
   ],
   "ideas": [
@@ -24363,6 +24997,790 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-06T13:54:05.195Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0p12web",
+      "note": "Full port: self-host the Jet compiler in Jet"
+    },
+    {
+      "at": "2026-07-06T13:53:35.935Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0949cz5",
+      "note": "Bootstrap readiness gate: dogfood portfolio + memory-model soundness campaign"
+    },
+    {
+      "at": "2026-07-06T13:53:02.716Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0x3v19y",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-06T13:48:34.691Z",
+      "by": "codex-lsp",
+      "action": "card.update",
+      "ref": "c0cevzhr",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-06T13:44:09.906Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0cevzhr",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-06T13:43:36.950Z",
+      "by": "codex-lsp",
+      "action": "card.update",
+      "ref": "c0cevzhr",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-06T13:38:45.658Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0cevzhr",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-06T13:38:14.532Z",
+      "by": "codex-lsp",
+      "action": "card.update",
+      "ref": "c0cevzhr",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-06T13:33:44.983Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0cevzhr",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-06T13:32:37.158Z",
+      "by": "codex-lsp",
+      "action": "card.update",
+      "ref": "c0cevzhr",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-06T13:27:38.927Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0vg0lj7",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-06T13:25:10.219Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0bnxdui",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-06T13:24:30.769Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0x3v19y",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-06T13:23:20.555Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0p3x8f2",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-06T13:23:01.975Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0x3v19y",
+      "note": "title,body,plan,logEntry"
+    },
+    {
+      "at": "2026-07-06T13:23:01.874Z",
+      "by": "codex-main",
+      "action": "card.add",
+      "ref": "c0p3x8f2",
+      "note": "Full game development stack (core.game + primitives)"
+    },
+    {
+      "at": "2026-07-06T13:20:15.563Z",
+      "by": "codex-e4-plan-b",
+      "action": "card.update",
+      "ref": "c0bnxdui",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-06T13:11:34.908Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0bnxdui",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-06T13:11:26.868Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0ay489t",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-06T13:10:28.979Z",
+      "by": "codex-e4-plan-b",
+      "action": "card.update",
+      "ref": "c0ay489t",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-06T13:02:28.066Z",
+      "by": "codex-game-plan",
+      "action": "card.update",
+      "ref": "c0x3v19y",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-06T12:58:14.536Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0ay489t",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-06T12:58:04.604Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0a5yisx",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-06T12:57:33.437Z",
+      "by": "codex-e4-plan-b",
+      "action": "card.update",
+      "ref": "c0a5yisx",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-06T12:54:50.109Z",
+      "by": "codex-e4-plan-b",
+      "action": "card.update",
+      "ref": "c0a5yisx",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-06T12:45:25.236Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0a5yisx",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-06T12:45:16.865Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c09fyrmq",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-06T12:44:26.093Z",
+      "by": "codex-lsp",
+      "action": "card.update",
+      "ref": "c09fyrmq",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-06T12:40:47.740Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c09fyrmq",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-06T12:40:28.283Z",
+      "by": "codex-e4-plan-b",
+      "action": "card.update",
+      "ref": "c09fyrmq",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-06T12:36:46.090Z",
+      "by": "codex-lsp",
+      "action": "card.update",
+      "ref": "c0cevzhr",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-06T12:32:08.871Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c09fyrmq",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-06T12:31:58.362Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c08no70r",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-06T12:30:57.328Z",
+      "by": "codex-e4-plan-b",
+      "action": "card.update",
+      "ref": "c08no70r",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-06T12:22:52.969Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c08no70r",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-06T12:22:43.881Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c076rspq",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-06T12:22:24.949Z",
+      "by": "codex-e4-plan-a",
+      "action": "card.update",
+      "ref": "c076rspq",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-06T12:21:41.793Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0xz4xqx",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-06T12:20:34.097Z",
+      "by": "codex-tls",
+      "action": "card.update",
+      "ref": "c0xz4xqx",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-06T12:15:56.230Z",
+      "by": "codex-game-plan",
+      "action": "card.update",
+      "ref": "c0x3v19y",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-06T12:12:34.731Z",
+      "by": "codex-e4-plan-a",
+      "action": "card.update",
+      "ref": "c076rspq",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-06T12:12:13.547Z",
+      "by": "codex-game-plan",
+      "action": "card.update",
+      "ref": "c0x3v19y",
+      "note": "plan,logEntry"
+    },
+    {
+      "at": "2026-07-06T12:06:51.720Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msgg749cs7",
+      "note": "→ codex-1: [tower] 2 decisions ratified: D-GAME3→C · D-TLSSERVE1→A. Boa"
+    },
+    {
+      "at": "2026-07-06T12:06:51.720Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msgf748t14",
+      "note": "→ claude-main: [tower] 2 decisions ratified: D-GAME3→C · D-TLSSERVE1→A. Boa"
+    },
+    {
+      "at": "2026-07-06T12:06:33.507Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c076rspq",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-06T12:06:33.384Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0x3v19y",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-06T12:06:33.253Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0xz4xqx",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-06T12:06:09.445Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c06fudbe",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-06T12:05:21.692Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-TLSSERVE1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-06T12:05:17.896Z",
+      "by": "codex-e4-plan-a",
+      "action": "card.update",
+      "ref": "c06fudbe",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-06T12:04:41.305Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-GAME3",
+      "note": "C"
+    },
+    {
+      "at": "2026-07-06T12:03:06.419Z",
+      "by": "codex-main",
+      "action": "question.answer",
+      "ref": "qesuz58l",
+      "note": ""
+    },
+    {
+      "at": "2026-07-06T12:02:55.130Z",
+      "by": "codex-main",
+      "action": "question.answer",
+      "ref": "qdhb7jyl",
+      "note": ""
+    },
+    {
+      "at": "2026-07-06T11:56:37.072Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0xz4xqx",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-06T11:56:21.768Z",
+      "by": "owner",
+      "action": "question.add",
+      "ref": "qesuz58l",
+      "note": ""
+    },
+    {
+      "at": "2026-07-06T11:56:18.220Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c06fudbe",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-06T11:56:05.942Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c05pas25",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-06T11:55:31.907Z",
+      "by": "codex-e4-plan-a",
+      "action": "card.update",
+      "ref": "c05pas25",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-06T11:54:16.993Z",
+      "by": "owner",
+      "action": "question.add",
+      "ref": "qdhb7jyl",
+      "note": ""
+    },
+    {
+      "at": "2026-07-06T11:54:02.502Z",
+      "by": "codex-e4-plan-a",
+      "action": "card.update",
+      "ref": "c05pas25",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-06T11:47:57.361Z",
+      "by": "codex-tls",
+      "action": "card.update",
+      "ref": "c0xz4xqx",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-06T11:47:27.789Z",
+      "by": "codex-tls",
+      "action": "card.update",
+      "ref": "c0xz4xqx",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-06T11:47:17.197Z",
+      "by": "codex-highlight",
+      "action": "card.update",
+      "ref": "c0vg0lj7",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-06T11:47:05.264Z",
+      "by": "codex-tls",
+      "action": "decision.add",
+      "ref": "D-TLSSERVE1",
+      "note": "HTTP server TLS surface"
+    },
+    {
+      "at": "2026-07-06T11:44:21.253Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c05pas25",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-06T11:44:07.920Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c4g593nd",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-06T11:44:07.864Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c3gg6ghs",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-06T11:42:37.183Z",
+      "by": "codex-tls",
+      "action": "card.update",
+      "ref": "c0xz4xqx",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-06T11:38:04.989Z",
+      "by": "codex-highlight",
+      "action": "card.update",
+      "ref": "c0vg0lj7",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-06T11:37:57.217Z",
+      "by": "codex-highlight",
+      "action": "card.update",
+      "ref": "c0vg0lj7",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-06T11:37:36.307Z",
+      "by": "codex-e4-plan-a",
+      "action": "card.update",
+      "ref": "c4g593nd",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-06T11:37:31.540Z",
+      "by": "codex-e4-plan-a",
+      "action": "card.update",
+      "ref": "c3gg6ghs",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-06T11:34:03.477Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c4g593nd",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-06T11:34:03.414Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c3gg6ghs",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-06T11:33:31.599Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0xz4xqx",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-06T11:32:19.309Z",
+      "by": "codex-highlight",
+      "action": "card.update",
+      "ref": "c0vg0lj7",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-06T11:31:30.470Z",
+      "by": "codex-lsp",
+      "action": "card.update",
+      "ref": "c0cevzhr",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-06T11:30:40.037Z",
+      "by": "codex-e4-plan-a",
+      "action": "card.update",
+      "ref": "c4g593nd",
+      "note": "phase,plan,logEntry"
+    },
+    {
+      "at": "2026-07-06T11:30:23.040Z",
+      "by": "codex-e4-plan-a",
+      "action": "card.update",
+      "ref": "c3gg6ghs",
+      "note": "phase,plan,logEntry"
+    },
+    {
+      "at": "2026-07-06T11:30:01.063Z",
+      "by": "codex-e4-plan-a",
+      "action": "card.update",
+      "ref": "c076rspq",
+      "note": "phase,plan,logEntry"
+    },
+    {
+      "at": "2026-07-06T11:29:39.542Z",
+      "by": "codex-e4-plan-a",
+      "action": "card.update",
+      "ref": "c06fudbe",
+      "note": "phase,plan,logEntry"
+    },
+    {
+      "at": "2026-07-06T11:29:20.334Z",
+      "by": "codex-e4-plan-a",
+      "action": "card.update",
+      "ref": "c05pas25",
+      "note": "phase,plan,logEntry"
+    },
+    {
+      "at": "2026-07-06T11:29:09.682Z",
+      "by": "codex-tls",
+      "action": "card.update",
+      "ref": "c0xz4xqx",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-06T11:29:03.835Z",
+      "by": "codex-tls",
+      "action": "card.update",
+      "ref": "c0xz4xqx",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-06T11:28:12.874Z",
+      "by": "codex-game-plan",
+      "action": "card.update",
+      "ref": "c0x3v19y",
+      "note": "plan,logEntry"
+    },
+    {
+      "at": "2026-07-06T11:27:43.303Z",
+      "by": "codex-game-plan",
+      "action": "decision.add",
+      "ref": "D-GAME3",
+      "note": "Beginner-facing core.game loop and scene API"
+    },
+    {
+      "at": "2026-07-06T11:27:27.089Z",
+      "by": "codex-e4-plan-b",
+      "action": "card.update",
+      "ref": "c0bnxdui",
+      "note": "phase,plan,logEntry"
+    },
+    {
+      "at": "2026-07-06T11:27:07.517Z",
+      "by": "codex-e4-plan-b",
+      "action": "card.update",
+      "ref": "c0ay489t",
+      "note": "phase,plan,logEntry"
+    },
+    {
+      "at": "2026-07-06T11:26:52.535Z",
+      "by": "codex-game-plan",
+      "action": "card.update",
+      "ref": "c0x3v19y",
+      "note": "plan,logEntry"
+    },
+    {
+      "at": "2026-07-06T11:26:49.658Z",
+      "by": "codex-e4-plan-b",
+      "action": "card.update",
+      "ref": "c0a5yisx",
+      "note": "phase,plan,logEntry"
+    },
+    {
+      "at": "2026-07-06T11:26:31.985Z",
+      "by": "codex-e4-plan-b",
+      "action": "card.update",
+      "ref": "c09fyrmq",
+      "note": "phase,plan,logEntry"
+    },
+    {
+      "at": "2026-07-06T11:26:14.776Z",
+      "by": "codex-e4-plan-b",
+      "action": "card.update",
+      "ref": "c08no70r",
+      "note": "phase,plan,logEntry"
+    },
+    {
+      "at": "2026-07-06T11:23:14.355Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0vg0lj7",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-06T11:23:14.295Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0xz4xqx",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-06T11:23:14.250Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0cevzhr",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-06T11:22:48.719Z",
+      "by": "codex-e4-plan-a",
+      "action": "card.claim",
+      "ref": "c4g593nd",
+      "note": ""
+    },
+    {
+      "at": "2026-07-06T11:22:48.656Z",
+      "by": "codex-e4-plan-a",
+      "action": "card.claim",
+      "ref": "c3gg6ghs",
+      "note": ""
+    },
+    {
+      "at": "2026-07-06T11:22:42.224Z",
+      "by": "codex-e4-plan-b",
+      "action": "card.claim",
+      "ref": "c0bnxdui",
+      "note": ""
+    },
+    {
+      "at": "2026-07-06T11:22:42.101Z",
+      "by": "codex-e4-plan-a",
+      "action": "card.claim",
+      "ref": "c076rspq",
+      "note": ""
+    },
+    {
+      "at": "2026-07-06T11:22:42.069Z",
+      "by": "codex-e4-plan-b",
+      "action": "card.claim",
+      "ref": "c0a5yisx",
+      "note": ""
+    },
+    {
+      "at": "2026-07-06T11:22:42.046Z",
+      "by": "codex-e4-plan-b",
+      "action": "card.claim",
+      "ref": "c09fyrmq",
+      "note": ""
+    },
+    {
+      "at": "2026-07-06T11:22:42.014Z",
+      "by": "codex-e4-plan-b",
+      "action": "card.claim",
+      "ref": "c0ay489t",
+      "note": ""
+    },
+    {
+      "at": "2026-07-06T11:22:41.987Z",
+      "by": "codex-e4-plan-b",
+      "action": "card.claim",
+      "ref": "c08no70r",
+      "note": ""
+    },
+    {
+      "at": "2026-07-06T11:22:32.775Z",
+      "by": "codex-e4-plan-a",
+      "action": "card.claim",
+      "ref": "c05pas25",
+      "note": ""
+    },
+    {
+      "at": "2026-07-06T11:22:32.711Z",
+      "by": "codex-tls",
+      "action": "card.claim",
+      "ref": "c0xz4xqx",
+      "note": ""
+    },
+    {
+      "at": "2026-07-06T11:22:32.651Z",
+      "by": "codex-lsp",
+      "action": "card.claim",
+      "ref": "c0cevzhr",
+      "note": ""
+    },
+    {
+      "at": "2026-07-06T11:22:32.617Z",
+      "by": "codex-game-plan",
+      "action": "card.claim",
+      "ref": "c0x3v19y",
+      "note": ""
+    },
+    {
+      "at": "2026-07-06T11:22:32.591Z",
+      "by": "codex-e4-plan-a",
+      "action": "card.claim",
+      "ref": "c06fudbe",
+      "note": ""
+    },
+    {
+      "at": "2026-07-06T11:22:32.551Z",
+      "by": "codex-highlight",
+      "action": "card.claim",
+      "ref": "c0vg0lj7",
+      "note": ""
+    },
+    {
+      "at": "2026-07-06T10:15:53.808Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msgclf2lqn",
+      "note": "→ codex-1: [tower] 1 decision ratified: D-GAME2→A. Board is current; pi"
+    },
+    {
+      "at": "2026-07-06T10:15:53.808Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msgblf24xm",
+      "note": "→ claude-main: [tower] 1 decision ratified: D-GAME2→A. Board is current; pi"
+    },
+    {
+      "at": "2026-07-06T10:14:23.783Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-GAME2",
+      "note": "A"
+    },
     {
       "at": "2026-07-06T00:33:46.966Z",
       "by": "claude-main",
@@ -25298,7 +26716,7 @@
       "file": null,
       "at": "2026-07-05T12:09:39.233Z",
       "deliveredAt": null,
-      "readAt": null
+      "readAt": "2026-07-06T10:14:28.208Z"
     },
     {
       "id": "msg0vonkhe",
@@ -25309,7 +26727,7 @@
       "file": null,
       "at": "2026-07-05T23:48:37.771Z",
       "deliveredAt": null,
-      "readAt": null
+      "readAt": "2026-07-06T10:14:28.208Z"
     },
     {
       "id": "msg0lg2316",
@@ -25319,6 +26737,50 @@
       "cardId": null,
       "file": null,
       "at": "2026-07-06T00:07:50.811Z",
+      "deliveredAt": null,
+      "readAt": "2026-07-06T10:14:28.208Z"
+    },
+    {
+      "id": "msgblf24xm",
+      "from": "tower",
+      "to": "claude-main",
+      "text": "[tower] 1 decision ratified: D-GAME2→A. Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-06T10:15:53.808Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msgclf2lqn",
+      "from": "tower",
+      "to": "codex-1",
+      "text": "[tower] 1 decision ratified: D-GAME2→A. Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-06T10:15:53.808Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msgf748t14",
+      "from": "tower",
+      "to": "claude-main",
+      "text": "[tower] 2 decisions ratified: D-GAME3→C · D-TLSSERVE1→A. Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-06T12:06:51.720Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msgg749cs7",
+      "from": "tower",
+      "to": "codex-1",
+      "text": "[tower] 2 decisions ratified: D-GAME3→C · D-TLSSERVE1→A. Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-06T12:06:51.720Z",
       "deliveredAt": null,
       "readAt": null
     }

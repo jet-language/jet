@@ -123,6 +123,14 @@ impl<'a> Parser<'a> {
             self.bump();
             return Ok((Syntax::KW_VIEW.to_string(), span));
         }
+        // U20: `Recipe.copy()` uses the ordinary dot-member form, while `copy`
+        // is also Jet's explicit copy keyword in value position. Keep the
+        // keyword reserved everywhere else; permit it only after `.`.
+        if matches!(self.peek().kind, TokKind::KwCopy) {
+            let span = self.peek().span;
+            self.bump();
+            return Ok((Syntax::KW_COPY.to_string(), span));
+        }
         self.expect_ident("after `.`")
     }
 
@@ -2820,7 +2828,13 @@ impl<'a> Parser<'a> {
         } else {
             None
         };
-        let expr = self.expr()?;
+        let expr = if label.as_ref().map(|(name, _)| name.as_str()) == Some("source")
+            && self.looks_like_provider_ref_value()
+        {
+            self.provider_ref_placeholder()
+        } else {
+            self.expr()?
+        };
         Ok(CallArg {
             convention,
             expr,
@@ -2829,6 +2843,36 @@ impl<'a> Parser<'a> {
             label,
             spread,
         })
+    }
+
+    fn looks_like_provider_ref_value(&self) -> bool {
+        matches!(self.peek().kind, TokKind::Ident(_)) && matches!(self.peek2().kind, TokKind::At)
+    }
+
+    fn provider_ref_placeholder(&mut self) -> Expr {
+        let start = self.peek().span.start;
+        let mut end = self.peek().span.end;
+        self.bump(); // provider
+        if matches!(self.peek().kind, TokKind::At) {
+            end = self.bump().span.end;
+        }
+        while matches!(
+            self.peek().kind,
+            TokKind::Ident(_)
+                | TokKind::Int(_)
+                | TokKind::Dot
+                | TokKind::Slash
+                | TokKind::Minus
+                | TokKind::Star
+                | TokKind::Question
+                | TokKind::Eq
+        ) {
+            end = self.bump().span.end;
+        }
+        Expr::Str(
+            vec![crate::AST::StrPart::Lit(String::new())],
+            Span { start, end },
+        )
     }
 
     /// D-MEM1: consume a leading capability sigil `&`/`^` → Write/Move. `~` is

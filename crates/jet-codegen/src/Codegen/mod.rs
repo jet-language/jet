@@ -695,6 +695,76 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
     )))
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::{HashMap, HashSet};
+    use std::path::PathBuf;
+
+    #[test]
+    fn raylib_window_example_reaches_sema_and_codegen() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let shown = "examples/features/game/raylib_window.jet";
+        let path = root.join(shown);
+        let src = std::fs::read_to_string(&path).expect("raylib example exists");
+
+        let (toks, lex_diags) = crate::Lexer::lex(&src);
+        assert!(lex_diags.is_empty(), "lex diagnostics: {lex_diags:?}");
+        let mut prog = crate::Parser::parse(&toks).expect("raylib example parses");
+        let mut bundle = crate::AST::ProgramBundle {
+            entry: 0,
+            project_root: root,
+            modules: vec![crate::AST::LoadedModule {
+                path,
+                display: shown.to_string(),
+                source: src,
+                alias: "main".to_string(),
+                imports: std::mem::take(&mut prog.imports),
+                items: std::mem::take(&mut prog.items),
+                web_target_ceiling: prog.web_target_ceiling,
+                pub_file: prog.pub_file,
+                html_path: prog.html_path.clone(),
+                no_alloc_policy: prog.no_alloc_policy,
+            }],
+            parse_teaching: Vec::new(),
+            used_core: HashSet::new(),
+            cffi: crate::AST::CFfi::default(),
+            comptime_inputs: Vec::new(),
+            import_targets: HashMap::new(),
+            layer_ceiling: None,
+            inferred_layer: crate::Syntax::RuntimeLayer::Core,
+            web_partitions: HashMap::new(),
+            web_partition_enforced: false,
+            web_partition_report: None,
+            dep_roots: HashMap::new(),
+            active_os: crate::Syntax::OsTarget::host(),
+        };
+
+        let diags = crate::Sema::check_bundle(&mut bundle, CompileMode::Run);
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == crate::Diagnostics::Severity::Error)
+            .collect();
+        assert!(errors.is_empty(), "sema diagnostics: {errors:?}");
+
+        let rust = emit_bundle(&bundle, CompileMode::Run, None);
+        assert!(rust.contains("fn main()"), "generated Rust has no main");
+        assert!(rust.contains("jet_raylib_window_open"));
+        assert!(rust.contains("let user_window: RaylibWindow"));
+        assert!(
+            !rust.contains("jet_std::Raylib"),
+            "raylib skeleton handles must lower to top-level prelude types"
+        );
+        assert!(rust.contains("jet_raylib_begin_drawing"));
+        assert!(rust.contains("jet_raylib_draw_text"));
+        assert!(rust.contains("jet_raylib_close_window"));
+        assert!(
+            !rust.contains("unsafe"),
+            "raylib example emits ungated unsafe"
+        );
+    }
+}
+
 /// Emit a test harness binary: all definitions plus one `main` that runs
 /// every `#Test "…" { }` block (M6 phase 2).
 pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {

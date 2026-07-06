@@ -59,6 +59,11 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
     },
     CommandSpec {
+        name: "devtools",
+        summary: "run checked developer generators (grammars)",
+        headline: false,
+    },
+    CommandSpec {
         name: "serve",
         summary: "watch a resident program and hot-swap type-stable edits",
         headline: false,

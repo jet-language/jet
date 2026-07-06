@@ -76,7 +76,7 @@ fn scan_parallel(paths: [String]) -> [String] {
         if paths.get(i) == Val(path) {
             tx :: copy sender
             file :: copy path
-            workers.push(tasks.spawn(take(tx) () => {
+            workers.push(tasks.spawn(take(tx, file) () => {
                 tx.send(scan_one(file))
             }))
         }

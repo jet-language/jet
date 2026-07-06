@@ -55,26 +55,8 @@
 (field_expr field: (identifier) @property)
 (named_arg name: (identifier) @property)
 
-; Self
-[
-  "self"
-] @variable.builtin
-
-; Keywords (the grammar exposes each keyword as its own anonymous token;
-; there is no single `keyword` node). `true`/`false` are `boolean_literal`.
-[
-  "as"
-  "extern"
-  "fn"
-  "impl"
-  "module"
-  "pub"
-  "ref"
-  "rust"
-  "use"
-  "using"
-] @keyword
-
+; BEGIN GENERATED JET SYNTAX HIGHLIGHTS
+; keyword.control: break continue else if in loop return step
 [
   "break"
   "continue"
@@ -86,48 +68,134 @@
   "step"
 ] @keyword.control
 
+; keyword.declaration: Bench Context Impure Pure Reactive Sanitizer State Tainted Test Todo Transact Transition Unsafe add alias as assume_deterministic change client comptime const derive distinct enum extern fn impl live migration module policy priv protocol pub region remove rename rust server state struct tag taskgroup trait use via
 [
+  "Bench"
+  "Context"
+  "Impure"
+  "Pure"
+  "Reactive"
+  "Sanitizer"
+  "State"
+  "Tainted"
+  "Test"
+  "Todo"
+  "Transact"
+  "Transition"
+  "Unsafe"
+  "add"
+  "alias"
+  "as"
+  "assume_deterministic"
+  "change"
+  "client"
   "comptime"
   "const"
   "derive"
   "distinct"
   "enum"
-  "struct"
-  "tag"
-  "trait"
-] @keyword
-
-[
-  "assume_deterministic"
-  "grant"
+  "extern"
+  "fn"
+  "impl"
   "live"
-  "region"
-] @keyword
-
-[
-  "add"
-  "change"
   "migration"
+  "module"
+  "policy"
+  "priv"
+  "protocol"
+  "pub"
+  "region"
   "remove"
   "rename"
+  "rust"
+  "server"
+  "state"
+  "struct"
+  "tag"
+  "taskgroup"
+  "trait"
+  "use"
   "via"
 ] @keyword
 
-; Binding sigils + operators
+; keyword.ownership: copy uninit
 [
-  "::"
-  ":="
-  "="
-  "+=" "-=" "*=" "/=" "%=" "&=" "|=" "^=" "<<=" ">>="
-] @operator
+  "copy"
+  "uninit"
+] @keyword
 
+; keyword.other: it self
 [
-  "+" "-" "*" "/" "%"
-  "==" "!=" "<" ">" "<=" ">="
-  "&&" "||" "!"
-  "&" "|" "^" "<<" ">>"
-  "->" "=>" ".." "?" "??" "?." "@"
-] @operator
+  "it"
+  "self"
+] @keyword
+
+; literal: None Val err false ok true
+[
+  "None"
+  "Val"
+  "err"
+  "false"
+  "ok"
+  "true"
+] @constant.builtin
+
+; type.builtin: BigInt Bool Char Computed Csv Data DbValue Decimal Derived Effect Error F32 F64 Float I16 I32 I64 I8 IOError Int JSON JSONError Json Key List Map Measurement Ptr SelectBuilder Shared Signal Stream String TaskGroup Toml U16 U32 U64 U8 UTF8Error Yaml
+[
+  "BigInt"
+  "Bool"
+  "Char"
+  "Computed"
+  "Csv"
+  "Data"
+  "DbValue"
+  "Decimal"
+  "Derived"
+  "Effect"
+  "Error"
+  "F32"
+  "F64"
+  "Float"
+  "I16"
+  "I32"
+  "I64"
+  "I8"
+  "IOError"
+  "Int"
+  "JSON"
+  "JSONError"
+  "Json"
+  "Key"
+  "List"
+  "Map"
+  "Measurement"
+  "Ptr"
+  "SelectBuilder"
+  "Shared"
+  "Signal"
+  "Stream"
+  "String"
+  "TaskGroup"
+  "Toml"
+  "U16"
+  "U32"
+  "U64"
+  "U8"
+  "UTF8Error"
+  "Yaml"
+] @type.builtin
+
+; builtin: input print
+[
+  "input"
+  "print"
+] @function.builtin
+
+; marker.directive: Bench Bindgen Caller Caps Default DenyUnknownFields Extern Flatten Grant Html Impure Js Layout Reactive Rename RenameAll Sanitizer SingleUse Skip State Suppress Tag Tainted Target Test Todo Transact Transition UnitFamily Unsafe Untagged Wasm WasmExport
+; marker.contract: Cli Codable CodableAsBase Comparable Debug Decode Doc Encode Experimental Hardened Inline InlineAlways MustUse Numeric Patchable Persist Post Pre Printable PublishedSchema Pure Redact Summarize Tested
+; sigil: # & ... :: := @ ^
+; operator: ! != % %= && &= * *= + ++ += - -- -= -> .. .[ .{ / /= < << <<= <= == => > >= >> >>= ? ?. ?? ^= | |= ||
+; END GENERATED JET SYNTAX HIGHLIGHTS
 
 ; Config / manifest keys (pkg.jet, env.jet)
 (config_key) @property

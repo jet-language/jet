@@ -29,8 +29,8 @@ pub use Diagnostics::merge_error_to_diagnostic;
 pub use Eval::{evaluate_modules, evaluate_source, merge_all, pkg_ref};
 pub use Source::{evaluate_env, is_module_surface};
 pub use Types::{
-    DevServicePlan, EnvPlan, EvaluatedModule, FleetPlan, HostPlan, ImageKind, ImagePlan,
-    OptionPlan, ServicePlan, SystemPlan,
+    AdapterPlan, AdapterRecipe, DevServicePlan, EnvPlan, EvaluatedModule, FleetPlan, HostPlan,
+    ImageKind, ImagePlan, OptionPlan, ServicePlan, SystemPlan,
 };
 
 #[cfg(test)]
@@ -210,6 +210,80 @@ module dev {
 "#;
         let plan = evaluate_env(src, &base_dir()).unwrap();
         assert_eq!(plan.package_refs, vec!["default:ripgrep"]);
+    }
+
+    #[test]
+    fn evaluate_env_captures_adapt_package() {
+        let src = r#"
+module dev {
+    env.dev: Env.{
+        packages: [
+            Pkg.adapt(
+                name: "weirdctl",
+                source: path@vendor/weirdctl,
+                deps: [default.cmake],
+                recipe: Recipe.prebuilt(bin: "weirdctl", as: "weirdctl")
+            ),
+            default.ripgrep,
+        ],
+    }
+}
+"#;
+        let plan = evaluate_env(src, &base_dir()).unwrap();
+        assert_eq!(plan.package_refs, vec!["default:ripgrep"]);
+        assert_eq!(plan.adapters.len(), 1);
+        assert_eq!(plan.adapters[0].name, "weirdctl");
+        assert_eq!(plan.adapters[0].source, "path@vendor/weirdctl");
+        assert_eq!(
+            plan.adapters[0].deps,
+            vec![Merge::Pkg::new("default", "cmake")]
+        );
+        match &plan.adapters[0].recipe {
+            AdapterRecipe::Prebuilt { bin, as_name } => {
+                assert_eq!(bin, "weirdctl");
+                assert_eq!(as_name, "weirdctl");
+            }
+            other => panic!("expected prebuilt recipe, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn evaluate_env_captures_copy_adapter() {
+        let src = r#"
+module dev {
+    env.dev: Env.{
+        packages: [
+            Pkg.adapt(
+                name: "tool",
+                source: path@vendor/tool,
+                recipe: Recipe.copy()
+            )
+        ],
+    }
+}
+"#;
+        let plan = evaluate_env(src, &base_dir()).unwrap();
+        assert_eq!(plan.adapters.len(), 1);
+        assert!(matches!(plan.adapters[0].recipe, AdapterRecipe::Copy));
+    }
+
+    #[test]
+    fn evaluate_env_bad_adapter_is_e1270() {
+        let src = r#"
+module dev {
+    env.dev: Env.{
+        packages: [
+            Pkg.adapt(
+                name: "tool",
+                source: path@vendor/tool,
+                recipe: Recipe.build()
+            )
+        ],
+    }
+}
+"#;
+        let err = evaluate_env(src, &base_dir()).unwrap_err();
+        assert_eq!(err.code, "E1270");
     }
 
     #[test]

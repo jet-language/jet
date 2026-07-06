@@ -9,7 +9,9 @@
 //! path, or `JETPACK_FIXTURES`), we read a canned `nix build --json` file
 //! instead of shelling out — exactly the Forge fixture pattern.
 
+use super::ModuleEval::{AdapterPlan, AdapterRecipe};
 use super::PackageManifest;
+use super::Recipe::{self, BuildContext, BuildRecipe, BuildStep};
 use super::RefSpec::{ProviderKind, RefSpec, Source, SourceTable};
 use super::JSON;
 use crate::SHA256;
@@ -83,6 +85,22 @@ pub enum ProviderError {
     /// E1233 (D-MONOREF1): an in-repo transitive dependency names a package that
     /// is not a member of the source repo's workspace index.
     MemberOutsideWorkspace(String),
+    /// E1270: an adapter source/recipe cannot be realized by the native adapter
+    /// path.
+    Adapter(String),
+    /// E1273: a recipe-backed package failed while running a logged build step.
+    BuildDebug(String),
+    /// E1271: a source channel cannot be resolved or is unlocked in a context
+    /// that may not resolve it.
+    Channel(String),
+    /// E1276: `--offline` forbids a network fetch or metadata refresh.
+    Offline(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NixBridgeNeed {
+    pub reference: String,
+    pub package: String,
 }
 
 impl ProviderError {
@@ -91,6 +109,10 @@ impl ProviderError {
         match self {
             ProviderError::MonorepoFetch(_) => Some("E1232"),
             ProviderError::MemberOutsideWorkspace(_) => Some("E1233"),
+            ProviderError::Adapter(_) => Some("E1270"),
+            ProviderError::Channel(_) => Some("E1271"),
+            ProviderError::BuildDebug(_) => Some("E1273"),
+            ProviderError::Offline(_) => Some("E1276"),
             _ => None,
         }
     }
@@ -188,6 +210,12 @@ impl Provider for NixProvider {
             Some(dir) => {
                 let path = dir.join(fixture_name(spec));
                 std::fs::read_to_string(&path).map_err(|_| ProviderError::FixtureMissing(path))?
+            }
+            None if ctx.offline => {
+                return Err(ProviderError::Offline(format!(
+                    "`{}` is not in the hangar and --offline forbids fetching provider output",
+                    spec.raw
+                )))
             }
             None => run_nix(spec, table)?,
         };
@@ -332,6 +360,7 @@ impl Provider for CoreProvider {
 /// dirs). D-JPK-GC1: build scratch is hangar-scoped and swept on crash, never a
 /// sibling of the store root.
 pub const BUILD_SCRATCH_DIR: &str = "build-scratch";
+pub const ACTIVE_TMP_MARKER: &str = ".active";
 
 /// Remove every transient build-scratch dir under the hangar. Idempotent; used
 /// to sweep scratch left behind by a crashed build (D-JPK-GC1). Returns the
@@ -341,6 +370,9 @@ pub fn sweep_build_scratch(hangar_dir: &Path) -> usize {
     let mut removed = 0;
     if let Ok(rd) = std::fs::read_dir(&root) {
         for ent in rd.flatten() {
+            if ent.path().join(ACTIVE_TMP_MARKER).exists() {
+                continue;
+            }
             if std::fs::remove_dir_all(ent.path()).is_ok() {
                 removed += 1;
             }
@@ -361,6 +393,7 @@ impl BuildScratch {
         let path = hangar_dir.join(BUILD_SCRATCH_DIR).join(key);
         let _ = std::fs::remove_dir_all(&path);
         let _ = std::fs::create_dir_all(&path);
+        let _ = std::fs::write(path.join(ACTIVE_TMP_MARKER), b"");
         BuildScratch { path }
     }
 }
@@ -547,11 +580,12 @@ fn fetch_remote_repo_indexed(
         return Ok(cache);
     }
     if ctx.offline {
-        return Err(ProviderError::CoreBuild(format!(
-            "offline mode has no cached checkout for `{}`",
+        return Err(ProviderError::Offline(format!(
+            "`{}` has no cached checkout and --offline forbids fetching source",
             remote.label
         )));
     }
+    ensure_network_allowed("fetch source repo")?;
 
     match try_sparse_member_fetch(remote, want_package, &cache) {
         // Only the addressed member's subtree was materialized.
@@ -893,11 +927,12 @@ fn fetch_remote_repo(remote: &RemoteSource, ctx: &Ctx) -> Result<PathBuf, Provid
         return Ok(cache);
     }
     if ctx.offline {
-        return Err(ProviderError::CoreBuild(format!(
-            "offline mode has no cached checkout for `{}`",
+        return Err(ProviderError::Offline(format!(
+            "`{}` has no cached checkout and --offline forbids fetching source",
             remote.label
         )));
     }
+    ensure_network_allowed("fetch source repo")?;
     if Command::new("git").arg("--version").output().is_err() {
         return Err(ProviderError::CoreBuild(
             "remote `core` sources need the `git` command to fetch source repos".to_string(),
@@ -1092,11 +1127,165 @@ pub fn uses_nix_provider(
     resolve_kind(spec, table, offline, cache_dir) != ProviderKind::Core
 }
 
+/// U23 / D-JPK-NONIX1=A: package refs that resolve through the Nix
+/// compatibility provider need the Nix bridge unless a fixture is standing in
+/// for that provider. This fact is computed before spawning `nix`, so no-Nix
+/// machines get one package-focused diagnostic instead of a raw spawn error.
+pub fn needs_nix_bridge(
+    spec: &RefSpec,
+    table: &SourceTable,
+    offline: bool,
+    cache_dir: &Path,
+) -> Option<NixBridgeNeed> {
+    if uses_nix_provider(spec, table, offline, cache_dir) {
+        Some(NixBridgeNeed {
+            reference: spec.raw.clone(),
+            package: spec.short_name().to_string(),
+        })
+    } else {
+        None
+    }
+}
+
 /// Realize a ref through its provider. The resolver entry point: it never knows
 /// or cares which backend runs — that is the whole point of the boundary.
 pub fn realize(spec: &RefSpec, table: &SourceTable, ctx: &Ctx) -> Result<Realized, ProviderError> {
     let kind = resolve_kind(spec, table, ctx.offline, ctx.store_dir);
     provider_for(kind).realize(spec, table, ctx)
+}
+
+/// U20: realize an inline `Pkg.adapt(...)` plan into the same `Realized`
+/// boundary as provider-backed packages.
+pub fn realize_adapter(plan: &AdapterPlan, ctx: &Ctx) -> Result<Realized, ProviderError> {
+    let source_ref = super::RefSpec::classify_provider_ref(&plan.source).map_err(|_| {
+        ProviderError::Adapter(format!(
+            "adapter source `{}` is not a provider ref",
+            plan.source
+        ))
+    })?;
+    let staged = stage_adapter_source(&source_ref, ctx)?;
+    let recipe = adapter_recipe_to_build(&plan.recipe);
+    let recipe_hash = recipe.recipe_hash();
+    let source_hash = tree_fingerprint(&staged);
+    let id_input = format!(
+        "u20-adapter-v1\nname={}\nsource={}\nsource_hash={}\nrecipe={}\n",
+        plan.name, plan.source, source_hash, recipe_hash
+    );
+    let fp = SHA256::sha256_hex(id_input.as_bytes());
+    let out_dir = ctx
+        .store_dir
+        .join(format!("{}-adapter-{}", plan.name, &fp[..12]));
+    let cache_hit = out_dir.exists();
+    if !cache_hit {
+        let fetch_cache = ctx.store_dir.join("fetch-cache");
+        let build_ctx = BuildContext {
+            source_dir: &staged,
+            output_root: &out_dir,
+            tools: std::collections::HashMap::new(),
+            fetch_cache: &fetch_cache,
+            offline: ctx.offline,
+        };
+        let mut attempt = super::BuildDebug::Attempt::new(
+            &plan.name,
+            &format!("adapt:{}:{}", plan.name, plan.source),
+            "adapter",
+            &recipe_hash,
+            &source_hash,
+        );
+        if let Err(d) = Recipe::run_logged(&recipe, &build_ctx, None, &mut attempt) {
+            attempt.preserve_scratch(ctx.store_dir, &staged, &out_dir);
+            let _ = attempt.persist(ctx.store_dir);
+            return Err(ProviderError::BuildDebug(format!(
+                "adapter `{}` failed at step {} of {}: {} — full log: `jet logs {}`; rerun with `--shell-on-fail` to debug inside {}",
+                plan.name,
+                attempt.failed_step,
+                attempt.steps.len(),
+                d.what,
+                plan.name,
+                attempt.scratch_dir
+            )));
+        }
+        let _ = attempt.persist(ctx.store_dir);
+    }
+    let out = out_dir.to_string_lossy().into_owned();
+    let bin_dir = out_dir.join("bin");
+    let bin = if bin_dir.is_dir() {
+        bin_dir.to_string_lossy().into_owned()
+    } else {
+        String::new()
+    };
+    let envelope = super::Envelope::Envelope::for_output(
+        &out,
+        &format!("adapt:{}:{}", plan.name, plan.source),
+        &format!("adapter:{recipe_hash}"),
+    );
+    Ok(Realized {
+        name: plan.name.clone(),
+        version: String::new(),
+        reference: format!("adapt:{}:{}", plan.name, plan.source),
+        out,
+        bin,
+        rlib: String::new(),
+        envelope,
+        source_state: if cache_hit {
+            SourceState::Cached
+        } else {
+            SourceState::Built
+        },
+    })
+}
+
+fn adapter_recipe_to_build(recipe: &AdapterRecipe) -> BuildRecipe {
+    match recipe {
+        AdapterRecipe::Copy => BuildRecipe {
+            steps: vec![BuildStep::InstallTree {
+                src: ".".to_string(),
+                dest: ".".to_string(),
+            }],
+        },
+        AdapterRecipe::Prebuilt { bin, as_name } => BuildRecipe {
+            steps: vec![BuildStep::Install {
+                src: bin.clone(),
+                dest: format!("bin/{as_name}"),
+            }],
+        },
+        AdapterRecipe::Build(recipe) => recipe.clone(),
+    }
+}
+
+fn stage_adapter_source(
+    source: &super::RefSpec::ProviderRef,
+    ctx: &Ctx,
+) -> Result<PathBuf, ProviderError> {
+    match source.provider {
+        Source::Path => {
+            let (target, _) = super::RefSpec::split_channel_ref(&source.target);
+            let path = PathBuf::from(target);
+            let path = if path.is_absolute() {
+                path
+            } else {
+                std::env::current_dir().unwrap_or_default().join(path)
+            };
+            if path.is_dir() {
+                Ok(path)
+            } else {
+                Err(ProviderError::Adapter(format!(
+                    "adapter source `{}` is not a directory",
+                    path.display()
+                )))
+            }
+        }
+        Source::Github => {
+            let remote = parse_remote_source(&format!("github:{}", source.target))?;
+            fetch_remote_repo(&remote, ctx)
+        }
+        Source::Nixpkgs => Err(ProviderError::Adapter(
+            "`nixpkgs@...` is an index source, not source bytes; use `jetpack add <ref> --adapt` to draft a concrete adapter.".to_string(),
+        )),
+        Source::Named(_) => Err(ProviderError::Adapter(
+            "adapter source must be a built-in provider ref like `path@vendor/tool`.".to_string(),
+        )),
+    }
 }
 
 /// U9 remote probe: classify a `github@…`/git upstream as `Core` (it carries a
@@ -1148,6 +1337,9 @@ fn pack_kind(has_pack: bool) -> ProviderKind {
 /// network error, unfetchable rev) is treated as "no pkg.jet" by the caller
 /// (→ nix), the safe default.
 fn remote_has_pack_jet(remote: &RemoteSource) -> bool {
+    if network_denied() {
+        return false;
+    }
     if Command::new("git").arg("--version").output().is_err() {
         return false;
     }
@@ -1200,6 +1392,7 @@ fn remote_has_pack_jet(remote: &RemoteSource) -> bool {
 }
 
 fn run_nix(spec: &RefSpec, table: &SourceTable) -> Result<String, ProviderError> {
+    ensure_network_allowed("run nix provider")?;
     let output = Command::new("nix")
         .args(["build", "--no-link", "--json"])
         .arg(flake_ref(spec, table))
@@ -1222,6 +1415,20 @@ fn run_nix(spec: &RefSpec, table: &SourceTable) -> Result<String, ProviderError>
         return Err(ProviderError::BuildFailed(reason));
     }
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+fn network_denied() -> bool {
+    std::env::var_os("JETPACK_DENY_NETWORK").is_some_and(|v| !v.is_empty())
+}
+
+fn ensure_network_allowed(need: &str) -> Result<(), ProviderError> {
+    if network_denied() {
+        Err(ProviderError::Offline(format!(
+            "network disabled by JETPACK_DENY_NETWORK while trying to {need}"
+        )))
+    } else {
+        Ok(())
+    }
 }
 
 /// Parse `nix build --json` output: an array of build results, each with an

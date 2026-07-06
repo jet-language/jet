@@ -1,5 +1,6 @@
 //! Completion: keyword/type tables + completion assembly.
 
+use crate::Jetpack::Discovery::Index as DiscoveryIndex;
 use crate::Syntax;
 use crate::AST;
 
@@ -171,14 +172,82 @@ fn context_is_binding_start(src: &str, offset: usize) -> bool {
     prior.is_empty() || prior.ends_with('{')
 }
 
+fn context_allows_keyword(src: &str, offset: usize, kw: &str) -> bool {
+    if context_is_binding_start(src, offset) {
+        return true;
+    }
+    matches!(
+        kw,
+        "return" | "if" | "else" | "when" | "true" | "false" | "break" | "continue"
+    )
+}
+
+fn function_detail(name: &str, params: &[(String, AST::Type)], ret: &Option<AST::Type>) -> String {
+    let mut out = format!(
+        "fn {}({})",
+        name,
+        params
+            .iter()
+            .map(|(n, t)| format!("{}: {}", n, t.name()))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+    if let Some(ret) = ret {
+        out.push_str(&format!(" -> {}", ret.name()));
+    }
+    out
+}
+
 pub(crate) fn compute_completions(
     db: &SymbolDB,
     src: &str,
     offset: usize,
     current_path: &str,
+    discovery: Option<&DiscoveryIndex>,
 ) -> Vec<CompletionItem> {
     let mut items: Vec<CompletionItem> = Vec::new();
     let mut seen = std::collections::HashSet::new();
+
+    if let Some(index) = discovery {
+        if let Some((source, prefix)) = context_is_package_ref(src, offset) {
+            for name in index.package_completions(&source, &prefix) {
+                if seen.insert(format!("pkg:{source}.{name}")) {
+                    items.push(CompletionItem {
+                        label: name,
+                        kind: ck::MODULE,
+                        detail: Some(format!("package from {source}")),
+                        insert_text: None,
+                        insert_text_format: 1,
+                        auto_import: None,
+                    });
+                }
+            }
+            return items;
+        }
+
+        if let Some(prefix) = context_is_option_field(src, offset) {
+            let mut fields = index
+                .packages
+                .iter()
+                .flat_map(|record| record.options.iter())
+                .filter(|field| field.name.starts_with(&prefix))
+                .collect::<Vec<_>>();
+            fields.sort_by(|a, b| a.name.cmp(&b.name));
+            for field in fields {
+                if seen.insert(format!("opt:{}", field.name)) {
+                    items.push(CompletionItem {
+                        label: field.name.clone(),
+                        kind: ck::PROPERTY,
+                        detail: Some(format!("default: {} - {}", field.default, field.docs)),
+                        insert_text: Some(format!("{}: ", field.name)),
+                        insert_text_format: 1,
+                        auto_import: None,
+                    });
+                }
+            }
+            return items;
+        }
+    }
 
     // Member completion: `expr.`
     if let Some(receiver_name) = context_is_member_access(src, offset) {
@@ -232,21 +301,13 @@ pub(crate) fn compute_completions(
                 }
                 // Also add methods
                 for md in &db.defs {
-                    if let SymKind::Function { params, .. } = &md.kind {
+                    if let SymKind::Function { params, ret } = &md.kind {
                         if params.first().map(|(n, _)| n.as_str()) == Some("self")
                             || md.module_path == def.module_path
                         {
                             // heuristic: include all methods in same module
                             if seen.insert(format!("m:{}", md.name)) {
-                                let detail = format!(
-                                    "fn {}({})",
-                                    md.name,
-                                    params
-                                        .iter()
-                                        .map(|(n, t)| format!("{}: {}", n, t.name()))
-                                        .collect::<Vec<_>>()
-                                        .join(", ")
-                                );
+                                let detail = function_detail(&md.name, params, ret);
                                 items.push(CompletionItem {
                                     label: md.name.clone(),
                                     kind: ck::METHOD,
@@ -304,17 +365,9 @@ pub(crate) fn compute_completions(
     // All top-level definitions
     for def in &db.defs {
         match &def.kind {
-            SymKind::Function { params, ret: _ } => {
+            SymKind::Function { params, ret } => {
                 if seen.insert(def.name.clone()) {
-                    let detail = format!(
-                        "fn {}({})",
-                        def.name,
-                        params
-                            .iter()
-                            .map(|(n, t)| format!("{}: {}", n, t.name()))
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    );
+                    let detail = function_detail(&def.name, params, ret);
                     items.push(CompletionItem {
                         label: def.name.clone(),
                         kind: ck::FUNCTION,
@@ -420,6 +473,9 @@ pub(crate) fn compute_completions(
 
     // Keywords
     for kw in JET_KEYWORDS {
+        if !context_allows_keyword(src, offset, kw) {
+            continue;
+        }
         if seen.insert(format!("kw:{}", kw)) {
             items.push(CompletionItem {
                 label: kw.to_string(),
@@ -484,4 +540,38 @@ pub(crate) fn compute_completions(
     }
 
     items
+}
+
+fn context_is_package_ref(src: &str, offset: usize) -> Option<(String, String)> {
+    let source = context_is_member_access(src, offset)?;
+    let prefix = current_identifier_prefix(src, offset);
+    Some((source, prefix))
+}
+
+fn context_is_option_field(src: &str, offset: usize) -> Option<String> {
+    let before = &src[..offset.min(src.len())];
+    let service = before.rfind("Service.{");
+    let env = before.rfind("Env.{");
+    let marker = match (service, env) {
+        (Some(a), Some(b)) => Some(a.max(b)),
+        (Some(a), None) | (None, Some(a)) => Some(a),
+        (None, None) => None,
+    }?;
+    let body = &before[marker..];
+    if body
+        .rfind('}')
+        .is_some_and(|close| body.rfind('{').map(|open| close > open).unwrap_or(false))
+    {
+        return None;
+    }
+    Some(current_identifier_prefix(src, offset))
+}
+
+fn current_identifier_prefix(src: &str, offset: usize) -> String {
+    let before = &src[..offset.min(src.len())];
+    let start = before
+        .rfind(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+        .map(|i| i + 1)
+        .unwrap_or(0);
+    before[start..].to_string()
 }

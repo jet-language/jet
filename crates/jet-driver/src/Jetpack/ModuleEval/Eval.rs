@@ -15,7 +15,7 @@ use super::super::Merge::{self, EntryContribution, MergeError, MergedEntry, Scal
 use super::DevService::evaluate_dev_service;
 use super::Diagnostics::{not_a_namespace_literal, packages_not_a_list, wrong_namespace_type};
 use super::System::{evaluate_fleet, evaluate_image, evaluate_system};
-use super::Types::{DevServicePlan, EvaluatedModule};
+use super::Types::{AdapterPlan, AdapterRecipe, DevServicePlan, EvaluatedModule};
 
 /// Parse `src` and evaluate every enabled module it declares. `base_dir`
 /// resolves `embed_file` inside contribution expressions, same as ordinary
@@ -86,18 +86,23 @@ fn evaluate_module<'a>(
     let mut fleets = Vec::new();
     let mut dev_services = Vec::new();
     let mut secrets = Vec::new();
+    let mut adapters = Vec::new();
     for c in &m.contributions {
         match (&c.namespace, &c.value) {
             (Namespace::Env, ContribValue::Expr(_)) => {
-                let (entry, names) = evaluate_env_contribution(c, src, base_dir, funcs)?;
+                let (entry, names, found_adapters) =
+                    evaluate_env_contribution(c, src, base_dir, funcs)?;
                 entries.push(((c.namespace, c.path.clone()), entry));
                 secrets.extend(names);
+                adapters.extend(found_adapters);
             }
             (Namespace::Env, ContribValue::Env(lit)) => {
-                let (entry, services, names) = evaluate_env_role(lit, src, base_dir, funcs)?;
+                let (entry, services, names, found_adapters) =
+                    evaluate_env_role(lit, src, base_dir, funcs)?;
                 entries.push(((c.namespace, c.path.clone()), entry));
                 dev_services.extend(services);
                 secrets.extend(names);
+                adapters.extend(found_adapters);
             }
             (Namespace::System, ContribValue::System(lit)) => {
                 systems.push(evaluate_system(&c.path, lit, src, base_dir, funcs)?);
@@ -121,6 +126,7 @@ fn evaluate_module<'a>(
         fleets,
         dev_services,
         secrets,
+        adapters,
     })
 }
 
@@ -171,7 +177,7 @@ fn evaluate_env_contribution(
     src: &str,
     base_dir: &Path,
     funcs: &HashMap<String, &Func>,
-) -> Result<(EntryContribution, Vec<String>), Diagnostic> {
+) -> Result<(EntryContribution, Vec<String>, Vec<AdapterPlan>), Diagnostic> {
     let expected = namespace_type(c.namespace);
     let ContribValue::Expr(value) = &c.value else {
         unreachable!("evaluate_env_contribution called on a non-env contribution")
@@ -189,7 +195,8 @@ fn evaluate_env_contribution(
         return Err(wrong_namespace_type(expected, type_name, value.span()));
     }
 
-    evaluate_env_fields(&fields, src, base_dir, funcs)
+    let (entry, names, adapters) = evaluate_env_fields(fields, src, base_dir, funcs)?;
+    Ok((entry, names, adapters))
 }
 
 /// Shared field-loop for both `env.<name>:` producer shapes (the legacy
@@ -201,14 +208,17 @@ fn evaluate_env_fields(
     src: &str,
     base_dir: &Path,
     funcs: &HashMap<String, &Func>,
-) -> Result<(EntryContribution, Vec<String>), Diagnostic> {
+) -> Result<(EntryContribution, Vec<String>, Vec<AdapterPlan>), Diagnostic> {
     let mut entry = EntryContribution::default();
     let mut secrets = Vec::new();
+    let mut adapters = Vec::new();
     let extern_names = HashSet::new();
     let globals = HashMap::new();
     for (name, _span, value) in fields {
         if name == Syntax::SYSTEM_FIELD_PACKAGES {
-            entry.packages.extend(extract_packages(value, src)?);
+            let extracted = extract_packages(value, src)?;
+            entry.packages.extend(extracted.packages);
+            adapters.extend(extracted.adapters);
         } else if name == Syntax::ENV_FIELD_SECRETS {
             // U13: `secrets: ["name", …]` — a plain list of strings, no Pkg
             // sugar. Evaluated as an ordinary comptime expression; anything
@@ -237,7 +247,7 @@ fn evaluate_env_fields(
                 .push(Scalar::normal(v.jet_show()));
         }
     }
-    Ok((entry, secrets))
+    Ok((entry, secrets, adapters))
 }
 
 /// U13: `[String]` → `Vec<String>`, or `None` if `v` isn't a list of strings
@@ -263,18 +273,32 @@ fn evaluate_env_role(
     src: &str,
     base_dir: &Path,
     funcs: &HashMap<String, &Func>,
-) -> Result<(EntryContribution, Vec<DevServicePlan>, Vec<String>), Diagnostic> {
-    let (entry, secrets) = evaluate_env_fields(&lit.fields, src, base_dir, funcs)?;
+) -> Result<
+    (
+        EntryContribution,
+        Vec<DevServicePlan>,
+        Vec<String>,
+        Vec<AdapterPlan>,
+    ),
+    Diagnostic,
+> {
+    let (entry, secrets, adapters) = evaluate_env_fields(&lit.fields, src, base_dir, funcs)?;
     let mut services = Vec::new();
     for s in &lit.services {
         services.push(evaluate_dev_service(s, base_dir, funcs)?);
     }
-    Ok((entry, services, secrets))
+    Ok((entry, services, secrets, adapters))
 }
 
 /// Pull the package list out of a `packages: [ … ]` field by slicing its
 /// source text and reusing the tested sugar parser (see module docs).
-pub(super) fn extract_packages(value: &Expr, src: &str) -> Result<Vec<Merge::Pkg>, Diagnostic> {
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub(super) struct ExtractedPackages {
+    pub packages: Vec<Merge::Pkg>,
+    pub adapters: Vec<AdapterPlan>,
+}
+
+pub(super) fn extract_packages(value: &Expr, src: &str) -> Result<ExtractedPackages, Diagnostic> {
     let Expr::ListLit(_, span) = value else {
         return Err(packages_not_a_list(value.span()));
     };
@@ -283,7 +307,137 @@ pub(super) fn extract_packages(value: &Expr, src: &str) -> Result<Vec<Merge::Pkg
         .strip_prefix('[')
         .and_then(|t| t.strip_suffix(']'))
         .unwrap_or(text);
-    Ok(Merge::parse_package_list(body))
+    let mut out = ExtractedPackages::default();
+    let mut plain = Vec::new();
+    for item in split_top_level(body) {
+        let item = item.trim();
+        if item.is_empty() {
+            continue;
+        }
+        if item.starts_with("Pkg.adapt") {
+            out.adapters.push(parse_adapter(item)?);
+        } else {
+            plain.push(item);
+        }
+    }
+    out.packages = Merge::parse_package_list(&plain.join(", "));
+    Ok(out)
+}
+
+fn split_top_level(body: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut depth = 0i32;
+    let mut start = 0usize;
+    let mut in_string = false;
+    let mut escape = false;
+    for (i, c) in body.char_indices() {
+        if in_string {
+            escape = c == '\\' && !escape;
+            if c == '"' && !escape {
+                in_string = false;
+            } else if c != '\\' {
+                escape = false;
+            }
+            continue;
+        }
+        match c {
+            '"' => in_string = true,
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth -= 1,
+            ',' if depth == 0 => {
+                out.push(&body[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    if start < body.len() {
+        out.push(&body[start..]);
+    }
+    out
+}
+
+fn parse_adapter(item: &str) -> Result<AdapterPlan, Diagnostic> {
+    let args = call_args(item, "Pkg.adapt").ok_or_else(|| adapter_shape(item))?;
+    let name = named_string(args, "name").ok_or_else(|| adapter_shape(item))?;
+    let source = named_raw(args, "source").ok_or_else(|| adapter_shape(item))?;
+    super::super::RefSpec::classify_provider_ref(&source).map_err(|_| adapter_shape(item))?;
+    let deps = named_raw(args, "deps")
+        .map(|raw| {
+            let body = raw
+                .trim()
+                .strip_prefix('[')
+                .and_then(|t| t.strip_suffix(']'))
+                .unwrap_or(raw.trim());
+            Merge::parse_package_list(body)
+        })
+        .unwrap_or_default();
+    let recipe = parse_recipe(&named_raw(args, "recipe").ok_or_else(|| adapter_shape(item))?)?;
+    Ok(AdapterPlan {
+        name,
+        source,
+        deps,
+        recipe,
+    })
+}
+
+fn parse_recipe(raw: &str) -> Result<AdapterRecipe, Diagnostic> {
+    let raw = raw.trim();
+    if raw.starts_with("Recipe.copy") {
+        return Ok(AdapterRecipe::Copy);
+    }
+    if let Some(args) = call_args(raw, "Recipe.prebuilt") {
+        let bin = named_string(args, "bin").ok_or_else(|| adapter_shape(raw))?;
+        let as_name = named_string(args, "as")
+            .or_else(|| named_string(args, "as_name"))
+            .unwrap_or_else(|| {
+                std::path::Path::new(&bin)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or(&bin)
+                    .to_string()
+            });
+        return Ok(AdapterRecipe::Prebuilt { bin, as_name });
+    }
+    Err(adapter_shape(raw))
+}
+
+fn call_args<'a>(raw: &'a str, prefix: &str) -> Option<&'a str> {
+    let rest = raw.trim().strip_prefix(prefix)?.trim_start();
+    let rest = rest.strip_prefix('(')?;
+    let end = rest.rfind(')')?;
+    Some(&rest[..end])
+}
+
+fn named_raw(args: &str, key: &str) -> Option<String> {
+    let needle = format!("{key}:");
+    for item in split_top_level(args) {
+        let item = item.trim();
+        if let Some(rest) = item.strip_prefix(&needle) {
+            return Some(rest.trim().trim_end_matches(',').to_string());
+        }
+    }
+    None
+}
+
+fn named_string(args: &str, key: &str) -> Option<String> {
+    let raw = named_raw(args, key)?;
+    unquote(raw.trim())
+}
+
+fn unquote(raw: &str) -> Option<String> {
+    let s = raw.strip_prefix('"')?.strip_suffix('"')?;
+    Some(s.replace("\\\"", "\"").replace("\\\\", "\\"))
+}
+
+fn adapter_shape(_raw: &str) -> Diagnostic {
+    Diagnostic::error(
+        "E1270",
+        "adapter package declaration is not complete".to_string(),
+        "`Pkg.adapt` needs `name:`, `source:`, and a supported `recipe:`; this U20 slice supports `Recipe.copy()` and `Recipe.prebuilt(bin:, as:)`.".to_string(),
+        "write `Pkg.adapt(name: \"tool\", source: path@vendor/tool, recipe: Recipe.copy())`.".to_string(),
+        None,
+    )
 }
 
 /// Merge every evaluated module's contributions through the §6 engine,

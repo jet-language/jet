@@ -207,6 +207,10 @@ impl<'a> Resolver<'a> {
                 .unwrap_or_default(),
             comptime_inputs: Vec::new(),
             toolchains: Vec::new(),
+            source_channels: self
+                .existing_lock
+                .map(|lock| lock.source_channels.clone())
+                .unwrap_or_default(),
         };
 
         // Build dep_dirs map.

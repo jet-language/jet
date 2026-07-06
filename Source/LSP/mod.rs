@@ -148,7 +148,7 @@ mod tests {
         let (_, bundle, facts) = check_document_with_bundle("test.jet", src);
         let bundle = bundle.expect("bundle");
         let db = build_symbol_db(&bundle, &facts);
-        let items = compute_completions(&db, src, 14, "test.jet");
+        let items = compute_completions(&db, src, 14, "test.jet", None);
         // `val` and `var` are retired (FOREIGN_VAL/FOREIGN_VAR); they must not appear.
         assert!(
             !items.iter().any(|i| i.label == "val"),

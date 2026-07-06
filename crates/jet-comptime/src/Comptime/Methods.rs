@@ -540,7 +540,8 @@ impl<'a> Interp<'a> {
     ///   1. Validate `url` (arg 0) and `expected_sha256` (arg 1 / labelled `sha256:`).
     ///   2. Download via the `jet-net` crate's blocking fetch.
     ///   3. `sha256_hex(bytes)` → compare; mismatch → **E3413**.
-    ///   4. Unreachable / fetch error → **E3414**.
+    ///   4. Unreachable / general fetch error → **E3414**; TLS client failures
+    ///      reachable through HTTPS → **E4201**–**E4203**.
     ///   5. Push `ComptimeInput { path: "url:{url}", hash: actual }` to `embed_inputs`.
     ///   6. Return `CtValue::Str(content)` (non-UTF-8 content needs its own code).
     fn eval_net_fetch(&mut self, args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
@@ -567,13 +568,15 @@ impl<'a> Interp<'a> {
             )),
         };
 
-        let bytes = jet_net::fetch(&url).map_err(|e| Diagnostic::error(
-            "E3414",
-            format!("fetch failed: {e}"),
-            format!("could not retrieve `{url}`"),
-            "check the URL is reachable and the network is available; use `file://` for local paths".to_string(),
-            Some(span),
-        ))?;
+        let bytes = jet_net::fetch(&url).map_err(|e| {
+            Diagnostic::error(
+                e.diagnostic_code(),
+                e.diagnostic_what(&url),
+                e.diagnostic_why(&url),
+                e.diagnostic_fix(),
+                Some(span),
+            )
+        })?;
 
         let actual = crate::SHA256::sha256_hex(&bytes);
         if actual != expected {

@@ -1186,6 +1186,39 @@ dashed-name = ident { "-" ident } ;                (* S84: kebab-case names *)
 - **`env.<name>:` values reuse the ordinary expression parser** — typically a
   struct literal (`Env.{ packages: […], prompt: "…" }`), so lists and strings
   work with no new grammar.
+- **Ad-hoc adapters (U20):** an `env.<name>.packages` list may contain
+  `Pkg.adapt(name:, source:, recipe:)`. `source:` is a provider ref such as
+  `path@vendor/tool`; this U20 slice realizes `Recipe.copy()` and
+  `Recipe.prebuilt(bin:, as:)` into ordinary hangar packages, with the same
+  store/lock path as any other package. `jetpack add <ref> --adapt` prints a
+  draft adapter and does not run upstream code.
+- **No-Nix machines (U23):** core packages and adapted packages realize without
+  Nix. Package refs that still route through the Nix compatibility provider are
+  reported together as E1272, naming only those holes and suggesting either
+  installing Nix or drafting an adapter with `jetpack add <ref> --adapt`.
+  Foreign-flake commands remain E1256 because they cannot run at all without
+  the `nix` binary.
+- **Offline discovery (U26):** `jet search <query>` and
+  `jet info <source>.<package>` read only `.jet/discovery/index.jsonl`, local
+  provider fixtures, and hangar metadata. They never fetch. `--json` emits the
+  same package records the editor discovery hooks consume: source, name,
+  resolved ref, version, platforms, docs, provenance, and typed service option
+  fields.
+- **Failed-build debugging (U27):** recipe-backed builds persist per-step logs
+  under the hangar. On failure, scratch is preserved in hangar-managed storage
+  and the diagnostic names `jet logs <pkg>` plus `--shell-on-fail`. Package-form
+  `jet explain <ref>` prints the latest resolution/build record; code-form
+  `jet explain E1234` keeps the existing diagnostic essay behavior.
+- **No daemon / no root (U28):** jetpack is a one-shot, user-owned process:
+  no resident daemon, no root-owned default hangar, no privileged sandbox
+  helper. Concurrent commands coordinate through file locks. If unprivileged
+  sandboxing is unavailable, Jetpack emits L0205; `jetpack config sandbox
+  require` makes that condition E1275 instead.
+- **Offline guarantee (U29):** once a package ref is realized into the hangar,
+  realize-class verbs can use it again with `--offline` and no provider
+  metadata refresh. Network-class verbs (`add`, `update`, `outdated`,
+  publish/cache sync) refuse `--offline`, and a missing local object reports
+  E1276 instead of fetching or timing out.
 - **`system.<name>:` and `image.<name>:` values use dedicated typed parsers**
   (U11/U13/U14) — the `options` list (`net.hostName: laptop`), the typed
   `target` value (`linux.x64`), and the `Service` map don't fit the ordinary
@@ -1358,11 +1391,39 @@ function's set when the function reaches an operation that carries it.
 | `Exec`  | `core.process.run`/`exit` |
 | `Db`    | `core.db.*` |
 | `Log`   | `core.log.*` |
-| `Gpu`   | (reserved; named in D-EFF3, no Core mapping yet) |
+| `Gpu`   | `core.raylib.*`, future `core.gpu.*` / `core.game.*` |
 
 A call to an `extern rust`/C foreign function, whose body the compiler can't
 inspect, contributes the **maximal** set (every effect) — it is assumed to do
 anything. This keeps inference sound without reading foreign code.
+
+### HTTPS client default (D-TLS1)
+
+`core.net.fetch` and `core.http.client` support `https://` in the default build
+through the rustls bridge and system certificate roots. Plain `http://` remains
+available for loopback fixtures and old endpoints. HTTPS client failures are
+reported in Jet terms: E4201 for handshake failure, E4202 for certificate trust
+failure, and E4203 when the host image has no usable certificate roots.
+Advanced client TLS configuration belongs in `core.tls` (custom roots,
+pinning, client certificates). D-TLSSERVE1=A adds HTTPS serving as a named
+option on the same server entry point: `Server.serve(addr, mux, tls:
+Server.tls(cert, key))?`. The third argument must be labeled `tls:`; unlabeled
+TLS config is rejected so the transport switch is visible at the call site.
+
+### Graphics and games (D-RAYLIB1, D-GAME1-3)
+
+`core.raylib` is the first-party graphics bridge package. The current slice is
+a typed skeleton: `window_open`, `window_should_close`, `begin_drawing`,
+`clear_background`, `draw_text`, `end_drawing`, `close_window`, and `color`
+type-check and lower to deterministic no-op runtime stubs. The native raylib
+link, window lifecycle, drawing, input, audio, and error translation are the
+next stage; examples that require a display are type-checked in CI and run only
+under an explicit display gate.
+
+`core.game` is the flagship engine name (D-GAME2=A). Its public beginner API is
+scene-first with a frame hook (D-GAME3=C): a `Scene` owns durable editable game
+data, while `scene.on_frame((frame) => { ... })` attaches per-frame logic.
+`core.game` is not implemented in this slice.
 
 ### Declaring a boundary — `#(…)` on the signature
 
@@ -1574,6 +1635,25 @@ pin moves), `jet init` (writes a `jet:` pin for the running channel by default).
 This is a *different* toolchain from the Rust/native **build** toolchain that
 compiles a user's `extern rust` bridge crates (D-JPK-BUILDTOOL1, E1240): that
 one builds bridge dependencies; this one pins the Jet compiler itself.
+
+## Source channels and outdated (D-JPK-CHANNEL1=A, U21)
+
+Source refs may carry channel selectors: `#latest`, `#main`, or a major-series
+mask such as `#v0.x`. The channel is tracking intent; `.jet/lock` records the
+exact source that intent resolved to:
+
+```toml
+[[source_channel]]
+name = "default"
+channel = "latest"
+exact = "github:acme/tool#v1.2.0"
+```
+
+`jetpack update [source]` is the only verb that moves `[[source_channel]]`.
+`jetpack outdated` compares the lock to channel metadata and writes nothing.
+`jetpack build`, `jetpack run`, `jetpack enter`, and `jetpack dev` read only the
+exact lock entry; an unlocked channel source is E1271, including under CI or
+`--offline`.
 
 ### Frozen-forward identity block
 

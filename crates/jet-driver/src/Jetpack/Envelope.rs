@@ -51,7 +51,7 @@ impl Envelope {
 /// The platform key for the host build target (`<arch>-<os>`). std-only (I6):
 /// derived from the compile target, which is what the realized artifact runs on.
 pub fn host_platform() -> String {
-    format!("{}-{}", std::env::consts::ARCH, std::env::consts::OS)
+    super::Platform::host_key()
 }
 
 /// Content hash of a realized output root.

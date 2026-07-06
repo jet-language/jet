@@ -5,6 +5,7 @@
 use crate::AST::Namespace;
 
 use super::super::Merge::{self, EntryContribution};
+use super::super::Recipe::BuildRecipe;
 use super::super::RefSpec::SourceTable;
 
 /// One module's contributions, keyed by `(namespace, path)` so `merge_all`
@@ -33,6 +34,32 @@ pub struct EvaluatedModule {
     /// (`.jet/secrets.age`). Validated (every name present) at env entry;
     /// `Jetpack::Secrets` is the only consumer.
     pub secrets: Vec<String>,
+    /// U20: `Pkg.adapt(...)` declarations captured from `packages:` fields.
+    /// They ride alongside ordinary package refs and realize into normal
+    /// hangar objects.
+    pub adapters: Vec<AdapterPlan>,
+}
+
+/// U20: an ad-hoc adapter package declared with `Pkg.adapt(...)`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdapterPlan {
+    pub name: String,
+    /// A provider ref such as `path@vendor/weirdctl`.
+    pub source: String,
+    pub deps: Vec<Merge::Pkg>,
+    pub recipe: AdapterRecipe,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AdapterRecipe {
+    /// `Recipe.copy(...)`: copy the staged source tree as-is.
+    Copy,
+    /// `Recipe.prebuilt(bin: "...", as: "...")`: install one executable under
+    /// `bin/<as>`.
+    Prebuilt { bin: String, as_name: String },
+    /// Curated future recipes parse as a concrete `BuildRecipe` once their
+    /// tool deps can be represented. The current U20 slice uses copy/prebuilt.
+    Build(BuildRecipe),
 }
 
 /// U11: a field-checked `system.<name>: { … }` contribution, captured so the
@@ -191,6 +218,9 @@ pub struct HostPlan {
 pub struct EnvPlan {
     pub table: SourceTable,
     pub package_refs: Vec<String>,
+    /// U20 adapter packages declared in `packages:`. Kept separate from refs
+    /// because they have inline build identity and no provider selector.
+    pub adapters: Vec<AdapterPlan>,
     pub prompt: Option<String>,
     /// U11: every captured `System` across all evaluated modules, in source order.
     /// The jetos tier (gap #4) realizes these; the dev-shell path ignores them.

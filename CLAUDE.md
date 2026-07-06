@@ -93,7 +93,8 @@ reviewed by another agent, and queue it as a decision in Tower (`node Tower/towe
 it surfaces in the board's Decide lane; **stop work on that feature** until the
 owner decides. Build something else meanwhile. When the owner ratifies: update
 `crates/jet-foundation/src/Syntax.rs` / parser, re-bless snapshots, log it in
-syntax-decisions.md.
+syntax-decisions.md. If the ratification adds or removes user-typeable syntax,
+run `jet devtools grammars` and commit the regenerated editor sections.
 
 See the **tower** skill for the full project-management loop. The owner is
 CEO/CTO; his decisions are the only allowed bottleneck — he never waits on you for a
