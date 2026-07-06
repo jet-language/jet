@@ -15,6 +15,9 @@ pub const RESERVED_TYPES: &[&str] = &[
     Syntax::TYPE_DEQUE,
     Syntax::TYPE_BIGINT,
     Syntax::TYPE_DECIMAL,
+    // D-SOLVER-LIB1=A: `Solver` is the Core finite-solver handle. Reserving it
+    // prevents a user type from being mistaken for the runtime solver handle.
+    Syntax::SOLVER_TYPE,
     // D-DYNARRAY1: `View<T>` is deliberately NOT reserved here (unlike `Set`/
     // `Deque`) — `View` is already a widely-used user type name across the
     // jetpack UI component kit (examples/features/ui/*.jet, crates/jet-driver/
@@ -82,6 +85,11 @@ pub fn builtin_method_return(
         // time/randomness THROUGH the handle is reproducible (caller seeded it).
         Type::Named(n) if n == crate::Syntax::CLOCK_TYPE => clock_method_return(method, arg_count),
         Type::Named(n) if n == crate::Syntax::RNG_TYPE => rng_method_return(method, arg_count),
+        // D-SOLVER-LIB1=A: explicit finite solver handle. `new(seed)` constructs
+        // state; `require(Bool)` records a checked constraint; query methods read it.
+        Type::Named(n) if n == crate::Syntax::SOLVER_TYPE => {
+            solver_method_return(method, arg_count)
+        }
         // D-DET-CAPAPI: `Duration.millis()` reads the span as ms.
         Type::Named(n) if n == crate::Syntax::DURATION_TYPE => {
             duration_method_return(method, arg_count)
@@ -272,6 +280,9 @@ fn builtin_static_return(ty: &Type, method: &str, nargs: usize) -> Option<Option
         })),
         (Type::Bool, "to_string", 0) => Some(Some(Type::String)),
         (Type::Char, "to_string", 0) => Some(Some(Type::String)),
+        (Type::Named(n), "new", 1) if n == crate::Syntax::SOLVER_TYPE => {
+            Some(Some(Type::Named(crate::Syntax::SOLVER_TYPE.to_string())))
+        }
         // D-SG9/D-NUMOPS1: width conversions + `to_string` for any numeric type.
         _ => numeric_method_return(ty, method, nargs),
     }
@@ -511,6 +522,17 @@ fn rng_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
     }
 }
 
+/// D-SOLVER-LIB1=A: explicit finite solver state. This first Core slice admits
+/// ordinary Bool constraints only; richer domains stay future library work.
+fn solver_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
+    match (method, nargs) {
+        ("require", 1) => Some(None),
+        ("failure_count", 0) => Some(Some(Type::Int)),
+        ("status", 0) => Some(Some(Type::String)),
+        _ => None,
+    }
+}
+
 /// D-DET-CAPAPI: methods on the deterministic `Duration` value. `millis()` reads
 /// the span back as an Int (the ms the `time.ms`/`time.secs` constructor minted).
 fn duration_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
@@ -677,6 +699,7 @@ pub fn builtin_method_mutates(recv_ty: &Type, method: &str) -> bool {
         Type::Named(n) if n == crate::Syntax::RNG_TYPE => {
             matches!(method, "int" | "float" | "bool" | "pick" | "shuffle")
         }
+        Type::Named(n) if n == crate::Syntax::SOLVER_TYPE => matches!(method, "require"),
         _ => false,
     }
 }
@@ -876,6 +899,11 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
         },
         Type::Named(n) if n == crate::Syntax::RNG_TYPE => match method {
             "int" => Some(vec![Type::Int, Type::Int]),
+            _ => Some(vec![]),
+        },
+        Type::Named(n) if n == crate::Syntax::SOLVER_TYPE => match method {
+            "new" => Some(vec![Type::Int]),
+            "require" => Some(vec![Type::Bool]),
             _ => Some(vec![]),
         },
         Type::Named(n) if n == crate::Syntax::DURATION_TYPE => Some(vec![]),

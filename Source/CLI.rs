@@ -114,8 +114,28 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
     },
     CommandSpec {
+        name: "push",
+        summary: "deploy a fleet through Jetpack",
+        headline: false,
+    },
+    CommandSpec {
         name: "trust",
         summary: "list, explain, grant, and revoke Jet trust authority (D-JPK-GRANTCMD1)",
+        headline: false,
+    },
+    CommandSpec {
+        name: "bridge",
+        summary: "translate a foreign environment description into Jetpack form",
+        headline: false,
+    },
+    CommandSpec {
+        name: "services",
+        summary: "manage project-local dev services",
+        headline: false,
+    },
+    CommandSpec {
+        name: "image",
+        summary: "build a declared OCI image",
         headline: false,
     },
     CommandSpec {
@@ -171,6 +191,31 @@ pub const COMMANDS: &[CommandSpec] = &[
     CommandSpec {
         name: "gc",
         summary: "remove unreferenced store entries",
+        headline: false,
+    },
+    CommandSpec {
+        name: "outdated",
+        summary: "report Jetpack channel refs with newer locks available",
+        headline: false,
+    },
+    CommandSpec {
+        name: "search",
+        summary: "search the local offline Jetpack package index",
+        headline: false,
+    },
+    CommandSpec {
+        name: "info",
+        summary: "show local offline Jetpack package metadata",
+        headline: false,
+    },
+    CommandSpec {
+        name: "logs",
+        summary: "show latest Jetpack build logs",
+        headline: false,
+    },
+    CommandSpec {
+        name: "clean",
+        summary: "optimize and collect stale Jetpack hangar entries",
         headline: false,
     },
     CommandSpec {
@@ -331,6 +376,54 @@ pub const FLAGS: &[FlagSpec] = &[
 /// Is `name` a built-in command?
 pub fn is_builtin(name: &str) -> bool {
     COMMANDS.iter().any(|c| c.name == name)
+        // E0043 teaching path: `jet install` is intentionally not advertised in
+        // help/completions, but dispatch must reach its bespoke "use fetch"
+        // diagnostic instead of generic unknown-command E2101.
+        || name == "install"
+}
+
+/// Commands that own a bespoke flag vocabulary or forward flags downstream.
+/// Main dispatch still reads the command set from `COMMANDS`; this only decides
+/// whether the generic E2102 checker should run.
+pub fn owns_flag_vocabulary(name: &str) -> bool {
+    matches!(
+        name,
+        "env"
+            | "dev"
+            | "devtools"
+            | "serve"
+            | "push"
+            | "trust"
+            | "bridge"
+            | "services"
+            | "image"
+            | "add"
+            | "remove"
+            | "bind"
+            | "lsp"
+            | "store"
+            | "config"
+            | "update"
+            | "outdated"
+            | "search"
+            | "info"
+            | "explain"
+            | "logs"
+            | "clean"
+            | "fetch"
+            | "publish"
+            | "yank"
+            | "keygen"
+            | "key"
+            | "vendor"
+            | "audit"
+            | "sbom"
+            | "repl"
+            | "schema"
+            | "semindex"
+            | "impact"
+            | "expand"
+    )
 }
 
 /// Is `flag` (e.g. `--json` or `--color=always`) a known flag?

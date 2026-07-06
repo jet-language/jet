@@ -195,7 +195,7 @@ pub(crate) fn emit_tir_method(
 /// block (the caller `emit_trait_impl`/`emit_external_trait_impl` opened it).
 /// Byte-identical to `emit_trait_method` (Source/Codegen/Items.rs): a BARE method name
 /// (no `user_` mangle — the trait owns it), NO `pub`, an always-`&self` receiver, and
-/// an `unsafe ` prefix iff the source was an `@unsafe fn`.
+/// an `unsafe ` prefix iff the source was an `#Unsafe fn`.
 pub(crate) fn emit_tir_trait_method(
     tir: &TFunc,
     is_unsafe: bool,
@@ -2178,6 +2178,15 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 THandleOp::RngShuffle => {
                     format!("{}jet_rng_shuffle(&mut ({}), &mut ({}))", root, recv, a(0))
                 }
+                // D-SOLVER-LIB1=A: explicit finite solver state.
+                THandleOp::SolverNew => format!("{}jet_solver_new({})", root, recv),
+                THandleOp::SolverRequire => {
+                    format!("{}jet_solver_require(&mut ({}), {})", root, recv, a(0))
+                }
+                THandleOp::SolverFailureCount => {
+                    format!("{}jet_solver_failure_count(&({}))", root, recv)
+                }
+                THandleOp::SolverStatus => format!("{}jet_solver_status(&({}))", root, recv),
                 THandleOp::DurationMillis => {
                     format!("{}jet_duration_millis(&({}))", root, recv)
                 }

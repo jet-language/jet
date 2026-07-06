@@ -76,6 +76,37 @@ fn run() {
 }
 
 #[test]
+fn solve_import_infers_alloc_layer() {
+    let dir = tmp_project("solve");
+    fs::write(
+        dir.join("pkg.jet"),
+        "payload: { name: \"m\", version: \"0.1.0\" }\n",
+    )
+    .unwrap();
+    let main = r#"
+use core.solve as Solve
+
+fn run() {
+    solver := Solve.Solver.new(1)
+    solver.require(true)
+}
+"#;
+    fs::write(dir.join("main.jet"), main).unwrap();
+    let main_path = dir.join("main.jet");
+    let path = main_path.to_str().unwrap();
+    let mut bundle = jet::Loader::load_entry(path).unwrap();
+    let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    assert!(
+        !diags
+            .iter()
+            .any(|d| d.severity == jet::Diagnostics::Severity::Error),
+        "{}",
+        jet::render_diagnostics(path, main, &diags)
+    );
+    assert_eq!(bundle.inferred_layer, jet::Syntax::RuntimeLayer::Alloc);
+}
+
+#[test]
 fn fs_import_infers_std_layer() {
     let dir = tmp_project("fs");
     fs::write(

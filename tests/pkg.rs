@@ -144,6 +144,586 @@ fn manifest_with_deps(name: &str, version: &str, dep_lines: &str) -> String {
 }
 
 // ─────────────────────────────────────────────
+// E4 Jetpack: strict graph, semantic lock, importers, federated providers
+// ─────────────────────────────────────────────
+
+fn graph_with_app() -> jet::Jetpack::PackageGraph::PackageGraph {
+    use jet::Jetpack::PackageGraph::{PackageGraph, PackageNode};
+    let mut graph = PackageGraph::new();
+    graph.add_package(
+        PackageNode::new("app")
+            .with_deps(&["ui"])
+            .with_transitives(&["log"]),
+    );
+    graph.add_package(PackageNode::new("ui").with_deps(&["log"]));
+    graph.add_package(PackageNode::new("worker").with_transitives(&["log"]));
+    graph
+}
+
+fn semantic_record(
+    owner: &str,
+    key: &str,
+    exact: &str,
+) -> jet::Jetpack::SemanticLock::SemanticRecord {
+    use jet::Jetpack::SemanticLock::{LockIdentity, LockRationale, LockRecordKind, SemanticRecord};
+    SemanticRecord::new(
+        LockIdentity {
+            kind: LockRecordKind::Package,
+            key: key.to_string(),
+            exact: exact.to_string(),
+            hash: format!("sha256-{exact}"),
+            platform: "x86_64-linux".to_string(),
+        },
+        LockRationale {
+            owner_package: owner.to_string(),
+            reason: format!("{owner} declared {key}"),
+            source_ref: format!("catalog:{key}"),
+            provider: "core".to_string(),
+            channel_input: "stable".to_string(),
+            exact_output: exact.to_string(),
+            policy_fingerprint: "policy-1".to_string(),
+            recipe_id: String::new(),
+            adapter_id: String::new(),
+            signature: "ed25519:sig".to_string(),
+            cache_provenance: "hangar".to_string(),
+            update_command: format!("jet update {key}"),
+        },
+    )
+}
+
+fn semantic_record_with_hash(
+    owner: &str,
+    key: &str,
+    exact: &str,
+    hash: &str,
+) -> jet::Jetpack::SemanticLock::SemanticRecord {
+    let mut record = semantic_record(owner, key, exact);
+    record.identity.hash = hash.to_string();
+    record
+}
+
+#[test]
+fn strict_graph_rejects_transitive_import() {
+    let graph = graph_with_app();
+    let err = graph
+        .check_visible("app", "log")
+        .expect_err("transitive dep must not be visible");
+    assert!(err.reason.contains("direct deps"));
+    assert_eq!(err.requested, "log");
+}
+
+#[test]
+fn strict_graph_accepts_direct_dep() {
+    let graph = graph_with_app();
+    let edge = graph
+        .check_visible("app", "ui")
+        .expect("direct dep visible");
+    assert_eq!(edge.dependency, "ui");
+    assert_eq!(
+        edge.kind,
+        jet::Jetpack::PackageGraph::VisibleEdgeKind::DirectDep
+    );
+}
+
+#[test]
+fn catalog_edge_behaves_like_direct_dep_after_selection() {
+    use jet::Jetpack::PackageGraph::{CatalogEntry, VisibleEdgeKind};
+    let mut graph = graph_with_app();
+    graph.add_catalog(CatalogEntry {
+        logical_name: "log".to_string(),
+        provider_ref: "core.log@1.2.3".to_string(),
+        version_rule: "1.2".to_string(),
+        allowed_packages: vec!["app".to_string()],
+        owner_workspace: "root".to_string(),
+        rationale: "workspace selected shared logging version".to_string(),
+    });
+    let edge = graph
+        .check_visible("app", "log")
+        .expect("catalog edge visible");
+    assert_eq!(edge.kind, VisibleEdgeKind::Catalog);
+    assert_eq!(edge.provider_ref, "core.log@1.2.3");
+}
+
+#[test]
+fn lock_records_catalog_owner_and_rationale() {
+    use jet::Jetpack::SemanticLock::{parse, write, SemanticLockFile};
+    let lock = SemanticLockFile {
+        records: vec![semantic_record("app", "core.log", "1.2.3")],
+    };
+    let text = write(&lock);
+    assert!(text.contains("owner-package = \"app\""));
+    assert!(text.contains("reason = \"app declared core.log\""));
+    let parsed = parse(&text);
+    assert_eq!(parsed.records[0].rationales[0].owner_package, "app");
+}
+
+#[test]
+fn catalog_merge_conflict_names_owner_package() {
+    use jet::Jetpack::SemanticLock::{merge, SemanticLockFile};
+    let left = SemanticLockFile {
+        records: vec![semantic_record("app", "core.log", "1.2.3")],
+    };
+    let right = SemanticLockFile {
+        records: vec![semantic_record("app", "core.log", "1.3.0")],
+    };
+    let out = merge(&SemanticLockFile::default(), &left, &right);
+    assert_eq!(out.conflicts.len(), 1);
+    assert_eq!(out.conflicts[0].owner_package, "app");
+    assert_eq!(out.conflicts[0].semantic_key, "package:core.log");
+}
+
+#[test]
+fn missing_dep_fix_prefers_direct_add_for_single_package() {
+    let graph = graph_with_app();
+    let err = graph.check_visible("app", "only-app").unwrap_err();
+    assert!(err
+        .fix_text()
+        .contains("jet add only-app --path ../only-app"));
+}
+
+#[test]
+fn missing_dep_fix_does_not_catalog_without_hidden_use_evidence() {
+    let mut graph = graph_with_app();
+    graph.add_package(
+        jet::Jetpack::PackageGraph::PackageNode::new("direct-only").with_deps(&["shared"]),
+    );
+    let err = graph.check_visible("app", "shared").unwrap_err();
+    assert!(matches!(
+        err.fix,
+        jet::Jetpack::PackageGraph::MissingDependencyFix::DirectAddPath { .. }
+    ));
+}
+
+#[test]
+fn missing_dep_fix_prefers_catalog_for_workspace_reuse() {
+    let graph = graph_with_app();
+    let err = graph.check_visible("app", "log").unwrap_err();
+    assert!(err.fix_text().contains("catalog data"));
+    assert!(err.fix_text().contains("app"));
+    assert!(err.fix_text().contains("worker"));
+}
+
+#[test]
+fn lsp_completion_hides_transitive_deps() {
+    let graph = graph_with_app();
+    let visible: Vec<String> = graph
+        .visible_edges("app")
+        .into_iter()
+        .map(|edge| edge.dependency)
+        .collect();
+    assert_eq!(visible, vec!["ui".to_string()]);
+    assert!(!visible.contains(&"log".to_string()));
+}
+
+#[test]
+fn lock_record_kinds_roundtrip_unknown_future_fields() {
+    use jet::Jetpack::SemanticLock::{parse, write, LockRecordKind, SemanticLockFile};
+    let raw = "semantic-lock-version = 1\n\n[[semantic_record]]\nkind = \"future-kind\"\nkey = \"k\"\nexact = \"e\"\nhash = \"h\"\nplatform = \"p\"\nfuture-key = \"future-value\"\n";
+    let parsed = parse(raw);
+    assert!(matches!(
+        parsed.records[0].identity.kind,
+        LockRecordKind::Future(_)
+    ));
+    assert_eq!(
+        parsed.records[0].future_fields.get("future-key"),
+        Some(&"future-value".to_string())
+    );
+    let reparsed = parse(&write(&SemanticLockFile {
+        records: parsed.records,
+    }));
+    assert_eq!(
+        reparsed.records[0].future_fields.get("future-key"),
+        Some(&"future-value".to_string())
+    );
+}
+
+#[test]
+fn lock_rationale_preserves_exact_identity() {
+    use jet::Jetpack::SemanticLock::SemanticLockFile;
+    let a = SemanticLockFile {
+        records: vec![semantic_record("app", "core.log", "1.2.3")],
+    };
+    let mut b = a.clone();
+    b.records[0].rationales[0].reason = "human text changed".to_string();
+    assert_eq!(
+        a.records[0].identity.machine_identity(),
+        b.records[0].identity.machine_identity()
+    );
+}
+
+#[test]
+fn lock_merge_independent_additions() {
+    use jet::Jetpack::SemanticLock::{merge, SemanticLockFile};
+    let left = SemanticLockFile {
+        records: vec![semantic_record("app", "core.log", "1.2.3")],
+    };
+    let right = SemanticLockFile {
+        records: vec![semantic_record("app", "core.http", "2.0.0")],
+    };
+    let out = merge(&SemanticLockFile::default(), &left, &right);
+    assert!(out.conflicts.is_empty());
+    assert_eq!(out.merged.records.len(), 2);
+}
+
+#[test]
+fn lock_merge_same_identity_two_owners() {
+    use jet::Jetpack::SemanticLock::{merge, SemanticLockFile};
+    let left = SemanticLockFile {
+        records: vec![semantic_record("app", "core.log", "1.2.3")],
+    };
+    let right = SemanticLockFile {
+        records: vec![semantic_record("worker", "core.log", "1.2.3")],
+    };
+    let out = merge(&SemanticLockFile::default(), &left, &right);
+    assert!(out.conflicts.is_empty());
+    assert_eq!(out.merged.records[0].rationales.len(), 2);
+}
+
+#[test]
+fn lock_merge_conflicting_identity_diagnostic() {
+    use jet::Jetpack::SemanticLock::{merge, SemanticLockFile};
+    let left = SemanticLockFile {
+        records: vec![semantic_record("app", "core.log", "1.2.3")],
+    };
+    let right = SemanticLockFile {
+        records: vec![semantic_record("app", "core.log", "1.3.0")],
+    };
+    let out = merge(&SemanticLockFile::default(), &left, &right);
+    assert_eq!(out.conflicts[0].left_reason, "app declared core.log");
+    assert_eq!(out.conflicts[0].right_reason, "app declared core.log");
+}
+
+#[test]
+fn lock_merge_conflicts_on_same_version_different_hash() {
+    use jet::Jetpack::SemanticLock::{merge, SemanticLockFile};
+    let left = SemanticLockFile {
+        records: vec![semantic_record_with_hash(
+            "app",
+            "core.log",
+            "1.2.3",
+            "sha256-left",
+        )],
+    };
+    let right = SemanticLockFile {
+        records: vec![semantic_record_with_hash(
+            "app",
+            "core.log",
+            "1.2.3",
+            "sha256-right",
+        )],
+    };
+    let out = merge(&SemanticLockFile::default(), &left, &right);
+    assert_eq!(out.conflicts.len(), 1);
+}
+
+#[test]
+fn lock_merge_accepts_one_sided_identity_change_from_base() {
+    use jet::Jetpack::SemanticLock::{merge, SemanticLockFile};
+    let base = SemanticLockFile {
+        records: vec![semantic_record("app", "core.log", "1.2.3")],
+    };
+    let left = base.clone();
+    let right = SemanticLockFile {
+        records: vec![semantic_record("app", "core.log", "1.3.0")],
+    };
+    let out = merge(&base, &left, &right);
+    assert!(out.conflicts.is_empty());
+    assert_eq!(out.merged.records[0].identity.exact, "1.3.0");
+}
+
+#[test]
+fn lock_merge_platform_specific_records() {
+    use jet::Jetpack::SemanticLock::{merge, SemanticLockFile};
+    let left = SemanticLockFile {
+        records: vec![semantic_record("app", "bin.tool:x86_64-linux", "1")],
+    };
+    let mut right_rec = semantic_record("app", "bin.tool:aarch64-macos", "1");
+    right_rec.identity.platform = "aarch64-macos".to_string();
+    let right = SemanticLockFile {
+        records: vec![right_rec],
+    };
+    let out = merge(&SemanticLockFile::default(), &left, &right);
+    assert!(out.conflicts.is_empty());
+    assert_eq!(out.merged.records.len(), 2);
+}
+
+#[test]
+fn lock_explain_names_owner_policy_provider_platform() {
+    use jet::Jetpack::SemanticLock::{explain, SemanticLockFile};
+    let lock = SemanticLockFile {
+        records: vec![semantic_record("app", "core.log", "1.2.3")],
+    };
+    let fact = explain(&lock, "package:core.log").expect("explain fact");
+    assert_eq!(fact.owners, vec!["app".to_string()]);
+    assert_eq!(fact.provider, "core");
+    assert_eq!(fact.platform, "x86_64-linux");
+    assert_eq!(fact.policy_fingerprint, "policy-1");
+}
+
+#[test]
+fn lock_satisfied_offline_verbs_do_not_touch_network() {
+    use jet::Jetpack::ProviderGraph::{
+        AuthorityGraph, FetchDecision, ProviderFamily, ProviderObject, ProviderRequest,
+    };
+    let obj = ProviderObject {
+        family: ProviderFamily::Npm,
+        ref_key: "left-pad".to_string(),
+        exact_identity: "npm:left-pad@1.0.0".to_string(),
+        hash: "sha256-aa".to_string(),
+        platform: "any".to_string(),
+        signature: String::new(),
+        audit: Vec::new(),
+        sandbox_effects: Vec::new(),
+        build_effects: Vec::new(),
+    };
+    let mut graph = AuthorityGraph::default();
+    graph.add_locked(obj);
+    let decision = graph.fetch_allowed(&ProviderRequest {
+        family: ProviderFamily::Npm,
+        ref_key: "left-pad".to_string(),
+        exact_identity: "npm:left-pad@1.0.0".to_string(),
+        hash: "sha256-aa".to_string(),
+        platform: "any".to_string(),
+        offline: true,
+    });
+    assert_eq!(decision, FetchDecision::AllowedOfflineSatisfied);
+}
+
+#[test]
+fn read_only_verbs_do_not_rewrite_lock() {
+    use jet::Jetpack::SemanticLock::{parse, write, SemanticLockFile};
+    let lock = SemanticLockFile {
+        records: vec![semantic_record("app", "core.log", "1.2.3")],
+    };
+    let before = write(&lock);
+    let after = write(&parse(&before));
+    assert_eq!(before, after);
+}
+
+#[test]
+fn nix_import_emits_role_modules_and_todos() {
+    let plan = jet::Jetpack::MigrationImport::import_nix_facts(
+        "flake.nix",
+        r#"{"name":"app","packages":["ripgrep"],"shellHook":"echo hi"}"#,
+    );
+    assert!(plan.generated_files.iter().any(|f| f.path == "env.jet"));
+    assert!(plan.todos.iter().any(|t| t.message.contains("shellHook")));
+}
+
+#[test]
+fn cargo_import_preserves_locked_versions() {
+    let plan = jet::Jetpack::MigrationImport::import_cargo(
+        "[package]\nname = \"app\"\nversion = \"0.1.0\"\n[dependencies]\nserde = \"1\"\n",
+        "[[package]]\nname = \"serde\"\nversion = \"1.0.200\"\n",
+    );
+    assert_eq!(plan.deps[0].locked_version, "1.0.200");
+    assert!(plan.ffi_stubs.iter().any(|s| s.symbol == "serde"));
+}
+
+#[test]
+fn npm_import_turns_scripts_into_legacy_build_actions() {
+    let plan = jet::Jetpack::MigrationImport::import_npm(
+        r#"{"name":"web","version":"1.0.0","dependencies":{"vite":"5"},"scripts":{"build":"vite build"}}"#,
+    );
+    assert!(plan.deps.iter().any(|d| d.name == "vite"));
+    assert!(plan
+        .todos
+        .iter()
+        .any(|t| t.message.contains("legacy build action")));
+}
+
+#[test]
+fn python_import_marks_dynamic_metadata_todo() {
+    let plan = jet::Jetpack::MigrationImport::import_python_metadata("pkg", &["version"]);
+    assert!(plan.todos[0].message.contains("dynamic Python metadata"));
+    assert!(jet::Jetpack::MigrationImport::todo_diagnostics_need_ballot());
+}
+
+#[test]
+fn swiftpm_import_emits_provider_refs() {
+    let plan = jet::Jetpack::MigrationImport::import_swiftpm("swift-log", "abc123");
+    assert_eq!(plan.deps[0].provider_ref, "swiftpm@swift-log");
+    assert_eq!(plan.deps[0].locked_version, "abc123");
+}
+
+#[test]
+fn import_idempotent_without_user_edits() {
+    use jet::Jetpack::MigrationImport::{merge_generated_file, GeneratedFile};
+    let file = GeneratedFile {
+        path: "env.jet".to_string(),
+        contents: "module env.dev\n".to_string(),
+        owned: true,
+    };
+    let merged = merge_generated_file(Some("module env.dev\n"), &file).expect("stable");
+    assert_eq!(merged, "module env.dev\n");
+}
+
+#[test]
+fn import_conflict_preserves_user_edit() {
+    use jet::Jetpack::MigrationImport::{merge_generated_file, GeneratedFile, ImportConflict};
+    let file = GeneratedFile {
+        path: "env.jet".to_string(),
+        contents: "module env.dev\n".to_string(),
+        owned: true,
+    };
+    let err = merge_generated_file(Some("# jet-import: edited\nmodule env.dev\n"), &file)
+        .expect_err("user edit must conflict");
+    assert_eq!(
+        err,
+        ImportConflict::UserEditedGeneratedLine {
+            path: "env.jet".to_string()
+        }
+    );
+}
+
+#[test]
+fn import_conflicts_on_any_generated_file_drift() {
+    use jet::Jetpack::MigrationImport::{merge_generated_file, GeneratedFile};
+    let file = GeneratedFile {
+        path: "env.jet".to_string(),
+        contents: "module env.dev\n".to_string(),
+        owned: true,
+    };
+    let err = merge_generated_file(Some("module env.dev\n// user change\n"), &file)
+        .expect_err("any drift from generated baseline must conflict");
+    assert_eq!(
+        err,
+        jet::Jetpack::MigrationImport::ImportConflict::UserEditedGeneratedLine {
+            path: "env.jet".to_string()
+        }
+    );
+}
+
+#[test]
+fn migration_status_feeds_lock_explain() {
+    use jet::Jetpack::MigrationImport::MigrationStatus;
+    let status = MigrationStatus::AdapterWrapped {
+        name: "left-pad".to_string(),
+    };
+    let mut record = semantic_record("app", "left-pad", "1.0.0");
+    record.rationales[0].adapter_id = match status {
+        MigrationStatus::AdapterWrapped { name } => format!("adapter:{name}"),
+        _ => String::new(),
+    };
+    assert_eq!(record.rationales[0].adapter_id, "adapter:left-pad");
+}
+
+#[test]
+fn provider_contract_covers_core_nix_path_github() {
+    use jet::Jetpack::ProviderGraph::{built_in_contracts, ProviderFamily};
+    let families: Vec<ProviderFamily> =
+        built_in_contracts().into_iter().map(|c| c.family).collect();
+    assert!(families.contains(&ProviderFamily::Core));
+    assert!(families.contains(&ProviderFamily::Nix));
+    assert!(families.contains(&ProviderFamily::Path));
+    assert!(families.contains(&ProviderFamily::Github));
+}
+
+#[test]
+fn npm_metadata_normalizes_deps_scripts_bins() {
+    let facts = jet::Jetpack::ProviderGraph::normalize_npm(
+        r#"{"name":"web","version":"1.0.0","license":"MIT","dependencies":{"vite":"5"},"scripts":{"build":"vite build"},"bin":{"web":"cli.js"}}"#,
+    );
+    assert_eq!(facts.dependencies, vec!["vite".to_string()]);
+    assert_eq!(facts.scripts, vec!["build".to_string()]);
+    assert_eq!(facts.bins, vec!["web".to_string()]);
+}
+
+#[test]
+fn cargo_metadata_normalizes_features_and_build_script_fact() {
+    let facts = jet::Jetpack::ProviderGraph::normalize_cargo(
+        "[package]\nname = \"lib\"\nversion = \"0.1.0\"\nbuild = \"build.rs\"\n[dependencies]\nserde = \"1\"\n[build-dependencies]\ncc = \"1\"\n",
+    );
+    assert_eq!(facts.dependencies, vec!["serde".to_string()]);
+    assert_eq!(facts.build_dependencies, vec!["cc".to_string()]);
+    assert_eq!(facts.scripts, vec!["build.rs".to_string()]);
+}
+
+#[test]
+fn pypi_dynamic_metadata_becomes_todo_fact() {
+    let facts = jet::Jetpack::ProviderGraph::normalize_pypi("pkg", "1.0.0", true);
+    assert!(facts.todos[0].contains("dynamic metadata"));
+}
+
+#[test]
+fn swiftpm_metadata_locks_exact_revision() {
+    let facts = jet::Jetpack::ProviderGraph::normalize_swiftpm("swift-log", "abc123");
+    assert_eq!(facts.integrity_hash, "abc123");
+    assert_eq!(facts.source_identity, "swiftpm:swift-log@abc123");
+}
+
+#[test]
+fn binary_provider_requires_hash_and_platform() {
+    assert!(jet::Jetpack::ProviderGraph::binary_object("tool", "", "linux", "").is_err());
+    assert!(jet::Jetpack::ProviderGraph::binary_object("tool", "sha256-aa", "", "").is_err());
+    let obj = jet::Jetpack::ProviderGraph::binary_object("tool", "sha256-aa", "linux", "")
+        .expect("hash + platform ok");
+    assert_eq!(obj.exact_identity, "binary:tool:linux:sha256-aa");
+}
+
+#[test]
+fn provider_fetch_denied_under_offline_without_lock() {
+    use jet::Jetpack::ProviderGraph::{
+        AuthorityGraph, FetchDecision, ProviderFamily, ProviderRequest,
+    };
+    let decision = AuthorityGraph::default().fetch_allowed(&ProviderRequest {
+        family: ProviderFamily::Cargo,
+        ref_key: "serde".to_string(),
+        exact_identity: "cargo:serde@1".to_string(),
+        hash: "sha256-aa".to_string(),
+        platform: "any".to_string(),
+        offline: true,
+    });
+    assert_eq!(decision, FetchDecision::DeniedOfflineMissingLock);
+}
+
+#[test]
+fn provider_fetch_allowed_offline_with_satisfied_lock() {
+    use jet::Jetpack::ProviderGraph::{
+        AuthorityGraph, FetchDecision, ProviderFamily, ProviderObject, ProviderRequest,
+    };
+    let mut graph = AuthorityGraph::default();
+    graph.add_locked(ProviderObject {
+        family: ProviderFamily::Cargo,
+        ref_key: "serde".to_string(),
+        exact_identity: "cargo:serde@1".to_string(),
+        hash: "sha256-aa".to_string(),
+        platform: "any".to_string(),
+        signature: String::new(),
+        audit: Vec::new(),
+        sandbox_effects: Vec::new(),
+        build_effects: Vec::new(),
+    });
+    let decision = graph.fetch_allowed(&ProviderRequest {
+        family: ProviderFamily::Cargo,
+        ref_key: "serde".to_string(),
+        exact_identity: "cargo:serde@1".to_string(),
+        hash: "sha256-aa".to_string(),
+        platform: "any".to_string(),
+        offline: true,
+    });
+    assert_eq!(decision, FetchDecision::AllowedOfflineSatisfied);
+}
+
+#[test]
+fn provider_facts_feed_search_info_and_lock_explain() {
+    use jet::Jetpack::ProviderGraph::{normalize_npm, ReplacementOverlay};
+    let mut facts = normalize_npm(r#"{"name":"left-pad","version":"1.0.0"}"#);
+    facts.replacement_candidates.push(ReplacementOverlay {
+        foreign_name: "left-pad".to_string(),
+        native_name: "core.text.pad_left".to_string(),
+        compatibility_proof: Some("golden:left-pad".to_string()),
+    });
+    let record = semantic_record("app", &facts.name, &facts.version);
+    assert_eq!(facts.source_identity, "npm:left-pad@1.0.0");
+    assert_eq!(record.identity.semantic_key(), "package:left-pad");
+    assert_eq!(
+        facts.replacement_candidates[0].native_name,
+        "core.text.pad_left"
+    );
+}
+
+// ─────────────────────────────────────────────
 // Manifest parsing
 // ─────────────────────────────────────────────
 
@@ -821,7 +1401,7 @@ fn lock_file_content_hash_roundtrip() {
         "content-hash must appear in lockfile"
     );
     assert!(serialized.contains("layer = \"core\""));
-    assert!(serialized.contains("inferred-layer = \"std\""));
+    assert!(serialized.contains("inferred-layer = \"hosted\""));
     let parsed = jet::Lock::parse(&serialized).expect("must parse back");
     assert_eq!(
         parsed.packages[0].content_hash,

@@ -44,6 +44,7 @@ and JIT/debugger successors outside Epoch 3.
 | [`../sidequests/compression-codecs.md`](../sidequests/compression-codecs.md) | D-CODECS1 | `core.compress.gzip` + `core.compress.zstd` |
 | [`../sidequests/unicode-text.md`](../sidequests/unicode-text.md) | D-GRAPHEME1 | Opt-in Unicode grapheme + normalization package |
 | [`../sidequests/raylib-graphics.md`](../sidequests/raylib-graphics.md) | D-RAYLIB1 | Official `core.raylib` graphics bridge |
+| [`dossier-umbrella.md`](dossier-umbrella.md) | D-WD2, D-DOSSIER1 | `jet dossier` as umbrella over existing semantic facts |
 | [`typed-data-core.md`](typed-data-core.md) | D-WD9 | typed data Core plus accelerator bridges |
 | [`core-game-substrate.md`](core-game-substrate.md) | D-WD10 | stable `core.game` substrate |
 | [`typed-target-profiles.md`](typed-target-profiles.md) | D-WD11 | typed embedded and freestanding target profiles |

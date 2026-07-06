@@ -331,8 +331,8 @@ pub enum TFuncKind {
     /// `user_` mangle) and there is NO `pub`. `self_conv` is the receiver convention
     /// (`Read`→`&self`, `Mutate`→`&mut self`, `Move`→`self`) — D-MUTSELF1: a `mut self`
     /// trait method gets `&mut self` and may mutate the receiver in place. `is_unsafe`
-    /// reproduces the `unsafe fn` prefix for an `@unsafe fn` trait method (S58/D-LL1 —
-    /// the body may use gated ops; calling it is already gated to an `@unsafe` block).
+    /// reproduces the `unsafe fn` prefix for an `#Unsafe fn` trait method (S58/D-LL1 —
+    /// the body may use gated ops; calling it is already gated to an `#Unsafe` block).
     TraitMethod {
         is_unsafe: bool,
         self_conv: AccessConvention,
@@ -1850,6 +1850,14 @@ pub enum THandleOp {
     RngPick,
     /// D-DET-CAPAPI Rng: `shuffle(&list)` → `{root}jet_rng_shuffle(&mut (recv), &mut (a0))` (in-place).
     RngShuffle,
+    /// D-SOLVER-LIB1=A: `Solver.new(seed)` → `{root}jet_solver_new(seed)`.
+    SolverNew,
+    /// D-SOLVER-LIB1=A: `solver.require(ok)` → `{root}jet_solver_require(&mut solver, ok)`.
+    SolverRequire,
+    /// D-SOLVER-LIB1=A: `solver.failure_count()` → `{root}jet_solver_failure_count(&solver)`.
+    SolverFailureCount,
+    /// D-SOLVER-LIB1=A: `solver.status()` → `{root}jet_solver_status(&solver)`.
+    SolverStatus,
     /// D-DET-CAPAPI Duration: `millis()` → `{root}jet_duration_millis(&(recv))` (span as ms).
     DurationMillis,
     /// D-BIGINT1 / D-DECIMAL1: instance methods on precise numeric types.

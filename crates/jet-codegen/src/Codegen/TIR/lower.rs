@@ -5224,6 +5224,22 @@ pub(crate) fn lower_method_call(
             }
         }
     }
+    // D-SOLVER-LIB1=A: `solve.Solver.new(seed)` constructor. The receiver is a
+    // core module sentinel (`solve.Solver`), so the seed arg becomes the lowered recv.
+    {
+        let locals: HashSet<String> = env.locals.keys().cloned().collect();
+        if solve_new_type(receiver, method, cx, &locals).is_some() {
+            let seed = lower_expr(&args[0].expr, cx, env);
+            return TExpr {
+                ty: Type::Named(Syntax::SOLVER_TYPE.to_string()),
+                kind: TExprKind::HandleMethod {
+                    recv: Box::new(seed),
+                    op: THandleOp::SolverNew,
+                    args: vec![],
+                },
+            };
+        }
+    }
     // D-OPTGC1: `gc.Gc.new<T>(value)` traced handle constructor.
     if method == Syntax::GC_NEW && recv_type.as_deref() == Some(Syntax::GC_TYPE) {
         if let Some(Type::Apply { name, args: targs }) = resolved_ret {

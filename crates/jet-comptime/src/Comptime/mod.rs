@@ -211,7 +211,7 @@ pub fn evaluate_with_imports_opts_collecting(
 /// program (the differential battery in `tests/dev.rs` enforces this, I2).
 ///
 /// The caller (src/interp.rs) is responsible for the E2201 boundary scan
-/// (FFI/tasks/`@unsafe`); this function simply runs and may itself return
+/// (FFI/tasks/`#Unsafe`); this function simply runs and may itself return
 /// E0956 (`unsupported`) when it reaches a construct the evaluator can't run,
 /// or E2202 when the fuel budget is exhausted.
 /// c139: everything the dev interpreter needs beyond the flat `funcs` map to

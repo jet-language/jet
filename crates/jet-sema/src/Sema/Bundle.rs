@@ -2195,6 +2195,14 @@ pub(crate) fn collect_core_expr(
                     Some(*method_span),
                 );
             }
+            if recv_type.as_deref() == Some(crate::Syntax::SOLVER_TYPE) {
+                note_core_usage(
+                    used,
+                    spans,
+                    format!("{}::{method}", crate::Syntax::CORE_SOLVE_MODULE),
+                    Some(*method_span),
+                );
+            }
             if matches!(receiver.as_ref(), Expr::Ident(n, _) if is_json_type_name(n)) {
                 note_core_usage(used, spans, "core::json", Some(*method_span));
             }

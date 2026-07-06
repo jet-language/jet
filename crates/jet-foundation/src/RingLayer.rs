@@ -74,6 +74,7 @@ fn layer_of_normalized(module: &str) -> RuntimeLayer {
         | "core.args"
         | "core.reflect"
         | "core.async.loadable"
+        | "core.solve"
         | "core.time.expiring"
         | "core.secrets"
         | "jet.reactive"

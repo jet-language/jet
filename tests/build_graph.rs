@@ -1,9 +1,11 @@
 use jet::Comptime::Build::{
     ActionCache, ActionCacheProvenance, ActionCacheStatus, ActionOutcome, ActionSpec,
-    BuildCapability, BuildContext, BuildError, BuildProvenance, CacheHitReason, CacheMissReason,
-    LinkerIdentity, LocalCas, LockRecord, ProbeKind, ProbeSpec, ProvenanceSource,
-    RemoteActionRequest, RemoteCachePolicy, RemoteDeniedReason, ReproducibilityClass, SdkIdentity,
-    SigningIdentitySpec, TargetKind, TargetSpec, ToolchainRole, ToolchainSpec,
+    BuildCapability, BuildContext, BuildError, BuildExecutionEvent, BuildGraphSubject, BuildPolicy,
+    BuildProvenance, BuildResourcePool, CacheHitReason, CacheMissReason, GeneratedModuleSpec,
+    LegacyWrapperKind, LegacyWrapperSpec, LinkerIdentity, LocalCas, LockRecord, PluginContribution,
+    ProbeKind, ProbeSpec, ProvenanceSource, RemoteActionRequest, RemoteCachePolicy,
+    RemoteDeniedReason, ReproducibilityClass, SdkIdentity, SigningIdentitySpec, TargetKind,
+    TargetSpec, ToolchainRole, ToolchainSpec, WasmComponentPluginSpec, BUILD_PLUGIN_API_VERSION,
 };
 use std::fs;
 
@@ -841,4 +843,329 @@ fn cache_provenance_records_hit_miss_and_remote_denial() {
             RemoteDeniedReason::MissingGrantAndSandboxProof
         );
     }
+}
+
+#[test]
+fn scheduler_records_parallel_ready_graph_pools_cancellation_and_metrics() {
+    let mut b = BuildContext::new();
+    let core = b
+        .action(
+            "compile-core",
+            ActionSpec::cached(["jetc", "src/core.jet"])
+                .with_outputs(["build/core.o"])
+                .with_pool(BuildResourcePool::Cpu),
+        )
+        .unwrap();
+    let ui = b
+        .action(
+            "compile-ui",
+            ActionSpec::cached(["jetc", "src/ui.jet"])
+                .with_outputs(["build/ui.o"])
+                .with_pool(BuildResourcePool::Cpu),
+        )
+        .unwrap();
+    let link = b
+        .action(
+            "link-app",
+            ActionSpec::cached(["ld", "-o", "build/app"])
+                .with_inputs(["build/core.o", "build/ui.o"])
+                .with_outputs(["build/app"])
+                .with_pool(BuildResourcePool::Linker)
+                .with_pool(BuildResourcePool::Console),
+        )
+        .unwrap();
+    let core_target = b
+        .add_library("core", TargetSpec::new().with_action(core))
+        .unwrap();
+    let ui_target = b
+        .add_library("ui", TargetSpec::new().with_action(ui))
+        .unwrap();
+    let app = b
+        .add_executable(
+            "app",
+            TargetSpec::new()
+                .with_dep(core_target)
+                .with_dep(ui_target)
+                .with_action(link),
+        )
+        .unwrap();
+    let plan = b.plan_with_default(app).unwrap();
+
+    let model = plan.execution_model().unwrap();
+    assert_eq!(model.stages[0].actions, vec![core.id(), ui.id()]);
+    assert_eq!(model.stages[1].actions, vec![link.id()]);
+    assert_eq!(model.metrics.max_parallel_actions, 2);
+    assert_eq!(model.metrics.cacheable_actions, 3);
+    assert_eq!(
+        model
+            .pools
+            .iter()
+            .map(|pool| pool.pool.as_str())
+            .collect::<Vec<_>>(),
+        vec!["cpu", "memory", "linker", "console", "gpu"]
+    );
+    assert_eq!(
+        model
+            .nodes
+            .iter()
+            .find(|node| node.action == link.id())
+            .unwrap()
+            .prerequisites,
+        vec![core.id(), ui.id()]
+    );
+    assert_eq!(model.console_order, vec![core.id(), ui.id(), link.id()]);
+
+    let report = plan
+        .execution_report(&[
+            (core, ActionOutcome::Failed { exit_code: 1 }),
+            (ui, ActionOutcome::Succeeded { exit_code: 0 }),
+        ])
+        .unwrap();
+    assert!(report.events.contains(&BuildExecutionEvent::Cancelled {
+        action: link.id(),
+        failed_prereq: core.id(),
+    }));
+    assert_eq!(report.metrics.failed_actions, 1);
+    assert_eq!(report.metrics.cancelled_actions, 1);
+}
+
+#[test]
+fn scheduler_orders_file_producer_before_consumer_without_target_dep() {
+    let mut b = BuildContext::new();
+    let gen = b
+        .action(
+            "generate",
+            ActionSpec::cached(["gen"])
+                .with_outputs([".jet/generated/schema.jet"])
+                .with_pool(BuildResourcePool::Cpu),
+        )
+        .unwrap();
+    let compile = b
+        .action(
+            "compile",
+            ActionSpec::cached(["jetc", ".jet/generated/schema.jet"])
+                .with_inputs([".jet/generated/schema.jet"])
+                .with_outputs(["build/schema.o"])
+                .with_pool(BuildResourcePool::Cpu),
+        )
+        .unwrap();
+    b.add_library("gen", TargetSpec::new().with_action(gen))
+        .unwrap();
+    b.add_library("compile", TargetSpec::new().with_action(compile))
+        .unwrap();
+    let plan = b.plan().unwrap();
+
+    let model = plan.execution_model().unwrap();
+    assert_eq!(model.stages[0].actions, vec![gen.id()]);
+    assert_eq!(model.stages[1].actions, vec![compile.id()]);
+    assert_eq!(
+        model
+            .nodes
+            .iter()
+            .find(|node| node.action == compile.id())
+            .unwrap()
+            .prerequisites,
+        vec![gen.id()]
+    );
+}
+
+#[test]
+fn graph_query_explain_and_rebuild_reasons_share_plan_provenance() {
+    let mut b = BuildContext::new();
+    let gen = b
+        .action(
+            "generate-schema",
+            ActionSpec::cached(["schema-gen", "schema/app.sql"])
+                .with_inputs(["schema/app.sql"])
+                .with_outputs([".jet/generated/schema.jet"])
+                .with_cap(BuildCapability::Fs),
+        )
+        .unwrap();
+    let lib = b
+        .add_library(
+            "db",
+            TargetSpec::new()
+                .with_source(".jet/generated/schema.jet")
+                .with_action(gen),
+        )
+        .unwrap();
+    let plan = b.plan_with_default(lib).unwrap();
+
+    let graph = plan.graph();
+    assert_eq!(graph.targets[0].name, "db");
+    assert_eq!(graph.actions[0].outputs, vec![".jet/generated/schema.jet"]);
+    let ownership = plan.file_ownership(".jet/generated/schema.jet");
+    assert_eq!(ownership.owner, Some(gen.id()));
+    assert_eq!(ownership.targets, vec![lib.id()]);
+
+    let target_explain = plan.explain_target(lib).unwrap();
+    assert_eq!(target_explain.subject, BuildGraphSubject::Target(lib.id()));
+    assert!(target_explain
+        .provenance
+        .iter()
+        .any(|line| line == "actions=1"));
+    let action_explain = plan.explain_action(gen).unwrap();
+    assert_eq!(action_explain.subject, BuildGraphSubject::Action(gen.id()));
+    assert!(action_explain
+        .provenance
+        .iter()
+        .any(|line| line == "inputs=1"));
+    let rebuilt = plan
+        .why_rebuilt(
+            gen,
+            ActionCacheStatus::Miss(CacheMissReason::ActionKeyChanged),
+        )
+        .unwrap();
+    assert_eq!(rebuilt.action, gen.id());
+    assert_eq!(rebuilt.reason, "action key changed");
+}
+
+#[test]
+fn legacy_wrappers_are_typed_declared_and_policy_denied_without_ambient_authority() {
+    let policy = BuildPolicy::allow_all();
+    for (kind, spec) in [
+        (
+            LegacyWrapperKind::CMake,
+            LegacyWrapperSpec::cmake(["cmake", "--build", "build"]),
+        ),
+        (LegacyWrapperKind::Make, LegacyWrapperSpec::make(["make"])),
+        (
+            LegacyWrapperKind::Gradle,
+            LegacyWrapperSpec::gradle(["gradle", "assemble"]),
+        ),
+        (
+            LegacyWrapperKind::Npm,
+            LegacyWrapperSpec::npm(["npm", "run", "build"]),
+        ),
+        (
+            LegacyWrapperKind::Cargo,
+            LegacyWrapperSpec::cargo(["cargo", "build"]),
+        ),
+    ] {
+        let action = spec
+            .with_inputs(["legacy/project"])
+            .with_outputs([format!("build/{}", kind.as_str())])
+            .with_cap(BuildCapability::Exec)
+            .with_cap(BuildCapability::Fs)
+            .into_action_spec(&policy)
+            .unwrap();
+        assert_eq!(action.legacy_wrapper, Some(kind));
+        assert!(action.caps.contains(&BuildCapability::Exec));
+        assert_eq!(action.inputs[0].as_str(), "legacy/project");
+        assert_eq!(
+            action.labels.get("legacy.wrapper").map(String::as_str),
+            Some(kind.as_str())
+        );
+    }
+
+    let denial = LegacyWrapperSpec::cargo(["cargo", "build"])
+        .with_inputs(["Cargo.toml"])
+        .with_outputs(["target/debug/app"])
+        .with_cap(BuildCapability::Exec)
+        .explain(&BuildPolicy::deny_legacy_wrappers(
+            "CI forbids legacy build tools",
+        ));
+    assert!(!denial.allowed);
+    assert_eq!(denial.reason, "CI forbids legacy build tools");
+
+    let err = LegacyWrapperSpec::make(["make"])
+        .with_inputs(["Makefile"])
+        .with_outputs(["build/app"])
+        .into_action_spec(&policy)
+        .unwrap_err();
+    assert_eq!(
+        err,
+        BuildError::LegacyWrapperWithoutCaps(LegacyWrapperKind::Make)
+    );
+}
+
+#[test]
+fn wasm_build_plugins_handshake_grants_policy_and_return_plan_contributions() {
+    let mut b = BuildContext::new();
+    let plugin = WasmComponentPluginSpec::new("shader-tools", "1.2.0", "sha256:plugin")
+        .with_capability(BuildCapability::Fs)
+        .with_capability(BuildCapability::Exec);
+    let policy = BuildPolicy::allow_all()
+        .with_plugin_grant("shader-tools", BuildCapability::Fs)
+        .with_plugin_grant("shader-tools", BuildCapability::Exec);
+    let contribution = PluginContribution::new()
+        .with_action(
+            "compile-shaders",
+            ActionSpec::cached(["shaderc", "assets/main.glsl"])
+                .with_inputs(["assets/main.glsl"])
+                .with_outputs([".jet/generated/shaders.jet"])
+                .with_cap(BuildCapability::Fs)
+                .with_cap(BuildCapability::Exec),
+        )
+        .with_target(
+            TargetKind::Library,
+            "shader-lib",
+            TargetSpec::new().with_source(".jet/generated/shaders.jet"),
+        )
+        .with_generated_module(GeneratedModuleSpec::new(
+            "shaders",
+            ".jet/generated/shaders.jet",
+            "fn shader_count() -> Int { return 1 }",
+        ));
+
+    let applied = b
+        .apply_wasm_component_plugin(plugin, contribution, &policy)
+        .unwrap();
+    let plan = b.plan().unwrap();
+    assert_eq!(plan.plugins()[0].name, "shader-tools");
+    assert_eq!(plan.plugins()[0].api_version, BUILD_PLUGIN_API_VERSION);
+    assert_eq!(
+        plan.action(applied.actions[0]).unwrap().plugin,
+        Some(applied.plugin)
+    );
+    assert_eq!(
+        plan.target(applied.targets[0]).unwrap().plugin,
+        Some(applied.plugin)
+    );
+    assert_eq!(plan.generated_modules()[0].name, "shaders");
+    assert!(plan.generated_modules()[0]
+        .source_digest
+        .as_str()
+        .starts_with("sha256:"));
+
+    let denied = BuildContext::new()
+        .apply_wasm_component_plugin(
+            WasmComponentPluginSpec::new("net-plugin", "1.0.0", "sha256:net")
+                .with_capability(BuildCapability::Net),
+            PluginContribution::new(),
+            &BuildPolicy::allow_all(),
+        )
+        .unwrap_err();
+    assert!(matches!(denied, BuildError::PolicyDenied(_)));
+
+    let version_err = BuildContext::new()
+        .apply_wasm_component_plugin(
+            WasmComponentPluginSpec::new("old-plugin", "0.1.0", "sha256:old")
+                .with_api_version("jet.build.plugin.v0"),
+            PluginContribution::new(),
+            &BuildPolicy::allow_all(),
+        )
+        .unwrap_err();
+    assert!(matches!(
+        version_err,
+        BuildError::PluginVersionMismatch { .. }
+    ));
+
+    let contributed_cap_denied = BuildContext::new()
+        .apply_wasm_component_plugin(
+            WasmComponentPluginSpec::new("net-plugin", "1.0.0", "sha256:net")
+                .with_capability(BuildCapability::Fs),
+            PluginContribution::new().with_action(
+                "probe-network",
+                ActionSpec::cached(["curl", "https://example.invalid"])
+                    .with_outputs(["build/net.txt"])
+                    .with_cap(BuildCapability::Net),
+            ),
+            &BuildPolicy::allow_all().with_plugin_grant("net-plugin", BuildCapability::Fs),
+        )
+        .unwrap_err();
+    assert!(matches!(
+        contributed_cap_denied,
+        BuildError::PolicyDenied(_)
+    ));
 }

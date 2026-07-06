@@ -25,10 +25,6 @@ fn root() -> PathBuf {
 //        `examples/features/test.jet` or `examples/features/test/main.jet`.
 //        The file appears to be an orphan leftover.
 //
-// GAP-3: Source/CLISpec.rs is a complete alternative CLI spec but is not
-//        declared in lib.rs and is dead code. The authoritative spec is
-//        Source/CLI.rs (COMMANDS array).
-
 // ---------------------------------------------------------------------------
 // Check 1: Every example *.jet file referenced in docs/ actually exists
 // ---------------------------------------------------------------------------
@@ -279,7 +275,7 @@ fn cargo_and_flake_versions_match() {
 }
 
 // ---------------------------------------------------------------------------
-// Check 7: Source/CLI.rs is the declared CLI module (CLISpec.rs is dead)
+// Check 7: Source/CLI.rs is the only in-code CLI command registry
 // ---------------------------------------------------------------------------
 #[test]
 fn cli_rs_is_declared_module() {
@@ -289,10 +285,45 @@ fn cli_rs_is_declared_module() {
         lib_src.contains("pub mod CLI;") || lib_src.contains("mod CLI;"),
         "Source/lib.rs does not declare `mod CLI` — the CLI module is not wired up"
     );
-    // CLISpec.rs exists but is intentionally not declared (GAP-3 above).
     assert!(
         !lib_src.contains("mod CLISpec;"),
-        "Source/lib.rs declares mod CLISpec — reconcile with CLI.rs before wiring it in"
+        "Source/lib.rs declares mod CLISpec — Source/CLI.rs is the only CLI registry"
+    );
+}
+
+#[test]
+fn cli_has_no_second_command_registry() {
+    let root = root();
+    assert!(
+        !root.join("Source/CLISpec.rs").exists(),
+        "Source/CLISpec.rs must not exist — Source/CLI.rs is the single CLI registry"
+    );
+
+    let mut registries = Vec::new();
+    for path in rs_files(&root.join("Source")) {
+        if path.extension().and_then(|x| x.to_str()) != Some("rs") {
+            continue;
+        }
+        let text = fs::read_to_string(&path).unwrap_or_default();
+        if text.contains("pub const COMMANDS: &[CommandSpec]") {
+            registries.push(path.strip_prefix(&root).unwrap().display().to_string());
+        }
+    }
+    assert_eq!(
+        registries,
+        vec!["Source/CLI.rs".to_string()],
+        "found a second CLI command registry:\n{}",
+        registries.join("\n")
+    );
+
+    let main_src = fs::read_to_string(root.join("Source/main.rs")).expect("Source/main.rs missing");
+    assert!(
+        !main_src.contains("let known ="),
+        "Source/main.rs must not rebuild the command registry; use jet::CLI::is_builtin"
+    );
+    assert!(
+        main_src.contains("jet::CLI::is_builtin(cmd)"),
+        "Source/main.rs should dispatch unknown-command checks through Source/CLI.rs"
     );
 }
 
@@ -387,4 +418,21 @@ fn walk_md(dir: &PathBuf, cb: &mut impl FnMut(&str)) {
             }
         }
     }
+}
+
+fn rs_files(dir: &PathBuf) -> Vec<PathBuf> {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            out.extend(rs_files(&path));
+        } else if path.extension().and_then(|e| e.to_str()) == Some("rs") {
+            out.push(path);
+        }
+    }
+    out.sort();
+    out
 }

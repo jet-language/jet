@@ -97,12 +97,10 @@ transitives absent.
 - Migration importers, because importers should emit catalog TODOs when they
   detect repeated shared versions.
 
-## Ballots Needed
+## Ratified Decisions
 
-- `D-JPK-CATALOG1` — Canonical user surface for workspace catalogs: where users
-  write catalog entries, how packages opt in, and which CLI edit command is the
-  one blessed fix. `D-WD3` ratifies the product rule, not the user-typeable
-  fields or command spelling.
-- `D-JPK-STRICTVIS1` — Exact diagnostic/fix contract for strict visibility if
-  it introduces new E12xx codes or changes existing package-resolution errors.
-
+- `D-JPK-CATALOG1=A` — Catalog entries live in `workspace.jet` under
+  `catalog:`; packages opt in through ordinary visible deps such as
+  `deps: { http: catalog.http }`.
+- `D-JPK-STRICTVIS1=A` — Strict visibility failures use dedicated diagnostics
+  naming requester, hidden package, reason, and direct-dep or catalog fix.

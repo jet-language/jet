@@ -115,7 +115,7 @@ impl Capabilities {
     }
 }
 
-/// True when the program contains an `@unsafe fn` anywhere.
+/// True when the program contains an `#Unsafe fn` anywhere.
 pub fn bundle_uses_unsafe(bundle: &AST::ProgramBundle) -> bool {
     use AST::Item;
     bundle.modules.iter().any(|m| {

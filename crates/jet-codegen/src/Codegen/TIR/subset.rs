@@ -169,7 +169,7 @@ pub(crate) fn tir_covers_method(f: &Func, type_name: &str, cx: &Cx) -> bool {
 /// must be in-subset and never reassign `self`.
 ///
 /// Conservative exclusions beyond the inherent-method gate:
-///  - `is_unsafe` (`@unsafe fn`) is excluded — its body may use gated pointer ops the
+///  - `is_unsafe` (`#Unsafe fn`) is excluded — its body may use gated pointer ops the
 ///    subset does not lower, and the `unsafe fn` prefix is a separate emit concern.
 ///  - a trait method ALWAYS has a `self` receiver (a trait method without `self` is a
 ///    static trait method, rare; exclude it — the emit hook always renders a receiver).
@@ -2922,6 +2922,11 @@ pub(crate) fn method_call_in_subset(
     if alloc_new_type(receiver, method, cx, locals).is_some() {
         return args.len() <= 1 && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
     }
+    // D-SOLVER-LIB1=A: `solve.Solver.new(seed)` mirrors `mem.Arena.new()`:
+    // receiver is a module-field sentinel, not a runtime value.
+    if solve_new_type(receiver, method, cx, locals).is_some() {
+        return args.len() == 1 && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
+    }
     // D-OPTGC1: `gc.Gc.new<T>(value)` traced-handle constructor.
     if recv_type.as_deref() == Some(Syntax::GC_TYPE) && method == Syntax::GC_NEW {
         return args.len() == 1 && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
@@ -3981,7 +3986,7 @@ pub(crate) fn is_numeric_bounds_const(member: &str) -> bool {
 ///     arg type, resolved by bespoke `check_core_call` logic, not the fixed table, so
 ///     a total `ty` would need re-inference (I3) → deferred;
 ///   - **handle-constructor** specials NOT in the table (`tasks.channel`,
-///     `http.router`/`parse`/`dispatch`) and `core.mem` ptr/alloc (`@unsafe`).
+///     `http.router`/`parse`/`dispatch`) and `core.mem` ptr/alloc (`#Unsafe`).
 /// A handle-PRODUCING call that IS in the table (`files.open` → `FileReader`,
 /// `net.tcp_connect` → `TcpStream`, `time.start` → `Stopwatch`, …) is covered: the
 /// CALL emits a plain helper call (parity-exact), and any later METHOD on the
@@ -4198,6 +4203,31 @@ pub(crate) fn alloc_new_type<'a>(
     }
 }
 
+/// D-SOLVER-LIB1=A: is this `solve.Solver.new(seed)`?
+pub(crate) fn solve_new_type<'a>(
+    receiver: &'a Expr,
+    method: &str,
+    cx: &Cx,
+    locals: &HashSet<String>,
+) -> Option<&'a str> {
+    if method != "new" {
+        return None;
+    }
+    let Expr::Field(inner, solver_type, _) = receiver else {
+        return None;
+    };
+    let Expr::Ident(alias, _) = &**inner else {
+        return None;
+    };
+    if locals.contains(alias) {
+        return None;
+    }
+    if cx.core_imports.get(alias).map(String::as_str) != Some(Syntax::CORE_SOLVE_MODULE) {
+        return None;
+    }
+    (solver_type == Syntax::SOLVER_TYPE).then_some(solver_type.as_str())
+}
+
 /// c109 Phase 25: is `router.get(path, handler)` (and `.post`/`.put`/`.delete`) inside
 /// the subset? Reproduces `emit_router_handler` (Source/Codegen/Expression.rs): the
 /// handler (arg 1) must be either a BARE TOP-LEVEL FN name (an `Ident` not in locals —
@@ -4249,6 +4279,9 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("Rng", "bool", 0) => THandleOp::RngBool,
         ("Rng", "pick", 1) => THandleOp::RngPick,
         ("Rng", "shuffle", 1) => THandleOp::RngShuffle,
+        ("Solver", "require", 1) => THandleOp::SolverRequire,
+        ("Solver", "failure_count", 0) => THandleOp::SolverFailureCount,
+        ("Solver", "status", 0) => THandleOp::SolverStatus,
         ("Duration", "millis", 0) => THandleOp::DurationMillis,
         ("BigInt", "add" | "sub" | "mul", 1) => THandleOp::PreciseMethod {
             type_name: "BigInt".to_string(),
@@ -4430,7 +4463,19 @@ pub(crate) fn handle_method_return_ty(handle: &str, method: &str, nargs: usize) 
         // directly at its call site since its return type depends on the
         // pattern literal's holes.
         .or_else(|| crate::Sema::binary_reader_method_return(handle, method, nargs))
-        .or_else(|| crate::Sema::text_cursor_method_return(handle, method, nargs));
+        .or_else(|| crate::Sema::text_cursor_method_return(handle, method, nargs))
+        .or_else(|| {
+            if handle == crate::Syntax::SOLVER_TYPE {
+                crate::Collections::builtin_method_return(
+                    &Type::Named(crate::Syntax::SOLVER_TYPE.to_string()),
+                    method,
+                    nargs,
+                    false,
+                )
+            } else {
+                None
+            }
+        });
     match ret {
         Some(Some(t)) => t,
         _ => unit_type(),

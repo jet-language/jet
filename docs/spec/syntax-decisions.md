@@ -57,6 +57,12 @@ every `#`-marker and every `@`-marker is PascalCase (`#Test`, `#Unsafe`,
 first-party library (built-in module or ring package) is `core.<name>`. No
 `jet.*`, `std.*`, or `jet.core` spellings (old ring spelling → E0341).
 
+**D-SOLVER-LIB1 — Explicit solver library**: `core.solve` ships a finite
+solver API with explicit `Solver` state, deterministic insertion-order
+constraint checks, ordinary `Bool` values, and no language-level
+backtracking/unification. Initial Core surface: `solve.Solver.new(seed)`,
+`solver.require(ok)`, `solver.failure_count()`, `solver.status()`.
+
 ### Bindings & assignment
 
 **S2 — Bindings** *(current law = D-BIND4; supersedes val/var keywords)*:
@@ -1216,11 +1222,9 @@ convenience helpers (`read`/`read_bytes`/`write`/`append_all`/`exists`/
 `remove`/`list_dir`/`create_dir`/`is_dir`/`copy`/`rename`) and streaming
 handle constructors (`open`/`create`/`append` → `FileReader`/`FileWriter`,
 D-IO2); `core.fs` no longer exists (greenfield — `use core.fs` is an ordinary
-unknown-module error). Blocked on ballot **D-FILES-APPEND1 = A**: the merge
-collided the whole-file one-shot `append(path, text)` with the streaming
-handle's `.append(text)` method on the same name/module. Resolution: the
-whole-file function is renamed `append_all(path, text)`; the streaming
-handle's `.append(…)` is untouched.
+unknown-module error). **D-FILES-APPEND1 = A** resolved the merge collision:
+the whole-file one-shot is `append_all(path, text)`; the streaming handle's
+`.append(…)` is untouched.
 
 **Serde & encoding** *(D-SERDE1–12, D-ENC1, D-JSONVERB1, D-SERDE-ACCESS,
 D-ENC-YAML1)*: one format-agnostic data model. `@Codable` (≡
@@ -1602,6 +1606,29 @@ implementation.
   `policy: { trust: { default: prompt, ci: { prompt: deny }, services: { postgres: prompt } } }`.
   Trust policy feeds the same grant graph used by prompts, CLI, locks, and
   audit.
+- **D-JPK-CATALOG1 (=A, ratified 2026-07-06, #231)**: shared dependency
+  versions live in `workspace.jet` under `catalog:`. Packages still opt in
+  through ordinary visible deps, e.g. `deps: { http: catalog.http }`; the
+  catalog is not a hidden dependency leak.
+- **D-JPK-STRICTVIS1 (=A, ratified 2026-07-06, #231)**: strict package
+  visibility failures get dedicated diagnostics that name the requesting
+  package, hidden dependency, reason, and smallest valid direct-dep or catalog
+  fix.
+- **D-JPK-IMPORTCMD1 (=A, ratified 2026-07-06, #233)**: foreign metadata is
+  imported with `jet import <ecosystem> <path>` plus update/dry-run/conflict
+  policy. Generated Jet source is canonical, editable output.
+- **D-JPK-IMPORTTODO1 (=A, ratified 2026-07-06, #233)**: importer gaps use a
+  dedicated TODO diagnostic family carrying what/why/fix, source path,
+  generated target, and migration status; generated comments are secondary.
+- **D-JPK-PROVIDERAUTH1 (=A, ratified 2026-07-06, #234)**: provider trust
+  roots live in reviewable source policy at `policy.providers`, feeding fetch
+  grants, cache, signatures, lock rationale, and audit.
+- **D-JPK-REPLACEPOLICY1 (=A, ratified 2026-07-06, #234)**: native
+  replacements are controlled by `policy.replacements`; compatibility proof is
+  mandatory, and policy only chooses allow/deny/prefer.
+- **D-JPK-REPLACEPROOF1 (=A, ratified 2026-07-06, #234)**: native replacement
+  packages publish `replacementProof:` metadata naming the foreign package,
+  public surface, effects, errors, examples, and goldens proved.
 - **D-WD2**: `jet dossier` is the umbrella explain view over named existing fact
   lenses. Each section must be owned by a real fact producer; experts get stable
   lenses and JSON schemas.

@@ -190,6 +190,8 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         // D-DET1: deterministic injected capability handles.
         "Clock" => Some("Clock"),
         "Rng" => Some("Rng"),
+        // D-SOLVER-LIB1=A: explicit finite solver state.
+        "Solver" => Some("Solver"),
         // D-DET-CAPAPI: deterministic `Duration` value.
         "Duration" => Some("Duration"),
         // D-BIGINT1 / D-DECIMAL1: precise numerics.
@@ -754,7 +756,7 @@ impl Cx {
                 format!("std::collections::VecDeque<{}>", self.rust_type(&args[0]))
             }
             // S58 (E2-M13): `Ptr<T>` lowers to a Rust raw pointer `*mut T`.
-            // Memory safety is enforced in sema (the `@unsafe` gate); codegen
+            // Memory safety is enforced in sema (the `#Unsafe` gate); codegen
             // is dumb.
             Type::Apply { name, args } if name == Syntax::TYPE_PTR && args.len() == 1 => {
                 format!("*mut {}", self.rust_type(&args[0]))

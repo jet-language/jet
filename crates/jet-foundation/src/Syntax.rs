@@ -330,6 +330,12 @@ pub const GC_TYPE: &str = "Gc";
 /// D-OPTGC1: construct a `Gc<T>` value.
 pub const GC_NEW: &str = "new";
 
+/// D-SOLVER-LIB1=A (ratified 2026-07-06): explicit finite solver library.
+pub const CORE_SOLVE_MODULE: &str = "core.solve";
+
+/// D-SOLVER-LIB1=A: deterministic solver state handle.
+pub const SOLVER_TYPE: &str = "Solver";
+
 /// S58 / D-CAP9 / D-TYPE-ALIAS-CANON1 (ratified): raw-pointer type is `*T`.
 /// `Ptr<T>` is not live syntax; this string remains only as the internal Rust
 /// dispatch key for legacy TIR/codegen paths until they are renamed to `RawPtr`.
@@ -3555,6 +3561,8 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     "core.mem.alloc",
     // D-OPTGC1 / D-DEP-GC1: opt-in traced `Gc<T>` library.
     "core.gc",
+    // D-SOLVER-LIB1=A: explicit finite solver state, no language backtracking.
+    "core.solve",
     // E2-M7: streaming file handles and path helpers (D-IO1, D-IO2).
     "core.files",
     "core.path",

@@ -1428,3 +1428,89 @@ fn run() {
     );
     let _ = fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn solve_solver_records_bool_constraints_in_order() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc {
+        eprintln!("note: skipping solver runtime test (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_corelib_solve_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "solve_runtime",
+        r#"
+use core.solve as Solve
+
+fn run() {
+    solver := Solve.Solver.new(42)
+    solver.require(1 + 1 == 2)
+    solver.require(2 * 3 == 5)
+    solver.require(true)
+    print(solver.status())
+    print(solver.failure_count())
+}
+"#,
+        &[],
+        None,
+    );
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "failed\n1\n");
+    assert_eq!(stderr, "");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn solve_require_needs_mutable_solver() {
+    let src = r#"
+use core.solve as Solve
+
+fn run() {
+    solver :: Solve.Solver.new(1)
+    solver.require(true)
+}
+"#;
+    let res = jet::compile(src);
+    assert!(res.is_err(), "solver.require on immutable solver must fail");
+    let diags = res.unwrap_err();
+    assert!(
+        diags.iter().any(|d| d.code == "E0202"),
+        "expected E0202, got: {:?}",
+        diags.iter().map(|d| d.code).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn solve_solver_type_name_is_reserved() {
+    let src = r#"
+struct Solver { value: Int }
+
+fn run() {}
+"#;
+    let diags = jet::compile(src).expect_err("Solver is a reserved Core handle name");
+    assert!(
+        diags.iter().any(|d| d.code == "E0106"),
+        "expected E0106, got: {:?}",
+        diags.iter().map(|d| d.code).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn solve_constructor_is_static_only() {
+    let src = r#"
+use core.solve as Solve
+
+fn run() {
+    solver := Solve.Solver.new(1)
+    solver.new(2)
+}
+"#;
+    let diags = jet::compile(src).expect_err("solver.new must not be an instance method");
+    assert!(
+        !diags.is_empty(),
+        "expected a diagnostic for instance constructor"
+    );
+}

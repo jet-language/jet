@@ -743,47 +743,10 @@ fn main() {
         }
     };
 
-    // If the first word is neither a built-in nor a recognized package/pkg
-    // command, try an external `jet-<cmd>` on PATH (D-DX5, cargo/git style),
-    // else teach E2101 with a "did you mean".
-    let known = jet::CLI::is_builtin(cmd)
-        || matches!(
-            cmd,
-            "lsp"
-                | "install"
-                | "doctor"
-                | "completions"
-                | "man"
-                | "dev"
-                | "devtools"
-                | "serve"
-                | "debug"
-                | "push"
-                | "trust"
-                | "bridge"
-                | "services"
-                | "image"
-                | "outdated"
-                | "search"
-                | "info"
-                | "logs"
-                | "clean"
-                | "publish"
-                | "yank"
-                | "keygen"
-                | "key"
-                | "vendor"
-                | "audit"
-                | "sbom"
-                | "emit"
-                | "bench"
-                | "repl"
-                | "schema"
-                | "semindex"
-                | "impact"
-                | "expand"
-        );
-    if !known {
+    // If the first word is not in the single CLI registry, try an external
+    // `jet-<cmd>` on PATH (D-DX5, cargo/git style), else teach E2101 with a
+    // "did you mean".
+    if !jet::CLI::is_builtin(cmd) {
         // c6vz465: `jet <file>` → `jet run <file>` when the first word names a
         // source path (not a typo'd subcommand like `buld`).
         if looks_like_jet_source(cmd) {
@@ -849,44 +812,7 @@ fn main() {
     // Validate flags against the registry; an unknown/half-typed flag is E2102.
     // Skipped for commands that own a bespoke flag vocabulary or forward flags
     // downstream (so their flags aren't measured against the global set).
-    let owns_flags = matches!(
-        cmd,
-        "env"
-            | "dev"
-            | "devtools"
-            | "serve"
-            | "push"
-            | "trust"
-            | "bridge"
-            | "services"
-            | "image"
-            | "add"
-            | "remove"
-            | "bind"
-            | "lsp"
-            | "store"
-            | "config"
-            | "update"
-            | "outdated"
-            | "search"
-            | "info"
-            | "explain"
-            | "logs"
-            | "clean"
-            | "fetch"
-            | "publish"
-            | "yank"
-            | "keygen"
-            | "key"
-            | "vendor"
-            | "audit"
-            | "sbom"
-            | "repl"
-            | "schema"
-            | "semindex"
-            | "impact"
-            | "expand"
-    );
+    let owns_flags = jet::CLI::owns_flag_vocabulary(cmd);
     if !owns_flags {
         check_flags(jet_argv, cmd);
     }

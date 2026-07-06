@@ -9,7 +9,7 @@
 //!
 //! Hard line (I2/I3): nothing here ever produces a release artifact. `jet
 //! build`/`jet run` never touch this path. When the interpreter can't run a
-//! program (FFI, tasks/channels, `@unsafe`/`core.mem`, native-only Core), it
+//! program (FFI, tasks/channels, `#Unsafe`/`core.mem`, native-only Core), it
 //! stops with **E2201** naming the feature and `jet build`/`jet run` — unless
 //! the user opted in with "try anyway" (D-DEV1), which runs past the boundary
 //! with no guarantees.
@@ -210,7 +210,7 @@ fn native_module_feature(name: &str) -> Option<&'static str> {
     }
 }
 
-/// Find the first `@unsafe { … }` block anywhere in a statement list.
+/// Find the first `#Unsafe { … }` block anywhere in a statement list.
 fn scan_stmts_for_unsafe(stmts: &[Stmt]) -> Option<Boundary> {
     for s in stmts {
         if let Some(b) = scan_stmt_for_unsafe(s) {

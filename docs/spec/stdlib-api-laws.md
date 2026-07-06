@@ -1,6 +1,6 @@
-# Stdlib ergonomic laws (D-STDRUBRIC1=A)
+# Core API ergonomic laws (D-STDRUBRIC1=A)
 
-Review rubric for all Core/std API additions. Every new function, method, or type
+Review rubric for all Core API additions. Every new function, method, or type
 must pass each law before landing. No exceptions; file a follow-up card for any
 existing drift found during review.
 
@@ -12,7 +12,8 @@ existing drift found during review.
 - Boolean predicates are verb-prefixed: `is_empty`, `has_prefix`, `contains`.
 - Fallible variants add no suffix; the `?` return type signals fallibility.
 - Constructor sugar uses `Type.{ }` (D-DOTCTOR1); factory functions use `Type.from_*(...)`.
-- Acronyms are PascalCase at word boundaries (`JsonDecoder`, `HttpClient`) — no `JSON`, `HTTP`.
+- Standard acronyms stay fully capitalized per S66 (`JSONDecoder`, `HTTPClient`,
+  `IOError`, `UTF8Error`). Do not add PascalCase aliases.
 
 ## Law 2 — Fallibility
 
@@ -25,17 +26,18 @@ existing drift found during review.
 
 ## Law 3 — Ownership / allocation
 
-- Functions that read a value take a view (`&T`) when possible; ownership transfer must
-  be visible in the signature (`T`, not `&T`).
+- Functions that only read a value take bare `T`; unmarked read access is enforced
+  and never elevates.
 - Functions that return a new allocation return by value; they do not write into a
   caller-supplied buffer unless the API is explicitly a low-allocation path.
-- Mutation is visible: a function that mutates a value takes `&mut T` (or the Jet
-  mutable-borrow equivalent); pure computation takes `&T`.
+- Mutation is visible: a function that mutates a value takes `&T`; ownership
+  transfer takes `^T`.
 - `#SingleUse` types must be documented with the invariant they enforce.
 
 ## Law 4 — Effects
 
-- IO effects are declared with the right capability marker (`#Fs`, `#Net`, `#Exec`, etc.).
+- I/O effects are declared with the right effect marker (`#(Fs)`, `#(Net)`,
+  `#(Exec)`, etc.).
 - Pure functions carry no effect markers; the compiler enforces this.
 - A function that performs multiple effects lists all of them; no hidden IO.
 - Comptime-evaluable functions satisfy D-CTCORE1's pure-Core whitelist.
@@ -74,15 +76,15 @@ existing drift found during review.
 
 ## Review template
 
-When submitting a new Core/std API for merge, include this checklist in the PR:
+When submitting a new Core API for merge, include this checklist in the PR:
 
 ```
-## Stdlib API review
+## Core API review
 
 Function/type: `<name>`
 Ratified decision(s): <D-XXX / S-YYY>
 
-- [ ] L1 Naming: plain English, predicate prefixed, PascalCase acronyms
+- [ ] L1 Naming: plain English, predicate prefixed, S66 acronyms
 - [ ] L2 Fallibility: correct return type, panic only on programmer error
 - [ ] L3 Ownership: view vs ownership vs mutation explicit
 - [ ] L4 Effects: all capability markers declared
@@ -103,6 +105,6 @@ Tower card tracking the fix; this list is the authoritative inventory.
 |-----|-----|-----|-----------|
 | L1 | `core.files.read` / `core.files.write` use short names | 1 | c44-follow-1 |
 | L6 | Several `core.math` functions lack UI snapshots for type mismatch | 6 | c44-follow-2 |
-| L7 | `core.json` functions have no standalone golden example | 7 | c44-follow-3 |
+| L7 | `core.encoding.json` functions have no standalone golden example | 7 | c44-follow-3 |
 
 *When a gap is resolved, remove the row and close the follow-up card.*

@@ -19,11 +19,11 @@ guaranteeing accuracy.
 
 | Surface form | TIR node / lowering |
 |---|---|
-| `let x = expr` binding | `TStmt::Bind` |
+| `x :: expr` / `x := expr` binding | `TStmt::Bind` |
 | `if cond { … } else { … }` | `TExprKind::If` |
-| `match` / `is` arms | `TExprKind::Match` |
+| `if subject == { arm -> … }` dispatch | `TExprKind::Match` |
 | `expr?` / `expr?? fallback` | `TExprKind::Propagate` / `TExprKind::WithDefault` |
-| `for x in iter { … }` | `TExprKind::ForIn` → iterator protocol |
+| `loop x in iter { … }` | `TExprKind::ForIn` → iterator protocol |
 | `loop { … }` | `TExprKind::Loop` |
 | `@MustUse` / `#SingleUse` markers | `TMarker::MustUse` / `TMarker::SingleUse` |
 | `drop(x)` (D-LIN1-DROP=A) | `TExprKind::Drop` |

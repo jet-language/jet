@@ -246,6 +246,8 @@ impl<'a> Checker<'a> {
             ("core.mem", "Fixed") => Some(Type::Named(Syntax::MEM_FIXED.to_string())),
             // D-OPTGC1: `gc.Gc` sentinel — `.new<T>(value)` constructs a traced handle.
             ("core.gc", "Gc") => Some(Type::Named(Syntax::GC_TYPE.to_string())),
+            // D-SOLVER-LIB1=A: `solve.Solver.new(seed)` constructs explicit solver state.
+            ("core.solve", "Solver") => Some(Type::Named(Syntax::SOLVER_TYPE.to_string())),
             // D-FIDELITY-API1=A: `core.perf.Perf` static API sentinel.
             ("core.perf", "Perf") => Some(Type::Named("Perf".to_string())),
             _ => {
@@ -4487,6 +4489,7 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         // D-ALLOC-C (ratified 2026-06-19): wider allocator API bucket.
         "core.mem.alloc" => &["Arena", "Bump", "Pool", "Fixed"],
         "core.gc" => &["Gc", "collect"],
+        "core.solve" => &["Solver"],
         "core.tasks" => &["spawn", "channel"],
         // D-FILES-WRITE1 (merge, was `core.fs` + `core.files`): one module for
         // both whole-file convenience helpers and streaming handle constructors.

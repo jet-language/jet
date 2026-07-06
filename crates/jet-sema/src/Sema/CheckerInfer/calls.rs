@@ -1101,6 +1101,22 @@ impl<'a> Checker<'a> {
         if let Expr::Field(base, leaf, _) = &**receiver {
             if let Expr::Ident(alias, alias_span) = &**base {
                 if let Some(ns) = self.core_imports.get(alias).cloned() {
+                    if ns == "core.solve" && leaf == Syntax::SOLVER_TYPE && method == "new" {
+                        if args.len() != 1 {
+                            self.diags.push(Diagnostic::error(
+                                "E0101",
+                                format!("`Solver.new` takes 1 argument, got {}", args.len()),
+                                "solver construction needs one deterministic seed".to_string(),
+                                "write `Solve.Solver.new(seed)`".to_string(),
+                                Some(span),
+                            ));
+                        }
+                        for a in args.iter_mut() {
+                            self.infer(&mut a.expr);
+                        }
+                        *recv_type_out = Some(Syntax::SOLVER_TYPE.to_string());
+                        return Some(Type::Named(Syntax::SOLVER_TYPE.to_string()));
+                    }
                     let submodule = format!("{}.{}", ns, leaf);
                     if crate::Syntax::is_known_core_module(&submodule) {
                         let ret = self.infer_core_call(
@@ -2085,7 +2101,7 @@ impl<'a> Checker<'a> {
             }
             if matches!(
                 handle_ty.as_str(),
-                "Clock" | "Rng" | "Stopwatch" | "Duration"
+                "Clock" | "Rng" | "Stopwatch" | "Duration" | "Solver"
             ) {
                 if let Some(ret) =
                     Collections::builtin_method_return(&recv_ty, method, args.len(), false)

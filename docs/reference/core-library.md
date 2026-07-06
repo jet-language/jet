@@ -64,7 +64,7 @@ compiler-known module under the `core` root.
 
 ```jet
 import core.files as fs     // teaching error E0015 — use `use core.files`
-use "std/fs"               // quoted paths are for .jet files only
+use "core/files"           // quoted paths are for .jet files only
 ```
 
 If you name a local file or folder `core`, `jet`, `http`, `regex`, `csv`, `toml`,
@@ -103,7 +103,7 @@ automatic conversion between error types in v1.
 
 ## Optional values (`T?`) — combinators (D-HOLE1)
 
-`T?` is either `value(x)` (present) or `null` (absent) — see S31/S35 for the
+`T?` is either `Val(x)` (present) or `None` (absent) — see S31/S35 for the
 core pattern-test and `??` fallback forms. Composing two or more optionals
 gets library combinators instead of a general "hole"/absent-propagating value
 type (D-HOLE1 rejected that: it would duplicate `T?` and silently bypass
@@ -111,7 +111,7 @@ distinct-type arithmetic gating like `@Numeric`).
 
 | Method | Type | What it does |
 | --- | --- | --- |
-| `.map(f)` | `(T?, fn(T) -> R) -> R?` | Applies `f` to the payload if present; `null` stays `null` |
+| `.map(f)` | `(T?, fn(T) -> R) -> R?` | Applies `f` to the payload if present; `None` stays `None` |
 | `.zip(other)` | `(T?, U?) -> (a: T, b: U)?` | Pairs two optionals: present only when **both** are present |
 | `Option.lift2(f, a, b)` | `(fn(T, U) -> R, T?, U?) -> R?` | Applies a two-argument function to `a`/`b` only when both are present |
 
@@ -119,13 +119,13 @@ distinct-type arithmetic gating like `@Numeric`).
 price: Float? :: lookup_price(id)
 qty: Float? :: lookup_qty(id)
 
-// zip: both present -> present pair; either null -> null
+// zip: both present -> present pair; either None -> None
 total1 :: price.zip(qty).map((pair) => pair.a * pair.b)
 
 // lift2: same idea, no explicit pair
 total2 :: Option.lift2((p, q) => p * q, price, qty)
 
-// total1, total2: Float? — null unless both price and qty were present
+// total1, total2: Float? — None unless both price and qty were present
 ```
 
 See `examples/features/types/option_combinators.jet`.
@@ -202,7 +202,7 @@ fn count_lines(path: String) -> Int ? IOError {
 | `open(path)` | `FileReader ? IOError` | Open a file for buffered line-by-line reading |
 | `create(path)` | `FileWriter ? IOError` | Create/overwrite a file for buffered writing |
 | `append(path)` | `FileWriter ? IOError` | Open a file for buffered appending |
-| `reader.read_line()` | `String? ? IOError` | One line (no newline), `null` at EOF |
+| `reader.read_line()` | `String? ? IOError` | One line (no newline), `None` at EOF |
 | `reader.lines()` | iterator of `String` | `loop line in handle.lines()` |
 | `writer.write_line(text)` | `() ? IOError` | Write `text` plus a trailing newline |
 | `writer.flush()` | `() ? IOError` | Force buffered bytes to disk |
@@ -299,8 +299,8 @@ returns a new one:
 | Method | Signature | Returns |
 |--------|-----------|---------|
 | `.flag(name)` | `(String) → Bool` | true if `--name` was passed |
-| `.option(name)` | `(String) → String?` | value of `--name VALUE`, or `null` |
-| `.positional(idx)` | `(Int) → String?` | the nth positional (0-based), or `null` |
+| `.option(name)` | `(String) → String?` | value of `--name VALUE`, or `None` |
+| `.positional(idx)` | `(Int) → String?` | the nth positional (0-based), or `None` |
 
 `--help` is not wired automatically — add a `.flag("help", "…")` and check
 `parsed.flag("help")` yourself. `.parse` returns `ParsedArgs ? String`, where
@@ -368,7 +368,7 @@ Example: `examples/features/reflection/reflect-value.jet`.
 use core.env as env
 
 fn run() {
-    home :: env.home_dir()               // String? — may be null
+    home :: env.home_dir()               // String? — may be None
     mode :: env.get("MODE") ?? "dev"     // String? from the environment
     env.set("MODE", "prod")              // set for child processes
     here :: env.current_dir() ?? return  // current working directory
@@ -380,7 +380,7 @@ fn run() {
 
 | Function | Returns | What it does |
 |----------|---------|--------------|
-| `get(name)` | `String?` | Environment variable, or null if unset |
+| `get(name)` | `String?` | Environment variable, or None if unset |
 | `set(name, value)` | nothing | Set an environment variable |
 | `current_dir()` | `String ? IOError` | Current working directory |
 | `home_dir()` | `String?` | User home directory, if known |
@@ -520,8 +520,8 @@ fn run() {
     print(random.int(1, 6))                 // inclusive range (like dice)
     print(random.float())                   // 0.0 .. 1.0
     items :: [10, 20, 30]
-    print(random.pick(items))               // one item, or null if list empty
-    random.shuffle(mut items)               // shuffle in place
+    print(random.pick(items))               // one item, or None if list empty
+    random.shuffle(&items)                  // shuffle in place
     print(items)
 }
 ```
@@ -534,7 +534,7 @@ not for tests.
 | `seed(n)` | nothing | Reset the generator (deterministic after this) |
 | `int(low, high)` | `Int` | Random integer, both ends inclusive |
 | `float()` | `Float` | Random float from 0 up to (but not including) 1 |
-| `pick(xs)` | `T?` | Random element, or null if `xs` is empty |
+| `pick(xs)` | `T?` | Random element, or None if `xs` is empty |
 | `shuffle(&xs)` | nothing | Randomly reorder a list in place |
 | `rng(seed)` | `Rng` | A **deterministic** RNG capability seeded by `seed` (D-DET1) |
 
@@ -560,11 +560,35 @@ The injected `Rng` mirrors the full ambient `random.*` set (D-DET-CAPAPI):
 | `int(lo, hi)` | `Int` | Draw an Int in `[lo, hi]` (inclusive); advances the stream |
 | `float()` | `Float` | Draw a Float in `[0.0, 1.0)`; advances the stream |
 | `bool()` | `Bool` | Draw a coin; advances the stream |
-| `pick(xs)` | `T?` | Uniform element of `[T]`, or null if empty; advances the stream |
+| `pick(xs)` | `T?` | Uniform element of `[T]`, or None if empty; advances the stream |
 | `shuffle(&xs)` | nothing | Reorder a list in place (Fisher–Yates); advances the stream |
 
 Every draw — including `bool`/`pick`/`shuffle` — needs a `&Rng` receiver, and
 `shuffle` needs the list passed with `&` (it edits in place).
+
+### `core.solve` — finite solver state
+
+`core.solve` gives constraint-style code an explicit state value instead of a
+second execution model. The first slice accepts ordinary `Bool` constraints in
+the order you add them. Failed constraints are counted; queries are
+deterministic.
+
+```jet
+use core.solve as Solve
+
+fn run() {
+    solver := Solve.Solver.new(42)
+    solver.require(2 + 2 == 4)
+    solver.require("red" != "blue")
+
+    print(solver.status())          // ok
+    print(solver.failure_count())   // 0
+}
+```
+
+There is no Prolog-style unification, hidden choice point, or language
+backtracking. Finite search stays normal Jet loops and conditionals; the solver
+object records the checks you choose to make visible.
 
 ---
 
@@ -701,16 +725,16 @@ fn run() {
 **One dynamic value, four format faces (D-ENC-DYN1).** Every format's untyped
 `parse` returns the same rich dynamic value, internally `DataTree`, user-facing
 as **`Data`** — variants `.Null` / `.Bool` / `.Int` / `.Float` / `.Text` /
-`.Array` / `.Object`. `Json`, `Toml`, `Yaml`, and `Csv` are type aliases over
-`Data` (so `json.parse` reads as `Json`, `toml.parse` as `Toml`, …), but it's
+`.Array` / `.Object`. `JSON`, `TOML`, `YAML`, and `CSV` are type aliases over
+`Data` (so `json.parse` reads as `JSON`, `toml.parse` as `TOML`, …), but it's
 one structure with one walker and one accessor set (`.field(name)`, `.at(i)`,
 `.int()`, `.float()`, `.text()`, `.bool()`). Integral numbers decode to `.Int`,
 fractional to `.Float`; objects keep field order.
 
 | Function | Returns | What it does |
 |----------|---------|--------------|
-| `parse(text)` | `Json ? JSONError` | Parse a JSON string |
-| `decode(text)` | `Json ? JSONError` | Lenient parse — coerces string→number/bool, logs each coercion (D-JSON3) |
+| `parse(text)` | `JSON ? JSONError` | Parse a JSON string |
+| `decode(text)` | `JSON ? JSONError` | Lenient parse — coerces string→number/bool, logs each coercion (D-JSON3) |
 | `to_string(j)` | `String` | Compact JSON text |
 | `to_string_pretty(j)` | `String` | Indented JSON text |
 
@@ -718,7 +742,7 @@ fractional to `.Float`; objects keep field order.
 
 **`core.encoding.csv`** — `parse(text) -> [[String]] ? String` (rows of fields),
 `to_string(rows) -> String`. **`core.encoding.toml`** / **`core.encoding.yaml`**
-— `parse(text) -> Toml ? JSONError` / `Yaml ? JSONError` (full adapters over
+— `parse(text) -> TOML ? JSONError` / `YAML ? JSONError` (full adapters over
 `Data`, not a flat map), `to_string(value)`.
 
 Each adapter is a full serde equivalent, not a lossy subset:
@@ -735,7 +759,7 @@ Each adapter is a full serde equivalent, not a lossy subset:
   (`|`/`>` with chomping), comments, `---`/`...` document markers, and
   anchors/aliases (`&a`/`*a`). Explicit/custom tags (`!!str`, `!T`) are deferred.
 
-All four parsers are std-only (I6).
+All four parsers use only Rust std (I6).
 
 Jet has no general `Any` top type (D-DYNAMIC-TYPE1): use the precise shape for
 the job — an enum for a closed set of variants, generics or traits for
@@ -762,7 +786,7 @@ struct Order {
 }
 
 fn run() {
-    o :: Order.{ id: 7, who: "Ada", items: ["pen", "ink"], note: null }
+    o :: Order.{ id: 7, who: "Ada", items: ["pen", "ink"], note: None }
     print(json.to_string(o))               // {"id":7,"customer":"Ada","items":["pen","ink"]}
 
     raw :: "{{\"id\":9,\"customer\":\"Bo\",\"items\":[\"ink\"],\"note\":\"rush\"}}"
@@ -772,7 +796,7 @@ fn run() {
 ```
 
 **Encode** — `to_string(v)` / `to_string_pretty(v)` accept any `@[Codable]`/`@[Encode]`
-value (the dynamic `JSON` tree and the `[[String]]`/`Map` forms still work too). Field
+value (the dynamic `JSON` tree and the `[[String]]`/`[K: V]` forms still work too). Field
 order is preserved.
 
 **Typed decode** — `decode<T>(text)` (D-SERDE6) returns `T ? DecodeError` for
@@ -934,7 +958,7 @@ would be lost), and that is deliberate.
 Every call returns a `Result`; the `Err` carries a one-line message when the
 pattern itself is malformed (the only failure at the boundary). A `Match` is a
 list of capture groups: `group(0)` is the whole match, `group(n)` is the n-th
-group as `String?` (`null` if the group did not participate or `n` is out of
+group as `String?` (`None` if the group did not participate or `n` is out of
 range).
 
 ```jet
@@ -945,7 +969,7 @@ fn run() {
     print(re.is_match("\\d+", text) ?? panic("bad pattern"))   // true
 
     m :: re.match("(\\d+) shipped", text) ?? panic("bad pattern")
-    if m == value(mat) {
+    if m == Val(mat) {
         print(mat.group(0) ?? "")   // 42 shipped
         print(mat.group(1) ?? "")   // 42
     }
@@ -957,8 +981,8 @@ fn run() {
 | Call | Returns | Does |
 |------|---------|------|
 | `re.is_match(pat, text)` | `Bool ? String` | whether `pat` occurs anywhere |
-| `re.match(pat, text)` | `Match? ? String` | first match with capture groups, `null` if none |
-| `re.find(pat, text)` | `String? ? String` | first matched substring, `null` if none |
+| `re.match(pat, text)` | `Match? ? String` | first match with capture groups, `None` if none |
+| `re.find(pat, text)` | `String? ? String` | first matched substring, `None` if none |
 | `re.find_all(pat, text)` | `[String] ? String` | every non-overlapping match, left to right |
 | `re.replace(pat, text, repl)` | `String ? String` | replace the first match (`$1`, `${name}` allowed in `repl`) |
 | `re.replace_all(pat, text, repl)` | `String ? String` | replace every match |
@@ -1024,7 +1048,7 @@ fn run() {
 
 `Signal`/`Derived` are cheap shared handles — copying one (e.g. capturing it in a
 lambda) shares the same reactive cell, so a derived/effect reads the live signal
-while outer code keeps `.set`ting it. The runtime is pure std (no external crate);
+while outer code keeps `.set`ting it. The runtime uses only Rust std (no external crate);
 the compiler-side dataflow graph for tooling/IDEs is a separate, future tooling
 feature.
 
@@ -1228,7 +1252,7 @@ hi: U8 :: 200
 lo: U8 :: 100
     print(wrapping(hi + lo))            // 44   — wraps around (C behaviour)
     print(saturating(hi + lo))          // 255  — clamps to the type's range
-    print(checked(hi + lo) ?? 0)        // 0    — checked(…) -> T?, null on overflow
+    print(checked(hi + lo) ?? 0)        // 0    — checked(…) -> T?, None on overflow
 }
 ```
 
@@ -1237,7 +1261,7 @@ lo: U8 :: 100
 | `expr` (`a + b`, …) | `T` | Traps on overflow (safe default) |
 | `wrapping(a + b)` | `T` | Wraps around the type's range |
 | `saturating(a + b)` | `T` | Clamps to `MIN`/`MAX` |
-| `checked(a + b)` | `T?` | `null` on overflow |
+| `checked(a + b)` | `T?` | `None` on overflow |
 
 Each wrapper takes exactly one integer `+`/`-`/`*`/`/`; anything else is **E1005**.
 

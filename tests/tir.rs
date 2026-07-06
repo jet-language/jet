@@ -3,7 +3,7 @@
 //! if-expression, bindings, returns, print), so codegen routes them through
 //! `Codegen/TIR.rs`. The asserts prove they compile (rustc accepts the output —
 //! I2) and run with the right output. Golden parity (`tests/golden.rs`) covers
-//! byte-identical equivalence to the AST path for the example suite.
+//! byte-equivalence with the old emitter baselines for the example suite.
 
 use std::fs;
 use std::process::Command;
@@ -89,11 +89,11 @@ fn run() {
     assert_eq!(stdout, "Fizz\nBuzz\nFizzBuzz\n7\n");
 }
 
-/// Coexistence: a covered free function (TIR path) and an uncovered type with a
-/// method (AST path) in the same program both compile and run. This is the gate
-/// working — `tir_covers` is false for the method, true for `add`.
+/// Coexistence: a free function and a method in the same program both route
+/// through the executable TIR. A construct outside TIR coverage is an ICE gate,
+/// not a legacy AST fallback.
 #[test]
-fn tir_and_ast_paths_coexist() {
+fn tir_function_and_method_coexist() {
     if !have_rustc() {
         return;
     }
@@ -230,8 +230,8 @@ fn run() {
 /// position — no clone), a struct return value, and a struct-typed local. All
 /// of `sum_pt`, `origin`, and `main` are inside the subset, so all route
 /// through the TIR. The scalar field-read arithmetic (`p.x + p.y`) must NOT
-/// overflow-trap: in the AST path a field operand is unresolved, so the plain
-/// `+` is used — the TIR reproduces that exactly (parity).
+/// overflow-trap: the old emitter baseline left this field operand unresolved,
+/// so the plain `+` was used — the TIR reproduces that parity exactly.
 #[test]
 fn struct_literal_field_read_and_return() {
     if !have_rustc() {
@@ -566,8 +566,8 @@ fn run() {
 
 /// A user-defined instance method with scalar args on a covered struct. The
 /// caller `run` routes through the TIR; `(c).user_add(10i64, 20i64)` is emitted
-/// from the resolved `method_sigs` conventions (the method body, which has `self`,
-/// stays on the AST path — the gate excludes `self` functions).
+/// from the resolved `method_sigs` conventions; the method body with `self`
+/// also routes through executable TIR.
 #[test]
 fn user_method_with_scalar_args() {
     if !have_rustc() {
@@ -907,9 +907,9 @@ fn run() {
     assert_eq!(stdout, "25\n-1\n");
 }
 
-/// An optional `T?` with `value`/`None` constructors and a `??` fallback.
+/// An optional `T?` with `Val`/`None` constructors and a `??` fallback.
 #[test]
-fn optional_value_null_and_fallback() {
+fn optional_val_none_and_fallback() {
     if !have_rustc() {
         return;
     }
@@ -1235,8 +1235,8 @@ fn run() {
 }
 
 // NOTE: a regex call (`re.is_match(…)?? …`) also routes through the TIR — the
-// emitted `<ffi_crate>::jet_regex_is_match(…)` is byte-identical to the AST path
-// (verified via the forced-AST-path diff). It is NOT given a `build_and_run` test
+// emitted `<ffi_crate>::jet_regex_is_match(…)` matches the old emitter baseline
+// (verified via the forced-baseline diff). It is NOT given a `build_and_run` test
 // here because the call references the external FFI bridge crate (`cx.ffi_crate`),
 // which the bare-`rustc` harness can't resolve standalone — the same reason the
 // example suite drives the regex example through the project build, not this file.
@@ -1245,8 +1245,8 @@ fn run() {
 // c109 Phase 11: lambdas/closures, fan-out, closure-taking collection
 // methods. Each program lives entirely inside the covered subset, so the
 // covered function(s) route through the TIR; the assert proves rustc
-// accepts the output (I2) and it runs correctly. Byte-parity to the AST
-// path is verified separately (forced-AST diff across the example suite).
+// accepts the output (I2) and it runs correctly. Byte-parity to the old
+// emitter baseline was verified separately across the example suite.
 // ===================================================================
 
 /// A list `map`/`filter`/`reduce`/`find`/`any`/`all` with expression-body
@@ -1357,12 +1357,11 @@ fn run() {
     assert_eq!(stdout, "[2, 4, 6]\n4\n");
 }
 
-/// A call whose callee has a Fn-typed parameter (`apply(f, x)`) is EXCLUDED
-/// from the TIR (the fn-value arg needs the `Box::new(…) as …` coercion the
-/// plain-call lowering does not emit). It stays on the AST path and still
-/// compiles + runs — proving the gate's exclusion is conservative, not lossy.
+/// A call whose callee has a Fn-typed parameter (`apply(f, x)`) now routes
+/// through the TIR with the required fn-value coercion. The test proves that
+/// this formerly excluded shape compiles and runs.
 #[test]
-fn fn_typed_param_call_stays_on_ast_path() {
+fn fn_typed_param_call_routes_through_tir() {
     if !have_rustc() {
         return;
     }
@@ -1493,8 +1492,8 @@ shapes: [Shape] :: [Circle.{radius: 2.0}, Square.{side: 3.0}]
 }
 
 /// c109 Phase 12: an explicit `else { if … }` block must stay `} else { if … }`,
-/// NOT collapse to `} else if …` (the AST path keys solely on the source
-/// `ElseBranch`, never on the else-body shape). This guards the parity fix to the
+/// NOT collapse to `} else if …` (the source `ElseBranch`, not the else-body
+/// shape, decides the emitted form). This guards the parity fix to the
 /// TIR `If` emit. The function routes through the TIR; rustc accepting proves it
 /// compiles, and the value proves the branch is taken correctly.
 #[test]
@@ -1556,9 +1555,8 @@ fn run() {
 }
 
 /// c109 Phase 13: a struct field call through a fn-typed field is an `Expr::CallValue`
-/// (`(w.step)(x)`). The struct has a `fn` field so it stays on the AST path, but the
-/// *call site* `apply_twice((x)=>…, …)` routes — and a fn-value stored in a local then
-/// called routes too. This proves the `Expr::Call`-to-a-local fn-value form.
+/// (`(w.step)(x)`). The struct's fn field, the `apply_twice((x)=>…, …)` call site,
+/// and a fn-value stored in a local then called all route through TIR.
 #[test]
 fn fn_value_call_through_local() {
     if !have_rustc() {
@@ -1627,8 +1625,8 @@ fn run() {
     print(launch())
 }
 ";
-    // `launch` itself stays on the AST path (`t.join()` is a Task method, not covered),
-    // but the spawn EXPRESSION and `compute` route; rustc accepting proves parity.
+    // `launch`, the spawn expression, and `compute` route through TIR; rustc accepting
+    // proves parity.
     let (code, stdout) = build_and_run("tir_tasks_spawn", src);
     assert_eq!(code, 0);
     assert_eq!(stdout, "21\n");
@@ -2124,7 +2122,7 @@ fn run() {
 
 /// c109 Phase 16: a struct with a covered collection field, and an enum variant
 /// carrying a covered collection payload. Both emit the field/payload value plainly
-/// (`items: vec![…]`, `Holder.Nums(xs)`), byte-identical to the AST path.
+/// (`items: vec![…]`, `Holder.Nums(xs)`) against the old emitter baseline.
 #[test]
 fn collection_field_and_payload() {
     if !have_rustc() {
@@ -3137,7 +3135,7 @@ fn foreign_enum_matching_and_payload() {
     }
     // The foreign struct `Note` is CONSTRUCTED in its own module (`make_note`, matching the
     // real logbook — an unqualified cross-module `Note {…}` literal is a separate pre-existing
-    // AST-path bug, omitted of `import_ns`, that the gate already excludes). `kind_str` matches
+    // lowering bug, omitted of `import_ns`, outside this fixture). `kind_str` matches
     // the foreign-LOCAL `NoteType`; the entry matches the foreign `NoteType` via a local
     // `Query`'s `Kind(NoteType)` payload + constructs `NoteType.User` cross-module.
     let note = "\
@@ -3289,7 +3287,7 @@ fn run() {
 
 /// c109 Phase 26: the `require(cond[, msg])` / `require_eq` rich-report builtins (S36,
 /// 14_panic). A satisfied `require` is a no-op; the program continues. (The failing
-/// branch's rich panic is exercised by the AST-path golden suite; here we prove the TIR
+/// branch's rich panic is exercised by the golden suite; here we prove the TIR
 /// renders + runs the guard byte-for-byte.)
 #[test]
 fn require_builtins() {
@@ -3712,7 +3710,7 @@ fn run() {
 }
 
 /// D-MUTSELF1: whole-`self` reassignment — `self = New{…}` — lowers to `(*self) = …`
-/// (the prior AST-path I2 hole, where the `mut self` slot wasn't dereferenced on the
+/// (the prior lowering I2 hole, where the `mut self` slot wasn't dereferenced on the
 /// LHS, is now closed). rustc accepts the dereferenced assignment.
 #[test]
 fn mut_self_whole_reassignment() {
@@ -3773,9 +3771,8 @@ fn run() {
 /// `Box<…>` (`cx.boxed_edges`), so its construction value must be wrapped
 /// `Box::new(…)` (E0308 otherwise — the AST `emit_struct_lit` was not wrapping).
 /// A nested inline `Tree.{ value, child: Val(Tree { … }) }` exercises the boxed
-/// wrap at multiple levels; the boxed field READ stays on the AST path (deref), so
-/// `main` reads only the non-boxed scalar `value`. Both construction levels and
-/// `main` route through the TIR.
+/// wrap at multiple levels; `main` reads only the non-boxed scalar `value`.
+/// Both construction levels and `main` route through the TIR.
 #[test]
 fn recursive_struct_construction() {
     if !have_rustc() {
@@ -4000,7 +3997,7 @@ fn run() {
 }
 
 /// c109 (B3): a struct-destructuring binding `Type.{ x, y } :: p` routes through
-/// the TIR and prints the field sum (byte-for-byte the AST `BindPattern::Struct`).
+/// the TIR and prints the field sum, matching the old `BindPattern::Struct` baseline.
 #[test]
 fn struct_destructure_binding() {
     if !have_rustc() {
@@ -4020,7 +4017,7 @@ fn run() {
 }
 
 /// c109 (B4): a user-enum variant if-let condition `if m == Ping(n) { } else { }`
-/// routes through the TIR and binds the payload (byte-for-byte the AST if-let).
+/// routes through the TIR and binds the payload, matching the old if-let baseline.
 #[test]
 fn user_enum_variant_if_let_condition() {
     if !have_rustc() {
@@ -4046,7 +4043,7 @@ fn run() {
 }
 
 /// c109 (B2): a fixed-size-list type `[E#N]` as a param (fed a fan-out result) and
-/// as a struct field routes through the TIR (rendered `Vec<E>`, byte-for-byte the AST).
+/// as a struct field routes through the TIR (rendered `Vec<E>`).
 #[test]
 fn fixed_size_list_param_and_field() {
     if !have_rustc() {
@@ -4072,8 +4069,8 @@ fn run() {
 }
 
 /// c109 (B1): a mixed-switch over a NON-IDENT subject (a field access) with a
-/// payload-binding arm head. Previously the AST path emitted `matches!(…, Some(c))`
-/// then used the unbound `c` (E0425); now it routes (both paths) through the Rust
+/// payload-binding arm head. The deleted emitter once produced
+/// `matches!(…, Some(c))` then used the unbound `c` (E0425); TIR emits the Rust
 /// `match` that binds the payload. The subject is evaluated once.
 #[test]
 fn mixed_switch_non_ident_subject_binds_payload() {
@@ -4339,7 +4336,7 @@ fn run() {
 /// c109: a field read off a comptime-const STRUCT value (`comptime P = Pair{…}`;
 /// `P.left`) and an `==` against a comptime-const ENUM value (`comptime L =
 /// Light.Green`; `L == Light.Green`). Each const inlines to its pre-rendered
-/// Rust value; the field read / comparison is byte-identical to the AST path.
+/// Rust value; the field read / comparison matches the old emitter baseline.
 /// `main` routes through the TIR; runs to the round-trip output.
 #[test]
 fn field_read_and_eq_on_inlined_comptime_values() {

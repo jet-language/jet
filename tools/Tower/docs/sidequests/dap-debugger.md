@@ -162,8 +162,8 @@ not `Source/Codegen/…` as the sketch above originally said).
     interpreter path) decides interpreter vs native; `run_native`/`run_dap`
     are the public entry points `Source/CmdCompile.rs` calls.
 - `Source/main.rs` — `debug` dispatch gained `--raw-frames`/`--dap` parsing
-  and the `needs_native` auto-routing; `Source/CLISpec.rs` registers both
-  flags (`FLAG_HELP` + the `debug` `CommandSpec`).
+  and the `needs_native` auto-routing; `Source/CLI.rs` registers the `debug`
+  command and global flag metadata.
 - `Source/CmdCompile.rs::run_debug_native` — compiles via `compile_for_debug`,
   builds with `BuildProfile::Debug` (full `-C debuginfo=2`) through the
   existing `build()` bridge (FFI/clinks handled identically to a normal

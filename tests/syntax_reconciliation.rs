@@ -7,7 +7,10 @@ use std::path::{Path, PathBuf};
 const ROOTS: &[&str] = &[
     "AGENTS.md",
     "CLAUDE.md",
+    "docs/spec",
     "docs/reference/syntax-surface.jet",
+    "Source",
+    "crates",
     "examples",
     "tests/ui",
 ];
@@ -61,9 +64,16 @@ fn live_surface_has_no_retired_spellings() {
             let Ok(text) = fs::read_to_string(&path) else {
                 continue;
             };
-            for needle in FORBIDDEN {
-                if text.contains(needle) {
-                    failures.push(format!("{} contains `{}`", path.display(), needle));
+            for (line_no, line) in scan_lines(&path, &text) {
+                for needle in forbidden_for_path(&path) {
+                    if line.contains(needle) && !allowed_retired_reference(&path, line) {
+                        failures.push(format!(
+                            "{}:{} contains `{}`",
+                            path.display(),
+                            line_no,
+                            needle
+                        ));
+                    }
                 }
             }
         }
@@ -96,5 +106,71 @@ fn files(path: &Path) -> Vec<PathBuf> {
 
 fn should_skip(path: &Path) -> bool {
     let s = path.to_string_lossy();
-    s.contains("/target/") || s.contains("_retired_") || s.ends_with(".published.snapshot")
+    s.contains("/target/")
+        || s.contains("_retired_")
+        || s.ends_with(".published.snapshot")
+        || s.ends_with("tests/syntax_reconciliation.rs")
+        || s.ends_with("docs/spec/syntax-decisions.md")
+}
+
+fn scan_lines<'a>(path: &Path, text: &'a str) -> Vec<(usize, &'a str)> {
+    if path.extension().and_then(|x| x.to_str()) != Some("rs") {
+        return text.lines().enumerate().map(|(i, l)| (i + 1, l)).collect();
+    }
+    text.lines()
+        .enumerate()
+        .filter_map(|(i, line)| {
+            if path.ends_with("crates/jet-parser/src/Parser/Items.rs")
+                && line.contains("retired_c_module_marker_diag")
+            {
+                return None;
+            }
+            let trimmed = line.trim_start();
+            if trimmed.starts_with("//")
+                || trimmed.starts_with("///")
+                || trimmed.starts_with("//!")
+                || line.contains('"')
+            {
+                Some((i + 1, line))
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn forbidden_for_path(path: &Path) -> Vec<&'static str> {
+    if path.extension().and_then(|x| x.to_str()) != Some("rs") {
+        return FORBIDDEN.to_vec();
+    }
+    FORBIDDEN
+        .iter()
+        .copied()
+        .filter(|needle| {
+            !matches!(
+                *needle,
+                "#layout"
+                    | "#grant"
+                    | "#context"
+                    | "List<"
+                    | "List["
+                    | "Map<"
+                    | "core.json"
+                    | "use jet."
+            )
+        })
+        .collect()
+}
+
+fn allowed_retired_reference(path: &Path, line: &str) -> bool {
+    let s = path.to_string_lossy();
+    if s.ends_with("docs/spec/diagnostics.md")
+        && (line.contains("retired") || line.contains("teaching:"))
+    {
+        return true;
+    }
+    if s.ends_with(".stderr") && line.contains("retired") {
+        return true;
+    }
+    false
 }

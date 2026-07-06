@@ -58,23 +58,23 @@ binding  = ident "::" expr NL                 // inferred immutable
          | ident ":" type "::" expr NL        // explicit immutable
          | ident ":" type ":=" expr NL        // explicit mutable
          | destructure ( "::" | ":=" ) expr NL ;
-destructure = ident "{" ident { "," ident } "}"   // S74: struct fields
+destructure = ".{" ident { "," ident } [ ", .." ] "}"   // S74: struct fields
             | "[" [ ident { "," ident } ] "]" ;    // S74: list elements
 assign   = ident ( "=" | "+=" | "-=" | "*=" | "/=" | "%="
                  | "&=" | "|=" | "^=" | "<<=" | ">>=" ) expr NL ;
 // D-IF1: `if` is the one branching keyword. Two forms by body shape:
 if       = "if" cond block { "else" "if" cond block } [ "else" block ]   // two-arm
-         | "if" subject "{" { arm } [ "else" "->" arm-body ] "}" ;       // multi-arm dispatch
+         | "if" subject "==" "{" { arm } [ "else" "->" arm-body ] "}" ;  // multi-arm dispatch
 arm      = arm-head "->" arm-body NL ;
 arm-head = value | range | condition ; // bare value ⇒ `subject == value`; range `lo..hi` ⇒ membership (D-PATR/D-RANGE1); else a Bool condition (D-IF2 Q3)
 range    = expr ".." expr ;            // inclusive (S22); no `..=` (E0318), no `step` in arm head (E0319)
 arm-body = block | stmt ;        // `{ … }` block or one braceless statement (D-IF2 Q2)
-loop     = [ "@" ident ] loop-body ;            // D-LABEL1: optional `@name` label
+loop     = [ ident "@" ] loop-body ;            // D-LABEL1: optional `name@` label
 loop-body= "loop" block
          | "loop" cond block
          | "loop" ident "in" expr [ ".." expr [ "step" expr ] ] block ;
-break    = "break" [ "@" ident ] NL ;           // D-LABEL1: `break @name` targets a label
-continue = "continue" [ "@" ident ] NL ;        // D-LABEL1: `continue @name`
+break    = "break" [ ident "@" ] NL ;           // D-LABEL1: `break name@` targets a label
+continue = "continue" [ ident "@" ] NL ;        // D-LABEL1: `continue name@`
 cond     = expr | "(" expr ")" ;                     // S68/D-SG2: optional parens, fmt strips them
 if-expr  = "if" cond value-block "else" ( if-expr | value-block ) ;  // S68/D-SG2: value form
 value-block = "{" { stmt } expr "}" ;
@@ -109,9 +109,9 @@ expr     = precedence climbing over:
   `loop { }` (infinite), `loop cond { }` (conditional), `loop x in a..b { }`
   (iterates a through b **inclusive**, S22; S19-amend); `break`/`continue`
   inside loops only (E0115, S23). A loop may
-  carry an `@name` label (D-LABEL1) — `@outer loop … { }` — and `break @outer` /
-  `continue @outer` target it from a nested loop (E0987 names an out-of-scope
-  label; E0988 flags a `@name` not followed by `loop`).
+  carry a suffix `name@` label (D-LABEL1) — `outer@ loop … { }` — and
+  `break outer@` / `continue outer@` target it from a nested loop (E0987 names
+  an out-of-scope label; E0988 flags a retired prefix label).
 - `if subject == { head -> { ... } else -> { ... } }` (D-IF1/D-IF3) tests arm
   heads top to bottom. Bare values and ranges compare against the subject;
   predicate heads are `Bool`; `else` is mandatory unless enum/option
@@ -431,7 +431,7 @@ impl Circle {
   distinctly-named no-`self` statics returning the type (`Point.cartesian`,
   `Point.polar`). Overloading is rejected; a duplicate name is E0105 with
   a teaching message pointing at constructor naming.
-- Enum `if subject { … }` arms must be exhaustive; missing cases are a compile error.
+- Enum `if subject == { … }` arms must be exhaustive; missing cases are a compile error.
 - **Traits (S28, M9):** `trait Name { fn sig(self) -> T; … }` — signatures
   only. Implement inside a type (`impl Trait { … }`) or outside as
   `impl Type.Trait { … }` (qualify foreign types: `impl other.Point.Shape`).
@@ -574,7 +574,7 @@ impl Circle {
 
 - **Struct layout control (D-REPRC1):** `#Layout(c)` before a struct stamps
   `#[repr(C)]` on the generated Rust struct, enabling direct C-FFI pointer
-  sharing. Field order is preserved as written. Growable fields (`[T]`, `Map`,
+  sharing. Field order is preserved as written. Growable fields (`[T]`, `[K: V]`,
   `String`) are rejected with **E1104** because they lack a stable C layout;
   fixed-size arrays `[T#N]` are allowed. Reserved variants (`packed`, `align(N)`,
   `columnar`) parse but error with **E1105** until their milestones ship.
@@ -741,13 +741,13 @@ over generated C-ABI shims.
 entry is a normal Jet signature plus **`= "rust::path"`** naming the target
 item. This source-level declaration is sufficient even inside a project with
 `pkg.jet`; users do not need the package manager just to call a foreign
-function. **`extern rust "std" { … }`** works for standard-library items with
+function. **`extern rust "std" { … }`** works for Rust standard-library items with
 no extra dependency. Non-`core` crates require an exact version pin (**E0701**).
 
 Allowed boundary types pass **by value**: `Int`, `Float`, `Bool`, `String`,
-`Char`, `List`/`Map`/`T?`/`T ? E` built from allowed types, and
-structs/enums whose fields are allowed. No `mut`/`take`/`view` parameters, no
-borrowed returns, no callbacks (**E0702**).
+`Char`, `[T]`/`[K: V]`/`T?`/`T ? E` built from allowed types, and
+structs/enums whose fields are allowed. No borrowed parameters or returns, no
+callbacks (**E0702**).
 
 When any crate dependency is needed, the driver builds a hidden cached cargo
 bridge under `~/.cache/jet/ffi/` and links it into the generated program (R9:
@@ -877,9 +877,9 @@ A view is sound only inside its **region** and only until the arena is `reset`/`
 sema checks (`Source/Sema/CheckerOwnership.rs`), both at least as strict as rustc's borrow
 checker so Jet always rejects first (I2):
 
-- **E0631** — the view escapes its region: returned, stored in another binding / `ref` /
-  struct field, given away or lent `mut` to a `take`/out parameter, or captured by an
-  escaping closure.
+- **E0631** — the view escapes its region: returned, stored in another binding
+  or struct field, passed to a `&`/`^` parameter, or captured by an escaping
+  closure.
 - **E0632** — the view is read after its arena was `reset`/`free`d.
 
 Regions (D-REGION1): **implicit and scope-inferred by default** — the region is the lexical
@@ -1035,7 +1035,8 @@ invokes rustc, so the cargo debug binary is sufficient.
 
 **Lambdas (S46):** `(params) => expr` or `(params) => { … }`. Parameter types
 may be omitted when the expected function type is known (**E0801** when not).
-The lambda arrow is **`=>`**; **`->`** stays for return types and `if subject { … }` arms.
+The lambda arrow is **`=>`**; **`->`** stays for return types and
+`if subject == { … }` dispatch arms.
 
 **Function types (S47):** `fn(T1, T2) -> R` (no parameter names; `-> R` may be
 omitted for no-return callbacks). Named `fn`s coerce to function values when
@@ -1071,7 +1072,7 @@ E0507 collection change inside a `for` loop), `tests/ui/not_a_function.jet`,
 `tests/ui/foreign_{lambda,pipe}.jet`; lint: `tests/ui_lint/lambda_escape_clone.jet`
 (L0801). Integration: `tests/closures.rs`.
 
-## M10 — Standard library (done)
+## M10 — Core library (done)
 
 Full user-facing reference: **docs/reference/core-library.md**.
 
@@ -1129,8 +1130,9 @@ hooks; scheduler-enforced pause/cancel semantics land with the M:N runtime work.
 linked send/receive pair, destructured at the call site: `(tx, rx) :=
 tasks.channel<T>()`. A second sender is `copy tx` — there's no combined
 "channel" value to fetch one off of. `sender.send(value)` moves a `T` into the
-channel (`take` semantics for non-copy values), and `receiver.receive() -> T or
-Closed` blocks until a value arrives or all senders are gone. Channel payloads
+channel (ownership semantics for non-copy values), and
+`receiver.receive() -> T ? Closed` blocks until a value arrives or all senders
+are gone. Channel payloads
 must be sendable (**E1102**).
 
 D-DEADLINE1 (ratified 2026-06-28): an ambient deadline can be set with
@@ -1680,7 +1682,7 @@ one flag, by this rule (checked top to bottom, first match wins):
 | any other supported scalar | `--name VALUE` (**required**) | runtime error, `core.args` voice — no new diagnostic code |
 
 Supported scalars: `Int`, `Float`, `Bool`, `String`, `Path`. Any other field
-type (a `Map`, a closure, a `[T]`, a nested struct that isn't itself
+type (a `[K: V]`, a closure, a `[T]`, a nested struct that isn't itself
 `@[Cli]`, …) is **E1305** — there is no flag shape for it. Field defaults
 use the *existing* `#[Default(expr)]` marker (D-SERDE5) — not a second,
 inline `= expr` mechanism (that syntax is reserved for function-parameter

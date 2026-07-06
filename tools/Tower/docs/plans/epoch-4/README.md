@@ -37,10 +37,13 @@ The latest decisions override stale prose in older Epoch 4 notes:
   D-JETOS-FREEZE1, not current Epoch 4 build scope. The shipped contribution form
   `module dev { env.dev: Env.{ ... } }` becomes teaching syntax, not a second
   canonical form.
-- **Only `pkg.jet` is a reserved filename.**
-  Role modules may live in any `.jet` file the user chooses and are discovered
-  by declaration via `find()`, never by required filenames like `env.jet`,
-  `workspace.jet`, `config.jet`, `build.jet`, or `fleet.jet`.
+- **Reserved filenames are `pkg.jet`, `env.jet`, and `workspace.jet`.**
+  `pkg.jet` owns package identity and publishable package metadata. `env.jet`
+  is the dev-shell role file; `workspace.jet` is the monorepo index carrying
+  `module workspace { ... }`. Other role modules may live in any discovered
+  `.jet` file; their role is declared by module name (`module env.dev { ... }`,
+  `module image.server { ... }`). There are no required `config.jet`,
+  `build.jet`, or `fleet.jet` filenames.
 - **Users type `jet`; engines are separate executables.**
   `D-JPK-DISPATCH1=B`: Jetpack / jetos verbs must cross a git-style process
   boundary (`jetpack`, `jetos`, or future engine binary), with exit-code,
@@ -50,9 +53,10 @@ The latest decisions override stale prose in older Epoch 4 notes:
   `D-JPK-OSNAME1=A`; trademark sweep remains pre-release work.
 
 `pkg.jet` still owns package identity and publishable package metadata. Dev
-environments, machines, images, fleets, services, and workspace membership are
-role modules. That preserves the old package/env separation while deleting
-required role filenames.
+environments and workspace membership have their reserved role files
+(`env.jet`, `workspace.jet`); images and other role modules are discovered by
+declaration. That preserves the package/env/workspace separation while deleting
+unratified role filenames.
 
 ---
 
@@ -69,7 +73,7 @@ required role filenames.
 | U15 | `D-JPK-FLEET1` | A | Fleet host maps remain research/capture only; rollout waits for Epoch 7 jetos ballots. |
 | U16 | `D-JPK-BRIDGE1` | A | `jet env -p`, foreign `flake.nix`/`devenv.nix` consumption, `jet run nixpkgs@tool`, `jet bridge flake`. |
 | U17 | `D-JPK-OSNAME1` | A | Spell the OS `jetos`. |
-| U18 | `D-JPK-TWONAMES1` + follow-ups | amended | One reserved file (`pkg.jet`) and one user command (`jet`); role modules discovered by declaration; engines dispatched as executables. |
+| U18 | `D-JPK-TWONAMES1` + follow-ups | amended | Reserved files are `pkg.jet`, `env.jet`, and `workspace.jet`; role modules are shaped by declaration; engines dispatched as executables. |
 | U19 | `D-JPK-DEVCOMPOSE1` | D | `jet env [name]` enters a tools-only shell and never runs project functions; `jet dev` explicitly runs `fn dev()` inside `env(base + env.dev)`. |
 | U20 | `D-JPK-ADAPTER1` | A | Ad-hoc adapters: `Pkg.adapt(source:, recipe:)` turns fetched bytes into packages for refs with no `pkg.jet`/flake/nixpkgs path; `jet add <ref> --adapt` drafts from read-only probes; curated recipes over one `Recipe.build(fn(BuildContext))`; constructor names are follow-up ballot surface. |
 | U21 | `D-JPK-CHANNEL1` | A | Channel refs (`#latest`, `#v0.x`, `#main`) resolve only in `jet update` / first `add`; lock stays exact; `jet outdated` read-only; unlocked channel ref in CI is an error. |
@@ -98,8 +102,8 @@ Built before this refresh:
   them as shipped OS syntax.
 - Providers `core` and `nix` realize into the hangar; `.jet/lock` exists.
 - `workspace.jet` / `module workspace { members: ... }` partially exists from
-  earlier cards, but U18 follow-up changes the filename rule: `workspace` is a
-  role module, not a required file.
+  earlier cards; the current rule is reserved filename plus role declaration,
+  not either one alone.
 - Hyphenated names in package/module/system/image/env name positions are
   ratified and implemented.
 
@@ -196,9 +200,9 @@ Sequence (workOrder; jetpack first per owner directive, then FFI program):
 | 13 | package signing (Ed25519) | package-signing.md | ready, after #3 (index dep); crypto already approved (D-DEP-CRYPTO1) |
 | 179 | toolchain as dependency (U30) | toolchain-as-dependency.md | ready — zero ballots |
 | 85 | CAS build cache contract | cas-build-cache.md | ready — includes cache-poisoning race fix |
-| 180 | FFI program frame | ffi-interop-program.md | deciding — D-FFI-PY1, D-DEP-PY1, D-JPK-EXTPROV1; Phase 0 binder seam buildable now |
-| 124 | JS/npm + Swift interop (P0) | ffi-interop-program.md | deciding — D-FFI-JS1, D-FFI-SWIFT1 |
-| 5 | plugin target | ../sidequests/plugin-target.md | deciding — D-PLUGIN-EXPORT1, D-PLUGIN-VERSION1; substrate buildable now |
+| 180 | FFI program frame | ffi-interop-program.md | ready — D-FFI-PY1, D-DEP-PY1, D-JPK-EXTPROV1 ratified; Phase 0 binder seam buildable now |
+| 124 | JS/npm + Swift interop (P0) | ffi-interop-program.md | ready — D-FFI-JS1, D-FFI-SWIFT1 ratified |
+| 5 | plugin target | ../sidequests/plugin-target.md | ready — D-PLUGIN-EXPORT1, D-PLUGIN-VERSION1 ratified; substrate buildable now |
 | 2 | jetos generations | jetos-generations.md | frozen — gated on Phase A/D prereqs |
 | 9 | flagship slices (Tower-in-Jet web app) | — | frozen — owner deferred to e4 end |
 
@@ -208,9 +212,7 @@ reproducibility contract; D-JPK-RINGSHIP1=C would ride #179's toolchain object.
 
 ## Open / Proposed
 
-Ten open ballots (2026-07-03 prep pass), all rendered in Tower's Decide lane:
-D-JPK-RINGSHIP1 · D-JPK-BUILDTOOL1 · D-JPK-ADAPTNAME1 (the adapter-spelling
-follow-up predicted below) · D-FFI-PY1 · D-FFI-JS1 (amends D-NPMTYPE1's
-hand-authored-stub floor — explicit) · D-FFI-SWIFT1 · D-DEP-PY1 (I6 CPython
-runtime approval) · D-JPK-EXTPROV1 (npm/PyPI/SwiftPM providers) ·
-D-PLUGIN-EXPORT1 · D-PLUGIN-VERSION1.
+No open E4 ballots remain from the 2026-07-03 prep pass. The listed gates are
+ratified in Tower and recorded in `docs/spec/syntax-decisions.md`; any new
+user-typeable syntax, command, manifest field, provider prefix, or diagnostic
+family still needs its own ballot before implementation.

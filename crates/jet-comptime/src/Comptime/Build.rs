@@ -28,6 +28,12 @@ pub struct SigningIdentityId(pub usize);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ProbeId(pub usize);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct PluginId(pub usize);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct GeneratedModuleId(pub usize);
+
 macro_rules! target_handle {
     ($name:ident) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -119,6 +125,30 @@ pub struct ProbeHandle {
 
 impl ProbeHandle {
     pub fn id(self) -> ProbeId {
+        self.id
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct PluginHandle {
+    id: PluginId,
+    context: u64,
+}
+
+impl PluginHandle {
+    pub fn id(self) -> PluginId {
+        self.id
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct GeneratedModuleHandle {
+    id: GeneratedModuleId,
+    context: u64,
+}
+
+impl GeneratedModuleHandle {
+    pub fn id(self) -> GeneratedModuleId {
         self.id
     }
 }
@@ -247,6 +277,7 @@ pub struct BuildTarget {
     pub toolchain: ToolchainHandle,
     pub signing_identity: Option<SigningIdentityHandle>,
     pub metadata: BTreeMap<String, String>,
+    pub plugin: Option<PluginHandle>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -258,6 +289,62 @@ pub enum BuildCapability {
     Toolchain,
     Cache,
     Custom(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum BuildResourcePool {
+    Cpu,
+    Memory,
+    Linker,
+    Console,
+    Gpu,
+    Custom(String),
+}
+
+impl BuildResourcePool {
+    pub fn as_str(&self) -> &str {
+        match self {
+            BuildResourcePool::Cpu => "cpu",
+            BuildResourcePool::Memory => "memory",
+            BuildResourcePool::Linker => "linker",
+            BuildResourcePool::Console => "console",
+            BuildResourcePool::Gpu => "gpu",
+            BuildResourcePool::Custom(name) => name.as_str(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BuildResourcePoolSpec {
+    pub pool: BuildResourcePool,
+    pub slots: usize,
+}
+
+impl BuildResourcePoolSpec {
+    pub fn new(pool: BuildResourcePool, slots: usize) -> Self {
+        BuildResourcePoolSpec { pool, slots }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LegacyWrapperKind {
+    CMake,
+    Make,
+    Gradle,
+    Npm,
+    Cargo,
+}
+
+impl LegacyWrapperKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            LegacyWrapperKind::CMake => "cmake",
+            LegacyWrapperKind::Make => "make",
+            LegacyWrapperKind::Gradle => "gradle",
+            LegacyWrapperKind::Npm => "npm",
+            LegacyWrapperKind::Cargo => "cargo",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -278,6 +365,8 @@ pub struct ActionSpec {
     pub probes: Vec<ProbeHandle>,
     pub signing_identity: Option<SigningIdentityHandle>,
     pub labels: BTreeMap<String, String>,
+    pub resource_pools: BTreeSet<BuildResourcePool>,
+    pub legacy_wrapper: Option<LegacyWrapperKind>,
 }
 
 impl ActionSpec {
@@ -297,6 +386,8 @@ impl ActionSpec {
             probes: Vec::new(),
             signing_identity: None,
             labels: BTreeMap::new(),
+            resource_pools: BTreeSet::new(),
+            legacy_wrapper: None,
         }
     }
 
@@ -360,6 +451,11 @@ impl ActionSpec {
         self.labels.insert(key.into(), value.into());
         self
     }
+
+    pub fn with_pool(mut self, pool: BuildResourcePool) -> Self {
+        self.resource_pools.insert(pool);
+        self
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -376,6 +472,236 @@ pub struct BuildAction {
     pub probes: Vec<ProbeHandle>,
     pub signing_identity: Option<SigningIdentityHandle>,
     pub labels: BTreeMap<String, String>,
+    pub resource_pools: BTreeSet<BuildResourcePool>,
+    pub legacy_wrapper: Option<LegacyWrapperKind>,
+    pub plugin: Option<PluginHandle>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PolicySetting {
+    Allow,
+    Deny(String),
+}
+
+impl PolicySetting {
+    pub fn deny(reason: impl Into<String>) -> Self {
+        PolicySetting::Deny(reason.into())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BuildPolicy {
+    pub legacy_wrappers: PolicySetting,
+    pub wasm_plugins: PolicySetting,
+    pub plugin_grants: BTreeMap<String, BTreeSet<BuildCapability>>,
+}
+
+impl BuildPolicy {
+    pub fn allow_all() -> Self {
+        BuildPolicy {
+            legacy_wrappers: PolicySetting::Allow,
+            wasm_plugins: PolicySetting::Allow,
+            plugin_grants: BTreeMap::new(),
+        }
+    }
+
+    pub fn deny_legacy_wrappers(reason: impl Into<String>) -> Self {
+        BuildPolicy {
+            legacy_wrappers: PolicySetting::deny(reason),
+            ..Self::allow_all()
+        }
+    }
+
+    pub fn deny_wasm_plugins(reason: impl Into<String>) -> Self {
+        BuildPolicy {
+            wasm_plugins: PolicySetting::deny(reason),
+            ..Self::allow_all()
+        }
+    }
+
+    pub fn with_plugin_grant(mut self, plugin: impl Into<String>, cap: BuildCapability) -> Self {
+        self.plugin_grants
+            .entry(plugin.into())
+            .or_default()
+            .insert(cap);
+        self
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PolicyExplanation {
+    pub subject: String,
+    pub allowed: bool,
+    pub reason: String,
+    pub required_caps: Vec<BuildCapability>,
+}
+
+impl PolicyExplanation {
+    fn allowed(subject: impl Into<String>, caps: Vec<BuildCapability>) -> Self {
+        PolicyExplanation {
+            subject: subject.into(),
+            allowed: true,
+            reason: "policy allows this declared authority".to_string(),
+            required_caps: caps,
+        }
+    }
+
+    fn denied(
+        subject: impl Into<String>,
+        reason: impl Into<String>,
+        caps: Vec<BuildCapability>,
+    ) -> Self {
+        PolicyExplanation {
+            subject: subject.into(),
+            allowed: false,
+            reason: reason.into(),
+            required_caps: caps,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LegacyWrapperSpec {
+    pub kind: LegacyWrapperKind,
+    pub argv: Vec<String>,
+    pub inputs: Vec<BuildPath>,
+    pub outputs: Vec<BuildPath>,
+    pub caps: BTreeSet<BuildCapability>,
+    pub env: BTreeMap<String, String>,
+    pub labels: BTreeMap<String, String>,
+}
+
+impl LegacyWrapperSpec {
+    pub fn cmake<I, S>(argv: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        Self::new(LegacyWrapperKind::CMake, argv)
+    }
+
+    pub fn make<I, S>(argv: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        Self::new(LegacyWrapperKind::Make, argv)
+    }
+
+    pub fn gradle<I, S>(argv: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        Self::new(LegacyWrapperKind::Gradle, argv)
+    }
+
+    pub fn npm<I, S>(argv: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        Self::new(LegacyWrapperKind::Npm, argv)
+    }
+
+    pub fn cargo<I, S>(argv: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        Self::new(LegacyWrapperKind::Cargo, argv)
+    }
+
+    fn new<I, S>(kind: LegacyWrapperKind, argv: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        LegacyWrapperSpec {
+            kind,
+            argv: argv.into_iter().map(Into::into).collect(),
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+            caps: BTreeSet::new(),
+            env: BTreeMap::new(),
+            labels: BTreeMap::new(),
+        }
+    }
+
+    pub fn with_inputs<I, S>(mut self, paths: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.inputs
+            .extend(paths.into_iter().map(|p| BuildPath(p.into())));
+        self
+    }
+
+    pub fn with_outputs<I, S>(mut self, paths: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.outputs
+            .extend(paths.into_iter().map(|p| BuildPath(p.into())));
+        self
+    }
+
+    pub fn with_cap(mut self, cap: BuildCapability) -> Self {
+        self.caps.insert(cap);
+        self
+    }
+
+    pub fn with_env(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.env.insert(key.into(), value.into());
+        self
+    }
+
+    pub fn with_label(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.labels.insert(key.into(), value.into());
+        self
+    }
+
+    pub fn explain(&self, policy: &BuildPolicy) -> PolicyExplanation {
+        let subject = format!("legacy wrapper {}", self.kind.as_str());
+        let caps = self.caps.iter().cloned().collect();
+        match &policy.legacy_wrappers {
+            PolicySetting::Allow => PolicyExplanation::allowed(subject, caps),
+            PolicySetting::Deny(reason) => PolicyExplanation::denied(subject, reason, caps),
+        }
+    }
+
+    pub fn into_action_spec(self, policy: &BuildPolicy) -> Result<ActionSpec, BuildError> {
+        if let PolicySetting::Deny(_) = &policy.legacy_wrappers {
+            return Err(BuildError::PolicyDenied(self.explain(policy)));
+        }
+        if self.inputs.is_empty() {
+            return Err(BuildError::LegacyWrapperWithoutInputs(self.kind));
+        }
+        if self.outputs.is_empty() {
+            return Err(BuildError::LegacyWrapperWithoutOutputs(self.kind));
+        }
+        if self.caps.is_empty() {
+            return Err(BuildError::LegacyWrapperWithoutCaps(self.kind));
+        }
+        let mut labels = self.labels;
+        labels.insert("legacy.wrapper".to_string(), self.kind.as_str().to_string());
+        Ok(ActionSpec {
+            inputs: self.inputs,
+            outputs: self.outputs,
+            argv: self.argv,
+            env: self.env,
+            caps: self.caps,
+            cache: ActionCache::Cached,
+            toolchain: None,
+            probes: Vec::new(),
+            signing_identity: None,
+            labels,
+            resource_pools: BTreeSet::new(),
+            legacy_wrapper: Some(self.kind),
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -942,6 +1268,146 @@ pub struct BuildProbe {
     pub toolchain: ToolchainHandle,
 }
 
+pub const BUILD_PLUGIN_API_VERSION: &str = "jet.build.plugin.v1";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WasmComponentPluginSpec {
+    pub name: String,
+    pub version: String,
+    pub api_version: String,
+    pub component_digest: String,
+    pub requested_caps: BTreeSet<BuildCapability>,
+}
+
+impl WasmComponentPluginSpec {
+    pub fn new(
+        name: impl Into<String>,
+        version: impl Into<String>,
+        component_digest: impl Into<String>,
+    ) -> Self {
+        WasmComponentPluginSpec {
+            name: name.into(),
+            version: version.into(),
+            api_version: BUILD_PLUGIN_API_VERSION.to_string(),
+            component_digest: component_digest.into(),
+            requested_caps: BTreeSet::new(),
+        }
+    }
+
+    pub fn with_api_version(mut self, api_version: impl Into<String>) -> Self {
+        self.api_version = api_version.into();
+        self
+    }
+
+    pub fn with_capability(mut self, cap: BuildCapability) -> Self {
+        self.requested_caps.insert(cap);
+        self
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BuildPlugin {
+    pub id: PluginId,
+    pub name: String,
+    pub version: String,
+    pub api_version: String,
+    pub component_digest: String,
+    pub grants: BTreeSet<BuildCapability>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GeneratedModuleSpec {
+    pub name: String,
+    pub path: BuildPath,
+    pub source: String,
+}
+
+impl GeneratedModuleSpec {
+    pub fn new(
+        name: impl Into<String>,
+        path: impl Into<String>,
+        source: impl Into<String>,
+    ) -> Self {
+        GeneratedModuleSpec {
+            name: name.into(),
+            path: BuildPath(path.into()),
+            source: source.into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BuildGeneratedModule {
+    pub id: GeneratedModuleId,
+    pub name: String,
+    pub path: BuildPath,
+    pub source_digest: ContentDigest,
+    pub source: String,
+    pub plugin: Option<PluginHandle>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PluginTargetSpec {
+    pub kind: TargetKind,
+    pub name: String,
+    pub spec: TargetSpec,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PluginContribution {
+    pub actions: Vec<(String, ActionSpec)>,
+    pub targets: Vec<PluginTargetSpec>,
+    pub generated_modules: Vec<GeneratedModuleSpec>,
+}
+
+impl PluginContribution {
+    pub fn new() -> Self {
+        PluginContribution {
+            actions: Vec::new(),
+            targets: Vec::new(),
+            generated_modules: Vec::new(),
+        }
+    }
+
+    pub fn with_action(mut self, name: impl Into<String>, spec: ActionSpec) -> Self {
+        self.actions.push((name.into(), spec));
+        self
+    }
+
+    pub fn with_target(
+        mut self,
+        kind: TargetKind,
+        name: impl Into<String>,
+        spec: TargetSpec,
+    ) -> Self {
+        self.targets.push(PluginTargetSpec {
+            kind,
+            name: name.into(),
+            spec,
+        });
+        self
+    }
+
+    pub fn with_generated_module(mut self, module: GeneratedModuleSpec) -> Self {
+        self.generated_modules.push(module);
+        self
+    }
+}
+
+impl Default for PluginContribution {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PluginApplication {
+    pub plugin: PluginHandle,
+    pub actions: Vec<ActionHandle>,
+    pub targets: Vec<TargetRef>,
+    pub generated_modules: Vec<GeneratedModuleHandle>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BuildPlan {
     context: u64,
@@ -950,7 +1416,141 @@ pub struct BuildPlan {
     toolchains: Vec<BuildToolchain>,
     signing_identities: Vec<BuildSigningIdentity>,
     probes: Vec<BuildProbe>,
+    plugins: Vec<BuildPlugin>,
+    generated_modules: Vec<BuildGeneratedModule>,
     default: Option<TargetRef>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BuildGraph {
+    pub targets: Vec<BuildGraphTarget>,
+    pub actions: Vec<BuildGraphAction>,
+    pub files: Vec<BuildGraphFile>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BuildGraphTarget {
+    pub id: TargetId,
+    pub name: String,
+    pub kind: TargetKind,
+    pub deps: Vec<TargetId>,
+    pub actions: Vec<ActionId>,
+    pub files: Vec<String>,
+    pub plugin: Option<PluginId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BuildGraphAction {
+    pub id: ActionId,
+    pub name: String,
+    pub inputs: Vec<String>,
+    pub outputs: Vec<String>,
+    pub target: Option<TargetId>,
+    pub caps: Vec<BuildCapability>,
+    pub pools: Vec<BuildResourcePool>,
+    pub legacy_wrapper: Option<LegacyWrapperKind>,
+    pub plugin: Option<PluginId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BuildGraphFile {
+    pub path: String,
+    pub owner: Option<ActionId>,
+    pub consumers: Vec<ActionId>,
+    pub targets: Vec<TargetId>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuildGraphSubject {
+    Target(TargetId),
+    Action(ActionId),
+    File,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BuildExplanation {
+    pub subject: BuildGraphSubject,
+    pub label: String,
+    pub provenance: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileOwnership {
+    pub path: String,
+    pub owner: Option<ActionId>,
+    pub consumers: Vec<ActionId>,
+    pub targets: Vec<TargetId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RebuildExplanation {
+    pub action: ActionId,
+    pub action_name: String,
+    pub status: ActionCacheStatus,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BuildExecutionModel {
+    pub pools: Vec<BuildResourcePoolSpec>,
+    pub nodes: Vec<BuildExecutionNode>,
+    pub stages: Vec<BuildExecutionStage>,
+    pub events: Vec<BuildExecutionEvent>,
+    pub console_order: Vec<ActionId>,
+    pub metrics: BuildExecutionMetrics,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BuildExecutionNode {
+    pub action: ActionId,
+    pub name: String,
+    pub target: Option<TargetId>,
+    pub prerequisites: Vec<ActionId>,
+    pub pools: Vec<BuildResourcePool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BuildExecutionStage {
+    pub index: usize,
+    pub actions: Vec<ActionId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BuildExecutionEvent {
+    Ready {
+        action: ActionId,
+        stage: usize,
+    },
+    Finished {
+        action: ActionId,
+        outcome: ActionOutcome,
+    },
+    Cancelled {
+        action: ActionId,
+        failed_prereq: ActionId,
+    },
+    Pending {
+        action: ActionId,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct BuildExecutionMetrics {
+    pub actions_total: usize,
+    pub parallel_stages: usize,
+    pub max_parallel_actions: usize,
+    pub cacheable_actions: usize,
+    pub phony_actions: usize,
+    pub failed_actions: usize,
+    pub cancelled_actions: usize,
+    pub cache_restored_actions: usize,
+    pub pending_actions: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BuildExecutionReport {
+    pub events: Vec<BuildExecutionEvent>,
+    pub metrics: BuildExecutionMetrics,
 }
 
 impl BuildPlan {
@@ -976,6 +1576,14 @@ impl BuildPlan {
 
     pub fn probes(&self) -> &[BuildProbe] {
         &self.probes
+    }
+
+    pub fn plugins(&self) -> &[BuildPlugin] {
+        &self.plugins
+    }
+
+    pub fn generated_modules(&self) -> &[BuildGeneratedModule] {
+        &self.generated_modules
     }
 
     pub fn default_host_toolchain(&self) -> &BuildToolchain {
@@ -1050,6 +1658,475 @@ impl BuildPlan {
             .filter(|a| a.cache == ActionCache::UncachedPhony)
             .collect()
     }
+
+    pub fn resource_pools(&self) -> Vec<BuildResourcePoolSpec> {
+        default_resource_pools()
+    }
+
+    pub fn graph(&self) -> BuildGraph {
+        let action_targets = self.action_targets();
+        let file_index = self.file_index(&action_targets);
+        BuildGraph {
+            targets: self
+                .targets
+                .iter()
+                .map(|target| BuildGraphTarget {
+                    id: target.id,
+                    name: target.name.clone(),
+                    kind: target.kind,
+                    deps: target.deps.iter().map(|dep| dep.id).collect(),
+                    actions: target.actions.iter().map(|action| action.id).collect(),
+                    files: target
+                        .sources
+                        .iter()
+                        .chain(target.inputs.iter())
+                        .chain(target.outputs.iter())
+                        .map(|path| path.as_str().to_string())
+                        .collect(),
+                    plugin: target.plugin.map(|plugin| plugin.id),
+                })
+                .collect(),
+            actions: self
+                .actions
+                .iter()
+                .map(|action| BuildGraphAction {
+                    id: action.id,
+                    name: action.name.clone(),
+                    inputs: action
+                        .inputs
+                        .iter()
+                        .map(|path| path.as_str().to_string())
+                        .collect(),
+                    outputs: action
+                        .outputs
+                        .iter()
+                        .map(|path| path.as_str().to_string())
+                        .collect(),
+                    target: action_targets.get(&action.id).copied(),
+                    caps: action.caps.iter().cloned().collect(),
+                    pools: action_pools(action),
+                    legacy_wrapper: action.legacy_wrapper,
+                    plugin: action.plugin.map(|plugin| plugin.id),
+                })
+                .collect(),
+            files: file_index
+                .into_iter()
+                .map(|(path, ownership)| BuildGraphFile {
+                    path,
+                    owner: ownership.owner,
+                    consumers: ownership.consumers,
+                    targets: ownership.targets,
+                })
+                .collect(),
+        }
+    }
+
+    pub fn file_ownership(&self, path: impl AsRef<str>) -> FileOwnership {
+        let path = path.as_ref().to_string();
+        self.file_index(&self.action_targets())
+            .remove(&path)
+            .unwrap_or(FileOwnership {
+                path,
+                owner: None,
+                consumers: Vec::new(),
+                targets: Vec::new(),
+            })
+    }
+
+    pub fn explain_target(&self, target: impl Into<TargetRef>) -> Option<BuildExplanation> {
+        let target = self.target(target)?;
+        Some(BuildExplanation {
+            subject: BuildGraphSubject::Target(target.id),
+            label: target.name.clone(),
+            provenance: vec![
+                format!("kind={:?}", target.kind),
+                format!("sources={}", target.sources.len()),
+                format!("deps={}", target.deps.len()),
+                format!("actions={}", target.actions.len()),
+            ],
+        })
+    }
+
+    pub fn explain_action(&self, action: ActionHandle) -> Option<BuildExplanation> {
+        let action = self.action(action)?;
+        let mut provenance = vec![
+            format!("argv={}", action.argv.join(" ")),
+            format!("inputs={}", action.inputs.len()),
+            format!("outputs={}", action.outputs.len()),
+            format!("cache={:?}", action.cache),
+        ];
+        if let Some(wrapper) = action.legacy_wrapper {
+            provenance.push(format!("legacy={}", wrapper.as_str()));
+        }
+        if let Some(plugin) = action.plugin {
+            provenance.push(format!("plugin={}", self.plugins[plugin.id.0].name));
+        }
+        Some(BuildExplanation {
+            subject: BuildGraphSubject::Action(action.id),
+            label: action.name.clone(),
+            provenance,
+        })
+    }
+
+    pub fn explain_file(&self, path: impl AsRef<str>) -> BuildExplanation {
+        let ownership = self.file_ownership(path.as_ref());
+        BuildExplanation {
+            subject: BuildGraphSubject::File,
+            label: ownership.path,
+            provenance: vec![
+                format!("owner={:?}", ownership.owner),
+                format!("consumers={:?}", ownership.consumers),
+                format!("targets={:?}", ownership.targets),
+            ],
+        }
+    }
+
+    pub fn why_rebuilt(
+        &self,
+        action: ActionHandle,
+        status: ActionCacheStatus,
+    ) -> Result<RebuildExplanation, BuildError> {
+        if action.context != self.context {
+            return Err(BuildError::UnknownAction(action.id));
+        }
+        let action_ref = self
+            .actions
+            .get(action.id.0)
+            .ok_or(BuildError::UnknownAction(action.id))?;
+        Ok(RebuildExplanation {
+            action: action.id,
+            action_name: action_ref.name.clone(),
+            status,
+            reason: cache_status_reason(status).to_string(),
+        })
+    }
+
+    pub fn execution_model(&self) -> Result<BuildExecutionModel, BuildError> {
+        let prereqs = self.action_prereqs()?;
+        let stages = execution_stages(&prereqs)?;
+        let action_targets = self.action_targets();
+        let nodes = self
+            .actions
+            .iter()
+            .map(|action| BuildExecutionNode {
+                action: action.id,
+                name: action.name.clone(),
+                target: action_targets.get(&action.id).copied(),
+                prerequisites: prereqs.get(&action.id).cloned().unwrap_or_default(),
+                pools: action_pools(action),
+            })
+            .collect::<Vec<_>>();
+        let events = stages
+            .iter()
+            .flat_map(|stage| {
+                stage
+                    .actions
+                    .iter()
+                    .map(move |action| BuildExecutionEvent::Ready {
+                        action: *action,
+                        stage: stage.index,
+                    })
+            })
+            .collect();
+        let metrics = execution_metrics(&self.actions, &stages);
+        Ok(BuildExecutionModel {
+            pools: self.resource_pools(),
+            nodes,
+            stages,
+            events,
+            console_order: self.actions.iter().map(|action| action.id).collect(),
+            metrics,
+        })
+    }
+
+    pub fn execution_report(
+        &self,
+        outcomes: &[(ActionHandle, ActionOutcome)],
+    ) -> Result<BuildExecutionReport, BuildError> {
+        let prereqs = self.action_prereqs()?;
+        let stages = execution_stages(&prereqs)?;
+        let mut supplied = BTreeMap::new();
+        for (action, outcome) in outcomes {
+            if action.context != self.context || action.id.0 >= self.actions.len() {
+                return Err(BuildError::UnknownAction(action.id));
+            }
+            supplied.insert(action.id, *outcome);
+        }
+
+        let mut failed = BTreeSet::new();
+        let mut finished = BTreeSet::new();
+        let mut events = Vec::new();
+        let mut metrics = execution_metrics(&self.actions, &stages);
+        for stage in &stages {
+            for action in &stage.actions {
+                if let Some(failed_prereq) = prereqs
+                    .get(action)
+                    .into_iter()
+                    .flat_map(|deps| deps.iter())
+                    .find(|dep| failed.contains(*dep))
+                {
+                    failed.insert(*action);
+                    metrics.cancelled_actions += 1;
+                    events.push(BuildExecutionEvent::Cancelled {
+                        action: *action,
+                        failed_prereq: *failed_prereq,
+                    });
+                    continue;
+                }
+                match supplied.get(action) {
+                    Some(outcome) => {
+                        finished.insert(*action);
+                        if matches!(outcome, ActionOutcome::Failed { .. }) {
+                            failed.insert(*action);
+                            metrics.failed_actions += 1;
+                        }
+                        if matches!(outcome, ActionOutcome::RestoredFromCache) {
+                            metrics.cache_restored_actions += 1;
+                        }
+                        events.push(BuildExecutionEvent::Finished {
+                            action: *action,
+                            outcome: *outcome,
+                        });
+                    }
+                    None => {
+                        metrics.pending_actions += 1;
+                        events.push(BuildExecutionEvent::Pending { action: *action });
+                    }
+                }
+            }
+        }
+        Ok(BuildExecutionReport { events, metrics })
+    }
+
+    fn action_targets(&self) -> BTreeMap<ActionId, TargetId> {
+        let mut out = BTreeMap::new();
+        for target in &self.targets {
+            for action in &target.actions {
+                out.entry(action.id).or_insert(target.id);
+            }
+        }
+        out
+    }
+
+    fn file_index(
+        &self,
+        action_targets: &BTreeMap<ActionId, TargetId>,
+    ) -> BTreeMap<String, FileOwnership> {
+        let mut files = BTreeMap::<String, FileOwnership>::new();
+        for action in &self.actions {
+            for output in &action.outputs {
+                let entry = files
+                    .entry(output.as_str().to_string())
+                    .or_insert(FileOwnership {
+                        path: output.as_str().to_string(),
+                        owner: None,
+                        consumers: Vec::new(),
+                        targets: Vec::new(),
+                    });
+                entry.owner = Some(action.id);
+            }
+            for input in &action.inputs {
+                let entry = files
+                    .entry(input.as_str().to_string())
+                    .or_insert(FileOwnership {
+                        path: input.as_str().to_string(),
+                        owner: None,
+                        consumers: Vec::new(),
+                        targets: Vec::new(),
+                    });
+                entry.consumers.push(action.id);
+            }
+        }
+        for target in &self.targets {
+            for path in target
+                .sources
+                .iter()
+                .chain(target.inputs.iter())
+                .chain(target.outputs.iter())
+            {
+                let entry = files
+                    .entry(path.as_str().to_string())
+                    .or_insert(FileOwnership {
+                        path: path.as_str().to_string(),
+                        owner: None,
+                        consumers: Vec::new(),
+                        targets: Vec::new(),
+                    });
+                entry.targets.push(target.id);
+            }
+            for action in &target.actions {
+                if let Some(target_id) = action_targets.get(&action.id) {
+                    for path in self.actions[action.id.0]
+                        .inputs
+                        .iter()
+                        .chain(self.actions[action.id.0].outputs.iter())
+                    {
+                        let entry =
+                            files
+                                .entry(path.as_str().to_string())
+                                .or_insert(FileOwnership {
+                                    path: path.as_str().to_string(),
+                                    owner: None,
+                                    consumers: Vec::new(),
+                                    targets: Vec::new(),
+                                });
+                        if !entry.targets.contains(target_id) {
+                            entry.targets.push(*target_id);
+                        }
+                    }
+                }
+            }
+        }
+        files
+    }
+
+    fn action_prereqs(&self) -> Result<BTreeMap<ActionId, Vec<ActionId>>, BuildError> {
+        let mut out = self
+            .actions
+            .iter()
+            .map(|action| (action.id, BTreeSet::<ActionId>::new()))
+            .collect::<BTreeMap<_, _>>();
+        for target in &self.targets {
+            let mut deps = BTreeSet::new();
+            for dep in &target.deps {
+                collect_target_actions(self, dep.id, &mut BTreeSet::new(), &mut deps)?;
+            }
+            for action in &target.actions {
+                out.entry(action.id)
+                    .or_default()
+                    .extend(deps.iter().copied());
+            }
+        }
+        let action_targets = self.action_targets();
+        for ownership in self.file_index(&action_targets).values() {
+            let Some(owner) = ownership.owner else {
+                continue;
+            };
+            for consumer in &ownership.consumers {
+                if *consumer != owner {
+                    out.entry(*consumer).or_default().insert(owner);
+                }
+            }
+        }
+        Ok(out
+            .into_iter()
+            .map(|(action, deps)| (action, deps.into_iter().collect()))
+            .collect())
+    }
+}
+
+fn default_resource_pools() -> Vec<BuildResourcePoolSpec> {
+    vec![
+        BuildResourcePoolSpec::new(BuildResourcePool::Cpu, 0),
+        BuildResourcePoolSpec::new(BuildResourcePool::Memory, 0),
+        BuildResourcePoolSpec::new(BuildResourcePool::Linker, 1),
+        BuildResourcePoolSpec::new(BuildResourcePool::Console, 1),
+        BuildResourcePoolSpec::new(BuildResourcePool::Gpu, 1),
+    ]
+}
+
+fn action_pools(action: &BuildAction) -> Vec<BuildResourcePool> {
+    if action.resource_pools.is_empty() {
+        vec![BuildResourcePool::Cpu]
+    } else {
+        action.resource_pools.iter().cloned().collect()
+    }
+}
+
+fn cache_status_reason(status: ActionCacheStatus) -> &'static str {
+    match status {
+        ActionCacheStatus::Hit(CacheHitReason::LocalActionRecordMatched) => {
+            "local action record matched"
+        }
+        ActionCacheStatus::Hit(CacheHitReason::DeclaredOutputsRestored) => {
+            "declared outputs restored"
+        }
+        ActionCacheStatus::Miss(CacheMissReason::NoLocalActionRecord) => "no local action record",
+        ActionCacheStatus::Miss(CacheMissReason::ActionKeyChanged) => "action key changed",
+        ActionCacheStatus::Miss(CacheMissReason::DeclaredOutputMissing) => {
+            "declared output missing"
+        }
+        ActionCacheStatus::Miss(CacheMissReason::RemoteDenied) => "remote cache denied by policy",
+        ActionCacheStatus::Miss(CacheMissReason::UncachedAction) => "action is uncached",
+    }
+}
+
+fn execution_stages(
+    prereqs: &BTreeMap<ActionId, Vec<ActionId>>,
+) -> Result<Vec<BuildExecutionStage>, BuildError> {
+    let mut remaining = prereqs.keys().copied().collect::<BTreeSet<_>>();
+    let mut done = BTreeSet::new();
+    let mut stages = Vec::new();
+    while !remaining.is_empty() {
+        let ready = remaining
+            .iter()
+            .copied()
+            .filter(|action| {
+                prereqs
+                    .get(action)
+                    .into_iter()
+                    .flat_map(|deps| deps.iter())
+                    .all(|dep| done.contains(dep))
+            })
+            .collect::<Vec<_>>();
+        if ready.is_empty() {
+            return Err(BuildError::ActionDependencyCycle);
+        }
+        for action in &ready {
+            remaining.remove(action);
+            done.insert(*action);
+        }
+        stages.push(BuildExecutionStage {
+            index: stages.len(),
+            actions: ready,
+        });
+    }
+    Ok(stages)
+}
+
+fn execution_metrics(
+    actions: &[BuildAction],
+    stages: &[BuildExecutionStage],
+) -> BuildExecutionMetrics {
+    BuildExecutionMetrics {
+        actions_total: actions.len(),
+        parallel_stages: stages.len(),
+        max_parallel_actions: stages
+            .iter()
+            .map(|stage| stage.actions.len())
+            .max()
+            .unwrap_or(0),
+        cacheable_actions: actions
+            .iter()
+            .filter(|action| action.cache == ActionCache::Cached)
+            .count(),
+        phony_actions: actions
+            .iter()
+            .filter(|action| action.cache == ActionCache::UncachedPhony)
+            .count(),
+        ..BuildExecutionMetrics::default()
+    }
+}
+
+fn collect_target_actions(
+    plan: &BuildPlan,
+    target: TargetId,
+    visiting: &mut BTreeSet<TargetId>,
+    out: &mut BTreeSet<ActionId>,
+) -> Result<(), BuildError> {
+    if !visiting.insert(target) {
+        return Err(BuildError::TargetDependencyCycle);
+    }
+    let target_ref = plan
+        .targets
+        .get(target.0)
+        .ok_or(BuildError::UnknownTarget(target))?;
+    for dep in &target_ref.deps {
+        collect_target_actions(plan, dep.id, visiting, out)?;
+    }
+    out.extend(target_ref.actions.iter().map(|action| action.id));
+    visiting.remove(&target);
+    Ok(())
 }
 
 #[derive(Debug, Clone)]
@@ -1060,6 +2137,8 @@ pub struct BuildContext {
     toolchains: Vec<BuildToolchain>,
     signing_identities: Vec<BuildSigningIdentity>,
     probes: Vec<BuildProbe>,
+    plugins: Vec<BuildPlugin>,
+    generated_modules: Vec<BuildGeneratedModule>,
     target_names: HashSet<String>,
     action_names: HashSet<String>,
     toolchain_names: HashSet<String>,
@@ -1093,6 +2172,8 @@ impl BuildContext {
             }],
             signing_identities: Vec::new(),
             probes: Vec::new(),
+            plugins: Vec::new(),
+            generated_modules: Vec::new(),
             target_names: HashSet::new(),
             action_names: HashSet::new(),
             toolchain_names,
@@ -1333,6 +2414,121 @@ impl BuildContext {
         name: impl Into<String>,
         spec: ActionSpec,
     ) -> Result<ActionHandle, BuildError> {
+        self.push_action(name, spec, None)
+    }
+
+    pub fn apply_wasm_component_plugin(
+        &mut self,
+        spec: WasmComponentPluginSpec,
+        contribution: PluginContribution,
+        policy: &BuildPolicy,
+    ) -> Result<PluginApplication, BuildError> {
+        validate_plugin_spec(&spec)?;
+        if spec.api_version != BUILD_PLUGIN_API_VERSION {
+            return Err(BuildError::PluginVersionMismatch {
+                plugin: spec.name,
+                expected: BUILD_PLUGIN_API_VERSION.to_string(),
+                actual: spec.api_version,
+            });
+        }
+        if let PolicySetting::Deny(reason) = &policy.wasm_plugins {
+            let caps = spec.requested_caps.iter().cloned().collect();
+            return Err(BuildError::PolicyDenied(PolicyExplanation::denied(
+                format!("wasm build plugin {}", spec.name),
+                reason,
+                caps,
+            )));
+        }
+        let grants = policy
+            .plugin_grants
+            .get(&spec.name)
+            .cloned()
+            .unwrap_or_default();
+        for cap in &spec.requested_caps {
+            if !grants.contains(cap) {
+                return Err(BuildError::PolicyDenied(PolicyExplanation::denied(
+                    format!("wasm build plugin {}", spec.name),
+                    format!("missing capability grant {}", cap_name(cap)),
+                    spec.requested_caps.iter().cloned().collect(),
+                )));
+            }
+        }
+        for (_, action) in &contribution.actions {
+            for cap in &action.caps {
+                if !grants.contains(cap) {
+                    return Err(BuildError::PolicyDenied(PolicyExplanation::denied(
+                        format!("wasm build plugin {}", spec.name),
+                        format!(
+                            "contributed action uses ungranted capability {}",
+                            cap_name(cap)
+                        ),
+                        action.caps.iter().cloned().collect(),
+                    )));
+                }
+            }
+        }
+
+        let plugin_id = PluginId(self.plugins.len());
+        let plugin = PluginHandle {
+            id: plugin_id,
+            context: self.context,
+        };
+        self.plugins.push(BuildPlugin {
+            id: plugin_id,
+            name: spec.name,
+            version: spec.version,
+            api_version: spec.api_version,
+            component_digest: spec.component_digest,
+            grants,
+        });
+
+        let mut action_handles = Vec::new();
+        for (name, action) in contribution.actions {
+            action_handles.push(self.push_action(name, action, Some(plugin))?);
+        }
+
+        let mut target_handles = Vec::new();
+        for target in contribution.targets {
+            let id =
+                self.push_target_with_plugin(target.name, target.kind, target.spec, Some(plugin))?;
+            target_handles.push(TargetRef {
+                id,
+                context: self.context,
+            });
+        }
+
+        let mut module_handles = Vec::new();
+        for module in contribution.generated_modules {
+            validate_generated_module(&module)?;
+            let id = GeneratedModuleId(self.generated_modules.len());
+            self.generated_modules.push(BuildGeneratedModule {
+                id,
+                name: module.name,
+                path: module.path,
+                source_digest: ContentDigest::from_bytes(module.source.as_bytes()),
+                source: module.source,
+                plugin: Some(plugin),
+            });
+            module_handles.push(GeneratedModuleHandle {
+                id,
+                context: self.context,
+            });
+        }
+
+        Ok(PluginApplication {
+            plugin,
+            actions: action_handles,
+            targets: target_handles,
+            generated_modules: module_handles,
+        })
+    }
+
+    fn push_action(
+        &mut self,
+        name: impl Into<String>,
+        spec: ActionSpec,
+        plugin: Option<PluginHandle>,
+    ) -> Result<ActionHandle, BuildError> {
         let name = check_name(name.into(), NameKind::Action)?;
         if !self.action_names.insert(name.clone()) {
             return Err(BuildError::DuplicateActionName(name));
@@ -1353,6 +2549,9 @@ impl BuildContext {
             probes: spec.probes,
             signing_identity: spec.signing_identity,
             labels: spec.labels,
+            resource_pools: spec.resource_pools,
+            legacy_wrapper: spec.legacy_wrapper,
+            plugin,
         });
         Ok(ActionHandle {
             id,
@@ -1379,6 +2578,16 @@ impl BuildContext {
         kind: TargetKind,
         spec: TargetSpec,
     ) -> Result<TargetId, BuildError> {
+        self.push_target_with_plugin(name, kind, spec, None)
+    }
+
+    fn push_target_with_plugin(
+        &mut self,
+        name: impl Into<String>,
+        kind: TargetKind,
+        spec: TargetSpec,
+        plugin: Option<PluginHandle>,
+    ) -> Result<TargetId, BuildError> {
         let name = check_name(name.into(), NameKind::Target)?;
         if !self.target_names.insert(name.clone()) {
             return Err(BuildError::DuplicateTargetName(name));
@@ -1399,6 +2608,7 @@ impl BuildContext {
             toolchain,
             signing_identity: spec.signing_identity,
             metadata: spec.metadata,
+            plugin,
         });
         Ok(id)
     }
@@ -1415,6 +2625,8 @@ impl BuildContext {
             toolchains: self.toolchains.clone(),
             signing_identities: self.signing_identities.clone(),
             probes: self.probes.clone(),
+            plugins: self.plugins.clone(),
+            generated_modules: self.generated_modules.clone(),
             default,
         })
     }
@@ -1553,6 +2765,19 @@ pub enum BuildError {
     UnknownToolchain(ToolchainId),
     UnknownSigningIdentity(SigningIdentityId),
     UnknownProbe(ProbeId),
+    LegacyWrapperWithoutInputs(LegacyWrapperKind),
+    LegacyWrapperWithoutOutputs(LegacyWrapperKind),
+    LegacyWrapperWithoutCaps(LegacyWrapperKind),
+    PolicyDenied(PolicyExplanation),
+    EmptyPluginField(String),
+    PluginVersionMismatch {
+        plugin: String,
+        expected: String,
+        actual: String,
+    },
+    EmptyGeneratedModuleField(String),
+    TargetDependencyCycle,
+    ActionDependencyCycle,
 }
 
 fn canonical_action_key(
@@ -1602,6 +2827,33 @@ fn canonical_action_key(
     }
     w.str("labels");
     w.map_str(&action.labels);
+    w.str("resource-pools");
+    for pool in action_pools(action) {
+        encode_resource_pool(&mut w, &pool);
+    }
+    w.str("legacy");
+    match action.legacy_wrapper {
+        Some(wrapper) => {
+            w.bool(true);
+            w.str(wrapper.as_str());
+        }
+        None => w.bool(false),
+    }
+    w.str("plugin");
+    match action.plugin {
+        Some(plugin) => {
+            w.bool(true);
+            let plugin = &plan.plugins[plugin.id.0];
+            w.str(&plugin.name);
+            w.str(&plugin.version);
+            w.str(&plugin.api_version);
+            w.str(&plugin.component_digest);
+            for grant in &plugin.grants {
+                encode_capability(&mut w, grant);
+            }
+        }
+        None => w.bool(false),
+    }
     ActionKey(format!("act-sha256:{}", SHA256::sha256_hex(&w.bytes)))
 }
 
@@ -1623,6 +2875,20 @@ fn encode_capability(w: &mut KeyWriter, cap: &BuildCapability) {
         BuildCapability::Custom(value) => {
             w.str("custom");
             w.str(value);
+        }
+    }
+}
+
+fn encode_resource_pool(w: &mut KeyWriter, pool: &BuildResourcePool) {
+    match pool {
+        BuildResourcePool::Cpu => w.str("cpu"),
+        BuildResourcePool::Memory => w.str("memory"),
+        BuildResourcePool::Linker => w.str("linker"),
+        BuildResourcePool::Console => w.str("console"),
+        BuildResourcePool::Gpu => w.str("gpu"),
+        BuildResourcePool::Custom(name) => {
+            w.str("custom");
+            w.str(name);
         }
     }
 }
@@ -1787,6 +3053,18 @@ fn resolve_under(base: &Path, rel: &str) -> io::Result<PathBuf> {
     Ok(out)
 }
 
+fn cap_name(cap: &BuildCapability) -> String {
+    match cap {
+        BuildCapability::Fs => "Fs".to_string(),
+        BuildCapability::Exec => "Exec".to_string(),
+        BuildCapability::Net => "Net".to_string(),
+        BuildCapability::Env => "Env".to_string(),
+        BuildCapability::Toolchain => "Toolchain".to_string(),
+        BuildCapability::Cache => "Cache".to_string(),
+        BuildCapability::Custom(name) => name.clone(),
+    }
+}
+
 fn check_name(name: String, kind: NameKind) -> Result<String, BuildError> {
     if name.trim().is_empty() {
         return match kind {
@@ -1798,6 +3076,32 @@ fn check_name(name: String, kind: NameKind) -> Result<String, BuildError> {
         };
     }
     Ok(name)
+}
+
+fn validate_plugin_spec(spec: &WasmComponentPluginSpec) -> Result<(), BuildError> {
+    if spec.name.trim().is_empty() {
+        return Err(BuildError::EmptyPluginField("name".to_string()));
+    }
+    if spec.version.trim().is_empty() {
+        return Err(BuildError::EmptyPluginField(spec.name.clone()));
+    }
+    if spec.api_version.trim().is_empty() {
+        return Err(BuildError::EmptyPluginField(spec.name.clone()));
+    }
+    if spec.component_digest.trim().is_empty() {
+        return Err(BuildError::EmptyPluginField(spec.name.clone()));
+    }
+    Ok(())
+}
+
+fn validate_generated_module(module: &GeneratedModuleSpec) -> Result<(), BuildError> {
+    if module.name.trim().is_empty()
+        || module.path.as_str().trim().is_empty()
+        || module.source.trim().is_empty()
+    {
+        return Err(BuildError::EmptyGeneratedModuleField(module.name.clone()));
+    }
+    Ok(())
 }
 
 fn validate_toolchain(name: &str, spec: &ToolchainSpec) -> Result<(), BuildError> {

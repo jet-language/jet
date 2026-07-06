@@ -118,6 +118,40 @@ fn registered_codes() -> BTreeSet<String> {
     out
 }
 
+fn registered_code_rows() -> Vec<(String, usize)> {
+    let diag_md = read(&root().join("docs/spec/diagnostics.md"));
+    let mut rows = Vec::new();
+    let mut in_registry = false;
+    for (idx, line) in diag_md.lines().enumerate() {
+        if line.trim() == "## Error code registry" {
+            in_registry = true;
+            continue;
+        }
+        if in_registry && line.starts_with("## ") {
+            break;
+        }
+        if !in_registry {
+            continue;
+        }
+        let trimmed = line.trim();
+        if !trimmed.starts_with('|') {
+            continue;
+        }
+        let cells: Vec<&str> = trimmed.split('|').map(str::trim).collect();
+        if cells.len() < 3 {
+            continue;
+        }
+        let code = cells[1].trim();
+        if code.len() == 5
+            && (code.starts_with('E') || code.starts_with('L'))
+            && code[1..].chars().all(|c| c.is_ascii_digit())
+        {
+            rows.push((code.to_string(), idx + 1));
+        }
+    }
+    rows
+}
+
 /// Whether a code is marked as retired in diagnostics.md.
 fn is_retired(code: &str, diag_md: &str) -> bool {
     for line in diag_md.lines() {
@@ -467,6 +501,22 @@ fn every_emitted_code_has_diagnostics_md_entry() {
          then add what/why/fix and a tests/ui snapshot.\n\
          Missing:\n  {}",
         missing.join("\n  ")
+    );
+}
+
+#[test]
+fn diagnostics_registry_has_no_duplicate_code_rows() {
+    let mut seen = BTreeSet::new();
+    let mut duplicates = Vec::new();
+    for (code, line) in registered_code_rows() {
+        if !seen.insert(code.clone()) {
+            duplicates.push(format!("{code} at docs/spec/diagnostics.md:{line}"));
+        }
+    }
+    assert!(
+        duplicates.is_empty(),
+        "duplicate code rows in docs/spec/diagnostics.md Error code registry:\n{}",
+        duplicates.join("\n")
     );
 }
 

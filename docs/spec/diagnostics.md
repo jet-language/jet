@@ -345,8 +345,8 @@ before continuing.
 | E3002 | runtime | error-return trace entry on a `?`-propagated failure, Zig-style (E2-M12, D-OBS1) |
 | E3003 | runtime | deadline exceeded at a wait/IO point while a `#Context(deadline: …)` budget is active (D-DEADLINE1) |
 | E3005 | runtime | a `@Pre`/`@Post` contract clause failed — checked in every build, not a debug/release split (D-PREPOST1) |
-| E3101 | sema  | *retired by D-TYPE-ALIAS-CANON1* (was: old `core.mem` pointer op gate; canonical raw ops use E0208) |
-| E3102 | sema  | *retired by D-TYPE-ALIAS-CANON1* (was: old `core.mem` pointer discovery gate) |
+| E3101 | sema  | low-level memory operation used outside an `#Unsafe("…")` block (D-LL1/D-UNSAFE2) |
+| E3102 | sema  | low-level memory vocabulary used without `use core.mem` (D-LL1/D-UNSAFE2) |
 | E3103 | sema  | `#Unsafe fn` called without an enclosing `#Unsafe("…")` block (D-UNSAFE2) |
 | E3104 | sema  | value allocated in an arena used after `arena.reset()` or `arena.free()` (D-ALLOC-D) |
 | E3110 | sema  | invalid swizzle lane on vector/SIMD type (D-SWIZZLE1) |
@@ -626,22 +626,6 @@ the `core.args` runtime-error voice above (no new code for that).
 | E1306 | two `@[Cli]` fields both derive the same flag | Every field needs a distinct `--flag`; `--help` is also reserved (every generated CLI gets one automatically). | Rename one of the fields. |
 | E1307 | a subcommand variant's payload isn't a `@[Cli]` struct | Each `enum Cmd { Variant(Payload) }` variant used as a `fn run` parameter needs a single `@[Cli]`-derived struct payload — that's where the subcommand's own flags come from. | Give the variant a single `@[Cli]` struct payload. |
 | E1308 | `` `run`'s parameter isn't a CLI-derived type `` | A typed `fn run(args: T)` entry only works when `T` is `@[Cli]`-derived, or an `enum` whose every variant carries a `@[Cli]` struct payload. | Mark the struct `@[Cli]`, or give the enum's variants `@[Cli]` struct payloads. |
-
-## Command-line diagnostics (E2-M3)
-
-These come from the CLI driver (`Source/main.rs`, `Source/CLI.rs`), not the language
-front end. They use the same `Error [E####]` / `Why:` / `Fix:` voice so the
-command line teaches the same way the compiler does. The "did you mean"
-suggestion reuses the edit-distance muscle behind the S14 teaching errors.
-
-| Code | What | Why | Fix |
-|------|------|-----|-----|
-| E2101 | That isn't a Jet command. | The first word after `jet` must be a known command (like `run`, `check`, or `test`) or an installed `jet-<name>` plugin on your PATH. | Run `jet help` to see the commands, or use the closest match named in the error. |
-| E2102 | That flag isn't one this command understands. | Each command accepts a fixed set of flags; an unknown or half-typed flag is usually a typo or a flag meant for a different command. | Drop the flag, or use the closest match named in the error; `jet help` lists the flags. |
-
-| Code | What | Why | Fix |
-|------|------|-----|-----|
-| L2101 | `jet doctor` found something in your environment that will bite you later. | Jet leans on a hidden toolchain (rustc, a build cache, your PATH); when one is missing or stale, builds fail with confusing errors far from the cause. | Apply the fix named in the report — many are auto-fixable with `jet doctor --fix`. |
 
 ## Dev-loop diagnostics (E2-M4, `jet dev`)
 

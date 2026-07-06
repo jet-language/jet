@@ -110,10 +110,9 @@ Exit: explain facts list migration state for every imported dependency.
 - Native replacement overlays, because importers should surface replacement
   candidates and proof status.
 
-## Ballots Needed
+## Ratified Decisions
 
-- `D-JPK-IMPORTCMD1` — Canonical importer command spelling and overwrite/update
-  behavior. `D-WD5` ratifies importer output shape, not the user command.
-- `D-JPK-IMPORTTODO1` — Canonical TODO diagnostic family for importer gaps if
-  new E12xx codes or warning codes are introduced.
-
+- `D-JPK-IMPORTCMD1=A` — Importers use
+  `jet import <ecosystem> <path>` plus update/dry-run/conflict policy.
+- `D-JPK-IMPORTTODO1=A` — Importer gaps use a dedicated TODO diagnostic family
+  with what/why/fix, source path, generated target, and migration status.

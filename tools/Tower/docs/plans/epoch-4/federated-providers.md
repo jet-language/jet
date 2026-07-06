@@ -12,8 +12,10 @@ not separate package managers.
 ## Current Ratified Law
 
 - `D-WD6`: listed ecosystems are federated providers under Jetpack authority.
-- `D-JPK-EXTPROV1` is still open in the E4 README for external provider surface;
-  this plan avoids implementing provider prefixes until that is decided.
+- `D-JPK-EXTPROV1=A`: npm, PyPI, and SwiftPM are first-class Jetpack
+  registry providers under the same provider seam as the Nix bridge.
+- `D-JPK-PROVIDERAUTH1=A`: provider trust roots live in reviewable source
+  policy at `policy.providers`.
 - `D-JPK-ADAPTER1=A`: refs with no metadata can be adapted through recipes.
 - `D-JPK-CACHE1=A`, `D-PKGSIGN1`, and `D-CASTORE1=A`: fetched and built objects
   carry cache/signature/hash identity.
@@ -105,12 +107,10 @@ already locked and present.
 - Migration importers, which consume provider metadata.
 - Native replacement overlays, which consume compatibility/replacement facts.
 
-## Ballots Needed
+## Ratified Decisions
 
-- `D-JPK-EXTPROV1` — External provider prefixes, source-ref spelling, and CLI
-  input forms for npm/PyPI/SwiftPM/binary providers. Already listed open in
-  README; implementation of user-typed refs waits on it.
-- `D-JPK-PROVIDERAUTH1` — Provider trust-root policy if user-visible config is
-  added for registries, mirrors, key pinning, or allowed providers beyond
-  existing signing/cache law.
-
+- `D-JPK-EXTPROV1=A` — External npm/PyPI/SwiftPM providers are accepted under
+  Jetpack's fetch, lock, vendor, hash-pin, offline, and trust laws.
+- `D-JPK-PROVIDERAUTH1=A` — Registry, mirror, key, and allow/deny policy lives
+  in `policy.providers` and feeds grants, cache, signatures, lock rationale,
+  and audit.

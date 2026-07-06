@@ -46,6 +46,15 @@ mod jet_std {
         pub state: u64,
     }
 
+    // D-SOLVER-LIB1=A: explicit finite solver state. This first slice records
+    // ordinary Bool constraints in insertion order; no hidden backtracking.
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct Solver {
+        pub seed: i64,
+        pub checked: i64,
+        pub failures: i64,
+    }
+
     // D-DET-CAPAPI: a deterministic span of milliseconds. Minted by `time.ms(n)` /
     // `time.secs(n)` (pure value constructors). The injected `Clock` advances by one
     // with `clock.wait(d)`; read it back with `duration.millis()`. std-only (I6).
@@ -448,6 +457,14 @@ mod jet_std {
     }
     impl super::JetShow for Rng {
         fn jet_show(&self) -> String { format!("Rng {{ .. }}") }
+    }
+    impl super::JetShow for Solver {
+        fn jet_show(&self) -> String {
+            format!(
+                "Solver {{ seed: {}, checked: {}, failures: {} }}",
+                self.seed, self.checked, self.failures
+            )
+        }
     }
     impl super::JetShow for Duration {
         fn jet_show(&self) -> String { format!("{}ms", self.ms) }
@@ -3805,6 +3822,27 @@ fn jet_rng_shuffle<T>(r: &mut jet_std::Rng, xs: &mut Vec<T>) {
     for i in (1..len).rev() {
         let j = jet_rng_int(r, 0, i as i64) as usize;
         xs.swap(i, j);
+    }
+}
+// D-SOLVER-LIB1=A: explicit finite solver state. Constraints are ordinary Bool
+// values recorded in insertion order; no unification or hidden backtracking.
+fn jet_solver_new(seed: i64) -> jet_std::Solver {
+    jet_std::Solver { seed, checked: 0, failures: 0 }
+}
+fn jet_solver_require(s: &mut jet_std::Solver, ok: bool) {
+    s.checked += 1;
+    if !ok {
+        s.failures += 1;
+    }
+}
+fn jet_solver_failure_count(s: &jet_std::Solver) -> i64 {
+    s.failures
+}
+fn jet_solver_status(s: &jet_std::Solver) -> String {
+    if s.failures == 0 {
+        "ok".to_string()
+    } else {
+        "failed".to_string()
     }
 }
 // D-DET-CAPAPI: `Duration` constructors + read. Pure value ops, ms-based.

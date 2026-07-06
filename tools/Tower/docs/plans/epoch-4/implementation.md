@@ -43,25 +43,28 @@ process seam.
 
 ### A2. Filename canon (`D-JPK-FILENAME2=B`)
 
-Goal: keep `pkg.jet`; remove stale `pack.jet` implementation instructions.
+Goal: keep the ratified reserved filenames: `pkg.jet` for package identity,
+`env.jet` for dev-shell roles, and `workspace.jet` for the monorepo index.
 
 Work:
 
 1. Ensure `PAYLOAD_FILE` / equivalent remains `"pkg.jet"`.
-2. Remove or update docs/tests that teach `pack.jet` as current.
+2. Ensure role-file probes recognize `env.jet` and `workspace.jet` for their
+   reserved jobs without making other role modules filename-bound.
 3. Treat `pack.jet`, `payload.jet`, `jet.toml`, and `jetpack.toml` as retired
    names with a teaching error pointing to `pkg.jet`.
-4. Fold `workspace.jet` semantics into role-module discovery: `module workspace`
-   can live in `pkg.jet` or any discovered `.jet` file.
+4. Keep `workspace.jet` semantics tied to `module workspace { ... }`: the file
+   gives the index role; the declaration gives the module body shape.
 
 Diagnostic:
 
 - `E1226` `old-manifest-filename`: "`pack.jet` is not the package manifest name;
   Jet reads `pkg.jet`." Fix: rename to `pkg.jet`.
 
-Acceptance test: a repo with `module workspace` and `module env.dev` in
-arbitrary file names is discovered; only `pkg.jet` is reserved. `system.*`
-examples are frozen jetos research until Epoch 7.
+Acceptance test: a repo with `workspace.jet` containing `module workspace` and
+`env.jet` containing `module env.dev` is discovered. Other role modules can be
+found by declaration in ordinary `.jet` files. `system.*` examples are frozen
+jetos research until Epoch 7.
 
 ### A3. Module declaration role form (`D-JPK-MODBODY1=A`)
 
