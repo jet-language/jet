@@ -294,7 +294,7 @@ fn print_jit_op_report() {
         {
             continue;
         }
-        let covered = jet_jit::resident_jit_safe_bundle(&bundle);
+        let covered = jet_jit::try_compile_bundle(&bundle).is_ok();
         for tag in jet_jit::jit_dump_main_ops(&bundle) {
             let entry = ops.entry(tag).or_default();
             if covered {
@@ -304,9 +304,9 @@ fn print_jit_op_report() {
             }
         }
     }
-    eprintln!("jit observed TIR op coverage:");
+    eprintln!("jit observed TIR op compile coverage:");
     for (op, (covered, gaps)) in ops {
-        eprintln!("  {op}: covered_examples={covered} gap_examples={gaps}");
+        eprintln!("  {op}: compile_covered_examples={covered} gap_examples={gaps}");
     }
 }
 
@@ -1057,13 +1057,13 @@ fn resident_jit_safe_string_method_chain() {
     );
 }
 
-/// Audit which type-checked examples are resident-safe. The committed manifest is
+/// Audit which type-checked examples compile through the JIT lowerer. The committed manifest is
 /// a ratchet baseline: any coverage movement is deliberate and reviewed.
 #[test]
 fn jit_coverage_audit() {
     let (covered, gaps) = collect_jit_coverage();
     let (expected_covered, expected_gaps, _) = parse_jit_gap_manifest();
-    eprintln!("resident-safe ({}):", covered.len());
+    eprintln!("jit compile-covered ({}):", covered.len());
     for s in &covered {
         eprintln!("  {s}");
     }
