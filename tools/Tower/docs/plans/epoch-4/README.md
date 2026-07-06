@@ -12,6 +12,15 @@ Older split files were folded into these three: `unified-ecosystem.md`,
 `jetos-design.md`, `IMPLEMENTATION-STATUS.md`,
 `payload-env-separation.md`, and `ad-hoc-adapters.md`.
 
+World-domination follow-up slices live beside the main plan:
+
+- [`universal-trust-grants.md`](universal-trust-grants.md) — #229, D-WD1.
+- [`strict-package-graph-catalogs.md`](strict-package-graph-catalogs.md) — #231, D-WD3.
+- [`explainable-lockfiles.md`](explainable-lockfiles.md) — #232, D-WD4.
+- [`migration-importers.md`](migration-importers.md) — #233, D-WD5.
+- [`federated-providers.md`](federated-providers.md) — #234, D-WD6.
+- [`native-replacement-overlays.md`](native-replacement-overlays.md) — #242, D-WD15.
+
 ---
 
 ## Current Canon

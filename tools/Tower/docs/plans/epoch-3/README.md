@@ -44,6 +44,12 @@ and JIT/debugger successors outside Epoch 3.
 | [`../sidequests/compression-codecs.md`](../sidequests/compression-codecs.md) | D-CODECS1 | `core.compress.gzip` + `core.compress.zstd` |
 | [`../sidequests/unicode-text.md`](../sidequests/unicode-text.md) | D-GRAPHEME1 | Opt-in Unicode grapheme + normalization package |
 | [`../sidequests/raylib-graphics.md`](../sidequests/raylib-graphics.md) | D-RAYLIB1 | Official `core.raylib` graphics bridge |
+| [`typed-data-core.md`](typed-data-core.md) | D-WD9 | typed data Core plus accelerator bridges |
+| [`core-game-substrate.md`](core-game-substrate.md) | D-WD10 | stable `core.game` substrate |
+| [`typed-target-profiles.md`](typed-target-profiles.md) | D-WD11 | typed embedded and freestanding target profiles |
+| [`adaptive-runtime.md`](adaptive-runtime.md) | D-ADAPTFID1 | adaptive runtime policy research |
+| [`logic-programming-subset.md`](logic-programming-subset.md) | research | explicit solver and logic subset research |
+| [`structural-merge.md`](structural-merge.md) | research | semantic-identity merge planning |
 
 ---
 

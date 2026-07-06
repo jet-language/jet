@@ -748,12 +748,25 @@ pub const CORE_CANONICAL: &str = "core";
 
 /// S51 (ratified M10): first-party short names reserved before packages land.
 pub const FIRST_PARTY_RESERVED: &[&str] = &[
-    "core", "jet", "c", "http", "regex", "csv", "toml", "crypto", "archive",
+    "core", "jet", "c", "rust", "py", "js", "swift", "http", "regex", "csv", "toml",
+    "crypto", "archive",
 ];
 
 /// S50 (ratified M7): Rust FFI block introducers — `extern rust "…" { … }`.
 pub const KW_EXTERN: &str = "extern"; // S50
 pub const KW_RUST: &str = "rust"; // S50
+
+/// D-FFI-UNIFY1: every foreign language mounts as `<lang>.<lib>`.
+pub const FOREIGN_ROOTS: &[&str] = &[
+    C_MODULE_ROOT,
+    KW_RUST,
+    PY_MODULE_ROOT,
+    JS_MODULE_ROOT,
+    SWIFT_MODULE_ROOT,
+];
+pub const PY_MODULE_ROOT: &str = "py"; // D-FFI-PY1 / D-FFI-UNIFY1
+pub const JS_MODULE_ROOT: &str = "js"; // D-FFI-JS1 / D-FFI-UNIFY1
+pub const SWIFT_MODULE_ROOT: &str = "swift"; // D-FFI-SWIFT1 / D-FFI-UNIFY1
 
 /// S59 (ratified E2-M14): C FFI module path root — `c.<lib>`, `c.<lib>.__bindgen__`.
 pub const C_MODULE_ROOT: &str = "c"; // S59
@@ -781,6 +794,8 @@ pub const ATTR_AUDIT: &str = "Audit"; // retired, D-UNSAFE2
                                       // Parser: `TokKind::Hash` followed by PascalCase ident → `Type::Tagged { marker, inner }`.
 /// S59: cache directory segment under `.jet/` for generated C bindings.
 pub const BINDINGS_C_SUBDIR: &str = "bindings/c"; // S59
+/// D-FFI-UNIFY1: generated foreign bindings live under `.jet/bindings/<lang>/`.
+pub const BINDINGS_ROOT_SUBDIR: &str = "bindings"; // D-FFI-UNIFY1
 
 /// S14: foreign forms recognized only for teaching errors.
 /// S19-amend (2026-06-17): `while`/`for` are now teaching errors pointing at `loop`.

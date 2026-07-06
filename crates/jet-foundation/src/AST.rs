@@ -503,21 +503,97 @@ impl ImportDecl {
         Syntax::normalize_core_module(name)
     }
 
+    /// D-FFI-UNIFY1: parse a project-tier foreign namespace import,
+    /// `use <lang>.<lib> as alias`.
+    pub fn foreign_namespace(&self) -> Option<ForeignNamespace> {
+        let ImportKind::Module(name, _) = &self.kind else {
+            return None;
+        };
+        ForeignNamespace::from_module_path(name)
+    }
+
     /// True when this import is any C `use` form (`use c.<lib>` or `use "<…>.h"`).
     pub fn is_c_import(&self) -> bool {
         match &self.kind {
-            ImportKind::Module(name, _) => {
-                let mut segs = name.split('.');
-                if segs.next() == Some(Syntax::C_MODULE_ROOT) {
-                    if let Some(lib) = segs.next() {
-                        return !lib.is_empty() && segs.next().is_none();
-                    }
-                }
-                false
-            }
+            ImportKind::Module(_, _) => self
+                .foreign_namespace()
+                .map(|ns| ns.language == ForeignLanguage::C)
+                .unwrap_or(false),
             ImportKind::File(path, _) => path.ends_with(".h"),
             ImportKind::Unqualified { .. } => false,
         }
+    }
+}
+
+/// D-FFI-UNIFY1: registered foreign language roots. C and Rust are active
+/// today; py/js/swift are ratified mounts whose binders land on later cards.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ForeignLanguage {
+    C,
+    Rust,
+    Py,
+    Js,
+    Swift,
+}
+
+impl ForeignLanguage {
+    pub const ALL: [ForeignLanguage; 5] = [
+        ForeignLanguage::C,
+        ForeignLanguage::Rust,
+        ForeignLanguage::Py,
+        ForeignLanguage::Js,
+        ForeignLanguage::Swift,
+    ];
+
+    pub fn from_root(root: &str) -> Option<Self> {
+        match root {
+            Syntax::C_MODULE_ROOT => Some(ForeignLanguage::C),
+            Syntax::KW_RUST => Some(ForeignLanguage::Rust),
+            Syntax::PY_MODULE_ROOT => Some(ForeignLanguage::Py),
+            Syntax::JS_MODULE_ROOT => Some(ForeignLanguage::Js),
+            Syntax::SWIFT_MODULE_ROOT => Some(ForeignLanguage::Swift),
+            _ => None,
+        }
+    }
+
+    pub fn root(self) -> &'static str {
+        match self {
+            ForeignLanguage::C => Syntax::C_MODULE_ROOT,
+            ForeignLanguage::Rust => Syntax::KW_RUST,
+            ForeignLanguage::Py => Syntax::PY_MODULE_ROOT,
+            ForeignLanguage::Js => Syntax::JS_MODULE_ROOT,
+            ForeignLanguage::Swift => Syntax::SWIFT_MODULE_ROOT,
+        }
+    }
+
+    pub fn bindings_subdir(self) -> String {
+        format!("{}/{}", Syntax::BINDINGS_ROOT_SUBDIR, self.root())
+    }
+}
+
+/// D-FFI-UNIFY1: a mounted foreign library, `<lang>.<lib>`.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ForeignNamespace {
+    pub language: ForeignLanguage,
+    pub lib: String,
+}
+
+impl ForeignNamespace {
+    pub fn from_module_path(path: &str) -> Option<Self> {
+        let mut segs = path.split('.');
+        let language = ForeignLanguage::from_root(segs.next()?)?;
+        let lib = segs.next()?;
+        if lib.is_empty() || segs.next().is_some() {
+            return None;
+        }
+        Some(ForeignNamespace {
+            language,
+            lib: lib.to_string(),
+        })
+    }
+
+    pub fn display(&self) -> String {
+        format!("{}.{}", self.language.root(), self.lib)
     }
 }
 

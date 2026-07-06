@@ -16,6 +16,94 @@ use std::process::Command;
 mod common;
 use common::FfiBridgeLock;
 
+#[test]
+fn unified_foreign_binder_registry_routes_active_and_planned_languages() {
+    use jet::Foreign::{binder_for, BinderStatus, BinderSurface};
+    use jet::AST::ForeignLanguage;
+
+    let expected = [
+        (
+            ForeignLanguage::C,
+            "c",
+            "bindings/c",
+            BinderSurface::Namespace,
+            BinderStatus::Active,
+        ),
+        (
+            ForeignLanguage::Rust,
+            "rust",
+            "bindings/rust",
+            BinderSurface::Namespace,
+            BinderStatus::Planned,
+        ),
+        (
+            ForeignLanguage::Py,
+            "py",
+            "bindings/py",
+            BinderSurface::Namespace,
+            BinderStatus::Planned,
+        ),
+        (
+            ForeignLanguage::Js,
+            "js",
+            "bindings/js",
+            BinderSurface::Namespace,
+            BinderStatus::Planned,
+        ),
+        (
+            ForeignLanguage::Swift,
+            "swift",
+            "bindings/swift",
+            BinderSurface::Namespace,
+            BinderStatus::Planned,
+        ),
+    ];
+
+    for (lang, root, bindings, surface, status) in expected {
+        assert_eq!(ForeignLanguage::from_root(root), Some(lang));
+        assert_eq!(lang.root(), root);
+        assert_eq!(lang.bindings_subdir(), bindings);
+        let binder = binder_for(lang).expect("registered binder");
+        assert_eq!(binder.surface, surface);
+        assert_eq!(binder.status, status);
+    }
+}
+
+#[test]
+fn unified_foreign_namespace_model_recognizes_c_project_import_only() {
+    use jet::AST::{ForeignLanguage, ForeignNamespace};
+
+    let c = ForeignNamespace::from_module_path("c.raylib").expect("c namespace");
+    assert_eq!(c.language, ForeignLanguage::C);
+    assert_eq!(c.lib, "raylib");
+    assert_eq!(c.display(), "c.raylib");
+
+    assert_eq!(
+        ForeignNamespace::from_module_path("js.plotly")
+            .expect("js namespace")
+            .language,
+        ForeignLanguage::Js
+    );
+    assert!(ForeignNamespace::from_module_path("c").is_none());
+    assert!(ForeignNamespace::from_module_path("c.raylib.extra").is_none());
+    assert!(ForeignNamespace::from_module_path("lua.socket").is_none());
+}
+
+#[test]
+fn planned_foreign_roots_are_reserved_until_their_binders_land() {
+    let dir = common::unique_tmp("jet_foreign_reserved");
+    fs::create_dir_all(&dir).unwrap();
+    let main = dir.join("main.jet");
+    let src = "use js.plotly as plot\nfn run() { }\n";
+    fs::write(&main, src).unwrap();
+
+    let diags = jet::compile_with_path(src, main.to_str().unwrap())
+        .expect_err("planned foreign roots must be reserved");
+    assert_eq!(diags[0].code, "E1002");
+    let rendered = jet::render_diagnostics(main.to_str().unwrap(), src, &diags);
+    assert!(rendered.contains("`js` is reserved for first-party or foreign packages"));
+}
+
 /// Build a tiny C static library `libjetc.a` in `dir`, returning its directory
 /// and link name. Skips (returns None) when no C compiler is available.
 fn build_c_lib(dir: &Path) -> Option<(PathBuf, String)> {

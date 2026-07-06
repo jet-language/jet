@@ -10,6 +10,7 @@ pub mod CFFI;
 pub mod Compile;
 pub mod Driver;
 pub mod FFI;
+pub mod Foreign;
 pub mod Jetpack;
 pub mod Loader;
 pub mod Lock;

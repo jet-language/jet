@@ -857,8 +857,8 @@ fn check_reserved_import(imp: &ImportDecl) -> Result<(), Diagnostic> {
     if Syntax::FIRST_PARTY_RESERVED.contains(&alias.as_str()) {
         return Err(Diagnostic::error(
             "E1002",
-            format!("`{}` is reserved for first-party packages", alias),
-            "`core`, `jet`, and the first-party ring names can't be used for local modules"
+            format!("`{}` is reserved for first-party or foreign packages", alias),
+            "`core`, `jet`, first-party ring names, and foreign-language roots can't be used for local modules"
                 .to_string(),
             format!(
                 "rename the module or use it with `{} other_name`",
@@ -872,8 +872,8 @@ fn check_reserved_import(imp: &ImportDecl) -> Result<(), Diagnostic> {
         if Syntax::FIRST_PARTY_RESERVED.contains(&root) {
             return Err(Diagnostic::error(
                 "E1002",
-                format!("`{}` is reserved for first-party packages", root),
-                "`core`, `jet`, and the first-party ring names can't be used for local modules"
+                format!("`{}` is reserved for first-party or foreign packages", root),
+                "`core`, `jet`, first-party ring names, and foreign-language roots can't be used for local modules"
                     .to_string(),
                 "choose a different module name".to_string(),
                 Some(*span),

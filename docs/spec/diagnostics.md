@@ -448,7 +448,7 @@ before continuing.
 | E0982 | jetpack | `use <pkg>` names an `executable` package — executables go on PATH, not `use` (U17) |
 | E0983 | jetpack | `use <pkg>` names a declared `library` dependency that hasn't been realized yet (U17) |
 | E1001 | jet   | unknown core module |
-| E1002 | jet   | local module shadows reserved first-party root/name |
+| E1002 | jet   | local module shadows reserved first-party or foreign root/name |
 | E1003 | sema  | integer literal out of range for its width |
 | E1004 | sema  | unknown item in core module |
 | E1005 | sema  | overflow opt-in not wrapping a single integer op |

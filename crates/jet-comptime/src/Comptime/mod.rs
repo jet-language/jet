@@ -15,6 +15,7 @@
 //! `String` (S41), and `BTreeMap` ordering (S38).
 
 mod Builtins;
+pub mod Build;
 mod Diagnostics;
 mod Interpreter;
 mod JsonInterp;

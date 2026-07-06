@@ -26,6 +26,7 @@ pub use jet_driver::{
     Comptime,
     Diagnostics,
     Driver,
+    Foreign,
     Formatter,
     Generics,
     Jetpack,

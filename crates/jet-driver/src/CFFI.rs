@@ -24,7 +24,8 @@
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
 use crate::AST::{
-    CModule, CModuleKind, ExternFn, ImportDecl, ImportKind, Item, LoadedModule, ProgramBundle,
+    CModule, CModuleKind, ExternFn, ForeignLanguage, ImportDecl, ImportKind, Item, LoadedModule,
+    ProgramBundle,
 };
 use std::collections::HashMap;
 use std::path::Path;
@@ -34,17 +35,8 @@ pub use crate::AST::{CFfi, CImportLink, CLib};
 
 /// `Module("c.<lib>")` → `Some("<lib>")` (the logical-module C `use` form).
 pub fn c_module_lib(imp: &ImportDecl) -> Option<String> {
-    if let ImportKind::Module(name, _) = &imp.kind {
-        let mut segs = name.split('.');
-        if segs.next() == Some(Syntax::C_MODULE_ROOT) {
-            let lib = segs.next()?;
-            // Reject `c.lib.extra` and bare `c` — only `c.<lib>` is a C use.
-            if !lib.is_empty() && segs.next().is_none() {
-                return Some(lib.to_string());
-            }
-        }
-    }
-    None
+    let ns = imp.foreign_namespace()?;
+    (ns.language == ForeignLanguage::C).then_some(ns.lib)
 }
 
 /// `File("<…>.h")` → `Some((header, lib))` (the header-path C `use` form). The
@@ -75,7 +67,11 @@ fn synthetic_alias(lib: &str) -> String {
 /// True when a file path sits under the generated bindings cache
 /// `.jet/bindings/c/` (D-CBIND7). `#Bindgen` is legal only there (E3207).
 fn is_generated_cache_file(display: &str) -> bool {
-    let needle = format!("{}/{}/", Syntax::SOURCE_ROOT_DIR, Syntax::BINDINGS_C_SUBDIR);
+    let needle = format!(
+        "{}/{}/",
+        Syntax::SOURCE_ROOT_DIR,
+        ForeignLanguage::C.bindings_subdir()
+    );
     display.replace('\\', "/").contains(&needle)
 }
 
@@ -104,7 +100,7 @@ fn e3207(lib: &str, span: Span) -> Diagnostic {
         format!(
             "`{}/{}/{}.{}` is written by `{} bind`; hand-written sources use `#{} module`",
             Syntax::SOURCE_ROOT_DIR,
-            Syntax::BINDINGS_C_SUBDIR,
+            ForeignLanguage::C.bindings_subdir(),
             lib,
             Syntax::FILE_EXT,
             Syntax::BINARY_NAME,
@@ -424,11 +420,8 @@ fn load_binding_caches(bundle: &mut ProgramBundle, diags: &mut Vec<Diagnostic>) 
         bundle.modules.iter().map(|m| m.path.clone()).collect();
 
     for lib in libs {
-        let cache_path = bundle
-            .project_root
-            .join(Syntax::SOURCE_ROOT_DIR)
-            .join(Syntax::BINDINGS_C_SUBDIR)
-            .join(format!("{}.{}", lib, Syntax::FILE_EXT));
+        let cache_path =
+            crate::Foreign::binding_cache_file(&bundle.project_root, ForeignLanguage::C, &lib);
 
         if already.contains(&cache_path) {
             continue;

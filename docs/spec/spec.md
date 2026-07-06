@@ -718,6 +718,16 @@ and a **`jet`** wrapper around `target/debug/jet`. **`cargo build`** once, then
 `jet run …` / `jet lsp` / `cargo test --test lsp`. Editor setup:
 `editors/vscode/README.md`. Release binary: `nix build .#jet`.
 
+## Unified FFI frame (D-FFI-UNIFY1)
+
+Every foreign ecosystem mounts through one model: a language root plus library
+name, `<lang>.<lib>`, with generated bindings under `.jet/bindings/<lang>/`.
+C and Rust are the active binders today. C uses the namespace surface
+(`use c.<lib>` / `#Extern module c.<lib>`); Rust keeps the shipped
+`extern rust "crate@version" { ... }` declaration block as its active binder
+surface. Python, JS, and Swift roots are registered for their ratified binders,
+but their binder depth lands on the later interop cards.
+
 ## M7 — Rust FFI (`extern rust`, done)
 
 **`extern rust "crate@version" { … }`** (S50) declares foreign functions. Each
