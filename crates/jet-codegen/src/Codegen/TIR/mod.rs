@@ -746,8 +746,8 @@ pub enum TStmt {
     },
     /// D-DBG3 step 2 (dap-debugger): a source line marker, one per lowered `Stmt`,
     /// inserted ONLY when `cx.debug_linemap` is set (native `jet debug` builds —
-    /// never a normal build or the JIT tier, so this is invisible to `jit_covers_stmt`'s
-    /// coverage decision and every other TStmt consumer). Emits a `// jet:line N`
+    /// never a normal build or the JIT tier, so this is invisible to the JIT
+    /// lowering gate and every other TStmt consumer). Emits a `// jet:line N`
     /// comment immediately before the statement's generated Rust, giving the native
     /// backend a rust-line -> jet-line table without touching any other TStmt shape.
     LineMarker(usize),

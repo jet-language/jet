@@ -17,7 +17,7 @@ use std::process::Command;
 /// resident heap), so every method funnels into [`run_checked`].
 ///
 /// This is the permanent fallback (D-JIT1): even when Cranelift tier-1 is
-/// active, calls outside `jit_covers` fall back here, never to silence.
+/// active, unsupported resident paths fall back here, never to silence.
 #[derive(Default)]
 pub struct InterpreterBackend;
 

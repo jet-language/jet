@@ -719,7 +719,7 @@ mod tests {
     }
 
     #[test]
-    fn jit_covers_task_examples() {
+    fn resident_jit_safe_task_examples() {
         for file in [
             "examples/features/concurrency/tasks.jet",
             "examples/features/concurrency/scheduler_spawn.jet",
@@ -733,7 +733,7 @@ mod tests {
                     .all(|d| !matches!(d.severity, crate::Diagnostics::Severity::Error)),
                 "{file} must type-check"
             );
-            let detail = jet_jit::jit_covers_bundle_detail(&bundle);
+            let detail = jet_jit::resident_jit_safe_bundle_detail(&bundle);
             if !detail.is_empty() {
                 eprintln!("{file}: {detail}");
                 if file.contains("160") {
@@ -742,7 +742,7 @@ mod tests {
                     }
                 }
             }
-            assert!(detail.is_empty(), "{file} must be jit-covered: {detail}");
+            assert!(detail.is_empty(), "{file} must be resident-safe: {detail}");
         }
     }
 }
