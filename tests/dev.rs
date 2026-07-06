@@ -438,6 +438,10 @@ fn dev_default_matches_compiled_binary() {
                 exit_code,
             } => ProgramOutput::ran(stdout, stderr, exit_code),
             RunOutcome::Problems(diags) => {
+                eprintln!(
+                    "default boundary: {stem}: {}",
+                    diags.iter().map(|d| d.code).collect::<Vec<_>>().join(",")
+                );
                 assert!(
                     diags.iter().any(|d| BOUNDARY_CODES.contains(&d.code)),
                     "`{}` neither ran nor stopped at a named boundary {:?} under the default \
@@ -484,6 +488,14 @@ fn dev_default_matches_compiled_binary() {
     assert!(
         ran > 0,
         "expected at least some examples to run via the default jet dev backend"
+    );
+    assert_eq!(
+        boundary, 0,
+        "default jet dev must run every AOT-runnable example; backend gaps must fall through transparently"
+    );
+    assert_eq!(
+        manifested, 0,
+        "default jet dev must not carry manifested stdout/stderr/exit-code divergences"
     );
 }
 
@@ -686,6 +698,30 @@ fn dev_default_aot_fallback_matches_io_log() {
     let got = normalize_for_parity("io/log", got);
     let expected = normalize_for_parity("io/log", expected);
     assert_eq!(got, expected);
+}
+
+#[test]
+fn dev_default_aot_fallback_runs_resident_boundaries() {
+    let dir = std::env::temp_dir();
+    for stem in ["concurrency/task_controls", "memory/entity_tree"] {
+        let file = example_path(stem);
+        let expected = compiled_binary_output(&dir, "aot_fallback_resident", 0, stem, &file)
+            .unwrap_or_else(|| panic!("{stem} should compile through the AOT path"));
+        let got = match dev_iteration(&file, false, false) {
+            RunOutcome::Ran {
+                stdout,
+                stderr,
+                exit_code,
+            } => ProgramOutput::ran(stdout, stderr, exit_code),
+            RunOutcome::Problems(diags) => {
+                panic!("default dev should AOT-fallback-run {stem}: {diags:?}")
+            }
+        };
+        assert_eq!(
+            normalize_for_parity(stem, got),
+            normalize_for_parity(stem, expected)
+        );
+    }
 }
 
 /// c139 M4: scheduler/channel spawn stress example is resident-safe and runs.

@@ -9,9 +9,10 @@
 pub use jet_foundation::JitBackend::{JitBackend, RunOutcome};
 
 use crate::Diagnostics::Diagnostic;
-use crate::Interpreter::{detect_dev_mode, run_checked, DevMode};
+use crate::Interpreter::run_checked;
 use crate::AST::ProgramBundle;
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 /// Tier-0 backend: the comptime interpreter. Stateless between runs (no
 /// resident heap), so every method funnels into [`run_checked`].
@@ -95,9 +96,6 @@ impl<F: JitBackend> JitBackend for AotFallbackBackend<F> {
 }
 
 fn try_aot_subprocess(bundle: &ProgramBundle) -> Option<RunOutcome> {
-    if matches!(detect_dev_mode(bundle), DevMode::Resident) {
-        return None;
-    }
     let entry = bundle.modules.get(bundle.entry)?;
     let file = entry.display.as_str();
     let compiled = crate::compile_with_path(&entry.source, file).ok()?;
@@ -138,7 +136,7 @@ fn try_aot_subprocess(bundle: &ProgramBundle) -> Option<RunOutcome> {
         if !built.status.success() {
             return None;
         }
-        let run = Command::new(&bin).output().ok()?;
+        let run = run_aot_binary_with_timeout(&bin, Duration::from_secs(5))?;
         Some(RunOutcome::Ran {
             stdout: String::from_utf8_lossy(&run.stdout).to_string(),
             stderr: String::from_utf8_lossy(&run.stderr).to_string(),
@@ -147,6 +145,29 @@ fn try_aot_subprocess(bundle: &ProgramBundle) -> Option<RunOutcome> {
     })();
     let _ = std::fs::remove_dir_all(root);
     result
+}
+
+fn run_aot_binary_with_timeout(
+    bin: &std::path::Path,
+    timeout: Duration,
+) -> Option<std::process::Output> {
+    let mut child = Command::new(bin)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .ok()?;
+    let deadline = Instant::now() + timeout;
+    loop {
+        if child.try_wait().ok()?.is_some() {
+            return child.wait_with_output().ok();
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return None;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
 }
 
 fn unique_nanos() -> u128 {

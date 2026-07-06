@@ -4423,7 +4423,18 @@ impl<F: JitBackend> JitBackend for CraneliftBackend<F> {
     fn run(&mut self, bundle: &ProgramBundle, try_anyway: bool) -> RunOutcome {
         if let Some(result) = try_resident(bundle) {
             match result {
-                Ok(out) => return out,
+                Ok(RunOutcome::Ran {
+                    stdout,
+                    stderr,
+                    exit_code,
+                }) => {
+                    return RunOutcome::Ran {
+                        stdout,
+                        stderr,
+                        exit_code,
+                    };
+                }
+                Ok(RunOutcome::Problems(_)) => return self.fallback.run(bundle, try_anyway),
                 Err(_) => return self.fallback.run(bundle, try_anyway),
             }
         }
