@@ -354,6 +354,11 @@ pub enum TargetProfileError {
     AllocatorRegionNotRam {
         region: String,
     },
+    AllocatorRegionTooSmall {
+        region: String,
+        requested_bytes: u64,
+        available_bytes: u64,
+    },
     MissingPanicPolicy,
     RamOverflow {
         used_bytes: u64,
@@ -433,9 +438,16 @@ fn validate_allocator(profile: &TargetProfile, errors: &mut Vec<TargetProfileErr
         AllocatorPolicy::Unspecified if profile.no_os => {
             errors.push(TargetProfileError::MissingAllocatorPolicy)
         }
-        AllocatorPolicy::Fixed { region, .. } => {
+        AllocatorPolicy::Fixed { region, size } => {
             match profile.memory.iter().find(|r| r.name == *region) {
-                Some(r) if r.kind == MemoryKind::Ram => {}
+                Some(r) if r.kind == MemoryKind::Ram && size.bytes <= r.size.bytes => {}
+                Some(r) if r.kind == MemoryKind::Ram => {
+                    errors.push(TargetProfileError::AllocatorRegionTooSmall {
+                        region: region.clone(),
+                        requested_bytes: size.bytes,
+                        available_bytes: r.size.bytes,
+                    })
+                }
                 Some(_) => errors.push(TargetProfileError::AllocatorRegionNotRam {
                     region: region.clone(),
                 }),

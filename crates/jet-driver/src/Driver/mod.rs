@@ -32,6 +32,39 @@ pub fn compile_bundle_path_opts(
     )
 }
 
+#[derive(Debug)]
+pub enum TargetProfileCompileError {
+    Diagnostics(Vec<Diagnostic>),
+    Profile(Vec<crate::TargetProfile::TargetProfileError>),
+}
+
+/// D-TARGET-* production hook: validate a selected typed target profile from
+/// sema facts before codegen. CLI/UI wording remains future work; this returns
+/// profile errors as data.
+pub fn compile_bundle_path_with_target_profile(
+    file: &str,
+    mode: crate::Sema::CompileMode,
+    profile: &crate::TargetProfile::TargetProfile,
+) -> Result<crate::CompileOutput, TargetProfileCompileError> {
+    let usage = target_profile_usage_for_file(file, mode)
+        .map_err(TargetProfileCompileError::Diagnostics)?;
+    let profile_errors = profile.validate(&usage);
+    if !profile_errors.is_empty() {
+        return Err(TargetProfileCompileError::Profile(profile_errors));
+    }
+    compile_bundle_path_opts_full(
+        file,
+        mode,
+        profile.no_os,
+        false,
+        false,
+        false,
+        false,
+        Some(profile.triple.as_str()),
+    )
+    .map_err(TargetProfileCompileError::Diagnostics)
+}
+
 /// Like `compile_bundle_path_opts`, but for `jet build --target=plugin`
 /// (D-PLUGIN1=B / D-DEP-WASM1=A, c81): also emits the guest `.wit` + wasm32
 /// Rust artifacts (`Codegen::emit_plugin`).
@@ -67,6 +100,32 @@ pub fn compile_bundle_path_opts_dbg(
         debug_linemap,
         cross_target,
     )
+}
+
+fn target_profile_usage_for_file(
+    file: &str,
+    mode: crate::Sema::CompileMode,
+) -> Result<crate::TargetProfile::TargetProfileUse, Vec<Diagnostic>> {
+    let mut bundle = crate::Loader::load_entry_with_overlay(file, None, false)?;
+    let diags = crate::Sema::check_bundle(&mut bundle, mode);
+    let mut errors = Vec::new();
+    for d in std::mem::take(&mut bundle.parse_teaching)
+        .into_iter()
+        .chain(diags)
+    {
+        if d.severity == Severity::Error {
+            errors.push(d);
+        }
+    }
+    if !errors.is_empty() {
+        return Err(errors);
+    }
+    let mut core_apis: Vec<String> = bundle.used_core.into_iter().collect();
+    core_apis.sort();
+    Ok(crate::TargetProfile::TargetProfileUse {
+        core_apis,
+        ..crate::TargetProfile::TargetProfileUse::default()
+    })
 }
 
 /// The real implementation behind every `compile_bundle_path_opts*` facade —

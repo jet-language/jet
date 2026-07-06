@@ -1,5 +1,6 @@
 //! Card #239: internal typed target profile model.
 
+use jet::Driver::TargetProfileCompileError;
 use jet::Syntax::RuntimeLayer;
 use jet::TargetProfile::{
     AllocatorPolicy, ByteSize, LinkerInput, MemoryAccess, MemoryKind, MemoryRegion, MmioAccess,
@@ -92,6 +93,65 @@ fn linker_override_requires_hashed_provenance() {
     assert!(errors.contains(&TargetProfileError::LinkerFileMissingHash {
         path: "vendor/memory.x".to_string()
     }));
+}
+
+#[test]
+fn allocator_size_must_fit_named_ram_region() {
+    let mut profile = sensor_profile();
+    profile.memory.push(MemoryRegion::new(
+        "scratch",
+        0x2001_0000,
+        ByteSize::kib(4),
+        MemoryKind::Ram,
+        MemoryAccess::Rw,
+    ));
+    profile.allocator = AllocatorPolicy::Fixed {
+        region: "scratch".to_string(),
+        size: ByteSize::kib(8),
+    };
+    let errors = profile.validate(&TargetProfileUse::default());
+    assert!(
+        errors.contains(&TargetProfileError::AllocatorRegionTooSmall {
+            region: "scratch".to_string(),
+            requested_bytes: ByteSize::kib(8).bytes,
+            available_bytes: ByteSize::kib(4).bytes,
+        })
+    );
+}
+
+#[test]
+fn selected_target_profile_rejects_unavailable_core_api_before_codegen() {
+    let dir = std::env::temp_dir().join(format!("jet_target_profile_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.jet");
+    std::fs::write(
+        &file,
+        r#"
+use core.files as fs
+
+fn run() {
+    print(fs.read("missing.txt") ?? "missing")
+}
+"#,
+    )
+    .unwrap();
+    let err = jet::Driver::compile_bundle_path_with_target_profile(
+        &file.to_string_lossy(),
+        jet::Sema::CompileMode::Run,
+        &sensor_profile(),
+    )
+    .expect_err("no-os target profile should reject core.files before codegen");
+    match err {
+        TargetProfileCompileError::Profile(errors) => assert!(errors.iter().any(|e| matches!(
+            e,
+            TargetProfileError::CoreApiUnavailable { api, .. } if api.starts_with("core.files")
+        ))),
+        TargetProfileCompileError::Diagnostics(diags) => {
+            panic!("expected profile errors, got diagnostics: {diags:?}")
+        }
+    }
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]

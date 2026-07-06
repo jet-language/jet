@@ -495,35 +495,74 @@ impl<'a> Checker<'a> {
         let sig = core_fixed_sig(module, name);
         match (module, name) {
             ("core.game", "run") => {
-                if !(1..=3).contains(&args.len()) {
-                    self.diags
-                        .push(wrong_core_arity("run", 1, args.len(), span));
-                }
                 if let Some(scene) = args.get_mut(0) {
-                    if let Expr::Ident(root, root_span) = &scene.expr {
-                        if let Some(info) = self.lookup(root) {
-                            if !info.mutable {
-                                self.diags.push(Diagnostic::error(
-                                    "E0202",
-                                    format!("`game.run` needs edit access to `{root}`"),
-                                    "running a scene advances its frame hooks and deterministic replay state".to_string(),
-                                    format!("declare `{root} := game.Scene.new(...)` before running it"),
-                                    Some(*root_span),
-                                ));
+                    self.check_game_run_scene_edit(&scene.expr);
+                    self.expect_core_arg("run", 0, &Type::Named("GameScene".to_string()), scene);
+                }
+                match args.len() {
+                    1 => {}
+                    2 => {
+                        let label = args[1].label.as_ref().map(|(l, _)| l.clone());
+                        match label.as_deref() {
+                            Some("backend") => self.expect_core_arg(
+                                "run",
+                                1,
+                                &Type::Named("GameBackend".to_string()),
+                                &mut args[1],
+                            ),
+                            Some("replay") | None => self.expect_core_arg(
+                                "run",
+                                1,
+                                &Type::Named("GameReplay".to_string()),
+                                &mut args[1],
+                            ),
+                            Some(label) => {
+                                game_run_label_error(&mut self.diags, label, &args[1], 1, span);
+                                self.infer(&mut args[1].expr);
                             }
                         }
                     }
-                    self.expect_core_arg("run", 0, &Type::Named("GameScene".to_string()), scene);
-                }
-                if let Some(arg) = args.get_mut(1) {
-                    let want = match arg.label.as_ref().map(|(l, _)| l.as_str()) {
-                        Some("backend") => Type::Named("GameBackend".to_string()),
-                        _ => Type::Named("GameReplay".to_string()),
-                    };
-                    self.expect_core_arg("run", 1, &want, arg);
-                }
-                if let Some(arg) = args.get_mut(2) {
-                    self.expect_core_arg("run", 2, &Type::Named("GameBackend".to_string()), arg);
+                    3 => {
+                        let label1 = args[1].label.as_ref().map(|(l, _)| l.clone());
+                        match label1.as_deref() {
+                            Some("replay") | None => self.expect_core_arg(
+                                "run",
+                                1,
+                                &Type::Named("GameReplay".to_string()),
+                                &mut args[1],
+                            ),
+                            Some(label) => {
+                                game_run_label_error(&mut self.diags, label, &args[1], 1, span);
+                                self.infer(&mut args[1].expr);
+                            }
+                        }
+                        let label2 = args[2].label.as_ref().map(|(l, _)| l.clone());
+                        match label2.as_deref() {
+                            Some("backend") | None => self.expect_core_arg(
+                                "run",
+                                2,
+                                &Type::Named("GameBackend".to_string()),
+                                &mut args[2],
+                            ),
+                            Some(label) => {
+                                game_run_label_error(&mut self.diags, label, &args[2], 2, span);
+                                self.infer(&mut args[2].expr);
+                            }
+                        }
+                    }
+                    _ => {
+                        self.diags.push(Diagnostic::error(
+                            "E0104",
+                            format!("`game.run` expects 1 to 3 arguments, got {}", args.len()),
+                            "`game.run` accepts a scene plus optional replay and backend handles"
+                                .to_string(),
+                            "write `game.run(scene)`, `game.run(scene, replay: replay)`, or `game.run(scene, replay: replay, backend: backend)`".to_string(),
+                            Some(span),
+                        ));
+                        for a in args.iter_mut().skip(1) {
+                            self.infer(&mut a.expr);
+                        }
+                    }
                 }
                 return Some(Type::String);
             }
@@ -2551,6 +2590,57 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
         ("GameFrame", "input") => Some(Type::Named("GameInputSnapshot".to_string())),
         _ => None,
     }
+}
+
+impl<'a> Checker<'a> {
+    fn check_game_run_scene_edit(&mut self, expr: &Expr) {
+        let Some(root) = expr_root_ident(expr) else {
+            self.diags.push(Diagnostic::error(
+                "E0202",
+                "`game.run` needs a mutable scene binding".to_string(),
+                "running a scene advances its frame hooks and deterministic replay state"
+                    .to_string(),
+                "store the scene in `scene := game.Scene.new(...)`, then call `game.run(scene)`"
+                    .to_string(),
+                Some(expr.span()),
+            ));
+            return;
+        };
+        if let Some(info) = self.lookup(root) {
+            if !info.mutable {
+                self.diags.push(Diagnostic::error(
+                    "E0202",
+                    format!("`game.run` needs edit access to `{root}`"),
+                    "running a scene advances its frame hooks and deterministic replay state"
+                        .to_string(),
+                    format!("declare `{root} := game.Scene.new(...)` before running it"),
+                    Some(expr.span()),
+                ));
+            }
+        }
+    }
+}
+
+fn game_run_label_error(
+    diags: &mut Vec<Diagnostic>,
+    label: &str,
+    arg: &crate::AST::CallArg,
+    index: usize,
+    span: Span,
+) {
+    let (expected, fix) = if index == 1 {
+        ("replay or backend", "write `replay:` here, `backend:` here for a two-argument backend call, or drop the label")
+    } else {
+        ("backend", "write `backend:` here, or drop the label")
+    };
+    let label_span = arg.label.as_ref().map(|(_, s)| *s).unwrap_or(span);
+    diags.push(Diagnostic::error(
+        "E0125",
+        format!("`game.run` has no `{label}:` option at argument {}", index + 1),
+        format!("this position accepts {expected}; labels document the positional shape and never reorder arguments"),
+        fix.to_string(),
+        Some(label_span),
+    ));
 }
 
 /// D-MIGRATE3=A: field access on the reserved generic `DecodeResult<T>` —

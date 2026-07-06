@@ -1590,6 +1590,61 @@ fn run() {
 }
 
 #[test]
+fn game_scene_asset_registration_needs_mutable_scene() {
+    let src = r#"
+use core.game as game
+
+fn run() {
+    scene :: game.Scene.new("arcade")
+    scene.assets.image("assets/player.png") ?? panic("image")
+}
+"#;
+    let diags = jet::compile(src).expect_err("asset registration must need edit access");
+    assert!(
+        diags.iter().any(|d| d.code == "E0202"),
+        "expected E0202, got: {:?}",
+        diags.iter().map(|d| d.code).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn game_run_needs_mutable_scene_lvalue() {
+    let src = r#"
+use core.game as game
+
+fn run() {
+    print(game.run(game.Scene.new("arcade")))
+}
+"#;
+    let diags = jet::compile(src).expect_err("game.run must reject temporary scene");
+    assert!(
+        diags.iter().any(|d| d.code == "E0202"),
+        "expected E0202, got: {:?}",
+        diags.iter().map(|d| d.code).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn game_run_rejects_transposed_labels() {
+    let src = r#"
+use core.game as game
+
+fn run() {
+    scene := game.Scene.new("arcade")
+    replay :: game.Replay.record("runs/demo.jreplay")
+    backend :: game.Backend.headless()
+    print(game.run(scene, backend: backend, replay))
+}
+"#;
+    let diags = jet::compile(src).expect_err("game.run labels must match positional shape");
+    assert!(
+        diags.iter().any(|d| d.code == "E0125"),
+        "expected E0125, got: {:?}",
+        diags.iter().map(|d| d.code).collect::<Vec<_>>()
+    );
+}
+
+#[test]
 fn game_headless_scene_replay_transcript_is_deterministic() {
     let dir = std::env::temp_dir().join(format!("jet_corelib_game_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);

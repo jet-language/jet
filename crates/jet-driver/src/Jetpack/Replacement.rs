@@ -49,6 +49,7 @@ pub struct ReplacementCandidate {
     pub platforms: Vec<String>,
     pub proof_status: ProofStatus,
     pub proof_digest: String,
+    pub proof_inputs: Vec<String>,
 }
 
 impl ReplacementCandidate {
@@ -65,6 +66,7 @@ impl ReplacementCandidate {
             platforms: Vec::new(),
             proof_status: ProofStatus::Missing,
             proof_digest: String::new(),
+            proof_inputs: Vec::new(),
         }
     }
 }
@@ -200,6 +202,7 @@ impl ProofReport {
             platforms,
             proof_status: self.status(),
             proof_digest: self.digest.clone(),
+            proof_inputs: self.inputs.clone(),
         }
     }
 }
@@ -467,13 +470,17 @@ pub fn replacement_lock_record(
         candidate.proof_digest.clone(),
     );
     future_fields.insert(
+        "replacement-proof-inputs".to_string(),
+        candidate.proof_inputs.join("\n"),
+    );
+    future_fields.insert(
         "replacement-covered-symbols".to_string(),
         candidate.covered_public_symbols.join(","),
     );
     let mut record = SemanticRecord::new(
         LockIdentity {
             kind: LockRecordKind::ReplacementOverlay,
-            key: candidate.foreign_identity.ref_string(),
+            key: format!("{}@{}", candidate.foreign_identity.ref_string(), platform),
             exact: candidate.native_identity.ref_string(),
             hash: candidate.proof_digest.clone(),
             platform: platform.to_string(),

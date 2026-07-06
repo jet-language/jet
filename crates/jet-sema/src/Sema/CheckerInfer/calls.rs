@@ -1893,6 +1893,7 @@ impl<'a> Checker<'a> {
                     return Some(Type::List(Box::new(Type::String)));
                 }
                 ("GameAssets", "image" | "sound") => {
+                    needs_edit(self, method);
                     if args.len() != 1 {
                         self.diags
                             .push(wrong_core_arity(method, 1, args.len(), span));

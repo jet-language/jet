@@ -755,6 +755,7 @@ fn replacement_candidate_visible_but_inactive() {
         platforms: vec!["x86_64-linux".to_string()],
         proof_status: ProofStatus::Missing,
         proof_digest: String::new(),
+        proof_inputs: Vec::new(),
     });
     let record = semantic_record("app", &facts.name, &facts.version);
     assert_eq!(facts.source_identity, "npm:left-pad@1.0.0");
@@ -871,7 +872,10 @@ fn replacement_preserves_foreign_call_site() {
         panic!("prefer policy should activate replacement");
     };
     assert_eq!(active.foreign_call_site, "npm:left-pad@1.0.0");
-    assert_eq!(active.lock_record.identity.key, "npm:left-pad@1.0.0");
+    assert_eq!(
+        active.lock_record.identity.key,
+        "npm:left-pad@1.0.0@x86_64-linux"
+    );
     assert_eq!(
         active.lock_record.identity.exact,
         "core:core.text.pad@1.0.0"
@@ -908,6 +912,13 @@ fn replacement_lock_records_foreign_native_proof_and_policy() {
             .map(String::as_str),
         Some(candidate.proof_digest.as_str())
     );
+    assert_eq!(
+        record
+            .future_fields
+            .get("replacement-proof-inputs")
+            .map(|s| s.contains("platform=x86_64-linux")),
+        Some(true)
+    );
     assert!(record.rationales[0]
         .policy_fingerprint
         .contains("policy.replacements"));
@@ -929,6 +940,7 @@ fn replacement_lock_merge_conflict_names_owners() {
         platforms: vec!["x86_64-linux".to_string()],
         proof_status: ProofStatus::Passed,
         proof_digest: format!("proof-{native}"),
+        proof_inputs: vec![format!("platform=x86_64-linux;native={native}")],
     };
     let left = SemanticLockFile {
         records: vec![replacement_lock_record(
@@ -951,8 +963,26 @@ fn replacement_lock_merge_conflict_names_owners() {
     assert_eq!(out.conflicts[0].owner_package, "app");
     assert_eq!(
         out.conflicts[0].semantic_key,
-        "replacement-overlay:npm:left-pad@1.0.0"
+        "replacement-overlay:npm:left-pad@1.0.0@x86_64-linux"
     );
+}
+
+#[test]
+fn replacement_lock_keys_are_platform_specific() {
+    let candidate = replacement_passed_candidate();
+    let linux = jet::Jetpack::Replacement::replacement_lock_record(
+        &candidate,
+        "app",
+        "x86_64-linux",
+        "policy",
+    );
+    let macos = jet::Jetpack::Replacement::replacement_lock_record(
+        &candidate,
+        "app",
+        "aarch64-apple-darwin",
+        "policy",
+    );
+    assert_ne!(linux.identity.semantic_key(), macos.identity.semantic_key());
 }
 
 #[test]
