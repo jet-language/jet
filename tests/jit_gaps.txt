@@ -1,267 +1,268 @@
-# Phase 0 JIT coverage ratchet baseline for Tower card #125.
+# Phase 3 JIT compile-gate ratchet baseline for Tower card #125.
 # Format consumed by tests/dev.rs::jit_coverage_audit.
+# Covered means TIR lowered and Cranelift compiled end-to-end; gaps list the first compile/unsupported reason.
 # Covered/gap movement is intentional only; update this file in the same diff.
 
 covered:
   basics/branches
   basics/compound
   basics/counted_loop
-  basics/default_refs
   basics/digits
-  basics/fizzbuzz
   basics/functions
   basics/hello
   basics/if_expression
   basics/if_universal
   basics/increment
-  basics/labeled_loops
   basics/method_chain
   basics/multiline_string
-  basics/named_args
   basics/numbers
-  basics/printable
   basics/range_step
   basics/switch
-  basics/tuples
   basics/values
+  collections/iter_hook
   collections/list_bounds
-  collections/lists
-  comptime/comptime_splice
   comptime/doctests
-  comptime/reflect
-  concurrency/all_failfast
   concurrency/pipeline
-  concurrency/race_cancel
   concurrency/scheduler_spawn
   concurrency/select_channel
   concurrency/taskgroup
   concurrency/tasks
   contracts/inline_contracts
   contracts/pre_post
-  crypto/hash
   effects/effect_caps
-  effects/effect_grant
   effects/effect_prohibition
-  effects/effect_trait_bound
   effects/effect_tree
   effects/effects
-  effects/method_receivers
+  effects/move_no_uaf
   effects/pure
-  effects/self_mutation
   effects/share_boundary
-  errors/discard_fallible
-  game/raylib_window
-  io/files
-  io/log
-  io/log_human
   lowlevel/cross
-  lowlevel/freestanding
   lowlevel/layout_c
-  memory/ref_field
-  modules/library
   modules/pub_file
   operators/chained_comparison
-  serde/serde_generic
-  serde/toml
-  serde/user_derive
-  tooling/bench
   tooling/debug
-  tooling/fidelity
   tooling/test_members
   tooling/tests
-  types/associated_types
-  types/computed_field
-  types/display_debug
   types/dot_construction
-  types/enum_dot
-  types/enum_dot_patterns
   types/enums
-  types/external_methods
-  types/recursive_enum
   types/structs
-  types/tags_and_traits
-  types/typestate
   web/web_compute
 
 gaps:
-  basics/bare_lambda_param: run not jit-covered: body stmt 0
-  basics/callbacks: run not jit-covered: body stmt 0
-  basics/closures: run not jit-covered: body stmt 1
-  basics/fan_out: run not jit-covered: body stmt 0
-  basics/loop_forms: run not jit-covered: body stmt 9
-  basics/pattern_matching: func `score_grade` not jit-covered
-  basics/variadics_spread: run not jit-covered: body stmt 0
+  basics/bare_lambda_param: jit param type unsupported: Fn { params: [Int], ret: None, effect_bound: None }
+  basics/callbacks: jit param type unsupported: Fn { params: [Int], ret: Some(Int), effect_bound: None }
+  basics/closures: run: jit expression unsupported
+  basics/default_refs: run: jit missing static `Rect::square`
+  basics/fan_out: run: jit expression unsupported
+  basics/fizzbuzz: label: label: verifier: VerifierErrors([VerifierError { location: inst27, context: None, message: "invalid block reference block8" }])
+  basics/labeled_loops: run: jit for-in unknown collection `vec![1i64, 2i64, 3i64]`
+  basics/loop_forms: jit compile panicked before returning an unsupported reason
+  basics/named_args: run: jit missing static `Rect::new`
+  basics/pattern_matching: describe_conn: jit enum pattern `user_Conn::user_Active(user_id) | user_Conn::user_Reconnecting(user_id)`
+  basics/printable: run: jit string interp type unsupported: Named("Greeting")
+  basics/tuples: run: jit clone unsupported
+  basics/variadics_spread: jit param type unsupported: List(String)
   cli/subcommands: lower_jit_program returned None (no plain run)
   cli/typed_entry_args: lower_jit_program returned None (no plain run)
-  collections/deque: run not jit-covered: body stmt 1
-  collections/dynamic-array-view: run not jit-covered: body stmt 0
-  collections/filter_map: run not jit-covered: body stmt 0
-  collections/fixed_arrays: run not jit-covered: body stmt 0
-  collections/index_hook: run not jit-covered: body stmt 0
-  collections/iter_adapters: run not jit-covered: body stmt 1
-  collections/iter_hook: run not jit-covered: body stmt 2
-  collections/list_remove_bounds: run not jit-covered: body stmt 1
-  collections/map_key: run not jit-covered: body stmt 0
-  collections/set: run not jit-covered: body stmt 0
-  collections/sketch: run not jit-covered: body stmt 1
-  collections/wordcount: run not jit-covered: body stmt 0
-  comptime/comptime_block: run not jit-covered: body stmt 0
-  comptime/comptime_core: run not jit-covered: body stmt 0
-  comptime/comptime_if: run not jit-covered: body stmt 0
-  comptime/comptime_parse: run not jit-covered: body stmt 0
-  comptime/comptime_table: run not jit-covered: body stmt 0
-  comptime/comptime_tiers: run not jit-covered: body stmt 0
-  comptime/embed: run not jit-covered: body stmt 1
-  comptime/embed_bytes: run not jit-covered: body stmt 0
-  concurrency/deadline_context: run not jit-covered: body stmt 0
-  concurrency/detached_task: run not jit-covered: body stmt 0
-  concurrency/parallel_iter: run not jit-covered: body stmt 1
-  concurrency/parallel_scan: run not jit-covered: body stmt 1
-  concurrency/protocol: run not jit-covered: body stmt 1
-  concurrency/task_controls: run not jit-covered: body stmt 1
-  crypto/crypto_envelope: run not jit-covered: body stmt 0
-  crypto/crypto_migration: run not jit-covered: body stmt 0
-  crypto/crypto_sign: run not jit-covered: body stmt 0
-  crypto/random_api_split: run not jit-covered: body stmt 1
-  crypto/vault_secret: func `handler` not jit-covered
-  devloop/persist: run not jit-covered: body stmt 0
-  effects/all_sigils: run not jit-covered: body stmt 3
-  effects/asset_pipeline: run not jit-covered: body stmt 1
-  effects/capability_sigils: run not jit-covered: body stmt 1
-  effects/determinism: run not jit-covered: body stmt 2
-  effects/effect_higher_order: run not jit-covered: body stmt 0
-  effects/effect_levers: run not jit-covered: body stmt 0
-  effects/infer_capability: run not jit-covered: body stmt 1
-  effects/infer_receiver: run not jit-covered: body stmt 1
-  effects/mix_write_take: run not jit-covered: body stmt 2
-  effects/move_no_uaf: run not jit-covered: body stmt 1
-  effects/single_use: run not jit-covered: body stmt 1
-  effects/single_use_discard: run not jit-covered: body stmt 1
-  effects/smart_context: run not jit-covered: body stmt 0
-  effects/taint: run not jit-covered: body stmt 2
-  errors/error_context: func `read_raw` not jit-covered
-  errors/errors: run not jit-covered: body stmt 0
-  errors/must_use: run not jit-covered: body stmt 4
-  errors/panic: run not jit-covered: body stmt 0
-  errors/qq_control: run not jit-covered: body stmt 0
-  errors/rollback_trait: run not jit-covered: body stmt 3
-  errors/transact: run not jit-covered: body stmt 1
-  errors/typed_error_families: run not jit-covered: body stmt 0
-  functions/lambda_bare_params: run not jit-covered: body stmt 0
-  functions/lambda_inference: run not jit-covered: body stmt 1
-  io/archive: run not jit-covered: body stmt 0
-  io/args_spec: run not jit-covered: body stmt 0
-  io/cli: run not jit-covered: body stmt 2
-  io/cli_args: run not jit-covered: body stmt 1
-  io/compress_gzip: run not jit-covered: body stmt 0
-  io/compress_zstd: run not jit-covered: body stmt 0
-  io/db: run not jit-covered: body stmt 1
-  io/dir_entry: run not jit-covered: body stmt 6
-  io/io_prelude: func `greet` not jit-covered
-  io/path: run not jit-covered: body stmt 0
-  io/scope_guard: run not jit-covered: body stmt 0
-  io/stdin_filter: run not jit-covered: body stmt 0
-  io/stream: func `count_lines` not jit-covered
-  io/terminal: run not jit-covered: body stmt 6
-  lowlevel/ffi: run not jit-covered: body stmt 0
-  lowlevel/layout_columnar: run not jit-covered: body stmt 0
-  lowlevel/linalg_simd: run not jit-covered: body stmt 0
-  lowlevel/lowlevel: run not jit-covered: body stmt 1
-  lowlevel/os_target_gating: run not jit-covered: body stmt 0
-  lowlevel/pointer_cast_deref: run not jit-covered: body stmt 1
-  lowlevel/sized_floats: run not jit-covered: body stmt 2
-  lowlevel/sized_integers: run not jit-covered: body stmt 0
-  lowlevel/swizzle: run not jit-covered: body stmt 0
-  memory/arena: run not jit-covered: body stmt 0
-  memory/arena_parse: run not jit-covered: body stmt 0
-  memory/arena_regions: run not jit-covered: body stmt 0
-  memory/copy_verb: run not jit-covered: body stmt 9
-  memory/entity_tree: run not jit-covered: body stmt 1
-  memory/entity_world: run not jit-covered: body stmt 1
-  memory/expiring_rotting: run not jit-covered: body stmt 3
-  memory/gc_cyclic: run not jit-covered: body stmt 0
-  memory/no_alloc_policy: run not jit-covered: body stmt 1
-  memory/ownership: run not jit-covered: body stmt 1
-  memory/pool_stale_id: run not jit-covered: body stmt 1
-  memory/rawptr: run not jit-covered: body stmt 1
-  memory/shared_config: run not jit-covered: body stmt 0
-  memory/string_view: run not jit-covered: body stmt 1
-  memory/uninit: run not jit-covered: body stmt 0
-  memory/uninit_buffer: run not jit-covered: body stmt 0
-  modules/generic_modules: run not jit-covered: body stmt 0
-  modules/inline_module: run not jit-covered: body stmt 0
-  modules/module_inline_sibling: run not jit-covered: body stmt 0
-  modules/selective_imports: run not jit-covered: body stmt 0
-  net/http_client: run not jit-covered: body stmt 4
-  net/http_get: run not jit-covered: body stmt 4
-  net/http_routes: run not jit-covered: body stmt 1
-  net/http_server: run not jit-covered: body stmt 1
-  net/http_server_tasks: run not jit-covered: body stmt 4
-  parsing/binary-reader: run not jit-covered: body stmt 0
-  parsing/parse_interpolation: run not jit-covered: body stmt 1
-  parsing/text-cursor: run not jit-covered: body stmt 1
-  patterns/struct_destructure: run not jit-covered: body stmt 1
-  reflection/reflect-value: run not jit-covered: body stmt 2
-  safety/typed_sql: run not jit-covered: body stmt 1
-  serde/csv: run not jit-covered: body stmt 2
-  serde/csv_typed: run not jit-covered: body stmt 4
-  serde/datatree_accessors: run not jit-covered: body stmt 2
-  serde/decode_traced: run not jit-covered: body stmt 12
-  serde/encoding: run not jit-covered: body stmt 3
-  serde/json: run not jit-covered: body stmt 3
-  serde/json_coerce: run not jit-covered: body stmt 2
-  serde/json_typed: run not jit-covered: body stmt 4
-  serde/serde_derive: run not jit-covered: body stmt 0
-  serde/yaml: run not jit-covered: body stmt 4
-  streams/generators: func `count` not jit-covered
-  syntax/trailing_block: run not jit-covered: body stmt 0
-  text/bigint: run not jit-covered: body stmt 0
-  text/dates: run not jit-covered: body stmt 1
-  text/datetime: run not jit-covered: body stmt 2
-  text/decimal: run not jit-covered: body stmt 0
-  text/hex_base64: run not jit-covered: body stmt 0
-  text/regex: run not jit-covered: body stmt 4
-  text/string_parse: run not jit-covered: body stmt 0
-  text/strings: run not jit-covered: body stmt 0
-  text/unicode_text: run not jit-covered: body stmt 7
-  text/uuid: run not jit-covered: body stmt 2
-  tooling/debug_native: run not jit-covered: body stmt 1
-  tooling/panic_report: func `summarize` not jit-covered
-  tooling/property_tests: func `reverse` not jit-covered
-  tooling/todo_hole: func `not_yet` not jit-covered
-  types/capability_bundles: run not jit-covered: body stmt 0
-  types/distinct_types: run not jit-covered: body stmt 0
-  types/generic_types: run not jit-covered: body stmt 0
-  types/measurement: run not jit-covered: body stmt 2
-  types/nested_enum_groups: run not jit-covered: body stmt 2
-  types/no_any_alternatives: run not jit-covered: body stmt 2
-  types/option: run not jit-covered: body stmt 0
-  types/option_combinators: run not jit-covered: body stmt 2
-  types/patchable: run not jit-covered: body stmt 2
-  types/range_types: run not jit-covered: body stmt 0
-  types/renderable-varargs-multi: run not jit-covered: body stmt 1
-  types/renderable-varargs: run not jit-covered: body stmt 1
-  types/traits: run not jit-covered: body stmt 0
-  types/type_alias: run not jit-covered: body stmt 0
-  types/unit_family: run not jit-covered: body stmt 0
-  types/unit_literals: run not jit-covered: body stmt 0
-  types/value_tag_type: func `tag_score` not jit-covered
-  ui/layout_basic: run not jit-covered: body stmt 0
-  ui/loadable: run not jit-covered: body stmt 2
-  ui/reactive: run not jit-covered: body stmt 2
-  ui/reactive_scope: run not jit-covered: body stmt 1
-  ui/ui_a11y: run not jit-covered: body stmt 3
-  ui/ui_component_kit: run not jit-covered: body stmt 3
-  ui/ui_motion: run not jit-covered: body stmt 1
-  ui/ui_native_linux: run not jit-covered: body stmt 0
-  ui/ui_null_backend: run not jit-covered: body stmt 3
-  ui/ui_tui_reactive: run not jit-covered: body stmt 2
-  ui/ui_typed_style: run not jit-covered: body stmt 2
-  ui/ui_view_tree: run not jit-covered: body stmt 0
-  web/ui_showcase: run not jit-covered: body stmt 0
-  web/ui_web_click: func `dev` not jit-covered
-  web/ui_web_reactive: run not jit-covered: body stmt 2
-  web/web_hello: run not jit-covered: body stmt 3
+  collections/deque: run: jit static `std::collections::VecDeque::<i64>::new`
+  collections/dynamic-array-view: run: jit builtin method unsupported
+  collections/filter_map: parse_int: jit result status unsupported
+  collections/fixed_arrays: sum: jit for-in unknown collection `(*user_xs)`
+  collections/index_hook: run: jit record field unsupported: List(Named("Cell"))
+  collections/iter_adapters: run: jit builtin method unsupported
+  collections/list_remove_bounds: run: jit builtin method unsupported
+  collections/lists: run: run: verifier: VerifierErrors([VerifierError { location: inst38, context: Some("v28, v29 = call fn11(v0, v25, v26, v27)  ; v25 = 1, v26 = 2, v27 = 8"), message: "arg 2 (v26) has type i64, expected i32" }, VerifierError { location: inst38, context: Some("v28, v29 = call fn11(v0, v25, v26, v27)  ; v25 = 1, v26 = 2, v27 = 8"), message: "mismatched argument count for `v28, v29 = call fn11(v0, v25, v26, v27)  ; v25 = 1, v26 = 2, v27 = 8`: got 4, expected 3" }])
+  collections/map_key: run: jit expression unsupported
+  collections/set: run: jit builtin method unsupported
+  collections/sketch: run: jit core call unsupported
+  collections/wordcount: run: jit expression unsupported
+  comptime/comptime_block: run: jit statement unsupported
+  comptime/comptime_core: run: jit expression unsupported
+  comptime/comptime_if: run: jit statement unsupported
+  comptime/comptime_parse: safe_int: jit result status unsupported
+  comptime/comptime_splice: run: jit missing method `Cube::label`
+  comptime/comptime_table: run: jit expression unsupported
+  comptime/comptime_tiers: run: jit expression unsupported
+  comptime/embed: check_nonempty: jit expression unsupported
+  comptime/embed_bytes: jit param type unsupported: List(IntN { signed: false, bits: 8 })
+  comptime/reflect: Widget::show: jit clone unsupported
+  concurrency/all_failfast: slow_one: jit core call unsupported
+  concurrency/deadline_context: jit core call unsupported
+  concurrency/detached_task: run: jit handle method unsupported
+  concurrency/parallel_iter: run: jit expression unsupported
+  concurrency/parallel_scan: jit param type unsupported: List(String)
+  concurrency/protocol: drive: jit result status unsupported
+  concurrency/race_cancel: slow_one: jit core call unsupported
+  concurrency/task_controls: run: jit handle method unsupported
+  crypto/crypto_envelope: run: jit result status unsupported
+  crypto/crypto_migration: run: jit result status unsupported
+  crypto/crypto_sign: run: jit result status unsupported
+  crypto/hash: run: jit core call unsupported
+  crypto/random_api_split: run: jit core call unsupported
+  crypto/vault_secret: handler: jit core call unsupported
+  devloop/persist: run: jit expression unsupported
+  effects/all_sigils: deposit: jit assign to unknown place `((*user_a)).user_balance`
+  effects/asset_pipeline: normalize: jit assign to unknown place `((*user_img)).user_gamma`
+  effects/capability_sigils: damage: jit assign to unknown place `((*user_p)).user_hp`
+  effects/determinism: roll_at: jit handle method unsupported
+  effects/effect_grant: run: jit result status unsupported
+  effects/effect_higher_order: jit param type unsupported: Fn { params: [Int], ret: Some(Int), effect_bound: None }
+  effects/effect_levers: jit param type unsupported: Fn { params: [Int], ret: Some(Int), effect_bound: Some([]) }
+  effects/effect_trait_bound: run: jit missing method `Square::area`
+  effects/infer_capability: bump: jit assign to unknown place `((*user_c)).user_value`
+  effects/infer_receiver: hurt: jit missing method `Player::damage`
+  effects/method_receivers: run: jit missing method `Buffer::peek`
+  effects/mix_write_take: equip: jit assign to unknown place `((*user_p)).user_hp`
+  effects/self_mutation: Tracker::take_hit: jit assign to unknown place `((*self)).user_hits`
+  effects/single_use: acquire: jit clone unsupported
+  effects/single_use_discard: issue: jit clone unsupported
+  effects/smart_context: run: jit expression unsupported
+  effects/taint: shell_arg: jit builtin method unsupported
+  errors/discard_fallible: run: jit core call unsupported
+  errors/error_context: read_raw: jit expression unsupported
+  errors/errors: parse_age: jit expression unsupported
+  errors/must_use: run: jit core closure unsupported
+  errors/panic: run: jit expression unsupported
+  errors/qq_control: run: jit result status unsupported
+  errors/rollback_trait: transfer: jit statement unsupported
+  errors/transact: place_order: jit statement unsupported
+  errors/typed_error_families: read_file: jit expression unsupported
+  functions/lambda_bare_params: run: jit expression unsupported
+  functions/lambda_inference: run: jit expression unsupported
+  game/raylib_window: run: jit core call unsupported
+  io/archive: run: jit core call unsupported
+  io/args_spec: run: jit core call unsupported
+  io/cli: run: jit core call unsupported
+  io/cli_args: run: jit core call unsupported
+  io/compress_gzip: run: jit core call unsupported
+  io/compress_zstd: run: jit core call unsupported
+  io/db: run: jit core call unsupported
+  io/dir_entry: run: jit result status unsupported
+  io/files: run: jit result status unsupported
+  io/io_prelude: greet: jit result status unsupported
+  io/log: run: jit core call unsupported
+  io/log_human: run: jit core call unsupported
+  io/path: run: jit handle method unsupported
+  io/scope_guard: with_guards: jit core closure unsupported
+  io/stdin_filter: run: jit for-in unknown collection `jet_std_io_stdin()`
+  io/stream: count_lines: jit expression unsupported
+  io/terminal: describe_key: jit if condition unsupported
+  lowlevel/ffi: run: jit expression unsupported
+  lowlevel/freestanding: clamp: clamp: verifier: VerifierErrors([VerifierError { location: inst4, context: None, message: "invalid block reference block2" }])
+  lowlevel/layout_columnar: jit param type unsupported: List(Named("Particle"))
+  lowlevel/linalg_simd: run: jit expression unsupported
+  lowlevel/lowlevel: run: jit statement unsupported
+  lowlevel/os_target_gating: run: jit statement unsupported
+  lowlevel/pointer_cast_deref: run: jit statement unsupported
+  lowlevel/sized_floats: run: jit core call unsupported
+  lowlevel/sized_integers: run: jit let type unsupported: IntN { signed: false, bits: 8 }
+  lowlevel/swizzle: run: jit expression unsupported
+  memory/arena: run: jit expression unsupported
+  memory/arena_parse: run: jit expression unsupported
+  memory/arena_regions: run: jit expression unsupported
+  memory/copy_verb: archive: jit clone unsupported
+  memory/entity_tree: run: jit static `jet_std::JetPool::<user_Node>::new`
+  memory/entity_world: tick: jit for-in unknown collection `((*user_world)).ids()`
+  memory/expiring_rotting: run: jit core call unsupported
+  memory/gc_cyclic: run: jit expression unsupported
+  memory/no_alloc_policy: integrate: jit assign to unknown place `((*user_e)).user_pos`
+  memory/ownership: bump: jit assign to unknown place `(*user_n)`
+  memory/pool_stale_id: run: jit static `jet_std::JetPool::<user_Player>::new`
+  memory/rawptr: run: jit statement unsupported
+  memory/ref_field: describe: jit clone unsupported
+  memory/shared_config: jit param type unsupported: Shared(Named("AppConfig"))
+  memory/string_view: run: jit builtin method unsupported
+  memory/uninit: run: jit expression unsupported
+  memory/uninit_buffer: run: jit expression unsupported
+  modules/generic_modules: run: jit call to unknown function `IntCache__key_of`
+  modules/inline_module: run: jit expression unsupported
+  modules/library: greet: greet: verifier: VerifierErrors([VerifierError { location: inst0, context: None, message: "invalid block reference block2" }])
+  modules/module_inline_sibling: run: jit expression unsupported
+  modules/selective_imports: run: jit expression unsupported
+  net/http_client: jit result status unsupported
+  net/http_get: jit result status unsupported
+  net/http_routes: jit result status unsupported
+  net/http_server: run: jit core call unsupported
+  net/http_server_tasks: jit result status unsupported
+  parsing/binary-reader: run: jit handle method unsupported
+  parsing/parse_interpolation: run: jit expression unsupported
+  parsing/text-cursor: run: jit handle method unsupported
+  patterns/struct_destructure: run: jit statement unsupported
+  reflection/reflect-value: run: jit core call unsupported
+  safety/typed_sql: run_query: jit expression unsupported
+  serde/csv: run: jit result status unsupported
+  serde/csv_typed: run: jit result status unsupported
+  serde/datatree_accessors: run: jit result status unsupported
+  serde/decode_traced: run: jit result status unsupported
+  serde/encoding: run: jit result status unsupported
+  serde/json: run: jit result status unsupported
+  serde/json_coerce: run: jit result status unsupported
+  serde/json_typed: run: jit result status unsupported
+  serde/serde_derive: run: jit record field unsupported: List(String)
+  serde/serde_generic: run: jit core call unsupported
+  serde/toml: run: jit result status unsupported
+  serde/user_derive: run: jit missing method `Point::debug_string`
+  serde/yaml: run: jit result status unsupported
+  streams/generators: count: jit expression unsupported
+  syntax/trailing_block: jit param type unsupported: Fn { params: [], ret: None, effect_bound: None }
+  text/bigint: run: jit expression unsupported
+  text/dates: run: jit core call unsupported
+  text/datetime: run: jit core call unsupported
+  text/decimal: run: jit expression unsupported
+  text/hex_base64: run: jit core call unsupported
+  text/regex: run: jit result status unsupported
+  text/string_parse: run: jit result status unsupported
+  text/strings: run: jit for-in unknown collection `"héllo".to_string()`
+  text/unicode_text: run: jit core call unsupported
+  text/uuid: run: jit core call unsupported
+  tooling/bench: fib: fib: verifier: VerifierErrors([VerifierError { location: inst5, context: None, message: "invalid block reference block2" }])
+  tooling/debug_native: word_count: jit for-in unknown collection `jet_string_split(&((*user_text)), &" ".to_string())`
+  tooling/fidelity: run: jit core call unsupported
+  tooling/panic_report: summarize: jit expression unsupported
+  tooling/property_tests: reverse: jit for-in unknown collection `(*user_xs)`
+  tooling/todo_hole: not_yet: jit expression unsupported
+  types/associated_types: run: jit missing method `Nums::at`
+  types/capability_bundles: run: jit call to unknown function `Usd`
+  types/computed_field: Stats::threat: jit field `user_attack()` on `Stats`
+  types/display_debug: run: jit string interp type unsupported: Named("User")
+  types/distinct_types: greet: jit expression unsupported
+  types/enum_dot: area: jit enum pattern `user_Shape::user_Circle(user_r)`
+  types/enum_dot_patterns: area: jit enum pattern `user_Shape::user_Circle(user_r)`
+  types/external_methods: run: jit missing static `Point::origin`
+  types/generic_types: run: jit call to unknown function `make_pair`
+  types/measurement: run: jit core call unsupported
+  types/nested_enum_groups: run: jit enum lit `user_Damage::user_Fire__Burn`
+  types/no_any_alternatives: label: jit enum pattern `user_Payload::user_Name(user_s)`
+  types/option: find_even: find_even: verifier: VerifierErrors([VerifierError { location: inst11, context: None, message: "invalid block reference block6" }])
+  types/option_combinators: lookup_price: lookup_price: verifier: VerifierErrors([VerifierError { location: inst5, context: None, message: "invalid block reference block2" }])
+  types/patchable: run: jit missing method `Employee::apply`
+  types/range_types: checked: jit expression unsupported
+  types/recursive_enum: run: jit enum payload unsupported
+  types/renderable-varargs-multi: run: jit call to unknown function `announce__va1`
+  types/renderable-varargs: run: jit call to unknown function `log_all__va4`
+  types/tags_and_traits: run: jit missing method `Doc::greet`
+  types/traits: print_area: jit missing method `Shape::name`
+  types/type_alias: parse_count: jit expression unsupported
+  types/typestate: run: jit missing static `Reservation::book`
+  types/unit_family: subtotal: jit call to unknown function `Usd`
+  types/unit_literals: run: jit call to unknown function `Ms`
+  types/value_tag_type: jit param type unsupported: Tagged { marker: "Raw", inner: Int }
+  ui/layout_basic: run: jit statement unsupported
+  ui/loadable: fetch_user: jit expression unsupported
+  ui/reactive: run: jit core call unsupported
+  ui/reactive_scope: run: jit core call unsupported
+  ui/ui_a11y: run: jit core call unsupported
+  ui/ui_component_kit: jit param type unsupported: List(Named("View"))
+  ui/ui_motion: tween: jit expression unsupported
+  ui/ui_native_linux: run: jit statement unsupported
+  ui/ui_null_backend: run: jit core call unsupported
+  ui/ui_tui_reactive: run: jit core call unsupported
+  ui/ui_typed_style: describe: jit enum pattern `user_View::user_Text { user_text: user_text, user_style: user_style }`
+  ui/ui_view_tree: jit param type unsupported: List(String)
+  web/ui_showcase: jit param type unsupported: List(Named("View"))
+  web/ui_web_click: dev: jit core call unsupported
+  web/ui_web_reactive: run: jit core call unsupported
+  web/web_hello: run: jit core call unsupported
 
 parity_divergences:
   errors/typed_error_families: dev tier misses AOT stderr error-propagation trace

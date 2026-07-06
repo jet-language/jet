@@ -49,6 +49,34 @@ thread_local! {
     static RESIDENT_RUNTIME: RefCell<Option<JitRuntime>> = const { RefCell::new(None) };
 }
 
+static TRY_COMPILE_PANIC_HOOK_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn catch_jit_panic<R>(context: &str, f: impl FnOnce() -> Result<R, String>) -> Result<R, String> {
+    let result = {
+        let _guard = TRY_COMPILE_PANIC_HOOK_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let old_hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        let result = catch_unwind(AssertUnwindSafe(f));
+        std::panic::set_hook(old_hook);
+        result
+    };
+    match result {
+        Ok(Ok(value)) => Ok(value),
+        Ok(Err(err)) => {
+            resident_teardown();
+            Err(err)
+        }
+        Err(_) => {
+            resident_teardown();
+            Err(format!(
+                "jit {context} panicked before returning an unsupported reason"
+            ))
+        }
+    }
+}
+
 /// Live heap carried across type-stable hot_swap (M2). `invocations` counts
 /// how many times `main` ran without a clean restart — preserved on swap,
 /// reset on restart.
@@ -3741,12 +3769,11 @@ pub fn try_compile_bundle(bundle: &ProgramBundle) -> Result<(), String> {
             TIR::lower_jit_program_fail_reason(bundle)
         )
     })?;
-    if !jit_covers_program(&program) {
-        return Err(jit_covers_bundle_detail(bundle));
-    }
-    resident_teardown();
-    RESIDENT_RUNTIME.with(|slot| *slot.borrow_mut() = Some(fresh_runtime()));
-    ensure_resident_module(&program)
+    catch_jit_panic("compile", || {
+        resident_teardown();
+        RESIDENT_RUNTIME.with(|slot| *slot.borrow_mut() = Some(fresh_runtime()));
+        ensure_resident_module(&program)
+    })
 }
 
 /// Test hook: lowered function names in the JIT program.

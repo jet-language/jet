@@ -172,13 +172,9 @@ fn collect_jit_coverage() -> (Vec<String>, Vec<String>) {
             continue;
         }
         let stem = stem_of(&root, &path);
-        if jet_jit::jit_covers_bundle(&bundle) {
-            covered.push(stem);
-        } else {
-            gaps.push(format!(
-                "{stem}: {}",
-                jet_jit::jit_covers_bundle_detail(&bundle)
-            ));
+        match jet_jit::try_compile_bundle(&bundle) {
+            Ok(()) => covered.push(stem),
+            Err(reason) => gaps.push(format!("{stem}: {reason}")),
         }
     }
     covered.sort();
@@ -881,8 +877,8 @@ fn assert_cranelift_three_way(file: &str, stem: &str) {
         .collect();
     assert!(errors.is_empty(), "`{stem}` must type-check");
     assert!(
-        jet_jit::jit_covers_bundle(&bundle),
-        "`{stem}` must be jit-covered for three-way differential"
+        jet_jit::jit_covers_bundle(&bundle) && jet_jit::try_compile_bundle(&bundle).is_ok(),
+        "`{stem}` must be resident-JIT safe for three-way differential"
     );
 
     let interpreted = match dev_iteration(file, false, true) {
@@ -1086,7 +1082,7 @@ fn jit_coverage_audit() {
     );
 }
 
-/// Stems of type-checked examples the JIT claims to cover.
+/// Stems of type-checked examples the resident JIT can run end-to-end.
 fn jit_covered_example_stems() -> Vec<String> {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let mut stems = Vec::new();
@@ -1146,32 +1142,21 @@ fn cranelift_three_way_differential_battery() {
     assert!(ran >= 9, "expected battery to grow beyond the M3 seed set");
 }
 
-/// Gate: JIT coverage is a subset of TIR coverage — never claim jit when tir won't lower.
+/// Gate: the compile gate is the JIT coverage source of truth. A checked
+/// example is either fully lowerable/compilable or has a ratcheted manifest
+/// reason.
 #[test]
-fn jit_covers_implies_tir_lowers() {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    for path in topic_jet_files(&root) {
-        let file = path.to_string_lossy();
-        let mut bundle = match jet::Loader::load_entry(&file) {
-            Ok(b) => b,
-            Err(_) => continue,
-        };
-        let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
-        if diags
-            .iter()
-            .any(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
-        {
-            continue;
-        }
-        let stem = stem_of(&root, &path);
-        if jet_jit::jit_covers_bundle(&bundle) {
-            assert!(
-                jet_jit::tir_lowers_bundle(&bundle),
-                "`{stem}` is jit-covered but TIR lower_jit_program returned None: {}",
-                jet_jit::tir_lower_fail_reason(&bundle)
-            );
-        }
-    }
+fn jit_try_compile_manifest_matches() {
+    let (covered, gaps) = collect_jit_coverage();
+    let (expected_covered, expected_gaps, _) = parse_jit_gap_manifest();
+    assert_eq!(
+        covered, expected_covered,
+        "JIT compile-covered set drifted; update tests/jit_gaps.txt only for an intentional ratchet move"
+    );
+    assert_eq!(
+        gaps, expected_gaps,
+        "JIT compile-gap set drifted; update tests/jit_gaps.txt only for an intentional ratchet move"
+    );
 }
 
 /// c139 M3: string interpolation builds the same stdout as the interpreter.
