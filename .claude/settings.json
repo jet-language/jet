@@ -1,0 +1,46 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(nix develop *)",
+      "Bash(rg *)",
+      "Bash(grep *)",
+      "Bash(cargo build*)",
+      "Bash(cargo test*)",
+      "Bash(git status*)",
+      "Bash(git log*)",
+      "Bash(git diff*)",
+      "Bash(git show*)",
+      "Bash(git ls-files*)",
+      "Bash(git check-ignore *)",
+      "Bash(node Tower/tower.mjs *)",
+      "Bash(node /home/nate/Projects/Github/jet/Tower/tower.mjs *)",
+      "Bash(df *)",
+      "Bash(rm -rf /tmp/nix-shell.*)",
+      "Read(//tmp/**)",
+      "WebSearch"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR\"/scripts/agent/clean-nix-tmp.sh"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Agent|Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR\"/scripts/agent/require-clean-tree.sh"
+          }
+        ]
+      }
+    ]
+  }
+}

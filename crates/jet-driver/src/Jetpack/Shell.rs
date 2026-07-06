@@ -94,7 +94,20 @@ pub fn run_command(env: &Env, cmd_args: &[String]) -> i32 {
 
 /// Enter an interactive temporary shell. Returns the child's exit code.
 pub fn enter(theme: &Theme, env: &Env, kind: ShellKind) -> i32 {
-    theme.note("entering a temporary shell — type `exit` to leave, nothing is installed.");
+    // The threshold rule — the signature moment of `jet env`. One quiet line
+    // in, one mirrored line out, so the temporary shell reads as a room you
+    // walked into and back out of, not a mode you might be stuck in.
+    let count = match env.refs.len() {
+        0 => "temporary shell".to_string(),
+        1 => "1 package".to_string(),
+        n => format!("{n} packages"),
+    };
+    theme.rule(&[
+        env.label.as_str(),
+        count.as_str(),
+        "exit to leave",
+        "nothing is installed",
+    ]);
 
     let mut cmd = Command::new(kind.binary());
     env.apply(&mut cmd);
@@ -126,7 +139,8 @@ pub fn enter(theme: &Theme, env: &Env, kind: ShellKind) -> i32 {
             127
         }
     };
-    theme.note("left the temporary shell. your machine is unchanged.");
+    let left = format!("left {}", env.label);
+    theme.rule(&[left.as_str(), "your machine is unchanged"]);
     code
 }
 
@@ -202,25 +216,34 @@ pub fn branded_shell(kind: ShellKind, label: &str) -> BrandedShell {
 
 fn bash_rc(label: &str) -> String {
     // Source the user's real bashrc first, then override the prompt so the
-    // jetpack label is unmistakable.
+    // jetpack label is unmistakable: bold cyan label, blue path, green ❯.
+    //
+    // The zero-width color runs are wrapped in raw \x01/\x02 bytes (readline's
+    // invisible-marker pair) rather than `\[`/`\]`: bash 5.3 stopped rewriting
+    // `\[`/`\]` on this path, so they printed literally inside `nix develop`-
+    // wrapped shells (nixpkgs bash 5.3.9). The raw markers work on every bash
+    // and are invisible control bytes when readline isn't displaying at all.
+    const S: char = '\u{1}';
+    const E: char = '\u{2}';
     format!(
         "[ -f /etc/bash.bashrc ] && . /etc/bash.bashrc\n\
          [ -f \"$HOME/.bashrc\" ] && . \"$HOME/.bashrc\"\n\
-         PS1='\\[\\e[36m\\]{label}\\[\\e[0m\\] \\w \\$ '\n"
+         PS1='{S}\u{1b}[1;36m{E}{label}{S}\u{1b}[0m{E} {S}\u{1b}[34m{E}\\w{S}\u{1b}[0m{E} {S}\u{1b}[32m{E}❯{S}\u{1b}[0m{E} '\n"
     )
 }
 
 fn zsh_rc(label: &str) -> String {
     format!(
         "[ -f \"$HOME/.zshrc\" ] && source \"$HOME/.zshrc\"\n\
-         PROMPT='%F{{cyan}}{label}%f %~ %# '\n"
+         PROMPT='%B%F{{cyan}}{label}%f%b %F{{blue}}%~%f %F{{green}}❯%f '\n"
     )
 }
 
 fn fish_init(label: &str) -> String {
     format!(
-        "function fish_prompt; set_color cyan; echo -n '{label} '; set_color normal; \
-         echo -n (prompt_pwd)' $ '; end"
+        "function fish_prompt; set_color -o cyan; echo -n '{label} '; \
+         set_color blue; echo -n (prompt_pwd); \
+         set_color green; echo -n ' ❯ '; set_color normal; end"
     )
 }
 

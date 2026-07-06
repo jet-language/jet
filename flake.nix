@@ -111,15 +111,19 @@
           shellHook = ''
             export JET_ROOT="$PWD"
 
-            echo "Jet dev shell"
-            echo "  build:    cargo build"
-            echo "  run:      jet run examples/features/basics/hello.jet"
-            echo "  search:   rg \"pattern\" docs Source tests"
-            echo "  LSP:      jet lsp        (tests: cargo test --test lsp)"
-            echo "  editor:   editors/vscode/install.sh   (Cursor/VS Code)"
-            echo "            editors/zed/install.sh        (Zed dev extension)"
-            echo "  debug:    jet debug <file.jet>  (native lldb backend: tests/debug.rs)"
-            echo "  release:  nix build .#jet"
+            # banner on stderr: `nix develop -c <cmd>` stdout stays clean for
+            # grepping/capture (agents misread results otherwise)
+            {
+              echo "Jet dev shell"
+              echo "  build:    cargo build"
+              echo "  run:      jet run examples/features/basics/hello.jet"
+              echo "  search:   rg \"pattern\" docs Source tests"
+              echo "  LSP:      jet lsp        (tests: cargo test --test lsp)"
+              echo "  editor:   editors/vscode/install.sh   (Cursor/VS Code)"
+              echo "            editors/zed/install.sh        (Zed dev extension)"
+              echo "  debug:    jet debug <file.jet>  (native lldb backend: tests/debug.rs)"
+              echo "  release:  nix build .#jet"
+            } >&2
           '';
         };
 

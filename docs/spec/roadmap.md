@@ -192,7 +192,12 @@ duplicated here:
 - Full adoption documentation (migration, services, debugging guides) → Epoch 3
   (owner, 2026-06-18); per-milestone docs stay as written
 - User token macros (rejected by S26; sanctioned path is S56 comptime derives)
-- Self-hosting; jetos as a shipped OS product → **post-Epoch-3** research track
+- Self-hosting → **Epoch 8** (Bootstrapping). Hard readiness gate before any
+  port work (owner, 2026-07-06): core lang locked-happy (stdlib may flux), a
+  dogfood portfolio of complex/fringe Jet projects proving readability and
+  reason-about-ability, and the memory model adversarially proven as solid as
+  Rust's borrow checker. Tracked in Tower cards #217 (readiness gate) and #218
+  (full port); jetos as a shipped OS product stays post-Epoch-3 research
   (owner, 2026-06-18); jetos surface syntax is not ratified in Epoch 2/3
 - Comptime layer 3 / user-defined derives (S56) → Epoch 3
 - Formal core / desugaring map → **Epoch 6** (D-FORMALCORE1=C); placeholder at

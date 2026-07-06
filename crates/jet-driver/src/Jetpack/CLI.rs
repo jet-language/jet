@@ -14,6 +14,7 @@ use super::Store::{self, Roots};
 use super::Trust;
 use super::{EnvFile, ModuleEval, RefSpec::RefError, WorkspaceFile, WorkspaceLock};
 use crate::Syntax;
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 
 /// Parsed global flags shared by every command.
@@ -269,8 +270,16 @@ fn realize_ref(
     flags: &Flags,
     table: &RefSpec::SourceTable,
     spec: &RefSpec::RefSpec,
+    name_w: usize,
 ) -> Option<(Store::StoreEntry, Provider::SourceState)> {
-    theme.status(&format!("resolving {} …", theme.bold(&spec.raw)));
+    // A TTY gets a live spinner that the final ledger row replaces; without
+    // one (piped output, NO_COLOR) the plain status line stands instead.
+    let spinner = if theme.color {
+        Some(theme.spinner(&format!("resolving {} …", spec.raw)))
+    } else {
+        theme.status(&format!("resolving {} …", theme.bold(&spec.raw)));
+        None
+    };
     // The provider writes store/source-cache records under the hangar (U2). The
     // store dir also seeds the U9 remote probe's source-cache lookup, so it is
     // resolved before the fixtures decision below.
@@ -284,6 +293,7 @@ fn realize_ref(
         if flags.offline && Provider::uses_nix_provider(spec, table, flags.offline, &store_dir) {
             let fx = fixtures_for(flags);
             if fx.is_none() {
+                drop(spinner);
                 theme.error(
                     "offline mode needs fixtures",
                     "`--offline` was set but no fixtures directory was given.",
@@ -302,14 +312,28 @@ fn realize_ref(
         store_dir: &store_dir,
         offline: flags.offline,
     };
-    match Provider::realize(spec, table, &ctx) {
+    let started = std::time::Instant::now();
+    let result = Provider::realize(spec, table, &ctx);
+    drop(spinner);
+    match result {
         Ok(r) => {
-            // T4 (D-JPK-CACHE1): report how the package was satisfied.
-            theme.ok(&format!(
-                "{} {}",
-                theme.bold(&r.name),
-                r.source_state.label()
-            ));
+            // T4 (D-JPK-CACHE1): one ledger row per package — how it was
+            // satisfied, and how long a from-source build took.
+            let elapsed = started.elapsed();
+            let state = if r.source_state == Provider::SourceState::Built && elapsed.as_secs() >= 1
+            {
+                format!("built {}", Output::human_duration(elapsed))
+            } else {
+                r.source_state.label().to_string()
+            };
+            // Nix-provided packages often carry no version of their own; the
+            // store path's `<hash>-<name>-<version>` basename usually does.
+            let version = if r.version.is_empty() {
+                version_from_out(&r.name, &r.out).unwrap_or_default()
+            } else {
+                r.version.clone()
+            };
+            theme.row(&r.name, name_w, &version, &state);
             theme.detail(&theme.gray(&r.out));
             let state = r.source_state;
             match Store::record(
@@ -337,6 +361,20 @@ fn realize_ref(
             report_provider_error(theme, &e);
             None
         }
+    }
+}
+
+/// Best-effort version out of a store-path basename like
+/// `<hash>-ripgrep-14.1.0`: everything after `<name>-`, if it starts with a
+/// digit (so `my-tool-src` never masquerades as a version).
+fn version_from_out(name: &str, out: &str) -> Option<String> {
+    let base = out.rsplit('/').next()?;
+    let idx = base.find(&format!("-{name}-"))?;
+    let version = &base[idx + name.len() + 2..];
+    if version.starts_with(|c: char| c.is_ascii_digit()) {
+        Some(version.to_string())
+    } else {
+        None
     }
 }
 
@@ -723,10 +761,25 @@ fn enter_foreign_flake(theme: &Theme, project_dir: &Path, flake_path: &Path, par
         for (k, v) in &b.env_vars {
             cmd.env(k, v);
         }
+        // Interactive: the same threshold rule the native path draws, so a
+        // foreign flake's shell still unmistakably reads as `jet env`.
+        let file = flake_path
+            .file_name()
+            .map(|f| f.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        theme.rule(&[
+            Syntax::JETPACK_PROMPT_LABEL,
+            &format!("foreign {file} shell"),
+            "exit to leave",
+        ]);
     }
     let result = cmd.status();
     if let Some(b) = &branded {
         b.cleanup();
+        theme.rule(&[
+            &format!("left {}", Syntax::JETPACK_PROMPT_LABEL),
+            "your machine is unchanged",
+        ]);
     }
     match result {
         Ok(status) => status.code().unwrap_or(1),
@@ -957,8 +1010,22 @@ fn cmd_config(theme: &Theme, parsed: &Parsed) -> i32 {
 fn compose_env(theme: &Theme, roots: &Roots, flags: &Flags, plan: &RunPlan) -> Option<Env> {
     let mut bin_dirs = Vec::new();
     let mut realized_refs = Vec::new();
+    let name_w = name_column_width(&plan.refs);
+    if plan.refs.len() > 1 {
+        theme.status(&format!(
+            "composing {} — {} packages",
+            theme.bold(&plan.label),
+            plan.refs.len()
+        ));
+    }
+    let (mut built, mut cached, mut substituted) = (0usize, 0usize, 0usize);
     for spec in &plan.refs {
-        let (entry, _state) = realize_ref(theme, roots, flags, &plan.table, spec)?;
+        let (entry, state) = realize_ref(theme, roots, flags, &plan.table, spec, name_w)?;
+        match state {
+            Provider::SourceState::Built => built += 1,
+            Provider::SourceState::Cached => cached += 1,
+            Provider::SourceState::Substituted => substituted += 1,
+        }
         // A `library` package realizes with an empty `bin` (U10) — it stages
         // source for import and contributes nothing to PATH.
         if !entry.bin.is_empty() {
@@ -966,11 +1033,38 @@ fn compose_env(theme: &Theme, roots: &Roots, flags: &Flags, plan: &RunPlan) -> O
         }
         realized_refs.push(entry.reference);
     }
+    if plan.refs.len() > 1 {
+        theme.status(&format!(
+            "env ready — {}",
+            state_summary(built, cached, substituted)
+        ));
+    }
     Some(Env {
         bin_dirs,
         refs: realized_refs,
         label: plan.label.clone(),
     })
+}
+
+/// The ledger's name-column width for a set of refs (min 8 so a single short
+/// name doesn't collapse the table).
+fn name_column_width(refs: &[RefSpec::RefSpec]) -> usize {
+    refs.iter().map(|r| r.package.len()).max().unwrap_or(0).max(8)
+}
+
+/// `2 built, 1 cached` — non-zero source-state counts, joined.
+fn state_summary(built: usize, cached: usize, substituted: usize) -> String {
+    let mut parts = Vec::new();
+    if built > 0 {
+        parts.push(format!("{built} built"));
+    }
+    if cached > 0 {
+        parts.push(format!("{cached} cached"));
+    }
+    if substituted > 0 {
+        parts.push(format!("{substituted} substituted"));
+    }
+    parts.join(", ")
 }
 
 /// `jetpack build [<ref>]` — realize without entering a shell.
@@ -1010,7 +1104,16 @@ fn cmd_build(theme: &Theme, parsed: &Parsed) -> i32 {
                                 continue;
                             }
                         };
-                        if realize_ref(theme, &roots, &parsed.flags, &table, &spec).is_none() {
+                        if realize_ref(
+                            theme,
+                            &roots,
+                            &parsed.flags,
+                            &table,
+                            &spec,
+                            member.name.len().max(8),
+                        )
+                        .is_none()
+                        {
                             ok = false;
                         }
                     }
@@ -1042,8 +1145,9 @@ fn cmd_build(theme: &Theme, parsed: &Parsed) -> i32 {
 
     let mut ok = true;
     let (mut built, mut cached, mut substituted) = (0usize, 0usize, 0usize);
+    let name_w = name_column_width(&refs);
     for spec in &refs {
-        match realize_ref(theme, &roots, &parsed.flags, &table, spec) {
+        match realize_ref(theme, &roots, &parsed.flags, &table, spec, name_w) {
             Some((_entry, state)) => match state {
                 Provider::SourceState::Built => built += 1,
                 Provider::SourceState::Cached => cached += 1,
@@ -1076,10 +1180,18 @@ fn cmd_list(theme: &Theme) -> i32 {
         return 0;
     }
     theme.status(&format!("{} realized package(s):", entries.len()));
+    let name_w = entries.iter().map(|e| e.name.len()).max().unwrap_or(0).max(8);
+    let ver_w = entries
+        .iter()
+        .map(|e| if e.version.is_empty() { 1 } else { e.version.len() })
+        .max()
+        .unwrap_or(1);
     for e in entries {
+        let v = if e.version.is_empty() { "—" } else { &e.version };
         theme.detail(&format!(
-            "{}  {}",
-            theme.bold(&e.name),
+            "{}  {}  {}",
+            theme.bold(&format!("{:<name_w$}", e.name)),
+            format!("{v:<ver_w$}"),
             theme.gray(&e.reference)
         ));
     }
@@ -1544,49 +1656,80 @@ fn cmd_os(theme: &Theme, parsed: &Parsed) -> i32 {
 
 fn usage() -> String {
     let bin = Syntax::JETPACK_BINARY_NAME;
+    let pack = Syntax::ENV_FILE;
+    // Bold section headers on a TTY only; the text is identical when piped.
+    let color = std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none();
+    let h = |s: &str| {
+        if color {
+            format!("\x1b[1m{s}\x1b[0m")
+        } else {
+            s.to_string()
+        }
+    };
     format!(
         "\
-{bin} — Jet's package manager (Phase 1)
+{title}
 
-usage:
-  {bin} run   <source>:<package>        enter a temporary shell with that package
-  {bin} run   <source>:<package> -- cmd run a command in that environment, then exit
-  {bin} run                            enter the shell described by ./{pack}
+{envs}
   {bin} enter                          enter the project shell described by ./{pack}
   {bin} enter -- cmd                   run a command in the project shell, then exit
   {bin} enter -p <pkg>...              add ad-hoc nixpkgs packages, undeclared
   {bin} enter --flake                  force a foreign flake.nix/devenv.nix shell
+  {bin} run   <source>:<package>       enter a temporary shell with that package
+  {bin} run   <source>:<package> -- cmd run a command in that environment, then exit
+  {bin} run                            enter the shell described by ./{pack}
+  {bin} dev                            realize the env, then run the project's fn dev()
+
+{manifest}
+  {bin} add    <source>:<package>      add a package to ./{pack}
+  {bin} add    <Component>             copy a starter component into ./components
+  {bin} remove <source>:<package>      remove a package from ./{pack}
   {bin} bridge flake                   print an env.* shim translated from ./flake.nix
+
+{store}
   {bin} build [<source>:<package>]     realize a package/environment, don't enter
   {bin} list                           show realized packages
   {bin} hangar du                      honest per-object hangar disk usage
   {bin} vendor [<dir>]                 write vendored + hash-pinned sources
   {bin} audit                          read build provenance (runs nothing)
   {bin} clean                          drop unused store records
-  {bin} add    <source>:<package>      add a package to ./{pack}
-  {bin} add    <Component>             copy a starter component into ./components
-  {bin} remove <source>:<package>      remove a package from ./{pack}
+
+{machines}
   {bin} os switch [<config>]@<host>    build + activate a machine from a config.jet
   {bin} os build  [<config>]@<host>    build a machine generation, don't activate
+  {bin} push <fleet>                   validate a fleet's hosts (deploy is gated)
 
-refs:
+{trust}
+  {bin} config trust add <pattern>     pre-authorize matching project paths
+  {bin} config trust list              show trusted hashes and patterns
+  {bin} config trust remove <pattern>  drop a trusted pattern
+
+{refs}
   nixpkgs:fastfetch                    a package from nixpkgs
   github:owner/repo                    a Jet pack repo (or a flake fallback)
   path:./my-env                        a local pack/flake directory
 
-components:
+{components}
   Button, Label, Input, Container      starter kit — ownable, editable .jet source
 
-flags:
+{flags}
   --no-color                           disable colored output (also: NO_COLOR)
   --offline                            resolve from fixtures only, never network
   --fixtures <dir>                     read provider output from captured fixtures
+  --trust                              skip the trust prompt for this one run
   -p <pkg>...                          (enter) ad-hoc nixpkgs packages, not declared anywhere
   --flake                              (enter) force the foreign flake.nix/devenv.nix fallback
   --pure                               (enter) isolate the shell from the host environment
 ",
-        bin = bin,
-        pack = Syntax::ENV_FILE,
+        title = h(&format!("{bin} — Jet's package manager (Phase 1)")),
+        envs = h("environments:"),
+        manifest = h("manifest:"),
+        store = h("store:"),
+        machines = h("machines:"),
+        trust = h("trust:"),
+        refs = h("refs:"),
+        components = h("components:"),
+        flags = h("flags:"),
     )
 }
 

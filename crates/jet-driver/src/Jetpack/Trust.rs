@@ -199,9 +199,26 @@ pub fn gate(
         "first entry to this project — it declares {} package(s):",
         refs.len()
     ));
+    // One aligned row per ref: bold package, gray source. The supply-chain
+    // decision is *which sources* run code here, so the source column is the
+    // thing this prompt exists to surface.
+    let name_w = refs.iter().map(|r| r.package.len()).max().unwrap_or(0).max(8);
     for r in refs {
-        theme.detail(&r.raw);
+        let source = r
+            .raw
+            .strip_suffix(&r.package)
+            .map(|s| s.trim_end_matches(':').to_string())
+            .unwrap_or_else(|| r.raw.clone());
+        theme.detail(&format!(
+            "{}  {}",
+            theme.bold(&format!("{:<name_w$}", r.package)),
+            theme.gray(&source)
+        ));
     }
+    eprintln!(
+        "\n  {}",
+        theme.gray("a yes is remembered for this exact env; any change asks again.")
+    );
     eprint!("  trust this environment? [y/N] ");
     {
         use std::io::Write;
