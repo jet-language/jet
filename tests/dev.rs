@@ -692,6 +692,40 @@ fn jit_coverage_detail_smoke() {
     }
 }
 
+#[test]
+fn jit_covers_labeled_loop_control() {
+    let file = "examples/features/basics/labeled_loops.jet";
+    let mut bundle = jet::Loader::load_entry(file).expect("load");
+    let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let errors: Vec<_> = diags
+        .into_iter()
+        .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+        .collect();
+    assert!(errors.is_empty(), "labeled loop example must type-check");
+    assert!(
+        jet_jit::jit_covers_bundle(&bundle),
+        "labeled break/continue should stay JIT-covered: {}",
+        jet_jit::jit_covers_bundle_detail(&bundle)
+    );
+}
+
+#[test]
+fn jit_covers_increment_decrement() {
+    let file = "examples/features/basics/increment.jet";
+    let mut bundle = jet::Loader::load_entry(file).expect("load");
+    let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let errors: Vec<_> = diags
+        .into_iter()
+        .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+        .collect();
+    assert!(errors.is_empty(), "increment example must type-check");
+    assert!(
+        jet_jit::jit_covers_bundle(&bundle),
+        "prefix/postfix ++/-- should stay JIT-covered: {}",
+        jet_jit::jit_covers_bundle_detail(&bundle)
+    );
+}
+
 /// Audit which type-checked examples are jit-covered (run with `--ignored`).
 #[test]
 #[ignore]

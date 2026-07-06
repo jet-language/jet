@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 216,
-    "rev": 137,
+    "rev": 144,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -5589,7 +5589,7 @@
     },
     {
       "milestoneId": null,
-      "assignee": null,
+      "assignee": "claude-main",
       "id": "c2hizkhl",
       "num": 125,
       "title": "JIT tier-1a: Cranelift JIT (dev-loop hot-reload) — c139",
@@ -5603,6 +5603,21 @@
       "plan": "jit-cranelift — M4 functional parity with AOT: (1) wire `dev_iteration` through CraneliftBackend by default (D-JIT2; done 2026-06-30); (2) expand CLIF lowering + host runtime for tasks/channels/spawn (scheduler), then structs/enums/collections/Core per `tir_covers`; (3) align `jit_covers` gate with `tir_covers` (try-compile, never silent interpreter fallback for AOT-covered programs); (4) three-way differential battery on full `examples/features/*.jet` set; (5) `jet dev` on `160_scheduler_spawn.jet` and task programs without E2201. Exit: byte-identical stdout vs AOT for every tir-covered example, or named tested gap only.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-06",
+          "by": "claude-main",
+          "text": "JIT small-gap pass complete: labeled loop control and prefix/postfix increment/decrement now count as Cranelift-covered. Added regression tests jit_covers_labeled_loop_control and jit_covers_increment_decrement. Audit improved from 70 covered / 186 gaps to 72 covered / 184 gaps. Verified cargo test --test dev green: 32 passed, 1 ignored. cargo fmt unavailable in this dev shell (cargo reports no fmt subcommand); git diff --check clean."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "claude-main",
+          "text": "Correction to previous log: JIT labeled loop control slice widened Cranelift coverage for loop labels and labeled break/continue; lowering resolves labels against loop target stack for Loop/While/CountedLoop/Range/ForIn. Added test jit_covers_labeled_loop_control. Verified cargo test --test dev green: 31 passed, 1 ignored; audit improved 70 to 71 covered, adding basics/labeled_loops."
+        },
+        {
+          "at": "2026-07-06",
+          "by": "claude-main",
+          "text": "JIT labeled loop control slice: Cranelift gate now admits loop labels and labeled break/continue; lowering resolves labels against the loop target stack for Loop/While/CountedLoop/Range/ForIn. Added . Verified  green: 31 passed, 1 ignored; audit count improved 70→71 covered ()."
+        },
         {
           "at": "2026-07-04",
           "by": "orchestrator",
@@ -5697,7 +5712,8 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-07-04"
+      "updated": "2026-07-06",
+      "claimedAt": "2026-07-05T23:48:43.833Z"
     },
     {
       "milestoneId": null,
@@ -24070,9 +24086,11 @@
       "by": "owner",
       "kind": "note",
       "text": "TOWER MOVED (2026-07-04): the board now runs from repo-root Tower/ with data in .tower/tower.json — this file (tools/Tower/tower.json) is FROZEN; do not write it. Use the CLI: node Tower/tower.mjs status | next | card update ... --by <you> | question answer. The 7878 server is the new app and your existing POST /api routes (card/update, question/answer, clearance) keep working. Read tools/Tower/MOVED.md + the updated .claude/skills/tower/SKILL.md. Mark this question answered in the NEW board once you have switched.",
-      "status": "open",
-      "answer": "",
-      "created": "2026-07-04T13:34:25.255Z"
+      "status": "answered",
+      "answer": "Switched to repo-root Tower CLI and .tower/tower.json. I will not read or write tools/Tower/tower.json.",
+      "created": "2026-07-04T13:34:25.255Z",
+      "answeredAt": "2026-07-05",
+      "answeredBy": "claude-main"
     },
     {
       "id": "q-tower-moved-cv5syntaxdecrees",
@@ -24080,9 +24098,11 @@
       "by": "owner",
       "kind": "note",
       "text": "TOWER MOVED (2026-07-04): the board now runs from repo-root Tower/ with data in .tower/tower.json — this file (tools/Tower/tower.json) is FROZEN; do not write it. Use the CLI: node Tower/tower.mjs status | next | card update ... --by <you> | question answer. The 7878 server is the new app and your existing POST /api routes (card/update, question/answer, clearance) keep working. Read tools/Tower/MOVED.md + the updated .claude/skills/tower/SKILL.md. Mark this question answered in the NEW board once you have switched.",
-      "status": "open",
-      "answer": "",
-      "created": "2026-07-04T13:34:25.256Z"
+      "status": "answered",
+      "answer": "Switched to repo-root Tower CLI and .tower/tower.json. I will not read or write tools/Tower/tower.json.",
+      "created": "2026-07-04T13:34:25.256Z",
+      "answeredAt": "2026-07-05",
+      "answeredBy": "claude-main"
     }
   ],
   "ideas": [
@@ -24338,6 +24358,55 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-06T00:06:06.100Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c2hizkhl",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-06T00:02:09.670Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c2hizkhl",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-06T00:02:02.788Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c2hizkhl",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-05T23:48:43.834Z",
+      "by": "claude-main",
+      "action": "card.claim",
+      "ref": "c2hizkhl",
+      "note": ""
+    },
+    {
+      "at": "2026-07-05T23:48:37.772Z",
+      "by": "claude-main",
+      "action": "message.send",
+      "ref": "msg0vonkhe",
+      "note": "→ owner: Received old Test + board-change notices. Switched to new To"
+    },
+    {
+      "at": "2026-07-05T23:48:24.834Z",
+      "by": "claude-main",
+      "action": "question.answer",
+      "ref": "q-tower-moved-cmemgreenfield",
+      "note": ""
+    },
+    {
+      "at": "2026-07-05T23:48:24.789Z",
+      "by": "claude-main",
+      "action": "question.answer",
+      "ref": "q-tower-moved-cv5syntaxdecrees",
+      "note": ""
+    },
     {
       "at": "2026-07-05T12:09:39.233Z",
       "by": "claude-main",
@@ -25195,6 +25264,17 @@
       "cardId": null,
       "file": null,
       "at": "2026-07-05T12:09:39.233Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg0vonkhe",
+      "from": "claude-main",
+      "to": "owner",
+      "text": "Received old Test + board-change notices. Switched to new Tower CLI, answered move questions, picking next e3 card #125.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-05T23:48:37.771Z",
       "deliveredAt": null,
       "readAt": null
     }

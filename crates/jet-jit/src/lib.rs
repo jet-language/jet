@@ -23,7 +23,7 @@ use jet_codegen::scheduler::{
 use jet_foundation::{
     Diagnostics::Diagnostic,
     JitBackend::{JitBackend, RunOutcome},
-    AST::{BinOp, ProgramBundle, Type, UnOp},
+    AST::{BinOp, IncDecOp, ProgramBundle, Type, UnOp},
 };
 
 use cranelift_codegen::ir::{
@@ -649,6 +649,7 @@ fn jit_covers_expr(expr: &TExpr, callees: &HashSet<String>) -> bool {
         TExprKind::Unary { op, operand } => {
             matches!(op, UnOp::Neg | UnOp::Not) && jit_covers_expr(operand, callees)
         }
+        TExprKind::IncDec { ty, .. } => matches!(ty, Type::Int),
         TExprKind::Binary {
             op,
             overflow,
@@ -810,39 +811,33 @@ fn jit_covers_stmt(stmt: &TStmt, callees: &HashSet<String>) -> bool {
                     .as_ref()
                     .is_none_or(|b| b.iter().all(|s| jit_covers_stmt(s, callees)))
         }
-        TStmt::Loop { label, body } => {
-            label.is_none() && body.iter().all(|s| jit_covers_stmt(s, callees))
-        }
-        TStmt::While { label, cond, body } => {
-            label.is_none()
-                && matches!(&cond.ty, Type::Bool)
+        TStmt::Loop { body, .. } => body.iter().all(|s| jit_covers_stmt(s, callees)),
+        TStmt::While { cond, body, .. } => {
+            matches!(&cond.ty, Type::Bool)
                 && jit_covers_expr(cond, callees)
                 && body.iter().all(|s| jit_covers_stmt(s, callees))
         }
         TStmt::CountedLoop {
-            label,
             init,
             cond,
             step,
             body,
+            ..
         } => {
-            label.is_none()
-                && jit_covers_stmt(init, callees)
+            jit_covers_stmt(init, callees)
                 && matches!(&cond.ty, Type::Bool)
                 && jit_covers_expr(cond, callees)
                 && jit_covers_stmt(step, callees)
                 && body.iter().all(|s| jit_covers_stmt(s, callees))
         }
         TStmt::Range {
-            label,
             start,
             end,
             step,
             body,
             ..
         } => {
-            label.is_none()
-                && matches!(&start.ty, Type::Int)
+            matches!(&start.ty, Type::Int)
                 && matches!(&end.ty, Type::Int)
                 && step.as_ref().is_none_or(|s| matches!(&s.ty, Type::Int))
                 && jit_covers_expr(start, callees)
@@ -850,7 +845,7 @@ fn jit_covers_stmt(stmt: &TStmt, callees: &HashSet<String>) -> bool {
                 && step.as_ref().is_none_or(|s| jit_covers_expr(s, callees))
                 && body.iter().all(|s| jit_covers_stmt(s, callees))
         }
-        TStmt::Break(label) | TStmt::Continue(label) => label.is_none(),
+        TStmt::Break(_) | TStmt::Continue(_) => true,
         TStmt::IndexAssign {
             base,
             index,
@@ -866,15 +861,13 @@ fn jit_covers_stmt(stmt: &TStmt, callees: &HashSet<String>) -> bool {
                 && jit_covers_expr(value, callees)
         }
         TStmt::ForIn {
-            label,
             var2,
             method_kind,
             columnar,
             body,
             ..
         } => {
-            label.is_none()
-                && var2.is_none()
+            var2.is_none()
                 && method_kind.is_none()
                 && !columnar
                 && body.iter().all(|s| jit_covers_stmt(s, callees))
@@ -1265,7 +1258,9 @@ impl<'a> JitMeta<'a> {
     }
 }
 
+#[derive(Clone)]
 struct LoopTargets {
+    label: Option<String>,
     continue_block: Block,
     break_block: Block,
 }
@@ -1292,6 +1287,23 @@ struct LowerCtx<'a, 'b> {
 }
 
 impl LowerCtx<'_, '_> {
+    fn loop_targets(&self, label: Option<&str>, kind: &str) -> Result<LoopTargets, String> {
+        match label {
+            Some(name) => self
+                .loop_stack
+                .iter()
+                .rev()
+                .find(|targets| targets.label.as_deref() == Some(name))
+                .cloned()
+                .ok_or_else(|| format!("jit {kind} to unknown loop label `{name}`")),
+            None => self
+                .loop_stack
+                .last()
+                .cloned()
+                .ok_or_else(|| format!("jit {kind} outside loop")),
+        }
+    }
+
     fn fresh_var(&mut self, ty: cranelift_codegen::ir::Type) -> Variable {
         let var = Variable::from_u32(self.next_var);
         self.next_var += 1;
@@ -1458,7 +1470,7 @@ impl LowerCtx<'_, '_> {
                 self.b.seal_block(merge_block);
                 self.dead = false;
             }
-            TStmt::Loop { body, .. } => {
+            TStmt::Loop { label, body } => {
                 let header = self.b.create_block();
                 let body_block = self.b.create_block();
                 let exit = self.b.create_block();
@@ -1469,6 +1481,7 @@ impl LowerCtx<'_, '_> {
                 self.b.ins().jump(body_block, &[]);
 
                 self.loop_stack.push(LoopTargets {
+                    label: label.clone(),
                     continue_block: header,
                     break_block: exit,
                 });
@@ -1484,7 +1497,9 @@ impl LowerCtx<'_, '_> {
                 self.b.seal_block(exit);
                 self.dead = false;
             }
-            TStmt::While { cond, body, .. } => {
+            TStmt::While {
+                label, cond, body, ..
+            } => {
                 let header = self.b.create_block();
                 let body_block = self.b.create_block();
                 let exit = self.b.create_block();
@@ -1495,6 +1510,7 @@ impl LowerCtx<'_, '_> {
                 self.b.ins().brif(cond_val, body_block, &[], exit, &[]);
 
                 self.loop_stack.push(LoopTargets {
+                    label: label.clone(),
                     continue_block: header,
                     break_block: exit,
                 });
@@ -1512,6 +1528,7 @@ impl LowerCtx<'_, '_> {
                 self.dead = false;
             }
             TStmt::CountedLoop {
+                label,
                 init,
                 cond,
                 step,
@@ -1529,6 +1546,7 @@ impl LowerCtx<'_, '_> {
                 self.b.ins().brif(cond_val, body_block, &[], exit, &[]);
 
                 self.loop_stack.push(LoopTargets {
+                    label: label.clone(),
                     continue_block: header,
                     break_block: exit,
                 });
@@ -1549,6 +1567,7 @@ impl LowerCtx<'_, '_> {
                 self.dead = false;
             }
             TStmt::Range {
+                label,
                 var,
                 start,
                 end,
@@ -1574,6 +1593,7 @@ impl LowerCtx<'_, '_> {
                 self.b.ins().brif(past_end, exit, &[], body_block, &[]);
 
                 self.loop_stack.push(LoopTargets {
+                    label: label.clone(),
                     continue_block: step_block,
                     break_block: exit,
                 });
@@ -1602,19 +1622,13 @@ impl LowerCtx<'_, '_> {
                 self.b.seal_block(exit);
                 self.dead = false;
             }
-            TStmt::Break(_) => {
-                let targets = self
-                    .loop_stack
-                    .last()
-                    .ok_or_else(|| "jit break outside loop".to_string())?;
+            TStmt::Break(label) => {
+                let targets = self.loop_targets(label.as_deref(), "break")?;
                 self.b.ins().jump(targets.break_block, &[]);
                 self.dead = true;
             }
-            TStmt::Continue(_) => {
-                let targets = self
-                    .loop_stack
-                    .last()
-                    .ok_or_else(|| "jit continue outside loop".to_string())?;
+            TStmt::Continue(label) => {
+                let targets = self.loop_targets(label.as_deref(), "continue")?;
                 self.b.ins().jump(targets.continue_block, &[]);
                 self.dead = true;
             }
@@ -1638,6 +1652,7 @@ impl LowerCtx<'_, '_> {
                 self.emit_trap_check()?;
             }
             TStmt::ForIn {
+                label,
                 var,
                 collection_str,
                 body,
@@ -1670,6 +1685,7 @@ impl LowerCtx<'_, '_> {
                 self.b.ins().brif(done, exit, &[], body_block, &[]);
 
                 self.loop_stack.push(LoopTargets {
+                    label: label.clone(),
                     continue_block: step_block,
                     break_block: exit,
                 });
@@ -2006,6 +2022,12 @@ impl LowerCtx<'_, '_> {
                     }
                 })
             }
+            TExprKind::IncDec {
+                op,
+                place,
+                postfix,
+                ty,
+            } => self.lower_incdec(*op, place, *postfix, ty),
             TExprKind::Binary {
                 op,
                 overflow,
@@ -2588,6 +2610,32 @@ impl LowerCtx<'_, '_> {
         self.b.switch_to_block(merge_block);
         self.b.seal_block(merge_block);
         Ok(self.b.block_params(merge_block)[0])
+    }
+
+    fn lower_incdec(
+        &mut self,
+        op: IncDecOp,
+        place: &str,
+        postfix: bool,
+        ty: &Type,
+    ) -> Result<Value, String> {
+        if !matches!(ty, Type::Int) {
+            return Err("jit increment/decrement unsupported type".to_string());
+        }
+        let key = self.normalize_place(place)?;
+        let var = self
+            .vars
+            .get(&key)
+            .copied()
+            .ok_or_else(|| format!("jit increment/decrement unknown local `{place}`"))?;
+        let old = self.b.use_var(var);
+        let delta = match op {
+            IncDecOp::Inc => self.b.ins().iconst(types::I64, 1),
+            IncDecOp::Dec => self.b.ins().iconst(types::I64, -1),
+        };
+        let next = self.b.ins().iadd(old, delta);
+        self.b.def_var(var, next);
+        Ok(if postfix { old } else { next })
     }
 
     fn expr_field_type(&self, expr: &TExpr) -> Option<Type> {
