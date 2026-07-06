@@ -44,6 +44,19 @@ Known traps:
 - The dev-shell `jet` is a wrapper that execs `target/debug/jet` — rebuild
   (`cargo build`) before smoke-testing compiler changes.
 
+## Deeper guides — read the one that matches your task
+
+Plain markdown, tool-neutral despite the `.claude/` path; Claude loads them
+as skills, every other agent reads them as files:
+
+- `.claude/skills/verify/SKILL.md` — verification checklist + this repo's
+  traps (stale binaries, snapshot/golden/formatter gotchas). Read before
+  claiming anything done.
+- `.claude/skills/tower/SKILL.md` — the board workflow (cards, lanes,
+  messaging the owner).
+- `.claude/skills/tower-ballot/SKILL.md` — ballot standard + how the owner
+  decides. Read before raising any owner-facing choice.
+
 ## Invariants (violating one = stop and fix)
 
 - **I1** Safe by default, expert tier first-class: all Jet code is memory-safe
