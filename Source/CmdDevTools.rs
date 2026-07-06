@@ -215,8 +215,8 @@ fn render_dev_change(
 }
 
 /// Hot-swap via the JitBackend seam. `use_interpreter` forces tier-0;
-/// otherwise `CraneliftBackend` wraps the interpreter (M0: delegates,
-/// M1+: JIT-compiles the covered subset).
+/// otherwise `CraneliftBackend` uses the same transparent AOT fallback ladder
+/// as `dev_iteration` before reaching the interpreter boundary.
 fn run_resident_swap(
     bundle: &jet::AST::ProgramBundle,
     try_anyway: bool,
@@ -225,13 +225,13 @@ fn run_resident_swap(
     mode: OutputMode,
     use_interpreter: bool,
 ) {
-    use jet::JitBackend::{InterpreterBackend, JitBackend};
+    use jet::JitBackend::{AotFallbackBackend, InterpreterBackend, JitBackend};
     use jet_jit::CraneliftBackend;
     let outcome = if use_interpreter {
         let mut b = InterpreterBackend::new();
         b.hot_swap(module_name, bundle, try_anyway)
     } else {
-        let mut b = CraneliftBackend::new(InterpreterBackend::new());
+        let mut b = CraneliftBackend::new(AotFallbackBackend::new(InterpreterBackend::new()));
         b.hot_swap(module_name, bundle, try_anyway)
     };
     match outcome {
@@ -251,13 +251,13 @@ fn run_resident_restart(
     mode: OutputMode,
     use_interpreter: bool,
 ) {
-    use jet::JitBackend::{InterpreterBackend, JitBackend};
+    use jet::JitBackend::{AotFallbackBackend, InterpreterBackend, JitBackend};
     use jet_jit::CraneliftBackend;
     let outcome = if use_interpreter {
         let mut b = InterpreterBackend::new();
         b.restart(bundle, try_anyway)
     } else {
-        let mut b = CraneliftBackend::new(InterpreterBackend::new());
+        let mut b = CraneliftBackend::new(AotFallbackBackend::new(InterpreterBackend::new()));
         b.restart(bundle, try_anyway)
     };
     render_outcome(outcome, file, mode);
