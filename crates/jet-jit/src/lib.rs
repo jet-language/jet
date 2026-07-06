@@ -1,10 +1,10 @@
 //! c139 (D-JITDEP1 / D-JIT2=A) — Cranelift JIT tier-1 backend.
 //!
 //! Architecture: CraneliftBackend<F: JitBackend> where F is the tier-0
-//! fallback. M0 delegates everything to F; M1 adds resident_jit_safe() and
-//! lower_tir_clif() to actually compile + run the covered subset natively.
+//! fallback. M0 delegates everything to F; M1 uses try-compile lowering to
+//! actually compile + run the covered subset natively.
 //! M2 keeps a resident JIT module + live runtime heap across hot_swap.
-//! M3 widens resident_jit_safe: arithmetic, bindings, if/else, calls, loops,
+//! M3 widens native lowering: arithmetic, bindings, if/else, calls, loops,
 //! compound assign, &&/|| short-circuit.
 //! M4: tasks/channels/spawn via scheduler host shims (D-ASYNCRT1=A).
 
@@ -700,6 +700,15 @@ fn jit_list_float_type(ty: &Type) -> bool {
 
 fn jit_list_native_type(ty: &Type) -> bool {
     jit_list_int_type(ty) || jit_list_float_type(ty)
+}
+
+fn jit_list_iter_elem_type(ty: &Type) -> Option<Type> {
+    match ty {
+        Type::List(inner) if matches!(inner.as_ref(), Type::Int | Type::Float) => {
+            Some(inner.as_ref().clone())
+        }
+        _ => None,
+    }
 }
 
 fn jit_list_task_int_type(ty: &Type) -> bool {
@@ -1548,6 +1557,7 @@ struct LowerCtx<'a, 'b> {
     runtime: &'a mut JitRuntime,
     meta: &'a JitMeta<'a>,
     vars: &'a mut HashMap<String, Variable>,
+    var_tys: &'a mut HashMap<String, Type>,
     func_ids: &'a HashMap<String, FuncId>,
     spawn_site: &'a mut usize,
     spawn_func_ids: &'a [FuncId],
@@ -1651,6 +1661,7 @@ impl LowerCtx<'_, '_> {
                 let var = self.fresh_var(ty);
                 self.b.def_var(var, val);
                 self.vars.insert(TIR::local_place(name), var);
+                self.var_tys.insert(TIR::local_place(name), init.ty.clone());
             }
             // D-TUPLE-DESTRUCT1: `(tx, rx) := tasks.channel<T>()`. The coverage gate
             // (`resident_safe_stmt`) admitted only this exact shape: a 2-element
@@ -1681,9 +1692,11 @@ impl LowerCtx<'_, '_> {
                     let tx_var = self.fresh_var(types::I64);
                     self.b.def_var(tx_var, tx_val);
                     self.vars.insert(binds[0].0.clone(), tx_var);
+                    self.var_tys.insert(binds[0].0.clone(), Type::Int);
                     let ch_var = self.fresh_var(types::I64);
                     self.b.def_var(ch_var, ch_val);
                     self.vars.insert(binds[1].0.clone(), ch_var);
+                    self.var_tys.insert(binds[1].0.clone(), Type::Int);
                 } else {
                     self.lower_tuple_destructure(init, binds)?;
                 }
@@ -1864,6 +1877,7 @@ impl LowerCtx<'_, '_> {
                 let loop_var = self.fresh_var(types::I64);
                 self.b.def_var(loop_var, start_val);
                 self.vars.insert(TIR::local_place(var), loop_var);
+                self.var_tys.insert(TIR::local_place(var), Type::Int);
 
                 let header = self.b.create_block();
                 let body_block = self.b.create_block();
@@ -1945,6 +1959,13 @@ impl LowerCtx<'_, '_> {
                 ..
             } => {
                 let coll_place = collection_str.trim().to_string();
+                let coll_ty = self
+                    .var_tys
+                    .get(&coll_place)
+                    .ok_or_else(|| format!("jit for-in unknown collection `{coll_place}`"))?;
+                let elem_ty = jit_list_iter_elem_type(coll_ty).ok_or_else(|| {
+                    format!("jit for-in collection type unsupported: {coll_ty:?}")
+                })?;
                 let coll_var = self
                     .vars
                     .get(&coll_place)
@@ -1978,15 +1999,23 @@ impl LowerCtx<'_, '_> {
                 self.b.switch_to_block(body_block);
                 self.b.seal_block(body_block);
                 let line = self.b.ins().iconst(types::I32, 1);
-                let get_ref = self
-                    .module
-                    .declare_func_in_func(self.host.coll.list_get, self.b.func);
+                let get_ref = self.module.declare_func_in_func(
+                    match elem_ty {
+                        Type::Float => self.host.coll.list_get_f64,
+                        _ => self.host.coll.list_get,
+                    },
+                    self.b.func,
+                );
                 let get_call = self.b.ins().call(get_ref, &[coll, idx, line]);
                 let elem = self.b.inst_results(get_call)[0];
                 self.emit_trap_check()?;
-                let loop_var = self.fresh_var(types::I64);
+                let loop_var =
+                    self.fresh_var(clif_ty(&elem_ty).ok_or_else(|| {
+                        format!("jit for-in element type unsupported: {elem_ty:?}")
+                    })?);
                 self.b.def_var(loop_var, elem);
                 self.vars.insert(TIR::local_place(var), loop_var);
+                self.var_tys.insert(TIR::local_place(var), elem_ty);
                 self.lower_stmts_scoped(body)?;
                 self.loop_stack.pop();
                 if !self.dead {
@@ -2338,6 +2367,7 @@ impl LowerCtx<'_, '_> {
             let var = self.fresh_var(clif);
             self.b.def_var(var, value);
             self.vars.insert(local.clone(), var);
+            self.var_tys.insert(local.clone(), fallback_ty);
         }
         Ok(())
     }
@@ -3400,6 +3430,7 @@ fn lower_spawn_function(
     ctx.func.signature = spawn_lambda_signature(module, lam);
     let mut fbcx = FunctionBuilderContext::new();
     let mut vars = HashMap::new();
+    let mut var_tys = HashMap::new();
     let mut spawn_site = 0usize;
     {
         let mut b = FunctionBuilder::new(&mut ctx.func, &mut fbcx);
@@ -3416,6 +3447,7 @@ fn lower_spawn_function(
             runtime,
             meta,
             vars: &mut vars,
+            var_tys: &mut var_tys,
             func_ids,
             spawn_site: &mut spawn_site,
             spawn_func_ids,
@@ -3430,6 +3462,8 @@ fn lower_spawn_function(
             let var = lctx.fresh_var(types::I64);
             lctx.b.def_var(var, param_vals[idx]);
             lctx.vars.insert(TIR::local_place(&cap.name), var);
+            lctx.var_tys
+                .insert(TIR::local_place(&cap.name), cap.ty.clone());
             idx += 1;
         }
         for (name, ty) in &lam.params {
@@ -3437,6 +3471,7 @@ fn lower_spawn_function(
             let var = lctx.fresh_var(clif);
             lctx.b.def_var(var, param_vals[idx]);
             lctx.vars.insert(TIR::local_place(name), var);
+            lctx.var_tys.insert(TIR::local_place(name), ty.clone());
             idx += 1;
         }
         match &lam.body {
@@ -3528,6 +3563,7 @@ fn lower_function(
     ctx.func.signature = func_signature(module, tir)?;
     let mut fbcx = FunctionBuilderContext::new();
     let mut vars = HashMap::new();
+    let mut var_tys = HashMap::new();
     {
         let mut b = FunctionBuilder::new(&mut ctx.func, &mut fbcx);
         let entry = b.create_block();
@@ -3548,6 +3584,7 @@ fn lower_function(
             runtime,
             meta,
             vars: &mut vars,
+            var_tys: &mut var_tys,
             func_ids,
             spawn_site,
             spawn_func_ids,
@@ -3562,6 +3599,10 @@ fn lower_function(
             let self_var = lctx.fresh_var(types::I64);
             lctx.b.def_var(self_var, param_vals[0]);
             lctx.vars.insert("self".to_string(), self_var);
+            if let Some(struct_name) = &lctx.method_struct {
+                lctx.var_tys
+                    .insert("self".to_string(), Type::Named(struct_name.clone()));
+            }
             param_idx = 1;
         }
         for (i, (name, ty, _)) in tir.params.iter().enumerate() {
@@ -3569,6 +3610,7 @@ fn lower_function(
             let var = lctx.fresh_var(clif);
             lctx.b.def_var(var, param_vals[param_idx + i]);
             lctx.vars.insert(name.clone(), var);
+            lctx.var_tys.insert(name.clone(), ty.clone());
         }
 
         lctx.lower_stmts(&tir.body)?;
@@ -3832,10 +3874,9 @@ fn try_resident(bundle: &ProgramBundle) -> Option<Result<RunOutcome, String>> {
         return None;
     }
     let program = TIR::lower_jit_program(bundle)?;
-    if !resident_safe_program(&program) {
-        return None;
-    }
-    Some(resident_run_fresh(&program))
+    Some(catch_jit_panic("resident run", || {
+        resident_run_fresh(&program)
+    }))
 }
 
 fn try_resident_hot_swap(bundle: &ProgramBundle) -> Option<Result<RunOutcome, String>> {
