@@ -51,9 +51,9 @@ covered:
 gaps:
   basics/bare_lambda_param: jit param type unsupported: Fn { params: [Int], ret: None, effect_bound: None }
   basics/callbacks: jit param type unsupported: Fn { params: [Int], ret: Some(Int), effect_bound: None }
-  basics/closures: run: jit expression unsupported
+  basics/closures: run: jit closure method unsupported
   basics/default_refs: run: jit missing static `Rect::square`
-  basics/fan_out: run: jit expression unsupported
+  basics/fan_out: run: jit fan-out expression unsupported
   basics/fizzbuzz: label: label: verifier: VerifierErrors([VerifierError { location: inst27, context: None, message: "invalid block reference block8" }])
   basics/labeled_loops: run: jit for-in unknown collection `vec![1i64, 2i64, 3i64]`
   basics/loop_forms: jit compile panicked before returning an unsupported reason
@@ -72,24 +72,24 @@ gaps:
   collections/iter_adapters: run: jit builtin method unsupported
   collections/list_remove_bounds: run: jit builtin method unsupported
   collections/lists: run: run: verifier: VerifierErrors([VerifierError { location: inst38, context: Some("v28, v29 = call fn11(v0, v25, v26, v27)  ; v25 = 1, v26 = 2, v27 = 8"), message: "arg 2 (v26) has type i64, expected i32" }, VerifierError { location: inst38, context: Some("v28, v29 = call fn11(v0, v25, v26, v27)  ; v25 = 1, v26 = 2, v27 = 8"), message: "mismatched argument count for `v28, v29 = call fn11(v0, v25, v26, v27)  ; v25 = 1, v26 = 2, v27 = 8`: got 4, expected 3" }])
-  collections/map_key: run: jit expression unsupported
+  collections/map_key: run: jit map literal unsupported
   collections/set: run: jit builtin method unsupported
   collections/sketch: run: jit core call unsupported
-  collections/wordcount: run: jit expression unsupported
-  comptime/comptime_block: run: jit statement unsupported
-  comptime/comptime_core: run: jit expression unsupported
-  comptime/comptime_if: run: jit statement unsupported
+  collections/wordcount: run: jit map literal unsupported
+  comptime/comptime_block: run: jit inline comptime branch unsupported
+  comptime/comptime_core: run: jit const inline unsupported
+  comptime/comptime_if: run: jit inline comptime branch unsupported
   comptime/comptime_parse: safe_int: jit result status unsupported
   comptime/comptime_splice: run: jit missing method `Cube::label`
-  comptime/comptime_table: run: jit expression unsupported
-  comptime/comptime_tiers: run: jit expression unsupported
-  comptime/embed: check_nonempty: jit expression unsupported
+  comptime/comptime_table: run: jit const inline unsupported
+  comptime/comptime_tiers: run: jit const inline unsupported
+  comptime/embed: check_nonempty: jit require/panic stop unsupported
   comptime/embed_bytes: jit param type unsupported: List(IntN { signed: false, bits: 8 })
   comptime/reflect: Widget::show: jit clone unsupported
   concurrency/all_failfast: slow_one: jit core call unsupported
   concurrency/deadline_context: jit core call unsupported
   concurrency/detached_task: run: jit handle method unsupported
-  concurrency/parallel_iter: run: jit expression unsupported
+  concurrency/parallel_iter: run: jit closure method unsupported
   concurrency/parallel_scan: jit param type unsupported: List(String)
   concurrency/protocol: drive: jit result status unsupported
   concurrency/race_cancel: slow_one: jit core call unsupported
@@ -100,7 +100,7 @@ gaps:
   crypto/hash: run: jit core call unsupported
   crypto/random_api_split: run: jit core call unsupported
   crypto/vault_secret: handler: jit core call unsupported
-  devloop/persist: run: jit expression unsupported
+  devloop/persist: run: jit const inline unsupported
   effects/all_sigils: deposit: jit assign to unknown place `((*user_a)).user_balance`
   effects/asset_pipeline: normalize: jit assign to unknown place `((*user_img)).user_gamma`
   effects/capability_sigils: damage: jit assign to unknown place `((*user_p)).user_hp`
@@ -116,19 +116,19 @@ gaps:
   effects/self_mutation: Tracker::take_hit: jit assign to unknown place `((*self)).user_hits`
   effects/single_use: acquire: jit clone unsupported
   effects/single_use_discard: issue: jit clone unsupported
-  effects/smart_context: run: jit expression unsupported
+  effects/smart_context: run: jit allocator constructor unsupported
   effects/taint: shell_arg: jit builtin method unsupported
   errors/discard_fallible: run: jit core call unsupported
-  errors/error_context: read_raw: jit expression unsupported
-  errors/errors: parse_age: jit expression unsupported
-  errors/must_use: run: jit core closure unsupported
-  errors/panic: run: jit expression unsupported
+  errors/error_context: read_raw: jit result err value unsupported
+  errors/errors: parse_age: jit result err value unsupported
+  errors/must_use: run: jit scope guard closure unsupported
+  errors/panic: run: jit require/panic stop unsupported
   errors/qq_control: run: jit result status unsupported
-  errors/rollback_trait: transfer: jit statement unsupported
-  errors/transact: place_order: jit statement unsupported
-  errors/typed_error_families: read_file: jit expression unsupported
-  functions/lambda_bare_params: run: jit expression unsupported
-  functions/lambda_inference: run: jit expression unsupported
+  errors/rollback_trait: transfer: jit transact block unsupported
+  errors/transact: place_order: jit transact block unsupported
+  errors/typed_error_families: read_file: jit result err value unsupported
+  functions/lambda_bare_params: run: jit closure method unsupported
+  functions/lambda_inference: run: jit closure method unsupported
   game/raylib_window: run: jit core call unsupported
   io/archive: run: jit core call unsupported
   io/args_spec: run: jit core call unsupported
@@ -143,53 +143,53 @@ gaps:
   io/log: run: jit core call unsupported
   io/log_human: run: jit core call unsupported
   io/path: run: jit handle method unsupported
-  io/scope_guard: with_guards: jit core closure unsupported
+  io/scope_guard: with_guards: jit scope guard closure unsupported
   io/stdin_filter: run: jit for-in unknown collection `jet_std_io_stdin()`
-  io/stream: count_lines: jit expression unsupported
+  io/stream: count_lines: jit try propagation unsupported
   io/terminal: describe_key: jit if condition unsupported
-  lowlevel/ffi: run: jit expression unsupported
+  lowlevel/ffi: run: jit extern call unsupported
   lowlevel/freestanding: clamp: clamp: verifier: VerifierErrors([VerifierError { location: inst4, context: None, message: "invalid block reference block2" }])
   lowlevel/layout_columnar: jit param type unsupported: List(Named("Particle"))
-  lowlevel/linalg_simd: run: jit expression unsupported
-  lowlevel/lowlevel: run: jit statement unsupported
-  lowlevel/os_target_gating: run: jit statement unsupported
-  lowlevel/pointer_cast_deref: run: jit statement unsupported
+  lowlevel/linalg_simd: run: jit math builtin unsupported
+  lowlevel/lowlevel: run: jit unsafe region unsupported
+  lowlevel/os_target_gating: run: jit inline comptime branch unsupported
+  lowlevel/pointer_cast_deref: run: jit unsafe region unsupported
   lowlevel/sized_floats: run: jit core call unsupported
   lowlevel/sized_integers: run: jit let type unsupported: IntN { signed: false, bits: 8 }
-  lowlevel/swizzle: run: jit expression unsupported
-  memory/arena: run: jit expression unsupported
-  memory/arena_parse: run: jit expression unsupported
-  memory/arena_regions: run: jit expression unsupported
+  lowlevel/swizzle: run: jit math builtin unsupported
+  memory/arena: run: jit allocator constructor unsupported
+  memory/arena_parse: run: jit allocator constructor unsupported
+  memory/arena_regions: run: jit allocator constructor unsupported
   memory/copy_verb: archive: jit clone unsupported
   memory/entity_tree: run: jit static `jet_std::JetPool::<user_Node>::new`
   memory/entity_world: tick: jit for-in unknown collection `((*user_world)).ids()`
   memory/expiring_rotting: run: jit core call unsupported
-  memory/gc_cyclic: run: jit expression unsupported
+  memory/gc_cyclic: run: jit allocator constructor unsupported
   memory/no_alloc_policy: integrate: jit assign to unknown place `((*user_e)).user_pos`
   memory/ownership: bump: jit assign to unknown place `(*user_n)`
   memory/pool_stale_id: run: jit static `jet_std::JetPool::<user_Player>::new`
-  memory/rawptr: run: jit statement unsupported
+  memory/rawptr: run: jit unsafe region unsupported
   memory/ref_field: describe: jit clone unsupported
   memory/shared_config: jit param type unsupported: Shared(Named("AppConfig"))
   memory/string_view: run: jit builtin method unsupported
-  memory/uninit: run: jit expression unsupported
-  memory/uninit_buffer: run: jit expression unsupported
+  memory/uninit: run: jit const inline unsupported
+  memory/uninit_buffer: run: jit const inline unsupported
   modules/generic_modules: run: jit call to unknown function `IntCache__key_of`
-  modules/inline_module: run: jit expression unsupported
+  modules/inline_module: run: jit module call unsupported
   modules/library: greet: greet: verifier: VerifierErrors([VerifierError { location: inst0, context: None, message: "invalid block reference block2" }])
-  modules/module_inline_sibling: run: jit expression unsupported
-  modules/selective_imports: run: jit expression unsupported
+  modules/module_inline_sibling: run: jit module call unsupported
+  modules/selective_imports: run: jit module call unsupported
   net/http_client: jit result status unsupported
   net/http_get: jit result status unsupported
   net/http_routes: jit result status unsupported
   net/http_server: run: jit core call unsupported
   net/http_server_tasks: jit result status unsupported
   parsing/binary-reader: run: jit handle method unsupported
-  parsing/parse_interpolation: run: jit expression unsupported
+  parsing/parse_interpolation: run: jit const inline unsupported
   parsing/text-cursor: run: jit handle method unsupported
-  patterns/struct_destructure: run: jit statement unsupported
+  patterns/struct_destructure: run: jit struct destructure unsupported
   reflection/reflect-value: run: jit core call unsupported
-  safety/typed_sql: run_query: jit expression unsupported
+  safety/typed_sql: run_query: jit const inline unsupported
   serde/csv: run: jit result status unsupported
   serde/csv_typed: run: jit result status unsupported
   serde/datatree_accessors: run: jit result status unsupported
@@ -203,12 +203,12 @@ gaps:
   serde/toml: run: jit result status unsupported
   serde/user_derive: run: jit missing method `Point::debug_string`
   serde/yaml: run: jit result status unsupported
-  streams/generators: count: jit expression unsupported
+  streams/generators: count: jit const inline unsupported
   syntax/trailing_block: jit param type unsupported: Fn { params: [], ret: None, effect_bound: None }
-  text/bigint: run: jit expression unsupported
+  text/bigint: run: jit precise numeric builtin unsupported
   text/dates: run: jit core call unsupported
   text/datetime: run: jit core call unsupported
-  text/decimal: run: jit expression unsupported
+  text/decimal: run: jit precise numeric builtin unsupported
   text/hex_base64: run: jit core call unsupported
   text/regex: run: jit result status unsupported
   text/string_parse: run: jit result status unsupported
@@ -218,14 +218,14 @@ gaps:
   tooling/bench: fib: fib: verifier: VerifierErrors([VerifierError { location: inst5, context: None, message: "invalid block reference block2" }])
   tooling/debug_native: word_count: jit for-in unknown collection `jet_string_split(&((*user_text)), &" ".to_string())`
   tooling/fidelity: run: jit core call unsupported
-  tooling/panic_report: summarize: jit expression unsupported
+  tooling/panic_report: summarize: jit require/panic stop unsupported
   tooling/property_tests: reverse: jit for-in unknown collection `(*user_xs)`
-  tooling/todo_hole: not_yet: jit expression unsupported
+  tooling/todo_hole: not_yet: jit todo expression unsupported
   types/associated_types: run: jit missing method `Nums::at`
   types/capability_bundles: run: jit call to unknown function `Usd`
   types/computed_field: Stats::threat: jit field `user_attack()` on `Stats`
   types/display_debug: run: jit string interp type unsupported: Named("User")
-  types/distinct_types: greet: jit expression unsupported
+  types/distinct_types: greet: jit distinct raw unsupported
   types/enum_dot: area: jit enum pattern `user_Shape::user_Circle(user_r)`
   types/enum_dot_patterns: area: jit enum pattern `user_Shape::user_Circle(user_r)`
   types/external_methods: run: jit missing static `Point::origin`
@@ -236,25 +236,25 @@ gaps:
   types/option: find_even: find_even: verifier: VerifierErrors([VerifierError { location: inst11, context: None, message: "invalid block reference block6" }])
   types/option_combinators: lookup_price: lookup_price: verifier: VerifierErrors([VerifierError { location: inst5, context: None, message: "invalid block reference block2" }])
   types/patchable: run: jit missing method `Employee::apply`
-  types/range_types: checked: jit expression unsupported
-  types/recursive_enum: run: jit enum payload unsupported
+  types/range_types: checked: jit result ok value unsupported
+  types/recursive_enum: run: jit enum positional payload unsupported
   types/renderable-varargs-multi: run: jit call to unknown function `announce__va1`
   types/renderable-varargs: run: jit call to unknown function `log_all__va4`
   types/tags_and_traits: run: jit missing method `Doc::greet`
   types/traits: print_area: jit missing method `Shape::name`
-  types/type_alias: parse_count: jit expression unsupported
+  types/type_alias: parse_count: jit result err value unsupported
   types/typestate: run: jit missing static `Reservation::book`
   types/unit_family: subtotal: jit call to unknown function `Usd`
   types/unit_literals: run: jit call to unknown function `Ms`
   types/value_tag_type: jit param type unsupported: Tagged { marker: "Raw", inner: Int }
-  ui/layout_basic: run: jit statement unsupported
-  ui/loadable: fetch_user: jit expression unsupported
+  ui/layout_basic: run: jit layout block unsupported
+  ui/loadable: fetch_user: jit result err value unsupported
   ui/reactive: run: jit core call unsupported
   ui/reactive_scope: run: jit core call unsupported
   ui/ui_a11y: run: jit core call unsupported
   ui/ui_component_kit: jit param type unsupported: List(Named("View"))
-  ui/ui_motion: tween: jit expression unsupported
-  ui/ui_native_linux: run: jit statement unsupported
+  ui/ui_motion: tween: jit numeric method unsupported
+  ui/ui_native_linux: run: jit inline comptime branch unsupported
   ui/ui_null_backend: run: jit core call unsupported
   ui/ui_tui_reactive: run: jit core call unsupported
   ui/ui_typed_style: describe: jit enum pattern `user_View::user_Text { user_text: user_text, user_style: user_style }`

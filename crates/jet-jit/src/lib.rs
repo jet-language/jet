@@ -2080,7 +2080,30 @@ impl LowerCtx<'_, '_> {
             TStmt::Region(body) => {
                 self.lower_stmts_scoped(body)?;
             }
-            _ => return Err("jit statement unsupported".to_string()),
+            TStmt::StructDestructure { .. } => {
+                return Err("jit struct destructure unsupported".to_string());
+            }
+            TStmt::ListDestructure { .. } => {
+                return Err("jit list destructure unsupported".to_string());
+            }
+            TStmt::IndexHookAssign { .. } => {
+                return Err("jit index-hook assign unsupported".to_string());
+            }
+            TStmt::MathSwizzleAssign { .. } => {
+                return Err("jit math swizzle assign unsupported".to_string());
+            }
+            TStmt::RangeSwitch { .. } => return Err("jit range switch unsupported".to_string()),
+            TStmt::Inline(_) => return Err("jit inline comptime branch unsupported".to_string()),
+            TStmt::Unsafe(_) => return Err("jit unsafe region unsupported".to_string()),
+            TStmt::Reactive { .. } => return Err("jit reactive statement unsupported".to_string()),
+            TStmt::Layout { .. } => return Err("jit layout block unsupported".to_string()),
+            TStmt::ContextBlock { .. } => {
+                return Err("jit context block unsupported".to_string());
+            }
+            TStmt::Live { .. } => return Err("jit live block unsupported".to_string()),
+            TStmt::ScopeMember { .. } => return Err("jit scope member unsupported".to_string()),
+            TStmt::Transact { .. } => return Err("jit transact block unsupported".to_string()),
+            TStmt::LineMarker(_) => return Err("jit line marker unsupported".to_string()),
         }
         Ok(())
     }
@@ -2366,7 +2389,9 @@ impl LowerCtx<'_, '_> {
                     UnOp::Neg => match &operand.ty {
                         Type::Int => self.b.ins().ineg(inner),
                         Type::Float => self.b.ins().fneg(inner),
-                        _ => return Err("jit unary neg unsupported type".to_string()),
+                        other => {
+                            return Err(format!("jit unary neg unsupported type: {other:?}"));
+                        }
                     },
                     UnOp::Not => {
                         let zero = self.b.ins().iconst(types::I8, 0);
@@ -2465,7 +2490,27 @@ impl LowerCtx<'_, '_> {
             }
             TExprKind::CoreClosureCall { kind } => match kind {
                 TCoreClosureKind::Spawn { .. } => self.lower_spawn(),
-                _ => Err("jit core closure unsupported".to_string()),
+                TCoreClosureKind::Serve { .. } => {
+                    Err("jit http serve closure unsupported".to_string())
+                }
+                TCoreClosureKind::Guard { .. } => {
+                    Err("jit scope guard closure unsupported".to_string())
+                }
+                TCoreClosureKind::OnCommit { .. } => {
+                    Err("jit transact on_commit closure unsupported".to_string())
+                }
+                TCoreClosureKind::OnRollback { .. } => {
+                    Err("jit transact on_rollback closure unsupported".to_string())
+                }
+                TCoreClosureKind::ReactiveDerived { .. } => {
+                    Err("jit reactive derived closure unsupported".to_string())
+                }
+                TCoreClosureKind::ReactiveEffect { .. } => {
+                    Err("jit reactive effect closure unsupported".to_string())
+                }
+                TCoreClosureKind::UiReactiveRender { .. } => {
+                    Err("jit UI reactive render closure unsupported".to_string())
+                }
             },
             TExprKind::HandleMethod { recv, op, args } => {
                 self.lower_handle_method(recv, op, args, &expr.ty)
@@ -2545,7 +2590,12 @@ impl LowerCtx<'_, '_> {
                     self.b.seal_block(fail_block);
                     let fb = match fallback {
                         TOrFallback::Value(e) => self.lower_expr(e)?,
-                        _ => return Err("jit option fallback unsupported".to_string()),
+                        TOrFallback::Return(_)
+                        | TOrFallback::Panic(_)
+                        | TOrFallback::Break
+                        | TOrFallback::Continue => {
+                            return Err("jit option fallback unsupported".to_string());
+                        }
                     };
                     self.b.ins().jump(merge, &[fb]);
                     self.b.switch_to_block(merge);
@@ -2578,7 +2628,12 @@ impl LowerCtx<'_, '_> {
                         self.emit_trap_check()?;
                         self.b.ins().jump(merge, &[panic_val]);
                     }
-                    _ => return Err("jit or-fallback unsupported".to_string()),
+                    TOrFallback::Value(_)
+                    | TOrFallback::Return(_)
+                    | TOrFallback::Break
+                    | TOrFallback::Continue => {
+                        return Err("jit or-fallback unsupported".to_string());
+                    }
                 }
                 self.b.switch_to_block(merge);
                 self.b.seal_block(merge);
@@ -2599,7 +2654,7 @@ impl LowerCtx<'_, '_> {
                 let line_const = self.b.ins().iconst(types::I32, *line as i64);
                 let host_id = match &expr.ty {
                     Type::Float => self.host.coll.list_get_f64,
-                    _ => self.host.coll.list_get,
+                    _other => self.host.coll.list_get,
                 };
                 let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
                 let call = self.b.ins().call(host_ref, &[list, idx, line_const]);
@@ -2690,7 +2745,10 @@ impl LowerCtx<'_, '_> {
                         .ok_or_else(|| format!("jit enum lit `{prefix}`"))?;
                     Ok(self.b.ins().iconst(types::I64, disc))
                 }
-                _ => Err("jit enum payload unsupported".to_string()),
+                TEnumPayload::Positional(_) => {
+                    Err("jit enum positional payload unsupported".to_string())
+                }
+                TEnumPayload::Named(_) => Err("jit enum named payload unsupported".to_string()),
             },
             TExprKind::Present(inner) => {
                 let v = self.lower_expr(inner)?;
@@ -2699,7 +2757,63 @@ impl LowerCtx<'_, '_> {
                 Ok(self.b.ins().iadd(v, one))
             }
             TExprKind::Absent => Ok(self.b.ins().iconst(types::I64, 0)),
-            _ => Err("jit expression unsupported".to_string()),
+            TExprKind::ConstInline(_) => Err("jit const inline unsupported".to_string()),
+            TExprKind::RangeCheckedCtor { .. } => {
+                Err("jit range-checked ctor unsupported".to_string())
+            }
+            TExprKind::MathBuiltin { .. } => Err("jit math builtin unsupported".to_string()),
+            TExprKind::PreciseBuiltin { .. } => {
+                Err("jit precise numeric builtin unsupported".to_string())
+            }
+            TExprKind::Drop(_) => Err("jit drop expression unsupported".to_string()),
+            TExprKind::AmbientInput { .. } => Err("jit ambient input unsupported".to_string()),
+            TExprKind::RequireStop(_) => Err("jit require/panic stop unsupported".to_string()),
+            TExprKind::LayoutCompare { .. } => Err("jit layout compare unsupported".to_string()),
+            TExprKind::LayoutLit { .. } => Err("jit layout literal unsupported".to_string()),
+            TExprKind::PtrFromAddr { .. } => Err("jit pointer from addr unsupported".to_string()),
+            TExprKind::Deref(_) => Err("jit pointer deref unsupported".to_string()),
+            TExprKind::RawOf(_) => Err("jit raw pointer address-of unsupported".to_string()),
+            TExprKind::AllocNew { .. } => Err("jit allocator constructor unsupported".to_string()),
+            TExprKind::JsonLit { .. } => Err("jit JSON literal unsupported".to_string()),
+            TExprKind::DbValueLit { .. } => Err("jit DbValue literal unsupported".to_string()),
+            TExprKind::ListSpread { .. } => Err("jit list spread unsupported".to_string()),
+            TExprKind::ColumnarListLit { .. } => {
+                Err("jit columnar list literal unsupported".to_string())
+            }
+            TExprKind::ColumnarGather { .. } => Err("jit columnar gather unsupported".to_string()),
+            TExprKind::ColumnarColumnRead { .. } => {
+                Err("jit columnar column read unsupported".to_string())
+            }
+            TExprKind::MapLit(_) => Err("jit map literal unsupported".to_string()),
+            TExprKind::IndexHook { .. } => Err("jit index hook unsupported".to_string()),
+            TExprKind::MathLaneIndex { .. } => Err("jit math lane index unsupported".to_string()),
+            TExprKind::MathSwizzleRead { .. } => {
+                Err("jit math swizzle read unsupported".to_string())
+            }
+            TExprKind::MaterializeView(_) => {
+                Err("jit string-view materialize unsupported".to_string())
+            }
+            TExprKind::FnFieldCall { .. } => Err("jit fn-field call unsupported".to_string()),
+            TExprKind::Todo { .. } => Err("jit todo expression unsupported".to_string()),
+            TExprKind::DistinctRaw(_) => Err("jit distinct raw unsupported".to_string()),
+            TExprKind::Ok(_) => Err("jit result ok value unsupported".to_string()),
+            TExprKind::Err(_) => Err("jit result err value unsupported".to_string()),
+            TExprKind::Try { .. } => Err("jit try propagation unsupported".to_string()),
+            TExprKind::OptField { .. } => Err("jit optional field chain unsupported".to_string()),
+            TExprKind::Lambda(_) => Err("jit lambda unsupported".to_string()),
+            TExprKind::PatternMatches { .. } => {
+                Err("jit pattern-matches expression unsupported".to_string())
+            }
+            TExprKind::FanOut { .. } => Err("jit fan-out expression unsupported".to_string()),
+            TExprKind::OptionLift2 { .. } => Err("jit Option.lift2 unsupported".to_string()),
+            TExprKind::ClosureMethod { .. } => Err("jit closure method unsupported".to_string()),
+            TExprKind::NumericMethod { .. } => Err("jit numeric method unsupported".to_string()),
+            TExprKind::OverflowOpt { .. } => {
+                Err("jit overflow opt-out expression unsupported".to_string())
+            }
+            TExprKind::FnValue { .. } => Err("jit fn value unsupported".to_string()),
+            TExprKind::ModuleCall { .. } => Err("jit module call unsupported".to_string()),
+            TExprKind::ExternCall { .. } => Err("jit extern call unsupported".to_string()),
         }
     }
 
