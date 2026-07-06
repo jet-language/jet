@@ -10,6 +10,15 @@ use crate::AST::{
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
+fn is_fallible_void_entry_return(ty: &Type) -> bool {
+    matches!(
+        ty,
+        Type::Result { ok, err }
+            if matches!(ok.as_ref(), Type::Named(n) if n == Syntax::TYPE_VOID)
+                && matches!(err.as_ref(), Type::Named(n) if n == Syntax::TYPE_ERROR)
+    )
+}
+
 /// D-CLIFLAG1: what `fn run`'s single parameter type turned out to be.
 enum CliEntryShape {
     /// A `@[Cli]`-derived struct — flags come straight from its fields.
@@ -1562,16 +1571,23 @@ pub(crate) fn check_bundle_opts(
             Item::Func(f) if f.name == "run" => Some(f),
             _ => None,
         }) {
-            // S12/D-CLIFLAG1: `run` is the only program entry name. It is either
-            // zero-arg, or one typed CLI-spec parameter (`@[Cli]` struct / enum).
+            // S12/D-S80-RUN1/D-CLIFLAG1: `run` is the only program entry name.
+            // It is zero-arg (optionally `-> Void ?`), or one typed CLI-spec
+            // parameter (`@[Cli]` struct / enum).
             if run_fn.params.is_empty() {
-                if mode == CompileMode::Run && run_fn.return_type.is_some() {
+                if mode == CompileMode::Run
+                    && run_fn
+                        .return_type
+                        .as_ref()
+                        .is_some_and(|ret| !is_fallible_void_entry_return(ret))
+                {
                     diags.push(Diagnostic::error(
                         "E0122",
-                        "`run` returns a value".to_string(),
-                        "`run` is where running starts; in run mode there is no caller waiting for a value"
+                        "`run` returns the wrong kind of value".to_string(),
+                        "`run` is where running starts; it either returns nothing or reports top-level errors with `Void ?`"
                             .to_string(),
-                        "write it as: fn run() { ... }".to_string(),
+                        "write `fn run() { ... }`, or `fn run() -> Void ? { ... }` if the entry uses `?`"
+                            .to_string(),
                         Some(run_fn.name_span),
                     ));
                 }

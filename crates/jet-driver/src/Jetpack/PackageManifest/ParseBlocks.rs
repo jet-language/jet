@@ -4,7 +4,7 @@
 use super::Helpers::{key_value_entries, top_level_commas, unquote};
 use super::{
     BuildOptimize, BuildProfileDef, Dep, DepSource, ManifestError, PackageEntry, PackageMeta,
-    Target,
+    Target, TrustDecision, TrustPolicy,
 };
 use crate::Jetpack::RefSpec;
 use crate::Syntax;
@@ -445,6 +445,84 @@ pub(super) fn parse_grants(body: &str) -> Result<Vec<(String, Vec<String>)>, Man
         out.push((dep, effects));
     }
     Ok(out)
+}
+
+/// D-JPK-GRANTSCHEMA1=A: parse `policy: { trust: { … } }`. The first slice is
+/// intentionally conservative: only ratified fields from the decision payload
+/// are accepted, and every value is one of `allow`, `prompt`, or `deny`.
+pub(super) fn parse_trust_policy(body: &str) -> Result<Option<TrustPolicy>, ManifestError> {
+    let Some(trust_body) = super::Helpers::block_body(body, Syntax::POLICY_FIELD_TRUST, '{', '}')
+    else {
+        return Ok(None);
+    };
+    let mut policy = TrustPolicy::default();
+    for (key, value) in key_value_entries(&trust_body) {
+        if key == Syntax::POLICY_TRUST_FIELD_DEFAULT {
+            policy.default = Some(parse_trust_decision(&value)?);
+        } else if key == Syntax::POLICY_TRUST_FIELD_CI {
+            policy.ci_prompt = Some(parse_ci_trust_prompt(&value)?);
+        } else if key == Syntax::POLICY_TRUST_FIELD_SERVICES {
+            policy.services = parse_service_trust(&value)?;
+        } else {
+            return Err(ManifestError::BadTrustPolicy {
+                detail: format!(
+                    "unknown `policy.trust` field `{key}` — allowed: `{}`, `{}`, `{}`",
+                    Syntax::POLICY_TRUST_FIELD_DEFAULT,
+                    Syntax::POLICY_TRUST_FIELD_CI,
+                    Syntax::POLICY_TRUST_FIELD_SERVICES,
+                ),
+            });
+        }
+    }
+    Ok(Some(policy))
+}
+
+fn parse_ci_trust_prompt(value: &str) -> Result<TrustDecision, ManifestError> {
+    let body = value
+        .trim()
+        .strip_prefix('{')
+        .and_then(|s| s.strip_suffix('}'))
+        .ok_or_else(|| ManifestError::BadTrustPolicy {
+            detail: "`policy.trust.ci` must be `{ prompt: allow|prompt|deny }`".to_string(),
+        })?;
+    let mut prompt = None;
+    for (key, value) in key_value_entries(body) {
+        if key != Syntax::POLICY_TRUST_FIELD_PROMPT {
+            return Err(ManifestError::BadTrustPolicy {
+                detail: format!("unknown `policy.trust.ci` field `{key}` — allowed: `prompt`"),
+            });
+        }
+        prompt = Some(parse_trust_decision(&value)?);
+    }
+    prompt.ok_or_else(|| ManifestError::BadTrustPolicy {
+        detail: "`policy.trust.ci` needs `prompt:`".to_string(),
+    })
+}
+
+fn parse_service_trust(value: &str) -> Result<Vec<(String, TrustDecision)>, ManifestError> {
+    let body = value
+        .trim()
+        .strip_prefix('{')
+        .and_then(|s| s.strip_suffix('}'))
+        .ok_or_else(|| ManifestError::BadTrustPolicy {
+            detail: "`policy.trust.services` must be `{ name: allow|prompt|deny }`".to_string(),
+        })?;
+    let mut services = Vec::new();
+    for (name, value) in key_value_entries(body) {
+        services.push((name, parse_trust_decision(&value)?));
+    }
+    Ok(services)
+}
+
+fn parse_trust_decision(value: &str) -> Result<TrustDecision, ManifestError> {
+    match unquote(value).as_str() {
+        v if v == Syntax::POLICY_TRUST_DECISION_ALLOW => Ok(TrustDecision::Allow),
+        v if v == Syntax::POLICY_TRUST_DECISION_PROMPT => Ok(TrustDecision::Prompt),
+        v if v == Syntax::POLICY_TRUST_DECISION_DENY => Ok(TrustDecision::Deny),
+        other => Err(ManifestError::BadTrustPolicy {
+            detail: format!("`{other}` is not a trust decision — use `allow`, `prompt`, or `deny`"),
+        }),
+    }
 }
 
 /// A `[ Db, Net ]`-shaped list of effect names, each validated against the

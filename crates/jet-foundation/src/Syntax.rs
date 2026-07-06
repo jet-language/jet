@@ -102,6 +102,7 @@ pub const TYPE_FLOAT: &str = "Float";
 pub const TYPE_BOOL: &str = "Bool";
 pub const TYPE_STRING: &str = "String";
 pub const TYPE_ERROR: &str = "Error";
+pub const TYPE_VOID: &str = "Void";
 
 /// D-SG9/S42 (ratified): explicit fixed-width numeric spellings for expert and
 /// FFI/binary code. `Int`/`Float` stay the beginner defaults (64-bit); `I64`
@@ -748,8 +749,8 @@ pub const CORE_CANONICAL: &str = "core";
 
 /// S51 (ratified M10): first-party short names reserved before packages land.
 pub const FIRST_PARTY_RESERVED: &[&str] = &[
-    "core", "jet", "c", "rust", "py", "js", "swift", "http", "regex", "csv", "toml",
-    "crypto", "archive",
+    "core", "jet", "c", "rust", "py", "js", "swift", "http", "regex", "csv", "toml", "crypto",
+    "archive",
 ];
 
 /// S50 (ratified M7): Rust FFI block introducers — `extern rust "…" { … }`.
@@ -1330,6 +1331,7 @@ pub const JETPACK_VERBS: &[&str] = &[
     "explain",
     "logs",
     "push",
+    TRUST_SUBCOMMAND,
     OS_SUBCOMMAND,
     DEV_SUBCOMMAND,
     CONFIG_SUBCOMMAND,
@@ -1390,6 +1392,24 @@ pub const SERVICES_SUBCOMMAND: &str = "services";
 /// until TLS support lands for registry pushes.
 pub const IMAGE_SUBCOMMAND: &str = "image";
 pub const IMAGE_FLAG_PUSH: &str = "--push";
+
+/// D-JPK-GRANTCMD1=A: `jet trust <verb>` is the public grant graph command
+/// family. The top-level `jet` binary dispatches it to Jetpack, which owns the
+/// trust store.
+pub const TRUST_SUBCOMMAND: &str = "trust";
+pub const TRUST_VERB_GRANT: &str = "grant";
+pub const TRUST_VERB_LIST: &str = "list";
+pub const TRUST_VERB_EXPLAIN: &str = "explain";
+pub const TRUST_VERB_REVOKE: &str = "revoke";
+pub const TRUST_VERBS: &[&str] = &[
+    TRUST_VERB_GRANT,
+    TRUST_VERB_LIST,
+    TRUST_VERB_EXPLAIN,
+    TRUST_VERB_REVOKE,
+];
+pub const TRUST_FLAG_SCOPE: &str = "--scope";
+pub const TRUST_SCOPE_USER: &str = "user";
+pub const TRUST_SCOPE_REPO: &str = "repo";
 
 pub const SERVICES_VERB_UP: &str = "up";
 pub const SERVICES_VERB_DOWN: &str = "down";
@@ -2210,6 +2230,7 @@ pub const JET_TYPE_LIST: &[&str] = &[
     TYPE_FLOAT,
     TYPE_BOOL,
     TYPE_STRING,
+    TYPE_VOID,
     TYPE_CHAR,
     TYPE_LIST,
     TYPE_MAP,
@@ -2819,6 +2840,10 @@ pub const JET_HIGHLIGHT_TOKENS: &[HighlightToken] = &[
         class: HighlightClass::TypeBuiltin,
     },
     HighlightToken {
+        text: TYPE_VOID,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
         text: TYPE_CHAR,
         class: HighlightClass::TypeBuiltin,
     },
@@ -3355,6 +3380,7 @@ fn is_zed_anonymous_word_token(s: &str) -> bool {
             | "U32"
             | "U64"
             | "U8"
+            | "Void"
             | "add"
             | "as"
             | "assume_deterministic"
@@ -3765,6 +3791,18 @@ pub const EFFECTS_FIELD_DENY: &str = "deny"; // D-EFFBUDGET1
 /// D-EFFBUDGET1: the `grants { "dep": [Effect] }` block — an audited
 /// per-dependency escape from the `effects:` budget, recorded in the lockfile.
 pub const MANIFEST_BLOCK_GRANTS: &str = "grants"; // D-EFFBUDGET1
+/// D-JPK-GRANTSCHEMA1=A: source-reviewed trust policy lives under
+/// `policy: { trust: { … } }` in `pkg.jet`. Manifest keys only, no language
+/// grammar.
+pub const MANIFEST_BLOCK_POLICY: &str = "policy"; // D-JPK-GRANTSCHEMA1
+pub const POLICY_FIELD_TRUST: &str = "trust"; // D-JPK-GRANTSCHEMA1
+pub const POLICY_TRUST_FIELD_DEFAULT: &str = "default"; // D-JPK-GRANTSCHEMA1
+pub const POLICY_TRUST_FIELD_CI: &str = "ci"; // D-JPK-GRANTSCHEMA1
+pub const POLICY_TRUST_FIELD_PROMPT: &str = "prompt"; // D-JPK-GRANTSCHEMA1
+pub const POLICY_TRUST_FIELD_SERVICES: &str = "services"; // D-JPK-GRANTSCHEMA1
+pub const POLICY_TRUST_DECISION_PROMPT: &str = "prompt"; // D-JPK-GRANTSCHEMA1
+pub const POLICY_TRUST_DECISION_DENY: &str = "deny"; // D-JPK-GRANTSCHEMA1
+pub const POLICY_TRUST_DECISION_ALLOW: &str = "allow"; // D-JPK-GRANTSCHEMA1
 
 /// Levenshtein edit distance between two strings (used for "did you mean?" suggestions).
 pub fn edit_distance(a: &str, b: &str) -> usize {

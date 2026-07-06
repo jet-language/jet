@@ -15,6 +15,15 @@ pub struct TargetId(pub usize);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ActionId(pub usize);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ToolchainId(pub usize);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SigningIdentityId(pub usize);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ProbeId(pub usize);
+
 macro_rules! target_handle {
     ($name:ident) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -75,6 +84,42 @@ impl ActionHandle {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ToolchainHandle {
+    id: ToolchainId,
+    context: u64,
+}
+
+impl ToolchainHandle {
+    pub fn id(self) -> ToolchainId {
+        self.id
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SigningIdentityHandle {
+    id: SigningIdentityId,
+    context: u64,
+}
+
+impl SigningIdentityHandle {
+    pub fn id(self) -> SigningIdentityId {
+        self.id
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ProbeHandle {
+    id: ProbeId,
+    context: u64,
+}
+
+impl ProbeHandle {
+    pub fn id(self) -> ProbeId {
+        self.id
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TargetKind {
     Executable,
     Library,
@@ -111,6 +156,9 @@ pub struct TargetSpec {
     pub outputs: Vec<BuildPath>,
     pub deps: Vec<TargetRef>,
     pub actions: Vec<ActionHandle>,
+    pub probes: Vec<ProbeHandle>,
+    pub toolchain: Option<ToolchainHandle>,
+    pub signing_identity: Option<SigningIdentityHandle>,
     pub metadata: BTreeMap<String, String>,
 }
 
@@ -144,6 +192,21 @@ impl TargetSpec {
         self
     }
 
+    pub fn with_probe(mut self, probe: ProbeHandle) -> Self {
+        self.probes.push(probe);
+        self
+    }
+
+    pub fn with_toolchain(mut self, toolchain: ToolchainHandle) -> Self {
+        self.toolchain = Some(toolchain);
+        self
+    }
+
+    pub fn with_signing_identity(mut self, identity: SigningIdentityHandle) -> Self {
+        self.signing_identity = Some(identity);
+        self
+    }
+
     pub fn with_metadata(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.metadata.insert(key.into(), value.into());
         self
@@ -158,6 +221,9 @@ impl Default for TargetSpec {
             outputs: Vec::new(),
             deps: Vec::new(),
             actions: Vec::new(),
+            probes: Vec::new(),
+            toolchain: None,
+            signing_identity: None,
             metadata: BTreeMap::new(),
         }
     }
@@ -173,6 +239,9 @@ pub struct BuildTarget {
     pub outputs: Vec<BuildPath>,
     pub deps: Vec<TargetRef>,
     pub actions: Vec<ActionHandle>,
+    pub probes: Vec<ProbeHandle>,
+    pub toolchain: ToolchainHandle,
+    pub signing_identity: Option<SigningIdentityHandle>,
     pub metadata: BTreeMap<String, String>,
 }
 
@@ -201,6 +270,7 @@ pub struct ActionSpec {
     pub env: BTreeMap<String, String>,
     pub caps: BTreeSet<BuildCapability>,
     pub cache: ActionCache,
+    pub toolchain: Option<ToolchainHandle>,
 }
 
 impl ActionSpec {
@@ -216,6 +286,7 @@ impl ActionSpec {
             env: BTreeMap::new(),
             caps: BTreeSet::new(),
             cache: ActionCache::Cached,
+            toolchain: None,
         }
     }
 
@@ -259,6 +330,11 @@ impl ActionSpec {
         self.caps.insert(cap);
         self
     }
+
+    pub fn with_toolchain(mut self, toolchain: ToolchainHandle) -> Self {
+        self.toolchain = Some(toolchain);
+        self
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -271,6 +347,311 @@ pub struct BuildAction {
     pub env: BTreeMap<String, String>,
     pub caps: BTreeSet<BuildCapability>,
     pub cache: ActionCache,
+    pub toolchain: ToolchainHandle,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LockRecord {
+    pub key: String,
+    pub digest: String,
+}
+
+impl LockRecord {
+    pub fn new(key: impl Into<String>, digest: impl Into<String>) -> Self {
+        LockRecord {
+            key: key.into(),
+            digest: digest.into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProvenanceSource {
+    InferredHost,
+    JetpackDependency(String),
+    AmbientRecord(String),
+    UserDeclared(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BuildProvenance {
+    pub source: ProvenanceSource,
+    pub lock: Option<LockRecord>,
+}
+
+impl BuildProvenance {
+    pub fn inferred_host() -> Self {
+        BuildProvenance {
+            source: ProvenanceSource::InferredHost,
+            lock: None,
+        }
+    }
+
+    pub fn jetpack_dependency(dep: impl Into<String>, lock: LockRecord) -> Self {
+        BuildProvenance {
+            source: ProvenanceSource::JetpackDependency(dep.into()),
+            lock: Some(lock),
+        }
+    }
+
+    pub fn ambient_record(record: impl Into<String>) -> Self {
+        BuildProvenance {
+            source: ProvenanceSource::AmbientRecord(record.into()),
+            lock: None,
+        }
+    }
+
+    pub fn user_declared(source: impl Into<String>, lock: Option<LockRecord>) -> Self {
+        BuildProvenance {
+            source: ProvenanceSource::UserDeclared(source.into()),
+            lock,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SdkIdentity {
+    pub name: String,
+    pub version: String,
+    pub provenance: BuildProvenance,
+}
+
+impl SdkIdentity {
+    pub fn new(
+        name: impl Into<String>,
+        version: impl Into<String>,
+        provenance: BuildProvenance,
+    ) -> Self {
+        SdkIdentity {
+            name: name.into(),
+            version: version.into(),
+            provenance,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LinkerIdentity {
+    pub name: String,
+    pub provenance: BuildProvenance,
+}
+
+impl LinkerIdentity {
+    pub fn new(name: impl Into<String>, provenance: BuildProvenance) -> Self {
+        LinkerIdentity {
+            name: name.into(),
+            provenance,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SigningIdentitySpec {
+    pub label: String,
+    pub provenance: BuildProvenance,
+}
+
+impl SigningIdentitySpec {
+    pub fn new(label: impl Into<String>, provenance: BuildProvenance) -> Self {
+        SigningIdentitySpec {
+            label: label.into(),
+            provenance,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BuildSigningIdentity {
+    pub id: SigningIdentityId,
+    pub name: String,
+    pub label: String,
+    pub provenance: BuildProvenance,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolchainRole {
+    Host,
+    Target,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolchainSpec {
+    pub role: ToolchainRole,
+    pub host_triple: String,
+    pub target_triple: String,
+    pub sdk: Option<SdkIdentity>,
+    pub linker: Option<LinkerIdentity>,
+    pub provenance: BuildProvenance,
+}
+
+impl ToolchainSpec {
+    pub fn target(target_triple: impl Into<String>, provenance: BuildProvenance) -> Self {
+        ToolchainSpec {
+            role: ToolchainRole::Target,
+            host_triple: "host".to_string(),
+            target_triple: target_triple.into(),
+            sdk: None,
+            linker: None,
+            provenance,
+        }
+    }
+
+    pub fn host(host_triple: impl Into<String>, provenance: BuildProvenance) -> Self {
+        let host_triple = host_triple.into();
+        ToolchainSpec {
+            role: ToolchainRole::Host,
+            target_triple: host_triple.clone(),
+            host_triple,
+            sdk: None,
+            linker: None,
+            provenance,
+        }
+    }
+
+    pub fn with_host_triple(mut self, host_triple: impl Into<String>) -> Self {
+        self.host_triple = host_triple.into();
+        self
+    }
+
+    pub fn with_sdk(mut self, sdk: SdkIdentity) -> Self {
+        self.sdk = Some(sdk);
+        self
+    }
+
+    pub fn with_linker(mut self, linker: LinkerIdentity) -> Self {
+        self.linker = Some(linker);
+        self
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BuildToolchain {
+    pub id: ToolchainId,
+    pub name: String,
+    pub role: ToolchainRole,
+    pub host_triple: String,
+    pub target_triple: String,
+    pub sdk: Option<SdkIdentity>,
+    pub linker: Option<LinkerIdentity>,
+    pub provenance: BuildProvenance,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReproducibilityClass {
+    Reproducible,
+    Ambient,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProbeKind {
+    FindProgram {
+        program: String,
+    },
+    PkgConfig {
+        package: String,
+        min_version: Option<String>,
+    },
+    HeaderCheck {
+        header: String,
+    },
+    CompileCheck {
+        name: String,
+        includes: Vec<String>,
+        code: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProbeSpec {
+    pub kind: ProbeKind,
+    pub reproducibility: ReproducibilityClass,
+    pub provenance: BuildProvenance,
+    pub toolchain: Option<ToolchainHandle>,
+}
+
+impl ProbeSpec {
+    pub fn find_program(program: impl Into<String>) -> Self {
+        ProbeSpec {
+            kind: ProbeKind::FindProgram {
+                program: program.into(),
+            },
+            reproducibility: ReproducibilityClass::Ambient,
+            provenance: BuildProvenance::ambient_record("find_program"),
+            toolchain: None,
+        }
+    }
+
+    pub fn pkg_config(package: impl Into<String>) -> Self {
+        ProbeSpec {
+            kind: ProbeKind::PkgConfig {
+                package: package.into(),
+                min_version: None,
+            },
+            reproducibility: ReproducibilityClass::Ambient,
+            provenance: BuildProvenance::ambient_record("pkg_config"),
+            toolchain: None,
+        }
+    }
+
+    pub fn header_check(header: impl Into<String>) -> Self {
+        ProbeSpec {
+            kind: ProbeKind::HeaderCheck {
+                header: header.into(),
+            },
+            reproducibility: ReproducibilityClass::Ambient,
+            provenance: BuildProvenance::ambient_record("header_check"),
+            toolchain: None,
+        }
+    }
+
+    pub fn compile_check(
+        name: impl Into<String>,
+        includes: impl IntoIterator<Item = impl Into<String>>,
+        code: impl Into<String>,
+    ) -> Self {
+        ProbeSpec {
+            kind: ProbeKind::CompileCheck {
+                name: name.into(),
+                includes: includes.into_iter().map(Into::into).collect(),
+                code: code.into(),
+            },
+            reproducibility: ReproducibilityClass::Ambient,
+            provenance: BuildProvenance::ambient_record("compile_check"),
+            toolchain: None,
+        }
+    }
+
+    pub fn with_min_version(mut self, version: impl Into<String>) -> Self {
+        if let ProbeKind::PkgConfig { min_version, .. } = &mut self.kind {
+            *min_version = Some(version.into());
+        }
+        self
+    }
+
+    pub fn with_toolchain(mut self, toolchain: ToolchainHandle) -> Self {
+        self.toolchain = Some(toolchain);
+        self
+    }
+
+    pub fn with_reproducibility(mut self, reproducibility: ReproducibilityClass) -> Self {
+        self.reproducibility = reproducibility;
+        self
+    }
+
+    pub fn with_provenance(mut self, provenance: BuildProvenance) -> Self {
+        self.provenance = provenance;
+        self
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BuildProbe {
+    pub id: ProbeId,
+    pub name: String,
+    pub kind: ProbeKind,
+    pub reproducibility: ReproducibilityClass,
+    pub provenance: BuildProvenance,
+    pub toolchain: ToolchainHandle,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -278,6 +659,9 @@ pub struct BuildPlan {
     context: u64,
     targets: Vec<BuildTarget>,
     actions: Vec<BuildAction>,
+    toolchains: Vec<BuildToolchain>,
+    signing_identities: Vec<BuildSigningIdentity>,
+    probes: Vec<BuildProbe>,
     default: Option<TargetRef>,
 }
 
@@ -294,6 +678,22 @@ impl BuildPlan {
         &self.actions
     }
 
+    pub fn toolchains(&self) -> &[BuildToolchain] {
+        &self.toolchains
+    }
+
+    pub fn signing_identities(&self) -> &[BuildSigningIdentity] {
+        &self.signing_identities
+    }
+
+    pub fn probes(&self) -> &[BuildProbe] {
+        &self.probes
+    }
+
+    pub fn default_host_toolchain(&self) -> &BuildToolchain {
+        &self.toolchains[0]
+    }
+
     pub fn target(&self, target: impl Into<TargetRef>) -> Option<&BuildTarget> {
         let target = target.into();
         if target.context != self.context {
@@ -307,6 +707,30 @@ impl BuildPlan {
             return None;
         }
         self.actions.get(action.id.0)
+    }
+
+    pub fn toolchain(&self, toolchain: ToolchainHandle) -> Option<&BuildToolchain> {
+        if toolchain.context != self.context {
+            return None;
+        }
+        self.toolchains.get(toolchain.id.0)
+    }
+
+    pub fn signing_identity(
+        &self,
+        identity: SigningIdentityHandle,
+    ) -> Option<&BuildSigningIdentity> {
+        if identity.context != self.context {
+            return None;
+        }
+        self.signing_identities.get(identity.id.0)
+    }
+
+    pub fn probe(&self, probe: ProbeHandle) -> Option<&BuildProbe> {
+        if probe.context != self.context {
+            return None;
+        }
+        self.probes.get(probe.id.0)
     }
 
     pub fn targets_by_kind(&self, kind: TargetKind) -> Vec<&BuildTarget> {
@@ -326,19 +750,167 @@ pub struct BuildContext {
     context: u64,
     targets: Vec<BuildTarget>,
     actions: Vec<BuildAction>,
+    toolchains: Vec<BuildToolchain>,
+    signing_identities: Vec<BuildSigningIdentity>,
+    probes: Vec<BuildProbe>,
     target_names: HashSet<String>,
     action_names: HashSet<String>,
+    toolchain_names: HashSet<String>,
+    signing_identity_names: HashSet<String>,
+    probe_names: HashSet<String>,
+    default_toolchain: ToolchainHandle,
 }
 
 impl BuildContext {
     pub fn new() -> Self {
+        let context = NEXT_CONTEXT.fetch_add(1, Ordering::Relaxed);
+        let default_toolchain = ToolchainHandle {
+            id: ToolchainId(0),
+            context,
+        };
+        let mut toolchain_names = HashSet::new();
+        toolchain_names.insert("host".to_string());
         BuildContext {
-            context: NEXT_CONTEXT.fetch_add(1, Ordering::Relaxed),
+            context,
             targets: Vec::new(),
             actions: Vec::new(),
+            toolchains: vec![BuildToolchain {
+                id: ToolchainId(0),
+                name: "host".to_string(),
+                role: ToolchainRole::Host,
+                host_triple: "host".to_string(),
+                target_triple: "host".to_string(),
+                sdk: None,
+                linker: None,
+                provenance: BuildProvenance::inferred_host(),
+            }],
+            signing_identities: Vec::new(),
+            probes: Vec::new(),
             target_names: HashSet::new(),
             action_names: HashSet::new(),
+            toolchain_names,
+            signing_identity_names: HashSet::new(),
+            probe_names: HashSet::new(),
+            default_toolchain,
         }
+    }
+
+    pub fn default_host_toolchain(&self) -> ToolchainHandle {
+        self.default_toolchain
+    }
+
+    pub fn toolchain(
+        &mut self,
+        name: impl Into<String>,
+        spec: ToolchainSpec,
+    ) -> Result<ToolchainHandle, BuildError> {
+        let name = check_name(name.into(), NameKind::Toolchain)?;
+        if self.toolchain_names.contains(&name) {
+            return Err(BuildError::DuplicateToolchainName(name));
+        }
+        validate_toolchain(&name, &spec)?;
+        self.toolchain_names.insert(name.clone());
+        let id = ToolchainId(self.toolchains.len());
+        self.toolchains.push(BuildToolchain {
+            id,
+            name,
+            role: spec.role,
+            host_triple: spec.host_triple,
+            target_triple: spec.target_triple,
+            sdk: spec.sdk,
+            linker: spec.linker,
+            provenance: spec.provenance,
+        });
+        Ok(ToolchainHandle {
+            id,
+            context: self.context,
+        })
+    }
+
+    pub fn signing_identity(
+        &mut self,
+        name: impl Into<String>,
+        spec: SigningIdentitySpec,
+    ) -> Result<SigningIdentityHandle, BuildError> {
+        let name = check_name(name.into(), NameKind::SigningIdentity)?;
+        if self.signing_identity_names.contains(&name) {
+            return Err(BuildError::DuplicateSigningIdentityName(name));
+        }
+        validate_identity(&name, &spec.label, &spec.provenance)?;
+        self.signing_identity_names.insert(name.clone());
+        let id = SigningIdentityId(self.signing_identities.len());
+        self.signing_identities.push(BuildSigningIdentity {
+            id,
+            name,
+            label: spec.label,
+            provenance: spec.provenance,
+        });
+        Ok(SigningIdentityHandle {
+            id,
+            context: self.context,
+        })
+    }
+
+    pub fn probe(
+        &mut self,
+        name: impl Into<String>,
+        spec: ProbeSpec,
+    ) -> Result<ProbeHandle, BuildError> {
+        let name = check_name(name.into(), NameKind::Probe)?;
+        if self.probe_names.contains(&name) {
+            return Err(BuildError::DuplicateProbeName(name));
+        }
+        let toolchain = spec.toolchain.unwrap_or(self.default_toolchain);
+        self.check_toolchain_ref(toolchain)?;
+        validate_probe(&name, &spec)?;
+        self.probe_names.insert(name.clone());
+        let id = ProbeId(self.probes.len());
+        self.probes.push(BuildProbe {
+            id,
+            name,
+            kind: spec.kind,
+            reproducibility: spec.reproducibility,
+            provenance: spec.provenance,
+            toolchain,
+        });
+        Ok(ProbeHandle {
+            id,
+            context: self.context,
+        })
+    }
+
+    pub fn find_program(
+        &mut self,
+        name: impl Into<String>,
+        program: impl Into<String>,
+    ) -> Result<ProbeHandle, BuildError> {
+        self.probe(name, ProbeSpec::find_program(program))
+    }
+
+    pub fn pkg_config(
+        &mut self,
+        name: impl Into<String>,
+        package: impl Into<String>,
+    ) -> Result<ProbeHandle, BuildError> {
+        self.probe(name, ProbeSpec::pkg_config(package))
+    }
+
+    pub fn header_check(
+        &mut self,
+        name: impl Into<String>,
+        header: impl Into<String>,
+    ) -> Result<ProbeHandle, BuildError> {
+        self.probe(name, ProbeSpec::header_check(header))
+    }
+
+    pub fn compile_check(
+        &mut self,
+        name: impl Into<String>,
+        check_name: impl Into<String>,
+        includes: impl IntoIterator<Item = impl Into<String>>,
+        code: impl Into<String>,
+    ) -> Result<ProbeHandle, BuildError> {
+        self.probe(name, ProbeSpec::compile_check(check_name, includes, code))
     }
 
     pub fn add_executable(
@@ -458,7 +1030,8 @@ impl BuildContext {
         if !self.action_names.insert(name.clone()) {
             return Err(BuildError::DuplicateActionName(name));
         }
-        validate_action(&name, &spec)?;
+        self.validate_action_spec(&name, &spec)?;
+        let toolchain = spec.toolchain.unwrap_or(self.default_toolchain);
         let id = ActionId(self.actions.len());
         self.actions.push(BuildAction {
             id,
@@ -469,6 +1042,7 @@ impl BuildContext {
             env: spec.env,
             caps: spec.caps,
             cache: spec.cache,
+            toolchain,
         });
         Ok(ActionHandle {
             id,
@@ -500,6 +1074,7 @@ impl BuildContext {
             return Err(BuildError::DuplicateTargetName(name));
         }
         self.validate_target_spec(&spec)?;
+        let toolchain = spec.toolchain.unwrap_or(self.default_toolchain);
         let id = TargetId(self.targets.len());
         self.targets.push(BuildTarget {
             id,
@@ -510,6 +1085,9 @@ impl BuildContext {
             outputs: spec.outputs,
             deps: spec.deps,
             actions: spec.actions,
+            probes: spec.probes,
+            toolchain,
+            signing_identity: spec.signing_identity,
             metadata: spec.metadata,
         });
         Ok(id)
@@ -524,6 +1102,9 @@ impl BuildContext {
             context: self.context,
             targets: self.targets.clone(),
             actions: self.actions.clone(),
+            toolchains: self.toolchains.clone(),
+            signing_identities: self.signing_identities.clone(),
+            probes: self.probes.clone(),
             default,
         })
     }
@@ -532,7 +1113,25 @@ impl BuildContext {
         validate_paths(&spec.sources)?;
         validate_paths(&spec.inputs)?;
         validate_paths(&spec.outputs)?;
-        self.validate_refs(&spec.deps, &spec.actions)
+        self.validate_refs(&spec.deps, &spec.actions)?;
+        for probe in &spec.probes {
+            self.check_probe_ref(*probe)?;
+        }
+        if let Some(toolchain) = spec.toolchain {
+            self.check_toolchain_ref(toolchain)?;
+        }
+        if let Some(identity) = spec.signing_identity {
+            self.check_signing_identity_ref(identity)?;
+        }
+        Ok(())
+    }
+
+    fn validate_action_spec(&self, name: &str, spec: &ActionSpec) -> Result<(), BuildError> {
+        validate_action(name, spec)?;
+        if let Some(toolchain) = spec.toolchain {
+            self.check_toolchain_ref(toolchain)?;
+        }
+        Ok(())
     }
 
     fn validate_refs(
@@ -562,6 +1161,30 @@ impl BuildContext {
         }
         Ok(())
     }
+
+    fn check_toolchain_ref(&self, toolchain: ToolchainHandle) -> Result<(), BuildError> {
+        if toolchain.context != self.context || toolchain.id.0 >= self.toolchains.len() {
+            return Err(BuildError::UnknownToolchain(toolchain.id));
+        }
+        Ok(())
+    }
+
+    fn check_signing_identity_ref(
+        &self,
+        identity: SigningIdentityHandle,
+    ) -> Result<(), BuildError> {
+        if identity.context != self.context || identity.id.0 >= self.signing_identities.len() {
+            return Err(BuildError::UnknownSigningIdentity(identity.id));
+        }
+        Ok(())
+    }
+
+    fn check_probe_ref(&self, probe: ProbeHandle) -> Result<(), BuildError> {
+        if probe.context != self.context || probe.id.0 >= self.probes.len() {
+            return Err(BuildError::UnknownProbe(probe.id));
+        }
+        Ok(())
+    }
 }
 
 impl Default for BuildContext {
@@ -574,21 +1197,36 @@ impl Default for BuildContext {
 enum NameKind {
     Target,
     Action,
+    Toolchain,
+    SigningIdentity,
+    Probe,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BuildError {
     EmptyTargetName,
     EmptyActionName,
+    EmptyToolchainName,
+    EmptySigningIdentityName,
+    EmptyProbeName,
     DuplicateTargetName(String),
     DuplicateActionName(String),
+    DuplicateToolchainName(String),
+    DuplicateSigningIdentityName(String),
+    DuplicateProbeName(String),
     EmptyPath,
+    EmptyToolchainTriple(String),
+    EmptyIdentityField(String),
+    EmptyProbeField(String),
     EmptyActionArgv(String),
     EmptyEnvName(String),
     CachedActionWithoutOutputs(String),
     PhonyActionWithoutCaps(String),
     PhonyActionWithOutputs(String),
-    DuplicateActionOutput { action: String, output: String },
+    DuplicateActionOutput {
+        action: String,
+        output: String,
+    },
     DuplicateBuildOutput {
         output: String,
         first_action: String,
@@ -596,6 +1234,9 @@ pub enum BuildError {
     },
     UnknownTarget(TargetId),
     UnknownAction(ActionId),
+    UnknownToolchain(ToolchainId),
+    UnknownSigningIdentity(SigningIdentityId),
+    UnknownProbe(ProbeId),
 }
 
 fn check_name(name: String, kind: NameKind) -> Result<String, BuildError> {
@@ -603,9 +1244,82 @@ fn check_name(name: String, kind: NameKind) -> Result<String, BuildError> {
         return match kind {
             NameKind::Target => Err(BuildError::EmptyTargetName),
             NameKind::Action => Err(BuildError::EmptyActionName),
+            NameKind::Toolchain => Err(BuildError::EmptyToolchainName),
+            NameKind::SigningIdentity => Err(BuildError::EmptySigningIdentityName),
+            NameKind::Probe => Err(BuildError::EmptyProbeName),
         };
     }
     Ok(name)
+}
+
+fn validate_toolchain(name: &str, spec: &ToolchainSpec) -> Result<(), BuildError> {
+    if spec.host_triple.trim().is_empty() || spec.target_triple.trim().is_empty() {
+        return Err(BuildError::EmptyToolchainTriple(name.to_string()));
+    }
+    if let Some(sdk) = &spec.sdk {
+        validate_identity(name, &sdk.name, &sdk.provenance)?;
+        validate_identity(name, &sdk.version, &sdk.provenance)?;
+    }
+    if let Some(linker) = &spec.linker {
+        validate_identity(name, &linker.name, &linker.provenance)?;
+    }
+    validate_provenance(name, &spec.provenance)
+}
+
+fn validate_identity(
+    name: &str,
+    field: &str,
+    provenance: &BuildProvenance,
+) -> Result<(), BuildError> {
+    if field.trim().is_empty() {
+        return Err(BuildError::EmptyIdentityField(name.to_string()));
+    }
+    validate_provenance(name, provenance)
+}
+
+fn validate_probe(name: &str, spec: &ProbeSpec) -> Result<(), BuildError> {
+    match &spec.kind {
+        ProbeKind::FindProgram { program } if program.trim().is_empty() => {
+            return Err(BuildError::EmptyProbeField(name.to_string()));
+        }
+        ProbeKind::PkgConfig { package, .. } if package.trim().is_empty() => {
+            return Err(BuildError::EmptyProbeField(name.to_string()));
+        }
+        ProbeKind::HeaderCheck { header } if header.trim().is_empty() => {
+            return Err(BuildError::EmptyProbeField(name.to_string()));
+        }
+        ProbeKind::CompileCheck {
+            name: check,
+            includes,
+            code,
+        } if check.trim().is_empty()
+            || code.trim().is_empty()
+            || includes.iter().any(|include| include.trim().is_empty()) =>
+        {
+            return Err(BuildError::EmptyProbeField(name.to_string()));
+        }
+        _ => {}
+    }
+    validate_provenance(name, &spec.provenance)
+}
+
+fn validate_provenance(name: &str, provenance: &BuildProvenance) -> Result<(), BuildError> {
+    match &provenance.source {
+        ProvenanceSource::JetpackDependency(dep)
+        | ProvenanceSource::AmbientRecord(dep)
+        | ProvenanceSource::UserDeclared(dep)
+            if dep.trim().is_empty() =>
+        {
+            return Err(BuildError::EmptyIdentityField(name.to_string()));
+        }
+        _ => {}
+    }
+    if let Some(lock) = &provenance.lock {
+        if lock.key.trim().is_empty() || lock.digest.trim().is_empty() {
+            return Err(BuildError::EmptyIdentityField(name.to_string()));
+        }
+    }
+    Ok(())
 }
 
 fn validate_action(name: &str, spec: &ActionSpec) -> Result<(), BuildError> {

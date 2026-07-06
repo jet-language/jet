@@ -450,7 +450,7 @@ impl Cx {
             {
                 name.clone()
             }
-            Type::Named(name) if name == "Unit" => "()".to_string(),
+            Type::Named(name) if name == "Unit" || name == "Void" => "()".to_string(),
             Type::Named(name) if name == "Error" => "String".to_string(),
             // D-PENDING1=B: Loadable<Unknown, Unknown> placeholders — Rust infers the type.
             Type::Named(name) if name == "Unknown" => "_".to_string(),

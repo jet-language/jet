@@ -47,6 +47,7 @@ pub use jet_driver::{
 pub use jet_queries as Queries;
 pub mod BuildCache;
 pub mod CLI;
+pub mod Compiler;
 pub mod Debug;
 pub mod Doctest;
 pub mod Doctor;
@@ -97,7 +98,7 @@ pub fn check_with_path(file: &str) -> Vec<Diagnostic> {
 }
 
 /// Full sema type-check for `jet eval`: runs the same pipeline as `compile`
-/// but with `CompileMode::Eval` so E0122 (main must return `()`) is relaxed
+/// but with `CompileMode::Eval` so E0122 (`run` return shape) is relaxed
 /// while all other diagnostics (type errors, unknown identifiers, etc.) still
 /// fire. Returns the error diagnostics, or an empty vec on success.
 pub fn check_for_eval(src: &str, file: &str) -> Vec<Diagnostic> {
@@ -224,6 +225,9 @@ pub fn compile_web_with_path(src: &str, file: &str) -> Result<CompileOutput, Vec
         Ok(c) => c,
         Err(diags) => return Err(diags),
     };
+    if let Err(diags) = Foreign::assemble_active_namespaces(&mut bundle) {
+        return Err(diags);
+    }
     let diags = Sema::check_bundle(&mut bundle, Sema::CompileMode::Run);
     let mut errors = Vec::new();
     let mut lints = Vec::new();

@@ -341,6 +341,10 @@ usage:
   {bin} new   <name> --annotated    same, with commented example deps
   {bin} env                         enter the project dev shell (delegates to `jetpack enter`)
   {bin} env   -- cmd                run a command in the project dev shell, then exit
+  {bin} trust list                  show package/build/env/service/image/fleet/jetos grants
+  {bin} trust explain [<grant>]      explain exact trust authority
+  {bin} trust grant <grant>          add a reviewed trust grant
+  {bin} trust revoke <grant>         drop a trust grant
   {bin} dev   <file.{ext}>          watch and re-run on every save (c77 auto-detects mode)
   {bin} serve <file.{ext}>          watch a resident program; hot-swap type-stable edits (c77)
   {bin} debug <file.{ext}>          step through a program at the Jet source level (D-DBG3)
@@ -755,6 +759,7 @@ fn main() {
                 | "serve"
                 | "debug"
                 | "push"
+                | "trust"
                 | "bridge"
                 | "services"
                 | "image"
@@ -851,6 +856,7 @@ fn main() {
             | "devtools"
             | "serve"
             | "push"
+            | "trust"
             | "bridge"
             | "services"
             | "image"
@@ -1082,6 +1088,15 @@ fn main() {
             exit(EngineDispatch::dispatch(
                 jet::Syntax::JETPACK_BINARY_NAME,
                 "push",
+                &raw,
+            ));
+        }
+        "trust" => {
+            // D-JPK-GRANTCMD1=A: public trust/grant graph command. Jetpack owns
+            // the trust store; `jet` stays a front door and dispatches.
+            exit(EngineDispatch::dispatch(
+                jet::Syntax::JETPACK_BINARY_NAME,
+                "trust",
                 &raw,
             ));
         }

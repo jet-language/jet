@@ -89,9 +89,10 @@ expr     = precedence climbing over:
 
 - Types: `Int`, `Float`, `Bool`, `String`. Local inference: annotations on
   bindings are optional; mismatched annotations are E0108.
-- A program must define `fn run` with no parameters and no return type, or
-  a single typed CLI parameter as described by D-CLIFLAG1 (E0101, E0122,
-  E1308). Execution starts there. `run` never takes `pub` (S12).
+- A program must define `fn run` with no parameters and no return type,
+  `fn run() -> Void ?` for top-level error propagation, or a single typed CLI
+  parameter as described by D-CLIFLAG1 (E0101, E0122, E1308). Execution starts
+  there. `run` never takes `pub` (S12).
 - `name :: value` and `name: Type :: value` are immutable; `name := value` and
   `name: Type := value` are mutable (D-BIND4).
   Assigning to an immutable binding is E0111.
@@ -605,8 +606,9 @@ Cross-type **`?`** conversion supports two forms:
   (S36) stop the program with a friendly report on stderr and exit code 70.
 - In **`if <fallible-expr> { … }`**, when the subject is not a plain
   name, **`it`** names the subject for pattern arms like **`it == ok(n)`**.
-- **`main`** may not return a fallible type; handle errors with **`??`**, a
-  full **`if subject { … }`**, or **`panic`**.
+- **`fn run()`** may stay bare for beginner programs. Use
+  **`fn run() -> Void ?`** only when the entry itself propagates errors with
+  **`?`**; returned errors print and exit non-zero.
 
 Unchecked fallible values (**E0401**), ignored fallible calls (**E0402**),
 ignored **`@MustUse`** results (**E0419**), bad propagation (**E0403**),
@@ -722,11 +724,16 @@ and a **`jet`** wrapper around `target/debug/jet`. **`cargo build`** once, then
 
 Every foreign ecosystem mounts through one model: a language root plus library
 name, `<lang>.<lib>`, with generated bindings under `.jet/bindings/<lang>/`.
-C and Rust are the active binders today. C uses the namespace surface
-(`use c.<lib>` / `#Extern module c.<lib>`); Rust keeps the shipped
+C and JS are the active namespace binders today. C uses the namespace surface
+(`use c.<lib>` / `#Extern module c.<lib>`). JS uses one `use js.<lib>` surface;
+the host is target-dispatched, with browser JS on web targets and the native
+JS-on-WASM host on native targets. Generated JS binding caches live under
+`.jet/bindings/js/`: `<lib>.jet` carries the callable Jet surface and
+`<lib>.d.ts` records the TypeScript declaration provenance. Rust keeps the shipped
 `extern rust "crate@version" { ... }` declaration block as its active binder
-surface. Python, JS, and Swift roots are registered for their ratified binders,
-but their binder depth lands on the later interop cards.
+surface until the `rust.*` namespace migrates. Python and Swift roots are
+registered for their ratified binders; Swift's planned route is a typed bridge
+over generated C-ABI shims.
 
 ## M7 — Rust FFI (`extern rust`, done)
 
@@ -1224,6 +1231,17 @@ dashed-name = ident { "-" ident } ;                (* S84: kebab-case names *)
   helper. Concurrent commands coordinate through file locks. If unprivileged
   sandboxing is unavailable, Jetpack emits L0205; `jetpack config sandbox
   require` makes that condition E1275 instead.
+- **Universal trust grants (D-JPK-GRANTCMD1/SCHEMA1):** `jet trust` is the
+  public command family for the unified grant graph. `jet trust list` shows
+  package, build, env, service, image, fleet, and jetos authority grants;
+  `jet trust explain [<grant>]` expands exact authority and revocation keys;
+  `jet trust grant <grant> [--scope user|repo]` records a reviewed local grant;
+  `jet trust revoke <grant>` removes it so the next risky action asks again.
+  The store remains backward-compatible with U19 `hash:` and `pattern:` lines.
+  `pkg.jet` may carry reviewed source policy as
+  `policy: { trust: { default: prompt, ci: { prompt: deny }, services: { postgres: prompt } } }`.
+  Policy decisions are `allow`, `prompt`, or `deny`; unknown fields are a
+  manifest error.
 - **Offline guarantee (U29):** once a package ref is realized into the hangar,
   realize-class verbs can use it again with `--offline` and no provider
   metadata refresh. Network-class verbs (`add`, `update`, `outdated`,
@@ -1832,6 +1850,27 @@ bare form) exits 0 — absence of facts is not a failure.
 (name, one-line summary, renderer) — adding a lens for a future ratified
 mechanism (effects, layout, derive expansion) is one row, never a new
 subcommand or a new flag (I8).
+
+## Public front-end toolkit API (D-FRONTENDAPI1=A, card #227)
+
+The public compiler toolkit is a read-only value facade over the front end.
+Rust dogfood tools use `jet::Compiler`; the exposed shapes are stable data,
+not AST handles or mutable compiler state.
+
+Version 1 exports:
+
+- `lex_source(src)` → token views with stable kind strings, byte ranges, and
+  line/column positions.
+- `parse_source(src)` → top-level syntax summaries plus diagnostics.
+- `check_file(path)` → diagnostics, syntax summaries, and a semantic-index
+  snapshot when the file checks cleanly.
+- `source_map_from_generated_rust(rust)` → generated Rust line markers mapped
+  back to Jet source lines.
+
+Diagnostics are cloned into value records (`code`, severity, message, why,
+fix, span). Semantic facts are cloned from the existing semindex schema. No
+API returns `Program`, `Item`, `Expr`, `Token`, mutable caches, parser state,
+or sema internals, and no API can feed modified syntax back into compilation.
 
 ## Inline script dependencies — `use pkg#version` (D-JPK-SCRIPTDEP1=A, U11)
 

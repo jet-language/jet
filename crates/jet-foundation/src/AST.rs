@@ -525,8 +525,9 @@ impl ImportDecl {
     }
 }
 
-/// D-FFI-UNIFY1: registered foreign language roots. C and Rust are active
-/// today; py/js/swift are ratified mounts whose binders land on later cards.
+/// D-FFI-UNIFY1: registered foreign language roots. C and JS are active
+/// namespace binders; rust/py/swift are ratified mounts whose binder depth
+/// lands on later cards.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ForeignLanguage {
     C,

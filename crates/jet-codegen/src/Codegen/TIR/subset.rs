@@ -571,7 +571,8 @@ pub(crate) fn is_covered_fallible_ty(ty: &Type, cx: &Cx) -> bool {
 
 /// An optional/fallible payload (`T` in `T?`, or `ok`/`err` in `T ? E`) the subset
 /// can lower: a scalar, Char, String, a covered struct/enum, a covered collection,
-/// or sema's default error type `Error` (`Type::Named("Error")`, which `cx.rust_type`
+/// `Void` (the ok payload of fallible `run`, rendered as `()`), or sema's
+/// default error type `Error` (`Type::Named("Error")`, which `cx.rust_type`
 /// lowers to plain `String` — its construction/binding is a String, so no clone/box
 /// decision the subset can't make).
 pub(crate) fn fallible_payload_covered(ty: &Type, cx: &Cx) -> bool {
@@ -584,6 +585,9 @@ pub(crate) fn fallible_payload_covered(ty: &Type, cx: &Cx) -> bool {
         return true;
     }
     if let Type::Named(n) = ty {
+        if n == "Void" {
+            return true;
+        }
         if n == "Error" {
             return true;
         }

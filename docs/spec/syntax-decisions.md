@@ -88,7 +88,7 @@ beside S17 (owner-chosen I8 exception).
 **S1 — Function keyword**: `fn`.
 
 **S12 — Entry point**: `fn run()`; no `pub` required. May be fallible:
-`fn run() -> Unit ?` (S80). **D-CLIFLAG1** (implemented, c7cliflag): a
+`fn run() -> Void ?` (S80, D-S80-RUN1). **D-CLIFLAG1** (implemented, c7cliflag): a
 typed entry parameter opts into CLI parsing — `fn run(args: ServeArgs)`
 derives `--flag` names/defaults/help from the struct's fields
 (`@[Cli]`/`@[Doc("...")]` markers, bracket form matching `@[Codable]`); an
@@ -513,9 +513,9 @@ user type of the same name shadows the core surface entirely.
 **S34 — Fallible return**: `T ? E`; bare `T ?` means `T ? Error`. Lowers to
 Rust `Result` (not surface syntax).
 
-**S80 — Error carrier & fallible main** *(D-ERR2)*: default `Error` carries
+**S80 — Error carrier & fallible `run`** *(D-ERR2, D-S80-RUN1)*: default `Error` carries
 message + optional code + optional source (`Error.message("…")`,
-`Error.code(n)`, `Error.with_source(e)`). `fn run() -> Unit ?` allowed;
+`Error.code(n)`, `Error.with_source(e)`). `fn run() -> Void ?` allowed;
 returned errors print in the diagnostic voice, exit non-zero. Cross-type `?`
 conversion is opt-in via the `Fallible` trait (`fn to_error(self) -> Error`);
 prelude types implement it, unrelated enums never convert silently.
@@ -1584,6 +1584,15 @@ implementation.
   services, images, fleets, and jetos activation. Beginner UX summarizes by
   intent; expert UX exposes exact authority, provenance, cache keys, and
   revocation.
+- **D-JPK-GRANTCMD1 (=A, ratified 2026-07-06, #229)**: trust authority is
+  controlled through `jet trust`: `list`, `explain`, `grant`, and `revoke`.
+  Older `jetpack config trust` remains a storage-management compatibility path;
+  the product concept is `jet trust`.
+- **D-JPK-GRANTSCHEMA1 (=A, ratified 2026-07-06, #229)**: reviewed source
+  policy lives under `policy.trust` in `pkg.jet`, e.g.
+  `policy: { trust: { default: prompt, ci: { prompt: deny }, services: { postgres: prompt } } }`.
+  Trust policy feeds the same grant graph used by prompts, CLI, locks, and
+  audit.
 - **D-WD2**: `jet dossier` is the umbrella explain view over named existing fact
   lenses. Each section must be owned by a real fact producer; experts get stable
   lenses and JSON schemas.

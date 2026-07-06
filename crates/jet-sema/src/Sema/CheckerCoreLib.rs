@@ -2274,7 +2274,7 @@ pub(crate) fn is_utf8_error_type_name(name: &str) -> bool {
 pub(crate) fn core_type_known(name: &str) -> bool {
     matches!(
         name,
-        "Unit" | "U8" | "Error" | "ProcessResult" | "Stopwatch" | "Closed"
+        "Unit" | "Void" | "U8" | "Error" | "ProcessResult" | "Stopwatch" | "Closed"
         // D-DET1: deterministic injected capability handles.
         // D-DET-CAPAPI: `Duration` value type for the widened clock surface.
         | "Clock" | "Rng" | "Duration"

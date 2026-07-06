@@ -76,7 +76,19 @@ pub(crate) fn emit_tir_toplevel(tir: &TFunc, cx: &Cx, out: &mut String) {
     } else {
         emit_tir_stmts(&tir.body, cx, out, 1);
     }
+    if is_fallible_void_return(&tir.ret) {
+        out.push_str("    Ok(())\n");
+    }
     out.push_str("}\n\n");
+}
+
+fn is_fallible_void_return(ret: &Option<Type>) -> bool {
+    matches!(
+        ret,
+        Some(Type::Result { ok, err })
+            if matches!(ok.as_ref(), Type::Named(n) if n == crate::Syntax::TYPE_VOID)
+                && matches!(err.as_ref(), Type::Named(n) if n == crate::Syntax::TYPE_ERROR)
+    )
 }
 
 /// D-STREAMYIELD1: a generator (`-> Stream<T>`) spawns its body on its own

@@ -155,7 +155,7 @@ before continuing.
 | E0119 | sema  | unknown type name                         |
 | E0120 | sema  | moving/returning a parameter without move (`^`) access |
 | E0121 | sema  | value used after it was given away        |
-| E0122 | sema  | plain `run` returns a value in run mode   |
+| E0122 | sema  | `run` returns something other than nothing or `Void ?` in run mode |
 | E0123 | sema  | `for` range `step` must be a positive Int (S22, D-SG8) |
 | E0124 | sema  | `if`-expression branches produce different types (S68, D-SG2) |
 | E0125 | sema  | call-site label mismatch: transposed or unknown label (D-NARG-D4) |

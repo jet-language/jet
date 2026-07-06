@@ -114,6 +114,11 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
     },
     CommandSpec {
+        name: "trust",
+        summary: "list, explain, grant, and revoke Jet trust authority (D-JPK-GRANTCMD1)",
+        headline: false,
+    },
+    CommandSpec {
         name: "bind",
         summary: "generate a C binding cache from a header",
         headline: false,
@@ -320,6 +325,7 @@ pub const FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--profile", help: "with build/run: named build profile --profile=<name> (D-BUILDPROFILE1)" },
     // D-A11YGATE1=B (c134 Phase 6): accessibility is an opt-in lint category.
     FlagSpec { long: "--a11y", help: "with lint: check accessibility — missing roles, unlabeled controls (D-A11YGATE1)" },
+    FlagSpec { long: "--scope", help: "with trust grant: grant scope, user or repo (D-JPK-GRANTCMD1)" },
 ];
 
 /// Is `name` a built-in command?

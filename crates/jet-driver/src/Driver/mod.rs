@@ -242,6 +242,9 @@ pub fn compile_src(
         Ok(c) => c,
         Err(diags) => return Err(diags),
     };
+    if let Err(diags) = crate::Foreign::assemble_active_namespaces(&mut bundle) {
+        return Err(diags);
+    }
     let diags = crate::Sema::check_bundle(&mut bundle, mode);
     let mut errors = Vec::new();
     let mut lints = Vec::new();
@@ -367,6 +370,9 @@ pub fn check_eval(src: &str, file: &str) -> Vec<Diagnostic> {
         Ok(c) => c,
         Err(diags) => return diags,
     };
+    if let Err(diags) = crate::Foreign::assemble_active_namespaces(&mut bundle) {
+        return diags;
+    }
     let diags = crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Eval);
     diags
         .into_iter()

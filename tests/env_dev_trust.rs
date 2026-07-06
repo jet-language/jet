@@ -44,6 +44,10 @@ fn jetpack() -> Command {
     Command::new(env!("CARGO_BIN_EXE_jetpack"))
 }
 
+fn jet() -> Command {
+    Command::new(env!("CARGO_BIN_EXE_jet"))
+}
+
 fn example_fixtures() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/jetpack-project/fixtures")
 }
@@ -359,4 +363,104 @@ fn config_trust_list_and_remove() {
     let trust_file = home.path.join(".jet").join("trust");
     let contents = fs::read_to_string(&trust_file).unwrap_or_default();
     assert!(!contents.contains(pattern), "contents: {contents}");
+}
+
+/// `jet trust` is the D-JPK-GRANTCMD1 public front door. It dispatches to
+/// Jetpack, but users never need to know the older `jetpack config trust` shape.
+#[test]
+fn top_level_jet_trust_grant_list_explain_revoke() {
+    let home = Scratch::new("top-level-jet-trust");
+
+    let grant = jet()
+        .args([
+            "trust",
+            "grant",
+            "github@acme/web:postgres.service",
+            "--scope",
+            "repo",
+            "--color=never",
+        ])
+        .env("HOME", &home.path)
+        .output()
+        .unwrap();
+    assert!(
+        grant.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&grant.stderr)
+    );
+
+    let list = jet()
+        .args(["trust", "list", "--json", "--color=never"])
+        .env("HOME", &home.path)
+        .output()
+        .unwrap();
+    assert!(list.status.success());
+    let stdout = String::from_utf8_lossy(&list.stdout);
+    assert!(
+        stdout.contains("\"authority\":\"service\""),
+        "stdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"subject\":\"github@acme/web:postgres.service\""),
+        "stdout: {stdout}"
+    );
+    assert!(stdout.contains("\"scope\":\"repo\""), "stdout: {stdout}");
+
+    let explain = jet()
+        .args([
+            "trust",
+            "explain",
+            "service:github@acme/web:postgres.service",
+            "--color=never",
+        ])
+        .env("HOME", &home.path)
+        .output()
+        .unwrap();
+    assert!(explain.status.success());
+    let stderr = String::from_utf8_lossy(&explain.stderr);
+    assert!(
+        stderr.contains("exact authority: service"),
+        "stderr: {stderr}"
+    );
+
+    let revoke = jet()
+        .args([
+            "trust",
+            "revoke",
+            "service:github@acme/web:postgres.service",
+            "--color=never",
+        ])
+        .env("HOME", &home.path)
+        .output()
+        .unwrap();
+    assert!(revoke.status.success());
+
+    let list_after = jet()
+        .args(["trust", "list", "--json", "--color=never"])
+        .env("HOME", &home.path)
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&list_after.stdout).trim(),
+        "{\"grants\":[]}"
+    );
+}
+
+#[test]
+fn top_level_jet_trust_grant_scope_needs_value() {
+    let home = Scratch::new("trust-scope-value-home");
+    let out = jet()
+        .args(["trust", "grant", "service:postgres.service", "--scope"])
+        .env("HOME", &home.path)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("couldn't parse trust grant"),
+        "stderr: {stderr}"
+    );
+    assert!(stderr.contains("unknown trust scope"), "stderr: {stderr}");
 }

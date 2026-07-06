@@ -399,6 +399,9 @@ fn to_diagnostic(path: &Path, err: &ManifestError) -> Diagnostic {
             ),
         ),
         ManifestError::BadEffectsBlock { detail } => e1221(&file, detail),
+        ManifestError::BadTrustPolicy { detail } => {
+            e1206(&file, &format!("`policy.trust` is malformed: {detail}"))
+        }
     }
 }
 

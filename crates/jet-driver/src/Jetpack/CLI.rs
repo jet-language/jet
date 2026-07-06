@@ -55,6 +55,8 @@ struct Flags {
     json: bool,
     /// U27: open a shell in preserved failed build scratch.
     shell_on_fail: bool,
+    /// D-JPK-GRANTCMD1=A: `jet trust grant <selector> --scope repo|user`.
+    trust_scope: Option<String>,
 }
 
 /// Result of separating flags, positional args, and a trailing `-- cmd`.
@@ -78,6 +80,7 @@ fn parse_args(args: &[String]) -> Parsed {
         adapt: false,
         json: false,
         shell_on_fail: false,
+        trust_scope: None,
     };
     let mut positional = Vec::new();
     let mut command = None;
@@ -90,6 +93,8 @@ fn parse_args(args: &[String]) -> Parsed {
         }
         match a.as_str() {
             "--no-color" => flags.no_color = true,
+            "--color=never" => flags.no_color = true,
+            "--color=auto" | "--color=always" => {}
             "--offline" => flags.offline = true,
             a if a == Syntax::TRUST_BYPASS_FLAG => flags.trust = true,
             a if a == Syntax::ENV_FLAG_FLAKE => flags.flake = true,
@@ -97,6 +102,14 @@ fn parse_args(args: &[String]) -> Parsed {
             "--adapt" => flags.adapt = true,
             "--json" => flags.json = true,
             a if a == Syntax::BUILD_FLAG_SHELL_ON_FAIL => flags.shell_on_fail = true,
+            a if a == Syntax::TRUST_FLAG_SCOPE => {
+                if let Some(scope) = args.get(i + 1).filter(|s| !s.starts_with('-')) {
+                    i += 1;
+                    flags.trust_scope = Some(scope.clone());
+                } else {
+                    flags.trust_scope = Some(String::new());
+                }
+            }
             a if a == Syntax::IMAGE_FLAG_PUSH => {
                 i += 1;
                 if let Some(r) = args.get(i) {
@@ -148,6 +161,7 @@ pub fn main(args: Vec<String>) -> i32 {
         "enter" => cmd_enter(&theme, &parsed),
         v if v == Syntax::DEV_SUBCOMMAND => cmd_dev(&theme, &parsed),
         v if v == Syntax::CONFIG_SUBCOMMAND => cmd_config(&theme, &parsed),
+        v if v == Syntax::TRUST_SUBCOMMAND => cmd_trust(&theme, &parsed),
         "build" => cmd_build(&theme, &parsed),
         "list" => cmd_list(&theme),
         "hangar" => cmd_hangar(&theme, &parsed),
@@ -1987,6 +2001,153 @@ fn cmd_config(theme: &Theme, parsed: &Parsed) -> i32 {
     }
 }
 
+/// D-JPK-GRANTCMD1=A: `jet trust grant/list/explain/revoke`. Jetpack owns the
+/// store; top-level `jet trust` dispatches here.
+fn cmd_trust(theme: &Theme, parsed: &Parsed) -> i32 {
+    let store = Trust::store_path();
+    match parsed.positional.first().map(String::as_str) {
+        Some(v) if v == Syntax::TRUST_VERB_GRANT => {
+            let Some(selector) = parsed.positional.get(1) else {
+                theme.error(
+                    "`jet trust grant` needs a grant selector",
+                    "a grant selector names one package, build, env, service, image, fleet, or jetos authority.",
+                    "try `jet trust grant service:postgres --scope repo`.",
+                );
+                return 2;
+            };
+            let scope = parsed
+                .flags
+                .trust_scope
+                .as_deref()
+                .unwrap_or(Syntax::TRUST_SCOPE_USER);
+            let grant = match Trust::parse_grant_selector(selector, scope) {
+                Ok(g) => g,
+                Err(e) => {
+                    theme.error(
+                        "couldn't parse trust grant",
+                        &e,
+                        "use `--scope user` or `--scope repo`.",
+                    );
+                    return 2;
+                }
+            };
+            let added = Trust::add_grant(&store, &grant);
+            theme.status(&if added {
+                format!(
+                    "trusted {} `{}` ({})",
+                    grant.authority, grant.subject, grant.scope
+                )
+            } else {
+                format!(
+                    "already trusted {} `{}` ({})",
+                    grant.authority, grant.subject, grant.scope
+                )
+            });
+            0
+        }
+        Some(v) if v == Syntax::TRUST_VERB_LIST => {
+            let records = Trust::list_records(&store);
+            if parsed.flags.json {
+                println!("{}", Trust::records_json(&records));
+            } else if records.is_empty() {
+                theme.status("no trust grants yet.");
+            } else {
+                for record in records {
+                    print_trust_record(theme, &record);
+                }
+            }
+            0
+        }
+        Some(v) if v == Syntax::TRUST_VERB_EXPLAIN => {
+            let records = Trust::list_records(&store);
+            let selected = parsed.positional.get(1).map(String::as_str);
+            let matches: Vec<_> = records
+                .into_iter()
+                .filter(|record| selected.is_none_or(|s| trust_record_matches(record, s)))
+                .collect();
+            if parsed.flags.json {
+                println!("{}", Trust::records_json(&matches));
+            } else if matches.is_empty() {
+                theme.status("no matching trust grants.");
+            } else {
+                for record in matches {
+                    print_trust_record(theme, &record);
+                    match &record {
+                        Trust::TrustRecord::Grant(grant) => theme.detail(&format!(
+                            "exact authority: {} subject `{}`; revoke with `jet trust revoke {}`",
+                            grant.authority,
+                            grant.subject,
+                            grant.key()
+                        )),
+                        Trust::TrustRecord::Hash { hash } => theme.detail(&format!(
+                            "exact env/build hash grant; revoke with `jet trust revoke hash:{hash}`"
+                        )),
+                        Trust::TrustRecord::Pattern { pattern } => theme.detail(&format!(
+                            "path pattern grant; revoke with `jet trust revoke pattern:{pattern}`"
+                        )),
+                        Trust::TrustRecord::Raw { line } => theme.detail(&format!(
+                            "legacy/raw grant; revoke with `jet trust revoke {line}`"
+                        )),
+                    }
+                }
+            }
+            0
+        }
+        Some(v) if v == Syntax::TRUST_VERB_REVOKE => {
+            let Some(selector) = parsed.positional.get(1) else {
+                theme.error(
+                    "`jet trust revoke` needs a grant selector",
+                    "revocation is exact: pass the subject, grant key, hash, pattern, or raw line shown by `jet trust list`.",
+                    "try `jet trust revoke service:postgres.service`.",
+                );
+                return 2;
+            };
+            let removed = Trust::revoke(&store, selector);
+            theme.status(&if removed {
+                format!("revoked: {selector}")
+            } else {
+                format!("not found: {selector}")
+            });
+            0
+        }
+        _ => {
+            theme.error(
+                "`jet trust` needs a verb",
+                &format!("the trust verbs are: {}.", Syntax::TRUST_VERBS.join(", ")),
+                "try `list`, `explain`, `grant`, or `revoke`.",
+            );
+            2
+        }
+    }
+}
+
+fn print_trust_record(theme: &Theme, record: &Trust::TrustRecord) {
+    match record {
+        Trust::TrustRecord::Hash { hash } => theme.detail(&format!("hash     {hash}")),
+        Trust::TrustRecord::Pattern { pattern } => theme.detail(&format!("pattern  {pattern}")),
+        Trust::TrustRecord::Grant(grant) => theme.detail(&format!(
+            "{:<7} {}  scope:{}",
+            grant.authority, grant.subject, grant.scope
+        )),
+        Trust::TrustRecord::Raw { line } => theme.detail(&format!("raw      {line}")),
+    }
+}
+
+fn trust_record_matches(record: &Trust::TrustRecord, selector: &str) -> bool {
+    match record {
+        Trust::TrustRecord::Hash { hash } => selector == hash || selector == format!("hash:{hash}"),
+        Trust::TrustRecord::Pattern { pattern } => {
+            selector == pattern || selector == format!("pattern:{pattern}")
+        }
+        Trust::TrustRecord::Grant(grant) => {
+            selector == grant.subject
+                || selector == grant.key()
+                || selector == format!("{}:{}", grant.scope, grant.key())
+        }
+        Trust::TrustRecord::Raw { line } => selector == line,
+    }
+}
+
 /// Realize every ref in `plan` and compose the shell env (PATH dirs + prompt
 /// label). Returns an exit code after reporting if any ref fails to realize.
 fn compose_env(theme: &Theme, roots: &Roots, flags: &Flags, plan: &RunPlan) -> Result<Env, i32> {
@@ -2057,7 +2218,11 @@ fn compose_env(theme: &Theme, roots: &Roots, flags: &Flags, plan: &RunPlan) -> R
 /// The ledger's name-column width for a set of refs (min 8 so a single short
 /// name doesn't collapse the table).
 fn name_column_width(refs: &[RefSpec::RefSpec]) -> usize {
-    refs.iter().map(|r| r.package.len()).max().unwrap_or(0).max(8)
+    refs.iter()
+        .map(|r| r.package.len())
+        .max()
+        .unwrap_or(0)
+        .max(8)
 }
 
 /// `2 built, 1 cached` — non-zero source-state counts, joined.
@@ -2225,14 +2390,29 @@ fn cmd_list(theme: &Theme) -> i32 {
         return 0;
     }
     theme.status(&format!("{} realized package(s):", entries.len()));
-    let name_w = entries.iter().map(|e| e.name.len()).max().unwrap_or(0).max(8);
+    let name_w = entries
+        .iter()
+        .map(|e| e.name.len())
+        .max()
+        .unwrap_or(0)
+        .max(8);
     let ver_w = entries
         .iter()
-        .map(|e| if e.version.is_empty() { 1 } else { e.version.len() })
+        .map(|e| {
+            if e.version.is_empty() {
+                1
+            } else {
+                e.version.len()
+            }
+        })
         .max()
         .unwrap_or(1);
     for e in entries {
-        let v = if e.version.is_empty() { "—" } else { &e.version };
+        let v = if e.version.is_empty() {
+            "—"
+        } else {
+            &e.version
+        };
         theme.detail(&format!(
             "{}  {}  {}",
             theme.bold(&format!("{:<name_w$}", e.name)),
@@ -3401,6 +3581,10 @@ fn usage() -> String {
   {bin} image <name> --push <ref>      (gated on TLS support, E1268 — not yet)
 
 {trust}
+  {bin} trust list                    show package/build/env/service/image/fleet/jetos grants
+  {bin} trust explain [<grant>]        explain exact authority and revocation key
+  {bin} trust grant <grant>            add a reviewed local grant
+  {bin} trust revoke <grant>           drop a grant; next risky action asks again
   {bin} config trust add <pattern>     pre-authorize matching project paths
   {bin} config trust list              show trusted hashes and patterns
   {bin} config trust remove <pattern>  drop a trusted pattern
@@ -3421,6 +3605,7 @@ fn usage() -> String {
   --shell-on-fail                      after a failed build, open a shell in preserved scratch
   --fixtures <dir>                     read provider output from captured fixtures
   --trust                              skip the trust prompt for this one run
+  --scope <user|repo>                  (trust grant) where the grant applies
   -p <pkg>...                          (enter) ad-hoc nixpkgs packages, not declared anywhere
   --flake                              (enter) force the foreign flake.nix/devenv.nix fallback
   --pure                               (enter) isolate the shell from the host environment

@@ -302,7 +302,7 @@ pub fn load_entry_with_overlay(
             if matches!(imp.kind, ImportKind::Unqualified { .. }) {
                 continue;
             }
-            if crate::CFFI::is_c_import(imp) {
+            if crate::Foreign::is_active_namespace_import(imp) || crate::CFFI::is_c_import(imp) {
                 continue;
             }
             if core_module_path(imp).is_some() {
@@ -352,6 +352,7 @@ pub fn load_entry_with_overlay(
     // S59 (E2-M14): fold every `#Extern`/`#Bindgen module c.<lib>` into merged
     // synthetic modules and resolve C `use` forms before sema sees the tree.
     bundle.cffi = crate::CFFI::assemble(&mut bundle)?;
+    crate::Foreign::assemble_active_namespaces(&mut bundle)?;
     Ok(bundle)
 }
 
@@ -599,7 +600,7 @@ fn load_file(
 
     for imp in &imports {
         // S59: C `use` forms use the reserved `c.` root legitimately.
-        if crate::CFFI::is_c_import(imp) {
+        if crate::Foreign::is_active_namespace_import(imp) || crate::CFFI::is_c_import(imp) {
             continue;
         }
         // D-MOD3: `use alias.Item` / `use alias.{A,B}` forms don't load new files;
@@ -614,9 +615,9 @@ fn load_file(
         if core_module_path(imp).is_some() {
             continue;
         }
-        // S59 (E2-M14): C `use` forms (`use c.<lib>` / `use "<header>.h"`) do
-        // not load `.jet` files — `CFFI::assemble` materializes their modules.
-        if crate::CFFI::is_c_import(imp) {
+        // Active foreign namespace imports (`use c.<lib>`, `use js.<lib>`) do
+        // not load local `.jet` modules. Each binder owns its cache/materializer.
+        if crate::Foreign::is_active_namespace_import(imp) || crate::CFFI::is_c_import(imp) {
             continue;
         }
         let target = match resolve_import(imp, path, project_root, pkg_dep_dirs, pkg_resolution) {

@@ -502,7 +502,13 @@ pub(crate) fn emit_cli_entry_if_needed(cx: &Cx, items: &[Item], out: &mut String
         return;
     };
     if run_fn.params.is_empty() {
-        out.push_str("fn main() {\n    user_run();\n}\n\n");
+        if is_fallible_void_entry_return(run_fn) {
+            out.push_str(
+                "fn main() {\n    if let Err(__jet_err) = user_run() {\n        eprintln!(\"{}\", __jet_err);\n        std::process::exit(1);\n    }\n}\n\n",
+            );
+        } else {
+            out.push_str("fn main() {\n    user_run();\n}\n\n");
+        }
         return;
     }
     if run_fn.params.len() != 1 {
@@ -547,6 +553,15 @@ pub(crate) fn emit_cli_entry_if_needed(cx: &Cx, items: &[Item], out: &mut String
     }) {
         emit_cli_subcommand_entry(cx, e, &arg_expr, out);
     }
+}
+
+fn is_fallible_void_entry_return(f: &Func) -> bool {
+    matches!(
+        &f.return_type,
+        Some(Type::Result { ok, err })
+            if matches!(ok.as_ref(), Type::Named(n) if n == crate::Syntax::TYPE_VOID)
+                && matches!(err.as_ref(), Type::Named(n) if n == crate::Syntax::TYPE_ERROR)
+    )
 }
 
 /// D-CLIFLAG1: the `enum Cmd { Serve(ServeArgs) Import(ImportArgs) }` case.

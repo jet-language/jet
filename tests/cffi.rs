@@ -48,7 +48,7 @@ fn unified_foreign_binder_registry_routes_active_and_planned_languages() {
             "js",
             "bindings/js",
             BinderSurface::Namespace,
-            BinderStatus::Planned,
+            BinderStatus::Active,
         ),
         (
             ForeignLanguage::Swift,
@@ -90,18 +90,124 @@ fn unified_foreign_namespace_model_recognizes_c_project_import_only() {
 }
 
 #[test]
-fn planned_foreign_roots_are_reserved_until_their_binders_land() {
-    let dir = common::unique_tmp("jet_foreign_reserved");
+fn foreign_active_js_import_is_accepted_while_planned_swift_stays_reserved() {
+    let dir = common::unique_tmp("jet_foreign_active_js");
     fs::create_dir_all(&dir).unwrap();
     let main = dir.join("main.jet");
     let src = "use js.plotly as plot\nfn run() { }\n";
+    fs::write(&main, src).unwrap();
+
+    jet::compile_with_path(src, main.to_str().unwrap())
+        .unwrap_or_else(|d| panic!("active js import rejected:\n{:?}", d));
+
+    let dir = common::unique_tmp("jet_foreign_reserved");
+    fs::create_dir_all(&dir).unwrap();
+    let main = dir.join("main.jet");
+    let src = "use swift.foundation as foundation\nfn run() { }\n";
     fs::write(&main, src).unwrap();
 
     let diags = jet::compile_with_path(src, main.to_str().unwrap())
         .expect_err("planned foreign roots must be reserved");
     assert_eq!(diags[0].code, "E1002");
     let rendered = jet::render_diagnostics(main.to_str().unwrap(), src, &diags);
-    assert!(rendered.contains("`js` is reserved for first-party or foreign packages"));
+    assert!(rendered.contains("`swift` is reserved for first-party or foreign packages"));
+}
+
+#[test]
+fn foreign_js_import_uses_generated_binding_cache_for_symbols() {
+    let dir = common::unique_tmp("jet_foreign_js_cache");
+    let cache_dir = dir.join(".jet/bindings/js");
+    fs::create_dir_all(&cache_dir).unwrap();
+    fs::write(
+        cache_dir.join("plotly.jet"),
+        "pub fn scatter() -> Int {\n    return 7\n}\n",
+    )
+    .unwrap();
+    let main = dir.join("main.jet");
+    let src = "use js.plotly as plot\nfn run() {\n    print(plot.scatter())\n}\n";
+    fs::write(&main, src).unwrap();
+
+    jet::compile_with_path(src, main.to_str().unwrap())
+        .unwrap_or_else(|d| panic!("js cache import rejected:\n{:?}", d));
+}
+
+#[test]
+fn foreign_js_import_without_cache_does_not_invent_symbols() {
+    let dir = common::unique_tmp("jet_foreign_js_no_cache");
+    fs::create_dir_all(&dir).unwrap();
+    let main = dir.join("main.jet");
+    let src = "use js.plotly as plot\nfn run() {\n    print(plot.scatter())\n}\n";
+    fs::write(&main, src).unwrap();
+
+    let diags = jet::compile_with_path(src, main.to_str().unwrap())
+        .expect_err("missing js cache must not invent callable symbols");
+    let rendered = jet::render_diagnostics(main.to_str().unwrap(), src, &diags);
+    assert!(
+        rendered.contains("scatter") || rendered.contains("plot"),
+        "unexpected diagnostics:\n{rendered}"
+    );
+}
+
+#[test]
+fn foreign_interop_routes_js_with_target_dispatched_host_and_dts_stub() {
+    use jet::Foreign::{
+        route_plan, BinderRuntime, BinderStatus, BindingStubKind, ForeignHost, ForeignTarget,
+    };
+    use jet::AST::{ForeignLanguage, ForeignNamespace};
+
+    let root = PathBuf::from("/tmp/jet_foreign_route");
+    let ns = ForeignNamespace::from_module_path("js.plotly").expect("js namespace");
+    let native = route_plan(&root, ns.clone(), ForeignTarget::Native).expect("native js route");
+    let web = route_plan(&root, ns, ForeignTarget::Web).expect("web js route");
+
+    assert_eq!(native.descriptor.language, ForeignLanguage::Js);
+    assert_eq!(native.descriptor.status, BinderStatus::Active);
+    assert_eq!(native.descriptor.runtime, BinderRuntime::TargetDispatchedJs);
+    assert_eq!(
+        native.descriptor.stub_kind,
+        BindingStubKind::TypeScriptDeclarations
+    );
+    assert_eq!(native.host, ForeignHost::NativeJsWasmComponent);
+    assert_eq!(web.host, ForeignHost::BrowserJsEngine);
+    assert_eq!(
+        native.binding_cache,
+        root.join(".jet/bindings/js/plotly.jet")
+    );
+    assert_eq!(
+        native.type_stub,
+        Some(root.join(".jet/bindings/js/plotly.d.ts"))
+    );
+    assert_eq!(
+        native.provenance,
+        root.join(".jet/bindings/js/plotly.provenance")
+    );
+}
+
+#[test]
+fn foreign_interop_routes_swift_as_planned_c_abi_bridge() {
+    use jet::Foreign::{
+        route_plan, BinderRuntime, BinderStatus, BindingStubKind, ForeignHost, ForeignTarget,
+    };
+    use jet::AST::{ForeignLanguage, ForeignNamespace};
+
+    let root = PathBuf::from("/tmp/jet_foreign_route");
+    let ns = ForeignNamespace::from_module_path("swift.foundation").expect("swift namespace");
+    let route = route_plan(&root, ns, ForeignTarget::Native).expect("swift route");
+
+    assert_eq!(route.descriptor.language, ForeignLanguage::Swift);
+    assert_eq!(route.descriptor.status, BinderStatus::Planned);
+    assert_eq!(route.descriptor.runtime, BinderRuntime::SwiftCAbiBridge);
+    assert_eq!(route.descriptor.stub_kind, BindingStubKind::SwiftModule);
+    assert_eq!(route.host, ForeignHost::SwiftCAbiBridge);
+    assert_eq!(
+        route.binding_cache,
+        root.join(".jet/bindings/swift/foundation.jet")
+    );
+    assert_eq!(route.type_stub, None);
+    assert_eq!(
+        route.provenance,
+        root.join(".jet/bindings/swift/foundation.provenance")
+    );
 }
 
 /// Build a tiny C static library `libjetc.a` in `dir`, returning its directory

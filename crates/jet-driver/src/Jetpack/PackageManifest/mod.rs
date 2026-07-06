@@ -46,7 +46,9 @@ pub use ParseBlocks::parse_build;
 use super::RefSpec::{RefError, Source};
 use crate::Syntax;
 use Helpers::block_body;
-use ParseBlocks::{parse_deps, parse_effects, parse_grants, parse_package, parse_packages};
+use ParseBlocks::{
+    parse_deps, parse_effects, parse_grants, parse_package, parse_packages, parse_trust_policy,
+};
 
 /// D-BUILDPROFILE1: optimization level for a named build profile. Stored in
 /// `Build.{ optimize: … }` inside `pkg.jet`'s `build { }` block.
@@ -101,6 +103,23 @@ pub struct BuildProfileDef {
     pub panic: Option<BuildPanic>,
     pub features: Vec<String>,
     pub env: Vec<(String, String)>,
+}
+
+/// D-JPK-GRANTSCHEMA1=A: source-reviewed trust policy from
+/// `policy: { trust: { … } }`.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct TrustPolicy {
+    pub default: Option<TrustDecision>,
+    pub ci_prompt: Option<TrustDecision>,
+    pub services: Vec<(String, TrustDecision)>,
+}
+
+/// One trust decision value in `policy.trust`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrustDecision {
+    Allow,
+    Prompt,
+    Deny,
 }
 
 /// Payload identity (the `payload: { … }` block, U10 — was `package:`).
@@ -216,6 +235,9 @@ pub struct PackManifest {
     /// D-EFFBUDGET1: `grants: { "dep": [Effect], … }` — the audited
     /// per-dependency escape from the `effects:` budget, in declaration order.
     pub grants: Vec<(String, Vec<String>)>,
+    /// D-JPK-GRANTSCHEMA1=A: reviewed trust policy facts for the unified grant
+    /// graph.
+    pub trust_policy: Option<TrustPolicy>,
 }
 
 /// Why a `pkg.jet` package manifest could not be parsed. These are internal
@@ -259,6 +281,8 @@ pub enum ManifestError {
     /// D-EFFBUDGET1 (E1221): a malformed `effects:`/`grants:` block — an
     /// unknown field, a non-list value, or an effect name outside D-EFF4.
     BadEffectsBlock { detail: String },
+    /// D-JPK-GRANTSCHEMA1=A: malformed `policy.trust`.
+    BadTrustPolicy { detail: String },
 }
 
 /// Top-level keys reserved for a future Jet feature; using them non-empty
@@ -335,6 +359,11 @@ pub fn parse(text: &str) -> Result<PackManifest, ManifestError> {
         None => Vec::new(),
     };
 
+    let trust_policy = match block_body(&text, Syntax::MANIFEST_BLOCK_POLICY, '{', '}') {
+        Some(body) => parse_trust_policy(&body)?,
+        None => None,
+    };
+
     for &section in RESERVED_SECTIONS {
         if let Some(body) = block_body(&text, section, '{', '}') {
             if !body.trim().is_empty() {
@@ -352,6 +381,7 @@ pub fn parse(text: &str) -> Result<PackManifest, ManifestError> {
         effects_allow,
         effects_deny,
         grants,
+        trust_policy,
     })
 }
 

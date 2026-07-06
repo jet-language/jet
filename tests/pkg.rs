@@ -242,6 +242,40 @@ fn manifest_parse_grants_block() {
 }
 
 #[test]
+fn manifest_parse_policy_trust_block() {
+    let raw = min_manifest("app", "0.1.0")
+        + "\npolicy: { trust: { default: prompt, ci: { prompt: deny }, services: { postgres: prompt } } }\n";
+    let pm = jet::Jetpack::PackageManifest::parse(&raw).expect("policy.trust block should parse");
+    let policy = pm.trust_policy.expect("trust policy should be stored");
+    assert_eq!(
+        policy.default,
+        Some(jet::Jetpack::PackageManifest::TrustDecision::Prompt)
+    );
+    assert_eq!(
+        policy.ci_prompt,
+        Some(jet::Jetpack::PackageManifest::TrustDecision::Deny)
+    );
+    assert_eq!(
+        policy.services,
+        vec![(
+            "postgres".to_string(),
+            jet::Jetpack::PackageManifest::TrustDecision::Prompt
+        )]
+    );
+}
+
+#[test]
+fn manifest_policy_trust_rejects_unknown_decision() {
+    let raw = min_manifest("app", "0.1.0") + "\npolicy: { trust: { default: maybe } }\n";
+    let err =
+        jet::Jetpack::PackageManifest::parse(&raw).expect_err("unknown trust decision should fail");
+    assert!(matches!(
+        err,
+        jet::Jetpack::PackageManifest::ManifestError::BadTrustPolicy { .. }
+    ));
+}
+
+#[test]
 fn manifest_no_effects_block_disables_enforcement() {
     let raw = min_manifest("app", "0.1.0");
     let pm = jet::Jetpack::PackageManifest::parse(&raw).expect("valid manifest should parse");

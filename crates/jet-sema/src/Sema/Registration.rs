@@ -10,6 +10,15 @@ use crate::AST::{
 };
 use std::collections::{HashMap, HashSet};
 
+fn is_fallible_void_return(ty: &Type) -> bool {
+    matches!(
+        ty,
+        Type::Result { ok, err }
+            if matches!(ok.as_ref(), Type::Named(n) if n == Syntax::TYPE_VOID)
+                && matches!(err.as_ref(), Type::Named(n) if n == Syntax::TYPE_ERROR)
+    )
+}
+
 impl<'a> Checker<'a> {
     /// Shared tail of `check_func_body` / `check_func_body_bundle`:
     /// declare parameters, check the body, enforce definite return.
@@ -178,7 +187,13 @@ impl<'a> Checker<'a> {
         // exactly a bare `return;` — it just ends the stream. Never E0114.
         let is_generator =
             matches!(&f.return_type, Some(Type::Apply { name, .. }) if name == "Stream");
-        if !is_generator && f.return_type.is_some() && !block_definitely_returns(&f.body) {
+        let is_entry_fallible_void =
+            f.name == "run" && f.return_type.as_ref().is_some_and(is_fallible_void_return);
+        if !is_generator
+            && !is_entry_fallible_void
+            && f.return_type.is_some()
+            && !block_definitely_returns(&f.body)
+        {
             let rt = f.return_type.clone().unwrap();
             self.diags.push(Diagnostic::error(
                 "E0114",
@@ -824,18 +839,25 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                 ));
             }
             Some(sig) => {
-                // E0122: in Run mode plain run must return Unit. A single typed
-                // CLI parameter is checked later in Bundle.
-                if mode == CompileMode::Run && sig.params.is_empty() && sig.return_type.is_some() {
+                // E0122: in Run mode zero-arg `run` either returns nothing or
+                // returns `Void ?` for top-level error reporting (D-S80-RUN1).
+                // A single typed CLI parameter is checked later in Bundle.
+                if mode == CompileMode::Run
+                    && sig.params.is_empty()
+                    && sig
+                        .return_type
+                        .as_ref()
+                        .is_some_and(|ret| !is_fallible_void_return(ret))
+                {
                     let span = prog.items.iter().find_map(|i| match i {
                         Item::Func(f) if f.name == "run" => Some(f.name_span),
                         _ => None,
                     });
                     diags.push(Diagnostic::error(
                         "E0122",
-                        "`run` returns a value".to_string(),
-                        "`run` is where running starts; in run mode there is no caller waiting for a value".to_string(),
-                        "write it as: fn run() { ... }".to_string(),
+                        "`run` returns the wrong kind of value".to_string(),
+                        "`run` is where running starts; it either returns nothing or reports top-level errors with `Void ?`".to_string(),
+                        "write `fn run() { ... }`, or `fn run() -> Void ? { ... }` if the entry uses `?`".to_string(),
                         span,
                     ));
                 }
