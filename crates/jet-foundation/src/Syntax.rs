@@ -1580,7 +1580,7 @@ pub const NS_IMAGE: &str = "image";
 /// (resolver rides board card c156).
 pub const NS_WORKSPACE: &str = "workspace";
 
-/// U15 (D-JPK-FLEET1=A, ratified 2026-07-02): a fleet is a map of named hosts to
+/// D-JPK-FLEET1=A (ratified 2026-07-02): a fleet is a map of named hosts to
 /// `System` refs — `module fleet.<name> { hosts: { web1: system.<sys>.{ … } } }`.
 /// Distinct from `workspace` (the monorepo index): a fleet is a deployment target.
 /// Parse/capture/cross-check now; ssh realization rides single-host jetos (Phase D).
@@ -1590,28 +1590,28 @@ pub const NS_FLEET: &str = "fleet";
 pub const TYPE_ENV: &str = "Env";
 pub const TYPE_SYSTEM: &str = "System";
 pub const TYPE_IMAGE: &str = "Image";
-/// U15: the type name of a `fleet.<name>` contribution record.
+/// D-JPK-FLEET1: the type name of a `fleet.<name>` contribution record.
 pub const TYPE_FLEET: &str = "Fleet";
 
-/// U15: a `Fleet`'s one required field — the `hosts:` map.
+/// D-JPK-FLEET1: a `Fleet`'s one required field — the `hosts:` map.
 pub const FLEET_FIELD_HOSTS: &str = "hosts";
 
-/// U12 (ratified 2026-06-16): the element type of a `System`'s `services:` map.
+/// D-JETOS-FREEZE1: frozen element type of a `System`'s `services:` map.
 /// `Service` is not a top-level namespace (it never appears as `service.<name>:`);
 /// it is the inferred type of each bare `{ … }` record written under `services:`.
 pub const TYPE_SERVICE: &str = "Service";
 
-/// U11 (ratified 2026-06-16): a `System`'s four fields —
-/// `target` / `packages` / `services` / `options`. Anything else is unknown.
+/// D-JETOS-FREEZE1: frozen jetos sketch fields kept only for legacy
+/// parser/evaluator coverage while `system.*` is outside current syntax law.
 pub const SYSTEM_FIELD_TARGET: &str = "target";
 pub const SYSTEM_FIELD_PACKAGES: &str = "packages";
 pub const SYSTEM_FIELD_SERVICES: &str = "services";
 pub const SYSTEM_FIELD_OPTIONS: &str = "options";
 
-/// U12 (ratified 2026-06-16): the required first field of every `Service` record.
+/// D-JPK-SERVICE1: the required first field of every `Service` record.
 pub const SERVICE_FIELD_ENABLE: &str = "enable";
 
-/// U12 (ratified 2026-06-16 — supervised-services slice, card c9jetpackgates):
+/// D-JPK-SERVICE1 (supervised-services slice, card c9jetpackgates):
 /// the recognized fields of a **dev-supervised** `Service` (an entry under an
 /// `env.<name>` role-module's `services:` map). `Service` stays the one
 /// ratified open record either way (same grammar as `system.*.services`,
@@ -1629,21 +1629,21 @@ pub const DEV_SERVICE_FIELD_SHUTDOWN: &str = "shutdown";
 pub const DEV_SERVICE_FIELD_DATA_DIR: &str = "data_dir";
 pub const DEV_SERVICE_FIELD_READY: &str = "ready";
 
-/// U13 (ratified 2026-06-16): the typed platform values a `System.target` (and a
+/// D-JPK-PLATFORM1: the typed platform values a `System.target` (and a
 /// cross-compile `Image.target`) may hold — `linux.x64` / `linux.arm64`. Written
 /// as a dotted typed value (an OS namespace `.` an arch), never a quoted string.
 pub const PLATFORM_OS_LINUX: &str = "linux";
 pub const PLATFORM_ARCH_X64: &str = "x64";
 pub const PLATFORM_ARCH_ARM64: &str = "arm64";
 
-/// U14 (ratified 2026-06-16): an `Image`'s fields — required `from: system.<name>`
+/// D-JPK-IMAGE1: an `Image`'s fields — required `from: system.<name>`
 /// and optional `format:` (default `iso`). `target`/`packages`/`services`/
 /// `options` are inherited from the referenced `System`, never restated (the lone
 /// exception is an explicit cross-compile `target:`).
 pub const IMAGE_FIELD_FROM: &str = "from";
 pub const IMAGE_FIELD_FORMAT: &str = "format";
 
-/// U14 (ratified 2026-06-16): the disk-image formats — `iso` (default) / `qcow` /
+/// D-JPK-IMAGE1: the disk-image formats — `iso` (default) / `qcow` /
 /// `raw`.
 pub const IMAGE_FORMAT_ISO: &str = "iso";
 pub const IMAGE_FORMAT_QCOW: &str = "qcow";
@@ -1690,11 +1690,11 @@ pub const WORKSPACE_FILE: &str = "workspace.jet";
 /// expression that evaluates to the list of member package paths.
 pub const MODULE_FIELD_MEMBERS: &str = "members";
 
-/// U15 (ratified 2026-06-16): the jetos tier is the `jetpack os <verb>`
+/// D-JETOS-FREEZE1: the jetos tier is the `jetpack os <verb>`
 /// subcommand group — not a separate `jetos` binary, not under `jet`.
 pub const OS_SUBCOMMAND: &str = "os";
 
-/// U15 (ratified 2026-06-16): the jetos verbs, mirroring `nixos-rebuild` —
+/// D-JETOS-FREEZE1: the jetos verbs, mirroring `nixos-rebuild` —
 /// `switch` (build + activate + set boot default) and `build` (build only).
 /// `boot`/`test` may be added later under the same protocol.
 pub const OS_VERB_SWITCH: &str = "switch";
@@ -1710,11 +1710,11 @@ pub const KEY_VERB_BACKUP: &str = "backup";
 pub const KEY_VERBS: &[&str] = &[KEY_VERB_BACKUP];
 pub const PUBLISH_FLAG_NO_SIGN: &str = "--no-sign";
 
-/// U16 (ratified 2026-06-16): the `@host` selector in a `jetpack os` target
+/// D-JETOS-FREEZE1: the `@host` selector in a `jetpack os` target
 /// `[<config-path>]@<host>`. Reuses jet's `@` source-selector convention.
 pub const OS_HOST_SELECTOR: &str = "@";
 
-/// U16 (ratified 2026-06-16): the default config location when no explicit path
+/// D-JETOS-FREEZE1: the default config location when no explicit path
 /// prefix is given — `~/.jet/config.jet`.
 pub const CONFIG_DEFAULT_DIR: &str = ".jet";
 
@@ -3563,6 +3563,8 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     "core.gc",
     // D-SOLVER-LIB1=A: explicit finite solver state, no language backtracking.
     "core.solve",
+    // D-DATA-SURFACE1=A: one beginner facade for typed tables, series, stats, and plots.
+    "core.data",
     // E2-M7: streaming file handles and path helpers (D-IO1, D-IO2).
     "core.files",
     "core.path",
@@ -3613,6 +3615,8 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     "core.archive",
     // D-RAYLIB1=A / D-GAME1=B: official first-party raylib graphics bridge.
     "core.raylib",
+    // D-GAME1/2/3 + D-WD10 + D-GAME-*: stable headless game substrate.
+    "core.game",
     // D-CODECS1 (ratified): standalone compression codecs, separate from `core.archive`.
     // `flate2` (gzip) and `zstd` FFI bridges.
     "core.compress.gzip",

@@ -4700,7 +4700,14 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
     // lowering (c133 M1 precedent; D-MIGRATE3=A extends it to `MigrationStatus`).
     let ui_name_collision = matches!(
         type_name.as_str(),
-        "Point" | "Size" | "Rect" | "SizeConstraint" | "UiNode" | "MigrationStatus"
+        "Point"
+            | "Size"
+            | "Rect"
+            | "SizeConstraint"
+            | "UiNode"
+            | "MigrationStatus"
+            | "DataGroup"
+            | "DataStatus"
     );
     if ui_name_collision && cx.type_names.contains(type_name) {
         return None;
@@ -4713,6 +4720,9 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
         n if n == Syntax::TYPE_UTF8_ERROR || n == "Utf8Error" => member == "message",
         // D-LSDIR1=A: DirEntry fields — name (bare filename), path (full path), is_dir.
         "DirEntry" => matches!(member, "name" | "path" | "is_dir"),
+        // D-DATA-SURFACE1=A / D-DATA-STATUS1=A: core.data fields use plain Rust names.
+        "DataGroup" => matches!(member, "key" | "count" | "sum" | "mean"),
+        "DataStatus" => matches!(member, "step" | "path" | "replacement"),
         // D-RENDERTGT2=A (c133 M1): UI geometry fields.
         "Point" => matches!(member, "x" | "y"),
         "Size" => matches!(member, "width" | "height"),
@@ -4728,6 +4738,8 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
         "HttpRequest" | "HttpResponse" => {
             matches!(member, "method" | "path" | "body" | "headers" | "status")
         }
+        "GameScene" => matches!(member, "assets" | "input" | "budgets"),
+        "GameFrame" => matches!(member, "index" | "input"),
         // D-MIGRATE3=A: `MigrationStatus` — `.migrated`/`.from`/`.steps`.
         "MigrationStatus" => matches!(member, "migrated" | "from" | "steps"),
         _ => false,
@@ -4786,6 +4798,35 @@ pub(crate) fn struct_field_type(cx: &Cx, recv_ty: &Type, field: &str) -> Option<
             "migrated" => Some(Type::Bool),
             "from" => Some(Type::String),
             "steps" => Some(Type::List(Box::new(Type::String))),
+            _ => None,
+        };
+    }
+    if name == "GameScene" {
+        return match field {
+            "assets" => Some(Type::Named("GameAssets".to_string())),
+            "input" => Some(Type::Named("GameInputMap".to_string())),
+            "budgets" => Some(Type::Named("GameBudgetsSlot".to_string())),
+            _ => None,
+        };
+    }
+    if name == "GameFrame" {
+        return match field {
+            "index" => Some(Type::Int),
+            "input" => Some(Type::Named("GameInputSnapshot".to_string())),
+            _ => None,
+        };
+    }
+    if name == "DataGroup" && !cx.struct_fields.contains_key(name) {
+        return match field {
+            "key" => Some(Type::String),
+            "count" => Some(Type::Int),
+            "sum" | "mean" => Some(Type::Float),
+            _ => None,
+        };
+    }
+    if name == "DataStatus" && !cx.struct_fields.contains_key(name) {
+        return match field {
+            "step" | "path" | "replacement" => Some(Type::String),
             _ => None,
         };
     }
@@ -5236,6 +5277,43 @@ pub(crate) fn lower_method_call(
                     recv: Box::new(seed),
                     op: THandleOp::SolverNew,
                     args: vec![],
+                },
+            };
+        }
+        if let Some(static_type) = game_static_type(receiver, method, cx, &locals) {
+            let op = match (static_type, method) {
+                ("Scene", "new") => THandleOp::GameSceneNew,
+                ("Replay", "record") => THandleOp::GameReplayRecord,
+                ("Backend", "headless") => THandleOp::GameBackendHeadless,
+                ("Budgets", "new") => THandleOp::GameBudgetsNew,
+                _ => unreachable!("game_static_type admitted only stable game constructors"),
+            };
+            let ty = match static_type {
+                "Scene" => Type::Named("GameScene".to_string()),
+                "Replay" => Type::Named("GameReplay".to_string()),
+                "Backend" => Type::Named("GameBackend".to_string()),
+                "Budgets" => Type::Named("GameBudgets".to_string()),
+                _ => unit_type(),
+            };
+            let recv = if args.is_empty() {
+                TExpr {
+                    ty: unit_type(),
+                    kind: TExprKind::ConstInline("()".to_string()),
+                }
+            } else {
+                lower_expr(&args[0].expr, cx, env)
+            };
+            let rest = args
+                .iter()
+                .skip(1)
+                .map(|a| lower_expr(&a.expr, cx, env))
+                .collect();
+            return TExpr {
+                ty,
+                kind: TExprKind::HandleMethod {
+                    recv: Box::new(recv),
+                    op,
+                    args: rest,
                 },
             };
         }
@@ -6548,6 +6626,46 @@ pub(crate) fn lower_core_closure_call(
             let lam = lam_at(0)?;
             let closure = render_lambda_str(lam, cx, env);
             TCoreClosureKind::Guard { closure }
+        }
+        ("core.data", "group_count") => {
+            let rows = lower_expr(&args[0].expr, cx, env);
+            let row_ty = match &rows.ty {
+                Type::List(inner) => (**inner).clone(),
+                _ => Type::Int,
+            };
+            let rows_s = emit_tir_expr(&rows, cx);
+            let key = render_lambda_str_expecting(lam_at(1)?, cx, env, Some(&[row_ty]));
+            let code = format!(
+                "{}jet_data_group_count(&({}), {})",
+                cx.root_prefix, rows_s, key
+            );
+            return Some(TExpr {
+                ty: Type::List(Box::new(Type::Named("DataGroup".to_string()))),
+                kind: TExprKind::ConstInline(code),
+            });
+        }
+        ("core.data", "group_sum" | "group_mean") => {
+            let rows = lower_expr(&args[0].expr, cx, env);
+            let row_ty = match &rows.ty {
+                Type::List(inner) => (**inner).clone(),
+                _ => Type::Int,
+            };
+            let rows_s = emit_tir_expr(&rows, cx);
+            let key = render_lambda_str_expecting(lam_at(1)?, cx, env, Some(&[row_ty.clone()]));
+            let value = render_lambda_str_expecting(lam_at(2)?, cx, env, Some(&[row_ty]));
+            let helper = if method == "group_sum" {
+                "jet_data_group_sum"
+            } else {
+                "jet_data_group_mean"
+            };
+            let code = format!(
+                "{}{}(&({}), {}, {})",
+                cx.root_prefix, helper, rows_s, key, value
+            );
+            return Some(TExpr {
+                ty: Type::List(Box::new(Type::Named("DataGroup".to_string()))),
+                kind: TExprKind::ConstInline(code),
+            });
         }
         // D-REACT1=B: the `derived` closure's body type is the `Derived<T>` element.
         ("jet.reactive", "derived") => {

@@ -2,6 +2,7 @@
 #![deny(warnings)]
 // Re-export foundation so `crate::AST`, `crate::Syntax` etc. work in all Lexer source files.
 pub use jet_foundation::{
-    CanonicalAST, Collections, Diagnostics, Generics, Numeric, Syntax, Traits, AST, SHA256,
+    CanonicalAST, Collections, Diagnostics, Generics, Numeric, Syntax, TargetProfile, Traits, AST,
+    SHA256,
 };
 pub mod Lexer;

@@ -25,6 +25,21 @@ mod jet_std {
         pub is_dir: bool,
     }
 
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct DataGroup {
+        pub key: String,
+        pub count: i64,
+        pub sum: f64,
+        pub mean: f64,
+    }
+
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct DataStatus {
+        pub step: String,
+        pub path: String,
+        pub replacement: String,
+    }
+
     #[derive(Clone, Debug)]
     pub struct Stopwatch {
         pub start: std::time::Instant,
@@ -3350,6 +3365,278 @@ fn jet_raylib_color(r: i64, g: i64, b: i64, a: i64) -> RaylibColor {
     RaylibColor { r, g, b, a }
 }
 
+// -- core.game headless substrate (D-GAME1/2/3, D-WD10, D-GAME-*) -------------
+#[derive(Default, Debug)]
+struct GameState {
+    assets: Vec<(String, String)>,
+    bindings: Vec<(String, String)>,
+    budgets: Option<GameBudgets>,
+    components: Vec<String>,
+}
+
+#[derive(Clone)]
+struct GameAssets {
+    state: std::rc::Rc<std::cell::RefCell<GameState>>,
+}
+
+#[derive(Clone)]
+struct GameInputMap {
+    state: std::rc::Rc<std::cell::RefCell<GameState>>,
+}
+
+#[derive(Clone)]
+struct GameBudgetsSlot {
+    state: std::rc::Rc<std::cell::RefCell<GameState>>,
+}
+
+struct GameScene {
+    name: String,
+    assets: GameAssets,
+    user_assets: GameAssets,
+    input: GameInputMap,
+    user_input: GameInputMap,
+    budgets: GameBudgetsSlot,
+    user_budgets: GameBudgetsSlot,
+    callbacks: std::rc::Rc<std::cell::RefCell<Vec<Box<dyn FnMut(GameFrame)>>>>,
+}
+
+#[derive(Clone, Debug)]
+struct GameImage {
+    path: String,
+}
+
+#[derive(Clone, Debug)]
+struct GameSound {
+    path: String,
+}
+
+#[derive(Clone, Debug)]
+struct GameReplay {
+    path: String,
+}
+
+#[derive(Clone, Debug)]
+struct GameBackend {
+    renderer: String,
+    audio: String,
+    editor: String,
+}
+
+#[derive(Clone, Debug)]
+struct GameBudgets {
+    frame_ms: i64,
+    memory_mb: i64,
+    asset_kb: i64,
+    draw_calls: i64,
+}
+
+#[derive(Clone, Debug)]
+struct GameInputSnapshot {
+    pressed: Vec<String>,
+}
+
+#[derive(Clone, Debug)]
+struct GameFrame {
+    index: i64,
+    user_index: i64,
+    input: GameInputSnapshot,
+    user_input: GameInputSnapshot,
+}
+
+impl JetShow for GameScene {
+    fn jet_show(&self) -> String { format!("GameScene({})", self.name) }
+}
+impl JetShow for GameAssets {
+    fn jet_show(&self) -> String { "GameAssets".to_string() }
+}
+impl JetShow for GameInputMap {
+    fn jet_show(&self) -> String { "GameInputMap".to_string() }
+}
+impl JetShow for GameBudgetsSlot {
+    fn jet_show(&self) -> String { "GameBudgetsSlot".to_string() }
+}
+impl JetShow for GameImage {
+    fn jet_show(&self) -> String { format!("GameImage({})", self.path) }
+}
+impl JetDebug for GameImage {
+    fn jet_debug(&self) -> String { self.jet_show() }
+}
+impl JetShow for GameSound {
+    fn jet_show(&self) -> String { format!("GameSound({})", self.path) }
+}
+impl JetDebug for GameSound {
+    fn jet_debug(&self) -> String { self.jet_show() }
+}
+impl JetShow for GameReplay {
+    fn jet_show(&self) -> String { format!("GameReplay({})", self.path) }
+}
+impl JetShow for GameBackend {
+    fn jet_show(&self) -> String {
+        format!("GameBackend(renderer: {}, audio: {}, editor: {})", self.renderer, self.audio, self.editor)
+    }
+}
+impl JetShow for GameBudgets {
+    fn jet_show(&self) -> String {
+        format!(
+            "GameBudgets(frame_ms: {}, memory_mb: {}, asset_kb: {}, draw_calls: {})",
+            self.frame_ms, self.memory_mb, self.asset_kb, self.draw_calls
+        )
+    }
+}
+impl JetShow for GameInputSnapshot {
+    fn jet_show(&self) -> String { format!("GameInputSnapshot({})", self.pressed.join(",")) }
+}
+impl JetShow for GameFrame {
+    fn jet_show(&self) -> String { format!("GameFrame({})", self.index) }
+}
+
+fn jet_game_scene_new(name: &String) -> GameScene {
+    let state = std::rc::Rc::new(std::cell::RefCell::new(GameState::default()));
+    let assets = GameAssets { state: state.clone() };
+    let input = GameInputMap { state: state.clone() };
+    let budgets = GameBudgetsSlot { state };
+    GameScene {
+        name: name.clone(),
+        assets: assets.clone(),
+        user_assets: assets,
+        input: input.clone(),
+        user_input: input,
+        budgets: budgets.clone(),
+        user_budgets: budgets,
+        callbacks: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
+    }
+}
+
+fn jet_game_replay_record(path: &String) -> GameReplay {
+    GameReplay { path: path.clone() }
+}
+
+fn jet_game_backend_headless() -> GameBackend {
+    GameBackend {
+        renderer: "headless".to_string(),
+        audio: "none".to_string(),
+        editor: "none".to_string(),
+    }
+}
+
+fn jet_game_budgets_new(frame_ms: i64, memory_mb: i64, asset_kb: i64, draw_calls: i64) -> GameBudgets {
+    GameBudgets { frame_ms, memory_mb, asset_kb, draw_calls }
+}
+
+fn jet_game_scene_on_frame(scene: &mut GameScene, f: Box<dyn FnMut(GameFrame)>) {
+    scene.callbacks.borrow_mut().push(f);
+}
+
+fn jet_game_scene_component(scene: &mut GameScene, name: &String) {
+    let mut state = scene.assets.state.borrow_mut();
+    if !state.components.iter().any(|existing| existing == name) {
+        state.components.push(name.clone());
+    }
+}
+
+fn jet_game_scene_query(scene: &GameScene, names: &String) -> Vec<String> {
+    let state = scene.assets.state.borrow();
+    let wanted: Vec<&str> = names.split(',').filter(|s| !s.is_empty()).collect();
+    if wanted.iter().all(|name| state.components.iter().any(|c| c == name)) {
+        vec![wanted.join("+")]
+    } else {
+        Vec::new()
+    }
+}
+
+fn jet_game_assets_image(assets: &GameAssets, path: &String) -> Result<GameImage, String> {
+    if path.contains("missing") {
+        return Err(format!("asset not found: {}", path));
+    }
+    assets.state.borrow_mut().assets.push(("image".to_string(), path.clone()));
+    Ok(GameImage { path: path.clone() })
+}
+
+fn jet_game_assets_sound(assets: &GameAssets, path: &String) -> Result<GameSound, String> {
+    if path.contains("missing") {
+        return Err(format!("asset not found: {}", path));
+    }
+    assets.state.borrow_mut().assets.push(("sound".to_string(), path.clone()));
+    Ok(GameSound { path: path.clone() })
+}
+
+fn jet_game_input_bind(input: &GameInputMap, action: &String, key: &String) {
+    let mut state = input.state.borrow_mut();
+    if !state.bindings.iter().any(|(a, k)| a == action && k == key) {
+        state.bindings.push((action.clone(), key.clone()));
+    }
+}
+
+fn jet_game_budgets_set(slot: &GameBudgetsSlot, budgets: &GameBudgets) {
+    slot.state.borrow_mut().budgets = Some(budgets.clone());
+}
+
+fn jet_game_input_pressed(input: &GameInputSnapshot, action: &String) -> bool {
+    input.pressed.iter().any(|a| a == action)
+}
+
+fn jet_game_run(scene: &mut GameScene, replay: Option<&GameReplay>, backend: Option<&GameBackend>) -> String {
+    let backend = backend.cloned().unwrap_or_else(jet_game_backend_headless);
+    let replay_path = replay.map(|r| r.path.clone()).unwrap_or_else(|| "<none>".to_string());
+    let mut out = Vec::new();
+    out.push(format!("scene:{}", scene.name));
+    out.push(format!("backend:{}/{}/{}", backend.renderer, backend.audio, backend.editor));
+    out.push(format!("replay:{}", replay_path));
+    {
+        let state = scene.assets.state.borrow();
+        let assets = state
+            .assets
+            .iter()
+            .map(|(kind, path)| format!("{}:{}", kind, path))
+            .collect::<Vec<_>>()
+            .join(",");
+        out.push(format!("assets:{}", if assets.is_empty() { "none".to_string() } else { assets }));
+        let bindings = state
+            .bindings
+            .iter()
+            .map(|(action, key)| format!("{}={}", action, key))
+            .collect::<Vec<_>>()
+            .join(",");
+        out.push(format!("input:{}", if bindings.is_empty() { "none".to_string() } else { bindings }));
+        let components = state.components.join(",");
+        out.push(format!("components:{}", if components.is_empty() { "none".to_string() } else { components }));
+        if let Some(b) = &state.budgets {
+            out.push(format!(
+                "budgets:frame={}ms,memory={}mb,assets={}kb,draws={}",
+                b.frame_ms, b.memory_mb, b.asset_kb, b.draw_calls
+            ));
+        } else {
+            out.push("budgets:none".to_string());
+        }
+    }
+    for frame_idx in 0..3 {
+        let pressed = if frame_idx == 1 {
+            scene
+                .assets
+                .state
+                .borrow()
+                .bindings
+                .iter()
+                .map(|(action, _)| action.clone())
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        let frame = GameFrame {
+            index: frame_idx,
+            user_index: frame_idx,
+            input: GameInputSnapshot { pressed: pressed.clone() },
+            user_input: GameInputSnapshot { pressed: pressed.clone() },
+        };
+        for cb in scene.callbacks.borrow_mut().iter_mut() {
+            cb(frame.clone());
+        }
+        let input = if pressed.is_empty() { "none".to_string() } else { pressed.join("+") };
+        out.push(format!("frame:{} input:{}", frame_idx, input));
+    }
+    out.join("\n")
+}
+
 // ── Typed Path API (D-PATHFS1) ────────────────────────────────────────────────
 #[derive(Clone, Debug)]
 struct JetPath {
@@ -4309,6 +4596,145 @@ fn jet_enc_csv_decode<T: user_Decode>(text: &String) -> Result<Vec<T>, jet_std::
         out.push(T::jet_decode_traced(&tree).map(|(v, _)| v).map_err(|e| jet_std::DecodeError::under(&format!("row {}", i + 1), e))?);
     }
     Ok(out)
+}
+
+fn jet_data_count<T>(rows: &Vec<T>) -> i64 {
+    rows.len() as i64
+}
+
+fn jet_data_sum(values: &Vec<f64>) -> f64 {
+    values.iter().copied().sum()
+}
+
+fn jet_data_mean(values: &Vec<f64>) -> f64 {
+    if values.is_empty() { 0.0 } else { jet_data_sum(values) / values.len() as f64 }
+}
+
+fn jet_data_min(values: &Vec<f64>) -> f64 {
+    values.iter().copied().reduce(f64::min).unwrap_or(0.0)
+}
+
+fn jet_data_max(values: &Vec<f64>) -> f64 {
+    values.iter().copied().reduce(f64::max).unwrap_or(0.0)
+}
+
+fn jet_data_group_count<T, F>(rows: &Vec<T>, key: F) -> Vec<jet_std::DataGroup>
+where
+    T: Clone,
+    F: Fn(T) -> String,
+{
+    let mut groups: std::collections::BTreeMap<String, (i64, f64)> = std::collections::BTreeMap::new();
+    for row in rows.iter().cloned() {
+        let k = key(row);
+        let entry = groups.entry(k).or_insert((0, 0.0));
+        entry.0 += 1;
+    }
+    groups
+        .into_iter()
+        .map(|(key, (count, sum))| jet_std::DataGroup { key, count, sum, mean: 0.0 })
+        .collect()
+}
+
+fn jet_data_group_sum<T, FK, FV>(rows: &Vec<T>, key: FK, value: FV) -> Vec<jet_std::DataGroup>
+where
+    T: Clone,
+    FK: Fn(T) -> String,
+    FV: Fn(T) -> f64,
+{
+    let mut groups: std::collections::BTreeMap<String, (i64, f64)> = std::collections::BTreeMap::new();
+    for row in rows.iter().cloned() {
+        let k = key(row.clone());
+        let v = value(row);
+        let entry = groups.entry(k).or_insert((0, 0.0));
+        entry.0 += 1;
+        entry.1 += v;
+    }
+    groups
+        .into_iter()
+        .map(|(key, (count, sum))| jet_std::DataGroup {
+            key,
+            count,
+            sum,
+            mean: if count == 0 { 0.0 } else { sum / count as f64 },
+        })
+        .collect()
+}
+
+fn jet_data_group_mean<T, FK, FV>(rows: &Vec<T>, key: FK, value: FV) -> Vec<jet_std::DataGroup>
+where
+    T: Clone,
+    FK: Fn(T) -> String,
+    FV: Fn(T) -> f64,
+{
+    jet_data_group_sum(rows, key, value)
+}
+
+fn jet_data_status() -> Vec<jet_std::DataStatus> {
+    vec![
+        jet_std::DataStatus {
+            step: "core.data.csv".to_string(),
+            path: "native".to_string(),
+            replacement: "native".to_string(),
+        },
+        jet_std::DataStatus {
+            step: "core.data.stats".to_string(),
+            path: "native".to_string(),
+            replacement: "native".to_string(),
+        },
+        jet_std::DataStatus {
+            step: "py.* / r.* / gpu.*".to_string(),
+            path: "bridge-ready".to_string(),
+            replacement: "report via data.status() and jet dossier data".to_string(),
+        },
+    ]
+}
+
+fn jet_data_bar_text(groups: &Vec<jet_std::DataGroup>) -> String {
+    let mut lines = Vec::new();
+    for g in groups {
+        let n = if g.count < 0 { 0 } else { g.count.min(40) } as usize;
+        lines.push(format!("{} | {} {}", g.key, "#".repeat(n), g.count));
+    }
+    lines.join("\n")
+}
+
+fn jet_data_bar_svg(groups: &Vec<jet_std::DataGroup>) -> String {
+    let width = 320.0f64;
+    let row_h = 24.0f64;
+    let height = 24.0 + row_h * groups.len() as f64;
+    let max = groups.iter().map(|g| g.count).max().unwrap_or(1).max(1) as f64;
+    let mut out = format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"320\" height=\"{}\" viewBox=\"0 0 320 {}\">",
+        height as i64,
+        height as i64
+    );
+    out.push_str("<rect width=\"320\" height=\"100%\" fill=\"white\"/>");
+    for (i, g) in groups.iter().enumerate() {
+        let y = 18.0 + i as f64 * row_h;
+        let bar_w = ((g.count as f64 / max) * (width - 120.0)).round();
+        out.push_str(&format!(
+            "<text x=\"8\" y=\"{}\" font-family=\"monospace\" font-size=\"12\">{}</text>",
+            y as i64,
+            jet_data_svg_escape(&g.key)
+        ));
+        out.push_str(&format!(
+            "<rect x=\"96\" y=\"{}\" width=\"{}\" height=\"14\" fill=\"#2f6f73\"/>",
+            (y - 12.0) as i64,
+            bar_w as i64
+        ));
+        out.push_str(&format!(
+            "<text x=\"{}\" y=\"{}\" font-family=\"monospace\" font-size=\"12\">{}</text>",
+            (104.0 + bar_w) as i64,
+            y as i64,
+            g.count
+        ));
+    }
+    out.push_str("</svg>");
+    out
+}
+
+fn jet_data_svg_escape(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
 }
 
 // D-MIGRATE3=A: traced sibling of `jet_enc_csv_decode` — see json's for the shape.

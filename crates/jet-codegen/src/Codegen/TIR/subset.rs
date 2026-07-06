@@ -2927,6 +2927,14 @@ pub(crate) fn method_call_in_subset(
     if solve_new_type(receiver, method, cx, locals).is_some() {
         return args.len() == 1 && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
     }
+    if let Some(static_type) = game_static_type(receiver, method, cx, locals) {
+        let want = match (static_type, method) {
+            ("Backend", "headless") => 0,
+            ("Budgets", "new") => 4,
+            _ => 1,
+        };
+        return args.len() == want && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
+    }
     // D-OPTGC1: `gc.Gc.new<T>(value)` traced-handle constructor.
     if recv_type.as_deref() == Some(Syntax::GC_TYPE) && method == Syntax::GC_NEW {
         return args.len() == 1 && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
@@ -4114,6 +4122,23 @@ fn core_call_args_in_subset(
             label_ok && expr_in_subset(&a.expr, cx, locals)
         });
     }
+    if module == "core.game" && method == "run" {
+        return args.iter().enumerate().all(|(idx, a)| {
+            let label_ok = match idx {
+                0 => a.label.is_none(),
+                1 => matches!(
+                    a.label.as_ref().map(|(label, _)| label.as_str()),
+                    None | Some("replay") | Some("backend")
+                ),
+                2 => matches!(
+                    a.label.as_ref().map(|(label, _)| label.as_str()),
+                    None | Some("backend")
+                ),
+                _ => false,
+            };
+            label_ok && expr_in_subset(&a.expr, cx, locals)
+        });
+    }
     args.iter()
         .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals))
 }
@@ -4149,6 +4174,21 @@ pub(crate) fn core_closure_call_in_subset(
                 && lambda_arg(1)
         }
         ("core.scope", "guard") => args.len() == 1 && no_labels && lambda_arg(0),
+        // D-DATA-SURFACE1=A: typed table selectors. Rows arg is in subset; selector
+        // args must be literal lambdas so lowering can seed row param types.
+        ("core.data", "group_count") => {
+            args.len() == 2
+                && no_labels
+                && expr_in_subset(&args[0].expr, cx, locals)
+                && lambda_arg(1)
+        }
+        ("core.data", "group_sum" | "group_mean") => {
+            args.len() == 3
+                && no_labels
+                && expr_in_subset(&args[0].expr, cx, locals)
+                && lambda_arg(1)
+                && lambda_arg(2)
+        }
         // D-REACT1=B / D-SIGNAL1: `reactive.derived/computed/effect(<lambda>)` —
         // 1 arg, a literal zero-param in-subset lambda (rendered by `render_lambda_str`).
         ("jet.reactive", "derived" | "computed" | "effect") => {
@@ -4228,6 +4268,30 @@ pub(crate) fn solve_new_type<'a>(
     (solver_type == Syntax::SOLVER_TYPE).then_some(solver_type.as_str())
 }
 
+pub(crate) fn game_static_type<'a>(
+    receiver: &'a Expr,
+    method: &str,
+    cx: &Cx,
+    locals: &HashSet<String>,
+) -> Option<&'a str> {
+    let Expr::Field(inner, static_type, _) = receiver else {
+        return None;
+    };
+    let Expr::Ident(alias, _) = &**inner else {
+        return None;
+    };
+    if locals.contains(alias) || cx.core_imports.get(alias).map(String::as_str) != Some("core.game")
+    {
+        return None;
+    }
+    match (static_type.as_str(), method) {
+        ("Scene", "new") | ("Replay", "record") | ("Backend", "headless") | ("Budgets", "new") => {
+            Some(static_type.as_str())
+        }
+        _ => None,
+    }
+}
+
 /// c109 Phase 25: is `router.get(path, handler)` (and `.post`/`.put`/`.delete`) inside
 /// the subset? Reproduces `emit_router_handler` (Source/Codegen/Expression.rs): the
 /// handler (arg 1) must be either a BARE TOP-LEVEL FN name (an `Ident` not in locals —
@@ -4282,6 +4346,14 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("Solver", "require", 1) => THandleOp::SolverRequire,
         ("Solver", "failure_count", 0) => THandleOp::SolverFailureCount,
         ("Solver", "status", 0) => THandleOp::SolverStatus,
+        ("GameScene", "on_frame", 1) => THandleOp::GameSceneOnFrame,
+        ("GameScene", "component", 1) => THandleOp::GameSceneComponent,
+        ("GameScene", "query", 1) => THandleOp::GameSceneQuery,
+        ("GameAssets", "image", 1) => THandleOp::GameAssetsImage,
+        ("GameAssets", "sound", 1) => THandleOp::GameAssetsSound,
+        ("GameInputMap", "bind", 2) => THandleOp::GameInputBind,
+        ("GameBudgetsSlot", "set", 1) => THandleOp::GameBudgetsSet,
+        ("GameInputSnapshot", "pressed", 1) => THandleOp::GameInputPressed,
         ("Duration", "millis", 0) => THandleOp::DurationMillis,
         ("BigInt", "add" | "sub" | "mul", 1) => THandleOp::PreciseMethod {
             type_name: "BigInt".to_string(),
@@ -4475,6 +4547,22 @@ pub(crate) fn handle_method_return_ty(handle: &str, method: &str, nargs: usize) 
             } else {
                 None
             }
+        })
+        .or_else(|| match (handle, method, nargs) {
+            ("GameAssets", "image", 1) => Some(Some(Type::Result {
+                ok: Box::new(Type::Named("GameImage".to_string())),
+                err: Box::new(Type::String),
+            })),
+            ("GameAssets", "sound", 1) => Some(Some(Type::Result {
+                ok: Box::new(Type::Named("GameSound".to_string())),
+                err: Box::new(Type::String),
+            })),
+            ("GameScene", "query", 1) => Some(Some(Type::List(Box::new(Type::String)))),
+            ("GameInputSnapshot", "pressed", 1) => Some(Some(Type::Bool)),
+            ("GameScene", "on_frame" | "component", 1)
+            | ("GameInputMap", "bind", 2)
+            | ("GameBudgetsSlot", "set", 1) => Some(None),
+            _ => None,
         });
     match ret {
         Some(Some(t)) => t,

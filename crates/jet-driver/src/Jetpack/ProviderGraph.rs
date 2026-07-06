@@ -3,6 +3,7 @@
 //! External provider prefixes and trust-root config remain owner-gated. This
 //! module models provider metadata/fetch/lock/sandbox/signature/audit facts.
 
+pub use super::Replacement::ReplacementCandidate as ReplacementOverlay;
 use super::JSON::{self, Json};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -87,13 +88,6 @@ pub struct MetadataFacts {
     pub trust_roots: Vec<String>,
     pub todos: Vec<String>,
     pub replacement_candidates: Vec<ReplacementOverlay>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ReplacementOverlay {
-    pub foreign_name: String,
-    pub native_name: String,
-    pub compatibility_proof: Option<String>,
 }
 
 impl MetadataFacts {

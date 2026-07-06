@@ -51,6 +51,33 @@ Combine with a cross target:
 jet build --freestanding --target=aarch64-unknown-linux-gnu 61_freestanding.jet
 ```
 
+## Typed target profile facts
+
+Card #239 / D-TARGET-* adds the internal profile model used by the next
+embedded slices. Hosted builds keep hidden defaults. A no-OS profile carries
+these typed facts before codegen:
+
+- target triple plus `no-os`
+- named memory regions: origin, size in bytes/KiB/MiB, kind (`flash`, `ram`,
+  `mmio`, `reserved`), access (`r`, `rw`, `rx`, `rwx`)
+- linker provenance: generated from profile facts, or a file path with a
+  `sha256:` hash
+- allocator policy: none, fixed region/size, or hosted default
+- panic policy: abort, report sink, or hosted default
+- audit requirements for build artifact plus dossier lens
+
+Validation is data-first in this slice. It reports missing flash/RAM,
+overlapping or overflowing memory, RAM budget overflow, heap use with no
+allocator, hosted Core APIs on a no-OS profile, MMIO outside declared regions,
+MMIO without an unsafe audit gate, missing panic policy, and missing linker
+provenance. Turning those data errors into new user diagnostics remains gated
+on exact diagnostic decisions.
+
+The profile audit JSON is stable and contains memory layout, linker source,
+allocator, panic behavior, unavailable Core APIs, and MMIO unsafe reasons. The
+ratified user-facing shape is a `jet dossier target` lens plus a build artifact;
+CLI/package wiring lands in the later surface slice.
+
 ## Running under QEMU (D-CROSS3 local harness)
 
 After a cross-build, run the binary under QEMU user-mode emulation without
@@ -89,5 +116,6 @@ Adds a `cross` section to the doctor report:
 - No board-support package or HAL library (use the low-level tier directly).
 - Only one target is proven in CI (aarch64-linux per D-CROSS1).
 - WASM is deferred to post-epoch (no browser runtime in v1).
-- E3303 (missing global allocator in freestanding) is registered but not yet
-  emitted automatically; configure an allocator manually with `core.mem`.
+- E3303 (missing global allocator in freestanding) is registered. The typed
+  profile model now catches the same fact as data; CLI/profile wiring will
+  promote it through the user diagnostic path once that surface slice lands.

@@ -200,6 +200,9 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         "Closed" => Some("Closed"),
         // D-LSDIR1=A: fs.list_dir returns [DirEntry].
         "DirEntry" => Some("DirEntry"),
+        // D-DATA-SURFACE1=A / D-DATA-STATUS1=A: core.data summary/status values.
+        "DataGroup" => Some("DataGroup"),
+        "DataStatus" => Some("DataStatus"),
         // D-SERDE2: the format-agnostic value tree + typed-decode error live in jet_std.
         "DataTree" => Some("DataTree"),
         "DecodeError" => Some("DecodeError"),
@@ -276,6 +279,23 @@ pub(crate) fn raylib_handle_rust_type(name: &str) -> Option<&'static str> {
     match name {
         "RaylibWindow" => Some("RaylibWindow"),
         "RaylibColor" => Some("RaylibColor"),
+        _ => None,
+    }
+}
+
+pub(crate) fn game_handle_rust_type(name: &str) -> Option<&'static str> {
+    match name {
+        "GameScene" => Some("GameScene"),
+        "GameAssets" => Some("GameAssets"),
+        "GameInputMap" => Some("GameInputMap"),
+        "GameBudgetsSlot" => Some("GameBudgetsSlot"),
+        "GameBudgets" => Some("GameBudgets"),
+        "GameBackend" => Some("GameBackend"),
+        "GameReplay" => Some("GameReplay"),
+        "GameImage" => Some("GameImage"),
+        "GameSound" => Some("GameSound"),
+        "GameFrame" => Some("GameFrame"),
+        "GameInputSnapshot" => Some("GameInputSnapshot"),
         _ => None,
     }
 }
@@ -545,6 +565,13 @@ impl Cx {
                     "{}{}",
                     self.root_prefix,
                     raylib_handle_rust_type(name).unwrap()
+                )
+            }
+            Type::Named(name) if game_handle_rust_type(name).is_some() => {
+                format!(
+                    "{}{}",
+                    self.root_prefix,
+                    game_handle_rust_type(name).unwrap()
                 )
             }
             // E2-M10: networking opaque types are top-level in the prelude.

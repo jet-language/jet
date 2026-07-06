@@ -38,6 +38,7 @@ pub use jet_driver::{
     PhaseTiming,
     Sema,
     Syntax,
+    TargetProfile,
     Traits,
     AST,
     CFFI,

@@ -38,8 +38,12 @@ The profile declaration surface, board module shape, memory-unit spelling, linke
 
 ## Dependency order
 
-1. Ratify exact profile declaration and selection surface.
-2. Add internal profile model and validation.
+1. Ratify exact profile declaration and selection surface. Done 2026-07-06:
+   D-TARGET-SURFACE1/MEMORY1/LINKER1/ALLOC1/AUDIT1 = A.
+2. Add internal profile model and validation. Done in the ungated slice:
+   `jet_foundation::TargetProfile` carries triples, no-OS, memory regions,
+   linker provenance, allocator/panic policy, MMIO gates, Core availability,
+   RAM budgets, and stable audit JSON as data.
 3. Wire profile facts into sema availability checks.
 4. Add memory/linker/allocator/panic diagnostics.
 5. Add volatile/MMIO audit gate integration.

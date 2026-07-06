@@ -3,7 +3,7 @@
 // Re-export lower seams. Sema transitively includes Parser/Lexer/Comptime/Foundation.
 pub use jet_sema::{
     CanonicalAST, Collections, Comptime, Diagnostics, Formatter, Generics, Lexer, Parser, Sema,
-    Syntax, Traits, AST, SHA256,
+    Syntax, TargetProfile, Traits, AST, SHA256,
 };
 pub mod Codegen;
 /// D-ASYNCRT1=A: M:N scheduler substrate for jet-jit host shims.

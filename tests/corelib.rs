@@ -123,6 +123,80 @@ fn run() {
 }
 
 #[test]
+fn core_data_import_and_codegen_resolve() {
+    let out = compile_temp(
+        "core_data_import.jet",
+        r#"
+use core.data as data
+
+@Codable
+struct Ticket {
+    team: String
+    minutes: Float
+}
+
+fn run() {
+    rows :: data.csv<Ticket>("team,minutes\nCore,4.0") ?? panic("bad csv")
+    print(data.count(rows))
+}
+"#,
+    );
+    assert!(out.rust.contains("jet_enc_csv_decode"));
+    assert!(out.rust.contains("jet_data_count"));
+}
+
+#[test]
+fn core_data_typed_csv_group_stats_status_and_plot() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc {
+        eprintln!("note: skipping core.data runtime test (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_corelib_data_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "data_core",
+        r#"
+use core.data as data
+
+@Codable
+struct Ticket {
+    team: String
+    minutes: Float
+}
+
+fn run() {
+    raw :: "team,minutes\nCore,4.0\nTools,5.0\nCore,8.0\nTools,7.0"
+    rows :: data.csv<Ticket>(raw) ?? panic("bad csv")
+    print(data.count(rows))
+    groups :: data.group_mean(rows, (t) => t.team, (t) => t.minutes)
+    loop g in groups {
+        print("{g.key}:{g.count}:{g.sum}:{g.mean}")
+    }
+    values :: [2.0, 4.0, 6.0]
+    print(data.sum(values))
+    print(data.mean(values))
+    counts :: data.group_count(rows, (t) => t.team)
+    print(data.bar_text(counts))
+    print(data.bar_svg(counts).len())
+    status :: data.status()
+    print("{status[0].step}:{status[0].path}")
+}
+"#,
+        &[],
+        None,
+    );
+    assert_eq!(code, 0, "core.data program failed: {stderr}");
+    assert_eq!(
+        stdout,
+        "4\nCore:2:12.0:6.0\nTools:2:12.0:6.0\n12.0\n4.0\nCore | ## 2\nTools | ## 2\n531\ncore.data.csv:native\n"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn io_input_reads_a_line_from_stdin() {
     let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
     if !have_rustc {
@@ -1513,4 +1587,48 @@ fn run() {
         !diags.is_empty(),
         "expected a diagnostic for instance constructor"
     );
+}
+
+#[test]
+fn game_headless_scene_replay_transcript_is_deterministic() {
+    let dir = std::env::temp_dir().join(format!("jet_corelib_game_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "game_headless",
+        r#"
+use core.game as game
+
+struct Position { x: Int }
+struct Velocity { dx: Int }
+
+fn run() {
+    scene := game.Scene.new("arcade")
+    scene.assets.image("assets/player.png") ?? panic("image")
+    scene.assets.sound("assets/jump.wav") ?? panic("sound")
+    scene.input.bind("jump", "Space")
+    scene.budgets.set(game.Budgets.new(16, 96, 256, 4))
+    scene.component<Position>()
+    scene.component<Velocity>()
+    print("query {scene.query<Position, Velocity>().len()}")
+    scene.on_frame((frame) => {
+        if frame.input.pressed("jump") {
+            print("hook jump {frame.index}")
+        }
+    })
+    replay :: game.Replay.record("runs/demo.jreplay")
+    print(game.run(scene, replay: replay))
+}
+"#,
+        &[],
+        None,
+    );
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert_eq!(
+        stdout,
+        "query 1\nhook jump 1\nscene:arcade\nbackend:headless/none/none\nreplay:runs/demo.jreplay\nassets:image:assets/player.png,sound:assets/jump.wav\ninput:jump=Space\ncomponents:Position,Velocity\nbudgets:frame=16ms,memory=96mb,assets=256kb,draws=4\nframe:0 input:none\nframe:1 input:jump\nframe:2 input:none\n"
+    );
+    assert_eq!(stderr, "");
+    let _ = fs::remove_dir_all(&dir);
 }

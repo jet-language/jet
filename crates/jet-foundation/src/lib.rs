@@ -11,5 +11,6 @@ pub mod OsTarget;
 pub mod RingLayer;
 pub mod SHA256;
 pub mod Syntax;
+pub mod TargetProfile;
 pub mod Traits;
 pub mod WebPartition;

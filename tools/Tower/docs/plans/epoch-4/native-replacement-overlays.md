@@ -1,6 +1,7 @@
 # Compatibility-proved native replacement overlays
 
-**Card:** Tower #242. **Epoch 4.** **Scope:** planning slice for `D-WD15`.
+**Card:** Tower #242. **Epoch 4.** **Scope:** implementation slice for
+`D-WD15`, `D-JPK-REPLACEPOLICY1`, and `D-JPK-REPLACEPROOF1`.
 
 ## Goal
 
@@ -106,12 +107,13 @@ Exit: importer fixture emits progress facts and explain output tracks them.
 - Build/test/golden infrastructure for both foreign bridge and native package
   behavior.
 
-## Ballots Needed
+## Ratified Decisions
 
-- `D-JPK-REPLACEPOLICY1` — Canonical user policy surface for allowing,
-  denying, or preferring native replacements. `D-WD15` ratifies the proof bar,
-  not the user-typeable policy field or command.
-- `D-JPK-REPLACEPROOF1` — Canonical way a package publishes compatibility proof
-  metadata if that metadata becomes user-authored source rather than generated
-  lock/index facts.
-
+- `D-JPK-REPLACEPOLICY1 (=A)` — native replacements are controlled by
+  `policy.replacements`; compatibility proof is mandatory, and policy only
+  chooses allow/deny/prefer.
+- `D-JPK-REPLACEPROOF1 (=A)` — native replacement packages publish
+  `replacementProof:` metadata naming the foreign package, public surface,
+  effects, errors, examples, and goldens proved.
+- `D-WD15 (=B)` — replacement overlays are allowed only after compatibility is
+  proved across public types, effects, errors, examples, and golden fixtures.

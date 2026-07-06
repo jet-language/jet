@@ -10,11 +10,15 @@ The first user story is a single-file analysis: read CSV into a typed row, group
 
 - D-WD9 ratifies the product direction: typed Core data floor plus accelerator bridges.
 - D-CORENS1 requires first-party libraries under `core.*`.
+- D-DATA-SURFACE1 ratifies the `core.data` facade for tables, series, stats, CSV, and plots.
+- D-DATA-BRIDGE1 ratifies direct bridge roots (`py.*`, `r.*`, `gpu.*`) instead of nesting bridge providers under `core.data`.
+- D-DATA-STATUS1 ratifies machine-readable status through the Core API plus the future `jet dossier data` human lens.
+- D-DATA-PLOT1 ratifies deterministic SVG plus text plotting output.
 - D-DEP1 allows crate-backed capability only as Jet packages wrapping pinned sources through `extern rust`, with a native-ize obligation.
 - I2 and I3 require Jet front-end diagnostics and sema-owned checking; bridge failures must not leak host-language tracebacks as primary user errors.
 - I5 requires examples plus expected output for every shipped feature.
 
-Exact public module names, bridge provider prefixes, accelerator status UI, and plotting backend policy are not yet fully ratified.
+Exact public module names, bridge provider prefixes, accelerator status UI, and plotting backend policy are ratified for the first slice.
 
 ## Vertical slices
 
@@ -43,12 +47,12 @@ Exact public module names, bridge provider prefixes, accelerator status UI, and 
 5. Add plotting data model and one deterministic backend.
 6. Add accelerator bridges and native replacement status.
 
-## Owner ballots needed
+## Ratified owner ballots
 
-- D-DATA-SURFACE1: exact `core.*` module names and beginner API shape for tables, series, stats, and plots.
-- D-DATA-BRIDGE1: accelerator provider spellings and import policy for Python, R, and GPU bridges.
-- D-DATA-STATUS1: user-facing surface for native replacement status, including whether it is an API, report, dossier lens, or command.
-- D-DATA-PLOT1: plotting backend policy and output formats for deterministic tests.
+- D-DATA-SURFACE1=A: one `core.data` facade.
+- D-DATA-BRIDGE1=A: direct provider roots.
+- D-DATA-STATUS1=A: Core status API plus `jet dossier data`.
+- D-DATA-PLOT1=A: deterministic SVG plus text fallback.
 
 ## Adversarial tradeoffs
 

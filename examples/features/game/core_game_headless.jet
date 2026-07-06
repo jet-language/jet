@@ -1,0 +1,31 @@
+use core.game as game
+
+struct Position {
+    x: Int
+}
+
+struct Velocity {
+    dx: Int
+}
+
+fn run() {
+    scene := game.Scene.new("arcade")
+    image :: scene.assets.image("assets/player.png") ?? panic("image")
+    sound :: scene.assets.sound("assets/jump.wav") ?? panic("sound")
+    scene.input.bind("jump", "Space")
+    scene.budgets.set(game.Budgets.new(16, 96, 256, 4))
+    scene.component<Position>()
+    scene.component<Velocity>()
+    hits :: scene.query<Position, Velocity>()
+    print("query {hits.len()}")
+    scene.on_frame((frame) => {
+        if frame.input.pressed("jump") {
+            print("hook jump {frame.index}")
+        }
+    })
+    replay :: game.Replay.record("runs/demo.jreplay")
+    transcript :: game.run(scene, replay: replay)
+    print(transcript)
+    print("{image@Debug}")
+    print("{sound@Debug}")
+}

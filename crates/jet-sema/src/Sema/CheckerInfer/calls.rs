@@ -8,10 +8,35 @@ use crate::Diagnostics::{Diagnostic, Span};
 use crate::Generics::{e0901, e0904};
 use crate::Sema::CheckerOwnership::{e0142_aliased, e0143_drop_unaudited};
 use crate::Syntax;
-use crate::AST::{AccessConvention, BinOp, Call, EnumLitArg, Expr, Lambda, LambdaBody, Stmt, Type};
+use crate::AST::{
+    AccessConvention, BinOp, Call, EnumLitArg, Expr, Lambda, LambdaBody, Stmt, StrPart, Type,
+};
 use std::collections::{HashMap, HashSet};
 
 impl<'a> Checker<'a> {
+    fn synthesized_string_arg(value: String, span: Span) -> crate::AST::CallArg {
+        crate::AST::CallArg {
+            convention: AccessConvention::Read,
+            expr: Expr::Str(vec![StrPart::Lit(value)], span),
+            span,
+            flags: crate::AST::CallArgFlags {
+                implicit_clone: false,
+                shared_auto_clone: false,
+                is_trailing_block: false,
+            },
+            label: None,
+            spread: false,
+        }
+    }
+
+    fn type_arg_name(t: &Type) -> String {
+        match t {
+            Type::Named(n) => n.clone(),
+            Type::Apply { name, args } if args.is_empty() => name.clone(),
+            _ => t.show(),
+        }
+    }
+
     pub(crate) fn infer_call_value(
         &mut self,
         callee: &mut Box<Expr>,
@@ -1117,6 +1142,73 @@ impl<'a> Checker<'a> {
                         *recv_type_out = Some(Syntax::SOLVER_TYPE.to_string());
                         return Some(Type::Named(Syntax::SOLVER_TYPE.to_string()));
                     }
+                    if ns == "core.game" {
+                        match (leaf.as_str(), method) {
+                            ("Scene", "new") => {
+                                if args.len() != 1 {
+                                    self.diags.push(wrong_core_arity(
+                                        "Scene.new",
+                                        1,
+                                        args.len(),
+                                        span,
+                                    ));
+                                }
+                                if let Some(arg) = args.get_mut(0) {
+                                    self.expect_core_arg("Scene.new", 0, &Type::String, arg);
+                                }
+                                *recv_type_out = Some("GameSceneType".to_string());
+                                return Some(Type::Named("GameScene".to_string()));
+                            }
+                            ("Replay", "record") => {
+                                if args.len() != 1 {
+                                    self.diags.push(wrong_core_arity(
+                                        "Replay.record",
+                                        1,
+                                        args.len(),
+                                        span,
+                                    ));
+                                }
+                                if let Some(arg) = args.get_mut(0) {
+                                    self.expect_core_arg("Replay.record", 0, &Type::String, arg);
+                                }
+                                *recv_type_out = Some("GameReplayType".to_string());
+                                return Some(Type::Named("GameReplay".to_string()));
+                            }
+                            ("Backend", "headless") => {
+                                if !args.is_empty() {
+                                    self.diags.push(wrong_core_arity(
+                                        "Backend.headless",
+                                        0,
+                                        args.len(),
+                                        span,
+                                    ));
+                                    for a in args.iter_mut() {
+                                        self.infer(&mut a.expr);
+                                    }
+                                }
+                                *recv_type_out = Some("GameBackendType".to_string());
+                                return Some(Type::Named("GameBackend".to_string()));
+                            }
+                            ("Budgets", "new") => {
+                                if args.len() != 4 {
+                                    self.diags.push(wrong_core_arity(
+                                        "Budgets.new",
+                                        4,
+                                        args.len(),
+                                        span,
+                                    ));
+                                }
+                                for i in 0..4 {
+                                    if let Some(arg) = args.get_mut(i) {
+                                        self.expect_core_arg("Budgets.new", i, &Type::Int, arg);
+                                    }
+                                }
+                                *recv_type_out = Some("GameBudgetsType".to_string());
+                                return Some(Type::Named("GameBudgets".to_string()));
+                            }
+                            _ => {}
+                        }
+                    }
                     let submodule = format!("{}.{}", ns, leaf);
                     if crate::Syntax::is_known_core_module(&submodule) {
                         let ret = self.infer_core_call(
@@ -1719,6 +1811,146 @@ impl<'a> Checker<'a> {
                     *recv_type_out = Some(handle_ty.clone());
                     return ret;
                 }
+            }
+        }
+        if let Type::Named(handle_ty) = &recv_ty {
+            let needs_edit = |checker: &mut Checker<'a>, api: &str| {
+                if let Some(root) = expr_root_ident(receiver) {
+                    if let Some(info) = checker.lookup(root) {
+                        if !info.mutable {
+                            checker.diags.push(Diagnostic::error(
+                                "E0202",
+                                format!("`{api}` needs edit access to `{root}`"),
+                                "game scene setup changes durable scene state".to_string(),
+                                format!("declare `{root} := game.Scene.new(...)` before calling `{api}`"),
+                                Some(receiver.span()),
+                            ));
+                        }
+                    }
+                }
+            };
+            match (handle_ty.as_str(), method) {
+                ("GameScene", "on_frame") => {
+                    needs_edit(self, "on_frame");
+                    if args.len() != 1 {
+                        self.diags
+                            .push(wrong_core_arity("on_frame", 1, args.len(), span));
+                        for a in args.iter_mut() {
+                            self.infer(&mut a.expr);
+                        }
+                    } else {
+                        let expected_fn = Type::Fn {
+                            params: vec![Type::Named("GameFrame".to_string())],
+                            ret: None,
+                            effect_bound: None,
+                        };
+                        let saved_esc = self.lambda_escapes;
+                        let saved_exp = self.expected_type.clone();
+                        self.lambda_escapes = true;
+                        self.expected_type = Some(expected_fn);
+                        self.infer(&mut args[0].expr);
+                        self.expected_type = saved_exp;
+                        self.lambda_escapes = saved_esc;
+                    }
+                    *recv_type_out = Some(handle_ty.clone());
+                    return None;
+                }
+                ("GameScene", "component") => {
+                    needs_edit(self, "component");
+                    if args.is_empty() && type_args.len() == 1 {
+                        args.push(Self::synthesized_string_arg(
+                            Self::type_arg_name(&type_args[0]),
+                            span,
+                        ));
+                    }
+                    if args.len() != 1 {
+                        self.diags
+                            .push(wrong_core_arity("component", 1, args.len(), span));
+                    }
+                    if let Some(arg) = args.get_mut(0) {
+                        self.expect_core_arg("component", 0, &Type::String, arg);
+                    }
+                    *recv_type_out = Some(handle_ty.clone());
+                    return None;
+                }
+                ("GameScene", "query") => {
+                    if args.is_empty() && !type_args.is_empty() {
+                        let names = type_args
+                            .iter()
+                            .map(Self::type_arg_name)
+                            .collect::<Vec<_>>()
+                            .join(",");
+                        args.push(Self::synthesized_string_arg(names, span));
+                    }
+                    if args.len() != 1 {
+                        self.diags
+                            .push(wrong_core_arity("query", 1, args.len(), span));
+                    }
+                    if let Some(arg) = args.get_mut(0) {
+                        self.expect_core_arg("query", 0, &Type::String, arg);
+                    }
+                    *recv_type_out = Some(handle_ty.clone());
+                    return Some(Type::List(Box::new(Type::String)));
+                }
+                ("GameAssets", "image" | "sound") => {
+                    if args.len() != 1 {
+                        self.diags
+                            .push(wrong_core_arity(method, 1, args.len(), span));
+                    }
+                    if let Some(arg) = args.get_mut(0) {
+                        self.expect_core_arg(method, 0, &Type::String, arg);
+                    }
+                    *recv_type_out = Some(handle_ty.clone());
+                    let ok = if method == "image" {
+                        "GameImage"
+                    } else {
+                        "GameSound"
+                    };
+                    return Some(result_ty(Type::Named(ok.to_string()), Type::String));
+                }
+                ("GameInputMap", "bind") => {
+                    needs_edit(self, "input.bind");
+                    if args.len() != 2 {
+                        self.diags
+                            .push(wrong_core_arity("bind", 2, args.len(), span));
+                    }
+                    for i in 0..2 {
+                        if let Some(arg) = args.get_mut(i) {
+                            self.expect_core_arg("bind", i, &Type::String, arg);
+                        }
+                    }
+                    *recv_type_out = Some(handle_ty.clone());
+                    return None;
+                }
+                ("GameBudgetsSlot", "set") => {
+                    needs_edit(self, "budgets.set");
+                    if args.len() != 1 {
+                        self.diags
+                            .push(wrong_core_arity("set", 1, args.len(), span));
+                    }
+                    if let Some(arg) = args.get_mut(0) {
+                        self.expect_core_arg(
+                            "set",
+                            0,
+                            &Type::Named("GameBudgets".to_string()),
+                            arg,
+                        );
+                    }
+                    *recv_type_out = Some(handle_ty.clone());
+                    return None;
+                }
+                ("GameInputSnapshot", "pressed") => {
+                    if args.len() != 1 {
+                        self.diags
+                            .push(wrong_core_arity("pressed", 1, args.len(), span));
+                    }
+                    if let Some(arg) = args.get_mut(0) {
+                        self.expect_core_arg("pressed", 0, &Type::String, arg);
+                    }
+                    *recv_type_out = Some(handle_ty.clone());
+                    return Some(Type::Bool);
+                }
+                _ => {}
             }
         }
         // E2-M7: method calls on streaming file handles (D-IO2).

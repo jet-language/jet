@@ -248,6 +248,12 @@ impl<'a> Checker<'a> {
             ("core.gc", "Gc") => Some(Type::Named(Syntax::GC_TYPE.to_string())),
             // D-SOLVER-LIB1=A: `solve.Solver.new(seed)` constructs explicit solver state.
             ("core.solve", "Solver") => Some(Type::Named(Syntax::SOLVER_TYPE.to_string())),
+            // D-GAME1/2/3 + D-WD10: static sentinels for `game.Scene.new`,
+            // `game.Replay.record`, `game.Backend.headless`, and `game.Budgets.new`.
+            ("core.game", "Scene") => Some(Type::Named("GameSceneType".to_string())),
+            ("core.game", "Replay") => Some(Type::Named("GameReplayType".to_string())),
+            ("core.game", "Backend") => Some(Type::Named("GameBackendType".to_string())),
+            ("core.game", "Budgets") => Some(Type::Named("GameBudgetsType".to_string())),
             // D-FIDELITY-API1=A: `core.perf.Perf` static API sentinel.
             ("core.perf", "Perf") => Some(Type::Named("Perf".to_string())),
             _ => {
@@ -488,6 +494,39 @@ impl<'a> Checker<'a> {
         }
         let sig = core_fixed_sig(module, name);
         match (module, name) {
+            ("core.game", "run") => {
+                if !(1..=3).contains(&args.len()) {
+                    self.diags
+                        .push(wrong_core_arity("run", 1, args.len(), span));
+                }
+                if let Some(scene) = args.get_mut(0) {
+                    if let Expr::Ident(root, root_span) = &scene.expr {
+                        if let Some(info) = self.lookup(root) {
+                            if !info.mutable {
+                                self.diags.push(Diagnostic::error(
+                                    "E0202",
+                                    format!("`game.run` needs edit access to `{root}`"),
+                                    "running a scene advances its frame hooks and deterministic replay state".to_string(),
+                                    format!("declare `{root} := game.Scene.new(...)` before running it"),
+                                    Some(*root_span),
+                                ));
+                            }
+                        }
+                    }
+                    self.expect_core_arg("run", 0, &Type::Named("GameScene".to_string()), scene);
+                }
+                if let Some(arg) = args.get_mut(1) {
+                    let want = match arg.label.as_ref().map(|(l, _)| l.as_str()) {
+                        Some("backend") => Type::Named("GameBackend".to_string()),
+                        _ => Type::Named("GameReplay".to_string()),
+                    };
+                    self.expect_core_arg("run", 1, &want, arg);
+                }
+                if let Some(arg) = args.get_mut(2) {
+                    self.expect_core_arg("run", 2, &Type::Named("GameBackend".to_string()), arg);
+                }
+                return Some(Type::String);
+            }
             // D-ENC1 / D-SERDE6: typed encode/decode over the Encode/Decode model.
             // `to_string`/`to_string_pretty` accept any encodable value (the dynamic
             // `Json` / `[[String]]` / `Map` forms AND a `@[Codable]` value); the
@@ -557,6 +596,85 @@ impl<'a> Checker<'a> {
                     args: vec![inner],
                 };
                 return Some(result_ty(decode_result, decode_error_ty()));
+            }
+            // D-DATA-SURFACE1=A: the beginner facade reuses typed CSV decoding,
+            // then keeps table/stat selectors as ordinary typed Jet lambdas.
+            ("core.data", "csv") if !type_args.is_empty() => {
+                if args.len() != 1 {
+                    self.diags.push(wrong_core_arity(name, 1, args.len(), span));
+                }
+                for a in args.iter_mut() {
+                    self.expect_core_arg(name, 0, &Type::String, a);
+                }
+                let t = type_args[0].clone();
+                self.check_decodable(&t, span);
+                return Some(result_ty(Type::List(Box::new(t)), decode_error_ty()));
+            }
+            ("core.data", "count") => {
+                if args.len() != 1 {
+                    self.diags.push(wrong_core_arity(name, 1, args.len(), span));
+                }
+                let Some(arg) = args.get_mut(0) else {
+                    return Some(Type::Int);
+                };
+                let ty = self.infer(&mut arg.expr)?;
+                if !matches!(ty, Type::List(_)) {
+                    self.diags.push(Diagnostic::error(
+                        "E0112",
+                        format!(
+                            "`data.count` needs a typed table or series, not {}",
+                            ty.show()
+                        ),
+                        "core.data counts rows from a list-backed table or series".to_string(),
+                        "pass a `[T]` value, such as `data.csv<Row>(text)?`".to_string(),
+                        Some(arg.expr.span()),
+                    ));
+                }
+                return Some(Type::Int);
+            }
+            ("core.data", "group_count" | "group_sum" | "group_mean") => {
+                let want = if name == "group_count" { 2 } else { 3 };
+                if args.len() != want {
+                    self.diags
+                        .push(wrong_core_arity(name, want, args.len(), span));
+                }
+                let Some(rows_arg) = args.get_mut(0) else {
+                    return Some(Type::List(Box::new(Type::Named("DataGroup".to_string()))));
+                };
+                let rows_ty = self.infer(&mut rows_arg.expr);
+                let row_ty = match rows_ty {
+                    Some(Type::List(inner)) => *inner,
+                    Some(other) => {
+                        self.diags.push(Diagnostic::error(
+                            "E0112",
+                            format!("`data.{}` needs a typed table, not {}", name, other.show()),
+                            "core.data groups rows from a list-backed typed table".to_string(),
+                            "pass a `[Row]` value, such as `data.csv<Row>(text)?`".to_string(),
+                            Some(rows_arg.expr.span()),
+                        ));
+                        Type::Int
+                    }
+                    None => Type::Int,
+                };
+                if let Some(key_arg) = args.get_mut(1) {
+                    let key_fn = Type::Fn {
+                        params: vec![row_ty.clone()],
+                        ret: Some(Box::new(Type::String)),
+                        effect_bound: None,
+                    };
+                    self.expect_core_arg(name, 1, &key_fn, key_arg);
+                }
+                if name != "group_count" {
+                    if let Some(value_arg) = args.get_mut(2) {
+                        let value_fn = Type::Fn {
+                            params: vec![row_ty],
+                            ret: Some(Box::new(Type::Float)),
+                            effect_bound: None,
+                        };
+                        self.expect_core_arg(name, 2, &value_fn, value_arg);
+                    }
+                }
+                return Some(Type::List(Box::new(Type::Named("DataGroup".to_string()))));
             }
             ("core.mem", "volatile_read") => {
                 if !self.in_unsafe {
@@ -2282,12 +2400,18 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // D-DET1: deterministic injected capability handles.
         // D-DET-CAPAPI: `Duration` value type for the widened clock surface.
         | "Clock" | "Rng" | "Duration"
+        | "GameScene" | "GameAssets" | "GameInputMap" | "GameBudgetsSlot" | "GameBudgets"
+        | "GameBackend" | "GameReplay" | "GameImage" | "GameSound" | "GameFrame"
+        | "GameInputSnapshot" | "GameSceneType" | "GameReplayType" | "GameBackendType"
+        | "GameBudgetsType"
         // D-BIGINT1 / D-DECIMAL1: arbitrary-precision numerics.
         | "BigInt" | "Decimal"
         | "FileReader" | "FileWriter" | "FileLines"
         | "StdinHandle" | "StdinLines"
         // D-LSDIR1=A: directory entry value.
         | "DirEntry"
+        // D-DATA-SURFACE1=A / D-DATA-STATUS1=A: data summary/status values.
+        | "DataGroup" | "DataStatus"
         // E2-M10: networking opaque types.
         | "TcpListener" | "TcpStream" | "HttpRequest" | "HttpResponse" | "HttpRouter"
         // D-ALLOC1/D-ALLOC-C (ratified 2026-06-19): allocator opaque types.
@@ -2378,6 +2502,20 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
             _ => None,
         };
     }
+    if type_name == "DataGroup" {
+        return match field {
+            "key" => Some(Type::String),
+            "count" => Some(Type::Int),
+            "sum" | "mean" => Some(Type::Float),
+            _ => None,
+        };
+    }
+    if type_name == "DataStatus" {
+        return match field {
+            "step" | "path" | "replacement" => Some(Type::String),
+            _ => None,
+        };
+    }
     match (type_name, field) {
         // D-LSDIR1=A: DirEntry has name (bare filename), path (full path), is_dir.
         ("DirEntry", "name" | "path") => Some(Type::String),
@@ -2405,6 +2543,12 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
             key: Box::new(Type::String),
             value: Box::new(Type::String),
         }),
+        // D-GAME-*: scene-owned headless game substrate fields.
+        ("GameScene", "assets") => Some(Type::Named("GameAssets".to_string())),
+        ("GameScene", "input") => Some(Type::Named("GameInputMap".to_string())),
+        ("GameScene", "budgets") => Some(Type::Named("GameBudgetsSlot".to_string())),
+        ("GameFrame", "index") => Some(Type::Int),
+        ("GameFrame", "input") => Some(Type::Named("GameInputSnapshot".to_string())),
         _ => None,
     }
 }
@@ -3593,6 +3737,7 @@ pub fn is_polymorphic_core_special(module: &str, name: &str) -> bool {
             // `T` read off the call-site turbofish — not in `core_fixed_sig`, so codegen
             // reads the whole tuple type from resolved_ret (I3).
             | ("core.tasks", "channel")
+            | ("core.data", "csv" | "count" | "group_count" | "group_sum" | "group_mean")
     )
 }
 
@@ -3719,6 +3864,10 @@ pub fn core_fixed_sig(
             vec![(read, Type::Int)],
             Some(Type::Named(crate::Syntax::DURATION_TYPE.to_string())),
         )),
+        ("core.game", "run") => Some((
+            vec![(read, Type::Named("GameScene".to_string()))],
+            Some(Type::String),
+        )),
         // D-ENC1 + D-JSONVERB1: unified encoding. `parse` → dynamic JSON value; `decode`
         // → lenient typed decode (D-JSON3); `to_string`/`to_string_pretty` → serialize.
         ("core.encoding.json", "parse") => Some((
@@ -3744,6 +3893,24 @@ pub fn core_fixed_sig(
             vec![(
                 read,
                 Type::List(Box::new(Type::List(Box::new(Type::String)))),
+            )],
+            Some(Type::String),
+        )),
+        // D-DATA-SURFACE1=A / D-DATA-PLOT1=A / D-DATA-STATUS1=A: core.data
+        // facade fixed-shape calls. Generic typed table calls are handled in
+        // infer_core_call so selectors stay typed by sema.
+        ("core.data", "sum" | "mean" | "min" | "max") => Some((
+            vec![(read, Type::List(Box::new(Type::Float)))],
+            Some(Type::Float),
+        )),
+        ("core.data", "status") => Some((
+            vec![],
+            Some(Type::List(Box::new(Type::Named("DataStatus".to_string())))),
+        )),
+        ("core.data", "bar_text" | "bar_svg") => Some((
+            vec![(
+                read,
+                Type::List(Box::new(Type::Named("DataGroup".to_string()))),
             )],
             Some(Type::String),
         )),
@@ -4490,6 +4657,21 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         "core.mem.alloc" => &["Arena", "Bump", "Pool", "Fixed"],
         "core.gc" => &["Gc", "collect"],
         "core.solve" => &["Solver"],
+        "core.game" => &["Scene", "Replay", "Backend", "Budgets", "run"],
+        "core.data" => &[
+            "csv",
+            "count",
+            "sum",
+            "mean",
+            "min",
+            "max",
+            "group_count",
+            "group_sum",
+            "group_mean",
+            "status",
+            "bar_text",
+            "bar_svg",
+        ],
         "core.tasks" => &["spawn", "channel"],
         // D-FILES-WRITE1 (merge, was `core.fs` + `core.files`): one module for
         // both whole-file convenience helpers and streaming handle constructors.

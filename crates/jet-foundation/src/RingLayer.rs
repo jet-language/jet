@@ -73,6 +73,7 @@ fn layer_of_normalized(module: &str) -> RuntimeLayer {
         | "core.text.unicode"
         | "core.args"
         | "core.reflect"
+        | "core.game"
         | "core.async.loadable"
         | "core.solve"
         | "core.time.expiring"

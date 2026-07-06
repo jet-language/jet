@@ -34,6 +34,7 @@ pub mod Provider;
 pub mod ProviderGraph;
 pub mod Recipe;
 pub mod RefSpec;
+pub mod Replacement;
 pub mod RuntimePolicy;
 pub mod ScriptDeps;
 pub mod ScriptLock;

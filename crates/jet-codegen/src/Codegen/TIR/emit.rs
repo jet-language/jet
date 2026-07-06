@@ -2187,6 +2187,43 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     format!("{}jet_solver_failure_count(&({}))", root, recv)
                 }
                 THandleOp::SolverStatus => format!("{}jet_solver_status(&({}))", root, recv),
+                THandleOp::GameSceneNew => format!("{}jet_game_scene_new(&({}))", root, recv),
+                THandleOp::GameReplayRecord => {
+                    format!("{}jet_game_replay_record(&({}))", root, recv)
+                }
+                THandleOp::GameBackendHeadless => format!("{}jet_game_backend_headless()", root),
+                THandleOp::GameBudgetsNew => format!(
+                    "{}jet_game_budgets_new({}, {}, {}, {})",
+                    root,
+                    recv,
+                    a(0),
+                    a(1),
+                    a(2)
+                ),
+                THandleOp::GameSceneOnFrame => {
+                    format!("{}jet_game_scene_on_frame(&mut ({}), {})", root, recv, a(0))
+                }
+                THandleOp::GameSceneComponent => {
+                    format!("{}jet_game_scene_component(&mut ({}), &({}))", root, recv, a(0))
+                }
+                THandleOp::GameSceneQuery => {
+                    format!("{}jet_game_scene_query(&({}), &({}))", root, recv, a(0))
+                }
+                THandleOp::GameAssetsImage => {
+                    format!("{}jet_game_assets_image(&({}), &({}))", root, recv, a(0))
+                }
+                THandleOp::GameAssetsSound => {
+                    format!("{}jet_game_assets_sound(&({}), &({}))", root, recv, a(0))
+                }
+                THandleOp::GameInputBind => {
+                    format!("{}jet_game_input_bind(&({}), &({}), &({}))", root, recv, a(0), a(1))
+                }
+                THandleOp::GameBudgetsSet => {
+                    format!("{}jet_game_budgets_set(&({}), &({}))", root, recv, a(0))
+                }
+                THandleOp::GameInputPressed => {
+                    format!("{}jet_game_input_pressed(&({}), &({}))", root, recv, a(0))
+                }
                 THandleOp::DurationMillis => {
                     format!("{}jet_duration_millis(&({}))", root, recv)
                 }
@@ -3157,6 +3194,34 @@ pub(crate) fn emit_tir_core_call(
         // D-DET-CAPAPI: `Duration` constructors — pure value, ms/secs → ms span.
         ("core.time", "ms") => format!("{}({})", helper("jet_std_duration_ms"), arg(0)),
         ("core.time", "secs") => format!("{}({})", helper("jet_std_duration_secs"), arg(0)),
+        ("core.game", "run") => {
+            let replay = if args.len() >= 2
+                && matches!(args[1].ty, Type::Named(ref n) if n == "GameReplay")
+            {
+                format!("Some(&({}))", arg(1))
+            } else {
+                "None".to_string()
+            };
+            let backend_idx = if args.len() >= 2
+                && matches!(args[1].ty, Type::Named(ref n) if n == "GameBackend")
+            {
+                Some(1)
+            } else if args.len() >= 3 {
+                Some(2)
+            } else {
+                None
+            };
+            let backend = backend_idx
+                .map(|i| format!("Some(&({}))", arg(i)))
+                .unwrap_or_else(|| "None".to_string());
+            format!(
+                "{root}jet_game_run(&mut ({scene}), {replay}, {backend})",
+                root = cx.root_prefix,
+                scene = arg(0),
+                replay = replay,
+                backend = backend
+            )
+        }
         // D-ENC1 + D-JSONVERB1 + D-SERDE6: unified `core.encoding.*`. The dynamic forms
         // (`Json` tree / `[[String]]` / `Map`) keep their existing helpers; the typed
         // forms route through the Encode/Decode model, distinguished by the lowered arg
@@ -3227,6 +3292,42 @@ pub(crate) fn emit_tir_core_call(
                 format!("{}(&({}))", helper("jet_enc_csv_to_string"), arg(0))
             }
         }
+        ("core.data", "csv") => {
+            format!(
+                "{}::<{}>(&({}))",
+                helper("jet_enc_csv_decode"),
+                enc_target_rust(ret_ty, cx),
+                arg(0)
+            )
+        }
+        ("core.data", "count") => format!("{}(&({}))", helper("jet_data_count"), arg(0)),
+        ("core.data", "group_count") => format!(
+            "{}(&({}), {})",
+            helper("jet_data_group_count"),
+            arg(0),
+            arg(1)
+        ),
+        ("core.data", "group_sum") => format!(
+            "{}(&({}), {}, {})",
+            helper("jet_data_group_sum"),
+            arg(0),
+            arg(1),
+            arg(2)
+        ),
+        ("core.data", "group_mean") => format!(
+            "{}(&({}), {}, {})",
+            helper("jet_data_group_mean"),
+            arg(0),
+            arg(1),
+            arg(2)
+        ),
+        ("core.data", "sum") => format!("{}(&({}))", helper("jet_data_sum"), arg(0)),
+        ("core.data", "mean") => format!("{}(&({}))", helper("jet_data_mean"), arg(0)),
+        ("core.data", "min") => format!("{}(&({}))", helper("jet_data_min"), arg(0)),
+        ("core.data", "max") => format!("{}(&({}))", helper("jet_data_max"), arg(0)),
+        ("core.data", "status") => format!("{}()", helper("jet_data_status")),
+        ("core.data", "bar_text") => format!("{}(&({}))", helper("jet_data_bar_text"), arg(0)),
+        ("core.data", "bar_svg") => format!("{}(&({}))", helper("jet_data_bar_svg"), arg(0)),
         ("core.encoding.toml", "parse") => {
             format!("{}(&({}))", helper("jet_std_toml_parse"), arg(0))
         }

@@ -592,6 +592,56 @@ object records the checks you choose to make visible.
 
 ---
 
+### `core.game` — headless game substrate
+
+`core.game` is the scene-first substrate. The current slice is deliberately
+headless: no renderer, audio, editor, asset file I/O, or native backend is
+required to type-check and run a deterministic game transcript.
+
+```jet
+use core.game as game
+
+struct Position { x: Int }
+struct Velocity { dx: Int }
+
+fn run() {
+    scene := game.Scene.new("arcade")
+    scene.assets.image("assets/player.png") ?? panic("image")
+    scene.input.bind("jump", "Space")
+    scene.budgets.set(game.Budgets.new(16, 96, 256, 4))
+    scene.component<Position>()
+    scene.component<Velocity>()
+    scene.on_frame((frame) => {
+        if frame.input.pressed("jump") {
+            print("jump {frame.index}")
+        }
+    })
+    replay :: game.Replay.record("runs/demo.jreplay")
+    print(game.run(scene, replay: replay))
+}
+```
+
+| Surface | Returns | What it does |
+|---------|---------|--------------|
+| `game.Scene.new(name)` | `GameScene` | Create one scene identity with assets, input, budgets, components, and frame hooks |
+| `scene.assets.image(path)` / `.sound(path)` | `GameImage ? String` / `GameSound ? String` | Register a typed scene asset handle; paths containing `missing` fail deterministically |
+| `scene.input.bind(action, key)` | nothing | Bind an action name to a device key name |
+| `scene.on_frame((frame) => { ... })` | nothing | Attach frame logic to the scene |
+| `frame.input.pressed(action)` | `Bool` | Read the deterministic per-frame input snapshot |
+| `scene.component<T>()` | nothing | Register a struct-marker component type on the scene |
+| `scene.query<T...>()` | `[String]` | Query registered component markers as a deterministic scene view |
+| `game.Budgets.new(frame_ms, memory_mb, asset_kb, draw_calls)` | `GameBudgets` | Build a scene budget value |
+| `scene.budgets.set(budgets)` | nothing | Attach budgets to the scene transcript |
+| `game.Replay.record(path)` | `GameReplay` | Name a `.jreplay` artifact for transcript recording |
+| `game.Backend.headless()` | `GameBackend` | Explicit no-renderer/no-audio/no-editor backend value |
+| `game.run(scene, replay: replay)` | `String` | Run three deterministic headless frames and return a transcript |
+
+Renderer, audio, editor, and native asset backends are replaceable packages on
+top of this surface. Gameplay code keeps the same scene/data/replay API when a
+backend package is introduced.
+
+---
+
 ### `core.perf` — fidelity signal
 
 `core.perf.Perf` is one runtime-global quality/performance signal. Runtime does
@@ -765,6 +815,44 @@ Jet has no general `Any` top type (D-DYNAMIC-TYPE1): use the precise shape for
 the job — an enum for a closed set of variants, generics or traits for
 abstraction, `T?` for absence, and `Data` for parsed dynamic input. Writing
 `Any` in type position is **E0350**.
+
+### `core.data` — typed tables, series, status, plots
+
+D-DATA-SURFACE1 makes `core.data` the beginner facade for typed tables,
+series, stats, CSV, and plots. The first slice is in-memory and deterministic:
+`data.csv<T>(text)` decodes CSV into `[T]` using the same `@[Codable]` model as
+`core.encoding.csv.decode<T>`. Selectors are typed lambdas, so a misspelled row
+field is a Jet field error before codegen.
+
+| Function | Returns | What it does |
+|----------|---------|--------------|
+| `csv<T>(text)` | `[T] ? DecodeError` | Header-mapped typed CSV rows |
+| `count(rows)` | `Int` | Count table rows or series values |
+| `sum(values)` / `mean(values)` / `min(values)` / `max(values)` | `Float` | Numeric series stats over `[Float]` |
+| `group_count(rows, row => row.key)` | `[DataGroup]` | Count rows by a `String` key |
+| `group_sum(rows, row => row.key, row => row.value)` | `[DataGroup]` | Sum a `Float` selector per key |
+| `group_mean(rows, row => row.key, row => row.value)` | `[DataGroup]` | Mean a `Float` selector per key |
+| `status()` | `[DataStatus]` | Native/bridge replacement facts for data workflows |
+| `bar_text(groups)` / `bar_svg(groups)` | `String` | Deterministic text/SVG bar output |
+
+`DataGroup` fields: `.key: String`, `.count: Int`, `.sum: Float`, `.mean:
+Float`. `DataStatus` fields: `.step`, `.path`, `.replacement`.
+
+```jet
+use core.data as data
+
+@[Codable]
+struct Ticket {
+    team: String
+    minutes: Float
+}
+
+fn run() {
+    rows :: data.csv<Ticket>("team,minutes\nCore,4.0\nCore,8.0\nTools,5.0") ?? panic("bad csv")
+    groups :: data.group_mean(rows, t => t.team, t => t.minutes)
+    print(data.bar_text(groups))
+}
+```
 
 #### Typed (de)serialization — one derive, every format (D-SERDE1–8)
 
@@ -1326,7 +1414,7 @@ These shipped in Epoch 2:
 | `core.reactive` | Signals, derived values, effects (opt-in reactivity, D-REACT1) |
 | `core.archive` | gzip compress/decompress, zip read/write, tar add/get/list (D-DEP-ARCHIVE1) |
 | `core.raylib` | Graphics bridge skeleton: typed window/draw/color calls for display-gated examples (D-RAYLIB1); native raylib link follows |
-| `core.game` | Flagship game engine, scene-first with a frame hook (`Scene` + `scene.on_frame`) per D-GAME1/2/3; not implemented yet |
+| `core.game` | Headless deterministic game substrate: `Scene`, assets, input, frame hooks, replay transcript, budgets, ECS marker/query floor (D-GAME1/2/3, D-WD10, D-GAME-*) |
 | `core.compress.gzip` | standalone gzip compress/decompress, no archive container (D-CODECS1) |
 | `core.compress.zstd` | standalone zstd compress/decompress, no archive container (D-CODECS1) |
 | `core.db` | SQLite — parameterized `DbConnection.query`/`.query_one`/`.execute`/`.begin`/`.commit`/`.rollback`/`.close` via rusqlite bundled (D-DBDRIVER1) |

@@ -15,7 +15,7 @@ This builds on D-GAME1 through D-GAME3: the beginner surface is scene-first with
 - D-RAYLIB1 keeps `core.raylib` as the interim bridge below the native-shaped stack.
 - R12 requires AOT and `jet dev` parity for executable TIR semantics; game examples must not become native-only blind spots.
 
-Exact APIs for assets, ECS queries, input bindings, replay files, budget attachment, editor hooks, and backend selection still need owner decisions before implementation.
+Owner decisions D-GAME-ASSET1, D-GAME-ECS1, D-GAME-INPUT1, D-GAME-REPLAY1, D-GAME-BACKEND1, and D-GAME-BUDGET1 are ratified. The first implemented slice is the headless deterministic substrate: scene-owned assets, struct-marker components, input snapshots, replay transcript, explicit headless backend, and scene budgets. Editor hooks and native renderer/audio/editor packages remain later layers over the same scene identity.
 
 ## Vertical slices
 
@@ -39,23 +39,24 @@ Exact APIs for assets, ECS queries, input bindings, replay files, budget attachm
 
 ## Dependency order
 
-1. Ratify exact substrate APIs that are user-facing.
-2. Finish native `core.raylib` bridge or keep a no-op backend as the test floor while the game API type-checks.
-3. Land scene skeleton and frame hook.
-4. Add fixed-step timing and input snapshots.
-5. Add assets and typed handles.
-6. Add replay and dev/AOT transcript parity.
-7. Add ECS over the same scene identity.
-8. Add editor hooks, replaceable backends, and budgets.
+1. Landed: ratify exact substrate APIs that are user-facing.
+2. Landed: keep a no-op/headless backend as the test floor while the game API type-checks.
+3. Landed: scene skeleton and frame hook.
+4. Landed: fixed-step timing and input snapshots.
+5. Landed: assets and typed handles.
+6. Landed: replay transcript floor.
+7. Landed: ECS marker/query floor over the same scene identity.
+8. Landed: explicit headless backend and scene budgets in the transcript.
+9. Next: editor hooks, native replay artifact read/write, replaceable renderer/audio/editor packages, and richer budget diagnostics.
 
-## Owner ballots needed
+## Ratified owner decisions
 
-- D-GAME-ASSET1: asset declaration/loading surface and typed handle policy.
-- D-GAME-ECS1: ECS/component/query public API and how it layers over `Scene`.
-- D-GAME-INPUT1: input binding names, devices, and snapshot API.
-- D-GAME-REPLAY1: replay file/API surface and determinism contract.
-- D-GAME-BACKEND1: renderer/audio/editor backend selection surface.
-- D-GAME-BUDGET1: budget attachment surface and diagnostic policy.
+- D-GAME-ASSET1=A: scene asset registry with typed handles.
+- D-GAME-ECS1=B: struct marker components.
+- D-GAME-INPUT1=A with typed-action direction: scene bindings plus frame snapshot, compatible with future typed action enums.
+- D-GAME-REPLAY1=A: `game.Replay` API plus `.jreplay` artifact contract.
+- D-GAME-BACKEND1=A: typed `game.Backend` value, default headless path.
+- D-GAME-BUDGET1=A with runtime watcher direction: scene/package budgets as one fact model plus runtime visibility.
 
 ## Adversarial tradeoffs
 

@@ -1216,6 +1216,18 @@ The frame hook is not a second engine model; it is script on the scene. The
 already-ratified `core.raylib` bridge package (D-RAYLIB1=A) remains the
 interim compatibility floor beneath the native-shaped stack.
 
+**D-GAME-ASSET1 / D-GAME-ECS1 / D-GAME-INPUT1 / D-GAME-REPLAY1 /
+D-GAME-BACKEND1 / D-GAME-BUDGET1 — Stable `core.game` substrate** *(ratified
+2026-07-06, card #238)*: the Epoch 3 headless Core floor ships scene-owned
+asset registries (`scene.assets.image`, `scene.assets.sound`), struct-marker
+components (`scene.component<T>()`) plus typed queries (`scene.query<T...>()`),
+scene input bindings with per-frame snapshots (`scene.input.bind`,
+`frame.input.pressed`), `game.Replay.record(".jreplay")`, an explicit
+`game.Backend.headless()` default, and scene budgets via `scene.budgets.set`.
+`game.run(scene, replay: replay)` produces a deterministic transcript without
+renderer/audio/editor dependencies. Renderer, audio, editor, native asset I/O,
+and richer replay files remain replaceable-package layers over this substrate.
+
 **D-FILES-WRITE1 — `core.fs`/`core.files` merge** *(ratified/shipped
 2026-07-04, cv5syntaxdecrees)*: one `core.files` module for both whole-file
 convenience helpers (`read`/`read_bytes`/`write`/`append_all`/`exists`/
@@ -1651,12 +1663,41 @@ implementation.
 - **D-WD9**: Core gets a typed data floor (tables, series, stats, plotting
   basics) while Python/R/GPU bridges cover gaps and expose native replacement
   status.
+  - **D-DATA-SURFACE1 (=A, ratified 2026-07-06, #237)**: tables, series,
+    stats, CSV, and plot builders live behind one beginner import,
+    `core.data`; expert modules may sit below it with the same operation names.
+  - **D-DATA-BRIDGE1 (=A, ratified 2026-07-06, #237)**: accepted bridge
+    providers use direct roots such as `py.*`, `r.*`, and `gpu.*`; data APIs
+    accept typed bridge results and report status instead of nesting providers
+    under `core.data`.
+  - **D-DATA-STATUS1 (=A, ratified 2026-07-06, #237)**: data workflows expose
+    machine-readable Core status through an API, and the canonical human view
+    is the D-WD dossier lens `jet dossier data`.
+  - **D-DATA-PLOT1 (=A, ratified 2026-07-06, #237)**: Core plotting starts with
+    first-party deterministic SVG plus a text backend; bitmap export may layer
+    on the same model later.
 - **D-WD10**: `core.game` is a stable game substrate: assets, ECS, input,
   fixed-step timing, deterministic replay, editor hooks, and budgets; renderer,
   audio, and editor backends remain replaceable packages.
 - **D-WD11**: embedded/freestanding work uses typed target profiles that expose
   memory, linker, allocator, panic, volatile/MMIO, and audit controls only when
   such targets are selected.
+  - **D-TARGET-SURFACE1 (=A, ratified 2026-07-06)**: embedded/freestanding
+    profiles are typed Jet profile modules selected through `targets:`; hosted
+    single-file programs never mention them.
+  - **D-TARGET-MEMORY1 (=A, ratified 2026-07-06)**: memory uses named regions
+    with origin, size, access, and kind; sizes use typed units, addresses stay
+    numeric, and validation catches overflow/overlap/MMIO mistakes before
+    codegen.
+  - **D-TARGET-LINKER1 (=A, ratified 2026-07-06)**: Jet generates linker input
+    from typed profile facts by default; expert file overrides require explicit
+    hashed provenance and appear in audit output.
+  - **D-TARGET-ALLOC1 (=A, ratified 2026-07-06)**: freestanding `allocator` and
+    `panic` are required typed profile facts; hosted defaults stay hidden, and
+    sema reads these facts to reject unavailable Core APIs.
+  - **D-TARGET-AUDIT1 (=A, ratified 2026-07-06)**: `jet dossier target` is the
+    canonical human/machine audit view, and builds also write the same stable
+    JSON artifact for CI archives.
 - **D-WD12**: `jet prove` becomes a progressive proof/replay product over
   contracts, refinements, effects, budgets, property tests, and replay facts;
   solvers are opt-in lenses with Jet diagnostics.

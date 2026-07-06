@@ -202,6 +202,42 @@ fn semantic_record_with_hash(
     record
 }
 
+fn replacement_identity(
+    provider: &str,
+    name: &str,
+    version: &str,
+) -> jet::Jetpack::Replacement::PackageIdentity {
+    jet::Jetpack::Replacement::PackageIdentity::new(provider, name, version)
+}
+
+fn replacement_surface(
+    provider: &str,
+    name: &str,
+    version: &str,
+) -> jet::Jetpack::Replacement::CompatibilitySurface {
+    use jet::Jetpack::Replacement::{
+        CompatibilitySurface, GoldenFixture, PackageIdentity, PublicSymbol,
+    };
+    let mut surface = CompatibilitySurface::new(PackageIdentity::new(provider, name, version));
+    surface.public_symbols = vec![
+        PublicSymbol::new("pad_left", "fn(String, Int) -> String")
+            .with_effects(&["pure"])
+            .with_errors(&["ValueError"]),
+        PublicSymbol::new("trim", "fn(String) -> String").with_effects(&["pure"]),
+    ];
+    surface.examples = vec!["examples/replacement/pad.jet".to_string()];
+    surface.goldens = vec![GoldenFixture::new("pad_left_basic", "  hi\n")];
+    surface.platforms = vec!["x86_64-linux".to_string()];
+    surface
+}
+
+fn replacement_passed_candidate() -> jet::Jetpack::Replacement::ReplacementCandidate {
+    let foreign = replacement_surface("npm", "left-pad", "1.0.0");
+    let native = replacement_surface("core", "core.text.pad", "1.0.0");
+    let report = jet::Jetpack::Replacement::run_proof(&foreign, &native, "x86_64-linux");
+    report.candidate("MIT", vec!["x86_64-linux".to_string()])
+}
+
 #[test]
 fn strict_graph_rejects_transitive_import() {
     let graph = graph_with_app();
@@ -706,21 +742,228 @@ fn provider_fetch_allowed_offline_with_satisfied_lock() {
 }
 
 #[test]
-fn provider_facts_feed_search_info_and_lock_explain() {
+fn replacement_candidate_visible_but_inactive() {
     use jet::Jetpack::ProviderGraph::{normalize_npm, ReplacementOverlay};
+    use jet::Jetpack::Replacement::{PackageIdentity, ProofStatus};
     let mut facts = normalize_npm(r#"{"name":"left-pad","version":"1.0.0"}"#);
     facts.replacement_candidates.push(ReplacementOverlay {
-        foreign_name: "left-pad".to_string(),
-        native_name: "core.text.pad_left".to_string(),
-        compatibility_proof: Some("golden:left-pad".to_string()),
+        foreign_identity: PackageIdentity::new("npm", "left-pad", "1.0.0"),
+        native_identity: PackageIdentity::new("core", "core.text.pad", "1.0.0"),
+        covered_public_symbols: Vec::new(),
+        unsupported_symbols: Vec::new(),
+        license: "MIT".to_string(),
+        platforms: vec!["x86_64-linux".to_string()],
+        proof_status: ProofStatus::Missing,
+        proof_digest: String::new(),
     });
     let record = semantic_record("app", &facts.name, &facts.version);
     assert_eq!(facts.source_identity, "npm:left-pad@1.0.0");
     assert_eq!(record.identity.semantic_key(), "package:left-pad");
     assert_eq!(
-        facts.replacement_candidates[0].native_name,
-        "core.text.pad_left"
+        facts.replacement_candidates[0].proof_status,
+        ProofStatus::Missing
     );
+    assert_eq!(
+        facts.replacement_candidates[0].native_identity.ref_string(),
+        "core:core.text.pad@1.0.0"
+    );
+}
+
+#[test]
+fn replacement_compat_proof_fails_on_missing_symbol() {
+    use jet::Jetpack::Replacement::{run_proof, ProofFailureKind};
+    let foreign = replacement_surface("npm", "left-pad", "1.0.0");
+    let mut native = replacement_surface("core", "core.text.pad", "1.0.0");
+    native.public_symbols.retain(|symbol| symbol.name != "trim");
+    let report = run_proof(&foreign, &native, "x86_64-linux");
+    assert!(report
+        .failures
+        .iter()
+        .any(|f| { f.kind == ProofFailureKind::MissingPublicSymbol && f.name == "trim" }));
+}
+
+#[test]
+fn replacement_compat_proof_fails_on_effect_mismatch() {
+    use jet::Jetpack::Replacement::{run_proof, ProofFailureKind};
+    let foreign = replacement_surface("npm", "left-pad", "1.0.0");
+    let mut native = replacement_surface("core", "core.text.pad", "1.0.0");
+    native.public_symbols[0].effects = vec!["fs.read".to_string()];
+    let report = run_proof(&foreign, &native, "x86_64-linux");
+    assert!(report
+        .failures
+        .iter()
+        .any(|f| { f.kind == ProofFailureKind::EffectMismatch && f.name == "pad_left" }));
+}
+
+#[test]
+fn replacement_compat_proof_fails_on_error_shape_mismatch() {
+    use jet::Jetpack::Replacement::{run_proof, ProofFailureKind};
+    let foreign = replacement_surface("npm", "left-pad", "1.0.0");
+    let mut native = replacement_surface("core", "core.text.pad", "1.0.0");
+    native.public_symbols[0].errors = vec!["RangeError".to_string()];
+    let report = run_proof(&foreign, &native, "x86_64-linux");
+    assert!(report
+        .failures
+        .iter()
+        .any(|f| { f.kind == ProofFailureKind::ErrorShapeMismatch && f.name == "pad_left" }));
+}
+
+#[test]
+fn replacement_compat_proof_fails_on_golden_output_diff() {
+    use jet::Jetpack::Replacement::{run_proof, GoldenFixture, ProofFailureKind};
+    let foreign = replacement_surface("npm", "left-pad", "1.0.0");
+    let mut native = replacement_surface("core", "core.text.pad", "1.0.0");
+    native.goldens = vec![GoldenFixture::new("pad_left_basic", "hi\n")];
+    let report = run_proof(&foreign, &native, "x86_64-linux");
+    assert!(report
+        .failures
+        .iter()
+        .any(|f| { f.kind == ProofFailureKind::GoldenOutputDiff && f.name == "pad_left_basic" }));
+}
+
+#[test]
+fn replacement_compat_proof_pass_enables_policy_replacement() {
+    use jet::Jetpack::Replacement::{resolve_replacement, ReplacementDecision, ReplacementPolicy};
+    let candidate = replacement_passed_candidate();
+    let policy = ReplacementPolicy::allow(
+        &candidate.foreign_identity,
+        &candidate.native_identity,
+        "app",
+    );
+    let decision = resolve_replacement(&candidate, &policy, "app", "x86_64-linux");
+    let ReplacementDecision::Active(active) = decision else {
+        panic!("passed proof + allow policy should activate replacement");
+    };
+    assert_eq!(
+        active.native_identity.ref_string(),
+        "core:core.text.pad@1.0.0"
+    );
+    assert_eq!(
+        active.lock_record.identity.kind.as_str(),
+        "replacement-overlay"
+    );
+}
+
+#[test]
+fn replacement_policy_deny_blocks_replacement() {
+    use jet::Jetpack::Replacement::{resolve_replacement, ReplacementDecision, ReplacementPolicy};
+    let candidate = replacement_passed_candidate();
+    let decision = resolve_replacement(
+        &candidate,
+        &ReplacementPolicy::default(),
+        "app",
+        "x86_64-linux",
+    );
+    assert!(matches!(decision, ReplacementDecision::Denied { .. }));
+}
+
+#[test]
+fn replacement_preserves_foreign_call_site() {
+    use jet::Jetpack::Replacement::{resolve_replacement, ReplacementDecision, ReplacementPolicy};
+    let candidate = replacement_passed_candidate();
+    let policy = ReplacementPolicy::prefer(
+        &candidate.foreign_identity,
+        &candidate.native_identity,
+        "app",
+    );
+    let decision = resolve_replacement(&candidate, &policy, "app", "x86_64-linux");
+    let ReplacementDecision::Active(active) = decision else {
+        panic!("prefer policy should activate replacement");
+    };
+    assert_eq!(active.foreign_call_site, "npm:left-pad@1.0.0");
+    assert_eq!(active.lock_record.identity.key, "npm:left-pad@1.0.0");
+    assert_eq!(
+        active.lock_record.identity.exact,
+        "core:core.text.pad@1.0.0"
+    );
+}
+
+#[test]
+fn replacement_lock_records_foreign_native_proof_and_policy() {
+    let candidate = replacement_passed_candidate();
+    let record = jet::Jetpack::Replacement::replacement_lock_record(
+        &candidate,
+        "app",
+        "x86_64-linux",
+        "policy.replacements:npm:left-pad@1.0.0=>core:core.text.pad@1.0.0:allow",
+    );
+    assert_eq!(
+        record
+            .future_fields
+            .get("replacement-foreign")
+            .map(String::as_str),
+        Some("npm:left-pad@1.0.0")
+    );
+    assert_eq!(
+        record
+            .future_fields
+            .get("replacement-native")
+            .map(String::as_str),
+        Some("core:core.text.pad@1.0.0")
+    );
+    assert_eq!(
+        record
+            .future_fields
+            .get("replacement-proof-digest")
+            .map(String::as_str),
+        Some(candidate.proof_digest.as_str())
+    );
+    assert!(record.rationales[0]
+        .policy_fingerprint
+        .contains("policy.replacements"));
+}
+
+#[test]
+fn replacement_lock_merge_conflict_names_owners() {
+    use jet::Jetpack::Replacement::{
+        replacement_lock_record, PackageIdentity, ProofStatus, ReplacementCandidate,
+    };
+    use jet::Jetpack::SemanticLock::{merge, SemanticLockFile};
+    let foreign = replacement_identity("npm", "left-pad", "1.0.0");
+    let mk_candidate = |native: &str| ReplacementCandidate {
+        foreign_identity: foreign.clone(),
+        native_identity: PackageIdentity::new("core", native, "1.0.0"),
+        covered_public_symbols: vec!["pad_left".to_string()],
+        unsupported_symbols: Vec::new(),
+        license: "MIT".to_string(),
+        platforms: vec!["x86_64-linux".to_string()],
+        proof_status: ProofStatus::Passed,
+        proof_digest: format!("proof-{native}"),
+    };
+    let left = SemanticLockFile {
+        records: vec![replacement_lock_record(
+            &mk_candidate("core.text.pad"),
+            "app",
+            "x86_64-linux",
+            "policy-left",
+        )],
+    };
+    let right = SemanticLockFile {
+        records: vec![replacement_lock_record(
+            &mk_candidate("core.string.pad"),
+            "app",
+            "x86_64-linux",
+            "policy-right",
+        )],
+    };
+    let out = merge(&SemanticLockFile::default(), &left, &right);
+    assert_eq!(out.conflicts.len(), 1);
+    assert_eq!(out.conflicts[0].owner_package, "app");
+    assert_eq!(
+        out.conflicts[0].semantic_key,
+        "replacement-overlay:npm:left-pad@1.0.0"
+    );
+}
+
+#[test]
+fn replacement_importer_reports_replacement_progress() {
+    use jet::Jetpack::Replacement::{ImporterProgressFact, ImporterReplacementStatus};
+    let candidate = replacement_passed_candidate();
+    let proof = ImporterProgressFact::from_candidate(&candidate);
+    let active = ImporterProgressFact::active(&candidate);
+    assert_eq!(proof.status, ImporterReplacementStatus::ProofPassed);
+    assert_eq!(active.status, ImporterReplacementStatus::ReplacementActive);
+    assert_eq!(active.proof_digest, candidate.proof_digest);
 }
 
 // ─────────────────────────────────────────────

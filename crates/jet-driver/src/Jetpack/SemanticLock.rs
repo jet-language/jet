@@ -20,6 +20,7 @@ pub enum LockRecordKind {
     ImageInput,
     FleetInput,
     JetosActivationClosure,
+    ReplacementOverlay,
     Future(String),
 }
 
@@ -38,6 +39,7 @@ impl LockRecordKind {
             LockRecordKind::ImageInput => "image-input",
             LockRecordKind::FleetInput => "fleet-input",
             LockRecordKind::JetosActivationClosure => "jetos-activation-closure",
+            LockRecordKind::ReplacementOverlay => "replacement-overlay",
             LockRecordKind::Future(s) => s.as_str(),
         }
     }
@@ -56,6 +58,7 @@ impl LockRecordKind {
             "image-input" => LockRecordKind::ImageInput,
             "fleet-input" => LockRecordKind::FleetInput,
             "jetos-activation-closure" => LockRecordKind::JetosActivationClosure,
+            "replacement-overlay" => LockRecordKind::ReplacementOverlay,
             other => LockRecordKind::Future(other.to_string()),
         }
     }

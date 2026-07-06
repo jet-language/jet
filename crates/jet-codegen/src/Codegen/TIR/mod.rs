@@ -1858,6 +1858,18 @@ pub enum THandleOp {
     SolverFailureCount,
     /// D-SOLVER-LIB1=A: `solver.status()` → `{root}jet_solver_status(&solver)`.
     SolverStatus,
+    GameSceneNew,
+    GameReplayRecord,
+    GameBackendHeadless,
+    GameBudgetsNew,
+    GameSceneOnFrame,
+    GameSceneComponent,
+    GameSceneQuery,
+    GameAssetsImage,
+    GameAssetsSound,
+    GameInputBind,
+    GameBudgetsSet,
+    GameInputPressed,
     /// D-DET-CAPAPI Duration: `millis()` → `{root}jet_duration_millis(&(recv))` (span as ms).
     DurationMillis,
     /// D-BIGINT1 / D-DECIMAL1: instance methods on precise numeric types.
