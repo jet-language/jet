@@ -79,6 +79,16 @@ pub struct LockedToolchain {
     pub envelope: LockEnvelope,
 }
 
+/// D-JPK-CHANNEL1=A: exact lock for a named source declared with a channel
+/// selector (`github@owner/repo#latest`, `#main`, `#v0.x`). Realize-class
+/// commands read `exact`; update-class commands are the only place it moves.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LockedSourceChannel {
+    pub name: String,
+    pub channel: String,
+    pub exact: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LockSource {
     Root,
@@ -110,6 +120,8 @@ pub struct LockFile {
     pub comptime_inputs: Vec<ComptimeInput>,
     /// D-JPK-TOOLCHAIN1=A (A4): pinned toolchain objects, envelope-carrying.
     pub toolchains: Vec<LockedToolchain>,
+    /// D-JPK-CHANNEL1=A: named source channels resolved to exact source refs.
+    pub source_channels: Vec<LockedSourceChannel>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -207,6 +219,14 @@ pub fn write(lock: &LockFile) -> String {
         write_envelope(&mut out, &tc.envelope);
     }
 
+    for source in &lock.source_channels {
+        out.push('\n');
+        out.push_str("[[source_channel]]\n");
+        out.push_str(&format!("name = \"{}\"\n", escape_str(&source.name)));
+        out.push_str(&format!("channel = \"{}\"\n", escape_str(&source.channel)));
+        out.push_str(&format!("exact = \"{}\"\n", escape_str(&source.exact)));
+    }
+
     out.push('\n');
     out.push_str("[root]\n");
     if !lock.root_dependencies.is_empty() {
@@ -247,12 +267,18 @@ fn escape_str(s: &str) -> String {
 /// `provenance` are always emitted for a realized object (the frozen schema);
 /// `signature` only when the slot is filled.
 fn write_envelope(out: &mut String, env: &LockEnvelope) {
-    out.push_str(&format!("output-hash = \"{}\"\n", escape_str(&env.output_hash)));
+    out.push_str(&format!(
+        "output-hash = \"{}\"\n",
+        escape_str(&env.output_hash)
+    ));
     out.push_str(&format!("platform = \"{}\"\n", escape_str(&env.platform)));
     if !env.signature.is_empty() {
         out.push_str(&format!("signature = \"{}\"\n", escape_str(&env.signature)));
     }
-    out.push_str(&format!("provenance = \"{}\"\n", escape_str(&env.provenance)));
+    out.push_str(&format!(
+        "provenance = \"{}\"\n",
+        escape_str(&env.provenance)
+    ));
 }
 
 // ──────────────────────────────────────────────
@@ -266,10 +292,12 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
     let mut workspace_members: Vec<LockedWorkspaceMember> = Vec::new();
     let mut comptime_inputs: Vec<ComptimeInput> = Vec::new();
     let mut toolchains: Vec<LockedToolchain> = Vec::new();
+    let mut source_channels: Vec<LockedSourceChannel> = Vec::new();
     let mut current_pkg: Option<PartialPkg> = None;
     let mut current_ci: Option<PartialCi> = None;
     let mut current_workspace_member: Option<PartialWorkspaceMember> = None;
     let mut current_toolchain: Option<PartialToolchain> = None;
+    let mut current_source_channel: Option<PartialSourceChannel> = None;
     let mut in_root = false;
 
     for line in raw.lines() {
@@ -295,6 +323,11 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
             if let Some(t) = current_toolchain.take() {
                 toolchains.push(t.finish());
             }
+            if let Some(sc) = current_source_channel.take() {
+                if let Some(c) = sc.finish() {
+                    source_channels.push(c);
+                }
+            }
             in_root = false;
             match line {
                 "[[comptime_inputs]]" => current_ci = Some(PartialCi::default()),
@@ -303,6 +336,9 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
                     current_workspace_member = Some(PartialWorkspaceMember::default())
                 }
                 "[[toolchain]]" => current_toolchain = Some(PartialToolchain::default()),
+                "[[source_channel]]" => {
+                    current_source_channel = Some(PartialSourceChannel::default())
+                }
                 "[root]" => in_root = true,
                 _ => {}
             }
@@ -314,11 +350,7 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
             None => continue,
         };
 
-        if key == "version"
-            && current_pkg.is_none()
-            && current_toolchain.is_none()
-            && !in_root
-        {
+        if key == "version" && current_pkg.is_none() && current_toolchain.is_none() && !in_root {
             version = val.trim_matches('"').parse().ok();
             continue;
         }
@@ -355,6 +387,15 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
                 "platform" => tc.envelope.platform = val.trim_matches('"').to_string(),
                 "signature" => tc.envelope.signature = val.trim_matches('"').to_string(),
                 "provenance" => tc.envelope.provenance = val.trim_matches('"').to_string(),
+                _ => {}
+            }
+            continue;
+        }
+        if let Some(ref mut sc) = current_source_channel {
+            match key {
+                "name" => sc.name = Some(val.trim_matches('"').to_string()),
+                "channel" => sc.channel = Some(val.trim_matches('"').to_string()),
+                "exact" => sc.exact = Some(val.trim_matches('"').to_string()),
                 _ => {}
             }
             continue;
@@ -404,6 +445,11 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
     if let Some(t) = current_toolchain {
         toolchains.push(t.finish());
     }
+    if let Some(sc) = current_source_channel {
+        if let Some(c) = sc.finish() {
+            source_channels.push(c);
+        }
+    }
 
     Ok(LockFile {
         version: version.unwrap_or(0),
@@ -412,6 +458,7 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
         workspace_members,
         comptime_inputs,
         toolchains,
+        source_channels,
     })
 }
 
@@ -517,6 +564,23 @@ impl PartialToolchain {
             version: self.version.unwrap_or_default(),
             envelope: self.envelope,
         }
+    }
+}
+
+#[derive(Default)]
+struct PartialSourceChannel {
+    name: Option<String>,
+    channel: Option<String>,
+    exact: Option<String>,
+}
+
+impl PartialSourceChannel {
+    fn finish(self) -> Option<LockedSourceChannel> {
+        Some(LockedSourceChannel {
+            name: self.name?,
+            channel: self.channel?,
+            exact: self.exact?,
+        })
     }
 }
 
@@ -651,15 +715,60 @@ pub fn record_toolchain(project_root: &Path, tc: LockedToolchain) {
             workspace_members: Vec::new(),
             comptime_inputs: Vec::new(),
             toolchains: Vec::new(),
+            source_channels: Vec::new(),
         });
     // A project has exactly one `jet` self-toolchain pin (its object id is
     // `jet-<version>-<fp>`), kept distinct from any bridge build-toolchain
     // entry (`toolchain-<version>`). Replace the existing jet pin in place so
     // moving channels never accumulates stale pins.
-    if let Some(existing) = lock.toolchains.iter_mut().find(|t| t.id.starts_with("jet-")) {
+    if let Some(existing) = lock
+        .toolchains
+        .iter_mut()
+        .find(|t| t.id.starts_with("jet-"))
+    {
         *existing = tc;
     } else {
         lock.toolchains.push(tc);
+    }
+    if let Some(parent) = lock_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(lock_path, write(&lock));
+}
+
+/// D-JPK-CHANNEL1=A: read one named source channel lock.
+pub fn locked_source_channel(project_root: &Path, name: &str) -> Option<LockedSourceChannel> {
+    load(project_root)?
+        .source_channels
+        .into_iter()
+        .find(|s| s.name == name)
+}
+
+/// D-JPK-CHANNEL1=A: upsert a named source channel lock. Keyed by source name
+/// so moving a channel replaces the prior exact identity.
+pub fn record_source_channel(project_root: &Path, source: LockedSourceChannel) {
+    let lock_path = project_root.join(Syntax::UNIFIED_LOCK_FILE);
+    let mut lock = std::fs::read_to_string(&lock_path)
+        .ok()
+        .and_then(|raw| parse(&raw).ok())
+        .unwrap_or_else(|| LockFile {
+            version: LOCK_VERSION,
+            packages: Vec::new(),
+            root_dependencies: Vec::new(),
+            workspace_members: Vec::new(),
+            comptime_inputs: Vec::new(),
+            toolchains: Vec::new(),
+            source_channels: Vec::new(),
+        });
+    lock.version = LOCK_VERSION;
+    if let Some(existing) = lock
+        .source_channels
+        .iter_mut()
+        .find(|s| s.name == source.name)
+    {
+        *existing = source;
+    } else {
+        lock.source_channels.push(source);
     }
     if let Some(parent) = lock_path.parent() {
         let _ = std::fs::create_dir_all(parent);
@@ -900,6 +1009,7 @@ mod a4_envelope_tests {
             workspace_members: Vec::new(),
             comptime_inputs: Vec::new(),
             toolchains,
+            source_channels: Vec::new(),
         }
     }
 
@@ -929,7 +1039,12 @@ mod a4_envelope_tests {
     /// A filled signature slot round-trips explicitly (forward-compat for #13).
     #[test]
     fn lock_roundtrips_filled_signature() {
-        let e = env("sha256-aa", "aarch64-macos", "ed25519:sigbytes", "ref via nix");
+        let e = env(
+            "sha256-aa",
+            "aarch64-macos",
+            "ed25519:sigbytes",
+            "ref via nix",
+        );
         let lock = base_lock(vec![pkg_with("p", Some(e.clone()))], Vec::new());
         let back = parse(&write(&lock)).expect("parse");
         assert_eq!(back.packages[0].envelope, Some(e));
@@ -989,8 +1104,16 @@ mod a4_envelope_tests {
         record_envelope(&dir, "hello", e.clone());
 
         let reloaded = load(&dir).expect("reload");
-        let hello = reloaded.packages.iter().find(|p| p.name == "hello").unwrap();
-        let other = reloaded.packages.iter().find(|p| p.name == "other").unwrap();
+        let hello = reloaded
+            .packages
+            .iter()
+            .find(|p| p.name == "hello")
+            .unwrap();
+        let other = reloaded
+            .packages
+            .iter()
+            .find(|p| p.name == "other")
+            .unwrap();
         assert_eq!(hello.envelope, Some(e));
         assert_eq!(other.envelope, None, "other packages untouched");
         std::fs::remove_dir_all(&dir).ok();
@@ -1000,7 +1123,10 @@ mod a4_envelope_tests {
     /// content-hash) without cross-contamination.
     #[test]
     fn envelope_coexists_with_effects_and_content_hash() {
-        let mut p = pkg_with("p", Some(env("sha256-x", "x86_64-linux", "", "r via core-source")));
+        let mut p = pkg_with(
+            "p",
+            Some(env("sha256-x", "x86_64-linux", "", "r via core-source")),
+        );
         p.content_hash = Some("sha256-tree".to_string());
         p.effects = vec!["Net".to_string(), "Fs".to_string()];
         let lock = base_lock(vec![p.clone()], Vec::new());

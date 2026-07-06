@@ -268,7 +268,8 @@ fn is_named_channel(c: &str) -> bool {
         Some(b) if b.is_ascii_lowercase() => {}
         _ => return false,
     }
-    c.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+    c.bytes()
+        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
 }
 
 /// The channel a running toolchain version belongs to: its `MAJOR.MINOR`
@@ -500,7 +501,10 @@ fn is_executable(p: &Path) -> bool {
 /// `jet toolchain` — read-only pin/version/status report (T4).
 pub fn report_pin(root: &Path) -> String {
     let manifest = read_manifest(root);
-    let id = manifest.as_deref().map(identity_preparse).unwrap_or_default();
+    let id = manifest
+        .as_deref()
+        .map(identity_preparse)
+        .unwrap_or_default();
     let mut out = String::new();
     match &id.jet {
         Some(pin) => out.push_str(&format!("pin:      jet {pin}\n")),
@@ -828,7 +832,10 @@ deps: { textkit: "1.2.0" }
 
         // Re-exec guard: with the marker set, the pinned child runs natively.
         std::env::set_var(Syntax::TOOLCHAIN_EXEC_MARKER_ENV, "0.4.0");
-        assert!(matches!(decide(&root, "0.4.0", false), PinDecision::RunNative));
+        assert!(matches!(
+            decide(&root, "0.4.0", false),
+            PinDecision::RunNative
+        ));
         std::env::remove_var(Syntax::TOOLCHAIN_EXEC_MARKER_ENV);
         std::env::remove_var(Syntax::TOOLCHAIN_OBJECT_ENV);
         std::fs::remove_dir_all(&root).ok();
@@ -845,7 +852,10 @@ deps: { textkit: "1.2.0" }
         .unwrap();
         Lock::record_toolchain(&root, toolchain_record("0.4", "0.4.0"));
         std::env::remove_var(Syntax::TOOLCHAIN_EXEC_MARKER_ENV);
-        assert!(matches!(decide(&root, "0.4.0", false), PinDecision::RunNative));
+        assert!(matches!(
+            decide(&root, "0.4.0", false),
+            PinDecision::RunNative
+        ));
         std::fs::remove_dir_all(&root).ok();
     }
 

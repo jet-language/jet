@@ -150,7 +150,11 @@ mod tests {
     fn module_found_regardless_of_filename() {
         let dir = tempdir("arbitrary-filename");
         // Nothing here is named after the module it declares.
-        std::fs::write(dir.join("whatever.jet"), "module workspace { members: [] }\n").unwrap();
+        std::fs::write(
+            dir.join("whatever.jet"),
+            "module workspace { members: [] }\n",
+        )
+        .unwrap();
         let found = discover_module_in(&dir, "workspace").unwrap();
         assert_eq!(found, dir);
     }

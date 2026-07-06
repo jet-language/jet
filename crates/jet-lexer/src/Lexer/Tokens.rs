@@ -31,6 +31,8 @@ pub enum TokKind {
     KwMutate,
     KwMove,
     KwView,
+    /// D-CAP2 (D-MEM1/S4): `copy x` — the one copy verb.
+    KwCopy,
     KwStruct,
     KwEnum,
     KwImpl,
@@ -200,6 +202,7 @@ pub fn describe(kind: &TokKind) -> String {
         TokKind::KwMutate => format!("the keyword `{}`", Syntax::KW_MUTATE),
         TokKind::KwMove => format!("the keyword `{}`", Syntax::KW_MOVE),
         TokKind::KwView => format!("the keyword `{}`", Syntax::KW_VIEW),
+        TokKind::KwCopy => format!("the keyword `{}`", Syntax::KW_COPY),
         TokKind::KwStruct => format!("the keyword `{}`", Syntax::KW_STRUCT),
         TokKind::KwEnum => format!("the keyword `{}`", Syntax::KW_ENUM),
         TokKind::KwImpl => format!("the keyword `{}`", Syntax::KW_IMPL),

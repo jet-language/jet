@@ -90,7 +90,7 @@ before continuing.
 | E0026 | parse | *retired by D-S14-PAUSE* (was: `throw`/`raise` teaching) |
 | E0027 | parse | *retired by D-S14-PAUSE* (was: `append` teaching) |
 | E0028 | parse | *retired by D-S14-PAUSE* (was: `Vec`/`dict` teaching) |
-| E0029 | parse | two capability markers on one parameter (D-CAP7) |
+| E0029 | parse | two capability markers on one parameter (D-CAP7/D-MEM1) |
 | E0030 | parse | *retired by D-S14-PAUSE* (was: `as` teaching) |
 | E0031 | parse | teaching: `unsafe` / C-style FFI → `extern rust` (S50) |
 | E0032 | parse | *retired by D-S14-PAUSE* (was: lambda teaching) |
@@ -118,6 +118,7 @@ before continuing.
 | E0055 | parse | teaching: `#Audit("…")` retired → reason is now the argument of `#Unsafe("…")` (D-UNSAFE2) |
 | E0056 | parse | teaching: `mut` capability keyword → `&` sigil (D-MEM1) |
 | E0057 | parse | *retired by D-S14-PAUSE* (was: `take` keyword teaching) |
+| E0058 | parse | *retired by D-MEM1/S3* (was: `view` return keyword teaching → `&` sigil; `-> &T` returns no longer exist to point at) |
 | E0059 | parse | teaching: bare `sanitizer fn` → `#Sanitizer fn` (D-TAINT-SAN) |
 | E0060 | parse | teaching: retired C FFI marker spelling → `#Extern` / `#Bindgen` (D-CFFI-SYNTAX-REOPEN, D-CFFI-CANON1) |
 | E0062 | parse | teaching: a contract marker written with `#` → write it with `@` (D-MARKER-FAMILY1, D-MARKERMOVE1/2/3) |
@@ -198,12 +199,17 @@ before continuing.
 | E0203 | sema  | `take` on a non-consuming parameter       |
 | E0204 | sema  | same value used while `mut` is active in one call |
 | E0205 | sema  | `self.field = v` without write access (`&`) on the receiver (D-MUTSELF1) |
+| E0206 | sema  | *retired by D-MEM1/S3* (was: `view` return can't point at this value; `-> &T` returns no longer exist) |
+| E0207 | sema  | *retired by D-MEM1/S3* (was: a stored-reference `&T` field's owner ambiguous, D-REF-SHORTHAND1; stored-ref fields no longer exist) |
 | E0208 | sema  | raw pointer op outside `#Unsafe`: postfix `p.*` deref or prefix `*x` raw-of (D-CAP9) |
 | E0209 | sema  | a named binding passed where it would be silently cloned — Move-param arg without `^`, or a std constructor consuming a borrowed value (D-MEM1/S2; hard error, was lint `L0201`) |
 | E0210 | parse | *retired by D-TYPE-ALIAS-CANON1* (was: pointer alias teaching) |
+| E0211 | sema  | `copy x` on a value that can't be copied — a function, a trait value, or a type Jet doesn't know how to duplicate (D-CAP2/D-MEM1/S4) |
+| L0201 | sema  | *retired by D-MEM1/S2* (was: implicit `.clone()` at call site, liveness-gated lint; superseded by hard error E0209 — no silent clone ever) |
 | L0202 | sema  | auto-clone `Shared` inside loop (lint)    |
 | L0203 | jet   | an inline script dependency (`use pkg#version;`) uses a loose/unpinned version selector (U11, D-JPK-SCRIPTDEP1) |
 | L0204 | jet   | a `flake.nix`/`devenv.nix` field `jet bridge flake` couldn't translate into `env.*` form (U16) |
+| L0205 | jetpack | build sandboxing is unavailable and fallback is allowed by policy (U28, D-JPK-NODAEMON1) |
 | E0301 | sema  | `impl` for unknown type                   |
 | E0302 | sema  | unknown field (with suggestion)           |
 | E0303 | sema  | struct/variant construction field errors  |
@@ -268,6 +274,7 @@ before continuing.
 | E0423 | sema  | `:= uninit` binding's type is not plain data (D-UNINIT1, reworded D-UNINIT-SENTINEL1) |
 | E0424 | sema  | `:= uninit` used without `use core.mem` (D-UNINIT1, reworded D-UNINIT-SENTINEL1) |
 | E0426 | parse | teaching: retired `#Uninit name: Type` marker → `name: Type := uninit` (D-UNINIT-SENTINEL1) |
+| E0427 | parse | *retired by D-MEM1/S3* (was: teaching retired `#Ref(owner) name: T` field form → `name: &T`, D-REF-SHORTHAND1; stored-ref fields no longer exist) |
 | E0501 | sema  | empty `[]` needs a context type           |
 | E0502 | sema  | type can't be a map key                   |
 | E0503 | sema  | strings aren't indexable with `[ ]`       |
@@ -358,11 +365,14 @@ before continuing.
 | E3301 | sema  | OS-dependent std API called in a `--freestanding` build |
 | E3302 | jet   | target triple unknown or toolchain component missing |
 | E3303 | sema  | freestanding build allocates memory with no global allocator |
-| E3410 | sema  | Tier-2 comptime effect (`core.fs`/`env`/`io`/`exec`) called outside a `#Impure` gate (D-CTEFFECT1) |
+| E3410 | sema  | Tier-2 comptime effect (`core.files`/`env`/`io`/`exec`) called outside a `#Impure` gate (D-CTEFFECT1) |
 | E3411 | sema  | Tier-2 comptime effect inside `#Impure` gate but `--allow-impure` not passed (D-CTEFFECT1) |
 | E3412 | sema  | `core.net.{method}()` is not available at comptime (only `fetch` is Tier-1) |
 | E3413 | sema  | comptime `fetch` sha256 mismatch — content hash doesn't match the `sha256:` pin (D-CTEFFECT1 / D-NETDEP1=A) |
 | E3414 | sema  | comptime `fetch` failed — bad URL, unsupported scheme, network error, or non-UTF-8 content (D-CTEFFECT1 / D-NETDEP1=A) |
+| E4201 | sema  | HTTPS client TLS handshake failed before any response was received (D-TLS1) |
+| E4202 | sema  | HTTPS client certificate could not be trusted (D-TLS1) |
+| E4203 | sema  | HTTPS client could not find usable system certificate roots (D-TLS1) |
 | E3401 | sema  | impure call inside a `@Pure fn` / pure-eval context (call-trace path) |
 | E3402 | sema  | package build attempted ambient I/O or network (names the call) |
 | E3403 | sema  | non-deterministic construct in pure evaluation (e.g. time/random) |
@@ -390,6 +400,7 @@ before continuing.
 | E0909 | sema  | generic instantiation too deep |
 | E0910 | sema  | `@PublishedSchema` struct made a breaking shape change (drop / type-change / add-without-default) with no migration to bridge it, or a declared migration op is nonsensical |
 | E0911 | parse | migration block uses an unknown verb (`drop`→`remove`, `reorder` not needed) |
+| E0912 | sema  | *retired by D-MEM1/S2* (was: frozen public capability signature drift under `library { api: stable/explicit }`, D-CAP8/c129; the `api:` field and capability freeze are gone — `ApiFreeze`'s snapshot survives as unconditional pub-fn semver diffing, E1218/E2601) |
 | E0913 | sema  | trait impl missing associated type (D-LIB2) |
 | E0914 | sema  | unknown interpolation selector after `@` (D-DISPLAYDBG2) |
 | E0915 | sema  | bare `{value}` on a type without `Display` (D-DISPLAY-SHAPE) |
@@ -398,6 +409,7 @@ before continuing.
 | E0918 | sema  | `@InlineAlways fn` had its address taken (stored, returned, or passed as a callback) instead of being called directly (D-METHODMACRO1) |
 | E0919 | sema  | `@InlineAlways fn` body exceeds the statement ceiling `@InlineAlways` enforces (D-METHODMACRO1) |
 | E0920 | parse | a function/method written with both `@Inline` and `@InlineAlways` (D-METHODMACRO1) |
+| E0921 | sema  | `policy no_alloc` floor violation — an allocation-shaped expression in the module's own function bodies (D-MEM1/S7, D-NOALLOC-SEM1) |
 | E0951 | sema  | comptime code reaches an impure operation (shows call path) |
 | E0952 | sema  | comptime budget exhausted (fuel) |
 | E0953 | sema  | comptime panic = user-authored compile error (message verbatim) |
@@ -461,8 +473,14 @@ before continuing.
 | E1110 | sema  | `.task { … }` outside a `taskgroup` scope, or on the wrong handle (D-TASKSCOPE1) |
 | L1101 | sema  | Task value dropped without `.join()` or `.detach()`  |
 | W0410 | sema  | `core.random.bytes` output used in a crypto context — `core.random` is PRNG only; use `core.crypto.random.bytes` (D-RANDSPLIT1) |
+| E2301 | sema  | *retired by D-MEM1/S3* (was: returned `view` outlives the local that owns it; `-> &T` returns no longer exist) |
+| E2302 | sema  | *retired by D-MEM1/S3* (was: stored `ref` field would point at something that dies first; `&T` fields no longer exist) |
 | E2303 | sema  | a `View<T>` crosses a task/channel boundary (E2-M5; emitted as E1102) |
+| E2304 | sema  | *retired by D-MEM1/S3* (was: an indexed/sliced piece can't be handed back as a `view`; `-> &T` returns no longer exist) |
 | E2305 | sema  | a `View<T>` (`.view(...)`) escapes the scope of the list it borrows from (D-DYNARRAY1) |
+| E2306 | sema  | *retired by D-MEM1/S3* (was: `#Ref(label)` on a `&T` field names no in-scope value of the referent type, D-REF-SHORTHAND2; stored-ref fields no longer exist) |
+| L2301 | sema  | *retired by D-MEM1/S3* (was: advisory naming a borrowed return's source; `-> &T` returns no longer exist) |
+| E2307 | sema  | a string view (`.trim()`/`.after()`/`.before()`) escapes the scope of the `String` it borrows from (D-MEM1 stage S5) |
 | E1201 | jet   | two versions of one package required (M12.1) |
 | E1202 | jet   | lock file out of date (M12.1) |
 | E1203 | jet   | `git` not installed (M12.1) |
@@ -477,7 +495,7 @@ before continuing.
 | E1213 | jet   | package declared in `packages:` but `module <name>` found in multiple files (U10) |
 | E1214 | jet   | `jetpack.toml` has a malformed line — not a valid `key = "value"` assignment or `[table]` header (D-JPK-FILES) |
 | E1215 | jet   | `jetpack.toml` contains an unknown table or key name, with a did-you-mean suggestion (D-JPK-FILES) |
-| E1216 | jet   | a `targets:` block has an unknown field, or `api:` is not `stable`/`explicit` (D-TGT3/D-CAP4) |
+| E1216 | jet   | a `targets:` block has an unknown field (D-TGT3) |
 | E1217 | jet   | a dependency in `pkg.jet` has no locked revision — `--locked`/publish needs every dep pinned (D-SUPPLY1) |
 | E1218 | jet   | a breaking public-API change is published under a non-major version bump (D-SUPPLY1) |
 | E1219 | jet   | unknown build profile name passed to `--profile` (D-BUILDPROFILE1) |
@@ -515,6 +533,26 @@ before continuing.
 | E1254 | jet   | project-level `jet dev` has neither `fn dev()` nor `fn run()` in its entry file (U19, D-JPK-DEVCOMPOSE1) |
 | E1255 | jet   | an untrusted project env hit a non-interactive path with no `--trust`/prior grant (U19, D-JPK-DEVCOMPOSE1) |
 | E1256 | jet   | `jet bridge flake` or foreign-flake detection needs `nix`, which isn't on PATH (U16) |
+| E1257 | jet   | a `target: plugin` package's exported interface changed incompatibly since the last frozen build (D-PLUGIN-VERSION1=A) |
+| E1258 | jet   | a `target: plugin` package's own code uses an effect — plugins are deny-by-default, zero host capabilities (D-PLUGIN1=B) |
+| E1259 | jet   | couldn't build a plugin's WASM Component — missing/failed `rustc`/`wasm-tools` toolchain (D-DEP-WASM1=A) |
+| E1260 | jet   | a plugin's exported `pub fn` isn't all-`Int` or all-`Float` (v1 plugin scope, D-PLUGIN-EXPORT1=A) |
+| E1261 | jet   | a dev-supervised service never became healthy within the readiness timeout (U12) |
+| E1262 | jet   | a dev-supervised `Service` field jetpack doesn't recognize at supervision time (U12) |
+| E1263 | jetpack | `jetpack secrets get <name>` names an entry that isn't in the encrypted store (U13) |
+| E1264 | sema  | a function reaches `core.vault.get` without declaring the `Secret` effect (U13, D-JPK-SECRETCRYPTO1) |
+| E1265 | comptime | `core.vault.get` reached from a build-time (comptime) context — secrets are never readable at build time (U13) |
+| E1266 | jet   | an `Image`'s `kind:` isn't `.Oci`/`.Iso`, or disagrees with what `from:` names (U14, D-JPK-IMAGE1) |
+| E1267 | jet   | an `.Oci` image's `from: packages.<name>` doesn't name an `executable`-kind package (U14, D-JPK-IMAGE1) |
+| E1268 | jetpack | `jet image <name> --push` — gated on TLS support for registry pushes, which doesn't exist yet (U14, D-JPK-IMAGE1) |
+| E1269 | jet   | an `.Oci` image field (`kind`/`expose`/`env_vars`/`files`/`base`) isn't shaped the way D-JPK-IMAGE1 spells it (U14) |
+| E1270 | jetpack | an ad-hoc adapter declaration/source/recipe is not shaped or realizable (U20, D-JPK-ADAPTER1) |
+| E1271 | jetpack | a channel source ref (`#latest`/`#main`/`#vN.x`) is not locked, or cannot be resolved during `jetpack update` (U21, D-JPK-CHANNEL1) |
+| E1272 | jetpack | one or more package refs need the Nix bridge on a machine without `nix` (U23, D-JPK-NONIX1) |
+| E1273 | jetpack | a recipe-backed package build failed at a logged build step (U27, D-JPK-BUILDDBG1) |
+| E1274 | jetpack | no persisted build logs/explain data exist for the requested package/ref (U27, D-JPK-BUILDDBG1) |
+| E1275 | jetpack | sandbox fallback is forbidden by policy but unprivileged sandboxing is unavailable (U28, D-JPK-NODAEMON1) |
+| E1276 | jetpack | `--offline` would need network access or a missing local package object (U29, D-JPK-OFFLINE1) |
 | E2001 | jet   | `pkg.jet` requests an edition this toolchain can't provide (E2-M2, D-REL3) |
 | E2002 | jet   | a deprecated item is used past its migration window (E2-M2, D-REL5) |
 | E2101 | jet   | unknown subcommand on the command line, with a "did you mean" (E2-M3, D-DX) |
@@ -688,9 +726,9 @@ CLI.
 | Code | What | Why | Fix |
 |------|------|-----|-----|
 | E1101 | A spawned task captures a value it does not own. | Tasks run concurrently and may outlive the scope that created them; shared `var` state is not allowed. | Give the task its own copy or use `take(name)` so the task owns the value; use a channel to send results back. |
-| E1102 | A value crossing `tasks.spawn` or `Sender.send` is not sendable. | Task and channel boundaries move owned data between threads; shared views (`&`), `ref`-holding structs, trait values, and non-`take`n closures cannot cross. | Send plain owned data, remove the shared-view field, or hand a closure over with `take`. |
+| E1102 | A value crossing `tasks.spawn` or `Sender.send` is not sendable. | Task and channel boundaries move owned data between threads; a `View<T>`/string view, a trait value, or a non-`take`n closure cannot cross. | Send plain owned data (`copy` it, or use a `Shared<T>` handle for genuinely shared state), or hand a closure over with `take`. |
 | E1103 | `.detach()` called on a task that had a sendability error (E1102) at spawn. | A detached task runs unsupervised and may outlive the caller; a task that already has sendability problems is doubly unsafe to detach. | Fix the E1102 error at the spawn site first; once the task only holds owned data, `.detach()` is safe. |
-| E1106 | `.detach()` called on a task that captured a `view` borrow. | A detached task runs unsupervised and may outlive the borrow's source; the captured `view` would dangle. | Pass an owned `copy` or `share` to the task instead of a `view`. |
+| E1106 | `.detach()` called on a task that captured a `view` borrow. | A detached task runs unsupervised and may outlive the borrow's source; the captured `view` would dangle. | Pass an owned `copy`, or a `Shared<T>` handle, to the task instead of a `view`. |
 | E1104 | `#Layout(c)` struct contains a field whose type is growable (`[T]`, `Map`, or `String`). | Growable Rust heap types don't have a stable C layout — the raw data pointer and length live at unpredictable offsets. | Use a fixed-size array `[T#N]` instead, or remove `#Layout(c)` if C interop is not required. |
 | E1105 | `#Layout(packed)` or `#Layout(align(N))` written on a struct. | The supported variants are `c` (C-compatible) and `columnar` (struct-of-arrays); `packed`/`align` are reserved for future milestones. | Use `#Layout(c)` or `#Layout(columnar)`, or omit `#Layout` for the default. |
 | E1107 | The per-container layout prefix `columnar [T]` was written in a type. | A per-use columnar override isn't built yet — only the whole-struct form `#Layout(columnar) struct …` ships in v1 (D-SOA2C reserves this spelling). | Put `#Layout(columnar)` on the `struct` declaration instead. |
@@ -701,22 +739,29 @@ CLI.
 | E0040 | `async` or `await` was written. | Jet uses blocking tasks and channels rather than async syntax. | Use `core.tasks as tasks` and call `tasks.spawn(() => work())`. |
 | E0041 | `Mutex`, `RwLock`, `mutex`, or `lock` was written. | Jet avoids shared mutable state; tasks communicate by sending messages. | Import `core.tasks as tasks`, create a channel, and use `sender.send`/`channel.receive`. |
 
-## Tier-2 reference diagnostics (E2-M5, D-DYNARRAY1 `View<T>`)
+## Tier-2 reference diagnostics (E2-M5, D-DYNARRAY1 `View<T>`, D-MEM1 S5 string views)
 
 D-MEM1/S3 deleted `-> &T` borrow returns and stored-reference (`&T`) fields
 outright — there is no first-class borrow to store or return in v1. What's
 left of this tier is the still-live `View<T>` zero-copy window
-(`list.view(a..b)`, D-DYNARRAY1): it never mentions lifetimes, speaking in
-Jet words instead — *what owns this* and *how long can this view live*.
-E2303 is the reference-specific name for the task/channel rule — that
-situation is **reported once, as E1102** (a `View<T>` value is unsendable);
-E2303 exists so `jet explain E2303` points there and the soundness matrix
-has a named cell.
+(`list.view(a..b)`, D-DYNARRAY1) plus, since D-MEM1 stage S5, the same
+zero-copy treatment for `String` slicing (`s.trim()`/`s.after(sep)`/
+`s.before(sep)` bound to a local): both never mention lifetimes, speaking in
+Jet words instead — *what owns this* and *how long can this view live*. A
+string view carries no distinct Jet-level type the way `View<T>` does
+(`String` stays one type end to end, D-MEM1 gallery) — the check instead
+tracks which *bindings* are views, the same scope-liveness proof applied to
+a different owner kind. E2303 is the reference-specific name for the
+task/channel rule — that situation is **reported once, as E1102** (an
+unsendable value), for both `View<T>` and a captured string view; E2303
+exists so `jet explain E2303` points there and the soundness matrix has a
+named cell.
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
-| E2303 | A `View<T>` crosses a `tasks.spawn` or `Sender.send` boundary. | A view (`View<T>`) points into something another scope owns; a task or channel moves owned data between threads, so a view can't cross without ownership. Reported as **E1102** (the unsendable-value rule), not separately, so one situation gives one error. | Send plain owned data, or rebuild the value as an owned copy before crossing. |
+| E2303 | A `View<T>` (or a string view) crosses a `tasks.spawn` or `Sender.send` boundary. | A view points into something another scope owns; a task or channel moves owned data between threads, so a view can't cross without ownership. Reported as **E1102** (the unsendable-value rule), not separately, so one situation gives one error. | Send plain owned data, or rebuild the value as an owned copy (`copy x`) before crossing. |
 | E2305 | A `View<T>` (`list.view(a..b)`) escapes the scope of the list it borrows from — returned from a function that owns the list, rebound to another local, or stored in a struct field. | `.view(a..b)` is a zero-copy window into the list's own backing storage, not a copy; if the list is made and freed inside this function (or scope), a window into it would outlive what owns it — there'd be nothing left to look at. | Return/store an owned copy instead (`list[a..b]` for a copying slice, or `.map(...)` the window into an owned list), or accept the list as a parameter so the caller keeps owning it. |
+| E2307 | A string view (`s.trim()`/`s.after(sep)`/`s.before(sep)` bound to a local) escapes the scope of the `String` it borrows from — returned, rebound to another local, or stored in a struct field. | These calls return a zero-copy `&str` window into `s`'s own buffer when sema can prove it stays inside `s`'s scope (D-MEM1 S5); if `s` is made and freed inside this function (or scope), the window would outlive what owns it. | Keep the view inside the owner's scope, or materialize an owned `String` with `copy` before it leaves. |
 
 ## Library authoring diagnostics (E2-M6)
 
@@ -773,7 +818,7 @@ output is machine-parseable with `--json`.
 | E2601 | This release is tagged `{version}` but removes (or changes incompatibly) the public API item `{item}`. | `{version}` is a {bump_kind} bump, which promises no breaking changes under SemVer. Callers pinned to `^{major}.0` would stop compiling. | Bump to `{next_major}.0.0`, or restore `{item}` (a deprecated forwarding shim counts). Use `--force` to publish anyway with an explicit warning banner. |
 | E2602 | Dependency resolver conflict: `{package}` requires `{req_a}` from `{from_a}` but `{req_b}` from `{from_b}`, and no version satisfies both. | Jet uses a PubGrub-style resolver that requires a single version per package. Two incompatible constraints cannot both be met. | Upgrade or downgrade one of the conflicting dependents so their `{package}` constraints overlap, or ask the authors to release a version that satisfies both. |
 | E2603 | `[{severity}]` advisory `{advisory_id}` matches `{package}` `{version}`: {title}. | The advisory database flags this version as having a known vulnerability, exposed interface, or supply-chain risk. `jet audit` exits nonzero only on a `critical` match; lower severities inform and exit 0. | Upgrade to `>= {fixed_version}` (or the version listed in the advisory). Run `jet audit --explain {advisory_id}` for details. |
-| E2604 | Integrity check failed for `{package}` `{version}` — expected `{expected}`, got `{actual}`. | A fetched artifact's content hash differs from what the lockfile recorded. This means the artifact changed after it was locked — accidental or deliberate tampering. | Re-run `jet fetch` after removing the corrupt store entry (`jet gc --force`). If the problem persists, the upstream source may have been altered; audit the change before proceeding. |
+| E2604 | Integrity check failed for `{package}` `{version}` — expected `{expected}`, got `{actual}`. | A fetched artifact's content hash differs from what the lockfile recorded. This means the artifact changed after it was locked — accidental or deliberate tampering. | Re-run `jet fetch` after cleaning stale Jetpack hangar entries (`jet clean`). If the problem persists, the upstream source may have been altered; audit the change before proceeding. |
 | E2605 | `{name}` v{version} cannot be published from a dirty working tree. | The registry records the exact source revision that was published. A dirty tree means uncommitted changes would be silently excluded, making the published package unreproducible. | Commit or stash all uncommitted changes (`git status` to list them), then run `jet publish` again. Use `--force` to bypass with an explicit warning banner. |
 | E2606 | `jet yank` requires a version argument. | A yank marks one specific published version as deprecated; without a version the command doesn't know which one to yank. | Run `jet yank <version>`, e.g. `jet yank 1.2.3`. |
 | E1217 | `{dep}` is in `pkg.jet` but has no locked revision. | A `--locked` build (and `jet publish`) requires every dependency to be pinned in the lockfile to a resolved version, so the build is reproducible. The dep is declared but not pinned. | Run `jet fetch` to resolve and pin `{dep}`, then commit the lockfile. |
@@ -944,11 +989,14 @@ Tier-2 (ambient) requires both a `#Impure("reason") { … }` gate **and** `--all
 
 | code | what | why | fix |
 |------|------|-----|-----|
-| E3410 | `{module}.{call}` is a Tier-2 ambient comptime effect and can't run at compile time without a `#Impure` gate. | `core.fs`, `core.env`, `core.io`, and `core.exec` touch the host system at compile time. Without the gate any build tooling (caches, hermetic sandboxes) may get different results. | Wrap the call in `#Impure("reading config") { … }`. |
+| E3410 | `{module}.{call}` is a Tier-2 ambient comptime effect and can't run at compile time without a `#Impure` gate. | `core.files`, `core.env`, `core.io`, and `core.exec` touch the host system at compile time. Without the gate any build tooling (caches, hermetic sandboxes) may get different results. | Wrap the call in `#Impure("reading config") { … }`. |
 | E3411 | `#Impure` gate present but `--allow-impure` was not passed. | The `#Impure` block opts in to ambient I/O, but the build flag is also required so CI can audit builds that touch the host. | Add `--allow-impure` to your `jet build` / `jet run` invocation. |
 | E3412 | `core.net.{method}()` is not available at comptime. | Only `core.net.fetch(url, sha256:)` is supported at compile time as a Tier-1 hermetic effect. Other `core.net` methods are not planned for comptime access. | Use `core.net.fetch(url, sha256: "…")` for content-hash-pinned downloads. |
 | E3413 | fetch: sha256 mismatch for `{url}`. | The downloaded content does not hash to the expected `sha256:` value. The pin ensures every machine gets byte-identical content; a mismatch means the URL content changed or the pin is wrong. | Update the `sha256:` argument to match the actual content hash shown in the Why line, or verify the URL points to the correct file. |
-| E3414 | fetch failed / bad argument / non-UTF-8 content (message varies). | Common causes: unsupported URL scheme (only `file://`, `http://`, `https://`), unreachable host, missing `sha256:` argument, or binary content (use `embed_bytes` for that). | Check the URL and arguments; use `file://` for local test paths. |
+| E3414 | fetch failed / bad argument / non-UTF-8 content (message varies). | Common causes: unsupported URL scheme (only `file://`, `http://`, `https://`), unreachable host, missing `sha256:` argument, or binary content (use `embed_bytes` for that). HTTPS TLS failures use E4201–E4203. | Check the URL and arguments; use `file://` for local test paths. |
+| E4201 | TLS handshake with `{host}` failed. | The URL reached a server, but the connection did not complete a secure HTTPS handshake. The usual cause is pointing an `https://` URL at a plain HTTP server or a server with a broken TLS setup. | Verify the URL points at an HTTPS server, not plain HTTP. For local tests, start the TLS fixture server. |
+| E4202 | TLS certificate for `{host}` could not be trusted. | The server presented a certificate Jet could not verify for that host. It may be expired, for another name, self-signed, or missing an intermediate. | Use a certificate whose subject matches the host and chains to a trusted root. For tests, trust the local fixture CA explicitly. |
+| E4203 | HTTPS could not find system certificate roots. | D-TLS1 uses rustls with the system trust store for default HTTPS. Minimal images can omit that bundle, so there is no root set to verify public certificates against. | Install the system certificate bundle (for example `ca-certificates`) or run in an image that includes it. |
 
 ## Arena region diagnostics (D-ALLOC2 / D-REGION1)
 
@@ -1264,8 +1312,29 @@ snapshots in `tests/jetpack.rs` (the `tests/ui/` harness only renders front-end
 | E1254 | This project has no `jet dev` entry. | Project-level `jet dev` (no file argument) runs the entry file's top-level `fn dev()` if it defines one, else `fn run()` (U19, D-JPK-DEVCOMPOSE1). The entry file defines neither. | Add `fn dev() { … }` (a custom dev command) or `fn run() { … }` (the default) to the entry file. |
 | E1255 | This project's environment isn't trusted yet. | Entering a project's declared env (`jet env`/`jet dev`) is a supply-chain decision — first entry to a repo that declares packages needs a trust decision (U19, D-JPK-DEVCOMPOSE1). stdin isn't a terminal, so an interactive prompt would hang instead of asking. | Pass `--trust` for this one run, or pre-authorize with `jet config trust add <pattern>`. |
 | E1256 | `{cmd}` needs `nix`, which isn't on PATH. | `jet bridge flake` translates a `flake.nix`'s devShell, and `jet env`'s foreign-flake/`devenv.nix` detection shells out to `nix` as the ratified stopgap (U16); neither works without the `nix` binary. | Install Nix (https://nixos.org/download), or skip the foreign flake and declare packages in `env.*` instead. |
+| E1257 | This plugin's exported interface changed incompatibly. | A `target: plugin` package's frozen exported interface is the load-time contract (D-PLUGIN-VERSION1=A) — a prior build's `.jet/cache/api/plugin__<name>.api` snapshot shows an export was removed or its signature changed. Adding a new export is always compatible. | Restore the removed/changed export, or accept this as an intentional breaking change (delete the stale snapshot to re-freeze). |
+| E1258 | A plugin can't use any effect. | This package builds as `target: plugin` (D-PLUGIN1=B) — plugins run fully sandboxed with zero host capabilities (the wasmtime host registers no host imports), so any effect (`Fs`/`Net`/`Db`/…) would fail to instantiate at load time. There is no gate or grant to widen this (I1: the sandbox is the safety boundary, not an opt-in). | Remove the effectful call, or move it out of the plugin into the host program that loads it. |
+| E1259 | Couldn't build the plugin's WASM Component. | Building a `target: plugin` package shells out to `rustc --target wasm32-unknown-unknown` and `wasm-tools component embed`/`new` (D-DEP-WASM1=A); one of them is missing or failed. | Make sure `rustc` supports `wasm32-unknown-unknown` and `wasm-tools` is on PATH (both ship in the project's `nix develop` shell). |
+| E1260 | A plugin's exported function has an unsupported signature. | v1 plugin exports (D-PLUGIN-EXPORT1=A) support only functions whose parameters and return type are all `Int` or all `Float` — Bool/Text need more of the Component Model's ABI machinery, a real follow-on rather than this increment's scope. | Narrow the signature to all-`Int`/all-`Float`, or drop `pub` if this function isn't meant to be called across the plugin boundary. |
+| E1261 | Service `{name}` never became healthy. | `jet dev`/`jetpack services up` supervises a `services:` process, then polls its readiness contract (`ready:`, else a TCP probe on its first `ports:` entry, else a bare process-alive check) until it passes or a timeout elapses (U12); it never passed in time. | Check `jetpack services logs {name}` for what the process printed, confirm its `init`/`ready` commands are correct, or raise the timeout isn't configurable yet — fix the service itself. |
+| E1262 | Service `{name}` has a field jetpack doesn't recognize: `{field}`. | A dev-supervised `Service` stays the one ratified open record (U12) at parse time, but jetpack's dev-runtime tier is the only consumer of a dev service's fields — unlike the jetos `system.*.services` capture, nothing downstream forwards unread metadata, so an unrecognized key here is almost always a typo. | Rename `{field}` to one of the recognized keys (`enable`, `ports`, `init`, `shutdown`, `data_dir`, `ready`), or remove it. |
+| E1263 | No secret named `{name}`. | `jetpack secrets get {name}` decrypted the store (`.jet/secrets.age`) fine, but it has no entry called `{name}` (U13). | Set it first with `jetpack secrets set {name} <value>`, or check the spelling. |
+| E1264 | `{fn}` reads a secret but doesn't declare the `Secret` effect. | Reading a secret (`core.vault.get`) always requires an explicit grant (U13, D-JPK-SECRETCRYPTO1) — unlike every other effect, there is no silently-inferred default: a bare `fn` with no `#(…)` list, or one that omits `Secret`, is rejected even though the same function calling `core.files`/`core.net` with no declared bound at all would pass silently. | Add `#(Secret)` to `{fn}`'s signature (or widen an existing `#(…)` list to cover it). |
+| E1265 | `core.vault.get` can't be reached from a build-time context. | Module-field/comptime evaluation (`pkg.jet`, `env.jet`, …) runs before secrets are ever decrypted (U13) — a repo's encrypted store is only ever opened at ordinary runtime (`core.vault.get` inside a `#(Secret)`-graned function), and unlike the Tier-2 comptime effect gate (E3410/E3411), there is no `#Impure`/`--allow-impure` escape hatch here: a build artifact must never bake in a decrypted secret. | Move the secret read out of comptime/module-field evaluation and into ordinary runtime code. |
+| E1266 | `` `<word>` isn't an image kind `` (or `` `kind: .<word>` doesn't match this image's `from:` ``). | D-JPK-IMAGE1: an `Image`'s `kind:` is a leading-dot value — `.Oci` (a container, built `from: packages.<name>`) or `.Iso` (a disk image, built `from: system.<name>`). Written, it must agree with which one `from:` actually names; omitted, it infers from `from:` itself. | Write `kind: .Oci` or `kind: .Iso`, matching `from:`, or drop `kind:` and let it infer. |
+| E1267 | The image `{image}` is built from a non-executable package `{package}`. | D-JPK-IMAGE1: an `.Oci` image's `from: packages.<name>` must name a package this project's `pkg.jet` declares `executable` — a `library`-kind package has no binary to containerize, and an undeclared name can't be confirmed either way. | Declare `{package}: executable` in `pkg.jet`, or point `from:` at an existing executable package. |
+| E1268 | `` `jet image <name>` can't push to `<ref>` yet. `` | D-JPK-IMAGE1: `--push` speaks the registry protocol, which needs TLS support jetpack doesn't have yet. `jet image` builds the OCI layout natively either way; it just never fakes the push. | Build without `--push`, then push the OCI layout with another tool for now; `--push` will work once TLS lands. |
+| E1269 | `` `<field>` isn't shaped like <expected>. `` | D-JPK-IMAGE1: an `.Oci` image's `kind`/`expose`/`env_vars`/`files`/`base` fields each have one fixed shape (a bare leading-dot value, a list of ports, a string-keyed map, a list of paths, `oci("<ref>")`) — `Image` is a closed record, so a misshapen recognized field is rejected rather than silently ignored. | Rewrite the field to match its documented shape. |
+| E1270 | Adapter package could not be realized. | `Pkg.adapt(...)` turns source bytes into a normal package, so its `source:` must be a provider ref such as `path@vendor/tool` and its recipe must be one of the supported U20 recipes (`Recipe.copy()` or `Recipe.prebuilt(bin:, as:)`). | Check the `Pkg.adapt(...)` source and recipe. |
+| E1271 | Source channel `{name}` is not locked / could not be resolved. | D-JPK-CHANNEL1 keeps tracking intent (`#latest`, `#main`, `#vN.x`) beside an exact lock entry. Build/run/env never re-resolve channels, and CI/offline may not invent a fresh exact source. | Run `jetpack update {name}` with network or fixture metadata, then commit `.jet/lock`. |
+| E1272 | `{count}` package refs need the Nix bridge, and Nix is not installed. | D-JPK-NONIX1 lets Nix-free packages realize first, then reports only the holes that still route through the Nix compatibility provider. This is distinct from E1256: foreign flake and `jet bridge flake` commands cannot run at all without `nix`, while package refs can coexist with native core/adapted packages. | Install Nix (https://nixos.org/download), or replace the listed refs with native sources/adapters; `jetpack add <ref> --adapt` drafts an adapter snippet. |
+| E1273 | Package build failed at a logged step. | D-JPK-BUILDDBG1 preserves the failed build scratch under the hangar and records each recipe step's command/output. The primary error names the failed step instead of dumping provider noise. | Run `jet logs <pkg>` for the full per-step log, or rerun the build with `--shell-on-fail` to debug inside the preserved scratch. |
+| E1274 | No build log exists for `{pkg}`. | `jet logs` and package-form `jet explain <ref>` read persisted Jetpack build attempts. If a package has not failed or built through the logged runner on this machine, there is nothing local to explain. | Run `jet build <ref>` first; for diagnostic-code help, keep using `jet explain E1234`. |
+| E1275 | Build sandboxing is required but unavailable. | `jetpack config sandbox require` turns sandbox fallback into a hard failure. This machine cannot provide Jetpack's unprivileged sandbox tier, so running adapter builds would violate local policy. | Run `jetpack config sandbox allow` to permit fallback, or enable unprivileged sandbox support on this machine. |
+| E1276 | `--offline` forbids network access. | Realize-class verbs must run from the current lock and local hangar when offline. Network-class verbs (`add`, `update`, `outdated`, publish/cache sync) cannot refresh metadata under `--offline`, and a missing local object cannot be fetched. | Drop `--offline` for this command, or realize/fetch the needed object before going offline. |
 | L0203 | `use {name}#{selector};` isn't pinned to an exact version. | An inline script dependency (U11) has no lockfile until `jet lock` runs; a loose selector (`1.4` rather than `1.4.2`) can resolve to a different version on a fresh clone (D-JPK-SCRIPTDEP1). | Write the exact version Jet resolved (`use {name}#<major.minor.patch>;`), or run `jet lock` to pin it in `<script>.lock`. |
 | L0204 | `{field}` in `{file}` has no `env.*` equivalent yet. | `jet bridge flake` (U16) is a best-effort translator; some `flake.nix`/`devenv.nix` fields (`shellHook`, multiple named devShells, `buildInputs` vs `nativeBuildInputs`) have no ratified `env.*` spelling. | Review the generated shim and add `{field}`'s effect by hand if you need it — the shim is a starting point, not a full translation. |
+| L0205 | Build sandboxing is unavailable; adapter builds will run unsandboxed. | D-JPK-NODAEMON1 forbids privileged helpers and daemons. When the platform cannot offer an unprivileged sandbox, Jetpack must say so instead of silently downgrading. | Run `jetpack config sandbox require` to refuse fallback. |
 
 ## Machine-readable diagnostics (`--json`)
 
@@ -1416,6 +1485,26 @@ literal's body (a separate closure, not inline text of the function).
 | What | Why | Fix |
 |------|-----|-----|
 | a function can't be both `@Inline` and `@InlineAlways`. | `@Inline` is a soft hint the compiler may ignore; `@InlineAlways` is a checked promise it must honor or reject — one declaration can't carry both meanings. | Keep one: `@Inline` to suggest inlining, `@InlineAlways` to require it. |
+
+### E0921 — `policy no_alloc` floor violation (D-MEM1/S7, D-NOALLOC-SEM1)
+
+`policy no_alloc` is a module-level allocation floor (a bare item at the top
+of a file, like `use`). The check is **local only**: it flags an
+allocation-shaped expression written directly in the policy'd module's own
+function bodies, and never follows a call into another function — a helper
+that itself allocates is that helper's own module's problem, not this one's.
+
+| What | Why | Fix |
+|------|-----|-----|
+| string interpolation allocates a new `String`. | any `"{…}"` hole builds a fresh `String` at runtime — a plain literal with no hole is one constant piece of text, not concatenation/interpolation, so it isn't flagged. | Avoid the allocation here, or move this code out of the `policy no_alloc` module. |
+| `` `.push`/`.insert` may allocate to grow this collection's heap allocation. `` | capacity headroom isn't provable at compile time in general, so every call of this shape is flagged, full stop. | Avoid the allocation here, or move this code out of the `policy no_alloc` module. |
+| constructing `{type}` here allocates — it owns heap data. | a struct/enum literal for a type with a `String`/`[T]`/`[K,V]`/`Shared<T>`/`Pool<T>` field (directly or transitively) allocates when built. | Avoid the allocation here, or move this code out of the `policy no_alloc` module. |
+| `` `copy` of `{type}` allocates — it owns heap data. `` | `copy` duplicates a value; duplicating a heap-owning type allocates a new one. | Avoid the allocation here, or move this code out of the `policy no_alloc` module. |
+
+Coverage note: a bare list/map/string literal that isn't one of the four
+shapes above (e.g. `xs := [1, 2, 3]`) is not checked — only the ratified
+denylist is enforced; extending it is a future policy-list ballot, not a
+silent expansion here.
 
 ## Process for a new diagnostic
 

@@ -3,9 +3,8 @@
 //! `jetpack enter` (`jet env`) and `jetpack dev` (project-level `jet dev`)
 //! both realize a project's declared env — code the project author wrote,
 //! not the user. First entry to a repo whose env definition is trust-sensitive
-//! (today: it declares any package ref/source — U12 services and U13 secrets
-//! don't exist yet, but [`is_trust_sensitive`] is the one place they register
-//! their own trigger later, see its doc comment) shows a summary and asks.
+//! (today: it declares any package ref/source, or U13 secrets) shows a summary
+//! and asks.
 //! Accepting persists a grant keyed by [`env_definition_hash`], so the same
 //! (unchanged) env never re-prompts; `--trust` is a one-shot bypass that
 //! persists nothing. `jetpack config trust add/list/remove` manages durable
@@ -35,7 +34,8 @@ pub fn store_path() -> PathBuf {
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."));
-    home.join(Syntax::CONFIG_DEFAULT_DIR).join(Syntax::TRUST_FILE)
+    home.join(Syntax::CONFIG_DEFAULT_DIR)
+        .join(Syntax::TRUST_FILE)
 }
 
 fn read_lines(path: &Path) -> Vec<String> {
@@ -62,14 +62,16 @@ fn append_line(path: &Path, line: &str) {
 }
 
 /// A stable hash over the env definition's trust-sensitive content: every
-/// realized ref (sorted) plus every declared named source (sorted, via
-/// `SourceTable::trust_lines`). U12 (services) / U13 (secrets) fold their own
-/// rendered form in here the day they ship, so a hash change re-prompts.
-pub fn env_definition_hash(refs: &[RefSpec], table: &SourceTable) -> String {
+/// realized ref (sorted), every declared named source (sorted, via
+/// `SourceTable::trust_lines`), and every U13 declared secret name (sorted).
+/// A change in any of those re-prompts.
+pub fn env_definition_hash(refs: &[RefSpec], table: &SourceTable, secrets: &[String]) -> String {
     let mut ref_lines: Vec<String> = refs.iter().map(|r| r.raw.clone()).collect();
     ref_lines.sort();
     let mut source_lines = table.trust_lines();
     source_lines.sort();
+    let mut secret_lines = secrets.to_vec();
+    secret_lines.sort();
     let mut content = String::new();
     for line in &ref_lines {
         content.push_str(line);
@@ -80,29 +82,55 @@ pub fn env_definition_hash(refs: &[RefSpec], table: &SourceTable) -> String {
         content.push_str(line);
         content.push('\n');
     }
+    content.push_str("--secrets--\n");
+    for line in &secret_lines {
+        content.push_str(line);
+        content.push('\n');
+    }
     crate::SHA256::sha256_hex(content.as_bytes())
 }
 
 /// Whether this env definition is trust-sensitive at all — i.e. whether
-/// entering it should ever prompt. Today: it declares at least one package
-/// ref (any external code/binary a project pulls in is a supply-chain
-/// decision). This is the extension point U12 (any `services:`) and U13 (any
-/// `secrets:`) add their own `||` arm to once those env fields exist — no
-/// call site above this function needs to change when they do.
+/// entering it should ever prompt. It declares at least one package ref (any
+/// external code/binary a project pulls in is a supply-chain decision), or
+/// (U13) at least one declared `secrets:` name — reading a repo's encrypted
+/// secrets is its own trust decision, independent of whether the env also
+/// declares any packages.
 pub fn is_trust_sensitive(refs: &[RefSpec]) -> bool {
-    !refs.is_empty()
+    is_trust_sensitive_ext(refs, false)
+}
+
+/// U13: the general form — `secrets_declared` is whether any evaluated
+/// `env.<name>` role-module in this project declares a non-empty `secrets:`
+/// list. Kept as a separate function (rather than changing
+/// [`is_trust_sensitive`]'s signature) so existing call sites that don't yet
+/// thread a secrets flag through keep compiling unchanged.
+pub fn is_trust_sensitive_ext(refs: &[RefSpec], secrets_declared: bool) -> bool {
+    !refs.is_empty() || secrets_declared
 }
 
 /// Already trusted: an exact hash grant, or a pattern matching `project_dir`.
 pub fn is_trusted(store: &Path, project_dir: &Path, hash: &str) -> bool {
     let project_str = project_dir.to_string_lossy();
+    let canonical_project = project_dir
+        .canonicalize()
+        .ok()
+        .map(|p| p.to_string_lossy().into_owned());
     let target_hash_line = format!("{HASH_PREFIX}{hash}");
     for line in read_lines(store) {
         if line == target_hash_line {
             return true;
         }
         if let Some(pattern) = line.strip_prefix(PATTERN_PREFIX) {
-            if matches_pattern(pattern, &project_str) {
+            if matches_pattern(pattern, &project_str)
+                || canonical_project
+                    .as_deref()
+                    .is_some_and(|subject| matches_pattern(pattern, subject))
+                || matches_canonical_pattern(pattern, &project_str)
+                || canonical_project
+                    .as_deref()
+                    .is_some_and(|subject| matches_canonical_pattern(pattern, subject))
+            {
                 return true;
             }
         }
@@ -116,6 +144,22 @@ fn matches_pattern(pattern: &str, subject: &str) -> bool {
     match pattern.strip_suffix('*') {
         Some(prefix) => subject.starts_with(prefix),
         None => subject == pattern || subject.starts_with(pattern),
+    }
+}
+
+fn matches_canonical_pattern(pattern: &str, subject: &str) -> bool {
+    let (prefix, wildcard) = match pattern.strip_suffix('*') {
+        Some(prefix) => (prefix, true),
+        None => (pattern, false),
+    };
+    let Ok(canonical_prefix) = Path::new(prefix).canonicalize() else {
+        return false;
+    };
+    let canonical = canonical_prefix.to_string_lossy();
+    if wildcard {
+        subject.starts_with(canonical.as_ref())
+    } else {
+        subject == canonical.as_ref() || subject.starts_with(canonical.as_ref())
     }
 }
 
@@ -173,12 +217,13 @@ pub fn gate(
     project_dir: &Path,
     refs: &[RefSpec],
     table: &SourceTable,
+    secrets: &[String],
     bypass: bool,
 ) -> Result<(), i32> {
-    if !is_trust_sensitive(refs) {
+    if !is_trust_sensitive_ext(refs, !secrets.is_empty()) {
         return Ok(());
     }
-    let hash = env_definition_hash(refs, table);
+    let hash = env_definition_hash(refs, table, secrets);
     if bypass || is_trusted(store, project_dir, &hash) {
         return Ok(());
     }
@@ -196,8 +241,9 @@ pub fn gate(
         return Err(2);
     }
     theme.note(&format!(
-        "first entry to this project — it declares {} package(s):",
-        refs.len()
+        "first entry to this project — it declares {} package(s) and {} secret(s):",
+        refs.len(),
+        secrets.len()
     ));
     // One aligned row per ref: bold package, gray source. The supply-chain
     // decision is *which sources* run code here, so the source column is the
@@ -214,6 +260,9 @@ pub fn gate(
             theme.bold(&format!("{:<name_w$}", r.package)),
             theme.gray(&source)
         ));
+    }
+    for s in secrets {
+        theme.detail(&format!("secret:{s}"));
     }
     eprintln!(
         "\n  {}",
@@ -306,8 +355,8 @@ pub fn gate_flake(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::RefSpec::Source;
+    use super::*;
 
     fn scratch(tag: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
@@ -330,6 +379,7 @@ mod tests {
     #[test]
     fn empty_refs_are_never_trust_sensitive() {
         assert!(!is_trust_sensitive(&[]));
+        assert!(is_trust_sensitive_ext(&[], true));
     }
 
     #[test]
@@ -340,16 +390,33 @@ mod tests {
     #[test]
     fn hash_is_stable_and_order_independent() {
         let table = SourceTable::empty();
-        let a = env_definition_hash(&[ref_spec("nixpkgs:a"), ref_spec("nixpkgs:b")], &table);
-        let b = env_definition_hash(&[ref_spec("nixpkgs:b"), ref_spec("nixpkgs:a")], &table);
+        let a = env_definition_hash(
+            &[ref_spec("nixpkgs:a"), ref_spec("nixpkgs:b")],
+            &table,
+            &["stripe".to_string(), "db".to_string()],
+        );
+        let b = env_definition_hash(
+            &[ref_spec("nixpkgs:b"), ref_spec("nixpkgs:a")],
+            &table,
+            &["db".to_string(), "stripe".to_string()],
+        );
         assert_eq!(a, b);
     }
 
     #[test]
     fn hash_changes_when_refs_change() {
         let table = SourceTable::empty();
-        let a = env_definition_hash(&[ref_spec("nixpkgs:a")], &table);
-        let b = env_definition_hash(&[ref_spec("nixpkgs:a"), ref_spec("nixpkgs:b")], &table);
+        let a = env_definition_hash(&[ref_spec("nixpkgs:a")], &table, &[]);
+        let b = env_definition_hash(&[ref_spec("nixpkgs:a"), ref_spec("nixpkgs:b")], &table, &[]);
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn hash_changes_when_secrets_change() {
+        let table = SourceTable::empty();
+        let refs = [ref_spec("nixpkgs:a")];
+        let a = env_definition_hash(&refs, &table, &["stripe".to_string()]);
+        let b = env_definition_hash(&refs, &table, &["db".to_string()]);
         assert_ne!(a, b);
     }
 
@@ -359,7 +426,7 @@ mod tests {
         let store = dir.join("trust");
         let table = SourceTable::empty();
         let refs = [ref_spec("nixpkgs:fastfetch")];
-        let hash = env_definition_hash(&refs, &table);
+        let hash = env_definition_hash(&refs, &table, &[]);
         assert!(!is_trusted(&store, &dir, &hash));
         grant_hash(&store, &hash);
         assert!(is_trusted(&store, &dir, &hash));
@@ -387,6 +454,17 @@ mod tests {
         add_pattern(&store, "/home/dev/");
         assert!(is_trusted(&store, Path::new("/home/dev/anything"), "h"));
         assert!(!is_trusted(&store, Path::new("/home/other"), "h"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn pattern_matching_tolerates_canonical_path_aliases() {
+        let dir = scratch("canonical_alias");
+        let store = dir.join("trust");
+        let lexical = dir.to_string_lossy().to_string();
+        add_pattern(&store, &format!("{lexical}*"));
+        let canonical = dir.canonicalize().unwrap();
+        assert!(is_trusted(&store, &canonical, "h"));
         std::fs::remove_dir_all(&dir).ok();
     }
 

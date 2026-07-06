@@ -1,30 +1,37 @@
 //! Jetpack state + store roots (D-JPK12; hangar per unified ecosystem U2).
 //!
-//! End-state roots are system-scoped: `/etc/jet/` for config/state and the one
-//! global, content-addressed store — the **hangar** — at `/etc/jet/hangar/`
-//! (`Syntax::HANGAR_DIR`). Jetpack *owns* the lifecycle even when the Nix
-//! provider realizes bytes into `/nix/store` — a Jetpack hangar entry is a small
-//! metadata record under our root that points at the realized output.
+//! End-state roots are user-owned by default: `$XDG_STATE_HOME/jet` (or
+//! `~/.local/state/jet`) holds the content-addressed store — the **hangar**.
+//! Jetpack *owns* the lifecycle even when the Nix provider realizes bytes into
+//! `/nix/store` — a Jetpack hangar entry is a small metadata record under our
+//! root that points at the realized output.
 //!
 //! A project also has a project-local **`.jet/` managed folder**
 //! (`Syntax::SOURCE_ROOT_DIR`) holding the single lockfile (`.jet/lock`),
 //! caches, and GC roots — never the realized packages, which live in the shared
 //! hangar.
 //!
-//! Permissions: `/etc/jet` is usually not writable by a normal user, so the
-//! root resolves with a dev-mode fallback. `JETPACK_ROOT` overrides everything
-//! (tests set it to a tempdir).
+//! U28 / D-JPK-NODAEMON1=A: no root-owned default path. `JETPACK_ROOT`
+//! overrides everything (tests set it to a tempdir), but the ordinary path is
+//! per-user and coordinated with file locks.
 
 use super::JSON::{self, Json};
 use crate::SHA256;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// The subdir of the resolved root that holds the content-addressed store.
-/// Mirrors the trailing segment of `Syntax::HANGAR_DIR` (`/etc/jet/hangar`).
+/// Mirrors the trailing segment of the historical `Syntax::HANGAR_DIR`.
 const HANGAR_SUBDIR: &str = "hangar";
+const BUILD_SCRATCH_DIR: &str = "build-scratch";
+const ACTIVE_TMP_MARKER: &str = ".active";
+const AUTO_CLEAN_STAMP: &str = ".last-auto-clean";
+const STALE_AFTER: Duration = Duration::from_secs(30 * 24 * 60 * 60);
+const AUTO_CLEAN_AFTER: Duration = Duration::from_secs(24 * 60 * 60);
 
-/// The resolved root, plus whether we fell back out of `/etc/jet`.
+/// The resolved root, plus whether we are using the default user-owned root.
 pub struct Roots {
     pub root: PathBuf,
     pub dev_mode: bool,
@@ -48,24 +55,14 @@ pub fn lock_path(project: &Path) -> PathBuf {
     managed_dir(project).join("lock")
 }
 
-const SYSTEM_ROOT: &str = "/etc/jet";
-
 /// Resolve the Jetpack root with a dev-mode fallback.
 ///
 /// 1. `JETPACK_ROOT` if set (tests, custom installs).
-/// 2. `/etc/jet` if we can create/write it (the ratified system root).
-/// 3. `$XDG_STATE_HOME/jet` (or `~/.local/state/jet`) in dev mode otherwise.
+/// 2. `$XDG_STATE_HOME/jet` (or `~/.local/state/jet`) in dev mode otherwise.
 pub fn resolve() -> Roots {
     if let Some(dir) = std::env::var_os("JETPACK_ROOT") {
         return Roots {
             root: PathBuf::from(dir),
-            dev_mode: false,
-        };
-    }
-    let system = PathBuf::from(SYSTEM_ROOT);
-    if can_write(&system) {
-        return Roots {
-            root: system,
             dev_mode: false,
         };
     }
@@ -83,27 +80,6 @@ fn dev_root() -> PathBuf {
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."));
     home.join(".local").join("state").join("jet")
-}
-
-/// True if `dir`'s store subdir exists (or can be created) AND is actually
-/// writable by this process. `create_dir_all` alone is not a sufficient probe:
-/// it no-ops successfully on a directory that already exists, even one owned
-/// by another user with no write access for us (e.g. a root-owned `/etc/jet`
-/// left over from a prior install) — so a real write probe is required after
-/// the directory is confirmed to exist.
-fn can_write(dir: &std::path::Path) -> bool {
-    let hangar = dir.join(HANGAR_SUBDIR);
-    if fs::create_dir_all(&hangar).is_err() {
-        return false;
-    }
-    let probe = hangar.join(format!(".jetpack-write-probe-{}", std::process::id()));
-    match fs::write(&probe, b"") {
-        Ok(()) => {
-            let _ = fs::remove_file(&probe);
-            true
-        }
-        Err(_) => false,
-    }
 }
 
 /// A realized package recorded under the Jetpack store.
@@ -127,10 +103,16 @@ pub struct StoreEntry {
     /// D-JPK-CACHE1=A: the A4 envelope — output hash, platform, signature slot,
     /// provenance. Empty for records written before the envelope existed.
     pub envelope: super::Envelope::Envelope,
+    /// Unix seconds when this hangar object was first realized.
+    pub realized_at: u64,
+    /// Unix seconds when Jetpack last reused/refreshed this object.
+    pub last_used_at: u64,
 }
 
 impl StoreEntry {
     fn meta_json(&self) -> String {
+        let realized_at = self.realized_at.to_string();
+        let last_used_at = self.last_used_at.to_string();
         JSON::object_of(&[
             ("name", &self.name),
             ("version", &self.version),
@@ -142,6 +124,8 @@ impl StoreEntry {
             ("platform", &self.envelope.platform),
             ("signature", &self.envelope.signature),
             ("provenance", &self.envelope.provenance),
+            ("realized_at", &realized_at),
+            ("last_used_at", &last_used_at),
         ])
     }
 }
@@ -172,21 +156,27 @@ pub fn record(
     rlib: &str,
     envelope: &super::Envelope::Envelope,
 ) -> std::io::Result<StoreEntry> {
-    let id = entry_id(name, version, reference, out);
-    let entry = StoreEntry {
-        id: id.clone(),
-        name: name.to_string(),
-        version: version.to_string(),
-        reference: reference.to_string(),
-        out: out.to_string(),
-        bin: bin.to_string(),
-        rlib: rlib.to_string(),
-        envelope: envelope.clone(),
-    };
-    let dir = roots.hangar_dir().join(&id);
-    fs::create_dir_all(&dir)?;
-    fs::write(dir.join("meta.json"), entry.meta_json())?;
-    Ok(entry)
+    super::RuntimePolicy::with_lock(&roots.root, "hangar-record", || {
+        let id = entry_id(name, version, reference, out);
+        let dir = roots.hangar_dir().join(&id);
+        let now = now_secs();
+        let realized_at = read_meta(&dir).and_then(|m| m.realized_at).unwrap_or(now);
+        let entry = StoreEntry {
+            id: id.clone(),
+            name: name.to_string(),
+            version: version.to_string(),
+            reference: reference.to_string(),
+            out: out.to_string(),
+            bin: bin.to_string(),
+            rlib: rlib.to_string(),
+            envelope: envelope.clone(),
+            realized_at,
+            last_used_at: now,
+        };
+        fs::create_dir_all(&dir)?;
+        fs::write(dir.join("meta.json"), entry.meta_json())?;
+        Ok(entry)
+    })
 }
 
 /// Read all recorded store entries (skipping malformed ones quietly).
@@ -201,33 +191,33 @@ pub fn list(roots: &Roots) -> Vec<StoreEntry> {
         let Ok(text) = fs::read_to_string(&meta) else {
             continue;
         };
-        let Ok(j) = JSON::parse(&text) else { continue };
-        let get = |k: &str| j.get(k).and_then(Json::as_str).map(str::to_string).ok();
-        if let (Some(name), Some(reference), Some(o), Some(b)) =
-            (get("name"), get("ref"), get("out"), get("bin"))
-        {
+        if let Some(parsed) = parse_meta(&text) {
             out.push(StoreEntry {
                 id: ent.file_name().to_string_lossy().into_owned(),
-                name,
-                // Older records predate the version field; treat as unknown.
-                version: get("version").unwrap_or_default(),
-                reference,
-                out: o,
-                bin: b,
-                // Older records predate the rlib field; treat as no compiled artifact.
-                rlib: get("rlib").unwrap_or_default(),
-                // Older records predate the envelope; empty envelope is the default.
-                envelope: super::Envelope::Envelope {
-                    output_hash: get("output_hash").unwrap_or_default(),
-                    platform: get("platform").unwrap_or_default(),
-                    signature: get("signature").unwrap_or_default(),
-                    provenance: get("provenance").unwrap_or_default(),
-                },
+                name: parsed.name,
+                version: parsed.version,
+                reference: parsed.reference,
+                out: parsed.out,
+                bin: parsed.bin,
+                rlib: parsed.rlib,
+                envelope: parsed.envelope,
+                realized_at: parsed.realized_at.unwrap_or(0),
+                last_used_at: parsed.last_used_at.unwrap_or(0),
             });
         }
     }
     out.sort_by(|a, b| a.id.cmp(&b.id));
     out
+}
+
+/// Return the newest recorded object for an exact ref, if one is already in
+/// the hangar. U29 uses this before provider dispatch so a lock-satisfied
+/// offline run never asks Nix/git for metadata.
+pub fn find_by_reference(roots: &Roots, reference: &str) -> Option<StoreEntry> {
+    list(roots)
+        .into_iter()
+        .filter(|e| e.reference == reference)
+        .max_by_key(|e| e.last_used_at)
 }
 
 /// One line of `jet hangar du` output: a realized object, its on-disk size, and
@@ -281,23 +271,295 @@ fn dir_size(path: &std::path::Path) -> u64 {
     total
 }
 
-/// Remove every recorded store entry; returns how many were removed.
-///
-/// Phase 1 temporary environments leave no GC roots, so "unused" means every
-/// recorded entry. The realized Nix outputs themselves live in `/nix/store`
-/// and are reclaimed by `nix store gc`; Jetpack only drops its own records.
-pub fn clean(roots: &Roots) -> std::io::Result<usize> {
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct CleanReport {
+    pub removed_objects: usize,
+    pub removed_bytes: u64,
+    pub swept_tmp: usize,
+    pub swept_tmp_bytes: u64,
+    pub optimized_files: usize,
+    pub optimized_bytes: u64,
+}
+
+impl CleanReport {
+    pub fn is_empty(&self) -> bool {
+        self.removed_objects == 0
+            && self.removed_bytes == 0
+            && self.swept_tmp == 0
+            && self.swept_tmp_bytes == 0
+            && self.optimized_files == 0
+            && self.optimized_bytes == 0
+    }
+}
+
+/// D-JPK-GC1=B / U22: collect only unreferenced stale hangar objects, sweep
+/// orphan build scratch, then optimize duplicate Jet-owned files. Lockfile
+/// reachable entries and unknown legacy records are retained.
+pub fn clean(roots: &Roots) -> std::io::Result<CleanReport> {
+    super::RuntimePolicy::with_lock(&roots.root, "hangar-clean", || clean_unlocked(roots))
+}
+
+fn clean_unlocked(roots: &Roots) -> std::io::Result<CleanReport> {
     let store = roots.hangar_dir();
-    let mut removed = 0;
-    if let Ok(rd) = fs::read_dir(&store) {
-        for ent in rd.flatten() {
-            if ent.path().is_dir() {
-                fs::remove_dir_all(ent.path())?;
-                removed += 1;
+    fs::create_dir_all(&store)?;
+    let live = current_lock_roots();
+    let mut report = sweep_build_scratch(&store)?;
+    let now = now_secs();
+
+    for ent in object_dirs(&store)? {
+        let path = ent.path();
+        let id = ent.file_name().to_string_lossy().into_owned();
+        let Some(meta) = read_meta(&path) else {
+            continue;
+        };
+        if is_live(&id, &meta, &live) || meta.last_used_at.is_none() {
+            continue;
+        }
+        let last_used = meta.last_used_at.unwrap_or(now);
+        if now.saturating_sub(last_used) < STALE_AFTER.as_secs() {
+            continue;
+        }
+        let bytes = dir_size(&path);
+        fs::remove_dir_all(&path)?;
+        report.removed_objects += 1;
+        report.removed_bytes += bytes;
+    }
+
+    let opt = optimize_hangar(&store)?;
+    report.optimized_files += opt.optimized_files;
+    report.optimized_bytes += opt.optimized_bytes;
+    Ok(report)
+}
+
+pub fn maybe_auto_clean(roots: &Roots) -> std::io::Result<Option<CleanReport>> {
+    super::RuntimePolicy::with_lock(&roots.root, "hangar-clean", || {
+        let hangar = roots.hangar_dir();
+        fs::create_dir_all(&hangar)?;
+        let stamp = hangar.join(AUTO_CLEAN_STAMP);
+        let now = SystemTime::now();
+        if std::env::var_os("JETPACK_AUTO_CLEAN_ALWAYS").is_none() {
+            if let Ok(meta) = fs::metadata(&stamp) {
+                if let Ok(modified) = meta.modified() {
+                    if now.duration_since(modified).unwrap_or_default() < AUTO_CLEAN_AFTER {
+                        return Ok(None);
+                    }
+                }
+            }
+        }
+        let report = clean_unlocked(roots)?;
+        let _ = fs::write(stamp, now_secs().to_string());
+        Ok(Some(report))
+    })
+}
+
+fn sweep_build_scratch(hangar: &Path) -> std::io::Result<CleanReport> {
+    let root = hangar.join(BUILD_SCRATCH_DIR);
+    let mut report = CleanReport::default();
+    let Ok(rd) = fs::read_dir(&root) else {
+        return Ok(report);
+    };
+    for ent in rd.flatten() {
+        let path = ent.path();
+        if path.join(ACTIVE_TMP_MARKER).exists() {
+            continue;
+        }
+        let bytes = dir_size(&path);
+        if path.is_dir() {
+            fs::remove_dir_all(&path)?;
+        } else {
+            fs::remove_file(&path)?;
+        }
+        report.swept_tmp += 1;
+        report.swept_tmp_bytes += bytes;
+    }
+    Ok(report)
+}
+
+fn optimize_hangar(hangar: &Path) -> std::io::Result<CleanReport> {
+    let mut seen: BTreeMap<(u64, String), PathBuf> = BTreeMap::new();
+    let mut report = CleanReport::default();
+    for obj in object_dirs(hangar)? {
+        for file in files_under(&obj.path()) {
+            if file.file_name().and_then(|n| n.to_str()) == Some("meta.json") {
+                continue;
+            }
+            let Ok(meta) = fs::metadata(&file) else {
+                continue;
+            };
+            if !meta.is_file() || meta.len() == 0 {
+                continue;
+            }
+            let Ok(bytes) = fs::read(&file) else { continue };
+            let key = (meta.len(), SHA256::sha256_hex(&bytes));
+            if let Some(first) = seen.get(&key) {
+                if hardlink_replace(first, &file).is_ok() {
+                    report.optimized_files += 1;
+                    report.optimized_bytes += meta.len();
+                }
+            } else {
+                seen.insert(key, file);
             }
         }
     }
-    Ok(removed)
+    Ok(report)
+}
+
+fn hardlink_replace(first: &Path, file: &Path) -> std::io::Result<()> {
+    if first == file {
+        return Ok(());
+    }
+    let tmp = file.with_extension(format!("jet-dedup-{}", std::process::id()));
+    fs::rename(file, &tmp)?;
+    match fs::hard_link(first, file) {
+        Ok(()) => {
+            let _ = fs::remove_file(&tmp);
+            Ok(())
+        }
+        Err(e) => {
+            let _ = fs::rename(&tmp, file);
+            Err(e)
+        }
+    }
+}
+
+fn object_dirs(hangar: &Path) -> std::io::Result<Vec<fs::DirEntry>> {
+    let mut out = Vec::new();
+    if let Ok(rd) = fs::read_dir(hangar) {
+        for ent in rd.flatten() {
+            let path = ent.path();
+            let name = ent.file_name().to_string_lossy().into_owned();
+            if path.is_dir() && name != BUILD_SCRATCH_DIR {
+                out.push(ent);
+            }
+        }
+    }
+    out.sort_by_key(|e| e.file_name());
+    Ok(out)
+}
+
+fn files_under(root: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    if let Ok(rd) = fs::read_dir(root) {
+        for ent in rd.flatten() {
+            let p = ent.path();
+            if p.is_dir() {
+                out.extend(files_under(&p));
+            } else {
+                out.push(p);
+            }
+        }
+    }
+    out
+}
+
+#[derive(Debug, Clone)]
+struct ParsedMeta {
+    name: String,
+    version: String,
+    reference: String,
+    out: String,
+    bin: String,
+    rlib: String,
+    envelope: super::Envelope::Envelope,
+    realized_at: Option<u64>,
+    last_used_at: Option<u64>,
+}
+
+fn read_meta(dir: &Path) -> Option<ParsedMeta> {
+    let text = fs::read_to_string(dir.join("meta.json")).ok()?;
+    parse_meta(&text)
+}
+
+fn parse_meta(text: &str) -> Option<ParsedMeta> {
+    let j = JSON::parse(text).ok()?;
+    let get = |k: &str| j.get(k).and_then(Json::as_str).map(str::to_string).ok();
+    let name = get("name")?;
+    let reference = get("ref")?;
+    let out = get("out")?;
+    let bin = get("bin")?;
+    Some(ParsedMeta {
+        name,
+        version: get("version").unwrap_or_default(),
+        reference,
+        out,
+        bin,
+        rlib: get("rlib").unwrap_or_default(),
+        envelope: super::Envelope::Envelope {
+            output_hash: get("output_hash").unwrap_or_default(),
+            platform: get("platform").unwrap_or_default(),
+            signature: get("signature").unwrap_or_default(),
+            provenance: get("provenance").unwrap_or_default(),
+        },
+        realized_at: get("realized_at").and_then(|s| s.parse().ok()),
+        last_used_at: get("last_used_at").and_then(|s| s.parse().ok()),
+    })
+}
+
+#[derive(Default)]
+struct LiveRoots {
+    ids: BTreeSet<String>,
+    output_hashes: BTreeSet<String>,
+    name_versions: BTreeSet<(String, String)>,
+}
+
+fn current_lock_roots() -> LiveRoots {
+    let Ok(cwd) = std::env::current_dir() else {
+        return LiveRoots::default();
+    };
+    let Some(lock_path) = nearest_lock_path(&cwd) else {
+        return LiveRoots::default();
+    };
+    let Ok(raw) = fs::read_to_string(lock_path) else {
+        return LiveRoots::default();
+    };
+    let Ok(lock) = crate::Lock::parse(&raw) else {
+        return LiveRoots::default();
+    };
+    let mut roots = LiveRoots::default();
+    for pkg in lock.packages {
+        roots.name_versions.insert((pkg.name, pkg.version));
+        if let Some(env) = pkg.envelope {
+            if !env.output_hash.is_empty() {
+                roots.output_hashes.insert(env.output_hash);
+            }
+        }
+    }
+    for toolchain in lock.toolchains {
+        roots.ids.insert(toolchain.id);
+        if !toolchain.envelope.output_hash.is_empty() {
+            roots.output_hashes.insert(toolchain.envelope.output_hash);
+        }
+    }
+    roots
+}
+
+fn nearest_lock_path(start: &Path) -> Option<PathBuf> {
+    let mut dir = Some(start);
+    while let Some(current) = dir {
+        let lock = lock_path(current);
+        if lock.is_file() {
+            return Some(lock);
+        }
+        dir = current.parent();
+    }
+    None
+}
+
+fn is_live(id: &str, meta: &ParsedMeta, roots: &LiveRoots) -> bool {
+    roots.ids.contains(id)
+        || (!meta.envelope.output_hash.is_empty()
+            && roots.output_hashes.contains(&meta.envelope.output_hash))
+        || (meta.envelope.output_hash.is_empty()
+            && roots
+                .name_versions
+                .contains(&(meta.name.clone(), meta.version.clone())))
+}
+
+fn now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
 }
 
 #[cfg(test)]
@@ -335,7 +597,7 @@ mod tests {
     }
 
     #[test]
-    fn clean_removes_entries() {
+    fn clean_keeps_fresh_entries() {
         let (roots, _g) = temp_roots();
         record(
             &roots,
@@ -359,8 +621,9 @@ mod tests {
             &super::super::Envelope::Envelope::default(),
         )
         .unwrap();
-        assert_eq!(clean(&roots).unwrap(), 2);
-        assert!(list(&roots).is_empty());
+        let report = clean(&roots).unwrap();
+        assert_eq!(report.removed_objects, 0);
+        assert_eq!(list(&roots).len(), 2);
     }
 
     #[test]

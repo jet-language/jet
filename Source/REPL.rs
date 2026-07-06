@@ -787,7 +787,7 @@ fn classify(text: &str, step: usize) -> Result<InputKind, Vec<Diagnostic>> {
     }
 
     // Hard rejects (D-REPL6=A) — these fire before imports so e.g.
-    // `use core.fs as fs` reports E1802 (the module needs the real compiler).
+    // `use core.files as fs` reports E1802 (the module needs the real compiler).
     if let Some(feature) = reject_feature(trimmed) {
         return Ok(InputKind::Reject(feature.to_string()));
     }

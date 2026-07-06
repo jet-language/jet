@@ -923,7 +923,10 @@ mod tests {
         // A registry where `EncodeOnlyType` is local but never implements Decode.
         let mut reg = TraitRegistry::default();
         reg.local_types.insert("EncodeOnlyType".to_string());
-        assert_eq!(run_with_snapshot_and_registry(SNAP_ONE, &items, &reg), vec!["E0910"]);
+        assert_eq!(
+            run_with_snapshot_and_registry(SNAP_ONE, &items, &reg),
+            vec!["E0910"]
+        );
     }
 
     #[test]

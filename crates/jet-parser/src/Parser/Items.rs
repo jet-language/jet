@@ -12,6 +12,36 @@ pub(super) enum TargetMarker {
 }
 
 impl<'a> Parser<'a> {
+    /// D-MEM1/S7 (D-NOALLOC-SEM1=A): `policy no_alloc;` — the file's
+    /// allocation floor. `no_alloc` is the only ratified policy name today;
+    /// any other name is an ordinary "expected X, found Y" parse error (the
+    /// full policy list is a follow-on ballot, not this stage's business).
+    fn policy_decl(&mut self) -> Result<Span, Diagnostic> {
+        let start = self.bump().span; // consume `policy`
+        match &self.peek().kind {
+            TokKind::Ident(n) if n == Syntax::POLICY_NO_ALLOC => {
+                let name_span = self.bump().span;
+                self.expect(TokKind::Semi, "after a `policy` declaration")?;
+                Ok(Span::new(start.start, name_span.end))
+            }
+            other => Err(Diagnostic::error(
+                "E0003",
+                format!(
+                    "expected `{}` after `{}`, found {}",
+                    Syntax::POLICY_NO_ALLOC,
+                    Syntax::KW_POLICY,
+                    describe(other)
+                ),
+                format!(
+                    "`{}` is the only ratified policy name today",
+                    Syntax::POLICY_NO_ALLOC
+                ),
+                format!("write `{} {}`", Syntax::KW_POLICY, Syntax::POLICY_NO_ALLOC),
+                Some(self.peek().span),
+            )),
+        }
+    }
+
     /// S16 (M6): `import "path" [as alias];` or `import name [as alias];`
     fn import_decl(&mut self) -> Result<crate::AST::ImportDecl, Diagnostic> {
         let start = self.bump().span; // consume `use`
@@ -142,7 +172,7 @@ impl<'a> Parser<'a> {
                                     inline_version: None,
                                 })
                             } else {
-                                // use core.fs as fs — Module path with dots
+                                // use core.files as fs — Module path with dots
                                 self.import_decl_module_path(start, first, first_span)
                             }
                         }
@@ -166,7 +196,7 @@ impl<'a> Parser<'a> {
                     }
                     // U11 (D-JPK-SCRIPTDEP1=A): `use pkg#version;` — an inline
                     // script dependency. Only the bare (no-dot) module-name
-                    // form takes a version; `use core.fs#1.0;` is nonsensical
+                    // form takes a version; `use core.files#1.0;` is nonsensical
                     // and isn't accepted here (the stray `#` falls through to
                     // a normal "expected `;`" parse error).
                     let inline_version = if matches!(self.peek().kind, TokKind::Hash) {
@@ -272,7 +302,7 @@ impl<'a> Parser<'a> {
             span: Span::new(start.start, end),
             is_pub: false,
             is_package_pub: false,
-            // A dotted module path (`use core.fs;`) never takes U11's `#version`
+            // A dotted module path (`use core.files;`) never takes U11's `#version`
             // — that's the single-segment `pkg` form only.
             inline_version: None,
         })
@@ -313,7 +343,8 @@ impl<'a> Parser<'a> {
                 ));
             }
         }
-        while matches!(self.peek().kind, TokKind::Dot) && matches!(self.peek2().kind, TokKind::Int(_))
+        while matches!(self.peek().kind, TokKind::Dot)
+            && matches!(self.peek2().kind, TokKind::Int(_))
         {
             self.bump(); // `.`
             let TokKind::Int(n) = self.peek().kind else {
@@ -336,6 +367,7 @@ impl<'a> Parser<'a> {
         let mut default_target: Option<String> = None;
         let mut html_path: Option<String> = None;
         let mut pub_file = false;
+        let mut no_alloc_policy: Option<Span> = None;
         loop {
             let r = match &self.peek().kind {
                 TokKind::Eof => break,
@@ -354,6 +386,32 @@ impl<'a> Parser<'a> {
                     Err(d) => {
                         self.diags.push(d);
                         self.sync_stmt();
+                        continue;
+                    }
+                },
+                // D-MEM1/S7 (D-NOALLOC-SEM1=A): `policy no_alloc;` — file-scoped
+                // allocation floor, parsed like `use`/`#PubFile` (not inside any
+                // `module { … }` body — only the top-level file item list).
+                TokKind::Ident(n) if n == Syntax::KW_POLICY => match self.policy_decl() {
+                    Ok(span) => {
+                        if let Some(first) = no_alloc_policy {
+                            self.diags.push(Diagnostic::error(
+                                "E0003",
+                                "only one `policy no_alloc` declaration is allowed per file"
+                                    .to_string(),
+                                "a file may declare its allocation floor once".to_string(),
+                                "remove the duplicate `policy no_alloc` line".to_string(),
+                                Some(span),
+                            ));
+                            let _ = first;
+                        } else {
+                            no_alloc_policy = Some(span);
+                        }
+                        continue;
+                    }
+                    Err(d) => {
+                        self.diags.push(d);
+                        self.sync_top();
                         continue;
                     }
                 },
@@ -1083,6 +1141,7 @@ impl<'a> Parser<'a> {
             pub_file,
             default_target,
             html_path,
+            no_alloc_policy,
         }
     }
 
@@ -2244,8 +2303,7 @@ impl<'a> Parser<'a> {
                     Diagnostic::error(
                         "E0003",
                         format!("`#Target(Os.{os_name})` is not a known native OS"),
-                        "native OS targets are `Os.Linux`, `Os.Macos`, or `Os.Windows`"
-                            .to_string(),
+                        "native OS targets are `Os.Linux`, `Os.Macos`, or `Os.Windows`".to_string(),
                         format!(
                             "write `#Target(Os.{})`, `#Target(Os.{})`, or `#Target(Os.{})`",
                             Syntax::TARGET_OS_LINUX,
@@ -2988,63 +3046,61 @@ impl<'a> Parser<'a> {
         } else {
             self.expect_ident("for a parameter name")?
         };
-        let (ty, ty_span, variadic, variadic_bound_list) = if matches!(
-            self.peek().kind,
-            TokKind::Colon
-        ) {
-            self.bump();
-            // D-MEM1: the capability sigil rides the type side — `name: &T`/`^T`.
-            // (Receivers carry it on `self` instead: `&self`, parsed above.)
-            if let Some(type_cap) = self.parse_capability_sigil() {
-                // A real pre-name marker (not the unmarked `Read` default) plus a
-                // type-side sigil is two markers (E0029).
-                if convention != AccessConvention::Read {
-                    self.diags.push(Diagnostic::error(
-                        "E0029",
-                        format!("`{}` has two capability markers", name),
-                        "a parameter's access capability is written once — on the type \
-                         (`name: &Type`), or on `self` for a receiver"
-                            .to_string(),
-                        "keep the sigil on the type and remove the other".to_string(),
-                        Some(name_span),
-                    ));
-                }
-                convention = type_cap;
-            }
-            // D-VARIADIC1: `name: ...T` — variadic rest parameter (last position only).
-            if matches!(self.peek().kind, TokKind::DotDotDot) {
+        let (ty, ty_span, variadic, variadic_bound_list) =
+            if matches!(self.peek().kind, TokKind::Colon) {
                 self.bump();
-                // D-ANY-JAI1/D-VARARGBOUND1: `...[TraitA, TraitB]` — an explicit
-                // trait-bound list. `[` never starts a legal *concrete* variadic
-                // element type here (list `[T]` and map `[K, V]` types don't make
-                // sense as a rest-parameter's own element type spelled this way),
-                // so this position always means a bound list. Bare `...Trait` /
-                // `...T` both go through `type_()` unchanged — sema tells a
-                // trait name from a concrete type the same way `resolve_type_name`
-                // already does elsewhere.
-                if matches!(self.peek().kind, TokKind::LBracket) {
-                    let (bounds, bracket_span) = self.parse_bracket_trait_bound_list()?;
-                    (Type::Named(String::new()), bracket_span, true, Some(bounds))
+                // D-MEM1: the capability sigil rides the type side — `name: &T`/`^T`.
+                // (Receivers carry it on `self` instead: `&self`, parsed above.)
+                if let Some(type_cap) = self.parse_capability_sigil() {
+                    // A real pre-name marker (not the unmarked `Read` default) plus a
+                    // type-side sigil is two markers (E0029).
+                    if convention != AccessConvention::Read {
+                        self.diags.push(Diagnostic::error(
+                            "E0029",
+                            format!("`{}` has two capability markers", name),
+                            "a parameter's access capability is written once — on the type \
+                         (`name: &Type`), or on `self` for a receiver"
+                                .to_string(),
+                            "keep the sigil on the type and remove the other".to_string(),
+                            Some(name_span),
+                        ));
+                    }
+                    convention = type_cap;
+                }
+                // D-VARIADIC1: `name: ...T` — variadic rest parameter (last position only).
+                if matches!(self.peek().kind, TokKind::DotDotDot) {
+                    self.bump();
+                    // D-ANY-JAI1/D-VARARGBOUND1: `...[TraitA, TraitB]` — an explicit
+                    // trait-bound list. `[` never starts a legal *concrete* variadic
+                    // element type here (list `[T]` and map `[K, V]` types don't make
+                    // sense as a rest-parameter's own element type spelled this way),
+                    // so this position always means a bound list. Bare `...Trait` /
+                    // `...T` both go through `type_()` unchanged — sema tells a
+                    // trait name from a concrete type the same way `resolve_type_name`
+                    // already does elsewhere.
+                    if matches!(self.peek().kind, TokKind::LBracket) {
+                        let (bounds, bracket_span) = self.parse_bracket_trait_bound_list()?;
+                        (Type::Named(String::new()), bracket_span, true, Some(bounds))
+                    } else {
+                        let (t, ts) = self.type_()?;
+                        (t, ts, true, None)
+                    }
                 } else {
                     let (t, ts) = self.type_()?;
-                    (t, ts, true, None)
+                    (t, ts, false, None)
                 }
+            } else if name == Syntax::KW_SELF {
+                // S27: receiver type is the owning struct/enum; sema fills it in.
+                (Type::Named(String::new()), name_span, false, None)
             } else {
-                let (t, ts) = self.type_()?;
-                (t, ts, false, None)
-            }
-        } else if name == Syntax::KW_SELF {
-            // S27: receiver type is the owning struct/enum; sema fills it in.
-            (Type::Named(String::new()), name_span, false, None)
-        } else {
-            return Err(Diagnostic::error(
-                "E0003",
-                format!("expected `:` after the parameter `{}`", name),
-                "every parameter except `self` needs a type after its name".to_string(),
-                format!("write `{}: Type`", name),
-                Some(name_span),
-            ));
-        };
+                return Err(Diagnostic::error(
+                    "E0003",
+                    format!("expected `:` after the parameter `{}`", name),
+                    "every parameter except `self` needs a type after its name".to_string(),
+                    format!("write `{}: Type`", name),
+                    Some(name_span),
+                ));
+            };
         // S61: optional trailing `= expr` default value.
         let default = if matches!(self.peek().kind, TokKind::Eq) {
             self.bump();
@@ -3504,7 +3560,10 @@ impl<'a> Parser<'a> {
     /// stamps the OS gate onto the resulting `ImplDef` afterward — no need to
     /// thread a new parameter through every `impl` parse path or its other
     /// caller (`Modules.rs`'s inline-module item loop calls this same helper).
-    pub(super) fn os_gated_impl(&mut self, os: crate::Syntax::OsTarget) -> Result<Item, Diagnostic> {
+    pub(super) fn os_gated_impl(
+        &mut self,
+        os: crate::Syntax::OsTarget,
+    ) -> Result<Item, Diagnostic> {
         // S6-R: a synthetic statement-terminator `;` may follow the marker
         // line (same as the `TokKind::Semi` skip at the top of the top-level
         // item loop) — swallow it before checking what actually follows.
@@ -4011,7 +4070,10 @@ impl<'a> Parser<'a> {
                 // set by the single-prefix `@PublishedSchema struct …` form
                 // (`published_schema_struct_def`). A schema published this way
                 // silently skipped E0910 migration validation. Mirror that form here.
-                if let Some(m) = markers.iter().find(|m| m.name == Syntax::ATTR_PUBLISHED_SCHEMA) {
+                if let Some(m) = markers
+                    .iter()
+                    .find(|m| m.name == Syntax::ATTR_PUBLISHED_SCHEMA)
+                {
                     s.is_published_schema = true;
                     s.published_schema_span = Some(m.span);
                 }

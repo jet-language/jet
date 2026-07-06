@@ -6,7 +6,9 @@ use super::*;
 use crate::Collections::is_map_key_type;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
-use crate::AST::{AccessConvention, Call, CallArg, EnumLitArg, Expr, IndexKind, StrPart, Type, UnOp};
+use crate::AST::{
+    AccessConvention, Call, CallArg, EnumLitArg, Expr, IndexKind, StrPart, Type, UnOp,
+};
 use std::collections::HashSet;
 
 impl<'a> Checker<'a> {
@@ -29,23 +31,17 @@ impl<'a> Checker<'a> {
         if !borrowed {
             if let Some(t) = &ty {
                 if !type_is_copy(t) && field_read_to_clone(e, self.registry, self.imports) {
+                    // D-CAP2 (D-MEM1/S4): the same `copy` node the user can write
+                    // explicitly — one mechanism for "duplicate this value",
+                    // whether the compiler inserts it or the user spells it.
                     let span = e.span();
                     let old = std::mem::replace(e, Expr::Absent(span));
-                    *e = Expr::MethodCall {
-                        receiver: Box::new(old),
-                        method: "clone".to_string(),
-                        method_span: span,
-                        type_args: Vec::new(),
-                        args: Vec::new(),
-                        recv_type: None,
-                        resolved_ret: None,
-                    };
+                    *e = Expr::Copy(Box::new(old), span);
                 }
             }
         }
         ty
     }
-
 
     pub(crate) fn infer_inner(&mut self, e: &mut Expr) -> Option<Type> {
         // D-EMPTYLIT1: an empty `[]` always parses as `Expr::ListLit`. When the
@@ -225,7 +221,9 @@ impl<'a> Checker<'a> {
                 };
                 let span = *str_span;
                 let old = std::mem::replace(e, Expr::Absent(span));
-                let Expr::Str(parts, _) = old else { unreachable!() };
+                let Expr::Str(parts, _) = old else {
+                    unreachable!()
+                };
                 // Rewrite to `Call { name: "Sql"|"Html", args }` — a literal
                 // segment then a hole, alternating, always closing on a
                 // literal (`literals.len() == holes.len() + 1`). Codegen
@@ -249,7 +247,13 @@ impl<'a> Checker<'a> {
                         StrPart::Interp(mut inner, _fmt) => {
                             args.push(mk_lit(std::mem::take(&mut cur_lit), span));
                             self.borrow_ctx = true;
+                            // D-MEM1 stage S5: a typed-text template hole reads
+                            // via Display (`str` has the impl too, see
+                            // `Prelude/Core.rs`) — safe for a string view.
+                            let was_view_read = self.allow_string_view_read;
+                            self.allow_string_view_read = true;
                             self.infer(&mut inner);
+                            self.allow_string_view_read = was_view_read;
                             args.push(CallArg {
                                 convention: AccessConvention::Read,
                                 span: inner.span(),
@@ -270,12 +274,28 @@ impl<'a> Checker<'a> {
                 });
                 Some(Type::Named(type_name))
             }
-            Expr::Str(parts, _) => {
+            Expr::Str(parts, str_span) => {
+                // D-MEM1/S7 (D-NOALLOC-SEM1=A): interpolation with at least one
+                // `{…}` hole builds a fresh `String` (unlike a plain literal
+                // with no holes, which is one constant piece of text — not
+                // "concatenation/interpolation that produces a new String").
+                if self.no_alloc && parts.iter().any(|p| matches!(p, StrPart::Interp(..))) {
+                    self.diags.push(no_alloc_violation(
+                        "string interpolation allocates a new `String`".to_string(),
+                        *str_span,
+                    ));
+                }
                 for p in parts.iter_mut() {
                     if let StrPart::Interp(inner, fmt) = p {
                         // Interpolation borrows; never moves.
                         self.borrow_ctx = true;
+                        // D-MEM1 stage S5: `"{d}"` reads `d` via Display/Debug
+                        // (`str` has both impls too, see `Prelude/Core.rs`) —
+                        // safe for a string view, unlike most other reads.
+                        let was_view_read = self.allow_string_view_read;
+                        self.allow_string_view_read = true;
                         let t = self.infer(inner);
+                        self.allow_string_view_read = was_view_read;
                         if let Some(t) = t {
                             match fmt {
                                 crate::AST::StrFormat::Display => {
@@ -391,7 +411,8 @@ impl<'a> Checker<'a> {
                         "after a value moves somewhere else, the old name no longer holds it"
                             .to_string(),
                         format!(
-                            "give away a copy instead (`{}.clone()`) where it moved",
+                            "give away a copy instead (`{} {}`) where it moved",
+                            Syntax::KW_COPY,
                             name
                         ),
                         Some(*span),
@@ -421,6 +442,19 @@ impl<'a> Checker<'a> {
                 // through the method-call path below, so reaching here means a
                 // plain read of the view's value.)
                 self.check_view_use(name, *span);
+                // D-MEM1 stage S5: E2307 — reading a string-view name anywhere
+                // other than the two positions its bare `&str` Rust place
+                // supports (`allow_string_view_read`, set only around chaining
+                // `.trim()`/`.after()`/`.before()` and `copy`'s operand). This
+                // is the ONE general choke point for the whole class of uses
+                // that would otherwise mismatch a callee's `&String`/`String`
+                // signature at the Rust level (list/tuple literal elements,
+                // call arguments, plain assignment, struct fields not already
+                // caught earlier, …) — every one of them reads this same
+                // `Expr::Ident` node to get the name's value.
+                if self.is_string_view(name) && !self.allow_string_view_read {
+                    self.report_string_view_unsupported_use(name, "be used directly here", *span);
+                }
                 if let Some(info) = self.lookup(name) {
                     return Some(info.ty.clone());
                 }
@@ -605,6 +639,50 @@ impl<'a> Checker<'a> {
                 let inner_t = self.infer(inner)?;
                 Some(crate::Sema::ptr_type(inner_t))
             }
+            Expr::Copy(inner, span) => {
+                // D-CAP2 (D-MEM1/S4): `copy x` explicitly duplicates `x` into a
+                // fresh, independent value — a temporary, so it never needs `^`
+                // and never trips E0209 regardless of what `inner` is. Suppress
+                // `infer`'s automatic owning-field-read `.clone()` wrap: this
+                // expression already IS that clone, and wrapping again would
+                // double-clone in the generated Rust.
+                self.borrow_ctx = true;
+                // D-MEM1 stage S5: `copy d` on a string-view name is the one
+                // legal way to materialize it into an owned `String` — the
+                // general E2307 check on a bare `Expr::Ident` read must not
+                // fire for `copy`'s own operand.
+                let was_view_read = self.allow_string_view_read;
+                self.allow_string_view_read = true;
+                let inner_t = self.infer(inner);
+                self.allow_string_view_read = was_view_read;
+                let inner_t = inner_t?;
+                if !type_is_copy(&inner_t) && !is_cloneable(&inner_t, self.registry, self.structs) {
+                    self.diags.push(Diagnostic::error(
+                        "E0211",
+                        format!("`{}` can't be copied", inner_t.show()),
+                        "copy needs a value made only of duplicable parts; this type holds something Jet can't duplicate — a function value, a trait value, or a type from outside Jet".to_string(),
+                        format!(
+                            "move it instead (`{}name` if this is its last use), or change the type so every part can be copied",
+                            Syntax::SIGIL_MOVE
+                        ),
+                        Some(*span),
+                    ));
+                    return None;
+                }
+                // D-MEM1/S7 (D-NOALLOC-SEM1=A): `copy` of a heap-owning type
+                // is itself an allocation (the whole point of `.clone()`-style
+                // duplication) — flagged regardless of whether it's cloneable.
+                if self.no_alloc && type_owns_heap(&inner_t, self.registry) {
+                    self.diags.push(no_alloc_violation(
+                        format!(
+                            "`copy` of `{}` allocates — it owns heap data",
+                            inner_t.show()
+                        ),
+                        *span,
+                    ));
+                }
+                Some(inner_t)
+            }
             Expr::PtrFromAddr {
                 alias,
                 alias_span,
@@ -678,6 +756,19 @@ impl<'a> Checker<'a> {
                 recv_type,
                 resolved_ret,
             } => {
+                // D-MEM1/S7 (D-NOALLOC-SEM1=A): `.push`/`.insert` may grow a
+                // List/Map's backing heap allocation — capacity headroom isn't
+                // statically provable in general, so ANY call of this shape is
+                // flagged, full stop (no receiver-type check needed).
+                if self.no_alloc && matches!(method.as_str(), "push" | "insert") {
+                    self.diags.push(no_alloc_violation(
+                        format!(
+                            "`.{}` may allocate to grow this collection's heap allocation",
+                            method
+                        ),
+                        *method_span,
+                    ));
+                }
                 // D-TAG1: a payload leaf under a group — `Damage.Fire.Burn(5)`
                 // parses as a method call on the `Damage.Fire` field chain. Fold
                 // chain + method into one dotted variant path and rewrite to an
@@ -757,6 +848,17 @@ impl<'a> Checker<'a> {
                         }
                     }
                 }
+                // D-MEM1/S7 (D-NOALLOC-SEM1=A): a struct literal for a type
+                // that owns heap data (directly or transitively) allocates.
+                if self.no_alloc && type_owns_heap(&Type::Named(type_name.clone()), self.registry) {
+                    self.diags.push(no_alloc_violation(
+                        format!(
+                            "constructing `{}` here allocates — it owns heap data",
+                            type_name
+                        ),
+                        *span,
+                    ));
+                }
                 Some(self.check_struct_lit(
                     type_name,
                     type_args,
@@ -802,6 +904,17 @@ impl<'a> Checker<'a> {
                         }
                     }
                 }
+                // D-MEM1/S7 (D-NOALLOC-SEM1=A): an enum literal for a type
+                // that owns heap data (directly or transitively) allocates.
+                if self.no_alloc && type_owns_heap(&Type::Named(type_name.clone()), self.registry) {
+                    self.diags.push(no_alloc_violation(
+                        format!(
+                            "constructing `{}` here allocates — it owns heap data",
+                            type_name
+                        ),
+                        *span,
+                    ));
+                }
                 Some(self.check_enum_lit(type_name, variant, args, *span))
             }
             // D-TAINT1: `#Tainted expr` — the value-fact tag is type-transparent.
@@ -836,7 +949,10 @@ impl<'a> Checker<'a> {
                 } else {
                     self.diags.push(Diagnostic::error(
                         "E0308",
-                        format!("bare `{}` needs a known optional type here", Syntax::LIT_NULL),
+                        format!(
+                            "bare `{}` needs a known optional type here",
+                            Syntax::LIT_NULL
+                        ),
                         format!(
                             "`{}` only fits where a `T?` is expected (S32)",
                             Syntax::LIT_NULL
@@ -1414,6 +1530,27 @@ impl<'a> Checker<'a> {
                 }
                 Some((**elem).clone())
             }
+            // D-MEM1 S6 (D-POOLID-API1=A): `pool[id]` — generation-checked read,
+            // panics at runtime on a stale `Id<T>` (mirrors the array-oob panic
+            // precedent, not a new diagnostic code — see `jet_pool_get`).
+            Type::Apply { name, args } if name == "Pool" && args.len() == 1 => {
+                *kind = IndexKind::Pool;
+                let is_matching_id = matches!(&idx_ty, Type::Apply { name, args: id_args } if name == "Id" && id_args.first() == args.first());
+                if !is_matching_id {
+                    self.diags.push(Diagnostic::error(
+                        "E0112",
+                        format!(
+                            "`Pool` indexes need a matching `Id<T>`, not {}",
+                            idx_ty.show()
+                        ),
+                        "a pool slot is only reached through the `Id<T>` its own `.add()` returned"
+                            .to_string(),
+                        "index with the `Id<T>` handle from `.add(...)`".to_string(),
+                        Some(index.span()),
+                    ));
+                }
+                Some(args[0].clone())
+            }
             // D-DYNARRAY1: `window[i]` on a `View<T>` — read-only, same bounds
             // discipline as list indexing (runtime panic on out-of-range).
             Type::Apply { name, args } if name == "View" && args.len() == 1 => {
@@ -1609,9 +1746,6 @@ impl<'a> Checker<'a> {
         member: &str,
         span: Span,
     ) -> Option<Type> {
-        if member == "clone" {
-            return self.infer(inner);
-        }
         if let Expr::Ident(root, _) = &**inner {
             if root == Syntax::FOREIGN_OS && member == "environ" {
                 self.diags.push(Diagnostic::error(

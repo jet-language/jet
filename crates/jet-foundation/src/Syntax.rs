@@ -133,6 +133,12 @@ pub const SIZED_NUMERIC_TYPES: &[&str] = &[
 pub const SIGIL_MOVE: &str = "^";
 pub const SIGIL_WRITE: &str = "&";
 
+/// D-CAP2 (ratified, part of D-MEM1/S4): the one copy spelling — `copy x`
+/// produces an owned, independent value. A temporary (no named binding
+/// survives to be used-after), so it never needs `^` and never trips E0209.
+/// `.clone()` is not user-typable Jet syntax (I8 — one way to mean it).
+pub const KW_COPY: &str = "copy";
+
 /// S10 (M2) → D-MEM1: the retired write keyword. Recognized only for the E0056
 /// teaching error that points at the `&` sigil.
 pub const KW_MUTATE: &str = "mut";
@@ -717,6 +723,15 @@ pub const FOREIGN_NOT: &str = "not";
 pub const KW_USE: &str = "use";
 pub const KW_AS: &str = "as";
 
+/// D-MEM1/S7 (D-NOALLOC-SEM1=A, ratified 2026-07-04): `policy no_alloc;` — a
+/// module-level allocation floor, file-scoped like `web_target_ceiling`/
+/// `#PubFile`. Sema flags allocation-shaped expressions written directly in
+/// this file's own function bodies (E0921) — local only, never follows calls
+/// into other modules. `no_alloc` is the only ratified policy name; the full
+/// policy list is a follow-on ballot (an unknown name after `policy` is E0003).
+pub const KW_POLICY: &str = "policy";
+pub const POLICY_NO_ALLOC: &str = "no_alloc";
+
 /// S51 / D-CORENS-CANON1: compiler-known `core.*` library root.
 pub const CORE_SHORT: &str = "core";
 pub const CORE_CANONICAL_ROOT: &str = "core";
@@ -1284,11 +1299,20 @@ pub const JETPACK_VERBS: &[&str] = &[
     "clean",
     "add",
     "remove",
+    "update",
+    "outdated",
+    "search",
+    "info",
+    "explain",
+    "logs",
     "push",
     OS_SUBCOMMAND,
     DEV_SUBCOMMAND,
     CONFIG_SUBCOMMAND,
     BRIDGE_SUBCOMMAND,
+    SERVICES_SUBCOMMAND,
+    SECRETS_SUBCOMMAND,
+    IMAGE_SUBCOMMAND,
 ];
 
 /// U16 (card c9jetpackgates): `jet env -p <pkg>...` — ad-hoc nixpkgs packages
@@ -1303,6 +1327,10 @@ pub const ENV_FLAG_FLAKE: &str = "--flake";
 /// U16: enter an isolated shell with no host environment leaking in —
 /// threaded straight through to the underlying `nix` invocation.
 pub const ENV_FLAG_PURE: &str = "--pure";
+
+/// U27 (D-JPK-BUILDDBG1=A): preserve failed build scratch and open a shell in
+/// the failing build environment.
+pub const BUILD_FLAG_SHELL_ON_FAIL: &str = "--shell-on-fail";
 
 /// U16: `jetpack bridge <verb>` — best-effort translators from a foreign
 /// ecosystem descriptor into jetpack's own manifest form.
@@ -1323,9 +1351,77 @@ pub const FOREIGN_DEVENV_FILE: &str = "devenv.nix";
 /// to `fn run()`.
 pub const DEV_SUBCOMMAND: &str = "dev";
 
+/// U12 (card c9jetpackgates): `jetpack services <verb>` supervises the
+/// project's dev `services:` processes under `.jet/services/<name>/` —
+/// `up`/`down` start/stop the enabled set (or one named service), `health`
+/// one-shot probes readiness, `logs` prints a service's captured
+/// stdout/stderr. Distinct from the jetos `system.*.services` tier (Phase D,
+/// untouched): this dev tier runs plain child processes via `std::process`,
+/// never a system service manager.
+pub const SERVICES_SUBCOMMAND: &str = "services";
+/// D-JPK-IMAGE1 (=A, ratified 2026-07-01, c9jetpackgates): `jet image <name>`
+/// builds the named `image.<name>` module contribution into a hangar OCI
+/// layout (the `.Oci` kind only — `.Iso` rides the jetos installer tier,
+/// Phase D, owner-gated, untouched). `--push <ref>` is honestly gated (E1268)
+/// until TLS support lands for registry pushes.
+pub const IMAGE_SUBCOMMAND: &str = "image";
+pub const IMAGE_FLAG_PUSH: &str = "--push";
+
+pub const SERVICES_VERB_UP: &str = "up";
+pub const SERVICES_VERB_DOWN: &str = "down";
+pub const SERVICES_VERB_HEALTH: &str = "health";
+pub const SERVICES_VERB_LOGS: &str = "logs";
+pub const SERVICES_VERBS: &[&str] = &[
+    SERVICES_VERB_UP,
+    SERVICES_VERB_DOWN,
+    SERVICES_VERB_HEALTH,
+    SERVICES_VERB_LOGS,
+];
+
+/// U12: the per-project supervised-services state dir name, nested under the
+/// project's `.jet/` managed folder — `.jet/services/<name>/{pid,stdout.log,
+/// stderr.log,data/}`.
+pub const SERVICES_STATE_DIR: &str = "services";
+
+/// U13 (D-JPK-SECRETCRYPTO1, card c9jetpackgates): `jetpack secrets <verb>` —
+/// the encrypted-repo-secrets engine (`.jet/secrets.age`, age-style crypto
+/// bridge). `keygen` mints a local identity, `recipients add/list` manage the
+/// committed recipients file, `set`/`get` upsert/read one entry (re-encrypting
+/// the whole store each `set`).
+pub const SECRETS_SUBCOMMAND: &str = "secrets";
+pub const SECRETS_VERB_KEYGEN: &str = "keygen";
+pub const SECRETS_VERB_SET: &str = "set";
+pub const SECRETS_VERB_GET: &str = "get";
+pub const SECRETS_VERB_RECIPIENTS: &str = "recipients";
+pub const SECRETS_VERBS: &[&str] = &[
+    SECRETS_VERB_KEYGEN,
+    SECRETS_VERB_SET,
+    SECRETS_VERB_GET,
+    SECRETS_VERB_RECIPIENTS,
+];
+pub const SECRETS_RECIPIENTS_VERB_ADD: &str = "add";
+pub const SECRETS_RECIPIENTS_VERB_LIST: &str = "list";
+pub const SECRETS_RECIPIENTS_VERBS: &[&str] =
+    &[SECRETS_RECIPIENTS_VERB_ADD, SECRETS_RECIPIENTS_VERB_LIST];
+/// U13: the `--force` flag on `jetpack secrets keygen`, overwriting an
+/// existing identity. Reuses the bare string rather than minting a new flag
+/// constant family — mirrors `jet keygen --force`'s own flag spelling
+/// (`Source/CLI.rs`), kept a plain literal there too.
+pub const SECRETS_FLAG_FORCE: &str = "--force";
+
+/// U13: env-namespace field name — `secrets: ["name", …]` under an
+/// `env.<name>` role-module, the names this env expects to find in the
+/// project's encrypted store (validated at env entry, E1263 if any is
+/// missing).
+pub const ENV_FIELD_SECRETS: &str = "secrets";
+
 /// U19: `jetpack config <verb>` — today only `trust` pattern management.
 pub const CONFIG_SUBCOMMAND: &str = "config";
 pub const CONFIG_VERB_TRUST: &str = "trust";
+/// U28 / D-JPK-NODAEMON1=A: sandbox fallback policy lives under `jetpack config
+/// sandbox`; `require` hard-fails when unprivileged sandboxing is unavailable,
+/// `allow` permits the explicit L0205 fallback warning.
+pub const CONFIG_VERB_SANDBOX: &str = "sandbox";
 pub const CONFIG_TRUST_VERB_ADD: &str = "add";
 pub const CONFIG_TRUST_VERB_LIST: &str = "list";
 pub const CONFIG_TRUST_VERB_REMOVE: &str = "remove";
@@ -1333,6 +1429,14 @@ pub const CONFIG_TRUST_VERBS: &[&str] = &[
     CONFIG_TRUST_VERB_ADD,
     CONFIG_TRUST_VERB_LIST,
     CONFIG_TRUST_VERB_REMOVE,
+];
+pub const CONFIG_SANDBOX_VERB_REQUIRE: &str = "require";
+pub const CONFIG_SANDBOX_VERB_ALLOW: &str = "allow";
+pub const CONFIG_SANDBOX_VERB_STATUS: &str = "status";
+pub const CONFIG_SANDBOX_VERBS: &[&str] = &[
+    CONFIG_SANDBOX_VERB_REQUIRE,
+    CONFIG_SANDBOX_VERB_ALLOW,
+    CONFIG_SANDBOX_VERB_STATUS,
 ];
 
 /// U19: the one-shot bypass flag for the env/dev trust gate — never persists
@@ -1452,6 +1556,24 @@ pub const SYSTEM_FIELD_OPTIONS: &str = "options";
 /// U12 (ratified 2026-06-16): the required first field of every `Service` record.
 pub const SERVICE_FIELD_ENABLE: &str = "enable";
 
+/// U12 (ratified 2026-06-16 — supervised-services slice, card c9jetpackgates):
+/// the recognized fields of a **dev-supervised** `Service` (an entry under an
+/// `env.<name>` role-module's `services:` map). `Service` stays the one
+/// ratified open record either way (same grammar as `system.*.services`,
+/// `SYSTEM_FIELD_SERVICES`/`SERVICE_FIELD_ENABLE` reused verbatim) — only the
+/// dev-runtime tier (`Jetpack::Services`) interprets these particular keys,
+/// to start/probe/stop the supervised process: `ports` (the `[Int]` TCP ports
+/// it listens on), `init` (the shell command that starts it), `shutdown` (the
+/// shell command that stops it, else a plain signal), `data_dir` (its
+/// persisted-state directory, else `.jet/services/<name>/data`), and `ready`
+/// (a shell command polled until it exits 0 — the readiness contract, else a
+/// TCP probe on `ports[0]`, else a bare process-alive check).
+pub const DEV_SERVICE_FIELD_PORTS: &str = "ports";
+pub const DEV_SERVICE_FIELD_INIT: &str = "init";
+pub const DEV_SERVICE_FIELD_SHUTDOWN: &str = "shutdown";
+pub const DEV_SERVICE_FIELD_DATA_DIR: &str = "data_dir";
+pub const DEV_SERVICE_FIELD_READY: &str = "ready";
+
 /// U13 (ratified 2026-06-16): the typed platform values a `System.target` (and a
 /// cross-compile `Image.target`) may hold — `linux.x64` / `linux.arm64`. Written
 /// as a dotted typed value (an OS namespace `.` an arch), never a quoted string.
@@ -1471,6 +1593,31 @@ pub const IMAGE_FIELD_FORMAT: &str = "format";
 pub const IMAGE_FORMAT_ISO: &str = "iso";
 pub const IMAGE_FORMAT_QCOW: &str = "qcow";
 pub const IMAGE_FORMAT_RAW: &str = "raw";
+
+/// D-JPK-IMAGE1 (=A, ratified 2026-07-01, c9jetpackgates): the keyword after
+/// `from:` that selects the OCI-container referent (`from: packages.<name>`,
+/// the sibling of the original `from: system.<name>`, `NS_SYSTEM`).
+pub const IMAGE_FROM_PACKAGES: &str = "packages";
+
+/// D-JPK-IMAGE1: an `Image`'s optional `kind:` — a leading-dot enum literal
+/// (`.Oci`/`.Iso`, D-ENUMDOT2) picking which referent `from:` names. Omitted,
+/// it infers from `from:` itself (`system.*` → Iso, `packages.*` → Oci); written,
+/// it must agree with `from:` or name a real kind (E1266 `image-unknown-kind`).
+pub const IMAGE_KIND_ISO: &str = "Iso";
+pub const IMAGE_KIND_OCI: &str = "Oci";
+
+/// D-JPK-IMAGE1: the `.Oci`-only fields — exposed TCP ports (`[Int]`), env vars
+/// (a `[KEY: "value"]` map), extra files layered into the image (`[String]`
+/// project-relative paths), and an optional base image escape hatch
+/// (`base: oci("<ref>")`, unrealized — no registry-pull client yet, D-JPK-
+/// RINGSHIP1/D-JPK-BUILDTOOL1 territory, honestly gated rather than faked).
+pub const IMAGE_FIELD_KIND: &str = "kind";
+pub const IMAGE_FIELD_EXPOSE: &str = "expose";
+pub const IMAGE_FIELD_ENV_VARS: &str = "env_vars";
+pub const IMAGE_FIELD_FILES: &str = "files";
+pub const IMAGE_FIELD_BASE: &str = "base";
+/// The `oci(...)` call name inside `base: oci("<ref>")`.
+pub const IMAGE_BASE_FN: &str = "oci";
 
 /// U3 (ratified 2026-06-16): project environment file (`env` namespace) and the
 /// master jetos system config (`system`/`image` namespaces, default dir ~/.jet/).
@@ -1566,10 +1713,11 @@ pub const MANIFEST_BLOCK_PAYLOAD: &str = "payload";
 pub const MANIFEST_BLOCK_PACKAGES: &str = "packages";
 
 /// D-TGT1/D-TGT2 (ratified 2026-06-21): a package's build targets, replacing the
-/// removed `kind:` (U10). The five shipped targets — `library` is imported for its
+/// removed `kind:` (U10). The six shipped targets — `library` is imported for its
 /// code, `executable` installs a binary on PATH, `test`/`example` build their own
-/// artifacts, `benchmark` (c80, D-TGT2) points `jet bench` at the package entry.
-/// Written as a bare keyword (`deploy: executable`, D-TGT3) or inside a
+/// artifacts, `benchmark` (c80, D-TGT2) points `jet bench` at the package entry,
+/// `plugin` (c81, D-PLUGIN1/D-DEP-WASM1) builds a sandboxed WASM Component Model
+/// module. Written as a bare keyword (`deploy: executable`, D-TGT3) or inside a
 /// `{ targets: [ … ] }` list.
 pub const TARGET_LIBRARY: &str = "library";
 pub const TARGET_EXECUTABLE: &str = "executable";
@@ -1579,11 +1727,19 @@ pub const TARGET_EXAMPLE: &str = "example";
 /// target that routes `jet bench` at the package entry — same engine as `#Bench`/
 /// `jet bench file.jet`, now addressable from a `packages:` declaration.
 pub const TARGET_BENCHMARK: &str = "benchmark";
+/// D-PLUGIN1=B / D-DEP-WASM1=A (ratified 2026-06-25; backend shipped c81): a
+/// package built as `plugin` compiles to a sandboxed `wasm32` Component Model
+/// module (wasmtime host, typed `.wit` contract) instead of a native binary.
+/// Safe by default — no `#Unsafe` gate (I1 holds by construction: the sandbox
+/// is the safety boundary). Its exported surface is named by the `export:`
+/// target field (`TARGET_FIELD_EXPORT`, D-PLUGIN-EXPORT1).
+pub const TARGET_PLUGIN: &str = "plugin";
 
 /// D-TGT2 (ratified 2026-06-21): target keywords reserved for a future increment —
 /// recognized but rejected (no backend yet) until their tooling lands.
-/// `benchmark` shipped (c80); only `plugin` remains reserved (c81/D-DEP-WASM1).
-pub const TARGET_RESERVED: &[&str] = &["plugin"];
+/// `benchmark` shipped (c80); `plugin` shipped (c81). Empty until the next
+/// reserved target is proposed.
+pub const TARGET_RESERVED: &[&str] = &[];
 
 /// D-TGT1 (ratified 2026-06-21): the per-package field listing build targets —
 /// `app: { targets: [library, executable { entry: "src/cli.jet" }] }`. A bare
@@ -1602,6 +1758,10 @@ pub const PACKAGE_FIELD_KIND_REMOVED: &str = "kind";
 /// unknown-field error like any other typo'd key.
 pub const TARGET_FIELD_ENTRY: &str = "entry";
 pub const TARGET_FIELD_NAME: &str = "name";
+/// D-PLUGIN-EXPORT1=A (ratified 2026-06-25): names a `plugin` target's exported
+/// surface (the `.wit` world name). Only meaningful on `plugin { export: "…" }`;
+/// defaults to the package name when omitted.
+pub const TARGET_FIELD_EXPORT: &str = "export";
 
 /// D-CAP1 (ratified 2026-06-21): the four-capability vocabulary —
 /// `view`/`edit`/`take`/`share`. `view` and `take` are ratified ownership keywords
@@ -1624,16 +1784,16 @@ pub const MANIFEST_FIELD_EDITION: &str = "edition";
 /// D-RINGLAYER1=A: optional package runtime-layer ceiling in `payload: { … }`.
 pub const MANIFEST_FIELD_LAYER: &str = "layer";
 
+pub use crate::OsTarget::{
+    os_target_build_context, os_target_dispatch_arm, os_target_dispatch_exhaustive,
+    os_target_mixed_axis, os_target_unmatched_call, OsTarget,
+};
 pub use crate::RingLayer::{
     core_module_layer, core_usage_layer, layer_ceiling_exceeded, RuntimeLayer,
 };
 pub use crate::WebPartition::{
     is_abi_safe_type, web_abi_type, web_cross_partition, web_target_browser, WebBucket,
     WebPartitionMarker,
-};
-pub use crate::OsTarget::{
-    os_target_build_context, os_target_dispatch_arm, os_target_dispatch_exhaustive,
-    os_target_mixed_axis, os_target_unmatched_call, OsTarget,
 };
 
 /// S52 (ratified M12; amended 2026-06-16, U2): the unified single lockfile lives
@@ -1941,8 +2101,10 @@ pub const JET_KEYWORD_LIST: &[&str] = &[
     KW_PUB,
     KW_PRIV,
     KW_USE,
+    KW_AS,
     KW_EXTERN,
     KW_MODULE,
+    KW_POLICY,
     // Control flow (M1, S19, S23, M1/M2)
     KW_IF,
     KW_ELSE,
@@ -1969,6 +2131,7 @@ pub const JET_KEYWORD_LIST: &[&str] = &[
     KW_REMOVE,
     KW_CHANGE,
     KW_VIA,
+    KW_COPY,
     // Ownership / borrow keywords (S10, M2). D-MEM1 retired KW_MUTATE/KW_MOVE
     // in favor of the `&`/`^` sigils — they live only as teaching errors
     // (E0056/E0057) now, so they are NOT in the keyword list. The retired
@@ -2263,6 +2426,931 @@ pub const DIRECTIVE_MARKERS: &[&str] = &[
     ATTR_UNTAGGED,
 ];
 
+/// D-HL1: generated editor grammars mark their owned sections with these
+/// comments. Tests compare the committed section against fresh renderer output.
+pub const HIGHLIGHT_GENERATED_START: &str = "BEGIN GENERATED JET SYNTAX HIGHLIGHTS";
+pub const HIGHLIGHT_GENERATED_END: &str = "END GENERATED JET SYNTAX HIGHLIGHTS";
+
+/// D-HL1: lexical highlight class for every token the generated grammars own.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
+pub enum HighlightClass {
+    KeywordControl,
+    KeywordDeclaration,
+    KeywordOwnership,
+    KeywordOther,
+    Literal,
+    TypeBuiltin,
+    Builtin,
+    MarkerDirective,
+    MarkerContract,
+    Operator,
+    Sigil,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
+pub struct HighlightToken {
+    pub text: &'static str,
+    pub class: HighlightClass,
+}
+
+impl HighlightClass {
+    pub fn textmate_scope(self) -> &'static str {
+        match self {
+            HighlightClass::KeywordControl => "keyword.control.jet",
+            HighlightClass::KeywordDeclaration => "keyword.declaration.jet",
+            HighlightClass::KeywordOwnership => "keyword.other.ownership.jet",
+            HighlightClass::KeywordOther => "keyword.other.jet",
+            HighlightClass::Literal => "constant.language.jet",
+            HighlightClass::TypeBuiltin => "storage.type.builtin.jet",
+            HighlightClass::Builtin => "support.function.builtin.jet",
+            HighlightClass::MarkerDirective => "entity.name.tag.directive.jet",
+            HighlightClass::MarkerContract => "entity.name.tag.contract.jet",
+            HighlightClass::Operator => "keyword.operator.jet",
+            HighlightClass::Sigil => "keyword.operator.sigil.jet",
+        }
+    }
+
+    pub fn zed_capture(self) -> &'static str {
+        match self {
+            HighlightClass::KeywordControl => "@keyword.control",
+            HighlightClass::KeywordDeclaration
+            | HighlightClass::KeywordOwnership
+            | HighlightClass::KeywordOther => "@keyword",
+            HighlightClass::Literal => "@constant.builtin",
+            HighlightClass::TypeBuiltin => "@type.builtin",
+            HighlightClass::Builtin => "@function.builtin",
+            HighlightClass::MarkerDirective | HighlightClass::MarkerContract => "@attribute",
+            HighlightClass::Operator | HighlightClass::Sigil => "@operator",
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            HighlightClass::KeywordControl => "keyword.control",
+            HighlightClass::KeywordDeclaration => "keyword.declaration",
+            HighlightClass::KeywordOwnership => "keyword.ownership",
+            HighlightClass::KeywordOther => "keyword.other",
+            HighlightClass::Literal => "literal",
+            HighlightClass::TypeBuiltin => "type.builtin",
+            HighlightClass::Builtin => "builtin",
+            HighlightClass::MarkerDirective => "marker.directive",
+            HighlightClass::MarkerContract => "marker.contract",
+            HighlightClass::Operator => "operator",
+            HighlightClass::Sigil => "sigil",
+        }
+    }
+}
+
+/// D-HL1: one source of truth for lexical editor highlighting. FOREIGN_* words
+/// stay out; teaching diagnostics are not colored as live syntax.
+pub const JET_HIGHLIGHT_TOKENS: &[HighlightToken] = &[
+    // Control flow.
+    HighlightToken {
+        text: KW_IF,
+        class: HighlightClass::KeywordControl,
+    },
+    HighlightToken {
+        text: KW_ELSE,
+        class: HighlightClass::KeywordControl,
+    },
+    HighlightToken {
+        text: KW_LOOP,
+        class: HighlightClass::KeywordControl,
+    },
+    HighlightToken {
+        text: KW_IN,
+        class: HighlightClass::KeywordControl,
+    },
+    HighlightToken {
+        text: KW_BREAK,
+        class: HighlightClass::KeywordControl,
+    },
+    HighlightToken {
+        text: KW_CONTINUE,
+        class: HighlightClass::KeywordControl,
+    },
+    HighlightToken {
+        text: KW_RETURN,
+        class: HighlightClass::KeywordControl,
+    },
+    HighlightToken {
+        text: KW_RANGE_STEP,
+        class: HighlightClass::KeywordControl,
+    },
+    // Declarations and contextual structure.
+    HighlightToken {
+        text: KW_FN,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_PUB,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_PRIV,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_USE,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_AS,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_EXTERN,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_RUST,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_MODULE,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_POLICY,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_STRUCT,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_ENUM,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_ALIAS,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_IMPL,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_TRAIT,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_TAG,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_DERIVE,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_CONST,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_COMPTIME,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_DISTINCT,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_MIGRATION,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_RENAME,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_ADD,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_REMOVE,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_CHANGE,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_VIA,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_UNSAFE,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_IMPURE,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_REACTIVE,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_REGION,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_TASKGROUP,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: CTX_BLOCK,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_LIVE,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_ASSUME_DET,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_TRANSACT,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_TEST,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_BENCH,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_PURE,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_TODO,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_TAINTED,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_SANITIZER,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_STATE,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_TRANSITION,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_STATE_DECL,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: KW_PROTOCOL,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: PROTO_CLIENT,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    HighlightToken {
+        text: PROTO_SERVER,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    // Ownership / builtins.
+    HighlightToken {
+        text: KW_SELF,
+        class: HighlightClass::KeywordOther,
+    },
+    HighlightToken {
+        text: KW_COPY,
+        class: HighlightClass::KeywordOwnership,
+    },
+    HighlightToken {
+        text: KW_UNINIT,
+        class: HighlightClass::KeywordOwnership,
+    },
+    HighlightToken {
+        text: KW_IT,
+        class: HighlightClass::KeywordOther,
+    },
+    HighlightToken {
+        text: BUILTIN_PRINT,
+        class: HighlightClass::Builtin,
+    },
+    HighlightToken {
+        text: BUILTIN_INPUT,
+        class: HighlightClass::Builtin,
+    },
+    // Literals.
+    HighlightToken {
+        text: LIT_TRUE,
+        class: HighlightClass::Literal,
+    },
+    HighlightToken {
+        text: LIT_FALSE,
+        class: HighlightClass::Literal,
+    },
+    HighlightToken {
+        text: LIT_NULL,
+        class: HighlightClass::Literal,
+    },
+    HighlightToken {
+        text: LIT_VALUE,
+        class: HighlightClass::Literal,
+    },
+    HighlightToken {
+        text: LIT_OK,
+        class: HighlightClass::Literal,
+    },
+    HighlightToken {
+        text: LIT_ERR,
+        class: HighlightClass::Literal,
+    },
+    // Built-in types.
+    HighlightToken {
+        text: TYPE_INT,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_FLOAT,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_BOOL,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_STRING,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_ERROR,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_CHAR,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_LIST,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_MAP,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_SHARED,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_STREAM,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_TASKGROUP,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_SELECT_BUILDER,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_SIGNAL,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_DERIVED,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_COMPUTED,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_EFFECT,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_MEASUREMENT,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_PTR,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_BIGINT,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_DECIMAL,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_KEY,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_IO_ERROR,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_UTF8_ERROR,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_JSON,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_JSON_ERROR,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_DATA,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_DATA_JSON,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_DATA_TOML,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_DATA_YAML,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_DATA_CSV,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_DB_VALUE,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_I8,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_I16,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_I32,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_I64,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_U8,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_U16,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_U32,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_U64,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_F32,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_F64,
+        class: HighlightClass::TypeBuiltin,
+    },
+    // Operators and sigils.
+    HighlightToken {
+        text: SIGIL_BIND_IMMUT,
+        class: HighlightClass::Sigil,
+    },
+    HighlightToken {
+        text: SIGIL_BIND_MUT,
+        class: HighlightClass::Sigil,
+    },
+    HighlightToken {
+        text: SIGIL_MOVE,
+        class: HighlightClass::Sigil,
+    },
+    HighlightToken {
+        text: SIGIL_WRITE,
+        class: HighlightClass::Sigil,
+    },
+    HighlightToken {
+        text: SIGIL_SPREAD,
+        class: HighlightClass::Sigil,
+    },
+    HighlightToken {
+        text: OP_TRY_SUFFIX,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_RANGE,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_ARM_ARROW,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_LAMBDA_ARROW,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_PLUS,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_MINUS,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_STAR,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_SLASH,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_PERCENT,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_PIPE,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_SHL,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_SHR,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_AND,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_OR,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_NOT,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_EQ,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_NE,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_LT,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_GT,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_LE,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_GE,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_PLUS_EQ,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_PLUS_PLUS,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_MINUS_EQ,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_MINUS_MINUS,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_STAR_EQ,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_SLASH_EQ,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_PERCENT_EQ,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_AMP_EQ,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_PIPE_EQ,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_CARET_EQ,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_SHL_EQ,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_SHR_EQ,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_FALLBACK,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_OPTIONAL_CHAIN,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_NAMED_CTOR,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_FAN_OUT,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: TYPE_FIXED_SIZE_SEP,
+        class: HighlightClass::Sigil,
+    },
+    HighlightToken {
+        text: ATTR_PREFIX,
+        class: HighlightClass::Sigil,
+    },
+    HighlightToken {
+        text: CONTRACT_PREFIX,
+        class: HighlightClass::Sigil,
+    },
+];
+
+pub fn highlighted_tokens_sorted() -> Vec<HighlightToken> {
+    let mut tokens = JET_HIGHLIGHT_TOKENS.to_vec();
+    for &marker in DIRECTIVE_MARKERS {
+        tokens.push(HighlightToken {
+            text: marker,
+            class: HighlightClass::MarkerDirective,
+        });
+    }
+    for &marker in CONTRACT_MARKERS {
+        tokens.push(HighlightToken {
+            text: marker,
+            class: HighlightClass::MarkerContract,
+        });
+    }
+    tokens.sort_by(|a, b| a.class.cmp(&b.class).then(a.text.cmp(b.text)));
+    tokens.dedup_by(|a, b| a.text == b.text && a.class == b.class);
+    tokens
+}
+
+pub fn render_vscode_generated_highlights() -> String {
+    let mut out = String::new();
+    out.push_str(&format!(
+        "      \"comment\": \"{}\",\n",
+        HIGHLIGHT_GENERATED_START
+    ));
+    out.push_str("      \"patterns\": [\n");
+    let classes = [
+        HighlightClass::KeywordControl,
+        HighlightClass::KeywordDeclaration,
+        HighlightClass::KeywordOwnership,
+        HighlightClass::KeywordOther,
+        HighlightClass::Literal,
+        HighlightClass::TypeBuiltin,
+        HighlightClass::Builtin,
+        HighlightClass::MarkerDirective,
+        HighlightClass::MarkerContract,
+        HighlightClass::Sigil,
+        HighlightClass::Operator,
+    ];
+    let mut first = true;
+    for class in classes {
+        let words = class_words(class);
+        let symbols = class_symbols(class);
+        if !words.is_empty() {
+            push_vscode_pattern(
+                &mut out,
+                &mut first,
+                class.textmate_scope(),
+                &format!("\\b({})\\b", words.join("|")),
+            );
+        }
+        if !symbols.is_empty() {
+            push_vscode_pattern(
+                &mut out,
+                &mut first,
+                class.textmate_scope(),
+                &format!("({})", symbols.join("|")),
+            );
+        }
+    }
+    out.push_str("\n      ],\n");
+    out.push_str(&format!(
+        "      \"endComment\": \"{}\"\n",
+        HIGHLIGHT_GENERATED_END
+    ));
+    out
+}
+
+pub fn render_tree_sitter_generated_highlights() -> String {
+    let mut out = String::new();
+    out.push_str(&format!("// {}\n", HIGHLIGHT_GENERATED_START));
+    for class in [
+        HighlightClass::KeywordControl,
+        HighlightClass::KeywordDeclaration,
+        HighlightClass::KeywordOwnership,
+        HighlightClass::KeywordOther,
+        HighlightClass::Literal,
+        HighlightClass::TypeBuiltin,
+        HighlightClass::Builtin,
+        HighlightClass::MarkerDirective,
+        HighlightClass::MarkerContract,
+        HighlightClass::Sigil,
+        HighlightClass::Operator,
+    ] {
+        let values = class_texts(class);
+        out.push_str(&format!(
+            "const {} = [{}];\n",
+            tree_sitter_const_name(class),
+            values
+                .iter()
+                .map(|s| format!("{:?}", s))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    out.push_str(&format!("// {}\n", HIGHLIGHT_GENERATED_END));
+    out
+}
+
+pub fn render_zed_generated_highlights() -> String {
+    let mut out = String::new();
+    out.push_str(&format!("; {}\n", HIGHLIGHT_GENERATED_START));
+    for class in [
+        HighlightClass::KeywordControl,
+        HighlightClass::KeywordDeclaration,
+        HighlightClass::KeywordOwnership,
+        HighlightClass::KeywordOther,
+        HighlightClass::Literal,
+        HighlightClass::TypeBuiltin,
+        HighlightClass::Builtin,
+        HighlightClass::MarkerDirective,
+        HighlightClass::MarkerContract,
+        HighlightClass::Sigil,
+        HighlightClass::Operator,
+    ] {
+        let values = class_texts(class);
+        out.push_str(&format!("; {}: {}\n", class.label(), values.join(" ")));
+        if class == HighlightClass::MarkerDirective || class == HighlightClass::MarkerContract {
+            continue;
+        }
+        let query_words = values
+            .iter()
+            .filter(|s| is_word_token(s))
+            .map(|s| format!("  {:?}", s))
+            .collect::<Vec<_>>();
+        if !query_words.is_empty() {
+            out.push_str("[\n");
+            out.push_str(&query_words.join("\n"));
+            out.push_str(&format!("\n] {}\n\n", class.zed_capture()));
+        }
+    }
+    out.push_str(&format!("; {}\n", HIGHLIGHT_GENERATED_END));
+    out
+}
+
+fn push_vscode_pattern(out: &mut String, first: &mut bool, scope: &str, pattern: &str) {
+    if !*first {
+        out.push_str(",\n");
+    }
+    *first = false;
+    out.push_str("        {\n");
+    out.push_str(&format!("          \"name\": \"{}\",\n", scope));
+    out.push_str(&format!(
+        "          \"match\": \"{}\"\n",
+        json_escape(pattern)
+    ));
+    out.push_str("        }");
+}
+
+fn class_texts(class: HighlightClass) -> Vec<&'static str> {
+    let mut values = highlighted_tokens_sorted()
+        .into_iter()
+        .filter(|token| token.class == class)
+        .map(|token| token.text)
+        .collect::<Vec<_>>();
+    values.sort();
+    values.dedup();
+    values
+}
+
+fn class_words(class: HighlightClass) -> Vec<String> {
+    class_texts(class)
+        .into_iter()
+        .filter(|s| is_word_token(s))
+        .map(regex_escape)
+        .collect()
+}
+
+fn class_symbols(class: HighlightClass) -> Vec<String> {
+    class_texts(class)
+        .into_iter()
+        .filter(|s| !is_word_token(s))
+        .map(regex_escape)
+        .collect()
+}
+
+fn is_word_token(s: &str) -> bool {
+    s.chars().all(|c| c == '_' || c.is_ascii_alphanumeric())
+        && s.chars()
+            .next()
+            .is_some_and(|c| c == '_' || c.is_ascii_alphabetic())
+}
+
+fn regex_escape(s: &str) -> String {
+    let mut out = String::new();
+    for ch in s.chars() {
+        if matches!(
+            ch,
+            '\\' | '.'
+                | '+'
+                | '*'
+                | '?'
+                | '^'
+                | '$'
+                | '('
+                | ')'
+                | '['
+                | ']'
+                | '{'
+                | '}'
+                | '|'
+                | '/'
+                | '-'
+        ) {
+            out.push('\\');
+        }
+        out.push(ch);
+    }
+    out
+}
+
+fn json_escape(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+fn tree_sitter_const_name(class: HighlightClass) -> &'static str {
+    match class {
+        HighlightClass::KeywordControl => "JET_HIGHLIGHT_KEYWORD_CONTROL",
+        HighlightClass::KeywordDeclaration => "JET_HIGHLIGHT_KEYWORD_DECLARATION",
+        HighlightClass::KeywordOwnership => "JET_HIGHLIGHT_KEYWORD_OWNERSHIP",
+        HighlightClass::KeywordOther => "JET_HIGHLIGHT_KEYWORD_OTHER",
+        HighlightClass::Literal => "JET_HIGHLIGHT_LITERAL",
+        HighlightClass::TypeBuiltin => "JET_HIGHLIGHT_TYPE_BUILTIN",
+        HighlightClass::Builtin => "JET_HIGHLIGHT_BUILTIN",
+        HighlightClass::MarkerDirective => "JET_HIGHLIGHT_MARKER_DIRECTIVE",
+        HighlightClass::MarkerContract => "JET_HIGHLIGHT_MARKER_CONTRACT",
+        HighlightClass::Operator => "JET_HIGHLIGHT_OPERATOR",
+        HighlightClass::Sigil => "JET_HIGHLIGHT_SIGIL",
+    }
+}
+
 /// D-MARKER-FAMILY1: is `name` a contract-plane (`@`) marker? The I7/R3
 /// dispatch chokepoint — parser/formatter/sema/LSP ask here, never hand-roll
 /// the move list.
@@ -2314,7 +3402,6 @@ pub const UNIT_SUFFIX_EXPONENT_RESERVED: &str = "e"; // D-UNITLIT1
 /// key set equals this slice.
 pub const KNOWN_CORE_MODULES: &[&str] = &[
     "core",
-    "core.fs",
     "core.io",
     "core.env",
     "core.process",
@@ -2375,12 +3462,17 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     "core.regex",
     // D-DEP-ARCHIVE1=A (ratified): gzip compress/decompress via the `flate2` crate FFI bridge.
     "core.archive",
+    // D-RAYLIB1=A / D-GAME1=B: official first-party raylib graphics bridge.
+    "core.raylib",
     // D-CODECS1 (ratified): standalone compression codecs, separate from `core.archive`.
     // `flate2` (gzip) and `zstd` FFI bridges.
     "core.compress.gzip",
     "core.compress.zstd",
     // D-DEP-DB1: SQLite ring package via the `rusqlite` (bundled) crate FFI bridge.
     "core.db",
+    // D-DEP-WASM1=A / D-PLUGIN1=B (c81): sandboxed WASM Component Model
+    // plugin loader (wasmtime, runtime-side only, I6).
+    "core.plugin",
     // D-REACT1=B (ratified 2026-06-22): opt-in reactive library — signals,
     // derived values, and effects. Pure std runtime (no external crate).
     "core.reactive",
@@ -2415,6 +3507,12 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     // c-devserver (owner-directed 2026-07-01): a `.jet` file's own `jet dev`
     // behavior — a configurable server value (`for_app`/`.html`/`.port`/`.serve`).
     "core.devserver",
+    // U13 (D-JPK-SECRETCRYPTO1, card c9jetpackgates): `core.vault.get` reads a
+    // secret decrypted from the project's encrypted repo file (`.jet/secrets.age`),
+    // via an age-style crypto FFI bridge. Named `vault`, not `secrets` — that
+    // name is already `core.secrets` (D-TTLVAL1's in-memory Expiring/Rotting<T>
+    // TTL wrapper), an unrelated feature.
+    "core.vault",
 ];
 
 pub fn is_known_core_module(name: &str) -> bool {
@@ -2463,7 +3561,10 @@ pub fn normalize_core_module(name: &str) -> Option<String> {
 pub fn is_ring_module(name: &str) -> bool {
     matches!(
         name,
-        "log" | "crypto" | "http" | "regex" | "reactive" | "archive" | "db"
+        "log" | "crypto" | "http" | "regex" | "reactive" | "archive" | "raylib" | "db"
+            // D-DEP-WASM1=A (c81): `core.plugin` / internal `jet.plugin` — the
+            // wasmtime-backed plugin loader (`Plugin.load`/`.call`).
+            | "plugin"
     )
 }
 

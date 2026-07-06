@@ -12,6 +12,140 @@
 use std::collections::BTreeSet;
 use std::fs;
 
+const GENERATED_START: &str = "BEGIN GENERATED JET SYNTAX HIGHLIGHTS";
+const GENERATED_END: &str = "END GENERATED JET SYNTAX HIGHLIGHTS";
+
+fn generated_section(path: &str) -> String {
+    let text = fs::read_to_string(path).unwrap_or_else(|e| panic!("{path}: {e}"));
+    let start = text
+        .find(GENERATED_START)
+        .unwrap_or_else(|| panic!("{path} is missing {GENERATED_START}"));
+    let line_start = text[..start].rfind('\n').map_or(0, |idx| idx + 1);
+    let after_start = &text[start..];
+    let end = after_start
+        .find(GENERATED_END)
+        .unwrap_or_else(|| panic!("{path} is missing {GENERATED_END}"));
+    let end_marker = start + end + GENERATED_END.len();
+    let line_end = text[end_marker..]
+        .find('\n')
+        .map_or(text.len(), |idx| end_marker + idx);
+    text[line_start..line_end].to_string()
+}
+
+#[test]
+fn editor_grammars_have_generated_sections() {
+    for path in [
+        "editors/vscode/syntaxes/jet.tmLanguage.json",
+        "editors/tree-sitter/grammar.js",
+        "editors/zed/languages/jet/highlights.scm",
+    ] {
+        let section = generated_section(path);
+        assert!(section.contains(GENERATED_START), "{path}");
+        assert!(section.contains(GENERATED_END), "{path}");
+    }
+}
+
+#[test]
+fn editor_grammars_match_generated_sections() {
+    let cases = [
+        (
+            "editors/vscode/syntaxes/jet.tmLanguage.json",
+            jet::Syntax::render_vscode_generated_highlights(),
+        ),
+        (
+            "editors/tree-sitter/grammar.js",
+            jet::Syntax::render_tree_sitter_generated_highlights(),
+        ),
+        (
+            "editors/zed/languages/jet/highlights.scm",
+            jet::Syntax::render_zed_generated_highlights(),
+        ),
+    ];
+
+    for (path, expected) in cases {
+        assert_eq!(
+            generated_section(path),
+            expected.trim_end(),
+            "{path} generated section drifted; run `jet devtools grammars`"
+        );
+    }
+}
+
+#[test]
+fn every_highlight_token_is_in_each_generated_section() {
+    let sections = [
+        (
+            "editors/vscode/syntaxes/jet.tmLanguage.json",
+            generated_section("editors/vscode/syntaxes/jet.tmLanguage.json"),
+        ),
+        (
+            "editors/tree-sitter/grammar.js",
+            generated_section("editors/tree-sitter/grammar.js"),
+        ),
+        (
+            "editors/zed/languages/jet/highlights.scm",
+            generated_section("editors/zed/languages/jet/highlights.scm"),
+        ),
+    ];
+
+    for token in jet::Syntax::highlighted_tokens_sorted() {
+        for (path, section) in &sections {
+            assert!(
+                section_has_token(section, token.text),
+                "{path} generated section missing `{}` ({:?})",
+                token.text,
+                token.class
+            );
+        }
+    }
+}
+
+#[test]
+fn syntax_keyword_list_tokens_are_classified_for_highlighting() {
+    for keyword in jet::Syntax::JET_KEYWORD_LIST {
+        assert!(
+            jet::Syntax::highlighted_tokens_sorted()
+                .iter()
+                .any(|token| token.text == *keyword),
+            "JET_KEYWORD_LIST token `{keyword}` has no highlight class"
+        );
+    }
+}
+
+fn section_has_token(section: &str, token: &str) -> bool {
+    let escaped = regex_escape(token);
+    let json_escaped = escaped.replace('\\', "\\\\");
+    section.contains(token) || section.contains(&escaped) || section.contains(&json_escaped)
+}
+
+fn regex_escape(s: &str) -> String {
+    let mut out = String::new();
+    for ch in s.chars() {
+        if matches!(
+            ch,
+            '\\' | '.'
+                | '+'
+                | '*'
+                | '?'
+                | '^'
+                | '$'
+                | '('
+                | ')'
+                | '['
+                | ']'
+                | '{'
+                | '}'
+                | '|'
+                | '/'
+                | '-'
+        ) {
+            out.push('\\');
+        }
+        out.push(ch);
+    }
+    out
+}
+
 /// Extract every literal word from `\b(word1|word2|...)\b`-style match patterns
 /// in the grammar's keywords section.
 ///

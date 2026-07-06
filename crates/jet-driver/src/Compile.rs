@@ -23,6 +23,9 @@ pub struct CompileOutput {
     pub web: Option<crate::Codegen::WebArtifacts>,
     /// D-WASM1: partition report when `--target=web`.
     pub web_partition_report: Option<String>,
+    /// D-PLUGIN1=B / D-DEP-WASM1=A (c81): plugin guest artifacts when
+    /// `--target=plugin` (the `.wit` world + wasm32 guest Rust source).
+    pub plugin: Option<crate::Codegen::PluginArtifacts>,
     /// D-RINGLAYER1=A M2: minimum runtime layer inferred from imports + helpers.
     pub inferred_layer: crate::Syntax::RuntimeLayer,
     /// D-RINGLAYER1=A: optional `layer:` ceiling from `pkg.jet`.
@@ -53,7 +56,7 @@ impl Capabilities {
         };
         Capabilities {
             uses_network: any(&["core.net", "jet.http"]),
-            uses_file_io: any(&["core.fs", "core.io", "core.files", "core.path"]),
+            uses_file_io: any(&["core.io", "core.files", "core.path"]),
             uses_unsafe: has_unsafe || any(&["core.mem"]),
             uses_ffi: has_ffi,
             uses_crypto: any(&["jet.crypto", "core.crypto.expert"]),

@@ -23,7 +23,7 @@ use jet_codegen::scheduler::{
 use jet_foundation::{
     Diagnostics::Diagnostic,
     JitBackend::{JitBackend, RunOutcome},
-    AST::{BinOp, ProgramBundle, Type, UnOp},
+    AST::{BinOp, IncDecOp, ProgramBundle, Type, UnOp},
 };
 
 use cranelift_codegen::ir::{
@@ -105,9 +105,7 @@ fn jet_trap_overflow(op: &str) {
     let msg = match op {
         "add" => "this addition overflows the value's type (the result is outside its range)",
         "sub" => "this subtraction overflows the value's type (the result is outside its range)",
-        "mul" => {
-            "this multiplication overflows the value's type (the result is outside its range)"
-        }
+        "mul" => "this multiplication overflows the value's type (the result is outside its range)",
         "div" => "this division can't be done (dividing by zero, or overflow)",
         _ => "this operation overflows the value's type (the result is outside its range)",
     };
@@ -277,6 +275,69 @@ extern "C" fn jet_jit_str_eq(a: i64, b: i64) -> i8 {
     })
 }
 
+extern "C" fn jet_jit_str_len(id: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.strings
+            .get(id as usize)
+            .map(|s| s.chars().count() as i64)
+            .unwrap_or(0)
+    })
+}
+
+extern "C" fn jet_jit_str_trim(id: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let text = rt
+            .strings
+            .get(id as usize)
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default();
+        let out = rt.strings.len() as i64;
+        rt.strings.push(text);
+        out
+    })
+}
+
+extern "C" fn jet_jit_str_to_upper(id: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let text = rt
+            .strings
+            .get(id as usize)
+            .map(|s| s.to_uppercase())
+            .unwrap_or_default();
+        let out = rt.strings.len() as i64;
+        rt.strings.push(text);
+        out
+    })
+}
+
+extern "C" fn jet_jit_str_to_lower(id: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let text = rt
+            .strings
+            .get(id as usize)
+            .map(|s| s.to_lowercase())
+            .unwrap_or_default();
+        let out = rt.strings.len() as i64;
+        rt.strings.push(text);
+        out
+    })
+}
+
+extern "C" fn jet_jit_str_replace(id: i64, from_id: i64, to_id: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let text = rt.strings.get(id as usize).cloned().unwrap_or_default();
+        let from = rt
+            .strings
+            .get(from_id as usize)
+            .cloned()
+            .unwrap_or_default();
+        let to = rt.strings.get(to_id as usize).cloned().unwrap_or_default();
+        let out = rt.strings.len() as i64;
+        rt.strings.push(text.replace(&from, &to));
+        out
+    })
+}
+
 extern "C" fn jet_jit_struct_new_f64(n: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let id = rt.structs_f64.len() as i64;
@@ -322,6 +383,11 @@ struct HostFns {
     str_push_char: FuncId,
     str_push_str: FuncId,
     str_eq: FuncId,
+    str_len: FuncId,
+    str_trim: FuncId,
+    str_to_upper: FuncId,
+    str_to_lower: FuncId,
+    str_replace: FuncId,
     struct_new_f64: FuncId,
     struct_get_f64: FuncId,
     struct_set_f64: FuncId,
@@ -350,6 +416,11 @@ fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     builder.symbol("jet_jit_str_push_char", jet_jit_str_push_char as *const u8);
     builder.symbol("jet_jit_str_push_str", jet_jit_str_push_str as *const u8);
     builder.symbol("jet_jit_str_eq", jet_jit_str_eq as *const u8);
+    builder.symbol("jet_jit_str_len", jet_jit_str_len as *const u8);
+    builder.symbol("jet_jit_str_trim", jet_jit_str_trim as *const u8);
+    builder.symbol("jet_jit_str_to_upper", jet_jit_str_to_upper as *const u8);
+    builder.symbol("jet_jit_str_to_lower", jet_jit_str_to_lower as *const u8);
+    builder.symbol("jet_jit_str_replace", jet_jit_str_replace as *const u8);
     builder.symbol(
         "jet_jit_struct_new_f64",
         jet_jit_struct_new_f64 as *const u8,
@@ -411,6 +482,14 @@ fn declare_host_fns(
     sig_str_eq.params.push(AbiParam::new(types::I64));
     sig_str_eq.params.push(AbiParam::new(types::I64));
     sig_str_eq.returns.push(AbiParam::new(types::I8));
+    let mut sig_str_unary_i64 = Signature::new(cc);
+    sig_str_unary_i64.params.push(AbiParam::new(types::I64));
+    sig_str_unary_i64.returns.push(AbiParam::new(types::I64));
+    let mut sig_str_replace = Signature::new(cc);
+    sig_str_replace.params.push(AbiParam::new(types::I64));
+    sig_str_replace.params.push(AbiParam::new(types::I64));
+    sig_str_replace.params.push(AbiParam::new(types::I64));
+    sig_str_replace.returns.push(AbiParam::new(types::I64));
     let mut sig_str_begin = Signature::new(cc);
     sig_str_begin.returns.push(AbiParam::new(types::I64));
     let mut sig_struct_new = Signature::new(cc);
@@ -451,6 +530,11 @@ fn declare_host_fns(
         str_push_char: import("jet_jit_str_push_char", &sig_str_push_char)?,
         str_push_str: import("jet_jit_str_push_str", &sig_str_push_lit)?,
         str_eq: import("jet_jit_str_eq", &sig_str_eq)?,
+        str_len: import("jet_jit_str_len", &sig_str_unary_i64)?,
+        str_trim: import("jet_jit_str_trim", &sig_str_unary_i64)?,
+        str_to_upper: import("jet_jit_str_to_upper", &sig_str_unary_i64)?,
+        str_to_lower: import("jet_jit_str_to_lower", &sig_str_unary_i64)?,
+        str_replace: import("jet_jit_str_replace", &sig_str_replace)?,
         struct_new_f64: import("jet_jit_struct_new_f64", &sig_struct_new)?,
         struct_get_f64: import("jet_jit_struct_get_f64", &sig_struct_get)?,
         struct_set_f64: import("jet_jit_struct_set_f64", &sig_struct_set)?,
@@ -507,8 +591,19 @@ fn user_type_name(ty: &Type) -> Option<&str> {
     }
 }
 
+fn record_type_key(ty: &Type) -> Option<String> {
+    match ty {
+        Type::Tuple(_) => Some(ty.name()),
+        _ => user_type_name(ty).map(str::to_string),
+    }
+}
+
 fn jit_struct_type(ty: &Type) -> bool {
     user_type_name(ty).is_some()
+}
+
+fn jit_tuple_type(ty: &Type) -> bool {
+    matches!(ty, Type::Tuple(fields) if fields.iter().all(|(_, t)| matches!(t.as_ref(), Type::Int | Type::Float)))
 }
 
 fn jit_enum_type(ty: &Type) -> bool {
@@ -519,6 +614,7 @@ fn jit_compound_type(ty: &Type) -> bool {
     jit_list_int_type(ty)
         || jit_list_task_int_type(ty)
         || jit_struct_type(ty)
+        || jit_tuple_type(ty)
         || jit_enum_type(ty)
         || jit_optional_scalar_type(ty)
 }
@@ -629,6 +725,9 @@ fn jit_covers_expr(expr: &TExpr, callees: &HashSet<String>) -> bool {
         TExprKind::StructLit { fields, .. } => {
             jit_struct_type(&expr.ty) && fields.iter().all(|(_, v, _)| jit_covers_expr(v, callees))
         }
+        TExprKind::TupleLit { fields, .. } => {
+            jit_tuple_type(&expr.ty) && jit_covers_tuple_fields(fields, callees)
+        }
         TExprKind::Field { recv, .. } => jit_covers_expr(recv, callees),
         TExprKind::MethodCall { recv, args, .. } => {
             jit_covers_expr(recv, callees) && args.iter().all(|a| jit_covers_call_arg(a, callees))
@@ -651,6 +750,7 @@ fn jit_covers_expr(expr: &TExpr, callees: &HashSet<String>) -> bool {
         TExprKind::Unary { op, operand } => {
             matches!(op, UnOp::Neg | UnOp::Not) && jit_covers_expr(operand, callees)
         }
+        TExprKind::IncDec { ty, .. } => matches!(ty, Type::Int),
         TExprKind::Binary {
             op,
             overflow,
@@ -668,6 +768,15 @@ fn jit_covers_expr(expr: &TExpr, callees: &HashSet<String>) -> bool {
                 return false;
             }
             jit_covers_expr(lhs, callees) && jit_covers_expr(rhs, callees)
+        }
+        TExprKind::CompareChain { operands, ops } => {
+            operands.len() == ops.len() + 1
+                && operands.iter().all(|e| {
+                    matches!(&e.ty, Type::Int | Type::Float) && jit_covers_expr(e, callees)
+                })
+                && ops
+                    .iter()
+                    .all(|op| matches!(op, BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge))
         }
         TExprKind::IfExpr {
             cond,
@@ -730,6 +839,12 @@ fn jit_covers_enum_payload(payload: &TEnumPayload, callees: &HashSet<String>) ->
     }
 }
 
+fn jit_covers_tuple_fields(fields: &[(String, TExpr)], callees: &HashSet<String>) -> bool {
+    fields.iter().all(|(_, value)| {
+        matches!(&value.ty, Type::Int | Type::Float) && jit_covers_expr(value, callees)
+    })
+}
+
 fn jit_covers_builtin_op(
     op: &TBuiltinOp,
     recv: &TExpr,
@@ -740,6 +855,17 @@ fn jit_covers_builtin_op(
         return false;
     }
     match op {
+        TBuiltinOp::LenString => matches!(&recv.ty, Type::String) && args.is_empty(),
+        TBuiltinOp::Trim | TBuiltinOp::ToUpper | TBuiltinOp::ToLower => {
+            matches!(&recv.ty, Type::String) && args.is_empty()
+        }
+        TBuiltinOp::Replace => {
+            matches!(&recv.ty, Type::String)
+                && args.len() == 2
+                && args
+                    .iter()
+                    .all(|a| matches!(&a.ty, Type::String) && jit_covers_expr(a, callees))
+        }
         TBuiltinOp::Push => {
             jit_list_int_type(&recv.ty)
                 && args.len() == 1
@@ -783,12 +909,19 @@ fn jit_covers_stmt(stmt: &TStmt, callees: &HashSet<String>) -> bool {
         // on it for the sender handle — same two host calls, now both fired at the
         // producer site instead of at a later `.sender()` call.
         TStmt::TupleDestructure { init, binds, .. } => {
-            binds.len() == 2
+            (binds.len() == 2
                 && matches!(
                     &init.kind,
                     TExprKind::CoreCall { module, method, args }
                         if module == "core.tasks" && method == "channel" && args.is_empty()
-                )
+                ))
+                || (jit_tuple_type(&init.ty)
+                    && binds.len()
+                        == match &init.ty {
+                            Type::Tuple(fields) => fields.len(),
+                            _ => 0,
+                        }
+                    && jit_covers_expr(init, callees))
         }
         TStmt::Assign {
             value, clone_value, ..
@@ -812,39 +945,33 @@ fn jit_covers_stmt(stmt: &TStmt, callees: &HashSet<String>) -> bool {
                     .as_ref()
                     .is_none_or(|b| b.iter().all(|s| jit_covers_stmt(s, callees)))
         }
-        TStmt::Loop { label, body } => {
-            label.is_none() && body.iter().all(|s| jit_covers_stmt(s, callees))
-        }
-        TStmt::While { label, cond, body } => {
-            label.is_none()
-                && matches!(&cond.ty, Type::Bool)
+        TStmt::Loop { body, .. } => body.iter().all(|s| jit_covers_stmt(s, callees)),
+        TStmt::While { cond, body, .. } => {
+            matches!(&cond.ty, Type::Bool)
                 && jit_covers_expr(cond, callees)
                 && body.iter().all(|s| jit_covers_stmt(s, callees))
         }
         TStmt::CountedLoop {
-            label,
             init,
             cond,
             step,
             body,
+            ..
         } => {
-            label.is_none()
-                && jit_covers_stmt(init, callees)
+            jit_covers_stmt(init, callees)
                 && matches!(&cond.ty, Type::Bool)
                 && jit_covers_expr(cond, callees)
                 && jit_covers_stmt(step, callees)
                 && body.iter().all(|s| jit_covers_stmt(s, callees))
         }
         TStmt::Range {
-            label,
             start,
             end,
             step,
             body,
             ..
         } => {
-            label.is_none()
-                && matches!(&start.ty, Type::Int)
+            matches!(&start.ty, Type::Int)
                 && matches!(&end.ty, Type::Int)
                 && step.as_ref().is_none_or(|s| matches!(&s.ty, Type::Int))
                 && jit_covers_expr(start, callees)
@@ -852,7 +979,7 @@ fn jit_covers_stmt(stmt: &TStmt, callees: &HashSet<String>) -> bool {
                 && step.as_ref().is_none_or(|s| jit_covers_expr(s, callees))
                 && body.iter().all(|s| jit_covers_stmt(s, callees))
         }
-        TStmt::Break(label) | TStmt::Continue(label) => label.is_none(),
+        TStmt::Break(_) | TStmt::Continue(_) => true,
         TStmt::IndexAssign {
             base,
             index,
@@ -868,15 +995,13 @@ fn jit_covers_stmt(stmt: &TStmt, callees: &HashSet<String>) -> bool {
                 && jit_covers_expr(value, callees)
         }
         TStmt::ForIn {
-            label,
             var2,
             method_kind,
             columnar,
             body,
             ..
         } => {
-            label.is_none()
-                && var2.is_none()
+            var2.is_none()
                 && method_kind.is_none()
                 && !columnar
                 && body.iter().all(|s| jit_covers_stmt(s, callees))
@@ -933,10 +1058,9 @@ fn jit_covers_func_detail(tir: &TFunc, callees: &HashSet<String>) -> Option<Stri
 
 fn jit_covers_program(program: &JitProgram) -> bool {
     let names: HashSet<String> = program.funcs.iter().map(|f| f.name.clone()).collect();
-    let main_ok = program
-        .funcs
-        .iter()
-        .any(|f| f.name == "run" && f.params.is_empty() && f.ret.is_none() && jit_covers_func(f, &names));
+    let main_ok = program.funcs.iter().any(|f| {
+        f.name == "run" && f.params.is_empty() && f.ret.is_none() && jit_covers_func(f, &names)
+    });
     if !main_ok {
         return false;
     }
@@ -1186,6 +1310,7 @@ fn clif_ty(ty: &Type) -> Option<types::Type> {
     if jit_list_int_type(ty)
         || jit_list_task_int_type(ty)
         || jit_struct_type(ty)
+        || jit_tuple_type(ty)
         || jit_enum_type(ty)
     {
         return Some(types::I64);
@@ -1268,7 +1393,9 @@ impl<'a> JitMeta<'a> {
     }
 }
 
+#[derive(Clone)]
 struct LoopTargets {
+    label: Option<String>,
     continue_block: Block,
     break_block: Block,
 }
@@ -1295,6 +1422,23 @@ struct LowerCtx<'a, 'b> {
 }
 
 impl LowerCtx<'_, '_> {
+    fn loop_targets(&self, label: Option<&str>, kind: &str) -> Result<LoopTargets, String> {
+        match label {
+            Some(name) => self
+                .loop_stack
+                .iter()
+                .rev()
+                .find(|targets| targets.label.as_deref() == Some(name))
+                .cloned()
+                .ok_or_else(|| format!("jit {kind} to unknown loop label `{name}`")),
+            None => self
+                .loop_stack
+                .last()
+                .cloned()
+                .ok_or_else(|| format!("jit {kind} outside loop")),
+        }
+    }
+
     fn fresh_var(&mut self, ty: cranelift_codegen::ir::Type) -> Variable {
         let var = Variable::from_u32(self.next_var);
         self.next_var += 1;
@@ -1374,26 +1518,34 @@ impl LowerCtx<'_, '_> {
             // `let ch := tasks.channel(); s := ch.sender();` host calls — `channel_new`
             // for the receiver handle, then `channel_sender` on it for the sender
             // handle — both fired here instead of at a later `.sender()` call.
-            TStmt::TupleDestructure { binds, .. } => {
-                let ch_ref = self
-                    .module
-                    .declare_func_in_func(self.host.conc.channel_new, self.b.func);
-                let ch_call = self.b.ins().call(ch_ref, &[]);
-                let ch_val = self.b.inst_results(ch_call)[0];
-                let tx_ref = self
-                    .module
-                    .declare_func_in_func(self.host.conc.channel_sender, self.b.func);
-                let tx_call = self.b.ins().call(tx_ref, &[ch_val]);
-                let tx_val = self.b.inst_results(tx_call)[0];
-                // `binds[i].0` is already the mangled Rust name (`mangle(elem.name)`,
-                // set at TIR lowering — unlike plain `Let.name`, which is the raw Jet
-                // name and needs `local_place`'s own `mangle` call). Use it directly.
-                let tx_var = self.fresh_var(types::I64);
-                self.b.def_var(tx_var, tx_val);
-                self.vars.insert(binds[0].0.clone(), tx_var);
-                let ch_var = self.fresh_var(types::I64);
-                self.b.def_var(ch_var, ch_val);
-                self.vars.insert(binds[1].0.clone(), ch_var);
+            TStmt::TupleDestructure { init, binds, .. } => {
+                if matches!(
+                    &init.kind,
+                    TExprKind::CoreCall { module, method, args }
+                        if module == "core.tasks" && method == "channel" && args.is_empty()
+                ) {
+                    let ch_ref = self
+                        .module
+                        .declare_func_in_func(self.host.conc.channel_new, self.b.func);
+                    let ch_call = self.b.ins().call(ch_ref, &[]);
+                    let ch_val = self.b.inst_results(ch_call)[0];
+                    let tx_ref = self
+                        .module
+                        .declare_func_in_func(self.host.conc.channel_sender, self.b.func);
+                    let tx_call = self.b.ins().call(tx_ref, &[ch_val]);
+                    let tx_val = self.b.inst_results(tx_call)[0];
+                    // `binds[i].0` is already the mangled Rust name (`mangle(elem.name)`,
+                    // set at TIR lowering — unlike plain `Let.name`, which is the raw Jet
+                    // name and needs `local_place`'s own `mangle` call). Use it directly.
+                    let tx_var = self.fresh_var(types::I64);
+                    self.b.def_var(tx_var, tx_val);
+                    self.vars.insert(binds[0].0.clone(), tx_var);
+                    let ch_var = self.fresh_var(types::I64);
+                    self.b.def_var(ch_var, ch_val);
+                    self.vars.insert(binds[1].0.clone(), ch_var);
+                } else {
+                    self.lower_tuple_destructure(init, binds)?;
+                }
             }
             TStmt::Assign {
                 place, op, value, ..
@@ -1461,7 +1613,7 @@ impl LowerCtx<'_, '_> {
                 self.b.seal_block(merge_block);
                 self.dead = false;
             }
-            TStmt::Loop { body, .. } => {
+            TStmt::Loop { label, body } => {
                 let header = self.b.create_block();
                 let body_block = self.b.create_block();
                 let exit = self.b.create_block();
@@ -1472,6 +1624,7 @@ impl LowerCtx<'_, '_> {
                 self.b.ins().jump(body_block, &[]);
 
                 self.loop_stack.push(LoopTargets {
+                    label: label.clone(),
                     continue_block: header,
                     break_block: exit,
                 });
@@ -1487,7 +1640,9 @@ impl LowerCtx<'_, '_> {
                 self.b.seal_block(exit);
                 self.dead = false;
             }
-            TStmt::While { cond, body, .. } => {
+            TStmt::While {
+                label, cond, body, ..
+            } => {
                 let header = self.b.create_block();
                 let body_block = self.b.create_block();
                 let exit = self.b.create_block();
@@ -1498,6 +1653,7 @@ impl LowerCtx<'_, '_> {
                 self.b.ins().brif(cond_val, body_block, &[], exit, &[]);
 
                 self.loop_stack.push(LoopTargets {
+                    label: label.clone(),
                     continue_block: header,
                     break_block: exit,
                 });
@@ -1515,6 +1671,7 @@ impl LowerCtx<'_, '_> {
                 self.dead = false;
             }
             TStmt::CountedLoop {
+                label,
                 init,
                 cond,
                 step,
@@ -1532,6 +1689,7 @@ impl LowerCtx<'_, '_> {
                 self.b.ins().brif(cond_val, body_block, &[], exit, &[]);
 
                 self.loop_stack.push(LoopTargets {
+                    label: label.clone(),
                     continue_block: header,
                     break_block: exit,
                 });
@@ -1552,6 +1710,7 @@ impl LowerCtx<'_, '_> {
                 self.dead = false;
             }
             TStmt::Range {
+                label,
                 var,
                 start,
                 end,
@@ -1577,6 +1736,7 @@ impl LowerCtx<'_, '_> {
                 self.b.ins().brif(past_end, exit, &[], body_block, &[]);
 
                 self.loop_stack.push(LoopTargets {
+                    label: label.clone(),
                     continue_block: step_block,
                     break_block: exit,
                 });
@@ -1605,19 +1765,13 @@ impl LowerCtx<'_, '_> {
                 self.b.seal_block(exit);
                 self.dead = false;
             }
-            TStmt::Break(_) => {
-                let targets = self
-                    .loop_stack
-                    .last()
-                    .ok_or_else(|| "jit break outside loop".to_string())?;
+            TStmt::Break(label) => {
+                let targets = self.loop_targets(label.as_deref(), "break")?;
                 self.b.ins().jump(targets.break_block, &[]);
                 self.dead = true;
             }
-            TStmt::Continue(_) => {
-                let targets = self
-                    .loop_stack
-                    .last()
-                    .ok_or_else(|| "jit continue outside loop".to_string())?;
+            TStmt::Continue(label) => {
+                let targets = self.loop_targets(label.as_deref(), "continue")?;
                 self.b.ins().jump(targets.continue_block, &[]);
                 self.dead = true;
             }
@@ -1641,6 +1795,7 @@ impl LowerCtx<'_, '_> {
                 self.emit_trap_check()?;
             }
             TStmt::ForIn {
+                label,
                 var,
                 collection_str,
                 body,
@@ -1673,6 +1828,7 @@ impl LowerCtx<'_, '_> {
                 self.b.ins().brif(done, exit, &[], body_block, &[]);
 
                 self.loop_stack.push(LoopTargets {
+                    label: label.clone(),
                     continue_block: step_block,
                     break_block: exit,
                 });
@@ -1916,23 +2072,6 @@ impl LowerCtx<'_, '_> {
         self.load_place(trimmed)
     }
 
-    fn scrutinee_bool(&mut self, cond: &str) -> Result<Value, String> {
-        if let Some((lhs, rhs)) = cond.split_once(" == ") {
-            let l = self.scrutinee_value(lhs.trim())?;
-            if rhs.trim().contains("::") {
-                let disc = self
-                    .meta
-                    .enum_variant_disc(rhs.trim())
-                    .ok_or_else(|| format!("jit enum cond `{rhs}`"))?;
-                let r = self.b.ins().iconst(types::I64, disc);
-                return Ok(self.bool_from_icmp(IntCC::Equal, l, r));
-            }
-            let r = self.scrutinee_value(rhs.trim())?;
-            return Ok(self.bool_from_icmp(IntCC::Equal, l, r));
-        }
-        Err(format!("jit switch cond unsupported `{cond}`"))
-    }
-
     fn method_key(recv_ty: &Type, method_rust: &str) -> Option<String> {
         let type_name = user_type_name(recv_ty)?;
         let method = method_rust.strip_prefix("user_").unwrap_or(method_rust);
@@ -1945,15 +2084,24 @@ impl LowerCtx<'_, '_> {
         Some(format!("{type_name}::{method}"))
     }
 
-    fn lower_struct_lit(&mut self, fields: &[(String, TExpr, bool)]) -> Result<Value, String> {
-        let n = self.b.ins().iconst(types::I64, fields.len() as i64);
+    fn lower_record_fields<'f>(
+        &mut self,
+        fields: impl Iterator<Item = &'f TExpr>,
+    ) -> Result<Value, String> {
+        let values: Vec<&TExpr> = fields.collect();
+        let n = self.b.ins().iconst(types::I64, values.len() as i64);
         let new_ref = self
             .module
             .declare_func_in_func(self.host.struct_new_f64, self.b.func);
         let new_call = self.b.ins().call(new_ref, &[n]);
         let handle = self.b.inst_results(new_call)[0];
-        for (i, (_, v, _)) in fields.iter().enumerate() {
-            let val = self.lower_expr(v)?;
+        for (i, value) in values.iter().enumerate() {
+            let raw = self.lower_expr(value)?;
+            let val = match value.ty {
+                Type::Float => raw,
+                Type::Int => self.b.ins().fcvt_from_sint(types::F64, raw),
+                _ => return Err(format!("jit record field unsupported: {:?}", value.ty)),
+            };
             let idx = self.b.ins().iconst(types::I64, i as i64);
             let set_ref = self
                 .module
@@ -1961,6 +2109,69 @@ impl LowerCtx<'_, '_> {
             self.b.ins().call(set_ref, &[handle, idx, val]);
         }
         Ok(handle)
+    }
+
+    fn lower_struct_lit(&mut self, fields: &[(String, TExpr, bool)]) -> Result<Value, String> {
+        self.lower_record_fields(fields.iter().map(|(_, value, _)| value))
+    }
+
+    fn lower_tuple_lit(&mut self, fields: &[(String, TExpr)]) -> Result<Value, String> {
+        self.lower_record_fields(fields.iter().map(|(_, value)| value))
+    }
+
+    fn lower_record_field(
+        &mut self,
+        handle: Value,
+        type_name: &str,
+        field_rust: &str,
+        fallback_ty: &Type,
+    ) -> Result<Value, String> {
+        let idx = self
+            .meta
+            .struct_field_index(type_name, field_rust)
+            .ok_or_else(|| format!("jit field `{field_rust}` on `{type_name}`"))?
+            as i64;
+        let idx_val = self.b.ins().iconst(types::I64, idx);
+        let host_ref = self
+            .module
+            .declare_func_in_func(self.host.struct_get_f64, self.b.func);
+        let call = self.b.ins().call(host_ref, &[handle, idx_val]);
+        let raw = self.b.inst_results(call)[0];
+        let field_ty = self
+            .meta
+            .struct_field_type(type_name, field_rust)
+            .unwrap_or_else(|| fallback_ty.clone());
+        Ok(match field_ty {
+            Type::Float => raw,
+            Type::Int => self.b.ins().fcvt_to_sint(types::I64, raw),
+            other => return Err(format!("jit field type unsupported: {other:?}")),
+        })
+    }
+
+    fn lower_tuple_destructure(
+        &mut self,
+        init: &TExpr,
+        binds: &[(String, String)],
+    ) -> Result<(), String> {
+        let handle = self.lower_expr(init)?;
+        let type_name = record_type_key(&init.ty).ok_or("jit tuple destructure type")?;
+        for (local, field_rust) in binds {
+            let fallback_ty = match &init.ty {
+                Type::Tuple(fields) => fields
+                    .iter()
+                    .find(|(name, _)| TIR::local_place(name) == *field_rust)
+                    .map(|(_, ty)| ty.as_ref().clone())
+                    .unwrap_or(Type::Int),
+                _ => Type::Int,
+            };
+            let value = self.lower_record_field(handle, &type_name, field_rust, &fallback_ty)?;
+            let clif = clif_ty(&fallback_ty)
+                .ok_or_else(|| format!("jit tuple destructure unsupported: {fallback_ty:?}"))?;
+            let var = self.fresh_var(clif);
+            self.b.def_var(var, value);
+            self.vars.insert(local.clone(), var);
+        }
+        Ok(())
     }
 
     fn lower_list_lit(&mut self, elems: &[TExpr]) -> Result<Value, String> {
@@ -2026,6 +2237,12 @@ impl LowerCtx<'_, '_> {
                     }
                 })
             }
+            TExprKind::IncDec {
+                op,
+                place,
+                postfix,
+                ty,
+            } => self.lower_incdec(*op, place, *postfix, ty),
             TExprKind::Binary {
                 op,
                 overflow,
@@ -2038,6 +2255,7 @@ impl LowerCtx<'_, '_> {
                 }
                 self.lower_binary(*op, *overflow, *line, lhs, rhs)
             }
+            TExprKind::CompareChain { operands, ops } => self.lower_compare_chain(operands, ops),
             TExprKind::Call { name, args } => {
                 let func_id = self
                     .func_ids
@@ -2270,36 +2488,15 @@ impl LowerCtx<'_, '_> {
                 self.lower_builtin_method(recv, op, args, &expr.ty)
             }
             TExprKind::StructLit { fields, .. } => self.lower_struct_lit(fields),
+            TExprKind::TupleLit { fields, .. } => self.lower_tuple_lit(fields),
             TExprKind::Field {
                 recv, field_rust, ..
             } => {
                 let handle = self.lower_expr(recv)?;
-                let type_name = user_type_name(&recv.ty)
-                    .map(str::to_string)
+                let type_name = record_type_key(&recv.ty)
                     .or_else(|| self.method_struct.clone())
                     .ok_or("jit field recv type")?;
-                let idx = self
-                    .meta
-                    .struct_field_index(&type_name, field_rust)
-                    .ok_or_else(|| format!("jit field `{field_rust}` on `{type_name}`"))?
-                    as i64;
-                let idx_val = self.b.ins().iconst(types::I64, idx);
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.struct_get_f64, self.b.func);
-                let call = self.b.ins().call(host_ref, &[handle, idx_val]);
-                let raw = self.b.inst_results(call)[0];
-                let field_ty = self
-                    .meta
-                    .struct_field_type(&type_name, field_rust)
-                    .unwrap_or_else(|| expr.ty.clone());
-                Ok(match field_ty {
-                    Type::Float => raw,
-                    Type::Int => self.b.ins().fcvt_to_sint(types::I64, raw),
-                    other => {
-                        return Err(format!("jit field type unsupported: {other:?}"));
-                    }
-                })
+                self.lower_record_field(handle, &type_name, field_rust, &expr.ty)
             }
             TExprKind::MethodCall {
                 recv,
@@ -2392,6 +2589,43 @@ impl LowerCtx<'_, '_> {
     ) -> Result<Value, String> {
         let recv_val = self.lower_expr(recv)?;
         match op {
+            TBuiltinOp::LenString => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.str_len, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            TBuiltinOp::Trim => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.str_trim, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            TBuiltinOp::ToUpper => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.str_to_upper, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            TBuiltinOp::ToLower => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.str_to_lower, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            TBuiltinOp::Replace => {
+                let from = self.lower_expr(&args[0])?;
+                let to = self.lower_expr(&args[1])?;
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.str_replace, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val, from, to]);
+                Ok(self.b.inst_results(call)[0])
+            }
             TBuiltinOp::Push => {
                 let v = self.lower_expr(&args[0])?;
                 let host_ref = self
@@ -2610,6 +2844,77 @@ impl LowerCtx<'_, '_> {
         Ok(self.b.block_params(merge_block)[0])
     }
 
+    fn lower_compare_chain(&mut self, operands: &[TExpr], ops: &[BinOp]) -> Result<Value, String> {
+        if operands.len() != ops.len() + 1 {
+            return Err("jit compare chain arity mismatch".to_string());
+        }
+        let vals: Result<Vec<_>, _> = operands.iter().map(|e| self.lower_expr(e)).collect();
+        let vals = vals?;
+        let mut acc = self.b.ins().iconst(types::I8, 1);
+        for (i, op) in ops.iter().enumerate() {
+            let lhs_ty = self.expr_arith_type(&operands[i]);
+            let rhs_ty = self.expr_arith_type(&operands[i + 1]);
+            if lhs_ty != rhs_ty {
+                return Err("jit compare chain mixed operand types".to_string());
+            }
+            let cmp = match (&lhs_ty, op) {
+                (Type::Int, BinOp::Lt) => {
+                    self.bool_from_icmp(IntCC::SignedLessThan, vals[i], vals[i + 1])
+                }
+                (Type::Int, BinOp::Gt) => {
+                    self.bool_from_icmp(IntCC::SignedGreaterThan, vals[i], vals[i + 1])
+                }
+                (Type::Int, BinOp::Le) => {
+                    self.bool_from_icmp(IntCC::SignedLessThanOrEqual, vals[i], vals[i + 1])
+                }
+                (Type::Int, BinOp::Ge) => {
+                    self.bool_from_icmp(IntCC::SignedGreaterThanOrEqual, vals[i], vals[i + 1])
+                }
+                (Type::Float, BinOp::Lt) => {
+                    self.bool_from_fcmp(FloatCC::LessThan, vals[i], vals[i + 1])
+                }
+                (Type::Float, BinOp::Gt) => {
+                    self.bool_from_fcmp(FloatCC::GreaterThan, vals[i], vals[i + 1])
+                }
+                (Type::Float, BinOp::Le) => {
+                    self.bool_from_fcmp(FloatCC::LessThanOrEqual, vals[i], vals[i + 1])
+                }
+                (Type::Float, BinOp::Ge) => {
+                    self.bool_from_fcmp(FloatCC::GreaterThanOrEqual, vals[i], vals[i + 1])
+                }
+                _ => return Err("jit compare chain operator unsupported".to_string()),
+            };
+            acc = self.b.ins().band(acc, cmp);
+        }
+        Ok(acc)
+    }
+
+    fn lower_incdec(
+        &mut self,
+        op: IncDecOp,
+        place: &str,
+        postfix: bool,
+        ty: &Type,
+    ) -> Result<Value, String> {
+        if !matches!(ty, Type::Int) {
+            return Err("jit increment/decrement unsupported type".to_string());
+        }
+        let key = self.normalize_place(place)?;
+        let var = self
+            .vars
+            .get(&key)
+            .copied()
+            .ok_or_else(|| format!("jit increment/decrement unknown local `{place}`"))?;
+        let old = self.b.use_var(var);
+        let delta = match op {
+            IncDecOp::Inc => self.b.ins().iconst(types::I64, 1),
+            IncDecOp::Dec => self.b.ins().iconst(types::I64, -1),
+        };
+        let next = self.b.ins().iadd(old, delta);
+        self.b.def_var(var, next);
+        Ok(if postfix { old } else { next })
+    }
+
     fn expr_field_type(&self, expr: &TExpr) -> Option<Type> {
         let TExprKind::Field {
             recv, field_rust, ..
@@ -2617,9 +2922,7 @@ impl LowerCtx<'_, '_> {
         else {
             return None;
         };
-        let type_name = user_type_name(&recv.ty)
-            .map(str::to_string)
-            .or_else(|| self.method_struct.clone())?;
+        let type_name = record_type_key(&recv.ty).or_else(|| self.method_struct.clone())?;
         self.meta.struct_field_type(&type_name, field_rust)
     }
 
@@ -2667,6 +2970,9 @@ impl LowerCtx<'_, '_> {
         }
         let lhs_ty = self.expr_arith_type(lhs);
         let _rhs_ty = self.expr_arith_type(rhs);
+        if matches!(op, BinOp::Eq | BinOp::Ne) && matches!(lhs_ty, Type::Tuple(_)) {
+            return self.lower_tuple_eq(op, &lhs_ty, l, r);
+        }
         Ok(match (&lhs_ty, op) {
             (Type::Int, BinOp::Add) => self.b.ins().iadd(l, r),
             (Type::Int, BinOp::Sub) => self.b.ins().isub(l, r),
@@ -2714,6 +3020,37 @@ impl LowerCtx<'_, '_> {
             }
             _ => return Err("jit binary op unsupported".to_string()),
         })
+    }
+
+    fn lower_tuple_eq(
+        &mut self,
+        op: BinOp,
+        ty: &Type,
+        lhs: Value,
+        rhs: Value,
+    ) -> Result<Value, String> {
+        let Type::Tuple(fields) = ty else {
+            return Err("jit tuple equality needs tuple type".to_string());
+        };
+        let type_name = record_type_key(ty).ok_or("jit tuple equality type")?;
+        let mut acc = self.b.ins().iconst(types::I8, 1);
+        for (name, field_ty) in fields {
+            let field_rust = TIR::local_place(name);
+            let left = self.lower_record_field(lhs, &type_name, &field_rust, field_ty)?;
+            let right = self.lower_record_field(rhs, &type_name, &field_rust, field_ty)?;
+            let eq = match field_ty.as_ref() {
+                Type::Int => self.bool_from_icmp(IntCC::Equal, left, right),
+                Type::Float => self.bool_from_fcmp(FloatCC::Equal, left, right),
+                other => return Err(format!("jit tuple equality unsupported: {other:?}")),
+            };
+            acc = self.b.ins().band(acc, eq);
+        }
+        if matches!(op, BinOp::Ne) {
+            let one = self.b.ins().iconst(types::I8, 1);
+            Ok(self.b.ins().isub(one, acc))
+        } else {
+            Ok(acc)
+        }
     }
 
     fn bool_from_icmp(&mut self, cc: IntCC, l: Value, r: Value) -> Value {
@@ -3222,7 +3559,16 @@ fn resident_hot_swap(program: &JitProgram) -> Result<RunOutcome, String> {
     resident_invoke()
 }
 
+pub fn cranelift_host_supported() -> bool {
+    // cranelift-jit 0.112's PLT path panics on non-x86_64 hosts. Keep the
+    // default dev path safe by delegating to the tier-0 backend there.
+    cfg!(target_arch = "x86_64")
+}
+
 fn try_resident(bundle: &ProgramBundle) -> Option<Result<RunOutcome, String>> {
+    if !cranelift_host_supported() {
+        return None;
+    }
     let program = TIR::lower_jit_program(bundle)?;
     if !jit_covers_program(&program) {
         return None;
@@ -3231,6 +3577,9 @@ fn try_resident(bundle: &ProgramBundle) -> Option<Result<RunOutcome, String>> {
 }
 
 fn try_resident_hot_swap(bundle: &ProgramBundle) -> Option<Result<RunOutcome, String>> {
+    if !cranelift_host_supported() {
+        return None;
+    }
     let program = TIR::lower_jit_program(bundle)?;
     if !jit_covers_program(&program) {
         return None;
@@ -3239,6 +3588,9 @@ fn try_resident_hot_swap(bundle: &ProgramBundle) -> Option<Result<RunOutcome, St
 }
 
 fn try_resident_restart(bundle: &ProgramBundle) -> Option<Result<RunOutcome, String>> {
+    if !cranelift_host_supported() {
+        return None;
+    }
     let program = TIR::lower_jit_program(bundle)?;
     if !jit_covers_program(&program) {
         return None;
@@ -3268,6 +3620,9 @@ pub fn jit_dump_mixed_switch_conds(bundle: &ProgramBundle) -> Vec<String> {
 /// Test hook: try JIT-compile a checked bundle; surfaces lowering errors.
 #[doc(hidden)]
 pub fn try_compile_bundle(bundle: &ProgramBundle) -> Result<(), String> {
+    if !cranelift_host_supported() {
+        return Err("cranelift-jit host path unsupported on this architecture".to_string());
+    }
     let program = TIR::lower_jit_program(bundle).ok_or_else(|| {
         format!(
             "lower_jit_program returned None ({})",
@@ -3460,10 +3815,9 @@ pub fn jit_covers_bundle_detail(bundle: &ProgramBundle) -> String {
         );
     };
     let names: HashSet<String> = program.funcs.iter().map(|f| f.name.clone()).collect();
-    let main_ok = program
-        .funcs
-        .iter()
-        .any(|f| f.name == "run" && f.params.is_empty() && f.ret.is_none() && jit_covers_func(f, &names));
+    let main_ok = program.funcs.iter().any(|f| {
+        f.name == "run" && f.params.is_empty() && f.ret.is_none() && jit_covers_func(f, &names)
+    });
     if !main_ok {
         for f in &program.funcs {
             if f.name == "run" {

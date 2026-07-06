@@ -674,6 +674,10 @@ impl<'a> Checker<'a> {
                 if self.is_list_view(vname) {
                     self.report_list_view_escape(vname, "be stored in a struct field", *vspan);
                 }
+                // D-MEM1 stage S5: no dedicated check here — the general
+                // E2307 check on the `Expr::Ident` read (the field value was
+                // already inferred earlier in this function) already caught
+                // a live string view stored in a struct field.
             }
             if let Some((_, _, fty, _)) = field_def {
                 let inst = self.trait_reg.instantiate_type(fty, &subst);
@@ -764,8 +768,9 @@ impl<'a> Checker<'a> {
     }
 
     /// Rewrite a struct-literal (or enum-payload, via the same call from
-    /// `check_enum_lit`) field VALUE that is a bare non-`Copy` ident into a
-    /// `.clone()` MethodCall, when leaving it a move would either (a) not
+    /// `check_enum_lit`) field VALUE that is a bare non-`Copy` ident into an
+    /// `Expr::Copy` node (D-CAP2 — the same node `copy x` desugars to), when
+    /// leaving it a move would either (a) not
     /// type-check (a borrowed param) or (b) silently move an OWNED LOCAL that
     /// is still read later — both would otherwise reach rustc as a raw,
     /// unreported E0507/E0382 (I2). Two cases:
@@ -806,17 +811,11 @@ impl<'a> Checker<'a> {
             _ => false,
         };
         if should_clone {
+            // D-CAP2 (D-MEM1/S4): same node `copy x` desugars to — one
+            // mechanism for "duplicate this value".
             let span = expr.span();
             let old = std::mem::replace(expr, Expr::Absent(span));
-            *expr = Expr::MethodCall {
-                receiver: Box::new(old),
-                method: "clone".to_string(),
-                method_span: span,
-                type_args: Vec::new(),
-                args: Vec::new(),
-                recv_type: None,
-                resolved_ret: None,
-            };
+            *expr = Expr::Copy(Box::new(old), span);
         }
     }
 
@@ -1660,7 +1659,12 @@ impl<'a> Checker<'a> {
                 }
                 let mut result = HashMap::new();
                 for part in parts {
-                    let StrMatchPart::Hole { name, ty, span: hole_span } = part else {
+                    let StrMatchPart::Hole {
+                        name,
+                        ty,
+                        span: hole_span,
+                    } = part
+                    else {
                         continue;
                     };
                     let bound_ty = self.str_match_hole_type(name, ty, *hole_span);

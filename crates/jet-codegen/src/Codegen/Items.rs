@@ -441,7 +441,11 @@ fn emit_struct_cli(cx: &Cx, s: &StructDef, out: &mut String) {
 // ──────────────────────────────────────────────────────────────────────────────
 
 fn emit_struct_patchable(_cx: &Cx, s: &StructDef, out: &mut String) {
-    if !s.derives.iter().any(|(t, _)| t == crate::Syntax::CONTRACT_PATCHABLE) {
+    if !s
+        .derives
+        .iter()
+        .any(|(t, _)| t == crate::Syntax::CONTRACT_PATCHABLE)
+    {
         return;
     }
     let base_rust = user_type_rust(&s.name);
@@ -558,11 +562,7 @@ fn emit_cli_subcommand_entry(
     arg_expr: &dyn Fn(&str) -> String,
     out: &mut String,
 ) {
-    let cmd_names: Vec<String> = e
-        .variants
-        .iter()
-        .map(|v| v.name.to_lowercase())
-        .collect();
+    let cmd_names: Vec<String> = e.variants.iter().map(|v| v.name.to_lowercase()).collect();
     let usage_lines = cmd_names
         .iter()
         .map(|c| format!("  {c}"))

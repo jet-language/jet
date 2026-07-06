@@ -111,7 +111,9 @@ ballot-ready decision in Tower immediately (see the **tower** and
 CLI — never hand-edit the JSON). Then **stop work on the gated feature**
 until the owner decides; build something ungated meanwhile. When the owner
 ratifies: update `crates/jet-foundation/src/Syntax.rs` / parser, re-bless
-snapshots, log it in syntax-decisions.md.
+snapshots, log it in syntax-decisions.md. If the ratification adds or removes
+user-typeable syntax, run `jet devtools grammars` and commit the regenerated
+editor sections.
 
 The owner is CEO/CTO; his decisions are the only allowed bottleneck — he
 never waits on you for a plan or a decision, and nothing reaches him that an

@@ -1053,10 +1053,7 @@ fn run() {
 ";
     let (code, stdout) = build_and_run("tir_string_after_before", src);
     assert_eq!(code, 0);
-    assert_eq!(
-        stdout,
-        "jet.dev\nnate\nno-separator\nno-separator\n"
-    );
+    assert_eq!(stdout, "jet.dev\nnate\nno-separator\nno-separator\n");
 }
 
 /// Map methods: insert, get, contains_key, keys, values, len, clear. BTreeMap
@@ -1193,10 +1190,10 @@ fn calc(a: Float) -> Float {
     return (f + c)
 }
 fn make_path(a: String, b: String) -> String {
-    return path.join(a.clone(), b.clone())
+    return path.join(copy a, copy b)
 }
 fn hash(s: String) -> String {
-    return crypto.sha256(s.clone())
+    return crypto.sha256(copy s)
 }
 fn run() {
     print(calc(16.0))
@@ -1219,14 +1216,14 @@ fn run() {
 /// `match { Ok(v) => v, Err(_) => fb }` fallback. The missing file takes the
 /// fallback branch — proving the composition runs.
 #[test]
-fn core_fs_read_with_fallback() {
+fn core_files_read_with_fallback() {
     if !have_rustc() {
         return;
     }
     let src = "\
-use core.fs as fs
+use core.files as fs
 fn read_or(p: String) -> String {
-    return (fs.read(p.clone()) ?? \"missing\")
+    return (fs.read(copy p) ?? \"missing\")
 }
 fn run() {
     print(read_or(\"/no/such/file/at/all/xyzzy\"))
@@ -1652,9 +1649,9 @@ fn handle_methods_file_writer() {
     let src = format!(
         "\
 use core.files as files
-use core.fs as fs
+use core.files as fs
 fn write_file(path: String, text: String) -> Int {{
-    w := files.create(path.clone()) ?? return 0
+    w := files.create(copy path) ?? return 0
     _r :: w.write_line(text)
     _f :: w.flush()
     return 1
@@ -2418,9 +2415,9 @@ fn empty_stack<T>() -> Stack<T> {
     return Stack<T>.{items: []}
 }
 fn push<T>(s: Stack<T>, item: T) -> Stack<T> {
-    copy := s
-    copy.items.push(item)
-    return copy
+    dup := s
+    dup.items.push(item)
+    return dup
 }
 fn run() {
 p: Pair<Int> :: make_pair(1, 2)
@@ -2726,7 +2723,7 @@ fn channel_send_receive() {
 use core.tasks as tasks
 fn run() {
 (s1, ch) :: tasks.channel<Int>()
-    s2 :: s1.clone()
+    s2 :: copy s1
     t1 :: tasks.spawn(take(s1) () => {
         s1.send(30)
     })
@@ -2981,7 +2978,7 @@ fn run() {
 
 /// c109 Phase 23: named tuples (S73/D-SG7). A tuple literal `(x: 1, y: 2)` → a generated
 /// `JetTup_<hash>` struct lit (canonical field order); field access `p.x` → `(p).user_x`;
-/// destructure `(a, b) :: p.clone()` → the borrow-temp + per-field `.clone()` form;
+/// destructure `(a, b) :: copy p` → the borrow-temp + per-field `.clone()` form;
 /// equality is native. The tuple type passes/returns byte-identically.
 #[test]
 fn named_tuples() {
@@ -2996,7 +2993,7 @@ fn run() {
     p :: (x: 1, y: 2)
     q :: (y: 3, x: 4)
     same_shape :: (p == q)
-    (a, b) :: p.clone()
+    (a, b) :: copy p
     print(\"{p.x} {p.y} {a} {b} {same_shape}\")
     pair :: bounds()
     print(\"{pair.min} {pair.max}\")
@@ -3546,7 +3543,7 @@ use core.io as io
 fn collect() -> [String] {
     out: [String] := []
     loop true {
-        line :: io.input(\"> \") ?? return out.clone()
+        line :: io.input(\"> \") ?? return copy out
         if line == \"\" {
             break
         }
@@ -4163,7 +4160,9 @@ fn run() {
 }
 
 /// c109 Phase 6b: a `Shared<T>` value passed to a FREE (non-method) call inside a loop
-/// auto-clones the Arc — `emit_call_args` emits `Arc::clone(&…)` and the receiving
+/// auto-clones the handle — `emit_call_args` emits `(…).clone()` (D-MEM1 S6: `Shared<T>`
+/// lowers to `jet_std::JetShared<T>`, a newtype with its own cheap-handle `Clone` impl,
+/// not a bare `Arc<T>` — was `Arc::clone(&…)` before this stage) and the receiving
 /// `Shared<T>` `Read` param borrows it (`&(…)`). The gate previously excluded
 /// `shared_auto_clone` on plain `Call` args, routing `loop_user`/`noop` through the AST
 /// path; both now route through the TIR with a byte-identical emit. A `Shared<T>` value
@@ -4199,18 +4198,20 @@ fn run() {
             jet::render_diagnostics(&shown, src, &diags)
         )
     });
-    // Byte-exact auto-clone emit: the free-call arg auto-clones the Arc, then the
-    // `Read` non-scalar `Shared<Int>` param borrows it.
+    // Byte-exact auto-clone emit: the free-call arg auto-clones the handle, then
+    // the `Read` non-scalar `Shared<Int>` param borrows it. (D-MEM1 S6: `Shared<T>`
+    // now lowers to `jet_std::JetShared<T>`, not a bare `std::sync::Arc<T>` — its
+    // own `Clone` impl is a cheap handle clone, so plain `.clone()` replaces the
+    // old `Arc::clone(&…)` text.)
     assert!(
-        out.rust
-            .contains("user_noop(&(std::sync::Arc::clone(&(*user_h))));"),
+        out.rust.contains("user_noop(&(((*user_h)).clone()));"),
         "shared auto-clone free-call arg not byte-exact:\n{}",
         out.rust
     );
     // The receiving param signature is the shared `rust_param_type` form.
     assert!(
         out.rust
-            .contains("pub fn user_noop(user_h: &std::sync::Arc<i64>)"),
+            .contains("pub fn user_noop(user_h: &jet_std::JetShared<i64>)"),
         "Shared<Int> param signature not byte-exact:\n{}",
         out.rust
     );

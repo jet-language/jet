@@ -16,8 +16,8 @@
 pub use jet_driver::{
     // Top-level re-exports from Compile module:
     bundle_uses_unsafe,
-    CanonicalAST,
     CBind,
+    CanonicalAST,
     Capabilities,
     Codegen,
     Collections,
@@ -43,6 +43,7 @@ pub use jet_driver::{
     FFI,
     SHA256,
 };
+pub use jet_queries as Queries;
 pub mod BuildCache;
 pub mod CLI;
 pub mod Debug;
@@ -145,6 +146,19 @@ pub fn compile_web(file: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
     compile_bundle_path_opts(file, Sema::CompileMode::Run, false, false, true, None)
 }
 
+/// Like `compile_with_path` but for `jet build --target=plugin` (D-PLUGIN1=B /
+/// D-DEP-WASM1=A, c81). `CompileMode::Check` — a plugin package has no single
+/// `fn run` entry point (D-ILE1: it's a library-shaped export surface, not an
+/// executable), so the "no `run`" requirement (E0101, `Run`/`Eval`-only) never
+/// applies here; every other check still runs in full.
+pub fn compile_plugin(file: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
+    Driver::compile_bundle_path_opts_plugin(
+        file,
+        Sema::CompileMode::Check,
+        Some(Syntax::TARGET_PLUGIN),
+    )
+}
+
 /// D-DBG3 step 2 (dap-debugger): compile for the native `jet debug` backend — a
 /// normal build with `debug_linemap = true`, so the generated Rust carries the
 /// `// jet:line N` table `Source/Debug/LineMap.rs` reads back.
@@ -188,6 +202,7 @@ pub fn compile_web_with_path(src: &str, file: &str) -> Result<CompileOutput, Vec
             web_target_ceiling: prog.web_target_ceiling,
             pub_file: prog.pub_file,
             html_path: prog.html_path.clone(),
+            no_alloc_policy: prog.no_alloc_policy,
         }],
         parse_teaching: Vec::new(),
         used_core: std::collections::HashSet::new(),
@@ -245,6 +260,7 @@ pub fn compile_web_with_path(src: &str, file: &str) -> Result<CompileOutput, Vec
         comptime_inputs,
         web,
         web_partition_report: bundle.web_partition_report.clone(),
+        plugin: None,
         inferred_layer: bundle.inferred_layer,
         layer_ceiling: bundle.layer_ceiling,
     })
@@ -496,8 +512,7 @@ pub fn eval_pure_program(src: &str, file: &str) -> Result<String, Vec<Diagnostic
         .unwrap_or(std::path::Path::new("."));
     let mut sink = Comptime::DevSink::new();
     let program = Comptime::ProgramInfo::empty();
-    Comptime::run_main(main_fn, &func_map, base_dir, &mut sink, &program)
-        .map_err(|d| vec![d])?;
+    Comptime::run_main(main_fn, &func_map, base_dir, &mut sink, &program).map_err(|d| vec![d])?;
     let text = sink.stdout;
     // Render the captured output as a JSON string.
     let json = if text.trim().is_empty() {

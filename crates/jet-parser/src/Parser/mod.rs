@@ -489,13 +489,14 @@ fn value_end_image(v: &crate::AST::ImageFieldValue) -> usize {
     }
 }
 
-/// U14: `from:` must be written `system.<name>`.
+/// U14/D-JPK-IMAGE1: `from:` must be written `system.<name>` (the `.Iso` disk-image
+/// tier) or `packages.<name>` (the `.Oci` container tier).
 fn image_from_not_system(span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0003",
-        "an image's `from:` must name a system".to_string(),
-        "U14: an `Image` is built from a `System`, written `from: system.<name>`".to_string(),
-        "write `from: system.<name>`, e.g. `from: system.halcyon`".to_string(),
+        "an image's `from:` must name a system or a package".to_string(),
+        "an `Image` is built either from a `System` (`from: system.<name>`, disk images) or a `Package` (`from: packages.<name>`, OCI containers)".to_string(),
+        "write `from: system.<name>` or `from: packages.<name>`".to_string(),
         Some(span),
     )
 }
@@ -505,7 +506,8 @@ fn fleet_host_not_system(span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0003",
         "a fleet host must name a system".to_string(),
-        "U15: each `hosts:` entry maps a host to a `System`, written `<host>: system.<name>`".to_string(),
+        "U15: each `hosts:` entry maps a host to a `System`, written `<host>: system.<name>`"
+            .to_string(),
         "write `<host>: system.<name>`, e.g. `web1: system.web`".to_string(),
         Some(span),
     )

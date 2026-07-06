@@ -1,0 +1,29 @@
+// services.jet — U12 supervised dev services, the executable spec for the
+// `env.<name> { services: { … } }` map.
+//
+// `services:` here is jetpack's own dev-runtime tier (`jetpack services
+// up/down/health/logs`, `jetpack dev`'s health gate) — a plain child process
+// under `.jet/services/<name>/`, distinct from the jetos `system.*.services`
+// tier above (a whole-machine service manager, Phase D). Same `Service`
+// grammar either way (open record, required `enable: Bool`) — only the
+// capture/interpretation differs.
+//
+// `redis` needs no `init`/`ready`/`ports` at all: its name matches jetpack's
+// built-in catalog, which supplies the start command, the `redis-cli … ping`
+// readiness probe, and the `default:redis` package to realize. `worker`
+// spells everything out by hand — any service jetpack doesn't know by name
+// works the same way. `cache` is declared but disabled (`enable: false`):
+// captured for `jetpack services logs` etc, never started.
+module env.dev {
+    services: {
+        redis: { enable: true },
+        worker: {
+            enable: true,
+            ports: [8080],
+            init: "worker --port 8080",
+            ready: "curl -sf http://127.0.0.1:8080/health",
+            data_dir: ".jet/services/worker/data",
+        },
+        cache: { enable: false },
+    }
+}

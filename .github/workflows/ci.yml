@@ -8,6 +8,24 @@ on:
       - master
 
 jobs:
+  jetpack-platform:
+    name: Jetpack platform audit (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Platform audit
+        run: cargo test --test jetpack_platform
+
   nix:
     name: Nix toolchain
     runs-on: ubuntu-latest

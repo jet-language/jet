@@ -37,8 +37,8 @@
 //! `#[inline(always)]` purely off `Func::is_inline`/`is_inline_always` once
 //! this check (and the rest of sema) has passed.
 
-use crate::AST::{Binding, ElseBranch, Expr, Func, LValue, Stmt};
 use crate::Diagnostics::{Diagnostic, Span};
+use crate::AST::{Binding, ElseBranch, Expr, Func, LValue, Stmt};
 
 /// D-METHODMACRO1=A: the size ceiling named in E0919's fix text. A statement
 /// count, not a byte/token count — cheap to compute, easy to explain, and
@@ -347,7 +347,9 @@ impl<'a> InlineAlwaysScan<'a> {
                 }
             }
             Expr::UnitLit { .. } => {}
-            Expr::Deref(inner, _) | Expr::RawOf(inner, _) => self.scan_expr(inner),
+            Expr::Deref(inner, _) | Expr::RawOf(inner, _) | Expr::Copy(inner, _) => {
+                self.scan_expr(inner)
+            }
             Expr::Field(inner, _, _) => self.scan_expr(inner),
             Expr::OptField { base, .. } => self.scan_expr(base),
             Expr::StructLit { fields, .. } => {

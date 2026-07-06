@@ -317,6 +317,25 @@ fn explain_golden() {
     check_snapshot("explain_E2001.txt", &stdout);
 }
 
+#[test]
+fn jetpack_missing_build_log_golden() {
+    let cwd = isolated_cwd(&line!().to_string());
+    let root = cwd.join("jetpack-root");
+    let out = Command::new(jet())
+        .args(["logs", "definitely_missing", "--no-color"])
+        .current_dir(&cwd)
+        .env("JETPACK_ROOT", &root)
+        .output()
+        .unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "missing log is usage-class error"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+    check_snapshot("e1274_missing_build_log.txt", &stderr);
+}
+
 fn is_code(s: &str) -> bool {
     let b = s.as_bytes();
     b.len() == 5 && (b[0] == b'E' || b[0] == b'L') && b[1..].iter().all(|c| c.is_ascii_digit())
@@ -952,7 +971,11 @@ fn expand_unknown_lens_golden() {
 #[test]
 fn expand_missing_file_is_user_error() {
     let out = Command::new(jet()).arg("expand").output().unwrap();
-    assert_eq!(out.status.code(), Some(1), "missing entry file is USER_ERROR");
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "missing entry file is USER_ERROR"
+    );
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
         stderr.contains("needs an entry file"),
@@ -988,7 +1011,11 @@ fn expand_compile_error_reports_ordinary_diagnostics() {
 #[test]
 fn stale_manifest_name_pack_jet_is_e1226() {
     let dir = isolated_cwd("stale_pack_jet");
-    fs::write(dir.join("pack.jet"), "payload: { name: \"x\", version: \"0.1.0\" }\n").unwrap();
+    fs::write(
+        dir.join("pack.jet"),
+        "payload: { name: \"x\", version: \"0.1.0\" }\n",
+    )
+    .unwrap();
     let out = Command::new(jet())
         .arg("add")
         .arg("dep")
@@ -999,9 +1026,18 @@ fn stale_manifest_name_pack_jet_is_e1226() {
         .output()
         .unwrap();
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("E1226"), "expected E1226 in stderr:\n{stderr}");
-    assert!(stderr.contains("pack.jet"), "names the found file:\n{stderr}");
-    assert!(stderr.contains("pkg.jet"), "names the fix target:\n{stderr}");
+    assert!(
+        stderr.contains("E1226"),
+        "expected E1226 in stderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("pack.jet"),
+        "names the found file:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("pkg.jet"),
+        "names the fix target:\n{stderr}"
+    );
 }
 
 #[test]
@@ -1015,8 +1051,14 @@ fn stale_manifest_name_jet_toml_is_e1226() {
         .output()
         .unwrap();
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("E1226"), "expected E1226 in stderr:\n{stderr}");
-    assert!(stderr.contains("jet.toml"), "names the found file:\n{stderr}");
+    assert!(
+        stderr.contains("E1226"),
+        "expected E1226 in stderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("jet.toml"),
+        "names the found file:\n{stderr}"
+    );
 }
 
 #[test]
@@ -1031,8 +1073,14 @@ fn stale_manifest_name_payload_jet_is_e1226() {
         .output()
         .unwrap();
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("E1226"), "expected E1226 in stderr:\n{stderr}");
-    assert!(stderr.contains("payload.jet"), "names the found file:\n{stderr}");
+    assert!(
+        stderr.contains("E1226"),
+        "expected E1226 in stderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("payload.jet"),
+        "names the found file:\n{stderr}"
+    );
 }
 
 /// `jetpack.toml` is a different, still-live file (D-JPK-FILES repo
@@ -1055,5 +1103,97 @@ fn jetpack_toml_alone_is_not_e1226() {
     assert!(
         stderr.contains("no file given and no `pkg.jet` found") || stderr.contains("E1225"),
         "should fall back to the generic no-manifest message:\n{stderr}"
+    );
+}
+
+/// D-PLUGIN1=B (c81): a `target: plugin` package is deny-by-default — its own
+/// code using any effect (here `core.env`) must fail cleanly at build time
+/// (E1258), not defer to a runtime instantiation failure. This check lives in
+/// the CLI's post-compile effect-budget pass (`Source/CmdCompile.rs`), so it
+/// needs the real subprocess (not the `jet::compile_plugin` library call the
+/// `tests/ui` `@plugin_target` harness drives).
+#[test]
+fn plugin_using_an_effect_is_e1258() {
+    let dir = isolated_cwd("plugin_effect_denied");
+    fs::write(
+        dir.join("main.jet"),
+        "use core.env as env\n\npub fn get_secret() -> Int {\n    _ :: env.get(\"SECRET\")\n    return 1\n}\n",
+    )
+    .unwrap();
+    let out = Command::new(jet())
+        .arg("build")
+        .arg("main.jet")
+        .arg("--target=plugin")
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("E1258"),
+        "expected E1258 (plugin capability-denied) in stderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("Env"),
+        "should name the offending effect:\n{stderr}"
+    );
+}
+
+/// D-DEP-WASM1=A (c81): `jet build --target=plugin` shells out to
+/// `wasm-tools` to lift the rustc-built core wasm module into a Component. A
+/// PATH without `wasm-tools` on it (but with `rustc` still reachable, so the
+/// core-module half of the build succeeds) must fail as a clean E1259, never
+/// a raw "No such file or directory" panic (I2).
+#[test]
+fn plugin_missing_wasm_tools_is_e1259() {
+    let which = |tool: &str| -> Option<String> {
+        Command::new("which")
+            .arg(tool)
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+    };
+    let (Some(rustc_path), Some(lld_path)) = (which("rustc"), which("lld")) else {
+        eprintln!("note: skipping plugin_missing_wasm_tools_is_e1259 (no `rustc`/`lld` on PATH to re-expose)");
+        return;
+    };
+
+    let dir = isolated_cwd("plugin_no_wasmtools");
+    fs::write(
+        dir.join("main.jet"),
+        "pub fn scale(a: Float, b: Float) -> Float {\n    return a * b\n}\n",
+    )
+    .unwrap();
+
+    // A minimal PATH exposing only `rustc` + `lld` (via symlinks), so the
+    // core-wasm-module half of the build still works but `wasm-tools`
+    // resolves to nothing.
+    let bin_dir = dir.join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::symlink;
+        let _ = symlink(&rustc_path, bin_dir.join("rustc"));
+        let _ = symlink(&lld_path, bin_dir.join("lld"));
+    }
+
+    let out = Command::new(jet())
+        .arg("build")
+        .arg("main.jet")
+        .arg("--target=plugin")
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .env("PATH", &bin_dir)
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("E1259"),
+        "expected E1259 (missing wasm-tools) in stderr:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("panicked"),
+        "must never panic, only report a clean diagnostic (I2):\n{stderr}"
     );
 }

@@ -47,9 +47,18 @@ pub struct FlagSpec {
 
 /// Flags accepted regardless of subcommand (presentation + machine output).
 pub const GLOBAL_FLAGS: &[FlagSpec] = &[
-    FlagSpec { name: "color", summary: "when to colorize: auto|always|never" },
-    FlagSpec { name: "json", summary: "emit machine-readable JSON diagnostics" },
-    FlagSpec { name: "version", summary: "print the compiler version and exit" },
+    FlagSpec {
+        name: "color",
+        summary: "when to colorize: auto|always|never",
+    },
+    FlagSpec {
+        name: "json",
+        summary: "emit machine-readable JSON diagnostics",
+    },
+    FlagSpec {
+        name: "version",
+        summary: "print the compiler version and exit",
+    },
 ];
 
 /// One-line meaning for every per-command flag, so the man page and completions
@@ -76,6 +85,7 @@ const FLAG_HELP: &[(&str, &str)] = &[
     ("branch", "with `--git`: track a branch"),
     ("rev", "with `--git`: pin to a commit"),
     ("locked", "with `fetch`: verify the lock only, no network"),
+    ("shell-on-fail", "with Jetpack build/env: open a shell in preserved failed build scratch"),
     ("pkg", "with `bind`: the C library link key"),
     ("out", "with `bind`: the output cache path"),
     // D-BUILDPROFILE1 (ratified 2026-06-25): named build profiles.
@@ -106,33 +116,183 @@ pub fn flag_help(name: &str) -> &'static str {
 /// Every built-in subcommand. This is THE list; `KNOWN_COMMANDS` in the driver
 /// is generated from it (see `command_names`).
 pub const COMMANDS: &[CommandSpec] = &[
-    CommandSpec { name: "check", summary: "look for problems, build nothing", flags: &["json"], arg: Arg::File },
-    CommandSpec { name: "build", summary: "compile to a native binary in ./build/", flags: &["small", "emit-rust", "json", "capabilities-json", "release", "profile", "target", "explain-partition"], arg: Arg::File },
-    CommandSpec { name: "run", summary: "build, then run (or run a project)", flags: &["small", "emit-rust", "json", "release", "profile"], arg: Arg::File },
-    CommandSpec { name: "test", summary: "compile and run top-level test blocks", flags: &["json", "update-snapshots", "u", "coverage"], arg: Arg::Path },
-    CommandSpec { name: "emit", summary: "emit the generated Rust source (D-TOOL3)", flags: &["rust"], arg: Arg::File },
-    CommandSpec { name: "bench", summary: "benchmark a Jet program (D-TOOL5)", flags: &["json"], arg: Arg::File },
-    CommandSpec { name: "new", summary: "create a new project folder", flags: &["annotated"], arg: Arg::Name },
-    CommandSpec { name: "dev", summary: "enter the project shell (jetpack enter)", flags: &[], arg: Arg::None },
-    CommandSpec { name: "debug", summary: "step through a program at the Jet source level (D-DBG3)", flags: &["raw-frames", "dap"], arg: Arg::File },
-    CommandSpec { name: "fmt", summary: "rewrite a file to canonical style", flags: &["check"], arg: Arg::Path },
-    CommandSpec { name: "fix", summary: "preview auto-fixable diagnostics (use --write to apply)", flags: &["write", "apply"], arg: Arg::Path },
-    CommandSpec { name: "bind", summary: "generate a C binding cache from a header", flags: &["pkg", "out"], arg: Arg::Path },
-    CommandSpec { name: "lsp", summary: "language server (stdio JSON-RPC)", flags: &["bench"], arg: Arg::None },
-    CommandSpec { name: "explain", summary: "print the offline essay for a diagnostic code", flags: &[], arg: Arg::Name },
-    CommandSpec { name: "doctor", summary: "diagnose your environment (rustc, cache, PATH, FFI)", flags: &["fix", "online", "network", "plain"], arg: Arg::None },
-    CommandSpec { name: "completions", summary: "print a shell completion script (bash|zsh|fish)", flags: &[], arg: Arg::Name },
-    CommandSpec { name: "man", summary: "print the manual page (roff)", flags: &[], arg: Arg::Name },
-    CommandSpec { name: "version", summary: "print the compiler version", flags: &[], arg: Arg::None },
-    CommandSpec { name: "help", summary: "print the help text", flags: &[], arg: Arg::None },
-    CommandSpec { name: "upgrade", summary: "how to download a newer release", flags: &[], arg: Arg::None },
-    CommandSpec { name: "add", summary: "add a dependency and fetch it", flags: &["path", "git", "tag", "branch", "rev"], arg: Arg::Name },
-    CommandSpec { name: "remove", summary: "remove a dependency", flags: &[], arg: Arg::Name },
-    CommandSpec { name: "fetch", summary: "download and link all dependencies", flags: &["locked"], arg: Arg::None },
-    CommandSpec { name: "update", summary: "refresh @latest / branch selectors", flags: &[], arg: Arg::Name },
-    CommandSpec { name: "store", summary: "inspect the content-addressed store", flags: &[], arg: Arg::Name },
-    CommandSpec { name: "gc", summary: "remove unreferenced store entries", flags: &[], arg: Arg::None },
-    CommandSpec { name: "install", summary: "(redirected) use `jet fetch` instead", flags: &[], arg: Arg::None },
+    CommandSpec {
+        name: "check",
+        summary: "look for problems, build nothing",
+        flags: &["json"],
+        arg: Arg::File,
+    },
+    CommandSpec {
+        name: "build",
+        summary: "compile to a native binary in ./build/",
+        flags: &[
+            "small",
+            "emit-rust",
+            "json",
+            "capabilities-json",
+            "release",
+            "profile",
+            "target",
+            "explain-partition",
+        ],
+        arg: Arg::File,
+    },
+    CommandSpec {
+        name: "run",
+        summary: "build, then run (or run a project)",
+        flags: &["small", "emit-rust", "json", "release", "profile"],
+        arg: Arg::File,
+    },
+    CommandSpec {
+        name: "test",
+        summary: "compile and run top-level test blocks",
+        flags: &["json", "update-snapshots", "u", "coverage"],
+        arg: Arg::Path,
+    },
+    CommandSpec {
+        name: "emit",
+        summary: "emit the generated Rust source (D-TOOL3)",
+        flags: &["rust"],
+        arg: Arg::File,
+    },
+    CommandSpec {
+        name: "bench",
+        summary: "benchmark a Jet program (D-TOOL5)",
+        flags: &["json"],
+        arg: Arg::File,
+    },
+    CommandSpec {
+        name: "new",
+        summary: "create a new project folder",
+        flags: &["annotated"],
+        arg: Arg::Name,
+    },
+    CommandSpec {
+        name: "dev",
+        summary: "enter the project shell (jetpack enter)",
+        flags: &[],
+        arg: Arg::None,
+    },
+    CommandSpec {
+        name: "debug",
+        summary: "step through a program at the Jet source level (D-DBG3)",
+        flags: &["raw-frames", "dap"],
+        arg: Arg::File,
+    },
+    CommandSpec {
+        name: "fmt",
+        summary: "rewrite a file to canonical style",
+        flags: &["check"],
+        arg: Arg::Path,
+    },
+    CommandSpec {
+        name: "fix",
+        summary: "preview auto-fixable diagnostics (use --write to apply)",
+        flags: &["write", "apply"],
+        arg: Arg::Path,
+    },
+    CommandSpec {
+        name: "bind",
+        summary: "generate a C binding cache from a header",
+        flags: &["pkg", "out"],
+        arg: Arg::Path,
+    },
+    CommandSpec {
+        name: "lsp",
+        summary: "language server (stdio JSON-RPC)",
+        flags: &["bench"],
+        arg: Arg::None,
+    },
+    CommandSpec {
+        name: "explain",
+        summary: "explain a diagnostic code or latest Jetpack build for a ref",
+        flags: &[],
+        arg: Arg::Name,
+    },
+    CommandSpec {
+        name: "logs",
+        summary: "print latest Jetpack build logs",
+        flags: &["json"],
+        arg: Arg::Name,
+    },
+    CommandSpec {
+        name: "doctor",
+        summary: "diagnose your environment (rustc, cache, PATH, FFI)",
+        flags: &["fix", "online", "network", "plain"],
+        arg: Arg::None,
+    },
+    CommandSpec {
+        name: "completions",
+        summary: "print a shell completion script (bash|zsh|fish)",
+        flags: &[],
+        arg: Arg::Name,
+    },
+    CommandSpec {
+        name: "man",
+        summary: "print the manual page (roff)",
+        flags: &[],
+        arg: Arg::Name,
+    },
+    CommandSpec {
+        name: "version",
+        summary: "print the compiler version",
+        flags: &[],
+        arg: Arg::None,
+    },
+    CommandSpec {
+        name: "help",
+        summary: "print the help text",
+        flags: &[],
+        arg: Arg::None,
+    },
+    CommandSpec {
+        name: "upgrade",
+        summary: "how to download a newer release",
+        flags: &[],
+        arg: Arg::None,
+    },
+    CommandSpec {
+        name: "add",
+        summary: "add a dependency and fetch it",
+        flags: &["path", "git", "tag", "branch", "rev"],
+        arg: Arg::Name,
+    },
+    CommandSpec {
+        name: "remove",
+        summary: "remove a dependency",
+        flags: &[],
+        arg: Arg::Name,
+    },
+    CommandSpec {
+        name: "fetch",
+        summary: "download and link all dependencies",
+        flags: &["locked"],
+        arg: Arg::None,
+    },
+    CommandSpec {
+        name: "update",
+        summary: "refresh @latest / branch selectors",
+        flags: &[],
+        arg: Arg::Name,
+    },
+    CommandSpec {
+        name: "store",
+        summary: "inspect the content-addressed store",
+        flags: &[],
+        arg: Arg::Name,
+    },
+    CommandSpec {
+        name: "gc",
+        summary: "remove unreferenced store entries",
+        flags: &[],
+        arg: Arg::None,
+    },
+    CommandSpec {
+        name: "install",
+        summary: "(redirected) use `jet fetch` instead",
+        flags: &[],
+        arg: Arg::None,
+    },
 ];
 
 /// Every built-in subcommand name, in declaration order. The driver's
@@ -189,7 +349,11 @@ pub fn completions_bash() -> String {
     let cmds = names_joined();
     let flags = flags_joined();
     // Commands that should offer file completion for their first argument.
-    let file_cmds: Vec<&str> = COMMANDS.iter().filter(|c| takes_file(c)).map(|c| c.name).collect();
+    let file_cmds: Vec<&str> = COMMANDS
+        .iter()
+        .filter(|c| takes_file(c))
+        .map(|c| c.name)
+        .collect();
     let file_cmds_j = file_cmds.join(" ");
     format!(
         "# {bin} bash completion (generated by `{bin} completions bash`)\n\
@@ -242,7 +406,11 @@ pub fn completions_zsh() -> String {
         let summary = f.summary.replace(':', "\\:");
         fdesc.push_str(&format!("        '--{}[{}]'\n", f.name, summary));
     }
-    let file_cmds: Vec<&str> = COMMANDS.iter().filter(|c| takes_file(c)).map(|c| c.name).collect();
+    let file_cmds: Vec<&str> = COMMANDS
+        .iter()
+        .filter(|c| takes_file(c))
+        .map(|c| c.name)
+        .collect();
     let file_cmds_j = file_cmds.join(" ");
     format!(
         "#compdef {bin}\n\
@@ -384,13 +552,23 @@ pub fn man(sub: Option<&str>) -> String {
     ));
     out.push_str(".SH COMMANDS\n");
     for c in COMMANDS {
-        out.push_str(&format!(".TP\n\\fB{}\\fR\n{}\n", c.name, roff_escape(c.summary)));
+        out.push_str(&format!(
+            ".TP\n\\fB{}\\fR\n{}\n",
+            c.name,
+            roff_escape(c.summary)
+        ));
     }
     out.push_str(".SH GLOBAL OPTIONS\n");
     for f in GLOBAL_FLAGS {
-        out.push_str(&format!(".TP\n\\fB\\-\\-{}\\fR\n{}\n", f.name, roff_escape(f.summary)));
+        out.push_str(&format!(
+            ".TP\n\\fB\\-\\-{}\\fR\n{}\n",
+            f.name,
+            roff_escape(f.summary)
+        ));
     }
     out.push_str(".SH SEE ALSO\n");
-    out.push_str(&format!("Run \\fB{bin} explain <code>\\fR for an essay on any diagnostic code.\n"));
+    out.push_str(&format!(
+        "Run \\fB{bin} explain <code>\\fR for an essay on any diagnostic code.\n"
+    ));
     out
 }

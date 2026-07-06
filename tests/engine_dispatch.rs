@@ -85,8 +85,14 @@ fn missing_engine_binary_is_e1228() {
 
     assert_eq!(out.status.code(), Some(1), "engine-missing is USER_ERROR");
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("E1228"), "expected E1228 in stderr: {stderr}");
-    assert!(stderr.contains("jetpack"), "names the missing engine: {stderr}");
+    assert!(
+        stderr.contains("E1228"),
+        "expected E1228 in stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("jetpack"),
+        "names the missing engine: {stderr}"
+    );
 }
 
 #[cfg(unix)]
@@ -112,7 +118,10 @@ exit 0"#,
 
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("E1227"), "expected E1227 in stderr: {stderr}");
+    assert!(
+        stderr.contains("E1227"),
+        "expected E1227 in stderr: {stderr}"
+    );
     assert!(
         stderr.contains("0.0.0-skew-test"),
         "names the mismatched version: {stderr}"
@@ -128,7 +137,10 @@ fn engine_too_old_for_handshake_is_e1227() {
     let jet_bin = isolated_jet(&jet_dir);
     let path_dir = Scratch::new("oldengine-path");
     let fake_jetpack = path_dir.join("jetpack");
-    write_script(&fake_jetpack, "echo \"jetpack: unknown flag $1\" >&2\nexit 2");
+    write_script(
+        &fake_jetpack,
+        "echo \"jetpack: unknown flag $1\" >&2\nexit 2",
+    );
 
     let out = Command::new(&jet_bin)
         .arg("env")
@@ -138,7 +150,10 @@ fn engine_too_old_for_handshake_is_e1227() {
 
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("E1227"), "expected E1227 in stderr: {stderr}");
+    assert!(
+        stderr.contains("E1227"),
+        "expected E1227 in stderr: {stderr}"
+    );
 }
 
 #[cfg(unix)]
@@ -211,7 +226,10 @@ fn typo_of_engine_verb_still_suggests_it() {
     let out = Command::new(real_jet()).arg("envx").output().unwrap();
     assert_eq!(out.status.code(), Some(2), "unknown command is USAGE");
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("E2101"), "expected E2101 in stderr: {stderr}");
+    assert!(
+        stderr.contains("E2101"),
+        "expected E2101 in stderr: {stderr}"
+    );
     assert!(
         stderr.contains("env"),
         "did-you-mean should suggest `env`: {stderr}"

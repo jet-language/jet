@@ -258,8 +258,7 @@ fn workspace_find_example_evaluates() {
 #[test]
 fn committed_monorepo_example_indexes_and_addresses_members() {
     use jet::Jetpack::RefSpec::{classify_with_workspace, Source, SourceTable, WorkspaceIndex};
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("examples/features/packages/monorepo");
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/features/packages/monorepo");
     let src = std::fs::read_to_string(dir.join("workspace.jet"))
         .expect("committed monorepo example must have a workspace.jet");
 
@@ -270,8 +269,11 @@ fn committed_monorepo_example_indexes_and_addresses_members() {
     assert_eq!(names, ["hello", "ranker"], "members: {:?}", plan.members);
 
     // Build the queryable index and address members two ways (Slice B).
-    let index =
-        WorkspaceIndex::from_members(plan.members.iter().map(|m| (m.name.clone(), m.path.clone())));
+    let index = WorkspaceIndex::from_members(
+        plan.members
+            .iter()
+            .map(|m| (m.name.clone(), m.path.clone())),
+    );
     // Bare form.
     let hello = classify_with_workspace("hello", &SourceTable::empty(), &index)
         .expect("bare `hello` must resolve");

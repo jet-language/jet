@@ -4,16 +4,22 @@
 //! binary (D-JPK1). All user-facing output flows through `Output::Theme`.
 
 use super::Bridge;
+use super::BuildDebug;
 use super::Components;
+use super::Discovery;
+use super::Image;
 use super::ManifestTOML;
 use super::Output::{self, Theme};
 use super::Provider::{self, ProviderError};
 use super::RefSpec::{self, ProviderKind};
+use super::RuntimePolicy;
+use super::Secrets;
+use super::Services;
 use super::Shell::{self, Env, ShellKind};
 use super::Store::{self, Roots};
 use super::Trust;
 use super::{EnvFile, ModuleEval, RefSpec::RefError, WorkspaceFile, WorkspaceLock};
-use crate::Syntax;
+use crate::{Lock, Syntax};
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 
@@ -37,6 +43,18 @@ struct Flags {
     /// foreign-flake fallback; jetpack's own composed shells are already
     /// PATH-only, so this is a no-op there today.
     pure: bool,
+    /// D-JPK-IMAGE1: `jet image <name> --push <ref>` — the registry ref to
+    /// push to. Always honestly gated (E1268): pushing needs TLS support that
+    /// doesn't exist yet, so this is only ever read to report that gate.
+    push: Option<String>,
+    /// U20: `jetpack add <ref> --adapt` drafts an adapter declaration instead
+    /// of editing `env.jet` with a plain package ref.
+    adapt: bool,
+    /// Emit machine-readable output for diagnostics that have structured
+    /// payloads (currently U23 no-Nix package holes).
+    json: bool,
+    /// U27: open a shell in preserved failed build scratch.
+    shell_on_fail: bool,
 }
 
 /// Result of separating flags, positional args, and a trailing `-- cmd`.
@@ -56,6 +74,10 @@ fn parse_args(args: &[String]) -> Parsed {
         packages: Vec::new(),
         flake: false,
         pure: false,
+        push: None,
+        adapt: false,
+        json: false,
+        shell_on_fail: false,
     };
     let mut positional = Vec::new();
     let mut command = None;
@@ -72,6 +94,15 @@ fn parse_args(args: &[String]) -> Parsed {
             a if a == Syntax::TRUST_BYPASS_FLAG => flags.trust = true,
             a if a == Syntax::ENV_FLAG_FLAKE => flags.flake = true,
             a if a == Syntax::ENV_FLAG_PURE => flags.pure = true,
+            "--adapt" => flags.adapt = true,
+            "--json" => flags.json = true,
+            a if a == Syntax::BUILD_FLAG_SHELL_ON_FAIL => flags.shell_on_fail = true,
+            a if a == Syntax::IMAGE_FLAG_PUSH => {
+                i += 1;
+                if let Some(r) = args.get(i) {
+                    flags.push = Some(r.clone());
+                }
+            }
             "--fixtures" => {
                 i += 1;
                 if let Some(dir) = args.get(i) {
@@ -125,9 +156,18 @@ pub fn main(args: Vec<String>) -> i32 {
         "clean" => cmd_clean(&theme),
         "add" => cmd_add(&theme, &parsed),
         "remove" => cmd_remove(&theme, &parsed),
+        "update" => cmd_update(&theme, &parsed),
+        "outdated" => cmd_outdated(&theme, &parsed),
+        "search" => cmd_search(&theme, &parsed),
+        "info" => cmd_info(&theme, &parsed),
+        "explain" => cmd_explain(&theme, &parsed),
+        "logs" => cmd_logs(&theme, &parsed),
         "push" => cmd_push(&theme, &parsed),
+        v if v == Syntax::IMAGE_SUBCOMMAND => cmd_image(&theme, &parsed),
         v if v == Syntax::BRIDGE_SUBCOMMAND => cmd_bridge(&theme, &parsed),
         v if v == Syntax::OS_SUBCOMMAND => cmd_os(&theme, &parsed),
+        v if v == Syntax::SERVICES_SUBCOMMAND => cmd_services(&theme, &parsed),
+        v if v == Syntax::SECRETS_SUBCOMMAND => cmd_secrets(&theme, &parsed),
         "help" | "--help" | "-h" => {
             println!("{}", usage());
             0
@@ -272,6 +312,30 @@ fn realize_ref(
     spec: &RefSpec::RefSpec,
     name_w: usize,
 ) -> Option<(Store::StoreEntry, Provider::SourceState)> {
+    match realize_ref_outcome(theme, roots, flags, table, spec, name_w) {
+        RefOutcome::Realized(entry, state) => Some((entry, state)),
+        RefOutcome::NeedsNix(need) => {
+            report_nix_bridge_required(theme, flags, &[need], &[]);
+            None
+        }
+        RefOutcome::Failed => None,
+    }
+}
+
+enum RefOutcome {
+    Realized(Store::StoreEntry, Provider::SourceState),
+    NeedsNix(Provider::NixBridgeNeed),
+    Failed,
+}
+
+fn realize_ref_outcome(
+    theme: &Theme,
+    roots: &Roots,
+    flags: &Flags,
+    table: &RefSpec::SourceTable,
+    spec: &RefSpec::RefSpec,
+    name_w: usize,
+) -> RefOutcome {
     // A TTY gets a live spinner that the final ledger row replaces; without
     // one (piped output, NO_COLOR) the plain status line stands instead.
     let spinner = if theme.color {
@@ -284,6 +348,31 @@ fn realize_ref(
     // store dir also seeds the U9 remote probe's source-cache lookup, so it is
     // resolved before the fixtures decision below.
     let store_dir = roots.hangar_dir();
+    if let Some(entry) = Store::find_by_reference(roots, &spec.raw) {
+        drop(spinner);
+        theme.ok(&format!("{} {}", theme.bold(&entry.name), "cached"));
+        theme.detail(&theme.gray(&entry.out));
+        return RefOutcome::Realized(entry, Provider::SourceState::Cached);
+    }
+    if flags.offline
+        && Provider::uses_nix_provider(spec, table, flags.offline, &store_dir)
+        && fixtures_for(flags).is_none()
+    {
+        drop(spinner);
+        report_provider_error(
+            theme,
+            &ProviderError::Offline(format!(
+                "`{}` is not in the hangar and --offline forbids fetching provider output",
+                spec.raw
+            )),
+        );
+        return RefOutcome::Failed;
+    }
+    if !package_fixture_available(flags, spec) && !Provider::nix_on_path() {
+        if let Some(need) = Provider::needs_nix_bridge(spec, table, flags.offline, &store_dir) {
+            return RefOutcome::NeedsNix(need);
+        }
+    }
     // Fixtures are a testing/offline mechanism only. They never override real
     // resolution: a stray `JETPACK_FIXTURES` in the environment must not
     // silently force fixture mode for an ordinary online run. The provider check
@@ -294,12 +383,14 @@ fn realize_ref(
             let fx = fixtures_for(flags);
             if fx.is_none() {
                 drop(spinner);
-                theme.error(
-                    "offline mode needs fixtures",
-                    "`--offline` was set but no fixtures directory was given.",
-                    "pass `--fixtures <dir>` or set JETPACK_FIXTURES.",
+                report_provider_error(
+                    theme,
+                    &ProviderError::Offline(format!(
+                        "`{}` is not in the hangar and --offline forbids fetching provider output",
+                        spec.raw
+                    )),
                 );
-                return None;
+                return RefOutcome::Failed;
             }
             fx
         } else {
@@ -353,12 +444,133 @@ fn realize_ref(
                         &format!("writing to the Jetpack store failed: {e}"),
                         "check permissions on the store root, or set JETPACK_ROOT.",
                     );
+                    return RefOutcome::Failed;
+                }
+            }
+            .map_or(RefOutcome::Failed, |(entry, state)| {
+                RefOutcome::Realized(entry, state)
+            })
+        }
+        Err(e) => {
+            if matches!(e, ProviderError::NixMissing) {
+                if let Some(need) =
+                    Provider::needs_nix_bridge(spec, table, flags.offline, &store_dir)
+                {
+                    return RefOutcome::NeedsNix(need);
+                }
+            }
+            report_provider_error(theme, &e);
+            RefOutcome::Failed
+        }
+    }
+}
+
+fn package_fixture_available(flags: &Flags, spec: &RefSpec::RefSpec) -> bool {
+    if flags.offline {
+        fixtures_for(flags)
+            .map(|dir| dir.join(Provider::fixture_name(spec)).is_file())
+            .unwrap_or(false)
+    } else {
+        flags
+            .fixtures
+            .as_ref()
+            .map(|dir| dir.join(Provider::fixture_name(spec)).is_file())
+            .unwrap_or(false)
+    }
+}
+
+fn report_nix_bridge_required(
+    theme: &Theme,
+    flags: &Flags,
+    holes: &[Provider::NixBridgeNeed],
+    realized_refs: &[String],
+) {
+    if flags.json {
+        let holes_json = holes
+            .iter()
+            .map(|h| super::JSON::quote(&h.reference))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let realized_json = realized_refs
+            .iter()
+            .map(|r| super::JSON::quote(r))
+            .collect::<Vec<_>>()
+            .join(", ");
+        println!("{{\"code\":\"E1272\",\"realized\":[{realized_json}],\"holes\":[{holes_json}]}}");
+    }
+    let count = holes.len();
+    let subject = if count == 1 {
+        "package needs"
+    } else {
+        "packages need"
+    };
+    let refs = holes
+        .iter()
+        .map(|h| format!("`{}`", h.reference))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let fix_ref = holes
+        .first()
+        .map(|h| h.reference.as_str())
+        .unwrap_or("<ref>");
+    theme.error_coded(
+        "E1272",
+        &format!("{count} {subject} the Nix bridge, and Nix is not installed"),
+        &format!("{refs} currently realize through the Nix compatibility provider on this machine."),
+        &format!(
+            "install Nix (https://nixos.org/download), or replace the package with a native source/adapter; `jetpack add {fix_ref} --adapt` drafts one."
+        ),
+    );
+}
+
+fn realize_adapter(
+    theme: &Theme,
+    roots: &Roots,
+    flags: &Flags,
+    plan: &ModuleEval::AdapterPlan,
+) -> Option<(Store::StoreEntry, Provider::SourceState)> {
+    theme.status(&format!("adapting {} …", theme.bold(&plan.name)));
+    let store_dir = roots.hangar_dir();
+    let ctx = Provider::Ctx {
+        fixtures: None,
+        store_dir: &store_dir,
+        offline: flags.offline,
+    };
+    match Provider::realize_adapter(plan, &ctx) {
+        Ok(r) => {
+            theme.ok(&format!(
+                "{} {}",
+                theme.bold(&r.name),
+                r.source_state.label()
+            ));
+            theme.detail(&theme.gray(&r.out));
+            let state = r.source_state;
+            match Store::record(
+                roots,
+                &r.name,
+                &r.version,
+                &r.reference,
+                &r.out,
+                &r.bin,
+                &r.rlib,
+                &r.envelope,
+            ) {
+                Ok(entry) => Some((entry, state)),
+                Err(e) => {
+                    theme.error(
+                        "could not record the adapted package",
+                        &format!("writing to the Jetpack store failed: {e}"),
+                        "check permissions on the store root, or set JETPACK_ROOT.",
+                    );
                     None
                 }
             }
         }
         Err(e) => {
             report_provider_error(theme, &e);
+            if flags.shell_on_fail {
+                shell_on_failed_build(theme, roots, &plan.name);
+            }
             None
         }
     }
@@ -424,6 +636,33 @@ pub(super) fn report_provider_error(theme: &Theme, err: &ProviderError) {
             reason,
             "add the dependency to the source repo's `workspace.jet` `members:`, or depend on it as an external `source:package` ref.",
         ),
+        ProviderError::Adapter(reason) => theme.error_coded(
+            "E1270",
+            "adapter package could not be realized",
+            reason,
+            "check the `Pkg.adapt(...)` source and recipe.",
+        ),
+        ProviderError::BuildDebug(reason) => theme.error_coded(
+            "E1273",
+            "package build failed at a logged step",
+            reason,
+            "run `jet logs <pkg>` for full output, or rerun with `--shell-on-fail`.",
+        ),
+        ProviderError::Channel(reason) => theme.error_coded(
+            "E1271",
+            "source channel could not be resolved",
+            reason,
+            &format!(
+                "run `jetpack update` with network or fixture metadata, then commit `{}`.",
+                Syntax::UNIFIED_LOCK_FILE
+            ),
+        ),
+        ProviderError::Offline(reason) => theme.error_coded(
+            "E1276",
+            "--offline forbids network access",
+            reason,
+            "drop `--offline` for this command, or realize/fetch the needed object before going offline.",
+        ),
     }
 }
 
@@ -431,8 +670,18 @@ pub(super) fn report_provider_error(theme: &Theme, err: &ProviderError) {
 /// prompt label for the resulting shell.
 struct RunPlan {
     refs: Vec<RefSpec::RefSpec>,
+    adapters: Vec<ModuleEval::AdapterPlan>,
     table: RefSpec::SourceTable,
     label: String,
+    /// U12: dev-supervised `services:` entries the typed env surface
+    /// declared, empty for the Phase-1 directive surface (which predates
+    /// U12). `jetpack services <verb>` and `jet dev`'s health gate are the
+    /// only readers.
+    dev_services: Vec<ModuleEval::DevServicePlan>,
+    /// U13: every declared `secrets: ["name", …]` entry from the typed env
+    /// surface. `jet env`/`jet dev` trust-gate on this and validate the names
+    /// exist before entering the environment.
+    secrets: Vec<String>,
 }
 
 /// Build a plan from the project `env.jet` (the no-explicit-ref path). `Err`
@@ -473,8 +722,11 @@ fn load_project_plan(theme: &Theme) -> Result<RunPlan, i32> {
     let refs = classify_all(theme, ef.refs().iter().map(String::as_str), &table)?;
     Ok(RunPlan {
         refs,
+        adapters: Vec::new(),
         table,
         label: ef.prompt_label(),
+        dev_services: Vec::new(),
+        secrets: Vec::new(),
     })
 }
 
@@ -497,13 +749,30 @@ fn typed_plan_with_defaults(
     })?;
     let mut table = plan.table;
     table.merge_defaults(toml_defaults);
-    let refs = classify_all(theme, plan.package_refs.iter().map(String::as_str), &table)?;
+    // U12: a dev service with no explicit `init:` that matches the built-in
+    // catalog implicitly depends on that catalog's package (e.g. `redis: {
+    // enable: true }` needs `redis-server` on PATH) — fold its ref in
+    // alongside the author's own `packages:` so it realizes the same way.
+    let mut package_refs = plan.package_refs;
+    for svc in &plan.dev_services {
+        if svc.enable && svc.init.is_none() {
+            if let Some(pkg_ref) = Services::catalog_pkg_ref(&svc.name) {
+                if !package_refs.iter().any(|r| r == pkg_ref) {
+                    package_refs.push(pkg_ref.to_string());
+                }
+            }
+        }
+    }
+    let refs = classify_all(theme, package_refs.iter().map(String::as_str), &table)?;
     Ok(RunPlan {
         refs,
+        adapters: plan.adapters,
         table,
         label: plan
             .prompt
             .unwrap_or_else(|| Syntax::JETPACK_PROMPT_LABEL.to_string()),
+        dev_services: plan.dev_services,
+        secrets: plan.secrets,
     })
 }
 
@@ -527,26 +796,249 @@ fn classify_all<'a>(
     Ok(refs)
 }
 
+struct ChannelSource {
+    name: String,
+    base: String,
+    channel: RefSpec::ChannelRef,
+}
+
+fn channel_sources(table: &RefSpec::SourceTable) -> Vec<ChannelSource> {
+    table
+        .declarations()
+        .into_iter()
+        .filter_map(|(name, upstream, _)| {
+            let (base, channel) = RefSpec::split_channel_ref(&upstream);
+            Some(ChannelSource {
+                name,
+                base: base.to_string(),
+                channel: channel?,
+            })
+        })
+        .collect()
+}
+
+/// D-JPK-CHANNEL1=A: realize-class commands use only exact lock entries.
+/// Update-class commands are the only place a channel may move.
+fn apply_locked_channels(
+    theme: &Theme,
+    project_dir: &Path,
+    table: &mut RefSpec::SourceTable,
+) -> Result<(), i32> {
+    for source in channel_sources(table) {
+        let Some(lock) = Lock::locked_source_channel(project_dir, &source.name) else {
+            report_unlocked_channel(theme, &source.name, source.channel.as_str());
+            return Err(2);
+        };
+        if lock.channel != source.channel.as_str() {
+            report_unlocked_channel(theme, &source.name, source.channel.as_str());
+            return Err(2);
+        }
+        table.set_upstream(&source.name, lock.exact);
+    }
+    Ok(())
+}
+
+fn report_unlocked_channel(theme: &Theme, name: &str, channel: &str) {
+    theme.error_coded(
+        "E1271",
+        &format!("source `{name}` tracks `{channel}` but is not locked"),
+        &format!(
+            "channel refs resolve only during `jetpack update`; build/run/env read the exact source recorded in `{}`.",
+            Syntax::UNIFIED_LOCK_FILE
+        ),
+        &format!(
+            "run `jetpack update {name}` and commit `{}`.",
+            Syntax::UNIFIED_LOCK_FILE
+        ),
+    );
+}
+
+fn resolve_source_channel(source: &ChannelSource, flags: &Flags) -> Result<String, ProviderError> {
+    if let Some(exact) = resolve_channel_from_fixture(source, flags) {
+        return Ok(exact);
+    }
+    if flags.offline || ci_mode() {
+        return Err(ProviderError::Channel(format!(
+            "source `{}` tracks `{}` but no exact lock entry exists",
+            source.name,
+            source.channel.as_str()
+        )));
+    }
+    resolve_channel_with_git(source)
+}
+
+fn resolve_channel_from_fixture(source: &ChannelSource, flags: &Flags) -> Option<String> {
+    let dir = fixtures_for(flags)?;
+    let raw = std::fs::read_to_string(dir.join("channels.txt")).ok()?;
+    for line in raw.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let cols: Vec<&str> = line.split_whitespace().collect();
+        if cols.len() >= 3 && cols[0] == source.base && cols[1] == source.channel.as_str() {
+            return Some(exact_upstream(&source.base, cols[2]));
+        }
+    }
+    None
+}
+
+fn exact_upstream(base: &str, exact: &str) -> String {
+    if exact.contains(Syntax::REF_SEPARATOR) {
+        exact.to_string()
+    } else {
+        format!("{base}#{exact}")
+    }
+}
+
+fn ci_mode() -> bool {
+    std::env::var_os("CI").is_some_and(|v| !v.is_empty())
+}
+
+fn resolve_channel_with_git(source: &ChannelSource) -> Result<String, ProviderError> {
+    let Some(rest) = source.base.strip_prefix("github:") else {
+        return Err(ProviderError::Channel(format!(
+            "source `{}` uses `{}`; only GitHub source channels can be resolved without fixture metadata today",
+            source.name, source.base
+        )));
+    };
+    let mut parts = rest.split('/');
+    let owner = parts.next().unwrap_or_default();
+    let repo = parts.next().unwrap_or_default();
+    if owner.is_empty() || repo.is_empty() {
+        return Err(ProviderError::Channel(format!(
+            "`{}` is not a GitHub repo source",
+            source.base
+        )));
+    }
+    let url = format!("https://github.com/{owner}/{repo}.git");
+    match &source.channel {
+        RefSpec::ChannelRef::Main => {
+            let out = git_ls_remote(&url, "refs/heads/main")?;
+            let rev = out
+                .split_whitespace()
+                .next()
+                .ok_or_else(|| ProviderError::Channel("no `main` head found".to_string()))?;
+            Ok(format!("{}#{}", source.base, rev))
+        }
+        RefSpec::ChannelRef::Latest => {
+            let tags = git_ls_remote(&url, "refs/tags/*")?;
+            let tag = newest_tag(tags.lines(), None).ok_or_else(|| {
+                ProviderError::Channel(format!("no release tags found for `{}`", source.base))
+            })?;
+            Ok(format!("{}#{}", source.base, tag))
+        }
+        RefSpec::ChannelRef::SemverMask(mask) => {
+            let tags = git_ls_remote(&url, "refs/tags/*")?;
+            let tag = newest_tag(tags.lines(), Some(mask)).ok_or_else(|| {
+                ProviderError::Channel(format!("no tags match `{mask}` for `{}`", source.base))
+            })?;
+            Ok(format!("{}#{}", source.base, tag))
+        }
+    }
+}
+
+fn git_ls_remote(url: &str, pattern: &str) -> Result<String, ProviderError> {
+    if std::env::var_os("JETPACK_DENY_NETWORK").is_some_and(|v| !v.is_empty()) {
+        return Err(ProviderError::Offline(
+            "network disabled by JETPACK_DENY_NETWORK while refreshing source channels".to_string(),
+        ));
+    }
+    let out = std::process::Command::new("git")
+        .args(["ls-remote", "--refs", url, pattern])
+        .output()
+        .map_err(|e| ProviderError::Channel(format!("could not run `git ls-remote`: {e}")))?;
+    if !out.status.success() {
+        let reason = String::from_utf8_lossy(&out.stderr)
+            .trim()
+            .lines()
+            .last()
+            .unwrap_or("git ls-remote failed")
+            .to_string();
+        return Err(ProviderError::Channel(reason));
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+fn offline_refusal(theme: &Theme, command: &str) -> i32 {
+    report_provider_error(
+        theme,
+        &ProviderError::Offline(format!(
+            "`jetpack {command}` is a network-class command and cannot run under --offline"
+        )),
+    );
+    2
+}
+
+fn newest_tag<'a>(lines: impl Iterator<Item = &'a str>, mask: Option<&str>) -> Option<String> {
+    let major = mask
+        .and_then(|m| m.strip_prefix('v'))
+        .and_then(|m| m.strip_suffix(".x"))
+        .and_then(|m| m.parse::<u64>().ok());
+    let mut best: Option<(Vec<u64>, String)> = None;
+    for line in lines {
+        let Some(tag) = line.split("refs/tags/").nth(1) else {
+            continue;
+        };
+        let tag = tag.trim();
+        let Some(nums) = semver_nums(tag) else {
+            continue;
+        };
+        if major.is_some_and(|m| nums.first().copied() != Some(m)) {
+            continue;
+        }
+        let wins = best
+            .as_ref()
+            .is_none_or(|(old, _)| nums.as_slice() > old.as_slice());
+        if wins {
+            best = Some((nums, tag.to_string()));
+        }
+    }
+    best.map(|(_, tag)| tag)
+}
+
+fn semver_nums(tag: &str) -> Option<Vec<u64>> {
+    let rest = tag.strip_prefix('v').unwrap_or(tag);
+    let mut out = Vec::new();
+    for part in rest.split('.') {
+        let digits = part
+            .chars()
+            .take_while(|c| c.is_ascii_digit())
+            .collect::<String>();
+        if digits.is_empty() {
+            return None;
+        }
+        out.push(digits.parse().ok()?);
+    }
+    Some(out)
+}
+
 /// `jetpack run [<ref>] [-- cmd…]`
 fn cmd_run(theme: &Theme, parsed: &Parsed) -> i32 {
     let roots = Store::resolve();
     if roots.dev_mode {
         theme.detail(&theme.gray(&format!(
-            "dev mode: using {} (no write access to {})",
-            roots.root.display(),
-            "/etc/jet"
+            "user-owned hangar: using {}",
+            roots.root.display()
         )));
     }
 
     // Collect the refs to realize plus the source table that resolves any
     // named sources: an explicit CLI ref (built-ins only), or the project pack.
-    let plan = match parsed.positional.first() {
+    let mut explicit_package: Option<String> = None;
+    let mut plan = match parsed.positional.first() {
         Some(raw) => match classify_or_report(theme, raw) {
-            Ok(spec) => RunPlan {
-                refs: vec![spec],
-                table: cwd_table(),
-                label: Syntax::JETPACK_PROMPT_LABEL.to_string(),
-            },
+            Ok(spec) => {
+                explicit_package = Some(spec.short_name().to_string());
+                RunPlan {
+                    refs: vec![spec],
+                    adapters: Vec::new(),
+                    table: cwd_table(),
+                    label: Syntax::JETPACK_PROMPT_LABEL.to_string(),
+                    dev_services: Vec::new(),
+                    secrets: Vec::new(),
+                }
+            }
             Err(_) => return 2,
         },
         None => match load_project_plan(theme) {
@@ -554,15 +1046,48 @@ fn cmd_run(theme: &Theme, parsed: &Parsed) -> i32 {
             Err(code) => return code,
         },
     };
+    let project_dir = std::env::current_dir().unwrap_or_default();
+    if let Err(code) = apply_locked_channels(theme, &project_dir, &mut plan.table) {
+        return code;
+    }
 
-    let Some(env) = compose_env(theme, &roots, &parsed.flags, &plan) else {
-        return 1;
+    let env = match compose_env(theme, &roots, &parsed.flags, &plan) {
+        Ok(env) => env,
+        Err(code) => return code,
     };
 
-    match &parsed.command {
-        Some(cmd) if !cmd.is_empty() => Shell::run_command(&env, cmd),
-        _ => Shell::enter(theme, &env, ShellKind::detect()),
+    let code = match &parsed.command {
+        Some(cmd) if !cmd.is_empty() => run_visible_command(theme, &env, &plan.refs, cmd),
+        _ => {
+            if let Some(program) = explicit_package {
+                let cmd = vec![program];
+                run_visible_command(theme, &env, &plan.refs, &cmd)
+            } else {
+                Shell::enter(theme, &env, ShellKind::detect())
+            }
+        }
+    };
+    if code == 0 {
+        auto_clean_after_success(theme, &roots);
     }
+    code
+}
+
+fn run_visible_command(theme: &Theme, env: &Env, refs: &[RefSpec::RefSpec], cmd: &[String]) -> i32 {
+    if let Some(program) = cmd.first() {
+        let ref_label = refs
+            .first()
+            .map(|r| r.raw.as_str())
+            .unwrap_or("project env");
+        let arg_note = if cmd.len() == 1 { " (no args)" } else { "" };
+        theme.status(&format!(
+            "running {} -> {}{}",
+            theme.bold(ref_label),
+            theme.bold(program),
+            theme.gray(arg_note)
+        ));
+    }
+    Shell::run_command(env, cmd)
 }
 
 /// `jetpack enter [-- cmd]` — realize the project environment and drop into its
@@ -585,8 +1110,9 @@ fn cmd_enter(theme: &Theme, parsed: &Parsed) -> i32 {
     // `--flake` (an equally explicit signal) can still force the foreign
     // shell over ad-hoc packages.
     let foreign = foreign_flake_path(&project_dir);
-    let auto_detect_wants_foreign =
-        foreign.is_some() && !project_declares_env(&project_dir) && parsed.flags.packages.is_empty();
+    let auto_detect_wants_foreign = foreign.is_some()
+        && !project_declares_env(&project_dir)
+        && parsed.flags.packages.is_empty();
     if parsed.flags.flake || auto_detect_wants_foreign {
         let Some(flake_path) = foreign else {
             theme.error(
@@ -606,9 +1132,8 @@ fn cmd_enter(theme: &Theme, parsed: &Parsed) -> i32 {
     let roots = Store::resolve();
     if roots.dev_mode {
         theme.detail(&theme.gray(&format!(
-            "dev mode: using {} (no write access to {})",
-            roots.root.display(),
-            "/etc/jet"
+            "user-owned hangar: using {}",
+            roots.root.display()
         )));
     }
 
@@ -625,8 +1150,11 @@ fn cmd_enter(theme: &Theme, parsed: &Parsed) -> i32 {
     } else {
         RunPlan {
             refs: Vec::new(),
+            adapters: Vec::new(),
             table: RefSpec::SourceTable::empty(),
             label: Syntax::JETPACK_PROMPT_LABEL.to_string(),
+            dev_services: Vec::new(),
+            secrets: Vec::new(),
         }
     };
 
@@ -645,6 +1173,9 @@ fn cmd_enter(theme: &Theme, parsed: &Parsed) -> i32 {
             ),
         });
     }
+    if let Err(code) = apply_locked_channels(theme, &project_dir, &mut plan.table) {
+        return code;
+    }
 
     // U19: `jet env` never runs a project function (the invariant this card
     // confirms), but it DOES realize the project's own declared packages —
@@ -655,19 +1186,29 @@ fn cmd_enter(theme: &Theme, parsed: &Parsed) -> i32 {
         &project_dir,
         &plan.refs,
         &plan.table,
+        &plan.secrets,
         parsed.flags.trust,
     ) {
         return code;
     }
 
-    let Some(env) = compose_env(theme, &roots, &parsed.flags, &plan) else {
-        return 1;
+    if let Err(code) = validate_declared_secrets(theme, &project_dir, &plan.secrets) {
+        return code;
+    }
+
+    let env = match compose_env(theme, &roots, &parsed.flags, &plan) {
+        Ok(env) => env,
+        Err(code) => return code,
     };
 
-    match &parsed.command {
+    let code = match &parsed.command {
         Some(cmd) if !cmd.is_empty() => Shell::run_command(&env, cmd),
         _ => Shell::enter(theme, &env, ShellKind::detect()),
+    };
+    if code == 0 {
+        auto_clean_after_success(theme, &roots);
     }
+    code
 }
 
 /// The foreign flake/devenv file in `dir`, if either exists. `flake.nix` wins
@@ -697,7 +1238,12 @@ fn project_declares_env(dir: &Path) -> bool {
     };
     if ModuleEval::is_module_surface(&src) {
         return ModuleEval::evaluate_env(&src, dir)
-            .map(|p| !p.package_refs.is_empty() || p.prompt.is_some())
+            .map(|p| {
+                !p.package_refs.is_empty()
+                    || p.prompt.is_some()
+                    || !p.dev_services.is_empty()
+                    || !p.secrets.is_empty()
+            })
             .unwrap_or(true);
     }
     let ef = EnvFile::parse(&src);
@@ -711,7 +1257,12 @@ fn project_declares_env(dir: &Path) -> bool {
 /// the same trust store as a declared env, keyed on the flake's content
 /// (`Trust::gate_flake`) since arbitrary flake.nix text is untrusted input
 /// the moment jetpack shells out to it.
-fn enter_foreign_flake(theme: &Theme, project_dir: &Path, flake_path: &Path, parsed: &Parsed) -> i32 {
+fn enter_foreign_flake(
+    theme: &Theme,
+    project_dir: &Path,
+    flake_path: &Path,
+    parsed: &Parsed,
+) -> i32 {
     if !Provider::nix_on_path() {
         theme.error_coded(
             "E1256",
@@ -809,9 +1360,8 @@ fn cmd_dev(theme: &Theme, parsed: &Parsed) -> i32 {
     let roots = Store::resolve();
     if roots.dev_mode {
         theme.detail(&theme.gray(&format!(
-            "dev mode: using {} (no write access to {})",
-            roots.root.display(),
-            "/etc/jet"
+            "user-owned hangar: using {}",
+            roots.root.display()
         )));
     }
 
@@ -831,10 +1381,13 @@ fn cmd_dev(theme: &Theme, parsed: &Parsed) -> i32 {
         return 2;
     }
 
-    let plan = match load_project_plan(theme) {
+    let mut plan = match load_project_plan(theme) {
         Ok(plan) => plan,
         Err(code) => return code,
     };
+    if let Err(code) = apply_locked_channels(theme, &project_dir, &mut plan.table) {
+        return code;
+    }
 
     if let Err(code) = Trust::gate(
         theme,
@@ -842,20 +1395,29 @@ fn cmd_dev(theme: &Theme, parsed: &Parsed) -> i32 {
         &project_dir,
         &plan.refs,
         &plan.table,
+        &plan.secrets,
         parsed.flags.trust,
     ) {
         return code;
     }
 
-    let Some(env) = compose_env(theme, &roots, &parsed.flags, &plan) else {
-        return 1;
-    };
-
-    if let Err(code) = wait_for_services_ready(&env) {
+    if let Err(code) = validate_declared_secrets(theme, &project_dir, &plan.secrets) {
         return code;
     }
 
-    theme.status(&format!("running {}", theme.bold(&entry.display().to_string())));
+    let env = match compose_env(theme, &roots, &parsed.flags, &plan) {
+        Ok(env) => env,
+        Err(code) => return code,
+    };
+
+    if let Err(code) = wait_for_services_ready(theme, &project_dir, &env, &plan.dev_services) {
+        return code;
+    }
+
+    theme.status(&format!(
+        "running {}",
+        theme.bold(&entry.display().to_string())
+    ));
     let mut cmd = vec![
         find_jet_binary(),
         Syntax::DEV_SUBCOMMAND.to_string(),
@@ -868,14 +1430,357 @@ fn cmd_dev(theme: &Theme, parsed: &Parsed) -> i32 {
     Shell::run_command(&env, &cmd)
 }
 
-/// U12 (supervised services) is unimplemented — this is a deliberate no-op,
-/// not a fake "waiting for services…" message. It takes the composed `Env` so
-/// the day U12 ships, this gains a real health-check loop against the
-/// project's `services:` and gates on it right here — the one call site
-/// `jetpack dev` already runs before starting the project — with no change
-/// needed at the call site itself.
-fn wait_for_services_ready(_env: &Env) -> Result<(), i32> {
+/// U13: before `jet env`/`jet dev` enters a trusted project environment, every
+/// declared `secrets: ["name", …]` entry must exist in `.jet/secrets.age`.
+/// Values stay inside `Secrets::get` and are dropped immediately; this is a
+/// presence check, not env-var injection.
+fn validate_declared_secrets(
+    theme: &Theme,
+    project_dir: &Path,
+    names: &[String],
+) -> Result<(), i32> {
+    for name in names {
+        match Secrets::get(project_dir, name) {
+            Ok(Some(_)) => {}
+            Ok(None) => {
+                theme.error_coded(
+                    "E1263",
+                    &format!("no secret named `{name}`"),
+                    "this environment declares that secret, but the encrypted store doesn't have an entry with this name.",
+                    &format!("set it first with `jetpack secrets set {name} <value>`, or check the spelling."),
+                );
+                return Err(2);
+            }
+            Err(msg) => {
+                theme.error(&format!("couldn't read `{name}`"), &msg, "");
+                return Err(2);
+            }
+        }
+    }
     Ok(())
+}
+
+/// U12: bring up every enabled dev `services:` entry and block until each is
+/// healthy (or E1261 on timeout) before `jetpack dev` runs the project's
+/// `fn dev()`/`fn run()`. Takes the composed `Env` so a catalog binary (e.g.
+/// `redis-server`, realized alongside the project's own packages) resolves
+/// on PATH the same way the project's own command does.
+fn wait_for_services_ready(
+    theme: &Theme,
+    project_dir: &Path,
+    env: &Env,
+    services: &[ModuleEval::DevServicePlan],
+) -> Result<(), i32> {
+    for svc in services {
+        if !svc.enable {
+            continue;
+        }
+        theme.detail(&format!(
+            "waiting for service `{}` to become healthy…",
+            svc.name
+        ));
+        bring_up_one(theme, project_dir, env, svc).map_err(|_| 2)?;
+    }
+    Ok(())
+}
+
+/// Bring up one enabled service and block until it's healthy: E1262 for an
+/// unrecognized field, a plain error if it can't be started at all, E1261 on
+/// a readiness timeout. Shared by `wait_for_services_ready` (the `jet dev`
+/// health gate) and `cmd_services`'s `up` verb so the two never drift.
+fn bring_up_one(
+    theme: &Theme,
+    project_dir: &Path,
+    env: &Env,
+    svc: &ModuleEval::DevServicePlan,
+) -> Result<(), ()> {
+    if let Some(field) = Services::unknown_field(svc) {
+        theme.error_coded(
+            "E1262",
+            &format!("service `{}` has a field jetpack doesn't recognize: `{field}`", svc.name),
+            "a dev-supervised `Service` stays open at parse time, but jetpack's dev-runtime tier is the only consumer of its fields — an unrecognized key is almost always a typo.",
+            "rename it to one of `enable`, `ports`, `init`, `shutdown`, `data_dir`, `ready`, or remove it.",
+        );
+        return Err(());
+    }
+    if let Err(msg) = Services::up_one(project_dir, env, svc) {
+        theme.error(&format!("couldn't start service `{}`", svc.name), &msg, "");
+        return Err(());
+    }
+    if Services::wait_healthy(project_dir, svc, service_health_timeout()) {
+        Ok(())
+    } else {
+        theme.error_coded(
+            "E1261",
+            &format!("service `{}` never became healthy", svc.name),
+            "jetpack waited for its readiness contract (`ready:`, else a TCP probe on its first `ports:` entry, else a bare process-alive check) and it never passed.",
+            &format!("check `jetpack services logs {}` for what it printed, and confirm its `init`/`ready` commands are correct.", svc.name),
+        );
+        Err(())
+    }
+}
+
+/// U12: the readiness-poll ceiling `wait_for_services_ready`/`cmd_services`'s
+/// `up` verb allow a service before reporting E1261. Not yet user-configurable
+/// (no ratified field for it) — 15s comfortably covers a local dev dependency
+/// (redis, a small HTTP mock, …) starting cold. `JETPACK_SERVICE_HEALTH_TIMEOUT_MS`
+/// overrides it for tests that need to exercise the E1261 timeout path quickly
+/// (mirrors `JETPACK_ROOT`/`JETPACK_FIXTURES`'s test-only env-var escape hatch).
+fn service_health_timeout() -> std::time::Duration {
+    std::env::var("JETPACK_SERVICE_HEALTH_TIMEOUT_MS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .map(std::time::Duration::from_millis)
+        .unwrap_or(std::time::Duration::from_secs(15))
+}
+
+/// `jetpack services up|down|health|logs [<name>]` (U12). With no `<name>`,
+/// every declared dev service is targeted; `logs` requires exactly one name.
+fn cmd_services(theme: &Theme, parsed: &Parsed) -> i32 {
+    let Some(verb) = parsed.positional.first().cloned() else {
+        theme.error(
+            "`jetpack services` needs a verb",
+            &format!("known verbs: {}.", Syntax::SERVICES_VERBS.join(", ")),
+            "try `jetpack services up`.",
+        );
+        return 2;
+    };
+    let name = parsed.positional.get(1).cloned();
+
+    let plan = match load_project_plan(theme) {
+        Ok(plan) => plan,
+        Err(code) => return code,
+    };
+    let project_dir = std::env::current_dir().unwrap_or_default();
+    let targets: Vec<&ModuleEval::DevServicePlan> = plan
+        .dev_services
+        .iter()
+        .filter(|s| name.as_deref().is_none_or(|n| n == s.name))
+        .collect();
+    if targets.is_empty() {
+        let headline = match &name {
+            Some(n) => format!("no dev service named `{n}`"),
+            None => "this project declares no dev `services:`".to_string(),
+        };
+        theme.error(
+            &headline,
+            "declare one under an `env.<name> { services: { … } }` role-module (U12).",
+            "",
+        );
+        return 2;
+    }
+
+    match verb.as_str() {
+        v if v == Syntax::SERVICES_VERB_LOGS => {
+            let Some(n) = &name else {
+                theme.error(
+                    "`jetpack services logs` needs a service name",
+                    "logs are per service.",
+                    "try `jetpack services logs <name>`.",
+                );
+                return 2;
+            };
+            print!("{}", Services::logs(&project_dir, n));
+            0
+        }
+        v if v == Syntax::SERVICES_VERB_UP => {
+            let roots = Store::resolve();
+            if roots.dev_mode {
+                theme.detail(&theme.gray("user-owned hangar active"));
+            }
+            let env = match compose_env(theme, &roots, &parsed.flags, &plan) {
+                Ok(env) => env,
+                Err(code) => return code,
+            };
+            for svc in &targets {
+                if !svc.enable {
+                    theme.detail(&format!("service `{}` is disabled, skipping", svc.name));
+                    continue;
+                }
+                if bring_up_one(theme, &project_dir, &env, svc).is_err() {
+                    return 2;
+                }
+                theme.ok(&format!("service `{}` is up", svc.name));
+            }
+            0
+        }
+        v if v == Syntax::SERVICES_VERB_DOWN => {
+            for svc in &targets {
+                Services::down_one(&project_dir, svc);
+                theme.ok(&format!("service `{}` is down", svc.name));
+            }
+            0
+        }
+        v if v == Syntax::SERVICES_VERB_HEALTH => {
+            let mut all_healthy = true;
+            for svc in &targets {
+                let (label, healthy) = match Services::health_one(&project_dir, svc) {
+                    Services::Health::Disabled => ("disabled", true),
+                    Services::Health::NotRunning => ("not running", false),
+                    Services::Health::Unhealthy => ("unhealthy", false),
+                    Services::Health::Healthy => ("healthy", true),
+                };
+                all_healthy &= healthy;
+                if healthy {
+                    theme.ok(&format!("service `{}`: {label}", svc.name));
+                } else {
+                    theme.error(&format!("service `{}`: {label}", svc.name), "", "");
+                }
+            }
+            if all_healthy {
+                0
+            } else {
+                1
+            }
+        }
+        other => {
+            theme.error(
+                &format!("`{other}` is not a `jetpack services` verb"),
+                &format!("known verbs: {}.", Syntax::SERVICES_VERBS.join(", ")),
+                "try `jetpack services up`.",
+            );
+            2
+        }
+    }
+}
+
+/// `jetpack secrets keygen|set|get|recipients` (U13, D-JPK-SECRETCRYPTO1).
+fn cmd_secrets(theme: &Theme, parsed: &Parsed) -> i32 {
+    let Some(verb) = parsed.positional.first().cloned() else {
+        theme.error(
+            "`jetpack secrets` needs a verb",
+            &format!("known verbs: {}.", Syntax::SECRETS_VERBS.join(", ")),
+            "try `jetpack secrets keygen`.",
+        );
+        return 2;
+    };
+    let project_dir = std::env::current_dir().unwrap_or_default();
+    match verb.as_str() {
+        v if v == Syntax::SECRETS_VERB_KEYGEN => {
+            let force = parsed
+                .positional
+                .iter()
+                .any(|a| a == Syntax::SECRETS_FLAG_FORCE);
+            match Secrets::keygen(force) {
+                Ok((path, recipient)) => {
+                    theme.ok(&format!("wrote identity to `{}`", path.display()));
+                    theme.detail(&format!("recipient: {recipient}"));
+                    theme.detail("add it with `jetpack secrets recipients add <recipient>`");
+                    0
+                }
+                Err(msg) => {
+                    theme.error("couldn't generate a secrets identity", &msg, "");
+                    2
+                }
+            }
+        }
+        v if v == Syntax::SECRETS_VERB_RECIPIENTS => {
+            let Some(sub) = parsed.positional.get(1).cloned() else {
+                theme.error(
+                    "`jetpack secrets recipients` needs a verb",
+                    &format!(
+                        "known verbs: {}.",
+                        Syntax::SECRETS_RECIPIENTS_VERBS.join(", ")
+                    ),
+                    "try `jetpack secrets recipients list`.",
+                );
+                return 2;
+            };
+            match sub.as_str() {
+                v if v == Syntax::SECRETS_RECIPIENTS_VERB_ADD => {
+                    let Some(recipient) = parsed.positional.get(2) else {
+                        theme.error(
+                            "`jetpack secrets recipients add` needs a recipient",
+                            "an `age1...` public key.",
+                            "try `jetpack secrets recipients add age1...`.",
+                        );
+                        return 2;
+                    };
+                    if Secrets::add_recipient(&project_dir, recipient) {
+                        theme.ok(&format!("added recipient `{recipient}`"));
+                    } else {
+                        theme.detail(&format!("recipient `{recipient}` already present"));
+                    }
+                    0
+                }
+                v if v == Syntax::SECRETS_RECIPIENTS_VERB_LIST => {
+                    for r in Secrets::list_recipients(&project_dir) {
+                        println!("{r}");
+                    }
+                    0
+                }
+                other => {
+                    theme.error(
+                        &format!("`{other}` is not a `jetpack secrets recipients` verb"),
+                        &format!(
+                            "known verbs: {}.",
+                            Syntax::SECRETS_RECIPIENTS_VERBS.join(", ")
+                        ),
+                        "try `jetpack secrets recipients list`.",
+                    );
+                    2
+                }
+            }
+        }
+        v if v == Syntax::SECRETS_VERB_SET => {
+            let (Some(name), Some(value)) = (parsed.positional.get(1), parsed.positional.get(2))
+            else {
+                theme.error(
+                    "`jetpack secrets set` needs a name and a value",
+                    "",
+                    "try `jetpack secrets set db_password hunter2`.",
+                );
+                return 2;
+            };
+            match Secrets::set(&project_dir, name, value) {
+                Ok(()) => {
+                    theme.ok(&format!("set `{name}`"));
+                    0
+                }
+                Err(msg) => {
+                    theme.error(&format!("couldn't set `{name}`"), &msg, "");
+                    2
+                }
+            }
+        }
+        v if v == Syntax::SECRETS_VERB_GET => {
+            let Some(name) = parsed.positional.get(1) else {
+                theme.error(
+                    "`jetpack secrets get` needs a name",
+                    "",
+                    "try `jetpack secrets get db_password`.",
+                );
+                return 2;
+            };
+            match Secrets::get(&project_dir, name) {
+                Ok(Some(value)) => {
+                    println!("{value}");
+                    0
+                }
+                Ok(None) => {
+                    theme.error_coded(
+                        "E1263",
+                        &format!("no secret named `{name}`"),
+                        "the encrypted store doesn't have an entry with this name.",
+                        &format!("set it first with `jetpack secrets set {name} <value>`, or check the spelling."),
+                    );
+                    2
+                }
+                Err(msg) => {
+                    theme.error(&format!("couldn't read `{name}`"), &msg, "");
+                    2
+                }
+            }
+        }
+        other => {
+            theme.error(
+                &format!("`{other}` is not a `jetpack secrets` verb"),
+                &format!("known verbs: {}.", Syntax::SECRETS_VERBS.join(", ")),
+                "try `jetpack secrets keygen`.",
+            );
+            2
+        }
+    }
 }
 
 /// The sibling `jet` binary next to the running `jetpack` process, falling
@@ -927,26 +1832,79 @@ fn has_dev_or_run_entry(file: &Path) -> bool {
     let Ok(prog) = crate::Parser::parse(&toks) else {
         return false;
     };
-    prog.items.iter().any(|i| {
-        matches!(i, crate::AST::Item::Func(f) if f.name == "dev" || f.name == "run")
-    })
+    prog.items
+        .iter()
+        .any(|i| matches!(i, crate::AST::Item::Func(f) if f.name == "dev" || f.name == "run"))
 }
 
 /// `jetpack config trust add/list/remove` (U19) — durable glob/prefix patterns
 /// that pre-authorize matching projects with no per-hash prompt at all.
 fn cmd_config(theme: &Theme, parsed: &Parsed) -> i32 {
     let group = parsed.positional.first().map(String::as_str);
-    if group != Some(Syntax::CONFIG_VERB_TRUST) {
+    if group != Some(Syntax::CONFIG_VERB_TRUST) && group != Some(Syntax::CONFIG_VERB_SANDBOX) {
         theme.error(
             &format!("`jetpack config {}` isn't a command", group.unwrap_or("")),
-            "today `jetpack config` only manages the env/dev trust store.",
-            "try `jetpack config trust add <pattern>`, `list`, or `remove <pattern>`.",
+            "jetpack config manages the env/dev trust store and sandbox fallback policy.",
+            "try `jetpack config trust list` or `jetpack config sandbox status`.",
         );
         return 2;
     }
     let store = Trust::store_path();
     match parsed.positional.get(1).map(String::as_str) {
-        Some(v) if v == Syntax::CONFIG_TRUST_VERB_ADD => {
+        Some(v)
+            if group == Some(Syntax::CONFIG_VERB_SANDBOX)
+                && v == Syntax::CONFIG_SANDBOX_VERB_REQUIRE =>
+        {
+            match RuntimePolicy::write_sandbox_policy(RuntimePolicy::SandboxPolicy::Require) {
+                Ok(path) => theme.status(&format!("sandbox fallback refused: {}", path.display())),
+                Err(e) => {
+                    theme.error(
+                        "couldn't write sandbox policy",
+                        &format!("{e}"),
+                        "check permissions on your ~/.jet directory.",
+                    );
+                    return 1;
+                }
+            }
+            0
+        }
+        Some(v)
+            if group == Some(Syntax::CONFIG_VERB_SANDBOX)
+                && v == Syntax::CONFIG_SANDBOX_VERB_ALLOW =>
+        {
+            match RuntimePolicy::write_sandbox_policy(RuntimePolicy::SandboxPolicy::AllowFallback) {
+                Ok(path) => theme.status(&format!("sandbox fallback allowed: {}", path.display())),
+                Err(e) => {
+                    theme.error(
+                        "couldn't write sandbox policy",
+                        &format!("{e}"),
+                        "check permissions on your ~/.jet directory.",
+                    );
+                    return 1;
+                }
+            }
+            0
+        }
+        Some(v)
+            if group == Some(Syntax::CONFIG_VERB_SANDBOX)
+                && v == Syntax::CONFIG_SANDBOX_VERB_STATUS =>
+        {
+            let status = RuntimePolicy::detect_sandbox();
+            let policy = RuntimePolicy::read_sandbox_policy();
+            let policy_label = match policy {
+                RuntimePolicy::SandboxPolicy::AllowFallback => "allow",
+                RuntimePolicy::SandboxPolicy::Require => "require",
+            };
+            theme.status(&format!(
+                "sandbox: {:?} via {} (policy: {policy_label})",
+                status.level, status.mechanism
+            ));
+            theme.detail(&status.reason);
+            0
+        }
+        Some(v)
+            if group == Some(Syntax::CONFIG_VERB_TRUST) && v == Syntax::CONFIG_TRUST_VERB_ADD =>
+        {
             let Some(pattern) = parsed.positional.get(2) else {
                 theme.error(
                     "`jetpack config trust add` needs a pattern",
@@ -963,7 +1921,9 @@ fn cmd_config(theme: &Theme, parsed: &Parsed) -> i32 {
             });
             0
         }
-        Some(v) if v == Syntax::CONFIG_TRUST_VERB_LIST => {
+        Some(v)
+            if group == Some(Syntax::CONFIG_VERB_TRUST) && v == Syntax::CONFIG_TRUST_VERB_LIST =>
+        {
             let entries = Trust::list_entries(&store);
             if entries.is_empty() {
                 theme.status("no trust entries yet.");
@@ -974,7 +1934,10 @@ fn cmd_config(theme: &Theme, parsed: &Parsed) -> i32 {
             }
             0
         }
-        Some(v) if v == Syntax::CONFIG_TRUST_VERB_REMOVE => {
+        Some(v)
+            if group == Some(Syntax::CONFIG_VERB_TRUST)
+                && v == Syntax::CONFIG_TRUST_VERB_REMOVE =>
+        {
             let Some(pattern) = parsed.positional.get(2) else {
                 theme.error(
                     "`jetpack config trust remove` needs a pattern",
@@ -991,7 +1954,7 @@ fn cmd_config(theme: &Theme, parsed: &Parsed) -> i32 {
             });
             0
         }
-        _ => {
+        _ if group == Some(Syntax::CONFIG_VERB_TRUST) => {
             theme.error(
                 "`jetpack config trust` needs a verb",
                 &format!(
@@ -1002,14 +1965,36 @@ fn cmd_config(theme: &Theme, parsed: &Parsed) -> i32 {
             );
             2
         }
+        _ if group == Some(Syntax::CONFIG_VERB_SANDBOX) => {
+            theme.error(
+                "`jetpack config sandbox` needs a verb",
+                &format!(
+                    "the sandbox verbs are: {}.",
+                    Syntax::CONFIG_SANDBOX_VERBS.join(", ")
+                ),
+                "try `require`, `allow`, or `status`.",
+            );
+            2
+        }
+        _ => {
+            theme.error(
+                &format!("`jetpack config {}` isn't a command", group.unwrap_or("")),
+                "jetpack config manages trust and sandbox fallback policy.",
+                "try `jetpack config trust list` or `jetpack config sandbox status`.",
+            );
+            2
+        }
     }
 }
 
 /// Realize every ref in `plan` and compose the shell env (PATH dirs + prompt
-/// label). Returns `None` after reporting if any ref fails to realize.
-fn compose_env(theme: &Theme, roots: &Roots, flags: &Flags, plan: &RunPlan) -> Option<Env> {
+/// label). Returns an exit code after reporting if any ref fails to realize.
+fn compose_env(theme: &Theme, roots: &Roots, flags: &Flags, plan: &RunPlan) -> Result<Env, i32> {
+    RuntimePolicy::enforce_sandbox_policy(theme, flags.json)?;
     let mut bin_dirs = Vec::new();
     let mut realized_refs = Vec::new();
+    let mut holes = Vec::new();
+    let mut failed = false;
     let name_w = name_column_width(&plan.refs);
     if plan.refs.len() > 1 {
         theme.status(&format!(
@@ -1020,18 +2005,41 @@ fn compose_env(theme: &Theme, roots: &Roots, flags: &Flags, plan: &RunPlan) -> O
     }
     let (mut built, mut cached, mut substituted) = (0usize, 0usize, 0usize);
     for spec in &plan.refs {
-        let (entry, state) = realize_ref(theme, roots, flags, &plan.table, spec, name_w)?;
-        match state {
-            Provider::SourceState::Built => built += 1,
-            Provider::SourceState::Cached => cached += 1,
-            Provider::SourceState::Substituted => substituted += 1,
+        match realize_ref_outcome(theme, roots, flags, &plan.table, spec, name_w) {
+            RefOutcome::Realized(entry, state) => {
+                match state {
+                    Provider::SourceState::Built => built += 1,
+                    Provider::SourceState::Cached => cached += 1,
+                    Provider::SourceState::Substituted => substituted += 1,
+                }
+                // A `library` package realizes with an empty `bin` (U10) — it
+                // stages source for import and contributes nothing to PATH.
+                if !entry.bin.is_empty() {
+                    bin_dirs.push(entry.bin);
+                }
+                realized_refs.push(entry.reference);
+            }
+            RefOutcome::NeedsNix(need) => holes.push(need),
+            RefOutcome::Failed => failed = true,
         }
-        // A `library` package realizes with an empty `bin` (U10) — it stages
-        // source for import and contributes nothing to PATH.
-        if !entry.bin.is_empty() {
-            bin_dirs.push(entry.bin);
+    }
+    for adapter in &plan.adapters {
+        match realize_adapter(theme, roots, flags, adapter) {
+            Some((entry, _state)) => {
+                if !entry.bin.is_empty() {
+                    bin_dirs.push(entry.bin);
+                }
+                realized_refs.push(entry.reference);
+            }
+            None => failed = true,
         }
-        realized_refs.push(entry.reference);
+    }
+    if !holes.is_empty() {
+        report_nix_bridge_required(theme, flags, &holes, &realized_refs);
+        return Err(2);
+    }
+    if failed {
+        return Err(1);
     }
     if plan.refs.len() > 1 {
         theme.status(&format!(
@@ -1039,7 +2047,7 @@ fn compose_env(theme: &Theme, roots: &Roots, flags: &Flags, plan: &RunPlan) -> O
             state_summary(built, cached, substituted)
         ));
     }
-    Some(Env {
+    Ok(Env {
         bin_dirs,
         refs: realized_refs,
         label: plan.label.clone(),
@@ -1071,6 +2079,9 @@ fn state_summary(built: usize, cached: usize, substituted: usize) -> String {
 fn cmd_build(theme: &Theme, parsed: &Parsed) -> i32 {
     let roots = Store::resolve();
     let dir = std::env::current_dir().unwrap_or_default();
+    if let Err(code) = RuntimePolicy::enforce_sandbox_policy(theme, parsed.flags.json) {
+        return code;
+    }
 
     // D-WORKSPACE1=B: if workspace.jet is present, build all workspace members
     // via the first-party core provider (no Nix required).
@@ -1132,39 +2143,73 @@ fn cmd_build(theme: &Theme, parsed: &Parsed) -> i32 {
         }
     }
 
-    let (refs, table) = match parsed.positional.first() {
+    let mut plan = match parsed.positional.first() {
         Some(raw) => match classify_or_report(theme, raw) {
-            Ok(s) => (vec![s], cwd_table()),
+            Ok(s) => RunPlan {
+                refs: vec![s],
+                adapters: Vec::new(),
+                table: cwd_table(),
+                label: Syntax::JETPACK_PROMPT_LABEL.to_string(),
+                dev_services: Vec::new(),
+                secrets: Vec::new(),
+            },
             Err(_) => return 2,
         },
         None => match load_project_plan(theme) {
-            Ok(plan) => (plan.refs, plan.table),
+            Ok(plan) => plan,
             Err(code) => return code,
         },
     };
+    if let Err(code) = apply_locked_channels(theme, &dir, &mut plan.table) {
+        return code;
+    }
 
     let mut ok = true;
     let (mut built, mut cached, mut substituted) = (0usize, 0usize, 0usize);
-    let name_w = name_column_width(&refs);
-    for spec in &refs {
-        match realize_ref(theme, &roots, &parsed.flags, &table, spec, name_w) {
-            Some((_entry, state)) => match state {
-                Provider::SourceState::Built => built += 1,
-                Provider::SourceState::Cached => cached += 1,
-                Provider::SourceState::Substituted => substituted += 1,
-            },
+    let mut realized_refs = Vec::new();
+    let mut holes = Vec::new();
+    let name_w = name_column_width(&plan.refs);
+    for spec in &plan.refs {
+        match realize_ref_outcome(theme, &roots, &parsed.flags, &plan.table, spec, name_w) {
+            RefOutcome::Realized(entry, state) => {
+                realized_refs.push(entry.reference);
+                match state {
+                    Provider::SourceState::Built => built += 1,
+                    Provider::SourceState::Cached => cached += 1,
+                    Provider::SourceState::Substituted => substituted += 1,
+                }
+            }
+            RefOutcome::NeedsNix(need) => holes.push(need),
+            RefOutcome::Failed => ok = false,
+        }
+    }
+    for adapter in &plan.adapters {
+        match realize_adapter(theme, &roots, &parsed.flags, adapter) {
+            Some((entry, state)) => {
+                realized_refs.push(entry.reference);
+                match state {
+                    Provider::SourceState::Built => built += 1,
+                    Provider::SourceState::Cached => cached += 1,
+                    Provider::SourceState::Substituted => substituted += 1,
+                }
+            }
             None => ok = false,
         }
+    }
+    if !holes.is_empty() {
+        report_nix_bridge_required(theme, &parsed.flags, &holes, &realized_refs);
+        return 2;
     }
     if ok {
         // T4: per-run source-state summary (mirrors the D-JPK-CACHE1 example).
         theme.status(&format!(
             "built {} package(s): {} built, {} cached, {} substituted",
-            refs.len(),
+            plan.refs.len() + plan.adapters.len(),
             built,
             cached,
             substituted
         ));
+        auto_clean_after_success(theme, &roots);
         0
     } else {
         1
@@ -1347,8 +2392,14 @@ fn cmd_audit(theme: &Theme) -> i32 {
                 &e.envelope.provenance
             }
         ));
-        theme.detail(&format!("  output-hash: {}", theme.gray(&e.envelope.output_hash)));
-        theme.detail(&format!("  platform:    {}", theme.gray(&e.envelope.platform)));
+        theme.detail(&format!(
+            "  output-hash: {}",
+            theme.gray(&e.envelope.output_hash)
+        ));
+        theme.detail(&format!(
+            "  platform:    {}",
+            theme.gray(&e.envelope.platform)
+        ));
     }
     0
 }
@@ -1375,22 +2426,426 @@ fn copy_dir(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()>
     Ok(())
 }
 
-/// `jetpack clean` — drop unused store records.
+/// `jetpack clean` — collect stale hangar objects and optimize owned bytes.
 fn cmd_clean(theme: &Theme) -> i32 {
     let roots = Store::resolve();
     match Store::clean(&roots) {
-        Ok(n) => {
-            theme.ok(&format!("removed {n} unused store record(s)"));
+        Ok(report) => {
+            theme.ok(&format!(
+                "cleaned hangar: removed {} stale object(s), freed {}, swept {} scratch item(s), optimized {} file(s)",
+                report.removed_objects,
+                human_bytes(report.removed_bytes + report.swept_tmp_bytes),
+                report.swept_tmp,
+                report.optimized_files
+            ));
+            if report.optimized_bytes > 0 {
+                theme.detail(&format!(
+                    "optimized duplicate Jet-owned files: saved {}",
+                    human_bytes(report.optimized_bytes)
+                ));
+            }
             0
         }
         Err(e) => {
             theme.error(
-                "could not clean the store",
+                "could not clean the hangar",
                 &format!("{e}"),
-                "check permissions on the store root.",
+                "check permissions on the hangar root.",
             );
             1
         }
+    }
+}
+
+fn auto_clean_after_success(theme: &Theme, roots: &Roots) {
+    match Store::maybe_auto_clean(roots) {
+        Ok(Some(report)) if !report.is_empty() => theme.detail(&format!(
+            "auto-cleaned hangar: removed {} stale object(s), swept {} scratch item(s), optimized {} file(s)",
+            report.removed_objects, report.swept_tmp, report.optimized_files
+        )),
+        Ok(_) => {}
+        Err(e) => theme.detail(&theme.gray(&format!("auto-clean skipped: {e}"))),
+    }
+}
+
+/// `jetpack update [<source>]` — resolve channel source refs and move only
+/// their lock entries. Does not realize packages.
+fn cmd_update(theme: &Theme, parsed: &Parsed) -> i32 {
+    if parsed.flags.offline {
+        return offline_refusal(theme, "update");
+    }
+    let project_dir = std::env::current_dir().unwrap_or_default();
+    let plan = match load_project_plan(theme) {
+        Ok(plan) => plan,
+        Err(code) => return code,
+    };
+    let only = parsed.positional.first().map(String::as_str);
+    let sources = channel_sources(&plan.table);
+    let selected: Vec<_> = sources
+        .into_iter()
+        .filter(|s| only.is_none_or(|name| name == s.name))
+        .collect();
+    if selected.is_empty() {
+        match only {
+            Some(name) => theme.error(
+                &format!("no channel source named `{name}`"),
+                "only sources declared with `#latest`, `#main`, or `#vN.x` can be updated.",
+                "run `jetpack outdated` to see channel sources.",
+            ),
+            None => theme.status("no channel sources to update."),
+        }
+        return if only.is_some() { 2 } else { 0 };
+    }
+
+    let mut ok = true;
+    for source in &selected {
+        match resolve_source_channel(source, &parsed.flags) {
+            Ok(exact) => {
+                Lock::record_source_channel(
+                    &project_dir,
+                    Lock::LockedSourceChannel {
+                        name: source.name.clone(),
+                        channel: source.channel.as_str().to_string(),
+                        exact: exact.clone(),
+                    },
+                );
+                theme.status(&format!(
+                    "{} {} → {}",
+                    theme.bold(&source.name),
+                    theme.gray(source.channel.as_str()),
+                    exact
+                ));
+            }
+            Err(e) => {
+                report_provider_error(theme, &e);
+                ok = false;
+            }
+        }
+    }
+    if ok {
+        0
+    } else {
+        2
+    }
+}
+
+/// `jetpack outdated` — read-only channel freshness report. It may query
+/// metadata, but never writes `.jet/lock`.
+fn cmd_outdated(theme: &Theme, parsed: &Parsed) -> i32 {
+    if parsed.flags.offline {
+        return offline_refusal(theme, "outdated");
+    }
+    let project_dir = std::env::current_dir().unwrap_or_default();
+    let plan = match load_project_plan(theme) {
+        Ok(plan) => plan,
+        Err(code) => return code,
+    };
+    let sources = channel_sources(&plan.table);
+    if sources.is_empty() {
+        theme.status("no channel sources.");
+        return 0;
+    }
+    let mut any = false;
+    let mut ok = true;
+    for source in &sources {
+        let locked = Lock::locked_source_channel(&project_dir, &source.name);
+        let Some(locked) = locked else {
+            theme.detail(&format!(
+                "{}  {}  unlocked (run `jetpack update {}`)",
+                theme.bold(&source.name),
+                theme.gray(source.channel.as_str()),
+                source.name
+            ));
+            any = true;
+            continue;
+        };
+        match resolve_source_channel(source, &parsed.flags) {
+            Ok(latest) if latest != locked.exact => {
+                any = true;
+                theme.detail(&format!(
+                    "{}  {}  {} → {}",
+                    theme.bold(&source.name),
+                    theme.gray(source.channel.as_str()),
+                    locked.exact,
+                    latest
+                ));
+            }
+            Ok(_) => {}
+            Err(e) => {
+                report_provider_error(theme, &e);
+                ok = false;
+            }
+        }
+    }
+    if ok && !any {
+        theme.status("all channel sources are current.");
+    }
+    if ok {
+        0
+    } else {
+        2
+    }
+}
+
+/// `jetpack search <query>` — local/offline package discovery (U26).
+fn cmd_search(theme: &Theme, parsed: &Parsed) -> i32 {
+    let Some(query) = parsed.positional.first() else {
+        theme.error(
+            "search needs a query",
+            "`jetpack search` reads the local discovery index; it never fetches.",
+            "write `jetpack search postgres`.",
+        );
+        return 2;
+    };
+    let index = match discovery_index(theme, parsed) {
+        Ok(index) => index,
+        Err(code) => return code,
+    };
+    let records = index.search(query);
+    if parsed.flags.json {
+        println!("{}", Discovery::search_json(&records));
+        return 0;
+    }
+    if records.is_empty() {
+        println!("no packages found for `{query}`");
+        if let Some(nearest) = index.nearest(query) {
+            println!("nearest: {nearest}");
+        }
+        return 1;
+    }
+    for record in records {
+        println!(
+            "{:<24} {:<10} {}",
+            record.display_ref(),
+            empty_dash(&record.version),
+            record.platforms.join(", ")
+        );
+    }
+    0
+}
+
+/// `jetpack info <ref>` — local/offline package metadata (U26).
+fn cmd_info(theme: &Theme, parsed: &Parsed) -> i32 {
+    let Some(query) = parsed.positional.first() else {
+        theme.error(
+            "info needs a package ref",
+            "`jetpack info` reads the local discovery index; it never fetches.",
+            "write `jetpack info default.ripgrep`.",
+        );
+        return 2;
+    };
+    let index = match discovery_index(theme, parsed) {
+        Ok(index) => index,
+        Err(code) => return code,
+    };
+    let Some(record) = index.info(query) else {
+        let fix = index
+            .nearest(query)
+            .map(|n| format!("try `jetpack info {n}`."))
+            .unwrap_or_else(|| "run `jetpack search <name>` to see local matches.".to_string());
+        theme.error(
+            &format!("no local package info for `{query}`"),
+            "`jetpack info` uses only the local discovery index.",
+            &fix,
+        );
+        return 2;
+    };
+    if parsed.flags.json {
+        println!("{}", Discovery::info_json(record));
+        return 0;
+    }
+    println!("{}", record.display_ref());
+    println!("  ref: {}", record.reference);
+    println!("  version: {}", empty_dash(&record.version));
+    println!("  platforms: {}", record.platforms.join(", "));
+    println!("  source: {}", record.source);
+    println!("  provenance: {}", record.provenance);
+    if !record.options.is_empty() {
+        println!("  service options:");
+        for opt in &record.options {
+            println!(
+                "    {:<10} default: {:<24} {}",
+                opt.name,
+                empty_dash(&opt.default),
+                opt.docs
+            );
+        }
+    }
+    0
+}
+
+fn cmd_explain(theme: &Theme, parsed: &Parsed) -> i32 {
+    let Some(query) = parsed.positional.first() else {
+        theme.error(
+            "explain needs a package ref",
+            "`jet explain <CODE>` is handled by the main compiler; `jetpack explain` explains package refs.",
+            "write `jet explain weirdctl` after a failed build.",
+        );
+        return 2;
+    };
+    let roots = Store::resolve();
+    let package = query
+        .split_once(':')
+        .map(|(_, p)| p)
+        .or_else(|| query.split_once('.').map(|(_, p)| p))
+        .unwrap_or(query);
+    match BuildDebug::latest(&roots.hangar_dir(), package) {
+        Ok(Some(attempt)) => {
+            print!("{}", BuildDebug::explain(&attempt));
+            0
+        }
+        Ok(None) => {
+            theme.error_coded(
+                "E1274",
+                &format!("no build log for `{query}`"),
+                "`jet explain <ref>` can explain refs after Jetpack has recorded a build attempt.",
+                &format!("run `jet build {query}` first, or use `jet explain E1234` for diagnostic-code help."),
+            );
+            2
+        }
+        Err(e) => {
+            theme.error_coded(
+                "E1274",
+                "couldn't read build explanation",
+                &e,
+                "check the build log directory under the Jetpack hangar.",
+            );
+            2
+        }
+    }
+}
+
+fn cmd_logs(theme: &Theme, parsed: &Parsed) -> i32 {
+    let Some(package) = parsed.positional.first() else {
+        theme.error(
+            "logs needs a package name",
+            "`jet logs` prints the latest recorded build attempt for one package.",
+            "write `jet logs weirdctl`.",
+        );
+        return 2;
+    };
+    let roots = Store::resolve();
+    if parsed.flags.json {
+        match BuildDebug::latest_json(&roots.hangar_dir(), package) {
+            Ok(Some(json)) => {
+                print!("{json}");
+                0
+            }
+            Ok(None) => missing_logs(theme, package),
+            Err(e) => read_logs_error(theme, &e),
+        }
+    } else {
+        match BuildDebug::latest(&roots.hangar_dir(), package) {
+            Ok(Some(attempt)) => {
+                print!("{}", BuildDebug::text_logs(&attempt));
+                0
+            }
+            Ok(None) => missing_logs(theme, package),
+            Err(e) => read_logs_error(theme, &e),
+        }
+    }
+}
+
+fn missing_logs(theme: &Theme, package: &str) -> i32 {
+    theme.error_coded(
+        "E1274",
+        &format!("no build log for `{package}`"),
+        "`jet logs` reads persisted Jetpack build attempts; no attempt is recorded for that package.",
+        &format!("run `jet build {package}` first."),
+    );
+    2
+}
+
+fn read_logs_error(theme: &Theme, reason: &str) -> i32 {
+    theme.error_coded(
+        "E1274",
+        "couldn't read build logs",
+        reason,
+        "check the build log directory under the Jetpack hangar.",
+    );
+    2
+}
+
+fn shell_on_failed_build(theme: &Theme, roots: &Roots, package: &str) {
+    let Ok(Some(attempt)) = BuildDebug::latest(&roots.hangar_dir(), package) else {
+        return;
+    };
+    if attempt.scratch_dir.is_empty() {
+        return;
+    }
+    let shell = std::env::var("JETPACK_SHELL_ON_FAIL")
+        .ok()
+        .unwrap_or_else(|| {
+            std::env::var("SHELL").unwrap_or_else(|_| {
+                if cfg!(windows) {
+                    "cmd".to_string()
+                } else {
+                    "sh".to_string()
+                }
+            })
+        });
+    theme.status(&format!(
+        "build failed at step {} · shell in preserved build dir {}",
+        attempt.failed_step, attempt.scratch_dir
+    ));
+    let mut cmd = std::process::Command::new(&shell);
+    cmd.current_dir(&attempt.scratch_dir)
+        .env("JETPACK_FAILED_SCRATCH", &attempt.scratch_dir)
+        .env("JETPACK_FAILED_STEP", attempt.failed_step.to_string())
+        .env("JETPACK_FAILED_PACKAGE", package);
+    let _ = cmd.status();
+}
+
+fn discovery_index(theme: &Theme, parsed: &Parsed) -> Result<Discovery::Index, i32> {
+    let project_dir = std::env::current_dir().unwrap_or_default();
+    let mut index = match Discovery::load(&project_dir) {
+        Ok(Some(index)) => index,
+        Ok(None) => Discovery::Index::default(),
+        Err(e) => {
+            theme.error(
+                "local discovery index is malformed",
+                &e,
+                "delete `.jet/discovery/index.jsonl` and rerun `jetpack search` from a project with env metadata.",
+            );
+            return Err(2);
+        }
+    };
+
+    let roots = Store::resolve();
+    let store_entries = Store::list(&roots);
+    Discovery::merge_store_entries(&mut index, &store_entries);
+
+    if EnvFile::path_in(&project_dir).exists() {
+        let plan = load_project_plan(theme)?;
+        let fixtures = fixtures_for(&parsed.flags);
+        Discovery::merge_refs(&mut index, &plan.refs, fixtures.as_deref(), &store_entries);
+        Discovery::merge_adapters(&mut index, &plan.adapters);
+        if let Err(e) = Discovery::write(&project_dir, &index) {
+            theme.error(
+                "couldn't write local discovery index",
+                &e,
+                "check permissions on `.jet/discovery/`.",
+            );
+            return Err(2);
+        }
+    }
+
+    if index.is_empty() {
+        theme.error(
+            "no local discovery index",
+            "`jetpack search` and `jetpack info` never fetch package metadata.",
+            "run from a project with env metadata, or realize packages once so hangar metadata exists.",
+        );
+        return Err(2);
+    }
+    Ok(index)
+}
+
+fn empty_dash(value: &str) -> &str {
+    if value.is_empty() {
+        "-"
+    } else {
+        value
     }
 }
 
@@ -1403,6 +2858,9 @@ fn cmd_clean(theme: &Theme) -> i32 {
 /// (`nixpkgs`/`github`/`path`/user-declared names), so an exact-case
 /// `Button`-style name can only ever mean a component.
 fn cmd_add(theme: &Theme, parsed: &Parsed) -> i32 {
+    if parsed.flags.offline {
+        return offline_refusal(theme, "add");
+    }
     let Some(raw) = parsed.positional.first() else {
         theme.error(
             "add what?",
@@ -1413,6 +2871,9 @@ fn cmd_add(theme: &Theme, parsed: &Parsed) -> i32 {
     };
     if let Some(component) = Components::find(raw) {
         return cmd_add_component(theme, component);
+    }
+    if parsed.flags.adapt {
+        return cmd_add_adapt(theme, raw);
     }
     let dir = std::env::current_dir().unwrap_or_default();
     // Classify against the env's declared sources so `add unstable:fd` works
@@ -1435,6 +2896,20 @@ fn cmd_add(theme: &Theme, parsed: &Parsed) -> i32 {
                 Syntax::ENV_FILE
             ));
             theme.detail(&theme.gray(&format!("now: {}", ef.packages.join(", "))));
+            if let Ok(plan) = load_project_plan(theme) {
+                for source in channel_sources(&plan.table) {
+                    if let Ok(exact) = resolve_source_channel(&source, &parsed.flags) {
+                        Lock::record_source_channel(
+                            &dir,
+                            Lock::LockedSourceChannel {
+                                name: source.name.clone(),
+                                channel: source.channel.as_str().to_string(),
+                                exact,
+                            },
+                        );
+                    }
+                }
+            }
             0
         }
         Err(e) => {
@@ -1446,6 +2921,67 @@ fn cmd_add(theme: &Theme, parsed: &Parsed) -> i32 {
             1
         }
     }
+}
+
+fn cmd_add_adapt(theme: &Theme, raw: &str) -> i32 {
+    let source = if raw.contains(Syntax::REF_PROVIDER_AT) {
+        match RefSpec::classify_provider_ref(raw) {
+            Ok(r) => r.raw,
+            Err(e) => {
+                Output::ref_error(theme, &e);
+                return 2;
+            }
+        }
+    } else {
+        let table = cwd_table();
+        let spec = match RefSpec::classify_in(raw, &table) {
+            Ok(s) => s,
+            Err(e) => {
+                Output::ref_error(theme, &e);
+                return 2;
+            }
+        };
+        match spec.source {
+            RefSpec::Source::Path => format!("path@{}", spec.package),
+            RefSpec::Source::Github => format!("github@{}", spec.package),
+            RefSpec::Source::Named(name) => match table.upstream(&name) {
+                Some(upstream) if upstream.starts_with("path:") => {
+                    format!("path@{}", upstream.trim_start_matches("path:"))
+                }
+                Some(upstream) if upstream.starts_with("github:") => {
+                    format!("github@{}", upstream.trim_start_matches("github:"))
+                }
+                _ => {
+                    theme.error_coded(
+                        "E1270",
+                        "adapter draft needs source bytes",
+                        "that named source does not point at a path or GitHub source tree.",
+                        "write `Pkg.adapt(...)` by hand with `source: path@...`.",
+                    );
+                    return 2;
+                }
+            },
+            RefSpec::Source::Nixpkgs => {
+                theme.error_coded(
+                    "E1270",
+                    "adapter draft needs source bytes",
+                    "`nixpkgs:<pkg>` names a package in an index, not an upstream source tree.",
+                    "use the package's source URL with `source: github@owner/repo#rev` or `source: path@vendor/pkg`.",
+                );
+                return 2;
+            }
+        }
+    };
+    let name = source
+        .split(['/', ':', '@', '#'])
+        .filter(|s| !s.is_empty())
+        .last()
+        .unwrap_or("tool")
+        .trim_end_matches(".git");
+    println!(
+        "Pkg.adapt(\n    name: \"{name}\",\n    source: {source},\n    recipe: Recipe.copy(),\n)"
+    );
+    0
 }
 
 /// Copy a starter component's source into `./components/<Name>.jet`.
@@ -1539,7 +3075,10 @@ fn cmd_push(theme: &Theme, parsed: &Parsed) -> i32 {
     let Ok(src) = std::fs::read_to_string(EnvFile::path_in(&dir)) else {
         theme.error(
             "no fleet here",
-            &format!("there is no {} declaring any `fleet.<name>`.", Syntax::ENV_FILE),
+            &format!(
+                "there is no {} declaring any `fleet.<name>`.",
+                Syntax::ENV_FILE
+            ),
             "declare `module fleet.<name> { hosts: { … } }`, then `jet push <name>`.",
         );
         return 2;
@@ -1606,6 +3145,158 @@ fn cmd_push(theme: &Theme, parsed: &Parsed) -> i32 {
 /// from a foreign `flake.nix`'s devShell into jetpack's own `env.*` module
 /// form. Never edits the project's `env.jet`; the shim prints to stdout for
 /// the user to review and merge (I8 — one canonical env surface).
+/// D-JPK-IMAGE1 (=A, ratified 2026-07-01, c9jetpackgates): `jet image <name>`
+/// builds the named `.Oci` `image.<name>` module contribution into a native
+/// OCI layout (`Jetpack::Image`). `.Iso` images ride the jetos installer tier
+/// (Phase D, owner-gated — untouched here); `--push` is honestly gated on TLS
+/// (E1268), never a fake push.
+fn cmd_image(theme: &Theme, parsed: &Parsed) -> i32 {
+    let dir = std::env::current_dir().unwrap_or_default();
+    let Ok(src) = std::fs::read_to_string(EnvFile::path_in(&dir)) else {
+        theme.error(
+            "no image here",
+            &format!(
+                "there is no {} declaring any `image.<name>`.",
+                Syntax::ENV_FILE
+            ),
+            "declare `module image.<name> { kind: .Oci, from: packages.<name> }`, then `jet image <name>`.",
+        );
+        return 2;
+    };
+    let plan = match ModuleEval::evaluate_env(&src, &dir) {
+        Ok(p) => p,
+        Err(d) => {
+            eprint!(
+                "{}",
+                crate::Diagnostics::render_all(Syntax::ENV_FILE, &src, std::slice::from_ref(&d))
+            );
+            return 2;
+        }
+    };
+
+    let available: Vec<String> = plan.images.iter().map(|i| i.name.clone()).collect();
+    let declared = || {
+        if available.is_empty() {
+            format!("no `image.<name>` is declared in {}.", Syntax::ENV_FILE)
+        } else {
+            format!("declared images: {}.", available.join(", "))
+        }
+    };
+    let Some(name) = parsed.positional.first() else {
+        theme.error(
+            "build which image?",
+            &declared(),
+            "name an image: `jet image <name>`.",
+        );
+        return 2;
+    };
+
+    let Some(image) = plan.images.iter().find(|i| &i.name == name) else {
+        theme.error(
+            &format!("no image `{name}`"),
+            &declared(),
+            "declare `module image.<name> { … }`, or build an existing image.",
+        );
+        return 2;
+    };
+
+    if image.kind != ModuleEval::ImageKind::Oci {
+        theme.error(
+            &format!("`{name}` is a `.Iso` disk image, not a container"),
+            "U14: `.Iso`/`.Qcow`/`.Raw` disk images ride the jetos installer tier, which is gated (Phase D, owner greenlight required) — `jet image` only builds `.Oci` containers today.",
+            "build an `.Oci` image instead, or track the jetos realization tier for disk images.",
+        );
+        return 2;
+    }
+
+    if let Some(push_ref) = &parsed.flags.push {
+        theme.error_coded(
+            "E1268",
+            &format!("`jet image {name}` can't push to `{push_ref}` yet"),
+            "D-JPK-IMAGE1: pushing to a registry needs TLS support for the connection, which jetpack doesn't have yet — `jet image` never fakes a push.",
+            &format!(
+                "build without `--push` (`jet image {name}`) and push the OCI layout with another tool for now; `--push` will work once TLS lands."
+            ),
+        );
+        return 2;
+    }
+
+    if let Some(base) = &image.base {
+        theme.error(
+            &format!("`base: oci(\"{base}\")` isn't realized yet"),
+            "D-JPK-IMAGE1: layering onto a base image needs a native registry-pull client, which doesn't exist yet — `jet image` never silently builds from scratch instead of the requested base.",
+            "drop `base:` to build a from-scratch image, or track the registry-pull client.",
+        );
+        return 2;
+    }
+
+    // D-JPK-IMAGE1: build from what `jet build` already realized. Jetpack has
+    // no dependency on the compiler's own build machinery (the dependency
+    // runs the other way — `jet` depends on `jet-driver`, not vice versa), so
+    // this mirrors, rather than calls into, `jet build`'s `build/<name>`
+    // output convention (`Source/CmdCompile.rs::bin_path`).
+    let bin_path = dir.join("build").join(&image.from);
+    let Ok(bin_data) = std::fs::read(&bin_path) else {
+        theme.error(
+            &format!("`{}` isn't built yet", image.from),
+            &format!(
+                "`jet image {name}` needs `{}` already built at `{}`.",
+                image.from,
+                bin_path.display()
+            ),
+            &format!("run `jet build` first, then `jet image {name}`."),
+        );
+        return 2;
+    };
+
+    let mut files = vec![Image::LayerFile {
+        path: format!("usr/local/bin/{}", image.from),
+        data: bin_data,
+        mode: 0o755,
+    }];
+    for rel in &image.files {
+        let Ok(data) = std::fs::read(dir.join(rel)) else {
+            theme.error(
+                &format!("`{rel}` (from `files:`) doesn't exist"),
+                &format!("`image.{name}`'s `files:` names `{rel}`, relative to the project dir."),
+                "fix the path, or remove it from `files:`.",
+            );
+            return 2;
+        };
+        files.push(Image::LayerFile {
+            path: rel.trim_start_matches('/').to_string(),
+            data,
+            mode: 0o644,
+        });
+    }
+
+    let spec = Image::BuildSpec {
+        files,
+        entrypoint: vec![format!("/usr/local/bin/{}", image.from)],
+        env: image.env_vars.clone(),
+        expose: image.expose.clone(),
+    };
+    let out_dir = dir.join(".jet").join("images").join(name);
+    match Image::build(&spec, &out_dir, name) {
+        Ok(built) => {
+            theme.ok(&format!(
+                "built image `{name}` -> {} ({})",
+                out_dir.display(),
+                built.manifest_digest
+            ));
+            0
+        }
+        Err(e) => {
+            theme.error(
+                &format!("couldn't build image `{name}`"),
+                &e.to_string(),
+                "check that the output directory is writable.",
+            );
+            2
+        }
+    }
+}
+
 fn cmd_bridge(theme: &Theme, parsed: &Parsed) -> i32 {
     match parsed.positional.first().map(String::as_str) {
         Some(v) if v == Syntax::BRIDGE_VERB_FLAKE => {
@@ -1692,17 +3383,29 @@ fn usage() -> String {
   {bin} hangar du                      honest per-object hangar disk usage
   {bin} vendor [<dir>]                 write vendored + hash-pinned sources
   {bin} audit                          read build provenance (runs nothing)
-  {bin} clean                          drop unused store records
+  {bin} clean                          collect stale hangar objects + optimize
+  {bin} search <query>                 search the local offline package index
+  {bin} info <source>.<package>         show local offline package metadata
+  {bin} explain <ref>                  show resolution path and latest build status
+  {bin} logs <pkg> --json              show persisted per-step build logs
 
 {machines}
   {bin} os switch [<config>]@<host>    build + activate a machine from a config.jet
   {bin} os build  [<config>]@<host>    build a machine generation, don't activate
   {bin} push <fleet>                   validate a fleet's hosts (deploy is gated)
+  {bin} services up   [<name>]         start dev services declared under env.*
+  {bin} services down [<name>]         stop them
+  {bin} services health [<name>]       one-shot readiness check
+  {bin} services logs <name>           print a service's captured stdout/stderr
+  {bin} image <name>                   build a declared `.Oci` image into a native OCI layout
+  {bin} image <name> --push <ref>      (gated on TLS support, E1268 — not yet)
 
 {trust}
   {bin} config trust add <pattern>     pre-authorize matching project paths
   {bin} config trust list              show trusted hashes and patterns
   {bin} config trust remove <pattern>  drop a trusted pattern
+  {bin} config sandbox require         refuse unsandboxed build fallback
+  {bin} config sandbox allow           allow fallback with L0205 warning
 
 {refs}
   nixpkgs:fastfetch                    a package from nixpkgs
@@ -1715,11 +3418,13 @@ fn usage() -> String {
 {flags}
   --no-color                           disable colored output (also: NO_COLOR)
   --offline                            resolve from fixtures only, never network
+  --shell-on-fail                      after a failed build, open a shell in preserved scratch
   --fixtures <dir>                     read provider output from captured fixtures
   --trust                              skip the trust prompt for this one run
   -p <pkg>...                          (enter) ad-hoc nixpkgs packages, not declared anywhere
   --flake                              (enter) force the foreign flake.nix/devenv.nix fallback
   --pure                               (enter) isolate the shell from the host environment
+  --push <ref>                         (image) push after building — gated on TLS, E1268
 ",
         title = h(&format!("{bin} — Jet's package manager (Phase 1)")),
         envs = h("environments:"),
@@ -1750,13 +3455,15 @@ mod tests {
 
     #[test]
     fn parses_flags() {
-        let args: Vec<String> = ["--no-color", "--fixtures", "/tmp/fx", "nixpkgs:jq"]
+        let fixtures = std::env::temp_dir().join("fx");
+        let fixtures_arg = fixtures.to_string_lossy().to_string();
+        let args: Vec<String> = ["--no-color", "--fixtures", &fixtures_arg, "nixpkgs:jq"]
             .iter()
             .map(|s| s.to_string())
             .collect();
         let p = parse_args(&args);
         assert!(p.flags.no_color);
-        assert_eq!(p.flags.fixtures, Some(PathBuf::from("/tmp/fx")));
+        assert_eq!(p.flags.fixtures, Some(fixtures));
         assert_eq!(p.positional, vec!["nixpkgs:jq"]);
     }
 

@@ -413,6 +413,7 @@ impl IoPoller {
         use std::os::unix::io::AsRawFd;
 
         #[repr(C)]
+        #[derive(Clone, Copy)]
         struct Kevent {
             ident: usize,
             filter: i16,

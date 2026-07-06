@@ -33,31 +33,33 @@ pub const WORKSPACE_LOCK: &str = Syntax::UNIFIED_LOCK_FILE;
 /// (the lock is best-effort; the source of truth is `workspace.jet`).
 pub fn write(workspace_root: &Path, plan: &WorkspacePlan) {
     let lock_path = workspace_root.join(WORKSPACE_LOCK);
-    let Some(lock_dir) = lock_path.parent() else {
+    let Some(lock_dir) = lock_path.parent().map(Path::to_path_buf) else {
         return;
     };
-    if std::fs::create_dir_all(lock_dir).is_err() {
-        return;
-    }
-    let mut lock = Lock::load(workspace_root).unwrap_or_else(empty_lock);
-    lock.version = Lock::LOCK_VERSION;
-    lock.workspace_members = plan
-        .members
-        .iter()
-        .map(|m| LockedWorkspaceMember {
-            name: m.name.clone(),
-            path: m.path.clone(),
-        })
-        .collect();
-    // D-CTEFFECT1: fold the Tier-1 inputs the `members:` expression recorded
-    // into the lock, keeping any inputs already recorded by other call sites.
-    // Dedup by path so re-writing the lock is idempotent.
-    for ci in &plan.comptime_inputs {
-        if !lock.comptime_inputs.iter().any(|e| e.path == ci.path) {
-            lock.comptime_inputs.push(ci.clone());
+    let _ = super::RuntimePolicy::with_project_lock(workspace_root, "workspace-lock", || {
+        if std::fs::create_dir_all(lock_dir).is_err() {
+            return Ok(());
         }
-    }
-    let _ = std::fs::write(lock_path, Lock::write(&lock));
+        let mut lock = Lock::load(workspace_root).unwrap_or_else(empty_lock);
+        lock.version = Lock::LOCK_VERSION;
+        lock.workspace_members = plan
+            .members
+            .iter()
+            .map(|m| LockedWorkspaceMember {
+                name: m.name.clone(),
+                path: m.path.clone(),
+            })
+            .collect();
+        // D-CTEFFECT1: fold the Tier-1 inputs the `members:` expression recorded
+        // into the lock, keeping any inputs already recorded by other call sites.
+        // Dedup by path so re-writing the lock is idempotent.
+        for ci in &plan.comptime_inputs {
+            if !lock.comptime_inputs.iter().any(|e| e.path == ci.path) {
+                lock.comptime_inputs.push(ci.clone());
+            }
+        }
+        std::fs::write(lock_path, Lock::write(&lock))
+    });
 }
 
 /// Load workspace members from `.jet/lock` in `workspace_root`. Returns `None`
@@ -85,7 +87,9 @@ fn empty_lock() -> LockFile {
         root_dependencies: Vec::new(),
         workspace_members: Vec::new(),
         comptime_inputs: Vec::new(),
-        toolchains: Vec::new(),    }
+        toolchains: Vec::new(),
+        source_channels: Vec::new(),
+    }
 }
 
 // ── check that Syntax::PAYLOAD_FILE is accessible (used for doc purposes) ─────

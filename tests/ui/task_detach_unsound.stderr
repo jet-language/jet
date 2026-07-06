@@ -4,7 +4,7 @@ Error [E1102]: `greet` can't cross into a task because `fn()` isn't sendable
   6 |     t :: tasks.spawn(() => greet)
     |                      ^^^^^^^^^^^
  Why: a closure may hold outside state, so it must be handed over with `take` before it crosses this boundary; tasks and channels move owned values between threads
- Fix: give the task plain owned data, or remove the shared-view field before spawning
+ Fix: give the task plain owned data, or rebuild the value as an owned copy before spawning
 
 Error [E1102]: this task returns `fn()`, which isn't sendable
   --> tests/ui/task_detach_unsound.jet:6:22
@@ -12,7 +12,7 @@ Error [E1102]: this task returns `fn()`, which isn't sendable
   6 |     t :: tasks.spawn(() => greet)
     |                      ^^^^^^^^^^^
  Why: a closure may hold outside state, so it must be handed over with `take` before it crosses this boundary; tasks and channels move owned values between threads
- Fix: give the task plain owned data, or remove the shared-view field before spawning
+ Fix: give the task plain owned data, or rebuild the value as an owned copy before spawning
 
 Error [E1103]: can't detach task `t` — it captured a value that can't cross a thread boundary
   --> tests/ui/task_detach_unsound.jet:7:7

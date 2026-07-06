@@ -14,7 +14,7 @@ built-in modules below and the ring packages — lives under the single `core.*`
 namespace. There is no `jet.*` or `std.*` library namespace.
 
 **Naming (S54):** types and error enums are PascalCase (`String`, `IOError`,
-`JSON`); functions and module segments are snake_case (`read`, `core.fs`).
+`JSON`); functions and module segments are snake_case (`read`, `core.files`).
 See S66 for acronym capitalization.
 
 ---
@@ -22,7 +22,7 @@ See S66 for acronym capitalization.
 ## Quick start
 
 ```jet
-use core.fs as fs
+use core.files as fs
 use core.io as io
 use core.env as env
 
@@ -53,30 +53,31 @@ nix develop -c jet run tool.jet World
 Core modules use `use` — no quotes, unlike file imports.
 
 ```jet
-use core.fs as fs                    // one submodule
+use core.files as fs                 // one submodule
 use core.encoding.json as json       // a nested submodule
 ```
 
-`use core.fs` and `use core.encoding.json` each resolve to a
+`use core.files` and `use core.encoding.json` each resolve to a
 compiler-known module under the `core` root.
 
 **Not allowed:**
 
 ```jet
-import core.fs as fs        // teaching error E0015 — use `use core.fs`
+import core.files as fs     // teaching error E0015 — use `use core.files`
 use "std/fs"               // quoted paths are for .jet files only
 ```
 
 If you name a local file or folder `core`, `jet`, `http`, `regex`, `csv`, `toml`,
 `crypto`, or `archive`, the compiler rejects it — those names are reserved for
 first-party packages (**E1002**). An unknown core module is **E1001**;
-selective imports (`use core.fs.{read}`) are rejected — keep qualified access
+selective imports (`use core.files.{read}`) are rejected — keep qualified access
 through an alias. An unknown item in a known core module is **E1004**, with a
 did-you-mean suggestion when possible.
 
 Fallible core functions return `T ? E` and must be handled with `?`, `??`, or
-a pattern test like any other Jet result. File APIs are whole-file only (no
-streaming handles); paths are plain `String`; binary APIs use `U8` and `[U8]`.
+a pattern test like any other Jet result. `core.files` has both whole-file
+helpers (`read`/`write`/…) and streaming handles (`open`/`create`); paths are
+plain `String`; binary APIs use `U8` and `[U8]`.
 
 ---
 
@@ -86,7 +87,7 @@ Fallible Core functions return `T ? E`. Handle them like any other Jet
 result — with `?`, `??`, or a pattern test:
 
 ```jet
-use core.fs as fs
+use core.files as fs
 
 fn run() {
     text :: fs.read("data.txt") ?? return   // stop on error
@@ -133,7 +134,7 @@ See `examples/features/types/option_combinators.jet`.
 
 ## Pay for what you call
 
-Using `core.fs` costs nothing in the generated binary until you **call**
+Using `core.files` costs nothing in the generated binary until you **call**
 something from it. A program that uses every Core module but only calls
 `print` stays hello-world sized. Only the helpers your program can reach are
 compiled in.
@@ -142,18 +143,18 @@ compiled in.
 
 ## Modules
 
-### `core.fs` — files and folders
+### `core.files` — files and folders
 
-Whole-file helpers only (streaming I/O added in E2-M7). Paths are plain
-`String`s.
+One module for both whole-file convenience helpers and streaming handles
+(D-FILES-WRITE1). Paths are plain `String`s.
 
 ```jet
-use core.fs as fs
+use core.files as fs
 
 fn run() {
     path :: "/tmp/notes.txt"
     fs.write(path, "hello\n") ?? return
-    fs.append(path, "world\n") ?? return
+    fs.append_all(path, "world\n") ?? return
     print(fs.read(path) ?? return)        // "hello\nworld\n"
     print(fs.exists(path))                // true
     print(fs.is_dir("/tmp"))              // true
@@ -162,12 +163,14 @@ fn run() {
 }
 ```
 
+Whole-file helpers:
+
 | Function | Returns | What it does |
 |----------|---------|--------------|
 | `read(path)` | `String ? IOError` | Read entire file as UTF-8 text |
 | `read_bytes(path)` | `[U8] ? IOError` | Read entire file as bytes |
 | `write(path, text)` | `() ? IOError` | Create or overwrite a text file |
-| `append(path, text)` | `() ? IOError` | Append text to a file |
+| `append_all(path, text)` | `() ? IOError` | Append text to a file, one shot |
 | `exists(path)` | `Bool` | Whether the path exists |
 | `remove(path)` | `() ? IOError` | Delete a file |
 | `list_dir(path)` | `[DirEntry] ? IOError` | One entry per directory member, sorted by name (D-LSDIR1) |
@@ -177,6 +180,37 @@ fn run() {
 | `rename(from, to)` | `() ? IOError` | Rename or move a file |
 
 **`IOError`** — `NotFound(path)`, `PermissionDenied(path)`, or `Other(message)`.
+
+Streaming handles (E2-M7/D-IO2) — for bounded-memory reads/writes instead of
+loading the whole file:
+
+```jet
+use core.files as files
+
+fn count_lines(path: String) -> Int ? IOError {
+    handle :: files.open(copy path)?
+    n := 0
+    loop line in handle.lines() {
+        n = (n + 1)
+    }
+    return ok(n)
+}
+```
+
+| Function/method | Returns | What it does |
+|------------------|---------|--------------|
+| `open(path)` | `FileReader ? IOError` | Open a file for buffered line-by-line reading |
+| `create(path)` | `FileWriter ? IOError` | Create/overwrite a file for buffered writing |
+| `append(path)` | `FileWriter ? IOError` | Open a file for buffered appending |
+| `reader.read_line()` | `String? ? IOError` | One line (no newline), `null` at EOF |
+| `reader.lines()` | iterator of `String` | `loop line in handle.lines()` |
+| `writer.write_line(text)` | `() ? IOError` | Write `text` plus a trailing newline |
+| `writer.flush()` | `() ? IOError` | Force buffered bytes to disk |
+
+Handles close automatically on every exit path (RAII), including early `?`
+returns. `append_all` (whole-file) and `append` (streaming handle
+constructor/method) are deliberately different names — D-FILES-APPEND1 — so
+the same module can offer both without a name collision.
 
 **`DirEntry`** (D-LSDIR1) has three readable fields:
 
@@ -501,7 +535,7 @@ not for tests.
 | `int(low, high)` | `Int` | Random integer, both ends inclusive |
 | `float()` | `Float` | Random float from 0 up to (but not including) 1 |
 | `pick(xs)` | `T?` | Random element, or null if `xs` is empty |
-| `shuffle(mut xs)` | nothing | Randomly reorder a list in place |
+| `shuffle(&xs)` | nothing | Randomly reorder a list in place |
 | `rng(seed)` | `Rng` | A **deterministic** RNG capability seeded by `seed` (D-DET1) |
 
 The ambient calls above (`int`/`float`/…) read a process-global generator, so a
@@ -510,12 +544,12 @@ randomness inside a `@Pure fn`, take a seeded `Rng` **as a parameter** and draw
 through it — the seed makes the stream reproducible on every machine:
 
 ```jet
-@Pure fn roll(rng: ~Rng) -> Int {
-    return rng.int(1, 6)            // inclusive; advances the stream (needs ~Rng)
+@Pure fn roll(rng: &Rng) -> Int {
+    return rng.int(1, 6)            // inclusive; advances the stream (needs &Rng)
 }
 fn run() {
     r := random.rng(42)            // same seed → same draws everywhere
-    print(roll(~r))
+    print(roll(&r))
 }
 ```
 
@@ -527,10 +561,10 @@ The injected `Rng` mirrors the full ambient `random.*` set (D-DET-CAPAPI):
 | `float()` | `Float` | Draw a Float in `[0.0, 1.0)`; advances the stream |
 | `bool()` | `Bool` | Draw a coin; advances the stream |
 | `pick(xs)` | `T?` | Uniform element of `[T]`, or null if empty; advances the stream |
-| `shuffle(~xs)` | nothing | Reorder a list in place (Fisher–Yates); advances the stream |
+| `shuffle(&xs)` | nothing | Reorder a list in place (Fisher–Yates); advances the stream |
 
-Every draw — including `bool`/`pick`/`shuffle` — needs a `~Rng` receiver, and
-`shuffle` needs the list passed with `~` (it edits in place).
+Every draw — including `bool`/`pick`/`shuffle` — needs a `&Rng` receiver, and
+`shuffle` needs the list passed with `&` (it edits in place).
 
 ---
 
@@ -583,10 +617,10 @@ fn run() {
 
 | `Clock` method | Returns | What it does |
 |----------------|---------|--------------|
-| `now()` | `Int` | The clock's current value in ms (read; no `~` needed) |
-| `tick(ms)` | `Int` | Advance the clock by `ms` (relative) and return the new value (needs `~Clock`) |
-| `advance(to_ms)` | `Int` | Set the clock to the **absolute** instant `to_ms` and return it (needs `~Clock`; D-DET-CAPAPI) |
-| `wait(d)` | `Int` | Advance the clock by a `Duration` `d` and return the new value (needs `~Clock`; D-DET-CAPAPI) |
+| `now()` | `Int` | The clock's current value in ms (read; no `&` needed) |
+| `tick(ms)` | `Int` | Advance the clock by `ms` (relative) and return the new value (needs `&Clock`) |
+| `advance(to_ms)` | `Int` | Set the clock to the **absolute** instant `to_ms` and return it (needs `&Clock`; D-DET-CAPAPI) |
+| `wait(d)` | `Int` | Advance the clock by a `Duration` `d` and return the new value (needs `&Clock`; D-DET-CAPAPI) |
 
 A `Duration` is a deterministic span of milliseconds minted by `time.ms(n)` /
 `time.secs(n)` (pure value constructors). Read it back with `d.millis()`.
@@ -832,7 +866,8 @@ fn run() {
 
 `tasks.channel<T>()` returns the send/receive pair directly (D-TUPLE-DESTRUCT1) —
 destructure it with `(tx, rx) := tasks.channel<T>()`. A second sender is
-`tx.clone()`, not a method on the channel (there's no combined channel value).
+`copy tx` (D-CAP2's one copy verb — a cheap handle duplicate, not a method on
+the channel; there's no combined channel value).
 
 | Function / type | Returns | What it does |
 |-----------------|---------|--------------|
@@ -844,13 +879,13 @@ destructure it with `(tx, rx) := tasks.channel<T>()`. A second sender is
 | `task.cancel()` | nothing | Request cancellation on the task control plane |
 | `task.trace()` | `String` | Read control-plane state as `paused=...,cancel=...` |
 | `tasks.channel<T>()` | `(Sender<T>, Receiver<T>)` | Create a linked send/receive pair |
-| `sender.clone()` | `Sender<T>` | Create another send half |
+| `copy sender` | `Sender<T>` | Create another send half (cheap handle duplicate, `copy` verb — not a method) |
 | `sender.send(value)` | nothing | Move one value into the channel |
 | `receiver.receive()` | `T ? Closed` | Block for a value, or return `Closed` when senders are gone |
 
-Values crossing `spawn` or `send` must be sendable: no `view` borrows, no
-structs containing `ref` fields, no trait values, and no closure values unless
-they are handed over with `take`. A `Task` that goes out of scope without
+Values crossing `spawn` or `send` must be sendable: no `View<T>` or string-view
+windows, no trait values, and no closure values unless they are handed over
+with `take`. A `Task` that goes out of scope without
 `.join()` emits warning **L1101**.
 With `#Context(deadline: <Int epoch_ms>)`, blocking waits (`task.join()` /
 `task.wait()` / `ch.receive()`) observe the inherited budget and report runtime
@@ -994,7 +1029,7 @@ checker enforces both:
 - using a view after `reset()`/`free()` → **E0632**.
 
 Both are compile errors, so a dangling arena pointer can never run. Copy what you
-need out (`x.clone()`) before it leaves the region.
+need out (`copy x`) before it leaves the region.
 
 For the cases scope-inference is too coarse — a region spanning two allocators, or
 narrower than the function — write an explicit **`region r { … }`** block:
@@ -1214,7 +1249,7 @@ shift count past the type's width traps (no leaked Rust panic).
 | `eprintln(...)` | `io.eprint(...)` |
 | `open("file")` / `File.open` | `fs.read(...)` / `fs.write(...)` |
 | `getenv("X")` / `os.environ` | `env.get("X")` |
-| `import core.fs` | `use core.fs` (teaching error E0015) |
+| `import core.files` | `use core.files` (teaching error E0015) |
 | `val x = …` / `var x = …` | `x :: …` (immutable) / `x := …` (mutable) |
 
 ---
@@ -1228,13 +1263,15 @@ These shipped in Epoch 2:
 
 | Package | What it unlocks |
 |---------|-----------------|
-| `core.http` | HTTP client + server, blocking networking (plain HTTP; TLS requires `core.tls`) |
+| `core.http` | HTTP client + server, blocking networking; HTTPS works by default in the client via rustls + system roots (D-TLS1); server HTTPS uses `serve(..., tls: Server.tls(cert, key))` (D-TLSSERVE1) |
 | `core.regex` | grep-class tools, text validation |
 | `core.log` | Structured logging / tracing / metrics |
 | `core.time` | Calendar dates, time zones, formatted dates |
 | `core.crypto` | Hash, HMAC, vetted random primitives |
 | `core.reactive` | Signals, derived values, effects (opt-in reactivity, D-REACT1) |
 | `core.archive` | gzip compress/decompress, zip read/write, tar add/get/list (D-DEP-ARCHIVE1) |
+| `core.raylib` | Graphics bridge skeleton: typed window/draw/color calls for display-gated examples (D-RAYLIB1); native raylib link follows |
+| `core.game` | Flagship game engine, scene-first with a frame hook (`Scene` + `scene.on_frame`) per D-GAME1/2/3; not implemented yet |
 | `core.compress.gzip` | standalone gzip compress/decompress, no archive container (D-CODECS1) |
 | `core.compress.zstd` | standalone zstd compress/decompress, no archive container (D-CODECS1) |
 | `core.db` | SQLite — parameterized `DbConnection.query`/`.query_one`/`.execute`/`.begin`/`.commit`/`.rollback`/`.close` via rusqlite bundled (D-DBDRIVER1) |

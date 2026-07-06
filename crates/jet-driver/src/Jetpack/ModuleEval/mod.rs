@@ -18,6 +18,7 @@
 //! see commit 2b3825e), so this module owns the only pass that gives module
 //! bodies meaning.
 
+mod DevService;
 mod Diagnostics;
 mod Eval;
 mod Source;
@@ -28,7 +29,8 @@ pub use Diagnostics::merge_error_to_diagnostic;
 pub use Eval::{evaluate_modules, evaluate_source, merge_all, pkg_ref};
 pub use Source::{evaluate_env, is_module_surface};
 pub use Types::{
-    EnvPlan, EvaluatedModule, FleetPlan, HostPlan, ImagePlan, OptionPlan, ServicePlan, SystemPlan,
+    AdapterPlan, AdapterRecipe, DevServicePlan, EnvPlan, EvaluatedModule, FleetPlan, HostPlan,
+    ImageKind, ImagePlan, OptionPlan, ServicePlan, SystemPlan,
 };
 
 #[cfg(test)]
@@ -208,6 +210,80 @@ module dev {
 "#;
         let plan = evaluate_env(src, &base_dir()).unwrap();
         assert_eq!(plan.package_refs, vec!["default:ripgrep"]);
+    }
+
+    #[test]
+    fn evaluate_env_captures_adapt_package() {
+        let src = r#"
+module dev {
+    env.dev: Env.{
+        packages: [
+            Pkg.adapt(
+                name: "weirdctl",
+                source: path@vendor/weirdctl,
+                deps: [default.cmake],
+                recipe: Recipe.prebuilt(bin: "weirdctl", as: "weirdctl")
+            ),
+            default.ripgrep,
+        ],
+    }
+}
+"#;
+        let plan = evaluate_env(src, &base_dir()).unwrap();
+        assert_eq!(plan.package_refs, vec!["default:ripgrep"]);
+        assert_eq!(plan.adapters.len(), 1);
+        assert_eq!(plan.adapters[0].name, "weirdctl");
+        assert_eq!(plan.adapters[0].source, "path@vendor/weirdctl");
+        assert_eq!(
+            plan.adapters[0].deps,
+            vec![Merge::Pkg::new("default", "cmake")]
+        );
+        match &plan.adapters[0].recipe {
+            AdapterRecipe::Prebuilt { bin, as_name } => {
+                assert_eq!(bin, "weirdctl");
+                assert_eq!(as_name, "weirdctl");
+            }
+            other => panic!("expected prebuilt recipe, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn evaluate_env_captures_copy_adapter() {
+        let src = r#"
+module dev {
+    env.dev: Env.{
+        packages: [
+            Pkg.adapt(
+                name: "tool",
+                source: path@vendor/tool,
+                recipe: Recipe.copy()
+            )
+        ],
+    }
+}
+"#;
+        let plan = evaluate_env(src, &base_dir()).unwrap();
+        assert_eq!(plan.adapters.len(), 1);
+        assert!(matches!(plan.adapters[0].recipe, AdapterRecipe::Copy));
+    }
+
+    #[test]
+    fn evaluate_env_bad_adapter_is_e1270() {
+        let src = r#"
+module dev {
+    env.dev: Env.{
+        packages: [
+            Pkg.adapt(
+                name: "tool",
+                source: path@vendor/tool,
+                recipe: Recipe.build()
+            )
+        ],
+    }
+}
+"#;
+        let err = evaluate_env(src, &base_dir()).unwrap_err();
+        assert_eq!(err.code, "E1270");
     }
 
     #[test]
@@ -592,6 +668,170 @@ module m {
         assert!(rendered.contains("unknown system `nope`"), "{rendered}");
     }
 
+    // ── U14/D-JPK-IMAGE1: `.Oci` container images ────────────────────────
+
+    /// A fresh temp dir with a `pkg.jet` declaring `app: executable` — the
+    /// package an `.Oci` image's `from: packages.app` cross-checks against
+    /// (E1267). Unique per call (thread + nanos) so parallel test threads
+    /// never race on the same directory the way a shared `base_dir()` would.
+    fn oci_base_dir(tag: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "jet-oci-modeval-{tag}-{nanos}-{:?}",
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("pkg.jet"),
+            "payload: { name: \"t\", version: \"0.1.0\" }\npackages: { app: executable }\n",
+        )
+        .unwrap();
+        dir
+    }
+
+    /// `kind: .Oci` + `from: packages.<name>` captures an `ImagePlan` with
+    /// `ImageKind::Oci` and every `.Oci`-only field, cross-checking clean
+    /// against a `pkg.jet`-declared executable package.
+    #[test]
+    fn worked_example_captures_oci_image() {
+        let dir = oci_base_dir("worked-example");
+        let src = r#"
+module image.server {
+    kind: .Oci
+    from: packages.app
+    expose: [8080, 443, 8080]
+    env_vars: ["RUST_LOG": "info", "PORT": "8080"]
+    files: ["b.txt", "a.txt"]
+}
+"#;
+        let plan = evaluate_env(src, &dir).unwrap();
+        assert_eq!(plan.images.len(), 1);
+        let image = &plan.images[0];
+        assert_eq!(image.name, "server");
+        assert_eq!(image.kind, ImageKind::Oci);
+        assert_eq!(image.from, "app");
+        // Sorted + deduped, not source order.
+        assert_eq!(image.expose, vec![443, 8080]);
+        assert_eq!(
+            image.env_vars,
+            vec![
+                ("PORT".to_string(), "8080".to_string()),
+                ("RUST_LOG".to_string(), "info".to_string()),
+            ]
+        );
+        // Sorted, not source order.
+        assert_eq!(image.files, vec!["a.txt".to_string(), "b.txt".to_string()]);
+        assert_eq!(image.base, None);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// `kind:` is optional — omitted, it infers `Oci` from `from: packages.*`
+    /// (mirroring the pre-existing `from: system.*` → `Iso` inference).
+    #[test]
+    fn oci_kind_is_inferred_when_omitted() {
+        let dir = oci_base_dir("inferred-kind");
+        let src = "module image.server { from: packages.app }";
+        let plan = evaluate_env(src, &dir).unwrap();
+        assert_eq!(plan.images[0].kind, ImageKind::Oci);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// `base: oci("<ref>")` is captured (not yet realized — no registry-pull
+    /// client exists).
+    #[test]
+    fn oci_base_is_captured() {
+        let dir = oci_base_dir("base-captured");
+        let src = r#"module image.server { from: packages.app, base: oci("debian:12") }"#;
+        let plan = evaluate_env(src, &dir).unwrap();
+        assert_eq!(plan.images[0].base.as_deref(), Some("debian:12"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// `kind: .Docker` (or any word that isn't `Oci`/`Iso`) is E1266.
+    #[test]
+    fn image_unknown_kind_is_e1266() {
+        let src = "module image.server { kind: .Docker, from: packages.app }";
+        let err = evaluate_env(src, &std::env::temp_dir()).unwrap_err();
+        assert_eq!(err.code, "E1266");
+    }
+
+    /// An explicit `kind:` that disagrees with what `from:` names is E1266.
+    #[test]
+    fn image_kind_from_mismatch_is_e1266() {
+        let src = "module image.server { kind: .Iso, from: packages.app }";
+        let err = evaluate_env(src, &std::env::temp_dir()).unwrap_err();
+        assert_eq!(err.code, "E1266");
+        let rendered =
+            crate::Diagnostics::render_all("config.jet", src, std::slice::from_ref(&err));
+        assert!(rendered.contains("doesn't match"), "{rendered}");
+    }
+
+    /// An `.Oci` image's `from:` naming a `library`-kind package is E1267 —
+    /// the one diagnostic D-JPK-IMAGE1 calls out by name (`oci-from-non-
+    /// executable`): a library has no binary to containerize.
+    #[test]
+    fn oci_from_library_package_is_e1267() {
+        let dir = oci_base_dir("library-rejected");
+        std::fs::write(
+            dir.join("pkg.jet"),
+            "payload: { name: \"t\", version: \"0.1.0\" }\npackages: { app: library }\n",
+        )
+        .unwrap();
+        let src = "module image.server { from: packages.app }";
+        let err = evaluate_env(src, &dir).unwrap_err();
+        assert_eq!(err.code, "E1267");
+        let rendered =
+            crate::Diagnostics::render_all("config.jet", src, std::slice::from_ref(&err));
+        assert!(rendered.contains("declared `library`"), "{rendered}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// An `.Oci` image's `from:` naming a package `pkg.jet` never declares is
+    /// also E1267 (there's nothing to confirm as executable).
+    #[test]
+    fn oci_from_undeclared_package_is_e1267() {
+        let dir = oci_base_dir("undeclared-rejected");
+        let src = "module image.server { from: packages.ghost }";
+        let err = evaluate_env(src, &dir).unwrap_err();
+        assert_eq!(err.code, "E1267");
+        let rendered =
+            crate::Diagnostics::render_all("config.jet", src, std::slice::from_ref(&err));
+        assert!(rendered.contains("isn't declared"), "{rendered}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// `expose:` written as anything but a list of `Int` is E1269 (the OCI
+    /// field-shape catch-all).
+    #[test]
+    fn oci_expose_wrong_shape_is_e1269() {
+        let dir = oci_base_dir("expose-shape");
+        let src = r#"module image.server { from: packages.app, expose: "8080" }"#;
+        let err = evaluate_env(src, &dir).unwrap_err();
+        assert_eq!(err.code, "E1269");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// `.Oci` never reads the `.Iso`-only `format:`/`target:` fields.
+    #[test]
+    fn oci_image_rejects_iso_only_field() {
+        let dir = oci_base_dir("rejects-format");
+        let src = "module image.server { from: packages.app, format: iso }";
+        let err = evaluate_env(src, &dir).unwrap_err();
+        assert_eq!(err.code, "E0977");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// `.Iso` never reads the `.Oci`-only `expose`/`env_vars`/`files`/`base` fields.
+    #[test]
+    fn iso_image_rejects_oci_only_field() {
+        let src = "module m { system.s: { target: linux.x64 } image.i: { from: system.s, expose: [8080] } }";
+        let err = evaluate_env(src, &base_dir()).unwrap_err();
+        assert_eq!(err.code, "E0977");
+    }
+
     // ── U15: Fleet (D-JPK-FLEET1) ───────────────────────────────────────
 
     /// A fleet captures its hosts (canonical role-declaration form
@@ -662,6 +902,109 @@ module fleet.prod { hosts: { only: system.web } }
         let src = "module fleet.prod { }";
         let err = evaluate_env(src, &base_dir()).unwrap_err();
         assert_eq!(err.code, "E1245");
+    }
+
+    // ── U12: dev-supervised services (`env.<name> { services: { … } }`) ──
+
+    /// The canonical role-module form captures a `services:` map into
+    /// `DevServicePlan`s, distinct from (and alongside) ordinary scalar/
+    /// `packages:` fields — the recognized control fields (`ports`/`init`/
+    /// `ready`) come back typed, not as display-string `extra`.
+    #[test]
+    fn dev_services_are_captured_with_typed_fields() {
+        let src = r#"
+module env.dev {
+    prompt: "wordstats",
+    services: {
+        redis: { enable: true, ports: [6380], init: "redis-server --port 6380", ready: "redis-cli -p 6380 ping" },
+        worker: { enable: false },
+    }
+}
+"#;
+        let plan = evaluate_env(src, &base_dir()).unwrap();
+        assert_eq!(plan.prompt.as_deref(), Some("wordstats"));
+        assert_eq!(plan.dev_services.len(), 2);
+        let redis = &plan.dev_services[0];
+        assert_eq!(redis.name, "redis");
+        assert!(redis.enable);
+        assert_eq!(redis.ports, vec![6380]);
+        assert_eq!(redis.init.as_deref(), Some("redis-server --port 6380"));
+        assert_eq!(redis.ready.as_deref(), Some("redis-cli -p 6380 ping"));
+        assert!(redis.extra.is_empty());
+        let worker = &plan.dev_services[1];
+        assert_eq!(worker.name, "worker");
+        assert!(!worker.enable);
+    }
+
+    /// A field jetpack's dev-runtime tier doesn't recognize is captured in
+    /// `extra` (open record, U12) rather than rejected at field-check time —
+    /// `Jetpack::Services` is the one that flags it (E1262), not modeval.
+    #[test]
+    fn dev_service_unrecognized_field_lands_in_extra() {
+        let src = r#"
+module env.dev {
+    services: { redis: { enable: true, prot: 6380 } }
+}
+"#;
+        let plan = evaluate_env(src, &base_dir()).unwrap();
+        assert_eq!(
+            plan.dev_services[0].extra,
+            vec![("prot".to_string(), "6380".to_string())]
+        );
+    }
+
+    /// A dev service with no `enable` is E0975 — the exact same diagnostic
+    /// (and required-field rule) as a jetos `system.*.services` entry (U12's
+    /// `Service` is one ratified grammar either way).
+    #[test]
+    fn dev_service_without_enable_is_e0975() {
+        let src = "module env.dev { services: { redis: { ports: [6379] } } }";
+        let err = evaluate_env(src, &base_dir()).unwrap_err();
+        assert_eq!(err.code, "E0975");
+    }
+
+    /// `services:` under `env.*` never contaminates the jetos `system.*`
+    /// capture (`ServicePlan`) — they're wholly separate lists on the plan.
+    #[test]
+    fn dev_services_and_jetos_services_are_independent() {
+        let src = r#"
+module env.dev {
+    services: { redis: { enable: true } }
+}
+module system.box {
+    target: linux.x64,
+    services: { openssh: { enable: true } }
+}
+"#;
+        let plan = evaluate_env(src, &base_dir()).unwrap();
+        assert_eq!(plan.dev_services.len(), 1);
+        assert_eq!(plan.dev_services[0].name, "redis");
+        assert_eq!(plan.systems[0].services.len(), 1);
+        assert_eq!(plan.systems[0].services[0].name, "openssh");
+    }
+
+    /// I5: the committed jetpack-typed fixture is the executable spec for
+    /// U12 dev services.
+    #[test]
+    fn committed_services_example_field_checks_clean() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/jetpack-typed/services.jet");
+        let src = std::fs::read_to_string(&path).unwrap();
+        let dir = path.parent().unwrap();
+        let plan = evaluate_env(&src, dir).unwrap();
+        assert_eq!(plan.dev_services.len(), 3);
+        let redis = &plan.dev_services[0];
+        assert_eq!(redis.name, "redis");
+        assert!(redis.enable);
+        assert!(redis.init.is_none(), "redis relies on the built-in catalog");
+        let worker = &plan.dev_services[1];
+        assert_eq!(worker.name, "worker");
+        assert_eq!(worker.ports, vec![8080]);
+        assert_eq!(worker.init.as_deref(), Some("worker --port 8080"));
+        assert!(worker.ready.is_some());
+        let cache = &plan.dev_services[2];
+        assert_eq!(cache.name, "cache");
+        assert!(!cache.enable);
     }
 
     #[test]

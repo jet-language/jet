@@ -76,7 +76,7 @@ params, fields). Never `Type name`.
 
 **S17 — Compound assignment**: `+=` `-=` `*=` `/=` `%=` `&=` `|=` `^=` `<<=`
 `>>=`. Arithmetic four on Int/Float; the rest Int-only. LHS must be a mutable
-binding or `~` parameter.
+binding or `&` parameter.
 
 **D-INCR1 — Increment/decrement**: `++x`, `x++`, `--x`, `x--` on mutable
 integer lvalues; prefix yields the new value, postfix the old. Indexed slots
@@ -100,8 +100,8 @@ existing `core.args` `ArgsSpec` builder (D-ARGS1) remains the library floor
 for non-entry parsing; the typed layer generates onto it rather than adding
 a second parser.
 
-**S27 — Methods**: `self` receiver with capability sigils (`~self`, `^self`,
-`&self`; bare `self` = read). Call `value.method(args)`. Methods live in the
+**S27 — Methods**: `self` receiver with capability sigils (`^self`,
+`&self`; bare `self` = read, D-MEM1). Call `value.method(args)`. Methods live in the
 type body, in `impl Type { }`, or top-level `fn Type.method(self)`
 (**D-EXTMETH1** — `.` connector, orphan rule: same source module; `~~` retired
 → E0325). No-`self` fn in a type = static method (`Circle.unit()`).
@@ -618,7 +618,7 @@ auto-derived; `{value@Debug}` selects it; `#[Redact]` on a field renders
 bracket syntax. Built-in `[T]`/`Map` keep native paths.
 
 **D-ROLLBACK-TRAIT**: `trait Rollback { type Snapshot; fn snapshot(self) ->
-Snapshot; fn restore(self: ~Self, snap: Snapshot) }`; restore total;
+Snapshot; fn restore(&self, snap: Snapshot) }`; restore total;
 `derive Rollback` = field-wise clone impl.
 
 **D-EXT1 — Extensibility ceiling**: Tier 0/1 (methods, traits, operators on
@@ -682,33 +682,47 @@ path, not yet generated.
 
 ### Capabilities & memory
 
-**S10 / D-CAP7 — Capability sigils** *(owner-frozen; supersedes all word
-spellings)*:
+**S10 / D-CAP7 — Capability sigils, memory v5** *(owner-frozen; migration to
+D-MEM1 complete 2026-07-04)*: two sigils ship; unmarked is always read,
+enforced (no elevation, no inference tier):
 
 ```jet
-T     // infer: starts at read/view, elevates only as the body requires
-~T    // edit:  exclusive write/mutate access
-^T    // take:  ownership moved/consumed
-&T    // share: may escape the scope, be retained, cached, spawned, stored
-*T    // raw:   unsafe pointer/address (#Unsafe-gated)
+T     // read: default, enforced — never elevates
+&T    // write: exclusive write access
+^T    // take: ownership moved/consumed
 ```
 
 ```jet
-fn write(file: ~File, data: Bytes)     // read is the default → no sigil
-fn equip(player: ~Player, item: ^Item)
+fn write(file: &File, data: Bytes)     // read is the default → no sigil
+fn equip(player: &Player, item: ^Item)
 ```
 
-Call sites mirror the type — `damage(~player, 10)`, `close(^file)`,
-`cache(&texture)`; receivers carry it on self (`fn damage(~self)`,
-`fn destroy(^self)`, `fn share(&self)`). Capability sits on the type side
-(`name: ~Type`, D-CAP3). `copy x` stays a verb — no sixth sigil (D-CAP2).
-Dereference is **postfix `p.*`** (composes: `p.*.field`); prefix `*x` is
-raw-pointer-of only, `#Unsafe`-gated (D-CAP9). `mut`/`take`/`view` are not
-keywords (E0056–E0058 point at the sigils).
+Call sites mirror the type — `write(&file, data)`, `close(^file)`; receivers
+carry it on self (`fn write(&self)`, `fn destroy(^self)`, bare `self` =
+read). Capability sits on the type side (`name: &Type`, D-CAP3). `copy x`
+stays a verb — no third sigil (D-CAP2). Dereference is **postfix `p.*`**
+(composes: `p.*.field`); prefix `*x` is raw-pointer-of only, `#Unsafe`-gated
+(D-CAP9), and is not a parameter capability. `mut`/`take`/`view` are not
+keywords (E0056/E0058 point at the sigils; E0057 retired earlier by
+D-S14-PAUSE).
 
-**D-CAP8 — Unmarked default**: infer-in-bodies, freeze-at-API — an unmarked
-param elevates by usage; at a `library { api: explicit }` boundary the
-resolved capability freezes; later drift is E0912, never a silent flip.
+*History:* D-CAP7's original text (pre-2026-07-03) had a third visible
+parameter sigil `~T` (edit/mutate), a fourth `*T` in parameter position, and
+an `Infer` tier where a bare `T` param elevated by body usage. D-MEM1
+superseded all of that: unmarked is always read (no elevation, ever), `~` is
+gone from the grammar entirely (ordinary syntax error — no compat, per the
+rule at the top of this file), and `*T` never shipped further than this doc
+as a *parameter* sigil (raw-pointer access stays the separate `p.*`/`*x`
+expression mechanism, D-CAP9, untouched by the migration).
+`AccessConvention::Share`/`::Raw` remain dead enum variants in the compiler,
+inert until a future tier reactivates them.
+
+**D-CAP8 — Unmarked default (retired 2026-07-04 by D-MEM1/S2)**: originally,
+an unmarked param elevated by body usage and froze its resolved capability
+at a `library { api: explicit }` boundary (drift = E0912, see D-CAP4/5/6).
+D-MEM1 deleted elevation and the freeze tier outright: unmarked is always
+read, no inference, no `api:` manifest field (an ordinary unknown-key error,
+E1216) — see D-MEM1 below.
 
 **D-MEM1 — Memory model v5, "the borrow checker, humanized"** *(ratified
 2026-07-03, migration in progress — card #187; plan
@@ -731,13 +745,65 @@ unmarked param is a hard error (fix-it: add `&`, or `^`/copy it); L0201 is
 gone (E0209 hard error, no silent clone ever); `CapabilityFreeze`/E0912 are
 gone and the `api:` manifest field no longer exists (ordinary unknown-field
 error) — `ApiFreeze`'s snapshot mechanism remains, now unconditional pub-fn
-semver diffing (E1218/E2601), not a capability-tier freeze. S3–S9 remain
-unbuilt.
+semver diffing (E1218/E2601), not a capability-tier freeze. **S3 shipped
+(2026-07-04)**: `-> &T` returns and `&T` fields are gone from the grammar
+(ordinary syntax errors); `#Ref`/E0207/E0427 deleted outright. **S4 shipped
+(2026-07-04)**: `copy x` (D-CAP2) is the one copy verb — a real prefix-verb
+expression (`Expr::Copy`), parses on any expression, formatter round-trips
+it. `.clone()` is not user-typable Jet syntax — `clone` falls through to the
+ordinary "no such method" path (I8). `copy x` on a non-cloneable type is
+E0211; on a scalar it's legal but redundant (already `Copy`). Every fix-it
+that used to suggest `.clone()` now suggests `copy name`. **S5 shipped
+(2026-07-04)**: `[T]` slice views were already live (`View<T>`, D-DYNARRAY1,
+predates this migration — nothing to build). `String.trim()`/`.after(sep)`/
+`.before(sep)` bound to a local now return a zero-copy `&str` view instead of
+an owned `String` when sema proves it can't outlive its owner (no distinct
+Jet-level view type — `String` stays one type; view-ness lives on the binding,
+codegen-invisible to the user); escape (return/rebind/field/call-arg/any other
+method) is **E2307**. `split` stays eager (`Vec<String>`) — a view-of-views
+list needs S6-scale representation work, named as a deferred gap, not built
+here. **S6 shipped (2026-07-04)**: `Shared<T>` (D-SHARED-API1=A) is a
+lock-guarded shared handle — `Shared.new(x)` constructs (bare type-name call,
+`T` inferred from `x`); `.read(f)`/`.edit(f)` run a closure against a read- or
+write-locked view, the lock scoped to the call only; cloning is always a
+cheap handle clone (never a deep copy), so it crosses a `tasks.spawn` boundary
+with no `take`. (`Shared<T>`'s *type* predates this stage as inert signature
+plumbing over a plain `Arc<T>` — never actually constructible, see
+`tests/ownership.rs`'s pre-existing param-signature tests; S6 gives it a real
+constructor and upgrades the representation to `Arc<RwLock<T>>`.) `Pool<T>`/
+`Id<T>` (D-POOLID-API1=A) is a generational arena: `Pool<T>.new()` constructs;
+`.add(val)` inserts and returns an `Id<T>` (plain, `Copy`, comparable —
+index+generation, never touches `T`); `pool[id]` indexes for read AND write
+(including a nested `pool[id].field = v`, a genuine mutable place, not a
+value round-trip); `.ids()` snapshots every live id; `.remove(id)` removes,
+bumping the slot's generation, returning `T?` (mirrors `Map.remove`'s
+`Option` convention). A stale `Id<T>` (removed/reused slot) panics at
+runtime, mirroring the array-out-of-bounds precedent — not a new diagnostic
+code. **S7 shipped (2026-07-04, D-NOALLOC-SEM1=A)**: `policy no_alloc` is a
+bare module-level item (parses like `use`, no manifest/`pkg.jet` field — it's
+ordinary module-file syntax, nothing else reads it). The check is **local
+only**: it walks only the policy'd module's own function bodies and never
+follows a call into another function (unlike `@Pure fn`'s whole-program
+call-graph fixpoint) — a denylist of four allocation-shaped expressions,
+each **E0921**: string interpolation with a `{…}` hole (a hole-less literal
+isn't flagged); any `.push`/`.insert` call (method-name match only, no
+receiver-type check — capacity headroom isn't provable statically); a
+struct/enum literal for a type that owns heap data directly or transitively
+(`String`/`[T]`/`[K,V]`/`Shared<T>`/`Pool<T>`, walked through struct fields
+and enum variant payloads — `Id<T>` is plain `Copy` data, never flagged);
+`copy` of a heap-owning type. A bare list/map literal outside those four
+shapes (`xs := [1, 2, 3]`) is NOT checked — a deliberate, ratified-text-exact
+scope cut, not silently expanded. **S8 shipped (2026-07-04)**: docs sweep —
+diagnostics.md retired-code stubs for every deleted S1-S7 mechanism,
+spec.md's memory chapter rewritten to v5 end to end, this file's
+D-CAP7/D-CAP8/D-CAP4-5-6/D-REF-SHORTHAND1/2 supersession notes, stale
+`~`/`.clone()`/`api:` sweep across docs/reference. S9 (final verification
+gate) remains.
 
-**D-MUTSELF1 — Receiver mutation**: a `~self` method mutates in place —
+**D-MUTSELF1 — Receiver mutation**: a `&self` method mutates in place —
 `self.field = v`, compound ops, and whole-`self` reassignment all lower
 through the deref'd receiver; the same write in a read method is E0205 with a
-"write the receiver as `~self`" fix at the assignment.
+"write the receiver as `&self`" fix at the assignment.
 
 **S63 — Resource cleanup**: automatic scope-end cleanup (RAII) is the single
 story — backed by Rust `Drop`, every exit path. No `defer` keyword
@@ -754,7 +820,7 @@ borrowed view is a compile error; **D-ASYNCRT1** M:N green threads, no
 *(ratified/implemented 2026-07-04)*: `tasks.channel<T>()` returns
 `(Sender<T>, Receiver<T>)` directly — no combined "Channel" handle, no
 `.sender()` method. Destructure with the existing S74 tuple form:
-`(tx, rx) := tasks.channel<T>()`; a second sender is `tx.clone()`. A
+`(tx, rx) := tasks.channel<T>()`; a second sender is `copy tx`. A
 `Receiver<T>` is what `g.select().recv(rx)` takes.
 
 ### Effects & safety
@@ -933,24 +999,26 @@ explicit type annotation; the flow-analysis engine (E0420/E0423/E0424) is
 unchanged, only the trigger moved. The old `#Uninit buffer: [U8#4096]`
 spelling is retired: a hard parse error (E0426) teaches the new form.
 
-**D-REF-SHORTHAND1 — Stored-ref field shorthand (opt D, ratified
-2026-07-02)**: a stored-reference field spells its type `&T` — the borrow
-sigil already used at call sites — instead of a bare `T` plus a separate
-marker. The owner is *inferred* at each construction site when exactly one
-in-scope value has the referent type; two or more is ambiguous (**E0207**,
-now fired at the construction site, listing the candidates by name) and one
-in-scope value of the type is named with `#Ref(label)` to disambiguate. The
-retired `#Ref(owner) name: T` form (plain type, no `&`) is a hard teaching
-error (**E0427**) pointing at `name: &T`. `~T` fields and always-required
-labels both stay rejected.
+**D-REF-SHORTHAND1 — Stored-ref field shorthand (retired 2026-07-04 by
+D-MEM1/S3)**: originally, a stored-reference field spelled its type `&T` —
+the borrow sigil already used at call sites — instead of a bare `T` plus a
+separate marker; the owner was *inferred* at each construction site (one
+candidate → it, two or more → **E0207**), disambiguated with `#Ref(label)`
+when needed; the retired `#Ref(owner) name: T` form (plain type, no `&`) was
+a hard teaching error (**E0427**). D-MEM1/S3 deleted the whole mechanism
+outright — `&T` struct fields are not in the v5 grammar (ordinary syntax
+error), and E0207/E0427 are gone (retired stub rows in
+docs/spec/diagnostics.md). The "how do I store a reference?" answer is now
+an owned field, `Shared<T>`, or `Pool<T>`/`Id<T>` (see D-MEM1) — forward
+guidance only, this mechanism is not coming back.
 
-**D-REF-SHORTHAND2 — `#Ref(label)` disambiguator (opt A, ratified
-2026-07-02)**: the owner label stays on the `#` directive plane, spelled
-`#Ref(label)` — *not* `@Ref`. This resolves the sigil clash with
-D-MARKERMOVE1 (which lists `#Ref(Label)` among the markers that stay `#`):
-`@Ref` must **not** ship. `#Ref(label)` is only valid on a `&T` field and
-only names one of the inferred candidate owners; a label naming no candidate
-is **E2306**.
+**D-REF-SHORTHAND2 — `#Ref(label)` disambiguator (retired 2026-07-04 by
+D-MEM1/S3)**: originally the owner label stayed on the `#` directive plane,
+spelled `#Ref(label)` — *not* `@Ref`, resolving the sigil clash with
+D-MARKERMOVE1. Deleted along with D-REF-SHORTHAND1's `&T` fields; a
+`#Ref(label)` naming no candidate owner used to be **E2306** — also gone
+(retired stub row in docs/spec/diagnostics.md). `jet expand --facts refs`
+(the lens that reported these owners) is gone with it.
 
 **D-REGION1 / D-ALLOC1 / D-ALLOC2 — Arenas & regions**: regions are implicit
 and scope-inferred by default (the region is the arena binding's lexical
@@ -1089,39 +1157,65 @@ uses `py.*`. **D-JPK-EXTPROV1 (=A)**: npm/PyPI/SwiftPM become first-class
 jetpack providers resolved by `<lib>: <lang>@"ref"` — fetched into the
 hangar, vendored + hash-pinned, obeying U29 offline, U21 channels, U28
 no-daemon, U24 provenance, U23 honest fallback; hash-verified on arrival.
-**D-PLUGIN-EXPORT1 (=A)**: a `plugin` target's exported surface is the `pub`
-items of its entry module, named by the manifest `export:` field and frozen
-via the existing D-CAP4 `api: stable` machinery [STALE: D-CAP4's `api:`
-field/freeze machinery is retired by D-MEM1/S2 — `plugin` is still reserved
-(unbuilt), so re-ground this on the S2 pub-metadata semver snapshot before
-building it]; the `.wit` world is generated from those signatures — no new
-in-source keyword (I8).
-**D-PLUGIN-VERSION1 (=A)**: plugin load-time compatibility is structural —
-the D-CAP4 freeze of the exported interface is the contract; a plugin
-rebuilt with an unchanged interface still loads; mismatch is a clean E-code
-naming the interface delta, never a loader crash (I2).
+**D-PLUGIN-EXPORT1 (=A, shipped c81)**: a `plugin` target's exported surface
+is the top-level `pub fn` items of its entry file, all-`Int` or all-`Float`
+(E1260) in v1, named by the manifest `export:` field (defaults to the package
+name) and frozen via `Sema::ApiFreeze`'s pub-metadata semver snapshot
+(re-grounded off the retired D-CAP4 `api: stable` machinery, which D-MEM1/S2
+deleted — same intent, the still-live mechanism); the `.wit` world is
+generated from those signatures — no new in-source keyword (I8).
+**D-PLUGIN-VERSION1 (=A, shipped c81)**: plugin load-time compatibility is
+structural — the `ApiFreeze` snapshot of the exported interface (keyed
+`plugin__<export>` in `.jet/cache/api/`, diffed at the plugin's own build
+time) is the contract; a plugin rebuilt with an unchanged interface still
+loads; an incompatible change is E1257, naming the interface delta, never a
+loader crash (I2).
 
 **D-DEP1 — Dependency law**: the compiler stays zero-external-crate (I6).
 Any crate-backed capability ships as a Jet package wrapping the crate via
 `extern rust`, source vendored + hash-pinned (D-BFS1). Owner-sanctioned
 bootstrap wraps (all carry a native-ize obligation): `regex` (D-REGEX1,
-`core.regex`), rustls (`core.tls`, D-NET1/D-HTTPLIB4 — embedded webpki
-roots, no system TLS), zip/tar/flate2 (`core.archive`, D-DEP-ARCHIVE1),
+`core.regex`), rustls bridge (D-NET1/D-HTTPLIB4; `core.http` client default
+HTTPS via rustls + system roots, D-TLS1=A; `core.tls` reserved for advanced
+client TLS config), zip/tar/flate2 (`core.archive`, D-DEP-ARCHIVE1),
 rusqlite-bundled (`core.db`, D-DEP-DB1), ureq/hyper/tungstenite
 (`core.http`, D-NETDEP1/D-HTTPLIB3), Cranelift (`jet-jit`, D-JITDEP1),
 wasmtime (plugins, D-DEP-WASM1), age-style crypto bridge
 (D-JPK-SECRETCRYPTO1). `jet repl` stays std-only (D-REPL18). Raylib ships as
-first-party `core.raylib` bridge package (D-RAYLIB1). npm interop = typed
-first-party stub packages, no `.d.ts` parsing (D-NPMTYPE1); Swift interop
-waits on native-UI/C-ABI work (D-JSWIFTFFI1).
+first-party `core.raylib` bridge package (D-RAYLIB1); `core.game` is the
+scene-first game engine layered above it (D-GAME1=B, D-GAME2=A, D-GAME3=C).
+npm interop = typed first-party stub packages, no `.d.ts` parsing
+(D-NPMTYPE1); Swift interop waits on native-UI/C-ABI work (D-JSWIFTFFI1).
 
 ### Core library
 
 **S9 — Print**: `print` (adds newline).
 
-**S51 — Core library**: exported as the `core` module — `use core.fs`,
+**S51 — Core library**: exported as the `core` module — `use core.files`,
 `use core.io as io`; dot paths select submodules; never quoted paths. `core`
 is compiler-reserved (see D-CORENS1).
+
+**D-GAME1 / D-GAME2 / D-GAME3 — Game stack** *(ratified 2026-07-05/06,
+card #212)*: Jet ships a first-party game stack: public primitives plus a
+batteries engine. The engine name is `core.game` (D-GAME2=A). The beginner
+API is scene-first with a frame hook (D-GAME3=C): a `Scene` owns sprites,
+shapes, sounds, camera, and input bindings as durable editable data, and
+`scene.on_frame((frame) => { ... })` attaches small game logic to that scene.
+The frame hook is not a second engine model; it is script on the scene. The
+already-ratified `core.raylib` bridge package (D-RAYLIB1=A) remains the
+interim compatibility floor beneath the native-shaped stack.
+
+**D-FILES-WRITE1 — `core.fs`/`core.files` merge** *(ratified/shipped
+2026-07-04, cv5syntaxdecrees)*: one `core.files` module for both whole-file
+convenience helpers (`read`/`read_bytes`/`write`/`append_all`/`exists`/
+`remove`/`list_dir`/`create_dir`/`is_dir`/`copy`/`rename`) and streaming
+handle constructors (`open`/`create`/`append` → `FileReader`/`FileWriter`,
+D-IO2); `core.fs` no longer exists (greenfield — `use core.fs` is an ordinary
+unknown-module error). Blocked on ballot **D-FILES-APPEND1 = A**: the merge
+collided the whole-file one-shot `append(path, text)` with the streaming
+handle's `.append(text)` method on the same name/module. Resolution: the
+whole-file function is renamed `append_all(path, text)`; the streaming
+handle's `.append(…)` is untouched.
 
 **Serde & encoding** *(D-SERDE1–12, D-ENC1, D-JSONVERB1, D-SERDE-ACCESS,
 D-ENC-YAML1)*: one format-agnostic data model. `@Codable` (≡
@@ -1166,9 +1260,12 @@ v4/v7 (D-UUIDENC1).
 `Matrix<M,N>` substrate (const-generic substrate unbuilt) (D-MATHLIB1,
 D-LINALG1). `core.db`: backend-neutral `Driver` trait, parameterized-only
 API, SQLite first; explicit `.begin/.commit/.rollback` distinct from
-`#Transact` (D-DBDRIVER1). `core.http`: client+server submodules; server is
+`#Transact` (D-DBDRIVER1). `core.http`: client+server submodules; client
+supports HTTPS by default via rustls + system roots (D-TLS1=A); server is
 plain `fn(req: Request) -> Response` on a `mux` (`mux.get("/path", handler)`,
-`req.params["id"]`, `http.serve(addr, mux)?`); HTTP/1.1+2+WebSocket
+`req.params["id"]`, `Server.serve(addr, mux)?`) with HTTPS enabled by the named
+option `Server.serve(addr, mux, tls: Server.tls(cert, key))` (D-TLSSERVE1=A);
+HTTP/1.1+2+WebSocket
 (D-HTTPLIB1–3, D-ROUTE1; unbuilt — c164). Compression
 `core.compress.{gzip,zstd}` (D-CODECS1). Measurement-with-uncertainty in
 `core.science.measurement` (D-HONESTNUM1, unbuilt). Opt-in `Gc<T>` module
@@ -1339,10 +1436,15 @@ Bare keyword or block (`executable { entry: "src/cli.jet" }`); bare
 omitted targets infer from `fn run()` (executable else library; two entries
 E_DUPMAIN).
 
-**D-CAP4/5/6 + c129 — API freeze**: `library { api: stable | explicit }`;
-inference is the default forever. `jet publish` freezes public capability
-signatures into `.jet/cache/api/<package>.api`; drift is E0912; digest folds
-into the lock fingerprint.
+**D-CAP4/5/6 + c129 — API freeze (retired 2026-07-04 by D-MEM1/S2)**:
+originally, `library { api: stable | explicit }` froze public capability
+signatures into `.jet/cache/api/<package>.api` at `jet publish`, drift was
+E0912, digest folded into the lock fingerprint. D-MEM1/S2 deleted the
+mechanism outright: the `api:` field no longer exists (an ordinary
+unknown-key error, E1216, like any typo'd key); `ApiFreeze`'s snapshot
+machinery survives, re-grounded as unconditional pub-fn semver diffing
+(E1218/E2601) — same intent (breaking-change detection at publish), no
+capability-tier freeze.
 
 **Publishing & supply chain**: `jet publish` (version from `pkg.jet`;
 refuses dirty tree/failing tests, `--allow-dirty`; errors E1219+)
@@ -1391,8 +1493,11 @@ migrations. Runtime semantics: spec.md "Runtime migration chain".
 **D-EXPANDCLI1 (=A, ratified 2026-07-03, c183expand)**: the transparency
 command is `jet expand --facts <lens> <file>`; bare `jet expand <file>`
 runs every lens, grouped (magic default). Lens floor: `inline`
-(D-METHODMACRO1), `refs` (D-REF-SHORTHAND1); other ratified surfaces add
-lenses under the same flag, never new commands (I8).
+(D-METHODMACRO1); other ratified surfaces add lenses under the same flag,
+never new commands (I8). A `refs` lens (D-REF-SHORTHAND1) shipped alongside
+`inline` at c183expand; D-MEM1/S3 deleted it along with the `&T`
+stored-ref-field mechanism it reported on (`--facts refs` is an
+unknown-lens usage error today).
 
 **Jetpack engine** *(D-JPK1/2/5/9/16, D-JPK-ADAPTER1, D-JPK-GC1,
 D-JPK-NONIX1, D-JPK-CACHE1, D-JPK-PLATFORM1, D-JPK-NODAEMON1,
@@ -1448,8 +1553,22 @@ never a string), `packages`, `services`, `options`.
 bare, free-form strings quoted. **D-OS4**: priorities are a map
 `[default: x, force: y]`; bare assignment = `default`.
 
-**U14 — `Image`**: `from: system.<name>` + `format: iso|qcow|raw`; inherits
-everything from its System (explicit `target:` only for cross-compiling).
+**U14 — `Image`**: two referents for `from:`, picked by an optional `kind:`
+(a leading-dot value, inferred from `from:` when omitted). `.Iso`:
+`from: system.<name>` + `format: iso|qcow|raw`; inherits everything from its
+System (explicit `target:` only for cross-compiling) — rides the jetos
+installer tier (Phase D, owner-gated). `.Oci` (**D-JPK-IMAGE1=A, ratified
+2026-07-01, c9jetpackgates**): `from: packages.<name>` (a package this
+project's `pkg.jet` declares `executable`) + `expose: [Int]` + `env_vars:
+[KEY: "value"]` (map keys must be quoted strings — no bare-ident sugar) +
+`files: [String]` (extra project-relative paths layered in) + `base:
+oci("<ref>")` (a base-image escape hatch, captured but not yet realized — no
+native registry-pull client exists). Built natively now (`jet image <name>`,
+no jetos/Phase D gate): a deterministic OCI layout (`oci-layout`/`index.json`/
+`blobs/sha256/<digest>`) with an uncompressed tar layer (no gzip — the
+`core.archive` flate2 bridge lives in a workspace-excluded crate compiled only
+into generated user programs, not into `jetpack` itself, I6). `--push` is
+honestly gated on TLS (E1268), never a fake push.
 
 **U15 — Verbs**: whole-machine management is `jetpack os switch|build`.
 
@@ -1485,6 +1604,13 @@ discovery. **D-REF3**: borrowed-return + cleanup-scope inlay hints on by
 default. **D-JPK-DISCOVER1**: `jet search`/`jet info` + LSP completions from
 a local offline index. **D-JPK-BUILDDBG1**: failed builds keep the scratch
 dir; `--shell-on-fail`; `jet explain <ref>`; `jet logs <pkg>`.
+
+**D-HL1**: highlighting is generated lexical base plus semantic overlay.
+`Syntax.rs` owns all user-typeable tokens; `jet devtools grammars` regenerates
+VS Code/TextMate, tree-sitter, and Zed generated sections, and
+`tests/grammar.rs` fails on drift. LSP semantic tokens refine live editors for
+ownership (`copy`, `^`, `&`) and markers; retired/foreign spellings are not
+colored as live syntax.
 
 **D-RECONCILE-SCOPE1 / D-CANON-SOURCE1**: syntax reconciliation is a strict
 repo-wide purge of stale spellings; canonical truth is `Syntax.rs` + this

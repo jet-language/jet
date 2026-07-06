@@ -30,7 +30,7 @@
 //! pipeline).
 
 use super::*;
-use crate::AST::{Binding, Expr, Func, ForKind, Param, Stmt, Type, TypeParam};
+use crate::AST::{Binding, Expr, ForKind, Func, Param, Stmt, Type, TypeParam};
 
 /// D-ANY-JAI1: the per-arity specialized Rust-function name shared by the
 /// call-site router (`lower_variadic_bound_call`, below) and the
@@ -74,7 +74,9 @@ pub(crate) fn lower_variadic_bound_call(
             // type param (by value, no coercion) — `None` makes
             // `lower_one_call_arg` fall straight through to a plain `lower_expr`.
             let conv = if i < fixed {
-                sig.as_ref().and_then(|ps| ps.get(i)).map(|(c, t)| (*c, t.clone()))
+                sig.as_ref()
+                    .and_then(|ps| ps.get(i))
+                    .map(|(c, t)| (*c, t.clone()))
             } else {
                 None
             };
@@ -208,6 +210,7 @@ fn unroll_variadic_body(stmts: &[Stmt], target: &str, arity: usize) -> Result<Ve
                         ct: None,
                         uninit: false,
                         arena_view: false,
+                        string_view: false,
                     }));
                     out.extend(body.clone());
                 }
@@ -263,7 +266,9 @@ fn stmt_references_ident(s: &Stmt, name: &str) -> bool {
                 ForKind::Range { start, end, step } => {
                     expr_references_ident(start, name)
                         || expr_references_ident(end, name)
-                        || step.as_ref().is_some_and(|s| expr_references_ident(s, name))
+                        || step
+                            .as_ref()
+                            .is_some_and(|s| expr_references_ident(s, name))
                 }
                 ForKind::In { collection } => expr_references_ident(collection, name),
             };
@@ -320,14 +325,18 @@ fn expr_references_ident(e: &Expr, name: &str) -> bool {
                 || args.iter().any(|a| expr_references_ident(&a.expr, name))
         }
         Expr::FanOut { callee, items, .. } => {
-            expr_references_ident(callee, name) || items.iter().any(|i| expr_references_ident(i, name))
+            expr_references_ident(callee, name)
+                || items.iter().any(|i| expr_references_ident(i, name))
         }
-        Expr::Binary(_, l, r, _) => expr_references_ident(l, name) || expr_references_ident(r, name),
+        Expr::Binary(_, l, r, _) => {
+            expr_references_ident(l, name) || expr_references_ident(r, name)
+        }
         Expr::Unary(_, inner, _)
         | Expr::IncDec { operand: inner, .. }
         | Expr::Field(inner, _, _)
         | Expr::Deref(inner, _)
         | Expr::RawOf(inner, _)
+        | Expr::Copy(inner, _)
         | Expr::Tainted(inner, _)
         | Expr::Present(inner, _)
         | Expr::Ok(inner, _)
@@ -337,7 +346,9 @@ fn expr_references_ident(e: &Expr, name: &str) -> bool {
         Expr::Index { base, index, .. } => {
             expr_references_ident(base, name) || expr_references_ident(index, name)
         }
-        Expr::Slice { base, start, end, .. } => {
+        Expr::Slice {
+            base, start, end, ..
+        } => {
             expr_references_ident(base, name)
                 || expr_references_ident(start, name)
                 || expr_references_ident(end, name)
@@ -346,9 +357,9 @@ fn expr_references_ident(e: &Expr, name: &str) -> bool {
         Expr::MapLit(pairs, _) => pairs
             .iter()
             .any(|(k, v)| expr_references_ident(k, name) || expr_references_ident(v, name)),
-        Expr::StructLit { fields, .. } => {
-            fields.iter().any(|(_, _, v)| expr_references_ident(v, name))
-        }
+        Expr::StructLit { fields, .. } => fields
+            .iter()
+            .any(|(_, _, v)| expr_references_ident(v, name)),
         Expr::TupleLit(fields, _, _) => fields.iter().any(|(_, v)| expr_references_ident(v, name)),
         Expr::EnumLit { args, .. } => args.iter().any(|a| {
             let e = match a {

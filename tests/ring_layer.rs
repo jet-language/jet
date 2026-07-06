@@ -74,7 +74,7 @@ fn fs_import_infers_std_layer() {
     )
     .unwrap();
     let main = r#"
-use core.fs as fs
+use core.files as fs
 
 fn run() {
     print("ok")
@@ -104,7 +104,7 @@ fn ceiling_blocks_std_import() {
     )
     .unwrap();
     let main = r#"
-use core.fs as fs
+use core.files as fs
 
 fn run() {
     print("ok")
@@ -227,14 +227,17 @@ fn lock_roundtrip_layer_metadata() {
         inferred_layer: Some(jet::Syntax::RuntimeLayer::Std),
         effects: vec![],
         effect_grants: vec![],
-        envelope: None,    };
+        envelope: None,
+    };
     let lock = LockFile {
         version: 1,
         packages: vec![pkg],
         root_dependencies: vec![],
         workspace_members: vec![],
         comptime_inputs: vec![],
-        toolchains: Vec::new(),    };
+        toolchains: Vec::new(),
+        source_channels: Vec::new(),
+    };
     let raw = jet::Lock::write(&lock);
     let parsed = jet::Lock::parse(&raw).unwrap();
     assert_eq!(

@@ -69,6 +69,16 @@ code is yours, under whatever license you choose for your project. Using Jet to
 build a program imposes no copyleft, attribution, or other term on that
 program's output beyond what your own dependencies require.
 
+## TLS security gate (D-TLS1)
+
+D-TLS1 makes `https://` work by default for the client path
+(`core.net.fetch` and `core.http.client`) through the rustls bridge and system
+certificate roots. A native Jet TLS implementation may replace rustls as the
+default only after an external security audit and an interop battery against
+rustls and OpenSSL test vectors. Advanced client configuration lives under
+`core.tls`; server TLS is the D-TLSSERVE1 named option
+`Server.serve(addr, mux, tls: Server.tls(cert, key))`.
+
 ## `jet --version` contract (E2-D1)
 
 `jet --version` prints, deterministically (golden-tested in `tests/release_gates.rs`):

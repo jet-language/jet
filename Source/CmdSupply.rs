@@ -391,7 +391,10 @@ fn publish_index_hashes(root: &std::path::Path, name: &str) -> (String, String) 
             .find(|p| p.name == name || matches!(p.source, jet::Lock::LockSource::Root))
         {
             if !pkg.fingerprint.is_empty() {
-                return (pkg.content_hash.clone().unwrap_or_default(), pkg.fingerprint.clone());
+                return (
+                    pkg.content_hash.clone().unwrap_or_default(),
+                    pkg.fingerprint.clone(),
+                );
             }
         }
     }
@@ -451,7 +454,11 @@ pub(crate) fn run_key_backup(dest: Option<&str>, registry: Option<&str>) {
             );
         }
         Err(e) => {
-            eprintln!("error: couldn't copy the signing key to {}: {}", dest.display(), e);
+            eprintln!(
+                "error: couldn't copy the signing key to {}: {}",
+                dest.display(),
+                e
+            );
             exit(ExitCodes::USER_ERROR);
         }
     }

@@ -20,15 +20,27 @@ pub fn compile_bundle_path_opts(
     web_target: bool,
     cross_target: Option<&str>,
 ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
-    compile_bundle_path_opts_dbg(
+    compile_bundle_path_opts_full(
         file,
         mode,
         freestanding,
         allow_impure,
         web_target,
         false,
+        false,
         cross_target,
     )
+}
+
+/// Like `compile_bundle_path_opts`, but for `jet build --target=plugin`
+/// (D-PLUGIN1=B / D-DEP-WASM1=A, c81): also emits the guest `.wit` + wasm32
+/// Rust artifacts (`Codegen::emit_plugin`).
+pub fn compile_bundle_path_opts_plugin(
+    file: &str,
+    mode: crate::Sema::CompileMode,
+    cross_target: Option<&str>,
+) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
+    compile_bundle_path_opts_full(file, mode, false, false, false, true, false, cross_target)
 }
 
 /// Like `compile_bundle_path_opts`, but `debug_linemap = true` routes codegen
@@ -42,6 +54,32 @@ pub fn compile_bundle_path_opts_dbg(
     freestanding: bool,
     allow_impure: bool,
     web_target: bool,
+    debug_linemap: bool,
+    cross_target: Option<&str>,
+) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
+    compile_bundle_path_opts_full(
+        file,
+        mode,
+        freestanding,
+        allow_impure,
+        web_target,
+        false,
+        debug_linemap,
+        cross_target,
+    )
+}
+
+/// The real implementation behind every `compile_bundle_path_opts*` facade —
+/// see `compile_bundle_path_opts` (native) / `compile_bundle_path_opts_dbg`
+/// (native debug) / `compile_bundle_path_opts_plugin` (c81 plugin guest) for
+/// the public entry points.
+fn compile_bundle_path_opts_full(
+    file: &str,
+    mode: crate::Sema::CompileMode,
+    freestanding: bool,
+    allow_impure: bool,
+    web_target: bool,
+    plugin_target: bool,
     debug_linemap: bool,
     cross_target: Option<&str>,
 ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
@@ -79,7 +117,10 @@ pub fn compile_bundle_path_opts_dbg(
     // before U11's L0203, so the gap went unnoticed).
     let mut errors = Vec::new();
     let mut lints = Vec::new();
-    for d in std::mem::take(&mut bundle.parse_teaching).into_iter().chain(diags) {
+    for d in std::mem::take(&mut bundle.parse_teaching)
+        .into_iter()
+        .chain(diags)
+    {
         match d.severity {
             Severity::Error => errors.push(d),
             Severity::Lint => lints.push(d),
@@ -98,6 +139,24 @@ pub fn compile_bundle_path_opts_dbg(
     let rust = crate::Codegen::emit_bundle_dbg(&bundle, ffi.as_ref(), debug_linemap, active_os);
     let web = if web_target {
         Some(crate::Codegen::emit_web(&bundle, mode, ffi.as_ref()))
+    } else {
+        None
+    };
+    // D-PLUGIN1=B / D-DEP-WASM1=A / D-PLUGIN-EXPORT1=A (c81): the guest side of
+    // a `target: plugin` build — a `.wit` world + wasm32 guest Rust, generated
+    // from the entry module's exportable (`Int`/`Float`-only) `pub fn`s.
+    let plugin = if plugin_target {
+        // E1260: every `pub fn` in the entry module must be exportable —
+        // never a silent skip (I3/I4).
+        let surface_errors = crate::Jetpack::PluginExport::validate_export_surface(&bundle);
+        if !surface_errors.is_empty() {
+            return Err(surface_errors);
+        }
+        let export_name = crate::Jetpack::PluginExport::resolve_export_name(&bundle);
+        // D-PLUGIN-VERSION1=A: freeze/diff the exported interface (E1257 on an
+        // incompatible change) before handing artifacts to the wasm build step.
+        crate::Jetpack::PluginExport::check_and_freeze_version(&bundle, &export_name)?;
+        Some(crate::Codegen::emit_plugin(&bundle, &rust, &export_name))
     } else {
         None
     };
@@ -133,6 +192,7 @@ pub fn compile_bundle_path_opts_dbg(
         comptime_inputs,
         web,
         web_partition_report: bundle.web_partition_report.clone(),
+        plugin,
         inferred_layer: bundle.inferred_layer,
         layer_ceiling: bundle.layer_ceiling,
     })
@@ -162,6 +222,7 @@ pub fn compile_src(
             web_target_ceiling: prog.web_target_ceiling,
             pub_file: prog.pub_file,
             html_path: prog.html_path.clone(),
+            no_alloc_policy: prog.no_alloc_policy,
         }],
         parse_teaching: Vec::new(),
         used_core: std::collections::HashSet::new(),
@@ -215,6 +276,7 @@ pub fn compile_src(
         comptime_inputs,
         web: None,
         web_partition_report: bundle.web_partition_report.clone(),
+        plugin: None,
         inferred_layer: bundle.inferred_layer,
         layer_ceiling: bundle.layer_ceiling,
     })
@@ -286,6 +348,7 @@ pub fn check_eval(src: &str, file: &str) -> Vec<Diagnostic> {
             web_target_ceiling: prog.web_target_ceiling,
             pub_file: prog.pub_file,
             html_path: prog.html_path.clone(),
+            no_alloc_policy: prog.no_alloc_policy,
         }],
         parse_teaching: Vec::new(),
         used_core: std::collections::HashSet::new(),
@@ -362,7 +425,10 @@ pub fn compile_bundle_path_with_entry(
     // `compile_bundle_path_opts_dbg` — `parse_teaching` rides along here too.
     let mut errors = Vec::new();
     let mut lints = Vec::new();
-    for d in std::mem::take(&mut bundle.parse_teaching).into_iter().chain(diags) {
+    for d in std::mem::take(&mut bundle.parse_teaching)
+        .into_iter()
+        .chain(diags)
+    {
         match d.severity {
             Severity::Error => errors.push(d),
             Severity::Lint => lints.push(d),
@@ -397,6 +463,7 @@ pub fn compile_bundle_path_with_entry(
         comptime_inputs,
         web: None,
         web_partition_report: bundle.web_partition_report.clone(),
+        plugin: None,
         inferred_layer: bundle.inferred_layer,
         layer_ceiling: bundle.layer_ceiling,
     })

@@ -32,8 +32,8 @@ use CmdCompile::{
     run_test_cov,
 };
 use CmdDevTools::{
-    run_bench, run_bind, run_completions, run_dev, run_doctor, run_emit_rust, run_eval,
-    run_explain, run_lint_a11y, run_repl, run_serve, watch_policy_from, WatchPolicy,
+    run_bench, run_bind, run_completions, run_dev, run_devtools, run_doctor, run_emit_rust,
+    run_eval, run_explain, run_lint_a11y, run_repl, run_serve, watch_policy_from, WatchPolicy,
 };
 use CmdDevWeb::run_dev_web;
 use CmdExpand::run_expand;
@@ -44,7 +44,9 @@ use CmdPkg::{
 };
 use CmdSchema::run_schema;
 use CmdSemIndex::run_semindex;
-use CmdSupply::{run_audit, run_key_backup, run_keygen, run_publish, run_sbom, run_vendor, run_yank};
+use CmdSupply::{
+    run_audit, run_key_backup, run_keygen, run_publish, run_sbom, run_vendor, run_yank,
+};
 
 /// How diagnostics should be presented this run, resolved once from flags +
 /// environment and threaded through the diagnostic-printing helpers.
@@ -377,10 +379,14 @@ package management (M12.1):
   {bin} fetch --locked              verify lock only, no network
   {bin} update                      refresh @latest / branch selectors
   {bin} update <dep>                update one moving selector
+  {bin} outdated                    report Jetpack channel refs with newer locks available
+  {bin} search <query>              search local offline Jetpack package index
+  {bin} info <source>.<package>     show local offline Jetpack package metadata
+  {bin} logs <pkg>                  show latest Jetpack build logs
   {bin} store verify                re-check all store entry hashes
   {bin} store generations           list recorded store generations (D-PURE3)
   {bin} store rollback <gen>        roll back to a prior generation (D-PURE3)
-  {bin} gc                          remove unreferenced store entries
+  {bin} clean                       optimize and collect stale Jetpack hangar entries
 
 supply chain (E2-M8):
   {bin} publish                     publish the current package to the registry
@@ -426,6 +432,86 @@ fn looks_like_jet_source(arg: &str) -> bool {
         return path.is_file() || path.is_dir();
     }
     Path::new(&format!("{}.{}", arg, jet::Syntax::FILE_EXT)).exists()
+}
+
+/// U16 (D-JPK-BRIDGE1=A): `nix run nixpkgs#fastfetch` parity.
+///
+/// Top-level `jet run nixpkgs:tool` is not a Jet source compile; it is the
+/// package-engine path, with the ratified `<source>:<package>` CLI spelling. Lower it
+/// to `jetpack run nixpkgs:tool -- tool`, preserving the offline fixture flags
+/// used by the same provider path and forwarding user args after `--`.
+fn dispatch_nixpkgs_run(raw: &[String], target: &str, sep: Option<usize>) -> Option<i32> {
+    let (source, package) = target.split_once(jet::Syntax::REF_SEPARATOR)?;
+    if source != jet::Syntax::REF_SOURCE_NIXPKGS || package.is_empty() {
+        return None;
+    }
+
+    let before_sep = sep.map_or(raw, |i| &raw[..i]);
+    let mut fwd = vec![
+        "run".to_string(),
+        format!(
+            "{}{}{}",
+            jet::Syntax::REF_SOURCE_NIXPKGS,
+            jet::Syntax::REF_SEPARATOR,
+            package
+        ),
+    ];
+    let mut command_args = Vec::new();
+    let mut saw_run = false;
+    let mut saw_target = false;
+    let mut i = 0usize;
+    while i < before_sep.len() {
+        let a = &before_sep[i];
+        if !saw_run && a == "run" {
+            saw_run = true;
+            i += 1;
+            continue;
+        }
+        if !saw_target && a == target {
+            saw_target = true;
+            i += 1;
+            continue;
+        }
+        match a.as_str() {
+            "--no-color" | "--offline" => fwd.push(a.clone()),
+            "--fixtures" => {
+                fwd.push(a.clone());
+                if let Some(value) = before_sep.get(i + 1) {
+                    fwd.push(value.clone());
+                    i += 1;
+                }
+            }
+            "--color=never" => fwd.push("--no-color".to_string()),
+            s if s.starts_with("--") => {
+                eprintln!(
+                    "Error [E2102]: `{}` isn't a flag `jet run nixpkgs:…` understands",
+                    s
+                );
+                eprintln!(
+                    " Why: this form forwards only package-run flags before `--`; tool arguments go after `--`"
+                );
+                eprintln!(
+                    " Fix: write `jet run nixpkgs:{} -- {}` to pass it to the tool.",
+                    package, s
+                );
+                return Some(ExitCodes::USAGE);
+            }
+            other => command_args.push(other.to_string()),
+        }
+        i += 1;
+    }
+
+    fwd.push("--".to_string());
+    fwd.push(package.to_string());
+    fwd.extend(command_args);
+    if let Some(i) = sep {
+        fwd.extend(raw[i + 1..].iter().cloned());
+    }
+    Some(EngineDispatch::dispatch(
+        jet::Syntax::JETPACK_BINARY_NAME,
+        "run",
+        &fwd,
+    ))
 }
 
 /// The bare-`jet` greeting (D-DX): friendly, exit 0, not a usage error.
@@ -665,10 +751,18 @@ fn main() {
                 | "completions"
                 | "man"
                 | "dev"
+                | "devtools"
                 | "serve"
                 | "debug"
                 | "push"
                 | "bridge"
+                | "services"
+                | "image"
+                | "outdated"
+                | "search"
+                | "info"
+                | "logs"
+                | "clean"
                 | "publish"
                 | "yank"
                 | "keygen"
@@ -731,6 +825,14 @@ fn main() {
         unknown_subcommand(cmd);
     }
 
+    if cmd == "run" {
+        if let Some(target) = args.get(1).map(|s| s.as_str()) {
+            if let Some(code) = dispatch_nixpkgs_run(&raw, target, passthrough_sep) {
+                exit(code);
+            }
+        }
+    }
+
     // D-JPK-TOOLCHAIN1=A (#179): a version-pinned project hands off to its
     // pinned `jet` toolchain before any manifest-driven verb runs. A running
     // `jet` in the pinned channel runs natively; a genuine version mismatch
@@ -746,9 +848,12 @@ fn main() {
         cmd,
         "env"
             | "dev"
+            | "devtools"
             | "serve"
             | "push"
             | "bridge"
+            | "services"
+            | "image"
             | "add"
             | "remove"
             | "bind"
@@ -756,6 +861,12 @@ fn main() {
             | "store"
             | "config"
             | "update"
+            | "outdated"
+            | "search"
+            | "info"
+            | "explain"
+            | "logs"
+            | "clean"
             | "fetch"
             | "publish"
             | "yank"
@@ -790,6 +901,11 @@ fn main() {
             run_completions(args.get(1).map(|s| s.as_str()));
             return;
         }
+        "devtools" => {
+            let devtool_args: Vec<&String> = args.iter().skip(1).copied().collect();
+            run_devtools(&devtool_args);
+            return;
+        }
         "man" => {
             print!("{}", jet::CLI::man_page(env!("CARGO_PKG_VERSION")));
             return;
@@ -804,7 +920,15 @@ fn main() {
         }
         "explain" => {
             let code = args.get(1).map(|s| s.as_str());
-            run_explain(code, mode);
+            if code.map(is_diagnostic_code).unwrap_or(true) {
+                run_explain(code, mode);
+            } else {
+                exit(EngineDispatch::dispatch(
+                    jet::Syntax::JETPACK_BINARY_NAME,
+                    "explain",
+                    &raw,
+                ));
+            }
             return;
         }
         "fetch" => {
@@ -972,6 +1096,28 @@ fn main() {
                 &raw,
             ));
         }
+        "services" => {
+            // U12 (card c9jetpackgates): `jet services up/down/health/logs`
+            // supervises the project's dev `services:` processes. D-JPK-
+            // DISPATCH1=B: dispatched to the jetpack engine exactly like
+            // `push`/`bridge`/`config`, never linked in-process.
+            exit(EngineDispatch::dispatch(
+                jet::Syntax::JETPACK_BINARY_NAME,
+                "services",
+                &raw,
+            ));
+        }
+        "image" => {
+            // U14 (D-JPK-IMAGE1=A, card c9jetpackgates): `jet image <name>`
+            // builds a declared `.Oci` image into a native OCI layout.
+            // D-JPK-DISPATCH1=B: dispatched to the jetpack engine exactly
+            // like `push`/`bridge`/`services`, never linked in-process.
+            exit(EngineDispatch::dispatch(
+                jet::Syntax::JETPACK_BINARY_NAME,
+                "image",
+                &raw,
+            ));
+        }
         "config" => {
             // U19: `jet config trust add/list/remove` manages the env/dev
             // trust store. D-JPK-DISPATCH1=B: dispatched to jetpack, which
@@ -979,6 +1125,50 @@ fn main() {
             exit(EngineDispatch::dispatch(
                 jet::Syntax::JETPACK_BINARY_NAME,
                 "config",
+                &raw,
+            ));
+        }
+        "outdated" => {
+            // U21 (D-JPK-CHANNEL1=A): channel freshness is owned by Jetpack's
+            // lock/source resolver. `jet outdated` is a read-only front door.
+            exit(EngineDispatch::dispatch(
+                jet::Syntax::JETPACK_BINARY_NAME,
+                "outdated",
+                &raw,
+            ));
+        }
+        "search" => {
+            // U26 (D-JPK-DISCOVER1=A): package discovery is owned by Jetpack's
+            // local/offline index. The compiler front door only dispatches.
+            exit(EngineDispatch::dispatch(
+                jet::Syntax::JETPACK_BINARY_NAME,
+                "search",
+                &raw,
+            ));
+        }
+        "info" => {
+            // U26: same local/offline discovery surface as `jet search`.
+            exit(EngineDispatch::dispatch(
+                jet::Syntax::JETPACK_BINARY_NAME,
+                "info",
+                &raw,
+            ));
+        }
+        "logs" => {
+            // U27 (D-JPK-BUILDDBG1=A): persisted build logs live in Jetpack.
+            exit(EngineDispatch::dispatch(
+                jet::Syntax::JETPACK_BINARY_NAME,
+                "logs",
+                &raw,
+            ));
+        }
+        "clean" => {
+            // U22 (D-JPK-GC1=B): hangar disk lifecycle belongs to Jetpack.
+            // Top-level `jet clean` is the user-facing spelling; old gc docs
+            // were retired with the same decision.
+            exit(EngineDispatch::dispatch(
+                jet::Syntax::JETPACK_BINARY_NAME,
+                "clean",
                 &raw,
             ));
         }
@@ -1480,6 +1670,13 @@ fn run_upgrade() {
     println!("  https://github.com/jet-lang/jet/releases");
 }
 
+fn is_diagnostic_code(s: &str) -> bool {
+    let mut chars = s.chars();
+    matches!(chars.next(), Some('E' | 'L'))
+        && chars.clone().next().is_some()
+        && chars.all(|c| c.is_ascii_digit())
+}
+
 /// Print front-end problems in the active output mode, with the trailing
 /// "N problems found" count and (in human mode) one quiet `jet explain`
 /// pointer naming the first code. Suppressed entirely in `--json`, where the
@@ -1554,7 +1751,11 @@ fn maybe_dispatch_pinned_toolchain(raw: &[String]) {
                 .env(jet::Syntax::TOOLCHAIN_EXEC_MARKER_ENV, &version)
                 .status()
                 .unwrap_or_else(|e| {
-                    eprintln!("error: couldn't exec the pinned toolchain `{}`: {}", binary.display(), e);
+                    eprintln!(
+                        "error: couldn't exec the pinned toolchain `{}`: {}",
+                        binary.display(),
+                        e
+                    );
                     exit(ExitCodes::USER_ERROR);
                 });
             exit(status.code().unwrap_or(ExitCodes::USER_ERROR));

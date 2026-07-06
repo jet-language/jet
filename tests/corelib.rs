@@ -88,7 +88,7 @@ fn canonical_core_import_resolves() {
     let out = compile_temp(
         "core_imports.jet",
         r#"
-use core.fs as fs
+use core.files as fs
 
 fn run() {
     print(fs.exists("/tmp"))
@@ -103,7 +103,7 @@ fn importing_core_without_calls_is_free_in_codegen() {
     let out = compile_temp(
         "core_import_only.jet",
         r#"
-use core.fs as fs
+use core.files as fs
 use core.io as io
 use core.env as env
 use core.process as process
@@ -246,7 +246,7 @@ fn importing_all_core_modules_without_calls_stays_hello_world_sized() {
     fs::write(
         dir.join("core_import_only.jet"),
         r#"
-use core.fs as fs
+use core.files as fs
 use core.io as io
 use core.env as env
 use core.process as process
@@ -549,9 +549,9 @@ use core.tasks as tasks
 fn run() {
 (sender, ch) :: tasks.channel<Int>()
     loop i in 1..1000 {
-        copy :: sender.clone()
-        tasks.spawn(take(copy) () => {
-            copy.send(1)
+        dup :: copy sender
+        tasks.spawn(take(dup) () => {
+            dup.send(1)
         })
     }
     total: Int := 0
@@ -588,9 +588,9 @@ use core.tasks as tasks
 fn run() {
 (sender, ch) :: tasks.channel<Int>()
     loop i in 1..10000 {
-        copy :: sender.clone()
-        tasks.spawn(take(copy) () => {
-            copy.send(1)
+        dup :: copy sender
+        tasks.spawn(take(dup) () => {
+            dup.send(1)
         })
     }
     total: Int := 0
@@ -628,9 +628,9 @@ use core.tasks as tasks
 fn run() {
 (sender, ch) :: tasks.channel<Int>()
     loop i in 1..100000 {
-        copy :: sender.clone()
-        tasks.spawn(take(copy) () => {
-            copy.send(1)
+        dup :: copy sender
+        tasks.spawn(take(dup) () => {
+            dup.send(1)
         })
     }
     total: Int := 0
@@ -714,7 +714,7 @@ fn core_module_items_covers_known_core_modules() {
     let mut items_keys: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     for line in fn_body.lines() {
         let trimmed = line.trim();
-        // A match arm head: `"core.fs" => &[` or `"core.log" | "jet.log" => &[`
+        // A match arm head: `"core.files" => &[` or `"core.log" | "jet.log" => &[`
         if trimmed.starts_with('"') && trimmed.contains("=>") {
             let arm_head = trimmed.split("=>").next().unwrap_or("");
             let mut rest = arm_head;
@@ -736,7 +736,9 @@ fn core_module_items_covers_known_core_modules() {
 
     // D-CORENS-CANON1: most ring packages still normalize to legacy `jet.*`
     // internal dispatch keys. `core.archive` is already canonical end-to-end.
-    let ring_names = ["log", "crypto", "http", "regex", "reactive", "db"];
+    let ring_names = [
+        "log", "crypto", "http", "regex", "reactive", "raylib", "db", "plugin",
+    ];
     let known_raw = jet::Loader::KNOWN_CORE_MODULES;
     let known: std::collections::BTreeSet<String> = known_raw
         .iter()
@@ -785,7 +787,7 @@ struct Wrap<T> {
 }
 
 @[Codable]
-struct Id<K> {
+struct Tagged<K> {
     raw: Int
     #[Skip] marker: K?
 }
@@ -806,13 +808,15 @@ fn run() {
         "Wrap's Decode impl must bound T: user_Decode\n{rs}"
     );
     // D-SERDE10: the phantom param K gets NO Encode/Decode bound (only Clone).
+    // (D-MEM1 S6: struct renamed `Id<K>` -> `Tagged<K>` — `Id<T>` is now the
+    // reserved `Pool<T>` handle type.)
     assert!(
-        rs.contains("impl<K: Clone> user_Encode for user_Id<K>"),
-        "Id's Encode impl must NOT bound K with user_Encode (phantom param)\n{rs}"
+        rs.contains("impl<K: Clone> user_Encode for user_Tagged<K>"),
+        "Tagged's Encode impl must NOT bound K with user_Encode (phantom param)\n{rs}"
     );
     assert!(
-        rs.contains("impl<K: Clone> user_Decode for user_Id<K>"),
-        "Id's Decode impl must NOT bound K with user_Decode (phantom param)\n{rs}"
+        rs.contains("impl<K: Clone> user_Decode for user_Tagged<K>"),
+        "Tagged's Decode impl must NOT bound K with user_Decode (phantom param)\n{rs}"
     );
     assert!(
         !rs.contains("K: user_Encode") && !rs.contains("K: user_Decode"),
@@ -844,7 +848,7 @@ struct Wrap<T> {
 }
 
 @[Codable]
-struct Id<K> {
+struct Tagged<K> {
     raw: Int
     #[Skip] marker: K?
 }
@@ -854,9 +858,9 @@ fn run() {
     print(json.to_string(wi))
     back :: json.decode<Wrap<Int>>("{{\"value\":42}}") ?? panic("bad")
     print(back.value)
-    id :: Id<Wrap<Int>>.{ raw: 9, marker: None }
+    id :: Tagged<Wrap<Int>>.{ raw: 9, marker: None }
     print(json.to_string(id))
-    rid :: json.decode<Id<Wrap<Int>>>("{{\"raw\":3}}") ?? panic("bad id")
+    rid :: json.decode<Tagged<Wrap<Int>>>("{{\"raw\":3}}") ?? panic("bad id")
     print(rid.raw)
 }
 "#,
@@ -1241,10 +1245,7 @@ fn run() {
         None,
     );
     assert_eq!(code, 0, "migration codec program failed: {stderr}");
-    assert_eq!(
-        stdout,
-        "localhost\ntrue\nv1\n2\nlocalhost\ntrue\nv1->v2\n"
-    );
+    assert_eq!(stdout, "localhost\ntrue\nv1\n2\nlocalhost\ntrue\nv1->v2\n");
     let _ = fs::remove_dir_all(&dir);
 }
 

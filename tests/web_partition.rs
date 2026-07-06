@@ -111,6 +111,7 @@ fn dom_fn() {
             web_target_ceiling: prog.web_target_ceiling,
             pub_file: prog.pub_file,
             html_path: prog.html_path.clone(),
+            no_alloc_policy: prog.no_alloc_policy,
         }],
         parse_teaching: vec![],
         used_core: Default::default(),

@@ -87,6 +87,7 @@ fn examples_compile_and_run() {
             || stem == "crypto/crypto_envelope"
             || stem == "crypto/crypto_sign"
             || stem == "crypto/crypto_migration"
+            || stem == "crypto/vault_secret"
             || stem == "io/compress_gzip"
             || stem == "io/compress_zstd";
 
@@ -238,6 +239,17 @@ fn examples_compile_and_run() {
         let needs_gtk = stem == "ui/ui_native_linux";
         if needs_gtk && (!have_gtk || !have_rustc) {
             eprintln!("note: skipping examples/features/{stem}.jet build (need gtk4 + rustc)");
+            checked += 1;
+            continue;
+        }
+        // D-RAYLIB1 stage 1: `core.raylib` is display-gated. The example is
+        // still front-end checked and codegen-emitted above; build/run waits for
+        // an explicit display opt-in until the native raylib bridge lands.
+        let needs_raylib_display = stem == "game/raylib_window";
+        if needs_raylib_display && std::env::var("JET_RAYLIB_DISPLAY").as_deref() != Ok("1") {
+            eprintln!(
+                "note: skipping examples/features/{stem}.jet build (set JET_RAYLIB_DISPLAY=1)"
+            );
             checked += 1;
             continue;
         }

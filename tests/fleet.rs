@@ -77,7 +77,8 @@ module fleet.prod {
 /// `web` system.
 #[test]
 fn committed_fleet_example_field_checks_clean() {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/jetpack-typed/fleet.jet");
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/jetpack-typed/fleet.jet");
     let src = fs::read_to_string(&path).unwrap();
     let dir = path.parent().unwrap();
     let plan = evaluate_env(&src, dir).unwrap();
@@ -85,7 +86,11 @@ fn committed_fleet_example_field_checks_clean() {
     assert_eq!(plan.systems[0].name, "web");
     assert_eq!(plan.fleets.len(), 1);
     assert_eq!(plan.fleets[0].name, "prod");
-    let hosts: Vec<&str> = plan.fleets[0].hosts.iter().map(|h| h.name.as_str()).collect();
+    let hosts: Vec<&str> = plan.fleets[0]
+        .hosts
+        .iter()
+        .map(|h| h.name.as_str())
+        .collect();
     assert_eq!(hosts, vec!["web1", "web2", "web3"]);
     assert!(plan.fleets[0].hosts.iter().all(|h| h.system == "web"));
 }
@@ -145,7 +150,11 @@ fn push_valid_fleet_is_gated_e1243() {
         .output()
         .unwrap();
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert_eq!(out.status.code(), Some(2), "gated push exits non-zero: {stderr}");
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "gated push exits non-zero: {stderr}"
+    );
     assert!(stderr.contains("E1243"), "expected E1243: {stderr}");
     assert!(stderr.contains("prod"), "names the fleet: {stderr}");
     assert!(
@@ -191,5 +200,8 @@ fn push_fleet_with_bad_host_is_e1242() {
         .unwrap();
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert_eq!(out.status.code(), Some(2));
-    assert!(stderr.contains("E1242"), "cross-check fires first: {stderr}");
+    assert!(
+        stderr.contains("E1242"),
+        "cross-check fires first: {stderr}"
+    );
 }

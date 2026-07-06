@@ -34,7 +34,7 @@ fn plain_program_has_no_capabilities() {
 fn fs_call_sets_file_io() {
     let c = caps(
         r#"
-use core.fs as fs
+use core.files as fs
 fn run() { x :: fs.read("a") ?? ""; print(x); }
 "#,
     );

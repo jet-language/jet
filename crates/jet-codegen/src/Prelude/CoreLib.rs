@@ -682,6 +682,96 @@ mod jet_std {
         Err(DbError { message: msg.to_string() })
     }
 
+    // ── D-DEP-WASM1=A / D-PLUGIN1=B (c81): core.plugin wire helpers ────────────
+    // `Plugin.call`/`.call_int` cross the sandboxed Component Model boundary as
+    // plain wire text — the always-compiled prelude here and the hidden FFI
+    // bridge crate (`Prelude/Plugin.rs`, `jet_plugin_call`) are built
+    // independently and share no Rust types, only this tagged-length text
+    // (same house style as `jet_db_encode_params`/`jet_db_decode_query_result`
+    // above; `pluginw_`-prefixed so nothing here collides with `db_*`).
+    fn pluginw_encode_tagged(tag: char, payload: &str) -> String {
+        format!("{tag}{}:{payload}", payload.len())
+    }
+
+    fn pluginw_read_tagged(bytes: &[u8], pos: &mut usize) -> Option<(char, String)> {
+        let tag = *bytes.get(*pos)? as char;
+        *pos += 1;
+        let len_start = *pos;
+        while *bytes.get(*pos)? != b':' {
+            *pos += 1;
+        }
+        let len: usize = std::str::from_utf8(&bytes[len_start..*pos]).ok()?.parse().ok()?;
+        *pos += 1; // skip ':'
+        let payload = std::str::from_utf8(bytes.get(*pos..*pos + len)?).ok()?.to_string();
+        *pos += len;
+        Some((tag, payload))
+    }
+
+    /// Encode a `[Float]` argument list for `plugin.call(name, args)`.
+    pub fn jet_plugin_encode_args_float(args: &Vec<f64>) -> String {
+        let mut out = String::new();
+        out.push_str(&args.len().to_string());
+        out.push(':');
+        for a in args {
+            out.push_str(&pluginw_encode_tagged('F', &a.to_string()));
+        }
+        out
+    }
+
+    /// Encode an `[Int]` argument list for `plugin.call_int(name, args)`.
+    pub fn jet_plugin_encode_args_int(args: &Vec<i64>) -> String {
+        let mut out = String::new();
+        out.push_str(&args.len().to_string());
+        out.push(':');
+        for a in args {
+            out.push_str(&pluginw_encode_tagged('I', &a.to_string()));
+        }
+        out
+    }
+
+    /// Decode the `"O:<handle>"`/`"E:<message>"` wire produced by
+    /// `jet_plugin_load`. Returns the handle, or `0` (the invalid-handle
+    /// sentinel, mirroring `jet_db_open`'s style) when the load failed — every
+    /// later `.call`/`.call_int` on handle `0` reports "no plugin loaded for
+    /// this handle" rather than ever panicking (I2).
+    pub fn jet_plugin_load_handle(wire: &str) -> u64 {
+        wire.strip_prefix("O:")
+            .and_then(|n| n.parse::<u64>().ok())
+            .unwrap_or(0)
+    }
+
+    /// Decode the `"O:F<len>:<val>"`/`"E:<message>"` wire produced by
+    /// `jet_plugin_call` for a `.call` (Float) invocation.
+    pub fn jet_plugin_decode_result_float(wire: &str) -> Result<f64, String> {
+        let Some(body) = wire.strip_prefix("O:") else {
+            return Err(wire.strip_prefix("E:").unwrap_or(wire).to_string());
+        };
+        let bytes = body.as_bytes();
+        let mut pos = 0usize;
+        match pluginw_read_tagged(bytes, &mut pos) {
+            Some((_, payload)) => payload
+                .parse::<f64>()
+                .map_err(|_| "plugin returned a malformed Float result".to_string()),
+            None => Err("plugin returned a malformed result".to_string()),
+        }
+    }
+
+    /// Decode the `"O:I<len>:<val>"`/`"E:<message>"` wire produced by
+    /// `jet_plugin_call` for a `.call_int` (Int) invocation.
+    pub fn jet_plugin_decode_result_int(wire: &str) -> Result<i64, String> {
+        let Some(body) = wire.strip_prefix("O:") else {
+            return Err(wire.strip_prefix("E:").unwrap_or(wire).to_string());
+        };
+        let bytes = body.as_bytes();
+        let mut pos = 0usize;
+        match pluginw_read_tagged(bytes, &mut pos) {
+            Some((_, payload)) => payload
+                .parse::<i64>()
+                .map_err(|_| "plugin returned a malformed Int result".to_string()),
+            None => Err("plugin returned a malformed result".to_string()),
+        }
+    }
+
     // ── core.encoding: format-agnostic value tree (D-SERDE2 = A) ───────────────
     // The one tree every format adapter speaks. The built-in `@[Codable]` derive
     // (D-ENC1) lowers `encode`/`decode` to walks over this; each adapter turns it
@@ -1179,6 +1269,227 @@ mod jet_std {
 
     #[derive(Clone, Debug, PartialEq)]
     pub enum Closed { Closed }
+
+    // D-MEM1 S6 (D-SHARED-API1=A): `Shared<T>` — a lock-guarded shared handle,
+    // "a copyable door". `Shared.new(x)` constructs; `.read(f)`/`.edit(f)` run a
+    // closure against a read- or write-locked view, the lock scoped to the
+    // closure call only (no guard object ever escapes it). Cloning is always a
+    // cheap `Arc` clone, never a deep copy of `T` — that's what lets it cross a
+    // `tasks.spawn` boundary with no `take`.
+    pub struct JetShared<T>(std::sync::Arc<std::sync::RwLock<T>>);
+    impl<T> JetShared<T> {
+        pub fn new(value: T) -> Self {
+            JetShared(std::sync::Arc::new(std::sync::RwLock::new(value)))
+        }
+        pub fn read<F, R>(&self, f: F) -> R
+        where
+            F: FnOnce(&T) -> R,
+        {
+            let guard = self.0.read().unwrap_or_else(|e| e.into_inner());
+            f(&*guard)
+        }
+        pub fn edit<F, R>(&self, f: F) -> R
+        where
+            F: FnOnce(&mut T) -> R,
+        {
+            let mut guard = self.0.write().unwrap_or_else(|e| e.into_inner());
+            f(&mut *guard)
+        }
+    }
+    impl<T> Clone for JetShared<T> {
+        fn clone(&self) -> Self {
+            JetShared(self.0.clone())
+        }
+    }
+    // D-MEM1 S6: an opaque-handle placeholder, mirroring `JetTcpListener`'s
+    // `JetShow` (Prelude/CoreLib.rs) — `Shared<T>`'s point is the lock-guarded
+    // access methods, not a direct print of the handle itself.
+    impl<T> super::JetShow for JetShared<T> {
+        fn jet_show(&self) -> String {
+            "Shared(..)".to_string()
+        }
+    }
+
+    // D-MEM1 S6 (D-POOLID-API1=A): `Pool<T>` — a generational arena. `Id<T>` is
+    // a lightweight index+generation handle: plain data, `Copy`, comparable,
+    // regardless of whether `T` itself is (it never touches `T` at runtime —
+    // hand-written impls below, not `#[derive]`, so no `T: Copy`/`Clone`/`Eq`
+    // bound leaks onto every `Id<T>`).
+    enum JetPoolSlot<T> {
+        Occupied(u32, T),
+        Vacant(u32),
+    }
+
+    pub struct JetPool<T> {
+        slots: Vec<JetPoolSlot<T>>,
+        free: Vec<usize>,
+    }
+
+    impl<T> JetPool<T> {
+        pub fn new() -> Self {
+            JetPool {
+                slots: Vec::new(),
+                free: Vec::new(),
+            }
+        }
+
+        pub fn add(&mut self, value: T) -> JetId<T> {
+            if let Some(idx) = self.free.pop() {
+                let gen = match self.slots[idx] {
+                    JetPoolSlot::Vacant(g) => g,
+                    JetPoolSlot::Occupied(..) => {
+                        unreachable!("a free-list slot is always Vacant")
+                    }
+                };
+                self.slots[idx] = JetPoolSlot::Occupied(gen, value);
+                return JetId::new(idx as u32, gen);
+            }
+            let idx = self.slots.len();
+            self.slots.push(JetPoolSlot::Occupied(0, value));
+            JetId::new(idx as u32, 0)
+        }
+
+        /// D-POOLID-API1=A: removes the slot `id` names, bumping its generation
+        /// so any other copy of `id` becomes stale — mirrors `Map.remove`'s
+        /// `Option<T>` convention (a miss returns `None`, not a panic).
+        pub fn remove(&mut self, id: JetId<T>) -> Option<T> {
+            let idx = id.index as usize;
+            let occupied = matches!(
+                self.slots.get(idx),
+                Some(JetPoolSlot::Occupied(g, _)) if *g == id.generation
+            );
+            if !occupied {
+                return None;
+            }
+            let next_gen = id.generation.wrapping_add(1);
+            let old = std::mem::replace(&mut self.slots[idx], JetPoolSlot::Vacant(next_gen));
+            self.free.push(idx);
+            match old {
+                JetPoolSlot::Occupied(_, v) => Some(v),
+                JetPoolSlot::Vacant(_) => unreachable!("just checked Occupied above"),
+            }
+        }
+
+        /// A snapshot `Vec` of every live id — small, `Copy` elements, so a
+        /// fresh allocation per call is the simplest correct thing (D-MEM1 S6
+        /// notes deferred a genuine lazy `Iterator` as unneeded polish).
+        pub fn ids(&self) -> Vec<JetId<T>> {
+            self.slots
+                .iter()
+                .enumerate()
+                .filter_map(|(i, s)| match s {
+                    JetPoolSlot::Occupied(g, _) => Some(JetId::new(i as u32, *g)),
+                    JetPoolSlot::Vacant(_) => None,
+                })
+                .collect()
+        }
+    }
+    // D-MEM1 S6: an opaque-handle placeholder, same rationale as `JetShared`'s
+    // `JetShow` just above.
+    impl<T> super::JetShow for JetPool<T> {
+        fn jet_show(&self) -> String {
+            format!("Pool({} slots)", self.slots.len())
+        }
+    }
+
+    pub struct JetId<T> {
+        index: u32,
+        generation: u32,
+        _marker: std::marker::PhantomData<fn() -> T>,
+    }
+    impl<T> JetId<T> {
+        fn new(index: u32, generation: u32) -> Self {
+            JetId {
+                index,
+                generation,
+                _marker: std::marker::PhantomData,
+            }
+        }
+    }
+    impl<T> Clone for JetId<T> {
+        fn clone(&self) -> Self {
+            *self
+        }
+    }
+    impl<T> Copy for JetId<T> {}
+    impl<T> PartialEq for JetId<T> {
+        fn eq(&self, other: &Self) -> bool {
+            self.index == other.index && self.generation == other.generation
+        }
+    }
+    impl<T> Eq for JetId<T> {}
+    impl<T> std::hash::Hash for JetId<T> {
+        fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+            self.index.hash(state);
+            self.generation.hash(state);
+        }
+    }
+    impl<T> std::fmt::Debug for JetId<T> {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "Id(#{}@{})", self.index, self.generation)
+        }
+    }
+    // D-MEM1 S6: print/interpolation/derived-Debug support — `Id<T>` shows up as
+    // an ordinary struct field (`parent: Id<Node>?`), whose containing struct's
+    // generated `jet_debug()` calls `.jet_debug()` on every field.
+    impl<T> super::JetShow for JetId<T> {
+        fn jet_show(&self) -> String {
+            format!("Id(#{}@{})", self.index, self.generation)
+        }
+    }
+    impl<T> super::JetDisplay for JetId<T> {
+        fn jet_display(&self) -> String {
+            format!("Id(#{}@{})", self.index, self.generation)
+        }
+    }
+    impl<T> super::JetDebug for JetId<T> {
+        fn jet_debug(&self) -> String {
+            format!("Id(#{}@{})", self.index, self.generation)
+        }
+    }
+
+    /// `pool[id]` read (`Expr::Index`, `IndexKind::Pool`): a generation-checked
+    /// clone of `T`. Panics naming the stale-access class on a mismatched or
+    /// vacant slot, mirroring the array-out-of-bounds panic precedent
+    /// (`jet_index_vec`) — a runtime panic, not a new diagnostic code.
+    pub fn jet_pool_get<T: Clone>(pool: &JetPool<T>, id: JetId<T>, file: &str, line: u32) -> T {
+        match pool.slots.get(id.index as usize) {
+            Some(JetPoolSlot::Occupied(gen, v)) if *gen == id.generation => v.clone(),
+            _ => super::jet_panic(
+                file,
+                line,
+                "this Id no longer refers to a live value — its pool slot was removed",
+            ),
+        }
+    }
+
+    /// `pool[id] = v` / `pool[id].field = v` (`LValue::Index` / `LValue::Field`
+    /// nested on a `Pool` index): a genuine mutable place, not a value
+    /// round-trip — a nested field write edits the real slot. Same stale-access
+    /// panic as `jet_pool_get`.
+    pub fn jet_pool_get_mut<'a, T>(
+        pool: &'a mut JetPool<T>,
+        id: JetId<T>,
+        file: &str,
+        line: u32,
+    ) -> &'a mut T {
+        let idx = id.index as usize;
+        let valid = matches!(
+            pool.slots.get(idx),
+            Some(JetPoolSlot::Occupied(gen, _)) if *gen == id.generation
+        );
+        if !valid {
+            super::jet_panic(
+                file,
+                line,
+                "this Id no longer refers to a live value — its pool slot was removed",
+            );
+        }
+        match &mut pool.slots[idx] {
+            JetPoolSlot::Occupied(_, v) => v,
+            JetPoolSlot::Vacant(_) => unreachable!("just checked Occupied above"),
+        }
+    }
 
     // ── D-REACT1=B: opt-in reactive runtime (signals / derived / effects) ──────
     // Reactivity is a LIBRARY, not core semantics (option B): ordinary bindings are
@@ -2968,6 +3279,58 @@ struct JetFileWriter {
 #[derive(Clone, Copy, Debug)]
 struct JetDbConnection {
     handle: u64,
+}
+
+// ── core.plugin sandboxed WASM handle (D-DEP-WASM1=A / D-PLUGIN1=B, c81) ─────
+// The real wasmtime `Store`/`Instance` live in the FFI bridge crate's
+// thread-local handle map (wasmtime types can't cross into this
+// always-compiled prelude — I6). `JetPlugin` is a thin, `Copy` handle wrapper,
+// same shape as `JetDbConnection`, so `.call`/`.call_int` dispatch by receiver
+// TYPE (`Plugin`) instead of exposing the bare `u64` to Jet code.
+#[derive(Clone, Copy, Debug)]
+struct JetPlugin {
+    handle: u64,
+}
+
+// -- core.raylib bridge skeleton (D-RAYLIB1=A) --------------------------------
+// This is the bounded stage-1 surface: typed handles and no-op functions so
+// examples can be front-end/type checked without requiring a display server or
+// native raylib. The next slice replaces these bodies with the real bridge.
+#[derive(Clone, Debug)]
+struct RaylibWindow {
+    width: i64,
+    height: i64,
+    title: String,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct RaylibColor {
+    r: i64,
+    g: i64,
+    b: i64,
+    a: i64,
+}
+
+fn jet_raylib_window_open(width: i64, height: i64, title: &String) -> RaylibWindow {
+    RaylibWindow { width, height, title: title.clone() }
+}
+
+fn jet_raylib_window_should_close(_window: &RaylibWindow) -> bool {
+    true
+}
+
+fn jet_raylib_begin_drawing(_window: &RaylibWindow) {}
+
+fn jet_raylib_clear_background(_color: &RaylibColor) {}
+
+fn jet_raylib_draw_text(_text: &String, _x: i64, _y: i64, _size: i64, _color: &RaylibColor) {}
+
+fn jet_raylib_end_drawing() {}
+
+fn jet_raylib_close_window(_window: &RaylibWindow) {}
+
+fn jet_raylib_color(r: i64, g: i64, b: i64, a: i64) -> RaylibColor {
+    RaylibColor { r, g, b, a }
 }
 
 // ── Typed Path API (D-PATHFS1) ────────────────────────────────────────────────
@@ -4966,9 +5329,8 @@ fn jet_http_client_response_header(resp: &JetHttpClientResp, name: &String) -> O
 
 
 // ── D-HTTPLIB1=A / D-HTTPLIB2=B: core.http.server — function-first mux ───────
-// Pure std, no external crates (I6). HTTP/1.1 blocking server with path-param
-// extraction and a typed mux surface. HTTP/2 and WebSocket require the bridge
-// crate and are tracked as follow-up work.
+// Plain HTTP is pure std. D-TLSSERVE1=A routes server TLS through the hidden
+// rustls bridge only when the named `tls:` option is used.
 
 #[derive(Clone)]
 struct JetHttpSrvResp {
@@ -4997,6 +5359,12 @@ struct JetHttpMuxRoute {
 #[derive(Clone)]
 struct JetHttpMux(std::sync::Arc<std::sync::Mutex<Vec<JetHttpMuxRoute>>>);
 
+#[derive(Clone)]
+struct JetHttpServerTls {
+    cert_pem: String,
+    key_pem: String,
+}
+
 impl JetHttpMux {
     fn new() -> Self { JetHttpMux(std::sync::Arc::new(std::sync::Mutex::new(Vec::new()))) }
     fn add<F>(&self, method: &str, pattern: &str, f: F)
@@ -5011,6 +5379,10 @@ impl JetHttpMux {
 }
 
 fn jet_http_mux_new() -> JetHttpMux { JetHttpMux::new() }
+
+fn jet_http_srv_tls(cert_pem: &String, key_pem: &String) -> JetHttpServerTls {
+    JetHttpServerTls { cert_pem: cert_pem.clone(), key_pem: key_pem.clone() }
+}
 
 fn jet_http_mux_add<F>(mux: &JetHttpMux, method: &str, pattern: &str, f: F)
 where F: Fn(JetHttpSrvReq) -> JetHttpSrvResp + Send + Sync + 'static
@@ -5044,6 +5416,46 @@ fn jet_http_mux_serve(addr: &String, mux: JetHttpMux) -> Result<(), String> {
             let resp = jet_http_mux_dispatch(&m, req);
             let text = jet_http_srv_format(&resp);
             let _ = stream.write_all(text.as_bytes());
+        });
+    }
+}
+
+fn jet_http_mux_serve_tls<V, H>(
+    addr: &String,
+    mux: JetHttpMux,
+    tls: JetHttpServerTls,
+    validate: V,
+    handle: H,
+) -> Result<(), String>
+where
+    V: Fn(&String, &String) -> Result<(), String>,
+    H: Fn(&String, &String, std::net::TcpStream, Box<dyn FnOnce(String) -> String + Send>) -> Result<(), String>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+{
+    validate(&tls.cert_pem, &tls.key_pem)?;
+    let listener = std::net::TcpListener::bind(addr.as_str())
+        .map_err(|e| format!("bind on `{}` failed: {}", addr, e))?;
+    let mux = std::sync::Arc::new(mux);
+    loop {
+        let (stream, _peer) = match listener.accept() {
+            Ok(x) => x,
+            Err(e) => { eprintln!("http TLS accept failed: {}", e); continue; }
+        };
+        let m = mux.clone();
+        let tls_cfg = tls.clone();
+        let handle_one = handle.clone();
+        std::thread::spawn(move || {
+            let dispatch = Box::new(move |raw: String| {
+                let req = jet_http_srv_parse(&raw);
+                let resp = jet_http_mux_dispatch(&m, req);
+                jet_http_srv_format(&resp)
+            });
+            if let Err(e) = handle_one(&tls_cfg.cert_pem, &tls_cfg.key_pem, stream, dispatch) {
+                eprintln!("http TLS connection failed: {}", e);
+            }
         });
     }
 }

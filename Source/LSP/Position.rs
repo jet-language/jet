@@ -14,6 +14,46 @@ pub(crate) struct LspRange {
     pub(crate) end: LspPos,
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct LineTable {
+    starts: Vec<usize>,
+}
+
+impl LineTable {
+    pub(crate) fn new(src: &str) -> Self {
+        let mut starts = vec![0];
+        for (i, c) in src.char_indices() {
+            if c == '\n' {
+                starts.push(i + 1);
+            }
+        }
+        LineTable { starts }
+    }
+
+    pub(crate) fn offset(&self, src: &str, pos: LspPos) -> usize {
+        let line_start = match self.starts.get(pos.line as usize) {
+            Some(start) => *start,
+            None => return src.len(),
+        };
+        let line_end = self
+            .starts
+            .get(pos.line as usize + 1)
+            .map(|next| next.saturating_sub(1))
+            .unwrap_or(src.len());
+        let line_text = &src[line_start..line_end.min(src.len())];
+        let mut utf16_count = 0u32;
+        let mut byte_off = line_start;
+        for c in line_text.chars() {
+            if utf16_count >= pos.character {
+                break;
+            }
+            utf16_count += c.len_utf16() as u32;
+            byte_off += c.len_utf8();
+        }
+        byte_off.min(src.len())
+    }
+}
+
 pub(crate) fn byte_span_to_range(src: &str, span: Span) -> LspRange {
     LspRange {
         start: byte_offset_to_lsp(src, span.start),
@@ -41,31 +81,18 @@ pub fn byte_offset_to_lsp(src: &str, offset: usize) -> LspPos {
 
 /// Convert an LSP (line, UTF-16 char) position back to a byte offset.
 pub fn lsp_pos_to_offset(src: &str, pos: LspPos) -> usize {
-    let mut cur_line = 0u32;
-    let mut line_byte_start = 0usize;
-    for (i, c) in src.char_indices() {
-        if cur_line == pos.line {
-            break;
-        }
-        if c == '\n' {
-            cur_line += 1;
-            line_byte_start = i + 1;
-        }
-    }
-    if cur_line < pos.line {
-        return src.len();
-    }
-    let line_text = &src[line_byte_start..];
-    let mut utf16_count = 0u32;
-    let mut byte_off = line_byte_start;
-    for c in line_text.chars() {
-        if utf16_count >= pos.character {
-            break;
-        }
-        utf16_count += c.len_utf16() as u32;
-        byte_off += c.len_utf8();
-    }
-    byte_off.min(src.len())
+    LineTable::new(src).offset(src, pos)
+}
+
+pub(crate) fn apply_lsp_edit(src: &str, range: LspRange, new_text: &str) -> String {
+    let table = LineTable::new(src);
+    let start = table.offset(src, range.start);
+    let end = table.offset(src, range.end).max(start).min(src.len());
+    let mut out = String::with_capacity(src.len() + new_text.len());
+    out.push_str(&src[..start]);
+    out.push_str(new_text);
+    out.push_str(&src[end..]);
+    out
 }
 
 pub(crate) fn full_document_range(src: &str) -> LspRange {

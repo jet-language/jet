@@ -27,7 +27,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use crate::Diagnostics::Diagnostic;
-use crate::AST::{Expr, Func};
+use crate::AST::{Expr, Func, StructDef};
 
 pub use Interpreter::{DebugHook, DevSink, REPL_FUEL_BUDGET};
 pub use Purity::walk_calls;
@@ -56,6 +56,11 @@ static EMPTY_METHODS: std::sync::OnceLock<HashMap<(String, String), &'static Fun
     std::sync::OnceLock::new();
 fn empty_methods() -> &'static HashMap<(String, String), &'static Func> {
     EMPTY_METHODS.get_or_init(HashMap::new)
+}
+static EMPTY_STRUCTS: std::sync::OnceLock<HashMap<String, &'static StructDef>> =
+    std::sync::OnceLock::new();
+fn empty_structs() -> &'static HashMap<String, &'static StructDef> {
+    EMPTY_STRUCTS.get_or_init(HashMap::new)
 }
 static EMPTY_COMPUTED: std::sync::OnceLock<HashMap<(String, String), &'static Expr>> =
     std::sync::OnceLock::new();
@@ -148,6 +153,7 @@ pub fn evaluate_with_imports_opts(
         emitted_fragments: Vec::new(),
         globals,
         methods: empty_methods(),
+        structs: empty_structs(),
         computed_fields: empty_computed(),
         distinct_ranges: empty_distinct(),
     };
@@ -187,6 +193,7 @@ pub fn evaluate_with_imports_opts_collecting(
         emitted_fragments: Vec::new(),
         globals,
         methods: empty_methods(),
+        structs: empty_structs(),
         computed_fields: empty_computed(),
         distinct_ranges: empty_distinct(),
     };
@@ -214,6 +221,7 @@ pub fn evaluate_with_imports_opts_collecting(
 pub struct ProgramInfo<'a> {
     pub globals: HashMap<String, CtValue>,
     pub methods: HashMap<(String, String), &'a Func>,
+    pub structs: HashMap<String, &'a StructDef>,
     pub computed_fields: HashMap<(String, String), &'a Expr>,
     pub distinct_ranges: HashMap<String, Option<(i64, i64)>>,
     pub core_imports: HashMap<String, String>,
@@ -224,6 +232,7 @@ impl<'a> ProgramInfo<'a> {
         ProgramInfo {
             globals: HashMap::new(),
             methods: HashMap::new(),
+            structs: HashMap::new(),
             computed_fields: HashMap::new(),
             distinct_ranges: HashMap::new(),
             core_imports: HashMap::new(),
@@ -254,6 +263,7 @@ pub fn run_main(
         emitted_fragments: Vec::new(),
         globals: &program.globals,
         methods: &program.methods,
+        structs: &program.structs,
         computed_fields: &program.computed_fields,
         distinct_ranges: &program.distinct_ranges,
     };
@@ -292,6 +302,7 @@ pub fn run_main_debug(
         emitted_fragments: Vec::new(),
         globals: empty_globals(),
         methods: empty_methods(),
+        structs: empty_structs(),
         computed_fields: empty_computed(),
         distinct_ranges: empty_distinct(),
     };
@@ -326,6 +337,7 @@ pub fn run_main_value(
         emitted_fragments: Vec::new(),
         globals: empty_globals(),
         methods: empty_methods(),
+        structs: empty_structs(),
         computed_fields: empty_computed(),
         distinct_ranges: empty_distinct(),
     };
@@ -363,6 +375,7 @@ pub fn run_main_with_fuel(
         emitted_fragments: Vec::new(),
         globals: empty_globals(),
         methods: empty_methods(),
+        structs: empty_structs(),
         computed_fields: empty_computed(),
         distinct_ranges: empty_distinct(),
     };
@@ -398,6 +411,7 @@ pub fn run_repl_main_with_fuel(
         emitted_fragments: Vec::new(),
         globals: empty_globals(),
         methods: empty_methods(),
+        structs: empty_structs(),
         computed_fields: empty_computed(),
         distinct_ranges: empty_distinct(),
     };
@@ -450,6 +464,7 @@ pub fn run_repl_step(
         emitted_fragments: Vec::new(),
         globals: empty_globals(),
         methods: empty_methods(),
+        structs: empty_structs(),
         computed_fields: empty_computed(),
         distinct_ranges: empty_distinct(),
     };
@@ -523,6 +538,7 @@ pub fn run_block_with_imports(
         emitted_fragments: Vec::new(),
         globals,
         methods: empty_methods(),
+        structs: empty_structs(),
         computed_fields: empty_computed(),
         distinct_ranges: empty_distinct(),
     };
@@ -650,6 +666,7 @@ pub fn evaluate_derive_body(
         emitted_fragments: Vec::new(),
         globals: empty_globals(),
         methods: empty_methods(),
+        structs: empty_structs(),
         computed_fields: empty_computed(),
         distinct_ranges: empty_distinct(),
     };

@@ -85,10 +85,13 @@ fn layer_of_normalized(module: &str) -> RuntimeLayer {
         | "jet.regex" => RuntimeLayer::Alloc,
 
         // ── std: OS I/O, networking, processes ─────────────────────────────
-        "core.fs" | "core.io" | "core.env" | "core.process" | "core.files" | "core.path"
+        "core.io" | "core.env" | "core.process" | "core.files" | "core.path"
         | "core.net" | "core.term" | "core.time" | "core.time.date" | "core.time.datetime"
         | "core.tasks" | "jet.http" | "core.http.client" | "core.http.server" | "core.archive"
-        | "core.compress.gzip" | "core.compress.zstd" | "jet.db" => RuntimeLayer::Std,
+        | "core.raylib" | "jet.raylib" | "core.compress.gzip" | "core.compress.zstd" | "jet.db"
+        // D-DEP-WASM1=A (c81): the plugin loader embeds wasmtime — same OS-facing
+        // posture as jet.db's embedded rusqlite.
+        | "jet.plugin" => RuntimeLayer::Std,
 
         // Unknown modules default to std so new OS-facing modules stay conservative.
         other if Syntax::is_known_core_module(other) => RuntimeLayer::Std,
@@ -96,7 +99,7 @@ fn layer_of_normalized(module: &str) -> RuntimeLayer {
     }
 }
 
-/// Classify a sema/codegen helper-usage key (`core.io::input`, `core.fs::read`, …)
+/// Classify a sema/codegen helper-usage key (`core.io::input`, `core.files::read`, …)
 /// to its minimum runtime layer.
 pub fn core_usage_layer(usage: &str) -> Option<RuntimeLayer> {
     if let Some(rest) = usage.strip_prefix("core::") {

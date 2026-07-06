@@ -100,6 +100,16 @@ pub fn builtin_method_return(
         Type::Apply { name, args } if name == "Sender" => {
             sender_method_return(args, method, arg_count)
         }
+        // D-MEM1 S6 (D-POOLID-API1=A): `Pool<T>` generational-arena methods.
+        // The precise return type is a placeholder here (this table only gates
+        // whether the call reaches `finish_builtin_method`) — sema's
+        // `finish_pool_add`/`finish_pool_remove`/the `("Pool","ids")` arm fully
+        // recompute it from the receiver's real element type.
+        Type::Apply { name, args } if name == "Pool" => pool_method_return(args, method, arg_count),
+        // D-MEM1 S6 (D-SHARED-API1=A): `Shared<T>.read(f)`/`.edit(f)`. Same
+        // placeholder-gate note as `Pool` above — `finish_shared_read`/
+        // `finish_shared_edit` compute the real (closure-derived) return type.
+        Type::Shared(inner) => shared_method_return(inner, method, arg_count),
         // D-REACT1=B: reactive handle methods. `Signal.get()/set(v)`, `Derived.get()`.
         Type::Apply { name, args } if name == crate::Syntax::TYPE_SIGNAL => {
             signal_method_return(args, method, arg_count)
@@ -542,6 +552,31 @@ fn receiver_method_return(args: &[Type], method: &str, nargs: usize) -> Option<O
 fn sender_method_return(_args: &[Type], method: &str, nargs: usize) -> Option<Option<Type>> {
     match (method, nargs) {
         ("send", 1) => Some(None),
+        _ => None,
+    }
+}
+
+/// D-MEM1 S6 (D-POOLID-API1=A): `Pool<T>` placeholder gate (see call site note).
+fn pool_method_return(args: &[Type], method: &str, nargs: usize) -> Option<Option<Type>> {
+    let t = args.first().cloned().unwrap_or(Type::Int);
+    match (method, nargs) {
+        ("add", 1) => Some(Some(Type::Apply {
+            name: "Id".to_string(),
+            args: vec![t],
+        })),
+        ("remove", 1) => Some(Some(Type::Option(Box::new(t)))),
+        ("ids", 0) => Some(Some(Type::List(Box::new(Type::Apply {
+            name: "Id".to_string(),
+            args: vec![t],
+        })))),
+        _ => None,
+    }
+}
+
+/// D-MEM1 S6 (D-SHARED-API1=A): `Shared<T>` placeholder gate (see call site note).
+fn shared_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option<Type>> {
+    match (method, nargs) {
+        ("read", 1) | ("edit", 1) => Some(Some(inner.clone())),
         _ => None,
     }
 }

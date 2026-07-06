@@ -915,7 +915,7 @@ impl<'a> Checker<'a> {
             // emitted here: `fs.read` is kept as sugar (D-IO3) and firing on every call
             // site is too noisy (breaks showcase golden tests via path-specific output).
             // Revisit when the test harness can normalise paths in exact comparisons.
-            ("core.fs", "read") => {}
+            ("core.files", "read") => {}
             // D-TUPLE-DESTRUCT1: `tasks.channel<T>()` returns the `(Sender<T>,
             // Receiver<T>)` pair directly — mirrors the turbofish `decode<T>` pattern
             // above (the element type `T` comes from the explicit call-site type
@@ -936,8 +936,7 @@ impl<'a> Checker<'a> {
                         "`tasks.channel` needs a type argument to infer the element type"
                             .to_string(),
                         "the element type `T` can't be guessed without `<T>`".to_string(),
-                        "call it with an explicit type argument: `tasks.channel<T>()`"
-                            .to_string(),
+                        "call it with an explicit type argument: `tasks.channel<T>()`".to_string(),
                         Some(span),
                     ));
                     return None;
@@ -1492,9 +1491,14 @@ impl<'a> Checker<'a> {
                 return Some(Type::Named("HttpMux".to_string()));
             }
             ("core.http.server", "serve") => {
-                if args.len() != 2 {
-                    self.diags
-                        .push(wrong_core_arity("serve", 2, args.len(), span));
+                if args.len() != 2 && args.len() != 3 {
+                    self.diags.push(Diagnostic::error(
+                        "E0104",
+                        format!("`serve` expects 2 arguments, or 3 with `tls:`, got {}", args.len()),
+                        "HTTPS serving uses the named `tls:` option so plaintext and TLS share one entry point".to_string(),
+                        "write `Server.serve(addr, mux)` or `Server.serve(addr, mux, tls: Server.tls(cert, key))`".to_string(),
+                        Some(span),
+                    ));
                     for a in args.iter_mut() {
                         self.infer(&mut a.expr);
                     }
@@ -1503,10 +1507,48 @@ impl<'a> Checker<'a> {
                 self.expect_core_arg("serve", 0, &Type::String, &mut args[0]);
                 // second arg is a Mux — just infer it
                 self.infer(&mut args[1].expr);
+                if args.len() == 3 {
+                    match args[2].label.as_ref().map(|(label, span)| (label.as_str(), *span)) {
+                        Some(("tls", _)) => {}
+                        Some((label, label_span)) => self.diags.push(Diagnostic::error(
+                            "E0125",
+                            format!("`serve` has no option named `{label}` here"),
+                            "the third HTTP server argument is a named TLS option, not a positional value".to_string(),
+                            "write `tls: Server.tls(cert, key)`".to_string(),
+                            Some(label_span),
+                        )),
+                        None => self.diags.push(Diagnostic::error(
+                            "E0125",
+                            "`serve` needs `tls:` before the third argument".to_string(),
+                            "the label makes the transport switch explicit at the call site".to_string(),
+                            "write `Server.serve(addr, mux, tls: Server.tls(cert, key))`".to_string(),
+                            Some(args[2].span),
+                        )),
+                    }
+                    self.expect_core_arg(
+                        "serve",
+                        2,
+                        &Type::Named("HttpServerTls".to_string()),
+                        &mut args[2],
+                    );
+                }
                 return Some(Type::Result {
                     ok: Box::new(unit_ty()),
                     err: Box::new(Type::String),
                 });
+            }
+            ("core.http.server", "tls") => {
+                if args.len() != 2 {
+                    self.diags
+                        .push(wrong_core_arity("tls", 2, args.len(), span));
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
+                    return None;
+                }
+                self.expect_core_arg("tls", 0, &Type::String, &mut args[0]);
+                self.expect_core_arg("tls", 1, &Type::String, &mut args[1]);
+                return Some(Type::Named("HttpServerTls".to_string()));
             }
             ("core.http.server", "response") => {
                 if args.len() != 2 {
@@ -1994,13 +2036,14 @@ impl<'a> Checker<'a> {
                     // D-MEM1/S2 (was D-L0201 lint): a hard error now, regardless
                     // of liveness — no clone is ever silent. Unlike a Move-param
                     // user function, this is a fixed std read-only signature —
-                    // `^` is never accepted here (E0203), so `.clone()` is the
-                    // only fix, not a liveness-dependent move/reorder menu.
+                    // `^` is never accepted here (E0203), so `copy name` (D-CAP2,
+                    // D-MEM1/S4) is the only fix, not a liveness-dependent
+                    // move/reorder menu.
                     self.diags.push(Diagnostic::error(
                         "E0209",
                         format!("implicit clone of `{}`", name),
                         format!("`{}` stores its own copy of this value", call_name),
-                        format!("write `{}.clone()` to copy explicitly", name),
+                        format!("write `{} {}` to copy explicitly", Syntax::KW_COPY, name),
                         Some(ispan),
                     ));
                 }
@@ -2094,6 +2137,69 @@ pub fn db_connection_method_return_ty(method: &str) -> Option<Type> {
         )),
         "execute" => Some(result_ty(Type::Int, db_error_ty())),
         "begin" | "commit" | "rollback" | "close" => Some(Type::Bool),
+        _ => None,
+    }
+}
+
+impl<'a> Checker<'a> {
+    /// D-DEP-WASM1=A / D-PLUGIN1=B (c81): `(name: String, args: [T]) -> T ?
+    /// String` argument elaboration shared by `.call`/`.call_int` — a plugin
+    /// export name plus a homogeneous scalar argument list. v1 supports
+    /// exactly two scalar shapes (`Float` via `.call`, `Int` via `.call_int`);
+    /// see `Prelude/Plugin.rs` for why Bool/Text aren't wired yet.
+    fn check_plugin_call_args(
+        &mut self,
+        name: &str,
+        arg_ty: &Type,
+        args: &mut [crate::AST::CallArg],
+        span: Span,
+    ) {
+        if args.len() != 2 {
+            self.diags.push(wrong_core_arity(name, 2, args.len(), span));
+            for a in args.iter_mut() {
+                self.infer(&mut a.expr);
+            }
+            return;
+        }
+        let list_ty = Type::List(Box::new(arg_ty.clone()));
+        self.expect_core_arg(name, 0, &Type::String, &mut args[0]);
+        self.expect_core_arg(name, 1, &list_ty, &mut args[1]);
+    }
+
+    /// D-DEP-WASM1=A / D-PLUGIN1=B (c81): instance methods on a `Plugin` handle
+    /// (produced by `core.plugin`'s `load`). `call`/`call_int` are fallible
+    /// (`? String`, naming a missing export or a param/type mismatch against
+    /// the plugin's actual `.wit` signature) — the sandboxed loader never
+    /// crashes the host program, it reports (I2).
+    pub(crate) fn check_plugin_method(
+        &mut self,
+        method: &str,
+        args: &mut [crate::AST::CallArg],
+        span: Span,
+    ) -> Option<Option<Type>> {
+        match method {
+            "call" => {
+                self.check_plugin_call_args("call", &Type::Float, args, span);
+                self.record_effect(Effect::Exec.name());
+                Some(Some(result_ty(Type::Float, Type::String)))
+            }
+            "call_int" => {
+                self.check_plugin_call_args("call_int", &Type::Int, args, span);
+                self.record_effect(Effect::Exec.name());
+                Some(Some(result_ty(Type::Int, Type::String)))
+            }
+            _ => None,
+        }
+    }
+}
+
+/// D-DEP-WASM1=A: the resolved return type of a covered `Plugin` method, read
+/// from `check_plugin_method`'s authoritative match — a pure lookup for
+/// codegen's TIR totality bookkeeping (mirrors `db_connection_method_return_ty`).
+pub fn plugin_method_return_ty(method: &str) -> Option<Type> {
+    match method {
+        "call" => Some(result_ty(Type::Float, Type::String)),
+        "call_int" => Some(result_ty(Type::Int, Type::String)),
         _ => None,
     }
 }
@@ -2219,7 +2325,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // D-TIMEDEPTH1=A: civil-time types.
         | "Date" | "DateTime"
         // D-NETDEP1=A / D-HTTPLIB1=A: HTTP types.
-        | "HttpClientReq" | "HttpClientResp" | "HttpMux" | "HttpSrvReq" | "HttpSrvResp"
+        | "HttpClientReq" | "HttpClientResp" | "HttpMux" | "HttpSrvReq" | "HttpSrvResp" | "HttpServerTls"
         // D-TYPEDTEXT1=D: typed text — a checked query/markup template built by
         // expected-type elaboration of a string literal (E0149 guards a plain
         // runtime `String` from filling this position).
@@ -2304,7 +2410,11 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
 /// for the one reserved core type that carries a generic type argument
 /// (`Type::Apply`, not `Type::Named`); see the `Type::Apply` arm in
 /// `CheckerInfer/expr.rs`'s member-access resolver.
-pub(crate) fn core_generic_struct_field(type_name: &str, field: &str, args: &[Type]) -> Option<Type> {
+pub(crate) fn core_generic_struct_field(
+    type_name: &str,
+    field: &str,
+    args: &[Type],
+) -> Option<Type> {
     if type_name == "DecodeResult" {
         return match field {
             "value" => args.first().cloned(),
@@ -3497,29 +3607,34 @@ pub fn core_fixed_sig(
     let list_u8 = Type::List(Box::new(u8_ty()));
     let io_unit = result_ty(unit.clone(), io.clone());
     match (module, name) {
-        ("core.fs", "read") => Some((vec![(read, string.clone())], Some(result_ty(string, io)))),
-        ("core.fs", "read_bytes") => Some((
+        ("core.files", "read") => Some((vec![(read, string.clone())], Some(result_ty(string, io)))),
+        ("core.files", "read_bytes") => Some((
             vec![(read, Type::String)],
             Some(result_ty(list_u8, io_error_ty())),
         )),
-        ("core.fs", "write" | "append") => Some((
+        // D-FILES-WRITE1 (merge) + D-FILES-APPEND1=A: `write`/`append_all` are the
+        // whole-file convenience twins of the streaming `open`/`create`/`append`
+        // handle constructors below. `append_all` (not `append`) so it doesn't
+        // collide with the streaming handle's `.append(text)` method in the same
+        // `core.files` namespace.
+        ("core.files", "write" | "append_all") => Some((
             vec![(read, Type::String), (read, Type::String)],
             Some(io_unit),
         )),
-        ("core.fs", "exists" | "is_dir") => Some((vec![(read, Type::String)], Some(bool_))),
-        ("core.fs", "remove" | "create_dir") => Some((
+        ("core.files", "exists" | "is_dir") => Some((vec![(read, Type::String)], Some(bool_))),
+        ("core.files", "remove" | "create_dir") => Some((
             vec![(read, Type::String)],
             Some(result_ty(unit_ty(), io_error_ty())),
         )),
         // D-LSDIR1=A: returns [DirEntry] ({name, path, is_dir}) — full path + type in one step.
-        ("core.fs", "list_dir") => Some((
+        ("core.files", "list_dir") => Some((
             vec![(read, Type::String)],
             Some(result_ty(
                 Type::List(Box::new(Type::Named("DirEntry".to_string()))),
                 io_error_ty(),
             )),
         )),
-        ("core.fs", "copy" | "rename") => Some((
+        ("core.files", "copy" | "rename") => Some((
             vec![(read, Type::String), (read, Type::String)],
             Some(result_ty(unit_ty(), io_error_ty())),
         )),
@@ -3536,6 +3651,13 @@ pub fn core_fixed_sig(
         ("core.env", "set") => Some((vec![(read, Type::String), (read, Type::String)], None)),
         ("core.env", "current_dir") => Some((vec![], Some(result_ty(Type::String, io_error_ty())))),
         ("core.env", "home_dir") => Some((vec![], Some(Type::Option(Box::new(Type::String))))),
+        // U13 (D-JPK-SECRETCRYPTO1): `core.vault.get(name)` — a decrypted repo
+        // secret, `None` if `name` isn't in the store. Same "may be missing"
+        // shape as `core.env.get`.
+        ("core.vault", "get") => Some((
+            vec![(read, Type::String)],
+            Some(Type::Option(Box::new(Type::String))),
+        )),
         ("core.process", "exit") => Some((vec![(read, int)], None)),
         ("core.process", "run") => Some((
             vec![(read, Type::List(Box::new(Type::String)))],
@@ -3891,6 +4013,46 @@ pub fn core_fixed_sig(
             vec![(read, Type::List(Box::new(u8_ty())))],
             Some(Type::String),
         )),
+        // D-RAYLIB1=A: first bounded `core.raylib` skeleton. These are typed,
+        // deterministic no-op stubs in codegen until the native raylib bridge
+        // is wired; the surface is intentionally tiny and display-gated.
+        ("core.raylib" | "jet.raylib", "window_open") => Some((
+            vec![(read, Type::Int), (read, Type::Int), (read, Type::String)],
+            Some(Type::Named("RaylibWindow".to_string())),
+        )),
+        ("core.raylib" | "jet.raylib", "window_should_close") => Some((
+            vec![(read, Type::Named("RaylibWindow".to_string()))],
+            Some(Type::Bool),
+        )),
+        ("core.raylib" | "jet.raylib", "begin_drawing") => {
+            Some((vec![(read, Type::Named("RaylibWindow".to_string()))], None))
+        }
+        ("core.raylib" | "jet.raylib", "clear_background") => {
+            Some((vec![(read, Type::Named("RaylibColor".to_string()))], None))
+        }
+        ("core.raylib" | "jet.raylib", "draw_text") => Some((
+            vec![
+                (read, Type::String),
+                (read, Type::Int),
+                (read, Type::Int),
+                (read, Type::Int),
+                (read, Type::Named("RaylibColor".to_string())),
+            ],
+            None,
+        )),
+        ("core.raylib" | "jet.raylib", "end_drawing") => Some((vec![], None)),
+        ("core.raylib" | "jet.raylib", "close_window") => {
+            Some((vec![(read, Type::Named("RaylibWindow".to_string()))], None))
+        }
+        ("core.raylib" | "jet.raylib", "color") => Some((
+            vec![
+                (read, Type::Int),
+                (read, Type::Int),
+                (read, Type::Int),
+                (read, Type::Int),
+            ],
+            Some(Type::Named("RaylibColor".to_string())),
+        )),
         // D-CODECS1: core.compress.gzip / core.compress.zstd — standalone codec APIs,
         // separate from core.archive. `compress` takes `[U8]` and is infallible;
         // `decompress` is fallible (malformed compressed stream → `Err(String)`),
@@ -3917,6 +4079,16 @@ pub fn core_fixed_sig(
             Some(Type::Named("DbConnection".to_string())),
         )),
         ("jet.db", "open_memory") => Some((vec![], Some(Type::Named("DbConnection".to_string())))),
+        // D-DEP-WASM1=A / D-PLUGIN1=B (c81): `core.plugin` — sandboxed WASM
+        // Component Model plugin loader (wasmtime, runtime-side only, I6).
+        // `load` is the only module-level entry point; it PRODUCES a `Plugin`
+        // handle (mirrors `jet.db`'s `open` producing a `DbConnection`). The
+        // actual calls (`.call`/`.call_int`) are instance methods dispatched by
+        // the receiver's `Plugin` type (see `check_plugin_method` below).
+        ("jet.plugin", "load") => Some((
+            vec![(read, Type::String)],
+            Some(Type::Named("Plugin".to_string())),
+        )),
         // D-UUIDENC1=A: hex and base64 codecs. `encode` is infallible; `decode`
         // returns `[Byte] ? String` (invalid input → Err).
         ("core.encoding.hex", "encode") => {
@@ -4251,19 +4423,6 @@ pub(crate) fn devserver_method_return(
 
 pub(crate) fn core_module_items(module: &str) -> Vec<String> {
     let items: &[&str] = match module {
-        "core.fs" => &[
-            "read",
-            "read_bytes",
-            "write",
-            "append",
-            "exists",
-            "remove",
-            "list_dir",
-            "create_dir",
-            "is_dir",
-            "copy",
-            "rename",
-        ],
         "core.io" => &["args", "input", "read_all_input", "eprint", "stdin"],
         "core.env" => &["get", "set", "current_dir", "home_dir"],
         "core.process" => &["exit", "run"],
@@ -4284,7 +4443,13 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         // D-JSONVERB1: `to_string`/`to_string_pretty` (compact/pretty); `parse` → dynamic
         // JSON value; `decode` → lenient typed decode (D-JSON3). D-MIGRATE3=A:
         // `decode_traced<T>` rides alongside `decode` on every format.
-        "core.encoding.json" => &["parse", "decode", "decode_traced", "to_string", "to_string_pretty"],
+        "core.encoding.json" => &[
+            "parse",
+            "decode",
+            "decode_traced",
+            "to_string",
+            "to_string_pretty",
+        ],
         // D-SERDE6: typed `decode<T>` rides every format submodule alongside `parse`.
         "core.encoding.csv" => &["parse", "decode", "decode_traced", "to_string"],
         "core.encoding.toml" => &["parse", "decode", "decode_traced", "to_string"],
@@ -4316,7 +4481,26 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         "core.mem.alloc" => &["Arena", "Bump", "Pool", "Fixed"],
         "core.gc" => &["Gc", "collect"],
         "core.tasks" => &["spawn", "channel"],
-        "core.files" => &["open", "create", "append"],
+        // D-FILES-WRITE1 (merge, was `core.fs` + `core.files`): one module for
+        // both whole-file convenience helpers and streaming handle constructors.
+        // D-FILES-APPEND1=A: whole-file one-shot append is `append_all`, kept
+        // distinct from the streaming handle's `.append(text)` method.
+        "core.files" => &[
+            "read",
+            "read_bytes",
+            "write",
+            "append_all",
+            "exists",
+            "remove",
+            "list_dir",
+            "create_dir",
+            "is_dir",
+            "copy",
+            "rename",
+            "open",
+            "create",
+            "append",
+        ],
         "core.path" => &["join", "parent", "extension", "normalize"],
         // D-DEFER1 option B: scope-exit guard.
         "core.scope" => &["guard"],
@@ -4387,6 +4571,17 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
             "tar_get",
             "tar_names_json",
         ],
+        // D-RAYLIB1=A: typed bridge skeleton.
+        "jet.raylib" => &[
+            "window_open",
+            "window_should_close",
+            "begin_drawing",
+            "clear_background",
+            "draw_text",
+            "end_drawing",
+            "close_window",
+            "color",
+        ],
         // D-CODECS1: standalone compression codecs, separate from core.archive.
         "core.compress.gzip" => &["compress", "decompress"],
         "core.compress.zstd" => &["compress", "decompress"],
@@ -4394,6 +4589,8 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         // D-DBDRIVER1: `close`/`query`/`query_one`/`execute`/`begin`/`commit`/
         // `rollback` are `DbConnection` instance methods, not module items.
         "jet.db" => &["open", "open_memory"],
+        // D-DEP-WASM1=A: sandboxed WASM plugin loader ring package.
+        "jet.plugin" => &["load"],
         // D-REACT1=B: opt-in reactive library — signals/derived/effects.
         // D-SIGNAL1: "computed" is the canonical alias for "derived".
         "jet.reactive" => &["signal", "derived", "computed", "effect"],
@@ -4441,7 +4638,10 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         "core.time.datetime" => &["from_timestamp", "now"],
         // D-NETDEP1=A / D-HTTPLIB1=A / D-HTTPLIB2=B: HTTP library.
         "core.http.client" => &["get", "post", "request"],
-        "core.http.server" => &["mux", "serve", "response"],
+        "core.http.server" => &["mux", "serve", "response", "tls"],
+        // U13 (D-JPK-SECRETCRYPTO1): decrypted-repo-secret read, age-style
+        // crypto FFI bridge.
+        "core.vault" => &["get"],
         _ => &[],
     };
     items.iter().map(|s| s.to_string()).collect()
@@ -4451,10 +4651,13 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
 pub(crate) fn is_freestanding_forbidden(module: &str) -> bool {
     matches!(
         module,
-        "core.fs" | "core.files" | "core.io" | "core.net" | "core.tasks"
+        "core.files" | "core.io" | "core.net" | "core.tasks"
             | "core.process" | "core.time" | "jet.http" | "jet.log"
             // D-TERM1: terminal I/O requires an OS terminal device.
             | "core.term"
+            // U13 (D-JPK-SECRETCRYPTO1): reading the encrypted repo store is
+            // filesystem I/O — same OS dependency as `core.files`.
+            | "core.vault"
     )
 }
 
@@ -4466,7 +4669,7 @@ pub(crate) fn module_short_name(module: &str) -> &str {
 /// Fix hint for E3301 depending on the forbidden module.
 pub(crate) fn freestanding_hint(module: &str) -> &'static str {
     match module {
-        "core.fs" | "core.files" => {
+        "core.files" => {
             "Embed the data at compile time with `@embed(\"file\")`, or build without `--freestanding`."
         }
         "core.net" | "jet.http" => {
@@ -4494,7 +4697,7 @@ pub(crate) fn freestanding_hint(module: &str) -> &'static str {
 pub(crate) fn unknown_core_item(module: &str, name: &str, span: Span) -> Diagnostic {
     let items = core_module_items(module);
     let mut fix = if items.is_empty() {
-        "import a specific core module, like `import core.fs as fs;`".to_string()
+        "import a specific core module, like `import core.files as fs;`".to_string()
     } else {
         format!("use one of: {}", items.join(", "))
     };
@@ -4991,4 +5194,28 @@ pub fn reflect_method_return(type_name: &str, method: &str, n_args: usize) -> Op
 
 pub fn is_reflect_type_name(name: &str) -> bool {
     matches!(name, "Value" | "Field")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn raylib_skeleton_signatures_are_registered() {
+        let window = core_fixed_sig("jet.raylib", "window_open")
+            .expect("raylib window_open signature")
+            .1
+            .expect("window_open return type");
+        assert_eq!(window, Type::Named("RaylibWindow".to_string()));
+
+        let color = core_fixed_sig("jet.raylib", "color")
+            .expect("raylib color signature")
+            .1
+            .expect("color return type");
+        assert_eq!(color, Type::Named("RaylibColor".to_string()));
+
+        let items = core_module_items("jet.raylib");
+        assert!(items.contains(&"draw_text".to_string()));
+        assert!(items.contains(&"close_window".to_string()));
+    }
 }

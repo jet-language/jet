@@ -156,169 +156,223 @@ A future feature must never die as a generic syntax error. Old Jet and foreign
 syntax teaching is paused until post-Epoch 6 (D-S14-PAUSE); active docs and
 fixtures use canonical syntax only.
 
-## M2 — ownership (done)
+## M2 — ownership (memory model v5, D-MEM1, done 2026-07-04)
 
 Borrow-checker mechanics live in the transpiler; tier-1 users never write
-`&`, `&mut`, `*`, or lifetime parameters.
+Rust's `&`, `&mut`, `*`, or lifetime parameters. Two sigils, enforced (no
+inference, no elevation):
 
-| You write              | It means                          | Compiles to Rust |
-|------------------------|-----------------------------------|------------------|
-| `fn f(x: T)`           | shared read (default)             | `x: &T`          |
-| `fn f(x: ~T)`          | mutable borrow                    | `x: &mut T`      |
-| `fn f(x: ^T)`          | move; caller must write `^`        | `x: T`           |
-| `fn f() -> &T`         | borrow return (elided lifetime)   | `-> &T`          |
-| `field: &T` (tier 2)   | stored reference in a struct      | `field: &'a T`   |
+| You write     | It means                       | Compiles to Rust |
+|----------------|--------------------------------|-------------------|
+| `fn f(x: T)`   | read (default; the only unmarked meaning) | `x: &T`   |
+| `fn f(x: &T)`  | write — exclusive edit access   | `x: &mut T`       |
+| `fn f(x: ^T)`  | take — ownership moves to callee | `x: T`          |
 
-**Stored-reference fields (D-REF-SHORTHAND1/2):** a struct field written
-`field: &T` holds a borrow of some *owner* rather than its own copy of `T`.
-At each place the struct is built, the field's **owner** — the value the
-borrow points into — is inferred: the *candidate owners* are the in-scope
-values (parameters, `let`/`::` locals, and module consts) whose type is
-exactly the referent type `T`. Exactly one candidate → it is the owner, no
-annotation needed. Two or more → the owner is ambiguous (**E0207**) and the
-field must name it with a `#Ref(label)` prefix, where `label` is one of the
-candidates. Zero candidates → the fill must be a `'static` const, since any
-shorter-lived source would dangle (**E2302**). An explicit `#Ref(label)` that
-names no candidate is **E2306**. `#Ref` is the only annotation and it lives on
-the `#` directive plane (never `@Ref`, per D-REF-SHORTHAND2); it *only*
-disambiguates the owner — it never turns a non-`&` field into a reference, so
-the retired `#Ref(owner) name: T` form (plain type, no `&`) is a hard error
-(**E0427**). Codegen lowers the field to `&'owner T`; distinct labels get
-distinct lifetimes.
+An unmarked parameter is **always** read — a body write to it, or handing it
+to a `&`/`^` position, is a hard error at the definition (fix-it: add `&` at
+the parameter and every call site). Call sites mirror the parameter's sigil:
 
-**`View<T>` (D-DYNARRAY1):** the collection-side sibling of a stored `ref`
-field, above. `list.view(a..b)` is a zero-copy window into `list`'s own
-backing storage — unlike `list[a..b]`, which stays the safe, default,
-**copying** slice (unchanged by `View<T>`'s addition). A `View<T>` compiles
-to a plain borrowed Rust slice `&[T]` (an elided-lifetime reference, no
-wrapper struct); the compiler tracks the list it borrows from the same way
-it tracks a `ref` field's owner, and rejects the window escaping that list's
-scope (returned, rebound to another local, or stored in a struct field) with
-**E2305**. Read-only surface in v1: indexing, iteration, `.fold`, and
-`.map` (map-to-owned — returns a fresh `[R]`, never another view); no
-mutation through a view. See `crates/jet-codegen/src/Prelude/CoreLib.rs`
-(the `View<T>` banner) and docs/spec/diagnostics.md's Tier-2 reference table.
+```jet
+fn bump(n: &Int) { n += 1 }
+fn archive(name: ^String) -> String { return name }
 
-The capability is a prefix sigil on the **type** (D-CAP7) — see "Access
-capability sigils" below for the full set. Call-site rules: the call-site sigil
-must match the parameter; omitting `^` on a clonable type inserts `.clone()`
-with lint **L0201** (fired only when the cloned value is dead after the call —
-D-L0201); on a non-clonable type → **E0201**. Omitting `~` on a mutable
-parameter → **E0202**. Using the same name twice in one call while `~` is active
-→ **E0204**. `*` outside `#Unsafe` → **E0208**.
+fn run() {
+    score: Int := 41
+    bump(&score)                 // & mirrors &Int
+    saved :: archive(^"vault")   // ^ mirrors ^String
+}
+```
+
+(examples/features/memory/ownership.jet) Method receivers carry the sigil on
+`self`; plain `self` is read; the sigil lives on the definition, not the call
+site:
+
+```jet
+impl Player {
+    fn show(self) -> Int { return self.hp }                     // read receiver
+    fn heal(&self, amount: Int) { self.hp = self.hp + amount }  // write receiver
+}
+```
+
+```jet
+p.heal(10)    // clean — the &self is on the method definition, not here
+p.show()      // plain read receiver
+```
+
+A write through a read receiver is **E0205** ("write the receiver as
+`&self`"); calling a `&self` method needs a changeable binding at the call
+site (**E0202**, "does not have edit access (`&`)"). Using the same name
+twice in one call while a `&` on it is active is **E0204** ("while something
+is being changed, nobody else may be looking at it") — pass `&x` once, or
+`copy x` first.
+
+**Named binding vs. temporary.** Passing a *named binding* to a `^` (take)
+parameter without `^` is **E0209** — a hard error, never a silent clone (the
+old `L0201` lint that auto-cloned is gone). A *temporary* — a literal,
+`copy x`, or a call result — passes freely with no `^`, since nothing survives
+to be used after. `copy x` (D-CAP2) is the one copy spelling — a real prefix
+expression, not a method: `.clone()` is not user-typable Jet syntax (`clone`
+falls through to the ordinary "no such method" error). `copy` on a value Jet
+can't duplicate — a function, a trait value — is **E0211**; on a scalar it's
+legal but redundant (already trivially copyable).
+
+```jet
+name: String :: "vault"
+saved :: copy name    // fresh, independent value; `name` still usable after
+```
+
+(examples/features/memory/copy_verb.jet)
+
+### Second-class borrows
+
+There is no first-class (storable, returnable) borrow in v1: `-> &T` return
+types and `&T` struct fields are not in the grammar (ordinary syntax errors,
+no special teaching text — the mechanism is gone, not disallowed). A struct
+field always owns its value:
+
+```jet
+struct Span { text: String, meta: String }
+
+fn describe(source: String, kind: String) {
+    s: Span :: Span.{text: source, meta: kind}   // fields own their data
+    print(s.text)
+}
+```
+
+(examples/features/memory/ref_field.jet) When a program genuinely needs
+"many owners, one value," reach for `Shared<T>` or `Pool<T>`/`Id<T>` (below)
+instead of a stored reference.
+
+### Zero-copy string views
+
+`String.trim()`/`.after(sep)`/`.before(sep)` bound to a local return a
+zero-copy view into the receiver's own buffer — a real `&str` borrow,
+invisible in the type (`String` stays one Jet-level type end to end) —
+whenever sema can prove the binding can't outlive its owner:
+
+```jet
+padded := "  nate@jet.dev  "
+email :: padded.trim()
+domain :: email.after("@")
+print("padded still readable: {padded}")   // reading the owner still works
+```
+
+(examples/features/memory/string_view.jet) A view's legal surface is
+narrow: chain another `.trim()/.after()/.before()`, interpolate it
+(`"{domain}"`), or `copy` it into an owned `String`. Any other use —
+return, rebind, struct field, call argument, list/tuple element, any other
+method — is **E2307**. `[T]` list slices (`list.view(a..b)`, D-DYNARRAY1,
+predates this migration) follow the same owner-outlives-view reasoning,
+reported as **E2305**. Either kind of view crossing a `tasks.spawn`/
+`Sender.send` boundary is reported once, as **E1102** (unsendable value) —
+a task or channel moves owned data between threads, and a view can't cross
+without ownership.
+
+### Escape hatches — `Shared<T>` and `Pool<T>`/`Id<T>`
+
+Two named mechanisms cover what a first-class borrow used to promise —
+share-across-scopes and many-owners-one-value — without reviving stored
+references.
+
+**`Shared<T>`** (D-SHARED-API1) is a lock-guarded shared handle — "a
+copyable door":
+
+```jet
+config :: Shared.new(AppConfig.{ name: "jet-server", hits: 0 })
+t1 :: tasks.spawn(() => handle(1, config))   // no `take` needed
+label :: config.read(c => c.name)
+config.edit(c => { c.hits += 1 })
+```
+
+(examples/features/memory/shared_config.jet) `Shared.new(x)` infers `T` from
+`x`; `.read(f)`/`.edit(f)` run a closure against a read- or write-locked view,
+the lock scoped to the call only. Cloning `Shared<T>` is always a cheap
+handle clone, never a deep copy of `T` — so it crosses a `tasks.spawn`
+boundary with no `^`.
+
+**`Pool<T>`/`Id<T>`** (D-POOLID-API1) is a generational arena: every value
+lives in one shared table, and other values point at it by `Id<T>` — plain
+copyable, comparable index+generation data, never touching `T` itself:
+
+```jet
+world := Pool<Player>.new()
+kai :: world.add(Player.{ name: "Kai", hp: 100, attack: 15, target: None })
+world[kai].target = Val(rem)          // nested write through a real place
+fallen :: world.remove(kai)           // T?, mirrors Map.remove
+```
+
+(examples/features/memory/entity_world.jet, entity_tree.jet) `pool[id]`
+indexes for read and write; `.ids()` walks every live entry. A stale `Id<T>`
+(its slot was removed) panics at runtime, mirroring the array-out-of-bounds
+precedent (examples/features/memory/pool_stale_id.jet) — not a new
+diagnostic code.
+
+### `policy no_alloc`
+
+A bare module-level `policy no_alloc` (D-NOALLOC-SEM1) flags four
+allocation-shaped expressions written directly in that module's own function
+bodies — string interpolation with a `{…}` hole, `.push`/`.insert`, a
+struct/enum literal for a heap-owning type, `copy` of a heap-owning type —
+as **E0921**. The check is local only: a call into another function is that
+function's own module's problem, never followed.
+
+```jet
+policy no_alloc
+
+fn integrate(e: &Entity, dt: Float) { e.pos += e.vel * dt }
+```
+
+(examples/features/memory/no_alloc_policy.jet)
 
 `const NAME = value` always looks the same; the transpiler emits Rust
 `const` or `static` when the address is taken or the type needs it.
 
-Aliasing rule, stated for humans: *while something is being changed,
-nobody else may be looking at it.* Foreign `read`/`write` spellings get
-teaching errors **E0017**/**E0018** (S14). A `&T` return may only hand
-back a parameter, a scalar local, or a const — not fresh text (**E0206**).
+Aliasing rule, stated for humans: *while something is being changed, nobody
+else may be looking at it.* Foreign `read`/`write` spellings get teaching
+errors **E0017**/**E0018** (S14).
 
-## Access capability sigils (D-CAP7/D-CAP8)
+## Access capability sigils (D-MEM1)
 
-The capability is a prefix sigil on the **type**, not the name. Five sigils; four ship today:
+The capability is a prefix sigil on the **type**, not the name. Two sigils
+ship in v1 (unmarked read is the default, not a sigil):
 
 | Sigil | Capability | Compiles to Rust |
-|-------|-----------|-----------------|
-| `T` (bare) | read/infer — callee reads only; inferred from body (D-CAP8) | `x: &T` |
-| `~T` | edit — exclusive mutable access | `x: &mut T` |
+|-------|-----------|-------------------|
+| `T` (bare) | read — callee only reads; enforced, never elevated | `x: &T` |
+| `&T` | write — exclusive edit access | `x: &mut T` |
 | `^T` | take — ownership moves to callee | `x: T` |
-| `&T` | share — value may escape the call (stored, cached, spawned) | `x: Arc<T>` / retained ref |
-| `*T` | raw pointer (D-CAP9) | `x: *mut T` |
+
+`~` is not part of the v5 grammar (ordinary syntax error). Raw-pointer access
+(`p.*` postfix deref, prefix `*x`) is a separate, `#Unsafe`-gated mechanism
+(D-CAP9) — not a parameter capability; the compiler's `AccessConvention`
+enum keeps dead `Share`/`Raw` variants internally, inert until a future
+tier reactivates them.
 
 ### Placement
 
 Capability rides the type on the parameter:
 
 ```jet
-fn damage(p: ~Player, amount: Int) {   // ~Player: edit; Int: read (bare)
+fn damage(p: &Player, amount: Int) {   // &Player: write; Int: read (bare)
     p.hp = p.hp - amount
 }
-
-fn report(p: &Player) {                // &Player: share
-    print("{p.name}: {p.hp}")
-}
 ```
 
-The call site mirrors the sigil — the capability is always visible where mutation or movement happens:
+The call site mirrors the sigil — the capability is always visible where
+mutation or movement happens:
 
 ```jet
-damage(~p, 30)    // ~ mirrors the parameter's ~Player
-report(&p)        // & mirrors &Player
+damage(&p, 30)    // & mirrors the parameter's &Player
 close(^file)      // ^ mirrors ^File — file is consumed
-```
-
-Method receivers carry the sigil on `self`; plain `self` is read:
-
-```jet
-impl Player {
-    fn show(self) -> Int { return self.hp }      // read receiver
-    fn heal(~self, amount: Int) { self.hp =  self.hp + amount }  // edit receiver
-}
-```
-
-Method call syntax stays clean — the receiver sigil is on the `impl`, not the call site:
-
-```jet
-p.heal(10)    // clean; the ~self is on the method definition, not here
-p.show()      // plain read receiver
-```
-
-### Inference (D-CAP8)
-
-An unmarked parameter is `Infer`: the compiler walks the body and resolves the
-minimum capability the usage requires.
-
-Resolution rules (deterministic, in priority order):
-1. Body assigns a field (`p.field = …`) or calls a `~self` method on the param → resolves to `~`.
-2. Body passes the param to a `^param` position → resolves to `^`.
-3. Body passes the param to a `&param` position → resolves to `&`.
-4. Otherwise → resolves to read (bare `T`, no sigil).
-
-The call site **still requires the resolved sigil** for edits and moves — inference removes
-the annotation from the definition, not the visibility at the call site:
-
-```jet
-// unmarked `c` — body writes c.value → compiler infers ~Counter
-fn bump(c: Counter, by: Int) {
-    c.value = c.value + by
-}
-
-fn run() {
-    c := Counter.{ value: 0 }
-    bump(~c, 5)    // ~ still required at the call site
-    bump(~c, 3)
-    print(value_of(c))
-}
-```
-
-An unmarked parameter whose body only reads it resolves to plain read; the call site needs
-no sigil:
-
-```jet
-fn value_of(c: Counter) -> Int {
-    return c.value    // read only — resolves to bare T
-}
-// call: value_of(c)  — no sigil
-```
-
-Inference also applies when a param calls a `~self` method on itself:
-
-```jet
-struct Player { hp: Int }
-impl Player { fn damage(~self, n: Int) { self.hp =  self.hp - n } }
-
-fn hurt(p: Player) { p.damage(5) }    // p is bare; body calls ~self → infers ~Player
-fn run() { x := Player.{ hp: 100 }; hurt(~x); print(x.hp) }
 ```
 
 ### Optional composition
 
-A capability sigil composes with `?` (optional presence) directly: `~User?`
-means "edit access over an optional User", `&Texture?` means "share an optional
-Texture". The sigil and `?` follow the same type-side grammar as any other type
-annotation — the sigil is the parameter prefix, `?` is the type suffix.
+A capability sigil composes with `?` (optional presence) directly: `&User?`
+means "write access over an optional User", `^Texture?` means "take an
+optional Texture". The sigil and `?` follow the same type-side grammar as
+any other type annotation — the sigil is the parameter prefix, `?` is the
+type suffix.
 
 ### E0029 — two capability markers
 
@@ -328,11 +382,12 @@ Placing more than one capability sigil on a single parameter is a parse error:
 error[E0029]: two capability markers on one parameter
   --> file.jet:3:12
    |
- 3 | fn bad(p: ~^Player) { … }
+ 3 | fn bad(p: &^Player) { … }
    |           ^^ remove one capability marker
 ```
 
-Access capabilities use sigils only: bare `T`, `~T`, `^T`, and `&T`.
+Access capabilities use sigils only: bare `T` (read), `&T` (write), `^T`
+(take) — no fourth spelling.
 
 ## M3 — data & methods (done)
 
@@ -358,14 +413,14 @@ impl Circle {
 }
 ```
 
-- **`self`** is the receiver; prefix the type sigil (`~self`, `^self`, `&self`) like any parameter (D-CAP7).
-- **Self-mutation (D-MUTSELF1):** inside a **`~self`** method the receiver may be
+- **`self`** is the receiver; prefix the type sigil (`^self`, `&self`) like any parameter (D-MEM1) — bare `self` is read.
+- **Self-mutation (D-MUTSELF1):** inside a **`&self`** method the receiver may be
   changed in place — assign a field (`self.field = v`), update one (`self.field += v`,
-  S17), or reassign the whole receiver (`self = New.{…}`). No new syntax (a `~`
-  parameter is already a valid assignment LHS). The same write in a non-`~self`
-  method (a shared-read receiver) is **E0205**, pointed at the assignment with a "write
-  the receiver as `~self`" fix. Calling a `~self` method needs a changeable
-  receiver binding (`:=`/`~`), enforced at the call site by E0202.
+  S17), or reassign the whole receiver (`self = New.{…}`). No new syntax (a `&`
+  parameter is already a valid assignment LHS). The same write in a non-`&self`
+  method (a read receiver) is **E0205**, pointed at the assignment with a "write
+  the receiver as `&self`" fix. Calling a `&self` method needs a changeable
+  receiver binding (`:=`), enforced at the call site by E0202.
 - Invoke with **`c.area()`** (not `area(c)`).
 - Methods may live **inside** the type, in **`impl Type { }`**, or as a top-level
   external inherent method **`fn Type.method(self, ...) { }`** (D-EXTMETH1) —
@@ -825,7 +880,7 @@ Two use forms (S16): **quotes = file path, no quotes = module.**
 **`use "path/to/file";`** — quoted path to a `.jet` file, relative to
 the using file's directory (`use "./lib";` for a sibling file;
 default namespace = last path segment). **`use name;`** or
-**`use core.fs;`** — unquoted module name (searches recursively from
+**`use core.files;`** — unquoted module name (searches recursively from
 the project root for `name.jet` or `name/{name,main}.jet`; `core` is a
 compiler-exported module per S51). Optional **`as alias`** in both forms.
 
@@ -1054,7 +1109,7 @@ hooks; scheduler-enforced pause/cancel semantics land with the M:N runtime work.
 
 `tasks.channel<T>() -> (Sender<T>, Receiver<T>)` (D-TUPLE-DESTRUCT1) creates a
 linked send/receive pair, destructured at the call site: `(tx, rx) :=
-tasks.channel<T>()`. A second sender is `tx.clone()` — there's no combined
+tasks.channel<T>()`. A second sender is `copy tx` — there's no combined
 "channel" value to fetch one off of. `sender.send(value)` moves a `T` into the
 channel (`take` semantics for non-copy values), and `receiver.receive() -> T or
 Closed` blocks until a value arrives or all senders are gone. Channel payloads
@@ -1131,6 +1186,39 @@ dashed-name = ident { "-" ident } ;                (* S84: kebab-case names *)
 - **`env.<name>:` values reuse the ordinary expression parser** — typically a
   struct literal (`Env.{ packages: […], prompt: "…" }`), so lists and strings
   work with no new grammar.
+- **Ad-hoc adapters (U20):** an `env.<name>.packages` list may contain
+  `Pkg.adapt(name:, source:, recipe:)`. `source:` is a provider ref such as
+  `path@vendor/tool`; this U20 slice realizes `Recipe.copy()` and
+  `Recipe.prebuilt(bin:, as:)` into ordinary hangar packages, with the same
+  store/lock path as any other package. `jetpack add <ref> --adapt` prints a
+  draft adapter and does not run upstream code.
+- **No-Nix machines (U23):** core packages and adapted packages realize without
+  Nix. Package refs that still route through the Nix compatibility provider are
+  reported together as E1272, naming only those holes and suggesting either
+  installing Nix or drafting an adapter with `jetpack add <ref> --adapt`.
+  Foreign-flake commands remain E1256 because they cannot run at all without
+  the `nix` binary.
+- **Offline discovery (U26):** `jet search <query>` and
+  `jet info <source>.<package>` read only `.jet/discovery/index.jsonl`, local
+  provider fixtures, and hangar metadata. They never fetch. `--json` emits the
+  same package records the editor discovery hooks consume: source, name,
+  resolved ref, version, platforms, docs, provenance, and typed service option
+  fields.
+- **Failed-build debugging (U27):** recipe-backed builds persist per-step logs
+  under the hangar. On failure, scratch is preserved in hangar-managed storage
+  and the diagnostic names `jet logs <pkg>` plus `--shell-on-fail`. Package-form
+  `jet explain <ref>` prints the latest resolution/build record; code-form
+  `jet explain E1234` keeps the existing diagnostic essay behavior.
+- **No daemon / no root (U28):** jetpack is a one-shot, user-owned process:
+  no resident daemon, no root-owned default hangar, no privileged sandbox
+  helper. Concurrent commands coordinate through file locks. If unprivileged
+  sandboxing is unavailable, Jetpack emits L0205; `jetpack config sandbox
+  require` makes that condition E1275 instead.
+- **Offline guarantee (U29):** once a package ref is realized into the hangar,
+  realize-class verbs can use it again with `--offline` and no provider
+  metadata refresh. Network-class verbs (`add`, `update`, `outdated`,
+  publish/cache sync) refuse `--offline`, and a missing local object reports
+  E1276 instead of fetching or timing out.
 - **`system.<name>:` and `image.<name>:` values use dedicated typed parsers**
   (U11/U13/U14) — the `options` list (`net.hostName: laptop`), the typed
   `target` value (`linux.x64`), and the `Service` map don't fit the ordinary
@@ -1172,6 +1260,14 @@ image_field = "from"   ":" "system" "." dashed-name  (* U14: required; S84 name 
 - **U12 — `Service` is an open record.** Each service under `services:` is a bare
   `{ … }` (type inferred, U18) whose first field is `enable: Bool` (required —
   missing is **E0975**, non-Bool is **E0975**); any further fields are allowed.
+- **U13 — `secrets:` (D-JPK-SECRETCRYPTO1).** An `env.<name>` role-module may
+  declare `secrets: ["name", …]` — a plain `[String]` list, no dedicated
+  grammar. Each name is one this env expects to find in the project's
+  encrypted repo store (`.jet/secrets.age`, managed by `jetpack secrets
+  set/get/recipients/keygen`); reading one at runtime is `core.vault.get`,
+  gated by the `Secret` effect (**E1264** if ungranted) and unconditionally
+  denied at build/comptime time (**E1265**, no `#Impure` escape hatch).
+  `jetpack secrets get <name>` on a name absent from the store is **E1263**.
 - **U14 — `Image` derives from a `System`.** An `Image` has `from: system.<name>`
   (required — missing is **E0977**; an unknown system is **E0978**) and an
   optional `format:` ∈ {`iso`, `qcow`, `raw`}, default `iso` (anything else is
@@ -1287,7 +1383,7 @@ function's set when the function reaches an operation that carries it.
 | Effect  | Carried by |
 |---------|-----------|
 | `Io`    | `print`, `eprint`, `input`, `read_all_input`, `core.io.*` |
-| `Fs`    | `core.fs.*`, `files.*` streaming handles |
+| `Fs`    | `core.files.*` (whole-file helpers and streaming handles) |
 | `Net`   | `core.net.*`, `core.http.*` |
 | `Time`  | `core.time.now`/`sleep`/`start`, `core.time.now` |
 | `Rand`  | `core.random.*` |
@@ -1295,11 +1391,39 @@ function's set when the function reaches an operation that carries it.
 | `Exec`  | `core.process.run`/`exit` |
 | `Db`    | `core.db.*` |
 | `Log`   | `core.log.*` |
-| `Gpu`   | (reserved; named in D-EFF3, no Core mapping yet) |
+| `Gpu`   | `core.raylib.*`, future `core.gpu.*` / `core.game.*` |
 
 A call to an `extern rust`/C foreign function, whose body the compiler can't
 inspect, contributes the **maximal** set (every effect) — it is assumed to do
 anything. This keeps inference sound without reading foreign code.
+
+### HTTPS client default (D-TLS1)
+
+`core.net.fetch` and `core.http.client` support `https://` in the default build
+through the rustls bridge and system certificate roots. Plain `http://` remains
+available for loopback fixtures and old endpoints. HTTPS client failures are
+reported in Jet terms: E4201 for handshake failure, E4202 for certificate trust
+failure, and E4203 when the host image has no usable certificate roots.
+Advanced client TLS configuration belongs in `core.tls` (custom roots,
+pinning, client certificates). D-TLSSERVE1=A adds HTTPS serving as a named
+option on the same server entry point: `Server.serve(addr, mux, tls:
+Server.tls(cert, key))?`. The third argument must be labeled `tls:`; unlabeled
+TLS config is rejected so the transport switch is visible at the call site.
+
+### Graphics and games (D-RAYLIB1, D-GAME1-3)
+
+`core.raylib` is the first-party graphics bridge package. The current slice is
+a typed skeleton: `window_open`, `window_should_close`, `begin_drawing`,
+`clear_background`, `draw_text`, `end_drawing`, `close_window`, and `color`
+type-check and lower to deterministic no-op runtime stubs. The native raylib
+link, window lifecycle, drawing, input, audio, and error translation are the
+next stage; examples that require a display are type-checked in CI and run only
+under an explicit display gate.
+
+`core.game` is the flagship engine name (D-GAME2=A). Its public beginner API is
+scene-first with a frame hook (D-GAME3=C): a `Scene` owns durable editable game
+data, while `scene.on_frame((frame) => { ... })` attaches per-frame logic.
+`core.game` is not implemented in this slice.
 
 ### Declaring a boundary — `#(…)` on the signature
 
@@ -1313,7 +1437,7 @@ fn_effects = "fn" ident "(" params ")" [ "#(" [ effect { "," effect } ] ")" ]
 
 ```jet
 fn load(path: String) #(Fs) -> String {
-    return core.fs.read(path)?;        // OK: Fs ⊆ {Fs}
+    return core.files.read(path)?;     // OK: Fs ⊆ {Fs}
 }
 ```
 
@@ -1346,7 +1470,7 @@ caps_region = "#Caps" "(" [ effect { "," effect } ] ")" block ;
 ```jet
 fn run() {
     #Caps(Fs, Io) {
-        text :: core.fs.read("x") ?? "";   // Fs — allowed
+        text :: core.files.read("x") ?? "";   // Fs — allowed
         print(text);                            // Io — allowed
     }
 }
@@ -1512,6 +1636,25 @@ This is a *different* toolchain from the Rust/native **build** toolchain that
 compiles a user's `extern rust` bridge crates (D-JPK-BUILDTOOL1, E1240): that
 one builds bridge dependencies; this one pins the Jet compiler itself.
 
+## Source channels and outdated (D-JPK-CHANNEL1=A, U21)
+
+Source refs may carry channel selectors: `#latest`, `#main`, or a major-series
+mask such as `#v0.x`. The channel is tracking intent; `.jet/lock` records the
+exact source that intent resolved to:
+
+```toml
+[[source_channel]]
+name = "default"
+channel = "latest"
+exact = "github:acme/tool#v1.2.0"
+```
+
+`jetpack update [source]` is the only verb that moves `[[source_channel]]`.
+`jetpack outdated` compares the lock to channel metadata and writes nothing.
+`jetpack build`, `jetpack run`, `jetpack enter`, and `jetpack dev` read only the
+exact lock entry; an unlocked channel source is E1271, including under CI or
+`--offline`.
+
 ### Frozen-forward identity block
 
 The `payload:` block's `name`, `version`, and `jet` fields form the project's
@@ -1651,12 +1794,10 @@ jet expand <file.jet>                  # every lens, grouped, empty ones skipped
 ```
 
 Facts are read straight off the ordinary check pass — never a second
-analysis, never rustc (I2/I3). A lens renders either fields already sitting
-on the checked AST (e.g. `Func::is_inline`/`is_inline_always`, validated by
-the time the bundle compiled at all) or a fact recorded once during checking
-and threaded out on `SemIndexEffectFacts` (e.g. `refs`, via
-`crates/jet-sema/src/Sema/Facts.rs::RefFact`) — the same side-channel
-`jet semindex`/`jet impact` already read, not a parallel pipeline.
+analysis, never rustc (I2/I3). A lens renders fields already sitting on the
+checked AST (e.g. `Func::is_inline`/`is_inline_always`, validated by the
+time the bundle compiled at all) — the same side-channel `jet semindex`/
+`jet impact` already read, not a parallel pipeline.
 
 **Floor lenses (this card):**
 
@@ -1664,17 +1805,11 @@ and threaded out on `SemIndexEffectFacts` (e.g. `refs`, via
   `@InlineAlways`: the contract and the Rust attribute codegen emits
   (`#[inline]` / `#[inline(always)]`). Functions with neither marker produce
   no line — the lens reports contracts, not every function in the program.
-- `refs` (D-REF-SHORTHAND1) — every `&T` stored-ref struct field's resolved
-  owner at its construction site: `labeled #Ref(x)` when the field named its
-  owner explicitly, `inferred — sole candidate` when sema found exactly one
-  in-scope value of the referent type.
 
-```
-$ jet expand --facts refs examples/features/memory/ref_field.jet
-refs — resolved owners for &T stored-ref fields (D-REF-SHORTHAND1) (2 facts)
-  examples/features/memory/ref_field.jet:10:22   Span.text   owner: source   (labeled #Ref(source))
-  examples/features/memory/ref_field.jet:10:36   Span.meta   owner: kind   (labeled #Ref(kind))
-```
+A `refs` lens (D-REF-SHORTHAND1) once reported resolved owners for `&T`
+stored-reference struct fields; D-MEM1/S3 deleted that mechanism outright
+(no stored-borrow fields in v1), and the lens went with it — `jet expand
+--facts refs` is an unknown-lens usage error today, like any retired name.
 
 Unknown `--facts <lens>` lists the registered lenses and exits nonzero
 (usage error, not an E-code — it never reaches the diagnostic renderer). A
@@ -1705,7 +1840,7 @@ fn run() {
 `pkg#version` is the `#` directive plane's version-selector form
 (D-MARKER-FAMILY1); the version is a dotted numeric selector (`1.4`, `1.4.2`),
 never a range operator. Only a single-segment module name takes one — `use
-core.fs#1.0` is nonsensical and isn't accepted.
+core.files#1.0` is nonsensical and isn't accepted.
 
 `jet run stats.jet` collects every inline ref from the entry file, resolves
 each, and wires the resolved directory into module search exactly like a
@@ -1725,6 +1860,75 @@ version and content hash, keyed by the script's own file-content hash so an
 edit goes stale). `jet init stats.jet` lifts the inline refs into a freshly
 written `pkg.jet`'s `deps: {}` block, growing the script from rung 0 to rung 1
 (vision.md's ladder) without discarding what it already declared.
+
+## `target: plugin` — sandboxed WASM Component Model plugins (c81, D-PLUGIN1=B, D-DEP-WASM1=A)
+
+A package built `target: plugin` compiles to a sandboxed `wasm32` Component
+Model module instead of a native binary. A host program loads and calls it —
+safe by default, **no `#Unsafe` gate anywhere in the story** (I1): the
+sandbox is the safety boundary, by construction. This is a general
+application-plugin substrate, distinct from the deferred Epoch-3
+compiler-extension plugin API (custom lints/sema hooks,
+`tools/Tower/docs/plans/epoch-3/plugin-api.md`) — don't conflate them (I8).
+
+```jet
+// pkg.jet
+payload: { name: "mathkit", version: "0.1.0" }
+```
+
+```jet
+// main.jet — the plugin's own source, no `fn run()` (it's loaded, not run)
+pub fn scale(a: Float, b: Float) -> Float {
+    return a * b
+}
+```
+
+`jet build main.jet --target=plugin` writes a `.wit` world (generated from
+the entry file's top-level `pub fn` surface) plus the wasm32 guest Rust, then
+shells out to `rustc --target wasm32-unknown-unknown --crate-type cdylib`
+followed by `wasm-tools component embed`/`component new` (D-DEP-WASM1=A) —
+external CLI tools, never linked into the compiler (I6) — producing a
+`.wasm` Component Model binary.
+
+A host is an ordinary native Jet program:
+
+```jet
+use core.plugin as plugin
+
+fn run() {
+    mathkit :: plugin.load("mathkit.wasm")
+    area :: mathkit.call("scale", [6.0, 7.0]) ?? panic("scale failed")
+    print("scale(6, 7) = {area}")
+}
+```
+
+`Plugin.load(path) -> Plugin` produces a handle (mirrors `core.db`'s
+`open`/`open_memory`); `.call(name, [Float]) -> Float ? String` and
+`.call_int(name, [Int]) -> Int ? String` are the only instance methods (v1
+scope — every parameter and the return type must be all-`Int` or all-`Float`,
+E1260; Bool is a trivial follow-on, Text needs the Component Model's
+memory-based string ABI, a real future increment). The wasmtime host embedded
+via the FFI-bridge pattern (`crates/jet-driver/src/Prelude/Plugin.rs`,
+runtime-side only, I6) registers **zero host imports** — deny-by-default
+capabilities: a plugin that tried to touch the filesystem, network, or clock
+simply fails to instantiate at load time, reported as a clean `Err`, never a
+crash (I2). A plugin's own code may not use any effect either — caught at
+build time as E1258, not deferred to that runtime failure.
+
+D-PLUGIN-EXPORT1=A: the exported surface is named by the manifest `export:`
+target field (`plugin { export: "mathkit" }`), defaulting to the package
+name. D-PLUGIN-VERSION1=A: the exported interface is frozen via
+`Sema::ApiFreeze`'s pub-metadata semver-snapshot mechanism (the same one an
+ordinary library's public API uses, E1218/E2601) — keyed `plugin__<export>`
+in `.jet/cache/api/` so it never collides with a library's own frozen API in
+the same project. Rebuilding a plugin with an unchanged interface freezes
+silently; removing or changing an export is E1257, naming the exact delta.
+
+Full worked example: `examples/features/packages/plugin_mathkit/` (a
+`plugin_src/` package + a host `main.jet`; golden-enforced, I5). New
+diagnostics: E1257 (interface changed incompatibly), E1258 (capability
+denied), E1259 (wasm build/toolchain failure), E1260 (unsupported export
+shape) — see docs/spec/diagnostics.md.
 
 ## Deliberately absent
 

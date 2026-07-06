@@ -12,6 +12,7 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { readFileSync, writeFileSync, readdirSync, mkdirSync, existsSync, statSync } from 'node:fs';
 import { join, extname, normalize, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { randomBytes } from 'node:crypto';
 import { UI, newId, readJSON } from './paths.mjs';
 import { saveConfig } from './config.mjs';
@@ -74,7 +75,8 @@ function agentRoster(store) {
 // BOOT identifies this server process; clients reload (when idle) if it
 // changes, so a server upgrade never leaves stale UI code running.
 const BOOT = randomBytes(6).toString('base64url');
-const projected = (store) => ({ ...store.project(), boot: BOOT });
+const TOWER_BIN = join(dirname(fileURLToPath(import.meta.url)), '..', 'tower.mjs');
+const projected = (store) => ({ ...store.project(), boot: BOOT, cli: `node ${TOWER_BIN}` });
 const sseClients = new Set();
 function broadcast(store) {
   if (!sseClients.size) return;

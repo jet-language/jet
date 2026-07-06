@@ -7,7 +7,9 @@ use std::collections::HashMap;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::AST::{CallArg, Expr, Func, LambdaBody, StrPart, Type, UnOp};
 
-use super::Builtins::{apply_method, apply_mutating, apply_static_type_method, as_bool, as_int, cmp};
+use super::Builtins::{
+    apply_method, apply_mutating, apply_static_type_method, as_bool, as_int, cmp,
+};
 use super::Diagnostics::{comptime_panic, unsupported};
 use super::Diagnostics::{EARLY_RETURN_CODE, ERR_PROPAGATE_CODE};
 use super::Interpreter::{Flow, Interp};
@@ -212,6 +214,20 @@ impl<'a> Interp<'a> {
             }
             return Err(unsupported("`emit` argument must be a string", span));
         }
+        // c139/HOF: `f(x)` where `f` is a local binding (a lambda param, or a
+        // `let f = someLambdaOrFn` variable) rather than a top-level `fn`
+        // name — every bare-name call, whatever the callee resolves to,
+        // parses as `Expr::Call` (the parser can't tell values from function
+        // names apart), so this is where a stored closure value gets called.
+        // Checked before the top-level-function lookup: a local binding
+        // shadows a same-named top-level function, same as any other name.
+        if let Some(f @ CtValue::Closure(_)) = scope.get(name).cloned() {
+            let mut vals = Vec::with_capacity(args.len());
+            for a in args {
+                vals.push(self.eval(&a.expr, scope)?);
+            }
+            return self.call_closure(&f, vals, span);
+        }
         // A user function: bind params, run the body in a fresh frame.
         let func = match self.funcs.get(name).copied() {
             Some(f) => f,
@@ -339,7 +355,92 @@ impl<'a> Interp<'a> {
                 }
             }
         }
-        Ok(v.jet_show())
+        Ok(self.display_fallback_value(v))
+    }
+
+    fn display_fallback_value(&self, v: &CtValue) -> String {
+        match v {
+            CtValue::Struct { type_name, fields } => {
+                let Some(def) = self.structs.get(type_name) else {
+                    return v.jet_show();
+                };
+                if def
+                    .fields
+                    .iter()
+                    .any(|field| matches!(field.ty, Type::Fn { .. }))
+                {
+                    return format!("{type_name} {{ ... }}");
+                }
+                if def.type_params.is_empty() {
+                    let parts: Vec<String> = def
+                        .fields
+                        .iter()
+                        .filter(|field| field.computed.is_none())
+                        .map(|field| {
+                            let rendered = fields
+                                .iter()
+                                .find(|(name, _)| name == &field.name)
+                                .map(|(_, value)| value.debug_rust())
+                                .unwrap_or_else(|| CtValue::Unit.debug_rust());
+                            format!("user_{}: {}", field.name, rendered)
+                        })
+                        .collect();
+                    return format!("user_{type_name} {{ {} }}", parts.join(", "));
+                }
+                let parts: Vec<String> = def
+                    .fields
+                    .iter()
+                    .map(|field| {
+                        let rendered = fields
+                            .iter()
+                            .find(|(name, _)| name == &field.name)
+                            .map(|(_, value)| value.jet_show())
+                            .unwrap_or_else(|| CtValue::Unit.jet_show());
+                        format!("{}: {}", field.name, rendered)
+                    })
+                    .collect();
+                format!("{type_name}({})", parts.join(", "))
+            }
+            _ => v.jet_show(),
+        }
+    }
+
+    pub(super) fn debug_value(&self, v: &CtValue) -> String {
+        match v {
+            CtValue::Struct { type_name, fields } => {
+                let Some(def) = self.structs.get(type_name) else {
+                    return v.debug_rust();
+                };
+                if def
+                    .fields
+                    .iter()
+                    .any(|field| matches!(field.ty, Type::Fn { .. }))
+                {
+                    return format!("{type_name} {{ ... }}");
+                }
+                if def.fields.is_empty() {
+                    return format!("{type_name} {{}}");
+                }
+                let parts: Vec<String> = def
+                    .fields
+                    .iter()
+                    .map(|field| {
+                        if field.redact {
+                            format!("{}: [redacted]", field.name)
+                        } else {
+                            let rendered = fields
+                                .iter()
+                                .find(|(name, _)| name == &field.name)
+                                .map(|(_, value)| value.debug_rust())
+                                .unwrap_or_else(|| CtValue::Unit.debug_rust());
+                            format!("{}: {}", field.name, rendered)
+                        }
+                    })
+                    .collect();
+                format!("{type_name} {{ {} }}", parts.join(", "))
+            }
+            _ => v.debug_rust(),
+        }
     }
 
     /// c139: invoke a closure value (`(x) => x > 3`) with already-evaluated
@@ -347,17 +448,23 @@ impl<'a> Interp<'a> {
     /// named `fn`. The frame starts from the closure's captured scope (so it
     /// still sees the bindings visible where it was created) with the params
     /// bound over that.
-    fn call_closure(
+    pub(super) fn call_closure(
         &mut self,
         f: &CtValue,
         args: Vec<CtValue>,
         span: Span,
     ) -> Result<CtValue, Diagnostic> {
         let CtValue::Closure(data) = f else {
-            return Err(unsupported("calling this value (it isn't a function)", span));
+            return Err(unsupported(
+                "calling this value (it isn't a function)",
+                span,
+            ));
         };
         if data.lambda.params.len() != args.len() {
-            return Err(unsupported("this closure (wrong number of arguments)", span));
+            return Err(unsupported(
+                "this closure (wrong number of arguments)",
+                span,
+            ));
         }
         let mut frame = data.captured.clone();
         for (p, a) in data.lambda.params.iter().zip(args) {
@@ -388,9 +495,9 @@ impl<'a> Interp<'a> {
         span: Span,
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {
-        let arg = args.first().ok_or_else(|| {
-            unsupported(&format!("`{}` (wrong number of arguments)", name), span)
-        })?;
+        let arg = args
+            .first()
+            .ok_or_else(|| unsupported(&format!("`{}` (wrong number of arguments)", name), span))?;
         let Some((lo, hi)) = range else {
             return self.eval(&arg.expr, scope);
         };
@@ -518,7 +625,8 @@ impl<'a> Interp<'a> {
     ///   1. Validate `url` (arg 0) and `expected_sha256` (arg 1 / labelled `sha256:`).
     ///   2. Download via the `jet-net` crate's blocking fetch.
     ///   3. `sha256_hex(bytes)` → compare; mismatch → **E3413**.
-    ///   4. Unreachable / fetch error → **E3414**.
+    ///   4. Unreachable / general fetch error → **E3414**; TLS client failures
+    ///      reachable through HTTPS → **E4201**–**E4203**.
     ///   5. Push `ComptimeInput { path: "url:{url}", hash: actual }` to `embed_inputs`.
     ///   6. Return `CtValue::Str(content)` (non-UTF-8 content needs its own code).
     fn eval_net_fetch(&mut self, args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
@@ -545,13 +653,15 @@ impl<'a> Interp<'a> {
             )),
         };
 
-        let bytes = jet_net::fetch(&url).map_err(|e| Diagnostic::error(
-            "E3414",
-            format!("fetch failed: {e}"),
-            format!("could not retrieve `{url}`"),
-            "check the URL is reachable and the network is available; use `file://` for local paths".to_string(),
-            Some(span),
-        ))?;
+        let bytes = jet_net::fetch(&url).map_err(|e| {
+            Diagnostic::error(
+                e.diagnostic_code(),
+                e.diagnostic_what(&url),
+                e.diagnostic_why(&url),
+                e.diagnostic_fix(),
+                Some(span),
+            )
+        })?;
 
         let actual = crate::SHA256::sha256_hex(&bytes);
         if actual != expected {
@@ -657,10 +767,32 @@ impl<'a> Interp<'a> {
                 if module == "core.net" && method == "fetch" {
                     return self.eval_net_fetch(argv, span);
                 }
+                // U13 (D-JPK-SECRETCRYPTO1): `core.vault.get` is denied at build time
+                // unconditionally — unlike the Tier-2 effects below, there is no
+                // `#Impure`/`--allow-impure` escape hatch, because a build artifact
+                // must never bake in a decrypted secret (I1).
+                if module == "core.vault" {
+                    return Err(Diagnostic::error(
+                        "E1265",
+                        format!("`{}.{}()` can't be reached from a build-time context", module, method),
+                        "module-field/comptime evaluation runs before secrets are ever decrypted; \
+                         a repo's encrypted store is only ever opened at ordinary runtime, and — \
+                         unlike the Tier-2 comptime effect gate — there is no `#Impure` escape hatch \
+                         here.".to_string(),
+                        "move the secret read out of comptime/module-field evaluation and into \
+                         ordinary runtime code.".to_string(),
+                        Some(span),
+                    ));
+                }
                 // D-CTEFFECT1: Tier-2 effect calls require an #Impure gate (or REPL sandbox).
                 let is_tier2 = matches!(
                     module.as_str(),
-                    "core.fs" | "core.env" | "core.io" | "core.exec" | "core.net" | "core.process"
+                    "core.files"
+                        | "core.env"
+                        | "core.io"
+                        | "core.exec"
+                        | "core.net"
+                        | "core.process"
                 );
                 if is_tier2 {
                     if self.impure_depth == 0 {
@@ -732,7 +864,11 @@ impl<'a> Interp<'a> {
         // above (capitalized `Type.Variant(…)` wins first).
         if let Expr::Ident(name, _) = receiver {
             if !scope.contains_key(name.as_str()) {
-                if let Some(f) = self.methods.get(&(name.clone(), method.to_string())).copied() {
+                if let Some(f) = self
+                    .methods
+                    .get(&(name.clone(), method.to_string()))
+                    .copied()
+                {
                     if f.params.len() == args.len() {
                         let mut frame = HashMap::new();
                         for (p, a) in f.params.iter().zip(args) {
@@ -764,7 +900,10 @@ impl<'a> Interp<'a> {
         if let Expr::Ident(name, _) = receiver {
             if name == "Option" && method == "lift2" && !scope.contains_key("Option") {
                 if args.len() != 3 {
-                    return Err(unsupported("`Option.lift2` (wrong number of arguments)", span));
+                    return Err(unsupported(
+                        "`Option.lift2` (wrong number of arguments)",
+                        span,
+                    ));
                 }
                 let f = self.eval(&args[0].expr, scope)?;
                 let a = self.eval(&args[1].expr, scope)?;
@@ -833,7 +972,8 @@ impl<'a> Interp<'a> {
                 // (D-BIND4 `:=` receiver) — key every element once, sort the
                 // keyed pairs, then write the reordered list back through the
                 // same lvalue path `push`/`pop`/… use.
-                (CtValue::List(xs), "sort_by") if matches!(receiver, Expr::Ident(..) | Expr::Field(..)) =>
+                (CtValue::List(xs), "sort_by")
+                    if matches!(receiver, Expr::Ident(..) | Expr::Field(..)) =>
                 {
                     let f = self.eval(&args[0].expr, scope)?;
                     let mut keyed = Vec::with_capacity(xs.len());
@@ -978,10 +1118,16 @@ fn as_bytes(v: &CtValue, span: Span) -> Result<Vec<u8>, Diagnostic> {
             .iter()
             .map(|x| match x {
                 CtValue::Int(n) if (0..=255).contains(n) => Ok(*n as u8),
-                _ => Err(unsupported("a `[U8]` list with an out-of-range element", span)),
+                _ => Err(unsupported(
+                    "a `[U8]` list with an out-of-range element",
+                    span,
+                )),
             })
             .collect(),
-        _ => Err(unsupported("non-`[U8]` argument to comptime encoding call", span)),
+        _ => Err(unsupported(
+            "non-`[U8]` argument to comptime encoding call",
+            span,
+        )),
     }
 }
 
@@ -1020,9 +1166,7 @@ fn base64_encode(bytes: Vec<u8>) -> String {
         let b1 = chunk.get(1).copied();
         let b2 = chunk.get(2).copied();
         out.push(BASE64_ALPHABET[(b0 >> 2) as usize] as char);
-        out.push(
-            BASE64_ALPHABET[(((b0 & 0x03) << 4) | (b1.unwrap_or(0) >> 4)) as usize] as char,
-        );
+        out.push(BASE64_ALPHABET[(((b0 & 0x03) << 4) | (b1.unwrap_or(0) >> 4)) as usize] as char);
         out.push(match b1 {
             Some(b1) => {
                 BASE64_ALPHABET[(((b1 & 0x0f) << 2) | (b2.unwrap_or(0) >> 6)) as usize] as char
@@ -1039,7 +1183,10 @@ fn base64_encode(bytes: Vec<u8>) -> String {
 
 fn base64_decode(s: &str) -> Option<Vec<u8>> {
     fn digit(c: u8) -> Option<u8> {
-        BASE64_ALPHABET.iter().position(|&d| d == c).map(|i| i as u8)
+        BASE64_ALPHABET
+            .iter()
+            .position(|&d| d == c)
+            .map(|i| i as u8)
     }
     let s = s.trim_end_matches('=');
     let bytes = s.as_bytes();
@@ -1407,10 +1554,7 @@ fn apply_core_call(
             let s = as_string(one(0)?, span)?;
             Ok(match hex_decode(s) {
                 Some(bytes) => CtValue::ResOk(Box::new(CtValue::Bytes(bytes))),
-                None => CtValue::ResErr(Box::new(CtValue::Str(format!(
-                    "`{}` isn't valid hex",
-                    s
-                )))),
+                None => CtValue::ResErr(Box::new(CtValue::Str(format!("`{}` isn't valid hex", s)))),
             })
         }
         ("core.encoding.base64", "encode") => {
@@ -1428,9 +1572,9 @@ fn apply_core_call(
             })
         }
         // --- core.text.unicode (std-only Unicode scalar helpers, pure) ---
-        ("core.text.unicode", "scalar_count") => {
-            Ok(CtValue::Int(as_string(one(0)?, span)?.chars().count() as i64))
-        }
+        ("core.text.unicode", "scalar_count") => Ok(CtValue::Int(
+            as_string(one(0)?, span)?.chars().count() as i64,
+        )),
         ("core.text.unicode", "byte_count") => {
             Ok(CtValue::Int(as_string(one(0)?, span)?.len() as i64))
         }
@@ -1444,27 +1588,32 @@ fn apply_core_call(
             Ok(CtValue::Str(as_string(one(0)?, span)?.to_uppercase()))
         }
         ("core.text.unicode", "scalars") => Ok(CtValue::List(
-            as_string(one(0)?, span)?.chars().map(CtValue::Char).collect(),
+            as_string(one(0)?, span)?
+                .chars()
+                .map(CtValue::Char)
+                .collect(),
         )),
         // --- impure / build-time I/O → teaching diagnostic (reached only when
         // no #Impure gate intercepts first in eval_method) ---
-        ("core.fs", _) | ("core.env", _) | ("core.io", _) | ("core.exec", _) | ("core.net", _) => {
-            Err(Diagnostic::error(
-                "E3410",
-                format!(
-                    "`{}.{}()` is a Tier-2 comptime effect — it requires a `#Impure` gate",
-                    module, method
-                ),
-                "ambient I/O (filesystem, environment, process) is not allowed in \
+        ("core.files", _)
+        | ("core.env", _)
+        | ("core.io", _)
+        | ("core.exec", _)
+        | ("core.net", _) => Err(Diagnostic::error(
+            "E3410",
+            format!(
+                "`{}.{}()` is a Tier-2 comptime effect — it requires a `#Impure` gate",
+                module, method
+            ),
+            "ambient I/O (filesystem, environment, process) is not allowed in \
                  pure comptime evaluation"
-                    .to_string(),
-                format!(
-                    "wrap the comptime binding in `#Impure(\"reason\") {{ … }}` and \
+                .to_string(),
+            format!(
+                "wrap the comptime binding in `#Impure(\"reason\") {{ … }}` and \
                          pass `--allow-impure` to the build"
-                ),
-                Some(span),
-            ))
-        }
+            ),
+            Some(span),
+        )),
         // --- unknown / not yet whitelisted ---
         _ => {
             if repl_mode {
@@ -1609,7 +1758,7 @@ fn apply_impure_core_call(
         })
     };
     match (module, method) {
-        ("core.fs", "read") => {
+        ("core.files", "read") => {
             let path_str = as_string(one(0)?, span)?;
             let path = base_dir.join(path_str);
             match std::fs::read_to_string(&path) {
@@ -1620,7 +1769,7 @@ fn apply_impure_core_call(
                 )))),
             }
         }
-        ("core.fs", "read_bytes") => {
+        ("core.files", "read_bytes") => {
             let path_str = as_string(one(0)?, span)?;
             let path = base_dir.join(path_str);
             match std::fs::read(&path) {
@@ -1631,11 +1780,13 @@ fn apply_impure_core_call(
                 )))),
             }
         }
-        ("core.fs", "write" | "append") => {
+        // D-FILES-APPEND1=A: whole-file one-shot is `append_all` (not `append`,
+        // which names the streaming handle's method).
+        ("core.files", "write" | "append_all") => {
             let path_str = as_string(one(0)?, span)?;
             let content = as_string(one(1)?, span)?;
             let path = base_dir.join(path_str);
-            let result = if method == "append" {
+            let result = if method == "append_all" {
                 use std::io::Write;
                 std::fs::OpenOptions::new()
                     .create(true)
@@ -1653,7 +1804,7 @@ fn apply_impure_core_call(
                 )))),
             }
         }
-        ("core.fs", "exists" | "is_dir") => {
+        ("core.files", "exists" | "is_dir") => {
             let path_str = as_string(one(0)?, span)?;
             let path = base_dir.join(path_str);
             let meta = std::fs::metadata(&path);
@@ -1665,7 +1816,7 @@ fn apply_impure_core_call(
                 _ => false,
             }))
         }
-        ("core.fs", "create_dir") => {
+        ("core.files", "create_dir") => {
             let path_str = as_string(one(0)?, span)?;
             let path = base_dir.join(path_str);
             match std::fs::create_dir_all(&path) {
@@ -1676,7 +1827,7 @@ fn apply_impure_core_call(
                 )))),
             }
         }
-        ("core.fs", "remove") => {
+        ("core.files", "remove") => {
             let path_str = as_string(one(0)?, span)?;
             let path = base_dir.join(path_str);
             let result = if path.is_dir() {

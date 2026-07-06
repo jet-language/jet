@@ -157,7 +157,10 @@ pub fn cmd_flake(theme: &Theme, dir: &Path, fixtures: Option<&Path>) -> i32 {
     if !flake_path.is_file() {
         theme.error(
             "no flake.nix here",
-            &format!("`jet bridge flake` translates a {} in the current directory; none was found.", Syntax::FOREIGN_FLAKE_FILE),
+            &format!(
+                "`jet bridge flake` translates a {} in the current directory; none was found.",
+                Syntax::FOREIGN_FLAKE_FILE
+            ),
             "run this from the directory that has the flake.nix, or write env.* by hand.",
         );
         return 2;
@@ -199,20 +202,17 @@ mod tests {
 
     #[test]
     fn parses_facts_from_fixture() {
-        let facts = parse_facts_json(
-            r#"{"buildInputs": ["ripgrep", "nodejs", "fd"], "shellHook": ""}"#,
-        )
-        .unwrap();
+        let facts =
+            parse_facts_json(r#"{"buildInputs": ["ripgrep", "nodejs", "fd"], "shellHook": ""}"#)
+                .unwrap();
         assert_eq!(facts.packages, vec!["fd", "nodejs", "ripgrep"]);
         assert!(facts.unmapped.is_empty());
     }
 
     #[test]
     fn nonempty_shell_hook_is_unmapped() {
-        let facts = parse_facts_json(
-            r#"{"buildInputs": [], "shellHook": "export FOO=1"}"#,
-        )
-        .unwrap();
+        let facts =
+            parse_facts_json(r#"{"buildInputs": [], "shellHook": "export FOO=1"}"#).unwrap();
         assert_eq!(facts.unmapped, vec!["shellHook".to_string()]);
     }
 

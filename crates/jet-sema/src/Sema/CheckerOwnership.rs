@@ -103,8 +103,8 @@ impl<'a> Checker<'a> {
                 name, arena, arena
             ),
             format!(
-                "keep `{}` inside the `{}` region, or copy what you need out with `.clone()` before it leaves",
-                name, arena
+                "keep `{}` inside the `{}` region, or copy what you need out with `{}` before it leaves",
+                name, arena, Syntax::KW_COPY
             ),
             Some(span),
         ));
@@ -224,6 +224,116 @@ impl<'a> Checker<'a> {
             Some(span),
         ));
     }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // D-MEM1 stage S5 (2026-07-04): string `view`s — `s.trim()` / `s.after(sep)`
+    // / `s.before(sep)` bound to a local name return a zero-copy `&str` window
+    // into `s` instead of an owned `String`. Unlike `View<T>` (a distinct Jet
+    // type), `String` stays ONE type end to end (D-MEM1 gallery: "one String
+    // type") — so the view-ness lives on the *binding* (`Binding::string_view`,
+    // set below), not on the value's static type. Tracking mirrors `list_views`
+    // exactly (same shape, same E-code family): E2307 fires on escape
+    // (returned, rebound, stored in a struct field); crossing a task boundary
+    // is caught separately at the capture-check site (`CheckerInfer/calls.rs`)
+    // since a plain `Type::String` carries no view marker for the general
+    // sendability check to key off.
+    // ──────────────────────────────────────────────────────────────────────
+
+    /// If `init` is `s.trim()` / `s.after(sep)` / `s.before(sep)` on a plain
+    /// local `String` name, return `s`'s name — but only when `s` is a genuine
+    /// local (dies at this function's return/scope exit). A parameter or const
+    /// outlives the call, so a view into it is sound without tracking (mirrors
+    /// `view_call_source`'s exemption).
+    pub(crate) fn string_view_call_source(&self, init: &Expr) -> Option<String> {
+        let Expr::MethodCall {
+            receiver,
+            method,
+            args,
+            ..
+        } = init
+        else {
+            return None;
+        };
+        let arity_ok = match method.as_str() {
+            "trim" => args.is_empty(),
+            "after" | "before" => args.len() == 1,
+            _ => return None,
+        };
+        if !arity_ok {
+            return None;
+        }
+        let Expr::Ident(name, _) = receiver.as_ref() else {
+            return None;
+        };
+        if self.consts.contains_key(name) {
+            return None;
+        }
+        let Some(info) = self.lookup(name) else {
+            return None;
+        };
+        if !matches!(info.ty, Type::String) {
+            return None;
+        }
+        if info.param_conv.is_some() {
+            return None;
+        }
+        Some(name.clone())
+    }
+
+    /// Record `name` as a string view into `owner`, declared at the current
+    /// scope depth.
+    pub(crate) fn record_string_view(&mut self, name: &str, owner: String) {
+        let scope_len = self.scopes.len();
+        self.string_views
+            .insert(name.to_string(), ListViewInfo { owner, scope_len });
+    }
+
+    /// True if `name` is currently a live string-view binding.
+    pub(crate) fn is_string_view(&self, name: &str) -> bool {
+        self.string_views.contains_key(name)
+    }
+
+    /// E2307: a string view named `name` was used somewhere only its full
+    /// `String` representation supports — this is the ONE call site for the
+    /// whole class of unsupported uses (return, rebind, struct field, call
+    /// argument, list/tuple literal element, an arbitrary builtin/user
+    /// method, …): the general `Expr::Ident` inference arm calls this
+    /// whenever it reads a live string-view name outside the two positions
+    /// its bare `&str` Rust place actually supports (chaining another
+    /// `.trim()`/`.after()`/`.before()`, or `copy`'s operand). This is a
+    /// representation limit, not a lifetime one — the view DOES live long
+    /// enough; it just isn't the value shape the destination needs — so the
+    /// wording says so rather than claiming it "doesn't live long enough"
+    /// (unlike `View<T>`, which needs its own escape check since a `List`
+    /// re-assignment/return is otherwise silent). `what` describes the use site.
+    pub(crate) fn report_string_view_unsupported_use(
+        &mut self,
+        name: &str,
+        what: &str,
+        span: Span,
+    ) {
+        let owner = self
+            .string_views
+            .get(name)
+            .map(|v| v.owner.clone())
+            .unwrap_or_else(|| "its owner".to_string());
+        self.diags.push(Diagnostic::error(
+            "E2307",
+            format!("`{}` can't {} yet", name, what),
+            format!(
+                "`{}` is a zero-copy view into `{}` (`.trim()`/`.after()`/`.before()`); only chaining another `.trim()`/`.after()`/`.before()` on it works directly — other methods and calls need the full owned value",
+                name, owner
+            ),
+            format!("write `{} {}` first to get an owned `String`, then use that", Syntax::KW_COPY, name),
+            Some(span),
+        ));
+    }
+
+    // No "fresh call made right in the return" shape exists for string views
+    // (unlike `View<T>`, which is type-driven everywhere `.view()` appears):
+    // view-ness here lives on the *binding*, set only for `Stmt::Val`, so
+    // `return s.after(sep)` written directly (no intermediate binding) always
+    // lowers as an ordinary owned `String` — safe, nothing to catch.
 
     /// D-LIN1 (ratified 2026-06-21): true when `ty` is a `#SingleUse` struct/enum,
     /// checking the local registry first and then any imported module that exposes
@@ -389,7 +499,7 @@ impl<'a> Checker<'a> {
                     "E0121",
                     format!("`{}` is given away inside a loop that may run again", name),
                     "after a value is given away it's gone, but the next time around the loop would need it again".to_string(),
-                    format!("give away a copy instead: `{}.clone()`", name),
+                    format!("give away a copy instead: `{} {}`", Syntax::KW_COPY, name),
                     Some(span),
                 ));
                 return;
@@ -691,10 +801,10 @@ impl<'a> Checker<'a> {
         );
         let fix = match crossing {
             SendCrossing::ChannelSend => {
-                "send plain owned data instead, or rebuild the value without shared-view fields before calling `.send()`"
+                "send plain owned data instead, or rebuild the value as an owned copy before calling `.send()`"
             }
             SendCrossing::TaskCapture | SendCrossing::TaskResult => {
-                "give the task plain owned data, or remove the shared-view field before spawning"
+                "give the task plain owned data, or rebuild the value as an owned copy before spawning"
             }
         };
         // D-DETACH1: if this E1102 fires in a task spawn context, record the task
@@ -759,20 +869,27 @@ impl<'a> Checker<'a> {
     /// cloneable carve-out is now a hard error (E0209, was `L0201`). `what`/
     /// `why` are call-site-specific; this builds the shared, liveness-aware
     /// fix menu: `^name` when this call is `name`'s last use (safe to move),
-    /// or `.clone()`/reorder when `name` is still used afterward (moving now
-    /// would break that later use). `.clone()` is the mechanism that actually
-    /// parses today; `copy name` (D-CAP2) is the eventual spelling once S4 lands.
-    pub(crate) fn e0209_implicit_clone(&self, what: String, why: String, name: &str, span: Span) -> Diagnostic {
+    /// or `copy name` (D-CAP2, D-MEM1/S4)/reorder when `name` is still used
+    /// afterward (moving now would break that later use).
+    pub(crate) fn e0209_implicit_clone(
+        &self,
+        what: String,
+        why: String,
+        name: &str,
+        span: Span,
+    ) -> Diagnostic {
         let fix = if self.is_name_live_after(name) {
             format!(
-                "`{name}` is used again after this call, so `{}{name}` would break that later use — write `{name}.clone()` to pass a copy, or reorder so this call is `{name}`'s last use and write `{}{name}`",
+                "`{name}` is used again after this call, so `{}{name}` would break that later use — write `{} {name}` to pass a copy, or reorder so this call is `{name}`'s last use and write `{}{name}`",
                 Syntax::SIGIL_MOVE,
+                Syntax::KW_COPY,
                 Syntax::SIGIL_MOVE,
             )
         } else {
             format!(
-                "write `{}{name}` to move it — this is `{name}`'s last use — or `{name}.clone()` to keep a copy",
+                "write `{}{name}` to move it — this is `{name}`'s last use — or `{} {name}` to keep a copy",
                 Syntax::SIGIL_MOVE,
+                Syntax::KW_COPY,
             )
         };
         Diagnostic::error("E0209", what, why, fix, Some(span))
@@ -917,6 +1034,203 @@ impl<'a> Checker<'a> {
             self.check_take_arg_ownership("send", 0, &elem_ty, arg);
         }
         None
+    }
+
+    /// D-MEM1 S6 (D-SHARED-API1=A): `shared.read(f)` — read-locked closure
+    /// callback; `f`'s param is a read-only view of the wrapped `T` (bare
+    /// access, no sigil). The call's own type is whatever `f` returns.
+    pub(crate) fn finish_shared_read(
+        &mut self,
+        inner: &Type,
+        args: &mut [crate::AST::CallArg],
+        span: Span,
+    ) -> Option<Type> {
+        self.finish_shared_closure("read", inner, args, span, false)
+    }
+
+    /// D-MEM1 S6 (D-SHARED-API1=A): `shared.edit(f)` — write-locked closure
+    /// callback, exclusive; `f`'s param is a mutable view of the wrapped `T`
+    /// with no `&` sigil written (the lock IS the write-access grant, scoped
+    /// to the closure body — no guard object ever escapes it).
+    pub(crate) fn finish_shared_edit(
+        &mut self,
+        inner: &Type,
+        args: &mut [crate::AST::CallArg],
+        span: Span,
+    ) -> Option<Type> {
+        self.finish_shared_closure("edit", inner, args, span, true)
+    }
+
+    fn finish_shared_closure(
+        &mut self,
+        method: &str,
+        inner: &Type,
+        args: &mut [crate::AST::CallArg],
+        span: Span,
+        param_mutable: bool,
+    ) -> Option<Type> {
+        if args.len() != 1 {
+            self.diags.push(Diagnostic::error(
+                "E0104",
+                format!("`{}` expects 1 argument, got {}", method, args.len()),
+                format!("`.{}` takes exactly one closure", method),
+                format!("call `.{}(value => ...)` with a closure", method),
+                Some(span),
+            ));
+            for a in args.iter_mut() {
+                self.infer(&mut a.expr);
+            }
+            return None;
+        }
+        if !matches!(args[0].expr, Expr::Lambda(_)) {
+            self.diags.push(Diagnostic::error(
+                "E0112",
+                format!("`{}` needs a lambda, not a value", method),
+                format!(
+                    "`.{}` runs a short function against the locked value",
+                    method
+                ),
+                format!("write `.{}(value => …)`", method),
+                Some(args[0].expr.span()),
+            ));
+            self.infer(&mut args[0].expr);
+            return None;
+        }
+        let expected = Type::Fn {
+            params: vec![inner.clone()],
+            ret: None,
+            effect_bound: None,
+        };
+        let saved_exp = self.expected_type.clone();
+        self.expected_type = Some(expected);
+        let saved_mut = self.lambda_param_mutable;
+        self.lambda_param_mutable = param_mutable;
+        let saved_esc = self.lambda_escapes;
+        self.lambda_escapes = false;
+        let fn_ty = self.infer(&mut args[0].expr);
+        self.lambda_escapes = saved_esc;
+        self.lambda_param_mutable = saved_mut;
+        self.expected_type = saved_exp;
+        match fn_ty {
+            Some(Type::Fn { ret: Some(r), .. }) => Some(*r),
+            _ => Some(Type::Named("Unit".to_string())),
+        }
+    }
+
+    /// D-MEM1 S6 (D-POOLID-API1=A): `pool.add(val)` — inserts, consumes `val` (a
+    /// fresh literal passes with no ceremony; a named binding needs `^`, same
+    /// discipline as `Sender.send` above), returns the new `Id<T>` handle.
+    pub(crate) fn finish_pool_add(
+        &mut self,
+        recv_ty: &Type,
+        args: &mut [crate::AST::CallArg],
+        span: Span,
+    ) -> Option<Type> {
+        let elem_ty = match recv_ty {
+            Type::Apply { name, args } if name == "Pool" => {
+                args.first().cloned().unwrap_or(Type::Int)
+            }
+            _ => Type::Int,
+        };
+        if args.len() != 1 {
+            self.diags.push(Diagnostic::error(
+                "E0104",
+                format!("`add` expects 1 argument, got {}", args.len()),
+                "adding to a pool needs exactly one value".to_string(),
+                "call `.add(value)` with the value to store".to_string(),
+                Some(span),
+            ));
+        }
+        let Some(arg) = args.get_mut(0) else {
+            return Some(Type::Apply {
+                name: "Id".to_string(),
+                args: vec![elem_ty],
+            });
+        };
+        let saved_exp = self.expected_type.clone();
+        self.expected_type = Some(elem_ty.clone());
+        let got = self.infer(&mut arg.expr);
+        self.expected_type = saved_exp;
+        if let Some(got) = got {
+            let reported = self.check_type_assignable(&elem_ty, &got, arg.expr.span());
+            if !reported && got != elem_ty {
+                self.diags.push(Diagnostic::error(
+                    "E0112",
+                    format!(
+                        "`add` wants {} for argument 1, but this is {}",
+                        elem_ty.show(),
+                        got.show()
+                    ),
+                    "a pool only stores values of its own element type".to_string(),
+                    type_fix_hint(&elem_ty, &got),
+                    Some(arg.expr.span()),
+                ));
+            }
+        }
+        self.check_take_arg_ownership("add", 0, &elem_ty, arg);
+        Some(Type::Apply {
+            name: "Id".to_string(),
+            args: vec![elem_ty],
+        })
+    }
+
+    /// D-MEM1 S6 (D-POOLID-API1=A): `pool.remove(id)` — removes the slot `id`
+    /// names, bumping its generation so any other copy of `id` becomes stale.
+    /// `Id<T>` is plain copyable data (like `Int`); no move ceremony on the
+    /// argument. Returns `T?` — mirrors `Map.remove`'s `Option<V>` convention
+    /// (the stdlib's existing "remove that might miss" shape), not `List`/
+    /// `Set.remove`'s unit return (those remove by position/value, always
+    /// present by construction at the call site).
+    pub(crate) fn finish_pool_remove(
+        &mut self,
+        recv_ty: &Type,
+        args: &mut [crate::AST::CallArg],
+        span: Span,
+    ) -> Option<Type> {
+        let elem_ty = match recv_ty {
+            Type::Apply { name, args } if name == "Pool" => {
+                args.first().cloned().unwrap_or(Type::Int)
+            }
+            _ => Type::Int,
+        };
+        let id_ty = Type::Apply {
+            name: "Id".to_string(),
+            args: vec![elem_ty.clone()],
+        };
+        if args.len() != 1 {
+            self.diags.push(Diagnostic::error(
+                "E0104",
+                format!("`remove` expects 1 argument, got {}", args.len()),
+                "removing from a pool needs exactly one `Id<T>`".to_string(),
+                "call `.remove(id)` with the `Id<T>` to remove".to_string(),
+                Some(span),
+            ));
+        }
+        let Some(arg) = args.get_mut(0) else {
+            return Some(Type::Option(Box::new(elem_ty)));
+        };
+        let saved_exp = self.expected_type.clone();
+        self.expected_type = Some(id_ty.clone());
+        let got = self.infer(&mut arg.expr);
+        self.expected_type = saved_exp;
+        if let Some(got) = got {
+            let reported = self.check_type_assignable(&id_ty, &got, arg.expr.span());
+            if !reported && got != id_ty {
+                self.diags.push(Diagnostic::error(
+                    "E0112",
+                    format!(
+                        "`remove` wants {} for argument 1, but this is {}",
+                        id_ty.show(),
+                        got.show()
+                    ),
+                    "a pool is only removed from by the `Id<T>` its own `.add()` returned"
+                        .to_string(),
+                    type_fix_hint(&id_ty, &got),
+                    Some(arg.expr.span()),
+                ));
+            }
+        }
+        Some(Type::Option(Box::new(elem_ty)))
     }
 }
 

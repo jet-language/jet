@@ -40,6 +40,9 @@ pub enum BuildStep {
     /// Copy `src` (relative to the source dir) to `dest` under the output root.
     /// `dest` must resolve inside the output root (`E1237`).
     Install { src: String, dest: String },
+    /// Copy a whole directory tree relative to the source dir into `dest`
+    /// under the output root. Used by `Recipe.copy()`.
+    InstallTree { src: String, dest: String },
 }
 
 /// A build recipe over a staged source tree.
@@ -70,6 +73,12 @@ impl BuildRecipe {
                 }
                 BuildStep::Install { src, dest } => {
                     data.extend_from_slice(b"install\0");
+                    data.extend_from_slice(src.as_bytes());
+                    data.push(0);
+                    data.extend_from_slice(dest.as_bytes());
+                }
+                BuildStep::InstallTree { src, dest } => {
+                    data.extend_from_slice(b"install-tree\0");
                     data.extend_from_slice(src.as_bytes());
                     data.push(0);
                     data.extend_from_slice(dest.as_bytes());
@@ -144,7 +153,7 @@ pub fn validate(recipe: &BuildRecipe, ctx: &BuildContext) -> Result<(), Diagnost
                     return Err(e1238(tool));
                 }
             }
-            BuildStep::Install { dest, .. } => {
+            BuildStep::Install { dest, .. } | BuildStep::InstallTree { dest, .. } => {
                 confined_dest(ctx.output_root, dest)?;
             }
         }
@@ -180,8 +189,28 @@ pub fn run(
                     Diagnostic::error(
                         "E1237",
                         format!("build step could not install `{src}`"),
-                        format!("copying `{}` into the output root failed: {e}", from.display()),
+                        format!(
+                            "copying `{}` into the output root failed: {e}",
+                            from.display()
+                        ),
                         "make sure the source file exists in the staged tree.".to_string(),
+                        None,
+                    )
+                })?;
+                report.add_effect("write");
+            }
+            BuildStep::InstallTree { src, dest } => {
+                let target = confined_dest(ctx.output_root, dest)?;
+                let from = ctx.source_dir.join(src);
+                copy_tree(&from, &target).map_err(|e| {
+                    Diagnostic::error(
+                        "E1237",
+                        format!("build step could not install `{src}`"),
+                        format!(
+                            "copying `{}` into the output root failed: {e}",
+                            from.display()
+                        ),
+                        "make sure the source directory exists in the staged tree.".to_string(),
                         None,
                     )
                 })?;
@@ -190,6 +219,116 @@ pub fn run(
         }
     }
     Ok(report)
+}
+
+/// Run with U27 step logging. Used by adapter/core build paths that need
+/// `jet logs`, `jet explain`, and preserved failed scratch.
+pub fn run_logged(
+    recipe: &BuildRecipe,
+    ctx: &BuildContext,
+    transport: Option<Transport>,
+    attempt: &mut super::BuildDebug::Attempt,
+) -> Result<RunReport, Diagnostic> {
+    validate(recipe, ctx)?;
+    std::fs::create_dir_all(ctx.output_root).ok();
+    let mut report = RunReport::default();
+    let total = recipe.steps.len();
+    for (idx, step) in recipe.steps.iter().enumerate() {
+        let index = idx + 1;
+        let result = match step {
+            BuildStep::Fetch { url, sha256 } => do_fetch(url, sha256, ctx, transport, &mut report),
+            BuildStep::Exec { tool, args } => do_exec_logged(tool, args, ctx, &mut report),
+            BuildStep::Install { src, dest } => {
+                let target = confined_dest(ctx.output_root, dest);
+                match target {
+                    Ok(target) => {
+                        let from = ctx.source_dir.join(src);
+                        if let Some(parent) = target.parent() {
+                            std::fs::create_dir_all(parent).ok();
+                        }
+                        std::fs::copy(&from, &target)
+                            .map(|_| report.add_effect("write"))
+                            .map_err(|e| {
+                                Diagnostic::error(
+                                    "E1237",
+                                    format!("build step could not install `{src}`"),
+                                    format!(
+                                        "copying `{}` into the output root failed: {e}",
+                                        from.display()
+                                    ),
+                                    "make sure the source file exists in the staged tree."
+                                        .to_string(),
+                                    None,
+                                )
+                            })
+                    }
+                    Err(d) => Err(d),
+                }
+            }
+            BuildStep::InstallTree { src, dest } => {
+                let target = confined_dest(ctx.output_root, dest);
+                match target {
+                    Ok(target) => {
+                        let from = ctx.source_dir.join(src);
+                        copy_tree(&from, &target)
+                            .map(|_| report.add_effect("write"))
+                            .map_err(|e| {
+                                Diagnostic::error(
+                                    "E1237",
+                                    format!("build step could not install `{src}`"),
+                                    format!(
+                                        "copying `{}` into the output root failed: {e}",
+                                        from.display()
+                                    ),
+                                    "make sure the source directory exists in the staged tree."
+                                        .to_string(),
+                                    None,
+                                )
+                            })
+                    }
+                    Err(d) => Err(d),
+                }
+            }
+        };
+        match result {
+            Ok(()) => attempt.push_step(step_log(step, index, total, ctx, "ok", "", "")),
+            Err(d) => {
+                attempt.push_step(step_log(
+                    step,
+                    index,
+                    total,
+                    ctx,
+                    "failed",
+                    "",
+                    &format!("{}: {}\n{}\n", d.code, d.what, d.why),
+                ));
+                return Err(d);
+            }
+        }
+    }
+    attempt.mark_ok();
+    Ok(report)
+}
+
+fn copy_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let from = entry.path();
+        let to = dst.join(entry.file_name());
+        if from.is_dir() {
+            copy_tree(&from, &to)?;
+        } else {
+            std::fs::copy(&from, &to)?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mode = std::fs::metadata(&from)?.permissions().mode();
+                std::fs::set_permissions(&to, std::fs::Permissions::from_mode(mode))?;
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Resolve `dest` under `output_root`, rejecting any escape (`..`, absolute
@@ -291,7 +430,10 @@ fn do_exec(
             Diagnostic::error(
                 "E1238",
                 format!("build tool `{tool}` failed to run"),
-                format!("the realized tool at {} could not be executed: {e}", exe.display()),
+                format!(
+                    "the realized tool at {} could not be executed: {e}",
+                    exe.display()
+                ),
                 "make sure the tool dependency realized correctly.".to_string(),
                 None,
             )
@@ -307,6 +449,87 @@ fn do_exec(
     }
     report.add_effect(&format!("exec:{tool}"));
     Ok(())
+}
+
+fn do_exec_logged(
+    tool: &str,
+    args: &[String],
+    ctx: &BuildContext,
+    report: &mut RunReport,
+) -> Result<(), Diagnostic> {
+    let exe = ctx.tools.get(tool).ok_or_else(|| e1238(tool))?;
+    let out = std::process::Command::new(exe)
+        .args(args)
+        .current_dir(ctx.source_dir)
+        .env("JET_BUILD_OUTPUT", ctx.output_root)
+        .output()
+        .map_err(|e| {
+            Diagnostic::error(
+                "E1238",
+                format!("build tool `{tool}` failed to run"),
+                format!(
+                    "the realized tool at {} could not be executed: {e}",
+                    exe.display()
+                ),
+                "make sure the tool dependency realized correctly.".to_string(),
+                None,
+            )
+        })?;
+    if !out.status.success() {
+        return Err(Diagnostic::error(
+            "E1238",
+            format!("build tool `{tool}` exited with an error"),
+            format!(
+                "`{tool} {}` returned a non-zero status.\nstdout:\n{}\nstderr:\n{}",
+                args.join(" "),
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            ),
+            "check the build recipe and the tool's arguments.".to_string(),
+            None,
+        ));
+    }
+    report.add_effect(&format!("exec:{tool}"));
+    Ok(())
+}
+
+fn step_log(
+    step: &BuildStep,
+    index: usize,
+    total: usize,
+    ctx: &BuildContext,
+    status: &str,
+    stdout: &str,
+    stderr: &str,
+) -> super::BuildDebug::StepLog {
+    super::BuildDebug::StepLog {
+        index,
+        total,
+        name: step_name(step).to_string(),
+        command: step_command(step),
+        cwd: ctx.source_dir.to_string_lossy().into_owned(),
+        status: status.to_string(),
+        stdout: stdout.to_string(),
+        stderr: stderr.to_string(),
+    }
+}
+
+fn step_name(step: &BuildStep) -> &'static str {
+    match step {
+        BuildStep::Fetch { .. } => "fetch",
+        BuildStep::Exec { .. } => "exec",
+        BuildStep::Install { .. } => "install",
+        BuildStep::InstallTree { .. } => "install-tree",
+    }
+}
+
+fn step_command(step: &BuildStep) -> String {
+    match step {
+        BuildStep::Fetch { url, sha256 } => format!("fetch {url} sha256:{sha256}"),
+        BuildStep::Exec { tool, args } => format!("{tool} {}", args.join(" ")).trim().to_string(),
+        BuildStep::Install { src, dest } => format!("install {src} {dest}"),
+        BuildStep::InstallTree { src, dest } => format!("install-tree {src} {dest}"),
+    }
 }
 
 // ── U19 trust gate (internal substrate) ──────────────────────────────────────
@@ -358,7 +581,8 @@ fn e1236_offline(url: &str) -> Diagnostic {
         "E1236",
         "a build step needs the network but the build is offline".to_string(),
         format!("`--offline` forbids any network fetch; `{url}` is not in the local fetch cache."),
-        "run once online to populate the cache, or `jet vendor` the source and rebuild.".to_string(),
+        "run once online to populate the cache, or `jet vendor` the source and rebuild."
+            .to_string(),
         None,
     )
 }
@@ -371,7 +595,8 @@ fn e1236_no_transport(url: &str) -> Diagnostic {
             "`{url}` is a remote URL; the build seam holds no network capability by itself \
              (zero-external-crate compiler)."
         ),
-        "provide a `file://` mirror, or `jet vendor` the source so the build is offline.".to_string(),
+        "provide a `file://` mirror, or `jet vendor` the source so the build is offline."
+            .to_string(),
         None,
     )
 }
@@ -418,7 +643,9 @@ pub fn e1238(tool: &str) -> Diagnostic {
         "build tools must be realized `Pkg` dependencies of the package, so the build is \
          reproducible. A build never falls through to host `/usr/bin`."
             .to_string(),
-        format!("add `{tool}` as a build dependency in `pkg.jet` so it is realized into the hangar."),
+        format!(
+            "add `{tool}` as a build dependency in `pkg.jet` so it is realized into the hangar."
+        ),
         None,
     )
 }
@@ -440,7 +667,12 @@ mod tests {
         p
     }
 
-    fn ctx_at<'a>(base: &'a Path, src: &'a Path, out: &'a Path, cache: &'a Path) -> BuildContext<'a> {
+    fn ctx_at<'a>(
+        base: &'a Path,
+        src: &'a Path,
+        out: &'a Path,
+        cache: &'a Path,
+    ) -> BuildContext<'a> {
         let _ = base;
         BuildContext {
             source_dir: src,
@@ -549,7 +781,10 @@ mod tests {
         assert_eq!(report.fetches.len(), 1);
         assert_eq!(report.fetches[0].sha256, sha);
         assert!(report.effects.iter().any(|e| e == "net.fetch"));
-        assert!(cache.join(&sha).is_file(), "locked source must be cached by hash");
+        assert!(
+            cache.join(&sha).is_file(),
+            "locked source must be cached by hash"
+        );
 
         // Now the upstream source disappears and we go offline — the re-build is
         // still satisfiable from the cache, no network.
@@ -602,7 +837,10 @@ mod tests {
             }],
         };
         let h = recipe.recipe_hash();
-        assert!(trust_first_build(&h, &trust), "first build is newly trusted");
+        assert!(
+            trust_first_build(&h, &trust),
+            "first build is newly trusted"
+        );
         assert!(
             !trust_first_build(&h, &trust),
             "second build is already trusted"

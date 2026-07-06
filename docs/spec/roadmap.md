@@ -117,7 +117,7 @@ M0–M14, v1.0 arc, verified 2026-06-14.
 - **M7** — FFI: `extern rust` inline crate deps.
 - **M8** — closures and lambdas.
 - **M9** — generics and traits; **M9.5** — comptime evaluation and `@embed`.
-- **M10** — Core library: `core.fs`, `core.io`, `core.env`, `core.process`, `core.math`, `core.random`, `core.time`, `core.encoding.json`. Frozen API in `docs/reference/core-library.md`.
+- **M10** — Core library: `core.files`, `core.io`, `core.env`, `core.process`, `core.math`, `core.random`, `core.time`, `core.encoding.json`. Frozen API in `docs/reference/core-library.md`.
 - **M11** — tasks and channels (Epoch-2 concurrency work; shipped as part of the v1 arc).
 - **M12** — package manager: `pkg.jet`, `.jet/lock`, content-addressed store (D-PM1…8). M12.1 verified; M12.2 (registry/semver) is Epoch 1 tail.
 - **M13** — LSP: incremental front end, go-to-definition, diagnostics, hover.
@@ -136,9 +136,9 @@ M0–M14, v1.0 arc, verified 2026-06-14.
 - **E2-M5** — tier-2 references: `view`/`ref` hardening, zero-copy patterns.
 - **E2-M6** — library authoring: associated types, error conversion for `?`, argument labels/defaults (S61), trait delegation (S62).
 - **E2-M7** — streaming I/O: file handles, `Reader`/`Writer`, RAII cleanup (S63), `Path`.
-- **E2-M8** — supply chain: `jet publish` (pre-publish gate), `jet vendor`, `jet audit`, SBOM; PubGrub resolver. Registry upload and `jet gc` deferred (D-PKGS1, M12.2).
+- **E2-M8** — supply chain: `jet publish` (pre-publish gate), `jet vendor`, `jet audit`, SBOM; PubGrub resolver. Registry upload deferred (D-PKGS1, M12.2); Jetpack hangar cleanup is `jet clean`.
 - **E2-M9** — first-party library ring: `core.regex`, `core.encoding.{csv,toml,yaml,json}`, `core.log`, `core.time`, `core.crypto`, `core.archive` (gzip/zip/tar — D-DEP-ARCHIVE1), `core.db` (SQLite via rusqlite bundled — D-DEP-DB1).
-- **E2-M10** — networking: blocking TCP/UDP, HTTP client/server (`core.http`, plain HTTP). TLS is delivered as the `core.tls` package (separate from the core binary, I6).
+- **E2-M10** — networking: blocking TCP/UDP, HTTP client/server (`core.http`; client HTTPS became default later under D-TLS1; server HTTPS uses D-TLSSERVE1's named `tls:` option). Advanced client TLS configuration remains `core.tls`.
 - **E2-M11** — testing/docs/bench: doctests, coverage, `jet bench`, property testing.
 - **E2-M12** — debug/observe: DAP prep, panic locals, structured logging/tracing/metrics.
 - **E2-M13** — expert low-level tier: `use core.mem`, `#Unsafe("reason")` gates, `*T`, volatile; I1 amendment (D-LL1).
@@ -163,8 +163,9 @@ backend). Moved to Epoch 3: DAP step-through debugging, adoption documentation,
 
 **Deferred registry ops (D-PKGS1):** `jet publish` runs the pre-publish gate
 (build + tests + API diff) but registry upload is not implemented — use
-git-based dependencies. `jet gc` is a stub pending M12.2. TLS requires the
-`core.tls` package; the built-in HTTP client (`core.http`) is plain HTTP only.
+git-based dependencies. Jetpack hangar cleanup uses `jet clean`. The built-in HTTP
+client (`core.http`) supports default HTTPS through the D-TLS1 rustls bridge;
+registry push remains a separate protocol/tooling follow-up.
 
 ### Jetpack & jetos
 

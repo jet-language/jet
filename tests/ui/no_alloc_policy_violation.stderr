@@ -1,0 +1,7 @@
+Error [E0921]: string interpolation allocates a new `String`
+  --> tests/ui/no_alloc_policy_violation.jet:4:12
+    |
+  4 |     return "frame {frame_num}"
+    |            ^^^^^^^^^^^^^^^^^^^
+ Why: this module declares `policy no_alloc` (D-NOALLOC-SEM1) — every allocation-shaped expression in its own function bodies is a compile error; a call to a function defined elsewhere is that function's own module's problem, not checked here
+ Fix: avoid the allocation here, or move this code out of the `policy no_alloc` module

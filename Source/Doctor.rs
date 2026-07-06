@@ -6,7 +6,7 @@
 //! problems can be applied with `--fix`. Network checks (the registry) run only
 //! under `--online`.
 //!
-//! The advisory diagnostic for rustc / cache / PATH problems is **L2101**.
+//! The advisory diagnostic for rustc / native linker / cache / PATH problems is **L2101**.
 //! The C-FFI section (D-BUILD1) reports pkg-config presence and hangar link
 //! dirs honestly.
 
@@ -93,6 +93,7 @@ pub struct Options {
 pub fn run(opts: Options) -> Vec<Check> {
     let mut out = Vec::new();
     out.push(check_rustc());
+    out.push(check_native_linker());
     out.extend(check_caches());
     out.push(check_path());
     out.push(check_lsp());
@@ -130,6 +131,23 @@ fn check_rustc() -> Check {
             "install Rust from https://rustup.rs, then re-run; v1 of Jet uses rustc as its hidden backend",
             false,
         ),
+    }
+}
+
+fn check_native_linker() -> Check {
+    if command_ok("cc", &["--version"]) {
+        let detail = which("cc")
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "found".to_string());
+        Check::ok("toolchain", "native linker (cc)", detail)
+    } else {
+        Check::problem(
+            "toolchain",
+            "native linker (cc)",
+            "not found on PATH",
+            "run from `nix develop`, or install a C toolchain that provides `cc` (`gcc`/`clang`; on Debian/Ubuntu: `build-essential`, on Arch: `base-devel`)",
+            false,
+        )
     }
 }
 
@@ -280,6 +298,27 @@ fn ffi_cache_dir() -> PathBuf {
 fn check_cross_target(triple: &str) -> Check {
     if triple == crate::Syntax::BUILD_TARGET_WEB {
         return Check::ok("cross", triple, "Jet web backend target (WASM + JS)");
+    }
+    // D-DEP-WASM1=A (c81): `--target=plugin` needs `wasm-tools` on PATH (to
+    // lift the rustc-built core wasm module into a Component Model binary)
+    // in addition to the ordinary `wasm32-unknown-unknown` rustc target this
+    // function's normal path below already checks.
+    if triple == crate::Syntax::TARGET_PLUGIN {
+        let have_wasm_tools = Command::new("wasm-tools")
+            .arg("--version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        if !have_wasm_tools {
+            return Check::problem(
+                "cross",
+                triple,
+                "`wasm-tools` isn't on PATH (needed to build a plugin's Component)",
+                "install wasm-tools (ships in the project's `nix develop` shell), or add it to PATH",
+                false,
+            );
+        }
+        return check_cross_target("wasm32-unknown-unknown");
     }
     // Step 1: is it a known rustc target at all?
     let known = Command::new("rustc")

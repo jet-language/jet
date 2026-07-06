@@ -207,19 +207,13 @@ mod tests {
             fs::set_permissions(&bin1, perm).unwrap();
         }
         #[cfg(unix)]
-        assert_eq!(
-            find_engine_binary_in(vec![d1].into_iter(), "jetpack"),
-            None
-        );
+        assert_eq!(find_engine_binary_in(vec![d1].into_iter(), "jetpack"), None);
     }
 
     #[test]
     fn find_engine_binary_in_none_when_absent() {
         let d1 = scratch("absent");
-        assert_eq!(
-            find_engine_binary_in(vec![d1].into_iter(), "jetpack"),
-            None
-        );
+        assert_eq!(find_engine_binary_in(vec![d1].into_iter(), "jetpack"), None);
     }
 
     #[test]

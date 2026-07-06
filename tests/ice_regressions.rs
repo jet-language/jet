@@ -67,7 +67,7 @@ fn b1_json_text_clones_borrowed_view_param() {
         r#"
 use core.encoding.json as json
 fn wrap(x: String) -> String {
-    j :: Json.Text(x.clone())
+    j :: Json.Text(copy x)
     return json.to_string(j)
 }
 fn run() {

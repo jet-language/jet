@@ -172,7 +172,7 @@ The bridge matches the three daily Nix flows:
 |---|---|
 | `nix-shell -p nodejs ripgrep` | `jet env -p nodejs ripgrep` |
 | `nix develop` in a flake repo | `jet env` detects `flake.nix` / `devenv.nix` when no `env.*` exists |
-| `nix run nixpkgs#fastfetch` | `jet run nixpkgs@fastfetch` |
+| `nix run nixpkgs#fastfetch` | `jet run nixpkgs:fastfetch` |
 
 `jet bridge flake` emits a generated `flake.nix` shim so Nix users can consume
 Jet packages and envs. Adoption is consume, coexist, replace; no flag day.

@@ -120,7 +120,10 @@ fn fmt_comptime_os_switch_round_trips() {
         "expected the else arm preserved, got:\n{out}"
     );
     let twice = jet::format_source(&out).expect("comptime OS switch output should re-fmt");
-    assert_eq!(out, twice, "comptime OS switch formatting must be idempotent");
+    assert_eq!(
+        out, twice,
+        "comptime OS switch formatting must be idempotent"
+    );
 }
 
 #[test]
@@ -1204,6 +1207,54 @@ fn run() {
 }
 
 #[test]
+fn fmt_no_alloc_policy_d_mem1_s7_stability() {
+    // D-MEM1/S7 (D-NOALLOC-SEM1=A): `policy no_alloc` is a fixed post-import
+    // file marker, same treatment as `#PubFile`/`#Target(…)` — must survive
+    // fmt unchanged.
+    let src = "\
+policy no_alloc
+
+fn run() {
+    print(\"ok\")
+}
+";
+    assert_fmt_keeps(src, &["policy no_alloc"], "D-MEM1/S7 policy no_alloc");
+}
+
+#[test]
+fn fmt_copy_verb_d_cap2_stability() {
+    // D-CAP2 (D-MEM1/S4): `copy x` is a prefix-verb expression — must survive
+    // fmt unchanged in binding position, call-arg position, and on a field.
+    let src = "\
+struct Ticket {
+    id: Int
+    label: String
+}
+
+fn archive(t: ^Ticket) -> String {
+    return t.label
+}
+
+fn run() {
+    name: String :: \"vault\"
+    saved :: copy name
+    t :: Ticket.{id: 1, label: \"root\"}
+    print(archive(copy t))
+    print(copy t.label)
+}
+";
+    assert_fmt_keeps(
+        src,
+        &[
+            "saved :: copy name",
+            "print(archive(copy t))",
+            "print(copy t.label)",
+        ],
+        "D-CAP2 copy verb",
+    );
+}
+
+#[test]
 fn fmt_loop_label_d_looplabel2_stability() {
     // D-LOOPLABEL2=A: `outer@ loop { break outer@ }` must survive fmt unchanged.
     let src = "\
@@ -1783,7 +1834,10 @@ fn fmt_verbatim_derive_body_comment_not_duplicated() {
         1,
         "derive-body comment must not duplicate, got:\n{out}"
     );
-    assert_eq!(out, src, "derive block with an internal comment must already be canonical");
+    assert_eq!(
+        out, src,
+        "derive block with an internal comment must already be canonical"
+    );
     let twice = jet::format_source(&out).expect("second fmt should succeed");
     assert_eq!(out, twice, "derive-body comment fmt must be idempotent");
 }
@@ -1810,7 +1864,10 @@ fn fmt_preserves_trait_associated_type() {
         out.contains("type Elem\n"),
         "trait's `type Elem` associated-type declaration must not be dropped, got:\n{out}"
     );
-    assert_eq!(out, src, "trait with an associated type must already be canonical");
+    assert_eq!(
+        out, src,
+        "trait with an associated type must already be canonical"
+    );
     let twice = jet::format_source(&out).expect("second fmt should succeed");
     assert_eq!(out, twice, "trait assoc-type fmt must be idempotent");
 }
@@ -1867,7 +1924,10 @@ fn fmt_preserves_web_partition_markers() {
             tag.trim_end()
         );
     }
-    assert_eq!(out, src, "web-partition-marked fns must already be canonical");
+    assert_eq!(
+        out, src,
+        "web-partition-marked fns must already be canonical"
+    );
     let twice = jet::format_source(&out).expect("second fmt should succeed");
     assert_eq!(out, twice, "web partition marker fmt must be idempotent");
 }

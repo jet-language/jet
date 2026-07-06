@@ -66,30 +66,109 @@ diagnostics suggesting owned field / `Shared<T>` / `Id<T>` — forward-looking
 guidance, no mention of former spellings. `ownership.jet` and `ref_field.jet`
 rewritten to the v5 surface (their diffs are the acceptance test).
 
-**S4 — `copy` verb.**
+**S4 — `copy` verb. DONE (2026-07-04).**
 D-CAP2 keyword form lands (`copy x`); it is the one copy spelling in the
 release surface — `.clone()` does not exist there (one way to mean it, I8).
 Rule: `^` marks giving away a *named binding*; temporaries (`copy x`, literals,
 call results) pass without `^` — nothing survives to be used-after.
+`Expr::Copy` is a real prefix-verb AST node (parser/formatter/codegen), and is
+also the sole lowering target the compiler's own internal duplication
+rewrites (val-binding-from-read-param, owning struct-field reads) now
+build — one mechanism, whether the user writes it or the compiler inserts
+it. `.clone()` is not a callable Jet method: `infer_method_call` no longer
+special-cases `clone`, so it falls through to the ordinary "no such method"
+path. A non-cloneable type under `copy x` is E0211 (new code); a scalar is
+legal but redundant (already `Copy`, no error). Every E0121/E0201/E0209/etc.
+fix-it that used to suggest `.clone()` now suggests `copy name`.
 
-**S5 — View values (stdlib).**
-`String` slicing ops (`split`, `trim`, `after`/`before` — shares D-STR-AFTER1
-work from card #188) return counted views internally; `[T]` slice views same
-machinery. Vetted internals only (I1; golden greps generated code for the bare
-word "unsafe" — keep it out of emitted text). Golden examples pin zero-copy
-behavior via output, perf pinned by a bench fixture.
+**S5 — View values (stdlib). DONE (2026-07-04).**
+`[T]` slice views were already live (`list.view(a..b)`, D-DYNARRAY1, shipped
+2026-07-01, predates this migration) — nothing to do there; "same machinery"
+turned out to mean the same scope-liveness *reasoning*, reused below, not a
+shared code path (`String` has no distinct view type the way `View<T>` does).
 
-**S6 — `Shared<T>` and `Pool<T>`/`Id<T>`.**
-CoreLib types + lowering (`Arc<RwLock>` class; generational arena). Ownership
-diagnostics suggest them by name. Examples + goldens for: shared config across
-tasks, entity world, parent-pointer tree. Any owner-facing spelling not already
-fixed by the ratified proposal text (e.g. `@Resource` naming) gets a mini-ballot
-BEFORE this stage builds it.
+`String.trim()`/`.after(sep)`/`.before(sep)` bound to a local (`d :: s.trim()`)
+now return a zero-copy `&str` window into the receiver's buffer instead of an
+eagerly-allocated `String`, whenever sema proves the binding can't outlive its
+owner — `Binding::string_view` (AST.rs), tracked in a `list_views`-shaped map
+(`Checker::string_views`), escape-checked as **E2307** (new code). Unlike
+`View<T>`, `String` stays ONE Jet-level type end to end (D-MEM1 gallery: "one
+String type") — the view-ness lives on the *binding*, invisible to the type
+system, so codegen (TIR `lower.rs`'s `Stmt::Val` handling) picks the borrowed
+`_view` prelude helper (`jet_string_after_view`/`_before_view`/`_trim_view`,
+`&str -> &str`) instead of the owned one only for THIS shape. A view's legal
+surface is deliberately narrow — chain another `.trim()/.after()/.before()`,
+interpolate it (`"{d}"`, backed by new `impl JetDisplay for str` etc.), or
+`copy d` to materialize an owned `String` — every other read (return, rebind,
+struct field, call argument, list/tuple literal element, any other method)
+is E2307, caught at ONE general choke point (the `Expr::Ident` inference arm,
+gated by `allow_string_view_read`) rather than enumerated per call site.
 
-**S7 — `policy` floors.**
-Module-level `policy` item (parser + manifest). `no_alloc` first (allocation
-sites error inside the module). The final policy list is a follow-on ballot;
-only ratified members ship.
+`split` stays eager (`Vec<String>`, unchanged) — a zero-copy `[View-of-String]`
+needs the same generalized List-of-views representation work as `Shared<T>`/
+`Pool<T>` (S6-scale), not a stage-S5-sized change; deferred, named here as a
+gap, not silently dropped.
+
+Golden pinning: `examples/features/memory/string_view.jet` (view binding,
+original string still readable after, `copy` escaping a function boundary) +
+two ui snapshots (`tests/ui/string_view_outlives_owner.jet` — E2307 on
+`return d`; `tests/ui/string_view_task_capture.jet` — E1102 on a task
+capturing a view, mirroring `task_detach_view_capture.jet`'s existing
+`View<T>` case). Perf: `jet bench` fixture (`#Bench` block, D-BENCH1/D-TOOL5,
+the existing convention — no new benchmarking harness) in the same example.
+
+**S6 — `Shared<T>` and `Pool<T>`/`Id<T>`. DONE (2026-07-04).**
+CoreLib types + lowering shipped per the ratified D-SHARED-API1=A /
+D-POOLID-API1=A ballots. `Shared<T>`: `Shared.new(x)` (bare type-name call, `T`
+inferred from `x`), `.read(f)`/`.edit(f)` closure callbacks over
+`Arc<RwLock<T>>` (`jet_std::JetShared<T>`); repurposed the pre-existing
+`Type::Shared`/`Shared<T>` grammar slot (parked since before this migration as
+inert signature plumbing over a plain `Arc<T>` — never actually
+constructible) rather than minting a second mechanism. `Pool<T>`/`Id<T>`:
+`Pool<T>.new()`, `.add(val) -> Id<T>`, `pool[id]` read/write (incl. nested
+`pool[id].field = v` through a genuine mutable place, `jet_pool_get_mut`, not
+a value round-trip), `.ids() -> [Id<T>]`, `.remove(id) -> T?` (mirrors
+`Map.remove`'s `Option` convention — the judgment call the ballot flagged as
+open). `Id<T>` is plain index+generation data (`Copy`, comparable, hand-written
+impls so no `T: Copy`/`Clone`/`Eq` bound leaks). A stale `Id<T>` panics at
+runtime mirroring the array-oob precedent (no new diagnostic code) —
+`examples/features/memory/pool_stale_id.jet` + `.err.out`. E0120's fix-it
+dropped "(coming soon)" — the types are here. Examples + goldens: shared
+config across tasks (`shared_config.jet`), entity world
+(`entity_world.jet`), parent-pointer tree (`entity_tree.jet`). No new
+owner-facing spelling needed a mini-ballot — the ratified text was fully
+decidable. Deliberate scope cuts (documented, not silent): `jet-jit` (the
+Cranelift dev-loop tier) doesn't cover these types yet — functions using
+them run via the AOT/interpreter tiers, not accelerated; `Pool<T>`/`Shared<T>`
+themselves aren't `PartialEq`/`Hash` (only `Id<T>` is) and aren't
+`@[Codable]`-serializable. Found + fixed a real parser bug while landing
+this: `Type<Args>.method()`'s call-site turbofish clobbered the type-name's
+OWN turbofish (`Deque<String>.new()` silently defaulted to `Int` before this
+fix — a latent, unrelated-to-Pool bug this stage's `Pool<Player>.new()` test
+surfaced). Also renamed a same-name collision: `examples/features/serde/
+serde_generic.jet` (+ 2 test-inline copies) had an unrelated demo struct
+`Id<K>`, predating `Id<T>`'s reservation — renamed to `Tagged<K>`.
+
+**S7 — `policy` floors. DONE (2026-07-04, D-NOALLOC-SEM1=A).**
+`policy no_alloc` is a bare module-level item, parsed like `use` (no
+`pkg.jet`/manifest field — "manifest" in the original plan text meant
+"recognized by the module-file parser," not a separate manifest key). Local-
+only sema pass (no call-graph walk, unlike `@Pure fn`): flags four
+allocation-shaped expression shapes written directly in the policy'd
+module's own function bodies — string interpolation with a `{…}` hole,
+`.push`/`.insert` (method-name match, no receiver-type check), a struct/enum
+literal for a type that owns heap data transitively, `copy` of a heap-owning
+type — as **E0921**. Calling a function defined elsewhere is never followed
+(that function's own module's problem). New `type_owns_heap` helper
+(`Sema/Diagnostics.rs`) walks struct fields/enum variants/distinct
+bases/aliases through the type registry; `Pool<T>` is always heap-owning,
+`Id<T>` never. Deliberate, ratified-text-exact scope cut: a bare list/map/
+string literal outside those four shapes isn't checked (e.g. `xs := [1, 2, 3]`
+sails through) — extending the denylist is a future ballot, not silently
+done here. Example: `examples/features/memory/no_alloc_policy.jet` (clean
+compile) + `tests/ui/no_alloc_policy_violation.jet` (E0921 on interpolation)
++ fmt round-trip test. The final policy list beyond `no_alloc` is still a
+follow-on ballot.
 
 **S8 — Diagnostics + docs sweep (rides every stage, finishes here).**
 Every new/changed error: code + what/why/fix in docs/spec/diagnostics.md + ui

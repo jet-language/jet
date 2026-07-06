@@ -207,7 +207,22 @@ impl<'a> Checker<'a> {
                 };
                 let taken = take_set.contains(name);
                 if self.is_task_spawn {
-                    let problem = if !cap_sendable {
+                    // D-MEM1 stage S5: a string view (`Binding.string_view`)
+                    // is `Type::String` at the type level — the general
+                    // sendability check above sees a plain `String` and finds
+                    // nothing wrong, unlike `View<T>` (a distinct type it
+                    // already flags). Check the NAME here instead, mirroring
+                    // the same `ViewBorrow` verdict `View<T>` gets, so a view
+                    // can't cross into a spawned task's `'static` closure any
+                    // more than a `View<T>` can (I2: this must be caught here,
+                    // never surface as a real rustc lifetime rejection).
+                    let problem = if self.is_string_view(name) {
+                        Some(SendabilityProblem {
+                            root: None,
+                            path: Vec::new(),
+                            kind: SendProblemKind::ViewBorrow,
+                        })
+                    } else if !cap_sendable {
                         self.sendability_problem(&cap_ty, taken).or_else(|| {
                             Some(SendabilityProblem {
                                 root: None,
@@ -239,8 +254,8 @@ impl<'a> Checker<'a> {
                             ),
                             "tasks run concurrently; a `var` binding can't be shared between tasks".to_string(),
                             format!(
-                                "give the task its own copy (`{}.clone()`) or hand it over with `take({})`",
-                                name, name
+                                "give the task its own copy (`{} {}`) or hand it over with `take({})`",
+                                Syntax::KW_COPY, name, name
                             ),
                             Some(lam.span),
                         ));
@@ -280,13 +295,16 @@ impl<'a> Checker<'a> {
                             ));
                         }
                     }
-                } else if is_reactive_handle_ty(&cap_ty) {
+                } else if is_reactive_handle_ty(&cap_ty) || matches!(cap_ty, Type::Shared(_)) {
                     // D-REACT1=B: a reactive `Signal`/`Derived` is an Rc-backed shared
                     // handle — capturing a "copy" shares the same reactive cell (that is
                     // the whole point: a derived/effect reads the live signal, and the
                     // outer code still `.set`s it). No silent-data-copy to warn about, so
                     // L0801 is suppressed. The capture is still recorded as a clone so
                     // codegen moves an Rc clone into the closure.
+                    // D-MEM1 S6 (D-SHARED-API1=A): `Shared<T>` is the same shape — an
+                    // Arc-backed "copyable door" meant to be captured freely across
+                    // `tasks.spawn` closures with no `take`; suppress the same lint.
                     lam.meta.cloned_captures.push(name.clone());
                 } else if !taken {
                     lam.meta.cloned_captures.push(name.clone());
@@ -299,8 +317,8 @@ impl<'a> Checker<'a> {
                         "a stored lambda owns its captures — clonable values are copied silently"
                             .to_string(),
                         format!(
-                            "use `take({}) (…) => …` to move `{}`, or `.clone()` at the call site to copy on purpose",
-                            name, name
+                            "use `take({}) (…) => …` to move `{}`, or `{} {}` at the call site to copy on purpose",
+                            name, name, Syntax::KW_COPY, name
                         ),
                         Some(lam.span),
                     ));
@@ -314,7 +332,10 @@ impl<'a> Checker<'a> {
                 p.name.clone(),
                 LocalInfo {
                     ty: pty.clone(),
-                    mutable: false,
+                    // D-MEM1 S6: `Shared<T>.edit(f)`'s closure param is the one
+                    // builtin-closure shape that binds its param mutable with no
+                    // `&` sigil — the exclusive write lock IS the API contract.
+                    mutable: self.lambda_param_mutable,
                     param_conv: None,
                     decl_loop_depth: self.loop_depth,
                     sendable: true,
@@ -488,7 +509,7 @@ impl<'a> Checker<'a> {
                     // D-DETACH1: consume the Task handle (marks it moved → L1101 won't fire).
                     // Two error cases:
                     //   E1106: task captured a `view` borrow — a detached task can outlive
-                    //          the borrow; fix-it is to pass an owned `copy`/`share`.
+                    //          the borrow; fix-it is to pass an owned `copy` or `Shared<T>`.
                     //   E1103: task had a general sendability failure at spawn (E1102 already
                     //          fired); detaching an unsound task is doubly dangerous.
                     if let Expr::Ident(name, _) = receiver {
@@ -500,7 +521,7 @@ impl<'a> Checker<'a> {
                                     name
                                 ),
                                 "a detached task runs unsupervised and may outlive the caller; a captured `view` would dangle".to_string(),
-                                "pass an owned `copy` or `share` to the task instead of a `view`".to_string(),
+                                "pass an owned `copy`, or a `Shared<T>` handle, to the task instead of a `view`".to_string(),
                                 Some(span),
                             ));
                         } else if self.view_capture_tasks.contains(name.as_str()) {
@@ -523,6 +544,43 @@ impl<'a> Checker<'a> {
                 ("Sender", "send") => {
                     return self.finish_sender_send(recv_ty, args, span);
                 }
+                // D-MEM1 S6 (D-POOLID-API1=A): `Pool<T>` — generational arena.
+                ("Pool", "add") => {
+                    return self.finish_pool_add(recv_ty, args, span);
+                }
+                ("Pool", "remove") => {
+                    return self.finish_pool_remove(recv_ty, args, span);
+                }
+                ("Pool", "ids") => {
+                    if !args.is_empty() {
+                        self.diags
+                            .push(wrong_core_arity("ids", 0, args.len(), span));
+                        for a in args.iter_mut() {
+                            self.infer(&mut a.expr);
+                        }
+                    }
+                    let elem_ty = match recv_ty {
+                        Type::Apply { name, args } if name == "Pool" => {
+                            args.first().cloned().unwrap_or(Type::Int)
+                        }
+                        _ => Type::Int,
+                    };
+                    let id_ty = Type::Apply {
+                        name: "Id".to_string(),
+                        args: vec![elem_ty],
+                    };
+                    return Some(Type::List(Box::new(id_ty)));
+                }
+                _ => {}
+            }
+        }
+        // D-MEM1 S6 (D-SHARED-API1=A): `Shared<T>` is `Type::Shared`, not
+        // `Type::Apply` (it predates this stage — see the type's own doc
+        // comment) — a separate receiver match, same shape as the block above.
+        if let Type::Shared(inner) = recv_ty {
+            match method {
+                "read" => return self.finish_shared_read(inner, args, span),
+                "edit" => return self.finish_shared_edit(inner, args, span),
                 _ => {}
             }
         }
@@ -934,10 +992,9 @@ impl<'a> Checker<'a> {
             ));
             return None;
         }
-        if method == "clone" {
-            self.borrow_ctx = true;
-            return self.infer(receiver);
-        }
+        // D-CAP2 (D-MEM1/S4): `.clone()` is not user-typable Jet syntax — `clone`
+        // falls through to the ordinary "no such method" path below like any
+        // other unrecognized name (I8: `copy x` is the one copy spelling).
         self.lint_allocation_hints(method, span);
         // D-DIST3 (ratified 2026-06-20): `.raw()` unwraps a distinct type.
         if method == crate::Syntax::METHOD_DISTINCT_RAW {
@@ -1007,9 +1064,10 @@ impl<'a> Checker<'a> {
                 self.diags.push(Diagnostic::error(
                     "E0038",
                     "`File.open` is not the M10 file API".to_string(),
-                    "M10 uses whole-file helpers in `core.fs`; file handles are out of scope"
+                    "M10 uses whole-file helpers in `core.files`, not a `File.open` handle type"
                         .to_string(),
-                    "import `core.fs as fs` and call `fs.read(path)` or `fs.write(path, text)`"
+                    "import `core.files as fs` and call `fs.read(path)` or `fs.write(path, text)` \
+                     (or `fs.open(path)` for a streaming handle)"
                         .to_string(),
                     Some(span),
                 ));
@@ -1200,6 +1258,52 @@ impl<'a> Checker<'a> {
                 *resolved_ret_out = Some(ret.clone());
                 return Some(ret);
             }
+            // D-MEM1 S6 (D-SHARED-API1=A): `Shared.new(x)` — a lock-guarded shared
+            // handle (`Arc<RwLock<T>>` class). `T` is inferred from the constructor
+            // argument, no turbofish — a bare type-name call like `Path.from` above.
+            if type_name == "Shared" && method == "new" {
+                if args.len() != 1 {
+                    self.diags.push(Diagnostic::error(
+                        "E0104",
+                        format!("`Shared.new` takes exactly one value, got {}", args.len()),
+                        "a `Shared<T>` wraps exactly one starting value".to_string(),
+                        "write `Shared.new(value)`".to_string(),
+                        Some(span),
+                    ));
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
+                    return None;
+                }
+                let elem_ty = self.infer(&mut args[0].expr).unwrap_or(Type::Int);
+                let ret = Type::Shared(Box::new(elem_ty));
+                *resolved_ret_out = Some(ret.clone());
+                return Some(ret);
+            }
+            // D-MEM1 S6 (D-POOLID-API1=A): `Pool<T>.new()` — an empty generational
+            // arena. `T` comes from the call-site turbofish (`Pool<Player>.new()`)
+            // or, failing that, the binding's type annotation — same fallback shape
+            // as `Deque.new()`/`Bag.new()` above.
+            if type_name == "Pool" && method == "new" && args.is_empty() {
+                let elem_ty =
+                    type_args
+                        .first()
+                        .cloned()
+                        .unwrap_or_else(|| match &self.expected_type {
+                            Some(Type::Apply { name, args, .. })
+                                if name == "Pool" && !args.is_empty() =>
+                            {
+                                args[0].clone()
+                            }
+                            _ => Type::Int,
+                        });
+                let ret = Type::Apply {
+                    name: "Pool".to_string(),
+                    args: vec![elem_ty],
+                };
+                *resolved_ret_out = Some(ret.clone());
+                return Some(ret);
+            }
             // D-PATHFS1: `Path.from(str)` — typed path constructor.
             if type_name == "Path" && method == "from" && !self.registry.contains("Path") {
                 if args.len() != 1 {
@@ -1227,8 +1331,12 @@ impl<'a> Checker<'a> {
                 if args.len() != 1 {
                     self.diags.push(Diagnostic::error(
                         "E0104",
-                        format!("`Reader.over` takes one `[U8]` argument, got {}", args.len()),
-                        "`Reader.over` wraps a byte list in a consuming, fallible cursor".to_string(),
+                        format!(
+                            "`Reader.over` takes one `[U8]` argument, got {}",
+                            args.len()
+                        ),
+                        "`Reader.over` wraps a byte list in a consuming, fallible cursor"
+                            .to_string(),
                         "write `Reader.over(some_bytes)`".to_string(),
                         Some(span),
                     ));
@@ -1248,8 +1356,12 @@ impl<'a> Checker<'a> {
                 if args.len() != 1 {
                     self.diags.push(Diagnostic::error(
                         "E0104",
-                        format!("`Cursor.over` takes one `String` argument, got {}", args.len()),
-                        "`Cursor.over` wraps a string in a consuming, fallible text cursor".to_string(),
+                        format!(
+                            "`Cursor.over` takes one `String` argument, got {}",
+                            args.len()
+                        ),
+                        "`Cursor.over` wraps a string in a consuming, fallible text cursor"
+                            .to_string(),
                         "write `Cursor.over(some_string)`".to_string(),
                         Some(span),
                     ));
@@ -1311,7 +1423,22 @@ impl<'a> Checker<'a> {
             }
         }
         self.borrow_ctx = true;
-        let recv_ty = self.infer(receiver)?;
+        // D-MEM1 stage S5: chaining `.trim()`/`.after()`/`.before()` onto a
+        // string-view name is the one builtin-method shape its bare `&str`
+        // Rust place supports (the `_view` prelude helpers take `&str`) — the
+        // general `Expr::Ident` E2307 check must not fire for THIS receiver
+        // read. Every other method name reaches the same `self.infer(receiver)`
+        // call with the flag left false, so it fires normally.
+        let recv_is_exempt_view = matches!(receiver.as_ref(), Expr::Ident(n, _)
+            if self.is_string_view(n) && matches!(method, "trim" | "after" | "before"));
+        if recv_is_exempt_view {
+            self.allow_string_view_read = true;
+        }
+        let recv_ty = self.infer(receiver);
+        if recv_is_exempt_view {
+            self.allow_string_view_read = false;
+        }
+        let recv_ty = recv_ty?;
         if let Type::Named(ref n) | Type::Apply { name: ref n, .. } = &recv_ty {
             if n == Syntax::TYPE_TASKGROUP {
                 return self.infer_taskgroup_method(receiver, method, span, args, recv_type_out);
@@ -1324,7 +1451,8 @@ impl<'a> Checker<'a> {
             // hole's text into the query string); `.text()` reads the escaped Html.
             if n == "Sql" && matches!(method, "template" | "params") {
                 if !args.is_empty() {
-                    self.diags.push(wrong_core_arity(method, 0, args.len(), span));
+                    self.diags
+                        .push(wrong_core_arity(method, 0, args.len(), span));
                 }
                 *recv_type_out = Some(n.clone());
                 return Some(if method == "template" {
@@ -1335,7 +1463,8 @@ impl<'a> Checker<'a> {
             }
             if n == "Html" && method == "text" {
                 if !args.is_empty() {
-                    self.diags.push(wrong_core_arity(method, 0, args.len(), span));
+                    self.diags
+                        .push(wrong_core_arity(method, 0, args.len(), span));
                 }
                 *recv_type_out = Some(n.clone());
                 return Some(Type::String);
@@ -1552,6 +1681,18 @@ impl<'a> Checker<'a> {
                 }
             }
         }
+        // D-DEP-WASM1=A / D-PLUGIN1=B (c81): method calls on a `Plugin` handle
+        // — same bespoke-block shape as `DbConnection` above (`.call`/
+        // `.call_int` need `(name: String, args: [T])` elaboration, not the
+        // generic `file_handle_method_return` table).
+        if let Type::Named(handle_ty) = &recv_ty {
+            if handle_ty == "Plugin" {
+                if let Some(ret) = self.check_plugin_method(method, args, span) {
+                    *recv_type_out = Some(handle_ty.clone());
+                    return ret;
+                }
+            }
+        }
         // E2-M7: method calls on streaming file handles (D-IO2).
         if let Type::Named(handle_ty) = &recv_ty {
             if let Some(ret) =
@@ -1597,7 +1738,8 @@ impl<'a> Checker<'a> {
             if handle_ty == "Cursor" && method == Syntax::METHOD_TAKE_PATTERN {
                 *recv_type_out = Some("Cursor".to_string());
                 if args.len() != 1 {
-                    self.diags.push(wrong_core_arity(method, 1, args.len(), span));
+                    self.diags
+                        .push(wrong_core_arity(method, 1, args.len(), span));
                     return Some(result_ty(unit_ty(), Type::String));
                 }
                 let Expr::StrMatchLit(parts, lit_span) = &args[0].expr else {
@@ -1615,7 +1757,12 @@ impl<'a> Checker<'a> {
                 let _ = lit_span;
                 let mut holes: Vec<(String, Type)> = Vec::new();
                 for part in parts {
-                    if let crate::AST::StrMatchPart::Hole { name, ty, span: hole_span } = part {
+                    if let crate::AST::StrMatchPart::Hole {
+                        name,
+                        ty,
+                        span: hole_span,
+                    } = part
+                    {
                         let bound_ty = self.str_match_hole_type(name, ty, *hole_span);
                         holes.push((name.clone(), bound_ty));
                     }
@@ -1878,9 +2025,7 @@ impl<'a> Checker<'a> {
                 }
             }
             // D-RENDERTGT2=A (c133 M1/M2): UI backend measure/layout/paint/on_event.
-            if handle_ty == "NullBackend"
-                || handle_ty == "TuiBackend"
-                || handle_ty == "GtkBackend"
+            if handle_ty == "NullBackend" || handle_ty == "TuiBackend" || handle_ty == "GtkBackend"
             {
                 if let Some(ret) =
                     ui_backend_method_return(handle_ty, method, args.len(), span, &mut self.diags)
@@ -1990,6 +2135,36 @@ impl<'a> Checker<'a> {
                     *recv_type_out = Some(crate::Syntax::TYPE_MEASUREMENT.to_string());
                     return Some(r);
                 }
+            }
+        }
+        // D-MEM1 S6 (D-POOLID-API1=A / D-SHARED-API1=A): `Pool<T>.add/remove/ids`
+        // and `Shared<T>.read/edit` set `recv_type_out` explicitly (unlike Task/
+        // Sender/Receiver, whose method NAMES alone are globally unambiguous —
+        // `add`/`remove`/`ids`/`read`/`edit` collide with Set/List/Map method
+        // names, so codegen's subset gate needs `recv_type` to disambiguate the
+        // receiver, the same reason Signal/Derived/Measurement set it above).
+        // The actual dispatch (`finish_pool_add` etc.) already lives in
+        // `finish_builtin_method`, reached the same way Signal/Derived reach it.
+        if let Type::Apply { name, .. } = &recv_ty {
+            if name == "Pool" {
+                if let Some(ret) =
+                    Collections::builtin_method_return(&recv_ty, method, args.len(), false)
+                {
+                    let result =
+                        self.finish_builtin_method(receiver, method, &recv_ty, args, span, ret);
+                    *recv_type_out = Some("Pool".to_string());
+                    return result;
+                }
+            }
+        }
+        if let Type::Shared(_) = &recv_ty {
+            if let Some(ret) =
+                Collections::builtin_method_return(&recv_ty, method, args.len(), false)
+            {
+                let result =
+                    self.finish_builtin_method(receiver, method, &recv_ty, args, span, ret);
+                *recv_type_out = Some("Shared".to_string());
+                return result;
             }
         }
         // D-SIMD2 / D-LINALG1: methods on the built-in math value types
@@ -2285,15 +2460,13 @@ impl<'a> Checker<'a> {
             // just the first, so a call inside the body can reach a method on any of
             // them. First match wins (S48 single-trait dispatch is the n=1 case of
             // this loop, unchanged).
-            let sig = trait_names
-                .iter()
-                .find_map(|tn| {
-                    self.trait_reg
-                        .traits
-                        .get(tn)
-                        .and_then(|t| t.methods.get(method))
-                        .map(|msig| (tn, msig))
-                });
+            let sig = trait_names.iter().find_map(|tn| {
+                self.trait_reg
+                    .traits
+                    .get(tn)
+                    .and_then(|t| t.methods.get(method))
+                    .map(|msig| (tn, msig))
+            });
             if let Some((trait_name, msig)) = sig {
                 *recv_type_out = Some(trait_name.clone());
                 let ret = msig.return_type.clone();
@@ -2313,7 +2486,10 @@ impl<'a> Checker<'a> {
                 many => (
                     format!(
                         "none of {} has a method `{method}`",
-                        many.iter().map(|t| format!("`{t}`")).collect::<Vec<_>>().join(" + ")
+                        many.iter()
+                            .map(|t| format!("`{t}`"))
+                            .collect::<Vec<_>>()
+                            .join(" + ")
                     ),
                     format!("add `fn {method}(…)` to one of the bound traits"),
                 ),
@@ -2470,7 +2646,8 @@ impl<'a> Checker<'a> {
                             ),
                             "this function has read access only and does not own the value".to_string(),
                             format!(
-                                "call it on a copy: `{}.clone().{}(...)` — or take ownership with `{}: {}{}`",
+                                "call it on a copy: `({} {}).{}(...)` — or take ownership with `{}: {}{}`",
+                                Syntax::KW_COPY,
                                 n,
                                 method,
                                 n,
@@ -2574,9 +2751,10 @@ impl<'a> Checker<'a> {
             self.diags.push(Diagnostic::error(
                 "E0038",
                 "`open` is not the M10 file API".to_string(),
-                "M10 uses whole-file helpers in `core.fs`; file handles are out of scope"
+                "M10 uses whole-file helpers in `core.files`, not a bare `open` handle call"
                     .to_string(),
-                "import `core.fs as fs` and call `fs.read(path)` or `fs.write(path, text)`"
+                "import `core.files as fs` and call `fs.read(path)` or `fs.write(path, text)` \
+                 (or `fs.open(path)` for a streaming handle)"
                     .to_string(),
                 Some(call.name_span),
             ));
@@ -3840,7 +4018,13 @@ impl<'a> Checker<'a> {
 
 /// D-ANY-JAI1/D-VARARGBOUND1 (c7jaiany): E1313 — a trait-bounded variadic
 /// call-site argument doesn't implement one of the bound trait(s).
-fn e1313(arg_ty_name: &str, trait_name: &str, param_name: &str, fn_name: &str, span: Span) -> Diagnostic {
+fn e1313(
+    arg_ty_name: &str,
+    trait_name: &str,
+    param_name: &str,
+    fn_name: &str,
+    span: Span,
+) -> Diagnostic {
     Diagnostic::error(
         "E1313",
         format!("`{arg_ty_name}` doesn't implement `{trait_name}`"),

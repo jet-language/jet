@@ -212,7 +212,10 @@ impl<'a> Checker<'a> {
                         Syntax::OP_TRY_SUFFIX,
                         inner_ty.name()
                     ),
-                    format!("propagation passes `{}` back to the caller", Syntax::LIT_NULL),
+                    format!(
+                        "propagation passes `{}` back to the caller",
+                        Syntax::LIT_NULL
+                    ),
                     format!(
                         "add `-> {}` to this function, or handle it with `{}`",
                         inner_ty.name(),

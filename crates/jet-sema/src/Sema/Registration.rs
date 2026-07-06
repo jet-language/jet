@@ -5,8 +5,8 @@ use crate::Numeric::{allows_float_money, is_money_like_name};
 use crate::Syntax;
 use crate::Traits::TraitRegistry;
 use crate::AST::{
-    AccessConvention, ConstAttr, DistinctDef, ElseBranch, EnumDef, Expr, Func, IfStmt, Item,
-    Param, Program, RustConstKind, Stmt, StructDef, Type,
+    AccessConvention, ConstAttr, DistinctDef, ElseBranch, EnumDef, Expr, Func, IfStmt, Item, Param,
+    Program, RustConstKind, Stmt, StructDef, Type,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -18,8 +18,7 @@ impl<'a> Checker<'a> {
             // D-ANY-JAI1: the `...[TraitA, TraitB]` bound-list form parses `ty`
             // as an unused `Type::Named("")` placeholder (the real bound list is
             // `variadic_bound_list`) — nothing to declared-type-check there.
-            let skip_type_check = (p.name == Syntax::KW_SELF
-                || p.variadic_bound_list.is_some())
+            let skip_type_check = (p.name == Syntax::KW_SELF || p.variadic_bound_list.is_some())
                 && matches!(&p.ty, Type::Named(n) if n.is_empty());
             if !skip_type_check {
                 let pty = self.resolve_type(p.ty.clone());
@@ -426,6 +425,7 @@ fn expr_uses(e: &Expr, name: &str, other: &mut Vec<Span>) {
         | Expr::Field(inner, _, _)
         | Expr::Deref(inner, _)
         | Expr::RawOf(inner, _)
+        | Expr::Copy(inner, _)
         | Expr::Tainted(inner, _)
         | Expr::Present(inner, _)
         | Expr::Ok(inner, _)
@@ -826,8 +826,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
             Some(sig) => {
                 // E0122: in Run mode plain run must return Unit. A single typed
                 // CLI parameter is checked later in Bundle.
-                if mode == CompileMode::Run && sig.params.is_empty() && sig.return_type.is_some()
-                {
+                if mode == CompileMode::Run && sig.params.is_empty() && sig.return_type.is_some() {
                     let span = prog.items.iter().find_map(|i| match i {
                         Item::Func(f) if f.name == "run" => Some(f.name_span),
                         _ => None,
@@ -934,6 +933,9 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
     // below; the `@InlineAlways` address-taken pass (E0918) runs after the
     // loop, once this set is complete.
     let mut global_addr_taken: HashSet<String> = HashSet::new();
+    // D-MEM1/S7 (D-NOALLOC-SEM1=A): captured once — every function body check
+    // below for this file gets the same file-scoped `policy no_alloc` state.
+    let no_alloc = prog.no_alloc_policy.is_some();
     for item in &mut prog.items {
         match item {
             Item::Func(f) => {
@@ -952,6 +954,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                     false,
                     &mut effect_summaries,
                     &mut global_addr_taken,
+                    no_alloc,
                 ));
             }
             Item::Impl(i) => {
@@ -971,6 +974,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                         false,
                         &mut effect_summaries,
                         &mut global_addr_taken,
+                        no_alloc,
                     ));
                 }
             }
@@ -991,6 +995,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                         false,
                         &mut effect_summaries,
                         &mut global_addr_taken,
+                        no_alloc,
                     ));
                 }
                 for block in &mut s.trait_impls {
@@ -1010,6 +1015,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                             false,
                             &mut effect_summaries,
                             &mut global_addr_taken,
+                            no_alloc,
                         ));
                     }
                 }
@@ -1031,6 +1037,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                         false,
                         &mut effect_summaries,
                         &mut global_addr_taken,
+                        no_alloc,
                     ));
                 }
             }
@@ -1077,6 +1084,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                     false,
                     &mut effect_summaries,
                     &mut global_addr_taken,
+                    no_alloc,
                 ));
                 t.body = synthetic.body;
             }
@@ -1093,6 +1101,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                     &ct_externs,
                     ct_base_dir,
                     &ct_globals,
+                    no_alloc,
                 ));
             }
             Item::Const(_)
@@ -1140,6 +1149,9 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
     check_region_caps(&effect_summaries, &solved, &mut diags);
     // D-EFF2: callback param effect bounds (E0747).
     check_callback_bounds(&effect_summaries, &solved, &mut diags);
+    // U13 (D-JPK-SECRETCRYPTO1): a `core.vault.get` reach requires `Secret` in
+    // the reaching function's own declared `#(…)` bound — E1264.
+    check_secret_grants(&prog.items, &effect_summaries, &mut diags);
 
     // D-TAINT1: taint tracking — `#Tainted` value-facts propagate, a `#Sanitizer
     // fn` clears taint, and a tainted value reaching a sink effect (Db/Exec/Net)
@@ -1775,7 +1787,9 @@ pub(crate) fn register_struct(
         },
     );
     if !computed_fields.is_empty() {
-        registry.computed_fields.insert(s.name.clone(), computed_fields);
+        registry
+            .computed_fields
+            .insert(s.name.clone(), computed_fields);
     }
     legacy.insert(
         s.name.clone(),
@@ -2047,6 +2061,8 @@ pub(crate) fn check_func_body(
     freestanding: bool,
     summaries: &mut HashMap<String, EffectSummary>,
     global_addr_taken: &mut HashSet<String>,
+    // D-MEM1/S7 (D-NOALLOC-SEM1=A): this module's `policy no_alloc` state.
+    no_alloc: bool,
 ) -> Vec<Diagnostic> {
     let empty_imports = HashMap::new();
     let empty_core_imports = HashMap::new();
@@ -2090,6 +2106,7 @@ pub(crate) fn check_func_body(
         in_unsafe: f.is_unsafe,
         suppress_must_use: false,
         in_pure: f.is_pure,
+        no_alloc,
         in_pre_clause: false,
         in_comptime: false,
         ret: f.return_type.clone(),
@@ -2099,10 +2116,13 @@ pub(crate) fn check_func_body(
         freed_allocators: HashMap::new(),
         arena_views: HashMap::new(),
         list_views: HashMap::new(),
+        string_views: HashMap::new(),
         uninit: HashMap::new(),
         borrow_ctx: false,
+        allow_string_view_read: false,
         lambda_escapes: true,
         is_task_spawn: false,
+        lambda_param_mutable: false,
         view_capture_tasks: HashSet::new(),
         view_borrow_escape_tasks: HashSet::new(),
         current_binding_name: None,
@@ -2190,6 +2210,8 @@ pub(crate) fn check_error_conv_body(
     ct_externs: &HashSet<String>,
     ct_base_dir: &std::path::Path,
     ct_globals: &HashMap<String, crate::Comptime::CtValue>,
+    // D-MEM1/S7 (D-NOALLOC-SEM1=A): this module's `policy no_alloc` state.
+    no_alloc: bool,
 ) -> Vec<Diagnostic> {
     // Synthesise a pseudo-function to reuse check_func_body.
     let mut synthetic = Func {
@@ -2247,6 +2269,7 @@ pub(crate) fn check_error_conv_body(
         false,
         &mut HashMap::new(),
         &mut HashSet::new(),
+        no_alloc,
     );
     ec.body = synthetic.body;
     d

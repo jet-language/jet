@@ -28,6 +28,9 @@ impl<'a> Checker<'a> {
         self.arena_views.retain(|_, v| v.scope_len < depth);
         // D-DYNARRAY1: `View<T>` bindings leave scope the same way arena views do.
         self.list_views.retain(|_, v| v.scope_len < depth);
+        // D-MEM1 S5: string-`view` bindings (`.trim()`/`.after()`/`.before()`)
+        // leave scope the same way.
+        self.string_views.retain(|_, v| v.scope_len < depth);
         self.scopes.pop();
         self.lambda_mut_borrow_stack.pop();
         self.ct_scopes.pop();
@@ -249,6 +252,8 @@ impl<'a> Checker<'a> {
                         | "Stream"
                         // D-MIGRATE3=A: `decode_traced<T>`'s return-shape wrapper.
                         | "DecodeResult"
+                        // D-MEM1 S6 (D-POOLID-API1=A): generational-arena handle pair.
+                        | "Pool" | "Id"
                 );
                 if !is_core_generic && !self.registry.contains(name) {
                     self.diags.push(Diagnostic::error(
@@ -719,6 +724,33 @@ impl<'a> Checker<'a> {
                             Some(Type::Named(n)) if self.trait_reg.index_types.contains_key(n) => {
                                 *kind = IndexKind::User(n.clone());
                             }
+                            // D-MEM1 S6: `pool[id] = v` — generation-checked write.
+                            Some(Type::Apply {
+                                name,
+                                args: pool_args,
+                            }) if name == "Pool" => {
+                                *kind = IndexKind::Pool;
+                                let is_matching_id = matches!(
+                                    &idx_ty,
+                                    Some(Type::Apply { name, args: id_args })
+                                        if name == "Id" && id_args.first() == pool_args.first()
+                                );
+                                if !is_matching_id {
+                                    self.diags.push(Diagnostic::error(
+                                        "E0112",
+                                        format!(
+                                            "`Pool` indexes need a matching `Id<T>`, not {}",
+                                            idx_ty
+                                                .as_ref()
+                                                .map(|t| t.show())
+                                                .unwrap_or_else(|| "this".to_string())
+                                        ),
+                                        "a pool slot is only reached through the `Id<T>` its own `.add()` returned".to_string(),
+                                        "index with the `Id<T>` handle from `.add(...)`".to_string(),
+                                        Some(index.span()),
+                                    ));
+                                }
+                            }
                             _ => {}
                         }
                         // D-SOA1: index-WRITE through a columnar list (`xs[i] = …`)
@@ -747,10 +779,16 @@ impl<'a> Checker<'a> {
                         }
                         // Writing through `[ ]` changes the owner: the root
                         // name must be changeable and not under a `for` borrow.
-                        if matches!(
-                            base_ty,
-                            Some(Type::Map { .. }) | Some(Type::List(_)) | Some(Type::FixedList { .. })
-                        ) {
+                        let base_is_pool =
+                            matches!(&base_ty, Some(Type::Apply { name, .. }) if name == "Pool");
+                        if base_is_pool
+                            || matches!(
+                                base_ty,
+                                Some(Type::Map { .. })
+                                    | Some(Type::List(_))
+                                    | Some(Type::FixedList { .. })
+                            )
+                        {
                             if let Some(root) = expr_root_ident(base) {
                                 let root = root.to_string();
                                 if self.iter_borrowed.contains(&root) {
@@ -1238,6 +1276,14 @@ impl<'a> Checker<'a> {
                         } else if let Some(owner) = self.view_call_source(e) {
                             self.report_view_owns_return(&owner, e.span());
                         }
+                        // D-MEM1 stage S5: no dedicated "returning a string
+                        // view" check here — the general E2307 check on the
+                        // `Expr::Ident` read (`self.infer(e)` above already
+                        // ran it) already caught `return d` for a live view;
+                        // a second check here would just double-report the
+                        // same span (unlike `View<T>`, which needs its OWN
+                        // check since its escape is otherwise silent — a
+                        // string view's bare-`&str` read is never silent).
                         // Returning a borrowed parameter would move out of a
                         // borrow in the generated Rust (I2) — require a copy.
                         // Exception: if the param type is a type variable, codegen
@@ -1267,10 +1313,11 @@ impl<'a> Checker<'a> {
                                         "this function has read access only and does not own the value"
                                             .to_string(),
                                         format!(
-                                            "return a copy: `return {}.clone();` — or take ownership with `{}: {}{}`. \
+                                            "return a copy: `return {} {};` — or take ownership with `{}: {}{}`. \
                                              There's no borrow-return in v1 — to share the value without a full \
-                                             copy, store an owned field, or reach for `Shared<T>`/`Id<T>` (coming soon) \
+                                             copy, store an owned field, or reach for `Shared<T>`/`Id<T>` \
                                              once a real program needs shared ownership",
+                                            Syntax::KW_COPY,
                                             n,
                                             n,
                                             Syntax::SIGIL_MOVE,
@@ -1335,7 +1382,9 @@ impl<'a> Checker<'a> {
             Stmt::Yield(e, span) => {
                 let resolved_ret = self.ret.clone().map(|t| self.resolve_type(t));
                 let elem_ty = match &resolved_ret {
-                    Some(Type::Apply { name, args }) if name == Syntax::TYPE_STREAM && args.len() == 1 => {
+                    Some(Type::Apply { name, args })
+                        if name == Syntax::TYPE_STREAM && args.len() == 1 =>
+                    {
                         Some(args[0].clone())
                     }
                     _ => None,
@@ -1366,7 +1415,8 @@ impl<'a> Checker<'a> {
                                 Syntax::TYPE_STREAM,
                                 elem_ty.show()
                             ),
-                            "every `yield` in a generator must hand back the stream's element type".to_string(),
+                            "every `yield` in a generator must hand back the stream's element type"
+                                .to_string(),
                             type_fix_hint(&elem_ty, &got),
                             Some(e.span()),
                         ));
@@ -1570,7 +1620,9 @@ impl<'a> Checker<'a> {
                             }
                             // D-DYNARRAY1: `loop x in window` — a `View<T>` iterates its
                             // elements read-only, same shape as `loop x in a_list`.
-                            Some(Type::Apply { name, args }) if name == "View" && args.len() == 1 => {
+                            Some(Type::Apply { name, args })
+                                if name == "View" && args.len() == 1 =>
+                            {
                                 self.declare_loop_var(var.clone(), *var_span, &args[0]);
                             }
                             Some(other) => {
@@ -2897,17 +2949,11 @@ impl<'a> Checker<'a> {
                     if matches!(info.param_conv, Some(AccessConvention::Read))
                         && is_cloneable(&info.ty, self.registry, self.structs)
                     {
+                        // D-CAP2 (D-MEM1/S4): same node `copy x` desugars to —
+                        // one mechanism for "duplicate this value".
                         let span = *nspan;
                         let old = std::mem::replace(&mut b.init, Expr::Absent(span));
-                        b.init = Expr::MethodCall {
-                            receiver: Box::new(old),
-                            method: "clone".to_string(),
-                            method_span: span,
-                            type_args: Vec::new(),
-                            args: Vec::new(),
-                            recv_type: None,
-                            resolved_ret: None,
-                        };
+                        b.init = Expr::Copy(Box::new(old), span);
                     } else if matches!(
                         info.param_conv,
                         Some(AccessConvention::Read) | Some(AccessConvention::Write)
@@ -2918,13 +2964,14 @@ impl<'a> Checker<'a> {
                             "this function has read access only and does not own the value"
                                 .to_string(),
                             format!(
-                                "copy it instead: `{} {} {}.clone()`",
+                                "copy it instead: `{} {} {} {}`",
                                 b.name,
                                 if b.mutable {
                                     Syntax::SIGIL_BIND_MUT
                                 } else {
                                     Syntax::SIGIL_BIND_IMMUT
                                 },
+                                Syntax::KW_COPY,
                                 n
                             ),
                             Some(*nspan),
@@ -3025,9 +3072,11 @@ impl<'a> Checker<'a> {
                             format!("construct a `{}`: `{}({})`", dt, dt, "expr"),
                             Some(b.init.span()),
                         ));
-                    } else if let Some(diag) =
-                        crate::Sema::Diagnostics::typed_text_mismatch(&annot, &actual, b.init.span())
-                    {
+                    } else if let Some(diag) = crate::Sema::Diagnostics::typed_text_mismatch(
+                        &annot,
+                        &actual,
+                        b.init.span(),
+                    ) {
                         self.diags.push(diag);
                     } else {
                         self.diags.push(Diagnostic::error(
@@ -3132,6 +3181,25 @@ impl<'a> Checker<'a> {
                 self.report_list_view_escape(src, "be stored in another binding", *src_span);
             }
         }
+        // D-MEM1 stage S5: `x :: s.trim()` / `x :: s.after(sep)` / `x ::
+        // s.before(sep)` makes `x` a scope-bound string view into `s` — the
+        // same E2305 reasoning as `View<T>`, reported as E2307 since `String`
+        // has no distinct view type for codegen to key off (`b.string_view`
+        // flags the binding itself instead). Immutable (`::`) only, matching
+        // "views are non-reassignable non-escaping locals" (I8) — a `:=`
+        // binding can be reassigned to an ordinary owned `String` later, and
+        // codegen's `&str` place has nowhere to put that; fall back to the
+        // ordinary eager/owned lowering for `:=` (unchanged pre-S5 behavior).
+        if !b.mutable {
+            if let Some(owner) = self.string_view_call_source(&b.init) {
+                b.string_view = true;
+                self.record_string_view(&b.name, owner);
+            }
+        }
+        // No dedicated "rebound to another binding" check here — the general
+        // E2307 check on `Expr::Ident` reads (this binding's init was already
+        // inferred above) already caught `y :: d` for a live view `d`; a
+        // second check here would double-report the same span.
         let task_has_view_capture = self.view_capture_tasks.contains(&b.name);
         self.declare(
             &b.name,

@@ -10,11 +10,14 @@
 //! consolidated plan lives in `tools/Tower/docs/plans/epoch-5/README.md`.
 
 pub mod Bridge;
+pub mod BuildDebug;
 pub mod CLI;
 pub mod Components;
+pub mod Discovery;
 pub mod EffectBudget;
-pub mod Envelope;
 pub mod EnvFile;
+pub mod Envelope;
+pub mod Image;
 pub mod JSON;
 pub mod JetOS;
 pub mod JetPin;
@@ -23,11 +26,16 @@ pub mod Merge;
 pub mod ModuleEval;
 pub mod Output;
 pub mod PackageManifest;
+pub mod Platform;
+pub mod PluginExport;
 pub mod Provider;
 pub mod Recipe;
 pub mod RefSpec;
+pub mod RuntimePolicy;
 pub mod ScriptDeps;
 pub mod ScriptLock;
+pub mod Secrets;
+pub mod Services;
 pub mod Shell;
 pub mod Store;
 pub mod TOML;

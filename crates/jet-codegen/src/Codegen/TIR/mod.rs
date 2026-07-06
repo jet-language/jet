@@ -182,6 +182,25 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
             _ => {}
         }
     }
+    for (_, fields) in collect_tuple_shapes(&module.items) {
+        let tuple_ty = Type::Tuple(
+            fields
+                .iter()
+                .map(|(name, ty)| (name.clone(), Box::new(ty.clone())))
+                .collect(),
+        );
+        struct_fields.insert(
+            tuple_ty.name(),
+            fields
+                .iter()
+                .map(|(name, _)| format!("user_{}", name))
+                .collect(),
+        );
+        struct_field_types.insert(
+            tuple_ty.name(),
+            fields.iter().map(|(_, ty)| ty.clone()).collect(),
+        );
+    }
     Some(JitProgram {
         source_file: module.display.clone(),
         funcs,
@@ -1075,9 +1094,19 @@ pub enum TExprKind {
         line: usize,
     },
     /// c109 Phase 6: the sema-inserted `.clone()` on an owning non-Copy field read
-    /// or borrowed value. The AST path emits `(recv).clone()` unconditionally; the
-    /// TIR carries the lowered receiver and the result type (the receiver's type).
+    /// or borrowed value. Also the lowering target for `Expr::Copy` — D-CAP2
+    /// (D-MEM1/S4) `copy x`, the one user-typable copy verb — so the compiler's
+    /// own internal duplication rewrites and the explicit `copy x` a user writes
+    /// share one TIR node (I8). The AST path emits `(recv).clone()`
+    /// unconditionally; the TIR carries the lowered receiver and the result type
+    /// (the receiver's type).
     Clone(Box<TExpr>),
+    /// D-MEM1 stage S5 (2026-07-04): `copy d` where `d` is a string-view local
+    /// (`Binding.string_view`, a bare `&str` Rust place) — materializes it into
+    /// an owned `String` via `.to_string()`. A plain `.clone()` (the `Clone`
+    /// node above) would be wrong here: cloning a `&str` hands back another
+    /// `&str`, not the owned `String` the copy needs to escape the view's scope.
+    MaterializeView(Box<TExpr>),
     /// c109 Phase 6: a user-defined instance method call `recv.method(args)` on a
     /// covered struct/enum. All dispatch facts are resolved at lowering (totality):
     /// `recv` is the lowered receiver (emitted as the AST path emits it — autoref
@@ -1628,7 +1657,9 @@ pub enum TBuiltinOp {
     /// `remove(k)` on a map → `(recv).remove(&(a0).clone())`.
     RemoveMap,
     /// `remove(i)` on a list → `jet_list_remove(&mut (recv), a0, file, line)`.
-    RemoveList { line: usize },
+    RemoveList {
+        line: usize,
+    },
     /// `get(k)` on a map → `(recv).get(&(a0).clone()).cloned()`.
     GetMap,
     /// `get(i)` on a list → `(recv).get(a0 as usize).cloned()`.
@@ -1675,7 +1706,9 @@ pub enum TBuiltinOp {
     /// `repeat(n)` → `(recv).repeat(a0 as usize)`.
     Repeat,
     /// `slice(a, b)` → `jet_string_slice(&(recv), a0, a1, file, line)`.
-    Slice { line: usize },
+    Slice {
+        line: usize,
+    },
     /// D-STR-AFTER1: `after(sep)` → `jet_string_after(&(recv), &a0)`. Substring
     /// strictly after the first `sep`; `sep` absent → the whole original string
     /// (mirrors `.replace`'s no-match-is-identity convention).
@@ -1683,6 +1716,17 @@ pub enum TBuiltinOp {
     /// D-STR-AFTER1: `before(sep)` → `jet_string_before(&(recv), &a0)`. Substring
     /// strictly before the first `sep`; `sep` absent → the whole original string.
     Before,
+    /// D-MEM1 stage S5: the zero-copy sibling of `Trim`, used ONLY as the init
+    /// of a `Binding` sema marked `string_view` (E2307 proves it can't outlive
+    /// its owner) → `jet_string_trim_view(&(recv))`, a borrowed `&str`, no
+    /// `.to_string()`.
+    TrimView,
+    /// D-MEM1 stage S5: the zero-copy sibling of `After`, same `string_view`
+    /// gate → `jet_string_after_view(&(recv), &a0)`.
+    AfterView,
+    /// D-MEM1 stage S5: the zero-copy sibling of `Before`, same `string_view`
+    /// gate → `jet_string_before_view(&(recv), &a0)`.
+    BeforeView,
     /// `keys()` → `(recv).keys().cloned().collect::<Vec<_>>()`.
     Keys,
     /// `values()` → `(recv).values().cloned().collect::<Vec<_>>()`.
@@ -1710,16 +1754,23 @@ pub enum TBuiltinOp {
     Windows,
     /// `enumerate()` → inline emit building `JetTup_<hash>` struct. The struct name
     /// is embedded here at lowering so emit is a pure formatter.
-    Enumerate { tuple_struct: String },
+    Enumerate {
+        tuple_struct: String,
+    },
     /// `zip([U])` → inline emit building `JetTup_<hash>` struct.
-    Zip { tuple_struct: String },
+    Zip {
+        tuple_struct: String,
+    },
     // D-HOLE1: Option combinators.
     /// `zip(U?)` on `T?` → `(recv).clone().zip((a0).clone()).map(|(x,y)| Struct{…})`
     /// (Rust's native `Option::zip`, wrapped into the named-tuple struct). `elem_ty`
     /// (`(a: T, b: U)`) is the resolved pair type — carried so the call's own `TExpr`
     /// type is total (not the generic table's placeholder), even though it's rarely
     /// load-bearing in emit (a binding carries sema's `b.ty`).
-    OptionZip { tuple_struct: String, elem_ty: Type },
+    OptionZip {
+        tuple_struct: String,
+        elem_ty: Type,
+    },
     // D-COLLBREADTH1=A: Set<T> operations.
     /// `Set.from([...])` — recv is the list: `(recv).into_iter().collect::<std::collections::HashSet<_>>()`.
     SetFrom,
@@ -1760,7 +1811,9 @@ pub enum TBuiltinOp {
     // one of those emits a plain Rust slice/`.get`/`.first`/… call that a
     // `&[T]` receiver satisfies exactly as a `Vec<T>` does.
     /// `list.view(a..b)` → `jet_view_new(&(recv), a0, a1, file, line)`.
-    ViewNew { line: usize },
+    ViewNew {
+        line: usize,
+    },
 }
 
 /// c109 Phase 13: a resolved handle-method op, one per handle arm of
@@ -2018,6 +2071,13 @@ pub enum THandleOp {
     DbValueText,
     DbValueBool,
     DbValueIsNull,
+    /// D-DEP-WASM1=A / D-PLUGIN1=B (c81): `plugin.call(name, args)` →
+    /// `Result<Float, String>`, a homogeneous `[Float]` call across the
+    /// sandboxed Component Model boundary (wire-encoded, see `Prelude/Plugin.rs`).
+    PluginCall,
+    /// D-DEP-WASM1=A / D-PLUGIN1=B (c81): `plugin.call_int(name, args)` →
+    /// `Result<Int, String>`, the `[Int]` sibling of `PluginCall`.
+    PluginCallInt,
     /// D-SHIFT1 (c7shift): `Reader.over(bytes)` constructor →
     /// `{root}jet_reader_over(&(recv))` → `JetReader`. `recv` is the `[U8]`
     /// argument (same "arg becomes the recv slot" shape as `PathFrom`).
@@ -2074,7 +2134,9 @@ pub struct TCallArg {
     pub mut_borrow: bool,
     /// Emit `(...).clone()` (an implicit clone — a value passed by `Move`).
     pub clone: bool,
-    /// Emit `Arc::clone(&...)` (a `Shared` value auto-cloned at the call site).
+    /// Emit `(...).clone()` (a `Shared` value auto-cloned at the call site — its
+    /// own cheap-handle `Clone` impl; D-MEM1 S6 changed this from a hardcoded
+    /// `Arc::clone(&...)` once `Shared<T>` stopped being a bare `Arc<T>`).
     /// c109 Phase 6: method/Arc args may set this; the plain-call path does not.
     pub arc_clone: bool,
     /// c109 Phase 13: the Fn-typed-parameter coercion (`emit_call_args`' fn-arg
@@ -2152,6 +2214,7 @@ mod tests {
                 web_target_ceiling: prog.web_target_ceiling,
                 pub_file: prog.pub_file,
                 html_path: prog.html_path.clone(),
+                no_alloc_policy: prog.no_alloc_policy,
             }],
             parse_teaching: Vec::new(),
             used_core: std::collections::HashSet::new(),
@@ -3508,7 +3571,7 @@ fn consume(ch: Receiver<Int>) -> Int {
         ));
         // A non-closure core call is not a closure-core-call.
         assert!(!core_closure_call_in_subset(
-            "core.fs",
+            "core.files",
             "read",
             &guard_args,
             &cx,

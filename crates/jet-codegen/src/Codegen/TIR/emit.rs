@@ -135,9 +135,7 @@ pub(crate) fn emit_tir_method(
     if let Some(conv) = self_conv {
         params.push(
             match conv {
-                AccessConvention::Read | AccessConvention::Share | AccessConvention::Raw => {
-                    "&self"
-                }
+                AccessConvention::Read | AccessConvention::Share | AccessConvention::Raw => "&self",
                 AccessConvention::Write => "&mut self",
                 AccessConvention::Move => "self",
             }
@@ -867,10 +865,7 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
                 // elapsed against the budget. Does not interrupt a hang.
                 ScopeMemberKind::Timeout(nanos) => {
                     out.push_str(&format!("{}{{\n", pad));
-                    out.push_str(&format!(
-                        "{}let __start = std::time::Instant::now();\n",
-                        ip
-                    ));
+                    out.push_str(&format!("{}let __start = std::time::Instant::now();\n", ip));
                     emit_tir_stmts(body, cx, out, inner);
                     out.push_str(&format!("{}let __elapsed = __start.elapsed();\n", ip));
                     out.push_str(&format!(
@@ -1198,6 +1193,11 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         TExprKind::Clone(recv) => {
             format!("({}).clone()", emit_tir_expr(recv, cx))
         }
+        // D-MEM1 stage S5: `copy d` on a string-view local — `.to_string()`,
+        // not `.clone()` (see the node's doc comment for why).
+        TExprKind::MaterializeView(recv) => {
+            format!("({}).to_string()", emit_tir_expr(recv, cx))
+        }
         // c109 Phase 23: `.raw()` on a distinct type → `({recv}).0`. Mirrors
         // `emit_method_call`'s `METHOD_DISTINCT_RAW` early return byte-for-byte.
         TExprKind::DistinctRaw(recv) => {
@@ -1325,6 +1325,12 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 // MOD_USE-imported convention as `jet_string_split`/`jet_string_lines`).
                 TBuiltinOp::After => format!("jet_string_after(&({}), &{})", recv, a(0)),
                 TBuiltinOp::Before => format!("jet_string_before(&({}), &{})", recv, a(0)),
+                // D-MEM1 stage S5: zero-copy siblings, `Stmt::Val` lowering only
+                // (see `lower.rs`'s `b.string_view` branch) — bare calls, no
+                // `.to_string()`, no root prefix (same convention as `After`/`Before`).
+                TBuiltinOp::TrimView => format!("jet_string_trim_view(&({}))", recv),
+                TBuiltinOp::AfterView => format!("jet_string_after_view(&({}), &{})", recv, a(0)),
+                TBuiltinOp::BeforeView => format!("jet_string_before_view(&({}), &{})", recv, a(0)),
                 TBuiltinOp::Keys => {
                     format!("({}).keys().cloned().collect::<Vec<_>>()", recv)
                 }
@@ -2643,6 +2649,22 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 THandleOp::DbValueText => format!("({}).text()", recv),
                 THandleOp::DbValueBool => format!("({}).bool()", recv),
                 THandleOp::DbValueIsNull => format!("({}).is_null()", recv),
+                // D-DEP-WASM1=A / D-PLUGIN1=B (c81): `Plugin.call`/`.call_int` —
+                // a homogeneous scalar call across the sandboxed Component
+                // Model boundary, wire-encoded exactly like `DbQuery` above
+                // (args encoded, result decoded; see `Prelude/Plugin.rs` and
+                // `jet_std::jet_plugin_{encode_args_float,decode_result_float}`
+                // in `Prelude/CoreLib.rs`).
+                THandleOp::PluginCall => format!(
+                    "{root}jet_std::jet_plugin_decode_result_float(&{ffi}::jet_plugin_call(({recv}).handle, &({}), &{root}jet_std::jet_plugin_encode_args_float(&({}))))",
+                    a(0),
+                    a(1)
+                ),
+                THandleOp::PluginCallInt => format!(
+                    "{root}jet_std::jet_plugin_decode_result_int(&{ffi}::jet_plugin_call(({recv}).handle, &({}), &{root}jet_std::jet_plugin_encode_args_int(&({}))))",
+                    a(0),
+                    a(1)
+                ),
             }
         }
         // c109 Phase 13: a closure-taking core call. The closure was rendered at
@@ -2948,32 +2970,40 @@ pub(crate) fn emit_tir_core_call(
         ("core.async.loadable", "failed") => {
             format!("JetLoadable::<(), _>::Failed({})", arg(0))
         }
-        ("core.fs", "read") => format!("{}(&({}))", helper("jet_std_fs_read"), arg(0)),
-        ("core.fs", "read_bytes") => format!("{}(&({}))", helper("jet_std_fs_read_bytes"), arg(0)),
-        ("core.fs", "write") => format!(
+        // D-FILES-WRITE1 (merge, was `core.fs`): whole-file convenience helpers now
+        // live in `core.files` alongside the streaming handle constructors below.
+        // D-FILES-APPEND1=A: whole-file one-shot is `append_all`, not `append` —
+        // that name stays reserved for the streaming handle's `.append(text)`.
+        ("core.files", "read") => format!("{}(&({}))", helper("jet_std_fs_read"), arg(0)),
+        ("core.files", "read_bytes") => {
+            format!("{}(&({}))", helper("jet_std_fs_read_bytes"), arg(0))
+        }
+        ("core.files", "write") => format!(
             "{}(&({}), &({}))",
             helper("jet_std_fs_write"),
             arg(0),
             arg(1)
         ),
-        ("core.fs", "append") => format!(
+        ("core.files", "append_all") => format!(
             "{}(&({}), &({}))",
             helper("jet_std_fs_append"),
             arg(0),
             arg(1)
         ),
-        ("core.fs", "exists") => format!("{}(&({}))", helper("jet_std_fs_exists"), arg(0)),
-        ("core.fs", "remove") => format!("{}(&({}))", helper("jet_std_fs_remove"), arg(0)),
-        ("core.fs", "list_dir") => format!("{}(&({}))", helper("jet_std_fs_list_dir"), arg(0)),
-        ("core.fs", "create_dir") => format!("{}(&({}))", helper("jet_std_fs_create_dir"), arg(0)),
-        ("core.fs", "is_dir") => format!("{}(&({}))", helper("jet_std_fs_is_dir"), arg(0)),
-        ("core.fs", "copy") => format!(
+        ("core.files", "exists") => format!("{}(&({}))", helper("jet_std_fs_exists"), arg(0)),
+        ("core.files", "remove") => format!("{}(&({}))", helper("jet_std_fs_remove"), arg(0)),
+        ("core.files", "list_dir") => format!("{}(&({}))", helper("jet_std_fs_list_dir"), arg(0)),
+        ("core.files", "create_dir") => {
+            format!("{}(&({}))", helper("jet_std_fs_create_dir"), arg(0))
+        }
+        ("core.files", "is_dir") => format!("{}(&({}))", helper("jet_std_fs_is_dir"), arg(0)),
+        ("core.files", "copy") => format!(
             "{}(&({}), &({}))",
             helper("jet_std_fs_copy"),
             arg(0),
             arg(1)
         ),
-        ("core.fs", "rename") => format!(
+        ("core.files", "rename") => format!(
             "{}(&({}), &({}))",
             helper("jet_std_fs_rename"),
             arg(0),
@@ -3355,6 +3385,13 @@ pub(crate) fn emit_tir_core_call(
             arg(0),
             arg(1)
         ),
+        // U13 (D-JPK-SECRETCRYPTO1): `core.vault.get` — reads `.jet/secrets.age`
+        // (project-relative) and decrypts with the local identity, via the
+        // age-style crypto FFI bridge. Already the exact `Option<String>` shape
+        // (`None` on any failure — missing file, missing entry, bad identity).
+        ("core.vault", "get") => {
+            format!("{}(&({}))", regex_fn("jet_vault_get_impl"), arg(0))
+        }
         // D-TTLVAL1=A: Expiring<T> / Rotting<T> constructors.
         ("core.time.expiring", "new") => format!(
             "{}jet_expiring_new({}, {}jet_duration_millis(&({})), {}jet_clock_now(&({})))",
@@ -3525,6 +3562,61 @@ pub(crate) fn emit_tir_core_call(
         ("core.archive", "tar_names_json") => {
             format!("{}(&({}))", regex_fn("jet_archive_tar_names_json"), arg(0))
         }
+        // D-RAYLIB1=A: typed no-op bridge skeleton. `core.raylib` currently
+        // normalizes to the internal `jet.raylib` key.
+        ("core.raylib" | "jet.raylib", "window_open") => {
+            format!(
+                "{}jet_raylib_window_open({}, {}, &({}))",
+                cx.root_prefix,
+                arg(0),
+                arg(1),
+                arg(2)
+            )
+        }
+        ("core.raylib" | "jet.raylib", "window_should_close") => {
+            format!(
+                "{}jet_raylib_window_should_close(&({}))",
+                cx.root_prefix,
+                arg(0)
+            )
+        }
+        ("core.raylib" | "jet.raylib", "begin_drawing") => {
+            format!("{}jet_raylib_begin_drawing(&({}))", cx.root_prefix, arg(0))
+        }
+        ("core.raylib" | "jet.raylib", "clear_background") => {
+            format!(
+                "{}jet_raylib_clear_background(&({}))",
+                cx.root_prefix,
+                arg(0)
+            )
+        }
+        ("core.raylib" | "jet.raylib", "draw_text") => {
+            format!(
+                "{}jet_raylib_draw_text(&({}), {}, {}, {}, &({}))",
+                cx.root_prefix,
+                arg(0),
+                arg(1),
+                arg(2),
+                arg(3),
+                arg(4)
+            )
+        }
+        ("core.raylib" | "jet.raylib", "end_drawing") => {
+            format!("{}jet_raylib_end_drawing()", cx.root_prefix)
+        }
+        ("core.raylib" | "jet.raylib", "close_window") => {
+            format!("{}jet_raylib_close_window(&({}))", cx.root_prefix, arg(0))
+        }
+        ("core.raylib" | "jet.raylib", "color") => {
+            format!(
+                "{}jet_raylib_color({}, {}, {}, {})",
+                cx.root_prefix,
+                arg(0),
+                arg(1),
+                arg(2),
+                arg(3)
+            )
+        }
         // D-CODECS1: core.compress.gzip / core.compress.zstd — standalone codec APIs
         // (separate from core.archive) via the FFI bridge crate. `compress` is
         // infallible; `decompress` returns a Rust `Result<Vec<u8>, String>` which is
@@ -3569,6 +3661,21 @@ pub(crate) fn emit_tir_core_call(
                 "{}JetDbConnection {{ handle: {}() }}",
                 cx.root_prefix,
                 regex_fn("jet_db_open_memory")
+            )
+        }
+        // D-DEP-WASM1=A / D-PLUGIN1=B (c81): core.plugin — sandboxed WASM
+        // Component Model loader via the FFI bridge crate (wasmtime,
+        // runtime-side only, I6). `load` is the only module-level entry
+        // point; it wraps the bridge's wire-encoded handle in the Jet-visible
+        // `Plugin` handle (`JetPlugin`), so `.call`/`.call_int` dispatch by
+        // receiver TYPE as instance methods (`THandleOp::PluginCall{,Int}`
+        // in the `HandleMethod` arm below), not a second module-call surface.
+        ("jet.plugin", "load") => {
+            format!(
+                "{root}JetPlugin {{ handle: {root}jet_std::jet_plugin_load_handle(&{}(&({}))) }}",
+                regex_fn("jet_plugin_load"),
+                arg(0),
+                root = cx.root_prefix,
             )
         }
         // c109 Phase 20: the polymorphic core specials — byte-for-byte `emit_core_call`.
@@ -3689,10 +3796,20 @@ pub(crate) fn emit_tir_core_call(
         }
         // D-NETDEP1=A / D-HTTPLIB1=A: HTTP server constructors (CoreLib, no prefix needed).
         ("core.http.server", "mux") => format!("jet_http_mux_new()"),
+        ("core.http.server", "serve") if args.len() == 3 => {
+            let ffi = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
+            format!(
+                "jet_http_mux_serve_tls(&({}), {}, {}, |cert, key| {ffi}::jet_http_server_tls_validate_impl(cert, key), |cert, key, stream, handler| {ffi}::jet_http_server_tls_handle_impl(cert, key, stream, handler))",
+                arg(0),
+                arg(1),
+                arg(2)
+            )
+        }
         ("core.http.server", "serve") => format!("jet_http_mux_serve(&({}), {})", arg(0), arg(1)),
         ("core.http.server", "response") => {
             format!("jet_http_srv_response({}, &({}))", arg(0), arg(1))
         }
+        ("core.http.server", "tls") => format!("jet_http_srv_tls(&({}), &({}))", arg(0), arg(1)),
         // D-TIMEDEPTH1=A: civil-time constructors.
         ("core.time.date", "new") => format!("JetDate::new({}, {}, {})", arg(0), arg(1), arg(2)),
         ("core.time.date", "today") => format!("JetDate::today_utc()"),
@@ -3719,7 +3836,11 @@ pub(crate) fn emit_tir_call_args(args: &[TCallArg], cx: &Cx) -> String {
             if a.clone {
                 s = format!("({}).clone()", s);
             } else if a.arc_clone {
-                s = format!("std::sync::Arc::clone(&{})", s);
+                // D-MEM1 S6: `Type::Shared` lowers to `JetShared<T>` (a newtype
+                // wrapping `Arc<RwLock<T>>`, not a bare `Arc<T>`) since this
+                // stage — `.clone()` (its own `impl Clone`, a cheap handle
+                // clone) is the correct call now, not `Arc::clone(&…)`.
+                s = format!("({}).clone()", s);
             }
             // D-FIXARR1: widen a [T#N] (Rust [T; N]) to [T] (Vec<T>) before passing.
             // Applied AFTER clone, BEFORE fn-coerce and borrow wrappers.

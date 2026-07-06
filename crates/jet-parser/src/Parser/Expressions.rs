@@ -123,6 +123,14 @@ impl<'a> Parser<'a> {
             self.bump();
             return Ok((Syntax::KW_VIEW.to_string(), span));
         }
+        // U20: `Recipe.copy()` uses the ordinary dot-member form, while `copy`
+        // is also Jet's explicit copy keyword in value position. Keep the
+        // keyword reserved everywhere else; permit it only after `.`.
+        if matches!(self.peek().kind, TokKind::KwCopy) {
+            let span = self.peek().span;
+            self.bump();
+            return Ok((Syntax::KW_COPY.to_string(), span));
+        }
         self.expect_ident("after `.`")
     }
 
@@ -652,6 +660,15 @@ impl<'a> Parser<'a> {
                 let inner = self.expr_unary(allow_struct_lit)?;
                 let full = Span::new(span.start, inner.span().end);
                 Ok(Expr::RawOf(Box::new(inner), full))
+            }
+            // D-CAP2 (D-MEM1/S4): `copy x` — the one copy verb, a prefix-verb
+            // expression form. Legal on any expression; most useful on a named
+            // binding. `.clone()` is not user-typable Jet syntax (I8).
+            TokKind::KwCopy => {
+                let span = self.bump().span;
+                let inner = self.expr_unary(allow_struct_lit)?;
+                let full = Span::new(span.start, inner.span().end);
+                Ok(Expr::Copy(Box::new(inner), full))
             }
             // D-DOTCTOR1: `.{ … }` inferred struct literal (type from context).
             // A leading `.` immediately followed by `{` is unambiguous — it is not
@@ -1235,10 +1252,7 @@ impl<'a> Parser<'a> {
                     ) =>
             {
                 let span = self.bump().span;
-                self.expect(
-                    TokKind::LParen,
-                    &format!("after `{}`", Syntax::LIT_VALUE),
-                )?;
+                self.expect(TokKind::LParen, &format!("after `{}`", Syntax::LIT_VALUE))?;
                 let inner = self.expr()?;
                 self.expect(
                     TokKind::RParen,
@@ -1428,10 +1442,7 @@ impl<'a> Parser<'a> {
                 if canonical == Syntax::LIT_NULL {
                     Ok(Expr::Absent(t.span))
                 } else {
-                    self.expect(
-                        TokKind::LParen,
-                        &format!("after `{}`", Syntax::LIT_VALUE),
-                    )?;
+                    self.expect(TokKind::LParen, &format!("after `{}`", Syntax::LIT_VALUE))?;
                     let inner = self.expr()?;
                     self.expect(
                         TokKind::RParen,
@@ -1727,10 +1738,20 @@ impl<'a> Parser<'a> {
                         return self.ptr_from_addr(type_name, span);
                     }
                     // D-SERDE6: optional call-site turbofish `csv.decode<Order>(raw)`.
+                    // D-MEM1 S6 fix: don't blindly overwrite `type_args` — a
+                    // capitalized receiver's OWN turbofish (`Pool<Player>.new()`,
+                    // parsed above at the type-name position) has no call-site
+                    // turbofish of its own (`self.at_turbofish()` is false right
+                    // after `.new`), so this used to silently clobber it with an
+                    // empty `Vec`, losing `Player` entirely. The two positions are
+                    // mutually exclusive in practice (a lowercase alias like `csv`
+                    // never reaches the type-name turbofish parse above), so
+                    // falling back to the outer `type_args` when there's no
+                    // call-site turbofish is a pure bug fix, not a behavior change.
                     let type_args = if self.at_turbofish() {
                         self.parse_turbofish()?
                     } else {
-                        Vec::new()
+                        type_args
                     };
                     if matches!(self.peek().kind, TokKind::LParen) {
                         self.bump();
@@ -2072,8 +2093,8 @@ impl<'a> Parser<'a> {
             TokKind::Ident(name) if name == Syntax::LIT_VALUE => {
                 let start = self.bump().span;
                 self.expect(TokKind::LParen, &format!("after `{}`", Syntax::LIT_VALUE))?;
-                let (binding, binding_span) = self
-                    .expect_ident(&format!("inside `{}(...)`", Syntax::LIT_VALUE))?;
+                let (binding, binding_span) =
+                    self.expect_ident(&format!("inside `{}(...)`", Syntax::LIT_VALUE))?;
                 self.expect(
                     TokKind::RParen,
                     &format!("after the binding in `{}(...)`", Syntax::LIT_VALUE),
@@ -2685,7 +2706,10 @@ impl<'a> Parser<'a> {
     /// Shared by `parse_lambda`/`parse_bare_lambda`: the body after `=>` and
     /// the lambda's overall end offset. `fallback_end` is used only for an
     /// empty block body (no statements to read an end span from).
-    fn lambda_arrow_body(&mut self, fallback_end: usize) -> Result<(LambdaBody, usize), Diagnostic> {
+    fn lambda_arrow_body(
+        &mut self,
+        fallback_end: usize,
+    ) -> Result<(LambdaBody, usize), Diagnostic> {
         let body = if matches!(self.peek().kind, TokKind::LBrace) {
             self.expect(TokKind::LBrace, "to open the lambda body")?;
             LambdaBody::Block(self.block_stmts())
@@ -2804,7 +2828,13 @@ impl<'a> Parser<'a> {
         } else {
             None
         };
-        let expr = self.expr()?;
+        let expr = if label.as_ref().map(|(name, _)| name.as_str()) == Some("source")
+            && self.looks_like_provider_ref_value()
+        {
+            self.provider_ref_placeholder()
+        } else {
+            self.expr()?
+        };
         Ok(CallArg {
             convention,
             expr,
@@ -2813,6 +2843,36 @@ impl<'a> Parser<'a> {
             label,
             spread,
         })
+    }
+
+    fn looks_like_provider_ref_value(&self) -> bool {
+        matches!(self.peek().kind, TokKind::Ident(_)) && matches!(self.peek2().kind, TokKind::At)
+    }
+
+    fn provider_ref_placeholder(&mut self) -> Expr {
+        let start = self.peek().span.start;
+        let mut end = self.peek().span.end;
+        self.bump(); // provider
+        if matches!(self.peek().kind, TokKind::At) {
+            end = self.bump().span.end;
+        }
+        while matches!(
+            self.peek().kind,
+            TokKind::Ident(_)
+                | TokKind::Int(_)
+                | TokKind::Dot
+                | TokKind::Slash
+                | TokKind::Minus
+                | TokKind::Star
+                | TokKind::Question
+                | TokKind::Eq
+        ) {
+            end = self.bump().span.end;
+        }
+        Expr::Str(
+            vec![crate::AST::StrPart::Lit(String::new())],
+            Span { start, end },
+        )
     }
 
     /// D-MEM1: consume a leading capability sigil `&`/`^` → Write/Move. `~` is
@@ -2948,6 +3008,7 @@ impl<'a> Parser<'a> {
                 | TokKind::LParen
                 | TokKind::Minus
                 | TokKind::Bang
+                | TokKind::KwCopy
         )
     }
 

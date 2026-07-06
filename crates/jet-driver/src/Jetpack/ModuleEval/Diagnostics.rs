@@ -1,6 +1,6 @@
-//! The diagnostic constructors for module evaluation (E0966–E0978) plus the
-//! merge-conflict (§6) wrapper (`merge_error_to_diagnostic`). Each carries its
-//! pinned what/why/fix copy (I4).
+//! The diagnostic constructors for module evaluation (E0966–E0978, E1242–E1245,
+//! E1266–E1267, E1269) plus the merge-conflict (§6) wrapper
+//! (`merge_error_to_diagnostic`). Each carries its pinned what/why/fix copy (I4).
 
 use std::path::Path;
 
@@ -233,6 +233,66 @@ pub(super) fn fleet_unknown_system(
         "U15: each `hosts:` entry maps a host to a `System` defined by some module contribution; the host deploys that system's closure".to_string(),
         format!("define `system.{system}: {{ … }}`, or point the host at an existing system ({hint})"),
         None,
+    )
+}
+
+/// E1266: an `Image`'s `kind:` doesn't name `.Oci`/`.Iso`, or names one that
+/// disagrees with what `from:` actually references (D-JPK-IMAGE1).
+pub(super) fn image_unknown_kind(word: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E1266",
+        format!("`{word}` isn't an image kind"),
+        "D-JPK-IMAGE1: an image's `kind:` is one of two leading-dot values — `.Oci` (a container, built `from: packages.<name>`) or `.Iso` (a disk image, built `from: system.<name>`)".to_string(),
+        "write `kind: .Oci` or `kind: .Iso`".to_string(),
+        Some(span),
+    )
+}
+
+/// E1266: an explicit `kind:` disagrees with what this image's `from:` names
+/// (D-JPK-IMAGE1) — e.g. `kind: .Oci` alongside `from: system.<name>`.
+pub(super) fn image_kind_from_mismatch(kind: &str, span: Span) -> Diagnostic {
+    let (wants, got) = if kind == crate::Syntax::IMAGE_KIND_OCI {
+        ("packages.<name>", "system.<name>")
+    } else {
+        ("system.<name>", "packages.<name>")
+    };
+    Diagnostic::error(
+        "E1266",
+        format!("`kind: .{kind}` doesn't match this image's `from:`"),
+        format!("D-JPK-IMAGE1: a `.{kind}` image is built `from: {wants}`, but this image's `from:` names a `{got}`"),
+        format!("change `from:` to `{wants}`, or change `kind:` to match what `from:` names"),
+        Some(span),
+    )
+}
+
+/// E1267: an `.Oci` image's `from: packages.<name>` doesn't name a package
+/// declared `executable` in this project's `pkg.jet` (D-JPK-IMAGE1) — a
+/// library has no binary to containerize, and an undeclared name can't be
+/// confirmed either way.
+pub(super) fn oci_from_non_executable(image: &str, package: &str, is_library: bool) -> Diagnostic {
+    let why = if is_library {
+        format!("`{package}` is declared `library` in `pkg.jet` — a library has no binary to containerize")
+    } else {
+        format!("`{package}` isn't declared in this project's `pkg.jet` `packages:` block")
+    };
+    Diagnostic::error(
+        "E1267",
+        format!("the image `{image}` is built from a non-executable package `{package}`"),
+        format!("D-JPK-IMAGE1: an `.Oci` image's `from: packages.<name>` must name an `executable` package — {why}"),
+        format!("declare `{package}: executable` in `pkg.jet`, or point `from:` at an existing executable package"),
+        None,
+    )
+}
+
+/// E1269: an `.Oci` image field (`kind`/`expose`/`env_vars`/`files`/`base`)
+/// is written, but not shaped the way D-JPK-IMAGE1 spells it.
+pub(super) fn image_field_shape(field: &str, expected: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E1269",
+        format!("`{field}` isn't shaped like {expected}"),
+        format!("D-JPK-IMAGE1: `{field}` is always written as {expected}"),
+        format!("rewrite `{field}:` as {expected}"),
+        Some(span),
     )
 }
 

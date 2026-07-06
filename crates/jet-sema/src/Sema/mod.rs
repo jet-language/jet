@@ -683,6 +683,12 @@ pub(crate) struct Checker<'a> {
     /// True while checking a `pure fn` body, so E3403 can fire on a
     /// non-deterministic std call (time/random) reached from pure code.
     in_pure: bool,
+    /// D-MEM1/S7 (D-NOALLOC-SEM1=A): true when the enclosing module declared
+    /// `policy no_alloc`. Local-only: set once per function-body check from
+    /// that module's own `no_alloc_policy`, never toggled by a call into
+    /// another function — a callee's own allocations are its own module's
+    /// concern (E0921 only fires on shapes written directly in THIS body).
+    no_alloc: bool,
     /// D-PREPOST1: true while type-checking a `@Pre` clause's condition —
     /// `result` isn't bound yet at function entry, so a reference to it here
     /// is E0144 instead of the normal "undefined name" error.
@@ -710,6 +716,15 @@ pub(crate) struct Checker<'a> {
     /// escape). Mirrors `arena_views`'s shape; kept separate so the arena
     /// mechanism (E0631/E0632, its own wording and drop-tracking) stays untouched.
     list_views: HashMap<String, ListViewInfo>,
+    /// D-MEM1 stage S5 (2026-07-04): string-`view` bindings in scope — a binding
+    /// `x :: s.trim()` / `x :: s.after(sep)` / `x :: s.before(sep)` holds a
+    /// scope-bound `&str` window into `s`'s backing storage (codegen: `b.string_view`).
+    /// Maps the view name → which `String` it points into (for E2307 escape).
+    /// Mirrors `list_views`'s shape exactly; kept separate so `ListViewInfo`'s
+    /// wording stays owner-type-agnostic in the shared struct but the two kinds
+    /// of view (list window vs string window) never alias in one map (I8: one
+    /// owner-tracking shape per kind, not one shared namespace).
+    string_views: HashMap<String, ListViewInfo>,
     /// D-UNINIT1 engine, reused unchanged by D-UNINIT-SENTINEL1: `:= uninit`
     /// bindings not yet definitely written — maps name → the decl span. A read
     /// while still in this map is E0420 (write-before-read proof); a write
@@ -719,10 +734,24 @@ pub(crate) struct Checker<'a> {
     /// borrow (method receivers, field/index bases, lvalues). Field reads in
     /// borrow position must NOT be rewritten to `.clone()`.
     borrow_ctx: bool,
+    /// D-MEM1 stage S5: true only while inferring a string-view name (see
+    /// `string_views`) in one of the TWO positions its bare `&str` Rust place
+    /// actually supports — the receiver of a chained `.trim()`/`.after()`/
+    /// `.before()`, or the operand of `copy`. The general `Expr::Ident` arm
+    /// reports E2307 whenever it reads a string-view name and this is false —
+    /// a single, general choke point instead of hunting down every possible
+    /// consuming context (list/tuple literal element, call argument, plain
+    /// assignment, …) one at a time.
+    allow_string_view_read: bool,
     /// M8: when false, a lambda is consumed inline (collection methods / borrow).
     lambda_escapes: bool,
     /// M11: when true, lambda is being passed to tasks.spawn — stricter capture rules (E1101).
     is_task_spawn: bool,
+    /// D-MEM1 S6 (D-SHARED-API1=A): true only while binding `Shared<T>.edit(f)`'s
+    /// closure parameter — grants it write access with no `&` sigil (the API
+    /// contract IS the exclusive lock; `check_lambda` reads this once, at bind
+    /// time, then it's irrelevant for the rest of the closure body).
+    lambda_param_mutable: bool,
     /// D-DETACH1: task names whose spawn lambda had a non-view sendability error (E1102 fired).
     /// At `.detach()`, if the task is in this set and NOT in view_borrow_escape_tasks, E1103 fires.
     view_capture_tasks: HashSet<String>,
@@ -812,9 +841,9 @@ mod OsTarget;
 mod Protocol;
 mod Purity;
 mod Registration;
-mod ScopeMembers;
 pub mod Schema;
 mod SchemaMigration;
+mod ScopeMembers;
 mod State;
 mod Taint;
 mod WebPartition;
@@ -822,9 +851,9 @@ mod WebPartition;
 pub(crate) use Bundle::*;
 pub(crate) use Captures::*;
 pub(crate) use CheckerCli::*;
+pub use CheckerCoreLib::*;
 pub(crate) use CheckerFieldPolicy::*;
 pub(crate) use CheckerPatchable::*;
-pub use CheckerCoreLib::*;
 pub(crate) use Diagnostics::*;
 pub(crate) use Effects::*;
 pub(crate) use Purity::*;
@@ -849,9 +878,9 @@ pub use Effects::SemIndexEffectFacts;
 // D-EFFTREE1: also export the tree helpers — jet-driver's EffectBudget and
 // manifest parsing need root validation and ancestor-subsumption coverage
 // too, not just the bare enum.
-pub use Effects::{effect_covers, effect_root, parse_effect_name, Effect, EffectSet};
-pub use Purity::{check_pure_fn, check_pure_program_root, e3401, e3402, e3403};
 pub(crate) use CheckerInline::{check_inline_always_fn, e0918_address_taken};
+pub use Effects::{effect_covers, effect_root, parse_effect_name, show_set, Effect, EffectSet};
+pub use Purity::{check_pure_fn, check_pure_program_root, e3401, e3402, e3403};
 pub use Registration::{check, check_with_mode, effect_key};
 pub use FFI::{e3202, e3301, e3302, e3303};
 // D-MIGRATE2C: `jet schema status` reuses the schema-migration diff.

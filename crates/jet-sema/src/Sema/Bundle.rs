@@ -571,6 +571,7 @@ pub(crate) fn rewrite_inline_calls_expr(
         | Expr::IncDec { operand: inner, .. }
         | Expr::Deref(inner, _)
         | Expr::RawOf(inner, _)
+        | Expr::Copy(inner, _)
         | Expr::Field(inner, _, _)
         | Expr::Tainted(inner, _) // D-TAINT1: tag erased; recurse into the value.
         | Expr::Present(inner, _)
@@ -1668,6 +1669,11 @@ pub(crate) fn check_bundle_opts(
     check_region_caps(&effect_summaries, &solved, &mut diags);
     // D-EFF2: callback param effect bounds (E0747).
     check_callback_bounds(&effect_summaries, &solved, &mut diags);
+    // U13 (D-JPK-SECRETCRYPTO1): a `core.vault.get` reach requires `Secret` in
+    // the reaching function's own declared `#(…)` bound — E1264.
+    for module in &bundle.modules {
+        check_secret_grants(&module.items, &effect_summaries, &mut diags);
+    }
 
     // D-WASM1=A (c123 M1): JS/WASM partition inference and boundary checks.
     diags.extend(check_web_partition(bundle, &effect_summaries, &solved));
@@ -1714,12 +1720,27 @@ pub(crate) fn check_bundle_opts(
     // Force the same `CORELIB_PRELUDE` inclusion a hand-written
     // `use core.args` would trigger (any key works; the caller only checks
     // "is this set empty").
-    if bundle
-        .modules
-        .iter()
-        .any(|m| m.items.iter().any(|i| matches!(i, Item::Struct(s) if s.derives.iter().any(|(t, _)| t == "Cli"))))
-    {
+    if bundle.modules.iter().any(|m| {
+        m.items
+            .iter()
+            .any(|i| matches!(i, Item::Struct(s) if s.derives.iter().any(|(t, _)| t == "Cli")))
+    }) {
         used_core.insert("core.args::spec".to_string());
+    }
+    // D-MEM1 S6: `Shared<T>`/`Pool<T>`/`Id<T>` need `CORELIB_PRELUDE`'s `jet_std`
+    // module (`JetShared`/`JetPool`/`JetId`), but need no `use core.X` import to
+    // reach them (unlike `tasks.spawn` etc.) — `collect_used_core` only walks
+    // import aliases, so it never sees them. Same forced-insert shape as
+    // D-CLIFLAG1 above; a cheap source-text scan is deliberately over-eager (a
+    // false positive just includes the prelude when it wasn't strictly needed —
+    // harmless, `#![allow(warnings)]` covers the unused code).
+    if bundle.modules.iter().any(|m| {
+        m.source.contains("Pool<")
+            || m.source.contains("Shared<")
+            || m.source.contains("Shared.new(")
+            || m.source.contains("Id<")
+    }) {
+        used_core.insert("core.mem::pool_shared".to_string());
     }
     bundle.used_core = used_core;
     apply_helper_layer_inference(bundle, &states, &usage_spans, &mut diags);
@@ -2229,6 +2250,7 @@ pub(crate) fn collect_core_expr(
         | Expr::IncDec { operand: inner, .. }
         | Expr::Deref(inner, _)
         | Expr::RawOf(inner, _)
+        | Expr::Copy(inner, _)
         | Expr::Tainted(inner, _) // D-TAINT1: tag erased; recurse into the value.
         | Expr::Present(inner, _)
         | Expr::Ok(inner, _)
@@ -2362,6 +2384,9 @@ pub(crate) fn check_module_bodies(
 ) -> Vec<Diagnostic> {
     let st = &states[module_idx];
     let mut diags = Vec::new();
+    // D-MEM1/S7 (D-NOALLOC-SEM1=A): captured once — every function body check
+    // below for this module gets the same file-scoped `policy no_alloc` state.
+    let no_alloc = module.no_alloc_policy.is_some();
     let (ct_funcs, ct_externs, ct_globals) = comptime_context_from_items(&module.items);
     let ct_base_dir = module
         .path
@@ -2385,6 +2410,7 @@ pub(crate) fn check_module_bodies(
                     summaries,
                     embed_inputs_out,
                     global_addr_taken,
+                    no_alloc,
                 ));
             }
             Item::Struct(s) => {
@@ -2403,6 +2429,7 @@ pub(crate) fn check_module_bodies(
                         summaries,
                         embed_inputs_out,
                         global_addr_taken,
+                        no_alloc,
                     ));
                 }
             }
@@ -2422,6 +2449,7 @@ pub(crate) fn check_module_bodies(
                         summaries,
                         embed_inputs_out,
                         global_addr_taken,
+                        no_alloc,
                     ));
                 }
             }
@@ -2441,6 +2469,7 @@ pub(crate) fn check_module_bodies(
                         summaries,
                         embed_inputs_out,
                         global_addr_taken,
+                        no_alloc,
                     ));
                 }
             }
@@ -2495,6 +2524,7 @@ pub(crate) fn check_module_bodies(
                     summaries,
                     embed_inputs_out,
                     global_addr_taken,
+                    no_alloc,
                 ));
                 t.body = synthetic.body;
             }
@@ -2543,6 +2573,7 @@ pub(crate) fn check_module_bodies(
                     summaries,
                     embed_inputs_out,
                     global_addr_taken,
+                    no_alloc,
                 ));
                 b.body = synthetic.body;
             }
@@ -2567,6 +2598,7 @@ pub(crate) fn check_module_bodies(
                                 summaries,
                                 embed_inputs_out,
                                 global_addr_taken,
+                                no_alloc,
                             ));
                         }
                     }
@@ -2586,6 +2618,7 @@ pub(crate) fn check_module_bodies(
                     &ct_externs,
                     &ct_base_dir,
                     &ct_globals,
+                    no_alloc,
                 ));
             }
             _ => {}
@@ -2609,6 +2642,8 @@ pub(crate) fn check_func_body_bundle(
     summaries: &mut HashMap<String, EffectSummary>,
     embed_inputs_out: &mut Vec<crate::AST::ComptimeInput>,
     global_addr_taken: &mut HashSet<String>,
+    // D-MEM1/S7 (D-NOALLOC-SEM1=A): this module's `policy no_alloc` state.
+    no_alloc: bool,
 ) -> Vec<Diagnostic> {
     let st = &states[module_idx];
     let mut ck = Checker {
@@ -2646,6 +2681,7 @@ pub(crate) fn check_func_body_bundle(
         in_unsafe: f.is_unsafe,
         suppress_must_use: false,
         in_pure: f.is_pure,
+        no_alloc,
         in_pre_clause: false,
         in_comptime: false,
         ret: f.return_type.clone(),
@@ -2655,10 +2691,13 @@ pub(crate) fn check_func_body_bundle(
         freed_allocators: HashMap::new(),
         arena_views: HashMap::new(),
         list_views: HashMap::new(),
+        string_views: HashMap::new(),
         uninit: HashMap::new(),
         borrow_ctx: false,
+        allow_string_view_read: false,
         lambda_escapes: true,
         is_task_spawn: false,
+        lambda_param_mutable: false,
         view_capture_tasks: HashSet::new(),
         view_borrow_escape_tasks: HashSet::new(),
         current_binding_name: None,

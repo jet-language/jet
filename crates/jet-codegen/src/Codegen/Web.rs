@@ -744,19 +744,14 @@ fn emit_js_method(
         // i64`'s truncation, not `Math.floor`'s round-toward-negative-infinity).
         ("to_float", 0) => recv,
         ("to_int", 0) => format!("Math.trunc({recv})"),
-        // D-UISHOWCASE1 (c134 Phase 8): sema silently inserts a `.clone()`
-        // `MethodCall` around struct-literal field values that need Rust
-        // value-semantics copying (CheckerOwnership.rs/CheckerInfer — not
-        // something this example's source ever spells out). Before this
-        // arm, the unknown-method fallback below turned every such field
-        // into `/* clone */ undefined` — a real, silent JS-codegen bug (a
-        // struct built from local variables, e.g. `stat_card(label, value,
-        // color, x, y) -> StatCard`, emitted `undefined` for every cloned
-        // field). JS objects/strings/numbers are copied-by-reference or by
-        // value naturally and nothing in this codegen subset mutates a
-        // struct's fields in place after construction, so `clone` is a safe
-        // identity passthrough here — no deep-copy needed.
-        ("clone", 0) => recv,
+        // D-UISHOWCASE1 (c134 Phase 8) / D-CAP2 (D-MEM1/S4): sema used to silently
+        // insert a `.clone()` `MethodCall` around struct-literal field values that
+        // need Rust value-semantics copying (CheckerOwnership.rs/CheckerInfer).
+        // That AST shape no longer reaches here — the compiler's own duplication
+        // rewrites (and a user's explicit `copy x`) both build `Expr::Copy` now,
+        // handled as an identity passthrough in `js_emit_expr`. A user-written
+        // `.clone()` MethodCall is also gone (unrecognized method, sema-level);
+        // `method` here can no longer be `"clone"`.
         _ => format!("/* {method} */ undefined"),
     }
 }
@@ -805,6 +800,15 @@ fn js_emit_expr(expr: &Expr, funcs: &[FuncWeb]) -> String {
                 .collect();
             format!("({{ {} }})", parts.join(", "))
         }
+        // D-CAP2 (D-MEM1/S4): `copy x` — same reasoning as the retired
+        // sema-inserted `.clone()` MethodCall this replaces (see
+        // `emit_js_method`'s old `("clone", 0)` arm): JS objects/strings/
+        // numbers are copied-by-reference or by value naturally and nothing
+        // in this codegen subset mutates a struct's fields in place after
+        // construction, so `copy` is a safe identity passthrough here — no
+        // deep-copy needed. Falling through to `_ => "undefined"` here was
+        // exactly the D-UISHOWCASE1 bug that arm was added to fix.
+        Expr::Copy(inner, _) => js_emit_expr(inner, funcs),
         _ => "undefined".to_string(),
     }
 }

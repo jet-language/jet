@@ -20,6 +20,15 @@ use jet::Interpreter::{dev_iteration, RunOutcome};
 use jet::JitBackend::{InterpreterBackend, JitBackend};
 use jet_jit::CraneliftBackend;
 
+fn skip_if_cranelift_host_unsupported() -> bool {
+    if jet_jit::cranelift_host_supported() {
+        false
+    } else {
+        eprintln!("note: cranelift-jit host path unsupported on this architecture; skipping resident JIT assertion");
+        true
+    }
+}
+
 /// c77: the differential battery covers EVERY `examples/features/*.jet`, not a
 /// hand-curated subset — so the battery can never quietly shrink. Each example
 /// either runs in the interpreter (and its stdout must match the compiled
@@ -28,6 +37,14 @@ use jet_jit::CraneliftBackend;
 /// a test failure.
 fn example_path(stem: &str) -> String {
     format!("examples/features/{}.jet", stem)
+}
+
+fn host_expected_stdout(stem: &str) -> Option<&'static str> {
+    match stem {
+        "lowlevel/os_target_gating" if cfg!(target_os = "macos") => Some("macos: appkit\n"),
+        "lowlevel/os_target_gating" if cfg!(target_os = "windows") => Some("windows: win32\n"),
+        _ => None,
+    }
 }
 
 /// All `.jet` files directly under a topic directory of `examples/features/`
@@ -87,11 +104,18 @@ fn all_example_stems() -> Vec<String> {
 ///   - E0956: a construct not yet supported at comptime (hit during execution),
 ///   - E0953: a deliberate user-authored panic (`require(false, …)`), which is
 ///     the program legitimately failing, not a silent skip.
-///   - E3410 / E3411: a D-CTEFFECT1 Tier-2 comptime effect (`core.fs`/`core.io`/
+///   - E3410 / E3411: a D-CTEFFECT1 Tier-2 comptime effect (`core.files`/`core.io`/
 ///     `core.env`/…) reached with no `#Impure` gate, or a gate present but
 ///     `--allow-impure` not passed — an honest, named boundary (the golden
 ///     corpus runs with neither), not a silent skip.
-const BOUNDARY_CODES: &[&str] = &["E2201", "E2202", "E0952", "E0956", "E0953", "E3410", "E3411"];
+///   - E1265 (U13, D-JPK-SECRETCRYPTO1): `core.vault.get` reached through the
+///     same comptime/interpreter evaluation path — unconditionally denied
+///     (no `#Impure` escape hatch), so an example exercising it always stops
+///     here under the interpreter/JIT tiers even though the AOT-compiled
+///     binary runs it fine (it never goes through this evaluator).
+const BOUNDARY_CODES: &[&str] = &[
+    "E2201", "E2202", "E0952", "E0956", "E0953", "E3410", "E3411", "E1265",
+];
 
 /// c77 widened battery: EVERY example either runs (interpreted stdout ==
 /// compiled-binary stdout, byte for byte — I2) or stops at a named boundary
@@ -275,7 +299,14 @@ fn interpreter_matches_expected_golden() {
         let expected_path = root.join(format!("examples/features/expected/{}.out", stem));
         match dev_iteration(&file, false, true) {
             RunOutcome::Ran { stdout, .. } => {
-                if let Ok(expected) = fs::read_to_string(&expected_path) {
+                if let Some(expected) = host_expected_stdout(&stem) {
+                    assert_eq!(
+                        stdout, expected,
+                        "`{}`: interpreter output differs from host expected output",
+                        stem
+                    );
+                    checked += 1;
+                } else if let Ok(expected) = fs::read_to_string(&expected_path) {
                     assert_eq!(
                         stdout, expected,
                         "`{}`: interpreter output differs from expected golden",
@@ -355,6 +386,9 @@ fn task_program_hits_e2201_in_interpreter_mode() {
 /// c139 M4: task programs inside `jit_covers` run via default `jet dev` (Cranelift), not E2201.
 #[test]
 fn task_program_runs_via_jit() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
     let file = "examples/features/concurrency/tasks.jet";
     let mut bundle = jet::Loader::load_entry(file).expect("tasks bundle should load");
     let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
@@ -392,6 +426,9 @@ fn task_program_runs_via_jit() {
 /// c139 M4: scheduler/channel spawn stress example is jit-covered and runs.
 #[test]
 fn scheduler_spawn_runs_via_jit() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
     let file = "examples/features/concurrency/scheduler_spawn.jet";
     let mut bundle = jet::Loader::load_entry(file).expect("bundle should load");
     let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
@@ -415,6 +452,18 @@ fn scheduler_spawn_runs_via_jit() {
         }
     };
     assert_eq!(got.trim(), "1000");
+}
+
+#[test]
+fn dev_default_interprets_display_debug_interpolation() {
+    let file = "examples/features/types/display_debug.jet";
+    let got = match dev_iteration(file, false, false) {
+        RunOutcome::Ran { stdout, .. } => stdout,
+        RunOutcome::Problems(ds) => {
+            panic!("display/debug interpolation should run in default dev, got: {ds:?}")
+        }
+    };
+    assert_eq!(got, golden_stdout("types/display_debug"));
 }
 
 /// D-DEV1 "try anyway": the opt-in flag skips the boundary scan and attempts
@@ -456,6 +505,9 @@ fn try_anyway_skips_the_boundary_scan() {
 /// stdout to the interpreter baseline.
 #[test]
 fn cranelift_backend_matches_hello() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
     let file = "examples/features/basics/hello.jet";
     let mut bundle = jet::Loader::load_entry(file).expect("hello bundle should load");
     let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
@@ -516,6 +568,9 @@ fn checked_bundle_from_path(file: &str) -> jet::AST::ProgramBundle {
 }
 
 fn assert_cranelift_matches_interpreter(src: &str, tag: &str) {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
     let p = std::env::temp_dir().join(format!("jet_jit_m3_{tag}.jet"));
     fs::write(&p, src).unwrap();
     let shown = p.to_string_lossy().to_string();
@@ -546,6 +601,9 @@ fn golden_stdout(stem: &str) -> String {
 }
 
 fn assert_cranelift_three_way(file: &str, stem: &str) {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
     let mut bundle = jet::Loader::load_entry(file).expect("bundle should load");
     let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
     let errors: Vec<_> = diags
@@ -646,6 +704,94 @@ fn jit_coverage_detail_smoke() {
     }
 }
 
+#[test]
+fn jit_covers_labeled_loop_control() {
+    let file = "examples/features/basics/labeled_loops.jet";
+    let mut bundle = jet::Loader::load_entry(file).expect("load");
+    let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let errors: Vec<_> = diags
+        .into_iter()
+        .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+        .collect();
+    assert!(errors.is_empty(), "labeled loop example must type-check");
+    assert!(
+        jet_jit::jit_covers_bundle(&bundle),
+        "labeled break/continue should stay JIT-covered: {}",
+        jet_jit::jit_covers_bundle_detail(&bundle)
+    );
+}
+
+#[test]
+fn jit_covers_increment_decrement() {
+    let file = "examples/features/basics/increment.jet";
+    let mut bundle = jet::Loader::load_entry(file).expect("load");
+    let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let errors: Vec<_> = diags
+        .into_iter()
+        .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+        .collect();
+    assert!(errors.is_empty(), "increment example must type-check");
+    assert!(
+        jet_jit::jit_covers_bundle(&bundle),
+        "prefix/postfix ++/-- should stay JIT-covered: {}",
+        jet_jit::jit_covers_bundle_detail(&bundle)
+    );
+}
+
+#[test]
+fn jit_covers_named_tuples() {
+    let file = "examples/features/basics/tuples.jet";
+    let mut bundle = jet::Loader::load_entry(file).expect("load");
+    let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let errors: Vec<_> = diags
+        .into_iter()
+        .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+        .collect();
+    assert!(errors.is_empty(), "tuple example must type-check");
+    assert!(
+        jet_jit::jit_covers_bundle(&bundle),
+        "named tuple literal/access/equality/destructure should stay JIT-covered: {}",
+        jet_jit::jit_covers_bundle_detail(&bundle)
+    );
+}
+
+#[test]
+fn jit_covers_chained_comparison() {
+    let file = "examples/features/operators/chained_comparison.jet";
+    let mut bundle = jet::Loader::load_entry(file).expect("load");
+    let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let errors: Vec<_> = diags
+        .into_iter()
+        .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+        .collect();
+    assert!(
+        errors.is_empty(),
+        "chained comparison example must type-check"
+    );
+    assert!(
+        jet_jit::jit_covers_bundle(&bundle),
+        "same-direction chained comparisons should stay JIT-covered: {}",
+        jet_jit::jit_covers_bundle_detail(&bundle)
+    );
+}
+
+#[test]
+fn jit_covers_string_method_chain() {
+    let file = "examples/features/basics/method_chain.jet";
+    let mut bundle = jet::Loader::load_entry(file).expect("load");
+    let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let errors: Vec<_> = diags
+        .into_iter()
+        .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+        .collect();
+    assert!(errors.is_empty(), "method-chain example must type-check");
+    assert!(
+        jet_jit::jit_covers_bundle(&bundle),
+        "pure string method chains should stay JIT-covered: {}",
+        jet_jit::jit_covers_bundle_detail(&bundle)
+    );
+}
+
 /// Audit which type-checked examples are jit-covered (run with `--ignored`).
 #[test]
 #[ignore]
@@ -717,6 +863,9 @@ fn jit_covered_example_stems() -> Vec<String> {
 /// c139 M3+: three-way differential (JIT == interpreter == AOT) on jit-covered examples.
 #[test]
 fn cranelift_three_way_differential_battery() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
     let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
     if !have_rustc {
         eprintln!("note: rustc not found; skipping three-way JIT differential battery");
@@ -859,6 +1008,9 @@ fn cranelift_covers_string_print() {
 /// live runtime state; restart tears it down.
 #[test]
 fn cranelift_hot_swap_preserves_live_state() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
     fn checked_bundle(src: &str, tag: &str) -> jet::AST::ProgramBundle {
         let mut b = bundle_of(src, tag);
         let diags = jet::Sema::check_bundle(&mut b, jet::Sema::CompileMode::Run);
@@ -924,6 +1076,9 @@ fn cranelift_hot_swap_preserves_live_state() {
 /// which took the whole `jet dev` server down with it.
 #[test]
 fn cranelift_trap_then_hot_swap_continues() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
     fn checked_bundle(src: &str, tag: &str) -> jet::AST::ProgramBundle {
         let mut b = bundle_of(src, tag);
         let diags = jet::Sema::check_bundle(&mut b, jet::Sema::CompileMode::Run);
@@ -966,7 +1121,9 @@ fn cranelift_trap_then_hot_swap_continues() {
     // the crashed run's partial heap.
     let out = match backend.hot_swap("run", &recovers, false) {
         Ok(RunOutcome::Ran { stdout, .. }) => stdout,
-        Ok(RunOutcome::Problems(ds)) => panic!("hot_swap after a trap produced diagnostics: {ds:?}"),
+        Ok(RunOutcome::Problems(ds)) => {
+            panic!("hot_swap after a trap produced diagnostics: {ds:?}")
+        }
         Err(ds) => panic!("hot_swap after a trap errored: {ds:?}"),
     };
     assert_eq!(out, "recovered\n");

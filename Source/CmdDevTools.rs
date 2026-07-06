@@ -354,6 +354,80 @@ pub(crate) fn run_completions(shell: Option<&str>) {
     print!("{}", out);
 }
 
+/// `jet devtools grammars` — D-HL1 generated lexical base for editor grammars.
+pub(crate) fn run_devtools(args: &[&String]) {
+    match args.first().map(|s| s.as_str()) {
+        Some("grammars") => {
+            write_generated_section(
+                "editors/vscode/syntaxes/jet.tmLanguage.json",
+                &jet::Syntax::render_vscode_generated_highlights(),
+            );
+            write_generated_section(
+                "editors/tree-sitter/grammar.js",
+                &jet::Syntax::render_tree_sitter_generated_highlights(),
+            );
+            write_generated_section(
+                "editors/zed/languages/jet/highlights.scm",
+                &jet::Syntax::render_zed_generated_highlights(),
+            );
+            println!("regenerated editor grammar sections");
+        }
+        Some(other) => {
+            eprintln!("error: unknown `devtools` subcommand `{}`", other);
+            eprintln!("usage: {} devtools grammars", jet::Syntax::BINARY_NAME);
+            exit(ExitCodes::USAGE);
+        }
+        None => {
+            eprintln!("usage: {} devtools grammars", jet::Syntax::BINARY_NAME);
+            exit(ExitCodes::USAGE);
+        }
+    }
+}
+
+fn write_generated_section(path: &str, fresh: &str) {
+    let text = fs::read_to_string(path).unwrap_or_else(|e| {
+        eprintln!("error: couldn't read `{}`: {}", path, e);
+        exit(ExitCodes::USER_ERROR);
+    });
+    let start = text
+        .find(jet::Syntax::HIGHLIGHT_GENERATED_START)
+        .unwrap_or_else(|| {
+            eprintln!(
+                "error: `{}` has no `{}` marker",
+                path,
+                jet::Syntax::HIGHLIGHT_GENERATED_START
+            );
+            exit(ExitCodes::USER_ERROR);
+        });
+    let prefix_start = text[..start].rfind('\n').map_or(0, |idx| idx + 1);
+    let after_start = &text[start..];
+    let end_rel = after_start
+        .find(jet::Syntax::HIGHLIGHT_GENERATED_END)
+        .unwrap_or_else(|| {
+            eprintln!(
+                "error: `{}` has no `{}` marker",
+                path,
+                jet::Syntax::HIGHLIGHT_GENERATED_END
+            );
+            exit(ExitCodes::USER_ERROR);
+        });
+    let end_marker = start + end_rel + jet::Syntax::HIGHLIGHT_GENERATED_END.len();
+    let suffix_start = text[end_marker..]
+        .find('\n')
+        .map_or(text.len(), |idx| end_marker + idx + 1);
+
+    let mut out = String::new();
+    out.push_str(&text[..prefix_start]);
+    out.push_str(fresh.trim_end());
+    out.push('\n');
+    out.push_str(&text[suffix_start..]);
+    fs::write(path, out).unwrap_or_else(|e| {
+        eprintln!("error: couldn't write `{}`: {}", path, e);
+        exit(ExitCodes::USER_ERROR);
+    });
+    println!("wrote {}", path);
+}
+
 /// `jet doctor` — environment self-diagnosis with actionable fixes (D-DX2,
 /// D-BUILD1). Offline by default; `--online` enables network checks; `--fix`
 /// applies the auto-fixable problems. The advisory code for rustc/cache/PATH
@@ -859,6 +933,7 @@ pub(crate) fn run_bench(file: &str, mode: OutputMode) {
         false,
         None,
         None,
+        None,
         mode,
         // Benchmark build; not content-cached (race-safe via `build`'s temp path).
         None,
@@ -931,6 +1006,7 @@ fn run_bench_regions(file: &str, src: &str, mode: OutputMode) {
         ffi_link.as_ref(),
         &[],
         false,
+        None,
         None,
         None,
         mode,

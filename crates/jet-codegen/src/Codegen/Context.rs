@@ -79,7 +79,7 @@ pub(crate) struct Cx {
     /// c109 Phase 14: `(import alias, function)` -> the function's return type, so the
     /// TIR can carry a total result type for a cross-module call (mirrors `import_sigs`).
     pub(crate) import_rets: HashMap<(String, String), Option<Type>>,
-    /// Import alias -> compiler-known core module (`core.fs`, `core.json`, ...).
+    /// Import alias -> compiler-known core module (`core.files`, `core.json`, ...).
     pub(crate) core_imports: HashMap<String, String>,
     /// M10 helpers proven reachable by sema.
     pub(crate) used_core: HashSet<String>,
@@ -208,6 +208,9 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         // D-DBDRIVER1: the tagged SQL parameter/column value + its error type.
         "DbValue" => Some("DbValue"),
         "DbError" => Some("DbError"),
+        // D-RAYLIB1=A: display-gated graphics bridge skeleton types.
+        "RaylibWindow" => Some("RaylibWindow"),
+        "RaylibColor" => Some("RaylibColor"),
         // D-TYPEDTEXT1=D: `Sql`/`Html` — this table's `.is_some()` is only a
         // "known core value type" gate for the TIR subset check; the actual Rust
         // spelling for these two comes from the earlier explicit `rust_type` arms
@@ -259,6 +262,18 @@ pub(crate) fn file_handle_rust_type(name: &str) -> Option<&'static str> {
         "Path" => Some("JetPath"),
         // D-DBDRIVER1: the SQLite connection handle wrapper.
         "DbConnection" => Some("JetDbConnection"),
+        // D-DEP-WASM1=A / D-PLUGIN1=B (c81): the sandboxed WASM plugin handle.
+        "Plugin" => Some("JetPlugin"),
+        _ => None,
+    }
+}
+
+/// D-RAYLIB1=A: raylib skeleton handle/value types are top-level prelude
+/// structs, like file/net handles, not members of `mod jet_std`.
+pub(crate) fn raylib_handle_rust_type(name: &str) -> Option<&'static str> {
+    match name {
+        "RaylibWindow" => Some("RaylibWindow"),
+        "RaylibColor" => Some("RaylibColor"),
         _ => None,
     }
 }
@@ -278,8 +293,8 @@ pub(crate) fn net_handle_rust_type(name: &str) -> Option<&'static str> {
 // Re-export from Syntax so submodules (lower.rs, subset.rs) find them via `use super::*`.
 pub(crate) use crate::Syntax::alloc_handle_rust_type;
 pub(crate) use crate::Syntax::args_handle_rust_type;
-pub(crate) use crate::Syntax::reflect_handle_rust_type;
 pub(crate) use crate::Syntax::binary_text_handle_rust_type;
+pub(crate) use crate::Syntax::reflect_handle_rust_type;
 
 impl Cx {
     pub(crate) fn field_rust_type(&self, owner: &str, edge: &str, ty: &Type) -> String {
@@ -411,7 +426,16 @@ impl Cx {
                 self.rust_type(key),
                 self.rust_type(value)
             ),
-            Type::Shared(inner) => format!("std::sync::Arc<{}>", self.rust_type(inner)),
+            // D-MEM1 S6 (D-SHARED-API1=A): `Shared<T>` — a lock-guarded shared
+            // handle (`.read(f)`/`.edit(f)` closure API). Was a plain read-only
+            // `Arc<T>` before this stage (never actually constructible — no
+            // `Shared.new` existed — so there is no live behavior to preserve);
+            // now `Arc<RwLock<T>>`, wrapped so `.clone()` stays a cheap Arc clone.
+            Type::Shared(inner) => format!(
+                "{}jet_std::JetShared<{}>",
+                self.root_prefix,
+                self.rust_type(inner)
+            ),
             Type::Option(inner) => format!("Option<{}>", self.rust_type(inner)),
             Type::Result { ok, err } => {
                 format!("Result<{}, {}>", self.rust_type(ok), self.rust_type(err))
@@ -444,6 +468,7 @@ impl Cx {
             Type::Named(name) if name == "HttpMux" => "JetHttpMux".to_string(),
             Type::Named(name) if name == "HttpSrvReq" => "JetHttpSrvReq".to_string(),
             Type::Named(name) if name == "HttpSrvResp" => "JetHttpSrvResp".to_string(),
+            Type::Named(name) if name == "HttpServerTls" => "JetHttpServerTls".to_string(),
             // c97/D-STRPARSE1: the builtin parse error (`Int.parse`, `Float.parse`,
             // `String.to_int`) erases to a plain message — never user-constructed.
             // A user enum named `ParseError` (in `type_names`) keeps its own lowering.
@@ -508,6 +533,16 @@ impl Cx {
                     "{}{}",
                     self.root_prefix,
                     file_handle_rust_type(name).unwrap()
+                )
+            }
+            // D-RAYLIB1=A: the bare-minimum raylib bridge skeleton lives in the
+            // top-level corelib prelude today, so generated user bindings must
+            // reference `RaylibWindow`/`RaylibColor` directly.
+            Type::Named(name) if raylib_handle_rust_type(name).is_some() => {
+                format!(
+                    "{}{}",
+                    self.root_prefix,
+                    raylib_handle_rust_type(name).unwrap()
                 )
             }
             // E2-M10: networking opaque types are top-level in the prelude.
@@ -614,6 +649,22 @@ impl Cx {
                     self.rust_type(&args[0])
                 )
             }
+            // D-MEM1 S6 (D-POOLID-API1=A): `Pool<T>`/`Id<T>` — the generational
+            // arena and its lightweight index+generation handle.
+            Type::Apply { name, args } if name == "Pool" && !args.is_empty() => {
+                format!(
+                    "{}jet_std::JetPool<{}>",
+                    self.root_prefix,
+                    self.rust_type(&args[0])
+                )
+            }
+            Type::Apply { name, args } if name == "Id" && !args.is_empty() => {
+                format!(
+                    "{}jet_std::JetId<{}>",
+                    self.root_prefix,
+                    self.rust_type(&args[0])
+                )
+            }
             // D-STREAMYIELD1: a generator's `Stream<T>` is a rendezvous-channel
             // receiver — `Receiver<T>` already implements `IntoIterator<Item = T>`,
             // which is exactly `loop x in stream { }`'s pull-one-block-until-ready
@@ -646,7 +697,9 @@ impl Cx {
             // `DecodeResult` shadows the core one — falls through to the plain
             // user-generic arm below instead.
             Type::Apply { name, args }
-                if name == "DecodeResult" && !args.is_empty() && !self.type_names.contains(name) =>
+                if name == "DecodeResult"
+                    && !args.is_empty()
+                    && !self.type_names.contains(name) =>
             {
                 format!(
                     "{}jet_std::DecodeResult<{}>",
@@ -730,7 +783,10 @@ impl Cx {
             // see the type's doc comment); join defensively rather than assume.
             Type::TraitObject(t) => format!(
                 "Box<dyn {}>",
-                t.iter().map(|n| Generics::user_trait_rust(n)).collect::<Vec<_>>().join(" + ")
+                t.iter()
+                    .map(|n| Generics::user_trait_rust(n))
+                    .collect::<Vec<_>>()
+                    .join(" + ")
             ),
             Type::Fn { params, ret, .. } => self.rust_fn_trait(params, ret.as_deref(), false),
             Type::Tuple(fields) => tuple_struct_name(&tuple_fields_plain(fields)),
@@ -1148,7 +1204,10 @@ pub(crate) fn build_cx_items(
                     cx.method_rets
                         .insert((s.name.clone(), m.name.clone()), m.return_type.clone());
                 }
-                if s.derives.iter().any(|(t, _)| t == Syntax::CONTRACT_PATCHABLE) {
+                if s.derives
+                    .iter()
+                    .any(|(t, _)| t == Syntax::CONTRACT_PATCHABLE)
+                {
                     cx.patchable.insert(s.name.clone());
                     let patch = format!("{}.Patch", s.name);
                     let base_ty = Type::Named(s.name.clone());
@@ -1166,10 +1225,8 @@ pub(crate) fn build_cx_items(
                             (AccessConvention::Move, base_ty),
                         ],
                     );
-                    cx.method_rets.insert(
-                        (s.name.clone(), "diff".to_string()),
-                        Some(patch_ty.clone()),
-                    );
+                    cx.method_rets
+                        .insert((s.name.clone(), "diff".to_string()), Some(patch_ty.clone()));
                     cx.method_sigs.insert(
                         (patch.clone(), "merge".to_string()),
                         vec![(AccessConvention::Move, patch_ty.clone())],
@@ -1499,6 +1556,13 @@ pub(crate) fn field_type_comparable(
         Type::Apply { name, .. } if matches!(name.as_str(), "Task" | "Sender" | "Receiver") => {
             false
         }
+        // D-MEM1 S6: `Pool<T>` is a live arena handle (`JetPool`), never comparable
+        // regardless of `T`. `Id<T>` is plain index+generation data — ALWAYS
+        // comparable regardless of `T` (it never touches `T` at runtime), so it
+        // must NOT fall through to the generic "comparable iff every arg is" arm
+        // below (that would wrongly require `T: PartialEq`).
+        Type::Apply { name, .. } if name == "Pool" => false,
+        Type::Apply { name, .. } if name == "Id" => true,
         Type::Apply { args, .. } => args
             .iter()
             .all(|a| field_type_comparable(a, types, param_names)),
@@ -1542,7 +1606,8 @@ pub(crate) fn field_type_hashable(
         Type::IntN { .. } => true,
         Type::Option(inner) => field_type_hashable(inner, types, param_names),
         Type::Result { ok, err } => {
-            field_type_hashable(ok, types, param_names) && field_type_hashable(err, types, param_names)
+            field_type_hashable(ok, types, param_names)
+                && field_type_hashable(err, types, param_names)
         }
         Type::List(inner) => field_type_hashable(inner, types, param_names),
         Type::Named(n) if Generics::is_type_var_name(n) || param_names.contains(n.as_str()) => true,
@@ -1551,7 +1616,12 @@ pub(crate) fn field_type_hashable(
         Type::Apply { name, .. } if matches!(name.as_str(), "Task" | "Sender" | "Receiver") => {
             false
         }
-        Type::Apply { args, .. } => args.iter().all(|a| field_type_hashable(a, types, param_names)),
+        // D-MEM1 S6: same `Pool`/`Id` split as `field_type_comparable` above.
+        Type::Apply { name, .. } if name == "Pool" => false,
+        Type::Apply { name, .. } if name == "Id" => true,
+        Type::Apply { args, .. } => args
+            .iter()
+            .all(|a| field_type_hashable(a, types, param_names)),
         Type::Tuple(fields) => fields
             .iter()
             .all(|(_, t)| field_type_hashable(t, types, param_names)),
@@ -1654,5 +1724,21 @@ fn walk_type_edge(
         }
         Type::Char => {}
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn raylib_skeleton_types_lower_to_core_prelude_types() {
+        assert_eq!(core_rust_type_name("RaylibWindow"), Some("RaylibWindow"));
+        assert_eq!(core_rust_type_name("RaylibColor"), Some("RaylibColor"));
+        assert_eq!(
+            raylib_handle_rust_type("RaylibWindow"),
+            Some("RaylibWindow")
+        );
+        assert_eq!(raylib_handle_rust_type("RaylibColor"), Some("RaylibColor"));
     }
 }

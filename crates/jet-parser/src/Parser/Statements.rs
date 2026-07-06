@@ -2275,6 +2275,7 @@ impl<'a> Parser<'a> {
                 ct: None,
                 uninit: false,
                 arena_view: false,
+                string_view: false,
             });
         }
         let (name, name_span) = self.expect_ident("for the binding name")?;
@@ -2312,6 +2313,7 @@ impl<'a> Parser<'a> {
                 ct: None,
                 uninit: false,
                 arena_view: false,
+                string_view: false,
             });
         }
         let (ty, ty_span) = if matches!(self.peek().kind, TokKind::Colon) {
@@ -2340,6 +2342,7 @@ impl<'a> Parser<'a> {
                         ct: None,
                         uninit: false,
                         arena_view: false,
+                        string_view: false,
                     });
                 }
                 // D-BIND4: `name: Type := expr` — explicit mutable.
@@ -2371,6 +2374,7 @@ impl<'a> Parser<'a> {
                             ct: None,
                             uninit: true,
                             arena_view: false,
+                            string_view: false,
                         });
                     }
                     let init = self.expr()?;
@@ -2386,6 +2390,7 @@ impl<'a> Parser<'a> {
                         ct: None,
                         uninit: false,
                         arena_view: false,
+                        string_view: false,
                     });
                 }
                 // Retired: `name: Type : expr`.
@@ -2421,6 +2426,7 @@ impl<'a> Parser<'a> {
                         ct: None,
                         uninit: false,
                         arena_view: false,
+                        string_view: false,
                     });
                 }
                 // Retired: `name: Type = expr`.
@@ -2456,6 +2462,7 @@ impl<'a> Parser<'a> {
                         ct: None,
                         uninit: false,
                         arena_view: false,
+                        string_view: false,
                     });
                 }
                 _ => {}
@@ -2493,6 +2500,7 @@ impl<'a> Parser<'a> {
             ct: None,
             uninit: false,
             arena_view: false,
+            string_view: false,
         })
     }
 
@@ -2670,6 +2678,7 @@ impl<'a> Parser<'a> {
                 ct: None,
                 uninit: false,
                 arena_view: false,
+                string_view: false,
             });
         }
         let (name, name_span) = self.expect_ident("after a binding keyword")?;
@@ -2694,6 +2703,7 @@ impl<'a> Parser<'a> {
             ct: None,
             uninit: false,
             arena_view: false,
+            string_view: false,
         })
     }
 
@@ -2974,6 +2984,7 @@ impl<'a> Parser<'a> {
             ct: None,
             uninit: false,
             arena_view: false,
+            string_view: false,
         })
     }
 

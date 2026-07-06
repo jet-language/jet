@@ -150,7 +150,9 @@ impl<'a> Parser<'a> {
     /// D-VARARGBOUND1: `[TraitA, TraitB, …]` — the bracketed multi-trait-bound
     /// list, the cursor at `[`. Shared by `<T: [A, B]>` (via `parse_trait_bounds`)
     /// and the variadic bound position `...[A, B]` (D-ANY-JAI1, `Items.rs::param`).
-    pub(super) fn parse_bracket_trait_bound_list(&mut self) -> Result<(Vec<String>, Span), Diagnostic> {
+    pub(super) fn parse_bracket_trait_bound_list(
+        &mut self,
+    ) -> Result<(Vec<String>, Span), Diagnostic> {
         let start = self.peek().span;
         self.expect(TokKind::LBracket, "to open a trait-bound list")?;
         let mut bounds = Vec::new();

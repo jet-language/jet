@@ -1,21 +1,24 @@
 //! JSON-RPC transport over stdio + request/notification dispatch + handlers.
 
 use crate::Diagnostics::{Diagnostic, Severity, Span};
-use crate::Lexer::Token;
+use crate::Lexer::{TokKind, Token};
 use crate::AST::ProgramBundle;
+use jet_queries::{InputKey, QueryEngine, QueryKey};
 use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
+use std::sync::Arc;
 
-use super::Check::{check_document, check_document_with_bundle, collect_fixes, Fix};
+use super::Check::{check_document_with_bundle, collect_fixes, Fix};
 use super::Completion::compute_completions;
 use super::Features::{
     compute_definition, compute_hover, compute_references, compute_rename, encode_semantic_tokens,
-    format_inlay_hints,
+    encode_semantic_tokens_in_span, format_inlay_hints, is_foreign_semantic_word,
 };
 use super::Position::{
-    byte_span_to_range, full_document_range, lsp_pos_to_offset, range_json, LspPos,
+    apply_lsp_edit, byte_offset_to_lsp, byte_span_to_range, full_document_range, lsp_pos_to_offset,
+    range_json, LspPos, LspRange,
 };
-use super::SymbolDB::{build_symbol_db, InlayHint, SymbolDB};
+use super::SymbolDB::{build_symbol_db, InlayHint, SymKind, SymbolDB};
 use super::JSON::{json_escape, json_get, json_int, json_str, parse_json, JsonValue};
 
 // ── Document state ────────────────────────────────────────────────────────────
@@ -25,24 +28,34 @@ struct Document {
     text: String,
 }
 
+#[derive(Clone)]
+struct CheckedBundle {
+    diags: Vec<Diagnostic>,
+    bundle: Option<Arc<ProgramBundle>>,
+    facts: jet_semindex::SemIndexEffectFacts,
+}
+
+impl Document {
+    fn new(path: String, text: String) -> Self {
+        Document { path, text }
+    }
+
+    fn replace_text(&mut self, text: String) {
+        self.text = text;
+    }
+
+    fn apply_range_edit(&mut self, range: LspRange, text: &str) {
+        self.text = apply_lsp_edit(&self.text, range, text);
+    }
+}
+
 struct Server {
     docs: HashMap<String, Document>,
     /// URIs of documents that changed since last diagnostic publish (D-LSP3).
     dirty: std::collections::HashSet<String>,
-    /// D-LSP4: diagnostic cache keyed by path → (source-hash, diagnostics).
-    /// RefCell allows mutation through &self so callers can hold &Document refs.
-    diag_cache: std::cell::RefCell<HashMap<String, (u64, Vec<Diagnostic>)>>,
+    /// D-LSP1 stage 1: shared query engine for memoized document facts.
+    queries: std::cell::RefCell<QueryEngine>,
     shutdown: bool,
-}
-
-/// FNV-1a 64-bit hash of a string — good enough for source-change detection.
-fn hash_str(s: &str) -> u64 {
-    let mut h: u64 = 14695981039346656037;
-    for b in s.bytes() {
-        h ^= b as u64;
-        h = h.wrapping_mul(1099511628211);
-    }
-    h
 }
 
 impl Server {
@@ -50,43 +63,65 @@ impl Server {
         Server {
             docs: HashMap::new(),
             dirty: std::collections::HashSet::new(),
-            diag_cache: std::cell::RefCell::new(HashMap::new()),
+            queries: std::cell::RefCell::new(QueryEngine::new()),
             shutdown: false,
         }
     }
 
-    /// D-LSP4: return diagnostics, re-using cached results when source is unchanged.
-    fn check(&self, doc: &Document) -> Vec<Diagnostic> {
-        let h = hash_str(&doc.text);
-        {
-            let cache = self.diag_cache.borrow();
-            if let Some((cached_h, cached)) = cache.get(&doc.path) {
-                if *cached_h == h {
-                    return cached.clone();
-                }
-            }
-        }
-        let diags = check_document(&doc.path, &doc.text);
-        self.diag_cache
+    fn sync_doc_input(&self, doc: &Document) {
+        self.queries
             .borrow_mut()
-            .insert(doc.path.clone(), (h, diags.clone()));
-        diags
+            .set_input(InputKey::new(doc.path.clone()), doc.text.clone());
     }
 
-    fn check_with_bundle(
-        &self,
-        doc: &Document,
-    ) -> (
-        Vec<Diagnostic>,
-        Option<ProgramBundle>,
-        jet_semindex::SemIndexEffectFacts,
-    ) {
-        check_document_with_bundle(&doc.path, &doc.text)
+    /// D-LSP1 stage 2: diagnostics run through the query engine instead of a
+    /// private LSP-only cache.
+    fn check(&self, doc: &Document) -> Vec<Diagnostic> {
+        self.check_with_bundle(doc).diags
     }
 
-    fn lex(&self, doc: &Document) -> Vec<Token> {
-        let (toks, _) = crate::Lexer::lex(&doc.text);
-        toks
+    fn check_with_bundle(&self, doc: &Document) -> CheckedBundle {
+        let path = doc.path.clone();
+        self.sync_doc_input(doc);
+        self.queries.borrow_mut().query(
+            QueryKey::new("lsp.checked_bundle", path.clone()),
+            |queries| {
+                let text = queries
+                    .input_text(&InputKey::new(path.clone()))
+                    .unwrap_or_default();
+                let (diags, bundle, facts) = check_document_with_bundle(&path, &text);
+                CheckedBundle {
+                    diags,
+                    bundle: bundle.map(Arc::new),
+                    facts,
+                }
+            },
+        )
+    }
+
+    fn lex(&self, doc: &Document) -> Arc<Vec<Token>> {
+        let path = doc.path.clone();
+        self.sync_doc_input(doc);
+        self.queries
+            .borrow_mut()
+            .query(QueryKey::new("lsp.tokens", path.clone()), |queries| {
+                let text = queries.input_text(&InputKey::new(path)).unwrap_or_default();
+                let (toks, _) = crate::Lexer::lex(&text);
+                Arc::new(toks)
+            })
+    }
+
+    fn fixes(&self, doc: &Document) -> Vec<Fix> {
+        let path = doc.path.clone();
+        self.sync_doc_input(doc);
+        self.queries
+            .borrow_mut()
+            .query(QueryKey::new("lsp.fixes", path.clone()), |queries| {
+                let text = queries
+                    .input_text(&InputKey::new(path.clone()))
+                    .unwrap_or_default();
+                collect_fixes(&path, &text)
+            })
     }
 }
 
@@ -228,12 +263,29 @@ fn handle_request(
         "textDocument/formatting" => format_response(server, params, id),
         "textDocument/rangeFormatting" => format_response(server, params, id),
         "textDocument/completion" => completion_response(server, params, id),
+        "textDocument/signatureHelp" => signature_help_response(server, params, id),
+        "textDocument/documentSymbol" => document_symbol_response(server, params, id),
+        "textDocument/foldingRange" => folding_range_response(server, params, id),
+        "textDocument/documentHighlight" => document_highlight_response(server, params, id),
+        "textDocument/selectionRange" => selection_range_response(server, params, id),
         "textDocument/hover" => hover_response(server, params, id),
         "textDocument/definition" => definition_response(server, params, id),
         "textDocument/references" => references_response(server, params, id),
+        "textDocument/prepareRename" => prepare_rename_response(server, params, id),
         "textDocument/rename" => rename_response(server, params, id),
         "textDocument/semanticTokens/full" => semantic_tokens_response(server, params, id),
+        "textDocument/semanticTokens/range" => semantic_tokens_range_response(server, params, id),
+        "textDocument/semanticTokens/full/delta" => {
+            semantic_tokens_delta_response(server, params, id)
+        }
         "textDocument/inlayHint" => inlay_hint_response(server, params, id),
+        "workspace/symbol" => workspace_symbol_response(server, params, id),
+        "textDocument/prepareCallHierarchy" => prepare_call_hierarchy_response(server, params, id),
+        "callHierarchy/incomingCalls" => call_hierarchy_incoming_response(server, params, id),
+        "callHierarchy/outgoingCalls" => call_hierarchy_outgoing_response(server, params, id),
+        "textDocument/prepareTypeHierarchy" => prepare_type_hierarchy_response(server, params, id),
+        "typeHierarchy/supertypes" => type_hierarchy_supertypes_response(server, params, id),
+        "typeHierarchy/subtypes" => type_hierarchy_subtypes_response(server, params, id),
         "workspace/executeCommand" => execute_command_response(server, params, id),
         _ => Some(response(id, "null")),
     };
@@ -277,7 +329,12 @@ fn handle_notification(
                 .and_then(|td| json_get(td, "uri"))
                 .and_then(json_str)
             {
-                server.docs.remove(uri);
+                if let Some(doc) = server.docs.remove(uri) {
+                    server
+                        .queries
+                        .borrow_mut()
+                        .remove_input(&InputKey::new(doc.path));
+                }
             }
             Ok(())
         }
@@ -288,7 +345,7 @@ fn handle_notification(
 fn initialize_response(id: &JsonValue) -> String {
     let result = r#"{
   "capabilities": {
-    "textDocumentSync": 1,
+    "textDocumentSync": 2,
     "documentFormattingProvider": true,
     "documentRangeFormattingProvider": true,
     "codeActionProvider": true,
@@ -296,22 +353,38 @@ fn initialize_response(id: &JsonValue) -> String {
       "triggerCharacters": ["."],
       "resolveProvider": false
     },
+    "signatureHelpProvider": {
+      "triggerCharacters": ["(", ","]
+    },
+    "documentSymbolProvider": true,
+    "workspaceSymbolProvider": true,
+    "foldingRangeProvider": true,
+    "documentHighlightProvider": true,
+    "selectionRangeProvider": true,
     "hoverProvider": true,
     "definitionProvider": true,
     "referencesProvider": true,
-    "renameProvider": true,
+    "renameProvider": {
+      "prepareProvider": true
+    },
     "semanticTokensProvider": {
       "legend": {
         "tokenTypes": [
           "keyword","type","function","variable","parameter",
           "property","enumMember","string","number","comment",
-          "operator","namespace"
+          "operator","namespace","ownership","decorator"
         ],
-        "tokenModifiers": ["declaration","readonly"]
+        "tokenModifiers": [
+          "declaration","readonly","move","writeBorrow","copy",
+          "directive","contract"
+        ]
       },
-      "full": true
+      "full": { "delta": true },
+      "range": true
     },
     "inlayHintProvider": true,
+    "callHierarchyProvider": true,
+    "typeHierarchyProvider": true,
     "executeCommandProvider": {
       "commands": ["jet.impact"]
     }
@@ -387,27 +460,22 @@ fn publish_after_change_impl(
     let path = uri_to_path(&uri);
 
     if let Some(text) = json_get(td, "text").and_then(json_str) {
-        server.docs.insert(
-            uri.clone(),
-            Document {
-                path,
-                text: text.to_string(),
-            },
-        );
+        server
+            .docs
+            .insert(uri.clone(), Document::new(path, text.to_string()));
     } else if let Some(changes) = json_get(params, "contentChanges") {
         if let JsonValue::Array(arr) = changes {
-            if let Some(JsonValue::Object(chg)) = arr.first() {
-                if let Some(text) = chg.get("text").and_then(json_str) {
-                    server.docs.insert(
-                        uri.clone(),
-                        Document {
-                            path,
-                            text: text.to_string(),
-                        },
-                    );
-                }
+            let doc = server
+                .docs
+                .entry(uri.clone())
+                .or_insert_with(|| Document::new(path, String::new()));
+            for change in arr {
+                apply_content_change(doc, change);
             }
         }
+    }
+    if let Some(doc) = server.docs.get(&uri) {
+        server.sync_doc_input(doc);
     }
 
     if is_open {
@@ -423,6 +491,38 @@ fn publish_after_change_impl(
         server.dirty.insert(uri);
     }
     Ok(())
+}
+
+fn apply_content_change(doc: &mut Document, change: &JsonValue) {
+    let obj = match change {
+        JsonValue::Object(obj) => obj,
+        _ => return,
+    };
+    let text = match obj.get("text").and_then(json_str) {
+        Some(text) => text,
+        None => return,
+    };
+    if let Some(range) = obj.get("range").and_then(range_from_json) {
+        doc.apply_range_edit(range, text);
+    } else {
+        doc.replace_text(text.to_string());
+    }
+}
+
+fn range_from_json(value: &JsonValue) -> Option<LspRange> {
+    let start = json_get(value, "start")?;
+    let end = json_get(value, "end")?;
+    Some(LspRange {
+        start: pos_from_json(start)?,
+        end: pos_from_json(end)?,
+    })
+}
+
+fn pos_from_json(value: &JsonValue) -> Option<LspPos> {
+    Some(LspPos {
+        line: json_int(json_get(value, "line")?)? as u32,
+        character: json_int(json_get(value, "character")?)? as u32,
+    })
 }
 
 /// Flush any pending dirty-document diagnostics before handling a request (D-LSP3).
@@ -484,7 +584,7 @@ fn code_action_response(
     // Go through the SAME unified fix engine the CLI `jet fix` uses, so a fix
     // offered in the editor is byte-identical to a fix applied on the command
     // line.
-    let fixes = collect_fixes(&doc_path_for(uri), &doc.text);
+    let fixes = server.fixes(doc);
     let mut actions = String::new();
     for (n, fix) in fixes.iter().enumerate() {
         if n > 0 {
@@ -493,12 +593,6 @@ fn code_action_response(
         actions.push_str(&code_action_json(uri, &doc.text, fix));
     }
     Some(response(id, &format!("[{}]", actions)))
-}
-
-/// The path `collect_fixes` should check for a `file://` URI (falls back to the
-/// raw URI so non-file documents still work).
-fn doc_path_for(uri: &str) -> String {
-    uri.strip_prefix("file://").unwrap_or(uri).to_string()
 }
 
 fn code_action_json(uri: &str, src: &str, fix: &Fix) -> String {
@@ -545,13 +639,14 @@ fn completion_response(
     let lsp_pos = LspPos { line, character };
     let offset = lsp_pos_to_offset(&doc.text, lsp_pos);
 
-    let (_, bundle, facts) = server.check_with_bundle(doc);
-    let db = match bundle {
-        Some(b) => build_symbol_db(&b, &facts),
+    let checked = server.check_with_bundle(doc);
+    let db = match checked.bundle {
+        Some(b) => build_symbol_db(&b, &checked.facts),
         None => SymbolDB::new(),
     };
 
-    let items = compute_completions(&db, &doc.text, offset, &doc.path);
+    let discovery = load_discovery_index(&doc.path);
+    let items = compute_completions(&db, &doc.text, offset, &doc.path, discovery.as_ref());
     let mut json_items = String::new();
     for (i, item) in items.iter().enumerate() {
         if i > 0 {
@@ -563,6 +658,491 @@ fn completion_response(
         id,
         &format!(r#"{{"isIncomplete":false,"items":[{}]}}"#, json_items),
     ))
+}
+
+fn signature_help_response(
+    server: &Server,
+    params: Option<&JsonValue>,
+    id: &JsonValue,
+) -> Option<String> {
+    let params = params?;
+    let td = json_get(params, "textDocument")?;
+    let uri = json_get(td, "uri").and_then(json_str)?;
+    let doc = server.docs.get(uri)?;
+    let pos = json_get(params, "position")?;
+    let line = json_int(json_get(pos, "line")?)? as u32;
+    let character = json_int(json_get(pos, "character")?)? as u32;
+    let offset = lsp_pos_to_offset(&doc.text, LspPos { line, character });
+    let call = match active_call(&doc.text, offset) {
+        Some(call) => call,
+        None => return Some(response(id, "null")),
+    };
+
+    let checked = server.check_with_bundle(doc);
+    let db = match checked.bundle {
+        Some(b) => build_symbol_db(&b, &checked.facts),
+        None => SymbolDB::new(),
+    };
+
+    let def = match db
+        .defs
+        .iter()
+        .find(|def| def.name == call.name && matches!(def.kind, SymKind::Function { .. }))
+    {
+        Some(def) => def,
+        None => return Some(response(id, "null")),
+    };
+
+    let (label, params_json, param_count) = match &def.kind {
+        SymKind::Function { params, ret } => {
+            let parts: Vec<String> = params
+                .iter()
+                .map(|(name, ty)| format!("{}: {}", name, ty.name()))
+                .collect();
+            let mut label = format!("fn {}({})", def.name, parts.join(", "));
+            if let Some(ret) = ret {
+                label.push_str(&format!(" -> {}", ret.name()));
+            }
+            let params_json = parts
+                .iter()
+                .map(|part| format!(r#"{{"label":"{}"}}"#, json_escape(part)))
+                .collect::<Vec<_>>()
+                .join(",");
+            (label, params_json, parts.len())
+        }
+        _ => return Some(response(id, "null")),
+    };
+    let active = if param_count == 0 {
+        0
+    } else {
+        call.active_param.min(param_count.saturating_sub(1))
+    };
+    let result = format!(
+        r#"{{"signatures":[{{"label":"{}","parameters":[{}]}}],"activeSignature":0,"activeParameter":{}}}"#,
+        json_escape(&label),
+        params_json,
+        active
+    );
+    Some(response(id, &result))
+}
+
+fn document_symbol_response(
+    server: &Server,
+    params: Option<&JsonValue>,
+    id: &JsonValue,
+) -> Option<String> {
+    let params = params?;
+    let td = json_get(params, "textDocument")?;
+    let uri = json_get(td, "uri").and_then(json_str)?;
+    let doc = server.docs.get(uri)?;
+    let checked = server.check_with_bundle(doc);
+    let db = match checked.bundle {
+        Some(b) => build_symbol_db(&b, &checked.facts),
+        None => SymbolDB::new(),
+    };
+
+    let mut defs = db
+        .defs
+        .iter()
+        .filter(|def| def.module_path == doc.path)
+        .filter_map(|def| document_symbol_kind(&def.kind).map(|kind| (def, kind)))
+        .collect::<Vec<_>>();
+    defs.sort_by_key(|(def, _)| def.def_span.start);
+
+    let mut items = String::new();
+    for (i, (def, kind)) in defs.iter().enumerate() {
+        if i > 0 {
+            items.push(',');
+        }
+        let range = range_json(byte_span_to_range(&doc.text, def.def_span));
+        items.push_str(&format!(
+            r#"{{"name":"{}","kind":{},"range":{},"selectionRange":{}}}"#,
+            json_escape(&def.name),
+            kind,
+            range,
+            range
+        ));
+    }
+    Some(response(id, &format!("[{}]", items)))
+}
+
+fn workspace_symbol_response(
+    server: &Server,
+    params: Option<&JsonValue>,
+    id: &JsonValue,
+) -> Option<String> {
+    let query = params
+        .and_then(|p| json_get(p, "query"))
+        .and_then(json_str)
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let mut items = String::new();
+    let mut first = true;
+    let mut docs = server.docs.values().collect::<Vec<_>>();
+    docs.sort_by(|a, b| a.path.cmp(&b.path));
+    for doc in docs {
+        let checked = server.check_with_bundle(doc);
+        let db = match checked.bundle {
+            Some(b) => build_symbol_db(&b, &checked.facts),
+            None => SymbolDB::new(),
+        };
+        let mut defs = db
+            .defs
+            .iter()
+            .filter(|def| def.module_path == doc.path)
+            .filter_map(|def| document_symbol_kind(&def.kind).map(|kind| (def, kind)))
+            .filter(|(def, _)| query.is_empty() || def.name.to_ascii_lowercase().contains(&query))
+            .collect::<Vec<_>>();
+        defs.sort_by_key(|(def, _)| def.def_span.start);
+        for (def, kind) in defs {
+            if !first {
+                items.push(',');
+            }
+            first = false;
+            let uri = path_to_uri(&doc.path);
+            let range = range_json(byte_span_to_range(&doc.text, def.def_span));
+            items.push_str(&format!(
+                r#"{{"name":"{}","kind":{},"location":{{"uri":"{}","range":{}}}}}"#,
+                json_escape(&def.name),
+                kind,
+                json_escape(&uri),
+                range
+            ));
+        }
+    }
+    Some(response(id, &format!("[{}]", items)))
+}
+
+fn folding_range_response(
+    server: &Server,
+    params: Option<&JsonValue>,
+    id: &JsonValue,
+) -> Option<String> {
+    let params = params?;
+    let td = json_get(params, "textDocument")?;
+    let uri = json_get(td, "uri").and_then(json_str)?;
+    let doc = server.docs.get(uri)?;
+    let folds = compute_folding_ranges(&doc.text);
+    let mut out = String::new();
+    for (i, fold) in folds.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        out.push_str(&fold.to_json());
+    }
+    Some(response(id, &format!("[{}]", out)))
+}
+
+fn document_highlight_response(
+    server: &Server,
+    params: Option<&JsonValue>,
+    id: &JsonValue,
+) -> Option<String> {
+    let params = params?;
+    let td = json_get(params, "textDocument")?;
+    let uri = json_get(td, "uri").and_then(json_str)?;
+    let doc = server.docs.get(uri)?;
+    let pos = json_get(params, "position")?;
+    let line = json_int(json_get(pos, "line")?)? as u32;
+    let character = json_int(json_get(pos, "character")?)? as u32;
+    let offset = lsp_pos_to_offset(&doc.text, LspPos { line, character });
+
+    let tokens = server.lex(doc);
+    let name = match ident_at(&tokens, offset) {
+        Some(name) => name.to_string(),
+        None => return Some(response(id, "[]")),
+    };
+    let checked = server.check_with_bundle(doc);
+    let db = match checked.bundle {
+        Some(b) => build_symbol_db(&b, &checked.facts),
+        None => SymbolDB::new(),
+    };
+
+    let mut spans: Vec<(Span, u8)> = Vec::new();
+    for def in db
+        .defs
+        .iter()
+        .filter(|def| def.module_path == doc.path && def.name == name)
+    {
+        spans.push((def.def_span, 3));
+    }
+    for r in db
+        .refs
+        .iter()
+        .filter(|r| r.module_path == doc.path && r.name == name)
+    {
+        spans.push((r.span, 2));
+    }
+    spans.sort_by_key(|(span, kind)| (span.start, *kind));
+    spans.dedup_by_key(|(span, kind)| (span.start, span.end, *kind));
+
+    let mut out = String::new();
+    for (i, (span, kind)) in spans.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        out.push_str(&format!(
+            r#"{{"range":{},"kind":{}}}"#,
+            range_json(byte_span_to_range(&doc.text, *span)),
+            kind
+        ));
+    }
+    Some(response(id, &format!("[{}]", out)))
+}
+
+fn selection_range_response(
+    server: &Server,
+    params: Option<&JsonValue>,
+    id: &JsonValue,
+) -> Option<String> {
+    let params = params?;
+    let td = json_get(params, "textDocument")?;
+    let uri = json_get(td, "uri").and_then(json_str)?;
+    let doc = server.docs.get(uri)?;
+    let positions = match json_get(params, "positions") {
+        Some(JsonValue::Array(values)) => values,
+        _ => return Some(response(id, "[]")),
+    };
+    let tokens = server.lex(doc);
+    let blocks = brace_block_spans(&doc.text);
+
+    let mut out = String::new();
+    for (i, pos) in positions.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        let line = match json_get(pos, "line").and_then(json_int) {
+            Some(line) => line as u32,
+            None => continue,
+        };
+        let character = match json_get(pos, "character").and_then(json_int) {
+            Some(character) => character as u32,
+            None => continue,
+        };
+        let offset = lsp_pos_to_offset(&doc.text, LspPos { line, character });
+        let ranges = selection_ranges_for(&doc.text, &tokens, &blocks, offset);
+        out.push_str(&selection_range_json(&ranges));
+    }
+    Some(response(id, &format!("[{}]", out)))
+}
+
+fn prepare_call_hierarchy_response(
+    server: &Server,
+    params: Option<&JsonValue>,
+    id: &JsonValue,
+) -> Option<String> {
+    let params = params?;
+    let td = json_get(params, "textDocument")?;
+    let uri = json_get(td, "uri").and_then(json_str)?;
+    let doc = server.docs.get(uri)?;
+    let pos = json_get(params, "position")?;
+    let line = json_int(json_get(pos, "line")?)? as u32;
+    let character = json_int(json_get(pos, "character")?)? as u32;
+    let offset = lsp_pos_to_offset(&doc.text, LspPos { line, character });
+    let tokens = server.lex(doc);
+    let name = match ident_at(&tokens, offset) {
+        Some(name) => name,
+        None => return Some(response(id, "[]")),
+    };
+    let checked = server.check_with_bundle(doc);
+    let db = match checked.bundle {
+        Some(b) => build_symbol_db(&b, &checked.facts),
+        None => SymbolDB::new(),
+    };
+    let item = db
+        .defs
+        .iter()
+        .find(|def| def.module_path == doc.path && def.name == name)
+        .and_then(|def| call_hierarchy_item_json(def, &doc.text));
+    match item {
+        Some(item) => Some(response(id, &format!("[{}]", item))),
+        None => Some(response(id, "[]")),
+    }
+}
+
+fn call_hierarchy_incoming_response(
+    server: &Server,
+    params: Option<&JsonValue>,
+    id: &JsonValue,
+) -> Option<String> {
+    let params = params?;
+    let item = json_get(params, "item")?;
+    let name = json_get(item, "name").and_then(json_str)?;
+    let uri = json_get(item, "uri").and_then(json_str)?;
+    let path = uri_to_path(uri);
+    let doc = server.docs.get(uri)?;
+    let checked = server.check_with_bundle(doc);
+    let db = match checked.bundle {
+        Some(b) => build_symbol_db(&b, &checked.facts),
+        None => SymbolDB::new(),
+    };
+
+    let mut out = String::new();
+    let mut first = true;
+    for edge in db
+        .calls
+        .iter()
+        .filter(|edge| edge.module_path == path && edge.callee == name)
+    {
+        let caller_name = short_symbol_name(&edge.caller);
+        let Some(def) = db
+            .defs
+            .iter()
+            .find(|def| def.module_path == path && def.name == caller_name)
+        else {
+            continue;
+        };
+        let Some(item_json) = call_hierarchy_item_json(def, &doc.text) else {
+            continue;
+        };
+        if !first {
+            out.push(',');
+        }
+        first = false;
+        let call_span = Span {
+            start: edge.call_span.start,
+            end: edge.call_span.end,
+        };
+        out.push_str(&format!(
+            r#"{{"from":{},"fromRanges":[{}]}}"#,
+            item_json,
+            range_json(byte_span_to_range(&doc.text, call_span))
+        ));
+    }
+    Some(response(id, &format!("[{}]", out)))
+}
+
+fn call_hierarchy_outgoing_response(
+    server: &Server,
+    params: Option<&JsonValue>,
+    id: &JsonValue,
+) -> Option<String> {
+    let params = params?;
+    let item = json_get(params, "item")?;
+    let name = json_get(item, "name").and_then(json_str)?;
+    let uri = json_get(item, "uri").and_then(json_str)?;
+    let path = uri_to_path(uri);
+    let doc = server.docs.get(uri)?;
+    let checked = server.check_with_bundle(doc);
+    let db = match checked.bundle {
+        Some(b) => build_symbol_db(&b, &checked.facts),
+        None => SymbolDB::new(),
+    };
+
+    let mut out = String::new();
+    let mut first = true;
+    for edge in db.calls.iter().filter(|edge| {
+        edge.module_path == path && (edge.caller == name || short_symbol_name(&edge.caller) == name)
+    }) {
+        let Some(def) = db
+            .defs
+            .iter()
+            .find(|def| def.module_path == path && def.name == edge.callee)
+        else {
+            continue;
+        };
+        let Some(item_json) = call_hierarchy_item_json(def, &doc.text) else {
+            continue;
+        };
+        if !first {
+            out.push(',');
+        }
+        first = false;
+        let call_span = Span {
+            start: edge.call_span.start,
+            end: edge.call_span.end,
+        };
+        out.push_str(&format!(
+            r#"{{"to":{},"fromRanges":[{}]}}"#,
+            item_json,
+            range_json(byte_span_to_range(&doc.text, call_span))
+        ));
+    }
+    Some(response(id, &format!("[{}]", out)))
+}
+
+fn prepare_type_hierarchy_response(
+    server: &Server,
+    params: Option<&JsonValue>,
+    id: &JsonValue,
+) -> Option<String> {
+    let params = params?;
+    let td = json_get(params, "textDocument")?;
+    let uri = json_get(td, "uri").and_then(json_str)?;
+    let doc = server.docs.get(uri)?;
+    let pos = json_get(params, "position")?;
+    let line = json_int(json_get(pos, "line")?)? as u32;
+    let character = json_int(json_get(pos, "character")?)? as u32;
+    let offset = lsp_pos_to_offset(&doc.text, LspPos { line, character });
+
+    let checked = server.check_with_bundle(doc);
+    let db = match checked.bundle {
+        Some(b) => build_symbol_db(&b, &checked.facts),
+        None => SymbolDB::new(),
+    };
+    let item = db
+        .defs
+        .iter()
+        .find(|def| {
+            def.module_path == doc.path
+                && def.def_span.start <= offset
+                && offset <= def.def_span.end
+        })
+        .and_then(|def| type_hierarchy_item_json(def, &doc.text));
+    match item {
+        Some(item) => Some(response(id, &format!("[{}]", item))),
+        None => Some(response(id, "null")),
+    }
+}
+
+fn type_hierarchy_supertypes_response(
+    server: &Server,
+    params: Option<&JsonValue>,
+    id: &JsonValue,
+) -> Option<String> {
+    let (uri, name) = type_hierarchy_item_params(params)?;
+    let doc = server.docs.get(uri)?;
+    let checked = server.check_with_bundle(doc);
+    let bundle = checked.bundle?;
+    let db = build_symbol_db(&bundle, &checked.facts);
+    let mut out = Vec::new();
+    for trait_name in type_hierarchy_trait_impls(&bundle, name) {
+        if let Some(def) = db
+            .defs
+            .iter()
+            .find(|def| def.name == trait_name && matches!(def.kind, SymKind::Trait | SymKind::Tag))
+        {
+            let src = module_source(&bundle, &def.module_path).unwrap_or(&doc.text);
+            if let Some(item) = type_hierarchy_item_json(def, src) {
+                out.push(item);
+            }
+        }
+    }
+    Some(response(id, &format!("[{}]", out.join(","))))
+}
+
+fn type_hierarchy_subtypes_response(
+    server: &Server,
+    params: Option<&JsonValue>,
+    id: &JsonValue,
+) -> Option<String> {
+    let (uri, name) = type_hierarchy_item_params(params)?;
+    let doc = server.docs.get(uri)?;
+    let checked = server.check_with_bundle(doc);
+    let bundle = checked.bundle?;
+    let db = build_symbol_db(&bundle, &checked.facts);
+    let mut out = Vec::new();
+    for subtype in type_hierarchy_subtype_names(&bundle, name) {
+        if let Some(def) = db.defs.iter().find(|def| {
+            def.name == subtype && matches!(def.kind, SymKind::Struct { .. } | SymKind::Enum { .. })
+        }) {
+            let src = module_source(&bundle, &def.module_path).unwrap_or(&doc.text);
+            if let Some(item) = type_hierarchy_item_json(def, src) {
+                out.push(item);
+            }
+        }
+    }
+    Some(response(id, &format!("[{}]", out.join(","))))
 }
 
 fn hover_response(server: &Server, params: Option<&JsonValue>, id: &JsonValue) -> Option<String> {
@@ -577,9 +1157,9 @@ fn hover_response(server: &Server, params: Option<&JsonValue>, id: &JsonValue) -
     let offset = lsp_pos_to_offset(&doc.text, lsp_pos);
 
     let tokens = server.lex(doc);
-    let (_, bundle, facts) = server.check_with_bundle(doc);
-    let db = match bundle {
-        Some(b) => build_symbol_db(&b, &facts),
+    let checked = server.check_with_bundle(doc);
+    let db = match checked.bundle {
+        Some(b) => build_symbol_db(&b, &checked.facts),
         None => SymbolDB::new(),
     };
 
@@ -611,9 +1191,9 @@ fn definition_response(
     let offset = lsp_pos_to_offset(&doc.text, lsp_pos);
 
     let tokens = server.lex(doc);
-    let (_, bundle, facts) = server.check_with_bundle(doc);
-    let db = match bundle {
-        Some(b) => build_symbol_db(&b, &facts),
+    let checked = server.check_with_bundle(doc);
+    let db = match checked.bundle {
+        Some(b) => build_symbol_db(&b, &checked.facts),
         None => SymbolDB::new(),
     };
 
@@ -694,9 +1274,9 @@ fn execute_command_response(
         }
     };
 
-    let (_, bundle, facts) = server.check_with_bundle(doc);
-    let db = match bundle {
-        Some(b) => build_symbol_db(&b, &facts),
+    let checked = server.check_with_bundle(doc);
+    let db = match checked.bundle {
+        Some(b) => build_symbol_db(&b, &checked.facts),
         None => {
             return Some(error_response(id, -32603, "document did not check cleanly"));
         }
@@ -734,9 +1314,9 @@ fn references_response(
         .unwrap_or(false);
 
     let tokens = server.lex(doc);
-    let (_, bundle, facts) = server.check_with_bundle(doc);
-    let db = match bundle {
-        Some(b) => build_symbol_db(&b, &facts),
+    let checked = server.check_with_bundle(doc);
+    let db = match checked.bundle {
+        Some(b) => build_symbol_db(&b, &checked.facts),
         None => SymbolDB::new(),
     };
 
@@ -762,6 +1342,54 @@ fn references_response(
     Some(response(id, &format!("[{}]", items)))
 }
 
+fn prepare_rename_response(
+    server: &Server,
+    params: Option<&JsonValue>,
+    id: &JsonValue,
+) -> Option<String> {
+    let params = params?;
+    let td = json_get(params, "textDocument")?;
+    let uri = json_get(td, "uri").and_then(json_str)?;
+    let doc = server.docs.get(uri)?;
+    let pos = json_get(params, "position")?;
+    let line = json_int(json_get(pos, "line")?)? as u32;
+    let character = json_int(json_get(pos, "character")?)? as u32;
+    let offset = lsp_pos_to_offset(&doc.text, LspPos { line, character });
+    let tokens = server.lex(doc);
+    let tok = match token_at(&tokens, offset) {
+        Some(tok) => tok,
+        None => return Some(response(id, "null")),
+    };
+    let text = token_text(&doc.text, tok);
+    match &tok.kind {
+        TokKind::Ident(name) if is_foreign_semantic_word(name) => Some(error_response(
+            id,
+            -32600,
+            &format!(
+                "`{}` is a retired foreign spelling, not a Jet symbol you can rename",
+                name
+            ),
+        )),
+        TokKind::Ident(name) => {
+            let range = range_json(byte_span_to_range(&doc.text, tok.span));
+            Some(response(
+                id,
+                &format!(
+                    r#"{{"range":{},"placeholder":"{}"}}"#,
+                    range,
+                    json_escape(name)
+                ),
+            ))
+        }
+        _ if is_keyword_token(tok, text) => Some(error_response(
+            id,
+            -32600,
+            &format!("`{}` is Jet syntax, not a name you can rename", text),
+        )),
+        _ => Some(response(id, "null")),
+    }
+}
+
 fn rename_response(server: &Server, params: Option<&JsonValue>, id: &JsonValue) -> Option<String> {
     let params = params?;
     let td = json_get(params, "textDocument")?;
@@ -775,9 +1403,9 @@ fn rename_response(server: &Server, params: Option<&JsonValue>, id: &JsonValue) 
     let new_name = json_get(params, "newName").and_then(json_str)?;
 
     let tokens = server.lex(doc);
-    let (_, bundle, facts) = server.check_with_bundle(doc);
-    let db = match bundle {
-        Some(b) => build_symbol_db(&b, &facts),
+    let checked = server.check_with_bundle(doc);
+    let db = match checked.bundle {
+        Some(b) => build_symbol_db(&b, &checked.facts),
         None => SymbolDB::new(),
     };
 
@@ -833,11 +1461,55 @@ fn semantic_tokens_response(
 
     let tokens = server.lex(doc);
     let data = encode_semantic_tokens(&tokens, &doc.text);
+    Some(response(id, &semantic_tokens_json(&doc.text, &data)))
+}
+
+fn semantic_tokens_range_response(
+    server: &Server,
+    params: Option<&JsonValue>,
+    id: &JsonValue,
+) -> Option<String> {
+    let params = params?;
+    let td = json_get(params, "textDocument")?;
+    let uri = json_get(td, "uri").and_then(json_str)?;
+    let doc = server.docs.get(uri)?;
+    let range = match json_get(params, "range").and_then(range_from_json) {
+        Some(range) => range,
+        None => return Some(response(id, r#"{"data":[]}"#)),
+    };
+    let start = lsp_pos_to_offset(&doc.text, range.start);
+    let end = lsp_pos_to_offset(&doc.text, range.end).max(start);
+    let tokens = server.lex(doc);
+    let data = encode_semantic_tokens_in_span(&tokens, &doc.text, Span { start, end });
+    Some(response(id, &semantic_tokens_json(&doc.text, &data)))
+}
+
+fn semantic_tokens_delta_response(
+    server: &Server,
+    params: Option<&JsonValue>,
+    id: &JsonValue,
+) -> Option<String> {
+    let params = params?;
+    let td = json_get(params, "textDocument")?;
+    let uri = json_get(td, "uri").and_then(json_str)?;
+    let doc = server.docs.get(uri)?;
+    let tokens = server.lex(doc);
+    let data = encode_semantic_tokens(&tokens, &doc.text);
+    // LSP permits a delta request to return a full SemanticTokens result.
+    Some(response(id, &semantic_tokens_json(&doc.text, &data)))
+}
+
+fn semantic_tokens_json(src: &str, data: &[u32]) -> String {
     let data_str: Vec<String> = data.iter().map(|n| n.to_string()).collect();
-    Some(response(
-        id,
-        &format!(r#"{{"data":[{}]}}"#, data_str.join(",")),
-    ))
+    format!(
+        r#"{{"resultId":"{}","data":[{}]}}"#,
+        semantic_tokens_result_id(src, data),
+        data_str.join(",")
+    )
+}
+
+fn semantic_tokens_result_id(src: &str, data: &[u32]) -> String {
+    format!("{}:{}", src.len(), data.len())
 }
 
 fn inlay_hint_response(
@@ -850,12 +1522,12 @@ fn inlay_hint_response(
     let uri = json_get(td, "uri").and_then(json_str)?;
     let doc = server.docs.get(uri)?;
 
-    let (_diags, bundle, facts) = server.check_with_bundle(doc);
+    let checked = server.check_with_bundle(doc);
 
     // Build type-annotation hints from the symbol DB.
-    let hints: Vec<InlayHint> = match bundle {
+    let hints: Vec<InlayHint> = match checked.bundle {
         Some(b) => {
-            let db = build_symbol_db(&b, &facts);
+            let db = build_symbol_db(&b, &checked.facts);
             db.inlay_hints_for(&doc.path).into_iter().cloned().collect()
         }
         None => Vec::new(),
@@ -864,6 +1536,419 @@ fn inlay_hint_response(
     let hint_refs: Vec<&InlayHint> = hints.iter().collect();
     let json = format_inlay_hints(&hint_refs, &doc.text);
     Some(response(id, &json))
+}
+
+struct ActiveCall {
+    name: String,
+    active_param: usize,
+}
+
+fn active_call(src: &str, offset: usize) -> Option<ActiveCall> {
+    let bytes = src.as_bytes();
+    let mut i = offset.min(bytes.len());
+    let mut nested = 0usize;
+    let mut active_param = 0usize;
+    while i > 0 {
+        i -= 1;
+        match bytes[i] {
+            b')' | b']' | b'}' => nested += 1,
+            b'(' if nested == 0 => {
+                let name = callee_name_before_paren(bytes, i)?;
+                return Some(ActiveCall { name, active_param });
+            }
+            b'(' | b'[' | b'{' => nested = nested.saturating_sub(1),
+            b',' if nested == 0 => active_param += 1,
+            _ => {}
+        }
+    }
+    None
+}
+
+fn callee_name_before_paren(bytes: &[u8], paren: usize) -> Option<String> {
+    let mut end = paren;
+    while end > 0 && bytes[end - 1].is_ascii_whitespace() {
+        end -= 1;
+    }
+    let mut start = end;
+    while start > 0 && is_ident_byte(bytes[start - 1]) {
+        start -= 1;
+    }
+    if start == end {
+        return None;
+    }
+    std::str::from_utf8(&bytes[start..end])
+        .ok()
+        .map(|s| s.to_string())
+}
+
+fn is_ident_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_'
+}
+
+fn token_at(tokens: &[Token], offset: usize) -> Option<&Token> {
+    tokens
+        .iter()
+        .find(|tok| tok.span.start <= offset && offset <= tok.span.end)
+}
+
+fn token_text<'a>(src: &'a str, tok: &Token) -> &'a str {
+    src.get(tok.span.start..tok.span.end.min(src.len()))
+        .unwrap_or("")
+}
+
+fn is_keyword_token(tok: &Token, text: &str) -> bool {
+    if crate::Syntax::JET_KEYWORD_LIST.contains(&text) {
+        return true;
+    }
+    matches!(
+        tok.kind,
+        TokKind::KwWhile
+            | TokKind::KwFor
+            | TokKind::KwSwitch
+            | TokKind::KwMutate
+            | TokKind::KwMove
+            | TokKind::KwView
+    )
+}
+
+fn document_symbol_kind(kind: &SymKind) -> Option<u8> {
+    match kind {
+        SymKind::Function { .. } => Some(12),
+        SymKind::Struct { .. } => Some(23),
+        SymKind::Enum { .. } => Some(10),
+        SymKind::Trait | SymKind::Tag => Some(11),
+        SymKind::Const => Some(14),
+        _ => None,
+    }
+}
+
+fn call_hierarchy_item_json(def: &jet_semindex::SymDef, src: &str) -> Option<String> {
+    if !matches!(def.kind, SymKind::Function { .. }) {
+        return None;
+    }
+    let uri = path_to_uri(&def.module_path);
+    let range = range_json(byte_span_to_range(src, def.def_span));
+    Some(format!(
+        r#"{{"name":"{}","kind":12,"uri":"{}","range":{},"selectionRange":{}}}"#,
+        json_escape(&def.name),
+        json_escape(&uri),
+        range,
+        range
+    ))
+}
+
+fn type_hierarchy_item_json(def: &jet_semindex::SymDef, src: &str) -> Option<String> {
+    let kind = match def.kind {
+        SymKind::Struct { .. } => 23,
+        SymKind::Enum { .. } => 10,
+        SymKind::Trait | SymKind::Tag => 11,
+        _ => return None,
+    };
+    let uri = path_to_uri(&def.module_path);
+    let range = range_json(byte_span_to_range(src, def.def_span));
+    Some(format!(
+        r#"{{"name":"{}","kind":{},"uri":"{}","range":{},"selectionRange":{}}}"#,
+        json_escape(&def.name),
+        kind,
+        json_escape(&uri),
+        range,
+        range
+    ))
+}
+
+fn type_hierarchy_item_params(params: Option<&JsonValue>) -> Option<(&str, &str)> {
+    let item = json_get(params?, "item")?;
+    let uri = json_get(item, "uri").and_then(json_str)?;
+    let name = json_get(item, "name").and_then(json_str)?;
+    Some((uri, name))
+}
+
+fn module_source<'a>(bundle: &'a ProgramBundle, path: &str) -> Option<&'a str> {
+    bundle
+        .modules
+        .iter()
+        .find(|module| module.display == path)
+        .map(|module| module.source.as_str())
+}
+
+fn type_hierarchy_trait_impls(bundle: &ProgramBundle, type_name: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for module in &bundle.modules {
+        for item in &module.items {
+            match item {
+                crate::AST::Item::Struct(s) if s.name == type_name => {
+                    out.extend(s.trait_impls.iter().map(|tb| tb.trait_name.clone()));
+                }
+                crate::AST::Item::Enum(e) if e.name == type_name => {
+                    out.extend(e.trait_impls.iter().map(|tb| tb.trait_name.clone()));
+                }
+                _ => {}
+            }
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
+fn type_hierarchy_subtype_names(bundle: &ProgramBundle, trait_name: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for module in &bundle.modules {
+        for item in &module.items {
+            match item {
+                crate::AST::Item::Struct(s)
+                    if s.trait_impls.iter().any(|tb| tb.trait_name == trait_name) =>
+                {
+                    out.push(s.name.clone());
+                }
+                crate::AST::Item::Enum(e)
+                    if e.trait_impls.iter().any(|tb| tb.trait_name == trait_name) =>
+                {
+                    out.push(e.name.clone());
+                }
+                _ => {}
+            }
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
+fn short_symbol_name(name: &str) -> &str {
+    name.rsplit("::").next().unwrap_or(name)
+}
+
+#[derive(Clone, Copy)]
+struct FoldingRange {
+    start_line: u32,
+    start_character: u32,
+    end_line: u32,
+    end_character: u32,
+    kind: Option<&'static str>,
+}
+
+impl FoldingRange {
+    fn to_json(self) -> String {
+        let kind = self
+            .kind
+            .map(|kind| format!(r#","kind":"{}""#, kind))
+            .unwrap_or_default();
+        format!(
+            r#"{{"startLine":{},"startCharacter":{},"endLine":{},"endCharacter":{}{}}}"#,
+            self.start_line, self.start_character, self.end_line, self.end_character, kind
+        )
+    }
+}
+
+#[derive(Clone, Copy)]
+struct BlockSpan {
+    start: usize,
+    end: usize,
+}
+
+fn compute_folding_ranges(src: &str) -> Vec<FoldingRange> {
+    let mut folds = brace_folding_ranges(src);
+    folds.extend(line_group_folds(src, is_comment_line, "comment"));
+    folds.extend(line_group_folds(src, is_import_line, "imports"));
+    folds.sort_by_key(|fold| (fold.start_line, fold.start_character, fold.end_line));
+    folds
+}
+
+fn brace_folding_ranges(src: &str) -> Vec<FoldingRange> {
+    let mut stack: Vec<LspPos> = Vec::new();
+    let mut folds = Vec::new();
+    for (offset, ch) in src.char_indices() {
+        match ch {
+            '{' => stack.push(byte_offset_to_lsp(src, offset)),
+            '}' => {
+                if let Some(start) = stack.pop() {
+                    let end = byte_offset_to_lsp(src, offset);
+                    if end.line > start.line {
+                        folds.push(FoldingRange {
+                            start_line: start.line,
+                            start_character: start.character,
+                            end_line: end.line,
+                            end_character: end.character,
+                            kind: Some("region"),
+                        });
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    folds
+}
+
+fn line_group_folds(
+    src: &str,
+    predicate: fn(&str) -> bool,
+    kind: &'static str,
+) -> Vec<FoldingRange> {
+    let lines = src.lines().collect::<Vec<_>>();
+    let mut folds = Vec::new();
+    let mut start: Option<usize> = None;
+    for (idx, line) in lines.iter().enumerate() {
+        if predicate(line) {
+            start.get_or_insert(idx);
+            continue;
+        }
+        if let Some(first) = start.take() {
+            push_line_group_fold(&lines, first, idx.saturating_sub(1), kind, &mut folds);
+        }
+    }
+    if let Some(first) = start.take() {
+        push_line_group_fold(
+            &lines,
+            first,
+            lines.len().saturating_sub(1),
+            kind,
+            &mut folds,
+        );
+    }
+    folds
+}
+
+fn push_line_group_fold(
+    lines: &[&str],
+    start: usize,
+    end: usize,
+    kind: &'static str,
+    folds: &mut Vec<FoldingRange>,
+) {
+    if end <= start {
+        return;
+    }
+    folds.push(FoldingRange {
+        start_line: start as u32,
+        start_character: first_non_ws(lines[start]) as u32,
+        end_line: end as u32,
+        end_character: lines[end].chars().count() as u32,
+        kind: Some(kind),
+    });
+}
+
+fn is_comment_line(line: &str) -> bool {
+    line.trim_start().starts_with("//")
+}
+
+fn is_import_line(line: &str) -> bool {
+    line.trim_start().starts_with("import ")
+}
+
+fn first_non_ws(line: &str) -> usize {
+    line.chars().position(|ch| !ch.is_whitespace()).unwrap_or(0)
+}
+
+fn ident_at<'a>(tokens: &'a [Token], offset: usize) -> Option<&'a str> {
+    tokens.iter().find_map(|tok| {
+        if tok.span.start <= offset && offset <= tok.span.end {
+            if let TokKind::Ident(name) = &tok.kind {
+                return Some(name.as_str());
+            }
+        }
+        None
+    })
+}
+
+fn brace_block_spans(src: &str) -> Vec<BlockSpan> {
+    let mut stack: Vec<usize> = Vec::new();
+    let mut blocks = Vec::new();
+    for (offset, ch) in src.char_indices() {
+        match ch {
+            '{' => stack.push(offset),
+            '}' => {
+                if let Some(start) = stack.pop() {
+                    blocks.push(BlockSpan {
+                        start,
+                        end: offset + ch.len_utf8(),
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+    blocks
+}
+
+fn selection_ranges_for(
+    src: &str,
+    tokens: &[Token],
+    blocks: &[BlockSpan],
+    offset: usize,
+) -> Vec<LspRange> {
+    let mut ranges = Vec::new();
+    if let Some(span) = token_span_at(tokens, offset) {
+        ranges.push(byte_span_to_range(src, span));
+    }
+    if let Some(span) = line_span_at(src, offset) {
+        ranges.push(byte_span_to_range(src, span));
+    }
+    if let Some(block) = blocks
+        .iter()
+        .filter(|block| block.start <= offset && offset <= block.end)
+        .min_by_key(|block| block.end.saturating_sub(block.start))
+    {
+        ranges.push(byte_span_to_range(
+            src,
+            Span {
+                start: block.start,
+                end: block.end,
+            },
+        ));
+    }
+    ranges.push(full_document_range(src));
+    dedup_ranges(ranges)
+}
+
+fn token_span_at(tokens: &[Token], offset: usize) -> Option<Span> {
+    tokens
+        .iter()
+        .find(|tok| {
+            tok.span.start <= offset && offset <= tok.span.end && tok.span.start < tok.span.end
+        })
+        .map(|tok| tok.span)
+}
+
+fn line_span_at(src: &str, offset: usize) -> Option<Span> {
+    if src.is_empty() {
+        return None;
+    }
+    let offset = offset.min(src.len());
+    let start = src[..offset].rfind('\n').map(|i| i + 1).unwrap_or(0);
+    let end = src[offset..]
+        .find('\n')
+        .map(|i| offset + i)
+        .unwrap_or(src.len());
+    Some(Span { start, end })
+}
+
+fn dedup_ranges(ranges: Vec<LspRange>) -> Vec<LspRange> {
+    let mut out = Vec::new();
+    for range in ranges {
+        if !out.iter().any(|existing| same_range(*existing, range)) {
+            out.push(range);
+        }
+    }
+    out
+}
+
+fn same_range(a: LspRange, b: LspRange) -> bool {
+    a.start == b.start && a.end == b.end
+}
+
+fn selection_range_json(ranges: &[LspRange]) -> String {
+    let mut iter = ranges.iter().rev();
+    let Some(last) = iter.next() else {
+        return r#"{"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":0}}}"#
+            .to_string();
+    };
+    let mut json = format!(r#"{{"range":{}}}"#, range_json(*last));
+    for range in iter {
+        json = format!(r#"{{"range":{},"parent":{}}}"#, range_json(*range), json);
+    }
+    json
 }
 
 // ── URI / path utilities ──────────────────────────────────────────────────────
@@ -886,4 +1971,18 @@ fn path_to_uri(path: &str) -> String {
     } else {
         format!("file://{}", path)
     }
+}
+
+fn load_discovery_index(path: &str) -> Option<crate::Jetpack::Discovery::Index> {
+    let mut dir = std::path::Path::new(path).parent()?;
+    loop {
+        if let Ok(Some(index)) = crate::Jetpack::Discovery::load(dir) {
+            return Some(index);
+        }
+        dir = match dir.parent() {
+            Some(parent) => parent,
+            None => break,
+        };
+    }
+    None
 }

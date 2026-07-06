@@ -95,11 +95,18 @@ pub fn prepare(bundle: &ProgramBundle) -> Result<Option<FfiLink>, Vec<Diagnostic
             || u == "core.compress.zstd"
             || u.starts_with("core.compress.zstd::")
     });
-    // D-NETDEP1=A / D-HTTPLIB4=B: ureq + rustls for core.http.client TLS support.
+    // D-NETDEP1=A / D-HTTPLIB4=B / D-TLS1=A: ureq + rustls with system trust
+    // roots for core.http.client TLS support.
     let needs_http_client = bundle
         .used_core
         .iter()
         .any(|u| u == "core.http.client" || u.starts_with("core.http.client::"));
+    // D-TLSSERVE1=A: server-side TLS uses rustls through the hidden bridge
+    // only when the named `tls:` option is constructed.
+    let needs_http_server_tls = bundle
+        .used_core
+        .iter()
+        .any(|u| u == "core.http.server::tls");
     // D-DEP-CRYPTO1=A: RustCrypto AEAD + Ed25519 for core.crypto envelope APIs.
     let needs_crypto = bundle.used_core.iter().any(|u| {
         u == "jet.crypto"
@@ -107,25 +114,43 @@ pub fn prepare(bundle: &ProgramBundle) -> Result<Option<FfiLink>, Vec<Diagnostic
             || u == "core.crypto.expert"
             || u.starts_with("core.crypto.expert::")
     });
+    // D-DEP-WASM1=A (c81): `core.plugin` — the sandboxed WASM Component Model
+    // plugin loader (`Plugin.load`/`.call`).
+    let needs_plugin = bundle
+        .used_core
+        .iter()
+        .any(|u| u == "jet.plugin" || u.starts_with("jet.plugin::"));
+    // U13 (D-JPK-SECRETCRYPTO1): `core.vault.get` — decrypted-repo-secret read,
+    // age-style crypto FFI bridge.
+    let needs_secrets = bundle
+        .used_core
+        .iter()
+        .any(|u| u == "core.vault" || u.starts_with("core.vault::"));
     if entries.is_empty()
         && !needs_regex
         && !needs_archive
         && !needs_db
         && !needs_http_client
+        && !needs_http_server_tls
         && !needs_crypto
         && !needs_compress
+        && !needs_plugin
+        && !needs_secrets
     {
         return Ok(None);
     }
 
-    build_bridge(
+    build_bridge_full(
         &entries,
         needs_regex,
         needs_archive,
         needs_db,
         needs_http_client,
+        needs_http_server_tls,
         needs_crypto,
         needs_compress,
+        needs_plugin,
+        needs_secrets,
     )
     .map(Some)
 }
@@ -150,13 +175,25 @@ pub const TAR_CRATE_SPEC: (&str, &str) = ("tar", "0");
 /// Lives only here — never in the compiler's Cargo.toml (I6).
 pub const DB_CRATE_SPEC: (&str, &str) = ("rusqlite", "0.31");
 
-/// The `ureq` crate version that backs `core.http.client` (D-NETDEP1=A, D-HTTPLIB4=B).
-/// rustls is pulled in automatically via `ureq`'s `tls` feature flag.
+/// The `ureq` crate version that backs `core.http.client`
+/// (D-NETDEP1=A, D-HTTPLIB4=B, D-TLS1=A).
+/// rustls is pulled in by `tls`; system roots by `native-certs`.
 /// Lives only here — never in the compiler's Cargo.toml (I6).
 pub const HTTP_CLIENT_CRATE_SPEC: (&str, &str) = ("ureq", "2");
 
 /// Hand-written HTTP client runtime emitted into the bridge crate when `core.http.client` is used.
 const HTTP_CLIENT_RUNTIME: &str = include_str!("Prelude/Http.rs");
+
+/// The `rustls` crate version that backs `core.http.server` TLS
+/// (D-TLSSERVE1=A). Lives only here — never in the compiler's Cargo.toml (I6).
+pub const HTTP_SERVER_TLS_CRATE_SPEC: (&str, &str) = ("rustls", "0.23");
+
+/// PEM parser used by the server TLS bridge.
+pub const HTTP_SERVER_TLS_PEMFILE_CRATE_SPEC: (&str, &str) = ("rustls-pemfile", "2");
+
+/// Hand-written HTTP server TLS runtime emitted into the bridge crate when
+/// `core.http.server.tls` is used.
+const HTTP_SERVER_TLS_RUNTIME: &str = include_str!("Prelude/HttpServerTls.rs");
 
 /// Crate dependency specs that require non-trivial TOML values (e.g. feature flags).
 /// These are emitted verbatim as the right-hand side of the `name = …` line.
@@ -165,7 +202,18 @@ const FEATURED_DEPS: &[(&str, &str)] = &[
         "rusqlite",
         "{ version = \"0.31\", features = [\"bundled\"] }",
     ),
-    ("ureq", "{ version = \"2\", features = [\"tls\"] }"),
+    (
+        "ureq",
+        "{ version = \"2\", default-features = false, features = [\"tls\", \"native-certs\"] }",
+    ),
+    (
+        "rustls",
+        "{ version = \"0.23\", default-features = false, features = [\"ring\", \"std\", \"tls12\"] }",
+    ),
+    (
+        "wasmtime",
+        "{ version = \"26\", features = [\"component-model\"] }",
+    ),
 ];
 
 /// Hand-written regex runtime emitted into the bridge crate when `jet.regex` is
@@ -192,6 +240,26 @@ pub const ED25519_CRATE_SPEC: (&str, &str) = ("ed25519-dalek", "2");
 /// Hand-written crypto runtime emitted into the bridge crate when `core.crypto`
 /// seal/open/sign/verify is used (D-CRYPTOENV1, D-DEP-CRYPTO1).
 const CRYPTO_RUNTIME: &str = include_str!("Prelude/Crypto.rs");
+
+/// The `wasmtime` crate version that backs `core.plugin` (D-DEP-WASM1=A, c81).
+/// Lives only here — never in the compiler's Cargo.toml (I6). Reuses the
+/// already-approved Cranelift backend internally (D-JITDEP1).
+pub const WASMTIME_CRATE_SPEC: (&str, &str) = ("wasmtime", "26");
+
+/// Hand-written plugin-loader runtime emitted into the bridge crate when
+/// `core.plugin` is used. This is the only place the `wasmtime` crate is
+/// touched.
+const PLUGIN_RUNTIME: &str = include_str!("Prelude/Plugin.rs");
+
+/// The `age` crate version backing `core.vault` (U13, D-JPK-SECRETCRYPTO1=A) —
+/// the age-style crypto bridge: X25519 recipients, ChaCha20-Poly1305 payload.
+/// Lives only here — never in the compiler's Cargo.toml (I6).
+pub const AGE_CRATE_SPEC: (&str, &str) = ("age", "0.10");
+
+/// Hand-written age-style crypto runtime emitted into the bridge crate when
+/// `core.vault` is used (U13). This is the only place the `age` crate is
+/// touched.
+const SECRETS_RUNTIME: &str = include_str!("Prelude/SecretsCrypto.rs");
 
 /// The `flate2` crate version that backs `core.compress.gzip` (D-CODECS1).
 /// Same crate as `core.archive`'s gzip; `core.compress` must also work standalone,
@@ -220,6 +288,34 @@ pub fn build_bridge(
     needs_http_client: bool,
     needs_crypto: bool,
     needs_compress: bool,
+    needs_plugin: bool,
+    needs_secrets: bool,
+) -> Result<FfiLink, Vec<Diagnostic>> {
+    build_bridge_full(
+        entries,
+        needs_regex,
+        needs_archive,
+        needs_db,
+        needs_http_client,
+        false,
+        needs_crypto,
+        needs_compress,
+        needs_plugin,
+        needs_secrets,
+    )
+}
+
+fn build_bridge_full(
+    entries: &[ExternEntry],
+    needs_regex: bool,
+    needs_archive: bool,
+    needs_db: bool,
+    needs_http_client: bool,
+    needs_http_server_tls: bool,
+    needs_crypto: bool,
+    needs_compress: bool,
+    needs_plugin: bool,
+    needs_secrets: bool,
 ) -> Result<FfiLink, Vec<Diagnostic>> {
     let mut deps = collect_crate_deps(entries);
     if needs_regex {
@@ -243,6 +339,16 @@ pub fn build_bridge(
         deps.insert(
             HTTP_CLIENT_CRATE_SPEC.0.to_string(),
             HTTP_CLIENT_CRATE_SPEC.1.to_string(),
+        );
+    }
+    if needs_http_server_tls {
+        deps.insert(
+            HTTP_SERVER_TLS_CRATE_SPEC.0.to_string(),
+            HTTP_SERVER_TLS_CRATE_SPEC.1.to_string(),
+        );
+        deps.insert(
+            HTTP_SERVER_TLS_PEMFILE_CRATE_SPEC.0.to_string(),
+            HTTP_SERVER_TLS_PEMFILE_CRATE_SPEC.1.to_string(),
         );
     }
     if needs_crypto {
@@ -272,6 +378,15 @@ pub fn build_bridge(
             COMPRESS_ZSTD_CRATE_SPEC.1.to_string(),
         );
     }
+    if needs_plugin {
+        deps.insert(
+            WASMTIME_CRATE_SPEC.0.to_string(),
+            WASMTIME_CRATE_SPEC.1.to_string(),
+        );
+    }
+    if needs_secrets {
+        deps.insert(AGE_CRATE_SPEC.0.to_string(), AGE_CRATE_SPEC.1.to_string());
+    }
     let key = cache_key_full(
         entries,
         &deps,
@@ -279,8 +394,11 @@ pub fn build_bridge(
         needs_archive,
         needs_db,
         needs_http_client,
+        needs_http_server_tls,
         needs_crypto,
         needs_compress,
+        needs_plugin,
+        needs_secrets,
     );
     let cache_root = cache_dir().join(format!("{:016x}", key));
     let crate_name = format!("jet_ffi_{:016x}", key);
@@ -297,10 +415,21 @@ pub fn build_bridge(
     } else {
         None
     };
+    // U13: same shape, a `jet-secrets-helper` binary when the bridge carries the
+    // age-style crypto bridge — `jetpack secrets *` shells out to it.
+    let secrets_helper_bin = if needs_secrets {
+        Some(target.join("jet-secrets-helper"))
+    } else {
+        None
+    };
     // The build is only "cached and ready" when the rlib exists AND — if a helper
     // is expected — the helper binary exists too (a bridge cached before c146
     // landed would have the rlib but no helper, so fall through to rebuild).
-    let helper_ready = helper_bin.as_ref().map(|p| p.is_file()).unwrap_or(true);
+    let helper_ready = helper_bin.as_ref().map(|p| p.is_file()).unwrap_or(true)
+        && secrets_helper_bin
+            .as_ref()
+            .map(|p| p.is_file())
+            .unwrap_or(true);
 
     // Fast path (cache hit): the key is content-derived from the exact
     // extern-rust signature / dep set, so an rlib already sitting at this
@@ -313,6 +442,7 @@ pub fn build_bridge(
             rlib_path: rlib,
             deps_dir,
             helper_bin_path: helper_bin,
+            secrets_helper_bin_path: secrets_helper_bin,
         });
     }
 
@@ -346,6 +476,7 @@ pub fn build_bridge(
             rlib_path: rlib,
             deps_dir,
             helper_bin_path: helper_bin,
+            secrets_helper_bin_path: secrets_helper_bin,
         });
     }
 
@@ -365,8 +496,11 @@ pub fn build_bridge(
             needs_archive,
             needs_db,
             needs_http_client,
+            needs_http_server_tls,
             needs_crypto,
             needs_compress,
+            needs_plugin,
+            needs_secrets,
         ),
     )
     .map_err(|e| tool_error(&format!("couldn't write the FFI wrappers: {}", e)))?;
@@ -381,6 +515,18 @@ pub fn build_bridge(
             emit_crypto_helper_bin(&crate_name),
         )
         .map_err(|e| tool_error(&format!("couldn't write the crypto helper: {}", e)))?;
+    }
+    // U13: same shape, the secrets helper binary when the age-style crypto
+    // bridge is in play.
+    if needs_secrets {
+        let bin_dir = src_dir.join("bin");
+        fs::create_dir_all(&bin_dir)
+            .map_err(|e| tool_error(&format!("couldn't create the FFI bin folder: {}", e)))?;
+        fs::write(
+            bin_dir.join("jet-secrets-helper.rs"),
+            emit_secrets_helper_bin(&crate_name),
+        )
+        .map_err(|e| tool_error(&format!("couldn't write the secrets helper: {}", e)))?;
     }
 
     let out = Command::new("cargo")
@@ -454,11 +600,20 @@ pub fn build_bridge(
             )));
         }
     }
+    if let Some(bin) = &secrets_helper_bin {
+        if !bin.is_file() {
+            return Err(tool_error(&format!(
+                "FFI build finished but the secrets helper `{}` is missing",
+                bin.display()
+            )));
+        }
+    }
     Ok(FfiLink {
         crate_name,
         rlib_path: rlib,
         deps_dir,
         helper_bin_path: helper_bin,
+        secrets_helper_bin_path: secrets_helper_bin,
     })
 }
 
@@ -539,6 +694,92 @@ fn main() {{
             match {crate_name}::jet_crypto_verify_impl(&pk, &msg, &sig) {{
                 Ok(()) => exit(0),
                 Err(_) => exit(2),
+            }}
+        }}
+        other => fail(&format!("unknown command `{{}}`", other)),
+    }}
+}}
+"#,
+        crate_name = crate_name
+    )
+}
+
+/// The secrets helper binary source (U13, D-JPK-SECRETCRYPTO1). A thin
+/// stdin-protocol wrapper around the crate's own `jet_vault_*_impl`
+/// functions (the *only* code that touches the `age` crate). `jetpack secrets
+/// set/get/recipients/keygen` shells out to this exactly as `jet` already
+/// shells out to `cargo`/`rustc`, keeping `crates/jet-driver` zero-dependency
+/// (I6). Protocol (one command line on stdin, hex-encoded byte args, plain
+/// age strings for identities/recipients since neither ever contains a space):
+///   `keygen`                                       → stdout `<identity> <recipient>`
+///   `encrypt <recipients_csv> <plaintext_hex>`      → stdout `<ciphertext_hex>` (exit 0) / exit 1 error
+///   `decrypt <identity> <ciphertext_hex>`           → stdout `<plaintext_hex>`  (exit 0) / exit 1 error
+fn emit_secrets_helper_bin(crate_name: &str) -> String {
+    format!(
+        r#"// Auto-generated age-style secrets helper (U13) — do not edit.
+#![allow(warnings)]
+use std::io::Read;
+use std::process::exit;
+
+fn hex_encode(bytes: &[u8]) -> String {{
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for b in bytes {{
+        s.push_str(&format!("{{:02x}}", b));
+    }}
+    s
+}}
+
+fn hex_decode(s: &str) -> Result<Vec<u8>, String> {{
+    let s = s.trim();
+    if s.len() % 2 != 0 {{
+        return Err("odd-length hex".to_string());
+    }}
+    let mut out = Vec::with_capacity(s.len() / 2);
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {{
+        let hi = (bytes[i] as char).to_digit(16).ok_or("bad hex digit")?;
+        let lo = (bytes[i + 1] as char).to_digit(16).ok_or("bad hex digit")?;
+        out.push(((hi << 4) | lo) as u8);
+        i += 2;
+    }}
+    Ok(out)
+}}
+
+fn fail(msg: &str) -> ! {{
+    eprintln!("error: {{}}", msg);
+    exit(1);
+}}
+
+fn main() {{
+    let mut input = String::new();
+    if std::io::stdin().read_to_string(&mut input).is_err() {{
+        fail("couldn't read stdin");
+    }}
+    let mut parts = input.split_whitespace();
+    let cmd = parts.next().unwrap_or("");
+    match cmd {{
+        "keygen" => {{
+            let (identity, recipient) = {crate_name}::jet_vault_keygen_impl();
+            println!("{{}} {{}}", identity, recipient);
+        }}
+        "encrypt" => {{
+            let recipients_csv = parts.next().unwrap_or_else(|| fail("encrypt: missing recipients"));
+            let plaintext_hex = parts.next().unwrap_or_else(|| fail("encrypt: missing plaintext"));
+            let recipients: Vec<String> = recipients_csv.split(',').map(|s| s.to_string()).collect();
+            let plaintext = hex_decode(plaintext_hex).unwrap_or_else(|e| fail(&e));
+            match {crate_name}::jet_vault_encrypt_impl(&recipients, &plaintext) {{
+                Ok(ciphertext) => println!("{{}}", hex_encode(&ciphertext)),
+                Err(e) => fail(&e),
+            }}
+        }}
+        "decrypt" => {{
+            let identity = parts.next().unwrap_or_else(|| fail("decrypt: missing identity")).to_string();
+            let ciphertext_hex = parts.next().unwrap_or_else(|| fail("decrypt: missing ciphertext"));
+            let ciphertext = hex_decode(ciphertext_hex).unwrap_or_else(|e| fail(&e));
+            match {crate_name}::jet_vault_decrypt_impl(&identity, &ciphertext) {{
+                Ok(plaintext) => println!("{{}}", hex_encode(&plaintext)),
+                Err(e) => fail(&e),
             }}
         }}
         other => fail(&format!("unknown command `{{}}`", other)),
@@ -635,8 +876,11 @@ fn cache_key_full(
     needs_archive: bool,
     needs_db: bool,
     needs_http_client: bool,
+    needs_http_server_tls: bool,
     needs_crypto: bool,
     needs_compress: bool,
+    needs_plugin: bool,
+    needs_secrets: bool,
 ) -> u64 {
     let mut h = DefaultHasher::new();
     // Only perturb the key when a ring module is actually needed, so programs
@@ -654,11 +898,20 @@ fn cache_key_full(
     if needs_http_client {
         needs_http_client.hash(&mut h);
     }
+    if needs_http_server_tls {
+        needs_http_server_tls.hash(&mut h);
+    }
     if needs_crypto {
         needs_crypto.hash(&mut h);
     }
     if needs_compress {
         needs_compress.hash(&mut h);
+    }
+    if needs_plugin {
+        needs_plugin.hash(&mut h);
+    }
+    if needs_secrets {
+        needs_secrets.hash(&mut h);
     }
     for (k, v) in deps {
         k.hash(&mut h);
@@ -760,8 +1013,11 @@ fn emit_wrapper_lib(
     needs_archive: bool,
     needs_db: bool,
     needs_http_client: bool,
+    needs_http_server_tls: bool,
     needs_crypto: bool,
     needs_compress: bool,
+    needs_plugin: bool,
+    needs_secrets: bool,
 ) -> String {
     let mut out = String::from(
         "// Auto-generated FFI wrappers — do not edit.\n#![allow(warnings)]\n\nfn ffi_panic() -> ! {\n    eprintln!(\"panic: a foreign function panicked\");\n    std::process::exit(70);\n}\n\n",
@@ -787,6 +1043,12 @@ fn emit_wrapper_lib(
         out.push_str(HTTP_CLIENT_RUNTIME);
         out.push('\n');
     }
+    if needs_http_server_tls {
+        // D-TLSSERVE1=A: the server TLS runtime is the only place serving
+        // touches rustls.
+        out.push_str(HTTP_SERVER_TLS_RUNTIME);
+        out.push('\n');
+    }
     if needs_crypto {
         // D-DEP-CRYPTO1=A: the crypto runtime is the only place RustCrypto is touched.
         out.push_str(CRYPTO_RUNTIME);
@@ -796,6 +1058,17 @@ fn emit_wrapper_lib(
         // D-CODECS1: the compress runtime is the only place the standalone
         // `core.compress.gzip` / `core.compress.zstd` codec paths are touched.
         out.push_str(COMPRESS_RUNTIME);
+        out.push('\n');
+    }
+    if needs_plugin {
+        // D-DEP-WASM1=A: the plugin runtime is the only place `wasmtime` is touched.
+        out.push_str(PLUGIN_RUNTIME);
+        out.push('\n');
+    }
+    if needs_secrets {
+        // U13 (D-JPK-SECRETCRYPTO1): the secrets runtime is the only place the
+        // `age` crate is touched.
+        out.push_str(SECRETS_RUNTIME);
         out.push('\n');
     }
     let mut names: HashSet<String> = HashSet::new();
@@ -863,6 +1136,12 @@ fn rust_type(ty: &Type, user_types: &HashSet<String>) -> String {
             rust_type(key, user_types),
             rust_type(value, user_types)
         ),
+        // D-MEM1 S6: the main codegen path (Codegen/Context.rs) now renders
+        // `Type::Shared` as `jet_std::JetShared<T>` (`Arc<RwLock<T>>`), not a
+        // bare `Arc<T>` — this C-FFI bridge type table is untested for
+        // `Shared<T>` crossing the boundary (no test exercises it; a
+        // concurrency handle in a C-ABI signature is not a realistic shape),
+        // left as the pre-S6 mapping rather than guessed at.
         Type::Shared(inner) => format!("std::sync::Arc<{}>", rust_type(inner, user_types)),
         Type::Option(inner) => format!("Option<{}>", rust_type(inner, user_types)),
         Type::Result { ok, err } => format!(
@@ -925,9 +1204,29 @@ fn stable_cargo_detail(stderr: &str) -> String {
                 && !t.contains("waiting for other jobs")
                 && !(t.starts_with("Compiling ") && !t.contains("jet_ffi_"))
         })
-        .map(|line| normalize_ffi_cache_path(line))
+        .map(|line| normalize_ffi_crate_name(&normalize_ffi_cache_path(line)))
         .collect();
     indent_block(&kept.join("\n"))
+}
+
+fn normalize_ffi_crate_name(line: &str) -> String {
+    let marker = "jet_ffi_";
+    let mut out = String::new();
+    let mut rest = line;
+    while let Some(idx) = rest.find(marker) {
+        out.push_str(&rest[..idx]);
+        let after = &rest[idx + marker.len()..];
+        let hash_len = after.chars().take_while(|c| c.is_ascii_hexdigit()).count();
+        if hash_len == 16 {
+            out.push_str("jet_ffi_<hash>");
+            rest = &after[hash_len..];
+        } else {
+            out.push_str(marker);
+            rest = after;
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 /// Keep ui snapshots stable across machines (`/home/…/.cache/jet/ffi/…` → `~/.cache/jet/ffi/…`).
@@ -950,9 +1249,8 @@ fn normalize_ffi_cache_path(line: &str) -> String {
     if hash_len != 16 {
         return line.to_string();
     }
-    let hash = &rest[..hash_len];
     let suffix = &rest[hash_len..];
-    format!("{}~/.cache/jet/ffi/{}{}", &line[..path_start], hash, suffix)
+    format!("{}~/.cache/jet/ffi/<hash>{}", &line[..path_start], suffix)
 }
 
 fn tool_error(msg: &str) -> Vec<Diagnostic> {

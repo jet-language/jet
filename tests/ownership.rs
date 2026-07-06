@@ -104,7 +104,10 @@ fn run() {
         out.lints.iter().any(|d| d.code == "L0202"),
         "expected L0202 loop auto-clone lint"
     );
-    assert!(out.rust.contains("Arc::clone"));
+    // D-MEM1 S6: `Shared<T>` lowers to `jet_std::JetShared<T>` now, not a bare
+    // `Arc<T>` — the auto-clone is a plain `.clone()` call (its own cheap-handle
+    // `Clone` impl), not `Arc::clone(&…)`.
+    assert!(out.rust.contains(").clone()"));
 }
 
 #[test]
@@ -146,7 +149,7 @@ fn run() {
 
 /// E0209 liveness gate (was D-L0201): when the value is still used after the
 /// call, `^` would break that later use — E0209 still fires (hard error), but
-/// the fix menu offers `.clone()`/reorder instead of `^`.
+/// the fix menu offers `copy name`/reorder instead of `^`.
 #[test]
 fn implicit_clone_errors_with_reorder_menu_when_live_after_call() {
     let src = r#"

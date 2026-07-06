@@ -1,0 +1,27 @@
+// D-MEM1 stage S7 (D-NOALLOC-SEM1=A, ratified 2026-07-04): `policy no_alloc`
+// is a module-level allocation floor. Sema flags allocation-shaped
+// expressions written directly in THIS file's own function bodies — a
+// struct/enum literal for a heap-owning type, `copy` of a heap-owning type,
+// string interpolation that allocates, `.push`/`.insert` — but never follows
+// a call into another module (local-only, D-NOALLOC-SEM1). Every function
+// below only touches scalars and references, so nothing is flagged.
+policy no_alloc
+
+struct Entity {
+    pos: Float
+    vel: Float
+}
+
+fn integrate(e: &Entity, dt: Float) {
+    e.pos += e.vel * dt
+}
+
+fn run() {
+    e := Entity.{ pos: 0.0, vel: 1.0 }
+    integrate(&e, 2.0)
+    // No interpolation here — `"{e.pos}"` would itself allocate a fresh
+    // `String` (E0921); a static literal (no `{…}` hole) is one constant
+    // piece of text, not "concatenation/interpolation that produces a new
+    // String", so it's fine under this module's own `policy no_alloc`.
+    print("integrated ok")
+}

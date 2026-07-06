@@ -110,7 +110,7 @@ impl<'a> Parser<'a> {
             }
         };
         self.bump(); // `.`
-        // S84: role names may be kebab-case (`system.my-host`).
+                     // S84: role names may be kebab-case (`system.my-host`).
         let (path, path_span) = self.expect_dashed_name("for the role name")?;
         self.expect(TokKind::LBrace, "to open the module body")?;
 
@@ -119,6 +119,11 @@ impl<'a> Parser<'a> {
         // Env bodies collect bare `field: expr` pairs into an inferred record
         // (U18); system/image bodies reuse their dedicated field parsers.
         let mut env_fields: Vec<(String, Span, Expr)> = Vec::new();
+        // U12: a dev `services: { name: { … }, … }` map, reusing the exact
+        // `services_map()` grammar `system.<name>.services` already parses —
+        // captured separately from `env_fields` because it isn't a bare
+        // `field: expr` pair (see `EnvLit`).
+        let mut env_services: Vec<crate::AST::ServiceEntry> = Vec::new();
         let mut system_fields: Vec<crate::AST::SystemField> = Vec::new();
         let mut image_fields: Vec<crate::AST::ImageField> = Vec::new();
         let mut fleet_fields: Vec<crate::AST::FleetField> = Vec::new();
@@ -146,8 +151,15 @@ impl<'a> Parser<'a> {
                     Namespace::Env => {
                         let (field, field_span) = self.expect_ident("for a field name")?;
                         self.expect(TokKind::Colon, "after a field name")?;
-                        let value = self.expr()?;
-                        env_fields.push((field, field_span, value));
+                        // U12: `services:` is a dev-supervised map, not a bare
+                        // scalar/list field — parse it with the same
+                        // dedicated grammar `System.services` uses.
+                        if field == Syntax::SYSTEM_FIELD_SERVICES {
+                            env_services.extend(self.services_map()?);
+                        } else {
+                            let value = self.expr()?;
+                            env_fields.push((field, field_span, value));
+                        }
                         if matches!(self.peek().kind, TokKind::Comma) {
                             self.bump();
                         }
@@ -178,13 +190,9 @@ impl<'a> Parser<'a> {
         let body_span = Span::new(body_start, end);
 
         let value = match namespace {
-            Namespace::Env => crate::AST::ContribValue::Expr(Expr::StructLit {
-                type_name: String::new(),
-                type_args: Vec::new(),
-                import_ns: None,
-                as_trait: None,
+            Namespace::Env => crate::AST::ContribValue::Env(crate::AST::EnvLit {
                 fields: env_fields,
-                inferred: true,
+                services: env_services,
                 span: body_span,
             }),
             Namespace::System => crate::AST::ContribValue::System(crate::AST::SystemLit {
@@ -1000,19 +1008,28 @@ impl<'a> Parser<'a> {
         self.expect(TokKind::Colon, "after an `Image` field name")?;
         let value = match name.as_str() {
             Syntax::IMAGE_FIELD_FROM => {
-                // `from: system.<name>` — the `system` keyword then the name.
-                let (kw, kw_span) = self.expect_ident("for `system`, e.g. `system.halcyon`")?;
-                if kw != Syntax::NS_SYSTEM {
+                // D-JPK-IMAGE1: `from: system.<name>` (the `.Iso` tier) or
+                // `from: packages.<name>` (the `.Oci` tier) — the `system`/
+                // `packages` keyword then the name.
+                let (kw, kw_span) = self.expect_ident(
+                    "for `system` or `packages`, e.g. `system.halcyon` or `packages.cli`",
+                )?;
+                if kw != Syntax::NS_SYSTEM && kw != Syntax::IMAGE_FROM_PACKAGES {
                     return Err(image_from_not_system(kw_span));
                 }
-                self.expect(TokKind::Dot, "after `system`")?;
+                self.expect(TokKind::Dot, "after `system`/`packages`")?;
                 // S84: `from: system.<name>` may reference a kebab-case System
-                // name; must read the same way the definition does so the E0978
-                // cross-check still string-matches.
-                let (sys, sys_span) = self.expect_dashed_name("for the system name")?;
+                // (or package) name; must read the same way the definition does
+                // so the E0978/E1267 cross-checks still string-match.
+                let (name, name_span) = self.expect_dashed_name("for the name")?;
+                let source = if kw == Syntax::NS_SYSTEM {
+                    crate::AST::ImageFromRef::System(name)
+                } else {
+                    crate::AST::ImageFromRef::Package(name)
+                };
                 crate::AST::ImageFieldValue::From {
-                    system: sys,
-                    span: Span::new(kw_span.start, sys_span.end),
+                    source,
+                    span: Span::new(kw_span.start, name_span.end),
                 }
             }
             Syntax::IMAGE_FIELD_FORMAT => {

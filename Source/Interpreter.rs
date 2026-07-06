@@ -175,21 +175,14 @@ fn boundary_scan(bundle: &ProgramBundle) -> Option<Boundary> {
                     if let Some(b) = scan_stmts_for_unsafe(&f.body) {
                         return Some(b);
                     }
-                    // c77 (Q2 hard rule): a call passing a `mut`/`^move`
-                    // argument asks for writeback / ownership-move binding the
-                    // scalar-by-value tree-walker doesn't faithfully reproduce
-                    // (e.g. field access on a moved struct param), so its output
+                    // c77 (Q2 hard rule): a call passing a `&` (write) argument
+                    // asks for writeback the scalar-by-value tree-walker
+                    // doesn't perform (the callee's frame is discarded, never
+                    // written back to the caller's binding), so its output
                     // could diverge from the compiled build. Stop honestly at
-                    // the boundary rather than risk a silent miscompile.
+                    // the boundary rather than risk a silent miscompile. (A
+                    // `^` move argument is fine — see `expr_mut_arg`.)
                     if let Some(b) = scan_stmts_for_mut_arg(&f.body) {
-                        return Some(b);
-                    }
-                    // c77 (Q2 hard rule): interpolating a whole struct/enum
-                    // value (`"{g}"`) formats via Rust's derived `Debug` in the
-                    // compiled build, which the interpreter's value printer does
-                    // not reproduce byte-for-byte. Stop at the boundary rather
-                    // than diverge.
-                    if let Some(b) = scan_stmts_for_struct_interp(&f.body) {
                         return Some(b);
                     }
                 }
@@ -208,7 +201,7 @@ fn native_module_feature(name: &str) -> Option<&'static str> {
     match name {
         "core.tasks" => Some("spawns a task or uses a channel"),
         "core.mem" => Some("uses the low-level `core.mem` tier"),
-        "core.fs" => Some("reads or writes files"),
+        "core.files" => Some("reads or writes files"),
         "core.env" => Some("reads the environment"),
         "core.process" => Some("runs another process or exits early"),
         "core.random" => Some("uses random numbers"),
@@ -318,32 +311,30 @@ fn scan_if_for_mut_arg(ifs: &crate::AST::IfStmt) -> Option<Boundary> {
     }
 }
 
-/// Does this expression (or a subexpression) pass a `mut`/`^move` argument
-/// *bound to a named variable* to a call? Those are the conventions whose
-/// caller-side binding (writeback for `mut`, ownership-move for `^`) the
-/// scalar-by-value tree-walker doesn't reproduce; moving a literal is fine.
+/// Does this expression (or a subexpression) pass a `&` (write/edit) argument
+/// *bound to a named variable* to a call? The scalar-by-value tree-walker
+/// runs the callee in its own frame and never writes a mutated parameter
+/// back into the caller's binding, so this would silently diverge from the
+/// compiled build's real writeback. Stop honestly at the boundary instead.
+///
+/// A `^` (move) argument on a named variable is NOT a boundary: sema's move
+/// checker (`CheckerOwnership`) already forbids reading `name` again on any
+/// path after `^name` is passed, so the interpreter evaluating it exactly
+/// like an ordinary read — same value, same one use — can never be observed
+/// to differ from the compiled build's real ownership transfer.
 fn expr_mut_arg(e: &Expr) -> Option<Boundary> {
     use crate::AST::AccessConvention;
-    let boundary = |conv: AccessConvention, span: Span| {
-        let feature = match conv {
-            AccessConvention::Write => {
-                "passes a `&` argument to a function (writeback isn't interpreted yet)"
-            }
-            _ => "passes a moved (`^`) variable to a function (move binding isn't interpreted yet)",
-        };
+    let boundary = |span: Span| {
         Some(Boundary {
-            feature: feature.to_string(),
+            feature: "passes a `&` argument to a function (writeback isn't interpreted yet)"
+                .to_string(),
             span: Some(span),
         })
     };
-    // A call arg is a boundary when it is `mut`/`^` on a named variable.
+    // A call arg is a boundary when it is `&` on a named variable.
     let arg_boundary = |a: &crate::AST::CallArg| -> Option<Boundary> {
-        if matches!(
-            a.convention,
-            AccessConvention::Write | AccessConvention::Move
-        ) && matches!(a.expr, Expr::Ident(..))
-        {
-            return boundary(a.convention.clone(), a.span);
+        if matches!(a.convention, AccessConvention::Write) && matches!(a.expr, Expr::Ident(..)) {
+            return boundary(a.span);
         }
         expr_mut_arg(&a.expr)
     };
@@ -382,155 +373,10 @@ fn expr_mut_arg(e: &Expr) -> Option<Boundary> {
         | Expr::IncDec { operand: inner, .. }
         | Expr::Deref(inner, _)
         | Expr::RawOf(inner, _)
+        | Expr::Copy(inner, _)
         | Expr::Field(inner, _, _) => expr_mut_arg(inner),
         Expr::Binary(_, l, r, _) => expr_mut_arg(l).or_else(|| expr_mut_arg(r)),
         Expr::Index { base, index, .. } => expr_mut_arg(base).or_else(|| expr_mut_arg(index)),
-        _ => None,
-    }
-}
-
-/// c77: flag a function body that interpolates a whole struct/enum value
-/// (`"{g}"` where `g` was bound to a `Type { … }`/`Type.Variant(…)` literal).
-/// Tracks locals bound to struct/enum literals as it walks, then flags an
-/// interpolation of such a local.
-fn scan_stmts_for_struct_interp(stmts: &[Stmt]) -> Option<Boundary> {
-    let mut struct_locals: std::collections::HashSet<String> = std::collections::HashSet::new();
-    scan_block_for_struct_interp(stmts, &mut struct_locals)
-}
-
-fn scan_block_for_struct_interp(
-    stmts: &[Stmt],
-    locals: &mut std::collections::HashSet<String>,
-) -> Option<Boundary> {
-    for s in stmts {
-        match s {
-            Stmt::Val(b) => {
-                if let Some(found) = expr_struct_interp(&b.init, locals) {
-                    return Some(found);
-                }
-                if !b.name.is_empty() && expr_is_struct_or_enum_lit(&b.init) {
-                    locals.insert(b.name.clone());
-                }
-            }
-            Stmt::Expr(e) => {
-                if let Some(found) = expr_struct_interp(e, locals) {
-                    return Some(found);
-                }
-            }
-            Stmt::Assign { value, .. } => {
-                if let Some(found) = expr_struct_interp(value, locals) {
-                    return Some(found);
-                }
-            }
-            Stmt::Return(Some(e), _) => {
-                if let Some(found) = expr_struct_interp(e, locals) {
-                    return Some(found);
-                }
-            }
-            Stmt::If(ifs) => {
-                if let Some(found) = scan_if_for_struct_interp(ifs, locals) {
-                    return Some(found);
-                }
-            }
-            Stmt::While { body, .. }
-            | Stmt::Loop { body, .. }
-            | Stmt::For { body, .. }
-            | Stmt::CountedLoop { body, .. } => {
-                if let Some(found) = scan_block_for_struct_interp(body, locals) {
-                    return Some(found);
-                }
-            }
-            Stmt::Switch {
-                arms, else_body, ..
-            } => {
-                for a in arms {
-                    if let Some(found) = scan_block_for_struct_interp(&a.body, locals) {
-                        return Some(found);
-                    }
-                }
-                if let Some(b) = else_body {
-                    if let Some(found) = scan_block_for_struct_interp(b, locals) {
-                        return Some(found);
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-    None
-}
-
-fn scan_if_for_struct_interp(
-    ifs: &crate::AST::IfStmt,
-    locals: &mut std::collections::HashSet<String>,
-) -> Option<Boundary> {
-    if let Some(b) = expr_struct_interp(&ifs.cond, locals) {
-        return Some(b);
-    }
-    if let Some(b) = scan_block_for_struct_interp(&ifs.then_body, locals) {
-        return Some(b);
-    }
-    match &ifs.else_branch {
-        Some(crate::AST::ElseBranch::ElseIf(inner)) => scan_if_for_struct_interp(inner, locals),
-        Some(crate::AST::ElseBranch::Else(body)) => scan_block_for_struct_interp(body, locals),
-        None => None,
-    }
-}
-
-fn expr_is_struct_or_enum_lit(e: &Expr) -> bool {
-    matches!(
-        e,
-        Expr::StructLit { .. } | Expr::EnumLit { .. } | Expr::TupleLit(..)
-    )
-}
-
-/// Find a `"{local}"` interpolation of a known struct/enum local anywhere in
-/// `e` (recurses into calls, operators, and nested string parts).
-fn expr_struct_interp(e: &Expr, locals: &std::collections::HashSet<String>) -> Option<Boundary> {
-    match e {
-        Expr::Str(parts, span) => {
-            for p in parts {
-                if let crate::AST::StrPart::Interp(inner, _) = p {
-                    if let Expr::Ident(name, _) = inner.as_ref() {
-                        if locals.contains(name) {
-                            return Some(Boundary {
-                                feature: "prints a whole struct or enum value via `{…}` interpolation (its format isn't interpreted yet)".to_string(),
-                                span: Some(*span),
-                            });
-                        }
-                    }
-                    if let Some(b) = expr_struct_interp(inner, locals) {
-                        return Some(b);
-                    }
-                }
-            }
-            None
-        }
-        Expr::Call(c) => c
-            .args
-            .iter()
-            .find_map(|a| expr_struct_interp(&a.expr, locals)),
-        Expr::MethodCall { receiver, args, .. } => {
-            expr_struct_interp(receiver, locals).or_else(|| {
-                args.iter()
-                    .find_map(|a| expr_struct_interp(&a.expr, locals))
-            })
-        }
-        Expr::CallValue { callee, args, .. } => expr_struct_interp(callee, locals).or_else(|| {
-            args.iter()
-                .find_map(|a| expr_struct_interp(&a.expr, locals))
-        }),
-        Expr::Unary(_, inner, _)
-        | Expr::IncDec { operand: inner, .. }
-        | Expr::Deref(inner, _)
-        | Expr::RawOf(inner, _)
-        | Expr::Field(inner, _, _) => expr_struct_interp(inner, locals),
-        Expr::Binary(_, l, r, _) => {
-            expr_struct_interp(l, locals).or_else(|| expr_struct_interp(r, locals))
-        }
-        Expr::Index { base, index, .. } => {
-            expr_struct_interp(base, locals).or_else(|| expr_struct_interp(index, locals))
-        }
         _ => None,
     }
 }
@@ -631,7 +477,9 @@ fn collect_funcs_and_info<'a>(
         for item in &module.items {
             if let Item::Const(c) = item {
                 if let Some(v) = &c.ct {
-                    info.globals.entry(c.name.clone()).or_insert_with(|| v.clone());
+                    info.globals
+                        .entry(c.name.clone())
+                        .or_insert_with(|| v.clone());
                 }
             }
         }
@@ -662,6 +510,7 @@ fn walk_items_for_interp<'a>(
                 }
             }
             Item::Struct(s) => {
+                info.structs.entry(s.name.clone()).or_insert(s);
                 for m in &s.methods {
                     info.methods
                         .entry((s.name.clone(), m.name.clone()))
@@ -712,9 +561,7 @@ fn walk_items_for_interp<'a>(
                 if let Some(body) = &cm.body {
                     for it in body {
                         if let Item::Func(f) = it {
-                            funcs
-                                .entry(format!("{}__{}", cm.name, f.name))
-                                .or_insert(f);
+                            funcs.entry(format!("{}__{}", cm.name, f.name)).or_insert(f);
                             // Bare-name fallback: a private sibling call inside
                             // the module, or an unaliased `use mod.item`
                             // selective import — see `collect_funcs_and_info`.
@@ -777,8 +624,9 @@ fn dev_boundary_from_comptime(d: Diagnostic) -> Diagnostic {
             .strip_suffix(" can't run at compile time yet")
             .unwrap_or(&d.what)
             .replace(" at compile time", ""),
-        "E0951" => "code that touches the outside world (network, filesystem, or environment)"
-            .to_string(),
+        "E0951" => {
+            "code that touches the outside world (network, filesystem, or environment)".to_string()
+        }
         _ => return d,
     };
     boundary_diag(&Boundary {

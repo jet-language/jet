@@ -1,8 +1,9 @@
 # Jet — VS Code / Cursor / VSCodium
 
 Extension id: **`jet-lang.jet`** (publisher `jet-lang`, name `jet`).
-Syntax highlighting + LSP v0: diagnostics, quick-fixes for teaching
-errors (e.g. `let` → `val`), and formatting.
+Generated TextMate syntax highlighting + LSP: diagnostics, quick-fixes,
+formatting, semantic tokens (full/range/delta), inlay hints, navigation,
+rename, call hierarchy, and type hierarchy.
 
 ## Setup
 
@@ -42,6 +43,19 @@ npx --yes @vscode/vsce package -o jet.vsix   # bundles vscode-languageclient
 cursor --install-extension "$(pwd)/jet.vsix"
 ```
 
+## Highlighting
+
+Lexical token lists are generated from `crates/jet-foundation/src/Syntax.rs`:
+
+```bash
+nix develop -c cargo run --bin jet -- devtools grammars
+nix develop -c cargo test --test grammar
+```
+
+The LSP semantic overlay refines live editor coloring for ownership (`copy`,
+`^`, `&`) and markers (`#Test`, `#Unsafe`, `@Pure`). Retired/foreign spellings
+are not colored as live syntax.
+
 ## Verify
 
 ```bash
@@ -49,4 +63,5 @@ cargo test --test lsp
 ```
 
 In the editor, open a `.jet` file containing `let x = 1;` — expect an
-**E0009** diagnostic pointing at `::` / `:=` binding sigils (use `x :: 1` or `x := 1`).
+**E0009** diagnostic pointing at `::` / `:=` binding sigils. In a v5 ownership
+sample, `copy`, `^`, `&`, and PascalCase markers should color consistently.

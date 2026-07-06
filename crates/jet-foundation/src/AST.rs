@@ -439,6 +439,12 @@ pub struct Program {
     /// the silent `<stem>.html` sibling-filename convention. Relative to the
     /// `.jet` source file's own directory.
     pub html_path: Option<String>,
+    /// D-MEM1/S7 (D-NOALLOC-SEM1=A, ratified 2026-07-04): `policy no_alloc;` —
+    /// this file's allocation floor. `Some(span)` = the policy line's span
+    /// (for a "declared twice" check); `None` = no policy. Local-only: sema
+    /// checks only expressions written directly in this file's own function
+    /// bodies, never calls into other modules (E0921).
+    pub no_alloc_policy: Option<Span>,
 }
 
 /// S16: `import "path" [as alias];` or `import name [as alias];`
@@ -488,7 +494,7 @@ impl ImportDecl {
     }
 
     /// If this import refers to a compiler-known core/ring module, return its
-    /// canonical path (e.g. `"core.fs"`, `"jet.http"`). Returns `None` for
+    /// canonical path (e.g. `"core.files"`, `"jet.http"`). Returns `None` for
     /// file/unqualified imports and unknown module names.
     pub fn core_module_path(&self) -> Option<String> {
         let ImportKind::Module(name, _) = &self.kind else {
@@ -600,6 +606,8 @@ pub struct LoadedModule {
     /// D-HTMLPAIR1 (ratified 2026-07-01, c134): `#Html("path.html")` — this file's explicit
     /// companion host page for `--target=web` builds.
     pub html_path: Option<String>,
+    /// D-MEM1/S7 (D-NOALLOC-SEM1=A): mirrors `Program::no_alloc_policy`.
+    pub no_alloc_policy: Option<Span>,
 }
 
 /// D-ERR-CONV (ratified 2026-06-19): how `?` converts the error type.
@@ -923,8 +931,16 @@ pub struct Contribution {
 #[derive(Debug)]
 pub enum ContribValue {
     /// `env.<name>:` — any expression, typically `Env { … }` (or a bare `{ … }`,
-    /// U18). modeval field-checks it.
+    /// U18). modeval field-checks it. Only the legacy contribution form
+    /// (`module dev { env.dev: Env.{ … } }`, teaches E1229) still produces
+    /// this; it has no dev `services:` support (U12) — see `Env` below.
     Expr(Expr),
+    /// `env.<name>:` in the canonical role-module form (`module env.<name> {
+    /// … }`, D-JPK-MODBODY1=A) — bare `field: expr` pairs plus, distinct from
+    /// jetos `system.*.services` (U11), a dev-supervised `services: { … }`
+    /// map (U12), reusing the exact same `services_map()` grammar as
+    /// `System`.
+    Env(EnvLit),
     /// `system.<name>:` — a `System` record (U11).
     System(SystemLit),
     /// `image.<name>:` — an `Image` record (U14).
@@ -937,11 +953,25 @@ impl ContribValue {
     pub fn span(&self) -> Span {
         match self {
             ContribValue::Expr(e) => e.span(),
+            ContribValue::Env(e) => e.span,
             ContribValue::System(s) => s.span,
             ContribValue::Image(i) => i.span,
             ContribValue::Fleet(f) => f.span,
         }
     }
+}
+
+/// U12/D-JPK-MODBODY1=A: an `env.<name>: { … }` role-module body — bare
+/// `field: expr` settings (packages/prompt/…, modeval field-checks each) plus
+/// a dev-supervised `services: { name: { … }, … }` map, captured with the
+/// same `ServiceEntry` grammar `System.services` uses (U12's `Service` stays
+/// one open record either way — only the downstream capture/interpretation
+/// differs between the jetos and dev planes, never the grammar).
+#[derive(Debug)]
+pub struct EnvLit {
+    pub fields: Vec<(String, Span, Expr)>,
+    pub services: Vec<ServiceEntry>,
+    pub span: Span,
 }
 
 /// U11/U18: a `System { target, packages, services, options }` record. The
@@ -1035,12 +1065,23 @@ pub struct ImageField {
     pub span: Span,
 }
 
-/// The parsed value of one `Image` field (U14).
+/// D-JPK-IMAGE1 (=A, ratified 2026-07-01): what an `Image`'s `from:` names —
+/// a `System` (the `.Iso`/`.Qcow`/`.Raw` disk-image tier, U14 original shape) or
+/// a `Package` (the `.Oci` container tier, same card). One `from:` keyword,
+/// two referent namespaces; `kind:` (explicit or inferred from which one is
+/// written) picks the interpretation.
+#[derive(Debug, Clone)]
+pub enum ImageFromRef {
+    System(String),
+    Package(String),
+}
+
+/// The parsed value of one `Image` field (U14/D-JPK-IMAGE1).
 #[derive(Debug)]
 pub enum ImageFieldValue {
-    /// `from: system.<name>` — references a `System` by name. Stores the name and
+    /// `from: system.<name>` or `from: packages.<name>` — stores which one and
     /// the whole value span.
-    From { system: String, span: Span },
+    From { source: ImageFromRef, span: Span },
     /// `format: iso` — a bare format keyword. Stores the word and its span.
     Format { word: String, span: Span },
     /// `target: linux.x64` — an explicit cross-compile platform (U14).
@@ -1049,7 +1090,10 @@ pub enum ImageFieldValue {
         arch: String,
         span: Span,
     },
-    /// Any other field — captured so modeval can reject restated inherited fields.
+    /// Any other field (`kind`/`expose`/`env_vars`/`files`/`base`, D-JPK-IMAGE1,
+    /// or a genuinely unknown one) — captured as a raw `Expr` so modeval can
+    /// dispatch on the field name (`Comptime::evaluate` for the OCI fields) or
+    /// reject a restated/unknown one.
     Other(Expr),
 }
 
@@ -1416,12 +1460,19 @@ impl Param {
     /// form. `is_trait_name` lets each crate plug in its own trait-name lookup
     /// (`TraitRegistry::is_trait_name` in sema, `Cx::trait_names` in codegen) —
     /// the classification rule itself lives once, here.
-    pub fn variadic_trait_bounds(&self, is_trait_name: impl Fn(&str) -> bool) -> Option<Vec<String>> {
+    pub fn variadic_trait_bounds(
+        &self,
+        is_trait_name: impl Fn(&str) -> bool,
+    ) -> Option<Vec<String>> {
         if !self.variadic {
             return None;
         }
         if let Some(list) = &self.variadic_bound_list {
-            return if list.is_empty() { None } else { Some(list.clone()) };
+            return if list.is_empty() {
+                None
+            } else {
+                Some(list.clone())
+            };
         }
         if let Type::Named(n) = &self.ty {
             if !n.is_empty() && is_trait_name(n) {
@@ -2383,6 +2434,11 @@ pub enum IndexKind {
     Lane(String),
     /// D-INDEX-HOOK: `mytype[k]` when the type implements `Index` (+ optional `IndexMut`).
     User(String),
+    /// D-MEM1 S6: `pool[id]` on a `Pool<T>` — generation-checked slot access, panics
+    /// on a stale `Id<T>` (removed/reused slot). Read returns a clone of `T`; write
+    /// (plain overwrite or a nested `pool[id].field = v`) goes through a genuine
+    /// mutable place (`jet_pool_get_mut`), not a value round-trip.
+    Pool,
 }
 
 /// `for i in 1..10` vs `for x in xs` (M5).
@@ -2427,6 +2483,15 @@ pub struct Binding {
     /// binds it as a reference and dereferences reads; sema (E0631/E0632)
     /// forbids it escaping its arena's scope or outliving a `reset`/`free`.
     pub arena_view: bool,
+    /// D-MEM1 stage S5 (2026-07-04): set by sema when `init` is a zero-copy
+    /// string slicing call (`s.trim()` / `s.after(sep)` / `s.before(sep)`) on
+    /// a plain local/param `String` owner, so this binding holds a scope-bound
+    /// *view* (`&str`) into the owner's buffer instead of an owned `String` —
+    /// the same D-DYNARRAY1 reasoning as `View<T>`, applied to strings since
+    /// they have no distinct Jet-level view type (`String` stays one type).
+    /// Codegen emits `&str` for the binding and calls the `_view` prelude
+    /// helper; sema (E2307) forbids it escaping the owner's scope.
+    pub string_view: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -2669,6 +2734,11 @@ pub enum Expr {
     /// only inside an `#Unsafe` region/fn (E0208). Lowers to `&x as *const _`
     /// inside the gated region.
     RawOf(Box<Expr>, Span),
+    /// D-CAP2 (D-MEM1/S4): `copy x` — the one copy verb. Produces a fresh,
+    /// independent value from `x` (a temporary; never needs `^`, never trips
+    /// E0209). Legal on any expression, most useful on a named binding.
+    /// Lowers to Rust `x.clone()` (E0211 if the type isn't cloneable).
+    Copy(Box<Expr>, Span),
     /// Field access: `v.field`.
     Field(Box<Expr>, String, Span),
     /// S71 (D-SG6): `base?.field` optional chaining. Yields a `T?` and
@@ -2860,6 +2930,7 @@ impl Expr {
             | Expr::Binary(_, _, _, s)
             | Expr::Deref(_, s)
             | Expr::RawOf(_, s)
+            | Expr::Copy(_, s)
             | Expr::Field(_, _, s)
             | Expr::OptField { span: s, .. }
             | Expr::StructLit { span: s, .. }
@@ -3158,7 +3229,7 @@ impl CtValue {
     /// program's derived `Debug` impl would (I2). Distinct from `jet_show`,
     /// which is the user-facing `Display`-style rendering `print` uses at the
     /// top level (e.g. an unquoted string).
-    fn debug_rust(&self) -> String {
+    pub fn debug_rust(&self) -> String {
         match self {
             CtValue::Int(n) => n.to_string(),
             CtValue::Float(f) => format!("{:?}", f),
@@ -3561,4 +3632,9 @@ pub struct FfiLink {
     /// bridge was built with `needs_crypto` (card c146 — package signing shells
     /// out to this helper for Ed25519 keygen/sign/verify). `None` otherwise.
     pub helper_bin_path: Option<PathBuf>,
+    /// U13 (D-JPK-SECRETCRYPTO1): path to the built `jet-secrets-helper`
+    /// binary, present only when the bridge was built with `needs_secrets` —
+    /// `jetpack secrets set/get/recipients/keygen` shells out to this for the
+    /// age-style encrypt/decrypt/keygen operations. `None` otherwise.
+    pub secrets_helper_bin_path: Option<PathBuf>,
 }

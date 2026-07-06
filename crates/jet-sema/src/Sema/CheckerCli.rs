@@ -12,10 +12,10 @@
 //! (E1307) and the `fn run` entry-parameter shape (E1308, invoked from
 //! `Bundle.rs`'s entry-point check next to the existing `run` checks).
 
-use crate::AST::{Field, Item, Type};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
 use crate::Traits::TraitRegistry;
+use crate::AST::{Field, Item, Type};
 
 /// D-CLIFLAG1: the dashed `--flag` name for a snake_case Jet field name.
 /// `config_file` -> `config-file`. Pure textual transform, no rename markers
@@ -39,7 +39,9 @@ fn is_cli_scalar(ty: &Type) -> bool {
 /// parameters, S61, a different grammar slot; struct fields, Cli or not, use
 /// `#[Default(...)]`)?
 fn has_default_marker(f: &Field) -> bool {
-    f.serde_markers.iter().any(|m| m.name == Syntax::ATTR_DEFAULT)
+    f.serde_markers
+        .iter()
+        .any(|m| m.name == Syntax::ATTR_DEFAULT)
 }
 
 /// D-CLIFLAG1: classify one `@[Cli]` struct field for `core.args` codegen.
@@ -76,7 +78,10 @@ pub(crate) fn classify_cli_field(f: &Field) -> Option<CliFieldKind> {
 fn e1305(field_name: &str, ty_show: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E1305",
-        format!("field `{}` has no CLI flag mapping ({})", field_name, ty_show),
+        format!(
+            "field `{}` has no CLI flag mapping ({})",
+            field_name, ty_show
+        ),
         "a `@[Cli]` field becomes one `--flag`; only `Int`, `Float`, `Bool`, `String`, `Path`, \
          and `T?` of those have a defined flag shape (nested `@[Cli]` structs and other \
          collection/closure types don't)."

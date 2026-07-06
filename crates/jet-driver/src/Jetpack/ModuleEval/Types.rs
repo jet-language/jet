@@ -5,6 +5,7 @@
 use crate::AST::Namespace;
 
 use super::super::Merge::{self, EntryContribution};
+use super::super::Recipe::BuildRecipe;
 use super::super::RefSpec::SourceTable;
 
 /// One module's contributions, keyed by `(namespace, path)` so `merge_all`
@@ -21,6 +22,44 @@ pub struct EvaluatedModule {
     /// U15: `fleet.<name>:` contributions, captured (parse/cross-check now;
     /// ssh realization rides single-host jetos, Phase D).
     pub fleets: Vec<FleetPlan>,
+    /// U12: dev-supervised `services:` entries captured from every `env.<name>`
+    /// role-module in this module, in source order. Distinct from the jetos
+    /// `system.<name>.services` capture (`ServicePlan` above) — a different
+    /// Rust type and evaluator (`ModuleEval::DevService`), even though the
+    /// `Service` grammar itself is the one ratified shape (U12).
+    pub dev_services: Vec<DevServicePlan>,
+    /// U13 (D-JPK-SECRETCRYPTO1): declared `secrets: ["name", …]` names from
+    /// every `env.<name>` role-module in this module, in source order — the
+    /// names this env expects to find in the project's encrypted store
+    /// (`.jet/secrets.age`). Validated (every name present) at env entry;
+    /// `Jetpack::Secrets` is the only consumer.
+    pub secrets: Vec<String>,
+    /// U20: `Pkg.adapt(...)` declarations captured from `packages:` fields.
+    /// They ride alongside ordinary package refs and realize into normal
+    /// hangar objects.
+    pub adapters: Vec<AdapterPlan>,
+}
+
+/// U20: an ad-hoc adapter package declared with `Pkg.adapt(...)`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdapterPlan {
+    pub name: String,
+    /// A provider ref such as `path@vendor/weirdctl`.
+    pub source: String,
+    pub deps: Vec<Merge::Pkg>,
+    pub recipe: AdapterRecipe,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AdapterRecipe {
+    /// `Recipe.copy(...)`: copy the staged source tree as-is.
+    Copy,
+    /// `Recipe.prebuilt(bin: "...", as: "...")`: install one executable under
+    /// `bin/<as>`.
+    Prebuilt { bin: String, as_name: String },
+    /// Curated future recipes parse as a concrete `BuildRecipe` once their
+    /// tool deps can be represented. The current U20 slice uses copy/prebuilt.
+    Build(BuildRecipe),
 }
 
 /// U11: a field-checked `system.<name>: { … }` contribution, captured so the
@@ -51,6 +90,44 @@ pub struct ServicePlan {
     pub extra: Vec<(String, String)>,
 }
 
+/// U12: one captured dev-supervised `Service` record under an `env.<name>`
+/// role-module's `services:` map (`ContribValue::Env`/`EnvLit::services`).
+/// Distinct from `ServicePlan` (the jetos `system.*.services` capture): same
+/// ratified `Service` grammar (open record, required `enable`), but jetpack's
+/// dev-runtime tier (`Jetpack::Services`) owns and interprets every field
+/// here — there is no downstream Nix-option consumer the way jetos services
+/// have (Phase D), so an unrecognized `extra` key is a supervision-time
+/// error (E1262), not silently-forwarded metadata.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct DevServicePlan {
+    /// The service name (the map key), e.g. `redis`.
+    pub name: String,
+    /// The required `enable` flag (U12) — `false` captures the service
+    /// (so `jet services logs` etc still knows its name) without supervising it.
+    pub enable: bool,
+    /// `ports: [Int]` — TCP ports the service listens on. The first port is
+    /// the default readiness probe target when no explicit `ready:` is given.
+    pub ports: Vec<i64>,
+    /// `init: "…"` — the shell command that starts the service. Falls back to
+    /// the built-in catalog's command when the name matches a known service
+    /// and this is unset.
+    pub init: Option<String>,
+    /// `shutdown: "…"` — the shell command that stops the service. Falls back
+    /// to a plain `SIGTERM`/`SIGKILL` of the supervised pid when unset.
+    pub shutdown: Option<String>,
+    /// `data_dir: "…"` — override for the persisted-state directory, which
+    /// otherwise defaults to `.jet/services/<name>/data`.
+    pub data_dir: Option<String>,
+    /// `ready: "…"` — a shell command polled until it exits 0; the readiness
+    /// contract. Falls back to a TCP connect on `ports[0]` when unset and
+    /// `ports` is non-empty, else to a bare process-alive check.
+    pub ready: Option<String>,
+    /// Any further field, captured verbatim as a display string (open record,
+    /// U12) — checked against the known keys above at supervision time, not
+    /// at field-check time (E1262).
+    pub extra: Vec<(String, String)>,
+}
+
 /// U13: one captured `options:` entry — a dotted key path and its value, rendered
 /// to a display string.
 #[derive(Debug, Clone, PartialEq)]
@@ -59,19 +136,54 @@ pub struct OptionPlan {
     pub value: String,
 }
 
-/// U14: a field-checked `image.<name>: { … }` contribution, captured for the
-/// jetos tier. `target`/`packages`/`services`/`options` are inherited from the
-/// referenced `System` at realize time (gap #4), so they are not stored here.
+/// D-JPK-IMAGE1 (=A, ratified 2026-07-01): which referent an `Image`'s `from:`
+/// names, and so which realize tier owns it. `Iso` is the original U14 shape
+/// (disk images from a `System`, Phase D jetos installer tier, owner-gated,
+/// untouched by this slice). `Oci` is the new container tier (built from a
+/// `Package`, native — no jetos/Phase D gate).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImageKind {
+    Iso,
+    Oci,
+}
+
+/// U14/D-JPK-IMAGE1: a field-checked `image.<name>: { … }` contribution.
+/// `Iso`: `target`/`packages`/`services`/`options` are inherited from the
+/// referenced `System` at realize time (Phase D, gap #4), so they are not
+/// stored here. `Oci`: built natively now (no jetos tier involved) from the
+/// referenced `Package`'s realized binary plus `expose`/`env_vars`/`files`/`base`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImagePlan {
     /// The contribution path — the `<name>` in `image.<name>`.
     pub name: String,
-    /// U14: the source system this image is built from (`from: system.<name>`).
+    /// Which referent `from:` names, and which tier realizes this image.
+    pub kind: ImageKind,
+    /// `Iso`: the source system's name (`from: system.<name>`).
+    /// `Oci`: the source package's name (`from: packages.<name>`).
     pub from: String,
-    /// U14: the disk-image format (`iso` default / `qcow` / `raw`).
+    /// `Iso` only: the disk-image format (`iso` default / `qcow` / `raw`).
+    /// Empty for `Oci`.
     pub format: String,
-    /// U14: an explicit cross-compile target, if any (else inherited from system).
+    /// `Iso` only: an explicit cross-compile target, if any (else inherited
+    /// from system). `None` for `Oci`.
     pub target: Option<String>,
+    /// `Oci` only: `expose: [Int]` — TCP ports recorded as `ExposedPorts` in
+    /// the OCI image config. Sorted + deduped for reproducibility.
+    pub expose: Vec<i64>,
+    /// `Oci` only: `env_vars: [KEY: "value"]` — baked into the OCI image
+    /// config's `Env` list. Source order follows the map's key order
+    /// (`CtValue::Map` is a `BTreeMap`, so this is already sorted by key).
+    pub env_vars: Vec<(String, String)>,
+    /// `Oci` only: `files: ["path", …]` — extra project-relative paths layered
+    /// into the image alongside the package binary. Sorted before layering so
+    /// the tar layer is byte-identical regardless of declaration order.
+    pub files: Vec<String>,
+    /// `Oci` only: `base: oci("<ref>")` — a base-image escape hatch (D-JPK-
+    /// IMAGE1 option A). Captured but not yet realized: building from a base
+    /// needs a native registry-pull client, which doesn't exist yet, so `jet
+    /// image` reports this honestly rather than silently building from
+    /// scratch instead.
+    pub base: Option<String>,
 }
 
 /// U15: a field-checked `fleet.<name>: { hosts: { … } }` contribution, captured
@@ -106,6 +218,9 @@ pub struct HostPlan {
 pub struct EnvPlan {
     pub table: SourceTable,
     pub package_refs: Vec<String>,
+    /// U20 adapter packages declared in `packages:`. Kept separate from refs
+    /// because they have inline build identity and no provider selector.
+    pub adapters: Vec<AdapterPlan>,
     pub prompt: Option<String>,
     /// U11: every captured `System` across all evaluated modules, in source order.
     /// The jetos tier (gap #4) realizes these; the dev-shell path ignores them.
@@ -114,4 +229,13 @@ pub struct EnvPlan {
     pub images: Vec<ImagePlan>,
     /// U15: every captured `Fleet`, validated so each host names a known system.
     pub fleets: Vec<FleetPlan>,
+    /// U12: every captured dev-supervised `Service`, across all evaluated
+    /// modules, in source order. `jetpack services <verb>`/`jetpack dev`'s
+    /// health gate are the only consumers — the jetos tier never reads this.
+    pub dev_services: Vec<DevServicePlan>,
+    /// U13 (D-JPK-SECRETCRYPTO1): every declared `secrets:` name, across all
+    /// evaluated modules, in source order. `jetpack enter`/`jetpack dev`
+    /// validate every name exists in the encrypted store at env entry
+    /// (E1263); the jetos tier never reads this.
+    pub secrets: Vec<String>,
 }

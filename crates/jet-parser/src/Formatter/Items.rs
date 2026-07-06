@@ -721,11 +721,7 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_enum_group(&mut self, e: &EnumDef, g: &EnumGroup) {
-        let short = g
-            .path
-            .rsplit('.')
-            .next()
-            .unwrap_or(g.path.as_str());
+        let short = g.path.rsplit('.').next().unwrap_or(g.path.as_str());
         self.write(short);
         self.write(" {");
         self.newline();

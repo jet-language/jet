@@ -440,10 +440,10 @@ fn repl_use_repl_incompatible_module_hard_rejected() {
 
 #[test]
 fn repl_use_core_fs_import_accepted() {
-    let out = run_transcript(&["use core.fs as fs"], None);
+    let out = run_transcript(&["use core.files as fs"], None);
     assert!(
         out.contains("ok"),
-        "core.fs import should work, got: {:?}",
+        "core.files import should work, got: {:?}",
         out
     );
     assert!(!out.contains("E1802"), "got: {:?}", out);
@@ -595,7 +595,7 @@ fn repl_core_fs_read_inline() {
         "fs.read(\"{}\") ?? panic(\"read failed\")",
         path.replace('\\', "\\\\")
     );
-    let inputs = &["use core.fs as fs", &read_expr];
+    let inputs = &["use core.files as fs", &read_expr];
     let out = run_transcript(inputs, None);
     std::fs::remove_file(&fixture).ok();
     assert!(

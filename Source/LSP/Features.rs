@@ -257,6 +257,8 @@ mod st {
     pub const COMMENT: u32 = 9;
     pub const OPERATOR: u32 = 10;
     pub const NAMESPACE: u32 = 11;
+    pub const OWNERSHIP: u32 = 12;
+    pub const DECORATOR: u32 = 13;
 }
 
 // Modifier bitmasks
@@ -264,18 +266,25 @@ mod st {
 mod sm {
     pub const DECLARATION: u32 = 1 << 0;
     pub const READONLY: u32 = 1 << 1;
+    pub const MOVE: u32 = 1 << 2;
+    pub const WRITE_BORROW: u32 = 1 << 3;
+    pub const COPY: u32 = 1 << 4;
+    pub const DIRECTIVE: u32 = 1 << 5;
+    pub const CONTRACT: u32 = 1 << 6;
 }
 
-fn semantic_token_type_for(tok: &Token) -> Option<(u32, u32)> {
+fn semantic_token_type_for(tokens: &[Token], idx: usize, src: &str) -> Option<(u32, u32)> {
+    let tok = &tokens[idx];
+    if let Some(marker_mod) = marker_modifier(tokens, idx) {
+        return Some((st::DECORATOR, marker_mod));
+    }
+
     match &tok.kind {
         TokKind::KwFn
         | TokKind::KwPub
         | TokKind::KwIf
         | TokKind::KwElse
-        | TokKind::KwWhile
-        | TokKind::KwFor
         | TokKind::KwIn
-        | TokKind::KwSwitch
         | TokKind::KwBreak
         | TokKind::KwContinue
         | TokKind::KwReturn
@@ -291,9 +300,6 @@ fn semantic_token_type_for(tok: &Token) -> Option<(u32, u32)> {
         | TokKind::KwExtern
         | TokKind::KwLoop
         | TokKind::KwUnsafe
-        | TokKind::KwMutate
-        | TokKind::KwMove
-        | TokKind::KwView
         | TokKind::KwSelf
         | TokKind::KwNull
         | TokKind::KwOk
@@ -303,7 +309,19 @@ fn semantic_token_type_for(tok: &Token) -> Option<(u32, u32)> {
 
         TokKind::KwTrue | TokKind::KwFalse => Some((st::KEYWORD, sm::READONLY)),
 
+        TokKind::KwCopy => Some((st::OWNERSHIP, sm::COPY)),
+
+        TokKind::KwWhile
+        | TokKind::KwFor
+        | TokKind::KwSwitch
+        | TokKind::KwMutate
+        | TokKind::KwMove
+        | TokKind::KwView => None,
+
         TokKind::Ident(name) => {
+            if is_foreign_semantic_word(name) {
+                return None;
+            }
             // Classify identifiers by name convention:
             // PascalCase → type, everything else → variable
             if name.starts_with(|c: char| c.is_uppercase()) {
@@ -324,9 +342,7 @@ fn semantic_token_type_for(tok: &Token) -> Option<(u32, u32)> {
         | TokKind::Star
         | TokKind::Slash
         | TokKind::Percent
-        | TokKind::Amp
         | TokKind::Pipe
-        | TokKind::Caret
         | TokKind::Shl
         | TokKind::Shr
         | TokKind::AndAnd
@@ -343,21 +359,190 @@ fn semantic_token_type_for(tok: &Token) -> Option<(u32, u32)> {
         | TokKind::Question
         | TokKind::DotDot => Some((st::OPERATOR, 0)),
 
+        TokKind::Amp if token_text(src, tok) == crate::Syntax::SIGIL_WRITE => {
+            Some((st::OWNERSHIP, sm::WRITE_BORROW))
+        }
+
+        TokKind::Caret if token_text(src, tok) == crate::Syntax::SIGIL_MOVE => {
+            Some((st::OWNERSHIP, sm::MOVE))
+        }
+
         _ => None,
     }
 }
 
+fn marker_modifier(tokens: &[Token], idx: usize) -> Option<u32> {
+    let tok = &tokens[idx];
+    match tok.kind {
+        TokKind::Hash => marker_kind_after(tokens, idx).map(|kind| kind.modifier()),
+        TokKind::At => marker_kind_after(tokens, idx).map(|kind| kind.modifier()),
+        _ => {
+            let prev = previous_significant(tokens, idx)?;
+            match tokens[prev].kind {
+                TokKind::Hash | TokKind::At if marker_name(tokens, idx).is_some() => {
+                    marker_kind_for(&tokens[prev], tokens, idx).map(|kind| kind.modifier())
+                }
+                _ => None,
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum MarkerKind {
+    Directive,
+    Contract,
+}
+
+impl MarkerKind {
+    fn modifier(self) -> u32 {
+        match self {
+            MarkerKind::Directive => sm::DIRECTIVE,
+            MarkerKind::Contract => sm::CONTRACT,
+        }
+    }
+}
+
+fn marker_kind_after(tokens: &[Token], idx: usize) -> Option<MarkerKind> {
+    let next = next_significant(tokens, idx)?;
+    marker_kind_for(&tokens[idx], tokens, next)
+}
+
+fn marker_kind_for(prefix: &Token, tokens: &[Token], name_idx: usize) -> Option<MarkerKind> {
+    let name = marker_name(tokens, name_idx)?;
+    match prefix.kind {
+        TokKind::Hash if crate::Syntax::DIRECTIVE_MARKERS.contains(&name) => {
+            Some(MarkerKind::Directive)
+        }
+        TokKind::At if crate::Syntax::CONTRACT_MARKERS.contains(&name) => {
+            Some(MarkerKind::Contract)
+        }
+        _ => None,
+    }
+}
+
+fn marker_name(tokens: &[Token], idx: usize) -> Option<&str> {
+    match &tokens[idx].kind {
+        TokKind::Ident(name) => Some(name.as_str()),
+        TokKind::KwUnsafe => Some(crate::Syntax::KW_UNSAFE),
+        _ => None,
+    }
+}
+
+fn previous_significant(tokens: &[Token], idx: usize) -> Option<usize> {
+    tokens[..idx]
+        .iter()
+        .enumerate()
+        .rev()
+        .find_map(|(i, tok)| (!is_trivia(tok)).then_some(i))
+}
+
+fn next_significant(tokens: &[Token], idx: usize) -> Option<usize> {
+    tokens
+        .iter()
+        .enumerate()
+        .skip(idx + 1)
+        .find_map(|(i, tok)| (!is_trivia(tok)).then_some(i))
+}
+
+fn is_trivia(tok: &Token) -> bool {
+    matches!(tok.kind, TokKind::LineComment(_) | TokKind::BlockComment(_))
+}
+
+fn token_text<'a>(src: &'a str, tok: &Token) -> &'a str {
+    src.get(tok.span.start..tok.span.end.min(src.len()))
+        .unwrap_or("")
+}
+
+pub(crate) fn is_foreign_semantic_word(name: &str) -> bool {
+    matches!(
+        name,
+        crate::Syntax::FOREIGN_PRIVATE
+            | crate::Syntax::FOREIGN_VAL
+            | crate::Syntax::FOREIGN_VAR
+            | crate::Syntax::FOREIGN_UNSAFE
+            | crate::Syntax::FOREIGN_AND
+            | crate::Syntax::FOREIGN_OR
+            | crate::Syntax::FOREIGN_NOT
+            | crate::Syntax::FOREIGN_WHILE
+            | crate::Syntax::FOREIGN_FOR
+            | crate::Syntax::FOREIGN_TRY
+            | crate::Syntax::FOREIGN_LET
+            | crate::Syntax::FOREIGN_SET
+            | crate::Syntax::FOREIGN_FUNC
+            | crate::Syntax::FOREIGN_DEF
+            | crate::Syntax::FOREIGN_IMPORT
+            | crate::Syntax::FOREIGN_MATCH
+            | crate::Syntax::FOREIGN_SWITCH
+            | crate::Syntax::FOREIGN_SOME
+            | crate::Syntax::FOREIGN_NIL
+            | crate::Syntax::FOREIGN_NONE_LOWER
+            | crate::Syntax::FOREIGN_SOME_LOWER
+            | crate::Syntax::FOREIGN_CLASS
+            | crate::Syntax::FOREIGN_INTERFACE
+            | crate::Syntax::FOREIGN_NAMESPACE
+            | crate::Syntax::FOREIGN_DYN
+            | crate::Syntax::FOREIGN_BOX
+            | crate::Syntax::FOREIGN_CASE
+            | crate::Syntax::FOREIGN_DEFAULT
+            | crate::Syntax::FOREIGN_READ
+            | crate::Syntax::FOREIGN_WRITE
+            | crate::Syntax::FOREIGN_OWNED
+            | crate::Syntax::FOREIGN_TEST
+            | crate::Syntax::FOREIGN_PURE
+            | crate::Syntax::FOREIGN_TODO
+            | crate::Syntax::FOREIGN_SANITIZER
+            | crate::Syntax::FOREIGN_LAMBDA
+            | crate::Syntax::FOREIGN_VEC
+            | crate::Syntax::FOREIGN_HASHMAP
+            | crate::Syntax::FOREIGN_DICT
+            | crate::Syntax::FOREIGN_APPEND
+            | crate::Syntax::FOREIGN_THROW
+            | crate::Syntax::FOREIGN_RAISE
+            | crate::Syntax::FOREIGN_CATCH
+            | crate::Syntax::FOREIGN_EXCEPT
+            | crate::Syntax::FOREIGN_UNWRAP
+            | crate::Syntax::FOREIGN_EXPECT
+            | crate::Syntax::FOREIGN_EPRINTLN
+            | crate::Syntax::FOREIGN_OPEN
+            | crate::Syntax::FOREIGN_GETENV
+            | crate::Syntax::FOREIGN_OS
+            | crate::Syntax::FOREIGN_ASYNC
+            | crate::Syntax::FOREIGN_AWAIT
+            | crate::Syntax::FOREIGN_MUTEX
+            | crate::Syntax::FOREIGN_LOCK
+    )
+}
+
 /// Encode semantic tokens for a token stream into the LSP delta-encoded u32 array.
 pub(crate) fn encode_semantic_tokens(tokens: &[Token], src: &str) -> Vec<u32> {
+    encode_semantic_tokens_where(tokens, src, |_| true)
+}
+
+/// Encode only tokens whose start byte lies inside `span`.
+pub(crate) fn encode_semantic_tokens_in_span(tokens: &[Token], src: &str, span: Span) -> Vec<u32> {
+    encode_semantic_tokens_where(tokens, src, |tok| {
+        tok.span.start >= span.start && tok.span.start < span.end
+    })
+}
+
+fn encode_semantic_tokens_where(
+    tokens: &[Token],
+    src: &str,
+    include: impl Fn(&Token) -> bool,
+) -> Vec<u32> {
     let mut data: Vec<u32> = Vec::new();
     let mut prev_line = 0u32;
     let mut prev_start = 0u32;
 
-    for tok in tokens {
+    for (idx, tok) in tokens.iter().enumerate() {
         if matches!(tok.kind, TokKind::Eof) {
             break;
         }
-        let (tok_type, tok_mods) = match semantic_token_type_for(tok) {
+        if !include(tok) {
+            continue;
+        }
+        let (tok_type, tok_mods) = match semantic_token_type_for(tokens, idx, src) {
             Some(t) => t,
             None => continue,
         };
