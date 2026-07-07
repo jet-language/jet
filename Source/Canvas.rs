@@ -434,7 +434,7 @@ pub fn canvas_html() -> String {
 pub fn canvas_html_for(base: &str) -> String {
     canvas_html_document(&format!(
         r#"<script>window.__JET_CANVAS_BASE__ = "{}";</script>
-<script src="{}/app.js?canvas_ui=blueprint8"></script>"#,
+<script src="{}/app.js?canvas_ui=blueprint23"></script>"#,
         json_escape(base),
         json_escape(base)
     ))
@@ -443,7 +443,7 @@ pub fn canvas_html_for(base: &str) -> String {
 pub fn canvas_html_query() -> String {
     canvas_html_document(
         r#"<script>window.__JET_CANVAS_BASE__ = ""; window.__JET_CANVAS_GRAPH__ = "/?jet_panel_graph=1"; window.__JET_CANVAS_TX__ = "/canvas/transaction"; window.__JET_CANVAS_QUERY__ = "/canvas/query"; window.__JET_CANVAS_SCM__ = "/canvas/source-control";</script>
-<script src="/?jet_panel_app=1&canvas_ui=blueprint8"></script>"#,
+<script src="/?jet_panel_app=1&canvas_ui=blueprint23"></script>"#,
     )
 }
 
@@ -457,8 +457,9 @@ fn canvas_html_document(bootstrap: &str) -> String {
 <style>
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; background: #05070b; color: #d7e4f7; font: 13px "Inter", "Segoe UI", system-ui, sans-serif; }
+body:not(.is-dev-mode) .dev-only { display: none !important; }
 button, input, select { font: inherit; }
-button { color: #d7e4f7; border: 1px solid #31445d; background: linear-gradient(#18202b, #111821); min-height: 30px; padding: 0 10px; cursor: pointer; border-radius: 4px; box-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 1px 0 rgba(0,0,0,.4); }
+button { color: #d7e4f7; border: 1px solid #31445d; background: linear-gradient(#18202b, #111821); min-height: 30px; padding: 0 10px; cursor: pointer; border-radius: 4px; box-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 1px 0 rgba(0,0,0,.4); white-space: nowrap; }
 button:hover, button:focus-visible { border-color: #35c2ff; background: #1d2b3a; outline: none; box-shadow: 0 0 0 2px rgba(53,194,255,.18); }
 button.primary { background: #123d45; border-color: #22d3ee; color: #e7fbff; }
 button.is-active { border-color: #f6d365; background: #352c17; color: #fff4bd; }
@@ -467,52 +468,99 @@ input, select { color: #e7eefb; border: 1px solid #31445d; background: #0b1118; 
 input:focus-visible, select:focus-visible { border-color: #35c2ff; outline: none; box-shadow: 0 0 0 2px rgba(53,194,255,.18); }
 select { min-width: 180px; }
 #shell { height: 100%; display: grid; grid-template-rows: auto minmax(0, 1fr) 28px; min-width: 0; }
-#topbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; min-height: 54px; padding: 8px 10px; border-bottom: 1px solid #25364b; background: linear-gradient(#111923, #0c1119); box-shadow: 0 1px 0 rgba(255,255,255,.04) inset, 0 14px 40px rgba(0,0,0,.25); }
+#topbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; min-height: 54px; padding: 8px 10px; border-bottom: 1px solid #25364b; background: linear-gradient(#111923, #0c1119 62%, #080c12); box-shadow: 0 1px 0 rgba(255,255,255,.04) inset, 0 14px 40px rgba(0,0,0,.25); }
 #brand { display: flex; flex-direction: column; gap: 1px; flex: 0 1 164px; min-width: 124px; padding-left: 8px; border-left: 3px solid #35c2ff; }
 #brand strong { font-size: 14px; letter-spacing: .08em; text-transform: uppercase; color: #f8fbff; }
 #brand span { color: #9db4d2; font: 11px ui-monospace, "SFMono-Regular", Consolas, monospace; }
-#graph-select { border-color: #4b6685; background: #0c1420; color: #eaf5ff; }
+#graph-select { display: none; border-color: #4b6685; background: #0c1420; color: #eaf5ff; }
+body.is-dev-mode #graph-select { display: block; }
 #topbar > select { flex: 1 1 190px; min-width: 140px; max-width: 360px; }
 #topbar > button { flex: 0 0 auto; padding-inline: 8px; }
 #jump { flex: 1 1 150px; min-width: 94px; color: #9db4d2; font: 12px ui-monospace, "SFMono-Regular", Consolas, monospace; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+body:not(.is-dev-mode) #jump { display: none; }
 .debug-controls { margin-left: auto; display: flex; align-items: center; gap: 5px; flex: 1 1 380px; min-width: 0; justify-content: flex-end; flex-wrap: wrap; }
+body:not(.is-dev-mode) .debug-controls { display: none; }
 .debug-controls select { flex: 1 1 130px; min-width: 112px; max-width: 220px; }
 .debug-controls button { min-width: 30px; padding: 0 7px; }
-#workbench { min-height: 0; min-width: 0; display: grid; grid-template-columns: minmax(156px, 15vw) minmax(0, 1fr) minmax(238px, 20vw); background: #05070b; }
+#workbench { min-height: 0; min-width: 0; position: relative; display: grid; grid-template-columns: minmax(156px, 15vw) minmax(0, 1fr) minmax(238px, 20vw); background: #05070b; }
 .side { min-width: 0; overflow: hidden auto; background: #0b1017; border-right: 1px solid #23344a; box-shadow: inset -1px 0 0 rgba(255,255,255,.03); }
 .right { border-right: 0; border-left: 1px solid #23344a; box-shadow: inset 1px 0 0 rgba(255,255,255,.03); }
 .panel { border-bottom: 1px solid #23344a; padding: clamp(9px, 1.2vw, 13px); }
 .panel h2 { margin: 0 0 10px; color: #eaf5ff; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; }
-.graph-list, .palette-list, .search-results { display: grid; gap: 6px; }
-.graph-item, .palette-item { width: 100%; display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 8px; text-align: left; border-color: #283b52; background: #101821; min-height: 38px; }
+.panel details { display: grid; gap: 8px; }
+.panel summary { list-style: none; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; min-height: 30px; color: #eaf5ff; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; cursor: pointer; }
+.panel summary::-webkit-details-marker { display: none; }
+.panel summary::before { content: "▸"; color: #35c2ff; font-size: 12px; transform: rotate(0deg); transition: transform .12s ease; }
+.panel details[open] summary::before { transform: rotate(90deg); }
+.panel summary .count { justify-self: end; }
+.panel details > :not(summary) { margin-top: 8px; }
+.graph-list, .search-results { display: grid; gap: 6px; }
+.graph-item { width: 100%; display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 8px; text-align: left; border-color: #283b52; background: #101821; min-height: 38px; }
 .graph-item.is-active { border-color: #35c2ff; background: #102437; box-shadow: inset 3px 0 0 #35c2ff; }
 .search-item { width: 100%; text-align: left; border-color: #34285e; background: #151229; }
 .search-item.is-active { border-color: #d58cff; background: #21133a; }
 .search-item small { color: #9aa8c5; display: block; margin-top: 3px; overflow-wrap: anywhere; }
 .count, .tag { color: #8fb2dc; font: 11px ui-monospace, "SFMono-Regular", Consolas, monospace; }
 .search { width: 100%; margin-bottom: 8px; }
-.function-factory { display: grid; gap: 7px; padding: 8px; border: 1px solid #293f5a; background: #0d1520; border-radius: 4px; }
-.function-factory input { width: 100%; }
-.function-factory .factory-row { display: grid; grid-template-columns: minmax(0, 1fr) 72px; gap: 6px; }
-.function-factory button { width: 100%; }
 #stage { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: #05070b; }
 #jet-canvas-view { width: 100%; height: 100%; display: block; background: #05070b; }
+#canvas-dock { position: absolute; left: 10px; top: 10px; z-index: 26; display: none; gap: 6px; padding: 5px; border: 1px solid #365a7f; background: rgba(8,17,29,.92); box-shadow: 0 12px 34px rgba(0,0,0,.42); border-radius: 6px; }
+#canvas-dock button { min-height: 28px; padding: 0 8px; font: 11px ui-monospace, "SFMono-Regular", Consolas, monospace; }
+#canvas-dock button.is-active { border-color: #35c2ff; color: #e7fbff; background: #102437; }
+#graph-strip { position: absolute; left: 12px; right: 12px; top: 10px; z-index: 13; display: flex; gap: 8px; overflow-x: auto; scrollbar-width: thin; padding: 6px; border: 1px solid rgba(53,194,255,.45); background: linear-gradient(180deg, rgba(9,19,32,.94), rgba(5,11,19,.82)); box-shadow: 0 16px 44px rgba(0,0,0,.42), inset 0 1px 0 rgba(255,255,255,.05); border-radius: 6px; max-width: min(860px, calc(100% - 24px)); }
+body:not(.is-dev-mode) #graph-strip { display: none; }
+.graph-tab { position: relative; flex: 0 0 auto; min-width: 116px; min-height: 36px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 7px; align-items: center; border-color: #2e4966; background: linear-gradient(180deg, rgba(18,31,46,.96), rgba(8,17,29,.96)); font: 11px ui-monospace, "SFMono-Regular", Consolas, monospace; box-shadow: inset 0 -1px 0 rgba(255,255,255,.04); }
+.graph-tab::before { content: ""; width: 8px; height: 18px; border-radius: 2px; background: #46617d; box-shadow: 0 0 14px rgba(70,97,125,.32); }
+.graph-tab.is-active { border-color: #35c2ff; background: linear-gradient(180deg, #12324a, #0b1d2d); color: #eaf8ff; box-shadow: inset 0 -3px 0 #35c2ff, 0 0 28px rgba(53,194,255,.24); }
+.graph-tab.is-active::before { background: #35c2ff; box-shadow: 0 0 18px rgba(53,194,255,.72); }
+.graph-tab-title { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 700; color: #f2f8ff; }
+.graph-tab-kind { color: #77a7d7; font-size: 9px; letter-spacing: .12em; text-transform: uppercase; }
+.graph-tab-count { color: #8fb2dc; border: 1px solid #2b4a67; background: rgba(2,8,15,.42); border-radius: 999px; padding: 2px 6px; }
+#wire-status { position: absolute; left: 10px; top: 58px; z-index: 13; display: grid; grid-template-columns: auto auto minmax(0, 1fr); align-items: center; gap: 7px; max-width: min(470px, calc(100% - 24px)); min-height: 34px; padding: 7px 10px; border: 1px solid rgba(54,90,127,.78); background: rgba(7,16,28,.82); box-shadow: 0 14px 34px rgba(0,0,0,.34); border-radius: 6px; color: #93b3d7; font: 11px ui-monospace, "SFMono-Regular", Consolas, monospace; pointer-events: none; }
+body:not(.is-dev-mode) #wire-status { display: none; }
+#wire-status-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--wire-color, #7dd3fc); box-shadow: 0 0 16px var(--wire-color, #7dd3fc); }
+#wire-status b { color: #eaf5ff; font-weight: 700; }
+#wire-status span:last-child { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+#graph-overview { display: none; }
+.graph-overview-title { display: grid; gap: 2px; min-width: 0; }
+.graph-overview-title b { color: #f8fbff; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.graph-overview-title code { color: #fde68a; font: 10px ui-monospace, "SFMono-Regular", Consolas, monospace; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.graph-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.graph-stat { display: grid; gap: 2px; padding: 6px; border: 1px solid #243852; background: rgba(8,16,27,.74); border-radius: 4px; min-width: 0; }
+.graph-stat b { color: #eaf5ff; font-size: 13px; }
+.graph-stat span { color: #84a8cf; font: 9px ui-monospace, "SFMono-Regular", Consolas, monospace; text-transform: uppercase; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 #source-view { position: absolute; inset: 0; display: none; margin: 0; padding: 20px 24px 84px; overflow: auto; color: #dbeafe; background: #07101a; border: 0; font: 12px ui-monospace, "SFMono-Regular", Consolas, monospace; line-height: 1.6; white-space: pre; tab-size: 4; }
-#stage.is-source #jet-canvas-view, #stage.is-source #minimap { display: none; }
+#stage.is-source #jet-canvas-view, #stage.is-source #minimap, #stage.is-source #graph-strip, #stage.is-source #wire-status, #stage.is-source #graph-overview { display: none; }
 #stage.is-source #source-view { display: block; }
 #minimap { position: absolute; right: clamp(8px, 1.4vw, 16px); bottom: clamp(8px, 1.4vw, 16px); width: min(210px, 22vw); height: min(132px, 15vw); min-width: 120px; min-height: 78px; border: 1px solid #365a7f; background: rgba(7,16,28,.9); box-shadow: 0 14px 42px rgba(0,0,0,.42); border-radius: 6px; }
 #hud { position: absolute; left: clamp(8px, 1.4vw, 16px); bottom: clamp(8px, 1.4vw, 16px); display: flex; gap: 8px; color: #9bb4d3; font: 12px ui-monospace, "SFMono-Regular", Consolas, monospace; max-width: calc(100% - 32px); flex-wrap: wrap; }
 #hud span { border: 1px solid #263b59; background: rgba(8,17,29,.88); padding: 5px 8px; border-radius: 4px; }
-#details { height: 100%; overflow: auto; }
-#details .title { color: #f8fbff; font-size: 18px; margin: 0 0 4px; }
-#details .kind { color: #7dd3fc; font: 11px ui-monospace, "SFMono-Regular", Consolas, monospace; text-transform: uppercase; }
-#details dl { display: grid; grid-template-columns: 88px 1fr; gap: 7px 10px; margin: 14px 0; }
-#details dt { color: #8096b5; }
-#details dd { margin: 0; color: #d8e7fb; overflow-wrap: anywhere; }
+body:not(.is-dev-mode) #graph-meta { display: none; }
+#details { height: 100%; overflow: auto; --node-accent: #35c2ff; }
+.details-empty { display: grid; gap: 8px; padding: 12px; border: 1px dashed #31445d; background: #0d1520; color: #90a5c4; border-radius: 4px; }
+.details-hero { position: relative; display: grid; gap: 10px; padding: 12px; border: 1px solid color-mix(in srgb, var(--node-accent) 56%, #21334a); background: linear-gradient(180deg, color-mix(in srgb, var(--node-accent) 18%, #101926), #09111a); border-radius: 6px; box-shadow: inset 4px 0 0 var(--node-accent), 0 14px 36px rgba(0,0,0,.26); }
+.details-titleline { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 9px; align-items: center; }
+.node-glyph { display: grid; place-items: center; width: 36px; height: 30px; color: var(--node-accent); border: 1px solid color-mix(in srgb, var(--node-accent) 64%, #1d2d42); background: color-mix(in srgb, var(--node-accent) 13%, #08111b); border-radius: 4px; font: 10px ui-monospace, "SFMono-Regular", Consolas, monospace; box-shadow: 0 0 18px color-mix(in srgb, var(--node-accent) 28%, transparent); }
+.details-title { min-width: 0; }
+#details .title { color: #f8fbff; font-size: 17px; font-weight: 700; margin: 0 0 2px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+#details .kind { color: var(--node-accent); font: 10px ui-monospace, "SFMono-Regular", Consolas, monospace; text-transform: uppercase; letter-spacing: .08em; }
+.details-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.details-chip { color: #bfd4ee; border: 1px solid #2b405a; background: rgba(6,14,24,.56); border-radius: 999px; padding: 3px 7px; font: 10px ui-monospace, "SFMono-Regular", Consolas, monospace; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.quick-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+.quick-actions button { min-width: 0; }
+.quick-actions .wide { grid-column: 1 / -1; }
+#details dl { display: grid; grid-template-columns: 72px 1fr; gap: 6px 9px; margin: 10px 0 0; padding-top: 9px; border-top: 1px solid #21344b; }
+#details dt { color: #8096b5; font-size: 11px; }
+#details dd { margin: 0; color: #d8e7fb; overflow-wrap: anywhere; font: 11px ui-monospace, "SFMono-Regular", Consolas, monospace; }
 .pin-list, .inline-list { display: grid; gap: 7px; margin-top: 8px; }
 .pin-row, .inline-row { border: 1px solid #2d4056; background: #101821; padding: 8px; border-radius: 4px; }
 .pin-row { display: grid; gap: 6px; }
 .pin-row b, .inline-row b { color: #f2f7ff; }
+.pin-card { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; border: 1px solid color-mix(in srgb, var(--pin-color) 42%, #253852); background: linear-gradient(180deg, color-mix(in srgb, var(--pin-color) 10%, #101821), #0a121b); padding: 8px; border-radius: 4px; box-shadow: inset 3px 0 0 var(--pin-color); }
+.pin-card-title { min-width: 0; }
+.pin-card-title b { display: block; color: #f2f7ff; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.pin-card-title small { display: block; margin-top: 2px; color: #91a7c4; font: 10px ui-monospace, "SFMono-Regular", Consolas, monospace; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.pin-card button { min-height: 26px; padding-inline: 8px; }
 .inline-row code { display: block; color: #fde68a; font: 12px ui-monospace, "SFMono-Regular", Consolas, monospace; margin-top: 4px; white-space: pre-wrap; }
 .edit-grid { display: grid; gap: 8px; margin-top: 10px; }
 .edit-grid label { display: grid; gap: 4px; color: #90a5c4; }
@@ -527,10 +575,10 @@ select { min-width: 180px; }
 .signature-source input { width: 100%; }
 .rename-strip { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 7px; }
 .pin-lane { display: grid; gap: 7px; padding: 8px; border: 1px solid #243852; background: rgba(8,16,27,.78); border-radius: 4px; }
-.lane-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.lane-head { display: flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: wrap; }
 .lane-head b { color: #eaf5ff; letter-spacing: .06em; text-transform: uppercase; font-size: 11px; }
 .lane-head .lane-meta { margin-left: auto; white-space: nowrap; }
-.lane-head button { min-height: 26px; padding-inline: 8px; }
+.lane-head button { min-height: 26px; padding-inline: 8px; flex: 0 0 auto; }
 .pin-editor-row { display: grid; gap: 7px; padding: 8px; border: 1px solid #2c4868; background: #0e1722; border-radius: 4px; }
 .pin-editor-title { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 7px; min-width: 0; }
 .pin-editor-title b { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
@@ -538,6 +586,7 @@ select { min-width: 180px; }
 .type-chip { color: #cfe9ff; border: 1px solid currentColor; background: rgba(255,255,255,.04); border-radius: 999px; padding: 2px 7px; font: 10px ui-monospace, "SFMono-Regular", Consolas, monospace; max-width: 98px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pin-empty { color: #7890ad; border: 1px dashed #31445d; padding: 8px; border-radius: 4px; font: 11px ui-monospace, "SFMono-Regular", Consolas, monospace; }
 .pin-tools { display: grid; grid-template-columns: minmax(0, 1fr) 68px 32px; gap: 6px; margin-top: 2px; }
+.pin-tools.output-pin-tools { grid-template-columns: minmax(0, 1fr) 68px 46px; }
 .pin-tools [data-param-default] { grid-column: 1 / 3; }
 .pin-tools input { min-width: 0; }
 #context-menu { position: fixed; z-index: 30; display: none; min-width: 320px; max-width: min(430px, calc(100vw - 20px)); border: 1px solid #3b5f89; background: #091525; box-shadow: 0 18px 48px rgba(0,0,0,.55); padding: 8px; border-radius: 6px; }
@@ -562,15 +611,24 @@ select { min-width: 180px; }
   .debug-controls { flex-basis: 280px; }
   .debug-controls button, #topbar > button { padding-inline: 6px; }
 }
-@media (max-width: 860px) {
-  #workbench { grid-template-columns: minmax(132px, 25vw) minmax(0, 1fr); }
-  .right { display: none; }
+@media (max-width: 900px) {
+  #workbench { grid-template-columns: minmax(0, 1fr); }
+  #canvas-dock { display: flex; }
+  #graph-strip { top: 56px; left: 10px; right: 10px; max-width: calc(100% - 20px); }
+  #wire-status { top: 104px; left: 10px; right: 10px; max-width: none; }
+  #graph-overview { display: none; }
+  .side { display: none; position: absolute; top: 0; bottom: 0; left: 0; width: min(326px, calc(100vw - 54px)); z-index: 22; border-right: 1px solid #35c2ff; background: rgba(9,15,23,.98); box-shadow: 18px 0 52px rgba(0,0,0,.58); }
+  .right { left: auto; right: 0; border-left: 1px solid #35c2ff; border-right: 0; box-shadow: -18px 0 52px rgba(0,0,0,.58); }
+  .side.is-drawer-open { display: block; }
+  #stage { grid-column: 1; }
   #jump { display: none; }
 }
 @media (max-width: 640px) {
   #workbench { grid-template-columns: 1fr; }
-  .side { display: none; }
+  .side { width: min(310px, calc(100vw - 42px)); }
+  .side:not(.is-drawer-open) { display: none; }
   #minimap { display: none; }
+  #graph-overview { display: none; }
   #topbar > button, .debug-controls button { min-height: 28px; padding-inline: 6px; }
 }
 </style>
@@ -586,6 +644,7 @@ select { min-width: 180px; }
     <button id="reload">Reload</button>
     <button id="source-diff">Diff</button>
     <button id="view-toggle">Code</button>
+    <button id="developer-mode" title="Show Canvas internals">Developer</button>
     <button id="undo-edit">Undo</button>
     <button id="redo-edit">Redo</button>
     <span id="jump">loading graph</span>
@@ -600,19 +659,21 @@ select { min-width: 180px; }
     </div>
   </header>
   <main id="workbench">
-    <aside class="side">
-      <section class="panel"><h2>Graphs</h2><div id="graph-list" class="graph-list"></div></section>
-      <section class="panel"><h2>Search</h2><input id="canvas-search" class="search" placeholder="Find in graph"><div id="search-results" class="search-results"></div></section>
-      <section class="panel"><h2>Palette</h2><input id="palette-search" class="search" placeholder="Search nodes"><div id="palette-list" class="palette-list"></div></section>
-      <section class="panel"><h2>Functions</h2><div class="function-factory"><input id="new-function-name" placeholder="helper"><input id="new-function-params" placeholder="value: Int"><div class="factory-row"><input id="new-function-return" placeholder="Int" value="Int"><button id="create-function-global">New</button></div></div></section>
+    <aside id="left-drawer" class="side">
+      <section id="graphs-panel" class="panel"><details open><summary><span>Functions</span><span id="graph-count" class="count">0</span></summary><div id="graph-list" class="graph-list"></div></details></section>
+      <section id="search-panel" class="panel"><details><summary><span>Search</span></summary><input id="canvas-search" class="search" placeholder="Find in graph"><div id="search-results" class="search-results"></div></details></section>
     </aside>
     <section id="stage">
+      <div id="canvas-dock" aria-label="Canvas panels"><button id="dock-graphs">Graphs</button><button id="dock-details">Inspector</button></div>
+      <div id="graph-strip" aria-label="Graph tabs"></div>
+      <div id="wire-status" aria-live="polite"><span id="wire-status-dot"></span><b>Ready</b><span>Drag from a socket or right-click the canvas</span></div>
+      <div id="graph-overview" aria-label="Graph overview"></div>
       <canvas id="jet-canvas-view" width="1400" height="900"></canvas>
       <pre id="source-view" aria-label="Jet source"></pre>
       <canvas id="minimap" width="190" height="124"></canvas>
       <div id="hud"><span id="zoom-label">100%</span><span id="graph-meta">0 nodes</span></div>
     </section>
-    <aside class="side right">
+    <aside id="right-drawer" class="side right">
       <section id="details" class="panel"></section>
     </aside>
   </main>
@@ -633,6 +694,7 @@ pub fn canvas_js() -> String {
   const stage = document.getElementById("stage");
   const sourceView = document.getElementById("source-view");
   const viewToggle = document.getElementById("view-toggle");
+  const developerModeButton = document.getElementById("developer-mode");
   const contextMenu = document.getElementById("context-menu");
   const minimap = document.getElementById("minimap");
   const mini = minimap.getContext("2d");
@@ -641,13 +703,15 @@ pub fn canvas_js() -> String {
   const graphBack = document.getElementById("graph-back");
   const graphForward = document.getElementById("graph-forward");
   const graphSelect = document.getElementById("graph-select");
+  const graphStrip = document.getElementById("graph-strip");
+  const graphCount = document.getElementById("graph-count");
+  const wireStatus = document.getElementById("wire-status");
+  const graphOverview = document.getElementById("graph-overview");
+  const leftDrawer = document.getElementById("left-drawer");
+  const rightDrawer = document.getElementById("right-drawer");
+  const dockGraphs = document.getElementById("dock-graphs");
+  const dockDetails = document.getElementById("dock-details");
   const graphList = document.getElementById("graph-list");
-  const paletteList = document.getElementById("palette-list");
-  const paletteSearch = document.getElementById("palette-search");
-  const newFunctionName = document.getElementById("new-function-name");
-  const newFunctionParams = document.getElementById("new-function-params");
-  const newFunctionReturn = document.getElementById("new-function-return");
-  const createFunctionGlobal = document.getElementById("create-function-global");
   const canvasSearch = document.getElementById("canvas-search");
   const searchResults = document.getElementById("search-results");
   const zoomLabel = document.getElementById("zoom-label");
@@ -685,8 +749,10 @@ pub fn canvas_js() -> String {
   let nodeOffsets = new Map();
   let autoNodeOffsets = new Map();
   let hoverPin = null;
+  let pendingPin = null;
   let spaceDown = false;
   let viewMode = "graph";
+  let developerMode = false;
   const layoutScale = { x: 1.08, y: 1.08 };
   const palette = [
     { title: "Print", detail: "Call print(\"canvas\")", op: "insert_print" },
@@ -700,10 +766,57 @@ pub fn canvas_js() -> String {
   let actionEntries = [];
   let contextMenuState = null;
 
+  function storedFlag(name) {
+    try { return window.localStorage && window.localStorage.getItem(name) === "1"; }
+    catch (_) { return false; }
+  }
+
+  function storeFlag(name, value) {
+    try { if (window.localStorage) window.localStorage.setItem(name, value ? "1" : "0"); }
+    catch (_) {}
+  }
+
+  function setDeveloperMode(on) {
+    developerMode = !!on;
+    document.body.classList.toggle("is-dev-mode", developerMode);
+    developerModeButton.classList.toggle("is-active", developerMode);
+    developerModeButton.textContent = developerMode ? "Developer on" : "Developer";
+    developerModeButton.title = developerMode ? "Hide Canvas internals" : "Show Canvas internals";
+    storeFlag("jet.canvas.developerMode", developerMode);
+    if (latestDoc) window.requestAnimationFrame(fitGraph);
+  }
+
   function showToast(text) {
     toast.textContent = text;
     window.clearTimeout(showToast.timer);
     showToast.timer = window.setTimeout(() => { toast.textContent = ""; }, 2200);
+  }
+
+  function setPendingPin(pin) {
+    pendingPin = pin;
+    window.__jetCanvasPendingPin = pin ? { pin_id: pin.pin_id, name: pin.name, type: pin.type, direction: pin.direction } : null;
+    syncWireStatus(pin ? { title: "Source socket", detail: pinName(pin) + " : " + exactPinType(pin), color: colorForType(pin.type || "Value") } : null);
+  }
+
+  function compactCanvasMode() {
+    return window.matchMedia && window.matchMedia("(max-width: 900px)").matches;
+  }
+
+  function setDrawer(which) {
+    const compact = compactCanvasMode();
+    if (!compact) {
+      leftDrawer.classList.remove("is-drawer-open");
+      rightDrawer.classList.remove("is-drawer-open");
+      dockGraphs.classList.remove("is-active");
+      dockDetails.classList.remove("is-active");
+      return;
+    }
+    const leftOpen = which === "graphs";
+    leftDrawer.classList.toggle("is-drawer-open", leftOpen);
+    rightDrawer.classList.toggle("is-drawer-open", which === "details");
+    dockGraphs.classList.toggle("is-active", which === "graphs");
+    dockDetails.classList.toggle("is-active", which === "details");
+    if (latestDoc) window.requestAnimationFrame(fitGraph);
   }
 
   function fit() {
@@ -914,14 +1027,13 @@ pub fn canvas_js() -> String {
   function drawPin(pin, x, y, dir, recordHit = true) {
     const color = colorForType(pin.type || "unknown");
     const rail = pinRail(pin);
-    const r = Math.max(5.5, 7 * view.zoom);
+    const r = isExecPin(pin) ? Math.max(7, 9 * view.zoom) : Math.max(5.5, 7 * view.zoom);
     ctx.beginPath();
     if (rail === "control") {
-      if (dir === "output") {
-        ctx.moveTo(x - r, y - r); ctx.lineTo(x + r * 1.15, y); ctx.lineTo(x - r, y + r); ctx.closePath();
-      } else {
-        ctx.moveTo(x + r, y - r); ctx.lineTo(x - r * 1.15, y); ctx.lineTo(x + r, y + r); ctx.closePath();
-      }
+      ctx.moveTo(x - r * .9, y - r);
+      ctx.lineTo(x + r * 1.25, y);
+      ctx.lineTo(x - r * .9, y + r);
+      ctx.closePath();
     } else if (rail === "fallible") {
       ctx.moveTo(x, y - r); ctx.lineTo(x + r, y); ctx.lineTo(x, y + r); ctx.lineTo(x - r, y); ctx.closePath();
     } else {
@@ -936,8 +1048,8 @@ pub fn canvas_js() -> String {
       ctx.lineWidth = 2;
       ctx.stroke();
     }
-    ctx.lineWidth = 1.5;
-    ctx.strokeStyle = "#07101c";
+    ctx.lineWidth = Math.max(1.4, 1.8 * view.zoom);
+    ctx.strokeStyle = isExecPin(pin) ? "#02060a" : "rgba(2,6,10,.9)";
     ctx.stroke();
     if (recordHit) {
       const hitR = Math.max(18, 23 * view.zoom);
@@ -946,9 +1058,14 @@ pub fn canvas_js() -> String {
     }
   }
 
-  function pinLabel(pin) {
+  function pinName(pin) {
     if (!pin) return "";
-    return isExecPin(pin) ? pin.name : pin.name + " : " + pin.type;
+    return pin.name || "";
+  }
+
+  function exactPinType(pin) {
+    if (!pin) return "";
+    return isExecPin(pin) ? "exec" : (pin.type || "Value");
   }
 
   function clipText(text, max) {
@@ -957,7 +1074,7 @@ pub fn canvas_js() -> String {
   }
 
   function drawPinLabel(pin, x, y, align) {
-    const label = pinLabel(pin);
+    const label = pinName(pin);
     ctx.font = `${Math.max(9, 11.5 * view.zoom)}px ui-monospace, Consolas, monospace`;
     ctx.textAlign = align;
     ctx.fillStyle = isExecPin(pin) ? "#edf6ff" : colorForType(pin.type || "unknown");
@@ -965,17 +1082,51 @@ pub fn canvas_js() -> String {
     ctx.textAlign = "left";
   }
 
+  function drawPinHoverTooltip(pin) {
+    const point = pin && pinPoints.get(pin.pin_id);
+    if (!point) return;
+    const text = pinName(pin) + " : " + exactPinType(pin);
+    ctx.font = `${Math.max(10, 12 * view.zoom)}px ui-monospace, Consolas, monospace`;
+    const padX = 9 * view.zoom;
+    const badgeW = Math.min(220 * view.zoom, ctx.measureText(text).width + padX * 2);
+    const badgeH = 25 * view.zoom;
+    const bx = Math.max(8, Math.min(point.x + 14 * view.zoom, cssSize().width - badgeW - 8));
+    const by = Math.max(8, point.y - badgeH - 13 * view.zoom);
+    roundRect(bx, by, badgeW, badgeH, 5 * view.zoom);
+    ctx.fillStyle = "rgba(7,17,31,.95)";
+    ctx.fill();
+    ctx.strokeStyle = point.color;
+    ctx.lineWidth = Math.max(1, view.zoom);
+    ctx.stroke();
+    ctx.fillStyle = point.color;
+    ctx.textAlign = "left";
+    ctx.fillText(clipText(text, 28), bx + padX, by + 17 * view.zoom);
+  }
+
   function drawSocketRow(pin, x, y, w, dir, recordHit) {
     const rowH = 24 * view.zoom;
     const px = dir === "input" ? x : x + w;
     const inset = 12 * view.zoom;
-    const labelX = dir === "input" ? x + 25 * view.zoom : x + w - 25 * view.zoom;
+    const labelX = dir === "input" ? x + 28 * view.zoom : x + w - 28 * view.zoom;
     const labelAlign = dir === "input" ? "left" : "right";
+    if (isExecPin(pin)) {
+      const railStart = dir === "input" ? x + 10 * view.zoom : x + w - 126 * view.zoom;
+      const railEnd = dir === "input" ? x + 126 * view.zoom : x + w - 10 * view.zoom;
+      ctx.beginPath();
+      ctx.moveTo(railStart, y);
+      ctx.lineTo(railEnd, y);
+      ctx.strokeStyle = "rgba(248,250,252,.52)";
+      ctx.lineWidth = Math.max(1.8, 2.4 * view.zoom);
+      ctx.stroke();
+      drawPin(pin, px, y, dir, recordHit);
+      drawPinLabel(pin, labelX, y + 4 * view.zoom, labelAlign);
+      return;
+    }
     ctx.beginPath();
     roundRect(x + inset, y - rowH * .56, w - inset * 2, rowH, 4 * view.zoom);
-    ctx.fillStyle = isExecPin(pin) ? "rgba(248,250,252,.06)" : hexToRgba(colorForType(pin.type), .10);
+    ctx.fillStyle = hexToRgba(colorForType(pin.type), .10);
     ctx.fill();
-    ctx.strokeStyle = isExecPin(pin) ? "rgba(248,250,252,.20)" : hexToRgba(colorForType(pin.type), .28);
+    ctx.strokeStyle = hexToRgba(colorForType(pin.type), .28);
     ctx.lineWidth = Math.max(.8, view.zoom);
     ctx.stroke();
     drawPin(pin, px, y, dir, recordHit);
@@ -1131,6 +1282,8 @@ pub fn canvas_js() -> String {
     for (const graph of doc.graphs || []) {
       const button = document.createElement("button");
       button.className = "graph-item" + (graph.graph_id === selectedGraphId ? " is-active" : "");
+      button.type = "button";
+      button.setAttribute("data-sidebar-graph", graph.graph_id);
       button.innerHTML = "<span>" + escapeHtml(graph.title) + "</span><span class=\"count\">" + graph.nodes.length + "</span>";
       button.addEventListener("click", () => {
         switchGraph(graph.graph_id);
@@ -1139,23 +1292,103 @@ pub fn canvas_js() -> String {
     }
   }
 
-  function syncPalette() {
-    const q = (paletteSearch.value || "").toLowerCase();
-    paletteList.innerHTML = "";
-    for (const item of palette.filter((p) => p.title.toLowerCase().includes(q))) {
-      const button = document.createElement("button");
-      button.className = "palette-item";
-      button.innerHTML = "<span>" + escapeHtml(item.title) + "<br><span class=\"tag\">" + escapeHtml(item.detail) + "</span></span><span class=\"count\">+</span>";
-      button.addEventListener("click", () => runPalette(item));
-      paletteList.appendChild(button);
+  function syncWireStatus(state) {
+    if (!wireStatus) return;
+    let title = "Ready";
+    let detail = "Drag from a socket or right-click the canvas";
+    let color = "#7dd3fc";
+    if (state) {
+      title = state.title || title;
+      detail = state.detail || detail;
+      color = state.color || color;
+    } else if (hoverPin) {
+      title = "Socket";
+      detail = pinName(hoverPin) + " : " + exactPinType(hoverPin);
+      color = colorForType(hoverPin.type || "Value");
     }
-    for (const item of actionEntries.filter((p) => p.title.toLowerCase().includes(q) || p.detail.toLowerCase().includes(q))) {
+    wireStatus.style.setProperty("--wire-color", color);
+    wireStatus.innerHTML = `<span id="wire-status-dot"></span><b>${escapeHtml(title)}</b><span>${escapeHtml(detail)}</span>`;
+  }
+
+  function graphRailSummary(graph) {
+    return graph && graph.rails && graph.rails.kinds && graph.rails.kinds.length ? graph.rails.kinds.join(", ") : "data";
+  }
+
+  function syncGraphOverview(graph, node) {
+    if (!graphOverview || !graph) return;
+    const fn = graph.function || {};
+    const signature = fn.signature || graph.title || graph.graph_id;
+    const execPins = (graph.pins || []).filter(isExecPin).length;
+    const dataPins = (graph.pins || []).length - execPins;
+    const selected = node ? nodeKindLabel(node, graph) + " / " + node.title : "none";
+    graphOverview.innerHTML = `
+      <div class="graph-overview-title"><b>${escapeHtml(graph.title || graph.graph_id)}</b><code>${escapeHtml(signature)}</code></div>
+      <div class="graph-stats">
+        <div class="graph-stat"><b>${graph.nodes.length}</b><span>nodes</span></div>
+        <div class="graph-stat"><b>${graph.wires.length}</b><span>wires</span></div>
+        <div class="graph-stat"><b>${dataPins}/${execPins}</b><span>data/exec</span></div>
+      </div>
+      <div class="tag">${escapeHtml(graphRailSummary(graph))} / ${escapeHtml(selected)}</div>
+    `;
+    window.__jetCanvasGraphOverview = {
+      graph_id: graph.graph_id,
+      title: graph.title || graph.graph_id,
+      nodes: graph.nodes.length,
+      wires: graph.wires.length,
+      data_pins: dataPins,
+      exec_pins: execPins,
+      selected
+    };
+  }
+
+  function nodeContextActions(graph, node) {
+    const actions = [
+      { title: "Jump source", detail: "span", group: "source", run: () => { const s = node.source_span || { start: 0, end: 0 }; setSourceHash(s); setViewMode("source"); } },
+      { title: "Find references", detail: "semindex", group: "query", run: () => postQuery({ op: "references", symbol: node.title }) },
+      { title: "Set breakpoint", detail: "local span", group: "debug", run: () => toggleBreakpoint(node) }
+    ];
+    if (graphForFunctionName(node.title)) actions.unshift({ title: "Open function graph", detail: "nested graph", group: "graph", run: () => openFunctionGraph(node.title) });
+    return actions;
+  }
+
+  function syncGraphStrip(doc) {
+    graphStrip.innerHTML = "";
+    if (graphCount) graphCount.textContent = String((doc.graphs || []).length);
+    for (const graph of doc.graphs || []) {
       const button = document.createElement("button");
-      button.className = "palette-item";
-      button.innerHTML = "<span>" + escapeHtml(item.title) + "<br><span class=\"tag\">" + escapeHtml(item.detail) + "</span></span><span class=\"count\">jit</span>";
-      button.addEventListener("click", () => runPalette(item));
-      paletteList.appendChild(button);
+      button.type = "button";
+      button.className = "graph-tab" + (graph.graph_id === selectedGraphId ? " is-active" : "");
+      button.setAttribute("data-graph-tab", graph.graph_id);
+      button.title = "Open graph: " + graph.title;
+      button.innerHTML = "<span class=\"graph-tab-kind\">fn</span><span class=\"graph-tab-title\">" + escapeHtml(graph.title) + "</span><span class=\"graph-tab-count\">" + graph.nodes.length + "</span>";
+      button.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        switchGraph(graph.graph_id);
+      });
+      graphStrip.appendChild(button);
     }
+    window.__jetCanvasGraphSwitcherReady = true;
+    window.__jetCanvasGraphTabCount = graphStrip.children.length;
+  }
+
+  function graphActionItems() {
+    const actions = [
+      { title: "Fit graph", detail: "viewport", group: "view", run: fitGraph },
+      { title: "New function", detail: "source", group: "function", run: () => {
+        const name = window.prompt("Function name", "helper");
+        if (name) postTransaction({ schema_version: 1, op: "create_function", revision: latestDoc.revision, name, params: "", ret_type: "Int" });
+      } },
+      { title: "Show source", detail: "toggle", group: "view", run: () => setViewMode("source") }
+    ];
+    for (const item of palette.concat(actionEntries).slice(0, 36)) {
+      actions.push({ title: item.title, detail: item.detail || "", group: item.op === "preview_canvas_action" ? "built-in" : "node", run: () => runPalette(item) });
+    }
+    return actions;
+  }
+
+  function openGraphActionPalette(x, y, query) {
+    openActionPalette(x, y, "Graph actions", graphActionItems(), { context: "right-click built-ins, functions, source actions", query: query || "" });
   }
 
   function currentGraph(doc) {
@@ -1188,6 +1421,7 @@ pub fn canvas_js() -> String {
       graphForwardStack = [];
     }
     selectedGraphId = graphId;
+    window.__jetCanvasSelectedGraphId = selectedGraphId;
     selectedNodeId = opts.nodeId || graph.entry_node;
     selectedNodeIds = new Set([selectedNodeId]);
     setViewMode("graph");
@@ -1355,19 +1589,23 @@ pub fn canvas_js() -> String {
     if (!graph) return;
     const b = graphBounds(graph);
     const size = cssSize();
-    const zx = (size.width - 42) / Math.max(1, b.maxX - b.minX);
-    const zy = (size.height - 76) / Math.max(1, b.maxY - b.minY);
-    view.zoom = Math.max(.55, Math.min(1.05, Math.min(zx, zy)));
-    view.x = 22 - b.minX * view.zoom;
-    view.y = 38 - b.minY * view.zoom;
+    const compact = compactCanvasMode();
+    const leftInset = 22;
+    const topInset = compact ? (developerMode ? 154 : 52) : (developerMode ? 108 : 32);
+    const bottomInset = 38;
+    const zx = (size.width - leftInset - 28) / Math.max(1, b.maxX - b.minX);
+    const zy = (size.height - topInset - bottomInset) / Math.max(1, b.maxY - b.minY);
+    view.zoom = Math.max(.42, Math.min(1.05, Math.min(zx, zy)));
+    view.x = leftInset - b.minX * view.zoom;
+    view.y = topInset - b.minY * view.zoom;
     drawGraph(latestDoc);
   }
 
   function drawGrid(size) {
-    const grad = ctx.createLinearGradient(0, 0, size.width, size.height);
-    grad.addColorStop(0, "#090d14");
-    grad.addColorStop(.52, "#0b111b");
-    grad.addColorStop(1, "#0b0f15");
+    const grad = ctx.createRadialGradient(size.width * .5, size.height * .42, 40, size.width * .5, size.height * .42, Math.max(size.width, size.height));
+    grad.addColorStop(0, "#101a27");
+    grad.addColorStop(.48, "#08111c");
+    grad.addColorStop(1, "#05080d");
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, size.width, size.height);
     const major = 96 * view.zoom;
@@ -1375,7 +1613,7 @@ pub fn canvas_js() -> String {
     ctx.lineWidth = 1;
     for (const step of [minor, major]) {
       if (step < 6) continue;
-      ctx.strokeStyle = step === major ? "#2c3440" : "#171d25";
+      ctx.strokeStyle = step === major ? "rgba(56,82,110,.72)" : "rgba(32,43,57,.72)";
       ctx.beginPath();
       let ox = view.x % step;
       let oy = view.y % step;
@@ -1383,6 +1621,49 @@ pub fn canvas_js() -> String {
       for (let y = oy; y < size.height; y += step) { ctx.moveTo(0, y); ctx.lineTo(size.width, y); }
       ctx.stroke();
     }
+  }
+
+  function drawTypeLegend(size) {
+    if (!developerMode || compactCanvasMode() || size.width < 760 || viewMode !== "graph") return;
+    const items = [
+      ["Exec", "exec"],
+      ["Bool", "Bool"],
+      ["Int", "Int"],
+      ["Float", "Float"],
+      ["String", "String"],
+      ["Fallible", "Value?"]
+    ];
+    const x = Math.max(14, size.width - 430);
+    const y = 58;
+    const w = Math.min(416, size.width - x - 12);
+    const h = 34;
+    roundRect(x, y, w, h, 6);
+    ctx.fillStyle = "rgba(8,17,29,.78)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(54,90,127,.72)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.font = "10px ui-monospace, Consolas, monospace";
+    ctx.textAlign = "left";
+    let cursor = x + 12;
+    for (const [label, type] of items) {
+      const color = colorForType(type);
+      ctx.beginPath();
+      if (type === "exec") {
+        ctx.moveTo(cursor, y + 12);
+        ctx.lineTo(cursor + 10, y + 17);
+        ctx.lineTo(cursor, y + 22);
+        ctx.closePath();
+      } else {
+        ctx.arc(cursor + 5, y + 17, 5, 0, Math.PI * 2);
+      }
+      ctx.fillStyle = color;
+      ctx.fill();
+      ctx.fillStyle = "#b9c9df";
+      ctx.fillText(label, cursor + 15, y + 20);
+      cursor += Math.min(72, 22 + ctx.measureText(label).width);
+    }
+    ctx.textAlign = "left";
   }
 
   function isExecPin(pin) {
@@ -1427,16 +1708,80 @@ pub fn canvas_js() -> String {
     return node.kind;
   }
 
+  function nodeKindLabel(node, graph) {
+    return nodeStyle(node, graph).label || node.kind || "Node";
+  }
+
+  function shouldDrawNodeBadge(node) {
+    return false;
+  }
+
   function nodeSize(graph, node) {
     const inputData = pinsForNode(graph, node, "input", false).length;
     const outputData = pinsForNode(graph, node, "output", false).length;
+    const execIn = pinsForNode(graph, node, "input", true).length;
     const execOut = pinsForNode(graph, node, "output", true).length;
-    const inlineCount = (graph.inline_exprs || []).filter((expr) => expr.node_id === node.node_id).length;
     const compact = node.kind === "variable_get" || node.kind === "constant";
-    const w = compact ? 220 : node.kind === "branch" || node.kind === "dispatch" ? 324 : 294;
-    const rows = Math.max(inputData, outputData, execOut > 1 ? execOut + 1 : 1);
-    const h = compact ? 92 : Math.max(132, 72 + rows * 30 + inlineCount * 24);
+    const w = compact ? 216 : node.kind === "branch" || node.kind === "dispatch" ? 340 : 314;
+    const execRows = Math.max(execIn, execOut);
+    const dataRows = Math.max(inputData, outputData);
+    const h = compact ? 84 : Math.max(132, 70 + Math.max(1, execRows) * 28 + Math.max(1, dataRows) * 30);
     return { w, h };
+  }
+
+  function bezierPoint(from, to, t) {
+    const c1 = { x: from.x + 96 * view.zoom, y: from.y };
+    const c2 = { x: to.x - 96 * view.zoom, y: to.y };
+    const mt = 1 - t;
+    return {
+      x: mt * mt * mt * from.x + 3 * mt * mt * t * c1.x + 3 * mt * t * t * c2.x + t * t * t * to.x,
+      y: mt * mt * mt * from.y + 3 * mt * mt * t * c1.y + 3 * mt * t * t * c2.y + t * t * t * to.y
+    };
+  }
+
+  function drawWireArrow(from, to, color, control) {
+    const p = bezierPoint(from, to, .72);
+    const q = bezierPoint(from, to, .66);
+    const angle = Math.atan2(p.y - q.y, p.x - q.x);
+    const len = (control ? 12 : 9) * view.zoom;
+    ctx.save();
+    ctx.translate(p.x, p.y);
+    ctx.rotate(angle);
+    ctx.beginPath();
+    ctx.moveTo(len, 0);
+    ctx.lineTo(-len * .55, -len * .55);
+    ctx.lineTo(-len * .2, 0);
+    ctx.lineTo(-len * .55, len * .55);
+    ctx.closePath();
+    ctx.fillStyle = color;
+    ctx.shadowColor = hexToRgba(color, .55);
+    ctx.shadowBlur = control ? 10 : 6;
+    ctx.fill();
+    ctx.restore();
+    ctx.shadowBlur = 0;
+  }
+
+  function drawWire(wire, from, to, activeWire, selectedWire) {
+    const control = wire.wire_kind === "control";
+    const color = activeWire ? "#facc15" : wireColor(wire, from);
+    ctx.beginPath();
+    ctx.moveTo(from.x, from.y);
+    ctx.bezierCurveTo(from.x + 96 * view.zoom, from.y, to.x - 96 * view.zoom, to.y, to.x, to.y);
+    ctx.strokeStyle = "rgba(1,6,12,.86)";
+    ctx.lineWidth = control ? Math.max(7, 10 * view.zoom) : Math.max(5, 7 * view.zoom);
+    ctx.shadowBlur = 0;
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(from.x, from.y);
+    ctx.bezierCurveTo(from.x + 96 * view.zoom, from.y, to.x - 96 * view.zoom, to.y, to.x, to.y);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = activeWire ? Math.max(4, 7 * view.zoom) : control ? Math.max(3, 5 * view.zoom) : Math.max(2.4, 3.6 * view.zoom);
+    ctx.shadowColor = activeWire ? "rgba(250,204,21,.72)" : hexToRgba(color, control || selectedWire ? .62 : .34);
+    ctx.shadowBlur = activeWire ? 18 : control ? 13 : 8;
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    if (control || selectedWire || activeWire) drawWireArrow(from, to, color, control);
   }
 
   function drawNode(graph, node, inlineByNode, recordHit = true) {
@@ -1448,7 +1793,7 @@ pub fn canvas_js() -> String {
     const searchHit = (searchState.spans || []).some((span) => spansOverlap(node.source_span, span));
     const breakpoint = nodeBreakpoint(node);
     const style = nodeStyle(node, graph);
-    const headerH = Math.min(46, size.h - 20) * view.zoom;
+    const headerH = Math.min(48, size.h - 20) * view.zoom;
 
     ctx.shadowColor = active ? "rgba(250,204,21,.58)" : selected ? hexToRgba(style.accent, .42) : searchHit ? "rgba(192,132,252,.42)" : "rgba(0,0,0,.45)";
     ctx.shadowBlur = active ? 34 : selected ? 26 : searchHit ? 22 : 16;
@@ -1474,21 +1819,38 @@ pub fn canvas_js() -> String {
     ctx.fillStyle = hexToRgba(style.accent, .28);
     ctx.fillRect(x, y, 4 * view.zoom, h);
 
-    ctx.fillStyle = hexToRgba(style.accent, .2);
-    roundRect(x + 12 * view.zoom, y + 10 * view.zoom, 40 * view.zoom, 22 * view.zoom, 4 * view.zoom);
+    ctx.fillStyle = hexToRgba(style.accent, .18);
+    roundRect(x + 12 * view.zoom, y + 10 * view.zoom, 42 * view.zoom, 22 * view.zoom, 4 * view.zoom);
     ctx.fill();
     ctx.fillStyle = style.accent;
     ctx.font = `${Math.max(8, 10.5 * view.zoom)}px ui-monospace, Consolas, monospace`;
     ctx.textAlign = "center";
-    ctx.fillText(style.glyph, x + 32 * view.zoom, y + 25 * view.zoom);
+    ctx.fillText(style.glyph, x + 33 * view.zoom, y + 25 * view.zoom);
     ctx.textAlign = "left";
 
     ctx.fillStyle = "#f8fbff";
     ctx.font = `${Math.max(12, 14.5 * view.zoom)}px "Segoe UI", system-ui, sans-serif`;
-    ctx.fillText(clipText(node.title, 30), x + 62 * view.zoom, y + 21 * view.zoom);
+    ctx.fillText(clipText(node.title, 24), x + 64 * view.zoom, y + 21 * view.zoom);
     ctx.fillStyle = "#9ab0cd";
     ctx.font = `${Math.max(9, 10.5 * view.zoom)}px ui-monospace, Consolas, monospace`;
-    ctx.fillText(clipText(nodeSubtitle(node), 30), x + 62 * view.zoom, y + 36 * view.zoom);
+    ctx.fillText(clipText(nodeSubtitle(node), 25), x + 64 * view.zoom, y + 37 * view.zoom);
+
+    if (shouldDrawNodeBadge(node)) {
+      const badgeText = nodeKindLabel(node, graph).toUpperCase();
+      ctx.font = `${Math.max(7.5, 9.2 * view.zoom)}px ui-monospace, Consolas, monospace`;
+      const badgeW = Math.min(118 * view.zoom, ctx.measureText(badgeText).width + 14 * view.zoom);
+      const badgeY = y + headerH + 9 * view.zoom;
+      roundRect(x + 14 * view.zoom, badgeY, badgeW, 20 * view.zoom, 4 * view.zoom);
+      ctx.fillStyle = hexToRgba(style.accent, .14);
+      ctx.fill();
+      ctx.strokeStyle = hexToRgba(style.accent, .42);
+      ctx.lineWidth = Math.max(.8, view.zoom);
+      ctx.stroke();
+      ctx.fillStyle = style.accent;
+      ctx.textAlign = "center";
+      ctx.fillText(clipText(badgeText, 16), x + 14 * view.zoom + badgeW / 2, badgeY + 13.5 * view.zoom);
+      ctx.textAlign = "left";
+    }
 
     if (breakpoint) {
       ctx.beginPath();
@@ -1499,18 +1861,28 @@ pub fn canvas_js() -> String {
 
     const execIn = pinsForNode(graph, node, "input", true);
     const execOut = pinsForNode(graph, node, "output", true);
-    execIn.forEach((p) => drawSocketRow(p, x, y + 24 * view.zoom, w, "input", recordHit));
-    execOut.forEach((p, i) => drawSocketRow(p, x, y + (24 + i * 28) * view.zoom, w, "output", recordHit));
+    const execTop = Math.min(72, size.h - 58);
+    execIn.forEach((p, i) => drawSocketRow(p, x, y + (execTop + i * 28) * view.zoom, w, "input", recordHit));
+    execOut.forEach((p, i) => drawSocketRow(p, x, y + (execTop + i * 28) * view.zoom, w, "output", recordHit));
 
     const inputs = pinsForNode(graph, node, "input", false);
     const outputs = pinsForNode(graph, node, "output", false);
-    const dataTop = 68;
+    const execRows = Math.max(execIn.length, execOut.length, 1);
+    const dataTop = execTop + execRows * 28 + 20;
+    if (inputs.length || outputs.length) {
+      ctx.beginPath();
+      ctx.moveTo(x + 12 * view.zoom, y + (dataTop - 16) * view.zoom);
+      ctx.lineTo(x + w - 12 * view.zoom, y + (dataTop - 16) * view.zoom);
+      ctx.strokeStyle = "rgba(94,119,150,.28)";
+      ctx.lineWidth = Math.max(.8, view.zoom);
+      ctx.stroke();
+    }
     inputs.forEach((p, i) => drawSocketRow(p, x, y + (dataTop + i * 30) * view.zoom, w, "input", recordHit));
     outputs.forEach((p, i) => drawSocketRow(p, x, y + (dataTop + i * 30) * view.zoom, w, "output", recordHit));
 
-    const inline = (inlineByNode.get(node.node_id) || []).slice(0, 3);
+    const inline = (selected || view.zoom >= .95 ? (inlineByNode.get(node.node_id) || []) : []).slice(0, 2);
     inline.forEach((expr, i) => {
-      const cy = y + (72 + Math.max(inputs.length, outputs.length) * 30 + i * 24) * view.zoom;
+      const cy = y + (dataTop + Math.max(inputs.length, outputs.length) * 30 + 12 + i * 24) * view.zoom;
       roundRect(x + 12 * view.zoom, cy - 13 * view.zoom, w - 24 * view.zoom, 18 * view.zoom, 5 * view.zoom);
       ctx.fillStyle = "rgba(246,211,101,.11)";
       ctx.fill();
@@ -1528,12 +1900,13 @@ pub fn canvas_js() -> String {
     const graph = currentGraph(doc);
     if (!graph) return;
     selectedGraphId = graph.graph_id;
+    window.__jetCanvasSelectedGraphId = selectedGraphId;
     if (!selectedNodeId || !graph.nodes.some((n) => n.node_id === selectedNodeId)) selectedNodeId = graph.entry_node;
     if (selectedNodeIds.size === 0 && selectedNodeId) selectedNodeIds.add(selectedNodeId);
     selectedNodeIds = new Set([...selectedNodeIds].filter((id) => graph.nodes.some((n) => n.node_id === id)));
     syncGraphPicker(doc);
     syncGraphList(doc);
-    syncPalette();
+    syncGraphStrip(doc);
     fit();
     const size = cssSize();
     drawGrid(size);
@@ -1561,17 +1934,9 @@ pub fn canvas_js() -> String {
       const to = pinPoints.get(wire.to_pin);
       if (!from || !to) continue;
       const activeWire = debugOverlay && debugOverlay.active_wire_id === wire.wire_id;
-      ctx.beginPath();
-      ctx.moveTo(from.x, from.y);
-      ctx.bezierCurveTo(from.x + 90 * view.zoom, from.y, to.x - 90 * view.zoom, to.y, to.x, to.y);
-      ctx.strokeStyle = activeWire ? "#facc15" : wireColor(wire, from);
-      ctx.lineWidth = activeWire ? Math.max(4, 7 * view.zoom) : Math.max(2.5, 4 * view.zoom);
-      ctx.shadowColor = activeWire ? "rgba(250,204,21,.72)" : wire.wire_kind === "fallible" ? "rgba(251,113,133,.42)" : wire.wire_kind === "control" ? "rgba(248,250,252,.42)" : "rgba(56,189,248,.32)";
-      ctx.shadowBlur = activeWire ? 18 : 9;
-      if (wire.wire_kind === "control") ctx.setLineDash([12, 8]);
-      ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.shadowBlur = 0;
+      const selectedWire = selectedNodeIds.has(from.pin.node_id) || selectedNodeIds.has(to.pin.node_id);
+      drawWire(wire, from, to, activeWire, selectedWire);
+      if (activeWire || selectedWire || view.zoom >= 1.05) drawWireTypeBadge(wire, from, to);
     }
 
     for (const node of graph.nodes) {
@@ -1583,6 +1948,7 @@ pub fn canvas_js() -> String {
       const from = pinPoints.get(drag.pin.pin_id);
       if (from) {
         const plan = connectionPlan(graph, drag.pin, hoverPin);
+        syncWireStatus({ title: plan.ok ? "Wire preview" : "Wire refused", detail: plan.label, color: plan.color });
         ctx.beginPath();
         ctx.moveTo(from.x, from.y);
         ctx.bezierCurveTo(from.x + 90 * view.zoom, from.y, drag.mx - 90 * view.zoom, drag.my, drag.mx, drag.my);
@@ -1592,6 +1958,22 @@ pub fn canvas_js() -> String {
         ctx.stroke();
         ctx.setLineDash([]);
         drawConnectionBadge(plan, drag.mx, drag.my);
+      }
+    }
+
+    if (pendingPin && (!drag || drag.mode !== "pin")) {
+      syncWireStatus({ title: "Destination needed", detail: pinName(pendingPin) + " : " + exactPinType(pendingPin), color: colorForType(pendingPin.type || "Value") });
+      drawCompatibleDropTargets(graph, pendingPin);
+      const from = pinPoints.get(pendingPin.pin_id);
+      if (from) {
+        ctx.beginPath();
+        ctx.arc(from.x, from.y, Math.max(17, 22 * view.zoom), 0, Math.PI * 2);
+        ctx.strokeStyle = "#7dd3fc";
+        ctx.lineWidth = Math.max(1.5, 2.4 * view.zoom);
+        ctx.setLineDash([8, 5]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        drawConnectionBadge({ ok: true, label: "Select destination socket", color: "#7dd3fc" }, from.x + 36 * view.zoom, from.y - 12 * view.zoom);
       }
     }
 
@@ -1607,9 +1989,15 @@ pub fn canvas_js() -> String {
       ctx.setLineDash([]);
     }
 
+    if (hoverPin && (!drag || drag.mode !== "pin")) drawPinHoverTooltip(hoverPin);
     drawMinimap(graph);
-    updateDetails(graph, nodes.get(selectedNodeId), graph.pins.filter((p) => p.node_id === selectedNodeId), inlineByNode.get(selectedNodeId) || []);
+    drawTypeLegend(size);
+    if (!pendingPin && (!drag || drag.mode !== "pin")) syncWireStatus(null);
+    const selectedNode = nodes.get(selectedNodeId);
+    updateDetails(graph, selectedNode, graph.pins.filter((p) => p.node_id === selectedNodeId), inlineByNode.get(selectedNodeId) || []);
+    syncGraphOverview(graph, selectedNode);
     window.__jetCanvasNonblankPixels = graph.nodes.length > 0 ? 1 : 0;
+    window.__jetCanvasPendingPin = pendingPin ? { pin_id: pendingPin.pin_id, name: pendingPin.name, type: pendingPin.type, direction: pendingPin.direction } : null;
     const hitMap = {
       graph_id: graph.graph_id,
       nodes: hit.map((h) => ({ node_id: h.node.node_id, title: h.node.title, kind: h.node.kind, x: h.x, y: h.y, w: h.w, h: h.h })),
@@ -1627,15 +2015,6 @@ pub fn canvas_js() -> String {
 
   graphSelect.addEventListener("change", function () {
     switchGraph(graphSelect.value);
-  });
-
-  createFunctionGlobal.addEventListener("click", function () {
-    if (!latestDoc) return;
-    const name = (newFunctionName.value || "").trim();
-    if (!name) return showToast("Name the function first");
-    const params = (newFunctionParams.value || "").trim();
-    const ret_type = (newFunctionReturn.value || "Void").trim() || "Void";
-    postTransaction({ schema_version: 1, op: "create_function", revision: latestDoc.revision, name, params, ret_type });
   });
 
   function drawMinimap(graph) {
@@ -1713,6 +2092,20 @@ pub fn canvas_js() -> String {
     return visibility + "fn " + ((fnMeta && fnMeta.name) || nodeTitle || "function") + "(" + params.join(", ") + ")" + ret;
   }
 
+  function applyFunctionPins(graph, fnMeta, nodeTitle, retOverride) {
+    const signature = signatureFromVisibleFunctionPins(fnMeta, nodeTitle, retOverride);
+    window.__jetCanvasLastSignature = signature;
+    postTransaction({ schema_version: 1, op: "edit_function_signature", revision: latestDoc.revision, graph_id: graph.graph_id, signature });
+    return signature;
+  }
+
+  function nextParamName(fnMeta) {
+    const used = new Set((fnMeta && fnMeta.params || []).map((p) => p.name || ""));
+    let i = 1;
+    while (used.has("input" + i)) i += 1;
+    return "input" + i;
+  }
+
   function pinPortHtml(type) {
     return `<span class="pin-port" style="color:${escapeAttr(colorForType(type))}"></span>`;
   }
@@ -1731,16 +2124,41 @@ pub fn canvas_js() -> String {
 
   function functionReturnRow(retType) {
     const outType = retType || "Void";
-    return `<div class="pin-editor-row"><div class="pin-editor-title">${pinPortHtml(outType)}<b>return</b>${typeChipHtml(outType)}</div><div class="lane-meta">output pin</div><div class="pin-tools"><input id="function-return-type" aria-label="Return type" title="Return type" value="${escapeAttr(outType)}"><button id="set-function-output">Set</button><button id="remove-function-output">-</button></div></div>`;
+    const color = colorForType(outType);
+    return `<div class="pin-editor-row"><div class="pin-editor-title"><span id="function-return-port" class="pin-port" style="color:${escapeAttr(color)}"></span><b>return</b><span id="function-return-type-chip" class="type-chip" style="color:${escapeAttr(color)}">${escapeHtml(outType)}</span></div><div id="function-return-meta" class="lane-meta">${outType === "Void" ? "no output value" : "output pin"}</div><div class="pin-tools output-pin-tools"><input id="function-return-type" aria-label="Return type" title="Return type" value="${escapeAttr(outType)}"><button id="set-function-output">Set</button><button id="remove-function-output">Void</button></div></div>`;
+  }
+
+  function syncReturnEditorPreview(type) {
+    const outType = type && type.trim() ? type.trim() : "Void";
+    const color = colorForType(outType);
+    const port = document.getElementById("function-return-port");
+    const chip = document.getElementById("function-return-type-chip");
+    const meta = document.getElementById("function-return-meta");
+    if (port) port.style.color = color;
+    if (chip) {
+      chip.style.color = color;
+      chip.textContent = outType;
+    }
+    if (meta) meta.textContent = outType === "Void" ? "no output value" : "output pin";
+  }
+
+  function pinCardHtml(p) {
+    const type = p.type || "Value";
+    const color = colorForType(type);
+    const rail = pinRail(p);
+    const flags = [p.direction, rail, p.fallible ? "fallible" : "", p.effect_grant_need ? "effect" : ""].filter(Boolean).join(" / ");
+    return `<div class="pin-card" style="--pin-color:${escapeAttr(color)}">${pinPortHtml(type)}<div class="pin-card-title"><b>${escapeHtml(p.name)}</b><small>${escapeHtml(flags)} - ${escapeHtml(type)}</small></div><button data-pin-menu="${escapeAttr(p.pin_id)}">Actions</button></div>`;
   }
 
   function updateDetails(graph, node, pins, inline) {
     if (!node) {
-      details.innerHTML = "<h2>Details</h2><p>Select a node.</p>";
+      details.innerHTML = "<div class=\"details-empty\"><b>No node selected</b><span class=\"tag\">Select, marquee, or use the graph tabs.</span></div>";
       return;
     }
+    const style = nodeStyle(node, graph);
+    details.style.setProperty("--node-accent", style.accent);
     const span = node.source_span || { start: 0, end: 0 };
-    const pinRows = pins.map((p) => `<div class="pin-row"><b>${escapeHtml(p.name)}</b> <span class="tag">${escapeHtml(p.direction)}</span><br><span style="color:${colorForType(p.type)}">${escapeHtml(p.type)}</span> ${p.fallible ? "fallible" : ""}<div class="edit-grid"><button data-pin-menu="${escapeHtml(p.pin_id)}">Compatible actions</button></div></div>`).join("");
+    const pinRows = pins.map(pinCardHtml).join("");
     const inlineRows = inline.map((expr) => `<div class="inline-row"><b>${escapeHtml(expr.role)}</b><code>${escapeHtml(expr.source)}</code><div class="edit-grid"><input data-inline-id="${escapeHtml(expr.inline_expr_id)}" value="${escapeAttr(expr.source)}"><button data-inline-apply="${escapeHtml(expr.inline_expr_id)}">Apply expression</button><button data-inline-promote="${escapeHtml(expr.inline_expr_id)}">Promote to binding</button><button data-inline-convert="${escapeHtml(expr.inline_expr_id)}">Insert conversion</button><button data-inline-preview-extract="${escapeHtml(expr.inline_expr_id)}">Preview extract</button><button data-inline-extract="${escapeHtml(expr.inline_expr_id)}">Extract function</button></div></div>`).join("");
     const rename = node.kind === "binding" ? `<div class="edit-grid"><label>Rename binding<input id="rename-to" value="${escapeAttr(node.title)}"></label><button id="preview-rename">Preview rename</button><button id="rename-binding" class="primary">Rename</button></div>` : "";
     const calleeGraph = (node.kind === "call" || node.kind === "method") ? graphForFunctionName(node.title) : null;
@@ -1750,7 +2168,7 @@ pub fn canvas_js() -> String {
     const fnParams = fnMeta ? (fnMeta.params || []).map((p, i) => functionParamRow(p, i)).join("") : "";
     const fnReturnPanel = fnMeta ? functionReturnRow(fnReturnType) : "";
     const fnEvents = fnMeta ? (graph.event_views || []).map((event) => `<div class="pin-row"><b>${escapeHtml(event.title || event.function)}</b><br><span class="tag">${escapeHtml(event.semantics || "ordinary_jet_function")}</span></div>`).join("") : "";
-    const fnPanel = fnMeta ? `<h2>Function</h2><div class="signature-board"><div class="signature-head"><div><span class="sig-eyebrow">function graph</span><b>${escapeHtml(fnMeta.visibility || "private")} ${escapeHtml(fnMeta.name || node.title)}</b><code>${escapeHtml(fnMeta.signature || "")}</code></div><button id="create-function" title="Create sibling function">New</button></div><div class="pin-lane"><div class="lane-head"><b>Inputs</b><span class="lane-meta">${(fnMeta.params || []).length} pins</span><button id="add-function-pin">+ Input</button></div><div class="pin-list" id="function-pin-list">${fnParams || "<div class=\"pin-empty\">No input pins</div>"}</div></div><div class="pin-lane"><div class="lane-head"><b>Output</b><span class="lane-meta">return type</span></div><div class="pin-list">${fnReturnPanel}</div></div><div class="signature-source"><span class="sig-eyebrow">source signature</span><code>${escapeHtml(fnMeta.signature || "")}</code><input id="function-signature" value="${escapeAttr(fnMeta.signature || "")}"><div class="rename-strip"><input id="function-rename-to" aria-label="Function name" title="Function name" value="${escapeAttr(fnMeta.name || node.title)}"><button id="rename-function">Rename</button></div></div><div class="signature-actions"><button id="edit-function-signature">Apply signature</button><button id="apply-function-pins" class="primary">Apply pins</button></div></div>${fnEvents ? `<h2>Callback views</h2><div class="pin-list">${fnEvents}</div>` : ""}` : "";
+    const fnPanel = fnMeta ? `<h2>Function</h2><div class="signature-board"><div class="signature-head"><div><span class="sig-eyebrow">function graph</span><b>${escapeHtml(fnMeta.visibility || "private")} ${escapeHtml(fnMeta.name || node.title)}</b><code>${escapeHtml(fnMeta.signature || "")}</code></div><button id="create-function" title="Create sibling function">New</button></div><div class="pin-lane"><div class="lane-head"><b>Inputs</b><span class="lane-meta">${(fnMeta.params || []).length} pins</span><button id="add-function-pin">+ Input</button></div><div class="pin-list" id="function-pin-list">${fnParams || "<div class=\"pin-empty\">No input pins</div>"}</div></div><div class="pin-lane"><div class="lane-head"><b>Output</b><span class="lane-meta">return type</span><button id="add-function-output">+ Output</button></div><div class="pin-list">${fnReturnPanel}</div></div><div class="signature-source"><span class="sig-eyebrow">source signature</span><code>${escapeHtml(fnMeta.signature || "")}</code><input id="function-signature" value="${escapeAttr(fnMeta.signature || "")}"><div class="rename-strip"><input id="function-rename-to" aria-label="Function name" title="Function name" value="${escapeAttr(fnMeta.name || node.title)}"><button id="rename-function">Rename</button></div></div><div class="signature-actions"><button id="edit-function-signature">Apply signature</button><button id="apply-function-pins" class="primary">Apply pins</button></div></div>${fnEvents ? `<h2>Callback views</h2><div class="pin-list">${fnEvents}</div>` : ""}` : "";
     const bpLabel = nodeBreakpoint(node) ? "Remove breakpoint" : "Set breakpoint";
     const locals = debugRows(debugOverlay && debugOverlay.locals);
     const watches = debugRows(debugOverlay && debugOverlay.watches);
@@ -1760,23 +2178,27 @@ pub fn canvas_js() -> String {
       const bounds = [b.x || 0, b.y || 0, b.w || 360, b.h || 180].join(",");
       return `<div class="inline-row"><b>${escapeHtml(region.title || "Comment")}</b><code>${escapeHtml(region.region_id)}</code><div class="edit-grid"><input data-region-title="${escapeHtml(region.region_id)}" value="${escapeAttr(region.title || "Comment")}"><input data-region-color="${escapeHtml(region.region_id)}" value="${escapeAttr(region.color || "#2563eb")}"><input data-region-alpha="${escapeHtml(region.region_id)}" value="${escapeAttr(region.alpha || "0.18")}"><input data-region-bounds="${escapeHtml(region.region_id)}" value="${escapeAttr(bounds)}"><button data-region-apply="${escapeHtml(region.region_id)}">Apply comment</button><button data-region-delete="${escapeHtml(region.region_id)}">Delete comment</button></div></div>`;
     }).join("");
+    const affords = (node.edit_affordances || []).slice(0, 4).map((a) => `<span class="details-chip">${escapeHtml(a)}</span>`).join("");
     details.innerHTML = `
-      <p class="title">${escapeHtml(node.title)}</p>
-      <div class="kind">${escapeHtml(node.kind)}</div>
-      <dl>
-        <dt>span</dt><dd>${span.start}..${span.end}</dd>
-        <dt>node</dt><dd>${escapeHtml(node.node_id)}</dd>
-        <dt>affords</dt><dd>${(node.edit_affordances || []).map(escapeHtml).join(", ")}</dd>
-      </dl>
-      <div class="edit-grid"><button id="source-jump">Jump source</button><button id="find-references">Find references</button>${calleeOpen}</div>
+      <div class="details-hero">
+        <div class="details-titleline"><span class="node-glyph">${escapeHtml(style.glyph)}</span><div class="details-title"><p class="title">${escapeHtml(node.title)}</p><div class="kind">${escapeHtml(nodeKindLabel(node, graph))}</div></div></div>
+        <div class="details-chips dev-only"><span class="details-chip">${escapeHtml(node.kind)}</span><span class="details-chip">${pins.length} pins</span>${affords}</div>
+        <div class="quick-actions"><button id="source-jump">Jump source</button><button id="find-references">Find refs</button>${calleeOpen ? calleeOpen.replace("<button", "<button class=\"wide\"") : ""}</div>
+        <dl class="dev-only">
+          <dt>span</dt><dd>${span.start}..${span.end}</dd>
+          <dt>node</dt><dd>${escapeHtml(node.node_id)}</dd>
+        </dl>
+      </div>
       ${rename}
       ${fnPanel}
-      <h2>Debug</h2>
-      <div class="edit-grid"><button id="debug-toggle-break">${bpLabel}</button><button id="debug-add-watch">Add watch</button></div>
-      <div class="pin-list">${locals || watches || stack ? locals + watches + stack : "<div class=\"tag\">no live values</div>"}</div>
-      <h2>Comments</h2><div class="inline-list">${regionRows || "<div class=\"tag\">none</div>"}</div>
-      <h2>Pins</h2><div class="pin-list">${pinRows || "<div class=\"tag\">none</div>"}</div>
-      <h2>Inline</h2><div class="inline-list">${inlineRows || "<div class=\"tag\">none</div>"}</div>
+      <div class="dev-only">
+        <h2>Debug</h2>
+        <div class="edit-grid"><button id="debug-toggle-break">${bpLabel}</button><button id="debug-add-watch">Add watch</button></div>
+        <div class="pin-list">${locals || watches || stack ? locals + watches + stack : "<div class=\"tag\">no live values</div>"}</div>
+        <h2>Comments</h2><div class="inline-list">${regionRows || "<div class=\"tag\">none</div>"}</div>
+        <h2>Pins</h2><div class="pin-list">${pinRows || "<div class=\"tag\">none</div>"}</div>
+        <h2>Inline</h2><div class="inline-list">${inlineRows || "<div class=\"tag\">none</div>"}</div>
+      </div>
     `;
     const renameButton = document.getElementById("rename-binding");
     if (renameButton) {
@@ -1826,20 +2248,30 @@ pub fn canvas_js() -> String {
         const list = document.getElementById("function-pin-list");
         const i = "new" + Date.now();
         const row = document.createElement("div");
-        row.innerHTML = functionParamRow({ name: "value", type: "Int", default_source: "1" }, i);
+        row.innerHTML = functionParamRow({ name: nextParamName(fnMeta), type: "Int", default_source: "" }, i);
         const editorRow = row.firstElementChild;
         if (editorRow) {
           const empty = list.querySelector(".pin-empty");
           if (empty) empty.remove();
           list.appendChild(editorRow);
-          editorRow.querySelector("[data-param-remove]").addEventListener("click", () => editorRow.remove());
+          const remove = editorRow.querySelector("[data-param-remove]");
+          if (remove) remove.addEventListener("click", () => {
+            editorRow.remove();
+            applyFunctionPins(graph, fnMeta, node.title);
+          });
+          applyFunctionPins(graph, fnMeta, node.title);
         }
       });
     }
+    ["apply-function-pins", "set-function-output", "remove-function-output", "add-function-output"].forEach((id) => {
+      const button = document.getElementById(id);
+      if (button) button.addEventListener("click", handleFunctionPinButton);
+    });
     details.querySelectorAll("[data-param-remove]").forEach((button) => {
       button.addEventListener("click", () => {
         const row = button.closest("[data-fn-param]");
         if (row) row.remove();
+        if (fnMeta) applyFunctionPins(graph, fnMeta, node.title);
       });
     });
     details.querySelectorAll("[data-pin-menu]").forEach((button) => {
@@ -2027,6 +2459,27 @@ pub fn canvas_js() -> String {
     ctx.fillText(clipText(text, 28), bx + padX, by + 17 * view.zoom);
   }
 
+  function drawWireTypeBadge(wire, from, to) {
+    const label = wire.wire_kind === "control" ? "EXEC" : (from.pin && from.pin.type) || wire.wire_kind || "Value";
+    const color = wireColor(wire, from);
+    const mx = (from.x + to.x) / 2;
+    const my = (from.y + to.y) / 2;
+    ctx.font = `${Math.max(8, 10 * view.zoom)}px ui-monospace, Consolas, monospace`;
+    const padX = 7 * view.zoom;
+    const badgeW = Math.min(112 * view.zoom, ctx.measureText(label).width + padX * 2);
+    const badgeH = 19 * view.zoom;
+    roundRect(mx - badgeW / 2, my - badgeH / 2, badgeW, badgeH, 5 * view.zoom);
+    ctx.fillStyle = "rgba(7,17,31,.90)";
+    ctx.fill();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = Math.max(.8, view.zoom);
+    ctx.stroke();
+    ctx.fillStyle = color;
+    ctx.textAlign = "center";
+    ctx.fillText(clipText(label, 16), mx, my + 3.5 * view.zoom);
+    ctx.textAlign = "left";
+  }
+
   function exactPinMatch(from, to) {
     if (!from || !to) return false;
     const out = from.direction === "output" ? from : to;
@@ -2066,10 +2519,38 @@ pub fn canvas_js() -> String {
     selectedNodeId = [...selectedNodeIds][0] || selectedNodeId;
   }
 
+  function completeConnection(fromPin, target, graph) {
+    const plan = connectionPlan(graph, fromPin, target);
+    window.__jetCanvasLastConnectionPlan = plan;
+    if (compatiblePin(fromPin, target)) {
+      const out = fromPin.direction === "output" ? fromPin : target;
+      const input = fromPin.direction === "input" ? fromPin : target;
+      const wire = wireIntoPin(graph, input);
+      const replacement = sourceExprForOutputPin(out);
+      if (exactPinMatch(fromPin, target) && wire && replacement) {
+        postTransaction({ schema_version: 1, op: "move_link", revision: latestDoc.revision, wire_id: wire.wire_id, replacement });
+      } else if (!exactPinMatch(fromPin, target)) {
+        const expr = inlineForPin(graph, input);
+        const callee = window.prompt("Visible conversion function", (input.type || "Value") + ".from");
+        if (expr && callee) postTransaction({ schema_version: 1, op: "insert_visible_conversion", revision: latestDoc.revision, inline_expr_id: expr.inline_expr_id, callee });
+        else showToast("Conversion needs an inline source expression");
+      } else {
+        showToast(plan.label + ": no safe source anchor");
+      }
+      return true;
+    }
+    if (target) showToast("Wire refused: " + plan.label);
+    return false;
+  }
+
   canvas.addEventListener("click", function (ev) {
     const rect = canvas.getBoundingClientRect();
     const x = ev.clientX - rect.left;
     const y = ev.clientY - rect.top;
+    if (hitPinAt(x, y)) {
+      ev.preventDefault();
+      return;
+    }
     const found = hitNodeAt(x, y);
     if (found) selectNode(found.node, ev.ctrlKey || ev.metaKey ? "toggle" : ev.shiftKey ? "add" : "replace");
   });
@@ -2091,6 +2572,7 @@ pub fn canvas_js() -> String {
       showToast(pin.name + ": " + pin.type);
       return;
     }
+    setPendingPin(null);
     const found = hitNodeAt(x, y);
     if (found) {
       selectNode(found.node, ev.ctrlKey || ev.metaKey ? "toggle" : ev.shiftKey ? "add" : "replace");
@@ -2141,26 +2623,23 @@ pub fn canvas_js() -> String {
       const rect = canvas.getBoundingClientRect();
       const target = hitPinAt(ev.clientX - rect.left, ev.clientY - rect.top) || hoverPin;
       const graph = latestDoc ? currentGraph(latestDoc) : null;
-      const plan = connectionPlan(graph, drag.pin, target);
-      window.__jetCanvasLastConnectionPlan = plan;
-      if (compatiblePin(drag.pin, target)) {
-        const out = drag.pin.direction === "output" ? drag.pin : target;
-        const input = drag.pin.direction === "input" ? drag.pin : target;
-        const wire = wireIntoPin(graph, input);
-        const replacement = sourceExprForOutputPin(out);
-        if (exactPinMatch(drag.pin, target) && wire && replacement) {
-          postTransaction({ schema_version: 1, op: "move_link", revision: latestDoc.revision, wire_id: wire.wire_id, replacement });
-        } else if (!exactPinMatch(drag.pin, target)) {
-          const expr = inlineForPin(graph, input);
-          const callee = window.prompt("Visible conversion function", (input.type || "Value") + ".from");
-          if (expr && callee) postTransaction({ schema_version: 1, op: "insert_visible_conversion", revision: latestDoc.revision, inline_expr_id: expr.inline_expr_id, callee });
-          else showToast("Conversion needs an inline source expression");
+      const moved = Math.abs(drag.mx - drag.x) > 5 || Math.abs(drag.my - drag.y) > 5;
+      if (!moved && pendingPin && target) {
+        const done = completeConnection(pendingPin, target, graph);
+        setPendingPin(done || pendingPin.pin_id === target.pin_id ? null : pendingPin);
+      } else if (!moved && target && target.pin_id === drag.pin.pin_id) {
+        if (pendingPin && pendingPin.pin_id === target.pin_id) {
+          setPendingPin(null);
+          showToast("Connection cancelled");
         } else {
-          showToast(plan.label + ": no safe source anchor");
+          setPendingPin(drag.pin);
+          showToast("Select destination socket");
         }
       } else if (target) {
-        showToast("Wire refused: " + plan.label);
+        setPendingPin(null);
+        completeConnection(drag.pin, target, graph);
       } else {
+        setPendingPin(null);
         openPinMenu(drag.pin, ev.clientX, ev.clientY);
       }
     }
@@ -2182,27 +2661,10 @@ pub fn canvas_js() -> String {
     const found = hitNodeAt(x, y);
     if (found) {
       selectNode(found.node, "replace");
-      const actions = [
-        { title: "Jump source", detail: "span", group: "source", run: () => { const s = found.node.source_span || { start: 0, end: 0 }; setSourceHash(s); setViewMode("source"); } },
-        { title: "Find references", detail: "semindex", group: "query", run: () => postQuery({ op: "references", symbol: found.node.title }) },
-        { title: "Set breakpoint", detail: "local span", group: "debug", run: () => toggleBreakpoint(found.node) }
-      ];
-      if (graphForFunctionName(found.node.title)) actions.unshift({ title: "Open function graph", detail: "nested graph", group: "graph", run: () => openFunctionGraph(found.node.title) });
-      openContextMenu(ev.clientX, ev.clientY, found.node.title, actions);
+      const graph = latestDoc ? currentGraph(latestDoc) : null;
+      openContextMenu(ev.clientX, ev.clientY, found.node.title, nodeContextActions(graph, found.node));
     } else {
-      const actions = [
-        { title: "Search built-ins", detail: "focus palette panel", group: "palette", run: () => { paletteSearch.focus(); paletteSearch.select(); } },
-        { title: "Fit graph", detail: "viewport", group: "view", run: fitGraph },
-        { title: "New function", detail: "source", group: "function", run: () => {
-          const name = window.prompt("Function name", "helper");
-          if (name) postTransaction({ schema_version: 1, op: "create_function", revision: latestDoc.revision, name, params: "", ret_type: "Int" });
-        } },
-        { title: "Show source", detail: "toggle", group: "view", run: () => setViewMode("source") }
-      ];
-      for (const item of palette.concat(actionEntries).slice(0, 24)) {
-        actions.push({ title: item.title, detail: item.detail || "", group: item.op === "preview_canvas_action" ? "built-in" : "node", run: () => runPalette(item) });
-      }
-      openActionPalette(ev.clientX, ev.clientY, "Graph actions", actions, { context: "built-ins, functions, source actions" });
+      openGraphActionPalette(ev.clientX, ev.clientY);
     }
   });
 
@@ -2232,10 +2694,13 @@ pub fn canvas_js() -> String {
     graphBackStack.push(selectedGraphId);
     switchGraph(next, { push: false, toast: "Forward to " + graphTitle(next) });
   });
+  dockGraphs.addEventListener("click", () => setDrawer(dockGraphs.classList.contains("is-active") ? null : "graphs"));
+  dockDetails.addEventListener("click", () => setDrawer(dockDetails.classList.contains("is-active") ? null : "details"));
   document.getElementById("fit").addEventListener("click", fitGraph);
   document.getElementById("reload").addEventListener("click", loadGraph);
   sourceDiff.addEventListener("click", showSourceDiff);
   viewToggle.addEventListener("click", () => setViewMode(viewMode === "source" ? "graph" : "source"));
+  developerModeButton.addEventListener("click", () => setDeveloperMode(!developerMode));
   undoEdit.addEventListener("click", undoTransaction);
   redoEdit.addEventListener("click", redoTransaction);
   debugStep.addEventListener("click", () => runDebug(["s"]));
@@ -2251,7 +2716,6 @@ pub fn canvas_js() -> String {
     const name = window.prompt("Watch local", "");
     addWatch(name && name.trim());
   });
-  paletteSearch.addEventListener("input", syncPalette);
   canvasSearch.addEventListener("input", runCanvasSearch);
   window.addEventListener("hashchange", applySourceHash);
 
@@ -2272,9 +2736,9 @@ pub fn canvas_js() -> String {
     }
     if ((ev.ctrlKey || ev.metaKey) && ev.key === "p") {
       ev.preventDefault();
-      paletteSearch.focus();
-      paletteSearch.select();
-      showToast("Palette search");
+      const rect = canvas.getBoundingClientRect();
+      openGraphActionPalette(rect.left + Math.min(rect.width - 20, 220), rect.top + 90);
+      showToast("Context actions");
       return;
     }
     if ((ev.ctrlKey || ev.metaKey) && ev.key === "z") {
@@ -2287,18 +2751,22 @@ pub fn canvas_js() -> String {
       redoTransaction();
       return;
     }
-    if (ev.key === "/" && document.activeElement !== paletteSearch && document.activeElement !== canvasSearch) {
+    if (ev.key === "/" && document.activeElement !== canvasSearch) {
       ev.preventDefault();
       canvasSearch.focus();
       return;
     }
     if (ev.key === "Escape") {
+      if (compactCanvasMode() && (leftDrawer.classList.contains("is-drawer-open") || rightDrawer.classList.contains("is-drawer-open"))) {
+        setDrawer(null);
+        return;
+      }
       selectedNodeIds = new Set();
       selectedNodeId = null;
       if (latestDoc) drawGraph(latestDoc);
       return;
     }
-    if (ev.key === "f" && document.activeElement !== paletteSearch && document.activeElement !== canvasSearch) {
+    if (ev.key === "f" && document.activeElement !== canvasSearch) {
       ev.preventDefault();
       fitGraph();
       return;
@@ -2325,7 +2793,7 @@ pub fn canvas_js() -> String {
   });
 
   function handleFunctionPinButton(ev) {
-    const button = ev.target && ev.target.closest && ev.target.closest("#apply-function-pins, #set-function-output, #remove-function-output");
+    const button = ev.target && ev.target.closest && ev.target.closest("#apply-function-pins, #set-function-output, #remove-function-output, #add-function-output");
     if (!button || !latestDoc) return;
     const now = Date.now();
     const handled_at = Number(button.getAttribute("data-canvas-handled-at") || "0");
@@ -2339,14 +2807,18 @@ pub fn canvas_js() -> String {
     if (button.id === "remove-function-output") {
       const ret = document.getElementById("function-return-type");
       if (ret) ret.value = "Void";
+    } else if (button.id === "add-function-output") {
+      const ret = document.getElementById("function-return-type");
+      if (ret && (!ret.value.trim() || ret.value.trim() === "Void")) {
+        ret.value = "Int";
+        syncReturnEditorPreview(ret.value);
+        window.__jetCanvasLastSignature = signatureFromVisibleFunctionPins(graph.function, graph.title);
+        showToast("Output pin ready");
+        return;
+      }
     }
-    const signature = signatureFromVisibleFunctionPins(graph.function, graph.title, button.id === "remove-function-output" ? "Void" : undefined);
-    window.__jetCanvasLastSignature = signature;
-    postTransaction({ schema_version: 1, op: "edit_function_signature", revision: latestDoc.revision, graph_id: graph.graph_id, signature });
+    applyFunctionPins(graph, graph.function, graph.title, button.id === "remove-function-output" ? "Void" : undefined);
   }
-  document.addEventListener("pointerdown", handleFunctionPinButton, true);
-  document.addEventListener("click", handleFunctionPinButton, true);
-
   function runPalette(item) {
     if (!latestDoc || !selectedGraphId) return;
     if (item.op === "preview_canvas_action") {
@@ -2483,7 +2955,6 @@ pub fn canvas_js() -> String {
           pins: action.pins || [],
           args: action.default_args || ["\"canvas\""]
         }));
-        syncPalette();
       })
       .catch(() => {});
   }
@@ -2493,12 +2964,13 @@ pub fn canvas_js() -> String {
     return String(s).replace(/["\\]/g, "\\$&");
   }
 
-  syncPalette();
   window.__jetCanvasPinAuthoring = true;
   window.__jetCanvasDebugOverlay = true;
+  setDeveloperMode(storedFlag("jet.canvas.developerMode"));
   details.innerHTML = "<h2>Details</h2><p>Select a node.</p>";
   window.addEventListener("resize", function () {
-    if (latestDoc) drawGraph(latestDoc);
+    if (!compactCanvasMode()) setDrawer(null);
+    if (latestDoc) window.requestAnimationFrame(fitGraph);
   });
 
   const base = window.__JET_CANVAS_BASE__ || "/canvas";
