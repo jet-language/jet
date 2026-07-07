@@ -1831,7 +1831,8 @@ identity, trend window, confidence policy, and explicit `jet budget update
 
 **D-BPE-NAME1=A / D-BPE-HOST1=B / D-BPE-LAYOUT1=A / D-BPE-ALTITUDE1=A /
 D-BPE-TAXONOMY1=A / D-BPE-EDITSCOPE1=A / D-BPE-PROTOCOL1=C**: Jet's visual
-code editor product is **Canopy**. First host is a `jet dev` browser panel.
+code editor product is **Canvas** (owner rename 2026-07-07; this supersedes the
+earlier Canopy name under the same decision). First host is a `jet dev` browser panel.
 Layout is deterministic from source. Structural constructs are nodes while
 pure leaves stay inline. The node vocabulary uses restrained semantic badges,
 typed pins, and distinct control/error/proof rails. V1 write scope is insert

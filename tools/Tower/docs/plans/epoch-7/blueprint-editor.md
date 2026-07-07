@@ -10,7 +10,7 @@ ratified surface constraints below.
 
 ## Ratified Surface
 
-- `D-BPE-NAME1=A`: product name is **Canopy**.
+- `D-BPE-NAME1=A`: product name is **Canvas** (owner rename 2026-07-07).
 - `D-BPE-HOST1=B`: first host is a `jet dev` browser panel.
 - `D-BPE-LAYOUT1=A`: v1 uses deterministic layout only.
 - `D-BPE-ALTITUDE1=A`: structural nodes, pure leaves inline.
@@ -192,7 +192,7 @@ and text with identical build/test/proof outcomes.
 
 ## Ratified Implementation Constraints
 
-Canopy starts as a `jet dev` browser panel because that host gives demos,
+Canvas starts as a `jet dev` browser panel because that host gives demos,
 teaching, and local iteration without requiring an editor extension. Layout is
 deterministic from source. The default graph expands structural code and keeps
 pure arithmetic/comparison leaves inline. Nodes use one restrained shape family

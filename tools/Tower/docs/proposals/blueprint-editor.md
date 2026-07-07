@@ -208,7 +208,7 @@ queries, text renderer).
 
 | ID | Question | Notes |
 |---|---|---|
-| D-BPE-NAME1 | Product name | A: Canopy |
+| D-BPE-NAME1 | Product name | A: Canvas (owner rename 2026-07-07) |
 | D-BPE-HOST1 | First host | B: `jet dev` browser panel |
 | D-BPE-LAYOUT1 | Layout persistence | A: deterministic layout only |
 | D-BPE-ALTITUDE1 | Default expression altitude | A: structural nodes, pure leaves inline |
@@ -216,7 +216,7 @@ queries, text renderer).
 | D-BPE-EDITSCOPE1 | V1 edit vocabulary | A: structural essentials |
 | D-BPE-PROTOCOL1 | Protocol stability | C: public after Reader, before write flows |
 
-Canopy remains source-first: no binary graph asset, no semantic sidecar, no
+Canvas remains source-first: no binary graph asset, no semantic sidecar, no
 layout file in review.
 
 ---
