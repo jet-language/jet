@@ -55,65 +55,15 @@ the beginner face; deeper proof engines stay opt-in and Jet-diagnostic-shaped.
 - Solver lens tests use fixture solver output laundered into Jet diagnostics;
   no raw solver text reaches users.
 
-## Ballot To Queue
+## Ratified Surface
 
-### D-PROVE-REPLAY1 - Proof and replay surface
+`D-PROVE-REPLAY1=A`: `jet prove` is the umbrella proof and replay command.
 
-Group: static-guarantees.
-
-Gist: choose the exact command and artifact shape for proof and replay.
-
-Story: Omar receives a production panic trace for payment code. He wants one
-command to replay the failure, check contracts and budgets, and hand CI a stable
-JSON report.
-
-In wild:
-
-```text
-jet prove src/payments.jet --replay traces/panic.jreplay
-jet prove src/payments.jet --json > proof.json
-```
-
-Options:
-
-- A: `jet prove` umbrella with `--replay`, `--lens`, `--json`, and typed
-  `.jreplay`/`.jproof` artifacts. Recommended.
-
-```text
-jet prove src/payments.jet --replay traces/panic.jreplay
-jet prove src/payments.jet --lens effects --json > payments.jproof
-```
-
-- B: Separate `jet prove` and `jet replay` top-level commands sharing artifacts.
-  Clear verbs, but users must learn two entrypoints for one correctness report.
-
-```text
-jet replay traces/panic.jreplay --target src/payments.jet
-jet prove src/payments.jet --from-replay traces/panic.jreplay
-```
-
-- C: Test-runner integration only: `jet test --prove --replay`. Familiar, but
-  hides effects, budgets, and replay behind a testing-only mental model.
-
-```text
-jet test --prove --replay traces/panic.jreplay
-jet test --prove --json > proof.json
-```
-
-- D: Dossier-only proof lens. Good for inspection, weak for CI action and
-  beginner "prove this" workflow.
-
-```text
-jet dossier proof src/payments.jet --replay traces/panic.jreplay
-jet dossier proof src/payments.jet --json > proof.json
-```
-
-Comparisons:
-
-- Rust: tests plus type safety, no unified proof command.
-- SPARK/Dafny: strong proof commands, heavier proof language.
-- Property-test tools: practical confidence, usually separate from replay and
-  effects.
-
-Rec: A. One command keeps the beginner path direct while lenses/artifacts give
-experts exact control over proof depth and replay data.
+- `jet prove <target>` renders the beginner pass/fail report.
+- `jet prove <target> --replay trace.jreplay` replays a typed trace against the
+  target.
+- `jet prove <target> --lens effects|replay|refinements|budgets|solver` selects
+  expert proof views as their producers ship.
+- `jet prove <target> --json` emits stable `.jproof`-shaped data for CI.
+- `.jreplay` and `.jproof` are typed artifacts; raw solver/runtime text never
+  reaches users.

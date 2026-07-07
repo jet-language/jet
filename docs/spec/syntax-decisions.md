@@ -1792,6 +1792,31 @@ default. **D-JPK-DISCOVER1**: `jet search`/`jet info` + LSP completions from
 a local offline index. **D-JPK-BUILDDBG1**: failed builds keep the scratch
 dir; `--shell-on-fail`; `jet explain <ref>`; `jet logs <pkg>`.
 
+**D-DOC-GEN1=A**: the documentation generator command is `jet doc`. Default
+output is deterministic local HTML; `--json` emits the stable docs schema;
+`--check` runs doc link, doctest, and stale-example checks. Implementation is
+deferred until the owner explicitly reopens documentation build work.
+
+**D-PROVE-REPLAY1=A**: `jet prove` is the umbrella proof/replay command. It
+accepts `--replay`, `--lens`, and `--json`, with typed `.jreplay` and `.jproof`
+artifacts. Raw solver/runtime text must be laundered into Jet diagnostics.
+
+**D-PERFBUDGET-SURFACE1=A / D-PERFBUDGET-BASELINE1=A**: performance budgets
+are declared in role modules such as `module perf.server { budgets: ... }`.
+Statistical budgets use pinned baseline artifacts with hardware/toolchain
+identity, trend window, confidence policy, and explicit `jet budget update
+--baseline <name>` / `jet bench --budget <name>` commands.
+
+**D-BPE-NAME1=A / D-BPE-HOST1=B / D-BPE-LAYOUT1=A / D-BPE-ALTITUDE1=A /
+D-BPE-TAXONOMY1=A / D-BPE-EDITSCOPE1=A / D-BPE-PROTOCOL1=C**: Jet's visual
+code editor product is **Canopy**. First host is a `jet dev` browser panel.
+Layout is deterministic from source. Structural constructs are nodes while
+pure leaves stay inline. The node vocabulary uses restrained semantic badges,
+typed pins, and distinct control/error/proof rails. V1 write scope is insert
+call, rewire, edit inline expression, add fallback rail, extract/collapse,
+rename binding, and create test. The graph protocol may stay internal for the
+read-only Reader, but must become public and versioned before write flows ship.
+
 **D-LSP1 / D-LSP2**: LSP v2 uses one incremental compiler-service query cache
 (`crates/jet-queries`) shared by editor requests, with full applicable LSP
 3.17 coverage. Every advertised capability must have a named test in

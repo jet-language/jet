@@ -69,6 +69,7 @@ fn codemod_rename_dry_run_apply_and_undo() {
     let log_text = fs::read_to_string(&log).unwrap();
     assert!(log_text.contains("inverse_from"));
     assert!(log_text.contains("after_hash"));
+    assert!(log_text.contains("inverse_edits"));
 
     let undo = Command::new(jet())
         .args(["codemod", "undo", log.to_str().unwrap()])
@@ -82,4 +83,49 @@ fn codemod_rename_dry_run_apply_and_undo() {
     let restored = fs::read_to_string(&source).unwrap();
     assert!(restored.contains("fn report"));
     assert!(restored.contains("report()"));
+}
+
+#[test]
+fn codemod_undo_refuses_changed_file() {
+    let dir = temp_dir("stale");
+    let source = dir.join("main.jet");
+    fs::write(
+        &source,
+        "fn report() {\n    print(\"ok\")\n}\n\nfn run() {\n    report()\n}\n",
+    )
+    .unwrap();
+    let object = dir.join("rename.codemod.json");
+    fs::write(
+        &object,
+        format!(
+            "{{\"name\":\"StaleRename\",\"entry\":\"{}\",\"operation\":\"rename\",\"from\":\"report\",\"to\":\"summarize\"}}\n",
+            source.display()
+        ),
+    )
+    .unwrap();
+
+    let apply = Command::new(jet())
+        .args(["codemod", "apply", object.to_str().unwrap()])
+        .output()
+        .expect("jet codemod apply");
+    assert!(
+        apply.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&apply.stderr)
+    );
+    fs::write(
+        &source,
+        "fn summarize() {\n    print(\"changed\")\n}\n\nfn run() {\n    summarize()\n}\n",
+    )
+    .unwrap();
+
+    let log = dir.join(".jet/codemods/StaleRename.log.json");
+    let undo = Command::new(jet())
+        .args(["codemod", "undo", log.to_str().unwrap()])
+        .output()
+        .expect("jet codemod undo");
+    assert!(!undo.status.success());
+    let stderr = String::from_utf8_lossy(&undo.stderr);
+    assert!(stderr.contains("checkpoint mismatch"), "stderr: {stderr}");
+    assert!(fs::read_to_string(&source).unwrap().contains("changed"));
 }

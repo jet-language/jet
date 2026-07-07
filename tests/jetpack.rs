@@ -1769,6 +1769,18 @@ fn config_example_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/jetpack-config")
 }
 
+fn assert_jetos_stderr_snapshot(name: &str, stderr: &str) {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/jetpack-diagnostics")
+        .join(format!("{name}.stderr"));
+    let expected = fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("missing jetos diagnostic snapshot {}: {e}", path.display()));
+    assert_eq!(
+        stderr, expected,
+        "jetos diagnostic snapshot `{name}` changed"
+    );
+}
+
 #[test]
 fn os_build_realizes_selected_system_offline() {
     // I5/D-JPK-OSVERB1/D-JPK-OSHOST1: `jet os build <host>` loads config.jet
@@ -1845,6 +1857,13 @@ fn os_switch_activates_and_sets_current() {
         .map(|e| e.path().join("etc/systemd/system/openssh.service"))
         .find(|p| p.exists());
     assert!(units.is_some(), "expected generated systemd unit");
+    let vm_proof = root.join("systems/generations/known-good/vm-proof.txt");
+    let vm_text = fs::read_to_string(&vm_proof).expect("risk switch writes VM proof");
+    assert!(vm_text.contains("plan-sha256:"), "vm proof: {vm_text}");
+    assert!(
+        vm_text.contains("service-artifacts: pass"),
+        "vm proof: {vm_text}"
+    );
 }
 
 #[test]
@@ -1884,8 +1903,7 @@ fn os_missing_host_is_friendly_and_exits_2() {
         .unwrap();
     assert_eq!(out.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("E0979"), "stderr: {stderr}");
-    assert!(stderr.contains("@host"), "stderr: {stderr}");
+    assert_jetos_stderr_snapshot("missing_host", &stderr);
 }
 
 #[test]
@@ -1899,9 +1917,7 @@ fn os_unknown_host_lists_available_systems() {
         .unwrap();
     assert_eq!(out.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("E0980"), "stderr: {stderr}");
-    assert!(stderr.contains("nope"), "stderr: {stderr}");
-    assert!(stderr.contains("halcyon"), "should list systems: {stderr}");
+    assert_jetos_stderr_snapshot("unknown_host", &stderr);
 }
 
 #[test]
@@ -1914,7 +1930,27 @@ fn os_missing_config_file_is_friendly() {
         .unwrap();
     assert_eq!(out.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("E0981"), "stderr: {stderr}");
+    assert_jetos_stderr_snapshot("missing_config", &stderr);
+}
+
+#[test]
+fn os_retired_option_namespace_is_snapshot_pinned() {
+    let proj = Scratch::new("os-bad-namespace");
+    let root = Scratch::new("os-bad-namespace-root");
+    fs::write(
+        proj.join("config.jet"),
+        "module box {\n    system.box: { target: linux.x64, options: [net.hostName: \"box\"] }\n}\n",
+    )
+    .unwrap();
+    let out = jet()
+        .args(["os", "build", "box", "--no-color", "--offline"])
+        .current_dir(&proj.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_jetos_stderr_snapshot("retired_namespace", &stderr);
 }
 
 #[test]
@@ -1980,6 +2016,17 @@ fn os_generations_are_newest_first_and_rollback_activates_prior() {
         String::from_utf8_lossy(&rollback.stderr).contains("rolled back"),
         "stderr: {}",
         String::from_utf8_lossy(&rollback.stderr)
+    );
+    let same = jet()
+        .args(["os", "rollback", "halcyon", "first", "--no-color"])
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert_eq!(same.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&same.stderr);
+    assert!(
+        stderr.contains("no generation is available"),
+        "stderr: {stderr}"
     );
 }
 

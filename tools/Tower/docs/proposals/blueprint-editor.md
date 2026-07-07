@@ -204,29 +204,20 @@ stack; Phase-1 Reader is buildable as soon as semindex + LSP webview exist.
 Feeds and is fed by `ue-to-jet.md` §3 (type-directed authoring — same
 queries, text renderer).
 
-## Open decisions (future ballot rows — nothing here is decided)
+## Ratified decisions
 
 | ID | Question | Notes |
 |---|---|---|
-| D-BPE-NAME1 | Product name | Menu below |
-| D-BPE-HOST1 | Where the canvas lives first: editor webview (Cursor/VS Code), `jet dev` browser panel, standalone app, Zed pane | One first-class host first; protocol keeps the rest open |
-| D-BPE-LAYOUT1 | Deterministic auto-layout only vs optional manual positions (and if manual: where positions persist) | Recommendation: auto-only; positions are the one thing that would reintroduce a non-text artifact |
-| D-BPE-ALTITUDE1 | Default expression altitude: which subexpressions start inline vs as nodes | Pure UX, but owner-facing defaults |
-| D-BPE-TAXONOMY1 | Node visual language: shapes/colors per construct class, effect badge design, error-rail styling | Decide from mockups, not prose |
-| D-BPE-EDITSCOPE1 | Phase-2/3 edit-op vocabulary: which refactors are canvas gestures v1 | Bounded by D-CODEMOD1 |
+| D-BPE-NAME1 | Product name | A: Canopy |
+| D-BPE-HOST1 | First host | B: `jet dev` browser panel |
+| D-BPE-LAYOUT1 | Layout persistence | A: deterministic layout only |
+| D-BPE-ALTITUDE1 | Default expression altitude | A: structural nodes, pure leaves inline |
+| D-BPE-TAXONOMY1 | Visual vocabulary | A: restrained semantic badges, typed pins, distinct rails |
+| D-BPE-EDITSCOPE1 | V1 edit vocabulary | A: structural essentials |
+| D-BPE-PROTOCOL1 | Protocol stability | C: public after Reader, before write flows |
 
-**Naming menu (D-BPE-NAME1)** — jet/aviation, original:
-
-| Candidate | Read |
-|---|---|
-| **Canopy** | the glass you see the whole flight through; over the code, not instead of it |
-| **Flightdeck** | where the whole aircraft is visible and operable |
-| **HUD** | heads-up display: data projected over the real thing — exactly the projection model |
-| **Contrail** | the visible line a jet draws; wires as vapor trails |
-| **Slipstream** | flow you can ride; dataflow canvas |
-| **Vector** | direction + magnitude; also the drawing sense |
-| **Glasswork** | glass cockpit + craft |
-| **Skein** | threads/wires; the term for geese in flight formation |
+Canopy remains source-first: no binary graph asset, no semantic sidecar, no
+layout file in review.
 
 ---
 

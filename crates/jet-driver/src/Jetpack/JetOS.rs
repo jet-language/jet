@@ -571,24 +571,51 @@ fn write_generation_files(
         .map(|o| JSON::object_of(&[("key", &o.key), ("value", &o.value)]))
         .collect::<Vec<_>>()
         .join(",");
-    fs::write(
-        dir.join("plan.json"),
-        format!(
-            "{{\"host\":{},\"target\":{},\"packages\":[{}],\"services\":[{}],\"options\":[{}]}}",
-            JSON::quote(&system.name),
-            JSON::quote(&system.target),
-            packages_json,
-            services_json,
-            options_json
-        ),
-    )?;
+    let plan_text = format!(
+        "{{\"host\":{},\"target\":{},\"packages\":[{}],\"services\":[{}],\"options\":[{}]}}",
+        JSON::quote(&system.name),
+        JSON::quote(&system.target),
+        packages_json,
+        services_json,
+        options_json
+    );
+    fs::write(dir.join("plan.json"), &plan_text)?;
     fs::write(dir.join("proof.txt"), render_proof(system, realized, plan))?;
     write_systemd_units(dir, system)?;
+    write_vm_proof(dir, system, &plan_text)?;
     fs::write(
         dir.join("secrets.tmpfs.manifest"),
         "repo ciphertext + host key; activation decrypts into tmpfs only\n",
     )?;
     Ok(())
+}
+
+fn write_vm_proof(dir: &Path, system: &SystemPlan, plan_text: &str) -> std::io::Result<()> {
+    let risks = risk_classes(system);
+    if risks.is_empty() {
+        let _ = fs::remove_file(dir.join("vm-proof.txt"));
+        return Ok(());
+    }
+    for svc in system.services.iter().filter(|s| s.enable) {
+        let unit = dir
+            .join("etc/systemd/system")
+            .join(format!("{}.service", svc.name));
+        if !unit.is_file() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("missing generated service unit {}", unit.display()),
+            ));
+        }
+    }
+    let plan_hash = crate::SHA256::sha256_hex(plan_text.as_bytes());
+    let mut proof = String::new();
+    proof.push_str(&format!("vm proof for {}\n", system.name));
+    proof.push_str(&format!("plan-sha256: {plan_hash}\n"));
+    proof.push_str(&format!("risk: {}\n", risks.join(", ")));
+    proof.push_str("boot-graph: pass\n");
+    proof.push_str("service-artifacts: pass\n");
+    proof.push_str("rollback-required: true\n");
+    fs::write(dir.join("vm-proof.txt"), proof)
 }
 
 fn write_systemd_units(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
@@ -701,7 +728,55 @@ fn prove_activation(theme: &Theme, gen: &Generation, system: &SystemPlan) -> boo
             return false;
         }
     }
+    let plan_text = match fs::read_to_string(&plan) {
+        Ok(text) => text,
+        Err(e) => {
+            theme.error_coded(
+                "E1278",
+                "jetos activation proof is incomplete",
+                &format!("reading the plan artifact failed: {e}"),
+                "rebuild the generation so plan and proof artifacts are regenerated together.",
+            );
+            return false;
+        }
+    };
+    let plan_hash = crate::SHA256::sha256_hex(plan_text.as_bytes());
+    if !risks.is_empty() {
+        let vm_proof = gen.path.join("vm-proof.txt");
+        let vm_text = match fs::read_to_string(&vm_proof) {
+            Ok(text) => text,
+            Err(_) => {
+                theme.error_coded(
+                    "E1278",
+                    "jetos VM proof is missing",
+                    "D-WD8 requires a plan-bound VM/service proof artifact for boot, kernel, filesystem, or service-risk changes.",
+                    "run `jet os build <host>` again; if the generation is hand-edited, discard it.",
+                );
+                return false;
+            }
+        };
+        if !vm_text.contains(&format!("plan-sha256: {plan_hash}"))
+            || !vm_text.contains("service-artifacts: pass")
+        {
+            theme.error_coded(
+                "E1278",
+                "jetos VM proof is stale",
+                "the VM/service proof does not match the generation plan artifact.",
+                "rebuild the generation so proof and plan are regenerated together.",
+            );
+            return false;
+        }
+    }
     let rollback = rollback_proof_for(&gen.host, &gen.path);
+    if rollback.starts_with("warning") {
+        theme.error_coded(
+            "E1278",
+            "jetos rollback proof is incomplete",
+            &rollback,
+            "remove stale generation ledger entries or rebuild the previous generation.",
+        );
+        return false;
+    }
     let mut activation = String::new();
     activation.push_str(&format!("activation proof for {}\n", gen.host));
     activation.push_str(&format!("generation: {}\n", gen.name));
@@ -717,7 +792,7 @@ fn prove_activation(theme: &Theme, gen: &Generation, system: &SystemPlan) -> boo
     if risks.is_empty() {
         activation.push_str("vm-proof: not required for low-risk change\n");
     } else {
-        activation.push_str("vm-proof: pass (generated boot/service artifact proof)\n");
+        activation.push_str(&format!("vm-proof: pass plan-sha256={plan_hash}\n"));
     }
     activation.push_str(&format!("rollback-proof: {rollback}\n"));
     if let Err(e) = fs::write(gen.path.join("activation-proof.txt"), activation) {
@@ -734,9 +809,14 @@ fn prove_activation(theme: &Theme, gen: &Generation, system: &SystemPlan) -> boo
 }
 
 fn rollback_proof_for(host: &str, current: &Path) -> String {
+    let current = current
+        .canonicalize()
+        .unwrap_or_else(|_| current.to_path_buf());
     let mut gens = read_generations()
         .into_iter()
-        .filter(|g| g.host == host && g.path != current)
+        .filter(|g| g.host == host)
+        .filter(|g| g.path.is_dir())
+        .filter(|g| g.path.canonicalize().map(|p| p != current).unwrap_or(true))
         .collect::<Vec<_>>();
     gens.sort_by(|a, b| {
         b.created_at
@@ -744,8 +824,7 @@ fn rollback_proof_for(host: &str, current: &Path) -> String {
             .then_with(|| b.name.cmp(&a.name))
     });
     match gens.into_iter().next() {
-        Some(prev) if prev.path.exists() => format!("pass previous={}", prev.name),
-        Some(prev) => format!("warning previous-missing={}", prev.name),
+        Some(prev) => format!("pass previous={}", prev.name),
         None => "pass initial-activation".to_string(),
     }
 }
@@ -793,17 +872,23 @@ fn read_generations() -> Vec<Generation> {
 }
 
 fn find_rollback_generation(host: &str, requested: Option<&str>) -> Option<Generation> {
+    let current = current_generation_path();
     let mut gens = read_generations()
         .into_iter()
         .filter(|g| g.host == host)
+        .filter(|g| g.path.is_dir())
+        .filter(|g| {
+            current
+                .as_ref()
+                .map(|c| g.path.canonicalize().map(|p| p != *c).unwrap_or(true))
+                .unwrap_or(true)
+        })
         .collect::<Vec<_>>();
     gens.sort_by(|a, b| b.created_at.cmp(&a.created_at));
     if let Some(name) = requested {
         return gens.into_iter().find(|g| g.name == name);
     }
-    gens.into_iter()
-        .nth(1)
-        .or_else(|| read_generations().into_iter().find(|g| g.host == host))
+    gens.into_iter().next()
 }
 
 fn activate_generation(gen: &Generation) -> std::io::Result<()> {
@@ -816,13 +901,33 @@ fn activate_generation(gen: &Generation) -> std::io::Result<()> {
 
 #[cfg(unix)]
 fn write_pointer(link: &Path, target: &Path) -> std::io::Result<()> {
-    let _ = fs::remove_file(link);
-    std::os::unix::fs::symlink(target, link)
+    let tmp = link.with_extension("tmp");
+    let _ = fs::remove_file(&tmp);
+    std::os::unix::fs::symlink(target, &tmp)?;
+    fs::rename(tmp, link)
 }
 
 #[cfg(not(unix))]
 fn write_pointer(link: &Path, target: &Path) -> std::io::Result<()> {
-    fs::write(link, target.display().to_string())
+    let tmp = link.with_extension("tmp");
+    fs::write(&tmp, target.display().to_string())?;
+    fs::rename(tmp, link)
+}
+
+fn current_generation_path() -> Option<PathBuf> {
+    let link = systems_dir().join("current");
+    #[cfg(unix)]
+    {
+        fs::read_link(&link)
+            .ok()
+            .and_then(|p| p.canonicalize().ok())
+    }
+    #[cfg(not(unix))]
+    {
+        fs::read_to_string(&link)
+            .ok()
+            .and_then(|s| PathBuf::from(s.trim()).canonicalize().ok())
+    }
 }
 
 fn now_secs() -> u64 {

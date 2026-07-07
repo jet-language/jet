@@ -25,6 +25,14 @@ struct FilePlan {
     edits: Vec<TextEdit>,
 }
 
+#[derive(Debug, Clone)]
+struct LoggedFile {
+    path: PathBuf,
+    before_hash: String,
+    after_hash: String,
+    inverse_edits: Vec<TextEdit>,
+}
+
 pub(crate) fn run_codemod(args: &[String]) {
     let mut positional: Vec<&str> = Vec::new();
     for a in args {
@@ -48,9 +56,8 @@ pub(crate) fn run_codemod(args: &[String]) {
         }
         ["undo", log] => {
             let log_path = absolutize(log);
-            let cm = load_inverse_log(&log_path);
-            let plans = plan_rename(&cm);
-            apply_undo(&cm, &plans, &log_path);
+            let (name, files) = load_replay_log(&log_path);
+            apply_undo(&name, &files, &log_path);
         }
         _ => {
             eprintln!("error: `jet codemod` needs `dry-run`, `apply`, or `undo`");
@@ -85,7 +92,7 @@ fn load_codemod(path: &Path) -> RenameCodemod {
     }
 }
 
-fn load_inverse_log(path: &Path) -> RenameCodemod {
+fn load_replay_log(path: &Path) -> (String, Vec<LoggedFile>) {
     let text = fs::read_to_string(path).unwrap_or_else(|e| {
         eprintln!(
             "error: could not read codemod log `{}`: {e}",
@@ -94,28 +101,36 @@ fn load_inverse_log(path: &Path) -> RenameCodemod {
         exit(ExitCodes::USER_ERROR);
     });
     let name = json_string_field(&text, "name").unwrap_or_else(|| "UndoCodemod".to_string());
-    let entry = required_field(&text, "entry");
-    let from = required_field(&text, "inverse_from");
-    let to = required_field(&text, "inverse_to");
-    let expected_current = required_field(&text, "after_hash");
-    let entry_path = PathBuf::from(entry);
-    let current = fs::read(&entry_path)
-        .map(|b| format!("sha256-{}", jet::SHA256::sha256_hex(&b)))
-        .unwrap_or_default();
-    if current != expected_current {
-        eprintln!(
-            "error: checkpoint mismatch for `{}`; refusing undo",
-            entry_path.display()
-        );
-        eprintln!(" Why: current file hash does not match codemod apply log");
+    let file_objects = json_array_objects(&text, "files");
+    if file_objects.is_empty() {
+        eprintln!("error: codemod log has no recorded file edits");
         exit(ExitCodes::USER_ERROR);
     }
-    RenameCodemod {
-        name,
-        entry: entry_path,
-        from,
-        to,
-    }
+    let files = file_objects
+        .iter()
+        .map(|obj| {
+            let path = PathBuf::from(required_field(obj, "path"));
+            let before_hash = required_field(obj, "before_hash");
+            let after_hash = required_field(obj, "after_hash");
+            let inverse_edits = json_array_objects(obj, "inverse_edits")
+                .iter()
+                .map(|edit_obj| TextEdit {
+                    span: Span::new(
+                        required_usize_field(edit_obj, "start"),
+                        required_usize_field(edit_obj, "end"),
+                    ),
+                    new_text: required_field(edit_obj, "new_text"),
+                })
+                .collect();
+            LoggedFile {
+                path,
+                before_hash,
+                after_hash,
+                inverse_edits,
+            }
+        })
+        .collect();
+    (name, files)
 }
 
 fn plan_rename(cm: &RenameCodemod) -> Vec<FilePlan> {
@@ -219,15 +234,48 @@ fn apply_plans(cm: &RenameCodemod, plans: &[FilePlan]) {
     println!("  log: {}", log.display());
 }
 
-fn apply_undo(cm: &RenameCodemod, plans: &[FilePlan], log_path: &Path) {
-    for p in plans {
-        fs::write(&p.path, &p.after).unwrap_or_else(|e| {
-            eprintln!("error: could not write `{}`: {e}", p.path.display());
+fn apply_undo(name: &str, files: &[LoggedFile], log_path: &Path) {
+    let mut writes = Vec::new();
+    for file in files {
+        let current = fs::read_to_string(&file.path).unwrap_or_else(|e| {
+            eprintln!("error: could not read `{}`: {e}", file.path.display());
+            exit(ExitCodes::USER_ERROR);
+        });
+        let current_hash = hash_text(&current);
+        if current_hash != file.after_hash {
+            eprintln!(
+                "error: checkpoint mismatch for `{}`; refusing undo",
+                file.path.display()
+            );
+            eprintln!(" Why: current file hash does not match codemod apply log");
+            exit(ExitCodes::USER_ERROR);
+        }
+        let restored =
+            jet::FixEngine::apply_edits(&current, &file.inverse_edits).unwrap_or_else(|e| {
+                eprintln!(
+                    "error: codemod undo edits overlap in `{}`: {e:?}",
+                    file.path.display()
+                );
+                exit(ExitCodes::USER_ERROR);
+            });
+        if hash_text(&restored) != file.before_hash {
+            eprintln!(
+                "error: undo result mismatch for `{}`; refusing undo",
+                file.path.display()
+            );
+            eprintln!(" Why: recorded inverse edits do not recreate the original file hash");
+            exit(ExitCodes::USER_ERROR);
+        }
+        writes.push((file.path.clone(), restored));
+    }
+    for (path, text) in writes {
+        fs::write(&path, text).unwrap_or_else(|e| {
+            eprintln!("error: could not write `{}`: {e}", path.display());
             exit(ExitCodes::USER_ERROR);
         });
     }
-    println!("codemod undo `{}` applied", cm.name);
-    println!("  files: {}", plans.len());
+    println!("codemod undo `{}` applied", name);
+    println!("  files: {}", files.len());
     println!("  source log: {}", log_path.display());
 }
 
@@ -243,25 +291,40 @@ fn write_log(cm: &RenameCodemod, plans: &[FilePlan]) -> PathBuf {
         exit(ExitCodes::USER_ERROR);
     });
     let log_path = dir.join(format!("{}.log.json", sanitize_file_name(&cm.name)));
-    let before_hash = plans
-        .first()
-        .map(|p| format!("sha256-{}", jet::SHA256::sha256_hex(p.before.as_bytes())))
-        .unwrap_or_default();
-    let after_hash = plans
-        .first()
-        .map(|p| format!("sha256-{}", jet::SHA256::sha256_hex(p.after.as_bytes())))
-        .unwrap_or_default();
+    let files = plans
+        .iter()
+        .map(|p| {
+            let edits = inverse_edits(p, &cm.to)
+                .into_iter()
+                .map(|e| {
+                    format!(
+                        "{{\"start\":{},\"end\":{},\"new_text\":\"{}\"}}",
+                        e.span.start,
+                        e.span.end,
+                        json_escape(&e.new_text)
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(",");
+            format!(
+                "{{\"path\":\"{}\",\"before_hash\":\"{}\",\"after_hash\":\"{}\",\"inverse_edits\":[{}]}}",
+                json_escape(&p.path.display().to_string()),
+                json_escape(&hash_text(&p.before)),
+                json_escape(&hash_text(&p.after)),
+                edits
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",\n    ");
     let text = format!(
-        "{{\n  \"name\": \"{}\",\n  \"entry\": \"{}\",\n  \"operation\": \"rename\",\n  \"from\": \"{}\",\n  \"to\": \"{}\",\n  \"inverse_from\": \"{}\",\n  \"inverse_to\": \"{}\",\n  \"before_hash\": \"{}\",\n  \"after_hash\": \"{}\",\n  \"files\": {}\n}}\n",
+        "{{\n  \"name\": \"{}\",\n  \"entry\": \"{}\",\n  \"operation\": \"rename\",\n  \"from\": \"{}\",\n  \"to\": \"{}\",\n  \"inverse_from\": \"{}\",\n  \"inverse_to\": \"{}\",\n  \"files\": [\n    {}\n  ]\n}}\n",
         json_escape(&cm.name),
         json_escape(&cm.entry.display().to_string()),
         json_escape(&cm.from),
         json_escape(&cm.to),
         json_escape(&cm.to),
         json_escape(&cm.from),
-        json_escape(&before_hash),
-        json_escape(&after_hash),
-        plans.len()
+        files
     );
     fs::write(&log_path, text).unwrap_or_else(|e| {
         eprintln!("error: could not write `{}`: {e}", log_path.display());
@@ -270,9 +333,36 @@ fn write_log(cm: &RenameCodemod, plans: &[FilePlan]) -> PathBuf {
     log_path
 }
 
+fn inverse_edits(plan: &FilePlan, replacement: &str) -> Vec<TextEdit> {
+    let mut edits = plan.edits.clone();
+    edits.sort_by_key(|e| e.span.start);
+    let mut delta: isize = 0;
+    let mut out = Vec::new();
+    for edit in edits {
+        let start = edit.span.start;
+        let end = edit.span.end;
+        let after_start = (start as isize + delta) as usize;
+        let after_end = after_start + replacement.len();
+        let old = plan.before.get(start..end).unwrap_or("").to_string();
+        out.push(TextEdit {
+            span: Span::new(after_start, after_end),
+            new_text: old,
+        });
+        delta += replacement.len() as isize - (end - start) as isize;
+    }
+    out
+}
+
 fn required_field(text: &str, key: &str) -> String {
     json_string_field(text, key).unwrap_or_else(|| {
         eprintln!("error: codemod object missing `{key}`");
+        exit(ExitCodes::USER_ERROR);
+    })
+}
+
+fn required_usize_field(text: &str, key: &str) -> usize {
+    json_usize_field(text, key).unwrap_or_else(|| {
+        eprintln!("error: codemod log missing numeric `{key}`");
         exit(ExitCodes::USER_ERROR);
     })
 }
@@ -309,6 +399,77 @@ fn json_string_field(text: &str, key: &str) -> Option<String> {
         }
     }
     None
+}
+
+fn json_usize_field(text: &str, key: &str) -> Option<usize> {
+    let needle = format!("\"{key}\"");
+    let mut rest = text;
+    while let Some(pos) = rest.find(&needle) {
+        rest = &rest[pos + needle.len()..];
+        let colon = rest.find(':')?;
+        rest = &rest[colon + 1..];
+        let digits = rest
+            .trim_start()
+            .chars()
+            .take_while(|c| c.is_ascii_digit())
+            .collect::<String>();
+        if !digits.is_empty() {
+            return digits.parse().ok();
+        }
+    }
+    None
+}
+
+fn json_array_objects(text: &str, key: &str) -> Vec<String> {
+    let needle = format!("\"{key}\"");
+    let Some(pos) = text.find(&needle) else {
+        return Vec::new();
+    };
+    let rest = &text[pos + needle.len()..];
+    let Some(colon) = rest.find(':') else {
+        return Vec::new();
+    };
+    let rest = &rest[colon + 1..];
+    let Some(start) = rest.find('[') else {
+        return Vec::new();
+    };
+    let mut objects = Vec::new();
+    let mut depth = 0usize;
+    let mut object_start = None;
+    let mut in_string = false;
+    let mut escaped = false;
+    for (i, c) in rest[start + 1..].char_indices() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if c == '\\' {
+                escaped = true;
+            } else if c == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match c {
+            '"' => in_string = true,
+            '{' => {
+                if depth == 0 {
+                    object_start = Some(i);
+                }
+                depth += 1;
+            }
+            '}' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    if let Some(s) = object_start.take() {
+                        objects.push(rest[start + 1 + s..start + 1 + i + 1].to_string());
+                    }
+                }
+            }
+            ']' if depth == 0 => break,
+            _ => {}
+        }
+    }
+    objects
 }
 
 fn validate_ident(name: &str) {
@@ -357,6 +518,10 @@ fn sanitize_file_name(name: &str) -> String {
     } else {
         out
     }
+}
+
+fn hash_text(text: &str) -> String {
+    format!("sha256-{}", jet::SHA256::sha256_hex(text.as_bytes()))
 }
 
 fn json_escape(s: &str) -> String {

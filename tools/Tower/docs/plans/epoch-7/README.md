@@ -1,8 +1,10 @@
 # Epoch 7 — jetos and visual proof tooling
 
-**Status:** planning only. Epoch 7 work is frozen behind
-`D-JETOS-FREEZE1` until fresh Tower ballots re-open jetos module, command,
-generation, image, activation, Studio, and proof surfaces.
+**Status:** mixed. The first `jet os` runtime slice is ratified and shipped:
+config discovery, check/build/switch/rollback/generations/init/lift/image,
+full-word option namespaces, generation names, installer proof artifacts, and
+proof-before-switch checks. Remaining Epoch 7 work here is Studio, deeper visual
+proof tooling, and public GUI/proof protocols.
 
 This folder holds durable plans for the two GUI/proof cards:
 
@@ -20,9 +22,10 @@ This folder holds durable plans for the two GUI/proof cards:
   changes.
 - `D-WD12`: `jet prove` is a progressive proof/replay product over contracts,
   refinements, effects, budgets, property tests, and replay facts.
-- `D-JETOS-FREEZE1`: jetos-only spellings are research notes, not current syntax
-  law. No fixture, parser, evaluator, CLI, or GUI contract may ship until its
-  exact surface is ratified.
+- `D-JPK-OS*`: ratified `jet os` command, host, generation, namespace, init,
+  secret, image, disk, and disable-policy surfaces now define the CLI slice.
+- `D-JOS-STUDIO-*`: ratified Studio launch/view/state/proof/protocol choices
+  define the GUI plan, but implementation remains future work.
 
 ## Shared architecture rule
 

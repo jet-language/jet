@@ -56,67 +56,12 @@ emits stable HTML and machine-readable docs data.
 - No host `cargo doc` dependency in the generator path; comparison to rustdoc is
   design input only.
 
-## Ballot To Queue
+## Ratified Surface
 
-### D-DOC-GEN1 - Documentation generator surface
+`D-DOC-GEN1=A`: `jet doc` is the documentation generator command.
 
-Group: tooling.
-
-Gist: choose how users generate Jet API docs.
-
-Story: Alice publishes a small HTTP package. She wants one command that builds
-local docs, runs doc examples, and gives CI a stable JSON file for package
-review.
-
-In wild:
-
-```text
-jet doc
-jet doc --json > docs.json
-```
-
-Options:
-
-- A: `jet doc` command. Generates HTML by default, `--json` emits the stable
-  schema, `--check` runs doc/link/doctest checks. Recommended.
-
-```text
-jet doc
-jet doc --check
-jet doc --json > target/docs/docs.json
-```
-
-- B: `jet docs` command. Reads naturally, but Jet commands mostly use singular
-  action nouns and `doc` matches `rustdoc` without importing Rust surface.
-
-```text
-jet docs
-jet docs --check
-jet docs --json > target/docs/docs.json
-```
-
-- C: `jet dossier docs` lens only. Keeps one umbrella command, but makes the
-  common "build docs" action less direct for beginners.
-
-```text
-jet dossier docs .
-jet dossier docs . --json > target/docs/docs.json
-```
-
-- D: external `jetdoc` tool. Isolates implementation, but creates a second
-  installation and versioning story.
-
-```text
-jetdoc build .
-jetdoc check .
-jetdoc json . > target/docs/docs.json
-```
-
-Comparisons:
-
-- Rust: `cargo doc` builds HTML from rustdoc comments.
-- Go: `go doc` and pkg.go.dev use compiler-known package facts.
-- TypeScript: TypeDoc is separate and plugin-shaped.
-
-Rec: A. `jet doc` is the simplest beginner command and still exposes expert
-JSON/check modes over the same fact schema.
+- `jet doc` generates deterministic local HTML by default.
+- `jet doc --json` emits the stable machine-readable docs schema.
+- `jet doc --check` runs doc link, doctest, and stale-example checks for CI.
+- `jet dossier` may link to generated docs facts, but it is not the primary docs
+  generation command.

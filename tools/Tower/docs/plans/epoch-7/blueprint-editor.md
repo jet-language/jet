@@ -5,8 +5,19 @@
 This file is the implementation plan and ballot inventory.
 
 **Build only after:** stable `D-SEMINDEX1` facts, formatter stability for every
-projected construct, edit transactions/codemods (`D-CODEMOD1`), and the owner
-ballots at the end of this file.
+projected construct, edit transactions/codemods (`D-CODEMOD1`), and the
+ratified surface constraints below.
+
+## Ratified Surface
+
+- `D-BPE-NAME1=A`: product name is **Canopy**.
+- `D-BPE-HOST1=B`: first host is a `jet dev` browser panel.
+- `D-BPE-LAYOUT1=A`: v1 uses deterministic layout only.
+- `D-BPE-ALTITUDE1=A`: structural nodes, pure leaves inline.
+- `D-BPE-TAXONOMY1=A`: restrained semantic badges, typed pins, distinct rails.
+- `D-BPE-EDITSCOPE1=A`: v1 write scope is structural essentials.
+- `D-BPE-PROTOCOL1=C`: protocol is internal for Reader, public before write
+  flows.
 
 ## Goal
 
@@ -40,8 +51,8 @@ expanded node graphs are two altitudes over the same AST, not two mechanisms.
 read-only graph documents plus write-capable edit transactions. It does not
 type-check independently.
 
-**Canvas clients.** Editor webview, `jet dev` panel, standalone Studio, and
-future Zed pane all consume the same protocol. First host is owner-gated.
+**Canvas clients.** `jet dev` browser panel is first. Editor webview,
+standalone Studio, and future Zed pane can consume the same protocol later.
 
 **Edit transactions.** User actions are named source operations: insert call,
 rewire argument, extract subgraph, inline node, add test region, wrap in
@@ -70,8 +81,7 @@ state into review.
 - `entry_node`, `exit_nodes`
 - `nodes`, `pins`, `wires`, `regions`
 - `inline_exprs`: AST subtrees rendered as editable expression text
-- `layout_hints`: deterministic, derivable hints only unless a future ballot
-  ratifies persistent manual positions
+- `layout_hints`: deterministic, derivable hints only
 
 `Node`:
 
@@ -120,12 +130,12 @@ Define graph JSON schema, projection query, and golden projection fixtures for
 functions, calls, bindings, branches, loops, lambdas, `?`, `?? return`,
 `#Test`, `#Unsafe`, effects, comments, generics, and method chains.
 
-Exit: an internal projection test helper emits stable JSON for fixture programs.
-No public CLI until `D-BPE-PROTOCOL1` is decided.
+Exit: an internal projection test helper emits stable JSON for fixture programs;
+protocol remains internal until Reader proves it.
 
 ### BPE1 — Reader UI
 
-Render one function graph read-only in the first ratified host. Dragging,
+Render one function graph read-only in the `jet dev` browser panel. Dragging,
 zooming, search, node focus, and source-span jump work. Pin hover shows type,
 capability, effect, and source snippet.
 
@@ -143,9 +153,10 @@ shows the existing Jet unsupported diagnostic, not raw backend output.
 
 ### BPE3 — structural editing
 
-Implement insert call from drag-off, rewire pin, inline literal edit, add
-fallback rail, collapse/extract to function, and rename binding. Every edit
-round-trips through formatter and produces an ordinary diff.
+Implement the structural essentials: insert call from drag-off, rewire pin,
+inline literal edit, add fallback rail, collapse/extract to function, rename
+binding, and create test. Every edit round-trips through formatter and produces
+an ordinary diff. Public protocol/schema is required before this write flow.
 
 Exit: paired text/graph tests prove side-by-side editing stays synchronized.
 
@@ -179,222 +190,14 @@ and text with identical build/test/proof outcomes.
 - Invariant checks: no second parser/checker, no generated semantic sidecar, no
   graph-owned source truth.
 
-## Ballots to queue
-
-### D-BPE-NAME1
-
-**group:** tooling
-
-**gist:** Choose the product name for Jet's visual code editor.
-
-**story:** Maya teaches game scripting to artists. She wants to say "open this
-in ___" and have the name feel like a first-party Jet surface, not a plugin.
-
-**inWild:**
-
-```text
-jet <name> open src/game.jet
-```
-
-**options:**
-
-- A / Canopy: The graph sits over the code like glass over the cockpit. Strong
-  "projection over source" meaning.
-  `jet canopy src/game.jet`
-- B / Flightdeck: Emphasizes full operational control. Strong for expert
-  cockpit, heavier for beginners.
-  `jet flightdeck src/game.jet`
-- C / HUD: Short and literal: information projected over the real program.
-  Risks sounding like an overlay, not an editor.
-  `jet hud src/game.jet`
-- D / Blueprint: Familiar to target users but owned by Unreal and semantically
-  misleading because Jet is source-first.
-  `jet blueprint src/game.jet`
-
-**comparisons:** Unreal uses Blueprint for binary graph assets; Jet should avoid
-that ownership model. Xcode Instruments and VS Code names are tool nouns, not
-language syntax.
-
-**rec:** A. "Canopy" best communicates source-backed visibility without copying
-Blueprint's asset model.
-
-### D-BPE-HOST1
-
-**group:** tooling
-
-**gist:** Choose the first host for the visual editor.
-
-**story:** Devon is reviewing a Jet PR. They want to open one function as a
-graph from the editor they already use, then jump back to the diff.
-
-**inWild:**
-
-```text
-Open command palette -> Jet: Open Function Graph
-```
-
-**options:**
-
-- A / Editor webview first: VS Code/Cursor extension over LSP protocol.
-  Best where code review and source editing already happen.
-- B / `jet dev` browser panel first: no editor dependency, good demos and
-  teaching, weaker daily-edit fit.
-- C / Standalone app first: best canvas control, highest risk of feeling like a
-  separate product.
-- D / Zed pane first: aligned with a modern editor, narrower audience.
-
-**comparisons:** Blueprint succeeds as an integrated editor surface; Enso's
-standalone experience made adoption depend on switching tools.
-
-**rec:** A. Start where source lives; keep the protocol host-neutral.
-
-### D-BPE-LAYOUT1
-
-**group:** tooling
-
-**gist:** Decide whether graph node positions are derived or saved.
-
-**story:** Priya reviews a refactor. She wants a stable graph view without
-committing noisy layout changes.
-
-**inWild:**
-
-```text
-git diff
-# only .jet source changed; no graph-position file appears
-```
-
-**options:**
-
-- A / deterministic layout only: positions derive from formatted source and
-  semantic structure. No layout merge conflicts.
-- B / generated local cache: manual positions saved under `.jet/`, never
-  committed, resettable.
-- C / committed sidecar: manual positions in a reviewable file beside source.
-  Better hand-arranged diagrams, but introduces a second artifact.
-
-**comparisons:** Blueprint stores layout in opaque assets; code review suffers.
-Graphviz derives layout; review stays text-first.
-
-**rec:** A for v1. Add B later only for local comfort if users demand it.
-
-### D-BPE-ALTITUDE1
-
-**group:** tooling
-
-**gist:** Choose which expressions start inline versus expanded as nodes.
-
-**story:** Nora opens math-heavy gameplay code. She needs the flow readable
-without turning every `+` and comparison into node clutter.
-
-**inWild:**
-
-```jet
-scene.on_frame(frame => {
-    player.velocity = player.velocity + gravity * frame.dt
-})
-```
-
-**options:**
-
-- A / structural nodes, pure leaves inline: calls, bindings, branches, loops,
-  effects, and fallible paths are nodes; pure arithmetic/comparisons stay inline
-  unless expanded.
-- B / all expressions as nodes: maximum visual uniformity; math becomes noisy.
-- C / all expression bodies inline until manually expanded: compact, but hides
-  important call/effect structure from beginners.
-
-**comparisons:** Blueprint's math graphs become spaghetti; spreadsheets keep
-small expressions inline and expand structure around them.
-
-**rec:** A. It preserves full fidelity while making the default graph readable.
-
-### D-BPE-TAXONOMY1
-
-**group:** tooling
-
-**gist:** Choose the visual vocabulary for node kinds and rails.
-
-**story:** Sam scans a graph and needs to distinguish data, control, error,
-unsafe, effectful, and proof-failed regions before reading labels.
-
-**inWild:**
-
-```text
-http.get #(Net) node: effect badge
-body? rail: fallible side exit
-#Unsafe region: audit border + reason
-```
-
-**options:**
-
-- A / restrained semantic badges: one node shape, typed pins, small badges for
-  effects/capabilities, distinct rails for control/error/proof.
-- B / many shapes/colors by construct: fast visual scanning, higher learning
-  load and accessibility risk.
-- C / text-first monochrome: easiest to theme, weaker at impossible-action UX.
-
-**comparisons:** Blueprint uses strong color categories; accessibility and
-large-graph noise are common pain points. Modern IDEs favor semantic badges.
-
-**rec:** A. It keeps the beginner surface learnable and leaves expert facts
-visible without color-only meaning.
-
-### D-BPE-EDITSCOPE1
-
-**group:** tooling
-
-**gist:** Choose the v1 write-capable graph edit vocabulary.
-
-**story:** Lee wants to patch a bug from the graph without learning every
-refactor gesture on day one.
-
-**inWild:**
-
-```text
-drag from String pin -> choose .lines()
-select nodes -> Extract Function
-click fallible rail -> Add ?? return
-```
-
-**options:**
-
-- A / structural essentials: insert call, rewire, edit inline expr, add
-  fallback rail, extract/collapse, rename binding, create test.
-- B / read-only plus inline edits only: safest first write path, too weak to
-  prove the product.
-- C / full refactor suite v1: powerful, but makes first release harder to
-  explain and test as a coherent contract.
-
-**comparisons:** IDE refactors succeed when each operation maps to a clear
-source edit. Visual tools fail when gestures are magic transformations.
-
-**rec:** A. It is enough to author real code while staying bounded and testable.
-
-### D-BPE-PROTOCOL1
-
-**group:** tooling
-
-**gist:** Decide whether the graph protocol is public in v1.
-
-**story:** Imani builds a review bot that wants to render graph diffs in CI.
-They need a stable schema or a clear "internal only" boundary.
-
-**inWild:**
-
-```text
-jet graph src/payments.jet --json > graph.json
-```
-
-**options:**
-
-- A / internal LSP protocol first: faster iteration; no compatibility promise.
-- B / public `jet graph --json` schema v1: CLI and tools can consume it; schema
-  versioning required immediately.
-- C / public only after Reader ships: internal during first UI, then stabilize
-  before write flows.
-
-**comparisons:** LSP stabilized editor integration by making protocol explicit;
-early unstable compiler JSON often becomes accidental API.
-
-**rec:** C. Keep Reader moving, then freeze before external write tooling grows.
+## Ratified Implementation Constraints
+
+Canopy starts as a `jet dev` browser panel because that host gives demos,
+teaching, and local iteration without requiring an editor extension. Layout is
+deterministic from source. The default graph expands structural code and keeps
+pure arithmetic/comparison leaves inline. Nodes use one restrained shape family
+with typed pins, semantic badges, and distinct control/error/proof rails.
+
+The Reader protocol may remain internal while the projection proves out. Before
+write-capable flows ship, the graph document and edit transaction schema become
+public, versioned, and snapshot-tested.

@@ -63,129 +63,23 @@ statistical budgets use pinned baselines and trend policy.
 - Dossier/prove snapshots showing budget facts consumed from the same report.
 - No-regression: projects without budgets compile/run/test unchanged.
 
-## Ballots To Queue
+## Ratified Surface
 
-### D-PERFBUDGET-SURFACE1 - Budget declaration surface
+`D-PERFBUDGET-SURFACE1=A`: budget declarations live in role modules, for example
+`module perf.server { budgets: ... }`. Package, env, service, and scene budgets
+all resolve to the same typed budget facts.
 
-Group: tooling.
+`D-PERFBUDGET-BASELINE1=A`: statistical budgets use pinned baseline artifacts
+with hardware/toolchain identity, trend window, confidence policy, and an
+explicit update command.
 
-Gist: choose where performance budgets are declared.
-
-Story: Mei owns an HTTP service and a small game. She wants service latency,
-startup, binary size, and frame budgets checked in CI without teaching every
-new contributor benchmark internals.
-
-In wild:
-
-```jet
-module perf.server {
-    budgets: {
-        startup: 20ms
-        alloc_per_request: 0
-        p99_latency: 5ms
-        binary_size: 3MiB
-    }
-}
-```
-
-Options:
-
-- A: Role modules such as `module perf.server { budgets: ... }`, with package,
-  env, service, and scene attachments resolving to the same typed budget facts.
-  Recommended.
-
-```jet
-module perf.server {
-    budgets: {
-        startup: 20ms
-        p99_latency: 5ms
-        binary_size: 3MiB
-    }
-}
-```
-
-- B: `pkg.jet` target fields only. Clear for packaged builds, but one-file and
-  scene/service budgets need extra ceremony.
-
-```jet
-targets: {
-    server: executable {
-        entry: "src/server.jet"
-        budgets: { startup: 20ms, p99_latency: 5ms }
-    }
-}
-```
-
-- C: `@Budget(...)` markers on functions. Local and visible, but poor for
-  package/service budgets and statistical baselines.
-
-```jet
-@Budget(p99_latency: 5ms)
-fn handle(req: Request) -> Response { ... }
-```
-
-- D: external policy file. Easy to generate, but creates split-brain state.
-
-```text
-perf-budget.jetpolicy
-server.startup = 20ms
-server.p99_latency = 5ms
-```
-
-Comparisons:
-
-- Lighthouse and web tooling use budget config files.
-- Go/Rust rely mostly on benchmarks and external CI policy.
-- Game engines expose frame/memory budgets in project settings.
-
-Rec: A. Role modules preserve source review, work for beginner defaults once a
-budget exists, and still give experts exact typed facts.
-
-### D-PERFBUDGET-BASELINE1 - Statistical baseline policy
-
-Group: tooling.
-
-Gist: choose how statistical budgets avoid flaky CI.
-
-Story: Mei's p99 latency shifts by machine. CI should catch regressions without
-failing every time a runner has background load.
-
-In wild:
+Accepted command shape for the implementation plan:
 
 ```text
 jet budget update --baseline ci/linux-x64
 jet bench --budget ci/linux-x64
 ```
 
-Options:
-
-- A: Pinned baseline artifact with hardware/toolchain identity, trend window,
-  confidence policy, and explicit update command. Recommended.
-
-```text
-jet budget update --baseline ci/linux-x64
-jet bench --budget ci/linux-x64
-```
-
-- B: Absolute thresholds only. Simple, but noisy for latency and throughput.
-
-```jet
-module perf.server {
-    budgets: { p99_latency: 5ms }
-}
-```
-
-- C: Advisory-only statistical budgets. Avoids flakes, but weakens CI value.
-
-```text
-jet bench --budget ci/linux-x64 --warn-only
-warning: p99_latency above trend budget
-```
-
-Comparisons:
-
-- Criterion stores baselines and compares distributions.
-- Web performance tooling distinguishes budgets from lab variance.
-
-Rec: A. Deterministic budgets remain hard gates; statistical budgets become
-evidence-bound trend checks instead of raw one-run thresholds.
+Deterministic budgets remain hard gates. Statistical budgets compare against
+evidence-bound baselines so CI catches real regressions without raw one-run
+threshold flake.
