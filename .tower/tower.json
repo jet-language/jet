@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 262,
-    "rev": 810,
+    "rev": 813,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -30321,7 +30321,7 @@
       "explainer": "",
       "story": "Betty is replacing a React TodoMVC with Jet. She wants the add box, checkbox toggles, filters, and reload-persistent tasks to live in Jet code, not handwritten JavaScript glue. This choice decides whether the browser slice proves Jet as an app framework or only as a compute/render island.",
       "inWild": "use core.web as web\n\nfn run() {\n    state := load_tasks()\n    web.on(\"#new-task\", \"keydown\", (ev) => {\n        if ev.key == \"Enter\" { add_task(web.value(\"#new-task\")) }\n    })\n    web.storage.set(\"tasks\", encode_tasks(state))\n}",
-      "detail": "",
+      "detail": "Current friction: `jettasks` can render through exported #Js functions, but Jet code cannot bind DOM events or browser storage itself. Host-page JS can call exports, yet that leaves app ownership outside Jet. If A is ratified, implementation touches `crates/jet-sema/src/Sema/CheckerCoreLib.rs`, `crates/jet-codegen/src/Codegen/Web.rs`, `crates/jet-codegen/src/Prelude/DomRuntime.js`, `examples/apps/jettasks/*`, `tests/web_build.rs`, and `tests/slices.rs`; proof is fake-DOM event/storage harness plus static web build and TodoMVC reducer/output goldens.",
       "options": [
         {
           "key": "A",
@@ -30378,7 +30378,7 @@
       "explainer": "",
       "story": "Earl is bringing up a tiny board. Reading a status register is not enough; he must write a byte to UART data and stream the Life transcript. Jet needs this power, but only inside an audited unsafe region so beginners never see the footgun.",
       "inWild": "use core.mem as mem\n\n#Unsafe(\"UART0 is mapped by the board profile and this write is volatile\") {\n    tx :: mem.Ptr<U8>.from_addr(0x09000000)\n    mem.volatile_write(tx, 74)\n}",
-      "detail": "",
+      "detail": "Current friction: `core.mem` has `volatile_read` and target-profile MMIO validation, but no write operation and no pointer-deref assignment lvalue. Without a write, `metal` cannot emit UART serial bytes. If A is ratified, implementation touches `crates/jet-foundation/src/Syntax.rs`, `crates/jet-sema/src/Sema/CheckerCoreLib.rs`, `crates/jet-codegen/src/Codegen/TIR/{subset,lower,emit}.rs`, diagnostics/tests for unsafe gating, `examples/apps/metal/*`, and `tests/slices.rs`; proof is gated `mem.volatile_write` plus freestanding/QEMU-oriented serial transcript path.",
       "options": [
         {
           "key": "A",
@@ -30430,7 +30430,7 @@
       "explainer": "",
       "story": "Earl runs the game at a club and wants a window, sprites, sound, input, and replay. CI still needs to verify the same rules without opening a display server. This choice sets the first real raylib bridge boundary.",
       "inWild": "use core.raylib as rl\n\nfn run() {\n    w :: rl.window_open(800, 600, \"jetfighter\")\n    tex :: rl.load_texture(\"assets/ship.png\")\n    loop !w.should_close() {\n        rl.begin_drawing(w)\n        rl.draw_texture(tex, 120, 90)\n        rl.end_drawing()\n    }\n}",
-      "detail": "",
+      "detail": "Current friction: `core.raylib` is a typed no-op skeleton: `window_open` returns a struct, `should_close` returns true, and no texture/audio/input bridge exists. If A is ratified, implementation touches `crates/jet-sema/src/Sema/CheckerCoreLib.rs`, `crates/jet-codegen/src/Prelude/CoreLib.rs`, `crates/jet-codegen/src/Codegen/TIR/{subset,lower,emit}.rs`, `Source/CmdCompile.rs`/link handling as needed, `examples/apps/jetfighter/*`, `tests/corelib.rs`, and `tests/slices.rs`; proof is real display bridge when available plus headless replay transcript in CI.",
       "options": [
         {
           "key": "A",
@@ -31710,6 +31710,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-07T01:59:10.051Z",
+      "by": "codex",
+      "action": "decision.update",
+      "ref": "D-FLAGSHIP-RAYLIB1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T01:59:09.997Z",
+      "by": "codex",
+      "action": "decision.update",
+      "ref": "D-FLAGSHIP-MMIO1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T01:59:09.943Z",
+      "by": "codex",
+      "action": "decision.update",
+      "ref": "D-FLAGSHIP-WEBAPI1",
+      "note": ""
+    },
     {
       "at": "2026-07-07T01:57:18.479Z",
       "by": "codex",
