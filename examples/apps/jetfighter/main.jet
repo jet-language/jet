@@ -1,0 +1,64 @@
+use core.game as game
+
+struct Ship {
+    x: Int
+    y: Int
+    score: Int
+}
+
+struct Asteroid {
+    x: Int
+    y: Int
+    alive: Bool
+}
+
+fn hit(ship: Ship, rock: Asteroid) -> Bool {
+    return rock.alive && (ship.x == rock.x) && (ship.y == rock.y)
+}
+
+fn step(ship: Ship, rock: Asteroid, input: String) -> Ship {
+    next := Ship.{x: ship.x, y: ship.y, score: ship.score}
+    if input == "right" {
+        next = Ship.{x: ship.x + 1, y: ship.y, score: ship.score}
+    }
+    if input == "up" {
+        next = Ship.{x: ship.x, y: ship.y + 1, score: ship.score}
+    }
+    if hit(next, rock) {
+        next = Ship.{x: next.x, y: next.y, score: next.score + 250}
+    }
+    return next
+}
+
+fn replay() -> [Ship] {
+    rock :: Asteroid.{x: 2, y: 1, alive: true}
+    ship := Ship.{x: 0, y: 0, score: 0}
+    frames: [Ship] := []
+    loop input in ["right", "right", "up"] {
+        ship = step(ship, rock, input)
+        frames.push(copy ship)
+    }
+    return frames
+}
+
+fn run() {
+    scene := game.Scene.new("jetfighter")
+    scene.input.bind("thrust", "Up")
+    scene.input.bind("fire", "Space")
+    scene.budgets.set(game.Budgets.new(16, 128, 512, 8))
+    frames :: replay()
+    print("jetfighter replay")
+    i := 0
+    loop frame in frames {
+        print("frame {i} ship=({frame.x},{frame.y}) score={frame.score}")
+        i += 1
+    }
+    print(game.run(scene, replay: game.Replay.record("runs/jetfighter.jreplay")))
+}
+
+#Test("collision awards points") {
+    ship :: Ship.{x: 1, y: 1, score: 0}
+    rock :: Asteroid.{x: 2, y: 1, alive: true}
+    next :: step(ship, rock, "right")
+    require_eq(next.score, 250)
+}

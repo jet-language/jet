@@ -1,0 +1,91 @@
+use core.files as fs
+use core.io as io
+use core.regex as re
+
+struct Hit {
+    path: String
+    line: Int
+    text: String
+}
+
+fn default_pattern() -> String {
+    return "error|warning|TODO"
+}
+
+fn default_paths() -> [String] {
+    return [
+        "examples/apps/jetgrep/fixtures/api.log",
+        "examples/apps/jetgrep/fixtures/notes.txt",
+    ]
+}
+
+fn pattern_from_args() -> String {
+    args :: io.args()
+    if args.get(1) == Val(pattern) {
+        return pattern
+    }
+    return default_pattern()
+}
+
+fn paths_from_args() -> [String] {
+    args :: io.args()
+    out: [String] := []
+    i := 2
+    loop i < args.len() {
+        if args.get(i) == Val(path) {
+            out.push(path)
+        }
+        i += 1
+    }
+    if out.len() == 0 {
+        return default_paths()
+    }
+    return out
+}
+
+fn scan_file(pattern: String, path: String) -> [Hit] {
+    text :: fs.read(copy path) ?? ""
+    hits: [Hit] := []
+    line_no := 1
+    loop line in text.split("\n") {
+        if re.is_match(pattern, line) ?? panic("bad regex") {
+            hits.push(Hit.{path: copy path, line: line_no, text: line})
+        }
+        line_no += 1
+    }
+    return hits
+}
+
+fn scan(pattern: String, paths: [String]) -> [Hit] {
+    hits: [Hit] := []
+    loop path in paths {
+        loop hit in scan_file(copy pattern, path) {
+            hits.push(hit)
+        }
+    }
+    return hits
+}
+
+fn render_hits(hits: [Hit]) -> [String] {
+    lines: [String] := []
+    loop hit in hits {
+        lines.push("{hit.path}:{hit.line}: {hit.text}")
+    }
+    return lines
+}
+
+fn run() {
+    pattern :: pattern_from_args()
+    paths :: paths_from_args()
+    hits :: scan(copy pattern, paths)
+    print("jetgrep pattern={pattern}")
+    loop line in render_hits(hits) {
+        print(line)
+    }
+    print("matches={hits.len()}")
+}
+
+#Test("scan finds deterministic fixture hits") {
+    hits :: scan(default_pattern(), default_paths())
+    require_eq(hits.len(), 4)
+}

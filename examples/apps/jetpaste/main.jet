@@ -1,0 +1,83 @@
+use core.db as db
+use core.http as http
+use core.net as net
+use core.tasks as tasks
+
+fn no_params() -> [DbValue] {
+    return []
+}
+
+fn json_pair(key: String, value: String) -> String {
+    return "{{\"{key}\":\"{value}\"}}"
+}
+
+fn handle_health(req: HttpRequest) -> HttpResponse {
+    return HttpResponse.{status: "200 OK", body: json_pair("ok", "true"), headers: []}
+}
+
+fn handle_create(req: HttpRequest) -> HttpResponse {
+    return HttpResponse.{status: "201 Created", body: json_pair("id", "p0001"), headers: []}
+}
+
+fn handle_fetch(req: HttpRequest) -> HttpResponse {
+    id :: req.param("id") ?? "p0001"
+    return HttpResponse.{status: "200 OK", body: "paste={id}", headers: []}
+}
+
+fn run() {
+    conn :: db.open_memory()
+    _created :: conn.execute("CREATE TABLE paste (id TEXT PRIMARY KEY, body TEXT)", no_params()) ?? panic("create")
+    _inserted :: conn.execute("INSERT INTO paste (id, body) VALUES (?, ?)", [DbValue.Text("p0001"), DbValue.Text("flight plan")]) ?? panic("insert")
+    count_row :: conn.query_one("SELECT COUNT(*) AS n FROM paste", no_params()) ?? panic("count")
+    stored := 0
+    if count_row == Val(found) {
+        n_val :: found.get("n") ?? panic("missing n")
+        stored = n_val.int() ?? panic("n")
+    }
+    body_row :: conn.query_one("SELECT body FROM paste WHERE id = ?", [DbValue.Text("p0001")]) ?? panic("query")
+    fetched_db := "missing"
+    if body_row == Val(found) {
+        body_val :: found.get("body") ?? panic("missing body")
+        fetched_db = body_val.text() ?? panic("body")
+    }
+    print("jetpaste db stored={stored} fetched={fetched_db}")
+
+    router :: http.router()
+    router.get("/health", handle_health)
+    router.post("/paste", handle_create)
+    router.get("/p/:id", handle_fetch)
+
+    (sender, ch) :: tasks.channel<String>()
+    server_task :: tasks.spawn(take(sender, router) () => {
+        listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind")
+        addr :: listener.local_addr()
+        sender.send(copy addr)
+        loop _i in [0, 1, 2] {
+            stream :: listener.accept() ?? panic("accept")
+            raw :: stream.read() ?? panic("read")
+            req :: http.parse(raw)
+            resp :: http.dispatch(router, req)
+            net.tcp_reply(stream, resp.status(), resp.body())
+        }
+    })
+    addr :: ch.receive() ?? panic("addr")
+    health :: http.get("http://{addr}/health") ?? panic("health")
+    created :: http.post("http://{addr}/paste", "flight plan") ?? panic("create")
+    fetched :: http.get("http://{addr}/p/p0001") ?? panic("fetch")
+    server_task.join()
+    print("health {health.status()} {health.body()}")
+    print("create {created.status()} {created.body()}")
+    print("fetch {fetched.status()} {fetched.body()}")
+}
+
+#Test("db round trip stores paste") {
+    conn :: db.open_memory()
+    _created :: conn.execute("CREATE TABLE paste (id TEXT PRIMARY KEY, body TEXT)", no_params()) ?? panic("create")
+    _inserted :: conn.execute("INSERT INTO paste (id, body) VALUES (?, ?)", [DbValue.Text("p0001"), DbValue.Text("flight plan")]) ?? panic("insert")
+    row :: conn.query_one("SELECT body FROM paste WHERE id = ?", [DbValue.Text("p0001")]) ?? panic("query")
+    if row == Val(found) {
+        body_val :: found.get("body") ?? panic("missing body")
+        body :: body_val.text() ?? panic("body")
+        require_eq(body, "flight plan")
+    }
+}

@@ -1,0 +1,91 @@
+use core.devserver as devserver
+use core.ui as ui
+
+#Target(Web)
+#Html("index.html")
+
+struct Task {
+    id: Int
+    title: String
+    done: Bool
+}
+
+fn seed_tasks() -> [Task] {
+    return [
+        Task.{id: 1, title: "write plan", done: true},
+        Task.{id: 2, title: "ship slices", done: false},
+    ]
+}
+
+fn add_task(tasks: [Task], title: String) -> [Task] {
+    out: [Task] := []
+    loop task in tasks {
+        out.push(task)
+    }
+    out.push(Task.{id: out.len() + 1, title: title, done: false})
+    return out
+}
+
+fn toggle(tasks: [Task], id: Int) -> [Task] {
+    out: [Task] := []
+    loop task in tasks {
+        if task.id == id {
+            out.push(Task.{id: task.id, title: task.title, done: !task.done})
+        } else {
+            out.push(task)
+        }
+    }
+    return out
+}
+
+fn remaining(tasks: [Task]) -> Int {
+    n := 0
+    loop task in tasks {
+        if !task.done {
+            n += 1
+        }
+    }
+    return n
+}
+
+fn transcript(tasks: [Task]) -> [String] {
+    lines: [String] := []
+    loop task in tasks {
+        mark := " "
+        if task.done {
+            mark = "x"
+        }
+        lines.push("[{mark}] {task.title}")
+    }
+    lines.push("{remaining(tasks)} items left")
+    return lines
+}
+
+#Js
+fn render_count(n: Int) {
+    backend :: ui.null_backend()
+    node :: ui.node_color("{n} items left", 160.0, 44.0, "#126b5a")
+    constraint :: ui.constraint(0.0, 0.0, 260.0, 80.0)
+    size :: backend.measure(node, constraint)
+    frame :: ui.rect(24.0, 24.0, size.width, size.height)
+    backend.layout(node, frame)
+    backend.paint(node)
+}
+
+fn dev() {
+    server :: devserver.app()
+    server.serve()
+}
+
+fn run() {
+    tasks :: toggle(add_task(seed_tasks(), "verify harness"), 2)
+    print("jettasks")
+    loop line in transcript(tasks) {
+        print(line)
+    }
+}
+
+#Test("remaining updates through add and toggle") {
+    tasks :: toggle(add_task(seed_tasks(), "verify harness"), 2)
+    require_eq(remaining(tasks), 1)
+}

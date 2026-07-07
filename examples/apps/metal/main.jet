@@ -1,0 +1,60 @@
+use core.math as math
+
+struct Cell {
+    live: Bool
+}
+
+fn bit(cell: Cell) -> String {
+    if cell.live {
+        return "#"
+    }
+    return "."
+}
+
+fn row(a: Cell, b: Cell, c: Cell) -> String {
+    return "{bit(a)}{bit(b)}{bit(c)}"
+}
+
+fn live_count3(a: Cell, b: Cell, c: Cell) -> Int {
+    n := 0
+    if a.live {
+        n += 1
+    }
+    if b.live {
+        n += 1
+    }
+    if c.live {
+        n += 1
+    }
+    return n
+}
+
+fn next_center3(a: Cell, b: Cell, c: Cell) -> Cell {
+    n :: live_count3(a, b, c)
+    return Cell.{live: ((n == 2) || (n == 3))}
+}
+
+fn energy(generation: Int, live: Int) -> Int {
+    return math.max(generation * live, live)
+}
+
+fn run() {
+    g0a :: Cell.{live: false}
+    g0b :: Cell.{live: true}
+    g0c :: Cell.{live: false}
+    g1a :: Cell.{live: true}
+    g1b :: next_center3(g0a, g0b, g0c)
+    g1c :: Cell.{live: true}
+    g2a :: next_center3(g1a, g1b, g1c)
+    g2b :: Cell.{live: false}
+    g2c :: next_center3(g1a, g1b, g1c)
+    print("metal boot")
+    print("g0 {row(g0a, g0b, g0c)}")
+    print("g1 {row(g1a, g1b, g1c)}")
+    print("g2 {row(g2a, g2b, g2c)}")
+    print("energy={energy(3, live_count3(g2a, g2b, g2c))}")
+}
+
+#Test("next center follows life-neighbor rule") {
+    require(next_center3(Cell.{live: true}, Cell.{live: true}, Cell.{live: false}).live)
+}
