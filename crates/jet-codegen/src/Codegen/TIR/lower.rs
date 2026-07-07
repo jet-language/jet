@@ -5446,16 +5446,19 @@ pub(crate) fn lower_method_call(
     // `core_fixed_sig` table. Tried BEFORE the builtin shape (a core method named
     // `get`/`split`/… must not be claimed by the receiver-keyed builtin op).
     if recv_type.is_none() {
-        if let Some(submodule) = core_module_path_from_receiver(receiver, &cx.core_imports, env) {
-            let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
-            return TExpr {
-                ty: core_call_return_ty(&submodule, method),
-                kind: TExprKind::CoreCall {
-                    module: submodule,
-                    method: method.to_string(),
-                    args: targs,
-                },
-            };
+        if matches!(receiver, Expr::Field(..)) {
+            if let Some(submodule) = core_module_path_from_receiver(receiver, &cx.core_imports, env)
+            {
+                let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
+                return TExpr {
+                    ty: core_call_return_ty(&submodule, method),
+                    kind: TExprKind::CoreCall {
+                        module: submodule,
+                        method: method.to_string(),
+                        args: targs,
+                    },
+                };
+            }
         }
         if let Expr::Ident(alias, _) = receiver {
             if !env.locals.contains_key(alias) {

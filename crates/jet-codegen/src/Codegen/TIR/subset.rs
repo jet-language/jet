@@ -2857,10 +2857,13 @@ pub(crate) fn method_call_in_subset(
     // polymorphic math/random/io specials + every closure-taking / handle-constructor
     // call stay on the AST path.
     if recv_type.is_none() {
-        if let Some(submodule) = core_module_path_from_receiver(receiver, &cx.core_imports, locals)
-        {
-            return core_call_covered(&submodule, method)
-                && core_call_args_in_subset(&submodule, method, args, cx, locals);
+        if matches!(receiver, Expr::Field(..)) {
+            if let Some(submodule) =
+                core_module_path_from_receiver(receiver, &cx.core_imports, locals)
+            {
+                return core_call_covered(&submodule, method)
+                    && core_call_args_in_subset(&submodule, method, args, cx, locals);
+            }
         }
         if let Expr::Ident(alias, _) = receiver {
             if !locals.contains(alias) {
