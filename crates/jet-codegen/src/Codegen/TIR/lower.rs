@@ -789,6 +789,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                         ty: ty.clone(),
                         kind: TExprKind::ConstInline(init_str),
                     },
+                    track_origin: None,
                 };
             }
             // c109 Phase 19: an arena `view` binding (`x :: arena.alloc(v)`). The AST
@@ -804,6 +805,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     kw: "let",
                     ty_clause: String::new(),
                     init,
+                    track_origin: None,
                 };
             }
             // D-MEM1 stage S5 (2026-07-04): a string-view binding (`x :: s.trim()` /
@@ -823,6 +825,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     kw: "let",
                     ty_clause: ": &str".to_string(),
                     init,
+                    track_origin: None,
                 };
             }
             // c109 (S57/M9.5): a comptime LOCAL `comptime NAME = expr`. The AST `emit_let`
@@ -860,6 +863,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     kw: "let",
                     ty_clause,
                     init,
+                    track_origin: None,
                 };
             }
             let mut init = lower_expr(&b.init, cx, env);
@@ -950,12 +954,14 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                         }
                     })
                     .unwrap_or_default();
+            let track_origin = tracked_float_origin(b, &ty, cx);
             env.bind(&b.name, mangle(&b.name), Some(ty));
             TStmt::Let {
                 name: b.name.clone(),
                 kw,
                 ty_clause,
                 init,
+                track_origin,
             }
         }
         Stmt::Assign {
@@ -1174,6 +1180,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 kw: "let mut",
                 ty_clause: String::new(),
                 init: init_val,
+                track_origin: None,
             });
             let cond = lower_expr(cond, cx, env);
             let mut branch = clone_env(env);
@@ -1493,6 +1500,23 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
     }
 }
 
+fn tracked_float_origin(b: &crate::AST::Binding, ty: &Type, cx: &Cx) -> Option<String> {
+    if !b.track || !matches!(ty, Type::Float) {
+        return None;
+    }
+    let (line, col) = crate::Diagnostics::span_line_col(&cx.src, b.name_span.start);
+    let snippet = cx
+        .src
+        .lines()
+        .nth(line.saturating_sub(1))
+        .unwrap_or("")
+        .trim();
+    Some(format!(
+        "tracked `{}` at {}:{}:{}: {}",
+        b.name, cx.file, line, col, snippet
+    ))
+}
+
 /// Pull the bare label name out of an `@name` loop label, dropping the span. The
 /// emitter renders it as `'jet_<name>:` (mirroring `loop_label_prefix`).
 pub(crate) fn label_name(label: &Option<(String, Span)>) -> Option<String> {
@@ -1658,6 +1682,7 @@ pub(crate) fn lower_if_cond(
                                 obj_tmp
                             )),
                         },
+                        track_origin: None,
                     };
                     return (
                         TIfCond::IfLet { pat_str, subj },
@@ -2014,6 +2039,7 @@ fn lower_struct_pattern_bindings(
                     struct_pattern_subject_field_expr(cx, subject_ty, field)
                 )),
             },
+            track_origin: None,
         });
     }
     out
@@ -2262,6 +2288,7 @@ fn lower_str_match_pattern_bindings(pattern: &Pattern, cx: &Cx, env: &mut LowerE
             ty: Type::Bool,
             kind: TExprKind::ConstInline(format!("({}).unwrap()", closure)),
         },
+        track_origin: None,
     }];
     let single = holes.len() == 1;
     for (i, (name, ty)) in holes.iter().enumerate() {
@@ -2281,6 +2308,7 @@ fn lower_str_match_pattern_bindings(pattern: &Pattern, cx: &Cx, env: &mut LowerE
                 ty: ty.clone(),
                 kind: TExprKind::ConstInline(project),
             },
+            track_origin: None,
         });
     }
     out

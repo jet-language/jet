@@ -53,10 +53,10 @@ block    = "{" { stmt } "}" ;            // S3: curly braces
 stmt     = binding | assign | if | loop
          | "break" NL | "continue" NL | "return" [ expr ] NL
          | expr NL ;
-binding  = ident "::" expr NL                 // inferred immutable
-         | ident ":=" expr NL                 // inferred mutable
-         | ident ":" type "::" expr NL        // explicit immutable
-         | ident ":" type ":=" expr NL        // explicit mutable
+binding  = [ "#Track" ] ( ident "::" expr     // inferred immutable
+         | ident ":=" expr                    // inferred mutable
+         | ident ":" type "::" expr           // explicit immutable
+         | ident ":" type ":=" expr ) NL      // explicit mutable
          | destructure ( "::" | ":=" ) expr NL ;
 destructure = ".{" ident { "," ident } [ ", .." ] "}"   // S74: struct fields
             | "[" [ ident { "," ident } ] "]" ;    // S74: list elements
@@ -97,6 +97,9 @@ expr     = precedence climbing over:
   `name: Type := value` are mutable (D-BIND4).
   Assigning to an immutable binding is E0111.
   Names may not shadow an existing name in scope (E0118).
+- `#Track name :: value` / `#Track name := value` opt a binding into
+  D-PROVENANCE1 provenance. Today this records Float binding origins for
+  `value.origin() -> String`; untracked Floats return `"untracked"`.
 - Arithmetic: `+ - * /` on `Int` and `Float` (never mixed — E0109);
   `% & | ^ << >>` on `Int` only. `+` on `String` is a teaching error
   pointing at interpolation. Compound assignment (S17) mirrors the binary

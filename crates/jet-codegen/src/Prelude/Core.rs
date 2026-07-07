@@ -4,6 +4,31 @@ trait JetDisplay { fn jet_display(&self) -> String; }
 /// D-DISPLAYDBG1: developer interpolation (`{value@Debug}`).
 trait JetDebug { fn jet_debug(&self) -> String; }
 
+// D-PROVENANCE1=B: `#Track x :: <Float>` records local Float provenance by
+// address. Plain copies remain plain values; a copied Float is untracked unless
+// rebound under `#Track`.
+static JET_FLOAT_ORIGINS: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashMap<usize, String>>,
+> = std::sync::OnceLock::new();
+
+fn jet_float_origins() -> &'static std::sync::Mutex<std::collections::HashMap<usize, String>> {
+    JET_FLOAT_ORIGINS.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+fn jet_track_float_origin(value: &f64, origin: &str) {
+    if let Ok(mut origins) = jet_float_origins().lock() {
+        origins.insert(value as *const f64 as usize, origin.to_string());
+    }
+}
+
+fn jet_float_origin(value: &f64) -> String {
+    jet_float_origins()
+        .lock()
+        .ok()
+        .and_then(|origins| origins.get(&(value as *const f64 as usize)).cloned())
+        .unwrap_or_else(|| "untracked".to_string())
+}
+
 macro_rules! jet_scalar_show {
     ($($t:ty),+ $(,)?) => {$(
         impl JetShow for $t { fn jet_show(&self) -> String { self.to_string() } }

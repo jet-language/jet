@@ -232,6 +232,9 @@ fn numeric_method_return(ty: &Type, method: &str, nargs: usize) -> Option<Option
         if let "is_nan" | "is_infinite" | "is_finite" = method {
             return Some(Some(Type::Bool));
         }
+        if matches!(ty, Type::Float) && method == "origin" {
+            return Some(Some(Type::String));
+        }
     }
     // D-NUMOPS1: integer bit-population queries (count -> Int).
     if int_kind(ty).is_some() && nargs == 0 {

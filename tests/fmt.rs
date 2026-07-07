@@ -1178,6 +1178,19 @@ fn run() {
 }
 
 #[test]
+fn fmt_preserves_track_binding_marker() {
+    let src = "\
+fn run() {
+    #Track count :: 1
+    #Track total := 2
+    #Track label: String :: \"ok\"
+    print(\"{count} {total} {label}\")
+}
+";
+    assert_fmt_stable(src, "#Track binding marker");
+}
+
+#[test]
 fn fmt_write_sigil_d_mem1_stability() {
     // D-MEM1 (S1): `&T` is the write sigil (param + call-site mirror), `&self`
     // is the write receiver, `^T`/`^self` (take/move) are unchanged, and plain

@@ -428,6 +428,9 @@ pub enum TStmt {
         kw: &'static str,
         ty_clause: String,
         init: TExpr,
+        /// D-PROVENANCE1=B: if present, record this Float binding's origin after
+        /// initialization. Empty for every untracked/non-Float binding.
+        track_origin: Option<String>,
     },
     /// c109 Phase 23: a TUPLE-destructuring binding `(a, b) :: <init>` (S74,
     /// `BindPattern::Tuple`). Reproduces `emit_stmt`'s destructure form byte-for-byte:
@@ -1466,6 +1469,8 @@ pub enum TNumericOp {
     /// `count_ones`/`count_zeros`/`leading_zeros`/`trailing_zeros` →
     /// `(({recv}).{method}() as i64)` (Rust returns u32 → widen to Int).
     BitCount(String),
+    /// `origin` on a Float receiver → debug provenance note or `"untracked"`.
+    Origin,
     /// A widening / float-targeted / float-sourced conversion → `(({recv}) as {dst})`.
     CastAs { dst_rust: String },
     /// An integer-narrowing conversion → the checked `<{dst}>::try_from(...)` form

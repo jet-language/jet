@@ -200,6 +200,8 @@ fn unroll_variadic_body(stmts: &[Stmt], target: &str, arity: usize) -> Result<Ve
                 for i in 0..arity {
                     out.push(Stmt::Val(Binding {
                         mutable: false,
+                        track: false,
+                        track_span: None,
                         name: var.clone(),
                         name_span: *var_span,
                         pattern: None,

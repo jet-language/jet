@@ -53,6 +53,10 @@ pub const SIGIL_BIND_IMMUT: &str = "::";
 /// D-BIND4: explicit-type mutable form is `name: Type := expr`.
 pub const SIGIL_BIND_MUT: &str = ":=";
 
+/// D-PROVENANCE1=B: binding-level tracking marker, written before the binding:
+/// `#Track name :: expr` / `#Track name := expr`.
+pub const ATTR_TRACK: &str = "Track";
+
 /// S2 / D-BIND1: the retired binding keywords, recognized only for the E0985
 /// teaching error that points at the `::` / `:=` sigils.
 pub const FOREIGN_VAL: &str = "val";
@@ -2456,6 +2460,7 @@ pub const DIRECTIVE_MARKERS: &[&str] = &[
     KW_CAPS,
     KW_GRANT,
     KW_TRANSACT,
+    ATTR_TRACK,
     ATTR_TARGET,
     ATTR_WASM,
     ATTR_JS,

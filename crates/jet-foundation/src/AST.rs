@@ -2538,6 +2538,10 @@ pub enum ForKind {
 #[derive(Debug, Clone)]
 pub struct Binding {
     pub mutable: bool,
+    /// Binding-level `#Track` marker. Parser/formatter preserve it; sema assigns
+    /// meaning in the later tracking slice.
+    pub track: bool,
+    pub track_span: Option<Span>,
     pub name: String,
     pub name_span: Span,
     /// S74: when present, this binding destructures `init` instead of binding

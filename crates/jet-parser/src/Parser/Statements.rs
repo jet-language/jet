@@ -967,6 +967,17 @@ impl<'a> Parser<'a> {
                 self.bump(); // `@`
                 self.loop_stmt(Some((label, lspan)))
             }
+            TokKind::Hash if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_TRACK) =>
+            {
+                let marker_span = self.peek().span;
+                self.bump(); // `#`
+                let (_, name_span) = self.expect_ident(&format!("`#{}`", Syntax::ATTR_TRACK))?;
+                let mut binding = self.sigil_binding()?;
+                binding.track = true;
+                binding.track_span = Some(Span::new(marker_span.start, name_span.end));
+                self.finish_stmt()?;
+                Ok(Stmt::Val(binding))
+            }
             // D-BIND1: a sigil binding `name (: type)? (:: | :=) expr` — no
             // leading keyword. Detected before the general Ident statement path.
             _ if self.looks_like_sigil_binding() => {
@@ -2265,6 +2276,8 @@ impl<'a> Parser<'a> {
             let init = self.expr()?;
             return Ok(Binding {
                 mutable,
+                track: false,
+                track_span: None,
                 name: String::new(),
                 name_span: pattern.span(),
                 pattern: Some(pattern),
@@ -2303,6 +2316,8 @@ impl<'a> Parser<'a> {
             let init = self.expr()?;
             return Ok(Binding {
                 mutable: false,
+                track: false,
+                track_span: None,
                 name,
                 name_span,
                 pattern: None,
@@ -2332,6 +2347,8 @@ impl<'a> Parser<'a> {
                     let init = self.expr()?;
                     return Ok(Binding {
                         mutable: false,
+                        track: false,
+                        track_span: None,
                         name,
                         name_span,
                         pattern: None,
@@ -2362,6 +2379,8 @@ impl<'a> Parser<'a> {
                         let marker_span = self.bump().span; // `uninit`
                         return Ok(Binding {
                             mutable: true,
+                            track: false,
+                            track_span: None,
                             name,
                             name_span,
                             pattern: None,
@@ -2380,6 +2399,8 @@ impl<'a> Parser<'a> {
                     let init = self.expr()?;
                     return Ok(Binding {
                         mutable: true,
+                        track: false,
+                        track_span: None,
                         name,
                         name_span,
                         pattern: None,
@@ -2416,6 +2437,8 @@ impl<'a> Parser<'a> {
                     let init = self.expr()?;
                     return Ok(Binding {
                         mutable: false,
+                        track: false,
+                        track_span: None,
                         name,
                         name_span,
                         pattern: None,
@@ -2452,6 +2475,8 @@ impl<'a> Parser<'a> {
                     let init = self.expr()?;
                     return Ok(Binding {
                         mutable: true,
+                        track: false,
+                        track_span: None,
                         name,
                         name_span,
                         pattern: None,
@@ -2490,6 +2515,8 @@ impl<'a> Parser<'a> {
         let init = self.expr()?;
         Ok(Binding {
             mutable,
+            track: false,
+            track_span: None,
             name,
             name_span,
             pattern: None,
@@ -2668,6 +2695,8 @@ impl<'a> Parser<'a> {
             let init = self.expr()?;
             return Ok(Binding {
                 mutable,
+                track: false,
+                track_span: None,
                 name: String::new(),
                 name_span: pattern.span(),
                 pattern: Some(pattern),
@@ -2693,6 +2722,8 @@ impl<'a> Parser<'a> {
         let init = self.expr()?;
         Ok(Binding {
             mutable,
+            track: false,
+            track_span: None,
             name,
             name_span,
             pattern: None,
@@ -2974,6 +3005,8 @@ impl<'a> Parser<'a> {
         let init = self.expr()?;
         Ok(Binding {
             mutable: false,
+            track: false,
+            track_span: None,
             name,
             name_span,
             pattern: None,

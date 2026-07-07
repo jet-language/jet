@@ -144,6 +144,8 @@ impl<'a> Checker<'a> {
         );
         *stmt = Stmt::Val(crate::AST::Binding {
             mutable: false,
+            track: false,
+            track_span: None,
             name: synth.clone(),
             name_span: span,
             pattern: None,

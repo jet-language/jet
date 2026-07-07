@@ -285,6 +285,7 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
             kw,
             ty_clause,
             init,
+            track_origin,
         } => {
             out.push_str(&format!(
                 "{}{} {}{} = {};\n",
@@ -294,6 +295,15 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
                 ty_clause,
                 emit_tir_expr(init, cx),
             ));
+            if let Some(origin) = track_origin {
+                out.push_str(&format!(
+                    "{}{}jet_track_float_origin(&{}, {:?});\n",
+                    pad,
+                    cx.root_prefix,
+                    mangle(name),
+                    origin
+                ));
+            }
         }
         TStmt::Assign {
             place,
@@ -1458,6 +1468,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 TNumericOp::Predicate(m) => format!("({}).{}()", recv, m),
                 TNumericOp::BitCount(m) => format!("(({}).{}() as i64)", recv, m),
                 TNumericOp::ToShow => format!("({}).jet_show()", recv),
+                TNumericOp::Origin => format!("{}jet_float_origin(&({}))", cx.root_prefix, recv),
                 TNumericOp::CastAs { dst_rust } => format!("(({}) as {})", recv, dst_rust),
                 TNumericOp::TryFrom {
                     dst_rust,

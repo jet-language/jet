@@ -672,6 +672,19 @@ the required trailing block separates it from leading-dot enum values
 construction and S74 destructuring. Other block markers may declare members
 under the same law — each addition is an API decision, not a syntax one.
 
+**D-PROVENANCE1=B — Binding-level provenance tracking**: `#Track` may prefix
+a sigil binding:
+
+```jet
+#Track speed :: compute_speed()
+#Track correction: Float := 0.0
+```
+
+The marker records provenance for that binding without changing its type.
+Current implementation records Float local origins; `speed.origin() -> String`
+returns the tracked source note, and untracked Floats return `"untracked"`.
+No `Tracked<T>` wrapper exists and no general value-history type is introduced.
+
 **D-QUAL2 — Tag vs trait**: exactly two qualifier kinds — `trait` (has
 methods, dispatches) and `tag` (no methods, erases). Methods on a tag E0732;
 tag where dispatch expected E0731. **D-QUAL4**: type-position value tags are

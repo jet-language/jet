@@ -604,6 +604,9 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_binding(&mut self, b: &Binding) {
+        if b.track {
+            self.write(&format!("#{} ", Syntax::ATTR_TRACK));
+        }
         // S57: comptime stays keyword-led (`comptime NAME = …`). D-BIND4: ordinary
         // bindings are sigil-led (`name :: …` / `name := …`), no leading keyword.
         if b.is_comptime {
