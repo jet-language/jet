@@ -219,6 +219,11 @@ fn write_fake_vm_tools(bin: &Path, guest_passes: bool) {
     write_executable(&bin.join("mkfs.vfat"), "#!/bin/sh\nexit 0\n");
     write_executable(&bin.join("sfdisk"), "#!/bin/sh\nexit 0\n");
     write_executable(&bin.join("blockdev"), "#!/bin/sh\nexit 0\n");
+    for tool in [
+        "cat", "cp", "ln", "mkdir", "mount", "rm", "sleep", "sync", "poweroff", "halt",
+    ] {
+        write_executable(&bin.join(tool), "#!/bin/sh\nexit 0\n");
+    }
     write_executable(&bin.join("mmd"), "#!/bin/sh\nexit 0\n");
     write_executable(&bin.join("mcopy"), "#!/bin/sh\nexit 0\n");
     write_executable(
@@ -3419,7 +3424,7 @@ fn os_vm_prove_writes_media_bound_harness() {
         "graphical proof should expose a VNC-backed stdvga display: {data}"
     );
     assert!(
-        data.contains("rdinit=/jetos/guest-verify.sh"),
+        data.contains("rdinit=/jetos/init"),
         "graphical QEMU proof should boot the JetOS verifier overlay script: {data}"
     );
     assert!(
@@ -3541,6 +3546,85 @@ fn os_vm_prove_runs_qemu_and_records_guest_proof() {
     assert!(
         stdout.contains("JETOS_GUEST_PROOF"),
         "interactive run should launch QEMU with the proved disk: {stdout}"
+    );
+}
+
+#[test]
+fn os_vm_test_runs_declared_scenario_and_records_proof() {
+    let project = Scratch::new("os-vmtest-project");
+    copy_dir_recursive(&config_example_dir(), &project.path);
+    let mut config = fs::read_to_string(project.path.join("config.jet")).unwrap();
+    config.push_str(
+        r#"
+
+module vmtest.ssh-smoke {
+    hosts: { halcyon: system.halcyon }
+    run: test {
+        halcyon.wait_for_boot()
+        halcyon.assert_unit_active(.openssh)
+        halcyon.assert_port_open(22)
+    }
+}
+"#,
+    );
+    fs::write(project.path.join("config.jet"), config).unwrap();
+    let root = Scratch::new("os-vmtest-root");
+    let tools = Scratch::new("os-vmtest-tools");
+    write_fake_vm_tools(&tools.path, true);
+    let out = jet()
+        .args([
+            "os",
+            "vm",
+            "test",
+            "ssh-smoke",
+            "--disk",
+            "ssh-smoke.qcow2",
+            "--name",
+            "vmtest-proof",
+            "--no-color",
+            "--offline",
+        ])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("PATH", &tools.path)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let proof = root
+        .path
+        .join("systems/vm-tests/ssh-smoke-vmtest-proof.json");
+    let data = fs::read_to_string(&proof).unwrap();
+    assert!(
+        data.contains("\"kind\":\"jetos.vmtest.proof\"")
+            && data.contains("\"state\":\"passed\"")
+            && data.contains("\"name\":\"ssh-smoke\""),
+        "proof: {data}"
+    );
+    assert!(
+        data.contains("\"name\": \"halcyon\"")
+            && data.contains("\"system\": \"halcyon\"")
+            && data.contains("\"disk\": \"ssh-smoke.qcow2\""),
+        "proof: {data}"
+    );
+    assert!(
+        data.contains("\"wait_for_boot\"")
+            && data.contains("\"assert_unit_active\"")
+            && data.contains("\"assert_port_open\""),
+        "proof should capture typed assertion methods: {data}"
+    );
+    assert!(
+        data.contains("halcyon.assert_unit_active(.openssh)"),
+        "proof should carry the source test body for replay: {data}"
+    );
+    assert!(
+        root.path
+            .join("systems/vm-proofs/halcyon-vmtest-proof-vm-proof.json")
+            .is_file(),
+        "vmtest should reuse the install/reboot VM proof harness"
     );
 }
 
@@ -3740,6 +3824,8 @@ fn os_vm_prove_rejects_stale_guest_generation() {
 #[test]
 fn os_image_writes_jetos_installer_media_proof() {
     let root = Scratch::new("os-image-root");
+    let tools = Scratch::new("os-image-tools");
+    write_fake_vm_tools(&tools.path, true);
     let out = jet()
         .args([
             "os",
@@ -3751,6 +3837,7 @@ fn os_image_writes_jetos_installer_media_proof() {
         ])
         .current_dir(config_example_dir())
         .env("JETPACK_ROOT", &root.path)
+        .env("PATH", &tools.path)
         .output()
         .unwrap();
     assert!(
@@ -3815,6 +3902,10 @@ fn os_image_writes_jetos_installer_media_proof() {
         "verify: {verify}"
     );
     assert!(
+        verify.contains("LABEL=jetos-root /dev/vda2 /dev/sda2 /dev/vda /dev/sda"),
+        "verify should probe partitioned installed disks: {verify}"
+    );
+    assert!(
         verify.contains("terminal/facts.json")
             && verify.contains("serial-getty@ttyS0.service")
             && verify.contains("desktop/facts.json")
@@ -3841,6 +3932,19 @@ fn os_image_writes_jetos_installer_media_proof() {
         "initrd: {initrd}"
     );
     assert!(
+        initrd.contains("jetos/init"),
+        "initrd should carry the JetOS init dispatcher: {initrd}"
+    );
+    assert!(
+        initrd.contains("mount -t proc proc /proc")
+            && initrd.contains("mount -t devtmpfs devtmpfs /dev"),
+        "initrd dispatcher should prepare proc/dev before reading cmdline: {initrd}"
+    );
+    assert!(
+        initrd.contains("LABEL=jetos-root /dev/vda2 /dev/sda2 /dev/vda /dev/sda"),
+        "initrd should probe partitioned installed disks before installer fallback: {initrd}"
+    );
+    assert!(
         initrd.contains("jetos/tools/bin/sfdisk") && initrd.contains("jetos/tools/bin/blockdev"),
         "initrd should carry installer partition tools: {initrd}"
     );
@@ -3851,7 +3955,7 @@ fn os_image_writes_jetos_installer_media_proof() {
     let limine = fs::read_to_string(staging.join("boot/limine.conf")).unwrap();
     assert!(
         limine.contains("/Install jetos halcyon")
-            && limine.contains("cmdline: console=ttyS0 rdinit=/jetos/install.sh")
+            && limine.contains("cmdline: console=ttyS0 rdinit=/jetos/init")
             && limine.contains("jetos.disk=/dev/sda"),
         "limine: {limine}"
     );

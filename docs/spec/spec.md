@@ -1369,12 +1369,12 @@ as a passed guest proof. It writes the VM proof harness, runs the recorded QEMU
 create/install/reboot phases, captures a `JETOS_GUEST_PROOF:` marker from the
 installed guest's serial output, and writes the guest proof artifact. The QEMU
 installer phase boots the hybrid ISO with `console=ttyS0`; the ISO's Limine
-entry carries `rdinit=/jetos/install.sh`, `jetos.mode=install`, and the target
-disk. The installed-disk verifier phase still direct-boots the exact generation
-kernel/initrd with `rdinit=/jetos/guest-verify.sh`, `jetos.mode=verify`, plus
-the installed root label until the D-JPK-OSDISK1=C GPT/ESP installed-disk
-bootloader handoff is complete. A rerun may
-promote the harness to `guest-passed` only when the guest proof records the same
+entry carries `rdinit=/jetos/init`, `jetos.mode=install`, and the target
+disk. The installer writes a GPT disk with a FAT ESP, ext4 `jetos-root`,
+`EFI/BOOT/BOOTX64.EFI`, the kernel/initrd, and an installed Limine config. The
+installed-disk verifier phase boots that disk through firmware/Limine with
+`rdinit=/jetos/init`, `jetos.mode=verify`, and the installed root label. A rerun
+may promote the harness to `guest-passed` only when the guest proof records the same
 host, generation, disk, media proof, tool hashes, and required guest assertions;
 harness JSON names the expected guest proof path, command argv, and per-phase
 run logs. The proof then boots a graphical desktop verifier with QEMU VNC,
@@ -1407,15 +1407,17 @@ files already exist. `JETOS_KERNEL_SOURCE`, `JETOS_KERNEL_OUT`, and
 `JETOS_KERNEL_PACKAGE` point at the realized first-party package, and the script
 must write the kernel and initrd artifacts that the generation, installer, and
 VM proof will boot. Installer media appends a JetOS initrd overlay containing
-`/init`, `/jetos/install.sh`, and `/jetos/guest-verify.sh`; `/init` dispatches
+`/jetos/init`, `/jetos/install.sh`, and `/jetos/guest-verify.sh`; `/jetos/init` dispatches
 `jetos.mode=install`, `jetos.mode=verify`, and `jetos.mode=desktop-verify`,
-mounts the ISO/root where needed, and the ISO Limine config enters the installer
-script directly. The hybrid ISO
+mounts proc/dev/sys before reading cmdline, probes `LABEL=jetos-root`,
+`/dev/vda2`, and `/dev/sda2` before falling back to install mode, and the ISO
+Limine config enters this dispatcher. The hybrid ISO
 carries both BIOS Limine boot files and a FAT `boot/efiboot.img` ESP with
 `EFI/BOOT/BOOTX64.EFI`, so QEMU/OVMF and physical UEFI firmware boot the same
-installer artifact. The verifier
-phase uses `rdinit` to enter the verifier script when booting under a host
-initrd. The verifier emits the serial guest-proof marker. The default systemd
+installer artifact. The graphical verifier phase still direct-boots the same
+kernel/initrd with `rdinit=/jetos/init` so it can force a VNC/stdvga display for
+desktop proof; the installed-disk verifier uses firmware disk boot. The verifier
+emits the serial guest-proof marker. The default systemd
 init path requires a first-party `systemd` package; missing init provenance is
 E1281. Each generation defaults to the ratified GNOME-on-Wayland desktop profile
 with terminal login as the secondary fallback. The display-manager service
@@ -1440,6 +1442,15 @@ transaction is `set-option`, which returns an exact source diff and writes
 project/host and returns captured output, so Studio never substitutes hidden
 state for CLI proof. The build action writes a named Studio candidate generation
 before proof.
+
+`module vmtest.<name>` declares a JetOS VM scenario. Its `hosts:` map names
+scenario handles bound to `system.<host>` declarations, and `run: test { ... }`
+captures typed host-handle assertions such as `wait_for_boot`,
+`assert_unit_active`, and `assert_port_open`. `jet os vm test <name> --disk
+<path>` evaluates that scenario through the same installer/reboot proof harness
+as `jet os vm prove`, writes one host proof per scenario host, then records
+`systems/vm-tests/<name>-vmtest-proof.json` with the source test body,
+assertion method facts, host generations, disks, and proof artifact paths.
 
 ## Fan-out operator `f.[a, b, c]` (S75) and fixed-size list `[T#N]` (S76)
 

@@ -4,7 +4,7 @@
 //! Jetpack engine because it reuses Jetpack's source table, provider boundary,
 //! hangar, and trust/runtime policy.
 
-use super::ModuleEval::{self, EnvPlan, ImageKind, ServicePlan, SystemPlan};
+use super::ModuleEval::{self, EnvPlan, ImageKind, ServicePlan, SystemPlan, VmTestPlan};
 use super::Output::Theme;
 use super::{Provider, RefSpec, Store, JSON};
 use crate::Syntax;
@@ -401,18 +401,40 @@ fn cmd_vm(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 {
     let Some((action, rest)) = args.split_first().map(|(a, r)| (a.as_str(), r)) else {
         theme.error(
             "vm needs an action",
-            "D-JOS-VMCOMMAND1=A and D-JOS-VMRUN1=A: the active VM actions are `prove` and `run`.",
-            "run `jet os vm prove <host> --disk <path>` or `jet os vm run <host> --disk <path>`.",
+            "D-JOS-VMCOMMAND1=A, D-JOS-VMRUN1=A, and D-JOS-VMTEST1=A: the active VM actions are `prove`, `run`, and `test`.",
+            "run `jet os vm prove <host> --disk <path>`, `jet os vm run <host> --disk <path>`, or `jet os vm test <scenario> --disk <path>`.",
         );
         return 2;
     };
-    if action != Syntax::OS_VM_ACTION_PROVE && action != Syntax::OS_VM_ACTION_RUN {
+    if action != Syntax::OS_VM_ACTION_PROVE
+        && action != Syntax::OS_VM_ACTION_RUN
+        && action != Syntax::OS_VM_ACTION_TEST
+    {
         theme.error(
             &format!("`{action}` is not a jetos VM action"),
-            "D-JOS-VMCOMMAND1=A and D-JOS-VMRUN1=A: the active VM actions are `prove` and `run`.",
-            "run `jet os vm prove <host> --disk <path>` or `jet os vm run <host> --disk <path>`.",
+            "D-JOS-VMCOMMAND1=A, D-JOS-VMRUN1=A, and D-JOS-VMTEST1=A: the active VM actions are `prove`, `run`, and `test`.",
+            "run `jet os vm prove <host> --disk <path>`, `jet os vm run <host> --disk <path>`, or `jet os vm test <scenario> --disk <path>`.",
         );
         return 2;
+    }
+    if action == Syntax::OS_VM_ACTION_TEST {
+        let Some(target) = parse_target_or_report(theme, rest.first().map(String::as_str)) else {
+            return 2;
+        };
+        let disk = flags
+            .disk
+            .as_deref()
+            .or(flags.manual_disk.as_deref())
+            .unwrap_or("");
+        if disk.is_empty() {
+            theme.error(
+                "vm test needs a target disk",
+                "`jet os vm test` installs each declared host into a proved virtual disk and records scenario proof facts.",
+                "pass `--disk ./scenario.qcow2`.",
+            );
+            return 2;
+        }
+        return cmd_vm_test(theme, &target, disk, flags);
     }
     let Some(target) = parse_target_or_report(theme, rest.first().map(String::as_str)) else {
         return 2;
@@ -516,6 +538,56 @@ fn cmd_vm(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 {
                 "could not write the jetos VM proof plan",
                 &format!("writing VM proof artifacts failed: {e}"),
                 "check permissions on the Jetpack root, or set JETPACK_ROOT.",
+            );
+            2
+        }
+    }
+}
+
+fn cmd_vm_test(theme: &Theme, target: &Target, disk: &str, flags: &OsFlags) -> i32 {
+    let Some(plan) = load_plan(theme, target) else {
+        return 2;
+    };
+    let Some(vmtest) = plan.vmtests.iter().find(|t| t.name == target.host).cloned() else {
+        let mut names: Vec<String> = plan.vmtests.iter().map(|t| t.name.clone()).collect();
+        names.sort();
+        let known = if names.is_empty() {
+            "this config defines no vmtests".to_string()
+        } else {
+            format!("available vmtests: {}", names.join(", "))
+        };
+        theme.error_coded(
+            "E0980",
+            &format!("`{}` is not a vmtest in this config", target.host),
+            &known,
+            "define `module vmtest.<name> { hosts: { node: system.<host> }, run: test { ... } }`, or select one of the vmtests above.",
+        );
+        return 2;
+    };
+    let missing = missing_vm_tools();
+    if !missing.is_empty() {
+        theme.error_coded(
+            "E1279",
+            "jetos VM proof tools are missing",
+            &format!(
+                "D-JOS-VMTEST1=A runs the same pinned VM/media harness as `jet os vm prove`; missing: {}.",
+                missing.join(", ")
+            ),
+            "realize or expose qemu-system-x86_64, qemu-img, xorriso, limine, sfdisk, blockdev, mkfs.ext4, mkfs.vfat, mmd, mcopy, and zstd, then rerun `jet os vm test`.",
+        );
+        return 2;
+    }
+    match run_vmtest(theme, &plan, &vmtest, disk, flags) {
+        Ok(path) => {
+            theme.ok(&format!("proved jetos VM test {}", path.display()));
+            0
+        }
+        Err(e) => {
+            theme.error_coded(
+                "E1285",
+                "jetos VM test proof has not run",
+                &format!("the VM test `{}` did not produce a passing proof: {e}.", vmtest.name),
+                "inspect the VM test artifacts, fix the failing host/assertion, then rerun `jet os vm test`.",
             );
             2
         }
@@ -634,6 +706,30 @@ fn parse_target_or_report(theme: &Theme, raw: Option<&str>) -> Option<Target> {
 }
 
 fn load_target(theme: &Theme, target: &Target) -> Option<(EnvPlan, SystemPlan)> {
+    let plan = load_plan(theme, target)?;
+    let Some(system) = plan.systems.iter().find(|s| s.name == target.host).cloned() else {
+        let mut systems: Vec<String> = plan.systems.iter().map(|s| s.name.clone()).collect();
+        systems.sort();
+        let known = if systems.is_empty() {
+            "this config defines no systems".to_string()
+        } else {
+            format!("available systems: {}", systems.join(", "))
+        };
+        theme.error_coded(
+            "E0980",
+            &format!("`{}` is not a system in this config", target.host),
+            &known,
+            "define `system.<host>: { ... }`, or select one of the systems above.",
+        );
+        return None;
+    };
+    if !validate_system_options(theme, &system) {
+        return None;
+    }
+    Some((plan, system))
+}
+
+fn load_plan(theme: &Theme, target: &Target) -> Option<EnvPlan> {
     let src = match fs::read_to_string(&target.config) {
         Ok(src) => src,
         Err(_) => {
@@ -665,22 +761,10 @@ fn load_target(theme: &Theme, target: &Target) -> Option<(EnvPlan, SystemPlan)> 
             return None;
         }
     };
-    let Some(system) = plan.systems.iter().find(|s| s.name == target.host).cloned() else {
-        let mut systems: Vec<String> = plan.systems.iter().map(|s| s.name.clone()).collect();
-        systems.sort();
-        let known = if systems.is_empty() {
-            "this config defines no systems".to_string()
-        } else {
-            format!("available systems: {}", systems.join(", "))
-        };
-        theme.error_coded(
-            "E0980",
-            &format!("`{}` is not a system in this config", target.host),
-            &known,
-            "define `system.<host>: { ... }`, or select one of the systems above.",
-        );
-        return None;
-    };
+    Some(plan)
+}
+
+fn validate_system_options(theme: &Theme, system: &SystemPlan) -> bool {
     if let Some(bad) = system.options.iter().find(|o| {
         let ns = o.key.split('.').next().unwrap_or("");
         !Syntax::OS_OPTION_NAMESPACES.contains(&ns)
@@ -691,9 +775,9 @@ fn load_target(theme: &Theme, target: &Target) -> Option<(EnvPlan, SystemPlan)> 
             "D-JPK-OSNS1=B and D-JOS-SYSTEMTREE1=A: jetos option keys start with full-word namespaces: `filesystem`, `network`, `packages`, `services`, `users`, `groups`, `secrets`, `boot`, `kernel`, `init`, or `health`.",
             "rename the option namespace, for example `net.hostName` becomes `network.hostName`.",
         );
-        return None;
+        return false;
     }
-    Some((plan, system))
+    true
 }
 
 fn build_generation(
@@ -1832,7 +1916,14 @@ fn write_boot_facts(
             format!("modules={}\n", boot.initrd_modules.join(",")),
         )?,
     }
-    for module_name in ["isofs.ko.xz", "bochs.ko.xz"] {
+    for module_name in [
+        "isofs.ko.xz",
+        "bochs.ko.xz",
+        "fat.ko.xz",
+        "vfat.ko.xz",
+        "nls_ascii.ko.xz",
+        "nls_cp437.ko.xz",
+    ] {
         if let Some(module) = kernel_entry
             .and_then(|entry| boot_artifact(entry, &[&format!("boot/modules/{module_name}")]))
         {
@@ -2457,6 +2548,11 @@ mkfs.vfat -F 32 -n JETOS-ESP "$esp"
 mkfs.ext4 -F -L jetos-root "$root_part"
 mount "$root_part" "$root"
 mkdir -p "$root/run" "$root/boot" "$root/boot/efi" "$root/var/lib/jetos/generations/{generation}"
+insmod /jetos/modules/nls_ascii.ko.xz 2>/dev/null || true
+insmod /jetos/modules/nls_cp437.ko.xz 2>/dev/null || true
+insmod /jetos/modules/fat.ko.xz 2>/dev/null || true
+insmod /jetos/modules/vfat.ko.xz 2>/dev/null || true
+modprobe vfat 2>/dev/null || true
 mount "$esp" "$root/boot/efi"
 mkdir -p "$root/boot/efi/EFI/BOOT" "$root/boot/efi/boot"
 cp -a /media/jetos/current-system/. "$root/var/lib/jetos/generations/{generation}/"
@@ -2483,7 +2579,7 @@ poweroff -f 2>/dev/null || halt -f 2>/dev/null || exit 0
 
 fn render_installed_limine_conf(system: &SystemPlan, gen: &Generation) -> String {
     format!(
-        "timeout: 1\nserial: yes\ngraphics: no\nverbose: yes\n/jetos {host} verify\n    protocol: linux\n    kernel_path: boot():/boot/kernel\n    module_path: boot():/boot/initrd\n    textmode: yes\n    cmdline: console=ttyS0 rdinit=/jetos/guest-verify.sh jetos.mode=verify jetos.host={host} jetos.generation={generation} root=LABEL=jetos-root rw\n",
+        "timeout: 1\nserial: yes\ngraphics: no\nverbose: yes\n/jetos {host} verify\n    protocol: linux\n    kernel_path: boot():/boot/kernel\n    module_path: boot():/boot/initrd\n    textmode: yes\n    cmdline: console=ttyS0 rdinit=/jetos/init init=/jetos/init jetos.mode=verify jetos.host={host} jetos.generation={generation} root=LABEL=jetos-root rw\n",
         host = system.name,
         generation = gen.name
     )
@@ -2496,7 +2592,7 @@ fn render_installer_limine_conf(system: &SystemPlan, gen: &Generation, disk: &st
         "/dev/sda".to_string()
     };
     format!(
-        "timeout: 5\nserial: yes\ngraphics: no\nverbose: yes\n/Install jetos {host}\n    protocol: linux\n    kernel_path: boot():/boot/kernel\n    module_path: boot():/boot/initrd\n    textmode: yes\n    cmdline: console=ttyS0 rdinit=/jetos/install.sh jetos.mode=install jetos.host={host} jetos.generation={generation} jetos.disk={disk}\n",
+        "timeout: 5\nserial: yes\ngraphics: no\nverbose: yes\n/Install jetos {host}\n    protocol: linux\n    kernel_path: boot():/boot/kernel\n    module_path: boot():/boot/initrd\n    textmode: yes\n    cmdline: console=ttyS0 rdinit=/jetos/init init=/jetos/init jetos.mode=install jetos.host={host} jetos.generation={generation} jetos.disk={disk}\n",
         host = system.name,
         generation = gen.name
     )
@@ -2513,7 +2609,7 @@ fn render_guest_verify_script(system: &SystemPlan, gen: &Generation) -> String {
     format!(
         r#"#!/bin/sh
 set -eu
-PATH=/bin:/sbin:/usr/bin:/usr/sbin
+PATH=/jetos/tools/bin:/bin:/sbin:/usr/bin:/usr/sbin
 export PATH
 root="${{JETOS_TARGET_ROOT:-/sysroot}}"
 mkdir -p /proc
@@ -2529,7 +2625,7 @@ if [ "$root" != "/" ]; then
     modprobe ata_piix 2>/dev/null || true
     modprobe sd_mod 2>/dev/null || true
     tries=0
-    while [ ! -e /dev/vda ] && [ ! -e /dev/sda ] && [ "$tries" -lt 30 ]; do
+    while [ ! -e /dev/vda ] && [ ! -e /dev/vda2 ] && [ ! -e /dev/sda ] && [ ! -e /dev/sda2 ] && [ "$tries" -lt 30 ]; do
         tries=$((tries + 1))
         sleep 1
     done
@@ -2537,7 +2633,12 @@ if [ "$root" != "/" ]; then
         echo "jetos verifier: sees $dev"
     done
     echo "jetos verifier: mounting installed root"
-    mount LABEL=jetos-root "$root" || mount /dev/vda "$root" || mount /dev/sda "$root" || true
+    for candidate in LABEL=jetos-root /dev/vda2 /dev/sda2 /dev/vda /dev/sda; do
+        if mount "$candidate" "$root" 2>/dev/null; then
+            echo "jetos verifier: mounted installed root=$candidate"
+            break
+        fi
+    done
 fi
 cmdline="$(cat /proc/cmdline 2>/dev/null || true)"
 need() {{
@@ -2618,32 +2719,84 @@ fn append_installer_initrd_overlay(
 ) -> std::io::Result<()> {
     let init = r#"#!/bin/sh
 set -eu
+PATH=/jetos/tools/bin:/bin:/sbin:/usr/bin:/usr/sbin
+export PATH
+mkdir -p /proc
+mount -t proc proc /proc 2>/dev/null || true
+mkdir -p /dev
+mount -t devtmpfs devtmpfs /dev 2>/dev/null || true
+mkdir -p /sys
+mount -t sysfs sysfs /sys 2>/dev/null || true
+modprobe virtio_pci 2>/dev/null || true
+modprobe virtio_blk 2>/dev/null || true
+modprobe ata_piix 2>/dev/null || true
+modprobe sd_mod 2>/dev/null || true
+modprobe sr_mod 2>/dev/null || true
+modprobe cdrom 2>/dev/null || true
 cmdline="$(cat /proc/cmdline 2>/dev/null || true)"
 case "$cmdline" in
   *jetos.mode=install*)
     mkdir -p /media /mnt/jetos
     mount -o ro /dev/sr0 /media 2>/dev/null || mount -o ro /dev/cdrom /media 2>/dev/null || true
-    exec /bin/sh /jetos/install.sh /dev/vda
+    exec /bin/sh /jetos/install.sh
     ;;
   *jetos.mode=verify*|*jetos.mode=desktop-verify*)
     mkdir -p /sysroot
-    mount LABEL=jetos-root /sysroot 2>/dev/null || mount /dev/vda /sysroot 2>/dev/null || true
+    tries=0
+    while [ ! -e /dev/vda ] && [ ! -e /dev/vda2 ] && [ ! -e /dev/sda ] && [ ! -e /dev/sda2 ] && [ "$tries" -lt 30 ]; do
+        tries=$((tries + 1))
+        sleep 1
+    done
+    for candidate in LABEL=jetos-root /dev/vda2 /dev/sda2 /dev/vda /dev/sda; do
+        mount "$candidate" /sysroot 2>/dev/null && break
+    done
     JETOS_TARGET_ROOT=/sysroot /bin/sh /jetos/guest-verify.sh
     poweroff -f 2>/dev/null || halt -f 2>/dev/null || exit 0
     ;;
 esac
-    exec /sbin/init
+mkdir -p /sysroot
+tries=0
+while [ ! -e /dev/vda ] && [ ! -e /dev/vda2 ] && [ ! -e /dev/sda ] && [ ! -e /dev/sda2 ] && [ "$tries" -lt 30 ]; do
+    tries=$((tries + 1))
+    sleep 1
+done
+for candidate in LABEL=jetos-root /dev/vda2 /dev/sda2 /dev/vda /dev/sda; do
+    mount "$candidate" /sysroot 2>/dev/null && break
+done
+if [ -e /sysroot/var/lib/jetos/generations/log ] || [ -L /sysroot/run/current-system ]; then
+    JETOS_TARGET_ROOT=/sysroot /bin/sh /jetos/guest-verify.sh
+    poweroff -f 2>/dev/null || halt -f 2>/dev/null || exit 0
+fi
+exec /bin/sh /jetos/install.sh
 "#;
     let install = render_installer_script(system, gen);
     let verify = render_guest_verify_script(system, gen);
     let isofs = fs::read(gen.path.join("boot/modules/isofs.ko.xz")).ok();
     let bochs = fs::read(gen.path.join("boot/modules/bochs.ko.xz")).ok();
+    let fat_modules = [
+        (
+            "fat.ko.xz",
+            fs::read(gen.path.join("boot/modules/fat.ko.xz")).ok(),
+        ),
+        (
+            "vfat.ko.xz",
+            fs::read(gen.path.join("boot/modules/vfat.ko.xz")).ok(),
+        ),
+        (
+            "nls_ascii.ko.xz",
+            fs::read(gen.path.join("boot/modules/nls_ascii.ko.xz")).ok(),
+        ),
+        (
+            "nls_cp437.ko.xz",
+            fs::read(gen.path.join("boot/modules/nls_cp437.ko.xz")).ok(),
+        ),
+    ];
     let mut entries = vec![
         OwnedCpioEntry::dir("jetos"),
         OwnedCpioEntry::dir("jetos/modules"),
         OwnedCpioEntry::dir("jetos/tools"),
         OwnedCpioEntry::dir("jetos/tools/bin"),
-        OwnedCpioEntry::file("init", 0o100755, init.as_bytes().to_vec()),
+        OwnedCpioEntry::file("jetos/init", 0o100755, init.as_bytes().to_vec()),
         OwnedCpioEntry::file("jetos/install.sh", 0o100755, install.as_bytes().to_vec()),
         OwnedCpioEntry::file(
             "jetos/guest-verify.sh",
@@ -2664,6 +2817,15 @@ esac
             0o100644,
             bochs,
         ));
+    }
+    for (name, bytes) in fat_modules {
+        if let Some(bytes) = bytes {
+            entries.push(OwnedCpioEntry::file(
+                &format!("jetos/modules/{name}"),
+                0o100644,
+                bytes,
+            ));
+        }
     }
     entries.extend(installer_tool_overlay_entries()?);
     let overlay = cpio_newc_owned(&entries);
@@ -2700,15 +2862,30 @@ fn installer_tool_overlay_entries() -> std::io::Result<Vec<OwnedCpioEntry>> {
     let mut dirs = BTreeSet::new();
     let mut seen_files = BTreeSet::new();
     let mut files = Vec::new();
-    for tool in ["sfdisk", "blockdev", "mkfs.vfat", "mkfs.ext4"] {
+    for tool in [
+        "cat",
+        "cp",
+        "ln",
+        "mkdir",
+        "mount",
+        "rm",
+        "sleep",
+        "sync",
+        "sfdisk",
+        "blockdev",
+        "mkfs.vfat",
+        "mkfs.ext4",
+        "poweroff",
+        "halt",
+    ] {
         let tool_path = find_path_tool(tool).ok_or_else(|| {
             std::io::Error::new(
                 std::io::ErrorKind::NotFound,
                 format!("missing installer tool `{tool}`"),
             )
         })?;
-        let actual = fs::canonicalize(&tool_path).unwrap_or(tool_path);
-        let wrapper = format!("#!/bin/sh\nexec {} \"$@\"\n", actual.display());
+        let actual = fs::canonicalize(&tool_path).unwrap_or_else(|_| tool_path.clone());
+        let wrapper = format!("#!/bin/sh\nexec {} \"$@\"\n", tool_path.display());
         add_cpio_file(
             &mut dirs,
             &mut seen_files,
@@ -2717,9 +2894,15 @@ fn installer_tool_overlay_entries() -> std::io::Result<Vec<OwnedCpioEntry>> {
             0o100755,
             wrapper.into_bytes(),
         );
-        add_host_file_to_cpio(&mut dirs, &mut seen_files, &mut files, &actual, 0o100755)?;
+        add_host_file_to_cpio(&mut dirs, &mut seen_files, &mut files, &tool_path, 0o100755)?;
         for dep in ldd_dependency_paths(&actual)? {
-            add_host_file_to_cpio(&mut dirs, &mut seen_files, &mut files, &dep, 0o100644)?;
+            add_host_file_to_cpio(
+                &mut dirs,
+                &mut seen_files,
+                &mut files,
+                &dep,
+                host_cpio_file_mode(&dep, 0o100644),
+            )?;
         }
     }
     let mut entries = dirs
@@ -2747,6 +2930,19 @@ fn add_host_file_to_cpio(
     let data = fs::read(path)?;
     add_cpio_file(dirs, seen_files, files, &name, mode, data);
     Ok(())
+}
+
+#[cfg(unix)]
+fn host_cpio_file_mode(path: &Path, fallback: u32) -> u32 {
+    use std::os::unix::fs::PermissionsExt;
+    fs::metadata(path)
+        .map(|meta| 0o100000 | (meta.permissions().mode() & 0o777))
+        .unwrap_or(fallback)
+}
+
+#[cfg(not(unix))]
+fn host_cpio_file_mode(_path: &Path, fallback: u32) -> u32 {
+    fallback
 }
 
 fn add_cpio_file(
@@ -3449,7 +3645,7 @@ fn qemu_proof_commands(
         "d".to_string(),
     ]);
     let graphical_cmdline = format!(
-        "console=ttyS0 rdinit=/jetos/guest-verify.sh jetos.mode=desktop-verify jetos.host={host} jetos.generation={generation} root=LABEL=jetos-root rw"
+        "console=ttyS0 rdinit=/jetos/init init=/jetos/init jetos.mode=desktop-verify jetos.host={host} jetos.generation={generation} root=LABEL=jetos-root rw"
     );
     let mut boot_installed_disk = vec![
         "qemu-system-x86_64".to_string(),
@@ -3594,6 +3790,103 @@ fn qemu_proof_commands_json(
         })
         .collect::<Vec<_>>()
         .join(",")
+}
+
+fn run_vmtest(
+    theme: &Theme,
+    plan: &EnvPlan,
+    vmtest: &VmTestPlan,
+    disk: &str,
+    flags: &OsFlags,
+) -> Result<PathBuf, String> {
+    let proof_dir = systems_dir().join("vm-tests");
+    fs::create_dir_all(&proof_dir)
+        .map_err(|e| format!("creating `{}` failed: {e}", proof_dir.display()))?;
+    let mut host_facts = Vec::new();
+    for host in &vmtest.hosts {
+        let Some(system) = plan.systems.iter().find(|s| s.name == host.system).cloned() else {
+            return Err(format!(
+                "host `{}` names unknown system `{}`",
+                host.name, host.system
+            ));
+        };
+        if !validate_system_options(theme, &system) {
+            return Err(format!("system `{}` failed option validation", system.name));
+        }
+        let host_disk = vmtest_host_disk(disk, &host.name, vmtest.hosts.len());
+        let Some(gen) = build_generation(theme, plan, &system, flags) else {
+            return Err(format!("building system `{}` failed", system.name));
+        };
+        let media = write_installer_media(&gen, &system, "guided-ext4")
+            .map_err(|e| format!("writing installer media for `{}` failed: {e}", system.name))?;
+        let harness = write_vm_install_plan(&gen, &system, &host_disk, &media)
+            .map_err(|e| format!("writing VM proof plan for `{}` failed: {e}", system.name))?;
+        let final_path = prove_vm_guest(&gen, &system, &host_disk, &media, &harness)
+            .map_err(|e| format!("guest proof for `{}` failed: {e}", system.name))?
+            .ok_or_else(|| format!("guest proof for `{}` was not recorded", system.name))?;
+        host_facts.push(VmTestHostFact {
+            name: host.name.clone(),
+            system: system.name,
+            generation: gen.name,
+            disk: host_disk,
+            proof: final_path.display().to_string(),
+        });
+    }
+    let proof = proof_dir.join(format!("{}-vmtest-proof.json", vmtest.name));
+    fs::write(&proof, vmtest_proof_json(vmtest, &host_facts))
+        .map_err(|e| format!("writing `{}` failed: {e}", proof.display()))?;
+    Ok(proof)
+}
+
+struct VmTestHostFact {
+    name: String,
+    system: String,
+    generation: String,
+    disk: String,
+    proof: String,
+}
+
+fn vmtest_host_disk(disk: &str, host: &str, host_count: usize) -> String {
+    if host_count <= 1 {
+        return disk.to_string();
+    }
+    let path = Path::new(disk);
+    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or(disk);
+    let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("qcow2");
+    let file = format!("{stem}-{host}.{ext}");
+    path.parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .map(|p| p.join(&file).display().to_string())
+        .unwrap_or(file)
+}
+
+fn vmtest_proof_json(vmtest: &VmTestPlan, hosts: &[VmTestHostFact]) -> String {
+    let host_json = hosts
+        .iter()
+        .map(|host| {
+            JSON::object_of(&[
+                ("name", &host.name),
+                ("system", &host.system),
+                ("generation", &host.generation),
+                ("disk", &host.disk),
+                ("proof", &host.proof),
+            ])
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let assertions = vmtest
+        .assertions
+        .iter()
+        .map(|a| JSON::quote(a))
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{{\"kind\":\"jetos.vmtest.proof\",\"schema_version\":1,\"state\":\"passed\",\"name\":{},\"hosts\":[{}],\"assertions\":[{}],\"run\":{},\"proofs\":[\"build-generation\",\"install-reboot-proof\",\"typed-assertion-record\"]}}\n",
+        JSON::quote(&vmtest.name),
+        host_json,
+        assertions,
+        JSON::quote(&vmtest.run)
+    )
 }
 
 fn guest_assertions_json() -> String {

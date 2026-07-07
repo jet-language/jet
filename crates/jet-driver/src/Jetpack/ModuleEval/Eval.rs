@@ -14,7 +14,7 @@ use crate::AST::{ContribValue, Contribution, EnvLit, Expr, Func, Item, ModuleDec
 use super::super::Merge::{self, EntryContribution, MergeError, MergedEntry, Scalar};
 use super::DevService::evaluate_dev_service;
 use super::Diagnostics::{not_a_namespace_literal, packages_not_a_list, wrong_namespace_type};
-use super::System::{evaluate_fleet, evaluate_image, evaluate_system};
+use super::System::{evaluate_fleet, evaluate_image, evaluate_system, evaluate_vmtest};
 use super::Types::{AdapterPlan, AdapterRecipe, DevServicePlan, EvaluatedModule};
 
 /// Parse `src` and evaluate every enabled module it declares. `base_dir`
@@ -84,6 +84,7 @@ fn evaluate_module<'a>(
     let mut systems = Vec::new();
     let mut images = Vec::new();
     let mut fleets = Vec::new();
+    let mut vmtests = Vec::new();
     let mut dev_services = Vec::new();
     let mut secrets = Vec::new();
     let mut adapters = Vec::new();
@@ -113,6 +114,9 @@ fn evaluate_module<'a>(
             (Namespace::Fleet, ContribValue::Fleet(lit)) => {
                 fleets.push(evaluate_fleet(&c.path, lit, src)?);
             }
+            (Namespace::VmTest, ContribValue::VmTest(lit)) => {
+                vmtests.push(evaluate_vmtest(&c.path, lit, src)?);
+            }
             // Namespace/value-shape mismatches can't occur: the parser pairs each
             // namespace with its dedicated value parser (see `contribution`).
             _ => unreachable!("contribution namespace/value shape mismatch"),
@@ -124,6 +128,7 @@ fn evaluate_module<'a>(
         systems,
         images,
         fleets,
+        vmtests,
         dev_services,
         secrets,
         adapters,
@@ -136,6 +141,7 @@ fn namespace_type(ns: Namespace) -> &'static str {
         Namespace::System => Syntax::TYPE_SYSTEM,
         Namespace::Image => Syntax::TYPE_IMAGE,
         Namespace::Fleet => Syntax::TYPE_FLEET,
+        Namespace::VmTest => Syntax::TYPE_VMTEST,
     }
 }
 

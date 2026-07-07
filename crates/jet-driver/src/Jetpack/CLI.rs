@@ -4118,6 +4118,7 @@ fn usage() -> String {
   jet os lift <host> [<root>]          draft ./config.jet from a host root
   jet os image <host> [--manual <path>] write jetos hybrid ISO media/proof
   jet os vm prove <host> --disk <path> boot installer, install, reboot, prove
+  jet os vm test <vmtest> --disk <path> run declared VM scenario proof
   jetos studio [path] --host <host>    open installed jetos Studio app
   jetos studio [path] --serve 127.0.0.1:7417 serve browser/edit fallback
   {bin} push <fleet>                   validate a fleet's hosts (deploy is gated)

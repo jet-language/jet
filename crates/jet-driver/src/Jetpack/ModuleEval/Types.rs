@@ -22,6 +22,9 @@ pub struct EvaluatedModule {
     /// U15: `fleet.<name>:` contributions, captured (parse/cross-check now;
     /// ssh realization rides single-host jetos, Phase D).
     pub fleets: Vec<FleetPlan>,
+    /// D-JOS-VMTEST1: `vmtest.<name>:` contributions, captured as runnable VM
+    /// scenarios over known systems.
+    pub vmtests: Vec<VmTestPlan>,
     /// U12: dev-supervised `services:` entries captured from every `env.<name>`
     /// role-module in this module, in source order. Distinct from the jetos
     /// `system.<name>.services` capture (`ServicePlan` above) — a different
@@ -210,6 +213,15 @@ pub struct HostPlan {
     pub overrides: Option<String>,
 }
 
+/// D-JOS-VMTEST1/D-JOS-VMASSERT1: a declarative VM test scenario.
+#[derive(Debug, Clone, PartialEq)]
+pub struct VmTestPlan {
+    pub name: String,
+    pub hosts: Vec<HostPlan>,
+    pub run: String,
+    pub assertions: Vec<String>,
+}
+
 /// The runnable shape of a typed `env.jet`, ready for the CLI run/build path:
 /// the named-source table, the package refs to realize (`<source>:<package>`),
 /// and the prompt label. Only the `env` namespace is consulted — `system`/`image`
@@ -229,6 +241,9 @@ pub struct EnvPlan {
     pub images: Vec<ImagePlan>,
     /// U15: every captured `Fleet`, validated so each host names a known system.
     pub fleets: Vec<FleetPlan>,
+    /// D-JOS-VMTEST1: every captured VM scenario, validated so each host names a
+    /// known system.
+    pub vmtests: Vec<VmTestPlan>,
     /// U12: every captured dev-supervised `Service`, across all evaluated
     /// modules, in source order. `jetpack services <verb>`/`jetpack dev`'s
     /// health gate are the only consumers — the jetos tier never reads this.

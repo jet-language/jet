@@ -30,7 +30,7 @@ pub use Eval::{evaluate_modules, evaluate_source, merge_all, pkg_ref};
 pub use Source::{evaluate_env, is_module_surface};
 pub use Types::{
     AdapterPlan, AdapterRecipe, DevServicePlan, EnvPlan, EvaluatedModule, FleetPlan, HostPlan,
-    ImageKind, ImagePlan, OptionPlan, ServicePlan, SystemPlan,
+    ImageKind, ImagePlan, OptionPlan, ServicePlan, SystemPlan, VmTestPlan,
 };
 
 #[cfg(test)]

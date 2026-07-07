@@ -93,17 +93,18 @@ impl<'a> Parser<'a> {
             _ if ns_word == Syntax::NS_SYSTEM => Namespace::System,
             _ if ns_word == Syntax::NS_IMAGE => Namespace::Image,
             _ if ns_word == Syntax::NS_FLEET => Namespace::Fleet,
+            _ if ns_word == Syntax::NS_VMTEST => Namespace::VmTest,
             _ => {
                 return Err(Diagnostic::error(
                     "E0960",
                     format!("`{}` is not a module namespace", ns_word),
                     format!(
-                        "a role module declares one of the reserved namespaces in its name: `{}` (a dev environment), `{}` (a whole machine), `{}` (a disk image), or `{}` (a host fleet)",
-                        Syntax::NS_ENV, Syntax::NS_SYSTEM, Syntax::NS_IMAGE, Syntax::NS_FLEET
+                        "a role module declares one of the reserved namespaces in its name: `{}` (a dev environment), `{}` (a whole machine), `{}` (a disk image), `{}` (a host fleet), or `{}` (a VM test)",
+                        Syntax::NS_ENV, Syntax::NS_SYSTEM, Syntax::NS_IMAGE, Syntax::NS_FLEET, Syntax::NS_VMTEST
                     ),
                     format!(
-                        "write `module {}.<name> {{ … }}`, `module {}.<name> {{ … }}`, `module {}.<name> {{ … }}`, or `module {}.<name> {{ … }}`",
-                        Syntax::NS_ENV, Syntax::NS_SYSTEM, Syntax::NS_IMAGE, Syntax::NS_FLEET
+                        "write `module {}.<name> {{ … }}`, `module {}.<name> {{ … }}`, `module {}.<name> {{ … }}`, `module {}.<name> {{ … }}`, or `module {}.<name> {{ … }}`",
+                        Syntax::NS_ENV, Syntax::NS_SYSTEM, Syntax::NS_IMAGE, Syntax::NS_FLEET, Syntax::NS_VMTEST
                     ),
                     Some(ns_span),
                 ));
@@ -127,6 +128,7 @@ impl<'a> Parser<'a> {
         let mut system_fields: Vec<crate::AST::SystemField> = Vec::new();
         let mut image_fields: Vec<crate::AST::ImageField> = Vec::new();
         let mut fleet_fields: Vec<crate::AST::FleetField> = Vec::new();
+        let mut vmtest_fields: Vec<crate::AST::VmTestField> = Vec::new();
         let body_start = self.peek().span.start;
 
         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
@@ -182,6 +184,12 @@ impl<'a> Parser<'a> {
                             self.bump();
                         }
                     }
+                    Namespace::VmTest => {
+                        vmtest_fields.push(self.vmtest_field()?);
+                        if matches!(self.peek().kind, TokKind::Comma) {
+                            self.bump();
+                        }
+                    }
                 },
             }
         }
@@ -208,6 +216,11 @@ impl<'a> Parser<'a> {
             Namespace::Fleet => crate::AST::ContribValue::Fleet(crate::AST::FleetLit {
                 explicit_type: None,
                 fields: fleet_fields,
+                span: body_span,
+            }),
+            Namespace::VmTest => crate::AST::ContribValue::VmTest(crate::AST::VmTestLit {
+                explicit_type: None,
+                fields: vmtest_fields,
                 span: body_span,
             }),
         };
@@ -751,17 +764,18 @@ impl<'a> Parser<'a> {
             Syntax::NS_SYSTEM => Namespace::System,
             Syntax::NS_IMAGE => Namespace::Image,
             Syntax::NS_FLEET => Namespace::Fleet,
+            Syntax::NS_VMTEST => Namespace::VmTest,
             _ => {
                 return Err(Diagnostic::error(
                     "E0960",
                     format!("`{}` is not a module namespace", ns_name),
                     format!(
-                        "a module contributes to the reserved namespaces `{}` (a dev environment), `{}` (a whole machine), `{}` (a disk image), and `{}` (a host fleet)",
-                        Syntax::NS_ENV, Syntax::NS_SYSTEM, Syntax::NS_IMAGE, Syntax::NS_FLEET
+                        "a module contributes to the reserved namespaces `{}` (a dev environment), `{}` (a whole machine), `{}` (a disk image), `{}` (a host fleet), and `{}` (a VM test)",
+                        Syntax::NS_ENV, Syntax::NS_SYSTEM, Syntax::NS_IMAGE, Syntax::NS_FLEET, Syntax::NS_VMTEST
                     ),
                     format!(
-                        "begin the contribution with `{}`, `{}`, `{}`, or `{}`",
-                        Syntax::NS_ENV, Syntax::NS_SYSTEM, Syntax::NS_IMAGE, Syntax::NS_FLEET
+                        "begin the contribution with `{}`, `{}`, `{}`, `{}`, or `{}`",
+                        Syntax::NS_ENV, Syntax::NS_SYSTEM, Syntax::NS_IMAGE, Syntax::NS_FLEET, Syntax::NS_VMTEST
                     ),
                     Some(ns_span),
                 ));
@@ -781,6 +795,7 @@ impl<'a> Parser<'a> {
             Namespace::System => crate::AST::ContribValue::System(self.system_lit()?),
             Namespace::Image => crate::AST::ContribValue::Image(self.image_lit()?),
             Namespace::Fleet => crate::AST::ContribValue::Fleet(self.fleet_lit()?),
+            Namespace::VmTest => crate::AST::ContribValue::VmTest(self.vmtest_lit()?),
         };
         let end = value.span().end;
         if matches!(self.peek().kind, TokKind::Comma) {
@@ -1144,6 +1159,73 @@ impl<'a> Parser<'a> {
         }
         self.expect(TokKind::RBrace, "to close the `hosts` map")?;
         Ok(out)
+    }
+
+    /// D-JOS-VMTEST1: parse a `VmTest { hosts, run }` or bare `{ … }` record.
+    fn vmtest_lit(&mut self) -> Result<crate::AST::VmTestLit, Diagnostic> {
+        let start = self.peek().span.start;
+        let explicit_type = self.opt_record_type(Syntax::TYPE_VMTEST)?;
+        self.expect(TokKind::LBrace, "to open a `VmTest` record")?;
+        let mut fields = Vec::new();
+        while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+            if matches!(self.peek().kind, TokKind::Semi) {
+                self.bump();
+                continue;
+            }
+            fields.push(self.vmtest_field()?);
+            if matches!(self.peek().kind, TokKind::Comma) {
+                self.bump();
+            }
+        }
+        let end = self.peek().span.end;
+        self.expect(TokKind::RBrace, "to close a `VmTest` record")?;
+        Ok(crate::AST::VmTestLit {
+            explicit_type,
+            fields,
+            span: Span::new(start, end),
+        })
+    }
+
+    fn vmtest_field(&mut self) -> Result<crate::AST::VmTestField, Diagnostic> {
+        let (name, name_span) = self.expect_ident("for a `VmTest` field name")?;
+        self.expect(TokKind::Colon, "after a `VmTest` field name")?;
+        let value = if name == Syntax::VMTEST_FIELD_HOSTS {
+            crate::AST::VmTestFieldValue::Hosts(self.fleet_hosts()?)
+        } else if name == Syntax::VMTEST_FIELD_RUN {
+            crate::AST::VmTestFieldValue::Run {
+                span: self.test_block_span()?,
+            }
+        } else {
+            crate::AST::VmTestFieldValue::Other(self.expr()?)
+        };
+        let end = match &value {
+            crate::AST::VmTestFieldValue::Hosts(hs) => {
+                hs.last().map(|h| h.span.end).unwrap_or(name_span.end)
+            }
+            crate::AST::VmTestFieldValue::Run { span } => span.end,
+            crate::AST::VmTestFieldValue::Other(e) => e.span().end,
+        };
+        Ok(crate::AST::VmTestField {
+            name,
+            name_span,
+            value,
+            span: Span::new(name_span.start, end),
+        })
+    }
+
+    fn test_block_span(&mut self) -> Result<Span, Diagnostic> {
+        let (word, word_span) = self.expect_ident("for `test` before a VM test body")?;
+        if word != "test" {
+            return Err(Diagnostic::error(
+                "E0960",
+                "vmtest run body starts with `test`".to_string(),
+                "D-JOS-VMTEST1=A: the run field is a checked VM test body.".to_string(),
+                "write `run: test { host.wait_for_boot() }`.".to_string(),
+                Some(word_span),
+            ));
+        }
+        let block = self.skip_balanced_brace_span()?;
+        Ok(Span::new(word_span.start, block.end))
     }
 
     /// Consume a balanced `{ … }` block (the parser is positioned on the opening

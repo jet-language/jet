@@ -1110,6 +1110,12 @@ in this mode, normal codegen byte-identical. **D-TOOL4**: snapshot testing
 with `-u`/`--update-snapshots`. **D-A11YGATE1**: accessibility issues are
 `jet lint --a11y` lints (E2930/E2931), opt-in CI gate.
 
+**D-TESTKIT1=A** *(ratified 2026-07-07, card #308)*: `#Test` remains the only
+test syntax. `core.testing` adds snapshots, fixtures, corpora, temp dirs, fake
+clocks/random, HTTP servers, golden files, and benchmark budgets as library
+helpers. Helpers emit structured test metadata so reports and CI can render
+categories without adding markers for every feature.
+
 ### Formatting & comments
 
 **S5 — Comments**: `//` line; `/* … */` **nesting** block comments
@@ -1311,6 +1317,70 @@ YAML parser is std-only, YAML 1.2 core incl. anchors.
 `.lines()`/`.read_line()` (D-STDIN1). Scoped `live { … }` raw-terminal block
 with guaranteed restore (D-TERM1). `core.log` auto-detects TTY (text) vs
 piped (JSON); `log.setup(format:)` overrides (D-LOGFMT1).
+
+**Core library audit ratifications** *(ratified 2026-07-07, cards #289-#308,
+#310)*: the Epoch 3 Core expansion follows these owner picks.
+
+- **D-COREIO1=A**: `core.io` owns stdout/stderr/stdin streams, flush, raw
+  bytes, TTY facts, and terminal capabilities. Style/progress/raw mode/key
+  events live under `io.terminal` or stream methods, honor TTY/NO_COLOR by
+  default, and expose explicit force/raw controls for experts.
+- **D-COREARGS1=A**: `ArgsSpec` is the one CLI parsing model. Typed
+  `fn run(args: T)` derives an `ArgsSpec`; library/tooling code may build the
+  same spec dynamically for subcommands, env fallbacks, completions, and tests.
+- **D-MATHLIB2=A**: `core.math` is the canonical callable surface for libm and
+  explicit checked/saturating/wrapping integer families. Value-context docs,
+  LSP completion, and snippets may discover helpers, but emitted code uses the
+  same `core.math` names.
+- **D-RANDOMDIST1=A**: `core.random` owns deterministic PRNGs,
+  distributions, shuffling, sampling, seed splitting, and test fixtures.
+  Secret randomness remains in `core.crypto`.
+- **D-TIME-CALENDAR1=A**: time uses distinct `Instant`, `DateTime`,
+  `LocalDate`, `LocalTime`, `Duration`, and `Zone` types, with easy beginner
+  constructors plus expert control over timezone data, monotonic clocks, fake
+  clocks, and schedulers.
+- **D-ENCSTREAM1=A**: each `core.encoding` codec has one adapter identity with
+  whole-value and reader/writer stream modes over the shared `Data`/`DataTree`
+  and `Codable` machinery. XML, JSONL, canonical JSON, and CBOR follow this
+  model.
+- **D-TEXTUNICODE1=A**: `core.text` owns Unicode algorithms: normalization,
+  case folding, segmentation, width, classification, and UTF-8/scalar helpers.
+  `String` stays small; tooling may insert `core.text` calls from String
+  contexts.
+- **D-REGEXENGINE1=A**: `core.regex` is RE2-class and linear by default,
+  including captures, named groups, replace, split, flags, and Unicode
+  classes. Any PCRE/backtracking compatibility is explicit and never the
+  default.
+- **D-NETSOCKET1=A**: `core.net` exposes typed blocking-looking
+  TCP/UDP/Unix/DNS APIs over handles compatible with the task runtime, so
+  deadlines, cancellation, readiness, and high-concurrency serving stay one
+  socket model.
+- **D-HTTPDEPTH1=A**: `core.http` owns Client, Server, Router, middleware,
+  streaming bodies, forms/multipart, cookies, redirects, timeouts, TLS policy,
+  SSE, and WebSocket home, built on `core.url`, `core.mime`, and `core.net`.
+- **D-CRYPTO-SUITE1=A**: beginner crypto APIs are safe envelopes
+  (`seal`/`open`, `sign`/`verify`, password hashing, key agreement, file
+  envelope, `Secret`/`Key` types). Expert primitives live under
+  `crypto.expert` with explicit algorithm choice and audit surface.
+- **D-DBMIGRATE1=A**: the canonical database path is parameterized SQL with
+  typed row decoding, transactions, prepared statements, migrations, and
+  checksums. Query builders may generate the same inspectable SQL/parameter
+  plan.
+- **D-LOGTRACE1=A**: `core.log` records typed events, spans, and fields as
+  source truth; text, JSON, and OTel are output sinks. Expert controls cover
+  propagation, sampling, redaction, trace IDs, and export policy.
+- **D-ITERTOOLS1=A**: one lazy `Iterable`/`Iterator` model powers collection
+  adapters. Collections expose beginner-friendly methods returning lazy views;
+  materialization is explicit via `collect`, `to_list`, or reducers.
+- **D-TASKRUNTIME1=A**: task groups remain the structured lifetime boundary.
+  Channels, timers, deadlines, cancellation, and select produce typed event
+  values; scheduler budgets, tracing, and deterministic tests are expert hooks.
+- **D-DATAFRAME1=A**: `core.data` exposes typed `Table`/`Series<T>`, schema,
+  typed rows, lazy query plans, joins, windows, missing values, and plotting.
+  Eager helpers and lazy plans share the same operations.
+- **D-STDLIBLEDGER1=C**: Core docs track built modules only. Missing domains
+  are implicit; Jet does not maintain a have/have-not ledger of unbuilt or
+  declined stdlib domains.
 
 **Filesystem & time**: typed `Path` (`from`/`join`/`parent`/`extension`/
 `stem`), `write_atomic()`, lazy cycle-safe `walk()` (D-PATHFS1, unbuilt);
@@ -1649,6 +1719,13 @@ honest error otherwise) — never the host cargo/rustc. Same source + same
 pinned toolchain → same output hash → portable cache hits; the toolchain id
 enters output provenance.
 
+**D-JPK-OVERLAY1=A** *(ratified 2026-07-07, card #330)*: Jetpack package
+overrides live as reviewed source truth in `workspace.jet`: typed workspace
+policy, named overlay sets, provider/channel swaps, per-package patches, and
+unfree policy. Reusable overlay modules may package override logic only when
+they materialize as typed workspace policy facts. CLI override commands are
+drafting tools that write source patches/policy, not hidden state.
+
 **World-domination ratifications (D-WD1–12, D-WD14–15 = B, ratified
 2026-07-06, c07589v1)**: these decisions set product law and planning
 direction, not a blanket approval of every illustrative syntax snippet in the
@@ -1837,6 +1914,61 @@ jetos system profile when available. The browser UI is the fallback, review, and
 headless screenshot path against the same protocol. The GUI never owns semantic
 configuration state outside Jet source, lock/proof artifacts, and the generated
 local UI cache ratified by D-JOS-STUDIO-STATE1.
+
+**jetos post-runtime surface ratifications** *(ratified 2026-07-07, cards
+#320-#336)*:
+
+- **D-JOS-VMTEST1=A**: `vmtest.<name>` declarations are the canonical VM
+  scenario surface and are also normal test targets for CI, filtering,
+  artifacts, and package integration. Single-host smoke shorthand expands to
+  `vmtest`; multi-host topology stays explicit.
+- **D-JOS-VMASSERT1=A**: VM tests use typed host handles and assertion
+  methods. Those methods also produce declarative check values/proof facts for
+  Studio and CI replay. String shell commands are explicit fallback assertions,
+  never the default.
+- **D-JOS-USERENV1=A**: `user.<name>` declarations are the canonical per-user
+  environment source. A profile can apply standalone or attach to
+  `system.<host>`; host-specific overrides live where the host composes the
+  profile.
+- **D-JOS-USERAPPLY1=A**: `jetos user plan|build|switch|rollback|prove` is
+  the standalone user-profile path, and `jet os switch` invokes the same
+  user-generation engine when a host imports user profiles.
+- **D-JOS-CONTAINER1=A**: isolated workloads use one `workload.<name>`
+  mechanism. The backend enum selects Container or MicroVM; shared fields cover
+  image/package, ports, mounts, secrets, health, resources, proof, and
+  rollback. Backend-specific knobs live under nested profiles.
+- **D-JOS-HARDWARE1=A**: hardware scans emit `hardware.<host>` source.
+  Systems import that source and may apply first-party or community hardware
+  profiles. Specialisations are named boot variants over the same host and
+  generation, with explain output showing what changed.
+- **D-JOS-DISK1=A**: one storage tree declares disks, partitions, encryption,
+  filesystems, mounts, ephemeral roots, and persistence. The installer consumes
+  it for destructive actions; activation consumes it for mounts and persistence
+  proof. Guided install may draft this source only.
+- **D-JOS-PRIORITY1=A**: option conflicts use named tiers (`Default`,
+  ordinary, `Force`) backed by explicit expert `Priority(n)` weights inside the
+  same mechanism. Explain output shows all contenders. Module disabling uses
+  stable module IDs.
+- **D-JOS-THEME1=A**: `theme.<name>` modules are reusable theme profiles. A
+  system references one and may override specific targets inline; the theme
+  engine projects GTK, Qt, terminals, editors, display manager, and Studio
+  preview from one source.
+- **D-JOS-FLATPAK1=A**: `apps.flatpak` declares remotes, refs, pins/tracking,
+  reconcile mode, and permission policy. User environment app modules may
+  reference those apps for per-user install intent; activation computes one
+  plan/diff/proof and rollback path.
+- **D-JOS-KERNELTUNE1=A**: beginners choose safe/lts/performance profile enums.
+  Experts override typed boot/performance families for kernel params, sysctl,
+  zram, sched-ext, initrd, and bootloader. Overrides carry risk/proof
+  classification and explain output.
+- **D-JOS-FLEETTARGET1=A**: each fleet host carries typed target/authority
+  fields beside its system. Friendly labels can be safe SSH defaults; reusable
+  `deploy.target` refs cover bastions/CI. Host key policy, privilege boundary,
+  and identity are proof-visible.
+- **D-JOS-FLEETROLLOUT1=A**: default fleet push is staged, proof-gated, and
+  rollback-and-stop. Experts can choose batch/canary/dependency order, health
+  timeout, and stage-only/continue flows through the same rollout object.
+  All-at-once is explicit policy, never default.
 
 ### CLI & tooling
 

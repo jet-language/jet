@@ -181,11 +181,10 @@ checks/builds/switches hosts from `system.<host>` declarations, records named
 generations, rolls back, scaffolds configs, and emits activation proof plus
 hybrid-ISO installer media/proof artifacts. VM proof now distinguishes
 harness-ready from guest-passed, runs the QEMU create/install/reboot phases,
-boots the hybrid ISO installer through Limine, direct-boots the exact generation
-kernel/initrd for the verifier phase while the D-JPK-OSDISK1=C GPT/ESP
-installed-disk bootloader handoff is implemented, uses `rdinit` to enter the
-JetOS installer/verify overlay scripts, captures the installed guest's serial
-proof marker, and only accepts a
+boots the hybrid ISO installer through Limine, installs a GPT disk with a FAT
+ESP and ext4 root, reboots the installed disk through OVMF/Limine, uses
+`rdinit=/jetos/init` to enter the JetOS installer/verify overlay dispatcher,
+captures the installed guest's serial proof marker, and only accepts a
 guest proof bound to the same host, generation, disk, media proof, tool hashes,
 and guest assertions, including terminal-login readiness through serial/virtual
 getty units, `/etc/profile`, `/etc/shells`, and projected user homes plus
@@ -199,6 +198,10 @@ The
 interactive `jet os vm run <host> --disk <path>` path launches only a disk
 already tied to the latest generation by the same passing VM proof, with a
 graphical VNC console exposed and serial output attached to the current process.
+`module vmtest.<name>` now declares a VM scenario over `system.<host>` refs, and
+`jet os vm test <name> --disk <path>` runs the same install/reboot proof harness
+per declared host, recording typed assertion facts and replayable VM-test proof
+artifacts under `systems/vm-tests/`.
 The
 `cachyos-kernel` package can now build missing boot
 artifacts from its recorded `source/recipe.jet` via package-internal

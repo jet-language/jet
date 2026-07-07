@@ -1597,15 +1597,26 @@ pub const NS_WORKSPACE: &str = "workspace";
 /// Parse/capture/cross-check now; ssh realization rides single-host jetos (Phase D).
 pub const NS_FLEET: &str = "fleet";
 
+/// D-JOS-VMTEST1=A: a VM scenario is a checked test target over jetos systems.
+/// `module vmtest.<name> { hosts: { node: system.<host> }, run: test { … } }`
+/// is the canonical scenario declaration; the CLI and CI consume the same object.
+pub const NS_VMTEST: &str = "vmtest";
+
 /// U3 (ratified 2026-06-16): the type matching each reserved namespace.
 pub const TYPE_ENV: &str = "Env";
 pub const TYPE_SYSTEM: &str = "System";
 pub const TYPE_IMAGE: &str = "Image";
 /// D-JPK-FLEET1: the type name of a `fleet.<name>` contribution record.
 pub const TYPE_FLEET: &str = "Fleet";
+/// D-JOS-VMTEST1: the type name of a `vmtest.<name>` contribution record.
+pub const TYPE_VMTEST: &str = "VmTest";
 
 /// D-JPK-FLEET1: a `Fleet`'s one required field — the `hosts:` map.
 pub const FLEET_FIELD_HOSTS: &str = "hosts";
+/// D-JOS-VMTEST1: a `VmTest`'s host map, same host shape as `Fleet`.
+pub const VMTEST_FIELD_HOSTS: &str = "hosts";
+/// D-JOS-VMASSERT1: a `VmTest`'s typed assertion body.
+pub const VMTEST_FIELD_RUN: &str = "run";
 
 /// D-JETOS-FREEZE1: frozen element type of a `System`'s `services:` map.
 /// `Service` is not a top-level namespace (it never appears as `service.<name>:`);
@@ -1725,6 +1736,8 @@ pub const OS_VERB_VM: &str = "vm";
 pub const OS_VM_ACTION_PROVE: &str = "prove";
 /// D-JOS-VMRUN1=A: interactive launch of a proved installed VM disk.
 pub const OS_VM_ACTION_RUN: &str = "run";
+/// D-JOS-VMTEST1=A: run a declared VM scenario and write proof artifacts.
+pub const OS_VM_ACTION_TEST: &str = "test";
 /// D-JOS-STUDIO-LAUNCH1=A / D-JOS-STUDIO-HOST1=A: `jetos studio`.
 pub const STUDIO_SUBCOMMAND: &str = "studio";
 /// D-JOS-STUDIO-HOST1=A: headless review mode over the same local protocol.

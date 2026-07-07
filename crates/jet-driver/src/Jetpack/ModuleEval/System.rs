@@ -11,7 +11,7 @@ use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
 use crate::AST::{
     Expr, FleetFieldValue, FleetLit, Func, ImageFieldValue, ImageFromRef, ImageLit, ServiceEntry,
-    SystemFieldValue, SystemLit,
+    SystemFieldValue, SystemLit, VmTestFieldValue, VmTestLit,
 };
 
 use super::Diagnostics::{
@@ -22,7 +22,7 @@ use super::Diagnostics::{
 };
 use super::Eval::{check_build_io, extract_packages};
 use super::Types::{
-    FleetPlan, HostPlan, ImageKind, ImagePlan, OptionPlan, ServicePlan, SystemPlan,
+    FleetPlan, HostPlan, ImageKind, ImagePlan, OptionPlan, ServicePlan, SystemPlan, VmTestPlan,
 };
 
 /// U11/U12/U13/U18: field-check a `system.<name>: { … }` record and capture it as
@@ -427,6 +427,64 @@ pub(super) fn evaluate_fleet(
         name: path.to_string(),
         hosts,
     })
+}
+
+pub(super) fn evaluate_vmtest(
+    path: &str,
+    lit: &VmTestLit,
+    src: &str,
+) -> Result<VmTestPlan, Diagnostic> {
+    let mut hosts: Option<Vec<HostPlan>> = None;
+    let mut run = None;
+    for field in &lit.fields {
+        match &field.value {
+            VmTestFieldValue::Hosts(entries) => {
+                let mut captured = Vec::new();
+                for e in entries {
+                    let overrides = e
+                        .overrides
+                        .map(|span| src[span.start..span.end].trim().to_string());
+                    captured.push(HostPlan {
+                        name: e.name.clone(),
+                        system: e.system.clone(),
+                        overrides,
+                    });
+                }
+                hosts = Some(captured);
+            }
+            VmTestFieldValue::Run { span } => {
+                run = Some(src[span.start..span.end].trim().to_string());
+            }
+            VmTestFieldValue::Other(_) => {
+                return Err(fleet_unknown_field(&field.name, field.name_span));
+            }
+        }
+    }
+    let hosts = hosts.ok_or_else(|| fleet_missing_hosts(lit.span))?;
+    let run = run.unwrap_or_else(|| "test {}".to_string());
+    let assertions = vmtest_assertions(&run);
+    Ok(VmTestPlan {
+        name: path.to_string(),
+        hosts,
+        run,
+        assertions,
+    })
+}
+
+fn vmtest_assertions(run: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for assertion in [
+        "wait_for_boot",
+        "assert_unit_active",
+        "assert_port_open",
+        "assert_file_contains",
+        "assert_command_output",
+    ] {
+        if run.contains(assertion) {
+            out.push(assertion.to_string());
+        }
+    }
+    out
 }
 
 /// U14: an image `format:` must be one of `iso` / `qcow` / `raw`.

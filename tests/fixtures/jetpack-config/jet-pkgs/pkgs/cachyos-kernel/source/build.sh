@@ -11,6 +11,12 @@ if [ -n "${JETOS_CACHYOS_KERNEL:-}" ] && [ -n "${JETOS_CACHYOS_INITRD:-}" ]; the
         mkdir -p "$JETOS_KERNEL_OUT/modules"
         cp "$JETOS_CACHYOS_MODULES/kernel/drivers/gpu/drm/tiny/bochs.ko.xz" "$JETOS_KERNEL_OUT/modules/bochs.ko.xz"
     fi
+    for module in kernel/fs/fat/fat.ko.xz kernel/fs/fat/vfat.ko.xz kernel/fs/nls/nls_ascii.ko.xz kernel/fs/nls/nls_cp437.ko.xz; do
+        if [ -n "${JETOS_CACHYOS_MODULES:-}" ] && [ -e "$JETOS_CACHYOS_MODULES/$module" ]; then
+            mkdir -p "$JETOS_KERNEL_OUT/modules"
+            cp "$JETOS_CACHYOS_MODULES/$module" "$JETOS_KERNEL_OUT/modules/$(basename "$module")"
+        fi
+    done
     exit 0
 fi
 printf 'MZ fixture-built cachyos kernel\nHdrS\n' > "$JETOS_KERNEL_OUT/vmlinuz-cachyos"

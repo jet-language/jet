@@ -1024,6 +1024,8 @@ pub enum ContribValue {
     Image(ImageLit),
     /// `fleet.<name>:` — a `Fleet` record (U15).
     Fleet(FleetLit),
+    /// `vmtest.<name>:` — a VM scenario record (D-JOS-VMTEST1).
+    VmTest(VmTestLit),
 }
 
 impl ContribValue {
@@ -1034,6 +1036,7 @@ impl ContribValue {
             ContribValue::System(s) => s.span,
             ContribValue::Image(i) => i.span,
             ContribValue::Fleet(f) => f.span,
+            ContribValue::VmTest(v) => v.span,
         }
     }
 }
@@ -1222,8 +1225,33 @@ pub struct HostEntry {
     pub span: Span,
 }
 
+/// D-JOS-VMTEST1: a `VmTest { hosts, run }` record. The `hosts:` map uses the
+/// same host-to-system reference grammar as `Fleet`; `run:` captures the typed
+/// test body span so the jetos VM-test runner can validate/replay proof facts.
+#[derive(Debug)]
+pub struct VmTestLit {
+    pub explicit_type: Option<Span>,
+    pub fields: Vec<VmTestField>,
+    pub span: Span,
+}
+
+#[derive(Debug)]
+pub struct VmTestField {
+    pub name: String,
+    pub name_span: Span,
+    pub value: VmTestFieldValue,
+    pub span: Span,
+}
+
+#[derive(Debug)]
+pub enum VmTestFieldValue {
+    Hosts(Vec<HostEntry>),
+    Run { span: Span },
+    Other(Expr),
+}
+
 /// U3 (unified-ecosystem §5): the reserved namespaces a module may contribute
-/// to, each with a matching type (`Env`/`System`/`Image`/`Fleet`).
+/// to, each with a matching type (`Env`/`System`/`Image`/`Fleet`/`VmTest`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Namespace {
     /// `env` → `Env`: a development environment / shell.
@@ -1234,6 +1262,8 @@ pub enum Namespace {
     Image,
     /// `fleet` → `Fleet`: a map of hosts to `System` refs (U15).
     Fleet,
+    /// `vmtest` → `VmTest`: a VM scenario over `System` refs (D-JOS-VMTEST1).
+    VmTest,
 }
 
 /// S45 (M9): type parameter with optional trait bounds.

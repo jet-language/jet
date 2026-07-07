@@ -74,6 +74,7 @@ pub fn evaluate_env(src: &str, base_dir: &Path) -> Result<EnvPlan, Diagnostic> {
     let mut systems: Vec<SystemPlan> = Vec::new();
     let mut images: Vec<ImagePlan> = Vec::new();
     let mut fleets: Vec<FleetPlan> = Vec::new();
+    let mut vmtests = Vec::new();
     let mut dev_services: Vec<super::Types::DevServicePlan> = Vec::new();
     let mut secrets: Vec<String> = Vec::new();
     let mut adapters: Vec<AdapterPlan> = Vec::new();
@@ -81,6 +82,7 @@ pub fn evaluate_env(src: &str, base_dir: &Path) -> Result<EnvPlan, Diagnostic> {
         systems.extend(module.systems.iter().cloned());
         images.extend(module.images.iter().cloned());
         fleets.extend(module.fleets.iter().cloned());
+        vmtests.extend(module.vmtests.iter().cloned());
         dev_services.extend(module.dev_services.iter().cloned());
         secrets.extend(module.secrets.iter().cloned());
         adapters.extend(module.adapters.iter().cloned());
@@ -135,6 +137,18 @@ pub fn evaluate_env(src: &str, base_dir: &Path) -> Result<EnvPlan, Diagnostic> {
             }
         }
     }
+    for vmtest in &vmtests {
+        for host in &vmtest.hosts {
+            if !system_names.contains(&host.system) {
+                return Err(fleet_unknown_system(
+                    &vmtest.name,
+                    &host.name,
+                    &host.system,
+                    &system_names,
+                ));
+            }
+        }
+    }
 
     let merged = merge_all(&modules).map_err(|e| merge_error_to_diagnostic(&e))?;
 
@@ -168,6 +182,7 @@ pub fn evaluate_env(src: &str, base_dir: &Path) -> Result<EnvPlan, Diagnostic> {
         systems,
         images,
         fleets,
+        vmtests,
         dev_services,
         secrets,
     })
