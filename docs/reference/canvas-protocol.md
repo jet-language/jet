@@ -20,7 +20,16 @@ Top-level fields:
 | `source_text` | Current source text. Canvas uses this for local undo/redo; clients may ignore it. |
 | `graphs` | Function/test/lambda graph documents. |
 | `diagnostics` | Jet diagnostics already emitted by parser/sema. Never rustc output. |
-| `facts` | Semindex schema/version handles used by the projection. |
+| `facts` | Semindex schema/version handles used by the projection, plus non-semantic Blueprint-parity facts. |
+
+`facts.blueprint` contains source-derived Canvas affordances that do not change
+program meaning:
+
+- `event_dispatchers`: `core.event` creation, subscription, and emit calls with
+  source spans, `EventScope` lifetime, and EventTrace overlay intent.
+- `interfaces`: trait and trait-impl facts for Canvas interface views and
+  create-impl transactions.
+- `task_flows`: `core.tasks` spawn/join/channel/taskgroup facts for async rails.
 
 Each graph contains source-backed records:
 
@@ -120,6 +129,7 @@ Current transactions:
 | `promote_to_binding` | `inline_expr_id`, `name` | Inserts an ordinary Jet binding before the owning source line and replaces the inline expression with that name. |
 | `insert_visible_conversion` | `inline_expr_id`, `callee` | Wraps an inline expression in an ordinary Jet conversion/function call. |
 | `insert_call` | `graph_id`, `callee`, `args`, optional `bind` | Inserts an ordinary Jet call in a graph's source body. |
+| `create_trait_impl` | `type_name`, `trait_name` | Appends an ordinary `impl Type.Trait { ... }` block with source-checked member stubs. |
 | `break_link` | `wire_id` | Replaces the source expression behind a wire with `#Todo`, preserving Jet type checking. |
 | `move_link` | `wire_id`, `replacement` | Rewrites the source expression behind a wire to another visible Jet name/path. |
 | `replace_source` | `source` | Replaces the file with exact prior/future Jet source after formatting and front-end validation. Used by local undo/redo. |

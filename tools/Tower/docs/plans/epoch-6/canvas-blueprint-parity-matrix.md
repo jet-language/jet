@@ -21,6 +21,8 @@ hidden graph asset or semantic sidecar.
 | Workbench | Pan, zoom, zoom-to-fit | Browser panel supports pan, zoom, fit, and nonblank graph rendering. | shipped | #265, tests/web_dev.rs |
 | Workbench | Child/parent graph navigation | Breadcrumbs and graph picker navigate function/test/lambda graphs. | shipped | #287, tests/web_dev.rs |
 | Workbench | Drag nodes and groups | Dragging stores local view state unless source-anchored hints apply. | shipped | #271/#287, tests/web_dev.rs |
+| Workbench | Align, distribute, reroute, tidy | Graph organization commands persist only local view/editor state; source stays truth. | shipped | #312, tests/web_dev.rs |
+| Workbench | Bookmarks and favorite actions | Graph bookmarks, palette pins, and recency/frequency ranking are local editor state. | shipped | #313, tests/web_dev.rs |
 | Workbench | Cut/copy/paste/duplicate | Source transactions duplicate or move source-backed selections. | planned | #272 |
 | Workbench | Inspector/details panel | Inspector shows node kind, pins, source span, and edit affordances. | shipped | #265, tests/web_dev.rs |
 | Hotkeys | Save, undo, redo, find, check | Blueprint-compatible command layer maps to source transactions and Jet checks. | planned | #271, #272, #282 |
@@ -31,6 +33,7 @@ hidden graph asset or semantic sidecar.
 | Node model | Variables get/set | Bindings, reads, and reassignments project as source nodes. | shipped | #274, #281, tests/canvas.rs |
 | Node model | Branch, switch, loops | Jet `if`, dispatch, and `loop` forms project and insert from palette without opaque fallbacks. | shipped | #272/#274, tests/canvas.rs |
 | Node model | Sequence, gate, do-once, do-N | Blueprint scheduler nodes are rejected unless represented by ordinary Jet control/callback code. | rejected-as-Blueprint-semantic-debt | #278 |
+| Node model | Large graph virtualization and LOD | Canvas renders visible graph regions and low-zoom title-bar nodes for large projections. | shipped | #314, tests/web_dev.rs |
 | Node model | Math Expression node | Expression text stays ordinary Jet expression source, not a separate formula language. | planned | #274 |
 | Pins and wires | Exec pins and data pins | Separate control/data rails over Jet semantics. | shipped | #278, tests/canvas.rs |
 | Pins and wires | Typed colored wires | Pin type, capability, fallibility, effect facts, and source spans render distinctly. | shipped | #274/#278, tests/canvas.rs |
@@ -52,7 +55,9 @@ hidden graph asset or semantic sidecar.
 | Macros/collapse | Collapse graph | Collapse is a view over a source span, expandable without semantic drift. | shipped | #280, D-CANVAS-COLLAPSE1, tests/canvas.rs |
 | Macros/collapse | Blueprint macros | Separate visual macro semantics are not part of Canvas v1. | rejected-as-Blueprint-semantic-debt | #280 |
 | Events | Event graph entry nodes | Framework callback views project from ordinary `on_*` Jet functions. | shipped | #281, D-CANVAS-EVENT1, tests/canvas.rs::canvas_projects_function_metadata_and_callback_event_views |
-| Events | Event dispatchers/interfaces | First-party Event/Hook system must supply the source truth before Canvas projects dispatcher semantics. | blocked-by-ballot | #286 |
+| Events | Event dispatchers/interfaces | `core.event` Event/Hook calls project dispatcher emit/subscription/lifetime/EventTrace facts from source. | shipped | #311, tests/canvas.rs::canvas_projects_event_dispatchers_from_core_event |
+| Interfaces | Trait/impl authoring | Jet traits project Blueprint-interface parity facts and create ordinary checked impl stubs. | shipped | #316, tests/canvas.rs::canvas_projects_trait_impl_authoring_and_writes_impl_stub |
+| Tasks | Latent action parity | `core.tasks` spawn/join/channel/taskgroup forms project async rails and task-flow facts. | shipped | #319, tests/canvas.rs::canvas_projects_task_flow_authoring_facts |
 | Debugger | Debug session selector | Canvas selects the local source-span debug session. | shipped | #273, tests/canvas.rs |
 | Debugger | Breakpoints/watches | Local source-span debug state drives breakpoints and watches without editing source. | shipped | #273, D-CANVAS-DEBUGSTATE1, tests/canvas.rs |
 | Debugger | Active node/wire pulse | Runtime overlays map active node/wire pulses back to source spans. | shipped | #273/#278, tests/canvas.rs |
@@ -61,6 +66,9 @@ hidden graph asset or semantic sidecar.
 | Search/refactor | Find references/rename | Refactors preview and write source through existing codemod paths. | shipped | #282, tests/canvas.rs |
 | Search/refactor | Source-to-graph jump | Source span selects matching graph node/pin/inline expression. | shipped | #282, tests/canvas.rs |
 | Search/refactor | Toggle graph/source view | Canvas and source code toggle over the same file, preserving source as truth. | shipped | #287, tests/web_dev.rs |
+| Accessibility | Keyboard-only authoring | Keyboard commands cover search, action palette, alignment/tidy, bookmarks, run, undo/redo, graph/source toggle, and node nudge with focus-visible/reduced-motion support. | shipped | #315, tests/web_dev.rs |
+| Learning | Node docs and first-run overlay | Source doc comments, type explanations, pin hover text, and a dismissible local first-run overlay guide Canvas without changing source. | shipped | #318, tests/web_dev.rs |
+| Runtime | Live-run loop | Canvas exposes a run HUD and one-key run/re-run path through the debug overlay and local watches. | shipped | #317, tests/web_dev.rs |
 | Source control | Dirty/stale/conflict markers | Graph transactions guard against stale source revisions. | shipped | #265, tests/canvas.rs |
 | Source control | Transaction diff preview | Canvas shows exact Jet text diffs and Git dirty state before/after source-backed writes. | shipped | #283, tests/canvas.rs, tests/web_dev.rs |
 | Source control | Asset checkout/lock model | Asset-style graph checkout is not Canvas truth. | rejected-as-Blueprint-semantic-debt | #283, D-CANVAS-SCM1 |

@@ -351,6 +351,13 @@ pub fn apply_transaction_json(path: &Path, request: &str) -> Result<String, Stri
             }
             apply_insert_call(path, &src, &graph_id, &callee, &args, bind.as_deref())
         }
+        "create_trait_impl" => {
+            let type_name = required_string(request, "type_name")?;
+            let trait_name = required_string(request, "trait_name")?;
+            validate_qualified_name(&type_name)?;
+            validate_qualified_name(&trait_name)?;
+            apply_create_trait_impl(path, &src, &type_name, &trait_name)
+        }
         "preview_canvas_action" => {
             let graph_id = required_string(request, "graph_id")?;
             let action_id = required_string(request, "action_id")?;
@@ -502,6 +509,7 @@ body:not(.is-dev-mode) .debug-controls { display: none; }
 .search-item small { color: #9aa8c5; display: block; margin-top: 3px; overflow-wrap: anywhere; }
 .count, .tag { color: #8fb2dc; font: 11px ui-monospace, "SFMono-Regular", Consolas, monospace; }
 .search { width: 100%; margin-bottom: 8px; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 #stage { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: #05070b; }
 #jet-canvas-view { width: 100%; height: 100%; display: block; background: #05070b; }
 #canvas-dock { position: absolute; left: 10px; top: 10px; z-index: 26; display: none; gap: 6px; padding: 5px; border: 1px solid #365a7f; background: rgba(8,17,29,.92); box-shadow: 0 12px 34px rgba(0,0,0,.42); border-radius: 6px; }
@@ -599,9 +607,19 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
 .action-context .pin-port { width: 9px; height: 9px; box-shadow: 0 0 0 2px rgba(255,255,255,.07), 0 0 12px currentColor; }
 .action-results { display: grid; gap: 5px; max-height: min(360px, calc(100vh - 170px)); overflow: auto; padding: 2px; }
 .action-result { border-color: #284866; background: #0d1826; min-height: 44px; }
+.action-result.is-favorite { border-color: #facc15; box-shadow: inset 3px 0 0 #facc15; }
 .action-result:hover, .action-result:focus-visible { border-color: #35c2ff; background: #102942; }
 .action-result small { color: #9aaecb; display: block; margin-top: 2px; overflow-wrap: anywhere; }
 .action-empty { color: #8da4c2; padding: 9px; border: 1px dashed #31445d; border-radius: 4px; font: 11px ui-monospace, "SFMono-Regular", Consolas, monospace; }
+#first-run-tour { position: fixed; inset: auto 18px 42px auto; z-index: 29; width: min(340px, calc(100vw - 36px)); display: none; gap: 10px; padding: 12px; border: 1px solid #365a7f; border-radius: 6px; background: rgba(7,16,28,.95); box-shadow: 0 22px 70px rgba(0,0,0,.5); color: #c9dcf2; }
+#first-run-tour.is-open { display: grid; }
+#first-run-tour b { color: #f8fbff; }
+#run-hud { position: absolute; right: 12px; top: 100px; z-index: 12; display: none; min-width: 190px; padding: 8px 10px; border: 1px solid #31506d; border-radius: 6px; background: rgba(8,16,27,.88); color: #9fb9d8; font: 11px ui-monospace, "SFMono-Regular", Consolas, monospace; }
+#run-hud.is-running { display: block; border-color: #facc15; color: #fef3c7; }
+.lod-node { opacity: .88; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; scroll-behavior: auto !important; }
+}
 #statusbar { display: flex; align-items: center; gap: 14px; padding: 0 12px; border-top: 1px solid #23344a; background: #070b10; color: #8096b5; font: 11px ui-monospace, "SFMono-Regular", Consolas, monospace; }
 #toast { margin-left: auto; color: #a7f3d0; }
 @media (max-width: 1120px) {
@@ -647,6 +665,12 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
     <button id="developer-mode" title="Show Canvas internals">Developer</button>
     <button id="undo-edit">Undo</button>
     <button id="redo-edit">Redo</button>
+    <button id="org-align" title="Align selected nodes">Align</button>
+    <button id="org-tidy" title="Tidy visible graph">Tidy</button>
+    <button id="bookmark-add" title="Bookmark graph">Mark</button>
+    <button id="bookmark-jump" title="Jump to bookmark">Go</button>
+    <button id="favorite-action" title="Pin first compatible action">Fav</button>
+    <button id="run-current" title="Run current entry">Run</button>
     <span id="jump">loading graph</span>
     <div class="debug-controls">
       <select id="debug-session" aria-label="Debug session"><option>local debug</option></select>
@@ -668,6 +692,7 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
       <div id="graph-strip" aria-label="Graph tabs"></div>
       <div id="wire-status" aria-live="polite"><span id="wire-status-dot"></span><b>Ready</b><span>Drag from a socket or right-click the canvas</span></div>
       <div id="graph-overview" aria-label="Graph overview"></div>
+      <div id="run-hud" aria-live="polite">run idle</div>
       <canvas id="jet-canvas-view" width="1400" height="900"></canvas>
       <pre id="source-view" aria-label="Jet source"></pre>
       <canvas id="minimap" width="190" height="124"></canvas>
@@ -680,6 +705,11 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
   <footer id="statusbar"><span id="source-id">source</span><span id="revision">revision</span><span id="schema">canvas v1</span><span id="scm-state">git</span><span id="toast"></span></footer>
 </div>
 <div id="context-menu" role="menu"></div>
+<div id="first-run-tour" role="dialog" aria-label="Canvas first run">
+  <b>Canvas uses source as truth.</b>
+  <span>Use search, right-click actions, pin menus, graph bookmarks, and Run without creating graph assets.</span>
+  <button id="tour-dismiss">Dismiss</button>
+</div>
 __JET_CANVAS_BOOTSTRAP__
 </body>
 </html>
@@ -723,6 +753,15 @@ pub fn canvas_js() -> String {
   const sourceDiff = document.getElementById("source-diff");
   const undoEdit = document.getElementById("undo-edit");
   const redoEdit = document.getElementById("redo-edit");
+  const orgAlign = document.getElementById("org-align");
+  const orgTidy = document.getElementById("org-tidy");
+  const bookmarkAdd = document.getElementById("bookmark-add");
+  const bookmarkJump = document.getElementById("bookmark-jump");
+  const favoriteAction = document.getElementById("favorite-action");
+  const runCurrent = document.getElementById("run-current");
+  const runHud = document.getElementById("run-hud");
+  const firstRunTour = document.getElementById("first-run-tour");
+  const tourDismiss = document.getElementById("tour-dismiss");
   const debugStep = document.getElementById("debug-step");
   const debugNext = document.getElementById("debug-next");
   const debugContinue = document.getElementById("debug-continue");
@@ -739,6 +778,9 @@ pub fn canvas_js() -> String {
   let scm = null;
   let undoStack = [];
   let redoStack = [];
+  let editorState = { bookmarks: [], favorites: [], actionUse: {}, rerouteKnots: [], tourDismissed: false };
+  let wireStyle = "bezier";
+  let runState = { running: false, last: "idle" };
   let selectedGraphId = null;
   let graphBackStack = [];
   let graphForwardStack = [];
@@ -774,6 +816,150 @@ pub fn canvas_js() -> String {
   function storeFlag(name, value) {
     try { if (window.localStorage) window.localStorage.setItem(name, value ? "1" : "0"); }
     catch (_) {}
+  }
+
+  function projectStateKey(doc) {
+    return "jet.canvas.editor:" + ((doc && doc.source_id) || "source");
+  }
+
+  function loadEditorState(doc) {
+    try {
+      editorState = JSON.parse(localStorage.getItem(projectStateKey(doc)) || "null") || editorState;
+    } catch (_) {
+      editorState = { bookmarks: [], favorites: [], actionUse: {}, rerouteKnots: [], tourDismissed: false };
+    }
+    editorState.bookmarks ||= [];
+    editorState.favorites ||= [];
+    editorState.actionUse ||= {};
+    editorState.rerouteKnots ||= [];
+    editorState.tourDismissed = !!editorState.tourDismissed;
+    if (firstRunTour) firstRunTour.classList.toggle("is-open", !editorState.tourDismissed);
+  }
+
+  function saveEditorState() {
+    if (!latestDoc) return;
+    try { localStorage.setItem(projectStateKey(latestDoc), JSON.stringify(editorState)); }
+    catch (_) {}
+  }
+
+  function favoriteSet() {
+    return new Set(editorState.favorites || []);
+  }
+
+  function markActionUsed(action) {
+    const id = action.action_id || action.callee || action.title;
+    editorState.actionUse[id] = (editorState.actionUse[id] || 0) + 1;
+    saveEditorState();
+  }
+
+  function rankAction(action) {
+    const id = action.action_id || action.callee || action.title;
+    const favorite = favoriteSet().has(id) ? 100000 : 0;
+    const used = editorState.actionUse[id] || 0;
+    return favorite + used;
+  }
+
+  function currentGraphOrNull() {
+    return latestDoc ? currentGraph(latestDoc) : null;
+  }
+
+  function selectedGraphNodes(graph) {
+    if (!graph) return [];
+    return graph.nodes.filter((node) => selectedNodeIds.has(node.node_id));
+  }
+
+  function setNodeViewPosition(node, x, y) {
+    nodeOffsets.set(node.node_id, {
+      x: x - node.layout.x * layoutScale.x,
+      y: y - node.layout.y * layoutScale.y
+    });
+  }
+
+  function alignSelectedNodes(axis) {
+    const graph = currentGraphOrNull();
+    const nodes = selectedGraphNodes(graph);
+    if (nodes.length < 2) return showToast("Select nodes to align");
+    const target = axis === "y"
+      ? Math.min(...nodes.map((node) => nodeY(node)))
+      : Math.min(...nodes.map((node) => nodeX(node)));
+    for (const node of nodes) {
+      const x = axis === "x" ? target : nodeX(node);
+      const y = axis === "y" ? target : nodeY(node);
+      setNodeViewPosition(node, x, y);
+    }
+    showToast(axis === "y" ? "Aligned top" : "Aligned left");
+    drawGraph(latestDoc);
+  }
+
+  function tidyGraphLayout() {
+    const graph = currentGraphOrNull();
+    if (!graph) return;
+    const cols = Math.max(2, Math.ceil(Math.sqrt(graph.nodes.length || 1)));
+    graph.nodes.forEach((node, i) => {
+      const col = i % cols;
+      const row = Math.floor(i / cols);
+      setNodeViewPosition(node, 80 + col * 360, 70 + row * 190);
+    });
+    wireStyle = "straight";
+    showToast("Graph tidied");
+    drawGraph(latestDoc);
+  }
+
+  function addRerouteKnot() {
+    const graph = currentGraphOrNull();
+    if (!graph) return;
+    const size = cssSize();
+    editorState.rerouteKnots.push({
+      graph_id: graph.graph_id,
+      x: wx(size.width / 2),
+      y: wy(size.height / 2)
+    });
+    saveEditorState();
+    showToast("Reroute knot placed");
+    drawGraph(latestDoc);
+  }
+
+  function bookmarkCurrentGraph() {
+    const graph = currentGraphOrNull();
+    if (!graph) return;
+    const entry = { graph_id: graph.graph_id, node_id: selectedNodeId, title: graph.title, view };
+    editorState.bookmarks = (editorState.bookmarks || []).filter((b) => b.graph_id !== graph.graph_id);
+    editorState.bookmarks.unshift(entry);
+    saveEditorState();
+    showToast("Bookmark saved");
+  }
+
+  function jumpBookmark() {
+    const mark = (editorState.bookmarks || [])[0];
+    if (!mark) return showToast("No bookmark");
+    view = mark.view || view;
+    switchGraph(mark.graph_id, { nodeId: mark.node_id, fit: false, toast: "Bookmark opened" });
+  }
+
+  function toggleFavoriteAction() {
+    const action = actionEntries[0] || graphActionItems()[0];
+    if (!action) return showToast("No action to favorite");
+    const id = action.action_id || action.callee || action.title;
+    const set = favoriteSet();
+    if (set.has(id)) set.delete(id);
+    else set.add(id);
+    editorState.favorites = Array.from(set);
+    saveEditorState();
+    showToast(set.has(id) ? "Favorite pinned" : "Favorite removed");
+  }
+
+  function runCurrentGraph() {
+    runState = { running: true, last: "running " + (graphTitle(selectedGraphId) || "run") };
+    runHud.textContent = runState.last + " via source-backed dev tier";
+    runHud.classList.add("is-running");
+    window.__jetCanvasRunLoop = { graph_id: selectedGraphId, state: "running", watches: debugState.watches || [] };
+    runDebug(["c"]);
+    window.setTimeout(() => {
+      runState.running = false;
+      runState.last = "last run projected into debug overlay";
+      runHud.textContent = runState.last;
+      runHud.classList.remove("is-running");
+    }, 450);
   }
 
   function setDeveloperMode(on) {
@@ -1085,7 +1271,7 @@ pub fn canvas_js() -> String {
   function drawPinHoverTooltip(pin) {
     const point = pin && pinPoints.get(pin.pin_id);
     if (!point) return;
-    const text = pinName(pin) + " : " + exactPinType(pin);
+    const text = pinName(pin) + " : " + exactPinType(pin) + " - " + typeExplanation(pin.type);
     ctx.font = `${Math.max(10, 12 * view.zoom)}px ui-monospace, Consolas, monospace`;
     const padX = 9 * view.zoom;
     const badgeW = Math.min(220 * view.zoom, ctx.measureText(text).width + padX * 2);
@@ -1101,6 +1287,16 @@ pub fn canvas_js() -> String {
     ctx.fillStyle = point.color;
     ctx.textAlign = "left";
     ctx.fillText(clipText(text, 28), bx + padX, by + 17 * view.zoom);
+  }
+
+  function typeExplanation(type) {
+    if (type === "exec" || type === "control") return "control rail";
+    if (type === "Bool") return "branch condition";
+    if (type === "String") return "text value";
+    if (type === "Int") return "whole number";
+    if (String(type || "").includes("Task")) return "task handle";
+    if (String(type || "").includes("Event") || String(type || "").includes("Hook")) return "event dispatcher";
+    return "source-backed Jet value";
   }
 
   function drawSocketRow(pin, x, y, w, dir, recordHit) {
@@ -1167,10 +1363,14 @@ pub fn canvas_js() -> String {
   function renderActionPalette() {
     if (!contextMenuState) return;
     const query = contextMenuState.query || "";
-    const matches = contextMenuState.actions.filter((action) => actionMatchesQuery(action, query)).slice(0, 18);
+    const matches = contextMenuState.actions
+      .filter((action) => actionMatchesQuery(action, query))
+      .sort((a, b) => rankAction(b) - rankAction(a) || String(a.title).localeCompare(String(b.title)))
+      .slice(0, 18);
     const context = contextMenuState.pin ? `${contextMenuState.pin.name}: ${contextMenuState.pin.type}` : (contextMenuState.context || "source-backed actions");
     const port = contextMenuState.pin ? pinPortHtml(contextMenuState.pin.type || "Value") : "";
-    contextMenu.innerHTML = `<div class="action-palette-head"><div class="menu-title">${escapeHtml(contextMenuState.title)}</div><div class="action-context">${port}<span>${escapeHtml(context)}</span><span class="tag">${matches.length}/${contextMenuState.actions.length}</span></div><input id="action-palette-search" placeholder="Search actions" value="${escapeAttr(query)}"></div><div class="action-results">${matches.length ? matches.map((action) => `<button class="action-result" data-menu-action="${escapeAttr(action.index)}"><span>${escapeHtml(action.title)}<small>${escapeHtml(action.detail || "")}</small></span><span class="tag">${escapeHtml(action.group || "")}</span></button>`).join("") : "<div class=\"action-empty\">No matching actions</div>"}</div>`;
+    const favorites = favoriteSet();
+    contextMenu.innerHTML = `<div class="action-palette-head"><div class="menu-title">${escapeHtml(contextMenuState.title)}</div><div class="action-context">${port}<span>${escapeHtml(context)}</span><span class="tag">${matches.length}/${contextMenuState.actions.length}</span></div><input id="action-palette-search" placeholder="Search actions" value="${escapeAttr(query)}"></div><div class="action-results">${matches.length ? matches.map((action) => { const id = action.action_id || action.callee || action.title; const fav = favorites.has(id); return `<button class="action-result${fav ? " is-favorite" : ""}" data-menu-action="${escapeAttr(action.index)}"><span>${fav ? "★ " : ""}${escapeHtml(action.title)}<small>${escapeHtml(action.detail || "")}</small></span><span class="tag">${escapeHtml(action.group || "")}</span></button>`; }).join("") : "<div class=\"action-empty\">No matching actions</div>"}</div>`;
     const input = document.getElementById("action-palette-search");
     if (input) {
       input.addEventListener("input", () => {
@@ -1199,7 +1399,10 @@ pub fn canvas_js() -> String {
       button.addEventListener("click", () => {
         const action = contextMenuState && contextMenuState.actions.find((item) => String(item.index) === button.getAttribute("data-menu-action"));
         closeContextMenu();
-        if (action) action.run();
+        if (action) {
+          markActionUsed(action);
+          action.run();
+        }
       });
     });
   }
@@ -1379,7 +1582,14 @@ pub fn canvas_js() -> String {
         const name = window.prompt("Function name", "helper");
         if (name) postTransaction({ schema_version: 1, op: "create_function", revision: latestDoc.revision, name, params: "", ret_type: "Int" });
       } },
-      { title: "Show source", detail: "toggle", group: "view", run: () => setViewMode("source") }
+      { title: "Show source", detail: "toggle", group: "view", run: () => setViewMode("source") },
+      { title: "Align top", detail: "local view state", group: "layout", run: () => alignSelectedNodes("y") },
+      { title: "Align left", detail: "local view state", group: "layout", run: () => alignSelectedNodes("x") },
+      { title: "Auto tidy", detail: "local view state", group: "layout", run: tidyGraphLayout },
+      { title: "Straighten wires", detail: "local view state", group: "layout", run: () => { wireStyle = "straight"; showToast("Wires straightened"); drawGraph(latestDoc); } },
+      { title: "Add reroute knot", detail: "local view state", group: "layout", run: addRerouteKnot },
+      { title: "Bookmark graph", detail: "local editor state", group: "navigation", run: bookmarkCurrentGraph },
+      { title: "Run graph", detail: "debug overlay", group: "run", run: runCurrentGraph }
     ];
     for (const item of palette.concat(actionEntries).slice(0, 36)) {
       actions.push({ title: item.title, detail: item.detail || "", group: item.op === "preview_canvas_action" ? "built-in" : "node", run: () => runPalette(item) });
@@ -1766,7 +1976,8 @@ pub fn canvas_js() -> String {
     const color = activeWire ? "#facc15" : wireColor(wire, from);
     ctx.beginPath();
     ctx.moveTo(from.x, from.y);
-    ctx.bezierCurveTo(from.x + 96 * view.zoom, from.y, to.x - 96 * view.zoom, to.y, to.x, to.y);
+    if (wireStyle === "straight") ctx.lineTo(to.x, to.y);
+    else ctx.bezierCurveTo(from.x + 96 * view.zoom, from.y, to.x - 96 * view.zoom, to.y, to.x, to.y);
     ctx.strokeStyle = "rgba(1,6,12,.86)";
     ctx.lineWidth = control ? Math.max(7, 10 * view.zoom) : Math.max(5, 7 * view.zoom);
     ctx.shadowBlur = 0;
@@ -1774,7 +1985,8 @@ pub fn canvas_js() -> String {
 
     ctx.beginPath();
     ctx.moveTo(from.x, from.y);
-    ctx.bezierCurveTo(from.x + 96 * view.zoom, from.y, to.x - 96 * view.zoom, to.y, to.x, to.y);
+    if (wireStyle === "straight") ctx.lineTo(to.x, to.y);
+    else ctx.bezierCurveTo(from.x + 96 * view.zoom, from.y, to.x - 96 * view.zoom, to.y, to.x, to.y);
     ctx.strokeStyle = color;
     ctx.lineWidth = activeWire ? Math.max(4, 7 * view.zoom) : control ? Math.max(3, 5 * view.zoom) : Math.max(2.4, 3.6 * view.zoom);
     ctx.shadowColor = activeWire ? "rgba(250,204,21,.72)" : hexToRgba(color, control || selectedWire ? .62 : .34);
@@ -1784,10 +1996,36 @@ pub fn canvas_js() -> String {
     if (control || selectedWire || activeWire) drawWireArrow(from, to, color, control);
   }
 
+  function drawRerouteKnots(graph) {
+    const knots = (editorState.rerouteKnots || []).filter((k) => k.graph_id === graph.graph_id);
+    for (const knot of knots) {
+      const x = sx(knot.x), y = sy(knot.y);
+      ctx.beginPath();
+      ctx.arc(x, y, Math.max(5, 7 * view.zoom), 0, Math.PI * 2);
+      ctx.fillStyle = "#0f172a";
+      ctx.fill();
+      ctx.strokeStyle = "#facc15";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+  }
+
   function drawNode(graph, node, inlineByNode, recordHit = true) {
     const size = nodeSize(graph, node);
     const w = size.w * view.zoom, h = size.h * view.zoom;
     const x = sx(nodeX(node)), y = sy(nodeY(node));
+    if (view.zoom < .38) {
+      roundRect(x, y, Math.max(72, w), Math.max(18, 24 * view.zoom), 4 * view.zoom);
+      ctx.fillStyle = selectedNodeIds.has(node.node_id) ? "#12324a" : "#101821";
+      ctx.fill();
+      ctx.strokeStyle = selectedNodeIds.has(node.node_id) ? "#35c2ff" : "#32445c";
+      ctx.stroke();
+      ctx.fillStyle = "#dbeafe";
+      ctx.font = "10px ui-monospace, Consolas, monospace";
+      ctx.fillText(clipText(node.title, 18), x + 8, y + 15);
+      if (recordHit) hit.push({ x, y, w: Math.max(72, w), h: Math.max(18, 24 * view.zoom), node });
+      return;
+    }
     const selected = selectedNodeIds.has(node.node_id);
     const active = debugOverlay && debugOverlay.active_node_id === node.node_id;
     const searchHit = (searchState.spans || []).some((span) => spansOverlap(node.source_span, span));
@@ -1894,6 +2132,22 @@ pub fn canvas_js() -> String {
     if (recordHit) hit.push({ x, y, w, h, node });
   }
 
+  function visibleGraphNodes(graph) {
+    const size = cssSize();
+    const margin = 360;
+    if (!graph || graph.nodes.length < 180) {
+      window.__jetCanvasVirtualizationStats = { total: graph ? graph.nodes.length : 0, visible: graph ? graph.nodes.length : 0, lod: view.zoom < .38 };
+      return graph ? graph.nodes : [];
+    }
+    const visible = graph.nodes.filter((node) => {
+      const ns = nodeSize(graph, node);
+      const x = sx(nodeX(node)), y = sy(nodeY(node));
+      return x + ns.w * view.zoom > -margin && y + ns.h * view.zoom > -margin && x < size.width + margin && y < size.height + margin;
+    });
+    window.__jetCanvasVirtualizationStats = { total: graph.nodes.length, visible: visible.length, lod: view.zoom < .38 };
+    return visible;
+  }
+
   function drawGraph(doc) {
     latestDoc = doc;
     loadDebugState(doc);
@@ -1924,8 +2178,10 @@ pub fn canvas_js() -> String {
     reflowGraph(graph);
 
     drawCommentRegions(graph);
+    const visibleNodes = visibleGraphNodes(graph);
+    const visibleIds = new Set(visibleNodes.map((node) => node.node_id));
 
-    for (const node of graph.nodes) {
+    for (const node of visibleNodes) {
       drawNode(graph, node, inlineByNode);
     }
 
@@ -1933,13 +2189,16 @@ pub fn canvas_js() -> String {
       const from = pinPoints.get(wire.from_pin);
       const to = pinPoints.get(wire.to_pin);
       if (!from || !to) continue;
+      if (!visibleIds.has(from.pin.node_id) && !visibleIds.has(to.pin.node_id)) continue;
       const activeWire = debugOverlay && debugOverlay.active_wire_id === wire.wire_id;
       const selectedWire = selectedNodeIds.has(from.pin.node_id) || selectedNodeIds.has(to.pin.node_id);
       drawWire(wire, from, to, activeWire, selectedWire);
       if (activeWire || selectedWire || view.zoom >= 1.05) drawWireTypeBadge(wire, from, to);
     }
 
-    for (const node of graph.nodes) {
+    drawRerouteKnots(graph);
+
+    for (const node of visibleNodes) {
       drawNode(graph, node, inlineByNode, false);
     }
 
@@ -2703,6 +2962,17 @@ pub fn canvas_js() -> String {
   developerModeButton.addEventListener("click", () => setDeveloperMode(!developerMode));
   undoEdit.addEventListener("click", undoTransaction);
   redoEdit.addEventListener("click", redoTransaction);
+  orgAlign.addEventListener("click", () => alignSelectedNodes("y"));
+  orgTidy.addEventListener("click", tidyGraphLayout);
+  bookmarkAdd.addEventListener("click", bookmarkCurrentGraph);
+  bookmarkJump.addEventListener("click", jumpBookmark);
+  favoriteAction.addEventListener("click", toggleFavoriteAction);
+  runCurrent.addEventListener("click", runCurrentGraph);
+  tourDismiss.addEventListener("click", () => {
+    editorState.tourDismissed = true;
+    saveEditorState();
+    firstRunTour.classList.remove("is-open");
+  });
   debugStep.addEventListener("click", () => runDebug(["s"]));
   debugNext.addEventListener("click", () => runDebug(["n"]));
   debugContinue.addEventListener("click", () => runDebug(["c"]));
@@ -2739,6 +3009,36 @@ pub fn canvas_js() -> String {
       const rect = canvas.getBoundingClientRect();
       openGraphActionPalette(rect.left + Math.min(rect.width - 20, 220), rect.top + 90);
       showToast("Context actions");
+      return;
+    }
+    if (ev.altKey && ev.key.toLowerCase() === "a") {
+      ev.preventDefault();
+      alignSelectedNodes(ev.shiftKey ? "x" : "y");
+      return;
+    }
+    if (ev.altKey && ev.key.toLowerCase() === "t") {
+      ev.preventDefault();
+      tidyGraphLayout();
+      return;
+    }
+    if (ev.altKey && ev.key.toLowerCase() === "r") {
+      ev.preventDefault();
+      addRerouteKnot();
+      return;
+    }
+    if (ev.altKey && ev.key.toLowerCase() === "b") {
+      ev.preventDefault();
+      bookmarkCurrentGraph();
+      return;
+    }
+    if (ev.altKey && ev.key.toLowerCase() === "g") {
+      ev.preventDefault();
+      jumpBookmark();
+      return;
+    }
+    if (ev.altKey && ev.key === "Enter") {
+      ev.preventDefault();
+      runCurrentGraph();
       return;
     }
     if ((ev.ctrlKey || ev.metaKey) && ev.key === "z") {
@@ -2916,6 +3216,7 @@ pub fn canvas_js() -> String {
       .then((r) => r.json())
       .then((doc) => {
         latestDoc = doc;
+        loadEditorState(doc);
         sourceView.textContent = doc.source_text || "";
         const firstLoad = selectedGraphId === null;
         drawGraph(doc);
@@ -3027,15 +3328,17 @@ fn project_checked(
         );
     }
     let fmt = crate::format_source(src).unwrap_or_else(|_| src.to_string());
+    let blueprint = canvas_blueprint_facts_json(src, bundle);
     let json = format!(
-        "{{\"protocol\":\"jet.canvas.graph\",\"schema_version\":{},\"source_id\":{},\"revision\":{},\"fmt_fingerprint\":{},\"source_text\":{},\"graphs\":[{}],\"diagnostics\":[],\"facts\":{{\"semindex_schema_version\":{},\"handles\":[\"definitions\",\"references\",\"calls\",\"effects\",\"members\"]}}}}",
+        "{{\"protocol\":\"jet.canvas.graph\",\"schema_version\":{},\"source_id\":{},\"revision\":{},\"fmt_fingerprint\":{},\"source_text\":{},\"graphs\":[{}],\"diagnostics\":[],\"facts\":{{\"semindex_schema_version\":{},\"handles\":[\"definitions\",\"references\",\"calls\",\"effects\",\"members\"],\"blueprint\":{}}}}}",
         GRAPH_SCHEMA_VERSION,
         json_str(&path.display().to_string()),
         json_str(&source_revision(src)),
         json_str(&source_revision(&fmt)),
         json_str(src),
         graph_json.join(","),
-        index.schema_version()
+        index.schema_version(),
+        blueprint
     );
     Projection {
         json,
@@ -3122,6 +3425,179 @@ fn collect_item_graphs(
         }
     }
     let _ = entry_path;
+}
+
+fn canvas_blueprint_facts_json(src: &str, bundle: &AST::ProgramBundle) -> String {
+    let mut interfaces = Vec::new();
+    collect_interface_facts(
+        &bundle
+            .modules
+            .iter()
+            .flat_map(|m| m.items.iter())
+            .collect::<Vec<_>>(),
+        &mut interfaces,
+    );
+    let dispatchers = event_dispatcher_facts(src).join(",");
+    let task_flows = task_flow_facts(src).join(",");
+    format!(
+        "{{\"event_dispatchers\":[{}],\"interfaces\":[{}],\"task_flows\":[{}],\"source_truth\":\"ordinary_jet_source\"}}",
+        dispatchers,
+        interfaces.join(","),
+        task_flows
+    )
+}
+
+fn collect_interface_facts(items: &[&Item], out: &mut Vec<String>) {
+    for item in items {
+        match item {
+            Item::Trait(t) => out.push(trait_fact_json(t)),
+            Item::Impl(i) if i.trait_name.is_some() => out.push(impl_fact_json(i)),
+            Item::Struct(s) => {
+                for block in &s.trait_impls {
+                    out.push(inline_trait_impl_fact_json(&s.name, block));
+                }
+            }
+            Item::Enum(e) => {
+                for block in &e.trait_impls {
+                    out.push(inline_trait_impl_fact_json(&e.name, block));
+                }
+            }
+            Item::CodeModule(m) => {
+                if let Some(body) = &m.body {
+                    let nested = body.iter().collect::<Vec<_>>();
+                    collect_interface_facts(&nested, out);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn trait_fact_json(t: &AST::TraitDef) -> String {
+    let methods = t
+        .methods
+        .iter()
+        .map(|m| {
+            format!(
+                "{{\"name\":{},\"signature\":{},\"source_span\":{}}}",
+                json_str(&m.name),
+                json_str(&trait_method_signature(m)),
+                span_json(m.span.into())
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{{\"kind\":\"trait_interface\",\"trait\":{},\"methods\":[{}],\"source_span\":{},\"authoring\":[\"create_trait_impl\",\"jump_trait_to_impls\",\"palette_trait_methods\"]}}",
+        json_str(&t.name),
+        methods,
+        span_json(t.name_span.into())
+    )
+}
+
+fn impl_fact_json(i: &AST::ImplDef) -> String {
+    let methods = i
+        .methods
+        .iter()
+        .map(|m| json_str(&m.name))
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{{\"kind\":\"trait_impl\",\"type\":{},\"trait\":{},\"methods\":[{}],\"delegation_field\":{},\"source_span\":{},\"diagnostic_affordance\":\"surface_missing_trait_members\"}}",
+        json_str(&i.type_name),
+        json_str(i.trait_name.as_deref().unwrap_or("")),
+        methods,
+        i.delegation_field
+            .as_deref()
+            .map(json_str)
+            .unwrap_or_else(|| "null".to_string()),
+        span_json(i.type_span.into())
+    )
+}
+
+fn inline_trait_impl_fact_json(type_name: &str, block: &AST::TraitImplBlock) -> String {
+    let methods = block
+        .methods
+        .iter()
+        .map(|m| json_str(&m.name))
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{{\"kind\":\"trait_impl\",\"type\":{},\"trait\":{},\"methods\":[{}],\"delegation_field\":null,\"source_span\":{},\"diagnostic_affordance\":\"surface_missing_trait_members\"}}",
+        json_str(type_name),
+        json_str(&block.trait_name),
+        methods,
+        span_json(block.trait_span.into())
+    )
+}
+
+fn trait_method_signature(m: &AST::TraitMethodSig) -> String {
+    let params = m
+        .params
+        .iter()
+        .map(|p| {
+            if p.name == "self" {
+                format!("{}self", p.convention.sigil())
+            } else {
+                format!("{}{}: {}", p.convention.sigil(), p.name, p.ty.name())
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let ret = m
+        .return_type
+        .as_ref()
+        .map(|t| format!(" -> {}", t.name()))
+        .unwrap_or_default();
+    format!("fn {}({}){}", m.name, params, ret)
+}
+
+fn event_dispatcher_facts(src: &str) -> Vec<String> {
+    let mut facts = Vec::new();
+    for (needle, kind) in [
+        ("event.new<", "event_stream_create"),
+        ("event.hook<", "hook_create"),
+        (".on(", "event_subscribe"),
+        (".once(", "event_subscribe_once"),
+        (".on_priority(", "event_subscribe_priority"),
+        (".emit(", "event_emit"),
+        (".emit_async(", "event_emit_async"),
+    ] {
+        for span in text_matches(src, needle) {
+            facts.push(format!(
+                "{{\"kind\":{},\"source\":{},\"source_span\":{},\"lifetime\":\"EventScope-owned\",\"debug_overlay\":\"EventTrace delivered/queued/dropped\",\"semantics\":\"core.event_source_truth\"}}",
+                json_str(kind),
+                json_str(needle),
+                span_json(span)
+            ));
+        }
+    }
+    facts
+}
+
+fn task_flow_facts(src: &str) -> Vec<String> {
+    let mut facts = Vec::new();
+    for (needle, kind) in [
+        ("taskgroup", "structured_task_scope"),
+        ("tasks.spawn", "spawn_task"),
+        (".task(", "taskgroup_spawn"),
+        (".join(", "join_task"),
+        ("tasks.channel", "channel_create"),
+        (".send(", "channel_send"),
+        (".receive(", "channel_receive"),
+        (".all(", "taskgroup_join_all"),
+        ("#Context", "deadline_context"),
+    ] {
+        for span in text_matches(src, needle) {
+            facts.push(format!(
+                "{{\"kind\":{},\"source\":{},\"source_span\":{},\"rail\":\"async\",\"semantics\":\"core.tasks_source_truth\"}}",
+                json_str(kind),
+                json_str(needle),
+                span_json(span)
+            ));
+        }
+    }
+    facts
 }
 
 fn project_func(
@@ -5027,6 +5503,92 @@ fn apply_create_function(
     let changed = FixEngine::apply_edits(src, &[edit(SourceSpan { start: 0, end: 0 }, &function)])
         .map_err(|_| edit_error("overlap", "Canvas create function edit overlapped"))?;
     write_checked_formatted(path, src, &changed)
+}
+
+fn apply_create_trait_impl(
+    path: &Path,
+    src: &str,
+    type_name: &str,
+    trait_name: &str,
+) -> Result<String, String> {
+    let path_str = path.to_string_lossy();
+    let (diags, bundle) = crate::Driver::check_file(&path_str, None, true);
+    let errors = diags
+        .iter()
+        .filter(|d| d.severity == Severity::Error)
+        .cloned()
+        .collect::<Vec<_>>();
+    if !errors.is_empty() {
+        return Err(diagnostics_error(path, src, &errors));
+    }
+    let Some(bundle) = bundle else {
+        return Err(edit_error(
+            "check",
+            "Canvas could not read checked trait facts",
+        ));
+    };
+    let Some(trait_def) = find_trait_def(&bundle, trait_name) else {
+        return Err(edit_error(
+            "not_found",
+            "Canvas trait was not found in source",
+        ));
+    };
+    let mut body = String::new();
+    for method in &trait_def.methods {
+        let sig = trait_method_signature(method);
+        body.push_str("    ");
+        body.push_str(&sig);
+        body.push_str(" {\n");
+        if let Some(ret) = &method.return_type {
+            if ret.name() != "Void" {
+                body.push_str("        return ");
+                body.push_str(&default_arg_for_type(&ret.name()));
+                body.push('\n');
+            }
+        }
+        body.push_str("    }\n");
+    }
+    let impl_block = format!("\nimpl {type_name}.{trait_name} {{\n{body}}}\n");
+    let changed = FixEngine::apply_edits(
+        src,
+        &[edit(
+            SourceSpan {
+                start: src.len(),
+                end: src.len(),
+            },
+            &impl_block,
+        )],
+    )
+    .map_err(|_| edit_error("overlap", "Canvas trait impl edit overlapped"))?;
+    write_checked_formatted(path, src, &changed)
+}
+
+fn find_trait_def<'a>(
+    bundle: &'a AST::ProgramBundle,
+    trait_name: &str,
+) -> Option<&'a AST::TraitDef> {
+    fn find_in_items<'a>(items: &'a [Item], trait_name: &str) -> Option<&'a AST::TraitDef> {
+        for item in items {
+            match item {
+                Item::Trait(t) if t.name == trait_name => return Some(t),
+                Item::CodeModule(m) => {
+                    if let Some(body) = &m.body {
+                        if let Some(t) = find_in_items(body, trait_name) {
+                            return Some(t);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+    for module in &bundle.modules {
+        if let Some(t) = find_in_items(&module.items, trait_name) {
+            return Some(t);
+        }
+    }
+    None
 }
 
 fn apply_edit_function_signature(

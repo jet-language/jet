@@ -167,6 +167,49 @@ fn run() {
 }
 "#;
 
+const CANVAS_EVENT_DISPATCHER_FIXTURE: &str = r#"use core.event as event
+
+fn run() {
+    scope :: event.scope()
+    clicked :: event.new<Int>()
+    clicked.on(scope, (n) => { print("clicked {n}") })
+    clicked.once(scope, (n) => { print("once {n}") })
+    clicked.on_priority(scope, 10, (n) => { print("priority {n}") })
+    print(clicked.emit(1).summary())
+}
+"#;
+
+const CANVAS_TRAIT_INTERFACE_FIXTURE: &str = r#"trait Drawable {
+    fn render(self) -> String
+}
+
+struct Badge {
+    label: String
+}
+
+fn run() {
+    print("ready")
+}
+"#;
+
+const CANVAS_TASK_FLOW_FIXTURE: &str = r#"use core.tasks as tasks
+
+fn work() -> Int {
+    return 1
+}
+
+fn run() {
+    (sender, ch) :: tasks.channel<Int>()
+    taskgroup g {
+        t :: g.task(take(sender) () => {
+            sender.send(work())
+        })
+        g.all([t])
+        print(ch.receive() ?? panic("channel closed"))
+    }
+}
+"#;
+
 const CANVAS_DEBUG_FIXTURE: &str = r#"fn run() {
     total := 1
     print(total)
@@ -873,6 +916,10 @@ fn canvas_protocol_doc_matches_v1_graph_and_edit_shape() {
         "graphs",
         "diagnostics",
         "facts",
+        "facts.blueprint",
+        "event_dispatchers",
+        "interfaces",
+        "task_flows",
         "rails",
         "source_text",
         "jet.canvas.debug",
@@ -911,6 +958,7 @@ fn canvas_protocol_doc_matches_v1_graph_and_edit_shape() {
         "extract_inline_expr",
         "inline_helper_call",
         "insert_call",
+        "create_trait_impl",
         "conflict",
     ] {
         assert!(doc.contains(term), "protocol doc missing `{term}`");
@@ -1085,6 +1133,86 @@ fn canvas_projects_async_task_rail() {
             graph.contains(field),
             "task rail graph missing {field}: {graph}"
         );
+    }
+}
+
+#[test]
+fn canvas_projects_event_dispatchers_from_core_event() {
+    let path = write_fixture("event_dispatchers", CANVAS_EVENT_DISPATCHER_FIXTURE);
+    let graph = jet::Canvas::graph_json_for_file(&path).expect("canvas graph");
+
+    for field in [
+        "\"event_dispatchers\"",
+        "\"kind\":\"event_stream_create\"",
+        "\"kind\":\"event_subscribe\"",
+        "\"kind\":\"event_subscribe_once\"",
+        "\"kind\":\"event_subscribe_priority\"",
+        "\"kind\":\"event_emit\"",
+        "\"lifetime\":\"EventScope-owned\"",
+        "\"debug_overlay\":\"EventTrace delivered/queued/dropped\"",
+        "\"semantics\":\"core.event_source_truth\"",
+    ] {
+        assert!(
+            graph.contains(field),
+            "event dispatcher graph missing {field}: {graph}"
+        );
+    }
+}
+
+#[test]
+fn canvas_projects_trait_impl_authoring_and_writes_impl_stub() {
+    let path = write_fixture("trait_interface", CANVAS_TRAIT_INTERFACE_FIXTURE);
+    let graph = jet::Canvas::graph_json_for_file(&path).expect("canvas graph");
+    for field in [
+        "\"interfaces\"",
+        "\"kind\":\"trait_interface\"",
+        "\"trait\":\"Drawable\"",
+        "\"signature\":\"fn render(self) -> String\"",
+        "\"create_trait_impl\"",
+    ] {
+        assert!(
+            graph.contains(field),
+            "trait graph missing {field}: {graph}"
+        );
+    }
+
+    let src = fs::read_to_string(&path).unwrap();
+    let revision = jet::Canvas::source_revision(&src);
+    let edit = format!(
+        "{{\"schema_version\":1,\"op\":\"create_trait_impl\",\"revision\":\"{}\",\"type_name\":\"Badge\",\"trait_name\":\"Drawable\"}}",
+        revision
+    );
+    let out = jet::Canvas::apply_transaction_json(&path, &edit).expect("create trait impl");
+    assert!(out.contains("\"changed\":true"), "{out}");
+    let after = fs::read_to_string(&path).unwrap();
+    assert!(after.contains("impl Badge.Drawable"), "{after}");
+    assert!(after.contains("fn render(self) -> String"), "{after}");
+    assert!(after.contains("return \"canvas\""), "{after}");
+    let graph = jet::Canvas::graph_json_for_file(&path).expect("trait impl graph");
+    assert!(graph.contains("\"kind\":\"trait_impl\""), "{graph}");
+    assert!(
+        graph.contains("\"diagnostic_affordance\":\"surface_missing_trait_members\""),
+        "{graph}"
+    );
+}
+
+#[test]
+fn canvas_projects_task_flow_authoring_facts() {
+    let path = write_fixture("task_flow", CANVAS_TASK_FLOW_FIXTURE);
+    let graph = jet::Canvas::graph_json_for_file(&path).expect("canvas graph");
+
+    for field in [
+        "\"task_flows\"",
+        "\"kind\":\"structured_task_scope\"",
+        "\"kind\":\"channel_create\"",
+        "\"kind\":\"taskgroup_spawn\"",
+        "\"kind\":\"channel_send\"",
+        "\"kind\":\"channel_receive\"",
+        "\"kind\":\"taskgroup_join_all\"",
+        "\"rail\":\"async\"",
+        "\"semantics\":\"core.tasks_source_truth\"",
+    ] {
+        assert!(graph.contains(field), "task flow missing {field}: {graph}");
     }
 }
 

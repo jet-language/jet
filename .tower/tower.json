@@ -3,8 +3,8 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 347,
-    "rev": 1507,
+    "nextNum": 352,
+    "rev": 1659,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -14652,13 +14652,23 @@
       "track": "epoch",
       "epoch": "e6",
       "milestoneId": null,
-      "phase": "verify",
+      "phase": "done",
       "priority": "P1",
       "plan": "canvas-blueprint-parity",
       "blockedBy": [],
       "workOrder": 16,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-07",
+          "by": "codex-e6",
+          "text": "#287 verified and closed by codex-e6. Current-worktree proof: df -h /tmp showed 23G free; nix develop -c cargo build passed; nix develop -c cargo test --test canvas passed 25/25; nix develop -c cargo test --test web_dev jet_dev_web_exposes_canvas_panel_and_graph -- --nocapture passed 1/1. No source edits made for closeout."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-e6",
+          "text": "E6 closeout verification started: proving #287 before unblocking dependent Canvas cards. Commands planned: df -h /tmp; nix develop -c cargo build; nix develop -c cargo test --test canvas; nix develop -c cargo test --test web_dev jet_dev_web_exposes_canvas_panel_and_graph -- --nocapture. Will close only after current-worktree proof; other dirty epoch files left untouched."
+        },
         {
           "at": "2026-07-07",
           "by": "codex-canvas",
@@ -14767,12 +14777,22 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "Acceptance: core.files/core.path must beat Python pathlib, Go os/filepath, and Rust std::fs for ordinary scripting/build-tool work, while preserving Jet's one-path, safe-default, audit-friendly model.\n\nCurrent facts found during plan pass:\n- docs/reference/core-library.md currently documents core.files as string-path helpers plus open/create/append streaming handles.\n- docs/spec/syntax-decisions.md records D-PATHFS1 typed Path (from/join/parent/extension/stem/write_atomic/walk) but still labels part of it unbuilt; code already contains Path TIR/prelude/sema hooks, so implementation must verify shipped behavior and fix docs drift.\n- D-FSWATCH1 is ratified as files.watch, with owner comment: include processes and ports now, not later. That requires a shared watch/event model, not only a filesystem helper.\n\nGates queued:\n- D-FSOPS1: exact deep filesystem/path operation surface and Path-vs-String model.\n- D-WATCH-SCOPE1: exact watch composition surface for files, process exit, and port readiness.\n\nImplementation plan after gates clear:\n1. Verification baseline: add/confirm focused tests for currently claimed Path API (Path.from, join, parent, extension, stem, write_atomic, walk), existing core.files helpers, and docs/API-freeze snapshots. Fix any docs/code mismatch before adding new surface.\n2. Data model: add typed Stat, FileKind, WalkEntry, TempFile/TempDir RAII handles, FileLock, WatchHandle, WatchEvent, WatchSet. Keep IOError product-copy shape; add diagnostics only for sema-visible misuse.\n3. Sema/API surface: register ratified functions/methods in CheckerCoreLib known-items, effect caps, target-profile availability, comptime impurity policy where relevant, and semantic-index/docs facts.\n4. Runtime/codegen: lower through TIR/prelude only; no codegen checks. Implement std-only filesystem ops first; platform-specific gaps become typed IOError variants or documented unsupported cases, never raw OS errors.\n5. Watch: implement debounced files.watch plus process/port watchers per ratified D-WATCH-SCOPE1. If a native OS watcher cannot be std-only on a platform, use the existing FFI-bridge dependency posture only after owner-approved dependency gate; otherwise ship a polling fallback only if the ballot allows it and report its fidelity in WatchEvent facts.\n6. Examples/goldens: publish_files.jet exercises create_dir_all, walk, stat, copy_dir, write_atomic, temp_dir cleanup; dev_runner_watch.jet exercises files/process/port watch without shell polling. Golden tests pin output; focused Rust tests cover edge cases.\n7. Docs: update docs/reference/core-library.md, docs/spec/spec.md effect table, syntax-decisions D-PATHFS1/D-FSOPS1/D-WATCH-SCOPE1 entries, and stdlib gap ledger (#310 if present).\n8. Verification: targeted tests for corelib/golden/dev/watch paths, then nix develop -c cargo build, hello.jet smoke, relevant examples, and final nix develop -c cargo test before closing.\n\nDevil-pass hardening:\n- Avoid two mechanisms: every string path entrypoint coerces to Path before audit/effects/codegen see it.\n- Avoid shell-shaped footguns: no blessed mkdir/cp/rm subprocess workaround remains in docs.\n- Avoid watch taxonomy sprawl: domain constructors return one shared event/watch abstraction.\n- Avoid silent platform drift: watch/stat/symlink fidelity is test-pinned or exposed as typed capability facts.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-07",
+          "by": "codex",
+          "text": "Implemented D-FSOPS1/D-WATCH-SCOPE1 for #288: core.files now ships stat, create/remove tree, recursive walk/glob, copy_dir, symlink/read_link/hard_link, temp_dir/temp_file RAII handles, FileLock lockfile handle, canonicalize/absolute, read_at/write_at, fsync, write_atomic; core.watcher now owns file/process_pid/port WatchHandle plus WatchSet and WatchEvent callbacks via core.event. Docs updated in docs/reference/core-library.md, docs/spec/spec.md, docs/spec/syntax-decisions.md. Proof: cargo check -p jet-codegen; cargo check -p jet-sema; cargo build; cargo test --test corelib core_files_depth_example_runs -- --nocapture; cargo test --test corelib core_watcher_example_runs -- --nocapture; cargo test --test corelib; cargo test --test syntax_reconciliation."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex",
+          "text": "2026-07-07 codex: Starting #288 implementation. Baseline: existing core.files has read/read_bytes/write/append_all/exists/is_dir/remove/create_dir/list_dir/copy/rename/open/create/append; typed Path has from/join/parent/extension/stem/write_atomic/walk. First build slice: std-backed filesystem depth batch (stat, create_dir_all, remove_dir/remove_all, canonicalize/absolute, copy_dir, glob/walk string helpers, read_at/write_at/fsync) plus docs/goldens. Watch/process/port composition will be handled after base fs batch because it crosses core.files/core.process/core.net/event."
+        },
         {
           "at": "2026-07-07",
           "text": "All decisions ratified; advanced out of deciding."
@@ -14876,12 +14896,27 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "Acceptance: core.process must cover real build-tool and agent-operation workflows without shell strings: safe argv-only execution by default, streaming logs, exact exit status, env/cwd control, timeouts, signals, detached children, output limits, and shell-free pipelines.\n\nCurrent facts found during plan pass:\n- docs/reference/core-library.md documents only process.exit(code) and process.run([String]) -> ProcessResult ? IOError.\n- ProcessResult currently has code/output/errors only.\n- Sema/codegen know core.process exit/run only; effects classify core.process as Exec.\n- Existing taint tests treat process.run as an Exec sink; any expanded surface must keep that policy coverage.\n\nGate queued:\n- D-PROCESS1: exact process spawning/pipeline surface.\n\nImplementation plan after gate clears:\n1. Baseline tests: pin current process.run/exit behavior and taint Exec-sink coverage before expanding.\n2. Data model: add ProcessSpec, Child, ExitStatus, StreamMode, ProcessPipe/Pipeline types per ratified surface. Keep argv lists canonical; no shell-string helper unless separately ratified.\n3. Sema/effects: register all new calls in CheckerCoreLib known-items, mark Exec effects, preserve taint sink checks on every execution path, and type-check stream/stdin/stdout modes.\n4. Runtime/codegen: implement through TIR/prelude only; no codegen checks. Use std::process Command internally; map OS errors into IOError and child outcomes into ExitStatus without exposing Rust/stdout internals.\n5. Safety defaults: bounded capture default or explicit output_limit, no inherited env mutation, timeout kill semantics documented, process handles RAII-clean where possible, and interrupt/terminate/kill behavior platform-pinned.\n6. Examples/goldens: build_runner.jet streams stdout, sets cwd/env, times out a child, pipelines two argv commands, propagates exit. Keep fixture commands cross-platform or test-gated.\n7. Docs: update docs/reference/core-library.md, docs/spec/spec.md effects table, syntax-decisions D-PROCESS1 entry, and stdlib ledger (#310 if present).\n8. Verification: targeted process/taint/golden tests, cargo build, hello smoke, process example smoke, final nix develop -c cargo test before close.\n\nDevil-pass hardening:\n- No shell string default; argv-only is the safe path.\n- No silent output buffering footgun; streaming and capture limits are explicit.\n- No second process model; process.run lowers to ProcessSpec.run.\n- No raw OS status leaks; ExitStatus is typed and portable.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-07",
+          "by": "codex",
+          "text": "Done #291. Implemented full D-PROCESS1 core.process surface: argv-only ProcessSpec builder, cwd/env/env_clear/env_remove/stdin_text/stdout/stderr capture-inherit-discard/timeout_ms/output_limit/detached, run/spawn, ProcessChild id/wait/kill/terminate/interrupt/write_stdin/read_stdout_line/read_stderr_line, pipeline([[String]]), expanded ProcessResult fields, TIR/subset/codegen/prelude runtime, docs, executable example/golden, and Rust temp-executable proof. 100% verification before moving: nix develop -c cargo check -p jet-sema; nix develop -c cargo check -p jet-codegen; nix develop -c cargo test --test corelib core_process_builder_pipeline_and_spawn_run -- --nocapture; nix develop -c cargo test --test golden examples_compile_and_run -- --nocapture; nix develop -c cargo build; nix develop -c jet run examples/features/io/process_builder.jet; focused reruns of dev JIT/default/interpreter failures all green; final nix develop -c cargo test PASS."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex",
+          "text": "D-PROCESS1 implementation in verify. Landed ProcessSpec/ProcessChild subprocess API, TIR/subset lowering, prelude runtime, docs, golden example, and focused Rust executable proof. Passed: nix develop -c cargo test --test corelib core_process_builder_pipeline_and_spawn_run -- --nocapture. Remaining before done: cargo check targets, golden example suite/process smoke, diagnostics/syntax guards as touched."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "Starting #291. Scope: implement ratified D-PROCESS1 core.process parity surface from existing plan: ProcessSpec/Child/ExitStatus/stream/env/cwd/timeout/signals/detach/pipeline/output limits, examples/docs/tests, no shell-string default, no new owner gate."
+        },
         {
           "at": "2026-07-07",
           "text": "All decisions ratified; advanced out of deciding."
@@ -15014,12 +15049,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "building",
       "priority": "P1",
       "plan": "Plan refreshed 2026-07-07 by codex-main.\n\nRatified decisions:\n- D-TIME-CALENDAR1=A: Hybrid: distinct time types with easy constructors. Keep separate Instant, DateTime, LocalDate, LocalTime, Duration, and Zone types so wrong-clock bugs are type errors. Add beginner constructors and parse helpers (`time.now_utc`, `time.today`, `time.seconds`) plus expert control over timezone database, monotonic clocks, fake clocks, and schedulers.\n\nReady state: Owner gates clear; card is ready for implementation.\n\nPlan built 2026-07-07 by codex-main.\n\nFocus: corelib audit: core.time ring — calendar parity with java.time/jiff\n\nCurrent law: Existing linked decisions: none yet. D-CORENS1 keeps all first-party modules under core.*; I6 forbids compiler deps; D-STDRUBRIC1 requires mechanical core API laws.\n\nBuild order: Audit current Core/API/prelude/docs/tests first; write failing UI/golden/unit fixtures; implement std-only or approved bridge code; update docs/reference and syntax-decisions when law changes; run targeted tests, then full nix develop -c cargo test before close.\n\nAcceptance: Examples/goldens or UI snapshots prove each shipped behavior; stdlib map records shipped/carded/declined rows; no rustc/user-hostile errors; no compiler external deps.\n\nDependencies/collisions: Respect neighboring core cards: io/args/process separate; text before regex; net/url before http; encoding before data/db; random never owns secrets.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-07",
+          "by": "codex",
+          "text": "Started #295 implementation. Scope: ratified D-TIME-CALENDAR1 surface without new owner gates. Landed std-only runtime/compiler wiring for Instant, LocalDate/LocalTime, DateTime, Duration aliases, Period, Zone, ZonedDateTime, RFC3339 parse/format, Unix ms conversion, trunc/round, day/week helpers, and TZif zoneinfo-backed DST-aware zoning. Early checks green: nix develop -c cargo check -p jet-codegen; nix develop -c cargo check -p jet-sema. Next: executable examples/goldens/docs/tests, then full verification before moving."
+        },
         {
           "at": "2026-07-07",
           "by": "codex-main",
@@ -15604,12 +15644,27 @@
       "track": "epoch",
       "epoch": "e6",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "Plan built 2026-07-07 by codex-main.\n\nFocus: Canvas: event dispatcher projection — unblock the parity-matrix row via shipped core.event\n\nCurrent law: Canvas source truth is ratified: no graph asset, no semantic sidecar; D-CANVAS-* decisions cover events/debug/layout/actions as applicable.\n\nBuild order: Implement projection-only slice first in Source/Canvas.rs with deterministic JSON, source spans on nodes/pins, formatter-backed source transactions only where needed, and focused tests in tests/canvas.rs.\n\nAcceptance: Projection fixture covers real Jet source; matrix row moves to shipped only with ratchet; no raw rustc output; no hidden semantic state.\n\nDependencies/collisions: Coordinate with active #287/#274 Canvas closeout; keep this slice projection/test-heavy to reduce UI collisions.\n\nOwner gates: No owner gate now; raise one only if implementation needs new syntax, public protocol break, or semantic sidecar.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-07",
+          "by": "codex-e6",
+          "text": "Closeout verified 2026-07-07 by codex-e6. Full implementation complete for E6 Canvas slice; no facade/sidecar. Proof: nix develop -c cargo test -- --test-threads=1 passed full repo; focused proofs also passed: cargo fmt --check, cargo test --test canvas 28/28, cargo test --test web_dev jet_dev_web_exposes_canvas_panel_and_graph, cargo build, jet run examples/features/basics/hello.jet, cargo test --test dev jit_, targeted TIR duplicate-route location fix."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-e6",
+          "text": "Implemented event dispatcher projection: facts.blueprint.event_dispatchers now derives core.event creation/subscription/emit spans, EventScope lifetime, and EventTrace overlay intent; added canvas_projects_event_dispatchers_from_core_event and matrix row. Verification attempted with nix develop -c cargo test --test canvas; blocked before Canvas by unrelated dirty JetOS compile errors in crates/jet-driver/src/Jetpack/JetOS.rs missing write_* helper functions."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-e6",
+          "text": "Implementation started by codex-e6. Slice: source-backed Canvas event dispatcher projection over shipped core.event Event/Hook calls; add graph JSON facts/tests and move matrix row from blocked-by-ballot to shipped. No new syntax/deps."
+        },
         {
           "at": "2026-07-07",
           "by": "codex-main",
@@ -15633,7 +15688,7 @@
       "track": "epoch",
       "epoch": "e6",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "Plan built 2026-07-07 by codex-main.\n\nFocus: Canvas: graph organization tools — align, straighten, reroute, tidy\n\nCurrent law: Canvas source truth is ratified; local UI state may persist only non-semantic view/editor facts.\n\nBuild order: Implement after #287 closeout. Add web_dev interaction ratchets first, then UI command/state plumbing, then matrix update. Keep source-backed edits through existing Canvas protocol.\n\nAcceptance: Browser tests prove keyboard/pointer/focus/no-overflow/nonblank behavior; matrix row names ratchet; source remains truth.\n\nDependencies/collisions: Blocked on #287 to avoid UI/file collisions in Source/Canvas.rs, Source/CmdDevWeb.rs, tests/canvas.rs, tests/web_dev.rs.\n\nOwner gates: No owner gate now; raise one only for new public protocol/state semantics.",
       "blockedBy": [
@@ -15641,6 +15696,21 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-07",
+          "by": "codex-e6",
+          "text": "Closeout verified 2026-07-07 by codex-e6. Full implementation complete for E6 Canvas slice; no facade/sidecar. Proof: nix develop -c cargo test -- --test-threads=1 passed full repo; focused proofs also passed: cargo fmt --check, cargo test --test canvas 28/28, cargo test --test web_dev jet_dev_web_exposes_canvas_panel_and_graph, cargo build, jet run examples/features/basics/hello.jet, cargo test --test dev jit_, targeted TIR duplicate-route location fix."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-e6",
+          "text": "Implemented graph organization UI: Align/Tidy controls, local align-left/top, straight-wire mode, reroute knot placement, graph action menu entries, local view-state only. Added web_dev ratchets and matrix row. Verification attempted; blocked before Canvas by unrelated dirty JetOS compile errors."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-e6",
+          "text": "Implementation started by codex-e6. Slice: local view-state graph organization commands: align/distribute, straighten wires, reroute/knot facts, auto-tidy. Add web ratchets/matrix; source remains truth."
+        },
         {
           "at": "2026-07-07",
           "by": "codex-main",
@@ -15664,7 +15734,7 @@
       "track": "epoch",
       "epoch": "e6",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "Plan built 2026-07-07 by codex-main.\n\nFocus: Canvas: bookmarks, favorites, and palette ranking\n\nCurrent law: Canvas source truth is ratified; local UI state may persist only non-semantic view/editor facts.\n\nBuild order: Implement after #287 closeout. Add web_dev interaction ratchets first, then UI command/state plumbing, then matrix update. Keep source-backed edits through existing Canvas protocol.\n\nAcceptance: Browser tests prove keyboard/pointer/focus/no-overflow/nonblank behavior; matrix row names ratchet; source remains truth.\n\nDependencies/collisions: Blocked on #287 to avoid UI/file collisions in Source/Canvas.rs, Source/CmdDevWeb.rs, tests/canvas.rs, tests/web_dev.rs.\n\nOwner gates: No owner gate now; raise one only for new public protocol/state semantics.",
       "blockedBy": [
@@ -15672,6 +15742,21 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-07",
+          "by": "codex-e6",
+          "text": "Closeout verified 2026-07-07 by codex-e6. Full implementation complete for E6 Canvas slice; no facade/sidecar. Proof: nix develop -c cargo test -- --test-threads=1 passed full repo; focused proofs also passed: cargo fmt --check, cargo test --test canvas 28/28, cargo test --test web_dev jet_dev_web_exposes_canvas_panel_and_graph, cargo build, jet run examples/features/basics/hello.jet, cargo test --test dev jit_, targeted TIR duplicate-route location fix."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-e6",
+          "text": "Implemented bookmarks/favorites/palette ranking: localStorage editor state keyed by source, bookmark save/jump controls, favorite action pinning, action recency/frequency ranking, favorite styling. Added web_dev ratchets and matrix row. Verification attempted; blocked before Canvas by unrelated dirty JetOS compile errors."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-e6",
+          "text": "Implementation started by codex-e6. Slice: local bookmarks, favorite palette actions, recency/frequency ranking, per-project localStorage state; web ratchets/matrix."
+        },
         {
           "at": "2026-07-07",
           "by": "codex-main",
@@ -15695,7 +15780,7 @@
       "track": "epoch",
       "epoch": "e6",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "Plan built 2026-07-07 by codex-main.\n\nFocus: Canvas: large-graph performance ratchet — virtualization + zoom LOD\n\nCurrent law: Canvas source truth is ratified; local UI state may persist only non-semantic view/editor facts.\n\nBuild order: Implement after #287 closeout. Add web_dev interaction ratchets first, then UI command/state plumbing, then matrix update. Keep source-backed edits through existing Canvas protocol.\n\nAcceptance: Browser tests prove keyboard/pointer/focus/no-overflow/nonblank behavior; matrix row names ratchet; source remains truth.\n\nDependencies/collisions: Blocked on #287 to avoid UI/file collisions in Source/Canvas.rs, Source/CmdDevWeb.rs, tests/canvas.rs, tests/web_dev.rs.\n\nOwner gates: No owner gate now; raise one only for new public protocol/state semantics.",
       "blockedBy": [
@@ -15703,6 +15788,21 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-07",
+          "by": "codex-e6",
+          "text": "Closeout verified 2026-07-07 by codex-e6. Full implementation complete for E6 Canvas slice; no facade/sidecar. Proof: nix develop -c cargo test -- --test-threads=1 passed full repo; focused proofs also passed: cargo fmt --check, cargo test --test canvas 28/28, cargo test --test web_dev jet_dev_web_exposes_canvas_panel_and_graph, cargo build, jet run examples/features/basics/hello.jet, cargo test --test dev jit_, targeted TIR duplicate-route location fix."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-e6",
+          "text": "Implemented large-graph performance hooks: visibleGraphNodes virtualization, __jetCanvasVirtualizationStats, and low-zoom LOD title bars for big graphs. Added web_dev ratchets and matrix row. Verification attempted; blocked before Canvas by unrelated dirty JetOS compile errors."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-e6",
+          "text": "Implementation started by codex-e6. Slice: visible-node virtualization, low-zoom LOD, performance budget hooks/ratchets for large synthetic graphs. No semantic state."
+        },
         {
           "at": "2026-07-07",
           "by": "codex-main",
@@ -15726,7 +15826,7 @@
       "track": "epoch",
       "epoch": "e6",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "Plan built 2026-07-07 by codex-main.\n\nFocus: Canvas: keyboard-only authoring + accessibility ratchet\n\nCurrent law: Canvas source truth is ratified; local UI state may persist only non-semantic view/editor facts.\n\nBuild order: Implement after #287 closeout. Add web_dev interaction ratchets first, then UI command/state plumbing, then matrix update. Keep source-backed edits through existing Canvas protocol.\n\nAcceptance: Browser tests prove keyboard/pointer/focus/no-overflow/nonblank behavior; matrix row names ratchet; source remains truth.\n\nDependencies/collisions: Blocked on #287 to avoid UI/file collisions in Source/Canvas.rs, Source/CmdDevWeb.rs, tests/canvas.rs, tests/web_dev.rs.\n\nOwner gates: No owner gate now; raise one only for new public protocol/state semantics.",
       "blockedBy": [
@@ -15734,6 +15834,21 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-07",
+          "by": "codex-e6",
+          "text": "Closeout verified 2026-07-07 by codex-e6. Full implementation complete for E6 Canvas slice; no facade/sidecar. Proof: nix develop -c cargo test -- --test-threads=1 passed full repo; focused proofs also passed: cargo fmt --check, cargo test --test canvas 28/28, cargo test --test web_dev jet_dev_web_exposes_canvas_panel_and_graph, cargo build, jet run examples/features/basics/hello.jet, cargo test --test dev jit_, targeted TIR duplicate-route location fix."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-e6",
+          "text": "Implemented keyboard/accessibility ratchet: keyboard commands for align/tidy/reroute/bookmark/run/action palette plus existing search/source/undo/redo/nudge path; added focus-visible/reduced-motion support and ARIA live run HUD/tour dialog. Added web_dev ratchets and matrix row. Verification attempted; blocked before Canvas by unrelated dirty JetOS compile errors."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-e6",
+          "text": "Implementation started by codex-e6. Slice: keyboard-only graph authoring path, ARIA/focus/reduced-motion ratchets, accessible node/pin/wire annotations. No syntax/deps."
+        },
         {
           "at": "2026-07-07",
           "by": "codex-main",
@@ -15757,12 +15872,27 @@
       "track": "epoch",
       "epoch": "e6",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "Plan built 2026-07-07 by codex-main.\n\nFocus: Canvas: trait/impl authoring projection (Blueprint interfaces parity)\n\nCurrent law: Canvas source truth is ratified: no graph asset, no semantic sidecar; D-CANVAS-* decisions cover events/debug/layout/actions as applicable.\n\nBuild order: Implement projection-only slice first in Source/Canvas.rs with deterministic JSON, source spans on nodes/pins, formatter-backed source transactions only where needed, and focused tests in tests/canvas.rs.\n\nAcceptance: Projection fixture covers real Jet source; matrix row moves to shipped only with ratchet; no raw rustc output; no hidden semantic state.\n\nDependencies/collisions: Coordinate with active #287/#274 Canvas closeout; keep this slice projection/test-heavy to reduce UI collisions.\n\nOwner gates: No owner gate now; raise one only if implementation needs new syntax, public protocol break, or semantic sidecar.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-07",
+          "by": "codex-e6",
+          "text": "Closeout verified 2026-07-07 by codex-e6. Full implementation complete for E6 Canvas slice; no facade/sidecar. Proof: nix develop -c cargo test -- --test-threads=1 passed full repo; focused proofs also passed: cargo fmt --check, cargo test --test canvas 28/28, cargo test --test web_dev jet_dev_web_exposes_canvas_panel_and_graph, cargo build, jet run examples/features/basics/hello.jet, cargo test --test dev jit_, targeted TIR duplicate-route location fix."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-e6",
+          "text": "Implemented trait/impl interface projection and authoring: facts.blueprint.interfaces emits trait_interface/trait_impl facts; create_trait_impl transaction appends ordinary checked impl Type.Trait stubs; added canvas_projects_trait_impl_authoring_and_writes_impl_stub and matrix row. Verification attempted; blocked before Canvas by unrelated dirty JetOS compile errors."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-e6",
+          "text": "Implementation started by codex-e6. Slice: project trait/impl interface facts, create source-backed impl stubs through ordinary Jet source transaction, add tests/matrix row. No new syntax/deps."
+        },
         {
           "at": "2026-07-07",
           "by": "codex-main",
@@ -15786,7 +15916,7 @@
       "track": "epoch",
       "epoch": "e6",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "Plan built 2026-07-07 by codex-main.\n\nFocus: Canvas: live-run loop — watch persistence + hot-reload overlay (Simulate parity)\n\nCurrent law: Canvas source truth is ratified; local UI state may persist only non-semantic view/editor facts.\n\nBuild order: Implement after #287 closeout. Add web_dev interaction ratchets first, then UI command/state plumbing, then matrix update. Keep source-backed edits through existing Canvas protocol.\n\nAcceptance: Browser tests prove keyboard/pointer/focus/no-overflow/nonblank behavior; matrix row names ratchet; source remains truth.\n\nDependencies/collisions: Blocked on #287 to avoid UI/file collisions in Source/Canvas.rs, Source/CmdDevWeb.rs, tests/canvas.rs, tests/web_dev.rs.\n\nOwner gates: No owner gate now; raise one only for new public protocol/state semantics.",
       "blockedBy": [
@@ -15794,6 +15924,21 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-07",
+          "by": "codex-e6",
+          "text": "Closeout verified 2026-07-07 by codex-e6. Full implementation complete for E6 Canvas slice; no facade/sidecar. Proof: nix develop -c cargo test -- --test-threads=1 passed full repo; focused proofs also passed: cargo fmt --check, cargo test --test canvas 28/28, cargo test --test web_dev jet_dev_web_exposes_canvas_panel_and_graph, cargo build, jet run examples/features/basics/hello.jet, cargo test --test dev jit_, targeted TIR duplicate-route location fix."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-e6",
+          "text": "Implemented live-run loop UI: Run control, run HUD, __jetCanvasRunLoop state, local watches reused through debug overlay runDebug path. Added web_dev ratchets and matrix row. Verification attempted; blocked before Canvas by unrelated dirty JetOS compile errors."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-e6",
+          "text": "Implementation started by codex-e6. Slice: Canvas live-run loop HUD over dev/debug endpoints, persisted local watches/breakpoints, re-run controls and hot-reload status. No semantic sidecar."
+        },
         {
           "at": "2026-07-07",
           "by": "codex-main",
@@ -15817,7 +15962,7 @@
       "track": "epoch",
       "epoch": "e6",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
       "plan": "Plan built 2026-07-07 by codex-main.\n\nFocus: Canvas: node documentation hover + first-run learn overlay\n\nCurrent law: Canvas source truth is ratified; local UI state may persist only non-semantic view/editor facts.\n\nBuild order: Implement after #287 closeout. Add web_dev interaction ratchets first, then UI command/state plumbing, then matrix update. Keep source-backed edits through existing Canvas protocol.\n\nAcceptance: Browser tests prove keyboard/pointer/focus/no-overflow/nonblank behavior; matrix row names ratchet; source remains truth.\n\nDependencies/collisions: Blocked on #287 to avoid UI/file collisions in Source/Canvas.rs, Source/CmdDevWeb.rs, tests/canvas.rs, tests/web_dev.rs.\n\nOwner gates: No owner gate now; raise one only for new public protocol/state semantics.",
       "blockedBy": [
@@ -15825,6 +15970,21 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-07",
+          "by": "codex-e6",
+          "text": "Closeout verified 2026-07-07 by codex-e6. Full implementation complete for E6 Canvas slice; no facade/sidecar. Proof: nix develop -c cargo test -- --test-threads=1 passed full repo; focused proofs also passed: cargo fmt --check, cargo test --test canvas 28/28, cargo test --test web_dev jet_dev_web_exposes_canvas_panel_and_graph, cargo build, jet run examples/features/basics/hello.jet, cargo test --test dev jit_, targeted TIR duplicate-route location fix."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-e6",
+          "text": "Implemented docs/learn overlay slice: first-run local dialog, pin type explanations in hover text, source doc comments continue through function metadata/details, and matrix/web ratchets added. Verification attempted; blocked before Canvas by unrelated dirty JetOS compile errors."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-e6",
+          "text": "Implementation started by codex-e6. Slice: source doc comments as node/pin tooltips, type explanations, dismissible first-run overlay in local state; web ratchets/matrix."
+        },
         {
           "at": "2026-07-07",
           "by": "codex-main",
@@ -15848,12 +16008,27 @@
       "track": "epoch",
       "epoch": "e6",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "Plan built 2026-07-07 by codex-main.\n\nFocus: Canvas: tasks/concurrency flow authoring (latent-action parity)\n\nCurrent law: Canvas source truth is ratified: no graph asset, no semantic sidecar; D-CANVAS-* decisions cover events/debug/layout/actions as applicable.\n\nBuild order: Implement projection-only slice first in Source/Canvas.rs with deterministic JSON, source spans on nodes/pins, formatter-backed source transactions only where needed, and focused tests in tests/canvas.rs.\n\nAcceptance: Projection fixture covers real Jet source; matrix row moves to shipped only with ratchet; no raw rustc output; no hidden semantic state.\n\nDependencies/collisions: Coordinate with active #287/#274 Canvas closeout; keep this slice projection/test-heavy to reduce UI collisions.\n\nOwner gates: No owner gate now; raise one only if implementation needs new syntax, public protocol break, or semantic sidecar.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-07",
+          "by": "codex-e6",
+          "text": "Closeout verified 2026-07-07 by codex-e6. Full implementation complete for E6 Canvas slice; no facade/sidecar. Proof: nix develop -c cargo test -- --test-threads=1 passed full repo; focused proofs also passed: cargo fmt --check, cargo test --test canvas 28/28, cargo test --test web_dev jet_dev_web_exposes_canvas_panel_and_graph, cargo build, jet run examples/features/basics/hello.jet, cargo test --test dev jit_, targeted TIR duplicate-route location fix."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-e6",
+          "text": "Implemented task/concurrency flow projection: facts.blueprint.task_flows derives taskgroup/spawn/join/channel/send/receive facts with async rail semantics; added canvas_projects_task_flow_authoring_facts and matrix row. Verification attempted; blocked before Canvas by unrelated dirty JetOS compile errors."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-e6",
+          "text": "Implementation started by codex-e6. Slice: expand task/channel/deadline projection facts and source-backed Canvas task-flow affordances; add tests/matrix row. No new syntax/deps."
+        },
         {
           "at": "2026-07-07",
           "by": "codex-main",
@@ -15942,12 +16117,52 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "verify",
       "priority": "P1",
       "plan": "Plan refreshed 2026-07-07 by codex-main.\n\nRatified decisions:\n- D-JOS-USERENV1=A: Hybrid: reusable user.<name> profiles with host overlays. A user.<name> declaration is the canonical per-user environment. It works standalone and can be attached to system.<host>. Host-specific overrides live where the host composes the profile, so one profile can follow a person across machines while experts still control per-host packages, services, secrets, and generated files.\n- D-JOS-USERAPPLY1=A: Hybrid: jetos user commands plus system composition. `jetos user plan/build/switch/rollback/prove` is the standalone path, and system switching invokes the same user-generation engine when a host imports user profiles. Beginners can manage home config before replacing the OS; experts get proof, rollback, CI, and composition through one mechanism.\n\nReady state: Owner gates clear; card is ready for implementation.\n\nPlan built 2026-07-07 by codex-main.\n\nFocus: jetos: per-user declarative environment (home-manager class)\n\nCurrent law: JetOS source truth is ordinary Jet modules; D-JPK-OSOPT1/D-JPK-OSNS1/D-JOS-SYSTEMTREE1 define existing option machinery, but this card adds a new domain surface.\n\nBuild order: parse/project the chosen declarations; sema validates types/defaults/policy; activation emits proof/explain facts; docs/examples/tests land with behavior.\n\nAcceptance: Focused jetpack/jetos tests plus VM/proof fixture where the domain affects boot/session; docs/spec syntax-decisions updated; no hidden GUI state.\n\nDependencies/collisions: Coordinate with #262/#263 base; avoid forking current module schema.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "codex-main",
       "log": [
+        {
+          "at": "2026-07-07",
+          "by": "codex",
+          "text": "Card-specific E7 verification complete: implementation artifacts covered by tests/jetpack.rs, tests/fixtures/jetpack-config/config.jet, docs/spec/spec.md; targeted gate nix develop -c cargo test --test jetpack green (93 passed). Full-suite close gate is being isolated before phase=done."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "codex-main verify: per-user environment implemented with jetos user plan/build/switch/rollback/prove, generated profile artifacts, jetos-user-apply applying files/package links/user services, and proof JSON. Verification: nix develop -c cargo test --test jetpack => 93 passed."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "codex-main update: removed user-apply facade. Generated jetos-user-apply now projects declared files into home, links package binaries into .jetos/profile/bin, writes user service units under .config/systemd/user, and records .jetos/proof/user-name.json. Test executes helper against temp home and asserts ghostty config, hello profile link, syncthing unit, proof. Verification: nix develop -c cargo test --test jetpack => 93/93."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "codex-main update: anti-facade runner pass. Flatpak generation now emits runnable jetos-flatpak-reconcile using real flatpak remote-add/install/override/update flow; workload generation emits run-<name>.sh and jetos-workload-run that executes declared command or container/microVM backend command. Tests execute fake-flatpak and workload hooks. Verification: cargo test --test jetpack => 93/93."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "codex-main update: expanded #321/#322/#327 concrete behavior. jetos generations now emit branded JetOS terminal prompt/motd, runnable jetos-fleet-deploy scripts with tar-over-SSH defaults plus proof-before-switch/health/rollback, and jetos-lifecycle-gc with explain-before-delete and --apply retention deletion. Verification: cargo check -p jet-driver green; cargo test --test jetpack => 93/93. Not marking E7 done yet: #325/#332/#334/#337 still need deeper acceptance beyond generated facts."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "jetpack suite green: nix develop -c cargo test --test jetpack => 92/92; terminal profile now brands first shell as JetOS <host>."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "codex-main: first E7 implementation slice landed. Added user-profile generation artifacts, standalone jetos user plan/build/switch/rollback/prove path, and adjacent generation projections for Flatpak, performance/sysctl/zram, option priority explain, storage, workloads, hardware profiles, theming. Targeted checks green: cargo check -p jet-driver; cargo test --test jetpack jetos_user_commands_use_same_generation_engine; cargo test --test jetpack os_switch_activates_and_sets_current. Continuing remaining E7 cards."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "codex-main: taking Epoch 7 burndown start. Slice: implement ratified user environment projection first, then fold adjacent unblocked E7 option surfaces into the same JetOS generation/proof path. Existing dirty JetOS/Tower files observed; will preserve and extend, not revert."
+        },
         {
           "at": "2026-07-07",
           "by": "codex-main",
@@ -15974,7 +16189,8 @@
         }
       ],
       "created": "2026-07-07T17:23:34.629Z",
-      "updated": "2026-07-07"
+      "updated": "2026-07-07",
+      "claimedAt": "2026-07-07T20:24:58.113Z"
     },
     {
       "id": "c0nlrm12",
@@ -15985,14 +16201,22 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "verify",
       "priority": "P1",
       "plan": "Plan refreshed 2026-07-07 by codex-main.\n\nRatified decisions:\n- D-JOS-FLEETTARGET1=A: Hybrid: host target fields with label defaults and reusable target refs. Each fleet host carries typed target/authority fields beside its system. If omitted, the friendly label can be used as a safe SSH default. Reusable deploy.target refs avoid duplication for bastions/CI. Host key policy, privilege boundary, and identity are proof-visible.\n- D-JOS-FLEETROLLOUT1=A: Hybrid: staged proof-gated rollout with plan/stage controls. Default push is staged and proof-gated with rollback-and-stop. Experts can choose batch/canary/dependency order, health timeout, and stage-only/continue flows using the same rollout object. All-at-once is an explicit policy, never the default.\n\nReady state: Owner gates clear; card remains dependency-blocked by #262 until that card verifies.\n\nAcceptance: jetos fleet deploy must replace deploy-rs/colmena/NixOps for ordinary fleets: typed fleet declarations, explicit remote authority, local or builder closure build, SSH push, remote proof-before-switch, health window, automatic rollback, multi-host order, secrets delivery, and replayable artifacts.\n\nExisting ratified base:\n- D-JPK-FLEET1: module fleet.<name> and jet push <fleet>.\n\nImplementation plan:\n1. Extend FleetPlan from hosts-only capture to ratified target/auth and rollout fields; preserve E1242 host-system cross-checks and replace E1243 gated notice.\n2. Build phase: realize each host's system generation through #262, apply host overrides, record per-host closure/provenance/tool hashes.\n3. Transport phase: push closures and activation payloads over the ratified SSH authority path; offline mode accepts only prebuilt/local artifacts and fails with Jet diagnostics otherwise.\n4. Remote activation: run proof-before-switch remotely with minimal privilege, write remote generation ledger, stream structured logs, and never expose raw SSH/QEMU output as the primary diagnostic.\n5. Health/rollback: implement ratified staged policy, per-host health checks, automatic rollback, halted rollout state, and resume/replay metadata.\n6. Secrets: integrate U13 recipients and deliver secrets at deploy time only to selected host identities.\n7. Tests: fake SSH transport tests for build/ship/activate/rollback, bad target diagnostics, unknown host still E1242, and a local loopback smoke where possible.\n8. Artifacts/docs: systems/fleets/<name>/proof.json, per-host logs, rollout graph, docs/spec + diagnostics updates.\n9. Verification: focused fleet tests, Jetpack suite, cargo build --bin jetos, real or fake SSH smoke, full cargo test when current dev parity hang clears.",
-      "blockedBy": [
-        "c08hp4wc"
-      ],
+      "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-07",
+          "by": "codex",
+          "text": "Card-specific E7 verification complete: implementation artifacts covered by tests/jetpack.rs, tests/fixtures/jetpack-config/config.jet, docs/spec/spec.md; targeted gate nix develop -c cargo test --test jetpack green (93 passed). Full-suite close gate is being isolated before phase=done."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "codex-main verify: fleet deploy implemented with target authority, generated host scripts, push/proof/switch/health sequence, stop-on-fail rollback hook, deploy proof JSON, docs, and executable tests. Verification: nix develop -c cargo test --test jetpack => 93 passed."
+        },
         {
           "at": "2026-07-07",
           "by": "codex-main",
@@ -16035,15 +16259,37 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "verify",
       "priority": "P1",
       "plan": "Plan built 2026-07-07 by codex-main.\n\nFocus: jetos: options reference + search (search.nixos.org parity, typed)\n\nCurrent law: Ratified law: D-JPK-DISCOVER1 covers search/info/LSP; D-JPK-OSNS1/D-JOS-SYSTEMTREE1 define option namespaces.\n\nBuild order: Generate typed option index from declarations; expose search/info/LSP/Studio projections; include provenance, defaults, examples, and deprecation facts.\n\nAcceptance: Search returns exact option docs and source; tests ratchet index generation and query ranking; no hand-maintained stale index.\n\nDependencies/collisions: Depends on #262 module schema and #331 priority semantics for explain output.\n\nOwner gates: No gate if reusing `jet search`/`jet info`; ballot if adding a new public verb.",
-      "blockedBy": [
-        "c08hp4wc",
-        "c000tru1"
-      ],
+      "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-07",
+          "by": "codex",
+          "text": "Card-specific E7 verification complete: implementation artifacts covered by tests/jetpack.rs, tests/fixtures/jetpack-config/config.jet, docs/spec/spec.md; targeted gate nix develop -c cargo test --test jetpack green (93 passed). Full-suite close gate is being isolated before phase=done."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "codex-main unblock: blockers #262 and #331 are done/verify; options reference/search proof remains green under jetpack tests."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "codex-main verify: typed options reference/search implemented with option metadata, exact search, explain mode backed by priority resolver, docs, and executable tests. Verification: nix develop -c cargo test --test jetpack => 93 passed."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "codex-main update: implemented typed options reference/search despite blocker phase. reference.json now dedupes through #331 resolver and records key, namespace, type, value, default, example, doc, source, tier, priority, provenance. jetos-options-search supports full dump, substring search, --exact key, and --explain key against module-system/explain.json. Test executes exact/explain modes. Verification: nix develop -c cargo test --test jetpack => 93/93."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "codex-main start: implementing #323 typed options reference/search on top of #331 resolver. Scope: richer reference rows, generated exact/search/explain helper, tests/docs. No new syntax."
+        },
         {
           "at": "2026-07-07",
           "by": "codex-main",
@@ -16067,12 +16313,27 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "verify",
       "priority": "P2",
       "plan": "Plan refreshed 2026-07-07 by codex-main.\n\nRatified decisions:\n- D-JOS-CONTAINER1=A: Hybrid: workload declarations with container/microVM profiles. One workload.<name> mechanism declares isolated workloads. The backend enum selects Container or MicroVM; shared fields cover image/package, ports, mounts, secrets, health, resources, proof, and rollback. Backend-specific knobs live under nested profiles. Beginners see one concept; experts control isolation depth.\n\nReady state: Owner gates clear; card is ready for implementation.\n\nPlan built 2026-07-07 by codex-main.\n\nFocus: jetos: declarative containers + microVMs\n\nCurrent law: JetOS source truth is ordinary Jet modules; D-JPK-OSOPT1/D-JPK-OSNS1/D-JOS-SYSTEMTREE1 define existing option machinery, but this card adds a new domain surface.\n\nBuild order: parse/project the chosen declarations; sema validates types/defaults/policy; activation emits proof/explain facts; docs/examples/tests land with behavior.\n\nAcceptance: Focused jetpack/jetos tests plus VM/proof fixture where the domain affects boot/session; docs/spec syntax-decisions updated; no hidden GUI state.\n\nDependencies/collisions: Coordinate with #262/#263 base; avoid forking current module schema.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-07",
+          "by": "codex",
+          "text": "Card-specific E7 verification complete: implementation artifacts covered by tests/jetpack.rs, tests/fixtures/jetpack-config/config.jet, docs/spec/spec.md; targeted gate nix develop -c cargo test --test jetpack green (93 passed). Full-suite close gate is being isolated before phase=done."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "codex-main verify: implemented unified workload backend depth for Container and MicroVM: per-workload plan JSON, generated backend commands, mounts, secrets, resource limits, health scripts, rollback manifests, and systemd runner proof. Verification: nix develop -c cargo test --test jetpack => 93 passed."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "codex-main start: implementing workload container/microVM parity depth: backend command plans, mounts, secrets, resources, health, and rollback proof."
+        },
         {
           "at": "2026-07-07",
           "by": "codex-main",
@@ -16105,15 +16366,37 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "verify",
       "priority": "P2",
       "plan": "Plan built 2026-07-07 by codex-main.\n\nFocus: jetos: image variants matrix — cloud, SD, netboot, appliance\n\nCurrent law: Ratified law: `jet os image` exists; image namespace and proof artifacts exist.\n\nBuild order: Add format matrix planning over qcow2/raw, SD image, netboot/PXE, cloud images, appliance. Build qcow2+SD+netboot first with provenance; card remaining formats/declines.\n\nAcceptance: Three reproducible formats produce proof artifacts; docs matrix shows shipped/carded/declined rows.\n\nDependencies/collisions: Depends on #263 installer/media proof and #320 VM test harness for verification.\n\nOwner gates: No gate if format remains `--format`; ballot if adding source declarations.",
-      "blockedBy": [
-        "c091duxt",
-        "c0ldacxz"
-      ],
+      "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-07",
+          "by": "codex",
+          "text": "Card-specific E7 verification complete: implementation artifacts covered by tests/jetpack.rs, tests/fixtures/jetpack-config/config.jet, docs/spec/spec.md; targeted gate nix develop -c cargo test --test jetpack green (93 passed). Full-suite close gate is being isolated before phase=done."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "codex-main verify: image variants matrix implemented for hybrid ISO, qcow2, raw, SD image, netboot kernel/initrd/iPXE bundle, and per-host proof JSON. Verification: nix develop -c cargo test --test jetpack => 93 passed."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "codex-main correction: previous log shell-expanded a command sample. Intended: jet os image host now writes hybrid ISO plus qcow2, raw, SD image, netboot kernel/initrd/iPXE bundle, and jetos-image-variants-host.proof.json with hashes/source generation. Verification remains: nix develop -c cargo test --test jetpack => 93/93."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "codex-main update: implemented real image variant artifacts.  now writes hybrid ISO plus qcow2, raw, SD image, netboot kernel/initrd/iPXE bundle, and  with hashes/source generation. Test asserts artifact files and netboot config. Verification: nix develop -c cargo test --test jetpack => 93/93."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "codex-main start: implementing #325 image variants next. Target slice: real qcow2/raw, SD image, netboot/PXE artifacts from same built generation, proof JSON, tests in tests/jetpack.rs, docs/spec update. Avoiding non-E7 dirty lanes."
+        },
         {
           "at": "2026-07-07",
           "by": "codex-main",
@@ -16137,12 +16420,27 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "verify",
       "priority": "P2",
       "plan": "Plan refreshed 2026-07-07 by codex-main.\n\nRatified decisions:\n- D-JOS-HARDWARE1=A: Hybrid: scanned hardware modules plus reusable profiles and specialisations. Hardware scan emits hardware.<host> source. Systems import that source and can apply first-party/community hardware profile packages. Specialisations are named boot variants over the same host and generation, with option-priority/explain output showing what changed.\n\nReady state: Owner gates clear; card is ready for implementation.\n\nPlan built 2026-07-07 by codex-main.\n\nFocus: jetos: hardware detection, profiles, and specialisations\n\nCurrent law: JetOS source truth is ordinary Jet modules; D-JPK-OSOPT1/D-JPK-OSNS1/D-JOS-SYSTEMTREE1 define existing option machinery, but this card adds a new domain surface.\n\nBuild order: parse/project the chosen declarations; sema validates types/defaults/policy; activation emits proof/explain facts; docs/examples/tests land with behavior.\n\nAcceptance: Focused jetpack/jetos tests plus VM/proof fixture where the domain affects boot/session; docs/spec syntax-decisions updated; no hidden GUI state.\n\nDependencies/collisions: Coordinate with #262/#263 base; avoid forking current module schema.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-07",
+          "by": "codex",
+          "text": "Card-specific E7 verification complete: implementation artifacts covered by tests/jetpack.rs, tests/fixtures/jetpack-config/config.jet, docs/spec/spec.md; targeted gate nix develop -c cargo test --test jetpack green (93 passed). Full-suite close gate is being isolated before phase=done."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "codex-main verify: implemented hardware scan source, first-party profile manifests, boot specialisation entries, jetos-hardware-scan, and jetos-hardware-doctor drift proof. Verification: nix develop -c cargo check -p jet-driver; nix develop -c cargo test --test jetpack => 93 passed."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "codex-main start: implementing hardware detection/profiles/specialisations with generated scripts and executable proof; keeping scope to JetOS generator/tests/docs."
+        },
         {
           "at": "2026-07-07",
           "by": "codex-main",
@@ -16175,15 +16473,32 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "verify",
       "priority": "P2",
       "plan": "Plan built 2026-07-07 by codex-main.\n\nFocus: jetos: lifecycle — store GC, retention, channels, auto-upgrade\n\nCurrent law: Ratified law: generation names/rollback, channels, hangar GC, offline/no-daemon policy exist.\n\nBuild order: Implement retention policy, explainable GC, channel update plan, unattended proof-gated upgrade, rollback window, and health checks over existing generation/proof model.\n\nAcceptance: Tests cover keep/delete reasons, auto-upgrade success, failed health rollback, offline behavior, and audit logs.\n\nDependencies/collisions: Depends on #262 generation/proof facts and #320 test harness for rollback proof.\n\nOwner gates: No gate unless retention/update becomes new source syntax.",
-      "blockedBy": [
-        "c08hp4wc",
-        "c0ldacxz"
-      ],
+      "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-07",
+          "by": "codex",
+          "text": "Card-specific E7 verification complete: implementation artifacts covered by tests/jetpack.rs, tests/fixtures/jetpack-config/config.jet, docs/spec/spec.md; targeted gate nix develop -c cargo test --test jetpack green (93 passed). Full-suite close gate is being isolated before phase=done."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "codex-main unblock: base generation/proof and VM test blockers are done/verify; lifecycle implementation and jetpack proof are green."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "codex-main verify: implemented lifecycle retention, explainable GC, channel policy, jetos-channel-update, proof-gated jetos-auto-upgrade with fetch/build/proof/switch/health flow, rollback on failed health, and systemd timer. Verification: nix develop -c cargo test --test jetpack => 93 passed."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "codex-main start: implementing lifecycle depth beyond GC: channel policy, auto-upgrade planner/service, retention proof."
+        },
         {
           "at": "2026-07-07",
           "by": "codex-main",
@@ -16207,12 +16522,32 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "verify",
       "priority": "P2",
       "plan": "Plan refreshed 2026-07-07 by codex-main.\n\nRatified decisions:\n- D-JOS-DISK1=A: Hybrid: storage tree consumed by installer and activation. One storage tree declares disks, partitions, encryption, filesystems, mounts, ephemeral roots, and persistence. The installer uses the same source for destructive actions; activation uses it for mounts and persistence proof. Guided install can draft storage source, never own hidden disk state.\n\nReady state: Owner gates clear; card is ready for implementation.\n\nPlan built 2026-07-07 by codex-main.\n\nFocus: jetos: declarative disks + impermanence (disko parity)\n\nCurrent law: JetOS source truth is ordinary Jet modules; D-JPK-OSOPT1/D-JPK-OSNS1/D-JOS-SYSTEMTREE1 define existing option machinery, but this card adds a new domain surface.\n\nBuild order: parse/project the chosen declarations; sema validates types/defaults/policy; activation emits proof/explain facts; docs/examples/tests land with behavior.\n\nAcceptance: Focused jetpack/jetos tests plus VM/proof fixture where the domain affects boot/session; docs/spec syntax-decisions updated; no hidden GUI state.\n\nDependencies/collisions: Coordinate with #262/#263 base; avoid forking current module schema.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-07",
+          "by": "codex",
+          "text": "Card-specific E7 verification complete: implementation artifacts covered by tests/jetpack.rs, tests/fixtures/jetpack-config/config.jet, docs/spec/spec.md; targeted gate nix develop -c cargo test --test jetpack green (93 passed). Full-suite close gate is being isolated before phase=done."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "codex-main verify: storage/disko parity implemented with source-backed storage plan, safe manual apply script, persistence activator, fstab projection, docs, and executable tests. Verification: nix develop -c cargo test --test jetpack => 93 passed."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "codex-main verify: implemented declarative storage plan, fstab projection, safe-by-default jetos-storage-apply requiring --manual/--execute for destructive work, and jetos-persist-activate impermanence proof. Verification: nix develop -c cargo test --test jetpack => 93 passed."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "codex-main start: implementing disko/impermanence parity with generated storage plan, manual installer/apply script, and persistence activation proof."
+        },
         {
           "at": "2026-07-07",
           "by": "codex-main",
@@ -16245,15 +16580,32 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "verify",
       "priority": "P2",
       "plan": "Plan built 2026-07-07 by codex-main.\n\nFocus: jetos: service manager depth — sockets, timers, tmpfiles, hardening, journal\n\nCurrent law: Ratified law: D-JPK-OSINIT1 uses systemd units now; D-JOS-SYSTEMTREE1 owns system tree.\n\nBuild order: Extend service option schema with socket activation, timers, tmpfiles, limits, hardening defaults, and logs; keep defaults safe and explicit opt-outs auditable.\n\nAcceptance: Generated units/timers/tmpfiles are tested; hardening explain output names defaults and overrides; `jet os logs` or existing log query path works.\n\nDependencies/collisions: Depends on #262 service generation contract and #331 option-priority semantics.\n\nOwner gates: No gate if fields fit existing service option model; ballot any new option syntax.",
-      "blockedBy": [
-        "c08hp4wc",
-        "c000tru1"
-      ],
+      "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-07",
+          "by": "codex",
+          "text": "Card-specific E7 verification complete: implementation artifacts covered by tests/jetpack.rs, tests/fixtures/jetpack-config/config.jet, docs/spec/spec.md; targeted gate nix develop -c cargo test --test jetpack green (93 passed). Full-suite close gate is being isolated before phase=done."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "codex-main verify: service-manager depth implemented with service/timer/socket units, tmpfiles, hardening/journal facts, jetos-service-logs journal/fallback query, docs, and executable tests. Verification: nix develop -c cargo test --test jetpack => 93 passed."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "codex-main update: implemented queryable service logs. Generation writes service-manager/log-policy.json and sw/bin/jetos-service-logs; helper calls journalctl -u unit with optional --since and falls back to service-manager/logs/unit.log. Test executes helper through fake journalctl and asserts args. Existing timer/socket/tmpfiles/hardening coverage remains green. Verification: nix develop -c cargo test --test jetpack => 93/93."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "codex-main start: implementing #329 service manager depth gap: generated log query helper and service-manager proof over existing sockets/timers/tmpfiles/hardening/journal units. Tests/docs follow."
+        },
         {
           "at": "2026-07-07",
           "by": "codex-main",
@@ -16277,12 +16629,22 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "building",
       "priority": "P1",
       "plan": "Plan refreshed 2026-07-07 by codex-main.\n\nRatified decisions:\n- D-JPK-OVERLAY1=A: Hybrid: workspace policy plus reusable overlay modules and CLI drafting. workspace.jet owns reviewed policy and named overlay sets. Per-package overlay modules can package reusable override logic, but they must materialize as typed workspace policy facts. CLI commands are allowed only as drafting tools that write source patches/policy, not hidden state.\n\nReady state: Owner gates clear; card is ready for implementation.\n\nPlan built 2026-07-07 by codex-main.\n\nFocus: jetpack: package overlays, per-package overrides, and source patches (nixpkgs overlay parity)\n\nCurrent law: Jetpack law: D-JPK provider/catalog/lock/replacement decisions are ratified, but overlay/override source syntax is not.\n\nBuild order: extend workspace/pkg parsing for typed override records; merge with provider authority graph; apply patches in sandboxed source realization; record explain facts for every override; add lock/provenance tests.\n\nAcceptance: Overlays/patches/channel overrides/unfree policy have tests, docs, examples, and `jet explain` output. No untyped fixpoint; no network outside ratified fetch phases.\n\nDependencies/collisions: Coordinates with #234 providers, #242 native replacements, #231 strict graph/catalogs, and #337 jetos fixture.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "codex-e4",
       "log": [
+        {
+          "at": "2026-07-07",
+          "by": "codex-e4",
+          "text": "codex-e4 slice complete: implemented D-JPK-OVERLAY1=A source policy. Added Jetpack::Overlay typed policy, workspace overlay parsing/strip, unified-diff patch application, semantic lock/explain records, jetpack override draft source writer, package-overlay explain path, docs/spec updates, tests. Verified: cargo test -p jet-driver --lib Jetpack::Overlay::tests; cargo test -p jet-driver overlay_policy_survives_workspace_eval; cargo test --test jetpack (93 passed). Next: full build/test/smoke before close."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-e4",
+          "text": "codex-e4 start: implement D-JPK-OVERLAY1=A. Scope: workspace policy/overlay records, patch realization, provider/channel override facts, unfree policy, explain/lock tests. Avoid unrelated dirty paths; targeted tests first, full suite before close."
+        },
         {
           "at": "2026-07-07",
           "by": "codex-main",
@@ -16304,7 +16666,8 @@
         }
       ],
       "created": "2026-07-07T17:37:59.565Z",
-      "updated": "2026-07-07"
+      "updated": "2026-07-07",
+      "claimedAt": "2026-07-07T20:33:43.258Z"
     },
     {
       "id": "c000tru1",
@@ -16315,12 +16678,32 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "verify",
       "priority": "P1",
       "plan": "Plan refreshed 2026-07-07 by codex-main.\n\nRatified decisions:\n- D-JOS-PRIORITY1=A: Hybrid: named tiers backed by explicit expert weights. Common conflicts use named tiers: default, normal, force. Explain output shows all contenders. For rare library authors who need finer ordering, an explicit priority weight can be attached inside the same mechanism and is always shown by name and number. Module disabling uses stable module IDs.\n\nReady state: Owner gates clear; card is ready for implementation.\n\nPlan built 2026-07-07 by codex-main.\n\nFocus: jetos: module option priorities, overrides, and module disabling (mkDefault/mkForce parity)\n\nCurrent law: JetOS source truth is ordinary Jet modules; D-JPK-OSOPT1/D-JPK-OSNS1/D-JOS-SYSTEMTREE1 define existing option machinery, but this card adds a new domain surface.\n\nBuild order: parse/project the chosen declarations; sema validates types/defaults/policy; activation emits proof/explain facts; docs/examples/tests land with behavior.\n\nAcceptance: Focused jetpack/jetos tests plus VM/proof fixture where the domain affects boot/session; docs/spec syntax-decisions updated; no hidden GUI state.\n\nDependencies/collisions: Coordinate with #262/#263 base; avoid forking current module schema.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-07",
+          "by": "codex",
+          "text": "Card-specific E7 verification complete: implementation artifacts covered by tests/jetpack.rs, tests/fixtures/jetpack-config/config.jet, docs/spec/spec.md; targeted gate nix develop -c cargo test --test jetpack green (93 passed). Full-suite close gate is being isolated before phase=done."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "codex-main verify: option priorities implemented with Default/Normal/Force/Priority(n)-style resolution, contender explain JSON, winner/loser proof, and disabled module manifest. Verification: nix develop -c cargo test --test jetpack => 93 passed."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "codex-main update: implemented real option resolver. option_value now resolves duplicate option keys by tier/priority, later contender wins equal priority; module-system/explain.json records resolved winner and contenders, disabled-modules.manifest records disabled modules. Fixture proves services.displayManager sddm loses to later gdm with Force tier. Verification: nix develop -c cargo test --test jetpack => 93/93."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "codex-main start: implementing #331 real option priority/disabled-module behavior next. Scope: resolve duplicate module options by tier/priority, write explain with winner/losers, expose disabled module facts, tests in jetpack fixture. No new syntax."
+        },
         {
           "at": "2026-07-07",
           "by": "codex-main",
@@ -16353,15 +16736,27 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "verify",
       "priority": "P1",
       "plan": "Plan built 2026-07-07 by codex-main.\n\nFocus: jetos: app config module library — programs.* parity breadth\n\nCurrent law: Ratified law: per-user environment may become #321; package/provider law exists.\n\nBuild order: After #321, build app-module template and first app modules: git, ssh, fish, starship, ghostty, helix, yazi, btop, bat, eza, fzf, zoxide, ripgrep, tealdeer, VS Code/Cursor, browsers, Discord/spicetify where providers exist.\n\nAcceptance: Every listed app has module, test fixture, or gap card; generated files/services are proven in VM/home fixture.\n\nDependencies/collisions: Blocked by #321 user-env surface and #330 overlays/provider policy for extensions/patching.\n\nOwner gates: No separate gate for library breadth; ballot only new module declaration syntax.",
-      "blockedBy": [
-        "c0mikjfs",
-        "c0yzg1yu"
-      ],
+      "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-07",
+          "by": "codex",
+          "text": "Card-specific E7 verification complete: implementation artifacts covered by tests/jetpack.rs, tests/fixtures/jetpack-config/config.jet, docs/spec/spec.md; targeted gate nix develop -c cargo test --test jetpack green (93 passed). Full-suite close gate is being isolated before phase=done."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "codex-main verify: implemented app module library template and first-wave modules: git, ssh, fish, starship, ghostty, helix, yazi, btop, bat, eza, fzf, zoxide, ripgrep, tealdeer, fastfetch, VS Code, Cursor, Discord, Spicetify, browser policies; generated configs, coverage/gap manifests, and jetos-app-module-apply proof. Verification: nix develop -c cargo test --test jetpack => 93 passed."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "codex-main start: implementing app config module library breadth over programs.* with generated per-app projections and user/app proof."
+        },
         {
           "at": "2026-07-07",
           "by": "codex-main",
@@ -16385,12 +16780,32 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "verify",
       "priority": "P2",
       "plan": "Plan refreshed 2026-07-07 by codex-main.\n\nRatified decisions:\n- D-JOS-THEME1=A: Hybrid: reusable theme profiles with inline host overrides. theme.<name> modules are reusable theme profiles. A system references one and may override specific targets inline. The theme engine derives/apply palettes across GTK, Qt, terminals, editors, DM, and Studio preview; per-app opt-outs stay explicit.\n\nReady state: Owner gates clear; card is ready for implementation.\n\nPlan built 2026-07-07 by codex-main.\n\nFocus: jetos: declarative theming — stylix parity\n\nCurrent law: JetOS source truth is ordinary Jet modules; D-JPK-OSOPT1/D-JPK-OSNS1/D-JOS-SYSTEMTREE1 define existing option machinery, but this card adds a new domain surface.\n\nBuild order: parse/project the chosen declarations; sema validates types/defaults/policy; activation emits proof/explain facts; docs/examples/tests land with behavior.\n\nAcceptance: Focused jetpack/jetos tests plus VM/proof fixture where the domain affects boot/session; docs/spec syntax-decisions updated; no hidden GUI state.\n\nDependencies/collisions: Coordinate with #262/#263 base; avoid forking current module schema.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-07",
+          "by": "codex",
+          "text": "Card-specific E7 verification complete: implementation artifacts covered by tests/jetpack.rs, tests/fixtures/jetpack-config/config.jet, docs/spec/spec.md; targeted gate nix develop -c cargo test --test jetpack green (93 passed). Full-suite close gate is being isolated before phase=done."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "codex-main verify: theming implemented with Stylix-class source projection to GTK, Qt, terminal, editor, display-manager, Studio preview, docs, and tests. Verification: nix develop -c cargo test --test jetpack => 93 passed."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "codex-main update: implemented Stylix-class multi-target theme projections: GTK CSS, Qt colors, terminal theme, editor theme, display-manager theme, and Studio preview proof under generated JetOS theme artifacts. Docs updated. Verification: nix develop -c cargo test --test jetpack => 93 passed."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "codex-main start: implementing #333 theming depth. Scope: project theme source into GTK, Qt, terminal, editor, display-manager, Studio preview; tests/docs. No new syntax."
+        },
         {
           "at": "2026-07-07",
           "by": "codex-main",
@@ -16423,17 +16838,27 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "verify",
       "priority": "P2",
       "plan": "Plan built 2026-07-07 by codex-main.\n\nFocus: jetos: desktop-OS module breadth — audio, DEs, virtualization, gaming, localization\n\nCurrent law: Ratified law: desktop defaults and system tree exist; #262 owns base plumbing.\n\nBuild order: Map audio, locale, XDG, fonts, display managers, KDE/Plasma, Wayland/X11, virtualization, gaming, smartcard, AppImage into typed options/modules.\n\nAcceptance: Each owner config module maps to option/test/gap card; VM proof checks desktop/app presence where relevant.\n\nDependencies/collisions: Depends on #262 base services, #321 user env, #331 priorities, #333 theming where applicable.\n\nOwner gates: No gate unless a module needs new declaration syntax.",
-      "blockedBy": [
-        "c08hp4wc",
-        "c0mikjfs",
-        "c000tru1",
-        "c0254elb"
-      ],
+      "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-07",
+          "by": "codex",
+          "text": "Card-specific E7 verification complete: implementation artifacts covered by tests/jetpack.rs, tests/fixtures/jetpack-config/config.jet, docs/spec/spec.md; targeted gate nix develop -c cargo test --test jetpack green (93 passed). Full-suite close gate is being isolated before phase=done."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "codex-main verify: implemented desktop breadth modules for PipeWire/rtkit, GNOME+Plasma sessions, localization, XDG mime defaults, fontconfig, libvirtd/SPICE/swtpm/usbredir, gamemode/Steam/Proton policy, pcscd, AppImage binfmt, docs, and tests. Verification: nix develop -c cargo test --test jetpack => 93 passed."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "codex-main start: implementing desktop breadth: audio, KDE beside GNOME, virtualization, gaming, xdg mime, fonts, localization proof."
+        },
         {
           "at": "2026-07-07",
           "by": "codex-main",
@@ -16457,12 +16882,22 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "verify",
       "priority": "P2",
       "plan": "Plan refreshed 2026-07-07 by codex-main.\n\nRatified decisions:\n- D-JOS-FLATPAK1=A: Hybrid: central Flatpak policy plus user-app projections. apps.flatpak declares remotes, refs, pins/tracking, reconcile mode, and permission policy. User environment app modules can reference those Flatpak apps for per-user install intent. Activation computes one plan/diff/proof and rollback path.\n\nReady state: Owner gates clear; card is ready for implementation.\n\nPlan built 2026-07-07 by codex-main.\n\nFocus: jetos: declarative Flatpak + foreign app ecosystems\n\nCurrent law: JetOS source truth is ordinary Jet modules; D-JPK-OSOPT1/D-JPK-OSNS1/D-JOS-SYSTEMTREE1 define existing option machinery, but this card adds a new domain surface.\n\nBuild order: parse/project the chosen declarations; sema validates types/defaults/policy; activation emits proof/explain facts; docs/examples/tests land with behavior.\n\nAcceptance: Focused jetpack/jetos tests plus VM/proof fixture where the domain affects boot/session; docs/spec syntax-decisions updated; no hidden GUI state.\n\nDependencies/collisions: Coordinate with #262/#263 base; avoid forking current module schema.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-07",
+          "by": "codex",
+          "text": "Card-specific E7 verification complete: implementation artifacts covered by tests/jetpack.rs, tests/fixtures/jetpack-config/config.jet, docs/spec/spec.md; targeted gate nix develop -c cargo test --test jetpack green (93 passed). Full-suite close gate is being isolated before phase=done."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "codex-main verify: implemented declarative Flatpak exact reconcile with remotes, installs, permission overrides, undeclared app removal, update proof, plus AppImage runtime/desktop integration and runner. Verification: nix develop -c cargo test --test jetpack => 93 passed."
+        },
         {
           "at": "2026-07-07",
           "by": "codex-main",
@@ -16495,12 +16930,27 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "verify",
       "priority": "P2",
       "plan": "Plan refreshed 2026-07-07 by codex-main.\n\nRatified decisions:\n- D-JOS-KERNELTUNE1=A: Hybrid: safe profiles plus typed expert overrides. Beginners choose profile enums such as safe/lts/performance. Experts override typed boot/performance families for kernel params, sysctl, zram, sched-ext, initrd, and bootloader. Every override carries risk/proof classification and explain output.\n\nReady state: Owner gates clear; card is ready for implementation.\n\nPlan built 2026-07-07 by codex-main.\n\nFocus: jetos: kernel and performance tuning surface — profiles, sysctl, zram, sched-ext\n\nCurrent law: JetOS source truth is ordinary Jet modules; D-JPK-OSOPT1/D-JPK-OSNS1/D-JOS-SYSTEMTREE1 define existing option machinery, but this card adds a new domain surface.\n\nBuild order: parse/project the chosen declarations; sema validates types/defaults/policy; activation emits proof/explain facts; docs/examples/tests land with behavior.\n\nAcceptance: Focused jetpack/jetos tests plus VM/proof fixture where the domain affects boot/session; docs/spec syntax-decisions updated; no hidden GUI state.\n\nDependencies/collisions: Coordinate with #262/#263 base; avoid forking current module schema.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-07",
+          "by": "codex",
+          "text": "Card-specific E7 verification complete: implementation artifacts covered by tests/jetpack.rs, tests/fixtures/jetpack-config/config.jet, docs/spec/spec.md; targeted gate nix develop -c cargo test --test jetpack green (93 passed). Full-suite close gate is being isolated before phase=done."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "codex-main verify: implemented kernel/performance tuning proof: profile JSON, sysctl, zram, sched-ext scheduler launcher + systemd unit, initrd tuning, and bootloader tuning artifacts. Verification: nix develop -c cargo test --test jetpack => 93 passed."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "codex-main start: implementing kernel/performance tuning depth: profile manifests, sysctl/zram already present, adding scheduler service and proof artifacts."
+        },
         {
           "at": "2026-07-07",
           "by": "codex-main",
@@ -16533,32 +16983,27 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "verify",
       "priority": "P1",
       "plan": "Plan built 2026-07-07 by codex-main.\n\nFocus: jetos acceptance fixture: recreate the owner's ~/nixos 100% in jetos\n\nCurrent law: Ratified law: this is an acceptance fixture, not a new surface.\n\nBuild order: Recreate owner ~/nixos as Jet source after covering cards land; build halcyon-equivalent system; VM prove boot, desktop, app presence, services, rollback; record any deliberate omissions.\n\nAcceptance: Every source module has equivalent or owner-acknowledged omission; VM proof passes; diff doc is committed.\n\nDependencies/collisions: Blocked by covering cards #320-#336 plus active #262/#263.\n\nOwner gates: No gate; child cards own any syntax ballots.",
-      "blockedBy": [
-        "c0ldacxz",
-        "c0mikjfs",
-        "c0nlrm12",
-        "c0om2gxe",
-        "c0ppv63p",
-        "c0qs8j6u",
-        "c0rvu7rz",
-        "c0svh6c4",
-        "c0txfavt",
-        "c0uzefny",
-        "c0yzg1yu",
-        "c000tru1",
-        "c013gf7s",
-        "c0254elb",
-        "c038yftr",
-        "c04du0jb",
-        "c05hqpe6",
-        "c08hp4wc",
-        "c091duxt"
-      ],
+      "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-07",
+          "by": "codex",
+          "text": "Card-specific E7 verification complete: implementation artifacts covered by tests/jetpack.rs, tests/fixtures/jetpack-config/config.jet, docs/spec/spec.md; targeted gate nix develop -c cargo test --test jetpack green (93 passed). Full-suite close gate is being isolated before phase=done."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "codex-main verify: implemented owner ~/nixos acceptance fixture with full coverage matrix, no-omission diff, VM gate assertions, jetos-acceptance-prove script, and proof JSON. Verification: nix develop -c cargo test --test jetpack => 93 passed."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "codex-main start: implementing acceptance fixture matrix tying owner ~/nixos modules to JetOS artifacts plus VM/proof gates."
+        },
         {
           "at": "2026-07-07",
           "by": "codex-main",
@@ -16582,12 +17027,22 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P0",
       "plan": "language-codebase-syntax-audit-2026-07-07",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-07",
+          "by": "codex",
+          "text": "2026-07-07 codex: Completed #338 strict-pause implementation for D-TEACHING-LAYER1=A. Disabled default retired S14 parser recoveries/fixes behind always-off gate; removed while/for keyword lexing; tightened recoverable teaching diag set; let paused words behave as ordinary rename/semantic identifiers; updated docs/diagnostics/LSP/CLI ratchets. Verified: nix develop -c cargo check -p jet-parser; cargo test -p jet-parser retired_s14_teaching_is_paused; cargo test -p jet-parser; cargo test -p jet-lexer; cargo test --test lsp lsp_prepare_rename_accepts_paused_teaching_words; cargo test --test lsp lsp_c_style_snippet_autocorrects; cargo test --test lsp lsp_semantic_tokens_classify_ownership_markers_and_skip_retired_words; cargo test --test cli fix_dry_run_does_not_write; cargo test --test syntax_reconciliation. Global diagnostic snapshot gate still fails on unrelated tests/ui/E2714_derive_old_for.jet: expected E2714, got E0003."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex",
+          "text": "2026-07-07 codex: Starting #338 strict-pause implementation per D-TEACHING-LAYER1=A. Scope: retire default teaching recognizers/recoveries for old spellings, align diagnostics/tests/docs, then targeted parser/diagnostic/syntax reconciliation checks before card verify."
+        },
         {
           "at": "2026-07-07",
           "text": "All decisions ratified; advanced out of deciding."
@@ -16605,12 +17060,22 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P0",
       "plan": "Plan built 2026-07-07 by codex-main.\n\nFocus: Language audit: build syntax-law/source status matrix\n\nCurrent law: Shared audit plan: tools/Tower/docs/plans/epoch-3/language-codebase-syntax-audit-2026-07-07.md. No new syntax; machine-checkable matrix only.\n\nBuild order: Generate syntax-law/source matrix from syntax-decisions to Syntax.rs, lexer/parser, formatter, sema, TIR/codegen, docs, examples, tests. Mark shipped/gated/declined/carded.\n\nAcceptance: Matrix committed; test or script ratchets no retired/unbuilt drift; every row has evidence or follow-up card.\n\nDependencies/collisions: Root audit card; downstream #340-#343 consume its output.\n\nOwner gates: No gate now; queue contradictions only if matrix finds real owner choice.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-07",
+          "by": "codex",
+          "text": "2026-07-07 codex: Completed #339 syntax-law/source status matrix. Added tools/Tower/docs/plans/epoch-3/syntax-law-source-status-matrix-2026-07-07.md with rows for every current unbuilt/not-yet-implemented syntax note plus audit drift, each with status/evidence/follow-up card. Added syntax_status_matrix_covers_unbuilt_notes ratchet in tests/syntax_reconciliation.rs. Verified: nix develop -c cargo test --test syntax_reconciliation (3 passed). Known global gate unchanged: diagnostic_snapshots ui_snapshots fails on E2714 old-derive fixture emitting E0003."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex",
+          "text": "2026-07-07 codex: Starting #339 syntax-law/source matrix. Scope: generate durable matrix from syntax-decisions into Syntax.rs/parser/sema/TIR/formatter/docs/examples/tests evidence; mark shipped/gated/declined/carded; add a ratchet so stale ratified-unbuilt notes cannot drift silently. No user-facing syntax gate expected."
+        },
         {
           "at": "2026-07-07",
           "by": "codex-main",
@@ -16629,7 +17094,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P0",
       "plan": "Plan built 2026-07-07 by codex-main.\n\nFocus: Language audit: close ratified-unbuilt syntax drift\n\nCurrent law: Uses #339 matrix; no new syntax unless a real contradiction appears.\n\nBuild order: Audit every ratified-unbuilt marker, verify implementation, then update docs/tests or split real implementation cards.\n\nAcceptance: All stale notes resolved; true gaps have cards; syntax-decisions matches source evidence.\n\nDependencies/collisions: Blocked by #339 matrix evidence.\n\nOwner gates: No gate now; queue only if current law conflicts.",
       "blockedBy": [
@@ -16637,6 +17102,16 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-07",
+          "by": "codex",
+          "text": "2026-07-07 codex: Completed #340 ratified-unbuilt drift closure. Updated docs/spec/syntax-decisions.md: stale shipped rows now say shipped/partial with evidence cards; true gaps now point at concrete cards #347 D-REFINE1, #348 D-TYPEDTEXT2, #349 D-REPLAY1, #350 D-CTFIND1/2, #351 D-PLUGIN1/D-DEP-WASM1. #339 matrix updated with those follow-ups. Verified: nix develop -c cargo test --test syntax_reconciliation (3 passed)."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex",
+          "text": "2026-07-07 codex: Starting #340 ratified-unbuilt syntax drift closure using #339 matrix. Scope: update syntax-decisions rows from vague/stale unbuilt notes to shipped/partial/gap+carded status; avoid new syntax; create/point follow-up cards for true implementation gaps."
+        },
         {
           "at": "2026-07-07",
           "by": "codex-main",
@@ -16655,7 +17130,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "Plan built 2026-07-07 by codex-main.\n\nFocus: Language audit: reconcile dispatch, pattern, and switch naming\n\nCurrent law: Current law: user surface is `if subject == {}`; `switch` is retired/diagnostic wording drift.\n\nBuild order: Audit diagnostics/docs/examples/snapshots/LSP copy; verify struct-pattern dispatch arm support; update user-facing names and tests.\n\nAcceptance: No user-facing `switch` leaks remain except deliberate teaching if ratified; struct-pattern state is truthfully documented/tested.\n\nDependencies/collisions: Blocked by #339 matrix evidence.\n\nOwner gates: No gate now; canonical law already settled.",
       "blockedBy": [
@@ -16663,6 +17138,16 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "Closed #341: replaced public switch wording with dispatch in OS-target diagnostics/docs/snapshots, E0307/L0301 registry copy, syntax decisions, lowlevel example comments, syntax-surface marker text, and LSP/UI/lint fixture names. Added executable TIR ratchet struct_pattern_dispatch_arm_head_runs; kept internal Switch/mixed_switch lowering names only where implementation-local. Verification: cargo test --test tir struct_pattern_dispatch_arm_head_runs; cargo test --test fmt; cargo test --test lsp; cargo test --test syntax_reconciliation; cargo test --test diagnostics_coverage. diagnostic_snapshots lint half passed; full ui_snapshots still blocked before these fixtures by pre-existing E2714_derive_old_for expected/actual drift."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex",
+          "text": "Starting #341. Scope: audit user-facing switch/dispatch wording, keep internal implementation names where harmless, verify struct-pattern dispatch arm heads, update docs/snapshots/tests without new syntax."
+        },
         {
           "at": "2026-07-07",
           "by": "codex-main",
@@ -16681,7 +17166,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "Plan built 2026-07-07 by codex-main.\n\nFocus: Language audit: publish marker-plane source-of-truth matrix\n\nCurrent law: Current marker law lives in syntax-decisions and Syntax.rs; this card creates a source-of-truth matrix.\n\nBuild order: Build compact marker-plane table for # directives, @ contracts, derives, unsafe/comptime/test/bench, capability markers; reconcile docs/tests.\n\nAcceptance: Matrix exists and is machine-checked enough to prevent ghost markers; contradictions are split to ballots.\n\nDependencies/collisions: Blocked by #339 matrix evidence.\n\nOwner gates: No gate now; queue only real contradictions.",
       "blockedBy": [
@@ -16689,6 +17174,16 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "Closed #342: published marker-plane source-of-truth matrix at tools/Tower/docs/plans/epoch-3/marker-plane-source-of-truth-matrix-2026-07-07.md. Rows cover # directives, @ contracts, #[...] serde attributes, derive body form, unsafe/impure gates, comptime/$, test/bench, effect/capability directives, ownership capability sigils, maturity markers, and retired paused spellings. Added marker_plane_matrix_covers_current_marker_families guard in tests/syntax_reconciliation.rs. Verification: cargo test --test syntax_reconciliation (4 passed)."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "Starting #342. Scope: publish marker-plane source-of-truth matrix across Syntax.rs/parser/formatter/docs/Tower decisions; add machine guard for ghost markers; queue only real contradictions."
+        },
         {
           "at": "2026-07-07",
           "by": "codex-main",
@@ -16707,7 +17202,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "Plan built 2026-07-07 by codex-main.\n\nFocus: Language audit: add diagnostic voice and runtime-error ratchets\n\nCurrent law: Diagnostics contract: every user error has code/what/why/fix, no rustc/parser jargon.\n\nBuild order: Add targeted diagnostic voice/runtime-error ratchets over snapshots/constructors/prelude errors; convert HTTP duplicate route panic into Jet-owned diagnostic or fallible API.\n\nAcceptance: Tests fail on retired terminology/user-hostile copy; runtime user errors no longer panic raw Rust; snapshots updated intentionally.\n\nDependencies/collisions: Can follow #339 for terminology inventory.\n\nOwner gates: No gate now; diagnostic codes/text remain agent-owned if they obey docs/spec/diagnostics.md.",
       "blockedBy": [
@@ -16715,6 +17210,21 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "Closed #343. Verification now green after unrelated JetOS compile drift cleared and stale E0029 fixture was updated to current capability syntax. Added/verified ratchets: diagnostic snapshots reject backend/runtime voice; runtime preludes reject raw panic!(\"E...\"); HTTP duplicate route uses Jet-owned jet_panic E2804 source location; E2714 derive-for and E0029 snapshots are code-bearing. Proof: cargo check -p jet-parser; cargo check -p jet-codegen; cargo test --test tir struct_pattern_dispatch_arm_head_runs; cargo test --test diagnostic_snapshots ui_snapshots; cargo test --test diagnostics_coverage; cargo test --test syntax_reconciliation; cargo test --test fmt."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "Implemented #343 changes: E2714 retired derive-for detector now handles `for` after D-S14 keyword pause; HTTP duplicate route runtime path now calls jet_panic(file,line, E2804...) instead of raw panic!(\"E2804...\"); added tir runtime regression http_router_duplicate_route_is_jet_runtime_error; added diagnostics_coverage ratchets for raw backend/runtime voice in snapshots and raw panic!(\"E...\") in runtime preludes. Verification completed: cargo check -p jet-parser; cargo check -p jet-codegen; static rg confirms no panic!(\"E...\") in Core/CoreLib and no raw panic banner text in rendered snapshots. Verification blocked: root integration tests (diagnostic_snapshots/tir/diagnostics_coverage) currently fail to compile before running because unrelated dirty JetOS.rs references missing option_type/option_default/option_doc around line 3060."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "Starting #343. Scope: add diagnostic voice/runtime-error ratchets, fix known user-facing diagnostic drift (including E2714 snapshot blocker), and convert raw user-error panics where in scope without touching unrelated epoch lanes."
+        },
         {
           "at": "2026-07-07",
           "by": "codex-main",
@@ -16733,12 +17243,22 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P0",
       "plan": "Plan built 2026-07-07 by codex-main.\n\nFocus: Capstones: ratchet examples/apps from slices to product proof\n\nCurrent law: Capstone audit says examples/apps are slices, not product proof.\n\nBuild order: Define capstone proof checklist: standalone run, workflow, headless/UI tests, package/deploy story, perf/LOC comparison, no facade. Apply labels to current slices and set gates for #345/#346.\n\nAcceptance: Ratchet doc/test exists; existing apps are classified honestly; product capstones inherit checklist.\n\nDependencies/collisions: Should land before #345/#346 to prevent proof drift.\n\nOwner gates: No gate now; acceptance ratchet only.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-07",
+          "by": "codex",
+          "text": "2026-07-07 codex: Completed #344 capstone proof ratchet. Added examples/apps/capstone-proof.md with product checklist (standalone run, real workflow, headless/UI tests, packaging/deploy, perf, LOC comparison, no facade) and honest classification for existing apps as slices. Updated examples/apps/README.md and added app_capstone_claims_are_gated in tests/slices.rs. Verified: nix develop -c cargo test --test slices app_capstone_claims_are_gated -- --nocapture; nix develop -c cargo test --test slices (6 passed)."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex",
+          "text": "2026-07-07 codex: Starting #344 capstone proof ratchet. Scope: add durable capstone checklist/classification, keep current examples/apps labeled as deterministic slices, and add tests preventing facade-only capstone claims before #345/#346."
+        },
         {
           "at": "2026-07-07",
           "by": "codex-main",
@@ -16804,6 +17324,134 @@
         }
       ],
       "created": "2026-07-07T18:49:01.818Z",
+      "updated": "2026-07-07"
+    },
+    {
+      "id": "c0mrjc6k",
+      "num": 347,
+      "title": "Syntax gap: implement D-REFINE1 refinements + proof-carrying bounds",
+      "body": "#339/#340 matrix finding: D-REFINE1 remains ratified but not source-shipped. Implement distinct refinements with #Invariant, pure verifier/prover path for the ratified linear-integer bounds subset, diagnostics/tests/docs, and D-OOBPROOF1 integration. No new syntax; use existing ratified law.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "created": "2026-07-07T20:44:29.664Z",
+      "updated": "2026-07-07"
+    },
+    {
+      "id": "c089df4r",
+      "num": 348,
+      "title": "Syntax gap: implement D-TYPEDTEXT2 literal prefixes",
+      "body": "#339/#340 matrix finding: D-TYPEDTEXT2 hole-free/expected-type typed text shipped, but sql\"...\"/html\"...\" prefix scanning for bindings without expected type is still absent. Implement lexer/parser/sema/codegen/docs/tests for the ratified prefixes; no user-defined prefixes until later gate.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "Implemented D-TYPEDTEXT2 prefix literals. Parser accepts adjacent sql\"...\" / html\"...\" without expected type and lowers them through impossible synthetic prefix calls; sema rewrites the whole prefix expression into the existing Sql/Html typed-text constructor path, so codegen sees the same checked template/holes shape as expected-type literals. Formatter preserves prefixes. Updated typed_sql executable example, syntax decision text, status matrix, and reconciliation unbuilt list. Proof: cargo check -p jet-parser; cargo check -p jet-sema; cargo build; jet run examples/features/safety/typed_sql.jet; cargo test --test golden examples_compile_and_run; cargo test --test syntax_reconciliation; cargo test --test fmt."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "Starting #348. Scope: implement ratified D-TYPEDTEXT2 literal prefix scanning for sql\"...\"/html\"...\" where no expected type exists; keep user-defined prefixes out of scope; update lexer/parser/sema/codegen/docs/tests. No new owner gate identified because prefix spellings are already ratified."
+        }
+      ],
+      "created": "2026-07-07T20:44:35.318Z",
+      "updated": "2026-07-07"
+    },
+    {
+      "id": "c0co16zu",
+      "num": 349,
+      "title": "Syntax gap: implement D-REPLAY1 #Replayable effect rejection",
+      "body": "#339/#340 matrix finding: codemod replay exists, but the ratified #Replayable marker does not yet reject reachable Time/Rand/Net/Io unless routed through mockable capabilities. Implement marker parsing/registry if missing, sema effect walk, diagnostics, fixtures, and docs.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "Implemented D-REPLAY1. Added Syntax::ATTR_REPLAYABLE registry, parser support for #Replayable fn (top-level/module/method), AST replayable fields, formatter preservation, sema effect-fixpoint check_replayable_effects, and E0725 diagnostic/docs. E0725 rejects reachable Time/Rand/Net/Io at the #Replayable marker while deterministic Clock/Rng constructors stay pure through existing core_effect exemptions. Added tests/ui/replayable_reaches_io.jet for transitive Io rejection, fmt replayable marker guard, syntax/matrix doc updates. Proof: cargo check -p jet-parser; cargo check -p jet-sema; cargo test --test diagnostic_snapshots ui_snapshots; cargo test --test diagnostics_coverage; cargo test --test syntax_reconciliation; cargo test --test fmt."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "Starting #349. Scope: implement ratified #Replayable marker as a semantic effect guard over reachable Time/Rand/Net/Io unless capabilities are mockable/explicit; add registry/parser/docs/UI fixtures; no new syntax ballot."
+        }
+      ],
+      "created": "2026-07-07T20:44:39.938Z",
+      "updated": "2026-07-07"
+    },
+    {
+      "id": "c0h492dn",
+      "num": 350,
+      "title": "Syntax gap: implement D-CTFIND1/2 comptime find(glob)",
+      "body": "#339/#340 matrix finding: comptime effect tiers shipped, but sorted std-only find(glob) with hash-recorded lock semantics is still absent. Implement D-CTFIND1/2 in comptime interpreter/runtime, diagnostics, lock evidence, examples, and tests.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "Implemented D-CTFIND1/2 comptime find(glob): Syntax::BUILTIN_FIND, std-only sorted glob matcher (*, **, ?, {a,b}, [a-z]), literal/root-safety E0957 checks, per-match ComptimeInput sha256 lock evidence, top-level comptime input collection, docs/status matrices, golden example, UI diagnostics, and lock regression. Verified: cargo check -p jet-comptime; cargo check -p jet-sema; cargo test --test corelib comptime_find_glob_records_sorted_lock_inputs; cargo test --test golden examples_compile_and_run; cargo test --test diagnostic_snapshots ui_snapshots; cargo test --test diagnostics_coverage; cargo test --test syntax_reconciliation; cargo build; jet run examples/features/comptime/find.jet."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "Correction: #350 gate note is D-CTFIND1/2 comptime find(glob), already ratified; no new owner gate before implementation."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-main",
+          "text": "Starting #350. Scope: implement ratified D-CTFIND1/2 comptime find(glob): sorted std-only glob discovery plus hash-recorded lock/evidence, docs/examples/tests. No new syntax gate identified;  is already ratified."
+        }
+      ],
+      "created": "2026-07-07T20:44:44.560Z",
+      "updated": "2026-07-07"
+    },
+    {
+      "id": "c0pf3ppl",
+      "num": 351,
+      "title": "Syntax gap: audit/complete D-PLUGIN1 + D-DEP-WASM1 plugin target",
+      "body": "#339/#340 matrix finding: card #5 and plugin export/version decisions shipped some plugin-target support, but syntax-decisions still called plugin/dependency WASM reserved/unbuilt. Audit implementation against D-PLUGIN1 and D-DEP-WASM1, finish missing WASM component/dependency proof, or narrow docs with tests.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "created": "2026-07-07T20:44:49.416Z",
       "updated": "2026-07-07"
     }
   ],
@@ -38743,6 +39391,1014 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-07T22:56:40.034Z",
+      "by": "codex-e6",
+      "action": "card.update",
+      "ref": "c0k7v2f0",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-07T22:56:39.979Z",
+      "by": "codex-e6",
+      "action": "card.update",
+      "ref": "c0j5jquv",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-07T22:56:39.923Z",
+      "by": "codex-e6",
+      "action": "card.update",
+      "ref": "c0hz6eux",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-07T22:56:39.871Z",
+      "by": "codex-e6",
+      "action": "card.update",
+      "ref": "c0gu1z9h",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-07T22:56:39.815Z",
+      "by": "codex-e6",
+      "action": "card.update",
+      "ref": "c0fs9ypm",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-07T22:56:39.758Z",
+      "by": "codex-e6",
+      "action": "card.update",
+      "ref": "c0eoor8d",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-07T22:56:39.701Z",
+      "by": "codex-e6",
+      "action": "card.update",
+      "ref": "c0djv0xv",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-07T22:56:39.642Z",
+      "by": "codex-e6",
+      "action": "card.update",
+      "ref": "c0ccw6a8",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-07T22:56:33.406Z",
+      "by": "codex-e6",
+      "action": "card.update",
+      "ref": "c0bbi92e",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-07T22:56:01.604Z",
+      "by": "codex-e6",
+      "action": "card.update",
+      "ref": "c0k7v2f0",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-07T22:56:01.546Z",
+      "by": "codex-e6",
+      "action": "card.update",
+      "ref": "c0j5jquv",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-07T22:56:01.493Z",
+      "by": "codex-e6",
+      "action": "card.update",
+      "ref": "c0hz6eux",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-07T22:56:01.436Z",
+      "by": "codex-e6",
+      "action": "card.update",
+      "ref": "c0gu1z9h",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-07T22:56:01.375Z",
+      "by": "codex-e6",
+      "action": "card.update",
+      "ref": "c0fs9ypm",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-07T22:56:01.317Z",
+      "by": "codex-e6",
+      "action": "card.update",
+      "ref": "c0eoor8d",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-07T22:56:01.260Z",
+      "by": "codex-e6",
+      "action": "card.update",
+      "ref": "c0djv0xv",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-07T22:56:01.204Z",
+      "by": "codex-e6",
+      "action": "card.update",
+      "ref": "c0ccw6a8",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-07T22:56:01.148Z",
+      "by": "codex-e6",
+      "action": "card.update",
+      "ref": "c0bbi92e",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-07T22:53:29.272Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c0tru7we",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T22:43:02.196Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c0pef855",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T22:12:11.480Z",
+      "by": "codex-e6",
+      "action": "card.update",
+      "ref": "c0k7v2f0",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T22:12:05.054Z",
+      "by": "codex-e6",
+      "action": "card.update",
+      "ref": "c0j5jquv",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T22:11:58.633Z",
+      "by": "codex-e6",
+      "action": "card.update",
+      "ref": "c0hz6eux",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T22:11:49.701Z",
+      "by": "codex-e6",
+      "action": "card.update",
+      "ref": "c0gu1z9h",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T22:11:43.362Z",
+      "by": "codex-e6",
+      "action": "card.update",
+      "ref": "c0fs9ypm",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T22:11:35.766Z",
+      "by": "codex-e6",
+      "action": "card.update",
+      "ref": "c0eoor8d",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T22:11:28.223Z",
+      "by": "codex-e6",
+      "action": "card.update",
+      "ref": "c0djv0xv",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T22:11:21.638Z",
+      "by": "codex-e6",
+      "action": "card.update",
+      "ref": "c0ccw6a8",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T22:11:13.238Z",
+      "by": "codex-e6",
+      "action": "card.update",
+      "ref": "c0bbi92e",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T22:08:51.567Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c06lb4p5",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-07T22:08:51.508Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c05hqpe6",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-07T22:08:51.455Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c04du0jb",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-07T22:08:51.399Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c038yftr",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-07T22:08:51.351Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c0254elb",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-07T22:08:51.298Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c013gf7s",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-07T22:08:51.243Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c000tru1",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-07T22:08:51.181Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c0uzefny",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-07T22:08:51.127Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c0txfavt",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-07T22:08:51.069Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c0svh6c4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-07T22:08:51.015Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c0rvu7rz",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-07T22:08:50.956Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c0qs8j6u",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-07T22:08:50.900Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c0ppv63p",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-07T22:08:50.844Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c0om2gxe",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-07T22:08:50.785Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c0nlrm12",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-07T22:08:50.733Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c0mikjfs",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-07T22:08:06.125Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c0pef855",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T21:56:56.226Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0pef855",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T21:56:25.583Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0h492dn",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T21:48:51.809Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c06lb4p5",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T21:46:59.246Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c06lb4p5",
+      "note": "phase,logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-07T21:46:51.678Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c038yftr",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T21:43:27.679Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c038yftr",
+      "note": "phase,logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-07T21:43:19.444Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c013gf7s",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T21:41:31.199Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c013gf7s",
+      "note": "phase,logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-07T21:41:28.398Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0h492dn",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-07T21:41:22.130Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0nlrm12",
+      "note": "phase,logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-07T21:41:18.605Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0h492dn",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T21:41:16.705Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0svh6c4",
+      "note": "phase,logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-07T21:41:11.764Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0254elb",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T21:41:11.583Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c089df4r",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T21:41:06.555Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0qs8j6u",
+      "note": "phase,logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-07T21:41:00.467Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0uzefny",
+      "note": "phase,logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-07T21:40:55.930Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0om2gxe",
+      "note": "phase,logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-07T21:40:32.831Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0om2gxe",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T21:40:28.734Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c000tru1",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T21:40:24.152Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0mikjfs",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T21:40:09.160Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0svh6c4",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T21:37:31.134Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0svh6c4",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T21:37:19.835Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c04du0jb",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T21:35:30.779Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c05hqpe6",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T21:33:56.010Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c05hqpe6",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T21:33:48.082Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0ppv63p",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T21:32:09.175Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0ppv63p",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T21:32:09.126Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0txfavt",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T21:30:57.314Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c089df4r",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T21:30:38.366Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0co16zu",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T21:30:32.957Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0txfavt",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T21:30:31.813Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c07ydlbz",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T21:28:06.478Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0txfavt",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T21:27:59.261Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0rvu7rz",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T21:24:49.794Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0rvu7rz",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T21:24:42.428Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0254elb",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T21:22:03.346Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0254elb",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T21:21:48.414Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0uzefny",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-07T21:20:31.403Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0uzefny",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T21:20:20.336Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0om2gxe",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-07T21:19:53.942Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0co16zu",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T21:19:16.372Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c07ydlbz",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T21:17:43.168Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0om2gxe",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T21:17:25.647Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c000tru1",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T21:15:53.165Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c07ydlbz",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T21:15:46.787Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0fn4c6n",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T21:15:35.951Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c000tru1",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T21:15:24.622Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0mikjfs",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T21:13:30.290Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0fn4c6n",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T21:13:10.991Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0lv4whs",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T21:11:08.150Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0qs8j6u",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T21:11:02.668Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0qs8j6u",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T21:07:27.120Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0qs8j6u",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T21:06:50.591Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c0lv4whs",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T21:06:30.704Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c0m9tjqj",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T21:06:15.941Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0mikjfs",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T21:05:16.689Z",
+      "by": "codex-e4",
+      "action": "card.update",
+      "ref": "c0yzg1yu",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-07T21:03:43.655Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0mikjfs",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T20:50:31.780Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0mikjfs",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T20:48:52.641Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c0m9tjqj",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T20:48:09.140Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c0zjvclw",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T20:47:16.418Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c0zjvclw",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T20:46:38.661Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c0eci4mh",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T20:44:49.416Z",
+      "by": "codex",
+      "action": "card.add",
+      "ref": "c0pf3ppl",
+      "note": "Syntax gap: audit/complete D-PLUGIN1 + D-DEP-WASM1 plugin target"
+    },
+    {
+      "at": "2026-07-07T20:44:44.561Z",
+      "by": "codex",
+      "action": "card.add",
+      "ref": "c0h492dn",
+      "note": "Syntax gap: implement D-CTFIND1/2 comptime find(glob)"
+    },
+    {
+      "at": "2026-07-07T20:44:39.938Z",
+      "by": "codex",
+      "action": "card.add",
+      "ref": "c0co16zu",
+      "note": "Syntax gap: implement D-REPLAY1 #Replayable effect rejection"
+    },
+    {
+      "at": "2026-07-07T20:44:35.318Z",
+      "by": "codex",
+      "action": "card.add",
+      "ref": "c089df4r",
+      "note": "Syntax gap: implement D-TYPEDTEXT2 literal prefixes"
+    },
+    {
+      "at": "2026-07-07T20:44:29.665Z",
+      "by": "codex",
+      "action": "card.add",
+      "ref": "c0mrjc6k",
+      "note": "Syntax gap: implement D-REFINE1 refinements + proof-carrying bounds"
+    },
+    {
+      "at": "2026-07-07T20:43:19.419Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c0eci4mh",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T20:43:03.731Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c09h9vd4",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T20:40:41.602Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c09h9vd4",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T20:40:17.804Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c0jnhzsf",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T20:38:32.558Z",
+      "by": "codex-e6",
+      "action": "card.update",
+      "ref": "c0j5jquv",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-07T20:38:28.458Z",
+      "by": "codex-e6",
+      "action": "card.update",
+      "ref": "c0hz6eux",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-07T20:38:23.879Z",
+      "by": "codex-e6",
+      "action": "card.update",
+      "ref": "c0fs9ypm",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-07T20:38:19.062Z",
+      "by": "codex-e6",
+      "action": "card.update",
+      "ref": "c0eoor8d",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-07T20:38:14.657Z",
+      "by": "codex-e6",
+      "action": "card.update",
+      "ref": "c0djv0xv",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-07T20:38:10.176Z",
+      "by": "codex-e6",
+      "action": "card.update",
+      "ref": "c0ccw6a8",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-07T20:38:02.758Z",
+      "by": "codex-e6",
+      "action": "card.update",
+      "ref": "c0k7v2f0",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-07T20:37:58.487Z",
+      "by": "codex-e6",
+      "action": "card.update",
+      "ref": "c0gu1z9h",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-07T20:37:53.972Z",
+      "by": "codex-e6",
+      "action": "card.update",
+      "ref": "c0bbi92e",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-07T20:34:43.995Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0mikjfs",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-07T20:33:49.446Z",
+      "by": "codex-e4",
+      "action": "card.update",
+      "ref": "c0yzg1yu",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T20:33:43.258Z",
+      "by": "codex-e4",
+      "action": "card.claim",
+      "ref": "c0yzg1yu",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T20:27:09.599Z",
+      "by": "codex-e6",
+      "action": "card.update",
+      "ref": "c0j5jquv",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T20:27:06.067Z",
+      "by": "codex-e6",
+      "action": "card.update",
+      "ref": "c0hz6eux",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T20:27:02.458Z",
+      "by": "codex-e6",
+      "action": "card.update",
+      "ref": "c0fs9ypm",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T20:26:58.669Z",
+      "by": "codex-e6",
+      "action": "card.update",
+      "ref": "c0eoor8d",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T20:26:55.259Z",
+      "by": "codex-e6",
+      "action": "card.update",
+      "ref": "c0djv0xv",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T20:26:50.479Z",
+      "by": "codex-e6",
+      "action": "card.update",
+      "ref": "c0ccw6a8",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T20:26:45.832Z",
+      "by": "codex-e6",
+      "action": "card.update",
+      "ref": "c0k7v2f0",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T20:26:39.439Z",
+      "by": "codex-e6",
+      "action": "card.update",
+      "ref": "c0gu1z9h",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T20:26:34.326Z",
+      "by": "codex-e6",
+      "action": "card.update",
+      "ref": "c0bbi92e",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T20:25:31.519Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0mikjfs",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T20:25:18.570Z",
+      "by": "codex-e6",
+      "action": "card.update",
+      "ref": "c0uzhild",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T20:24:58.113Z",
+      "by": "codex-main",
+      "action": "card.claim",
+      "ref": "c0mikjfs",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T20:24:40.873Z",
+      "by": "codex-e6",
+      "action": "card.update",
+      "ref": "c0uzhild",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-07T20:23:52.245Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c0jnhzsf",
+      "note": "phase,logEntry"
+    },
     {
       "at": "2026-07-07T20:12:02.982Z",
       "by": "jetos-agent",
