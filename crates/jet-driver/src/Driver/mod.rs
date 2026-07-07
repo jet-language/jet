@@ -120,12 +120,352 @@ fn target_profile_usage_for_file(
     if !errors.is_empty() {
         return Err(errors);
     }
+    let mmio = collect_mmio_usage(&bundle);
     let mut core_apis: Vec<String> = bundle.used_core.into_iter().collect();
     core_apis.sort();
     Ok(crate::TargetProfile::TargetProfileUse {
         core_apis,
+        mmio,
         ..crate::TargetProfile::TargetProfileUse::default()
     })
+}
+
+#[derive(Clone, Copy)]
+struct PtrFact {
+    address: u64,
+    size: crate::TargetProfile::ByteSize,
+}
+
+fn collect_mmio_usage(bundle: &crate::AST::ProgramBundle) -> Vec<crate::TargetProfile::MmioAccess> {
+    let mut out = Vec::new();
+    for module in &bundle.modules {
+        let core_aliases = core_aliases(module);
+        for item in &module.items {
+            match item {
+                crate::AST::Item::Func(f) => collect_mmio_func(f, &core_aliases, &mut out),
+                crate::AST::Item::Struct(s) => {
+                    for m in &s.methods {
+                        collect_mmio_func(m, &core_aliases, &mut out);
+                    }
+                }
+                crate::AST::Item::Enum(e) => {
+                    for m in &e.methods {
+                        collect_mmio_func(m, &core_aliases, &mut out);
+                    }
+                }
+                crate::AST::Item::Impl(i) => {
+                    for m in &i.methods {
+                        collect_mmio_func(m, &core_aliases, &mut out);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    out
+}
+
+fn core_aliases(module: &crate::AST::LoadedModule) -> std::collections::HashMap<String, String> {
+    let mut aliases = std::collections::HashMap::new();
+    for import in &module.imports {
+        if let crate::AST::ImportKind::Module(name, _) = &import.kind {
+            if crate::Syntax::is_known_core_module(name) {
+                let alias = if import.alias.is_empty() {
+                    name.rsplit('.').next().unwrap_or(name).to_string()
+                } else {
+                    import.alias.clone()
+                };
+                aliases.insert(alias, name.clone());
+            }
+        }
+    }
+    aliases
+}
+
+fn collect_mmio_func(
+    f: &crate::AST::Func,
+    core_aliases: &std::collections::HashMap<String, String>,
+    out: &mut Vec<crate::TargetProfile::MmioAccess>,
+) {
+    let mut ptrs = std::collections::HashMap::new();
+    let reason = if f.is_unsafe {
+        f.unsafe_reason.as_deref()
+    } else {
+        None
+    };
+    collect_mmio_stmts(&f.body, core_aliases, &mut ptrs, reason, out);
+}
+
+fn collect_mmio_stmts(
+    stmts: &[crate::AST::Stmt],
+    core_aliases: &std::collections::HashMap<String, String>,
+    ptrs: &mut std::collections::HashMap<String, PtrFact>,
+    unsafe_reason: Option<&str>,
+    out: &mut Vec<crate::TargetProfile::MmioAccess>,
+) {
+    for stmt in stmts {
+        match stmt {
+            crate::AST::Stmt::Val(b) => {
+                collect_mmio_expr(&b.init, core_aliases, ptrs, unsafe_reason, out);
+                if let Some(fact) = ptr_fact_from_expr(&b.init) {
+                    ptrs.insert(b.name.clone(), fact);
+                }
+            }
+            crate::AST::Stmt::Expr(e) | crate::AST::Stmt::Return(Some(e), _) => {
+                collect_mmio_expr(e, core_aliases, ptrs, unsafe_reason, out);
+            }
+            crate::AST::Stmt::Assign { value, .. } => {
+                collect_mmio_expr(value, core_aliases, ptrs, unsafe_reason, out);
+            }
+            crate::AST::Stmt::If(i) => {
+                collect_mmio_expr(&i.cond, core_aliases, ptrs, unsafe_reason, out);
+                collect_mmio_stmts(&i.then_body, core_aliases, ptrs, unsafe_reason, out);
+                collect_mmio_else(&i.else_branch, core_aliases, ptrs, unsafe_reason, out);
+            }
+            crate::AST::Stmt::While { cond, body, .. } => {
+                collect_mmio_expr(cond, core_aliases, ptrs, unsafe_reason, out);
+                collect_mmio_stmts(body, core_aliases, ptrs, unsafe_reason, out);
+            }
+            crate::AST::Stmt::For { kind, body, .. } => {
+                collect_mmio_for_kind(kind, core_aliases, ptrs, unsafe_reason, out);
+                collect_mmio_stmts(body, core_aliases, ptrs, unsafe_reason, out);
+            }
+            crate::AST::Stmt::Switch {
+                subject,
+                arms,
+                else_body,
+                ..
+            } => {
+                collect_mmio_expr(subject, core_aliases, ptrs, unsafe_reason, out);
+                for arm in arms {
+                    collect_mmio_stmts(&arm.body, core_aliases, ptrs, unsafe_reason, out);
+                }
+                if let Some(body) = else_body {
+                    collect_mmio_stmts(body, core_aliases, ptrs, unsafe_reason, out);
+                }
+            }
+            crate::AST::Stmt::Loop { body, .. }
+            | crate::AST::Stmt::Impure { body, .. }
+            | crate::AST::Stmt::Reactive { body, .. }
+            | crate::AST::Stmt::SuppressMustUse { body, .. }
+            | crate::AST::Stmt::Region { body, .. }
+            | crate::AST::Stmt::TaskGroup { body, .. } => {
+                collect_mmio_stmts(body, core_aliases, ptrs, unsafe_reason, out);
+            }
+            crate::AST::Stmt::Unsafe { audit, body, .. } => {
+                collect_mmio_stmts(body, core_aliases, ptrs, audit.as_deref(), out);
+            }
+            crate::AST::Stmt::CountedLoop {
+                init,
+                cond,
+                step,
+                body,
+                ..
+            } => {
+                collect_mmio_expr(&init.init, core_aliases, ptrs, unsafe_reason, out);
+                if let Some(fact) = ptr_fact_from_expr(&init.init) {
+                    ptrs.insert(init.name.clone(), fact);
+                }
+                collect_mmio_expr(cond, core_aliases, ptrs, unsafe_reason, out);
+                collect_mmio_stmts(
+                    std::slice::from_ref(step),
+                    core_aliases,
+                    ptrs,
+                    unsafe_reason,
+                    out,
+                );
+                collect_mmio_stmts(body, core_aliases, ptrs, unsafe_reason, out);
+            }
+            crate::AST::Stmt::Return(None, _)
+            | crate::AST::Stmt::Break(_)
+            | crate::AST::Stmt::Continue(_)
+            | crate::AST::Stmt::BreakLabel(_, _)
+            | crate::AST::Stmt::ContinueLabel(_, _) => {}
+            _ => {}
+        }
+    }
+}
+
+fn collect_mmio_else(
+    branch: &Option<crate::AST::ElseBranch>,
+    core_aliases: &std::collections::HashMap<String, String>,
+    ptrs: &mut std::collections::HashMap<String, PtrFact>,
+    unsafe_reason: Option<&str>,
+    out: &mut Vec<crate::TargetProfile::MmioAccess>,
+) {
+    match branch {
+        Some(crate::AST::ElseBranch::Else(body)) => {
+            collect_mmio_stmts(body, core_aliases, ptrs, unsafe_reason, out);
+        }
+        Some(crate::AST::ElseBranch::ElseIf(i)) => {
+            collect_mmio_expr(&i.cond, core_aliases, ptrs, unsafe_reason, out);
+            collect_mmio_stmts(&i.then_body, core_aliases, ptrs, unsafe_reason, out);
+            collect_mmio_else(&i.else_branch, core_aliases, ptrs, unsafe_reason, out);
+        }
+        None => {}
+    }
+}
+
+fn collect_mmio_for_kind(
+    kind: &crate::AST::ForKind,
+    core_aliases: &std::collections::HashMap<String, String>,
+    ptrs: &mut std::collections::HashMap<String, PtrFact>,
+    unsafe_reason: Option<&str>,
+    out: &mut Vec<crate::TargetProfile::MmioAccess>,
+) {
+    match kind {
+        crate::AST::ForKind::Range { start, end, step } => {
+            collect_mmio_expr(start, core_aliases, ptrs, unsafe_reason, out);
+            collect_mmio_expr(end, core_aliases, ptrs, unsafe_reason, out);
+            if let Some(step) = step {
+                collect_mmio_expr(step, core_aliases, ptrs, unsafe_reason, out);
+            }
+        }
+        crate::AST::ForKind::In { collection } => {
+            collect_mmio_expr(collection, core_aliases, ptrs, unsafe_reason, out);
+        }
+    }
+}
+
+fn collect_mmio_expr(
+    expr: &crate::AST::Expr,
+    core_aliases: &std::collections::HashMap<String, String>,
+    ptrs: &std::collections::HashMap<String, PtrFact>,
+    unsafe_reason: Option<&str>,
+    out: &mut Vec<crate::TargetProfile::MmioAccess>,
+) {
+    match expr {
+        crate::AST::Expr::PtrFromAddr { addr, .. } => {
+            collect_mmio_expr(addr, core_aliases, ptrs, unsafe_reason, out);
+        }
+        crate::AST::Expr::MethodCall {
+            receiver,
+            method,
+            args,
+            ..
+        } => {
+            if is_core_mem_receiver(receiver, core_aliases)
+                && matches!(method.as_str(), "volatile_read" | "volatile_write")
+            {
+                if let Some(first) = args.first() {
+                    if let crate::AST::Expr::Ident(name, _) = &first.expr {
+                        if let Some(fact) = ptrs.get(name) {
+                            out.push(crate::TargetProfile::MmioAccess {
+                                address: fact.address,
+                                size: fact.size,
+                                unsafe_gate: unsafe_reason.map(|reason| {
+                                    crate::TargetProfile::UnsafeGate {
+                                        reason: reason.to_string(),
+                                    }
+                                }),
+                            });
+                        }
+                    }
+                }
+            }
+            collect_mmio_expr(receiver, core_aliases, ptrs, unsafe_reason, out);
+            for arg in args {
+                collect_mmio_expr(&arg.expr, core_aliases, ptrs, unsafe_reason, out);
+            }
+        }
+        crate::AST::Expr::Call(c) => {
+            for arg in &c.args {
+                collect_mmio_expr(&arg.expr, core_aliases, ptrs, unsafe_reason, out);
+            }
+        }
+        crate::AST::Expr::Binary(_, a, b, _) => {
+            collect_mmio_expr(a, core_aliases, ptrs, unsafe_reason, out);
+            collect_mmio_expr(b, core_aliases, ptrs, unsafe_reason, out);
+        }
+        crate::AST::Expr::Index { base, index, .. } => {
+            collect_mmio_expr(base, core_aliases, ptrs, unsafe_reason, out);
+            collect_mmio_expr(index, core_aliases, ptrs, unsafe_reason, out);
+        }
+        crate::AST::Expr::OrFallback {
+            value, fallback, ..
+        } => {
+            collect_mmio_expr(value, core_aliases, ptrs, unsafe_reason, out);
+            if let crate::AST::OrFallback::Value(v) = fallback {
+                collect_mmio_expr(v, core_aliases, ptrs, unsafe_reason, out);
+            }
+        }
+        crate::AST::Expr::Unary(_, e, _)
+        | crate::AST::Expr::Copy(e, _)
+        | crate::AST::Expr::Deref(e, _)
+        | crate::AST::Expr::RawOf(e, _)
+        | crate::AST::Expr::Field(e, _, _)
+        | crate::AST::Expr::OptField { base: e, .. } => {
+            collect_mmio_expr(e, core_aliases, ptrs, unsafe_reason, out);
+        }
+        crate::AST::Expr::StructLit { fields, .. } => {
+            for (_, _, value) in fields {
+                collect_mmio_expr(value, core_aliases, ptrs, unsafe_reason, out);
+            }
+        }
+        crate::AST::Expr::ListLit(elems, _) => {
+            for elem in elems {
+                collect_mmio_expr(elem, core_aliases, ptrs, unsafe_reason, out);
+            }
+        }
+        crate::AST::Expr::MapLit(entries, _) => {
+            for (k, v) in entries {
+                collect_mmio_expr(k, core_aliases, ptrs, unsafe_reason, out);
+                collect_mmio_expr(v, core_aliases, ptrs, unsafe_reason, out);
+            }
+        }
+        crate::AST::Expr::TupleLit(fields, _, _) => {
+            for (_, value) in fields {
+                collect_mmio_expr(value, core_aliases, ptrs, unsafe_reason, out);
+            }
+        }
+        crate::AST::Expr::CallValue { callee, args, .. } => {
+            collect_mmio_expr(callee, core_aliases, ptrs, unsafe_reason, out);
+            for arg in args {
+                collect_mmio_expr(&arg.expr, core_aliases, ptrs, unsafe_reason, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn is_core_mem_receiver(
+    receiver: &crate::AST::Expr,
+    core_aliases: &std::collections::HashMap<String, String>,
+) -> bool {
+    matches!(receiver, crate::AST::Expr::Ident(alias, _) if core_aliases.get(alias).is_some_and(|m| m == "core.mem"))
+}
+
+fn ptr_fact_from_expr(expr: &crate::AST::Expr) -> Option<PtrFact> {
+    let crate::AST::Expr::PtrFromAddr { elem, addr, .. } = expr else {
+        return None;
+    };
+    let crate::AST::Expr::Int(address, _, _) = addr.as_ref() else {
+        return None;
+    };
+    if *address < 0 {
+        return None;
+    }
+    Some(PtrFact {
+        address: *address as u64,
+        size: byte_size_for_type(elem)?,
+    })
+}
+
+fn byte_size_for_type(ty: &crate::AST::Type) -> Option<crate::TargetProfile::ByteSize> {
+    match ty {
+        crate::AST::Type::Bool => Some(crate::TargetProfile::ByteSize::bytes(1)),
+        crate::AST::Type::Char | crate::AST::Type::Float32 => {
+            Some(crate::TargetProfile::ByteSize::bytes(4))
+        }
+        crate::AST::Type::Int | crate::AST::Type::Float | crate::AST::Type::String => {
+            Some(crate::TargetProfile::ByteSize::bytes(8))
+        }
+        crate::AST::Type::IntN { bits, .. } => {
+            Some(crate::TargetProfile::ByteSize::bytes((*bits as u64) / 8))
+        }
+        crate::AST::Type::Tagged { inner, .. } => byte_size_for_type(inner),
+        _ => None,
+    }
 }
 
 /// The real implementation behind every `compile_bundle_path_opts*` facade —

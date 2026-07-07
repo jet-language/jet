@@ -352,6 +352,10 @@ pub const MEM_FROM_ADDR: &str = "from_addr";
 /// S58 (ratified 2026-06-12): `mem.volatile_read(p)` — volatile/MMIO read.
 pub const MEM_VOLATILE_READ: &str = "volatile_read";
 
+/// D-FLAGSHIP-MMIO1=A (ratified 2026-07-07): `mem.volatile_write(p, value)` —
+/// volatile/MMIO write.
+pub const MEM_VOLATILE_WRITE: &str = "volatile_write";
+
 /// S58 (ratified 2026-06-12): `mem.address_of(x)` — the address of a value as
 /// an Int (taking a pointer is inert; using it needs `#Unsafe`).
 pub const MEM_ADDRESS_OF: &str = "address_of";

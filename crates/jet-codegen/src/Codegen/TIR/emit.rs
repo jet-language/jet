@@ -2978,11 +2978,14 @@ pub(crate) fn emit_tir_core_call(
     match (module, method) {
         // c109 Phase 18 (S58, E2-M13): low-level pointer ops, byte-for-byte
         // `emit_core_call`. `address_of` is an inert address cast (no `unsafe`);
-        // `volatile_read` reads through a `Ptr<T>` — `read_volatile` is valid because the
-        // call only reaches codegen inside an `#Unsafe` region/fn (sema E3101), already
-        // lowered to a Rust `unsafe` context.
+        // `volatile_read`/`volatile_write` access through a `Ptr<T>` — the volatile ops are
+        // valid because the call only reaches codegen inside an `#Unsafe` region/fn (sema
+        // E3101), already lowered to a Rust `unsafe` context.
         ("core.mem", "address_of") => format!("(&({}) as *const _ as usize as i64)", arg(0)),
         ("core.mem", "volatile_read") => format!("std::ptr::read_volatile({})", arg(0)),
+        ("core.mem", "volatile_write") => {
+            format!("std::ptr::write_volatile({}, {})", arg(0), arg(1))
+        }
         // D-TUPLE-DESTRUCT1: the `tasks.channel<T>()` producer — returns the
         // `(Sender<T>, Receiver<T>)` pair as the same `JetTup_<hash>` named-tuple
         // struct every other `Type::Tuple` value uses (`enumerate`/`zip`/`partition`'s

@@ -155,6 +155,77 @@ fn run() {
 }
 
 #[test]
+fn selected_target_profile_validates_direct_mmio_accesses() {
+    let dir = std::env::temp_dir().join(format!("jet_target_profile_mmio_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.jet");
+    std::fs::write(
+        &file,
+        r#"
+use core.mem as mem
+
+fn run() {
+    #Unsafe("timer register is mapped by board.sensor_v1") {
+        p :: mem.Ptr<Int>.from_addr(0x40000100)
+        mem.volatile_write(p, 7)
+        _seen :: mem.volatile_read(p)
+    }
+}
+"#,
+    )
+    .unwrap();
+    jet::Driver::compile_bundle_path_with_target_profile(
+        &file.to_string_lossy(),
+        jet::Sema::CompileMode::Run,
+        &sensor_profile(),
+    )
+    .expect("profile should accept direct volatile access inside MMIO range");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn selected_target_profile_rejects_direct_mmio_outside_region() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_target_profile_bad_mmio_{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.jet");
+    std::fs::write(
+        &file,
+        r#"
+use core.mem as mem
+
+fn run() {
+    #Unsafe("this address is intentionally outside the board MMIO region") {
+        p :: mem.Ptr<Int>.from_addr(0x50000000)
+        mem.volatile_write(p, 7)
+    }
+}
+"#,
+    )
+    .unwrap();
+    let err = jet::Driver::compile_bundle_path_with_target_profile(
+        &file.to_string_lossy(),
+        jet::Sema::CompileMode::Run,
+        &sensor_profile(),
+    )
+    .expect_err("target profile should reject direct volatile access outside MMIO range");
+    match err {
+        TargetProfileCompileError::Profile(errors) => assert!(errors.iter().any(|e| matches!(
+            e,
+            TargetProfileError::MmioOutsideRegion { address, .. } if *address == 0x5000_0000
+        ))),
+        TargetProfileCompileError::Diagnostics(diags) => {
+            panic!("expected profile errors, got diagnostics: {diags:?}")
+        }
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn audit_report_is_machine_stable() {
     let usage = TargetProfileUse {
         core_apis: vec!["core.files".to_string()],

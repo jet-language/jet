@@ -5485,8 +5485,9 @@ pub(crate) fn lower_method_call(
                     // type. `address_of` is always `Int`; `volatile_read(p)` reads through
                     // the typed pointer, so its result is `ptr_elem(p.ty)` — the `T` of the
                     // `Ptr<T>` arg, recovered from the LOWERED arg's total `ty` (no emit-time
-                    // inference, I3). A defensive `Unit` fallback (an ill-typed arg sema
-                    // would already have rejected) keeps the fact total.
+                    // inference, I3). `volatile_write(p, value)` returns `Unit`.
+                    // A defensive `Unit` fallback (an ill-typed arg sema would already have
+                    // rejected) keeps the fact total.
                     let ty = if module == "core.mem" {
                         match method {
                             "address_of" => Type::Int,
@@ -5494,6 +5495,7 @@ pub(crate) fn lower_method_call(
                                 .first()
                                 .and_then(|a| crate::Sema::ptr_elem(&a.ty))
                                 .unwrap_or_else(unit_type),
+                            "volatile_write" => unit_type(),
                             _ => core_call_return_ty(&module, method),
                         }
                     } else if crate::Sema::is_polymorphic_core_special(&module, method) {

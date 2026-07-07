@@ -1001,16 +1001,21 @@ decisions).
 ### Low-level tier
 
 **S58 — Two gates, one keyword**: `use core.mem` is the discovery gate
-(allocators, `*T`, layout/repr, volatile). `#Unsafe("reason") { … }` /
+(allocators, `*T`, layout/repr, volatile read/write). `#Unsafe("reason") { … }` /
 `#Unsafe("reason") fn` is the audit gate (**D-UNSAFE2** — the reason is the
 gate's argument; **D-UNSAFE-REASON1=B** — bare `#Unsafe { … }` / `#Unsafe fn`
 compile and emit L3101; whole-fn form requires an enclosing `#Unsafe` at call
 sites). Gated ops: deref `p.*`, raw-pointer-of `*x`,
-pointer math, transmute-class casts, FFI pointer crossings (outside the gate:
-E0208). Address-of is `mem.address_of(x)`. `mem.cast_ptr<T>(p)` is the cast
-primitive (D-CASTPTR1); no compact pointer-chain syntax (D-POINTERCHAIN1).
+volatile `mem.volatile_read(p)` / `mem.volatile_write(p, value)`, pointer math,
+transmute-class casts, FFI pointer crossings (outside the gate: E0208).
+Address-of is `mem.address_of(x)`. `mem.cast_ptr<T>(p)` is the cast primitive
+(D-CASTPTR1); no compact pointer-chain syntax (D-POINTERCHAIN1).
 Generated `unsafe` appears only inside user-gated regions + vetted internals
 (I1). Onboarding never mentions any of it.
+
+**D-FLAGSHIP-MMIO1 — MMIO writes**: volatile writes use the Core helper
+`mem.volatile_write(ptr, value)`, paired with `mem.volatile_read(ptr)`. No
+pointer-assignment lvalue spelling is added.
 
 **D-UNINIT1 — Visible uninitialization**: skips zero-fill for a binding, gated
 behind `use core.mem` (E0424); sema proves write-before-read on all paths

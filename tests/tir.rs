@@ -2242,8 +2242,9 @@ fn run() {
 /// c109 Phase 18 / D-UNSAFE2: the expert low-level tier (S58, E2-M13/D-LL1). A
 /// `#Unsafe("reason") fn` lowers to a Rust `unsafe fn`; a `#Unsafe("reason") { … }`
 /// audited region lowers to `unsafe { … }` (the reason string emits nothing);
-/// `mem.Ptr<T>.from_addr(addr)`, `mem.address_of(x)`, and `mem.volatile_read(p)` lower
-/// to the raw-pointer ops. I1: every emitted `unsafe` is a gated form tied 1:1 to a source gate.
+/// `mem.Ptr<T>.from_addr(addr)`, `mem.address_of(x)`, and `mem.volatile_read(p)`
+/// lower to the raw-pointer ops. I1: every emitted `unsafe` is a gated form tied
+/// 1:1 to a source gate.
 #[test]
 fn unsafe_fn_block_and_ptr_ops() {
     if !have_rustc() {
@@ -2384,6 +2385,44 @@ cell: Int :: 1337
             );
         }
     }
+}
+
+#[test]
+fn volatile_write_emit_is_byte_exact() {
+    let src = "\
+use core.mem
+#Unsafe(\"UART TX register is mapped by the target profile\")
+fn write_reg(value: Int) {
+    p :: mem.Ptr<Int>.from_addr(0x40000100)
+    mem.volatile_write(p, value)
+}
+fn run() {
+}
+";
+    let dir = std::env::temp_dir().join(format!("jet_tir_volatile_write_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let jet_path = dir.join("volatile_write.jet");
+    fs::write(&jet_path, src).unwrap();
+    let shown = jet_path.to_string_lossy().into_owned();
+    let out = jet::compile_with_path(src, &shown).unwrap_or_else(|diags| {
+        panic!(
+            "front end rejected:\n{}",
+            jet::render_diagnostics(&shown, src, &diags)
+        )
+    });
+    assert!(
+        out.rust
+            .contains("let user_p: *mut i64 = ((1073742080i64) as usize as *mut i64);"),
+        "PtrFromAddr constant not byte-exact:\n{}",
+        out.rust
+    );
+    assert!(
+        out.rust
+            .contains("std::ptr::write_volatile(user_p, user_value);"),
+        "volatile_write not byte-exact:\n{}",
+        out.rust
+    );
+    let _ = fs::remove_dir_all(&dir);
 }
 
 // ---------------------------------------------------------------------------

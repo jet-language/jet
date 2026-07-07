@@ -4008,10 +4008,11 @@ pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
     // S58). NOT in `core_fixed_sig` (their types come from bespoke sema logic), but both
     // are deterministic and reproducible from total facts: `address_of(x) -> Int` is an
     // inert address cast (no `unsafe`); `volatile_read(p) -> ptr_elem(p)` reads through a
-    // typed pointer (the `read_volatile` is valid because it is only reachable inside an
+    // typed pointer, and `volatile_write(p, value) -> Unit` writes through one (the
+    // volatile ops are valid because they are only reachable inside an
     // `#Unsafe` region/fn — sema E3101 — already lowered to a Rust `unsafe` context). The
     // return type is resolved at lowering (see `lower_method_call`), so it is total.
-    if module == "core.mem" && matches!(method, "address_of" | "volatile_read") {
+    if module == "core.mem" && matches!(method, "address_of" | "volatile_read" | "volatile_write") {
         return true;
     }
     // c109 Phase 20: the polymorphic core specials (`math.abs/min/max/clamp`,

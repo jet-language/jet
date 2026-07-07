@@ -812,8 +812,8 @@ C/Zig-class control behind two explicit gates; ordinary Jet never reaches it and
 emits **zero** `unsafe` (the I1 amendment, D-LL1, recorded in `architecture.md`).
 
 - **Discovery gate** — `use core.mem;` unlocks the low-level vocabulary (`*T`,
-  `mem.volatile_read`, `mem.address_of`, allocators). Naming one of these without
-  the import → **E3102**.
+  `mem.volatile_read`, `mem.volatile_write`, `mem.address_of`, allocators).
+  Naming one of these without the import → **E3102**.
 - **Audit gate** — `#Unsafe("reason") { … }` opens the operations that can
   violate memory safety (pointer build/deref, volatile access). The reason
   string is the argument to `#Unsafe` itself (D-UNSAFE2; the former separate
@@ -824,7 +824,9 @@ emits **zero** `unsafe` (the I1 amendment, D-LL1, recorded in `architecture.md`)
   **E3103**.
 - **Operations** — prefix `*x` takes a raw pointer to `x`; postfix `p.*`
   dereferences it. `mem.address_of(x)` is inert (a plain address as `Int`) and
-  legal outside a gate. Using a low-level op outside `#Unsafe` → **E3101**.
+  legal outside a gate. `mem.volatile_read(p)` and
+  `mem.volatile_write(p, value)` perform explicit volatile/MMIO access through a
+  typed pointer. Using a low-level op outside `#Unsafe` → **E3101**.
 
 Codegen stays dumb (I3): an `#Unsafe { … }` region lowers straight to a Rust
 `unsafe { … }`, an `#Unsafe fn` to a Rust `unsafe fn`. All gating is decided in

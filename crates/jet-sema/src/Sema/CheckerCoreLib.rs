@@ -743,6 +743,36 @@ impl<'a> Checker<'a> {
                     }
                 };
             }
+            ("core.mem", "volatile_write") => {
+                if !self.in_unsafe {
+                    self.diags.push(e3101(Syntax::MEM_VOLATILE_WRITE, span));
+                }
+                if args.len() != 2 {
+                    self.diags.push(wrong_core_arity(name, 2, args.len(), span));
+                    return None;
+                }
+                let ptr_arg = args.get_mut(0)?;
+                let ptr_ty = self.infer(&mut ptr_arg.expr)?;
+                let Some(elem) = ptr_elem(&ptr_ty) else {
+                    self.diags.push(Diagnostic::error(
+                        "E0112",
+                        format!(
+                            "`{}` needs a `Ptr<T>`, not {}",
+                            Syntax::MEM_VOLATILE_WRITE,
+                            ptr_ty.show()
+                        ),
+                        "a volatile write writes through a typed pointer".to_string(),
+                        "build a pointer first with `mem.Ptr<T>.from_addr(addr)`".to_string(),
+                        Some(ptr_arg.expr.span()),
+                    ));
+                    return None;
+                };
+                let value_arg = args.get_mut(1)?;
+                if let Some(value_ty) = self.infer(&mut value_arg.expr) {
+                    self.check_type_assignable(&elem, &value_ty, value_arg.expr.span());
+                }
+                return Some(unit_ty());
+            }
             ("core.mem", "address_of") => {
                 if args.len() != 1 {
                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
@@ -4737,6 +4767,7 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
             "Ptr",
             "from_addr",
             "volatile_read",
+            "volatile_write",
             "address_of",
             "Arena",
             "Bump",

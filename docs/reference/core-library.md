@@ -1163,6 +1163,10 @@ fn run() {
 }
 ```
 
+Raw pointer and MMIO helpers also live in `core.mem`. `mem.address_of(x)` returns
+an inert address as `Int`; `mem.Ptr<T>.from_addr(addr)`, `mem.volatile_read(p)`,
+and `mem.volatile_write(p, value)` require an audited `#Unsafe("reason")` region.
+
 `arena.alloc(value)` hands back a **view** into the arena's storage, not an owned
 copy. A view is fast and zero-copy, but it lives only inside its **region** — the
 scope of the `arena` binding — and only until the arena is `reset`/`free`d. The
