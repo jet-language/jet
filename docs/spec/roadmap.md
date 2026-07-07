@@ -178,9 +178,32 @@ importers, hangar/cache, signing, build-from-source, and no-Nix behavior.
 proof-before-switch, generations, installable images, source-backed Studio, and
 the Blueprint-class visual editor. The first runtime slice is active: `jet os`
 checks/builds/switches hosts from `system.<host>` declarations, records named
-generations, rolls back, scaffolds configs, and emits installer/activation
-proof artifacts. Deeper VM proof, real installer media, and fleet rollout stay
-future Epoch 7 work.
+generations, rolls back, scaffolds configs, and emits activation proof plus
+hybrid-ISO installer media/proof artifacts. VM proof now distinguishes
+harness-ready from guest-passed, runs the QEMU create/install/reboot phases,
+boots the hybrid ISO installer through Limine, direct-boots the exact generation
+kernel/initrd for the verifier phase, uses `rdinit` to enter the JetOS
+installer/verify overlay scripts, captures the installed guest's serial proof
+marker, and only accepts a
+guest proof bound to the same host, generation, disk, media proof, tool hashes,
+and guest assertions, including terminal-login readiness through serial/virtual
+getty units, `/etc/profile`, `/etc/shells`, and projected user homes. The
+interactive `jet os vm run <host> --disk <path>` path launches only a disk
+already tied to the latest generation by the same passing VM proof, with the
+terminal console attached to the current process. The
+`cachyos-kernel` package can now build missing boot
+artifacts from its recorded `source/recipe.jet` via package-internal
+`source/build.sh`; that builder is authoritative when present, so stale
+pre-dropped boot files do not bypass the source-built path. The installer and VM
+runner boot the artifacts produced by the selected first-party package, and the
+installer ISO dereferences generation symlinks into a self-contained guest
+payload before real-QEMU install/reboot proof runs. Each generation installs the first-party jetos
+Studio app projection into the system profile with a browser fallback over the
+same local protocol; `jetos studio --headless` exposes the installed app path for
+review flows. The dev-shell smoke path can inject the local CachyOS
+kernel/initrd/modules into the first-party `cachyos-kernel` builder, producing a
+real-QEMU VM proof while production package recipes continue to harden. Fleet
+rollout stays future Epoch 7 work.
 
 ### Epoch 1 tail
 

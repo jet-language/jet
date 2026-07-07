@@ -1979,6 +1979,10 @@ pub enum THandleOp {
     ReactiveGet,
     /// D-REACT1=B: `Signal.set(v)` → `(recv).set(<arg0>)` (writes + notifies).
     ReactiveSet,
+    /// D-EVENT1=D: Event/Hook/Subscription/EventScope/EventTrace runtime methods.
+    EventMethod {
+        method: String,
+    },
     /// D-HONESTNUM1=A: `Measurement<Float>` arithmetic / accessors.
     /// `.add(m)/.sub(m)/.mul(m)/.div(m)` → `(recv).<method>(a0)` → `JetMeasurement<f64>`.
     /// `.value()/.uncertainty()` → `(recv).<method>()` → `f64`.
@@ -2641,7 +2645,7 @@ fn mk() {
         let variant = "enum Light { Red Green Yellow }\nfn pick() -> Light { return Light.Red }\nfn classify() -> Int {\n if pick() == {\n Red -> { return 1 }\n Green -> { return 2 }\n else -> { return 0 }\n }\n}\n";
         assert!(covers(variant, "classify"));
         // A field-access subject with a payload-binding (optional) arm:
-        let payload = "struct Holder { val: Int? }\nfn f(h: Holder) -> Int {\n if h.val == {\n value(c) -> { return c }\n else -> { return 0 }\n }\n}\n";
+        let payload = "struct Holder { val: Int? }\nfn f(h: Holder) -> Int {\n if h.val == {\n Val(c) -> { return c }\n else -> { return 0 }\n }\n}\n";
         assert!(covers(payload, "f"));
     }
 
@@ -2762,11 +2766,11 @@ fn mk() {
 
     #[test]
     fn covers_optional_binding_if_condition() {
-        // c109 Phase 22: `if x == value(b) { … b … }` lowers to `if let Some(b) = …`.
-        let src = "fn f(x: Int?) {\n if x == value(n) {\n print(\"{n}\")\n }\n}\n";
+        // c109 Phase 22: `if x == Val(b) { … b … }` lowers to `if let Some(b) = …`.
+        let src = "fn f(x: Int?) {\n if x == Val(n) {\n print(\"{n}\")\n }\n}\n";
         assert!(covers(src, "f"));
-        // `x == null` lowers to `.is_none()`.
-        let isnone = "fn f(x: Int?) {\n if x == null {\n print(\"none\")\n }\n}\n";
+        // `x == None` lowers to `.is_none()`.
+        let isnone = "fn f(x: Int?) {\n if x == None {\n print(\"none\")\n }\n}\n";
         assert!(covers(isnone, "f"));
     }
 
@@ -2994,9 +2998,9 @@ fn mk() {
 
     #[test]
     fn covers_optional_return_and_chaining() {
-        // A `T?` return with `value`/`null`, plus `?.` chaining over a covered struct.
+        // A `T?` return with `Val`/`None`, plus `?.` chaining over a covered struct.
         // (Multi-letter struct name; a single uppercase letter reads as a type var.)
-        let src = "struct Addr {\n city: String\n}\nfn opt(x: Int) -> (Int?) {\n if x > 0 {\n return value(x)\n }\n return null\n}\nfn ch(a: (Addr?)) -> (String?) {\n return a?.city\n}\n";
+        let src = "struct Addr {\n city: String\n}\nfn opt(x: Int) -> (Int?) {\n if x > 0 {\n return Val(x)\n }\n return None\n}\nfn ch(a: (Addr?)) -> (String?) {\n return a?.city\n}\n";
         assert!(covers(src, "opt"));
         assert!(covers(src, "ch"));
     }
@@ -3433,6 +3437,36 @@ fn greet() -> String { return input() }
     }
 
     #[test]
+    fn event_method_names_and_core_calls() {
+        // D-EVENT1=D: typed Event/Hook family lowers through the event handle
+        // method shape plus generic core-call constructors.
+        assert!(is_event_handle_type(Some("Event")));
+        assert!(is_event_handle_type(Some("Hook")));
+        assert!(is_event_handle_type(Some("Subscription")));
+        assert!(is_event_handle_type(Some("EventScope")));
+        assert!(is_event_handle_type(Some("EventTrace")));
+        assert!(!is_event_handle_type(Some("Signal")));
+        assert!(is_event_method_name("on", 2));
+        assert!(is_event_method_name("once", 2));
+        assert!(is_event_method_name("on_priority", 3));
+        assert!(is_event_method_name("emit", 1));
+        assert!(is_event_method_name("emit_async", 1));
+        assert!(is_event_method_name("run", 2));
+        assert!(is_event_method_name("unsubscribe", 0));
+        assert!(is_event_method_name("active_count", 0));
+        assert!(is_event_method_name("summary", 0));
+        assert!(!is_event_method_name("on", 1));
+        assert!(!is_event_method_name("emit", 0));
+        assert!(core_call_covered("core.event", "new"));
+        assert!(core_call_covered("core.event", "with_policy"));
+        assert!(core_call_covered("core.event", "hook"));
+        assert!(core_call_covered("core.event", "scope"));
+        assert!(core_call_covered("core.event", "policy_sync"));
+        assert!(core_call_covered("core.event", "policy_async"));
+        assert!(!core_call_covered("core.event", "subscribe"));
+    }
+
+    #[test]
     fn concurrency_value_types_covered() {
         // c109 Phase 21 / D-TUPLE-DESTRUCT1: `Task<T>`/`Receiver<T>`/`Sender<T>` are
         // covered value types; the `Closed` err type is a covered fallible payload
@@ -3746,7 +3780,7 @@ struct PR {
     note: String?
 }
 fn mk(p: String) -> PR {
-    return PR.{file_path: p, note: null}
+    return PR.{file_path: p, note: None}
 }
 ";
         assert!(covers(src, "mk"));
@@ -3812,10 +3846,10 @@ fn nope(x: U8) {
         // c109 Phase 30: a generic fn with a `T?` return whose payload is a type var
         // (`largest<T: Comparable>() -> (T?)`). Before Phase 30 the `T?` payload was
         // excluded (`fallible_payload_covered` admitted no type var) — now it routes.
-        // Body is a structural `value(x)` (a type-var payload `Some(user_x)`).
+        // Body is a structural `Val(x)` (a type-var payload `Some(user_x)`).
         let src = "\
 fn opt_id<T: Comparable>(x: T) -> (T?) {
-    return value(x)
+    return Val(x)
 }
 ";
         assert!(covers(src, "opt_id"));
@@ -3830,7 +3864,7 @@ trait Shape {
     fn area(self) -> Float
 }
 fn maybe_shape(s: Shape) -> (Shape?) {
-    return value(s)
+    return Val(s)
 }
 ";
         assert!(!covers(src, "maybe_shape"));
@@ -3884,7 +3918,7 @@ fn bad(s: Nonexistent) {
     fn covers_recursive_struct_construction() {
         // c109 (recursive struct): constructing a self-referential (boxed) struct is
         // covered — `struct_lit_constructible` admits the boxed edge and lowering wraps the
-        // field value `Box::new(…)`. A fn building a nested `Tree { value, child: value(…) }`
+        // field value `Box::new(…)`. A fn building a nested `Tree { value, child: Val(…) }`
         // routes. (The boxed-field READ is also covered now — see covers_recursive_struct_boxed_field_read.)
         let src = "\
 struct Tree {
@@ -3892,7 +3926,7 @@ struct Tree {
     child: Tree?
 }
 fn build() {
-    root :: Tree.{ value: 1, child: value(Tree.{ value: 2, child: null }) }
+    root :: Tree.{ value: 1, child: Val(Tree.{ value: 2, child: None }) }
     print(root.value)
 }
 ";
@@ -3913,10 +3947,10 @@ struct Tree {
 fn first_child(t: Tree) -> Int {
     kid: Tree? :: t.child
     if kid == {
-        value(c) -> {
+        Val(c) -> {
             return c.value
         }
-        null -> {
+        None -> {
             return 0
         }
     }
@@ -4045,7 +4079,7 @@ fn run() {
         let src = "\
 enum Wrapper {
     Some(Int)
-    None
+    Empty
 }
 fn run() {
     w :: Wrapper.Some(42)

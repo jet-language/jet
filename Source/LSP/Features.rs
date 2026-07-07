@@ -459,8 +459,6 @@ pub(crate) fn is_foreign_semantic_word(name: &str) -> bool {
     matches!(
         name,
         crate::Syntax::FOREIGN_PRIVATE
-            | crate::Syntax::FOREIGN_VAL
-            | crate::Syntax::FOREIGN_VAR
             | crate::Syntax::FOREIGN_UNSAFE
             | crate::Syntax::FOREIGN_AND
             | crate::Syntax::FOREIGN_OR
@@ -468,8 +466,6 @@ pub(crate) fn is_foreign_semantic_word(name: &str) -> bool {
             | crate::Syntax::FOREIGN_WHILE
             | crate::Syntax::FOREIGN_FOR
             | crate::Syntax::FOREIGN_TRY
-            | crate::Syntax::FOREIGN_LET
-            | crate::Syntax::FOREIGN_SET
             | crate::Syntax::FOREIGN_FUNC
             | crate::Syntax::FOREIGN_DEF
             | crate::Syntax::FOREIGN_IMPORT

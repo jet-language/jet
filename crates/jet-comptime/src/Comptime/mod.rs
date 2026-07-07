@@ -479,7 +479,7 @@ pub fn run_repl_step(
     interp.exec_block(head, scope)?;
     // Determine if the last statement should produce an echo value.
     // Case 1: `Stmt::Val` named `__repl_echo__` — the sentinel that `classify`
-    //   injects for bare-expression inputs (e.g. `1 + 2` → `val __repl_echo__ = 1 + 2`).
+    //   injects for bare-expression inputs (e.g. `1 + 2` → `__repl_echo__ :: 1 + 2`).
     //   Evaluate but don't add to the persistent scope.
     // Case 2: bare `Stmt::Expr` — retained for forward-compat.
     let echo_bare = !suppress && matches!(last, crate::AST::Stmt::Expr(_));

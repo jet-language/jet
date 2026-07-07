@@ -729,20 +729,16 @@ fn lsp_teaching_autocorrect_let_to_val() {
 
     let diag_msg = read_msg(&mut stdout);
     assert!(
-        diag_msg.contains("E0009"),
-        "expected E0009 diagnostic, got: {}",
-        diag_msg
-    );
-    assert!(
         diag_msg.contains("publishDiagnostics"),
         "expected publishDiagnostics, got: {}",
         diag_msg
     );
+    assert!(
+        !diag_msg.contains("E0009") && !diag_msg.contains("E0985"),
+        "old binding words must not produce migration diagnostics, got: {}",
+        diag_msg
+    );
 
-    // D-BIND1: `let x = 1` migrates to `x :: 1`, which moves tokens — it is no
-    // longer a single-keyword swap, so the E0009 teaching diagnostic carries no
-    // trivial quick-fix edit (the codeAction result is empty). `jet fmt`
-    // performs the migration.
     let action_req = format!(
         r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/codeAction","params":{{"textDocument":{{"uri":"{}"}},"range":{{"start":{{"line":1,"character":4}},"end":{{"line":1,"character":7}}}},"context":{{"diagnostics":[]}}}}}}"#,
         uri
@@ -756,7 +752,7 @@ fn lsp_teaching_autocorrect_let_to_val() {
     );
     assert!(
         actions.contains(r#""id":2"#) && actions.contains(r#""result":[]"#),
-        "expected an empty codeAction result for E0009 (no trivial edit), got: {}",
+        "expected an empty codeAction result for old binding syntax, got: {}",
         actions
     );
 
@@ -829,8 +825,8 @@ fn lsp_incremental_sync_range_edit_updates_document() {
     send_msg(&mut stdin, &req);
     let diag = read_msg(&mut stdout);
     assert!(
-        diag.contains("publishDiagnostics") && diag.contains("E0009"),
-        "expected range edit to trigger E0009 diagnostics, got: {}",
+        diag.contains("publishDiagnostics") && !diag.contains("E0009") && !diag.contains("E0985"),
+        "expected range edit to trigger ordinary diagnostics, got: {}",
         diag
     );
     let tokens = read_msg(&mut stdout);
@@ -995,15 +991,11 @@ fn lsp_c_style_snippet_autocorrects() {
 }
 
 fn run() {
-    let count = 1;
+    count :: 1
     println("hi");
 }
 "#;
     let diags = jet::check_document("snippet.jet", src);
-    assert!(
-        diags.iter().any(|d| d.code == "E0009"),
-        "let → binding sigil"
-    );
     assert!(diags.iter().any(|d| d.code == "E0037"), "println → print");
     assert!(diags.iter().any(|d| d.code == "E0008"), "def → fn");
 
@@ -1013,11 +1005,8 @@ fn run() {
     for edit in edits {
         fixed = jet::LSP::apply_edit(&fixed, &edit);
     }
-    // D-BIND1: E0009 (`let`) carries no token-swap edit — migrating to `count :: 1`
-    // moves tokens, so `jet fmt` handles it and the LSP leaves `let` in place.
-    assert!(fixed.contains("let count"));
     assert!(!fixed.contains("val count"));
-    // E0037 and E0008 are still single-token swaps and apply.
+    // E0037 and E0008 are single-token swaps and apply.
     assert!(fixed.contains("print("));
     assert!(!fixed.contains("println("));
     assert!(fixed.contains("fn greet"));
@@ -1401,7 +1390,7 @@ fn lsp_signature_help_returns_active_parameter() {
     if !jet.exists() {
         return;
     }
-    let source = "fn add(a: Int, b: Int) -> Int {\n    return a + b;\n}\nfn run() {\n    val r = add(1, 2);\n}\n";
+    let source = "fn add(a: Int, b: Int) -> Int {\n    return a + b;\n}\nfn run() {\n    r :: add(1, 2)\n}\n";
     let uri = "file:///tmp/lsp_signature_help_test.jet";
 
     run_transcript(
@@ -1423,7 +1412,7 @@ fn lsp_signature_help_returns_active_parameter() {
             },
             TranscriptStep::Send {
                 msg: format!(
-                    r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/signatureHelp","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":4,"character":18}}}}}}"#,
+                    r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/signatureHelp","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":4,"character":16}}}}}}"#,
                     uri
                 ),
                 expect_contains: Some(vec![
@@ -1750,7 +1739,7 @@ fn lsp_prepare_rename_rejects_foreign_symbol() {
     if !jet.exists() {
         return;
     }
-    let source = "fn val() {}\n";
+    let source = "fn func() {}\n";
     let uri = "file:///tmp/lsp_prepare_rename_foreign_test.jet";
 
     run_transcript(
@@ -1777,7 +1766,7 @@ fn lsp_prepare_rename_rejects_foreign_symbol() {
                 ),
                 expect_contains: Some(vec![
                     "\"error\"".to_string(),
-                    "`val` is a retired foreign spelling, not a Jet symbol you can rename"
+                    "`func` is a retired foreign spelling, not a Jet symbol you can rename"
                         .to_string(),
                 ]),
             },
@@ -1839,7 +1828,7 @@ fn lsp_hover_returns_signature() {
     if !jet.exists() {
         return;
     }
-    let source = "fn add(a: Int, b: Int) -> Int {\n    return a + b;\n}\nfn run() {\n    val r = add(1, 2);\n}\n";
+    let source = "fn add(a: Int, b: Int) -> Int {\n    return a + b;\n}\nfn run() {\n    r :: add(1, 2)\n}\n";
     let uri = "file:///tmp/lsp_hover_test.jet";
 
     run_transcript(
@@ -1962,7 +1951,7 @@ fn lsp_semantic_tokens_returns_data() {
     if !jet.exists() {
         return;
     }
-    let source = "fn run() {\n    val x: Int = 1;\n}\n";
+    let source = "fn run() {\n    x: Int :: 1\n}\n";
     let uri = "file:///tmp/lsp_semtok_test.jet";
 
     run_transcript(
@@ -2012,7 +2001,7 @@ fn lsp_semantic_tokens_classify_ownership_markers_and_skip_retired_words() {
 }
 @Pure fn clean(x: Int) -> Int { return x }
 fn run() {
-    val old = 1
+    old :: 1
     while true { break }
     mut borrowed
     take borrowed
@@ -2243,10 +2232,10 @@ fn c40_is_keyword_retired_words_not_keywords() {
     // they are FOREIGN_ teaching-error tokens. Rename must accept them as names.
     let diags = jet::check_document(
         "c40_retired.jet",
-        "fn run() {\n    val switch_count = 0;\n    val import_count = 1;\n}\n",
+        "fn run() {\n    switch_count :: 0\n    import_count :: 1\n}\n",
     );
-    // These should compile/parse (the names `switch_count` and `import_count` are
-    // legal identifiers; `val` itself triggers E0009 but that's fine here).
+    // These should compile/parse; the names `switch_count` and `import_count`
+    // are legal identifiers.
     // Key assertion: no diagnostic claiming "switch_count" / "import_count" is a keyword.
     assert!(
         !diags.iter().any(|d| {
@@ -2570,14 +2559,11 @@ fn c44_lsp_keywords_derive_from_syntax() {
     }
     // 2. FOREIGN_* teaching words must NOT be in the keyword list.
     let banned = [
-        Syntax::FOREIGN_VAL,
-        Syntax::FOREIGN_VAR,
         Syntax::FOREIGN_SWITCH,
         Syntax::FOREIGN_IMPORT,
         Syntax::FOREIGN_OR_FALLBACK,
         Syntax::FOREIGN_WHILE,
         Syntax::FOREIGN_FOR,
-        Syntax::FOREIGN_LET,
         Syntax::FOREIGN_MATCH,
         Syntax::FOREIGN_CLASS,
     ];

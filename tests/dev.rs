@@ -7,18 +7,26 @@
 //! the real build does. This mirrors `tests/comptime_diff.rs`.
 //!
 //! Also tested:
-//!   - the E2201 honest-boundary note (tasks/FFI/`@unsafe`/native std),
+//!   - the E2201 honest-boundary note (tasks/FFI/`#Unsafe`/native std),
 //!   - the per-iteration `dev_iteration` function the watch loop is built on,
 //!   - the save-to-diagnostic latency budget (D-DEV3, <200ms check-only).
 
 use std::fs;
 use std::path::PathBuf;
-use std::process::Command;
-use std::time::Instant;
+use std::process::{Command, Output, Stdio};
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use jet::Interpreter::{dev_iteration, RunOutcome};
 use jet::JitBackend::{InterpreterBackend, JitBackend};
 use jet_jit::CraneliftBackend;
+
+const DEV_DIFF_TIMEOUT: Duration = Duration::from_secs(30);
+
+fn dev_diff_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
 
 fn skip_if_cranelift_host_unsupported() -> bool {
     if jet_jit::cranelift_host_supported() {
@@ -109,20 +117,103 @@ fn compiled_binary_output(
     for arg in clinks {
         rustc_cmd.arg(arg);
     }
-    let out = rustc_cmd.output().unwrap();
+    let out = command_output_with_timeout(
+        rustc_cmd,
+        DEV_DIFF_TIMEOUT,
+        &format!("rustc build for `{stem}`"),
+    );
     if !out.status.success() {
         panic!(
-            "`{}` ran in dev but generated Rust failed to build:\n{}",
+            "`{}` ran in dev but generated Rust failed to build (status: {}):\nstdout:\n{}\nstderr:\n{}",
             stem,
+            out.status,
+            String::from_utf8_lossy(&out.stdout),
             String::from_utf8_lossy(&out.stderr)
         );
     }
-    let run = Command::new(&bin).output().unwrap();
+    let run_cmd = Command::new(&bin);
+    let run = command_output_with_timeout(
+        run_cmd,
+        DEV_DIFF_TIMEOUT,
+        &format!("compiled binary run for `{stem}`"),
+    );
     ProgramOutput::ran(
         String::from_utf8_lossy(&run.stdout).to_string(),
         String::from_utf8_lossy(&run.stderr).to_string(),
         run.status.code().unwrap_or(1),
     )
+}
+
+fn command_output_with_timeout(mut cmd: Command, timeout: Duration, label: &str) -> Output {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let base =
+        std::env::temp_dir().join(format!("jet_dev_timeout_{}_{}", std::process::id(), stamp));
+    let stdout_path = base.with_extension("stdout");
+    let stderr_path = base.with_extension("stderr");
+    let stdout_file = fs::File::create(&stdout_path)
+        .unwrap_or_else(|e| panic!("{label}: failed to create stdout temp file: {e}"));
+    let stderr_file = fs::File::create(&stderr_path)
+        .unwrap_or_else(|e| panic!("{label}: failed to create stderr temp file: {e}"));
+    let mut child = cmd
+        .stdout(Stdio::from(stdout_file))
+        .stderr(Stdio::from(stderr_file))
+        .spawn()
+        .unwrap_or_else(|e| panic!("{label}: failed to spawn: {e}"));
+    let start = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => {
+                let status = child
+                    .wait()
+                    .unwrap_or_else(|e| panic!("{label}: failed to collect status: {e}"));
+                let stdout = fs::read(&stdout_path).unwrap_or_default();
+                let stderr = fs::read(&stderr_path).unwrap_or_default();
+                let _ = fs::remove_file(&stdout_path);
+                let _ = fs::remove_file(&stderr_path);
+                return Output {
+                    status,
+                    stdout,
+                    stderr,
+                };
+            }
+            Ok(None) if start.elapsed() >= timeout => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let stdout = fs::read(&stdout_path).unwrap_or_default();
+                let stderr = fs::read(&stderr_path).unwrap_or_default();
+                let _ = fs::remove_file(&stdout_path);
+                let _ = fs::remove_file(&stderr_path);
+                panic!(
+                    "{label}: timed out after {:?}\nstdout:\n{}\nstderr:\n{}",
+                    timeout,
+                    String::from_utf8_lossy(&stdout),
+                    String::from_utf8_lossy(&stderr)
+                );
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(10)),
+            Err(e) => panic!("{label}: failed to poll child: {e}"),
+        }
+    }
+}
+
+fn dev_iteration_with_timeout(stem: &str, file: &str, use_interpreter: bool) -> RunOutcome {
+    let stem = stem.to_string();
+    let file = file.to_string();
+    let worker_file = file.clone();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let out = dev_iteration(&worker_file, false, use_interpreter);
+        let _ = tx.send(out);
+    });
+    rx.recv_timeout(DEV_DIFF_TIMEOUT).unwrap_or_else(|_| {
+        panic!(
+            "dev_iteration timed out after {:?} for `{}` ({}) with use_interpreter={}",
+            DEV_DIFF_TIMEOUT, stem, file, use_interpreter
+        )
+    })
 }
 
 /// All `.jet` files directly under a topic directory of `examples/features/`
@@ -373,12 +464,14 @@ const BOUNDARY_CODES: &[&str] = &[
 /// the coverage can't quietly shrink.
 #[test]
 fn interpreter_matches_compiled_binary() {
+    let _guard = dev_diff_lock().lock().unwrap();
     let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
     if !have_rustc {
         eprintln!("note: rustc not found; skipping jet dev differential battery");
         return;
     }
-    let dir = std::env::temp_dir();
+    let dir = std::env::temp_dir().join(format!("jet_dev_diff_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
     let (_, _, manifested_divergences) = parse_jit_gap_manifest();
     let mut ran = 0usize;
     let mut boundary = 0usize;
@@ -386,7 +479,7 @@ fn interpreter_matches_compiled_binary() {
     for (i, stem) in all_example_stems().iter().enumerate() {
         let file = example_path(stem);
 
-        let interpreted = match dev_iteration(&file, false, true) {
+        let interpreted = match dev_iteration_with_timeout(stem, &file, true) {
             RunOutcome::Ran {
                 stdout,
                 stderr,
@@ -453,20 +546,23 @@ fn interpreter_matches_compiled_binary() {
 /// had — a P0 regression, not a coverage gap.
 #[test]
 fn dev_default_matches_compiled_binary() {
+    let _guard = dev_diff_lock().lock().unwrap();
     let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
     if !have_rustc {
         eprintln!("note: rustc not found; skipping jet dev (default backend) differential battery");
         return;
     }
-    let dir = std::env::temp_dir();
+    let dir = std::env::temp_dir().join(format!("jet_dev_default_diff_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
     let (_, _, manifested_divergences) = parse_jit_gap_manifest();
     let mut ran = 0usize;
     let mut boundary = 0usize;
     let mut manifested = 0usize;
     for (i, stem) in all_example_stems().iter().enumerate() {
         let file = example_path(stem);
+        eprintln!("dev-default checking {stem}");
 
-        let interpreted = match dev_iteration(&file, false, false) {
+        let interpreted = match dev_iteration_with_timeout(stem, &file, false) {
             RunOutcome::Ran {
                 stdout,
                 stderr,
@@ -543,7 +639,7 @@ fn interpreter_matches_expected_golden() {
     for stem in all_example_stems() {
         let file = example_path(&stem);
         let expected_path = root.join(format!("examples/features/expected/{}.out", stem));
-        match dev_iteration(&file, false, true) {
+        match dev_iteration_with_timeout(&stem, &file, true) {
             RunOutcome::Ran { stdout, .. } => {
                 if let Some(expected) = host_expected_stdout(&stem) {
                     assert_eq!(

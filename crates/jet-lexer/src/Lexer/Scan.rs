@@ -160,9 +160,9 @@ impl<'a> Lexer<'a> {
                 '^' => toks.push(simple(self, TokKind::Caret, 1)),
                 // D-MEM1: `~` is retired (was the D-CAP7 write sigil; `&` now
                 // carries that meaning). Still lexed as `Tilde` so it fails as an
-                // ordinary syntax error, not a lexer panic. `~~` (S83 trait-attach)
-                // is lexed (longest-match before `~`) but not yet parsed; Phase 2
-                // wires it.
+                // ordinary syntax error, not a lexer panic. `~~` is longest-match
+                // lexed so the parser can emit the retired external-method connector
+                // diagnostic (E0325).
                 '~' if next == '~' => toks.push(simple(self, TokKind::TildeTilde, 2)),
                 '~' => toks.push(simple(self, TokKind::Tilde, 1)),
                 '&' if next == '&' => toks.push(simple(self, TokKind::AndAnd, 2)),

@@ -2345,6 +2345,24 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 // D-REACT1=B: reactive Signal/Derived reads and writes.
                 THandleOp::ReactiveGet => format!("({}).get()", recv),
                 THandleOp::ReactiveSet => format!("({}).set({})", recv, a(0)),
+                // D-EVENT1=D: first-party typed Event/Hook runtime family.
+                THandleOp::EventMethod { method } => match method.as_str() {
+                    "on" | "once" => format!("({}).{}(&({}), {})", recv, method, a(0), a(1)),
+                    "on_priority" => {
+                        format!("({}).on_priority(&({}), {}, {})", recv, a(0), a(1), a(2))
+                    }
+                    "emit" | "emit_async" | "cancel" | "unsubscribe" | "active" | "active_count"
+                    | "trace" | "listener_count" | "queued_count" | "summary" | "delivered"
+                    | "queued" | "dropped" => {
+                        if args.is_empty() {
+                            format!("({}).{}()", recv, method)
+                        } else {
+                            format!("({}).{}({})", recv, method, a(0))
+                        }
+                    }
+                    "run" => format!("({}).run({}, {})", recv, a(0), a(1)),
+                    _ => format!("({}).{}()", recv, method),
+                },
                 // D-HONESTNUM1=A: Measurement<Float> arithmetic + accessors.
                 THandleOp::MeasurementMethod { method } => {
                     if args.is_empty() {
@@ -2975,6 +2993,9 @@ pub(crate) fn emit_tir_core_call(
         let crate_name = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
         format!("{}::{}", crate_name, name)
     };
+    let normalized_module =
+        crate::Syntax::normalize_core_module(module).unwrap_or_else(|| module.to_string());
+    let module = normalized_module.as_str();
     match (module, method) {
         // c109 Phase 18 (S58, E2-M13): low-level pointer ops, byte-for-byte
         // `emit_core_call`. `address_of` is an inert address cast (no `unsafe`);
@@ -3018,6 +3039,54 @@ pub(crate) fn emit_tir_core_call(
         // D-REACT1=B: `reactive.signal(initial)` producer → a `JetSignal<T>`.
         ("jet.reactive", "signal") => {
             format!("{}jet_std::JetSignal::new({})", cx.root_prefix, arg(0))
+        }
+        // D-EVENT1=D: first-party typed Event/Hook constructors.
+        ("core.event", "scope") => format!("{}jet_std::JetEventScope::new()", cx.root_prefix),
+        ("core.event", "policy_sync") => {
+            format!("{}jet_std::JetEventPolicy::sync()", cx.root_prefix)
+        }
+        ("core.event", "policy_async") => {
+            format!(
+                "{}jet_std::JetEventPolicy::async_buffered({})",
+                cx.root_prefix,
+                arg(0)
+            )
+        }
+        ("core.event", "new") => {
+            let elem = match ret_ty {
+                Type::Apply { args, .. } => args.first().cloned().unwrap_or(Type::Int),
+                _ => Type::Int,
+            };
+            format!(
+                "{}jet_std::JetEvent::<{}>::new()",
+                cx.root_prefix,
+                cx.rust_type(&elem)
+            )
+        }
+        ("core.event", "with_policy") => {
+            let elem = match ret_ty {
+                Type::Apply { args, .. } => args.first().cloned().unwrap_or(Type::Int),
+                _ => Type::Int,
+            };
+            format!(
+                "{}jet_std::JetEvent::<{}>::with_policy({})",
+                cx.root_prefix,
+                cx.rust_type(&elem),
+                arg(0)
+            )
+        }
+        ("core.event", "hook") => {
+            let (payload, result) = match ret_ty {
+                Type::Apply { args, .. } if args.len() >= 2 => (args[0].clone(), args[1].clone()),
+                _ => (Type::Int, Type::Int),
+            };
+            format!(
+                "{}jet_std::JetHook::<{}, {}>::new({})",
+                cx.root_prefix,
+                cx.rust_type(&payload),
+                cx.rust_type(&result),
+                arg(0)
+            )
         }
         // D-HONESTNUM1=A: `M.from(value, uncertainty)` → a `JetMeasurement<f64>`.
         ("core.science.measurement", "from") => {
@@ -3698,9 +3767,8 @@ pub(crate) fn emit_tir_core_call(
         ("core.archive", "tar_names_json") => {
             format!("{}(&({}))", regex_fn("jet_archive_tar_names_json"), arg(0))
         }
-        // D-RAYLIB1=A: typed no-op bridge skeleton. `core.raylib` currently
-        // normalizes to the internal `jet.raylib` key.
-        ("core.raylib" | "jet.raylib", "window_open") => {
+        // D-RAYLIB1=A / D-FLAGSHIP-RAYLIB1=A: typed graphics bridge.
+        ("core.raylib", "window_open") => {
             format!(
                 "{}jet_raylib_window_open({}, {}, &({}))",
                 cx.root_prefix,
@@ -3709,24 +3777,24 @@ pub(crate) fn emit_tir_core_call(
                 arg(2)
             )
         }
-        ("core.raylib" | "jet.raylib", "window_should_close") => {
+        ("core.raylib", "window_should_close") => {
             format!(
                 "{}jet_raylib_window_should_close(&({}))",
                 cx.root_prefix,
                 arg(0)
             )
         }
-        ("core.raylib" | "jet.raylib", "begin_drawing") => {
+        ("core.raylib", "begin_drawing") => {
             format!("{}jet_raylib_begin_drawing(&({}))", cx.root_prefix, arg(0))
         }
-        ("core.raylib" | "jet.raylib", "clear_background") => {
+        ("core.raylib", "clear_background") => {
             format!(
                 "{}jet_raylib_clear_background(&({}))",
                 cx.root_prefix,
                 arg(0)
             )
         }
-        ("core.raylib" | "jet.raylib", "draw_text") => {
+        ("core.raylib", "draw_text") => {
             format!(
                 "{}jet_raylib_draw_text(&({}), {}, {}, {}, &({}))",
                 cx.root_prefix,
@@ -3737,13 +3805,13 @@ pub(crate) fn emit_tir_core_call(
                 arg(4)
             )
         }
-        ("core.raylib" | "jet.raylib", "end_drawing") => {
+        ("core.raylib", "end_drawing") => {
             format!("{}jet_raylib_end_drawing()", cx.root_prefix)
         }
-        ("core.raylib" | "jet.raylib", "close_window") => {
+        ("core.raylib", "close_window") => {
             format!("{}jet_raylib_close_window(&({}))", cx.root_prefix, arg(0))
         }
-        ("core.raylib" | "jet.raylib", "color") => {
+        ("core.raylib", "color") => {
             format!(
                 "{}jet_raylib_color({}, {}, {}, {})",
                 cx.root_prefix,

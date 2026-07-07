@@ -1663,6 +1663,296 @@ mod jet_std {
         jet_reactive_effect(body);
     }
 
+    // D-EVENT1: first-party typed Event/Hook family. Values are ordinary Core
+    // handles; the compiler knows their generic payload/result types.
+    use std::cell::Cell;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static JET_EVENT_NEXT_ID: AtomicU64 = AtomicU64::new(1);
+
+    #[derive(Clone)]
+    pub struct JetEventPolicy {
+        async_buffer: Option<usize>,
+    }
+
+    impl JetEventPolicy {
+        pub fn sync() -> Self { JetEventPolicy { async_buffer: None } }
+        pub fn async_buffered(buffer: i64) -> Self {
+            JetEventPolicy { async_buffer: Some(buffer.max(0) as usize) }
+        }
+    }
+
+    #[derive(Clone)]
+    pub struct JetEventTrace {
+        delivered: i64,
+        queued: i64,
+        dropped: i64,
+        summary: String,
+    }
+
+    impl JetEventTrace {
+        pub fn delivered(&self) -> i64 { self.delivered }
+        pub fn queued(&self) -> i64 { self.queued }
+        pub fn dropped(&self) -> i64 { self.dropped }
+        pub fn summary(&self) -> String { self.summary.clone() }
+    }
+
+    #[derive(Clone)]
+    pub struct JetSubscription {
+        active: Rc<Cell<bool>>,
+    }
+
+    impl JetSubscription {
+        fn new() -> Self { JetSubscription { active: Rc::new(Cell::new(true)) } }
+        pub fn unsubscribe(&self) { self.active.set(false); }
+        pub fn active(&self) -> bool { self.active.get() }
+    }
+
+    #[derive(Clone)]
+    pub struct JetEventScope {
+        subs: Rc<RefCell<Vec<JetSubscription>>>,
+    }
+
+    impl JetEventScope {
+        pub fn new() -> Self { JetEventScope { subs: Rc::new(RefCell::new(Vec::new())) } }
+        pub fn track(&self, sub: JetSubscription) -> JetSubscription {
+            self.subs.borrow_mut().push(sub.clone());
+            sub
+        }
+        pub fn cancel(&self) {
+            for sub in self.subs.borrow().iter() {
+                sub.unsubscribe();
+            }
+        }
+        pub fn active_count(&self) -> i64 {
+            self.subs.borrow().iter().filter(|s| s.active()).count() as i64
+        }
+    }
+
+    impl Drop for JetEventScope {
+        fn drop(&mut self) {
+            if Rc::strong_count(&self.subs) == 1 {
+                self.cancel();
+            }
+        }
+    }
+
+    struct JetListener<T> {
+        id: u64,
+        priority: i64,
+        once: bool,
+        sub: JetSubscription,
+        handler: Rc<dyn Fn(T)>,
+    }
+
+    pub struct JetEvent<T: Clone + 'static> {
+        policy: JetEventPolicy,
+        listeners: Rc<RefCell<Vec<JetListener<T>>>>,
+        queue: Rc<RefCell<Vec<T>>>,
+        dropped: Rc<Cell<i64>>,
+    }
+
+    impl<T: Clone + 'static> Clone for JetEvent<T> {
+        fn clone(&self) -> Self {
+            JetEvent {
+                policy: self.policy.clone(),
+                listeners: self.listeners.clone(),
+                queue: self.queue.clone(),
+                dropped: self.dropped.clone(),
+            }
+        }
+    }
+
+    impl<T: Clone + 'static> JetEvent<T> {
+        pub fn new() -> Self { Self::with_policy(JetEventPolicy::sync()) }
+        pub fn with_policy(policy: JetEventPolicy) -> Self {
+            JetEvent {
+                policy,
+                listeners: Rc::new(RefCell::new(Vec::new())),
+                queue: Rc::new(RefCell::new(Vec::new())),
+                dropped: Rc::new(Cell::new(0)),
+            }
+        }
+        pub fn on<F: Fn(T) + 'static>(&self, scope: &JetEventScope, handler: F) -> JetSubscription {
+            self.on_priority(scope, 0, handler)
+        }
+        pub fn once<F: Fn(T) + 'static>(&self, scope: &JetEventScope, handler: F) -> JetSubscription {
+            self.add(scope, 0, true, handler)
+        }
+        pub fn on_priority<F: Fn(T) + 'static>(
+            &self,
+            scope: &JetEventScope,
+            priority: i64,
+            handler: F,
+        ) -> JetSubscription {
+            self.add(scope, priority, false, handler)
+        }
+        fn add<F: Fn(T) + 'static>(
+            &self,
+            scope: &JetEventScope,
+            priority: i64,
+            once: bool,
+            handler: F,
+        ) -> JetSubscription {
+            let sub = JetSubscription::new();
+            self.listeners.borrow_mut().push(JetListener {
+                id: JET_EVENT_NEXT_ID.fetch_add(1, Ordering::Relaxed),
+                priority,
+                once,
+                sub: sub.clone(),
+                handler: Rc::new(handler),
+            });
+            scope.track(sub)
+        }
+        pub fn emit(&self, payload: T) -> JetEventTrace { self.dispatch(payload, false) }
+        pub fn emit_async(&self, payload: T) -> JetEventTrace { self.dispatch(payload, true) }
+        fn dispatch(&self, payload: T, queued: bool) -> JetEventTrace {
+            let mut queued_count = 0;
+            if queued || self.policy.async_buffer.is_some() {
+                queued_count = 1;
+                if let Some(limit) = self.policy.async_buffer {
+                    let mut q = self.queue.borrow_mut();
+                    if limit == 0 {
+                        self.dropped.set(self.dropped.get() + 1);
+                    } else {
+                        if q.len() >= limit {
+                            q.remove(0);
+                            self.dropped.set(self.dropped.get() + 1);
+                        }
+                        q.push(payload.clone());
+                    }
+                    q.clear();
+                }
+            }
+            let mut entries: Vec<(i64, u64, bool, JetSubscription, Rc<dyn Fn(T)>)> = self
+                .listeners
+                .borrow()
+                .iter()
+                .filter(|l| l.sub.active())
+                .map(|l| (l.priority, l.id, l.once, l.sub.clone(), l.handler.clone()))
+                .collect();
+            entries.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+            let mut delivered = 0;
+            for (_, _, once, sub, handler) in entries {
+                if sub.active() {
+                    handler(payload.clone());
+                    delivered += 1;
+                    if once {
+                        sub.unsubscribe();
+                    }
+                }
+            }
+            self.listeners.borrow_mut().retain(|l| l.sub.active());
+            JetEventTrace {
+                delivered,
+                queued: queued_count,
+                dropped: self.dropped.get(),
+                summary: format!("event delivered={delivered} queued={queued_count} dropped={}", self.dropped.get()),
+            }
+        }
+        pub fn listener_count(&self) -> i64 {
+            self.listeners.borrow().iter().filter(|l| l.sub.active()).count() as i64
+        }
+        pub fn queued_count(&self) -> i64 { self.queue.borrow().len() as i64 }
+        pub fn trace(&self) -> String {
+            format!(
+                "listeners={} queued={} dropped={}",
+                self.listener_count(),
+                self.queued_count(),
+                self.dropped.get()
+            )
+        }
+    }
+
+    struct JetHookListener<T, R> {
+        id: u64,
+        priority: i64,
+        once: bool,
+        sub: JetSubscription,
+        handler: Rc<dyn Fn(T) -> R>,
+    }
+
+    pub struct JetHook<T: Clone + 'static, R: Clone + 'static> {
+        fallback: R,
+        listeners: Rc<RefCell<Vec<JetHookListener<T, R>>>>,
+    }
+
+    impl<T: Clone + 'static, R: Clone + 'static> Clone for JetHook<T, R> {
+        fn clone(&self) -> Self {
+            JetHook { fallback: self.fallback.clone(), listeners: self.listeners.clone() }
+        }
+    }
+
+    impl<T: Clone + 'static, R: Clone + 'static> JetHook<T, R> {
+        pub fn new(fallback: R) -> Self {
+            JetHook { fallback, listeners: Rc::new(RefCell::new(Vec::new())) }
+        }
+        pub fn on<F: Fn(T) -> R + 'static>(
+            &self,
+            scope: &JetEventScope,
+            handler: F,
+        ) -> JetSubscription {
+            self.on_priority(scope, 0, handler)
+        }
+        pub fn once<F: Fn(T) -> R + 'static>(
+            &self,
+            scope: &JetEventScope,
+            handler: F,
+        ) -> JetSubscription {
+            self.add(scope, 0, true, handler)
+        }
+        pub fn on_priority<F: Fn(T) -> R + 'static>(
+            &self,
+            scope: &JetEventScope,
+            priority: i64,
+            handler: F,
+        ) -> JetSubscription {
+            self.add(scope, priority, false, handler)
+        }
+        fn add<F: Fn(T) -> R + 'static>(
+            &self,
+            scope: &JetEventScope,
+            priority: i64,
+            once: bool,
+            handler: F,
+        ) -> JetSubscription {
+            let sub = JetSubscription::new();
+            self.listeners.borrow_mut().push(JetHookListener {
+                id: JET_EVENT_NEXT_ID.fetch_add(1, Ordering::Relaxed),
+                priority,
+                once,
+                sub: sub.clone(),
+                handler: Rc::new(handler),
+            });
+            scope.track(sub)
+        }
+        pub fn run(&self, payload: T, fallback: R) -> R {
+            let mut entries: Vec<(i64, u64, bool, JetSubscription, Rc<dyn Fn(T) -> R>)> = self
+                .listeners
+                .borrow()
+                .iter()
+                .filter(|l| l.sub.active())
+                .map(|l| (l.priority, l.id, l.once, l.sub.clone(), l.handler.clone()))
+                .collect();
+            entries.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+            let mut result = if entries.is_empty() { fallback } else { self.fallback.clone() };
+            for (_, _, once, sub, handler) in entries {
+                if sub.active() {
+                    result = handler(payload.clone());
+                    if once {
+                        sub.unsubscribe();
+                    }
+                }
+            }
+            self.listeners.borrow_mut().retain(|l| l.sub.active());
+            result
+        }
+        pub fn listener_count(&self) -> i64 {
+            self.listeners.borrow().iter().filter(|l| l.sub.active()).count() as i64
+        }
+        pub fn trace(&self) -> String { format!("hook listeners={}", self.listener_count()) }
+    }
+
     impl super::JetShow for Closed {
         fn jet_show(&self) -> String { "Closed".to_string() }
     }

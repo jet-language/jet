@@ -77,12 +77,14 @@
           '';
         jetDev = mkJetDevBin "jet";
         jetpackDev = mkJetDevBin "jetpack";
+        jetosDev = mkJetDevBin "jetos";
       in
       {
         packages = {
           default = jet;
           inherit jet;
           jetpack = jet;
+          jetos = jet;
         };
 
         apps.default = {
@@ -93,6 +95,10 @@
           type = "app";
           program = "${jet}/bin/jetpack";
         };
+        apps.jetos = {
+          type = "app";
+          program = "${jet}/bin/jetos";
+        };
 
         devShells.default = pkgs.mkShell {
           packages = with pkgs; [
@@ -101,6 +107,9 @@
             gcc
             lld
             qemu
+            xorriso
+            limine
+            e2fsprogs
             nodejs_22
             nixfmt
             ripgrep
@@ -113,8 +122,10 @@
             tree-sitter
             emscripten
             lldb
+            OVMF.fd
             jetDev
             jetpackDev
+            jetosDev
             # D-UIDEVSHELL1=A (ratified 2026-07-03, c134 Phase 8): native Linux
             # UI backend links libgtk-4 via the S59 C-FFI path (`use c.gtk4` →
             # `pkg-config gtk4`). pkg-config + gtk4 dev headers enter the dev
@@ -126,6 +137,7 @@
 
           shellHook = ''
             export JET_ROOT="$PWD"
+            export JETOS_OVMF_CODE="${pkgs.OVMF.fd}/FV/OVMF_CODE.fd"
 
             # banner on stderr: `nix develop -c <cmd>` stdout stays clean for
             # grepping/capture (agents misread results otherwise)

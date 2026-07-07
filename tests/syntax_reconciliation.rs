@@ -15,6 +15,19 @@ const ROOTS: &[&str] = &[
     "tests/ui",
 ];
 
+const OLD_BINDING_SCAN_ROOTS: &[&str] = &[
+    "crates/jet-foundation/src/Syntax.rs",
+    "crates/jet-parser/src/Parser",
+    "Source/FixEngine.rs",
+    "Source/LSP",
+    "docs/reference/syntax-surface.jet",
+    "editors/vscode/README.md",
+    "editors/zed/README.md",
+    "tests/cli",
+    "tests/lsp",
+    "tests/ui",
+];
+
 const FORBIDDEN: &[&str] = &[
     "@unsafe",
     "@audit",
@@ -53,6 +66,9 @@ const FORBIDDEN: &[&str] = &[
     "comptime val ",
 ];
 
+const OLD_BINDING_CODES: &[&str] = &["E0009", "E0010", "E0985"];
+const OLD_BINDING_WORDS: &[&str] = &["let", "val", "var", "set"];
+
 #[test]
 fn live_surface_has_no_retired_spellings() {
     let mut failures = Vec::new();
@@ -83,6 +99,179 @@ fn live_surface_has_no_retired_spellings() {
         "retired syntax found:\n{}",
         failures.join("\n")
     );
+}
+
+#[test]
+fn old_binding_migration_paths_stay_removed() {
+    let mut failures = Vec::new();
+    for root in OLD_BINDING_SCAN_ROOTS {
+        for path in files(Path::new(root)) {
+            if should_skip(&path) {
+                continue;
+            }
+            let Ok(text) = fs::read_to_string(&path) else {
+                continue;
+            };
+            scan_old_binding_codes(&path, &text, &mut failures);
+            scan_old_binding_examples(&path, &text, &mut failures);
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "old binding migration path found:\n{}",
+        failures.join("\n")
+    );
+}
+
+fn scan_old_binding_codes(path: &Path, text: &str, failures: &mut Vec<String>) {
+    for (idx, line) in text.lines().enumerate() {
+        for code in OLD_BINDING_CODES {
+            if line.contains(code) && !allowed_old_binding_reference(path, text, line) {
+                failures.push(format!(
+                    "{}:{} contains retired binding diagnostic `{}`",
+                    path.display(),
+                    idx + 1,
+                    code
+                ));
+            }
+        }
+    }
+}
+
+fn scan_old_binding_examples(path: &Path, text: &str, failures: &mut Vec<String>) {
+    if path.extension().and_then(|x| x.to_str()) == Some("rs") {
+        for (line, literal) in rust_string_literals(text) {
+            if literal_has_old_binding_example(&literal)
+                && !allowed_old_binding_reference(path, text, &literal)
+            {
+                failures.push(format!(
+                    "{}:{} contains retired binding spelling in a Rust string literal",
+                    path.display(),
+                    line
+                ));
+            }
+        }
+        return;
+    }
+
+    for (idx, line) in text.lines().enumerate() {
+        if line_has_old_binding_start(line) && !allowed_old_binding_reference(path, text, line) {
+            failures.push(format!(
+                "{}:{} contains retired binding spelling `{}`",
+                path.display(),
+                idx + 1,
+                line.trim()
+            ));
+        }
+    }
+}
+
+fn rust_string_literals(text: &str) -> Vec<(usize, String)> {
+    let bytes = text.as_bytes();
+    let mut out = Vec::new();
+    let mut i = 0;
+    let mut line = 1;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\n' => {
+                line += 1;
+                i += 1;
+            }
+            b'r' => {
+                let start_line = line;
+                let mut j = i + 1;
+                while j < bytes.len() && bytes[j] == b'#' {
+                    j += 1;
+                }
+                if j >= bytes.len() || bytes[j] != b'"' {
+                    i += 1;
+                    continue;
+                }
+                let hashes = j - (i + 1);
+                j += 1;
+                let content_start = j;
+                while j < bytes.len() {
+                    if bytes[j] == b'\n' {
+                        line += 1;
+                    }
+                    if bytes[j] == b'"' && bytes[j + 1..].starts_with(&vec![b'#'; hashes]) {
+                        let content = String::from_utf8_lossy(&bytes[content_start..j]).to_string();
+                        out.push((start_line, content));
+                        j += 1 + hashes;
+                        break;
+                    }
+                    j += 1;
+                }
+                i = j;
+            }
+            b'"' => {
+                if i > 0 && i + 1 < bytes.len() && bytes[i - 1] == b'\'' && bytes[i + 1] == b'\'' {
+                    i += 1;
+                    continue;
+                }
+                let start_line = line;
+                let mut j = i + 1;
+                let mut content = String::new();
+                while j < bytes.len() {
+                    match bytes[j] {
+                        b'\\' if j + 1 < bytes.len() => {
+                            let next = bytes[j + 1] as char;
+                            if next == 'n' {
+                                content.push('\n');
+                            } else {
+                                content.push(next);
+                            }
+                            j += 2;
+                        }
+                        b'"' => {
+                            j += 1;
+                            break;
+                        }
+                        b'\n' => {
+                            line += 1;
+                            content.push('\n');
+                            j += 1;
+                        }
+                        b => {
+                            content.push(b as char);
+                            j += 1;
+                        }
+                    }
+                }
+                out.push((start_line, content));
+                i = j;
+            }
+            _ => {
+                i += 1;
+            }
+        }
+    }
+    out
+}
+
+fn literal_has_old_binding_example(literal: &str) -> bool {
+    literal.lines().any(line_has_old_binding_start)
+}
+
+fn line_has_old_binding_start(line: &str) -> bool {
+    for segment in line.split(['{', ';']) {
+        let trimmed = segment.trim_start();
+        for word in OLD_BINDING_WORDS {
+            if let Some(rest) = trimmed.strip_prefix(word) {
+                if rest.starts_with(' ') || rest.starts_with('\t') {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+fn allowed_old_binding_reference(path: &Path, text: &str, line: &str) -> bool {
+    let s = path.to_string_lossy();
+    s.ends_with("Source/LSP/mod.rs")
+        && text.contains("fn old_binding_keyword_has_no_teaching_edit")
+        && (line.contains("let x = 1") || line.contains("E0009") || line.contains("E0985"))
 }
 
 fn files(path: &Path) -> Vec<PathBuf> {

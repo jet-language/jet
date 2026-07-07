@@ -10,8 +10,10 @@
 //! controls.
 
 use std::fs;
+use std::io;
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Output};
+use std::time::Duration;
 
 fn real_jet() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_jet"))
@@ -70,6 +72,21 @@ fn write_script(path: &PathBuf, body: &str) {
     fs::set_permissions(path, perm).unwrap();
 }
 
+fn output_with_retry(cmd: &mut Command) -> Output {
+    let mut last = None;
+    for attempt in 0..8 {
+        if attempt > 0 {
+            std::thread::sleep(Duration::from_millis(20 * attempt));
+        }
+        match cmd.output() {
+            Ok(out) => return out,
+            Err(e) if e.kind() == io::ErrorKind::ExecutableFileBusy => last = Some(e),
+            Err(e) => panic!("engine dispatch command failed: {e}"),
+        }
+    }
+    panic!("engine dispatch command stayed busy: {}", last.unwrap());
+}
+
 #[cfg(unix)]
 #[test]
 fn missing_engine_binary_is_e1228() {
@@ -77,11 +94,11 @@ fn missing_engine_binary_is_e1228() {
     let jet_bin = isolated_jet(&jet_dir);
     let empty_path_dir = Scratch::new("missing-path");
 
-    let out = Command::new(&jet_bin)
-        .arg("env")
-        .env("PATH", &empty_path_dir.path)
-        .output()
-        .unwrap();
+    let out = output_with_retry(
+        Command::new(&jet_bin)
+            .arg("env")
+            .env("PATH", &empty_path_dir.path),
+    );
 
     assert_eq!(out.status.code(), Some(1), "engine-missing is USER_ERROR");
     let stderr = String::from_utf8_lossy(&out.stderr);
@@ -110,11 +127,11 @@ fn version_skew_is_e1227() {
 exit 0"#,
     );
 
-    let out = Command::new(&jet_bin)
-        .arg("env")
-        .env("PATH", &path_dir.path)
-        .output()
-        .unwrap();
+    let out = output_with_retry(
+        Command::new(&jet_bin)
+            .arg("env")
+            .env("PATH", &path_dir.path),
+    );
 
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&out.stderr);
@@ -142,11 +159,11 @@ fn engine_too_old_for_handshake_is_e1227() {
         "echo \"jetpack: unknown flag $1\" >&2\nexit 2",
     );
 
-    let out = Command::new(&jet_bin)
-        .arg("env")
-        .env("PATH", &path_dir.path)
-        .output()
-        .unwrap();
+    let out = output_with_retry(
+        Command::new(&jet_bin)
+            .arg("env")
+            .env("PATH", &path_dir.path),
+    );
 
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&out.stderr);
@@ -172,11 +189,11 @@ exit 37"#
         ),
     );
 
-    let out = Command::new(&jet_bin)
-        .arg("env")
-        .env("PATH", &path_dir.path)
-        .output()
-        .unwrap();
+    let out = output_with_retry(
+        Command::new(&jet_bin)
+            .arg("env")
+            .env("PATH", &path_dir.path),
+    );
 
     assert_eq!(
         out.status.code(),
@@ -204,12 +221,12 @@ exit 0"#,
         ),
     );
 
-    let out = Command::new(&jet_bin)
-        .arg("env")
-        .arg("--json")
-        .env("PATH", &path_dir.path)
-        .output()
-        .unwrap();
+    let out = output_with_retry(
+        Command::new(&jet_bin)
+            .arg("env")
+            .arg("--json")
+            .env("PATH", &path_dir.path),
+    );
 
     assert_eq!(out.status.code(), Some(0));
     let logged = fs::read_to_string(&log).unwrap_or_default();
@@ -223,7 +240,7 @@ exit 0"#,
 /// suggestion path (E2101) for a near-miss of a known command like `env`.
 #[test]
 fn typo_of_engine_verb_still_suggests_it() {
-    let out = Command::new(real_jet()).arg("envx").output().unwrap();
+    let out = output_with_retry(Command::new(real_jet()).arg("envx"));
     assert_eq!(out.status.code(), Some(2), "unknown command is USAGE");
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
@@ -242,12 +259,12 @@ fn typo_of_engine_verb_still_suggests_it() {
 /// reasons — the point is that dispatch gets past the handshake cleanly.
 #[test]
 fn real_engine_pair_passes_handshake() {
-    let out = Command::new(real_jet())
-        .arg("env")
-        .env("NO_COLOR", "1")
-        .stdin(std::process::Stdio::null())
-        .output()
-        .unwrap();
+    let out = output_with_retry(
+        Command::new(real_jet())
+            .arg("env")
+            .env("NO_COLOR", "1")
+            .stdin(std::process::Stdio::null()),
+    );
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
         !stderr.contains("E1227") && !stderr.contains("E1228"),

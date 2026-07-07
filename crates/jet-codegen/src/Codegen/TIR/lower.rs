@@ -5494,6 +5494,12 @@ pub(crate) fn lower_method_call(
                         // it onto the node's `resolved_ret`. Read it totally (I3); a unit
                         // fallback (eprint/shuffle return nothing) keeps the fact total.
                         resolved_ret.cloned().unwrap_or_else(unit_type)
+                    } else if module == "core.event"
+                        && matches!(method, "new" | "with_policy" | "hook")
+                    {
+                        resolved_ret
+                            .cloned()
+                            .unwrap_or_else(|| core_call_return_ty(&module, method))
                     } else {
                         core_call_return_ty(&module, method)
                     };
@@ -5684,6 +5690,73 @@ pub(crate) fn lower_method_call(
             kind: TExprKind::HandleMethod {
                 recv: Box::new(recv_t),
                 op,
+                args: targs,
+            },
+        };
+    }
+    // D-EVENT1=D: Event/Hook/Subscription/EventScope/EventTrace methods.
+    if is_event_handle_type(recv_type.as_deref()) && is_event_method_name(method, args.len()) {
+        let recv_t = lower_expr(receiver, cx, env);
+        let unit = unit_type();
+        let result_ty = match (recv_type.as_deref(), method) {
+            (Some("Event"), "emit" | "emit_async") => Type::Named("EventTrace".to_string()),
+            (Some("Event"), "on" | "once" | "on_priority")
+            | (Some("Hook"), "on" | "once" | "on_priority") => {
+                Type::Named("Subscription".to_string())
+            }
+            (Some("Hook"), "run") => match &recv_t.ty {
+                Type::Apply { args, .. } if args.len() >= 2 => args[1].clone(),
+                _ => Type::Named("Unknown".to_string()),
+            },
+            (_, "trace" | "summary") => Type::String,
+            (
+                _,
+                "listener_count" | "queued_count" | "active_count" | "delivered" | "queued"
+                | "dropped",
+            ) => Type::Int,
+            (_, "active") => Type::Bool,
+            _ => unit,
+        };
+        let expected_payload = match &recv_t.ty {
+            Type::Apply { args, .. } => args.first().cloned(),
+            _ => None,
+        };
+        let expected_hook_result = match &recv_t.ty {
+            Type::Apply { args, .. } if args.len() >= 2 => args.get(1).cloned(),
+            _ => None,
+        };
+        let targs: Vec<TExpr> = args
+            .iter()
+            .enumerate()
+            .map(|(i, a)| {
+                let handler_idx = matches!(
+                    (method, args.len(), i),
+                    ("on" | "once", 2, 1) | ("on_priority", 3, 2)
+                );
+                if handler_idx {
+                    if let Expr::Lambda(lam) = &a.expr {
+                        let params = expected_payload.clone().into_iter().collect::<Vec<_>>();
+                        let tl = lower_lambda_expecting(lam, cx, env, Some(params.as_slice()));
+                        return TExpr {
+                            ty: Type::Fn {
+                                params,
+                                ret: expected_hook_result.clone().map(Box::new),
+                                effect_bound: None,
+                            },
+                            kind: TExprKind::Lambda(Box::new(tl)),
+                        };
+                    }
+                }
+                lower_expr(&a.expr, cx, env)
+            })
+            .collect();
+        return TExpr {
+            ty: result_ty,
+            kind: TExprKind::HandleMethod {
+                recv: Box::new(recv_t),
+                op: THandleOp::EventMethod {
+                    method: method.to_string(),
+                },
                 args: targs,
             },
         };

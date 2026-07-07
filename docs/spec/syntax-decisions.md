@@ -65,7 +65,7 @@ backtracking/unification. Initial Core surface: `solve.Solver.new(seed)`,
 
 ### Bindings & assignment
 
-**S2 — Bindings** *(current law = D-BIND4; supersedes val/var keywords)*:
+**S2 — Bindings** *(current law = D-BIND4)*:
 
 ```jet
 name :: expr            // immutable binding
@@ -74,8 +74,6 @@ name: Type :: expr      // explicit-typed immutable
 name: Type := expr      // explicit-typed mutable
 name = expr             // reassignment of an existing := binding
 ```
-
-`val`/`var`/`let` are teaching errors; bindings use the sigils above.
 
 **S4 — Type annotations**: `name: Type` after the name, everywhere (bindings,
 params, fields). Never `Type name`.
@@ -1264,6 +1262,21 @@ scene input bindings with per-frame snapshots (`scene.input.bind`,
 renderer/audio/editor dependencies. Renderer, audio, editor, native asset I/O,
 and richer replay files remain replaceable-package layers over this substrate.
 
+**D-EVENT1 — First-party typed Event/Hook family** *(ratified 2026-07-07,
+card #286)*: Jet ships one event semantic family as ordinary Core values, not
+new event syntax. `core.event` exposes `Event<T>` for many-subscriber typed
+occurrences, `Hook<T, R>` for ordered intervention points, `Subscription` for
+explicit unsubscribe, `EventScope` for owned lifetime cleanup, `EventPolicy`
+for sync/queued dispatch policy, and `EventTrace` for delivered/queued/dropped
+debug facts. The compiler knows these types for checking, TIR lowering, docs,
+debugger/Canvas projection, and editor highlighting; source sugar remains
+reserved until examples prove the library spelling is too noisy. Default
+dispatch is synchronous and deterministic: priority first, then subscription
+order. `once` auto-unsubscribes, `scope.cancel()` drops all owned subscriptions,
+and `with_policy<T>(policy_async(n))` gives an explicit queued/backpressure
+entrypoint. Hooks combine by "last active handler result wins" in this first
+slice, with the call-site fallback used when no handler is active.
+
 **D-FILES-WRITE1 — `core.fs`/`core.files` merge** *(ratified/shipped
 2026-07-04, cv5syntaxdecrees)*: one `core.files` module for both whole-file
 convenience helpers (`read`/`read_bytes`/`write`/`append_all`/`exists`/
@@ -1334,13 +1347,15 @@ and `reset_fidelity()` (D-FIDELITY-API1=A). No automatic adaptive scheduler or
 platform-signal providers ship in Epoch 3 (D-ADAPTRT1=C,
 D-ADAPT-PROVIDER1=A).
 
-**Reactive & UI stack** *(D-REACT1, D-REACTCORE1, D-SIGNAL1, D-RENDERTGT1/2,
-D-UITREE1, D-STYLESHAPE1, D-MOTIONTIME1, D-LAYOUT1, D-OWNCOMP1, D-A11Y1,
-D-NATIVEUI1/2)*: reactivity is a library + explicit `#Reactive` scope marker
-(E2914) lowering onto `core.reactive` — `Signal<T>` (`.get()/.set(v)`),
-`Computed<T>`, `Effect`; explicit-by-read subscription; pure std runtime
-(E2910–E2913). Render backends implement measure/layout/paint (`JetBackend`;
-`NullBackend`/`TuiBackend` shipped). UI trees are typed dot-construction
+**Reactive, events & UI stack** *(D-REACT1, D-REACTCORE1, D-SIGNAL1, D-EVENT1,
+D-RENDERTGT1/2, D-UITREE1, D-STYLESHAPE1, D-MOTIONTIME1, D-LAYOUT1,
+D-OWNCOMP1, D-A11Y1, D-NATIVEUI1/2)*: reactivity is a library + explicit
+`#Reactive` scope marker (E2914) lowering onto `core.reactive` — `Signal<T>`
+(`.get()/.set(v)`), `Computed<T>`, `Effect`; explicit-by-read subscription;
+pure std runtime (E2910–E2913). Events and hooks are compiler-known Core values
+in `core.event`: `Event<T>`, `Hook<T, R>`, `Subscription`, `EventScope`,
+`EventPolicy`, and `EventTrace`. Render backends implement measure/layout/paint
+(`JetBackend`; `NullBackend`/`TuiBackend` shipped). UI trees are typed dot-construction
 (`.Button.{ label: "OK" }`); `Style` is one flat record; motion uses the
 injectable `Clock`; constraint layout is a `layout { }` block over
 `Constraint` handles with a first-party simplex solver (E2932–E2934).
@@ -1766,9 +1781,12 @@ push.
 
 ### jetos Runtime Slice
 
-**D-JPK-OSVERB1=A**: the public CLI is `jet os
-check|init|build|switch|rollback|generations|lift|image`. `jetpack` remains the
-engine process behind the dispatch seam; users type `jet os`, not `jetpack os`.
+**D-JPK-OSVERB1=A / D-JOS-PROOFAPI1=B**: the public CLI is `jet os
+check|init|plan|proof|build|switch|rollback|generations|lift|image`. `jet os
+plan` prints the canonical checked plan without building. `jet os proof` reads
+the latest generation's proof, provenance, health, boot, init, secrets, VM, and
+rollback artifacts. `jetpack` remains the engine process behind the dispatch
+seam; users type `jet os`, not `jetpack os`.
 
 **D-JPK-OSHOST1=C**: a bare host name discovers `system.<host>` in `./config.jet`;
 `path@host` selects an exact external root (directory roots load
@@ -1777,15 +1795,48 @@ engine process behind the dispatch seam; users type `jet os`, not `jetpack os`.
 **D-JPK-OSGEN1=C**: every build gets an automatic generation name; `jet os
 switch --name <name>` overrides it. `jet os generations` lists newest first.
 
-**D-JPK-OSNS1=B**: jetos option keys use full-word namespaces:
-`filesystem.*`, `network.*`, and `packages.*`.
+**D-JPK-OSNS1=B / D-JOS-SYSTEMTREE1=A**: jetos option keys use full-word
+namespaces: `filesystem.*`, `network.*`, `packages.*`, `services.*`,
+`users.*`, `groups.*`, `secrets.*`, `boot.*`, `kernel.*`, `init.*`, and
+`health.*`. The current generation projection covers package closure/cache
+facts, users/groups, filesystems and swap, network/firewall/wireless facts,
+systemd services/timers/sockets plus target wants, kernel firmware/driver
+facts, desktop display manager facts under `services.*`, secrets, health checks,
+and explicit audited compatibility escape hatches under `packages.*`
+(overlay/specialArgs/nixModule).
 
-**D-JPK-OSINIT1=A / D-JPK-OSSECRET1=A / D-JPK-OSBRAND1=A / D-JPK-OSDISK1=C /
-D-JPK-OSDISABLE1=C**: the active runtime slice generates systemd unit files in
-generations, records repo-ciphertext plus host-key tmpfs-only secret activation
-proof, brands installer artifacts as `jetos`, defaults guided disk setup to
-ext4 with a manual path override, and keeps discovery aligned with the existing
-module/import skip rules.
+**D-JOS-BOOTKERNEL1=A / D-JPK-OSINIT1=A / D-JPK-OSSECRET1=A /
+D-JPK-OSBRAND1=A / D-JPK-OSDISK1=C / D-JPK-OSDISABLE1=C**: the active runtime
+slice defaults to the Limine bootloader, CachyOS kernel, and systemd init,
+generates systemd unit files in generations, requires a first-party `systemd`
+package for the default `/sbin/init` projection, records repo-ciphertext plus
+host-key tmpfs-only secret activation proof, brands installer artifacts as
+`jetos`, defaults guided disk setup to ext4 with a manual path override, and
+keeps discovery aligned with the existing module/import skip rules.
+
+**D-JOS-KERNELSRC1=A**: `.CachyOS` resolves to a first-party
+`cachyos-kernel` package. Generation proof records that package's reference,
+output hash, provenance, and boot artifacts; jetos does not silently substitute a
+generic kernel.
+
+**D-JOS-KERNELBOOTSTRAP1=A**: the first-party `cachyos-kernel` package is
+source-built. Its output must carry the source recipe, kernel config, patch
+manifest, initrd-input manifest, kernel image, and initrd. Generation, installer,
+and VM proof all boot the same recorded artifacts; no generic proof-only kernel
+may stand in for `.CachyOS`.
+
+**D-JOS-INSTALLUX1=A / D-JOS-INSTALLMEDIA1=A / D-JOS-VMCOMMAND1=A /
+D-JOS-VMDEPS1=A**: the installer surface offers guided and scripted modes,
+builds a hybrid ISO first, proves install/reboot flows through `jet os vm
+prove <host> --disk <path>`, and uses pinned tool packages for QEMU/media work.
+
+**D-JOS-STUDIO-HOST1=A**: jetos Studio runs through one local Jet-owned
+projection/edit service. It is a separate jetos application, not Canvas. By
+default `jetos studio` opens the installed first-party jetos Studio app from the
+jetos system profile when available. The browser UI is the fallback, review, and
+headless screenshot path against the same protocol. The GUI never owns semantic
+configuration state outside Jet source, lock/proof artifacts, and the generated
+local UI cache ratified by D-JOS-STUDIO-STATE1.
 
 ### CLI & tooling
 

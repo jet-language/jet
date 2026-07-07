@@ -2368,6 +2368,43 @@ impl<'a> Checker<'a> {
                 }
             }
         }
+        // D-EVENT1=D: methods on compiler-known Event<T>/Hook<T,R> values.
+        // Set `recv_type_out` so TIR lowers these to the event runtime method
+        // shape instead of the generic collection builtin fallback.
+        if let Type::Apply { name, .. } = &recv_ty {
+            if matches!(
+                name.as_str(),
+                crate::Syntax::TYPE_EVENT | crate::Syntax::TYPE_HOOK
+            ) {
+                if let Some(ret) =
+                    Collections::builtin_method_return(&recv_ty, method, args.len(), false)
+                {
+                    let handle_ty = name.clone();
+                    let result =
+                        self.finish_builtin_method(receiver, method, &recv_ty, args, span, ret);
+                    *recv_type_out = Some(handle_ty);
+                    return result;
+                }
+            }
+        }
+        if let Type::Named(name) = &recv_ty {
+            if matches!(
+                name.as_str(),
+                crate::Syntax::TYPE_SUBSCRIPTION
+                    | crate::Syntax::TYPE_EVENT_SCOPE
+                    | crate::Syntax::TYPE_EVENT_TRACE
+            ) {
+                if let Some(ret) =
+                    Collections::builtin_method_return(&recv_ty, method, args.len(), false)
+                {
+                    let handle_ty = name.clone();
+                    let result =
+                        self.finish_builtin_method(receiver, method, &recv_ty, args, span, ret);
+                    *recv_type_out = Some(handle_ty);
+                    return result;
+                }
+            }
+        }
         // D-HONESTNUM1=A: methods on `Measurement<Float>` (value ± uncertainty).
         // `.add/sub/mul/div(m)` → Measurement<Float>; `.value()/.uncertainty()` → Float.
         // Operator overloading is NOT extended here — I8 closed-family rule.

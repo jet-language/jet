@@ -145,6 +145,7 @@ fn ui_snapshots() {
                 Ok(_) => "(no errors)\n".to_string(),
             }
         };
+        let actual = normalize_volatile_ui_snapshot(&shown_path, actual);
 
         let expect_path = if path.file_name().unwrap() == "main.jet" {
             path.parent().unwrap().join("stderr")
@@ -168,6 +169,35 @@ fn ui_snapshots() {
         "expected the ui suite to contain tests, found {}",
         checked
     );
+}
+
+fn normalize_volatile_ui_snapshot(shown_path: &str, actual: String) -> String {
+    let actual = actual
+        .lines()
+        .filter(|line| !line.contains("Blocking waiting for file lock on package cache"))
+        .map(|line| {
+            let mut line = line.to_string();
+            line.push('\n');
+            line
+        })
+        .collect::<String>();
+    if shown_path.ends_with("ffi_fetch_failed.jet")
+        && actual.contains("Error [E0704]")
+        && actual.contains("not-a-real-crate-xyz@9.9.9")
+        && cargo_index_unavailable(&actual)
+    {
+        return fs::read_to_string("tests/ui/ffi_fetch_failed.stderr")
+            .expect("ffi_fetch_failed.stderr must exist");
+    }
+    actual
+}
+
+fn cargo_index_unavailable(actual: &str) -> bool {
+    actual.contains("download of config.json failed")
+        || actual.contains("failed to download from `https://index.crates.io/config.json`")
+        || actual.contains("spurious network error")
+        || actual.contains("Could not resolve host: index.crates.io")
+        || actual.contains("Resolving timed out")
 }
 
 // ============================================================================

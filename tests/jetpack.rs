@@ -22,6 +22,54 @@ fn jet() -> Command {
     Command::new(env!("CARGO_BIN_EXE_jet"))
 }
 
+fn jetos() -> Command {
+    Command::new(env!("CARGO_BIN_EXE_jetos"))
+}
+
+fn copy_dir_recursive(src: &Path, dst: &Path) {
+    fs::create_dir_all(dst).unwrap();
+    let mut entries = fs::read_dir(src)
+        .unwrap()
+        .filter_map(Result::ok)
+        .collect::<Vec<_>>();
+    entries.sort_by_key(|entry| entry.file_name());
+    for entry in entries {
+        let path = entry.path();
+        let target = dst.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            copy_dir_recursive(&path, &target);
+        } else {
+            fs::copy(&path, &target).unwrap();
+        }
+    }
+}
+
+fn studio_http(addr: &str, method: &str, path: &str, body: &str) -> String {
+    let mut stream = std::net::TcpStream::connect(addr).unwrap();
+    {
+        use std::io::Write;
+        write!(
+            stream,
+            "{method} {path} HTTP/1.1\r\nHost: local\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        )
+        .unwrap();
+    }
+    let _ = stream.shutdown(std::net::Shutdown::Write);
+    let mut response = String::new();
+    {
+        use std::io::Read;
+        if let Err(e) = stream.read_to_string(&mut response) {
+            assert_eq!(
+                e.kind(),
+                std::io::ErrorKind::ConnectionReset,
+                "studio HTTP read failed: {e}"
+            );
+        }
+    }
+    response
+}
+
 /// A throwaway directory under the system temp dir, removed on drop.
 struct Scratch {
     path: PathBuf,
@@ -96,6 +144,59 @@ fn now_secs() -> u64 {
         .as_secs()
 }
 
+fn test_json_escape(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+}
+
+fn write_executable(path: &Path, text: &str) {
+    fs::write(path, text).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+}
+
+fn write_fake_vm_tools(bin: &Path, guest_passes: bool) {
+    fs::create_dir_all(bin).unwrap();
+    let limine_data = bin.join("limine-data");
+    fs::create_dir_all(&limine_data).unwrap();
+    fs::write(limine_data.join("limine-bios.sys"), "fake limine bios\n").unwrap();
+    fs::write(limine_data.join("BOOTX64.EFI"), "fake limine efi\n").unwrap();
+    write_executable(
+        &bin.join("limine"),
+        &format!(
+            "#!/bin/sh\nif [ \"$1\" = \"--print-datadir\" ]; then printf '%s\\n' '{}'; exit 0; fi\nexit 0\n",
+            limine_data.display()
+        ),
+    );
+    write_executable(
+        &bin.join("xorriso"),
+        "#!/bin/sh\nout=''\nprev=''\nfor arg in \"$@\"; do\n  if [ \"$prev\" = '-o' ]; then out=\"$arg\"; fi\n  prev=\"$arg\"\ndone\nif [ -n \"$out\" ]; then printf 'fake iso\\n' > \"$out\"; fi\nexit 0\n",
+    );
+    write_executable(
+        &bin.join("qemu-img"),
+        "#!/bin/sh\nif [ \"$1\" = 'create' ]; then printf 'fake qcow2\\n' > \"$4\"; fi\nexit 0\n",
+    );
+    let guest_line = if guest_passes {
+        "host=unknown\ngeneration=unknown\nfor arg in \"$@\"; do\n  case \"$arg\" in\n    *jetos.host=*) host=\"${arg#*jetos.host=}\"; host=\"${host%% *}\" ;;\n  esac\n  case \"$arg\" in\n    *jetos.generation=*) generation=\"${arg#*jetos.generation=}\"; generation=\"${generation%% *}\" ;;\n  esac\ndone\ncase \" $* \" in\n  *' -boot c '*) echo \"JETOS_GUEST_PROOF: {\\\"state\\\":\\\"guest-passed\\\",\\\"host\\\":\\\"$host\\\",\\\"generation\\\":\\\"$generation\\\",\\\"assertions\\\":[\\\"current-generation-matches\\\",\\\"packages-present\\\",\\\"services-active\\\",\\\"network-up\\\",\\\"rollback-generation-bootable\\\",\\\"terminal-login-ready\\\"]}\" ;;\nesac\n"
+    } else {
+        "echo 'qemu booted without guest proof'\n"
+    };
+    write_executable(
+        &bin.join("qemu-system-x86_64"),
+        &format!("#!/bin/sh\n{guest_line}exit 0\n"),
+    );
+    write_executable(&bin.join("mkfs.ext4"), "#!/bin/sh\nexit 0\n");
+    write_executable(
+        &bin.join("zstd"),
+        "#!/bin/sh\nlast=''\nfor arg in \"$@\"; do last=\"$arg\"; done\nwhile IFS= read -r line; do printf '%s\\n' \"$line\"; done < \"$last\"\n",
+    );
+}
+
 fn write_hangar_meta(
     root: &Path,
     id: &str,
@@ -140,11 +241,7 @@ fn build_resolves_fixture_ref() {
         .env("JETPACK_FIXTURES", example_fixtures())
         .output()
         .unwrap();
-    assert!(
-        out.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
+    assert!(out.status.success());
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("fastfetch"), "stderr: {stderr}");
     assert!(stderr.contains("/nix/store/"), "stderr: {stderr}");
@@ -1781,6 +1878,51 @@ fn assert_jetos_stderr_snapshot(name: &str, stderr: &str) {
     );
 }
 
+fn assert_jetos_stderr_snapshot_trimmed(name: &str, stderr: &str) {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/jetpack-diagnostics")
+        .join(format!("{name}.stderr"));
+    let expected = fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("missing jetos diagnostic snapshot {}: {e}", path.display()));
+    assert_eq!(
+        stderr.trim_end(),
+        expected.trim_end(),
+        "jetos diagnostic snapshot `{name}` changed"
+    );
+}
+
+fn write_cachyos_source_recipe(pkg: &Path) {
+    let source = pkg.join("source");
+    fs::create_dir_all(&source).unwrap();
+    fs::write(
+        source.join("recipe.jet"),
+        "kernel cachyos { source: \"cachyos/linux-cachyos\", build: source }\n",
+    )
+    .unwrap();
+    write_executable(&source.join("build.sh"), "#!/bin/sh\nexit 0\n");
+    fs::write(
+        source.join("config"),
+        "CONFIG_CACHYOS=y\nCONFIG_EXT4_FS=y\n",
+    )
+    .unwrap();
+    fs::write(source.join("patches.manifest"), "cachyos-scheduler.patch\n").unwrap();
+    fs::write(
+        source.join("initrd-inputs.manifest"),
+        "busybox\nkmod\nsystemd\n",
+    )
+    .unwrap();
+}
+
+fn write_cachyos_source_builder(pkg: &Path, body: &str) {
+    write_executable(&pkg.join("source/build.sh"), body);
+}
+
+fn write_bootlike_cachyos_artifacts(pkg: &Path) {
+    fs::create_dir_all(pkg.join("boot")).unwrap();
+    fs::write(pkg.join("boot/vmlinuz-cachyos"), "MZ test kernel\nHdrS\n").unwrap();
+    fs::write(pkg.join("boot/initrd-cachyos"), "070701 test initrd\n").unwrap();
+}
+
 #[test]
 fn os_build_realizes_selected_system_offline() {
     // I5/D-JPK-OSVERB1/D-JPK-OSHOST1: `jet os build <host>` loads config.jet
@@ -1791,7 +1933,15 @@ fn os_build_realizes_selected_system_offline() {
     // no nix). The store lives under a scratch JETPACK_ROOT.
     let root = Scratch::new("os-build-root");
     let out = jet()
-        .args(["os", "build", "halcyon", "--no-color", "--offline"])
+        .args([
+            "os",
+            "build",
+            "halcyon",
+            "--name",
+            "fixture-source-built",
+            "--no-color",
+            "--offline",
+        ])
         .current_dir(config_example_dir())
         .env("JETPACK_ROOT", &root.path)
         .env("PATH", "/usr/bin:/bin") // no nix on PATH
@@ -1812,6 +1962,17 @@ fn os_build_realizes_selected_system_offline() {
     assert!(
         root.join("systems").is_dir(),
         "expected a systems dir under the root"
+    );
+    let generation = root.join("systems/generations/fixture-source-built");
+    let kernel = fs::read_to_string(generation.join("boot/kernel")).unwrap();
+    let initrd = fs::read_to_string(generation.join("boot/initrd")).unwrap();
+    assert!(
+        kernel.contains("fixture-built cachyos kernel"),
+        "kernel should come from source/build.sh: {kernel}"
+    );
+    assert!(
+        initrd.contains("fixture-built cachyos initrd"),
+        "initrd should come from source/build.sh: {initrd}"
     );
 }
 
@@ -1851,18 +2012,609 @@ fn os_switch_activates_and_sets_current() {
         "expected a `current` generation pointer at {}",
         current.display()
     );
-    let units = fs::read_dir(root.join("systems"))
-        .unwrap()
-        .filter_map(|e| e.ok())
-        .map(|e| e.path().join("etc/systemd/system/openssh.service"))
-        .find(|p| p.exists());
-    assert!(units.is_some(), "expected generated systemd unit");
-    let vm_proof = root.join("systems/generations/known-good/vm-proof.txt");
+    let generation = root.join("systems/generations/known-good");
+    assert!(
+        generation
+            .join("etc/systemd/system/openssh.service")
+            .is_file(),
+        "expected generated systemd unit"
+    );
+    assert!(
+        generation.join("sw/bin/hello").exists(),
+        "expected hello in the system package closure"
+    );
+    assert!(
+        generation.join("sw/bin/btop").exists(),
+        "expected btop in the system package closure"
+    );
+    assert!(
+        generation.join("sw/bin/systemd").exists(),
+        "expected systemd in the system package closure"
+    );
+    assert_eq!(
+        fs::read_to_string(generation.join("etc/hostname")).unwrap(),
+        "halcyon\n"
+    );
+    assert_eq!(
+        fs::read_to_string(generation.join("etc/timezone")).unwrap(),
+        "Europe/London\n"
+    );
+    let fstab = fs::read_to_string(generation.join("etc/fstab")).unwrap();
+    assert!(fstab.contains("jetos-root"), "fstab: {fstab}");
+    assert!(
+        fstab.contains("/dev/disk/by-label/swap\tnone\tswap\tpri=5"),
+        "fstab: {fstab}"
+    );
+    let diff = fs::read_to_string(generation.join("activation-diff.txt")).unwrap();
+    assert!(diff.contains("packages: 4"), "diff: {diff}");
+    assert!(diff.contains("services: 3"), "diff: {diff}");
+    let health = fs::read_to_string(generation.join("health-checks.txt")).unwrap();
+    assert!(health.contains("openssh"), "health: {health}");
+    assert!(health.contains("backup"), "health: {health}");
+    assert!(health.contains("metrics"), "health: {health}");
+    let provenance = fs::read_to_string(generation.join("provenance.json")).unwrap();
+    assert!(provenance.contains("\"hello\""), "provenance: {provenance}");
+    assert!(
+        provenance.contains("\"cachyos-kernel\""),
+        "provenance: {provenance}"
+    );
+    assert!(
+        provenance.contains("core-source"),
+        "provenance: {provenance}"
+    );
+    assert!(
+        provenance.contains("packages.overlay.nixpkgs"),
+        "provenance should expose compatibility escape hatches: {provenance}"
+    );
+    assert!(
+        provenance.contains("\"bootstrap\":\"source-built\""),
+        "provenance should record source-built CachyOS bootstrap: {provenance}"
+    );
+    let passwd = fs::read_to_string(generation.join("etc/passwd")).unwrap();
+    assert!(passwd.contains("nate:x:1000"), "passwd: {passwd}");
+    assert!(
+        passwd.contains("/run/current-system/sw/bin/hello"),
+        "passwd: {passwd}"
+    );
+    let group = fs::read_to_string(generation.join("etc/group")).unwrap();
+    assert!(group.contains("wheel:x:2000:nate"), "group: {group}");
+    let sysusers = fs::read_to_string(generation.join("etc/sysusers.d/jetos.conf")).unwrap();
+    assert!(sysusers.contains("u nate 1000"), "sysusers: {sysusers}");
+    assert!(sysusers.contains("g wheel 2000"), "sysusers: {sysusers}");
+    let shells = fs::read_to_string(generation.join("etc/shells")).unwrap();
+    assert!(
+        shells.contains("/run/current-system/sw/bin/hello"),
+        "shells: {shells}"
+    );
+    let profile = fs::read_to_string(generation.join("etc/profile")).unwrap();
+    assert!(
+        profile.contains("/run/current-system/sw/bin"),
+        "profile: {profile}"
+    );
+    let terminal = fs::read_to_string(generation.join("terminal/facts.json")).unwrap();
+    assert!(
+        terminal.contains("\"login_user\":\"nate\"")
+            && terminal.contains("\"serial_tty\":\"ttyS0\"")
+            && terminal.contains("terminal-login-ready"),
+        "terminal: {terminal}"
+    );
+    assert!(
+        generation
+            .join("etc/systemd/system/serial-getty@ttyS0.service")
+            .is_file(),
+        "expected serial getty unit"
+    );
+    assert!(
+        generation
+            .join("etc/systemd/system/getty.target.wants/serial-getty@ttyS0.service")
+            .exists(),
+        "expected serial getty enabled"
+    );
+    let boot = fs::read_to_string(generation.join("boot/facts.json")).unwrap();
+    assert!(boot.contains("\"loader\":\"Limine\""), "boot: {boot}");
+    assert!(boot.contains("\"kernel\":\"CachyOS\""), "boot: {boot}");
+    assert!(
+        boot.contains("\"kernel_package\""),
+        "boot facts should name the realized kernel package: {boot}"
+    );
+    assert!(
+        boot.contains("\"output_hash\""),
+        "boot facts should carry kernel provenance hash: {boot}"
+    );
+    assert!(
+        boot.contains("\"source_recipe\""),
+        "boot facts should carry source recipe provenance: {boot}"
+    );
+    assert!(
+        boot.contains("\"sha256\""),
+        "boot facts should hash kernel recipe inputs: {boot}"
+    );
+    let kernel = fs::read_to_string(generation.join("boot/kernel")).unwrap();
+    assert!(
+        kernel.contains("MZ fixture-built cachyos kernel") && kernel.contains("HdrS"),
+        "kernel artifact: {kernel}"
+    );
+    assert!(
+        generation.join("boot/limine.conf").is_file(),
+        "expected Limine config"
+    );
+    let network = fs::read_to_string(generation.join("network/facts.json")).unwrap();
+    assert!(
+        network.contains("\"interface\":\"enp0s1\""),
+        "network: {network}"
+    );
+    assert!(
+        network.contains("\"firewall_allowed_tcp_ports\":[\"22\",\"443\"]"),
+        "network: {network}"
+    );
+    let networkd =
+        fs::read_to_string(generation.join("etc/systemd/network/10-jetos.network")).unwrap();
+    assert!(
+        networkd.contains("Address=192.0.2.10/24"),
+        "networkd: {networkd}"
+    );
+    let nft = fs::read_to_string(generation.join("etc/nftables/jetos-firewall.nft")).unwrap();
+    assert!(nft.contains("tcp dport { 22, 443 } accept"), "nft: {nft}");
+    let init = fs::read_to_string(generation.join("init/systemd.json")).unwrap();
+    assert!(init.contains("multi-user.target"), "init: {init}");
+    assert!(init.contains("\"systemd\""), "init: {init}");
+    assert!(
+        generation.join("sbin/init").exists(),
+        "expected bootable /sbin/init projection"
+    );
+    assert!(
+        generation.join("root/etc/hostname").is_file(),
+        "expected root-shaped /etc projection"
+    );
+    assert!(
+        generation.join("root/boot/kernel").is_file(),
+        "expected root-shaped /boot projection"
+    );
+    assert!(
+        generation.join("root/sbin/init").exists(),
+        "expected root-shaped /sbin/init projection"
+    );
+    assert!(
+        generation
+            .join("root/run/current-system/etc/systemd/system/openssh.service")
+            .is_file(),
+        "expected current-system projection inside root"
+    );
+    assert!(
+        generation.join("root/home/nate/.profile").is_file(),
+        "expected user home profile in installed root"
+    );
+    assert!(
+        generation
+            .join("root/run/current-system/terminal/facts.json")
+            .is_file(),
+        "expected terminal proof facts in current-system projection"
+    );
+    assert!(
+        generation.join("etc/systemd/system/backup.timer").is_file(),
+        "expected backup timer"
+    );
+    assert!(
+        generation
+            .join("etc/systemd/system/timers.target.wants/backup.timer")
+            .exists(),
+        "expected enabled backup timer"
+    );
+    assert!(
+        generation
+            .join("etc/systemd/system/metrics.socket")
+            .is_file(),
+        "expected metrics socket"
+    );
+    assert!(
+        generation
+            .join("etc/systemd/system/sockets.target.wants/metrics.socket")
+            .exists(),
+        "expected enabled metrics socket"
+    );
+    assert!(
+        generation
+            .join("etc/systemd/system/display-manager.service")
+            .is_file(),
+        "expected display manager unit"
+    );
+    assert!(
+        generation
+            .join("etc/systemd/system/graphical.target.wants/display-manager.service")
+            .exists(),
+        "expected enabled display manager"
+    );
+    assert!(
+        generation
+            .join("etc/systemd/system/multi-user.target.wants/openssh.service")
+            .exists(),
+        "expected enabled openssh service"
+    );
+    let hardware = fs::read_to_string(generation.join("hardware/facts.json")).unwrap();
+    assert!(hardware.contains("iwlwifi"), "hardware: {hardware}");
+    assert!(hardware.contains("amdgpu"), "hardware: {hardware}");
+    let desktop = fs::read_to_string(generation.join("desktop/facts.json")).unwrap();
+    assert!(
+        desktop.contains("\"session\":\"sway\""),
+        "desktop: {desktop}"
+    );
+    assert!(
+        desktop.contains("\"display_manager\":\"greetd\""),
+        "desktop: {desktop}"
+    );
+    let cache = fs::read_to_string(generation.join("store/cache.json")).unwrap();
+    assert!(cache.contains("jetpack-hangar"), "cache: {cache}");
+    let compat = fs::read_to_string(generation.join("compat/escape-hatches.json")).unwrap();
+    assert!(
+        compat.contains("\"studio_visible\": \"true\""),
+        "compat: {compat}"
+    );
+    assert!(
+        generation.join("sw/bin/jetos-studio").is_file(),
+        "expected installed jetos Studio launcher"
+    );
+    assert!(
+        generation
+            .join("share/applications/jetos-studio.desktop")
+            .is_file(),
+        "expected desktop app entry"
+    );
+    let studio = fs::read_to_string(generation.join("studio/app.json")).unwrap();
+    assert!(
+        studio.contains("\"runtime\": \"jetos-system-app\""),
+        "studio: {studio}"
+    );
+    assert!(
+        studio.contains("\"browser_fallback\": \"true\""),
+        "studio: {studio}"
+    );
+    assert!(
+        !studio.contains("Canvas"),
+        "studio app projection must stay separate from Canvas: {studio}"
+    );
+    let studio_data = fs::read_to_string(generation.join("studio/data.json")).unwrap();
+    assert!(
+        studio_data.contains("\"kind\":\"jetos-studio-projection\""),
+        "studio data: {studio_data}"
+    );
+    assert!(
+        studio_data.contains("\"artifacts\""),
+        "studio data: {studio_data}"
+    );
+    assert!(
+        studio_data.contains("\"openssh\""),
+        "studio data: {studio_data}"
+    );
+    assert!(
+        generation
+            .join("root/run/current-system/studio/app.json")
+            .is_file(),
+        "expected Studio app in root current-system projection"
+    );
+    assert!(
+        generation
+            .join("root/run/current-system/studio/data.json")
+            .is_file(),
+        "expected Studio data in root current-system projection"
+    );
+    let studio_html = fs::read_to_string(generation.join("studio/index.html")).unwrap();
+    assert!(
+        studio_html.contains("jetos Studio"),
+        "studio: {studio_html}"
+    );
+    assert!(studio_html.contains("openssh"), "studio: {studio_html}");
+    assert!(
+        studio_html.contains("network.hostName"),
+        "studio: {studio_html}"
+    );
+    assert!(
+        studio_html.contains("data-tx=\"preview\""),
+        "studio: {studio_html}"
+    );
+    assert!(
+        studio_html.contains("data-run=\"proof\""),
+        "studio: {studio_html}"
+    );
+    assert!(
+        !studio_html.contains("Canvas"),
+        "Studio UI must not present itself as Canvas: {studio_html}"
+    );
+    let secrets = fs::read_to_string(generation.join("secrets.tmpfs.manifest")).unwrap();
+    assert!(
+        secrets.contains("wifi\tsecrets/wifi.age"),
+        "secrets: {secrets}"
+    );
+    let vm_proof = generation.join("vm-proof.txt");
     let vm_text = fs::read_to_string(&vm_proof).expect("risk switch writes VM proof");
     assert!(vm_text.contains("plan-sha256:"), "vm proof: {vm_text}");
     assert!(
         vm_text.contains("service-artifacts: pass"),
         "vm proof: {vm_text}"
+    );
+    let proof = jet()
+        .args(["os", "proof", "halcyon", "--json", "--no-color"])
+        .current_dir(config_example_dir())
+        .env("JETPACK_ROOT", &root.path)
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert!(
+        proof.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&proof.stderr)
+    );
+    let proof_json = String::from_utf8_lossy(&proof.stdout);
+    assert!(
+        proof_json.contains("\"host\":\"halcyon\""),
+        "proof: {proof_json}"
+    );
+    assert!(proof_json.contains("\"boot\":"), "proof: {proof_json}");
+    assert!(
+        proof_json.contains("\"provenance\":"),
+        "proof: {proof_json}"
+    );
+    assert!(proof_json.contains("\"vm_proof\":"), "proof: {proof_json}");
+}
+
+#[test]
+fn jetos_studio_headless_opens_installed_app_projection() {
+    let root = Scratch::new("studio-root");
+    let switch = jet()
+        .args([
+            "os",
+            "switch",
+            "halcyon",
+            "--name",
+            "studio-app",
+            "--no-color",
+            "--offline",
+        ])
+        .current_dir(config_example_dir())
+        .env("JETPACK_ROOT", &root.path)
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert!(
+        switch.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&switch.stderr)
+    );
+    let generation = root.path.join("systems/generations/studio-app");
+    let out = jetos()
+        .args(["studio", "--headless", "--no-color"])
+        .env("JETOS_STUDIO_ROOT", &generation)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("studio/index.html"),
+        "stdout should print app path: {stdout}"
+    );
+}
+
+#[test]
+fn jetos_studio_serve_exposes_projection_json() {
+    let root = Scratch::new("studio-serve-root");
+    let switch = jet()
+        .args([
+            "os",
+            "switch",
+            "halcyon",
+            "--name",
+            "studio-serve",
+            "--no-color",
+            "--offline",
+        ])
+        .current_dir(config_example_dir())
+        .env("JETPACK_ROOT", &root.path)
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert!(
+        switch.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&switch.stderr)
+    );
+    let generation = root.path.join("systems/generations/studio-serve");
+    let mut child = jetos()
+        .args(["studio", "--serve", "127.0.0.1:0", "--no-color"])
+        .env("JETOS_STUDIO_ROOT", &generation)
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let stdout = child.stdout.take().unwrap();
+    let mut reader = std::io::BufReader::new(stdout);
+    let mut line = String::new();
+    {
+        use std::io::BufRead;
+        reader.read_line(&mut line).unwrap();
+    }
+    let addr = line
+        .trim()
+        .strip_prefix("http://")
+        .and_then(|s| s.strip_suffix("/studio/"))
+        .expect("service url");
+    let mut stream = std::net::TcpStream::connect(addr).unwrap();
+    {
+        use std::io::Write;
+        stream
+            .write_all(b"GET /studio/data.json HTTP/1.1\r\nHost: local\r\n\r\n")
+            .unwrap();
+    }
+    let mut response = String::new();
+    {
+        use std::io::Read;
+        stream.read_to_string(&mut response).unwrap();
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+    assert!(response.contains("200 OK"), "response: {response}");
+    assert!(
+        response.contains("jetos-studio-projection"),
+        "response: {response}"
+    );
+    assert!(response.contains("openssh"), "response: {response}");
+}
+
+#[test]
+fn jetos_studio_transaction_previews_and_writes_source() {
+    let project = Scratch::new("studio-edit-project");
+    copy_dir_recursive(&config_example_dir(), &project.path);
+    let root = Scratch::new("studio-edit-root");
+    let switch = jet()
+        .args([
+            "os",
+            "switch",
+            "halcyon",
+            "--name",
+            "studio-edit",
+            "--no-color",
+            "--offline",
+        ])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert!(
+        switch.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&switch.stderr)
+    );
+    let generation = root.path.join("systems/generations/studio-edit");
+    let mut child = jetos()
+        .args([
+            "studio",
+            project.path.to_str().unwrap(),
+            "--host",
+            "halcyon",
+            "--serve",
+            "127.0.0.1:0",
+            "--no-color",
+        ])
+        .env("JETOS_STUDIO_ROOT", &generation)
+        .env("JETPACK_ROOT", &root.path)
+        .env("PATH", "/usr/bin:/bin")
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let stdout = child.stdout.take().unwrap();
+    let mut reader = std::io::BufReader::new(stdout);
+    let mut line = String::new();
+    {
+        use std::io::BufRead;
+        reader.read_line(&mut line).unwrap();
+    }
+    let addr = line
+        .trim()
+        .strip_prefix("http://")
+        .and_then(|s| s.strip_suffix("/studio/"))
+        .expect("service url");
+    let preview = studio_http(
+        addr,
+        "POST",
+        "/studio/transaction",
+        "{\"op\":\"set-option\",\"key\":\"network.hostName\",\"value\":\"aurora\",\"write\":false}",
+    );
+    assert!(preview.contains("200 OK"), "preview: {preview}");
+    assert!(preview.contains("\"write\":false"), "preview: {preview}");
+    assert!(
+        preview.contains("-            network.hostName: halcyon,"),
+        "preview: {preview}"
+    );
+    assert!(
+        preview.contains("+            network.hostName: aurora,"),
+        "preview: {preview}"
+    );
+    let config = fs::read_to_string(project.join("config.jet")).unwrap();
+    assert!(
+        config.contains("network.hostName: halcyon"),
+        "config: {config}"
+    );
+    let source = studio_http(addr, "GET", "/studio/source", "");
+    assert!(
+        source.contains("network.hostName: halcyon"),
+        "source: {source}"
+    );
+    let write = studio_http(
+        addr,
+        "POST",
+        "/studio/transaction",
+        "{\"op\":\"set-option\",\"key\":\"network.hostName\",\"value\":\"aurora\",\"write\":true}",
+    );
+    assert!(write.contains("200 OK"), "write: {write}");
+    assert!(write.contains("\"write\":true"), "write: {write}");
+    let config = fs::read_to_string(project.join("config.jet")).unwrap();
+    assert!(
+        config.contains("network.hostName: aurora"),
+        "config: {config}"
+    );
+    let source = studio_http(addr, "GET", "/studio/source", "");
+    assert!(
+        source.contains("network.hostName: aurora"),
+        "source: {source}"
+    );
+    let plan = jet()
+        .args(["os", "plan", "halcyon", "--json", "--no-color", "--offline"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert!(
+        plan.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&plan.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&plan.stdout);
+    assert!(stdout.contains("aurora"), "plan: {stdout}");
+    let check = studio_http(addr, "POST", "/studio/run", "{\"action\":\"check\"}");
+    assert!(check.contains("\"success\":true"), "check: {check}");
+    let build = studio_http(addr, "POST", "/studio/run", "{\"action\":\"build\"}");
+    assert!(build.contains("\"success\":true"), "build: {build}");
+    let proof = studio_http(addr, "POST", "/studio/run", "{\"action\":\"proof\"}");
+    assert!(proof.contains("\"success\":true"), "proof: {proof}");
+    assert!(proof.contains("aurora"), "proof: {proof}");
+    let generations = studio_http(addr, "POST", "/studio/run", "{\"action\":\"generations\"}");
+    assert!(
+        generations.contains("zz-studio-candidate"),
+        "generations: {generations}"
+    );
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+#[test]
+fn os_plan_prints_checked_system_contract_without_building() {
+    let root = Scratch::new("os-plan-root");
+    let out = jet()
+        .args(["os", "plan", "halcyon", "--json", "--no-color", "--offline"])
+        .current_dir(config_example_dir())
+        .env("JETPACK_ROOT", &root.path)
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let json = String::from_utf8_lossy(&out.stdout);
+    assert!(json.contains("\"host\":\"halcyon\""), "plan: {json}");
+    assert!(json.contains("\"loader\":\"Limine\""), "plan: {json}");
+    assert!(json.contains("\"kernel\":\"CachyOS\""), "plan: {json}");
+    assert!(
+        json.contains("\"key\": \"users.nate.normal\""),
+        "plan: {json}"
+    );
+    assert!(
+        !root.join("systems/generations").exists(),
+        "plan must not create a generation"
     );
 }
 
@@ -1872,9 +2624,27 @@ fn os_build_bare_host_uses_current_repo_config() {
     let proj = Scratch::new("os-repo");
     let root = Scratch::new("os-default-root");
     // A minimal self-contained system (no packages → realizes trivially offline).
+    let pkg = proj.join("jet-pkgs/pkgs/cachyos-kernel");
+    let systemd = proj.join("jet-pkgs/pkgs/systemd");
+    fs::create_dir_all(pkg.join("boot")).unwrap();
+    fs::create_dir_all(systemd.join("bin")).unwrap();
+    fs::write(
+        proj.join("jet-pkgs/pkg.jet"),
+        "payload: { name: \"jet-pkgs\", version: \"0.1.0\" }\npackages: { cachyos-kernel: library, systemd: executable }\n",
+    )
+    .unwrap();
+    fs::write(
+        pkg.join("cachyos-kernel.jet"),
+        "module cachyos-kernel { }\n",
+    )
+    .unwrap();
+    write_bootlike_cachyos_artifacts(&pkg);
+    write_cachyos_source_recipe(&pkg);
+    fs::write(systemd.join("systemd.jet"), "module systemd { }\n").unwrap();
+    fs::write(systemd.join("bin/systemd"), "test systemd\n").unwrap();
     fs::write(
         proj.join("config.jet"),
-        "module box {\n    system.box: { target: linux.x64 }\n}\n",
+        "module box {\n    sources: { mine: path@./jet-pkgs }\n    system.box: { target: linux.x64 }\n}\n",
     )
     .unwrap();
     let out = jet()
@@ -1891,6 +2661,345 @@ fn os_build_bare_host_uses_current_repo_config() {
     );
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("box"), "stderr: {stderr}");
+}
+
+#[test]
+fn os_cachyos_kernel_source_recipe_builds_boot_artifacts() {
+    let proj = Scratch::new("os-kernel-source-build");
+    let root = Scratch::new("os-kernel-source-build-root");
+    let pkg = proj.join("jet-pkgs/pkgs/cachyos-kernel");
+    let systemd = proj.join("jet-pkgs/pkgs/systemd");
+    fs::create_dir_all(&pkg).unwrap();
+    fs::create_dir_all(systemd.join("bin")).unwrap();
+    fs::write(
+        proj.join("jet-pkgs/pkg.jet"),
+        "payload: { name: \"jet-pkgs\", version: \"0.1.0\" }\npackages: { cachyos-kernel: library, systemd: executable }\n",
+    )
+    .unwrap();
+    fs::write(
+        pkg.join("cachyos-kernel.jet"),
+        "module cachyos-kernel { }\n",
+    )
+    .unwrap();
+    write_cachyos_source_recipe(&pkg);
+    write_cachyos_source_builder(
+        &pkg,
+        "#!/bin/sh\nset -eu\nprintf 'MZ built cachyos kernel\\nHdrS\\n' > \"$JETOS_KERNEL_OUT/vmlinuz-cachyos\"\nprintf '070701 built cachyos initrd\\n' > \"$JETOS_KERNEL_OUT/initrd-cachyos\"\n",
+    );
+    fs::write(systemd.join("systemd.jet"), "module systemd { }\n").unwrap();
+    fs::write(systemd.join("bin/systemd"), "test systemd\n").unwrap();
+    fs::write(
+        proj.join("config.jet"),
+        "module box {\n    sources: { mine: path@./jet-pkgs }\n    system.box: { target: linux.x64 }\n}\n",
+    )
+    .unwrap();
+    let out = jet()
+        .args([
+            "os",
+            "build",
+            "box",
+            "--name",
+            "kernel-source-built",
+            "--no-color",
+            "--offline",
+        ])
+        .current_dir(&proj.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let kernel = fs::read_to_string(
+        root.path
+            .join("systems/generations/kernel-source-built/boot/kernel"),
+    )
+    .unwrap();
+    assert!(kernel.contains("built cachyos kernel"), "kernel: {kernel}");
+    let boot = fs::read_to_string(
+        root.path
+            .join("systems/generations/kernel-source-built/boot/facts.json"),
+    )
+    .unwrap();
+    assert!(
+        boot.contains("\"bootstrap\":\"source-built\""),
+        "boot: {boot}"
+    );
+}
+
+#[test]
+fn os_cachyos_kernel_source_builder_failure_is_diagnostic() {
+    let proj = Scratch::new("os-kernel-source-build-fail");
+    let root = Scratch::new("os-kernel-source-build-fail-root");
+    let pkg = proj.join("jet-pkgs/pkgs/cachyos-kernel");
+    let systemd = proj.join("jet-pkgs/pkgs/systemd");
+    fs::create_dir_all(&pkg).unwrap();
+    fs::create_dir_all(systemd.join("bin")).unwrap();
+    fs::write(
+        proj.join("jet-pkgs/pkg.jet"),
+        "payload: { name: \"jet-pkgs\", version: \"0.1.0\" }\npackages: { cachyos-kernel: library, systemd: executable }\n",
+    )
+    .unwrap();
+    fs::write(
+        pkg.join("cachyos-kernel.jet"),
+        "module cachyos-kernel { }\n",
+    )
+    .unwrap();
+    write_cachyos_source_recipe(&pkg);
+    write_cachyos_source_builder(&pkg, "#!/bin/sh\necho compiler missing >&2\nexit 7\n");
+    fs::write(systemd.join("systemd.jet"), "module systemd { }\n").unwrap();
+    fs::write(systemd.join("bin/systemd"), "test systemd\n").unwrap();
+    fs::write(
+        proj.join("config.jet"),
+        "module box {\n    sources: { mine: path@./jet-pkgs }\n    system.box: { target: linux.x64 }\n}\n",
+    )
+    .unwrap();
+    let out = jet()
+        .args(["os", "build", "box", "--no-color", "--offline"])
+        .current_dir(&proj.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let diagnostic = stderr
+        .find("\n  error[E1286]")
+        .map(|idx| &stderr[idx..])
+        .unwrap_or(&stderr);
+    assert_jetos_stderr_snapshot("cachyos_source_build_failed", diagnostic);
+}
+
+#[test]
+fn os_cachyos_kernel_requires_first_party_source() {
+    let proj = Scratch::new("os-missing-kernel");
+    let root = Scratch::new("os-missing-kernel-root");
+    fs::write(
+        proj.join("config.jet"),
+        "module box {\n    system.box: { target: linux.x64 }\n}\n",
+    )
+    .unwrap();
+    let out = jet()
+        .args(["os", "build", "box", "--no-color", "--offline"])
+        .current_dir(&proj.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_jetos_stderr_snapshot("missing_cachyos_kernel", &stderr);
+}
+
+#[test]
+fn os_systemd_init_requires_first_party_source() {
+    let proj = Scratch::new("os-missing-systemd");
+    let root = Scratch::new("os-missing-systemd-root");
+    let pkg = proj.join("jet-pkgs/pkgs/cachyos-kernel");
+    fs::create_dir_all(pkg.join("boot")).unwrap();
+    fs::write(
+        proj.join("jet-pkgs/pkg.jet"),
+        "payload: { name: \"jet-pkgs\", version: \"0.1.0\" }\npackages: { cachyos-kernel: library }\n",
+    )
+    .unwrap();
+    fs::write(
+        pkg.join("cachyos-kernel.jet"),
+        "module cachyos-kernel { }\n",
+    )
+    .unwrap();
+    write_bootlike_cachyos_artifacts(&pkg);
+    write_cachyos_source_recipe(&pkg);
+    fs::write(
+        proj.join("config.jet"),
+        "module box {\n    sources: { mine: path@./jet-pkgs }\n    system.box: { target: linux.x64 }\n}\n",
+    )
+    .unwrap();
+    let out = jet()
+        .args(["os", "build", "box", "--no-color", "--offline"])
+        .current_dir(&proj.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let diagnostic = stderr
+        .find("\n  error[E1281]")
+        .map(|idx| &stderr[idx..])
+        .unwrap_or(&stderr);
+    assert_jetos_stderr_snapshot("missing_systemd_init", diagnostic);
+}
+
+#[test]
+fn os_cachyos_kernel_requires_boot_artifacts() {
+    let proj = Scratch::new("os-missing-kernel-artifacts");
+    let root = Scratch::new("os-missing-kernel-artifacts-root");
+    let pkg = proj.join("jet-pkgs/pkgs/cachyos-kernel");
+    let systemd = proj.join("jet-pkgs/pkgs/systemd");
+    fs::create_dir_all(&pkg).unwrap();
+    fs::create_dir_all(systemd.join("bin")).unwrap();
+    fs::write(
+        proj.join("jet-pkgs/pkg.jet"),
+        "payload: { name: \"jet-pkgs\", version: \"0.1.0\" }\npackages: { cachyos-kernel: library, systemd: executable }\n",
+    )
+    .unwrap();
+    fs::write(
+        pkg.join("cachyos-kernel.jet"),
+        "module cachyos-kernel { }\n",
+    )
+    .unwrap();
+    fs::write(systemd.join("systemd.jet"), "module systemd { }\n").unwrap();
+    fs::write(systemd.join("bin/systemd"), "test systemd\n").unwrap();
+    fs::write(
+        proj.join("config.jet"),
+        "module box {\n    sources: { mine: path@./jet-pkgs }\n    system.box: { target: linux.x64 }\n}\n",
+    )
+    .unwrap();
+    let out = jet()
+        .args(["os", "build", "box", "--no-color", "--offline"])
+        .current_dir(&proj.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let diagnostic = stderr
+        .find("\n  error[E1282]")
+        .map(|idx| &stderr[idx..])
+        .unwrap_or(&stderr);
+    assert_jetos_stderr_snapshot_trimmed("missing_cachyos_boot_artifacts", diagnostic);
+}
+
+#[test]
+fn os_cachyos_kernel_rejects_text_boot_artifacts() {
+    let proj = Scratch::new("os-text-kernel-artifacts");
+    let root = Scratch::new("os-text-kernel-artifacts-root");
+    let pkg = proj.join("jet-pkgs/pkgs/cachyos-kernel");
+    let systemd = proj.join("jet-pkgs/pkgs/systemd");
+    fs::create_dir_all(pkg.join("boot")).unwrap();
+    fs::create_dir_all(systemd.join("bin")).unwrap();
+    fs::write(
+        proj.join("jet-pkgs/pkg.jet"),
+        "payload: { name: \"jet-pkgs\", version: \"0.1.0\" }\npackages: { cachyos-kernel: library, systemd: executable }\n",
+    )
+    .unwrap();
+    fs::write(
+        pkg.join("cachyos-kernel.jet"),
+        "module cachyos-kernel { }\n",
+    )
+    .unwrap();
+    fs::write(pkg.join("boot/vmlinuz-cachyos"), "not a kernel\n").unwrap();
+    fs::write(pkg.join("boot/initrd-cachyos"), "not an initrd\n").unwrap();
+    write_cachyos_source_recipe(&pkg);
+    fs::write(systemd.join("systemd.jet"), "module systemd { }\n").unwrap();
+    fs::write(systemd.join("bin/systemd"), "test systemd\n").unwrap();
+    fs::write(
+        proj.join("config.jet"),
+        "module box {\n    sources: { mine: path@./jet-pkgs }\n    system.box: { target: linux.x64 }\n}\n",
+    )
+    .unwrap();
+    let out = jet()
+        .args(["os", "build", "box", "--no-color", "--offline"])
+        .current_dir(&proj.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let diagnostic = stderr
+        .find("\n  error[E1282]")
+        .map(|idx| &stderr[idx..])
+        .unwrap_or(&stderr);
+    assert_jetos_stderr_snapshot_trimmed("missing_cachyos_boot_artifacts", diagnostic);
+}
+
+#[test]
+fn os_cachyos_kernel_requires_source_recipe() {
+    let proj = Scratch::new("os-missing-kernel-source");
+    let root = Scratch::new("os-missing-kernel-source-root");
+    let pkg = proj.join("jet-pkgs/pkgs/cachyos-kernel");
+    let systemd = proj.join("jet-pkgs/pkgs/systemd");
+    fs::create_dir_all(pkg.join("boot")).unwrap();
+    fs::create_dir_all(systemd.join("bin")).unwrap();
+    fs::write(
+        proj.join("jet-pkgs/pkg.jet"),
+        "payload: { name: \"jet-pkgs\", version: \"0.1.0\" }\npackages: { cachyos-kernel: library, systemd: executable }\n",
+    )
+    .unwrap();
+    fs::write(
+        pkg.join("cachyos-kernel.jet"),
+        "module cachyos-kernel { }\n",
+    )
+    .unwrap();
+    write_bootlike_cachyos_artifacts(&pkg);
+    fs::write(systemd.join("systemd.jet"), "module systemd { }\n").unwrap();
+    fs::write(systemd.join("bin/systemd"), "test systemd\n").unwrap();
+    fs::write(
+        proj.join("config.jet"),
+        "module box {\n    sources: { mine: path@./jet-pkgs }\n    system.box: { target: linux.x64 }\n}\n",
+    )
+    .unwrap();
+    let out = jet()
+        .args(["os", "build", "box", "--no-color", "--offline"])
+        .current_dir(&proj.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let diagnostic = stderr
+        .find("\n  error[E1284]")
+        .map(|idx| &stderr[idx..])
+        .unwrap_or(&stderr);
+    assert_jetos_stderr_snapshot_trimmed("missing_cachyos_source_recipe", diagnostic);
+}
+
+#[test]
+fn os_systemd_init_requires_init_artifact() {
+    let proj = Scratch::new("os-missing-systemd-artifact");
+    let root = Scratch::new("os-missing-systemd-artifact-root");
+    let kernel = proj.join("jet-pkgs/pkgs/cachyos-kernel");
+    let systemd = proj.join("jet-pkgs/pkgs/systemd");
+    fs::create_dir_all(kernel.join("boot")).unwrap();
+    fs::create_dir_all(&systemd).unwrap();
+    fs::write(
+        proj.join("jet-pkgs/pkg.jet"),
+        "payload: { name: \"jet-pkgs\", version: \"0.1.0\" }\npackages: { cachyos-kernel: library, systemd: executable }\n",
+    )
+    .unwrap();
+    fs::write(
+        kernel.join("cachyos-kernel.jet"),
+        "module cachyos-kernel { }\n",
+    )
+    .unwrap();
+    write_bootlike_cachyos_artifacts(&kernel);
+    write_cachyos_source_recipe(&kernel);
+    fs::write(systemd.join("systemd.jet"), "module systemd { }\n").unwrap();
+    fs::write(
+        proj.join("config.jet"),
+        "module box {\n    sources: { mine: path@./jet-pkgs }\n    system.box: { target: linux.x64 }\n}\n",
+    )
+    .unwrap();
+    let out = jet()
+        .args(["os", "build", "box", "--no-color", "--offline"])
+        .current_dir(&proj.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let diagnostic = stderr
+        .find("\n  error[E1283]")
+        .map(|idx| &stderr[idx..])
+        .unwrap_or(&stderr);
+    assert_jetos_stderr_snapshot("missing_systemd_init_artifact", diagnostic);
 }
 
 #[test]
@@ -2031,7 +3140,466 @@ fn os_generations_are_newest_first_and_rollback_activates_prior() {
 }
 
 #[test]
-fn os_image_writes_jetos_installer_proof() {
+fn os_vm_prove_requires_pinned_media_tools() {
+    let root = Scratch::new("os-vm-tools-root");
+    let out = jet()
+        .args([
+            "os",
+            "vm",
+            "prove",
+            "halcyon",
+            "--disk",
+            "halcyon.qcow2",
+            "--no-color",
+            "--offline",
+        ])
+        .current_dir(config_example_dir())
+        .env("JETPACK_ROOT", &root.path)
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_jetos_stderr_snapshot_trimmed("vm_tools_missing", &stderr);
+    assert!(
+        !root.join("systems/vm-proofs").exists(),
+        "missing tools must not write VM proof artifacts"
+    );
+}
+
+#[test]
+fn os_vm_run_requires_proved_installed_disk() {
+    let root = Scratch::new("os-vm-run-unproven-root");
+    let tools = Scratch::new("os-vm-run-unproven-tools");
+    write_fake_vm_tools(&tools.path, false);
+    let out = jet()
+        .args([
+            "os",
+            "vm",
+            "run",
+            "halcyon",
+            "--disk",
+            "halcyon.qcow2",
+            "--no-color",
+            "--offline",
+        ])
+        .current_dir(config_example_dir())
+        .env("JETPACK_ROOT", &root.path)
+        .env("PATH", &tools.path)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_jetos_stderr_snapshot("vm_run_unproven", &stderr);
+}
+
+#[test]
+fn os_vm_prove_writes_media_bound_harness() {
+    let root = Scratch::new("os-vm-proof-root");
+    let tools = Scratch::new("os-vm-proof-tools");
+    write_fake_vm_tools(&tools.path, false);
+    let out = jet()
+        .args([
+            "os",
+            "vm",
+            "prove",
+            "halcyon",
+            "--disk",
+            "halcyon.qcow2",
+            "--name",
+            "vm-proof",
+            "--no-color",
+            "--offline",
+        ])
+        .current_dir(config_example_dir())
+        .env("JETPACK_ROOT", &root.path)
+        .env("PATH", &tools.path)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("error[E1285]"),
+        "stderr should refuse harness-only proof: {stderr}"
+    );
+    let proof_dir = root.path.join("systems/vm-proofs");
+    let proof = fs::read_dir(&proof_dir)
+        .unwrap()
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .find(|path| path.extension().and_then(|e| e.to_str()) == Some("json"))
+        .expect("vm proof json");
+    let data = fs::read_to_string(&proof).unwrap();
+    assert!(
+        data.contains("\"state\":\"harness-ready\""),
+        "proof should not claim guest pass before QEMU run: {data}"
+    );
+    assert!(data.contains("\"disk\":\"halcyon.qcow2\""), "proof: {data}");
+    assert!(
+        data.contains("\"media_proof\":"),
+        "proof should bind installer media: {data}"
+    );
+    assert!(
+        data.contains("\"expected_guest_proof\":"),
+        "proof should name the guest proof artifact path: {data}"
+    );
+    assert!(
+        data.contains("\"sha256\":"),
+        "proof should hash tools: {data}"
+    );
+    assert!(
+        data.contains("rollback-generation-bootable"),
+        "proof should name guest assertions: {data}"
+    );
+    assert!(
+        data.contains("terminal-login-ready"),
+        "proof should require terminal readiness: {data}"
+    );
+    assert!(
+        data.contains("\"phase\":\"boot-installer\""),
+        "proof should record QEMU boot phase: {data}"
+    );
+    assert!(
+        data.contains("\"phase\":\"boot-installed-disk\""),
+        "proof should record reboot phase: {data}"
+    );
+    assert!(
+        data.contains("\"-kernel\"") && data.contains("/boot/kernel"),
+        "proof should direct-boot the generation kernel: {data}"
+    );
+    assert!(
+        data.contains("\"-initrd\"") && data.contains("/boot/initrd"),
+        "proof should direct-boot the generation initrd: {data}"
+    );
+    assert!(
+        data.contains("\"-cdrom\"") && data.contains("jetos-installer-halcyon.iso"),
+        "installer phase should boot the ISO media: {data}"
+    );
+    assert!(
+        data.contains("jetos.mode=verify") && data.contains("root=LABEL=jetos-root"),
+        "installed-disk boot should carry verify intent: {data}"
+    );
+    assert!(
+        data.contains("rdinit=/jetos/guest-verify.sh"),
+        "QEMU proof should boot the JetOS verifier overlay script: {data}"
+    );
+    assert!(
+        data.contains("jetos.generation=vm-proof"),
+        "QEMU proof should bind guest boot to the generation name: {data}"
+    );
+    assert!(
+        data.contains("console=ttyS0"),
+        "QEMU proof needs serial output for guest proof marker: {data}"
+    );
+    assert!(
+        proof
+            .with_file_name("halcyon-vm-proof-vm-proof.run")
+            .join("boot-installed-disk.stdout")
+            .is_file(),
+        "vm prove should run the recorded QEMU phases"
+    );
+    assert!(
+        root.path
+            .join("systems/images/jetos-installer-halcyon.iso.proof.json")
+            .is_file(),
+        "vm prove should build media proof first"
+    );
+}
+
+#[test]
+fn os_vm_prove_runs_qemu_and_records_guest_proof() {
+    let root = Scratch::new("os-vm-run-root");
+    let tools = Scratch::new("os-vm-run-tools");
+    write_fake_vm_tools(&tools.path, true);
+    let out = jet()
+        .args([
+            "os",
+            "vm",
+            "prove",
+            "halcyon",
+            "--disk",
+            "halcyon.qcow2",
+            "--name",
+            "vm-live",
+            "--no-color",
+            "--offline",
+        ])
+        .current_dir(config_example_dir())
+        .env("JETPACK_ROOT", &root.path)
+        .env("PATH", &tools.path)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let proof = root
+        .path
+        .join("systems/vm-proofs/halcyon-vm-live-vm-proof.json");
+    let guest = root
+        .path
+        .join("systems/vm-proofs/halcyon-vm-live-vm-proof-guest-proof.json");
+    let final_proof = fs::read_to_string(&proof).unwrap();
+    assert!(
+        final_proof.contains("\"state\":\"guest-passed\""),
+        "proof: {final_proof}"
+    );
+    assert!(
+        final_proof.contains("\"guest_proof_sha256\""),
+        "proof: {final_proof}"
+    );
+    let guest_proof = fs::read_to_string(&guest).unwrap();
+    assert!(
+        guest_proof.contains("\"serial_report\""),
+        "guest proof: {guest_proof}"
+    );
+    assert!(
+        guest_proof.contains("halcyon") && guest_proof.contains("vm-live"),
+        "guest serial report should bind host and generation: {guest_proof}"
+    );
+    assert!(
+        guest_proof.contains("\"qemu-system-x86_64\""),
+        "guest proof should bind the runner toolchain: {guest_proof}"
+    );
+    let boot_log = root
+        .path
+        .join("systems/vm-proofs/halcyon-vm-live-vm-proof.run/boot-installed-disk.stdout");
+    assert!(
+        fs::read_to_string(&boot_log)
+            .unwrap()
+            .contains("JETOS_GUEST_PROOF"),
+        "boot log should carry guest proof marker"
+    );
+
+    let run = jet()
+        .args([
+            "os",
+            "vm",
+            "run",
+            "halcyon",
+            "--disk",
+            "halcyon.qcow2",
+            "--no-color",
+            "--offline",
+        ])
+        .current_dir(config_example_dir())
+        .env("JETPACK_ROOT", &root.path)
+        .env("PATH", &tools.path)
+        .output()
+        .unwrap();
+    assert!(
+        run.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(
+        stderr.contains("booting jetos VM halcyon generation vm-live"),
+        "stderr: {stderr}"
+    );
+    assert!(
+        stdout.contains("JETOS_GUEST_PROOF"),
+        "interactive run should launch QEMU with the proved disk: {stdout}"
+    );
+}
+
+#[test]
+fn os_vm_prove_accepts_matching_guest_proof() {
+    let root = Scratch::new("os-vm-guest-proof-root");
+    let tools = Scratch::new("os-vm-guest-proof-tools");
+    write_fake_vm_tools(&tools.path, false);
+    let args = [
+        "os",
+        "vm",
+        "prove",
+        "halcyon",
+        "--disk",
+        "halcyon.qcow2",
+        "--name",
+        "vm-proof",
+        "--no-color",
+        "--offline",
+    ];
+    let first = jet()
+        .args(args)
+        .current_dir(config_example_dir())
+        .env("JETPACK_ROOT", &root.path)
+        .env("PATH", &tools.path)
+        .output()
+        .unwrap();
+    assert_eq!(first.status.code(), Some(2));
+    let proof = root
+        .path
+        .join("systems/vm-proofs/halcyon-vm-proof-vm-proof.json");
+    let guest = root
+        .path
+        .join("systems/vm-proofs/halcyon-vm-proof-vm-proof-guest-proof.json");
+    let media_proof = root
+        .path
+        .join("systems/images/jetos-installer-halcyon.iso.proof.json");
+    let harness = fs::read_to_string(&proof).unwrap();
+    fs::write(
+        &guest,
+        format!(
+            "{{\"state\":\"guest-passed\",\"host\":\"halcyon\",\"generation\":\"vm-proof\",\"disk\":\"halcyon.qcow2\",\"media_proof\":\"{}\",\"assertions\":[\"current-generation-matches\",\"packages-present\",\"services-active\",\"network-up\",\"rollback-generation-bootable\",\"terminal-login-ready\"],\"toolchain\":\"{}\"}}\n",
+            test_json_escape(&media_proof.display().to_string()),
+            test_json_escape(&harness)
+        ),
+    )
+    .unwrap();
+
+    let second = jet()
+        .args(args)
+        .current_dir(config_example_dir())
+        .env("JETPACK_ROOT", &root.path)
+        .env("PATH", &tools.path)
+        .output()
+        .unwrap();
+    assert!(
+        second.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&second.stderr)
+    );
+    let final_proof = fs::read_to_string(&proof).unwrap();
+    assert!(
+        final_proof.contains("\"state\":\"guest-passed\""),
+        "proof: {final_proof}"
+    );
+    assert!(
+        final_proof.contains("\"guest_proof_sha256\""),
+        "proof: {final_proof}"
+    );
+}
+
+#[test]
+fn os_vm_prove_rejects_incomplete_guest_proof() {
+    let root = Scratch::new("os-vm-stale-guest-proof-root");
+    let tools = Scratch::new("os-vm-stale-guest-proof-tools");
+    write_fake_vm_tools(&tools.path, false);
+    let args = [
+        "os",
+        "vm",
+        "prove",
+        "halcyon",
+        "--disk",
+        "halcyon.qcow2",
+        "--name",
+        "vm-proof",
+        "--no-color",
+        "--offline",
+    ];
+    let first = jet()
+        .args(args)
+        .current_dir(config_example_dir())
+        .env("JETPACK_ROOT", &root.path)
+        .env("PATH", &tools.path)
+        .output()
+        .unwrap();
+    assert_eq!(first.status.code(), Some(2));
+    let proof = root
+        .path
+        .join("systems/vm-proofs/halcyon-vm-proof-vm-proof.json");
+    let guest = root
+        .path
+        .join("systems/vm-proofs/halcyon-vm-proof-vm-proof-guest-proof.json");
+    let media_proof = root
+        .path
+        .join("systems/images/jetos-installer-halcyon.iso.proof.json");
+    let harness = fs::read_to_string(&proof).unwrap();
+    fs::write(
+        &guest,
+        format!(
+            "{{\"state\":\"guest-passed\",\"host\":\"halcyon\",\"generation\":\"vm-proof\",\"disk\":\"halcyon.qcow2\",\"media_proof\":\"{}\",\"assertions\":[\"current-generation-matches\",\"packages-present\",\"services-active\",\"network-up\"],\"toolchain\":\"{}\"}}\n",
+            test_json_escape(&media_proof.display().to_string()),
+            test_json_escape(&harness)
+        ),
+    )
+    .unwrap();
+
+    let second = jet()
+        .args(args)
+        .current_dir(config_example_dir())
+        .env("JETPACK_ROOT", &root.path)
+        .env("PATH", &tools.path)
+        .output()
+        .unwrap();
+    assert_eq!(second.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&second.stderr);
+    assert!(
+        stderr.contains("guest assertions did not match"),
+        "stderr: {stderr}"
+    );
+    let final_proof = fs::read_to_string(&proof).unwrap();
+    assert!(
+        final_proof.contains("\"state\":\"harness-ready\""),
+        "proof should remain unpromoted: {final_proof}"
+    );
+}
+
+#[test]
+fn os_vm_prove_rejects_stale_guest_generation() {
+    let root = Scratch::new("os-vm-stale-generation-root");
+    let tools = Scratch::new("os-vm-stale-generation-tools");
+    write_fake_vm_tools(&tools.path, false);
+    let args = [
+        "os",
+        "vm",
+        "prove",
+        "halcyon",
+        "--disk",
+        "halcyon.qcow2",
+        "--name",
+        "vm-proof",
+        "--no-color",
+        "--offline",
+    ];
+    let first = jet()
+        .args(args)
+        .current_dir(config_example_dir())
+        .env("JETPACK_ROOT", &root.path)
+        .env("PATH", &tools.path)
+        .output()
+        .unwrap();
+    assert_eq!(first.status.code(), Some(2));
+    let proof = root
+        .path
+        .join("systems/vm-proofs/halcyon-vm-proof-vm-proof.json");
+    let guest = root
+        .path
+        .join("systems/vm-proofs/halcyon-vm-proof-vm-proof-guest-proof.json");
+    let media_proof = root
+        .path
+        .join("systems/images/jetos-installer-halcyon.iso.proof.json");
+    let harness = fs::read_to_string(&proof).unwrap();
+    fs::write(
+        &guest,
+        format!(
+            "{{\"state\":\"guest-passed\",\"host\":\"halcyon\",\"generation\":\"older-generation\",\"disk\":\"halcyon.qcow2\",\"media_proof\":\"{}\",\"assertions\":[\"current-generation-matches\",\"packages-present\",\"services-active\",\"network-up\",\"rollback-generation-bootable\",\"terminal-login-ready\"],\"toolchain\":\"{}\"}}\n",
+            test_json_escape(&media_proof.display().to_string()),
+            test_json_escape(&harness)
+        ),
+    )
+    .unwrap();
+
+    let second = jet()
+        .args(args)
+        .current_dir(config_example_dir())
+        .env("JETPACK_ROOT", &root.path)
+        .env("PATH", &tools.path)
+        .output()
+        .unwrap();
+    assert_eq!(second.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&second.stderr);
+    assert!(
+        stderr.contains("`generation` expected `vm-proof`, found `older-generation`"),
+        "stderr: {stderr}"
+    );
+}
+
+#[test]
+fn os_image_writes_jetos_installer_media_proof() {
     let root = Scratch::new("os-image-root");
     let out = jet()
         .args([
@@ -2051,13 +3619,96 @@ fn os_image_writes_jetos_installer_proof() {
         "stderr: {}",
         String::from_utf8_lossy(&out.stderr)
     );
-    let image = root
+    let proof = root
         .path
         .join("systems/images")
-        .join("jetos-installer-halcyon.img");
-    let data = fs::read_to_string(&image).unwrap();
-    assert!(data.contains("brand=jetos"), "data: {data}");
-    assert!(data.contains("disk=/dev/sda"), "data: {data}");
+        .join("jetos-installer-halcyon.iso.proof.json");
+    let data = fs::read_to_string(&proof).unwrap();
+    assert!(data.contains("\"brand\":\"jetos\""), "data: {data}");
+    assert!(data.contains("\"kind\":\"hybrid-iso\""), "data: {data}");
+    assert!(data.contains("\"state\":\"built\""), "data: {data}");
+    assert!(data.contains("\"sha256\":"), "data: {data}");
+    assert!(
+        root.path
+            .join("systems/images/jetos-installer-halcyon.iso")
+            .is_file(),
+        "expected real hybrid ISO artifact"
+    );
+    let staging = root
+        .path
+        .join("systems/images")
+        .join("jetos-installer-halcyon.iso.d");
+    let transaction = fs::read_to_string(staging.join("install/transaction.json")).unwrap();
+    assert!(
+        transaction.contains("\"disk\":\"/dev/sda\""),
+        "tx: {transaction}"
+    );
+    assert!(
+        transaction.contains("\"install-limine\""),
+        "tx: {transaction}"
+    );
+    let install = fs::read_to_string(staging.join("install/install.sh")).unwrap();
+    assert!(install.contains("mkfs.ext4"), "install: {install}");
+    assert!(install.contains("install-proof.json"), "install: {install}");
+    let verify = fs::read_to_string(staging.join("install/guest-verify.sh")).unwrap();
+    assert!(
+        verify.contains("system=\"$root/var/lib/jetos/generations/")
+            && verify.contains("need \"$system/plan.json\""),
+        "verify: {verify}"
+    );
+    assert!(
+        verify.contains("jetos verifier: missing $path"),
+        "verify: {verify}"
+    );
+    assert!(
+        verify.contains("terminal/facts.json") && verify.contains("serial-getty@ttyS0.service"),
+        "verify: {verify}"
+    );
+    assert!(
+        verify.contains("for svc in openssh backup metrics"),
+        "verify: {verify}"
+    );
+    assert!(verify.contains("\"rollback\""), "verify: {verify}");
+    let initrd = fs::read_to_string(staging.join("boot/initrd")).unwrap();
+    assert!(initrd.contains("jetos.mode=install"), "initrd: {initrd}");
+    assert!(initrd.contains("jetos.mode=verify"), "initrd: {initrd}");
+    assert!(
+        initrd.contains("JETOS_GUEST_PROOF"),
+        "initrd should carry guest proof reporter: {initrd}"
+    );
+    let limine = fs::read_to_string(staging.join("boot/limine.conf")).unwrap();
+    assert!(
+        limine.contains(":Install jetos halcyon")
+            && limine.contains("rdinit=/jetos/install.sh")
+            && limine.contains("jetos.disk=/dev/sda"),
+        "limine: {limine}"
+    );
+    assert_eq!(
+        fs::read_to_string(staging.join("limine.conf")).unwrap(),
+        limine,
+        "Limine config should be available at the ISO root and /boot"
+    );
+    assert!(staging.join("jetos/provenance.json").is_file());
+    assert!(
+        staging
+            .join("jetos/current-system/etc/systemd/system/openssh.service")
+            .is_file(),
+        "installer media should carry the full generation"
+    );
+    assert!(
+        !fs::symlink_metadata(staging.join("jetos/current-system/plan.json"))
+            .unwrap()
+            .file_type()
+            .is_symlink(),
+        "installer media must be self-contained"
+    );
+    assert!(
+        !fs::symlink_metadata(staging.join("jetos/current-system/sbin/init"))
+            .unwrap()
+            .file_type()
+            .is_symlink(),
+        "installer media must not point back to the host root"
+    );
 }
 
 #[test]

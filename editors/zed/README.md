@@ -62,8 +62,7 @@ nix develop -c jet lsp doctor
 nix develop -c cargo test --test lsp
 ```
 
-In Zed, open a file with `let x = 1;` — expect **E0009** with a quick-fix
-to `x :: 1` or `x := 1`.
+In Zed, open a file with `x :: 1` and expect a clean parse.
 
 ## Grammar note
 

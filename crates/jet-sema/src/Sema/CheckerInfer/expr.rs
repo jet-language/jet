@@ -837,7 +837,7 @@ impl<'a> Checker<'a> {
                                 "the inferred construction form requires an expected type \
                                  from the surrounding context (binding annotation, return type, etc.)"
                                     .to_string(),
-                                "add a type annotation, e.g. `val x: Point = .{ x: 1, y: 2 }`"
+                                "add a type annotation, e.g. `x: Point :: .{ x: 1, y: 2 }`"
                                     .to_string(),
                                 Some(*span),
                             ));
@@ -1070,7 +1070,7 @@ impl<'a> Checker<'a> {
             self.diags.push(Diagnostic::error(
                 "E0501",
                 "an empty list needs a type".to_string(),
-                "write `[]` only where the list type is already known, like `val xs: [Int] = []`"
+                "write `[]` only where the list type is already known, like `xs: [Int] :: []`"
                     .to_string(),
                 "add a type annotation on the binding".to_string(),
                 Some(span),

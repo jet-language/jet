@@ -2028,9 +2028,9 @@ pub enum BindPattern {
         rest: Option<Span>,
         span: Span,
     },
-    /// `val [a, b] = xs;` — binds list elements by position.
+    /// `[a, b] :: xs` — binds list elements by position.
     List { elems: Vec<BindName>, span: Span },
-    /// `val (x, y) = p;` — binds named tuple fields in canonical (sorted) order.
+    /// `(x, y) :: p` — binds named tuple fields in canonical (sorted) order.
     Tuple { elems: Vec<BindName>, span: Span },
 }
 

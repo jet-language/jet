@@ -508,7 +508,7 @@ impl<'a> Checker<'a> {
         self.moved.insert(name, span);
     }
 
-    /// `x = y;` / `val a = y;` / `return y;` where `y` is a plain name of a
+    /// `x = y` / `a :: y` / `return y` where `y` is a plain name of a
     /// non-scalar type gives the value away (assignment moves, see C1).
     pub(crate) fn note_move_if_direct_ident(&mut self, e: &Expr) {
         if let Expr::Ident(n, span) = e {

@@ -18,7 +18,7 @@ use super::Services;
 use super::Shell::{self, Env, ShellKind};
 use super::Store::{self, Roots};
 use super::Trust;
-use super::{EnvFile, ModuleEval, RefSpec::RefError, WorkspaceFile, WorkspaceLock};
+use super::{EnvFile, ModuleEval, RefSpec::RefError, WorkspaceFile, WorkspaceLock, JSON};
 use crate::{Lock, Syntax};
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
@@ -51,6 +51,12 @@ struct Flags {
     os_name: Option<String>,
     /// D-JPK-OSDISK1=C: optional manual disk/device path for `jet os init|image`.
     os_manual: Option<String>,
+    /// D-JOS-VMCOMMAND1=A: optional VM proof disk image path.
+    os_disk: Option<String>,
+    /// D-JOS-STUDIO-HOST1=A: local Studio projection service address.
+    studio_serve: Option<String>,
+    /// D-JOS-STUDIO-HOST1=A: selected jetos host for Studio.
+    studio_host: Option<String>,
     /// U20: `jetpack add <ref> --adapt` drafts an adapter declaration instead
     /// of editing `env.jet` with a plain package ref.
     adapt: bool,
@@ -87,6 +93,9 @@ fn parse_args(args: &[String]) -> Parsed {
         trust_scope: None,
         os_name: None,
         os_manual: None,
+        os_disk: None,
+        studio_serve: None,
+        studio_host: None,
     };
     let mut positional = Vec::new();
     let mut command = None;
@@ -132,6 +141,24 @@ fn parse_args(args: &[String]) -> Parsed {
                 i += 1;
                 if let Some(path) = args.get(i) {
                     flags.os_manual = Some(path.clone());
+                }
+            }
+            a if a == Syntax::OS_FLAG_DISK => {
+                i += 1;
+                if let Some(path) = args.get(i) {
+                    flags.os_disk = Some(path.clone());
+                }
+            }
+            a if a == Syntax::STUDIO_FLAG_SERVE => {
+                i += 1;
+                if let Some(addr) = args.get(i) {
+                    flags.studio_serve = Some(addr.clone());
+                }
+            }
+            a if a == Syntax::STUDIO_FLAG_HOST => {
+                i += 1;
+                if let Some(host) = args.get(i) {
+                    flags.studio_host = Some(host.clone());
                 }
             }
             "--fixtures" => {
@@ -198,6 +225,7 @@ pub fn main(args: Vec<String>) -> i32 {
         v if v == Syntax::IMAGE_SUBCOMMAND => cmd_image(&theme, &parsed),
         v if v == Syntax::BRIDGE_SUBCOMMAND => cmd_bridge(&theme, &parsed),
         v if v == Syntax::OS_SUBCOMMAND => cmd_os(&theme, &parsed),
+        v if v == Syntax::STUDIO_SUBCOMMAND => cmd_studio(&theme, &parsed),
         v if v == Syntax::SERVICES_SUBCOMMAND => cmd_services(&theme, &parsed),
         v if v == Syntax::SECRETS_SUBCOMMAND => cmd_secrets(&theme, &parsed),
         "help" | "--help" | "-h" => {
@@ -3541,8 +3569,497 @@ fn cmd_os(theme: &Theme, parsed: &Parsed) -> i32 {
         offline: parsed.flags.offline,
         name: parsed.flags.os_name.clone(),
         manual_disk: parsed.flags.os_manual.clone(),
+        disk: parsed.flags.os_disk.clone(),
+        json: parsed.flags.json,
     };
     super::JetOS::main(theme, verb, args, &flags)
+}
+
+/// `jetos studio` — launch the installed first-party Studio app, with a
+/// browser/headless fallback over the same generated projection.
+fn cmd_studio(theme: &Theme, parsed: &Parsed) -> i32 {
+    let headless = parsed
+        .positional
+        .iter()
+        .any(|arg| arg == Syntax::STUDIO_FLAG_HEADLESS);
+    let root = std::env::var_os("JETOS_STUDIO_ROOT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/run/current-system"));
+    let app = root.join("studio/index.html");
+    let meta = root.join("studio/app.json");
+    let data = root.join("studio/data.json");
+    if !app.is_file() || !meta.is_file() || !data.is_file() {
+        theme.error(
+            "jetos Studio app is not installed",
+            &format!(
+                "`{}` does not contain studio/index.html, studio/app.json, and studio/data.json.",
+                root.display()
+            ),
+            "activate a jetos generation, or set JETOS_STUDIO_ROOT to a generation path.",
+        );
+        return 2;
+    }
+    if parsed.flags.json {
+        println!(
+            "{{\"root\":{},\"app\":{},\"metadata\":{},\"data\":{},\"host\":{}}}",
+            JSON::quote(&root.display().to_string()),
+            JSON::quote(&app.display().to_string()),
+            JSON::quote(&meta.display().to_string()),
+            JSON::quote(&data.display().to_string()),
+            JSON::quote(studio_host(parsed).as_deref().unwrap_or(""))
+        );
+        return 0;
+    }
+    if let Some(addr) = parsed.flags.studio_serve.as_deref() {
+        let context = studio_context(parsed);
+        return serve_studio(theme, addr, &app, &meta, &data, context.as_ref());
+    }
+    println!("{}", app.display());
+    if headless {
+        theme.ok("jetos Studio app ready");
+        return 0;
+    }
+    match std::process::Command::new("xdg-open").arg(&app).spawn() {
+        Ok(_) => {
+            theme.ok("opened jetos Studio");
+            0
+        }
+        Err(_) => {
+            theme.ok("jetos Studio browser fallback ready");
+            theme.detail("open the printed path in a browser.");
+            0
+        }
+    }
+}
+
+struct StudioContext {
+    config: PathBuf,
+    host: String,
+}
+
+fn studio_host(parsed: &Parsed) -> Option<String> {
+    parsed.flags.studio_host.clone()
+}
+
+fn studio_context(parsed: &Parsed) -> Option<StudioContext> {
+    let project = parsed
+        .positional
+        .iter()
+        .find(|arg| !arg.starts_with('-'))
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."));
+    let config = if project.is_dir() {
+        project.join(Syntax::CONFIG_FILE)
+    } else {
+        project
+    };
+    let host = studio_host(parsed).unwrap_or_else(|| "host".to_string());
+    Some(StudioContext { config, host })
+}
+
+fn serve_studio(
+    theme: &Theme,
+    addr: &str,
+    app: &Path,
+    meta: &Path,
+    data: &Path,
+    context: Option<&StudioContext>,
+) -> i32 {
+    let listener = match std::net::TcpListener::bind(addr) {
+        Ok(listener) => listener,
+        Err(e) => {
+            theme.error(
+                "jetos Studio could not bind the local service",
+                &format!("binding `{addr}` failed: {e}"),
+                "choose a free loopback address, for example `--serve 127.0.0.1:7417`.",
+            );
+            return 2;
+        }
+    };
+    let local = listener
+        .local_addr()
+        .map(|addr| addr.to_string())
+        .unwrap_or_else(|_| addr.to_string());
+    println!("http://{local}/studio/");
+    theme.ok("jetos Studio service listening");
+    for stream in listener.incoming() {
+        match stream {
+            Ok(mut stream) => {
+                let _ = handle_studio_request(&mut stream, app, meta, data, context);
+            }
+            Err(e) => {
+                theme.error(
+                    "jetos Studio service connection failed",
+                    &format!("accepting a local connection failed: {e}"),
+                    "restart `jetos studio --serve`.",
+                );
+                return 2;
+            }
+        }
+    }
+    0
+}
+
+fn handle_studio_request(
+    stream: &mut std::net::TcpStream,
+    app: &Path,
+    meta: &Path,
+    data: &Path,
+    context: Option<&StudioContext>,
+) -> std::io::Result<()> {
+    use std::io::Write;
+    let request_bytes = read_http_request(stream)?;
+    let request = String::from_utf8_lossy(&request_bytes);
+    let method = request
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().next())
+        .unwrap_or("GET");
+    let path = request
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .unwrap_or("/");
+    if method == "POST" && path == "/studio/transaction" {
+        let body = request.split("\r\n\r\n").nth(1).unwrap_or("");
+        let (status, body) = handle_studio_transaction(body, context);
+        let response = format!(
+            "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            body.len()
+        );
+        stream.write_all(response.as_bytes())?;
+        return stream.write_all(body.as_bytes());
+    }
+    if method == "POST" && path == "/studio/run" {
+        let body = request.split("\r\n\r\n").nth(1).unwrap_or("");
+        let (status, body) = handle_studio_run(body, context);
+        let response = format!(
+            "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            body.len()
+        );
+        stream.write_all(response.as_bytes())?;
+        return stream.write_all(body.as_bytes());
+    }
+    let (status, content_type, body) = match path {
+        "/" | "/studio" | "/studio/" | "/studio/index.html" => {
+            ("200 OK", "text/html; charset=utf-8", fs_read_for_http(app))
+        }
+        "/studio/app.json" => ("200 OK", "application/json", fs_read_for_http(meta)),
+        "/studio/data.json" => ("200 OK", "application/json", fs_read_for_http(data)),
+        "/studio/source" => match context {
+            Some(context) => (
+                "200 OK",
+                "text/plain; charset=utf-8",
+                fs_read_for_http(&context.config),
+            ),
+            None => (
+                "400 Bad Request",
+                "text/plain; charset=utf-8",
+                b"missing Studio project context\n".to_vec(),
+            ),
+        },
+        _ => (
+            "404 Not Found",
+            "text/plain; charset=utf-8",
+            b"not found\n".to_vec(),
+        ),
+    };
+    let response = format!(
+        "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    );
+    stream.write_all(response.as_bytes())?;
+    stream.write_all(&body)
+}
+
+fn fs_read_for_http(path: &Path) -> Vec<u8> {
+    std::fs::read(path).unwrap_or_else(|_| b"missing\n".to_vec())
+}
+
+fn read_http_request(stream: &mut std::net::TcpStream) -> std::io::Result<Vec<u8>> {
+    use std::io::Read;
+    let mut buf = Vec::new();
+    let mut chunk = [0_u8; 1024];
+    loop {
+        let n = stream.read(&mut chunk)?;
+        if n == 0 {
+            break;
+        }
+        buf.extend_from_slice(&chunk[..n]);
+        if http_request_complete(&buf) || buf.len() > 64 * 1024 {
+            break;
+        }
+    }
+    Ok(buf)
+}
+
+fn http_request_complete(buf: &[u8]) -> bool {
+    let Some(header_end) = buf.windows(4).position(|w| w == b"\r\n\r\n").map(|p| p + 4) else {
+        return false;
+    };
+    let headers = String::from_utf8_lossy(&buf[..header_end]);
+    let content_len = headers
+        .lines()
+        .find_map(|line| {
+            let (key, value) = line.split_once(':')?;
+            key.eq_ignore_ascii_case("content-length")
+                .then(|| value.trim().parse::<usize>().ok())
+                .flatten()
+        })
+        .unwrap_or(0);
+    buf.len().saturating_sub(header_end) >= content_len
+}
+
+fn handle_studio_transaction(
+    body: &str,
+    context: Option<&StudioContext>,
+) -> (&'static str, String) {
+    let Some(context) = context else {
+        return (
+            "400 Bad Request",
+            "{\"error\":\"missing Studio project context\"}".to_string(),
+        );
+    };
+    let op = json_string_field(body, "op").unwrap_or_default();
+    if op != "set-option" {
+        return (
+            "400 Bad Request",
+            "{\"error\":\"unsupported Studio transaction\"}".to_string(),
+        );
+    }
+    let Some(key) = json_string_field(body, "key") else {
+        return ("400 Bad Request", "{\"error\":\"missing key\"}".to_string());
+    };
+    let Some(value) = json_string_field(body, "value") else {
+        return (
+            "400 Bad Request",
+            "{\"error\":\"missing value\"}".to_string(),
+        );
+    };
+    let write = json_bool_field(body, "write");
+    let source = match std::fs::read_to_string(&context.config) {
+        Ok(source) => source,
+        Err(e) => {
+            return (
+                "500 Internal Server Error",
+                format!(
+                    "{{\"error\":{},\"path\":{}}}",
+                    JSON::quote(&format!("reading config failed: {e}")),
+                    JSON::quote(&context.config.display().to_string())
+                ),
+            )
+        }
+    };
+    let (next, changed) = match apply_option_transaction(&source, &key, &value) {
+        Ok(result) => result,
+        Err(e) => {
+            return (
+                "400 Bad Request",
+                format!("{{\"error\":{}}}", JSON::quote(&e)),
+            )
+        }
+    };
+    if write && changed {
+        if let Err(e) = std::fs::write(&context.config, &next) {
+            return (
+                "500 Internal Server Error",
+                format!(
+                    "{{\"error\":{},\"path\":{}}}",
+                    JSON::quote(&format!("writing config failed: {e}")),
+                    JSON::quote(&context.config.display().to_string())
+                ),
+            );
+        }
+    }
+    let diff = source_diff(&context.config, &source, &next);
+    (
+        "200 OK",
+        format!(
+            "{{\"host\":{},\"path\":{},\"op\":\"set-option\",\"key\":{},\"value\":{},\"write\":{},\"changed\":{},\"diff\":{}}}",
+            JSON::quote(&context.host),
+            JSON::quote(&context.config.display().to_string()),
+            JSON::quote(&key),
+            JSON::quote(&value),
+            if write { "true" } else { "false" },
+            if changed { "true" } else { "false" },
+            JSON::quote(&diff)
+        ),
+    )
+}
+
+fn handle_studio_run(body: &str, context: Option<&StudioContext>) -> (&'static str, String) {
+    let Some(context) = context else {
+        return (
+            "400 Bad Request",
+            "{\"error\":\"missing Studio project context\"}".to_string(),
+        );
+    };
+    let Some(action) = json_string_field(body, "action") else {
+        return (
+            "400 Bad Request",
+            "{\"error\":\"missing action\"}".to_string(),
+        );
+    };
+    if !["check", "plan", "build", "proof", "generations"].contains(&action.as_str()) {
+        return (
+            "400 Bad Request",
+            "{\"error\":\"unsupported Studio run action\"}".to_string(),
+        );
+    }
+    let Some(jet) = sibling_binary("jet") else {
+        return (
+            "500 Internal Server Error",
+            "{\"error\":\"could not find sibling jet binary\"}".to_string(),
+        );
+    };
+    let cwd = context
+        .config
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
+    let mut cmd = std::process::Command::new(jet);
+    cmd.arg("os")
+        .arg(&action)
+        .arg(&context.host)
+        .arg("--no-color");
+    if action == "plan" || action == "proof" {
+        cmd.arg("--json");
+    }
+    if action == "build" {
+        cmd.arg("--name").arg("zz-studio-candidate");
+    }
+    let output = match cmd.current_dir(&cwd).output() {
+        Ok(output) => output,
+        Err(e) => {
+            return (
+                "500 Internal Server Error",
+                format!(
+                    "{{\"error\":{}}}",
+                    JSON::quote(&format!("running jet failed: {e}"))
+                ),
+            )
+        }
+    };
+    (
+        "200 OK",
+        format!(
+            "{{\"host\":{},\"action\":{},\"status\":{},\"success\":{},\"stdout\":{},\"stderr\":{}}}",
+            JSON::quote(&context.host),
+            JSON::quote(&action),
+            output.status.code().unwrap_or(1),
+            if output.status.success() { "true" } else { "false" },
+            JSON::quote(&String::from_utf8_lossy(&output.stdout)),
+            JSON::quote(&String::from_utf8_lossy(&output.stderr))
+        ),
+    )
+}
+
+fn sibling_binary(name: &str) -> Option<PathBuf> {
+    let current = std::env::current_exe().ok()?;
+    let dir = current.parent()?;
+    let direct = dir.join(name);
+    if direct.is_file() {
+        return Some(direct);
+    }
+    #[cfg(unix)]
+    {
+        let debug = dir.parent()?.join(name);
+        if debug.is_file() {
+            return Some(debug);
+        }
+    }
+    Some(PathBuf::from(name))
+}
+
+fn apply_option_transaction(
+    source: &str,
+    key: &str,
+    value: &str,
+) -> Result<(String, bool), String> {
+    let mut lines = source.lines().map(str::to_string).collect::<Vec<_>>();
+    let mut in_options = false;
+    let mut insert_at = None;
+    for (idx, line) in lines.iter_mut().enumerate() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("options:") && trimmed.contains('[') {
+            in_options = true;
+            continue;
+        }
+        if in_options && trimmed.starts_with(']') {
+            insert_at = Some(idx);
+            break;
+        }
+        if in_options && trimmed.starts_with(&format!("{key}:")) {
+            let indent_len = line.len() - trimmed.len();
+            let indent = line[..indent_len].to_string();
+            let comma = if trimmed.trim_end().ends_with(',') {
+                ","
+            } else {
+                ""
+            };
+            let next = format!("{indent}{key}: {value}{comma}");
+            let changed = *line != next;
+            *line = next;
+            let mut output = lines.join("\n");
+            if source.ends_with('\n') {
+                output.push('\n');
+            }
+            return Ok((output, changed));
+        }
+    }
+    let Some(idx) = insert_at else {
+        return Err("Studio could not find an options block in config.jet".to_string());
+    };
+    lines.insert(idx, format!("            {key}: {value},"));
+    let mut output = lines.join("\n");
+    if source.ends_with('\n') {
+        output.push('\n');
+    }
+    Ok((output, true))
+}
+
+fn source_diff(path: &Path, before: &str, after: &str) -> String {
+    if before == after {
+        return format!("diff -- {}\n(no changes)\n", path.display());
+    }
+    let mut diff = format!("diff -- {}\n", path.display());
+    let before_lines = before.lines().collect::<Vec<_>>();
+    let after_lines = after.lines().collect::<Vec<_>>();
+    let max = before_lines.len().max(after_lines.len());
+    for idx in 0..max {
+        let old = before_lines.get(idx).copied();
+        let new = after_lines.get(idx).copied();
+        if old == new {
+            continue;
+        }
+        if let Some(old) = old {
+            diff.push_str(&format!("-{old}\n"));
+        }
+        if let Some(new) = new {
+            diff.push_str(&format!("+{new}\n"));
+        }
+    }
+    diff
+}
+
+fn json_string_field(body: &str, key: &str) -> Option<String> {
+    let needle = format!("\"{key}\"");
+    let rest = body.split_once(&needle)?.1;
+    let rest = rest.split_once(':')?.1.trim_start();
+    let rest = rest.strip_prefix('"')?;
+    let end = rest.find('"')?;
+    Some(rest[..end].replace("\\\"", "\"").replace("\\\\", "\\"))
+}
+
+fn json_bool_field(body: &str, key: &str) -> bool {
+    let needle = format!("\"{key}\"");
+    let Some(rest) = body.split_once(&needle).map(|(_, rest)| rest) else {
+        return false;
+    };
+    let Some(rest) = rest.split_once(':').map(|(_, rest)| rest.trim_start()) else {
+        return false;
+    };
+    rest.starts_with("true")
 }
 
 fn usage() -> String {
@@ -3591,13 +4108,18 @@ fn usage() -> String {
 
 {machines}
   jet os check <host>                  validate ./config.jet system.<host>
+  jet os plan <host> --json            print checked plan/proof input without building
+  jet os proof <host> --json           print latest generation proof/provenance facts
   jet os build <host>                  build a named jetos generation
   jet os switch <host> [--name <name>] build + activate a named generation
   jet os generations [<host>]          list generations newest first
   jet os rollback <host> [<name>]      activate a previous generation
   jet os init <host> [--manual <path>] write starter ./config.jet
   jet os lift <host> [<root>]          draft ./config.jet from a host root
-  jet os image <host> [--manual <path>] write a jetos installer proof image
+  jet os image <host> [--manual <path>] write jetos hybrid ISO media/proof
+  jet os vm prove <host> --disk <path> boot installer, install, reboot, prove
+  jetos studio [path] --host <host>    open installed jetos Studio app
+  jetos studio [path] --serve 127.0.0.1:7417 serve browser/edit fallback
   {bin} push <fleet>                   validate a fleet's hosts (deploy is gated)
   {bin} services up   [<name>]         start dev services declared under env.*
   {bin} services down [<name>]         stop them
@@ -3638,6 +4160,10 @@ fn usage() -> String {
   --push <ref>                         (image) push after building — gated on TLS, E1268
   --name <name>                        (os switch) override generation name
   --manual <path>                      (os init/image) record manual disk path
+  --disk <path>                        (os vm prove) target qcow2/raw disk image
+  --headless                           (jetos studio) print app path without opening
+  --serve <addr>                       (jetos studio) run local projection service
+  --host <host>                        (jetos studio) select system host
 ",
         title = h(&format!("{bin} — Jet's package manager (Phase 1)")),
         envs = h("environments:"),

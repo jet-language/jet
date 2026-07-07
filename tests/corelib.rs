@@ -809,10 +809,8 @@ fn core_module_items_covers_known_core_modules() {
     }
 
     // D-CORENS-CANON1: most ring packages still normalize to legacy `jet.*`
-    // internal dispatch keys. `core.archive` is already canonical end-to-end.
-    let ring_names = [
-        "log", "crypto", "http", "regex", "reactive", "raylib", "db", "plugin",
-    ];
+    // internal dispatch keys. Some modules are already canonical end-to-end.
+    let ring_names = ["log", "crypto", "http", "regex", "reactive", "db", "plugin"];
     let known_raw = jet::Loader::KNOWN_CORE_MODULES;
     let known: std::collections::BTreeSet<String> = known_raw
         .iter()
@@ -841,6 +839,26 @@ fn core_module_items_covers_known_core_modules() {
         "core_module_items has arms for modules NOT in KNOWN_CORE_MODULES: {:?}\n\
          Either add to KNOWN_CORE_MODULES in Source/Loader.rs or remove the arm.",
         extra_in_items
+    );
+}
+
+#[test]
+fn jet_raylib_namespace_is_not_a_core_module_alias() {
+    assert!(jet::Syntax::is_known_core_module("core.raylib"));
+    assert!(!jet::Syntax::is_known_core_module("jet.raylib"));
+
+    let src = r#"
+use jet.raylib as rl
+
+fn run() {
+    print("nope")
+}
+"#;
+    let diags = jet::compile(src).expect_err("jet.raylib must be rejected");
+    assert!(
+        diags.iter().any(|d| d.code == "E0341"),
+        "expected E0341 for retired namespace, got: {:?}",
+        diags.iter().map(|d| d.code.to_string()).collect::<Vec<_>>()
     );
 }
 
@@ -1499,6 +1517,51 @@ fn run() {
     assert_eq!(
         stdout, "10.0\n10.0\nnull\nnull\nnull\nnull\n",
         "unexpected option combinator output: {stdout}"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn event_scope_subscribe_once_priority_and_hook_run() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc {
+        eprintln!("note: skipping event runtime test (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_corelib_event_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "event_runtime",
+        r#"
+use core.event as event
+
+fn run() {
+    scope :: event.scope()
+    ev :: event.with_policy<Int>(event.policy_async(2))
+    sub :: ev.on(scope, (n) => { print("low {n}") })
+    ev.on_priority(scope, 10, (n) => { print("high {n}") })
+    ev.once(scope, (n) => { print("once {n}") })
+    print(ev.emit_async(1).summary())
+    sub.unsubscribe()
+    print(ev.emit(2).summary())
+    print(scope.active_count())
+
+    hook :: event.hook<Int, String>("base")
+    hook.on(scope, (n) => "seen {n}")
+    print(hook.run(7, "fallback"))
+    scope.cancel()
+    print(hook.run(8, "fallback"))
+}
+"#,
+        &[],
+        None,
+    );
+    assert_eq!(code, 0, "event runtime failed: {stderr}");
+    assert_eq!(
+        stdout,
+        "high 1\nlow 1\nonce 1\nevent delivered=3 queued=1 dropped=0\nhigh 2\nevent delivered=1 queued=1 dropped=0\n1\nseen 7\nfallback\n"
     );
     let _ = fs::remove_dir_all(&dir);
 }

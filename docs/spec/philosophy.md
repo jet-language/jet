@@ -151,7 +151,7 @@ loved by experts.
 - **An expert low-level tier is required** — true C/C++/Rust/Zig-class
   control (raw memory, layout, volatile, allocators), gated so it never
   confuses beginners and never slows programs that don't use it.
-  Gating ratified as S58 (`std/mem` import + `unsafe` blocks,
+  Gating ratified as S58 (`core.mem` import + `#Unsafe("reason")` blocks,
   Zig-style allocators). Onboarding materials never mention it until
   needed.
 - **C FFI is a needed future addition** (S59 ships in **Epoch 2**,

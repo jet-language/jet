@@ -269,7 +269,7 @@ pub fn e0904(span: Span, param: &str) -> Diagnostic {
         "E0904",
         format!("can't figure out what `{param}` should be here"),
         "generic calls need enough context to pick a concrete type".to_string(),
-        "add a type annotation on a binding, like `val p: Pair<Int> = …`".to_string(),
+        "add a type annotation on a binding, like `p: Pair<Int> :: …`".to_string(),
         Some(span),
     )
 }

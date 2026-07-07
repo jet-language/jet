@@ -42,6 +42,7 @@
 //! D-WASM1) that only ever care about a whole root regardless of leaf.
 
 use crate::Diagnostics::{Diagnostic, Span};
+use crate::Syntax;
 use std::collections::{BTreeSet, HashMap};
 
 /// A primitive effect. Closed, compiler-known set; each Core operation
@@ -292,8 +293,12 @@ pub fn show_set(set: &EffectSet) -> String {
 
 /// The effect carried by a Core call `module.method`, or `None` if pure.
 /// Grounded in the real Core API surface (CheckerCoreLib). The `module` is the
-/// fully-resolved name (`core.files`, `jet.http`, …).
+/// fully-resolved name (`core.files`, `core.http`, …); legacy internal ring
+/// keys are normalized through the foundation resolver before matching.
 pub fn core_effect(module: &str, method: &str) -> Option<Effect> {
+    let normalized_module =
+        Syntax::normalize_core_module(module).unwrap_or_else(|| module.to_string());
+    let module = normalized_module.as_str();
     // D-DET1: the deterministic capability constructors carry NO ambient effect —
     // `time.clock(seed)` / `random.rng(seed)` build a reproducible `Clock`/`Rng`
     // from a caller-supplied seed (a pure value). Reading time/randomness THROUGH
@@ -313,7 +318,7 @@ pub fn core_effect(module: &str, method: &str) -> Option<Effect> {
         "core.files" => Effect::Fs,
         "core.net" | "jet.http" | "core.http.client" | "core.http.server" => Effect::Net,
         // D-RAYLIB1=A: windowing/drawing/input/audio bridge.
-        "core.raylib" | "jet.raylib" => Effect::Gpu,
+        "core.raylib" => Effect::Gpu,
         "core.time" => Effect::Time,
         "core.random" | "core.crypto.random" => Effect::Rand,
         "core.env" => Effect::Env,

@@ -3071,6 +3071,33 @@ pub(crate) fn method_call_in_subset(
                 .iter()
                 .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
     }
+    // Shape (d5b) [D-EVENT1=D]: Event/Hook handle methods. Handler arguments
+    // must be literal lambdas so lowering can seed payload/result types and
+    // render the stored callback for the event runtime.
+    if is_event_handle_type(recv_type.as_deref()) && is_event_method_name(method, args.len()) {
+        let handler_ok = match (method, args.len()) {
+            ("on" | "once", 2) => args
+                .get(1)
+                .is_some_and(|a| a.label.is_none() && matches!(a.expr, Expr::Lambda(_))),
+            ("on_priority", 3) => {
+                args.get(1)
+                    .is_some_and(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals))
+                    && args
+                        .get(2)
+                        .is_some_and(|a| a.label.is_none() && matches!(a.expr, Expr::Lambda(_)))
+            }
+            _ => true,
+        };
+        return expr_in_subset(receiver, cx, locals)
+            && handler_ok
+            && args.iter().enumerate().all(|(i, a)| {
+                a.label.is_none()
+                    && match (method, args.len(), i) {
+                        ("on" | "once", 2, 1) | ("on_priority", 3, 2) => true,
+                        _ => expr_in_subset(&a.expr, cx, locals),
+                    }
+            });
+    }
     // Shape (d6) [D-HONESTNUM1=A]: a `Measurement<Float>` method.
     // Sema sets `recv_type == Some("Measurement")`.
     if recv_type.as_deref() == Some("Measurement") && is_measurement_method_name(method, args.len())
@@ -3728,6 +3755,26 @@ pub(crate) fn is_reactive_method_name(method: &str, nargs: usize) -> bool {
     matches!((method, nargs), ("get", 0) | ("set", 1))
 }
 
+pub(crate) fn is_event_handle_type(name: Option<&str>) -> bool {
+    matches!(
+        name,
+        Some("Event" | "Hook" | "Subscription" | "EventScope" | "EventTrace")
+    )
+}
+
+pub(crate) fn is_event_method_name(method: &str, nargs: usize) -> bool {
+    matches!(
+        (method, nargs),
+        ("on" | "once", 2)
+            | ("on_priority", 3)
+            | ("emit" | "emit_async", 1)
+            | ("run", 2)
+            | ("unsubscribe" | "active" | "cancel" | "active_count", 0)
+            | ("trace" | "listener_count" | "queued_count", 0)
+            | ("summary" | "delivered" | "queued" | "dropped", 0)
+    )
+}
+
 /// D-HONESTNUM1=A: is `(method, nargs)` a `Measurement<Float>` method?
 /// `.add/sub/mul/div(m)` (1 arg), `.value()/.uncertainty()` (0 args).
 /// Always keyed with `recv_type == Some("Measurement")`.
@@ -4086,6 +4133,16 @@ pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
         module,
         "core.sketch.hll" | "core.sketch.tdigest" | "core.sketch.cms" | "core.sketch.reservoir"
     ) && method == "new"
+    {
+        return true;
+    }
+    // D-EVENT1=D: Event/Hook constructors are generic over the payload/result
+    // types, so their real return type comes from sema's resolved call.
+    if module == "core.event"
+        && matches!(
+            method,
+            "new" | "with_policy" | "hook" | "scope" | "policy_sync" | "policy_async"
+        )
     {
         return true;
     }
@@ -4685,6 +4742,28 @@ pub(crate) fn core_call_return_ty(module: &str, method: &str) -> Type {
                 name: "Rotting".to_string(),
                 args: vec![Type::Named("Unknown".to_string())],
             }
+        }
+        // D-EVENT1=D: generic constructors; sema normally writes the precise
+        // resolved return type and lowering reads that. Placeholders keep node
+        // totality for defensive/fallback paths.
+        ("core.event", "new" | "with_policy") => {
+            return Type::Apply {
+                name: "Event".to_string(),
+                args: vec![Type::Named("Unknown".to_string())],
+            }
+        }
+        ("core.event", "hook") => {
+            return Type::Apply {
+                name: "Hook".to_string(),
+                args: vec![
+                    Type::Named("Unknown".to_string()),
+                    Type::Named("Unknown".to_string()),
+                ],
+            }
+        }
+        ("core.event", "scope") => return Type::Named("EventScope".to_string()),
+        ("core.event", "policy_sync" | "policy_async") => {
+            return Type::Named("EventPolicy".to_string())
         }
         // D-NETDEP1=A / D-HTTPLIB1=A: HTTP constructors.
         ("core.http.client", "get") | ("core.http.client", "post") => {

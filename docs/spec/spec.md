@@ -853,6 +853,42 @@ needs outside the retained `core.ui` paint surface:
 native codegen lowers the same checked calls to inert stubs so rustc never
 becomes the browser API checker.
 
+## First-party events and hooks (D-EVENT1, implemented)
+
+`use core.event as event` exposes the first compiler-known event family as
+ordinary Core values. There is no `event` declaration syntax in this slice.
+
+- `event.new<T>() -> Event<T>` creates a typed many-subscriber occurrence stream.
+- `event.with_policy<T>(policy) -> Event<T>` creates the same stream with an
+  explicit sync/queued dispatch policy.
+- `event.hook<T, R>(fallback) -> Hook<T, R>` creates an ordered intervention
+  point. `.run(payload, fallback)` returns the last active handler result, or
+  the call-site fallback when no handler is active.
+- `event.scope() -> EventScope` owns subscriptions. `scope.cancel()` unsubscribes
+  all owned subscriptions; `scope.active_count()` reports currently active
+  subscriptions.
+- `Event<T>.on(scope, handler)`, `.once(scope, handler)`, and
+  `.on_priority(scope, priority, handler)` return `Subscription`. Priority sorts
+  before source order; `once` auto-unsubscribes after first delivery.
+- `Event<T>.emit(payload)` and `.emit_async(payload)` return `EventTrace`.
+  `EventTrace.summary()` prints delivered/queued/dropped counts.
+
+```jet
+use core.event as event
+
+fn run() {
+    scope :: event.scope()
+    clicked :: event.new<Int>()
+
+    sub :: clicked.on(scope, (n) => { print("clicked {n}") })
+    clicked.once(scope, (n) => { print("once {n}") })
+
+    print(clicked.emit(1).summary())
+    sub.unsubscribe()
+    scope.cancel()
+}
+```
+
 ### Jai transliteration: compact cast/deref chains (D-POINTERCHAIN1=A, docs-only)
 
 Jai allows a single compact expression that casts and dereferences a raw pointer
@@ -1302,14 +1338,91 @@ capture into a plan model). The U5 merge engine consumes `env` contributions.
 
 ### jetos Runtime Slice
 
-`jet os check|init|build|switch|rollback|generations|lift|image` is active. A
-bare host (`jet os switch laptop`) selects `system.laptop` in `./config.jet`;
-`path@host` selects an exact external root. Builds create named generations;
-`generations` lists newest first; `switch --name <name>` overrides the automatic
-name; `rollback` activates a prior generation. The current slice records
-systemd unit files, repo-ciphertext/host-key tmpfs-only secret activation proof,
-guided-ext4 disk intent with `--manual`, and `jetos-installer-<host>.img` proof
-images.
+`jet os check|init|plan|proof|build|switch|rollback|generations|lift|image|vm`
+is active. A bare host (`jet os switch laptop`) selects `system.laptop` in
+`./config.jet`; `path@host` selects an exact external root. Builds create named
+generations; `generations` lists newest first; `switch --name <name>` overrides
+the automatic name; `rollback` activates a prior generation. `plan` prints the
+checked system plan without building. `proof` reads the latest generation's
+plan, proof, provenance, health, boot, init, secrets, VM, and rollback facts.
+The current slice records a root `sw/bin` package closure, hangar/cache facts,
+systemd service/timer/socket units plus target wants, users/groups, filesystems and swap,
+networkd/firewall/wireless facts, Limine + CachyOS boot facts, first-party
+systemd init closure with `/sbin/init`, kernel firmware/driver facts, desktop/display-manager facts,
+terminal login facts with serial/virtual getty units and user home/profile
+projection,
+repo-ciphertext/host-key tmpfs-only secret activation proof, guided-ext4 disk
+intent with `--manual`, and `jetos` hybrid ISO media staging/proof. When pinned
+xorriso, Limine, zstd, QEMU, and filesystem tools are present, `jet os image`
+writes the ISO artifact and records the exact tool paths in proof JSON.
+Installer media copies the generation as a self-contained tree; host-root
+symlinks are dereferenced before the ISO is built so the guest install does not
+depend on the build machine's paths.
+Compatibility escape
+hatches such as overlays and specialArgs are allowed only as explicit
+`packages.*` options; each one is written to the generation's compat audit file
+and provenance so Studio can show it and native replacement work can track it.
+`jet os vm prove <host> --disk <path>` is the install/reboot proof entrypoint;
+it fails with E1279 rather than faking boot media when pinned QEMU/media tools
+are missing, and it fails with E1285 rather than treating a prepared QEMU harness
+as a passed guest proof. It writes the VM proof harness, runs the recorded QEMU
+create/install/reboot phases, captures a `JETOS_GUEST_PROOF:` marker from the
+installed guest's serial output, and writes the guest proof artifact. The QEMU
+installer phase boots the hybrid ISO with `console=ttyS0`; the ISO's Limine
+entry carries `rdinit=/jetos/install.sh`, `jetos.mode=install`, and the target
+disk. The installed-disk verifier phase still direct-boots the exact generation
+kernel/initrd with `rdinit=/jetos/guest-verify.sh`, `jetos.mode=verify`, plus
+the installed root label until installed-disk bootloader handoff is complete. A
+rerun may
+promote the harness to `guest-passed` only when the guest proof records the same
+host, generation, disk, media proof, tool hashes, and required guest assertions;
+harness JSON names the expected guest proof path, command argv, and per-phase
+run logs. The required guest assertion set includes terminal-login readiness:
+the installed generation must carry `terminal/facts.json`, `/etc/profile`,
+`/etc/shells`, enabled `serial-getty@ttyS0.service`, and the user home profile
+inside the root projection before VM proof can pass. The
+ratified interactive launch surface is `jet os vm run <host> --disk <path>`;
+it opens only a disk already tied to the latest generation by a `guest-passed`
+VM proof and attaches the terminal console to the current process. It fails
+with E1287 rather than launching an unproven qcow2. The
+default CachyOS kernel is a first-party `cachyos-kernel`
+source-built package carrying recipe/config/patch/initrd-input hashes beside the
+kernel and initrd artifacts; missing kernel package provenance is E1280, missing
+bootable kernel/initrd artifact headers are E1282, missing source recipe
+or builder provenance is E1284, and a failing `source/build.sh` bootstrap build
+is E1286.
+The build script is package-internal and authoritative: when the source recipe
+is present, `source/build.sh` runs before boot validation even if stale boot
+files already exist. `JETOS_KERNEL_SOURCE`, `JETOS_KERNEL_OUT`, and
+`JETOS_KERNEL_PACKAGE` point at the realized first-party package, and the script
+must write the kernel and initrd artifacts that the generation, installer, and
+VM proof will boot. Installer media appends a JetOS initrd overlay containing
+`/init`, `/jetos/install.sh`, and `/jetos/guest-verify.sh`; `/init` dispatches
+`jetos.mode=install` and `jetos.mode=verify`, mounts the ISO/root where needed,
+and the ISO Limine config enters the installer script directly. The verifier
+phase uses `rdinit` to enter the verifier script when booting under a host
+initrd. The verifier emits the serial guest-proof marker. The default systemd
+init path requires a first-party `systemd` package; missing init provenance is
+E1281. Each generation also
+installs the first-party jetos Studio
+app projection under `sw/bin/jetos-studio`, `share/applications`, and `studio/`;
+`studio/data.json` carries the read-only host/package/service/option projection
+and artifact paths. The root projection carries these files into
+`/run/current-system`. Studio remains a separate jetos system app from Canvas
+and may fall back to the browser over the same local projection service. The
+direct launch command is `jetos studio`; `jetos studio --headless` prints the
+installed app path for CI/review without opening a browser, and `--json` prints
+the root, app, metadata, and data paths without opening a browser.
+`jetos studio --serve <loopback:port>` serves `index.html`, `app.json`, and
+`data.json` over the local browser fallback. `GET /studio/source` serves the
+selected `config.jet` for the adjacent source pane. The same local service
+accepts source transactions at `POST /studio/transaction`; the first implemented
+transaction is `set-option`, which returns an exact source diff and writes
+`config.jet` only when `write:true`. `POST /studio/run` executes the matching
+`jet os check|plan|build|proof|generations` action from the selected
+project/host and returns captured output, so Studio never substitutes hidden
+state for CLI proof. The build action writes a named Studio candidate generation
+before proof.
 
 ## Fan-out operator `f.[a, b, c]` (S75) and fixed-size list `[T#N]` (S76)
 
@@ -1833,6 +1946,25 @@ declaration. These are editor-only overlays: they do not edit source and carry
 source links to the real impl method spans.
 
 `jet codemod` supports a first replayable codemod object, encoded as JSON:
+
+## Canvas visual editor prototype (D-BPE-*)
+
+`jet dev <file.jet> --target=web` serves Canvas at `/canvas` (with the same
+versioned JSON endpoints also reachable under `/__jet_canvas`). Canvas is a
+projection of checked Jet source, not a graph asset. `/__jet_canvas/graph`
+emits `jet.canvas.graph` schema v1 with one function graph per checked function:
+deterministic source-order layout, structural nodes, typed pins, data/fallible
+wires, inline pure expressions, source byte spans, and semindex fact handles.
+
+`POST /__jet_canvas/transaction` accepts `jet.canvas.edit` schema v1. Prototype
+transactions are `noop`, `rename_binding`, `edit_inline_expr`, and
+`insert_call`. Each transaction must carry the current source `revision`; stale
+revisions fail with a conflict. Successful writes go through `jet fmt`, re-check
+through the front end, replace ordinary `.jet` source, and then reproject.
+The public v1 graph/edit field contract is pinned in
+[`docs/reference/canvas-protocol.md`](../reference/canvas-protocol.md).
+Unknown request fields are ignored by v1; unknown operations fail as Canvas edit
+errors, and unknown future graph fields may never carry hidden semantics.
 
 ```json
 {"name":"RenameReport","entry":"main.jet","operation":"rename","from":"report","to":"summarize"}

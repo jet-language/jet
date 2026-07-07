@@ -643,6 +643,7 @@ fn registered_unimplemented_codes_are_expected() {
         "E0004", // retired
         "E0005", // retired
         "E0006", // retired
+        "E0010", // retired by D-S14-PAUSE: was `set` teaching
         "E0011", // retired
         "E0058", // retired (D-MEM1/S3): was `view` return keyword teaching; `-> &T` gone
         "E0206", // retired (D-MEM1/S3): was `view` return escape check; `-> &T` gone
@@ -683,6 +684,7 @@ fn registered_unimplemented_codes_are_expected() {
         "E0852", // D-GENMOD2=A: type argument bound check — staged (MVP skips bound checking)
         "E0853", // D-GENMOD2=A: value argument type mismatch — staged (MVP skips value params)
         "E0855", // D-GENMOD2=A: circular alias — staged (MVP has no cycle detection)
+        "E0954", // retired by D-S14-PAUSE: was two-keyword comptime binding teaching
         "E1229", // D-JPK-MODBODY1: retired role-module body form — parse recovery only, not stable
     ];
 

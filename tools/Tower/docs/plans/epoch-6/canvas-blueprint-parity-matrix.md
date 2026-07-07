@@ -1,0 +1,79 @@
+# Canvas Blueprint Parity Matrix
+
+Status vocabulary:
+
+- `shipped`
+- `planned`
+- `blocked-by-ballot`
+- `rejected-as-Blueprint-semantic-debt`
+- `not-yet-applicable`
+
+This matrix is the Epoch 6 ratchet. A row may move to `shipped` only when the
+implementation is source-backed, verified by focused tests, and does not add a
+hidden graph asset or semantic sidecar.
+
+| Area | UE 5.8 Blueprint capability | Canvas target | Status | Ratchet |
+|---|---|---|---|---|
+| Workbench | Right-click action menu | Context menu opens source-backed node actions from graph facts. | shipped | #287, tests/web_dev.rs |
+| Workbench | Drag-off-pin action menu | Compatible action menu filtered by sema expected-type facts. | shipped | #277, tests/canvas.rs |
+| Workbench | Built-in method search | Palette/context search includes source-checked built-ins and ordinary Jet functions with pin metadata. | shipped | #287, tests/canvas.rs::canvas_actions_project_palette_entries_and_preview_jit_backed_source_transactions |
+| Workbench | Selection, shift-add, ctrl-toggle, marquee | Stable keyboard and pointer selection over projected nodes. | shipped | #271/#287, tests/web_dev.rs |
+| Workbench | Pan, zoom, zoom-to-fit | Browser panel supports pan, zoom, fit, and nonblank graph rendering. | shipped | #265, tests/web_dev.rs |
+| Workbench | Child/parent graph navigation | Breadcrumbs and graph picker navigate function/test/lambda graphs. | shipped | #287, tests/web_dev.rs |
+| Workbench | Drag nodes and groups | Dragging stores local view state unless source-anchored hints apply. | shipped | #271/#287, tests/web_dev.rs |
+| Workbench | Cut/copy/paste/duplicate | Source transactions duplicate or move source-backed selections. | planned | #272 |
+| Workbench | Inspector/details panel | Inspector shows node kind, pins, source span, and edit affordances. | shipped | #265, tests/web_dev.rs |
+| Hotkeys | Save, undo, redo, find, check | Blueprint-compatible command layer maps to source transactions and Jet checks. | planned | #271, #272, #282 |
+| Hotkeys | Undo/redo | Undo/redo restore exact validated Jet source through the edit protocol. | shipped | #272, tests/canvas.rs |
+| Hotkeys | Breakpoint and comment chords | Hotkeys target local debug anchors or source-backed comment regions. | planned | #273, #279 |
+| Node model | Function calls | Calls project as typed nodes with input/output pins. | shipped | #265, tests/canvas.rs |
+| Node model | Pure function calls | Pure leaves render inline by default and can expand. | planned | #274 |
+| Node model | Variables get/set | Bindings, reads, and reassignments project as source nodes. | shipped | #274, #281, tests/canvas.rs |
+| Node model | Branch, switch, loops | Jet `if`, dispatch, and `loop` forms project and insert from palette without opaque fallbacks. | shipped | #272/#274, tests/canvas.rs |
+| Node model | Sequence, gate, do-once, do-N | Blueprint scheduler nodes are rejected unless represented by ordinary Jet control/callback code. | rejected-as-Blueprint-semantic-debt | #278 |
+| Node model | Math Expression node | Expression text stays ordinary Jet expression source, not a separate formula language. | planned | #274 |
+| Pins and wires | Exec pins and data pins | Separate control/data rails over Jet semantics. | shipped | #278, tests/canvas.rs |
+| Pins and wires | Typed colored wires | Pin type, capability, fallibility, effect facts, and source spans render distinctly. | shipped | #274/#278, tests/canvas.rs |
+| Pins and wires | Incompatible refusal | Wrong wires are impossible or fail with Jet diagnostics. | shipped | #277, tests/canvas.rs |
+| Pins and wires | Auto-cast insertion | Ratified visible conversion node/call writes source. | shipped | #277, tests/canvas.rs, D-CANVAS-CONVERT1 |
+| Pins and wires | Promote pin to variable | Promotion creates an ordinary Jet binding. | shipped | #277, tests/canvas.rs |
+| Pins and wires | Break/move links | Rewire transactions rewrite ordinary Jet call/argument source. | shipped | #277, tests/canvas.rs |
+| Pins and wires | Drag-drop rewiring | Pin drag applies source-backed move/conversion transactions when Canvas can prove the source anchor, otherwise opens compatible action menus. | shipped | #287, tests/web_dev.rs |
+| Types | Primitive and user types | Pins display Bool, numeric, String, structs, enums, collections, options/results. | shipped | #274, tests/canvas.rs |
+| Types | Object/reference handles | Handles render as Jet library/type facts, not Blueprint object semantics. | planned | #274 |
+| Types | Effect and unsafe markers | Async/effect/proof/unsafe rails are visual projections only. | shipped | #278, tests/canvas.rs |
+| Comments | Node bubbles | Source-backed comment bubbles use ratified source-anchored hints. | shipped | #279, D-CANVAS-LAYOUT1, tests/canvas.rs |
+| Comments | Comment boxes | Region boxes persist through ordinary Jet comments when shared; viewport state stays local. | shipped | #279, D-CANVAS-LAYOUT1, tests/canvas.rs |
+| Comments | Free-floating editor notes | Notes with no source anchor stay local. | rejected-as-Blueprint-semantic-debt | #279 |
+| Functions | Create function graph | Every Jet function body opens as a graph; Canvas can create an ordinary helper function transaction. | shipped | #274, #281, tests/canvas.rs::canvas_function_transactions_write_source_and_reproject_calls |
+| Functions | Edit signature | Signature edits write ordinary Jet function source, sema-check, and reproject. | shipped | #281, tests/canvas.rs::canvas_function_transactions_write_source_and_reproject_calls |
+| Functions | Add/remove/modify input and output pins | Function pin controls edit ordinary Jet parameter lists and return type, then reproject call nodes from source. | shipped | #287, tests/web_dev.rs |
+| Functions | Extract selection to function | Extract writes an ordinary helper function after sema proves captures/returns. | shipped | #280, tests/canvas.rs |
+| Macros/collapse | Collapse graph | Collapse is a view over a source span, expandable without semantic drift. | shipped | #280, D-CANVAS-COLLAPSE1, tests/canvas.rs |
+| Macros/collapse | Blueprint macros | Separate visual macro semantics are not part of Canvas v1. | rejected-as-Blueprint-semantic-debt | #280 |
+| Events | Event graph entry nodes | Framework callback views project from ordinary `on_*` Jet functions. | shipped | #281, D-CANVAS-EVENT1, tests/canvas.rs::canvas_projects_function_metadata_and_callback_event_views |
+| Events | Event dispatchers/interfaces | First-party Event/Hook system must supply the source truth before Canvas projects dispatcher semantics. | blocked-by-ballot | #286 |
+| Debugger | Debug session selector | Canvas selects the local source-span debug session. | shipped | #273, tests/canvas.rs |
+| Debugger | Breakpoints/watches | Local source-span debug state drives breakpoints and watches without editing source. | shipped | #273, D-CANVAS-DEBUGSTATE1, tests/canvas.rs |
+| Debugger | Active node/wire pulse | Runtime overlays map active node/wire pulses back to source spans. | shipped | #273/#278, tests/canvas.rs |
+| Debugger | Call stack and trace | Trace anchors map to graph/source spans. | shipped | #273, tests/canvas.rs |
+| Search/refactor | Find in graph/project | Shared LSP/semindex query engine drives graph search. | shipped | #282, tests/canvas.rs |
+| Search/refactor | Find references/rename | Refactors preview and write source through existing codemod paths. | shipped | #282, tests/canvas.rs |
+| Search/refactor | Source-to-graph jump | Source span selects matching graph node/pin/inline expression. | shipped | #282, tests/canvas.rs |
+| Search/refactor | Toggle graph/source view | Canvas and source code toggle over the same file, preserving source as truth. | shipped | #287, tests/web_dev.rs |
+| Source control | Dirty/stale/conflict markers | Graph transactions guard against stale source revisions. | shipped | #265, tests/canvas.rs |
+| Source control | Transaction diff preview | Canvas shows exact Jet text diffs and Git dirty state before/after source-backed writes. | shipped | #283, tests/canvas.rs, tests/web_dev.rs |
+| Source control | Asset checkout/lock model | Asset-style graph checkout is not Canvas truth. | rejected-as-Blueprint-semantic-debt | #283, D-CANVAS-SCM1 |
+| Public protocol | Graph JSON schema | `jet.canvas.graph` v1 exposes source-backed graph facts. | shipped | #265, tests/canvas.rs |
+| Public protocol | Edit transaction schema | `jet.canvas.edit` v1 supports initial source transactions. | shipped | #265, tests/canvas.rs |
+| Public protocol | Forward compatibility | Unknown non-semantic fields are ignored by old clients and never carry semantics. | planned | #276 |
+| Extensibility | Function library projection | Packages expose ordinary Jet functions/types/docs as source-backed palette entries. | shipped | #284, tests/canvas.rs::canvas_actions_project_palette_entries_and_preview_jit_backed_source_transactions |
+| Extensibility | Behavior-producing third-party nodes | Ratified Canvas actions use checked TIR/JIT preview and return source transactions only. | shipped | #284, D-CANVAS-EXT1, D-CANVAS-EXT2, tests/canvas.rs::canvas_actions_project_palette_entries_and_preview_jit_backed_source_transactions |
+| Validation | Check/compile button | Canvas invokes Jet front-end diagnostics, never raw rustc output. | planned | #278 |
+| Validation | Formatter stability | Every write runs through formatter and reprojects from source. | shipped | #265, tests/canvas.rs |
+| Tests | Projection JSON snapshots | Every supported Jet construct needs deterministic graph coverage. | shipped | #285, tests/canvas.rs::canvas_hardening_projection_suite_covers_blueprint_backlog_constructs |
+| Tests | UI nonblank and interactions | Browser panel has nonblank, keyboard, pointer, search, palette, undo, diff, and debug ratchets. | shipped | #285, tests/web_dev.rs::jet_dev_web_exposes_canvas_panel_and_graph |
+| Tests | Unsupported-feature diagnostics | Unsupported and invalid Canvas actions fail through Canvas/Jet diagnostics, never raw rustc. | shipped | #285, tests/canvas.rs::canvas_unsupported_and_invalid_actions_return_canvas_errors_without_rustc |
+| Tests | Rows cannot ship without tests | This matrix is scanned by tests and shipped rows must name ratchets. | shipped | #275, tests/canvas.rs |
+| Future | Multi-user graph collaboration | Multiplayer editing is outside the current source transaction layer. | not-yet-applicable | post-Epoch 6 |
+| Future | Binary graph assets | Canvas will not adopt Blueprint asset storage. | rejected-as-Blueprint-semantic-debt | Epoch 6 invariant |

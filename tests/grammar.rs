@@ -471,7 +471,7 @@ fn s6r_terminator_insertion_and_suppression() {
 
 #[test]
 fn dot_zero_in_statement_lexes_as_dot_then_int() {
-    let (toks, diags) = jet::Lexer::lex("fn run() { val x = p.0; }");
+    let (toks, diags) = jet::Lexer::lex("fn run() { x :: p.0 }");
     assert!(diags.is_empty(), "{diags:?}");
     let dot = toks
         .iter()

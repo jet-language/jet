@@ -79,6 +79,7 @@ fn layer_of_normalized(module: &str) -> RuntimeLayer {
         | "core.reflect"
         | "core.game"
         | "core.async.loadable"
+        | "core.event"
         | "core.solve"
         | "core.time.expiring"
         | "core.secrets"
@@ -94,7 +95,7 @@ fn layer_of_normalized(module: &str) -> RuntimeLayer {
         "core.io" | "core.env" | "core.process" | "core.files" | "core.path"
         | "core.net" | "core.term" | "core.time" | "core.time.date" | "core.time.datetime"
         | "core.tasks" | "jet.http" | "core.http.client" | "core.http.server" | "core.archive"
-        | "core.raylib" | "jet.raylib" | "core.compress.gzip" | "core.compress.zstd" | "jet.db"
+        | "core.raylib" | "core.compress.gzip" | "core.compress.zstd" | "jet.db"
         // D-DEP-WASM1=A (c81): the plugin loader embeds wasmtime — same OS-facing
         // posture as jet.db's embedded rusqlite.
         | "jet.plugin" => RuntimeLayer::Std,

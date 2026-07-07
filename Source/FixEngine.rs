@@ -104,31 +104,30 @@ mod tests {
 
     #[test]
     fn single_replacement() {
-        // replace "let" (0..3) with "val"
-        let src = "let x = 1;";
-        let out = apply_edits(src, &[ed(0, 3, "val")]).unwrap();
-        assert_eq!(out, "val x = 1;");
+        let src = "abc x = 1;";
+        let out = apply_edits(src, &[ed(0, 3, "def")]).unwrap();
+        assert_eq!(out, "def x = 1;");
     }
 
     #[test]
     fn right_to_left_keeps_offsets_valid() {
         // Two edits on the same line. If applied left-to-right naively, the
         // first replacement (different length) would shift the second span.
-        // "let a = 1; let b = 2;"
-        //  0..3 -> val             14..17 -> val
-        let src = "let a = 1; let b = 2;";
-        let edits = vec![ed(0, 3, "val"), ed(11, 14, "val")];
+        // "abc a = 1; abc b = 2;"
+        //  0..3 -> def             11..14 -> def
+        let src = "abc a = 1; abc b = 2;";
+        let edits = vec![ed(0, 3, "def"), ed(11, 14, "def")];
         let out = apply_edits(src, &edits).unwrap();
-        assert_eq!(out, "val a = 1; val b = 2;");
+        assert_eq!(out, "def a = 1; def b = 2;");
     }
 
     #[test]
     fn unordered_input_is_sorted() {
         // Same as above but the edits arrive highest-first; result must match.
-        let src = "let a = 1; let b = 2;";
-        let edits = vec![ed(11, 14, "val"), ed(0, 3, "val")];
+        let src = "abc a = 1; abc b = 2;";
+        let edits = vec![ed(11, 14, "def"), ed(0, 3, "def")];
         let out = apply_edits(src, &edits).unwrap();
-        assert_eq!(out, "val a = 1; val b = 2;");
+        assert_eq!(out, "def a = 1; def b = 2;");
     }
 
     #[test]
@@ -182,9 +181,8 @@ mod tests {
 
     #[test]
     fn changes_text_detects_noop() {
-        let src = "val x = 1;";
-        // replacing "val" with "val" is a no-op
-        assert!(!changes_text(src, &[ed(0, 3, "val")]));
-        assert!(changes_text(src, &[ed(0, 3, "let")]));
+        let src = "abc x = 1;";
+        assert!(!changes_text(src, &[ed(0, 3, "abc")]));
+        assert!(changes_text(src, &[ed(0, 3, "def")]));
     }
 }

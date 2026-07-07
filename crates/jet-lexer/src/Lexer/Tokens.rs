@@ -115,8 +115,8 @@ pub enum TokKind {
     /// lone `~` fails as an ordinary unrecognized-token syntax error rather than
     /// panicking the lexer — but the parser has no arm for it.
     Tilde,
-    /// S83: `~~` trait-attach (spec-only; lexed but not yet parsed). Longest-match
-    /// before `~`.
+    /// Retired external-method connector. Longest-match before `~` so parser
+    /// can teach E0325.
     TildeTilde,
     Shl,
     Shr,

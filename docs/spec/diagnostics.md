@@ -124,7 +124,7 @@ before continuing.
 | E0062 | parse | teaching: a contract marker written with `#` → write it with `@` (D-MARKER-FAMILY1, D-MARKERMOVE1/2/3) |
 | E0063 | parse | teaching: a directive marker written with `@` → write it with `#` (D-MARKER-FAMILY1) |
 | E0984 | parse | *retired by D-S14-PAUSE* (was: `when` teaching) |
-| E0985 | parse | teaching: `val`/`var` keyword → `name ::`/`name :=` sigil (D-BIND4) |
+| E0985 | parse | *retired by D-S14-PAUSE* (was: `val`/`var` binding teaching) |
 | E0986 | parse | teaching: `-> Type`/`{` split from the closing `)` (S6-R layout) |
 | E0998 | parse | teaching: retired explicit binding forms → `: Type ::` / `: Type :=` (D-BIND4) |
 | E0992 | parse | teaching: implicit dispatch — a multi-arm `if` needs `==` between the subject and `{` (D-IF3) |
@@ -556,6 +556,14 @@ before continuing.
 | E1276 | jetpack | `--offline` would need network access or a missing local package object (U29, D-JPK-OFFLINE1) |
 | E1277 | jetpack | a jetos option key uses a retired namespace (D-JPK-OSNS1) |
 | E1278 | jetpack | a jetos activation proof is incomplete (D-WD8) |
+| E1279 | jetpack | VM/media proof tools are missing (D-JOS-VMDEPS1) |
+| E1280 | jetpack | the first-party CachyOS kernel package is missing (D-JOS-KERNELSRC1) |
+| E1281 | jetpack | the first-party systemd init package is missing (D-JPK-OSINIT1) |
+| E1282 | jetpack | the first-party CachyOS kernel package lacks bootable kernel/initrd artifacts (D-JOS-KERNELSRC1) |
+| E1283 | jetpack | the first-party systemd package lacks init artifacts (D-JPK-OSINIT1) |
+| E1284 | jetpack | the first-party CachyOS kernel package lacks source-built recipe/builder provenance (D-JOS-KERNELBOOTSTRAP1) |
+| E1285 | jetpack | the VM install/reboot harness exists but no guest proof has run (D-JOS-VMCOMMAND1) |
+| E1286 | jetpack | the first-party CachyOS kernel source recipe failed to build boot artifacts |
 | E2001 | jet   | `pkg.jet` requests an edition this toolchain can't provide (E2-M2, D-REL3) |
 | E2002 | jet   | a deprecated item is used past its migration window (E2-M2, D-REL5) |
 | E2101 | jet   | unknown subcommand on the command line, with a "did you mean" (E2-M3, D-DX) |
@@ -1320,8 +1328,17 @@ snapshots in `tests/jetpack.rs` (the `tests/ui/` harness only renders front-end
 | E1274 | No build log exists for `{pkg}`. | `jet logs` and package-form `jet explain <ref>` read persisted Jetpack build attempts. If a package has not failed or built through the logged runner on this machine, there is nothing local to explain. | Run `jet build <ref>` first; for diagnostic-code help, keep using `jet explain E1234`. |
 | E1275 | Build sandboxing is required but unavailable. | `jetpack config sandbox require` turns sandbox fallback into a hard failure. This machine cannot provide Jetpack's unprivileged sandbox tier, so running adapter builds would violate local policy. | Run `jetpack config sandbox allow` to permit fallback, or enable unprivileged sandbox support on this machine. |
 | E1276 | `--offline` forbids network access. | Realize-class verbs must run from the current lock and local hangar when offline. Network-class verbs (`add`, `update`, `outdated`, publish/cache sync) cannot refresh metadata under `--offline`, and a missing local object cannot be fetched. | Drop `--offline` for this command, or realize/fetch the needed object before going offline. |
-| E1277 | A jetos option key uses a retired namespace. | D-JPK-OSNS1=B: jetos option keys start with full-word namespaces: `filesystem`, `network`, or `packages`. | Rename the option namespace, for example `net.hostName` becomes `network.hostName`. |
+| E1277 | A jetos option key uses a retired namespace. | D-JPK-OSNS1=B and D-JOS-SYSTEMTREE1=A: jetos option keys start with full-word namespaces: `filesystem`, `network`, `packages`, `services`, `users`, `groups`, `secrets`, `boot`, `kernel`, `init`, or `health`. | Rename the option namespace, for example `net.hostName` becomes `network.hostName`. |
 | E1278 | A jetos activation proof is incomplete. | D-WD8 requires `jet os switch` to prove the plan, risk class, generated service artifacts, and rollback evidence before changing the active generation pointers. | Rebuild the generation so the proof artifacts are regenerated, or discard a hand-edited generation. |
+| E1279 | jetos VM proof tools are missing. | D-JOS-VMDEPS1=A requires pinned QEMU, firmware, ISO, bootloader, filesystem, and initrd compression tools before install/reboot proof can run. | Realize or expose the required tools, then rerun `jet os vm prove <host> --disk <disk>`. |
+| E1280 | The jetos CachyOS kernel package is missing. | D-JOS-KERNELSRC1=A: `.CachyOS` resolves to a first-party `cachyos-kernel` package with boot artifacts and provenance. | Declare a first-party source that provides `cachyos-kernel`, or select a different ratified kernel. |
+| E1281 | The jetos systemd init package is missing. | D-JPK-OSINIT1=A: the default jetos init path is systemd, so the generation needs a first-party `systemd` package with bootable init artifacts. | Declare a first-party source that provides `systemd`, or select a ratified init override. |
+| E1282 | The jetos CachyOS boot artifacts are missing. | D-JOS-KERNELSRC1=A: the first-party `cachyos-kernel` package must provide a Linux kernel image and initrd with bootable file headers so the generation and installer can boot the same payload. | Add `boot/vmlinuz-cachyos` and `boot/initrd-cachyos` with real boot payloads, or select a different ratified kernel. |
+| E1283 | The jetos systemd init artifact is missing. | D-JPK-OSINIT1=A: the first-party `systemd` package must provide a bootable init binary for `/sbin/init`. | Add `bin/systemd`, `lib/systemd/systemd`, or `sbin/init` to the package output, or select a ratified init override. |
+| E1284 | The jetos CachyOS source recipe is missing. | D-JOS-KERNELBOOTSTRAP1=A: the first-party `cachyos-kernel` package must carry source-built recipe, builder, config, patch, and initrd-input provenance beside the boot artifacts. | Add `source/recipe.jet`, `source/build.sh`, `source/config`, `source/patches.manifest`, and `source/initrd-inputs.manifest` to the package output. |
+| E1285 | The jetos VM guest proof has not run. | D-JOS-VMCOMMAND1=A requires `jet os vm prove` to record an actual installer boot, disk install, reboot, and guest verification before claiming proof. A written harness is not proof, and a guest proof must match the host, generation, disk, media proof, tool hashes, and guest assertions. | Inspect the VM run logs, fix the boot/install path, then rerun `jet os vm prove` to capture a guest proof marker. |
+| E1286 | The jetos CachyOS source build failed. | D-JOS-KERNELBOOTSTRAP1=A requires the first-party `cachyos-kernel` package to build boot artifacts from its recorded source recipe before VM/install proof can claim the selected `.CachyOS` kernel. | Check the first-party `cachyos-kernel` source recipe and rerun `jet os build`. |
+| E1287 | jetos VM run needs a proved installed disk. | D-JOS-VMRUN1=A keeps `jet os vm run` on the same proof-before-use path as `jet os vm prove`: an interactive VM may open only the latest generation's disk after a matching guest-passed proof binds host, generation, disk, media proof, tool hashes, and assertions. | Run `jet os vm prove <host> --disk <disk>` first, then rerun `jet os vm run`. |
 | L0203 | `use {name}#{selector};` isn't pinned to an exact version. | An inline script dependency (U11) has no lockfile until `jet lock` runs; a loose selector (`1.4` rather than `1.4.2`) can resolve to a different version on a fresh clone (D-JPK-SCRIPTDEP1). | Write the exact version Jet resolved (`use {name}#<major.minor.patch>;`), or run `jet lock` to pin it in `<script>.lock`. |
 | L0204 | `{field}` in `{file}` has no `env.*` equivalent yet. | `jet bridge flake` (U16) is a best-effort translator; some `flake.nix`/`devenv.nix` fields (`shellHook`, multiple named devShells, `buildInputs` vs `nativeBuildInputs`) have no ratified `env.*` spelling. | Review the generated shim and add `{field}`'s effect by hand if you need it — the shim is a starting point, not a full translation. |
 | L0205 | Build sandboxing is unavailable; adapter builds will run unsandboxed. | D-JPK-NODAEMON1 forbids privileged helpers and daemons. When the platform cannot offer an unprivileged sandbox, Jetpack must say so instead of silently downgrading. | Run `jetpack config sandbox require` to refuse fallback. |

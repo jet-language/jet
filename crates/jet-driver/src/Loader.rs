@@ -869,6 +869,17 @@ fn check_reserved_import(imp: &ImportDecl) -> Result<(), Diagnostic> {
         ));
     }
     if let ImportKind::Module(name, span) = &imp.kind {
+        if let Some(ring) = name.strip_prefix("jet.") {
+            if is_ring_module(ring) {
+                return Err(Diagnostic::error(
+                    "E0341",
+                    format!("`use jet.{ring}` is the old first-party library spelling"),
+                    "first-party libraries moved to the `core.*` namespace (D-CORENS1)".to_string(),
+                    format!("write `use core.{ring}` instead"),
+                    Some(*span),
+                ));
+            }
+        }
         let root = name.split('.').next().unwrap_or(name);
         if Syntax::FIRST_PARTY_RESERVED.contains(&root) {
             return Err(Diagnostic::error(

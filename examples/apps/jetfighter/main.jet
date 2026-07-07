@@ -12,6 +12,16 @@ struct Asteroid {
     alive: Bool
 }
 
+struct Position {
+    x: Int
+    y: Int
+}
+
+struct Velocity {
+    dx: Int
+    dy: Int
+}
+
 fn hit(ship: Ship, rock: Asteroid) -> Bool {
     return rock.alive && (ship.x == rock.x) && (ship.y == rock.y)
 }
@@ -43,9 +53,19 @@ fn replay() -> [Ship] {
 
 fn run() {
     scene := game.Scene.new("jetfighter")
+    scene.assets.image("assets/player.png") ?? panic("image")
+    scene.assets.sound("assets/laser.wav") ?? panic("sound")
     scene.input.bind("thrust", "Up")
     scene.input.bind("fire", "Space")
+    scene.component<Position>()
+    scene.component<Velocity>()
     scene.budgets.set(game.Budgets.new(16, 128, 512, 8))
+    print("query {scene.query<Position, Velocity>().len()}")
+    scene.on_frame((frame) => {
+        if frame.input.pressed("fire") {
+            print("hook fire {frame.index}")
+        }
+    })
     frames :: replay()
     print("jetfighter replay")
     i := 0
@@ -61,4 +81,11 @@ fn run() {
     rock :: Asteroid.{x: 2, y: 1, alive: true}
     next :: step(ship, rock, "right")
     require_eq(next.score, 250)
+}
+
+#Test("entity query is present") {
+    scene := game.Scene.new("test")
+    scene.component<Position>()
+    scene.component<Velocity>()
+    require_eq(scene.query<Position, Velocity>().len(), 1)
 }

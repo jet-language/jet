@@ -120,8 +120,6 @@ fn is_teaching_parse_diag(code: &str) -> bool {
     matches!(
         code,
         "E0008"
-            | "E0009"
-            | "E0010"
             | "E0012"
             | "E0013"
             | "E0014"
@@ -152,7 +150,6 @@ fn is_teaching_parse_diag(code: &str) -> bool {
             | "E0057"
             | "E0210"
             | "E0984"
-            | "E0985"
             | "E0986"
             | "E0320"
             | "E0992"
@@ -521,14 +518,6 @@ fn fleet_unterminated_override(span: Span) -> Diagnostic {
         "U15: a `.{ … }` copy-with-update override on a host must be closed with `}`".to_string(),
         "close the override record with `}`".to_string(),
         Some(span),
-    )
-}
-
-fn binding_why() -> String {
-    format!(
-        "a binding is `name {} value` if it never changes, or `name {} value` if it can",
-        Syntax::SIGIL_BIND_IMMUT,
-        Syntax::SIGIL_BIND_MUT
     )
 }
 

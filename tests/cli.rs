@@ -509,7 +509,7 @@ fn fix_dry_run_does_not_write() {
     // (`or` → `??`) carries a machine-applicable `replace` edit, and the parser
     // recovers so sema still runs.
     let p = std::env::temp_dir().join("jet_cli_fix.jet");
-    let original = "fn run() {\n    val x: Int? = none;\n    print(x or 0);\n}\n";
+    let original = "fn run() {\n    x: Int? :: none\n    print(x or 0)\n}\n";
     fs::write(&p, original).unwrap();
     let out = Command::new(jet())
         .arg("fix")

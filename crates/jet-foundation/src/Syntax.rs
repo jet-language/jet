@@ -57,11 +57,6 @@ pub const SIGIL_BIND_MUT: &str = ":=";
 /// `#Track name :: expr` / `#Track name := expr`.
 pub const ATTR_TRACK: &str = "Track";
 
-/// S2 / D-BIND1: the retired binding keywords, recognized only for the E0985
-/// teaching error that points at the `::` / `:=` sigils.
-pub const FOREIGN_VAL: &str = "val";
-pub const FOREIGN_VAR: &str = "var";
-
 /// S3 (ratified): block delimiters.
 pub const BLOCK_OPEN: &str = "{";
 pub const BLOCK_CLOSE: &str = "}";
@@ -554,6 +549,15 @@ pub const TYPE_DERIVED: &str = "Derived";
 pub const TYPE_COMPUTED: &str = "Computed";
 /// D-SIGNAL1: the runtime value created by `#Reactive` / `reactive.effect`.
 pub const TYPE_EFFECT: &str = "Effect";
+/// D-EVENT1 (ratified 2026-07-07): first-party typed Event/Hook family.
+/// Library values, compiler-known for typing/tooling; no new syntax.
+pub const EVENT_MODULE: &str = "core.event";
+pub const TYPE_EVENT: &str = "Event";
+pub const TYPE_HOOK: &str = "Hook";
+pub const TYPE_SUBSCRIPTION: &str = "Subscription";
+pub const TYPE_EVENT_SCOPE: &str = "EventScope";
+pub const TYPE_EVENT_POLICY: &str = "EventPolicy";
+pub const TYPE_EVENT_TRACE: &str = "EventTrace";
 /// D-HONESTNUM1=A: the science measurement type name.
 pub const TYPE_MEASUREMENT: &str = "Measurement";
 
@@ -823,9 +827,6 @@ pub const BINDINGS_ROOT_SUBDIR: &str = "bindings"; // D-FFI-UNIFY1
 pub const FOREIGN_WHILE: &str = "while";
 pub const FOREIGN_FOR: &str = "for";
 pub const FOREIGN_TRY: &str = "try";
-pub const FOREIGN_LET: &str = "let";
-pub const FOREIGN_LET_MUT: &str = "let mut";
-pub const FOREIGN_SET: &str = "set";
 pub const FOREIGN_FUNC: &str = "func";
 pub const FOREIGN_DEF: &str = "def";
 pub const FOREIGN_IMPORT: &str = "import";
@@ -1315,6 +1316,8 @@ pub const SYSTEM_LIB_TARGET: &str = "system";
 
 /// D-JPK1/9: the Jetpack package-manager binary name.
 pub const JETPACK_BINARY_NAME: &str = "jetpack";
+/// D-JOS-STUDIO-LAUNCH1=A: direct jetos system-tool binary name.
+pub const JETOS_BINARY_NAME: &str = "jetos";
 
 /// U1 (D-JPK20) / U10 / D-JPK-FILES: the Jet **package manifest** is `pkg.jet`
 /// (`PAYLOAD_FILE`; Cargo.toml analog, replaces `jet.toml`). Prior filenames
@@ -1708,19 +1711,40 @@ pub const OS_VERB_CHECK: &str = "check";
 pub const OS_VERB_INIT: &str = "init";
 pub const OS_VERB_SWITCH: &str = "switch";
 pub const OS_VERB_BUILD: &str = "build";
+/// D-JOS-PROOFAPI1=B: read the exact checked plan without building.
+pub const OS_VERB_PLAN: &str = "plan";
+/// D-JOS-PROOFAPI1=B: read proof/provenance artifacts for the latest generation.
+pub const OS_VERB_PROOF: &str = "proof";
 pub const OS_VERB_ROLLBACK: &str = "rollback";
 pub const OS_VERB_GENERATIONS: &str = "generations";
 pub const OS_VERB_LIFT: &str = "lift";
 pub const OS_VERB_IMAGE: &str = "image";
+/// D-JOS-VMCOMMAND1=A: `jet os vm prove` runs installer/reboot proof.
+pub const OS_VERB_VM: &str = "vm";
+/// D-JOS-VMCOMMAND1=A: non-interactive VM install/reboot proof action.
+pub const OS_VM_ACTION_PROVE: &str = "prove";
+/// D-JOS-VMRUN1=A: interactive launch of a proved installed VM disk.
+pub const OS_VM_ACTION_RUN: &str = "run";
+/// D-JOS-STUDIO-LAUNCH1=A / D-JOS-STUDIO-HOST1=A: `jetos studio`.
+pub const STUDIO_SUBCOMMAND: &str = "studio";
+/// D-JOS-STUDIO-HOST1=A: headless review mode over the same local protocol.
+pub const STUDIO_FLAG_HEADLESS: &str = "--headless";
+/// D-JOS-STUDIO-HOST1=A: serve browser fallback over local projection protocol.
+pub const STUDIO_FLAG_SERVE: &str = "--serve";
+/// D-JOS-STUDIO-HOST1=A: select the system host Studio projects/edits.
+pub const STUDIO_FLAG_HOST: &str = "--host";
 pub const OS_VERBS: &[&str] = &[
     OS_VERB_CHECK,
     OS_VERB_INIT,
+    OS_VERB_PLAN,
+    OS_VERB_PROOF,
     OS_VERB_BUILD,
     OS_VERB_SWITCH,
     OS_VERB_ROLLBACK,
     OS_VERB_GENERATIONS,
     OS_VERB_LIFT,
     OS_VERB_IMAGE,
+    OS_VERB_VM,
 ];
 
 /// c146 (D-PKGSIGN1, ratified): package-signing CLI verbs (I7). `jet keygen`
@@ -1744,15 +1768,34 @@ pub const OS_FLAG_NAME: &str = "--name";
 
 /// D-JPK-OSDISK1=C: installer/init accepts a manual disk path override.
 pub const OS_FLAG_MANUAL_DISK: &str = "--manual";
+/// D-JOS-VMCOMMAND1=A: VM proof target disk path.
+pub const OS_FLAG_DISK: &str = "--disk";
 
 /// D-JPK-OSNS1=B: full-word option namespaces.
 pub const OS_OPTION_NS_FILESYSTEM: &str = "filesystem";
 pub const OS_OPTION_NS_NETWORK: &str = "network";
 pub const OS_OPTION_NS_PACKAGES: &str = "packages";
+/// D-JOS-SYSTEMTREE1=A: standard full-word jetos option namespaces.
+pub const OS_OPTION_NS_SERVICES: &str = "services";
+pub const OS_OPTION_NS_USERS: &str = "users";
+pub const OS_OPTION_NS_GROUPS: &str = "groups";
+pub const OS_OPTION_NS_SECRETS: &str = "secrets";
+pub const OS_OPTION_NS_BOOT: &str = "boot";
+pub const OS_OPTION_NS_KERNEL: &str = "kernel";
+pub const OS_OPTION_NS_INIT: &str = "init";
+pub const OS_OPTION_NS_HEALTH: &str = "health";
 pub const OS_OPTION_NAMESPACES: &[&str] = &[
     OS_OPTION_NS_FILESYSTEM,
     OS_OPTION_NS_NETWORK,
     OS_OPTION_NS_PACKAGES,
+    OS_OPTION_NS_SERVICES,
+    OS_OPTION_NS_USERS,
+    OS_OPTION_NS_GROUPS,
+    OS_OPTION_NS_SECRETS,
+    OS_OPTION_NS_BOOT,
+    OS_OPTION_NS_KERNEL,
+    OS_OPTION_NS_INIT,
+    OS_OPTION_NS_HEALTH,
 ];
 
 /// U4 (ratified 2026-06-16): import-tree discovery builtin — `find("./modules")`
@@ -2943,6 +2986,30 @@ pub const JET_HIGHLIGHT_TOKENS: &[HighlightToken] = &[
         class: HighlightClass::TypeBuiltin,
     },
     HighlightToken {
+        text: TYPE_EVENT,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_HOOK,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_SUBSCRIPTION,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_EVENT_SCOPE,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_EVENT_POLICY,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_EVENT_TRACE,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
         text: TYPE_EFFECT,
         class: HighlightClass::TypeBuiltin,
     },
@@ -3667,6 +3734,8 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     // D-REACT1=B (ratified 2026-06-22): opt-in reactive library — signals,
     // derived values, and effects. Pure std runtime (no external crate).
     "core.reactive",
+    // D-EVENT1=D (ratified 2026-07-07): typed Event<T>/Hook<T,R> runtime family.
+    "core.event",
     // D-HONESTNUM1=A (ratified 2026-06-26): Measurement<T> — value ± uncertainty
     // with standard uncertainty propagation. Pure float arithmetic; no external crates.
     "core.science.measurement",
@@ -3716,8 +3785,11 @@ pub fn is_known_core_module(name: &str) -> bool {
         return true;
     }
     // D-CORENS1: internal dispatch key `jet.<ring>` (from normalize_core_module)
-    // is valid even though only `core.<ring>` is in KNOWN_CORE_MODULES.
+    // is valid for ring modules that have not been canonicalized end to end.
     if let Some(ring) = name.strip_prefix("jet.") {
+        if ring == "raylib" {
+            return false;
+        }
         return is_ring_module(ring);
     }
     false
@@ -3739,10 +3811,10 @@ pub fn normalize_core_module(name: &str) -> Option<String> {
     if name == CORE_CANONICAL {
         return Some(CORE_SHORT.to_string());
     }
-    // `core.archive` is canonical end-to-end. Other ring modules still use
-    // internal `jet.<ring>` keys until their package cleanup lands.
+    // Some ring modules still use internal `jet.<ring>` keys until their
+    // package cleanup lands. Canonicalized modules stay `core.*` end to end.
     if let Some(ring) = name.strip_prefix("core.") {
-        if ring == "archive" {
+        if matches!(ring, "archive" | "raylib") {
             return Some(name.to_string());
         }
         if is_ring_module(ring) {

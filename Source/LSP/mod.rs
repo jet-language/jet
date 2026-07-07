@@ -43,25 +43,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn teaching_edit_from_let() {
-        // D-BIND1: `let x = 1` migrates to `x :: 1`, which moves tokens — it is
-        // no longer a single-keyword swap, so no auto-edit is synthesized (the
-        // `replace `X` with `Y`` shape). `jet fmt` performs the migration. The
-        // teaching diagnostic still fires and points at the sigil form.
+    fn old_binding_keyword_has_no_teaching_edit() {
         let src = "fn run() {\n    let x = 1\n}\n";
         let diags = check_document("test.jet", src);
-        let e0009 = diags.iter().find(|d| d.code == "E0009").expect("E0009");
         assert!(
-            e0009.edit.is_none(),
-            "E0009 fix moves tokens; no trivial edit"
+            !diags.iter().any(|d| d.code == "E0009" || d.code == "E0985"),
+            "old binding words should not produce migration diagnostics: {diags:?}"
         );
-        assert!(e0009.fix.contains(crate::Syntax::SIGIL_BIND_IMMUT));
+        assert!(!diags.is_empty(), "old binding words should still fail");
     }
 
     #[test]
     fn lsp_pos_round_trip() {
-        let src = "fn run() {\n    val x = 1;\n}\n";
-        let offset = 18; // somewhere in 'val'
+        let src = "fn run() {\n    x :: 1\n}\n";
+        let offset = 18; // somewhere in 'x ::'
         let pos = byte_offset_to_lsp(src, offset);
         let back = lsp_pos_to_offset(src, pos);
         assert_eq!(back, offset);
@@ -81,8 +76,7 @@ mod tests {
 
     #[test]
     fn hover_returns_function_signature() {
-        let src =
-            "fn add(a: Int, b: Int) -> Int { return a + b; }\nfn run() { val r = add(1, 2); }\n";
+        let src = "fn add(a: Int, b: Int) -> Int { return a + b; }\nfn run() { r :: add(1, 2) }\n";
         let (_, bundle, facts) = check_document_with_bundle("test.jet", src);
         let bundle = bundle.expect("bundle");
         let db = build_symbol_db(&bundle, &facts);
@@ -118,7 +112,7 @@ mod tests {
 
     #[test]
     fn semantic_tokens_non_empty() {
-        let src = "fn run() { val x: Int = 1; }\n";
+        let src = "fn run() { x: Int :: 1 }\n";
         let (toks, _) = crate::Lexer::lex(src);
         let data = encode_semantic_tokens(&toks, src);
         // Should emit at least one token (5 u32s per token)
@@ -149,10 +143,10 @@ mod tests {
         let bundle = bundle.expect("bundle");
         let db = build_symbol_db(&bundle, &facts);
         let items = compute_completions(&db, src, 14, "test.jet", None, None);
-        // `val` and `var` are retired (FOREIGN_VAL/FOREIGN_VAR); they must not appear.
+        // Keyword completions expose only Jet syntax.
         assert!(
             !items.iter().any(|i| i.label == "val"),
-            "val is retired (D-BIND1); must not appear in completions"
+            "old binding words must not appear in completions"
         );
         // Real keywords must appear:
         assert!(

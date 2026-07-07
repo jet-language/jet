@@ -1142,6 +1142,50 @@ feature.
 
 ---
 
+### `core.event` — typed events and hooks (D-EVENT1)
+
+`use core.event as event`. Events are first-party typed Core values. The compiler
+knows the family for checking and lowering, but this slice adds no event syntax.
+
+```jet
+use core.event as event
+
+fn run() {
+    scope :: event.scope()
+    clicked :: event.new<Int>()
+
+    sub :: clicked.on(scope, (n) => { print("clicked {n}") })
+    clicked.once(scope, (n) => { print("once {n}") })
+
+    print(clicked.emit(1).summary())
+    sub.unsubscribe()
+    scope.cancel()
+}
+```
+
+| Call | Returns | Does |
+|------|---------|------|
+| `event.new<T>()` | `Event<T>` | create a typed many-subscriber event |
+| `event.with_policy<T>(policy)` | `Event<T>` | create an event with explicit dispatch/backpressure policy |
+| `event.hook<T, R>(fallback)` | `Hook<T, R>` | create an ordered hook; last active handler result wins |
+| `event.scope()` | `EventScope` | create an owner for subscriptions |
+| `event.policy_sync()` | `EventPolicy` | synchronous deterministic dispatch |
+| `event.policy_async(n)` | `EventPolicy` | queued dispatch with an explicit buffer size |
+| `ev.on(scope, handler)` / `ev.once(scope, handler)` | `Subscription` | subscribe a handler owned by `scope`; `once` auto-unsubscribes |
+| `ev.on_priority(scope, priority, handler)` | `Subscription` | subscribe with higher priority before source order |
+| `ev.emit(payload)` / `ev.emit_async(payload)` | `EventTrace` | dispatch and return delivered/queued/dropped counts |
+| `hook.run(payload, fallback)` | `R` | run active hook handlers or return fallback |
+| `sub.unsubscribe()` / `sub.active()` | — / `Bool` | manage an explicit subscription |
+| `scope.cancel()` / `scope.active_count()` | — / `Int` | cancel all owned subscriptions and count active ones |
+| `trace.summary()` | `String` | compact delivery trace for logs/tests |
+
+`Event<T>` is for "something happened" streams. `Hook<T, R>` is for ordered
+intervention points before/during/after an operation. Default dispatch is sync,
+priority-descending, then registration order. `EventScope` is the beginner-safe
+lifetime owner; explicit `Subscription` handles give experts manual control.
+
+---
+
 ### `core.web` — browser events and storage
 
 `core.web` is the web-target browser API beside `core.ui` rendering:
@@ -1421,7 +1465,7 @@ shift count past the type's width traps (no leaked Rust panic).
 | `open("file")` / `File.open` | `fs.read(...)` / `fs.write(...)` |
 | `getenv("X")` / `os.environ` | `env.get("X")` |
 | `import core.files` | `use core.files` (teaching error E0015) |
-| `val x = …` / `var x = …` | `x :: …` (immutable) / `x := …` (mutable) |
+| `x :: …` / `x := …` | Immutable / mutable binding |
 
 ---
 
@@ -1440,6 +1484,7 @@ These shipped in Epoch 2:
 | `core.time` | Calendar dates, time zones, formatted dates |
 | `core.crypto` | Hash, HMAC, vetted random primitives |
 | `core.reactive` | Signals, derived values, effects (opt-in reactivity, D-REACT1) |
+| `core.event` | Typed events, hooks, subscription scopes, event traces (D-EVENT1) |
 | `core.archive` | gzip compress/decompress, zip read/write, tar add/get/list (D-DEP-ARCHIVE1) |
 | `core.raylib` | Graphics bridge: typed window/draw/color calls, headless by default; `JET_RAYLIB_DISPLAY=1` dynamically loads native raylib (D-RAYLIB1/D-FLAGSHIP-RAYLIB1) |
 | `core.game` | Headless deterministic game substrate: `Scene`, assets, input, frame hooks, replay transcript, budgets, ECS marker/query floor (D-GAME1/2/3, D-WD10, D-GAME-*) |

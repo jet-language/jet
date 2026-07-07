@@ -231,10 +231,10 @@ fn run() {
 
 #[test]
 fn unsafe_block_locals_not_leaked() {
-    // D-OBS2: locals inside @unsafe blocks must never appear in panic reports.
+    // D-OBS2: locals inside #Unsafe blocks must never appear in panic reports.
     // This is enforced structurally: safe_locals_expr only includes Copy scalars
     // that are in the *safe* env, never raw pointer slots from core.mem.
-    // The sema gate (E3101/E3102/E3103) prevents unsafe ops outside @unsafe blocks,
+    // The sema gate (E3101/E3102/E3103) prevents unsafe ops outside #Unsafe blocks,
     // so the only unsafe values are Ptr types — which are not Int/Float/Bool
     // and are therefore always excluded by the type filter.
     // This test confirms the invariant holds by checking that a panic inside an

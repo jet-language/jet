@@ -247,7 +247,9 @@ impl<'a> Checker<'a> {
                         | "Set" | "Bag" | "Deque"
                         | "BigInt" | "Decimal"
                         // D-REACT1=B: reactive handle types.
-                        | "Signal" | "Derived"
+                        | "Signal" | "Derived" | "Computed"
+                        // D-EVENT1=D: first-party typed event/hook handles.
+                        | "Event" | "Hook"
                         // D-STREAMYIELD1: generator return type.
                         | "Stream"
                         // D-MIGRATE3=A: `decode_traced<T>`'s return-shape wrapper.
@@ -3032,7 +3034,7 @@ impl<'a> Checker<'a> {
             }
         }
 
-        // `val a = b;` moves `b` when the type isn't a scalar (M2 model:
+        // `a :: b` moves `b` when the type isn't a scalar (M2 model:
         // assignment moves). Borrowed parameters can't be moved at all.
         if let Expr::Ident(n, nspan) = &b.init {
             if let Some(info) = self.lookup(n) {

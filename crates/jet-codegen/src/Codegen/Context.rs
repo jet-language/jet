@@ -213,7 +213,7 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         // D-DBDRIVER1: the tagged SQL parameter/column value + its error type.
         "DbValue" => Some("DbValue"),
         "DbError" => Some("DbError"),
-        // D-RAYLIB1=A: display-gated graphics bridge skeleton types.
+        // D-RAYLIB1=A: display-gated graphics bridge types.
         "RaylibWindow" => Some("RaylibWindow"),
         "RaylibColor" => Some("RaylibColor"),
         // D-TYPEDTEXT1=D: `Sql`/`Html` — this table's `.is_some()` is only a
@@ -273,7 +273,7 @@ pub(crate) fn file_handle_rust_type(name: &str) -> Option<&'static str> {
     }
 }
 
-/// D-RAYLIB1=A: raylib skeleton handle/value types are top-level prelude
+/// D-RAYLIB1=A: raylib handle/value types are top-level prelude
 /// structs, like file/net handles, not members of `mod jet_std`.
 pub(crate) fn raylib_handle_rust_type(name: &str) -> Option<&'static str> {
     match name {
@@ -549,6 +549,26 @@ impl Cx {
             Type::Named(name) if name == "DevServer" && !self.type_names.contains(name) => {
                 format!("{}JetDevServer", self.root_prefix)
             }
+            Type::Named(name)
+                if name == Syntax::TYPE_SUBSCRIPTION && !self.type_names.contains(name) =>
+            {
+                format!("{}jet_std::JetSubscription", self.root_prefix)
+            }
+            Type::Named(name)
+                if name == Syntax::TYPE_EVENT_SCOPE && !self.type_names.contains(name) =>
+            {
+                format!("{}jet_std::JetEventScope", self.root_prefix)
+            }
+            Type::Named(name)
+                if name == Syntax::TYPE_EVENT_POLICY && !self.type_names.contains(name) =>
+            {
+                format!("{}jet_std::JetEventPolicy", self.root_prefix)
+            }
+            Type::Named(name)
+                if name == Syntax::TYPE_EVENT_TRACE && !self.type_names.contains(name) =>
+            {
+                format!("{}jet_std::JetEventTrace", self.root_prefix)
+            }
             // E2-M7: file handle types are top-level in the prelude (not in jet_std).
             Type::Named(name) if file_handle_rust_type(name).is_some() => {
                 format!(
@@ -557,7 +577,7 @@ impl Cx {
                     file_handle_rust_type(name).unwrap()
                 )
             }
-            // D-RAYLIB1=A: the bare-minimum raylib bridge skeleton lives in the
+            // D-RAYLIB1=A: the raylib bridge lives in the
             // top-level corelib prelude today, so generated user bindings must
             // reference `RaylibWindow`/`RaylibColor` directly.
             Type::Named(name) if raylib_handle_rust_type(name).is_some() => {
@@ -717,6 +737,21 @@ impl Cx {
                     "{}jet_std::JetDerived<{}>",
                     self.root_prefix,
                     self.rust_type(&args[0])
+                )
+            }
+            Type::Apply { name, args } if name == Syntax::TYPE_EVENT && !args.is_empty() => {
+                format!(
+                    "{}jet_std::JetEvent<{}>",
+                    self.root_prefix,
+                    self.rust_type(&args[0])
+                )
+            }
+            Type::Apply { name, args } if name == Syntax::TYPE_HOOK && args.len() == 2 => {
+                format!(
+                    "{}jet_std::JetHook<{}, {}>",
+                    self.root_prefix,
+                    self.rust_type(&args[0]),
+                    self.rust_type(&args[1])
                 )
             }
             // D-MIGRATE3=A: `DecodeResult<T>` — `decode_traced<T>`'s return-shape

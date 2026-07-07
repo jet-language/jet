@@ -303,7 +303,7 @@ impl<'a> Interp<'a> {
                     scope.insert(e.name.clone(), v);
                 }
             }
-            // S73/D-SG7: `val (a, b) = p` binds named tuple fields in
+            // S73/D-SG7: `(a, b) :: p` binds named tuple fields in
             // canonical (sorted-by-name) order — a tuple value's fields are
             // always stored in that order (see `Expr::TupleLit` in `eval`),
             // so a straight positional zip lines up correctly.

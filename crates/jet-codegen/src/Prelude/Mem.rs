@@ -16,7 +16,7 @@ mod jet_mem {
     //     never speaks — but the signatures are the backstop.
     //
     // I6: zero external crates — plain std Rust only.
-    // D-LL1: the one vetted lifetime-extension lives here, inside the std/mem
+    // D-LL1: the one vetted lifetime-extension lives here, inside the core.mem
     // helper module; it never leaks into user-visible generated code.
     use std::cell::RefCell;
 

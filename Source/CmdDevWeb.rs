@@ -10,7 +10,7 @@
 //! from `run_dev`, not any of its interpreter/JIT machinery.
 
 use std::fs;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::exit;
@@ -67,13 +67,15 @@ pub(crate) fn run_dev_web(file: &str, mode: OutputMode, verbose: bool, port: Opt
 
     {
         let version = Arc::clone(&version);
-        thread::spawn(move || serve_forever(listener, version));
+        let canvas_file = file.to_string();
+        thread::spawn(move || serve_forever(listener, version, canvas_file));
     }
 
     println!(
         "serving http://localhost:{} — watching {} … (Ctrl-C to stop)",
         port, file
     );
+    println!("Canvas: http://localhost:{}/canvas", port);
 
     // Same mtime-poll/debounce shape as `run_dev` (Source/CmdDevTools.rs),
     // reusing `file_mtime` verbatim (I6: no filesystem-notification crate).
@@ -231,12 +233,13 @@ fn bind_dev_server(port: Option<u16>) -> TcpListener {
 
 /// Accept connections forever, one thread per connection (a dev tool serving
 /// a handful of small files has no need for a worker pool).
-fn serve_forever(listener: TcpListener, version: Arc<AtomicU64>) {
+fn serve_forever(listener: TcpListener, version: Arc<AtomicU64>, canvas_file: String) {
     for stream in listener.incoming() {
         if let Ok(stream) = stream {
             let version = Arc::clone(&version);
+            let canvas_file = canvas_file.clone();
             thread::spawn(move || {
-                let _ = handle_connection(stream, &version);
+                let _ = handle_connection(stream, &version, &canvas_file);
             });
         }
     }
@@ -244,18 +247,30 @@ fn serve_forever(listener: TcpListener, version: Arc<AtomicU64>) {
 
 /// Parse one GET request line + headers (no keep-alive, no request body —
 /// this is a dev tool, not a production server) and serve a response.
-fn handle_connection(stream: TcpStream, version: &AtomicU64) -> std::io::Result<()> {
+fn handle_connection(
+    stream: TcpStream,
+    version: &AtomicU64,
+    canvas_file: &str,
+) -> std::io::Result<()> {
     let mut reader = BufReader::new(stream.try_clone()?);
     let mut request_line = String::new();
     if reader.read_line(&mut request_line)? == 0 {
         return Ok(());
     }
-    // Drain headers up to the blank line; a dev server never needs them.
+    let mut content_length = 0usize;
     loop {
         let mut line = String::new();
         if reader.read_line(&mut line)? == 0 || line == "\r\n" || line == "\n" {
             break;
         }
+        let lower = line.to_ascii_lowercase();
+        if let Some(v) = lower.strip_prefix("content-length:") {
+            content_length = v.trim().parse().unwrap_or(0);
+        }
+    }
+    let mut body = vec![0u8; content_length];
+    if content_length > 0 {
+        reader.read_exact(&mut body)?;
     }
 
     let mut stream = stream;
@@ -263,17 +278,206 @@ fn handle_connection(stream: TcpStream, version: &AtomicU64) -> std::io::Result<
     let method = parts.next().unwrap_or("");
     let target = parts.next().unwrap_or("/");
 
-    if method != "GET" {
+    if method != "GET" && method != "POST" {
         return write_response(
             &mut stream,
             "405 Method Not Allowed",
             "text/plain; charset=utf-8",
-            b"jet dev's web server only handles GET",
+            b"jet dev's web server only handles GET and Canvas POST requests",
         );
     }
 
     let path = target.split('?').next().unwrap_or("/");
+    if target == "/?jet_panel=1" {
+        if method != "GET" {
+            return method_not_allowed(&mut stream);
+        }
+        let body = jet::Canvas::canvas_html_query();
+        return write_response(
+            &mut stream,
+            "200 OK",
+            "text/html; charset=utf-8",
+            body.as_bytes(),
+        );
+    }
+    if target == "/?jet_panel_app=1" {
+        if method != "GET" {
+            return method_not_allowed(&mut stream);
+        }
+        let body = jet::Canvas::canvas_js();
+        return write_response(
+            &mut stream,
+            "200 OK",
+            "application/javascript; charset=utf-8",
+            body.as_bytes(),
+        );
+    }
+    if target == "/?jet_panel_graph=1" {
+        if method != "GET" {
+            return method_not_allowed(&mut stream);
+        }
+        return match jet::Canvas::graph_json_for_file(Path::new(canvas_file)) {
+            Ok(body) => write_response(
+                &mut stream,
+                "200 OK",
+                "application/json; charset=utf-8",
+                body.as_bytes(),
+            ),
+            Err(diags) => {
+                let src = fs::read_to_string(canvas_file).unwrap_or_default();
+                let body = jet::render_diagnostics(canvas_file, &src, &diags);
+                write_response(
+                    &mut stream,
+                    "409 Conflict",
+                    "text/plain; charset=utf-8",
+                    body.as_bytes(),
+                )
+            }
+        };
+    }
+    if path == "/__jet_canvas"
+        || path == "/__jet_canvas/"
+        || path == "/canvas"
+        || path == "/canvas/"
+        || path == "/panel"
+        || path == "/panel/"
+    {
+        if method != "GET" {
+            return method_not_allowed(&mut stream);
+        }
+        let base = if path.starts_with("/panel") {
+            "/panel"
+        } else {
+            "/canvas"
+        };
+        let body = jet::Canvas::canvas_html_for(base);
+        return write_response(
+            &mut stream,
+            "200 OK",
+            "text/html; charset=utf-8",
+            body.as_bytes(),
+        );
+    }
+    if path == "/__jet_canvas/app.js" || path == "/canvas/app.js" || path == "/panel/app.js" {
+        if method != "GET" {
+            return method_not_allowed(&mut stream);
+        }
+        let body = jet::Canvas::canvas_js();
+        return write_response(
+            &mut stream,
+            "200 OK",
+            "application/javascript; charset=utf-8",
+            body.as_bytes(),
+        );
+    }
+    if path == "/__jet_canvas/graph" || path == "/canvas/graph" || path == "/panel/graph" {
+        if method != "GET" {
+            return method_not_allowed(&mut stream);
+        }
+        return match jet::Canvas::graph_json_for_file(Path::new(canvas_file)) {
+            Ok(body) => write_response(
+                &mut stream,
+                "200 OK",
+                "application/json; charset=utf-8",
+                body.as_bytes(),
+            ),
+            Err(diags) => {
+                let src = fs::read_to_string(canvas_file).unwrap_or_default();
+                let body = jet::render_diagnostics(canvas_file, &src, &diags);
+                write_response(
+                    &mut stream,
+                    "409 Conflict",
+                    "text/plain; charset=utf-8",
+                    body.as_bytes(),
+                )
+            }
+        };
+    }
+    if path == "/__jet_canvas/source-control"
+        || path == "/canvas/source-control"
+        || path == "/panel/source-control"
+    {
+        if method != "GET" {
+            return method_not_allowed(&mut stream);
+        }
+        let body = jet::Canvas::source_control_json_for_file(Path::new(canvas_file));
+        return write_response(
+            &mut stream,
+            "200 OK",
+            "application/json; charset=utf-8",
+            body.as_bytes(),
+        );
+    }
+    if path == "/__jet_canvas/transaction"
+        || path == "/canvas/transaction"
+        || path == "/panel/transaction"
+    {
+        if method != "POST" {
+            return method_not_allowed(&mut stream);
+        }
+        let request = String::from_utf8_lossy(&body);
+        return match jet::Canvas::apply_transaction_json(Path::new(canvas_file), &request) {
+            Ok(body) => {
+                version.fetch_add(1, Ordering::SeqCst);
+                write_response(
+                    &mut stream,
+                    "200 OK",
+                    "application/json; charset=utf-8",
+                    body.as_bytes(),
+                )
+            }
+            Err(body) => write_response(
+                &mut stream,
+                "409 Conflict",
+                "application/json; charset=utf-8",
+                body.as_bytes(),
+            ),
+        };
+    }
+    if path == "/__jet_canvas/query" || path == "/canvas/query" || path == "/panel/query" {
+        if method != "POST" {
+            return method_not_allowed(&mut stream);
+        }
+        let request = String::from_utf8_lossy(&body);
+        return match jet::Canvas::query_json_for_file(Path::new(canvas_file), &request) {
+            Ok(body) => write_response(
+                &mut stream,
+                "200 OK",
+                "application/json; charset=utf-8",
+                body.as_bytes(),
+            ),
+            Err(body) => write_response(
+                &mut stream,
+                "409 Conflict",
+                "application/json; charset=utf-8",
+                body.as_bytes(),
+            ),
+        };
+    }
+    if path == "/__jet_canvas/debug" || path == "/canvas/debug" || path == "/panel/debug" {
+        if method != "POST" {
+            return method_not_allowed(&mut stream);
+        }
+        let request = String::from_utf8_lossy(&body);
+        return match jet::Canvas::debug_session_json_for_file(Path::new(canvas_file), &request) {
+            Ok(body) => write_response(
+                &mut stream,
+                "200 OK",
+                "application/json; charset=utf-8",
+                body.as_bytes(),
+            ),
+            Err(body) => write_response(
+                &mut stream,
+                "409 Conflict",
+                "application/json; charset=utf-8",
+                body.as_bytes(),
+            ),
+        };
+    }
     if path == "/__jet_dev_version" {
+        if method != "GET" {
+            return method_not_allowed(&mut stream);
+        }
         let body = version.load(Ordering::SeqCst).to_string();
         return write_response(
             &mut stream,
@@ -283,6 +487,15 @@ fn handle_connection(stream: TcpStream, version: &AtomicU64) -> std::io::Result<
         );
     }
     serve_static(&mut stream, path)
+}
+
+fn method_not_allowed(stream: &mut TcpStream) -> std::io::Result<()> {
+    write_response(
+        stream,
+        "405 Method Not Allowed",
+        "text/plain; charset=utf-8",
+        b"method not allowed",
+    )
 }
 
 /// Serve one file out of `build/`, injecting the live-reload script into

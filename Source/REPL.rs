@@ -125,13 +125,13 @@ pub struct Session {
     /// synthetic program so an import typed in one input (e.g.
     /// `use core.math as math`) keeps resolving in later inputs.
     pub import_srcs: Vec<String>,
-    /// Accumulated `val` binding sources: `val x: Int = 0;` style lines.
-    /// These are added after each successful `val` step so sema sees them.
+    /// Accumulated binding sources: `x: Int :: 0` style lines.
+    /// These are added after each successful binding step so sema sees them.
     pub binding_srcs: Vec<String>,
     /// The interpreter's function table: all `fn` items by name.
     /// Rebuilt when a new function is added.
     pub func_defs: HashMap<String, Func>,
-    /// Live interpreter scope: accumulated `val`/`var` bindings (D-REPL7).
+    /// Live interpreter scope: accumulated bindings (D-REPL7).
     pub scope: HashMap<String, CtValue>,
     /// Whether the teaching note for `print` (D-REPL-PRELOAD) has been shown.
     pub shown_preload_note: bool,
@@ -186,7 +186,7 @@ impl Session {
     }
 
     /// Build the accumulated item declarations source text (functions, structs…).
-    /// This is inserted at program top-level, so `val` bindings are NOT here.
+    /// This is inserted at program top-level, so value bindings are NOT here.
     fn accumulated_src(&self) -> String {
         self.item_srcs.join("\n")
     }
@@ -201,7 +201,7 @@ impl Session {
         }
     }
 
-    /// Build the accumulated val-binding stubs for insertion INSIDE a function body.
+    /// Build the accumulated binding stubs for insertion INSIDE a function body.
     /// Bindings moved in prior inputs are re-declared then immediately consumed
     /// by a synthetic assignment, so sema reports E0121 ("was given away") if the
     /// current input tries to use them (D-REPL8=A).
@@ -236,7 +236,7 @@ impl Session {
         lines.join("\n")
     }
 
-    /// Register a val binding for sema visibility after it was evaluated.
+    /// Register a value binding for sema visibility after it was evaluated.
     /// `mutable` must match the original `::` / `:=` sigil (D-BIND4).
     pub fn record_binding(&mut self, name: &str, v: &CtValue, mutable: bool) {
         let sigil = if mutable {
@@ -286,7 +286,7 @@ fn val_binding_mutable(stmts: &[Stmt], name: &str) -> bool {
 /// Scan the successfully-parsed stmts for names that were moved from the
 /// session's current bindings. A move occurs when:
 ///
-/// 1. `val t = s` (or `t :: s`) — the init is a bare identifier that names a
+/// 1. `t :: s` — the init is a bare identifier that names a
 ///    session binding of non-scalar type. Sema's `note_move_if_direct_ident`
 ///    marks non-scalar bindings moved at this point.
 /// 2. A call argument uses `take name` convention — `CallArg::convention == Move`
@@ -325,7 +325,7 @@ fn collect_moved_in_stmt(
 ) {
     match stmt {
         Stmt::Val(b) => {
-            // `val t = s` — if init is a bare Ident naming a non-scalar session
+            // `t :: s` — if init is a bare Ident naming a non-scalar session
             // binding, that's a move (sema marks it via note_move_if_direct_ident).
             if let Expr::Ident(name, _) = &b.init {
                 if session_bindings.contains(name.as_str()) {
@@ -840,20 +840,20 @@ fn classify(text: &str, step: usize) -> Result<InputKind, Vec<Diagnostic>> {
     }
 
     // For everything (statements AND bare expressions), try wrapping as:
-    //   fn __repl__() { val __repl_echo__ = <input>; }
+    //   fn __repl__() { __repl_echo__ :: <input> }
     // first. If it parses, the last statement is a Val with the magic name.
     // In run_repl_step we detect `__repl_echo__` and echo its value (D-REPL16=B).
     // If input already ends in `;`, suppress the echo.
     //
-    // For inputs that are already statements (val/var/print/if/while/…),
-    // the `val __repl_echo__ = stmt` form won't parse; we fall through to
+    // For inputs that are already statements (bindings/print/if/loop/…),
+    // the `__repl_echo__ :: stmt` form won't parse; we fall through to
     // plain statement wrapping.
     // Strategy: if the input isn't a statement keyword, try wrapping it as
-    // `val __repl_echo__ = <input>;`. This lets bare expressions like `1 + 2`
+    // `__repl_echo__ :: <input>`. This lets bare expressions like `1 + 2`
     // parse as a `Val` binding with the magic sentinel name. `run_repl_step`
     // then echoes the value without adding it to the session scope.
     //
-    // For statements (val/var/print/if/…) or suppressed inputs, try the plain
+    // For statements (bindings/print/if/…) or suppressed inputs, try the plain
     // statement-wrapping form first; if that fails, try the echo sentinel.
     let try_stmt_first = starts_with_stmt_keyword(trimmed) || suppress;
 

@@ -4,6 +4,12 @@
 [`../../proposals/blueprint-editor.md`](../../proposals/blueprint-editor.md).
 This file is the implementation plan and ballot inventory.
 
+**Prototype slice (#265, 2026-07-07):** `jet dev <file> --target=web` serves
+Canvas at `/canvas`, backed by public v1 graph/edit JSON endpoints. The
+slice renders checked function graphs with deterministic layout, typed pins,
+inline pure expressions, source spans, and initial formatter-backed transactions
+(`noop`, `rename_binding`, `edit_inline_expr`, `insert_call`).
+
 **Build only after:** stable `D-SEMINDEX1` facts, formatter stability for every
 projected construct, edit transactions/codemods (`D-CODEMOD1`), and the
 ratified surface constraints below.

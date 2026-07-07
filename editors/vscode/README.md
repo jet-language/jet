@@ -66,6 +66,6 @@ running the same `jet` binary the language server uses.
 cargo test --test lsp
 ```
 
-In the editor, open a `.jet` file containing `let x = 1;` — expect an
-**E0009** diagnostic pointing at `::` / `:=` binding sigils. In a v5 ownership
-sample, `copy`, `^`, `&`, and PascalCase markers should color consistently.
+In the editor, open a `.jet` file containing `x :: 1` and expect a clean parse.
+In a v5 ownership sample, `copy`, `^`, `&`, and PascalCase markers should color
+consistently.

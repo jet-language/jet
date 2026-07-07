@@ -63,6 +63,34 @@ fn http_get(port: u16, path: &str) -> Option<(u16, Vec<u8>)> {
     Some((status, raw[split..].to_vec()))
 }
 
+fn http_post(port: u16, path: &str, body: &str) -> Option<(u16, Vec<u8>)> {
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).ok()?;
+    stream.set_read_timeout(Some(Duration::from_secs(5))).ok()?;
+    let req = format!(
+        "POST {} HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        path,
+        body.len(),
+        body
+    );
+    stream.write_all(req.as_bytes()).ok()?;
+    let mut raw = Vec::new();
+    stream.read_to_end(&mut raw).ok()?;
+    let sep = b"\r\n\r\n";
+    let split = raw
+        .windows(sep.len())
+        .position(|w| w == sep)
+        .map(|i| i + sep.len())?;
+    let header_text = String::from_utf8_lossy(&raw[..split]);
+    let status: u16 = header_text
+        .lines()
+        .next()?
+        .split_whitespace()
+        .nth(1)?
+        .parse()
+        .ok()?;
+    Some((status, raw[split..].to_vec()))
+}
+
 /// Polls `/__jet_dev_version` until it differs from `baseline`, or panics
 /// after a generous timeout — the rebuild-on-save proof point.
 fn wait_for_version_change(port: u16, baseline: &str, timeout: Duration) -> String {
@@ -228,6 +256,171 @@ fn jet_dev_web_serves_and_rebuilds_on_save() {
     );
 
     // `guard`'s `Drop` kills and reaps the child process on scope exit.
+    drop(guard);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn jet_dev_web_exposes_canvas_panel_and_graph() {
+    if !have_tool("rustc") {
+        eprintln!("note: skipping jet_dev_web_exposes_canvas_panel_and_graph (need rustc)");
+        return;
+    }
+
+    let dir = std::env::temp_dir().join(format!("jet_dev_canvas_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let src_path = dir.join("app.jet");
+    fs::write(&src_path, FIXTURE_SRC).unwrap();
+
+    let mut child = Command::new(jet_bin())
+        .args(["dev", "app.jet", "--target=web"])
+        .current_dir(&dir)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to start `jet dev --target=web`");
+
+    struct KillOnDrop(std::process::Child);
+    impl Drop for KillOnDrop {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let stdout = child.stdout.take().unwrap();
+    let guard = KillOnDrop(child);
+    let port = wait_for_port(stdout);
+
+    let (status, html) = http_get(port, "/canvas").expect("GET Canvas panel");
+    assert_eq!(status, 200);
+    let html = String::from_utf8_lossy(&html);
+    assert!(html.contains("<canvas id=\"jet-canvas-view\""));
+    assert!(html.contains("<canvas id=\"minimap\""));
+    assert!(html.contains("id=\"graph-list\""));
+    assert!(html.contains("id=\"palette-list\""));
+    assert!(html.contains("id=\"details\""));
+    assert!(html.contains("id=\"undo-edit\""));
+    assert!(html.contains("id=\"redo-edit\""));
+    assert!(html.contains("id=\"source-diff\""));
+    assert!(html.contains("id=\"view-toggle\""));
+    assert!(html.contains("id=\"source-view\""));
+    assert!(html.contains("id=\"context-menu\""));
+    assert!(html.contains("grid-template-rows: auto minmax(0, 1fr) 26px"));
+    assert!(html.contains("flex-wrap: wrap"));
+    assert!(html
+        .contains("grid-template-columns: minmax(132px, 16vw) minmax(0, 1fr) minmax(190px, 22vw)"));
+    assert!(html.contains("@media (max-width: 860px)"));
+    assert!(html.contains("id=\"scm-state\""));
+    assert!(html.contains("id=\"canvas-search\""));
+    assert!(html.contains("id=\"search-results\""));
+    assert!(html.contains("/canvas/app.js"));
+
+    let (status, js) = http_get(port, "/canvas/app.js").expect("GET Canvas JS");
+    assert_eq!(status, 200);
+    let js = String::from_utf8_lossy(&js);
+    assert!(js.contains("window.__jetCanvasNonblankPixels"));
+    assert!(js.contains("ctx.fillRect"));
+    assert!(js.contains("const graphUrl"));
+    assert!(js.contains("fetch(graphUrl"));
+    assert!(js.contains("function fitGraph"));
+    assert!(js.contains("function postTransaction"));
+    assert!(js.contains("const queryUrl"));
+    assert!(js.contains("sourceControlUrl"));
+    assert!(js.contains("loadSourceControl"));
+    assert!(js.contains("showSourceDiff"));
+    assert!(js.contains("function postQuery"));
+    assert!(js.contains("loadCanvasActions"));
+    assert!(js.contains("preview_canvas_action"));
+    assert!(js.contains("jet.canvas.action"));
+    assert!(js.contains("checked-tir+jit"));
+    assert!(js.contains("source_to_graph"));
+    assert!(js.contains("preview_rename"));
+    assert!(js.contains("find-references"));
+    assert!(js.contains("rename_function"));
+    assert!(js.contains("edit_function_signature"));
+    assert!(js.contains("create_function"));
+    assert!(js.contains("Apply signature"));
+    assert!(js.contains("function-return-type"));
+    assert!(js.contains("set-function-output"));
+    assert!(js.contains("remove-function-output"));
+    assert!(js.contains("signatureFromParamInputs(\"Void\")"));
+    assert!(js.contains("Callback views"));
+    assert!(js.contains("undoStack"));
+    assert!(js.contains("redoStack"));
+    assert!(js.contains("replace_source"));
+    assert!(js.contains("insert_branch"));
+    assert!(js.contains("insert_switch"));
+    assert!(js.contains("insert_loop"));
+    assert!(js.contains("insert_fallible_rail"));
+    assert!(js.contains("insert_call"));
+    assert!(js.contains("selectedNodeIds"));
+    assert!(js.contains("mode: \"marquee\""));
+    assert!(js.contains("mode: \"node\""));
+    assert!(js.contains("contextmenu"));
+    assert!(js.contains("ArrowRight"));
+    assert!(js.contains("paletteSearch.focus"));
+    assert!(js.contains("__jetCanvasPinAuthoring"));
+    assert!(js.contains("compatiblePin"));
+    assert!(js.contains("compatibleActionType"));
+    assert!(js.contains("functionsForPin"));
+    assert!(js.contains("openPinMenu"));
+    assert!(js.contains("Create function accepting"));
+    assert!(js.contains("move_link"));
+    assert!(js.contains("viewMode"));
+    assert!(js.contains("setViewMode"));
+    assert!(js.contains("Apply pins"));
+    assert!(js.contains("Visible conversion function"));
+    assert!(js.contains("Wire refused"));
+    assert!(js.contains("promote_to_binding"));
+    assert!(js.contains("insert_visible_conversion"));
+    assert!(js.contains("Promote to binding"));
+    assert!(js.contains("__jetCanvasDebugOverlay"));
+    assert!(js.contains("debugUrl"));
+    assert!(js.contains("breakpoint_spans"));
+    assert!(js.contains("active_node_id"));
+    assert!(js.contains("Debug overlay stopped"));
+    assert!(js.contains("create_comment_region"));
+    assert!(js.contains("edit_comment_region"));
+    assert!(js.contains("Apply comment"));
+    assert!(js.contains("preview_extract_inline_expr"));
+    assert!(js.contains("extract_inline_expr"));
+    assert!(js.contains("Extract function"));
+
+    let (status, graph) = http_get(port, "/canvas/graph").expect("GET Canvas graph");
+    assert_eq!(status, 200);
+    let graph = String::from_utf8_lossy(&graph);
+    assert!(graph.contains("\"protocol\":\"jet.canvas.graph\""));
+    assert!(graph.contains("\"schema_version\":1"));
+    assert!(graph.contains("\"nodes\""));
+    assert!(graph.contains("\"pins\""));
+    assert!(graph.contains("\"layout_hints\""));
+    assert!(graph.contains("\"source_span\""));
+    assert!(graph.contains("\"source_text\""));
+
+    let src = fs::read_to_string(&src_path).unwrap();
+    let revision = jet::Canvas::source_revision(&src);
+    let req = format!(
+        "{{\"schema_version\":1,\"op\":\"noop\",\"revision\":\"{}\"}}",
+        revision
+    );
+    let (status, body) = http_post(port, "/canvas/transaction", &req).expect("POST Canvas noop");
+    assert_eq!(status, 200);
+    assert!(String::from_utf8_lossy(&body).contains("\"protocol\":\"jet.canvas.edit\""));
+
+    let query = format!(
+        "{{\"schema_version\":1,\"op\":\"find\",\"revision\":\"{}\",\"query\":\"run\"}}",
+        revision
+    );
+    let (status, body) = http_post(port, "/canvas/query", &query).expect("POST Canvas query");
+    assert_eq!(status, 200);
+    assert!(String::from_utf8_lossy(&body).contains("\"protocol\":\"jet.canvas.query\""));
+
+    let (status, body) =
+        http_get(port, "/canvas/source-control").expect("GET Canvas source control");
+    assert_eq!(status, 200);
+    assert!(String::from_utf8_lossy(&body).contains("\"protocol\":\"jet.canvas.source_control\""));
+
     drop(guard);
     let _ = fs::remove_dir_all(&dir);
 }

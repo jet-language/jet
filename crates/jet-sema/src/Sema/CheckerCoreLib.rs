@@ -1483,6 +1483,126 @@ impl<'a> Checker<'a> {
                 }
                 return None; // effect returns nothing
             }
+            // D-EVENT1=D: first-party typed Event/Hook family. Constructors are
+            // module functions so the semantic family is one Core library surface,
+            // not new syntax.
+            ("core.event", "scope") => {
+                if !args.is_empty() {
+                    self.diags
+                        .push(wrong_core_arity("scope", 0, args.len(), span));
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
+                    return None;
+                }
+                return Some(Type::Named(crate::Syntax::TYPE_EVENT_SCOPE.to_string()));
+            }
+            ("core.event", "policy_sync") => {
+                if !args.is_empty() {
+                    self.diags
+                        .push(wrong_core_arity("policy_sync", 0, args.len(), span));
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
+                    return None;
+                }
+                return Some(Type::Named(crate::Syntax::TYPE_EVENT_POLICY.to_string()));
+            }
+            ("core.event", "policy_async") => {
+                if args.len() != 1 {
+                    self.diags
+                        .push(wrong_core_arity("policy_async", 1, args.len(), span));
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
+                    return None;
+                }
+                self.expect_core_arg("policy_async", 0, &Type::Int, &mut args[0]);
+                return Some(Type::Named(crate::Syntax::TYPE_EVENT_POLICY.to_string()));
+            }
+            ("core.event", "new") => {
+                if !args.is_empty() {
+                    self.diags
+                        .push(wrong_core_arity("new", 0, args.len(), span));
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
+                    return None;
+                }
+                if type_args.len() != 1 {
+                    self.diags.push(Diagnostic::error(
+                        "E0904",
+                        "`event.new` needs one payload type".to_string(),
+                        "`Event<T>` carries exactly one typed payload for each emit".to_string(),
+                        "call it with an explicit type argument: `event.new<Click>()`".to_string(),
+                        Some(span),
+                    ));
+                    return None;
+                }
+                self.check_declared_type(&type_args[0], span);
+                return Some(Type::Apply {
+                    name: crate::Syntax::TYPE_EVENT.to_string(),
+                    args: vec![type_args[0].clone()],
+                });
+            }
+            ("core.event", "with_policy") => {
+                if args.len() != 1 {
+                    self.diags
+                        .push(wrong_core_arity("with_policy", 1, args.len(), span));
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
+                    return None;
+                }
+                if type_args.len() != 1 {
+                    self.diags.push(Diagnostic::error(
+                        "E0904",
+                        "`event.with_policy` needs one payload type".to_string(),
+                        "`Event<T>` carries exactly one typed payload for each emit".to_string(),
+                        "call it with an explicit type argument: `event.with_policy<Click>(policy)`".to_string(),
+                        Some(span),
+                    ));
+                    return None;
+                }
+                self.check_declared_type(&type_args[0], span);
+                self.expect_core_arg(
+                    "with_policy",
+                    0,
+                    &Type::Named(crate::Syntax::TYPE_EVENT_POLICY.to_string()),
+                    &mut args[0],
+                );
+                return Some(Type::Apply {
+                    name: crate::Syntax::TYPE_EVENT.to_string(),
+                    args: vec![type_args[0].clone()],
+                });
+            }
+            ("core.event", "hook") => {
+                if args.len() != 1 {
+                    self.diags
+                        .push(wrong_core_arity("hook", 1, args.len(), span));
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
+                    return None;
+                }
+                if type_args.len() != 2 {
+                    self.diags.push(Diagnostic::error(
+                        "E0904",
+                        "`event.hook` needs payload and result types".to_string(),
+                        "`Hook<T, R>` receives a typed payload and combines handler results into one `R`".to_string(),
+                        "call it with explicit type arguments: `event.hook<Request, Decision>(fallback)`".to_string(),
+                        Some(span),
+                    ));
+                    return None;
+                }
+                self.check_declared_type(&type_args[0], span);
+                self.check_declared_type(&type_args[1], span);
+                self.expect_core_arg("hook", 0, &type_args[1], &mut args[0]);
+                return Some(Type::Apply {
+                    name: crate::Syntax::TYPE_HOOK.to_string(),
+                    args: vec![type_args[0].clone(), type_args[1].clone()],
+                });
+            }
             // D-PENDING1=B: Loadable<T,E> constructors — idle/loading/loaded/failed.
             ("core.async.loadable", "idle") => {
                 for a in args.iter_mut() {
@@ -2500,7 +2620,9 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // built-in constraint-layout value types.
         | "HVar" | "VVar" | "LengthVar" | "Constraint" | "LayoutHandle"
         // D-REACT1=B: opt-in reactive handle types (used bare as `Signal<T>`/`Derived<T>`).
-        | "Signal" | "Derived"
+        | "Signal" | "Derived" | "Computed"
+        // D-EVENT1=D: first-party typed Event/Hook family.
+        | "Event" | "Hook" | "Subscription" | "EventScope" | "EventPolicy" | "EventTrace"
         // D-HONESTNUM1=A: Measurement<T> value ± uncertainty.
         | "Measurement"
         // D-PENDING1=B: async UI state machine.
@@ -3865,6 +3987,9 @@ pub fn core_fixed_sig(
     module: &str,
     name: &str,
 ) -> Option<(Vec<(AccessConvention, Type)>, Option<Type>)> {
+    let normalized_module =
+        Syntax::normalize_core_module(module).unwrap_or_else(|| module.to_string());
+    let module = normalized_module.as_str();
     let read = AccessConvention::Read;
     let string = Type::String;
     let int = Type::Int;
@@ -4304,24 +4429,23 @@ pub fn core_fixed_sig(
             vec![(read, Type::List(Box::new(u8_ty())))],
             Some(Type::String),
         )),
-        // D-RAYLIB1=A: first bounded `core.raylib` skeleton. These are typed,
-        // deterministic no-op stubs in codegen until the native raylib bridge
-        // is wired; the surface is intentionally tiny and display-gated.
-        ("core.raylib" | "jet.raylib", "window_open") => Some((
+        // D-RAYLIB1=A / D-FLAGSHIP-RAYLIB1=A: first bounded `core.raylib`
+        // bridge. The surface is intentionally tiny and display-gated.
+        ("core.raylib", "window_open") => Some((
             vec![(read, Type::Int), (read, Type::Int), (read, Type::String)],
             Some(Type::Named("RaylibWindow".to_string())),
         )),
-        ("core.raylib" | "jet.raylib", "window_should_close") => Some((
+        ("core.raylib", "window_should_close") => Some((
             vec![(read, Type::Named("RaylibWindow".to_string()))],
             Some(Type::Bool),
         )),
-        ("core.raylib" | "jet.raylib", "begin_drawing") => {
+        ("core.raylib", "begin_drawing") => {
             Some((vec![(read, Type::Named("RaylibWindow".to_string()))], None))
         }
-        ("core.raylib" | "jet.raylib", "clear_background") => {
+        ("core.raylib", "clear_background") => {
             Some((vec![(read, Type::Named("RaylibColor".to_string()))], None))
         }
-        ("core.raylib" | "jet.raylib", "draw_text") => Some((
+        ("core.raylib", "draw_text") => Some((
             vec![
                 (read, Type::String),
                 (read, Type::Int),
@@ -4331,11 +4455,11 @@ pub fn core_fixed_sig(
             ],
             None,
         )),
-        ("core.raylib" | "jet.raylib", "end_drawing") => Some((vec![], None)),
-        ("core.raylib" | "jet.raylib", "close_window") => {
+        ("core.raylib", "end_drawing") => Some((vec![], None)),
+        ("core.raylib", "close_window") => {
             Some((vec![(read, Type::Named("RaylibWindow".to_string()))], None))
         }
-        ("core.raylib" | "jet.raylib", "color") => Some((
+        ("core.raylib", "color") => Some((
             vec![
                 (read, Type::Int),
                 (read, Type::Int),
@@ -4746,6 +4870,9 @@ pub(crate) fn devserver_method_return(
 }
 
 pub(crate) fn core_module_items(module: &str) -> Vec<String> {
+    let normalized_module =
+        Syntax::normalize_core_module(module).unwrap_or_else(|| module.to_string());
+    let module = normalized_module.as_str();
     let items: &[&str] = match module {
         "core.io" => &["args", "input", "read_all_input", "eprint", "stdin"],
         "core.env" => &["get", "set", "current_dir", "home_dir"],
@@ -4912,8 +5039,8 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
             "tar_get",
             "tar_names_json",
         ],
-        // D-RAYLIB1=A: typed bridge skeleton.
-        "jet.raylib" => &[
+        // D-RAYLIB1=A: typed graphics bridge.
+        "core.raylib" => &[
             "window_open",
             "window_should_close",
             "begin_drawing",
@@ -4935,6 +5062,15 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         // D-REACT1=B: opt-in reactive library — signals/derived/effects.
         // D-SIGNAL1: "computed" is the canonical alias for "derived".
         "jet.reactive" => &["signal", "derived", "computed", "effect"],
+        // D-EVENT1=D: first-party typed Event/Hook family.
+        "core.event" => &[
+            "new",
+            "with_policy",
+            "hook",
+            "scope",
+            "policy_sync",
+            "policy_async",
+        ],
         // D-HONESTNUM1=A: Measurement<T> constructor.
         "core.science.measurement" => &["from"],
         // D-DECIMAL1: exact decimal constructor alias.
@@ -5555,19 +5691,19 @@ mod tests {
 
     #[test]
     fn raylib_skeleton_signatures_are_registered() {
-        let window = core_fixed_sig("jet.raylib", "window_open")
+        let window = core_fixed_sig("core.raylib", "window_open")
             .expect("raylib window_open signature")
             .1
             .expect("window_open return type");
         assert_eq!(window, Type::Named("RaylibWindow".to_string()));
 
-        let color = core_fixed_sig("jet.raylib", "color")
+        let color = core_fixed_sig("core.raylib", "color")
             .expect("raylib color signature")
             .1
             .expect("color return type");
         assert_eq!(color, Type::Named("RaylibColor".to_string()));
 
-        let items = core_module_items("jet.raylib");
+        let items = core_module_items("core.raylib");
         assert!(items.contains(&"draw_text".to_string()));
         assert!(items.contains(&"close_window".to_string()));
     }

@@ -4489,32 +4489,7 @@ impl<'a> Parser<'a> {
 
     /// S57 (M9.5): `comptime NAME = expr;` — a compile-time constant binding.
     pub(super) fn comptime_def(&mut self) -> Result<ConstDef, Diagnostic> {
-        let kw = self.peek().span;
         self.expect_kw(TokKind::KwComptime, "to start a comptime binding")?;
-        // E0954: `comptime val` / `comptime var` — one keyword suffices.
-        if let TokKind::Ident(n) = &self.peek().kind {
-            if (n == Syntax::FOREIGN_VAL || n == Syntax::FOREIGN_VAR)
-                && matches!(self.peek2().kind, TokKind::Ident(_))
-            {
-                let foreign = n.clone();
-                let extra = self.peek().span;
-                return Err(Diagnostic::error(
-                    "E0954",
-                    format!(
-                        "write `{} NAME = ...`, not `{} {} NAME = ...`",
-                        Syntax::KW_COMPTIME,
-                        Syntax::KW_COMPTIME,
-                        foreign
-                    ),
-                    format!(
-                        "`{}` is already the binding keyword, and a comptime value is always a constant",
-                        Syntax::KW_COMPTIME
-                    ),
-                    format!("remove the extra keyword: `{} NAME = ...`", Syntax::KW_COMPTIME),
-                    Some(Span::new(kw.start, extra.end)),
-                ));
-            }
-        }
         let (name, name_span) = self.expect_ident("after `comptime`")?;
         self.expect(TokKind::Eq, "after the comptime name")?;
         let value = self.expr()?;
