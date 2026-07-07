@@ -182,25 +182,37 @@ generations, rolls back, scaffolds configs, and emits activation proof plus
 hybrid-ISO installer media/proof artifacts. VM proof now distinguishes
 harness-ready from guest-passed, runs the QEMU create/install/reboot phases,
 boots the hybrid ISO installer through Limine, direct-boots the exact generation
-kernel/initrd for the verifier phase, uses `rdinit` to enter the JetOS
-installer/verify overlay scripts, captures the installed guest's serial proof
-marker, and only accepts a
+kernel/initrd for the verifier phase while the D-JPK-OSDISK1=C GPT/ESP
+installed-disk bootloader handoff is implemented, uses `rdinit` to enter the
+JetOS installer/verify overlay scripts, captures the installed guest's serial
+proof marker, and only accepts a
 guest proof bound to the same host, generation, disk, media proof, tool hashes,
 and guest assertions, including terminal-login readiness through serial/virtual
-getty units, `/etc/profile`, `/etc/shells`, and projected user homes. The
+getty units, `/etc/profile`, `/etc/shells`, and projected user homes plus
+desktop-session readiness through GNOME Wayland session artifacts, display-manager
+unit wiring, terminal fallback, the installed jetos Studio app, and
+graphical-console readiness through QEMU VNC/stdvga plus guest-visible `fb0`;
+the graphical verifier also executes the generated display-manager,
+desktop-session, and terminal-fallback launchers in proof mode so the installed
+closure proves its GNOME/GDM launch path, not just file presence.
+The
 interactive `jet os vm run <host> --disk <path>` path launches only a disk
-already tied to the latest generation by the same passing VM proof, with the
-terminal console attached to the current process. The
+already tied to the latest generation by the same passing VM proof, with a
+graphical VNC console exposed and serial output attached to the current process.
+The
 `cachyos-kernel` package can now build missing boot
 artifacts from its recorded `source/recipe.jet` via package-internal
 `source/build.sh`; that builder is authoritative when present, so stale
 pre-dropped boot files do not bypass the source-built path. The installer and VM
 runner boot the artifacts produced by the selected first-party package, and the
 installer ISO dereferences generation symlinks into a self-contained guest
-payload before real-QEMU install/reboot proof runs. Each generation installs the first-party jetos
-Studio app projection into the system profile with a browser fallback over the
-same local protocol; `jetos studio --headless` exposes the installed app path for
-review flows. The dev-shell smoke path can inject the local CachyOS
+payload before real-QEMU install/reboot proof runs. Its UEFI path uses a real
+FAT ESP boot image (`boot/efiboot.img`) containing `EFI/BOOT/BOOTX64.EFI`, not a
+raw EFI binary as the El Torito image. Each generation defaults to the ratified
+GNOME-on-Wayland desktop profile, keeps terminal login as fallback, and installs
+the first-party jetos Studio app projection into the system profile with a
+browser fallback over the same local protocol; `jetos studio --headless` exposes
+the installed app path for review flows. The dev-shell smoke path can inject the local CachyOS
 kernel/initrd/modules into the first-party `cachyos-kernel` builder, producing a
 real-QEMU VM proof while production package recipes continue to harden. Fleet
 rollout stays future Epoch 7 work.

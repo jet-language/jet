@@ -3,8 +3,8 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 288,
-    "rev": 1124,
+    "nextNum": 338,
+    "rev": 1271,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -13149,6 +13149,16 @@
         {
           "at": "2026-07-07",
           "by": "jetos-agent",
+          "text": "2026-07-07 jetos-agent verify update: system-core desktop artifacts now include executable proof-mode launchers. Generated jetos-display-manager, jetos-desktop-session, and jetos-terminal-fallback resolve against JETOS_SYSTEM_ROOT/run-current-system semantics, advertise --jetos-proof, and are ratcheted in tests so the desktop/session path is not file-presence-only. Docs/spec and roadmap updated to require desktop-launchers-run alongside terminal-login-ready, desktop-session-ready, and graphical-console-ready. Verification shared with #263: cargo check -p jet-driver green; cargo test --test jetpack os_ 30 passed; cargo test --test jetpack 90 passed; cargo build --bin jetos green; cargo fmt --check green; real QEMU launcher-smoke proof guest-passed with fb0 and launcher proof lines."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "jetos-agent",
+          "text": "2026-07-07 jetos-agent verify update: #262 system-core evidence refreshed after graphical VM hardening. Default graphical.target configs now require/provision first-party GNOME desktop command closure (gdm, gnome-session, gnome-shell) and keep jetos Studio separate from Canvas with browser fallback; generated system closure includes display-manager units, session launcher, terminal fallback, Studio app, boot/kernel/init artifacts, package symlinks, activation diff, generations/rollback, and provenance. JetOS binary decoupled from root Canvas by moving the jetos bin into crates/jet-driver. Verification: nix develop -c cargo test --test jetpack os_ => 30 passed; nix develop -c cargo test --test jetpack => 90 passed; nix develop -c cargo build --bin jetos green; nix develop -c cargo check -p jet-driver green; cargo tree -p jet-driver shows no root jet crate dependency. Real QEMU proof /tmp/jetos-real-qemu-root-46 produced guest-passed graphical-smoke with terminal-login-ready, desktop-session-ready, and graphical-console-ready. Leaving #262 in verify because full repo cargo test is intentionally not rerun across concurrent Canvas/E3/E6 dirty lanes; JetOS-local gates are green."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "jetos-agent",
           "text": "2026-07-07 jetos-agent verify update: Current #262 system-core/JetOS evidence is green after #263 real-QEMU hardening. Verification run: df -h /tmp OK (55% used); rustfmt check on JetOS/Jetpack touched Rust green; nix develop -c cargo test --test jetpack => 88 passed; nix develop -c cargo test --test diagnostics_coverage => 7 passed; nix develop -c cargo check --bin jetos green; nix develop -c cargo build --bin jetos green; real-QEMU smoke with local CachyOS kernel/initrd/modules proved install/reboot at /tmp/jetos-real-qemu-root-26. Full nix develop -c cargo test remains blocked outside JetOS: tests/dev.rs::dev_default_matches_compiled_binary hangs in isolation for 3 minutes and was interrupted. Keeping #262 in verify until full-suite close gate is available; no dev/JIT/Canvas files touched."
         },
         {
@@ -13330,6 +13340,31 @@
       "workOrder": 2,
       "assignee": "jetos-agent",
       "log": [
+        {
+          "at": "2026-07-07",
+          "by": "jetos-agent",
+          "text": "2026-07-07 jetos-agent building update: added and verified in-guest desktop launcher proof; did not leave the failed GPT/ESP sub-slice in the tree. Current green evidence after final revert: cargo fmt --check green; cargo check -p jet-driver green; cargo test --test jetpack os_ => 30 passed; cargo test --test jetpack => 90 passed; cargo build --bin jetos green; real QEMU final smoke /tmp/jetos-real-qemu-root-49 with /tmp/jetos-real-qemu-49.qcow2 => guest-passed. boot-graphical-desktop stdout shows bochs-drmdrmfb, fb0/fbcon, display manager command gdm, desktop session command gnome-session, terminal fallback ready; guest assertions include desktop-launchers-run. I also attempted the D-JPK-OSDISK1=C installed-disk handoff (GPT + FAT ESP + ext4 root, boot-installed-disk via ESP/Limine), but real QEMU failed in boot-installer because the current host initrd lacks sfdisk; the guest log showed 'jetos installer: missing sfdisk' then kernel panic as init exited. I reverted that sub-slice rather than leaving a regression. Next #263 work: embed pinned partition/FAT tools into the JetOS initrd overlay or switch installer media to a self-owned initramfs tool closure, then re-land GPT/ESP and boot-installed-disk through firmware."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "jetos-agent",
+          "text": "2026-07-07 jetos-agent phase correction: verification found a remaining acceptance gap. Current proof installs to disk, reboots QEMU, mounts/verifies the installed root, proves terminal + graphical framebuffer + desktop launchers, and vm run opens the proved disk. But the installed-disk verify phases still direct-boot the generation kernel/initrd from the harness; they do not yet boot through the installed disk's own GPT/ESP/Limine handoff. D-JPK-OSDISK1 is already ratified as guided default = GPT + ESP + ext4 root with manual escape hatch, so no new owner ballot is needed for the default. Moving #263 back to building until the installer creates that disk layout and QEMU boots the installed boot path."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "jetos-agent",
+          "text": "2026-07-07 jetos-agent verify update: strengthened desktop VM proof from file-presence to in-guest launcher execution. Generated jetos-display-manager, jetos-desktop-session, and jetos-terminal-fallback now support --jetos-proof; desktop verifier runs them inside the mounted installed generation with JETOS_SYSTEM_ROOT/PATH pointed at the system closure. Required guest assertions now include desktop-launchers-run, so VM proof cannot pass unless the guest sees framebuffer/fb0 and resolves gdm, gnome-session, and terminal fallback launchers from the installed closure. Verification: nix develop -c cargo check -p jet-driver green; nix develop -c cargo test --test jetpack os_ => 30 passed; nix develop -c cargo test --test jetpack => 90 passed; nix develop -c cargo build --bin jetos green; nix develop -c cargo fmt --check green. Real QEMU proof: JETPACK_ROOT=/tmp/jetos-real-qemu-root-47 ... jetos os vm prove halcyon --disk /tmp/jetos-real-qemu-47.qcow2 --name launcher-smoke --offline => guest-passed. boot-graphical-desktop.stdout shows bochs-drmdrmfb, /sys/class/graphics/fb0, 'jetos proof: display manager command gdm', 'jetos proof: desktop session command gnome-session', 'jetos proof: terminal fallback ready', and guest proof assertions include desktop-launchers-run. Short jetos os vm run on the proved disk accepted proof and exposed VNC 127.0.0.1:5900 until intentional timeout. Remaining caveat for full NixOS-class parity: this proves installed graphical launch path and framebuffer, not a full upstream GNOME login session or installed-disk bootloader handoff yet."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "jetos-agent",
+          "text": "2026-07-07 jetos-agent verify update: closed the prior graphical proof gap for the VM slice. JetOS binary is now independent of Canvas/root UI plumbing: jetos lives as crates/jet-driver/src/bin/jetos.rs and cargo build --bin jetos compiles the jet-driver package path, not Source/lib.rs Canvas. Added default GNOME Wayland closure ratchet: graphical configs auto-realize first-party gdm, gnome-session, and gnome-shell or emit E1288; generated generation contains sw/bin/gdm, sw/bin/gnome-session, sw/bin/gnome-shell plus jetos-display-manager, jetos-desktop-session, jetos-terminal-fallback, and jetos-studio. VM proof now has boot-graphical-desktop phase using VNC display + std VGA, guest verifier checks framebuffer/fb0 and emits graphical-console-ready. Verification: nix develop -c cargo test --test jetpack os_ => 30 passed; nix develop -c cargo test --test jetpack => 90 passed; nix develop -c cargo build --bin jetos green; nix develop -c cargo check -p jet-driver green; real QEMU proof JETPACK_ROOT=/tmp/jetos-real-qemu-root-46 ... jetos os vm prove halcyon --disk /tmp/jetos-real-qemu-46.qcow2 --name graphical-smoke --offline => guest-passed with terminal-login-ready, desktop-session-ready, graphical-console-ready; boot-graphical-desktop.stderr reports VNC server running on 127.0.0.1:5900; stdout reports 0 bochs-drmdrmfb and graphics sees /sys/class/graphics/fb0. Short jetos os vm run on that proved disk accepted proof and booted until intentional timeout with VNC exposed. Remaining honest caveat: this proves graphical console/framebuffer, desktop closure wiring, and Studio system app; it does not prove a real upstream GNOME/GDM session login yet."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "jetos-agent",
+          "text": "2026-07-07 jetos-agent: Terminal+desktop VM slice proved. JetOS no longer depends on Canvas for its binary: moved jetos into crates/jet-driver; cargo build --bin jetos now compiles jet-driver only. Implemented UEFI hybrid ISO with dynamic FAT ESP sizing, Limine boot(): paths, OVMF pflash support, hard VM-stop if media staging fails to build a real ISO, and ratified jet os vm run. Implemented D-JOS-DESKTOP1=A outcome: default GNOME Wayland profile, gdm/display-manager wiring, terminal fallback launchers, installed jetos Studio system app and browser fallback kept separate from Canvas. Guest verifier now requires desktop artifacts plus Studio app and emits desktop-session-ready alongside terminal-login-ready. Real smoke: JETPACK_ROOT=/tmp/jetos-real-qemu-root-42 ... target/debug/jetos os vm prove halcyon --disk /tmp/jetos-real-qemu-42.qcow2 --name desktop-smoke --offline => guest-passed with terminal-login-ready + desktop-session-ready. Short jet os vm run on that disk accepted proof and booted until timeout. Verification: cargo check -p jet-driver green; cargo build --bin jetos green; cargo test --test jetpack os_ => 29 passed; cargo test --test jetpack => 89 passed. Broad cargo test was interrupted after repeating the pre-existing dev parity hang in dev_default_matches_compiled_binary/interpreter_matches_compiled_binary; Canvas tests passed in that broad run. Remaining #263 gap: graphical session is declared/proof-bound and Studio is installed, but real GUI framebuffer/display-manager interaction still needs an open VM graphical proof, not only terminal serial proof."
+        },
         {
           "at": "2026-07-07",
           "by": "jetos-agent",
@@ -14606,6 +14641,46 @@
       "log": [
         {
           "at": "2026-07-07",
+          "by": "codex-canvas",
+          "text": "action-palette continuation: replaced static Canvas context menus with a searchable Blueprint-style action palette. Pin menus now show compatible source-backed actions with type context/counts and live filtering; graph background menu now includes built-ins, node actions, function/source/view actions, and searchable action entries. Verified: rustfmt Source/Canvas.rs tests/web_dev.rs --check ok; cargo test --test web_dev jet_dev_web_exposes_canvas_panel_and_graph ok; cargo test --test canvas 25/25 ok; cargo build ok after removing unrelated unused BTreeSet import from dirty JetOS lane. Browser evidence: right-click Int output pin opened Compatible actions with search, filtered to square 1/4; right-click graph opened Graph actions, filtered print to 2/15; 800x720 remained scrollWidth 800 with right panel collapsed. Server stopped after verify."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-canvas",
+          "text": "graph-renderer visual continuation: rebuilt Canvas node cards toward Blueprint parity: wider typed cards, stronger colored title bands, socket rows for data/control pins, scaled exec triangles, clipped readable labels, tighter side panels to give canvas more room, layout compression, and automatic row reflow so nodes no longer overlap or clip. Verified: rustfmt Source/Canvas.rs tests/web_dev.rs --check ok; cargo test --test web_dev jet_dev_web_exposes_canvas_panel_and_graph ok; cargo test --test canvas 25/25 ok; cargo build ok. Browser evidence: 1280x800 canvas columns 192/832/256, no horizontal overflow, all nodes visible, no node overlaps, exec/data pin hit maps present, graph switcher changed to run graph and active graph list updated; 800x720 scrollWidth 800, right panel collapsed, no node overlaps. Server stopped after verify."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-canvas",
+          "text": "signature-editor/function-factory continuation: replaced raw function pin form with Blueprint-style signature board, explicit input/output lanes, type-color ports/chips, compact responsive pin field grid, and left-panel function factory for source-backed new functions. Verified: rustfmt Source/Canvas.rs tests/web_dev.rs --check ok; cargo test --test web_dev jet_dev_web_exposes_canvas_panel_and_graph ok; cargo test --test canvas 25/25 ok. Browser evidence: desktop 1280x800 no horizontal overflow, signature board rendered with pin rows; add input pin wrote extra: Bool = true and toast Source updated; narrow 800x720 scrollWidth 800, right panel collapsed, stage/canvas 600px; function factory created fn triple(n: Int) -> Int and graph switcher/list updated. Server stopped after verify."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-canvas",
+          "text": "nested graph navigation continuation: added Blueprint-style graph back/forward buttons and a graph trail in the top bar. Dropdown, graph list, and double-click callee navigation now route through one switchGraph path with history stacks. Verified: rustfmt touched files ok; cargo test --test web_dev jet_dev_web_exposes_canvas_panel_and_graph ok; cargo test --test canvas 25/25 ok; cargo build ok. Browser evidence: initial summarize trail had Back/Forward disabled; double-click square call opened square with trail \"summarize › square\" and Back enabled; Back returned to summarize and enabled Forward; Forward returned to square; 800x720 stayed scrollWidth 800, columns 200px 600px. Server stopped after verify."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-canvas",
+          "text": "pin-label readability continuation: moved pin labels inside nodes instead of outside along wires, so Canvas reads closer to Blueprint ports and wires no longer collide with external type text. Added pinLabel/drawPinLabel render helpers and ratchets, bumped Canvas JS cache key to blueprint5. Verified: rustfmt touched files ok; cargo test --test web_dev jet_dev_web_exposes_canvas_panel_and_graph ok; cargo test --test canvas 25/25 ok; cargo build ok. Browser evidence: summarize screenshot shows internal port labels and cleaner wires; double-click square call still opens square graph; 800x720 remains scrollWidth 800 and columns 200px 600px. Server stopped after verify."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-canvas",
+          "text": "visual polish continuation: fixed Canvas render order so wires draw behind a second node/pass instead of obscuring node labels/interiors, capped fitGraph zoom at 105% so small graphs stop ballooning to toy-size, bumped Canvas JS cache key to blueprint4, and ratcheted the render path in web_dev. Verified: rustfmt touched files ok; cargo test --test canvas 25/25 ok; cargo test --test web_dev jet_dev_web_exposes_canvas_panel_and_graph ok; cargo build ok. Browser evidence: localhost Canvas screenshot shows summarize graph with readable nodes over wires, double-click square call opens square graph, square graph fits at 105% instead of prior 147%, and 800x720 remains scrollWidth 800 with columns 200px 600px. Server stopped after verify."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-canvas",
+          "text": "greenfield UX continuation: fixed execution rail ordering to respect data dependencies (entry -> square call -> set total before branch), added DOM-backed Canvas hit map for real browser interaction testing, fixed Canvas selection hash recursion that reset clicked call nodes back to entry, and added nested function navigation from call/method nodes via inspector button, context menu, and double-click. Verified: rustfmt Source/Canvas.rs tests/canvas.rs tests/web_dev.rs crates/jet-driver/src/Jetpack/JetOS.rs --check ok; cargo test --test canvas 25/25 ok; cargo test --test web_dev jet_dev_web_exposes_canvas_panel_and_graph ok; cargo build ok. Browser evidence: localhost Canvas desktop no overflow; CUA click on rendered square call selected call node and showed Open square graph; inspector button opened square graph; double-click square call opened square graph; 800x720 responsive check scrollWidth 800, columns 200px 600px. Also made minimal unrelated JetOS clone fix because dirty JetOS code blocked Canvas test compilation."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex-canvas",
+          "text": "visual greenfield follow-up complete: replaced duplicate pin submitter, fixed default-expression signature display, and verified via in-app browser. Evidence: rustfmt Source/Canvas.rs tests/canvas.rs tests/web_dev.rs --check ok, cargo test --test canvas 25/25 ok, cargo test --test web_dev jet_dev_web_exposes_canvas_panel_and_graph ok, cargo build ok. Browser localhost Canvas verified desktop no overflow, graph switch to run active, source toggle shows fn run and edited source, Print palette search, context menu with built-ins/fit/new function/source, add input pin writes extra: Bool = true with Source updated and no stale-conflict text, narrow 800x720 scrollWidth 800 and workbench columns 200px 600px. Server stopped after verify."
+        },
+        {
+          "at": "2026-07-07",
           "by": "agent",
           "text": "verification note: final focused checks green after built-in/context follow-up: rustfmt Source/Canvas.rs tests/canvas.rs tests/web_dev.rs --check; cargo test --test canvas 25/25; cargo test --test web_dev jet_dev_web_exposes_canvas_panel_and_graph; cargo build. Tried to restart demo for a fresh localhost asset probe, but curl could not connect despite the jet dev banner and ps showed no Jet server, so stopped the stale Nix session. Earlier 800x720 browser smoke still covers the responsive CSS change; no CSS changed after that smoke."
         },
@@ -14631,6 +14706,1206 @@
         }
       ],
       "created": "2026-07-07T16:04:49.346Z",
+      "updated": "2026-07-07"
+    },
+    {
+      "id": "c0m9tjqj",
+      "num": 288,
+      "title": "corelib audit: core.files/core.path — file I/O parity with pathlib/Go os/Rust fs",
+      "body": "Best-in-class bar: Python pathlib ergonomics, Go os robustness, Rust std::fs safety. Card #58 (path objects, atomic write, dir-walk) is done — first verify what actually shipped vs docs/reference/core-library.md (the doc shows no walk/glob/metadata), then close the residual gaps so core.files is a strict superset of the bar.\n\nGaps to audit and close: file metadata (size, mtime, created, permissions, file type) as a typed Stat value; create_dir_all / remove_dir / remove_all; glob patterns and recursive walk with entry filtering; symlink create/read/detect and hardlinks; temp files and temp dirs with RAII cleanup; atomic write (verify #58); advisory file locking; canonicalize/absolute; copy_dir tree; seek/offset reads and byte-stream (non-line) buffered readers/writers; fsync/flush-to-disk; filesystem watch (notify events) — watch may deserve its own module name (ballot).\n\nDone means: every gap either ships with example + golden test, or is recorded as an owner-declined non-goal in the stdlib map. Ballot gates: any new user-facing module name, function surface, or syntax is an owner decision (queue ballots before code); any external dep stays behind the FFI bridge pattern (I6).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-07",
+          "by": "owner",
+          "text": "Activated into epoch e3 track"
+        }
+      ],
+      "created": "2026-07-07T17:23:32.437Z",
+      "updated": "2026-07-07"
+    },
+    {
+      "id": "c0n8old0",
+      "num": 289,
+      "title": "corelib audit: core.io — terminal surface parity",
+      "body": "Best-in-class bar: Go term + Rust crossterm capabilities with Python rich ergonomics. Current surface is args/input/read_all_input/eprint only.\n\nGaps: print without trailing newline + explicit flush; write raw bytes to stdout; isatty detection for stdout/stderr; terminal width/height; ANSI color/style helpers that honor NO_COLOR and non-tty (safe by default — no garbage codes in pipes); carriage-return progress idiom or a small progress helper; raw mode + key events (may be a separate opt-in module — ballot if so).\n\nDone means: gaps shipped with examples + golden tests or recorded as declined non-goals. Ballot gates: any new user-facing module name, function surface, or syntax is an owner decision (queue ballots before code); any external dep stays behind the FFI bridge pattern (I6).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-07",
+          "by": "claude-main",
+          "text": "Activated into epoch e3 track"
+        }
+      ],
+      "created": "2026-07-07T17:23:32.496Z",
+      "updated": "2026-07-07"
+    },
+    {
+      "id": "c0oa2sfp",
+      "num": 290,
+      "title": "corelib audit: core.args — CLI parsing parity with clap",
+      "body": "Best-in-class bar: clap (Rust), with argparse/Go flag as floors. Current: flag/option/positional + help text, string-only values, no auto help.\n\nGaps: subcommands with per-subcommand specs; short flags (-v) and combined short flags; typed option values (Int, Float, enum choices, path) validated at parse; default values declared in the spec; repeated options (multi values); required vs optional options; automatic --help and --version wiring; environment-variable fallbacks; \"did you mean\" suggestions on unknown flags (Jet diagnostic voice); shell completion generation (bash/zsh/fish) via jet devtools; value hints for completions.\n\nDone means: a nontrivial real CLI (e.g. a jet example tool) is expressible without hand-walking [String], with golden help output. Ballot gates: any new user-facing module name, function surface, or syntax is an owner decision (queue ballots before code); any external dep stays behind the FFI bridge pattern (I6).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-07",
+          "by": "claude-main",
+          "text": "Activated into epoch e3 track"
+        }
+      ],
+      "created": "2026-07-07T17:23:32.559Z",
+      "updated": "2026-07-07"
+    },
+    {
+      "id": "c0pef855",
+      "num": 291,
+      "title": "corelib audit: core.process — subprocess parity with Python subprocess/Go os/exec",
+      "body": "Best-in-class bar: Python subprocess flexibility, Go os/exec explicitness, duct-style pipelines. Current: run([cmd]) capturing everything + exit(code) only.\n\nGaps: streaming stdin write and incremental stdout/stderr read while the child runs; env control (set, remove, clear-then-set); working-directory control; timeout with kill; send signals (terminate/kill/interrupt); detached spawn; exit status detail (signal vs code); pipelines (child stdout → child stdin) without a shell; safe argv-only execution documented (no shell interpolation footgun — safe by default); output size limits; inherit-vs-capture per stream.\n\nDone means: a build-tool-shaped example (spawn, stream logs live, timeout, propagate exit) ships with golden output. Ballot gates: any new user-facing module name, function surface, or syntax is an owner decision (queue ballots before code); any external dep stays behind the FFI bridge pattern (I6).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-07",
+          "by": "claude-main",
+          "text": "Activated into epoch e3 track"
+        }
+      ],
+      "created": "2026-07-07T17:23:32.626Z",
+      "updated": "2026-07-07"
+    },
+    {
+      "id": "c0qi7dc2",
+      "num": 292,
+      "title": "corelib audit: core.env + system facts — os info, signals, process identity",
+      "body": "Best-in-class bar: Go os/runtime + Python os/platform/signal. Current core.env: get/set/current_dir/home_dir.\n\nGaps: unset(name); vars() enumeration; temp_dir(); executable path; process id; hostname; os name/family and cpu architecture; logical cpu count; current username; set current dir; graceful-shutdown hook for interrupt (ctrl-c) — one safe beginner surface (on_interrupt handler) with expert signal access behind it. Decide the module home for system facts (core.env vs a new core.os — naming is an owner ballot).\n\nDone means: gaps shipped with examples + golden tests or recorded as declined non-goals. Ballot gates: any new user-facing module name, function surface, or syntax is an owner decision (queue ballots before code); any external dep stays behind the FFI bridge pattern (I6).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-07",
+          "by": "owner",
+          "text": "Activated into epoch e3 track"
+        }
+      ],
+      "created": "2026-07-07T17:23:32.693Z",
+      "updated": "2026-07-07"
+    },
+    {
+      "id": "c0rmuc30",
+      "num": 293,
+      "title": "corelib audit: core.math — full libm + integer-safety surface",
+      "body": "Best-in-class bar: C99 libm coverage with Rust f64/i64 method safety. Current: sqrt/pow/abs/min/max/floor/ceil/round/clamp/pi/e.\n\nGaps: trig family (sin, cos, tan, asin, acos, atan, atan2) and hyperbolics; exp, ln, log2, log10, hypot; trunc, fract, sign; isnan/isinf/isfinite; float to_bits/from_bits; NaN-explicit min/max policy; integer checked_/saturating_/wrapping_ add/sub/mul (pairs with overflow diagnostics); integer pow; gcd/lcm; degrees/radians; lerp; tau/infinity/nan constants. Verify shipped BigInt/Decimal (#65) integrate with this surface (abs/min/max/comparisons work uniformly).\n\nDone means: gaps shipped with examples + golden tests or recorded as declined non-goals; one canonical spelling per operation (I8). Ballot gates: any new user-facing module name, function surface, or syntax is an owner decision (queue ballots before code); any external dep stays behind the FFI bridge pattern (I6).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-07",
+          "by": "claude-main",
+          "text": "Activated into epoch e3 track"
+        }
+      ],
+      "created": "2026-07-07T17:23:32.762Z",
+      "updated": "2026-07-07"
+    },
+    {
+      "id": "c0sr7exp",
+      "num": 294,
+      "title": "corelib audit: core.random — distributions, bytes, sampling",
+      "body": "Best-in-class bar: Go math/rand/v2 + Python random, with the D-DET1 capability story kept intact. Current: seed/int/float/pick/shuffle + injectable Rng.\n\nGaps: bytes(n); bool with probability p; normal/gaussian and exponential draws; weighted pick; sample(k) without replacement; range convenience over Float; mirror every new draw on the injected Rng capability (D-DET-CAPAPI). Keep the crypto/PRNG split explicit (#52): crypto randomness stays in core.crypto, documented cross-reference both ways.\n\nDone means: gaps shipped with deterministic seeded golden tests or recorded as declined non-goals. Ballot gates: any new user-facing module name, function surface, or syntax is an owner decision (queue ballots before code); any external dep stays behind the FFI bridge pattern (I6).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-07",
+          "by": "claude-main",
+          "text": "Activated into epoch e3 track"
+        }
+      ],
+      "created": "2026-07-07T17:23:32.829Z",
+      "updated": "2026-07-07"
+    },
+    {
+      "id": "c0tru7we",
+      "num": 295,
+      "title": "corelib audit: core.time ring — calendar parity with java.time/jiff",
+      "body": "Best-in-class bar: java.time (JSR-310) semantics and jiff (Rust) correctness. Card #53 (time depth) is done — first verify what actually shipped, then close residual gaps.\n\nAudit list: civil Date / Time / DateTime types distinct from the ms timestamp; ZonedDateTime with a bundled, updatable IANA tzdb (DST-correct arithmetic — the thing most languages get wrong); Duration vs calendar Period distinction; RFC 3339 / ISO 8601 parse + format; custom format patterns; monotonic Instant separate from wall clock (Stopwatch exists — expose the primitive); truncate/round to unit; day-of-week/ordinal/week-based math; leap-second policy stated in docs; conversion to/from Unix ms without ambiguity traps.\n\nDone means: the documented ring surface provably covers the JSR-310 core use-case table, with examples + golden tests per area. Ballot gates: any new user-facing module name, function surface, or syntax is an owner decision (queue ballots before code); any external dep stays behind the FFI bridge pattern (I6).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-07",
+          "by": "claude-main",
+          "text": "Activated into epoch e3 track"
+        }
+      ],
+      "created": "2026-07-07T17:23:32.891Z",
+      "updated": "2026-07-07"
+    },
+    {
+      "id": "c0uxsyns",
+      "num": 296,
+      "title": "corelib audit: core.encoding — format breadth (XML, binary interchange, streaming)",
+      "body": "Best-in-class bar: Go encoding/* breadth with serde-quality fidelity (existing JSON/TOML/YAML/CSV adapters are already full-fidelity — keep that bar).\n\nGaps: XML parse/serialize (full, namespace-aware); one canonical binary interchange format (MessagePack or CBOR — pick one, I8; owner ballot); JSON Lines streaming read/write; streaming/incremental (pull) parsing for large JSON/CSV inputs with bounded memory; canonical/stable-key-order JSON output for hashing and diffing; base32; URL-safe base64 variant (verify what encoding.base64 already covers). All through the same Data tree + @[Codable] derive so decode<T> works uniformly.\n\nDone means: each new format is a full adapter (not a lossy subset) with examples + golden tests, or a recorded non-goal. Ballot gates: any new user-facing module name, function surface, or syntax is an owner decision (queue ballots before code); any external dep stays behind the FFI bridge pattern (I6).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-07",
+          "by": "owner",
+          "text": "Activated into epoch e3 track"
+        }
+      ],
+      "created": "2026-07-07T17:23:32.961Z",
+      "updated": "2026-07-07"
+    },
+    {
+      "id": "c0vwu9my",
+      "num": 297,
+      "title": "corelib gap: core.url + core.mime — new modules (WHATWG URL, query strings, mime tables)",
+      "body": "Missing entirely today; every serious stdlib has this and core.http/core.web need it underneath. Best-in-class bar: WHATWG URL spec (what browsers and JS ship), Go net/url reliability.\n\nScope: URL parse/build/normalize/join with typed components (scheme, host, port, path segments, query, fragment); query-string encode/decode to typed pairs incl. repeated keys; percent-encoding done right (per-component rules); IDNA/punycode host handling; file:// and data: URL support; relative resolution; a mime module: extension↔type mapping, parse of type/subtype+params, sniffing declined or explicit. core.http and core.web then consume these types instead of raw strings (typed values over strings — owner preference).\n\nNew module names + surfaces are owner ballots before any code. Done means: WHATWG URL test-suite-derived fixtures pass; examples + golden tests. Ballot gates: any new user-facing module name, function surface, or syntax is an owner decision (queue ballots before code); any external dep stays behind the FFI bridge pattern (I6).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-07",
+          "by": "owner",
+          "text": "Activated into epoch e3 track"
+        }
+      ],
+      "created": "2026-07-07T17:23:33.020Z",
+      "updated": "2026-07-07"
+    },
+    {
+      "id": "c0wx96s2",
+      "num": 298,
+      "title": "corelib audit: core.text — Unicode completeness (case folding, segmentation, width)",
+      "body": "Best-in-class bar: Swift String honesty + ICU floor. Cards #66 (graphemes, normalization) and the unicode slice of #117 are done — verify shipped surface first.\n\nAudit list: NFC/NFD/NFKC/NFKD normalization (verify); full Unicode case mapping and case folding for upper/lower/caseless-compare (not ASCII-only); grapheme iteration (verify) plus word and sentence segmentation (UAX #29); display width (east-asian width) for terminal alignment; char classification (alphabetic, numeric, whitespace per Unicode); efficient String builder for heavy concatenation; general str utility audit vs Rust str + Python str (splitn/rsplit, trim variants, pad/center, starts/ends combinators, char_indices equivalents). Collation/locale sort: record policy (probably an i18n non-goal for now — state it).\n\nDone means: audit table in docs, gaps shipped with examples + golden tests or recorded as declined non-goals. Ballot gates: any new user-facing module name, function surface, or syntax is an owner decision (queue ballots before code); any external dep stays behind the FFI bridge pattern (I6).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-07",
+          "by": "claude-main",
+          "text": "Activated into epoch e3 track"
+        }
+      ],
+      "created": "2026-07-07T17:23:33.081Z",
+      "updated": "2026-07-07"
+    },
+    {
+      "id": "c0xyrsis",
+      "num": 299,
+      "title": "corelib: core.regex — in-house RE2-class engine + API depth",
+      "body": "D-REGEX1 already slates replacing the bootstrap regex crate with an in-house RE2-style engine before end of Epoch 3 — this card makes that trackable and adds the API gaps so the surface lands once, right.\n\nEngine: linear-time DFA/NFA hybrid in pure Rust (later Jet), no backtracking, keeps the ReDoS-safety guarantee; comptime pattern syntax checking with Jet diagnostics (a bad pattern literal should fail at compile time, not runtime — beats every mainstream language).\n\nAPI gaps: precompiled Regex value (compile once, reuse — current API re-parses the pattern string per call); named group access by name; match spans (start/end offsets), not just text; iterator over all matches with captures; replace with a callback lambda; split with limit; flags surface (case-insensitive, multiline, dotall) as typed options.\n\nDone means: engine swap invisible behind the same surface, bootstrap dep deleted, API gaps shipped with examples + snapshot-tested diagnostics. Ballot gates: any new user-facing module name, function surface, or syntax is an owner decision (queue ballots before code); any external dep stays behind the FFI bridge pattern (I6).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-07",
+          "by": "claude-main",
+          "text": "Activated into epoch e3 track"
+        }
+      ],
+      "created": "2026-07-07T17:23:33.144Z",
+      "updated": "2026-07-07"
+    },
+    {
+      "id": "c0z3l25j",
+      "num": 300,
+      "title": "corelib audit: core.net — socket layer parity with Go net",
+      "body": "Best-in-class bar: Go net — the lauded gold standard. A core.net namespace exists in the prelude; audit its real surface first.\n\nScope: TCP dial/listen/accept with deadlines and typed addresses; UDP send/receive; Unix domain sockets; DNS resolution (A/AAAA, SRV, TXT) with timeout control; IpAddr/SocketAddr as typed values (not strings); TLS client stream over any socket (reuse the D-TLS1 bridge); dual-stack/happy-eyeballs dialing; graceful close semantics; integration with core.tasks deadlines (#Context budget observed by blocking socket ops, like tasks.join already does).\n\nDone means: an echo server + client example pair ships with golden tests; surface documented in core-library.md. Ballot gates: any new user-facing module name, function surface, or syntax is an owner decision (queue ballots before code); any external dep stays behind the FFI bridge pattern (I6).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-07",
+          "by": "claude-main",
+          "text": "Activated into epoch e3 track"
+        }
+      ],
+      "created": "2026-07-07T17:23:33.213Z",
+      "updated": "2026-07-07"
+    },
+    {
+      "id": "c0075iyb",
+      "num": 301,
+      "title": "corelib audit: core.http — client/server parity with Go net/http + requests ergonomics",
+      "body": "Best-in-class bar: Go net/http server completeness with Python requests/httpx client ergonomics. Client HTTPS-by-default (D-TLS1) and server TLS (D-TLSSERVE1) shipped — audit the rest.\n\nClient gaps to audit: connection pooling/keep-alive; redirect policy control; cookie jar; multipart upload and form encoding; streaming request and response bodies (bounded memory); per-phase timeouts (connect/read/total); proxy support (env-standard); transparent gzip decompression; HTTP/2; typed URL input (consumes the core.url card).\n\nServer gaps to audit: router with path params and wildcards; middleware chain; streaming responses and server-sent events; graceful shutdown; request size/time limits (safe defaults — I1); static file serving with range requests; access logging via core.log.\n\nWebSocket client + server: likely its own module name (owner ballot). Done means: audit table plus shipped gaps with example servers/clients under golden tests; a realistic REST service example needs no third-party anything. Ballot gates: any new user-facing module name, function surface, or syntax is an owner decision (queue ballots before code); any external dep stays behind the FFI bridge pattern (I6).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-07",
+          "by": "owner",
+          "text": "Activated into epoch e3 track"
+        }
+      ],
+      "created": "2026-07-07T17:23:33.279Z",
+      "updated": "2026-07-07"
+    },
+    {
+      "id": "c0184j6s",
+      "num": 302,
+      "title": "corelib audit: core.crypto — misuse-resistant suite (AEAD, signatures, KDF, password hashing)",
+      "body": "Best-in-class bar: libsodium/age misuse-resistance — high-level envelopes a beginner cannot hold wrong, primitives behind them for experts. Card #64 (crypto push) is done — but the prelude currently exposes only sha256, hmac, and random_bytes; verify what actually shipped (FFI bridge included), then close the gaps.\n\nScope: authenticated encryption seal/open envelope with one canonical cipher (XChaCha20-Poly1305 or AES-GCM — owner ballot), nonce handling internal (never user-supplied by default); Ed25519 sign/verify; X25519 key exchange; Argon2id password hash + verify with safe defaults; HKDF; SHA-512 and BLAKE3; constant-time comparison; key/secret types that refuse Display (no keys in logs — safe by default); simple key encoding (raw/hex/PEM as needed); file-encryption envelope (age-class). PQ hybrid agility already tracked (#71).\n\nI6: implementations in-house or behind the FFI bridge crate — each new bridge dep is an owner ballot. Done means: each primitive ships with test vectors from the reference specs (RFC/NIST/libsodium vectors) as golden tests. Ballot gates: any new user-facing module name, function surface, or syntax is an owner decision (queue ballots before code); any external dep stays behind the FFI bridge pattern (I6).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-07",
+          "by": "owner",
+          "text": "Activated into epoch e3 track"
+        }
+      ],
+      "created": "2026-07-07T17:23:33.341Z",
+      "updated": "2026-07-07"
+    },
+    {
+      "id": "c02ch1op",
+      "num": 303,
+      "title": "corelib audit: core.db — driver breadth, typed rows, migrations",
+      "body": "Best-in-class bar: Go database/sql universality with Rust sqlx's compile-checked queries as the north star — Jet can sema-check SQL at comptime, which no mainstream stdlib does. SQLite shipped (D-DBDRIVER1).\n\nGaps: typed row decode — query<T> returning [T] via @[Codable] instead of hand-indexing rows; named parameters; transaction closure helper (auto commit/rollback on scope exit); prepared-statement caching; connection pool; Postgres wire-protocol driver (native implementation — the protocol is documented and stable; I6-clean, no C lib); MySQL driver decision (ship or record as non-goal); schema migrations runner integrated with @PublishedSchema/migration blocks so data and DB schema share one migration story; comptime SQL syntax/column checking against a declared schema (flagship differentiator — ballot the surface).\n\nDone means: audit table plus shipped gaps with a realistic CRUD example under golden tests. Ballot gates: any new user-facing module name, function surface, or syntax is an owner decision (queue ballots before code); any external dep stays behind the FFI bridge pattern (I6).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-07",
+          "by": "claude-main",
+          "text": "Activated into epoch e3 track"
+        }
+      ],
+      "created": "2026-07-07T17:23:33.409Z",
+      "updated": "2026-07-07"
+    },
+    {
+      "id": "c03gcv39",
+      "num": 304,
+      "title": "corelib audit: core.log — structured logging, spans, sinks, OTel export",
+      "body": "Best-in-class bar: Rust tracing (spans) + Go slog (simplicity) + OpenTelemetry (export). core.log shipped in Epoch 2 — audit the real surface first.\n\nAudit list: leveled structured fields with typed values (not string-formatted); runtime level filtering per module; span/scope context that propagates across core.tasks spawns; sinks — stderr human format, file, JSON lines; rotation policy; sampling for high-volume paths; OTLP/OpenTelemetry export (bridge gate if any dep); metrics floor (counter/gauge/histogram) or an explicit decision that metrics is its own module (ballot); print vs log guidance in docs.\n\nDone means: audit table plus shipped gaps with examples + golden tests; a service example emits parseable JSON logs with spans across tasks. Ballot gates: any new user-facing module name, function surface, or syntax is an owner decision (queue ballots before code); any external dep stays behind the FFI bridge pattern (I6).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-07",
+          "by": "claude-main",
+          "text": "Activated into epoch e3 track"
+        }
+      ],
+      "created": "2026-07-07T17:23:33.476Z",
+      "updated": "2026-07-07"
+    },
+    {
+      "id": "c04ljr3f",
+      "num": 305,
+      "title": "corelib audit: collections + iterator adapters — parity with Rust Iterator/itertools",
+      "body": "Best-in-class bar: Rust's Iterator trait — the most-lauded iterator design anywhere — plus Python itertools breadth. Set/Deque shipped (#55).\n\nContainer gaps: sorted map/sorted set (BTree-class, ordered iteration); binary heap / priority queue; LRU cache; bitset; growable byte buffer with endian-aware read/write (Reader exists for consuming — the building half is missing).\n\nIterator/sequence adapter audit — one canonical spelling each (I8): enumerate, zip/unzip, windows, chunks, flat_map, filter_map, take_while/skip_while, fold/reduce/scan, dedup, partition, group-by/chunk-by, min_by/max_by/min_by_key, sort_by_key, counts/frequency map, sum/product over selectors, first/last/nth, any/all (verify), flatten, intersperse/join beyond strings. Whatever list-comprehension/pipeline surface exists must reach the same operations without a second mechanism.\n\nDone means: audit table in docs; gaps shipped with examples + golden tests; the doc shows the canonical Jet spelling next to the Rust/Python name so migrants find it instantly. Ballot gates: any new user-facing module name, function surface, or syntax is an owner decision (queue ballots before code); any external dep stays behind the FFI bridge pattern (I6).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-07",
+          "by": "claude-main",
+          "text": "Activated into epoch e3 track"
+        }
+      ],
+      "created": "2026-07-07T17:23:33.545Z",
+      "updated": "2026-07-07"
+    },
+    {
+      "id": "c05o0105",
+      "num": 306,
+      "title": "corelib audit: core.tasks — M:N runtime completion, select, bounded channels, timers",
+      "body": "Best-in-class bar: Go's scheduler + channels with Kotlin/Trio structured-concurrency discipline. Epoch-3 concurrency plans exist (async-networking.md, concurrency-vision.md) — this card audits shipped reality against them and closes the stdlib-surface gaps.\n\nAudit list: M:N green-task runtime (docs say pause/cancel are trace-only until it lands — track it here); select over multiple channels (+ timeout arm); bounded channels with explicit backpressure behavior; timer surface (after/interval) integrated with channels or events; nursery/structured-scope surface (verify #102's shipped shape); parallel map/reduce helpers (verify #114); cancellation actually interrupting blocking ops; deadline #Context coverage across every blocking call (join/receive/sleep shipped — sockets and process waits must follow).\n\nDone means: audit table reconciled with the epoch-3 plans (no duplicate tracking); gaps shipped with deterministic examples + golden tests. Ballot gates: any new user-facing module name, function surface, or syntax is an owner decision (queue ballots before code); any external dep stays behind the FFI bridge pattern (I6).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-07",
+          "by": "claude-main",
+          "text": "Activated into epoch e3 track"
+        }
+      ],
+      "created": "2026-07-07T17:23:33.610Z",
+      "updated": "2026-07-07"
+    },
+    {
+      "id": "c06tng04",
+      "num": 307,
+      "title": "corelib audit: core.data — dataframe parity with polars essentials",
+      "body": "Best-in-class bar: polars/pandas essentials, kept typed and deterministic (Jet's selectors are typed lambdas — misspelled columns are compile errors; keep that advantage everywhere). Current: csv<T>, count/sum/mean/min/max, group_count/sum/mean, bar_text/bar_svg. Reconcile with epoch-3/typed-data-core.md before adding scope.\n\nGaps: filter/select/sort pipelines over [T]; joins (inner/left) on typed keys; pivot; median/quantiles/std/variance; describe summary; rolling/window aggregations; datetime columns (consumes the core.time card); Parquet and Arrow IO (bridge gates — owner ballots); lazy pipeline evaluation decision (ship or record non-goal).\n\nDone means: an analysis example (load CSV → join → group → plot) ships under golden tests; audit table records non-goals. Ballot gates: any new user-facing module name, function surface, or syntax is an owner decision (queue ballots before code); any external dep stays behind the FFI bridge pattern (I6).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-07",
+          "by": "claude-main",
+          "text": "Activated into epoch e3 track"
+        }
+      ],
+      "created": "2026-07-07T17:23:33.680Z",
+      "updated": "2026-07-07"
+    },
+    {
+      "id": "c07vdfen",
+      "num": 308,
+      "title": "corelib audit: testing toolkit — fuzzing, snapshots, benchmarks beyond M11",
+      "body": "Best-in-class bar: cargo test + insta + criterion + Hypothesis + Go testing, unified. M11 (property testing, doctests, coverage) is already roadmap-active — this card covers only what M11 excludes; reconcile first, no duplicate tracking.\n\nAudit list: fuzzing harness (jet fuzz <target>) with corpus + minimization; snapshot testing for user code (the compiler has it internally — users deserve it too); benchmark harness with statistical output (verify what #249's bench marker shipped at runtime); table-driven/parameterized tests; golden-file helper for examples-as-tests in user projects; injectable Clock/Rng test patterns documented as the canonical determinism story; test tags/filtering; parallel test isolation guarantees documented.\n\nDone means: gaps shipped with examples; jet test output for each new mode snapshot-pinned. Ballot gates: any new user-facing module name, function surface, or syntax is an owner decision (queue ballots before code); any external dep stays behind the FFI bridge pattern (I6).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-07",
+          "by": "claude-main",
+          "text": "Activated into epoch e3 track"
+        }
+      ],
+      "created": "2026-07-07T17:23:33.743Z",
+      "updated": "2026-07-07"
+    },
+    {
+      "id": "c08z55oy",
+      "num": 309,
+      "title": "corelib gap: core.fmt — human formatting + locale floor (new module decision)",
+      "body": "Missing today: number formatting beyond bare interpolation. Best-in-class bar: JS Intl for capability, Go humanize for ergonomics.\n\nScope to ballot: thousands separators, precision/width/alignment controls (decide: format-spec mini-language in interpolation vs functions — I8 says one way); human bytes (\"1.5 GB\"), human durations (\"3m 42s\"), ordinals; pluralization floor; locale-aware number/date rendering policy — full ICU is likely a non-goal for now, but the decision must be recorded, not implicit.\n\nNew module name + any interpolation syntax are owner ballots first. Done means: ratified surface shipped with golden tests, or the whole area recorded as a scoped non-goal in the stdlib map. Ballot gates: any new user-facing module name, function surface, or syntax is an owner decision (queue ballots before code); any external dep stays behind the FFI bridge pattern (I6).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P3",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-07",
+          "by": "owner",
+          "text": "Activated into epoch e3 track"
+        }
+      ],
+      "created": "2026-07-07T17:23:33.810Z",
+      "updated": "2026-07-07"
+    },
+    {
+      "id": "c0a6z6cg",
+      "num": 310,
+      "title": "corelib: stdlib map — deliberate have/have-not ledger vs Python/Go/Rust",
+      "body": "Meta-deliverable so \"best stdlib of any language\" is provable, not vibes. Produce one ledger doc (docs/reference/) listing every stdlib domain Python/Go/Rust/.NET ship, with Jet's status: shipped (where), carded (#N), or declined (why — one line each, owner-ratified).\n\nDomains to rule on explicitly: XML, binary interchange, URL/mime, sockets, websockets, smtp/email sending, templating, markdown, image codecs, terminal UI, ssh client, ftp (decline), i18n/ICU, IPC, tar/zip/compression (shipped), embedded DB (shipped). Ideas worth building become cards; declines become recorded non-goals so the next audit doesn't re-litigate them.\n\nDone means: ledger doc exists, every row has a status, open rows have ballots queued; CI or a test greps that carded rows reference live card numbers. Ballot gates: any new user-facing module name, function surface, or syntax is an owner decision (queue ballots before code); any external dep stays behind the FFI bridge pattern (I6).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P3",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-07",
+          "by": "claude-main",
+          "text": "Activated into epoch e3 track"
+        }
+      ],
+      "created": "2026-07-07T17:23:33.884Z",
+      "updated": "2026-07-07"
+    },
+    {
+      "id": "c0bbi92e",
+      "num": 311,
+      "title": "Canvas: event dispatcher projection — unblock the parity-matrix row via shipped core.event",
+      "body": "The parity matrix row \"Event dispatchers/interfaces\" is blocked-by-ballot on #286, and #286 (first-party Event/Hook system) is now done. Project Event<T>/Hook<T,R> as Blueprint-dispatcher-class graph UX: emit nodes with payload pins; subscriptions (on/once/on_priority) as event-graph entry views like the existing on_* callback views; scope/subscription lifetime visible; EventTrace overlay (delivered/queued/dropped) on the debug rails.\n\nSource stays truth: all edits are ordinary Jet source transactions over core.event calls. Update the matrix row with ratchets when shipped. Coordinate with the active Canvas agent (#287) — this extends, does not touch their closeout scope.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e6",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-07",
+          "by": "claude-main",
+          "text": "Activated into epoch e6 track"
+        }
+      ],
+      "created": "2026-07-07T17:23:33.952Z",
+      "updated": "2026-07-07"
+    },
+    {
+      "id": "c0ccw6a8",
+      "num": 312,
+      "title": "Canvas: graph organization tools — align, straighten, reroute, tidy",
+      "body": "Blueprint parity gaps not in the matrix: node alignment/distribution commands (align left/top, distribute), straighten-wire command, reroute (knot) nodes for wire readability, and an auto-tidy layout pass for messy regions. All are view-layer or source-anchored hints (D-CANVAS-LAYOUT1) — no semantics in the graph, source stays truth.\n\nDone means: commands reachable by context menu + hotkey, covered by web_dev.rs interaction ratchets, and rows added to the parity matrix.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e6",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-07",
+          "by": "claude-main",
+          "text": "Activated into epoch e6 track"
+        }
+      ],
+      "created": "2026-07-07T17:23:34.015Z",
+      "updated": "2026-07-07"
+    },
+    {
+      "id": "c0djv0xv",
+      "num": 313,
+      "title": "Canvas: bookmarks, favorites, and palette ranking",
+      "body": "Blueprint has graph bookmarks and favorite actions; Canvas has neither. Scope: named bookmarks jumping to graph locations (local view state); favorite/pinned palette actions; recency+frequency ranking of palette/context-menu results; per-project pins. All local editor state — never a semantic sidecar.\n\nDone means: web_dev.rs ratchets for bookmark jump and favorite persistence; parity-matrix rows added.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e6",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-07",
+          "by": "claude-main",
+          "text": "Activated into epoch e6 track"
+        }
+      ],
+      "created": "2026-07-07T17:23:34.087Z",
+      "updated": "2026-07-07"
+    },
+    {
+      "id": "c0eoor8d",
+      "num": 314,
+      "title": "Canvas: large-graph performance ratchet — virtualization + zoom LOD",
+      "body": "Blueprint stays usable at thousands of nodes; Canvas has no performance ratchet at all. Scope: virtualized rendering (only visible nodes materialize DOM), level-of-detail at low zoom (Blueprint fades to title bars), incremental reprojection cost bounds, and benchmark fixtures — generated 1k/5k-node graphs with budgeted interaction timings asserted in tests (pan/zoom/select/search under budget).\n\nDone means: benchmarks live in tests/web_dev.rs or a dedicated perf harness, budgets asserted, parity-matrix row added. This is the \"serious product, not facade\" proof for Canvas at scale.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e6",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-07",
+          "by": "claude-main",
+          "text": "Activated into epoch e6 track"
+        }
+      ],
+      "created": "2026-07-07T17:23:34.155Z",
+      "updated": "2026-07-07"
+    },
+    {
+      "id": "c0fs9ypm",
+      "num": 315,
+      "title": "Canvas: keyboard-only authoring + accessibility ratchet",
+      "body": "Jet ships accessibility-by-default (#121) — Canvas must honor the same invariant. Scope: complete keyboard-only authoring path (focus-order graph navigation, add node from keyboard palette, wire pins, edit values, trigger transactions); screen-reader annotations for nodes/pins/wires/diagnostics; focus-visible states; reduced-motion compliance.\n\nDone means: a scripted keyboard-only session builds a small function graph end-to-end in web_dev.rs; a11y assertions ratcheted; parity-matrix row added. Blueprint itself is weak here — this is a beat-them axis, not just parity.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e6",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-07",
+          "by": "claude-main",
+          "text": "Activated into epoch e6 track"
+        }
+      ],
+      "created": "2026-07-07T17:23:34.222Z",
+      "updated": "2026-07-07"
+    },
+    {
+      "id": "c0gu1z9h",
+      "num": 316,
+      "title": "Canvas: trait/impl authoring projection (Blueprint interfaces parity)",
+      "body": "Blueprint interfaces have no Canvas equivalent yet. Jet's answer is traits: project \"implements trait X\" on a type's graph view; create-impl source transaction with member stubs; jump trait ↔ impls; unimplemented-member affordance surfacing the real Jet diagnostic; palette entries for trait methods on typed pins.\n\nSource stays truth; no new syntax expected (existing impl syntax only) — if any authoring shape needs new surface, ballot first. Done means: canvas.rs projection + transaction tests, parity-matrix row updated.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e6",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-07",
+          "by": "claude-main",
+          "text": "Activated into epoch e6 track"
+        }
+      ],
+      "created": "2026-07-07T17:23:34.285Z",
+      "updated": "2026-07-07"
+    },
+    {
+      "id": "c0hz6eux",
+      "num": 317,
+      "title": "Canvas: live-run loop — watch persistence + hot-reload overlay (Simulate parity)",
+      "body": "Blueprint's Simulate/PIE loop is a big part of why it feels alive. Canvas has debug overlays (#273) but no persistent run loop. Scope: persist watch/breakpoint sets per graph across sessions (local state); one-click run/re-run of the current entry under the JIT dev tier with live pin-value capture streamed into the overlay; jet dev file-watch integration so source edits from either view re-run and re-pulse; run status HUD.\n\nDone means: web_dev.rs ratchet drives a run, sees pin values update, edits source, sees re-run. Coordinate with #287 owner-UX work; extend only.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e6",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-07",
+          "by": "claude-main",
+          "text": "Activated into epoch e6 track"
+        }
+      ],
+      "created": "2026-07-07T17:23:34.354Z",
+      "updated": "2026-07-07"
+    },
+    {
+      "id": "c0j5jquv",
+      "num": 318,
+      "title": "Canvas: node documentation hover + first-run learn overlay",
+      "body": "Blueprint tooltips document every node; Canvas palette shows facts but nodes lack doc hover. Scope: doc comments from source render as node/pin tooltips (same source jetdoc will use); pin type explanations linking to Jet diagnostics/docs; a dismissible first-run tour of the workbench (local state only).\n\nDone means: tooltip content asserted in web_dev.rs; parity-matrix row added.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e6",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P3",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-07",
+          "by": "claude-main",
+          "text": "Activated into epoch e6 track"
+        }
+      ],
+      "created": "2026-07-07T17:23:34.426Z",
+      "updated": "2026-07-07"
+    },
+    {
+      "id": "c0k7v2f0",
+      "num": 319,
+      "title": "Canvas: tasks/concurrency flow authoring (latent-action parity)",
+      "body": "Blueprint latent actions (delays, async nodes with clock icons) have no Canvas story. Jet's substrate is core.tasks: palette actions and projections for spawn/join, channel create/send/receive, and deadline #Context blocks, with rails visualizing task boundaries and blocking waits; the existing effect/async rail markers extend to show which wires cross tasks.\n\nProjection + ordinary source transactions only — no new semantics, no hidden scheduler nodes (the matrix already rejects Blueprint scheduler-node debt; this projects real Jet concurrency instead). Depends on the core.tasks audit card for surface stability. Done means: canvas.rs projection tests over a producer/consumer example; parity-matrix rows added.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e6",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-07",
+          "by": "claude-main",
+          "text": "Activated into epoch e6 track"
+        }
+      ],
+      "created": "2026-07-07T17:23:34.490Z",
+      "updated": "2026-07-07"
+    },
+    {
+      "id": "c0ldacxz",
+      "num": 320,
+      "title": "jetos: declarative VM integration-test framework (NixOS test-driver parity)",
+      "body": "The NixOS VM test framework is its most-lauded infrastructure — jetos needs a better one to claim drop-in-and-better. Scope: declare a multi-host scenario in Jet (system.<host> configs + a typed test script — not strings driving Python like NixOS), orchestrate QEMU guests from the #263 harness, typed assertions (unit active, port open, file content, command output), inter-VM networking, deterministic replay + proof artifacts, failure output in Jet's diagnostic voice.\n\nBeat-NixOS axes: typed test script with sema-checked host/service references (a typo'd service name fails at compile time), and first-class artifact/provenance capture. Builds on #262/#263 — coordinate with the jetos agent; this is a new layer, not their installer/system-core scope.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e7",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-07",
+          "by": "claude-main",
+          "text": "Activated into epoch e7 track"
+        }
+      ],
+      "created": "2026-07-07T17:23:34.559Z",
+      "updated": "2026-07-07"
+    },
+    {
+      "id": "c0mikjfs",
+      "num": 321,
+      "title": "jetos: per-user declarative environment (home-manager class)",
+      "body": "NixOS without home-manager is half the story; home-manager is community glue jetos should ship first-party. Scope: user.<name> declarations — packages, dotfiles/config projection, per-user services, shell/env — with the same generation/rollback/proof story as system generations; composes into system.<host> or runs standalone via jetpack on any Linux/macOS host (home-manager's killer feature: adoption without switching OS).\n\nOwner gates: user.<name> declaration surface is new user-facing syntax — ballot before code. Coordinate with #262 (its users/groups scope is system identity; this is user environment).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e7",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-07",
+          "by": "claude-main",
+          "text": "Activated into epoch e7 track"
+        }
+      ],
+      "created": "2026-07-07T17:23:34.629Z",
+      "updated": "2026-07-07"
+    },
+    {
+      "id": "c0nlrm12",
+      "num": 322,
+      "title": "jetos: fleet/remote deployment — push generations with proof-gated rollback",
+      "body": "deploy-rs/colmena/NixOps parity, first-party. Roadmap already names fleet rollout as future Epoch 7 — this card tracks it. Scope: build closures locally (or on a builder), push to remote hosts over SSH, activate with proof-before-switch (#236) on the remote, health-check window with automatic rollback, multi-host rollout ordering with dependency graph, secrets delivery at deploy time, no daemon/root beyond what activation needs (U28), offline-capable (U29). Reconcile with U15 (fleet parse/capture, done) for the config side.\n\nBeat-NixOS axes: proof-gated activation per host and typed rollout plans with explainable failure. Coordinate with jetos agent; blocked conceptually on #262's activation contract.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e7",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-07",
+          "by": "claude-main",
+          "text": "Activated into epoch e7 track"
+        }
+      ],
+      "created": "2026-07-07T17:23:34.695Z",
+      "updated": "2026-07-07"
+    },
+    {
+      "id": "c0om2gxe",
+      "num": 323,
+      "title": "jetos: options reference + search (search.nixos.org parity, typed)",
+      "body": "NixOS options search is how people actually live in NixOS. jetos's system.* schema is typed Jet — generate the reference from sema facts, which beats NixOS's doc-string scraping. Scope: every option with type, default, example, doc, and provenance (which module defines/overrides it); jet os options <query> CLI search; Studio browser view (#264 prototype exists); package search across configured providers; \"what set this value on my host\" explain (mkForce-class debugging, solved properly).\n\nDone means: generated reference is complete for every shipped system.* option, tested against schema drift (a new option without docs fails CI).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e7",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-07",
+          "by": "claude-main",
+          "text": "Activated into epoch e7 track"
+        }
+      ],
+      "created": "2026-07-07T17:23:34.756Z",
+      "updated": "2026-07-07"
+    },
+    {
+      "id": "c0ppv63p",
+      "num": 324,
+      "title": "jetos: declarative containers + microVMs",
+      "body": "nixos-containers/microvm.nix parity. Scope: nested system declarations — system.<host>.containers.<name> reusing the same module schema; shared-store lightweight containers; OCI image export for any system/package closure (reconcile with U14 jetpack OCI work); microVM variant (QEMU/cloud-hypervisor) with the same declaration; per-container generations + rollback; network wiring declarations.\n\nOwner gates: container declaration surface is new syntax — ballot first. Coordinate with jetos agent's #262 service/activation contract.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e7",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-07",
+          "by": "claude-main",
+          "text": "Activated into epoch e7 track"
+        }
+      ],
+      "created": "2026-07-07T17:23:34.822Z",
+      "updated": "2026-07-07"
+    },
+    {
+      "id": "c0qs8j6u",
+      "num": 325,
+      "title": "jetos: image variants matrix — cloud, SD, netboot, appliance",
+      "body": "nixos-generators parity: one host declaration, many artifact shapes. Scope: jet os image <host> --format … producing qcow2/raw/VM disk, AMI/GCE/Azure cloud images, aarch64 SD-card images (Raspberry Pi class), netboot/PXE artifacts, minimal appliance images; each with provenance/proof metadata like the existing installer ISO path (#263); cross-architecture builds reconciled with the aarch64 CI card (#4).\n\nDone means: at least qcow2 + SD + netboot build reproducibly with proof artifacts, matrix documented, remaining formats carded or declined.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e7",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-07",
+          "by": "claude-main",
+          "text": "Activated into epoch e7 track"
+        }
+      ],
+      "created": "2026-07-07T17:23:34.887Z",
+      "updated": "2026-07-07"
+    },
+    {
+      "id": "c0rvu7rz",
+      "num": 326,
+      "title": "jetos: hardware detection, profiles, and specialisations",
+      "body": "Parity targets: nixos-generate-config (hardware scan), nixos-hardware (community per-device profiles), and NixOS specialisations (boot-selectable variants). Scope: installer/first-boot hardware scan emitting a typed hardware.<host> declaration (disks, filesystems, kernel modules, firmware, GPU); first-party hardware profile packages applyable per device; specialisations — named boot-time variants of one host config (e.g. gpu-passthrough on/off) sharing a generation; jet os doctor hardware drift report.\n\nOwner gates: hardware/specialisation declaration surfaces are new syntax — ballot first. Coordinate with #263 installer scope (it detects enough to install; this generalizes).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e7",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-07",
+          "by": "claude-main",
+          "text": "Activated into epoch e7 track"
+        }
+      ],
+      "created": "2026-07-07T17:23:34.953Z",
+      "updated": "2026-07-07"
+    },
+    {
+      "id": "c0svh6c4",
+      "num": 327,
+      "title": "jetos: lifecycle — store GC, retention, channels, auto-upgrade",
+      "body": "NixOS parity: nix-collect-garbage, generation trimming, channels, system.autoUpgrade. Scope: retention policy as declaration (keep last N generations, keep-younger-than); scheduled GC honoring the policy with explainable \"why kept/deleted\"; channel/pin update surface over jetpack channels (U21) at the OS layer; unattended auto-upgrade — fetch, build, proof-gate (#236), switch inside a rollback window, roll back on failed health checks; all no-daemon/no-root compliant (U28).\n\nBeat-NixOS axes: proof-gated unattended upgrades (NixOS auto-upgrade is fire-and-pray) and explainable GC. Coordinate with jetos agent's generation machinery in #262.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e7",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-07",
+          "by": "claude-main",
+          "text": "Activated into epoch e7 track"
+        }
+      ],
+      "created": "2026-07-07T17:23:35.013Z",
+      "updated": "2026-07-07"
+    },
+    {
+      "id": "c0txfavt",
+      "num": 328,
+      "title": "jetos: declarative disks + impermanence (disko parity)",
+      "body": "disko and impermanence are the community pieces every serious NixOS deployment bolts on — ship them first-party. Scope: typed disk layout declaration (partitions, filesystems, LVM, LUKS encryption, ZFS/btrfs pools/subvolumes) consumed by the #263 installer instead of imperative partitioning; mount generation from the same truth; opt-in ephemeral root (tmpfs/rollback-snapshot root) with an explicit persist list — safe-by-default semantics: nothing silently lost, activation diff shows exactly what persists.\n\nOwner gates: disk/persist declaration surfaces are new syntax — ballot first. Reconcile with whatever partitioning #263 already implements; extend, don't fork it.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e7",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-07",
+          "by": "claude-main",
+          "text": "Activated into epoch e7 track"
+        }
+      ],
+      "created": "2026-07-07T17:23:35.077Z",
+      "updated": "2026-07-07"
+    },
+    {
+      "id": "c0uzefny",
+      "num": 329,
+      "title": "jetos: service manager depth — sockets, timers, tmpfiles, hardening, journal",
+      "body": "#262 generates service units; this card is the depth pass that makes services best-in-class rather than minimal. Scope: socket activation; timer units (cron parity) from typed schedule declarations; tmpfiles-class managed paths; resource limits (cpu/mem/io) as typed options; sandboxing/hardening defaults — services get a strong isolation profile unless explicitly opened (systemd-analyze security parity, but safe-by-default per I1, which NixOS does not give you); log capture with a queryable journal surface (jet os logs <unit> --since …) wired to core.log formats.\n\nCoordinate with the jetos agent: extends the #262 unit-generation contract only after it stabilizes; no overlap with their current building scope. Ballot any new service option syntax first.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e7",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-07",
+          "by": "claude-main",
+          "text": "Activated into epoch e7 track"
+        }
+      ],
+      "created": "2026-07-07T17:23:35.141Z",
+      "updated": "2026-07-07"
+    },
+    {
+      "id": "c0yzg1yu",
+      "num": 330,
+      "title": "jetpack: package overlays, per-package overrides, and source patches (nixpkgs overlay parity)",
+      "body": "Owner's real config depends on this everywhere: an overlays/ dir with patches, NUR third-party packages, per-host channel swaps (halcyon-plasma-beta builds the same host module set against a different nixpkgs input), and unfree allowances. jetos cannot recreate ~/nixos without it.\n\nScope: override a package's version/source/flags/patches at the workspace or host level without forking the provider; apply source patches declaratively; third-party package namespaces distributed through jetpack providers (NUR parity — reconcile with #234 federated providers); per-host provider/channel pinning (one host tree, different channel per variant); policy switches like allowUnfree as typed, explainable options.\n\nBeat-Nix axes: overrides are typed and explainable (jet explains what an override changed and why a rebuild happened), instead of nixpkgs' untyped fixpoint overlays. Ballot any new pkg.jet/workspace.jet surface before code.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-07",
+          "by": "claude-main",
+          "text": "Activated into epoch e4 track"
+        }
+      ],
+      "created": "2026-07-07T17:37:59.565Z",
+      "updated": "2026-07-07"
+    },
+    {
+      "id": "c000tru1",
+      "num": 331,
+      "title": "jetos: module option priorities, overrides, and module disabling (mkDefault/mkForce parity)",
+      "body": "Owner's config uses lib.mkForce (disable SDDM on the plasma-beta variant), lib.mkDefault (stateVersion), disabledModules (stylix kmscon), and system tags. NixOS solves multi-module option conflict with numeric priorities nobody can explain; jetos must solve it better or the module system can't compose real configs.\n\nScope: a ratified conflict/priority story for options set by multiple modules — default vs normal vs force tiers with typed spellings; disabling an imported module wholesale; per-variant overrides (one host, variants overriding single options); generation tags/labels; and the explain surface — \"what set this value, what lost, why\" wired into #323 options search. This is core module-system semantics: ballot the surface before code (D-JOS pattern). Coordinate with jetos agent's #262 module schema.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e7",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-07",
+          "by": "claude-main",
+          "text": "Activated into epoch e7 track"
+        }
+      ],
+      "created": "2026-07-07T17:37:59.628Z",
+      "updated": "2026-07-07"
+    },
+    {
+      "id": "c013gf7s",
+      "num": 332,
+      "title": "jetos: app config module library — programs.* parity breadth",
+      "body": "#321 builds the per-user environment mechanism; this card is the library breadth that makes it useful. Owner's config declares 30+ per-app modules — the concrete acceptance list: git (identity/signing), ssh, fish shell + aliases, starship, ghostty, helix, yazi, btop, bat, eza, fzf, zoxide, ripgrep, tealdeer, fastfetch, VS Code/Cursor with declarative extensions + settings + keybinds (extension pinning currently via nix-vscode-extensions + importNpmLock), Discord via nixcord-class config, spicetify-class app patching, browsers (Zen, Brave, Helium) with policies, Thunderbird, Element, Logseq, OnlyOffice, vicinae launcher + extensions.\n\nScope: the typed module template (package + config file projection + service hooks), the first ~20 modules from the list above, and a community contribution path via jetpack packages so the library scales like home-manager's did. Done means: every app in the owner's config has a jetos module or a recorded gap card.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e7",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-07",
+          "by": "claude-main",
+          "text": "Activated into epoch e7 track"
+        }
+      ],
+      "created": "2026-07-07T17:37:59.693Z",
+      "updated": "2026-07-07"
+    },
+    {
+      "id": "c0254elb",
+      "num": 333,
+      "title": "jetos: declarative theming — stylix parity",
+      "body": "Owner runs stylix: one wallpaper image + base16 palette + polarity + fonts + cursor drive GTK, Qt, terminals, editors, and the display manager. This is a first-party jetos feature NixOS never shipped (stylix is community glue).\n\nScope: theme.<host> declaration — palette (explicit or derived from wallpaper), polarity, font stack, cursor — projected into GTK/Qt/DM/terminal/editor app configs through the same app-module library; per-app opt-out; instant preview in Studio. Ballot the declaration surface first (D-JOS pattern).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e7",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-07",
+          "by": "claude-main",
+          "text": "Activated into epoch e7 track"
+        }
+      ],
+      "created": "2026-07-07T17:37:59.756Z",
+      "updated": "2026-07-07"
+    },
+    {
+      "id": "c038yftr",
+      "num": 334,
+      "title": "jetos: desktop-OS module breadth — audio, DEs, virtualization, gaming, localization",
+      "body": "Gap sweep from the owner's real config beyond the system core (#262): pipewire audio + rtkit; localization (locale, timezone, keyboard layout); XDG mime/default-app declarations; font packages + fontconfig; display managers; KDE Plasma as a first-class DE beside the ratified GNOME default (owner runs Plasma — one option away, not a fork); Wayland/X11 session choice; virtualization stack (libvirtd + QEMU + swtpm + SPICE + virt-manager + USB redirection); gaming stack (Steam, gamemode, wine/proton tooling); smartcard/pcscd; AppImage binfmt support; zram is covered by the kernel-tuning card.\n\nDone means: every module in the owner's ~/nixos modules/core + modules/apps trees maps to a typed jetos option set or a recorded decline. Coordinate with jetos agent (#262 owns services/activation plumbing; this is option/module breadth on top).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e7",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-07",
+          "by": "claude-main",
+          "text": "Activated into epoch e7 track"
+        }
+      ],
+      "created": "2026-07-07T17:37:59.823Z",
+      "updated": "2026-07-07"
+    },
+    {
+      "id": "c04du0jb",
+      "num": 335,
+      "title": "jetos: declarative Flatpak + foreign app ecosystems",
+      "body": "Owner hand-rolled a Flatpak reconcile loop in an activation script (add flathub remote, install desired list, remove undeclared, update) — community nix-flatpak exists because NixOS never shipped it. jetos ships it first-party.\n\nScope: flatpaks declaration on host/user — remotes, app list, pinned or tracking; reconcile as part of activation with a plan/diff (install/remove/update shown before switch, proof-gated like everything else); per-app permission overrides declared (Flatseal parity, typed); AppImage runtime integration. Beat-Nix axes: reconcile is part of the activation plan with rollback, not a fire-and-forget user script. Ballot declaration surface first.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e7",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-07",
+          "by": "claude-main",
+          "text": "Activated into epoch e7 track"
+        }
+      ],
+      "created": "2026-07-07T17:37:59.892Z",
+      "updated": "2026-07-07"
+    },
+    {
+      "id": "c05hqpe6",
+      "num": 336,
+      "title": "jetos: kernel and performance tuning surface — profiles, sysctl, zram, sched-ext",
+      "body": "From the owner's config: a typed kernel profile enum (safe=zen / lts=cachyos-lts / performance=cachyos-latest) selecting boot.kernelPackages; sysctl (vm.swappiness); zram swap with memory cap; sched-ext userspace scheduler service (scx, pluggable scheduler name); initrd options (systemd initrd, verbosity); bootloader depth (limine maxGenerations, EFI variables) — bootloader/kernel defaults are ratified (D-JOS-BOOTKERNEL1, D-JOS-KERNELSRC1); this card is the tuning surface around them.\n\nScope: typed options for kernel package selection/profiles, kernel params + sysctl, zram/swap declarations, scx scheduler services, initrd, and bootloader knobs. Ballot new option surfaces (D-JOS pattern). Coordinate with jetos agent's boot work in #262/#263.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e7",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-07",
+          "by": "claude-main",
+          "text": "Activated into epoch e7 track"
+        }
+      ],
+      "created": "2026-07-07T17:37:59.959Z",
+      "updated": "2026-07-07"
+    },
+    {
+      "id": "c06lb4p5",
+      "num": 337,
+      "title": "jetos acceptance fixture: recreate the owner's ~/nixos 100% in jetos",
+      "body": "The concrete dogfood proof that jetos is a drop-in NixOS replacement: the owner's real ~/nixos flake, recreated fully in jetos declarations, building and VM-boot-proving a halcyon-equivalent system.\n\nCoverage matrix (config feature → covering card):\n- flake inputs/pins/channels, per-host channel swap → jetpack U21/U30 + overlays card\n- overlays/patches, NUR, allowUnfree → jetpack overlays card\n- multi-variant hosts (halcyon / halcyon-plasma-beta: mkForce DM swap, tags, channel override) → module-priorities card + #326 specialisations\n- disko input, btrfs → #328 declarative disks\n- limine + kernel profiles + zram + sysctl + scx → kernel-tuning card (D-JOS-BOOTKERNEL1/KERNELSRC1 ratified)\n- users/groups, networking (hostname, NetworkManager, nameservers, firewall ports), security (sudo, rtkit) → #262\n- home-manager + per-app modules (git/ssh/fish/starship/ghostty/helix/vscode+cursor extensions/nixcord/spicetify/browsers/…) → #321 + app-module-library card\n- plasma-manager/dconf-class DE settings, KDE beside GNOME default, audio, localization, xdg-mimes, fonts, virtualization (libvirt/spice), gaming (steam/wine/gamemode), smartcard → desktop-breadth card\n- stylix (wallpaper/palette/fonts/cursor) → theming card\n- flatpak reconcile + appimage → flatpak card\n- custom ISO host → #263\n- substituters → jetpack cache/providers (shipped)\n- secrets → U13/#262\n- jetlang packaged from local path → jetpack path providers\n\nExit criteria: every module file under ~/nixos has a jetos equivalent expressed in ratified syntax; the config builds; the VM test framework (#320) boots it and passes desktop-session + app-presence assertions; a written diff of anything deliberately not recreated, owner-acknowledged. Blocked by the covering cards above — this card is the ratchet that proves them done.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e7",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-07",
+          "by": "claude-main",
+          "text": "Activated into epoch e7 track"
+        }
+      ],
+      "created": "2026-07-07T17:38:00.025Z",
       "updated": "2026-07-07"
     }
   ],
@@ -33085,6 +34360,452 @@
       "created": "2026-07-07T16:14:21.894Z",
       "outcome": "A",
       "ratifiedAt": "2026-07-07"
+    },
+    {
+      "id": "D-JOS-DESKTOP1",
+      "cardId": "c091duxt",
+      "group": "runtime",
+      "title": "jetos default desktop session",
+      "gist": "Choose what desktop/window manager a jetos VM boots into.",
+      "explainer": "",
+      "story": "Betty boots the jetos VM after proving install/reboot. She wants a real graphical session with a terminal and jetos Studio available from the system, not a proof-only shell. Earl needs the same session to be declarative, auditable, and replaceable by policy for workstation images.",
+      "inWild": "system.halcyon: {\n    services.desktop.enable: true,\n    services.desktop.profile: .Default,\n}\n\n$ jet os vm prove halcyon --disk ./halcyon.qcow2\n$ jet os vm run halcyon --disk ./halcyon.qcow2\n# graphical login/session starts; terminal + jetos Studio are installed apps",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Wayland-first JetOS session (recommended)",
+          "detail": "Default desktop is one JetOS-owned Wayland session profile: display manager, seat/session service, wlroots-class compositor, terminal, browser fallback, and jetos Studio app. Beginners get a graphical system by enabling one desktop profile; experts can replace compositor, terminal, display manager, and session services through the same `services.*` tree and proof artifacts.",
+          "code": "services.desktop.profile: .Default\nproof.desktop.session = \"jetos-wayland\"\nproof.desktop.apps = [\"terminal\", \"jetos-studio\", \"browser-fallback\"]"
+        },
+        {
+          "key": "B",
+          "name": "KDE/GNOME profile first",
+          "detail": "Default desktop is a mainstream full DE profile. Familiar for users and good hardware coverage, but JetOS proof becomes centered on a large external desktop policy stack instead of a small canonical JetOS session.",
+          "code": "services.desktop.profile: .Plasma\nproof.desktop.session = \"kde-plasma\"\nproof.desktop.external_policy = \"desktop-upstream\""
+        },
+        {
+          "key": "C",
+          "name": "Terminal-first, desktop deferred",
+          "detail": "The VM stays text-login only for now. This keeps the current terminal proof as the whole acceptance surface, but it does not meet the owner goal of opening a desktop/window-manager JetOS VM.",
+          "code": "services.desktop.enable: false\n$ jet os vm run halcyon --disk ./halcyon.qcow2\nlogin: nate\n$"
+        },
+        {
+          "key": "D",
+          "name": "X11-first session",
+          "detail": "Default desktop starts with Xorg plus a lightweight window manager. It supports older software paths, but makes the first JetOS desktop center on the compatibility display server instead of the modern default graphics path.",
+          "code": "services.desktop.profile: .X11\nproof.desktop.session = \"xorg+wm\"\nproof.desktop.compat = true"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "NixOS",
+          "note": "NixOS exposes desktop choices declaratively and can enable a display manager plus desktop manager/window manager in the same system config.",
+          "code": "services.xserver.displayManager.gdm.enable = true;\nservices.desktopManager.gnome.enable = true;"
+        },
+        {
+          "lang": "Fedora Workstation",
+          "note": "Fedora chooses a mainstream Wayland-first GNOME desktop as the default workstation experience.",
+          "code": "default graphical target + GNOME Wayland session"
+        },
+        {
+          "lang": "Sway/labwc systems",
+          "note": "Small Wayland compositors give a complete desktop session while keeping policy surface compact and inspectable.",
+          "code": "greetd -> Wayland compositor -> terminal/app launcher"
+        }
+      ],
+      "rec": "A",
+      "status": "ratified",
+      "created": "2026-07-07T16:49:11.695Z",
+      "outcome": "A",
+      "comment": "We should prefer wayland, but we will have gnome de by default, with terminal version as the secondary option/fallback. This way beginners get something easy & experts can get exactly what they want",
+      "ratifiedAt": "2026-07-07"
+    },
+    {
+      "id": "D-URL1",
+      "cardId": "c0vwu9my",
+      "group": "stdlib",
+      "title": "Typed URL and mime modules: core.url + core.mime",
+      "gist": "Whether Jet gets typed URL/mime values as new core modules, and under which names.",
+      "explainer": "A keeps URL values first-class and discoverable for every consumer (http, web, files, config), and mime is a genuinely separate small domain. Typed values over strings is the owner-preferred direction.",
+      "story": "Priya builds a webhook relay in Jet. She concatenates a base URL with a user-supplied path and query params by hand; a space in a param silently produces a bad request that only fails in production. Every serious language gives her a URL type that makes this impossible; today core.http takes raw strings.",
+      "inWild": "use core.http as http\n\nfn notify(base: String, user: String) -> Void ? HttpError {\n    // today: hand-built string, no escaping — \"ada lovelace\" breaks the query\n    url :: \"{base}/notify?user={user}&when=now\"\n    http.get(url)?\n    return ok(())\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Two modules: core.url + core.mime",
+          "detail": "WHATWG-class typed Url value (parse/build/join/normalize, typed query pairs, per-component percent-encoding, IDNA) plus a small core.mime (extension↔type table, type/subtype+params parsing). core.http/core.web accept Url and mime types.",
+          "code": "use core.url as url\n\nu := url.parse(\"https://api.example.com/notify\")?\nu.query.add(\"user\", \"ada lovelace\")   // encoded correctly, by construction\nhttp.get(u)?\n\nuse core.mime as mime\nprint(mime.from_extension(\"png\") ?? \"application/octet-stream\")   // image/png"
+        },
+        {
+          "key": "B",
+          "name": "core.url only; mime lives inside core.http",
+          "detail": "Same typed Url module; the mime table ships as http.mime helpers since HTTP is its main consumer. One fewer module name; files/static-serving reach through http for mime lookups.",
+          "code": "use core.url as url\nuse core.http as http\n\nu := url.parse(\"https://api.example.com\")?\nprint(http.mime.from_extension(\"png\") ?? \"?\")"
+        },
+        {
+          "key": "C",
+          "name": "Fold both into core.http",
+          "detail": "http.url.parse(...) and http.mime.*. No new top-level modules, but URL values are useful far beyond HTTP (file://, data:, config values, core.web) and burying them hurts discovery.",
+          "code": "use core.http as http\n\nu := http.url.parse(\"https://api.example.com\")?"
+        },
+        {
+          "key": "D",
+          "name": "Decline — keep strings",
+          "detail": "URLs stay strings with documented escaping helpers in core.encoding. Cheapest surface, but every consumer re-solves encoding and the beginner footgun stays the default, against I1/philosophy.",
+          "code": "raw :: \"{base}/notify?user={encoding.percent(user)}\"   // remembering to call percent() is on you"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "JavaScript (WHATWG URL)",
+          "note": "The URL/URLSearchParams pair is the modern reference; browsers ship it built-in.",
+          "code": "const u = new URL('https://api.example.com/notify');\nu.searchParams.set('user', 'ada lovelace');"
+        },
+        {
+          "lang": "Go",
+          "note": "net/url is stdlib and universally used; mime is its own stdlib package.",
+          "code": "u, _ := url.Parse(\"https://api.example.com\")\nq := u.Query(); q.Set(\"user\", \"ada lovelace\"); u.RawQuery = q.Encode()"
+        },
+        {
+          "lang": "Python",
+          "note": "urllib.parse is stdlib but string-tuple based and widely considered clunky — the anti-example.",
+          "code": "urlunparse((\"https\",\"api.example.com\",\"/notify\",\"\", urlencode({\"user\":\"ada lovelace\"}), \"\"))"
+        }
+      ],
+      "rec": "A",
+      "status": "ratified",
+      "created": "2026-07-07T17:38:00.090Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-07"
+    },
+    {
+      "id": "D-ENCBIN1",
+      "cardId": "c0uxsyns",
+      "group": "stdlib",
+      "title": "Canonical binary interchange format for core.encoding",
+      "gist": "Which single binary serialization format Jet ships beside json/toml/yaml/csv.",
+      "explainer": "A: standardization plus a specified deterministic form (hashing/signing/content-addressing all want stable bytes) outweighs MessagePack’s ecosystem edge; one format keeps I8.",
+      "story": "Marco's game syncs replay state between a Jet server and clients 60 times a second. JSON is the only interchange format Jet has, so he pays text encode/parse on every tick and his packets are 3x larger than needed. He needs one blessed binary format that works through the same @[Codable] derive — not a menu of five.",
+      "inWild": "use core.encoding.json as json\n\n@[Codable]\nstruct Tick { frame: Int, inputs: [U8], checksum: Int }\n\n// today: text on the wire, floats re-parsed, 3x the bytes\nsend(json.to_string(tick))",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "CBOR (RFC 8949)",
+          "detail": "IETF standard with a deterministic-encoding profile (stable bytes for hashing/signing — pairs with crypto.seal and content-addressed stores), native binary strings, and a clean extension model. Same parse/to_string/decode<T> verbs as every other codec.",
+          "code": "use core.encoding.cbor as cbor\n\nbytes :: cbor.to_bytes(tick)              // [U8], ~1/3 the JSON size\nback :: cbor.decode<Tick>(bytes)?\n\n// deterministic profile: same value → same bytes, always\nhash :: crypto.sha256(cbor.to_bytes_canonical(tick))"
+        },
+        {
+          "key": "B",
+          "name": "MessagePack",
+          "detail": "The most popular binary format by ecosystem (Redis, Fluentd, many game stacks). Slightly tighter encoding than CBOR in common cases; no IETF standard, no canonical-form spec — deterministic bytes for hashing would be Jet-invented.",
+          "code": "use core.encoding.msgpack as msgpack\n\nbytes :: msgpack.to_bytes(tick)\nback :: msgpack.decode<Tick>(bytes)?"
+        },
+        {
+          "key": "C",
+          "name": "Ship both",
+          "detail": "Maximum interop, but two mechanisms for one semantic job — exactly what I8 rejects. Every API that accepts one must document why not the other, forever.",
+          "code": "use core.encoding.cbor as cbor\nuse core.encoding.msgpack as msgpack   // which one does your team use? both, eventually"
+        },
+        {
+          "key": "D",
+          "name": "Decline binary interchange for now",
+          "detail": "JSON stays the only interchange. Games, caches, and IPC keep paying text overhead or hand-rolling formats — the gap every systems language fills in year one.",
+          "code": "// status quo: json.to_string(tick) on a 60Hz loop"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Go",
+          "note": "stdlib ships encoding/gob (Go-only) — everyone actually uses CBOR or msgpack third-party; shipping neither pushed the ecosystem off-stdlib.",
+          "code": "import \"github.com/fxamacker/cbor/v2\"   // the de-facto Go answer"
+        },
+        {
+          "lang": "Swift",
+          "note": "Codable has JSON + plist only; binary interchange is a long-standing community complaint.",
+          "code": "JSONEncoder() // or a third-party CBOR encoder"
+        },
+        {
+          "lang": "IETF/COSE",
+          "note": "CBOR is the substrate for COSE signing/encryption and WebAuthn — standards momentum is behind it.",
+          "code": "RFC 8949 (CBOR), RFC 9052 (COSE)"
+        }
+      ],
+      "rec": "A",
+      "status": "ratified",
+      "created": "2026-07-07T17:38:00.156Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-07"
+    },
+    {
+      "id": "D-FSWATCH1",
+      "cardId": "c0m9tjqj",
+      "group": "stdlib",
+      "title": "Filesystem watch surface and home",
+      "gist": "Where filesystem change notifications live and what the beginner surface looks like.",
+      "explainer": "A: discovery beats taxonomy — the person with a path in hand is already in core.files; normalize per-OS quirks and debounce by default.",
+      "story": "Lena writes a static-site tool in Jet and wants rebuild-on-save. Today she loops fs.list_dir + mtimes on a timer — wasteful, laggy, and subtly wrong on renames. jet dev itself watches files internally; users deserve the same primitive.",
+      "inWild": "use core.files as fs\nuse core.time as time\n\n// today: hand-rolled polling\nloop {\n    stamp := newest_mtime(fs.list_dir(\"site/\")?)\n    if stamp > last { rebuild() }\n    time.sleep(500)\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "files.watch in core.files",
+          "detail": "One more capability on the module that owns paths: watch(path) returns a WatchHandle whose events() iterate typed changes (Created/Modified/Removed/Renamed). Debounced by default (beginner-safe); raw stream behind an option.",
+          "code": "use core.files as files\n\nw :: files.watch(\"site/\")?\nloop ev in w.events() {\n    if ev.path.ends_with(\".md\") { rebuild() }\n}"
+        },
+        {
+          "key": "B",
+          "name": "New core.watch module",
+          "detail": "Separate module name for the whole watching domain (files now; maybe processes/ports later). Cleaner if watching grows beyond files, but today it is one function and a new top-level name to learn.",
+          "code": "use core.watch as watch\n\nw :: watch.files(\"site/\")?\nloop ev in w.events() { rebuild() }"
+        },
+        {
+          "key": "C",
+          "name": "Decline — polling helper only",
+          "detail": "Ship files.poll_changes(path, interval) sugar over mtime polling. No OS notification backends to maintain, but it bakes the laggy/wasteful pattern in as the blessed answer.",
+          "code": "loop ev in files.poll_changes(\"site/\", time.ms(500)) { rebuild() }"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Go",
+          "note": "fsnotify is the de-facto standard everyone pulls in — Go not shipping it in stdlib is a known gap.",
+          "code": "watcher, _ := fsnotify.NewWatcher(); watcher.Add(\"site/\")"
+        },
+        {
+          "lang": "Node.js",
+          "note": "fs.watch is stdlib but semantics vary per-OS; chokidar exists to paper over it — the lesson is to normalize events in the library.",
+          "code": "fs.watch('site/', (event, filename) => rebuild())"
+        }
+      ],
+      "rec": "A",
+      "status": "ratified",
+      "created": "2026-07-07T17:38:00.224Z",
+      "outcome": "A",
+      "comment": "also include processes and ports now, not later",
+      "ratifiedAt": "2026-07-07"
+    },
+    {
+      "id": "D-WS1",
+      "cardId": "c0075iyb",
+      "group": "stdlib",
+      "title": "WebSocket module home",
+      "gist": "Where WebSocket client/server support lives.",
+      "explainer": "A: upgrade-from-a-route is the dominant real-world shape; keeping it inside core.http gives one import and shared types. Every mainstream stdlib that declined WebSockets regretted it.",
+      "story": "Tomás builds a collaborative editor backend in Jet. HTTP endpoints come from core.http; for the live channel he needs WebSockets and finds nothing — he would have to hand-roll the upgrade handshake and frame protocol over raw sockets.",
+      "inWild": "use core.http as http\n\nfn run() -> Void ? {\n    server :: http.serve(8080, router)?\n    // live cursor sync: ??? — no upgrade path from a route to a socket\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "core.http.ws submodule",
+          "detail": "WebSocket is an HTTP upgrade; it lives where the connection starts. Server: a route handler upgrades; client: ws.connect(url). Shares http types (headers, Url, TLS).",
+          "code": "use core.http as http\n\nrouter.get(\"/live\", (req) => {\n    sock :: http.ws.upgrade(req)?\n    loop msg in sock.messages() { sock.send(msg)? }   // echo\n})\n\nclient :: http.ws.connect(\"wss://example.com/live\")?"
+        },
+        {
+          "key": "B",
+          "name": "Standalone core.ws module",
+          "detail": "Own top-level name, imports http types underneath. Slightly more discoverable in a module listing; splits the connection story across two imports for the common server case.",
+          "code": "use core.http as http\nuse core.ws as ws\n\nrouter.get(\"/live\", (req) => {\n    sock :: ws.upgrade(req)?\n    ...\n})"
+        },
+        {
+          "key": "C",
+          "name": "Decline for this epoch",
+          "detail": "Server-sent events (already in the #301 audit scope) cover server→client push; bidirectional realtime waits. Collaborative/game use cases stay unserved or hand-rolled.",
+          "code": "// SSE only:\nrouter.get(\"/live\", (req) => http.sse(req, events))"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Go",
+          "note": "stdlib has no WebSocket — gorilla/websocket then nhooyr filled it; a decade of \"why is this not stdlib\".",
+          "code": "import \"nhooyr.io/websocket\""
+        },
+        {
+          "lang": "Python",
+          "note": "stdlib has none; websockets/aiohttp fill it. Same story.",
+          "code": "import websockets"
+        },
+        {
+          "lang": "Deno/Bun/browsers",
+          "note": "WebSocket is just there, next to fetch — the modern expectation Jet should match.",
+          "code": "const ws = new WebSocket('wss://example.com/live')"
+        }
+      ],
+      "rec": "A",
+      "status": "ratified",
+      "created": "2026-07-07T17:38:00.287Z",
+      "outcome": "B",
+      "ratifiedAt": "2026-07-07"
+    },
+    {
+      "id": "D-OSFACTS1",
+      "cardId": "c0qi7dc2",
+      "group": "stdlib",
+      "title": "Home for system facts and signal handling",
+      "gist": "Which module owns hostname/os/arch/cpu-count and interrupt handling.",
+      "explainer": "A: one obvious module name for \"facts about this machine/process\" plus the safe interrupt hook; keeps core.env honest. Exact signal breadth beyond interrupt stays expert opt-in inside the same module.",
+      "story": "Sam writes a build tool in Jet. It wants parallelism = cpu count, a cache dir under the right OS convention, the hostname for log stamps, and a clean ctrl-c that flushes the cache index before exit. None of those are environment variables, but core.env is the only place that sounds close.",
+      "inWild": "use core.env as env\n\nfn run() {\n    // today: none of these exist anywhere\n    workers :: ???           // logical cpu count\n    host :: ???              // hostname for the log line\n    // ctrl-c mid-build corrupts the half-written cache index\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "New core.os module",
+          "detail": "os.name()/arch()/hostname()/cpu_count()/temp_dir()/username()/pid(), plus the beginner-safe interrupt hook os.on_interrupt(handler). core.env keeps only environment variables + cwd/home. Matches Go/Python naming instincts.",
+          "code": "use core.os as os\n\nworkers :: os.cpu_count()\nprint(\"[{os.hostname()}] building with {workers} workers\")\nos.on_interrupt(() => { flush_cache(); process.exit(130) })"
+        },
+        {
+          "key": "B",
+          "name": "Extend core.env",
+          "detail": "Everything lands on the module people already import: env.cpu_count(), env.hostname(), env.on_interrupt(...). No new name to learn, but \"env\" stops meaning environment variables and the module becomes a junk drawer.",
+          "code": "use core.env as env\n\nworkers :: env.cpu_count()\nenv.on_interrupt(() => flush_cache())"
+        },
+        {
+          "key": "C",
+          "name": "Split: facts in core.env, signals in core.process",
+          "detail": "Read-only facts join env; interrupt/signal handling joins core.process (which already owns exit). Each piece lands near a neighbor, but the \"where do I look\" answer becomes two modules.",
+          "code": "use core.env as env\nuse core.process as process\n\nworkers :: env.cpu_count()\nprocess.on_interrupt(() => flush_cache())"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Go",
+          "note": "os + runtime own this; env vars are one corner of os, not the container.",
+          "code": "runtime.NumCPU(); os.Hostname(); signal.Notify(c, os.Interrupt)"
+        },
+        {
+          "lang": "Python",
+          "note": "os/platform/signal split — three modules for one question is the anti-pattern to avoid.",
+          "code": "os.cpu_count(); platform.node(); signal.signal(signal.SIGINT, h)"
+        },
+        {
+          "lang": "Rust",
+          "note": "std::env has vars, std::thread::available_parallelism has cpus, hostname needs a crate — famously scattered.",
+          "code": "std::thread::available_parallelism()"
+        }
+      ],
+      "rec": "A",
+      "status": "ratified",
+      "created": "2026-07-07T17:38:00.354Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-07"
+    },
+    {
+      "id": "D-HUMANFMT1",
+      "cardId": "c08z55oy",
+      "group": "stdlib",
+      "title": "Human formatting: core.fmt module vs interpolation format-specs",
+      "gist": "How Jet spells number/bytes/duration formatting — library functions or string-interpolation syntax.",
+      "explainer": "C: A’s functions deliver the daily wins (bytes/duration/thousands) with zero syntax risk now, and the spec-sugar question stays a clean future reopen instead of a silent never.",
+      "story": "Ana prints a report: file sizes, elapsed times, row counts with thousands separators, floats to 2 decimals. Today interpolation gives her the raw value only, so she writes arithmetic and string surgery by hand for each cell — the tenth time she has done it.",
+      "inWild": "print(\"{name}: {bytes} bytes in {ms} ms ({count} rows)\")\n// wanted: \"report.csv: 1.5 GB in 3m 42s (1,204,331 rows)\"\n// today: hand-rolled division loops and padding for every column",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "core.fmt module, functions only",
+          "detail": "fmt.bytes(n), fmt.duration(ms), fmt.number(n, thousands: true, precision: 2), fmt.ordinal(n), fmt.pad/align helpers. No syntax change; composes in interpolation like any call. Locale-aware variants can join later behind the same names.",
+          "code": "use core.fmt as fmt\n\nprint(\"{name}: {fmt.bytes(size)} in {fmt.duration(elapsed)} ({fmt.number(rows, thousands: true)} rows)\")\n// report.csv: 1.5 GB in 3m 42s (1,204,331 rows)"
+        },
+        {
+          "key": "B",
+          "name": "Interpolation format-specs",
+          "detail": "Python/Rust-style mini-language inside braces: {x:.2f}, {n:,}, {s:>10}. Terse at the call site, but it is new user-facing syntax (lexer/parser/formatter/S8 interplay), a second sub-language to learn, and covers only what the spec grammar anticipates (no bytes/duration).",
+          "code": "print(\"{name}: {size:.1G}B in {elapsed:dur} ({rows:,} rows)\")\n// every marker is spec grammar to ratify, document, and format-stabilize"
+        },
+        {
+          "key": "C",
+          "name": "Both: functions now, spec sugar later",
+          "detail": "Ship A; reopen a spec-syntax ballot only if call-site verbosity proves painful in real code. Keeps today’s decision small without closing the door.",
+          "code": "print(\"{fmt.number(rows, thousands: true)}\")   // today\nprint(\"{rows:,}\")                              // possible future reopen"
+        },
+        {
+          "key": "D",
+          "name": "Decline",
+          "detail": "Raw interpolation only. Every report/CLI author keeps hand-rolling the same helpers — a daily papercut in exactly the beginner path Jet optimizes for.",
+          "code": "print(\"{(size / 1073741824.0)} GB\")   // and now round it yourself"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Python",
+          "note": "format-spec mini-language is powerful and famously unmemorizable; humanize is a separate library anyway for bytes/durations.",
+          "code": "f\"{rows:,} rows, {size/2**30:.1f} GiB\""
+        },
+        {
+          "lang": "Go",
+          "note": "no format-specs in strings; helpers/libraries do it — humanize is one of the most-imported Go packages.",
+          "code": "humanize.Bytes(1500000000) // \"1.5 GB\""
+        },
+        {
+          "lang": "Rust",
+          "note": "{:>10.2} exists in format! and still no bytes/duration answer without crates.",
+          "code": "format!(\"{:>10.2}\", x)"
+        }
+      ],
+      "rec": "C",
+      "status": "ratified",
+      "created": "2026-07-07T17:38:00.422Z",
+      "outcome": "A",
+      "comment": "full go-style humanize support in the fmt module/lib.",
+      "ratifiedAt": "2026-07-07"
+    },
+    {
+      "id": "D-PWHASH1",
+      "cardId": "c0184j6s",
+      "group": "safety",
+      "title": "Password hashing surface: crypto.password_hash / password_verify",
+      "gist": "Whether Jet ships a misuse-resistant password hashing pair, and what it exposes.",
+      "explainer": "A: PHC-string self-description makes upgrades free and misuse hard; matches the ratified misuse-resistant envelope direction (D-CRYPTOENV1) and I1 safe-by-default.",
+      "story": "Deb builds her first Jet web app with signup/login. The seal/open envelope (D-CRYPTOENV1) encrypts data but is wrong for passwords; without a blessed surface she will do what beginners do — sha256(password) — which is exactly the breach headline. The stdlib either hands her Argon2id correctly-parameterized, or the footgun is the default.",
+      "inWild": "use core.crypto as crypto\n\nfn signup(user: String, password: String) -> Void ? {\n    // today, the only tool in the box:\n    db.execute(\"insert into users values (?, ?)\", [user, crypto.sha256(password)])?\n    // unsalted fast hash — cracked at billions/sec\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Misuse-resistant pair, Argon2id inside",
+          "detail": "crypto.password_hash(pw) -> String encodes algorithm+params+salt in one PHC string (safe defaults, no knobs required); crypto.password_verify(pw, stored) -> Bool re-derives from the stored params — old hashes keep verifying after defaults change. Expert cost overrides via optional args. Backend follows the ratified D-DEP-CRYPTO1 bridge path.",
+          "code": "stored :: crypto.password_hash(password)\n// \"$argon2id$v=19$m=65536,t=3,p=4$…$…\"  — self-describing\ndb.execute(\"insert into users values (?, ?)\", [user, stored])?\n\n// login:\nif crypto.password_verify(attempt, stored) { … }"
+        },
+        {
+          "key": "B",
+          "name": "Expose raw KDF primitives",
+          "detail": "crypto.argon2id(pw, salt, cost…) and friends; users assemble salting/encoding/verification themselves. Full control, but the beginner path is back to holding sharp edges — the opposite of the libsodium lesson.",
+          "code": "salt :: crypto.random_bytes(16)\nhash :: crypto.argon2id(password, salt, memory: 65536, iters: 3, lanes: 4)\n// now design your own storage encoding and verify flow"
+        },
+        {
+          "key": "C",
+          "name": "Decline — document seal + external services",
+          "detail": "Point auth at hosted identity providers; stdlib ships nothing. Every self-hosted Jet app (the jetos story!) still needs it and will hand-roll worse.",
+          "code": "// docs: \"use an identity provider\" — meanwhile:\ndb.execute(\"…\", [user, crypto.sha256(password)])   // what actually happens"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "PHP",
+          "note": "password_hash/password_verify with self-describing output is the acknowledged best-in-class API shape here — rare praise for PHP.",
+          "code": "password_hash($pw, PASSWORD_ARGON2ID); password_verify($pw, $stored);"
+        },
+        {
+          "lang": "libsodium",
+          "note": "crypto_pwhash_str/_str_verify — same shape, same reasoning.",
+          "code": "crypto_pwhash_str(out, pw, len, OPSLIMIT_MODERATE, MEMLIMIT_MODERATE)"
+        },
+        {
+          "lang": "Go/Rust",
+          "note": "both push users to external packages (bcrypt/argon2 crates) — stdlib silence is the common gap, not the standard to copy.",
+          "code": "golang.org/x/crypto/argon2"
+        }
+      ],
+      "rec": "A",
+      "status": "ratified",
+      "created": "2026-07-07T17:38:00.484Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-07"
     }
   ],
   "questions": [
@@ -34349,6 +36070,1147 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-07T18:07:09.714Z",
+      "by": "codex-canvas",
+      "action": "card.update",
+      "ref": "c0uzhild",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-07T18:04:30.647Z",
+      "by": "jetos-agent",
+      "action": "card.update",
+      "ref": "c091duxt",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T18:01:43.863Z",
+      "by": "codex-canvas",
+      "action": "card.update",
+      "ref": "c0uzhild",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-07T17:53:18.707Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msg407wvfxw",
+      "note": "→ jetos-agent: [tower] 5 decisions ratified: D-HUMANFMT1→A (\"full go-style "
+    },
+    {
+      "at": "2026-07-07T17:53:18.707Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msg3z7wvbqh",
+      "note": "→ codex-jetos: [tower] 5 decisions ratified: D-HUMANFMT1→A (\"full go-style "
+    },
+    {
+      "at": "2026-07-07T17:53:18.707Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msg3y7wv7jn",
+      "note": "→ codex-canvas: [tower] 5 decisions ratified: D-HUMANFMT1→A (\"full go-style "
+    },
+    {
+      "at": "2026-07-07T17:53:18.707Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msg3x7wv35a",
+      "note": "→ codex-main: [tower] 5 decisions ratified: D-HUMANFMT1→A (\"full go-style "
+    },
+    {
+      "at": "2026-07-07T17:53:18.707Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msg3w7wuxes",
+      "note": "→ codex-1: [tower] 5 decisions ratified: D-HUMANFMT1→A (\"full go-style "
+    },
+    {
+      "at": "2026-07-07T17:53:18.707Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msg3v7wu4y2",
+      "note": "→ claude-main: [tower] 5 decisions ratified: D-HUMANFMT1→A (\"full go-style "
+    },
+    {
+      "at": "2026-07-07T17:52:31.485Z",
+      "by": "jetos-agent",
+      "action": "card.update",
+      "ref": "c091duxt",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T17:51:48.663Z",
+      "by": "owner",
+      "action": "card.activate",
+      "ref": "c0uxsyns",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T17:51:48.206Z",
+      "by": "owner",
+      "action": "card.activate",
+      "ref": "c0qi7dc2",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T17:51:47.696Z",
+      "by": "owner",
+      "action": "card.activate",
+      "ref": "c0m9tjqj",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T17:51:46.158Z",
+      "by": "owner",
+      "action": "card.activate",
+      "ref": "c0vwu9my",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T17:51:45.623Z",
+      "by": "owner",
+      "action": "card.activate",
+      "ref": "c0075iyb",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T17:51:45.014Z",
+      "by": "owner",
+      "action": "card.activate",
+      "ref": "c0184j6s",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T17:51:43.747Z",
+      "by": "owner",
+      "action": "card.activate",
+      "ref": "c08z55oy",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T17:51:36.810Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-WS1",
+      "note": "B"
+    },
+    {
+      "at": "2026-07-07T17:51:33.170Z",
+      "by": "codex-canvas",
+      "action": "card.update",
+      "ref": "c0uzhild",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-07T17:51:30.919Z",
+      "by": "owner",
+      "action": "decision.reopen",
+      "ref": "D-WS1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T17:51:25.388Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-WS1",
+      "note": "B"
+    },
+    {
+      "at": "2026-07-07T17:50:42.285Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-URL1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-07T17:50:18.332Z",
+      "by": "jetos-agent",
+      "action": "card.update",
+      "ref": "c08hp4wc",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T17:50:10.600Z",
+      "by": "jetos-agent",
+      "action": "card.update",
+      "ref": "c091duxt",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T17:50:09.512Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-PWHASH1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-07T17:49:20.483Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-HUMANFMT1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-07T17:47:57.642Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msg3uq34ttx",
+      "note": "→ jetos-agent: [tower] 3 decisions ratified: D-FSWATCH1→A (\"also include pr"
+    },
+    {
+      "at": "2026-07-07T17:47:57.642Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msg3tq34pkk",
+      "note": "→ codex-jetos: [tower] 3 decisions ratified: D-FSWATCH1→A (\"also include pr"
+    },
+    {
+      "at": "2026-07-07T17:47:57.642Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msg3sq34k2f",
+      "note": "→ codex-canvas: [tower] 3 decisions ratified: D-FSWATCH1→A (\"also include pr"
+    },
+    {
+      "at": "2026-07-07T17:47:57.642Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msg3rq34fho",
+      "note": "→ codex-main: [tower] 3 decisions ratified: D-FSWATCH1→A (\"also include pr"
+    },
+    {
+      "at": "2026-07-07T17:47:57.642Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msg3qq349j3",
+      "note": "→ codex-1: [tower] 3 decisions ratified: D-FSWATCH1→A (\"also include pr"
+    },
+    {
+      "at": "2026-07-07T17:47:57.642Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msg3pq33dge",
+      "note": "→ claude-main: [tower] 3 decisions ratified: D-FSWATCH1→A (\"also include pr"
+    },
+    {
+      "at": "2026-07-07T17:46:27.602Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-OSFACTS1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-07T17:46:10.548Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-WS1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-07T17:44:47.133Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-FSWATCH1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-07T17:44:41.181Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msg3ogytgke",
+      "note": "→ jetos-agent: [tower] 1 decision ratified: D-ENCBIN1→A. Board is current; "
+    },
+    {
+      "at": "2026-07-07T17:44:41.181Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msg3ngytch6",
+      "note": "→ codex-jetos: [tower] 1 decision ratified: D-ENCBIN1→A. Board is current; "
+    },
+    {
+      "at": "2026-07-07T17:44:41.181Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msg3mgyt8e8",
+      "note": "→ codex-canvas: [tower] 1 decision ratified: D-ENCBIN1→A. Board is current; "
+    },
+    {
+      "at": "2026-07-07T17:44:41.181Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msg3lgyt41t",
+      "note": "→ codex-main: [tower] 1 decision ratified: D-ENCBIN1→A. Board is current; "
+    },
+    {
+      "at": "2026-07-07T17:44:41.181Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msg3kgyswxi",
+      "note": "→ codex-1: [tower] 1 decision ratified: D-ENCBIN1→A. Board is current; "
+    },
+    {
+      "at": "2026-07-07T17:44:41.181Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msg3jgys6co",
+      "note": "→ claude-main: [tower] 1 decision ratified: D-ENCBIN1→A. Board is current; "
+    },
+    {
+      "at": "2026-07-07T17:43:11.147Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-ENCBIN1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-07T17:42:45.522Z",
+      "by": "jetos-agent",
+      "action": "card.update",
+      "ref": "c08hp4wc",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T17:42:37.064Z",
+      "by": "jetos-agent",
+      "action": "card.update",
+      "ref": "c091duxt",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T17:42:35.312Z",
+      "by": "codex-canvas",
+      "action": "card.update",
+      "ref": "c0uzhild",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-07T17:38:35.173Z",
+      "by": "claude-main",
+      "action": "message.send",
+      "ref": "msg3ibvey34",
+      "note": "→ owner: Round 2 done. (1) Reviewed ~/nixos (110 modules, flake-parts"
+    },
+    {
+      "at": "2026-07-07T17:38:34.905Z",
+      "by": "codex-canvas",
+      "action": "card.update",
+      "ref": "c0uzhild",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-07T17:38:03.319Z",
+      "by": "claude-main",
+      "action": "card.activate",
+      "ref": "c06lb4p5",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T17:38:03.255Z",
+      "by": "claude-main",
+      "action": "card.activate",
+      "ref": "c05hqpe6",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T17:38:03.193Z",
+      "by": "claude-main",
+      "action": "card.activate",
+      "ref": "c04du0jb",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T17:38:03.127Z",
+      "by": "claude-main",
+      "action": "card.activate",
+      "ref": "c038yftr",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T17:38:03.057Z",
+      "by": "claude-main",
+      "action": "card.activate",
+      "ref": "c0254elb",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T17:38:02.990Z",
+      "by": "claude-main",
+      "action": "card.activate",
+      "ref": "c013gf7s",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T17:38:02.923Z",
+      "by": "claude-main",
+      "action": "card.activate",
+      "ref": "c000tru1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T17:38:02.861Z",
+      "by": "claude-main",
+      "action": "card.activate",
+      "ref": "c0yzg1yu",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T17:38:02.794Z",
+      "by": "claude-main",
+      "action": "card.activate",
+      "ref": "c0uzefny",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T17:38:02.727Z",
+      "by": "claude-main",
+      "action": "card.activate",
+      "ref": "c0txfavt",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T17:38:02.661Z",
+      "by": "claude-main",
+      "action": "card.activate",
+      "ref": "c0svh6c4",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T17:38:02.594Z",
+      "by": "claude-main",
+      "action": "card.activate",
+      "ref": "c0rvu7rz",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T17:38:02.527Z",
+      "by": "claude-main",
+      "action": "card.activate",
+      "ref": "c0qs8j6u",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T17:38:02.465Z",
+      "by": "claude-main",
+      "action": "card.activate",
+      "ref": "c0ppv63p",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T17:38:02.399Z",
+      "by": "claude-main",
+      "action": "card.activate",
+      "ref": "c0om2gxe",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T17:38:02.334Z",
+      "by": "claude-main",
+      "action": "card.activate",
+      "ref": "c0nlrm12",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T17:38:02.267Z",
+      "by": "claude-main",
+      "action": "card.activate",
+      "ref": "c0mikjfs",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T17:38:02.198Z",
+      "by": "claude-main",
+      "action": "card.activate",
+      "ref": "c0ldacxz",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T17:38:02.125Z",
+      "by": "claude-main",
+      "action": "card.activate",
+      "ref": "c0k7v2f0",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T17:38:02.062Z",
+      "by": "claude-main",
+      "action": "card.activate",
+      "ref": "c0j5jquv",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T17:38:01.993Z",
+      "by": "claude-main",
+      "action": "card.activate",
+      "ref": "c0hz6eux",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T17:38:01.928Z",
+      "by": "claude-main",
+      "action": "card.activate",
+      "ref": "c0gu1z9h",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T17:38:01.861Z",
+      "by": "claude-main",
+      "action": "card.activate",
+      "ref": "c0fs9ypm",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T17:38:01.793Z",
+      "by": "claude-main",
+      "action": "card.activate",
+      "ref": "c0eoor8d",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T17:38:01.726Z",
+      "by": "claude-main",
+      "action": "card.activate",
+      "ref": "c0djv0xv",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T17:38:01.664Z",
+      "by": "claude-main",
+      "action": "card.activate",
+      "ref": "c0ccw6a8",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T17:38:01.598Z",
+      "by": "claude-main",
+      "action": "card.activate",
+      "ref": "c0bbi92e",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T17:38:01.536Z",
+      "by": "claude-main",
+      "action": "card.activate",
+      "ref": "c0a6z6cg",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T17:38:01.471Z",
+      "by": "claude-main",
+      "action": "card.activate",
+      "ref": "c07vdfen",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T17:38:01.404Z",
+      "by": "claude-main",
+      "action": "card.activate",
+      "ref": "c06tng04",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T17:38:01.338Z",
+      "by": "claude-main",
+      "action": "card.activate",
+      "ref": "c05o0105",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T17:38:01.269Z",
+      "by": "claude-main",
+      "action": "card.activate",
+      "ref": "c04ljr3f",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T17:38:01.202Z",
+      "by": "claude-main",
+      "action": "card.activate",
+      "ref": "c03gcv39",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T17:38:01.138Z",
+      "by": "claude-main",
+      "action": "card.activate",
+      "ref": "c02ch1op",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T17:38:01.072Z",
+      "by": "claude-main",
+      "action": "card.activate",
+      "ref": "c0z3l25j",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T17:38:01.012Z",
+      "by": "claude-main",
+      "action": "card.activate",
+      "ref": "c0xyrsis",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T17:38:00.954Z",
+      "by": "claude-main",
+      "action": "card.activate",
+      "ref": "c0wx96s2",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T17:38:00.886Z",
+      "by": "claude-main",
+      "action": "card.activate",
+      "ref": "c0tru7we",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T17:38:00.819Z",
+      "by": "claude-main",
+      "action": "card.activate",
+      "ref": "c0sr7exp",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T17:38:00.751Z",
+      "by": "claude-main",
+      "action": "card.activate",
+      "ref": "c0rmuc30",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T17:38:00.686Z",
+      "by": "claude-main",
+      "action": "card.activate",
+      "ref": "c0pef855",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T17:38:00.615Z",
+      "by": "claude-main",
+      "action": "card.activate",
+      "ref": "c0oa2sfp",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T17:38:00.551Z",
+      "by": "claude-main",
+      "action": "card.activate",
+      "ref": "c0n8old0",
+      "note": ""
+    },
+    {
+      "at": "2026-07-07T17:38:00.484Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-PWHASH1",
+      "note": "Password hashing surface: crypto.password_hash / password_verify"
+    },
+    {
+      "at": "2026-07-07T17:38:00.423Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-HUMANFMT1",
+      "note": "Human formatting: core.fmt module vs interpolation format-specs"
+    },
+    {
+      "at": "2026-07-07T17:38:00.355Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-OSFACTS1",
+      "note": "Home for system facts and signal handling"
+    },
+    {
+      "at": "2026-07-07T17:38:00.288Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-WS1",
+      "note": "WebSocket module home"
+    },
+    {
+      "at": "2026-07-07T17:38:00.224Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-FSWATCH1",
+      "note": "Filesystem watch surface and home"
+    },
+    {
+      "at": "2026-07-07T17:38:00.157Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-ENCBIN1",
+      "note": "Canonical binary interchange format for core.encoding"
+    },
+    {
+      "at": "2026-07-07T17:38:00.090Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-URL1",
+      "note": "Typed URL and mime modules: core.url + core.mime"
+    },
+    {
+      "at": "2026-07-07T17:38:00.026Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c06lb4p5",
+      "note": "jetos acceptance fixture: recreate the owner's ~/nixos 100% in jetos"
+    },
+    {
+      "at": "2026-07-07T17:37:59.959Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c05hqpe6",
+      "note": "jetos: kernel and performance tuning surface — profiles, sysctl, zram, sched-ext"
+    },
+    {
+      "at": "2026-07-07T17:37:59.892Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c04du0jb",
+      "note": "jetos: declarative Flatpak + foreign app ecosystems"
+    },
+    {
+      "at": "2026-07-07T17:37:59.823Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c038yftr",
+      "note": "jetos: desktop-OS module breadth — audio, DEs, virtualization, gaming, localization"
+    },
+    {
+      "at": "2026-07-07T17:37:59.756Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0254elb",
+      "note": "jetos: declarative theming — stylix parity"
+    },
+    {
+      "at": "2026-07-07T17:37:59.693Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c013gf7s",
+      "note": "jetos: app config module library — programs.* parity breadth"
+    },
+    {
+      "at": "2026-07-07T17:37:59.628Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c000tru1",
+      "note": "jetos: module option priorities, overrides, and module disabling (mkDefault/mkForce parity)"
+    },
+    {
+      "at": "2026-07-07T17:37:59.566Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0yzg1yu",
+      "note": "jetpack: package overlays, per-package overrides, and source patches (nixpkgs overlay parity)"
+    },
+    {
+      "at": "2026-07-07T17:35:43.359Z",
+      "by": "codex-canvas",
+      "action": "card.update",
+      "ref": "c0uzhild",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-07T17:31:15.861Z",
+      "by": "codex-canvas",
+      "action": "card.update",
+      "ref": "c0uzhild",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-07T17:23:57.782Z",
+      "by": "claude-main",
+      "action": "message.send",
+      "ref": "msg3h9f7epx",
+      "note": "→ owner: Audit sweep done: 42 new cards in activate lane (#288-#329)."
+    },
+    {
+      "at": "2026-07-07T17:23:35.141Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0uzefny",
+      "note": "jetos: service manager depth — sockets, timers, tmpfiles, hardening, journal"
+    },
+    {
+      "at": "2026-07-07T17:23:35.077Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0txfavt",
+      "note": "jetos: declarative disks + impermanence (disko parity)"
+    },
+    {
+      "at": "2026-07-07T17:23:35.014Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0svh6c4",
+      "note": "jetos: lifecycle — store GC, retention, channels, auto-upgrade"
+    },
+    {
+      "at": "2026-07-07T17:23:34.954Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0rvu7rz",
+      "note": "jetos: hardware detection, profiles, and specialisations"
+    },
+    {
+      "at": "2026-07-07T17:23:34.887Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0qs8j6u",
+      "note": "jetos: image variants matrix — cloud, SD, netboot, appliance"
+    },
+    {
+      "at": "2026-07-07T17:23:34.823Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0ppv63p",
+      "note": "jetos: declarative containers + microVMs"
+    },
+    {
+      "at": "2026-07-07T17:23:34.756Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0om2gxe",
+      "note": "jetos: options reference + search (search.nixos.org parity, typed)"
+    },
+    {
+      "at": "2026-07-07T17:23:34.695Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0nlrm12",
+      "note": "jetos: fleet/remote deployment — push generations with proof-gated rollback"
+    },
+    {
+      "at": "2026-07-07T17:23:34.629Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0mikjfs",
+      "note": "jetos: per-user declarative environment (home-manager class)"
+    },
+    {
+      "at": "2026-07-07T17:23:34.560Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0ldacxz",
+      "note": "jetos: declarative VM integration-test framework (NixOS test-driver parity)"
+    },
+    {
+      "at": "2026-07-07T17:23:34.490Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0k7v2f0",
+      "note": "Canvas: tasks/concurrency flow authoring (latent-action parity)"
+    },
+    {
+      "at": "2026-07-07T17:23:34.426Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0j5jquv",
+      "note": "Canvas: node documentation hover + first-run learn overlay"
+    },
+    {
+      "at": "2026-07-07T17:23:34.355Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0hz6eux",
+      "note": "Canvas: live-run loop — watch persistence + hot-reload overlay (Simulate parity)"
+    },
+    {
+      "at": "2026-07-07T17:23:34.286Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0gu1z9h",
+      "note": "Canvas: trait/impl authoring projection (Blueprint interfaces parity)"
+    },
+    {
+      "at": "2026-07-07T17:23:34.222Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0fs9ypm",
+      "note": "Canvas: keyboard-only authoring + accessibility ratchet"
+    },
+    {
+      "at": "2026-07-07T17:23:34.156Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0eoor8d",
+      "note": "Canvas: large-graph performance ratchet — virtualization + zoom LOD"
+    },
+    {
+      "at": "2026-07-07T17:23:34.087Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0djv0xv",
+      "note": "Canvas: bookmarks, favorites, and palette ranking"
+    },
+    {
+      "at": "2026-07-07T17:23:34.015Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0ccw6a8",
+      "note": "Canvas: graph organization tools — align, straighten, reroute, tidy"
+    },
+    {
+      "at": "2026-07-07T17:23:33.952Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0bbi92e",
+      "note": "Canvas: event dispatcher projection — unblock the parity-matrix row via shipped core.event"
+    },
+    {
+      "at": "2026-07-07T17:23:33.884Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0a6z6cg",
+      "note": "corelib: stdlib map — deliberate have/have-not ledger vs Python/Go/Rust"
+    },
+    {
+      "at": "2026-07-07T17:23:33.810Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c08z55oy",
+      "note": "corelib gap: core.fmt — human formatting + locale floor (new module decision)"
+    },
+    {
+      "at": "2026-07-07T17:23:33.744Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c07vdfen",
+      "note": "corelib audit: testing toolkit — fuzzing, snapshots, benchmarks beyond M11"
+    },
+    {
+      "at": "2026-07-07T17:23:33.680Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c06tng04",
+      "note": "corelib audit: core.data — dataframe parity with polars essentials"
+    },
+    {
+      "at": "2026-07-07T17:23:33.610Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c05o0105",
+      "note": "corelib audit: core.tasks — M:N runtime completion, select, bounded channels, timers"
+    },
+    {
+      "at": "2026-07-07T17:23:33.546Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c04ljr3f",
+      "note": "corelib audit: collections + iterator adapters — parity with Rust Iterator/itertools"
+    },
+    {
+      "at": "2026-07-07T17:23:33.476Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c03gcv39",
+      "note": "corelib audit: core.log — structured logging, spans, sinks, OTel export"
+    },
+    {
+      "at": "2026-07-07T17:23:33.409Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c02ch1op",
+      "note": "corelib audit: core.db — driver breadth, typed rows, migrations"
+    },
+    {
+      "at": "2026-07-07T17:23:33.342Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0184j6s",
+      "note": "corelib audit: core.crypto — misuse-resistant suite (AEAD, signatures, KDF, password hashing)"
+    },
+    {
+      "at": "2026-07-07T17:23:33.280Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0075iyb",
+      "note": "corelib audit: core.http — client/server parity with Go net/http + requests ergonomics"
+    },
+    {
+      "at": "2026-07-07T17:23:33.213Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0z3l25j",
+      "note": "corelib audit: core.net — socket layer parity with Go net"
+    },
+    {
+      "at": "2026-07-07T17:23:33.145Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0xyrsis",
+      "note": "corelib: core.regex — in-house RE2-class engine + API depth"
+    },
+    {
+      "at": "2026-07-07T17:23:33.082Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0wx96s2",
+      "note": "corelib audit: core.text — Unicode completeness (case folding, segmentation, width)"
+    },
+    {
+      "at": "2026-07-07T17:23:33.020Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0vwu9my",
+      "note": "corelib gap: core.url + core.mime — new modules (WHATWG URL, query strings, mime tables)"
+    },
+    {
+      "at": "2026-07-07T17:23:32.962Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0uxsyns",
+      "note": "corelib audit: core.encoding — format breadth (XML, binary interchange, streaming)"
+    },
+    {
+      "at": "2026-07-07T17:23:32.891Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0tru7we",
+      "note": "corelib audit: core.time ring — calendar parity with java.time/jiff"
+    },
+    {
+      "at": "2026-07-07T17:23:32.830Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0sr7exp",
+      "note": "corelib audit: core.random — distributions, bytes, sampling"
+    },
+    {
+      "at": "2026-07-07T17:23:32.762Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0rmuc30",
+      "note": "corelib audit: core.math — full libm + integer-safety surface"
+    },
+    {
+      "at": "2026-07-07T17:23:32.693Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0qi7dc2",
+      "note": "corelib audit: core.env + system facts — os info, signals, process identity"
+    },
+    {
+      "at": "2026-07-07T17:23:32.627Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0pef855",
+      "note": "corelib audit: core.process — subprocess parity with Python subprocess/Go os/exec"
+    },
+    {
+      "at": "2026-07-07T17:23:32.559Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0oa2sfp",
+      "note": "corelib audit: core.args — CLI parsing parity with clap"
+    },
+    {
+      "at": "2026-07-07T17:23:32.496Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0n8old0",
+      "note": "corelib audit: core.io — terminal surface parity"
+    },
+    {
+      "at": "2026-07-07T17:23:32.438Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0m9tjqj",
+      "note": "corelib audit: core.files/core.path — file I/O parity with pathlib/Go os/Rust fs"
+    },
+    {
+      "at": "2026-07-07T17:18:35.804Z",
+      "by": "jetos-agent",
+      "action": "card.update",
+      "ref": "c091duxt",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T17:17:29.599Z",
+      "by": "codex-canvas",
+      "action": "card.update",
+      "ref": "c0uzhild",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-07T16:59:11.018Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msg3g92by48",
+      "note": "→ jetos-agent: [tower] 1 decision ratified: D-JOS-DESKTOP1→A (\"We should pr"
+    },
+    {
+      "at": "2026-07-07T16:59:11.018Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msg3f92bwfa",
+      "note": "→ codex-jetos: [tower] 1 decision ratified: D-JOS-DESKTOP1→A (\"We should pr"
+    },
+    {
+      "at": "2026-07-07T16:59:11.018Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msg3e92btnn",
+      "note": "→ codex-canvas: [tower] 1 decision ratified: D-JOS-DESKTOP1→A (\"We should pr"
+    },
+    {
+      "at": "2026-07-07T16:59:11.018Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msg3d92brna",
+      "note": "→ codex-main: [tower] 1 decision ratified: D-JOS-DESKTOP1→A (\"We should pr"
+    },
+    {
+      "at": "2026-07-07T16:59:11.018Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msg3c92boje",
+      "note": "→ codex-1: [tower] 1 decision ratified: D-JOS-DESKTOP1→A (\"We should pr"
+    },
+    {
+      "at": "2026-07-07T16:59:11.018Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msg3b92b83g",
+      "note": "→ claude-main: [tower] 1 decision ratified: D-JOS-DESKTOP1→A (\"We should pr"
+    },
+    {
+      "at": "2026-07-07T16:57:40.985Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-JOS-DESKTOP1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-07T16:49:13.376Z",
+      "by": "jetos-agent",
+      "action": "message.send",
+      "ref": "msg3ap5ni1o",
+      "note": "→ owner: Ballot ready: D-JOS-DESKTOP1 chooses the default desktop/win"
+    },
+    {
+      "at": "2026-07-07T16:49:11.699Z",
+      "by": "jetos-agent",
+      "action": "decision.add",
+      "ref": "D-JOS-DESKTOP1",
+      "note": "jetos default desktop session"
+    },
+    {
+      "at": "2026-07-07T16:44:49.812Z",
+      "by": "jetos-agent",
+      "action": "message.send",
+      "ref": "msg39maxt61",
+      "note": "→ codex-canvas: JetOS #263 root verification blocked by Canvas compile error"
+    },
+    {
+      "at": "2026-07-07T16:44:49.688Z",
+      "by": "jetos-agent",
+      "action": "message.send",
+      "ref": "msg38k8n0k1",
+      "note": "→ canvas-agent: JetOS #263 root verification blocked by Canvas compile error"
+    },
     {
       "at": "2026-07-07T16:32:46.820Z",
       "by": "agent",
@@ -43040,6 +45902,325 @@
       "at": "2026-07-07T16:20:30.310Z",
       "deliveredAt": null,
       "readAt": "2026-07-07T16:27:47.567Z"
+    },
+    {
+      "id": "msg38k8n0k1",
+      "from": "jetos-agent",
+      "to": "canvas-agent",
+      "text": "JetOS #263 root verification blocked by Canvas compile errors in Source/Canvas.rs around previous_out inferred as Option<str> (lines ~3256-3267). cargo check -p jet-driver is green; cargo build --bin jetos and cargo test --test jetpack cannot proceed until Canvas lane fixes root crate. JetOS lane will not edit Canvas.",
+      "cardId": "c091duxt",
+      "file": null,
+      "at": "2026-07-07T16:44:49.688Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg39maxt61",
+      "from": "jetos-agent",
+      "to": "codex-canvas",
+      "text": "JetOS #263 root verification blocked by Canvas compile errors in Source/Canvas.rs around previous_out inferred as Option<str> (lines ~3256-3267). cargo check -p jet-driver is green; cargo build --bin jetos and cargo test --test jetpack cannot proceed until Canvas lane fixes root crate. JetOS lane will not edit Canvas.",
+      "cardId": "c091duxt",
+      "file": null,
+      "at": "2026-07-07T16:44:49.812Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg3ap5ni1o",
+      "from": "jetos-agent",
+      "to": "owner",
+      "text": "Ballot ready: D-JOS-DESKTOP1 chooses the default desktop/window-manager session for the JetOS VM after terminal proof.",
+      "cardId": "c091duxt",
+      "file": null,
+      "at": "2026-07-07T16:49:13.376Z",
+      "deliveredAt": null,
+      "readAt": "2026-07-07T16:57:42.834Z"
+    },
+    {
+      "id": "msg3b92b83g",
+      "from": "tower",
+      "to": "claude-main",
+      "text": "[tower] 1 decision ratified: D-JOS-DESKTOP1→A (\"We should prefer wayland, but we will have gnome de by default, with terminal ve\"). Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-07T16:59:11.018Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg3c92boje",
+      "from": "tower",
+      "to": "codex-1",
+      "text": "[tower] 1 decision ratified: D-JOS-DESKTOP1→A (\"We should prefer wayland, but we will have gnome de by default, with terminal ve\"). Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-07T16:59:11.018Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg3d92brna",
+      "from": "tower",
+      "to": "codex-main",
+      "text": "[tower] 1 decision ratified: D-JOS-DESKTOP1→A (\"We should prefer wayland, but we will have gnome de by default, with terminal ve\"). Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-07T16:59:11.018Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg3e92btnn",
+      "from": "tower",
+      "to": "codex-canvas",
+      "text": "[tower] 1 decision ratified: D-JOS-DESKTOP1→A (\"We should prefer wayland, but we will have gnome de by default, with terminal ve\"). Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-07T16:59:11.018Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg3f92bwfa",
+      "from": "tower",
+      "to": "codex-jetos",
+      "text": "[tower] 1 decision ratified: D-JOS-DESKTOP1→A (\"We should prefer wayland, but we will have gnome de by default, with terminal ve\"). Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-07T16:59:11.018Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg3g92by48",
+      "from": "tower",
+      "to": "jetos-agent",
+      "text": "[tower] 1 decision ratified: D-JOS-DESKTOP1→A (\"We should prefer wayland, but we will have gnome de by default, with terminal ve\"). Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-07T16:59:11.018Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg3h9f7epx",
+      "from": "claude-main",
+      "to": "owner",
+      "text": "Audit sweep done: 42 new cards in activate lane (#288-#329). Corelib #288-#310: per-module parity audits vs best-in-class (pathlib/Go os, clap, subprocess, java.time, Go net + net/http, libsodium crypto — prelude has only sha256/hmac/random_bytes today, sqlx-class db, Rust iterators, polars, tracing/slog) plus missing-module gaps: core.url+core.mime (#297), core.fmt (#309), and a have/have-not stdlib ledger (#310). Canvas #311-#319: beyond the parity matrix — event dispatcher projection now unblockable (#286 shipped), graph org tools, bookmarks/favorites, large-graph perf ratchet, keyboard-only a11y, trait authoring, live-run loop, doc hover, tasks-flow authoring. jetos #320-#329: NixOS-community-parity ring beyond #262/#263 — VM test framework, home-manager class user env, fleet deploy, options search, containers/microVMs, image matrix, hardware profiles, GC/auto-upgrade, disko+impermanence, service-manager depth. All cards note ballot gates + coordination with active jetos/canvas agents; none touch their claimed scope. All in triage/activate for your pick.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-07T17:23:57.782Z",
+      "deliveredAt": null,
+      "readAt": "2026-07-07T17:51:49.975Z"
+    },
+    {
+      "id": "msg3ibvey34",
+      "from": "claude-main",
+      "to": "owner",
+      "text": "Round 2 done. (1) Reviewed ~/nixos (110 modules, flake-parts+import-tree, 20 flake inputs): most of it maps to existing cards, but 8 gaps found and carded — #330 jetpack overlays/overrides/patches (your overlays dir, NUR, per-host channel swap), #331 module priorities/mkForce/disabledModules (halcyon-plasma-beta needs it), #332 app config module library (your 30+ programs.* modules incl. cursor/vscode extensions, nixcord, spicetify), #333 stylix-parity theming, #334 desktop breadth (pipewire, KDE beside GNOME default, libvirt/spice, gaming stack, xdg-mimes, fonts), #335 declarative flatpak (replaces your hand-rolled reconcile script, proof-gated), #336 kernel tuning (your safe/lts/performance profile enum, sysctl, zram, scx), #337 acceptance fixture: recreate your ~/nixos 100% with full coverage matrix + VM-boot proof as the exit criterion. (2) 7 ballots ready in decide: D-URL1 (core.url+mime), D-ENCBIN1 (CBOR vs msgpack), D-FSWATCH1 (files.watch), D-WS1 (websocket home), D-OSFACTS1 (core.os), D-HUMANFMT1 (core.fmt vs format-specs), D-PWHASH1 (password_hash pair). AEAD/sign ballots not raised — D-CRYPTOENV1/D-DEP-CRYPTO1 already ratified those. (3) Greenlit 43 ungated cards to planning per your go-ahead; the 7 ballot-gated cards wait on you. jetos syntax cards (#321/324/326/328/331/333/335/336) will raise D-JOS-* ballots at plan time per the freeze pattern — surfaces need design before worked options are honest. FYI: tower decision list (text mode) crashes on titleless legacy decisions (D-RENDERTGT2 etc.) — cli.mjs:165; --json works.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-07T17:38:35.173Z",
+      "deliveredAt": null,
+      "readAt": "2026-07-07T17:51:49.975Z"
+    },
+    {
+      "id": "msg3jgys6co",
+      "from": "tower",
+      "to": "claude-main",
+      "text": "[tower] 1 decision ratified: D-ENCBIN1→A. Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-07T17:44:41.181Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg3kgyswxi",
+      "from": "tower",
+      "to": "codex-1",
+      "text": "[tower] 1 decision ratified: D-ENCBIN1→A. Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-07T17:44:41.181Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg3lgyt41t",
+      "from": "tower",
+      "to": "codex-main",
+      "text": "[tower] 1 decision ratified: D-ENCBIN1→A. Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-07T17:44:41.181Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg3mgyt8e8",
+      "from": "tower",
+      "to": "codex-canvas",
+      "text": "[tower] 1 decision ratified: D-ENCBIN1→A. Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-07T17:44:41.181Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg3ngytch6",
+      "from": "tower",
+      "to": "codex-jetos",
+      "text": "[tower] 1 decision ratified: D-ENCBIN1→A. Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-07T17:44:41.181Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg3ogytgke",
+      "from": "tower",
+      "to": "jetos-agent",
+      "text": "[tower] 1 decision ratified: D-ENCBIN1→A. Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-07T17:44:41.181Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg3pq33dge",
+      "from": "tower",
+      "to": "claude-main",
+      "text": "[tower] 3 decisions ratified: D-FSWATCH1→A (\"also include processes and ports now, not later\") · D-WS1→A · D-OSFACTS1→A. Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-07T17:47:57.642Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg3qq349j3",
+      "from": "tower",
+      "to": "codex-1",
+      "text": "[tower] 3 decisions ratified: D-FSWATCH1→A (\"also include processes and ports now, not later\") · D-WS1→A · D-OSFACTS1→A. Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-07T17:47:57.642Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg3rq34fho",
+      "from": "tower",
+      "to": "codex-main",
+      "text": "[tower] 3 decisions ratified: D-FSWATCH1→A (\"also include processes and ports now, not later\") · D-WS1→A · D-OSFACTS1→A. Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-07T17:47:57.642Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg3sq34k2f",
+      "from": "tower",
+      "to": "codex-canvas",
+      "text": "[tower] 3 decisions ratified: D-FSWATCH1→A (\"also include processes and ports now, not later\") · D-WS1→A · D-OSFACTS1→A. Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-07T17:47:57.642Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg3tq34pkk",
+      "from": "tower",
+      "to": "codex-jetos",
+      "text": "[tower] 3 decisions ratified: D-FSWATCH1→A (\"also include processes and ports now, not later\") · D-WS1→A · D-OSFACTS1→A. Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-07T17:47:57.642Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg3uq34ttx",
+      "from": "tower",
+      "to": "jetos-agent",
+      "text": "[tower] 3 decisions ratified: D-FSWATCH1→A (\"also include processes and ports now, not later\") · D-WS1→A · D-OSFACTS1→A. Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-07T17:47:57.642Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg3v7wu4y2",
+      "from": "tower",
+      "to": "claude-main",
+      "text": "[tower] 5 decisions ratified: D-HUMANFMT1→A (\"full go-style humanize support in the fmt module/lib.\") · D-PWHASH1→A · D-URL1→A · D-WS1→B · D-WS1→B — greenlit: #309 #302 #301 #297 #288 #292 #296. Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-07T17:53:18.707Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg3w7wuxes",
+      "from": "tower",
+      "to": "codex-1",
+      "text": "[tower] 5 decisions ratified: D-HUMANFMT1→A (\"full go-style humanize support in the fmt module/lib.\") · D-PWHASH1→A · D-URL1→A · D-WS1→B · D-WS1→B — greenlit: #309 #302 #301 #297 #288 #292 #296. Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-07T17:53:18.707Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg3x7wv35a",
+      "from": "tower",
+      "to": "codex-main",
+      "text": "[tower] 5 decisions ratified: D-HUMANFMT1→A (\"full go-style humanize support in the fmt module/lib.\") · D-PWHASH1→A · D-URL1→A · D-WS1→B · D-WS1→B — greenlit: #309 #302 #301 #297 #288 #292 #296. Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-07T17:53:18.707Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg3y7wv7jn",
+      "from": "tower",
+      "to": "codex-canvas",
+      "text": "[tower] 5 decisions ratified: D-HUMANFMT1→A (\"full go-style humanize support in the fmt module/lib.\") · D-PWHASH1→A · D-URL1→A · D-WS1→B · D-WS1→B — greenlit: #309 #302 #301 #297 #288 #292 #296. Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-07T17:53:18.707Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg3z7wvbqh",
+      "from": "tower",
+      "to": "codex-jetos",
+      "text": "[tower] 5 decisions ratified: D-HUMANFMT1→A (\"full go-style humanize support in the fmt module/lib.\") · D-PWHASH1→A · D-URL1→A · D-WS1→B · D-WS1→B — greenlit: #309 #302 #301 #297 #288 #292 #296. Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-07T17:53:18.707Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg407wvfxw",
+      "from": "tower",
+      "to": "jetos-agent",
+      "text": "[tower] 5 decisions ratified: D-HUMANFMT1→A (\"full go-style humanize support in the fmt module/lib.\") · D-PWHASH1→A · D-URL1→A · D-WS1→B · D-WS1→B — greenlit: #309 #302 #301 #297 #288 #292 #296. Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-07T17:53:18.707Z",
+      "deliveredAt": null,
+      "readAt": null
     }
   ]
 }

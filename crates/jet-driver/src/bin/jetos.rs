@@ -4,9 +4,9 @@
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    if args.first().map(String::as_str) == Some(jet::Syntax::ENGINE_PROTOCOL_FLAG) {
+    if args.first().map(String::as_str) == Some(jet_foundation::Syntax::ENGINE_PROTOCOL_FLAG) {
         println!("{}", env!("CARGO_PKG_VERSION"));
         std::process::exit(0);
     }
-    std::process::exit(jet::Jetpack::run(args));
+    std::process::exit(jet_driver::Jetpack::run(args));
 }

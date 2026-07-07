@@ -109,7 +109,10 @@
             qemu
             xorriso
             limine
+            util-linux
             e2fsprogs
+            dosfstools
+            mtools
             nodejs_22
             nixfmt
             ripgrep

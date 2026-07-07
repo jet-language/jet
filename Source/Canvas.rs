@@ -4,7 +4,7 @@
 //! by a second path: projection comes from `ProgramBundle` + semindex facts, and
 //! writes go back through `jet fmt` before the file is replaced.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -62,6 +62,7 @@ struct GraphBuilder {
     next_wire: usize,
 }
 
+#[derive(Clone)]
 struct NodeRec {
     id: String,
     kind: String,
@@ -433,7 +434,7 @@ pub fn canvas_html() -> String {
 pub fn canvas_html_for(base: &str) -> String {
     canvas_html_document(&format!(
         r#"<script>window.__JET_CANVAS_BASE__ = "{}";</script>
-<script src="{}/app.js"></script>"#,
+<script src="{}/app.js?canvas_ui=blueprint8"></script>"#,
         json_escape(base),
         json_escape(base)
     ))
@@ -442,7 +443,7 @@ pub fn canvas_html_for(base: &str) -> String {
 pub fn canvas_html_query() -> String {
     canvas_html_document(
         r#"<script>window.__JET_CANVAS_BASE__ = ""; window.__JET_CANVAS_GRAPH__ = "/?jet_panel_graph=1"; window.__JET_CANVAS_TX__ = "/canvas/transaction"; window.__JET_CANVAS_QUERY__ = "/canvas/query"; window.__JET_CANVAS_SCM__ = "/canvas/source-control";</script>
-<script src="/?jet_panel_app=1"></script>"#,
+<script src="/?jet_panel_app=1&canvas_ui=blueprint8"></script>"#,
     )
 }
 
@@ -455,47 +456,53 @@ fn canvas_html_document(bootstrap: &str) -> String {
 <title>Jet Canvas</title>
 <style>
 * { box-sizing: border-box; }
-html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0d10; color: #d7e4f7; font: 13px "Inter", "Segoe UI", system-ui, sans-serif; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: #05070b; color: #d7e4f7; font: 13px "Inter", "Segoe UI", system-ui, sans-serif; }
 button, input, select { font: inherit; }
-button { color: #d7e4f7; border: 1px solid #343a46; background: #171a20; min-height: 30px; padding: 0 10px; cursor: pointer; }
-button:hover, button:focus-visible { border-color: #2dd4bf; background: #20242c; outline: none; }
-button.primary { background: #0e7490; border-color: #22d3ee; color: #e7fbff; }
-button.is-active { border-color: #facc15; background: #253142; color: #fff7c2; }
-input, select { color: #e7eefb; border: 1px solid #343a46; background: #101318; min-height: 30px; padding: 0 8px; }
+button { color: #d7e4f7; border: 1px solid #31445d; background: linear-gradient(#18202b, #111821); min-height: 30px; padding: 0 10px; cursor: pointer; border-radius: 4px; box-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 1px 0 rgba(0,0,0,.4); }
+button:hover, button:focus-visible { border-color: #35c2ff; background: #1d2b3a; outline: none; box-shadow: 0 0 0 2px rgba(53,194,255,.18); }
+button.primary { background: #123d45; border-color: #22d3ee; color: #e7fbff; }
+button.is-active { border-color: #f6d365; background: #352c17; color: #fff4bd; }
+button:disabled { opacity: .42; cursor: default; box-shadow: none; }
+input, select { color: #e7eefb; border: 1px solid #31445d; background: #0b1118; min-height: 30px; padding: 0 8px; border-radius: 4px; }
+input:focus-visible, select:focus-visible { border-color: #35c2ff; outline: none; box-shadow: 0 0 0 2px rgba(53,194,255,.18); }
 select { min-width: 180px; }
-#shell { height: 100%; display: grid; grid-template-rows: auto minmax(0, 1fr) 26px; min-width: 0; }
-#topbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; min-height: 48px; padding: 7px 10px; border-bottom: 1px solid #303642; background: #14141a; box-shadow: 0 1px 0 #20242c inset; }
-#brand { display: flex; flex-direction: column; gap: 1px; flex: 0 1 148px; min-width: 116px; }
-#brand strong { font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: #f8fbff; }
-#brand span { color: #7f96b8; font: 11px ui-monospace, "SFMono-Regular", Consolas, monospace; }
-#graph-select { border-color: #46505f; background: #11151b; }
-#topbar > select { flex: 1 1 170px; min-width: 128px; max-width: 340px; }
+#shell { height: 100%; display: grid; grid-template-rows: auto minmax(0, 1fr) 28px; min-width: 0; }
+#topbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; min-height: 54px; padding: 8px 10px; border-bottom: 1px solid #25364b; background: linear-gradient(#111923, #0c1119); box-shadow: 0 1px 0 rgba(255,255,255,.04) inset, 0 14px 40px rgba(0,0,0,.25); }
+#brand { display: flex; flex-direction: column; gap: 1px; flex: 0 1 164px; min-width: 124px; padding-left: 8px; border-left: 3px solid #35c2ff; }
+#brand strong { font-size: 14px; letter-spacing: .08em; text-transform: uppercase; color: #f8fbff; }
+#brand span { color: #9db4d2; font: 11px ui-monospace, "SFMono-Regular", Consolas, monospace; }
+#graph-select { border-color: #4b6685; background: #0c1420; color: #eaf5ff; }
+#topbar > select { flex: 1 1 190px; min-width: 140px; max-width: 360px; }
 #topbar > button { flex: 0 0 auto; padding-inline: 8px; }
-#jump { flex: 1 1 130px; min-width: 90px; color: #93a9c9; font: 12px ui-monospace, "SFMono-Regular", Consolas, monospace; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.debug-controls { margin-left: auto; display: flex; align-items: center; gap: 5px; flex: 1 1 360px; min-width: 0; justify-content: flex-end; flex-wrap: wrap; }
+#jump { flex: 1 1 150px; min-width: 94px; color: #9db4d2; font: 12px ui-monospace, "SFMono-Regular", Consolas, monospace; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.debug-controls { margin-left: auto; display: flex; align-items: center; gap: 5px; flex: 1 1 380px; min-width: 0; justify-content: flex-end; flex-wrap: wrap; }
 .debug-controls select { flex: 1 1 130px; min-width: 112px; max-width: 220px; }
 .debug-controls button { min-width: 30px; padding: 0 7px; }
-#workbench { min-height: 0; min-width: 0; display: grid; grid-template-columns: minmax(132px, 16vw) minmax(0, 1fr) minmax(190px, 22vw); }
-.side { min-width: 0; overflow: hidden; background: #101216; border-right: 1px solid #303642; }
-.right { border-right: 0; border-left: 1px solid #20344f; }
-.panel { border-bottom: 1px solid #303642; padding: clamp(8px, 1.2vw, 12px); }
-.panel h2 { margin: 0 0 10px; color: #f2f7ff; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; }
+#workbench { min-height: 0; min-width: 0; display: grid; grid-template-columns: minmax(156px, 15vw) minmax(0, 1fr) minmax(238px, 20vw); background: #05070b; }
+.side { min-width: 0; overflow: hidden auto; background: #0b1017; border-right: 1px solid #23344a; box-shadow: inset -1px 0 0 rgba(255,255,255,.03); }
+.right { border-right: 0; border-left: 1px solid #23344a; box-shadow: inset 1px 0 0 rgba(255,255,255,.03); }
+.panel { border-bottom: 1px solid #23344a; padding: clamp(9px, 1.2vw, 13px); }
+.panel h2 { margin: 0 0 10px; color: #eaf5ff; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; }
 .graph-list, .palette-list, .search-results { display: grid; gap: 6px; }
-.graph-item, .palette-item { width: 100%; display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 8px; text-align: left; border-color: #303642; background: #15181f; }
-.graph-item.is-active { border-color: #2dd4bf; background: #172522; }
+.graph-item, .palette-item { width: 100%; display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 8px; text-align: left; border-color: #283b52; background: #101821; min-height: 38px; }
+.graph-item.is-active { border-color: #35c2ff; background: #102437; box-shadow: inset 3px 0 0 #35c2ff; }
 .search-item { width: 100%; text-align: left; border-color: #34285e; background: #151229; }
-.search-item.is-active { border-color: #c084fc; background: #21133a; }
+.search-item.is-active { border-color: #d58cff; background: #21133a; }
 .search-item small { color: #9aa8c5; display: block; margin-top: 3px; overflow-wrap: anywhere; }
 .count, .tag { color: #8fb2dc; font: 11px ui-monospace, "SFMono-Regular", Consolas, monospace; }
 .search { width: 100%; margin-bottom: 8px; }
-#stage { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: #0b0d10; }
-#jet-canvas-view { width: 100%; height: 100%; display: block; background: #0b0d10; }
-#source-view { position: absolute; inset: 0; display: none; margin: 0; padding: 20px 24px 84px; overflow: auto; color: #dbeafe; background: #0b0d10; border: 0; font: 12px ui-monospace, "SFMono-Regular", Consolas, monospace; line-height: 1.6; white-space: pre; tab-size: 4; }
+.function-factory { display: grid; gap: 7px; padding: 8px; border: 1px solid #293f5a; background: #0d1520; border-radius: 4px; }
+.function-factory input { width: 100%; }
+.function-factory .factory-row { display: grid; grid-template-columns: minmax(0, 1fr) 72px; gap: 6px; }
+.function-factory button { width: 100%; }
+#stage { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: #05070b; }
+#jet-canvas-view { width: 100%; height: 100%; display: block; background: #05070b; }
+#source-view { position: absolute; inset: 0; display: none; margin: 0; padding: 20px 24px 84px; overflow: auto; color: #dbeafe; background: #07101a; border: 0; font: 12px ui-monospace, "SFMono-Regular", Consolas, monospace; line-height: 1.6; white-space: pre; tab-size: 4; }
 #stage.is-source #jet-canvas-view, #stage.is-source #minimap { display: none; }
 #stage.is-source #source-view { display: block; }
-#minimap { position: absolute; right: clamp(8px, 1.4vw, 16px); bottom: clamp(8px, 1.4vw, 16px); width: min(190px, 22vw); height: min(124px, 15vw); min-width: 120px; min-height: 78px; border: 1px solid #2a4464; background: rgba(7,16,28,.84); box-shadow: 0 14px 42px rgba(0,0,0,.42); }
+#minimap { position: absolute; right: clamp(8px, 1.4vw, 16px); bottom: clamp(8px, 1.4vw, 16px); width: min(210px, 22vw); height: min(132px, 15vw); min-width: 120px; min-height: 78px; border: 1px solid #365a7f; background: rgba(7,16,28,.9); box-shadow: 0 14px 42px rgba(0,0,0,.42); border-radius: 6px; }
 #hud { position: absolute; left: clamp(8px, 1.4vw, 16px); bottom: clamp(8px, 1.4vw, 16px); display: flex; gap: 8px; color: #9bb4d3; font: 12px ui-monospace, "SFMono-Regular", Consolas, monospace; max-width: calc(100% - 32px); flex-wrap: wrap; }
-#hud span { border: 1px solid #263b59; background: rgba(8,17,29,.82); padding: 5px 8px; }
+#hud span { border: 1px solid #263b59; background: rgba(8,17,29,.88); padding: 5px 8px; border-radius: 4px; }
 #details { height: 100%; overflow: auto; }
 #details .title { color: #f8fbff; font-size: 18px; margin: 0 0 4px; }
 #details .kind { color: #7dd3fc; font: 11px ui-monospace, "SFMono-Regular", Consolas, monospace; text-transform: uppercase; }
@@ -503,28 +510,60 @@ select { min-width: 180px; }
 #details dt { color: #8096b5; }
 #details dd { margin: 0; color: #d8e7fb; overflow-wrap: anywhere; }
 .pin-list, .inline-list { display: grid; gap: 7px; margin-top: 8px; }
-.pin-row, .inline-row { border: 1px solid #343a46; background: #141821; padding: 8px; }
+.pin-row, .inline-row { border: 1px solid #2d4056; background: #101821; padding: 8px; border-radius: 4px; }
+.pin-row { display: grid; gap: 6px; }
 .pin-row b, .inline-row b { color: #f2f7ff; }
 .inline-row code { display: block; color: #fde68a; font: 12px ui-monospace, "SFMono-Regular", Consolas, monospace; margin-top: 4px; white-space: pre-wrap; }
 .edit-grid { display: grid; gap: 8px; margin-top: 10px; }
 .edit-grid label { display: grid; gap: 4px; color: #90a5c4; }
-.pin-tools { display: grid; grid-template-columns: 1fr 76px 32px; gap: 6px; margin-top: 8px; }
+.signature-board { display: grid; gap: 10px; margin: 10px 0 14px; padding: 10px; border: 1px solid #385a7e; background: linear-gradient(180deg, #0d1825, #09111b); border-radius: 6px; box-shadow: inset 0 1px 0 rgba(255,255,255,.04); }
+.signature-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 8px; padding-bottom: 8px; border-bottom: 1px solid #223954; }
+.signature-head b { display: block; color: #f8fbff; font-size: 14px; overflow-wrap: anywhere; }
+.signature-head code, .signature-source code { display: block; color: #fde68a; font: 11px ui-monospace, "SFMono-Regular", Consolas, monospace; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+.sig-eyebrow, .lane-meta { color: #84a8cf; font: 10px ui-monospace, "SFMono-Regular", Consolas, monospace; letter-spacing: .09em; text-transform: uppercase; }
+.signature-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+.signature-actions .primary { grid-column: 1 / -1; }
+.signature-source { display: grid; gap: 7px; padding: 8px; border: 1px solid #263c55; background: #0a121c; border-radius: 4px; }
+.signature-source input { width: 100%; }
+.rename-strip { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 7px; }
+.pin-lane { display: grid; gap: 7px; padding: 8px; border: 1px solid #243852; background: rgba(8,16,27,.78); border-radius: 4px; }
+.lane-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.lane-head b { color: #eaf5ff; letter-spacing: .06em; text-transform: uppercase; font-size: 11px; }
+.lane-head .lane-meta { margin-left: auto; white-space: nowrap; }
+.lane-head button { min-height: 26px; padding-inline: 8px; }
+.pin-editor-row { display: grid; gap: 7px; padding: 8px; border: 1px solid #2c4868; background: #0e1722; border-radius: 4px; }
+.pin-editor-title { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 7px; min-width: 0; }
+.pin-editor-title b { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.pin-port { width: 12px; height: 12px; border-radius: 50%; display: inline-block; box-shadow: 0 0 0 3px rgba(255,255,255,.07), 0 0 16px currentColor; background: currentColor; }
+.type-chip { color: #cfe9ff; border: 1px solid currentColor; background: rgba(255,255,255,.04); border-radius: 999px; padding: 2px 7px; font: 10px ui-monospace, "SFMono-Regular", Consolas, monospace; max-width: 98px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pin-empty { color: #7890ad; border: 1px dashed #31445d; padding: 8px; border-radius: 4px; font: 11px ui-monospace, "SFMono-Regular", Consolas, monospace; }
+.pin-tools { display: grid; grid-template-columns: minmax(0, 1fr) 68px 32px; gap: 6px; margin-top: 2px; }
+.pin-tools [data-param-default] { grid-column: 1 / 3; }
 .pin-tools input { min-width: 0; }
-#context-menu { position: fixed; z-index: 30; display: none; min-width: 260px; max-width: 360px; border: 1px solid #3b5f89; background: #091525; box-shadow: 0 18px 48px rgba(0,0,0,.55); padding: 8px; }
+#context-menu { position: fixed; z-index: 30; display: none; min-width: 320px; max-width: min(430px, calc(100vw - 20px)); border: 1px solid #3b5f89; background: #091525; box-shadow: 0 18px 48px rgba(0,0,0,.55); padding: 8px; border-radius: 6px; }
 #context-menu.is-open { display: grid; gap: 6px; }
 #context-menu button { width: 100%; text-align: left; display: grid; grid-template-columns: 1fr auto; gap: 10px; }
 #context-menu .menu-title { color: #dbeafe; font-size: 11px; letter-spacing: .1em; text-transform: uppercase; padding: 4px 6px; }
-#statusbar { display: flex; align-items: center; gap: 14px; padding: 0 12px; border-top: 1px solid #303642; background: #0b0d10; color: #8096b5; font: 11px ui-monospace, "SFMono-Regular", Consolas, monospace; }
+.action-palette-head { display: grid; gap: 6px; padding: 4px; border-bottom: 1px solid #203954; }
+.action-palette-head input { width: 100%; border-color: #3b5f89; background: #07111f; }
+.action-context { color: #8fb2dc; font: 11px ui-monospace, "SFMono-Regular", Consolas, monospace; display: flex; gap: 7px; align-items: center; min-width: 0; }
+.action-context .pin-port { width: 9px; height: 9px; box-shadow: 0 0 0 2px rgba(255,255,255,.07), 0 0 12px currentColor; }
+.action-results { display: grid; gap: 5px; max-height: min(360px, calc(100vh - 170px)); overflow: auto; padding: 2px; }
+.action-result { border-color: #284866; background: #0d1826; min-height: 44px; }
+.action-result:hover, .action-result:focus-visible { border-color: #35c2ff; background: #102942; }
+.action-result small { color: #9aaecb; display: block; margin-top: 2px; overflow-wrap: anywhere; }
+.action-empty { color: #8da4c2; padding: 9px; border: 1px dashed #31445d; border-radius: 4px; font: 11px ui-monospace, "SFMono-Regular", Consolas, monospace; }
+#statusbar { display: flex; align-items: center; gap: 14px; padding: 0 12px; border-top: 1px solid #23344a; background: #070b10; color: #8096b5; font: 11px ui-monospace, "SFMono-Regular", Consolas, monospace; }
 #toast { margin-left: auto; color: #a7f3d0; }
 @media (max-width: 1120px) {
-  #workbench { grid-template-columns: minmax(118px, 18vw) minmax(0, 1fr) minmax(168px, 24vw); }
+  #workbench { grid-template-columns: minmax(142px, 18vw) minmax(0, 1fr) minmax(200px, 23vw); }
   #brand span { display: none; }
   #topbar { gap: 6px; }
   .debug-controls { flex-basis: 280px; }
   .debug-controls button, #topbar > button { padding-inline: 6px; }
 }
 @media (max-width: 860px) {
-  #workbench { grid-template-columns: minmax(104px, 24vw) minmax(0, 1fr); }
+  #workbench { grid-template-columns: minmax(132px, 25vw) minmax(0, 1fr); }
   .right { display: none; }
   #jump { display: none; }
 }
@@ -540,6 +579,8 @@ select { min-width: 180px; }
 <div id="shell">
   <header id="topbar">
     <div id="brand"><strong>Jet Canvas</strong><span>source-backed blueprint</span></div>
+    <button id="graph-back" title="Back graph">‹</button>
+    <button id="graph-forward" title="Forward graph">›</button>
     <select id="graph-select" aria-label="Graph"></select>
     <button id="fit">Fit</button>
     <button id="reload">Reload</button>
@@ -563,6 +604,7 @@ select { min-width: 180px; }
       <section class="panel"><h2>Graphs</h2><div id="graph-list" class="graph-list"></div></section>
       <section class="panel"><h2>Search</h2><input id="canvas-search" class="search" placeholder="Find in graph"><div id="search-results" class="search-results"></div></section>
       <section class="panel"><h2>Palette</h2><input id="palette-search" class="search" placeholder="Search nodes"><div id="palette-list" class="palette-list"></div></section>
+      <section class="panel"><h2>Functions</h2><div class="function-factory"><input id="new-function-name" placeholder="helper"><input id="new-function-params" placeholder="value: Int"><div class="factory-row"><input id="new-function-return" placeholder="Int" value="Int"><button id="create-function-global">New</button></div></div></section>
     </aside>
     <section id="stage">
       <canvas id="jet-canvas-view" width="1400" height="900"></canvas>
@@ -596,10 +638,16 @@ pub fn canvas_js() -> String {
   const mini = minimap.getContext("2d");
   const details = document.getElementById("details");
   const jump = document.getElementById("jump");
+  const graphBack = document.getElementById("graph-back");
+  const graphForward = document.getElementById("graph-forward");
   const graphSelect = document.getElementById("graph-select");
   const graphList = document.getElementById("graph-list");
   const paletteList = document.getElementById("palette-list");
   const paletteSearch = document.getElementById("palette-search");
+  const newFunctionName = document.getElementById("new-function-name");
+  const newFunctionParams = document.getElementById("new-function-params");
+  const newFunctionReturn = document.getElementById("new-function-return");
+  const createFunctionGlobal = document.getElementById("create-function-global");
   const canvasSearch = document.getElementById("canvas-search");
   const searchResults = document.getElementById("search-results");
   const zoomLabel = document.getElementById("zoom-label");
@@ -628,15 +676,18 @@ pub fn canvas_js() -> String {
   let undoStack = [];
   let redoStack = [];
   let selectedGraphId = null;
+  let graphBackStack = [];
+  let graphForwardStack = [];
   let selectedNodeId = null;
   let selectedNodeIds = new Set();
   let view = { x: 64, y: 42, zoom: 1 };
   let drag = null;
   let nodeOffsets = new Map();
+  let autoNodeOffsets = new Map();
   let hoverPin = null;
   let spaceDown = false;
   let viewMode = "graph";
-  const layoutScale = { x: 1.42, y: 1.28 };
+  const layoutScale = { x: 1.08, y: 1.08 };
   const palette = [
     { title: "Print", detail: "Call print(\"canvas\")", op: "insert_print" },
     { title: "Branch", detail: "Insert if/else rails", op: "insert_branch" },
@@ -647,6 +698,7 @@ pub fn canvas_js() -> String {
     { title: "Comment", detail: "Source comment projection", op: "comment" }
   ];
   let actionEntries = [];
+  let contextMenuState = null;
 
   function showToast(text) {
     toast.textContent = text;
@@ -672,8 +724,11 @@ pub fn canvas_js() -> String {
   function wx(x) { return (x - view.x) / view.zoom; }
   function wy(y) { return (y - view.y) / view.zoom; }
   function nodeOffset(node) { return nodeOffsets.get(node.node_id) || { x: 0, y: 0 }; }
-  function nodeX(node) { const o = nodeOffset(node); return node.layout.x * layoutScale.x + o.x; }
-  function nodeY(node) { const o = nodeOffset(node); return node.layout.y * layoutScale.y + o.y; }
+  function autoNodeOffset(node) { return autoNodeOffsets.get(node.node_id) || { x: 0, y: 0 }; }
+  function rawNodeX(node) { const o = nodeOffset(node); return node.layout.x * layoutScale.x + o.x; }
+  function rawNodeY(node) { const o = nodeOffset(node); return node.layout.y * layoutScale.y + o.y; }
+  function nodeX(node) { const o = autoNodeOffset(node); return rawNodeX(node) + o.x; }
+  function nodeY(node) { const o = autoNodeOffset(node); return rawNodeY(node) + o.y; }
 
   function colorForType(type) {
     if (type === "Bool") return "#ef4444";
@@ -810,7 +865,7 @@ pub fn canvas_js() -> String {
       selectedNodeIds = new Set([result.node_id]);
     }
     if (fitView && latestDoc) fitGraph();
-    window.location.hash = result.source_span ? `span-${result.source_span.start}-${result.source_span.end}` : window.location.hash;
+    if (result.source_span) setSourceHash(result.source_span);
   }
 
   function runCanvasSearch() {
@@ -827,6 +882,13 @@ pub fn canvas_js() -> String {
   function sourceHashSpan() {
     const m = String(window.location.hash || "").match(/^#span-(\d+)-(\d+)$/);
     return m ? { start: Number(m[1]), end: Number(m[2]) } : null;
+  }
+
+  function setSourceHash(span) {
+    if (!span) return;
+    const next = "#span-" + span.start + "-" + span.end;
+    if (window.location.hash === next) return;
+    window.history.replaceState(null, "", next);
   }
 
   function applySourceHash() {
@@ -849,16 +911,21 @@ pub fn canvas_js() -> String {
     ctx.quadraticCurveTo(x, y, x + rr, y);
   }
 
-  function drawPin(pin, x, y, dir) {
+  function drawPin(pin, x, y, dir, recordHit = true) {
     const color = colorForType(pin.type || "unknown");
     const rail = pinRail(pin);
+    const r = Math.max(5.5, 7 * view.zoom);
     ctx.beginPath();
     if (rail === "control") {
-      ctx.rect(x - 6, y - 6, 12, 12);
+      if (dir === "output") {
+        ctx.moveTo(x - r, y - r); ctx.lineTo(x + r * 1.15, y); ctx.lineTo(x - r, y + r); ctx.closePath();
+      } else {
+        ctx.moveTo(x + r, y - r); ctx.lineTo(x - r * 1.15, y); ctx.lineTo(x + r, y + r); ctx.closePath();
+      }
     } else if (rail === "fallible") {
-      ctx.moveTo(x, y - 7); ctx.lineTo(x + 7, y); ctx.lineTo(x, y + 7); ctx.lineTo(x - 7, y); ctx.closePath();
+      ctx.moveTo(x, y - r); ctx.lineTo(x + r, y); ctx.lineTo(x, y + r); ctx.lineTo(x - r, y); ctx.closePath();
     } else {
-      ctx.arc(x, y, 6, 0, Math.PI * 2);
+      ctx.arc(x, y, r * .86, 0, Math.PI * 2);
     }
     ctx.fillStyle = color;
     ctx.fill();
@@ -872,13 +939,47 @@ pub fn canvas_js() -> String {
     ctx.lineWidth = 1.5;
     ctx.strokeStyle = "#07101c";
     ctx.stroke();
-    ctx.fillStyle = "#b8c7dd";
-    ctx.font = "11px ui-monospace, Consolas, monospace";
-    ctx.textAlign = dir === "output" ? "left" : "right";
-    ctx.fillText(pin.name + ": " + pin.type, dir === "output" ? x + 11 : x - 11, y + 4);
+    if (recordHit) {
+      const hitR = Math.max(18, 23 * view.zoom);
+      pinPoints.set(pin.pin_id, { x, y, color, pin });
+      pinHit.push({ x: x - hitR, y: y - hitR, w: hitR * 2, h: hitR * 2, cx: x, cy: y, pin });
+    }
+  }
+
+  function pinLabel(pin) {
+    if (!pin) return "";
+    return isExecPin(pin) ? pin.name : pin.name + " : " + pin.type;
+  }
+
+  function clipText(text, max) {
+    const s = String(text || "");
+    return s.length > max ? s.slice(0, Math.max(1, max - 1)) + "…" : s;
+  }
+
+  function drawPinLabel(pin, x, y, align) {
+    const label = pinLabel(pin);
+    ctx.font = `${Math.max(9, 11.5 * view.zoom)}px ui-monospace, Consolas, monospace`;
+    ctx.textAlign = align;
+    ctx.fillStyle = isExecPin(pin) ? "#edf6ff" : colorForType(pin.type || "unknown");
+    ctx.fillText(clipText(label, 24), x, y);
     ctx.textAlign = "left";
-    pinPoints.set(pin.pin_id, { x, y, color, pin });
-    pinHit.push({ x: x - 10, y: y - 10, w: 20, h: 20, pin });
+  }
+
+  function drawSocketRow(pin, x, y, w, dir, recordHit) {
+    const rowH = 24 * view.zoom;
+    const px = dir === "input" ? x : x + w;
+    const inset = 12 * view.zoom;
+    const labelX = dir === "input" ? x + 25 * view.zoom : x + w - 25 * view.zoom;
+    const labelAlign = dir === "input" ? "left" : "right";
+    ctx.beginPath();
+    roundRect(x + inset, y - rowH * .56, w - inset * 2, rowH, 4 * view.zoom);
+    ctx.fillStyle = isExecPin(pin) ? "rgba(248,250,252,.06)" : hexToRgba(colorForType(pin.type), .10);
+    ctx.fill();
+    ctx.strokeStyle = isExecPin(pin) ? "rgba(248,250,252,.20)" : hexToRgba(colorForType(pin.type), .28);
+    ctx.lineWidth = Math.max(.8, view.zoom);
+    ctx.stroke();
+    drawPin(pin, px, y, dir, recordHit);
+    drawPinLabel(pin, labelX, y + 4 * view.zoom, labelAlign);
   }
 
   function compatibleActionType(accepted, actual) {
@@ -903,22 +1004,73 @@ pub fn canvas_js() -> String {
   function closeContextMenu() {
     contextMenu.classList.remove("is-open");
     contextMenu.innerHTML = "";
+    contextMenuState = null;
+  }
+
+  function actionMatchesQuery(action, query) {
+    if (!query) return true;
+    const q = query.toLowerCase();
+    return String(action.title || "").toLowerCase().includes(q) || String(action.detail || "").toLowerCase().includes(q) || String(action.group || "").toLowerCase().includes(q);
+  }
+
+  function renderActionPalette() {
+    if (!contextMenuState) return;
+    const query = contextMenuState.query || "";
+    const matches = contextMenuState.actions.filter((action) => actionMatchesQuery(action, query)).slice(0, 18);
+    const context = contextMenuState.pin ? `${contextMenuState.pin.name}: ${contextMenuState.pin.type}` : (contextMenuState.context || "source-backed actions");
+    const port = contextMenuState.pin ? pinPortHtml(contextMenuState.pin.type || "Value") : "";
+    contextMenu.innerHTML = `<div class="action-palette-head"><div class="menu-title">${escapeHtml(contextMenuState.title)}</div><div class="action-context">${port}<span>${escapeHtml(context)}</span><span class="tag">${matches.length}/${contextMenuState.actions.length}</span></div><input id="action-palette-search" placeholder="Search actions" value="${escapeAttr(query)}"></div><div class="action-results">${matches.length ? matches.map((action) => `<button class="action-result" data-menu-action="${escapeAttr(action.index)}"><span>${escapeHtml(action.title)}<small>${escapeHtml(action.detail || "")}</small></span><span class="tag">${escapeHtml(action.group || "")}</span></button>`).join("") : "<div class=\"action-empty\">No matching actions</div>"}</div>`;
+    const input = document.getElementById("action-palette-search");
+    if (input) {
+      input.addEventListener("input", () => {
+        contextMenuState.query = input.value || "";
+        renderActionPalette();
+        const next = document.getElementById("action-palette-search");
+        if (next) {
+          next.focus();
+          next.setSelectionRange(next.value.length, next.value.length);
+        }
+      });
+      input.addEventListener("keydown", (ev) => {
+        if (ev.key === "Escape") {
+          ev.preventDefault();
+          closeContextMenu();
+        } else if (ev.key === "Enter") {
+          const first = contextMenu.querySelector("[data-menu-action]");
+          if (first) {
+            ev.preventDefault();
+            first.click();
+          }
+        }
+      });
+    }
+    contextMenu.querySelectorAll("[data-menu-action]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const action = contextMenuState && contextMenuState.actions.find((item) => String(item.index) === button.getAttribute("data-menu-action"));
+        closeContextMenu();
+        if (action) action.run();
+      });
+    });
+  }
+
+  function openActionPalette(x, y, title, actions, opts = {}) {
+    contextMenuState = {
+      title,
+      actions: (actions.length ? actions : [{ title: "No compatible actions", detail: "source-backed only", group: "empty", run: () => {} }]).map((action, index) => Object.assign({ index }, action)),
+      pin: opts.pin || null,
+      context: opts.context || "",
+      query: opts.query || ""
+    };
+    renderActionPalette();
+    contextMenu.style.left = Math.min(x, window.innerWidth - 430) + "px";
+    contextMenu.style.top = Math.min(y, window.innerHeight - 430) + "px";
+    contextMenu.classList.add("is-open");
+    const input = document.getElementById("action-palette-search");
+    if (input) input.focus();
   }
 
   function openContextMenu(x, y, title, actions) {
-    contextMenu.innerHTML = `<div class="menu-title">${escapeHtml(title)}</div>` + actions.map((action, index) => {
-      return `<button data-menu-action="${index}"><span>${escapeHtml(action.title)}</span><span class="tag">${escapeHtml(action.detail || "")}</span></button>`;
-    }).join("");
-    contextMenu.style.left = Math.min(x, window.innerWidth - 380) + "px";
-    contextMenu.style.top = Math.min(y, window.innerHeight - 260) + "px";
-    contextMenu.classList.add("is-open");
-    contextMenu.querySelectorAll("[data-menu-action]").forEach((button) => {
-      button.addEventListener("click", () => {
-        const action = actions[Number(button.getAttribute("data-menu-action"))];
-        closeContextMenu();
-        action.run();
-      });
-    });
+    openActionPalette(x, y, title, actions, { context: "node actions" });
   }
 
   function openPinMenu(pin, x, y) {
@@ -926,11 +1078,13 @@ pub fn canvas_js() -> String {
     const actions = entries.map((entry) => ({
       title: entry.title,
       detail: entry.detail,
+      group: "call",
       run: () => runPalette(entry)
     }));
     actions.unshift({
       title: "Create function accepting " + (pin.type || "Value"),
       detail: pin.name || "value",
+      group: "function",
       run: () => {
         const base = String(pin.name || "value").replace(/[^A-Za-z0-9_]/g, "_").replace(/^[^A-Za-z_]+/, "") || "value";
         const name = window.prompt("Function name", "use_" + base);
@@ -941,6 +1095,7 @@ pub fn canvas_js() -> String {
       actions.unshift({
         title: "Promote pin to binding",
         detail: pin.type || "value",
+        group: "refactor",
         run: () => {
           const name = window.prompt("Binding name", pin.name || "value");
           const graph = latestDoc ? currentGraph(latestDoc) : null;
@@ -950,7 +1105,7 @@ pub fn canvas_js() -> String {
         }
       });
     }
-    openContextMenu(x, y, `${pin.name}: ${pin.type}`, actions.length ? actions : [{ title: "No compatible actions", detail: "source-backed only", run: () => {} }]);
+    openActionPalette(x, y, "Compatible actions", actions, { pin, context: "pin actions" });
   }
 
   function richestGraph(doc) {
@@ -978,9 +1133,7 @@ pub fn canvas_js() -> String {
       button.className = "graph-item" + (graph.graph_id === selectedGraphId ? " is-active" : "");
       button.innerHTML = "<span>" + escapeHtml(graph.title) + "</span><span class=\"count\">" + graph.nodes.length + "</span>";
       button.addEventListener("click", () => {
-        selectedGraphId = graph.graph_id;
-        selectedNodeId = graph.entry_node;
-        drawGraph(latestDoc);
+        switchGraph(graph.graph_id);
       });
       graphList.appendChild(button);
     }
@@ -1007,6 +1160,52 @@ pub fn canvas_js() -> String {
 
   function currentGraph(doc) {
     return (doc.graphs || []).find((g) => g.graph_id === selectedGraphId) || richestGraph(doc);
+  }
+
+  function graphById(id) {
+    return latestDoc && (latestDoc.graphs || []).find((graph) => graph.graph_id === id) || null;
+  }
+
+  function graphTitle(id) {
+    const graph = graphById(id);
+    return graph ? graph.title : "graph";
+  }
+
+  function updateGraphNav(graph) {
+    graphBack.disabled = graphBackStack.length === 0;
+    graphForward.disabled = graphForwardStack.length === 0;
+    const trail = graphBackStack.slice(-2).map(graphTitle).concat(graph ? [graph.title] : []);
+    jump.textContent = trail.join("  ›  ") + (graph ? " - " + graph.nodes.length + " nodes" + (selectedNodeIds.size > 1 ? " / " + selectedNodeIds.size + " selected" : "") : "");
+  }
+
+  function switchGraph(graphId, opts = {}) {
+    if (!latestDoc || !graphId) return;
+    const graph = graphById(graphId);
+    if (!graph) return;
+    const push = opts.push !== false && selectedGraphId && selectedGraphId !== graphId;
+    if (push) {
+      graphBackStack.push(selectedGraphId);
+      graphForwardStack = [];
+    }
+    selectedGraphId = graphId;
+    selectedNodeId = opts.nodeId || graph.entry_node;
+    selectedNodeIds = new Set([selectedNodeId]);
+    setViewMode("graph");
+    if (opts.fit === false) drawGraph(latestDoc);
+    else fitGraph();
+    if (opts.toast) showToast(opts.toast);
+  }
+
+  function graphForFunctionName(name) {
+    if (!latestDoc || !name) return null;
+    return (latestDoc.graphs || []).find((graph) => graph.title === name) || null;
+  }
+
+  function openFunctionGraph(name) {
+    const graph = graphForFunctionName(name);
+    if (!graph) return false;
+    switchGraph(graph.graph_id, { toast: "Opened " + graph.title });
+    return true;
   }
 
   function debugStorageKey(doc) {
@@ -1104,14 +1303,49 @@ pub fn canvas_js() -> String {
     if (latestDoc) drawGraph(latestDoc);
   }
 
+  function reflowGraph(graph) {
+    autoNodeOffsets = new Map();
+    if (!graph || !graph.nodes || graph.nodes.length === 0) return;
+    const rowGap = 88;
+    const colGap = 22;
+    const rows = [];
+    for (const node of graph.nodes.slice().sort((a, b) => rawNodeY(a) - rawNodeY(b) || rawNodeX(a) - rawNodeX(b))) {
+      let row = rows.find((candidate) => Math.abs(candidate.y - rawNodeY(node)) < rowGap);
+      if (!row) {
+        row = { y: rawNodeY(node), nodes: [] };
+        rows.push(row);
+      }
+      row.nodes.push(node);
+    }
+    for (const row of rows) {
+      let cursor = -Infinity;
+      let previous = null;
+      for (const node of row.nodes.sort((a, b) => rawNodeX(a) - rawNodeX(b))) {
+        const x = rawNodeX(node);
+        const size = nodeSize(graph, node);
+        const shift = Math.max(0, cursor - x);
+        if (previous && shift > 0 && previous.kind === node.kind) {
+          autoNodeOffsets.set(node.node_id, { x: 0, y: size.h + colGap });
+          cursor = Math.max(cursor, x + size.w + colGap);
+        } else {
+          autoNodeOffsets.set(node.node_id, { x: shift, y: 0 });
+          cursor = x + shift + size.w + colGap;
+          previous = node;
+        }
+      }
+    }
+  }
+
   function graphBounds(graph) {
     if (!graph || graph.nodes.length === 0) return { minX: 0, minY: 0, maxX: 600, maxY: 360 };
+    reflowGraph(graph);
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const n of graph.nodes) {
+      const size = nodeSize(graph, n);
       minX = Math.min(minX, nodeX(n));
       minY = Math.min(minY, nodeY(n));
-      maxX = Math.max(maxX, nodeX(n) + 190);
-      maxY = Math.max(maxY, nodeY(n) + 110);
+      maxX = Math.max(maxX, nodeX(n) + size.w);
+      maxY = Math.max(maxY, nodeY(n) + size.h);
     }
     return { minX, minY, maxX, maxY };
   }
@@ -1123,14 +1357,18 @@ pub fn canvas_js() -> String {
     const size = cssSize();
     const zx = (size.width - 42) / Math.max(1, b.maxX - b.minX);
     const zy = (size.height - 76) / Math.max(1, b.maxY - b.minY);
-    view.zoom = Math.max(.55, Math.min(1.5, Math.min(zx, zy)));
+    view.zoom = Math.max(.55, Math.min(1.05, Math.min(zx, zy)));
     view.x = 22 - b.minX * view.zoom;
     view.y = 38 - b.minY * view.zoom;
     drawGraph(latestDoc);
   }
 
   function drawGrid(size) {
-    ctx.fillStyle = "#0b0d10";
+    const grad = ctx.createLinearGradient(0, 0, size.width, size.height);
+    grad.addColorStop(0, "#090d14");
+    grad.addColorStop(.52, "#0b111b");
+    grad.addColorStop(1, "#0b0f15");
+    ctx.fillStyle = grad;
     ctx.fillRect(0, 0, size.width, size.height);
     const major = 96 * view.zoom;
     const minor = 24 * view.zoom;
@@ -1147,9 +1385,152 @@ pub fn canvas_js() -> String {
     }
   }
 
+  function isExecPin(pin) {
+    return pinRail(pin) === "control";
+  }
+
+  function pinsForNode(graph, node, direction, exec) {
+    return (graph.pins || []).filter((pin) => pin.node_id === node.node_id && pin.direction === direction && isExecPin(pin) === exec);
+  }
+
+  function nodeStyle(node, graph) {
+    const table = {
+      entry: { accent: "#35c2ff", header: "#123247", fill: "#101923", label: "Function", glyph: "FN" },
+      call: { accent: "#7c8cff", header: "#20245a", fill: "#111423", label: "Call", glyph: "CALL" },
+      method: { accent: "#b48cff", header: "#312052", fill: "#151020", label: "Method", glyph: "M" },
+      variant: { accent: "#d58cff", header: "#3a1d4a", fill: "#17101f", label: "Variant", glyph: "V" },
+      binding: { accent: "#5ee0a0", header: "#153f30", fill: "#0f1a17", label: "Set variable", glyph: "SET" },
+      assign: { accent: "#ffb454", header: "#4a3014", fill: "#1c160e", label: "Assign", glyph: "SET" },
+      variable_get: { accent: "#7ee787", header: "#193b24", fill: "#0d1711", label: "Get variable", glyph: "GET" },
+      constant: { accent: "#f6d365", header: "#4d3a12", fill: "#1a150a", label: "Constant", glyph: "LIT" },
+      branch: { accent: "#ff7b72", header: "#4b1f23", fill: "#1c1114", label: "Branch", glyph: "IF" },
+      dispatch: { accent: "#ff9f43", header: "#4b2d0d", fill: "#1b140a", label: "Dispatch", glyph: "==" },
+      loop: { accent: "#22d3ee", header: "#123d45", fill: "#0d181c", label: "Loop", glyph: "LOOP" },
+      return: { accent: "#6ee7b7", header: "#144335", fill: "#0c1915", label: "Return", glyph: "RET" },
+      fallible: { accent: "#fb7185", header: "#4c1722", fill: "#1c1014", label: "Fallible", glyph: "?" },
+      flow: { accent: "#f8fafc", header: "#2d3440", fill: "#11161d", label: "Flow", glyph: "GO" },
+      yield: { accent: "#67e8f9", header: "#134250", fill: "#0e1a1f", label: "Yield", glyph: "Y" }
+    };
+    const style = table[node.kind] || { accent: "#a78bfa", header: "#2b2141", fill: "#14111d", label: node.kind || "Node", glyph: "N" };
+    if (node.kind === "constant") {
+      const out = pinsForNode(graph, node, "output", false)[0];
+      return Object.assign({}, style, { accent: colorForType(out && out.type || "unknown") });
+    }
+    return style;
+  }
+
+  function nodeSubtitle(node) {
+    if (node.kind === "variable_get") return "read from source";
+    if (node.kind === "binding") return "write local binding";
+    if (node.kind === "assign") return "mutate existing value";
+    if (node.kind === "constant") return "literal";
+    return node.kind;
+  }
+
+  function nodeSize(graph, node) {
+    const inputData = pinsForNode(graph, node, "input", false).length;
+    const outputData = pinsForNode(graph, node, "output", false).length;
+    const execOut = pinsForNode(graph, node, "output", true).length;
+    const inlineCount = (graph.inline_exprs || []).filter((expr) => expr.node_id === node.node_id).length;
+    const compact = node.kind === "variable_get" || node.kind === "constant";
+    const w = compact ? 220 : node.kind === "branch" || node.kind === "dispatch" ? 324 : 294;
+    const rows = Math.max(inputData, outputData, execOut > 1 ? execOut + 1 : 1);
+    const h = compact ? 92 : Math.max(132, 72 + rows * 30 + inlineCount * 24);
+    return { w, h };
+  }
+
+  function drawNode(graph, node, inlineByNode, recordHit = true) {
+    const size = nodeSize(graph, node);
+    const w = size.w * view.zoom, h = size.h * view.zoom;
+    const x = sx(nodeX(node)), y = sy(nodeY(node));
+    const selected = selectedNodeIds.has(node.node_id);
+    const active = debugOverlay && debugOverlay.active_node_id === node.node_id;
+    const searchHit = (searchState.spans || []).some((span) => spansOverlap(node.source_span, span));
+    const breakpoint = nodeBreakpoint(node);
+    const style = nodeStyle(node, graph);
+    const headerH = Math.min(46, size.h - 20) * view.zoom;
+
+    ctx.shadowColor = active ? "rgba(250,204,21,.58)" : selected ? hexToRgba(style.accent, .42) : searchHit ? "rgba(192,132,252,.42)" : "rgba(0,0,0,.45)";
+    ctx.shadowBlur = active ? 34 : selected ? 26 : searchHit ? 22 : 16;
+    ctx.shadowOffsetY = 12;
+    roundRect(x, y, w, h, 6 * view.zoom);
+    ctx.fillStyle = style.fill;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetY = 0;
+    ctx.strokeStyle = active ? "#facc15" : selected ? style.accent : searchHit ? "#c084fc" : "#3b4657";
+    ctx.lineWidth = active ? 3 : selected ? 2.2 : 1.2;
+    ctx.stroke();
+
+    roundRect(x, y, w, headerH, 6 * view.zoom);
+    const headerGrad = ctx.createLinearGradient(x, y, x + w, y);
+    headerGrad.addColorStop(0, style.header);
+    headerGrad.addColorStop(.68, "#101722");
+    headerGrad.addColorStop(1, hexToRgba(style.accent, .20));
+    ctx.fillStyle = headerGrad;
+    ctx.fill();
+    ctx.fillStyle = style.accent;
+    ctx.fillRect(x, y + headerH - 3 * view.zoom, w, 3 * view.zoom);
+    ctx.fillStyle = hexToRgba(style.accent, .28);
+    ctx.fillRect(x, y, 4 * view.zoom, h);
+
+    ctx.fillStyle = hexToRgba(style.accent, .2);
+    roundRect(x + 12 * view.zoom, y + 10 * view.zoom, 40 * view.zoom, 22 * view.zoom, 4 * view.zoom);
+    ctx.fill();
+    ctx.fillStyle = style.accent;
+    ctx.font = `${Math.max(8, 10.5 * view.zoom)}px ui-monospace, Consolas, monospace`;
+    ctx.textAlign = "center";
+    ctx.fillText(style.glyph, x + 32 * view.zoom, y + 25 * view.zoom);
+    ctx.textAlign = "left";
+
+    ctx.fillStyle = "#f8fbff";
+    ctx.font = `${Math.max(12, 14.5 * view.zoom)}px "Segoe UI", system-ui, sans-serif`;
+    ctx.fillText(clipText(node.title, 30), x + 62 * view.zoom, y + 21 * view.zoom);
+    ctx.fillStyle = "#9ab0cd";
+    ctx.font = `${Math.max(9, 10.5 * view.zoom)}px ui-monospace, Consolas, monospace`;
+    ctx.fillText(clipText(nodeSubtitle(node), 30), x + 62 * view.zoom, y + 36 * view.zoom);
+
+    if (breakpoint) {
+      ctx.beginPath();
+      ctx.arc(x + w - 17 * view.zoom, y + 17 * view.zoom, 6 * view.zoom, 0, Math.PI * 2);
+      ctx.fillStyle = "#ef4444";
+      ctx.fill();
+    }
+
+    const execIn = pinsForNode(graph, node, "input", true);
+    const execOut = pinsForNode(graph, node, "output", true);
+    execIn.forEach((p) => drawSocketRow(p, x, y + 24 * view.zoom, w, "input", recordHit));
+    execOut.forEach((p, i) => drawSocketRow(p, x, y + (24 + i * 28) * view.zoom, w, "output", recordHit));
+
+    const inputs = pinsForNode(graph, node, "input", false);
+    const outputs = pinsForNode(graph, node, "output", false);
+    const dataTop = 68;
+    inputs.forEach((p, i) => drawSocketRow(p, x, y + (dataTop + i * 30) * view.zoom, w, "input", recordHit));
+    outputs.forEach((p, i) => drawSocketRow(p, x, y + (dataTop + i * 30) * view.zoom, w, "output", recordHit));
+
+    const inline = (inlineByNode.get(node.node_id) || []).slice(0, 3);
+    inline.forEach((expr, i) => {
+      const cy = y + (72 + Math.max(inputs.length, outputs.length) * 30 + i * 24) * view.zoom;
+      roundRect(x + 12 * view.zoom, cy - 13 * view.zoom, w - 24 * view.zoom, 18 * view.zoom, 5 * view.zoom);
+      ctx.fillStyle = "rgba(246,211,101,.11)";
+      ctx.fill();
+      ctx.fillStyle = "#f6d365";
+      ctx.font = `${Math.max(9, 11 * view.zoom)}px ui-monospace, Consolas, monospace`;
+      ctx.fillText(clipText(expr.source, 34), x + 19 * view.zoom, cy);
+    });
+
+    if (recordHit) hit.push({ x, y, w, h, node });
+  }
+
   function drawGraph(doc) {
     latestDoc = doc;
     loadDebugState(doc);
+    const graph = currentGraph(doc);
+    if (!graph) return;
+    selectedGraphId = graph.graph_id;
+    if (!selectedNodeId || !graph.nodes.some((n) => n.node_id === selectedNodeId)) selectedNodeId = graph.entry_node;
+    if (selectedNodeIds.size === 0 && selectedNodeId) selectedNodeIds.add(selectedNodeId);
+    selectedNodeIds = new Set([...selectedNodeIds].filter((id) => graph.nodes.some((n) => n.node_id === id)));
     syncGraphPicker(doc);
     syncGraphList(doc);
     syncPalette();
@@ -1159,12 +1540,6 @@ pub fn canvas_js() -> String {
     hit = [];
     pinPoints = new Map();
     pinHit = [];
-    const graph = currentGraph(doc);
-    if (!graph) return;
-    selectedGraphId = graph.graph_id;
-    if (!selectedNodeId || !graph.nodes.some((n) => n.node_id === selectedNodeId)) selectedNodeId = graph.entry_node;
-    if (selectedNodeIds.size === 0 && selectedNodeId) selectedNodeIds.add(selectedNodeId);
-    selectedNodeIds = new Set([...selectedNodeIds].filter((id) => graph.nodes.some((n) => n.node_id === id)));
     graphSelect.value = selectedGraphId;
     const pins = new Map(graph.pins.map((p) => [p.pin_id, p]));
     const nodes = new Map(graph.nodes.map((n) => [n.node_id, n]));
@@ -1173,73 +1548,12 @@ pub fn canvas_js() -> String {
       if (!inlineByNode.has(expr.node_id)) inlineByNode.set(expr.node_id, []);
       inlineByNode.get(expr.node_id).push(expr);
     }
+    reflowGraph(graph);
 
     drawCommentRegions(graph);
 
     for (const node of graph.nodes) {
-      const w = 190 * view.zoom, h = 110 * view.zoom;
-      const x = sx(nodeX(node)), y = sy(nodeY(node));
-      const selected = selectedNodeIds.has(node.node_id);
-      const active = debugOverlay && debugOverlay.active_node_id === node.node_id;
-      const searchHit = (searchState.spans || []).some((span) => spansOverlap(node.source_span, span));
-      const breakpoint = nodeBreakpoint(node);
-      const header = node.kind === "entry" ? "#155e75" : node.kind === "branch" ? "#713f12" : node.kind === "return" ? "#166534" : node.kind === "call" ? "#3730a3" : "#27272a";
-      ctx.shadowColor = active ? "rgba(250,204,21,.58)" : selected ? "rgba(56,189,248,.45)" : searchHit ? "rgba(192,132,252,.42)" : "rgba(0,0,0,.35)";
-      ctx.shadowBlur = active ? 34 : selected ? 28 : searchHit ? 24 : 14;
-      ctx.shadowOffsetY = 8;
-      roundRect(x, y, w, h, 8);
-      ctx.fillStyle = "#12161d";
-      ctx.fill();
-      ctx.shadowBlur = 0;
-      ctx.shadowOffsetY = 0;
-      ctx.strokeStyle = active ? "#facc15" : selected ? "#2dd4bf" : searchHit ? "#c084fc" : "#3f4652";
-      ctx.lineWidth = active ? 3 : selected ? 2.2 : searchHit ? 2 : 1.2;
-      ctx.stroke();
-      const controlNode = (node.edit_affordances || []).includes("control") || ["entry", "branch", "loop", "return"].includes(node.kind);
-      if (controlNode) {
-        ctx.fillStyle = "#f8fafc";
-        ctx.beginPath();
-        ctx.moveTo(x + w / 2 - 8 * view.zoom, y - 2 * view.zoom);
-        ctx.lineTo(x + w / 2 + 8 * view.zoom, y - 2 * view.zoom);
-        ctx.lineTo(x + w / 2, y + 10 * view.zoom);
-        ctx.closePath();
-        ctx.fill();
-        ctx.beginPath();
-        ctx.moveTo(x + w / 2 - 8 * view.zoom, y + h - 10 * view.zoom);
-        ctx.lineTo(x + w / 2 + 8 * view.zoom, y + h - 10 * view.zoom);
-        ctx.lineTo(x + w / 2, y + h + 2 * view.zoom);
-        ctx.closePath();
-        ctx.fill();
-      }
-      if (breakpoint) {
-        ctx.beginPath();
-        ctx.arc(x + w - 17 * view.zoom, y + 16 * view.zoom, 6 * view.zoom, 0, Math.PI * 2);
-        ctx.fillStyle = "#ef4444";
-        ctx.fill();
-      }
-      roundRect(x, y, w, 32 * view.zoom, 8);
-      ctx.fillStyle = header;
-      ctx.fill();
-      ctx.fillStyle = "#f8fbff";
-      ctx.font = `${Math.max(11, 13 * view.zoom)}px "Segoe UI", system-ui, sans-serif`;
-      ctx.fillText(node.title, x + 12 * view.zoom, y + 21 * view.zoom);
-      ctx.fillStyle = "#92a6c3";
-      ctx.font = `${Math.max(9, 11 * view.zoom)}px ui-monospace, Consolas, monospace`;
-      ctx.fillText(node.kind, x + 12 * view.zoom, y + 51 * view.zoom);
-      const inline = (inlineByNode.get(node.node_id) || []).slice(0, 2);
-      inline.forEach((expr, i) => {
-        const cy = y + (72 + i * 20) * view.zoom;
-        roundRect(x + 12 * view.zoom, cy - 13 * view.zoom, w - 24 * view.zoom, 18 * view.zoom, 5);
-        ctx.fillStyle = "rgba(250,204,21,.11)";
-        ctx.fill();
-        ctx.fillStyle = "#fde68a";
-        ctx.font = `${Math.max(9, 11 * view.zoom)}px ui-monospace, Consolas, monospace`;
-        ctx.fillText(expr.source.slice(0, 26), x + 19 * view.zoom, cy);
-      });
-      const nodePins = graph.pins.filter((p) => p.node_id === node.node_id);
-      nodePins.filter((p) => p.direction === "input").forEach((p, i) => drawPin(p, x, y + (58 + i * 18) * view.zoom, "input"));
-      nodePins.filter((p) => p.direction === "output").forEach((p, i) => drawPin(p, x + w, y + (58 + i * 18) * view.zoom, "output"));
-      hit.push({ x, y, w, h, node });
+      drawNode(graph, node, inlineByNode);
     }
 
     for (const wire of graph.wires) {
@@ -1260,17 +1574,24 @@ pub fn canvas_js() -> String {
       ctx.shadowBlur = 0;
     }
 
+    for (const node of graph.nodes) {
+      drawNode(graph, node, inlineByNode, false);
+    }
+
     if (drag && drag.mode === "pin") {
+      drawCompatibleDropTargets(graph, drag.pin);
       const from = pinPoints.get(drag.pin.pin_id);
       if (from) {
+        const plan = connectionPlan(graph, drag.pin, hoverPin);
         ctx.beginPath();
         ctx.moveTo(from.x, from.y);
         ctx.bezierCurveTo(from.x + 90 * view.zoom, from.y, drag.mx - 90 * view.zoom, drag.my, drag.mx, drag.my);
-        ctx.strokeStyle = compatiblePin(drag.pin, hoverPin) ? "#a7f3d0" : "#fb7185";
+        ctx.strokeStyle = plan.color;
         ctx.lineWidth = Math.max(2.5, 4 * view.zoom);
-        ctx.setLineDash([8, 6]);
+        ctx.setLineDash(plan.ok ? [12, 6] : [4, 6]);
         ctx.stroke();
         ctx.setLineDash([]);
+        drawConnectionBadge(plan, drag.mx, drag.my);
       }
     }
 
@@ -1289,7 +1610,14 @@ pub fn canvas_js() -> String {
     drawMinimap(graph);
     updateDetails(graph, nodes.get(selectedNodeId), graph.pins.filter((p) => p.node_id === selectedNodeId), inlineByNode.get(selectedNodeId) || []);
     window.__jetCanvasNonblankPixels = graph.nodes.length > 0 ? 1 : 0;
-    jump.textContent = graph.title + " - " + graph.nodes.length + " nodes" + (selectedNodeIds.size > 1 ? " / " + selectedNodeIds.size + " selected" : "");
+    const hitMap = {
+      graph_id: graph.graph_id,
+      nodes: hit.map((h) => ({ node_id: h.node.node_id, title: h.node.title, kind: h.node.kind, x: h.x, y: h.y, w: h.w, h: h.h })),
+      pins: pinHit.map((h) => ({ pin_id: h.pin.pin_id, node_id: h.pin.node_id, name: h.pin.name, type: h.pin.type, direction: h.pin.direction, x: h.x, y: h.y, w: h.w, h: h.h, cx: h.cx, cy: h.cy }))
+    };
+    window.__jetCanvasHitMap = hitMap;
+    canvas.dataset.hitMap = JSON.stringify(hitMap);
+    updateGraphNav(graph);
     const rails = (graph.rails && graph.rails.kinds ? graph.rails.kinds.join(", ") : "data");
     graphMeta.textContent = graph.nodes.length + " nodes / " + graph.wires.length + " wires / " + rails;
     zoomLabel.textContent = Math.round(view.zoom * 100) + "%";
@@ -1298,12 +1626,16 @@ pub fn canvas_js() -> String {
   }
 
   graphSelect.addEventListener("change", function () {
-    selectedGraphId = graphSelect.value;
-    selectedNodeId = null;
-    if (latestDoc) {
-      drawGraph(latestDoc);
-      fitGraph();
-    }
+    switchGraph(graphSelect.value);
+  });
+
+  createFunctionGlobal.addEventListener("click", function () {
+    if (!latestDoc) return;
+    const name = (newFunctionName.value || "").trim();
+    if (!name) return showToast("Name the function first");
+    const params = (newFunctionParams.value || "").trim();
+    const ret_type = (newFunctionReturn.value || "Void").trim() || "Void";
+    postTransaction({ schema_version: 1, op: "create_function", revision: latestDoc.revision, name, params, ret_type });
   });
 
   function drawMinimap(graph) {
@@ -1313,8 +1645,9 @@ pub fn canvas_js() -> String {
     const b = graphBounds(graph);
     const scale = Math.min((minimap.width - 20) / Math.max(1, b.maxX - b.minX), (minimap.height - 20) / Math.max(1, b.maxY - b.minY));
     for (const n of graph.nodes) {
+      const size = nodeSize(graph, n);
       mini.fillStyle = n.node_id === selectedNodeId ? "#38bdf8" : "#31557b";
-      mini.fillRect(10 + (nodeX(n) - b.minX) * scale, 10 + (nodeY(n) - b.minY) * scale, 28, 13);
+      mini.fillRect(10 + (nodeX(n) - b.minX) * scale, 10 + (nodeY(n) - b.minY) * scale, Math.max(16, size.w * scale), Math.max(9, size.h * scale));
     }
   }
 
@@ -1329,10 +1662,11 @@ pub fn canvas_js() -> String {
     if (nodes.length === 0) return { x: 120, y: 120, w: 360, h: 180 };
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const node of nodes) {
+      const size = nodeSize(graph, node);
       minX = Math.min(minX, nodeX(node));
       minY = Math.min(minY, nodeY(node));
-      maxX = Math.max(maxX, nodeX(node) + 190);
-      maxY = Math.max(maxY, nodeY(node) + 110);
+      maxX = Math.max(maxX, nodeX(node) + size.w);
+      maxY = Math.max(maxY, nodeY(node) + size.h);
     }
     return { x: minX - 26, y: minY - 36, w: maxX - minX + 52, h: maxY - minY + 70 };
   }
@@ -1364,6 +1698,42 @@ pub fn canvas_js() -> String {
     return (items || []).map((item) => `<div class="pin-row"><b>${escapeHtml(item.name || "frame")}</b><br><span class="tag">${escapeHtml(item.value || String(item))}</span></div>`).join("");
   }
 
+  function signatureFromVisibleFunctionPins(fnMeta, nodeTitle, retOverride) {
+    const retType = retOverride !== undefined ? retOverride : (document.getElementById("function-return-type") && document.getElementById("function-return-type").value.trim()) || "Void";
+    const ret = retType && retType !== "Void" ? " -> " + retType : "";
+    const rows = [...details.querySelectorAll("[data-fn-param]")];
+    const params = rows.map((row) => {
+      const name = (row.querySelector("[data-param-name]") || {}).value || "";
+      const type = (row.querySelector("[data-param-type]") || {}).value || "Int";
+      const fallback = (row.querySelector("[data-param-default]") || {}).value || "";
+      const defaultExpr = fallback.trim() ? " = " + fallback.trim() : "";
+      return name.trim() + ": " + type.trim() + defaultExpr;
+    }).filter((p) => !p.startsWith(":"));
+    const visibility = fnMeta && fnMeta.visibility === "public" ? "pub " : "";
+    return visibility + "fn " + ((fnMeta && fnMeta.name) || nodeTitle || "function") + "(" + params.join(", ") + ")" + ret;
+  }
+
+  function pinPortHtml(type) {
+    return `<span class="pin-port" style="color:${escapeAttr(colorForType(type))}"></span>`;
+  }
+
+  function typeChipHtml(type) {
+    return `<span class="type-chip" style="color:${escapeAttr(colorForType(type))}">${escapeHtml(type || "Value")}</span>`;
+  }
+
+  function functionParamRow(p, i) {
+    const pinType = p && p.type ? p.type : "Int";
+    const pinName = p && p.name ? p.name : "value";
+    const defaultSource = p && p.default_source ? p.default_source : "";
+    const defaultLabel = defaultSource ? "default " + defaultSource : "required";
+    return `<div class="pin-editor-row" data-fn-param="${escapeAttr(i)}"><div class="pin-editor-title">${pinPortHtml(pinType)}<b>${escapeHtml(pinName)}</b>${typeChipHtml(pinType)}</div><div class="lane-meta">${escapeHtml(defaultLabel)}</div><div class="pin-tools"><input data-param-name="${escapeAttr(i)}" aria-label="Input pin name" title="Input pin name" value="${escapeAttr(pinName)}"><input data-param-type="${escapeAttr(i)}" aria-label="Input pin type" title="Input pin type" value="${escapeAttr(pinType)}"><input data-param-default="${escapeAttr(i)}" aria-label="Default expression" title="Default expression" placeholder="default" value="${escapeAttr(defaultSource)}"><button data-param-remove="${escapeAttr(i)}" title="Remove input pin">-</button></div></div>`;
+  }
+
+  function functionReturnRow(retType) {
+    const outType = retType || "Void";
+    return `<div class="pin-editor-row"><div class="pin-editor-title">${pinPortHtml(outType)}<b>return</b>${typeChipHtml(outType)}</div><div class="lane-meta">output pin</div><div class="pin-tools"><input id="function-return-type" aria-label="Return type" title="Return type" value="${escapeAttr(outType)}"><button id="set-function-output">Set</button><button id="remove-function-output">-</button></div></div>`;
+  }
+
   function updateDetails(graph, node, pins, inline) {
     if (!node) {
       details.innerHTML = "<h2>Details</h2><p>Select a node.</p>";
@@ -1373,12 +1743,14 @@ pub fn canvas_js() -> String {
     const pinRows = pins.map((p) => `<div class="pin-row"><b>${escapeHtml(p.name)}</b> <span class="tag">${escapeHtml(p.direction)}</span><br><span style="color:${colorForType(p.type)}">${escapeHtml(p.type)}</span> ${p.fallible ? "fallible" : ""}<div class="edit-grid"><button data-pin-menu="${escapeHtml(p.pin_id)}">Compatible actions</button></div></div>`).join("");
     const inlineRows = inline.map((expr) => `<div class="inline-row"><b>${escapeHtml(expr.role)}</b><code>${escapeHtml(expr.source)}</code><div class="edit-grid"><input data-inline-id="${escapeHtml(expr.inline_expr_id)}" value="${escapeAttr(expr.source)}"><button data-inline-apply="${escapeHtml(expr.inline_expr_id)}">Apply expression</button><button data-inline-promote="${escapeHtml(expr.inline_expr_id)}">Promote to binding</button><button data-inline-convert="${escapeHtml(expr.inline_expr_id)}">Insert conversion</button><button data-inline-preview-extract="${escapeHtml(expr.inline_expr_id)}">Preview extract</button><button data-inline-extract="${escapeHtml(expr.inline_expr_id)}">Extract function</button></div></div>`).join("");
     const rename = node.kind === "binding" ? `<div class="edit-grid"><label>Rename binding<input id="rename-to" value="${escapeAttr(node.title)}"></label><button id="preview-rename">Preview rename</button><button id="rename-binding" class="primary">Rename</button></div>` : "";
+    const calleeGraph = (node.kind === "call" || node.kind === "method") ? graphForFunctionName(node.title) : null;
+    const calleeOpen = calleeGraph ? `<button id="open-callee-graph">Open ${escapeHtml(calleeGraph.title)} graph</button>` : "";
     const fnMeta = node.node_id === graph.entry_node ? graph.function : null;
-    const fnParams = fnMeta ? (fnMeta.params || []).map((p, i) => `<div class="pin-row" data-fn-param="${i}"><b>${escapeHtml(p.name)}</b> <span class="tag">${escapeHtml(p.type)}</span><br>${p.default ? "default " + escapeHtml(p.default_source || "") : "required"}<div class="pin-tools"><input data-param-name="${i}" value="${escapeAttr(p.name)}"><input data-param-type="${i}" value="${escapeAttr(p.type)}"><button data-param-remove="${i}">-</button></div></div>`).join("") : "";
-    const fnReturnType = fnMeta && fnMeta.returns && fnMeta.returns.type ? fnMeta.returns.type : "Void";
-    const fnReturnPanel = fnMeta ? `<div class="pin-row"><b>return</b> <span class="tag">output</span><br><span style="color:${colorForType(fnReturnType)}">${escapeHtml(fnReturnType)}</span><div class="pin-tools"><input id="function-return-type" value="${escapeAttr(fnReturnType)}"><button id="set-function-output">Set</button><button id="remove-function-output">-</button></div></div>` : "";
+    const fnReturnType = fnMeta ? (typeof fnMeta.returns === "string" ? fnMeta.returns : (fnMeta.returns && fnMeta.returns.type) || "Void") : "Void";
+    const fnParams = fnMeta ? (fnMeta.params || []).map((p, i) => functionParamRow(p, i)).join("") : "";
+    const fnReturnPanel = fnMeta ? functionReturnRow(fnReturnType) : "";
     const fnEvents = fnMeta ? (graph.event_views || []).map((event) => `<div class="pin-row"><b>${escapeHtml(event.title || event.function)}</b><br><span class="tag">${escapeHtml(event.semantics || "ordinary_jet_function")}</span></div>`).join("") : "";
-    const fnPanel = fnMeta ? `<h2>Function</h2><div class="inline-row"><b>${escapeHtml(fnMeta.visibility || "private")} ${escapeHtml(fnMeta.name || node.title)}</b><code>${escapeHtml(fnMeta.signature || "")}</code><div class="edit-grid"><input id="function-signature" value="${escapeAttr(fnMeta.signature || "")}"><button id="edit-function-signature">Apply signature</button><input id="function-rename-to" value="${escapeAttr(fnMeta.name || node.title)}"><button id="rename-function">Rename function</button><button id="create-function">Create function</button><button id="add-function-pin">Add input pin</button><button id="apply-function-pins" class="primary">Apply pins</button></div></div><h2>Output</h2><div class="pin-list">${fnReturnPanel}</div><h2>Inputs</h2><div class="pin-list" id="function-pin-list">${fnParams || "<div class=\"tag\">no params</div>"}</div>${fnEvents ? `<h2>Callback views</h2><div class="pin-list">${fnEvents}</div>` : ""}` : "";
+    const fnPanel = fnMeta ? `<h2>Function</h2><div class="signature-board"><div class="signature-head"><div><span class="sig-eyebrow">function graph</span><b>${escapeHtml(fnMeta.visibility || "private")} ${escapeHtml(fnMeta.name || node.title)}</b><code>${escapeHtml(fnMeta.signature || "")}</code></div><button id="create-function" title="Create sibling function">New</button></div><div class="pin-lane"><div class="lane-head"><b>Inputs</b><span class="lane-meta">${(fnMeta.params || []).length} pins</span><button id="add-function-pin">+ Input</button></div><div class="pin-list" id="function-pin-list">${fnParams || "<div class=\"pin-empty\">No input pins</div>"}</div></div><div class="pin-lane"><div class="lane-head"><b>Output</b><span class="lane-meta">return type</span></div><div class="pin-list">${fnReturnPanel}</div></div><div class="signature-source"><span class="sig-eyebrow">source signature</span><code>${escapeHtml(fnMeta.signature || "")}</code><input id="function-signature" value="${escapeAttr(fnMeta.signature || "")}"><div class="rename-strip"><input id="function-rename-to" aria-label="Function name" title="Function name" value="${escapeAttr(fnMeta.name || node.title)}"><button id="rename-function">Rename</button></div></div><div class="signature-actions"><button id="edit-function-signature">Apply signature</button><button id="apply-function-pins" class="primary">Apply pins</button></div></div>${fnEvents ? `<h2>Callback views</h2><div class="pin-list">${fnEvents}</div>` : ""}` : "";
     const bpLabel = nodeBreakpoint(node) ? "Remove breakpoint" : "Set breakpoint";
     const locals = debugRows(debugOverlay && debugOverlay.locals);
     const watches = debugRows(debugOverlay && debugOverlay.watches);
@@ -1396,7 +1768,7 @@ pub fn canvas_js() -> String {
         <dt>node</dt><dd>${escapeHtml(node.node_id)}</dd>
         <dt>affords</dt><dd>${(node.edit_affordances || []).map(escapeHtml).join(", ")}</dd>
       </dl>
-      <div class="edit-grid"><button id="source-jump">Jump source</button><button id="find-references">Find references</button></div>
+      <div class="edit-grid"><button id="source-jump">Jump source</button><button id="find-references">Find references</button>${calleeOpen}</div>
       ${rename}
       ${fnPanel}
       <h2>Debug</h2>
@@ -1444,17 +1816,9 @@ pub fn canvas_js() -> String {
         postTransaction({ schema_version: 1, op: "create_function", revision: latestDoc.revision, name, params, ret_type });
       });
     }
-    function signatureFromParamInputs(retOverride) {
-      const retType = retOverride !== undefined ? retOverride : (document.getElementById("function-return-type") && document.getElementById("function-return-type").value.trim()) || fnReturnType;
-      const ret = retType && retType !== "Void" ? " -> " + retType : "";
-      const rows = [...details.querySelectorAll("[data-fn-param]")];
-      const params = rows.map((row) => {
-        const i = row.getAttribute("data-fn-param");
-        const name = (details.querySelector(`[data-param-name="${cssEscape(i)}"]`) || {}).value || "";
-        const type = (details.querySelector(`[data-param-type="${cssEscape(i)}"]`) || {}).value || "Int";
-        return name.trim() + ": " + type.trim();
-      }).filter((p) => !p.startsWith(":"));
-      return "fn " + (fnMeta.name || node.title) + "(" + params.join(", ") + ")" + ret;
+    const openCalleeGraph = document.getElementById("open-callee-graph");
+    if (openCalleeGraph && calleeGraph) {
+      openCalleeGraph.addEventListener("click", () => openFunctionGraph(calleeGraph.title));
     }
     const addFunctionPin = document.getElementById("add-function-pin");
     if (addFunctionPin && fnMeta) {
@@ -1462,11 +1826,14 @@ pub fn canvas_js() -> String {
         const list = document.getElementById("function-pin-list");
         const i = "new" + Date.now();
         const row = document.createElement("div");
-        row.className = "pin-row";
-        row.setAttribute("data-fn-param", i);
-        row.innerHTML = `<b>new input</b><div class="pin-tools"><input data-param-name="${i}" value="value"><input data-param-type="${i}" value="Int"><button data-param-remove="${i}">-</button></div>`;
-        list.appendChild(row);
-        row.querySelector("[data-param-remove]").addEventListener("click", () => row.remove());
+        row.innerHTML = functionParamRow({ name: "value", type: "Int", default_source: "1" }, i);
+        const editorRow = row.firstElementChild;
+        if (editorRow) {
+          const empty = list.querySelector(".pin-empty");
+          if (empty) empty.remove();
+          list.appendChild(editorRow);
+          editorRow.querySelector("[data-param-remove]").addEventListener("click", () => editorRow.remove());
+        }
       });
     }
     details.querySelectorAll("[data-param-remove]").forEach((button) => {
@@ -1475,26 +1842,6 @@ pub fn canvas_js() -> String {
         if (row) row.remove();
       });
     });
-    const applyFunctionPins = document.getElementById("apply-function-pins");
-    if (applyFunctionPins && fnMeta) {
-      applyFunctionPins.addEventListener("click", () => {
-        postTransaction({ schema_version: 1, op: "edit_function_signature", revision: latestDoc.revision, graph_id: graph.graph_id, signature: signatureFromParamInputs() });
-      });
-    }
-    const setFunctionOutput = document.getElementById("set-function-output");
-    if (setFunctionOutput && fnMeta) {
-      setFunctionOutput.addEventListener("click", () => {
-        postTransaction({ schema_version: 1, op: "edit_function_signature", revision: latestDoc.revision, graph_id: graph.graph_id, signature: signatureFromParamInputs() });
-      });
-    }
-    const removeFunctionOutput = document.getElementById("remove-function-output");
-    if (removeFunctionOutput && fnMeta) {
-      removeFunctionOutput.addEventListener("click", () => {
-        const ret = document.getElementById("function-return-type");
-        if (ret) ret.value = "Void";
-        postTransaction({ schema_version: 1, op: "edit_function_signature", revision: latestDoc.revision, graph_id: graph.graph_id, signature: signatureFromParamInputs("Void") });
-      });
-    }
     details.querySelectorAll("[data-pin-menu]").forEach((button) => {
       button.addEventListener("click", (ev) => {
         const pin = pins.find((p) => p.pin_id === button.getAttribute("data-pin-menu"));
@@ -1504,7 +1851,7 @@ pub fn canvas_js() -> String {
     const sourceJump = document.getElementById("source-jump");
     if (sourceJump) {
       sourceJump.addEventListener("click", () => {
-        window.location.hash = `span-${span.start}-${span.end}`;
+        setSourceHash(span);
         showToast("Source span copied to URL");
       });
     }
@@ -1583,7 +1930,7 @@ pub fn canvas_js() -> String {
     }
     selectedNodeId = node.node_id;
     const s = node.source_span || { start: 0, end: 0 };
-    location.hash = "span-" + s.start + "-" + s.end;
+    setSourceHash(s);
     if (latestDoc) drawGraph(latestDoc);
   }
 
@@ -1596,11 +1943,20 @@ pub fn canvas_js() -> String {
   }
 
   function hitPinAt(x, y) {
+    let best = null;
+    let bestDistance = Infinity;
     for (let i = pinHit.length - 1; i >= 0; i--) {
       const h = pinHit[i];
-      if (x >= h.x && x <= h.x + h.w && y >= h.y && y <= h.y + h.h) return h.pin;
+      if (x < h.x || x > h.x + h.w || y < h.y || y > h.y + h.h) continue;
+      const dx = x - (h.cx || h.x + h.w / 2);
+      const dy = y - (h.cy || h.y + h.h / 2);
+      const distance = dx * dx + dy * dy;
+      if (distance < bestDistance) {
+        best = h.pin;
+        bestDistance = distance;
+      }
     }
-    return null;
+    return best;
   }
 
   function numericType(type) {
@@ -1614,6 +1970,61 @@ pub fn canvas_js() -> String {
     const input = from.direction === "input" ? from : to;
     if (out.type === input.type) return true;
     return numericType(out.type) && numericType(input.type);
+  }
+
+  function connectionPlan(graph, fromPin, toPin) {
+    if (!fromPin) return { ok: false, label: "No pin", color: "#fb7185" };
+    if (!toPin) return { ok: true, label: "Release for actions", color: "#7dd3fc" };
+    if (fromPin.pin_id === toPin.pin_id) return { ok: false, label: "Same socket", color: "#fb7185" };
+    if (fromPin.direction === toPin.direction) {
+      const expected = fromPin.direction === "output" ? "Drop on an input socket" : "Drop on an output socket";
+      return { ok: false, label: expected, color: "#fb7185" };
+    }
+    const out = fromPin.direction === "output" ? fromPin : toPin;
+    const input = fromPin.direction === "input" ? fromPin : toPin;
+    if (!compatiblePin(fromPin, toPin)) return { ok: false, label: "Type mismatch " + (out.type || "?") + " -> " + (input.type || "?"), color: "#fb7185" };
+    if (!exactPinMatch(fromPin, toPin)) return { ok: true, label: "Insert visible conversion", color: "#f59e0b" };
+    const wire = wireIntoPin(graph, input);
+    const replacement = sourceExprForOutputPin(out);
+    if (wire && replacement) return { ok: true, label: "Rewire source", color: "#a7f3d0" };
+    return { ok: true, label: "Compatible preview", color: "#fde68a" };
+  }
+
+  function drawCompatibleDropTargets(graph, fromPin) {
+    const seen = new Set();
+    for (const hit of pinHit) {
+      const pin = hit.pin;
+      if (!compatiblePin(fromPin, pin) || seen.has(pin.pin_id)) continue;
+      seen.add(pin.pin_id);
+      const point = pinPoints.get(pin.pin_id);
+      if (!point) continue;
+      ctx.beginPath();
+      ctx.arc(point.x, point.y, Math.max(13, 18 * view.zoom), 0, Math.PI * 2);
+      ctx.strokeStyle = exactPinMatch(fromPin, pin) ? "#a7f3d0" : "#f59e0b";
+      ctx.lineWidth = Math.max(1.4, 2.2 * view.zoom);
+      ctx.shadowColor = exactPinMatch(fromPin, pin) ? "rgba(167,243,208,.52)" : "rgba(245,158,11,.44)";
+      ctx.shadowBlur = 10;
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+    }
+  }
+
+  function drawConnectionBadge(plan, x, y) {
+    const text = plan.label || "";
+    ctx.font = `${Math.max(10, 12 * view.zoom)}px ui-monospace, Consolas, monospace`;
+    const padX = 9 * view.zoom;
+    const badgeW = Math.min(230 * view.zoom, ctx.measureText(text).width + padX * 2);
+    const badgeH = 26 * view.zoom;
+    const bx = Math.min(x + 14 * view.zoom, cssSize().width - badgeW - 8);
+    const by = Math.max(8, y - badgeH - 12 * view.zoom);
+    roundRect(bx, by, badgeW, badgeH, 5 * view.zoom);
+    ctx.fillStyle = "rgba(7,17,31,.94)";
+    ctx.fill();
+    ctx.strokeStyle = plan.color || "#7dd3fc";
+    ctx.lineWidth = Math.max(1, view.zoom);
+    ctx.stroke();
+    ctx.fillStyle = plan.color || "#dbeafe";
+    ctx.fillText(clipText(text, 28), bx + padX, by + 17 * view.zoom);
   }
 
   function exactPinMatch(from, to) {
@@ -1661,6 +2072,12 @@ pub fn canvas_js() -> String {
     const y = ev.clientY - rect.top;
     const found = hitNodeAt(x, y);
     if (found) selectNode(found.node, ev.ctrlKey || ev.metaKey ? "toggle" : ev.shiftKey ? "add" : "replace");
+  });
+
+  canvas.addEventListener("dblclick", function (ev) {
+    const rect = canvas.getBoundingClientRect();
+    const found = hitNodeAt(ev.clientX - rect.left, ev.clientY - rect.top);
+    if (found && openFunctionGraph(found.node.title)) ev.preventDefault();
   });
 
   canvas.addEventListener("mousedown", function (ev) {
@@ -1721,9 +2138,12 @@ pub fn canvas_js() -> String {
   window.addEventListener("mouseup", function (ev) {
     if (drag && drag.mode === "node") showToast("Moved " + selectedNodeIds.size + " node" + (selectedNodeIds.size === 1 ? "" : "s") + " locally");
     if (drag && drag.mode === "pin") {
-      const target = hoverPin;
+      const rect = canvas.getBoundingClientRect();
+      const target = hitPinAt(ev.clientX - rect.left, ev.clientY - rect.top) || hoverPin;
+      const graph = latestDoc ? currentGraph(latestDoc) : null;
+      const plan = connectionPlan(graph, drag.pin, target);
+      window.__jetCanvasLastConnectionPlan = plan;
       if (compatiblePin(drag.pin, target)) {
-        const graph = latestDoc ? currentGraph(latestDoc) : null;
         const out = drag.pin.direction === "output" ? drag.pin : target;
         const input = drag.pin.direction === "input" ? drag.pin : target;
         const wire = wireIntoPin(graph, input);
@@ -1736,10 +2156,10 @@ pub fn canvas_js() -> String {
           if (expr && callee) postTransaction({ schema_version: 1, op: "insert_visible_conversion", revision: latestDoc.revision, inline_expr_id: expr.inline_expr_id, callee });
           else showToast("Conversion needs an inline source expression");
         } else {
-          showToast("Compatible wire preview: no safe source anchor");
+          showToast(plan.label + ": no safe source anchor");
         }
       } else if (target) {
-        showToast("Wire refused: " + drag.pin.type + " -> " + target.type);
+        showToast("Wire refused: " + plan.label);
       } else {
         openPinMenu(drag.pin, ev.clientX, ev.clientY);
       }
@@ -1762,21 +2182,27 @@ pub fn canvas_js() -> String {
     const found = hitNodeAt(x, y);
     if (found) {
       selectNode(found.node, "replace");
-      openContextMenu(ev.clientX, ev.clientY, found.node.title, [
-        { title: "Jump source", detail: "span", run: () => { const s = found.node.source_span || { start: 0, end: 0 }; window.location.hash = `span-${s.start}-${s.end}`; setViewMode("source"); } },
-        { title: "Find references", detail: "semindex", run: () => postQuery({ op: "references", symbol: found.node.title }) },
-        { title: "Set breakpoint", detail: "local span", run: () => toggleBreakpoint(found.node) }
-      ]);
+      const actions = [
+        { title: "Jump source", detail: "span", group: "source", run: () => { const s = found.node.source_span || { start: 0, end: 0 }; setSourceHash(s); setViewMode("source"); } },
+        { title: "Find references", detail: "semindex", group: "query", run: () => postQuery({ op: "references", symbol: found.node.title }) },
+        { title: "Set breakpoint", detail: "local span", group: "debug", run: () => toggleBreakpoint(found.node) }
+      ];
+      if (graphForFunctionName(found.node.title)) actions.unshift({ title: "Open function graph", detail: "nested graph", group: "graph", run: () => openFunctionGraph(found.node.title) });
+      openContextMenu(ev.clientX, ev.clientY, found.node.title, actions);
     } else {
-      openContextMenu(ev.clientX, ev.clientY, "Graph", [
-        { title: "Search built-ins", detail: "palette", run: () => { paletteSearch.focus(); paletteSearch.select(); } },
-        { title: "Fit graph", detail: "viewport", run: fitGraph },
-        { title: "New function", detail: "source", run: () => {
+      const actions = [
+        { title: "Search built-ins", detail: "focus palette panel", group: "palette", run: () => { paletteSearch.focus(); paletteSearch.select(); } },
+        { title: "Fit graph", detail: "viewport", group: "view", run: fitGraph },
+        { title: "New function", detail: "source", group: "function", run: () => {
           const name = window.prompt("Function name", "helper");
           if (name) postTransaction({ schema_version: 1, op: "create_function", revision: latestDoc.revision, name, params: "", ret_type: "Int" });
         } },
-        { title: "Show source", detail: "toggle", run: () => setViewMode("source") }
-      ]);
+        { title: "Show source", detail: "toggle", group: "view", run: () => setViewMode("source") }
+      ];
+      for (const item of palette.concat(actionEntries).slice(0, 24)) {
+        actions.push({ title: item.title, detail: item.detail || "", group: item.op === "preview_canvas_action" ? "built-in" : "node", run: () => runPalette(item) });
+      }
+      openActionPalette(ev.clientX, ev.clientY, "Graph actions", actions, { context: "built-ins, functions, source actions" });
     }
   });
 
@@ -1794,6 +2220,18 @@ pub fn canvas_js() -> String {
     if (latestDoc) drawGraph(latestDoc);
   }, { passive: false });
 
+  graphBack.addEventListener("click", () => {
+    if (!graphBackStack.length || !selectedGraphId) return;
+    const previous = graphBackStack.pop();
+    graphForwardStack.push(selectedGraphId);
+    switchGraph(previous, { push: false, toast: "Back to " + graphTitle(previous) });
+  });
+  graphForward.addEventListener("click", () => {
+    if (!graphForwardStack.length || !selectedGraphId) return;
+    const next = graphForwardStack.pop();
+    graphBackStack.push(selectedGraphId);
+    switchGraph(next, { push: false, toast: "Forward to " + graphTitle(next) });
+  });
   document.getElementById("fit").addEventListener("click", fitGraph);
   document.getElementById("reload").addEventListener("click", loadGraph);
   sourceDiff.addEventListener("click", showSourceDiff);
@@ -1886,6 +2324,29 @@ pub fn canvas_js() -> String {
     if (!contextMenu.contains(ev.target)) closeContextMenu();
   });
 
+  function handleFunctionPinButton(ev) {
+    const button = ev.target && ev.target.closest && ev.target.closest("#apply-function-pins, #set-function-output, #remove-function-output");
+    if (!button || !latestDoc) return;
+    const now = Date.now();
+    const handled_at = Number(button.getAttribute("data-canvas-handled-at") || "0");
+    if (ev.type === "click" && now - handled_at < 900) return;
+    button.setAttribute("data-canvas-handled-at", String(now));
+    const graph = currentGraph(latestDoc);
+    if (!graph || !graph.function) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    if (ev.stopImmediatePropagation) ev.stopImmediatePropagation();
+    if (button.id === "remove-function-output") {
+      const ret = document.getElementById("function-return-type");
+      if (ret) ret.value = "Void";
+    }
+    const signature = signatureFromVisibleFunctionPins(graph.function, graph.title, button.id === "remove-function-output" ? "Void" : undefined);
+    window.__jetCanvasLastSignature = signature;
+    postTransaction({ schema_version: 1, op: "edit_function_signature", revision: latestDoc.revision, graph_id: graph.graph_id, signature });
+  }
+  document.addEventListener("pointerdown", handleFunctionPinButton, true);
+  document.addEventListener("click", handleFunctionPinButton, true);
+
   function runPalette(item) {
     if (!latestDoc || !selectedGraphId) return;
     if (item.op === "preview_canvas_action") {
@@ -1923,9 +2384,11 @@ pub fn canvas_js() -> String {
   function postTransaction(body) {
     const txUrl = window.__JET_CANVAS_TX__ || ((window.__JET_CANVAS_BASE__ || "/canvas") + "/transaction");
     const beforeSource = latestDoc && latestDoc.source_text;
+    window.__jetCanvasLastTx = body;
     fetch(txUrl, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
       .then((r) => r.json().then((j) => ({ ok: r.ok, json: j })))
       .then((result) => {
+        window.__jetCanvasLastTxResult = result.json;
         if (!result.ok) { showToast(result.json.message || "Edit rejected"); return; }
         if (result.json.protocol === "jet.canvas.action") {
           searchState.results = [];
@@ -2253,6 +2716,7 @@ fn project_func(
     }
     project_stmt_block(&mut g, index, module_src, &f.body, 0, 220, 170);
     add_source_comment_regions(&mut g, module_src, f);
+    add_execution_overlay(&mut g);
     g
 }
 
@@ -2319,12 +2783,18 @@ fn project_stmt(
             let output_pin = add_pin(g, &node_id, &b.name, "output", &ty, "", false);
             g.local_pins.insert(b.name.clone(), output_pin);
             g.local_types.insert(b.name.clone(), ty);
-            if pure_leaf(&b.init) {
-                add_inline(g, &node_id, ordinal, "init", src, b.init.span());
-            } else if let Some(out) = project_expr_node(g, index, src, &b.init, ordinal, x - 190, y)
-            {
-                add_wire(g, &out, &input_pin, "data");
-            }
+            connect_expr_to_input(
+                g,
+                index,
+                src,
+                &b.init,
+                ordinal,
+                "init",
+                &node_id,
+                &input_pin,
+                x - 220,
+                y,
+            );
         }
         Stmt::Assign {
             target, op, value, ..
@@ -2345,12 +2815,18 @@ fn project_stmt(
             );
             let input = add_pin(g, &node_id, "value", "input", &ty, "", false);
             let output = add_pin(g, &node_id, "target", "output", &ty, "&", false);
-            if pure_leaf(value) {
-                add_inline(g, &node_id, ordinal, "value", src, value.span());
-                wire_ident_refs(g, value, &input);
-            } else if let Some(out) = project_expr_node(g, index, src, value, ordinal, x - 190, y) {
-                add_wire(g, &out, &input, "data");
-            }
+            connect_expr_to_input(
+                g,
+                index,
+                src,
+                value,
+                ordinal,
+                "value",
+                &node_id,
+                &input,
+                x - 220,
+                y,
+            );
             if let AST::LValue::Local { name, .. } = target {
                 g.local_pins.insert(name.clone(), output);
                 g.local_types.insert(name.clone(), ty);
@@ -2375,12 +2851,18 @@ fn project_stmt(
             if let Some(e) = expr {
                 let ty = expr_type(g, index, e);
                 let input = add_pin(g, &node_id, "value", "input", &ty, "", false);
-                if pure_leaf(e) {
-                    add_inline(g, &node_id, ordinal, "value", src, e.span());
-                    wire_ident_refs(g, e, &input);
-                } else if let Some(out) = project_expr_node(g, index, src, e, ordinal, x - 190, y) {
-                    add_wire(g, &out, &input, "data");
-                }
+                connect_expr_to_input(
+                    g,
+                    index,
+                    src,
+                    e,
+                    ordinal,
+                    "value",
+                    &node_id,
+                    &input,
+                    x - 220,
+                    y,
+                );
             }
         }
         Stmt::If(ifs) => {
@@ -2396,9 +2878,19 @@ fn project_stmt(
                 vec!["control"],
                 vec!["edit_inline_expr", "source_jump"],
             );
-            add_inline(g, &node_id, ordinal, "cond", src, ifs.cond.span());
             let cond = add_pin(g, &node_id, "cond", "input", "Bool", "", false);
-            wire_ident_refs(g, &ifs.cond, &cond);
+            connect_expr_to_input(
+                g,
+                index,
+                src,
+                &ifs.cond,
+                ordinal,
+                "cond",
+                &node_id,
+                &cond,
+                x - 220,
+                y,
+            );
             project_stmt_block(
                 g,
                 index,
@@ -2530,13 +3022,18 @@ fn project_stmt(
             );
             let ty = expr_type(g, index, subject);
             let subject_pin = add_pin(g, &node_id, "subject", "input", &ty, "", false);
-            if pure_leaf(subject) {
-                add_inline(g, &node_id, ordinal, "subject", src, subject.span());
-                wire_ident_refs(g, subject, &subject_pin);
-            } else if let Some(out) = project_expr_node(g, index, src, subject, ordinal, x - 190, y)
-            {
-                add_wire(g, &out, &subject_pin, "data");
-            }
+            connect_expr_to_input(
+                g,
+                index,
+                src,
+                subject,
+                ordinal,
+                "subject",
+                &node_id,
+                &subject_pin,
+                x - 220,
+                y,
+            );
             for (i, arm) in arms.iter().enumerate() {
                 add_inline(
                     g,
@@ -2711,12 +3208,18 @@ fn project_stmt(
             );
             let ty = expr_type(g, index, expr);
             let input = add_pin(g, &node_id, "value", "input", &ty, "", false);
-            if pure_leaf(expr) {
-                add_inline(g, &node_id, ordinal, "value", src, expr.span());
-                wire_ident_refs(g, expr, &input);
-            } else if let Some(out) = project_expr_node(g, index, src, expr, ordinal, x - 190, y) {
-                add_wire(g, &out, &input, "data");
-            }
+            connect_expr_to_input(
+                g,
+                index,
+                src,
+                expr,
+                ordinal,
+                "value",
+                &node_id,
+                &input,
+                x - 220,
+                y,
+            );
         }
         Stmt::ScopeMember {
             name,
@@ -2780,6 +3283,78 @@ fn project_else_branch(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+fn connect_expr_to_input(
+    g: &mut GraphBuilder,
+    index: &SemIndex,
+    src: &str,
+    expr: &Expr,
+    ordinal: usize,
+    role: &str,
+    owner_node_id: &str,
+    input_pin: &str,
+    x: i32,
+    y: i32,
+) {
+    if let Some(out) = project_value_node(g, index, src, expr, ordinal, role, x, y) {
+        add_inline(g, owner_node_id, ordinal, role, src, expr.span());
+        add_wire_with_span(g, &out, input_pin, "data", Some(expr.span().into()));
+    } else if pure_leaf(expr) {
+        add_inline(g, owner_node_id, ordinal, role, src, expr.span());
+        wire_ident_refs(g, expr, input_pin);
+    } else if let Some(out) = project_expr_node(g, index, src, expr, ordinal, x, y) {
+        add_wire_with_span(g, &out, input_pin, "data", Some(expr.span().into()));
+    }
+}
+
+fn project_value_node(
+    g: &mut GraphBuilder,
+    index: &SemIndex,
+    src: &str,
+    expr: &Expr,
+    ordinal: usize,
+    role: &str,
+    x: i32,
+    y: i32,
+) -> Option<String> {
+    let (kind, title, badges) = match expr {
+        Expr::Ident(name, _) => ("variable_get", format!("get {name}"), vec!["read"]),
+        Expr::Int(_, _, _)
+        | Expr::Float(_, _, _)
+        | Expr::Bool(_, _)
+        | Expr::Str(_, _)
+        | Expr::Char(_, _)
+        | Expr::Absent(_)
+        | Expr::Todo { .. } => ("constant", snippet(src, expr.span()), vec!["const"]),
+        _ => return None,
+    };
+    let span: SourceSpan = expr.span().into();
+    let node_id = format!(
+        "{}:value:{ordinal}:{role}:{}-{}",
+        g.graph_id, span.start, span.end
+    );
+    add_node(
+        g,
+        &node_id,
+        kind,
+        &title,
+        span,
+        x,
+        y,
+        badges,
+        vec!["edit_inline_expr", "source_jump"],
+    );
+    Some(add_pin(
+        g,
+        &node_id,
+        "value",
+        "output",
+        &expr_type(g, index, expr),
+        "",
+        false,
+    ))
+}
+
 fn project_expr_node(
     g: &mut GraphBuilder,
     index: &SemIndex,
@@ -2814,17 +3389,18 @@ fn project_expr_node(
                     arg.convention.sigil(),
                     false,
                 );
-                if pure_leaf(&arg.expr) {
-                    add_inline(
-                        g,
-                        &node_id,
-                        ordinal,
-                        &format!("arg{}", i + 1),
-                        src,
-                        arg.expr.span(),
-                    );
-                }
-                wire_ident_refs(g, &arg.expr, &input);
+                connect_expr_to_input(
+                    g,
+                    index,
+                    src,
+                    &arg.expr,
+                    ordinal * 1000 + i + 1,
+                    &format!("arg{}", i + 1),
+                    &node_id,
+                    &input,
+                    x - 220,
+                    y + i as i32 * 74,
+                );
             }
             let ret = call_ret(index, &c.name).unwrap_or_else(|| "Void".to_string());
             Some(add_pin(
@@ -2866,7 +3442,18 @@ fn project_expr_node(
             );
             let recv_ty = expr_type(g, index, receiver);
             let recv_pin = add_pin(g, &node_id, "self", "input", &recv_ty, "", false);
-            wire_ident_refs(g, receiver, &recv_pin);
+            connect_expr_to_input(
+                g,
+                index,
+                src,
+                receiver,
+                ordinal * 1000 + 1,
+                "self",
+                &node_id,
+                &recv_pin,
+                x - 220,
+                y,
+            );
             for (i, arg) in args.iter().enumerate() {
                 let ty = expr_type(g, index, &arg.expr);
                 let input = add_pin(
@@ -2878,7 +3465,18 @@ fn project_expr_node(
                     arg.convention.sigil(),
                     false,
                 );
-                wire_ident_refs(g, &arg.expr, &input);
+                connect_expr_to_input(
+                    g,
+                    index,
+                    src,
+                    &arg.expr,
+                    ordinal * 1000 + i + 2,
+                    &format!("arg{}", i + 1),
+                    &node_id,
+                    &input,
+                    x - 220,
+                    y + (i as i32 + 1) * 74,
+                );
             }
             let ret = resolved_ret
                 .as_ref()
@@ -3067,6 +3665,173 @@ fn add_source_comment_regions(g: &mut GraphBuilder, src: &str, f: &AST::Func) {
     }
 }
 
+fn add_execution_overlay(g: &mut GraphBuilder) {
+    let exec_nodes = execution_nodes_in_order(g);
+
+    for node in &exec_nodes {
+        if node.kind != "entry" {
+            ensure_exec_pin(g, &node.id, "exec", "input", node.span);
+        }
+        if node.kind == "branch" || node.kind == "dispatch" {
+            ensure_exec_pin(g, &node.id, "then", "output", node.span);
+            ensure_exec_pin(g, &node.id, "else", "output", node.span);
+        } else if node.kind != "return" {
+            ensure_exec_pin(g, &node.id, "then", "output", node.span);
+        }
+    }
+
+    let mut previous_out: Option<String> = None;
+    for node in &exec_nodes {
+        let input = format!("{}:input:exec", node.id);
+        if let Some(from) = previous_out.take() {
+            if node.kind != "entry" {
+                add_wire(g, &from, &input, "control");
+            }
+        }
+        previous_out = if node.kind == "return" {
+            None
+        } else {
+            Some(format!("{}:output:then", node.id))
+        };
+    }
+}
+
+fn execution_nodes_in_order(g: &GraphBuilder) -> Vec<NodeRec> {
+    let mut nodes = g
+        .nodes
+        .iter()
+        .filter(|node| node_wants_exec(node))
+        .cloned()
+        .collect::<Vec<_>>();
+    nodes.sort_by_key(|node| {
+        (
+            if node.kind == "entry" { 0 } else { 1 },
+            node.span.start,
+            node.y,
+            node.x,
+        )
+    });
+
+    let source_rank = nodes
+        .iter()
+        .enumerate()
+        .map(|(rank, node)| (node.id.clone(), rank))
+        .collect::<HashMap<_, _>>();
+    let exec_ids = source_rank.keys().cloned().collect::<HashSet<_>>();
+    let pin_nodes = g
+        .pins
+        .iter()
+        .map(|pin| (pin.id.clone(), pin.node_id.clone()))
+        .collect::<HashMap<_, _>>();
+    let mut edges: HashMap<String, Vec<String>> = HashMap::new();
+    let mut indegree = nodes
+        .iter()
+        .map(|node| (node.id.clone(), 0usize))
+        .collect::<HashMap<_, _>>();
+
+    for wire in g.wires.iter().filter(|wire| wire.kind == "data") {
+        let Some(from_node) = pin_nodes.get(&wire.from_pin) else {
+            continue;
+        };
+        let Some(to_node) = pin_nodes.get(&wire.to_pin) else {
+            continue;
+        };
+        if from_node == to_node || !exec_ids.contains(from_node) || !exec_ids.contains(to_node) {
+            continue;
+        }
+        let slot = edges.entry(from_node.clone()).or_default();
+        if !slot.contains(to_node) {
+            slot.push(to_node.clone());
+            *indegree.entry(to_node.clone()).or_default() += 1;
+        }
+    }
+
+    let by_id = nodes
+        .iter()
+        .cloned()
+        .map(|node| (node.id.clone(), node))
+        .collect::<HashMap<_, _>>();
+    let mut ready = nodes
+        .iter()
+        .filter(|node| indegree.get(&node.id).copied().unwrap_or(0) == 0)
+        .map(|node| node.id.clone())
+        .collect::<Vec<_>>();
+    ready.sort_by_key(|id| source_rank.get(id).copied().unwrap_or(usize::MAX));
+
+    let mut ordered = Vec::new();
+    let mut emitted = HashSet::new();
+    while let Some(id) = ready.first().cloned() {
+        ready.remove(0);
+        if !emitted.insert(id.clone()) {
+            continue;
+        }
+        if let Some(node) = by_id.get(&id) {
+            ordered.push(node.clone());
+        }
+        for next in edges.get(&id).cloned().unwrap_or_default() {
+            let Some(degree) = indegree.get_mut(&next) else {
+                continue;
+            };
+            *degree = degree.saturating_sub(1);
+            if *degree == 0 {
+                ready.push(next);
+                ready.sort_by_key(|id| source_rank.get(id).copied().unwrap_or(usize::MAX));
+            }
+        }
+    }
+
+    if ordered.len() != nodes.len() {
+        for node in nodes {
+            if !emitted.contains(&node.id) {
+                ordered.push(node);
+            }
+        }
+    }
+    ordered
+}
+
+fn node_wants_exec(node: &NodeRec) -> bool {
+    matches!(
+        node.kind.as_str(),
+        "entry"
+            | "binding"
+            | "assign"
+            | "return"
+            | "branch"
+            | "loop"
+            | "dispatch"
+            | "flow"
+            | "yield"
+            | "scope_member"
+            | "call"
+            | "fallible"
+    )
+}
+
+fn ensure_exec_pin(
+    g: &mut GraphBuilder,
+    node_id: &str,
+    name: &str,
+    direction: &str,
+    span: SourceSpan,
+) -> String {
+    let id = format!("{node_id}:{direction}:{name}");
+    if !g.pins.iter().any(|pin| pin.id == id) {
+        g.pins.push(PinRec {
+            id: id.clone(),
+            node_id: node_id.to_string(),
+            name: name.to_string(),
+            direction: direction.to_string(),
+            ty: "exec".to_string(),
+            capability: "control".to_string(),
+            fallible: false,
+            effect_grant_need: None,
+            span,
+        });
+    }
+    id
+}
+
 fn func_source_span(f: &AST::Func) -> SourceSpan {
     let mut start = f.name_span.start;
     let mut end = f.name_span.end;
@@ -3238,7 +4003,7 @@ fn function_metadata_json(src: &str, f: &AST::Func) -> String {
     format!(
         "{{\"name\":{},\"signature\":{},\"visibility\":{},\"docs\":{},\"pure\":{},\"unsafe\":{},\"effects\":[{}],\"returns\":{},\"params\":[{}],\"source_span\":{},\"edit_affordances\":[\"rename_function\",\"edit_function_signature\",\"create_function\",\"source_jump\"]}}",
         json_str(&f.name),
-        json_str(&function_signature_text(f)),
+        json_str(&function_signature_text(src, f)),
         json_str(function_visibility(f)),
         json_str(&doc_comment_before(src, f.name_span.start)),
         if f.is_pure { "true" } else { "false" },
@@ -3260,7 +4025,7 @@ fn function_visibility(f: &AST::Func) -> &'static str {
     }
 }
 
-fn function_signature_text(f: &AST::Func) -> String {
+fn function_signature_text(src: &str, f: &AST::Func) -> String {
     let mut out = String::new();
     if f.is_pure {
         out.push_str("@Pure ");
@@ -3280,11 +4045,7 @@ fn function_signature_text(f: &AST::Func) -> String {
                 let mut s = format!("{}: {}", p.name, p.ty.name());
                 if let Some(default) = &p.default {
                     s.push_str(" = ");
-                    s.push_str(&format!(
-                        "<default@{}-{}>",
-                        default.span().start,
-                        default.span().end
-                    ));
+                    s.push_str(&snippet(src, default.span()));
                 }
                 s
             })

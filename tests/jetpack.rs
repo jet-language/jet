@@ -13,6 +13,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::OnceLock;
 
 fn jetpack() -> Command {
     Command::new(env!("CARGO_BIN_EXE_jetpack"))
@@ -23,7 +24,31 @@ fn jet() -> Command {
 }
 
 fn jetos() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_jetos"))
+    Command::new(jetos_bin())
+}
+
+fn jetos_bin() -> &'static PathBuf {
+    static BIN: OnceLock<PathBuf> = OnceLock::new();
+    BIN.get_or_init(|| {
+        if let Some(path) = option_env!("CARGO_BIN_EXE_jetos") {
+            return PathBuf::from(path);
+        }
+        let target_dir = std::env::var_os("CARGO_TARGET_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target"));
+        let bin = target_dir
+            .join("debug")
+            .join(format!("jetos{}", std::env::consts::EXE_SUFFIX));
+        if !bin.is_file() {
+            let status = Command::new(env!("CARGO"))
+                .args(["build", "-p", "jet-driver", "--bin", "jetos"])
+                .current_dir(env!("CARGO_MANIFEST_DIR"))
+                .status()
+                .unwrap();
+            assert!(status.success(), "building jetos test binary failed");
+        }
+        bin
+    })
 }
 
 fn copy_dir_recursive(src: &Path, dst: &Path) {
@@ -182,7 +207,7 @@ fn write_fake_vm_tools(bin: &Path, guest_passes: bool) {
         "#!/bin/sh\nif [ \"$1\" = 'create' ]; then printf 'fake qcow2\\n' > \"$4\"; fi\nexit 0\n",
     );
     let guest_line = if guest_passes {
-        "host=unknown\ngeneration=unknown\nfor arg in \"$@\"; do\n  case \"$arg\" in\n    *jetos.host=*) host=\"${arg#*jetos.host=}\"; host=\"${host%% *}\" ;;\n  esac\n  case \"$arg\" in\n    *jetos.generation=*) generation=\"${arg#*jetos.generation=}\"; generation=\"${generation%% *}\" ;;\n  esac\ndone\ncase \" $* \" in\n  *' -boot c '*) echo \"JETOS_GUEST_PROOF: {\\\"state\\\":\\\"guest-passed\\\",\\\"host\\\":\\\"$host\\\",\\\"generation\\\":\\\"$generation\\\",\\\"assertions\\\":[\\\"current-generation-matches\\\",\\\"packages-present\\\",\\\"services-active\\\",\\\"network-up\\\",\\\"rollback-generation-bootable\\\",\\\"terminal-login-ready\\\"]}\" ;;\nesac\n"
+        "host=unknown\ngeneration=unknown\nfor arg in \"$@\"; do\n  case \"$arg\" in\n    *jetos.host=*) host=\"${arg#*jetos.host=}\"; host=\"${host%% *}\" ;;\n  esac\n  case \"$arg\" in\n    *jetos.generation=*) generation=\"${arg#*jetos.generation=}\"; generation=\"${generation%% *}\" ;;\n  esac\ndone\ncase \" $* \" in\n  *'jetos.mode=desktop-verify'*) echo \"jetos proof: display manager command gdm\"; echo \"jetos proof: desktop session command gnome-session\"; echo \"jetos proof: terminal fallback ready\"; echo \"JETOS_GUEST_PROOF: {\\\"state\\\":\\\"guest-passed\\\",\\\"host\\\":\\\"$host\\\",\\\"generation\\\":\\\"$generation\\\",\\\"assertions\\\":[\\\"current-generation-matches\\\",\\\"packages-present\\\",\\\"services-active\\\",\\\"network-up\\\",\\\"rollback-generation-bootable\\\",\\\"terminal-login-ready\\\",\\\"desktop-session-ready\\\",\\\"graphical-console-ready\\\",\\\"desktop-launchers-run\\\"]}\" ;;\n  *' -boot c '*) echo \"JETOS_GUEST_PROOF: {\\\"state\\\":\\\"guest-passed\\\",\\\"host\\\":\\\"$host\\\",\\\"generation\\\":\\\"$generation\\\",\\\"assertions\\\":[\\\"current-generation-matches\\\",\\\"packages-present\\\",\\\"services-active\\\",\\\"network-up\\\",\\\"rollback-generation-bootable\\\",\\\"terminal-login-ready\\\",\\\"desktop-session-ready\\\"]}\" ;;\nesac\n"
     } else {
         "echo 'qemu booted without guest proof'\n"
     };
@@ -191,6 +216,11 @@ fn write_fake_vm_tools(bin: &Path, guest_passes: bool) {
         &format!("#!/bin/sh\n{guest_line}exit 0\n"),
     );
     write_executable(&bin.join("mkfs.ext4"), "#!/bin/sh\nexit 0\n");
+    write_executable(&bin.join("mkfs.vfat"), "#!/bin/sh\nexit 0\n");
+    write_executable(&bin.join("sfdisk"), "#!/bin/sh\nexit 0\n");
+    write_executable(&bin.join("blockdev"), "#!/bin/sh\nexit 0\n");
+    write_executable(&bin.join("mmd"), "#!/bin/sh\nexit 0\n");
+    write_executable(&bin.join("mcopy"), "#!/bin/sh\nexit 0\n");
     write_executable(
         &bin.join("zstd"),
         "#!/bin/sh\nlast=''\nfor arg in \"$@\"; do last=\"$arg\"; done\nwhile IFS= read -r line; do printf '%s\\n' \"$line\"; done < \"$last\"\n",
@@ -2031,6 +2061,12 @@ fn os_switch_activates_and_sets_current() {
         generation.join("sw/bin/systemd").exists(),
         "expected systemd in the system package closure"
     );
+    assert!(
+        generation.join("sw/bin/gdm").exists()
+            && generation.join("sw/bin/gnome-session").exists()
+            && generation.join("sw/bin/gnome-shell").exists(),
+        "expected GNOME desktop commands in the system package closure"
+    );
     assert_eq!(
         fs::read_to_string(generation.join("etc/hostname")).unwrap(),
         "halcyon\n"
@@ -2046,7 +2082,7 @@ fn os_switch_activates_and_sets_current() {
         "fstab: {fstab}"
     );
     let diff = fs::read_to_string(generation.join("activation-diff.txt")).unwrap();
-    assert!(diff.contains("packages: 4"), "diff: {diff}");
+    assert!(diff.contains("packages: 7"), "diff: {diff}");
     assert!(diff.contains("services: 3"), "diff: {diff}");
     let health = fs::read_to_string(generation.join("health-checks.txt")).unwrap();
     assert!(health.contains("openssh"), "health: {health}");
@@ -2156,7 +2192,7 @@ fn os_switch_activates_and_sets_current() {
     let nft = fs::read_to_string(generation.join("etc/nftables/jetos-firewall.nft")).unwrap();
     assert!(nft.contains("tcp dport { 22, 443 } accept"), "nft: {nft}");
     let init = fs::read_to_string(generation.join("init/systemd.json")).unwrap();
-    assert!(init.contains("multi-user.target"), "init: {init}");
+    assert!(init.contains("graphical.target"), "init: {init}");
     assert!(init.contains("\"systemd\""), "init: {init}");
     assert!(
         generation.join("sbin/init").exists(),
@@ -2235,12 +2271,48 @@ fn os_switch_activates_and_sets_current() {
     assert!(hardware.contains("amdgpu"), "hardware: {hardware}");
     let desktop = fs::read_to_string(generation.join("desktop/facts.json")).unwrap();
     assert!(
-        desktop.contains("\"session\":\"sway\""),
+        desktop.contains("\"session\":\"gnome-wayland\""),
         "desktop: {desktop}"
     );
     assert!(
-        desktop.contains("\"display_manager\":\"greetd\""),
+        desktop.contains("\"display_manager\":\"gdm\"")
+            && desktop.contains("\"terminal_fallback\":\"ttyS0+tty1\"")
+            && desktop.contains("desktop-session-ready"),
         "desktop: {desktop}"
+    );
+    assert!(
+        generation.join("sw/bin/jetos-desktop-session").is_file(),
+        "expected desktop session launcher"
+    );
+    let desktop_session =
+        fs::read_to_string(generation.join("sw/bin/jetos-desktop-session")).unwrap();
+    assert!(
+        desktop_session.contains("--jetos-proof")
+            && desktop_session.contains("desktop session command gnome-session"),
+        "desktop session launcher should expose proof mode: {desktop_session}"
+    );
+    let display_manager =
+        fs::read_to_string(generation.join("sw/bin/jetos-display-manager")).unwrap();
+    assert!(
+        display_manager.contains("--jetos-proof")
+            && display_manager.contains("display manager command gdm"),
+        "display manager launcher should expose proof mode: {display_manager}"
+    );
+    assert!(
+        generation.join("sw/bin/gdm").is_file()
+            && generation.join("sw/bin/gnome-session").is_file()
+            && generation.join("sw/bin/gnome-shell").is_file(),
+        "expected default GNOME profile commands in system closure"
+    );
+    assert!(
+        generation.join("sw/bin/jetos-terminal-fallback").is_file(),
+        "expected terminal fallback launcher"
+    );
+    assert!(
+        generation
+            .join("share/wayland-sessions/jetos-gnome.desktop")
+            .is_file(),
+        "expected GNOME Wayland session entry"
     );
     let cache = fs::read_to_string(generation.join("store/cache.json")).unwrap();
     assert!(cache.contains("jetpack-hangar"), "cache: {cache}");
@@ -2834,6 +2906,49 @@ fn os_systemd_init_requires_first_party_source() {
 }
 
 #[test]
+fn os_default_gnome_desktop_requires_first_party_packages() {
+    let proj = Scratch::new("os-missing-gnome-desktop");
+    let root = Scratch::new("os-missing-gnome-desktop-root");
+    let kernel = proj.join("jet-pkgs/pkgs/cachyos-kernel");
+    let systemd = proj.join("jet-pkgs/pkgs/systemd");
+    fs::create_dir_all(kernel.join("boot")).unwrap();
+    fs::create_dir_all(systemd.join("bin")).unwrap();
+    fs::write(
+        proj.join("jet-pkgs/pkg.jet"),
+        "payload: { name: \"jet-pkgs\", version: \"0.1.0\" }\npackages: { cachyos-kernel: library, systemd: executable }\n",
+    )
+    .unwrap();
+    fs::write(
+        kernel.join("cachyos-kernel.jet"),
+        "module cachyos-kernel { }\n",
+    )
+    .unwrap();
+    write_bootlike_cachyos_artifacts(&kernel);
+    write_cachyos_source_recipe(&kernel);
+    fs::write(systemd.join("systemd.jet"), "module systemd { }\n").unwrap();
+    write_executable(&systemd.join("bin/systemd"), "#!/bin/sh\nexit 0\n");
+    fs::write(
+        proj.join("config.jet"),
+        "module box {\n    sources: { mine: path@./jet-pkgs }\n    system.box: { target: linux.x64, options: [ services.desktop.profile: .Default ] }\n}\n",
+    )
+    .unwrap();
+    let out = jet()
+        .args(["os", "build", "box", "--no-color", "--offline"])
+        .current_dir(&proj.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let diagnostic = stderr
+        .find("\n  error[E1288]")
+        .map(|idx| &stderr[idx..])
+        .unwrap_or(&stderr);
+    assert_jetos_stderr_snapshot("missing_gnome_desktop", diagnostic);
+}
+
+#[test]
 fn os_cachyos_kernel_requires_boot_artifacts() {
     let proj = Scratch::new("os-missing-kernel-artifacts");
     let root = Scratch::new("os-missing-kernel-artifacts-root");
@@ -3252,8 +3367,11 @@ fn os_vm_prove_writes_media_bound_harness() {
         "proof should name guest assertions: {data}"
     );
     assert!(
-        data.contains("terminal-login-ready"),
-        "proof should require terminal readiness: {data}"
+        data.contains("terminal-login-ready")
+            && data.contains("desktop-session-ready")
+            && data.contains("graphical-console-ready")
+            && data.contains("desktop-launchers-run"),
+        "proof should require terminal and desktop readiness: {data}"
     );
     assert!(
         data.contains("\"phase\":\"boot-installer\""),
@@ -3264,24 +3382,45 @@ fn os_vm_prove_writes_media_bound_harness() {
         "proof should record reboot phase: {data}"
     );
     assert!(
-        data.contains("\"-kernel\"") && data.contains("/boot/kernel"),
-        "proof should direct-boot the generation kernel: {data}"
-    );
-    assert!(
-        data.contains("\"-initrd\"") && data.contains("/boot/initrd"),
-        "proof should direct-boot the generation initrd: {data}"
+        data.contains("\"phase\":\"boot-graphical-desktop\""),
+        "proof should record graphical desktop phase: {data}"
     );
     assert!(
         data.contains("\"-cdrom\"") && data.contains("jetos-installer-halcyon.iso"),
         "installer phase should boot the ISO media: {data}"
     );
+    let installed_phase = data
+        .split("\"phase\":\"boot-installed-disk\"")
+        .nth(1)
+        .and_then(|rest| rest.split("\"phase\":\"boot-graphical-desktop\"").next())
+        .expect("installed-disk command in proof");
     assert!(
-        data.contains("jetos.mode=verify") && data.contains("root=LABEL=jetos-root"),
-        "installed-disk boot should carry verify intent: {data}"
+        installed_phase.contains("\"-boot\",\"c\"")
+            && installed_phase.contains("file=halcyon.qcow2,format=qcow2,if=ide")
+            && !installed_phase.contains("\"-kernel\"")
+            && !installed_phase.contains("\"-initrd\"")
+            && !installed_phase.contains("\"-append\""),
+        "installed-disk phase should boot firmware/disk, not direct kernel: {installed_phase}"
+    );
+    assert!(
+        data.contains("\"-kernel\"") && data.contains("/boot/kernel"),
+        "graphical proof should direct-boot the generation kernel: {data}"
+    );
+    assert!(
+        data.contains("\"-initrd\"") && data.contains("/boot/initrd"),
+        "graphical proof should direct-boot the generation initrd: {data}"
+    );
+    assert!(
+        data.contains("jetos.mode=desktop-verify")
+            && data.contains("\"-display\"")
+            && data.contains("vnc=127.0.0.1:0,to=99")
+            && data.contains("\"-vga\"")
+            && data.contains("\"std\""),
+        "graphical proof should expose a VNC-backed stdvga display: {data}"
     );
     assert!(
         data.contains("rdinit=/jetos/guest-verify.sh"),
-        "QEMU proof should boot the JetOS verifier overlay script: {data}"
+        "graphical QEMU proof should boot the JetOS verifier overlay script: {data}"
     );
     assert!(
         data.contains("jetos.generation=vm-proof"),
@@ -3294,7 +3433,7 @@ fn os_vm_prove_writes_media_bound_harness() {
     assert!(
         proof
             .with_file_name("halcyon-vm-proof-vm-proof.run")
-            .join("boot-installed-disk.stdout")
+            .join("boot-graphical-desktop.stdout")
             .is_file(),
         "vm prove should run the recorded QEMU phases"
     );
@@ -3364,7 +3503,7 @@ fn os_vm_prove_runs_qemu_and_records_guest_proof() {
     );
     let boot_log = root
         .path
-        .join("systems/vm-proofs/halcyon-vm-live-vm-proof.run/boot-installed-disk.stdout");
+        .join("systems/vm-proofs/halcyon-vm-live-vm-proof.run/boot-graphical-desktop.stdout");
     assert!(
         fs::read_to_string(&boot_log)
             .unwrap()
@@ -3443,7 +3582,7 @@ fn os_vm_prove_accepts_matching_guest_proof() {
     fs::write(
         &guest,
         format!(
-            "{{\"state\":\"guest-passed\",\"host\":\"halcyon\",\"generation\":\"vm-proof\",\"disk\":\"halcyon.qcow2\",\"media_proof\":\"{}\",\"assertions\":[\"current-generation-matches\",\"packages-present\",\"services-active\",\"network-up\",\"rollback-generation-bootable\",\"terminal-login-ready\"],\"toolchain\":\"{}\"}}\n",
+            "{{\"state\":\"guest-passed\",\"host\":\"halcyon\",\"generation\":\"vm-proof\",\"disk\":\"halcyon.qcow2\",\"media_proof\":\"{}\",\"assertions\":[\"current-generation-matches\",\"packages-present\",\"services-active\",\"network-up\",\"rollback-generation-bootable\",\"terminal-login-ready\",\"desktop-session-ready\",\"graphical-console-ready\",\"desktop-launchers-run\"],\"toolchain\":\"{}\"}}\n",
             test_json_escape(&media_proof.display().to_string()),
             test_json_escape(&harness)
         ),
@@ -3576,7 +3715,7 @@ fn os_vm_prove_rejects_stale_guest_generation() {
     fs::write(
         &guest,
         format!(
-            "{{\"state\":\"guest-passed\",\"host\":\"halcyon\",\"generation\":\"older-generation\",\"disk\":\"halcyon.qcow2\",\"media_proof\":\"{}\",\"assertions\":[\"current-generation-matches\",\"packages-present\",\"services-active\",\"network-up\",\"rollback-generation-bootable\",\"terminal-login-ready\"],\"toolchain\":\"{}\"}}\n",
+            "{{\"state\":\"guest-passed\",\"host\":\"halcyon\",\"generation\":\"older-generation\",\"disk\":\"halcyon.qcow2\",\"media_proof\":\"{}\",\"assertions\":[\"current-generation-matches\",\"packages-present\",\"services-active\",\"network-up\",\"rollback-generation-bootable\",\"terminal-login-ready\",\"desktop-session-ready\",\"graphical-console-ready\",\"desktop-launchers-run\"],\"toolchain\":\"{}\"}}\n",
             test_json_escape(&media_proof.display().to_string()),
             test_json_escape(&harness)
         ),
@@ -3644,11 +3783,26 @@ fn os_image_writes_jetos_installer_media_proof() {
         "tx: {transaction}"
     );
     assert!(
-        transaction.contains("\"install-limine\""),
+        transaction.contains("\"partition-gpt\"")
+            && transaction.contains("\"mkfs.vfat-esp\"")
+            && transaction.contains("\"install-limine-esp\""),
         "tx: {transaction}"
     );
     let install = fs::read_to_string(staging.join("install/install.sh")).unwrap();
+    assert!(
+        install.contains("sfdisk --wipe always"),
+        "install: {install}"
+    );
+    assert!(
+        install.contains("blockdev --rereadpt"),
+        "install: {install}"
+    );
+    assert!(install.contains("mkfs.vfat -F 32"), "install: {install}");
     assert!(install.contains("mkfs.ext4"), "install: {install}");
+    assert!(
+        install.contains("EFI/BOOT/BOOTX64.EFI") && install.contains("installed-limine.conf"),
+        "install: {install}"
+    );
     assert!(install.contains("install-proof.json"), "install: {install}");
     let verify = fs::read_to_string(staging.join("install/guest-verify.sh")).unwrap();
     assert!(
@@ -3661,7 +3815,16 @@ fn os_image_writes_jetos_installer_media_proof() {
         "verify: {verify}"
     );
     assert!(
-        verify.contains("terminal/facts.json") && verify.contains("serial-getty@ttyS0.service"),
+        verify.contains("terminal/facts.json")
+            && verify.contains("serial-getty@ttyS0.service")
+            && verify.contains("desktop/facts.json")
+            && verify.contains("sw/bin/gdm")
+            && verify.contains("sw/bin/gnome-session")
+            && verify.contains("sw/bin/gnome-shell")
+            && verify.contains("jetos-desktop-session")
+            && verify.contains("jetos-studio")
+            && verify.contains("--jetos-proof")
+            && verify.contains("desktop-launchers-run"),
         "verify: {verify}"
     );
     assert!(
@@ -3669,19 +3832,40 @@ fn os_image_writes_jetos_installer_media_proof() {
         "verify: {verify}"
     );
     assert!(verify.contains("\"rollback\""), "verify: {verify}");
-    let initrd = fs::read_to_string(staging.join("boot/initrd")).unwrap();
+    let initrd_bytes = fs::read(staging.join("boot/initrd")).unwrap();
+    let initrd = String::from_utf8_lossy(&initrd_bytes);
     assert!(initrd.contains("jetos.mode=install"), "initrd: {initrd}");
     assert!(initrd.contains("jetos.mode=verify"), "initrd: {initrd}");
+    assert!(
+        initrd.contains("jetos.mode=desktop-verify"),
+        "initrd: {initrd}"
+    );
+    assert!(
+        initrd.contains("jetos/tools/bin/sfdisk") && initrd.contains("jetos/tools/bin/blockdev"),
+        "initrd should carry installer partition tools: {initrd}"
+    );
     assert!(
         initrd.contains("JETOS_GUEST_PROOF"),
         "initrd should carry guest proof reporter: {initrd}"
     );
     let limine = fs::read_to_string(staging.join("boot/limine.conf")).unwrap();
     assert!(
-        limine.contains(":Install jetos halcyon")
-            && limine.contains("rdinit=/jetos/install.sh")
+        limine.contains("/Install jetos halcyon")
+            && limine.contains("cmdline: console=ttyS0 rdinit=/jetos/install.sh")
             && limine.contains("jetos.disk=/dev/sda"),
         "limine: {limine}"
+    );
+    assert!(
+        staging.join("boot/efiboot.img").is_file(),
+        "installer media should carry a UEFI FAT ESP boot image"
+    );
+    assert!(
+        staging.join("EFI/BOOT/BOOTX64.EFI").is_file(),
+        "installer media should expose the EFI loader for target ESP install"
+    );
+    assert!(
+        staging.join("boot/installed-limine.conf").is_file(),
+        "installer media should carry installed-disk Limine config"
     );
     assert_eq!(
         fs::read_to_string(staging.join("limine.conf")).unwrap(),

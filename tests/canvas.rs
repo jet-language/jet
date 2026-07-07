@@ -191,6 +191,16 @@ fn first_source_wire_id(graph: &str) -> String {
     panic!("source-backed wire in graph JSON");
 }
 
+fn first_node_id_containing(graph: &str, needle: &str) -> String {
+    for chunk in graph.split("\"node_id\":\"").skip(1) {
+        let id = &chunk[..chunk.find('"').expect("node id terminator")];
+        if id.contains(needle) {
+            return id.to_string();
+        }
+    }
+    panic!("node id containing {needle}");
+}
+
 fn count_occurrences(haystack: &str, needle: &str) -> usize {
     haystack.match_indices(needle).count()
 }
@@ -208,10 +218,23 @@ fn canvas_graph_json_is_stable_and_typed() {
     assert!(json.contains("\"title\":\"summarize\""));
     assert!(json.contains("\"kind\":\"branch\""));
     assert!(json.contains("\"kind\":\"call\""));
+    assert!(json.contains("\"kind\":\"variable_get\""));
+    assert!(json.contains("\"kind\":\"constant\""));
     assert!(json.contains("\"type\":\"Int\""));
     assert!(json.contains("\"wire_kind\":\"data\""));
+    assert!(json.contains("\"wire_kind\":\"control\""));
+    assert!(json.contains("\"type\":\"exec\""));
+    assert!(json.contains("\"capability\":\"control\""));
     assert!(json.contains("\"inline_exprs\""));
     assert!(json.contains("total > 10"));
+    let square_call = first_node_id_containing(&json, ":call:square");
+    let binding = first_node_id_containing(&json, ":stmt:1:binding");
+    assert!(
+        json.contains(&format!(
+            "\"from_pin\":\"{square_call}:output:then\",\"to_pin\":\"{binding}:input:exec\",\"wire_kind\":\"control\""
+        )),
+        "execution rail should run data-producing calls before dependent bindings: {json}"
+    );
 
     let again = jet::Canvas::graph_json_for_file(&path).expect("canvas graph again");
     assert_eq!(
@@ -709,7 +732,7 @@ fn canvas_projects_function_metadata_and_callback_event_views() {
     for field in [
         "\"title\":\"on_start\"",
         "\"function\":{\"name\":\"on_start\"",
-        "\"signature\":\"pub fn on_start(limit: Int = <default@",
+        "\"signature\":\"pub fn on_start(limit: Int = 1) -> Int\"",
         "\"visibility\":\"public\"",
         "\"docs\":\"Starts the scene.\"",
         "\"returns\":\"Int\"",

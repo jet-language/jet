@@ -8,6 +8,7 @@ use super::ModuleEval::{self, EnvPlan, ImageKind, ServicePlan, SystemPlan};
 use super::Output::Theme;
 use super::{Provider, RefSpec, Store, JSON};
 use crate::Syntax;
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -15,12 +16,18 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const CACHYOS_KERNEL_PACKAGE: &str = "cachyos-kernel";
 const SYSTEMD_INIT_PACKAGE: &str = "systemd";
-const VM_TOOLS: [&str; 6] = [
+const GNOME_DESKTOP_PACKAGES: [&str; 3] = ["gdm", "gnome-session", "gnome-shell"];
+const VM_TOOLS: [&str; 11] = [
     "qemu-system-x86_64",
     "qemu-img",
     "xorriso",
     "limine",
+    "sfdisk",
+    "blockdev",
     "mkfs.ext4",
+    "mkfs.vfat",
+    "mmd",
+    "mcopy",
     "zstd",
 ];
 const VM_GUEST_PROOF_MARKER: &str = "JETOS_GUEST_PROOF:";
@@ -435,10 +442,10 @@ fn cmd_vm(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 {
             "E1279",
             "jetos VM proof tools are missing",
             &format!(
-                "D-JOS-VMDEPS1=A requires pinned VM/media tools before installer proof can run; missing: {}.",
+            "D-JOS-VMDEPS1=A requires pinned VM/media tools before installer proof can run; missing: {}.",
                 missing.join(", ")
             ),
-            "realize or expose qemu-system-x86_64, qemu-img, xorriso, limine, mkfs.ext4, and zstd, then rerun `jet os vm prove`.",
+            "realize or expose qemu-system-x86_64, qemu-img, xorriso, limine, sfdisk, blockdev, mkfs.ext4, mkfs.vfat, mmd, mcopy, and zstd, then rerun `jet os vm prove`.",
         );
         return 2;
     }
@@ -456,6 +463,20 @@ fn cmd_vm(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 {
             return 2;
         }
     };
+    let installer_iso = systems_dir()
+        .join("images")
+        .join(format!("jetos-installer-{}.iso", system.name));
+    if !installer_iso.is_file() {
+        theme.error(
+            "jetos installer ISO was not built",
+            &format!(
+                "VM proof needs `{}`; media staging did not produce a bootable ISO.",
+                installer_iso.display()
+            ),
+            "inspect the media staging `iso-error.txt`, fix the ISO build failure, then rerun `jet os vm prove`.",
+        );
+        return 2;
+    }
     match write_vm_install_plan(&gen, &system, disk, &media) {
         Ok(path) => match prove_vm_guest(&gen, &system, disk, &media, &path) {
             Ok(Some(final_path)) => {
@@ -556,7 +577,7 @@ fn cmd_vm_run(theme: &Theme, system: &SystemPlan, disk: &str) -> i32 {
         theme.bold(&system.name),
         theme.bold(&gen.name)
     ));
-    theme.detail("terminal console is attached to this process");
+    theme.detail("graphical console is exposed over VNC; serial output is attached here");
     match run_interactive_vm_command(&command) {
         Ok(code) => code,
         Err(e) => {
@@ -795,6 +816,47 @@ fn build_generation(
         };
         realized.push(entry);
     }
+    for package in desktop_default_required_packages(system) {
+        if realized.iter().any(|entry| entry.name == *package) {
+            continue;
+        }
+        let Some(raw) = first_party_package_ref(&plan.table, package) else {
+            theme.error_coded(
+                "E1288",
+                "jetos GNOME desktop package is missing",
+                "D-JOS-DESKTOP1=A: the default jetos desktop profile needs first-party GNOME session packages in the system closure.",
+                "declare first-party packages for gdm, gnome-session, and gnome-shell, or select a ratified non-GNOME desktop profile.",
+            );
+            return None;
+        };
+        let spec = match RefSpec::classify_in(&raw, &plan.table) {
+            Ok(spec) => spec,
+            Err(err) => {
+                super::Output::ref_error(theme, &err);
+                return None;
+            }
+        };
+        let entry = match try_realize_ref(
+            theme,
+            &roots,
+            flags,
+            &plan.table,
+            &spec,
+            name_w.max(package.len()),
+        ) {
+            Ok(entry) => entry,
+            Err(_) => {
+                theme.error_coded(
+                    "E1288",
+                    "jetos GNOME desktop package is missing",
+                    "D-JOS-DESKTOP1=A: the default jetos desktop profile needs first-party GNOME session packages in the system closure.",
+                    "declare first-party packages for gdm, gnome-session, and gnome-shell, or select a ratified non-GNOME desktop profile.",
+                );
+                return None;
+            }
+        };
+        realized.push(entry);
+    }
     if !run_kernel_bootstrap_builder(theme, &boot, &realized) {
         return None;
     }
@@ -952,6 +1014,29 @@ fn first_party_package_ref(table: &RefSpec::SourceTable, package: &str) -> Optio
         .into_iter()
         .find(|(_, _, via)| *via == RefSpec::ProviderKind::Core)
         .map(|(name, _, _)| format!("{name}:{package}"))
+}
+
+fn desktop_default_required_packages(system: &SystemPlan) -> &'static [&'static str] {
+    let requested = option_value(
+        system,
+        &["services.desktop.profile", "services.desktop.session"],
+    )
+    .is_some()
+        || option_value(system, &["services.displayManager"]).is_some()
+        || option_value(system, &["init.defaultTarget"]).as_deref() == Some("graphical.target");
+    if !requested {
+        return &[];
+    }
+    let profile = option_value(system, &["services.desktop.profile"])
+        .map(|s| clean_symbol(&s))
+        .or_else(|| option_value(system, &["services.desktop.session"]).map(|s| clean_symbol(&s)))
+        .unwrap_or_else(|| "Default".to_string());
+    let profile = profile.to_ascii_lowercase();
+    if profile == "default" || profile == "gnome" {
+        &GNOME_DESKTOP_PACKAGES
+    } else {
+        &[]
+    }
 }
 
 fn realize_ref(
@@ -1720,7 +1805,7 @@ fn write_boot_facts(
     fs::write(
         boot_dir.join("limine.conf"),
         format!(
-            "TIMEOUT=5\nSERIAL=yes\nVERBOSE=yes\nTEXTMODE=yes\n:jetos {}\n    PROTOCOL=linux\n    KERNEL_PATH=boot:///boot/kernel\n    MODULE_PATH=boot:///boot/initrd\n    CMDLINE=console=ttyS0 root=LABEL=jetos-root rw init={}\n",
+        "timeout: 5\nserial: yes\ngraphics: no\nverbose: yes\n/jetos {}\n    protocol: linux\n    kernel_path: boot():/boot/kernel\n    module_path: boot():/boot/initrd\n    textmode: yes\n    cmdline: console=ttyS0 root=LABEL=jetos-root rw init={}\n",
             system.name, boot.init
         ),
     )?;
@@ -1747,11 +1832,13 @@ fn write_boot_facts(
             format!("modules={}\n", boot.initrd_modules.join(",")),
         )?,
     }
-    if let Some(module) =
-        kernel_entry.and_then(|entry| boot_artifact(entry, &["boot/modules/isofs.ko.xz"]))
-    {
-        fs::create_dir_all(boot_dir.join("modules"))?;
-        link_or_copy_file(&module, &boot_dir.join("modules/isofs.ko.xz"))?;
+    for module_name in ["isofs.ko.xz", "bochs.ko.xz"] {
+        if let Some(module) = kernel_entry
+            .and_then(|entry| boot_artifact(entry, &[&format!("boot/modules/{module_name}")]))
+        {
+            fs::create_dir_all(boot_dir.join("modules"))?;
+            link_or_copy_file(&module, &boot_dir.join("modules").join(module_name))?;
+        }
     }
     fs::write(
         boot_dir.join("facts.json"),
@@ -2034,35 +2121,80 @@ fn write_hardware_facts(dir: &Path, system: &SystemPlan) -> std::io::Result<()> 
 
 fn write_desktop_facts(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
     let desktop_dir = dir.join("desktop");
+    let bin_dir = dir.join("sw/bin");
+    let session_dir = dir.join("share/wayland-sessions");
     fs::create_dir_all(&desktop_dir)?;
-    let session = option_value(system, &["services.desktop.session"]);
-    let display_manager = option_value(system, &["services.displayManager"]);
+    fs::create_dir_all(&bin_dir)?;
+    fs::create_dir_all(&session_dir)?;
+    let profile = option_value(system, &["services.desktop.profile"])
+        .map(|s| clean_symbol(&s))
+        .unwrap_or_else(|| {
+            option_value(system, &["services.desktop.session"])
+                .map(|s| clean_symbol(&s))
+                .unwrap_or_else(|| "Default".to_string())
+        });
+    let profile_lower = profile.to_ascii_lowercase();
+    let (session, display_manager, compositor, shell) =
+        if profile_lower == "default" || profile_lower == "gnome" {
+            (
+                "gnome-wayland".to_string(),
+                option_value(system, &["services.displayManager"])
+                    .map(|s| clean_symbol(&s))
+                    .unwrap_or_else(|| "gdm".to_string()),
+                "mutter".to_string(),
+                "gnome-shell".to_string(),
+            )
+        } else {
+            (
+                profile.clone(),
+                option_value(system, &["services.displayManager"])
+                    .map(|s| clean_symbol(&s))
+                    .unwrap_or_else(|| "greetd".to_string()),
+                profile.clone(),
+                profile.clone(),
+            )
+        };
     fs::write(
         desktop_dir.join("facts.json"),
         format!(
-            "{{\"session\":{},\"display_manager\":{},\"source\":\"system options\"}}",
-            session
-                .as_deref()
-                .map(JSON::quote)
-                .unwrap_or_else(|| "null".to_string()),
-            display_manager
-                .as_deref()
-                .map(JSON::quote)
-                .unwrap_or_else(|| "null".to_string())
+            "{{\"profile\":{},\"session\":{},\"protocol\":\"wayland\",\"display_manager\":{},\"compositor\":{},\"shell\":{},\"terminal_fallback\":\"ttyS0+tty1\",\"studio_app\":\"jetos-studio\",\"browser_fallback\":true,\"proof\":\"desktop-session-ready\",\"source\":\"system options\"}}",
+            JSON::quote(&profile),
+            JSON::quote(&session),
+            JSON::quote(&display_manager),
+            JSON::quote(&compositor),
+            JSON::quote(&shell)
         ),
     )?;
-    if let Some(dm) = display_manager {
-        let unit_dir = dir.join("etc/systemd/system");
-        fs::create_dir_all(&unit_dir)?;
-        fs::write(
-            unit_dir.join("display-manager.service"),
-            format!(
-                "[Unit]\nDescription=jetos display manager\n\n[Service]\nExecStart=/run/current-system/sw/bin/{}\n\n[Install]\nWantedBy=graphical.target\n",
-                dm
-            ),
-        )?;
-        enable_unit(&unit_dir, "graphical.target", "display-manager.service")?;
-    }
+    fs::write(
+        desktop_dir.join("session.env"),
+        format!(
+            "XDG_SESSION_TYPE=wayland\nXDG_CURRENT_DESKTOP=jetos:{}\nJETOS_DESKTOP_PROFILE={}\nJETOS_TERMINAL_FALLBACK=ttyS0,tty1\n",
+            session, profile
+        ),
+    )?;
+    fs::write(
+        session_dir.join("jetos-gnome.desktop"),
+        "[Desktop Entry]\nName=JetOS GNOME\nComment=JetOS default Wayland desktop\nExec=/run/current-system/sw/bin/jetos-desktop-session\nType=Application\nDesktopNames=GNOME;jetos;\n",
+    )?;
+    let fallback = "#!/usr/bin/env sh\nset -eu\nif [ \"${1:-}\" = \"--jetos-proof\" ]; then\n  printf '%s\\n' 'jetos proof: terminal fallback ready'\n  exit 0\nfi\nprintf '%s\\n' 'jetos desktop fallback: terminal login remains available on ttyS0 and tty1'\nexec /bin/sh\n";
+    let fallback_path = bin_dir.join("jetos-terminal-fallback");
+    fs::write(&fallback_path, fallback)?;
+    make_executable(&fallback_path)?;
+    let session_launcher = "#!/usr/bin/env sh\nset -eu\nroot=${JETOS_SYSTEM_ROOT:-/run/current-system}\nPATH=\"$root/sw/bin:$PATH\"\nexport PATH\nexport XDG_SESSION_TYPE=wayland\nexport XDG_CURRENT_DESKTOP=jetos:GNOME\nif [ \"${1:-}\" = \"--jetos-proof\" ]; then\n  if command -v gnome-session >/dev/null 2>&1; then\n    printf '%s\\n' 'jetos proof: desktop session command gnome-session'\n    exit 0\n  fi\n  if command -v gnome-shell >/dev/null 2>&1; then\n    printf '%s\\n' 'jetos proof: desktop session command gnome-shell --wayland'\n    exit 0\n  fi\n  exec \"$root/sw/bin/jetos-terminal-fallback\" --jetos-proof\nfi\nif command -v gnome-session >/dev/null 2>&1; then\n  exec gnome-session\nfi\nif command -v gnome-shell >/dev/null 2>&1; then\n  exec gnome-shell --wayland\nfi\nexec \"$root/sw/bin/jetos-terminal-fallback\"\n";
+    let session_path = bin_dir.join("jetos-desktop-session");
+    fs::write(&session_path, session_launcher)?;
+    make_executable(&session_path)?;
+    let dm_launcher = "#!/usr/bin/env sh\nset -eu\nroot=${JETOS_SYSTEM_ROOT:-/run/current-system}\nPATH=\"$root/sw/bin:$PATH\"\nexport PATH\nif [ \"${1:-}\" = \"--jetos-proof\" ]; then\n  if command -v gdm >/dev/null 2>&1; then\n    printf '%s\\n' 'jetos proof: display manager command gdm'\n    exit 0\n  fi\n  exec \"$root/sw/bin/jetos-desktop-session\" --jetos-proof\nfi\nif command -v gdm >/dev/null 2>&1; then\n  exec gdm\nfi\nexec \"$root/sw/bin/jetos-desktop-session\"\n";
+    let dm_path = bin_dir.join("jetos-display-manager");
+    fs::write(&dm_path, dm_launcher)?;
+    make_executable(&dm_path)?;
+    let unit_dir = dir.join("etc/systemd/system");
+    fs::create_dir_all(&unit_dir)?;
+    fs::write(
+        unit_dir.join("display-manager.service"),
+        "[Unit]\nDescription=jetos graphical login\nAfter=systemd-user-sessions.service plymouth-quit-wait.service\n\n[Service]\nExecStart=/run/current-system/sw/bin/jetos-display-manager\nRestart=always\n\n[Install]\nWantedBy=graphical.target\n",
+    )?;
+    enable_unit(&unit_dir, "graphical.target", "display-manager.service")?;
     Ok(())
 }
 
@@ -2165,6 +2297,10 @@ fn write_installer_media(
     let installer_limine = render_installer_limine_conf(system, gen, disk);
     fs::write(staging.join("limine.conf"), &installer_limine)?;
     fs::write(staging.join("boot/limine.conf"), installer_limine)?;
+    fs::write(
+        staging.join("boot/installed-limine.conf"),
+        render_installed_limine_conf(system, gen),
+    )?;
     copy_file_replace(&gen.path.join("boot/kernel"), &staging.join("boot/kernel"))?;
     copy_file_replace(&gen.path.join("boot/initrd"), &staging.join("boot/initrd"))?;
     append_installer_initrd_overlay(&staging.join("boot/initrd"), system, gen)?;
@@ -2185,7 +2321,7 @@ fn write_installer_media(
         format!("{}\n", gen.path.display()),
     )?;
     let transaction = format!(
-        "{{\"brand\":\"jetos\",\"host\":{},\"generation\":{},\"mode\":\"guided-or-scripted\",\"disk\":{},\"root_label\":\"jetos-root\",\"source_generation\":{},\"steps\":[\"partition-disk\",\"mkfs.ext4-root\",\"copy-generation-closure\",\"install-limine\",\"write-generation-ledger\",\"reboot-installed-disk\",\"verify-guest-proof\"]}}",
+        "{{\"brand\":\"jetos\",\"host\":{},\"generation\":{},\"mode\":\"guided-or-scripted\",\"disk\":{},\"root_label\":\"jetos-root\",\"esp_label\":\"JETOS-ESP\",\"source_generation\":{},\"steps\":[\"partition-gpt\",\"mkfs.vfat-esp\",\"mkfs.ext4-root\",\"copy-generation-closure\",\"install-limine-esp\",\"write-generation-ledger\",\"reboot-installed-disk\",\"verify-guest-proof\"]}}",
         JSON::quote(&system.name),
         JSON::quote(&gen.name),
         JSON::quote(disk),
@@ -2237,7 +2373,7 @@ fn render_installer_script(system: &SystemPlan, gen: &Generation) -> String {
     format!(
         r#"#!/bin/sh
 set -eu
-PATH=/bin:/sbin:/usr/bin:/usr/sbin
+PATH=/jetos/tools/bin:/bin:/sbin:/usr/bin:/usr/sbin
 export PATH
 disk="${{1:-}}"
 mkdir -p /proc
@@ -2301,22 +2437,53 @@ while [ ! -e "$disk" ] && [ "$tries" -lt 50 ]; do
     sleep 1
 done
 echo "jetos installer: using disk=$disk"
-mkfs.ext4 -F -L jetos-root "$disk"
-mount "$disk" "$root"
-mkdir -p "$root/run" "$root/boot" "$root/var/lib/jetos/generations/{generation}"
+case "$disk" in
+    *[0-9]) esp="${{disk}}p1"; root_part="${{disk}}p2" ;;
+    *) esp="${{disk}}1"; root_part="${{disk}}2" ;;
+esac
+printf 'label: gpt\nsize=512M, type=U\n type=L\n' | sfdisk --wipe always "$disk"
+blockdev --rereadpt "$disk" 2>/dev/null || true
+sync
+tries=0
+while {{ [ ! -e "$esp" ] || [ ! -e "$root_part" ]; }} && [ "$tries" -lt 30 ]; do
+    tries=$((tries + 1))
+    sleep 1
+done
+if [ ! -e "$esp" ] || [ ! -e "$root_part" ]; then
+    echo "jetos installer: missing partition nodes esp=$esp root=$root_part"
+    exit 1
+fi
+mkfs.vfat -F 32 -n JETOS-ESP "$esp"
+mkfs.ext4 -F -L jetos-root "$root_part"
+mount "$root_part" "$root"
+mkdir -p "$root/run" "$root/boot" "$root/boot/efi" "$root/var/lib/jetos/generations/{generation}"
+mount "$esp" "$root/boot/efi"
+mkdir -p "$root/boot/efi/EFI/BOOT" "$root/boot/efi/boot"
 cp -a /media/jetos/current-system/. "$root/var/lib/jetos/generations/{generation}/"
 rm -rf "$root/run/current-system"
 ln -s "/var/lib/jetos/generations/{generation}" "$root/run/current-system"
 cp /media/boot/kernel "$root/boot/kernel"
 cp /media/boot/initrd "$root/boot/initrd"
-cp /media/jetos/current-system/boot/limine.conf "$root/boot/limine.conf"
+cp /media/boot/installed-limine.conf "$root/boot/limine.conf"
+cp /media/boot/kernel "$root/boot/efi/boot/kernel"
+cp /media/boot/initrd "$root/boot/efi/boot/initrd"
+cp /media/boot/installed-limine.conf "$root/boot/efi/boot/limine.conf"
+cp /media/EFI/BOOT/BOOTX64.EFI "$root/boot/efi/EFI/BOOT/BOOTX64.EFI"
 printf '%s\t%s\t%s\n' "{created}" "{host}" "{generation}" > "$root/var/lib/jetos/generations/log"
-printf '{{"host":"{host}","generation":"{generation}","disk":"%s","result":"installed"}}\n' "$disk" > "$root/var/lib/jetos/install-proof.json"
+printf '{{"host":"{host}","generation":"{generation}","disk":"%s","esp":"%s","root":"%s","layout":"gpt-esp-ext4","result":"installed"}}\n' "$disk" "$esp" "$root_part" > "$root/var/lib/jetos/install-proof.json"
 sync
 echo "jetos installer: installed host={host} generation={generation}"
 poweroff -f 2>/dev/null || halt -f 2>/dev/null || exit 0
 "#,
         created = gen.created_at,
+        host = system.name,
+        generation = gen.name
+    )
+}
+
+fn render_installed_limine_conf(system: &SystemPlan, gen: &Generation) -> String {
+    format!(
+        "timeout: 1\nserial: yes\ngraphics: no\nverbose: yes\n/jetos {host} verify\n    protocol: linux\n    kernel_path: boot():/boot/kernel\n    module_path: boot():/boot/initrd\n    textmode: yes\n    cmdline: console=ttyS0 rdinit=/jetos/guest-verify.sh jetos.mode=verify jetos.host={host} jetos.generation={generation} root=LABEL=jetos-root rw\n",
         host = system.name,
         generation = gen.name
     )
@@ -2329,7 +2496,7 @@ fn render_installer_limine_conf(system: &SystemPlan, gen: &Generation, disk: &st
         "/dev/sda".to_string()
     };
     format!(
-        "TIMEOUT=5\nSERIAL=yes\nVERBOSE=yes\nTEXTMODE=yes\n:Install jetos {host}\n    PROTOCOL=linux\n    KERNEL_PATH=boot:///boot/kernel\n    MODULE_PATH=boot:///boot/initrd\n    CMDLINE=console=ttyS0 rdinit=/jetos/install.sh jetos.mode=install jetos.host={host} jetos.generation={generation} jetos.disk={disk}\n",
+        "timeout: 5\nserial: yes\ngraphics: no\nverbose: yes\n/Install jetos {host}\n    protocol: linux\n    kernel_path: boot():/boot/kernel\n    module_path: boot():/boot/initrd\n    textmode: yes\n    cmdline: console=ttyS0 rdinit=/jetos/install.sh jetos.mode=install jetos.host={host} jetos.generation={generation} jetos.disk={disk}\n",
         host = system.name,
         generation = gen.name
     )
@@ -2372,6 +2539,7 @@ if [ "$root" != "/" ]; then
     echo "jetos verifier: mounting installed root"
     mount LABEL=jetos-root "$root" || mount /dev/vda "$root" || mount /dev/sda "$root" || true
 fi
+cmdline="$(cat /proc/cmdline 2>/dev/null || true)"
 need() {{
     path="$1"
     if [ ! -e "$path" ]; then
@@ -2391,6 +2559,16 @@ need "$system/etc/profile"
 need "$system/etc/shells"
 need "$system/etc/systemd/system/serial-getty@ttyS0.service"
 need "$system/etc/systemd/system/getty.target.wants/serial-getty@ttyS0.service"
+need "$system/desktop/facts.json"
+need "$system/sw/bin/gdm"
+need "$system/sw/bin/gnome-session"
+need "$system/sw/bin/gnome-shell"
+need "$system/sw/bin/jetos-desktop-session"
+need "$system/sw/bin/jetos-terminal-fallback"
+need "$system/sw/bin/jetos-studio"
+need "$system/share/applications/jetos-studio.desktop"
+need "$system/etc/systemd/system/display-manager.service"
+need "$system/etc/systemd/system/graphical.target.wants/display-manager.service"
 need "$root/var/lib/jetos/generations/log"
 if [ ! -L "$root/run/current-system" ]; then
     echo "jetos verifier: missing current-system symlink"
@@ -2399,8 +2577,32 @@ fi
 for svc in {services}; do
     need "$system/etc/systemd/system/$svc.service"
 done
-printf '{{"host":"{host}","generation":"{generation}","packages":"present","services":"present","network":"declared","rollback":"ledger-present","proof":"present"}}\n'
-printf 'JETOS_GUEST_PROOF: {{"state":"guest-passed","host":"{host}","generation":"{generation}","assertions":["current-generation-matches","packages-present","services-active","network-up","rollback-generation-bootable","terminal-login-ready"]}}\n'
+case "$cmdline" in
+  *jetos.mode=desktop-verify*)
+    insmod /jetos/modules/bochs.ko.xz 2>/dev/null || true
+    modprobe virtio_gpu 2>/dev/null || true
+    modprobe bochs 2>/dev/null || true
+    modprobe drm 2>/dev/null || true
+    cat /proc/fb 2>/dev/null || true
+    for gfx in /sys/class/graphics/*; do
+        echo "jetos verifier: graphics sees $gfx"
+    done
+    if [ ! -e /sys/class/graphics/fb0 ] && [ ! -s /proc/fb ]; then
+        echo "jetos verifier: missing graphical framebuffer"
+        exit 1
+    fi
+    desktop_path="$system/sw/bin:$PATH"
+    JETOS_SYSTEM_ROOT="$system" PATH="$desktop_path" /bin/sh "$system/sw/bin/jetos-display-manager" --jetos-proof
+    JETOS_SYSTEM_ROOT="$system" PATH="$desktop_path" /bin/sh "$system/sw/bin/jetos-desktop-session" --jetos-proof
+    JETOS_SYSTEM_ROOT="$system" PATH="$desktop_path" /bin/sh "$system/sw/bin/jetos-terminal-fallback" --jetos-proof
+    printf '{{"host":"{host}","generation":"{generation}","packages":"present","services":"present","network":"declared","rollback":"ledger-present","proof":"present","desktop":"gnome-wayland","display":"graphical","launcher":"proved"}}\n'
+    printf 'JETOS_GUEST_PROOF: {{"state":"guest-passed","host":"{host}","generation":"{generation}","assertions":["current-generation-matches","packages-present","services-active","network-up","rollback-generation-bootable","terminal-login-ready","desktop-session-ready","graphical-console-ready","desktop-launchers-run"]}}\n'
+    ;;
+  *)
+    printf '{{"host":"{host}","generation":"{generation}","packages":"present","services":"present","network":"declared","rollback":"ledger-present","proof":"present"}}\n'
+    printf 'JETOS_GUEST_PROOF: {{"state":"guest-passed","host":"{host}","generation":"{generation}","assertions":["current-generation-matches","packages-present","services-active","network-up","rollback-generation-bootable","terminal-login-ready","desktop-session-ready"]}}\n'
+    ;;
+esac
 poweroff -f 2>/dev/null || halt -f 2>/dev/null || exit 0
 "#,
         host = system.name,
@@ -2423,7 +2625,7 @@ case "$cmdline" in
     mount -o ro /dev/sr0 /media 2>/dev/null || mount -o ro /dev/cdrom /media 2>/dev/null || true
     exec /bin/sh /jetos/install.sh /dev/vda
     ;;
-  *jetos.mode=verify*)
+  *jetos.mode=verify*|*jetos.mode=desktop-verify*)
     mkdir -p /sysroot
     mount LABEL=jetos-root /sysroot 2>/dev/null || mount /dev/vda /sysroot 2>/dev/null || true
     JETOS_TARGET_ROOT=/sysroot /bin/sh /jetos/guest-verify.sh
@@ -2435,23 +2637,36 @@ esac
     let install = render_installer_script(system, gen);
     let verify = render_guest_verify_script(system, gen);
     let isofs = fs::read(gen.path.join("boot/modules/isofs.ko.xz")).ok();
-    let overlay = if let Some(isofs) = isofs.as_ref() {
-        cpio_newc(&[
-            CpioEntry::dir("jetos"),
-            CpioEntry::dir("jetos/modules"),
-            CpioEntry::file("init", 0o100755, init.as_bytes()),
-            CpioEntry::file("jetos/install.sh", 0o100755, install.as_bytes()),
-            CpioEntry::file("jetos/guest-verify.sh", 0o100755, verify.as_bytes()),
-            CpioEntry::file("jetos/modules/isofs.ko.xz", 0o100644, isofs),
-        ])
-    } else {
-        cpio_newc(&[
-            CpioEntry::dir("jetos"),
-            CpioEntry::file("init", 0o100755, init.as_bytes()),
-            CpioEntry::file("jetos/install.sh", 0o100755, install.as_bytes()),
-            CpioEntry::file("jetos/guest-verify.sh", 0o100755, verify.as_bytes()),
-        ])
-    };
+    let bochs = fs::read(gen.path.join("boot/modules/bochs.ko.xz")).ok();
+    let mut entries = vec![
+        OwnedCpioEntry::dir("jetos"),
+        OwnedCpioEntry::dir("jetos/modules"),
+        OwnedCpioEntry::dir("jetos/tools"),
+        OwnedCpioEntry::dir("jetos/tools/bin"),
+        OwnedCpioEntry::file("init", 0o100755, init.as_bytes().to_vec()),
+        OwnedCpioEntry::file("jetos/install.sh", 0o100755, install.as_bytes().to_vec()),
+        OwnedCpioEntry::file(
+            "jetos/guest-verify.sh",
+            0o100755,
+            verify.as_bytes().to_vec(),
+        ),
+    ];
+    if let Some(isofs) = isofs {
+        entries.push(OwnedCpioEntry::file(
+            "jetos/modules/isofs.ko.xz",
+            0o100644,
+            isofs,
+        ));
+    }
+    if let Some(bochs) = bochs {
+        entries.push(OwnedCpioEntry::file(
+            "jetos/modules/bochs.ko.xz",
+            0o100644,
+            bochs,
+        ));
+    }
+    entries.extend(installer_tool_overlay_entries()?);
+    let overlay = cpio_newc_owned(&entries);
     let initrd_bytes = fs::read(initrd)?;
     let overlay = if contains_zstd_frame(&initrd_bytes) && find_path_tool("zstd").is_some() {
         let overlay_path = initrd.with_extension("jetos-overlay.cpio");
@@ -2481,6 +2696,124 @@ esac
     file.write_all(&overlay)
 }
 
+fn installer_tool_overlay_entries() -> std::io::Result<Vec<OwnedCpioEntry>> {
+    let mut dirs = BTreeSet::new();
+    let mut seen_files = BTreeSet::new();
+    let mut files = Vec::new();
+    for tool in ["sfdisk", "blockdev", "mkfs.vfat", "mkfs.ext4"] {
+        let tool_path = find_path_tool(tool).ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("missing installer tool `{tool}`"),
+            )
+        })?;
+        let actual = fs::canonicalize(&tool_path).unwrap_or(tool_path);
+        let wrapper = format!("#!/bin/sh\nexec {} \"$@\"\n", actual.display());
+        add_cpio_file(
+            &mut dirs,
+            &mut seen_files,
+            &mut files,
+            &format!("jetos/tools/bin/{tool}"),
+            0o100755,
+            wrapper.into_bytes(),
+        );
+        add_host_file_to_cpio(&mut dirs, &mut seen_files, &mut files, &actual, 0o100755)?;
+        for dep in ldd_dependency_paths(&actual)? {
+            add_host_file_to_cpio(&mut dirs, &mut seen_files, &mut files, &dep, 0o100644)?;
+        }
+    }
+    let mut entries = dirs
+        .into_iter()
+        .map(|dir| OwnedCpioEntry::dir(&dir))
+        .collect::<Vec<_>>();
+    entries.extend(files);
+    Ok(entries)
+}
+
+fn add_host_file_to_cpio(
+    dirs: &mut BTreeSet<String>,
+    seen_files: &mut BTreeSet<String>,
+    files: &mut Vec<OwnedCpioEntry>,
+    path: &Path,
+    mode: u32,
+) -> std::io::Result<()> {
+    let Some(name) = path
+        .to_str()
+        .and_then(|s| s.strip_prefix('/'))
+        .map(str::to_string)
+    else {
+        return Ok(());
+    };
+    let data = fs::read(path)?;
+    add_cpio_file(dirs, seen_files, files, &name, mode, data);
+    Ok(())
+}
+
+fn add_cpio_file(
+    dirs: &mut BTreeSet<String>,
+    seen_files: &mut BTreeSet<String>,
+    files: &mut Vec<OwnedCpioEntry>,
+    name: &str,
+    mode: u32,
+    data: Vec<u8>,
+) {
+    add_cpio_parent_dirs(dirs, name);
+    if seen_files.insert(name.to_string()) {
+        files.push(OwnedCpioEntry::file(name, mode, data));
+    }
+}
+
+fn add_cpio_parent_dirs(dirs: &mut BTreeSet<String>, name: &str) {
+    let mut prefix = String::new();
+    for part in name
+        .split('/')
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .skip(1)
+        .rev()
+    {
+        if part.is_empty() {
+            continue;
+        }
+        if !prefix.is_empty() {
+            prefix.push('/');
+        }
+        prefix.push_str(part);
+        dirs.insert(prefix.clone());
+    }
+}
+
+fn ldd_dependency_paths(path: &Path) -> std::io::Result<Vec<PathBuf>> {
+    if fs::read(path)
+        .map(|bytes| bytes.starts_with(b"#!"))
+        .unwrap_or(false)
+    {
+        return Ok(Vec::new());
+    }
+    let output = Command::new("ldd").arg(path).output()?;
+    if !output.status.success() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!("ldd failed for `{}`", path.display()),
+        ));
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut deps = Vec::new();
+    let mut seen = BTreeSet::new();
+    for token in text.split_whitespace() {
+        let candidate = token.trim_end_matches(':');
+        if !candidate.starts_with('/') {
+            continue;
+        }
+        let path = PathBuf::from(candidate);
+        if path.exists() && seen.insert(candidate.to_string()) {
+            deps.push(path);
+        }
+    }
+    Ok(deps)
+}
+
 fn contains_zstd_frame(bytes: &[u8]) -> bool {
     bytes
         .windows(4)
@@ -2503,35 +2836,39 @@ fn cpio_trailer_header_offset(bytes: &[u8]) -> Option<usize> {
         })
 }
 
-struct CpioEntry<'a> {
-    name: &'a str,
+struct OwnedCpioEntry {
+    name: String,
     mode: u32,
-    data: &'a [u8],
+    data: Vec<u8>,
 }
 
-impl<'a> CpioEntry<'a> {
-    fn dir(name: &'a str) -> CpioEntry<'a> {
-        CpioEntry {
-            name,
+impl OwnedCpioEntry {
+    fn dir(name: &str) -> OwnedCpioEntry {
+        OwnedCpioEntry {
+            name: name.to_string(),
             mode: 0o040755,
-            data: &[],
+            data: Vec::new(),
         }
     }
 
-    fn file(name: &'a str, mode: u32, data: &'a [u8]) -> CpioEntry<'a> {
-        CpioEntry { name, mode, data }
+    fn file(name: &str, mode: u32, data: Vec<u8>) -> OwnedCpioEntry {
+        OwnedCpioEntry {
+            name: name.to_string(),
+            mode,
+            data,
+        }
     }
 }
 
-fn cpio_newc(entries: &[CpioEntry<'_>]) -> Vec<u8> {
+fn cpio_newc_owned(entries: &[OwnedCpioEntry]) -> Vec<u8> {
     let mut out = Vec::new();
     for (ino, entry) in entries.iter().enumerate() {
         cpio_newc_entry(
             &mut out,
             (ino + 1) as u32,
-            entry.name,
+            &entry.name,
             entry.mode,
-            entry.data,
+            &entry.data,
         );
     }
     cpio_newc_entry(&mut out, entries.len() as u32 + 1, "TRAILER!!!", 0, &[]);
@@ -2584,9 +2921,17 @@ fn build_hybrid_iso(staging: &Path, iso: &Path) -> Result<bool, String> {
     }
     let data_dir = PathBuf::from(String::from_utf8_lossy(&limine_data.stdout).trim());
     let boot_dir = staging.join("boot");
-    fs::copy(
-        data_dir.join("limine-bios.sys"),
-        boot_dir.join("limine-bios.sys"),
+    let efi_boot_dir = staging.join("EFI/BOOT");
+    fs::create_dir_all(&efi_boot_dir)
+        .map_err(|e| format!("creating EFI boot directory failed: {e}"))?;
+    copy_file_replace(
+        &data_dir.join("BOOTX64.EFI"),
+        &efi_boot_dir.join("BOOTX64.EFI"),
+    )
+    .map_err(|e| format!("copying BOOTX64.EFI failed: {e}"))?;
+    copy_file_replace(
+        &data_dir.join("limine-bios.sys"),
+        &boot_dir.join("limine-bios.sys"),
     )
     .map_err(|e| format!("copying limine-bios.sys failed: {e}"))?;
     fs::copy(data_dir.join("BOOTX64.EFI"), boot_dir.join("BOOTX64.EFI"))
@@ -2595,6 +2940,79 @@ fn build_hybrid_iso(staging: &Path, iso: &Path) -> Result<bool, String> {
     fs::create_dir_all(&efi_boot).map_err(|e| format!("creating EFI boot dir failed: {e}"))?;
     fs::copy(data_dir.join("BOOTX64.EFI"), efi_boot.join("BOOTX64.EFI"))
         .map_err(|e| format!("copying EFI/BOOT/BOOTX64.EFI failed: {e}"))?;
+    let efi_img = boot_dir.join("efiboot.img");
+    let bootx64_len = fs::metadata(data_dir.join("BOOTX64.EFI"))
+        .map_err(|e| format!("reading BOOTX64.EFI metadata failed: {e}"))?
+        .len();
+    let limine_len = fs::metadata(boot_dir.join("limine.conf"))
+        .map_err(|e| format!("reading limine.conf metadata failed: {e}"))?
+        .len();
+    let kernel_len = fs::metadata(boot_dir.join("kernel"))
+        .map_err(|e| format!("reading kernel metadata failed: {e}"))?
+        .len();
+    let initrd_len = fs::metadata(boot_dir.join("initrd"))
+        .map_err(|e| format!("reading initrd metadata failed: {e}"))?
+        .len();
+    let min_efi_len = 96 * 1024 * 1024;
+    let payload_len = bootx64_len + limine_len + (kernel_len * 2) + (initrd_len * 2);
+    let efi_len = round_up_u64(
+        min_efi_len.max(payload_len + 64 * 1024 * 1024),
+        16 * 1024 * 1024,
+    );
+    let efi_file =
+        fs::File::create(&efi_img).map_err(|e| format!("creating efiboot.img failed: {e}"))?;
+    efi_file
+        .set_len(efi_len)
+        .map_err(|e| format!("sizing efiboot.img failed: {e}"))?;
+    drop(efi_file);
+    let mkfs = Command::new("mkfs.vfat")
+        .args(["-n", "JETOS_EFI"])
+        .arg(&efi_img)
+        .output()
+        .map_err(|e| format!("running mkfs.vfat failed: {e}"))?;
+    if !mkfs.status.success() {
+        return Err(format!(
+            "mkfs.vfat exited with {}: {}",
+            mkfs.status,
+            String::from_utf8_lossy(&mkfs.stderr)
+        ));
+    }
+    let mmd = Command::new("mmd")
+        .args(["-i"])
+        .arg(&efi_img)
+        .args(["::/EFI", "::/EFI/BOOT", "::/boot"])
+        .output()
+        .map_err(|e| format!("running mmd failed: {e}"))?;
+    if !mmd.status.success() {
+        return Err(format!(
+            "mmd exited with {}: {}",
+            mmd.status,
+            String::from_utf8_lossy(&mmd.stderr)
+        ));
+    }
+    for (source, target) in [
+        (data_dir.join("BOOTX64.EFI"), "::/EFI/BOOT/BOOTX64.EFI"),
+        (boot_dir.join("limine.conf"), "::/boot/limine.conf"),
+        (boot_dir.join("kernel"), "::/boot/kernel"),
+        (boot_dir.join("initrd"), "::/boot/initrd"),
+        (boot_dir.join("kernel"), "::/kernel"),
+        (boot_dir.join("initrd"), "::/initrd"),
+    ] {
+        let mcopy = Command::new("mcopy")
+            .args(["-i"])
+            .arg(&efi_img)
+            .arg(&source)
+            .arg(target)
+            .output()
+            .map_err(|e| format!("running mcopy failed: {e}"))?;
+        if !mcopy.status.success() {
+            return Err(format!(
+                "mcopy exited with {}: {}",
+                mcopy.status,
+                String::from_utf8_lossy(&mcopy.stderr)
+            ));
+        }
+    }
     let xorriso = Command::new("xorriso")
         .args([
             "-as",
@@ -2606,7 +3024,7 @@ fn build_hybrid_iso(staging: &Path, iso: &Path) -> Result<bool, String> {
             "4",
             "-boot-info-table",
             "--efi-boot",
-            "boot/BOOTX64.EFI",
+            "boot/efiboot.img",
             "-efi-boot-part",
             "--efi-boot-image",
             "--protective-msdos-label",
@@ -2638,6 +3056,13 @@ fn build_hybrid_iso(staging: &Path, iso: &Path) -> Result<bool, String> {
     Ok(true)
 }
 
+fn round_up_u64(value: u64, unit: u64) -> u64 {
+    if unit == 0 {
+        return value;
+    }
+    value.div_ceil(unit) * unit
+}
+
 fn write_vm_install_plan(
     gen: &Generation,
     system: &SystemPlan,
@@ -2657,7 +3082,7 @@ fn write_vm_install_plan(
     let commands = qemu_proof_commands_json(&staging_boot, disk, &iso, &system.name, &gen.name);
     let guest = guest_proof_path(&proof);
     let text = format!(
-        "{{\"host\":{},\"generation\":{},\"state\":\"harness-ready\",\"disk\":{},\"installer_media\":{},\"media_proof\":{},\"expected_guest_proof\":{},\"tools\":[{}],\"commands\":[{}],\"steps\":[\"build-generation\",\"create-hybrid-iso\",\"boot-installer-qemu\",\"install-to-disk\",\"reboot-installed-disk\",\"verify-guest-proof\"],\"guest_assertions\":[{}]}}",
+        "{{\"host\":{},\"generation\":{},\"state\":\"harness-ready\",\"disk\":{},\"installer_media\":{},\"media_proof\":{},\"expected_guest_proof\":{},\"tools\":[{}],\"commands\":[{}],\"steps\":[\"build-generation\",\"create-hybrid-iso\",\"boot-installer-qemu\",\"install-to-disk\",\"reboot-installed-disk\",\"verify-guest-proof\",\"boot-graphical-desktop\"],\"guest_assertions\":[{}]}}",
         JSON::quote(&system.name),
         JSON::quote(&gen.name),
         JSON::quote(disk),
@@ -2708,14 +3133,14 @@ fn run_vm_install_harness(
     }
     fs::create_dir_all(&log_dir)
         .map_err(|e| format!("creating `{}` failed: {e}", log_dir.display()))?;
-    let mut boot_disk_output = String::new();
+    let mut graphical_output = String::new();
     for command in qemu_proof_commands(&staging_boot, disk, &iso, &system.name, &gen.name) {
         let output = run_vm_command(&command, &log_dir)?;
-        if command.phase == "boot-installed-disk" {
-            boot_disk_output = output;
+        if command.phase == "boot-graphical-desktop" {
+            graphical_output = output;
         }
     }
-    let Some(report) = extract_guest_proof_report(&boot_disk_output) else {
+    let Some(report) = extract_guest_proof_report(&graphical_output) else {
         return Ok(false);
     };
     write_runner_guest_proof(gen, system, disk, media_proof, harness, &report)?;
@@ -2964,18 +3389,27 @@ fn require_guest_assertions(text: &str) -> Result<(), String> {
     }
 }
 
-const GUEST_ASSERTIONS: [&str; 6] = [
+const GUEST_ASSERTIONS: [&str; 9] = [
     "current-generation-matches",
     "packages-present",
     "services-active",
     "network-up",
     "rollback-generation-bootable",
     "terminal-login-ready",
+    "desktop-session-ready",
+    "graphical-console-ready",
+    "desktop-launchers-run",
 ];
 
 struct VmCommand {
     phase: &'static str,
     argv: Vec<String>,
+}
+
+fn ovmf_code_path() -> Option<PathBuf> {
+    std::env::var_os("JETOS_OVMF_CODE")
+        .map(PathBuf::from)
+        .filter(|path| path.is_file())
 }
 
 fn qemu_proof_commands(
@@ -2988,9 +3422,59 @@ fn qemu_proof_commands(
     let iso_path = iso.display().to_string();
     let kernel = boot_dir.join("kernel").display().to_string();
     let initrd = boot_dir.join("initrd").display().to_string();
-    let verify_cmdline = format!(
-        "console=ttyS0 rdinit=/jetos/guest-verify.sh jetos.mode=verify jetos.host={host} jetos.generation={generation} root=LABEL=jetos-root rw"
+    let mut boot_installer = vec![
+        "qemu-system-x86_64".to_string(),
+        "-m".to_string(),
+        "2048".to_string(),
+        "-nographic".to_string(),
+        "-monitor".to_string(),
+        "none".to_string(),
+    ];
+    if let Some(ovmf) = ovmf_code_path() {
+        boot_installer.extend([
+            "-drive".to_string(),
+            format!("if=pflash,format=raw,readonly=on,file={}", ovmf.display()),
+        ]);
+    }
+    boot_installer.extend([
+        "-cdrom".to_string(),
+        iso_path,
+        "-drive".to_string(),
+        format!("file={disk},format=qcow2,if=ide"),
+        "-netdev".to_string(),
+        format!("user,id=net0,hostname={host}"),
+        "-device".to_string(),
+        "virtio-net-pci,netdev=net0".to_string(),
+        "-boot".to_string(),
+        "d".to_string(),
+    ]);
+    let graphical_cmdline = format!(
+        "console=ttyS0 rdinit=/jetos/guest-verify.sh jetos.mode=desktop-verify jetos.host={host} jetos.generation={generation} root=LABEL=jetos-root rw"
     );
+    let mut boot_installed_disk = vec![
+        "qemu-system-x86_64".to_string(),
+        "-m".to_string(),
+        "2048".to_string(),
+        "-nographic".to_string(),
+        "-monitor".to_string(),
+        "none".to_string(),
+    ];
+    if let Some(ovmf) = ovmf_code_path() {
+        boot_installed_disk.extend([
+            "-drive".to_string(),
+            format!("if=pflash,format=raw,readonly=on,file={}", ovmf.display()),
+        ]);
+    }
+    boot_installed_disk.extend([
+        "-drive".to_string(),
+        format!("file={disk},format=qcow2,if=ide"),
+        "-netdev".to_string(),
+        format!("user,id=net0,hostname={host}"),
+        "-device".to_string(),
+        "virtio-net-pci,netdev=net0".to_string(),
+        "-boot".to_string(),
+        "c".to_string(),
+    ]);
     vec![
         VmCommand {
             phase: "create-disk",
@@ -3005,40 +3489,32 @@ fn qemu_proof_commands(
         },
         VmCommand {
             phase: "boot-installer",
-            argv: vec![
-                "qemu-system-x86_64".to_string(),
-                "-m".to_string(),
-                "2048".to_string(),
-                "-nographic".to_string(),
-                "-monitor".to_string(),
-                "none".to_string(),
-                "-cdrom".to_string(),
-                iso_path,
-                "-drive".to_string(),
-                format!("file={disk},format=qcow2,if=ide"),
-                "-netdev".to_string(),
-                format!("user,id=net0,hostname={host}"),
-                "-device".to_string(),
-                "virtio-net-pci,netdev=net0".to_string(),
-                "-boot".to_string(),
-                "d".to_string(),
-            ],
+            argv: boot_installer,
         },
         VmCommand {
             phase: "boot-installed-disk",
+            argv: boot_installed_disk,
+        },
+        VmCommand {
+            phase: "boot-graphical-desktop",
             argv: vec![
                 "qemu-system-x86_64".to_string(),
                 "-m".to_string(),
                 "2048".to_string(),
-                "-nographic".to_string(),
+                "-display".to_string(),
+                "vnc=127.0.0.1:0,to=99".to_string(),
+                "-serial".to_string(),
+                "stdio".to_string(),
                 "-monitor".to_string(),
                 "none".to_string(),
+                "-vga".to_string(),
+                "std".to_string(),
                 "-kernel".to_string(),
                 kernel,
                 "-initrd".to_string(),
                 initrd,
                 "-append".to_string(),
-                verify_cmdline,
+                graphical_cmdline,
                 "-drive".to_string(),
                 format!("file={disk},format=qcow2,if=ide"),
                 "-netdev".to_string(),
@@ -3068,9 +3544,14 @@ fn qemu_interactive_run_command(
             "qemu-system-x86_64".to_string(),
             "-m".to_string(),
             "2048".to_string(),
-            "-nographic".to_string(),
+            "-display".to_string(),
+            "vnc=127.0.0.1:0,to=99".to_string(),
+            "-serial".to_string(),
+            "stdio".to_string(),
             "-monitor".to_string(),
             "none".to_string(),
+            "-vga".to_string(),
+            "std".to_string(),
             "-kernel".to_string(),
             kernel,
             "-initrd".to_string(),

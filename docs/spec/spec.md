@@ -1372,19 +1372,29 @@ installer phase boots the hybrid ISO with `console=ttyS0`; the ISO's Limine
 entry carries `rdinit=/jetos/install.sh`, `jetos.mode=install`, and the target
 disk. The installed-disk verifier phase still direct-boots the exact generation
 kernel/initrd with `rdinit=/jetos/guest-verify.sh`, `jetos.mode=verify`, plus
-the installed root label until installed-disk bootloader handoff is complete. A
-rerun may
+the installed root label until the D-JPK-OSDISK1=C GPT/ESP installed-disk
+bootloader handoff is complete. A rerun may
 promote the harness to `guest-passed` only when the guest proof records the same
 host, generation, disk, media proof, tool hashes, and required guest assertions;
 harness JSON names the expected guest proof path, command argv, and per-phase
-run logs. The required guest assertion set includes terminal-login readiness:
+run logs. The proof then boots a graphical desktop verifier with QEMU VNC,
+stdvga, and the packaged `bochs` DRM module; promotion requires the guest to see
+a framebuffer (`fb0`) and execute the generated display-manager,
+desktop-session, and terminal-fallback launchers in proof mode before it emits
+`graphical-console-ready` and `desktop-launchers-run`. The required guest
+assertion set includes terminal-login readiness, desktop-session readiness,
+graphical-console readiness, and launcher readiness:
 the installed generation must carry `terminal/facts.json`, `/etc/profile`,
 `/etc/shells`, enabled `serial-getty@ttyS0.service`, and the user home profile
-inside the root projection before VM proof can pass. The
+inside the root projection, plus `desktop/facts.json`, the GNOME Wayland session
+launcher, the display-manager unit, the terminal fallback launcher, the installed
+jetos Studio app, a guest-visible graphical framebuffer, and launchers that
+resolve GNOME/GDM commands from the installed system closure before VM proof can
+pass. The
 ratified interactive launch surface is `jet os vm run <host> --disk <path>`;
 it opens only a disk already tied to the latest generation by a `guest-passed`
-VM proof and attaches the terminal console to the current process. It fails
-with E1287 rather than launching an unproven qcow2. The
+VM proof, exposes a graphical VNC console, and attaches serial output to the
+current process. It fails with E1287 rather than launching an unproven qcow2. The
 default CachyOS kernel is a first-party `cachyos-kernel`
 source-built package carrying recipe/config/patch/initrd-input hashes beside the
 kernel and initrd artifacts; missing kernel package provenance is E1280, missing
@@ -1398,14 +1408,21 @@ files already exist. `JETOS_KERNEL_SOURCE`, `JETOS_KERNEL_OUT`, and
 must write the kernel and initrd artifacts that the generation, installer, and
 VM proof will boot. Installer media appends a JetOS initrd overlay containing
 `/init`, `/jetos/install.sh`, and `/jetos/guest-verify.sh`; `/init` dispatches
-`jetos.mode=install` and `jetos.mode=verify`, mounts the ISO/root where needed,
-and the ISO Limine config enters the installer script directly. The verifier
+`jetos.mode=install`, `jetos.mode=verify`, and `jetos.mode=desktop-verify`,
+mounts the ISO/root where needed, and the ISO Limine config enters the installer
+script directly. The hybrid ISO
+carries both BIOS Limine boot files and a FAT `boot/efiboot.img` ESP with
+`EFI/BOOT/BOOTX64.EFI`, so QEMU/OVMF and physical UEFI firmware boot the same
+installer artifact. The verifier
 phase uses `rdinit` to enter the verifier script when booting under a host
 initrd. The verifier emits the serial guest-proof marker. The default systemd
 init path requires a first-party `systemd` package; missing init provenance is
-E1281. Each generation also
-installs the first-party jetos Studio
-app projection under `sw/bin/jetos-studio`, `share/applications`, and `studio/`;
+E1281. Each generation defaults to the ratified GNOME-on-Wayland desktop profile
+with terminal login as the secondary fallback. The display-manager service
+launches the system session when GNOME/GDM are present and falls back to the
+terminal launcher instead of blocking boot. Each generation also installs the
+first-party jetos Studio app projection under `sw/bin/jetos-studio`,
+`share/applications`, and `studio/`;
 `studio/data.json` carries the read-only host/package/service/option projection
 and artifact paths. The root projection carries these files into
 `/run/current-system`. Studio remains a separate jetos system app from Canvas
