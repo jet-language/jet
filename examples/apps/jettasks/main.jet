@@ -1,5 +1,6 @@
 use core.devserver as devserver
 use core.ui as ui
+use core.web as web
 
 #Target(Web)
 #Html("index.html")
@@ -70,6 +71,18 @@ fn render_count(n: Int) {
     frame :: ui.rect(24.0, 24.0, size.width, size.height)
     backend.layout(node, frame)
     backend.paint(node)
+}
+
+#Js
+fn init_tasks() {
+    saved :: web.storage.local.get("jettasks.tasks") ?? "[]"
+    web.storage.local.set("jettasks.tasks", saved)
+    web.on("#new-task", "input", (ev) => {
+        web.storage.local.set("jettasks.draft", web.value("#new-task"))
+    })
+    web.on("#toggle-2", "click", (ev) => {
+        web.storage.local.set("jettasks.last-toggle", "2")
+    })
 }
 
 fn dev() {

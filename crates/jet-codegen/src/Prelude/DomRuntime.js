@@ -150,6 +150,86 @@ export function onEvent(backend, event) {
   return "Handled";
 }
 
+function query(selector) {
+  if (typeof document === "undefined" || !document.querySelector) return null;
+  return document.querySelector(String(selector));
+}
+
+function normalizeEvent(ev) {
+  return {
+    kind: String(ev?.type ?? ""),
+    key: String(ev?.key ?? ""),
+    code: String(ev?.code ?? ""),
+    value: ev?.target && "value" in ev.target ? String(ev.target.value ?? "") : "",
+    checked: !!(ev?.target && ev.target.checked),
+  };
+}
+
+export function on(selector, eventName, handler) {
+  const el = query(selector);
+  if (!el || !el.addEventListener) return "Missing";
+  el.addEventListener(String(eventName), (ev) => handler(normalizeEvent(ev)));
+  return "Bound";
+}
+
+export function value(selector) {
+  const el = query(selector);
+  if (!el) return "";
+  if ("value" in el) return String(el.value ?? "");
+  return String(el.textContent ?? "");
+}
+
+const fallbackStorage = { local: new Map(), session: new Map() };
+
+function storage(kind) {
+  const name = kind === "session" ? "sessionStorage" : "localStorage";
+  const candidate = globalThis?.[name];
+  if (
+    candidate &&
+    typeof candidate.getItem === "function" &&
+    typeof candidate.setItem === "function" &&
+    typeof candidate.removeItem === "function"
+  ) {
+    return candidate;
+  }
+  const map = fallbackStorage[kind === "session" ? "session" : "local"];
+  return {
+    getItem(key) {
+      key = String(key);
+      return map.has(key) ? map.get(key) : null;
+    },
+    setItem(key, value) {
+      map.set(String(key), String(value));
+    },
+    removeItem(key) {
+      map.delete(String(key));
+    },
+    clear() {
+      map.clear();
+    },
+  };
+}
+
+export function storageGet(kind, key) {
+  const value = storage(kind).getItem(String(key));
+  return value == null ? null : String(value);
+}
+
+export function storageSet(kind, key, value) {
+  storage(kind).setItem(String(key), String(value));
+  return null;
+}
+
+export function storageRemove(kind, key) {
+  storage(kind).removeItem(String(key));
+  return null;
+}
+
+export function storageClear(kind) {
+  storage(kind).clear();
+  return null;
+}
+
 export function makeNode(label, width, height, color) {
   return { label: String(label), width, height, color: color != null ? String(color) : undefined };
 }

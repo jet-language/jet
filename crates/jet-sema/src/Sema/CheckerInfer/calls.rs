@@ -37,6 +37,18 @@ impl<'a> Checker<'a> {
         }
     }
 
+    fn core_module_path_from_receiver(&self, receiver: &Expr) -> Option<(String, Span)> {
+        match receiver {
+            Expr::Ident(alias, span) => self.core_imports.get(alias).cloned().map(|m| (m, *span)),
+            Expr::Field(base, leaf, _) => {
+                let (module, span) = self.core_module_path_from_receiver(base)?;
+                let submodule = format!("{module}.{leaf}");
+                crate::Syntax::is_known_core_module(&submodule).then_some((submodule, span))
+            }
+            _ => None,
+        }
+    }
+
     pub(crate) fn infer_call_value(
         &mut self,
         callee: &mut Box<Expr>,
@@ -1124,7 +1136,7 @@ impl<'a> Checker<'a> {
         // `<ns>.<leaf>` as a core call. Guarded by `is_known_core_module`, so it fires only
         // for real submodules (e.g. `core.encoding.json`), never plain field access.
         if let Expr::Field(base, leaf, _) = &**receiver {
-            if let Expr::Ident(alias, alias_span) = &**base {
+            if let Expr::Ident(alias, _) = &**base {
                 if let Some(ns) = self.core_imports.get(alias).cloned() {
                     if ns == "core.solve" && leaf == Syntax::SOLVER_TYPE && method == "new" {
                         if args.len() != 1 {
@@ -1209,23 +1221,15 @@ impl<'a> Checker<'a> {
                             _ => {}
                         }
                     }
-                    let submodule = format!("{}.{}", ns, leaf);
-                    if crate::Syntax::is_known_core_module(&submodule) {
-                        let ret = self.infer_core_call(
-                            &submodule,
-                            method,
-                            *alias_span,
-                            span,
-                            type_args,
-                            args,
-                        );
-                        if is_polymorphic_core_special(&submodule, method) {
-                            *resolved_ret_out = ret.clone();
-                        }
-                        return ret;
-                    }
                 }
             }
+        }
+        if let Some((module, alias_span)) = self.core_module_path_from_receiver(receiver) {
+            let ret = self.infer_core_call(&module, method, alias_span, span, type_args, args);
+            if is_polymorphic_core_special(&module, method) {
+                *resolved_ret_out = ret.clone();
+            }
+            return ret;
         }
         if let Expr::Ident(alias, alias_span) = &**receiver {
             if let Some(module) = self.core_imports.get(alias).cloned() {

@@ -3904,6 +3904,17 @@ pub(crate) fn emit_tir_core_call(
         ("core.ui", "aria_role_container") => {
             format!("{}jet_ui_aria_role_container()", cx.root_prefix)
         }
+        // D-FLAGSHIP-WEBAPI1=A: browser-only helpers. Native TIR emission stays
+        // inert so web TIR validation can lower checked JS bodies without making
+        // rustc the browser API checker.
+        ("core.web", "on") => "{ let _ = || (); () }".to_string(),
+        ("core.web", "value") => "String::new()".to_string(),
+        ("core.web.storage.local" | "core.web.storage.session", "get") => {
+            "None::<String>".to_string()
+        }
+        ("core.web.storage.local" | "core.web.storage.session", "set" | "remove" | "clear") => {
+            "()".to_string()
+        }
         // c-devserver (owner-directed 2026-07-01): `devserver.for_app(file)`
         // constructor — the builder methods dispatch through
         // `THandleOp::DevServerMethod` above, not here.

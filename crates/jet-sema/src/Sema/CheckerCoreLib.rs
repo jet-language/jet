@@ -4498,6 +4498,34 @@ pub fn core_fixed_sig(
             "core.ui",
             "aria_role_button" | "aria_role_text_input" | "aria_role_label" | "aria_role_container",
         ) => Some((vec![], Some(Type::Named("UiAriaRole".to_string())))),
+        // D-FLAGSHIP-WEBAPI1=A: first-party browser API for web flagship slices.
+        ("core.web", "on") => Some((
+            vec![
+                (read, string.clone()),
+                (read, string.clone()),
+                (
+                    read,
+                    Type::Fn {
+                        params: vec![Type::Named("WebEvent".to_string())],
+                        ret: None,
+                        effect_bound: None,
+                    },
+                ),
+            ],
+            None,
+        )),
+        ("core.web", "value") => Some((vec![(read, string.clone())], Some(Type::String))),
+        ("core.web.storage.local" | "core.web.storage.session", "get") => Some((
+            vec![(read, string.clone())],
+            Some(Type::Option(Box::new(Type::String))),
+        )),
+        ("core.web.storage.local" | "core.web.storage.session", "set") => {
+            Some((vec![(read, string.clone()), (read, string.clone())], None))
+        }
+        ("core.web.storage.local" | "core.web.storage.session", "remove") => {
+            Some((vec![(read, string)], None))
+        }
+        ("core.web.storage.local" | "core.web.storage.session", "clear") => Some((vec![], None)),
         // c-devserver (owner-directed 2026-07-01): `devserver.for_app(file)` —
         // the constructor for a configurable `jet dev` server value. The
         // builder methods (`.html`/`.port`/`.serve`) are instance methods on
@@ -4945,6 +4973,12 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
             // the paint pipeline's fill color is no longer hardcoded.
             "node_color",
         ],
+        // D-FLAGSHIP-WEBAPI1=A: browser events and storage. The intermediate
+        // `storage` module exists so `web.storage.local.get(...)` resolves as a
+        // real nested core module, not a magic field.
+        "core.web" => &["on", "value", "storage"],
+        "core.web.storage" => &["local", "session"],
+        "core.web.storage.local" | "core.web.storage.session" => &["get", "set", "remove", "clear"],
         // c-devserver (owner-directed 2026-07-01): `jet dev` server builder.
         "core.devserver" => &["for_app", "app"],
         // D-APPROX1=A: approximate sketch data structures.

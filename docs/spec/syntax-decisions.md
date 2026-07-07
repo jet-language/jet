@@ -1017,6 +1017,16 @@ Generated `unsafe` appears only inside user-gated regions + vetted internals
 `mem.volatile_write(ptr, value)`, paired with `mem.volatile_read(ptr)`. No
 pointer-assignment lvalue spelling is added.
 
+**D-FLAGSHIP-WEBAPI1 — Browser events and storage**: web flagship slices use
+`core.web` for browser-owned state and DOM events. `web.on(selector, event,
+handler)` binds an event listener, `web.value(selector)` reads an element's
+current value/text, and `web.storage.local` / `web.storage.session` expose
+`get`, `set`, `remove`, and `clear`. `get(key)` returns `String?`, so missing
+storage reads use the standard fallback operator: `web.storage.local.get("tasks")
+?? "[]"`. Component-level events are the same mechanism at the compiler level:
+components emit stable selectors/ids, then bind handlers through `web.on(...)`;
+there is no second component-only event language.
+
 **D-UNINIT1 — Visible uninitialization**: skips zero-fill for a binding, gated
 behind `use core.mem` (E0424); sema proves write-before-read on all paths
 (E0420; POD-only E0423); lowers to `MaybeUninit` after the proof. *(sema

@@ -3680,6 +3680,11 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     "core.perf",
     // D-RENDERTGT1=A + D-RENDERTGT2=A (c133 M1): render-target backend trait seam.
     "core.ui",
+    // D-FLAGSHIP-WEBAPI1=A: browser events, element reads, and storage for web slices.
+    "core.web",
+    "core.web.storage",
+    "core.web.storage.local",
+    "core.web.storage.session",
     // D-APPROX1=A (ratified 2026-06-26): approximate data structures under core.sketch.
     "core.sketch.hll",
     "core.sketch.tdigest",

@@ -835,6 +835,24 @@ sema. Diagnostics **E3101–E3104 + L3101** in diagnostics.md with snapshots
 `tests/ui_lint/unsafe_missing_audit`); the audited end-to-end example is
 `examples/features/lowlevel/lowlevel.jet`.
 
+## Web browser API (D-FLAGSHIP-WEBAPI1, implemented)
+
+`use core.web as web` exposes the browser-owned pieces that a web flagship slice
+needs outside the retained `core.ui` paint surface:
+
+- `web.on(selector, event, handler)` binds a DOM event listener. The handler gets
+  a `WebEvent` value; handlers that do not need the event may ignore it.
+- `web.value(selector) -> String` reads an input value or element text.
+- `web.storage.local.get(key) -> String?` and
+  `web.storage.session.get(key) -> String?` read browser storage. Missing keys
+  compose with the normal `??` fallback: `web.storage.local.get("tasks") ?? "[]"`.
+- `set(key, value)`, `remove(key)`, and `clear()` mutate local/session storage.
+
+`core.web` carries the `Browser` effect. The web JS backend emits real
+`addEventListener`, `querySelector`, `localStorage`, and `sessionStorage` calls;
+native codegen lowers the same checked calls to inert stubs so rustc never
+becomes the browser API checker.
+
 ### Jai transliteration: compact cast/deref chains (D-POINTERCHAIN1=A, docs-only)
 
 Jai allows a single compact expression that casts and dereferences a raw pointer

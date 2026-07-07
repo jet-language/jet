@@ -325,7 +325,9 @@ pub fn core_effect(module: &str, method: &str) -> Option<Effect> {
         // `core.process` (an effects-budget `deny: [Exec]` also denies plugins).
         "core.plugin" | "jet.plugin" => Effect::Exec,
         "jet.log" => Effect::Log,
-        "core.ui" => Effect::Browser,
+        "core.ui" | "core.web" | "core.web.storage.local" | "core.web.storage.session" => {
+            Effect::Browser
+        }
         // U13 (D-JPK-SECRETCRYPTO1): `core.vault.get` reads a decrypted repo
         // secret — never `core.secrets` (D-TTLVAL1's in-memory
         // Expiring/Rotting<T> wrapper already owns that module name).

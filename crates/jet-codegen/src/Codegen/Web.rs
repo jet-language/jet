@@ -762,7 +762,62 @@ fn ui_method_call(
             return reactive_dom_call(&format!("reactive.{method}"), args, funcs);
         }
     }
+    if let Some(path) = module_path_from_receiver(receiver) {
+        if path == "web" || path == "web.storage.local" || path == "web.storage.session" {
+            return web_dom_call(&path, method, args, funcs);
+        }
+    }
     None
+}
+
+fn module_path_from_receiver(receiver: &Expr) -> Option<String> {
+    match receiver {
+        Expr::Ident(name, _) => Some(name.clone()),
+        Expr::Field(base, leaf, _) => {
+            let mut path = module_path_from_receiver(base)?;
+            path.push('.');
+            path.push_str(leaf);
+            Some(path)
+        }
+        _ => None,
+    }
+}
+
+fn web_dom_call(
+    path: &str,
+    method: &str,
+    args: &[crate::AST::CallArg],
+    funcs: &[FuncWeb],
+) -> Option<String> {
+    let a = |i: usize| {
+        args.get(i)
+            .map(|arg| js_emit_expr(&arg.expr, funcs))
+            .unwrap_or_else(|| "undefined".to_string())
+    };
+    let rendered = match (path, method) {
+        ("web", "on") => format!("jetDom.on({}, {}, {})", a(0), a(1), a(2)),
+        ("web", "value") => format!("jetDom.value({})", a(0)),
+        ("web.storage.local", "get") => format!("jetDom.storageGet(\"local\", {})", a(0)),
+        ("web.storage.session", "get") => {
+            format!("jetDom.storageGet(\"session\", {})", a(0))
+        }
+        ("web.storage.local", "set") => {
+            format!("jetDom.storageSet(\"local\", {}, {})", a(0), a(1))
+        }
+        ("web.storage.session", "set") => {
+            format!("jetDom.storageSet(\"session\", {}, {})", a(0), a(1))
+        }
+        ("web.storage.local", "remove") => {
+            format!("jetDom.storageRemove(\"local\", {})", a(0))
+        }
+        ("web.storage.session", "remove") => {
+            format!("jetDom.storageRemove(\"session\", {})", a(0))
+        }
+        ("web.storage.local", "clear") => "jetDom.storageClear(\"local\")".to_string(),
+        ("web.storage.session", "clear") => "jetDom.storageClear(\"session\")".to_string(),
+        _ => return None,
+    };
+    Some(rendered)
 }
 
 /// `reactive.signal(initial)` — the only `core.reactive` constructor this
@@ -839,6 +894,28 @@ fn js_emit_expr(expr: &Expr, funcs: &[FuncWeb]) -> String {
         ),
         Expr::Unary(op, inner, _) => format!("({}{})", unop(op), js_emit_expr(inner, funcs)),
         Expr::Paren(inner, _) => js_emit_expr(inner, funcs),
+        Expr::OrFallback {
+            value, fallback, ..
+        } => {
+            let rhs = match fallback {
+                crate::AST::OrFallback::Value(expr) => js_emit_expr(expr, funcs),
+                crate::AST::OrFallback::Return(Some(expr), _) => {
+                    format!("(() => {{ return {}; }})()", js_emit_expr(expr, funcs))
+                }
+                crate::AST::OrFallback::Return(None, _) => "undefined".to_string(),
+                crate::AST::OrFallback::Panic { args, .. } => {
+                    let msg = args
+                        .first()
+                        .map(|arg| js_emit_expr(&arg.expr, funcs))
+                        .unwrap_or_else(|| "\"fallback failed\"".to_string());
+                    format!("(() => {{ throw new Error(String({msg})); }})()")
+                }
+                crate::AST::OrFallback::Break(_) | crate::AST::OrFallback::Continue(_) => {
+                    "undefined".to_string()
+                }
+            };
+            format!("({} ?? {})", js_emit_expr(value, funcs), rhs)
+        }
         Expr::Call(call) => {
             js_emit_call_expr(call, funcs).unwrap_or_else(|| "undefined".to_string())
         }

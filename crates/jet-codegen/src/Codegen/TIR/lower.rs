@@ -5446,29 +5446,16 @@ pub(crate) fn lower_method_call(
     // `core_fixed_sig` table. Tried BEFORE the builtin shape (a core method named
     // `get`/`split`/… must not be claimed by the receiver-keyed builtin op).
     if recv_type.is_none() {
-        // D-ENC1: nested-namespace core call `<alias>.<leaf>.method(args)`. The subset
-        // gate admitted it; resolve the submodule and build a plain `CoreCall` (the
-        // encoding calls are all monomorphic, so the type comes from `core_fixed_sig`).
-        if let Expr::Field(base, leaf, _) = receiver {
-            if let Expr::Ident(alias, _) = &**base {
-                if !env.locals.contains_key(alias) {
-                    if let Some(ns) = cx.core_imports.get(alias).cloned() {
-                        let submodule = format!("{}.{}", ns, leaf);
-                        if crate::Syntax::is_known_core_module(&submodule) {
-                            let targs: Vec<TExpr> =
-                                args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
-                            return TExpr {
-                                ty: core_call_return_ty(&submodule, method),
-                                kind: TExprKind::CoreCall {
-                                    module: submodule,
-                                    method: method.to_string(),
-                                    args: targs,
-                                },
-                            };
-                        }
-                    }
-                }
-            }
+        if let Some(submodule) = core_module_path_from_receiver(receiver, &cx.core_imports, env) {
+            let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
+            return TExpr {
+                ty: core_call_return_ty(&submodule, method),
+                kind: TExprKind::CoreCall {
+                    module: submodule,
+                    method: method.to_string(),
+                    args: targs,
+                },
+            };
         }
         if let Expr::Ident(alias, _) = receiver {
             if !env.locals.contains_key(alias) {
@@ -6631,6 +6618,22 @@ pub(crate) fn lower_method_call(
 /// method)` isn't one of the three (so the caller falls through to the plain
 /// `CoreCall`). The gate (`core_closure_call_in_subset`) already proved a literal
 /// in-subset lambda in the closure-arg position.
+fn core_module_path_from_receiver(
+    receiver: &Expr,
+    imports: &HashMap<String, String>,
+    env: &LowerEnv,
+) -> Option<String> {
+    match receiver {
+        Expr::Ident(alias, _) if !env.locals.contains_key(alias) => imports.get(alias).cloned(),
+        Expr::Field(base, leaf, _) => {
+            let module = core_module_path_from_receiver(base, imports, env)?;
+            let submodule = format!("{module}.{leaf}");
+            crate::Syntax::is_known_core_module(&submodule).then_some(submodule)
+        }
+        _ => None,
+    }
+}
+
 pub(crate) fn lower_core_closure_call(
     module: &str,
     method: &str,

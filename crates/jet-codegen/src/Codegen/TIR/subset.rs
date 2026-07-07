@@ -2857,22 +2857,10 @@ pub(crate) fn method_call_in_subset(
     // polymorphic math/random/io specials + every closure-taking / handle-constructor
     // call stay on the AST path.
     if recv_type.is_none() {
-        // D-ENC1: nested-namespace core call `<alias>.<leaf>.method(args)` (e.g.
-        // `encoding.json.to_string(x)`). Mirrors the Ident-alias arm below for the
-        // `Field(Ident(alias), leaf)` receiver shape; covered iff `<ns>.<leaf>` is a real
-        // submodule with a covered method.
-        if let Expr::Field(base, leaf, _) = receiver {
-            if let Expr::Ident(alias, _) = &**base {
-                if !locals.contains(alias) {
-                    if let Some(ns) = cx.core_imports.get(alias) {
-                        let submodule = format!("{}.{}", ns, leaf);
-                        if crate::Syntax::is_known_core_module(&submodule) {
-                            return core_call_covered(&submodule, method)
-                                && core_call_args_in_subset(&submodule, method, args, cx, locals);
-                        }
-                    }
-                }
-            }
+        if let Some(submodule) = core_module_path_from_receiver(receiver, &cx.core_imports, locals)
+        {
+            return core_call_covered(&submodule, method)
+                && core_call_args_in_subset(&submodule, method, args, cx, locals);
         }
         if let Expr::Ident(alias, _) = receiver {
             if !locals.contains(alias) {
@@ -3362,6 +3350,22 @@ pub(crate) fn method_call_in_subset(
     args.iter()
         .zip(sig.iter())
         .all(|(a, (_, _pty))| expr_in_subset(&a.expr, cx, locals))
+}
+
+fn core_module_path_from_receiver(
+    receiver: &Expr,
+    imports: &std::collections::HashMap<String, String>,
+    locals: &std::collections::HashSet<String>,
+) -> Option<String> {
+    match receiver {
+        Expr::Ident(alias, _) if !locals.contains(alias) => imports.get(alias).cloned(),
+        Expr::Field(base, leaf, _) => {
+            let module = core_module_path_from_receiver(base, imports, locals)?;
+            let submodule = format!("{module}.{leaf}");
+            crate::Syntax::is_known_core_module(&submodule).then_some(submodule)
+        }
+        _ => None,
+    }
 }
 
 /// c109 Phase 27: is `recv.method(args)` a call THROUGH a fn-typed struct FIELD (not a

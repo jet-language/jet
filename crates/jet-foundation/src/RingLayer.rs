@@ -55,6 +55,10 @@ fn layer_of_normalized(module: &str) -> RuntimeLayer {
         | "core.perf"
         | "core.scope"
         | "core.ui"
+        | "core.web"
+        | "core.web.storage"
+        | "core.web.storage.local"
+        | "core.web.storage.session"
         | "core.encoding.hex"
         | "core.encoding.base64"
         | "jet.crypto" => RuntimeLayer::Core,

@@ -133,6 +133,74 @@ fn run_web_click_harness(dir: &PathBuf) -> String {
     String::from_utf8_lossy(&node.stdout).into_owned()
 }
 
+const WEB_API_HARNESS: &str = r##"
+class FakeElement {
+  constructor(id) {
+    this.id = id;
+    this.value = "";
+    this.textContent = "";
+    this.listeners = new Map();
+  }
+  addEventListener(name, handler) {
+    const list = this.listeners.get(name) ?? [];
+    list.push(handler);
+    this.listeners.set(name, list);
+  }
+  dispatchEvent(ev) {
+    ev.target = this;
+    for (const handler of this.listeners.get(ev.type) ?? []) handler(ev);
+  }
+}
+class FakeDocument {
+  constructor() {
+    this.input = new FakeElement("new-task");
+  }
+  querySelector(sel) {
+    if (sel === "#new-task") return this.input;
+    return null;
+  }
+  getElementById(id) {
+    return id === "new-task" ? this.input : null;
+  }
+  createElement(tag) {
+    return new FakeElement(tag);
+  }
+}
+class FakeStorage {
+  constructor() { this.map = new Map(); }
+  getItem(key) { return this.map.has(String(key)) ? this.map.get(String(key)) : null; }
+  setItem(key, value) { this.map.set(String(key), String(value)); }
+  removeItem(key) { this.map.delete(String(key)); }
+  clear() { this.map.clear(); }
+}
+globalThis.document = new FakeDocument();
+globalThis.localStorage = new FakeStorage();
+
+const { init } = await import("./app.js");
+init();
+console.log(`tasks=${localStorage.getItem("tasks")}`);
+document.input.value = "write flagship slice";
+document.input.dispatchEvent({ type: "input" });
+console.log(`draft=${localStorage.getItem("draft")}`);
+"##;
+
+fn run_web_api_harness(dir: &PathBuf) -> String {
+    let harness_path = dir.join("build/web_api_harness.mjs");
+    fs::write(&harness_path, WEB_API_HARNESS).unwrap();
+    let node = Command::new("node")
+        .current_dir(dir.join("build"))
+        .arg("web_api_harness.mjs")
+        .output()
+        .unwrap();
+    assert!(
+        node.status.success(),
+        "node web API harness failed:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&node.stdout),
+        String::from_utf8_lossy(&node.stderr)
+    );
+    String::from_utf8_lossy(&node.stdout).into_owned()
+}
+
 /// D-UISHOWCASE1 (c134 Phase 8, flagship showcase — 197_ui_showcase.jet):
 /// same fake-`document` trick as `FAKE_DOM_HARNESS`, but exercises the
 /// dashboard's two independent entry points instead of one click-driven
@@ -543,6 +611,35 @@ fn web_click_counter_dom_roundtrip() {
     let stdout = run_web_click_harness(&dir);
     let expected = include_str!("../examples/features/expected/web/ui_web_click.harness.out");
     assert_eq!(stdout, expected);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn web_events_and_storage_roundtrip() {
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln!("note: skipping web_build browser API (need rustc + node)");
+        return;
+    }
+    let src = r##"#Target(Web)
+use core.web as web
+
+#Js
+fn init() {
+    saved :: web.storage.local.get("tasks") ?? "[]"
+    web.storage.local.set("tasks", saved)
+    web.on("#new-task", "input", (ev) => {
+        web.storage.local.set("draft", web.value("#new-task"))
+    })
+}
+
+fn run() {}
+"##;
+    let dir = build_web_fixture("webapi", src, "tests/fixtures/web_api.jet");
+    let stdout = run_web_api_harness(&dir);
+    assert_eq!(
+        stdout, "tasks=[]\ndraft=write flagship slice\n",
+        "web.on/web.value/web.storage.local should roundtrip through generated JS"
+    );
     let _ = fs::remove_dir_all(&dir);
 }
 

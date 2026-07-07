@@ -1142,6 +1142,30 @@ feature.
 
 ---
 
+### `core.web` — browser events and storage
+
+`core.web` is the web-target browser API beside `core.ui` rendering:
+
+```jet
+use core.web as web
+
+#Js
+fn init() {
+    saved :: web.storage.local.get("tasks") ?? "[]"
+    web.storage.local.set("tasks", saved)
+    web.on("#new-task", "input", (ev) => {
+        web.storage.local.set("draft", web.value("#new-task"))
+    })
+}
+```
+
+`web.on(selector, event, handler)` binds a DOM event listener. `web.value(selector)`
+reads an input value or text content. `web.storage.local` and
+`web.storage.session` provide `get`, `set`, `remove`, and `clear`; `get` returns
+`String?` so ordinary `??` handles missing keys.
+
+---
+
 ### `core.mem` — arenas and regions
 
 Expert-tier explicit allocators, unlocked by `use core.mem` (no `#Unsafe`
