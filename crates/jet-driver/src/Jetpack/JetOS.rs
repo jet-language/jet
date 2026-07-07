@@ -642,8 +642,15 @@ fn cmd_vm_run(theme: &Theme, system: &SystemPlan, disk: &str) -> i32 {
             return 2;
         }
     }
-    let command =
-        qemu_interactive_run_command(&gen.path.join("boot"), disk, &system.name, &gen.name);
+    let boot_dir = systems_dir()
+        .join("images")
+        .join(format!("jetos-installer-{}.iso.d/boot", system.name));
+    let boot_dir = if boot_dir.join("initrd").is_file() {
+        boot_dir
+    } else {
+        gen.path.join("boot")
+    };
+    let command = qemu_interactive_run_command(&boot_dir, disk, &system.name, &gen.name);
     theme.ok(&format!(
         "booting jetos VM {} generation {}",
         theme.bold(&system.name),
@@ -2753,6 +2760,28 @@ case "$cmdline" in
     JETOS_TARGET_ROOT=/sysroot /bin/sh /jetos/guest-verify.sh
     poweroff -f 2>/dev/null || halt -f 2>/dev/null || exit 0
     ;;
+  *jetos.mode=run*)
+    mkdir -p /sysroot
+    tries=0
+    while [ ! -e /dev/vda ] && [ ! -e /dev/vda2 ] && [ ! -e /dev/sda ] && [ ! -e /dev/sda2 ] && [ "$tries" -lt 30 ]; do
+        tries=$((tries + 1))
+        sleep 1
+    done
+    for candidate in LABEL=jetos-root /dev/vda2 /dev/sda2 /dev/vda /dev/sda; do
+        mount "$candidate" /sysroot 2>/dev/null && break
+    done
+    system="/sysroot/var/lib/jetos/generations/@JETOS_GENERATION@"
+    if [ ! -e "$system" ]; then
+        system="/sysroot/run/current-system"
+    fi
+    if [ ! -e "$system/sw/bin/jetos-terminal-fallback" ]; then
+        echo "jetos run: missing installed terminal fallback"
+        exec /bin/sh
+    fi
+    echo "jetos run: opened installed generation at $system"
+    echo "jetos run: try: ls /sysroot/run/current-system ; cat /sysroot/run/current-system/studio/app.json"
+    JETOS_SYSTEM_ROOT="$system" PATH="$system/sw/bin:$PATH" exec /bin/sh "$system/sw/bin/jetos-terminal-fallback"
+    ;;
 esac
 mkdir -p /sysroot
 tries=0
@@ -2768,7 +2797,8 @@ if [ -e /sysroot/var/lib/jetos/generations/log ] || [ -L /sysroot/run/current-sy
     poweroff -f 2>/dev/null || halt -f 2>/dev/null || exit 0
 fi
 exec /bin/sh /jetos/install.sh
-"#;
+"#
+    .replace("@JETOS_GENERATION@", &gen.name);
     let install = render_installer_script(system, gen);
     let verify = render_guest_verify_script(system, gen);
     let isofs = fs::read(gen.path.join("boot/modules/isofs.ko.xz")).ok();
@@ -3732,8 +3762,9 @@ fn qemu_interactive_run_command(
 ) -> VmCommand {
     let kernel = boot_dir.join("kernel").display().to_string();
     let initrd = boot_dir.join("initrd").display().to_string();
-    let cmdline =
-        format!("console=ttyS0 jetos.mode=run jetos.host={host} jetos.generation={generation} root=LABEL=jetos-root rw");
+    let cmdline = format!(
+        "console=ttyS0 rdinit=/jetos/init init=/jetos/init jetos.mode=run jetos.host={host} jetos.generation={generation} root=LABEL=jetos-root rw"
+    );
     VmCommand {
         phase: "run-installed-disk",
         argv: vec![
