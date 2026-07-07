@@ -1,12 +1,28 @@
 use core.files as fs
 use core.io as io
+use core.path as path
 use core.process as process
 use core.regex as re
+
+struct Options {
+    pattern: String
+    paths: [String]
+    count: Bool
+    files: Bool
+    context: Int
+    ignore: String
+}
 
 struct Hit {
     path: String
     line: Int
     text: String
+}
+
+struct FileScan {
+    path: String
+    lines: [String]
+    hits: [Hit]
 }
 
 fn default_pattern() -> String {
@@ -15,9 +31,12 @@ fn default_pattern() -> String {
 
 fn default_paths() -> [String] {
     return [
-        "examples/apps/jetgrep/fixtures/api.log",
-        "examples/apps/jetgrep/fixtures/notes.txt",
+        "examples/apps/jetgrep/fixtures",
     ]
+}
+
+fn empty_paths() -> [String] {
+    return []
 }
 
 fn fail_string(message: String) -> String {
@@ -32,59 +51,167 @@ fn fail_bool(message: String) -> Bool {
     return false
 }
 
-fn pattern_from_args() -> String {
-    args :: io.args()
-    if args.get(1) == Val(pattern) {
-        return pattern
-    }
-    return default_pattern()
+fn fail_int(message: String) -> Int {
+    print(message)
+    process.exit(1)
+    return 0
 }
 
-fn paths_from_args() -> [String] {
-    args :: io.args()
-    out: [String] := []
-    i := 2
-    loop i < args.len() {
-        if args.get(i) == Val(path) {
-            out.push(path)
+fn fail_paths(message: String) -> [String] {
+    print(message)
+    process.exit(1)
+    return []
+}
+
+fn fail_entries(message: String) -> [DirEntry] {
+    print(message)
+    process.exit(1)
+    return []
+}
+
+fn parse_options(argv: [String]) -> Options {
+    count := false
+    files := false
+    context := 0
+    ignore := ""
+    positional: [String] := []
+    i := 1
+    loop i < argv.len() {
+        arg :: argv[i]
+        if arg == "--count" {
+            count = true
+        } else if arg == "--files" {
+            files = true
+        } else if arg == "--context" {
+            i += 1
+            if i >= argv.len() {
+                context = fail_int("jetgrep: --context needs a number")
+            } else {
+                context = argv[i].to_int() ?? fail_int("jetgrep: --context needs a number")
+                if context < 0 {
+                    context = fail_int("jetgrep: --context must be zero or greater")
+                }
+            }
+        } else if arg == "--ignore" {
+            i += 1
+            if i >= argv.len() {
+                ignore = fail_string("jetgrep: --ignore needs a name")
+            } else {
+                ignore = argv[i]
+            }
+        } else if arg.starts_with("--") {
+            _ :: fail_string("jetgrep: unknown flag {arg}")
+        } else {
+            positional.push(arg)
         }
         i += 1
     }
-    if out.len() == 0 {
-        return default_paths()
+    pattern := default_pattern()
+    paths: [String] := default_paths()
+    if positional.get(0) == Val(p) {
+        pattern = p
+        paths = empty_paths()
+        j := 1
+        loop j < positional.len() {
+            paths.push(positional[j])
+            j += 1
+        }
+        if paths.len() == 0 {
+            paths = default_paths()
+        }
     }
-    return out
+    return Options.{pattern, paths, count, files, context, ignore}
 }
 
-fn scan_file(pattern: String, path: String) -> [Hit] {
+fn should_ignore(name: String, ignore: String) -> Bool {
+    if ignore != "" {
+        return name == ignore
+    }
+    return false
+}
+
+fn expand_path(input: String, ignore: String) -> [String] {
+    if !fs.exists(copy input) {
+        return fail_paths("jetgrep: missing file {input}")
+    }
+    if fs.is_dir(copy input) {
+        return expand_dir(input, ignore)
+    }
+    return [copy input]
+}
+
+fn expand_dir(dir: String, ignore: String) -> [String] {
+    files: [String] := []
+    entries :: fs.list_dir(copy dir) ?? fail_entries("jetgrep: unreadable directory {dir}")
+    loop entry in entries {
+        if should_ignore(entry.name, ignore) {
+        } else if entry.is_dir {
+            child_dir :: path.join(copy dir, entry.name)
+            loop child in expand_dir(child_dir, ignore) {
+                files.push(child)
+            }
+        } else {
+            files.push(path.join(copy dir, entry.name))
+        }
+    }
+    return files
+}
+
+fn expand_paths(inputs: [String], ignore: String) -> [String] {
+    files: [String] := []
+    loop input in inputs {
+        loop file in expand_path(input, ignore) {
+            files.push(file)
+        }
+    }
+    return files
+}
+
+fn scan_file(pattern: String, path: String) -> FileScan {
     if !fs.exists(copy path) {
         print("jetgrep: missing file {path}")
         process.exit(1)
     }
     text :: fs.read(copy path) ?? fail_string("jetgrep: unreadable file {path}")
+    lines: [String] := []
     hits: [Hit] := []
     line_no := 1
     loop line in text.split("\n") {
+        lines.push(copy line)
         matched :: re.is_match(pattern, line) ?? fail_bool("jetgrep: invalid regex {pattern}")
         if matched {
             hits.push(Hit.{path: copy path, line: line_no, text: line})
         }
         line_no += 1
     }
-    return hits
+    return FileScan.{path, lines, hits}
 }
 
-fn scan(pattern: String, paths: [String]) -> [Hit] {
+fn scan_files(pattern: String, files: [String]) -> [FileScan] {
+    scans: [FileScan] := []
+    loop file in files {
+        scans.push(scan_file(copy pattern, file))
+    }
+    return scans
+}
+
+fn collect_hits(scans: [FileScan]) -> [Hit] {
     hits: [Hit] := []
-    loop path in paths {
-        loop hit in scan_file(copy pattern, path) {
+    loop scan in scans {
+        loop hit in scan.hits {
             hits.push(hit)
         }
     }
     return hits
 }
 
-fn render_hits(hits: [Hit]) -> [String] {
+fn scan(pattern: String, paths: [String]) -> [Hit] {
+    files :: expand_paths(paths, "")
+    scans :: scan_files(pattern, files)
+    return collect_hits(scans)
+}
+
+fn render_default(hits: [Hit]) -> [String] {
     lines: [String] := []
     loop hit in hits {
         lines.push("{hit.path}:{hit.line}: {hit.text}")
@@ -92,13 +219,126 @@ fn render_hits(hits: [Hit]) -> [String] {
     return lines
 }
 
+fn file_match_count(path: String, hits: [Hit]) -> Int {
+    count := 0
+    loop hit in hits {
+        if hit.path == path {
+            count += 1
+        }
+    }
+    return count
+}
+
+fn render_counts(files: [String], hits: [Hit]) -> [String] {
+    lines: [String] := []
+    loop file in files {
+        n :: file_match_count(file, hits)
+        if n > 0 {
+            lines.push("{file}:{n}")
+        }
+    }
+    return lines
+}
+
+fn has_match(path: String, hits: [Hit]) -> Bool {
+    loop hit in hits {
+        if hit.path == path {
+            return true
+        }
+    }
+    return false
+}
+
+fn render_files(files: [String], hits: [Hit]) -> [String] {
+    lines: [String] := []
+    loop file in files {
+        if has_match(file, hits) {
+            lines.push(file)
+        }
+    }
+    return lines
+}
+
+fn line_has_hit(path: String, line: Int, hits: [Hit]) -> Bool {
+    loop hit in hits {
+        if hit.path == path && hit.line == line {
+            return true
+        }
+    }
+    return false
+}
+
+fn visible_line_count(lines: [String]) -> Int {
+    if lines.len() > 0 {
+        if lines[lines.len() - 1] == "" {
+            return lines.len() - 1
+        }
+    }
+    return lines.len()
+}
+
+fn render_scan_context(scan: FileScan, context: Int) -> [String] {
+    lines: [String] := []
+    last_printed := 0
+    max_line :: visible_line_count(scan.lines)
+    loop hit in scan.hits {
+        start := hit.line - context
+        if start < 1 {
+            start = 1
+        }
+        stop := hit.line + context
+        if stop > max_line {
+            stop = max_line
+        }
+        line_no := start
+        loop line_no <= stop {
+            if line_no > last_printed {
+                text :: scan.lines[line_no - 1]
+                if line_has_hit(copy scan.path, line_no, scan.hits) {
+                    lines.push("{scan.path}:{line_no}: {text}")
+                } else {
+                    lines.push("{scan.path}-{line_no}- {text}")
+                }
+                last_printed = line_no
+            }
+            line_no += 1
+        }
+    }
+    return lines
+}
+
+fn render_context(scans: [FileScan], context: Int) -> [String] {
+    lines: [String] := []
+    loop scan in scans {
+        loop line in render_scan_context(scan, context) {
+            lines.push(line)
+        }
+    }
+    return lines
+}
+
+fn render(opts: Options, files: [String], scans: [FileScan]) -> [String] {
+    hits :: collect_hits(scans)
+    if opts.count {
+        return render_counts(files, hits)
+    }
+    if opts.files {
+        return render_files(files, hits)
+    }
+    if opts.context > 0 {
+        return render_context(scans, opts.context)
+    }
+    return render_default(hits)
+}
+
 fn run() {
-    pattern :: pattern_from_args()
-    _valid :: re.is_match(copy pattern, "") ?? fail_bool("jetgrep: invalid regex {pattern}")
-    paths :: paths_from_args()
-    hits :: scan(copy pattern, paths)
-    print("jetgrep pattern={pattern}")
-    loop line in render_hits(hits) {
+    opts :: parse_options(io.args())
+    _valid :: re.is_match(copy opts.pattern, "") ?? fail_bool("jetgrep: invalid regex {opts.pattern}")
+    files :: expand_paths(opts.paths, opts.ignore)
+    scans :: scan_files(copy opts.pattern, files)
+    hits :: collect_hits(scans)
+    print("jetgrep pattern={opts.pattern}")
+    loop line in render(opts, files, scans) {
         print(line)
     }
     print("matches={hits.len()}")
@@ -106,5 +346,51 @@ fn run() {
 
 #Test("scan finds deterministic fixture hits") {
     hits :: scan(default_pattern(), default_paths())
-    require_eq(hits.len(), 4)
+    require_eq(hits.len(), 5)
+}
+
+#Test("parse flags and render count mode") {
+    argv :: [
+        "jetgrep",
+        "--count",
+        "--context",
+        "2",
+        "--ignore",
+        "archive",
+        "TODO",
+        "examples/apps/jetgrep/fixtures",
+    ]
+    opts :: parse_options(argv)
+    require(opts.count, "count flag set")
+    require_eq(opts.context, 2)
+    require_eq(opts.ignore, "archive")
+    require_eq(opts.pattern, "TODO")
+    require_eq(opts.paths[0], "examples/apps/jetgrep/fixtures")
+    hits: [Hit] :: [
+        Hit.{path: "a.txt", line: 1, text: "TODO one"},
+        Hit.{path: "b.txt", line: 2, text: "TODO two"},
+        Hit.{path: "b.txt", line: 4, text: "TODO three"},
+    ]
+    rendered :: render_counts(["a.txt", "b.txt", "c.txt"], hits)
+    require_eq(rendered.len(), 2)
+    require_eq(rendered[0], "a.txt:1")
+    require_eq(rendered[1], "b.txt:2")
+}
+
+#Test("render files and context windows") {
+    hits: [Hit] :: [
+        Hit.{path: "demo.txt", line: 2, text: "warning here"},
+        Hit.{path: "demo.txt", line: 4, text: "error there"},
+    ]
+    files :: render_files(["demo.txt", "empty.txt"], hits)
+    require_eq(files.len(), 1)
+    require_eq(files[0], "demo.txt")
+    scan :: FileScan.{path: "demo.txt", lines: ["alpha", "warning here", "middle", "error there", "omega"], hits}
+    ctx :: render_scan_context(scan, 1)
+    require_eq(ctx.len(), 5)
+    require_eq(ctx[0], "demo.txt-1- alpha")
+    require_eq(ctx[1], "demo.txt:2: warning here")
+    require_eq(ctx[2], "demo.txt-3- middle")
+    require_eq(ctx[3], "demo.txt:4: error there")
+    require_eq(ctx[4], "demo.txt-5- omega")
 }

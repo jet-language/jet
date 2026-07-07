@@ -3,86 +3,256 @@ use core.http as http
 use core.net as net
 use core.tasks as tasks
 
+enum PasteLookup {
+    Found(String)
+    Missing
+    Expired
+}
+
+struct PasteModel {
+    next_seq: Int
+    now: Int
+    ttl_seconds: Int
+    created: Int
+    reads: Int
+    missing: Int
+    expired: Int
+}
+
 fn no_params() -> [DbValue] {
     return []
 }
 
-fn json_pair(key: String, value: String) -> String {
-    return "{{\"{key}\":\"{value}\"}}"
+fn json_error(message: String) -> String {
+    return "{{\"error\":\"{message}\"}}"
 }
 
-fn handle_health(req: HttpRequest) -> HttpResponse {
-    return HttpResponse.{status: "200 OK", body: json_pair("ok", "true"), headers: []}
+fn json_id(id: String) -> String {
+    return "{{\"id\":\"{id}\"}}"
 }
 
-fn handle_create(req: HttpRequest) -> HttpResponse {
-    return HttpResponse.{status: "201 Created", body: json_pair("id", "p0001"), headers: []}
-}
-
-fn handle_fetch(req: HttpRequest) -> HttpResponse {
-    id :: req.param("id") ?? "p0001"
-    if id == "p0001" {
-        return HttpResponse.{status: "200 OK", body: "flight plan", headers: []}
+fn paste_id(n: Int) -> String {
+    if n < 10 {
+        return "p000{n}"
+    } else if n < 100 {
+        return "p00{n}"
+    } else if n < 1000 {
+        return "p0{n}"
     }
-    return HttpResponse.{status: "404 Not Found", body: json_pair("error", "not found"), headers: []}
+    return "p{n}"
+}
+
+impl PasteModel {
+    fn new(seed: Int, ttl_seconds: Int, now: Int) -> PasteModel {
+        return PasteModel.{
+            next_seq: seed,
+            now: now,
+            ttl_seconds: ttl_seconds,
+            created: 0,
+            reads: 0,
+            missing: 0,
+            expired: 0,
+        }
+    }
+
+    fn next_id(&self) -> String {
+        id :: paste_id(self.next_seq)
+        self.next_seq += 1
+        return id
+    }
+
+    fn allocate(&self) -> String {
+        id :: self.next_id()
+        self.created += 1
+        return id
+    }
+
+    fn expires_at(self) -> Int {
+        return self.now + self.ttl_seconds
+    }
+
+    fn mark_read(&self) {
+        self.reads += 1
+    }
+
+    fn mark_missing(&self) {
+        self.missing += 1
+    }
+
+    fn mark_expired(&self) {
+        self.expired += 1
+    }
+
+    fn health_json(self, stored: Int) -> String {
+        return "{{\"ok\":true,\"stored\":{stored}}}"
+    }
+
+    fn stats_json(self, stored: Int) -> String {
+        return "{{\"created\":{self.created},\"reads\":{self.reads},\"missing\":{self.missing},\"expired\":{self.expired},\"stored\":{stored}}}"
+    }
+}
+
+fn http_ok(body: String) -> HttpResponse {
+    return HttpResponse.{status: "200 OK", body: copy body, headers: []}
+}
+
+fn http_created(body: String) -> HttpResponse {
+    return HttpResponse.{status: "201 Created", body: copy body, headers: []}
+}
+
+fn http_not_found() -> HttpResponse {
+    return HttpResponse.{status: "404 Not Found", body: json_error("not found"), headers: []}
+}
+
+fn serve(sender: Sender<String>) {
+    conn :: db.open_memory()
+    _created :: conn.execute("CREATE TABLE paste (id TEXT PRIMARY KEY, body TEXT NOT NULL, expires_at INTEGER NOT NULL)", no_params()) ?? panic("create paste table")
+    model := PasteModel.new(1, 60, 1000)
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind")
+    addr :: listener.local_addr()
+    sender.send(copy addr)
+    loop _i in [0, 1, 2, 3, 4] {
+        stream :: listener.accept() ?? panic("accept")
+        raw :: stream.read() ?? panic("read")
+        req :: http.parse(raw)
+        method :: req.method()
+        path :: req.path()
+        resp := http_not_found()
+        if method == "GET" && path == "/health" {
+            row :: conn.query_one("SELECT COUNT(*) AS n FROM paste", no_params()) ?? None
+            stored := 0
+            if row == Val(found) {
+                n_val :: found.get("n") ?? DbValue.Int(0)
+                stored = n_val.int() ?? 0
+            }
+            resp = http_ok(model.health_json(stored))
+        } else if method == "POST" && path == "/paste" {
+            body :: req.body()
+            id :: model.allocate()
+            expires_at :: model.expires_at()
+            _inserted :: conn.execute(
+                "INSERT INTO paste (id, body, expires_at) VALUES (?, ?, ?)",
+                [DbValue.Text(copy id), DbValue.Text(copy body), DbValue.Int(expires_at)]
+            ) ?? 0
+            resp = http_created(json_id(id))
+        } else if method == "GET" && path.contains("/p/") {
+            id :: copy path.after("/p/")
+            row :: conn.query_one(
+                "SELECT body, expires_at FROM paste WHERE id = ?",
+                [DbValue.Text(copy id)]
+            ) ?? None
+            if row == Val(found) {
+                expires_val :: found.get("expires_at") ?? DbValue.Int(0)
+                expires_at :: expires_val.int() ?? 0
+                if expires_at < model.now {
+                    model.mark_expired()
+                    resp = http_not_found()
+                } else {
+                    body_val :: found.get("body") ?? DbValue.Text("")
+                    body :: body_val.text() ?? ""
+                    model.mark_read()
+                    resp = http_ok(body)
+                }
+            } else {
+                model.mark_missing()
+                resp = http_not_found()
+            }
+        } else if method == "GET" && path == "/stats" {
+            row :: conn.query_one("SELECT COUNT(*) AS n FROM paste", no_params()) ?? None
+            stored := 0
+            if row == Val(found) {
+                n_val :: found.get("n") ?? DbValue.Int(0)
+                stored = n_val.int() ?? 0
+            }
+            resp = http_ok(model.stats_json(stored))
+        }
+        net.tcp_reply(stream, resp.status(), resp.body())
+    }
 }
 
 fn run() {
-    conn :: db.open_memory()
-    _created :: conn.execute("CREATE TABLE paste (id TEXT PRIMARY KEY, body TEXT)", no_params()) ?? panic("create")
-    _inserted :: conn.execute("INSERT INTO paste (id, body) VALUES (?, ?)", [DbValue.Text("p0001"), DbValue.Text("flight plan")]) ?? panic("insert")
-    count_row :: conn.query_one("SELECT COUNT(*) AS n FROM paste", no_params()) ?? panic("count")
-    stored := 0
-    if count_row == Val(found) {
-        n_val :: found.get("n") ?? panic("missing n")
-        stored = n_val.int() ?? panic("n")
-    }
-    body_row :: conn.query_one("SELECT body FROM paste WHERE id = ?", [DbValue.Text("p0001")]) ?? panic("query")
-    fetched_db := "missing"
-    if body_row == Val(found) {
-        body_val :: found.get("body") ?? panic("missing body")
-        fetched_db = body_val.text() ?? panic("body")
-    }
-    print("jetpaste db stored={stored} fetched={fetched_db}")
-
-    router :: http.router()
-    router.get("/health", handle_health)
-    router.post("/paste", handle_create)
-    router.get("/p/:id", handle_fetch)
-
     (sender, ch) :: tasks.channel<String>()
-    server_task :: tasks.spawn(take(sender, router) () => {
-        listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind")
-        addr :: listener.local_addr()
-        sender.send(copy addr)
-        loop _i in [0, 1, 2, 3] {
-            stream :: listener.accept() ?? panic("accept")
-            raw :: stream.read() ?? panic("read")
-            req :: http.parse(raw)
-            resp :: http.dispatch(router, req)
-            net.tcp_reply(stream, resp.status(), resp.body())
-        }
+    server_task :: tasks.spawn(take(sender) () => {
+        serve(sender)
     })
+
     addr :: ch.receive() ?? panic("addr")
     health :: http.get("http://{addr}/health") ?? panic("health")
     created :: http.post("http://{addr}/paste", "flight plan") ?? panic("create")
     fetched :: http.get("http://{addr}/p/p0001") ?? panic("fetch")
     missing :: http.get("http://{addr}/p/missing") ?? panic("missing")
+    stats :: http.get("http://{addr}/stats") ?? panic("stats")
     server_task.join()
+
     print("health {health.status()} {health.body()}")
     print("create {created.status()} {created.body()}")
     print("fetch {fetched.status()} {fetched.body()}")
     print("missing {missing.status()} {missing.body()}")
+    print("stats {stats.status()} {stats.body()}")
 }
 
-#Test("db round trip stores paste") {
+#Test("model allocates deterministic ids") {
+    require_eq(paste_id(1), "p0001")
+    require_eq(paste_id(12), "p0012")
+    require_eq(paste_id(123), "p0123")
+}
+
+#Test("db helper stores and fetches paste body") {
     conn :: db.open_memory()
-    _created :: conn.execute("CREATE TABLE paste (id TEXT PRIMARY KEY, body TEXT)", no_params()) ?? panic("create")
-    _inserted :: conn.execute("INSERT INTO paste (id, body) VALUES (?, ?)", [DbValue.Text("p0001"), DbValue.Text("flight plan")]) ?? panic("insert")
-    row :: conn.query_one("SELECT body FROM paste WHERE id = ?", [DbValue.Text("p0001")]) ?? panic("query")
+    _created :: conn.execute("CREATE TABLE paste (id TEXT PRIMARY KEY, body TEXT NOT NULL, expires_at INTEGER NOT NULL)", no_params()) ?? panic("create paste table")
+    model := PasteModel.new(1, 60, 1000)
+    id :: model.allocate()
+    _inserted :: conn.execute(
+        "INSERT INTO paste (id, body, expires_at) VALUES (?, ?, ?)",
+        [DbValue.Text(copy id), DbValue.Text("alpha body"), DbValue.Int(model.expires_at())]
+    ) ?? panic("insert paste")
+    require_eq(id, "p0001")
+    count_row :: conn.query_one("SELECT COUNT(*) AS n FROM paste", no_params()) ?? panic("count pastes")
+    if count_row == Val(found) {
+        n_val :: found.get("n") ?? panic("missing n")
+        require_eq(n_val.int() ?? panic("n"), 1)
+    }
+    row :: conn.query_one("SELECT body FROM paste WHERE id = ?", [DbValue.Text("p0001")]) ?? panic("fetch paste")
     if row == Val(found) {
         body_val :: found.get("body") ?? panic("missing body")
         body :: body_val.text() ?? panic("body")
-        require_eq(body, "flight plan")
+        model.mark_read()
+        require_eq(body, "alpha body")
+    } else {
+        require(false)
     }
+    require_eq(model.stats_json(1), "{{\"created\":1,\"reads\":1,\"missing\":0,\"expired\":0,\"stored\":1}}")
+}
+
+#Test("db helper reports missing and expired pastes") {
+    conn :: db.open_memory()
+    _created :: conn.execute("CREATE TABLE paste (id TEXT PRIMARY KEY, body TEXT NOT NULL, expires_at INTEGER NOT NULL)", no_params()) ?? panic("create paste table")
+    model := PasteModel.new(1, 1, 1000)
+    id :: model.allocate()
+    _inserted :: conn.execute(
+        "INSERT INTO paste (id, body, expires_at) VALUES (?, ?, ?)",
+        [DbValue.Text(copy id), DbValue.Text("short lived"), DbValue.Int(model.expires_at())]
+    ) ?? panic("insert paste")
+    model.now = 1002
+    expired :: conn.query_one("SELECT expires_at FROM paste WHERE id = ?", [DbValue.Text("p0001")]) ?? panic("fetch paste")
+    if expired == Val(found) {
+        expires_val :: found.get("expires_at") ?? panic("missing expires_at")
+        expires_at :: expires_val.int() ?? panic("expires_at")
+        if expires_at < model.now {
+            model.mark_expired()
+            require(true)
+        } else {
+            require(false)
+        }
+    } else {
+        require(false)
+    }
+    missing :: conn.query_one("SELECT body FROM paste WHERE id = ?", [DbValue.Text("missing")]) ?? panic("fetch missing")
+    if missing == Val(found) {
+        require(false)
+    } else {
+        model.mark_missing()
+        require(true)
+    }
+    require_eq(model.stats_json(1), "{{\"created\":1,\"reads\":0,\"missing\":1,\"expired\":1,\"stored\":1}}")
 }

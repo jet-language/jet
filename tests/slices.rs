@@ -103,6 +103,44 @@ fn jetgrep_reports_cli_errors() {
 }
 
 #[test]
+fn jetgrep_cli_modes_are_pinned() {
+    let count = assert_success(&[
+        "run",
+        "examples/apps/jetgrep/main.jet",
+        "--",
+        "--count",
+        "warning",
+        "examples/apps/jetgrep/fixtures",
+    ]);
+    assert!(count.contains("examples/apps/jetgrep/fixtures/api.log:1"));
+    assert!(count.contains("examples/apps/jetgrep/fixtures/notes.txt:1"));
+    assert!(count.contains("matches=2"));
+
+    let files = assert_success(&[
+        "run",
+        "examples/apps/jetgrep/main.jet",
+        "--",
+        "--files",
+        "TODO",
+        "examples/apps/jetgrep/fixtures",
+    ]);
+    assert!(files.contains("examples/apps/jetgrep/fixtures/nested/deploy.log"));
+    assert!(files.contains("examples/apps/jetgrep/fixtures/notes.txt"));
+
+    let ignored = assert_success(&[
+        "run",
+        "examples/apps/jetgrep/main.jet",
+        "--",
+        "--ignore",
+        "nested",
+        "TODO",
+        "examples/apps/jetgrep/fixtures",
+    ]);
+    assert!(!ignored.contains("nested/deploy.log"));
+    assert!(ignored.contains("matches=1"));
+}
+
+#[test]
 fn metal_freestanding_builds() {
     let out = run_jet(&[
         "build",

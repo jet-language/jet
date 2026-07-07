@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 262,
-    "rev": 806,
+    "rev": 810,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -591,6 +591,11 @@
       "plan": "flagship-vertical-slices",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-07",
+          "by": "codex",
+          "text": "Ungated flagship work advanced: jetgrep now recursively scans dirs, supports --count/--files/--context/--ignore with pinned CLI-mode tests; jetpaste now persists request bodies through SQLite, exposes health/stats, deterministic IDs, missing/expired model tests, and real loopback create/read probe. Raised D-FLAGSHIP-WEBAPI1, D-FLAGSHIP-MMIO1, D-FLAGSHIP-RAYLIB1 for platform-complete web/metal/game slices. Verified cargo check and cargo test --test slices."
+        },
         {
           "at": "2026-07-07",
           "by": "codex",
@@ -30306,6 +30311,167 @@
       "created": "2026-07-07T00:40:09.229Z",
       "outcome": "C",
       "ratifiedAt": "2026-07-07"
+    },
+    {
+      "id": "D-FLAGSHIP-WEBAPI1",
+      "cardId": "c123",
+      "group": "web-ui",
+      "title": "Browser event and storage API for jettasks",
+      "gist": "How Jet web apps bind DOM events and persist browser state.",
+      "explainer": "",
+      "story": "Betty is replacing a React TodoMVC with Jet. She wants the add box, checkbox toggles, filters, and reload-persistent tasks to live in Jet code, not handwritten JavaScript glue. This choice decides whether the browser slice proves Jet as an app framework or only as a compute/render island.",
+      "inWild": "use core.web as web\n\nfn run() {\n    state := load_tasks()\n    web.on(\"#new-task\", \"keydown\", (ev) => {\n        if ev.key == \"Enter\" { add_task(web.value(\"#new-task\")) }\n    })\n    web.storage.set(\"tasks\", encode_tasks(state))\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Typed core.web events plus storage (recommended)",
+          "detail": "Add a first-party browser Core surface: typed selectors, event objects, input values, and localStorage/sessionStorage wrappers. Beginner path stays direct, expert path can still drop to #Js exports when needed. One canonical browser-side mechanism.",
+          "code": "use core.web as web\nweb.on(\"#toggle-3\", \"click\", (_) => toggle(3))\nweb.storage.local.set(\"tasks\", json)\njson :: web.storage.local.get(\"tasks\") ?? \"[]\""
+        },
+        {
+          "key": "B",
+          "name": "Host-page JavaScript drives exported #Js functions",
+          "detail": "Keep Jet web output as exported functions called by handwritten JS in index.html. Avoids new Core API, but the flagship app would not prove Jet owns browser interaction or persistence.",
+          "code": "<script type=\"module\">\n  import { addTask, toggle } from \"./app.js\";\n  input.addEventListener(\"keydown\", e => addTask(input.value));\n</script>"
+        },
+        {
+          "key": "C",
+          "name": "Component callbacks inside core.ui nodes",
+          "detail": "Events are attached as properties on UI nodes. Strong long-term component ergonomics, but requires the view tree to become the source of event wiring and storage still needs a separate answer.",
+          "code": "ui.input(value: title, on_key: (ev) => { if ev.key == \"Enter\" { add(title) } })"
+        },
+        {
+          "key": "D",
+          "name": "Do not persist browser state yet",
+          "detail": "Events land, storage stays out. This cannot satisfy TodoMVC persistence and would weaken the web flagship proof.",
+          "code": "web.on(\"#new-task\", \"keydown\", add_from_input)\n// reload loses tasks"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "React",
+          "note": "Events are declared in component code and state persistence usually uses localStorage through typed wrappers or hooks.",
+          "code": "<input onKeyDown={add} />\nlocalStorage.setItem(\"tasks\", json)"
+        },
+        {
+          "lang": "Elm",
+          "note": "Events are typed messages; ports are used for browser APIs like storage.",
+          "code": "onInput ChangeTitle"
+        },
+        {
+          "lang": "Svelte",
+          "note": "Event handlers live in markup and storage is ordinary browser API.",
+          "code": "<input on:keydown={add}>\nlocalStorage.tasks = json"
+        }
+      ],
+      "rec": "A",
+      "status": "open",
+      "created": "2026-07-07T01:52:53.881Z"
+    },
+    {
+      "id": "D-FLAGSHIP-MMIO1",
+      "cardId": "c123",
+      "group": "safety",
+      "title": "MMIO write API for metal",
+      "gist": "How low-level Jet writes to memory-mapped hardware registers.",
+      "explainer": "",
+      "story": "Earl is bringing up a tiny board. Reading a status register is not enough; he must write a byte to UART data and stream the Life transcript. Jet needs this power, but only inside an audited unsafe region so beginners never see the footgun.",
+      "inWild": "use core.mem as mem\n\n#Unsafe(\"UART0 is mapped by the board profile and this write is volatile\") {\n    tx :: mem.Ptr<U8>.from_addr(0x09000000)\n    mem.volatile_write(tx, 74)\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "mem.volatile_write(ptr, value) (recommended)",
+          "detail": "Pair the existing volatile_read with an audited write helper. It is gated by use core.mem plus #Unsafe, validates against target-profile MMIO ranges, and reads naturally in UART code.",
+          "code": "#Unsafe(\"UART TX register\") {\n    tx :: mem.Ptr<U8>.from_addr(UART0)\n    mem.volatile_write(tx, byte)\n}"
+        },
+        {
+          "key": "B",
+          "name": "Pointer assignment p.* = value",
+          "detail": "Looks like ordinary assignment through a pointer. Compact, but expands lvalue grammar and makes volatile semantics less visible at the call site.",
+          "code": "#Unsafe(\"UART TX register\") {\n    tx :: mem.Ptr<U8>.from_addr(UART0)\n    tx.* = byte\n}"
+        },
+        {
+          "key": "C",
+          "name": "mem.mmio(region).write(offset, value)",
+          "detail": "More structured and profile-aware. Strong for experts, more ceremony for first bring-up, and a second API alongside raw Ptr unless it replaces Ptr use entirely for MMIO.",
+          "code": "#Unsafe(\"UART TX register\") {\n    uart :: mem.mmio(\"uart0\")\n    uart.write8(0, byte)\n}"
+        },
+        {
+          "key": "D",
+          "name": "Keep read-only volatile for now",
+          "detail": "Cannot ship the metal UART proof because the app cannot write serial bytes.",
+          "code": "mem.volatile_read(status)\n// no write path"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Volatile writes are explicit unsafe operations.",
+          "code": "core::ptr::write_volatile(uart as *mut u8, byte);"
+        },
+        {
+          "lang": "Zig",
+          "note": "Volatile pointer writes are explicit in the pointer type/access.",
+          "code": "uart.* = byte;"
+        }
+      ],
+      "rec": "A",
+      "status": "open",
+      "created": "2026-07-07T01:52:53.932Z"
+    },
+    {
+      "id": "D-FLAGSHIP-RAYLIB1",
+      "cardId": "c123",
+      "group": "stdlib",
+      "title": "core.raylib bridge completion boundary",
+      "gist": "How the game slice proves real raylib without making CI depend on a display.",
+      "explainer": "",
+      "story": "Earl runs the game at a club and wants a window, sprites, sound, input, and replay. CI still needs to verify the same rules without opening a display server. This choice sets the first real raylib bridge boundary.",
+      "inWild": "use core.raylib as rl\n\nfn run() {\n    w :: rl.window_open(800, 600, \"jetfighter\")\n    tex :: rl.load_texture(\"assets/ship.png\")\n    loop !w.should_close() {\n        rl.begin_drawing(w)\n        rl.draw_texture(tex, 120, 90)\n        rl.end_drawing()\n    }\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Real bridge plus headless replay verifier (recommended)",
+          "detail": "Window/audio/input are real when display and raylib are present; CI runs the same game logic through a headless replay backend with frame transcript and budget checks. Strong proof without flaky display dependency.",
+          "code": "$ jet run examples/apps/jetfighter/main.jet\n# opens window when raylib/display available\n$ jet run examples/apps/jetfighter/main.jet -- --headless --replay fixtures/demo.moves\nframes=900 score=1250 checksum=..."
+        },
+        {
+          "key": "B",
+          "name": "Headless core.game only",
+          "detail": "CI-friendly, already works, but does not prove raylib/window/audio. This is the current smoke slice, not the full flagship.",
+          "code": "game.run(scene, replay: replay)"
+        },
+        {
+          "key": "C",
+          "name": "Display-required native test only",
+          "detail": "Proves raylib but makes CI fragile and excludes headless machines.",
+          "code": "JET_RAYLIB_DISPLAY=1 cargo test --test slices"
+        },
+        {
+          "key": "D",
+          "name": "External C FFI example instead of core.raylib",
+          "detail": "Uses existing C link plumbing but bypasses the ratified first-party core.raylib surface, weakening the standard-library story.",
+          "code": "use c.raylib as rl"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "raylib C",
+          "note": "Examples open windows directly; CI usually compiles or runs under xvfb/headless.",
+          "code": "InitWindow(800, 450, \"raylib\");"
+        },
+        {
+          "lang": "Bevy",
+          "note": "Separates app logic from render backend so headless tests can verify gameplay.",
+          "code": "MinimalPlugins / headless schedule"
+        }
+      ],
+      "rec": "A",
+      "status": "open",
+      "created": "2026-07-07T01:52:53.981Z"
     }
   ],
   "questions": [
@@ -31544,6 +31710,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-07T01:57:18.479Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c123",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-07T01:52:53.981Z",
+      "by": "codex",
+      "action": "decision.add",
+      "ref": "D-FLAGSHIP-RAYLIB1",
+      "note": "core.raylib bridge completion boundary"
+    },
+    {
+      "at": "2026-07-07T01:52:53.932Z",
+      "by": "codex",
+      "action": "decision.add",
+      "ref": "D-FLAGSHIP-MMIO1",
+      "note": "MMIO write API for metal"
+    },
+    {
+      "at": "2026-07-07T01:52:53.881Z",
+      "by": "codex",
+      "action": "decision.add",
+      "ref": "D-FLAGSHIP-WEBAPI1",
+      "note": "Browser event and storage API for jettasks"
+    },
     {
       "at": "2026-07-07T01:44:50.625Z",
       "by": "codex",
