@@ -332,8 +332,8 @@ fn integrate(e: &Entity, dt: Float) { e.pos += e.vel * dt }
 `const` or `static` when the address is taken or the type needs it.
 
 Aliasing rule, stated for humans: *while something is being changed, nobody
-else may be looking at it.* Foreign `read`/`write` spellings get teaching
-errors **E0017**/**E0018** (S14).
+else may be looking at it.* Foreign `read`/`write` spellings are paused under
+D-S14-PAUSE and get ordinary parse errors.
 
 ## Access capability sigils (D-MEM1)
 
@@ -467,15 +467,18 @@ impl Circle {
   (**E-OSTARGET-BUILD-CONTEXT**); arm heads are bare OS variants
   (**E-OSTARGET-DISPATCH-ARM**). See syntax-decisions.md → D-OSTARGET2 for the
   full rules.
-- **Build-time embedding (D-CTIO1):** inside a `comptime` binding,
+- **Build-time embedding (D-CTIO1/D-CTFIND1/2):** inside a `comptime` binding,
   **`embed_file("path") -> String`** bakes a file's UTF-8 text into the binary
   and **`embed_bytes("path") -> [U8]`** bakes its raw bytes (binary-safe, no
-  UTF-8 requirement — images, fonts, any blob). These are the *only* sanctioned
-  build-time I/O; comptime is otherwise pure (**E0951**). The path must be a
-  string literal resolved relative to the embedding file's directory, never
-  absolute and never escaping the project via `..` (**E0957**). A missing or
-  unreadable file is **E0955**; for `embed_file`, a non-UTF-8 file is also
-  **E0955**, with a fix pointing at `embed_bytes`.
+  UTF-8 requirement — images, fonts, any blob). **`find("glob") -> [String]`**
+  returns sorted relative file paths for a std-only glob (`*`, `**`, `?`,
+  `{a,b}`, `[a-z]`). These are the *only* sanctioned build-time I/O; comptime is
+  otherwise pure (**E0951**). Paths/globs must be string literals resolved
+  relative to the embedding file's directory, never absolute and never escaping
+  the project via `..` (**E0957**). A missing or unreadable embedded file is
+  **E0955**; for `embed_file`, a non-UTF-8 file is also **E0955**, with a fix
+  pointing at `embed_bytes`. Every embedded file and every file matched by
+  `find` records its sha256 in `.jet/lock`.
 - **Published schema migrations (D-MIGRATE1/D-MIGRATE2):** `@PublishedSchema struct
   Name { ... }` marks a public record whose field layout is snapshotted at release
   under `.jet/cache/schema/`. On later project builds, sema compares the current
@@ -603,8 +606,8 @@ Cross-type **`?`** conversion supports two forms:
   optional: yields the success payload or evaluates the right side. Precedence is
   looser than **`&&`** / **`||`**, so `a? ?? b` and `x == 1 || y ?? 0`
   parse predictably. The right side may be a value, **`return`**, **`return expr`**,
-  or **`panic(…)`**. The retired word **`or`** is a teaching error pointing at
-  **`??`** (S71, D-SG6).
+  or **`panic(…)`**. The retired word **`or`** is paused under D-S14-PAUSE and
+  gets an ordinary parse error.
 - **`panic("msg")`** and **`require(cond)`** / **`require(cond, "msg")`**
   (S36) stop the program with a friendly report on stderr and exit code 70.
 - In **`if <fallible-expr> { … }`**, when the subject is not a plain
@@ -643,8 +646,8 @@ Idempotence: **`fmt(fmt(x)) == fmt(x)`** on every `examples/*.jet` and
 **`#Test("name") { … }`** (S43, D-CASING1 follow-on) — top-level blocks only.
 Bodies parse like a parameterless function; use **`require(cond)`** /
 **`require(cond, "msg")`** and **`require_eq(a, b)`** (S36) for checks. Duplicate
-test names → **E0105**; a nested `#Test` block → **E0601**; bare `test "name"` →
-**E0052**. **`jet run`** / **`jet build`** ignore test
+test names → **E0105**; a nested `#Test` block → **E0601**; bare `test "name"` is
+paused under D-S14-PAUSE and gets an ordinary parse error. **`jet run`** / **`jet build`** ignore test
 blocks; only **`jet test`** compiles and runs them.
 
 **`jet test <file.jet>`** (or a directory of `*.jet` files) builds one harness
@@ -1121,8 +1124,8 @@ is also the lambda-capture keyword. `enumerate()` and `zip(other)` return named 
 `(false_: [T], true_: [T])`. All lazy (evaluated at call site, allocation deferred to
 result use).
 
-Teaching: **`lambda`** / anonymous-fn spellings → `(x) => …` (**E0032**);
-**`|x|`** pipes → `(x) => …` (**E0033**).
+D-S14-PAUSE: retired `lambda` / anonymous-fn spellings and `|x|` pipes get
+ordinary parse errors. Current lambda syntax is `(x) => …`.
 
 Examples: `examples/features/basics/closures.jet`, `examples/features/basics/callbacks.jet`,
 `examples/features/collections/iter_adapters.jet`. Ui:
@@ -1295,6 +1298,17 @@ dashed-name = ident { "-" ident } ;                (* S84: kebab-case names *)
   and the diagnostic names `jet logs <pkg>` plus `--shell-on-fail`. Package-form
   `jet explain <ref>` prints the latest resolution/build record; code-form
   `jet explain E1234` keeps the existing diagnostic essay behavior.
+- **Package overlays and overrides (D-JPK-OVERLAY1):** `workspace.jet` may carry
+  reviewed overlay policy inside `module workspace`. An `overlay <name> { ... }`
+  block records provider/channel swaps (`provider: Provider.nixpkgs(channel:
+  "plasma-beta")`), per-package source/version/flag/patch changes
+  (`package("foo").patches += [patch("patches/foo.patch")]`), and package-local
+  `allowUnfree`. Workspace-wide unfree review uses
+  `policy.allowUnfree: ["discord"]`. `jetpack override draft <ref> --patch
+  <file>` only writes that source policy; it never creates hidden state. Patch
+  application is deterministic unified-diff application against the source tree,
+  and `jetpack explain package-overlay:<overlay>:<package>` prints provider,
+  channel, policy fingerprint, and update command from the same source policy.
 - **No daemon / no root (U28):** jetpack is a one-shot, user-owned process:
   no resident daemon, no root-owned default hangar, no privileged sandbox
   helper. Concurrent commands coordinate through file locks. If unprivileged
@@ -1351,10 +1365,54 @@ networkd/firewall/wireless facts, Limine + CachyOS boot facts, first-party
 systemd init closure with `/sbin/init`, kernel firmware/driver facts, desktop/display-manager facts,
 terminal login facts with serial/virtual getty units and user home/profile
 projection,
+per-user generation profiles under `users/`, Flatpak exact reconcile plans,
+permission overrides, undeclared-app removal, and AppImage runtime integration under
+`flatpak/`/`appimage/`, performance profile, sysctl, zram, sched-ext scheduler, initrd, and
+bootloader tuning proof under `performance/`, option priority
+explain output under `module-system/`, storage plans, fstab projections,
+safe-by-default `jetos-storage-apply`, and `jetos-persist-activate`
+impermanence proof under `storage/`, container/microVM workload plans with
+mounts, secrets, resources, health, and rollback proof under `workloads/`, hardware scan source,
+profile manifests, boot specialisation entries, and `jetos-hardware-scan` /
+`jetos-hardware-doctor` commands under `hardware/`, reusable theme projections under `theme/` and concrete GTK,
+Qt, terminal, editor, display-manager, and Studio preview files, and
+`jetos-service-logs` journal/fallback log query support under
+`service-manager/`,
+fleet deploy plans plus generated `jetos-fleet-deploy` host scripts under
+`fleet/`, runnable workload launchers under `workloads/`, a generated
+`jetos-flatpak-reconcile` command for remotes/apps/permissions/removals,
+`jetos-appimage-run` for AppImage desktop integration, lifecycle channel policy,
+proof-gated auto-upgrade service/timer, rollback-on-health-fail proof, and
+explainable `jetos-lifecycle-gc` retention scripts under
+`lifecycle/`, option priority/explain output under `module-system/` with
+winner/loser contenders and disabled-module manifests, typed option
+reference/search artifacts under `options/` including type, default, example,
+doc, tier, priority, and provenance plus exact/explain search modes, and image
+variant artifacts under `systems/images/`: qcow2, raw, SD-card image, and a
+netboot bundle with kernel/initrd/iPXE config plus
+`jetos-image-variants-<host>.proof.json`,
+first-wave `apps.program.*` modules under `apps/programs/` for git, ssh, fish,
+starship, ghostty, helix, yazi, btop, bat, eza, fzf, zoxide, ripgrep, tealdeer,
+fastfetch, VS Code, Cursor, Discord, Spicetify, and browser policy projection,
+plus `jetos-app-module-apply`,
+desktop breadth projections for PipeWire/rtkit, GNOME and Plasma Wayland
+sessions, libvirt/SPICE/swtpm/USB redirection, GameMode/Steam/Proton policy,
+locales/keymaps, XDG mime defaults, fonts, smartcard pcscd, and AppImage binfmt,
+owner-`~/nixos` acceptance coverage matrix, VM gate list, no-omission diff, and
+`jetos-acceptance-prove` proof under `acceptance/`,
 repo-ciphertext/host-key tmpfs-only secret activation proof, guided-ext4 disk
 intent with `--manual`, and `jetos` hybrid ISO media staging/proof. When pinned
 xorriso, Limine, zstd, QEMU, and filesystem tools are present, `jet os image`
-writes the ISO artifact and records the exact tool paths in proof JSON.
+writes the ISO artifact, the qcow2/SD/netboot variant proof, and records the
+exact tool paths in proof JSON.
+Generated terminal profiles set `JETOS_BRAND=JetOS` and a clean `JetOS <host>`
+prompt for login shells and VM run-mode shells; `/etc/issue` and `/etc/motd`
+carry the same light host branding.
+Fleet deploy scripts default to tar-over-SSH staging, remote proof before
+switch, health check, and rollback-on-fail; tests may replace those commands
+with local hooks, but the generated default is a real push path, not a proof
+label. Lifecycle GC is explain-before-delete by default and deletes old
+generation directories only when invoked with `--apply`.
 Installer media copies the generation as a self-contained tree; host-root
 symlinks are dereferenced before the ISO is built so the guest install does not
 depend on the build machine's paths.
@@ -1452,6 +1510,16 @@ as `jet os vm prove`, writes one host proof per scenario host, then records
 `systems/vm-tests/<name>-vmtest-proof.json` with the source test body,
 assertion method facts, host generations, disks, and proof artifact paths.
 
+`jetos user plan|build|switch|rollback|prove <name>` is the standalone
+per-user path. It selects a `user.<name>` or `users.<name>` profile from
+`config.jet`, renders the same `users/<name>/profile.json` artifact used by
+`jet os switch`, and builds/activates/proves it through normal named
+generations rather than a separate hidden state store. The generated
+`jetos-user-apply <name>` command applies that profile to a home directory:
+projects declared files, links package binaries into `.jetos/profile/bin`,
+writes user service units under `.config/systemd/user`, and records
+`.jetos/proof/user-<name>.json`.
+
 ## Fan-out operator `f.[a, b, c]` (S75) and fixed-size list `[T#N]` (S76)
 
 ### Fan-out `f.[a, b, c]`
@@ -1513,12 +1581,12 @@ function's set when the function reaches an operation that carries it.
 | Effect  | Carried by |
 |---------|-----------|
 | `Io`    | `print`, `eprint`, `input`, `read_all_input`, `core.io.*` |
-| `Fs`    | `core.files.*` (whole-file helpers and streaming handles) |
-| `Net`   | `core.net.*`, `core.http.*` |
-| `Time`  | `core.time.now`/`sleep`/`start`, `core.time.now` |
+| `Fs`    | `core.files.*` (whole-file helpers and streaming handles), `core.watcher.files` |
+| `Net`   | `core.net.*`, `core.http.*`, `core.watcher.port` |
+| `Time`  | ambient `core.time` clock/zone reads (`now`, `now_utc`, `today`, `instant`, `zone`, `sleep`, `start`) |
 | `Rand`  | `core.random.*` |
 | `Env`   | `core.env.*` |
-| `Exec`  | `core.process.run`/`exit` |
+| `Exec`  | `core.process.run`/`exit`/`cmd`/`pipeline`, `ProcessSpec.run`/`spawn`, `ProcessChild` wait/control/stream calls, `core.watcher.process_pid` |
 | `Db`    | `core.db.*` |
 | `Log`   | `core.log.*` |
 | `Gpu`   | `core.raylib.*`, future `core.gpu.*` / `core.game.*` |

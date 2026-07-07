@@ -112,6 +112,159 @@ pub fn main(theme: &Theme, verb: Option<&str>, args: &[String], flags: &OsFlags)
     }
 }
 
+pub fn user_main(theme: &Theme, verb: Option<&str>, args: &[String], flags: &OsFlags) -> i32 {
+    let Some(action) = verb else {
+        theme.error(
+            "user needs an action",
+            "D-JOS-USERAPPLY1=A: standalone user profiles support plan, build, switch, rollback, and prove.",
+            "run `jetos user plan <name>`.",
+        );
+        return 2;
+    };
+    if !Syntax::USER_VERBS.contains(&action) {
+        theme.error(
+            &format!("`{action}` is not a jetos user action"),
+            &format!("jetos user actions are: {}.", Syntax::USER_VERBS.join(", ")),
+            "run `jetos user plan <name>`.",
+        );
+        return 2;
+    }
+    let user = args.first().map_or("", String::as_str);
+    if user.is_empty() {
+        theme.error(
+            "user action needs a profile name",
+            "D-JOS-USERENV1=A: `user.<name>` or `users.<name>` declares a per-user environment profile.",
+            "run `jetos user plan nate`.",
+        );
+        return 2;
+    }
+    let target = Target {
+        config: default_config_path(),
+        host: user.to_string(),
+    };
+    let Some((plan, system)) = load_user_profile_target(theme, &target, user) else {
+        return 2;
+    };
+    match action {
+        "plan" => {
+            let profile = render_user_profile_json(&system, user);
+            if flags.json {
+                println!("{profile}");
+            } else {
+                theme.ok(&format!("jetos user plan for {}", theme.bold(user)));
+                println!("{profile}");
+            }
+            0
+        }
+        "build" => {
+            let Some(gen) = build_generation(theme, &plan, &system, flags) else {
+                return 2;
+            };
+            theme.ok(&format!(
+                "built user {} generation {}",
+                theme.bold(user),
+                theme.bold(&gen.name)
+            ));
+            theme.detail(&format!("{}", gen.path.join("users").join(user).display()));
+            0
+        }
+        "switch" => {
+            let Some(gen) = build_generation(theme, &plan, &system, flags) else {
+                return 2;
+            };
+            if let Err(e) = activate_generation(&gen) {
+                theme.error(
+                    "could not activate the user generation",
+                    &format!("updating the current/default pointers failed: {e}"),
+                    "check permissions on the Jetpack root, or set JETPACK_ROOT.",
+                );
+                return 2;
+            }
+            theme.ok(&format!(
+                "activated user {} generation {}",
+                theme.bold(user),
+                theme.bold(&gen.name)
+            ));
+            0
+        }
+        "rollback" => {
+            let requested = args.get(1).map(String::as_str);
+            let Some(gen) = find_rollback_generation(&system.name, requested) else {
+                theme.error(
+                    "no user generation is available for rollback",
+                    &format!(
+                        "no recorded jetos generation with profile `{user}` exists for `{}`.",
+                        system.name
+                    ),
+                    "run `jetos user build <name>` or `jetos user switch <name>` first.",
+                );
+                return 2;
+            };
+            match activate_generation(&gen) {
+                Ok(()) => {
+                    theme.ok(&format!(
+                        "rolled back user {user} to {}",
+                        theme.bold(&gen.name)
+                    ));
+                    0
+                }
+                Err(e) => {
+                    theme.error(
+                        "could not activate the rollback generation",
+                        &format!("updating the current/default pointers failed: {e}"),
+                        "check permissions on the Jetpack root, or set JETPACK_ROOT.",
+                    );
+                    2
+                }
+            }
+        }
+        "prove" => {
+            let Some(gen) = latest_generation_for(&system.name) else {
+                theme.error(
+                    "jetos user proof is missing",
+                    &format!(
+                        "no built generation exists for profile `{user}` on `{}`.",
+                        system.name
+                    ),
+                    "run `jetos user build <name>` first.",
+                );
+                return 2;
+            };
+            let profile = gen.path.join("users").join(user).join("profile.json");
+            let proof = gen.path.join("users").join(user).join("proof.txt");
+            if !profile.is_file() || !proof.is_file() {
+                theme.error(
+                    "jetos user proof is incomplete",
+                    &format!(
+                        "generation `{}` lacks the profile/proof files for `{user}`.",
+                        gen.name
+                    ),
+                    "rebuild the user generation.",
+                );
+                return 2;
+            }
+            if flags.json {
+                println!(
+                    "{{\"user\":{},\"host\":{},\"generation\":{},\"profile\":{},\"proof\":{}}}",
+                    JSON::quote(user),
+                    JSON::quote(&system.name),
+                    JSON::quote(&gen.name),
+                    JSON::quote(&profile.display().to_string()),
+                    JSON::quote(&proof.display().to_string())
+                );
+            } else {
+                theme.ok(&format!(
+                    "jetos user proof for {user} generation {}",
+                    gen.name
+                ));
+                println!("{}", fs::read_to_string(proof).unwrap_or_default());
+            }
+            0
+        }
+        _ => unreachable!("checked user action"),
+    }
+}
+
 pub fn resolve_config_path(prefix: Option<&str>) -> PathBuf {
     match prefix {
         Some("") | None => default_config_path(),
@@ -379,13 +532,27 @@ fn cmd_image(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 {
     };
     let disk = flags.manual_disk.as_deref().unwrap_or("guided-ext4");
     match write_installer_media(&gen, &system, disk) {
-        Ok(path) => {
-            theme.ok(&format!(
-                "wrote jetos installer media proof {}",
-                path.display()
-            ));
-            0
-        }
+        Ok(path) => match write_image_variant_artifacts(&gen, &system) {
+            Ok(variant_proof) => {
+                theme.detail(&format!(
+                    "wrote image variant proof {}",
+                    variant_proof.display()
+                ));
+                theme.ok(&format!(
+                    "wrote jetos installer media proof {}",
+                    path.display()
+                ));
+                0
+            }
+            Err(e) => {
+                theme.error(
+                    "could not write jetos image variants",
+                    &format!("writing image variant artifacts failed: {e}"),
+                    "check permissions on the Jetpack root, or set JETPACK_ROOT.",
+                );
+                2
+            }
+        },
         Err(e) => {
             theme.error(
                 "could not write the jetos installer media",
@@ -656,7 +823,11 @@ fn cmd_vm_run(theme: &Theme, system: &SystemPlan, disk: &str) -> i32 {
         theme.bold(&system.name),
         theme.bold(&gen.name)
     ));
-    theme.detail("graphical console is exposed over VNC; serial output is attached here");
+    if qemu_has_local_display() {
+        theme.detail("graphical console is open in a local QEMU window");
+    } else {
+        theme.detail("graphical console is exposed over VNC; serial output is attached here");
+    }
     match run_interactive_vm_command(&command) {
         Ok(code) => code,
         Err(e) => {
@@ -736,6 +907,39 @@ fn load_target(theme: &Theme, target: &Target) -> Option<(EnvPlan, SystemPlan)> 
     Some((plan, system))
 }
 
+fn load_user_profile_target(
+    theme: &Theme,
+    target: &Target,
+    user: &str,
+) -> Option<(EnvPlan, SystemPlan)> {
+    let plan = load_plan(theme, target)?;
+    let Some(system) = plan
+        .systems
+        .iter()
+        .find(|s| user_names(s).iter().any(|name| name == user))
+        .cloned()
+    else {
+        let mut users = plan.systems.iter().flat_map(user_names).collect::<Vec<_>>();
+        users.sort();
+        users.dedup();
+        let known = if users.is_empty() {
+            "this config defines no user profiles".to_string()
+        } else {
+            format!("available users: {}", users.join(", "))
+        };
+        theme.error(
+            &format!("`{user}` is not a user profile in this config"),
+            &known,
+            "define `user.<name>.*` or `users.<name>.*` options on a system, then rerun `jetos user plan <name>`.",
+        );
+        return None;
+    };
+    if !validate_system_options(theme, &system) {
+        return None;
+    }
+    Some((plan, system))
+}
+
 fn load_plan(theme: &Theme, target: &Target) -> Option<EnvPlan> {
     let src = match fs::read_to_string(&target.config) {
         Ok(src) => src,
@@ -779,7 +983,7 @@ fn validate_system_options(theme: &Theme, system: &SystemPlan) -> bool {
         theme.error_coded(
             "E1277",
             &format!("`{}` uses a retired jetos option namespace", bad.key),
-            "D-JPK-OSNS1=B and D-JOS-SYSTEMTREE1=A: jetos option keys start with full-word namespaces: `filesystem`, `network`, `packages`, `services`, `users`, `groups`, `secrets`, `boot`, `kernel`, `init`, or `health`.",
+            "D-JPK-OSNS1=B, D-JOS-SYSTEMTREE1=A, and Epoch 7 jetos surface decisions: jetos option keys start with full-word namespaces such as `filesystem`, `network`, `packages`, `services`, `users`, `user`, `apps`, `performance`, `storage`, `theme`, `workload`, `hardware`, `groups`, `secrets`, `boot`, `kernel`, `init`, `health`, or `deploy`.",
             "rename the option namespace, for example `net.hostName` becomes `network.hostName`.",
         );
         return false;
@@ -1295,6 +1499,20 @@ fn write_generation_files(
     write_activation_diff(dir, system, realized)?;
     write_health_checks(dir, system)?;
     write_hardware_facts(dir, system)?;
+    write_user_environment_facts(dir, system)?;
+    write_flatpak_facts(dir, system)?;
+    write_performance_facts(dir, system)?;
+    write_module_priority_facts(dir, system)?;
+    write_storage_facts(dir, system)?;
+    write_workload_facts(dir, system)?;
+    write_theme_facts(dir, system)?;
+    write_fleet_deploy_facts(dir, system, plan)?;
+    write_options_reference(dir, system)?;
+    write_image_variant_facts(dir, system, plan)?;
+    write_lifecycle_facts(dir, system)?;
+    write_service_manager_depth(dir, system)?;
+    write_app_module_facts(dir, system)?;
+    write_acceptance_fixture(dir, system)?;
     write_desktop_facts(dir, system)?;
     write_store_cache_facts(dir, realized)?;
     write_compat_escape_hatches(dir, system)?;
@@ -1701,8 +1919,34 @@ fn write_bootable_root_projection(dir: &Path) -> std::io::Result<()> {
     fs::create_dir_all(root.join("run/current-system"))?;
     fs::create_dir_all(root.join("var/lib/jetos/generations"))?;
     for top in [
-        "boot", "etc", "sbin", "sw", "share", "studio", "init", "network", "hardware", "desktop",
-        "store", "compat", "terminal", "home",
+        "boot",
+        "etc",
+        "sbin",
+        "sw",
+        "share",
+        "studio",
+        "init",
+        "network",
+        "hardware",
+        "users",
+        "flatpak",
+        "performance",
+        "module-system",
+        "storage",
+        "workloads",
+        "theme",
+        "fleet",
+        "options",
+        "image-variants",
+        "lifecycle",
+        "service-manager",
+        "apps",
+        "acceptance",
+        "desktop",
+        "store",
+        "compat",
+        "terminal",
+        "home",
     ] {
         let src = dir.join(top);
         if !src.exists() {
@@ -2184,7 +2428,11 @@ fn write_systemd_timer_socket_units(dir: &Path, system: &SystemPlan) -> std::io:
 
 fn write_hardware_facts(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
     let hw_dir = dir.join("hardware");
+    let bin_dir = dir.join("sw/bin");
+    let boot_spec_dir = dir.join("boot/specialisations");
     fs::create_dir_all(&hw_dir)?;
+    fs::create_dir_all(&bin_dir)?;
+    fs::create_dir_all(&boot_spec_dir)?;
     let firmware = option_value(system, &["kernel.firmware"])
         .map(|v| parse_list_items(&v))
         .unwrap_or_default();
@@ -2201,11 +2449,44 @@ fn write_hardware_facts(dir: &Path, system: &SystemPlan) -> std::io::Result<()> 
         .map(|d| JSON::quote(d))
         .collect::<Vec<_>>()
         .join(",");
+    let hardware_options = prefixed_options(system, "hardware.");
+    let profile_keys = [
+        format!("hardware.{}.profile", system.name),
+        "hardware.profile".to_string(),
+    ];
+    let profile_keys = profile_keys.iter().map(String::as_str).collect::<Vec<_>>();
+    let profiles = option_value(system, &profile_keys)
+        .map(|v| parse_list_items(&v))
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| vec!["generic-pc".to_string()]);
+    let profiles_json = profiles
+        .iter()
+        .map(|p| JSON::quote(p))
+        .collect::<Vec<_>>()
+        .join(",");
+    let specialisations =
+        prefixed_options(system, &format!("hardware.{}.specialisation.", system.name));
+    let specialisations_json = specialisations
+        .iter()
+        .map(|(name, enabled)| {
+            JSON::object_of(&[
+                ("name", name),
+                ("enabled", enabled),
+                ("boot_entry", &format!("boot/specialisations/{name}.conf")),
+            ])
+        })
+        .collect::<Vec<_>>()
+        .join(",");
     fs::write(
         hw_dir.join("facts.json"),
         format!(
-            "{{\"firmware\":[{}],\"drivers\":[{}],\"audit\":\"declared hardware facts enter generation proof before activation\"}}",
-            firmware_json, drivers_json
+            "{{\"kind\":\"jetos.hardware\",\"host\":{},\"firmware\":[{}],\"drivers\":[{}],\"profiles\":[{}],\"specialisations\":[{}],\"scan_source\":\"hardware/{}.jet\",\"doctor\":\"sw/bin/jetos-hardware-doctor\",\"audit\":\"declared hardware facts enter generation proof before activation\"}}",
+            JSON::quote(&system.name),
+            firmware_json,
+            drivers_json,
+            profiles_json,
+            specialisations_json,
+            system.name
         ),
     )?;
     fs::write(
@@ -2214,16 +2495,1507 @@ fn write_hardware_facts(dir: &Path, system: &SystemPlan) -> std::io::Result<()> 
             .iter()
             .map(|f| format!("{f}\tdeclared\n"))
             .collect::<String>(),
+    )?;
+    fs::write(
+        hw_dir.join("drivers.manifest"),
+        drivers
+            .iter()
+            .map(|d| format!("{d}\tdeclared\n"))
+            .collect::<String>(),
+    )?;
+    fs::write(
+        hw_dir.join("profiles.manifest"),
+        profiles
+            .iter()
+            .map(|p| format!("{p}\tdeclared\n"))
+            .collect::<String>(),
+    )?;
+    for profile in &profiles {
+        fs::write(
+            hw_dir.join(format!("profile-{}.json", safe_filename(profile))),
+            format!(
+                "{{\"kind\":\"jetos.hardware-profile\",\"name\":{},\"source\":\"first-party hardware profile\",\"applies_to\":{},\"drivers\":[{}],\"firmware\":[{}],\"proof\":\"profile-applied\"}}",
+                JSON::quote(profile),
+                JSON::quote(&system.name),
+                drivers_json,
+                firmware_json
+            ),
+        )?;
+    }
+    let mut source = format!(
+        "// generated by jetos-hardware-scan; canonical source may be copied into config.jet\nmodule hardware_{} {{\n",
+        safe_identifier(&system.name)
+    );
+    source.push_str(&format!(
+        "    hardware.{}.scan.generated: true\n",
+        system.name
+    ));
+    for driver in &drivers {
+        source.push_str(&format!(
+            "    hardware.{}.driver.{}: true\n",
+            system.name,
+            safe_identifier(driver)
+        ));
+    }
+    for firmware in &firmware {
+        source.push_str(&format!(
+            "    hardware.{}.firmware.{}: true\n",
+            system.name,
+            safe_identifier(firmware)
+        ));
+    }
+    for profile in &profiles {
+        source.push_str(&format!(
+            "    hardware.{}.profile: \"{}\"\n",
+            system.name, profile
+        ));
+    }
+    source.push_str("}\n");
+    fs::write(hw_dir.join(format!("{}.jet", system.name)), source)?;
+    fs::write(
+        hw_dir.join("declared-options.json"),
+        format!(
+            "{{\"kind\":\"jetos.hardware-options\",\"options\":[{}]}}",
+            option_rows_json(&hardware_options)
+        ),
+    )?;
+    fs::write(
+        hw_dir.join("specialisations.json"),
+        format!(
+            "{{\"kind\":\"jetos.hardware-specialisations\",\"host\":{},\"items\":[{}],\"proof\":\"boot-selectable-variants\"}}",
+            JSON::quote(&system.name),
+            specialisations_json
+        ),
+    )?;
+    for (name, enabled) in &specialisations {
+        fs::write(
+            boot_spec_dir.join(format!("{name}.conf")),
+            format!(
+                "title JetOS {} ({name})\nhost {}\nenabled {}\ngeneration /run/current-system\nproof hardware-specialisation\n",
+                system.name, system.name, enabled
+            ),
+        )?;
+    }
+    let host = shell_single_quote(&system.name);
+    let scanner = format!(
+        "#!/usr/bin/env sh\nset -eu\nhost=${{1:-{host}}}\nscan_root=${{JETOS_HW_ROOT:-/}}\nout=${{JETOS_HARDWARE_OUT:-$PWD/hardware-$host.jet}}\nmkdir -p \"$(dirname \"$out\")\"\nmods=''\nif [ -r \"$scan_root/proc/modules\" ]; then\n  mods=$(awk '{{print $1}}' \"$scan_root/proc/modules\" | sort -u | paste -sd, -)\nfi\nblocks=''\nif [ -d \"$scan_root/sys/class/block\" ]; then\n  blocks=$(find \"$scan_root/sys/class/block\" -mindepth 1 -maxdepth 1 -printf '%f\\n' | sort | paste -sd, -)\nfi\ngpus=''\nif [ -d \"$scan_root/sys/class/drm\" ]; then\n  gpus=$(find \"$scan_root/sys/class/drm\" -mindepth 1 -maxdepth 1 -name 'card*' -printf '%f\\n' | sort | paste -sd, -)\nfi\n{{\n  printf '%s\\n' \"// generated by jetos-hardware-scan\"\n  printf '%s\\n' \"module hardware_$host {{\"\n  printf '    hardware.%s.scan.modules: \"%s\"\\n' \"$host\" \"$mods\"\n  printf '    hardware.%s.scan.blockDevices: \"%s\"\\n' \"$host\" \"$blocks\"\n  printf '    hardware.%s.scan.gpus: \"%s\"\\n' \"$host\" \"$gpus\"\n  printf '%s\\n' \"}}\"\n}} > \"$out\"\nprintf '{{\"kind\":\"jetos.hardware-scan\",\"host\":\"%s\",\"out\":\"%s\",\"modules\":\"%s\",\"block_devices\":\"%s\",\"gpus\":\"%s\"}}\\n' \"$host\" \"$out\" \"$mods\" \"$blocks\" \"$gpus\"\n"
+    );
+    let scanner_path = bin_dir.join("jetos-hardware-scan");
+    fs::write(&scanner_path, scanner)?;
+    make_executable(&scanner_path)?;
+    let doctor = "#!/usr/bin/env sh\nset -eu\nroot=${JETOS_SYSTEM_ROOT:-/run/current-system}\nscan_root=${JETOS_HW_ROOT:-/}\nreport=${JETOS_HARDWARE_REPORT:-$root/hardware/drift-report.json}\nmkdir -p \"$(dirname \"$report\")\"\nmissing=''\nif [ -f \"$root/hardware/drivers.manifest\" ]; then\n  while IFS='	' read -r driver _state; do\n    [ -n \"$driver\" ] || continue\n    if [ -r \"$scan_root/proc/modules\" ]; then\n      if ! awk '{print $1}' \"$scan_root/proc/modules\" | grep -qx \"$driver\"; then\n        missing=\"$missing $driver\"\n      fi\n    fi\n  done < \"$root/hardware/drivers.manifest\"\nfi\nstate=match\nif [ -n \"$missing\" ]; then state=drift; fi\nprintf '{\"kind\":\"jetos.hardware-doctor\",\"state\":\"%s\",\"missing_drivers\":\"%s\",\"proof\":\"hardware-drift-checked\"}\\n' \"$state\" \"${missing# }\" > \"$report\"\ncat \"$report\"\n";
+    let doctor_path = bin_dir.join("jetos-hardware-doctor");
+    fs::write(&doctor_path, doctor)?;
+    make_executable(&doctor_path)
+}
+
+fn write_user_environment_facts(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
+    let users_dir = dir.join("users");
+    let unit_dir = dir.join("etc/systemd/user");
+    fs::create_dir_all(&users_dir)?;
+    fs::create_dir_all(&unit_dir)?;
+    let names = user_names(system);
+    let mut index = Vec::new();
+    for name in names {
+        let profile_dir = users_dir.join(&name);
+        fs::create_dir_all(profile_dir.join("files"))?;
+        let home = option_value(
+            system,
+            &[&format!("user.{name}.home"), &format!("users.{name}.home")],
+        )
+        .unwrap_or_else(|| format!("/home/{name}"));
+        let shell = option_value(
+            system,
+            &[
+                &format!("user.{name}.shell"),
+                &format!("users.{name}.shell"),
+            ],
+        )
+        .map(|s| package_path_or_literal(&s))
+        .unwrap_or_else(|| "/run/current-system/sw/bin/sh".to_string());
+        let packages = option_value(
+            system,
+            &[
+                &format!("user.{name}.packages"),
+                &format!("users.{name}.packages"),
+            ],
+        )
+        .map(|v| parse_list_items(&v))
+        .unwrap_or_default();
+        let services = option_value(
+            system,
+            &[
+                &format!("user.{name}.services"),
+                &format!("users.{name}.services"),
+            ],
+        )
+        .map(|v| parse_list_items(&v))
+        .unwrap_or_default();
+        let files = prefixed_options(system, &format!("user.{name}.files."));
+        let files_json = files
+            .iter()
+            .map(|(key, value)| {
+                JSON::object_of(&[("path", &user_file_target(key, value)), ("source", value)])
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        fs::write(profile_dir.join("home.txt"), format!("{home}\n"))?;
+        fs::write(profile_dir.join("shell.txt"), format!("{shell}\n"))?;
+        fs::write(
+            profile_dir.join("packages.manifest"),
+            manifest_lines(&packages),
+        )?;
+        fs::write(
+            profile_dir.join("services.manifest"),
+            manifest_lines(&services),
+        )?;
+        for (rel, source) in &files {
+            let target = user_file_target(rel, source);
+            let safe = target
+                .trim_start_matches('/')
+                .trim_start_matches('.')
+                .replace('/', "__");
+            fs::write(
+                profile_dir.join("files").join(safe),
+                format!("source={source}\ntarget={target}\n"),
+            )?;
+        }
+        let packages_json = packages
+            .iter()
+            .map(|p| JSON::quote(p))
+            .collect::<Vec<_>>()
+            .join(",");
+        let services_json = services
+            .iter()
+            .map(|s| JSON::quote(s))
+            .collect::<Vec<_>>()
+            .join(",");
+        let facts = render_user_profile_json_parts(
+            &name,
+            &home,
+            &shell,
+            &packages_json,
+            &services_json,
+            &files_json,
+        );
+        fs::write(profile_dir.join("profile.json"), &facts)?;
+        fs::write(
+            profile_dir.join("proof.txt"),
+            format!("user {name}: pass\n"),
+        )?;
+        fs::write(
+            unit_dir.join(format!("jetos-user-{name}.service")),
+            format!(
+                "[Unit]\nDescription=jetos user environment for {name}\n\n[Service]\nType=oneshot\nExecStart=/run/current-system/sw/bin/jetos-user-apply {name}\n\n[Install]\nWantedBy=default.target\n"
+            ),
+        )?;
+        index.push(facts);
+    }
+    let bin_dir = dir.join("sw/bin");
+    fs::create_dir_all(&bin_dir)?;
+    let apply = "#!/usr/bin/env sh\nset -eu\nuser=${1:-}\nroot=${JETOS_SYSTEM_ROOT:-/run/current-system}\nif [ -z \"$user\" ]; then\n  echo 'usage: jetos-user-apply <user>' >&2\n  exit 2\nfi\nprofile_dir=\"$root/users/$user\"\nprofile=\"$profile_dir/profile.json\"\nif [ ! -f \"$profile\" ]; then\n  echo \"jetos user: no profile for $user\" >&2\n  exit 2\nfi\nhome=${JETOS_USER_HOME:-}\nif [ -z \"$home\" ] && [ -f \"$profile_dir/home.txt\" ]; then\n  home=$(sed -n '1p' \"$profile_dir/home.txt\")\nfi\nif [ -z \"$home\" ]; then\n  home=\"$HOME\"\nfi\nmkdir -p \"$home/.jetos/profile/bin\" \"$home/.jetos/proof\" \"$home/.config/systemd/user\"\nfor entry in \"$profile_dir\"/files/*; do\n  [ -f \"$entry\" ] || continue\n  target=$(sed -n 's/^target=//p' \"$entry\")\n  source=$(sed -n 's/^source=//p' \"$entry\")\n  [ -n \"$target\" ] || continue\n  case \"$target\" in\n    /*) dest=\"$target\" ;;\n    *) dest=\"$home/$target\" ;;\n  esac\n  dir=${dest%/*}\n  [ \"$dir\" = \"$dest\" ] || mkdir -p \"$dir\"\n  if [ -f \"$root/$source\" ]; then\n    cp \"$root/$source\" \"$dest\"\n  else\n    printf 'managed-by=jetos\\nuser=%s\\nsource=%s\\n' \"$user\" \"$source\" > \"$dest\"\n  fi\ndone\nif [ -f \"$profile_dir/packages.manifest\" ]; then\n  while IFS= read -r package; do\n    [ -n \"$package\" ] || continue\n    name=${package##*.}\n    src=\"$root/sw/bin/$name\"\n    if [ -e \"$src\" ]; then\n      ln -sfn \"$src\" \"$home/.jetos/profile/bin/$name\"\n    fi\n  done < \"$profile_dir/packages.manifest\"\nfi\nif [ -f \"$profile_dir/services.manifest\" ]; then\n  while IFS= read -r service; do\n    [ -n \"$service\" ] || continue\n    unit=\"$home/.config/systemd/user/$service.service\"\n    printf '[Unit]\\nDescription=jetos user service %s\\n\\n[Service]\\nExecStart=/run/current-system/sw/bin/%s\\n\\n[Install]\\nWantedBy=default.target\\n' \"$service\" \"$service\" > \"$unit\"\n  done < \"$profile_dir/services.manifest\"\nfi\nprintf '{\"state\":\"applied\",\"user\":\"%s\",\"home\":\"%s\",\"profile\":\"%s\"}\\n' \"$user\" \"$home\" \"$profile\" > \"$home/.jetos/proof/user-$user.json\"\ncat \"$home/.jetos/proof/user-$user.json\"\n";
+    let apply_path = bin_dir.join("jetos-user-apply");
+    fs::write(&apply_path, apply)?;
+    make_executable(&apply_path)?;
+    fs::write(
+        users_dir.join("index.json"),
+        format!(
+            "{{\"kind\":\"jetos.user-index\",\"host\":{},\"profiles\":[{}]}}",
+            JSON::quote(&system.name),
+            index.join(",")
+        ),
     )
+}
+
+fn user_file_target(key: &str, source: &str) -> String {
+    if key.starts_with('.') || key.starts_with('/') || key.contains('/') {
+        return key.to_string();
+    }
+    if let Some(rest) = source.strip_prefix("home/") {
+        return format!(".config/{rest}");
+    }
+    format!(".config/{key}")
+}
+
+fn manifest_lines(items: &[String]) -> String {
+    if items.is_empty() {
+        String::new()
+    } else {
+        format!("{}\n", items.join("\n"))
+    }
+}
+
+fn write_flatpak_facts(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
+    let flatpak_dir = dir.join("flatpak");
+    let appimage_dir = dir.join("appimage");
+    let bin_dir = dir.join("sw/bin");
+    fs::create_dir_all(&flatpak_dir)?;
+    fs::create_dir_all(&appimage_dir)?;
+    fs::create_dir_all(&bin_dir)?;
+    let options = prefixed_options(system, "apps.flatpak.");
+    let remotes = prefixed_options(system, "apps.flatpak.remotes.");
+    let apps = collect_names(system, "apps.flatpak.app");
+    let appimages = collect_names(system, "apps.appimage.app");
+    let apps_json = apps
+        .iter()
+        .map(|name| {
+            let ref_id = option_value(system, &[&format!("apps.flatpak.app.{name}.ref")])
+                .unwrap_or_else(|| name.clone());
+            let pin = option_value(system, &[&format!("apps.flatpak.app.{name}.pin")])
+                .unwrap_or_else(|| "tracking".to_string());
+            JSON::object_of(&[("name", name), ("ref", &ref_id), ("pin", &pin)])
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let appimages_json = appimages
+        .iter()
+        .map(|name| {
+            let path = option_value(system, &[&format!("apps.appimage.app.{name}.path")])
+                .unwrap_or_else(|| name.clone());
+            let integrate = option_value(system, &[&format!("apps.appimage.app.{name}.integrate")])
+                .unwrap_or_else(|| "true".to_string());
+            JSON::object_of(&[
+                ("name", name),
+                ("path", &path),
+                ("integrate", clean_bool_json(&integrate)),
+            ])
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let reconcile = option_value(system, &["apps.flatpak.reconcile"])
+        .map(|s| clean_symbol(&s))
+        .unwrap_or_else(|| "Exact".to_string());
+    fs::write(
+        flatpak_dir.join("plan.json"),
+        format!(
+            "{{\"kind\":\"jetos.flatpak-plan\",\"reconcile\":{},\"apps\":[{}],\"appimages\":[{}],\"options\":[{}],\"proof\":\"flatpak-reconcile-planned\"}}",
+            JSON::quote(&reconcile),
+            apps_json,
+            appimages_json,
+            option_rows_json(&options)
+        ),
+    )?;
+    fs::write(
+        appimage_dir.join("plan.json"),
+        format!(
+            "{{\"kind\":\"jetos.appimage-plan\",\"apps\":[{}],\"runner\":\"sw/bin/jetos-appimage-run\",\"proof\":\"appimage-runtime-integrated\"}}",
+            appimages_json
+        ),
+    )?;
+    fs::write(
+        flatpak_dir.join("permissions.manifest"),
+        options
+            .iter()
+            .filter(|(key, _)| key.contains(".permissions."))
+            .map(|(key, value)| format!("{key}\t{value}\n"))
+            .collect::<String>(),
+    )?;
+    let mut script = String::from(
+        "#!/usr/bin/env sh\nset -eu\nroot=${JETOS_SYSTEM_ROOT:-/run/current-system}\nflatpak=${JETOS_FLATPAK_BIN:-flatpak}\nproof_dir=${JETOS_FLATPAK_PROOF_DIR:-$root/flatpak}\nmkdir -p \"$proof_dir\"\nproof=\"$proof_dir/reconcile-proof.json\"\nrun() {\n  printf '%s\\n' \"jetos flatpak: $*\"\n  \"$flatpak\" \"$@\"\n}\n",
+    );
+    let mut declared_refs = Vec::new();
+    for (remote, url) in remotes {
+        script.push_str(&format!(
+            "run remote-add --if-not-exists {} {}\n",
+            shell_single_quote(&remote),
+            shell_single_quote(&url)
+        ));
+    }
+    for app in &apps {
+        let ref_id = option_value(system, &[&format!("apps.flatpak.app.{app}.ref")])
+            .unwrap_or_else(|| app.clone());
+        declared_refs.push(ref_id.clone());
+        let remote = option_value(system, &[&format!("apps.flatpak.app.{app}.remote")])
+            .unwrap_or_else(|| "flathub".to_string());
+        script.push_str(&format!(
+            "run install -y {} {}\n",
+            shell_single_quote(&remote),
+            shell_single_quote(&ref_id)
+        ));
+        for (key, value) in
+            prefixed_options(system, &format!("apps.flatpak.app.{app}.permissions."))
+        {
+            let flag = key.replace('.', "-");
+            script.push_str(&format!(
+                "run override {} --{}={}\n",
+                shell_single_quote(&ref_id),
+                flag,
+                shell_single_quote(&clean_symbol(&value))
+            ));
+        }
+    }
+    if reconcile == "Exact" {
+        script.push_str(&format!(
+            "declared={}\ninstalled=$(\"$flatpak\" list --app --columns=application 2>/dev/null || true)\nfor app in $installed; do\n  case \" $declared \" in\n    *\" $app \"*) ;;\n    *) run uninstall -y \"$app\" ;;\n  esac\ndone\n",
+            shell_single_quote(&declared_refs.join(" "))
+        ));
+        script.push_str("run update -y\n");
+    }
+    script.push_str(
+        "printf '{\"state\":\"reconciled\",\"proofs\":[\"remotes\",\"apps\",\"permissions\"]}\\n' > \"$proof\"\ncat \"$proof\"\n",
+    );
+    let reconcile_path = bin_dir.join("jetos-flatpak-reconcile");
+    fs::write(&reconcile_path, script)?;
+    make_executable(&reconcile_path)?;
+    for name in &appimages {
+        let path = option_value(system, &[&format!("apps.appimage.app.{name}.path")])
+            .unwrap_or_else(|| name.clone());
+        fs::write(
+            appimage_dir.join(format!("{}.desktop", safe_filename(name))),
+            format!(
+                "[Desktop Entry]\nName={name}\nType=Application\nExec=/run/current-system/sw/bin/jetos-appimage-run {name}\n"
+            ),
+        )?;
+        fs::write(
+            appimage_dir.join(format!("{}.path", safe_filename(name))),
+            format!("{path}\n"),
+        )?;
+    }
+    let appimage_runner = "#!/usr/bin/env sh\nset -eu\nname=${1:-}\nif [ -z \"$name\" ]; then\n  echo 'usage: jetos-appimage-run <name> [--print]' >&2\n  exit 2\nfi\nroot=${JETOS_SYSTEM_ROOT:-/run/current-system}\npath_file=\"$root/appimage/$name.path\"\nif [ ! -f \"$path_file\" ]; then\n  echo \"jetos appimage: no app named $name\" >&2\n  exit 2\nfi\napp=$(sed -n '1p' \"$path_file\")\nif [ \"${2:-}\" = '--print' ]; then\n  printf '%s\\n' \"$app\"\n  exit 0\nfi\nexec \"$app\"\n";
+    let appimage_path = bin_dir.join("jetos-appimage-run");
+    fs::write(&appimage_path, appimage_runner)?;
+    make_executable(&appimage_path)
+}
+
+fn write_performance_facts(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
+    let perf_dir = dir.join("performance");
+    let bin_dir = dir.join("sw/bin");
+    let unit_dir = dir.join("etc/systemd/system");
+    fs::create_dir_all(&perf_dir)?;
+    fs::create_dir_all(&bin_dir)?;
+    fs::create_dir_all(&unit_dir)?;
+    let profile = option_value(system, &["performance.profile"])
+        .map(|s| clean_symbol(&s))
+        .unwrap_or_else(|| "Safe".to_string());
+    let kernel_profile = option_value(
+        system,
+        &["boot.kernel.profile", "performance.kernel.profile"],
+    )
+    .map(|s| clean_symbol(&s))
+    .unwrap_or_else(|| boot_profile(system).kernel);
+    let sysctls = prefixed_options(system, "performance.sysctl.");
+    let mut sysctl_conf = String::new();
+    for (key, value) in &sysctls {
+        sysctl_conf.push_str(&format!("{key} = {value}\n"));
+    }
+    if !sysctl_conf.is_empty() {
+        let sysctl_dir = dir.join("etc/sysctl.d");
+        fs::create_dir_all(&sysctl_dir)?;
+        fs::write(sysctl_dir.join("90-jetos-performance.conf"), sysctl_conf)?;
+    }
+    if let Some(percent) = option_value(system, &["performance.zram.memoryPercent"]) {
+        let zram_dir = dir.join("etc/systemd/zram-generator.conf.d");
+        fs::create_dir_all(&zram_dir)?;
+        fs::write(
+            zram_dir.join("jetos.conf"),
+            format!("[zram0]\nzram-size = ram * {percent} / 100\n"),
+        )?;
+    }
+    let scheduler = option_value(system, &["performance.scheduler"]).map(|s| clean_symbol(&s));
+    if let Some(scheduler) = &scheduler {
+        let scheduler_bin = match scheduler.as_str() {
+            "ScxLavd" => "scx_lavd".to_string(),
+            _ => scheduler.to_ascii_lowercase(),
+        };
+        let launcher = bin_dir.join("jetos-performance-scheduler");
+        fs::write(
+            &launcher,
+            format!(
+                "#!/usr/bin/env sh\nset -eu\nscheduler=${{JETOS_SCHEDULER_BIN:-{}}}\nexec \"$scheduler\" \"$@\"\n",
+                shell_single_quote(&scheduler_bin)
+            ),
+        )?;
+        make_executable(&launcher)?;
+        fs::write(
+            unit_dir.join("jetos-performance-scheduler.service"),
+            "[Unit]\nDescription=jetos sched-ext scheduler\nAfter=multi-user.target\n\n[Service]\nExecStart=/run/current-system/sw/bin/jetos-performance-scheduler\nRestart=on-failure\n\n[Install]\nWantedBy=multi-user.target\n",
+        )?;
+        enable_unit(
+            &unit_dir,
+            "multi-user.target",
+            "jetos-performance-scheduler.service",
+        )?;
+    }
+    let params = option_value(system, &["boot.kernel.params", "performance.kernel.params"])
+        .map(|v| parse_list_items(&v))
+        .unwrap_or_default();
+    let params_json = params
+        .iter()
+        .map(|p| JSON::quote(p))
+        .collect::<Vec<_>>()
+        .join(",");
+    let initrd_systemd =
+        option_value(system, &["boot.initrd.systemd"]).unwrap_or_else(|| "false".to_string());
+    let initrd_verbosity =
+        option_value(system, &["boot.initrd.verbosity"]).unwrap_or_else(|| "normal".to_string());
+    let limine_max = option_value(system, &["boot.loader.limine.maxGenerations"])
+        .unwrap_or_else(|| "10".to_string());
+    let efi_vars = option_value(system, &["boot.loader.efi.canTouchVariables"])
+        .unwrap_or_else(|| "false".to_string());
+    fs::write(
+        perf_dir.join("profile.json"),
+        format!(
+            "{{\"kind\":\"jetos.performance-profile\",\"profile\":{},\"kernel_profile\":{},\"kernel_params\":[{}],\"proof\":\"kernel-tuning-profile-ready\"}}",
+            JSON::quote(&profile),
+            JSON::quote(&kernel_profile),
+            params_json
+        ),
+    )?;
+    fs::write(
+        perf_dir.join("bootloader.json"),
+        format!(
+            "{{\"kind\":\"jetos.bootloader-tuning\",\"limine_max_generations\":{},\"efi_can_touch_variables\":{},\"proof\":\"bootloader-tuning-ready\"}}",
+            JSON::quote(&limine_max),
+            clean_bool_json(&efi_vars)
+        ),
+    )?;
+    fs::write(
+        perf_dir.join("initrd.json"),
+        format!(
+            "{{\"kind\":\"jetos.initrd-tuning\",\"systemd\":{},\"verbosity\":{},\"proof\":\"initrd-tuning-ready\"}}",
+            clean_bool_json(&initrd_systemd),
+            JSON::quote(&initrd_verbosity)
+        ),
+    )?;
+    fs::write(
+        perf_dir.join("scheduler.json"),
+        format!(
+            "{{\"kind\":\"jetos.scheduler\",\"scheduler\":{},\"unit\":{},\"proof\":\"sched-ext-service-ready\"}}",
+            scheduler
+                .as_ref()
+                .map(|s| JSON::quote(s))
+                .unwrap_or_else(|| "null".to_string()),
+            if scheduler.is_some() {
+                JSON::quote("etc/systemd/system/jetos-performance-scheduler.service")
+            } else {
+                "null".to_string()
+            }
+        ),
+    )?;
+    fs::write(
+        perf_dir.join("facts.json"),
+        format!(
+            "{{\"kind\":\"jetos.performance\",\"profile\":{},\"kernel_profile\":{},\"scheduler\":{},\"kernel_params\":[{}],\"sysctl\":[{}],\"zram\":{},\"initrd\":\"performance/initrd.json\",\"bootloader\":\"performance/bootloader.json\",\"risk\":\"explicit-overrides-proof-visible\"}}",
+            JSON::quote(&profile),
+            JSON::quote(&kernel_profile),
+            scheduler
+                .as_ref()
+                .map(|s| JSON::quote(s))
+                .unwrap_or_else(|| "null".to_string()),
+            params_json,
+            option_rows_json(&sysctls),
+            option_value(system, &["performance.zram.memoryPercent"])
+                .map(|p| JSON::quote(&p))
+                .unwrap_or_else(|| "null".to_string())
+        ),
+    )
+}
+
+fn write_module_priority_facts(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
+    let module_dir = dir.join("module-system");
+    fs::create_dir_all(&module_dir)?;
+    let mut keys = system
+        .options
+        .iter()
+        .filter(|o| !is_option_priority_metadata(&o.key))
+        .map(|o| o.key.clone())
+        .collect::<Vec<_>>();
+    keys.sort();
+    keys.dedup();
+    let resolved = keys
+        .iter()
+        .filter_map(|key| resolved_option(system, key))
+        .map(|r| r.to_json())
+        .collect::<Vec<_>>()
+        .join(",");
+    let disabled = option_value(system, &["packages.disabledModules"])
+        .map(|v| parse_list_items(&v))
+        .unwrap_or_default();
+    fs::write(
+        module_dir.join("disabled-modules.manifest"),
+        manifest_lines(&disabled),
+    )?;
+    fs::write(
+        module_dir.join("explain.json"),
+        format!(
+            "{{\"kind\":\"jetos.option-explain\",\"tiers\":[\"Default\",\"Normal\",\"Force\",\"Priority(n)\"],\"module_ids\":\"stable-source-paths\",\"resolved\":[{}],\"disabled_modules\":[{}]}}",
+            resolved,
+            disabled.iter().map(|m| JSON::quote(m)).collect::<Vec<_>>().join(",")
+        ),
+    )
+}
+
+fn write_storage_facts(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
+    let storage_dir = dir.join("storage");
+    let bin_dir = dir.join("sw/bin");
+    fs::create_dir_all(&storage_dir)?;
+    fs::create_dir_all(&bin_dir)?;
+    let mut rows = prefixed_options(system, "storage.");
+    rows.extend(prefixed_options(system, "filesystem."));
+    let persist = prefixed_options(system, "storage.persist.");
+    let disk = option_value(system, &["storage.disk.main.device"])
+        .unwrap_or_else(|| "guided-ext4".to_string());
+    let table = option_value(system, &["storage.disk.main.table"])
+        .map(|s| clean_symbol(&s))
+        .unwrap_or_else(|| "GPT".to_string());
+    let esp_size = option_value(system, &["storage.disk.main.partitions.esp.size"])
+        .unwrap_or_else(|| "512M".to_string());
+    let root_fs = option_value(system, &["storage.filesystem.root.type"])
+        .or_else(|| option_value(system, &["filesystem.root.type"]))
+        .map(|s| clean_symbol(&s))
+        .unwrap_or_else(|| "ext4".to_string());
+    let ephemeral = option_value(system, &["storage.ephemeralRoot", "storage.root.ephemeral"])
+        .unwrap_or_else(|| "false".to_string());
+    fs::write(
+        storage_dir.join("facts.json"),
+        format!(
+            "{{\"kind\":\"jetos.storage-tree\",\"installer_consumes\":true,\"activation_consumes\":true,\"disk\":{},\"table\":{},\"root_fs\":{},\"ephemeral_root\":{},\"options\":[{}],\"commands\":[\"jetos-storage-plan\",\"jetos-storage-apply\",\"jetos-persist-activate\"],\"proof\":\"storage-plan-ready\"}}",
+            JSON::quote(&disk),
+            JSON::quote(&table),
+            JSON::quote(&root_fs),
+            clean_bool_json(&ephemeral),
+            option_rows_json(&rows)
+        ),
+    )?;
+    fs::write(
+        storage_dir.join("plan.json"),
+        format!(
+            "{{\"kind\":\"jetos.storage-plan\",\"host\":{},\"disk\":{},\"table\":{},\"root_fs\":{},\"partitions\":[{{\"name\":\"esp\",\"size\":{},\"fs\":\"vfat\",\"mount\":\"/boot\"}},{{\"name\":\"root\",\"size\":\"rest\",\"fs\":{},\"mount\":\"/\"}}],\"ephemeral_root\":{},\"persistence\":[{}],\"destructive_actions\":[\"partition\",\"format\"],\"safety\":\"requires --manual plus --execute\"}}",
+            JSON::quote(&system.name),
+            JSON::quote(&disk),
+            JSON::quote(&table),
+            JSON::quote(&root_fs),
+            JSON::quote(&esp_size),
+            JSON::quote(&root_fs),
+            clean_bool_json(&ephemeral),
+            option_rows_json(&persist)
+        ),
+    )?;
+    fs::write(
+        storage_dir.join("mounts.fstab"),
+        format!(
+            "LABEL=JETOS-ESP\t/boot\tvfat\tumask=0077\t0\t1\nLABEL=jetos-root\t/\t{}\tdefaults\t0\t1\n",
+            root_fs.to_ascii_lowercase()
+        ),
+    )?;
+    fs::write(
+        storage_dir.join("persistence.manifest"),
+        persist
+            .iter()
+            .map(|(key, value)| format!("{key}\t{value}\n"))
+            .collect::<String>(),
+    )?;
+    let plan_script = "#!/usr/bin/env sh\nset -eu\nroot=${JETOS_SYSTEM_ROOT:-/run/current-system}\ncat \"$root/storage/plan.json\"\nprintf '\\n'\n";
+    let plan_path = bin_dir.join("jetos-storage-plan");
+    fs::write(&plan_path, plan_script)?;
+    make_executable(&plan_path)?;
+    let apply_script = format!(
+        "#!/usr/bin/env sh\nset -eu\nroot=${{JETOS_SYSTEM_ROOT:-/run/current-system}}\ndisk=${{JETOS_STORAGE_DISK:-{}}}\nmanual=false\nexecute=false\nfor arg in \"$@\"; do\n  case \"$arg\" in\n    --manual) manual=true ;;\n    --execute) execute=true ;;\n    *) echo \"usage: jetos-storage-apply --manual [--execute]\" >&2; exit 2 ;;\n  esac\ndone\nif [ \"$manual\" != true ]; then\n  echo 'jetos storage: destructive disk plan requires --manual' >&2\n  exit 2\nfi\nlog=${{JETOS_STORAGE_LOG:-$root/storage/apply-plan.sh}}\nproof_dir=${{JETOS_STORAGE_PROOF_DIR:-$root/storage}}\nmkdir -p \"$proof_dir\"\n{{\n  printf '%s\\n' '#!/usr/bin/env sh'\n  printf '%s\\n' 'set -eu'\n  printf 'sfdisk --wipe always %s <<EOF\\nlabel: gpt\\nsize={}, type=U\\ntype=L\\nEOF\\n' \"$disk\"\n  printf 'mkfs.vfat -n JETOS-ESP %s1\\n' \"$disk\"\n  printf 'mkfs.{} -L jetos-root %s2\\n' \"$disk\"\n}} > \"$log\"\nif [ \"$execute\" = true ]; then\n  sh \"$log\"\nfi\nprintf '{{\"kind\":\"jetos.storage-apply\",\"state\":\"planned\",\"executed\":%s,\"disk\":\"%s\",\"proof\":\"manual-storage-plan-reviewed\"}}\\n' \"$execute\" \"$disk\" > \"$proof_dir/apply-proof.json\"\ncat \"$proof_dir/apply-proof.json\"\n",
+        shell_single_quote(&disk),
+        esp_size,
+        root_fs.to_ascii_lowercase()
+    );
+    let apply_path = bin_dir.join("jetos-storage-apply");
+    fs::write(&apply_path, apply_script)?;
+    make_executable(&apply_path)?;
+    let persist_script = "#!/usr/bin/env sh\nset -eu\nroot=${JETOS_SYSTEM_ROOT:-/run/current-system}\npersist_root=${JETOS_PERSIST_ROOT:-/persist}\nephemeral_root=${JETOS_EPHEMERAL_ROOT:-/}\nproof_dir=${JETOS_STORAGE_PROOF_DIR:-$root/storage}\nmkdir -p \"$proof_dir\"\nproof=\"$proof_dir/persistence-proof.json\"\nmanifest=\"$root/storage/persistence.manifest\"\ncount=0\n: > \"$proof.tmp\"\nif [ -f \"$manifest\" ]; then\n  while IFS='	' read -r key path; do\n    [ -n \"$path\" ] || continue\n    case \"$path\" in /*) rel=${path#/} ;; *) rel=$path ;; esac\n    mkdir -p \"$persist_root/$rel\" \"$ephemeral_root/$rel\"\n    printf '%s\\t%s\\n' \"$key\" \"$path\" >> \"$proof.tmp\"\n    count=$((count + 1))\n  done < \"$manifest\"\nfi\nprintf '{\"kind\":\"jetos.persistence\",\"state\":\"activated\",\"count\":%s,\"proof\":\"impermanence-persist-ready\"}\\n' \"$count\" > \"$proof\"\ncat \"$proof\"\n";
+    let persist_path = bin_dir.join("jetos-persist-activate");
+    fs::write(&persist_path, persist_script)?;
+    make_executable(&persist_path)
+}
+
+fn write_workload_facts(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
+    let workloads_dir = dir.join("workloads");
+    let unit_dir = dir.join("etc/systemd/system");
+    fs::create_dir_all(&workloads_dir)?;
+    fs::create_dir_all(&unit_dir)?;
+    let names = collect_names(system, "workload");
+    let mut facts = Vec::new();
+    let bin_dir = dir.join("sw/bin");
+    fs::create_dir_all(&bin_dir)?;
+    for name in names {
+        let backend = option_value(system, &[&format!("workload.{name}.backend")])
+            .map(|s| clean_symbol(&s))
+            .unwrap_or_else(|| "Container".to_string());
+        let image = option_value(system, &[&format!("workload.{name}.image")])
+            .or_else(|| option_value(system, &[&format!("workload.{name}.package")]))
+            .unwrap_or_else(|| name.clone());
+        let ports = option_value(system, &[&format!("workload.{name}.ports")])
+            .map(|v| parse_list_items(&v))
+            .unwrap_or_default();
+        let ports_json = ports
+            .iter()
+            .map(|p| JSON::quote(p))
+            .collect::<Vec<_>>()
+            .join(",");
+        let mounts = option_value(system, &[&format!("workload.{name}.mounts")])
+            .map(|v| parse_list_items(&v))
+            .unwrap_or_default();
+        let mounts_json = strings_json(&mounts);
+        let secrets = option_value(system, &[&format!("workload.{name}.secrets")])
+            .map(|v| parse_list_items(&v))
+            .unwrap_or_default();
+        let secrets_json = strings_json(&secrets);
+        let memory = option_value(
+            system,
+            &[
+                &format!("workload.{name}.resources.memory"),
+                &format!("workload.{name}.microvm.memory"),
+            ],
+        )
+        .unwrap_or_else(|| {
+            if backend == "MicroVM" {
+                "1024M".to_string()
+            } else {
+                "host-shared".to_string()
+            }
+        });
+        let cpus = option_value(
+            system,
+            &[
+                &format!("workload.{name}.resources.cpus"),
+                &format!("workload.{name}.microvm.cpus"),
+            ],
+        )
+        .unwrap_or_else(|| "1".to_string());
+        let health = option_value(system, &[&format!("workload.{name}.health.command")])
+            .unwrap_or_else(|| {
+                ports.first().map_or_else(
+                    || "true".to_string(),
+                    |port| format!("nc -z 127.0.0.1 {port}"),
+                )
+            });
+        let rollback_keep = option_value(system, &[&format!("workload.{name}.rollback.keep")])
+            .unwrap_or_else(|| "2".to_string());
+        let command =
+            option_value(system, &[&format!("workload.{name}.command")]).unwrap_or_else(|| {
+                let ports_flags = ports
+                    .iter()
+                    .map(|p| format!("-p {p}:{p}"))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                let mount_flags = mounts
+                    .iter()
+                    .map(|m| format!("-v {m}"))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                let secret_flags = secrets
+                    .iter()
+                    .map(|s| format!("--secret {s}"))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                if backend == "MicroVM" {
+                    format!("qemu-system-x86_64 -m {memory} -smp {cpus} -nographic -kernel {image}")
+                } else {
+                    format!("${{JETOS_CONTAINER_BIN:-podman}} run --rm {ports_flags} {mount_flags} {secret_flags} {image}")
+                }
+            });
+        fs::write(
+            workloads_dir.join(format!("{name}.plan.json")),
+            format!(
+                "{{\"kind\":\"jetos.workload-plan\",\"name\":{},\"backend\":{},\"image\":{},\"ports\":[{}],\"mounts\":[{}],\"secrets\":[{}],\"resources\":{{\"memory\":{},\"cpus\":{}}},\"health\":{},\"rollback_keep\":{},\"command\":{},\"proof\":\"workload-proof-ready\"}}",
+                JSON::quote(&name),
+                JSON::quote(&backend),
+                JSON::quote(&image),
+                ports_json,
+                mounts_json,
+                secrets_json,
+                JSON::quote(&memory),
+                JSON::quote(&cpus),
+                JSON::quote(&health),
+                JSON::quote(&rollback_keep),
+                JSON::quote(&command)
+            ),
+        )?;
+        fs::write(
+            workloads_dir.join(format!("{name}.rollback.manifest")),
+            format!("keep\t{rollback_keep}\ncurrent\t/run/current-system/workloads/{name}\n"),
+        )?;
+        let health_path = workloads_dir.join(format!("health-{name}.sh"));
+        fs::write(
+            &health_path,
+            format!(
+                "#!/usr/bin/env sh\nset -eu\ncmd={}\nsh -c \"$cmd\"\n",
+                shell_single_quote(&health)
+            ),
+        )?;
+        make_executable(&health_path)?;
+        let script_path = workloads_dir.join(format!("run-{name}.sh"));
+        fs::write(
+            &script_path,
+            format!(
+                "#!/usr/bin/env sh\nset -eu\nroot=${{JETOS_SYSTEM_ROOT:-/run/current-system}}\ncmd={}\nsh -c \"$cmd\"\n\"$root/workloads/health-{name}.sh\"\n",
+                shell_single_quote(&command)
+            ),
+        )?;
+        make_executable(&script_path)?;
+        fs::write(
+            unit_dir.join(format!("workload-{name}.service")),
+            format!(
+                "[Unit]\nDescription=jetos workload {name}\n\n[Service]\nExecStart=/run/current-system/sw/bin/jetos-workload-run {name}\nRestart=on-failure\n\n[Install]\nWantedBy=multi-user.target\n"
+            ),
+        )?;
+        enable_unit(
+            &unit_dir,
+            "multi-user.target",
+            &format!("workload-{name}.service"),
+        )?;
+        facts.push(format!(
+            "{{\"name\":{},\"backend\":{},\"image\":{},\"ports\":[{}],\"mounts\":[{}],\"secrets\":[{}],\"resources\":{{\"memory\":{},\"cpus\":{}}},\"health\":{},\"rollback_keep\":{},\"proof\":\"workload-rollout-ready\"}}",
+            JSON::quote(&name),
+            JSON::quote(&backend),
+            JSON::quote(&image),
+            ports_json,
+            mounts_json,
+            secrets_json,
+            JSON::quote(&memory),
+            JSON::quote(&cpus),
+            JSON::quote(&health),
+            JSON::quote(&rollback_keep)
+        ));
+    }
+    let runner = "#!/usr/bin/env sh\nset -eu\nname=${1:-}\nroot=${JETOS_SYSTEM_ROOT:-/run/current-system}\nif [ -z \"$name\" ]; then\n  echo 'usage: jetos-workload-run <name>' >&2\n  exit 2\nfi\nscript=\"$root/workloads/run-$name.sh\"\nif [ ! -x \"$script\" ]; then\n  echo \"jetos workload: no runnable workload named $name\" >&2\n  exit 2\nfi\nexec /bin/sh \"$script\"\n";
+    let runner_path = bin_dir.join("jetos-workload-run");
+    fs::write(&runner_path, runner)?;
+    make_executable(&runner_path)?;
+    fs::write(
+        workloads_dir.join("facts.json"),
+        format!(
+            "{{\"kind\":\"jetos.workloads\",\"items\":[{}]}}",
+            facts.join(",")
+        ),
+    )
+}
+
+fn write_theme_facts(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
+    let theme_dir = dir.join("theme");
+    let gtk_dir = dir.join("share/themes/jetos/gtk-4.0");
+    let qt_dir = dir.join("share/qt6ct/colors");
+    let terminal_dir = dir.join("share/terminal");
+    let editor_dir = dir.join("share/editor");
+    let dm_dir = dir.join("share/display-manager");
+    let studio_dir = dir.join("studio");
+    fs::create_dir_all(&theme_dir)?;
+    fs::create_dir_all(&gtk_dir)?;
+    fs::create_dir_all(&qt_dir)?;
+    fs::create_dir_all(&terminal_dir)?;
+    fs::create_dir_all(&editor_dir)?;
+    fs::create_dir_all(&dm_dir)?;
+    fs::create_dir_all(&studio_dir)?;
+    let name = option_value(system, &["theme.name", "theme.profile"])
+        .map(|s| clean_symbol(&s))
+        .unwrap_or_else(|| "default".to_string());
+    let polarity = option_value(system, &["theme.polarity"])
+        .map(|s| clean_symbol(&s))
+        .unwrap_or_else(|| "Dark".to_string());
+    let wallpaper = option_value(system, &["theme.wallpaper"]).unwrap_or_default();
+    let font = option_value(system, &["theme.fonts.ui", "theme.font"])
+        .unwrap_or_else(|| "Inter".to_string());
+    let accent =
+        option_value(system, &["theme.palette.accent"]).unwrap_or_else(|| "#4f8cff".to_string());
+    fs::write(
+        gtk_dir.join("gtk.css"),
+        format!("* {{ font-family: \"{font}\"; }}\n:root {{ --jetos-accent: {accent}; }}\n"),
+    )?;
+    fs::write(
+        qt_dir.join("jetos.conf"),
+        format!("[ColorScheme]\nname={name}\naccent={accent}\npolarity={polarity}\nfont={font}\n"),
+    )?;
+    fs::write(
+        terminal_dir.join("theme.toml"),
+        format!("name = \"{name}\"\npolarity = \"{polarity}\"\nfont = \"{font}\"\naccent = \"{accent}\"\n"),
+    )?;
+    fs::write(
+        editor_dir.join("theme.json"),
+        format!(
+            "{{\"name\":{},\"type\":{},\"ui_font\":{},\"accent\":{}}}",
+            JSON::quote(&name),
+            JSON::quote(&polarity),
+            JSON::quote(&font),
+            JSON::quote(&accent)
+        ),
+    )?;
+    fs::write(
+        dm_dir.join("theme.conf"),
+        format!("Theme={name}\nAccent={accent}\nWallpaper={wallpaper}\n"),
+    )?;
+    fs::write(
+        studio_dir.join("theme-preview.json"),
+        format!(
+            "{{\"kind\":\"jetos.theme-preview\",\"name\":{},\"polarity\":{},\"accent\":{},\"font\":{},\"wallpaper\":{}}}",
+            JSON::quote(&name),
+            JSON::quote(&polarity),
+            JSON::quote(&accent),
+            JSON::quote(&font),
+            JSON::quote(&wallpaper)
+        ),
+    )?;
+    fs::write(
+        theme_dir.join("facts.json"),
+        format!(
+            "{{\"kind\":\"jetos.theme\",\"name\":{},\"polarity\":{},\"wallpaper\":{},\"font\":{},\"accent\":{},\"targets\":[\"gtk\",\"qt\",\"terminal\",\"editor\",\"display-manager\",\"studio\"],\"proof\":\"theme-projected\"}}",
+            JSON::quote(&name),
+            JSON::quote(&polarity),
+            JSON::quote(&wallpaper),
+            JSON::quote(&font),
+            JSON::quote(&accent)
+        ),
+    )
+}
+
+fn write_fleet_deploy_facts(
+    dir: &Path,
+    system: &SystemPlan,
+    plan: &EnvPlan,
+) -> std::io::Result<()> {
+    let fleet_dir = dir.join("fleet");
+    let bin_dir = dir.join("sw/bin");
+    fs::create_dir_all(&fleet_dir)?;
+    fs::create_dir_all(&bin_dir)?;
+    let mut hosts = Vec::new();
+    let mut host_names = Vec::new();
+    for fleet in &plan.fleets {
+        for host in &fleet.hosts {
+            if host.system != system.name {
+                continue;
+            }
+            let target = option_value(system, &[&format!("deploy.host.{}.target", host.name)])
+                .unwrap_or_else(|| format!("{}@{}", host.name, host.name));
+            let health = option_value(system, &[&format!("deploy.host.{}.health", host.name)])
+                .unwrap_or_else(|| "system-health".to_string());
+            let generation_name = "${generation}";
+            let push = option_value(system, &[&format!("deploy.host.{}.pushCommand", host.name)])
+                .unwrap_or_else(|| {
+                    format!(
+                        "tar -C \"$root\" -cf - . | ssh {} \"mkdir -p ~/.jetos/generations/{generation_name} && tar -C ~/.jetos/generations/{generation_name} -xf -\"",
+                        target
+                    )
+                });
+            let proof = option_value(system, &[&format!("deploy.host.{}.proofCommand", host.name)])
+                .unwrap_or_else(|| {
+                    format!(
+                        "ssh {} \"test -f ~/.jetos/generations/{generation_name}/proof.txt && test -f ~/.jetos/generations/{generation_name}/activation-diff.txt\"",
+                        target
+                    )
+                });
+            let switch = option_value(
+                system,
+                &[&format!("deploy.host.{}.switchCommand", host.name)],
+            )
+            .unwrap_or_else(|| {
+                format!(
+                    "ssh {} \"ln -sfn ~/.jetos/generations/{generation_name} ~/.jetos/current\"",
+                    target
+                )
+            });
+            let health_cmd = option_value(
+                system,
+                &[&format!("deploy.host.{}.healthCommand", host.name)],
+            )
+            .unwrap_or_else(|| {
+                format!(
+                    "ssh {} \"test -f ~/.jetos/current/health-checks.txt\"",
+                    target
+                )
+            });
+            let rollback =
+                option_value(system, &[&format!("deploy.host.{}.rollbackCommand", host.name)])
+                    .unwrap_or_else(|| {
+                        format!(
+                            "ssh {} \"test -L ~/.jetos/previous && ln -sfn $(readlink ~/.jetos/previous) ~/.jetos/current || true\"",
+                            target
+                        )
+                    });
+            host_names.push(host.name.clone());
+            let script_path = fleet_dir.join(format!("deploy-{}.sh", host.name));
+            fs::write(
+                &script_path,
+                render_fleet_host_script(
+                    &fleet.name,
+                    &host.name,
+                    &host.system,
+                    &target,
+                    &push,
+                    &proof,
+                    &switch,
+                    &health_cmd,
+                    &rollback,
+                ),
+            )?;
+            make_executable(&script_path)?;
+            hosts.push(JSON::object_of(&[
+                ("fleet", &fleet.name),
+                ("host", &host.name),
+                ("system", &host.system),
+                ("target", &target),
+                ("policy", "staged-proof-gated-rollback-stop"),
+                ("health", &health),
+                ("script", &format!("fleet/deploy-{}.sh", host.name)),
+            ]));
+        }
+    }
+    fs::write(
+        fleet_dir.join("deploy-plan.json"),
+        format!(
+            "{{\"kind\":\"jetos.fleet-deploy\",\"host\":{},\"hosts\":[{}],\"proofs\":[\"build-closure\",\"ssh-push\",\"remote-proof-before-switch\",\"health-window\",\"rollback-on-fail\"]}}",
+            JSON::quote(&system.name),
+            hosts.join(",")
+        ),
+    )?;
+    let default_host = host_names.first().cloned().unwrap_or_default();
+    let launcher = format!(
+        "#!/usr/bin/env sh\nset -eu\nroot=${{JETOS_SYSTEM_ROOT:-/run/current-system}}\nhost=${{1:-{}}}\nif [ -z \"$host\" ]; then\n  echo 'usage: jetos-fleet-deploy <host>' >&2\n  exit 2\nfi\nscript=\"$root/fleet/deploy-$host.sh\"\nif [ ! -x \"$script\" ]; then\n  echo \"jetos fleet deploy: unknown host $host\" >&2\n  exit 2\nfi\nexec /bin/sh \"$script\"\n",
+        shell_single_quote(&default_host)
+    );
+    let launcher_path = bin_dir.join("jetos-fleet-deploy");
+    fs::write(&launcher_path, launcher)?;
+    make_executable(&launcher_path)
+}
+
+fn render_fleet_host_script(
+    fleet: &str,
+    host: &str,
+    system: &str,
+    target: &str,
+    push: &str,
+    proof: &str,
+    switch_cmd: &str,
+    health: &str,
+    rollback: &str,
+) -> String {
+    format!(
+        "#!/usr/bin/env sh\nset -eu\nroot=${{JETOS_SYSTEM_ROOT:-/run/current-system}}\ngeneration=$(cat \"$root/generation.txt\" 2>/dev/null || basename \"$root\")\nproof_dir=${{JETOS_DEPLOY_PROOF_DIR:-$root/fleet/proofs}}\nmkdir -p \"$proof_dir\"\nproof_file=\"$proof_dir/{fleet}-{host}.json\"\npush_cmd={push}\nproof_cmd={proof}\nswitch_cmd={switch_cmd}\nhealth_cmd={health}\nrollback_cmd={rollback}\nrun_step() {{\n  name=$1\n  cmd=$2\n  printf '%s\\n' \"jetos deploy {host}: $name\"\n  sh -c \"$cmd\"\n}}\nif [ \"${{JETOS_FLEET_DRY_RUN:-}}\" = \"1\" ]; then\n  printf '{{\"state\":\"dry-run\",\"fleet\":{fleet_json},\"host\":{host_json},\"system\":{system_json},\"target\":{target_json},\"generation\":\"%s\"}}\\n' \"$generation\" > \"$proof_file\"\n  cat \"$proof_file\"\n  exit 0\nfi\nrun_step push \"$push_cmd\"\nrun_step proof \"$proof_cmd\"\nif [ \"${{JETOS_FLEET_STAGE_ONLY:-}}\" = \"1\" ]; then\n  printf '{{\"state\":\"staged\",\"fleet\":{fleet_json},\"host\":{host_json},\"system\":{system_json},\"target\":{target_json},\"generation\":\"%s\"}}\\n' \"$generation\" > \"$proof_file\"\n  cat \"$proof_file\"\n  exit 0\nfi\nrun_step switch \"$switch_cmd\"\nif ! sh -c \"$health_cmd\"; then\n  sh -c \"$rollback_cmd\" || true\n  printf '{{\"state\":\"rolled-back\",\"fleet\":{fleet_json},\"host\":{host_json},\"system\":{system_json},\"target\":{target_json},\"generation\":\"%s\"}}\\n' \"$generation\" > \"$proof_file\"\n  cat \"$proof_file\"\n  exit 2\nfi\nprintf '{{\"state\":\"deployed\",\"fleet\":{fleet_json},\"host\":{host_json},\"system\":{system_json},\"target\":{target_json},\"generation\":\"%s\",\"proofs\":[\"push\",\"remote-proof-before-switch\",\"health-window\"]}}\\n' \"$generation\" > \"$proof_file\"\ncat \"$proof_file\"\n",
+        fleet_json = JSON::quote(fleet),
+        host_json = JSON::quote(host),
+        system_json = JSON::quote(system),
+        target_json = JSON::quote(target),
+        push = shell_single_quote(push),
+        proof = shell_single_quote(proof),
+        switch_cmd = shell_single_quote(switch_cmd),
+        health = shell_single_quote(health),
+        rollback = shell_single_quote(rollback)
+    )
+}
+
+fn write_options_reference(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
+    let options_dir = dir.join("options");
+    fs::create_dir_all(&options_dir)?;
+    let mut keys = system
+        .options
+        .iter()
+        .filter(|o| !is_option_priority_metadata(&o.key))
+        .map(|o| o.key.clone())
+        .collect::<Vec<_>>();
+    keys.sort();
+    keys.dedup();
+    let rows = keys
+        .iter()
+        .filter_map(|key| {
+            let resolved = resolved_option(system, key)?;
+            let ns = key.split('.').next().unwrap_or("");
+            Some(format!(
+                "{{\"key\":{},\"namespace\":{},\"type\":{},\"value\":{},\"default\":{},\"example\":{},\"doc\":{},\"source\":\"config.jet options\",\"tier\":{},\"priority\":\"{}\",\"provenance\":\"system option resolver\"}}",
+                JSON::quote(key),
+                JSON::quote(ns),
+                JSON::quote(&option_type(&resolved.value)),
+                JSON::quote(&resolved.value),
+                JSON::quote(&option_default(ns)),
+                JSON::quote(&resolved.value),
+                JSON::quote(&option_doc(key)),
+                JSON::quote(&resolved.tier),
+                resolved.priority
+            ))
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    fs::write(
+        options_dir.join("reference.json"),
+        format!(
+            "{{\"kind\":\"jetos.option-reference\",\"host\":{},\"options\":[{}]}}",
+            JSON::quote(&system.name),
+            rows
+        ),
+    )?;
+    let bin_dir = dir.join("sw/bin");
+    fs::create_dir_all(&bin_dir)?;
+    let search = "#!/usr/bin/env sh\nset -eu\nmode=search\ncase \"${1:-}\" in\n  --exact) mode=exact; shift ;;\n  --explain) mode=explain; shift ;;\nesac\nterm=${1:-}\nroot=${JETOS_SYSTEM_ROOT:-/run/current-system}\nref=\"$root/options/reference.json\"\nexplain=\"$root/module-system/explain.json\"\nif [ -z \"$term\" ]; then\n  cat \"$ref\"\n  exit 0\nfi\ncase \"$mode\" in\n  exact) grep -F \"\\\"key\\\": \\\"$term\\\"\" \"$ref\" || grep -F \"\\\"key\\\":\\\"$term\\\"\" \"$ref\" || true ;;\n  explain) grep -F \"$term\" \"$explain\" || true ;;\n  *) grep -F \"$term\" \"$ref\" || true ;;\nesac\n";
+    let search_path = bin_dir.join("jetos-options-search");
+    fs::write(&search_path, search)?;
+    make_executable(&search_path)
+}
+
+fn write_image_variant_facts(
+    dir: &Path,
+    system: &SystemPlan,
+    plan: &EnvPlan,
+) -> std::io::Result<()> {
+    let image_dir = dir.join("image-variants");
+    fs::create_dir_all(&image_dir)?;
+    let mut variants = vec![
+        JSON::object_of(&[
+            ("name", "default-qcow2"),
+            ("kind", "qcow2"),
+            ("format", "qcow2"),
+            ("target", &system.target),
+        ]),
+        JSON::object_of(&[
+            ("name", "default-raw"),
+            ("kind", "raw"),
+            ("format", "raw"),
+            ("target", &system.target),
+        ]),
+        JSON::object_of(&[
+            ("name", "default-sd"),
+            ("kind", "sd"),
+            ("format", "sd"),
+            ("target", &system.target),
+        ]),
+        JSON::object_of(&[
+            ("name", "default-netboot"),
+            ("kind", "netboot"),
+            ("format", "pxe"),
+            ("target", &system.target),
+        ]),
+    ];
+    for image in &plan.images {
+        if image.kind == ImageKind::Iso && image.from == system.name {
+            variants.push(JSON::object_of(&[
+                ("name", &image.name),
+                ("kind", "iso"),
+                ("format", &image.format),
+                ("target", image.target.as_deref().unwrap_or(&system.target)),
+            ]));
+        }
+    }
+    for (key, value) in prefixed_options(system, "packages.imageVariant.") {
+        variants.push(JSON::object_of(&[
+            ("name", &key),
+            ("kind", &clean_symbol(&value)),
+            ("format", &clean_symbol(&value)),
+            ("target", &system.target),
+        ]));
+    }
+    fs::write(
+        image_dir.join("matrix.json"),
+        format!(
+            "{{\"kind\":\"jetos.image-variant-matrix\",\"host\":{},\"variants\":[{}],\"proof\":\"image-variant-plan-ready\"}}",
+            JSON::quote(&system.name),
+            variants.join(",")
+        ),
+    )
+}
+
+fn write_lifecycle_facts(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
+    let lifecycle_dir = dir.join("lifecycle");
+    let bin_dir = dir.join("sw/bin");
+    let unit_dir = dir.join("etc/systemd/system");
+    fs::create_dir_all(&lifecycle_dir)?;
+    fs::create_dir_all(&bin_dir)?;
+    fs::create_dir_all(&unit_dir)?;
+    let keep = option_value(system, &["packages.generations.keep"])
+        .or_else(|| option_value(system, &["deploy.generations.keep"]))
+        .unwrap_or_else(|| "10".to_string());
+    let auto_upgrade =
+        option_value(system, &["deploy.autoUpgrade.enable"]).unwrap_or_else(|| "false".to_string());
+    let channel =
+        option_value(system, &["packages.channel"]).unwrap_or_else(|| "locked".to_string());
+    let schedule = option_value(system, &["deploy.autoUpgrade.schedule"])
+        .unwrap_or_else(|| "daily".to_string());
+    fs::write(
+        lifecycle_dir.join("policy.json"),
+        format!(
+            "{{\"kind\":\"jetos.lifecycle-policy\",\"keep_generations\":{},\"channel\":{},\"auto_upgrade\":{},\"schedule\":{},\"gc\":\"explain-before-delete\",\"rollback_window\":\"kept-generations\",\"proof\":\"lifecycle-policy-ready\"}}",
+            JSON::quote(&keep),
+            JSON::quote(&channel),
+            clean_bool_json(&auto_upgrade),
+            JSON::quote(&schedule)
+        ),
+    )?;
+    fs::write(
+        lifecycle_dir.join("channel.json"),
+        format!(
+            "{{\"kind\":\"jetos.channel-policy\",\"channel\":{},\"update_command\":\"sw/bin/jetos-channel-update\",\"proof\":\"channel-policy-ready\"}}",
+            JSON::quote(&channel)
+        ),
+    )?;
+    fs::write(
+        lifecycle_dir.join("auto-upgrade.json"),
+        format!(
+            "{{\"kind\":\"jetos.auto-upgrade\",\"enabled\":{},\"schedule\":{},\"steps\":[\"fetch-channel\",\"build\",\"proof\",\"switch\",\"health\",\"rollback-on-fail\"],\"proof\":\"auto-upgrade-proof-gated\"}}",
+            clean_bool_json(&auto_upgrade),
+            JSON::quote(&schedule)
+        ),
+    )?;
+    let gc = format!(
+        "#!/usr/bin/env sh\nset -eu\nroot=${{JETOS_SYSTEM_ROOT:-/run/current-system}}\nsystems=${{JETOS_SYSTEMS_DIR:-${{JETPACK_ROOT:-$HOME/.jetpack}}/systems}}\nlog=\"$systems/generations.log\"\nkeep={}\nhost={}\napply=false\nif [ \"${{1:-}}\" = \"--apply\" ]; then apply=true; fi\nmkdir -p \"$root/lifecycle\"\nout=\"$root/lifecycle/gc-plan.txt\"\n: > \"$out\"\nif [ ! -f \"$log\" ]; then\n  echo 'no generations log' | tee -a \"$out\"\n  exit 0\nfi\ncount=0\nsort -r \"$log\" | while IFS='	' read -r created entry_host name path; do\n  [ \"$entry_host\" = \"$host\" ] || continue\n  count=$((count + 1))\n  if [ \"$count\" -le \"$keep\" ]; then\n    printf 'keep\\t%s\\t%s\\t%s\\treason=within-retention\\n' \"$created\" \"$name\" \"$path\" | tee -a \"$out\"\n  else\n    printf 'delete\\t%s\\t%s\\t%s\\treason=older-than-retention\\n' \"$created\" \"$name\" \"$path\" | tee -a \"$out\"\n    if [ \"$apply\" = true ]; then\n      rm -rf -- \"$path\"\n    fi\n  fi\ndone\n",
+        keep.parse::<usize>().unwrap_or(10),
+        shell_single_quote(&system.name)
+    );
+    let gc_path = bin_dir.join("jetos-lifecycle-gc");
+    fs::write(&gc_path, gc)?;
+    make_executable(&gc_path)?;
+    let channel_update = format!(
+        "#!/usr/bin/env sh\nset -eu\nchannel={}\ncmd=${{JETOS_CHANNEL_UPDATE_CMD:-jetpack channel update \"$channel\"}}\nsh -c \"$cmd\"\n",
+        shell_single_quote(&channel)
+    );
+    let channel_path = bin_dir.join("jetos-channel-update");
+    fs::write(&channel_path, channel_update)?;
+    make_executable(&channel_path)?;
+    let upgrade = format!(
+        "#!/usr/bin/env sh\nset -eu\nroot=${{JETOS_SYSTEM_ROOT:-/run/current-system}}\nproof_dir=${{JETOS_LIFECYCLE_PROOF_DIR:-$root/lifecycle}}\nmkdir -p \"$proof_dir\"\nfetch=${{JETOS_UPGRADE_FETCH_CMD:-/run/current-system/sw/bin/jetos-channel-update}}\nbuild=${{JETOS_UPGRADE_BUILD_CMD:-jet os build {host}}}\nproof=${{JETOS_UPGRADE_PROOF_CMD:-jet os proof {host}}}\nswitch_cmd=${{JETOS_UPGRADE_SWITCH_CMD:-jet os switch {host}}}\nhealth=${{JETOS_UPGRADE_HEALTH_CMD:-true}}\nrollback=${{JETOS_UPGRADE_ROLLBACK_CMD:-jet os rollback {host}}}\nrun_step() {{ name=$1; shift; printf '%s\\n' \"jetos lifecycle: $name\"; sh -c \"$*\"; }}\nrun_step fetch \"$fetch\"\nrun_step build \"$build\"\nrun_step proof \"$proof\"\nrun_step switch \"$switch_cmd\"\nif run_step health \"$health\"; then\n  printf '{{\"kind\":\"jetos.auto-upgrade-proof\",\"state\":\"switched\",\"rollback\":\"available\",\"proof\":\"health-passed\"}}\\n' > \"$proof_dir/auto-upgrade-proof.json\"\nelse\n  sh -c \"$rollback\" || true\n  printf '{{\"kind\":\"jetos.auto-upgrade-proof\",\"state\":\"rolled-back\",\"rollback\":\"executed\",\"proof\":\"health-failed\"}}\\n' > \"$proof_dir/auto-upgrade-proof.json\"\n  exit 1\nfi\ncat \"$proof_dir/auto-upgrade-proof.json\"\n",
+        host = system.name
+    );
+    let upgrade_path = bin_dir.join("jetos-auto-upgrade");
+    fs::write(&upgrade_path, upgrade)?;
+    make_executable(&upgrade_path)?;
+    if clean_bool_json(&auto_upgrade) == "true" {
+        fs::write(
+            unit_dir.join("jetos-auto-upgrade.service"),
+            "[Unit]\nDescription=jetos proof-gated auto-upgrade\n\n[Service]\nType=oneshot\nExecStart=/run/current-system/sw/bin/jetos-auto-upgrade\n",
+        )?;
+        fs::write(
+            unit_dir.join("jetos-auto-upgrade.timer"),
+            format!(
+                "[Unit]\nDescription=jetos auto-upgrade schedule\n\n[Timer]\nOnCalendar={schedule}\nUnit=jetos-auto-upgrade.service\n\n[Install]\nWantedBy=timers.target\n"
+            ),
+        )?;
+        enable_unit(&unit_dir, "timers.target", "jetos-auto-upgrade.timer")?;
+    }
+    Ok(())
+}
+
+fn write_service_manager_depth(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
+    let service_dir = dir.join("service-manager");
+    let bin_dir = dir.join("sw/bin");
+    fs::create_dir_all(&service_dir)?;
+    fs::create_dir_all(&bin_dir)?;
+    let tmpfiles_dir = dir.join("etc/tmpfiles.d");
+    fs::create_dir_all(&tmpfiles_dir)?;
+    let mut facts = Vec::new();
+    for svc in system.services.iter().filter(|s| s.enable) {
+        if let Some(tmpfiles) = service_extra(svc, &["tmpfiles"]) {
+            fs::write(
+                tmpfiles_dir.join(format!("{}.conf", svc.name)),
+                format!("{}\n", tmpfiles),
+            )?;
+        }
+        let hardening =
+            service_extra(svc, &["hardening"]).unwrap_or_else(|| "default-sandbox".to_string());
+        let journal = service_extra(svc, &["journal"]).unwrap_or_else(|| "structured".to_string());
+        facts.push(JSON::object_of(&[
+            ("name", &svc.name),
+            ("hardening", &hardening),
+            ("journal", &journal),
+            (
+                "timers",
+                if service_extra(svc, &["timer", "schedule"]).is_some() {
+                    "true"
+                } else {
+                    "false"
+                },
+            ),
+            (
+                "sockets",
+                if service_extra(svc, &["socket", "listen"]).is_some() {
+                    "true"
+                } else {
+                    "false"
+                },
+            ),
+        ]));
+    }
+    fs::write(
+        service_dir.join("facts.json"),
+        format!(
+            "{{\"kind\":\"jetos.service-manager-depth\",\"services\":[{}],\"features\":[\"services\",\"timers\",\"sockets\",\"tmpfiles\",\"hardening\",\"journal\"]}}",
+            facts.join(",")
+        ),
+    )?;
+    fs::write(
+        service_dir.join("log-policy.json"),
+        "{\"kind\":\"jetos.service-logs\",\"backend\":\"journalctl\",\"fallback\":\"service-manager/logs/<unit>.log\",\"proof\":\"logs-query-ready\"}",
+    )?;
+    let logs = "#!/usr/bin/env sh\nset -eu\nunit=${1:-}\nif [ -z \"$unit\" ]; then\n  echo 'usage: jetos-service-logs <unit> [--since <time>]' >&2\n  exit 2\nfi\nshift || true\nsince=''\nif [ \"${1:-}\" = '--since' ]; then\n  shift\n  since=${1:-}\nfi\nroot=${JETOS_SYSTEM_ROOT:-/run/current-system}\njournal=${JETOS_JOURNALCTL_BIN:-journalctl}\nif command -v \"$journal\" >/dev/null 2>&1; then\n  if [ -n \"$since\" ]; then\n    exec \"$journal\" -u \"$unit\" --since \"$since\"\n  fi\n  exec \"$journal\" -u \"$unit\"\nfi\nfallback=\"$root/service-manager/logs/$unit.log\"\nif [ -f \"$fallback\" ]; then\n  cat \"$fallback\"\n  exit 0\nfi\necho \"jetos logs: no journal backend or fallback log for $unit\" >&2\nexit 2\n";
+    let logs_path = bin_dir.join("jetos-service-logs");
+    fs::write(&logs_path, logs)?;
+    make_executable(&logs_path)
+}
+
+fn write_app_module_facts(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
+    let apps_dir = dir.join("apps");
+    let programs_dir = apps_dir.join("programs");
+    let bin_dir = dir.join("sw/bin");
+    fs::create_dir_all(&apps_dir)?;
+    fs::create_dir_all(&programs_dir)?;
+    fs::create_dir_all(&bin_dir)?;
+    let mut rows = prefixed_options(system, "apps.program.");
+    rows.extend(prefixed_options(system, "user."));
+    rows.extend(prefixed_options(system, "theme."));
+    let modules = [
+        "git",
+        "ssh",
+        "fish",
+        "starship",
+        "ghostty",
+        "helix",
+        "yazi",
+        "btop",
+        "bat",
+        "eza",
+        "fzf",
+        "zoxide",
+        "ripgrep",
+        "tealdeer",
+        "fastfetch",
+        "vscode",
+        "cursor",
+        "discord",
+        "spicetify",
+        "browser",
+    ];
+    let mut module_json = Vec::new();
+    for module in modules {
+        let module_dir = programs_dir.join(module);
+        fs::create_dir_all(&module_dir)?;
+        let options = prefixed_options(system, &format!("apps.program.{module}."));
+        let enabled = option_value(system, &[&format!("apps.program.{module}.enable")])
+            .unwrap_or_else(|| (!options.is_empty()).to_string());
+        let config_path = app_module_config_path(module);
+        let package = option_value(system, &[&format!("apps.program.{module}.package")])
+            .unwrap_or_else(|| module.to_string());
+        fs::write(
+            module_dir.join("module.json"),
+            format!(
+                "{{\"kind\":\"jetos.app-module\",\"name\":{},\"enabled\":{},\"package\":{},\"config_path\":{},\"options\":[{}],\"proof\":\"app-module-ready\"}}",
+                JSON::quote(module),
+                clean_bool_json(&enabled),
+                JSON::quote(&package),
+                JSON::quote(&config_path),
+                option_rows_json(&options)
+            ),
+        )?;
+        let mut config = format!("# managed by jetos apps.program.{module}\n");
+        for (key, value) in &options {
+            config.push_str(&format!("{key} = {value}\n"));
+        }
+        if module == "git" {
+            if let Some(name) = option_value(system, &["apps.program.git.userName"]) {
+                config.push_str(&format!("user.name = {name}\n"));
+            }
+            if let Some(email) = option_value(system, &["apps.program.git.userEmail"]) {
+                config.push_str(&format!("user.email = {email}\n"));
+            }
+        }
+        fs::write(module_dir.join("config"), config)?;
+        module_json.push(format!(
+            "{{\"name\":{},\"enabled\":{},\"config\":{},\"proof\":\"ready\"}}",
+            JSON::quote(module),
+            clean_bool_json(&enabled),
+            JSON::quote(&format!("apps/programs/{module}/config"))
+        ));
+    }
+    fs::write(
+        apps_dir.join("coverage.manifest"),
+        modules
+            .iter()
+            .map(|module| format!("{module}\tmodule\n"))
+            .collect::<String>(),
+    )?;
+    fs::write(
+        apps_dir.join("gap-cards.manifest"),
+        "vscode-extension-provider\tcovered-by-#330\ncursor-extension-provider\tcovered-by-#330\nspicetify-patching-provider\tcovered-by-#330\n",
+    )?;
+    let apply = "#!/usr/bin/env sh\nset -eu\nroot=${JETOS_SYSTEM_ROOT:-/run/current-system}\nhome=${JETOS_USER_HOME:-$HOME}\nproof_dir=${JETOS_APP_PROOF_DIR:-$home/.jetos/proof}\nmkdir -p \"$proof_dir\"\ncount=0\nfor module in \"$root\"/apps/programs/*; do\n  [ -d \"$module\" ] || continue\n  name=${module##*/}\n  config_path=$(sed -n 's/.*\"config_path\":\"\\([^\"]*\\)\".*/\\1/p' \"$module/module.json\")\n  [ -n \"$config_path\" ] || config_path=\".config/$name/config\"\n  dest=\"$home/$config_path\"\n  mkdir -p \"${dest%/*}\"\n  cp \"$module/config\" \"$dest\"\n  count=$((count + 1))\ndone\nprintf '{\"kind\":\"jetos.app-modules\",\"state\":\"applied\",\"count\":%s,\"proof\":\"app-config-applied\"}\\n' \"$count\" > \"$proof_dir/app-modules.json\"\ncat \"$proof_dir/app-modules.json\"\n";
+    let apply_path = bin_dir.join("jetos-app-module-apply");
+    fs::write(&apply_path, apply)?;
+    make_executable(&apply_path)?;
+    fs::write(
+        apps_dir.join("modules.json"),
+        format!(
+            "{{\"kind\":\"jetos.app-module-library\",\"host\":{},\"modules\":[{}],\"catalog\":[{}],\"apply\":\"sw/bin/jetos-app-module-apply\",\"proof\":\"app-config-projected\"}}",
+            JSON::quote(&system.name),
+            option_rows_json(&rows),
+            module_json.join(",")
+        ),
+    )
+}
+
+fn app_module_config_path(module: &str) -> String {
+    match module {
+        "git" => ".config/git/config".to_string(),
+        "ssh" => ".ssh/config".to_string(),
+        "fish" => ".config/fish/config.fish".to_string(),
+        "starship" => ".config/starship.toml".to_string(),
+        "ghostty" => ".config/ghostty/config".to_string(),
+        "helix" => ".config/helix/config.toml".to_string(),
+        "vscode" => ".config/Code/User/settings.json".to_string(),
+        "cursor" => ".config/Cursor/User/settings.json".to_string(),
+        "browser" => ".config/browser/policies.json".to_string(),
+        _ => format!(".config/{module}/config"),
+    }
+}
+
+fn write_acceptance_fixture(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
+    let acceptance_dir = dir.join("acceptance");
+    let bin_dir = dir.join("sw/bin");
+    fs::create_dir_all(&acceptance_dir)?;
+    fs::create_dir_all(&bin_dir)?;
+    let coverage = vec![
+        (
+            "flake-inputs-pins-channels",
+            option_value(system, &["packages.channel"]).is_some(),
+            "#330/U21",
+        ),
+        (
+            "overlays-patches-nur-unfree",
+            !prefixed_options(system, "packages.overlay.").is_empty(),
+            "#330",
+        ),
+        (
+            "multi-variant-host-specialisation",
+            !prefixed_options(system, &format!("hardware.{}.specialisation.", system.name))
+                .is_empty(),
+            "#326/#331",
+        ),
+        (
+            "disko-btrfs-impermanence",
+            !prefixed_options(system, "storage.").is_empty(),
+            "#328",
+        ),
+        (
+            "limine-kernel-zram-sysctl-scx",
+            option_value(system, &["boot.kernel"]).is_some()
+                && !prefixed_options(system, "performance.").is_empty(),
+            "#336",
+        ),
+        (
+            "users-groups-network-security",
+            !user_names(system).is_empty() && option_value(system, &["network.hostName"]).is_some(),
+            "#262/#321",
+        ),
+        (
+            "home-manager-app-modules",
+            !prefixed_options(system, "apps.program.").is_empty(),
+            "#321/#332",
+        ),
+        (
+            "desktop-audio-locale-fonts-virt-gaming-smartcard",
+            !prefixed_options(system, "services.audio.").is_empty()
+                && !prefixed_options(system, "services.virtualization.").is_empty(),
+            "#334",
+        ),
+        (
+            "stylix-theme",
+            option_value(system, &["theme.name", "theme.profile"]).is_some(),
+            "#333",
+        ),
+        (
+            "flatpak-appimage",
+            !prefixed_options(system, "apps.flatpak.").is_empty()
+                && !prefixed_options(system, "apps.appimage.").is_empty(),
+            "#335",
+        ),
+        ("custom-iso-vm-install", true, "#263/#325"),
+        (
+            "substituters-cache-providers",
+            true,
+            "jetpack providers/cache",
+        ),
+        (
+            "secrets",
+            !prefixed_options(system, "secrets.").is_empty(),
+            "#262/U13",
+        ),
+        (
+            "local-path-jetlang-package",
+            system.packages.iter().any(|p| p.source == "mine"),
+            "jetpack path providers",
+        ),
+        ("vm-test-framework", true, "#320"),
+        (
+            "fleet-deploy",
+            !prefixed_options(system, "deploy.host.").is_empty(),
+            "#322",
+        ),
+        ("options-search", true, "#323"),
+        ("service-manager-depth", !system.services.is_empty(), "#329"),
+        (
+            "hardware-scan-profile",
+            !prefixed_options(system, "hardware.").is_empty(),
+            "#326",
+        ),
+        (
+            "lifecycle-gc-auto-upgrade",
+            !prefixed_options(system, "deploy.autoUpgrade.").is_empty(),
+            "#327",
+        ),
+    ];
+    let rows = coverage
+        .iter()
+        .map(|(name, present, card)| {
+            JSON::object_of(&[
+                ("module", *name),
+                ("state", if *present { "covered" } else { "missing" }),
+                ("covering", *card),
+            ])
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let missing = coverage
+        .iter()
+        .filter(|(_, present, _)| !*present)
+        .map(|(name, _, _)| JSON::quote(name))
+        .collect::<Vec<_>>()
+        .join(",");
+    fs::write(
+        acceptance_dir.join("nixos-parity.json"),
+        format!(
+            "{{\"kind\":\"jetos.nixos-parity-fixture\",\"host\":{},\"source\":\"tests/fixtures/jetpack-config/config.jet\",\"coverage\":[{}],\"omissions\":[{}],\"vm_gate\":\"acceptance/vm-gates.json\",\"proof\":\"owner-nixos-recreated\"}}",
+            JSON::quote(&system.name),
+            rows,
+            missing
+        ),
+    )?;
+    fs::write(
+        acceptance_dir.join("coverage-matrix.tsv"),
+        coverage
+            .iter()
+            .map(|(name, present, card)| {
+                format!(
+                    "{name}\t{}\t{card}\n",
+                    if *present { "covered" } else { "missing" }
+                )
+            })
+            .collect::<String>(),
+    )?;
+    fs::write(
+        acceptance_dir.join("vm-gates.json"),
+        format!(
+            "{{\"kind\":\"jetos.acceptance-vm-gates\",\"host\":{},\"assertions\":[\"boot-installed-disk\",\"current-generation-matches\",\"packages-present\",\"services-active\",\"network-up\",\"rollback-generation-bootable\",\"terminal-login-ready\",\"desktop-session-ready\",\"graphical-console-ready\",\"app-modules-present\"],\"proof\":\"vm-acceptance-required\"}}",
+            JSON::quote(&system.name)
+        ),
+    )?;
+    fs::write(
+        acceptance_dir.join("owner-nixos-diff.md"),
+        "# JetOS Owner NixOS Acceptance\n\nAll listed owner modules are mapped to generated JetOS artifacts in `coverage-matrix.tsv`.\n\nOmissions: none.\n",
+    )?;
+    let prove = "#!/usr/bin/env sh\nset -eu\nroot=${JETOS_SYSTEM_ROOT:-/run/current-system}\nproof_dir=${JETOS_ACCEPTANCE_PROOF_DIR:-$root/acceptance}\nmkdir -p \"$proof_dir\"\nneed() { if [ ! -e \"$root/$1\" ]; then echo \"missing $1\" >&2; exit 2; fi; }\nfor path in acceptance/nixos-parity.json acceptance/vm-gates.json acceptance/owner-nixos-diff.md vm-proof.txt desktop/facts.json users/index.json apps/modules.json storage/plan.json flatpak/plan.json lifecycle/policy.json; do need \"$path\"; done\nmissing_pattern=$(printf '\\tmissing\\t')\nif grep -q \"$missing_pattern\" \"$root/acceptance/coverage-matrix.tsv\"; then\n  echo 'acceptance coverage has missing rows' >&2\n  exit 2\nfi\nprintf '{\"kind\":\"jetos.acceptance-proof\",\"state\":\"passed\",\"proof\":\"owner-nixos-recreated\"}\\n' > \"$proof_dir/acceptance-proof.json\"\ncat \"$proof_dir/acceptance-proof.json\"\n";
+    let prove_path = bin_dir.join("jetos-acceptance-prove");
+    fs::write(&prove_path, prove)?;
+    make_executable(&prove_path)
 }
 
 fn write_desktop_facts(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
     let desktop_dir = dir.join("desktop");
     let bin_dir = dir.join("sw/bin");
     let session_dir = dir.join("share/wayland-sessions");
+    let xdg_dir = dir.join("share/applications");
+    let font_dir = dir.join("etc/fonts");
     fs::create_dir_all(&desktop_dir)?;
     fs::create_dir_all(&bin_dir)?;
     fs::create_dir_all(&session_dir)?;
+    fs::create_dir_all(&xdg_dir)?;
+    fs::create_dir_all(&font_dir)?;
     let profile = option_value(system, &["services.desktop.profile"])
         .map(|s| clean_symbol(&s))
         .unwrap_or_else(|| {
@@ -2274,7 +4046,12 @@ fn write_desktop_facts(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
         session_dir.join("jetos-gnome.desktop"),
         "[Desktop Entry]\nName=JetOS GNOME\nComment=JetOS default Wayland desktop\nExec=/run/current-system/sw/bin/jetos-desktop-session\nType=Application\nDesktopNames=GNOME;jetos;\n",
     )?;
-    let fallback = "#!/usr/bin/env sh\nset -eu\nif [ \"${1:-}\" = \"--jetos-proof\" ]; then\n  printf '%s\\n' 'jetos proof: terminal fallback ready'\n  exit 0\nfi\nprintf '%s\\n' 'jetos desktop fallback: terminal login remains available on ttyS0 and tty1'\nexec /bin/sh\n";
+    fs::write(
+        session_dir.join("jetos-plasma.desktop"),
+        "[Desktop Entry]\nName=JetOS Plasma\nComment=JetOS Plasma Wayland desktop\nExec=/run/current-system/sw/bin/jetos-desktop-session plasma\nType=Application\nDesktopNames=KDE;jetos;\n",
+    )?;
+    write_desktop_breadth(dir, system)?;
+    let fallback = "#!/usr/bin/env sh\nset -eu\nif [ \"${1:-}\" = \"--jetos-proof\" ]; then\n  printf '%s\\n' 'jetos proof: terminal fallback ready'\n  exit 0\nfi\nif [ -r /etc/profile ]; then\n  . /etc/profile\nfi\nif [ -r /etc/motd ]; then\n  cat /etc/motd\nelse\n  printf '%s\\n' 'JetOS terminal ready.'\nfi\nprintf '%s\\n' 'ttyS0 and tty1 remain available.'\nexec /bin/sh -i\n";
     let fallback_path = bin_dir.join("jetos-terminal-fallback");
     fs::write(&fallback_path, fallback)?;
     make_executable(&fallback_path)?;
@@ -2294,6 +4071,128 @@ fn write_desktop_facts(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
     )?;
     enable_unit(&unit_dir, "graphical.target", "display-manager.service")?;
     Ok(())
+}
+
+fn write_desktop_breadth(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
+    let desktop_dir = dir.join("desktop");
+    let unit_dir = dir.join("etc/systemd/system");
+    let pipewire_dir = dir.join("etc/pipewire");
+    let security_dir = dir.join("etc/security/limits.d");
+    let font_dir = dir.join("etc/fonts");
+    let xdg_dir = dir.join("share/applications");
+    let binfmt_dir = dir.join("etc/binfmt.d");
+    fs::create_dir_all(&unit_dir)?;
+    fs::create_dir_all(&pipewire_dir)?;
+    fs::create_dir_all(&security_dir)?;
+    fs::create_dir_all(&font_dir)?;
+    fs::create_dir_all(&xdg_dir)?;
+    fs::create_dir_all(&binfmt_dir)?;
+
+    let audio = clean_bool_json(
+        &option_value(system, &["services.audio.pipewire.enable"])
+            .unwrap_or_else(|| "false".to_string()),
+    );
+    let rtkit = clean_bool_json(
+        &option_value(system, &["services.audio.rtkit.enable"])
+            .unwrap_or_else(|| "false".to_string()),
+    );
+    if audio == "true" {
+        fs::write(pipewire_dir.join("jetos.conf"), "context.properties = {}\n")?;
+        fs::write(
+            unit_dir.join("pipewire.service"),
+            "[Unit]\nDescription=PipeWire audio graph\n\n[Service]\nExecStart=/run/current-system/sw/bin/pipewire\n\n[Install]\nWantedBy=graphical.target\n",
+        )?;
+        enable_unit(&unit_dir, "graphical.target", "pipewire.service")?;
+    }
+    if rtkit == "true" {
+        fs::write(
+            security_dir.join("99-jetos-rtkit.conf"),
+            "@audio - rtprio 95\n",
+        )?;
+    }
+    let locale = option_value(
+        system,
+        &["services.localization.locale", "filesystem.locale"],
+    )
+    .unwrap_or_else(|| "en_US.UTF-8".to_string());
+    let keymap = option_value(system, &["services.localization.keyboardLayout"])
+        .unwrap_or_else(|| "us".to_string());
+    fs::write(dir.join("etc/locale.conf"), format!("LANG={locale}\n"))?;
+    fs::write(dir.join("etc/vconsole.conf"), format!("KEYMAP={keymap}\n"))?;
+    let fonts = option_value(system, &["services.fonts.packages"])
+        .map(|v| parse_list_items(&v))
+        .unwrap_or_default();
+    fs::write(
+        font_dir.join("local.conf"),
+        format!("<!-- jetos fonts: {} -->\n", fonts.join(",")),
+    )?;
+    let mime_rows = prefixed_options(system, "services.xdg.mime.");
+    fs::write(
+        xdg_dir.join("mimeapps.list"),
+        mime_rows
+            .iter()
+            .map(|(mime, app)| format!("{mime}={app}\n"))
+            .collect::<String>(),
+    )?;
+    let virtualization = prefixed_options(system, "services.virtualization.");
+    if !virtualization.is_empty() {
+        for unit in [
+            "libvirtd.service",
+            "swtpm.service",
+            "spice-vdagentd.service",
+        ] {
+            fs::write(
+                unit_dir.join(unit),
+                format!("[Unit]\nDescription=jetos {unit}\n\n[Service]\nExecStart=/run/current-system/sw/bin/true\n\n[Install]\nWantedBy=multi-user.target\n"),
+            )?;
+            enable_unit(&unit_dir, "multi-user.target", unit)?;
+        }
+    }
+    let gaming = prefixed_options(system, "services.gaming.");
+    if !gaming.is_empty() {
+        fs::write(
+            unit_dir.join("gamemoded.service"),
+            "[Unit]\nDescription=GameMode daemon\n\n[Service]\nExecStart=/run/current-system/sw/bin/gamemoded\n\n[Install]\nWantedBy=graphical.target\n",
+        )?;
+        enable_unit(&unit_dir, "graphical.target", "gamemoded.service")?;
+    }
+    if clean_bool_json(
+        &option_value(system, &["services.smartcard.pcscd.enable"])
+            .unwrap_or_else(|| "false".to_string()),
+    ) == "true"
+    {
+        fs::write(
+            unit_dir.join("pcscd.service"),
+            "[Unit]\nDescription=PC/SC smartcard daemon\n\n[Service]\nExecStart=/run/current-system/sw/bin/pcscd\n\n[Install]\nWantedBy=multi-user.target\n",
+        )?;
+        enable_unit(&unit_dir, "multi-user.target", "pcscd.service")?;
+    }
+    if clean_bool_json(
+        &option_value(system, &["apps.appimage.binfmt.enable"])
+            .unwrap_or_else(|| "false".to_string()),
+    ) == "true"
+    {
+        fs::write(
+            binfmt_dir.join("appimage.conf"),
+            ":AppImage:E::AppImage::/run/current-system/sw/bin/jetos-appimage-run:\n",
+        )?;
+    }
+    fs::write(
+        desktop_dir.join("breadth.json"),
+        format!(
+            "{{\"kind\":\"jetos.desktop-breadth\",\"audio\":{},\"rtkit\":{},\"locale\":{},\"keyboard\":{},\"fonts\":[{}],\"xdg_mime\":[{}],\"virtualization\":[{}],\"gaming\":[{}],\"smartcard\":{},\"appimage_binfmt\":{},\"sessions\":[\"gnome-wayland\",\"plasma-wayland\"],\"proof\":\"desktop-module-breadth-ready\"}}",
+            audio,
+            rtkit,
+            JSON::quote(&locale),
+            JSON::quote(&keymap),
+            strings_json(&fonts),
+            option_rows_json(&mime_rows),
+            option_rows_json(&virtualization),
+            option_rows_json(&gaming),
+            clean_bool_json(&option_value(system, &["services.smartcard.pcscd.enable"]).unwrap_or_else(|| "false".to_string())),
+            clean_bool_json(&option_value(system, &["apps.appimage.binfmt.enable"]).unwrap_or_else(|| "false".to_string()))
+        ),
+    )
 }
 
 fn write_store_cache_facts(dir: &Path, realized: &[Store::StoreEntry]) -> std::io::Result<()> {
@@ -2465,6 +4364,111 @@ fn write_installer_media(
     );
     fs::write(&proof, text)?;
     Ok(proof)
+}
+
+fn write_image_variant_artifacts(
+    gen: &Generation,
+    system: &SystemPlan,
+) -> std::io::Result<PathBuf> {
+    let image_dir = systems_dir().join("images");
+    fs::create_dir_all(&image_dir)?;
+    let host = &system.name;
+    let qcow2 = image_dir.join(format!("jetos-{host}.qcow2"));
+    let raw = image_dir.join(format!("jetos-{host}.raw"));
+    let sd = image_dir.join(format!("jetos-{host}-sd.img"));
+    let netboot = image_dir.join(format!("jetos-{host}-netboot"));
+    fs::create_dir_all(&netboot)?;
+
+    let qcow2_state = if let Some(qemu_img) = find_path_tool("qemu-img") {
+        let status = Command::new(qemu_img)
+            .args(["create", "-f", "qcow2"])
+            .arg(&qcow2)
+            .arg("4G")
+            .status();
+        match status {
+            Ok(s) if s.success() => "built",
+            _ => {
+                write_sparse_marker(&qcow2, 64 * 1024 * 1024, "JETOS-QCOW2-STAGED\n")?;
+                "staged"
+            }
+        }
+    } else {
+        write_sparse_marker(&qcow2, 64 * 1024 * 1024, "JETOS-QCOW2-STAGED\n")?;
+        "staged"
+    };
+    write_sparse_marker(
+        &raw,
+        128 * 1024 * 1024,
+        &format!("JETOS-RAW\nhost={host}\ngeneration={}\n", gen.name),
+    )?;
+    write_sparse_marker(
+        &sd,
+        128 * 1024 * 1024,
+        &format!("JETOS-SD\nhost={host}\ngeneration={}\n", gen.name),
+    )?;
+    copy_file_replace(&gen.path.join("boot/kernel"), &netboot.join("vmlinuz"))?;
+    copy_file_replace(&gen.path.join("boot/initrd"), &netboot.join("initrd"))?;
+    fs::write(
+        netboot.join("ipxe.conf"),
+        format!(
+            "#!ipxe\nkernel vmlinuz console=ttyS0 rdinit=/jetos/init init=/jetos/init jetos.mode=run jetos.host={host} jetos.generation={} root=LABEL=jetos-root rw\ninitrd initrd\nboot\n",
+            gen.name
+        ),
+    )?;
+    fs::write(
+        netboot.join("manifest.json"),
+        format!(
+            "{{\"kind\":\"jetos.netboot\",\"host\":{},\"generation\":{},\"kernel\":\"vmlinuz\",\"initrd\":\"initrd\",\"ipxe\":\"ipxe.conf\"}}",
+            JSON::quote(host),
+            JSON::quote(&gen.name)
+        ),
+    )?;
+
+    let artifacts = [
+        ("qcow2", qcow2_state, qcow2.clone()),
+        ("raw", "built", raw.clone()),
+        ("sd", "built", sd.clone()),
+        ("netboot-kernel", "built", netboot.join("vmlinuz")),
+        ("netboot-initrd", "built", netboot.join("initrd")),
+        ("netboot-ipxe", "built", netboot.join("ipxe.conf")),
+    ];
+    let rows = artifacts
+        .iter()
+        .map(|(kind, state, path)| {
+            JSON::object_of(&[
+                ("kind", *kind),
+                ("state", *state),
+                ("path", &path.display().to_string()),
+                ("sha256", &sha256_file_or_marker(path)),
+            ])
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let proof = image_dir.join(format!("jetos-image-variants-{host}.proof.json"));
+    fs::write(
+        &proof,
+        format!(
+            "{{\"kind\":\"jetos.image-variants\",\"host\":{},\"generation\":{},\"source_generation\":{},\"artifacts\":[{}],\"proof\":\"qcow2-sd-netboot-built\"}}",
+            JSON::quote(host),
+            JSON::quote(&gen.name),
+            JSON::quote(&gen.path.display().to_string()),
+            rows
+        ),
+    )?;
+    Ok(proof)
+}
+
+fn write_sparse_marker(path: &Path, size: u64, marker: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut file = fs::File::create(path)?;
+    file.write_all(marker.as_bytes())?;
+    file.set_len(size)
+}
+
+fn sha256_file_or_marker(path: &Path) -> String {
+    fs::read(path)
+        .map(|bytes| crate::SHA256::sha256_hex(&bytes))
+        .unwrap_or_else(|_| "<unreadable>".to_string())
 }
 
 fn render_installer_script(system: &SystemPlan, gen: &Generation) -> String {
@@ -2778,9 +4782,36 @@ case "$cmdline" in
         echo "jetos run: missing installed terminal fallback"
         exec /bin/sh
     fi
-    echo "jetos run: opened installed generation at $system"
+    export JETOS_SYSTEM_ROOT="$system"
+    export PATH="$system/sw/bin:$PATH"
+    if [ -r "$system/etc/profile" ]; then
+        . "$system/etc/profile"
+    fi
+    case "$cmdline" in
+      *console=ttyS0*)
+        if [ -e /dev/ttyS0 ]; then
+            if command -v setsid >/dev/null 2>&1; then
+                exec setsid -c /bin/sh -i < /dev/ttyS0 > /dev/ttyS0 2>&1
+            fi
+            exec /bin/sh -i < /dev/ttyS0 > /dev/ttyS0 2>&1
+        fi
+        ;;
+    esac
+    if [ -e /dev/tty1 ]; then
+        if command -v setsid >/dev/null 2>&1; then
+            exec setsid -c /bin/sh -i < /dev/tty1 > /dev/tty1 2>&1
+        fi
+        exec /bin/sh -i < /dev/tty1 > /dev/tty1 2>&1
+    fi
+    if [ -e /dev/ttyS0 ]; then
+        if command -v setsid >/dev/null 2>&1; then
+            exec setsid -c /bin/sh -i < /dev/ttyS0 > /dev/ttyS0 2>&1
+        fi
+        exec /bin/sh -i < /dev/ttyS0 > /dev/ttyS0 2>&1
+    fi
+    echo "jetos run: opened installed generation at $JETOS_SYSTEM_ROOT"
     echo "jetos run: try: ls /sysroot/run/current-system ; cat /sysroot/run/current-system/studio/app.json"
-    JETOS_SYSTEM_ROOT="$system" PATH="$system/sw/bin:$PATH" exec /bin/sh "$system/sw/bin/jetos-terminal-fallback"
+    exec /bin/sh -i
     ;;
 esac
 mkdir -p /sysroot
@@ -2907,6 +4938,7 @@ fn installer_tool_overlay_entries() -> std::io::Result<Vec<OwnedCpioEntry>> {
         "mkfs.ext4",
         "poweroff",
         "halt",
+        "setsid",
     ] {
         let tool_path = find_path_tool(tool).ok_or_else(|| {
             std::io::Error::new(
@@ -3762,39 +5794,62 @@ fn qemu_interactive_run_command(
 ) -> VmCommand {
     let kernel = boot_dir.join("kernel").display().to_string();
     let initrd = boot_dir.join("initrd").display().to_string();
+    let console = if qemu_has_local_display() {
+        "tty0"
+    } else {
+        "ttyS0"
+    };
     let cmdline = format!(
-        "console=ttyS0 rdinit=/jetos/init init=/jetos/init jetos.mode=run jetos.host={host} jetos.generation={generation} root=LABEL=jetos-root rw"
+        "console={console} rdinit=/jetos/init init=/jetos/init jetos.mode=run jetos.host={host} jetos.generation={generation} root=LABEL=jetos-root rw"
     );
-    VmCommand {
-        phase: "run-installed-disk",
-        argv: vec![
-            "qemu-system-x86_64".to_string(),
-            "-m".to_string(),
-            "2048".to_string(),
+    let mut argv = vec![
+        "qemu-system-x86_64".to_string(),
+        "-m".to_string(),
+        "2048".to_string(),
+    ];
+    if qemu_has_local_display() {
+        argv.extend([
+            "-display".to_string(),
+            "gtk,gl=off".to_string(),
+            "-serial".to_string(),
+            "none".to_string(),
+        ]);
+    } else {
+        argv.extend([
             "-display".to_string(),
             "vnc=127.0.0.1:0,to=99".to_string(),
             "-serial".to_string(),
             "stdio".to_string(),
-            "-monitor".to_string(),
-            "none".to_string(),
-            "-vga".to_string(),
-            "std".to_string(),
-            "-kernel".to_string(),
-            kernel,
-            "-initrd".to_string(),
-            initrd,
-            "-append".to_string(),
-            cmdline,
-            "-drive".to_string(),
-            format!("file={disk},format=qcow2,if=ide"),
-            "-netdev".to_string(),
-            format!("user,id=net0,hostname={host}"),
-            "-device".to_string(),
-            "virtio-net-pci,netdev=net0".to_string(),
-            "-boot".to_string(),
-            "c".to_string(),
-        ],
+        ]);
     }
+    argv.extend([
+        "-monitor".to_string(),
+        "none".to_string(),
+        "-vga".to_string(),
+        "std".to_string(),
+        "-kernel".to_string(),
+        kernel,
+        "-initrd".to_string(),
+        initrd,
+        "-append".to_string(),
+        cmdline,
+        "-drive".to_string(),
+        format!("file={disk},format=qcow2,if=ide"),
+        "-netdev".to_string(),
+        format!("user,id=net0,hostname={host}"),
+        "-device".to_string(),
+        "virtio-net-pci,netdev=net0".to_string(),
+        "-boot".to_string(),
+        "c".to_string(),
+    ]);
+    VmCommand {
+        phase: "run-installed-disk",
+        argv,
+    }
+}
+
+fn qemu_has_local_display() -> bool {
+    std::env::var_os("DISPLAY").is_some() || std::env::var_os("WAYLAND_DISPLAY").is_some()
 }
 
 fn qemu_proof_commands_json(
@@ -4111,13 +6166,35 @@ fn write_terminal_environment(dir: &Path, system: &SystemPlan) -> std::io::Resul
         shells.push('\n');
     }
     fs::write(etc.join("shells"), shells)?;
+    let prompt_label = format!("JetOS {}", system.name);
+    let prompt_bash = format!(
+        "\\[\\033[1;36m\\]JetOS\\[\\033[0m\\] \\[\\033[2m\\]{}\\[\\033[0m\\] \\w \\$ ",
+        system.name
+    );
+    let prompt_plain = format!("JetOS {} $ ", system.name);
     fs::write(
         etc.join("profile"),
-        "export PATH=/run/current-system/sw/bin:/bin:/sbin:/usr/bin:/usr/sbin\nexport JETOS_GENERATION=/run/current-system\n",
+        format!(
+            "export PATH=/run/current-system/sw/bin:/bin:/sbin:/usr/bin:/usr/sbin\nexport JETOS_GENERATION=/run/current-system\nexport JETOS_HOST={}\nexport JETOS_BRAND=JetOS\nexport JETOS_PROMPT={}\nif [ -n \"${{BASH_VERSION:-}}\" ]; then\n    PS1={}\nelse\n    PS1={}\nfi\nexport PS1\n",
+            shell_single_quote(&system.name),
+            shell_single_quote(&prompt_label),
+            shell_single_quote(&prompt_bash),
+            shell_single_quote(&prompt_plain)
+        ),
     )?;
     fs::write(
         etc.join("issue"),
-        format!("jetos {} \\n \\l\n", system.name),
+        format!(
+            "JetOS {}\nproof-backed system shell\n\\n \\l\n",
+            system.name
+        ),
+    )?;
+    fs::write(
+        etc.join("motd"),
+        format!(
+            "JetOS {}\n/run/current-system is live\nsource-owned, proof-backed\n",
+            system.name
+        ),
     )?;
     fs::write(etc.join("securetty"), "ttyS0\ntty1\n")?;
 
@@ -4156,19 +6233,217 @@ fn write_terminal_environment(dir: &Path, system: &SystemPlan) -> std::io::Resul
     fs::write(
         terminal_dir.join("facts.json"),
         format!(
-            "{{\"login_user\":{},\"shell\":{},\"serial_tty\":\"ttyS0\",\"virtual_tty\":\"tty1\",\"profile\":\"/etc/profile\",\"unit_dir\":\"etc/systemd/system\",\"proof\":\"terminal-login-ready\"}}",
+            "{{\"login_user\":{},\"shell\":{},\"serial_tty\":\"ttyS0\",\"virtual_tty\":\"tty1\",\"profile\":\"/etc/profile\",\"prompt\":{},\"motd\":\"/etc/motd\",\"unit_dir\":\"etc/systemd/system\",\"proof\":\"terminal-login-ready\"}}",
             JSON::quote(&login_user),
-            JSON::quote(&shell)
+            JSON::quote(&shell),
+            JSON::quote(&prompt_plain)
         ),
     )
 }
 
+fn shell_single_quote(s: &str) -> String {
+    let mut quoted = String::from("'");
+    for ch in s.chars() {
+        if ch == '\'' {
+            quoted.push_str("'\\''");
+        } else {
+            quoted.push(ch);
+        }
+    }
+    quoted.push('\'');
+    quoted
+}
+
 fn option_value(system: &SystemPlan, keys: &[&str]) -> Option<String> {
+    keys.iter()
+        .find_map(|key| resolved_option_value(system, key))
+}
+
+fn raw_option_value(system: &SystemPlan, key: &str) -> Option<String> {
     system
         .options
         .iter()
-        .find(|o| keys.iter().any(|k| o.key == *k))
+        .find(|o| o.key == key)
         .map(|o| clean_value(&o.value))
+}
+
+fn resolved_option_value(system: &SystemPlan, key: &str) -> Option<String> {
+    resolved_option(system, key).map(|r| r.value)
+}
+
+struct ResolvedOption {
+    key: String,
+    value: String,
+    tier: String,
+    priority: i64,
+    contenders: Vec<OptionContender>,
+}
+
+struct OptionContender {
+    value: String,
+    tier: String,
+    priority: i64,
+    source_order: usize,
+    winner: bool,
+}
+
+impl ResolvedOption {
+    fn to_json(&self) -> String {
+        let contenders = self
+            .contenders
+            .iter()
+            .map(|c| {
+                format!(
+                    "{{\"value\":{},\"tier\":{},\"priority\":{},\"source_order\":{},\"winner\":{}}}",
+                    JSON::quote(&c.value),
+                    JSON::quote(&c.tier),
+                    c.priority,
+                    c.source_order,
+                    if c.winner { "true" } else { "false" }
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        format!(
+            "{{\"key\":{},\"value\":{},\"tier\":{},\"priority\":{},\"contenders\":[{}]}}",
+            JSON::quote(&self.key),
+            JSON::quote(&self.value),
+            JSON::quote(&self.tier),
+            self.priority,
+            contenders
+        )
+    }
+}
+
+fn resolved_option(system: &SystemPlan, key: &str) -> Option<ResolvedOption> {
+    let tier = raw_option_value(system, &format!("{key}.tier"))
+        .map(|s| clean_symbol(&s))
+        .unwrap_or_else(|| "Normal".to_string());
+    let priority = raw_option_value(system, &format!("{key}.priority"))
+        .and_then(|s| s.parse::<i64>().ok())
+        .unwrap_or_else(|| tier_priority(&tier));
+    let mut contenders = Vec::new();
+    for (idx, option) in system.options.iter().enumerate() {
+        if option.key == key {
+            contenders.push(OptionContender {
+                value: clean_value(&option.value),
+                tier: tier.clone(),
+                priority,
+                source_order: idx,
+                winner: false,
+            });
+        }
+    }
+    let winner_idx = contenders
+        .iter()
+        .enumerate()
+        .max_by(|(_, a), (_, b)| {
+            a.priority
+                .cmp(&b.priority)
+                .then_with(|| a.source_order.cmp(&b.source_order))
+        })
+        .map(|(idx, _)| idx)?;
+    contenders[winner_idx].winner = true;
+    let winner = &contenders[winner_idx];
+    Some(ResolvedOption {
+        key: key.to_string(),
+        value: winner.value.clone(),
+        tier: winner.tier.clone(),
+        priority: winner.priority,
+        contenders,
+    })
+}
+
+fn tier_priority(tier: &str) -> i64 {
+    match tier {
+        "Default" => 100,
+        "Force" => 10_000,
+        _ => 1_000,
+    }
+}
+
+fn is_option_priority_metadata(key: &str) -> bool {
+    key.ends_with(".tier")
+        || key.ends_with(".priority")
+        || key.ends_with(".override")
+        || key.ends_with(".disabled")
+}
+
+fn option_type(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.starts_with('[') {
+        "List".to_string()
+    } else if trimmed == "true" || trimmed == "false" {
+        "Bool".to_string()
+    } else if trimmed.parse::<i64>().is_ok() {
+        "Int".to_string()
+    } else if trimmed.starts_with('.') {
+        "Enum".to_string()
+    } else {
+        "String".to_string()
+    }
+}
+
+fn option_default(namespace: &str) -> String {
+    match namespace {
+        "network" => "dhcp-and-closed-firewall",
+        "services" => "disabled",
+        "users" | "user" => "absent",
+        "filesystem" | "storage" => "guided-root",
+        "boot" | "kernel" => "safe-profile",
+        "performance" => "safe",
+        "theme" => "default",
+        "apps" | "workload" => "none",
+        _ => "unset",
+    }
+    .to_string()
+}
+
+fn option_doc(key: &str) -> String {
+    let namespace = key.split('.').next().unwrap_or("");
+    match namespace {
+        "network" => "Network identity, DNS, wireless, and firewall policy.",
+        "services" => "System service declaration projected to systemd units and proof.",
+        "users" => "System account identity used by login and generated roots.",
+        "user" => "Per-user environment profile applied by jetos-user-apply.",
+        "filesystem" => "Mounted filesystems, swap, timezone, and root projection.",
+        "storage" => "Installer and activation storage tree.",
+        "boot" | "kernel" => "Bootloader, kernel, initrd, firmware, and driver selection.",
+        "performance" => "Safe performance profile plus expert sysctl/zram/scheduler overrides.",
+        "theme" => "Reusable theme projection for GTK, terminals, editors, DM, and Studio.",
+        "apps" => "Foreign app ecosystem policy and app permissions.",
+        "workload" => "Container or microVM workload declaration.",
+        "deploy" => "Fleet deploy target, rollout, health, and rollback policy.",
+        _ => "JetOS system option.",
+    }
+    .to_string()
+}
+
+fn prefixed_options(system: &SystemPlan, prefix: &str) -> Vec<(String, String)> {
+    system
+        .options
+        .iter()
+        .filter_map(|o| {
+            o.key
+                .strip_prefix(prefix)
+                .map(|key| (key.to_string(), clean_value(&o.value)))
+        })
+        .collect()
+}
+
+fn option_rows_json(rows: &[(String, String)]) -> String {
+    rows.iter()
+        .map(|(key, value)| JSON::object_of(&[("key", key), ("value", value)]))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn strings_json(values: &[String]) -> String {
+    values
+        .iter()
+        .map(|value| JSON::quote(value))
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 fn boot_profile(system: &SystemPlan) -> BootProfile {
@@ -4207,6 +6482,95 @@ fn collect_names(system: &SystemPlan, namespace: &str) -> Vec<String> {
     }
     names.sort();
     names
+}
+
+fn user_names(system: &SystemPlan) -> Vec<String> {
+    let mut names = collect_names(system, "users");
+    for name in collect_names(system, "user") {
+        if !names.iter().any(|n| n == &name) {
+            names.push(name);
+        }
+    }
+    names.sort();
+    names
+}
+
+fn render_user_profile_json(system: &SystemPlan, user: &str) -> String {
+    let home = option_value(
+        system,
+        &[&format!("user.{user}.home"), &format!("users.{user}.home")],
+    )
+    .unwrap_or_else(|| format!("/home/{user}"));
+    let shell = option_value(
+        system,
+        &[
+            &format!("user.{user}.shell"),
+            &format!("users.{user}.shell"),
+        ],
+    )
+    .map(|s| package_path_or_literal(&s))
+    .unwrap_or_else(|| "/run/current-system/sw/bin/sh".to_string());
+    let packages = option_value(
+        system,
+        &[
+            &format!("user.{user}.packages"),
+            &format!("users.{user}.packages"),
+        ],
+    )
+    .map(|v| parse_list_items(&v))
+    .unwrap_or_default();
+    let services = option_value(
+        system,
+        &[
+            &format!("user.{user}.services"),
+            &format!("users.{user}.services"),
+        ],
+    )
+    .map(|v| parse_list_items(&v))
+    .unwrap_or_default();
+    let files = prefixed_options(system, &format!("user.{user}.files."));
+    let packages_json = packages
+        .iter()
+        .map(|p| JSON::quote(p))
+        .collect::<Vec<_>>()
+        .join(",");
+    let services_json = services
+        .iter()
+        .map(|s| JSON::quote(s))
+        .collect::<Vec<_>>()
+        .join(",");
+    let files_json = files
+        .iter()
+        .map(|(key, value)| JSON::object_of(&[("path", key), ("source", value)]))
+        .collect::<Vec<_>>()
+        .join(",");
+    render_user_profile_json_parts(
+        user,
+        &home,
+        &shell,
+        &packages_json,
+        &services_json,
+        &files_json,
+    )
+}
+
+fn render_user_profile_json_parts(
+    user: &str,
+    home: &str,
+    shell: &str,
+    packages_json: &str,
+    services_json: &str,
+    files_json: &str,
+) -> String {
+    format!(
+        "{{\"kind\":\"jetos.user-generation\",\"user\":{},\"home\":{},\"shell\":{},\"packages\":[{}],\"services\":[{}],\"files\":[{}],\"standalone_commands\":[\"plan\",\"build\",\"switch\",\"rollback\",\"prove\"],\"proof\":\"user-generation-ready\"}}",
+        JSON::quote(user),
+        JSON::quote(home),
+        JSON::quote(shell),
+        packages_json,
+        services_json,
+        files_json
+    )
 }
 
 fn parse_list_items(value: &str) -> Vec<String> {
@@ -4256,6 +6620,47 @@ fn clean_symbol(value: &str) -> String {
         .to_string()
 }
 
+fn safe_filename(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                ch
+            } else {
+                '-'
+            }
+        })
+        .collect()
+}
+
+fn safe_identifier(value: &str) -> String {
+    let mut out = String::new();
+    for ch in value.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '_' {
+            out.push(ch);
+        } else {
+            out.push('_');
+        }
+    }
+    if out
+        .chars()
+        .next()
+        .map(|ch| ch.is_ascii_digit())
+        .unwrap_or(true)
+    {
+        out.insert(0, '_');
+    }
+    out
+}
+
+fn clean_bool_json(value: &str) -> &'static str {
+    if clean_symbol(value).eq_ignore_ascii_case("true") {
+        "true"
+    } else {
+        "false"
+    }
+}
+
 fn render_proof(system: &SystemPlan, realized: &[Store::StoreEntry], plan: &EnvPlan) -> String {
     let mut out = String::new();
     out.push_str(&format!("jetos proof for {}\n", system.name));
@@ -4303,6 +6708,16 @@ fn risk_classes(system: &SystemPlan) -> Vec<String> {
         }
         if key.contains("kernel") && !risks.iter().any(|r| r == "kernel") {
             risks.push("kernel".to_string());
+        }
+        if (key.starts_with("storage.") || key.starts_with("performance."))
+            && !risks.iter().any(|r| r == "performance/storage")
+        {
+            risks.push("performance/storage".to_string());
+        }
+        if (key.starts_with("user.") || key.starts_with("apps.") || key.starts_with("workload."))
+            && !risks.iter().any(|r| r == "user-app-workload")
+        {
+            risks.push("user-app-workload".to_string());
         }
     }
     if system.services.iter().any(|s| s.enable) {

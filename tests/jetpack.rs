@@ -176,6 +176,10 @@ fn test_json_escape(value: &str) -> String {
         .replace('\n', "\\n")
 }
 
+fn test_shell_quote(value: &Path) -> String {
+    format!("'{}'", value.display().to_string().replace('\'', "'\\''"))
+}
+
 fn write_executable(path: &Path, text: &str) {
     fs::write(path, text).unwrap();
     #[cfg(unix)]
@@ -220,7 +224,7 @@ fn write_fake_vm_tools(bin: &Path, guest_passes: bool) {
     write_executable(&bin.join("sfdisk"), "#!/bin/sh\nexit 0\n");
     write_executable(&bin.join("blockdev"), "#!/bin/sh\nexit 0\n");
     for tool in [
-        "cat", "cp", "ln", "mkdir", "mount", "rm", "sleep", "sync", "poweroff", "halt",
+        "cat", "cp", "ln", "mkdir", "mount", "rm", "setsid", "sleep", "sync", "poweroff", "halt",
     ] {
         write_executable(&bin.join(tool), "#!/bin/sh\nexit 0\n");
     }
@@ -265,6 +269,70 @@ fn write_lock_with_live_output(project: &Path, name: &str, version: &str, output
         ),
     )
     .unwrap();
+}
+
+#[test]
+fn override_draft_writes_reviewed_workspace_policy_and_explains_it() {
+    let project = Scratch::new("override-draft");
+    fs::create_dir_all(project.join("patches")).unwrap();
+    fs::write(project.join("patches/foo.patch"), "patch body\n").unwrap();
+
+    let out = jetpack()
+        .args([
+            "override",
+            "draft",
+            "nixpkgs:foo",
+            "--overlay",
+            "plasma_beta",
+            "--provider",
+            "nixpkgs",
+            "--channel",
+            "plasma-beta",
+            "--patch",
+            "patches/foo.patch",
+            "--allow-unfree",
+            "--no-color",
+        ])
+        .current_dir(&project.path)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let workspace = fs::read_to_string(project.join("workspace.jet")).unwrap();
+    assert!(workspace.contains("overlay plasma_beta"), "{workspace}");
+    assert!(
+        workspace.contains("Provider.nixpkgs(channel: \"plasma-beta\")"),
+        "{workspace}"
+    );
+    assert!(
+        workspace.contains("package(\"foo\").patches += [patch(\"patches/foo.patch\")]"),
+        "{workspace}"
+    );
+    assert!(
+        workspace.contains("package(\"foo\").allowUnfree: true"),
+        "{workspace}"
+    );
+
+    let explain = jetpack()
+        .args(["explain", "package-overlay:plasma_beta:foo", "--no-color"])
+        .current_dir(&project.path)
+        .output()
+        .unwrap();
+    assert!(
+        explain.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&explain.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&explain.stdout);
+    assert!(
+        stdout.contains("package-overlay:plasma_beta:foo")
+            && stdout.contains("provider: nixpkgs")
+            && stdout.contains("policy: workspace.overlay.plasma_beta"),
+        "explain: {stdout}"
+    );
 }
 
 #[test]
@@ -2129,13 +2197,27 @@ fn os_switch_activates_and_sets_current() {
     );
     let profile = fs::read_to_string(generation.join("etc/profile")).unwrap();
     assert!(
-        profile.contains("/run/current-system/sw/bin"),
+        profile.contains("/run/current-system/sw/bin")
+            && profile.contains("export JETOS_BRAND=JetOS")
+            && profile.contains("export JETOS_PROMPT='JetOS halcyon'")
+            && profile.contains("\\033[1;36m\\]JetOS"),
         "profile: {profile}"
+    );
+    let issue = fs::read_to_string(generation.join("etc/issue")).unwrap();
+    assert!(
+        issue.contains("JetOS halcyon") && issue.contains("proof-backed system shell"),
+        "issue: {issue}"
+    );
+    let motd = fs::read_to_string(generation.join("etc/motd")).unwrap();
+    assert!(
+        motd.contains("JetOS halcyon") && motd.contains("source-owned, proof-backed"),
+        "motd: {motd}"
     );
     let terminal = fs::read_to_string(generation.join("terminal/facts.json")).unwrap();
     assert!(
         terminal.contains("\"login_user\":\"nate\"")
             && terminal.contains("\"serial_tty\":\"ttyS0\"")
+            && terminal.contains("\"prompt\":\"JetOS halcyon $ \"")
             && terminal.contains("terminal-login-ready"),
         "terminal: {terminal}"
     );
@@ -2225,6 +2307,57 @@ fn os_switch_activates_and_sets_current() {
         generation.join("root/home/nate/.profile").is_file(),
         "expected user home profile in installed root"
     );
+    let user_profile = fs::read_to_string(generation.join("users/nate/profile.json")).unwrap();
+    assert!(
+        user_profile.contains("\"kind\":\"jetos.user-generation\"")
+            && user_profile.contains("\"user\":\"nate\"")
+            && user_profile.contains("\"syncthing\""),
+        "user profile: {user_profile}"
+    );
+    assert!(
+        generation
+            .join("etc/systemd/user/jetos-user-nate.service")
+            .is_file(),
+        "expected user environment unit"
+    );
+    assert!(
+        generation.join("sw/bin/jetos-user-apply").is_file(),
+        "expected standalone user apply helper"
+    );
+    let user_home = root.path.join("applied-home");
+    let user_apply = Command::new(generation.join("sw/bin/jetos-user-apply"))
+        .arg("nate")
+        .env("JETOS_SYSTEM_ROOT", &generation)
+        .env("JETOS_USER_HOME", &user_home)
+        .output()
+        .unwrap();
+    assert!(
+        user_apply.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&user_apply.stdout),
+        String::from_utf8_lossy(&user_apply.stderr)
+    );
+    let ghostty = fs::read_to_string(user_home.join(".config/ghostty/config")).unwrap();
+    assert!(
+        ghostty.contains("managed-by=jetos") && ghostty.contains("home/ghostty/config"),
+        "ghostty: {ghostty}"
+    );
+    assert!(
+        user_home.join(".jetos/profile/bin/hello").exists(),
+        "expected per-user package profile link"
+    );
+    assert!(
+        user_home
+            .join(".config/systemd/user/syncthing.service")
+            .is_file(),
+        "expected per-user service unit"
+    );
+    let user_apply_proof =
+        fs::read_to_string(user_home.join(".jetos/proof/user-nate.json")).unwrap();
+    assert!(
+        user_apply_proof.contains("\"state\":\"applied\""),
+        "user_apply_proof: {user_apply_proof}"
+    );
     assert!(
         generation
             .join("root/run/current-system/terminal/facts.json")
@@ -2274,6 +2407,753 @@ fn os_switch_activates_and_sets_current() {
     let hardware = fs::read_to_string(generation.join("hardware/facts.json")).unwrap();
     assert!(hardware.contains("iwlwifi"), "hardware: {hardware}");
     assert!(hardware.contains("amdgpu"), "hardware: {hardware}");
+    assert!(
+        hardware.contains("framework-13-amd"),
+        "hardware: {hardware}"
+    );
+    assert!(
+        hardware.contains("jetos.hardware") && hardware.contains("jetos-hardware-doctor"),
+        "hardware: {hardware}"
+    );
+    assert!(
+        generation.join("hardware/halcyon.jet").is_file()
+            && generation
+                .join("hardware/profile-framework-13-amd.json")
+                .is_file()
+            && generation
+                .join("boot/specialisations/plasmaBeta.conf")
+                .is_file()
+            && generation.join("sw/bin/jetos-hardware-scan").is_file()
+            && generation.join("sw/bin/jetos-hardware-doctor").is_file(),
+        "expected hardware scan/profile/specialisation artifacts"
+    );
+    let hardware_root = root.path.join("fake-hardware");
+    fs::create_dir_all(hardware_root.join("proc")).unwrap();
+    fs::create_dir_all(hardware_root.join("sys/class/block/nvme0n1")).unwrap();
+    fs::create_dir_all(hardware_root.join("sys/class/drm/card0")).unwrap();
+    fs::write(
+        hardware_root.join("proc/modules"),
+        "amdgpu 1 0 - Live 0\nnvme 1 0 - Live 0\n",
+    )
+    .unwrap();
+    let scan_out = root.path.join("halcyon-scan.jet");
+    let scan = Command::new(generation.join("sw/bin/jetos-hardware-scan"))
+        .arg("halcyon")
+        .env("JETOS_HW_ROOT", &hardware_root)
+        .env("JETOS_HARDWARE_OUT", &scan_out)
+        .output()
+        .unwrap();
+    assert!(
+        scan.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&scan.stdout),
+        String::from_utf8_lossy(&scan.stderr)
+    );
+    let scanned_source = fs::read_to_string(&scan_out).unwrap();
+    assert!(
+        scanned_source.contains("hardware.halcyon.scan.modules")
+            && scanned_source.contains("amdgpu,nvme")
+            && scanned_source.contains("nvme0n1"),
+        "scanned_source: {scanned_source}"
+    );
+    let doctor = Command::new(generation.join("sw/bin/jetos-hardware-doctor"))
+        .env("JETOS_SYSTEM_ROOT", &generation)
+        .env("JETOS_HW_ROOT", &hardware_root)
+        .output()
+        .unwrap();
+    assert!(
+        doctor.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&doctor.stdout),
+        String::from_utf8_lossy(&doctor.stderr)
+    );
+    let doctor = String::from_utf8_lossy(&doctor.stdout);
+    assert!(
+        doctor.contains("\"state\":\"match\"") && doctor.contains("hardware-drift-checked"),
+        "doctor: {doctor}"
+    );
+    let performance = fs::read_to_string(generation.join("performance/facts.json")).unwrap();
+    assert!(
+        performance.contains("\"profile\":\"Gaming\"")
+            && performance.contains("\"kernel_profile\":\"CachyOSLatest\"")
+            && performance.contains("vm.swappiness")
+            && performance.contains("performance/initrd.json")
+            && performance.contains("performance/bootloader.json"),
+        "performance: {performance}"
+    );
+    let perf_profile = fs::read_to_string(generation.join("performance/profile.json")).unwrap();
+    assert!(
+        perf_profile.contains("kernel-tuning-profile-ready")
+            && perf_profile.contains("CachyOSLatest"),
+        "perf_profile: {perf_profile}"
+    );
+    let scheduler = fs::read_to_string(generation.join("performance/scheduler.json")).unwrap();
+    assert!(
+        scheduler.contains("ScxLavd") && scheduler.contains("sched-ext-service-ready"),
+        "scheduler: {scheduler}"
+    );
+    assert!(
+        generation
+            .join("etc/systemd/system/jetos-performance-scheduler.service")
+            .is_file()
+            && generation
+                .join("etc/systemd/system/multi-user.target.wants/jetos-performance-scheduler.service")
+                .exists()
+            && generation.join("sw/bin/jetos-performance-scheduler").is_file(),
+        "expected scheduler service"
+    );
+    let scheduler_bin = root.path.join("fake-scheduler");
+    let scheduler_log = root.path.join("scheduler.log");
+    write_executable(
+        &scheduler_bin,
+        "#!/bin/sh\nprintf '%s\\n' scheduler >> \"$JETOS_SCHEDULER_LOG\"\n",
+    );
+    let scheduler_run = Command::new(generation.join("sw/bin/jetos-performance-scheduler"))
+        .env("JETOS_SCHEDULER_BIN", &scheduler_bin)
+        .env("JETOS_SCHEDULER_LOG", &scheduler_log)
+        .output()
+        .unwrap();
+    assert!(
+        scheduler_run.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&scheduler_run.stdout),
+        String::from_utf8_lossy(&scheduler_run.stderr)
+    );
+    assert!(
+        fs::read_to_string(&scheduler_log)
+            .unwrap()
+            .contains("scheduler"),
+        "expected scheduler log"
+    );
+    let initrd = fs::read_to_string(generation.join("performance/initrd.json")).unwrap();
+    assert!(
+        initrd.contains("\"systemd\":true") && initrd.contains("\"verbosity\":\"quiet\""),
+        "initrd: {initrd}"
+    );
+    let bootloader = fs::read_to_string(generation.join("performance/bootloader.json")).unwrap();
+    assert!(
+        bootloader.contains("\"limine_max_generations\":\"7\"")
+            && bootloader.contains("\"efi_can_touch_variables\":false"),
+        "bootloader: {bootloader}"
+    );
+    assert!(
+        generation
+            .join("etc/sysctl.d/90-jetos-performance.conf")
+            .is_file(),
+        "expected sysctl projection"
+    );
+    assert!(
+        generation
+            .join("etc/systemd/zram-generator.conf.d/jetos.conf")
+            .is_file(),
+        "expected zram projection"
+    );
+    let storage = fs::read_to_string(generation.join("storage/facts.json")).unwrap();
+    assert!(
+        storage.contains("jetos.storage-tree")
+            && storage.contains("disk.main.device")
+            && storage.contains("jetos-storage-apply")
+            && storage.contains("\"ephemeral_root\":true"),
+        "storage: {storage}"
+    );
+    let storage_plan = fs::read_to_string(generation.join("storage/plan.json")).unwrap();
+    assert!(
+        storage_plan.contains("\"root_fs\":\"Btrfs\"")
+            && storage_plan.contains("/var/lib")
+            && storage_plan.contains("requires --manual plus --execute"),
+        "storage_plan: {storage_plan}"
+    );
+    assert!(
+        generation.join("storage/mounts.fstab").is_file()
+            && generation.join("sw/bin/jetos-storage-plan").is_file()
+            && generation.join("sw/bin/jetos-storage-apply").is_file()
+            && generation.join("sw/bin/jetos-persist-activate").is_file(),
+        "expected storage scripts and mounts"
+    );
+    let storage_apply_log = root.path.join("storage-apply.sh");
+    let storage_proofs = root.path.join("storage-proofs");
+    let storage_apply = Command::new(generation.join("sw/bin/jetos-storage-apply"))
+        .arg("--manual")
+        .env("JETOS_SYSTEM_ROOT", &generation)
+        .env("JETOS_STORAGE_LOG", &storage_apply_log)
+        .env("JETOS_STORAGE_PROOF_DIR", &storage_proofs)
+        .output()
+        .unwrap();
+    assert!(
+        storage_apply.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&storage_apply.stdout),
+        String::from_utf8_lossy(&storage_apply.stderr)
+    );
+    let storage_apply_log = fs::read_to_string(&storage_apply_log).unwrap();
+    assert!(
+        storage_apply_log.contains("sfdisk --wipe always /dev/sda")
+            && storage_apply_log.contains("mkfs.btrfs -L jetos-root"),
+        "storage_apply_log: {storage_apply_log}"
+    );
+    let storage_apply_proof = fs::read_to_string(storage_proofs.join("apply-proof.json")).unwrap();
+    assert!(
+        storage_apply_proof.contains("\"executed\":false")
+            && storage_apply_proof.contains("manual-storage-plan-reviewed"),
+        "storage_apply_proof: {storage_apply_proof}"
+    );
+    let persist_root = root.path.join("persist-root");
+    let ephemeral_root = root.path.join("ephemeral-root");
+    let persist = Command::new(generation.join("sw/bin/jetos-persist-activate"))
+        .env("JETOS_SYSTEM_ROOT", &generation)
+        .env("JETOS_PERSIST_ROOT", &persist_root)
+        .env("JETOS_EPHEMERAL_ROOT", &ephemeral_root)
+        .env("JETOS_STORAGE_PROOF_DIR", &storage_proofs)
+        .output()
+        .unwrap();
+    assert!(
+        persist.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&persist.stdout),
+        String::from_utf8_lossy(&persist.stderr)
+    );
+    assert!(
+        persist_root.join("home/nate").is_dir()
+            && persist_root.join("var/lib").is_dir()
+            && ephemeral_root.join("home/nate").is_dir(),
+        "expected persisted paths"
+    );
+    let persist_proof = fs::read_to_string(storage_proofs.join("persistence-proof.json")).unwrap();
+    assert!(
+        persist_proof.contains("\"state\":\"activated\"")
+            && persist_proof.contains("impermanence-persist-ready"),
+        "persist_proof: {persist_proof}"
+    );
+    let module_explain = fs::read_to_string(generation.join("module-system/explain.json")).unwrap();
+    assert!(
+        module_explain.contains("\"key\":\"services.displayManager\"")
+            && module_explain.contains("\"value\":\"gdm\"")
+            && module_explain.contains("\"value\":\"sddm\"")
+            && module_explain.contains("\"winner\":true")
+            && module_explain.contains("Force")
+            && module_explain.contains("stylix.kmscon"),
+        "module explain: {module_explain}"
+    );
+    let disabled_modules =
+        fs::read_to_string(generation.join("module-system/disabled-modules.manifest")).unwrap();
+    assert!(
+        disabled_modules.contains("stylix.kmscon"),
+        "disabled_modules: {disabled_modules}"
+    );
+    let theme = fs::read_to_string(generation.join("theme/facts.json")).unwrap();
+    assert!(
+        theme.contains("\"name\":\"halcyon\"") && theme.contains("theme-projected"),
+        "theme: {theme}"
+    );
+    assert!(
+        generation
+            .join("share/themes/jetos/gtk-4.0/gtk.css")
+            .is_file(),
+        "expected theme projection"
+    );
+    for themed in [
+        "share/qt6ct/colors/jetos.conf",
+        "share/terminal/theme.toml",
+        "share/editor/theme.json",
+        "share/display-manager/theme.conf",
+        "studio/theme-preview.json",
+    ] {
+        assert!(
+            generation.join(themed).is_file(),
+            "expected theme projection {themed}"
+        );
+    }
+    let studio_theme = fs::read_to_string(generation.join("studio/theme-preview.json")).unwrap();
+    assert!(
+        studio_theme.contains("jetos.theme-preview") && studio_theme.contains("#7aa2f7"),
+        "studio_theme: {studio_theme}"
+    );
+    let flatpak = fs::read_to_string(generation.join("flatpak/plan.json")).unwrap();
+    assert!(
+        flatpak.contains("com.discordapp.Discord")
+            && flatpak.contains("flatpak-reconcile-planned")
+            && flatpak.contains("obsidian"),
+        "flatpak: {flatpak}"
+    );
+    let appimage = fs::read_to_string(generation.join("appimage/plan.json")).unwrap();
+    assert!(
+        appimage.contains("appimage-runtime-integrated")
+            && appimage.contains("/opt/apps/Obsidian.AppImage"),
+        "appimage: {appimage}"
+    );
+    assert!(
+        generation.join("sw/bin/jetos-flatpak-reconcile").is_file()
+            && generation.join("sw/bin/jetos-appimage-run").is_file()
+            && generation.join("appimage/obsidian.desktop").is_file(),
+        "expected foreign app helpers"
+    );
+    let flatpak_bin = root.path.join("fake-flatpak");
+    let flatpak_log = root.path.join("flatpak.log");
+    write_executable(
+        &flatpak_bin,
+        "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$JETOS_FLATPAK_LOG\"\nif [ \"$1\" = list ]; then\n  printf '%s\\n' com.discordapp.Discord com.spotify.Client\nfi\n",
+    );
+    let flatpak_run = Command::new(generation.join("sw/bin/jetos-flatpak-reconcile"))
+        .env("JETOS_SYSTEM_ROOT", &generation)
+        .env("JETOS_FLATPAK_BIN", &flatpak_bin)
+        .env("JETOS_FLATPAK_LOG", &flatpak_log)
+        .output()
+        .unwrap();
+    assert!(
+        flatpak_run.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&flatpak_run.stdout),
+        String::from_utf8_lossy(&flatpak_run.stderr)
+    );
+    let flatpak_steps = fs::read_to_string(&flatpak_log).unwrap();
+    assert!(
+        flatpak_steps.contains("remote-add --if-not-exists flathub")
+            && flatpak_steps.contains("install -y flathub com.discordapp.Discord")
+            && flatpak_steps.contains("override com.discordapp.Discord --filesystem=Downloads")
+            && flatpak_steps.contains("uninstall -y com.spotify.Client")
+            && flatpak_steps.contains("update -y"),
+        "flatpak_steps: {flatpak_steps}"
+    );
+    let appimage_print = Command::new(generation.join("sw/bin/jetos-appimage-run"))
+        .args(["obsidian", "--print"])
+        .env("JETOS_SYSTEM_ROOT", &generation)
+        .output()
+        .unwrap();
+    assert!(
+        appimage_print.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&appimage_print.stdout),
+        String::from_utf8_lossy(&appimage_print.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&appimage_print.stdout).contains("/opt/apps/Obsidian.AppImage"),
+        "appimage_print: {}",
+        String::from_utf8_lossy(&appimage_print.stdout)
+    );
+    let workloads = fs::read_to_string(generation.join("workloads/facts.json")).unwrap();
+    assert!(
+        workloads.contains("\"name\":\"web\"")
+            && workloads.contains("\"backend\":\"Container\"")
+            && workloads.contains("\"name\":\"sandbox\"")
+            && workloads.contains("\"backend\":\"MicroVM\"")
+            && workloads.contains("web-token"),
+        "workloads: {workloads}"
+    );
+    let web_plan = fs::read_to_string(generation.join("workloads/web.plan.json")).unwrap();
+    assert!(
+        web_plan.contains("/srv/web:/srv/web:ro")
+            && web_plan.contains("\"memory\":\"512M\"")
+            && web_plan.contains("\"rollback_keep\":\"3\"")
+            && web_plan.contains("workload-proof-ready"),
+        "web_plan: {web_plan}"
+    );
+    let sandbox_plan = fs::read_to_string(generation.join("workloads/sandbox.plan.json")).unwrap();
+    assert!(
+        sandbox_plan.contains("qemu-system-x86_64")
+            && sandbox_plan.contains("-m 2048M")
+            && sandbox_plan.contains("\"backend\":\"MicroVM\""),
+        "sandbox_plan: {sandbox_plan}"
+    );
+    assert!(
+        generation
+            .join("etc/systemd/system/workload-web.service")
+            .is_file(),
+        "expected workload systemd unit"
+    );
+    assert!(
+        generation.join("workloads/web.rollback.manifest").is_file()
+            && generation.join("workloads/health-web.sh").is_file()
+            && generation
+                .join("workloads/sandbox.rollback.manifest")
+                .is_file(),
+        "expected workload health/rollback artifacts"
+    );
+    let workload_log = root.path.join("workload.log");
+    let workload_run = Command::new(generation.join("sw/bin/jetos-workload-run"))
+        .arg("web")
+        .env("JETOS_SYSTEM_ROOT", &generation)
+        .env("JETOS_WORKLOAD_LOG", &workload_log)
+        .output()
+        .unwrap();
+    assert!(
+        workload_run.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&workload_run.stdout),
+        String::from_utf8_lossy(&workload_run.stderr)
+    );
+    let workload_steps = fs::read_to_string(&workload_log).unwrap();
+    assert!(
+        workload_steps.contains("workload"),
+        "workload: {workload_steps}"
+    );
+    let fleet = fs::read_to_string(generation.join("fleet/deploy-plan.json")).unwrap();
+    assert!(
+        fleet.contains("staged-proof-gated-rollback-stop") && fleet.contains("\"fleet\": \"home\""),
+        "fleet: {fleet}"
+    );
+    assert!(
+        generation.join("sw/bin/jetos-fleet-deploy").is_file(),
+        "expected fleet deploy launcher"
+    );
+    let deploy_log = root.path.join("deploy.log");
+    let deploy_proofs = root.path.join("deploy-proofs");
+    fs::create_dir_all(&deploy_proofs).unwrap();
+    let deploy = Command::new(generation.join("sw/bin/jetos-fleet-deploy"))
+        .arg("halcyon")
+        .env("JETOS_SYSTEM_ROOT", &generation)
+        .env("JETOS_DEPLOY_PROOF_DIR", &deploy_proofs)
+        .env("JETOS_DEPLOY_LOG", &deploy_log)
+        .output()
+        .unwrap();
+    assert!(
+        deploy.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&deploy.stdout),
+        String::from_utf8_lossy(&deploy.stderr)
+    );
+    let deploy_steps = fs::read_to_string(&deploy_log).unwrap();
+    assert!(
+        deploy_steps.contains("push")
+            && deploy_steps.contains("proof")
+            && deploy_steps.contains("switch")
+            && deploy_steps.contains("health"),
+        "deploy_steps: {deploy_steps}"
+    );
+    let deploy_proof = fs::read_to_string(deploy_proofs.join("home-halcyon.json")).unwrap();
+    assert!(
+        deploy_proof.contains("\"state\":\"deployed\"")
+            && deploy_proof.contains("remote-proof-before-switch"),
+        "deploy_proof: {deploy_proof}"
+    );
+    let options_ref = fs::read_to_string(generation.join("options/reference.json")).unwrap();
+    assert!(
+        options_ref.contains("apps.flatpak.app.discord.ref")
+            && options_ref.contains("performance.sysctl.vm.swappiness")
+            && options_ref.contains("\"type\":")
+            && options_ref.contains("\"doc\":")
+            && options_ref.contains("\"tier\":"),
+        "options reference: {options_ref}"
+    );
+    assert!(
+        generation.join("sw/bin/jetos-options-search").is_file(),
+        "expected options search helper"
+    );
+    let option_exact = Command::new(generation.join("sw/bin/jetos-options-search"))
+        .args(["--exact", "services.displayManager"])
+        .env("JETOS_SYSTEM_ROOT", &generation)
+        .output()
+        .unwrap();
+    assert!(
+        option_exact.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&option_exact.stdout),
+        String::from_utf8_lossy(&option_exact.stderr)
+    );
+    let option_exact = String::from_utf8_lossy(&option_exact.stdout);
+    assert!(
+        option_exact.contains("services.displayManager") && option_exact.contains("gdm"),
+        "option_exact: {option_exact}"
+    );
+    let option_explain = Command::new(generation.join("sw/bin/jetos-options-search"))
+        .args(["--explain", "services.displayManager"])
+        .env("JETOS_SYSTEM_ROOT", &generation)
+        .output()
+        .unwrap();
+    assert!(
+        option_explain.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&option_explain.stdout),
+        String::from_utf8_lossy(&option_explain.stderr)
+    );
+    let option_explain = String::from_utf8_lossy(&option_explain.stdout);
+    assert!(
+        option_explain.contains("services.displayManager") && option_explain.contains("winner"),
+        "option_explain: {option_explain}"
+    );
+    let images = fs::read_to_string(generation.join("image-variants/matrix.json")).unwrap();
+    assert!(
+        images.contains("\"name\": \"installer\"") && images.contains("image-variant-plan-ready"),
+        "image variants: {images}"
+    );
+    let lifecycle = fs::read_to_string(generation.join("lifecycle/policy.json")).unwrap();
+    assert!(
+        lifecycle.contains("gc")
+            && lifecycle.contains("rollback_window")
+            && lifecycle.contains("\"auto_upgrade\":true"),
+        "lifecycle: {lifecycle}"
+    );
+    let auto_upgrade = fs::read_to_string(generation.join("lifecycle/auto-upgrade.json")).unwrap();
+    assert!(
+        auto_upgrade.contains("auto-upgrade-proof-gated")
+            && auto_upgrade.contains("rollback-on-fail"),
+        "auto_upgrade: {auto_upgrade}"
+    );
+    let channel = fs::read_to_string(generation.join("lifecycle/channel.json")).unwrap();
+    assert!(
+        channel.contains("\"channel\":\"stable\"") && channel.contains("channel-policy-ready"),
+        "channel: {channel}"
+    );
+    assert!(
+        generation.join("sw/bin/jetos-lifecycle-gc").is_file()
+            && generation.join("sw/bin/jetos-channel-update").is_file()
+            && generation.join("sw/bin/jetos-auto-upgrade").is_file()
+            && generation
+                .join("etc/systemd/system/jetos-auto-upgrade.timer")
+                .is_file(),
+        "expected lifecycle launchers"
+    );
+    let gc_systems = root.path.join("gc-systems");
+    let old = gc_systems.join("generations/old");
+    let mid = gc_systems.join("generations/mid");
+    let new = gc_systems.join("generations/new");
+    fs::create_dir_all(&old).unwrap();
+    fs::create_dir_all(&mid).unwrap();
+    fs::create_dir_all(&new).unwrap();
+    fs::write(
+        gc_systems.join("generations.log"),
+        format!(
+            "1\thalcyon\told\t{}\n2\thalcyon\tmid\t{}\n3\thalcyon\tnew\t{}\n",
+            old.display(),
+            mid.display(),
+            new.display()
+        ),
+    )
+    .unwrap();
+    let gc = Command::new(generation.join("sw/bin/jetos-lifecycle-gc"))
+        .arg("--apply")
+        .env("JETOS_SYSTEM_ROOT", &generation)
+        .env("JETOS_SYSTEMS_DIR", &gc_systems)
+        .output()
+        .unwrap();
+    assert!(
+        gc.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&gc.stdout),
+        String::from_utf8_lossy(&gc.stderr)
+    );
+    assert!(!old.exists(), "old generation should be deleted by GC");
+    assert!(
+        mid.exists() && new.exists(),
+        "newer generations should be kept"
+    );
+    let gc_plan = fs::read_to_string(generation.join("lifecycle/gc-plan.txt")).unwrap();
+    assert!(
+        gc_plan.contains("reason=older-than-retention")
+            && gc_plan.contains("reason=within-retention"),
+        "gc_plan: {gc_plan}"
+    );
+    let lifecycle_log = root.path.join("lifecycle.log");
+    let lifecycle_log_q = test_shell_quote(&lifecycle_log);
+    let lifecycle_proofs = root.path.join("lifecycle-proofs");
+    let upgrade = Command::new(generation.join("sw/bin/jetos-auto-upgrade"))
+        .env("JETOS_SYSTEM_ROOT", &generation)
+        .env("JETOS_LIFECYCLE_PROOF_DIR", &lifecycle_proofs)
+        .env(
+            "JETOS_UPGRADE_FETCH_CMD",
+            format!("echo fetch >> {lifecycle_log_q}"),
+        )
+        .env(
+            "JETOS_UPGRADE_BUILD_CMD",
+            format!("echo build >> {lifecycle_log_q}"),
+        )
+        .env(
+            "JETOS_UPGRADE_PROOF_CMD",
+            format!("echo proof >> {lifecycle_log_q}"),
+        )
+        .env(
+            "JETOS_UPGRADE_SWITCH_CMD",
+            format!("echo switch >> {lifecycle_log_q}"),
+        )
+        .env(
+            "JETOS_UPGRADE_HEALTH_CMD",
+            format!("echo health >> {lifecycle_log_q}"),
+        )
+        .output()
+        .unwrap();
+    assert!(
+        upgrade.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&upgrade.stdout),
+        String::from_utf8_lossy(&upgrade.stderr)
+    );
+    let lifecycle_steps = fs::read_to_string(&lifecycle_log).unwrap();
+    assert!(
+        lifecycle_steps.contains("fetch")
+            && lifecycle_steps.contains("build")
+            && lifecycle_steps.contains("proof")
+            && lifecycle_steps.contains("switch")
+            && lifecycle_steps.contains("health"),
+        "lifecycle_steps: {lifecycle_steps}"
+    );
+    let upgrade_proof =
+        fs::read_to_string(lifecycle_proofs.join("auto-upgrade-proof.json")).unwrap();
+    assert!(
+        upgrade_proof.contains("\"state\":\"switched\"") && upgrade_proof.contains("health-passed"),
+        "upgrade_proof: {upgrade_proof}"
+    );
+    let rollback_log = root.path.join("lifecycle-rollback.log");
+    let rollback_log_q = test_shell_quote(&rollback_log);
+    let rollback_proofs = root.path.join("lifecycle-rollback-proofs");
+    let rollback = Command::new(generation.join("sw/bin/jetos-auto-upgrade"))
+        .env("JETOS_SYSTEM_ROOT", &generation)
+        .env("JETOS_LIFECYCLE_PROOF_DIR", &rollback_proofs)
+        .env("JETOS_UPGRADE_FETCH_CMD", "true")
+        .env("JETOS_UPGRADE_BUILD_CMD", "true")
+        .env("JETOS_UPGRADE_PROOF_CMD", "true")
+        .env("JETOS_UPGRADE_SWITCH_CMD", "true")
+        .env("JETOS_UPGRADE_HEALTH_CMD", "false")
+        .env(
+            "JETOS_UPGRADE_ROLLBACK_CMD",
+            format!("echo rollback >> {rollback_log_q}"),
+        )
+        .output()
+        .unwrap();
+    assert!(
+        !rollback.status.success(),
+        "rollback path should fail after health failure"
+    );
+    assert!(
+        fs::read_to_string(&rollback_log)
+            .unwrap()
+            .contains("rollback"),
+        "expected rollback log"
+    );
+    let rollback_proof =
+        fs::read_to_string(rollback_proofs.join("auto-upgrade-proof.json")).unwrap();
+    assert!(
+        rollback_proof.contains("\"state\":\"rolled-back\"")
+            && rollback_proof.contains("health-failed"),
+        "rollback_proof: {rollback_proof}"
+    );
+    let services = fs::read_to_string(generation.join("service-manager/facts.json")).unwrap();
+    assert!(
+        services.contains("tmpfiles")
+            && services.contains("hardening")
+            && services.contains("journal"),
+        "service depth: {services}"
+    );
+    assert!(
+        generation.join("etc/tmpfiles.d/backup.conf").is_file(),
+        "expected tmpfiles projection"
+    );
+    assert!(
+        generation.join("sw/bin/jetos-service-logs").is_file(),
+        "expected service log helper"
+    );
+    let journal_bin = root.path.join("fake-journalctl");
+    let journal_log = root.path.join("journalctl.log");
+    write_executable(
+        &journal_bin,
+        "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$JETOS_JOURNAL_LOG\"\n",
+    );
+    let service_logs = Command::new(generation.join("sw/bin/jetos-service-logs"))
+        .args(["openssh", "--since", "1 hour ago"])
+        .env("JETOS_SYSTEM_ROOT", &generation)
+        .env("JETOS_JOURNALCTL_BIN", &journal_bin)
+        .env("JETOS_JOURNAL_LOG", &journal_log)
+        .output()
+        .unwrap();
+    assert!(
+        service_logs.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&service_logs.stdout),
+        String::from_utf8_lossy(&service_logs.stderr)
+    );
+    let journal_args = fs::read_to_string(&journal_log).unwrap();
+    assert!(
+        journal_args.contains("-u openssh --since 1 hour ago"),
+        "journal_args: {journal_args}"
+    );
+    let app_modules = fs::read_to_string(generation.join("apps/modules.json")).unwrap();
+    assert!(
+        app_modules.contains("app-module-library")
+            && app_modules.contains("ghosttyConfig")
+            && app_modules.contains("\"name\":\"git\"")
+            && app_modules.contains("\"name\":\"vscode\"")
+            && app_modules.contains("jetos-app-module-apply"),
+        "app modules: {app_modules}"
+    );
+    assert!(
+        generation.join("apps/programs/git/module.json").is_file()
+            && generation.join("apps/programs/vscode/config").is_file()
+            && generation
+                .join("apps/programs/discord/module.json")
+                .is_file()
+            && generation.join("apps/coverage.manifest").is_file()
+            && generation.join("apps/gap-cards.manifest").is_file()
+            && generation.join("sw/bin/jetos-app-module-apply").is_file(),
+        "expected app module library artifacts"
+    );
+    let git_config = fs::read_to_string(generation.join("apps/programs/git/config")).unwrap();
+    assert!(
+        git_config.contains("user.name = Nate") && git_config.contains("user.email"),
+        "git_config: {git_config}"
+    );
+    let app_home = root.path.join("app-home");
+    let app_apply = Command::new(generation.join("sw/bin/jetos-app-module-apply"))
+        .env("JETOS_SYSTEM_ROOT", &generation)
+        .env("JETOS_USER_HOME", &app_home)
+        .output()
+        .unwrap();
+    assert!(
+        app_apply.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&app_apply.stdout),
+        String::from_utf8_lossy(&app_apply.stderr)
+    );
+    assert!(
+        app_home.join(".config/git/config").is_file()
+            && app_home.join(".config/Code/User/settings.json").is_file()
+            && app_home.join(".jetos/proof/app-modules.json").is_file(),
+        "expected app module apply output"
+    );
+    let acceptance = fs::read_to_string(generation.join("acceptance/nixos-parity.json")).unwrap();
+    assert!(
+        acceptance.contains("jetos.nixos-parity-fixture")
+            && acceptance.contains("\"state\": \"covered\"")
+            && acceptance.contains("owner-nixos-recreated")
+            && acceptance.contains("\"omissions\":[]"),
+        "acceptance: {acceptance}"
+    );
+    let coverage = fs::read_to_string(generation.join("acceptance/coverage-matrix.tsv")).unwrap();
+    assert!(
+        coverage.contains("desktop-audio-locale-fonts-virt-gaming-smartcard\tcovered")
+            && coverage.contains("flatpak-appimage\tcovered")
+            && coverage.contains("lifecycle-gc-auto-upgrade\tcovered")
+            && !coverage.contains("\tmissing\t"),
+        "coverage: {coverage}"
+    );
+    let vm_gates = fs::read_to_string(generation.join("acceptance/vm-gates.json")).unwrap();
+    assert!(
+        vm_gates.contains("desktop-session-ready")
+            && vm_gates.contains("app-modules-present")
+            && vm_gates.contains("vm-acceptance-required"),
+        "vm_gates: {vm_gates}"
+    );
+    assert!(
+        generation.join("acceptance/owner-nixos-diff.md").is_file()
+            && generation.join("sw/bin/jetos-acceptance-prove").is_file(),
+        "expected acceptance artifacts"
+    );
+    let acceptance_proofs = root.path.join("acceptance-proofs");
+    let acceptance_run = Command::new(generation.join("sw/bin/jetos-acceptance-prove"))
+        .env("JETOS_SYSTEM_ROOT", &generation)
+        .env("JETOS_ACCEPTANCE_PROOF_DIR", &acceptance_proofs)
+        .output()
+        .unwrap();
+    assert!(
+        acceptance_run.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&acceptance_run.stdout),
+        String::from_utf8_lossy(&acceptance_run.stderr)
+    );
+    let acceptance_proof =
+        fs::read_to_string(acceptance_proofs.join("acceptance-proof.json")).unwrap();
+    assert!(
+        acceptance_proof.contains("\"state\":\"passed\"")
+            && acceptance_proof.contains("owner-nixos-recreated"),
+        "acceptance_proof: {acceptance_proof}"
+    );
     let desktop = fs::read_to_string(generation.join("desktop/facts.json")).unwrap();
     assert!(
         desktop.contains("\"session\":\"gnome-wayland\""),
@@ -2289,6 +3169,34 @@ fn os_switch_activates_and_sets_current() {
         generation.join("sw/bin/jetos-desktop-session").is_file(),
         "expected desktop session launcher"
     );
+    let desktop_breadth = fs::read_to_string(generation.join("desktop/breadth.json")).unwrap();
+    assert!(
+        desktop_breadth.contains("desktop-module-breadth-ready")
+            && desktop_breadth.contains("\"audio\":true")
+            && desktop_breadth.contains("plasma-wayland")
+            && desktop_breadth.contains("libvirtd")
+            && desktop_breadth.contains("gamemode")
+            && desktop_breadth.contains("Inter"),
+        "desktop_breadth: {desktop_breadth}"
+    );
+    for desktop_path in [
+        "share/wayland-sessions/jetos-plasma.desktop",
+        "etc/pipewire/jetos.conf",
+        "etc/security/limits.d/99-jetos-rtkit.conf",
+        "etc/locale.conf",
+        "etc/vconsole.conf",
+        "etc/fonts/local.conf",
+        "share/applications/mimeapps.list",
+        "etc/systemd/system/libvirtd.service",
+        "etc/systemd/system/gamemoded.service",
+        "etc/systemd/system/pcscd.service",
+        "etc/binfmt.d/appimage.conf",
+    ] {
+        assert!(
+            generation.join(desktop_path).is_file(),
+            "expected desktop breadth artifact {desktop_path}"
+        );
+    }
     let desktop_session =
         fs::read_to_string(generation.join("sw/bin/jetos-desktop-session")).unwrap();
     assert!(
@@ -2312,6 +3220,13 @@ fn os_switch_activates_and_sets_current() {
     assert!(
         generation.join("sw/bin/jetos-terminal-fallback").is_file(),
         "expected terminal fallback launcher"
+    );
+    let terminal_fallback =
+        fs::read_to_string(generation.join("sw/bin/jetos-terminal-fallback")).unwrap();
+    assert!(
+        terminal_fallback.contains("cat /etc/motd")
+            && terminal_fallback.contains("ttyS0 and tty1 remain available"),
+        "terminal_fallback: {terminal_fallback}"
     );
     assert!(
         generation
@@ -2692,6 +3607,74 @@ fn os_plan_prints_checked_system_contract_without_building() {
     assert!(
         !root.join("systems/generations").exists(),
         "plan must not create a generation"
+    );
+}
+
+#[test]
+fn jetos_user_commands_use_same_generation_engine() {
+    let root = Scratch::new("jetos-user-root");
+    let plan = jetos()
+        .args(["user", "plan", "nate", "--json", "--no-color"])
+        .current_dir(config_example_dir())
+        .env("JETPACK_ROOT", &root.path)
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert!(
+        plan.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&plan.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&plan.stdout);
+    assert!(
+        stdout.contains("\"kind\":\"jetos.user-generation\"")
+            && stdout.contains("\"user\":\"nate\""),
+        "plan: {stdout}"
+    );
+
+    let build = jetos()
+        .args([
+            "user",
+            "build",
+            "nate",
+            "--name",
+            "user-gen",
+            "--no-color",
+            "--offline",
+        ])
+        .current_dir(config_example_dir())
+        .env("JETPACK_ROOT", &root.path)
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert!(
+        build.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+    assert!(
+        root.path
+            .join("systems/generations/user-gen/users/nate/profile.json")
+            .is_file(),
+        "expected user profile artifact"
+    );
+
+    let proof = jetos()
+        .args(["user", "prove", "nate", "--json", "--no-color"])
+        .current_dir(config_example_dir())
+        .env("JETPACK_ROOT", &root.path)
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert!(
+        proof.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&proof.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&proof.stdout);
+    assert!(
+        stdout.contains("\"user\":\"nate\"") && stdout.contains("user-gen"),
+        "proof: {stdout}"
     );
 }
 
@@ -3859,6 +4842,43 @@ fn os_image_writes_jetos_installer_media_proof() {
             .join("systems/images/jetos-installer-halcyon.iso")
             .is_file(),
         "expected real hybrid ISO artifact"
+    );
+    let variant_proof = root
+        .path
+        .join("systems/images")
+        .join("jetos-image-variants-halcyon.proof.json");
+    let variants = fs::read_to_string(&variant_proof).unwrap();
+    assert!(
+        variants.contains("\"kind\":\"jetos.image-variants\"")
+            && variants.contains("\"proof\":\"qcow2-sd-netboot-built\"")
+            && variants.contains("\"kind\": \"qcow2\"")
+            && variants.contains("\"kind\": \"sd\"")
+            && variants.contains("\"kind\": \"netboot-ipxe\""),
+        "variants: {variants}"
+    );
+    for artifact in [
+        "jetos-halcyon.qcow2",
+        "jetos-halcyon.raw",
+        "jetos-halcyon-sd.img",
+        "jetos-halcyon-netboot/vmlinuz",
+        "jetos-halcyon-netboot/initrd",
+        "jetos-halcyon-netboot/ipxe.conf",
+    ] {
+        assert!(
+            root.path.join("systems/images").join(artifact).is_file(),
+            "expected image variant artifact {artifact}"
+        );
+    }
+    let ipxe = fs::read_to_string(
+        root.path
+            .join("systems/images/jetos-halcyon-netboot/ipxe.conf"),
+    )
+    .unwrap();
+    assert!(
+        ipxe.contains("kernel vmlinuz")
+            && ipxe.contains("initrd initrd")
+            && ipxe.contains("jetos.mode=run"),
+        "ipxe: {ipxe}"
     );
     let staging = root
         .path

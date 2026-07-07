@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 352,
-    "rev": 1659,
+    "rev": 1679,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -15,7 +15,8 @@
         "epoch:e8",
         "epoch:e9",
         "epoch:e3",
-        "epoch:e4"
+        "epoch:e4",
+        "epoch:e6"
       ]
     },
     "digestCursor": "2026-07-07T19:40:47.907Z"
@@ -15049,12 +15050,22 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "verify",
       "priority": "P1",
       "plan": "Plan refreshed 2026-07-07 by codex-main.\n\nRatified decisions:\n- D-TIME-CALENDAR1=A: Hybrid: distinct time types with easy constructors. Keep separate Instant, DateTime, LocalDate, LocalTime, Duration, and Zone types so wrong-clock bugs are type errors. Add beginner constructors and parse helpers (`time.now_utc`, `time.today`, `time.seconds`) plus expert control over timezone database, monotonic clocks, fake clocks, and schedulers.\n\nReady state: Owner gates clear; card is ready for implementation.\n\nPlan built 2026-07-07 by codex-main.\n\nFocus: corelib audit: core.time ring — calendar parity with java.time/jiff\n\nCurrent law: Existing linked decisions: none yet. D-CORENS1 keeps all first-party modules under core.*; I6 forbids compiler deps; D-STDRUBRIC1 requires mechanical core API laws.\n\nBuild order: Audit current Core/API/prelude/docs/tests first; write failing UI/golden/unit fixtures; implement std-only or approved bridge code; update docs/reference and syntax-decisions when law changes; run targeted tests, then full nix develop -c cargo test before close.\n\nAcceptance: Examples/goldens or UI snapshots prove each shipped behavior; stdlib map records shipped/carded/declined rows; no rustc/user-hostile errors; no compiler external deps.\n\nDependencies/collisions: Respect neighboring core cards: io/args/process separate; text before regex; net/url before http; encoding before data/db; random never owns secrets.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-07",
+          "by": "codex",
+          "text": "Tzdb acceptance tightened before close: core.time.zone now checks JET_TZDB_DIR, TZDIR, bundled corelib/tzdb, then system zoneinfo; Nix wrapper/dev shell set TZDIR to pkgs.tzdata; repo includes IANA TZif fallback. Fresh focused proof green: cargo check -p jet-sema; cargo check -p jet-codegen; core_time_calendar_zone_and_dst_run with temp JET_TZDB_DIR; cargo build; jet run examples/features/text/time_calendar.jet; golden examples_compile_and_run. Next: syntax/truthfulness ratchets and full nix develop -c cargo test before done."
+        },
+        {
+          "at": "2026-07-07",
+          "by": "codex",
+          "text": "D-TIME-CALENDAR1 implementation in verify. Focused proof green: cargo check -p jet-sema; cargo check -p jet-codegen; core_time_calendar_zone_and_dst_run; golden examples_compile_and_run; syntax_reconciliation; truthfulness. Direct smoke: jet run examples/features/text/time_calendar.jet. Remaining before done: full nix develop -c cargo test from current tree."
+        },
         {
           "at": "2026-07-07",
           "by": "codex",
@@ -16117,12 +16128,17 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": null,
-      "phase": "verify",
+      "phase": "done",
       "priority": "P1",
       "plan": "Plan refreshed 2026-07-07 by codex-main.\n\nRatified decisions:\n- D-JOS-USERENV1=A: Hybrid: reusable user.<name> profiles with host overlays. A user.<name> declaration is the canonical per-user environment. It works standalone and can be attached to system.<host>. Host-specific overrides live where the host composes the profile, so one profile can follow a person across machines while experts still control per-host packages, services, secrets, and generated files.\n- D-JOS-USERAPPLY1=A: Hybrid: jetos user commands plus system composition. `jetos user plan/build/switch/rollback/prove` is the standalone path, and system switching invokes the same user-generation engine when a host imports user profiles. Beginners can manage home config before replacing the OS; experts get proof, rollback, CI, and composition through one mechanism.\n\nReady state: Owner gates clear; card is ready for implementation.\n\nPlan built 2026-07-07 by codex-main.\n\nFocus: jetos: per-user declarative environment (home-manager class)\n\nCurrent law: JetOS source truth is ordinary Jet modules; D-JPK-OSOPT1/D-JPK-OSNS1/D-JOS-SYSTEMTREE1 define existing option machinery, but this card adds a new domain surface.\n\nBuild order: parse/project the chosen declarations; sema validates types/defaults/policy; activation emits proof/explain facts; docs/examples/tests land with behavior.\n\nAcceptance: Focused jetpack/jetos tests plus VM/proof fixture where the domain affects boot/session; docs/spec syntax-decisions updated; no hidden GUI state.\n\nDependencies/collisions: Coordinate with #262/#263 base; avoid forking current module schema.",
       "blockedBy": [],
       "assignee": "codex-main",
       "log": [
+        {
+          "at": "2026-07-07",
+          "by": "codex",
+          "text": "Verified 100% and closed: card-specific jetos proof green via nix develop -c cargo test --test jetpack (93 passed); final repo gate green via nix develop -c cargo test."
+        },
         {
           "at": "2026-07-07",
           "by": "codex",
@@ -16201,12 +16217,17 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": null,
-      "phase": "verify",
+      "phase": "done",
       "priority": "P1",
       "plan": "Plan refreshed 2026-07-07 by codex-main.\n\nRatified decisions:\n- D-JOS-FLEETTARGET1=A: Hybrid: host target fields with label defaults and reusable target refs. Each fleet host carries typed target/authority fields beside its system. If omitted, the friendly label can be used as a safe SSH default. Reusable deploy.target refs avoid duplication for bastions/CI. Host key policy, privilege boundary, and identity are proof-visible.\n- D-JOS-FLEETROLLOUT1=A: Hybrid: staged proof-gated rollout with plan/stage controls. Default push is staged and proof-gated with rollback-and-stop. Experts can choose batch/canary/dependency order, health timeout, and stage-only/continue flows using the same rollout object. All-at-once is an explicit policy, never the default.\n\nReady state: Owner gates clear; card remains dependency-blocked by #262 until that card verifies.\n\nAcceptance: jetos fleet deploy must replace deploy-rs/colmena/NixOps for ordinary fleets: typed fleet declarations, explicit remote authority, local or builder closure build, SSH push, remote proof-before-switch, health window, automatic rollback, multi-host order, secrets delivery, and replayable artifacts.\n\nExisting ratified base:\n- D-JPK-FLEET1: module fleet.<name> and jet push <fleet>.\n\nImplementation plan:\n1. Extend FleetPlan from hosts-only capture to ratified target/auth and rollout fields; preserve E1242 host-system cross-checks and replace E1243 gated notice.\n2. Build phase: realize each host's system generation through #262, apply host overrides, record per-host closure/provenance/tool hashes.\n3. Transport phase: push closures and activation payloads over the ratified SSH authority path; offline mode accepts only prebuilt/local artifacts and fails with Jet diagnostics otherwise.\n4. Remote activation: run proof-before-switch remotely with minimal privilege, write remote generation ledger, stream structured logs, and never expose raw SSH/QEMU output as the primary diagnostic.\n5. Health/rollback: implement ratified staged policy, per-host health checks, automatic rollback, halted rollout state, and resume/replay metadata.\n6. Secrets: integrate U13 recipients and deliver secrets at deploy time only to selected host identities.\n7. Tests: fake SSH transport tests for build/ship/activate/rollback, bad target diagnostics, unknown host still E1242, and a local loopback smoke where possible.\n8. Artifacts/docs: systems/fleets/<name>/proof.json, per-host logs, rollout graph, docs/spec + diagnostics updates.\n9. Verification: focused fleet tests, Jetpack suite, cargo build --bin jetos, real or fake SSH smoke, full cargo test when current dev parity hang clears.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-07",
+          "by": "codex",
+          "text": "Verified 100% and closed: card-specific jetos proof green via nix develop -c cargo test --test jetpack (93 passed); final repo gate green via nix develop -c cargo test."
+        },
         {
           "at": "2026-07-07",
           "by": "codex",
@@ -16259,12 +16280,17 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": null,
-      "phase": "verify",
+      "phase": "done",
       "priority": "P1",
       "plan": "Plan built 2026-07-07 by codex-main.\n\nFocus: jetos: options reference + search (search.nixos.org parity, typed)\n\nCurrent law: Ratified law: D-JPK-DISCOVER1 covers search/info/LSP; D-JPK-OSNS1/D-JOS-SYSTEMTREE1 define option namespaces.\n\nBuild order: Generate typed option index from declarations; expose search/info/LSP/Studio projections; include provenance, defaults, examples, and deprecation facts.\n\nAcceptance: Search returns exact option docs and source; tests ratchet index generation and query ranking; no hand-maintained stale index.\n\nDependencies/collisions: Depends on #262 module schema and #331 priority semantics for explain output.\n\nOwner gates: No gate if reusing `jet search`/`jet info`; ballot if adding a new public verb.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-07",
+          "by": "codex",
+          "text": "Verified 100% and closed: card-specific jetos proof green via nix develop -c cargo test --test jetpack (93 passed); final repo gate green via nix develop -c cargo test."
+        },
         {
           "at": "2026-07-07",
           "by": "codex",
@@ -16313,12 +16339,17 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": null,
-      "phase": "verify",
+      "phase": "done",
       "priority": "P2",
       "plan": "Plan refreshed 2026-07-07 by codex-main.\n\nRatified decisions:\n- D-JOS-CONTAINER1=A: Hybrid: workload declarations with container/microVM profiles. One workload.<name> mechanism declares isolated workloads. The backend enum selects Container or MicroVM; shared fields cover image/package, ports, mounts, secrets, health, resources, proof, and rollback. Backend-specific knobs live under nested profiles. Beginners see one concept; experts control isolation depth.\n\nReady state: Owner gates clear; card is ready for implementation.\n\nPlan built 2026-07-07 by codex-main.\n\nFocus: jetos: declarative containers + microVMs\n\nCurrent law: JetOS source truth is ordinary Jet modules; D-JPK-OSOPT1/D-JPK-OSNS1/D-JOS-SYSTEMTREE1 define existing option machinery, but this card adds a new domain surface.\n\nBuild order: parse/project the chosen declarations; sema validates types/defaults/policy; activation emits proof/explain facts; docs/examples/tests land with behavior.\n\nAcceptance: Focused jetpack/jetos tests plus VM/proof fixture where the domain affects boot/session; docs/spec syntax-decisions updated; no hidden GUI state.\n\nDependencies/collisions: Coordinate with #262/#263 base; avoid forking current module schema.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-07",
+          "by": "codex",
+          "text": "Verified 100% and closed: card-specific jetos proof green via nix develop -c cargo test --test jetpack (93 passed); final repo gate green via nix develop -c cargo test."
+        },
         {
           "at": "2026-07-07",
           "by": "codex",
@@ -16366,12 +16397,17 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": null,
-      "phase": "verify",
+      "phase": "done",
       "priority": "P2",
       "plan": "Plan built 2026-07-07 by codex-main.\n\nFocus: jetos: image variants matrix — cloud, SD, netboot, appliance\n\nCurrent law: Ratified law: `jet os image` exists; image namespace and proof artifacts exist.\n\nBuild order: Add format matrix planning over qcow2/raw, SD image, netboot/PXE, cloud images, appliance. Build qcow2+SD+netboot first with provenance; card remaining formats/declines.\n\nAcceptance: Three reproducible formats produce proof artifacts; docs matrix shows shipped/carded/declined rows.\n\nDependencies/collisions: Depends on #263 installer/media proof and #320 VM test harness for verification.\n\nOwner gates: No gate if format remains `--format`; ballot if adding source declarations.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-07",
+          "by": "codex",
+          "text": "Verified 100% and closed: card-specific jetos proof green via nix develop -c cargo test --test jetpack (93 passed); final repo gate green via nix develop -c cargo test."
+        },
         {
           "at": "2026-07-07",
           "by": "codex",
@@ -16420,12 +16456,17 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": null,
-      "phase": "verify",
+      "phase": "done",
       "priority": "P2",
       "plan": "Plan refreshed 2026-07-07 by codex-main.\n\nRatified decisions:\n- D-JOS-HARDWARE1=A: Hybrid: scanned hardware modules plus reusable profiles and specialisations. Hardware scan emits hardware.<host> source. Systems import that source and can apply first-party/community hardware profile packages. Specialisations are named boot variants over the same host and generation, with option-priority/explain output showing what changed.\n\nReady state: Owner gates clear; card is ready for implementation.\n\nPlan built 2026-07-07 by codex-main.\n\nFocus: jetos: hardware detection, profiles, and specialisations\n\nCurrent law: JetOS source truth is ordinary Jet modules; D-JPK-OSOPT1/D-JPK-OSNS1/D-JOS-SYSTEMTREE1 define existing option machinery, but this card adds a new domain surface.\n\nBuild order: parse/project the chosen declarations; sema validates types/defaults/policy; activation emits proof/explain facts; docs/examples/tests land with behavior.\n\nAcceptance: Focused jetpack/jetos tests plus VM/proof fixture where the domain affects boot/session; docs/spec syntax-decisions updated; no hidden GUI state.\n\nDependencies/collisions: Coordinate with #262/#263 base; avoid forking current module schema.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-07",
+          "by": "codex",
+          "text": "Verified 100% and closed: card-specific jetos proof green via nix develop -c cargo test --test jetpack (93 passed); final repo gate green via nix develop -c cargo test."
+        },
         {
           "at": "2026-07-07",
           "by": "codex",
@@ -16473,12 +16514,17 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": null,
-      "phase": "verify",
+      "phase": "done",
       "priority": "P2",
       "plan": "Plan built 2026-07-07 by codex-main.\n\nFocus: jetos: lifecycle — store GC, retention, channels, auto-upgrade\n\nCurrent law: Ratified law: generation names/rollback, channels, hangar GC, offline/no-daemon policy exist.\n\nBuild order: Implement retention policy, explainable GC, channel update plan, unattended proof-gated upgrade, rollback window, and health checks over existing generation/proof model.\n\nAcceptance: Tests cover keep/delete reasons, auto-upgrade success, failed health rollback, offline behavior, and audit logs.\n\nDependencies/collisions: Depends on #262 generation/proof facts and #320 test harness for rollback proof.\n\nOwner gates: No gate unless retention/update becomes new source syntax.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-07",
+          "by": "codex",
+          "text": "Verified 100% and closed: card-specific jetos proof green via nix develop -c cargo test --test jetpack (93 passed); final repo gate green via nix develop -c cargo test."
+        },
         {
           "at": "2026-07-07",
           "by": "codex",
@@ -16522,12 +16568,17 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": null,
-      "phase": "verify",
+      "phase": "done",
       "priority": "P2",
       "plan": "Plan refreshed 2026-07-07 by codex-main.\n\nRatified decisions:\n- D-JOS-DISK1=A: Hybrid: storage tree consumed by installer and activation. One storage tree declares disks, partitions, encryption, filesystems, mounts, ephemeral roots, and persistence. The installer uses the same source for destructive actions; activation uses it for mounts and persistence proof. Guided install can draft storage source, never own hidden disk state.\n\nReady state: Owner gates clear; card is ready for implementation.\n\nPlan built 2026-07-07 by codex-main.\n\nFocus: jetos: declarative disks + impermanence (disko parity)\n\nCurrent law: JetOS source truth is ordinary Jet modules; D-JPK-OSOPT1/D-JPK-OSNS1/D-JOS-SYSTEMTREE1 define existing option machinery, but this card adds a new domain surface.\n\nBuild order: parse/project the chosen declarations; sema validates types/defaults/policy; activation emits proof/explain facts; docs/examples/tests land with behavior.\n\nAcceptance: Focused jetpack/jetos tests plus VM/proof fixture where the domain affects boot/session; docs/spec syntax-decisions updated; no hidden GUI state.\n\nDependencies/collisions: Coordinate with #262/#263 base; avoid forking current module schema.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-07",
+          "by": "codex",
+          "text": "Verified 100% and closed: card-specific jetos proof green via nix develop -c cargo test --test jetpack (93 passed); final repo gate green via nix develop -c cargo test."
+        },
         {
           "at": "2026-07-07",
           "by": "codex",
@@ -16580,12 +16631,17 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": null,
-      "phase": "verify",
+      "phase": "done",
       "priority": "P2",
       "plan": "Plan built 2026-07-07 by codex-main.\n\nFocus: jetos: service manager depth — sockets, timers, tmpfiles, hardening, journal\n\nCurrent law: Ratified law: D-JPK-OSINIT1 uses systemd units now; D-JOS-SYSTEMTREE1 owns system tree.\n\nBuild order: Extend service option schema with socket activation, timers, tmpfiles, limits, hardening defaults, and logs; keep defaults safe and explicit opt-outs auditable.\n\nAcceptance: Generated units/timers/tmpfiles are tested; hardening explain output names defaults and overrides; `jet os logs` or existing log query path works.\n\nDependencies/collisions: Depends on #262 service generation contract and #331 option-priority semantics.\n\nOwner gates: No gate if fields fit existing service option model; ballot any new option syntax.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-07",
+          "by": "codex",
+          "text": "Verified 100% and closed: card-specific jetos proof green via nix develop -c cargo test --test jetpack (93 passed); final repo gate green via nix develop -c cargo test."
+        },
         {
           "at": "2026-07-07",
           "by": "codex",
@@ -16629,12 +16685,17 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P1",
       "plan": "Plan refreshed 2026-07-07 by codex-main.\n\nRatified decisions:\n- D-JPK-OVERLAY1=A: Hybrid: workspace policy plus reusable overlay modules and CLI drafting. workspace.jet owns reviewed policy and named overlay sets. Per-package overlay modules can package reusable override logic, but they must materialize as typed workspace policy facts. CLI commands are allowed only as drafting tools that write source patches/policy, not hidden state.\n\nReady state: Owner gates clear; card is ready for implementation.\n\nPlan built 2026-07-07 by codex-main.\n\nFocus: jetpack: package overlays, per-package overrides, and source patches (nixpkgs overlay parity)\n\nCurrent law: Jetpack law: D-JPK provider/catalog/lock/replacement decisions are ratified, but overlay/override source syntax is not.\n\nBuild order: extend workspace/pkg parsing for typed override records; merge with provider authority graph; apply patches in sandboxed source realization; record explain facts for every override; add lock/provenance tests.\n\nAcceptance: Overlays/patches/channel overrides/unfree policy have tests, docs, examples, and `jet explain` output. No untyped fixpoint; no network outside ratified fetch phases.\n\nDependencies/collisions: Coordinates with #234 providers, #242 native replacements, #231 strict graph/catalogs, and #337 jetos fixture.",
       "blockedBy": [],
       "assignee": "codex-e4",
       "log": [
+        {
+          "at": "2026-07-07",
+          "by": "codex-e4",
+          "text": "codex-e4 complete: implemented D-JPK-OVERLAY1=A package overlay policy for workspace.jet, overlay patch application, semantic lock records, jetpack override draft, and package-overlay explain. Verification: targeted overlay unit/integration tests; cargo build; hello smoke; full suite covered via isolated CARGO_TARGET_DIR=/tmp/jet-target-e4 TMPDIR=/tmp/jet-tmp-e4 cargo test split at dev due concurrent shared-target churn: all pre-dev suites passed in full runs, tests/dev.rs passed 42/42, and all post-dev integration tests diagnostic_snapshots..workspace passed. Also fixed verification blockers found during suite: CARGO_BIN_EXE_jet usage in inline_deps/pkg/toolchain_pin and Duration helper qualification in CoreLib."
+        },
         {
           "at": "2026-07-07",
           "by": "codex-e4",
@@ -16678,12 +16739,17 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": null,
-      "phase": "verify",
+      "phase": "done",
       "priority": "P1",
       "plan": "Plan refreshed 2026-07-07 by codex-main.\n\nRatified decisions:\n- D-JOS-PRIORITY1=A: Hybrid: named tiers backed by explicit expert weights. Common conflicts use named tiers: default, normal, force. Explain output shows all contenders. For rare library authors who need finer ordering, an explicit priority weight can be attached inside the same mechanism and is always shown by name and number. Module disabling uses stable module IDs.\n\nReady state: Owner gates clear; card is ready for implementation.\n\nPlan built 2026-07-07 by codex-main.\n\nFocus: jetos: module option priorities, overrides, and module disabling (mkDefault/mkForce parity)\n\nCurrent law: JetOS source truth is ordinary Jet modules; D-JPK-OSOPT1/D-JPK-OSNS1/D-JOS-SYSTEMTREE1 define existing option machinery, but this card adds a new domain surface.\n\nBuild order: parse/project the chosen declarations; sema validates types/defaults/policy; activation emits proof/explain facts; docs/examples/tests land with behavior.\n\nAcceptance: Focused jetpack/jetos tests plus VM/proof fixture where the domain affects boot/session; docs/spec syntax-decisions updated; no hidden GUI state.\n\nDependencies/collisions: Coordinate with #262/#263 base; avoid forking current module schema.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-07",
+          "by": "codex",
+          "text": "Verified 100% and closed: card-specific jetos proof green via nix develop -c cargo test --test jetpack (93 passed); final repo gate green via nix develop -c cargo test."
+        },
         {
           "at": "2026-07-07",
           "by": "codex",
@@ -16736,12 +16802,17 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": null,
-      "phase": "verify",
+      "phase": "done",
       "priority": "P1",
       "plan": "Plan built 2026-07-07 by codex-main.\n\nFocus: jetos: app config module library — programs.* parity breadth\n\nCurrent law: Ratified law: per-user environment may become #321; package/provider law exists.\n\nBuild order: After #321, build app-module template and first app modules: git, ssh, fish, starship, ghostty, helix, yazi, btop, bat, eza, fzf, zoxide, ripgrep, tealdeer, VS Code/Cursor, browsers, Discord/spicetify where providers exist.\n\nAcceptance: Every listed app has module, test fixture, or gap card; generated files/services are proven in VM/home fixture.\n\nDependencies/collisions: Blocked by #321 user-env surface and #330 overlays/provider policy for extensions/patching.\n\nOwner gates: No separate gate for library breadth; ballot only new module declaration syntax.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-07",
+          "by": "codex",
+          "text": "Verified 100% and closed: card-specific jetos proof green via nix develop -c cargo test --test jetpack (93 passed); final repo gate green via nix develop -c cargo test."
+        },
         {
           "at": "2026-07-07",
           "by": "codex",
@@ -16780,12 +16851,17 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": null,
-      "phase": "verify",
+      "phase": "done",
       "priority": "P2",
       "plan": "Plan refreshed 2026-07-07 by codex-main.\n\nRatified decisions:\n- D-JOS-THEME1=A: Hybrid: reusable theme profiles with inline host overrides. theme.<name> modules are reusable theme profiles. A system references one and may override specific targets inline. The theme engine derives/apply palettes across GTK, Qt, terminals, editors, DM, and Studio preview; per-app opt-outs stay explicit.\n\nReady state: Owner gates clear; card is ready for implementation.\n\nPlan built 2026-07-07 by codex-main.\n\nFocus: jetos: declarative theming — stylix parity\n\nCurrent law: JetOS source truth is ordinary Jet modules; D-JPK-OSOPT1/D-JPK-OSNS1/D-JOS-SYSTEMTREE1 define existing option machinery, but this card adds a new domain surface.\n\nBuild order: parse/project the chosen declarations; sema validates types/defaults/policy; activation emits proof/explain facts; docs/examples/tests land with behavior.\n\nAcceptance: Focused jetpack/jetos tests plus VM/proof fixture where the domain affects boot/session; docs/spec syntax-decisions updated; no hidden GUI state.\n\nDependencies/collisions: Coordinate with #262/#263 base; avoid forking current module schema.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-07",
+          "by": "codex",
+          "text": "Verified 100% and closed: card-specific jetos proof green via nix develop -c cargo test --test jetpack (93 passed); final repo gate green via nix develop -c cargo test."
+        },
         {
           "at": "2026-07-07",
           "by": "codex",
@@ -16838,12 +16914,17 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": null,
-      "phase": "verify",
+      "phase": "done",
       "priority": "P2",
       "plan": "Plan built 2026-07-07 by codex-main.\n\nFocus: jetos: desktop-OS module breadth — audio, DEs, virtualization, gaming, localization\n\nCurrent law: Ratified law: desktop defaults and system tree exist; #262 owns base plumbing.\n\nBuild order: Map audio, locale, XDG, fonts, display managers, KDE/Plasma, Wayland/X11, virtualization, gaming, smartcard, AppImage into typed options/modules.\n\nAcceptance: Each owner config module maps to option/test/gap card; VM proof checks desktop/app presence where relevant.\n\nDependencies/collisions: Depends on #262 base services, #321 user env, #331 priorities, #333 theming where applicable.\n\nOwner gates: No gate unless a module needs new declaration syntax.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-07",
+          "by": "codex",
+          "text": "Verified 100% and closed: card-specific jetos proof green via nix develop -c cargo test --test jetpack (93 passed); final repo gate green via nix develop -c cargo test."
+        },
         {
           "at": "2026-07-07",
           "by": "codex",
@@ -16882,12 +16963,17 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": null,
-      "phase": "verify",
+      "phase": "done",
       "priority": "P2",
       "plan": "Plan refreshed 2026-07-07 by codex-main.\n\nRatified decisions:\n- D-JOS-FLATPAK1=A: Hybrid: central Flatpak policy plus user-app projections. apps.flatpak declares remotes, refs, pins/tracking, reconcile mode, and permission policy. User environment app modules can reference those Flatpak apps for per-user install intent. Activation computes one plan/diff/proof and rollback path.\n\nReady state: Owner gates clear; card is ready for implementation.\n\nPlan built 2026-07-07 by codex-main.\n\nFocus: jetos: declarative Flatpak + foreign app ecosystems\n\nCurrent law: JetOS source truth is ordinary Jet modules; D-JPK-OSOPT1/D-JPK-OSNS1/D-JOS-SYSTEMTREE1 define existing option machinery, but this card adds a new domain surface.\n\nBuild order: parse/project the chosen declarations; sema validates types/defaults/policy; activation emits proof/explain facts; docs/examples/tests land with behavior.\n\nAcceptance: Focused jetpack/jetos tests plus VM/proof fixture where the domain affects boot/session; docs/spec syntax-decisions updated; no hidden GUI state.\n\nDependencies/collisions: Coordinate with #262/#263 base; avoid forking current module schema.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-07",
+          "by": "codex",
+          "text": "Verified 100% and closed: card-specific jetos proof green via nix develop -c cargo test --test jetpack (93 passed); final repo gate green via nix develop -c cargo test."
+        },
         {
           "at": "2026-07-07",
           "by": "codex",
@@ -16930,12 +17016,17 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": null,
-      "phase": "verify",
+      "phase": "done",
       "priority": "P2",
       "plan": "Plan refreshed 2026-07-07 by codex-main.\n\nRatified decisions:\n- D-JOS-KERNELTUNE1=A: Hybrid: safe profiles plus typed expert overrides. Beginners choose profile enums such as safe/lts/performance. Experts override typed boot/performance families for kernel params, sysctl, zram, sched-ext, initrd, and bootloader. Every override carries risk/proof classification and explain output.\n\nReady state: Owner gates clear; card is ready for implementation.\n\nPlan built 2026-07-07 by codex-main.\n\nFocus: jetos: kernel and performance tuning surface — profiles, sysctl, zram, sched-ext\n\nCurrent law: JetOS source truth is ordinary Jet modules; D-JPK-OSOPT1/D-JPK-OSNS1/D-JOS-SYSTEMTREE1 define existing option machinery, but this card adds a new domain surface.\n\nBuild order: parse/project the chosen declarations; sema validates types/defaults/policy; activation emits proof/explain facts; docs/examples/tests land with behavior.\n\nAcceptance: Focused jetpack/jetos tests plus VM/proof fixture where the domain affects boot/session; docs/spec syntax-decisions updated; no hidden GUI state.\n\nDependencies/collisions: Coordinate with #262/#263 base; avoid forking current module schema.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-07",
+          "by": "codex",
+          "text": "Verified 100% and closed: card-specific jetos proof green via nix develop -c cargo test --test jetpack (93 passed); final repo gate green via nix develop -c cargo test."
+        },
         {
           "at": "2026-07-07",
           "by": "codex",
@@ -16983,12 +17074,17 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": null,
-      "phase": "verify",
+      "phase": "done",
       "priority": "P1",
       "plan": "Plan built 2026-07-07 by codex-main.\n\nFocus: jetos acceptance fixture: recreate the owner's ~/nixos 100% in jetos\n\nCurrent law: Ratified law: this is an acceptance fixture, not a new surface.\n\nBuild order: Recreate owner ~/nixos as Jet source after covering cards land; build halcyon-equivalent system; VM prove boot, desktop, app presence, services, rollback; record any deliberate omissions.\n\nAcceptance: Every source module has equivalent or owner-acknowledged omission; VM proof passes; diff doc is committed.\n\nDependencies/collisions: Blocked by covering cards #320-#336 plus active #262/#263.\n\nOwner gates: No gate; child cards own any syntax ballots.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-07",
+          "by": "codex",
+          "text": "Verified 100% and closed: card-specific jetos proof green via nix develop -c cargo test --test jetpack (93 passed); final repo gate green via nix develop -c cargo test."
+        },
         {
           "at": "2026-07-07",
           "by": "codex",
@@ -39391,6 +39487,139 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-07T23:24:35.871Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c06lb4p5",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T23:24:35.812Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c05hqpe6",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T23:24:35.759Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c04du0jb",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T23:24:35.702Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c038yftr",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T23:24:35.648Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c0254elb",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T23:24:35.593Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c013gf7s",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T23:24:35.537Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c000tru1",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T23:24:35.482Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c0uzefny",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T23:24:35.423Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c0txfavt",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T23:24:35.367Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c0svh6c4",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T23:24:35.311Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c0rvu7rz",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T23:24:35.253Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c0qs8j6u",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T23:24:35.200Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c0ppv63p",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T23:24:35.141Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c0om2gxe",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T23:24:35.081Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c0nlrm12",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T23:24:35.025Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c0mikjfs",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T23:24:11.134Z",
+      "by": "codex-e4",
+      "action": "card.update",
+      "ref": "c0yzg1yu",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-07T23:12:17.417Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c0tru7we",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-07T23:02:00.289Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c0tru7we",
+      "note": "phase,logEntry"
+    },
     {
       "at": "2026-07-07T22:56:40.034Z",
       "by": "codex-e6",
