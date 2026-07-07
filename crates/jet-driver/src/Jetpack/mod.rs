@@ -26,6 +26,7 @@ pub mod Merge;
 pub mod MigrationImport;
 pub mod ModuleEval;
 pub mod Output;
+pub mod Overlay;
 pub mod PackageGraph;
 pub mod PackageManifest;
 pub mod Platform;

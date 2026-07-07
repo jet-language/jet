@@ -69,6 +69,7 @@ pub fn load(workspace_root: &Path) -> Option<WorkspacePlan> {
     let lock = Lock::load(workspace_root)?;
     Some(WorkspacePlan {
         comptime_inputs: lock.comptime_inputs.clone(),
+        overlay_policy: Default::default(),
         members: lock
             .workspace_members
             .into_iter()
@@ -200,6 +201,7 @@ mod tests {
                 path: "assets/index.json".to_string(),
                 hash: "sha256-deadbeef".to_string(),
             }],
+            overlay_policy: Default::default(),
         };
         write(&tmp, &plan);
         let raw = std::fs::read_to_string(tmp.join(Syntax::UNIFIED_LOCK_FILE)).unwrap();

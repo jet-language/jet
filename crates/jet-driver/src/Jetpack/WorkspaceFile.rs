@@ -20,6 +20,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
+use super::Overlay::{self, OverlayPolicy};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
 use crate::AST::{ComptimeInput, Expr, Func, Item, StrPart};
@@ -38,6 +39,10 @@ pub struct WorkspacePlan {
     /// Recorded into `.jet/lock` so the index is reproducible — a changed input
     /// invalidates the lock the same way it does for any other Tier-1 call site.
     pub comptime_inputs: Vec<ComptimeInput>,
+    /// D-JPK-OVERLAY1=A: reviewed package overlay/override policy from
+    /// `workspace.jet`; CLI commands may draft this source but never create
+    /// hidden override state.
+    pub overlay_policy: OverlayPolicy,
 }
 
 /// One workspace member package.
@@ -137,7 +142,17 @@ fn e1239_ambiguous_workspace(paths: &[&Path]) -> Diagnostic {
 
 /// Evaluate a `workspace.jet` source string to a `WorkspacePlan`.
 pub fn evaluate(src: &str, base_dir: &Path) -> Result<WorkspacePlan, Diagnostic> {
-    let (toks, lex_diags) = crate::Lexer::lex(src);
+    let overlay_policy = Overlay::parse_workspace_policy(src).map_err(|e| {
+        Diagnostic::error(
+            "E0998",
+            "workspace overlay policy is malformed".to_string(),
+            e.message().to_string(),
+            "write `overlay <name> { provider: Provider.nixpkgs(channel: \"...\"); package(\"pkg\").patches += [patch(\"path.patch\")] }`".to_string(),
+            None,
+        )
+    })?;
+    let eval_src = Overlay::strip_overlay_policy(src);
+    let (toks, lex_diags) = crate::Lexer::lex(&eval_src);
     if let Some(d) = lex_diags.into_iter().next() {
         return Err(d);
     }
@@ -206,6 +221,7 @@ pub fn evaluate(src: &str, base_dir: &Path) -> Result<WorkspacePlan, Diagnostic>
     Ok(WorkspacePlan {
         members,
         comptime_inputs,
+        overlay_policy,
     })
 }
 
@@ -225,10 +241,9 @@ fn eval_members_expr(
     extern_names: &HashSet<String>,
     globals: &HashMap<String, crate::Comptime::CtValue>,
 ) -> Result<(Vec<String>, Vec<ComptimeInput>), Diagnostic> {
-    // Fast path: `find("./dir")` — scan for package directories. A literal-path
-    // `find` reads the filesystem directly (no comptime input record); the
-    // general `find(glob) -> [String]` builtin (D-CTFIND1/2, unbuilt c157) will
-    // route through the comptime path below once it lands.
+    // Fast path: workspace `find("./dir")` scans for package directories. This
+    // manifest helper is separate from comptime `find(glob) -> [String]`, which
+    // records matched file hashes for ordinary Jet comptime bindings.
     if let Expr::Call(call) = expr {
         if call.name == Syntax::BUILTIN_FIND {
             let span = call.name_span;
@@ -463,6 +478,30 @@ mod tests {
         let src = "module workspace {\n    members: []\n}\n";
         let plan = eval(src);
         assert!(plan.members.is_empty());
+    }
+
+    #[test]
+    fn overlay_policy_survives_workspace_eval() {
+        let src = r#"
+module workspace {
+    members: []
+    overlay plasma_beta {
+        provider: Provider.nixpkgs(channel: "plasma-beta")
+        package("foo").patches += [patch("patches/foo.patch")]
+    }
+    policy.allowUnfree: ["discord"]
+}
+"#;
+        let plan = eval(src);
+        assert!(plan.members.is_empty());
+        assert_eq!(plan.overlay_policy.allow_unfree, vec!["discord"]);
+        assert_eq!(
+            plan.overlay_policy
+                .package_override("plasma_beta", "foo")
+                .unwrap()
+                .patches,
+            vec!["patches/foo.patch"]
+        );
     }
 
     #[test]

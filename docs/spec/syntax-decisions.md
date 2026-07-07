@@ -1724,7 +1724,11 @@ overrides live as reviewed source truth in `workspace.jet`: typed workspace
 policy, named overlay sets, provider/channel swaps, per-package patches, and
 unfree policy. Reusable overlay modules may package override logic only when
 they materialize as typed workspace policy facts. CLI override commands are
-drafting tools that write source patches/policy, not hidden state.
+drafting tools that write source patches/policy, not hidden state. Shipped
+surface: `overlay <name> { provider: Provider.nixpkgs(channel: "...");
+package("pkg").patches += [patch("path.patch")] }`,
+`policy.allowUnfree: [...]`, `jetpack override draft`, unified-diff patch
+application, and `jetpack explain package-overlay:<overlay>:<package>`.
 
 **World-domination ratifications (D-WD1–12, D-WD14–15 = B, ratified
 2026-07-06, c07589v1)**: these decisions set product law and planning

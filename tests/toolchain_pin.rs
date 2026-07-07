@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn jet_bin() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/debug/jet")
+    PathBuf::from(env!("CARGO_BIN_EXE_jet"))
 }
 
 fn scratch(tag: &str) -> PathBuf {

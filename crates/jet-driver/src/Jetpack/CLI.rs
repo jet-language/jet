@@ -10,6 +10,7 @@ use super::Discovery;
 use super::Image;
 use super::ManifestTOML;
 use super::Output::{self, Theme};
+use super::Overlay;
 use super::Provider::{self, ProviderError};
 use super::RefSpec::{self, ProviderKind};
 use super::RuntimePolicy;
@@ -18,7 +19,9 @@ use super::Services;
 use super::Shell::{self, Env, ShellKind};
 use super::Store::{self, Roots};
 use super::Trust;
-use super::{EnvFile, ModuleEval, RefSpec::RefError, WorkspaceFile, WorkspaceLock, JSON};
+use super::{
+    EnvFile, ModuleEval, RefSpec::RefError, SemanticLock, WorkspaceFile, WorkspaceLock, JSON,
+};
 use crate::{Lock, Syntax};
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
@@ -221,6 +224,7 @@ pub fn main(args: Vec<String>) -> i32 {
         "info" => cmd_info(&theme, &parsed),
         "explain" => cmd_explain(&theme, &parsed),
         "logs" => cmd_logs(&theme, &parsed),
+        "override" => cmd_override(&theme, &parsed),
         "push" => cmd_push(&theme, &parsed),
         v if v == Syntax::IMAGE_SUBCOMMAND => cmd_image(&theme, &parsed),
         v if v == Syntax::BRIDGE_SUBCOMMAND => cmd_bridge(&theme, &parsed),
@@ -2909,6 +2913,9 @@ fn cmd_explain(theme: &Theme, parsed: &Parsed) -> i32 {
         );
         return 2;
     };
+    if query.starts_with("package-overlay:") {
+        return cmd_explain_overlay(theme, query);
+    }
     let roots = Store::resolve();
     let package = query
         .split_once(':')
@@ -2939,6 +2946,156 @@ fn cmd_explain(theme: &Theme, parsed: &Parsed) -> i32 {
             2
         }
     }
+}
+
+fn cmd_explain_overlay(theme: &Theme, query: &str) -> i32 {
+    let dir = std::env::current_dir().unwrap_or_default();
+    let Some(result) = WorkspaceFile::load(&dir) else {
+        theme.error_coded(
+            "E1274",
+            &format!("no overlay policy for `{query}`"),
+            "`package-overlay:*` explanations come from reviewed `workspace.jet` overlay policy.",
+            "run `jetpack override draft <ref> --patch <file>` or add an `overlay` block to `workspace.jet`.",
+        );
+        return 2;
+    };
+    let plan = match result {
+        Ok(plan) => plan,
+        Err(d) => {
+            eprint!(
+                "{}",
+                crate::Diagnostics::render_all(
+                    Syntax::WORKSPACE_FILE,
+                    "",
+                    std::slice::from_ref(&d)
+                )
+            );
+            return 2;
+        }
+    };
+    let lock = SemanticLock::SemanticLockFile {
+        records: Overlay::semantic_records(&plan.overlay_policy, "workspace", std::env::consts::OS),
+    };
+    let Some(fact) = SemanticLock::explain(&lock, query) else {
+        theme.error_coded(
+            "E1274",
+            &format!("no overlay record for `{query}`"),
+            "`workspace.jet` has overlay policy, but not that overlay/package key.",
+            "query `package-overlay:<overlay>:<package>`.",
+        );
+        return 2;
+    };
+    println!("{}", fact.semantic_key);
+    println!("  owners: {}", fact.owners.join(", "));
+    println!("  provider: {}", empty_dash(&fact.provider));
+    println!("  platform: {}", empty_dash(&fact.platform));
+    println!("  exact: {}", empty_dash(&fact.exact_artifact));
+    println!("  policy: {}", empty_dash(&fact.policy_fingerprint));
+    println!("  update: {}", empty_dash(&fact.update_command));
+    println!("  offline: {}", fact.offline_satisfied);
+    0
+}
+
+fn cmd_override(theme: &Theme, parsed: &Parsed) -> i32 {
+    let Some(action) = parsed.positional.first().map(String::as_str) else {
+        theme.error(
+            "override needs an action",
+            "`jetpack override` only drafts reviewed source policy; it never records hidden override state.",
+            "write `jetpack override draft <ref> --patch <file>`.",
+        );
+        return 2;
+    };
+    if action != "draft" {
+        theme.error(
+            &format!("unknown override action `{action}`"),
+            "`draft` is the only supported override action.",
+            "write `jetpack override draft <ref> --patch <file>`.",
+        );
+        return 2;
+    }
+    let Some(reference) = parsed.positional.get(1) else {
+        theme.error(
+            "override draft needs a package ref",
+            "the ref names the package whose typed workspace policy should be drafted.",
+            "write `jetpack override draft nixpkgs:foo --patch patches/foo.patch`.",
+        );
+        return 2;
+    };
+    let mut overlay = "local".to_string();
+    let mut patch = None::<String>;
+    let mut provider = None::<String>;
+    let mut channel = None::<String>;
+    let mut allow_unfree = false;
+    let mut i = 2usize;
+    while i < parsed.positional.len() {
+        match parsed.positional[i].as_str() {
+            "--overlay" => {
+                i += 1;
+                overlay = parsed.positional.get(i).cloned().unwrap_or_default();
+            }
+            "--patch" => {
+                i += 1;
+                patch = parsed.positional.get(i).cloned();
+            }
+            "--provider" => {
+                i += 1;
+                provider = parsed.positional.get(i).cloned();
+            }
+            "--channel" => {
+                i += 1;
+                channel = parsed.positional.get(i).cloned();
+            }
+            "--allow-unfree" => allow_unfree = true,
+            other => {
+                theme.error(
+                    &format!("unknown override draft flag `{other}`"),
+                    "override drafts accept `--overlay`, `--provider`, `--channel`, `--patch`, and `--allow-unfree`.",
+                    "write `jetpack override draft nixpkgs:foo --patch patches/foo.patch`.",
+                );
+                return 2;
+            }
+        }
+        i += 1;
+    }
+    if overlay.trim().is_empty() {
+        theme.error(
+            "override draft needs a non-empty overlay name",
+            "`workspace.jet` stores overrides in named overlay sets.",
+            "pass `--overlay local` or another source-reviewed name.",
+        );
+        return 2;
+    }
+    let package = reference
+        .split_once(':')
+        .map(|(_, p)| p)
+        .unwrap_or(reference)
+        .to_string();
+    let workspace = std::env::current_dir().unwrap_or_default();
+    let path = workspace.join(Syntax::WORKSPACE_FILE);
+    let existing = std::fs::read_to_string(&path).ok();
+    let next = Overlay::draft_overlay_source(
+        existing.as_deref(),
+        &overlay,
+        &package,
+        patch.as_deref(),
+        provider.as_deref(),
+        channel.as_deref(),
+        allow_unfree,
+    );
+    if let Err(e) = std::fs::write(&path, next) {
+        theme.error(
+            "could not write workspace overlay policy",
+            &format!("writing `{}` failed: {e}", path.display()),
+            "check permissions and retry.",
+        );
+        return 2;
+    }
+    theme.ok(&format!("drafted overlay `{overlay}` for `{package}`"));
+    theme.detail(&format!(
+        "wrote reviewed source policy to {}",
+        path.display()
+    ));
+    0
 }
 
 fn cmd_logs(theme: &Theme, parsed: &Parsed) -> i32 {
@@ -4105,6 +4262,8 @@ fn usage() -> String {
   {bin} info <source>.<package>         show local offline package metadata
   {bin} explain <ref>                  show resolution path and latest build status
   {bin} logs <pkg> --json              show persisted per-step build logs
+  {bin} override draft <ref> --patch <file>
+                                      draft reviewed workspace overlay policy
 
 {machines}
   jet os check <host>                  validate ./config.jet system.<host>

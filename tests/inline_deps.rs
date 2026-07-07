@@ -37,7 +37,7 @@ fn write(dir: &Path, rel: &str, content: &str) {
 }
 
 fn jet_bin() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/debug/jet")
+    PathBuf::from(env!("CARGO_BIN_EXE_jet"))
 }
 
 fn have_cargo() -> bool {

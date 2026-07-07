@@ -1352,6 +1352,7 @@ pub const JETPACK_VERBS: &[&str] = &[
     "info",
     "explain",
     "logs",
+    "override",
     "push",
     TRUST_SUBCOMMAND,
     OS_SUBCOMMAND,
@@ -1708,6 +1709,8 @@ pub const CONFIG_FILE: &str = "config.jet";
 /// (D-WORKSPACE1=B). Wired by the resolver (board card c156). `NS_WORKSPACE` is
 /// declared with the other reserved namespaces near `NS_ENV`.
 pub const WORKSPACE_FILE: &str = "workspace.jet";
+/// D-JPK-OVERLAY1=A: reviewed workspace overlay blocks.
+pub const WORKSPACE_OVERLAY: &str = "overlay";
 /// D-WORKSPACE1=B: the `members:` field in a workspace module — the comptime
 /// expression that evaluates to the list of member package paths.
 pub const MODULE_FIELD_MEMBERS: &str = "members";

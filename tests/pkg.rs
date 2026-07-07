@@ -41,7 +41,7 @@ fn first_diag_code(diags: &[jet::Diagnostics::Diagnostic]) -> &str {
 }
 
 fn jet_bin() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/debug/jet")
+    PathBuf::from(env!("CARGO_BIN_EXE_jet"))
 }
 
 fn have_git() -> bool {
