@@ -112,9 +112,15 @@ fn jetgrep_cli_modes_are_pinned() {
         "warning",
         "examples/apps/jetgrep/fixtures",
     ]);
-    assert!(count.contains("examples/apps/jetgrep/fixtures/api.log:1"));
-    assert!(count.contains("examples/apps/jetgrep/fixtures/notes.txt:1"));
-    assert!(count.contains("matches=2"));
+    assert_eq!(
+        count,
+        concat!(
+            "jetgrep pattern=warning\n",
+            "examples/apps/jetgrep/fixtures/api.log:1\n",
+            "examples/apps/jetgrep/fixtures/notes.txt:1\n",
+            "matches=2\n",
+        )
+    );
 
     let files = assert_success(&[
         "run",
@@ -124,8 +130,15 @@ fn jetgrep_cli_modes_are_pinned() {
         "TODO",
         "examples/apps/jetgrep/fixtures",
     ]);
-    assert!(files.contains("examples/apps/jetgrep/fixtures/nested/deploy.log"));
-    assert!(files.contains("examples/apps/jetgrep/fixtures/notes.txt"));
+    assert_eq!(
+        files,
+        concat!(
+            "jetgrep pattern=TODO\n",
+            "examples/apps/jetgrep/fixtures/nested/deploy.log\n",
+            "examples/apps/jetgrep/fixtures/notes.txt\n",
+            "matches=2\n",
+        )
+    );
 
     let ignored = assert_success(&[
         "run",
@@ -136,8 +149,14 @@ fn jetgrep_cli_modes_are_pinned() {
         "TODO",
         "examples/apps/jetgrep/fixtures",
     ]);
-    assert!(!ignored.contains("nested/deploy.log"));
-    assert!(ignored.contains("matches=1"));
+    assert_eq!(
+        ignored,
+        concat!(
+            "jetgrep pattern=TODO\n",
+            "examples/apps/jetgrep/fixtures/notes.txt:2: TODO add benchmark corpus once owner greenlights docs/build gates\n",
+            "matches=1\n",
+        )
+    );
 }
 
 #[test]

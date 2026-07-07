@@ -111,7 +111,8 @@ fn serve(sender: Sender<String>) {
     listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind")
     addr :: listener.local_addr()
     sender.send(copy addr)
-    loop _i in [0, 1, 2, 3, 4] {
+    running := true
+    loop running {
         stream :: listener.accept() ?? panic("accept")
         raw :: stream.read() ?? panic("read")
         req :: http.parse(raw)
@@ -165,6 +166,9 @@ fn serve(sender: Sender<String>) {
                 stored = n_val.int() ?? 0
             }
             resp = http_ok(model.stats_json(stored))
+        } else if method == "GET" && path == "/shutdown" {
+            resp = http_ok("{{\"ok\":true}}")
+            running = false
         }
         net.tcp_reply(stream, resp.status(), resp.body())
     }
@@ -182,6 +186,7 @@ fn run() {
     fetched :: http.get("http://{addr}/p/p0001") ?? panic("fetch")
     missing :: http.get("http://{addr}/p/missing") ?? panic("missing")
     stats :: http.get("http://{addr}/stats") ?? panic("stats")
+    _shutdown :: http.get("http://{addr}/shutdown") ?? panic("shutdown")
     server_task.join()
 
     print("health {health.status()} {health.body()}")
