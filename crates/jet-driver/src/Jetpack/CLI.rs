@@ -47,6 +47,10 @@ struct Flags {
     /// push to. Always honestly gated (E1268): pushing needs TLS support that
     /// doesn't exist yet, so this is only ever read to report that gate.
     push: Option<String>,
+    /// D-JPK-OSGEN1=C: optional generation name for `jet os switch`.
+    os_name: Option<String>,
+    /// D-JPK-OSDISK1=C: optional manual disk/device path for `jet os init|image`.
+    os_manual: Option<String>,
     /// U20: `jetpack add <ref> --adapt` drafts an adapter declaration instead
     /// of editing `env.jet` with a plain package ref.
     adapt: bool,
@@ -81,6 +85,8 @@ fn parse_args(args: &[String]) -> Parsed {
         json: false,
         shell_on_fail: false,
         trust_scope: None,
+        os_name: None,
+        os_manual: None,
     };
     let mut positional = Vec::new();
     let mut command = None;
@@ -114,6 +120,18 @@ fn parse_args(args: &[String]) -> Parsed {
                 i += 1;
                 if let Some(r) = args.get(i) {
                     flags.push = Some(r.clone());
+                }
+            }
+            a if a == Syntax::OS_FLAG_NAME => {
+                i += 1;
+                if let Some(name) = args.get(i) {
+                    flags.os_name = Some(name.clone());
+                }
+            }
+            a if a == Syntax::OS_FLAG_MANUAL_DISK => {
+                i += 1;
+                if let Some(path) = args.get(i) {
+                    flags.os_manual = Some(path.clone());
                 }
             }
             "--fixtures" => {
@@ -3517,12 +3535,14 @@ fn cmd_bridge(theme: &Theme, parsed: &Parsed) -> i32 {
 /// the first positional (`switch`/`build`); the target is the second.
 fn cmd_os(theme: &Theme, parsed: &Parsed) -> i32 {
     let verb = parsed.positional.first().map(String::as_str);
-    let target = parsed.positional.get(1).map(String::as_str);
+    let args = parsed.positional.get(1..).unwrap_or(&[]);
     let flags = super::JetOS::OsFlags {
         fixtures: parsed.flags.fixtures.clone(),
         offline: parsed.flags.offline,
+        name: parsed.flags.os_name.clone(),
+        manual_disk: parsed.flags.os_manual.clone(),
     };
-    super::JetOS::main(theme, verb, target, &flags)
+    super::JetOS::main(theme, verb, args, &flags)
 }
 
 fn usage() -> String {
@@ -3570,8 +3590,14 @@ fn usage() -> String {
   {bin} logs <pkg> --json              show persisted per-step build logs
 
 {machines}
-  {bin} os switch [<config>]@<host>    build + activate a machine from a config.jet
-  {bin} os build  [<config>]@<host>    build a machine generation, don't activate
+  jet os check <host>                  validate ./config.jet system.<host>
+  jet os build <host>                  build a named jetos generation
+  jet os switch <host> [--name <name>] build + activate a named generation
+  jet os generations [<host>]          list generations newest first
+  jet os rollback <host> [<name>]      activate a previous generation
+  jet os init <host> [--manual <path>] write starter ./config.jet
+  jet os lift <host> [<root>]          draft ./config.jet from a host root
+  jet os image <host> [--manual <path>] write a jetos installer proof image
   {bin} push <fleet>                   validate a fleet's hosts (deploy is gated)
   {bin} services up   [<name>]         start dev services declared under env.*
   {bin} services down [<name>]         stop them
@@ -3610,6 +3636,8 @@ fn usage() -> String {
   --flake                              (enter) force the foreign flake.nix/devenv.nix fallback
   --pure                               (enter) isolate the shell from the host environment
   --push <ref>                         (image) push after building — gated on TLS, E1268
+  --name <name>                        (os switch) override generation name
+  --manual <path>                      (os init/image) record manual disk path
 ",
         title = h(&format!("{bin} — Jet's package manager (Phase 1)")),
         envs = h("environments:"),

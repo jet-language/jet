@@ -570,10 +570,11 @@ access E0605/E0609.
 **U3 — Module declarations**: `module name { … }` is the single outermost
 construct; multiple per file; leading `_` disables a module. Modules never
 import each other — they contribute to the merged whole. Reserved
-namespaces currently live for Jetpack: `env` (`Env`), OCI `image` (`Image`),
-`workspace`. **D-JPK-MODBODY1**: role namespaces live in the declaration
+namespaces currently live for Jetpack/jetos: `env` (`Env`), `system`
+(`System`), OCI/jetos `image` (`Image`), `workspace`. **D-JPK-MODBODY1**:
+role namespaces live in the declaration
 name — `module env.dev { packages: […] }`, `module image.server { … }`.
-`system.*` is frozen jetos research under D-JETOS-FREEZE1.
+`system.*` is the jetos host declaration surface.
 
 **U8 — Manifest fields nest in the module body**: a module's `sources:`
 (`name: provider@target` entries, merged by key) and `imports:` are fields
@@ -1741,17 +1742,28 @@ OCI layout (`oci-layout`/`index.json`/`blobs/sha256/<digest>`) with an
 uncompressed tar layer. `--push` is honestly gated on TLS (E1268), never a fake
 push.
 
-### jetos Research Appendix (Frozen)
+### jetos Runtime Slice
 
-**D-JETOS-FREEZE1 (=A, ratified 2026-07-06)**: jetos-only spellings are
-research notes, not current syntax law. Frozen sketches include `System`
-fields, whole-machine `Service` records, `options:` merge priority forms,
-`.Iso`/`.Qcow`/`.Raw` images from `system.<name>`, `jetpack os
-switch|build`, `[<config-path>]@<host>`, `user.<name>.*`, and any implication
-that OS generations/activation build today. Epoch 7 must reopen these with
-fresh ballots before implementation. Product name remains **jetos**
-(D-JPK-OSNAME1), and engine verbs still cross a separate executable process
-seam when that tier exists (D-JPK-DISPATCH1).
+**D-JPK-OSVERB1=A**: the public CLI is `jet os
+check|init|build|switch|rollback|generations|lift|image`. `jetpack` remains the
+engine process behind the dispatch seam; users type `jet os`, not `jetpack os`.
+
+**D-JPK-OSHOST1=C**: a bare host name discovers `system.<host>` in `./config.jet`;
+`path@host` selects an exact external root (directory roots load
+`path/config.jet`; file roots load that file).
+
+**D-JPK-OSGEN1=C**: every build gets an automatic generation name; `jet os
+switch --name <name>` overrides it. `jet os generations` lists newest first.
+
+**D-JPK-OSNS1=B**: jetos option keys use full-word namespaces:
+`filesystem.*`, `network.*`, and `packages.*`.
+
+**D-JPK-OSINIT1=A / D-JPK-OSSECRET1=A / D-JPK-OSBRAND1=A / D-JPK-OSDISK1=C /
+D-JPK-OSDISABLE1=C**: the active runtime slice generates systemd unit files in
+generations, records repo-ciphertext plus host-key tmpfs-only secret activation
+proof, brands installer artifacts as `jetos`, defaults guided disk setup to
+ext4 with a manual path override, and keeps discovery aligned with the existing
+module/import skip rules.
 
 ### CLI & tooling
 
@@ -1770,9 +1782,11 @@ swap in place, layout changes trigger a clean announced restart.
 Jet→Rust line table is a sidecar `<file>.jetmap` JSON (versioned, std-only).
 
 **D-SEMINDEX1**: versioned semantic-index query API (symbols/refs/types/
-call-graph/effects; `jet semindex --json`) — foundation for dossier views,
-breadcrumb hints, impact analysis, and codemods (D-DOSSIER1/D-BREADCRUMB1/
-D-IMPACT1/D-CODEMOD1, all gated on it). **D-DX5**: PATH `jet-*` plugin
+call-graph/effects/member facts; `jet semindex --json`, schema v3) —
+foundation for dossier views, breadcrumb hints, impact analysis, and codemods
+(D-DOSSIER1/D-BREADCRUMB1/D-IMPACT1/D-CODEMOD1). `jet dossier <file> [Symbol]`
+is the D-WD2 umbrella over those facts; `jet codemod` starts with named JSON
+rename objects (`dry-run`/`apply`/`undo`) and replay logs. **D-DX5**: PATH `jet-*` plugin
 discovery. **D-REF3**: borrowed-return + cleanup-scope inlay hints on by
 default. **D-JPK-DISCOVER1**: `jet search`/`jet info` + LSP completions from
 a local offline index. **D-JPK-BUILDDBG1**: failed builds keep the scratch

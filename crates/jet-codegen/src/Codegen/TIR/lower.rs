@@ -1517,6 +1517,22 @@ fn tracked_float_origin(b: &crate::AST::Binding, ty: &Type, cx: &Cx) -> Option<S
     ))
 }
 
+fn static_call_type_name_lower(receiver: &Expr, env: &LowerEnv) -> Option<String> {
+    let name = static_call_type_name_unchecked(receiver)?;
+    match receiver {
+        Expr::Ident(n, _) if env.locals.contains_key(n) => None,
+        Expr::Field(base, _, _) => {
+            if let Expr::Ident(prefix, _) = base.as_ref() {
+                if env.locals.contains_key(prefix) {
+                    return None;
+                }
+            }
+            Some(name)
+        }
+        _ => Some(name),
+    }
+}
+
 /// Pull the bare label name out of an `@name` loop label, dropping the span. The
 /// emitter renders it as `'jet_<name>:` (mirroring `loop_label_prefix`).
 pub(crate) fn label_name(label: &Option<(String, Span)>) -> Option<String> {
@@ -6245,9 +6261,7 @@ pub(crate) fn lower_method_call(
     // (`static_method_call_in_subset`) proved the receiver is a covered type-name
     // ident and `method` is a registered static method. Mirror the AST path
     // (Expression.rs ~L1644): `user_<Type>::user_<method>(args)`.
-    if recv_type.is_none() {
-        let type_name = static_call_type_name_unchecked(receiver)
-            .expect("gate proved static receiver is a type-name ident");
+    if let Some(type_name) = static_call_type_name_lower(receiver, env) {
         // D-PATHFS1: `Path.from(str)` → `jet_path_from(&(str_arg))`.
         // The string arg becomes the "receiver" slot of the PathFrom HandleMethod;
         // `Path` itself (a type-name ident) has no value.

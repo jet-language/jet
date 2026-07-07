@@ -74,7 +74,7 @@ pub struct SystemPlan {
     pub packages: Vec<Merge::Pkg>,
     /// U12: the enabled/typed services, in source order.
     pub services: Vec<ServicePlan>,
-    /// U13: the ordered option entries (`net.hostName: laptop`), in source order.
+    /// U13: the ordered option entries (`network.hostName: laptop`), in source order.
     pub options: Vec<OptionPlan>,
 }
 

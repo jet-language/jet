@@ -432,9 +432,9 @@ module halcyon {
             openssh: { enable: true, ports: [22] },
         },
         options: [
-            net.hostName: halcyon,
-            time.timeZone: "Europe/London",
-            users.nate.shell: default.fish,
+            network.hostName: halcyon,
+            filesystem.timeZone: "Europe/London",
+            packages.shell: default.fish,
         ],
     }
 }
@@ -467,15 +467,15 @@ module installer {
             sys.options,
             vec![
                 OptionPlan {
-                    key: "net.hostName".into(),
+                    key: "network.hostName".into(),
                     value: "halcyon".into()
                 },
                 OptionPlan {
-                    key: "time.timeZone".into(),
+                    key: "filesystem.timeZone".into(),
                     value: "\"Europe/London\"".into()
                 },
                 OptionPlan {
-                    key: "users.nate.shell".into(),
+                    key: "packages.shell".into(),
                     value: "default.fish".into()
                 },
             ]

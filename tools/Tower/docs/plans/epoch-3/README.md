@@ -48,6 +48,13 @@ and JIT/debugger successors outside Epoch 3.
 | [`typed-data-core.md`](typed-data-core.md) | D-WD9 | typed data Core plus accelerator bridges |
 | [`core-game-substrate.md`](core-game-substrate.md) | D-WD10 | stable `core.game` substrate |
 | [`typed-target-profiles.md`](typed-target-profiles.md) | D-WD11 | typed embedded and freestanding target profiles |
+| [`progressive-proof-replay.md`](progressive-proof-replay.md) | D-WD12 | `jet prove` and replay as a progressive correctness product |
+| [`performance-budget-profiles.md`](performance-budget-profiles.md) | D-WD14 | typed performance budgets for build, bench, dev, dossier, and CI |
+| [`embedded-docs-and-maturity-tags.md`](embedded-docs-and-maturity-tags.md) | D-WD11, D-MATURITY1 | embedded reference docs plus API maturity tag docs |
+| [`docs-generator.md`](docs-generator.md) | S49, D-TEST4, D-MATURITY1 | Jet API docs generator research and command ballot |
+| [`jit-bytecode-vm.md`](jit-bytecode-vm.md) | D-JIT1, D-JIT2 | Jet-owned bytecode VM successor to Cranelift tier-1 |
+| [`native-jit.md`](native-jit.md) | D-JIT1, D-JIT2 | Jet-owned native JIT research after bytecode VM parity |
+| [`bootstrap-readiness-gate.md`](bootstrap-readiness-gate.md) | self-hosting gate | dogfood portfolio and memory-model proof before compiler port |
 | [`adaptive-runtime.md`](adaptive-runtime.md) | D-ADAPTFID1 | adaptive runtime policy research |
 | [`logic-programming-subset.md`](logic-programming-subset.md) | research | explicit solver and logic subset research |
 | [`structural-merge.md`](structural-merge.md) | research | semantic-identity merge planning |

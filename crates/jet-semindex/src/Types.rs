@@ -4,7 +4,7 @@ use jet_foundation::Diagnostics::Span;
 
 /// Schema version for JSON snapshots and API consumers. Bump when the exported
 /// fact shape changes incompatibly.
-pub const SCHEMA_VERSION: u32 = 2;
+pub const SCHEMA_VERSION: u32 = 3;
 
 /// Byte span in a source file (same coordinates as diagnostics).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -55,6 +55,42 @@ pub enum SymbolKind {
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MemberKind {
+    Field,
+    Variant,
+    Method,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MemberOrigin {
+    TypeBody,
+    InherentImpl,
+    TraitImpl { trait_name: String },
+    TraitRequirement { trait_name: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MemberFact {
+    pub owner: String,
+    pub name: String,
+    pub identity: String,
+    pub kind: MemberKind,
+    pub origin: MemberOrigin,
+    pub signature: String,
+    pub module_path: String,
+    pub span: SourceSpan,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TypeDossier {
+    pub schema_version: u32,
+    pub target: String,
+    pub definition: Option<SymbolDef>,
+    pub members: Vec<MemberFact>,
+    pub references: Vec<SymbolRef>,
+}
+
 /// One named definition in the program.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SymbolDef {
@@ -101,6 +137,7 @@ pub struct SemIndex {
     refs: Vec<SymbolRef>,
     calls: Vec<CallEdge>,
     effects: Vec<EffectFact>,
+    members: Vec<MemberFact>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -116,6 +153,7 @@ impl SemIndex {
         refs: Vec<SymbolRef>,
         calls: Vec<CallEdge>,
         effects: Vec<EffectFact>,
+        members: Vec<MemberFact>,
     ) -> Self {
         SemIndex {
             schema_version: SCHEMA_VERSION,
@@ -123,6 +161,7 @@ impl SemIndex {
             refs,
             calls,
             effects,
+            members,
         }
     }
 
@@ -154,6 +193,14 @@ impl SemIndex {
         &self.effects
     }
 
+    pub fn members(&self) -> &[MemberFact] {
+        &self.members
+    }
+
+    pub fn members_of(&self, owner: &str) -> Vec<&MemberFact> {
+        self.members.iter().filter(|m| m.owner == owner).collect()
+    }
+
     pub fn effect_of(&self, function: &str) -> Option<&EffectFact> {
         self.effects.iter().find(|e| e.function == function)
     }
@@ -164,6 +211,44 @@ impl SemIndex {
 
     pub fn lookup_identity(&self, identity: &str) -> Option<&SymbolDef> {
         self.defs.iter().find(|d| d.identity == identity)
+    }
+
+    pub fn dossier(&self, target: &str) -> TypeDossier {
+        let definition = self
+            .definitions()
+            .iter()
+            .find(|d| d.name == target || d.identity == target)
+            .cloned();
+        let owner = definition
+            .as_ref()
+            .map(|d| d.name.as_str())
+            .unwrap_or(target);
+        let mut members: Vec<MemberFact> = self
+            .members
+            .iter()
+            .filter(|m| m.owner == owner)
+            .cloned()
+            .collect();
+        sort_members(&mut members);
+        let mut references: Vec<SymbolRef> = self
+            .refs
+            .iter()
+            .filter(|r| r.name == owner)
+            .cloned()
+            .collect();
+        references.sort_by(|a, b| {
+            a.module_path
+                .cmp(&b.module_path)
+                .then(a.span.start.cmp(&b.span.start))
+                .then(a.span.end.cmp(&b.span.end))
+        });
+        TypeDossier {
+            schema_version: SCHEMA_VERSION,
+            target: owner.to_string(),
+            definition,
+            members,
+            references,
+        }
     }
 
     pub fn structural_audit(&self, next: &SemIndex) -> StructuralAudit {
@@ -192,6 +277,34 @@ impl SemIndex {
             removed,
             changed,
         }
+    }
+}
+
+fn sort_members(members: &mut [MemberFact]) {
+    members.sort_by(|a, b| {
+        member_rank(&a.kind)
+            .cmp(&member_rank(&b.kind))
+            .then(origin_rank(&a.origin).cmp(&origin_rank(&b.origin)))
+            .then(a.name.cmp(&b.name))
+            .then(a.module_path.cmp(&b.module_path))
+            .then(a.span.start.cmp(&b.span.start))
+    });
+}
+
+fn member_rank(kind: &MemberKind) -> u8 {
+    match kind {
+        MemberKind::Field => 0,
+        MemberKind::Variant => 1,
+        MemberKind::Method => 2,
+    }
+}
+
+fn origin_rank(origin: &MemberOrigin) -> u8 {
+    match origin {
+        MemberOrigin::TypeBody => 0,
+        MemberOrigin::InherentImpl => 1,
+        MemberOrigin::TraitImpl { .. } => 2,
+        MemberOrigin::TraitRequirement { .. } => 3,
     }
 }
 

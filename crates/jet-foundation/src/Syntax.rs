@@ -1694,16 +1694,30 @@ pub const WORKSPACE_FILE: &str = "workspace.jet";
 /// expression that evaluates to the list of member package paths.
 pub const MODULE_FIELD_MEMBERS: &str = "members";
 
-/// D-JETOS-FREEZE1: the jetos tier is the `jetpack os <verb>`
-/// subcommand group — not a separate `jetos` binary, not under `jet`.
+/// D-JPK-OSVERB1=A (ratified 2026-07-06): the public jetos CLI surface is
+/// `jet os <verb>`. The engine still executes in the `jetpack` process via
+/// D-JPK-DISPATCH1, but users type `jet os`, not `jetpack os`.
 pub const OS_SUBCOMMAND: &str = "os";
 
-/// D-JETOS-FREEZE1: the jetos verbs, mirroring `nixos-rebuild` —
-/// `switch` (build + activate + set boot default) and `build` (build only).
-/// `boot`/`test` may be added later under the same protocol.
+/// D-JPK-OSVERB1=A: public jetos verbs.
+pub const OS_VERB_CHECK: &str = "check";
+pub const OS_VERB_INIT: &str = "init";
 pub const OS_VERB_SWITCH: &str = "switch";
 pub const OS_VERB_BUILD: &str = "build";
-pub const OS_VERBS: &[&str] = &[OS_VERB_SWITCH, OS_VERB_BUILD];
+pub const OS_VERB_ROLLBACK: &str = "rollback";
+pub const OS_VERB_GENERATIONS: &str = "generations";
+pub const OS_VERB_LIFT: &str = "lift";
+pub const OS_VERB_IMAGE: &str = "image";
+pub const OS_VERBS: &[&str] = &[
+    OS_VERB_CHECK,
+    OS_VERB_INIT,
+    OS_VERB_BUILD,
+    OS_VERB_SWITCH,
+    OS_VERB_ROLLBACK,
+    OS_VERB_GENERATIONS,
+    OS_VERB_LIFT,
+    OS_VERB_IMAGE,
+];
 
 /// c146 (D-PKGSIGN1, ratified): package-signing CLI verbs (I7). `jet keygen`
 /// creates the Ed25519 author key; `jet key backup` copies the secret key out
@@ -1714,13 +1728,28 @@ pub const KEY_VERB_BACKUP: &str = "backup";
 pub const KEY_VERBS: &[&str] = &[KEY_VERB_BACKUP];
 pub const PUBLISH_FLAG_NO_SIGN: &str = "--no-sign";
 
-/// D-JETOS-FREEZE1: the `@host` selector in a `jetpack os` target
-/// `[<config-path>]@<host>`. Reuses jet's `@` source-selector convention.
+/// D-JPK-OSHOST1=C: a bare host discovers `system.<host>` in the current repo;
+/// `path@host` selects an exact external repo/config root.
 pub const OS_HOST_SELECTOR: &str = "@";
 
-/// D-JETOS-FREEZE1: the default config location when no explicit path
-/// prefix is given — `~/.jet/config.jet`.
+/// D-JPK-OSHOST1=C: current-repo/external-root config filename.
 pub const CONFIG_DEFAULT_DIR: &str = ".jet";
+
+/// D-JPK-OSGEN1=C: switch may override the generated generation name.
+pub const OS_FLAG_NAME: &str = "--name";
+
+/// D-JPK-OSDISK1=C: installer/init accepts a manual disk path override.
+pub const OS_FLAG_MANUAL_DISK: &str = "--manual";
+
+/// D-JPK-OSNS1=B: full-word option namespaces.
+pub const OS_OPTION_NS_FILESYSTEM: &str = "filesystem";
+pub const OS_OPTION_NS_NETWORK: &str = "network";
+pub const OS_OPTION_NS_PACKAGES: &str = "packages";
+pub const OS_OPTION_NAMESPACES: &[&str] = &[
+    OS_OPTION_NS_FILESYSTEM,
+    OS_OPTION_NS_NETWORK,
+    OS_OPTION_NS_PACKAGES,
+];
 
 /// U4 (ratified 2026-06-16): import-tree discovery builtin — `find("./modules")`
 /// auto-discovers and merges every `.jet` module in the tree.

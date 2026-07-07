@@ -944,7 +944,7 @@ impl<'a> Parser<'a> {
         let mut out = Vec::new();
         while !matches!(self.peek().kind, TokKind::RBracket | TokKind::Eof) {
             let (mut key, key_start) =
-                self.expect_ident("for an option key, e.g. `net.hostName`")?;
+                self.expect_ident("for an option key, e.g. `network.hostName`")?;
             let mut key_end = key_start.end;
             while matches!(self.peek().kind, TokKind::Dot) {
                 self.bump();

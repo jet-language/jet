@@ -7,7 +7,7 @@ use jet_foundation::AST::{self, Item, LoadedModule, ProgramBundle};
 use jet_sema::{effect_key, SemIndexEffectFacts};
 
 use crate::Json::{convert_defs, convert_effects, convert_refs};
-use crate::Types::{CallEdge, SemIndex};
+use crate::Types::{CallEdge, MemberFact, MemberKind, MemberOrigin, SemIndex};
 
 /// The semantic kind of a defined symbol (LSP-facing; uses AST types internally).
 #[derive(Debug, Clone)]
@@ -84,6 +84,7 @@ pub struct SymbolDB {
     pub defs: Vec<SymDef>,
     pub refs: Vec<SymRef>,
     pub calls: Vec<CallEdge>,
+    pub members: Vec<MemberFact>,
     pub hover: Vec<HoverEntry>,
     pub inlay: Vec<InlayHint>,
 }
@@ -103,10 +104,11 @@ struct WalkCtx<'a> {
 impl SymbolDB {
     pub fn new() -> Self {
         SymbolDB {
-            index: SemIndex::new(Vec::new(), Vec::new(), Vec::new(), Vec::new()),
+            index: SemIndex::new(Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new()),
             defs: Vec::new(),
             refs: Vec::new(),
             calls: Vec::new(),
+            members: Vec::new(),
             hover: Vec::new(),
             inlay: Vec::new(),
         }
@@ -116,7 +118,13 @@ impl SymbolDB {
         let defs = convert_defs(&self.defs);
         let refs = convert_refs(&self.refs);
         let effects = convert_effects(facts);
-        self.index = SemIndex::new(defs, refs, self.calls.clone(), effects);
+        self.index = SemIndex::new(
+            defs,
+            refs,
+            self.calls.clone(),
+            effects,
+            self.members.clone(),
+        );
     }
 
     /// Find the definition whose def_span contains `offset` in module at `path`.
@@ -186,6 +194,55 @@ fn local_identity(scope: &str, kind: &str, name: &str) -> String {
     format!("{kind}:{scope}::{name}")
 }
 
+fn fn_signature(name: &str, params: &[(String, AST::Type)], ret: &Option<AST::Type>) -> String {
+    let params = params
+        .iter()
+        .map(|(n, t)| format!("{n}: {}", t.name()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    match ret {
+        Some(t) => format!("fn {name}({params}) -> {}", t.name()),
+        None => format!("fn {name}({params})"),
+    }
+}
+
+fn method_params(f: &AST::Func) -> Vec<(String, AST::Type)> {
+    f.params
+        .iter()
+        .filter(|p| p.name != Syntax::KW_SELF)
+        .map(|p| (p.name.clone(), p.ty.clone()))
+        .collect()
+}
+
+fn method_fact(
+    scope: &str,
+    owner: &str,
+    f: &AST::Func,
+    origin: MemberOrigin,
+    mp: &str,
+) -> MemberFact {
+    let params = method_params(f);
+    MemberFact {
+        owner: owner.to_string(),
+        name: f.name.clone(),
+        identity: callable_identity(scope, Some(owner), &f.name, f),
+        kind: MemberKind::Method,
+        origin,
+        signature: fn_signature(&f.name, &params, &f.return_type),
+        module_path: mp.to_string(),
+        span: f.name_span.into(),
+    }
+}
+
+fn origin_label(origin: &MemberOrigin) -> String {
+    match origin {
+        MemberOrigin::TypeBody => "type".to_string(),
+        MemberOrigin::InherentImpl => "impl".to_string(),
+        MemberOrigin::TraitImpl { trait_name } => format!("impl {trait_name}"),
+        MemberOrigin::TraitRequirement { trait_name } => format!("trait {trait_name}"),
+    }
+}
+
 fn scoped_local_identity(ctx: &WalkCtx<'_>, kind: &str, name: &str) -> String {
     local_identity(active_scope(ctx), kind, name)
 }
@@ -233,8 +290,58 @@ pub fn build_symbol_db(bundle: &ProgramBundle, facts: &SemIndexEffectFacts) -> S
             collect_item(item, &mp, module, &mut ctx);
         }
     }
+    add_breadcrumb_hints(&mut db);
     db.finalize_index(facts);
     db
+}
+
+fn add_breadcrumb_hints(db: &mut SymbolDB) {
+    let type_defs: Vec<SymDef> = db
+        .defs
+        .iter()
+        .filter(|d| matches!(d.kind, SymKind::Struct { .. } | SymKind::Enum { .. }))
+        .cloned()
+        .collect();
+    for def in type_defs {
+        let mut remote: Vec<MemberFact> = db
+            .members
+            .iter()
+            .filter(|m| {
+                m.owner == def.name
+                    && m.kind == MemberKind::Method
+                    && matches!(
+                        m.origin,
+                        MemberOrigin::InherentImpl | MemberOrigin::TraitImpl { .. }
+                    )
+            })
+            .cloned()
+            .collect();
+        remote.sort_by(|a, b| {
+            origin_label(&a.origin)
+                .cmp(&origin_label(&b.origin))
+                .then(a.name.cmp(&b.name))
+                .then(a.module_path.cmp(&b.module_path))
+                .then(a.span.start.cmp(&b.span.start))
+        });
+        if remote.is_empty() {
+            continue;
+        }
+        let label = remote
+            .iter()
+            .map(|m| {
+                format!(
+                    "+ {} [{}:{}..{}]",
+                    m.signature, m.module_path, m.span.start, m.span.end
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(" | ");
+        db.inlay.push(InlayHint {
+            span: def.def_span,
+            module_path: def.module_path,
+            label,
+        });
+    }
 }
 
 /// Public query surface over the same facts (no LSP hover/inlay extras).
@@ -246,12 +353,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
     match item {
         Item::Func(f) => {
             let fn_identity = callable_identity(&ctx.scope_identity, None, &f.name, f);
-            let params: Vec<(String, AST::Type)> = f
-                .params
-                .iter()
-                .filter(|p| p.name != Syntax::KW_SELF)
-                .map(|p| (p.name.clone(), p.ty.clone()))
-                .collect();
+            let params: Vec<(String, AST::Type)> = method_params(f);
             let sym = SymDef {
                 identity: fn_identity.clone(),
                 name: f.name.clone(),
@@ -330,6 +432,16 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                         parent: s.name.clone(),
                     },
                 });
+                ctx.db.members.push(MemberFact {
+                    owner: s.name.clone(),
+                    name: f.name.clone(),
+                    identity: member_identity(&ctx.scope_identity, &s.name, "field", &f.name),
+                    kind: MemberKind::Field,
+                    origin: MemberOrigin::TypeBody,
+                    signature: format!("{}: {}", f.name, f.ty.name()),
+                    module_path: mp.to_string(),
+                    span: f.name_span.into(),
+                });
                 ctx.db.hover.push(HoverEntry {
                     span: f.name_span,
                     module_path: mp.to_string(),
@@ -340,6 +452,13 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                 let method_identity =
                     callable_identity(&ctx.scope_identity, Some(&s.name), &meth.name, meth);
                 let hover_text = hover_for_fn(meth);
+                ctx.db.members.push(method_fact(
+                    &ctx.scope_identity,
+                    &s.name,
+                    meth,
+                    MemberOrigin::TypeBody,
+                    mp,
+                ));
                 ctx.db.defs.push(SymDef {
                     identity: method_identity.clone(),
                     name: meth.name.clone(),
@@ -388,6 +507,25 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                 for meth in &tb.methods {
                     let method_identity =
                         callable_identity(&ctx.scope_identity, Some(&s.name), &meth.name, meth);
+                    ctx.db.members.push(method_fact(
+                        &ctx.scope_identity,
+                        &s.name,
+                        meth,
+                        MemberOrigin::TraitImpl {
+                            trait_name: tb.trait_name.clone(),
+                        },
+                        mp,
+                    ));
+                    ctx.db.defs.push(SymDef {
+                        identity: method_identity.clone(),
+                        name: meth.name.clone(),
+                        def_span: meth.name_span,
+                        module_path: mp.to_string(),
+                        kind: SymKind::Function {
+                            params: method_params(meth),
+                            ret: meth.return_type.clone(),
+                        },
+                    });
                     with_caller(
                         ctx,
                         CallerFrame {
@@ -417,14 +555,25 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                 text: format!("enum `{}` — variants: {}", e.name, variants.join(", ")),
             });
             for v in &e.variants {
+                let identity = member_identity(&ctx.scope_identity, &e.name, "variant", &v.name);
                 ctx.db.defs.push(SymDef {
-                    identity: member_identity(&ctx.scope_identity, &e.name, "variant", &v.name),
+                    identity: identity.clone(),
                     name: v.name.clone(),
                     def_span: v.name_span,
                     module_path: mp.to_string(),
                     kind: SymKind::EnumVariant {
                         parent: e.name.clone(),
                     },
+                });
+                ctx.db.members.push(MemberFact {
+                    owner: e.name.clone(),
+                    name: v.name.clone(),
+                    identity,
+                    kind: MemberKind::Variant,
+                    origin: MemberOrigin::TypeBody,
+                    signature: v.name.clone(),
+                    module_path: mp.to_string(),
+                    span: v.name_span.into(),
                 });
                 ctx.db.hover.push(HoverEntry {
                     span: v.name_span,
@@ -435,6 +584,13 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
             for meth in &e.methods {
                 let method_identity =
                     callable_identity(&ctx.scope_identity, Some(&e.name), &meth.name, meth);
+                ctx.db.members.push(method_fact(
+                    &ctx.scope_identity,
+                    &e.name,
+                    meth,
+                    MemberOrigin::TypeBody,
+                    mp,
+                ));
                 ctx.db.defs.push(SymDef {
                     identity: method_identity.clone(),
                     name: meth.name.clone(),
@@ -464,6 +620,25 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                 for meth in &tb.methods {
                     let method_identity =
                         callable_identity(&ctx.scope_identity, Some(&e.name), &meth.name, meth);
+                    ctx.db.members.push(method_fact(
+                        &ctx.scope_identity,
+                        &e.name,
+                        meth,
+                        MemberOrigin::TraitImpl {
+                            trait_name: tb.trait_name.clone(),
+                        },
+                        mp,
+                    ));
+                    ctx.db.defs.push(SymDef {
+                        identity: method_identity.clone(),
+                        name: meth.name.clone(),
+                        def_span: meth.name_span,
+                        module_path: mp.to_string(),
+                        kind: SymKind::Function {
+                            params: method_params(meth),
+                            ret: meth.return_type.clone(),
+                        },
+                    });
                     with_caller(
                         ctx,
                         CallerFrame {
@@ -490,20 +665,33 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                 text: format!("trait `{}`", t.name),
             });
             for sig in &t.methods {
+                let params: Vec<(String, AST::Type)> = sig
+                    .params
+                    .iter()
+                    .filter(|p| p.name != Syntax::KW_SELF)
+                    .map(|p| (p.name.clone(), p.ty.clone()))
+                    .collect();
                 ctx.db.defs.push(SymDef {
                     identity: trait_method_identity(&ctx.scope_identity, &t.name, sig),
                     name: sig.name.clone(),
                     def_span: sig.name_span,
                     module_path: mp.to_string(),
                     kind: SymKind::Function {
-                        params: sig
-                            .params
-                            .iter()
-                            .filter(|p| p.name != Syntax::KW_SELF)
-                            .map(|p| (p.name.clone(), p.ty.clone()))
-                            .collect(),
+                        params: params.clone(),
                         ret: sig.return_type.clone(),
                     },
+                });
+                ctx.db.members.push(MemberFact {
+                    owner: t.name.clone(),
+                    name: sig.name.clone(),
+                    identity: trait_method_identity(&ctx.scope_identity, &t.name, sig),
+                    kind: MemberKind::Method,
+                    origin: MemberOrigin::TraitRequirement {
+                        trait_name: t.name.clone(),
+                    },
+                    signature: fn_signature(&sig.name, &params, &sig.return_type),
+                    module_path: mp.to_string(),
+                    span: sig.name_span.into(),
                 });
             }
         }
@@ -525,6 +713,19 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
             for meth in &i.methods {
                 let method_identity =
                     callable_identity(&ctx.scope_identity, Some(&i.type_name), &meth.name, meth);
+                let origin = match &i.trait_name {
+                    Some(trait_name) => MemberOrigin::TraitImpl {
+                        trait_name: trait_name.clone(),
+                    },
+                    None => MemberOrigin::InherentImpl,
+                };
+                ctx.db.members.push(method_fact(
+                    &ctx.scope_identity,
+                    &i.type_name,
+                    meth,
+                    origin,
+                    mp,
+                ));
                 ctx.db.defs.push(SymDef {
                     identity: method_identity.clone(),
                     name: meth.name.clone(),

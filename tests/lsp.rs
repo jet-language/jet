@@ -2147,6 +2147,50 @@ fn lsp_inlay_hints_returns_type_labels() {
 }
 
 #[test]
+fn lsp_inlay_hints_include_scattered_method_breadcrumbs() {
+    let jet = jet_bin();
+    if !jet.exists() {
+        return;
+    }
+    let source = "trait DrawThing {\n    fn render(self) -> String\n}\n\nstruct Widget {\n    title: String\n}\n\nimpl Widget {\n    fn size(self) -> Int {\n        return 1\n    }\n}\n\nimpl Widget.DrawThing {\n    fn render(self) -> String {\n        return self.title\n    }\n}\n\nfn run() {\n    w :: Widget.{title: \"ok\"}\n    print(w.render())\n}\n";
+    let uri = "file:///tmp/lsp_breadcrumb_hint_test.jet";
+
+    run_transcript(
+        source,
+        &[
+            TranscriptStep::Send {
+                msg:
+                    r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#
+                        .to_string(),
+                expect_contains: Some(vec!["inlayHintProvider".to_string()]),
+            },
+            TranscriptStep::Send {
+                msg: r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#.to_string(),
+                expect_contains: None,
+            },
+            TranscriptStep::Open {
+                uri: uri.to_string(),
+                expect_notification: true,
+            },
+            TranscriptStep::Send {
+                msg: format!(
+                    r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/inlayHint","params":{{"textDocument":{{"uri":"{}"}},"range":{{"start":{{"line":0,"character":0}},"end":{{"line":30,"character":0}}}}}}}}"#,
+                    uri
+                ),
+                expect_contains: Some(vec![
+                    "+ fn size() -> Int".to_string(),
+                    "+ fn render() -> String".to_string(),
+                ]),
+            },
+            TranscriptStep::Send {
+                msg: r#"{"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}}"#.to_string(),
+                expect_contains: Some(vec!["result".to_string()]),
+            },
+        ],
+    );
+}
+
+#[test]
 fn lsp_references_finds_all_uses() {
     let jet = jet_bin();
     if !jet.exists() {

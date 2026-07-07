@@ -20,7 +20,7 @@ fn temp_fixture(name: &str, src: &str) -> PathBuf {
 
 #[test]
 fn semindex_schema_version() {
-    assert_eq!(SCHEMA_VERSION, 2);
+    assert_eq!(SCHEMA_VERSION, 3);
 }
 
 #[test]
@@ -28,10 +28,11 @@ fn semindex_hello_json_shape() {
     let idx = open(&fixture("basics/hello.jet")).expect("hello indexes");
     let json = idx.to_json();
     assert!(json.starts_with('{'));
-    assert!(json.contains("\"schema_version\":2"));
+    assert!(json.contains("\"schema_version\":3"));
     assert!(json.contains("\"definitions\""));
     assert!(json.contains("\"identity\""));
     assert!(json.contains("\"scope_identity\""));
+    assert!(json.contains("\"members\""));
     assert!(json.contains("\"run\""));
 }
 
@@ -231,6 +232,62 @@ fn semindex_references() {
 }
 
 #[test]
+fn semindex_dossier_stitches_scattered_members() {
+    let src = r#"
+trait DrawThing {
+    fn render(self) -> String
+}
+
+struct Widget {
+    title: String
+
+    fn label(self) -> String {
+        return self.title
+    }
+}
+
+impl Widget {
+    fn size(self) -> Int {
+        return 1
+    }
+}
+
+impl Widget.DrawThing {
+    fn render(self) -> String {
+        return self.label()
+    }
+}
+
+fn run() {
+    w :: Widget.{title: "ok"}
+    print(w.render())
+}
+"#;
+    let path = temp_fixture("dossier_scattered.jet", src);
+    let idx = open(&path).expect("dossier fixture indexes");
+    let dossier = idx.dossier("Widget");
+    let signatures: Vec<String> = dossier
+        .members
+        .iter()
+        .map(|m| format!("{}:{}", m.name, m.signature))
+        .collect();
+    assert!(signatures.iter().any(|s| s == "title:title: String"));
+    assert!(signatures
+        .iter()
+        .any(|s| s.contains("label:fn label() -> String")));
+    assert!(signatures
+        .iter()
+        .any(|s| s.contains("size:fn size() -> Int")));
+    assert!(signatures
+        .iter()
+        .any(|s| s.contains("render:fn render() -> String")));
+    let json = dossier.to_json();
+    assert!(json.contains("\"target\":\"Widget\""));
+    assert!(json.contains("\"trait_impl\""));
+    assert!(json.contains("\"inherent_impl\""));
+}
+
+#[test]
 fn jet_semindex_cli_json_smoke() {
     let bin = PathBuf::from(env!("CARGO_BIN_EXE_jet"));
     let path = fixture("basics/hello.jet");
@@ -244,5 +301,23 @@ fn jet_semindex_cli_json_smoke() {
         String::from_utf8_lossy(&out.stderr)
     );
     let text = String::from_utf8_lossy(&out.stdout);
-    assert!(text.contains("\"schema_version\":2"));
+    assert!(text.contains("\"schema_version\":3"));
+}
+
+#[test]
+fn jet_dossier_cli_json_smoke() {
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_jet"));
+    let path = fixture("types/traits.jet");
+    let out = std::process::Command::new(bin)
+        .args(["dossier", path.to_str().unwrap(), "Square", "--json"])
+        .output()
+        .expect("jet dossier");
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("\"target\":\"Square\""));
+    assert!(text.contains("\"members\""));
 }

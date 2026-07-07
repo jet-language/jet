@@ -1762,7 +1762,7 @@ fn core_provider_fetches_remote_git_package_from_env() {
     );
 }
 
-// ── gap #4: `jetpack os <verb> [<config-path>]@<host>` (U15/U16) ─────────
+// ── E7 jetos runtime: `jet os <verb> <host>` / `path@host` ─────────
 
 /// The committed jetpack-config fixture dir.
 fn config_example_dir() -> PathBuf {
@@ -1771,20 +1771,16 @@ fn config_example_dir() -> PathBuf {
 
 #[test]
 fn os_build_realizes_selected_system_offline() {
-    // I5/U15/U16: `jetpack os build <path>@<host>` loads the config, selects the
+    // I5/D-JPK-OSVERB1/D-JPK-OSHOST1: `jet os build <host>` loads config.jet
+    // from the current repo, selects system.<host>, and realizes its packages
+    // into a named generation.
     // System named <host>, and realizes its packages into a system generation —
     // fully offline (the packages come from a first-party `core` source repo, so
     // no nix). The store lives under a scratch JETPACK_ROOT.
     let root = Scratch::new("os-build-root");
-    let config = config_example_dir().join("config.jet");
-    let out = jetpack()
-        .args([
-            "os",
-            "build",
-            &format!("{}@halcyon", config.to_string_lossy()),
-            "--no-color",
-            "--offline",
-        ])
+    let out = jet()
+        .args(["os", "build", "halcyon", "--no-color", "--offline"])
+        .current_dir(config_example_dir())
         .env("JETPACK_ROOT", &root.path)
         .env("PATH", "/usr/bin:/bin") // no nix on PATH
         .output()
@@ -1813,15 +1809,17 @@ fn os_switch_activates_and_sets_current() {
     // pointer (and a boot `default`). The internal mechanic is a symlink in the
     // managed system store; the user sees a clear "activated" line.
     let root = Scratch::new("os-switch-root");
-    let config = config_example_dir().join("config.jet");
-    let out = jetpack()
+    let out = jet()
         .args([
             "os",
             "switch",
-            &format!("{}@halcyon", config.to_string_lossy()),
+            "halcyon",
+            "--name",
+            "known-good",
             "--no-color",
             "--offline",
         ])
+        .current_dir(config_example_dir())
         .env("JETPACK_ROOT", &root.path)
         .env("PATH", "/usr/bin:/bin")
         .output()
@@ -1833,6 +1831,7 @@ fn os_switch_activates_and_sets_current() {
     );
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("activated"), "stderr: {stderr}");
+    assert!(stderr.contains("known-good"), "stderr: {stderr}");
     // The `current` pointer now exists.
     let current = root.join("systems").join("current");
     assert!(
@@ -1840,26 +1839,29 @@ fn os_switch_activates_and_sets_current() {
         "expected a `current` generation pointer at {}",
         current.display()
     );
+    let units = fs::read_dir(root.join("systems"))
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .map(|e| e.path().join("etc/systemd/system/openssh.service"))
+        .find(|p| p.exists());
+    assert!(units.is_some(), "expected generated systemd unit");
 }
 
 #[test]
-fn os_build_default_config_path_uses_home_dot_jet() {
-    // U16: with no path prefix (`jetpack os build @host`), the config defaults to
-    // `~/.jet/config.jet`. We point HOME at a scratch dir holding that file.
-    let home = Scratch::new("os-home");
+fn os_build_bare_host_uses_current_repo_config() {
+    // D-JPK-OSHOST1=C: bare host discovers system.<host> in ./config.jet.
+    let proj = Scratch::new("os-repo");
     let root = Scratch::new("os-default-root");
-    let jet_dir = home.join(".jet");
-    fs::create_dir_all(&jet_dir).unwrap();
     // A minimal self-contained system (no packages → realizes trivially offline).
     fs::write(
-        jet_dir.join("config.jet"),
+        proj.join("config.jet"),
         "module box {\n    system.box: { target: linux.x64 }\n}\n",
     )
     .unwrap();
-    let out = jetpack()
-        .args(["os", "build", "@box", "--no-color", "--offline"])
+    let out = jet()
+        .args(["os", "build", "box", "--no-color", "--offline"])
+        .current_dir(&proj.path)
         .env("JETPACK_ROOT", &root.path)
-        .env("HOME", &home.path)
         .env("PATH", "/usr/bin:/bin")
         .output()
         .unwrap();
@@ -1875,8 +1877,8 @@ fn os_build_default_config_path_uses_home_dot_jet() {
 #[test]
 fn os_missing_host_is_friendly_and_exits_2() {
     let root = Scratch::new("os-no-host");
-    let out = jetpack()
-        .args(["os", "build", "./config.jet", "--no-color"])
+    let out = jet()
+        .args(["os", "build", "--no-color"])
         .env("JETPACK_ROOT", &root.path)
         .output()
         .unwrap();
@@ -1889,15 +1891,9 @@ fn os_missing_host_is_friendly_and_exits_2() {
 #[test]
 fn os_unknown_host_lists_available_systems() {
     let root = Scratch::new("os-bad-host");
-    let config = config_example_dir().join("config.jet");
-    let out = jetpack()
-        .args([
-            "os",
-            "build",
-            &format!("{}@nope", config.to_string_lossy()),
-            "--no-color",
-            "--offline",
-        ])
+    let out = jet()
+        .args(["os", "build", "nope", "--no-color", "--offline"])
+        .current_dir(config_example_dir())
         .env("JETPACK_ROOT", &root.path)
         .output()
         .unwrap();
@@ -1911,19 +1907,129 @@ fn os_unknown_host_lists_available_systems() {
 #[test]
 fn os_missing_config_file_is_friendly() {
     let root = Scratch::new("os-no-config");
-    let out = jetpack()
-        .args([
-            "os",
-            "build",
-            "/definitely/not/here/config.jet@box",
-            "--no-color",
-        ])
+    let out = jet()
+        .args(["os", "build", "/definitely/not/here@box", "--no-color"])
         .env("JETPACK_ROOT", &root.path)
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("E0981"), "stderr: {stderr}");
+}
+
+#[test]
+fn os_generations_are_newest_first_and_rollback_activates_prior() {
+    let root = Scratch::new("os-gens-root");
+    for name in ["first", "second"] {
+        let out = jet()
+            .args([
+                "os",
+                "switch",
+                "halcyon",
+                "--name",
+                name,
+                "--no-color",
+                "--offline",
+            ])
+            .current_dir(config_example_dir())
+            .env("JETPACK_ROOT", &root.path)
+            .env("PATH", "/usr/bin:/bin")
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "stderr: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    let list = jet()
+        .args(["os", "generations", "halcyon", "--no-color"])
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert!(list.status.success());
+    let stdout = String::from_utf8_lossy(&list.stdout);
+    let second = stdout.find("second").unwrap();
+    let first = stdout.find("first").unwrap();
+    assert!(
+        second < first,
+        "generations should be newest-first: {stdout}"
+    );
+    let proof = fs::read_to_string(
+        root.path
+            .join("systems/generations/second/activation-proof.txt"),
+    )
+    .unwrap();
+    assert!(proof.contains("service-risk"), "proof: {proof}");
+    assert!(
+        proof.contains("rollback-proof: pass previous=first"),
+        "proof: {proof}"
+    );
+
+    let rollback = jet()
+        .args(["os", "rollback", "halcyon", "first", "--no-color"])
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert!(
+        rollback.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&rollback.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&rollback.stderr).contains("rolled back"),
+        "stderr: {}",
+        String::from_utf8_lossy(&rollback.stderr)
+    );
+}
+
+#[test]
+fn os_image_writes_jetos_installer_proof() {
+    let root = Scratch::new("os-image-root");
+    let out = jet()
+        .args([
+            "os",
+            "image",
+            "halcyon",
+            "--manual",
+            "/dev/sda",
+            "--no-color",
+        ])
+        .current_dir(config_example_dir())
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let image = root
+        .path
+        .join("systems/images")
+        .join("jetos-installer-halcyon.img");
+    let data = fs::read_to_string(&image).unwrap();
+    assert!(data.contains("brand=jetos"), "data: {data}");
+    assert!(data.contains("disk=/dev/sda"), "data: {data}");
+}
+
+#[test]
+fn os_init_writes_guided_ext4_config() {
+    let proj = Scratch::new("os-init");
+    let out = jet()
+        .args(["os", "init", "laptop", "--no-color"])
+        .current_dir(&proj.path)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let config = fs::read_to_string(proj.join("config.jet")).unwrap();
+    assert!(config.contains("system.laptop"), "config: {config}");
+    assert!(config.contains("filesystem.layout"), "config: {config}");
+    assert!(config.contains("network.hostName"), "config: {config}");
 }
 
 #[test]

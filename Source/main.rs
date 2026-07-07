@@ -16,9 +16,11 @@ use std::process::{exit, Command};
 use jet::Diagnostics::ColorChoice;
 use jet::ExitCodes;
 
+mod CmdCodemod;
 mod CmdCompile;
 mod CmdDevTools;
 mod CmdDevWeb;
+mod CmdDossier;
 mod CmdExpand;
 mod CmdImpact;
 mod CmdPkg;
@@ -27,6 +29,7 @@ mod CmdSemIndex;
 mod CmdSupply;
 mod EngineDispatch;
 
+use CmdCodemod::run_codemod;
 use CmdCompile::{
     run_compile_cmd, run_debug_native, run_dev_entry, run_fix, run_fmt, run_new, run_test,
     run_test_cov,
@@ -36,6 +39,7 @@ use CmdDevTools::{
     run_eval, run_explain, run_lint_a11y, run_repl, run_serve, watch_policy_from, WatchPolicy,
 };
 use CmdDevWeb::run_dev_web;
+use CmdDossier::run_dossier;
 use CmdExpand::run_expand;
 use CmdImpact::run_impact;
 use CmdPkg::{
@@ -954,10 +958,22 @@ fn main() {
             run_semindex(&semindex_args, mode.json);
             return;
         }
+        "dossier" => {
+            // D-WD2/D-DOSSIER1: umbrella explain view over semantic facts.
+            let dossier_args: Vec<String> = raw.iter().skip(1).cloned().collect();
+            run_dossier(&dossier_args, mode.json);
+            return;
+        }
         "impact" => {
             // D-IMPACT1: blast-radius queries over the semantic index.
             let impact_args: Vec<String> = raw.iter().skip(1).cloned().collect();
             run_impact(&impact_args, mode.json);
+            return;
+        }
+        "codemod" => {
+            // D-CODEMOD1: replayable semantic refactors over semindex facts.
+            let codemod_args: Vec<String> = raw.iter().skip(1).cloned().collect();
+            run_codemod(&codemod_args);
             return;
         }
         "expand" => {
@@ -1056,6 +1072,16 @@ fn main() {
             exit(EngineDispatch::dispatch(
                 jet::Syntax::JETPACK_BINARY_NAME,
                 "image",
+                &raw,
+            ));
+        }
+        "os" => {
+            // D-JPK-OSVERB1=A: `jet os ...` is the public jetos front door.
+            // The implementation still runs in the Jetpack engine process so
+            // the compiler binary stays separate from package/OS realization.
+            exit(EngineDispatch::dispatch(
+                jet::Syntax::JETPACK_BINARY_NAME,
+                "os",
                 &raw,
             ));
         }

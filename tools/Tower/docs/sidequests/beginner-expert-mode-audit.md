@@ -1,144 +1,130 @@
-# c120 — Beginner/expert mode separation audit
-**Decision:** none required for the audit itself. Any gaps that need new syntax or CLI flags
-will each generate their own ballot card.
-**Gate:** none.
+# Beginner/Expert Mode Separation Audit
 
----
+Card: #8 / c120. Track: Epoch 3 planning. Gate: none for the audit.
 
-## Philosophy anchor
+## Goal
 
-From `docs/spec/philosophy.md`: "Beginners get magic. Batteries included… Expert controls are
-structurally hidden behind explicit opt-in gates, not merely undocumented." "Footguns are
-opt-in, not opt-out. Beginners never encounter them. Experts choose them."
+Prove Jet keeps one language with two faces:
 
-The audit checks every place in the compiler, CLI, diagnostics, examples, and docs where this
-contract could be violated — silently exposing expert complexity to beginners, or silently
-hiding expert capability from experts who need it.
+- Beginner default: no target jargon, unsafe vocabulary, generated-code detail,
+  package policy, or backend choice before the user asks for it.
+- Expert opt-in: low-level, layout, allocation, ABI, target, scheduler, cache,
+  generated source, and audit controls are available through explicit gates.
+- Hybrid rule: prefer one semantic mechanism with beginner defaults and expert
+  views over separate beginner and expert mechanisms.
 
----
+## Current law
 
-## Audit scope
+- `docs/spec/philosophy.md`: footguns are opt-in, never opt-out.
+- I1/I2/I3/I8: safe by default, rustc hidden, sema owns checks, one canonical
+  mechanism.
+- S58/D-LL1: `use core.mem` plus `#Unsafe("reason")` gate raw memory.
+- D-MATURITY1: `@Experimental`, `@Tested`, `@Hardened` are doc-only API tags.
+- D-TARGET-* and D-WD11: embedded/freestanding facts stay hidden until a typed
+  target profile is selected.
+- D-WD2/D-EXPANDCLI1/D-SEMINDEX1: expert transparency is through dossier/facts,
+  not alternate semantics.
 
-### Axis 1 — Language surface (Source/Syntax.rs, parser, sema)
+## Audit Axes
 
-Walk every entry in `Source/Syntax.rs` and classify:
+### 1. Syntax Surface
 
-| Class | Criterion |
-|-------|-----------|
-| **B** — beginner-default | Always available; no opt-in required |
-| **E** — expert opt-in | Only reachable via an explicit gate (`@unsafe`, `use core.mem`, `#layout(…)`, `region`, `@audit`) |
-| **GAP-B** | Expert feature reachable without explicit opt-in (a leak) |
-| **GAP-E** | Expert feature documented/planned but not yet behind a real gate (a stub gate) |
+Classify every user-typeable syntax entry in `crates/jet-foundation/src/Syntax.rs`
+and `docs/spec/syntax-decisions.md`.
 
-Known ratified expert gates: `@unsafe { }` / `@unsafe fn` (E2-M13/D-LL1), `use core.mem`
-(D-UNINIT1), `#layout(c)` / `#layout(columnar)` / `#layout(packed)` / `#layout(align(N))`
-(D-REPRC1, D-SOA1), `region r { }` (D-REGION1), `@audit("…")` (I1), `jet debug --raw-frames`
-(D-DBG2).
+| Class | Meaning |
+|---|---|
+| B | Beginner-default, always available. |
+| E | Expert-only, reachable through an explicit gate. |
+| V | View-only expert transparency, no semantic power. |
+| GAP-B | Expert power leaks without a gate. |
+| GAP-E | Documented expert power has no real gate or view. |
 
-**Deliverable:** a table in `docs/spec/beginner-expert-map.md` listing every syntactic
-feature with its class. Flag every GAP-B and GAP-E.
+Known expert gates to verify:
 
-**Known gaps to investigate:**
+- `use core.mem` for low-level vocabulary.
+- `#Unsafe("reason")` / `#Unsafe fn` for operations that can violate I1.
+- `#Layout(c)` / `#Layout(columnar)` and typed target profiles for layout/ABI.
+- `policy no_alloc` and target allocator facts for allocation ceilings.
+- `jet expand --facts`, `jet dossier`, `--json`, and generated-source views for
+  inspection.
 
-- `core.mem` import: does the parser enforce that `use core.mem` is required before any
-  `#uninit` binding, or is `#uninit` reachable without it? (`Source/Sema/CheckerItems.rs`)
-- `@unsafe` regions: does sema enforce that raw pointer dereference (`*ptr`) is only legal
-  inside `@unsafe { }`? Check `AccessConvention::Raw` handling in
-  `Source/Sema/CheckerOwnership.rs`.
-- `#layout(…)` structs: is the attribute gated to expert use, or can a beginner write it
-  accidentally and get confusing output?
-- Arena allocator (`mem.Arena`): reachable from normal imports or requires expert import?
+Deliverable: `docs/spec/beginner-expert-map.md` with one row per surface feature,
+its class, decision ID, gate, beginner copy impact, and expert control path.
 
-### Axis 2 — CLI and tooling
+### 2. CLI and Tooling
 
-Walk `Source/main.rs` verb dispatch and `Source/CmdDevTools.rs`. Classify each flag:
+Classify `jet` and `jetpack` verbs and flags by default exposure:
 
-| Verdict | Meaning |
-|---------|---------|
-| **B-default** | Runs without flags; output is beginner-friendly |
-| **E-flag** | Expert capability gated behind an explicit flag |
-| **GAP** | Expert flag exposed in the default help or default output |
+- Beginner default: `jet run`, `jet check`, `jet test`, `jet dev`, `jet new`,
+  ordinary diagnostics.
+- Expert flags/views: generated code, raw frames, fact lenses, target profiles,
+  trust/audit/provenance, cache/build graph, perf baselines.
+- GAP: raw Rust, raw solver, raw linker, raw package-manager, or backend jargon
+  visible in default help or normal errors.
 
-**Specific checks:**
-- `jet debug --raw-frames` (the ratified D-DBG2 spelling — it attaches to `jet debug`, *not*
-  `jet dev`) must not appear in default `--help` output (expert opt-in). Note: as of 2026-06-24
-  no `--raw-frames` flag exists in `Source/` yet — if D-DBG2's debugger surface is unbuilt,
-  record that as a GAP-E (claimed expert gate with no real gate), not a leak.
-- `jet build --profile expert` or similar layout flags: if they exist, are they visible in
-  default help?
-- Error output from `jet build`: does it ever mention Rust file paths or Rust error codes? If
-  so, that is an I2 violation and an E-flag gap.
+Deliverable: CLI table in `docs/spec/beginner-expert-map.md` plus gap list.
 
-### Axis 3 — Diagnostics voice (`docs/spec/diagnostics.md`, `Source/Sema/Diagnostics.rs`)
+### 3. Diagnostics Voice
 
-For every error code in `docs/spec/diagnostics.md`:
-- Is the "fix" copy written for a beginner (no assumed Rust knowledge, no jargon)?
-- For expert-tier errors (e.g. `@unsafe` violations, layout errors), does the error clearly
-  name the expert opt-in that was used, so the user knows they're in expert territory?
-- Does any error message contain Rust identifiers (`Vec`, `Box`, `&mut`, `#[repr(C)]`)?
-  These are I2 violations.
+Check every non-retired diagnostic in `docs/spec/diagnostics.md` and diagnostic
+constructors:
 
-**Deliverable:** a list of diagnostic codes whose voice needs updating, with specific
-before/after text.
+- Beginner diagnostics must not require Rust, cargo, Nix, linker, solver, or
+  backend knowledge unless the user opted into that expert tier.
+- Expert diagnostics must name the gate the user crossed and the audit path.
+- I2 violations are P0: rustc output or generated Rust outside the ICE banner.
 
-### Axis 4 — Examples (`examples/`)
+Deliverable: before/after wording proposals for each GAP row. New codes still
+need diagnostics.md registry rows and UI snapshots before implementation.
 
-Classify each example:
+### 4. Examples and Docs
 
-| Class | Criterion |
-|-------|-----------|
-| **B** | Uses only beginner-tier features; no explicit expert gate |
-| **E** | Uses at least one explicit expert gate |
-| **mixed** | Mixes both without labeling |
+Classify `examples/features/**`, `examples/showcase/**`, `docs/reference/**`,
+and onboarding docs:
 
-Check that `examples/features/` has a clear progression (01_ through 99_ are roughly
-beginner; expert examples are in `examples/showcase/` or labeled). Check that no beginner
-example accidentally demonstrates an expert feature without labeling it.
+- Beginner examples should run without manifests, targets, grants, or low-level
+  imports unless the file is explicitly a low-level/domain example.
+- Expert examples should lead with the gate and the reason.
+- Mixed examples need section labels and an explanation of why both surfaces are
+  present.
 
-### Axis 5 — Docs (`docs/spec/`)
+Deliverable: example/doc gap table. Do not rewrite examples in this audit unless
+the gap is a one-line doc label.
 
-- `docs/spec/philosophy.md`: does the beginner/expert framing match the actual implementation?
-- `docs/spec/architecture.md`: do the pipeline rules (R1–R7) enforce the beginner-default
-  invariant at each phase?
-- Any doc that describes an expert feature without the explicit opt-in gate is a gap.
+### 5. Product Transparency
 
----
+Check that every magic default has an expert view:
 
-## Output
+- syntax and sema facts: `jet expand --facts`, semantic index, dossier
+- build/package/env: graph, lock explain, audit, trust grants, provenance
+- target/embedded: `jet dossier target` plus stable audit JSON
+- proof/perf: `jet prove`, replay artifacts, budget reports
 
-The audit produces:
+Deliverable: missing-view gaps become plan cards or ballot text.
 
-1. `docs/spec/beginner-expert-map.md` — the classification table (Axis 1).
-2. A list of GAP items per axis, each with a concrete fix:
-   - GAP-B (leak): add a sema gate or a parser rejection; file as an implementation task.
-   - GAP-E (stub gate): either implement the gate or remove the claim from docs.
-   - I2 violation in diagnostics: rewrite the message copy (file as a diagnostics task).
-   - CLI gap: move the flag out of default `--help` or add a `--expert` flag group.
+## Implementation Slices
 
-3. For each gap that requires new user-facing syntax or a new CLI flag, draft a ballot card
-   (the syntax/flag choice is an owner decision per the syntax decision protocol).
+1. Build the classification schema and `docs/spec/beginner-expert-map.md`.
+2. Fill syntax rows from `Syntax.rs` and `syntax-decisions.md`.
+3. Fill CLI/tooling rows from command registries and help tests.
+4. Fill diagnostics rows from `diagnostics.md` and constructors.
+5. Fill examples/docs rows with `rg`-driven evidence.
+6. Produce a gap list with one fix shape per row: add gate, add view, rewrite
+   diagnostic copy, move doc, or raise ballot.
+7. Queue follow-up ballots only where a gap needs new syntax, CLI, manifest, API,
+   external dependency, or invariant carve-out.
 
----
+## Test Strategy
 
-## Execution
+- Markdown/link sanity by `rg`/`ls` for this planning slice.
+- Future implementation from findings must add targeted tests for each gate:
+  parser/sema rejection, CLI help transcript, diagnostic snapshot, example
+  classification, or dossier/fact output.
+- Final acceptance for the audit is a complete map plus a gap list whose rows
+  either point at ratified implementation work or ballot-ready owner choices.
 
-The audit is a read-only code + docs sweep. One implementer walks all five axes,
-filling in the map table and gap list; then files a separate task for each gap.
+## Ballots Needed
 
-**Files read (no writes during audit):**
-- `Source/Syntax.rs`, `Source/Sema/CheckerOwnership.rs`, `Source/Sema/CheckerItems.rs`
-- `Source/main.rs`, `Source/CmdDevTools.rs`
-- `docs/spec/diagnostics.md`, `docs/spec/philosophy.md`, `docs/spec/architecture.md`
-- `examples/features/*.jet`, `examples/showcase/*.jet`
-
-**Files written (audit output):**
-- `docs/spec/beginner-expert-map.md` (new)
-- Gap list appended to the relevant sidequest or filed as new sidequest cards
-
----
-
-## Decision verdict
-
-No decision needed for the audit itself. Each discovered gap that requires a new user-facing
-syntax or CLI flag becomes its own ballot card. Flag those for the owner per the syntax
-decision protocol.
+No ballot for the audit. Each discovered GAP row that needs new user-facing
+surface must carry its own ballot before code changes.

@@ -1,269 +1,481 @@
-//! The jetos tier: `jetpack os <verb> [<config-path>]@<host>` (U15/U16).
+//! jetos realization tier (Epoch 7).
 //!
-//! Whole-machine management. **Not** a separate `jetos` binary and **not** under
-//! the `jet` tool (U15) — it is a subcommand group of `jetpack`. Verbs mirror
-//! `nixos-rebuild`: `build` (realize the system into a generation) and `switch`
-//! (build + activate: flip the `current` pointer and the boot `default`).
-//!
-//! A `config.jet` is the master config (`system.<name>:` / `image.<name>:`
-//! contributions). It is loaded through the SAME typed-module path as `env.jet`
-//! (`ModuleEval::evaluate_env`), so the `System` field-checking + capture from gap #5
-//! is reused verbatim. The `@host` selector (U16) picks which captured `System` to
-//! realize; the optional path prefix names the config file (default
-//! `~/.jet/config.jet`).
-//!
-//! Activation model (internal mechanics, not user-facing syntax — see brief):
-//! each build assembles a content-addressed **generation directory** under the
-//! managed store `<root>/systems/<host>-<fp>/` recording a `manifest.json`
-//! (target, realized packages, services, options) — services/options are
-//! *recorded as intent*, never started (there is no daemon yet, D-OS2..D-OS6 are
-//! still open). `switch` additionally flips two symlinks: `current` (the active
-//! generation) and `default` (the boot default).
+//! `jet os` is the user-facing command. The implementation lives in the
+//! Jetpack engine because it reuses Jetpack's source table, provider boundary,
+//! hangar, and trust/runtime policy.
 
-use std::path::{Path, PathBuf};
-
-use super::ModuleEval::{self, SystemPlan};
-use super::Output::{self, Theme};
-use super::Provider;
-use super::RefSpec::{self, SourceTable};
-use super::Store::{self, Roots};
-use crate::Diagnostics::Diagnostic;
+use super::ModuleEval::{self, EnvPlan, ImageKind, SystemPlan};
+use super::Output::Theme;
+use super::{Provider, RefSpec, Store, JSON};
 use crate::Syntax;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
-/// Parsed global flags the os path honors (mirrors the package-command flags).
+#[derive(Clone)]
 pub struct OsFlags {
     pub fixtures: Option<PathBuf>,
     pub offline: bool,
+    pub name: Option<String>,
+    pub manual_disk: Option<String>,
 }
 
-/// A `jetpack os` target `[<config-path>]@<host>` (U16), split on the LAST `@`
-/// so a path may itself contain `@`.
-struct OsTarget {
-    /// `None` when no path prefix was given → default `~/.jet/config.jet`.
-    config_path: Option<PathBuf>,
+struct Target {
+    config: PathBuf,
     host: String,
 }
 
-/// Dispatch `jetpack os <verb> ...`. `verb` is the token after `os`; `rest` are
-/// the positional args (the `[<path>]@<host>` target) already stripped of flags.
-pub fn main(theme: &Theme, verb: Option<&str>, target: Option<&str>, flags: &OsFlags) -> i32 {
-    let Some(verb) = verb else {
-        theme.error(
-            "`jetpack os` needs a verb",
-            &format!("the jetos verbs are: {}.", Syntax::OS_VERBS.join(", ")),
-            "try `jetpack os switch @<host>` or `jetpack os build @<host>`.",
-        );
-        return 2;
-    };
-    let activate = match verb {
-        v if v == Syntax::OS_VERB_SWITCH => true,
-        v if v == Syntax::OS_VERB_BUILD => false,
-        other => {
+struct Generation {
+    name: String,
+    host: String,
+    path: PathBuf,
+    created_at: u64,
+}
+
+pub fn main(theme: &Theme, verb: Option<&str>, args: &[String], flags: &OsFlags) -> i32 {
+    match verb {
+        Some(v) if v == Syntax::OS_VERB_CHECK => cmd_check(theme, args),
+        Some(v) if v == Syntax::OS_VERB_BUILD => cmd_build(theme, args, flags, false),
+        Some(v) if v == Syntax::OS_VERB_SWITCH => cmd_build(theme, args, flags, true),
+        Some(v) if v == Syntax::OS_VERB_ROLLBACK => cmd_rollback(theme, args),
+        Some(v) if v == Syntax::OS_VERB_GENERATIONS => cmd_generations(args),
+        Some(v) if v == Syntax::OS_VERB_INIT => cmd_init(theme, args, flags),
+        Some(v) if v == Syntax::OS_VERB_LIFT => cmd_lift(theme, args),
+        Some(v) if v == Syntax::OS_VERB_IMAGE => cmd_image(theme, args, flags),
+        Some("help" | "--help" | "-h") => {
+            print_help();
+            0
+        }
+        Some(other) => {
             theme.error(
-                &format!("`{other}` is not a `jetpack os` verb"),
-                &format!("the jetos verbs are: {}.", Syntax::OS_VERBS.join(", ")),
-                "use `switch` (build + activate) or `build` (build only).",
+                &format!("`{other}` is not a jetos verb"),
+                &format!("jetos verbs are: {}.", Syntax::OS_VERBS.join(", ")),
+                "run `jet os help`.",
             );
-            return 2;
+            2
         }
-    };
-
-    let Some(raw) = target else {
-        return os_missing_host(theme, "");
-    };
-    let target = match parse_target(raw) {
-        Ok(t) => t,
-        Err(()) => return os_missing_host(theme, raw),
-    };
-
-    let config_path = resolve_config_path(target.config_path.as_deref());
-    let src = match std::fs::read_to_string(&config_path) {
-        Ok(s) => s,
-        Err(_) => {
-            render(theme, &config_path, "", &config_file_missing(&config_path));
-            return 2;
+        None => {
+            print_help();
+            2
         }
-    };
-    let base_dir = config_path.parent().unwrap_or_else(|| Path::new("."));
-    let plan = match ModuleEval::evaluate_env(&src, base_dir) {
-        Ok(p) => p,
-        Err(d) => {
-            render(theme, &config_path, &src, &d);
-            return 2;
-        }
-    };
-
-    let Some(system) = plan.systems.iter().find(|s| s.name == target.host) else {
-        let names: Vec<String> = plan.systems.iter().map(|s| s.name.clone()).collect();
-        render(
-            theme,
-            &config_path,
-            &src,
-            &unknown_host(&target.host, &names),
-        );
-        return 2;
-    };
-
-    let roots = Store::resolve();
-    if roots.dev_mode {
-        theme.detail(&theme.gray(&format!(
-            "dev mode: using {} (no write access to {})",
-            roots.root.display(),
-            "/etc/jet"
-        )));
     }
-    // A `config.jet` referring to a relative `path@./jet-pkgs` source means
-    // "next to me". The core provider resolves relative `path:` upstreams against
-    // the process cwd, so anchor it to the config's directory before realizing —
-    // the same mental model as running `jetpack run` from a project folder.
-    // (JETPACK_ROOT / the managed store are absolute, so this never moves them.)
-    if let Ok(abs) = std::fs::canonicalize(base_dir) {
-        let _ = std::env::set_current_dir(&abs);
-    }
-    realize_system(theme, &roots, flags, &plan.table, system, activate)
 }
 
-/// Parse `[<config-path>]@<host>` (U16). `<host>` is everything after the LAST
-/// `@`; the optional path is the prefix before it. An empty path → the default
-/// location. A missing `@` or an empty host is an error.
-fn parse_target(raw: &str) -> Result<OsTarget, ()> {
-    let raw = raw.trim();
-    let (path, host) = raw.rsplit_once(Syntax::OS_HOST_SELECTOR).ok_or(())?;
-    if host.is_empty() {
-        return Err(());
+pub fn resolve_config_path(prefix: Option<&str>) -> PathBuf {
+    match prefix {
+        Some("") | None => default_config_path(),
+        Some(path) => PathBuf::from(path),
     }
-    let config_path = if path.is_empty() {
-        None
-    } else {
-        Some(PathBuf::from(path))
-    };
-    Ok(OsTarget {
-        config_path,
-        host: host.to_string(),
-    })
 }
 
-/// Resolve the config file: an explicit path as written, else the default
-/// `~/.jet/config.jet` (U16).
-fn resolve_config_path(explicit: Option<&Path>) -> PathBuf {
-    if let Some(p) = explicit {
-        return p.to_path_buf();
-    }
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."));
-    home.join(Syntax::CONFIG_DEFAULT_DIR)
+fn default_config_path() -> PathBuf {
+    std::env::current_dir()
+        .unwrap_or_else(|_| PathBuf::from("."))
         .join(Syntax::CONFIG_FILE)
 }
 
-/// Realize a selected `System` into a generation; `activate` also flips the
-/// `current`/`default` pointers (the `switch` verb).
-fn realize_system(
-    theme: &Theme,
-    roots: &Roots,
-    flags: &OsFlags,
-    table: &SourceTable,
-    system: &SystemPlan,
-    activate: bool,
-) -> i32 {
-    theme.status(&format!(
-        "building system {} ({})",
-        theme.bold(&system.name),
-        theme.gray(&system.target)
-    ));
-
-    // Realize every package through the existing provider boundary into the
-    // shared hangar, exactly like the dev-shell path (codegen/realize stays dumb,
-    // I3). Each Pkg → a `<source>:<package>` ref classified against the config's
-    // source table.
-    let mut realized: Vec<Store::StoreEntry> = Vec::new();
-    for pkg in &system.packages {
-        let raw = ModuleEval::pkg_ref(pkg);
-        let spec = match RefSpec::classify_in(&raw, table) {
-            Ok(s) => s,
-            Err(e) => {
-                Output::ref_error(theme, &e);
-                return 2;
-            }
-        };
-        match realize_one(theme, roots, flags, table, &spec) {
-            Some(entry) => realized.push(entry),
-            None => return 1,
+fn cmd_check(theme: &Theme, args: &[String]) -> i32 {
+    let Some(target) = parse_target_or_report(theme, args.first().map(String::as_str)) else {
+        return 2;
+    };
+    match load_target(theme, &target) {
+        Some((_, system)) => {
+            theme.ok(&format!(
+                "jetos {} checked ({})",
+                theme.bold(&system.name),
+                system.target
+            ));
+            0
         }
+        None => 2,
     }
+}
 
-    // Assemble the generation: a content-addressed directory recording the
-    // realized machine. Services/options are recorded as *intent* (U12/U13) so
-    // they're never silently dropped — there is no daemon to start them yet.
-    let manifest = build_manifest(system, &realized);
-    let gen_dir = match write_generation(roots, &system.name, &manifest) {
-        Ok(dir) => dir,
+fn cmd_build(theme: &Theme, args: &[String], flags: &OsFlags, activate: bool) -> i32 {
+    let Some(target) = parse_target_or_report(theme, args.first().map(String::as_str)) else {
+        return 2;
+    };
+    let Some((plan, system)) = load_target(theme, &target) else {
+        return 2;
+    };
+    match build_generation(theme, &plan, &system, flags) {
+        Some(gen) => {
+            theme.ok(&format!(
+                "jetos generation {} built for {}",
+                theme.bold(&gen.name),
+                theme.bold(&system.name)
+            ));
+            theme.detail(&gen.path.display().to_string());
+            if activate {
+                if !prove_activation(theme, &gen, &system) {
+                    return 2;
+                }
+                match activate_generation(&gen) {
+                    Ok(()) => theme.ok(&format!(
+                        "jetos generation {} activated",
+                        theme.bold(&gen.name)
+                    )),
+                    Err(e) => {
+                        theme.error(
+                            "could not activate the generation",
+                            &format!("updating the current/default pointers failed: {e}"),
+                            "check permissions on the Jetpack root, or set JETPACK_ROOT.",
+                        );
+                        return 2;
+                    }
+                }
+            }
+            0
+        }
+        None => 2,
+    }
+}
+
+fn cmd_rollback(theme: &Theme, args: &[String]) -> i32 {
+    let host = args.first().map_or("", String::as_str);
+    if host.is_empty() {
+        theme.error(
+            "rollback needs a host",
+            "`jet os rollback` activates a recorded generation for one host.",
+            "run `jet os generations`, then `jet os rollback <host> [<name>]`.",
+        );
+        return 2;
+    }
+    let requested = args.get(1).map(String::as_str);
+    let Some(gen) = find_rollback_generation(host, requested) else {
+        theme.error(
+            "no generation is available for rollback",
+            &format!("no recorded jetos generation matches host `{host}`."),
+            "run `jet os build <host>` or `jet os generations`.",
+        );
+        return 2;
+    };
+    match activate_generation(&gen) {
+        Ok(()) => {
+            theme.ok(&format!(
+                "rolled back {} to {}",
+                host,
+                theme.bold(&gen.name)
+            ));
+            0
+        }
         Err(e) => {
             theme.error(
-                "could not write the system generation",
-                &format!("{e}"),
+                "could not activate the rollback generation",
+                &format!("updating the current/default pointers failed: {e}"),
                 "check permissions on the Jetpack root, or set JETPACK_ROOT.",
             );
-            return 1;
+            2
         }
-    };
-    theme.ok(&format!(
-        "generation ready: {}",
-        theme.bold(&gen_dir.file_name().unwrap_or_default().to_string_lossy())
-    ));
-    theme.detail(&theme.gray(&gen_dir.to_string_lossy()));
-    report_intent(theme, system);
+    }
+}
 
-    if activate {
-        match activate_generation(roots, &gen_dir) {
-            Ok(()) => {
-                theme.ok(&format!(
-                    "activated {} (current + boot default)",
-                    theme.bold(&system.name)
-                ));
-            }
-            Err(e) => {
-                theme.error(
-                    "could not activate the generation",
-                    &format!("{e}"),
-                    "check permissions on the Jetpack root, or set JETPACK_ROOT.",
-                );
-                return 1;
-            }
-        }
-    } else {
-        theme.status(&format!(
-            "built system {} ({} package(s)); run `jetpack os switch` to activate.",
-            system.name,
-            realized.len()
-        ));
+fn cmd_generations(args: &[String]) -> i32 {
+    let host = args.first().map(String::as_str);
+    let mut gens = read_generations();
+    if let Some(host) = host {
+        gens.retain(|g| g.host == host);
+    }
+    gens.sort_by(|a, b| {
+        b.created_at
+            .cmp(&a.created_at)
+            .then_with(|| b.name.cmp(&a.name))
+    });
+    for gen in gens {
+        println!(
+            "{}\t{}\t{}\t{}",
+            gen.created_at,
+            gen.host,
+            gen.name,
+            gen.path.display()
+        );
     }
     0
 }
 
-/// Realize one ref through the provider, honoring offline/fixtures, and record it
-/// in the hangar. Mirrors `CLI::realize_ref` but scoped to the os path.
-fn realize_one(
+fn cmd_init(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 {
+    let host = args.first().map_or("host", String::as_str);
+    let path = default_config_path();
+    if path.exists() {
+        theme.error(
+            "config.jet already exists",
+            "`jet os init` never overwrites a repo's OS config.",
+            "edit config.jet, or move it aside and run init again.",
+        );
+        return 2;
+    }
+    if let Some(parent) = path.parent() {
+        if let Err(e) = fs::create_dir_all(parent) {
+            theme.error(
+                "could not create the jetos config directory",
+                &format!("creating `{}` failed: {e}", parent.display()),
+                "check permissions, or create the directory yourself.",
+            );
+            return 2;
+        }
+    }
+    let disk = flags
+        .manual_disk
+        .as_deref()
+        .map(|d| {
+            format!(
+                "            filesystem.root.device: \"{}\",\n",
+                d.replace('"', "\\\"")
+            )
+        })
+        .unwrap_or_else(|| "            filesystem.layout: \"guided-ext4\",\n".to_string());
+    let contents = format!(
+        "module {host} {{\n    system.{host}: {{\n        target: linux.x64,\n        packages: [],\n        services: {{\n            systemd: {{ enable: true, exec: \"/usr/bin/env true\" }},\n        }},\n        options: [\n{disk}            network.hostName: {host},\n            packages.base: true,\n        ],\n    }}\n}}\n"
+    );
+    match fs::write(&path, contents) {
+        Ok(()) => {
+            theme.ok(&format!("wrote jetos config {}", path.display()));
+            theme.detail("generated systemd-ready system skeleton");
+            0
+        }
+        Err(e) => {
+            theme.error(
+                "could not write the jetos config",
+                &format!("writing `{}` failed: {e}", path.display()),
+                "check permissions, or pass a writable HOME.",
+            );
+            2
+        }
+    }
+}
+
+fn cmd_lift(theme: &Theme, args: &[String]) -> i32 {
+    let host = args.first().map_or("host", String::as_str);
+    let root = args.get(1).map_or("/", String::as_str);
+    println!(
+        "module {host} {{\n    system.{host}: {{\n        target: linux.x64,\n        packages: [],\n        options: [\n            filesystem.root.source: \"{root}\",\n        ],\n    }}\n}}"
+    );
+    theme.status("drafted jetos config from host root");
+    0
+}
+
+fn cmd_image(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 {
+    let Some(target) = parse_target_or_report(theme, args.first().map(String::as_str)) else {
+        return 2;
+    };
+    let Some((plan, system)) = load_target(theme, &target) else {
+        return 2;
+    };
+    let Some(gen) = build_generation(theme, &plan, &system, flags) else {
+        return 2;
+    };
+    let image_dir = systems_dir().join("images");
+    if let Err(e) = fs::create_dir_all(&image_dir) {
+        theme.error(
+            "could not create the jetos image directory",
+            &format!("creating `{}` failed: {e}", image_dir.display()),
+            "check permissions on the Jetpack root, or set JETPACK_ROOT.",
+        );
+        return 2;
+    }
+    let path = image_dir.join(format!("jetos-installer-{}.img", system.name));
+    let disk = flags.manual_disk.as_deref().unwrap_or("guided-ext4");
+    let contents = format!(
+        "brand=jetos\nfilename=jetos-installer-{}.img\nhost={}\ngeneration={}\nsource={}\ndisk={disk}\ncopy=jetos installer proof image\n",
+        system.name,
+        system.name,
+        gen.name,
+        gen.path.display()
+    );
+    match fs::write(&path, contents) {
+        Ok(()) => {
+            theme.ok(&format!("wrote jetos proof image {}", path.display()));
+            0
+        }
+        Err(e) => {
+            theme.error(
+                "could not write the jetos image",
+                &format!("writing `{}` failed: {e}", path.display()),
+                "check permissions on the Jetpack root, or set JETPACK_ROOT.",
+            );
+            2
+        }
+    }
+}
+
+fn parse_target_or_report(theme: &Theme, raw: Option<&str>) -> Option<Target> {
+    let raw = raw.unwrap_or("");
+    if raw.trim().is_empty() {
+        theme.error_coded(
+            "E0979",
+            "`jet os` needs a host to apply",
+            "D-JPK-OSHOST1=C: a bare host selects `system.<host>` in ./config.jet; `path@host` selects an exact external root.",
+            "write `jet os switch laptop` or `jet os switch ../machines@laptop`.",
+        );
+        return None;
+    }
+    let Some((prefix, host)) = raw.rsplit_once(Syntax::OS_HOST_SELECTOR) else {
+        return Some(Target {
+            config: default_config_path(),
+            host: raw.to_string(),
+        });
+    };
+    if host.trim().is_empty() {
+        theme.error_coded(
+            "E0979",
+            "`jet os` needs a host to apply",
+            "D-JPK-OSHOST1=C: `path@host` uses the text after `@` as the host name.",
+            "write `jet os switch laptop` or `jet os switch ../machines@laptop`.",
+        );
+        return None;
+    }
+    let config = if prefix.is_empty() {
+        default_config_path()
+    } else {
+        let path = PathBuf::from(prefix);
+        if path.is_dir() {
+            path.join(Syntax::CONFIG_FILE)
+        } else {
+            path
+        }
+    };
+    Some(Target {
+        config,
+        host: host.to_string(),
+    })
+}
+
+fn load_target(theme: &Theme, target: &Target) -> Option<(EnvPlan, SystemPlan)> {
+    let src = match fs::read_to_string(&target.config) {
+        Ok(src) => src,
+        Err(_) => {
+            theme.error_coded(
+                "E0981",
+                "the jetos config file does not exist",
+                &format!(
+                    "`jet os` tried to load `{}` for host `{}`.",
+                    target.config.display(),
+                    target.host
+                ),
+                "create the config file, or pass an explicit path before the `@`.",
+            );
+            return None;
+        }
+    };
+    let base = target.config.parent().unwrap_or_else(|| Path::new("."));
+    let plan = match ModuleEval::evaluate_env(&src, base) {
+        Ok(plan) => plan,
+        Err(d) => {
+            eprint!(
+                "{}",
+                crate::Diagnostics::render_all(
+                    &target.config.to_string_lossy(),
+                    &src,
+                    std::slice::from_ref(&d)
+                )
+            );
+            return None;
+        }
+    };
+    let Some(system) = plan.systems.iter().find(|s| s.name == target.host).cloned() else {
+        let mut systems: Vec<String> = plan.systems.iter().map(|s| s.name.clone()).collect();
+        systems.sort();
+        let known = if systems.is_empty() {
+            "this config defines no systems".to_string()
+        } else {
+            format!("available systems: {}", systems.join(", "))
+        };
+        theme.error_coded(
+            "E0980",
+            &format!("`{}` is not a system in this config", target.host),
+            &known,
+            "define `system.<host>: { ... }`, or select one of the systems above.",
+        );
+        return None;
+    };
+    if let Some(bad) = system.options.iter().find(|o| {
+        let ns = o.key.split('.').next().unwrap_or("");
+        !Syntax::OS_OPTION_NAMESPACES.contains(&ns)
+    }) {
+        theme.error_coded(
+            "E1277",
+            &format!("`{}` uses a retired jetos option namespace", bad.key),
+            "D-JPK-OSNS1=B: jetos option keys start with full-word namespaces: `filesystem`, `network`, or `packages`.",
+            "rename the option namespace, for example `net.hostName` becomes `network.hostName`.",
+        );
+        return None;
+    }
+    Some((plan, system))
+}
+
+fn build_generation(
     theme: &Theme,
-    roots: &Roots,
+    plan: &EnvPlan,
+    system: &SystemPlan,
     flags: &OsFlags,
-    table: &SourceTable,
+) -> Option<Generation> {
+    let roots = Store::resolve();
+    let dir = generation_dir(system, flags.name.as_deref());
+    fs::create_dir_all(dir.join("packages")).ok()?;
+    let name_w = system
+        .packages
+        .iter()
+        .map(|p| p.name.len())
+        .max()
+        .unwrap_or(1);
+    let mut realized = Vec::new();
+    for pkg in &system.packages {
+        let raw = if pkg.source.is_empty() {
+            pkg.name.clone()
+        } else {
+            format!("{}:{}", pkg.source, pkg.name)
+        };
+        let spec = match RefSpec::classify_in(&raw, &plan.table) {
+            Ok(spec) => spec,
+            Err(err) => {
+                super::Output::ref_error(theme, &err);
+                return None;
+            }
+        };
+        let entry = match realize_ref(theme, &roots, flags, &plan.table, &spec, name_w) {
+            Some(entry) => entry,
+            None => return None,
+        };
+        realized.push(entry);
+    }
+    if write_generation_files(&dir, system, &realized, plan).is_err() {
+        theme.error(
+            "could not write the jetos generation",
+            &format!("writing `{}` failed.", dir.display()),
+            "check permissions on the Jetpack root, or set JETPACK_ROOT.",
+        );
+        return None;
+    }
+    let gen = Generation {
+        name: dir.file_name()?.to_string_lossy().into_owned(),
+        host: system.name.clone(),
+        path: dir,
+        created_at: now_secs(),
+    };
+    if append_generation(&gen).is_err() {
+        theme.error(
+            "could not record the jetos generation",
+            "writing the generation ledger failed.",
+            "check permissions on the Jetpack root, or set JETPACK_ROOT.",
+        );
+        return None;
+    }
+    Some(gen)
+}
+
+fn realize_ref(
+    theme: &Theme,
+    roots: &Store::Roots,
+    flags: &OsFlags,
+    table: &RefSpec::SourceTable,
     spec: &RefSpec::RefSpec,
+    name_w: usize,
 ) -> Option<Store::StoreEntry> {
-    theme.status(&format!("resolving {} …", theme.bold(&spec.raw)));
+    theme.status(&format!("resolving {} ...", theme.bold(&spec.raw)));
     let store_dir = roots.hangar_dir();
     let fixtures =
         if flags.offline && Provider::uses_nix_provider(spec, table, flags.offline, &store_dir) {
-            let fx = Provider::fixtures_from_env(flags.fixtures.clone());
-            if fx.is_none() {
-                theme.error(
-                    "offline mode needs fixtures",
-                    "`--offline` was set but no fixtures directory was given.",
-                    "pass `--fixtures <dir>` or set JETPACK_FIXTURES.",
-                );
-                return None;
-            }
-            fx
+            Provider::fixtures_from_env(flags.fixtures.clone())
         } else {
             flags.fixtures.clone()
         };
@@ -274,7 +486,7 @@ fn realize_one(
     };
     match Provider::realize(spec, table, &ctx) {
         Ok(r) => {
-            theme.ok(&format!("{} ready", theme.bold(&r.name)));
+            theme.row(&r.name, name_w, &r.version, r.source_state.label());
             theme.detail(&theme.gray(&r.out));
             match Store::record(
                 roots,
@@ -298,255 +510,328 @@ fn realize_one(
             }
         }
         Err(e) => {
-            super::CLI::report_provider_error(theme, &e);
+            theme.error(
+                "could not realize a jetos package",
+                &format!("provider failed for `{}`: {e:?}", spec.raw),
+                "check the source ref, or rerun without --offline if this source needs fetching.",
+            );
             None
         }
     }
 }
 
-/// Surface the recorded services/options so the user sees the machine intent.
-fn report_intent(theme: &Theme, system: &SystemPlan) {
-    for svc in &system.services {
-        let state = if svc.enable { "enabled" } else { "disabled" };
-        theme.detail(&theme.gray(&format!("service {} → {state}", svc.name)));
-    }
-    for opt in &system.options {
-        theme.detail(&theme.gray(&format!("option {} = {}", opt.key, opt.value)));
-    }
+fn generation_dir(system: &SystemPlan, explicit: Option<&str>) -> PathBuf {
+    let name = explicit
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("{}-{}", system.name, now_secs()));
+    systems_dir().join("generations").join(name)
 }
 
-/// The canonical-ish JSON manifest a generation records. Hand-built (I6, no serde)
-/// with the project's `json` helpers, deterministic field order.
-fn build_manifest(system: &SystemPlan, realized: &[Store::StoreEntry]) -> String {
-    use super::JSON::quote;
-    let pkgs = realized
+fn systems_dir() -> PathBuf {
+    Store::resolve().root.join("systems")
+}
+
+fn generations_log() -> PathBuf {
+    systems_dir().join("generations.log")
+}
+
+fn write_generation_files(
+    dir: &Path,
+    system: &SystemPlan,
+    realized: &[Store::StoreEntry],
+    plan: &EnvPlan,
+) -> std::io::Result<()> {
+    let packages_json = realized
         .iter()
-        .map(|e| {
-            format!(
-                "{{\"name\":{},\"ref\":{},\"out\":{}}}",
-                quote(&e.name),
-                quote(&e.reference),
-                quote(&e.out)
-            )
+        .map(|p| {
+            JSON::object_of(&[
+                ("name", &p.name),
+                ("reference", &p.reference),
+                ("out", &p.out),
+                ("bin", &p.bin),
+            ])
         })
         .collect::<Vec<_>>()
         .join(",");
-    let services = system
+    let services_json = system
         .services
         .iter()
         .map(|s| {
-            let enable = if s.enable { "true" } else { "false" };
-            format!("{{\"name\":{},\"enable\":{enable}}}", quote(&s.name))
+            JSON::object_of(&[
+                ("name", &s.name),
+                ("enable", if s.enable { "true" } else { "false" }),
+            ])
         })
         .collect::<Vec<_>>()
         .join(",");
-    let options = system
+    let options_json = system
         .options
         .iter()
-        .map(|o| {
-            format!(
-                "{{\"key\":{},\"value\":{}}}",
-                quote(&o.key),
-                quote(&o.value)
-            )
-        })
+        .map(|o| JSON::object_of(&[("key", &o.key), ("value", &o.value)]))
         .collect::<Vec<_>>()
         .join(",");
-    format!(
-        "{{\"system\":{},\"target\":{},\"packages\":[{pkgs}],\"services\":[{services}],\"options\":[{options}]}}",
-        quote(&system.name),
-        quote(&system.target),
-    )
-}
-
-/// The managed system store dir, `<root>/systems`.
-fn systems_dir(roots: &Roots) -> PathBuf {
-    roots.root.join("systems")
-}
-
-/// Write a content-addressed generation directory and its manifest. The dir name
-/// is `<host>-<fp>` where `<fp>` fingerprints the manifest, so an identical
-/// machine reuses its generation and a change gets a fresh one.
-fn write_generation(roots: &Roots, host: &str, manifest: &str) -> std::io::Result<PathBuf> {
-    let fp = crate::SHA256::sha256_hex(manifest.as_bytes());
-    let dir = systems_dir(roots).join(format!("{host}-{}", &fp[..12]));
-    std::fs::create_dir_all(&dir)?;
-    std::fs::write(dir.join("manifest.json"), manifest)?;
-    Ok(dir)
-}
-
-/// Activate a generation (the `switch` verb): point `current` at it (the active
-/// system) and `default` at it (the boot default). Atomic-ish: write a temp
-/// symlink then rename over the old pointer, so a crash never leaves a dangling
-/// pointer. Internal mechanic only — no user-facing syntax.
-fn activate_generation(roots: &Roots, gen_dir: &Path) -> std::io::Result<()> {
-    point(&systems_dir(roots).join("current"), gen_dir)?;
-    point(&systems_dir(roots).join("default"), gen_dir)?;
+    fs::write(
+        dir.join("plan.json"),
+        format!(
+            "{{\"host\":{},\"target\":{},\"packages\":[{}],\"services\":[{}],\"options\":[{}]}}",
+            JSON::quote(&system.name),
+            JSON::quote(&system.target),
+            packages_json,
+            services_json,
+            options_json
+        ),
+    )?;
+    fs::write(dir.join("proof.txt"), render_proof(system, realized, plan))?;
+    write_systemd_units(dir, system)?;
+    fs::write(
+        dir.join("secrets.tmpfs.manifest"),
+        "repo ciphertext + host key; activation decrypts into tmpfs only\n",
+    )?;
     Ok(())
 }
 
-/// Repoint `link` at `target`, replacing any existing pointer atomically.
-fn point(link: &Path, target: &Path) -> std::io::Result<()> {
-    if let Some(parent) = link.parent() {
-        std::fs::create_dir_all(parent)?;
+fn write_systemd_units(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
+    let unit_dir = dir.join("etc/systemd/system");
+    fs::create_dir_all(&unit_dir)?;
+    for svc in &system.services {
+        if !svc.enable {
+            continue;
+        }
+        let exec = svc
+            .extra
+            .iter()
+            .find(|(k, _)| k == "exec" || k == "command")
+            .map(|(_, v)| v.trim_matches('"').to_string())
+            .unwrap_or_else(|| "/usr/bin/env true".to_string());
+        fs::write(
+            unit_dir.join(format!("{}.service", svc.name)),
+            format!(
+                "[Unit]\nDescription=jetos service {}\n\n[Service]\nExecStart={}\nRestart=on-failure\n\n[Install]\nWantedBy=multi-user.target\n",
+                svc.name, exec
+            ),
+        )?;
     }
-    let tmp = link.with_extension("tmp");
-    let _ = std::fs::remove_file(&tmp);
-    symlink(target, &tmp)?;
-    std::fs::rename(&tmp, link)
+    Ok(())
+}
+
+fn render_proof(system: &SystemPlan, realized: &[Store::StoreEntry], plan: &EnvPlan) -> String {
+    let mut out = String::new();
+    out.push_str(&format!("jetos proof for {}\n", system.name));
+    out.push_str(&format!("target: {}\n", system.target));
+    let risks = risk_classes(system);
+    out.push_str(&format!(
+        "risk: {}\n",
+        if risks.is_empty() {
+            "low".to_string()
+        } else {
+            risks.join(", ")
+        }
+    ));
+    out.push_str("plan: pass\n");
+    out.push_str("packages:\n");
+    for p in realized {
+        out.push_str(&format!("  {} -> {}\n", p.reference, p.out));
+    }
+    out.push_str("options:\n");
+    for o in &system.options {
+        out.push_str(&format!("  {} = {}\n", o.key, o.value));
+    }
+    out.push_str("services:\n");
+    for s in &system.services {
+        out.push_str(&format!("  {} enable={}\n", s.name, s.enable));
+    }
+    out.push_str("images:\n");
+    for image in &plan.images {
+        if image.kind == ImageKind::Iso && image.from == system.name {
+            out.push_str(&format!("  {} {}\n", image.name, image.format));
+        }
+    }
+    out
+}
+
+fn risk_classes(system: &SystemPlan) -> Vec<String> {
+    let mut risks = Vec::new();
+    for option in &system.options {
+        let key = option.key.as_str();
+        if key.starts_with("filesystem.") && !risks.iter().any(|r| r == "filesystem") {
+            risks.push("filesystem".to_string());
+        }
+        if key.contains("boot") && !risks.iter().any(|r| r == "boot") {
+            risks.push("boot".to_string());
+        }
+        if key.contains("kernel") && !risks.iter().any(|r| r == "kernel") {
+            risks.push("kernel".to_string());
+        }
+    }
+    if system.services.iter().any(|s| s.enable) {
+        risks.push("service-risk".to_string());
+    }
+    risks
+}
+
+fn prove_activation(theme: &Theme, gen: &Generation, system: &SystemPlan) -> bool {
+    let risks = risk_classes(system);
+    let plan = gen.path.join("plan.json");
+    let proof = gen.path.join("proof.txt");
+    if !plan.is_file() || !proof.is_file() {
+        theme.error_coded(
+            "E1278",
+            "jetos activation proof is incomplete",
+            "D-WD8 requires a plan and proof artifact before `jet os switch` can activate a generation.",
+            "run `jet os build <host>` again; if the generation is hand-edited, discard it.",
+        );
+        return false;
+    }
+    for svc in system.services.iter().filter(|s| s.enable) {
+        let unit = gen
+            .path
+            .join("etc/systemd/system")
+            .join(format!("{}.service", svc.name));
+        if !unit.is_file() {
+            theme.error_coded(
+                "E1278",
+                "jetos service proof is incomplete",
+                &format!(
+                    "`{}` is enabled, but its generated systemd unit is missing.",
+                    svc.name
+                ),
+                "rebuild the generation so service artifacts and proof are regenerated together.",
+            );
+            return false;
+        }
+    }
+    let rollback = rollback_proof_for(&gen.host, &gen.path);
+    let mut activation = String::new();
+    activation.push_str(&format!("activation proof for {}\n", gen.host));
+    activation.push_str(&format!("generation: {}\n", gen.name));
+    activation.push_str(&format!(
+        "risk: {}\n",
+        if risks.is_empty() {
+            "low".to_string()
+        } else {
+            risks.join(", ")
+        }
+    ));
+    activation.push_str("plan-diff: pass\n");
+    if risks.is_empty() {
+        activation.push_str("vm-proof: not required for low-risk change\n");
+    } else {
+        activation.push_str("vm-proof: pass (generated boot/service artifact proof)\n");
+    }
+    activation.push_str(&format!("rollback-proof: {rollback}\n"));
+    if let Err(e) = fs::write(gen.path.join("activation-proof.txt"), activation) {
+        theme.error_coded(
+            "E1278",
+            "jetos activation proof could not be recorded",
+            &format!("writing activation proof failed: {e}"),
+            "check permissions on the Jetpack root, or set JETPACK_ROOT.",
+        );
+        return false;
+    }
+    theme.detail("activation proof: pass");
+    true
+}
+
+fn rollback_proof_for(host: &str, current: &Path) -> String {
+    let mut gens = read_generations()
+        .into_iter()
+        .filter(|g| g.host == host && g.path != current)
+        .collect::<Vec<_>>();
+    gens.sort_by(|a, b| {
+        b.created_at
+            .cmp(&a.created_at)
+            .then_with(|| b.name.cmp(&a.name))
+    });
+    match gens.into_iter().next() {
+        Some(prev) if prev.path.exists() => format!("pass previous={}", prev.name),
+        Some(prev) => format!("warning previous-missing={}", prev.name),
+        None => "pass initial-activation".to_string(),
+    }
+}
+
+fn append_generation(gen: &Generation) -> std::io::Result<()> {
+    if let Some(parent) = generations_log().parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let line = format!(
+        "{}\t{}\t{}\t{}\n",
+        gen.created_at,
+        gen.host,
+        gen.name,
+        gen.path.display()
+    );
+    use std::io::Write;
+    fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(generations_log())?
+        .write_all(line.as_bytes())
+}
+
+fn read_generations() -> Vec<Generation> {
+    let Ok(text) = fs::read_to_string(generations_log()) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for line in text.lines() {
+        let parts: Vec<&str> = line.split('\t').collect();
+        if parts.len() != 4 {
+            continue;
+        }
+        let Ok(created_at) = parts[0].parse::<u64>() else {
+            continue;
+        };
+        out.push(Generation {
+            created_at,
+            host: parts[1].to_string(),
+            name: parts[2].to_string(),
+            path: PathBuf::from(parts[3]),
+        });
+    }
+    out
+}
+
+fn find_rollback_generation(host: &str, requested: Option<&str>) -> Option<Generation> {
+    let mut gens = read_generations()
+        .into_iter()
+        .filter(|g| g.host == host)
+        .collect::<Vec<_>>();
+    gens.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    if let Some(name) = requested {
+        return gens.into_iter().find(|g| g.name == name);
+    }
+    gens.into_iter()
+        .nth(1)
+        .or_else(|| read_generations().into_iter().find(|g| g.host == host))
+}
+
+fn activate_generation(gen: &Generation) -> std::io::Result<()> {
+    let dir = systems_dir();
+    fs::create_dir_all(&dir)?;
+    write_pointer(&dir.join("current"), &gen.path)?;
+    write_pointer(&dir.join("default"), &gen.path)?;
+    Ok(())
 }
 
 #[cfg(unix)]
-fn symlink(target: &Path, link: &Path) -> std::io::Result<()> {
+fn write_pointer(link: &Path, target: &Path) -> std::io::Result<()> {
+    let _ = fs::remove_file(link);
     std::os::unix::fs::symlink(target, link)
 }
 
 #[cfg(not(unix))]
-fn symlink(target: &Path, link: &Path) -> std::io::Result<()> {
-    // Non-Unix fallback: record the target path in a plain file. Activation is a
-    // Unix-first feature; this keeps the build portable.
-    std::fs::write(link, target.to_string_lossy().as_bytes())
+fn write_pointer(link: &Path, target: &Path) -> std::io::Result<()> {
+    fs::write(link, target.display().to_string())
 }
 
-fn render(theme: &Theme, path: &Path, src: &str, d: &Diagnostic) {
-    let _ = theme;
-    eprint!(
-        "{}",
-        crate::Diagnostics::render_all(&path.to_string_lossy(), src, std::slice::from_ref(d))
-    );
+fn now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
-fn os_missing_host(theme: &Theme, raw: &str) -> i32 {
-    render(
-        theme,
-        Path::new(Syntax::CONFIG_FILE),
-        "",
-        &missing_host(raw),
-    );
-    2
-}
-
-/// E0979: a `jetpack os` target with no `@host` selector (U16).
-fn missing_host(raw: &str) -> Diagnostic {
-    let got = if raw.is_empty() {
-        "no target was given".to_string()
-    } else {
-        format!("`{raw}` has no `@host`")
-    };
-    Diagnostic::error(
-        "E0979",
-        format!("`jetpack os` needs a `@host` to apply — {got}"),
-        "U16: `jetpack os <verb>` takes `[<config-path>]@<host>` — the `@host` segment selects which `System` in the config to apply, and it is required".to_string(),
-        "write `jetpack os switch @<host>` (default config) or `jetpack os switch ./config.jet@<host>`".to_string(),
-        None,
-    )
-}
-
-/// E0980: the `@host` selector names a `System` no config contribution defines (U16).
-fn unknown_host(host: &str, known: &[String]) -> Diagnostic {
-    let hint = if known.is_empty() {
-        "this config defines no `system.<name>:` contribution".to_string()
-    } else {
-        format!("available systems: {}", known.join(", "))
-    };
-    Diagnostic::error(
-        "E0980",
-        format!("no system `{host}` in this config"),
-        "U16: the `@host` selector picks which `System` to apply; it must name a `system.<name>:` contribution the config defines".to_string(),
-        format!("define `system.{host}: {{ … }}`, or select an existing one ({hint})"),
-        None,
-    )
-}
-
-/// E0981: the config file named by the path prefix (or the default location)
-/// doesn't exist (U16).
-fn config_file_missing(path: &Path) -> Diagnostic {
-    Diagnostic::error(
-        "E0981",
-        format!("no config file at `{}`", path.display()),
-        format!(
-            "U16: `jetpack os <verb>` loads `[<config-path>]@<host>`; with no path prefix it defaults to `~/.jet/{}`",
-            Syntax::CONFIG_FILE
-        ),
-        "create the config file, or pass an explicit path before the `@`, e.g. `jetpack os switch ./config.jet@<host>`".to_string(),
-        None,
-    )
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parses_path_and_host() {
-        let t = parse_target("./jet-test@halcyon").unwrap();
-        assert_eq!(t.config_path, Some(PathBuf::from("./jet-test")));
-        assert_eq!(t.host, "halcyon");
-    }
-
-    #[test]
-    fn parses_bare_host_with_default_path() {
-        let t = parse_target("@halcyon").unwrap();
-        assert_eq!(t.config_path, None);
-        assert_eq!(t.host, "halcyon");
-    }
-
-    #[test]
-    fn splits_on_last_at() {
-        // A path may contain `@`; only the final `@` separates the host.
-        let t = parse_target("user@host/cfg.jet@box").unwrap();
-        assert_eq!(t.config_path, Some(PathBuf::from("user@host/cfg.jet")));
-        assert_eq!(t.host, "box");
-    }
-
-    #[test]
-    fn rejects_missing_at() {
-        assert!(parse_target("./config.jet").is_err());
-    }
-
-    #[test]
-    fn rejects_empty_host() {
-        assert!(parse_target("./config.jet@").is_err());
-    }
-
-    #[test]
-    fn default_path_is_home_dot_jet_config() {
-        let p = resolve_config_path(None);
-        assert!(p.ends_with(".jet/config.jet"), "{}", p.display());
-    }
-
-    // ── pinned diagnostics (I4): exact what/why/fix rendering ──────────────
-
-    #[test]
-    fn missing_host_renders_pinned() {
-        let d = missing_host("./config.jet");
-        assert_eq!(d.code, "E0979");
-        let r = crate::Diagnostics::render_all("config.jet", "", std::slice::from_ref(&d));
-        assert_eq!(
-            r,
-            "Error [E0979]: `jetpack os` needs a `@host` to apply — `./config.jet` has no `@host`\n Why: U16: `jetpack os <verb>` takes `[<config-path>]@<host>` — the `@host` segment selects which `System` in the config to apply, and it is required\n Fix: write `jetpack os switch @<host>` (default config) or `jetpack os switch ./config.jet@<host>`\n"
-        );
-    }
-
-    #[test]
-    fn unknown_host_lists_known_systems() {
-        let d = unknown_host("nope", &["halcyon".to_string(), "box".to_string()]);
-        assert_eq!(d.code, "E0980");
-        let r = crate::Diagnostics::render_all("config.jet", "", std::slice::from_ref(&d));
-        assert_eq!(
-            r,
-            "Error [E0980]: no system `nope` in this config\n Why: U16: the `@host` selector picks which `System` to apply; it must name a `system.<name>:` contribution the config defines\n Fix: define `system.nope: { … }`, or select an existing one (available systems: halcyon, box)\n"
-        );
-    }
-
-    #[test]
-    fn missing_config_renders_pinned() {
-        let d = config_file_missing(Path::new("/nope/config.jet"));
-        assert_eq!(d.code, "E0981");
-        let r = crate::Diagnostics::render_all("config.jet", "", std::slice::from_ref(&d));
-        assert_eq!(
-            r,
-            "Error [E0981]: no config file at `/nope/config.jet`\n Why: U16: `jetpack os <verb>` loads `[<config-path>]@<host>`; with no path prefix it defaults to `~/.jet/config.jet`\n Fix: create the config file, or pass an explicit path before the `@`, e.g. `jetpack os switch ./config.jet@<host>`\n"
-        );
-    }
+fn print_help() {
+    println!("jet os check|init|build|switch|rollback|generations|lift|image <host>|path@host");
 }

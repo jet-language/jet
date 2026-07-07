@@ -1203,10 +1203,9 @@ dashed-name = ident { "-" ident } ;                (* S84: kebab-case names *)
 - **Disable with a leading underscore:** `module _name { … }` parses with
   `disabled = true` (the name begins with `_`); it is not discovered or merged
   (U3, one-character reversible toggle).
-- **Active reserved namespaces** are `env` → `Env` (dev environment) and
-  `image` → `Image` (OCI container image). Whole-machine `system.*`, disk
-  images, OS generations, and activation commands are frozen jetos research,
-  not current Jetpack syntax law.
+- **Active reserved namespaces** are `env` → `Env` (dev environment),
+  `system` → `System` (jetos host), and `image` → `Image` (OCI container image
+  or jetos installer input).
 - **`env.<name>:` values reuse the ordinary expression parser** — typically a
   struct literal (`Env.{ packages: […], prompt: "…" }`), so lists and strings
   work with no new grammar.
@@ -1215,8 +1214,8 @@ dashed-name = ident { "-" ident } ;                (* S84: kebab-case names *)
   `from: packages.<name>`, `expose: [Int]`, `env_vars: ["KEY": "value"]`,
   `files: [String]`, and `base: oci("<ref>")`. `base:` is captured but not yet
   realized because registry-pull is gated on TLS/native-client work. `.Iso`,
-  `.Qcow`, `.Raw`, and `from: system.<name>` are jetos installer research, not
-  a buildable Jetpack image surface today.
+  `.Qcow`, `.Raw`, and `from: system.<name>` are jetos installer inputs handled
+  by `jet os image`, not by `jet image`.
 - **Ad-hoc adapters (U20):** an `env.<name>.packages` list may contain
   `Pkg.adapt(name:, source:, recipe:)`. `source:` is a provider ref such as
   `path@vendor/tool`; this U20 slice realizes `Recipe.copy()` and
@@ -1281,14 +1280,16 @@ capture into a plan model). The U5 merge engine consumes `env` contributions.
   denied at build/comptime time (**E1265**, no `#Impure` escape hatch).
   `jetpack secrets get <name>` on a name absent from the store is **E1263**.
 
-### jetos Research Appendix (Frozen)
+### jetos Runtime Slice
 
-D-JETOS-FREEZE1 moves whole-machine `System`, disk-image, OS generation, and
-activation spellings out of current law. Old sketches such as `system.<name>`,
-`Service` as a system-service record, `.Iso`/`.Qcow`/`.Raw`, and `jetpack os
-...` are research notes only until Epoch 7 reopens them with fresh ballots.
-Current Jetpack may capture some inert fields for migration experiments, but
-docs and syntax law must not describe them as buildable OS commands or modules.
+`jet os check|init|build|switch|rollback|generations|lift|image` is active. A
+bare host (`jet os switch laptop`) selects `system.laptop` in `./config.jet`;
+`path@host` selects an exact external root. Builds create named generations;
+`generations` lists newest first; `switch --name <name>` overrides the automatic
+name; `rollback` activates a prior generation. The current slice records
+systemd unit files, repo-ciphertext/host-key tmpfs-only secret activation proof,
+guided-ext4 disk intent with `--manual`, and `jetos-installer-<host>.img` proof
+images.
 
 ## Fan-out operator `f.[a, b, c]` (S75) and fixed-size list `[T#N]` (S76)
 
@@ -1795,6 +1796,34 @@ bare form) exits 0 — absence of facts is not a failure.
 (name, one-line summary, renderer) — adding a lens for a future ratified
 mechanism (effects, layout, derive expansion) is one row, never a new
 subcommand or a new flag (I8).
+
+## Semantic index, dossier, and codemods (D-SEMINDEX1, D-WD2, D-CODEMOD1)
+
+`jet semindex --json <file.jet>` emits schema v3: definitions, references,
+call edges, effects, and member facts. Member facts stitch fields, variants,
+inline methods, external inherent impl methods, trait impl methods, and trait
+requirements into one stable owner-ordered view.
+
+`jet dossier <file.jet> [Symbol]` renders those facts as a human report;
+`--json` emits the same lens data. The first shipped lens is the type/member
+dossier. It never re-checks by another path and never invents facts missing
+from semindex.
+
+The LSP exposes scattered-method breadcrumbs as inlay hints at the owning type
+declaration. These are editor-only overlays: they do not edit source and carry
+source links to the real impl method spans.
+
+`jet codemod` supports a first replayable codemod object, encoded as JSON:
+
+```json
+{"name":"RenameReport","entry":"main.jet","operation":"rename","from":"report","to":"summarize"}
+```
+
+`jet codemod dry-run <object>` prints affected files plus the inverse object.
+`jet codemod apply <object>` rewrites semantic definition/reference spans using
+the same fix engine as `jet fix` and writes `.jet/codemods/<name>.log.json`
+with inverse rename metadata plus before/after hashes. `jet codemod undo <log>`
+checks the apply hash before replaying the inverse rename.
 
 ## Public front-end toolkit API (D-FRONTENDAPI1=A, card #227)
 

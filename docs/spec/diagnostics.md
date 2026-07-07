@@ -443,9 +443,9 @@ before continuing.
 | E0976 | jetpack | an `Image` uses a frozen disk-image format (D-JETOS-FREEZE1) |
 | E0977 | jetpack | an `Image` has no active `from`, or restates a frozen system field (D-JETOS-FREEZE1) |
 | E0978 | jetpack | an `Image` `from:` references a frozen/unknown `System` (D-JETOS-FREEZE1) |
-| E0979 | jetpack | a `jetpack os` target has no `@host` selector (U16) |
-| E0980 | jetpack | a `jetpack os` `@host` names a `System` the config doesn't define (U16) |
-| E0981 | jetpack | a `jetpack os` config file doesn't exist (U16) |
+| E0979 | jetpack | a `jet os` target has no host (D-JPK-OSHOST1) |
+| E0980 | jetpack | a `jet os` host names a `System` the config doesn't define (D-JPK-OSHOST1) |
+| E0981 | jetpack | a `jet os` config file doesn't exist (D-JPK-OSHOST1) |
 | E0982 | jetpack | `use <pkg>` names an `executable` package — executables go on PATH, not `use` (U17) |
 | E0983 | jetpack | `use <pkg>` names a declared `library` dependency that hasn't been realized yet (U17) |
 | E1001 | jet   | unknown core module |
@@ -554,6 +554,8 @@ before continuing.
 | E1274 | jetpack | no persisted build logs/explain data exist for the requested package/ref (U27, D-JPK-BUILDDBG1) |
 | E1275 | jetpack | sandbox fallback is forbidden by policy but unprivileged sandboxing is unavailable (U28, D-JPK-NODAEMON1) |
 | E1276 | jetpack | `--offline` would need network access or a missing local package object (U29, D-JPK-OFFLINE1) |
+| E1277 | jetpack | a jetos option key uses a retired namespace (D-JPK-OSNS1) |
+| E1278 | jetpack | a jetos activation proof is incomplete (D-WD8) |
 | E2001 | jet   | `pkg.jet` requests an edition this toolchain can't provide (E2-M2, D-REL3) |
 | E2002 | jet   | a deprecated item is used past its migration window (E2-M2, D-REL5) |
 | E2101 | jet   | unknown subcommand on the command line, with a "did you mean" (E2-M3, D-DX) |
@@ -700,9 +702,9 @@ CLI.
 | E0976 | An `Image` uses a frozen disk-image format. | D-JETOS-FREEZE1: `iso`, `qcow`, and `raw` disk images are jetos research capture; Jetpack only builds `.Oci` images today. | Use `kind: .Oci` for an active image, or keep disk-image notes in the jetos research appendix. |
 | E0977 | An `Image` has no active `from`, or restates a frozen system-inherited field. | Active Jetpack images are OCI containers built `from: packages.<name>`; `system.*` disk images are frozen jetos research. | Add `from: packages.<name>` for an `.Oci` image, or remove fields inherited from frozen `system.*` research. |
 | E0978 | An `Image` `from:` references a frozen/unknown system. | D-JETOS-FREEZE1: `from: system.<name>` is frozen jetos disk-image research; Jetpack's active image path uses `from: packages.<name>`. | Use `from: packages.<name>` for an `.Oci` image, or keep the system image as research capture. |
-| E0979 | A `jetpack os` target was given with no `@host` selector. | U16: `jetpack os <verb>` takes `[<config-path>]@<host>`; the `@host` segment selects which `System` in the config to apply, and it is required. | Write `jetpack os switch @<host>` (default config) or `jetpack os switch ./config.jet@<host>`. |
-| E0980 | A `jetpack os` `@host` selector names a system the config doesn't define. | U16: the `@host` selector picks which `System` to apply; it must name a `system.<name>:` contribution the config defines. | Define `system.<host>: { … }`, or select one of the systems the config already defines. |
-| E0981 | The `jetpack os` config file (named, or the default `~/.jet/config.jet`) doesn't exist. | U16: `jetpack os <verb>` loads `[<config-path>]@<host>`; with no path prefix it defaults to `~/.jet/config.jet`. | Create the config file, or pass an explicit path before the `@`, e.g. `jetpack os switch ./config.jet@<host>`. |
+| E0979 | `jet os` was given no host to apply. | D-JPK-OSHOST1=C: a bare host selects `system.<host>` in `./config.jet`; `path@host` selects an exact external root. | Write `jet os switch laptop` or `jet os switch ../machines@laptop`. |
+| E0980 | A `jet os` host names a system the config doesn't define. | D-JPK-OSHOST1=C: the host selects one `system.<host>` contribution in `config.jet`. | Define `system.<host>: { … }`, or select one of the systems the config already defines. |
+| E0981 | The `jet os` config file doesn't exist. | D-JPK-OSHOST1=C: a bare host loads `./config.jet`; `path@host` loads `path/config.jet` when `path` is a directory, or the file named by `path`. | Create it with `jet os init <host>`, or pass an external root as `path@host`. |
 | E0982 | `use <pkg>` named a package that is realized as an `executable`. | U17: one import concept (`use`) covers files, modules, and `library` packages; an `executable` package installs a binary on your PATH — you run it, you don't import its code. | Remove the `use`, and run the executable's binary instead; or, if you meant to import its code, change the package to `library` in `pkg.jet`. |
 | E0983 | `use <pkg>` named a `library` dependency the project declares but that hasn't been realized (its source isn't staged in the shared hangar store, and isn't on disk as a path dep). | U17: a `library` is consumed with the ordinary `use` form only after it is realized — `jet build`/`run` never realize on demand, keeping them offline and deterministic (the same flow as pre-fetched deps). | Run `jetpack build` to realize the library into the hangar, then `use <pkg>;` resolves it. |
 
@@ -1318,6 +1320,8 @@ snapshots in `tests/jetpack.rs` (the `tests/ui/` harness only renders front-end
 | E1274 | No build log exists for `{pkg}`. | `jet logs` and package-form `jet explain <ref>` read persisted Jetpack build attempts. If a package has not failed or built through the logged runner on this machine, there is nothing local to explain. | Run `jet build <ref>` first; for diagnostic-code help, keep using `jet explain E1234`. |
 | E1275 | Build sandboxing is required but unavailable. | `jetpack config sandbox require` turns sandbox fallback into a hard failure. This machine cannot provide Jetpack's unprivileged sandbox tier, so running adapter builds would violate local policy. | Run `jetpack config sandbox allow` to permit fallback, or enable unprivileged sandbox support on this machine. |
 | E1276 | `--offline` forbids network access. | Realize-class verbs must run from the current lock and local hangar when offline. Network-class verbs (`add`, `update`, `outdated`, publish/cache sync) cannot refresh metadata under `--offline`, and a missing local object cannot be fetched. | Drop `--offline` for this command, or realize/fetch the needed object before going offline. |
+| E1277 | A jetos option key uses a retired namespace. | D-JPK-OSNS1=B: jetos option keys start with full-word namespaces: `filesystem`, `network`, or `packages`. | Rename the option namespace, for example `net.hostName` becomes `network.hostName`. |
+| E1278 | A jetos activation proof is incomplete. | D-WD8 requires `jet os switch` to prove the plan, risk class, generated service artifacts, and rollback evidence before changing the active generation pointers. | Rebuild the generation so the proof artifacts are regenerated, or discard a hand-edited generation. |
 | L0203 | `use {name}#{selector};` isn't pinned to an exact version. | An inline script dependency (U11) has no lockfile until `jet lock` runs; a loose selector (`1.4` rather than `1.4.2`) can resolve to a different version on a fresh clone (D-JPK-SCRIPTDEP1). | Write the exact version Jet resolved (`use {name}#<major.minor.patch>;`), or run `jet lock` to pin it in `<script>.lock`. |
 | L0204 | `{field}` in `{file}` has no `env.*` equivalent yet. | `jet bridge flake` (U16) is a best-effort translator; some `flake.nix`/`devenv.nix` fields (`shellHook`, multiple named devShells, `buildInputs` vs `nativeBuildInputs`) have no ratified `env.*` spelling. | Review the generated shim and add `{field}`'s effect by hand if you need it — the shim is a starting point, not a full translation. |
 | L0205 | Build sandboxing is unavailable; adapter builds will run unsandboxed. | D-JPK-NODAEMON1 forbids privileged helpers and daemons. When the platform cannot offer an unprivileged sandbox, Jetpack must say so instead of silently downgrading. | Run `jetpack config sandbox require` to refuse fallback. |

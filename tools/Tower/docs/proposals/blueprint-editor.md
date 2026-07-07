@@ -3,6 +3,8 @@
 > Proposal for owner review (card #182, 2026-07-02). Digestible report, not a
 > plan. Companion: `ue-to-jet.md` (UE design lessons; its §3 covers the
 > language-side type-directed authoring this editor sits on).
+>
+> Durable implementation plan: [`../plans/epoch-7/blueprint-editor.md`](../plans/epoch-7/blueprint-editor.md).
 
 The pitch: a fully functional node-graph editor for Jet where the graph and
 the text are the same program. Epic is removing Blueprint from UE6. Millions

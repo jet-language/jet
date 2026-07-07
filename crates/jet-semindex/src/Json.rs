@@ -3,7 +3,10 @@
 use jet_foundation::Diagnostics::Span;
 
 use crate::Build::{SymDef, SymKind, SymRef};
-use crate::Types::{CallEdge, EffectFact, SemIndex, SourceSpan, SymbolDef, SymbolKind, SymbolRef};
+use crate::Types::{
+    CallEdge, EffectFact, MemberFact, MemberKind, MemberOrigin, SemIndex, SourceSpan, SymbolDef,
+    SymbolKind, SymbolRef, TypeDossier,
+};
 
 fn escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
@@ -139,6 +142,43 @@ fn json_effect(e: &EffectFact) -> String {
     )
 }
 
+fn json_member_kind(kind: &MemberKind) -> &'static str {
+    match kind {
+        MemberKind::Field => "field",
+        MemberKind::Variant => "variant",
+        MemberKind::Method => "method",
+    }
+}
+
+fn json_origin(origin: &MemberOrigin) -> String {
+    match origin {
+        MemberOrigin::TypeBody => "{\"kind\":\"type_body\"}".to_string(),
+        MemberOrigin::InherentImpl => "{\"kind\":\"inherent_impl\"}".to_string(),
+        MemberOrigin::TraitImpl { trait_name } => format!(
+            "{{\"kind\":\"trait_impl\",\"trait\":{}}}",
+            json_str(trait_name)
+        ),
+        MemberOrigin::TraitRequirement { trait_name } => format!(
+            "{{\"kind\":\"trait_requirement\",\"trait\":{}}}",
+            json_str(trait_name)
+        ),
+    }
+}
+
+fn json_member(m: &MemberFact) -> String {
+    format!(
+        "{{\"owner\":{},\"name\":{},\"identity\":{},\"kind\":{},\"origin\":{},\"signature\":{},\"module\":{},\"span\":{}}}",
+        json_str(&m.owner),
+        json_str(&m.name),
+        json_str(&m.identity),
+        json_str(json_member_kind(&m.kind)),
+        json_origin(&m.origin),
+        json_str(&m.signature),
+        json_str(&m.module_path),
+        json_span(m.span)
+    )
+}
+
 impl SemIndex {
     /// Stable JSON document for tests and `jet semindex --json`.
     pub fn to_json(&self) -> String {
@@ -146,14 +186,84 @@ impl SemIndex {
         let refs: Vec<String> = self.references().iter().map(json_ref).collect();
         let calls: Vec<String> = self.call_edges().iter().map(json_call).collect();
         let effects: Vec<String> = self.effects().iter().map(json_effect).collect();
+        let members: Vec<String> = self.members().iter().map(json_member).collect();
         format!(
-            "{{\"schema_version\":{},\"definitions\":[{}],\"references\":[{}],\"calls\":[{}],\"effects\":[{}]}}",
+            "{{\"schema_version\":{},\"definitions\":[{}],\"references\":[{}],\"calls\":[{}],\"effects\":[{}],\"members\":[{}]}}",
             self.schema_version(),
             defs.join(","),
             refs.join(","),
             calls.join(","),
-            effects.join(",")
+            effects.join(","),
+            members.join(",")
         )
+    }
+}
+
+impl TypeDossier {
+    pub fn to_json(&self) -> String {
+        let def_json = match &self.definition {
+            Some(def) => json_def(def),
+            None => "null".to_string(),
+        };
+        let members: Vec<String> = self.members.iter().map(json_member).collect();
+        let refs: Vec<String> = self.references.iter().map(json_ref).collect();
+        format!(
+            "{{\"schema_version\":{},\"target\":{},\"definition\":{},\"members\":[{}],\"references\":[{}]}}",
+            self.schema_version,
+            json_str(&self.target),
+            def_json,
+            members.join(","),
+            refs.join(",")
+        )
+    }
+
+    pub fn render_text(&self) -> String {
+        let mut out = String::new();
+        out.push_str(&format!(
+            "dossier `{}` (schema v{})\n",
+            self.target, self.schema_version
+        ));
+        match &self.definition {
+            Some(def) => {
+                out.push_str(&format!(
+                    "summary\n  defined: {}:{}..{}\n",
+                    def.module_path, def.def_span.start, def.def_span.end
+                ));
+            }
+            None => out.push_str("summary\n  defined: not found\n"),
+        }
+        out.push_str("members\n");
+        if self.members.is_empty() {
+            out.push_str("  none\n");
+        }
+        for m in &self.members {
+            out.push_str(&format!(
+                "  {} {} ({}) @ {}:{}..{}\n",
+                json_member_kind(&m.kind),
+                m.signature,
+                origin_text(&m.origin),
+                m.module_path,
+                m.span.start,
+                m.span.end
+            ));
+        }
+        out.push_str(&format!("references\n  count: {}\n", self.references.len()));
+        for r in &self.references {
+            out.push_str(&format!(
+                "  {}:{}..{}\n",
+                r.module_path, r.span.start, r.span.end
+            ));
+        }
+        out
+    }
+}
+
+fn origin_text(origin: &MemberOrigin) -> String {
+    match origin {
+        MemberOrigin::TypeBody => "type body".to_string(),
+        MemberOrigin::InherentImpl => "impl".to_string(),
+        MemberOrigin::TraitImpl { trait_name } => format!("impl {trait_name}"),
+        MemberOrigin::TraitRequirement { trait_name } => format!("trait {trait_name}"),
     }
 }
 

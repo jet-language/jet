@@ -139,6 +139,11 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
     },
     CommandSpec {
+        name: "os",
+        summary: "check, build, switch, rollback, list, lift, init, or image a jetos host",
+        headline: false,
+    },
+    CommandSpec {
         name: "bind",
         summary: "generate a C binding cache from a header",
         headline: false,
@@ -249,8 +254,18 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
     },
     CommandSpec {
+        name: "dossier",
+        summary: "explain a file or symbol through stable semantic fact lenses",
+        headline: false,
+    },
+    CommandSpec {
         name: "impact",
         summary: "report blast radius for a symbol (callers, references, callees)",
+        headline: false,
+    },
+    CommandSpec {
+        name: "codemod",
+        summary: "dry-run, apply, or undo replayable semantic codemods",
         headline: false,
     },
     CommandSpec {
@@ -397,6 +412,7 @@ pub fn owns_flag_vocabulary(name: &str) -> bool {
             | "bridge"
             | "services"
             | "image"
+            | "os"
             | "add"
             | "remove"
             | "bind"
@@ -421,7 +437,9 @@ pub fn owns_flag_vocabulary(name: &str) -> bool {
             | "repl"
             | "schema"
             | "semindex"
+            | "dossier"
             | "impact"
+            | "codemod"
             | "expand"
     )
 }

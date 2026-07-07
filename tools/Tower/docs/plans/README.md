@@ -6,6 +6,8 @@ are the *how*; `docs/spec/` remains the *what* and *why* and always wins on conf
 ## Where work lives
 
 - **Active epochs** — [`epoch-3/`](epoch-3/README.md) for future pillars. Epoch 2 is complete; development highlights are in `docs/spec/roadmap.md`.
+- **Epoch 7 planning** — [`epoch-7/`](epoch-7/README.md) for frozen jetos Studio,
+  proof, and visual-editor plans that need fresh ballots before implementation.
 - **Sidequests** — [`sidequests/`](sidequests/): one agent-reviewed plan per
   in-flight task. A sidequest is deleted the moment its feature ships (behavior
   then lives in `docs/spec/spec.md` + golden examples). Plans are scaffolding,

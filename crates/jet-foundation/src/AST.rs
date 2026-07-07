@@ -1002,7 +1002,7 @@ pub struct Contribution {
 /// U11/U12/U14/U18: the value of a typed contribution. `env.<name>:` reuses the
 /// ordinary expression parser (a struct literal), while `system.<name>:` and
 /// `image.<name>:` parse into dedicated typed literals so the U13 `options` list
-/// (`net.hostName: laptop`), the U13 typed `target` value (`linux.x64`), the U12
+/// (`network.hostName: laptop`), the U13 typed `target` value (`linux.x64`), the U12
 /// `Service` map, and U18 bare-`{ … }` records all have a home — none of which fit
 /// the ordinary expression grammar.
 #[derive(Debug)]
@@ -1087,7 +1087,7 @@ pub enum SystemFieldValue {
     Packages(Expr),
     /// `services: { name: { … }, … }` — a keyed map of bare `Service` records (U12).
     Services(Vec<ServiceEntry>),
-    /// `options: [ net.hostName: laptop, … ]` — an ordered list of dotted-key /
+    /// `options: [ network.hostName: laptop, … ]` — an ordered list of dotted-key /
     /// value entries (U13).
     Options(Vec<OptionEntry>),
     /// Any other field — captured as an expression so modeval can report it as an
@@ -1108,7 +1108,7 @@ pub struct ServiceEntry {
 }
 
 /// U13: one `dotted.key: value` entry in an `options:` list. `key` is the dotted
-/// path text (`net.hostName`); `value` is any expression (bare identifier, dotted
+/// path text (`network.hostName`); `value` is any expression (bare identifier, dotted
 /// typed value, list, or quoted free-form string).
 #[derive(Debug)]
 pub struct OptionEntry {
