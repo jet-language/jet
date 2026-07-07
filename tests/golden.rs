@@ -226,6 +226,11 @@ fn examples_compile_and_run() {
                     );
                 }
             }
+        } else if stem == "game/raylib_window" {
+            assert!(
+                !user_code.contains("unsafe fn user_"),
+                "raylib user functions must stay safe; bridge unsafe stays in vetted prelude"
+            );
         } else {
             // Every other example's user code is fully safe — the only `unsafe`
             // in the file is the vetted `jet_mem` arena helper, already excluded.
@@ -249,9 +254,9 @@ fn examples_compile_and_run() {
             checked += 1;
             continue;
         }
-        // D-RAYLIB1 stage 1: `core.raylib` is display-gated. The example is
-        // still front-end checked and codegen-emitted above; build/run waits for
-        // an explicit display opt-in until the native raylib bridge lands.
+        // D-FLAGSHIP-RAYLIB1=A: display remains explicit. The headless path is
+        // checked above; native display build/run stays opt-in so CI doesn't need
+        // a display server or raylib installation.
         let needs_raylib_display = stem == "game/raylib_window";
         if needs_raylib_display && std::env::var("JET_RAYLIB_DISPLAY").as_deref() != Ok("1") {
             eprintln!(

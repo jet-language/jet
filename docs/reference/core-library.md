@@ -1441,7 +1441,7 @@ These shipped in Epoch 2:
 | `core.crypto` | Hash, HMAC, vetted random primitives |
 | `core.reactive` | Signals, derived values, effects (opt-in reactivity, D-REACT1) |
 | `core.archive` | gzip compress/decompress, zip read/write, tar add/get/list (D-DEP-ARCHIVE1) |
-| `core.raylib` | Graphics bridge skeleton: typed window/draw/color calls for display-gated examples (D-RAYLIB1); native raylib link follows |
+| `core.raylib` | Graphics bridge: typed window/draw/color calls, headless by default; `JET_RAYLIB_DISPLAY=1` dynamically loads native raylib (D-RAYLIB1/D-FLAGSHIP-RAYLIB1) |
 | `core.game` | Headless deterministic game substrate: `Scene`, assets, input, frame hooks, replay transcript, budgets, ECS marker/query floor (D-GAME1/2/3, D-WD10, D-GAME-*) |
 | `core.compress.gzip` | standalone gzip compress/decompress, no archive container (D-CODECS1) |
 | `core.compress.zstd` | standalone zstd compress/decompress, no archive container (D-CODECS1) |

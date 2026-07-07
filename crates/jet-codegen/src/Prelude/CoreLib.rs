@@ -3324,15 +3324,18 @@ struct JetPlugin {
     handle: u64,
 }
 
-// -- core.raylib bridge skeleton (D-RAYLIB1=A) --------------------------------
-// This is the bounded stage-1 surface: typed handles and no-op functions so
-// examples can be front-end/type checked without requiring a display server or
-// native raylib. The next slice replaces these bodies with the real bridge.
+// jet:raylib-begin
+// -- core.raylib bridge (D-RAYLIB1=A / D-FLAGSHIP-RAYLIB1=A) -----------------
+// Display remains explicit: without JET_RAYLIB_DISPLAY=1 the bridge is a
+// deterministic headless no-op. With the flag set, Jet dynamically loads the
+// native raylib shared library and calls the real C API without adding a
+// compile-time link requirement to every CI run.
 #[derive(Clone, Debug)]
 struct RaylibWindow {
     width: i64,
     height: i64,
     title: String,
+    native: bool,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -3343,27 +3346,227 @@ struct RaylibColor {
     a: i64,
 }
 
-fn jet_raylib_window_open(width: i64, height: i64, title: &String) -> RaylibWindow {
-    RaylibWindow { width, height, title: title.clone() }
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct JetRaylibCColor {
+    r: u8,
+    g: u8,
+    b: u8,
+    a: u8,
 }
 
-fn jet_raylib_window_should_close(_window: &RaylibWindow) -> bool {
+type JetRaylibInitWindow = unsafe extern "C" fn(i32, i32, *const std::os::raw::c_char);
+type JetRaylibWindowShouldClose = unsafe extern "C" fn() -> bool;
+type JetRaylibBeginDrawing = unsafe extern "C" fn();
+type JetRaylibClearBackground = unsafe extern "C" fn(JetRaylibCColor);
+type JetRaylibDrawText =
+    unsafe extern "C" fn(*const std::os::raw::c_char, i32, i32, i32, JetRaylibCColor);
+type JetRaylibEndDrawing = unsafe extern "C" fn();
+type JetRaylibCloseWindow = unsafe extern "C" fn();
+
+#[derive(Clone, Copy)]
+struct JetRaylibApi {
+    init_window: JetRaylibInitWindow,
+    window_should_close: JetRaylibWindowShouldClose,
+    begin_drawing: JetRaylibBeginDrawing,
+    clear_background: JetRaylibClearBackground,
+    draw_text: JetRaylibDrawText,
+    end_drawing: JetRaylibEndDrawing,
+    close_window: JetRaylibCloseWindow,
+}
+
+static JET_RAYLIB_WINDOW_OPEN: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+fn jet_raylib_display_enabled() -> bool {
+    std::env::var("JET_RAYLIB_DISPLAY").as_deref() == Ok("1")
+}
+
+fn jet_raylib_clamp_u8(v: i64) -> u8 {
+    v.clamp(0, 255) as u8
+}
+
+fn jet_raylib_c_color(color: &RaylibColor) -> JetRaylibCColor {
+    JetRaylibCColor {
+        r: jet_raylib_clamp_u8(color.r),
+        g: jet_raylib_clamp_u8(color.g),
+        b: jet_raylib_clamp_u8(color.b),
+        a: jet_raylib_clamp_u8(color.a),
+    }
+}
+
+fn jet_raylib_cstring(s: &String) -> std::ffi::CString {
+    let filtered: Vec<u8> = s.as_bytes().iter().copied().filter(|b| *b != 0).collect();
+    std::ffi::CString::new(filtered).unwrap_or_else(|_| std::ffi::CString::new("").unwrap())
+}
+
+#[cfg(unix)]
+mod jet_raylib_dyn {
+    use super::*;
+    use std::os::raw::{c_char, c_int, c_void};
+    use std::sync::OnceLock;
+
+    #[cfg(target_os = "linux")]
+    #[link(name = "dl")]
+    unsafe extern "C" {}
+
+    unsafe extern "C" {
+        fn dlopen(filename: *const c_char, flags: c_int) -> *mut c_void;
+        fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
+    }
+
+    const RTLD_NOW: c_int = 2;
+    static API: OnceLock<Option<JetRaylibApi>> = OnceLock::new();
+
+    pub(super) fn api() -> Option<&'static JetRaylibApi> {
+        API.get_or_init(load).as_ref()
+    }
+
+    fn load() -> Option<JetRaylibApi> {
+        // SAFETY: the loader only reads process-global dynamic-linker state.
+        let handle = unsafe {
+            #[cfg(target_os = "macos")]
+            {
+                dlopen(b"libraylib.dylib\0".as_ptr().cast(), RTLD_NOW)
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                let first = dlopen(b"libraylib.so\0".as_ptr().cast(), RTLD_NOW);
+                if first.is_null() {
+                    dlopen(b"libraylib.so.5\0".as_ptr().cast(), RTLD_NOW)
+                } else {
+                    first
+                }
+            }
+        };
+        if handle.is_null() {
+            return None;
+        }
+        Some(JetRaylibApi {
+            init_window: symbol(handle, b"InitWindow\0")?,
+            window_should_close: symbol(handle, b"WindowShouldClose\0")?,
+            begin_drawing: symbol(handle, b"BeginDrawing\0")?,
+            clear_background: symbol(handle, b"ClearBackground\0")?,
+            draw_text: symbol(handle, b"DrawText\0")?,
+            end_drawing: symbol(handle, b"EndDrawing\0")?,
+            close_window: symbol(handle, b"CloseWindow\0")?,
+        })
+    }
+
+    fn symbol<T: Copy>(handle: *mut c_void, name: &[u8]) -> Option<T> {
+        // SAFETY: names are NUL-terminated raylib symbols and T matches each
+        // requested C function signature at the call site above.
+        let ptr = unsafe { dlsym(handle, name.as_ptr().cast()) };
+        if ptr.is_null() {
+            None
+        } else {
+            // SAFETY: C function pointers and data pointers have the platform ABI
+            // representation used by dlsym on supported Unix targets.
+            Some(unsafe { std::mem::transmute_copy(&ptr) })
+        }
+    }
+}
+
+#[cfg(unix)]
+fn jet_raylib_api() -> Option<&'static JetRaylibApi> {
+    jet_raylib_dyn::api()
+}
+
+#[cfg(not(unix))]
+fn jet_raylib_api() -> Option<&'static JetRaylibApi> {
+    None
+}
+
+fn jet_raylib_window_open(width: i64, height: i64, title: &String) -> RaylibWindow {
+    let mut native = false;
+    if jet_raylib_display_enabled() {
+        if let Some(api) = jet_raylib_api() {
+            let title_c = jet_raylib_cstring(title);
+            // SAFETY: raylib is loaded, the title pointer is valid for the call,
+            // and all C interaction is confined to this vetted bridge.
+            unsafe { (api.init_window)(width as i32, height as i32, title_c.as_ptr()) };
+            JET_RAYLIB_WINDOW_OPEN.store(true, std::sync::atomic::Ordering::SeqCst);
+            native = true;
+        }
+    }
+    RaylibWindow {
+        width,
+        height,
+        title: title.clone(),
+        native,
+    }
+}
+
+fn jet_raylib_window_should_close(window: &RaylibWindow) -> bool {
+    if window.native {
+        if let Some(api) = jet_raylib_api() {
+            // SAFETY: the function pointer was loaded from raylib and takes no args.
+            return unsafe { (api.window_should_close)() };
+        }
+    }
     true
 }
 
-fn jet_raylib_begin_drawing(_window: &RaylibWindow) {}
+fn jet_raylib_begin_drawing(window: &RaylibWindow) {
+    if window.native {
+        if let Some(api) = jet_raylib_api() {
+            // SAFETY: the raylib window was opened by this bridge.
+            unsafe { (api.begin_drawing)() };
+        }
+    }
+}
 
-fn jet_raylib_clear_background(_color: &RaylibColor) {}
+fn jet_raylib_clear_background(color: &RaylibColor) {
+    if JET_RAYLIB_WINDOW_OPEN.load(std::sync::atomic::Ordering::SeqCst) {
+        if let Some(api) = jet_raylib_api() {
+            // SAFETY: color is a repr(C) mirror of raylib Color.
+            unsafe { (api.clear_background)(jet_raylib_c_color(color)) };
+        }
+    }
+}
 
-fn jet_raylib_draw_text(_text: &String, _x: i64, _y: i64, _size: i64, _color: &RaylibColor) {}
+fn jet_raylib_draw_text(text: &String, x: i64, y: i64, size: i64, color: &RaylibColor) {
+    if JET_RAYLIB_WINDOW_OPEN.load(std::sync::atomic::Ordering::SeqCst) {
+        if let Some(api) = jet_raylib_api() {
+            let text_c = jet_raylib_cstring(text);
+            // SAFETY: the text pointer is valid for the call, color matches C ABI,
+            // and raylib owns the active drawing context.
+            unsafe {
+                (api.draw_text)(
+                    text_c.as_ptr(),
+                    x as i32,
+                    y as i32,
+                    size as i32,
+                    jet_raylib_c_color(color),
+                )
+            };
+        }
+    }
+}
 
-fn jet_raylib_end_drawing() {}
+fn jet_raylib_end_drawing() {
+    if JET_RAYLIB_WINDOW_OPEN.load(std::sync::atomic::Ordering::SeqCst) {
+        if let Some(api) = jet_raylib_api() {
+            // SAFETY: the raylib window/drawing context is bridge-owned.
+            unsafe { (api.end_drawing)() };
+        }
+    }
+}
 
-fn jet_raylib_close_window(_window: &RaylibWindow) {}
+fn jet_raylib_close_window(window: &RaylibWindow) {
+    if window.native {
+        if let Some(api) = jet_raylib_api() {
+            // SAFETY: the window was opened by this bridge.
+            unsafe { (api.close_window)() };
+            JET_RAYLIB_WINDOW_OPEN.store(false, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+}
 
 fn jet_raylib_color(r: i64, g: i64, b: i64, a: i64) -> RaylibColor {
     RaylibColor { r, g, b, a }
 }
+// jet:raylib-end
 
 // -- core.game headless substrate (D-GAME1/2/3, D-WD10, D-GAME-*) -------------
 #[derive(Default, Debug)]

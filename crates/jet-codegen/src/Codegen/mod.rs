@@ -361,6 +361,35 @@ fn strip_unused_gc_prelude(out: String) -> String {
     s
 }
 
+/// D-FLAGSHIP-RAYLIB1=A: the raylib bridge carries vetted FFI `unsafe`.
+/// Programs that never call `core.raylib` must not inherit that unsafe prelude.
+fn strip_unused_raylib_prelude(out: String) -> String {
+    let prelude_end = [
+        out.find("fn user_"),
+        out.find("pub fn user_"),
+        out.find("fn main()"),
+    ]
+    .into_iter()
+    .flatten()
+    .min()
+    .unwrap_or(out.len());
+    if out[prelude_end..].contains("jet_raylib_") {
+        return out;
+    }
+    const BEGIN: &str = "// jet:raylib-begin";
+    const END: &str = "// jet:raylib-end";
+    let Some(start) = out.find(BEGIN) else {
+        return out;
+    };
+    let Some(end_marker) = out.find(END) else {
+        return out;
+    };
+    let end = end_marker + END.len();
+    let mut s = out[..start].to_string();
+    s.push_str(out[end..].trim_start_matches('\n'));
+    s
+}
+
 /// D-TXN-ROLLBACK layer 1: the `jet_txn` module carries the auto-snapshot
 /// restore mechanism, whose Drop-backed writeback uses one vetted raw-pointer
 /// deref (sound: the transaction guard outlives nothing it points at). A program
@@ -690,8 +719,8 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
     // S12/D-CLIFLAG1: Jet's only program entry is `fn run`; Rust still needs
     // `fn main`, so synthesize that wrapper for zero-arg and typed-CLI forms.
     emit_cli_entry_if_needed(&cx, &prog.items, &mut out);
-    strip_unused_term_prelude(strip_unused_gc_prelude(strip_unused_txn_prelude(
-        strip_unused_mem_prelude(out),
+    strip_unused_raylib_prelude(strip_unused_term_prelude(strip_unused_gc_prelude(
+        strip_unused_txn_prelude(strip_unused_mem_prelude(out)),
     )))
 }
 
@@ -753,14 +782,16 @@ mod tests {
         assert!(rust.contains("let user_window: RaylibWindow"));
         assert!(
             !rust.contains("jet_std::Raylib"),
-            "raylib skeleton handles must lower to top-level prelude types"
+            "raylib bridge handles must lower to top-level prelude types"
         );
         assert!(rust.contains("jet_raylib_begin_drawing"));
         assert!(rust.contains("jet_raylib_draw_text"));
         assert!(rust.contains("jet_raylib_close_window"));
+        assert!(rust.contains("dlopen"));
+        assert!(rust.contains("JET_RAYLIB_DISPLAY"));
         assert!(
-            !rust.contains("unsafe"),
-            "raylib example emits ungated unsafe"
+            !rust.contains("unsafe fn user_"),
+            "raylib user functions must stay safe; unsafe is confined to the vetted bridge"
         );
     }
 }
@@ -875,8 +906,8 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
 
     emit_test_fns(&cx, &tests, &mut out);
     emit_test_main(&tests, &mut out);
-    strip_unused_term_prelude(strip_unused_gc_prelude(strip_unused_txn_prelude(
-        strip_unused_mem_prelude(out),
+    strip_unused_raylib_prelude(strip_unused_term_prelude(strip_unused_gc_prelude(
+        strip_unused_txn_prelude(strip_unused_mem_prelude(out)),
     )))
 }
 
@@ -1195,8 +1226,8 @@ pub fn emit_bundle_dbg(
     // the Rust `fn main` wrapper that parses `io.args()` and dispatches to it.
     // No-op when the entry file has no `run` (sema's E0101 already rejected it).
     emit_cli_entry_if_needed(&cx, &entry.items, &mut out);
-    strip_unused_term_prelude(strip_unused_gc_prelude(strip_unused_txn_prelude(
-        strip_unused_mem_prelude(out),
+    strip_unused_raylib_prelude(strip_unused_term_prelude(strip_unused_gc_prelude(
+        strip_unused_txn_prelude(strip_unused_mem_prelude(out)),
     )))
 }
 
@@ -1320,8 +1351,8 @@ pub fn emit_bundle_tests_cov(
 
     emit_test_fns(&cx, &tests, &mut out);
     emit_test_main_cov(&tests, &mut out, coverage);
-    strip_unused_term_prelude(strip_unused_gc_prelude(strip_unused_txn_prelude(
-        strip_unused_mem_prelude(out),
+    strip_unused_raylib_prelude(strip_unused_term_prelude(strip_unused_gc_prelude(
+        strip_unused_txn_prelude(strip_unused_mem_prelude(out)),
     )))
 }
 
@@ -1498,7 +1529,7 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
         out.push_str("    }\n");
     }
     out.push_str("}\n");
-    strip_unused_term_prelude(strip_unused_gc_prelude(strip_unused_txn_prelude(
-        strip_unused_mem_prelude(out),
+    strip_unused_raylib_prelude(strip_unused_term_prelude(strip_unused_gc_prelude(
+        strip_unused_txn_prelude(strip_unused_mem_prelude(out)),
     )))
 }

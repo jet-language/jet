@@ -1245,6 +1245,13 @@ The frame hook is not a second engine model; it is script on the scene. The
 already-ratified `core.raylib` bridge package (D-RAYLIB1=A) remains the
 interim compatibility floor beneath the native-shaped stack.
 
+**D-FLAGSHIP-RAYLIB1 — Native raylib bridge** *(ratified 2026-07-07,
+card #9)*: the flagship raylib slice uses the already-ratified `core.raylib`
+surface. Generated code is headless by default; with `JET_RAYLIB_DISPLAY=1` it
+dynamically loads native raylib and calls the real C window/draw APIs. Missing
+raylib degrades to the same headless path so CI and ordinary test runs do not
+link raylib or require a display server.
+
 **D-GAME-ASSET1 / D-GAME-ECS1 / D-GAME-INPUT1 / D-GAME-REPLAY1 /
 D-GAME-BACKEND1 / D-GAME-BUDGET1 — Stable `core.game` substrate** *(ratified
 2026-07-06, card #238)*: the Epoch 3 headless Core floor ships scene-owned
