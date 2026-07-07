@@ -1,5 +1,6 @@
 use core.files as fs
 use core.io as io
+use core.process as process
 use core.regex as re
 
 struct Hit {
@@ -17,6 +18,18 @@ fn default_paths() -> [String] {
         "examples/apps/jetgrep/fixtures/api.log",
         "examples/apps/jetgrep/fixtures/notes.txt",
     ]
+}
+
+fn fail_string(message: String) -> String {
+    print(message)
+    process.exit(1)
+    return ""
+}
+
+fn fail_bool(message: String) -> Bool {
+    print(message)
+    process.exit(1)
+    return false
 }
 
 fn pattern_from_args() -> String {
@@ -44,11 +57,16 @@ fn paths_from_args() -> [String] {
 }
 
 fn scan_file(pattern: String, path: String) -> [Hit] {
-    text :: fs.read(copy path) ?? ""
+    if !fs.exists(copy path) {
+        print("jetgrep: missing file {path}")
+        process.exit(1)
+    }
+    text :: fs.read(copy path) ?? fail_string("jetgrep: unreadable file {path}")
     hits: [Hit] := []
     line_no := 1
     loop line in text.split("\n") {
-        if re.is_match(pattern, line) ?? panic("bad regex") {
+        matched :: re.is_match(pattern, line) ?? fail_bool("jetgrep: invalid regex {pattern}")
+        if matched {
             hits.push(Hit.{path: copy path, line: line_no, text: line})
         }
         line_no += 1
@@ -76,6 +94,7 @@ fn render_hits(hits: [Hit]) -> [String] {
 
 fn run() {
     pattern :: pattern_from_args()
+    _valid :: re.is_match(copy pattern, "") ?? fail_bool("jetgrep: invalid regex {pattern}")
     paths :: paths_from_args()
     hits :: scan(copy pattern, paths)
     print("jetgrep pattern={pattern}")

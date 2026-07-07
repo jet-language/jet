@@ -1,4 +1,5 @@
 # metal
 
-Freestanding flagship slice. Current deterministic mode keeps the Life core
-host-runnable while `tests/slices.rs` also checks `jet build --freestanding`.
+Freestanding implementation slice. Current deterministic mode keeps the Life
+core host-runnable while `tests/slices.rs` checks `jet build --freestanding`.
+UART/QEMU/no-std symbol proof remains on card #9.

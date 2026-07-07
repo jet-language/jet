@@ -21,7 +21,10 @@ fn handle_create(req: HttpRequest) -> HttpResponse {
 
 fn handle_fetch(req: HttpRequest) -> HttpResponse {
     id :: req.param("id") ?? "p0001"
-    return HttpResponse.{status: "200 OK", body: "paste={id}", headers: []}
+    if id == "p0001" {
+        return HttpResponse.{status: "200 OK", body: "flight plan", headers: []}
+    }
+    return HttpResponse.{status: "404 Not Found", body: json_pair("error", "not found"), headers: []}
 }
 
 fn run() {
@@ -52,7 +55,7 @@ fn run() {
         listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind")
         addr :: listener.local_addr()
         sender.send(copy addr)
-        loop _i in [0, 1, 2] {
+        loop _i in [0, 1, 2, 3] {
             stream :: listener.accept() ?? panic("accept")
             raw :: stream.read() ?? panic("read")
             req :: http.parse(raw)
@@ -64,10 +67,12 @@ fn run() {
     health :: http.get("http://{addr}/health") ?? panic("health")
     created :: http.post("http://{addr}/paste", "flight plan") ?? panic("create")
     fetched :: http.get("http://{addr}/p/p0001") ?? panic("fetch")
+    missing :: http.get("http://{addr}/p/missing") ?? panic("missing")
     server_task.join()
     print("health {health.status()} {health.body()}")
     print("create {created.status()} {created.body()}")
     print("fetch {fetched.status()} {fetched.body()}")
+    print("missing {missing.status()} {missing.body()}")
 }
 
 #Test("db round trip stores paste") {

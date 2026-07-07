@@ -41,6 +41,27 @@ fn assert_expected(app: &str) {
     );
 }
 
+fn assert_failure(args: &[&str], needle: &str) {
+    let out = run_jet(args);
+    assert!(
+        !out.status.success(),
+        "jet {:?} unexpectedly succeeded\nstdout:\n{}\nstderr:\n{}",
+        args,
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        combined.contains(needle),
+        "jet {:?} missing `{needle}`\noutput:\n{combined}",
+        args
+    );
+}
+
 fn assert_manifest(app: &str) {
     let dir = Path::new("examples/apps").join(app);
     assert!(dir.join("pkg.jet").is_file(), "{app} missing pkg.jet");
@@ -57,6 +78,28 @@ fn app_slices_run_tests_and_match_goldens() {
         assert_manifest(app);
         assert_expected(app);
     }
+}
+
+#[test]
+fn jetgrep_reports_cli_errors() {
+    assert_failure(
+        &[
+            "run",
+            "examples/apps/jetgrep/main.jet",
+            "[",
+            "examples/apps/jetgrep/fixtures/api.log",
+        ],
+        "jetgrep: invalid regex [",
+    );
+    assert_failure(
+        &[
+            "run",
+            "examples/apps/jetgrep/main.jet",
+            "error",
+            "examples/apps/jetgrep/fixtures/missing.txt",
+        ],
+        "jetgrep: missing file examples/apps/jetgrep/fixtures/missing.txt",
+    );
 }
 
 #[test]
