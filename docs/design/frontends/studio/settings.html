@@ -344,12 +344,16 @@ function renderServices(d){
   bindControls(d);
 }
 function renderPackages(d){
-  const rows=PACKAGES.map(p=>`<div class="row"><div><div class="lbl">${p.name}</div><div class="path">packages: [ … ${p.name} … ]</div></div><div class="ctl"><span class="enumpill">${p.source}</span> <button class="btn ghost" disabled>Remove</button></div></div>`).join("");
-  d.innerHTML=`<h1>Packages</h1><p class="lede">System packages resolved from the <span class="mono">mine</span> core source. Realized offline, no Nix.</p><div class="card">${rows}</div><button class="btn" style="margin-top:4px">Add package…</button>`;
+  const rows=PACKAGES.map(p=>`<div class="row"><div><div class="lbl">${p.name}</div><div class="path">packages: [ … ${p.name} … ]</div></div><div class="ctl"><span class="enumpill">${p.source}</span> <button class="btn ghost" data-rmpkg="${p.name}">Remove</button></div></div>`).join("");
+  d.innerHTML=`<h1>Packages</h1><p class="lede">System packages resolved from the <span class="mono">mine</span> core source. Realized offline, no Nix.</p><div class="card">${rows}</div><button class="btn" style="margin-top:4px" data-addpkg>Add package…</button>`;
+  d.querySelectorAll("[data-rmpkg]").forEach(b=>b.onclick=()=>toast("Stage package removal",`jet os pkg remove ${b.dataset.rmpkg} drops it from packages and stages the one-line source diff for review before apply.`,"ok"));
+  d.querySelector("[data-addpkg]").onclick=()=>toast("Add package",`jet os pkg add resolves a package from the mine core source and stages it into the pending changes.`,"ok");
 }
 function renderSecrets(d){
-  const rows=SECRETS.map(s=>`<div class="row"><div><div class="lbl">${s.name} <span class="tag">age-encrypted</span></div><div class="desc">Used by <span class="mono">${s.used}</span>. Value never leaves the encrypted store.</div><div class="path">secrets.${s.name}.source: "${s.age}"</div></div><div class="ctl"><span class="mono" style="color:var(--dim)">•••••••• sealed</span> <button class="btn ghost">Re-key</button></div></div>`).join("");
-  d.innerHTML=`<h1>Secrets</h1><p class="lede">Studio shows secret names and their age files only — never plaintext. Editing a value re-encrypts in place.</p><div class="card">${rows}</div><button class="btn" style="margin-top:4px">Add secret…</button>`;
+  const rows=SECRETS.map(s=>`<div class="row"><div><div class="lbl">${s.name} <span class="tag">age-encrypted</span></div><div class="desc">Used by <span class="mono">${s.used}</span>. Value never leaves the encrypted store.</div><div class="path">secrets.${s.name}.source: "${s.age}"</div></div><div class="ctl"><span class="mono" style="color:var(--dim)">•••••••• sealed</span> <button class="btn ghost" data-rekey="${s.name}">Re-key</button></div></div>`).join("");
+  d.innerHTML=`<h1>Secrets</h1><p class="lede">Studio shows secret names and their age files only — never plaintext. Editing a value re-encrypts in place.</p><div class="card">${rows}</div><button class="btn" style="margin-top:4px" data-addsecret>Add secret…</button>`;
+  d.querySelectorAll("[data-rekey]").forEach(b=>b.onclick=()=>toast("Re-key "+b.dataset.rekey,`jet os secret rekey ${b.dataset.rekey} re-encrypts its age file to the host's current recipient keys. Plaintext is never read or shown.`,"ok"));
+  d.querySelector("[data-addsecret]").onclick=()=>toast("Add secret",`jet os secret add encrypts a new value with age and writes only its name and file path into the source.`,"ok");
 }
 function renderGenerations(d){
   const rows=GENERATIONS.map(g=>{
@@ -441,6 +445,7 @@ function toast(title,msg,kind){
 function escape(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
 
 document.getElementById("filter").addEventListener("input",e=>renderNav(e.target.value));
+document.querySelector(".host-pick").onclick=()=>toast("Switch host","Studio edits one host at a time. Switching loads that host's config.jet and generation history — hosts come from the fleet in workspace.jet.","ok");
 renderNav();renderDetail();renderTray();
 </script>
 </body>

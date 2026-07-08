@@ -22,7 +22,7 @@ Core-loop test — one sentence each, all distinct:
 | # | file | core loop |
 |---|------|-----------|
 | 1 | quiet.html | Live in the browser; the terminal is a three-line daemon. |
-| 2 | dashboard.html | The terminal is mission control; the browser stays clean. |
+| 2 | dashboard.html | The terminal is the primary view (pinned status header + request log); the browser stays clean. |
 | 3 | paired.html | Glance at terminal or browser corner — same status, same error. |
 
 quiet and dashboard are deliberate opposites (rich-browser/silent-terminal vs
@@ -65,7 +65,7 @@ must stay self-contained (no CDN).
 
 ## 2 — Terminal dashboard
 
-**Loop:** terminal is mission control — pinned header (status dot, port,
+**Loop:** terminal is the primary view — pinned header (status dot, port,
 clients, last build) over a scrolling request/rebuild log with timings. Browser
 shows only a thin error banner pointing back.
 

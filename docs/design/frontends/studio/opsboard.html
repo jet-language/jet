@@ -129,7 +129,7 @@ button{font:inherit;color:inherit;cursor:pointer}
 <header class="top">
   <span class="brand">jetos Studio <small>operations</small></span>
   <span class="live"><span class="beat"></span> live · fleet home</span>
-  <div class="right"><span>refreshed just now</span><button class="btn sm ghost">Refresh</button></div>
+  <div class="right"><span>fleet from workspace.jet</span><span id="refreshedAt">refreshed just now</span><button class="btn sm ghost" id="refreshBtn">Refresh</button></div>
 </header>
 
 <div class="page">
@@ -172,6 +172,10 @@ button{font:inherit;color:inherit;cursor:pointer}
    and edit rarely.
 ----------------------------------------------------------------*/
 
+// Fleet members come from the `hosts:` list in the workspace's workspace.jet;
+// per-host state is what `jet os status <host>` reports (generation, services,
+// drift). A single-machine user sees one row — their own host. Illustrative
+// data below stands in for that live poll.
 const HOSTS = [
   {id:"halcyon", role:"workstation", state:"err", gen:41, tried:42,
    sub:"kernel boot failed · fell back to 41", uptime:"2h", target:"linux.x64",
@@ -269,7 +273,7 @@ function renderHosts(){
       <span class="state ${h.state}">${GLYPH[h.state]}</span>
       <div><div class="name">${h.id}<span class="role">${h.role} · ${h.target}</span></div>
         <div class="sub">generation <span class="mono">${h.gen}</span> · up ${h.uptime} · ${h.sub}</div></div>
-      <div class="ribbon">${rib}<span class="lab">gen 42</span></div>
+      <div class="ribbon">${rib}<span class="lab">gen ${h.gen}</span></div>
     </button>`;
   }).join("");
   document.getElementById("hosts").querySelectorAll(".host-row").forEach(b=>b.onclick=()=>openDrawer(b.dataset.host));
@@ -354,6 +358,7 @@ function restart(hostId){
 }
 
 function refresh(){renderKpis();renderAlerts();renderHosts();renderSvcs();}
+document.getElementById("refreshBtn").onclick=()=>{refresh();document.getElementById("refreshedAt").textContent="refreshed just now";toast("Fleet refreshed","Re-polled jet os status for every host in workspace.jet.","ok");};
 function toast(title,msg,kind){
   const t=document.getElementById("toast");
   t.style.borderLeftColor=kind==="ok"?"var(--ok)":kind==="warn"?"var(--warn)":"var(--err)";
