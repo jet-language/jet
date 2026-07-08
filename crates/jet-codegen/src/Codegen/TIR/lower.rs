@@ -4753,6 +4753,7 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
             | "MigrationStatus"
             | "DataGroup"
             | "DataStatus"
+            | "DataSummary"
     );
     if ui_name_collision && cx.type_names.contains(type_name) {
         return None;
@@ -4789,6 +4790,10 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
         // D-DATA-SURFACE1=A / D-DATA-STATUS1=A: core.data fields use plain Rust names.
         "DataGroup" => matches!(member, "key" | "count" | "sum" | "mean"),
         "DataStatus" => matches!(member, "step" | "path" | "replacement"),
+        "DataSummary" => matches!(
+            member,
+            "count" | "sum" | "mean" | "min" | "max" | "median" | "variance" | "stddev"
+        ),
         // D-RENDERTGT2=A (c133 M1): UI geometry fields.
         "Point" => matches!(member, "x" | "y"),
         "Size" => matches!(member, "width" | "height"),
@@ -4893,6 +4898,15 @@ pub(crate) fn struct_field_type(cx: &Cx, recv_ty: &Type, field: &str) -> Option<
     if name == "DataStatus" && !cx.struct_fields.contains_key(name) {
         return match field {
             "step" | "path" | "replacement" => Some(Type::String),
+            _ => None,
+        };
+    }
+    if name == "DataSummary" && !cx.struct_fields.contains_key(name) {
+        return match field {
+            "count" => Some(Type::Int),
+            "sum" | "mean" | "min" | "max" | "median" | "variance" | "stddev" => {
+                Some(Type::Float)
+            }
             _ => None,
         };
     }
@@ -7127,6 +7141,56 @@ pub(crate) fn lower_core_closure_call(
             let code = format!(
                 "{}{}(&({}), {}, {})",
                 cx.root_prefix, helper, rows_s, key, value
+            );
+            return Some(TExpr {
+                ty: Type::List(Box::new(Type::Named("DataGroup".to_string()))),
+                kind: TExprKind::ConstInline(code),
+            });
+        }
+        ("core.data", "inner_join" | "left_join") => {
+            let left = lower_expr(&args[0].expr, cx, env);
+            let right = lower_expr(&args[1].expr, cx, env);
+            let left_ty = match &left.ty {
+                Type::List(inner) => (**inner).clone(),
+                _ => Type::Int,
+            };
+            let right_ty = match &right.ty {
+                Type::List(inner) => (**inner).clone(),
+                _ => Type::Int,
+            };
+            let left_s = emit_tir_expr(&left, cx);
+            let right_s = emit_tir_expr(&right, cx);
+            let left_key = render_lambda_str_expecting(lam_at(2)?, cx, env, Some(&[left_ty]));
+            let right_key = render_lambda_str_expecting(lam_at(3)?, cx, env, Some(&[right_ty]));
+            let helper = if method == "inner_join" {
+                "jet_data_inner_join"
+            } else {
+                "jet_data_left_join"
+            };
+            let code = format!(
+                "{}{}(&({}), &({}), {}, {})",
+                cx.root_prefix, helper, left_s, right_s, left_key, right_key
+            );
+            return Some(TExpr {
+                ty: Type::List(Box::new(Type::Named("DataGroup".to_string()))),
+                kind: TExprKind::ConstInline(code),
+            });
+        }
+        ("core.data", "pivot_sum") => {
+            let rows = lower_expr(&args[0].expr, cx, env);
+            let row_ty = match &rows.ty {
+                Type::List(inner) => (**inner).clone(),
+                _ => Type::Int,
+            };
+            let rows_s = emit_tir_expr(&rows, cx);
+            let row_key =
+                render_lambda_str_expecting(lam_at(1)?, cx, env, Some(&[row_ty.clone()]));
+            let col_key =
+                render_lambda_str_expecting(lam_at(2)?, cx, env, Some(&[row_ty.clone()]));
+            let value = render_lambda_str_expecting(lam_at(3)?, cx, env, Some(&[row_ty]));
+            let code = format!(
+                "{}jet_data_pivot_sum(&({}), {}, {}, {})",
+                cx.root_prefix, rows_s, row_key, col_key, value
             );
             return Some(TExpr {
                 ty: Type::List(Box::new(Type::Named("DataGroup".to_string()))),
