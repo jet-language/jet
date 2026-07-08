@@ -7,7 +7,7 @@ collapse of finished commands keeps scrollback to 1 line each.
 
 Shared transplants: **starship/oh-my-posh transient prompt** (finished
 commands collapse to verb + result + duration); **starship segment model**
-(env / version / vcs); **Braille spinner** ⣾⣽⣻⢿⡿⣟⣯⣷ for in-flight work.
+(env / version / vcs); **Braille spinner** ⣾⣽⣻⢿⡿⣟⣯⣷ for running work.
 
 States shown per option: normal · dirty-git · failing-build · long-running.
 

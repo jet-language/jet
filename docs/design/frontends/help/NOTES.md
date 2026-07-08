@@ -88,4 +88,3 @@ glow inside the word. Everything else cool. Best as a showpiece help.
 Exit: `webapp ▸ jet build --release_`  (command keeps its glow out.)
 Truecolor gradient; 16-color = solid bright-red on the one element.
 NO_COLOR: selection reverse-video, matches underlined.
-```
