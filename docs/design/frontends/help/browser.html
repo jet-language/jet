@@ -1,0 +1,152 @@
+<title>jet ? help — browser archetype</title>
+<style>
+:root{
+  --bg:#0e141b;--panel:#0b1119;--chrome:#161f2b;--fg:#d9e6f2;--dim:#7e93a8;
+  --cyan:#3fc6ff;--green:#58d68d;--yellow:#ffb454;--red:#ff5c5c;--mag:#c88bf0;
+  --line:#22303f;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:14px/1.6 ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  -webkit-font-smoothing:antialiased;padding:40px 20px}
+.wrap{max-width:900px;margin:0 auto}
+h1{font-size:22px;font-weight:600;margin:0 0 4px;letter-spacing:-.01em}
+.sub{color:var(--dim);margin:0 0 4px;font-size:13px}
+.loop{color:var(--cyan);font-size:13px;margin:0 0 28px;padding-left:12px;
+  border-left:2px solid var(--cyan)}
+.still{margin:0 0 34px}
+.cap{color:var(--dim);font-size:12px;margin:0 0 8px;display:flex;gap:8px;
+  align-items:baseline;flex-wrap:wrap}
+.cap .n{color:var(--mag);font-weight:600}
+.term{background:var(--panel);border:1px solid var(--line);border-radius:8px;
+  overflow:hidden;box-shadow:0 8px 24px rgba(0,0,0,.35)}
+.bar{display:flex;align-items:center;gap:8px;padding:8px 12px;
+  background:var(--chrome);border-bottom:1px solid var(--line)}
+.dot{width:10px;height:10px;border-radius:50%;background:#31414f}
+.bar .t{margin-left:6px;color:var(--dim);font-size:12px}
+pre{margin:0;padding:14px 16px;white-space:pre;overflow-x:auto;
+  font:12.5px/1.5 inherit;tab-size:2}
+.c{color:var(--cyan)}.g{color:var(--green)}.y{color:var(--yellow)}
+.r{color:var(--red)}.m{color:var(--mag)}.d{color:var(--dim)}.b{font-weight:600}
+.sel{background:#2a2140;color:#e7d6ff}
+.cur{background:var(--cyan);color:#04121b}
+.crumb{color:var(--cyan)}
+.note{color:var(--dim);font-size:12px;margin:8px 2px 0;line-height:1.55}
+.note b{color:var(--fg);font-weight:600}
+.nocolor pre .c,.nocolor pre .g,.nocolor pre .y,.nocolor pre .r,
+.nocolor pre .m,.nocolor pre .cur,.nocolor pre .crumb{color:var(--fg);
+  background:transparent}
+.nocolor pre .sel{background:transparent;color:var(--fg)}
+.legend{border-top:1px solid var(--line);margin-top:20px;padding-top:16px;
+  color:var(--dim);font-size:12px;line-height:1.8}
+.legend b{color:var(--fg)}
+.sw{display:inline-block;width:9px;height:9px;border-radius:2px;
+  margin-right:5px;vertical-align:middle}
+</style>
+<div class="wrap">
+<h1>jet ? help · browser</h1>
+<p class="sub">Two-pane reference app. Categories and commands on the left,
+full man-depth detail on the right — usage, flags, runnable examples — with
+breadcrumbs.</p>
+<p class="loop">Core loop: explore the whole tool like a reference book, moving
+left-to-right from category to command to detail.</p>
+
+<div class="still">
+<div class="cap"><span class="n">1</span> The app — left list of categories and
+commands, right pane the selected command's detail. Breadcrumb up top.</div>
+<div class="term">
+<div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="t">jet ? · reference (alt-screen)</span></div>
+<pre><span class="c b">jet ?</span> <span class="d">reference</span>              <span class="crumb">Build &amp; run › run › usage</span>
+<span class="d">┌─ commands ──────────┬─ jet run ────────────────────────────┐</span>
+<span class="d">│</span> <span class="c">▾ Build &amp; run</span>        <span class="d">│</span> <span class="d">Usage</span>                                <span class="d">│</span>
+<span class="sel">    run              </span><span class="d">│</span>   jet run &lt;file&gt; [flags]               <span class="d">│</span>
+<span class="d">│</span>    build            <span class="d">│</span>                                      <span class="d">│</span>
+<span class="d">│</span>    test             <span class="d">│</span> Run a file, rebuilding first if its   <span class="d">│</span>
+<span class="d">│</span> <span class="c">▸ Project</span>            <span class="d">│</span> sources changed.                      <span class="d">│</span>
+<span class="d">│</span>    env              <span class="d">│</span>                                      <span class="d">│</span>
+<span class="d">│</span>    fmt              <span class="d">│</span> <span class="d">Flags</span>                                <span class="d">│</span>
+<span class="d">│</span> <span class="c">▸ Reference</span>          <span class="d">│</span>   <span class="c">--watch</span>     rebuild + rerun on save   <span class="d">│</span>
+<span class="d">│</span>    error codes      <span class="d">│</span>   <span class="c">--release</span>   optimized build           <span class="d">│</span>
+<span class="d">│</span>    syntax           <span class="d">│</span>   <span class="c">--quiet</span>     hide the build ledger     <span class="d">│</span>
+<span class="d">└─────────────────────┴──────────────────────────────────────┘</span>
+<span class="d">↑↓ move · → into · ⏎ prefill shell · / search · q quit</span></pre>
+</div>
+<p class="note">Fixed panels with focus and breadcrumbs (lazygit). The left
+tree groups the whole CLI; the right pane is a full reference page, not a blurb.</p>
+</div>
+
+<div class="still">
+<div class="cap"><span class="n">2</span> Scroll the detail — runnable examples sit
+at the bottom of every command page; Enter on one prefills the shell.</div>
+<div class="term">
+<div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="t">jet ? · reference (alt-screen)</span></div>
+<pre><span class="c b">jet ?</span> <span class="d">reference</span>              <span class="crumb">Build &amp; run › run › examples</span>
+<span class="d">┌─ commands ──────────┬─ jet run ────────────────────────────┐</span>
+<span class="d">│</span>    run              <span class="d">│</span> <span class="d">Examples</span>                             <span class="d">│</span>
+<span class="d">│</span>    build            <span class="d">│</span>   jet run src/main.jet                <span class="d">│</span>
+<span class="d">│</span>    test             <span class="sel">   jet run --watch src/main.jet        </span><span class="d">│</span>
+<span class="d">│</span>                     <span class="d">│</span>   jet run examples/features/basics/   <span class="d">│</span>
+<span class="d">│</span>                     <span class="d">│</span>     hello.jet                         <span class="d">│</span>
+<span class="d">│</span>                     <span class="d">│</span>                                      <span class="d">│</span>
+<span class="d">│</span>                     <span class="d">│</span> <span class="d">See also</span>  build · test · env         <span class="d">│</span>
+<span class="d">└─────────────────────┴──────────────────────────────────────┘</span>
+<span class="d">↑↓ move · ⏎ prefill: jet run --watch src/main.jet · q quit</span></pre>
+</div>
+<p class="note">Examples are real, copy-paste-correct commands (drawn from
+<code>examples/features/</code>). The footer shows exactly what Enter will hand
+the shell.</p>
+</div>
+
+<div class="still">
+<div class="cap"><span class="n">3</span> Reference isn't just commands — the error
+codes category renders each code's page verbatim (I4).</div>
+<div class="term">
+<div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="t">jet ? · reference (alt-screen)</span></div>
+<pre><span class="c b">jet ?</span> <span class="d">reference</span>              <span class="crumb">Reference › error codes › E0112</span>
+<span class="d">┌─ commands ──────────┬─ E0112 ──────────────────────────────┐</span>
+<span class="d">│</span> <span class="c">▾ Reference</span>          <span class="d">│</span> <span class="d">Argument type mismatch</span>               <span class="d">│</span>
+<span class="sel">    error codes      </span><span class="d">│</span>                                      <span class="d">│</span>
+<span class="d">│</span>    syntax           <span class="d">│</span> <span class="r b">Error [E0112]:</span> `show` wants Int (a    <span class="d">│</span>
+<span class="d">│</span>                     <span class="d">│</span> whole number) for argument 1, but     <span class="d">│</span>
+<span class="d">│</span>                     <span class="d">│</span> this is String (text)                 <span class="d">│</span>
+<span class="d">│</span>                     <span class="d">│</span>  <span class="b">Why:</span> every argument must match its   <span class="d">│</span>
+<span class="d">│</span>                     <span class="d">│</span>       parameter's type               <span class="d">│</span>
+<span class="d">│</span>                     <span class="d">│</span>  <span class="b">Fix:</span> use Int (a whole number) here   <span class="d">│</span>
+<span class="d">└─────────────────────┴──────────────────────────────────────┘</span>
+<span class="d">↑↓ move · / search codes · q quit</span></pre>
+</div>
+<p class="note">The same words the compiler prints, so what you read here and
+what you hit in the terminal are one text. Man-depth without leaving the CLI.</p>
+</div>
+
+<div class="still nocolor">
+<div class="cap"><span class="n">4</span> <code>NO_COLOR=1</code> / non-TTY — tree
+markers and the selection bar carry the structure with no color.</div>
+<div class="term">
+<div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="t">jet ? · reference · NO_COLOR</span></div>
+<pre>jet ? reference              Build & run › run › usage
+┌─ commands ──────────┬─ jet run ────────────────────────────┐
+│ ▾ Build & run        │ Usage                                │
+│ &gt;  run              │   jet run &lt;file&gt; [flags]               │
+│    build            │                                      │
+│    test             │ Run a file, rebuilding first if its   │
+│ ▸ Project           │ sources changed.                      │
+│                     │ Flags                                │
+│                     │   --watch     rebuild + rerun on save │
+└─────────────────────┴──────────────────────────────────────┘
+up/down move · right into · enter prefill · / search · q quit</pre>
+</div>
+<p class="note">Category state is <code>▾</code>/<code>▸</code>, selection is a
+<code>&gt;</code> row marker — both are glyphs, so a piped page keeps its shape.</p>
+</div>
+
+<div class="legend">
+<b>Shared TUI palette</b> —
+<span class="sw" style="background:var(--cyan)"></span>cyan headings / flags / breadcrumb ·
+<span class="sw" style="background:var(--mag)"></span>magenta selected row ·
+<span class="sw" style="background:var(--red)"></span>red inside a rendered diagnostic (verbatim) ·
+<span class="sw" style="background:var(--dim)"></span>bright-black panel frames.<br>
+Std-only ANSI (I6): alt-screen two-pane app, box-drawing frames, breadcrumb,
+scrollable detail. <b>NO_COLOR</b> keeps tree glyphs + <code>&gt;</code> selection.
+</div>
+</div>
