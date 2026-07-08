@@ -188,6 +188,8 @@ mod tests {
             must_use_span: None,
             is_inline: false,
             is_inline_always: false,
+            is_replayable: false,
+            replayable_span: None,
             inline_span: None,
             body: Vec::new(),
         }
