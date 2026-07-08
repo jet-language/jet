@@ -285,6 +285,4 @@ impl<'a> Checker<'a> {
             };
             Some(ty)
         }
-    }
-    
 }
