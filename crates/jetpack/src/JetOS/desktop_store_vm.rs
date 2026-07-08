@@ -111,9 +111,9 @@ fn write_acceptance_fixture(dir: &Path, system: &SystemPlan) -> std::io::Result<
         .collect::<Vec<_>>()
         .join(",");
     fs::write(
-        acceptance_dir.join("nixos-parity.json"),
+        acceptance_dir.join("jetos-host-coverage.json"),
         format!(
-            "{{\"kind\":\"jetos.nixos-parity-fixture\",\"host\":{},\"source\":\"tests/fixtures/jetpack-config/config.jet\",\"coverage\":[{}],\"omissions\":[{}],\"vm_gate\":\"acceptance/vm-gates.json\",\"proof\":\"owner-nixos-recreated\"}}",
+            "{{\"kind\":\"jetos.host-coverage\",\"host\":{},\"source\":\"tests/fixtures/jetpack-config/config.jet\",\"coverage\":[{}],\"omissions\":[{}],\"vm_gate\":\"acceptance/vm-gates.json\",\"proof\":\"jetos-host-covered\"}}",
             JSON::quote(&system.name),
             rows,
             missing
@@ -139,10 +139,10 @@ fn write_acceptance_fixture(dir: &Path, system: &SystemPlan) -> std::io::Result<
         ),
     )?;
     fs::write(
-        acceptance_dir.join("owner-nixos-diff.md"),
-        "# JetOS Owner NixOS Acceptance\n\nAll listed owner modules are mapped to generated JetOS artifacts in `coverage-matrix.tsv`.\n\nOmissions: none.\n",
+        acceptance_dir.join("owner-jetos-coverage.md"),
+        "# JetOS Host Acceptance\n\nAll listed owner modules are mapped to generated JetOS artifacts in `coverage-matrix.tsv`.\n\nOmissions: none.\n",
     )?;
-    let prove = "#!/usr/bin/env sh\nset -eu\nroot=${JETOS_SYSTEM_ROOT:-/run/current-system}\nproof_dir=${JETOS_ACCEPTANCE_PROOF_DIR:-$root/acceptance}\nmkdir -p \"$proof_dir\"\nneed() { if [ ! -e \"$root/$1\" ]; then echo \"missing $1\" >&2; exit 2; fi; }\nfor path in acceptance/nixos-parity.json acceptance/vm-gates.json acceptance/owner-nixos-diff.md vm-proof.txt desktop/facts.json users/index.json apps/modules.json storage/plan.json flatpak/plan.json lifecycle/policy.json; do need \"$path\"; done\nmissing_pattern=$(printf '\\tmissing\\t')\nif grep -q \"$missing_pattern\" \"$root/acceptance/coverage-matrix.tsv\"; then\n  echo 'acceptance coverage has missing rows' >&2\n  exit 2\nfi\nprintf '{\"kind\":\"jetos.acceptance-proof\",\"state\":\"passed\",\"proof\":\"owner-nixos-recreated\"}\\n' > \"$proof_dir/acceptance-proof.json\"\ncat \"$proof_dir/acceptance-proof.json\"\n";
+    let prove = "#!/usr/bin/env sh\nset -eu\nroot=${JETOS_SYSTEM_ROOT:-/run/current-system}\nproof_dir=${JETOS_ACCEPTANCE_PROOF_DIR:-$root/acceptance}\nmkdir -p \"$proof_dir\"\nneed() { if [ ! -e \"$root/$1\" ]; then echo \"missing $1\" >&2; exit 2; fi; }\nfor path in acceptance/jetos-host-coverage.json acceptance/vm-gates.json acceptance/owner-jetos-coverage.md vm-proof.txt desktop/facts.json users/index.json apps/modules.json storage/plan.json flatpak/plan.json lifecycle/policy.json; do need \"$path\"; done\nmissing_pattern=$(printf '\\tmissing\\t')\nif grep -q \"$missing_pattern\" \"$root/acceptance/coverage-matrix.tsv\"; then\n  echo 'acceptance coverage has missing rows' >&2\n  exit 2\nfi\nprintf '{\"kind\":\"jetos.acceptance-proof\",\"state\":\"passed\",\"proof\":\"jetos-host-covered\"}\\n' > \"$proof_dir/acceptance-proof.json\"\ncat \"$proof_dir/acceptance-proof.json\"\n";
     let prove_path = bin_dir.join("jetos-acceptance-prove");
     fs::write(&prove_path, prove)?;
     make_executable(&prove_path)
@@ -153,11 +153,13 @@ fn write_desktop_facts(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
     let bin_dir = dir.join("sw/bin");
     let session_dir = dir.join("share/wayland-sessions");
     let xdg_dir = dir.join("share/applications");
+    let icon_dir = dir.join("share/icons/hicolor/scalable/apps");
     let font_dir = dir.join("etc/fonts");
     fs::create_dir_all(&desktop_dir)?;
     fs::create_dir_all(&bin_dir)?;
     fs::create_dir_all(&session_dir)?;
     fs::create_dir_all(&xdg_dir)?;
+    fs::create_dir_all(&icon_dir)?;
     fs::create_dir_all(&font_dir)?;
     let profile = option_value(system, &["services.desktop.profile"])
         .map(|s| clean_symbol(&s))
@@ -212,6 +214,10 @@ fn write_desktop_facts(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
     fs::write(
         session_dir.join("jetos-plasma.desktop"),
         "[Desktop Entry]\nName=JetOS Plasma\nComment=JetOS Plasma Wayland desktop\nExec=/run/current-system/sw/bin/jetos-desktop-session plasma\nType=Application\nDesktopNames=KDE;jetos;\n",
+    )?;
+    fs::write(
+        icon_dir.join("jetos-logo.svg"),
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 128 128\"><rect width=\"128\" height=\"128\" rx=\"18\" fill=\"#101820\"/><path d=\"M28 84c18-4 31-18 39-42 9 23 21 37 37 42-23 2-36 14-41 34-5-20-17-32-35-34z\" fill=\"#61dafb\"/><path d=\"M36 34h56v12H36z\" fill=\"#f7f7f7\"/></svg>\n",
     )?;
     write_desktop_breadth(dir, system)?;
     let fallback = "#!/usr/bin/env sh\nset -eu\nif [ \"${1:-}\" = \"--jetos-proof\" ]; then\n  printf '%s\\n' 'jetos proof: terminal fallback ready'\n  exit 0\nfi\nif [ -r /etc/profile ]; then\n  . /etc/profile\nfi\nif [ -r /etc/motd ]; then\n  cat /etc/motd\nelse\n  printf '%s\\n' 'JetOS terminal ready.'\nfi\nprintf '%s\\n' 'ttyS0 and tty1 remain available.'\nexec /bin/sh -i\n";
@@ -428,8 +434,19 @@ fn missing_vm_tools() -> Vec<String> {
 }
 
 fn find_path_tool(name: &str) -> Option<PathBuf> {
-    let paths = std::env::var_os("PATH")?;
-    for dir in std::env::split_paths(&paths) {
+    let mut dirs = std::env::var_os("PATH")
+        .map(|paths| std::env::split_paths(&paths).collect::<Vec<_>>())
+        .unwrap_or_default();
+    for fallback in [
+        "/run/current-system/sw/bin",
+        "/usr/bin",
+        "/bin",
+        "/usr/sbin",
+        "/sbin",
+    ] {
+        dirs.push(PathBuf::from(fallback));
+    }
+    for dir in dirs {
         let candidate = dir.join(name);
         if candidate.is_file() {
             return Some(candidate);

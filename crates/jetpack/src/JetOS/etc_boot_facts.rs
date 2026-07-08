@@ -23,15 +23,18 @@ fn write_etc_tree(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
         fstab.push_str(&format!("{device}\tnone\tswap\t{priority}\t0\t0\n"));
     }
     fs::write(etc.join("fstab"), fstab)?;
-    write_identity_files(&etc, system)
+    write_identity_files(dir, &etc, system)
 }
 
-fn write_identity_files(etc: &Path, system: &SystemPlan) -> std::io::Result<()> {
+fn write_identity_files(dir: &Path, etc: &Path, system: &SystemPlan) -> std::io::Result<()> {
     let users = collect_names(system, "users");
     let groups = collect_names(system, "groups");
     let mut passwd = String::from("root:x:0:0:root:/root:/bin/sh\n");
-    let mut group = String::from("root:x:0:\n");
+    let mut shadow = String::from("root:!:1::::::\n");
+    let mut group = String::from("root:x:0:\nmessagebus:x:81:\ngdm:x:120:\nvideo:x:44:\nrender:x:303:\ninput:x:304:\naudio:x:18:\n");
     let mut sysusers = String::new();
+    passwd.push_str("messagebus:x:81:81:D-Bus system message bus:/run/dbus:/usr/sbin/nologin\n");
+    passwd.push_str("gdm:x:120:120:GDM display manager:/var/lib/gdm:/usr/sbin/nologin\n");
     for (idx, user) in users.iter().enumerate() {
         let uid = 1000 + idx;
         let home = option_value(system, &[&format!("users.{user}.home")])
@@ -41,6 +44,7 @@ fn write_identity_files(etc: &Path, system: &SystemPlan) -> std::io::Result<()> 
             .unwrap_or_else(|| "/run/current-system/sw/bin/sh".to_string());
         passwd.push_str(&format!("{user}:x:{uid}:{uid}:{user}:{home}:{shell}\n"));
         group.push_str(&format!("{user}:x:{uid}:{user}\n"));
+        shadow.push_str(&format!("{user}:!:1::::::\n"));
         sysusers.push_str(&format!("u {user} {uid} \"{user}\" {home} {shell}\n"));
     }
     for (idx, name) in groups.iter().enumerate() {
@@ -56,9 +60,41 @@ fn write_identity_files(etc: &Path, system: &SystemPlan) -> std::io::Result<()> 
     }
     fs::write(etc.join("passwd"), passwd)?;
     fs::write(etc.join("group"), group)?;
+    fs::write(etc.join("shadow"), shadow)?;
+    let os_release = "NAME=JetOS\nID=jetos\nPRETTY_NAME=\"JetOS\"\nHOME_URL=\"https://jet.dev/jetos\"\n";
+    fs::write(etc.join("os-release"), os_release)?;
+    let usr_lib = dir.join("usr/lib");
+    fs::create_dir_all(&usr_lib)?;
+    fs::write(usr_lib.join("os-release"), os_release)?;
+    fs::write(
+        etc.join("machine-id"),
+        format!("{}\n", &crate::SHA256::sha256_hex(system.name.as_bytes())[..32]),
+    )?;
+    fs::write(
+        etc.join("nsswitch.conf"),
+        "passwd: files\ngroup: files\nshadow: files\nhosts: files dns\nservices: files\n",
+    )?;
+    write_pam_files(etc)?;
     let sysusers_dir = etc.join("sysusers.d");
     fs::create_dir_all(&sysusers_dir)?;
     fs::write(sysusers_dir.join("jetos.conf"), sysusers)
+}
+
+fn write_pam_files(etc: &Path) -> std::io::Result<()> {
+    let pam = etc.join("pam.d");
+    fs::create_dir_all(&pam)?;
+    let login = "auth sufficient pam_unix.so nullok\naccount sufficient pam_unix.so\npassword sufficient pam_unix.so nullok\nsession required pam_unix.so\nsession optional pam_systemd.so\n";
+    for name in [
+        "login",
+        "gdm",
+        "gdm-password",
+        "gdm-launch-environment",
+        "polkit-1",
+        "system-local-login",
+    ] {
+        fs::write(pam.join(name), login)?;
+    }
+    Ok(())
 }
 
 fn write_boot_facts(

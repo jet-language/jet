@@ -225,7 +225,7 @@ fn report_nix_bridge_required(
         &format!("{count} {subject} the Nix bridge, and Nix is not installed"),
         &format!("{refs} currently realize through the Nix compatibility provider on this machine."),
         &format!(
-            "install Nix (https://nixos.org/download), or replace the package with a native source/adapter; `jetpack add {fix_ref} --adapt` drafts one."
+            "install Nix from the official installer, or replace the package with a native source/adapter; `jetpack add {fix_ref} --adapt` drafts one."
         ),
     );
 }
@@ -302,7 +302,7 @@ pub(super) fn report_provider_error(theme: &Theme, err: &ProviderError) {
         ProviderError::NixMissing => theme.error(
             "couldn't run `nix`",
             "This package comes from the Nix provider, but `nix` isn't on your PATH.",
-            "install Nix (https://nixos.org/download), or use a native Jetpack source.",
+            "install Nix from the official installer, or use a native Jetpack source.",
         ),
         ProviderError::BuildFailed(reason) => theme.error(
             "the provider failed to build that package",

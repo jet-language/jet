@@ -7,7 +7,7 @@ fn cmd_bridge(theme: &Theme, parsed: &Parsed) -> i32 {
                     "`jet bridge flake` needs `nix`, which isn't on PATH",
                     "translating a flake.nix's devShell shells out to `nix eval` (U16); without \
                      `nix` there's nothing to read the devShell from.",
-                    "install Nix (https://nixos.org/download), or write env.* by hand.",
+                    "install Nix from the official installer, or write env.* by hand.",
                 );
                 return 2;
             }

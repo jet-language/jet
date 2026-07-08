@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 363,
-    "rev": 1813,
+    "rev": 1822,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -19,7 +19,7 @@
         "epoch:e6"
       ]
     },
-    "digestCursor": "2026-07-08T10:31:10.220Z"
+    "digestCursor": "2026-07-08T14:04:45.992Z"
   },
   "epochs": [
     {
@@ -39025,45 +39025,56 @@
       "id": "D-FE-CANVAS1",
       "cardId": "c0bsg5zl",
       "group": "web-ui",
-      "title": "Canvas visual editor — pick the design family",
-      "gist": "Which of three complete visual designs the Canvas node editor ships with.",
-      "explainer": "Carbon — a debugger workbench rewards density, and the status band carries build/watch/diagnostic/port state at a glance. Paper is the strongest newcomer-facing alternative if Canvas should read as the beginner surface.",
-      "story": "Maya opens Canvas for the first time after hearing Jet has \"the Blueprint editor Unreal dropped.\" She spends the next three hours wiring nodes, stepping a breakpoint, and reading one type error. Whether she stays depends on whether the editor feels like a professional instrument she can trust for a workday — this ballot picks that look. All three options render the identical feature set (typed pins per rail, right-click node search, graph⇄source view, debugger overlay, replay scrubber, verbatim E0204 diagnostic); only the visual language differs.",
-      "inWild": "// examples/features/tooling/canvas_blueprint_demo.jet — the graph shown in every mockup\nfn square(n: Int) -> Int { n * n }\n\nfn summarize(values: [Int]) -> String {\n    let total = values.fold(0, fn(acc: Int, v: Int) -> Int { acc + v })\n    \"total=\" + total.to_string()\n}\n\nfn run() {\n    let nums = [1, 2, 3, 4]\n    let squared = square.[1, 2, 3]\n    print(summarize(nums))\n}",
+      "title": "Canvas visual editor — pick the UX archetype",
+      "gist": "Which editing experience Canvas is built around — four genuinely different editors, one shared look.",
+      "explainer": "Dual lens — it is the strongest expression of Jet's source-backed north star (graph and code are provably the same artifact), serves beginners (write code, get a free map) and experts (text speed) in one mechanism, and the other archetypes' best verbs (⌘K summon, typed offers) can live inside its graph pane later without a second mechanism (I8).",
+      "story": "Maya opens Canvas to build her first Jet program; Dev, an Unreal veteran, opens it to rewire a 200-node graph. The question is not what Canvas looks like (one visual system, fixed) but what USING it is: does she browse a catalog, summon nodes by typing, edit code and graph as synced twins, or grow a program from type-checked offers? All four options render the full real feature set (typed pins, rails, node search, graph⇄source, inspector, debugger, replay, verbatim E0204). Browse all four side by side: file:///home/nate/Projects/Github/jet/docs/design/frontends/index.html#canvas (←/→ switches, c compares).",
+      "inWild": "// examples/features/basics/fizzbuzz.jet — shown as graph content in the mockups\nfn label(n: Int) -> String {\n    if n % 15 == 0 { \"FizzBuzz\" }\n    else if n % 3 == 0 { \"Fizz\" }\n    else if n % 5 == 0 { \"Buzz\" }\n    else { n.to_string() }\n}",
       "detail": "",
       "options": [
         {
           "key": "A",
-          "name": "Carbon — dense dark workbench",
-          "detail": "Professional instrument for all-day use (Linear/Zed density). Three-column workbench, kind-tinted node headers, everything monospaced and scannable. Signature: bottom status band of labeled lamps — BUILD / WATCH / DIAG / PORT state in one glance. Transplants: Unreal's exec-triangle vs data-circle pins and type-filtered right-click search, Blender's kind-colored headers, Node-RED's palette rows. Closest in spirit to the shipped Canvas. Risk: density punishes first-run newcomers; needs the existing tour/empty-state path.",
-          "code": "REVIEW IN BROWSER:\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/canvas/carbon.html\n\nStatus band: BUILD ● OK · WATCH ● 3 files · DIAG ● E0204 ×1 · PORT ● 8080"
+          "name": "Workbench — docked IDE",
+          "detail": "Core loop: browse the palette catalog, drag a node onto the graph, wire its pins, tune it in the docked inspector. Fixed resizable docks (menubar, palette+project+debugger left, graph center with rail gutter, inspector right) — nothing hides. The Unreal/Blender/VS Code model for people in the editor eight hours a day. Beginner: drag a labelled node from the palette. Expert: Ctrl+K search, tabs, docked debugger. Risk: densest option; most familiar, least novel.\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/canvas/workbench.html",
+          "code": "┌ menubar ────────────────────────────────────────────────┐\n│ palette      │  graph (rail gutter on left edge) │ inspector │\n│  search      │   [entry]→[call]→[branch]         │  node     │\n│  categories  │      │pins: ▲exec ●data ◆fallible │  pins     │\n│ project tree │   amber pulse on paused wire      │  actions  │\n│ debugger     │                                   │           │\n│  stack/locals│                                   │           │\n└──────────────┴───────────────────────────────────┴───────────┘\nLoop: browse catalog → drag → wire → inspect"
         },
         {
           "key": "B",
-          "name": "Paper — light editorial document",
-          "detail": "The counter-position: Canvas as a calm, light document. White node cards with a thin type-colored top rule, hairline structure, breadcrumb selector. Signature: fading hairline leading every label to its value. Transplants: Figma's quiet left nav and soft-ring selection, Blender's kind color moved to a restrained top rule, Stripe-docs layout. Best first impression for the beginner facet — reads like documentation. Risk: wire colors need the darker tuning it ships with; long debug sessions on white can fatigue.",
-          "code": "REVIEW IN BROWSER:\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/canvas/paper.html\n\nSignature: label ───────╌╌ · value  (rule fades toward the value)"
+          "name": "Flow — summon at the cursor",
+          "detail": "Core loop: type at the cursor to summon the node you're thinking of and keep flowing — never leave the canvas for a panel. Infinite canvas, zero fixed panels; ⌘K or double-click opens a type-filtered summoner AT the cursor; releasing a wire on empty space searches only compatible nodes; inspector pops beside the selection. tldraw/Figma chrome with Unreal's drag-from-pin search promoted to the primary verb. Beginner: double-click → type \"print\" → Enter (hint bar teaches it). Expert: the whole loop is keyboard, at the cursor. Risk: power hides behind keys/right-click — discoverability rests on the hint bar.\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/canvas/flow.html",
+          "code": "        (infinite dotted canvas, no panels)\n\n   [grant Fs,Io]──▶[caps.write]        ⌘K anywhere\n         │                              ↓ at cursor\n         ●───────╮        ┌ summon ────────────┐\n                 ▼        │ > pri               │\n            [print]       │ print (msg: String) │  only type-\n                          │ print_line          │  compatible\n                          └─────────────────────┘\nLoop: think → summon by typing → keep flowing"
         },
         {
           "key": "C",
-          "name": "Pulse — full-bleed canvas, floating chrome",
-          "detail": "Maximal graph, minimal chrome: no fixed panels — floating command pill, drawer, inspector, and a media-style transport bar (debug step + replay scrub) over an edge-to-edge canvas. Signature: exactly one hot gradient on screen — the paused node and the execution pulse flowing into it; when nothing runs, nothing is hot. Transplants: tldraw's floating panels, Rive's transport bar, Unreal's wire pulse recolored as the single hot element. Risk: floating panels can occlude the graph on small laptops; the one-hot-thing rule needs discipline as features grow.",
-          "code": "REVIEW IN BROWSER:\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/canvas/pulse.html\n\nSignature: paused Branch node + its exec wire = the only warm pixels"
+          "name": "Dual lens — code ⇄ graph, synced",
+          "detail": "Core loop: read or write in whichever lens fits the thought — code editor or graph — and the other follows your cursor live. Two equal panes over the same source: click a line, its node lights; click a node, its line scrolls and highlights; a gutter breakpoint mirrors a red halo on the node; replay scrubs both at once. E0204 appears as one truth in both lenses (squiggle in code, red node in graph, verbatim card below). The Enso/Observable model. Beginner: type ordinary Jet, the graph draws itself — no new gesture. Expert: full-speed text editing with a free live map. Risk: sync must be instant — any lag breaks the promise; two panes cost width.\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/canvas/duallens.html",
+          "code": "┌ code lens ──────────────┬ graph lens ─────────────┐\n│ 3  fn label(n: Int)     │   [entry label]         │\n│ 4    if n % 15 == 0 ◀───┼──▶[branch n%15]  ◀ same │\n│ ●5     \"FizzBuzz\"       │      ├─[\"FizzBuzz\"]     │\n│ 6    else if n % 3 == 0 │      ▼                  │\n│      ~~~~~~ E0204 ~~~~~ │   [branch n%3] (red)    │\n├─────────────────────────┴─────────────────────────┤\n│ replay ├────────●────────┤ step highlights BOTH   │\nLoop: edit either lens; the other follows"
+        },
+        {
+          "key": "D",
+          "name": "Guided — grow from typed offers",
+          "detail": "Core loop: pick a seed, then choose from only the type-compatible offers; the program grows correct-by-construction, one step at a time. A vertical spine of built steps; the value's type rides the connector; the offer tray lists only next steps whose input matches — you never drag a wire, and an invalid wire is unreachable. Diagnostics become refused offers: E0204 shows as a disabled offer with the verbatim why/fix at the exact moment the move would break. The Hazel/Scratch idea with the type system as the snap constraint. Beginner: the strongest story — the first node can't be wrong. Expert: type-to-filter, ↑↓+↵. Risk: linear spine suits growing a function, not reshaping a big graph — needs a hand-off to A/B/C.\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/canvas/guided.html",
+          "code": "  spine                        offer tray (type-filtered)\n  [load_port() -> Int ?]      ┌ next for Int ? ─────────┐\n        │ Int ?               │ > handle with ? (pass)   │\n        ▼                     │   ?? fallback value      │\n  [? propagate]               │   match on error         │\n        │ Int                 └──────────────────────────┘\n        ▼                     refused offer (disabled):\n  [print(port)]                ✕ use x again — E0204 why/fix\nLoop: pick seed → choose typed offer → grows correct"
         }
       ],
       "comparisons": [
         {
           "lang": "Unreal Blueprint",
-          "note": "The benchmark all three transplant from: exec triangles vs typed data circles, thicker exec wires, type-filtered right-click node search, execution-path highlight while paused.",
-          "code": "Right-click on canvas → search pre-filtered to \"compatible with Int\""
+          "note": "A is its docked-editor model refined; B promotes its drag-from-pin context search to the primary authoring verb.",
+          "code": "release wire on empty canvas → search filtered to compatible nodes"
         },
         {
-          "lang": "tldraw / Rive",
-          "note": "Option C's chrome model: an edge-to-edge canvas with floating panels and a bottom transport strip, instead of fixed docked columns.",
-          "code": "[pill: select · pan · wire]        [transport: ⏮ ◀ ▶ ⏭  ●rec  scrub ────]"
+          "lang": "Enso / Observable",
+          "note": "C's model: code and visual as two faithful, editable views of one program.",
+          "code": "edit code → graph redraws · move node → source updates"
+        },
+        {
+          "lang": "Hazel / Scratch",
+          "note": "D's model: type-directed next-step offers; incomplete-but-valid program at every step; blocks only snap where they fit.",
+          "code": "offer list = every expression the current type can flow into"
         }
       ],
-      "rec": "A",
+      "rec": "C",
       "status": "open",
       "created": "2026-07-08T13:10:16.606Z",
       "comment": "Overall A is the best but it should be more gray/graphite than the blue hue. Also there is too much mess going on, it needs to be simplified. If people want to see more info they should have a toggle in the ui"
@@ -39072,45 +39083,56 @@
       "id": "D-FE-STUDIO1",
       "cardId": "c0e7rot4",
       "group": "web-ui",
-      "title": "jetos Studio — pick the design family",
-      "gist": "Which of three complete visual designs the jetos Studio system manager ships with.",
-      "explainer": "Carbon — an admin/settings app rewards density; SET-vs-DEF provenance, line-select keys, and the sticky source pane are the strongest expression of \"toggle = a line of source.\" Paper is the clean newcomer-facing alternative.",
-      "story": "Nate runs `jetos studio` on halcyon to bump the kernel and flip a stylix option. The app must show him exactly which line of system.jet each toggle rewrites, what the pending diff is, and let him build and switch generations without fear — with rollback one click away. All three options render the same 8 screens (overview, module/option editor, pending review + build/switch, generations timeline, packages, services, secrets, fleet) with the same source-backed edit model; only the visual language differs.",
-      "inWild": "// system.jet — the source every Studio toggle projects\nmodule system.host {\n    hostname: \"halcyon\"\n    kernel: \"linux-cachyos\"\n}\n\nmodule desktop.plasma {\n    enable: true\n    theme: stylix.catppuccin(\"mocha\")\n}\n\n// Studio edit = a set-option transaction that rewrites one line\n// and shows the diff before jet os build && switch",
+      "title": "jetos Studio — pick the UX archetype",
+      "gist": "Which experience Studio is built around — settings app, review-first changesets, ops board, or an editable source document.",
+      "explainer": "Projectional — it makes Studio's core truth (GUI edit = a system.jet line) literal instead of illustrated, scales from reading to expert editing without a second mechanism, and its generation time-machine is the cleanest rollback story. Settings (A) is the strongest pick if the beginner facet should lead.",
+      "story": "Nate wants to bump halcyon's kernel and flip a theme option; later that week a bad generation fails to boot and he needs rollback fast. Four genuinely different apps answer those moments: find-and-flip settings, stage-review-apply changesets, a fleet health board, or config.jet itself rendered as a live document. All four share one visual system and the same truth — every GUI edit rewrites exactly one system.jet line and shows the diff (the real set-option transaction). Browse side by side: file:///home/nate/Projects/Github/jet/docs/design/frontends/index.html#studio (←/→ switches, c compares).",
+      "inWild": "// config.jet (halcyon fixture) — the source every archetype edits\nboot.kernel: .CachyOS\nboot.loader: .Limine\nperf.scheduler: .ScxLavd\ndesktop.plasma.enable: true\ntheme.flavor: \"catppuccin-mocha\"\nsecrets.wifi: age(\"wifi.age\")",
       "detail": "",
       "options": [
         {
           "key": "A",
-          "name": "Carbon — dense dark console",
-          "detail": "Admin console at Linear/Zed density: every value monospaced, strict alignment, scan-not-read. Signature: sticky status band — BUILD OK · GEN 47 · PENDING 3 · PROOF SIGNED. Option rows carry SET vs DEF provenance badges; a per-module system.jet:NN button flips the source pane to that block with the live pending diff. Line-select keys (L1..L4) and number keys 1–8 make it fully keyboard-driven. Transplants: Apple System Settings grouped rows, Home Assistant's config-vs-source duality, Tailscale fleet density, Vercel generation timeline, Proxmox task steps. Risk: density fatigue — mitigated with generous row padding.",
-          "code": "REVIEW IN BROWSER:\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/studio/carbon.html\n\nOption row:  desktop.plasma.enable   [on]   SET · system.jet:12"
+          "name": "Settings — find it, flip it, apply",
+          "detail": "Core loop: pick a category, flip one option's control, confirm the single source line it writes, apply. Apple-System-Settings navigator whose sidebar groups map 1:1 to config.jet namespaces; the signature is the pending source tray — a docked bar accumulating the exact +/- lines and impact chips as you toggle, so nothing touches the machine unseen. Kernel change: Boot & kernel → dropdown (tagged rebuild+reboot). Rollback: Generations category → \"Roll back to N\". The beginner tier: lowest ceremony for changing one thing. Risk: deep tree — search carries it; grouping is editorial, a setting can be \"somewhere unexpected.\"\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/studio/settings.html",
+          "code": "┌ sidebar ─────┬ Boot & kernel ──────────────────────┐\n│ > Boot       │ Kernel        [.CachyOS ▾] rebuild+reboot │\n│   Performance│ Boot loader   [.Limine  ▾]           │\n│   Network    │ Scheduler     [.ScxLavd ▾]           │\n│   Desktop    │                                      │\n│   Generations├──────────────────────────────────────┤\n│   Secrets    │ pending (2): - boot.kernel: .CachyOS │\n│              │              + boot.kernel: .Zen     │\n└──────────────┴──── [Discard] [Apply — builds gen 48] ┘\nLoop: find → flip → confirm the line → apply"
         },
         {
           "key": "B",
-          "name": "Paper — light editorial settings",
-          "detail": "Stripe-docs calm: light ground, whitespace and type hierarchy do the work; the only dark surfaces are code and logs. Signature: fading hairline leading each label to its value and each step to the next. The source aside is persistent — the current system.jet block and pending diff are always visible, never hidden behind a click. Transplants: Stripe editorial hierarchy, Vercel dot-rail deploy timeline, Home Assistant set/default tags, Apple Settings grouped cards. Contrast verified (ink 13:1, secondary 5.2:1 AA). Risk: long tables can feel sparse on white — hairlines and the header wash add structure.",
-          "code": "REVIEW IN BROWSER:\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/studio/paper.html\n\nStat card:  generation ───────╌╌ · 47   kernel ───────╌╌ · linux-cachyos"
+          "name": "Changeset — review before anything lands",
+          "detail": "Core loop: stage edits from anywhere into one changeset whose primary screen is the diff review plus impact, then apply the whole reviewed set as one build. The GitHub-PR/terraform-plan model: unified source diff with per-hunk include/exclude, beside a plain-language \"What this changes\" summary and an impact ledger (services restarted, packages rebuilt, reboot needed, generation N+1). Build & switch = merge. Rollback stages the inverse as a reviewable changeset. The safety tier: never surprised by an apply. Risk: heavier for a one-toggle change; authoring via option-key form assumes some fluency (autocomplete helps).\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/studio/changeset.html",
+          "code": "┌ Changeset: kernel bump + theme ── 2 files · +3 −2 ┐\n│ @@ boot @@                    ☑ include            │\n│ - boot.kernel: .CachyOS                            │\n│ + boot.kernel: .Zen                                │\n│ @@ theme @@                   ☑ include            │\n│ - theme.flavor: \"catppuccin-mocha\"                │\n│ + theme.flavor: \"catppuccin-latte\"                │\n├ What this changes ────────────────────────────────┤\n│ • kernel rebuilt — reboot required                 │\n│ • plasma restarts · generation 47 → 48             │\n└──────── [Build only] [Build & switch] ────────────┘\nLoop: stage → read diff + impact → apply as one"
         },
         {
           "key": "C",
-          "name": "Pulse — dark, one hot subject",
-          "detail": "Bold display type, big numbers, and exactly one hot gradient element per screen: the live generation tile on overview, the selected option row in modules, the running build step during switch, the current node on the timeline. Selecting a row and loading its source line are the same gesture — the selection is the glow. Warnings stay amber/red, never hot, so status never competes with the accent. Transplants: Vercel's loud \"current\" deployment, Tailscale fleet rows, Portainer service badges, Synology install-state buttons. Risk: gradient discipline must hold as screens grow — the mockup enforces thin gradient borders, never fills.",
-          "code": "REVIEW IN BROWSER:\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/studio/pulse.html\n\nOne glow per screen: overview→gen tile · modules→selected row · switch→running step"
+          "name": "Ops board — health first, edit on drill-in",
+          "detail": "Core loop: watch the fleet health board; when a tile goes red, drill into it, fix or roll back from the drawer, watch it go green. Landing screen is KPIs, alerts, per-host generation ribbons (colored run history), and a service grid — the Proxmox/Tailscale/PagerDuty model. Config editing is a drawer opened FROM a red thing; the mock's centerpiece is a kernel panic on gen 42 with auto-fallback to 41 and one-click clean rollback, the diagnosis in what/why/fix voice. Hosts come from workspace.jet. The fleet tier: operate constantly, edit rarely. Risk: drawer editing is intentionally shallow — deep edits should deep-link into A or D.\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/studio/opsboard.html",
+          "code": "┌ 3 hosts · 1 alert ── services 11/12 ── gen ok 2/3 ┐\n│ ⚠ halcyon: gen 42 failed boot — fell back to 41   │\n│   [Roll back to 41 & reboot]  [Diagnose]          │\n├ hosts ────────────────────────────────────────────┤\n│ ● halcyon   gen ▣▣▣▣▨ 42✕  kernel cachyos  2m ago │\n│ ● skylark   gen ▣▣▣▣▣ 39   kernel zen      1m ago │\n│ ● relay-1   gen ▣▣▣▣▣ 12   headless        4m ago │\n├ services ─────────────────────────────────────────┤\n│ plasma ●  postgres ●  caddy ●  backup ⚠ restart   │\nLoop: watch board → red tile → drill in → heal"
+        },
+        {
+          "key": "D",
+          "name": "Projectional — the file is the app",
+          "detail": "Core loop: read the config AS the document; edit each value through an inline control so you change system.jet without typing syntax. config.jet rendered line-numbered and syntax-highlighted, but every option value is a live widget in place — toggle, dropdown, stepper, chip list, sealed secret. A Text toggle reveals the exact source the projection produces (one artifact, two surfaces); a git-style gutter marks changed lines; the generation picker turns the document into a time machine (\"Restore these values\" stages a rollback). The JetBrains-MPS/Dark model — the expert tier, I8-clean (same set-option mechanism, different entrypoint). Risk: real implementation must round-trip through the formatter; densest for beginners.\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/studio/projectional.html",
+          "code": "  config.jet · halcyon · gen [47 ▾]        [Projection|Text]\n  12  boot.kernel:      [.CachyOS ▾]   ← rebuild + reboot\n▌ 13  boot.loader:      [.Limine  ▾]      (changed)\n  14  perf.scheduler:   [.ScxLavd ▾]\n  18  desktop.plasma:   [on ⏻]\n  19  theme.flavor:     [catppuccin-mocha ▾]\n  24  secrets.wifi:     [sealed · age · 41d] [rekey]\n  ────────────────────────────────────────────────\n  2 lines changed → [Review & apply — gen 48]\nLoop: read the doc → edit values in place → apply"
         }
       ],
       "comparisons": [
         {
-          "lang": "Home Assistant",
-          "note": "The config-vs-UI duality all three transplant — but made always-visible instead of a hidden YAML mode: every toggle shows its system.jet line and pending diff.",
-          "code": "toggle → set-option transaction → source diff shown before apply"
+          "lang": "Apple System Settings",
+          "note": "A's navigation model — category rail, control-on-the-row — extended with the pending source tray so every flip shows its source line.",
+          "code": "toggle → tray: - desktop.plasma.enable: false / + true"
         },
         {
-          "lang": "Vercel",
-          "note": "Generations as a deploy timeline with one-click rollback and closure-size delta — the model for the generations screen in every option.",
-          "code": "gen 47 (current) ← gen 46 · rollback · closure 2.1 GiB (+34 MiB)"
+          "lang": "GitHub PR / Terraform plan",
+          "note": "B's primary screen: unified diff + human summary + impact before anything applies; per-hunk include is PR review's viewed-checkbox turned into control.",
+          "code": "Plan: 2 to change · reboot required · gen 47 → 48  [y/N]"
+        },
+        {
+          "lang": "JetBrains MPS / Dark",
+          "note": "D's model: projectional editing — structured values manipulated through typed widgets while the document stays the single artifact.",
+          "code": "boot.kernel: [.CachyOS ▾] — the dropdown IS line 12"
         }
       ],
-      "rec": "A",
+      "rec": "D",
       "status": "open",
       "created": "2026-07-08T13:10:16.749Z",
       "comment": "Give me the bones of C but with the visual style of A -> I dont love the look of c but the structure & info shown is better than a. The visual identity of a is better"
@@ -39119,47 +39141,47 @@
       "id": "D-FE-REPL1",
       "cardId": "c0gk8k3t",
       "group": "tooling",
-      "title": "Jet REPL — pick the design family",
-      "gist": "Which of three visual designs the interactive REPL ships with.",
-      "explainer": "Carbon — a persistent status band gives whole-session state to the daily driver; Paper is the better teaching/newcomer swap if the REPL should lead with approachability.",
-      "story": "Priya keeps a REPL open all day next to her editor: she pastes a function, probes a value, and reads one type error an hour. The REPL's look decides whether that loop feels like a first-class instrument or an afterthought. All three options share the same features — ghost autosuggest from history, Tab completion with a signature column, `?name` inline docs, multiline editing, the pinned `name : Type = value` output — and show the real E0112 diagnostic verbatim (I4). Only the frame differs.",
-      "inWild": "$ jet repl\nJet 0.9.2 — interactive REPL\n\nuser> let grid = fizzbuzz(20)\ngrid : [String] = [\"1\", \"2\", \"Fizz\", \"4\", \"Buzz\", ...]\n\nuser> show(\"hi\")\nError [E0112]: `show` wants Int (a whole number) for argument 1, but this is String (text)",
+      "title": "Jet REPL — pick the UX archetype",
+      "gist": "Which interaction model the REPL is built around — enhanced line, living blocks, or a pane workspace.",
+      "explainer": "Line — it preserves the universal REPL mental model and clean scrollback while adding the modern editing that actually speeds daily use; B's pin and C's bindings view can arrive later as opt-in modes on top of it without a second mechanism (I8).",
+      "story": "Priya keeps a REPL open all day: she probes values, pastes functions, reads the occasional type error. Three genuinely different sessions compete: a classic line loop with modern editing, a notebook of blocks she can fold/rerun/pin, or a split workspace where every binding stays visible as it evolves. One shared theme; the archetypes differ in what a session IS. All show the verbatim E0112 diagnostic and the pinned `value : Type` echo. Browse: file:///home/nate/Projects/Github/jet/docs/design/frontends/index.html#repl (←/→ switches, c compares).",
+      "inWild": "$ jet repl\nJet 0.1.0 — interactive REPL  (type :quit to exit, :help for commands)\n\nuser> nums :: [1, 2, 3, 4, 5]\n[1, 2, 3, 4, 5] : List\nuser> nums.map((n: Int) => (n * n))\n[1, 4, 9, 16, 25] : List",
       "detail": "",
       "options": [
         {
           "key": "A",
-          "name": "Carbon — status band + step-indexed prompt",
-          "detail": "Persistent status band under the title (session, core, fuel, step count with state LEDs) and a step-indexed prompt `[n] ▸` replacing flat `user>`. Value lines read as engineered readouts with a dotted rule from name to value. For heavy daily users who want session state always in view. Full HTML flow: file:///home/nate/Projects/Github/jet/docs/design/frontends/repl/carbon.html",
-          "code": "┌ jet repl ───────────────────────────────────── 80×24 ┐\n│ SESSION ● live │ CORE ● loaded │ FUEL 65000 │ STEP 4 │\n├──────────────────────────────────────────────────────┤\n│ [4] ▸ grid.take(5)                                   │\n│                                                      │\n│   grid ····· : [String] = [\"1\",\"2\",\"Fizz\",\"4\",..]    │\n│                                                      │\n│ [5] ▸ show(\"hi\")                                     │\n│                                                      │\n│ Error [E0112]: `show` wants Int (a whole number)     │\n│ for argument 1, but this is String (text)            │\n│   --> <repl:6>                                       │\n│     |                                                │\n│   6 |     show(\"hi\")                                 │\n│     |          ^^^^                                  │\n│  Why: every argument must match its parameter's type │\n│  Fix: use Int (a whole number) here                  │\n│ [6] ▸ _                                              │\n└──────────────────────────────────────────────────────┘"
+          "name": "Line — classic loop, modern editing",
+          "detail": "Core loop: type an expression, read its value, keep typing — one line at a time. Adds ghost autosuggest from history, a completion menu with signatures, inline ?name docs, and live highlight WITHOUT changing the mental model; scrollback stays plain text, so pipes and logs stay clean. Lowest ceremony, obvious default. Note: the ?name docs mode is new behavior (not in REPL.rs) — if A wins it gets its own ballot row before implementation. NO_COLOR: ghost suggest simply not shown (up-arrow history remains).\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/repl/line.html",
+          "code": "Jet 0.1.0 — interactive REPL  (type :quit to exit, :help for commands)\n\nuser> nums :: [1, 2, 3, 4, 5]\n[1, 2, 3, 4, 5] : List\nuser> nums.fil\n      ┌──────────────────────────────────────────────┐\n      > filter      (f: Fn) -> List   keep items where\n      │ filter_map  (f: Fn) -> List   map, drop None  │\n      └──────────────────────────────────────────────┘\n      Tab accept · up/down move · ? docs for selected\nuser> show(\"hi\")\nError [E0112]: `show` wants Int (a whole number) for argument 1, but this is String (text)\n  --> tests/ui/arg_type_mismatch.jet:5:10\n    |\n  5 |     show(\"hi\")\n    |          ^^^^\n Why: every argument must match its parameter's type\n Fix: use Int (a whole number) here\nuser> _"
         },
         {
           "key": "B",
-          "name": "Paper — light shell, foldable blocks",
-          "detail": "Each turn is a Warp-style block you can fold and rerun, separated by hairline rules; the prompt is a single accent chevron. A light terminal by default (dark swap available) — the deliberate counter-position to every dark tool. Errors are a calm orange-accented card, never a red wall. Best for teaching, docs-adjacent work, and newcomers. Full HTML flow: file:///home/nate/Projects/Github/jet/docs/design/frontends/repl/paper.html",
-          "code": "+-- jet repl -------------------------------- 80x24 --+\n| Jet 0.9.2  interactive REPL   core loaded fuel 65k  |\n| ?name for docs · :help commands · :quit exit        |\n+-----------------------------------------------------+\n|> grid.take(5)                                       |\n|                                                     |\n|  grid --------- : [String] = [\"1\",\"2\",\"Fizz\",..]    |\n+-----------------------------------------------------+\n|> show(\"hi\")                                         |\n|Error [E0112]: `show` wants Int (a whole number)     |\n|for argument 1, but this is String (text)            |\n|  --> <repl:6>                                       |\n|    |                                                |\n|  6 |     show(\"hi\")                                 |\n|    |          ^^^^                                  |\n| Why: every argument must match its parameter's type |\n| Fix: use Int (a whole number) here                  |\n+-----------------------------------------------------+"
+          "name": "Notebook — a session of living blocks",
+          "detail": "Core loop: build up a session of blocks you fold, rerun, edit in place, and pin — revisit, don't scroll away. Every turn is command+output+status+timing in one addressable block (Warp model); pin a value to keep it on screen; big outputs page inside the block as a browsable table instead of flooding the screen. The session becomes reproducible, not append-only. Note: edit-in-place rerun must recompute or stale-mark downstream bindings — real semantics work that gets its own ballot row if B wins. NO_COLOR: status words (ok/error/edited/folded) already textual.\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/repl/notebook.html",
+          "code": "╭─ 1 · ok · 2ms ────────────────────────── fold  rerun  pin\n│ nums :: [1, 2, 3, 4, 5]\n│ [1, 2, 3, 4, 5] : List\n╰───────────────────────────────────────────────────────\n📌 ╭─ 1 · ok · pinned ────────────────────────────────────\n│ nums : List = [1, 2, 3, 4, 5]\n╰───────────────────────────────────────────────────────\n╭─ 2 · ok · folded ── nums.map(…) → [1,4,9,16,25] ─ unfold\n╭─ 4 · ok · 1ms ────────────────────────── fold  rerun  pin\n│ nums.map((n: Int) => (n * n))\n│ idx  value        5 items\n│  0    1     <- selected row · j/k scroll · → expand\n│  1    4\n╰───────────────────────────────────────────────────────\n╭─ 5 · error · E0112 ──────────────────────── edit  rerun\n│ Error [E0112]: `show` wants Int (a whole number) ...\n│  Fix: use Int (a whole number) here\n╰───────────────────────────────────────────────────────"
         },
         {
           "key": "C",
-          "name": "Pulse — dark, one glow follows the live edge",
-          "detail": "Exactly one hot gradient element on screen, and it follows the action: the prompt chevron when idle, the selected completion row, the just-computed value name, or the error caret. All syntax highlighting is cool-toned so nothing competes. The showpiece option — strongest in demos and screencasts. Full HTML flow: file:///home/nate/Projects/Github/jet/docs/design/frontends/repl/pulse.html",
-          "code": "  JET  interactive REPL · v0.9.2\n  core loaded · fuel 65k · :help · :quit\n\n[4] ▸ grid.take(5)                     (▸ = the one glow)\n\n  grid ····· : [String] = [\"1\",\"2\",\"Fizz\",\"4\",\"Buzz\"]\n             (glow moves to `grid`: it is the live value)\n\n[6] ▸ show(\"hi\")\n  Error [E0112]: `show` wants Int (a whole number)\n  for argument 1, but this is String (text)\n    --> <repl:6>\n      |\n    6 |     show(\"hi\")\n      |          ^^^^   (glow moves to the caret)\n   Why: every argument must match its parameter's type\n   Fix: use Int (a whole number) here"
+          "name": "Workspace — session left, live bindings right",
+          "detail": "Core loop: evaluate on the left; watch state evolve in a live bindings inspector on the right, docs on demand. Alt-screen split (lazygit panes): every binding shown as `name : Type = value`, updated the instant a step lands, changed row marked — kills :type round-trips and surfaces the memory model (moved/owned) live. ? splits the right column for docs without covering the session. Non-TTY falls back to the line archetype's plain transcript. NO_COLOR: box-drawing panes + a `◂ new this step` glyph carry everything.\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/repl/workspace.html",
+          "code": "jet repl · workspace ──────────────────── ? docs  :help  :quit\n┌─ session ───────────────────────────┬─ bindings ──────────────┐\n│ user> doubled := nums.map(          │ nums    : List = [1,2,3,│\n│   (n: Int) => (n * 2))              │                    4,5] │\n│ [2, 4, 6, 8, 10] : List             │ total   : Int  = 15     │\n│ user> _                             │ doubled : List = [2,4,6,│\n│                                     │                    8,10]│\n│                                     │ ◂ new this step         │\n│                                     │ 3 bindings · 0 moved    │\n└─────────────────────────────────────┴─────────────────────────┘\n⏎ eval   ⇥ complete   ^L clear session   ^B focus bindings"
         }
       ],
       "comparisons": [
         {
           "lang": "ipython / ptpython",
-          "note": "Numbered turns and ghost autosuggest from history — Option A's step index makes the turn number a first-class part of the prompt.",
-          "code": "In [4]: grid.take(5)\nOut[4]: [\"1\", \"2\", \"Fizz\", \"4\", \"Buzz\"]"
-        },
-        {
-          "lang": "Julia",
-          "note": "The `?name` help mode all three adopt: type ? and the prompt switches to documentation lookup.",
-          "code": "help?> fold\n  fold(init, f) — combine elements left to right"
+          "note": "A's editing kit: ghost autosuggest from history, completion menu with signatures, ?-style docs.",
+          "code": "In [2]: nums.fil<TAB>  →  filter  filter_map  (menu w/ signatures)"
         },
         {
           "lang": "Warp",
-          "note": "Option B's block model: every command+output is a discrete card you can fold, copy, or rerun.",
-          "code": "[block] > jet test ........ ✓ 0.8s   (fold ▾ · rerun ↻)"
+          "note": "B's block model: every command+output is an addressable card with status/duration — bookmark becomes pin, rerun is one key.",
+          "code": "[block 4 · ok · 1ms]  rerun ↻ · pin 📌 · fold ▾"
+        },
+        {
+          "lang": "lazygit / debugger variables pane",
+          "note": "C's layout: fixed panes with focus keys; the bindings pane is a debugger's variables view kept live for a REPL session.",
+          "code": "┌ session ┬ bindings ┐  ^B focus · values update per step"
         }
       ],
       "rec": "A",
@@ -39170,42 +39192,42 @@
       "id": "D-FE-PROMPT1",
       "cardId": "c0iyfhaf",
       "group": "tooling",
-      "title": "Jet shell prompt — pick the design family",
-      "gist": "Which of three designs the prompt inside jet env dev shells ships with.",
-      "explainer": "Pulse — a two-line prompt is exactly where one moving glow pays off: idle, broken, or busy is legible before reading a single word. Paper is the pick if silence-by-default matters more.",
-      "story": "Sam enters `jet env`, works for four hours, and glances at the prompt hundreds of times: is the build green, is the tree dirty, is that benchmark still running? The prompt is the highest-frequency surface Jet ships — it must answer in a glance and never cost more than two lines. All three options show the same segments (env name, jet version, build/test state, git branch, dirty markers) and collapse finished commands starship-transient-style; only the visual language differs.",
-      "inWild": "$ jet env\n── webapp · dev shell ──────────────────────────\n# four hours of: edit, build, test, glance at prompt\n$ jet build   # fails with E0308 — the prompt must surface this\n$ jet bench   # runs 90s — the prompt must show it is alive",
+      "title": "Jet shell prompt — pick the UX archetype",
+      "gist": "How the jet env prompt communicates: on demand, always, or only when something changed.",
+      "explainer": "Adaptive — it gives minimal's silence AND segments' awareness, each exactly when warranted: nothing when things pass, one actionable line when they don't. The failed-test line handing you the rerun command is the joy-of-use moment. Segments (B) is the pick if constant readouts matter more than quiet.",
+      "story": "Sam works four hours inside `jet env` and glances at the prompt hundreds of times. The real choice is a communication policy, not a look: pull (silent until asked), push-always (segments answer every question before he asks), or push-on-event (silence is the all-clear; the prompt speaks once when a build fails or a job runs). All ≤2 lines, one shared theme. Browse: file:///home/nate/Projects/Github/jet/docs/design/frontends/index.html#prompt (←/→ switches, c compares).",
+      "inWild": "$ jet env\n── web-api · dev shell ─────────────────────────\n# hours of: edit → jet build → jet test → glance\n$ jet build    # fails — how loudly should the prompt say so?\n$ jet bench    # runs 90s — how does the prompt show it's alive?",
       "detail": "",
       "options": [
         {
           "key": "A",
-          "name": "Carbon — status-band prompt",
-          "detail": "The info line is a flat run of segments with condition LEDs; a failing build shows its error code inline. Full state on every prompt, nothing hidden. Finished commands collapse to verb + LED + duration. NO_COLOR: LEDs become [ok]/[FAIL] tags. Full HTML states: file:///home/nate/Projects/Github/jet/docs/design/frontends/prompt/carbon.html",
-          "code": "webapp · jet 0.9.2 · ● tests ok · ⎇ main          (normal)\n▸ _\n\nwebapp · jet 0.9.2 · ● tests ok · ⎇ main ●3 +42 −7 (dirty)\n▸ git add .\n\nwebapp · jet 0.9.2 · ● build failed E0308 · ⎇ main ●1 (fail)\n▸ _\n\n▸ jet build            ● 1.2s                      (transient)\n▸ jet test             ● 0.8s\nwebapp · ⣾ running jet bench · 12s · ⎇ main"
+          "name": "Minimal — silent until asked (pull)",
+          "detail": "Core loop: the prompt stays out of the way until you ask it for status. One line: env marker + chevron; the only persistent signal is the chevron's exit state (green ok / red + code). One keystroke (^G) expands a single dim line with last build/test, then it collapses. For people who want zero prompt noise and are willing to ask. NO_COLOR: chevron color becomes an ok / x N tag.\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/prompt/minimal.html",
+          "code": "web-api ❯ jet test\n12 passed\nweb-api ❯ jet run           (chevron green: last exit 0)\n…server exited 1\nweb-api ❯ 1                 (chevron red + code: last exit 1)\nweb-api ❯                   (press ^G to glance ↓)\n        build ok · 0.4s     test 12/12 · 8ms ago\nNO_COLOR:  web-api ok ❯     web-api x 1 ❯"
         },
         {
           "key": "B",
-          "name": "Paper — quiet prompt, absence is the all-clear",
-          "detail": "Hairline-separated segments — and a clean passing shell hides the info line entirely: silence means everything is fine. Only a failed build raises its voice, phrased as the next action to take. The lowest-noise option; state appears exactly when it changes. NO_COLOR: markers become [!] tags. Full HTML states: file:///home/nate/Projects/Github/jet/docs/design/frontends/prompt/paper.html",
-          "code": "webapp ─ jet 0.9.2 ─ main                          (normal)\n> _\n\nwebapp ─ jet 0.9.2 ─ main  ✎ 3 · +42 −7            (dirty)\n> git add .\n\nwebapp ─ jet 0.9.2 ─ main  ✎ 1                     (fail)\nbuild failed · E0308 in label() · run jet build to see it\n> _\n\n> jet build   ✓ 1.2s                               (transient)\n> jet test    ✓ 0.8s\nwebapp ─ ⣾ jet bench 12s   Ctrl-C to stop"
+          "name": "Segments — everything on, every prompt (push-always)",
+          "detail": "Core loop: a glance answers every status question before you type. A second info line carries always-on segments — env · jet version · build · test · git — each one truth, color-coded, words not glyphs (so NO_COLOR holds: `build ✗ E0112`, `test stale`, `main •1`). Finished commands collapse to a one-line receipt so history stays skimmable. Costs one extra line every prompt; segments drop right-to-left on narrow terminals.\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/prompt/segments.html",
+          "code": "web-api ❯ jet test                          ✓ 12/12 · 0.3s   (collapsed)\nweb-api · jet 0.1.0 · build ok · test 12/12 · main ✓\n❯ _\n\nafter a failed build:\nweb-api ❯ jet build                         ✗ E0112 · 0.2s\nweb-api · jet 0.1.0 · build ✗ E0112 · test stale · main •1\n❯ _"
         },
         {
           "key": "C",
-          "name": "Pulse — one glow that moves to what matters",
-          "detail": "Exactly one hot element, and it travels: the cursor when idle, the failed segment when broken, the spinner while work runs. A dirty tree stays cool — it is a normal working state, not an alarm. No glow anywhere means nothing needs you. NO_COLOR: the glow becomes a bold leading glyph. Full HTML states: file:///home/nate/Projects/Github/jet/docs/design/frontends/prompt/pulse.html",
-          "code": "webapp · jet 0.9.2 · ✓ tests · ⎇ main              (normal)\n▸ _                        (▸ glows)\n\nwebapp · jet 0.9.2 · ✓ tests · ⎇ main ●3 +42 −7    (dirty)\n▸ git add .                (▸ glows; markers cool)\n\nwebapp · jet 0.9.2 · ✗ build E0308 · ⎇ main        (fail)\n▸ _                        (✗ segment glows; ▸ cool)\n\n▸ jet build   ✓ 1.2s                               (transient)\nwebapp · ⣾ jet bench 12s · ⎇ main   (spinner glows)"
+          "name": "Adaptive — speaks only on change (push-on-event)",
+          "detail": "Core loop: the prompt speaks only when something changed. Clean shell = bare chevron; a running job shows one live spinner line that collapses when done; a failure inserts exactly one line phrased as the next action with a runnable command, gone on your next input. Success adds nothing — silence is the signal. The action line is prompt copy, never a restated diagnostic (I4-safe: it points and hands a command). Needs a build/test event feed; reduced motion freezes the spinner.\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/prompt/adaptive.html",
+          "code": "❯                            (clean: bare chevron)\n❯ jet test\n⠹ running tests · 6/12 · 0.2s          (live, then collapses)\n❯ jet test\n12 passed                    (success: prompt adds nothing)\n❯\n\non failure — one inserted action line:\n❯ jet test\n11 passed · 1 failed\n→ 1 test failed. Rerun just it: jet test url_parse\n❯\nNO_COLOR: spinner ⠹ stays; arrow → degrades to ->"
         }
       ],
       "comparisons": [
         {
           "lang": "starship",
-          "note": "The segment model and transient prompt all three build on: finished commands collapse to one line with duration.",
-          "code": "webapp on  main [!3] via ⬢ v22 took 1.2s\n❯"
+          "note": "B builds on its segment model and transient collapse; A and C reuse only the transient collapse and last-exit glyph.",
+          "code": "web-api on  main took 1.2s\n❯"
         },
         {
-          "lang": "powerlevel10k",
-          "note": "Instant prompt + condition-dependent segments — Option A's always-on LED band is the same idea with a fixed layout.",
-          "code": "╭─ webapp  main ✗3 ─ ok ╰─❯"
+          "lang": "fish",
+          "note": "A and C's philosophy: the shell stays minimal and truthful; state you didn't ask about stays out of the way.",
+          "code": "~/w/api ❯   (nothing else, until something matters)"
         }
       ],
       "rec": "C",
@@ -39216,50 +39238,50 @@
       "id": "D-FE-HELP1",
       "cardId": "c0l5fmyy",
       "group": "tooling",
-      "title": "jet ? help app — pick the design family",
-      "gist": "Which of three designs the full-screen jet ? help browser ships with.",
-      "explainer": "Paper — help is the discovery surface for newcomers; the editorial reading view serves \"find what you want faster and enjoy exploring\" best. Carbon suits it once you already know the tool.",
-      "story": "Ana installed Jet an hour ago. She knows roughly what she wants — \"run my file and rebuild on save\" — but not the flag. She types `jet ?`, and instead of eighty lines of flat --help scrolling past, a navigable app opens: fuzzy search, command groups, runnable examples, and Enter drops the chosen command onto her shell line ready to edit. All three options share that flow (lazygit two-pane, fzf fuzzy match, atuin-style prefill exit); only the visual language differs.",
-      "inWild": "$ jet ?\n# full-screen help opens (alt-screen; q restores the shell untouched)\n# Ana types: watch → fuzzy-matches `jet run --watch`\n# Enter → app closes, shell line reads:\n$ jet run app.jet --watch▌   ← prefilled, not executed",
+      "title": "jet ? help app — pick the UX archetype",
+      "gist": "What jet ? opens: an instant command finder, a full reference book, or a goal-first guide.",
+      "explainer": "Palette — help's job is measured in seconds-to-command, and the overlay wins that for beginners and experts alike while staying the lightest to maintain; B's reference pages and C's recipes can mount INSIDE the palette later as result types without a second mechanism (I8).",
+      "story": "Ana installed Jet an hour ago and wants \"run my file and rebuild on save\"; Marco has used Jet for a year and just forgot a flag. Three genuinely different apps serve them: a fuzzy finder that drops over the shell and prefills the command in two seconds, a two-pane reference covering every command, flag, error code and syntax page, or a goal-first explorer that starts from what you want to DO. The axis is speed vs depth vs intent. Browse: file:///home/nate/Projects/Github/jet/docs/design/frontends/index.html#help (←/→ switches, c compares).",
+      "inWild": "$ jet ?\n# what opens? Ana types \"watch\" or picks a goal —\n# either way she should land back at her shell with:\n$ jet run --watch src/main.jet▌   ← prefilled, never executed",
       "detail": "",
       "options": [
         {
           "key": "A",
-          "name": "Carbon — dense two-pane browser",
-          "detail": "Status band up top (match count, active command), engineered list/detail split, examples inline with a run marker. Maximum information per screen — built for people who already know the tool and want speed. NO_COLOR: selection becomes reverse video, matches underline. Full HTML flow: file:///home/nate/Projects/Github/jet/docs/design/frontends/help/carbon.html",
-          "code": " jet ?  help browser              ↑↓ / search  ? keys  q quit\n ⌕ _                                    filter 26 commands\n ┌ BUILD & RUN ────────┬ jet run ─────────────────────────┐\n │▸run    build & run  │ build the current program, run it│\n │ build  compile bin  │ USAGE  jet run [FILE] [--watch]   │\n │ test   run tests    │ EXAMPLES                          │\n │ CODE QUALITY        │  ❯ jet run            enter→shell │\n │ check  type-check   │  ❯ jet run app.jet --watch        │\n └─────────────────────┴───────────────────────────────────┘\n enter use · tab pane · / search · c categories · q quit"
+          "name": "Palette — instant overlay, prefill and go",
+          "detail": "Core loop: summon → type three chars → Enter → back in the shell with the command prefilled. An fzf-style finder drops OVER the shell (no alt-screen takeover; the shell stays dimmed behind). Search spans commands, flags, and examples; Tab peeks flags inline; Enter prefills the shell line and never runs it. The two-second path for someone who roughly knows what they want. Risk: fuzzy ranking quality is the whole UX; prefill-not-run must be unmistakable. NO_COLOR: > selection + [ ] match brackets.\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/help/palette.html",
+          "code": "web-api ❯ jet ?\n┌─ find a command ─────────────────────────────────────┐\n│ > run                                        5 shown │\n├──────────────────────────────────────────────────────┤\n> jet [run] <file>      run a file, rebuilding if changed\n│ jet [run] --watch     rerun on every save            │\n│ jet [run] --release   run an optimized build         │\n├──────────────────────────────────────────────────────┤\n│ example  jet run examples/features/basics/hello.jet  │\n│ ↑↓ move · ⏎ prefill shell · ⇥ flags · Esc close      │\n└──────────────────────────────────────────────────────┘\n→ Enter closes overlay, shell line:  web-api ❯ jet run _"
         },
         {
           "key": "B",
-          "name": "Paper — editorial reading view",
-          "detail": "Reads like good documentation: real heading hierarchy in the detail pane, fading hairline under section labels, whitespace doing the structure. The one warm accent marks fuzzy-match characters. Built for newcomers and discovery — the surface most aligned with \"make exploration enjoyable.\" NO_COLOR: matches underline, selection is a left bar + bold. Full HTML flow: file:///home/nate/Projects/Github/jet/docs/design/frontends/help/paper.html",
-          "code": " jet ?  help                      ↑↓ / search  ? keys  q quit\n ⌕ _                                    filter 26 commands\n BUILD & RUN            │ jet run\n  run   build & run     │ Build the current program and run\n  build compile binary  │ it — fastest path from code to out.\n  test  run tests       │ USAGE ─────────────\n CODE QUALITY           │  jet run [FILE] [--watch]\n  check type-check      │ EXAMPLES\n  fmt   format source   │  [ ❯ jet run ]        enter→shell\n                        │  [ ❯ jet run app.jet --watch ]\n enter use · / search · c categories · q quit"
+          "name": "Browser — the full reference book",
+          "detail": "Core loop: explore the whole tool like a reference book — category → command → man-depth detail. Alt-screen two-pane app (lazygit model): category tree + commands left; usage, description, flags table, runnable examples, see-also right. The reference also covers error codes and syntax — each code page renders the verbatim diagnostic (E0112 shown). Enter on an example still prefills the shell after exit. The learn-it-properly surface. Risk: heavier to invoke; large content to author and maintain. NO_COLOR: ▾/▸ tree glyphs + > selection.\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/help/browser.html",
+          "code": "jet ? reference              Build & run › run › usage\n┌─ commands ──────────┬─ jet run ────────────────────────┐\n│ ▾ Build & run       │ Usage                            │\n│ >  run              │   jet run <file> [flags]         │\n│    build            │ Run a file, rebuilding first if  │\n│    test             │ its sources changed.             │\n│ ▸ Project           │ Flags                            │\n│ ▸ Reference         │   --watch   rebuild+rerun on save│\n│    error codes      │   --release optimized build      │\n│    syntax           │   --quiet   hide the build ledger│\n└─────────────────────┴──────────────────────────────────┘\n↑↓ move · → into · ⏎ prefill shell · / search · q quit"
         },
         {
           "key": "C",
-          "name": "Pulse — one glow follows focus",
-          "detail": "Exactly one hot element: the selected command, then the chosen example, then — on exit — the command riding out onto the shell line still glowing. Fuzzy-matched characters light inside the word. The showpiece option; help as a demo of the product's polish. NO_COLOR: reverse-video selection, underlined matches. Full HTML flow: file:///home/nate/Projects/Github/jet/docs/design/frontends/help/pulse.html",
-          "code": " jet ?  help                      ↑↓ / search  ? keys  q quit\n ⌕ biuld                                3 of 26 match\n MATCHES               │ jet build\n ▸build  (b·ild glow)  │ compile the current program to a bin\n  bundle assets        │ USAGE jet build [--release] [--target]\n  rebuild clean        │ EXAMPLES\n                       │  ❯ jet build\n                       │ [❯ jet build --release]  ← the one glow\n enter use · esc clear · ↑↓ move · q quit"
+          "name": "Tasks — start from the goal",
+          "detail": "Core loop: say what you want to do, get the exact commands to do it. Home lists outcomes (\"run a file and rebuild on save\", \"add a dependency\", \"understand an error message\"), not command names; picking one shows a short numbered recipe of real runnable commands with one-line whys, each prefillable. \"Understand an error\" leads with the verbatim diagnostic then how to act on it. The strongest beginner story — no command names required to start. Risk: the goal list is curated content; it must stay small and outcome-worded or it becomes a second command list (I8), and recipes must stay tested (golden candidates). NO_COLOR: step numbers + > selection.\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/help/tasks.html",
+          "code": "jet ? what do you want to do?\n┌──────────────────────────────────────────────────────┐\n│ > run a file and rebuild on save                     │\n│   start a web app                                    │\n│   add a dependency                                   │\n│   understand an error message                        │\n└──────────────────────────────────────────────────────┘\n\nopen \"run a file and rebuild on save\":\n│ 1  start it, watching for changes                    │\n│ >    jet run --watch src/main.jet                    │\n│ 2  in another shell, rerun tests on every save       │\n│      jet test --watch                                │\n│ Every save rebuilds and reruns. Ctrl-C stops it.     │"
         }
       ],
       "comparisons": [
         {
-          "lang": "fzf / atuin",
-          "note": "The interaction spine of all three: fuzzy subsequence match while typing, Enter drops the choice onto the shell line without executing it.",
-          "code": "⌕ biuld  →  matches `build` · Enter → $ jet build --release▌"
+          "lang": "fzf / navi / atuin",
+          "note": "A's spine: fuzzy match over the shell, Enter drops the choice onto the shell line without executing.",
+          "code": "jet ? → type \"wat\" → ⏎ → $ jet run --watch _"
         },
         {
-          "lang": "lazygit",
-          "note": "The two-pane list/detail layout with single-key navigation that Options A and B structure around.",
-          "code": "[list pane] ▸ run          [detail pane] usage · examples · flags"
+          "lang": "lazygit / man",
+          "note": "B's structure: fixed panes, single-key navigation, man-depth pages including error-code reference.",
+          "code": "[tree] run → [page] usage · flags · examples · see also"
         },
         {
-          "lang": "trogon (Textualize)",
-          "note": "The precedent for elevating --help into a full TUI; these designs skip its form-builder in favor of prefill-on-exit.",
-          "code": "trogon builds the command in-app; jet ? hands it to your shell instead"
+          "lang": "tldr / navi recipes",
+          "note": "C's model: task-first entries and short command recipes instead of alphabetical reference.",
+          "code": "\"add a dependency\" → 1. jetpack add <pkg>  2. jet build"
         }
       ],
-      "rec": "B",
+      "rec": "A",
       "status": "open",
       "created": "2026-07-08T13:10:17.169Z"
     },
@@ -39267,50 +39289,50 @@
       "id": "D-FE-CLI1",
       "cardId": "c0nhjxh4",
       "group": "tooling",
-      "title": "jetpack / jetos CLI output — pick the design family",
-      "gist": "Which of three output designs the jetpack and jetos command line ships with.",
-      "explainer": "Carbon — the status band plus the aligned resolve/build ledger fits a package-manager/OS power tool; state survives scrollback. Paper is the pick if the CLI should read maximally calm.",
-      "story": "Leo maintains three machines on jetos. His day is `jetpack add`, `jet env`, `jetos switch`, and the occasional `jetpack gc` — plus one build failure a week where the output has to hand him the next move (`--shell-on-fail`). He wants what nh gives nix — a clean generation diff, readable progress — but tighter. All three options keep today's quiet, aligned baseline (gutter label, ✓ ledger rows, threshold rule, uv-style resolve summary, nh-style generation diff) and converge to the identical plain output under NO_COLOR/CI; only color and emphasis differ.",
-      "inWild": "$ jetos switch\n# build 1240 derivations → show what changes → confirm → atomic switch\n\nchanges\n  + hello           2.12.1\n  ↑ ripgrep         14.1.0 → 14.1.1\n  ↓ nodejs          22.5.0 → 20.15.1\n  − obsolete-tool   1.0.0\n  4 changed · +1 −1 ↑1 ↓1 · closure 2.1 GiB (+34 MiB)",
+      "title": "jetpack / jetos CLI output — pick the UX archetype",
+      "gist": "How command progress and results are experienced: a scrolling ledger, a pinned live region, or plan→confirm→apply.",
+      "explainer": "Plan — for a tool that mutates systems and generations, consent-before-consequence is the experience worth being known for, and it subsumes the others: the apply phase can render as ledger lines (A) or a live region (B) beneath an already-approved plan. Pair with --yes for trivial adds so small ops stay fast.",
+      "story": "Leo runs `jetpack add`, `jet env`, `jetos switch`, and the occasional `jetpack gc`. The flows are identical in all three options — what differs is the experience of progress and consequence: read a quiet ledger top to bottom, watch one live region while clean scrollback accumulates above it, or review a complete plan and answer once before anything mutates (the nh/terraform model you named). One shared theme; diagnostics verbatim (E0102). Browse: file:///home/nate/Projects/Github/jet/docs/design/frontends/index.html#cli (←/→ switches, c compares).",
+      "inWild": "$ jetos switch\n# 42 → 43: kernel bump, one add, one remove.\n# The archetype decides what Leo sees between typing this\n# and the new generation being live — and when he gets to say no.",
       "detail": "",
       "options": [
         {
           "key": "A",
-          "name": "Carbon — status band over the log",
-          "detail": "A labeled state-light line sits above the scroll (HANGAR / BUILD / CLOSURE / SWITCH), so system state stays legible after a thousand log lines pass. Four-color generation diff scans without reading versions. Cyan accent, magenta select, amber warn. The densest, most instrument-like option. Full HTML flows (add/env/switch/gc/failure/NO_COLOR): file:///home/nate/Projects/Github/jet/docs/design/frontends/cli/carbon.html",
-          "code": "$ jetos switch\n HANGAR ● OK   BUILD ● OK   CLOSURE ● +34M   SWITCH ● pending\n  jetos  building generation\n         ▸ realised 1240 / 1240 derivations\n  jetos  generation 42 → 43\n\n  changes\n    + hello           2.12.1\n    ↑ ripgrep         14.1.0 → 14.1.1\n    ↓ nodejs          22.5.0 → 20.15.1\n    − obsolete-tool   1.0.0\n    4 changed · +1 −1 ↑1 ↓1 · closure 2.1 GiB (+34 MiB)\n\n  jetos  switch to generation 43? [Y/n] y\n  jetos  activated generation 43 ✓"
+          "name": "Ledger — quiet scrolling record",
+          "detail": "Core loop: read top to bottom once; the active line spins, done lines freeze, scrollback is the permanent record. Refines what jetpack already ships (gutter, ✓ rows, threshold rule, spinner) — zero learning cost, perfect log fidelity, identical on TTY and CI. Cost: a long op is a wall of lines and there's no single \"where am I now\"; the spinner line is the only live signal.\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/cli/ledger.html",
+          "code": "  jetpack  add ripgrep fd\n           ▸ resolving from nixpkgs\n           ✓ ripgrep  14.1.0  built 6s\n           ✓ fd       9.0.0   cached\n  jetpack  2 packages ready  ✓\n\n  jetpack  env\n           ✓ node     22.3.0  cached\n           ✓ postgres 16.3.0  cached\n\n  ── myproj ─ dev shell · exit to leave ──────────────\n\n  (build failure: diagnostic prints inline, verbatim,\n   no spinner left hanging)"
         },
         {
           "key": "B",
-          "name": "Paper — receipt-style, fading hairlines",
-          "detail": "Output reads like a printed receipt: fading hairline rules lead each label to its value, generous alignment, one warm accent per screen (the single downgrade, the reclaimable figure). Designed for light terminals but degrades to dash-density on any ground. The calmest option. Full HTML flows: file:///home/nate/Projects/Github/jet/docs/design/frontends/cli/paper.html",
-          "code": "$ jetpack gc\n  jetpack  hangar disk report\n\n    generations  ──────╌╌ ·  12 kept · 8 reclaimable\n    store paths  ──────╌╌ ·  1,204 live · 318 dead\n    reclaimable  ──────╌╌ ·  4.7 GiB\n\n  jetpack  remove 318 dead paths + 8 generations? [y/N] y\n  jetpack  freed 4.7 GiB ✓"
+          "name": "Live region — one place to watch",
+          "detail": "Core loop: watch one pinned bottom region (progress bar, counts, elapsed, size); finished items promote up into clean scrollback; the region collapses to a one-line summary. The uv/bun/pnpm model — best \"where am I now\" for long builds: one aggregate 31/42 beats 42 log lines. Cost: cursor-up region redraw (std ANSI, noted in NOTES), must erase cleanly before any diagnostic prints, and non-TTY degrades to appended lines (= option A).\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/cli/live.html",
+          "code": "  jetpack  add ripgrep fd\n           ✓ ripgrep  14.1.0  built 6s\n  ── live region · redraws in place ──────────────────\n  realizing 1/2 · fd            00:06 · 42 MB\n  ████████████████░░░░░░░░  unpacking\n  ────────────────────────────────────────────────────\n        │ finished items promote UP, region stays pinned\n        ▼\n  jetpack  2 packages ready in 6s  ✓   (region replaced)"
         },
         {
           "key": "C",
-          "name": "Pulse — one glow on the live line",
-          "detail": "Exactly one hot highlight per screen, always on the thing currently happening: the package being built, the target generation through confirm→activate, the reclaimable figure awaiting a decision. Everything else stays cool — a finished command has no heat at all. Full HTML flows: file:///home/nate/Projects/Github/jet/docs/design/frontends/cli/pulse.html",
-          "code": "$ jetpack add nixpkgs:ripgrep\n  jetpack  resolving 1 request\n  jetpack  Resolved 4 packages in 312ms\n           ⠹ building ripgrep 14.1.1 …      ← the one glow\n           ✓ pcre2      10.44    cached\n           ✓ oniguruma  6.9.9    cached\n  jetpack  added ripgrep to env.jet ✓"
+          "name": "Plan — decide first, apply quietly",
+          "detail": "Core loop: every mutation prints a full plan (add/change/remove, download size, closure and generation delta), asks once [y/N], then applies tersely with each done line tied to a plan line. The nh/terraform model — safest for consequential ops (switch, gc): you decide from the diff and nothing mutates unseen. Cost: an extra step on trivial adds — needs sensible --yes and CI behavior (non-TTY prints the plan and exits without applying, never hangs).\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/cli/plan.html",
+          "code": "  jetos  switch\n\n  Plan  generation 42 → 43 · 1 add, 1 change, 1 remove\n\n    + firefox       —      → 129.0\n    ~ linux         6.9.7  → 6.10.1\n    - obsolete-lib  1.2.0  → —\n\n  Download 240 MB · closure +18 MB · rebuild boot + current\n\n  Apply? [y/N] ▏\n     y → quiet apply, one ✓ per planned line\n     Enter/N → nothing touched"
         }
       ],
       "comparisons": [
         {
           "lang": "nh (nix helper)",
-          "note": "The owner-named benchmark: its os-switch generation diff table is the direct ancestor of the changes block in every option — improved with aligned columns and a one-line summary row.",
-          "code": "nh os switch → [ + added  − removed  ↑ upgraded  ↓ downgraded ] + closure delta"
+          "note": "The owner-named benchmark. Its os-switch generation diff is C's plan block; the improvement is making the plan the gate for every mutation, not just switch.",
+          "code": "nh os switch → diff of added/removed/upgraded + closure delta"
         },
         {
-          "lang": "uv",
-          "note": "The compact resolve summary all three reuse: one line that says what happened and how fast, then a ledger of packages.",
-          "code": "Resolved 4 packages in 312ms"
+          "lang": "uv / pnpm",
+          "note": "B's pinned progress area with counters; finished work scrolls up clean.",
+          "code": "Progress: resolved 42, reused 40, added 2   ████████░░"
         },
         {
-          "lang": "cargo",
-          "note": "The aligned verb-gutter output style the current Output.rs already follows; all three options keep it rather than reinventing.",
-          "code": "   Compiling jet-sema v0.9.2\n    Finished dev [unoptimized] in 4.2s"
+          "lang": "terraform",
+          "note": "C's contract: complete plan, explicit confirmation, apply reported against the plan.",
+          "code": "Plan: 1 to add, 1 to change, 1 to destroy.  Enter a value:"
         }
       ],
-      "rec": "A",
+      "rec": "C",
       "status": "open",
       "created": "2026-07-08T13:10:17.309Z"
     },
@@ -39318,45 +39340,45 @@
       "id": "D-FE-DEVSRV1",
       "cardId": "c0prf2ws",
       "group": "web-ui",
-      "title": "jet dev server — pick the design family",
-      "gist": "Which of three designs the dev server terminal output and browser error overlay ship with.",
-      "explainer": "Carbon — the status band makes app health one glance in a terminal that scrolls all day, and the dark overlay is the proven pattern. Paper is the pick to visually align dev errors with a light docs-first brand.",
-      "story": "Kai runs `jet dev app.jet --target=web`, keeps the browser on one monitor and the terminal on the other, and saves every thirty seconds. On a typo, the browser must show the compile error over the running app (last good build keeps serving) and clear itself on the next clean save — vite-class. All three options show the identical verbatim E0102 diagnostic (I4) in both terminal and overlay, and the same three polling states (Rebuilding / Reloading / offline–retrying); only the chrome differs.",
-      "inWild": "$ jet dev app.jet --target=web\nserving http://localhost:8080 — watching app.jet …\n\n# save with a typo:\nError [E0102]: nothing named `rende` exists here\n  --> app.jet:14:5\n    |\n 14 |     rende(scene)\n    |     ^^^^^\n Why: only functions that have been defined (or built in, like `print` / `input`) can be called\n Fix: define it first (fn rende() { ... }), or call one that exists",
+      "title": "jet dev server — pick the UX archetype",
+      "gist": "Where the dev server's richness lives: in the browser, in the terminal, or mirrored identically in both.",
+      "explainer": "Paired — the polling architecture already makes both surfaces read one truth, so parity is nearly free, and it removes the failure mode of both other options (error hiding on the surface you're not watching). A's fuller overlay can layer on top for web targets later without breaking the parity contract.",
+      "story": "Kai runs `jet dev app.jet --target=web` with the browser on one monitor and the terminal on the other. On a broken save the last good build keeps serving — but where does he learn what broke, and how much does each surface tell him? Three splits of the same information: rich browser + silent terminal, rich terminal + clean browser, or strict parity where both always show the same status and the same verbatim E0102 frame. Browse: file:///home/nate/Projects/Github/jet/docs/design/frontends/index.html#devserver (←/→ switches, c compares).",
+      "inWild": "$ jet dev app.jet --target=web\nserving http://localhost:8080 — watching app.jet …\n# save a typo → E0102. Last good build keeps serving;\n# the archetype decides where the error reaches Kai.",
       "detail": "",
       "options": [
         {
           "key": "A",
-          "name": "Carbon — status band + dark full-bleed overlay",
-          "detail": "Terminal: a status band above the log flips BUILD ● 1 error, so app health is legible regardless of scroll; rebuild lines are timestamped. Browser: vite-class full-viewport dark card with a clickable file:line header and dismiss tip, diagnostic body verbatim. Full HTML (terminal + real overlay): file:///home/nate/Projects/Github/jet/docs/design/frontends/devserver/carbon.html",
-          "code": " SERVE ● :8080   WATCH ● app.jet   BUILD ● 1 error   CLIENTS ● 1\n  jet dev  web target\n    serve   http://localhost:8080\n    watch   app.jet\n    ready in 640ms · Ctrl-C to stop\n  14:22:08  app.jet changed → rebuilt in 210ms ✓\n  14:22:19  app.jet changed → 1 error\n  ┌ Build failed ───────────────────── app.jet:14:5 ┐\n  │ Error [E0102]: nothing named `rende` exists here │\n  │ … verbatim diagnostic …                          │\n  └ Fix the code to dismiss · Esc to hide ───────────┘"
+          "name": "Quiet terminal, rich browser",
+          "detail": "Core loop: live in the browser; the terminal is a three-line daemon. Terminal prints URL, watch target, last rebuild — then goes silent. Everything rich is in the page: vite-class full error overlay with the verbatim diagnostic, dim-while-rebuilding, a rebuild toast with timing, reconnect states. Matches how web developers actually work — eyes on the rendered page. Risk: with no tab open an error is invisible until you look (the terminal still prints the diagnostic as fallback).\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/devserver/quiet.html",
+          "code": " terminal (steady state)          browser (on error)\n ┌───────────────────────┐   ┌────────────────────────────────┐\n │ jet dev  serving      │   │ localhost:8080                 │\n │   :8080               │   │ ┌ Build failed ────── app.jet ┐│\n │   watching app.jet    │   │ │ Error [E0102]: nothing named ││\n │ ✓ rebuilt 0.4s 14:22  │   │ │  `nonexistent_function_xyz`… ││\n └───────────────────────┘   │ │  8 | nonexistent_function()  ││\n                             │ │    | ^^^^^^^^^^^^^^^^^^^^^^  ││\n  toast: ● rebuilt in 0.4s   │ │ Why / Fix … · Esc dismiss    ││\n                             │ └──────────────────────────────┘│\n                             └────────────────────────────────┘"
         },
         {
           "key": "B",
-          "name": "Paper — light overlay, the calm bet",
-          "detail": "Terminal: fading hairline leads each timestamp to its result. Browser: the one real aesthetic risk in this sweep — a light error overlay. The compile error arrives as a calm, readable card instead of a dark takeover; blue file link, diagnostic verbatim. Full HTML: file:///home/nate/Projects/Github/jet/docs/design/frontends/devserver/paper.html",
-          "code": "  jet dev  web target\n    serve   http://localhost:8080\n    ready in 640ms · Ctrl-C to stop\n  14:22:08  app.jet changed ──╌ · rebuilt in 210ms ✓\n  14:22:19  app.jet changed ──╌ · 1 error\n  ┌ Build failed   app.jet:14:5 ─────────────────╌╌ ┐  (light card)\n  │ Error [E0102]: nothing named `rende` exists here │\n  │ … verbatim diagnostic …                          │\n  └ Fix the code to dismiss · Esc to hide ───────────┘"
+          "name": "Terminal dashboard, clean browser",
+          "detail": "Core loop: the terminal is the primary view — a pinned header (status dot, port, client count, last build time) over a scrolling request/rebuild log with timings; the browser shows only a thin error banner pointing back. Best for terminal-centric developers and multi-client debugging: every request and rebuild visible with timing, client count comes free from the 400ms pollers. Risk: pinned header needs cursor-home redraw (std ANSI) and degrades to a plain status line off-TTY; the browser is deliberately information-poor.\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/devserver/dashboard.html",
+          "code": " ┌ jet dev ──────────────────────────────────────────────┐\n │ ● ready   localhost:8080   2 clients   last build 0.4s│\n └────────────────────────────────────────────────────────┘\n  14:22:03  GET  /            200  2ms\n  14:22:07  save app.jet  →  rebuilt 0.4s\n  14:23:01  save app.jet  →  error E0102\n  Error [E0102]: nothing named `nonexistent_function_xyz` …\n    8 | nonexistent_function_xyz()\n      | ^^^^^^^^^^^^^^^^^^^^^^^^\n\n browser: ● Build failed · E0102 — details in the terminal"
         },
         {
           "key": "C",
-          "name": "Pulse — heat moves from banner to failure",
-          "detail": "Terminal: the `jet dev` banner carries the one glow while the server is healthy — the heat IS the liveness indicator. On failure it moves to a single gradient bar across the overlay header; the healthy banner goes cold. Browser: dark card, cool file link, diagnostic verbatim. Full HTML: file:///home/nate/Projects/Github/jet/docs/design/frontends/devserver/pulse.html",
-          "code": "  jet dev  web target            (banner glows = server live)\n    serve   http://localhost:8080\n    ready in 640ms · Ctrl-C to stop\n  14:22:08  app.jet changed → rebuilt in 210ms ✓\n  14:22:19  app.jet changed → 1 error     (heat moves ↓)\n  ▟▟▟▟▟▟▟▟ gradient bar ▟▟▟▟▟▟▟▟▟▟▟▟▟▟▟▟\n  │ Build failed                    app.jet:14:5 │\n  │ Error [E0102]: nothing named `rende` exists… │\n  └ Fix the code to dismiss · Esc to hide ───────┘"
+          "name": "Paired — same truth on both sides",
+          "detail": "Core loop: glance at the terminal or the browser corner — same status, same error. A one-line terminal status and a browser corner strip mirror each other exactly (building / ok / error / n clients), both driven by the same version poll; on error both expand the identical verbatim diagnostic frame (once in ANSI, once in CSS, same snapshot text). No \"which surface is authoritative\" question, lowest cognitive overhead. Risk: parity must be genuinely lockstep or it's a lie; the frame is the only detail level — no request log.\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/devserver/paired.html",
+          "code": " terminal                        browser corner strip\n jet dev ● error · E0102 · 2 cl. ┌ localhost:8080 ──────────┐\n ┌ E0102 ────────────────────┐   │  (app, dimmed)           │\n │ Error [E0102]: nothing    │   │ ┌ E0102 ───────────────┐ │\n │  named `nonexistent_...`  │   │ │ Error [E0102]: nothing│ │\n │  8 | nonexistent_fn()     │   │ │  8 | nonexistent_fn() │ │\n │    | ^^^^^^^^^^^^^^^^^    │   │ │    | ^^^^^^^^^^^^^^^^ │ │\n │ Why / Fix …               │   │ └───────────────────────┘ │\n └───────────────────────────┘   │ ● error · E0102 · 2 clients│\n   (same frame, same words)      └───────────────────────────┘"
         }
       ],
       "comparisons": [
         {
           "lang": "vite",
-          "note": "The overlay benchmark: full-bleed card over the app, clickable file:line, code frame, auto-clears on the next clean build. All three keep that contract; they restyle the chrome only.",
-          "code": "[plugin:vite] Transform failed — app.tsx:14:5   (click → editor)"
+          "note": "A's overlay contract: full-bleed error card over the app, code frame, Esc dismiss, auto-clears on the next clean build.",
+          "code": "[vite] Internal server error → overlay with file:line + frame"
         },
         {
-          "lang": "next.js",
-          "note": "Precedent for the light-ground error surface Option B bets on — its dev overlay renders diagnostics on white.",
-          "code": "Build Error · light card · readable stack, no dark takeover"
+          "lang": "next / astro dev",
+          "note": "B's request log with method/path/status/timing as the terminal's primary content.",
+          "code": "GET / 200 in 2ms · ✓ compiled in 0.4s"
         }
       ],
-      "rec": "A",
+      "rec": "C",
       "status": "open",
       "created": "2026-07-08T13:10:17.448Z"
     }
@@ -40623,6 +40645,62 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-08T14:22:50.390Z",
+      "by": "claude-main",
+      "action": "message.send",
+      "ref": "msg5ego8uz6",
+      "note": "→ owner: Frontend ballots rebuilt (v2). Options are now distinct UX a"
+    },
+    {
+      "at": "2026-07-08T14:22:50.303Z",
+      "by": "claude-main",
+      "action": "decision.update",
+      "ref": "D-FE-DEVSRV1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-08T14:22:50.235Z",
+      "by": "claude-main",
+      "action": "decision.update",
+      "ref": "D-FE-CLI1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-08T14:22:50.168Z",
+      "by": "claude-main",
+      "action": "decision.update",
+      "ref": "D-FE-HELP1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-08T14:22:50.099Z",
+      "by": "claude-main",
+      "action": "decision.update",
+      "ref": "D-FE-PROMPT1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-08T14:22:50.033Z",
+      "by": "claude-main",
+      "action": "decision.update",
+      "ref": "D-FE-REPL1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-08T14:22:49.962Z",
+      "by": "claude-main",
+      "action": "decision.update",
+      "ref": "D-FE-STUDIO1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-08T14:22:49.890Z",
+      "by": "claude-main",
+      "action": "decision.update",
+      "ref": "D-FE-CANVAS1",
+      "note": ""
+    },
     {
       "at": "2026-07-08T13:46:03.243Z",
       "by": "codex",
@@ -55173,6 +55251,17 @@
       "cardId": null,
       "file": null,
       "at": "2026-07-08T13:29:24.758Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg5ego8uz6",
+      "from": "claude-main",
+      "to": "owner",
+      "text": "Frontend ballots rebuilt (v2). Options are now distinct UX archetypes sharing one visual system — not palettes. Canvas: workbench / summon-at-cursor / dual-lens / typed-offers. Studio: settings / changeset-review / ops board / projectional source doc. REPL: line / notebook blocks / pane workspace. Prompt: pull / push-always / push-on-event. Help: palette overlay / reference book / goal recipes. CLI: ledger / live region / plan-confirm-apply. Dev server: rich-browser / rich-terminal / paired. One-file viewer for everything (switch with arrows, side-by-side compare): file:///home/nate/Projects/Github/jet/docs/design/frontends/index.html — review notes in docs/design/frontends/REVIEW.md. Recs: canvas=duallens(C), studio=projectional(D), repl=line(A), prompt=adaptive(C), help=palette(A), cli=plan(C), devserver=paired(C).",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-08T14:22:50.390Z",
       "deliveredAt": null,
       "readAt": null
     }

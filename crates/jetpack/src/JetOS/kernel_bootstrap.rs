@@ -2,6 +2,7 @@ fn run_kernel_bootstrap_builder(
     theme: &Theme,
     boot: &BootProfile,
     realized: &[Store::StoreEntry],
+    use_host_defaults: bool,
 ) -> bool {
     if boot.kernel != "CachyOS" {
         return true;
@@ -17,7 +18,8 @@ fn run_kernel_bootstrap_builder(
     if !script.is_file() {
         return true;
     }
-    if let Err(e) = fs::create_dir_all(out.join("boot")) {
+    let boot_dir = out.join("boot");
+    if let Err(e) = fs::create_dir_all(&boot_dir).and_then(|_| make_tree_writable(&boot_dir)) {
         theme.error_coded(
             "E1286",
             "jetos CachyOS source build failed",
@@ -28,10 +30,11 @@ fn run_kernel_bootstrap_builder(
     }
     let output = Command::new(&script)
         .current_dir(out)
+        .env("PATH", jetos_bootstrap_path())
         .env("JETOS_KERNEL_OUT", out.join("boot"))
         .env("JETOS_KERNEL_SOURCE", out.join("source"))
         .env("JETOS_KERNEL_PACKAGE", out)
-        .envs(default_cachyos_kernel_env())
+        .envs(default_cachyos_kernel_env(use_host_defaults))
         .output();
     let output = match output {
         Ok(output) => output,
@@ -61,8 +64,34 @@ fn run_kernel_bootstrap_builder(
     true
 }
 
-fn default_cachyos_kernel_env() -> Vec<(&'static str, PathBuf)> {
+fn make_tree_writable(path: &Path) -> std::io::Result<()> {
+    let mut perms = fs::metadata(path)?.permissions();
+    perms.set_readonly(false);
+    fs::set_permissions(path, perms)?;
+    if path.is_dir() {
+        for entry in fs::read_dir(path)? {
+            let entry = entry?;
+            make_tree_writable(&entry.path())?;
+        }
+    }
+    Ok(())
+}
+
+fn jetos_bootstrap_path() -> String {
+    let existing = std::env::var("PATH").unwrap_or_default();
+    let defaults = "/run/current-system/sw/bin:/usr/bin:/bin:/usr/sbin:/sbin";
+    if existing.is_empty() {
+        defaults.to_string()
+    } else {
+        format!("{existing}:{defaults}")
+    }
+}
+
+fn default_cachyos_kernel_env(use_host_defaults: bool) -> Vec<(&'static str, PathBuf)> {
     let mut env = Vec::new();
+    if !use_host_defaults {
+        return env;
+    }
     if std::env::var_os("JETOS_CACHYOS_KERNEL").is_none() {
         if let Some(kernel) = first_existing_path(&[
             "/run/booted-system/kernel",

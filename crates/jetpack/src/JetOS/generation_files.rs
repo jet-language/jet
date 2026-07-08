@@ -164,8 +164,11 @@ fn write_root_closure(dir: &Path, realized: &[Store::StoreEntry]) -> std::io::Re
     fs::create_dir_all(&sw_bin)?;
     let mut manifest = String::new();
     manifest.push_str("jetos system package closure\n");
+    let mut projected_runtime = BTreeSet::new();
     for pkg in realized {
         manifest.push_str(&format!("{} {} {}\n", pkg.name, pkg.reference, pkg.out));
+        project_runtime_closure(dir, pkg, &mut manifest, &mut projected_runtime)?;
+        project_profile_dirs(dir, pkg)?;
         if pkg.bin.is_empty() {
             continue;
         }
@@ -188,6 +191,191 @@ fn write_root_closure(dir: &Path, realized: &[Store::StoreEntry]) -> std::io::Re
     fs::write(dir.join("sw/closure.txt"), manifest)
 }
 
+fn project_profile_dirs(dir: &Path, pkg: &Store::StoreEntry) -> std::io::Result<()> {
+    let out = Path::new(&pkg.out);
+    if !out.is_dir() {
+        return Ok(());
+    }
+    let sw = dir.join("sw");
+    for top in ["bin", "sbin", "lib", "libexec", "share", "etc"] {
+        let src = out.join(top);
+        if src.is_dir() {
+            copy_profile_tree(&src, &sw.join(top))?;
+        }
+    }
+    Ok(())
+}
+
+fn copy_profile_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
+    if skip_runtime_payload(src) {
+        return Ok(());
+    }
+    let meta = fs::symlink_metadata(src)?;
+    if meta.is_dir() {
+        fs::create_dir_all(dst)?;
+        let mut entries = fs::read_dir(src)?
+            .filter_map(Result::ok)
+            .collect::<Vec<_>>();
+        entries.sort_by_key(|entry| entry.file_name());
+        for entry in entries {
+            copy_profile_tree(&entry.path(), &dst.join(entry.file_name()))?;
+        }
+    } else if !dst.exists() {
+        if let Some(parent) = dst.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        if meta.file_type().is_symlink() {
+            copy_runtime_symlink(src, dst)?;
+        } else if meta.is_file() {
+            link_or_copy_file(src, dst)?;
+        }
+    }
+    Ok(())
+}
+
+fn project_runtime_closure(
+    dir: &Path,
+    pkg: &Store::StoreEntry,
+    manifest: &mut String,
+    projected_runtime: &mut BTreeSet<String>,
+) -> std::io::Result<()> {
+    let out = Path::new(&pkg.out);
+    if !out.starts_with("/nix/store") {
+        return Ok(());
+    }
+    for path in nix_store_closure_paths(out)? {
+        if !path.starts_with("/nix/store") {
+            continue;
+        }
+        if skip_runtime_store_path(&path) {
+            continue;
+        }
+        let key = path.to_string_lossy().into_owned();
+        if !projected_runtime.insert(key.clone()) {
+            continue;
+        }
+        copy_nix_store_path(dir, &path)?;
+        manifest.push_str(&format!("jetos-adapter-closure {} {}\n", pkg.name, key));
+    }
+    Ok(())
+}
+
+fn skip_runtime_store_path(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|part| part.to_str())
+        .map(|name| name.contains("nixos-icons"))
+        .unwrap_or(false)
+}
+
+fn nix_store_closure_paths(out: &Path) -> std::io::Result<Vec<PathBuf>> {
+    let output = Command::new("nix-store").args(["-qR"]).arg(out).output();
+    let output = match output {
+        Ok(output) => output,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(vec![out.to_path_buf()]),
+        Err(e) => return Err(e),
+    };
+    if !output.status.success() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!(
+                "nix-store -qR failed for `{}`: {}",
+                out.display(),
+                String::from_utf8_lossy(&output.stderr).trim()
+            ),
+        ));
+    }
+    let mut paths = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(|line| PathBuf::from(line.trim()))
+        .filter(|path| !path.as_os_str().is_empty())
+        .collect::<Vec<_>>();
+    if paths.is_empty() {
+        paths.push(out.to_path_buf());
+    }
+    paths.sort();
+    paths.dedup();
+    Ok(paths)
+}
+
+fn copy_nix_store_path(dir: &Path, src: &Path) -> std::io::Result<()> {
+    let rel = src.strip_prefix("/").map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("nix closure path is not absolute: `{}`", src.display()),
+        )
+    })?;
+    copy_runtime_tree_filtered(src, &dir.join(rel))
+}
+
+fn copy_runtime_tree_filtered(src: &Path, dst: &Path) -> std::io::Result<()> {
+    if skip_runtime_payload(src) {
+        return Ok(());
+    }
+    let meta = fs::symlink_metadata(src)?;
+    if meta.is_dir() {
+        fs::create_dir_all(dst)?;
+        let mut entries = fs::read_dir(src)?
+            .filter_map(Result::ok)
+            .collect::<Vec<_>>();
+        entries.sort_by_key(|entry| entry.file_name());
+        for entry in entries {
+            copy_runtime_tree_filtered(&entry.path(), &dst.join(entry.file_name()))?;
+        }
+    } else if meta.file_type().is_symlink() {
+        copy_runtime_symlink(src, dst)?;
+    } else if meta.is_file() {
+        if let Some(parent) = dst.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        copy_runtime_file_filtered(src, dst)?;
+    }
+    Ok(())
+}
+
+fn copy_runtime_file_filtered(src: &Path, dst: &Path) -> std::io::Result<()> {
+    let bytes = fs::read(src)?;
+    if let Ok(text) = std::str::from_utf8(&bytes) {
+        if text.contains("nixos-icons") && text.contains("nix-snowflake") {
+            let sanitized = text
+                .lines()
+                .map(|line| {
+                    if line.trim_start().starts_with("logo=") {
+                        "logo='/run/current-system/share/icons/hicolor/scalable/apps/jetos-logo.svg'"
+                    } else {
+                        line
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            fs::write(dst, format!("{sanitized}\n"))?;
+            return Ok(());
+        }
+    }
+    copy_file_replace(src, dst)
+}
+
+fn skip_runtime_payload(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|part| part.to_str()) else {
+        return false;
+    };
+    name.ends_with(".nix") || name.ends_with(".drv")
+}
+
+#[cfg(unix)]
+fn copy_runtime_symlink(src: &Path, dst: &Path) -> std::io::Result<()> {
+    if let Some(parent) = dst.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let _ = fs::remove_file(dst);
+    let target = fs::read_link(src)?;
+    std::os::unix::fs::symlink(target, dst)
+}
+
+#[cfg(not(unix))]
+fn copy_runtime_symlink(src: &Path, dst: &Path) -> std::io::Result<()> {
+    copy_file_replace(src, dst)
+}
+
 fn write_jetos_toolchain(
     dir: &Path,
     sw_bin: &Path,
@@ -204,10 +392,32 @@ fn write_jetos_toolchain(
             continue;
         };
         let dst = sw_bin.join(name);
-        copy_file_replace(src, &dst)?;
-        make_executable(&dst)?;
+        copy_file_replace(src, &dst).map_err(|e| {
+            std::io::Error::new(
+                e.kind(),
+                format!(
+                    "copying jetos tool `{}` to `{}` failed: {e}",
+                    src.display(),
+                    dst.display()
+                ),
+            )
+        })?;
+        make_executable(&dst).map_err(|e| {
+            std::io::Error::new(
+                e.kind(),
+                format!("marking jetos tool `{}` executable failed: {e}", dst.display()),
+            )
+        })?;
         manifest.push_str(&format!("jetos-toolchain {name} {}\n", src.display()));
-        copy_toolchain_runtime_deps(dir, src)?;
+        copy_toolchain_runtime_deps(dir, src).map_err(|e| {
+            std::io::Error::new(
+                e.kind(),
+                format!(
+                    "copying runtime dependencies for jetos tool `{}` failed: {e}",
+                    src.display()
+                ),
+            )
+        })?;
     }
     Ok(())
 }
@@ -261,5 +471,14 @@ fn copy_absolute_runtime_file(dir: &Path, src: &Path) -> std::io::Result<()> {
     if let Some(parent) = dst.parent() {
         fs::create_dir_all(parent)?;
     }
-    copy_file_replace(src, &dst)
+    copy_file_replace(src, &dst).map_err(|e| {
+        std::io::Error::new(
+            e.kind(),
+            format!(
+                "copying runtime file `{}` to `{}` failed: {e}",
+                src.display(),
+                dst.display()
+            ),
+        )
+    })
 }

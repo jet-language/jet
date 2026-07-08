@@ -13,7 +13,7 @@ pub(super) fn bad_source_ref(ref_text: &str, span: Option<Span>) -> Diagnostic {
         "E0968",
         format!("`{ref_text}` isn't a `provider@target` source ref"),
         "a named source resolves to an upstream written as `provider@target` (U6) — `github@owner/repo/rev`, `path@../local`, `nixpkgs@channel`".to_string(),
-        "write the ref as `provider@target`, e.g. `github@NixOS/nixpkgs/nixos-24.05`".to_string(),
+        "write the ref as `provider@target`, e.g. `github@owner/repo/rev`".to_string(),
         span,
     )
 }

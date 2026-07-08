@@ -3107,11 +3107,12 @@ fn os_switch_activates_and_sets_current() {
             && app_home.join(".jetos/proof/app-modules.json").is_file(),
         "expected app module apply output"
     );
-    let acceptance = fs::read_to_string(generation.join("acceptance/nixos-parity.json")).unwrap();
+    let acceptance =
+        fs::read_to_string(generation.join("acceptance/jetos-host-coverage.json")).unwrap();
     assert!(
-        acceptance.contains("jetos.nixos-parity-fixture")
+        acceptance.contains("jetos.host-coverage")
             && acceptance.contains("\"state\": \"covered\"")
-            && acceptance.contains("owner-nixos-recreated")
+            && acceptance.contains("jetos-host-covered")
             && acceptance.contains("\"omissions\":[]"),
         "acceptance: {acceptance}"
     );
@@ -3130,10 +3131,20 @@ fn os_switch_activates_and_sets_current() {
             && vm_gates.contains("vm-acceptance-required"),
         "vm_gates: {vm_gates}"
     );
+    let os_release = fs::read_to_string(generation.join("etc/os-release")).unwrap();
     assert!(
-        generation.join("acceptance/owner-nixos-diff.md").is_file()
+        os_release.contains("ID=jetos") && os_release.contains("PRETTY_NAME=\"JetOS\""),
+        "os_release: {os_release}"
+    );
+    assert!(
+        generation.join("acceptance/owner-jetos-coverage.md").is_file()
             && generation.join("sw/bin/jetos-acceptance-prove").is_file(),
         "expected acceptance artifacts"
+    );
+    assert!(
+        !generation.join("acceptance/nixos-parity.json").exists()
+            && !generation.join("acceptance/owner-nixos-diff.md").exists(),
+        "legacy NixOS-named JetOS artifacts must not be generated"
     );
     let acceptance_proofs = root.path.join("acceptance-proofs");
     let acceptance_run = Command::new(generation.join("sw/bin/jetos-acceptance-prove"))
@@ -3151,7 +3162,7 @@ fn os_switch_activates_and_sets_current() {
         fs::read_to_string(acceptance_proofs.join("acceptance-proof.json")).unwrap();
     assert!(
         acceptance_proof.contains("\"state\":\"passed\"")
-            && acceptance_proof.contains("owner-nixos-recreated"),
+            && acceptance_proof.contains("jetos-host-covered"),
         "acceptance_proof: {acceptance_proof}"
     );
     let desktop = fs::read_to_string(generation.join("desktop/facts.json")).unwrap();

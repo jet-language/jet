@@ -254,7 +254,7 @@ fn enter_foreign_flake(
             "this project's foreign flake needs `nix`, which isn't on PATH",
             "`jet env`'s foreign-flake fallback (U16) shells out to `nix develop`, the ratified \
              stopgap; without `nix` there's no way to enter that shell.",
-            "install Nix (https://nixos.org/download), or declare packages in env.* instead.",
+            "install Nix from the official installer, or declare packages in env.* instead.",
         );
         return 2;
     }

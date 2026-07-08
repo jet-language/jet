@@ -701,7 +701,7 @@ impl<'a> Parser<'a> {
                 return Err(Diagnostic::error(
                     "E0003",
                     "a source needs a `provider@target` ref".to_string(),
-                    "every named source resolves to an upstream, e.g. `default: github@NixOS/nixpkgs/nixos-24.05`"
+                    "every named source resolves to an upstream, e.g. `default: github@owner/repo/rev`"
                         .to_string(),
                     "write the ref after the `:`".to_string(),
                     Some(ref_start),
