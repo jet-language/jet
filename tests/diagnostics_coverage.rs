@@ -459,21 +459,22 @@ fn all_exclusions() -> BTreeSet<String> {
 /// pattern matcher, not as Jet Diagnostic codes.
 #[test]
 fn i2_rustc_codes_do_not_leak_as_jet_diagnostics() {
-    let ffi_path = root().join("crates/jet-driver/src/FFI.rs");
-    let ffi_content = read(&ffi_path);
-
     // The FFI.rs pattern-matcher is the only allowlisted use.
     // Verify the strings appear only inside a function whose name contains "mismatch" or "looks_like".
     let allowed_fn_context = "looks_like_signature_mismatch";
+    let mut source_text = String::new();
+    for dir in [root().join("Source"), root().join("crates")] {
+        walk_rs(&dir, &mut |content| {
+            source_text.push_str(content);
+            source_text.push('\n');
+        });
+    }
 
     for &code in RUSTC_CODES_IN_SOURCE {
-        // Count occurrences in FFI.rs — should all be in looks_like_signature_mismatch
-        let in_ffi = ffi_content.matches(code).count();
-        // Count occurrences in all other Source/ files
+        // Count occurrences in Source/ and seam crates.
         let mut other_count = 0usize;
         for dir in [root().join("Source"), root().join("crates")] {
             walk_rs(&dir, &mut |content| {
-                // Skip FFI.rs itself
                 other_count += content
                     .lines()
                     .filter(|l| l.contains(code))
@@ -493,14 +494,14 @@ fn i2_rustc_codes_do_not_leak_as_jet_diagnostics() {
             code, allowed_fn_context, other_count
         );
 
-        // Also confirm FFI.rs usage is benign (not inside a Diagnostic::error call)
-        let ffi_diag_lines = ffi_content
+        // Also confirm classifier usage is benign (not inside a Diagnostic::error call).
+        let classifier_diag_lines = source_text
             .lines()
             .filter(|l| l.contains(code) && l.contains("Diagnostic::error"))
             .count();
         assert_eq!(
-            ffi_diag_lines, 0,
-            "I2 violation: rustc code {} appears inside a Diagnostic::error call in FFI.rs",
+            classifier_diag_lines, 0,
+            "I2 violation: rustc code {} appears inside a Diagnostic::error call",
             code
         );
 
@@ -514,7 +515,7 @@ fn i2_rustc_codes_do_not_leak_as_jet_diagnostics() {
             code,
             code
         );
-        let _ = (in_ffi, &allowed_fn_context, &bracketed);
+        let _ = (&allowed_fn_context, &bracketed);
     }
 }
 
@@ -546,16 +547,19 @@ fn diagnostic_snapshots_do_not_leak_runtime_or_backend_voice() {
 #[test]
 fn runtime_user_error_codes_use_jet_panic_voice() {
     let mut failures = Vec::new();
-    for rel in [
-        "crates/jet-codegen/src/Prelude/Core.rs",
-        "crates/jet-codegen/src/Prelude/CoreLib.rs",
-    ] {
-        let path = root().join(rel);
+    let mut paths = vec![root().join("crates/jet-codegen/src/Prelude/Core.rs")];
+    collect_rs_paths(
+        &root().join("crates/jet-codegen/src/Prelude/CoreLib"),
+        &mut paths,
+    );
+    for path in paths {
         let text = read(&path);
+        let rel = path.strip_prefix(root()).unwrap_or(&path).display().to_string();
         for (idx, line) in text.lines().enumerate() {
             if line.contains("panic!(\"E") {
                 failures.push(format!(
-                    "{rel}:{} uses raw panic for a Jet error code",
+                    "{}:{} uses raw panic for a Jet error code",
+                    rel,
                     idx + 1
                 ));
             }
@@ -566,6 +570,21 @@ fn runtime_user_error_codes_use_jet_panic_voice() {
         "runtime user errors must use Jet-owned panic/report helpers:\n{}",
         failures.join("\n")
     );
+}
+
+fn collect_rs_paths(dir: &PathBuf, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_rs_paths(&path, out);
+        } else if path.extension().and_then(|ext| ext.to_str()) == Some("rs") {
+            out.push(path);
+        }
+    }
+    out.sort();
 }
 
 fn allowed_backend_voice_snapshot(path: &std::path::Path, text: &str, needle: &str) -> bool {

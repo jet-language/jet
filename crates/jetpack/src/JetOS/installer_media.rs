@@ -13,7 +13,16 @@ fn write_installer_media(
     fs::create_dir_all(staging.join("boot"))?;
     fs::create_dir_all(staging.join("install"))?;
     fs::create_dir_all(staging.join("jetos"))?;
-    copy_dir_recursive_deref(&gen.path, &staging.join("jetos/current-system"))?;
+    copy_dir_recursive_deref(&gen.path, &staging.join("jetos/current-system")).map_err(|e| {
+        std::io::Error::new(
+            e.kind(),
+            format!(
+                "copying generation `{}` into installer staging `{}` failed: {e}",
+                gen.path.display(),
+                staging.join("jetos/current-system").display()
+            ),
+        )
+    })?;
     let installer_limine = render_installer_limine_conf(system, gen, disk);
     fs::write(staging.join("limine.conf"), &installer_limine)?;
     fs::write(staging.join("boot/limine.conf"), installer_limine)?;
@@ -21,9 +30,28 @@ fn write_installer_media(
         staging.join("boot/installed-limine.conf"),
         render_installed_limine_conf(system, gen),
     )?;
-    copy_file_replace(&gen.path.join("boot/kernel"), &staging.join("boot/kernel"))?;
-    copy_file_replace(&gen.path.join("boot/initrd"), &staging.join("boot/initrd"))?;
-    append_installer_initrd_overlay(&staging.join("boot/initrd"), system, gen)?;
+    copy_file_replace(&gen.path.join("boot/kernel"), &staging.join("boot/kernel")).map_err(
+        |e| {
+            std::io::Error::new(
+                e.kind(),
+                format!("copying installer kernel failed: {e}"),
+            )
+        },
+    )?;
+    copy_file_replace(&gen.path.join("boot/initrd"), &staging.join("boot/initrd")).map_err(
+        |e| {
+            std::io::Error::new(
+                e.kind(),
+                format!("copying installer initrd failed: {e}"),
+            )
+        },
+    )?;
+    append_installer_initrd_overlay(&staging.join("boot/initrd"), system, gen).map_err(|e| {
+        std::io::Error::new(
+            e.kind(),
+            format!("appending JetOS installer initrd overlay failed: {e}"),
+        )
+    })?;
     fs::write(
         staging.join("jetos/plan.json"),
         fs::read_to_string(gen.path.join("plan.json"))?,
