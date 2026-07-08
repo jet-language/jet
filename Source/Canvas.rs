@@ -192,6 +192,11 @@ pub fn project_json_for_entry(path: &Path) -> String {
         ctx.manifest_root.as_deref(),
         ctx.workspace_root.as_deref(),
     );
+    let targets_json = targets_project_json(
+        &ctx.project_root,
+        ctx.manifest_root.as_deref(),
+        ctx.workspace_root.as_deref(),
+    );
     let files_json = ctx
         .files
         .iter()
@@ -208,7 +213,7 @@ pub fn project_json_for_entry(path: &Path) -> String {
     let locks_json = lock_project_json(&ctx.project_root);
     let env_projection = env_project_json(&ctx.project_root);
     format!(
-        "{{\"protocol\":\"jet.canvas.project\",\"schema_version\":{},\"project_root\":{},\"project_revision\":{},\"entry\":{},\"mode\":{},\"workspace\":{},\"packages\":[{}],\"targets\":[],\"envs\":[{}],\"services\":[{}],\"files\":[{}],\"locks\":[{}],\"diagnostics\":[{}],\"source_control\":{{\"truth\":\"git-text\"}},\"state_policy\":{{\"semantic\":\"source\",\"local\":[\"tabs\",\"viewport\",\"selection\",\"breakpoints\",\"watches\"],\"shared_visual\":\"source-anchored-comments\"}}}}",
+        "{{\"protocol\":\"jet.canvas.project\",\"schema_version\":{},\"project_root\":{},\"project_revision\":{},\"entry\":{},\"mode\":{},\"workspace\":{},\"packages\":[{}],\"targets\":[{}],\"envs\":[{}],\"services\":[{}],\"files\":[{}],\"locks\":[{}],\"diagnostics\":[{}],\"source_control\":{{\"truth\":\"git-text\"}},\"state_policy\":{{\"semantic\":\"source\",\"local\":[\"tabs\",\"viewport\",\"selection\",\"breakpoints\",\"watches\"],\"shared_visual\":\"source-anchored-comments\"}}}}",
         PROJECT_SCHEMA_VERSION,
         json_str(&ctx.project_root.display().to_string()),
         json_str(&ctx.project_revision),
@@ -222,6 +227,7 @@ pub fn project_json_for_entry(path: &Path) -> String {
         }),
         workspace_json,
         packages_json,
+        targets_json,
         env_projection.envs,
         env_projection.services,
         files_json,
@@ -3811,6 +3817,14 @@ fn packages_project_json(
     manifest_root: Option<&Path>,
     workspace_root: Option<&Path>,
 ) -> String {
+    package_dirs(manifest_root, workspace_root)
+        .iter()
+        .filter_map(|dir| package_project_json(project_root, dir))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn package_dirs(manifest_root: Option<&Path>, workspace_root: Option<&Path>) -> Vec<PathBuf> {
     let mut dirs = Vec::new();
     if let Some(root) = manifest_root {
         dirs.push(root.to_path_buf());
@@ -3824,10 +3838,47 @@ fn packages_project_json(
     }
     dirs.sort();
     dirs.dedup();
-    dirs.iter()
-        .filter_map(|dir| package_project_json(project_root, dir))
+    dirs
+}
+
+fn targets_project_json(
+    project_root: &Path,
+    manifest_root: Option<&Path>,
+    workspace_root: Option<&Path>,
+) -> String {
+    package_dirs(manifest_root, workspace_root)
+        .iter()
+        .filter_map(|dir| package_targets_project_json(project_root, dir))
+        .flatten()
         .collect::<Vec<_>>()
         .join(",")
+}
+
+fn package_targets_project_json(project_root: &Path, dir: &Path) -> Option<Vec<String>> {
+    let manifest_path = dir.join(crate::Syntax::PAYLOAD_FILE);
+    let raw = fs::read_to_string(&manifest_path).ok()?;
+    let manifest = crate::Jetpack::PackageManifest::parse(&raw).ok()?;
+    let package_path = rel_path(project_root, dir);
+    let manifest_rel = rel_path(project_root, &manifest_path);
+    Some(
+        manifest
+            .packages
+            .iter()
+            .flat_map(|package| {
+                let package_path = package_path.clone();
+                let manifest_rel = manifest_rel.clone();
+                package.targets.iter().map(move |target| {
+                    format!(
+                        "{{\"package\":{},\"package_path\":{},\"manifest\":{},\"target\":{}}}",
+                        json_str(&package.name),
+                        json_str(&package_path),
+                        json_str(&manifest_rel),
+                        json_str(&target_label(target))
+                    )
+                })
+            })
+            .collect(),
+    )
 }
 
 fn package_project_json(project_root: &Path, dir: &Path) -> Option<String> {
