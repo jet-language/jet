@@ -230,6 +230,7 @@ pub fn main(args: Vec<String>) -> i32 {
         v if v == Syntax::BRIDGE_SUBCOMMAND => cmd_bridge(&theme, &parsed),
         v if v == Syntax::OS_SUBCOMMAND => cmd_os(&theme, &parsed),
         v if v == Syntax::STUDIO_SUBCOMMAND => cmd_studio(&theme, &parsed),
+        v if v == Syntax::USER_SUBCOMMAND => cmd_user(&theme, &parsed),
         v if v == Syntax::SERVICES_SUBCOMMAND => cmd_services(&theme, &parsed),
         v if v == Syntax::SECRETS_SUBCOMMAND => cmd_secrets(&theme, &parsed),
         "help" | "--help" | "-h" => {
@@ -3730,6 +3731,22 @@ fn cmd_os(theme: &Theme, parsed: &Parsed) -> i32 {
         json: parsed.flags.json,
     };
     super::JetOS::main(theme, verb, args, &flags)
+}
+
+/// `jetos user <plan|build|switch|rollback|prove> <name>` — standalone user
+/// generations over the same profile engine used by `jet os switch`.
+fn cmd_user(theme: &Theme, parsed: &Parsed) -> i32 {
+    let verb = parsed.positional.first().map(String::as_str);
+    let args = parsed.positional.get(1..).unwrap_or(&[]);
+    let flags = super::JetOS::OsFlags {
+        fixtures: parsed.flags.fixtures.clone(),
+        offline: parsed.flags.offline,
+        name: parsed.flags.os_name.clone(),
+        manual_disk: parsed.flags.os_manual.clone(),
+        disk: parsed.flags.os_disk.clone(),
+        json: parsed.flags.json,
+    };
+    super::JetOS::user_main(theme, verb, args, &flags)
 }
 
 /// `jetos studio` — launch the installed first-party Studio app, with a

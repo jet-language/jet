@@ -1,0 +1,51 @@
+// D-NETSOCKET1=A: typed addresses, TCP echo, UDP datagrams, Unix sockets.
+use core.files as fs
+use core.net as net
+use core.tasks as tasks
+use core.time as time
+
+fn run() {
+    typed :: net.socket_addr("127.0.0.1", 0) ?? panic("socket addr")
+    listener :: net.tcp_listen_addr(typed) ?? panic("tcp bind")
+    local :: net.listener_local_socket_addr(listener)
+    print("tcp-listen:{net.socket_host(local)}")
+
+    (ready_tx, ready_rx) :: tasks.channel<String>()
+    tcp_task :: tasks.spawn(take(listener, ready_tx) () => {
+        ready_tx.send(net.socket_to_string(net.listener_local_socket_addr(listener)))
+        stream :: listener.accept() ?? panic("tcp accept")
+        msg :: stream.read() ?? panic("tcp read")
+        stream.write("tcp:{msg}") ?? panic("tcp write")
+    })
+
+    addr :: ready_rx.receive() ?? panic("tcp addr")
+    client :: net.tcp_connect(addr) ?? panic("tcp connect")
+    net.set_timeout(&client, 1000)
+    client.write("ping") ?? panic("tcp client write")
+    print(client.read() ?? panic("tcp client read"))
+    tcp_task.join()
+
+    udp_server :: net.udp_bind("127.0.0.1:0") ?? panic("udp bind")
+    udp_addr :: net.udp_local_addr(udp_server)
+    udp_client :: net.udp_bind("127.0.0.1:0") ?? panic("udp client")
+    net.udp_set_timeout(udp_client, 1000) ?? panic("udp timeout")
+    _sent :: net.udp_send_to(udp_client, "pong", udp_addr) ?? panic("udp send")
+    packet :: net.udp_recv_from(udp_server, 128) ?? panic("udp recv")
+    print("udp:{net.udp_packet_data(packet)}")
+
+    path :: "/tmp/jet-socket-echo-{time.now()}.sock"
+    unix_listener :: net.unix_listen(path) ?? panic("unix bind")
+    (unix_tx, unix_rx) :: tasks.channel<String>()
+    unix_task :: tasks.spawn(take(unix_listener, unix_tx) () => {
+        unix_tx.send("ready")
+        s :: net.unix_accept(unix_listener) ?? panic("unix accept")
+        msg :: net.unix_read(&s) ?? panic("unix read")
+        net.unix_write(&s, "unix:{msg}") ?? panic("unix write")
+    })
+    _ready :: unix_rx.receive() ?? panic("unix ready")
+    unix_client :: net.unix_connect(path) ?? panic("unix connect")
+    net.unix_write(&unix_client, "ok") ?? panic("unix client write")
+    print(net.unix_read(&unix_client) ?? panic("unix client read"))
+    unix_task.join()
+    fs.remove(path) ?? return
+}

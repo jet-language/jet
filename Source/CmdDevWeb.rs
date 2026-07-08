@@ -374,24 +374,33 @@ fn handle_connection(
         if method != "GET" {
             return method_not_allowed(&mut stream);
         }
-        return match jet::Canvas::graph_json_for_file(Path::new(canvas_file)) {
+        let source_id = query_param(target, "source_id");
+        return match jet::Canvas::graph_json_for_entry_source(Path::new(canvas_file), source_id.as_deref()) {
             Ok(body) => write_response(
                 &mut stream,
                 "200 OK",
                 "application/json; charset=utf-8",
                 body.as_bytes(),
             ),
-            Err(diags) => {
-                let src = fs::read_to_string(canvas_file).unwrap_or_default();
-                let body = jet::render_diagnostics(canvas_file, &src, &diags);
-                write_response(
-                    &mut stream,
-                    "409 Conflict",
-                    "text/plain; charset=utf-8",
-                    body.as_bytes(),
-                )
-            }
+            Err(body) => write_response(
+                &mut stream,
+                "409 Conflict",
+                "application/json; charset=utf-8",
+                body.as_bytes(),
+            ),
         };
+    }
+    if path == "/__jet_canvas/project" || path == "/canvas/project" || path == "/panel/project" {
+        if method != "GET" {
+            return method_not_allowed(&mut stream);
+        }
+        let body = jet::Canvas::project_json_for_entry(Path::new(canvas_file));
+        return write_response(
+            &mut stream,
+            "200 OK",
+            "application/json; charset=utf-8",
+            body.as_bytes(),
+        );
     }
     if path == "/__jet_canvas/source-control"
         || path == "/canvas/source-control"
@@ -400,7 +409,7 @@ fn handle_connection(
         if method != "GET" {
             return method_not_allowed(&mut stream);
         }
-        let body = jet::Canvas::source_control_json_for_file(Path::new(canvas_file));
+        let body = jet::Canvas::source_control_json_for_entry(Path::new(canvas_file));
         return write_response(
             &mut stream,
             "200 OK",
@@ -434,12 +443,39 @@ fn handle_connection(
             ),
         };
     }
+    if path == "/__jet_canvas/project/transaction"
+        || path == "/canvas/project/transaction"
+        || path == "/panel/project/transaction"
+    {
+        if method != "POST" {
+            return method_not_allowed(&mut stream);
+        }
+        let request = String::from_utf8_lossy(&body);
+        return match jet::Canvas::apply_project_transaction_json(Path::new(canvas_file), &request)
+        {
+            Ok(body) => {
+                version.fetch_add(1, Ordering::SeqCst);
+                write_response(
+                    &mut stream,
+                    "200 OK",
+                    "application/json; charset=utf-8",
+                    body.as_bytes(),
+                )
+            }
+            Err(body) => write_response(
+                &mut stream,
+                "409 Conflict",
+                "application/json; charset=utf-8",
+                body.as_bytes(),
+            ),
+        };
+    }
     if path == "/__jet_canvas/query" || path == "/canvas/query" || path == "/panel/query" {
         if method != "POST" {
             return method_not_allowed(&mut stream);
         }
         let request = String::from_utf8_lossy(&body);
-        return match jet::Canvas::query_json_for_file(Path::new(canvas_file), &request) {
+        return match jet::Canvas::query_json_for_entry(Path::new(canvas_file), &request) {
             Ok(body) => write_response(
                 &mut stream,
                 "200 OK",
@@ -487,6 +523,44 @@ fn handle_connection(
         );
     }
     serve_static(&mut stream, path)
+}
+
+fn query_param(target: &str, key: &str) -> Option<String> {
+    let (_, query) = target.split_once('?')?;
+    for part in query.split('&') {
+        let (name, value) = part.split_once('=').unwrap_or((part, ""));
+        if name == key {
+            return Some(percent_decode(value));
+        }
+    }
+    None
+}
+
+fn percent_decode(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let (Some(a), Some(b)) = (hex_value(bytes[i + 1]), hex_value(bytes[i + 2])) {
+                out.push(a * 16 + b);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(if bytes[i] == b'+' { b' ' } else { bytes[i] });
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).to_string()
+}
+
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
 }
 
 fn method_not_allowed(stream: &mut TcpStream) -> std::io::Result<()> {

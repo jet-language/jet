@@ -84,8 +84,8 @@ impl CompletionItem {
 /// Derives directly from `Syntax::JET_KEYWORD_LIST` (c44 consolidation).
 /// Do NOT duplicate this list here — add keywords to Syntax.rs instead.
 ///
-/// FOREIGN_* teaching-error words must NOT appear here. Drift from Syntax.rs
-/// is impossible: this is just an alias. Guarded by tests::c44_keyword_drift.
+/// Paused or live teaching words must NOT appear here. Drift from Syntax.rs is
+/// impossible: this is just an alias. Guarded by tests::c44_keyword_drift.
 pub(crate) const JET_KEYWORDS: &[&str] = Syntax::JET_KEYWORD_LIST;
 
 /// Built-in type names for completion and rename guard.

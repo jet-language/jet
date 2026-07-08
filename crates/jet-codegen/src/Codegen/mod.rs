@@ -490,6 +490,60 @@ fn strip_unused_term_prelude(out: String) -> String {
     s
 }
 
+/// D-OSFACTS1: `core.os.on_interrupt` uses a small POSIX signal hook with
+/// vetted FFI `unsafe`. Keep ordinary programs `unsafe`-free by stripping that
+/// hook unless generated user code actually calls it.
+fn strip_unused_os_signal_prelude(out: String) -> String {
+    let prelude_end = [
+        out.find("fn user_"),
+        out.find("pub fn user_"),
+        out.find("fn main()"),
+    ]
+    .into_iter()
+    .flatten()
+    .min()
+    .unwrap_or(out.len());
+    if out[prelude_end..].contains("jet_std_os_on_interrupt") {
+        return out;
+    }
+
+    let Some(os_mod) = out.find("mod jet_os_unix {") else {
+        return out;
+    };
+    let block_start = out[..os_mod].rfind("#[cfg(unix)]").unwrap_or(os_mod);
+    let Some(non_unix_fn) = out.find("fn jet_std_os_on_interrupt") else {
+        return out;
+    };
+    let Some(non_unix_fn) = out[non_unix_fn + 1..].find("fn jet_std_os_on_interrupt").map(|i| i + non_unix_fn + 1) else {
+        return out;
+    };
+
+    let bytes = out.as_bytes();
+    let (mut depth, mut seen, mut i) = (0usize, false, non_unix_fn);
+    let mut end = out.len();
+    while i < bytes.len() {
+        match bytes[i] {
+            b'{' => {
+                depth += 1;
+                seen = true;
+            }
+            b'}' => {
+                depth -= 1;
+                if seen && depth == 0 {
+                    end = i + 1;
+                    break;
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+
+    let mut s = out[..block_start].to_string();
+    s.push_str(out[end..].trim_start_matches('\n'));
+    s
+}
+
 pub(crate) fn mangle(name: &str) -> String {
     format!("user_{}", name)
 }
@@ -719,9 +773,9 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
     // S12/D-CLIFLAG1: Jet's only program entry is `fn run`; Rust still needs
     // `fn main`, so synthesize that wrapper for zero-arg and typed-CLI forms.
     emit_cli_entry_if_needed(&cx, &prog.items, &mut out);
-    strip_unused_raylib_prelude(strip_unused_term_prelude(strip_unused_gc_prelude(
+    strip_unused_os_signal_prelude(strip_unused_raylib_prelude(strip_unused_term_prelude(strip_unused_gc_prelude(
         strip_unused_txn_prelude(strip_unused_mem_prelude(out)),
-    )))
+    ))))
 }
 
 #[cfg(test)]
@@ -906,9 +960,9 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
 
     emit_test_fns(&cx, &tests, &mut out);
     emit_test_main(&tests, &mut out);
-    strip_unused_raylib_prelude(strip_unused_term_prelude(strip_unused_gc_prelude(
+    strip_unused_os_signal_prelude(strip_unused_raylib_prelude(strip_unused_term_prelude(strip_unused_gc_prelude(
         strip_unused_txn_prelude(strip_unused_mem_prelude(out)),
-    )))
+    ))))
 }
 
 /// D-TEST1/S43: the shared reporting `main` for a `jet test` harness. Each test
@@ -1226,9 +1280,9 @@ pub fn emit_bundle_dbg(
     // the Rust `fn main` wrapper that parses `io.args()` and dispatches to it.
     // No-op when the entry file has no `run` (sema's E0101 already rejected it).
     emit_cli_entry_if_needed(&cx, &entry.items, &mut out);
-    strip_unused_raylib_prelude(strip_unused_term_prelude(strip_unused_gc_prelude(
+    strip_unused_os_signal_prelude(strip_unused_raylib_prelude(strip_unused_term_prelude(strip_unused_gc_prelude(
         strip_unused_txn_prelude(strip_unused_mem_prelude(out)),
-    )))
+    ))))
 }
 
 pub fn emit_bundle_tests(bundle: &ProgramBundle, link: Option<&FfiLink>) -> String {
@@ -1351,9 +1405,9 @@ pub fn emit_bundle_tests_cov(
 
     emit_test_fns(&cx, &tests, &mut out);
     emit_test_main_cov(&tests, &mut out, coverage);
-    strip_unused_raylib_prelude(strip_unused_term_prelude(strip_unused_gc_prelude(
+    strip_unused_os_signal_prelude(strip_unused_raylib_prelude(strip_unused_term_prelude(strip_unused_gc_prelude(
         strip_unused_txn_prelude(strip_unused_mem_prelude(out)),
-    )))
+    ))))
 }
 
 /// D-BENCH1: emit a benchmark harness binary — every definition plus a `main`
@@ -1529,7 +1583,7 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
         out.push_str("    }\n");
     }
     out.push_str("}\n");
-    strip_unused_raylib_prelude(strip_unused_term_prelude(strip_unused_gc_prelude(
+    strip_unused_os_signal_prelude(strip_unused_raylib_prelude(strip_unused_term_prelude(strip_unused_gc_prelude(
         strip_unused_txn_prelude(strip_unused_mem_prelude(out)),
-    )))
+    ))))
 }

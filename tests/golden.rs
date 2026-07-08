@@ -94,6 +94,7 @@ fn examples_compile_and_run() {
             || stem == "crypto/crypto_envelope"
             || stem == "crypto/crypto_sign"
             || stem == "crypto/crypto_migration"
+            || stem == "crypto/crypto_suite"
             || stem == "crypto/vault_secret"
             || stem == "io/compress_gzip"
             || stem == "io/compress_zstd";
@@ -135,6 +136,7 @@ fn examples_compile_and_run() {
         //   - `mod jet_mem`        (D-ALLOC2 — arena lifetime-extension)
         //   - `mod jet_term_unix`  (D-TERM1 — POSIX termios via extern "C")
         //   - `mod jet_term_windows` (D-TERM1 — Windows console API via extern "system")
+        //   - `mod jet_os_unix`    (D-OSFACTS1 — POSIX signal hook via extern "C")
         //   - `mod user___c_<lib>`  (S58 — C-FFI wrappers: the only place
         //                            compiler-vetted `unsafe` calls extern "C")
         // These are audited platform-FFI blocks, not user code. All other `unsafe`
@@ -179,6 +181,7 @@ fn examples_compile_and_run() {
             let s = strip_mod(&s, "jet_txn");
             let s = strip_mod(&s, "jet_term_unix");
             let s = strip_mod(&s, "jet_term_windows");
+            let s = strip_mod(&s, "jet_os_unix");
             // D-UIDEVSHELL1=A (c134 Phase 8): the native GTK4 backend's vetted
             // `extern "C"` boundary. Same treatment as the term/C-FFI shims —
             // its `unsafe` is audited platform-FFI, not user code.
@@ -324,6 +327,7 @@ fn examples_compile_and_run() {
                 continue;
             }
             let err_path = ex_dir.join("expected").join(format!("{}.err.out", stem));
+            let success_err_path = ex_dir.join("expected").join(format!("{}.stderr.out", stem));
             if err_path.exists() {
                 let expected_err = fs::read_to_string(&err_path).unwrap_or_else(|_| {
                     panic!("missing examples/features/expected/{}.err.out", stem)
@@ -359,6 +363,17 @@ fn examples_compile_and_run() {
                     "output mismatch for example {}",
                     stem
                 );
+                if success_err_path.exists() {
+                    let expected_err = fs::read_to_string(&success_err_path).unwrap_or_else(|_| {
+                        panic!("missing examples/features/expected/{}.stderr.out", stem)
+                    });
+                    assert_eq!(
+                        String::from_utf8_lossy(&run.stderr),
+                        expected_err,
+                        "stderr mismatch for example {}",
+                        stem
+                    );
+                }
             }
         }
         checked += 1;

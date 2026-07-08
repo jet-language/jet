@@ -63,7 +63,7 @@ compiler-known module under the `core` root.
 **Not allowed:**
 
 ```jet
-import core.files as fs     // teaching error E0015 — use `use core.files`
+import core.files as fs     // ordinary parse error under D-S14-PAUSE
 use "core/files"           // quoted paths are for .jet files only
 ```
 
@@ -132,6 +132,29 @@ See `examples/features/types/option_combinators.jet`.
 
 ---
 
+## Collections and iterators (D-ITERTOOLS1=A)
+
+Core collection spellings stay explicit: `[T]` for lists, `[K: V]` for the
+default ordered map, and named types for specialized behavior.
+
+| Type | Constructors | Main methods |
+| --- | --- | --- |
+| `[T]` | list literal `[a, b]` | `map`, `filter`, `each`, `find`, `any`, `all`, `sort_by`, `reduce`, `take`, `skip`, `step_by`, `dedup`, `chunks`, `windows`, `enumerate`, `zip`, `unzip`, `take_while`, `skip_while`, `flat_map`, `filter_map`, `scan`, `fold`, `sum`, `product`, `min`, `max`, `min_by`, `max_by`, `group_by`, `count_by`, `partition`, `flatten`, `intersperse` |
+| `[K: V]` | map literal `["a": 1]` | `keys`, `values`, `contains_key`, `get`, `insert`, `remove`, `len`, `is_empty`, `clear` |
+| `Set<T>` | `Set.new()`, `Set.from(xs)` | `add`, `remove`, `contains`, `union`, `to_list`, `len`, `is_empty`, `clear` |
+| `SortedSet<T>` | `SortedSet.new()`, `SortedSet.from(xs)` | `add`, `remove`, `contains`, `first`, `last`, `union`, `to_list`, `len`, `is_empty`, `clear` |
+| `Deque<T>` | `Deque.new()`, `Deque.from(xs)` | `push_front`, `push_back`, `pop_front`, `pop_back`, `peek_front`, `peek_back`, `to_list`, `len`, `is_empty`, `clear` |
+| `PriorityQueue<T>` | `PriorityQueue.new()`, `PriorityQueue.from(xs)` | `push`, `pop`, `peek`, `to_sorted_list`, `len`, `is_empty`, `clear` |
+| `Lru<K,V>` | `Lru.new(capacity)` | `put`, `get`, `remove`, `contains_key`, `keys`, `capacity`, `len`, `is_empty`, `clear` |
+| `Bag<T>` | `Bag.new()`, `Bag.from(xs)` | `add`, `remove`, `has`, `count`, `to_list`, `len`, `is_empty`, `clear` |
+| `BitSet` | `BitSet.new()` | `add`, `remove`, `contains`, `count`, `to_list`, `len`, `clear` |
+| `ByteBuffer` | `ByteBuffer.new()`, `ByteBuffer.from(bytes)` | `write_u8`, `write_u16_le`, `write_u16_be`, `write_u32_le`, `write_u32_be`, `write_u64_le`, `write_u64_be`, `write_bytes`, `to_bytes`, `len`, `is_empty`, `clear` |
+
+Example: `examples/features/collections/iter_tools_audit.jet` covers the
+adapter and specialized-container surface.
+
+---
+
 ## Pay for what you call
 
 Using `core.files` costs nothing in the generated binary until you **call**
@@ -173,11 +196,30 @@ Whole-file helpers:
 | `append_all(path, text)` | `() ? IOError` | Append text to a file, one shot |
 | `exists(path)` | `Bool` | Whether the path exists |
 | `remove(path)` | `() ? IOError` | Delete a file |
+| `remove_dir(path)` | `() ? IOError` | Delete an empty directory |
+| `remove_all(path)` | `() ? IOError` | Delete a file or directory tree |
 | `list_dir(path)` | `[DirEntry] ? IOError` | One entry per directory member, sorted by name (D-LSDIR1) |
-| `create_dir(path)` | `() ? IOError` | Create a directory |
+| `create_dir(path)` | `() ? IOError` | Create a directory, including missing parents |
+| `create_dir_all(path)` | `() ? IOError` | Create a directory tree |
 | `is_dir(path)` | `Bool` | Whether the path is a directory |
 | `copy(from, to)` | `() ? IOError` | Copy a file |
+| `copy_dir(from, to)` | `() ? IOError` | Copy a directory tree |
 | `rename(from, to)` | `() ? IOError` | Rename or move a file |
+| `stat(path)` | `Stat ? IOError` | Metadata: size, times, permissions, kind |
+| `canonicalize(path)` | `String ? IOError` | Existing path, absolute and symlink-resolved |
+| `absolute(path)` | `String ? IOError` | Absolute path without requiring it to exist |
+| `walk(path)` | `[WalkEntry] ? IOError` | Recursive entries below `path`, sorted per directory |
+| `glob(pattern)` | `[String] ? IOError` | Recursive `*`/`?` path match |
+| `symlink(from, to)` | `() ? IOError` | Create a symbolic link |
+| `read_link(path)` | `String ? IOError` | Read a symbolic link target |
+| `hard_link(from, to)` | `() ? IOError` | Create a hard link |
+| `read_at(path, offset, len)` | `[U8] ? IOError` | Read bytes at an offset |
+| `write_at(path, offset, bytes)` | `() ? IOError` | Write bytes at an offset |
+| `fsync(path)` | `() ? IOError` | Flush a file to stable storage |
+| `write_atomic(path, bytes)` | `() ? IOError` | Write via temp file then rename |
+| `temp_dir(prefix)` | `TempDir ? IOError` | Create a temp directory; last handle drop removes it |
+| `temp_file(prefix)` | `TempFile ? IOError` | Create a temp file; last handle drop removes it |
+| `lock(path)` | `FileLock ? IOError` | Create an advisory lock file; last handle drop removes it |
 
 **`IOError`** — `NotFound(path)`, `PermissionDenied(path)`, or `Other(message)`.
 
@@ -222,9 +264,220 @@ the same module can offer both without a name collision.
 
 Use `entry.path` for a ready-to-use path (don't build `"{dir}/{entry}"` by
 hand) and `entry.name` for filename checks (`entry.name.ends_with(".txt")`).
-`core.path` provides `path.join(dir, name) -> String` plus `.parent()`,
-`.extension()`, and `.normalize()` for composing paths independently of
-`DirEntry`. Example: `examples/features/io/dir_entry.jet`.
+`Stat` fields are `size`, `modified_ms`, `created_ms`, `readonly`, `is_file`,
+`is_dir`, `is_symlink`, and `kind` (`"file"`, `"dir"`, `"symlink"`, or
+`"other"`). `WalkEntry` fields are `path`, `relative`, `is_dir`, and `depth`.
+`TempDir`, `TempFile`, and `FileLock` expose `.path`; cleanup is RAII on the
+last handle drop. `core.path` provides `path.join(dir, name) -> String` plus
+`.parent()`, `.extension()`, and `.normalize()` for composing paths
+independently of `DirEntry`. Examples: `examples/features/io/dir_entry.jet`
+and `examples/features/io/files_depth.jet`.
+
+### `core.url` and `core.mime` — typed web addresses and media types
+
+`core.url` parses, normalizes, joins, and renders typed `Url` values. Hosts are
+lowercased and IDNA labels are punycoded; paths remove dot segments; query
+pairs preserve repeated keys. `core.http.client` accepts either `String` or
+`Url` for URL arguments.
+
+```jet
+use core.url as url
+use core.mime as mime
+
+fn run() {
+    base :: url.parse("https://Bücher.example/a/./b/../c?x=1") ?? return
+    next :: base.join("../notify?user=ada lovelace&user=grace") ?? return
+    print(next.to_string())
+
+    html :: mime.parse("Text/HTML; charset=UTF-8") ?? return
+    print(html.essence())
+}
+```
+
+| Function / method | Returns | What it does |
+|-------------------|---------|--------------|
+| `url.parse(text)` | `Url ? String` | Parse absolute WHATWG-style URLs: http(s), file, data, and other schemes |
+| `url.from_parts(scheme, host, path, query, fragment)` | `Url ? String` | Build a URL from decoded components; query is `[[String]]` key/value rows |
+| `url.file(path)` / `url.data(mime, text)` | `Url` | Build `file://` and `data:` URLs |
+| `url.query(pairs)` | `String` | Encode repeated query pairs from `[[String]]` |
+| `url.percent_encode(text)` / `url.percent_decode(text)` | `String` / `String ? String` | Component percent encoding and decoding |
+| `u.scheme()` / `.host()` / `.port()` / `.path()` / `.fragment()` | mixed | Typed component accessors |
+| `u.path_segments()` / `.query_pairs()` / `.query()` | `[String]` / `[[String]]` / `String` | Decoded path/query views plus encoded query text |
+| `u.normalize()` / `.join(relative)` | `Url` / `Url ? String` | Normalize or resolve a relative reference |
+| `u.set_query(k, v)` / `.add_query(k, v)` | `Url` | Return a new URL with query pairs changed; repeated keys are preserved by `add_query` |
+
+`core.mime` parses `type/subtype; param=value`, exposes typed accessors, and
+ships a small extension table for common web/static-file types. Sniffing is not
+implicit; callers choose an explicit MIME type or extension lookup.
+
+| Function / method | Returns | What it does |
+|-------------------|---------|--------------|
+| `mime.parse(text)` | `Mime ? String` | Parse media type, subtype, and parameters |
+| `mime.from_extension(ext)` / `mime.extension(type)` | `String?` / `String?` | Map common extensions and MIME essences |
+| `m.media_type()` / `.subtype()` / `.essence()` | `String` | Type/subtype accessors |
+| `m.param(name)` / `.params()` | `String?` / `[[String]]` | Parameter lookup and decoded key/value rows |
+
+### `core.http` — HTTP client and server
+
+`core.http.client` is the request side; `core.http.server` is the serving side.
+The client accepts `String` or typed `Url` values, uses HTTPS by default through
+the hidden rustls bridge, and keeps the compiler itself dependency-free. The
+server is std-only HTTP/1.1 unless the named TLS option is supplied.
+
+```jet
+use core.http.client as Client
+use core.http.server as Server
+
+fn run() {
+    mux :: Server.mux()
+    mux.post("/api/:name/*", (req: HttpSrvReq) =>
+        Server.response(200, req.body())
+    )
+
+    req :: Client.request("POST", "http://127.0.0.1:8080/api/ada/profile")
+        .form("tool", "jet")
+        .cookie("session", "abc")
+        .connect_timeout(1000)
+        .read_timeout(1000)
+    resp :: req.send() ?? return
+    print(resp.status())
+}
+```
+
+Client surface:
+
+| Function / method | Returns | What it does |
+|-------------------|---------|--------------|
+| `Client.get(url)` / `Client.post(url, body)` | `HttpClientResp ? String` | One-shot request helpers |
+| `Client.request(method, url)` | `HttpClientReq` | Start a typed request builder |
+| `req.header(name, value)` / `.body(text)` | `HttpClientReq` | Add headers or a string body |
+| `req.form(name, value)` / `.multipart_text(name, value)` | `HttpClientReq` | Encode form or text multipart fields |
+| `req.cookie(name, value)` / `.redirects(n)` | `HttpClientReq` | Set Cookie header or redirect limit |
+| `req.timeout(ms)` / `.connect_timeout(ms)` / `.read_timeout(ms)` / `.total_timeout(ms)` | `HttpClientReq` | Set global/per-phase deadlines |
+| `req.proxy(url)` | `HttpClientReq` | Use an explicit proxy; env proxies are honored by default |
+| `req.send()` | `HttpClientResp ? String` | Execute the request |
+| `resp.status()` / `.body()` / `.header(name)` / `.cookies()` | mixed | Inspect response status, text body, headers, and Set-Cookie values |
+
+Server surface:
+
+| Function / method | Returns | What it does |
+|-------------------|---------|--------------|
+| `Server.mux()` | `HttpMux` | Create a function-first router |
+| `mux.get/post/put/delete/patch(path, handler)` | nothing | Register `fn(HttpSrvReq) -> HttpSrvResp` handlers |
+| `Server.serve(addr, mux)` | `() ? String` | Serve HTTP/1.1 forever |
+| `Server.serve(addr, mux, tls: Server.tls(cert, key))` | `() ? String` | Serve HTTPS with explicit TLS material |
+| `Server.serve_once(addr, mux)` / `Server.serve_once_listener(listener, mux)` | `() ? String` | Testable one-request serving |
+| `Server.response(status, body)` / `resp.header(name, value)` | `HttpSrvResp` | Build a response |
+| `Server.sse(data)` | `HttpSrvResp` | Server-sent event response |
+| `Server.static_file(path, mime)` / `.static_file_range(req, path, mime)` | `HttpSrvResp ? String` | Static file response, with Range support |
+| `Server.access_log(req, status)` | `String` | Stable access-log line |
+| `req.method()` / `.path()` / `.param(name)` / `.header(name)` / `.body()` / `.body_len()` / `.under_limit(max)` | mixed | Inspect request data and enforce body limits |
+
+Card 301 audit state:
+
+| Area | State |
+|------|-------|
+| HTTPS client / server TLS | Shipped: client default HTTPS, server `tls:` named option |
+| Typed URL input | Shipped: client calls accept `Url` or `String` |
+| Redirects, cookies, forms, multipart, proxy, phase timeouts | Shipped: request builder methods above |
+| Router params and wildcard routes | Shipped: `:name` params plus final `*` wildcard (`param("wildcard")`) |
+| SSE, static files, Range, access log, request body limits | Shipped: server helpers above |
+| Bounded streaming bodies | Shipped as explicit size checks and one-shot bodies today; streaming handles stay on the socket layer |
+| Graceful shutdown | Shipped for tests via `serve_once*`; long-lived cancellation composes through `core.tasks`/listener ownership |
+| HTTP/2 | Not in `core.http` HTTP/1.1 audit closeout; tracked as a transport upgrade, not a placeholder API |
+| WebSocket | Ratified as standalone `core.ws` (D-WS1=B), not hidden inside `core.http` |
+
+Example: `examples/features/net/http_rest_service.jet`.
+
+### `core.crypto` — safe envelopes and expert primitives
+
+`core.crypto` is the safe-by-default cryptography surface. Beginner APIs hide
+nonce handling and algorithm selection; raw algorithm choice lives under
+`core.crypto.expert` and requires an audited `#Unsafe` region. RustCrypto crates
+are linked only through the hidden bridge crate, not the compiler.
+
+```jet
+use core.crypto as crypto
+
+fn run() {
+    key :: crypto.random.bytes(32)
+    box :: crypto.seal(key, "hello".bytes()) ?? return
+    plain :: crypto.open(key, box) ?? return
+
+    stored :: crypto.password_hash("correct horse battery staple") ?? return
+    print(crypto.password_verify("correct horse battery staple", stored))
+}
+```
+
+| Function | Returns | What it does |
+|----------|---------|--------------|
+| `sha256(text)` / `sha256_bytes(bytes)` | `String` | SHA-256 hex digest |
+| `sha512_bytes(bytes)` | `String` | SHA-512 hex digest |
+| `blake3_bytes(bytes)` | `String` | BLAKE3 hex digest |
+| `random.bytes(n)` | `[U8]` | CSPRNG bytes for keys, nonces, and tokens |
+| `seal(key, bytes)` / `open(key, box)` | `[U8] ? String` | Authenticated encryption envelope; default is ChaCha20-Poly1305 with internal nonce |
+| `file_seal(key, bytes)` / `file_open(key, box)` | `[U8] ? String` | Same envelope for file payloads; kept separate for docs and future metadata |
+| `sign(seed, bytes)` / `verify(public, bytes, sig)` | mixed | Ed25519 signatures (`verify` returns `() ? String`) |
+| `x25519_public(secret)` / `x25519_shared(secret, public)` | `[U8] ? String` | X25519 key agreement |
+| `hkdf_sha256(ikm, salt, info, len)` | `[U8] ? String` | HKDF-SHA256 expand |
+| `password_hash(password)` | `String ? String` | Argon2id PHC string with generated salt and safe defaults |
+| `password_hash_with_salt(password, salt)` | `String ? String` | Deterministic Argon2id PHC for fixtures/imports; salt must be at least 8 bytes |
+| `password_verify(password, stored)` | `Bool` | Verify a PHC string; malformed strings return `false` |
+| `constant_time_eq(a, b)` | `Bool` | Constant-time byte equality |
+
+Card 302 audit state:
+
+| Area | State |
+|------|-------|
+| AEAD envelope | Shipped: `seal/open`, internal nonce, ChaCha20-Poly1305 default, AES-GCM legacy open via expert bridge |
+| Signatures | Shipped: Ed25519 sign/verify with RFC-vector golden |
+| Password hashing | Shipped: Argon2id PHC hash/verify, random salt default, deterministic salted vector helper |
+| KDF / key agreement | Shipped: HKDF-SHA256 and X25519 with RFC vectors |
+| Hashes / comparison | Shipped: SHA-256, SHA-512, BLAKE3, constant-time equality |
+| File envelope | Shipped: `file_seal/file_open` over the same authenticated envelope |
+| Secret display types | Not a separate runtime type today; APIs pass `[U8]`, and docs keep key material in byte values. A future `Secret<T>` wrapper must be a real type, not a display shim |
+| PQ hybrid agility | Tracked by #71, not duplicated here |
+
+Examples: `examples/features/crypto/crypto_suite.jet`,
+`examples/features/crypto/crypto_envelope.jet`, and
+`examples/features/crypto/crypto_sign.jet`.
+
+### `core.watcher` — file/process/port change events
+
+`core.watcher` owns watch-style APIs (D-WATCH-SCOPE1). It uses std-only polling
+today: file watchers diff recursive metadata snapshots, process watchers check
+process liveness, and port watchers attempt a TCP connect. Handles can be
+polled directly or connected to `core.event` scopes with callbacks.
+
+```jet
+use core.event as event
+use core.watcher as watcher
+
+fn run() {
+    scope :: event.scope()
+    files :: watcher.files("src") ?? return
+    files.on(scope, (ev) => { print("{ev.kind}: {ev.path}") })
+    loop ev in files.poll() {
+        print(ev.kind)
+    }
+}
+```
+
+| Function/method | Returns | What it does |
+|------------------|---------|--------------|
+| `watcher.files(path)` | `WatchHandle ? IOError` | Watch a file or directory tree |
+| `watcher.process_pid(pid)` | `WatchHandle` | Watch a process id for exit |
+| `watcher.port(host, port)` | `WatchHandle` | Watch for TCP readiness |
+| `watcher.set()` | `WatchSet` | Create a multiplexer for handles |
+| `handle.poll()` / `handle.events()` | `[WatchEvent]` | Drain newly observed events |
+| `handle.on(scope, f)` / `.once(scope, f)` | `Subscription` | Run callback on future `poll()` events |
+| `handle.cancel()` / `.active()` / `.summary()` | mixed | Stop/query a handle |
+| `set.add(handle)` | nothing | Add a handle to a set |
+| `set.poll()` / `set.events()` | `[WatchEvent]` | Poll all handles |
+
+`WatchEvent` fields are `domain` (`"file"`, `"process"`, `"port"`), `kind`,
+`path`, `detail`, `pid`, and `port`. Example:
+`examples/features/io/watcher.jet`.
 
 ---
 
@@ -238,6 +491,9 @@ fn run() {
     name :: io.input("your name? ") ?? return  // reads one line, strips newline
     print("hi, {name}")
     io.eprint("(log) done")                 // like print, but to stderr
+    out :: io.stdout()
+    out.write("done") ?? return
+    out.flush() ?? return
 }
 ```
 
@@ -253,8 +509,21 @@ printf "Ada\n" | nix develop -c jet run ask.jet
 | `input([prompt])` | `String ? IOError` | Read one line from stdin; optional prompt |
 | `read_all_input()` | `String ? IOError` | Read all of stdin to end-of-file |
 | `eprint(value)` | nothing | Print to stderr (any printable value) |
+| `stdin()` | `StdinHandle` | Buffered stdin handle with `.read_line()` and `.lines()` |
+| `stdout()` / `stderr()` | `Stdout` / `Stderr` | Stream handles |
+| `stream.write(text)` | `() ? IOError` | Write without adding a newline |
+| `stream.write_line(text)` | `() ? IOError` | Write text plus newline |
+| `stream.write_bytes(bytes)` | `() ? IOError` | Write raw `[U8]` bytes |
+| `stream.flush()` | `() ? IOError` | Force buffered bytes through the OS handle |
+| `stream.is_tty()` | `Bool` | Whether that stream is attached to a terminal |
+| `terminal_width()` / `terminal_height()` | `Int` | Terminal size from the OS where available, then `COLUMNS`/`LINES`, then `80x24` |
+| `style(name, text)` | `String` | ANSI style only when stdout is a TTY and `NO_COLOR` is absent |
+| `style_force(name, text)` | `String` | Expert override that always emits known ANSI styles |
+| `progress(text)` | `() ? IOError` | TTY: carriage-return progress update; non-TTY: one plain line |
 
 `print` stays in the core prelude (no `use` needed). Use `io.eprint` for stderr.
+`core.term` still owns `live { ... }` and `term.read_key()` for direct raw-key
+input; it is the shipped raw-mode/key-event bridge under D-TERM1.
 
 `jet run file.jet -- arg1 arg2` forwards everything after `--` verbatim as
 program arguments (`io.args()` sees them, argv[1..]); plain positional words
@@ -289,10 +558,22 @@ returns a new one:
 | Method | Signature | Registers |
 |--------|-----------|-----------|
 | `.flag(name, help)` | `(String, String) → ArgsSpec` | `--name` boolean flag |
-| `.option(name, help, meta)` | `(String, String, String) → ArgsSpec` | `--name VALUE` string option |
+| `.flag_short(name, short, help)` | `(String, String, String) → ArgsSpec` | `--name` plus `-n`; combined shorts like `-vv` work for flags |
+| `.option(name, help, meta)` | `(String, String, String) → ArgsSpec` | `--name VALUE` / `--name=VALUE` string option |
+| `.option_short(name, short, help, meta)` | `(String, String, String, String) → ArgsSpec` | value option plus `-n VALUE` / `-nVALUE` |
+| `.option_int(name, help, meta)` | `(String, String, String) → ArgsSpec` | option whose value must parse as `Int` |
+| `.option_float(name, help, meta)` | `(String, String, String) → ArgsSpec` | option whose value must parse as `Float` |
+| `.option_choice(name, help, meta, choices)` | `(String, String, String, String) → ArgsSpec` | option restricted to comma-separated choices |
+| `.option_default(name, help, meta, value)` | `(String, String, String, String) → ArgsSpec` | optional string option with default |
+| `.option_env(name, help, meta, env)` | `(String, String, String, String) → ArgsSpec` | optional string option with environment fallback |
+| `.required_option(name, help, meta)` | `(String, String, String) → ArgsSpec` | required string option |
+| `.repeat(name, help, meta)` | `(String, String, String) → ArgsSpec` | repeatable string option |
 | `.positional(name, help)` | `(String, String) → ArgsSpec` | required positional |
-| `.help()` | `() → String` | formatted help text |
-| `.parse(argv)` | `([String]) → ParsedArgs ? String` | parses `argv` against the spec |
+| `.subcommand(name, help, spec)` | `(String, String, ArgsSpec) → ArgsSpec` | subcommand with its own nested spec |
+| `.version(text)` | `(String) → ArgsSpec` | enables `--version` |
+| `.completion(shell)` | `(String) → String` | shell completion text for bash/zsh/fish-style generators |
+| `.help()` | `() → String` | formatted help text with defaults, env fallbacks, choices, and subcommands |
+| `.parse(argv)` | `([String]) → ParsedArgs ? String` | parses `argv` against the spec; unknown flags include suggestions |
 
 `ParsedArgs` query methods:
 
@@ -300,13 +581,20 @@ returns a new one:
 |--------|-----------|---------|
 | `.flag(name)` | `(String) → Bool` | true if `--name` was passed |
 | `.option(name)` | `(String) → String?` | value of `--name VALUE`, or `None` |
+| `.option_int(name)` | `(String) → Int?` | parsed integer value |
+| `.option_float(name)` | `(String) → Float?` | parsed float value |
+| `.options(name)` | `(String) → [String]` | every value passed to a repeated option |
 | `.positional(idx)` | `(Int) → String?` | the nth positional (0-based), or `None` |
+| `.subcommand()` | `() → String?` | matched subcommand name |
 
-`--help` is not wired automatically — add a `.flag("help", "…")` and check
-`parsed.flag("help")` yourself. `.parse` returns `ParsedArgs ? String`, where
-the error string carries the parse message (unknown flag, missing positional,
-…). Wrong argument counts on builder/query methods are **E1301**–**E1304**.
-Example: `examples/features/io/cli_args.jet`.
+`--help` and `--version` are recognized automatically; parse does not exit the
+process, so tools can decide whether to print `spec.help()` or continue. `.parse`
+returns `ParsedArgs ? String`, where the error string carries the parse message
+(unknown flag with "did you mean", missing positional, bad typed value, …).
+Wrong argument counts on builder/query methods are **E1301**–**E1304**.
+Examples: `examples/features/io/args_spec.jet`,
+`examples/features/io/args_audit.jet`, and typed entry-parameter CLIs under
+`examples/features/cli/`.
 
 ---
 
@@ -387,13 +675,50 @@ fn run() {
 
 ---
 
+### `core.os` — system facts and interrupt hook (D-OSFACTS1)
+
+```jet
+use core.os as os
+
+fn run() {
+    print(os.name())           // linux, macos, windows, …
+    print(os.arch())           // x86_64, aarch64, …
+    print(os.cpu_count())      // logical CPU count
+    os.on_interrupt(() => {
+        print("stopping")
+    })
+}
+```
+
+`core.env` owns environment variables and cwd/home. `core.os` owns facts about
+this process and machine.
+
+| Function | Returns | What it does |
+|----------|---------|--------------|
+| `name()` | `String` | OS name from the target platform |
+| `family()` | `String` | OS family (`unix`, `windows`, `wasm`, …) |
+| `arch()` | `String` | CPU architecture |
+| `cpu_count()` | `Int` | Logical CPU count, at least 1 |
+| `temp_dir()` | `String` | Platform temp directory |
+| `executable()` | `String` | Current executable path, or empty if unavailable |
+| `pid()` | `Int` | Current process id |
+| `hostname()` | `String` | Hostname, falling back to `localhost` |
+| `username()` | `String` | Current username, or empty if unavailable |
+| `set_current_dir(path)` | `Void ? IOError` | Change process working directory |
+| `on_interrupt(handler)` | `Void` | Run `handler` after Ctrl-C / SIGINT on supported platforms |
+
+Example: `examples/features/io/os_facts.jet`.
+
+---
+
 ### `core.process` — exit and subprocesses
 
 ```jet
 use core.process as process
 
 fn run() {
-    result :: process.run(["echo", "hi"]) ?? return
+    result :: process.cmd(["echo", "hi"]).timeout_ms(1000).run() ?? return
+    print(result.success)    // true when the command exited 0
     print(result.code)       // exit code as Int
     print(result.output)     // stdout as String
     print(result.errors)     // stderr as String
@@ -405,8 +730,21 @@ fn run() {
 |----------|---------|--------------|
 | `exit(code)` | never | Stop the program with the given exit code |
 | `run(cmd)` | `ProcessResult ? IOError` | Run a command; `cmd` is `[String]` |
+| `cmd(argv)` | `ProcessSpec` | Build a subprocess spec from an argv array; no shell string |
+| `pipeline(commands)` | `ProcessResult ? IOError` | Connect stdout to stdin across `[[String]]` commands |
 
-**`ProcessResult`** — `code: Int`, `output: String`, `errors: String`.
+`ProcessSpec` builder methods are value-returning: `cwd(path)`, `env(key,
+value)`, `env_remove(key)`, `env_clear()`, `stdin_text(text)`,
+`stdout_capture()`, `stdout_inherit()`, `stdout_discard()`, `stderr_capture()`,
+`stderr_inherit()`, `stderr_discard()`, `timeout_ms(ms)`, `output_limit(bytes)`,
+and `detached()`. A spec can `run()` to collect a `ProcessResult` or `spawn()`
+to return a `ProcessChild`.
+
+`ProcessChild` exposes `id()`, `wait()`, `kill()`, `terminate()`, `interrupt()`,
+`write_stdin(text)`, `read_stdout_line()`, and `read_stderr_line()`.
+
+**`ProcessResult`** — `code: Int`, `success: Bool`, `timed_out: Bool`,
+`signal: Int?`, `output: String`, `errors: String`.
 
 ---
 
@@ -438,6 +776,19 @@ fn run() {
 | `min[T]`, `max[T]` | Two values of the same comparable type |
 | `clamp(x, lo, hi)` | Keep `x` inside the range |
 | `pi`, `e` | Float constants |
+| `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2` | Trig family |
+| `sinh`, `cosh`, `tanh` | Hyperbolic trig |
+| `exp`, `ln`, `log2`, `log10`, `hypot` | libm exponent/log/vector length floor |
+| `trunc`, `fract`, `sign` | Float decomposition/classification |
+| `is_nan`, `is_inf`, `is_finite` | Float predicates |
+| `to_bits`, `from_bits` | Float bit round-trip through `Int` |
+| `degrees`, `radians`, `lerp` | Unit conversion and interpolation |
+| `checked_add/sub/mul/pow` | Integer operations returning `Int?` on overflow |
+| `saturating_add/sub/mul` | Integer operations clamping on overflow |
+| `wrapping_add/sub/mul` | Integer operations wrapping on overflow |
+| `int_pow`, `gcd`, `lcm` | Integer power and number theory helpers |
+
+Example: `examples/features/math/math_audit.jet`.
 
 ---
 
@@ -519,24 +870,35 @@ fn run() {
     random.seed(42)                         // make the sequence repeatable
     print(random.int(1, 6))                 // inclusive range (like dice)
     print(random.float())                   // 0.0 .. 1.0
+    print(random.normal(0.0, 1.0))          // deterministic after seed()
     items :: [10, 20, 30]
     print(random.pick(items))               // one item, or None if list empty
+    print(random.sample(items, 2))          // no replacement
     random.shuffle(&items)                  // shuffle in place
     print(items)
 }
 ```
 
-Without `seed`, the generator starts from the current time — fine for games,
-not for tests.
+`core.random` is deterministic PRNG randomness for games, simulations, tests,
+and sampling. It is not for secrets; use `core.crypto.random.bytes` for keys,
+nonces, tokens, salts, and anything security-sensitive.
 
 | Function | Returns | What it does |
 |----------|---------|--------------|
 | `seed(n)` | nothing | Reset the generator (deterministic after this) |
 | `int(low, high)` | `Int` | Random integer, both ends inclusive |
 | `float()` | `Float` | Random float from 0 up to (but not including) 1 |
+| `float_range(low, high)` | `Float` | Random float in `[low, high)`; returns `low` when the range is empty |
+| `bool(p)` | `Bool` | Draw `true` with probability `p`, clamped at 0 and 1 |
+| `normal(mean, stddev)` | `Float` | Gaussian draw via Box-Muller; negative stddev is treated as 0 |
+| `exponential(lambda)` | `Float` | Exponential draw; non-positive lambda returns 0 |
 | `pick(xs)` | `T?` | Random element, or None if `xs` is empty |
+| `weighted_pick(xs, weights)` | `T?` | Weighted element; None for length mismatch or no positive weights |
+| `sample(xs, k)` | `[T]` | Up to `k` distinct elements without replacement |
 | `shuffle(&xs)` | nothing | Randomly reorder a list in place |
 | `rng(seed)` | `Rng` | A **deterministic** RNG capability seeded by `seed` (D-DET1) |
+| `split(seed)` | `Rng` | Derive a deterministic child stream from the ambient stream plus `seed` |
+| `bytes(n)` | `[U8]` | PRNG bytes for fixtures/simulation; not cryptographic |
 
 The ambient calls above (`int`/`float`/…) read a process-global generator, so a
 `@Pure fn` cannot call them (E3403 — they break reproducibility). To use
@@ -559,12 +921,20 @@ The injected `Rng` mirrors the full ambient `random.*` set (D-DET-CAPAPI):
 |--------------|---------|--------------|
 | `int(lo, hi)` | `Int` | Draw an Int in `[lo, hi]` (inclusive); advances the stream |
 | `float()` | `Float` | Draw a Float in `[0.0, 1.0)`; advances the stream |
+| `float_range(lo, hi)` | `Float` | Draw a Float in `[lo, hi)`; advances the stream |
 | `bool()` | `Bool` | Draw a coin; advances the stream |
+| `bool(p)` | `Bool` | Draw `true` with probability `p`; advances the stream |
+| `normal(mean, stddev)` | `Float` | Gaussian draw; advances the stream |
+| `exponential(lambda)` | `Float` | Exponential draw; advances the stream |
+| `bytes(n)` | `[U8]` | Deterministic PRNG bytes; advances the stream |
+| `split()` | `Rng` | Derive a child stream and advance the parent |
 | `pick(xs)` | `T?` | Uniform element of `[T]`, or None if empty; advances the stream |
+| `weighted_pick(xs, weights)` | `T?` | Weighted element; advances the stream |
+| `sample(xs, k)` | `[T]` | Up to `k` elements without replacement; advances the stream |
 | `shuffle(&xs)` | nothing | Reorder a list in place (Fisher–Yates); advances the stream |
 
-Every draw — including `bool`/`pick`/`shuffle` — needs a `&Rng` receiver, and
-`shuffle` needs the list passed with `&` (it edits in place).
+Every draw needs a `&Rng` receiver, and `shuffle` needs the list passed with
+`&` because it edits in place.
 
 ### `core.solve` — finite solver state
 
@@ -673,10 +1043,32 @@ Epoch 3 (D-ADAPT-PROVIDER1=A). Automatic adaptive scheduling is declined
 
 ---
 
-### `core.time` — clock and delays
+### `core.text` — Unicode text algorithms
 
-Time in Core is **Unix milliseconds** only — no dates, time zones, or
-formatting (use `core.time` for calendars).
+`String` stays small. `core.text` owns Unicode-heavy operations and tooling may
+insert these calls from String contexts.
+
+| Function | Returns | What it does |
+|----------|---------|--------------|
+| `nfc/nfd/nfkc/nfkd(text)` | `String` | Normalize text for comparison or storage |
+| `casefold(text)` / `caseless_eq(a,b)` | `String` / `Bool` | Locale-free caseless matching |
+| `lower/upper(text)` | `String` | Unicode case mapping |
+| `graphemes/words/sentences(text)` | `[String]` | Segmentation helpers |
+| `width(text)` | `Int` | Terminal display columns, including wide CJK/emoji floor |
+| `is_alphabetic/is_numeric/is_whitespace/is_ascii(text)` | `Bool` | Unicode classification over the whole string |
+| `scalar_count/byte_count/scalars(text)` | `Int` / `[String]` | UTF-8/scalar facts |
+| `splitn/rsplitn(text, sep, n)` | `[String]` | Bounded split helpers |
+| `trim/trim_start/trim_end(text)` | `String` | Unicode-whitespace trim |
+| `pad_start/pad_end/center(text, width, fill)` | `String` | Display-width padding |
+| `starts_any/ends_any(text, parts)` | `Bool` | Prefix/suffix combinators |
+| `char_indices(text)` | `[String]` | `"byte:scalar"` debug view |
+
+Locale collation and language-specific sorting are not in v1 core; those need
+locale data, not a hidden ASCII fallback.
+
+---
+
+### `core.time` — clocks, calendars, and zones
 
 ```jet
 use core.time as time
@@ -688,18 +1080,60 @@ fn run() {
     time.sleep(50)
     print(sw.elapsed_millis())           // at least 50
     print(time.now() - started)
+
+    dt :: time.parse_rfc3339("2024-03-10T06:30:00Z") ?? return
+    ny :: time.zone("America/New_York") ?? return
+    print(dt.in_zone(ny).format("yyyy-MM-dd HH:mm:ss VV XXX"))
 }
 ```
 
 | Function / type | Returns | What it does |
 |-----------------|---------|--------------|
 | `now()` | `Int` | Current Unix time in milliseconds |
+| `now_utc()` | `DateTime` | Current UTC wall-clock date-time |
+| `from_unix_ms(ms)` | `DateTime` | Convert Unix milliseconds to UTC `DateTime` |
+| `parse_rfc3339(text)` | `DateTime ? String` | Parse RFC 3339 / ISO 8601 offset text |
+| `today()` | `LocalDate` | Current UTC date |
+| `local_time(h, m, s)` / `parse_time(text)` | `LocalTime` / `LocalTime ? String` | Local wall-clock time |
+| `instant()` | `Instant` | Monotonic clock sample for elapsed-time measurement |
+| `zone(name)` / `utc()` | `Zone ? String` / `Zone` | IANA time zone from TZif zoneinfo, or UTC |
+| `zoned(dt, zone)` | `ZonedDateTime` | View a UTC `DateTime` in a zone |
+| `zoned_local(date, time, zone)` | `ZonedDateTime` | Resolve local civil time in a zone |
 | `sleep(millis)` | nothing | Block for about `millis` milliseconds (runtime E3003 if an ambient `#Context(deadline: …)` budget expires first) |
 | `time.start()` | `Stopwatch` | Start a stopwatch |
 | `sw.elapsed_millis()` | `Int` | Milliseconds since `time.start()` |
 | `clock(seed)` | `Clock` | A **deterministic** clock capability starting at `seed` ms (D-DET1) |
-| `ms(n)` | `Duration` | A `Duration` of `n` milliseconds (pure value; D-DET-CAPAPI) |
-| `secs(n)` | `Duration` | A `Duration` of `n` seconds (pure value; D-DET-CAPAPI) |
+| `ms(n)` / `secs(n)` / `seconds(n)` / `minutes(n)` / `hours(n)` | `Duration` | Absolute elapsed-time span |
+| `period(years, months, days)` / `period_days(n)` / `period_months(n)` / `period_years(n)` | `Period` | Calendar span for local-date arithmetic |
+
+`DateTime` is an unambiguous UTC instant. `LocalDate` and `LocalTime` are civil
+values without a zone. `ZonedDateTime` combines an instant with a `Zone` so
+formatting and calendar arithmetic use the right offset. `Duration` is elapsed
+time; `Period` is calendar time. Across DST, `z.add_duration(time.hours(24))`
+adds 24 real hours, while `z.add_period(time.period_days(1))` keeps the same
+local clock time on the next calendar day.
+
+`time.zone(name)` reads IANA TZif data from `JET_TZDB_DIR` first, then `TZDIR`,
+then the repo bundled fallback at `$JET_ROOT/corelib/tzdb`, then common system
+zoneinfo directories. The Nix shell sets `TZDIR` to `pkgs.tzdata`; other
+environments may set `JET_TZDB_DIR` to an updated tzdb without changing code.
+
+Useful methods:
+
+| Type | Methods |
+|------|---------|
+| `LocalDate` | `year()`, `month()`, `day()`, `add_days(n)`, `add_months(n)`, `add_period(p)`, `diff_days(other)`, `weekday()`, `iso_weekday()`, `day_of_year()`, `iso_week()`, `truncate(unit)`, `format(pattern)`, `to_string()` |
+| `LocalTime` | `hour()`, `minute()`, `second()`, `to_string()` |
+| `DateTime` | `date()`, `time()`, `hour()`, `minute()`, `second()`, `to_timestamp()`, `to_unix_ms()`, `plus_duration(d)`, `truncate(unit)`, `round(unit)`, `in_zone(zone)`, `format_rfc3339()`, `format(pattern)`, `to_string()` |
+| `ZonedDateTime` | `date()`, `time()`, `offset_seconds()`, `to_datetime()`, `zone()`, `add_duration(d)`, `add_period(p)`, `format(pattern)`, `to_string()` |
+| `Instant` | `elapsed_millis()` |
+| `Duration` | `millis()`, `seconds()` |
+| `Zone` | `name()` |
+
+Format patterns are literal text plus `yyyy`, `MM`, `dd`, `HH`, `mm`, `ss`,
+`EEE`, `DDD`, `VV`, and `XXX`. Leap seconds are not represented as a distinct
+instant: RFC 3339 parsing rejects `:60`; use upstream clock smear policy before
+data reaches Jet.
 
 **Test hook:** when the environment variable `LEX_TEST_EPOCH` is set to an
 integer, `time.now()` returns that value instead of the real clock. Tests use
@@ -795,11 +1229,27 @@ fractional to `.Float`; objects keep field order.
 — `parse(text) -> TOML ? JSONError` / `YAML ? JSONError` (full adapters over
 `Data`, not a flat map), `to_string(value)`.
 
+**Epoch 3 breadth (D-ENCSTREAM1).** The same `Data` tree now backs:
+
+| Module | Surface | What it does |
+|--------|---------|--------------|
+| `core.encoding.json` | `canonical(data)`, `events(data)` | Stable key-order JSON for hashing/diffs; pull-style path events for bounded-memory consumers |
+| `core.encoding.jsonl` | `parse(text)`, `to_string(rows)` | JSON Lines over `[Data]` |
+| `core.encoding.xml` | `parse(text)`, `to_string(data)` | Namespace-preserving element tree: `name`, `attrs`, `children`, `text` |
+| `core.encoding.cbor` | `encode(data)`, `decode(bytes)` | Canonical binary interchange over `Data` |
+| `core.encoding.base64` | `encode_url(bytes)`, `decode_url(text)` | URL-safe base64 without required padding |
+| `core.encoding.base32` | `encode(bytes)`, `decode(text)` | RFC 4648 base32 |
+
 Each adapter is a full serde equivalent, not a lossy subset:
 
 - **JSON** — full RFC 8259: exponents and the strict number grammar, every
   escape including `\uXXXX` with surrogate-pair combining; rejects invalid
   escapes, lone surrogates, and raw control characters with a line + message.
+- **JSONL** — one JSON value per non-empty line, returned as `[Data]`.
+- **XML** — element/attribute/text tree with namespace prefixes and `xmlns:*`
+  declarations preserved as names/attributes.
+- **CBOR** — canonical maps with stable key order, text keys, arrays, bytes,
+  ints, floats, bools, and null.
 - **CSV** — header-mapped typed rows (`decode<T>` maps columns to fields by name).
 - **TOML** — full TOML 1.0: `[table]` headers, `[[array-of-tables]]`, dotted keys,
   inline tables, strings (every escape + multi-line), integers in every base,
@@ -853,6 +1303,54 @@ fn run() {
     print(data.bar_text(groups))
 }
 ```
+
+### `core.fmt` — human-readable formatting
+
+D-HUMANFMT1 keeps formatting as library calls, not a second syntax inside
+interpolation. The beginner path is the thing report and CLI authors need every
+day: readable numbers, bytes, durations, ordinals, plural phrases, and padding.
+
+| Function | Returns | What it does |
+|----------|---------|--------------|
+| `number(n)` | `String` | Thousands-grouped integer |
+| `decimal(x, places)` | `String` | Fixed decimal with grouped whole part |
+| `percent(x, places)` | `String` | `x * 100` with `%` |
+| `bytes(n)` | `String` | SI byte units (`KB`, `MB`, `GB`, ...) |
+| `duration(ms)` | `String` | Compact `d h m s` / `ms` duration |
+| `ordinal(n)` | `String` | `1st`, `2nd`, `3rd`, `4th` |
+| `plural(n, one, many)` | `String` | Count plus singular/plural noun |
+| `pad_left` / `pad_right` / `pad_center` | `String` | Width padding by character count |
+
+```jet
+use core.fmt as fmt
+
+fn run() {
+    print("{fmt.bytes(1500000000)} in {fmt.duration(222000)}")
+    print("{fmt.number(1204331)} rows")
+}
+```
+
+### `core.log` — structured logs, spans, sinks
+
+`core.log` records events as typed fields plus optional span context. Plain
+`info`/`warn`/`error`/`debug` is still the beginner path; `*_fields` carries
+typed `LogField` values for services and audit logs.
+
+```jet
+use core.log as log
+
+fn run() {
+    log.set_sink("jsonl", "service.log")
+    span :: log.span("request")
+    log.enter(span)
+    log.info_fields("served", [log.field("route", "/"), log.int("status", 200)])
+    log.close(span)
+}
+```
+
+Core helpers include `field`, `int`, `float`, `bool`, `redact`, `counter`,
+`span`, `enter`, `close`, `set_sink`, `sample_every`, `otlp_file`, `set_level`,
+`set_trace_id`, and `setup`.
 
 #### Typed (de)serialization — one derive, every format (D-SERDE1–8)
 
@@ -1008,9 +1506,11 @@ fn run() {
 ```
 
 `tasks.channel<T>()` returns the send/receive pair directly (D-TUPLE-DESTRUCT1) —
-destructure it with `(tx, rx) := tasks.channel<T>()`. A second sender is
-`copy tx` (D-CAP2's one copy verb — a cheap handle duplicate, not a method on
-the channel; there's no combined channel value).
+destructure it with `(tx, rx) := tasks.channel<T>()`. `tasks.channel<T>(capacity:
+N)` creates a bounded channel; `send` parks when the queue already holds `N`
+values and resumes when a receiver drains space. A second sender is `copy tx`
+(D-CAP2's one copy verb — a cheap handle duplicate, not a method on the channel;
+there's no combined channel value).
 
 | Function / type | Returns | What it does |
 |-----------------|---------|--------------|
@@ -1021,7 +1521,11 @@ the channel; there's no combined channel value).
 | `task.resume()` | nothing | Clear paused state on the task control plane |
 | `task.cancel()` | nothing | Request cancellation on the task control plane |
 | `task.trace()` | `String` | Read control-plane state as `paused=...,cancel=...` |
-| `tasks.channel<T>()` | `(Sender<T>, Receiver<T>)` | Create a linked send/receive pair |
+| `tasks.channel<T>()` | `(Sender<T>, Receiver<T>)` | Create an unbounded linked send/receive pair |
+| `tasks.channel<T>(capacity: N)` | `(Sender<T>, Receiver<T>)` | Create a bounded pair with real backpressure |
+| `tasks.after(ms: N)` | `Receiver<Unit>` | One-shot timer channel |
+| `tasks.after(ms: N, value: fallback)` | `Receiver<T>` | One-shot typed timer channel for timeout values |
+| `tasks.interval(ms: N)` | `Receiver<Int>` | Interval timer channel sending `1`, `2`, ... |
 | `copy sender` | `Sender<T>` | Create another send half (cheap handle duplicate, `copy` verb — not a method) |
 | `sender.send(value)` | nothing | Move one value into the channel |
 | `receiver.receive()` | `T ? Closed` | Block for a value, or return `Closed` when senders are gone |
@@ -1031,23 +1535,47 @@ windows, no trait values, and no closure values unless they are handed over
 with `take`. A `Task` that goes out of scope without
 `.join()` emits warning **L1101**.
 With `#Context(deadline: <Int epoch_ms>)`, blocking waits (`task.join()` /
-`task.wait()` / `ch.receive()`) observe the inherited budget and report runtime
-**E3003** on exceed.
-Current thread-runtime implementation records pause/cancel requests for tracing;
-hard scheduler-level pause/cancel behavior lands with the M:N runtime.
+`task.wait()` / `ch.receive()` / `sender.send()` / `time.sleep`) observe the
+inherited budget and report runtime **E3003** on exceed.
+
+`taskgroup` owns child tasks until scope exit. `g.all`, `g.race`, and `g.any`
+join task lists on the scheduler; `race`/`any` cancel losers. `g.select()` races
+receivers and timers: `.recv(rx)` waits for a channel value, `.after(ms: N)` is a
+unit timer arm, and `.after(ms: N, value: fallback)` is a typed timeout arm that
+can be mixed with same-`T` receive arms.
+
+### `core.testing` — fixtures under `#Test`
+
+D-TESTKIT1 keeps `#Test` as the only test syntax. `core.testing` is a helper
+library for test data and deterministic fixtures.
+
+```jet
+use core.testing as testing
+
+fn run() {
+    print(testing.fixture("fixtures/input.txt"))
+    print(testing.golden("expected/out.txt", "actual output"))
+    print(testing.snap("case", "snapshot text"))
+}
+```
+
+Helpers: `snap`, `golden`, `fixture`, `temp_dir`, `corpus`, `fake_clock`,
+`fake_rng`, and `bench_budget`. Use `expect(value).snapshot()` inside `#Test`
+blocks for assertion snapshots; `testing.snap` is for explicit named files.
 
 ### `core.regex` — linear-time regular expressions
 
-`use core.regex as re`. Matching is **linear-time** — the engine is a DFA/NFA
-hybrid with no catastrophic backtracking, so patterns are ReDoS-safe by
-construction. Backreferences and lookaround do not exist (the safety property
-would be lost), and that is deliberate.
+`use core.regex as re`. Matching is **linear-time** — the engine is a
+std-only Thompson/Pike NFA with no catastrophic backtracking, so patterns are
+ReDoS-safe by construction. Backreferences and lookaround do not exist (the
+safety property would be lost), and that is deliberate.
 
-Every call returns a `Result`; the `Err` carries a one-line message when the
-pattern itself is malformed (the only failure at the boundary). A `Match` is a
-list of capture groups: `group(0)` is the whole match, `group(n)` is the n-th
-group as `String?` (`None` if the group did not participate or `n` is out of
-range).
+Pattern-string calls return a `Result`; the `Err` carries a one-line message
+when the pattern itself is malformed (the only failure at the boundary).
+`compile` returns a reusable `Regex`, so hot paths parse once. A `Match`
+records capture text plus byte spans: `group(0)` is the whole match,
+`group(n)` is the n-th group as `String?`, and named groups are read with
+`name("group")`.
 
 ```jet
 use core.regex as re
@@ -1063,26 +1591,44 @@ fn run() {
     }
 
     print(re.replace_all("\\d+", text, "#") ?? panic("bad pattern"))
+
+    flags :: re.flags(true, true, false)              // case-insensitive, multiline, dotall
+    rx :: re.compile_with("^(?<word>[a-z]+)", flags) ?? panic("bad pattern")
+    hit :: rx.match("Ada\nlovelace")
+    if hit == Val(mat) {
+        print(mat.name("word") ?? "")                // Ada
+        print(mat.start())                           // 0
+    }
 }
 ```
 
 | Call | Returns | Does |
 |------|---------|------|
+| `re.flags(case_insensitive, multiline, dotall)` | `RegexFlags` | typed flag set |
+| `re.compile(pat)` | `Regex ? String` | parse once with default flags |
+| `re.compile_with(pat, flags)` | `Regex ? String` | parse once with typed flags |
 | `re.is_match(pat, text)` | `Bool ? String` | whether `pat` occurs anywhere |
 | `re.match(pat, text)` | `Match? ? String` | first match with capture groups, `None` if none |
 | `re.find(pat, text)` | `String? ? String` | first matched substring, `None` if none |
 | `re.find_all(pat, text)` | `[String] ? String` | every non-overlapping match, left to right |
+| `re.matches(pat, text)` | `[Match] ? String` | every non-overlapping match with captures/spans |
 | `re.replace(pat, text, repl)` | `String ? String` | replace the first match (`$1`, `${name}` allowed in `repl`) |
 | `re.replace_all(pat, text, repl)` | `String ? String` | replace every match |
 | `re.split(pat, text)` | `[String] ? String` | split `text` on every match |
+| `re.split_limit(pat, text, n)` | `[String] ? String` | split at most `n - 1` times |
+| `rx.is_match(text)` | `Bool` | reuse a compiled regex |
+| `rx.match(text)` | `Match?` | first match with captures/spans |
+| `rx.matches(text)` | `[Match]` | all matches with captures/spans |
+| `rx.replace_all_with(text, fn(Match) -> String)` | `String` | replace every match with callback output |
 | `mat.group(n)` | `String?` | capture group `n` of a `Match` |
+| `mat.name(name)` | `String?` | capture group by name |
+| `mat.start()` / `mat.end()` | `Int` | byte span of the whole match |
+| `mat.group_start(n)` / `mat.group_end(n)` | `Int?` | byte span of a capture |
 
 Note: `{N}` quantifiers must be written `{{N}}` in Jet source — single braces
 are string interpolation (S8). Write `\\d{{4}}` for "four digits".
 
-`regex` is the one owner-approved I6 bootstrap dependency (D-REGEX1): it lives
-only inside the hidden FFI bridge crate, never in the compiler, and is slated to
-be replaced by an in-house RE2-style engine before the end of Epoch 3.
+`core.regex` has no external dependency and does not create a hidden FFI bridge.
 
 ---
 
@@ -1464,34 +2010,102 @@ shift count past the type's width traps (no leaked Rust panic).
 | `eprintln(...)` | `io.eprint(...)` |
 | `open("file")` / `File.open` | `fs.read(...)` / `fs.write(...)` |
 | `getenv("X")` / `os.environ` | `env.get("X")` |
-| `import core.files` | `use core.files` (teaching error E0015) |
+| `import core.files` | `use core.files` |
 | `x :: …` / `x := …` | Immutable / mutable binding |
 
 ---
 
-## First-party ring (`core.*` packages)
+## `core.net` — sockets and DNS
 
-The eight modules above are built into the compiler. The first-party ring
-ships as versioned packages under the same `core.*` namespace (owner,
-2026-06-26 — a ring package is a `core.<name>` library, not a `jet.*` one).
-These shipped in Epoch 2:
+`core.net` is the low-level socket layer. Calls look blocking at the Jet
+surface, but shared runtime handles observe `#Context` deadlines where the
+runtime provides one. Beginner calls accept strings; expert calls accept typed
+`IpAddr` / `SocketAddr` values.
 
-| Package | What it unlocks |
-|---------|-----------------|
-| `core.http` | HTTP client + server, blocking networking; HTTPS works by default in the client via rustls + system roots (D-TLS1); server HTTPS uses `serve(..., tls: Server.tls(cert, key))` (D-TLSSERVE1) |
-| `core.regex` | grep-class tools, text validation |
-| `core.log` | Structured logging / tracing / metrics |
-| `core.time` | Calendar dates, time zones, formatted dates |
-| `core.crypto` | Hash, HMAC, vetted random primitives |
-| `core.reactive` | Signals, derived values, effects (opt-in reactivity, D-REACT1) |
-| `core.event` | Typed events, hooks, subscription scopes, event traces (D-EVENT1) |
-| `core.archive` | gzip compress/decompress, zip read/write, tar add/get/list (D-DEP-ARCHIVE1) |
-| `core.raylib` | Graphics bridge: typed window/draw/color calls, headless by default; `JET_RAYLIB_DISPLAY=1` dynamically loads native raylib (D-RAYLIB1/D-FLAGSHIP-RAYLIB1) |
-| `core.game` | Headless deterministic game substrate: `Scene`, assets, input, frame hooks, replay transcript, budgets, ECS marker/query floor (D-GAME1/2/3, D-WD10, D-GAME-*) |
-| `core.compress.gzip` | standalone gzip compress/decompress, no archive container (D-CODECS1) |
-| `core.compress.zstd` | standalone zstd compress/decompress, no archive container (D-CODECS1) |
-| `core.db` | SQLite — parameterized `DbConnection.query`/`.query_one`/`.execute`/`.begin`/`.commit`/`.rollback`/`.close` via rusqlite bundled (D-DBDRIVER1) |
-| `core.reflect` | `reflect.of(x) -> Value` runtime reflection floor — `.type_name()`/`.display()`/`.fields()` (D-ANY-JAI1) |
+| Function | Returns | Notes |
+|----------|---------|-------|
+| `ip_addr(text)` | `IpAddr ? String` | Parse IPv4/IPv6 |
+| `ip_to_string(ip)` / `ip_is_ipv4(ip)` | `String` / `Bool` | Inspect typed IP values |
+| `socket_addr(host, port)` | `SocketAddr ? String` | Resolve/parse host and port |
+| `socket_addr_parse(text)` | `SocketAddr ? String` | Parse `host:port` |
+| `socket_host(addr)` / `socket_port(addr)` / `socket_to_string(addr)` | `String` / `Int` / `String` | Inspect typed socket addresses |
+| `tcp_listen(addr)` / `tcp_connect(addr)` | `TcpListener ? String` / `TcpStream ? String` | String entrypoints |
+| `tcp_listen_addr(addr)` / `tcp_connect_addr(addr)` | `TcpListener ? String` / `TcpStream ? String` | Typed entrypoints |
+| `tcp_connect_timeout(addr, ms)` | `TcpStream ? String` | Typed dial with timeout |
+| `tcp_connect_happy(host, port, ms)` | `TcpStream ? String` | Dual-stack dial, IPv6 tried before IPv4 |
+| `tcp_read(stream)` / `tcp_write(stream, text)` | `String ? String` / `() ? String` | UTF-8 text I/O |
+| `tcp_local_socket_addr(stream)` / `tcp_peer_socket_addr(stream)` | `SocketAddr` | Typed stream addresses |
+| `listener_local_socket_addr(listener)` | `SocketAddr` | Typed listener address |
+| `set_timeout(stream, ms)` | `()` | Set read/write timeouts |
+| `set_read_timeout(stream, ms)` / `set_write_timeout(stream, ms)` | `() ? String` | Directional timeouts |
+| `udp_bind(addr)` / `udp_bind_addr(addr)` | `UdpSocket ? String` | Datagram sockets |
+| `udp_local_addr(socket)` | `SocketAddr` | Typed local address |
+| `udp_set_timeout(socket, ms)` | `() ? String` | Read/write datagram timeouts |
+| `udp_send_to(socket, text, addr)` | `Int ? String` | Sent byte count |
+| `udp_recv_from(socket, limit)` | `UdpPacket ? String` | UTF-8 packet data + source address |
+| `udp_packet_data(packet)` / `udp_packet_addr(packet)` | `String` / `SocketAddr` | Inspect packets |
+| `unix_listen(path)` / `unix_connect(path)` | `UnixListener ? String` / `UnixStream ? String` | Unix-domain sockets where supported |
+| `unix_accept(listener)` | `UnixStream ? String` | Accept one Unix stream |
+| `unix_read(stream)` / `unix_write(stream, text)` | `String ? String` / `() ? String` | Unix stream text I/O |
+| `dns_a(name, ms)` / `dns_aaaa(name, ms)` | `[IpAddr] ? String` | System resolver config, timeout in ms |
+| `dns_txt(name, ms)` | `[String] ? String` | TXT records |
+| `dns_srv(name, ms)` | `[DnsSrv] ? String` | SRV records |
+| `dns_*_at(server, name, ms)` | same as matching lookup | Expert override for a specific DNS server |
+| `dns_srv_target(srv)` / `dns_srv_port(srv)` | `String` / `Int` | Inspect SRV records |
+| `tls_connect(stream, server_name)` | `TlsStream ? String` | Upgrade a `TcpStream` through the D-TLS1 bridge |
+| `tls_read(stream)` / `tls_write(stream, text)` / `tls_close(stream)` | `String ? String` / `() ? String` / `() ? String` | Client TLS stream I/O |
+
+`TcpListener.accept()`, `TcpStream.read()`, `TcpStream.write(text)`,
+`TcpStream.local_addr()`, `TcpStream.peer_addr()`, and `TcpStream.close()` remain
+method aliases for the common TCP path.
+
+---
+
+## core.db
+
+`core.db` opens SQLite connections through `db.open(path)` or
+`db.open_memory()`. Queries use one path: SQL text plus `[DbValue]` parameters.
+Checked `Sql` literals feed that path through `db.params(sql)`, so holes become
+bound parameters, not string interpolation.
+
+| API | Returns | Notes |
+|-----|---------|-------|
+| `conn.execute(sql, params)` | `Int ? DbError` | Affected row count |
+| `conn.query(sql, params)` | `[Row] ? DbError` | `Row` is `Map<String, DbValue>` |
+| `conn.query_one(sql, params)` | `Row? ? DbError` | First row, if any |
+| `conn.begin()` / `commit()` / `rollback()` / `close()` | `Bool` | Explicit transaction control |
+| `db.row_int(row, key)` / `row_float` / `row_text` / `row_bool` | `T ? String` | Typed column read with missing/type errors |
+| `db.transaction(conn, label, statements)` | `Int ? DbError` | Runs statements in one transaction, rollback on first error |
+| `db.migrate(conn, name, statements)` | `Int ? DbError` | Records migration checksum in `__jet_migrations`; rerun returns `0`, changed checksum errors |
+
+`DbValue` variants are `Null`, `Int`, `Float`, `Text`, and `Bool`.
+
+---
+
+## Built Core Modules
+
+D-STDLIBLEDGER1 keeps this reference to built modules only. It is not a
+have/have-not ledger of missing domains.
+
+`core.io`, `core.env`, `core.os`, `core.process`, `core.math`, `core.random`,
+`core.time`, `core.tasks`, `core.testing`, `core.mem`, `core.mem.alloc`, `core.gc`,
+`core.solve`, `core.data`, `core.files`, `core.path`, `core.url`, `core.mime`,
+`core.watcher`, `core.net`, `core.scope`, `core.args`, `core.term`,
+`core.reflect`, `core.encoding`, `core.encoding.json`, `core.encoding.jsonl`,
+`core.encoding.csv`, `core.encoding.toml`, `core.encoding.yaml`,
+`core.encoding.xml`, `core.encoding.cbor`, `core.encoding.hex`,
+`core.encoding.base64`, `core.encoding.base32`, `core.text.unicode`,
+`core.binary`, `core.text`, `core.fmt`, `core.uuid`, `core.log`,
+`core.crypto`, `core.crypto.random`, `core.crypto.expert`, `core.http`,
+`core.regex`, `core.archive`, `core.raylib`, `core.game`,
+`core.compress.gzip`, `core.compress.zstd`, `core.db`, `core.plugin`,
+`core.reactive`, `core.event`, `core.science.measurement`, `core.numeric`,
+`core.async.loadable`, `core.perf`, `core.ui`, `core.web`,
+`core.web.storage`, `core.web.storage.local`, `core.web.storage.session`,
+`core.sketch.hll`, `core.sketch.tdigest`, `core.sketch.reservoir`,
+`core.sketch.cms`, `core.time.date`, `core.time.datetime`,
+`core.time.expiring`, `core.secrets`, `core.http.client`,
+`core.http.server`, `core.devserver`, `core.vault`.
 
 ---
 
@@ -1511,6 +2125,7 @@ the package system fully stabilizes.
 | `examples/features/serde/json.jet` | Parse, inspect, mutate, re-render JSON |
 | `examples/features/io/cli.jet` | Args, environment, exit codes |
 | `examples/features/io/cli_args.jet` | `core.args` — flag/option/positional spec + parse |
+| `examples/features/io/db_checked_sql.jet` | `core.db` — checked SQL params, typed row reads, transactions, migrations |
 | `examples/features/io/dir_entry.jet` | `fs.list_dir` → `[DirEntry]` |
 | `examples/features/serde/serde_derive.jet` | `@[Codable]` encode + typed `decode<T>` with `#[Rename]` |
 | `examples/features/serde/csv_typed.jet` | `csv.decode<Row>` → struct → JSON (the typed CSV pipeline) |

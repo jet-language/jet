@@ -505,11 +505,10 @@ fn man_page_golden() {
 
 #[test]
 fn fix_dry_run_does_not_write() {
-    // A file with an autofixable diagnostic: the S14 teaching error E0045
-    // (`or` → `??`) carries a machine-applicable `replace` edit, and the parser
-    // recovers so sema still runs.
+    // A file with an autofixable diagnostic. S14 teaching fixes are paused, so
+    // use the still-live Core habit fix (`println` -> `print`).
     let p = std::env::temp_dir().join("jet_cli_fix.jet");
-    let original = "fn run() {\n    x: Int? :: none\n    print(x or 0)\n}\n";
+    let original = "fn run() {\n    println(\"hi\")\n}\n";
     fs::write(&p, original).unwrap();
     let out = Command::new(jet())
         .arg("fix")
@@ -519,7 +518,7 @@ fn fix_dry_run_does_not_write() {
         .unwrap();
     let s = String::from_utf8_lossy(&out.stdout);
     assert!(s.contains("dry run"), "dry-run should say so:\n{}", s);
-    assert!(s.contains("??"), "diff should show the fix:\n{}", s);
+    assert!(s.contains("print"), "diff should show the fix:\n{}", s);
     // The file on disk is unchanged.
     assert_eq!(
         fs::read_to_string(&p).unwrap(),
@@ -531,7 +530,7 @@ fn fix_dry_run_does_not_write() {
     let out2 = Command::new(jet()).arg("fix").arg(&p).output().unwrap();
     assert_eq!(out2.status.code(), Some(0));
     assert!(
-        fs::read_to_string(&p).unwrap().contains("x ?? 0"),
+        fs::read_to_string(&p).unwrap().contains("print(\"hi\")"),
         "fix should rewrite the file"
     );
 }

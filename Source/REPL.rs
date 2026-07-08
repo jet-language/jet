@@ -27,6 +27,19 @@ use crate::Comptime::{CtValue, DevSink, REPL_FUEL_BUDGET};
 use crate::Diagnostics::Diagnostic;
 use crate::AST::{AccessConvention, CallArg, Expr, Func, Item, Stmt};
 
+const TERMINAL_SHIFT_IN: &str = "\x0f";
+
+fn strip_terminal_control_bytes(input: &str) -> String {
+    input
+        .chars()
+        .filter(|c| !c.is_control() || matches!(*c, '\t' | '\n' | '\r'))
+        .collect()
+}
+
+fn normalize_repl_input(input: &str) -> String {
+    strip_terminal_control_bytes(input.trim_end_matches('\n').trim_end_matches('\r'))
+}
+
 // ── color helpers ──────────────────────────────────────────────────────────
 
 /// Return true if color output is desired on stdout.
@@ -637,31 +650,29 @@ fn bracket_balance(s: &str) -> i32 {
 /// Read a complete input (possibly multi-line) using D-REPL9 rules.
 /// Returns `None` on EOF.
 fn read_input(stdin: &mut impl BufRead, color: bool, prompt: &str) -> Option<String> {
-    print!("{}", bold(prompt, color));
+    let terminal_shift = if color { TERMINAL_SHIFT_IN } else { "" };
+    print!("{}{}", terminal_shift, bold(prompt, color));
     io::stdout().flush().ok();
     let mut buf = String::new();
     if stdin.read_line(&mut buf).ok()? == 0 {
         return None; // EOF
     }
-    let trimmed = buf
-        .trim_end_matches('\n')
-        .trim_end_matches('\r')
-        .to_string();
+    let trimmed = normalize_repl_input(&buf);
 
     // D-REPL9: keep reading if brackets are unbalanced.
     let mut bal = bracket_balance(&trimmed);
     let mut full = trimmed;
     while bal > 0 {
-        print!("{}", dim("...  ", color));
+        print!("{}{}", terminal_shift, dim("...  ", color));
         io::stdout().flush().ok();
         let mut cont = String::new();
         if stdin.read_line(&mut cont).ok()? == 0 {
             break;
         }
-        let line = cont.trim_end_matches('\n').trim_end_matches('\r');
-        bal += bracket_balance(line);
+        let line = normalize_repl_input(&cont);
+        bal += bracket_balance(&line);
         full.push('\n');
-        full.push_str(line);
+        full.push_str(&line);
     }
     Some(full)
 }
@@ -1459,7 +1470,8 @@ pub fn run_transcript(inputs: &[&str], project_dir: Option<&str>) -> String {
     }
 
     for &input in inputs {
-        let trimmed = input.trim();
+        let normalized = normalize_repl_input(input);
+        let trimmed = normalized.trim();
         if trimmed.is_empty() {
             continue;
         }

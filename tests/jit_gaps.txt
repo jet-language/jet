@@ -71,6 +71,7 @@ gaps:
   collections/index_hook: run: jit record field unsupported: List(Named("Cell"))
   collections/iter_adapters: run: jit builtin method unsupported
   collections/iter_hook: run: jit for-in collection type unsupported: Named("Crate")
+  collections/iter_tools_audit: run: jit builtin method unsupported
   collections/list_remove_bounds: run: jit builtin method unsupported
   collections/lists: run: run: verifier: VerifierErrors([VerifierError { location: inst38, context: Some("v28, v29 = call fn11(v0, v25, v26, v27)  ; v25 = 1, v26 = 2, v27 = 8"), message: "arg 2 (v26) has type i64, expected i32" }, VerifierError { location: inst38, context: Some("v28, v29 = call fn11(v0, v25, v26, v27)  ; v25 = 1, v26 = 2, v27 = 8"), message: "mismatched argument count for `v28, v29 = call fn11(v0, v25, v26, v27)  ; v25 = 1, v26 = 2, v27 = 8`: got 4, expected 3" }])
   collections/map_key: run: jit map literal unsupported
@@ -86,6 +87,7 @@ gaps:
   comptime/comptime_tiers: run: jit const inline unsupported
   comptime/embed: check_nonempty: jit require/panic stop unsupported
   comptime/embed_bytes: jit param type unsupported: List(IntN { signed: false, bits: 8 })
+  comptime/find: run: jit const inline unsupported
   comptime/reflect: Widget::show: jit clone unsupported
   concurrency/all_failfast: slow_one: jit core call unsupported
   concurrency/deadline_context: jit core call unsupported
@@ -95,9 +97,11 @@ gaps:
   concurrency/protocol: drive: jit result status unsupported
   concurrency/race_cancel: slow_one: jit core call unsupported
   concurrency/task_controls: run: jit handle method unsupported
+  concurrency/task_runtime_audit: run: jit core call unsupported
   crypto/crypto_envelope: run: jit result status unsupported
   crypto/crypto_migration: run: jit result status unsupported
   crypto/crypto_sign: run: jit result status unsupported
+  crypto/crypto_suite: run: jit core call unsupported
   crypto/hash: run: jit core call unsupported
   crypto/random_api_split: run: jit core call unsupported
   crypto/vault_secret: handler: jit core call unsupported
@@ -134,22 +138,30 @@ gaps:
   game/core_game_headless: run: jit handle method unsupported
   game/raylib_window: run: jit core call unsupported
   io/archive: run: jit core call unsupported
+  io/args_audit: run: jit core call unsupported
   io/args_spec: run: jit core call unsupported
   io/cli: run: jit core call unsupported
   io/cli_args: run: jit core call unsupported
   io/compress_gzip: run: jit core call unsupported
   io/compress_zstd: run: jit core call unsupported
   io/db: run: jit core call unsupported
+  io/db_checked_sql: run: jit core call unsupported
   io/dir_entry: run: jit result status unsupported
   io/files: run: jit result status unsupported
+  io/files_depth: run: jit core call unsupported
   io/io_prelude: greet: jit result status unsupported
   io/log: run: jit core call unsupported
   io/log_human: run: jit core call unsupported
+  io/log_structured: run: jit core call unsupported
+  io/os_facts: run: jit core call unsupported
   io/path: run: jit handle method unsupported
+  io/process_builder: run: jit result status unsupported
   io/scope_guard: with_guards: jit scope guard closure unsupported
   io/stdin_filter: run: jit for-in unknown collection `jet_std_io_stdin()`
   io/stream: count_lines: jit try propagation unsupported
   io/terminal: describe_key: jit if condition unsupported
+  io/terminal_parity: run: jit core call unsupported
+  io/watcher: run: jit core call unsupported
   lowlevel/ffi: run: jit extern call unsupported
   lowlevel/freestanding: clamp: clamp: verifier: VerifierErrors([VerifierError { location: inst4, context: None, message: "invalid block reference block2" }])
   lowlevel/layout_columnar: jit param type unsupported: List(Named("Particle"))
@@ -160,6 +172,8 @@ gaps:
   lowlevel/sized_floats: run: jit core call unsupported
   lowlevel/sized_integers: run: jit let type unsupported: IntN { signed: false, bits: 8 }
   lowlevel/swizzle: run: jit math builtin unsupported
+  math/math_audit: run: jit core call unsupported
+  math/random_audit: run: jit core call unsupported
   memory/arena: run: jit allocator constructor unsupported
   memory/arena_parse: run: jit allocator constructor unsupported
   memory/arena_regions: run: jit allocator constructor unsupported
@@ -184,9 +198,12 @@ gaps:
   modules/selective_imports: run: jit module call unsupported
   net/http_client: jit result status unsupported
   net/http_get: jit result status unsupported
+  net/http_rest_service: jit result status unsupported
   net/http_routes: jit result status unsupported
   net/http_server: run: jit core call unsupported
   net/http_server_tasks: jit result status unsupported
+  net/socket_echo: jit core call unsupported
+  net/url_mime: run: jit result status unsupported
   parsing/binary-reader: run: jit handle method unsupported
   parsing/parse_interpolation: run: jit const inline unsupported
   parsing/text-cursor: run: jit handle method unsupported
@@ -198,6 +215,7 @@ gaps:
   serde/datatree_accessors: run: jit result status unsupported
   serde/decode_traced: run: jit result status unsupported
   serde/encoding: run: jit result status unsupported
+  serde/encoding_breadth: run: jit result status unsupported
   serde/json: run: jit result status unsupported
   serde/json_coerce: run: jit result status unsupported
   serde/json_typed: run: jit result status unsupported
@@ -213,19 +231,24 @@ gaps:
   text/datetime: run: jit core call unsupported
   text/decimal: run: jit precise numeric builtin unsupported
   text/hex_base64: run: jit core call unsupported
+  text/human_format: run: jit core call unsupported
   text/regex: run: jit result status unsupported
   text/string_parse: run: jit result status unsupported
   text/strings: run: jit for-in unknown collection `"héllo".to_string()`
+  text/time_calendar: run: jit result status unsupported
   text/unicode_text: run: jit core call unsupported
+  text/unicode_text_audit: run: jit core call unsupported
   text/uuid: run: jit core call unsupported
   tooling/bench: fib: fib: verifier: VerifierErrors([VerifierError { location: inst5, context: None, message: "invalid block reference block2" }])
   tooling/data_core: run: jit result status unsupported
+  tooling/data_pipeline: run: jit result status unsupported
   tooling/debug_native: word_count: jit for-in unknown collection `jet_string_split(&((*user_text)), &" ".to_string())`
   tooling/fidelity: run: jit core call unsupported
   tooling/panic_report: summarize: jit require/panic stop unsupported
   tooling/property_tests: reverse: jit for-in unknown collection `(*user_xs)`
   tooling/provenance_track: run: jit numeric method unsupported
   tooling/solve_puzzle: run: jit handle method unsupported
+  tooling/testing_helpers: run: jit core call unsupported
   tooling/todo_hole: not_yet: jit todo expression unsupported
   types/associated_types: run: jit missing method `Nums::at`
   types/capability_bundles: run: jit call to unknown function `Usd`

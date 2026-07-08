@@ -131,6 +131,41 @@ fn run() {
 }
 
 #[test]
+fn structured_log_fields_and_span_context() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc {
+        return;
+    }
+
+    let src = r#"
+use core.log as log
+fn run() {
+    log.setup("json")
+    log.set_trace_id("req-1")
+    span :: log.span("request")
+    log.enter(span)
+    log.info_fields("served", [
+        log.field("route", "/health"),
+        log.int("status", 200),
+        log.bool("cache", true),
+        log.counter("requests", 1),
+    ])
+    log.close(span)
+}
+"#;
+    let (_code, _stdout, stderr) = build_and_run_debug("log_structured_fields", src);
+    let lines: Vec<&str> = stderr.lines().filter(|l| l.starts_with('{')).collect();
+    assert_eq!(lines.len(), 1, "stderr:\n{stderr}");
+    let line = lines[0];
+    assert!(line.contains("\"trace_id\":\"req-1\""), "trace missing: {line}");
+    assert!(line.contains("\"route\":\"/health\""), "field missing: {line}");
+    assert!(line.contains("\"status\":200"), "int field missing: {line}");
+    assert!(line.contains("\"cache\":true"), "bool field missing: {line}");
+    assert!(line.contains("\"metric.counter.requests\":1"), "counter missing: {line}");
+    assert!(line.contains("\"spans\":[\"request\"]"), "span missing: {line}");
+}
+
+#[test]
 fn structured_log_json_escape() {
     let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
     if !have_rustc {

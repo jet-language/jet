@@ -170,6 +170,17 @@ fn repl_help_shows_commands() {
 }
 
 #[test]
+fn repl_strips_terminal_control_bytes() {
+    let out = run_transcript(&["\x0e1 + 2"], None);
+    assert_eq!(out.trim(), "3 : Int");
+    assert!(
+        !out.contains('\x0e'),
+        "control byte leaked into transcript: {:?}",
+        out
+    );
+}
+
+#[test]
 fn repl_load_hello() {
     // Load examples/features/basics/hello.jet and check it runs.
     let out = run_transcript(&[":load examples/features/basics/hello.jet"], None);

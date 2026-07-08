@@ -84,9 +84,9 @@ fn fmt_canonicalizes_bare_question_return_to_fallible_return() {
 }
 
 #[test]
-fn fmt_comptime_os_switch_round_trips() {
+fn fmt_comptime_os_dispatch_round_trips() {
     // D-OSTARGET2=B (ratified 2026-07-03): `comptime if build.os == { … }` — the
-    // OS-dispatch switch. New token shape: the `comptime if <subject> == { }`
+    // OS-target dispatch. New token shape: the `comptime if <subject> == { }`
     // dispatch. Must survive fmt (subject + arms + bodies preserved) and be
     // idempotent (the formatter-round-trip-required rule catches dropped tokens).
     let src = r#"fn run() {
@@ -100,10 +100,10 @@ fn fmt_comptime_os_switch_round_trips() {
     }
 }
 "#;
-    let out = jet::format_source(src).expect("fmt should accept a comptime OS switch");
+    let out = jet::format_source(src).expect("fmt should accept a comptime OS dispatch");
     assert!(
         out.contains("comptime if build.os == {"),
-        "expected the `comptime if build.os == {{` switch head, got:\n{out}"
+        "expected the `comptime if build.os == {{` dispatch head, got:\n{out}"
     );
     // Arms and their bodies survive (the formatter canonicalizes braceless arm
     // bodies to block form, like any `if … == { }` dispatch).
@@ -119,10 +119,10 @@ fn fmt_comptime_os_switch_round_trips() {
         out.contains("else -> {") && out.contains("print(\"other\")"),
         "expected the else arm preserved, got:\n{out}"
     );
-    let twice = jet::format_source(&out).expect("comptime OS switch output should re-fmt");
+    let twice = jet::format_source(&out).expect("comptime OS dispatch output should re-fmt");
     assert_eq!(
         out, twice,
-        "comptime OS switch formatting must be idempotent"
+        "comptime OS dispatch formatting must be idempotent"
     );
 }
 
@@ -812,6 +812,16 @@ enum Shape {
         &["@Codable", "#Tag(\"type\")", "#[Rename(\"circle\")]"],
         "enum tag + variant rename",
     );
+}
+
+#[test]
+fn fmt_keeps_replayable_marker() {
+    let src = "\
+#Replayable fn replay_turn(seed: Int) -> Int {
+    return seed + 1
+}
+";
+    assert_fmt_keeps(src, &["#Replayable fn replay_turn"], "replayable fn");
 }
 
 #[test]
@@ -1552,7 +1562,11 @@ fn render(h: Html) {
 
 fn run() {
     id :: 42
-    run_query(\"select * from t where id = {id}\")
+    q :: sql\"select * from t where id = {id}\"
+    run_query(q)
+    name :: \"Jet\"
+    page :: html\"<p>{name}</p>\"
+    render(page)
     trusted :: Html.raw(\"<b>audited</b>\")
     render(trusted)
 }

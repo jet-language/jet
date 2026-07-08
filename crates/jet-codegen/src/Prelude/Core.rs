@@ -1,8 +1,14 @@
-trait JetShow { fn jet_show(&self) -> String; }
+trait JetShow {
+    fn jet_show(&self) -> String;
+}
 /// D-DISPLAYDBG1: user-facing interpolation (`{value}`).
-trait JetDisplay { fn jet_display(&self) -> String; }
+trait JetDisplay {
+    fn jet_display(&self) -> String;
+}
 /// D-DISPLAYDBG1: developer interpolation (`{value@Debug}`).
-trait JetDebug { fn jet_debug(&self) -> String; }
+trait JetDebug {
+    fn jet_debug(&self) -> String;
+}
 
 // D-PROVENANCE1=B: `#Track x :: <Float>` records local Float provenance by
 // address. Plain copies remain plain values; a copied Float is untracked unless
@@ -37,51 +43,123 @@ macro_rules! jet_scalar_show {
     )+};
 }
 jet_scalar_show!(i64, i8, i16, i32, u8, u16, u32, u64, bool, char);
-impl JetShow for f32 { fn jet_show(&self) -> String { format!("{:?}", self) } }
-impl JetDisplay for f32 { fn jet_display(&self) -> String { format!("{:?}", self) } }
-impl JetDebug for f32 { fn jet_debug(&self) -> String { format!("{:?}", self) } }
-impl JetShow for f64 { fn jet_show(&self) -> String { format!("{:?}", self) } }
-impl JetDisplay for f64 { fn jet_display(&self) -> String { format!("{:?}", self) } }
-impl JetDebug for f64 { fn jet_debug(&self) -> String { format!("{:?}", self) } }
-impl JetShow for String { fn jet_show(&self) -> String { self.clone() } }
-impl JetDisplay for String { fn jet_display(&self) -> String { self.clone() } }
-impl JetDebug for String { fn jet_debug(&self) -> String { format!("{self:?}") } }
+impl JetShow for f32 {
+    fn jet_show(&self) -> String {
+        format!("{:?}", self)
+    }
+}
+impl JetDisplay for f32 {
+    fn jet_display(&self) -> String {
+        format!("{:?}", self)
+    }
+}
+impl JetDebug for f32 {
+    fn jet_debug(&self) -> String {
+        format!("{:?}", self)
+    }
+}
+impl JetShow for f64 {
+    fn jet_show(&self) -> String {
+        format!("{:?}", self)
+    }
+}
+impl JetDisplay for f64 {
+    fn jet_display(&self) -> String {
+        format!("{:?}", self)
+    }
+}
+impl JetDebug for f64 {
+    fn jet_debug(&self) -> String {
+        format!("{:?}", self)
+    }
+}
+impl JetShow for String {
+    fn jet_show(&self) -> String {
+        self.clone()
+    }
+}
+impl JetDisplay for String {
+    fn jet_display(&self) -> String {
+        self.clone()
+    }
+}
+impl JetDebug for String {
+    fn jet_debug(&self) -> String {
+        format!("{self:?}")
+    }
+}
 // D-MEM1 stage S5: a string view (`s.trim()`/`.after()`/`.before()` bound to a
 // local, see `jet_string_*_view` below) is a genuine `&str` in generated Rust —
 // `String` stays the one Jet-level type, so anything that already works on a
 // `String` (print/interpolate/debug) must also work on the view directly.
-impl JetShow for str { fn jet_show(&self) -> String { self.to_string() } }
-impl JetDisplay for str { fn jet_display(&self) -> String { self.to_string() } }
-impl JetDebug for str { fn jet_debug(&self) -> String { format!("{self:?}") } }
-impl<T: JetShow> JetShow for &T { fn jet_show(&self) -> String { (**self).jet_show() } }
-impl<T: JetDisplay> JetDisplay for &T { fn jet_display(&self) -> String { (**self).jet_display() } }
-impl<T: JetDebug> JetDebug for &T { fn jet_debug(&self) -> String { (**self).jet_debug() } }
-impl<T: JetShow> JetShow for Vec<T> { fn jet_show(&self) -> String {
-    let parts: Vec<String> = self.iter().map(|x| x.jet_show()).collect();
-    format!("[{}]", parts.join(", "))
-} }
-impl<T: JetDisplay> JetDisplay for Vec<T> { fn jet_display(&self) -> String {
-    let parts: Vec<String> = self.iter().map(|x| x.jet_display()).collect();
-    format!("[{}]", parts.join(", "))
-} }
-impl<T: JetDebug> JetDebug for Vec<T> { fn jet_debug(&self) -> String {
-    let parts: Vec<String> = self.iter().map(|x| x.jet_debug()).collect();
-    format!("[{}]", parts.join(", "))
-} }
+impl JetShow for str {
+    fn jet_show(&self) -> String {
+        self.to_string()
+    }
+}
+impl JetDisplay for str {
+    fn jet_display(&self) -> String {
+        self.to_string()
+    }
+}
+impl JetDebug for str {
+    fn jet_debug(&self) -> String {
+        format!("{self:?}")
+    }
+}
+impl<T: JetShow> JetShow for &T {
+    fn jet_show(&self) -> String {
+        (**self).jet_show()
+    }
+}
+impl<T: JetDisplay> JetDisplay for &T {
+    fn jet_display(&self) -> String {
+        (**self).jet_display()
+    }
+}
+impl<T: JetDebug> JetDebug for &T {
+    fn jet_debug(&self) -> String {
+        (**self).jet_debug()
+    }
+}
+impl<T: JetShow> JetShow for Vec<T> {
+    fn jet_show(&self) -> String {
+        let parts: Vec<String> = self.iter().map(|x| x.jet_show()).collect();
+        format!("[{}]", parts.join(", "))
+    }
+}
+impl<T: JetDisplay> JetDisplay for Vec<T> {
+    fn jet_display(&self) -> String {
+        let parts: Vec<String> = self.iter().map(|x| x.jet_display()).collect();
+        format!("[{}]", parts.join(", "))
+    }
+}
+impl<T: JetDebug> JetDebug for Vec<T> {
+    fn jet_debug(&self) -> String {
+        let parts: Vec<String> = self.iter().map(|x| x.jet_debug()).collect();
+        format!("[{}]", parts.join(", "))
+    }
+}
 // D-FIXARR1: `[T#N]` lowers to a real Rust array `[T; N]`; render it like a list
 // so printing/interpolating a fixed array (or a fan-out result) works.
-impl<T: JetShow, const N: usize> JetShow for [T; N] { fn jet_show(&self) -> String {
-    let parts: Vec<String> = self.iter().map(|x| x.jet_show()).collect();
-    format!("[{}]", parts.join(", "))
-} }
-impl<T: JetDisplay, const N: usize> JetDisplay for [T; N] { fn jet_display(&self) -> String {
-    let parts: Vec<String> = self.iter().map(|x| x.jet_display()).collect();
-    format!("[{}]", parts.join(", "))
-} }
-impl<T: JetDebug, const N: usize> JetDebug for [T; N] { fn jet_debug(&self) -> String {
-    let parts: Vec<String> = self.iter().map(|x| x.jet_debug()).collect();
-    format!("[{}]", parts.join(", "))
-} }
+impl<T: JetShow, const N: usize> JetShow for [T; N] {
+    fn jet_show(&self) -> String {
+        let parts: Vec<String> = self.iter().map(|x| x.jet_show()).collect();
+        format!("[{}]", parts.join(", "))
+    }
+}
+impl<T: JetDisplay, const N: usize> JetDisplay for [T; N] {
+    fn jet_display(&self) -> String {
+        let parts: Vec<String> = self.iter().map(|x| x.jet_display()).collect();
+        format!("[{}]", parts.join(", "))
+    }
+}
+impl<T: JetDebug, const N: usize> JetDebug for [T; N] {
+    fn jet_debug(&self) -> String {
+        let parts: Vec<String> = self.iter().map(|x| x.jet_debug()).collect();
+        format!("[{}]", parts.join(", "))
+    }
+}
 // D-COLLBREADTH1=A: Set<T> (HashSet) shows lexicographically sorted like a list;
 // Deque<T> shows in order like a list. Sort by string rep for determinism.
 impl<T: JetShow> JetShow for std::collections::HashSet<T> {
@@ -105,18 +183,60 @@ impl<T: JetDebug> JetDebug for std::collections::HashSet<T> {
         format!("[{}]", parts.join(", "))
     }
 }
-impl<T: JetShow> JetShow for std::collections::VecDeque<T> { fn jet_show(&self) -> String {
-    let parts: Vec<String> = self.iter().map(|x| x.jet_show()).collect();
-    format!("[{}]", parts.join(", "))
-} }
-impl<T: JetDisplay> JetDisplay for std::collections::VecDeque<T> { fn jet_display(&self) -> String {
-    let parts: Vec<String> = self.iter().map(|x| x.jet_display()).collect();
-    format!("[{}]", parts.join(", "))
-} }
-impl<T: JetDebug> JetDebug for std::collections::VecDeque<T> { fn jet_debug(&self) -> String {
-    let parts: Vec<String> = self.iter().map(|x| x.jet_debug()).collect();
-    format!("[{}]", parts.join(", "))
-} }
+impl<T: Ord + JetShow> JetShow for std::collections::BTreeSet<T> {
+    fn jet_show(&self) -> String {
+        let parts: Vec<String> = self.iter().map(|x| x.jet_show()).collect();
+        format!("[{}]", parts.join(", "))
+    }
+}
+impl<T: Ord + JetDisplay> JetDisplay for std::collections::BTreeSet<T> {
+    fn jet_display(&self) -> String {
+        let parts: Vec<String> = self.iter().map(|x| x.jet_display()).collect();
+        format!("[{}]", parts.join(", "))
+    }
+}
+impl<T: Ord + JetDebug> JetDebug for std::collections::BTreeSet<T> {
+    fn jet_debug(&self) -> String {
+        let parts: Vec<String> = self.iter().map(|x| x.jet_debug()).collect();
+        format!("[{}]", parts.join(", "))
+    }
+}
+impl<T: Ord + Clone + JetShow> JetShow for std::collections::BinaryHeap<T> {
+    fn jet_show(&self) -> String {
+        let parts: Vec<String> = self.clone().into_sorted_vec().into_iter().rev().map(|x| x.jet_show()).collect();
+        format!("[{}]", parts.join(", "))
+    }
+}
+impl<T: Ord + Clone + JetDisplay> JetDisplay for std::collections::BinaryHeap<T> {
+    fn jet_display(&self) -> String {
+        let parts: Vec<String> = self.clone().into_sorted_vec().into_iter().rev().map(|x| x.jet_display()).collect();
+        format!("[{}]", parts.join(", "))
+    }
+}
+impl<T: Ord + Clone + JetDebug> JetDebug for std::collections::BinaryHeap<T> {
+    fn jet_debug(&self) -> String {
+        let parts: Vec<String> = self.clone().into_sorted_vec().into_iter().rev().map(|x| x.jet_debug()).collect();
+        format!("[{}]", parts.join(", "))
+    }
+}
+impl<T: JetShow> JetShow for std::collections::VecDeque<T> {
+    fn jet_show(&self) -> String {
+        let parts: Vec<String> = self.iter().map(|x| x.jet_show()).collect();
+        format!("[{}]", parts.join(", "))
+    }
+}
+impl<T: JetDisplay> JetDisplay for std::collections::VecDeque<T> {
+    fn jet_display(&self) -> String {
+        let parts: Vec<String> = self.iter().map(|x| x.jet_display()).collect();
+        format!("[{}]", parts.join(", "))
+    }
+}
+impl<T: JetDebug> JetDebug for std::collections::VecDeque<T> {
+    fn jet_debug(&self) -> String {
+        let parts: Vec<String> = self.iter().map(|x| x.jet_debug()).collect();
+        format!("[{}]", parts.join(", "))
+    }
+}
 impl<K: Ord + JetShow, V: JetShow> JetShow for std::collections::BTreeMap<K, V> {
     fn jet_show(&self) -> String {
         let parts: Vec<String> = self
@@ -194,17 +314,38 @@ impl<T: JetDebug, E: JetDebug> JetDebug for Result<T, E> {
 }
 // D-PENDING1=B: async UI state machine — Idle/Loading/Loaded(T)/Failed(E).
 #[derive(Clone, Debug)]
-enum JetLoadable<T: Clone, E: Clone> { Idle, Loading, Loaded(T), Failed(E) }
+enum JetLoadable<T: Clone, E: Clone> {
+    Idle,
+    Loading,
+    Loaded(T),
+    Failed(E),
+}
 impl<T: Clone, E: Clone> JetLoadable<T, E> {
-    fn is_idle(&self) -> bool { matches!(self, JetLoadable::Idle) }
-    fn is_loading(&self) -> bool { matches!(self, JetLoadable::Loading) }
-    fn is_loaded(&self) -> bool { matches!(self, JetLoadable::Loaded(_)) }
-    fn is_failed(&self) -> bool { matches!(self, JetLoadable::Failed(_)) }
+    fn is_idle(&self) -> bool {
+        matches!(self, JetLoadable::Idle)
+    }
+    fn is_loading(&self) -> bool {
+        matches!(self, JetLoadable::Loading)
+    }
+    fn is_loaded(&self) -> bool {
+        matches!(self, JetLoadable::Loaded(_))
+    }
+    fn is_failed(&self) -> bool {
+        matches!(self, JetLoadable::Failed(_))
+    }
     fn loaded(&self) -> Option<T> {
-        if let JetLoadable::Loaded(v) = self { Some(v.clone()) } else { None }
+        if let JetLoadable::Loaded(v) = self {
+            Some(v.clone())
+        } else {
+            None
+        }
     }
     fn or_else(&self, default: T) -> T {
-        if let JetLoadable::Loaded(v) = self { v.clone() } else { default }
+        if let JetLoadable::Loaded(v) = self {
+            v.clone()
+        } else {
+            default
+        }
     }
 }
 impl<T: Clone + JetShow, E: Clone + JetShow> JetShow for JetLoadable<T, E> {
@@ -221,7 +362,9 @@ impl<T: Clone + JetShow, E: Clone + JetShow> JetShow for JetLoadable<T, E> {
 #[derive(Clone, Debug)]
 struct JetExpired;
 impl JetShow for JetExpired {
-    fn jet_show(&self) -> String { "Expired".to_string() }
+    fn jet_show(&self) -> String {
+        "Expired".to_string()
+    }
 }
 #[derive(Clone, Debug)]
 struct JetExpiring<T: Clone> {
@@ -239,7 +382,9 @@ impl<T: Clone> JetExpiring<T> {
             Ok(self.value.clone())
         }
     }
-    fn is_valid(&self, now_ms: i64) -> bool { now_ms <= self.deadline_ms }
+    fn is_valid(&self, now_ms: i64) -> bool {
+        now_ms <= self.deadline_ms
+    }
 }
 impl<T: Clone + JetShow> JetShow for JetExpiring<T> {
     fn jet_show(&self) -> String {
@@ -254,7 +399,11 @@ struct JetRotting<T: Clone> {
 }
 impl<T: Clone + 'static> JetRotting<T> {
     fn new(value: T, deadline_ms: i64) -> Self {
-        JetRotting { value, deadline_ms, consumed: false }
+        JetRotting {
+            value,
+            deadline_ms,
+            consumed: false,
+        }
     }
     fn get(&mut self, now_ms: i64) -> Result<T, JetExpired> {
         if self.consumed || now_ms > self.deadline_ms {
@@ -270,8 +419,12 @@ impl<T: Clone + 'static> JetRotting<T> {
         self.consumed = true;
         if let Some(s) = (&mut self.value as &mut dyn std::any::Any).downcast_mut::<String>() {
             s.clear();
-        } else if let Some(v) = (&mut self.value as &mut dyn std::any::Any).downcast_mut::<Vec<u8>>() {
-            for b in v.iter_mut() { *b = 0; }
+        } else if let Some(v) =
+            (&mut self.value as &mut dyn std::any::Any).downcast_mut::<Vec<u8>>()
+        {
+            for b in v.iter_mut() {
+                *b = 0;
+            }
             v.clear();
         }
     }
@@ -281,57 +434,109 @@ impl<T: Clone + JetShow> JetShow for JetRotting<T> {
         format!("Rotting(deadline={})", self.deadline_ms)
     }
 }
-// D-TIMEDEPTH1=A: civil-time types (Date, DateTime) and calendar math.
-// Pure Rust, no external crates (I6). Proleptic Gregorian calendar.
+// D-TIMEDEPTH1/D-TIME-CALENDAR1: civil-time types and calendar math.
+// Pure Rust, no external crates (I6). Proleptic Gregorian calendar, Unix time
+// as UTC seconds, and a small TZif reader for IANA zoneinfo files.
 #[derive(Clone, Debug, PartialEq)]
-struct JetDate { year: i64, month: i64, day: i64 }
+struct JetDate {
+    year: i64,
+    month: i64,
+    day: i64,
+}
 impl JetDate {
-    fn is_leap(y: i64) -> bool { (y % 4 == 0 && y % 100 != 0) || y % 400 == 0 }
+    fn is_leap(y: i64) -> bool {
+        (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
+    }
     fn days_in_month(y: i64, m: i64) -> i64 {
         match m {
-            1|3|5|7|8|10|12 => 31,
-            4|6|9|11 => 30,
-            2 => if Self::is_leap(y) { 29 } else { 28 },
+            1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+            4 | 6 | 9 | 11 => 30,
+            2 => {
+                if Self::is_leap(y) {
+                    29
+                } else {
+                    28
+                }
+            }
             _ => 30,
         }
     }
-    fn new(y: i64, m: i64, d: i64) -> Self { JetDate { year: y, month: m, day: d } }
+    fn new(y: i64, m: i64, d: i64) -> Self {
+        let month = m.clamp(1, 12);
+        let day = d.clamp(1, Self::days_in_month(y, month));
+        JetDate {
+            year: y,
+            month,
+            day,
+        }
+    }
     // Days since 0001-01-01 (proleptic Gregorian).
     fn to_day_number(&self) -> i64 {
         let y = self.year - 1;
-        365 * y + y / 4 - y / 100 + y / 400
-            + [0i64,31,59,90,120,151,181,212,243,273,304,334][(self.month - 1) as usize]
-            + if self.month > 2 && Self::is_leap(self.year) { 1 } else { 0 }
-            + self.day - 1
+        365 * y + y / 4 - y / 100
+            + y / 400
+            + [0i64, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334][(self.month - 1) as usize]
+            + if self.month > 2 && Self::is_leap(self.year) {
+                1
+            } else {
+                0
+            }
+            + self.day
+            - 1
     }
     fn from_day_number(mut n: i64) -> Self {
         let mut y = n / 365 + 1;
         loop {
             let start = JetDate::new(y, 1, 1).to_day_number();
             let next = JetDate::new(y + 1, 1, 1).to_day_number();
-            if n >= start && n < next { break; }
-            if n < start { y -= 1; } else { y += 1; }
+            if n >= start && n < next {
+                break;
+            }
+            if n < start {
+                y -= 1;
+            } else {
+                y += 1;
+            }
         }
         n -= JetDate::new(y, 1, 1).to_day_number();
         let mut m = 1i64;
-        while m < 12 && n >= Self::days_in_month(y, m) { n -= Self::days_in_month(y, m); m += 1; }
+        while m < 12 && n >= Self::days_in_month(y, m) {
+            n -= Self::days_in_month(y, m);
+            m += 1;
+        }
         JetDate::new(y, m, n + 1)
     }
     fn parse(s: &str) -> Result<JetDate, String> {
         let parts: Vec<&str> = s.splitn(3, '-').collect();
-        if parts.len() != 3 { return Err(format!("invalid date: {}", s)); }
-        let y = parts[0].parse::<i64>().map_err(|_| format!("bad year: {}", parts[0]))?;
-        let m = parts[1].parse::<i64>().map_err(|_| format!("bad month: {}", parts[1]))?;
-        let d = parts[2].parse::<i64>().map_err(|_| format!("bad day: {}", parts[2]))?;
+        if parts.len() != 3 {
+            return Err(format!("invalid date: {}", s));
+        }
+        let y = parts[0]
+            .parse::<i64>()
+            .map_err(|_| format!("bad year: {}", parts[0]))?;
+        let m = parts[1]
+            .parse::<i64>()
+            .map_err(|_| format!("bad month: {}", parts[1]))?;
+        let d = parts[2]
+            .parse::<i64>()
+            .map_err(|_| format!("bad day: {}", parts[2]))?;
         if m < 1 || m > 12 || d < 1 || d > Self::days_in_month(y, m) {
             return Err(format!("date out of range: {}", s));
         }
         Ok(JetDate::new(y, m, d))
     }
-    fn year(&self) -> i64 { self.year }
-    fn month(&self) -> i64 { self.month }
-    fn day(&self) -> i64 { self.day }
-    fn add_days(&self, n: i64) -> JetDate { Self::from_day_number(self.to_day_number() + n) }
+    fn year(&self) -> i64 {
+        self.year
+    }
+    fn month(&self) -> i64 {
+        self.month
+    }
+    fn day(&self) -> i64 {
+        self.day
+    }
+    fn add_days(&self, n: i64) -> JetDate {
+        Self::from_day_number(self.to_day_number() + n)
+    }
     fn add_months(&self, n: i64) -> JetDate {
         let total = self.month - 1 + n;
         let y = self.year + total / 12;
@@ -339,33 +544,183 @@ impl JetDate {
         let d = self.day.min(Self::days_in_month(y, m));
         JetDate::new(y, m, d)
     }
-    fn diff_days(&self, other: &JetDate) -> i64 { self.to_day_number() - other.to_day_number() }
+    fn diff_days(&self, other: &JetDate) -> i64 {
+        self.to_day_number() - other.to_day_number()
+    }
     fn weekday(&self) -> i64 {
-        // 0=Mon, 6=Sun (ISO).
+        // Legacy D-TIMEDEPTH1 shape: 0=Sunday, 6=Saturday.
         (self.to_day_number() + 6) % 7
     }
-    fn day_of_year(&self) -> i64 { self.to_day_number() - JetDate::new(self.year, 1, 1).to_day_number() + 1 }
-    fn to_string_fmt(&self) -> String { format!("{:04}-{:02}-{:02}", self.year, self.month, self.day) }
+    fn iso_weekday(&self) -> i64 {
+        (self.to_day_number() % 7) + 1
+    }
+    fn day_of_year(&self) -> i64 {
+        self.to_day_number() - JetDate::new(self.year, 1, 1).to_day_number() + 1
+    }
+    fn iso_week(&self) -> i64 {
+        let thursday = self.add_days(4 - self.iso_weekday());
+        ((thursday.to_day_number() - JetDate::new(thursday.year, 1, 1).to_day_number()) / 7) + 1
+    }
+    fn truncate(&self, unit: &String) -> JetDate {
+        match unit.as_str() {
+            "year" => JetDate::new(self.year, 1, 1),
+            "month" => JetDate::new(self.year, self.month, 1),
+            _ => self.clone(),
+        }
+    }
+    fn add_period(&self, p: &JetPeriod) -> JetDate {
+        self.add_months(p.years.saturating_mul(12).saturating_add(p.months))
+            .add_days(p.days)
+    }
+    fn format_pattern(&self, pattern: &String) -> String {
+        jet_time_format_pattern(pattern, self, &JetLocalTime::new(0, 0, 0), None)
+    }
+    fn to_string_fmt(&self) -> String {
+        format!("{:04}-{:02}-{:02}", self.year, self.month, self.day)
+    }
     fn today_utc() -> JetDate {
         // Seconds since Unix epoch ÷ 86400 days.
         let secs = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) as i64;
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0) as i64;
         let days_since_1970 = secs / 86400;
         let epoch = JetDate::new(1970, 1, 1).to_day_number();
         JetDate::from_day_number(epoch + days_since_1970)
     }
 }
 impl JetShow for JetDate {
-    fn jet_show(&self) -> String { self.to_string_fmt() }
+    fn jet_show(&self) -> String {
+        self.to_string_fmt()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
-struct JetDateTime { secs: i64 } // seconds since Unix epoch (UTC)
+struct JetLocalTime {
+    hour: i64,
+    minute: i64,
+    second: i64,
+}
+impl JetLocalTime {
+    fn new(hour: i64, minute: i64, second: i64) -> Self {
+        JetLocalTime {
+            hour: hour.clamp(0, 23),
+            minute: minute.clamp(0, 59),
+            second: second.clamp(0, 59),
+        }
+    }
+    fn parse(s: &str) -> Result<JetLocalTime, String> {
+        let parts: Vec<&str> = s.splitn(3, ':').collect();
+        if parts.len() != 3 {
+            return Err(format!("invalid time: {}", s));
+        }
+        let h = parts[0]
+            .parse::<i64>()
+            .map_err(|_| format!("bad hour: {}", parts[0]))?;
+        let m = parts[1]
+            .parse::<i64>()
+            .map_err(|_| format!("bad minute: {}", parts[1]))?;
+        let sec = parts[2]
+            .parse::<i64>()
+            .map_err(|_| format!("bad second: {}", parts[2]))?;
+        if h < 0 || h > 23 || m < 0 || m > 59 || sec < 0 || sec > 59 {
+            return Err(format!("time out of range: {}", s));
+        }
+        Ok(Self::new(h, m, sec))
+    }
+    fn hour(&self) -> i64 {
+        self.hour
+    }
+    fn minute(&self) -> i64 {
+        self.minute
+    }
+    fn second(&self) -> i64 {
+        self.second
+    }
+    fn to_seconds(&self) -> i64 {
+        self.hour * 3600 + self.minute * 60 + self.second
+    }
+    fn to_string_fmt(&self) -> String {
+        format!("{:02}:{:02}:{:02}", self.hour, self.minute, self.second)
+    }
+}
+impl JetShow for JetLocalTime {
+    fn jet_show(&self) -> String {
+        self.to_string_fmt()
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct JetPeriod {
+    years: i64,
+    months: i64,
+    days: i64,
+}
+impl JetPeriod {
+    fn new(years: i64, months: i64, days: i64) -> Self {
+        JetPeriod {
+            years,
+            months,
+            days,
+        }
+    }
+    fn days(n: i64) -> Self {
+        Self::new(0, 0, n)
+    }
+    fn months(n: i64) -> Self {
+        Self::new(0, n, 0)
+    }
+    fn years(n: i64) -> Self {
+        Self::new(n, 0, 0)
+    }
+    fn to_string_fmt(&self) -> String {
+        format!("P{}Y{}M{}D", self.years, self.months, self.days)
+    }
+}
+impl JetShow for JetPeriod {
+    fn jet_show(&self) -> String {
+        self.to_string_fmt()
+    }
+}
+
+#[derive(Clone, Debug)]
+struct JetInstant {
+    start: std::time::Instant,
+}
+impl JetInstant {
+    fn now() -> Self {
+        JetInstant {
+            start: std::time::Instant::now(),
+        }
+    }
+    fn elapsed_millis(&self) -> i64 {
+        self.start.elapsed().as_millis() as i64
+    }
+}
+impl PartialEq for JetInstant {
+    fn eq(&self, other: &Self) -> bool {
+        self.start == other.start
+    }
+}
+impl JetShow for JetInstant {
+    fn jet_show(&self) -> String {
+        "Instant".to_string()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct JetDateTime {
+    secs: i64,
+} // seconds since Unix epoch (UTC)
 impl JetDateTime {
-    fn from_timestamp(secs: i64) -> Self { JetDateTime { secs } }
+    fn from_timestamp(secs: i64) -> Self {
+        JetDateTime { secs }
+    }
     fn now() -> Self {
         let s = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) as i64;
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0) as i64;
         JetDateTime { secs: s }
     }
     fn date(&self) -> JetDate {
@@ -373,22 +728,426 @@ impl JetDateTime {
         let epoch = JetDate::new(1970, 1, 1).to_day_number();
         JetDate::from_day_number(epoch + days)
     }
-    fn hour(&self) -> i64 { self.secs.div_euclid(3600) % 24 }
-    fn minute(&self) -> i64 { self.secs.div_euclid(60) % 60 }
-    fn second(&self) -> i64 { self.secs.rem_euclid(60) }
-    fn to_timestamp(&self) -> i64 { self.secs }
+    fn time(&self) -> JetLocalTime {
+        let sec = self.secs.rem_euclid(86400);
+        JetLocalTime::new(sec / 3600, (sec / 60) % 60, sec % 60)
+    }
+    fn hour(&self) -> i64 {
+        self.time().hour
+    }
+    fn minute(&self) -> i64 {
+        self.time().minute
+    }
+    fn second(&self) -> i64 {
+        self.secs.rem_euclid(60)
+    }
+    fn to_timestamp(&self) -> i64 {
+        self.secs
+    }
+    fn to_unix_ms(&self) -> i64 {
+        self.secs.saturating_mul(1000)
+    }
+    fn from_unix_ms(ms: i64) -> Self {
+        JetDateTime {
+            secs: ms.div_euclid(1000),
+        }
+    }
+    fn parse_rfc3339(s: &str) -> Result<Self, String> {
+        let (date_part, rest) = s
+            .split_once('T')
+            .ok_or_else(|| format!("invalid RFC3339 datetime: {}", s))?;
+        let date = JetDate::parse(date_part)?;
+        let zone_pos = rest
+            .find('Z')
+            .or_else(|| rest.rfind('+'))
+            .or_else(|| {
+                rest.get(1..)
+                    .and_then(|tail| tail.rfind('-').map(|i| i + 1))
+            })
+            .ok_or_else(|| format!("RFC3339 datetime needs Z or an offset: {}", s))?;
+        let (time_part, zone_part) = rest.split_at(zone_pos);
+        let clean_time = time_part.split('.').next().unwrap_or(time_part);
+        let time = JetLocalTime::parse(clean_time)?;
+        let offset = if zone_part == "Z" {
+            0
+        } else {
+            let sign = if zone_part.starts_with('-') { -1 } else { 1 };
+            let z = &zone_part[1..];
+            let (hh, mm) = z
+                .split_once(':')
+                .ok_or_else(|| format!("bad RFC3339 offset: {}", zone_part))?;
+            let h = hh
+                .parse::<i64>()
+                .map_err(|_| format!("bad RFC3339 offset hour: {}", hh))?;
+            let m = mm
+                .parse::<i64>()
+                .map_err(|_| format!("bad RFC3339 offset minute: {}", mm))?;
+            sign * (h * 3600 + m * 60)
+        };
+        Ok(JetDateTime {
+            secs: jet_time_utc_from_parts(&date, &time) - offset,
+        })
+    }
+    fn format_rfc3339(&self) -> String {
+        let d = self.date();
+        let t = self.time();
+        format!("{}T{}Z", d.to_string_fmt(), t.to_string_fmt())
+    }
+    fn format_pattern(&self, pattern: &String) -> String {
+        jet_time_format_pattern(pattern, &self.date(), &self.time(), None)
+    }
+    fn plus_duration_ms(&self, ms: i64) -> JetDateTime {
+        JetDateTime {
+            secs: self.secs.saturating_add(ms.div_euclid(1000)),
+        }
+    }
+    fn truncate(&self, unit: &String) -> JetDateTime {
+        let size = match unit.as_str() {
+            "day" => 86400,
+            "hour" => 3600,
+            "minute" => 60,
+            _ => 1,
+        };
+        JetDateTime {
+            secs: self.secs.div_euclid(size) * size,
+        }
+    }
+    fn round(&self, unit: &String) -> JetDateTime {
+        let size = match unit.as_str() {
+            "day" => 86400,
+            "hour" => 3600,
+            "minute" => 60,
+            _ => 1,
+        };
+        JetDateTime {
+            secs: self.secs.saturating_add(size / 2).div_euclid(size) * size,
+        }
+    }
+    fn in_zone(&self, zone: &JetZone) -> JetZonedDateTime {
+        JetZonedDateTime {
+            instant: self.clone(),
+            zone: zone.clone(),
+        }
+    }
     fn to_string_fmt(&self) -> String {
         let d = self.date();
-        format!("{} {:02}:{:02}:{:02} UTC", d.to_string_fmt(), self.hour(), self.minute(), self.second())
+        format!(
+            "{} {:02}:{:02}:{:02} UTC",
+            d.to_string_fmt(),
+            self.hour(),
+            self.minute(),
+            self.second()
+        )
     }
 }
 impl JetShow for JetDateTime {
-    fn jet_show(&self) -> String { self.to_string_fmt() }
+    fn jet_show(&self) -> String {
+        self.to_string_fmt()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct JetTtInfo {
+    offset: i64,
+    is_dst: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct JetZone {
+    name: String,
+    transitions: Vec<(i64, usize)>,
+    infos: Vec<JetTtInfo>,
+}
+impl JetZone {
+    fn utc() -> Self {
+        JetZone {
+            name: "UTC".to_string(),
+            transitions: Vec::new(),
+            infos: vec![JetTtInfo {
+                offset: 0,
+                is_dst: false,
+            }],
+        }
+    }
+    fn named(name: &String) -> Result<Self, String> {
+        if name == "UTC" || name == "Etc/UTC" || name == "Z" {
+            return Ok(Self::utc());
+        }
+        if name.contains("..") || name.starts_with('/') || name.starts_with('\\') {
+            return Err(format!("invalid time zone name: {}", name));
+        }
+        let rel = name
+            .trim_start_matches("posix/")
+            .trim_start_matches("right/");
+        let mut roots = Vec::new();
+        if let Some(dir) = std::env::var_os("JET_TZDB_DIR") {
+            roots.push(std::path::PathBuf::from(dir));
+        }
+        if let Some(dir) = std::env::var_os("TZDIR") {
+            roots.push(std::path::PathBuf::from(dir));
+        }
+        if let Some(root) = std::env::var_os("JET_ROOT") {
+            roots.push(std::path::PathBuf::from(root).join("corelib/tzdb"));
+        }
+        roots.push(std::path::PathBuf::from("corelib/tzdb"));
+        roots.push(std::path::PathBuf::from("/usr/share/zoneinfo"));
+        roots.push(std::path::PathBuf::from("/usr/share/lib/zoneinfo"));
+        roots.push(std::path::PathBuf::from("/etc/zoneinfo"));
+        for base in roots {
+            let path = base.join(rel);
+            if let Ok(bytes) = std::fs::read(&path) {
+                return Self::parse_tzif(name.clone(), &bytes);
+            }
+        }
+        Err(format!(
+            "unknown IANA time zone: {}; set JET_TZDB_DIR or TZDIR to an IANA TZif database",
+            name
+        ))
+    }
+    fn parse_tzif(name: String, bytes: &[u8]) -> Result<Self, String> {
+        fn be_u32(bytes: &[u8], i: usize) -> Result<u32, String> {
+            let chunk = bytes
+                .get(i..i + 4)
+                .ok_or_else(|| "truncated tzif".to_string())?;
+            Ok(u32::from_be_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+        }
+        fn be_i32(bytes: &[u8], i: usize) -> Result<i32, String> {
+            Ok(be_u32(bytes, i)? as i32)
+        }
+        fn be_i64(bytes: &[u8], i: usize) -> Result<i64, String> {
+            let c = bytes
+                .get(i..i + 8)
+                .ok_or_else(|| "truncated tzif".to_string())?;
+            Ok(i64::from_be_bytes([
+                c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7],
+            ]))
+        }
+        fn header(bytes: &[u8], base: usize) -> Result<(u8, [usize; 6]), String> {
+            if bytes.get(base..base + 4) != Some(b"TZif") {
+                return Err("invalid tzif header".to_string());
+            }
+            let version = *bytes.get(base + 4).unwrap_or(&0);
+            let mut counts = [0usize; 6];
+            for i in 0..6 {
+                counts[i] = be_u32(bytes, base + 20 + i * 4)? as usize;
+            }
+            Ok((version, counts))
+        }
+        let (version, c1) = header(bytes, 0)?;
+        let block32 = c1[3] * 4 + c1[3] + c1[4] * 6 + c1[5] + c1[2] * 8 + c1[0] + c1[1];
+        let mut base = 44;
+        let mut wide = false;
+        if version == b'2' || version == b'3' || version == b'4' {
+            base = 44 + block32;
+            let _ = header(bytes, base)?;
+            base += 44;
+            wide = true;
+        }
+        let counts = if wide {
+            header(bytes, base - 44)?.1
+        } else {
+            c1
+        };
+        let timecnt = counts[3];
+        let typecnt = counts[4].max(1);
+        let time_size = if wide { 8 } else { 4 };
+        let mut pos = base;
+        let mut times = Vec::new();
+        for _ in 0..timecnt {
+            let t = if wide {
+                be_i64(bytes, pos)?
+            } else {
+                be_i32(bytes, pos)? as i64
+            };
+            times.push(t);
+            pos += time_size;
+        }
+        let idxs = bytes
+            .get(pos..pos + timecnt)
+            .ok_or_else(|| "truncated tzif index".to_string())?;
+        pos += timecnt;
+        let mut infos = Vec::new();
+        for _ in 0..typecnt {
+            let offset = be_i32(bytes, pos)? as i64;
+            let is_dst = *bytes.get(pos + 4).unwrap_or(&0) != 0;
+            infos.push(JetTtInfo { offset, is_dst });
+            pos += 6;
+        }
+        if infos.is_empty() {
+            infos.push(JetTtInfo {
+                offset: 0,
+                is_dst: false,
+            });
+        }
+        let mut transitions = Vec::new();
+        for (t, idx) in times.into_iter().zip(idxs.iter().copied()) {
+            transitions.push((t, (idx as usize).min(infos.len() - 1)));
+        }
+        Ok(JetZone {
+            name,
+            transitions,
+            infos,
+        })
+    }
+    fn name(&self) -> String {
+        self.name.clone()
+    }
+    fn offset_at_utc(&self, secs: i64) -> i64 {
+        if self.transitions.is_empty() {
+            return self.infos[0].offset;
+        }
+        let mut lo = 0usize;
+        let mut hi = self.transitions.len();
+        while lo < hi {
+            let mid = (lo + hi) / 2;
+            if self.transitions[mid].0 <= secs {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+        let idx = if lo == 0 {
+            self.transitions.first().map(|(_, i)| *i).unwrap_or(0)
+        } else {
+            self.transitions[lo - 1].1
+        };
+        self.infos[idx].offset
+    }
+    fn local_parts(&self, secs: i64) -> (JetDate, JetLocalTime, i64) {
+        let offset = self.offset_at_utc(secs);
+        let local = JetDateTime::from_timestamp(secs.saturating_add(offset));
+        (local.date(), local.time(), offset)
+    }
+    fn local_to_utc(&self, date: &JetDate, time: &JetLocalTime) -> i64 {
+        let mut guess = jet_time_utc_from_parts(date, time);
+        for _ in 0..4 {
+            let next =
+                jet_time_utc_from_parts(date, time).saturating_sub(self.offset_at_utc(guess));
+            if next == guess {
+                break;
+            }
+            guess = next;
+        }
+        guess
+    }
+}
+impl JetShow for JetZone {
+    fn jet_show(&self) -> String {
+        self.name.clone()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct JetZonedDateTime {
+    instant: JetDateTime,
+    zone: JetZone,
+}
+impl JetZonedDateTime {
+    fn now(zone: &JetZone) -> Self {
+        JetDateTime::now().in_zone(zone)
+    }
+    fn from_local(date: &JetDate, time: &JetLocalTime, zone: &JetZone) -> Self {
+        JetZonedDateTime {
+            instant: JetDateTime::from_timestamp(zone.local_to_utc(date, time)),
+            zone: zone.clone(),
+        }
+    }
+    fn date(&self) -> JetDate {
+        self.zone.local_parts(self.instant.secs).0
+    }
+    fn time(&self) -> JetLocalTime {
+        self.zone.local_parts(self.instant.secs).1
+    }
+    fn offset_seconds(&self) -> i64 {
+        self.zone.local_parts(self.instant.secs).2
+    }
+    fn to_datetime(&self) -> JetDateTime {
+        self.instant.clone()
+    }
+    fn zone(&self) -> JetZone {
+        self.zone.clone()
+    }
+    fn add_duration_ms(&self, ms: i64) -> JetZonedDateTime {
+        JetZonedDateTime {
+            instant: self.instant.plus_duration_ms(ms),
+            zone: self.zone.clone(),
+        }
+    }
+    fn add_period(&self, p: &JetPeriod) -> JetZonedDateTime {
+        let date = self.date().add_period(p);
+        let time = self.time();
+        JetZonedDateTime::from_local(&date, &time, &self.zone)
+    }
+    fn format_pattern(&self, pattern: &String) -> String {
+        let date = self.date();
+        let time = self.time();
+        jet_time_format_pattern(
+            pattern,
+            &date,
+            &time,
+            Some((&self.zone, self.offset_seconds())),
+        )
+    }
+    fn to_string_fmt(&self) -> String {
+        let off = self.offset_seconds();
+        format!(
+            "{} {} {} ({})",
+            self.date().to_string_fmt(),
+            self.time().to_string_fmt(),
+            self.zone.name,
+            jet_time_offset_string(off)
+        )
+    }
+}
+impl JetShow for JetZonedDateTime {
+    fn jet_show(&self) -> String {
+        self.to_string_fmt()
+    }
+}
+
+fn jet_time_utc_from_parts(date: &JetDate, time: &JetLocalTime) -> i64 {
+    let epoch = JetDate::new(1970, 1, 1).to_day_number();
+    (date.to_day_number() - epoch)
+        .saturating_mul(86400)
+        .saturating_add(time.to_seconds())
+}
+
+fn jet_time_offset_string(offset: i64) -> String {
+    let sign = if offset < 0 { '-' } else { '+' };
+    let abs = offset.abs();
+    format!("{}{:02}:{:02}", sign, abs / 3600, (abs / 60) % 60)
+}
+
+fn jet_time_format_pattern(
+    pattern: &String,
+    date: &JetDate,
+    time: &JetLocalTime,
+    zone: Option<(&JetZone, i64)>,
+) -> String {
+    let mut out = pattern.clone();
+    let weekday =
+        ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][(date.iso_weekday() - 1) as usize];
+    out = out.replace("yyyy", &format!("{:04}", date.year));
+    out = out.replace("DDD", &format!("{:03}", date.day_of_year()));
+    out = out.replace("EEE", weekday);
+    out = out.replace("MM", &format!("{:02}", date.month));
+    out = out.replace("dd", &format!("{:02}", date.day));
+    out = out.replace("HH", &format!("{:02}", time.hour));
+    out = out.replace("mm", &format!("{:02}", time.minute));
+    out = out.replace("ss", &format!("{:02}", time.second));
+    if let Some((z, off)) = zone {
+        out = out.replace("VV", &z.name);
+        out = out.replace("XXX", &jet_time_offset_string(off));
+    }
+    out
 }
 
 // D-AUTOPAR1=A: explicit parallel list adapters using std::thread::scope (I6-safe).
 fn jet_list_par_map<T, U, F>(xs: Vec<T>, f: F) -> Vec<U>
-where T: Send + Clone, U: Send, F: Fn(T) -> U + Sync
+where
+    T: Send + Clone,
+    U: Send,
+    F: Fn(T) -> U + Sync,
 {
     std::thread::scope(|s| {
         let handles: Vec<_> = xs.into_iter().map(|x| s.spawn(|| f(x))).collect();
@@ -396,21 +1155,28 @@ where T: Send + Clone, U: Send, F: Fn(T) -> U + Sync
     })
 }
 fn jet_list_par_filter<T, F>(xs: Vec<T>, f: F) -> Vec<T>
-where T: Send + Clone, F: Fn(T) -> bool + Sync
+where
+    T: Send + Clone,
+    F: Fn(T) -> bool + Sync,
 {
     // Clone each element for the predicate thread; keep original for result.
     let pairs: Vec<(T, T)> = xs.into_iter().map(|x| (x.clone(), x)).collect();
     std::thread::scope(|s| {
         let (originals, clones): (Vec<T>, Vec<T>) = pairs.into_iter().unzip();
         let handles: Vec<_> = clones.into_iter().map(|x| s.spawn(|| f(x))).collect();
-        originals.into_iter().zip(handles).filter_map(|(x, h)| if h.join().unwrap() { Some(x) } else { None }).collect()
+        originals
+            .into_iter()
+            .zip(handles)
+            .filter_map(|(x, h)| if h.join().unwrap() { Some(x) } else { None })
+            .collect()
     })
 }
 // par_fold(init, f) — sequential execution; parallelism requires an associative combiner
 // the caller cannot provide separately. Semantically correct; future parallel version
 // would accept a combine: Fn(U, U) -> U argument.
 fn jet_list_par_fold<T, U, F>(xs: Vec<T>, init: U, f: F) -> U
-where F: Fn(U, T) -> U
+where
+    F: Fn(U, T) -> U,
 {
     xs.into_iter().fold(init, f)
 }
@@ -450,13 +1216,19 @@ fn jet_perf_reset_fidelity() {
 // FNV-1a: deterministic, I6-safe, no external crates.
 fn fnv1a(data: &[u8]) -> u64 {
     let mut hash: u64 = 14695981039346656037;
-    for &b in data { hash ^= b as u64; hash = hash.wrapping_mul(1099511628211); }
+    for &b in data {
+        hash ^= b as u64;
+        hash = hash.wrapping_mul(1099511628211);
+    }
     hash
 }
 // Second independent hash (FNV with a different offset) for multi-hash sketches.
 fn fnv1a_h2(data: &[u8]) -> u64 {
     let mut hash: u64 = 0xcbf29ce484222325u64.wrapping_add(0xdeadbeef);
-    for &b in data { hash ^= b as u64; hash = hash.wrapping_mul(1099511628211); }
+    for &b in data {
+        hash ^= b as u64;
+        hash = hash.wrapping_mul(1099511628211);
+    }
     hash
 }
 
@@ -469,11 +1241,17 @@ impl JetHyperLogLog {
     }
     fn add(&self, item: &str) {
         let h = fnv1a(item.as_bytes());
-        let reg = (h & 0xFF) as usize;          // bottom 8 bits → register index
-        let rest = h >> 8;                       // remaining 56 bits
-        let lz = if rest == 0 { 57u8 } else { rest.leading_zeros() as u8 + 1 };
+        let reg = (h & 0xFF) as usize; // bottom 8 bits → register index
+        let rest = h >> 8; // remaining 56 bits
+        let lz = if rest == 0 {
+            57u8
+        } else {
+            rest.leading_zeros() as u8 + 1
+        };
         let mut regs = self.0.lock().unwrap();
-        if lz > regs[reg] { regs[reg] = lz; }
+        if lz > regs[reg] {
+            regs[reg] = lz;
+        }
     }
     fn count(&self) -> i64 {
         let regs = self.0.lock().unwrap();
@@ -491,7 +1269,9 @@ impl JetHyperLogLog {
     }
 }
 impl JetShow for JetHyperLogLog {
-    fn jet_show(&self) -> String { format!("HyperLogLog(count={})", self.count()) }
+    fn jet_show(&self) -> String {
+        format!("HyperLogLog(count={})", self.count())
+    }
 }
 
 // TDigest — quantile estimator (~±0.5% error). Centroid merging sketch.
@@ -511,7 +1291,11 @@ impl JetTDigest {
         let mut merged: Vec<(f64, f64)> = Vec::with_capacity(cs.len());
         let mut cum = 0.0f64;
         for &(mean, weight) in cs.iter() {
-            if merged.is_empty() { merged.push((mean, weight)); cum += weight; continue; }
+            if merged.is_empty() {
+                merged.push((mean, weight));
+                cum += weight;
+                continue;
+            }
             let last = merged.last_mut().unwrap();
             let q = cum / total;
             let limit = 4.0 * total * q * (1.0 - q) / Self::DELTA;
@@ -520,26 +1304,33 @@ impl JetTDigest {
                 last.0 = (last.0 * last.1 + mean * weight) / new_w;
                 last.1 = new_w;
             } else {
-                merged.push((mean, weight)); cum += weight;
+                merged.push((mean, weight));
+                cum += weight;
             }
         }
         *cs = merged;
     }
     fn quantile(&self, q: f64) -> f64 {
         let cs = self.0.lock().unwrap();
-        if cs.is_empty() { return 0.0; }
+        if cs.is_empty() {
+            return 0.0;
+        }
         let total: f64 = cs.iter().map(|(_, w)| w).sum();
         let target = q * total;
         let mut cum = 0.0f64;
         for &(mean, weight) in cs.iter() {
             cum += weight;
-            if cum >= target { return mean; }
+            if cum >= target {
+                return mean;
+            }
         }
         cs.last().unwrap().0
     }
 }
 impl JetShow for JetTDigest {
-    fn jet_show(&self) -> String { "TDigest".to_string() }
+    fn jet_show(&self) -> String {
+        "TDigest".to_string()
+    }
 }
 
 // CountMinSketch — frequency estimator. 4 rows × 256 cols; FNV + offset.
@@ -548,7 +1339,9 @@ const CMS_COLS: usize = 256;
 struct JetCountMinSketch(std::sync::Arc<std::sync::Mutex<[[u32; CMS_COLS]; 4]>>);
 impl JetCountMinSketch {
     fn new() -> Self {
-        JetCountMinSketch(std::sync::Arc::new(std::sync::Mutex::new([[0u32; CMS_COLS]; 4])))
+        JetCountMinSketch(std::sync::Arc::new(std::sync::Mutex::new(
+            [[0u32; CMS_COLS]; 4],
+        )))
     }
     fn add(&self, key: &str) {
         let bytes = key.as_bytes();
@@ -565,34 +1358,51 @@ impl JetCountMinSketch {
         let h1 = fnv1a(bytes);
         let h2 = fnv1a_h2(bytes);
         let tbl = self.0.lock().unwrap();
-        (0..4usize).map(|row| {
-            let col = ((h1.wrapping_add(h2.wrapping_mul(row as u64 + 1))) & 0xFF) as usize;
-            tbl[row][col]
-        }).min().unwrap() as i64
+        (0..4usize)
+            .map(|row| {
+                let col = ((h1.wrapping_add(h2.wrapping_mul(row as u64 + 1))) & 0xFF) as usize;
+                tbl[row][col]
+            })
+            .min()
+            .unwrap() as i64
     }
 }
 impl JetShow for JetCountMinSketch {
-    fn jet_show(&self) -> String { "CountMinSketch".to_string() }
+    fn jet_show(&self) -> String {
+        "CountMinSketch".to_string()
+    }
 }
 
 // ReservoirSampler — uniform random sample. Seeded xorshift64 PRNG (I6-safe).
 #[derive(Clone)]
 struct JetReservoirSampler(std::sync::Arc<std::sync::Mutex<JetReservoirInner>>);
-struct JetReservoirInner { capacity: usize, reservoir: Vec<String>, count: u64, rng: u64 }
+struct JetReservoirInner {
+    capacity: usize,
+    reservoir: Vec<String>,
+    count: u64,
+    rng: u64,
+}
 impl Clone for JetReservoirInner {
     fn clone(&self) -> Self {
         JetReservoirInner {
-            capacity: self.capacity, reservoir: self.reservoir.clone(),
-            count: self.count, rng: self.rng,
+            capacity: self.capacity,
+            reservoir: self.reservoir.clone(),
+            count: self.count,
+            rng: self.rng,
         }
     }
 }
 impl JetReservoirSampler {
     fn new(capacity: i64) -> Self {
         let cap = (capacity.max(1)) as usize;
-        JetReservoirSampler(std::sync::Arc::new(std::sync::Mutex::new(JetReservoirInner {
-            capacity: cap, reservoir: Vec::with_capacity(cap), count: 0, rng: 0xdeadbeef_cafebabe,
-        })))
+        JetReservoirSampler(std::sync::Arc::new(std::sync::Mutex::new(
+            JetReservoirInner {
+                capacity: cap,
+                reservoir: Vec::with_capacity(cap),
+                count: 0,
+                rng: 0xdeadbeef_cafebabe,
+            },
+        )))
     }
     fn add(&self, item: String) {
         let mut inner = self.0.lock().unwrap();
@@ -602,10 +1412,14 @@ impl JetReservoirSampler {
         } else {
             // xorshift64
             let mut x = inner.rng;
-            x ^= x << 13; x ^= x >> 7; x ^= x << 17;
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
             inner.rng = x;
             let j = (x % inner.count) as usize;
-            if j < inner.capacity { inner.reservoir[j] = item; }
+            if j < inner.capacity {
+                inner.reservoir[j] = item;
+            }
         }
     }
     fn sample(&self) -> Vec<String> {
@@ -613,7 +1427,9 @@ impl JetReservoirSampler {
     }
 }
 impl JetShow for JetReservoirSampler {
-    fn jet_show(&self) -> String { format!("ReservoirSampler(n={})", self.0.lock().unwrap().count) }
+    fn jet_show(&self) -> String {
+        format!("ReservoirSampler(n={})", self.0.lock().unwrap().count)
+    }
 }
 
 thread_local! {
@@ -646,7 +1462,10 @@ fn jet_panic(file: &str, line: u32, msg: &str) -> ! {
 #[allow(dead_code)] // only called from generated code that has a @Pre/@Post
 fn jet_contract_fail(file: &str, line: u32, clause_kw: &str, msg: &str) -> ! {
     if jet_scheduler_in_task() {
-        panic!("@{} contract failed: {} (at {}:{})", clause_kw, msg, file, line);
+        panic!(
+            "@{} contract failed: {} (at {}:{})",
+            clause_kw, msg, file, line
+        );
     }
     eprintln!("@{} contract failed: {}", clause_kw, msg);
     eprintln!("  --> {}:{}", file, line);
@@ -745,7 +1564,10 @@ fn jet_panic_rich(
 /// `From`/`to_error` conversion). In release builds this is a no-op.
 fn jet_trace_err<T, E>(r: Result<T, E>, file: &str, line: u32, fn_name: &str) -> Result<T, E> {
     if cfg!(debug_assertions) && r.is_err() {
-        eprintln!("error propagated from: {} ({}:{}) via ?", fn_name, file, line);
+        eprintln!(
+            "error propagated from: {} ({}:{}) via ?",
+            fn_name, file, line
+        );
     }
     r
 }
@@ -764,20 +1586,40 @@ fn jet_context<T, F: FnOnce() -> String>(r: Result<T, String>, msg: F) -> Result
 fn jet_index_vec<T: Clone>(xs: &[T], i: i64, file: &str, line: u32) -> T {
     let len = xs.len() as i64;
     if i < 0 || i >= len {
-        jet_panic(file, line, &format!("the list has {} items, so position {} doesn't exist", len, i));
+        jet_panic(
+            file,
+            line,
+            &format!(
+                "the list has {} items, so position {} doesn't exist",
+                len, i
+            ),
+        );
     }
     xs[i as usize].clone()
 }
 fn jet_unpack_vec<T: Clone>(xs: &[T], want: usize, i: usize, file: &str, line: u32) -> T {
     if xs.len() != want {
-        jet_panic(file, line, &format!("this pattern needs exactly {} item{}, but the list has {}", want, if want == 1 { "" } else { "s" }, xs.len()));
+        jet_panic(
+            file,
+            line,
+            &format!(
+                "this pattern needs exactly {} item{}, but the list has {}",
+                want,
+                if want == 1 { "" } else { "s" },
+                xs.len()
+            ),
+        );
     }
     xs[i].clone()
 }
 fn jet_slice_vec<T: Clone>(xs: &[T], a: i64, b: i64, file: &str, line: u32) -> Vec<T> {
     let len = xs.len() as i64;
     if a < 0 || b < 0 || a > b || b >= len {
-        jet_panic(file, line, &format!("can't slice {} items from {} to {} (inclusive)", len, a, b));
+        jet_panic(
+            file,
+            line,
+            &format!("can't slice {} items from {} to {} (inclusive)", len, a, b),
+        );
     }
     xs[a as usize..=b as usize].to_vec()
 }
@@ -789,24 +1631,39 @@ fn jet_slice_vec<T: Clone>(xs: &[T], a: i64, b: i64, file: &str, line: u32) -> V
 fn jet_view_new<'a, T>(xs: &'a [T], a: i64, b: i64, file: &str, line: u32) -> &'a [T] {
     let len = xs.len() as i64;
     if a < 0 || b < 0 || a > b || b >= len {
-        jet_panic(file, line, &format!("can't view {} items from {} to {} (inclusive)", len, a, b));
+        jet_panic(
+            file,
+            line,
+            &format!("can't view {} items from {} to {} (inclusive)", len, a, b),
+        );
     }
     &xs[a as usize..=b as usize]
 }
 // D-DYNARRAY1: View<T> read-only closure surface. `xs` is already a borrow
 // (never `.clone()`d to an owned `Vec` first, unlike the `jet_list_*` family
 // above) — folding/mapping a view touches no allocation beyond the result.
-fn jet_view_fold<T: Clone, U, F>(xs: &[T], init: U, f: F) -> U where F: Fn(U, T) -> U {
+fn jet_view_fold<T: Clone, U, F>(xs: &[T], init: U, f: F) -> U
+where
+    F: Fn(U, T) -> U,
+{
     let mut acc = init;
     for x in xs {
         acc = f(acc, x.clone());
     }
     acc
 }
-fn jet_view_map<T: Clone, U, F>(xs: &[T], f: F) -> Vec<U> where F: Fn(T) -> U {
+fn jet_view_map<T: Clone, U, F>(xs: &[T], f: F) -> Vec<U>
+where
+    F: Fn(T) -> U,
+{
     xs.iter().cloned().map(f).collect()
 }
-fn jet_index_map<K: Ord + Clone, V: Clone>(m: &std::collections::BTreeMap<K, V>, k: &K, file: &str, line: u32) -> V {
+fn jet_index_map<K: Ord + Clone, V: Clone>(
+    m: &std::collections::BTreeMap<K, V>,
+    k: &K,
+    file: &str,
+    line: u32,
+) -> V {
     match m.get(k) {
         Some(v) => v.clone(),
         None => jet_panic(file, line, &format!("the map has no entry for this key")),
@@ -818,12 +1675,23 @@ fn jet_map_insert<K: Ord, V>(m: &mut std::collections::BTreeMap<K, V>, k: K, v: 
 fn jet_list_remove<T: Clone>(xs: &mut Vec<T>, i: i64, file: &str, line: u32) -> T {
     let len = xs.len() as i64;
     if i < 0 || i >= len {
-        jet_panic(file, line, &format!("the list has {} items, so position {} doesn't exist", len, i));
+        jet_panic(
+            file,
+            line,
+            &format!(
+                "the list has {} items, so position {} doesn't exist",
+                len, i
+            ),
+        );
     }
     xs.remove(i as usize)
 }
-fn jet_char_len(s: &String) -> i64 { s.chars().count() as i64 }
-fn jet_string_split(s: &String, sep: &str) -> Vec<String> { s.split(sep).map(|x| x.to_string()).collect() }
+fn jet_char_len(s: &String) -> i64 {
+    s.chars().count() as i64
+}
+fn jet_string_split(s: &String, sep: &str) -> Vec<String> {
+    s.split(sep).map(|x| x.to_string()).collect()
+}
 // D-STR-AFTER1: first-occurrence substring split. `sep` absent -> the whole
 // original string (both sides agree, mirroring `.replace`'s no-match-is-identity
 // convention — no `Option`/empty-string special case to unwrap).
@@ -877,50 +1745,349 @@ fn jet_html_escape(s: &str) -> String {
     }
     out
 }
-fn jet_string_lines(s: &String) -> Vec<String> { s.lines().map(|x| x.to_string()).collect() }
+fn jet_string_lines(s: &String) -> Vec<String> {
+    s.lines().map(|x| x.to_string()).collect()
+}
 fn jet_string_slice(s: &String, a: i64, b: i64, file: &str, line: u32) -> String {
     let chars: Vec<char> = s.chars().collect();
     let len = chars.len() as i64;
     if a < 0 || b < 0 || a > b || b >= len {
-        jet_panic(file, line, &format!("can't slice {} characters from {} to {} (inclusive)", len, a, b));
+        jet_panic(
+            file,
+            line,
+            &format!(
+                "can't slice {} characters from {} to {} (inclusive)",
+                len, a, b
+            ),
+        );
     }
     chars[a as usize..=b as usize].iter().collect()
 }
-fn jet_list_map<T, U, F>(xs: Vec<T>, f: F) -> Vec<U> where F: Fn(T) -> U {
+fn jet_list_map<T, U, F>(xs: Vec<T>, f: F) -> Vec<U>
+where
+    F: Fn(T) -> U,
+{
     xs.into_iter().map(f).collect()
 }
-fn jet_list_map_mut<T, U, F>(xs: Vec<T>, mut f: F) -> Vec<U> where F: FnMut(T) -> U {
+fn jet_list_map_mut<T, U, F>(xs: Vec<T>, mut f: F) -> Vec<U>
+where
+    F: FnMut(T) -> U,
+{
     xs.into_iter().map(|x| f(x)).collect()
 }
-fn jet_list_filter<T: Clone, F>(xs: Vec<T>, f: F) -> Vec<T> where F: Fn(T) -> bool {
+fn jet_list_filter<T: Clone, F>(xs: Vec<T>, f: F) -> Vec<T>
+where
+    F: Fn(T) -> bool,
+{
     xs.into_iter().filter(|x| f(x.clone())).collect()
 }
-fn jet_list_each<T, F>(xs: Vec<T>, f: F) where F: Fn(T) {
-    for x in xs { f(x); }
+fn jet_list_each<T, F>(xs: Vec<T>, f: F)
+where
+    F: Fn(T),
+{
+    for x in xs {
+        f(x);
+    }
 }
-fn jet_list_each_ref<T, F>(xs: &Vec<T>, f: F) where F: Fn(&T) {
-    for x in xs.iter() { f(x); }
+fn jet_list_each_ref<T, F>(xs: &Vec<T>, f: F)
+where
+    F: Fn(&T),
+{
+    for x in xs.iter() {
+        f(x);
+    }
 }
-fn jet_list_each_mut<T, F>(xs: Vec<T>, mut f: F) where F: FnMut(T) {
-    for x in xs { f(x); }
+fn jet_list_each_mut<T, F>(xs: Vec<T>, mut f: F)
+where
+    F: FnMut(T),
+{
+    for x in xs {
+        f(x);
+    }
 }
-fn jet_list_find<T: Clone, F>(xs: Vec<T>, f: F) -> Option<T> where F: Fn(T) -> bool {
+fn jet_list_find<T: Clone, F>(xs: Vec<T>, f: F) -> Option<T>
+where
+    F: Fn(T) -> bool,
+{
     xs.into_iter().find(|x| f(x.clone()))
 }
-fn jet_list_any<T: Clone, F>(xs: Vec<T>, f: F) -> bool where F: Fn(T) -> bool {
+fn jet_list_any<T: Clone, F>(xs: Vec<T>, f: F) -> bool
+where
+    F: Fn(T) -> bool,
+{
     xs.iter().any(|x| f(x.clone()))
 }
-fn jet_list_all<T: Clone, F>(xs: Vec<T>, f: F) -> bool where F: Fn(T) -> bool {
+fn jet_list_all<T: Clone, F>(xs: Vec<T>, f: F) -> bool
+where
+    F: Fn(T) -> bool,
+{
     xs.iter().all(|x| f(x.clone()))
 }
-fn jet_list_sort_by<T: Clone, K: Ord, F>(xs: &mut Vec<T>, f: F) where F: Fn(T) -> K {
+fn jet_list_sort_by<T: Clone, K: Ord, F>(xs: &mut Vec<T>, f: F)
+where
+    F: Fn(T) -> K,
+{
     xs.sort_by_key(|x| f(x.clone()));
 }
-fn jet_list_reduce<T, U, F>(xs: Vec<T>, init: U, f: F) -> U where F: Fn(U, T) -> U {
+fn jet_list_reduce<T, U, F>(xs: Vec<T>, init: U, f: F) -> U
+where
+    F: Fn(U, T) -> U,
+{
     xs.into_iter().fold(init, f)
 }
-fn jet_map_each<K: Ord, V, F>(m: std::collections::BTreeMap<K, V>, f: F) where F: Fn(K, V) {
-    for (k, v) in m { f(k, v); }
+fn jet_map_each<K: Ord, V, F>(m: std::collections::BTreeMap<K, V>, f: F)
+where
+    F: Fn(K, V),
+{
+    for (k, v) in m {
+        f(k, v);
+    }
+}
+// ── D-ITERTOOLS1=A: expanded collection/runtime handles ─────────────────────
+#[derive(Clone)]
+struct JetLru<K, V> {
+    cap: usize,
+    entries: Vec<(K, V)>,
+}
+
+impl<K: Eq + Clone, V: Clone> JetLru<K, V> {
+    fn new(capacity: i64) -> Self {
+        Self {
+            cap: capacity.max(0) as usize,
+            entries: Vec::new(),
+        }
+    }
+    fn put(&mut self, key: K, value: V) {
+        if self.cap == 0 {
+            return;
+        }
+        if let Some(i) = self.entries.iter().position(|(k, _)| *k == key) {
+            self.entries.remove(i);
+        }
+        self.entries.insert(0, (key, value));
+        if self.entries.len() > self.cap {
+            self.entries.pop();
+        }
+    }
+    fn get(&mut self, key: &K) -> Option<V> {
+        let i = self.entries.iter().position(|(k, _)| k == key)?;
+        let (k, v) = self.entries.remove(i);
+        let out = v.clone();
+        self.entries.insert(0, (k, v));
+        Some(out)
+    }
+    fn remove(&mut self, key: &K) -> Option<V> {
+        let i = self.entries.iter().position(|(k, _)| k == key)?;
+        Some(self.entries.remove(i).1)
+    }
+    fn contains_key(&self, key: &K) -> bool {
+        self.entries.iter().any(|(k, _)| k == key)
+    }
+    fn keys(&self) -> Vec<K> {
+        self.entries.iter().map(|(k, _)| k.clone()).collect()
+    }
+    fn len(&self) -> usize {
+        self.entries.len()
+    }
+    fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+    fn capacity(&self) -> i64 {
+        self.cap as i64
+    }
+    fn clear(&mut self) {
+        self.entries.clear();
+    }
+}
+
+impl<K: JetShow, V: JetShow> JetShow for JetLru<K, V> {
+    fn jet_show(&self) -> String {
+        let parts: Vec<String> = self
+            .entries
+            .iter()
+            .map(|(k, v)| format!("{}: {}", k.jet_show(), v.jet_show()))
+            .collect();
+        format!("[:{}]", parts.join(", "))
+    }
+}
+impl<K: JetDisplay, V: JetDisplay> JetDisplay for JetLru<K, V> {
+    fn jet_display(&self) -> String {
+        let parts: Vec<String> = self
+            .entries
+            .iter()
+            .map(|(k, v)| format!("{}: {}", k.jet_display(), v.jet_display()))
+            .collect();
+        format!("[:{}]", parts.join(", "))
+    }
+}
+impl<K: JetDebug, V: JetDebug> JetDebug for JetLru<K, V> {
+    fn jet_debug(&self) -> String {
+        let parts: Vec<String> = self
+            .entries
+            .iter()
+            .map(|(k, v)| format!("{}: {}", k.jet_debug(), v.jet_debug()))
+            .collect();
+        format!("[:{}]", parts.join(", "))
+    }
+}
+
+#[derive(Clone)]
+struct JetBitSet {
+    bits: std::collections::BTreeSet<i64>,
+}
+impl JetBitSet {
+    fn new() -> Self {
+        Self {
+            bits: std::collections::BTreeSet::new(),
+        }
+    }
+    fn add(&mut self, bit: i64) {
+        if bit >= 0 {
+            self.bits.insert(bit);
+        }
+    }
+    fn remove(&mut self, bit: &i64) {
+        self.bits.remove(bit);
+    }
+    fn contains(&self, bit: &i64) -> bool {
+        self.bits.contains(bit)
+    }
+    fn count(&self) -> i64 {
+        self.bits.len() as i64
+    }
+    fn len(&self) -> i64 {
+        self.bits.iter().next_back().map(|v| v + 1).unwrap_or(0)
+    }
+    fn is_empty(&self) -> bool {
+        self.bits.is_empty()
+    }
+    fn clear(&mut self) {
+        self.bits.clear();
+    }
+    fn to_list(&self) -> Vec<i64> {
+        self.bits.iter().copied().collect()
+    }
+}
+impl JetShow for JetBitSet {
+    fn jet_show(&self) -> String {
+        self.to_list().jet_show()
+    }
+}
+impl JetDisplay for JetBitSet {
+    fn jet_display(&self) -> String {
+        self.to_list().jet_display()
+    }
+}
+impl JetDebug for JetBitSet {
+    fn jet_debug(&self) -> String {
+        self.to_list().jet_debug()
+    }
+}
+
+#[derive(Clone)]
+struct JetByteBuffer {
+    bytes: Vec<u8>,
+}
+impl JetByteBuffer {
+    fn new() -> Self {
+        Self { bytes: Vec::new() }
+    }
+    fn from(bytes: &Vec<u8>) -> Self {
+        Self {
+            bytes: bytes.clone(),
+        }
+    }
+    fn write_u8(&mut self, v: u8) {
+        self.bytes.push(v);
+    }
+    fn write_u16_le(&mut self, v: u16) {
+        self.bytes.extend_from_slice(&v.to_le_bytes());
+    }
+    fn write_u16_be(&mut self, v: u16) {
+        self.bytes.extend_from_slice(&v.to_be_bytes());
+    }
+    fn write_u32_le(&mut self, v: u32) {
+        self.bytes.extend_from_slice(&v.to_le_bytes());
+    }
+    fn write_u32_be(&mut self, v: u32) {
+        self.bytes.extend_from_slice(&v.to_be_bytes());
+    }
+    fn write_u64_le(&mut self, v: u64) {
+        self.bytes.extend_from_slice(&v.to_le_bytes());
+    }
+    fn write_u64_be(&mut self, v: u64) {
+        self.bytes.extend_from_slice(&v.to_be_bytes());
+    }
+    fn write_bytes(&mut self, bytes: &Vec<u8>) {
+        self.bytes.extend_from_slice(bytes);
+    }
+    fn to_bytes(&self) -> Vec<u8> {
+        self.bytes.clone()
+    }
+    fn len(&self) -> i64 {
+        self.bytes.len() as i64
+    }
+    fn is_empty(&self) -> bool {
+        self.bytes.is_empty()
+    }
+    fn clear(&mut self) {
+        self.bytes.clear();
+    }
+}
+impl JetShow for JetByteBuffer {
+    fn jet_show(&self) -> String {
+        self.bytes.jet_show()
+    }
+}
+impl JetDisplay for JetByteBuffer {
+    fn jet_display(&self) -> String {
+        self.bytes.jet_display()
+    }
+}
+impl JetDebug for JetByteBuffer {
+    fn jet_debug(&self) -> String {
+        self.bytes.jet_debug()
+    }
+}
+
+fn jet_list_sum<T>(xs: Vec<T>) -> T
+where
+    T: std::iter::Sum<T>,
+{
+    xs.into_iter().sum()
+}
+fn jet_list_product<T>(xs: Vec<T>) -> T
+where
+    T: std::iter::Product<T>,
+{
+    xs.into_iter().product()
+}
+fn jet_list_flatten<T>(xs: Vec<Vec<T>>) -> Vec<T> {
+    xs.into_iter().flatten().collect()
+}
+fn jet_list_intersperse<T: Clone>(xs: Vec<T>, sep: T) -> Vec<T> {
+    let mut out = Vec::new();
+    for (i, x) in xs.into_iter().enumerate() {
+        if i > 0 {
+            out.push(sep.clone());
+        }
+        out.push(x);
+    }
+    out
+}
+fn jet_list_count_by<T: Clone, K: Ord + Clone, F>(
+    xs: Vec<T>,
+    f: F,
+) -> std::collections::BTreeMap<K, i64>
+where
+    F: Fn(T) -> K,
+{
+    let mut m: std::collections::BTreeMap<K, i64> = std::collections::BTreeMap::new();
+    for x in xs {
+        let k = f(x.clone());
+        *m.entry(k).or_insert(0) += 1;
+    }
+    m
 }
 // ── binary.Reader / text.Cursor (D-SHIFT1, c7shift) ──────────────────────────
 // The "shift" kernel from linear stream parsing (Jai's `shift` primitive),
@@ -940,7 +2107,10 @@ struct JetCursor {
 }
 
 fn jet_reader_over(bytes: &Vec<u8>) -> JetReader {
-    JetReader { buf: bytes.clone(), pos: 0 }
+    JetReader {
+        buf: bytes.clone(),
+        pos: 0,
+    }
 }
 
 fn jet_reader_bounds_error(method: &str, need: usize, r: &JetReader) -> String {
@@ -973,27 +2143,26 @@ fn jet_reader_read_u16_be(r: &mut JetReader) -> Result<u16, String> {
     jet_reader_take_fixed(r, 2, "read_u16_be").map(|b| u16::from_be_bytes([b[0], b[1]]))
 }
 fn jet_reader_read_u32_le(r: &mut JetReader) -> Result<u32, String> {
-    jet_reader_take_fixed(r, 4, "read_u32_le")
-        .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+    jet_reader_take_fixed(r, 4, "read_u32_le").map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
 }
 fn jet_reader_read_u32_be(r: &mut JetReader) -> Result<u32, String> {
-    jet_reader_take_fixed(r, 4, "read_u32_be")
-        .map(|b| u32::from_be_bytes([b[0], b[1], b[2], b[3]]))
+    jet_reader_take_fixed(r, 4, "read_u32_be").map(|b| u32::from_be_bytes([b[0], b[1], b[2], b[3]]))
 }
 fn jet_reader_read_u64_le(r: &mut JetReader) -> Result<u64, String> {
-    jet_reader_take_fixed(r, 8, "read_u64_le").map(|b| {
-        u64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]])
-    })
+    jet_reader_take_fixed(r, 8, "read_u64_le")
+        .map(|b| u64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]))
 }
 fn jet_reader_read_u64_be(r: &mut JetReader) -> Result<u64, String> {
-    jet_reader_take_fixed(r, 8, "read_u64_be").map(|b| {
-        u64::from_be_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]])
-    })
+    jet_reader_take_fixed(r, 8, "read_u64_be")
+        .map(|b| u64::from_be_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]))
 }
 
 fn jet_reader_take(r: &mut JetReader, n: i64) -> Result<Vec<u8>, String> {
     if n < 0 {
-        return Err(format!("Reader.take: length must not be negative, got {}", n));
+        return Err(format!(
+            "Reader.take: length must not be negative, got {}",
+            n
+        ));
     }
     jet_reader_take_fixed(r, n as usize, "take")
 }
@@ -1007,7 +2176,10 @@ fn jet_reader_at_end(r: &JetReader) -> bool {
 }
 
 fn jet_cursor_over(s: &String) -> JetCursor {
-    JetCursor { buf: s.clone(), pos: 0 }
+    JetCursor {
+        buf: s.clone(),
+        pos: 0,
+    }
 }
 
 fn jet_cursor_take_until(c: &mut JetCursor, delim: &String) -> Result<String, String> {
@@ -1042,7 +2214,9 @@ fn jet_list_skip<T: Clone>(xs: Vec<T>, n: i64) -> Vec<T> {
     xs.into_iter().skip(n.max(0) as usize).collect()
 }
 fn jet_list_step_by<T: Clone>(xs: Vec<T>, n: i64) -> Vec<T> {
-    if n <= 0 { return Vec::new(); }
+    if n <= 0 {
+        return Vec::new();
+    }
     xs.into_iter().step_by(n as usize).collect()
 }
 fn jet_list_dedup<T: Clone + PartialEq>(xs: Vec<T>) -> Vec<T> {
@@ -1060,26 +2234,42 @@ fn jet_list_chunks<T: Clone>(xs: Vec<T>, n: i64) -> Vec<Vec<T>> {
 }
 fn jet_list_windows<T: Clone>(xs: Vec<T>, n: i64) -> Vec<Vec<T>> {
     let n = n.max(1) as usize;
-    if n > xs.len() { return Vec::new(); }
+    if n > xs.len() {
+        return Vec::new();
+    }
     xs.windows(n).map(|w| w.to_vec()).collect()
 }
-fn jet_list_take_while<T: Clone, F>(xs: Vec<T>, f: F) -> Vec<T> where F: Fn(T) -> bool {
+fn jet_list_take_while<T: Clone, F>(xs: Vec<T>, f: F) -> Vec<T>
+where
+    F: Fn(T) -> bool,
+{
     xs.into_iter().take_while(|x| f(x.clone())).collect()
 }
-fn jet_list_skip_while<T: Clone, F>(xs: Vec<T>, f: F) -> Vec<T> where F: Fn(T) -> bool {
+fn jet_list_skip_while<T: Clone, F>(xs: Vec<T>, f: F) -> Vec<T>
+where
+    F: Fn(T) -> bool,
+{
     xs.into_iter().skip_while(|x| f(x.clone())).collect()
 }
-fn jet_list_flat_map<T, U, F>(xs: Vec<T>, f: F) -> Vec<U> where F: Fn(T) -> Vec<U> {
+fn jet_list_flat_map<T, U, F>(xs: Vec<T>, f: F) -> Vec<U>
+where
+    F: Fn(T) -> Vec<U>,
+{
     xs.into_iter().flat_map(f).collect()
 }
-fn jet_list_filter_map<T, U, E, F>(xs: Vec<T>, f: F) -> Vec<U> where F: Fn(T) -> Result<U, E> {
+fn jet_list_filter_map<T, U, E, F>(xs: Vec<T>, f: F) -> Vec<U>
+where
+    F: Fn(T) -> Result<U, E>,
+{
     xs.into_iter().filter_map(|x| f(x).ok()).collect()
 }
 fn jet_list_try_collect<T: Clone, E: Clone>(xs: Vec<Result<T, E>>) -> Result<Vec<T>, E> {
     xs.into_iter().collect()
 }
 fn jet_list_scan<T, U: Clone, F>(xs: Vec<T>, init: U, f: F) -> Vec<U>
-where F: Fn(U, T) -> U {
+where
+    F: Fn(U, T) -> U,
+{
     let mut acc = init;
     let mut out = Vec::new();
     for x in xs {
@@ -1088,25 +2278,37 @@ where F: Fn(U, T) -> U {
     }
     out
 }
-fn jet_list_fold<T, U, F>(xs: Vec<T>, init: U, f: F) -> U where F: Fn(U, T) -> U {
+fn jet_list_fold<T, U, F>(xs: Vec<T>, init: U, f: F) -> U
+where
+    F: Fn(U, T) -> U,
+{
     xs.into_iter().fold(init, f)
 }
 fn jet_list_position<T: Clone, F>(xs: Vec<T>, f: F) -> Option<i64>
-where F: Fn(T) -> bool {
+where
+    F: Fn(T) -> bool,
+{
     xs.into_iter().position(|x| f(x)).map(|i| i as i64)
 }
 fn jet_list_min_by<T: Clone, K: Ord, F>(xs: Vec<T>, f: F) -> Option<T>
-where F: Fn(T) -> K {
+where
+    F: Fn(T) -> K,
+{
     xs.into_iter().min_by_key(|x| f(x.clone()))
 }
 fn jet_list_max_by<T: Clone, K: Ord, F>(xs: Vec<T>, f: F) -> Option<T>
-where F: Fn(T) -> K {
+where
+    F: Fn(T) -> K,
+{
     xs.into_iter().max_by_key(|x| f(x.clone()))
 }
 fn jet_list_group_by<T: Clone, K: Ord + Clone, F>(
-    xs: Vec<T>, f: F
+    xs: Vec<T>,
+    f: F,
 ) -> std::collections::BTreeMap<K, Vec<T>>
-where F: Fn(T) -> K {
+where
+    F: Fn(T) -> K,
+{
     let mut m: std::collections::BTreeMap<K, Vec<T>> = std::collections::BTreeMap::new();
     for x in xs {
         let k = f(x.clone());
@@ -1124,7 +2326,11 @@ where
     let mut yes: Vec<T> = Vec::new();
     let mut no: Vec<T> = Vec::new();
     for x in xs {
-        if f(x.clone()) { yes.push(x); } else { no.push(x); }
+        if f(x.clone()) {
+            yes.push(x);
+        } else {
+            no.push(x);
+        }
     }
     build(yes, no)
 }
@@ -1141,7 +2347,9 @@ fn jet_scope_guard<F: FnOnce()>(f: F) -> JetScopeGuard<F> {
 }
 impl<F: FnOnce()> Drop for JetScopeGuard<F> {
     fn drop(&mut self) {
-        if let Some(f) = self.f.take() { f(); }
+        if let Some(f) = self.f.take() {
+            f();
+        }
     }
 }
 // ── D-TXN1–D-TXN4 + D-TXN-ROLLBACK (2026-06-24/25): #Transact transaction blocks
@@ -1166,7 +2374,11 @@ struct JetTransaction {
     committed: bool,
 }
 fn jet_transaction() -> JetTransaction {
-    JetTransaction { hooks: Vec::new(), undo: Vec::new(), committed: false }
+    JetTransaction {
+        hooks: Vec::new(),
+        undo: Vec::new(),
+        committed: false,
+    }
 }
 impl JetTransaction {
     fn on_commit(&mut self, f: Box<dyn FnOnce()>) {
@@ -1236,7 +2448,9 @@ mod jet_txn {
         }));
     }
 }
-trait user_Serialize { fn to_json(&self) -> String; }
+trait user_Serialize {
+    fn to_json(&self) -> String;
+}
 
 // ── D-TERM1 (ratified 2026-06-22): terminal direct-input primitives ───────────
 // `live { … }` blocks in Jet source emit:
@@ -1348,7 +2562,9 @@ mod jet_term_unix {
     pub fn enter() {
         unsafe {
             let mut t = std::mem::zeroed::<Termios>();
-            if tcgetattr(0, &mut t) != 0 { return; }
+            if tcgetattr(0, &mut t) != 0 {
+                return;
+            }
             SAVED.with(|s| *s.borrow_mut() = Some(std::mem::transmute_copy(&t)));
             t.c_lflag &= !(ECHO | ICANON);
             t.c_cc[VMIN] = 1;
@@ -1372,7 +2588,9 @@ mod jet_term_unix {
         let mut buf = [0u8; 6];
         let stdin = std::io::stdin();
         let n = stdin.lock().read(&mut buf).unwrap_or(0);
-        if n == 0 { return JetKey::Unknown; }
+        if n == 0 {
+            return JetKey::Unknown;
+        }
         match &buf[..n] {
             [0x0d] | [0x0a] => JetKey::Enter,
             [0x1b] if n == 1 => JetKey::Escape,
@@ -1411,9 +2629,18 @@ mod jet_term_unix {
                     if let Ok(s) = std::str::from_utf8(digits) {
                         if let Ok(n) = s.parse::<i64>() {
                             let fkey = match n {
-                                11 => 1, 12 => 2, 13 => 3, 14 => 4,
-                                15 => 5, 17 => 6, 18 => 7, 19 => 8,
-                                20 => 9, 21 => 10, 23 => 11, 24 => 12,
+                                11 => 1,
+                                12 => 2,
+                                13 => 3,
+                                14 => 4,
+                                15 => 5,
+                                17 => 6,
+                                18 => 7,
+                                19 => 8,
+                                20 => 9,
+                                21 => 10,
+                                23 => 11,
+                                24 => 12,
                                 _ => return JetKey::Unknown,
                             };
                             return JetKey::F(fkey);
@@ -1448,7 +2675,9 @@ mod jet_term_windows {
         unsafe {
             let h = GetStdHandle(STD_INPUT_HANDLE);
             let mut mode: u32 = 0;
-            if GetConsoleMode(h, &mut mode) == 0 { return; }
+            if GetConsoleMode(h, &mut mode) == 0 {
+                return;
+            }
             SAVED.with(|s| *s.borrow_mut() = Some(mode));
             let new_mode = mode & !(ENABLE_ECHO_INPUT | ENABLE_LINE_INPUT);
             SetConsoleMode(h, new_mode);
@@ -1470,26 +2699,28 @@ mod jet_term_windows {
         use super::JetKey;
         let mut buf = [0u8; 6];
         let n = std::io::stdin().lock().read(&mut buf).unwrap_or(0);
-        if n == 0 { return JetKey::Unknown; }
+        if n == 0 {
+            return JetKey::Unknown;
+        }
         match &buf[..n] {
             [0x0d] | [0x0a] => JetKey::Enter,
             [0x1b] => JetKey::Escape,
             [0x7f] | [0x08] => JetKey::Backspace,
             [0x09] => JetKey::Tab,
-            [0x1b, 0x5b, rest @ ..] => {
-                match rest {
-                    [0x41] => JetKey::Up,
-                    [0x42] => JetKey::Down,
-                    [0x43] => JetKey::Right,
-                    [0x44] => JetKey::Left,
-                    _ => JetKey::Unknown,
-                }
-            }
+            [0x1b, 0x5b, rest @ ..] => match rest {
+                [0x41] => JetKey::Up,
+                [0x42] => JetKey::Down,
+                [0x43] => JetKey::Right,
+                [0x44] => JetKey::Left,
+                _ => JetKey::Unknown,
+            },
             [b] if *b >= 1 && *b <= 26 => JetKey::Ctrl((b'a' - 1 + *b) as char),
             [b] if *b < 0x80 => JetKey::Char(*b as char),
             bytes => {
                 if let Ok(s) = std::str::from_utf8(bytes) {
-                    if let Some(c) = s.chars().next() { return JetKey::Char(c); }
+                    if let Some(c) = s.chars().next() {
+                        return JetKey::Char(c);
+                    }
                 }
                 JetKey::Unknown
             }

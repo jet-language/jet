@@ -55,23 +55,29 @@ impl Capabilities {
                 .any(|k| prefixes.iter().any(|p| k.starts_with(p)))
         };
         Capabilities {
-            uses_network: any(&["core.net", "jet.http"]),
-            uses_file_io: any(&["core.io", "core.files", "core.path"]),
+            uses_network: any(&["core.net", "jet.http", "core.watcher::port"]),
+            uses_file_io: any(&["core.io", "core.files", "core.path", "core.watcher"]),
             uses_unsafe: has_unsafe || any(&["core.mem"]),
             uses_ffi: has_ffi,
             uses_crypto: any(&["jet.crypto", "core.crypto.expert"]),
-            uses_concurrency: any(&["core.tasks", "core.time", "jet.time"]),
+            uses_concurrency: any(&["core.tasks", "core.time", "jet.time", "core.watcher"]),
         }
     }
 
     pub fn from_rust(rust: &str) -> Self {
         Capabilities {
-            uses_network: rust.contains("jet_net_") || rust.contains("jet_http_"),
-            uses_file_io: rust.contains("jet_fs_") || rust.contains("jet_io_"),
+            uses_network: rust.contains("jet_net_")
+                || rust.contains("jet_http_")
+                || rust.contains("jet_watcher_port"),
+            uses_file_io: rust.contains("jet_fs_")
+                || rust.contains("jet_io_")
+                || rust.contains("jet_watcher_"),
             uses_unsafe: rust.contains("unsafe {") || rust.contains("unsafe fn"),
             uses_ffi: rust.contains("extern \"C\"") || rust.contains("jet_ffi"),
             uses_crypto: rust.contains("jet_crypto_"),
-            uses_concurrency: rust.contains("jet_tasks_") || rust.contains("jet_time_"),
+            uses_concurrency: rust.contains("jet_tasks_")
+                || rust.contains("jet_time_")
+                || rust.contains("jet_watcher_"),
         }
     }
 

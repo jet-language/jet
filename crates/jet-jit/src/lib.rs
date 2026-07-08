@@ -951,10 +951,17 @@ fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> bool {
                 && jit_concurrency_type(&channel.ty)
                 && resident_safe_expr(channel, callees)
         }
-        TExprKind::SelectAfter { builder, millis } => {
+        TExprKind::SelectAfter {
+            builder,
+            millis,
+            value,
+        } => {
             resident_safe_expr(builder, callees)
                 && matches!(&millis.ty, Type::Int)
                 && resident_safe_expr(millis, callees)
+                && value.as_ref().map_or(true, |v| {
+                    matches!(&v.ty, Type::Int) && resident_safe_expr(v, callees)
+                })
         }
         TExprKind::SelectRead { builder, .. } => resident_safe_expr(builder, callees),
         TExprKind::SelectWait { builder } => {
@@ -1353,12 +1360,14 @@ fn resident_safe_select_wait(builder: &TExpr, callees: &HashSet<String>) -> bool
         && recvs
             .iter()
             .all(|ch| jit_concurrency_type(&ch.ty) && resident_safe_expr(ch, callees))
-        && afters
-            .iter()
-            .all(|ms| matches!(&ms.ty, Type::Int) && resident_safe_expr(ms, callees))
+        && afters.iter().all(|(ms, value)| {
+            matches!(&ms.ty, Type::Int) && resident_safe_expr(ms, callees) && value.is_none()
+        })
 }
 
-fn collect_select_arms_jit<'a>(builder: &'a TExpr) -> (Vec<&'a TExpr>, Vec<&'a TExpr>) {
+fn collect_select_arms_jit<'a>(
+    builder: &'a TExpr,
+) -> (Vec<&'a TExpr>, Vec<(&'a TExpr, Option<&'a TExpr>)>) {
     let mut recvs = Vec::new();
     let mut afters = Vec::new();
     let mut cur = builder;
@@ -1375,8 +1384,9 @@ fn collect_select_arms_jit<'a>(builder: &'a TExpr) -> (Vec<&'a TExpr>, Vec<&'a T
             TExprKind::SelectAfter {
                 builder: inner,
                 millis,
+                value,
             } => {
-                afters.push(millis.as_ref());
+                afters.push((millis.as_ref(), value.as_deref()));
                 cur = inner;
             }
             TExprKind::SelectRead { builder: inner, .. } => {
@@ -2582,7 +2592,11 @@ impl LowerCtx<'_, '_> {
                 let _ = self.lower_expr(builder)?;
                 self.lower_expr(channel)
             }
-            TExprKind::SelectAfter { builder, millis } => {
+            TExprKind::SelectAfter {
+                builder,
+                millis,
+                value: _,
+            } => {
                 let _ = self.lower_expr(builder)?;
                 self.lower_expr(millis)
             }
@@ -2594,7 +2608,10 @@ impl LowerCtx<'_, '_> {
                     recv_vals.push(self.lower_expr(ch)?);
                 }
                 let mut after_vals = Vec::new();
-                for ms in afters {
+                for (ms, value) in afters {
+                    if value.is_some() {
+                        return Err("jit select timer value unsupported".to_string());
+                    }
                     after_vals.push(self.lower_expr(ms)?);
                 }
                 let recv_list = self.lower_i64_value_list(&recv_vals)?;

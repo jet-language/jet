@@ -639,7 +639,11 @@ pub fn jet_scheduler_io_wait(stream: &TcpStream, read: bool, write: bool, wait_k
 struct ChannelState<T> {
     queue: VecDeque<T>,
     recv_waiters: Vec<Arc<ParkSlot>>,
+    send_waiters: Vec<Arc<ParkSlot>>,
     closed: bool,
+    capacity: Option<usize>,
+    sender_count: usize,
+    receiver_count: usize,
 }
 
 pub(crate) struct ChannelInner<T> {
@@ -656,26 +660,58 @@ pub struct JetSchedulerChannel<T> {
 // `JetSchedulerSender`'s manual impl right below.
 impl<T> Clone for JetSchedulerChannel<T> {
     fn clone(&self) -> Self {
+        self.inner.state.lock().unwrap().receiver_count += 1;
         JetSchedulerChannel {
             inner: self.inner.clone(),
         }
     }
 }
 
+impl<T> Drop for JetSchedulerChannel<T> {
+    fn drop(&mut self) {
+        let send_waiters = {
+            let mut st = self.inner.state.lock().unwrap();
+            st.receiver_count = st.receiver_count.saturating_sub(1);
+            if st.receiver_count == 0 {
+                st.closed = true;
+                std::mem::take(&mut st.send_waiters)
+            } else {
+                Vec::new()
+            }
+        };
+        for slot in send_waiters {
+            slot.wake();
+        }
+    }
+}
+
 impl<T: Send> JetSchedulerChannel<T> {
     pub fn new() -> Self {
+        Self::with_capacity(None)
+    }
+
+    pub fn bounded(capacity: usize) -> Self {
+        Self::with_capacity(Some(capacity.max(1)))
+    }
+
+    fn with_capacity(capacity: Option<usize>) -> Self {
         JetSchedulerChannel {
             inner: Arc::new(ChannelInner {
                 state: Mutex::new(ChannelState {
                     queue: VecDeque::new(),
                     recv_waiters: Vec::new(),
+                    send_waiters: Vec::new(),
                     closed: false,
+                    capacity,
+                    sender_count: 0,
+                    receiver_count: 1,
                 }),
             }),
         }
     }
 
     pub fn sender(&self) -> JetSchedulerSender<T> {
+        self.inner.state.lock().unwrap().sender_count += 1;
         JetSchedulerSender {
             inner: self.inner.clone(),
         }
@@ -696,6 +732,9 @@ impl<T: Send> JetSchedulerChannel<T> {
             let parked = {
                 let mut st = self.inner.state.lock().unwrap();
                 if let Some(v) = st.queue.pop_front() {
+                    if let Some(slot) = st.send_waiters.pop() {
+                        slot.wake();
+                    }
                     return Some(v);
                 }
                 if st.closed {
@@ -713,16 +752,26 @@ impl<T: Send> JetSchedulerChannel<T> {
     }
 
     pub fn try_receive(&self) -> Option<T> {
-        self.inner.state.lock().unwrap().queue.pop_front()
+        let mut st = self.inner.state.lock().unwrap();
+        let out = st.queue.pop_front();
+        if out.is_some() {
+            if let Some(slot) = st.send_waiters.pop() {
+                slot.wake();
+            }
+        }
+        out
     }
 
     pub fn close(&self) {
-        let waiters = {
+        let (recv_waiters, send_waiters) = {
             let mut st = self.inner.state.lock().unwrap();
             st.closed = true;
-            std::mem::take(&mut st.recv_waiters)
+            (
+                std::mem::take(&mut st.recv_waiters),
+                std::mem::take(&mut st.send_waiters),
+            )
         };
-        for w in waiters {
+        for w in recv_waiters.into_iter().chain(send_waiters) {
             w.wake();
         }
     }
@@ -734,21 +783,68 @@ pub struct JetSchedulerSender<T> {
 
 impl<T> Clone for JetSchedulerSender<T> {
     fn clone(&self) -> Self {
+        self.inner.state.lock().unwrap().sender_count += 1;
         JetSchedulerSender {
             inner: self.inner.clone(),
         }
     }
 }
 
-impl<T: Send> JetSchedulerSender<T> {
-    pub fn send(&self, value: T) {
-        let wake = {
+impl<T> Drop for JetSchedulerSender<T> {
+    fn drop(&mut self) {
+        let recv_waiters = {
             let mut st = self.inner.state.lock().unwrap();
-            st.queue.push_back(value);
-            st.recv_waiters.pop()
+            st.sender_count = st.sender_count.saturating_sub(1);
+            if st.sender_count == 0 {
+                st.closed = true;
+                std::mem::take(&mut st.recv_waiters)
+            } else {
+                Vec::new()
+            }
         };
-        if let Some(slot) = wake {
-            jet_scheduler_wake(&slot);
+        for slot in recv_waiters {
+            slot.wake();
+        }
+    }
+}
+
+impl<T: Send> JetSchedulerSender<T> {
+    pub fn send(&self, value: T) -> bool {
+        let mut value = Some(value);
+        loop {
+            if jet_scheduler_task_cancelled() {
+                return false;
+            }
+            if let Some(ctrl) = current_task_control() {
+                ctrl.wait_while_paused();
+                if ctrl.cancelled.load(Ordering::Relaxed) {
+                    return false;
+                }
+            }
+            let slot = ParkSlot::new();
+            let wake = {
+                let mut st = self.inner.state.lock().unwrap();
+                if st.closed || st.receiver_count == 0 {
+                    return false;
+                }
+                let full = st.capacity.is_some_and(|cap| st.queue.len() >= cap);
+                if full {
+                    st.send_waiters.push(slot.clone());
+                    None
+                } else {
+                    st.queue.push_back(value.take().expect("channel send value missing"));
+                    st.recv_waiters.pop()
+                }
+            };
+            if let Some(slot) = wake {
+                jet_scheduler_wake(&slot);
+            }
+            if value.is_none() {
+                return true;
+            }
+            jet_scheduler_yield("channel send", &slot, None);
+            let mut st = self.inner.state.lock().unwrap();
+            st.send_waiters.retain(|w| !Arc::ptr_eq(w, &slot));
         }
     }
 }
@@ -771,7 +867,14 @@ pub enum JetSelectOutcome<T> {
 #[allow(dead_code)]
 impl<T> ChannelInner<T> {
     fn try_pop(&self) -> Option<T> {
-        self.state.lock().unwrap().queue.pop_front()
+        let mut st = self.state.lock().unwrap();
+        let out = st.queue.pop_front();
+        if out.is_some() {
+            if let Some(slot) = st.send_waiters.pop() {
+                slot.wake();
+            }
+        }
+        out
     }
 
     fn register_select_waiter(&self, slot: Arc<ParkSlot>) {
@@ -802,11 +905,12 @@ pub(crate) fn jet_scheduler_select<T: Send>(
             return JetSelectOutcome::Recv { arm: i, value: v };
         }
     }
-    if after_ms.iter().any(|ms| *ms == 0) {
-        return JetSelectOutcome::After { arm: 0 };
+    if let Some((i, _)) = after_ms.iter().enumerate().find(|(_, ms)| **ms == 0) {
+        return JetSelectOutcome::After { arm: i };
     }
 
     let master = ParkSlot::new();
+    let started = Instant::now();
     for ch in &recvs {
         ch.register_select_waiter(master.clone());
     }
@@ -828,9 +932,13 @@ pub(crate) fn jet_scheduler_select<T: Send>(
                 return JetSelectOutcome::Recv { arm: i, value: v };
             }
         }
-        if !after_ms.is_empty() {
+        if let Some((i, _)) = after_ms
+            .iter()
+            .enumerate()
+            .find(|(_, ms)| started.elapsed() >= Duration::from_millis(**ms))
+        {
             cleanup_select_waiters(&recvs, &master);
-            return JetSelectOutcome::After { arm: 0 };
+            return JetSelectOutcome::After { arm: i };
         }
     }
 }

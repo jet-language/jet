@@ -1,6 +1,5 @@
-// D-REGEX1: jet.regex — linear-time regex (no ReDoS), shipped on the `regex`
-// crate via the hidden FFI bridge. The `regex` dependency lives only in that
-// bridge crate; the compiler stays dependency-free (I6).
+// D-REGEXENGINE1: core.regex — std-only linear regex (no ReDoS), no hidden
+// bridge crate.
 use core.regex as re
 
 fn run() {
@@ -30,4 +29,23 @@ fn run() {
     // split on whitespace runs.
     words :: re.split("\\s+", text) ?? panic("bad pattern")
     print(words.len())
+
+    // compile once, reuse with typed flags and named groups.
+    flags :: re.flags(true, true, false)
+    rx :: re.compile_with("^(?<word>[a-z]+)", flags) ?? panic("bad pattern")
+    matches :: rx.matches("Ada\nlovelace")
+    print(matches.len())
+    first_named :: rx.match("Ada\nlovelace")
+    if first_named == Val(mat) {
+        print(mat.name("word") ?? "none")
+        print(mat.start())
+        print(mat.end())
+    }
+
+    // callback replacement and split limit.
+    word :: re.compile("\\w+") ?? panic("bad word")
+    print(word.replace_all_with("a b", (m: Match) => "hit"))
+    sep :: re.compile(",\\s*") ?? panic("bad sep")
+    limited :: sep.split_limit("a, b, c", 2)
+    print(limited[1])
 }

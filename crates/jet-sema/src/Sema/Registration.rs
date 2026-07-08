@@ -562,6 +562,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                     || f.name == Syntax::BUILTIN_PANIC
                     || f.name == Syntax::BUILTIN_REQUIRE
                     || f.name == Syntax::BUILTIN_REQUIRE_EQ
+                    || f.name == Syntax::BUILTIN_FIND
                     || f.name == Syntax::BUILTIN_EXPECT
                 {
                     diags.push(Diagnostic::error(
@@ -917,6 +918,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
         std::path::Path::new("."),
         &mut diags,
         &single_core_imports,
+        None,
     );
 
     let const_names: Vec<String> = consts.keys().cloned().collect();
@@ -1088,6 +1090,8 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                     unsafe_span: None,
                     is_pure: false,
                     is_reactive: false,
+            is_replayable: false,
+            replayable_span: None,
                     is_sanitizer: false,
                     declared_effects: None,
         effect_via: None,
@@ -1180,6 +1184,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
     // every `#Caps(…)` region restriction.
     let solved = solve(&effect_summaries);
     check_effect_boundaries(&prog.items, &solved, &mut diags);
+    check_replayable_effects(&prog.items, &solved, &mut diags);
     check_region_caps(&effect_summaries, &solved, &mut diags);
     // D-EFF2: callback param effect bounds (E0747).
     check_callback_bounds(&effect_summaries, &solved, &mut diags);
@@ -1575,6 +1580,7 @@ pub(crate) fn eval_comptime_items(
     // D-CTCORE1: module alias → Core path so the interpreter can evaluate
     // whitelisted pure Core calls (e.g. `comptime X = math.sqrt(4.0)`).
     core_imports: &HashMap<String, String>,
+    mut embed_inputs_out: Option<&mut Vec<crate::AST::ComptimeInput>>,
 ) {
     if !items
         .iter()
@@ -1605,18 +1611,23 @@ pub(crate) fn eval_comptime_items(
             if let Item::Const(c) = item {
                 if c.is_comptime {
                     // D-CTCORE1: evaluate_with_imports so Core whitelist calls work.
-                    match crate::Comptime::evaluate_with_imports(
+                    match crate::Comptime::evaluate_with_imports_opts_collecting(
                         &c.value,
                         &funcs,
                         &externs,
                         base_dir,
                         &globals,
                         core_imports,
+                        false,
+                        0,
                     ) {
-                        Ok(v) => {
+                        Ok((v, inputs)) => {
                             consts.insert(c.name.clone(), v.jet_type());
                             globals.insert(c.name.clone(), v.clone());
                             results.push((c.name.clone(), v));
+                            if let Some(out) = embed_inputs_out.as_deref_mut() {
+                                out.extend(inputs);
+                            }
                         }
                         Err(d) => diags.push(d),
                     }
@@ -2275,6 +2286,8 @@ pub(crate) fn check_error_conv_body(
         unsafe_span: None,
         is_pure: false,
         is_reactive: false,
+        is_replayable: false,
+        replayable_span: None,
         is_must_use: false,
         must_use_span: None,
         is_inline: false,
@@ -2599,6 +2612,8 @@ pub(crate) fn synthesize_delegation_method(
         unsafe_span: None,
         is_pure: false,
         is_reactive: false,
+        is_replayable: false,
+        replayable_span: None,
         is_must_use: false,
         must_use_span: None,
         is_inline: false,
@@ -2657,6 +2672,8 @@ pub(crate) fn synthesize_default_method(
         unsafe_span: None,
         is_pure: false,
         is_reactive: false,
+        is_replayable: false,
+        replayable_span: None,
         is_must_use: false,
         must_use_span: None,
         is_inline: false,

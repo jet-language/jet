@@ -258,6 +258,7 @@ pub(crate) fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
         || is_covered_struct_ty(&ty, cx)
         || is_covered_enum_ty(&ty, cx)
         || is_covered_collection_ty(&ty, cx)
+        || is_covered_expanded_collection_ty(&ty, cx)
         || is_covered_fallible_ty(&ty, cx)
         || is_covered_fn_ty(&ty, cx)
         || is_covered_foreign_value_ty(&ty, cx)
@@ -347,6 +348,26 @@ pub(crate) fn is_covered_reactive_ty(ty: &Type, cx: &Cx) -> bool {
     matches!(name.as_str(), "Signal" | "Derived" | "Computed")
         && args.len() == 1
         && is_subset_param_ty(&args[0], cx)
+}
+
+pub(crate) fn is_covered_expanded_collection_ty(ty: &Type, cx: &Cx) -> bool {
+    match ty {
+        Type::Named(name)
+            if name == crate::Syntax::TYPE_BIT_SET || name == crate::Syntax::TYPE_BYTE_BUFFER =>
+        {
+            true
+        }
+        Type::Apply { name, args }
+            if name == crate::Syntax::TYPE_SORTED_SET
+                || name == crate::Syntax::TYPE_PRIORITY_QUEUE =>
+        {
+            args.len() == 1 && is_subset_param_ty(&args[0], cx)
+        }
+        Type::Apply { name, args } if name == crate::Syntax::TYPE_LRU => {
+            args.len() == 2 && is_subset_param_ty(&args[0], cx) && is_subset_param_ty(&args[1], cx)
+        }
+        _ => false,
+    }
 }
 
 /// c109 Phase 21: a `Task<T>`/`Channel<T>`/`Sender<T>` element type. Any covered value
@@ -457,9 +478,8 @@ pub(crate) fn is_covered_foreign_value_ty(ty: &Type, cx: &Cx) -> bool {
     if cx.foreign_types.contains_key(name) {
         return true;
     }
-    // c109 Phase 24: a regex `Match` value (`if m == value(mat)` binds `mat: Match`). It
-    // renders via `cx.rust_type` to `Vec<Option<String>>`; the only method on it
-    // (`.group(n)`) is the dedicated builtin shape.
+    // D-REGEXENGINE1=A: a regex `Match` value (`if m == value(mat)` binds
+    // `mat: Match`). It renders to `jet_std::JetRegexMatch`.
     if name == "Match" {
         return true;
     }
@@ -599,10 +619,8 @@ pub(crate) fn fallible_payload_covered(ty: &Type, cx: &Cx) -> bool {
         if n == "Closed" {
             return true;
         }
-        // c109 Phase 24: a regex `Match` (the payload of `re.match()`'s `Match?`). It
-        // renders via `cx.rust_type` to `Vec<Option<String>>` (Context.rs), so an
-        // `Option<Match>` payload is byte-identical; the `.group(n)` method is the
-        // dedicated builtin shape.
+        // D-REGEXENGINE1=A: a regex `Match` (the payload of `re.match()`'s `Match?`).
+        // It renders via `cx.rust_type` to `jet_std::JetRegexMatch`.
         if n == "Match" {
             return true;
         }
@@ -2964,7 +2982,17 @@ pub(crate) fn method_call_in_subset(
         if let Expr::Ident(type_name, _) = receiver {
             if !locals.contains(type_name.as_str()) {
                 match (type_name.as_str(), method, args.len()) {
-                    ("Set", "from", 1) | ("Bag", "new", 0) | ("Deque", "new", 0) => {
+                    ("Set", "from", 1)
+                    | ("SortedSet", "from", 1)
+                    | ("PriorityQueue", "from", 1)
+                    | ("ByteBuffer", "from", 1)
+                    | ("Bag", "new", 0)
+                    | ("Deque", "new", 0)
+                    | ("SortedSet", "new", 0)
+                    | ("PriorityQueue", "new", 0)
+                    | ("Lru", "new", 1)
+                    | ("BitSet", "new", 0)
+                    | ("ByteBuffer", "new", 0) => {
                         return args
                             .iter()
                             .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
@@ -3043,7 +3071,7 @@ pub(crate) fn method_call_in_subset(
                 .iter()
                 .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
     }
-    // Shape (d4) [c109 Phase 24]: `Match.group(n)` (D-REGEX1). Sema sets `recv_type ==
+    // Shape (d4): `Match.group(n)` (D-REGEXENGINE1). Sema sets `recv_type ==
     // Some("Match")` (the `Match` receiver type, CheckerInfer's user/handle-method
     // writeback), and the AST `emit_builtin_method` dispatches it on the method NAME
     // guarded by `rty == Some(Named("Match"))` (Expression.rs ~L1132). Keyed on
@@ -3097,6 +3125,35 @@ pub(crate) fn method_call_in_subset(
                         _ => expr_in_subset(&a.expr, cx, locals),
                     }
             });
+    }
+    // Shape (d5c) [D-WATCH-SCOPE1]: watcher handle/set methods. Callback
+    // handlers are literal lambdas so lowering can seed `WatchEvent`.
+    if is_watch_handle_type(recv_type.as_deref()) && is_watch_method_name(method, args.len()) {
+        let handler_ok = match (recv_type.as_deref(), method, args.len()) {
+            (Some("WatchHandle"), "on" | "once", 2) => args
+                .get(1)
+                .is_some_and(|a| a.label.is_none() && matches!(a.expr, Expr::Lambda(_))),
+            _ => true,
+        };
+        return expr_in_subset(receiver, cx, locals)
+            && handler_ok
+            && args.iter().enumerate().all(|(i, a)| {
+                a.label.is_none()
+                    && match (recv_type.as_deref(), method, args.len(), i) {
+                        (Some("WatchHandle"), "on" | "once", 2, 1) => true,
+                        _ => expr_in_subset(&a.expr, cx, locals),
+                    }
+            });
+    }
+    // D-PROCESS1: ProcessSpec/ProcessChild subprocess handles. The lowerer routes
+    // every admitted method through fixed prelude helpers, with sema-proved arity.
+    if matches!(recv_type.as_deref(), Some("ProcessSpec" | "ProcessChild"))
+        && is_process_handle_method_name(recv_type.as_deref(), method, args.len())
+    {
+        return expr_in_subset(receiver, cx, locals)
+            && args
+                .iter()
+                .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
     }
     // Shape (d6) [D-HONESTNUM1=A]: a `Measurement<Float>` method.
     // Sema sets `recv_type == Some("Measurement")`.
@@ -3160,8 +3217,19 @@ pub(crate) fn method_call_in_subset(
                 .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
     }
     // Shape (d9) [D-TIMEDEPTH1=A]: a civil-time method (Date/DateTime).
-    if matches!(recv_type.as_deref(), Some("Date" | "DateTime"))
-        && is_civil_time_method_name(recv_type.as_deref(), method)
+    if matches!(
+        recv_type.as_deref(),
+        Some(
+            "Date"
+                | "LocalDate"
+                | "LocalTime"
+                | "DateTime"
+                | "Instant"
+                | "Period"
+                | "Zone"
+                | "ZonedDateTime"
+        )
+    ) && is_civil_time_method_name(recv_type.as_deref(), method)
     {
         return expr_in_subset(receiver, cx, locals)
             && args
@@ -3585,7 +3653,7 @@ pub(crate) fn is_intercepted_method_name(method: &str) -> bool {
         | "take" | "skip" | "step_by" | "dedup" | "chunks" | "windows"
         | "enumerate" | "zip"
         | "take_while" | "skip_while" | "flat_map" | "scan"
-        | "position" | "min_by" | "max_by" | "fold" | "group_by" | "partition"
+        | "position" | "min_by" | "max_by" | "fold" | "group_by" | "count_by" | "partition"
         // Numeric predicates / bit ops / width conversions (D-NUMOPS1).
         | "is_nan" | "is_infinite" | "is_finite"
         | "count_ones" | "count_zeros" | "leading_zeros" | "trailing_zeros"
@@ -3702,8 +3770,15 @@ pub(crate) fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
         | ("take", 1) | ("skip", 1) | ("step_by", 1)
         | ("dedup", 0) | ("chunks", 1) | ("windows", 1)
         | ("enumerate", 0) | ("zip", 1)
+        | ("sum", 0) | ("product", 0) | ("min", 0) | ("max", 0)
+        | ("flatten", 0) | ("intersperse", 1) | ("unzip", 0)
         // D-COLLBREADTH1=A: Set<T> instance methods.
         | ("add", 1) | ("union", 1) | ("to_list", 0)
+        | ("peek", 0) | ("to_sorted_list", 0) | ("put", 2)
+        | ("capacity", 0) | ("count", 0) | ("to_bytes", 0)
+        | ("write_u8", 1) | ("write_u16_le", 1) | ("write_u16_be", 1)
+        | ("write_u32_le", 1) | ("write_u32_be", 1)
+        | ("write_u64_le", 1) | ("write_u64_be", 1) | ("write_bytes", 1)
         // D-TAG1: Bag<T> instance methods (add/remove share list/set arms above).
         | ("has", 1) | ("count", 1)
         // D-COLLBREADTH1=A: Deque<T> instance methods.
@@ -3775,6 +3850,55 @@ pub(crate) fn is_event_method_name(method: &str, nargs: usize) -> bool {
     )
 }
 
+pub(crate) fn is_watch_handle_type(name: Option<&str>) -> bool {
+    matches!(name, Some("WatchHandle" | "WatchSet"))
+}
+
+pub(crate) fn is_watch_method_name(method: &str, nargs: usize) -> bool {
+    matches!(
+        (method, nargs),
+        ("poll" | "events" | "summary", 0)
+            | ("active" | "cancel", 0)
+            | ("on" | "once", 2)
+            | ("add", 1)
+    )
+}
+
+pub(crate) fn is_process_handle_method_name(
+    recv_type: Option<&str>,
+    method: &str,
+    nargs: usize,
+) -> bool {
+    match recv_type {
+        Some("ProcessSpec") => matches!(
+            (method, nargs),
+            ("cwd" | "env_remove" | "stdin_text" | "stdout" | "stderr", 1)
+                | ("env", 2)
+                | (
+                    "env_clear"
+                        | "stdout_capture"
+                        | "stdout_inherit"
+                        | "stdout_discard"
+                        | "stderr_capture"
+                        | "stderr_inherit"
+                        | "stderr_discard"
+                        | "detached"
+                        | "run"
+                        | "spawn",
+                    0
+                )
+                | ("timeout_ms" | "output_limit", 1)
+        ),
+        Some("ProcessChild") => matches!(
+            (method, nargs),
+            ("id" | "wait" | "kill" | "terminate" | "interrupt", 0)
+                | ("write_stdin", 1)
+                | ("read_stdout_line" | "read_stderr_line", 0)
+        ),
+        _ => false,
+    }
+}
+
 /// D-HONESTNUM1=A: is `(method, nargs)` a `Measurement<Float>` method?
 /// `.add/sub/mul/div(m)` (1 arg), `.value()/.uncertainty()` (0 args).
 /// Always keyed with `recv_type == Some("Measurement")`.
@@ -3840,10 +3964,27 @@ pub(crate) fn is_http_type(recv_type: Option<&str>) -> bool {
 /// D-NETDEP1=A / D-HTTPLIB1=A: is `method` valid for this HTTP type?
 pub(crate) fn is_http_method_name(recv_type: Option<&str>, method: &str) -> bool {
     match recv_type {
-        Some("HttpClientReq") => matches!(method, "header" | "body" | "timeout" | "send"),
-        Some("HttpClientResp") => matches!(method, "status" | "body" | "header"),
+        Some("HttpClientReq") => matches!(
+            method,
+            "header"
+                | "body"
+                | "timeout"
+                | "connect_timeout"
+                | "read_timeout"
+                | "total_timeout"
+                | "redirects"
+                | "proxy"
+                | "cookie"
+                | "form"
+                | "multipart_text"
+                | "send"
+        ),
+        Some("HttpClientResp") => matches!(method, "status" | "body" | "header" | "cookies"),
         Some("HttpMux") => matches!(method, "get" | "post" | "put" | "delete" | "patch"),
-        Some("HttpSrvReq") => matches!(method, "method" | "path" | "body" | "param" | "header"),
+        Some("HttpSrvReq") => matches!(
+            method,
+            "method" | "path" | "body" | "param" | "header" | "body_len" | "under_limit"
+        ),
         Some("HttpSrvResp") => matches!(method, "header"),
         _ => false,
     }
@@ -3852,21 +3993,55 @@ pub(crate) fn is_http_method_name(recv_type: Option<&str>, method: &str) -> bool
 /// D-TIMEDEPTH1=A: is `method` valid for this civil-time type?
 pub(crate) fn is_civil_time_method_name(recv_type: Option<&str>, method: &str) -> bool {
     match recv_type {
-        Some("Date") => matches!(
+        Some("Date" | "LocalDate") => matches!(
             method,
             "year"
                 | "month"
                 | "day"
                 | "add_days"
                 | "add_months"
+                | "add_period"
                 | "diff_days"
                 | "weekday"
+                | "iso_weekday"
                 | "day_of_year"
+                | "iso_week"
+                | "truncate"
+                | "format"
                 | "to_string"
         ),
+        Some("LocalTime") => matches!(method, "hour" | "minute" | "second" | "to_string"),
         Some("DateTime") => matches!(
             method,
-            "hour" | "minute" | "second" | "to_timestamp" | "date" | "to_string"
+            "hour"
+                | "minute"
+                | "second"
+                | "to_timestamp"
+                | "to_unix_ms"
+                | "date"
+                | "time"
+                | "plus_duration"
+                | "truncate"
+                | "round"
+                | "in_zone"
+                | "format_rfc3339"
+                | "format"
+                | "to_string"
+        ),
+        Some("Instant") => matches!(method, "elapsed_millis"),
+        Some("Period") => matches!(method, "to_string"),
+        Some("Zone") => matches!(method, "name"),
+        Some("ZonedDateTime") => matches!(
+            method,
+            "date"
+                | "time"
+                | "offset_seconds"
+                | "to_datetime"
+                | "zone"
+                | "add_duration"
+                | "add_period"
+                | "format"
+                | "to_string"
         ),
         _ => false,
     }
@@ -4163,7 +4338,19 @@ pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
     if matches!(module, "core.http.client" | "core.http.server")
         && matches!(
             method,
-            "get" | "post" | "request" | "mux" | "serve" | "response" | "tls"
+            "get"
+                | "post"
+                | "request"
+                | "mux"
+                | "serve"
+                | "serve_once"
+                | "serve_once_listener"
+                | "response"
+                | "tls"
+                | "sse"
+                | "static_file"
+                | "static_file_range"
+                | "access_log"
         )
     {
         return true;
@@ -4245,6 +4432,12 @@ pub(crate) fn core_closure_call_in_subset(
         ("core.scope", "guard") => args.len() == 1 && no_labels && lambda_arg(0),
         // D-DATA-SURFACE1=A: typed table selectors. Rows arg is in subset; selector
         // args must be literal lambdas so lowering can seed row param types.
+        ("core.data", "filter" | "sort_by") => {
+            args.len() == 2
+                && no_labels
+                && expr_in_subset(&args[0].expr, cx, locals)
+                && lambda_arg(1)
+        }
         ("core.data", "group_count") => {
             args.len() == 2
                 && no_labels
@@ -4400,6 +4593,16 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("FileWriter", "write_line", 1) => THandleOp::FileWriterWriteLine,
         ("FileWriter", "flush", 0) => THandleOp::FileWriterFlush,
         ("StdinHandle", "read_line", 0) => THandleOp::StdinReadLine,
+        ("Stdout", "write", 1) => THandleOp::StdoutWrite,
+        ("Stdout", "write_line", 1) => THandleOp::StdoutWriteLine,
+        ("Stdout", "write_bytes", 1) => THandleOp::StdoutWriteBytes,
+        ("Stdout", "flush", 0) => THandleOp::StdoutFlush,
+        ("Stdout", "is_tty", 0) => THandleOp::StdoutIsTty,
+        ("Stderr", "write", 1) => THandleOp::StderrWrite,
+        ("Stderr", "write_line", 1) => THandleOp::StderrWriteLine,
+        ("Stderr", "write_bytes", 1) => THandleOp::StderrWriteBytes,
+        ("Stderr", "flush", 0) => THandleOp::StderrFlush,
+        ("Stderr", "is_tty", 0) => THandleOp::StderrIsTty,
         ("Stopwatch", "elapsed_millis", 0) => THandleOp::StopwatchElapsedMillis,
         // D-DET1: deterministic injected Clock/Rng capability methods.
         ("Clock", "now", 0) => THandleOp::ClockNow,
@@ -4409,8 +4612,16 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("Clock", "wait", 1) => THandleOp::ClockWait,
         ("Rng", "int", 2) => THandleOp::RngInt,
         ("Rng", "float", 0) => THandleOp::RngFloat,
+        ("Rng", "float_range", 2) => THandleOp::RngFloatRange,
         ("Rng", "bool", 0) => THandleOp::RngBool,
+        ("Rng", "bool", 1) => THandleOp::RngBoolP,
+        ("Rng", "normal", 2) => THandleOp::RngNormal,
+        ("Rng", "exponential", 1) => THandleOp::RngExponential,
+        ("Rng", "bytes", 1) => THandleOp::RngBytes,
+        ("Rng", "split", 0) => THandleOp::RngSplit,
         ("Rng", "pick", 1) => THandleOp::RngPick,
+        ("Rng", "weighted_pick", 2) => THandleOp::RngWeightedPick,
+        ("Rng", "sample", 2) => THandleOp::RngSample,
         ("Rng", "shuffle", 1) => THandleOp::RngShuffle,
         ("Solver", "require", 1) => THandleOp::SolverRequire,
         ("Solver", "failure_count", 0) => THandleOp::SolverFailureCount,
@@ -4424,6 +4635,7 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("GameBudgetsSlot", "set", 1) => THandleOp::GameBudgetsSet,
         ("GameInputSnapshot", "pressed", 1) => THandleOp::GameInputPressed,
         ("Duration", "millis", 0) => THandleOp::DurationMillis,
+        ("Duration", "seconds", 0) => THandleOp::DurationSeconds,
         ("BigInt", "add" | "sub" | "mul", 1) => THandleOp::PreciseMethod {
             type_name: "BigInt".to_string(),
             method: method.to_string(),
@@ -4453,8 +4665,20 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         // share identical Rust method names (the engines differ; the surface doesn't).
         // D-ARGS1: ArgsSpec builder methods.
         ("ArgsSpec", "flag", 2) => THandleOp::ArgsSpecFlag,
+        ("ArgsSpec", "flag_short", 3) => THandleOp::ArgsSpecFlagShort,
         ("ArgsSpec", "option", 3) => THandleOp::ArgsSpecOption,
+        ("ArgsSpec", "option_short", 4) => THandleOp::ArgsSpecOptionShort,
+        ("ArgsSpec", "option_default", 4) => THandleOp::ArgsSpecOptionDefault,
+        ("ArgsSpec", "option_env", 4) => THandleOp::ArgsSpecOptionEnv,
+        ("ArgsSpec", "option_int", 3) => THandleOp::ArgsSpecOptionInt,
+        ("ArgsSpec", "option_float", 3) => THandleOp::ArgsSpecOptionFloat,
+        ("ArgsSpec", "option_choice", 4) => THandleOp::ArgsSpecOptionChoice,
+        ("ArgsSpec", "repeat", 3) => THandleOp::ArgsSpecRepeat,
+        ("ArgsSpec", "required_option", 3) => THandleOp::ArgsSpecRequiredOption,
         ("ArgsSpec", "positional", 2) => THandleOp::ArgsSpecPositional,
+        ("ArgsSpec", "subcommand", 3) => THandleOp::ArgsSpecSubcommand,
+        ("ArgsSpec", "version", 1) => THandleOp::ArgsSpecVersion,
+        ("ArgsSpec", "completion", 1) => THandleOp::ArgsSpecCompletion,
         ("ArgsSpec", "help", 0) => THandleOp::ArgsSpecHelp,
         ("ArgsSpec", "parse", 1) => THandleOp::ArgsSpecParse,
         // D-ANY-JAI1 (c7jaiany §6): reflect.of(x)'s Value/Field handle methods.
@@ -4466,7 +4690,11 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         // D-ARGS1: ParsedArgs query methods.
         ("ParsedArgs", "flag", 1) => THandleOp::ParsedArgsFlag,
         ("ParsedArgs", "option", 1) => THandleOp::ParsedArgsOption,
+        ("ParsedArgs", "option_int", 1) => THandleOp::ParsedArgsOptionInt,
+        ("ParsedArgs", "option_float", 1) => THandleOp::ParsedArgsOptionFloat,
+        ("ParsedArgs", "options", 1) => THandleOp::ParsedArgsOptions,
         ("ParsedArgs", "positional", 1) => THandleOp::ParsedArgsPositional,
+        ("ParsedArgs", "subcommand", 0) => THandleOp::ParsedArgsSubcommand,
         ("Arena" | "Bump" | "Pool" | "Fixed", "alloc", 1) => THandleOp::AllocAlloc,
         ("Arena" | "Bump" | "Pool" | "Fixed", "reset", 0) => THandleOp::AllocReset,
         ("Arena" | "Bump" | "Pool" | "Fixed", "free", 0) => THandleOp::AllocFree,
@@ -4497,6 +4725,53 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("Data" | "Json" | "Toml" | "Yaml" | "Csv", "text", 0) => THandleOp::JsonText,
         ("Data" | "Json" | "Toml" | "Yaml" | "Csv", "bool", 0) => THandleOp::JsonBool,
         ("Data" | "Json" | "Toml" | "Yaml" | "Csv", "float", 0) => THandleOp::JsonFloat,
+        (
+            "Url",
+            "scheme" | "host" | "port" | "path" | "path_segments" | "query" | "query_pairs"
+            | "fragment" | "normalize" | "to_string",
+            0,
+        ) => THandleOp::UrlMimeMethod {
+            kind: "Url".to_string(),
+            method: method.to_string(),
+        },
+        ("Url", "join", 1) => THandleOp::UrlMimeMethod {
+            kind: "Url".to_string(),
+            method: method.to_string(),
+        },
+        ("Url", "set_query" | "add_query", 2) => THandleOp::UrlMimeMethod {
+            kind: "Url".to_string(),
+            method: method.to_string(),
+        },
+        ("Mime", "media_type" | "subtype" | "essence" | "params" | "to_string", 0) => {
+            THandleOp::UrlMimeMethod {
+                kind: "Mime".to_string(),
+                method: method.to_string(),
+            }
+        }
+        ("Mime", "param", 1) => THandleOp::UrlMimeMethod {
+            kind: "Mime".to_string(),
+            method: method.to_string(),
+        },
+        ("Regex", "is_match" | "match" | "find" | "find_all" | "matches" | "split", 1) => {
+            THandleOp::RegexMethod {
+                kind: "Regex".to_string(),
+                method: method.to_string(),
+            }
+        }
+        ("Regex", "replace" | "replace_all" | "replace_all_with" | "split_limit", 2) => {
+            THandleOp::RegexMethod {
+                kind: "Regex".to_string(),
+                method: method.to_string(),
+            }
+        }
+        ("Match", "start" | "end", 0) => THandleOp::RegexMethod {
+            kind: "Match".to_string(),
+            method: method.to_string(),
+        },
+        ("Match", "group" | "name" | "group_start" | "group_end", 1) => THandleOp::RegexMethod {
+            kind: "Match".to_string(),
+            method: method.to_string(),
+        },
         // D-PATHFS1: typed Path instance methods.
         ("Path", "join", 1) => THandleOp::PathJoin,
         ("Path", "parent", 0) => THandleOp::PathParent,
@@ -4598,6 +4873,48 @@ pub(crate) fn handle_method_return_ty(handle: &str, method: &str, nargs: usize) 
             } else {
                 None
             }
+        })
+        .or_else(|| match (handle, method, nargs) {
+            ("Url", "scheme" | "path" | "query" | "to_string", 0) => Some(Some(Type::String)),
+            ("Url", "host" | "fragment", 0) => Some(Some(Type::Option(Box::new(Type::String)))),
+            ("Url", "port", 0) => Some(Some(Type::Option(Box::new(Type::Int)))),
+            ("Url", "path_segments", 0) => Some(Some(Type::List(Box::new(Type::String)))),
+            ("Url", "query_pairs", 0) => Some(Some(Type::List(Box::new(Type::List(Box::new(
+                Type::String,
+            )))))),
+            ("Url", "normalize" | "set_query" | "add_query", _) => {
+                Some(Some(Type::Named("Url".to_string())))
+            }
+            ("Url", "join", 1) => Some(Some(Type::Result {
+                ok: Box::new(Type::Named("Url".to_string())),
+                err: Box::new(Type::String),
+            })),
+            ("Mime", "media_type" | "subtype" | "essence" | "to_string", 0) => {
+                Some(Some(Type::String))
+            }
+            ("Mime", "param", 1) => Some(Some(Type::Option(Box::new(Type::String)))),
+            ("Mime", "params", 0) => Some(Some(Type::List(Box::new(Type::List(Box::new(
+                Type::String,
+            )))))),
+            ("Regex", "is_match", 1) => Some(Some(Type::Bool)),
+            ("Regex", "match", 1) => Some(Some(Type::Option(Box::new(Type::Named(
+                "Match".to_string(),
+            ))))),
+            ("Regex", "find", 1) => Some(Some(Type::Option(Box::new(Type::String)))),
+            ("Regex", "find_all" | "split", 1) => Some(Some(Type::List(Box::new(Type::String)))),
+            ("Regex", "matches", 1) => {
+                Some(Some(Type::List(Box::new(Type::Named("Match".to_string())))))
+            }
+            ("Regex", "replace" | "replace_all" | "replace_all_with", 2) => {
+                Some(Some(Type::String))
+            }
+            ("Regex", "split_limit", 2) => Some(Some(Type::List(Box::new(Type::String)))),
+            ("Match", "group" | "name", 1) => Some(Some(Type::Option(Box::new(Type::String)))),
+            ("Match", "start" | "end", 0) => Some(Some(Type::Int)),
+            ("Match", "group_start" | "group_end", 1) => {
+                Some(Some(Type::Option(Box::new(Type::Int))))
+            }
+            _ => None,
         })
         // D-SHIFT1 (c7shift): `binary.Reader` / `text.Cursor` — `take_pattern`
         // is excluded (like `Gc.new<T>`/`Arena.alloc` above), resolved
@@ -4775,13 +5092,21 @@ pub(crate) fn core_call_return_ty(module: &str, method: &str) -> Type {
         ("core.http.client", "request") => return Type::Named("HttpClientReq".to_string()),
         ("core.http.server", "mux") => return Type::Named("HttpMux".to_string()),
         ("core.http.server", "tls") => return Type::Named("HttpServerTls".to_string()),
-        ("core.http.server", "serve") => {
+        ("core.http.server", "serve" | "serve_once" | "serve_once_listener") => {
             return Type::Result {
                 ok: Box::new(Type::Tuple(vec![])),
                 err: Box::new(Type::String),
             }
         }
+        ("core.http.server", "static_file" | "static_file_range") => {
+            return Type::Result {
+                ok: Box::new(Type::Named("HttpSrvResp".to_string())),
+                err: Box::new(Type::String),
+            }
+        }
         ("core.http.server", "response") => return Type::Named("HttpSrvResp".to_string()),
+        ("core.http.server", "sse") => return Type::Named("HttpSrvResp".to_string()),
+        ("core.http.server", "access_log") => return Type::String,
         _ => {}
     }
     crate::Sema::core_fixed_sig(module, method)

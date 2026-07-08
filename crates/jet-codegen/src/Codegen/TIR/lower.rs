@@ -922,9 +922,10 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             // when bound immutably (its methods take `&mut self`). Mirror
             // `emit_let`'s `is_file_handle` set exactly.
             let is_file_handle = matches!(
-                &b.ty,
-                Some(Type::Named(n)) if n == "FileReader" || n == "FileWriter"
-                    || n == "TcpStream" || n == "HttpRouter"
+                &ty,
+                Type::Named(n) if n == "FileReader" || n == "FileWriter"
+                    || n == "Stdout" || n == "Stderr"
+                    || n == "TcpStream" || n == "UnixStream" || n == "HttpRouter"
                     || n == "Arena" || n == "Bump" || n == "Pool" || n == "Fixed"
             )
             // D-SHIFT1 (c7shift): `Reader`/`Cursor` bindings are usually
@@ -4757,13 +4758,34 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
         return None;
     }
     let known = match type_name.as_str() {
-        "ProcessResult" => matches!(member, "code" | "output" | "errors"),
+        "ProcessResult" => matches!(
+            member,
+            "code" | "output" | "errors" | "success" | "signal" | "timed_out"
+        ),
         n if n == Syntax::TYPE_JSON_ERROR || n == "JsonError" => {
             matches!(member, "line" | "message")
         }
         n if n == Syntax::TYPE_UTF8_ERROR || n == "Utf8Error" => member == "message",
         // D-LSDIR1=A: DirEntry fields — name (bare filename), path (full path), is_dir.
         "DirEntry" => matches!(member, "name" | "path" | "is_dir"),
+        // D-FSOPS1/D-WATCH-SCOPE1: core filesystem/watch structs use plain Rust fields.
+        "Stat" => matches!(
+            member,
+            "size"
+                | "modified_ms"
+                | "created_ms"
+                | "readonly"
+                | "is_file"
+                | "is_dir"
+                | "is_symlink"
+                | "kind"
+        ),
+        "WalkEntry" => matches!(member, "path" | "relative" | "is_dir" | "depth"),
+        "TempDir" | "TempFile" | "FileLock" => member == "path",
+        "WatchEvent" => matches!(
+            member,
+            "domain" | "kind" | "path" | "detail" | "pid" | "port"
+        ),
         // D-DATA-SURFACE1=A / D-DATA-STATUS1=A: core.data fields use plain Rust names.
         "DataGroup" => matches!(member, "key" | "count" | "sum" | "mean"),
         "DataStatus" => matches!(member, "step" | "path" | "replacement"),
@@ -5093,13 +5115,32 @@ pub(crate) fn lower_method_call(
                     },
                 };
             }
-            Syntax::SELECT_AFTER_METHOD if args.len() == 1 => {
+            Syntax::SELECT_AFTER_METHOD if args.len() == 1 || args.len() == 2 => {
                 let millis = lower_expr(&args[0].expr, cx, env);
+                let value = args
+                    .get(1)
+                    .map(|arg| Box::new(lower_expr(&arg.expr, cx, env)));
+                let ty = if let Some(value) = value.as_ref() {
+                    match &builder.ty {
+                        Type::Apply { name, args, .. }
+                            if name == Syntax::TYPE_SELECT_BUILDER && args.len() == 1 =>
+                        {
+                            builder.ty.clone()
+                        }
+                        _ => Type::Apply {
+                            name: Syntax::TYPE_SELECT_BUILDER.to_string(),
+                            args: vec![value.ty.clone()],
+                        },
+                    }
+                } else {
+                    builder.ty.clone()
+                };
                 return TExpr {
-                    ty: builder.ty.clone(),
+                    ty,
                     kind: TExprKind::SelectAfter {
                         builder: Box::new(builder),
                         millis: Box::new(millis),
+                        value,
                     },
                 };
             }
@@ -5590,7 +5631,9 @@ pub(crate) fn lower_method_call(
     // emit makes no type decision (I3). The result type comes from the builtin's
     // sema return (`Collections::builtin_method_return`) for totality.
     if recv_type.is_none() {
-        if let Some(op) = resolve_builtin_op(receiver, method, method_span, args, env, cx) {
+        if let Some(op) =
+            resolve_builtin_op(receiver, method, method_span, args, resolved_ret, env, cx)
+        {
             // D-MEM1 S6: a mutating builtin (`.push()` etc.) on a place rooted in
             // a `Pool` index (`tree[root].children.push(child)`) needs the SAME
             // genuine-mutable-place treatment `LValue::Field`/`LValue::Index`
@@ -5615,6 +5658,7 @@ pub(crate) fn lower_method_call(
             // struct name above — reuse it here instead of guessing a placeholder.
             let result_ty = match &op {
                 TBuiltinOp::OptionZip { elem_ty, .. } => Type::Option(Box::new(elem_ty.clone())),
+                _ if resolved_ret.is_some() => resolved_ret.cloned().unwrap_or_else(unit_type),
                 _ => builtin_result_ty(method, args.len(), recv_ast_ty.as_ref()),
             };
             // Args are emitted plainly (no clone/borrow wrappers), exactly as
@@ -5761,6 +5805,103 @@ pub(crate) fn lower_method_call(
             },
         };
     }
+    // D-WATCH-SCOPE1: WatchHandle/WatchSet methods. Callback lambdas receive
+    // a WatchEvent payload, matching the shared Core event/callback model.
+    if is_watch_handle_type(recv_type.as_deref()) && is_watch_method_name(method, args.len()) {
+        let recv_t = lower_expr(receiver, cx, env);
+        let result_ty = match (recv_type.as_deref(), method) {
+            (_, "poll" | "events") => Type::List(Box::new(Type::Named("WatchEvent".to_string()))),
+            (Some("WatchHandle"), "on" | "once") => Type::Named("Subscription".to_string()),
+            (_, "summary") => Type::String,
+            (_, "active") => Type::Bool,
+            _ => unit_type(),
+        };
+        let targs: Vec<TExpr> = args
+            .iter()
+            .enumerate()
+            .map(|(i, a)| {
+                if matches!(
+                    (recv_type.as_deref(), method, args.len(), i),
+                    (Some("WatchHandle"), "on" | "once", 2, 1)
+                ) {
+                    if let Expr::Lambda(lam) = &a.expr {
+                        let params = vec![Type::Named("WatchEvent".to_string())];
+                        let tl = lower_lambda_expecting(lam, cx, env, Some(params.as_slice()));
+                        return TExpr {
+                            ty: Type::Fn {
+                                params,
+                                ret: None,
+                                effect_bound: None,
+                            },
+                            kind: TExprKind::Lambda(Box::new(tl)),
+                        };
+                    }
+                }
+                lower_expr(&a.expr, cx, env)
+            })
+            .collect();
+        return TExpr {
+            ty: result_ty,
+            kind: TExprKind::HandleMethod {
+                recv: Box::new(recv_t),
+                op: THandleOp::WatchMethod {
+                    method: method.to_string(),
+                },
+                args: targs,
+            },
+        };
+    }
+    // D-PROCESS1: ProcessSpec/ProcessChild methods lower to explicit prelude
+    // helpers; sema already proved arity and argument types.
+    if matches!(
+        recv_type.as_deref(),
+        Some("ProcessSpec") | Some("ProcessChild")
+    ) {
+        let recv_t = lower_expr(receiver, cx, env);
+        let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
+        let result_ty = match (recv_type.as_deref(), method) {
+            (Some("ProcessSpec"), "run") => Type::Result {
+                ok: Box::new(Type::Named("ProcessResult".to_string())),
+                err: Box::new(Type::Named("IOError".to_string())),
+            },
+            (Some("ProcessSpec"), "spawn") => Type::Result {
+                ok: Box::new(Type::Named("ProcessChild".to_string())),
+                err: Box::new(Type::Named("IOError".to_string())),
+            },
+            (Some("ProcessSpec"), _) => Type::Named("ProcessSpec".to_string()),
+            (Some("ProcessChild"), "id") => Type::Int,
+            (Some("ProcessChild"), "wait") => Type::Result {
+                ok: Box::new(Type::Named("ProcessResult".to_string())),
+                err: Box::new(Type::Named("IOError".to_string())),
+            },
+            (Some("ProcessChild"), "read_stdout_line" | "read_stderr_line") => Type::Result {
+                ok: Box::new(Type::Option(Box::new(Type::String))),
+                err: Box::new(Type::Named("IOError".to_string())),
+            },
+            (Some("ProcessChild"), _) => Type::Result {
+                ok: Box::new(unit_type()),
+                err: Box::new(Type::Named("IOError".to_string())),
+            },
+            _ => unit_type(),
+        };
+        let op = if recv_type.as_deref() == Some("ProcessSpec") {
+            THandleOp::ProcessSpecMethod {
+                method: method.to_string(),
+            }
+        } else {
+            THandleOp::ProcessChildMethod {
+                method: method.to_string(),
+            }
+        };
+        return TExpr {
+            ty: result_ty,
+            kind: TExprKind::HandleMethod {
+                recv: Box::new(recv_t),
+                op,
+                args: targs,
+            },
+        };
+    }
     // D-HONESTNUM1=A: a `Measurement<Float>` method (gate shape d6).
     if recv_type.as_deref() == Some("Measurement") && is_measurement_method_name(method, args.len())
     {
@@ -5903,17 +6044,28 @@ pub(crate) fn lower_method_call(
         let result_ty = match (kind.as_str(), method) {
             ("HttpClientReq", "header")
             | ("HttpClientReq", "body")
-            | ("HttpClientReq", "timeout") => Type::Named("HttpClientReq".to_string()),
+            | ("HttpClientReq", "timeout")
+            | ("HttpClientReq", "connect_timeout")
+            | ("HttpClientReq", "read_timeout")
+            | ("HttpClientReq", "total_timeout")
+            | ("HttpClientReq", "redirects")
+            | ("HttpClientReq", "proxy")
+            | ("HttpClientReq", "cookie")
+            | ("HttpClientReq", "form")
+            | ("HttpClientReq", "multipart_text") => Type::Named("HttpClientReq".to_string()),
             ("HttpClientReq", "send") => Type::Result {
                 ok: Box::new(Type::Named("HttpClientResp".to_string())),
                 err: Box::new(Type::String),
             },
             ("HttpClientResp", "status") => Type::Int,
             ("HttpClientResp", "body") | ("HttpClientResp", "header") => Type::String,
+            ("HttpClientResp", "cookies") => Type::List(Box::new(Type::String)),
             ("HttpMux", _) => unit_type(),
             ("HttpSrvReq", "method") | ("HttpSrvReq", "path") | ("HttpSrvReq", "body") => {
                 Type::String
             }
+            ("HttpSrvReq", "body_len") => Type::Int,
+            ("HttpSrvReq", "under_limit") => Type::Bool,
             ("HttpSrvReq", "param") | ("HttpSrvReq", "header") => {
                 Type::Option(Box::new(Type::String))
             }
@@ -5946,26 +6098,61 @@ pub(crate) fn lower_method_call(
         };
     }
     // D-TIMEDEPTH1=A: a civil-time method (gate shape d9).
-    if matches!(recv_type.as_deref(), Some("Date" | "DateTime"))
-        && is_civil_time_method_name(recv_type.as_deref(), method)
+    if matches!(
+        recv_type.as_deref(),
+        Some(
+            "Date"
+                | "LocalDate"
+                | "LocalTime"
+                | "DateTime"
+                | "Instant"
+                | "Period"
+                | "Zone"
+                | "ZonedDateTime"
+        )
+    ) && is_civil_time_method_name(recv_type.as_deref(), method)
     {
         let kind = recv_type.as_deref().unwrap_or("Date").to_string();
         let recv_t = lower_expr(receiver, cx, env);
         let result_ty = match (kind.as_str(), method) {
-            ("Date", "year")
-            | ("Date", "month")
-            | ("Date", "day")
-            | ("Date", "diff_days")
-            | ("Date", "weekday")
-            | ("Date", "day_of_year") => Type::Int,
-            ("Date", "add_days") | ("Date", "add_months") => Type::Named("Date".to_string()),
-            ("Date", "to_string") => Type::String,
+            ("Date" | "LocalDate", "year")
+            | ("Date" | "LocalDate", "month")
+            | ("Date" | "LocalDate", "day")
+            | ("Date" | "LocalDate", "diff_days")
+            | ("Date" | "LocalDate", "weekday")
+            | ("Date" | "LocalDate", "iso_weekday")
+            | ("Date" | "LocalDate", "day_of_year")
+            | ("Date" | "LocalDate", "iso_week") => Type::Int,
+            ("Date" | "LocalDate", "add_days" | "add_months" | "add_period" | "truncate") => {
+                Type::Named("LocalDate".to_string())
+            }
+            ("Date" | "LocalDate", "to_string" | "format") => Type::String,
+            ("LocalTime", "hour" | "minute" | "second") => Type::Int,
+            ("LocalTime", "to_string") => Type::String,
             ("DateTime", "hour")
             | ("DateTime", "minute")
             | ("DateTime", "second")
-            | ("DateTime", "to_timestamp") => Type::Int,
-            ("DateTime", "date") => Type::Named("Date".to_string()),
-            ("DateTime", "to_string") => Type::String,
+            | ("DateTime", "to_timestamp")
+            | ("DateTime", "to_unix_ms") => Type::Int,
+            ("DateTime", "date") => Type::Named("LocalDate".to_string()),
+            ("DateTime", "time") => Type::Named("LocalTime".to_string()),
+            ("DateTime", "plus_duration" | "truncate" | "round") => {
+                Type::Named("DateTime".to_string())
+            }
+            ("DateTime", "in_zone") => Type::Named("ZonedDateTime".to_string()),
+            ("DateTime", "to_string" | "format_rfc3339" | "format") => Type::String,
+            ("Instant", "elapsed_millis") => Type::Int,
+            ("Period", "to_string") => Type::String,
+            ("Zone", "name") => Type::String,
+            ("ZonedDateTime", "date") => Type::Named("LocalDate".to_string()),
+            ("ZonedDateTime", "time") => Type::Named("LocalTime".to_string()),
+            ("ZonedDateTime", "offset_seconds") => Type::Int,
+            ("ZonedDateTime", "to_datetime") => Type::Named("DateTime".to_string()),
+            ("ZonedDateTime", "zone") => Type::Named("Zone".to_string()),
+            ("ZonedDateTime", "add_duration" | "add_period") => {
+                Type::Named("ZonedDateTime".to_string())
+            }
+            ("ZonedDateTime", "to_string" | "format") => Type::String,
             _ => unit_type(),
         };
         let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
@@ -6203,11 +6390,17 @@ pub(crate) fn lower_method_call(
         let recv_t = lower_expr(receiver, cx, env);
         let path_t = lower_expr(&args[0].expr, cx, env);
         let handler = render_router_handler(args, cx, env);
+        let line = crate::Diagnostics::span_line_col(&cx.src, method_span.start).0;
         return TExpr {
             ty: unit_type(),
             kind: TExprKind::HandleMethod {
                 recv: Box::new(recv_t),
-                op: THandleOp::HttpRouterRegister { verb, handler },
+                op: THandleOp::HttpRouterRegister {
+                    verb,
+                    handler,
+                    file: cx.file.clone(),
+                    line,
+                },
                 args: vec![path_t],
             },
         };
@@ -6407,6 +6600,137 @@ pub(crate) fn lower_method_call(
                 kind: TExprKind::BuiltinMethod {
                     recv: Box::new(list_arg),
                     op: TBuiltinOp::SetFrom,
+                    args: vec![],
+                },
+            };
+        }
+        if type_name == crate::Syntax::TYPE_SORTED_SET && method == "from" && args.len() == 1 {
+            let list_arg = lower_expr(&args[0].expr, cx, env);
+            let elem_ty = match &list_arg.ty {
+                Type::List(inner) => *inner.clone(),
+                _ => Type::Int,
+            };
+            return TExpr {
+                ty: Type::Apply {
+                    name: crate::Syntax::TYPE_SORTED_SET.to_string(),
+                    args: vec![elem_ty],
+                },
+                kind: TExprKind::BuiltinMethod {
+                    recv: Box::new(list_arg),
+                    op: TBuiltinOp::SortedSetFrom,
+                    args: vec![],
+                },
+            };
+        }
+        if type_name == crate::Syntax::TYPE_SORTED_SET && method == "new" && args.is_empty() {
+            let elem_ty = match resolved_ret {
+                Some(Type::Apply { args: targs, .. }) if !targs.is_empty() => targs[0].clone(),
+                _ => Type::Int,
+            };
+            let elem_rust = cx.rust_type(&elem_ty);
+            return TExpr {
+                ty: Type::Apply {
+                    name: crate::Syntax::TYPE_SORTED_SET.to_string(),
+                    args: vec![elem_ty],
+                },
+                kind: TExprKind::StaticCall {
+                    type_prefix: format!("std::collections::BTreeSet::<{}>", elem_rust),
+                    method_rust: "new".to_string(),
+                    args: vec![],
+                },
+            };
+        }
+        if type_name == crate::Syntax::TYPE_PRIORITY_QUEUE && method == "from" && args.len() == 1 {
+            let list_arg = lower_expr(&args[0].expr, cx, env);
+            let elem_ty = match &list_arg.ty {
+                Type::List(inner) => *inner.clone(),
+                _ => Type::Int,
+            };
+            return TExpr {
+                ty: Type::Apply {
+                    name: crate::Syntax::TYPE_PRIORITY_QUEUE.to_string(),
+                    args: vec![elem_ty],
+                },
+                kind: TExprKind::BuiltinMethod {
+                    recv: Box::new(list_arg),
+                    op: TBuiltinOp::PriorityQueueFrom,
+                    args: vec![],
+                },
+            };
+        }
+        if type_name == crate::Syntax::TYPE_PRIORITY_QUEUE && method == "new" && args.is_empty() {
+            let elem_ty = match resolved_ret {
+                Some(Type::Apply { args: targs, .. }) if !targs.is_empty() => targs[0].clone(),
+                _ => Type::Int,
+            };
+            let elem_rust = cx.rust_type(&elem_ty);
+            return TExpr {
+                ty: Type::Apply {
+                    name: crate::Syntax::TYPE_PRIORITY_QUEUE.to_string(),
+                    args: vec![elem_ty],
+                },
+                kind: TExprKind::StaticCall {
+                    type_prefix: format!("std::collections::BinaryHeap::<{}>", elem_rust),
+                    method_rust: "new".to_string(),
+                    args: vec![],
+                },
+            };
+        }
+        if type_name == crate::Syntax::TYPE_LRU && method == "new" && args.len() == 1 {
+            let cap_arg = lower_expr(&args[0].expr, cx, env);
+            let (key_ty, value_ty) = match resolved_ret {
+                Some(Type::Apply { args: targs, .. }) if targs.len() >= 2 => {
+                    (targs[0].clone(), targs[1].clone())
+                }
+                _ => (Type::String, Type::Int),
+            };
+            return TExpr {
+                ty: Type::Apply {
+                    name: crate::Syntax::TYPE_LRU.to_string(),
+                    args: vec![key_ty, value_ty],
+                },
+                kind: TExprKind::StaticCall {
+                    type_prefix: "JetLru".to_string(),
+                    method_rust: "new".to_string(),
+                    args: vec![TCallArg {
+                        value: cap_arg,
+                        borrow: false,
+                        mut_borrow: false,
+                        clone: false,
+                        arc_clone: false,
+                        fn_coerce: None,
+                        widen_to_vec: false,
+                    }],
+                },
+            };
+        }
+        if type_name == crate::Syntax::TYPE_BIT_SET && method == "new" && args.is_empty() {
+            return TExpr {
+                ty: Type::Named(crate::Syntax::TYPE_BIT_SET.to_string()),
+                kind: TExprKind::StaticCall {
+                    type_prefix: "JetBitSet".to_string(),
+                    method_rust: "new".to_string(),
+                    args: vec![],
+                },
+            };
+        }
+        if type_name == crate::Syntax::TYPE_BYTE_BUFFER && method == "new" && args.is_empty() {
+            return TExpr {
+                ty: Type::Named(crate::Syntax::TYPE_BYTE_BUFFER.to_string()),
+                kind: TExprKind::StaticCall {
+                    type_prefix: "JetByteBuffer".to_string(),
+                    method_rust: "new".to_string(),
+                    args: vec![],
+                },
+            };
+        }
+        if type_name == crate::Syntax::TYPE_BYTE_BUFFER && method == "from" && args.len() == 1 {
+            let bytes_arg = lower_expr(&args[0].expr, cx, env);
+            return TExpr {
+                ty: Type::Named(crate::Syntax::TYPE_BYTE_BUFFER.to_string()),
+                kind: TExprKind::BuiltinMethod {
+                    recv: Box::new(bytes_arg),
+                    op: TBuiltinOp::ByteBufferFrom,
                     args: vec![],
                 },
             };
@@ -6749,6 +7073,25 @@ pub(crate) fn lower_core_closure_call(
             let lam = lam_at(0)?;
             let closure = render_lambda_str(lam, cx, env);
             TCoreClosureKind::Guard { closure }
+        }
+        ("core.data", "filter" | "sort_by") => {
+            let rows = lower_expr(&args[0].expr, cx, env);
+            let row_ty = match &rows.ty {
+                Type::List(inner) => (**inner).clone(),
+                _ => Type::Int,
+            };
+            let rows_s = emit_tir_expr(&rows, cx);
+            let pred = render_lambda_str_expecting(lam_at(1)?, cx, env, Some(&[row_ty.clone()]));
+            let helper = if method == "filter" {
+                "jet_data_filter"
+            } else {
+                "jet_data_sort_by"
+            };
+            let code = format!("{}{}(&({}), {})", cx.root_prefix, helper, rows_s, pred);
+            return Some(TExpr {
+                ty: Type::List(Box::new(row_ty)),
+                kind: TExprKind::ConstInline(code),
+            });
         }
         ("core.data", "group_count") => {
             let rows = lower_expr(&args[0].expr, cx, env);
@@ -7111,6 +7454,32 @@ pub(crate) fn tir_recv_jet_ty(e: &Expr, env: &LowerEnv) -> Option<Type> {
     }
 }
 
+fn tuple_fields(ty: Option<&Type>) -> Option<Vec<(String, Type)>> {
+    match ty {
+        Some(Type::Tuple(fields)) => Some(
+            fields
+                .iter()
+                .map(|(name, ty)| (name.clone(), (**ty).clone()))
+                .collect(),
+        ),
+        _ => None,
+    }
+}
+
+fn tuple_list_elem_fields(ty: Option<&Type>) -> Option<Vec<(String, Type)>> {
+    match ty {
+        Some(Type::List(inner)) => tuple_fields(Some(inner.as_ref())),
+        _ => None,
+    }
+}
+
+fn option_tuple_fields(ty: Option<&Type>) -> Option<Vec<(String, Type)>> {
+    match ty {
+        Some(Type::Option(inner)) => tuple_fields(Some(inner.as_ref())),
+        _ => None,
+    }
+}
+
 /// D-MEM1 S6: `pool[id].field`'s type — needed so a MUTATING method call on it
 /// (`tree[root].children.push(child)`) is recognized as needing a real mutable
 /// place (`builtin_needs_mut_receiver`), not the ordinary `jet_pool_get` value
@@ -7184,6 +7553,7 @@ pub(crate) fn resolve_builtin_op(
     method: &str,
     method_span: Span,
     args: &[crate::AST::CallArg],
+    resolved_ret: Option<&Type>,
     env: &LowerEnv,
     cx: &Cx,
 ) -> Option<TBuiltinOp> {
@@ -7194,7 +7564,14 @@ pub(crate) fn resolve_builtin_op(
     let is_string = matches!(rty, Some(Type::String));
     let is_map = matches!(rty, Some(Type::Map { .. }));
     let is_set = matches!(&rty, Some(Type::Apply { name, .. }) if name == "Set");
+    let is_sorted_set =
+        matches!(&rty, Some(Type::Apply { name, .. }) if name == crate::Syntax::TYPE_SORTED_SET);
+    let is_priority_queue = matches!(&rty, Some(Type::Apply { name, .. }) if name == crate::Syntax::TYPE_PRIORITY_QUEUE);
+    let is_lru = matches!(&rty, Some(Type::Apply { name, .. }) if name == crate::Syntax::TYPE_LRU);
     let is_bag = matches!(&rty, Some(Type::Apply { name, .. }) if name == "Bag");
+    let is_bit_set = matches!(&rty, Some(Type::Named(name)) if name == crate::Syntax::TYPE_BIT_SET);
+    let is_byte_buffer =
+        matches!(&rty, Some(Type::Named(name)) if name == crate::Syntax::TYPE_BYTE_BUFFER);
     // D-HOLE1: `.zip` on `T?` (vs. `[T].zip`).
     let is_option = matches!(rty, Some(Type::Option(_)));
     Some(match (method, args.len()) {
@@ -7220,9 +7597,15 @@ pub(crate) fn resolve_builtin_op(
         ("remove", 1) => {
             if is_set {
                 TBuiltinOp::SetRemove
+            } else if is_sorted_set {
+                TBuiltinOp::SortedSetRemove
+            } else if is_bit_set {
+                TBuiltinOp::BitSetRemove
             } else if is_bag {
                 TBuiltinOp::BagRemove
             } else if is_map {
+                TBuiltinOp::RemoveMap
+            } else if is_lru {
                 TBuiltinOp::RemoveMap
             } else {
                 // The list form embeds the *method-span* line for its bounds panic,
@@ -7232,12 +7615,16 @@ pub(crate) fn resolve_builtin_op(
             }
         }
         ("get", 1) => {
-            if is_map {
+            if is_lru {
+                TBuiltinOp::LruGet
+            } else if is_map {
                 TBuiltinOp::GetMap
             } else {
                 TBuiltinOp::GetList
             }
         }
+        ("first", 0) if is_sorted_set => TBuiltinOp::First,
+        ("last", 0) if is_sorted_set => TBuiltinOp::Last,
         ("first", 0) => TBuiltinOp::First,
         ("last", 0) => TBuiltinOp::Last,
         ("contains", 1) => TBuiltinOp::Contains,
@@ -7245,6 +7632,12 @@ pub(crate) fn resolve_builtin_op(
         ("reverse", 0) => TBuiltinOp::Reverse,
         ("sort", 0) => TBuiltinOp::Sort,
         ("join", 1) => TBuiltinOp::JoinSep,
+        ("sum", 0) => TBuiltinOp::Sum,
+        ("product", 0) => TBuiltinOp::Product,
+        ("min", 0) => TBuiltinOp::Min,
+        ("max", 0) => TBuiltinOp::Max,
+        ("flatten", 0) => TBuiltinOp::Flatten,
+        ("intersperse", 1) => TBuiltinOp::Intersperse,
         ("clear", 0) => TBuiltinOp::Clear,
         ("chars", 0) => TBuiltinOp::Chars,
         ("bytes", 0) => TBuiltinOp::Bytes,
@@ -7281,6 +7674,7 @@ pub(crate) fn resolve_builtin_op(
             let line = crate::Diagnostics::span_line_col(&cx.src, receiver.span().start).0;
             TBuiltinOp::ViewNew { line }
         }
+        ("keys", 0) if is_lru => TBuiltinOp::LruKeys,
         ("keys", 0) => TBuiltinOp::Keys,
         ("values", 0) => TBuiltinOp::Values,
         ("contains_key", 1) => TBuiltinOp::ContainsKey,
@@ -7295,59 +7689,114 @@ pub(crate) fn resolve_builtin_op(
         ("enumerate", 0) => {
             // Build the tuple struct name for `(idx: Int, item: T)`.
             // Fields are alpha-sorted: idx < item.
-            let elem_ty = match &rty {
-                Some(Type::List(inner)) => *inner.clone(),
-                _ => Type::Int,
-            };
-            let fields = vec![
-                ("idx".to_string(), Type::Int),
-                ("item".to_string(), elem_ty),
-            ];
+            let fields = tuple_list_elem_fields(resolved_ret).unwrap_or_else(|| {
+                let elem_ty = match &rty {
+                    Some(Type::List(inner)) => *inner.clone(),
+                    _ => Type::Int,
+                };
+                vec![
+                    ("idx".to_string(), Type::Int),
+                    ("item".to_string(), elem_ty),
+                ]
+            });
             let ts = crate::Codegen::Tuples::tuple_struct_name(&fields);
             TBuiltinOp::Enumerate { tuple_struct: ts }
         }
         ("zip", 1) if is_option => {
             // D-HOLE1: `a: T?`.zip(`b: U?`) -> `(a: T, b: U)?` — heterogeneous, so
             // (unlike list zip below) the real `b` type is read from the argument.
-            let a_ty = match &rty {
-                Some(Type::Option(inner)) => (**inner).clone(),
-                _ => Type::Int,
-            };
-            let b_ty = match tir_recv_jet_ty(&args[0].expr, env) {
-                Some(Type::Option(inner)) => *inner,
-                _ => Type::Int,
-            };
-            let fields = vec![
-                ("a".to_string(), a_ty.clone()),
-                ("b".to_string(), b_ty.clone()),
-            ];
+            let fields = option_tuple_fields(resolved_ret).unwrap_or_else(|| {
+                let a_ty = match &rty {
+                    Some(Type::Option(inner)) => (**inner).clone(),
+                    _ => Type::Int,
+                };
+                let b_ty = match tir_recv_jet_ty(&args[0].expr, env) {
+                    Some(Type::Option(inner)) => *inner,
+                    _ => Type::Int,
+                };
+                vec![("a".to_string(), a_ty), ("b".to_string(), b_ty)]
+            });
             let ts = crate::Codegen::Tuples::tuple_struct_name(&fields);
             TBuiltinOp::OptionZip {
                 tuple_struct: ts,
-                elem_ty: crate::Collections::zip_elem_ty(&a_ty, &b_ty),
+                elem_ty: Type::Tuple(
+                    fields
+                        .into_iter()
+                        .map(|(name, ty)| (name, Box::new(ty)))
+                        .collect(),
+                ),
             }
         }
         ("zip", 1) => {
             // Build the tuple struct name for `(a: T, b: U)`.
-            let a_ty = match &rty {
-                Some(Type::List(inner)) => *inner.clone(),
-                _ => Type::Int,
-            };
-            let b_ty = match tir_recv_jet_ty(&args[0].expr, env) {
-                Some(Type::List(inner)) => *inner,
-                _ => Type::Int,
-            };
-            let fields = vec![("a".to_string(), a_ty), ("b".to_string(), b_ty)];
+            let fields = tuple_list_elem_fields(resolved_ret).unwrap_or_else(|| {
+                let a_ty = match &rty {
+                    Some(Type::List(inner)) => *inner.clone(),
+                    _ => Type::Int,
+                };
+                let b_ty = match tir_recv_jet_ty(&args[0].expr, env) {
+                    Some(Type::List(inner)) => *inner,
+                    _ => Type::Int,
+                };
+                vec![("a".to_string(), a_ty), ("b".to_string(), b_ty)]
+            });
             let ts = crate::Codegen::Tuples::tuple_struct_name(&fields);
             TBuiltinOp::Zip { tuple_struct: ts }
+        }
+        ("unzip", 0) => {
+            let fields = tuple_fields(resolved_ret).unwrap_or_else(|| {
+                let (a_ty, b_ty) = match &rty {
+                    Some(Type::List(inner)) => match inner.as_ref() {
+                        Type::Tuple(fields) => {
+                            let a = fields
+                                .iter()
+                                .find(|(name, _)| name == "a")
+                                .map(|(_, ty)| (**ty).clone())
+                                .unwrap_or(Type::Int);
+                            let b = fields
+                                .iter()
+                                .find(|(name, _)| name == "b")
+                                .map(|(_, ty)| (**ty).clone())
+                                .unwrap_or(Type::Int);
+                            (a, b)
+                        }
+                        _ => (Type::Int, Type::Int),
+                    },
+                    _ => (Type::Int, Type::Int),
+                };
+                vec![
+                    ("a".to_string(), Type::List(Box::new(a_ty))),
+                    ("b".to_string(), Type::List(Box::new(b_ty))),
+                ]
+            });
+            let ts = crate::Codegen::Tuples::tuple_struct_name(&fields);
+            TBuiltinOp::Unzip { tuple_struct: ts }
         }
         // D-FAILCOMP1: try_collect on [Result<T,E>] → Result<[T],E>.
         ("try_collect", 0) => TBuiltinOp::TryCollect,
         // D-COLLBREADTH1=A: Set<T> instance methods.
         ("add", 1) if is_set => TBuiltinOp::SetInsert,
+        ("add", 1) if is_sorted_set => TBuiltinOp::SortedSetInsert,
+        ("add", 1) if is_bit_set => TBuiltinOp::BitSetAdd,
         ("add", 1) if is_bag => TBuiltinOp::BagAdd,
+        ("peek", 0) if is_priority_queue => TBuiltinOp::PriorityQueuePeek,
+        ("to_sorted_list", 0) if is_priority_queue => TBuiltinOp::PriorityQueueToSortedList,
+        ("to_list", 0) if is_sorted_set => TBuiltinOp::SortedSetToList,
+        ("to_list", 0) if is_bit_set => TBuiltinOp::BitSetToList,
         ("to_list", 0) => TBuiltinOp::SetToList,
+        ("union", 1) if is_sorted_set => TBuiltinOp::SortedSetUnion,
         ("union", 1) => TBuiltinOp::SetUnion,
+        ("put", 2) if is_lru => TBuiltinOp::LruPut,
+        ("capacity", 0) if is_lru => TBuiltinOp::LruCapacity,
+        ("count", 0) if is_bit_set => TBuiltinOp::BitSetCount,
+        (
+            "write_u8" | "write_u16_le" | "write_u16_be" | "write_u32_le" | "write_u32_be"
+            | "write_u64_le" | "write_u64_be" | "write_bytes",
+            1,
+        ) if is_byte_buffer => TBuiltinOp::ByteBufferWrite {
+            method: method.to_string(),
+        },
+        ("to_bytes", 0) if is_byte_buffer => TBuiltinOp::ByteBufferToBytes,
         ("has", 1) if is_bag => TBuiltinOp::BagHas,
         ("count", 1) if is_bag => TBuiltinOp::BagCount,
         // D-COLLBREADTH1=A: Deque<T> instance methods.
@@ -7448,6 +7897,7 @@ pub(crate) fn resolve_closure_op(
         "min_by" => TClosureOp::MinBy,
         "max_by" => TClosureOp::MaxBy,
         "group_by" => TClosureOp::GroupBy,
+        "count_by" => TClosureOp::CountBy,
         "partition" => {
             // Compute the tuple struct name from the receiver element type.
             // recv = List<T>; partition returns (false_: [T], true_: [T]).

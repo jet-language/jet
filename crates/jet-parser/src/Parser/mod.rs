@@ -1,11 +1,10 @@
 //! Parser: tokens -> AST. Hand-written recursive descent with statement-
 //! level error recovery (M1): one run reports every parse problem it can.
 //!
-//! Teaching errors (S14): familiar foreign spellings (`def`, `let`, `set`,
-//! `and`, `try`, `match`, …) are recognized here only to emit an error
-//! naming the canonical Jet form — then parsing continues as if the
-//! canonical form had been written, so one foreign word doesn't hide the
-//! rest of the file's problems.
+//! D-S14-PAUSE / D-TEACHING-LAYER1: broad retired-spelling teaching is paused
+//! until post-Epoch 6. Retired S14 spellings fall through to ordinary parse
+//! errors. Narrow, separately ratified teaching diagnostics still live at their
+//! specific parser sites.
 
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Generics;
@@ -31,15 +30,14 @@ pub fn parse(toks: &[Token]) -> Result<Program, Vec<Diagnostic>> {
     parse_inner(toks, false)
 }
 
-/// Parse for `jet fmt`: succeeds when the AST is recoverable, even if S14
-/// teaching diagnostics were emitted (foreign spellings already lowered in
-/// the tree as `val`, `fn`, `&&`, …).
+/// Parse for `jet fmt`: succeeds when the AST is recoverable, even if live
+/// teaching diagnostics rewrote retired marker or punctuation forms.
 pub fn parse_for_fmt(toks: &[Token]) -> Result<Program, Vec<Diagnostic>> {
     parse_inner(toks, true)
 }
 
-/// Parse for editor/LSP check: recover through S14 teaching errors, return them
-/// alongside the AST so sema can still run (M6 phase 4).
+/// Parse for editor/LSP check: recover through live teaching errors, return
+/// them alongside the AST so sema can still run (M6 phase 4).
 pub fn parse_for_check(toks: &[Token]) -> Result<(Program, Vec<Diagnostic>), Vec<Diagnostic>> {
     let toks = crate::Lexer::without_comments(toks);
     check_token_nesting(&toks)?;
@@ -115,41 +113,16 @@ fn string_literal_value(parts: &[StrTokPart]) -> Result<String, Diagnostic> {
     }
 }
 
-/// S14: recovered in the AST; fmt may rewrite to canon.
+/// Live teaching diagnostics that recover in the AST; fmt may rewrite to canon.
 fn is_teaching_parse_diag(code: &str) -> bool {
     matches!(
         code,
-        "E0008"
-            | "E0012"
-            | "E0013"
-            | "E0014"
-            | "E0015"
-            | "E0016"
-            | "E0017"
-            | "E0018"
-            | "E0020"
-            | "E0021"
-            | "E0023"
-            | "E0024"
-            | "E0025"
-            | "E0026"
-            | "E0027"
-            | "E0028"
-            | "E0030"
-            | "E0031"
+        "E0031"
             | "E0034"
-            | "E0036"
-            | "E0044"
-            | "E0045"
             | "E0048"
             | "E0049"
-            | "E0050"
-            | "E0051"
             | "E0055"
-            | "E0056"
-            | "E0057"
             | "E0210"
-            | "E0984"
             | "E0986"
             | "E0320"
             | "E0992"
@@ -164,6 +137,10 @@ fn is_teaching_parse_diag(code: &str) -> bool {
             | "E0418"
             | "E0998"
     )
+}
+
+fn retired_s14_teaching_enabled() -> bool {
+    false
 }
 
 /// Hard cap on recursive parser nesting (parentheses, unary chains,
@@ -650,5 +627,59 @@ fn run() {
             "expected E0415, got {:?}",
             p.diags
         );
+    }
+
+    #[test]
+    fn retired_s14_teaching_is_paused() {
+        const RETIRED_CODES: &[&str] = &[
+            "E0008", "E0012", "E0013", "E0014", "E0015", "E0016", "E0017", "E0018", "E0020",
+            "E0021", "E0022", "E0023", "E0024", "E0025", "E0026", "E0027", "E0028", "E0030",
+            "E0032", "E0033", "E0036", "E0044", "E0045", "E0050", "E0051", "E0052", "E0053",
+            "E0054", "E0056", "E0057", "E0984",
+        ];
+        let cases = [
+            "def run() { return }",
+            "func run() { return }",
+            "import core.files",
+            "fn run() { while true { return } }",
+            "fn run() { for x in xs { return } }",
+            "fn run() { match x { 1 -> return } }",
+            "fn run() { switch x { 1 -> return } }",
+            "fn run() { x :: a or b }",
+            "fn run() { x :: a and b }",
+            "fn run() { x :: not ok }",
+            "fn run(x: Text) { return }",
+            "fn run() { todo }",
+            "fn run() { y :: Some(1) }",
+            "fn run() { y :: lambda x { x } }",
+            "fn run() { y :: append(xs, 1) }",
+            "class Point { x: Int }",
+            "interface Shape { fn draw(self) }",
+            "fn use_item(mut item: Item) { return }",
+        ];
+
+        for src in cases {
+            let (toks, lex_errs) = lex(src);
+            assert!(lex_errs.is_empty(), "lex errors for {src:?}: {lex_errs:?}");
+            let diags = match parse_for_check(&toks) {
+                Ok((_program, recovered)) => recovered,
+                Err(diags) => diags,
+            };
+            let codes: Vec<&str> = diags.iter().map(|d| d.code).collect();
+            assert!(
+                codes.iter().all(|code| !RETIRED_CODES.contains(code)),
+                "retired teaching code leaked for {src:?}: {codes:?}"
+            );
+        }
+
+        for word in [Syntax::FOREIGN_WHILE, Syntax::FOREIGN_FOR] {
+            let (toks, errs) = lex(word);
+            assert!(errs.is_empty(), "lex errors for {word}: {errs:?}");
+            assert!(
+                matches!(&toks[0].kind, TokKind::Ident(n) if n == word),
+                "`{word}` should lex as an ordinary name while D-S14-PAUSE is active, got {:?}",
+                toks[0].kind
+            );
+        }
     }
 }

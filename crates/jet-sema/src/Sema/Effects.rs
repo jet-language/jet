@@ -306,13 +306,39 @@ pub fn core_effect(module: &str, method: &str) -> Option<Effect> {
     // value, not a module call, so it never reaches `core_effect`. This lets a
     // `@Pure fn` take and use an injected `Clock`/`Rng` while ambient `time.now()`
     // / `random.int(…)` stay rejected (E3403).
-    // D-DET-CAPAPI: `time.ms`/`time.secs` mint a `Duration` from a pure Int — a
+    // D-DET-CAPAPI: duration/civil constructors mint deterministic values — a
     // deterministic value constructor, so (like `time.clock`) it carries no effect.
     if matches!(
         (module, method),
-        ("core.time", "clock" | "ms" | "secs") | ("core.random", "rng")
+        (
+            "core.time",
+            "clock"
+                | "ms"
+                | "secs"
+                | "seconds"
+                | "minutes"
+                | "hours"
+                | "local_time"
+                | "parse_time"
+                | "period"
+                | "period_days"
+                | "period_months"
+                | "period_years"
+                | "utc"
+                | "zoned"
+                | "zoned_local"
+        ) | ("core.random", "rng")
     ) {
         return None;
+    }
+    if module == "core.watcher" {
+        return match method {
+            "files" => Some(Effect::Fs),
+            "process_pid" => Some(Effect::Exec),
+            "port" => Some(Effect::Net),
+            "set" => None,
+            _ => None,
+        };
     }
     Some(match module {
         "core.files" => Effect::Fs,
@@ -642,6 +668,94 @@ pub fn check_callback_bounds(
             }
         }
     }
+}
+
+/// D-REPLAY1: `#Replayable` functions may not reach ambient
+/// Time/Rand/Net/Io. Deterministic handles (`time.clock(seed)`,
+/// `random.rng(seed)`, mockable capability objects) stay valid because they do
+/// not enter the ambient Core-call effect graph.
+pub fn check_replayable_effects(
+    items: &[crate::AST::Item],
+    solved: &HashMap<String, EffectSet>,
+    diags: &mut Vec<Diagnostic>,
+) {
+    use crate::AST::Item;
+
+    fn replay_forbidden(effects: &EffectSet) -> EffectSet {
+        let roots = [Effect::Time, Effect::Rand, Effect::Net, Effect::Io];
+        effects
+            .iter()
+            .filter(|effect| roots.iter().any(|root| effect_root(effect) == root.name()))
+            .cloned()
+            .collect()
+    }
+
+    fn check_one(
+        f: &crate::AST::Func,
+        owner: Option<&str>,
+        solved: &HashMap<String, EffectSet>,
+        diags: &mut Vec<Diagnostic>,
+    ) {
+        if !f.is_replayable {
+            return;
+        }
+        let inferred = solved
+            .get(&super::effect_key(owner, &f.name))
+            .cloned()
+            .unwrap_or_default();
+        let forbidden = replay_forbidden(&inferred);
+        if !forbidden.is_empty() {
+            diags.push(e0725(
+                &f.name,
+                &forbidden,
+                f.replayable_span.unwrap_or(f.name_span),
+            ));
+        }
+    }
+
+    for item in items {
+        match item {
+            Item::Func(f) => check_one(f, None, solved, diags),
+            Item::Impl(i) => {
+                for m in &i.methods {
+                    check_one(m, Some(&i.type_name), solved, diags);
+                }
+            }
+            Item::Struct(s) => {
+                for m in &s.methods {
+                    check_one(m, Some(&s.name), solved, diags);
+                }
+                for block in &s.trait_impls {
+                    for m in &block.methods {
+                        check_one(m, Some(&s.name), solved, diags);
+                    }
+                }
+            }
+            Item::Enum(e) => {
+                for m in &e.methods {
+                    check_one(m, Some(&e.name), solved, diags);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// E0725 (D-REPLAY1): a `#Replayable` function reaches ambient nondeterminism.
+pub fn e0725(fn_name: &str, effects: &EffectSet, span: Span) -> Diagnostic {
+    let effect_list = show_set(effects);
+    Diagnostic::error(
+        "E0725",
+        format!(
+            "`{}` is `#Replayable` but reaches `{}`",
+            fn_name, effect_list
+        ),
+        "`#Replayable` code must replay from explicit inputs; ambient time, randomness, network, or console IO would make the same replay diverge"
+            .to_string(),
+        "inject a deterministic clock/RNG or mockable capability, pass recorded data in, or move the ambient effect outside the replayable function"
+            .to_string(),
+        Some(span),
+    )
 }
 
 /// E0747 (D-EFF2): a callback argument carries an effect the parameter's bound

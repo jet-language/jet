@@ -267,6 +267,12 @@ pub const DSL_BLOCK_SQL: &str = "Sql";
 /// existing file-level companion-page form (`#Html("path.html")`).
 pub const STDLIB_DSL_BLOCK_MARKERS: &[&str] = &[DSL_BLOCK_SQL, ATTR_HTML];
 
+/// D-TYPEDTEXT2: parser-only sentinels for `sql"..."` / `html"..."` literals.
+/// These are impossible user identifiers; sema rewrites them to the existing
+/// synthetic `Sql`/`Html` typed-text calls before codegen.
+pub const TYPED_TEXT_SQL_PREFIX_CALL: &str = "$typed_text_sql";
+pub const TYPED_TEXT_HTML_PREFIX_CALL: &str = "$typed_text_html";
+
 /// D-OSTARGET1=A (ratified 2026-07-01, c134): `#Target(Os. … )` namespace — the
 /// second, mutually-exclusive axis of the `#Target(...)` marker family
 /// (`Wasm`/`Js`/`Web` above are the first, web-bucket axis). Attaches at
@@ -558,6 +564,11 @@ pub const TYPE_SUBSCRIPTION: &str = "Subscription";
 pub const TYPE_EVENT_SCOPE: &str = "EventScope";
 pub const TYPE_EVENT_POLICY: &str = "EventPolicy";
 pub const TYPE_EVENT_TRACE: &str = "EventTrace";
+/// D-WATCH-SCOPE1 (ratified 2026-07-07): unified file/process/port watcher values.
+pub const WATCHER_MODULE: &str = "core.watcher";
+pub const TYPE_WATCH_HANDLE: &str = "WatchHandle";
+pub const TYPE_WATCH_SET: &str = "WatchSet";
+pub const TYPE_WATCH_EVENT: &str = "WatchEvent";
 /// D-HONESTNUM1=A: the science measurement type name.
 pub const TYPE_MEASUREMENT: &str = "Measurement";
 
@@ -571,6 +582,12 @@ pub const TYPE_HASH_MAP: &str = "HashMap";
 pub const TYPE_BTREE_MAP: &str = "BTreeMap";
 pub const TYPE_DEQUE: &str = "Deque";
 pub const TYPE_SET: &str = "Set";
+/// D-ITERTOOLS1=A: expanded collection handles.
+pub const TYPE_SORTED_SET: &str = "SortedSet";
+pub const TYPE_PRIORITY_QUEUE: &str = "PriorityQueue";
+pub const TYPE_LRU: &str = "Lru";
+pub const TYPE_BIT_SET: &str = "BitSet";
+pub const TYPE_BYTE_BUFFER: &str = "ByteBuffer";
 
 /// S41 (ratified M5): character type.
 pub const TYPE_CHAR: &str = "Char";
@@ -925,11 +942,13 @@ pub const BUILTIN_REQUIRE: &str = "require";
 /// S43 (ratified M6): equality assertion in test blocks.
 pub const BUILTIN_REQUIRE_EQ: &str = "require_eq";
 
-/// D-CTIO1 (ratified 2026-06-22): the two sanctioned build-time I/O builtins.
+/// D-CTIO1 (ratified 2026-06-22): the sanctioned build-time I/O builtins.
 /// `embed_file("path") -> String` bakes a file's UTF-8 text into the binary;
 /// `embed_bytes("path") -> [U8]` bakes its raw bytes (binary-safe). The path
 /// must be a string literal, resolved relative to the source file, with no
 /// `..`-escape past the project root. Only valid in a `comptime` binding.
+/// D-CTFIND1/2: `find(glob) -> [String]` returns sorted relative file paths and
+/// records each matched file hash for `.jet/lock`.
 pub const BUILTIN_EMBED_FILE: &str = "embed_file";
 pub const BUILTIN_EMBED_BYTES: &str = "embed_bytes";
 
@@ -1362,6 +1381,7 @@ pub const JETPACK_VERBS: &[&str] = &[
     SERVICES_SUBCOMMAND,
     SECRETS_SUBCOMMAND,
     IMAGE_SUBCOMMAND,
+    USER_SUBCOMMAND,
 ];
 
 /// U16 (card c9jetpackgates): `jet env -p <pkg>...` — ad-hoc nixpkgs packages
@@ -1804,6 +1824,23 @@ pub const OS_OPTION_NS_BOOT: &str = "boot";
 pub const OS_OPTION_NS_KERNEL: &str = "kernel";
 pub const OS_OPTION_NS_INIT: &str = "init";
 pub const OS_OPTION_NS_HEALTH: &str = "health";
+/// D-JOS-USERENV1=A: per-user environment declarations can appear as `user.*`
+/// option projections while the role-module surface is being realized.
+pub const OS_OPTION_NS_USER: &str = "user";
+/// D-JOS-FLATPAK1=A: first-party foreign app ecosystem declarations.
+pub const OS_OPTION_NS_APPS: &str = "apps";
+/// D-JOS-KERNELTUNE1=A: performance and kernel-tuning profile declarations.
+pub const OS_OPTION_NS_PERFORMANCE: &str = "performance";
+/// D-JOS-DISK1=A: storage tree declarations consumed by installer and activation.
+pub const OS_OPTION_NS_STORAGE: &str = "storage";
+/// D-JOS-THEME1=A: reusable theme profile projection.
+pub const OS_OPTION_NS_THEME: &str = "theme";
+/// D-JOS-CONTAINER1=A: isolated workload declarations.
+pub const OS_OPTION_NS_WORKLOAD: &str = "workload";
+/// D-JOS-HARDWARE1=A: hardware scan/profile/specialisation declarations.
+pub const OS_OPTION_NS_HARDWARE: &str = "hardware";
+/// D-JOS-FLEETTARGET1=A / D-JOS-FLEETROLLOUT1=A: deploy target/rollout facts.
+pub const OS_OPTION_NS_DEPLOY: &str = "deploy";
 pub const OS_OPTION_NAMESPACES: &[&str] = &[
     OS_OPTION_NS_FILESYSTEM,
     OS_OPTION_NS_NETWORK,
@@ -1816,6 +1853,14 @@ pub const OS_OPTION_NAMESPACES: &[&str] = &[
     OS_OPTION_NS_KERNEL,
     OS_OPTION_NS_INIT,
     OS_OPTION_NS_HEALTH,
+    OS_OPTION_NS_USER,
+    OS_OPTION_NS_APPS,
+    OS_OPTION_NS_PERFORMANCE,
+    OS_OPTION_NS_STORAGE,
+    OS_OPTION_NS_THEME,
+    OS_OPTION_NS_WORKLOAD,
+    OS_OPTION_NS_HARDWARE,
+    OS_OPTION_NS_DEPLOY,
 ];
 
 /// U4 (ratified 2026-06-16): import-tree discovery builtin — `find("./modules")`
@@ -2069,6 +2114,11 @@ pub const ATTR_PUBLISHED_SCHEMA: &str = "PublishedSchema"; // D-MIGRATE1
 /// compile-time only and erases in codegen (I3). Written `#SingleUse` before the
 /// `struct`/`enum`, same marker idiom as `@PublishedSchema`.
 pub const ATTR_SINGLE_USE: &str = "SingleUse"; // D-LIN1
+
+/// D-REPLAY1: `#Replayable fn` marks a function whose reachable effects must be
+/// deterministic by default. Ambient `Time`/`Rand`/`Net`/`Io` are rejected unless
+/// the work is routed through explicit deterministic/mockable capabilities.
+pub const ATTR_REPLAYABLE: &str = "Replayable";
 
 /// D-MUSTUSE1 (c18iwxqx): `@MustUse` — marks a type, function, or method whose
 /// result cannot be silently ignored as a bare expression statement (E0419).
@@ -2348,6 +2398,11 @@ pub const JET_TYPE_LIST: &[&str] = &[
     TYPE_BTREE_MAP,
     TYPE_DEQUE,
     TYPE_SET,
+    TYPE_SORTED_SET,
+    TYPE_PRIORITY_QUEUE,
+    TYPE_LRU,
+    TYPE_BIT_SET,
+    TYPE_BYTE_BUFFER,
     TYPE_I8,
     TYPE_I16,
     TYPE_I32,
@@ -2571,6 +2626,7 @@ pub const DIRECTIVE_MARKERS: &[&str] = &[
     // error, same treatment as ATTR_UNINIT above.
     ATTR_UNIT_FAMILY,
     ATTR_SINGLE_USE,
+    ATTR_REPLAYABLE,
     ATTR_LAYOUT,
     ATTR_SUPPRESS,
     ATTR_EXTERN_MODULE,
@@ -2982,6 +3038,26 @@ pub const JET_HIGHLIGHT_TOKENS: &[HighlightToken] = &[
         class: HighlightClass::TypeBuiltin,
     },
     HighlightToken {
+        text: TYPE_SORTED_SET,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_PRIORITY_QUEUE,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_LRU,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_BIT_SET,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_BYTE_BUFFER,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
         text: TYPE_STREAM,
         class: HighlightClass::TypeBuiltin,
     },
@@ -3027,6 +3103,18 @@ pub const JET_HIGHLIGHT_TOKENS: &[HighlightToken] = &[
     },
     HighlightToken {
         text: TYPE_EVENT_TRACE,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_WATCH_HANDLE,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_WATCH_SET,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_WATCH_EVENT,
         class: HighlightClass::TypeBuiltin,
     },
     HighlightToken {
@@ -3676,11 +3764,15 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     "core",
     "core.io",
     "core.env",
+    // D-OSFACTS1=A: system facts and safe interrupt hook.
+    "core.os",
     "core.process",
     "core.math",
     "core.random",
     "core.time",
     "core.tasks",
+    // D-TESTKIT1=A: helpers under existing #Test syntax.
+    "core.testing",
     "core.mem",
     // D-ALLOC-C (ratified 2026-06-19): wider allocator API bucket.
     "core.mem.alloc",
@@ -3693,6 +3785,11 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     // E2-M7: streaming file handles and path helpers (D-IO1, D-IO2).
     "core.files",
     "core.path",
+    // D-URL1=A: typed WHATWG-class URLs and MIME values.
+    "core.url",
+    "core.mime",
+    // D-WATCH-SCOPE1: unified file/process/port watcher constructors.
+    "core.watcher",
     // E2-M10: TCP/UDP sockets.
     "core.net",
     // D-DEFER1 option B: scope-exit guard (RAII cleanup via closure).
@@ -3708,12 +3805,16 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     // per-format submodules. Supersedes `core.json` + `jet.{csv,toml,yaml}` (clean break).
     "core.encoding",
     "core.encoding.json",
+    "core.encoding.jsonl",
     "core.encoding.csv",
     "core.encoding.toml",
     "core.encoding.yaml",
+    "core.encoding.xml",
+    "core.encoding.cbor",
     // D-UUIDENC1=A (ratified 2026-06-26): hex and base64 codecs (pure, no deps).
     "core.encoding.hex",
     "core.encoding.base64",
+    "core.encoding.base32",
     // D-TEXTUNICODE1: std-only Unicode scalar helpers. Grapheme segmentation stays
     // future work because it needs a Unicode data table/engine.
     "core.text.unicode",
@@ -3721,6 +3822,8 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     // bare (no import needed); the modules exist for discoverability/docs.
     "core.binary",
     "core.text",
+    // D-HUMANFMT1=A: Go-humanize-style helpers as ordinary library calls.
+    "core.fmt",
     // D-UUIDENC1=A: UUID v4 (CSPRNG) and v7 (injectable Clock).
     "core.uuid",
     // D-CORENS1: ring packages now spelled `core.*` (canonical user-facing name).
@@ -3734,7 +3837,7 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     "core.crypto.expert",
     // D-HTTPLIB1-4 (ratified 2026-06-26): HTTP client+server ring package.
     "core.http",
-    // D-REGEX1: linear-time regex, ships on the `regex` crate via the FFI bridge.
+    // D-REGEXENGINE1=A: std-only linear regex in the generated prelude.
     "core.regex",
     // D-DEP-ARCHIVE1=A (ratified): gzip compress/decompress via the `flate2` crate FFI bridge.
     "core.archive",
@@ -3930,6 +4033,8 @@ pub fn binary_text_handle_rust_type(name: &str) -> Option<&'static str> {
     match name {
         "Reader" => Some("JetReader"),
         "Cursor" => Some("JetCursor"),
+        TYPE_BIT_SET => Some("JetBitSet"),
+        TYPE_BYTE_BUFFER => Some("JetByteBuffer"),
         _ => None,
     }
 }

@@ -1166,6 +1166,7 @@ pub(crate) fn check_bundle_opts(
                 .collect()
         })
         .collect();
+    let mut top_level_embed_inputs = Vec::new();
     for (idx, module) in bundle.modules.iter_mut().enumerate() {
         let base = module
             .path
@@ -1178,8 +1179,10 @@ pub(crate) fn check_bundle_opts(
             &base,
             &mut diags,
             &ct_core_imports[idx],
+            Some(&mut top_level_embed_inputs),
         );
     }
+    bundle.comptime_inputs.extend(top_level_embed_inputs);
 
     // D-MOD3/4: Unqualified imports (`use alias.Item`) are processed in a
     // dedicated pass *after* file-module aliases land in `st.imports` below.
@@ -1681,6 +1684,7 @@ pub(crate) fn check_bundle_opts(
     let solved = solve(&effect_summaries);
     for module in &bundle.modules {
         check_effect_boundaries(&module.items, &solved, &mut diags);
+        check_replayable_effects(&module.items, &solved, &mut diags);
     }
     check_region_caps(&effect_summaries, &solved, &mut diags);
     // D-EFF2: callback param effect bounds (E0747).
@@ -2521,6 +2525,8 @@ pub(crate) fn check_module_bodies(
                     unsafe_span: None,
                     is_pure: false,
                     is_reactive: false,
+                    is_replayable: false,
+                    replayable_span: None,
                     is_must_use: false,
                     must_use_span: None,
                     is_inline: false,
@@ -2572,6 +2578,8 @@ pub(crate) fn check_module_bodies(
                     unsafe_span: None,
                     is_pure: false,
                     is_reactive: false,
+                    is_replayable: false,
+                    replayable_span: None,
                     is_must_use: false,
                     must_use_span: None,
                     is_inline: false,

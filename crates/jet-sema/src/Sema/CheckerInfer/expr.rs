@@ -18,6 +18,58 @@ impl<'a> Checker<'a> {
             .unwrap_or_else(|| fallback.to_string())
     }
 
+    pub(crate) fn rewrite_typed_text_literal(
+        &mut self,
+        e: &mut Expr,
+        type_name: String,
+        span: Span,
+    ) -> Option<Type> {
+        let old = std::mem::replace(e, Expr::Absent(span));
+        let Expr::Str(parts, _) = old else {
+            *e = old;
+            return Some(Type::Named(type_name));
+        };
+        let mk_lit = |s: String, span: Span| CallArg {
+            convention: AccessConvention::Read,
+            expr: Expr::Str(vec![StrPart::Lit(s)], span),
+            span,
+            flags: crate::AST::CallArgFlags::default(),
+            label: None,
+            spread: false,
+        };
+        let mut args: Vec<CallArg> = Vec::new();
+        let mut cur_lit = String::new();
+        for p in parts {
+            match p {
+                StrPart::Lit(s) => cur_lit.push_str(&s),
+                StrPart::Interp(mut inner, _fmt) => {
+                    args.push(mk_lit(std::mem::take(&mut cur_lit), span));
+                    self.borrow_ctx = true;
+                    let was_view_read = self.allow_string_view_read;
+                    self.allow_string_view_read = true;
+                    self.infer(&mut inner);
+                    self.allow_string_view_read = was_view_read;
+                    args.push(CallArg {
+                        convention: AccessConvention::Read,
+                        span: inner.span(),
+                        expr: *inner,
+                        flags: crate::AST::CallArgFlags::default(),
+                        label: None,
+                        spread: false,
+                    });
+                }
+            }
+        }
+        args.push(mk_lit(cur_lit, span));
+        *e = Expr::Call(Call {
+            name: type_name.clone(),
+            name_span: span,
+            args,
+            range_checked: false,
+        });
+        Some(Type::Named(type_name))
+    }
+
     /// Infer and check an expression. Returns None when a problem was
     /// already reported (avoids error cascades).
     ///
@@ -220,59 +272,7 @@ impl<'a> Checker<'a> {
                     unreachable!()
                 };
                 let span = *str_span;
-                let old = std::mem::replace(e, Expr::Absent(span));
-                let Expr::Str(parts, _) = old else {
-                    unreachable!()
-                };
-                // Rewrite to `Call { name: "Sql"|"Html", args }` — a literal
-                // segment then a hole, alternating, always closing on a
-                // literal (`literals.len() == holes.len() + 1`). Codegen
-                // recognizes this synthetic call by name (like D-UNITLIT1's
-                // rewrite) and builds the template/params split from the
-                // literal-vs-hole position parity — no runtime string
-                // formatting touches a hole's text.
-                let mk_lit = |s: String, span: Span| CallArg {
-                    convention: AccessConvention::Read,
-                    expr: Expr::Str(vec![StrPart::Lit(s)], span),
-                    span,
-                    flags: crate::AST::CallArgFlags::default(),
-                    label: None,
-                    spread: false,
-                };
-                let mut args: Vec<CallArg> = Vec::new();
-                let mut cur_lit = String::new();
-                for p in parts {
-                    match p {
-                        StrPart::Lit(s) => cur_lit.push_str(&s),
-                        StrPart::Interp(mut inner, _fmt) => {
-                            args.push(mk_lit(std::mem::take(&mut cur_lit), span));
-                            self.borrow_ctx = true;
-                            // D-MEM1 stage S5: a typed-text template hole reads
-                            // via Display (`str` has the impl too, see
-                            // `Prelude/Core.rs`) — safe for a string view.
-                            let was_view_read = self.allow_string_view_read;
-                            self.allow_string_view_read = true;
-                            self.infer(&mut inner);
-                            self.allow_string_view_read = was_view_read;
-                            args.push(CallArg {
-                                convention: AccessConvention::Read,
-                                span: inner.span(),
-                                expr: *inner,
-                                flags: crate::AST::CallArgFlags::default(),
-                                label: None,
-                                spread: false,
-                            });
-                        }
-                    }
-                }
-                args.push(mk_lit(cur_lit, span));
-                *e = Expr::Call(Call {
-                    name: type_name.clone(),
-                    name_span: span,
-                    args,
-                    range_checked: false,
-                });
-                Some(Type::Named(type_name))
+                self.rewrite_typed_text_literal(e, type_name, span)
             }
             Expr::Str(parts, str_span) => {
                 // D-MEM1/S7 (D-NOALLOC-SEM1=A): interpolation with at least one

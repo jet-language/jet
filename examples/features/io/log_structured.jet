@@ -1,0 +1,16 @@
+use core.log as log
+
+fn run() {
+    log.setup("json")
+    log.set_trace_id("trace-1")
+    span :: log.span("request")
+    log.enter(span)
+    log.info_fields("served", [
+        log.field("route", "/health"),
+        log.int("status", 200),
+        log.bool("cache", true),
+        log.counter("requests", 1),
+    ])
+    log.close(span)
+    print("structured log demo done")
+}

@@ -236,7 +236,7 @@ impl<'a> Checker<'a> {
         span: Span,
     ) -> Option<Type> {
         match (module, name) {
-            ("core.math", "pi" | "e") => Some(Type::Float),
+            ("core.math", "pi" | "e" | "tau" | "infinity" | "nan") => Some(Type::Float),
             // D-ALLOC1/D-ALLOC-C (ratified 2026-06-19): `mem.Arena`, `mem.Bump`,
             // `mem.Pool`, `mem.Fixed` — accessed as a field on the `core.mem` alias,
             // then `.new()` is called on the sentinel type to construct the allocator.
@@ -671,6 +671,43 @@ impl<'a> Checker<'a> {
                 }
                 return Some(Type::Int);
             }
+            ("core.data", "filter" | "sort_by") => {
+                if args.len() != 2 {
+                    self.diags.push(wrong_core_arity(name, 2, args.len(), span));
+                }
+                let Some(rows_arg) = args.get_mut(0) else {
+                    return Some(Type::List(Box::new(Type::Int)));
+                };
+                let rows_ty = self.infer(&mut rows_arg.expr);
+                let row_ty = match rows_ty {
+                    Some(Type::List(inner)) => *inner,
+                    Some(other) => {
+                        self.diags.push(Diagnostic::error(
+                            "E0112",
+                            format!("`data.{}` needs a typed table, not {}", name, other.show()),
+                            "core.data pipelines rows from a list-backed typed table".to_string(),
+                            "pass a `[Row]` value, such as `data.csv<Row>(text)?`".to_string(),
+                            Some(rows_arg.expr.span()),
+                        ));
+                        Type::Int
+                    }
+                    None => Type::Int,
+                };
+                if let Some(fn_arg) = args.get_mut(1) {
+                    let ret = if name == "filter" {
+                        Type::Bool
+                    } else {
+                        Type::String
+                    };
+                    let fn_ty = Type::Fn {
+                        params: vec![row_ty.clone()],
+                        ret: Some(Box::new(ret)),
+                        effect_bound: None,
+                    };
+                    self.expect_core_arg(name, 1, &fn_ty, fn_arg);
+                }
+                return Some(Type::List(Box::new(row_ty)));
+            }
             ("core.data", "group_count" | "group_sum" | "group_mean") => {
                 let want = if name == "group_count" { 2 } else { 3 };
                 if args.len() != want {
@@ -850,7 +887,12 @@ impl<'a> Checker<'a> {
             // D-FLOATW1 (ratified 2026-06-22): sqrt/floor/ceil/pow are width-generic —
             // they return the same float width they receive (Float→Float, F32→F32).
             // Mixing widths is a compile error; explicit .to_f32()/.to_f64() converts.
-            ("core.math", "sqrt" | "floor" | "ceil") => {
+            (
+                "core.math",
+                "sqrt" | "floor" | "ceil" | "sin" | "cos" | "tan" | "asin" | "acos"
+                | "atan" | "sinh" | "cosh" | "tanh" | "exp" | "ln" | "log2" | "log10"
+                | "trunc" | "fract" | "degrees" | "radians",
+            ) => {
                 if args.len() != 1 {
                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
                 }
@@ -862,13 +904,129 @@ impl<'a> Checker<'a> {
                     self.diags.push(Diagnostic::error(
                         "E0112",
                         format!("`{}` needs Float or F32, not {}", name, ty.show()),
-                        "transcendental functions operate on floating-point numbers".to_string(),
+                        "math functions in this family operate on floating-point numbers".to_string(),
                         "pass a Float or F32 value".to_string(),
                         Some(arg.expr.span()),
                     ));
                     return None;
                 }
                 return Some(ty);
+            }
+            ("core.math", "atan2" | "hypot" | "lerp") => {
+                if args.len() != if name == "lerp" { 3 } else { 2 } {
+                    self.diags.push(wrong_core_arity(
+                        name,
+                        if name == "lerp" { 3 } else { 2 },
+                        args.len(),
+                        span,
+                    ));
+                }
+                let Some(first) = args.get_mut(0).and_then(|a| self.infer(&mut a.expr)) else {
+                    for a in args.iter_mut().skip(1) {
+                        self.infer(&mut a.expr);
+                    }
+                    return Some(Type::Float);
+                };
+                if !matches!(first, Type::Float | Type::Float32) {
+                    self.diags.push(Diagnostic::error(
+                        "E0112",
+                        format!("`{}` needs Float or F32, not {}", name, first.show()),
+                        "this math function operates on floating-point numbers".to_string(),
+                        "pass Float or F32 values".to_string(),
+                        Some(args[0].expr.span()),
+                    ));
+                    return None;
+                }
+                for i in 1..args.len() {
+                    if let Some(got) = args.get_mut(i).and_then(|a| self.infer(&mut a.expr)) {
+                        if got != first {
+                            self.diags.push(Diagnostic::error(
+                                "E0112",
+                                format!("`{}` needs all arguments to have the same float type", name),
+                                "D-FLOATW1: mixing float widths is not allowed".to_string(),
+                                "convert the arguments to the same float width".to_string(),
+                                Some(args[i].expr.span()),
+                            ));
+                        }
+                    }
+                }
+                return Some(first);
+            }
+            ("core.math", "is_nan" | "is_inf" | "is_finite") => {
+                if args.len() != 1 {
+                    self.diags.push(wrong_core_arity(name, 1, args.len(), span));
+                }
+                let Some(arg) = args.get_mut(0) else {
+                    return Some(Type::Bool);
+                };
+                let ty = self.infer(&mut arg.expr)?;
+                if !matches!(ty, Type::Float | Type::Float32) {
+                    self.diags.push(Diagnostic::error(
+                        "E0112",
+                        format!("`{}` needs Float or F32, not {}", name, ty.show()),
+                        "floating-point classification only applies to floats".to_string(),
+                        "pass a Float or F32 value".to_string(),
+                        Some(arg.expr.span()),
+                    ));
+                    return None;
+                }
+                return Some(Type::Bool);
+            }
+            ("core.math", "sign") => {
+                if args.len() != 1 {
+                    self.diags.push(wrong_core_arity(name, 1, args.len(), span));
+                }
+                if let Some(arg) = args.get_mut(0) {
+                    let ty = self.infer(&mut arg.expr)?;
+                    if !matches!(ty, Type::Float | Type::Float32) {
+                        self.diags.push(Diagnostic::error(
+                            "E0112",
+                            format!("`sign` needs Float or F32, not {}", ty.show()),
+                            "sign classifies a floating-point value as negative, zero, or positive".to_string(),
+                            "pass a Float or F32 value".to_string(),
+                            Some(arg.expr.span()),
+                        ));
+                        return None;
+                    }
+                }
+                return Some(Type::Int);
+            }
+            ("core.math", "to_bits") => {
+                if args.len() != 1 {
+                    self.diags.push(wrong_core_arity(name, 1, args.len(), span));
+                }
+                return Some(Type::Int);
+            }
+            ("core.math", "from_bits") => {
+                if args.len() != 1 {
+                    self.diags.push(wrong_core_arity(name, 1, args.len(), span));
+                }
+                return Some(Type::Float);
+            }
+            (
+                "core.math",
+                "checked_add" | "checked_sub" | "checked_mul" | "checked_pow",
+            ) => {
+                if args.len() != 2 {
+                    self.diags.push(wrong_core_arity(name, 2, args.len(), span));
+                }
+                for (idx, arg) in args.iter_mut().enumerate() {
+                    self.expect_core_arg(name, idx, &Type::Int, arg);
+                }
+                return Some(Type::Option(Box::new(Type::Int)));
+            }
+            (
+                "core.math",
+                "saturating_add" | "saturating_sub" | "saturating_mul" | "wrapping_add"
+                | "wrapping_sub" | "wrapping_mul" | "gcd" | "lcm" | "int_pow",
+            ) => {
+                if args.len() != 2 {
+                    self.diags.push(wrong_core_arity(name, 2, args.len(), span));
+                }
+                for (idx, arg) in args.iter_mut().enumerate() {
+                    self.expect_core_arg(name, idx, &Type::Int, arg);
+                }
+                return Some(Type::Int);
             }
             ("core.math", "pow") => {
                 if args.len() != 2 {
@@ -1010,6 +1168,80 @@ impl<'a> Checker<'a> {
                 ));
                 return None;
             }
+            ("core.random", "sample") => {
+                if args.len() != 2 {
+                    self.diags.push(wrong_core_arity(name, 2, args.len(), span));
+                }
+                let Some(arg) = args.get_mut(0) else {
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
+                    return Some(Type::List(Box::new(Type::Int)));
+                };
+                let arg_span = arg.expr.span();
+                let ty = self.infer(&mut arg.expr)?;
+                if let Some(k) = args.get_mut(1).and_then(|a| self.infer(&mut a.expr)) {
+                    if k != Type::Int {
+                        let k_span = args.get(1).map(|a| a.expr.span()).unwrap_or(span);
+                        self.diags.push(Diagnostic::error(
+                            "E0112",
+                            format!("`sample` count must be Int, not {}", k.show()),
+                            "random.sample chooses up to k items without replacement".to_string(),
+                            "pass an Int count".to_string(),
+                            Some(k_span),
+                        ));
+                    }
+                }
+                if let Type::List(inner) = ty {
+                    return Some(Type::List(inner));
+                }
+                self.diags.push(Diagnostic::error(
+                    "E0112",
+                    format!("`sample` needs a list, not {}", ty.show()),
+                    "random.sample chooses items from a List".to_string(),
+                    "pass a `[T]` value".to_string(),
+                    Some(arg_span),
+                ));
+                return None;
+            }
+            ("core.random", "weighted_pick") => {
+                if args.len() != 2 {
+                    self.diags.push(wrong_core_arity(name, 2, args.len(), span));
+                }
+                let Some(items_arg) = args.get_mut(0) else {
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
+                    return Some(Type::Option(Box::new(Type::Int)));
+                };
+                let items_span = items_arg.expr.span();
+                let items_ty = self.infer(&mut items_arg.expr)?;
+                if let Some(weights_arg) = args.get_mut(1) {
+                    let weights_ty = self.infer(&mut weights_arg.expr);
+                    if weights_ty != Some(Type::List(Box::new(Type::Float))) {
+                        if let Some(got) = weights_ty {
+                            self.diags.push(Diagnostic::error(
+                                "E0112",
+                                format!("`weighted_pick` weights must be [Float], not {}", got.show()),
+                                "random.weighted_pick pairs each item with a non-negative Float weight".to_string(),
+                                "pass a `[Float]` weights list".to_string(),
+                                Some(weights_arg.expr.span()),
+                            ));
+                        }
+                    }
+                }
+                if let Type::List(inner) = items_ty {
+                    return Some(Type::Option(inner));
+                }
+                self.diags.push(Diagnostic::error(
+                    "E0112",
+                    format!("`weighted_pick` needs a list, not {}", items_ty.show()),
+                    "random.weighted_pick chooses one weighted item from a List".to_string(),
+                    "pass a `[T]` value".to_string(),
+                    Some(items_span),
+                ));
+                return None;
+            }
             ("core.random", "shuffle") => {
                 if args.len() != 1 {
                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
@@ -1107,19 +1339,130 @@ impl<'a> Checker<'a> {
             // site is too noisy (breaks showcase golden tests via path-specific output).
             // Revisit when the test harness can normalise paths in exact comparisons.
             ("core.files", "read") => {}
+            // D-TASKRUNTIME1=A: scheduler timer channels. `after(ms)` emits a unit tick;
+            // `after(ms, value)` emits a typed timeout value that can join a select.
+            ("core.tasks", "after") => {
+                if !(args.len() == 1 || args.len() == 2) {
+                    self.diags.push(Diagnostic::error(
+                        "E0104",
+                        format!(
+                            "`tasks.after` takes one duration and an optional value, got {} argument{}",
+                            args.len(),
+                            if args.len() == 1 { "" } else { "s" }
+                        ),
+                        "a one-shot timer channel fires after a whole-millisecond delay".to_string(),
+                        "write `tasks.after(ms: 100)` or `tasks.after(ms: 100, value: fallback)`".to_string(),
+                        Some(span),
+                    ));
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
+                    return None;
+                }
+                let ms_ty = self.infer(&mut args[0].expr)?;
+                if !(matches!(ms_ty, Type::Int)
+                    || matches!(ms_ty, Type::Named(ref n) if n == "Int" || n == "I64" || n == "I32"))
+                {
+                    self.diags.push(Diagnostic::error(
+                        "E0112",
+                        format!(
+                            "`tasks.after(ms: …)` needs an integer millisecond count, not {}",
+                            ms_ty.show()
+                        ),
+                        "timer channels use whole milliseconds".to_string(),
+                        "write `tasks.after(ms: 100)`".to_string(),
+                        Some(args[0].expr.span()),
+                    ));
+                }
+                let elem = if args.len() == 2 {
+                    self.infer(&mut args[1].expr)?
+                } else {
+                    Type::Named("Unit".to_string())
+                };
+                if let Some(problem) = self.sendability_problem(&elem, false) {
+                    self.report_unsendable(
+                        "timer value",
+                        &elem,
+                        problem,
+                        SendCrossing::ChannelSend,
+                        args.get(1).map(|a| a.expr.span()).unwrap_or(span),
+                    );
+                }
+                return Some(Type::Apply {
+                    name: "Receiver".to_string(),
+                    args: vec![elem],
+                });
+            }
+            // D-TASKRUNTIME1=A: interval timer sends tick numbers (1, 2, ...).
+            ("core.tasks", "interval") => {
+                if args.len() != 1 {
+                    self.diags
+                        .push(wrong_core_arity("interval", 1, args.len(), span));
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
+                    return None;
+                }
+                let ms_ty = self.infer(&mut args[0].expr)?;
+                if !(matches!(ms_ty, Type::Int)
+                    || matches!(ms_ty, Type::Named(ref n) if n == "Int" || n == "I64" || n == "I32"))
+                {
+                    self.diags.push(Diagnostic::error(
+                        "E0112",
+                        format!(
+                            "`tasks.interval(ms: …)` needs an integer millisecond count, not {}",
+                            ms_ty.show()
+                        ),
+                        "interval channels use whole milliseconds".to_string(),
+                        "write `tasks.interval(ms: 1000)`".to_string(),
+                        Some(args[0].expr.span()),
+                    ));
+                }
+                return Some(Type::Apply {
+                    name: "Receiver".to_string(),
+                    args: vec![Type::Int],
+                });
+            }
             // D-TUPLE-DESTRUCT1: `tasks.channel<T>()` returns the `(Sender<T>,
             // Receiver<T>)` pair directly — mirrors the turbofish `decode<T>` pattern
             // above (the element type `T` comes from the explicit call-site type
             // argument, not a binding annotation; there's no combined "Channel" value
             // to infer against anymore).
             ("core.tasks", "channel") => {
-                if !args.is_empty() {
-                    self.diags
-                        .push(wrong_core_arity("channel", 0, args.len(), span));
+                if args.len() > 1 {
+                    self.diags.push(Diagnostic::error(
+                        "E0104",
+                        format!(
+                            "`tasks.channel` takes an optional capacity, got {} arguments",
+                            args.len()
+                        ),
+                        "a channel may be unbounded or have one whole-number backpressure bound"
+                            .to_string(),
+                        "write `tasks.channel<T>()` or `tasks.channel<T>(capacity: 1)`".to_string(),
+                        Some(span),
+                    ));
                     for a in args.iter_mut() {
                         self.infer(&mut a.expr);
                     }
                     return None;
+                }
+                if let Some(cap) = args.get_mut(0) {
+                    let cap_ty = self.infer(&mut cap.expr)?;
+                    if !(matches!(cap_ty, Type::Int)
+                        || matches!(cap_ty, Type::Named(ref n) if n == "Int" || n == "I64" || n == "I32"))
+                    {
+                        self.diags.push(Diagnostic::error(
+                            "E0112",
+                            format!(
+                                "`tasks.channel<T>(capacity: …)` needs an integer capacity, not {}",
+                                cap_ty.show()
+                            ),
+                            "bounded channels use a whole-number memory/backpressure limit"
+                                .to_string(),
+                            "write `tasks.channel<T>(capacity: 1)`".to_string(),
+                            Some(cap.expr.span()),
+                        ));
+                    }
                 }
                 let Some(t) = type_args.first().cloned() else {
                     self.diags.push(Diagnostic::error(
@@ -1760,7 +2103,7 @@ impl<'a> Checker<'a> {
                     }
                     return None;
                 }
-                self.expect_core_arg("get", 0, &Type::String, &mut args[0]);
+                self.expect_url_arg("get", 0, &mut args[0]);
                 return Some(Type::Result {
                     ok: Box::new(Type::Named("HttpClientResp".to_string())),
                     err: Box::new(Type::String),
@@ -1775,7 +2118,7 @@ impl<'a> Checker<'a> {
                     }
                     return None;
                 }
-                self.expect_core_arg("post", 0, &Type::String, &mut args[0]);
+                self.expect_url_arg("post", 0, &mut args[0]);
                 self.expect_core_arg("post", 1, &Type::String, &mut args[1]);
                 return Some(Type::Result {
                     ok: Box::new(Type::Named("HttpClientResp".to_string())),
@@ -1792,7 +2135,7 @@ impl<'a> Checker<'a> {
                     return None;
                 }
                 self.expect_core_arg("request", 0, &Type::String, &mut args[0]);
-                self.expect_core_arg("request", 1, &Type::String, &mut args[1]);
+                self.expect_url_arg("request", 1, &mut args[1]);
                 return Some(Type::Named("HttpClientReq".to_string()));
             }
             ("core.http.server", "mux") => {
@@ -1848,6 +2191,43 @@ impl<'a> Checker<'a> {
                     err: Box::new(Type::String),
                 });
             }
+            ("core.http.server", "serve_once") => {
+                if args.len() != 2 {
+                    self.diags
+                        .push(wrong_core_arity("serve_once", 2, args.len(), span));
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
+                    return None;
+                }
+                self.expect_core_arg("serve_once", 0, &Type::String, &mut args[0]);
+                self.infer(&mut args[1].expr);
+                return Some(Type::Result {
+                    ok: Box::new(unit_ty()),
+                    err: Box::new(Type::String),
+                });
+            }
+            ("core.http.server", "serve_once_listener") => {
+                if args.len() != 2 {
+                    self.diags
+                        .push(wrong_core_arity("serve_once_listener", 2, args.len(), span));
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
+                    return None;
+                }
+                self.expect_core_arg(
+                    "serve_once_listener",
+                    0,
+                    &Type::Named("TcpListener".to_string()),
+                    &mut args[0],
+                );
+                self.infer(&mut args[1].expr);
+                return Some(Type::Result {
+                    ok: Box::new(unit_ty()),
+                    err: Box::new(Type::String),
+                });
+            }
             ("core.http.server", "tls") => {
                 if args.len() != 2 {
                     self.diags
@@ -1874,6 +2254,74 @@ impl<'a> Checker<'a> {
                 self.expect_core_arg("response", 1, &Type::String, &mut args[1]);
                 return Some(Type::Named("HttpSrvResp".to_string()));
             }
+            ("core.http.server", "sse") => {
+                if args.len() != 1 {
+                    self.diags
+                        .push(wrong_core_arity("sse", 1, args.len(), span));
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
+                    return None;
+                }
+                self.expect_core_arg("sse", 0, &Type::String, &mut args[0]);
+                return Some(Type::Named("HttpSrvResp".to_string()));
+            }
+            ("core.http.server", "static_file") => {
+                if args.len() != 2 {
+                    self.diags
+                        .push(wrong_core_arity("static_file", 2, args.len(), span));
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
+                    return None;
+                }
+                self.expect_core_arg("static_file", 0, &Type::String, &mut args[0]);
+                self.expect_core_arg("static_file", 1, &Type::String, &mut args[1]);
+                return Some(Type::Result {
+                    ok: Box::new(Type::Named("HttpSrvResp".to_string())),
+                    err: Box::new(Type::String),
+                });
+            }
+            ("core.http.server", "static_file_range") => {
+                if args.len() != 3 {
+                    self.diags
+                        .push(wrong_core_arity("static_file_range", 3, args.len(), span));
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
+                    return None;
+                }
+                self.expect_core_arg(
+                    "static_file_range",
+                    0,
+                    &Type::Named("HttpSrvReq".to_string()),
+                    &mut args[0],
+                );
+                self.expect_core_arg("static_file_range", 1, &Type::String, &mut args[1]);
+                self.expect_core_arg("static_file_range", 2, &Type::String, &mut args[2]);
+                return Some(Type::Result {
+                    ok: Box::new(Type::Named("HttpSrvResp".to_string())),
+                    err: Box::new(Type::String),
+                });
+            }
+            ("core.http.server", "access_log") => {
+                if args.len() != 2 {
+                    self.diags
+                        .push(wrong_core_arity("access_log", 2, args.len(), span));
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
+                    return None;
+                }
+                self.expect_core_arg(
+                    "access_log",
+                    0,
+                    &Type::Named("HttpSrvReq".to_string()),
+                    &mut args[0],
+                );
+                self.expect_core_arg("access_log", 1, &Type::Int, &mut args[1]);
+                return Some(Type::String);
+            }
             // D-TIMEDEPTH1=A: civil-time constructors.
             ("core.time.date", "new") => {
                 if args.len() != 3 {
@@ -1887,13 +2335,13 @@ impl<'a> Checker<'a> {
                 self.expect_core_arg("new", 0, &Type::Int, &mut args[0]);
                 self.expect_core_arg("new", 1, &Type::Int, &mut args[1]);
                 self.expect_core_arg("new", 2, &Type::Int, &mut args[2]);
-                return Some(Type::Named("Date".to_string()));
+                return Some(Type::Named("LocalDate".to_string()));
             }
             ("core.time.date", "today") => {
                 for a in args.iter_mut() {
                     self.infer(&mut a.expr);
                 }
-                return Some(Type::Named("Date".to_string()));
+                return Some(Type::Named("LocalDate".to_string()));
             }
             ("core.time.date", "parse") => {
                 if args.len() != 1 {
@@ -1906,7 +2354,7 @@ impl<'a> Checker<'a> {
                 }
                 self.expect_core_arg("parse", 0, &Type::String, &mut args[0]);
                 return Some(Type::Result {
-                    ok: Box::new(Type::Named("Date".to_string())),
+                    ok: Box::new(Type::Named("LocalDate".to_string())),
                     err: Box::new(Type::String),
                 });
             }
@@ -2266,6 +2714,33 @@ impl<'a> Checker<'a> {
         self.expect_core_arg_impl(call_name, idx, param_ty, arg, false);
     }
 
+    pub(crate) fn expect_url_arg(
+        &mut self,
+        call_name: &str,
+        idx: usize,
+        arg: &mut crate::AST::CallArg,
+    ) {
+        self.borrow_ctx = true;
+        let got = self.infer(&mut arg.expr);
+        if let Some(got) = got {
+            if matches!(got, Type::String) || matches!(got, Type::Named(ref n) if n == "Url") {
+                return;
+            }
+            self.diags.push(Diagnostic::error(
+                "E0112",
+                format!(
+                    "`{}` wants String or Url for argument {}, but this is {}",
+                    call_name,
+                    idx + 1,
+                    got.show()
+                ),
+                "HTTP client calls accept raw strings or typed Url values".to_string(),
+                "pass a String, or build a Url with core.url.parse".to_string(),
+                Some(arg.expr.span()),
+            ));
+        }
+    }
+
     /// Same elaboration as `expect_core_arg`, but for the handful of std
     /// constructors that genuinely store the argument as their own payload
     /// (`Json.Text`/`DbValue.Text` own their `String`, etc. — see
@@ -2585,7 +3060,7 @@ pub(crate) fn is_utf8_error_type_name(name: &str) -> bool {
 pub(crate) fn core_type_known(name: &str) -> bool {
     matches!(
         name,
-        "Unit" | "Void" | "U8" | "Error" | "ProcessResult" | "Stopwatch" | "Closed"
+        "Unit" | "Void" | "U8" | "Error" | "ProcessResult" | "ProcessSpec" | "ProcessChild" | "Stopwatch" | "Closed"
         // D-DET1: deterministic injected capability handles.
         // D-DET-CAPAPI: `Duration` value type for the widened clock surface.
         | "Clock" | "Rng" | "Duration"
@@ -2596,13 +3071,20 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // D-BIGINT1 / D-DECIMAL1: arbitrary-precision numerics.
         | "BigInt" | "Decimal"
         | "FileReader" | "FileWriter" | "FileLines"
-        | "StdinHandle" | "StdinLines"
-        // D-LSDIR1=A: directory entry value.
-        | "DirEntry"
+        | "StdinHandle" | "StdinLines" | "Stdout" | "Stderr"
+        // D-LSDIR1/D-FSOPS1/D-WATCH-SCOPE1: filesystem and watcher values.
+        | "DirEntry" | "Stat" | "WalkEntry" | "TempDir" | "TempFile" | "FileLock"
+        | "WatchEvent" | "WatchHandle" | "WatchSet"
         // D-DATA-SURFACE1=A / D-DATA-STATUS1=A: data summary/status values.
-        | "DataGroup" | "DataStatus"
+        | "DataGroup" | "DataStatus" | "DataSummary"
+        // D-LOGTRACE1=A: typed structured logging values.
+        | "LogField" | "LogSpan"
+        // D-ITERTOOLS1=A: expanded collection handles.
+        | "BitSet" | "ByteBuffer"
         // E2-M10: networking opaque types.
-        | "TcpListener" | "TcpStream" | "HttpRequest" | "HttpResponse" | "HttpRouter"
+        | "TcpListener" | "TcpStream" | "IpAddr" | "SocketAddr" | "UdpSocket" | "UdpPacket"
+        | "DnsSrv" | "UnixListener" | "UnixStream" | "TlsStream"
+        | "HttpRequest" | "HttpResponse" | "HttpRouter"
         // D-ALLOC1/D-ALLOC-C (ratified 2026-06-19): allocator opaque types.
         | "Arena" | "Bump" | "Pool" | "Fixed"
         // D-ARGS1 (ratified 2026-06-22): declarative CLI arg parsing types.
@@ -2642,7 +3124,12 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // D-APPROX1=A: approximate sketch data structures.
         | "HyperLogLog" | "TDigest" | "CountMinSketch" | "ReservoirSampler"
         // D-TIMEDEPTH1=A: civil-time types.
-        | "Date" | "DateTime"
+        | "Date" | "LocalDate" | "LocalTime" | "DateTime" | "Instant" | "Period" | "Zone"
+        | "ZonedDateTime"
+        // D-URL1=A: typed URL and MIME values.
+        | "Url" | "Mime"
+        // D-REGEXENGINE1=A: std-only linear regex values.
+        | "Regex" | "RegexFlags" | "Match"
         // D-NETDEP1=A / D-HTTPLIB1=A: HTTP types.
         | "HttpClientReq" | "HttpClientResp" | "HttpMux" | "HttpSrvReq" | "HttpSrvResp" | "HttpServerTls"
         // D-TYPEDTEXT1=D: typed text — a checked query/markup template built by
@@ -2707,10 +3194,29 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
             _ => None,
         };
     }
+    if type_name == "DataSummary" {
+        return match field {
+            "count" => Some(Type::Int),
+            "sum" | "mean" | "min" | "max" | "median" | "variance" | "stddev" => {
+                Some(Type::Float)
+            }
+            _ => None,
+        };
+    }
     match (type_name, field) {
         // D-LSDIR1=A: DirEntry has name (bare filename), path (full path), is_dir.
         ("DirEntry", "name" | "path") => Some(Type::String),
         ("DirEntry", "is_dir") => Some(Type::Bool),
+        // D-FSOPS1=A: typed filesystem metadata and recursive walk entries.
+        ("Stat", "size" | "modified_ms" | "created_ms") => Some(Type::Int),
+        ("Stat", "readonly" | "is_file" | "is_dir" | "is_symlink") => Some(Type::Bool),
+        ("Stat", "kind") => Some(Type::String),
+        ("WalkEntry", "path" | "relative") => Some(Type::String),
+        ("WalkEntry", "is_dir") => Some(Type::Bool),
+        ("WalkEntry", "depth") => Some(Type::Int),
+        ("TempDir" | "TempFile" | "FileLock", "path") => Some(Type::String),
+        ("WatchEvent", "domain" | "kind" | "path" | "detail") => Some(Type::String),
+        ("WatchEvent", "pid" | "port") => Some(Type::Int),
         // D-RENDERTGT2=A (c133 M1): UI geometry fields.
         ("Point", "x" | "y") => Some(Type::Float),
         ("Size", "width" | "height") => Some(Type::Float),
@@ -2721,6 +3227,8 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
         ("UiNode", "label") => Some(Type::String),
         ("UiNode", "width" | "height") => Some(Type::Float),
         ("ProcessResult", "code") => Some(Type::Int),
+        ("ProcessResult", "success" | "timed_out") => Some(Type::Bool),
+        ("ProcessResult", "signal") => Some(Type::Option(Box::new(Type::Int))),
         ("ProcessResult", "output" | "errors") => Some(Type::String),
         // E2-M10: HTTP request fields exposed to handlers.
         ("HttpRequest", "method" | "path" | "body") => Some(Type::String),
@@ -2950,6 +3458,16 @@ pub fn file_handle_method_return(
             "read_line" if n_args == 0 => {
                 Some(Some(result_ty(Type::Option(Box::new(Type::String)), io)))
             }
+            _ => None,
+        },
+        // D-COREIO1=A: stdout/stderr stream methods.
+        "Stdout" | "Stderr" => match method {
+            "write" | "write_line" if n_args == 1 => {
+                Some(Some(result_ty(unit.clone(), io.clone())))
+            }
+            "write_bytes" if n_args == 1 => Some(Some(result_ty(unit.clone(), io.clone()))),
+            "flush" if n_args == 0 => Some(Some(result_ty(unit.clone(), io))),
+            "is_tty" if n_args == 0 => Some(Some(Type::Bool)),
             _ => None,
         },
         _ => None,
@@ -3450,9 +3968,41 @@ pub fn net_method_return(
         ("TcpStream", "peer_addr") => Some(Some(str_ty.clone())),
         ("TcpStream", "local_addr") => Some(Some(str_ty.clone())),
         ("TcpStream", "close") => Some(Some(unit)),
-        // D-REGEX1: a regex `Match`. `group(0)` is the whole match; `group(n)` is
-        // capture group n, `none` if the group did not participate.
-        ("Match", "group") => Some(Some(Type::Option(Box::new(str_ty.clone())))),
+        _ => None,
+    }
+}
+
+/// D-REGEXENGINE1=A: method return types for std-only regex values.
+pub fn regex_method_return(
+    ty: &Type,
+    method: &str,
+    args: &[crate::AST::CallArg],
+) -> Option<Option<Type>> {
+    let argc = args.len();
+    match ty {
+        Type::Named(n) if n == "Regex" => match method {
+            "is_match" if argc == 1 => Some(Some(Type::Bool)),
+            "match" if argc == 1 => Some(Some(Type::Option(Box::new(Type::Named(
+                "Match".to_string(),
+            ))))),
+            "find" if argc == 1 => Some(Some(Type::Option(Box::new(Type::String)))),
+            "find_all" | "split" if argc == 1 => Some(Some(Type::List(Box::new(Type::String)))),
+            "matches" if argc == 1 => {
+                Some(Some(Type::List(Box::new(Type::Named("Match".to_string())))))
+            }
+            "replace" | "replace_all" if argc == 2 => Some(Some(Type::String)),
+            "split_limit" if argc == 2 => Some(Some(Type::List(Box::new(Type::String)))),
+            "replace_all_with" if argc == 2 => Some(Some(Type::String)),
+            _ => None,
+        },
+        Type::Named(n) if n == "Match" => match method {
+            "group" | "name" if argc == 1 => Some(Some(Type::Option(Box::new(Type::String)))),
+            "start" | "end" if argc == 0 => Some(Some(Type::Int)),
+            "group_start" | "group_end" if argc == 1 => {
+                Some(Some(Type::Option(Box::new(Type::Int))))
+            }
+            _ => None,
+        },
         _ => None,
     }
 }
@@ -3537,7 +4087,10 @@ pub fn http_type_method_return(
     let mk_opt_str = || Some(Some(Type::Option(Box::new(Type::String))));
     match ty {
         Type::Named(n) if n == "HttpClientReq" => match method {
-            "header" | "body" | "timeout" => mk("HttpClientReq"),
+            "header" | "body" | "timeout" | "connect_timeout" | "read_timeout"
+            | "total_timeout" | "redirects" | "proxy" | "cookie" | "form" | "multipart_text" => {
+                mk("HttpClientReq")
+            }
             "send" => Some(Some(Type::Result {
                 ok: Box::new(Type::Named("HttpClientResp".to_string())),
                 err: Box::new(Type::String),
@@ -3548,6 +4101,7 @@ pub fn http_type_method_return(
             "status" => mk_int(),
             "body" => mk_str(),
             "header" => mk_opt_str(),
+            "cookies" => Some(Some(Type::List(Box::new(Type::String)))),
             _ => None,
         },
         Type::Named(n) if n == "HttpMux" => match method {
@@ -3557,6 +4111,8 @@ pub fn http_type_method_return(
         Type::Named(n) if n == "HttpSrvReq" => match method {
             "method" | "path" | "body" => mk_str(),
             "param" | "header" => mk_opt_str(),
+            "body_len" => mk_int(),
+            "under_limit" => Some(Some(Type::Bool)),
             _ => None,
         },
         Type::Named(n) if n == "HttpSrvResp" => match method {
@@ -3567,26 +4123,113 @@ pub fn http_type_method_return(
     }
 }
 
-/// D-TIMEDEPTH1=A: method return types for Date/DateTime.
+/// D-URL1=A: method return types for typed URL and MIME values.
+pub fn url_mime_method_return(
+    ty: &Type,
+    method: &str,
+    args: &[crate::AST::CallArg],
+) -> Option<Option<Type>> {
+    let argc = args.len();
+    match ty {
+        Type::Named(n) if n == "Url" => match method {
+            "scheme" | "path" | "query" | "to_string" if argc == 0 => Some(Some(Type::String)),
+            "host" | "fragment" if argc == 0 => Some(Some(Type::Option(Box::new(Type::String)))),
+            "port" if argc == 0 => Some(Some(Type::Option(Box::new(Type::Int)))),
+            "path_segments" if argc == 0 => Some(Some(Type::List(Box::new(Type::String)))),
+            "query_pairs" if argc == 0 => Some(Some(Type::List(Box::new(Type::List(Box::new(
+                Type::String,
+            )))))),
+            "normalize" if argc == 0 => Some(Some(Type::Named("Url".to_string()))),
+            "join" if argc == 1 => Some(Some(result_ty(
+                Type::Named("Url".to_string()),
+                Type::String,
+            ))),
+            "set_query" | "add_query" if argc == 2 => Some(Some(Type::Named("Url".to_string()))),
+            _ => None,
+        },
+        Type::Named(n) if n == "Mime" => match method {
+            "media_type" | "subtype" | "essence" | "to_string" if argc == 0 => {
+                Some(Some(Type::String))
+            }
+            "param" if argc == 1 => Some(Some(Type::Option(Box::new(Type::String)))),
+            "params" if argc == 0 => Some(Some(Type::List(Box::new(Type::List(Box::new(
+                Type::String,
+            )))))),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// D-TIMEDEPTH1/D-TIME-CALENDAR1: method return types for civil-time values.
 pub fn civil_time_method_return(
     ty: &Type,
     method: &str,
     args: &[crate::AST::CallArg],
 ) -> Option<Option<Type>> {
-    let _ = args;
+    let argc = args.len();
     match ty {
-        Type::Named(n) if n == "Date" => match method {
-            "year" | "month" | "day" | "diff_days" | "weekday" | "day_of_year" => {
+        Type::Named(n) if n == "Date" || n == "LocalDate" => match method {
+            "year" | "month" | "day" | "weekday" | "iso_weekday" | "day_of_year" | "iso_week"
+                if argc == 0 =>
+            {
                 Some(Some(Type::Int))
             }
-            "add_days" | "add_months" => Some(Some(Type::Named("Date".to_string()))),
-            "to_string" => Some(Some(Type::String)),
+            "diff_days" if argc == 1 => Some(Some(Type::Int)),
+            "add_days" | "add_months" | "truncate" if argc == 1 => {
+                Some(Some(Type::Named("LocalDate".to_string())))
+            }
+            "add_period" if argc == 1 => Some(Some(Type::Named("LocalDate".to_string()))),
+            "to_string" if argc == 0 => Some(Some(Type::String)),
+            "format" if argc == 1 => Some(Some(Type::String)),
+            _ => None,
+        },
+        Type::Named(n) if n == "LocalTime" => match method {
+            "hour" | "minute" | "second" if argc == 0 => Some(Some(Type::Int)),
+            "to_string" if argc == 0 => Some(Some(Type::String)),
             _ => None,
         },
         Type::Named(n) if n == "DateTime" => match method {
-            "hour" | "minute" | "second" | "to_timestamp" => Some(Some(Type::Int)),
-            "date" => Some(Some(Type::Named("Date".to_string()))),
-            "to_string" => Some(Some(Type::String)),
+            "hour" | "minute" | "second" | "to_timestamp" | "to_unix_ms" if argc == 0 => {
+                Some(Some(Type::Int))
+            }
+            "date" if argc == 0 => Some(Some(Type::Named("LocalDate".to_string()))),
+            "time" if argc == 0 => Some(Some(Type::Named("LocalTime".to_string()))),
+            "plus_duration" | "truncate" | "round" if argc == 1 => {
+                Some(Some(Type::Named("DateTime".to_string())))
+            }
+            "in_zone" if argc == 1 => Some(Some(Type::Named("ZonedDateTime".to_string()))),
+            "to_string" | "format_rfc3339" if argc == 0 => Some(Some(Type::String)),
+            "format" if argc == 1 => Some(Some(Type::String)),
+            _ => None,
+        },
+        Type::Named(n) if n == "Instant" => match method {
+            "elapsed_millis" if argc == 0 => Some(Some(Type::Int)),
+            _ => None,
+        },
+        Type::Named(n) if n == "Duration" => match method {
+            "millis" | "seconds" if argc == 0 => Some(Some(Type::Int)),
+            _ => None,
+        },
+        Type::Named(n) if n == "Period" => match method {
+            "to_string" if argc == 0 => Some(Some(Type::String)),
+            _ => None,
+        },
+        Type::Named(n) if n == "Zone" => match method {
+            "name" if argc == 0 => Some(Some(Type::String)),
+            _ => None,
+        },
+        Type::Named(n) if n == "ZonedDateTime" => match method {
+            "date" if argc == 0 => Some(Some(Type::Named("LocalDate".to_string()))),
+            "time" if argc == 0 => Some(Some(Type::Named("LocalTime".to_string()))),
+            "offset_seconds" if argc == 0 => Some(Some(Type::Int)),
+            "to_datetime" if argc == 0 => Some(Some(Type::Named("DateTime".to_string()))),
+            "zone" if argc == 0 => Some(Some(Type::Named("Zone".to_string()))),
+            "add_duration" | "add_period" if argc == 1 => {
+                Some(Some(Type::Named("ZonedDateTime".to_string())))
+            }
+            "to_string" if argc == 0 => Some(Some(Type::String)),
+            "format" if argc == 1 => Some(Some(Type::String)),
             _ => None,
         },
         _ => None,
@@ -3959,7 +4602,48 @@ pub fn is_polymorphic_core_special(module: &str, name: &str) -> bool {
             | ("core.math", "floor")
             | ("core.math", "ceil")
             | ("core.math", "pow")
+            | ("core.math", "sin")
+            | ("core.math", "cos")
+            | ("core.math", "tan")
+            | ("core.math", "asin")
+            | ("core.math", "acos")
+            | ("core.math", "atan")
+            | ("core.math", "atan2")
+            | ("core.math", "sinh")
+            | ("core.math", "cosh")
+            | ("core.math", "tanh")
+            | ("core.math", "exp")
+            | ("core.math", "ln")
+            | ("core.math", "log2")
+            | ("core.math", "log10")
+            | ("core.math", "hypot")
+            | ("core.math", "trunc")
+            | ("core.math", "fract")
+            | ("core.math", "sign")
+            | ("core.math", "is_nan")
+            | ("core.math", "is_inf")
+            | ("core.math", "is_finite")
+            | ("core.math", "to_bits")
+            | ("core.math", "from_bits")
+            | ("core.math", "degrees")
+            | ("core.math", "radians")
+            | ("core.math", "lerp")
+            | ("core.math", "checked_add")
+            | ("core.math", "checked_sub")
+            | ("core.math", "checked_mul")
+            | ("core.math", "checked_pow")
+            | ("core.math", "saturating_add")
+            | ("core.math", "saturating_sub")
+            | ("core.math", "saturating_mul")
+            | ("core.math", "wrapping_add")
+            | ("core.math", "wrapping_sub")
+            | ("core.math", "wrapping_mul")
+            | ("core.math", "int_pow")
+            | ("core.math", "gcd")
+            | ("core.math", "lcm")
             | ("core.random", "pick")
+            | ("core.random", "weighted_pick")
+            | ("core.random", "sample")
             | ("core.random", "shuffle")
             | ("core.io", "eprint")
             // D-ENC1 / D-SERDE6: typed encode/decode return types depend on the value
@@ -3978,8 +4662,8 @@ pub fn is_polymorphic_core_special(module: &str, name: &str) -> bool {
             // D-TUPLE-DESTRUCT1: `tasks.channel<T>()` returns `(Sender<T>, Receiver<T>)`,
             // `T` read off the call-site turbofish — not in `core_fixed_sig`, so codegen
             // reads the whole tuple type from resolved_ret (I3).
-            | ("core.tasks", "channel")
-            | ("core.data", "csv" | "count" | "group_count" | "group_sum" | "group_mean")
+            | ("core.tasks", "channel" | "after")
+            | ("core.data", "csv" | "count" | "filter" | "sort_by" | "group_count" | "group_sum" | "group_mean")
     )
 }
 
@@ -4016,9 +4700,20 @@ pub fn core_fixed_sig(
             Some(io_unit),
         )),
         ("core.files", "exists" | "is_dir") => Some((vec![(read, Type::String)], Some(bool_))),
-        ("core.files", "remove" | "create_dir") => Some((
+        (
+            "core.files",
+            "remove" | "create_dir" | "create_dir_all" | "remove_dir" | "remove_all",
+        ) => Some((
             vec![(read, Type::String)],
             Some(result_ty(unit_ty(), io_error_ty())),
+        )),
+        ("core.files", "stat") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(Type::Named("Stat".to_string()), io_error_ty())),
+        )),
+        ("core.files", "canonicalize" | "absolute") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(Type::String, io_error_ty())),
         )),
         // D-LSDIR1=A: returns [DirEntry] ({name, path, is_dir}) — full path + type in one step.
         ("core.files", "list_dir") => Some((
@@ -4032,12 +4727,100 @@ pub fn core_fixed_sig(
             vec![(read, Type::String), (read, Type::String)],
             Some(result_ty(unit_ty(), io_error_ty())),
         )),
+        ("core.files", "copy_dir") => Some((
+            vec![(read, Type::String), (read, Type::String)],
+            Some(result_ty(unit_ty(), io_error_ty())),
+        )),
+        ("core.files", "symlink" | "hard_link") => Some((
+            vec![(read, Type::String), (read, Type::String)],
+            Some(result_ty(unit_ty(), io_error_ty())),
+        )),
+        ("core.files", "read_link") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(Type::String, io_error_ty())),
+        )),
+        ("core.files", "walk") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(
+                Type::List(Box::new(Type::Named("WalkEntry".to_string()))),
+                io_error_ty(),
+            )),
+        )),
+        ("core.files", "glob") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(Type::List(Box::new(Type::String)), io_error_ty())),
+        )),
+        ("core.files", "read_at") => Some((
+            vec![(read, Type::String), (read, Type::Int), (read, Type::Int)],
+            Some(result_ty(Type::List(Box::new(u8_ty())), io_error_ty())),
+        )),
+        ("core.files", "write_at") => Some((
+            vec![
+                (read, Type::String),
+                (read, Type::Int),
+                (read, Type::List(Box::new(u8_ty()))),
+            ],
+            Some(result_ty(unit_ty(), io_error_ty())),
+        )),
+        ("core.files", "fsync") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(unit_ty(), io_error_ty())),
+        )),
+        ("core.files", "write_atomic") => Some((
+            vec![(read, Type::String), (read, Type::List(Box::new(u8_ty())))],
+            Some(result_ty(unit_ty(), io_error_ty())),
+        )),
+        ("core.files", "temp_dir") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(Type::Named("TempDir".to_string()), io_error_ty())),
+        )),
+        ("core.files", "temp_file") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(
+                Type::Named("TempFile".to_string()),
+                io_error_ty(),
+            )),
+        )),
+        ("core.files", "lock") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(
+                Type::Named("FileLock".to_string()),
+                io_error_ty(),
+            )),
+        )),
+        ("core.watcher", "files") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(
+                Type::Named("WatchHandle".to_string()),
+                io_error_ty(),
+            )),
+        )),
+        ("core.watcher", "process_pid") => Some((
+            vec![(read, Type::Int)],
+            Some(Type::Named("WatchHandle".to_string())),
+        )),
+        ("core.watcher", "port") => Some((
+            vec![(read, Type::String), (read, Type::Int)],
+            Some(Type::Named("WatchHandle".to_string())),
+        )),
+        ("core.watcher", "set") => Some((vec![], Some(Type::Named("WatchSet".to_string())))),
         ("core.io", "args") => Some((vec![], Some(Type::List(Box::new(Type::String))))),
         ("core.io", "read_all_input") => {
             Some((vec![], Some(result_ty(Type::String, io_error_ty()))))
         }
         // D-STDIN1=A: streaming line-by-line stdin.
         ("core.io", "stdin") => Some((vec![], Some(Type::Named("StdinHandle".to_string())))),
+        ("core.io", "stdout") => Some((vec![], Some(Type::Named("Stdout".to_string())))),
+        ("core.io", "stderr") => Some((vec![], Some(Type::Named("Stderr".to_string())))),
+        ("core.io", "terminal_width" | "terminal_height") => Some((vec![], Some(Type::Int))),
+        ("core.io", "style" | "style_force") => Some((
+            vec![(read, Type::String), (read, Type::String)],
+            Some(Type::String),
+        )),
+        ("core.io", "progress") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(unit_ty(), io_error_ty())),
+        )),
         ("core.env", "get") => Some((
             vec![(read, Type::String)],
             Some(Type::Option(Box::new(Type::String))),
@@ -4045,6 +4828,24 @@ pub fn core_fixed_sig(
         ("core.env", "set") => Some((vec![(read, Type::String), (read, Type::String)], None)),
         ("core.env", "current_dir") => Some((vec![], Some(result_ty(Type::String, io_error_ty())))),
         ("core.env", "home_dir") => Some((vec![], Some(Type::Option(Box::new(Type::String))))),
+        ("core.os", "name" | "family" | "arch" | "temp_dir" | "executable" | "hostname" | "username") => {
+            Some((vec![], Some(Type::String)))
+        }
+        ("core.os", "pid" | "cpu_count") => Some((vec![], Some(Type::Int))),
+        ("core.os", "set_current_dir") => {
+            Some((vec![(read, Type::String)], Some(result_ty(unit_ty(), io_error_ty()))))
+        }
+        ("core.os", "on_interrupt") => Some((
+            vec![(
+                read,
+                Type::Fn {
+                    params: vec![],
+                    ret: None,
+                    effect_bound: None,
+                },
+            )],
+            None,
+        )),
         // U13 (D-JPK-SECRETCRYPTO1): `core.vault.get(name)` — a decrypted repo
         // secret, `None` if `name` isn't in the store. Same "may be missing"
         // shape as `core.env.get`.
@@ -4060,6 +4861,42 @@ pub fn core_fixed_sig(
                 io_error_ty(),
             )),
         )),
+        ("core.process", "cmd") => Some((
+            vec![(read, Type::List(Box::new(Type::String)))],
+            Some(Type::Named("ProcessSpec".to_string())),
+        )),
+        ("core.process", "pipeline") => Some((
+            vec![(
+                read,
+                Type::List(Box::new(Type::List(Box::new(Type::String)))),
+            )],
+            Some(result_ty(
+                Type::Named("ProcessResult".to_string()),
+                io_error_ty(),
+            )),
+        )),
+        ("core.testing", "snap" | "golden") => Some((
+            vec![(read, Type::String), (read, Type::String)],
+            Some(Type::Bool),
+        )),
+        ("core.testing", "fixture" | "temp_dir") => {
+            Some((vec![(read, Type::String)], Some(Type::String)))
+        }
+        ("core.testing", "corpus") => Some((
+            vec![(read, Type::String)],
+            Some(Type::List(Box::new(Type::String))),
+        )),
+        ("core.testing", "fake_clock") => Some((
+            vec![(read, Type::Int)],
+            Some(Type::Named("Clock".to_string())),
+        )),
+        ("core.testing", "fake_rng") => {
+            Some((vec![(read, Type::Int)], Some(Type::Named("Rng".to_string()))))
+        }
+        ("core.testing", "bench_budget") => Some((
+            vec![(read, Type::String), (read, Type::Int)],
+            Some(Type::Bool),
+        )),
         ("core.math", "sqrt" | "floor" | "ceil") => {
             Some((vec![(read, float.clone())], Some(float)))
         }
@@ -4072,6 +4909,16 @@ pub fn core_fixed_sig(
             Some((vec![(read, Type::Int), (read, Type::Int)], Some(Type::Int)))
         }
         ("core.random", "float") => Some((vec![], Some(Type::Float))),
+        ("core.random", "float_range") => Some((
+            vec![(read, Type::Float), (read, Type::Float)],
+            Some(Type::Float),
+        )),
+        ("core.random", "bool") => Some((vec![(read, Type::Float)], Some(Type::Bool))),
+        ("core.random", "normal") => Some((
+            vec![(read, Type::Float), (read, Type::Float)],
+            Some(Type::Float),
+        )),
+        ("core.random", "exponential") => Some((vec![(read, Type::Float)], Some(Type::Float))),
         ("core.random", "seed") => Some((vec![(read, Type::Int)], None)),
         // D-RANDSPLIT1=A: seedable PRNG bytes — fast, NOT cryptographically secure.
         // Returns raw `[Int8N]`; for crypto contexts use `core.crypto.random.bytes`.
@@ -4091,9 +4938,70 @@ pub fn core_fixed_sig(
             vec![(read, Type::Int)],
             Some(Type::Named(crate::Syntax::RNG_TYPE.to_string())),
         )),
+        ("core.random", "split") => Some((
+            vec![(read, Type::Int)],
+            Some(Type::Named(crate::Syntax::RNG_TYPE.to_string())),
+        )),
         ("core.time", "now") => Some((vec![], Some(Type::Int))),
         ("core.time", "sleep") => Some((vec![(read, Type::Int)], None)),
+        ("core.tasks", "interval") => Some((
+            vec![(read, Type::Int)],
+            Some(Type::Apply {
+                name: "Receiver".to_string(),
+                args: vec![Type::Int],
+            }),
+        )),
         ("core.time", "start") => Some((vec![], Some(Type::Named("Stopwatch".to_string())))),
+        ("core.time", "instant") => Some((vec![], Some(Type::Named("Instant".to_string())))),
+        ("core.time", "now_utc") => Some((vec![], Some(Type::Named("DateTime".to_string())))),
+        ("core.time", "from_unix_ms") => Some((
+            vec![(read, Type::Int)],
+            Some(Type::Named("DateTime".to_string())),
+        )),
+        ("core.time", "today") => Some((vec![], Some(Type::Named("LocalDate".to_string())))),
+        ("core.time", "parse_rfc3339") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(Type::Named("DateTime".to_string()), Type::String)),
+        )),
+        ("core.time", "local_time") => Some((
+            vec![(read, Type::Int), (read, Type::Int), (read, Type::Int)],
+            Some(Type::Named("LocalTime".to_string())),
+        )),
+        ("core.time", "parse_time") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(
+                Type::Named("LocalTime".to_string()),
+                Type::String,
+            )),
+        )),
+        ("core.time", "period") => Some((
+            vec![(read, Type::Int), (read, Type::Int), (read, Type::Int)],
+            Some(Type::Named("Period".to_string())),
+        )),
+        ("core.time", "period_days" | "period_months" | "period_years") => Some((
+            vec![(read, Type::Int)],
+            Some(Type::Named("Period".to_string())),
+        )),
+        ("core.time", "zone") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(Type::Named("Zone".to_string()), Type::String)),
+        )),
+        ("core.time", "utc") => Some((vec![], Some(Type::Named("Zone".to_string())))),
+        ("core.time", "zoned") => Some((
+            vec![
+                (read, Type::Named("DateTime".to_string())),
+                (read, Type::Named("Zone".to_string())),
+            ],
+            Some(Type::Named("ZonedDateTime".to_string())),
+        )),
+        ("core.time", "zoned_local") => Some((
+            vec![
+                (read, Type::Named("LocalDate".to_string())),
+                (read, Type::Named("LocalTime".to_string())),
+                (read, Type::Named("Zone".to_string())),
+            ],
+            Some(Type::Named("ZonedDateTime".to_string())),
+        )),
         // D-DET1: deterministic injected Clock capability. `time.clock(seed)` builds a
         // reproducible `Clock` from a caller-supplied start instant (a pure Int, ms);
         // a `@Pure fn` may read time through it (`clock.now()` / `clock.tick(ms)`)
@@ -4105,7 +5013,7 @@ pub fn core_fixed_sig(
         // D-DET-CAPAPI: `time.ms(n)` / `time.secs(n)` mint a deterministic `Duration`
         // value (pure — no ambient effect, like `time.clock`). The clock advances by
         // one with `clock.wait(d)`; read it back with `duration.millis()`.
-        ("core.time", "ms" | "secs") => Some((
+        ("core.time", "ms" | "secs" | "seconds" | "minutes" | "hours") => Some((
             vec![(read, Type::Int)],
             Some(Type::Named(crate::Syntax::DURATION_TYPE.to_string())),
         )),
@@ -4126,6 +5034,17 @@ pub fn core_fixed_sig(
         ("core.encoding.json", "to_string" | "to_string_pretty") => {
             Some((vec![(read, json)], Some(Type::String)))
         }
+        ("core.encoding.json", "canonical" | "events") => {
+            Some((vec![(read, json.clone())], Some(Type::String)))
+        }
+        ("core.encoding.jsonl", "parse") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(Type::List(Box::new(json.clone())), json_error_ty())),
+        )),
+        ("core.encoding.jsonl", "to_string") => Some((
+            vec![(read, Type::List(Box::new(json.clone())))],
+            Some(Type::String),
+        )),
         // jet.csv → core.encoding.csv: parse text into a list of rows (list of fields).
         ("core.encoding.csv", "parse") => Some((
             vec![(read, Type::String)],
@@ -4144,9 +5063,17 @@ pub fn core_fixed_sig(
         // D-DATA-SURFACE1=A / D-DATA-PLOT1=A / D-DATA-STATUS1=A: core.data
         // facade fixed-shape calls. Generic typed table calls are handled in
         // infer_core_call so selectors stay typed by sema.
-        ("core.data", "sum" | "mean" | "min" | "max") => Some((
+        ("core.data", "sum" | "mean" | "min" | "max" | "median" | "variance" | "stddev") => Some((
             vec![(read, Type::List(Box::new(Type::Float)))],
             Some(Type::Float),
+        )),
+        ("core.data", "quantile") => Some((
+            vec![(read, Type::List(Box::new(Type::Float))), (read, Type::Float)],
+            Some(Type::Float),
+        )),
+        ("core.data", "describe") => Some((
+            vec![(read, Type::List(Box::new(Type::Float)))],
+            Some(Type::Named("DataSummary".to_string())),
         )),
         ("core.data", "status") => Some((
             vec![],
@@ -4157,6 +5084,21 @@ pub fn core_fixed_sig(
                 read,
                 Type::List(Box::new(Type::Named("DataGroup".to_string()))),
             )],
+            Some(Type::String),
+        )),
+        ("core.fmt", "number" | "bytes" | "duration" | "ordinal") => {
+            Some((vec![(read, Type::Int)], Some(Type::String)))
+        }
+        ("core.fmt", "decimal" | "percent") => Some((
+            vec![(read, Type::Float), (read, Type::Int)],
+            Some(Type::String),
+        )),
+        ("core.fmt", "plural") => Some((
+            vec![(read, Type::Int), (read, Type::String), (read, Type::String)],
+            Some(Type::String),
+        )),
+        ("core.fmt", "pad_left" | "pad_right" | "pad_center") => Some((
+            vec![(read, Type::String), (read, Type::Int), (read, Type::String)],
             Some(Type::String),
         )),
         // D-ENC-DYN1=A+ (c152): TOML is a full adapter over the rich `Data` value —
@@ -4176,6 +5118,19 @@ pub fn core_fixed_sig(
         ("core.encoding.yaml", "to_string") => {
             Some((vec![(read, json.clone())], Some(Type::String)))
         }
+        ("core.encoding.xml", "parse") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(json.clone(), Type::String)),
+        )),
+        ("core.encoding.xml", "to_string") => Some((vec![(read, json.clone())], Some(Type::String))),
+        ("core.encoding.cbor", "encode") => Some((
+            vec![(read, json.clone())],
+            Some(Type::List(Box::new(u8_ty()))),
+        )),
+        ("core.encoding.cbor", "decode") => Some((
+            vec![(read, Type::List(Box::new(u8_ty())))],
+            Some(result_ty(json.clone(), Type::String)),
+        )),
         // E2-M7: streaming file handles (D-IO2, files.open / files.create).
         ("core.files", "open" | "append") => Some((
             vec![(read, string.clone())],
@@ -4193,6 +5148,55 @@ pub fn core_fixed_sig(
         ("core.path", "parent" | "extension" | "normalize") => {
             Some((vec![(read, Type::String)], Some(Type::String)))
         }
+        // D-URL1=A: typed URLs, query strings, component escaping, and MIME values.
+        ("core.url", "parse") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(Type::Named("Url".to_string()), Type::String)),
+        )),
+        ("core.url", "from_parts") => Some((
+            vec![
+                (read, Type::String),
+                (read, Type::String),
+                (read, Type::String),
+                (
+                    read,
+                    Type::List(Box::new(Type::List(Box::new(Type::String)))),
+                ),
+                (read, Type::String),
+            ],
+            Some(result_ty(Type::Named("Url".to_string()), Type::String)),
+        )),
+        ("core.url", "file") => Some((
+            vec![(read, Type::String)],
+            Some(Type::Named("Url".to_string())),
+        )),
+        ("core.url", "data") => Some((
+            vec![
+                (read, Type::Named("Mime".to_string())),
+                (read, Type::String),
+            ],
+            Some(Type::Named("Url".to_string())),
+        )),
+        ("core.url", "query") => Some((
+            vec![(
+                read,
+                Type::List(Box::new(Type::List(Box::new(Type::String)))),
+            )],
+            Some(Type::String),
+        )),
+        ("core.url", "percent_encode") => Some((vec![(read, Type::String)], Some(Type::String))),
+        ("core.url", "percent_decode") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(Type::String, Type::String)),
+        )),
+        ("core.mime", "parse") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(Type::Named("Mime".to_string()), Type::String)),
+        )),
+        ("core.mime", "from_extension" | "extension") => Some((
+            vec![(read, Type::String)],
+            Some(Type::Option(Box::new(Type::String))),
+        )),
         // D-TEXTUNICODE1: std-only Unicode scalar helpers.
         ("core.text.unicode", "scalar_count" | "byte_count") => {
             Some((vec![(read, Type::String)], Some(Type::Int)))
@@ -4205,8 +5209,89 @@ pub fn core_fixed_sig(
             vec![(read, Type::String)],
             Some(Type::List(Box::new(Type::String))),
         )),
-        // jet.log: structured JSON logging to stderr (E2-M12, D-OBS3).
-        ("jet.log", "info" | "warn" | "error" | "debug") => Some((vec![(read, string)], None)),
+        ("core.text", "nfc" | "nfd" | "nfkc" | "nfkd" | "casefold" | "lower" | "upper") => {
+            Some((vec![(read, Type::String)], Some(Type::String)))
+        }
+        ("core.text", "caseless_eq") => Some((
+            vec![(read, Type::String), (read, Type::String)],
+            Some(Type::Bool),
+        )),
+        ("core.text", "graphemes" | "words" | "sentences" | "scalars") => Some((
+            vec![(read, Type::String)],
+            Some(Type::List(Box::new(Type::String))),
+        )),
+        ("core.text", "width" | "scalar_count" | "byte_count") => {
+            Some((vec![(read, Type::String)], Some(Type::Int)))
+        }
+        ("core.text", "is_alphabetic" | "is_numeric" | "is_whitespace" | "is_ascii") => {
+            Some((vec![(read, Type::String)], Some(Type::Bool)))
+        }
+        ("core.text", "splitn" | "rsplitn") => Some((
+            vec![(read, Type::String), (read, Type::String), (read, Type::Int)],
+            Some(Type::List(Box::new(Type::String))),
+        )),
+        ("core.text", "trim" | "trim_start" | "trim_end") => {
+            Some((vec![(read, Type::String)], Some(Type::String)))
+        }
+        ("core.text", "pad_start" | "pad_end" | "center") => Some((
+            vec![(read, Type::String), (read, Type::Int), (read, Type::String)],
+            Some(Type::String),
+        )),
+        ("core.text", "starts_any" | "ends_any") => Some((
+            vec![(read, Type::String), (read, Type::List(Box::new(Type::String)))],
+            Some(Type::Bool),
+        )),
+        ("core.text", "char_indices") => Some((
+            vec![(read, Type::String)],
+            Some(Type::List(Box::new(Type::String))),
+        )),
+        // jet.log/core.log: structured logging, typed fields, spans, sinks.
+        ("jet.log", "info" | "warn" | "error" | "debug") => {
+            Some((vec![(read, string.clone())], None))
+        }
+        ("jet.log", "field") => Some((
+            vec![(read, string.clone()), (read, string.clone())],
+            Some(Type::Named("LogField".to_string())),
+        )),
+        ("jet.log", "int") => Some((
+            vec![(read, string.clone()), (read, Type::Int)],
+            Some(Type::Named("LogField".to_string())),
+        )),
+        ("jet.log", "float") => Some((
+            vec![(read, string.clone()), (read, Type::Float)],
+            Some(Type::Named("LogField".to_string())),
+        )),
+        ("jet.log", "bool") => Some((
+            vec![(read, string.clone()), (read, Type::Bool)],
+            Some(Type::Named("LogField".to_string())),
+        )),
+        ("jet.log", "redact") => Some((
+            vec![(read, string.clone())],
+            Some(Type::Named("LogField".to_string())),
+        )),
+        ("jet.log", "info_fields" | "warn_fields" | "error_fields" | "debug_fields") => Some((
+            vec![
+                (read, string.clone()),
+                (read, Type::List(Box::new(Type::Named("LogField".to_string())))),
+            ],
+            None,
+        )),
+        ("jet.log", "span") => Some((
+            vec![(read, string.clone())],
+            Some(Type::Named("LogSpan".to_string())),
+        )),
+        ("jet.log", "enter" | "close") => {
+            Some((vec![(read, Type::Named("LogSpan".to_string()))], None))
+        }
+        ("jet.log", "set_sink") => {
+            Some((vec![(read, string.clone()), (read, string.clone())], None))
+        }
+        ("jet.log", "sample_every") => Some((vec![(read, Type::Int)], None)),
+        ("jet.log", "counter") => Some((
+            vec![(read, string.clone()), (read, Type::Int)],
+            Some(Type::Named("LogField".to_string())),
+        )),
+        ("jet.log", "otlp_file") => Some((vec![(read, string.clone())], None)),
         ("jet.log", "set_level") => Some((vec![(read, Type::String)], None)),
         // D-OBS3: set OTel trace_id for all subsequent log entries on this thread.
         ("jet.log", "set_trace_id") => Some((vec![(read, Type::String)], None)),
@@ -4224,15 +5309,58 @@ pub fn core_fixed_sig(
             vec![(read, Type::List(Box::new(u8_ty())))],
             Some(Type::String),
         )),
-        // D-CRYPTOENV1=A: misuse-resistant envelope (RustCrypto via FFI bridge).
-        ("jet.crypto", "seal") => Some((
+        ("jet.crypto", "sha512_bytes" | "blake3_bytes") => Some((
+            vec![(read, Type::List(Box::new(u8_ty())))],
+            Some(Type::String),
+        )),
+        ("jet.crypto", "constant_time_eq") => Some((
+            vec![
+                (read, Type::List(Box::new(u8_ty()))),
+                (read, Type::List(Box::new(u8_ty()))),
+            ],
+            Some(Type::Bool),
+        )),
+        ("jet.crypto", "hkdf_sha256") => Some((
+            vec![
+                (read, Type::List(Box::new(u8_ty()))),
+                (read, Type::List(Box::new(u8_ty()))),
+                (read, Type::List(Box::new(u8_ty()))),
+                (read, Type::Int),
+            ],
+            Some(result_ty(Type::List(Box::new(u8_ty())), Type::String)),
+        )),
+        ("jet.crypto", "x25519_public") => Some((
+            vec![(read, Type::List(Box::new(u8_ty())))],
+            Some(result_ty(Type::List(Box::new(u8_ty())), Type::String)),
+        )),
+        ("jet.crypto", "x25519_shared") => Some((
             vec![
                 (read, Type::List(Box::new(u8_ty()))),
                 (read, Type::List(Box::new(u8_ty()))),
             ],
             Some(result_ty(Type::List(Box::new(u8_ty())), Type::String)),
         )),
-        ("jet.crypto", "open") => Some((
+        ("jet.crypto", "password_hash") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(Type::String, Type::String)),
+        )),
+        ("jet.crypto", "password_hash_with_salt") => Some((
+            vec![(read, Type::String), (read, Type::List(Box::new(u8_ty())))],
+            Some(result_ty(Type::String, Type::String)),
+        )),
+        ("jet.crypto", "password_verify") => Some((
+            vec![(read, Type::String), (read, Type::String)],
+            Some(Type::Bool),
+        )),
+        // D-CRYPTOENV1=A: misuse-resistant envelope (RustCrypto via FFI bridge).
+        ("jet.crypto", "seal" | "file_seal") => Some((
+            vec![
+                (read, Type::List(Box::new(u8_ty()))),
+                (read, Type::List(Box::new(u8_ty()))),
+            ],
+            Some(result_ty(Type::List(Box::new(u8_ty())), Type::String)),
+        )),
+        ("jet.crypto", "open" | "file_open") => Some((
             vec![
                 (read, Type::List(Box::new(u8_ty()))),
                 (read, Type::List(Box::new(u8_ty()))),
@@ -4277,6 +5405,47 @@ pub fn core_fixed_sig(
                 Type::String,
             )),
         )),
+        ("core.net", "ip_addr") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(Type::Named("IpAddr".to_string()), Type::String)),
+        )),
+        ("core.net", "ip_to_string") => Some((
+            vec![(read, Type::Named("IpAddr".to_string()))],
+            Some(Type::String),
+        )),
+        ("core.net", "ip_is_ipv4") => Some((
+            vec![(read, Type::Named("IpAddr".to_string()))],
+            Some(Type::Bool),
+        )),
+        ("core.net", "socket_addr") => Some((
+            vec![(read, Type::String), (read, Type::Int)],
+            Some(result_ty(
+                Type::Named("SocketAddr".to_string()),
+                Type::String,
+            )),
+        )),
+        ("core.net", "socket_addr_parse") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(
+                Type::Named("SocketAddr".to_string()),
+                Type::String,
+            )),
+        )),
+        ("core.net", "socket_host" | "socket_to_string") => Some((
+            vec![(read, Type::Named("SocketAddr".to_string()))],
+            Some(Type::String),
+        )),
+        ("core.net", "socket_port") => Some((
+            vec![(read, Type::Named("SocketAddr".to_string()))],
+            Some(Type::Int),
+        )),
+        ("core.net", "tcp_listen_addr") => Some((
+            vec![(read, Type::Named("SocketAddr".to_string()))],
+            Some(result_ty(
+                Type::Named("TcpListener".to_string()),
+                Type::String,
+            )),
+        )),
         ("core.net", "tcp_accept") => Some((
             vec![(
                 AccessConvention::Read,
@@ -4289,6 +5458,30 @@ pub fn core_fixed_sig(
         )),
         ("core.net", "tcp_connect") => Some((
             vec![(read, Type::String)],
+            Some(result_ty(
+                Type::Named("TcpStream".to_string()),
+                Type::String,
+            )),
+        )),
+        ("core.net", "tcp_connect_addr") => Some((
+            vec![(read, Type::Named("SocketAddr".to_string()))],
+            Some(result_ty(
+                Type::Named("TcpStream".to_string()),
+                Type::String,
+            )),
+        )),
+        ("core.net", "tcp_connect_timeout") => Some((
+            vec![
+                (read, Type::Named("SocketAddr".to_string())),
+                (read, Type::Int),
+            ],
+            Some(result_ty(
+                Type::Named("TcpStream".to_string()),
+                Type::String,
+            )),
+        )),
+        ("core.net", "tcp_connect_happy") => Some((
+            vec![(read, Type::String), (read, Type::Int), (read, Type::Int)],
             Some(result_ty(
                 Type::Named("TcpStream".to_string()),
                 Type::String,
@@ -4315,6 +5508,14 @@ pub fn core_fixed_sig(
             vec![(read, Type::Named("TcpStream".to_string()))],
             Some(Type::String),
         )),
+        ("core.net", "tcp_local_socket_addr" | "tcp_peer_socket_addr") => Some((
+            vec![(read, Type::Named("TcpStream".to_string()))],
+            Some(Type::Named("SocketAddr".to_string())),
+        )),
+        ("core.net", "listener_local_socket_addr") => Some((
+            vec![(read, Type::Named("TcpListener".to_string()))],
+            Some(Type::Named("SocketAddr".to_string())),
+        )),
         ("core.net", "set_timeout") => Some((
             vec![
                 (
@@ -4325,6 +5526,16 @@ pub fn core_fixed_sig(
             ],
             None,
         )),
+        ("core.net", "set_read_timeout" | "set_write_timeout") => Some((
+            vec![
+                (
+                    AccessConvention::Write,
+                    Type::Named("TcpStream".to_string()),
+                ),
+                (read, Type::Int),
+            ],
+            Some(result_ty(unit_ty(), Type::String)),
+        )),
         // Convenience: send a complete HTTP/1.1 response and close the stream.
         ("core.net", "tcp_reply") => Some((
             vec![
@@ -4333,6 +5544,182 @@ pub fn core_fixed_sig(
                 (read, Type::String),
             ],
             None,
+        )),
+        ("core.net", "udp_bind") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(
+                Type::Named("UdpSocket".to_string()),
+                Type::String,
+            )),
+        )),
+        ("core.net", "udp_bind_addr") => Some((
+            vec![(read, Type::Named("SocketAddr".to_string()))],
+            Some(result_ty(
+                Type::Named("UdpSocket".to_string()),
+                Type::String,
+            )),
+        )),
+        ("core.net", "udp_local_addr") => Some((
+            vec![(read, Type::Named("UdpSocket".to_string()))],
+            Some(Type::Named("SocketAddr".to_string())),
+        )),
+        ("core.net", "udp_set_timeout") => Some((
+            vec![
+                (read, Type::Named("UdpSocket".to_string())),
+                (read, Type::Int),
+            ],
+            Some(result_ty(unit_ty(), Type::String)),
+        )),
+        ("core.net", "udp_send_to") => Some((
+            vec![
+                (read, Type::Named("UdpSocket".to_string())),
+                (read, Type::String),
+                (read, Type::Named("SocketAddr".to_string())),
+            ],
+            Some(result_ty(Type::Int, Type::String)),
+        )),
+        ("core.net", "udp_recv_from") => Some((
+            vec![
+                (read, Type::Named("UdpSocket".to_string())),
+                (read, Type::Int),
+            ],
+            Some(result_ty(
+                Type::Named("UdpPacket".to_string()),
+                Type::String,
+            )),
+        )),
+        ("core.net", "udp_packet_data") => Some((
+            vec![(read, Type::Named("UdpPacket".to_string()))],
+            Some(Type::String),
+        )),
+        ("core.net", "udp_packet_addr") => Some((
+            vec![(read, Type::Named("UdpPacket".to_string()))],
+            Some(Type::Named("SocketAddr".to_string())),
+        )),
+        ("core.net", "unix_listen") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(
+                Type::Named("UnixListener".to_string()),
+                Type::String,
+            )),
+        )),
+        ("core.net", "unix_accept") => Some((
+            vec![(read, Type::Named("UnixListener".to_string()))],
+            Some(result_ty(
+                Type::Named("UnixStream".to_string()),
+                Type::String,
+            )),
+        )),
+        ("core.net", "unix_connect") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(
+                Type::Named("UnixStream".to_string()),
+                Type::String,
+            )),
+        )),
+        ("core.net", "unix_read") => Some((
+            vec![(
+                AccessConvention::Write,
+                Type::Named("UnixStream".to_string()),
+            )],
+            Some(result_ty(Type::String, Type::String)),
+        )),
+        ("core.net", "unix_write") => Some((
+            vec![
+                (
+                    AccessConvention::Write,
+                    Type::Named("UnixStream".to_string()),
+                ),
+                (read, Type::String),
+            ],
+            Some(result_ty(unit_ty(), Type::String)),
+        )),
+        ("core.net", "dns_a" | "dns_aaaa") => Some((
+            vec![(read, Type::String), (read, Type::Int)],
+            Some(result_ty(
+                Type::List(Box::new(Type::Named("IpAddr".to_string()))),
+                Type::String,
+            )),
+        )),
+        ("core.net", "dns_a_at" | "dns_aaaa_at") => Some((
+            vec![
+                (read, Type::String),
+                (read, Type::String),
+                (read, Type::Int),
+            ],
+            Some(result_ty(
+                Type::List(Box::new(Type::Named("IpAddr".to_string()))),
+                Type::String,
+            )),
+        )),
+        ("core.net", "dns_txt") => Some((
+            vec![(read, Type::String), (read, Type::Int)],
+            Some(result_ty(Type::List(Box::new(Type::String)), Type::String)),
+        )),
+        ("core.net", "dns_txt_at") => Some((
+            vec![
+                (read, Type::String),
+                (read, Type::String),
+                (read, Type::Int),
+            ],
+            Some(result_ty(Type::List(Box::new(Type::String)), Type::String)),
+        )),
+        ("core.net", "dns_srv") => Some((
+            vec![(read, Type::String), (read, Type::Int)],
+            Some(result_ty(
+                Type::List(Box::new(Type::Named("DnsSrv".to_string()))),
+                Type::String,
+            )),
+        )),
+        ("core.net", "dns_srv_at") => Some((
+            vec![
+                (read, Type::String),
+                (read, Type::String),
+                (read, Type::Int),
+            ],
+            Some(result_ty(
+                Type::List(Box::new(Type::Named("DnsSrv".to_string()))),
+                Type::String,
+            )),
+        )),
+        ("core.net", "dns_srv_target") => Some((
+            vec![(read, Type::Named("DnsSrv".to_string()))],
+            Some(Type::String),
+        )),
+        ("core.net", "dns_srv_port" | "dns_srv_priority" | "dns_srv_weight") => Some((
+            vec![(read, Type::Named("DnsSrv".to_string()))],
+            Some(Type::Int),
+        )),
+        ("core.net", "tls_connect") => Some((
+            vec![
+                (AccessConvention::Move, Type::Named("TcpStream".to_string())),
+                (read, Type::String),
+            ],
+            Some(result_ty(
+                Type::Named("TlsStream".to_string()),
+                Type::String,
+            )),
+        )),
+        ("core.net", "tls_read") => Some((
+            vec![(
+                AccessConvention::Write,
+                Type::Named("TlsStream".to_string()),
+            )],
+            Some(result_ty(Type::String, Type::String)),
+        )),
+        ("core.net", "tls_write") => Some((
+            vec![
+                (
+                    AccessConvention::Write,
+                    Type::Named("TlsStream".to_string()),
+                ),
+                (read, Type::String),
+            ],
+            Some(result_ty(unit_ty(), Type::String)),
+        )),
+        ("core.net", "tls_close") => Some((
+            vec![(AccessConvention::Move, Type::Named("TlsStream".to_string()))],
+            Some(result_ty(unit_ty(), Type::String)),
         )),
         // E2-M10: jet.http — HTTP client/server over blocking I/O.
         // GET / HEAD / DELETE requests (no body sent).
@@ -4354,8 +5741,23 @@ pub fn core_fixed_sig(
         // serve blocks until the listener is closed; handler is called per request.
         // The handler type is resolved at the call site (lambda / fn pointer).
         ("jet.http", "serve") => None, // special-cased in check_core_call
-        // D-REGEX1: jet.regex — linear-time regex on the `regex` crate. Every call
-        // returns a Result; the `Err` is a bad-pattern message at the boundary.
+        // D-REGEXENGINE1=A: core.regex — std-only linear regex. Every parsing
+        // call returns a Result; the `Err` is a bad-pattern message at the boundary.
+        ("jet.regex", "flags") => Some((
+            vec![(read, Type::Bool), (read, Type::Bool), (read, Type::Bool)],
+            Some(Type::Named("RegexFlags".to_string())),
+        )),
+        ("jet.regex", "compile") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(Type::Named("Regex".to_string()), Type::String)),
+        )),
+        ("jet.regex", "compile_with") => Some((
+            vec![
+                (read, Type::String),
+                (read, Type::Named("RegexFlags".to_string())),
+            ],
+            Some(result_ty(Type::Named("Regex".to_string()), Type::String)),
+        )),
         ("jet.regex", "is_match") => Some((
             vec![(read, Type::String), (read, Type::String)],
             Some(result_ty(Type::Bool, Type::String)),
@@ -4378,6 +5780,21 @@ pub fn core_fixed_sig(
         )),
         ("jet.regex", "find_all" | "split") => Some((
             vec![(read, Type::String), (read, Type::String)],
+            Some(result_ty(Type::List(Box::new(Type::String)), Type::String)),
+        )),
+        ("jet.regex", "matches") => Some((
+            vec![(read, Type::String), (read, Type::String)],
+            Some(result_ty(
+                Type::List(Box::new(Type::Named("Match".to_string()))),
+                Type::String,
+            )),
+        )),
+        ("jet.regex", "split_limit") => Some((
+            vec![
+                (read, Type::String),
+                (read, Type::String),
+                (read, Type::Int),
+            ],
             Some(result_ty(Type::List(Box::new(Type::String)), Type::String)),
         )),
         ("jet.regex", "replace" | "replace_all") => Some((
@@ -4494,6 +5911,53 @@ pub fn core_fixed_sig(
             Some(Type::Named("DbConnection".to_string())),
         )),
         ("jet.db", "open_memory") => Some((vec![], Some(Type::Named("DbConnection".to_string())))),
+        ("jet.db", "params") => Some((
+            vec![(read, Type::Named("Sql".to_string()))],
+            Some(Type::List(Box::new(Type::Named(Syntax::TYPE_DB_VALUE.to_string())))),
+        )),
+        ("jet.db", "row_value") => Some((
+            vec![(read, db_row_ty()), (read, Type::String)],
+            Some(Type::Result {
+                ok: Box::new(Type::Named(Syntax::TYPE_DB_VALUE.to_string())),
+                err: Box::new(Type::String),
+            }),
+        )),
+        ("jet.db", "row_int") => Some((
+            vec![(read, db_row_ty()), (read, Type::String)],
+            Some(Type::Result {
+                ok: Box::new(Type::Int),
+                err: Box::new(Type::String),
+            }),
+        )),
+        ("jet.db", "row_float") => Some((
+            vec![(read, db_row_ty()), (read, Type::String)],
+            Some(Type::Result {
+                ok: Box::new(Type::Float),
+                err: Box::new(Type::String),
+            }),
+        )),
+        ("jet.db", "row_text") => Some((
+            vec![(read, db_row_ty()), (read, Type::String)],
+            Some(Type::Result {
+                ok: Box::new(Type::String),
+                err: Box::new(Type::String),
+            }),
+        )),
+        ("jet.db", "row_bool") => Some((
+            vec![(read, db_row_ty()), (read, Type::String)],
+            Some(Type::Result {
+                ok: Box::new(Type::Bool),
+                err: Box::new(Type::String),
+            }),
+        )),
+        ("jet.db", "transaction") | ("jet.db", "migrate") => Some((
+            vec![
+                (read, Type::Named("DbConnection".to_string())),
+                (read, Type::String),
+                (read, Type::List(Box::new(Type::String))),
+            ],
+            Some(result_ty(Type::Int, db_error_ty())),
+        )),
         // D-DEP-WASM1=A / D-PLUGIN1=B (c81): `core.plugin` — sandboxed WASM
         // Component Model plugin loader (wasmtime, runtime-side only, I6).
         // `load` is the only module-level entry point; it PRODUCES a `Plugin`
@@ -4517,6 +5981,20 @@ pub fn core_fixed_sig(
             Some((vec![(read, list_u8.clone())], Some(Type::String)))
         }
         ("core.encoding.base64", "decode") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(list_u8.clone(), Type::String)),
+        )),
+        ("core.encoding.base64", "encode_url") => {
+            Some((vec![(read, list_u8.clone())], Some(Type::String)))
+        }
+        ("core.encoding.base64", "decode_url") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(list_u8.clone(), Type::String)),
+        )),
+        ("core.encoding.base32", "encode") => {
+            Some((vec![(read, list_u8.clone())], Some(Type::String)))
+        }
+        ("core.encoding.base32", "decode") => Some((
             vec![(read, Type::String)],
             Some(result_ty(list_u8.clone(), Type::String)),
         )),
@@ -4682,10 +6160,22 @@ pub(crate) fn args_spec_method_return(
     match (method, n_args) {
         // .flag("name", "help text") → ArgsSpec  (boolean flag, no value)
         ("flag", 2) => Some(Some(spec_ty)),
+        ("flag_short", 3) => Some(Some(spec_ty)),
         // .option("name", "help text", "METAVAR") → ArgsSpec  (value option)
         ("option", 3) => Some(Some(spec_ty)),
+        ("option_short", 4)
+        | ("option_default", 4)
+        | ("option_env", 4)
+        | ("option_choice", 4) => Some(Some(spec_ty)),
+        ("option_int", 3)
+        | ("option_float", 3)
+        | ("repeat", 3)
+        | ("required_option", 3) => Some(Some(spec_ty)),
         // .positional("name", "help text") → ArgsSpec  (positional argument)
         ("positional", 2) => Some(Some(spec_ty)),
+        ("subcommand", 3) => Some(Some(spec_ty)),
+        ("version", 1) => Some(Some(spec_ty)),
+        ("completion", 1) => Some(Some(Type::String)),
         // .help() → String  (render --help text)
         ("help", 0) => Some(Some(Type::String)),
         // .parse([String]) → ParsedArgs ? String
@@ -4704,12 +6194,45 @@ pub(crate) fn args_spec_method_return(
             ));
             Some(None)
         }
+        ("flag_short", _) => {
+            diags.push(Diagnostic::error(
+                "E1301",
+                format!(
+                    "`flag_short` expects 3 arguments (name, short, help), got {}",
+                    n_args
+                ),
+                "`ArgsSpec.flag_short(name, short, help)` registers a boolean flag with a `-v` alias".to_string(),
+                "pass exactly three strings: long name, one-letter short name, and help text".to_string(),
+                Some(span),
+            ));
+            Some(None)
+        }
         ("option", _) => {
             diags.push(Diagnostic::error(
                 "E1302",
                 format!("`option` expects 3 arguments (name, help, metavar), got {}", n_args),
                 "`ArgsSpec.option(name, help, metavar)` registers a value option like `--output FILE`".to_string(),
                 "pass three strings: the option name, a help description, and a metavar like `FILE`".to_string(),
+                Some(span),
+            ));
+            Some(None)
+        }
+        (
+            "option_short"
+            | "option_default"
+            | "option_env"
+            | "option_int"
+            | "option_float"
+            | "option_choice"
+            | "repeat"
+            | "required_option",
+            _,
+        ) => {
+            diags.push(Diagnostic::error(
+                "E1302",
+                format!("`{}` was called with the wrong number of arguments", method),
+                "`core.args` option builders declare long names, help text, and a value name; variants add one extra string where needed".to_string(),
+                "check the `core.args` builder signature and pass the required strings".to_string(),
                 Some(span),
             ));
             Some(None)
@@ -4724,6 +6247,29 @@ pub(crate) fn args_spec_method_return(
                 "`ArgsSpec.positional(name, help)` registers a required positional argument"
                     .to_string(),
                 "pass exactly two strings: the positional name and a help description".to_string(),
+                Some(span),
+            ));
+            Some(None)
+        }
+        ("subcommand", _) => {
+            diags.push(Diagnostic::error(
+                "E1303",
+                format!(
+                    "`subcommand` expects 3 arguments (name, help, spec), got {}",
+                    n_args
+                ),
+                "`ArgsSpec.subcommand(name, help, spec)` gives a subcommand its own nested ArgsSpec".to_string(),
+                "pass the subcommand name, help text, and an ArgsSpec built with `args.spec()`".to_string(),
+                Some(span),
+            ));
+            Some(None)
+        }
+        ("version" | "completion", _) => {
+            diags.push(Diagnostic::error(
+                "E1303",
+                format!("`{}` expects 1 argument, got {}", method, n_args),
+                "`version(text)` configures `--version`; `completion(shell)` renders shell completion text".to_string(),
+                "pass exactly one string".to_string(),
                 Some(span),
             ));
             Some(None)
@@ -4755,8 +6301,12 @@ pub(crate) fn parsed_args_method_return(
         ("flag", 1) => Some(Some(Type::Bool)),
         // .option("name") → String?
         ("option", 1) => Some(Some(Type::Option(Box::new(Type::String)))),
+        ("option_int", 1) => Some(Some(Type::Option(Box::new(Type::Int)))),
+        ("option_float", 1) => Some(Some(Type::Option(Box::new(Type::Float)))),
+        ("options", 1) => Some(Some(Type::List(Box::new(Type::String)))),
         // .positional(n) → String?
         ("positional", 1) => Some(Some(Type::Option(Box::new(Type::String)))),
+        ("subcommand", 0) => Some(Some(Type::Option(Box::new(Type::String)))),
         ("flag", _) => {
             diags.push(Diagnostic::error(
                 "E1301",
@@ -4786,6 +6336,19 @@ pub(crate) fn parsed_args_method_return(
             ));
             Some(None)
         }
+        ("option_int" | "option_float" | "options", _) => {
+            diags.push(Diagnostic::error(
+                "E1302",
+                format!(
+                    "`ParsedArgs.{}` expects 1 argument (option name), got {}",
+                    method, n_args
+                ),
+                "`ParsedArgs` typed option queries read values already validated by `ArgsSpec.parse`".to_string(),
+                "pass exactly one string: the option name (without leading `--`)".to_string(),
+                Some(span),
+            ));
+            Some(None)
+        }
         ("positional", _) => {
             diags.push(Diagnostic::error(
                 "E1303",
@@ -4800,6 +6363,100 @@ pub(crate) fn parsed_args_method_return(
                 "pass exactly one Int: the zero-based positional argument index".to_string(),
                 Some(span),
             ));
+            Some(None)
+        }
+        ("subcommand", _) => {
+            diags.push(Diagnostic::error(
+                "E1303",
+                format!("`ParsedArgs.subcommand` expects 0 arguments, got {}", n_args),
+                "`ParsedArgs.subcommand()` returns the matched subcommand name, if any".to_string(),
+                "call it with no arguments".to_string(),
+                Some(span),
+            ));
+            Some(None)
+        }
+        _ => None,
+    }
+}
+
+/// D-PROCESS1: type-check `ProcessSpec` builder/run/spawn methods.
+pub(crate) fn process_spec_method_return(
+    method: &str,
+    n_args: usize,
+    span: Span,
+    diags: &mut Vec<Diagnostic>,
+) -> Option<Option<Type>> {
+    let spec_ty = Type::Named("ProcessSpec".to_string());
+    match (method, n_args) {
+        ("cwd" | "env_remove" | "stdin_text" | "stdout" | "stderr", 1) => Some(Some(spec_ty)),
+        ("env", 2) => Some(Some(spec_ty)),
+        (
+            "env_clear" | "stdout_capture" | "stdout_inherit" | "stdout_discard" | "stderr_capture"
+            | "stderr_inherit" | "stderr_discard" | "detached",
+            0,
+        ) => Some(Some(spec_ty)),
+        ("timeout_ms" | "output_limit", 1) => Some(Some(spec_ty)),
+        ("run", 0) => Some(Some(result_ty(
+            Type::Named("ProcessResult".to_string()),
+            io_error_ty(),
+        ))),
+        ("spawn", 0) => Some(Some(result_ty(
+            Type::Named("ProcessChild".to_string()),
+            io_error_ty(),
+        ))),
+        ("cwd" | "env_remove" | "stdin_text" | "stdout" | "stderr", _) => {
+            diags.push(wrong_core_arity(method, 1, n_args, span));
+            Some(None)
+        }
+        ("env", _) => {
+            diags.push(wrong_core_arity(method, 2, n_args, span));
+            Some(None)
+        }
+        (
+            "env_clear" | "stdout_capture" | "stdout_inherit" | "stdout_discard" | "stderr_capture"
+            | "stderr_inherit" | "stderr_discard" | "detached" | "run" | "spawn",
+            _,
+        ) => {
+            diags.push(wrong_core_arity(method, 0, n_args, span));
+            Some(None)
+        }
+        ("timeout_ms" | "output_limit", _) => {
+            diags.push(wrong_core_arity(method, 1, n_args, span));
+            Some(None)
+        }
+        _ => None,
+    }
+}
+
+/// D-PROCESS1: type-check `ProcessChild` streaming/control methods.
+pub(crate) fn process_child_method_return(
+    method: &str,
+    n_args: usize,
+    span: Span,
+    diags: &mut Vec<Diagnostic>,
+) -> Option<Option<Type>> {
+    let io = io_error_ty();
+    match (method, n_args) {
+        ("id", 0) => Some(Some(Type::Int)),
+        ("wait", 0) => Some(Some(result_ty(
+            Type::Named("ProcessResult".to_string()),
+            io.clone(),
+        ))),
+        ("kill" | "terminate" | "interrupt", 0) => Some(Some(result_ty(unit_ty(), io.clone()))),
+        ("write_stdin", 1) => Some(Some(result_ty(unit_ty(), io.clone()))),
+        ("read_stdout_line" | "read_stderr_line", 0) => {
+            Some(Some(result_ty(Type::Option(Box::new(Type::String)), io)))
+        }
+        ("write_stdin", _) => {
+            diags.push(wrong_core_arity(method, 1, n_args, span));
+            Some(None)
+        }
+        (
+            "id" | "wait" | "kill" | "terminate" | "interrupt" | "read_stdout_line"
+            | "read_stderr_line",
+            _,
+        ) => {
+            diags.push(wrong_core_arity(method, 0, n_args, span));
             Some(None)
         }
         _ => None,
@@ -4874,20 +6531,138 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         Syntax::normalize_core_module(module).unwrap_or_else(|| module.to_string());
     let module = normalized_module.as_str();
     let items: &[&str] = match module {
-        "core.io" => &["args", "input", "read_all_input", "eprint", "stdin"],
+        "core.io" => &[
+            "args",
+            "input",
+            "read_all_input",
+            "eprint",
+            "stdin",
+            "stdout",
+            "stderr",
+            "terminal_width",
+            "terminal_height",
+            "style",
+            "style_force",
+            "progress",
+        ],
         "core.env" => &["get", "set", "current_dir", "home_dir"],
-        "core.process" => &["exit", "run"],
+        "core.os" => &[
+            "name",
+            "family",
+            "arch",
+            "cpu_count",
+            "temp_dir",
+            "executable",
+            "pid",
+            "hostname",
+            "username",
+            "set_current_dir",
+            "on_interrupt",
+        ],
+        "core.process" => &["exit", "run", "cmd", "pipeline"],
         "core.math" => &[
-            "sqrt", "pow", "abs", "min", "max", "floor", "ceil", "round", "pi", "e", "clamp",
+            "sqrt",
+            "pow",
+            "abs",
+            "min",
+            "max",
+            "floor",
+            "ceil",
+            "round",
+            "pi",
+            "e",
+            "tau",
+            "infinity",
+            "nan",
+            "clamp",
+            "sin",
+            "cos",
+            "tan",
+            "asin",
+            "acos",
+            "atan",
+            "atan2",
+            "sinh",
+            "cosh",
+            "tanh",
+            "exp",
+            "ln",
+            "log2",
+            "log10",
+            "hypot",
+            "trunc",
+            "fract",
+            "sign",
+            "is_nan",
+            "is_inf",
+            "is_finite",
+            "to_bits",
+            "from_bits",
+            "degrees",
+            "radians",
+            "lerp",
+            "checked_add",
+            "checked_sub",
+            "checked_mul",
+            "checked_pow",
+            "saturating_add",
+            "saturating_sub",
+            "saturating_mul",
+            "wrapping_add",
+            "wrapping_sub",
+            "wrapping_mul",
+            "int_pow",
+            "gcd",
+            "lcm",
         ],
         // D-DET1: `rng` builds a deterministic injected RNG capability.
         // D-RANDSPLIT1=A: `bytes(n)` returns n PRNG bytes — fast, NOT crypto-safe.
-        "core.random" => &["int", "float", "pick", "shuffle", "seed", "rng", "bytes"],
+        "core.random" => &[
+            "int",
+            "float",
+            "float_range",
+            "bool",
+            "normal",
+            "exponential",
+            "pick",
+            "weighted_pick",
+            "sample",
+            "shuffle",
+            "seed",
+            "rng",
+            "split",
+            "bytes",
+        ],
         // D-RANDSPLIT1=A: CSPRNG namespace — cryptographically secure random bytes.
         "core.crypto.random" => &["bytes"],
         // D-DET1: `clock` builds a deterministic injected Clock capability.
         // D-DET-CAPAPI: `ms`/`secs` mint a deterministic `Duration` value.
-        "core.time" => &["now", "sleep", "start", "clock", "ms", "secs"],
+        "core.time" => &[
+            "now",
+            "sleep",
+            "start",
+            "clock",
+            "ms",
+            "secs",
+            "seconds",
+            "minutes",
+            "hours",
+            "instant",
+            "now_utc",
+            "from_unix_ms",
+            "today",
+            "parse_rfc3339",
+            "local_time",
+            "parse_time",
+            "period",
+            "period_days",
+            "period_months",
+            "period_years",
+            "zone",
+            "utc",
+            "zoned",
+            "zoned_local",
+        ],
         // D-ENC1: unified serialization. `core.encoding` is the library root (no direct
         // verbs — formats are submodules); each format submodule carries the verbs.
         "core.encoding" => &[],
@@ -4900,14 +6675,20 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
             "decode_traced",
             "to_string",
             "to_string_pretty",
+            "canonical",
+            "events",
         ],
+        "core.encoding.jsonl" => &["parse", "to_string"],
         // D-SERDE6: typed `decode<T>` rides every format submodule alongside `parse`.
         "core.encoding.csv" => &["parse", "decode", "decode_traced", "to_string"],
         "core.encoding.toml" => &["parse", "decode", "decode_traced", "to_string"],
         "core.encoding.yaml" => &["parse", "decode", "decode_traced", "to_string"],
+        "core.encoding.xml" => &["parse", "to_string"],
+        "core.encoding.cbor" => &["encode", "decode"],
         // D-UUIDENC1=A: hex/base64 codecs and UUID generator.
         "core.encoding.hex" => &["encode", "decode"],
-        "core.encoding.base64" => &["encode", "decode"],
+        "core.encoding.base64" => &["encode", "decode", "encode_url", "decode_url"],
+        "core.encoding.base32" => &["encode", "decode"],
         // D-TEXTUNICODE1: std-only Unicode scalar helpers.
         "core.text.unicode" => &[
             "scalar_count",
@@ -4937,10 +6718,17 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         "core.data" => &[
             "csv",
             "count",
+            "filter",
+            "sort_by",
             "sum",
             "mean",
             "min",
             "max",
+            "median",
+            "quantile",
+            "variance",
+            "stddev",
+            "describe",
             "group_count",
             "group_sum",
             "group_mean",
@@ -4948,7 +6736,17 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
             "bar_text",
             "bar_svg",
         ],
-        "core.tasks" => &["spawn", "channel"],
+        "core.tasks" => &["spawn", "channel", "after", "interval"],
+        "core.testing" => &[
+            "snap",
+            "golden",
+            "fixture",
+            "temp_dir",
+            "corpus",
+            "fake_clock",
+            "fake_rng",
+            "bench_budget",
+        ],
         // D-FILES-WRITE1 (merge, was `core.fs` + `core.files`): one module for
         // both whole-file convenience helpers and streaming handle constructors.
         // D-FILES-APPEND1=A: whole-file one-shot append is `append_all`, kept
@@ -4960,16 +6758,46 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
             "append_all",
             "exists",
             "remove",
+            "remove_dir",
+            "remove_all",
             "list_dir",
             "create_dir",
+            "create_dir_all",
             "is_dir",
             "copy",
+            "copy_dir",
+            "symlink",
+            "read_link",
+            "hard_link",
             "rename",
+            "stat",
+            "canonicalize",
+            "absolute",
+            "walk",
+            "glob",
+            "read_at",
+            "write_at",
+            "fsync",
+            "write_atomic",
+            "temp_dir",
+            "temp_file",
+            "lock",
             "open",
             "create",
             "append",
         ],
+        "core.watcher" => &["files", "process_pid", "port", "set"],
         "core.path" => &["join", "parent", "extension", "normalize"],
+        "core.url" => &[
+            "parse",
+            "from_parts",
+            "file",
+            "data",
+            "query",
+            "percent_encode",
+            "percent_decode",
+        ],
+        "core.mime" => &["parse", "from_extension", "extension"],
         // D-DEFER1 option B: scope-exit guard.
         "core.scope" => &["guard"],
         // D-ARGS1 (ratified 2026-06-22): declarative CLI arg parsing.
@@ -4980,7 +6808,51 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         // static constructors (no import needed, D-PATHFS1's `Path.from`
         // shape) — these module entries exist for discoverability/docs only.
         "core.binary" => &["Reader"],
-        "core.text" => &["Cursor"],
+        "core.text" => &[
+            "Cursor",
+            "nfc",
+            "nfd",
+            "nfkc",
+            "nfkd",
+            "casefold",
+            "caseless_eq",
+            "lower",
+            "upper",
+            "graphemes",
+            "words",
+            "sentences",
+            "width",
+            "scalar_count",
+            "byte_count",
+            "is_alphabetic",
+            "is_numeric",
+            "is_whitespace",
+            "is_ascii",
+            "scalars",
+            "splitn",
+            "rsplitn",
+            "trim",
+            "trim_start",
+            "trim_end",
+            "pad_start",
+            "pad_end",
+            "center",
+            "starts_any",
+            "ends_any",
+            "char_indices",
+        ],
+        "core.fmt" => &[
+            "number",
+            "decimal",
+            "percent",
+            "bytes",
+            "duration",
+            "ordinal",
+            "plural",
+            "pad_left",
+            "pad_right",
+            "pad_center",
+        ],
         // D-TERM1 (ratified 2026-06-22): terminal direct-input primitive.
         "core.term" => &["read_key"],
         "core" => &[],
@@ -4991,11 +6863,45 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
             "warn",
             "error",
             "debug",
+            "field",
+            "int",
+            "float",
+            "bool",
+            "redact",
+            "info_fields",
+            "warn_fields",
+            "error_fields",
+            "debug_fields",
+            "span",
+            "enter",
+            "close",
+            "set_sink",
+            "sample_every",
+            "counter",
+            "otlp_file",
             "set_level",
             "set_trace_id",
             "setup",
         ],
-        "jet.crypto" => &["sha256", "sha256_bytes", "seal", "open", "sign", "verify"],
+        "jet.crypto" => &[
+            "sha256",
+            "sha256_bytes",
+            "sha512_bytes",
+            "blake3_bytes",
+            "constant_time_eq",
+            "hkdf_sha256",
+            "x25519_public",
+            "x25519_shared",
+            "password_hash",
+            "password_hash_with_salt",
+            "password_verify",
+            "seal",
+            "open",
+            "file_seal",
+            "file_open",
+            "sign",
+            "verify",
+        ],
         // D-CRYPTOENV1=A: expert-only raw primitives — misuse lint at call site.
         "core.crypto.expert" => &[
             "aes256_gcm_seal",
@@ -5008,26 +6914,77 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         "core.secrets" => &["rotting_new"],
         // E2-M10: networking modules.
         "core.net" => &[
+            "ip_addr",
+            "ip_to_string",
+            "ip_is_ipv4",
+            "socket_addr",
+            "socket_addr_parse",
+            "socket_host",
+            "socket_port",
+            "socket_to_string",
             "tcp_listen",
+            "tcp_listen_addr",
             "tcp_accept",
             "tcp_connect",
+            "tcp_connect_addr",
+            "tcp_connect_timeout",
+            "tcp_connect_happy",
             "tcp_read",
             "tcp_write",
             "tcp_local_addr",
             "tcp_peer_addr",
+            "tcp_local_socket_addr",
+            "tcp_peer_socket_addr",
+            "listener_local_socket_addr",
             "set_timeout",
+            "set_read_timeout",
+            "set_write_timeout",
             "tcp_reply",
+            "udp_bind",
+            "udp_bind_addr",
+            "udp_local_addr",
+            "udp_set_timeout",
+            "udp_send_to",
+            "udp_recv_from",
+            "udp_packet_data",
+            "udp_packet_addr",
+            "unix_listen",
+            "unix_accept",
+            "unix_connect",
+            "unix_read",
+            "unix_write",
+            "dns_a",
+            "dns_aaaa",
+            "dns_a_at",
+            "dns_aaaa_at",
+            "dns_txt",
+            "dns_txt_at",
+            "dns_srv",
+            "dns_srv_at",
+            "dns_srv_target",
+            "dns_srv_port",
+            "dns_srv_priority",
+            "dns_srv_weight",
+            "tls_connect",
+            "tls_read",
+            "tls_write",
+            "tls_close",
         ],
         "jet.http" => &["get", "post", "serve"],
-        // D-REGEX1: linear-time regex ring package.
+        // D-REGEXENGINE1=A: std-only linear regex package.
         "jet.regex" => &[
+            "flags",
+            "compile",
+            "compile_with",
             "is_match",
             "match",
             "find",
             "find_all",
+            "matches",
             "replace",
             "replace_all",
             "split",
+            "split_limit",
         ],
         // D-DEP-ARCHIVE1=A: archive ring package — gzip + zip + tar.
         "core.archive" => &[
@@ -5056,7 +7013,18 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         // D-DEP-DB1: SQLite ring package.
         // D-DBDRIVER1: `close`/`query`/`query_one`/`execute`/`begin`/`commit`/
         // `rollback` are `DbConnection` instance methods, not module items.
-        "jet.db" => &["open", "open_memory"],
+        "jet.db" => &[
+            "open",
+            "open_memory",
+            "params",
+            "row_value",
+            "row_int",
+            "row_float",
+            "row_text",
+            "row_bool",
+            "transaction",
+            "migrate",
+        ],
         // D-DEP-WASM1=A: sandboxed WASM plugin loader ring package.
         "jet.plugin" => &["load"],
         // D-REACT1=B: opt-in reactive library — signals/derived/effects.
@@ -5127,7 +7095,18 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         "core.time.datetime" => &["from_timestamp", "now"],
         // D-NETDEP1=A / D-HTTPLIB1=A / D-HTTPLIB2=B: HTTP library.
         "core.http.client" => &["get", "post", "request"],
-        "core.http.server" => &["mux", "serve", "response", "tls"],
+        "core.http.server" => &[
+            "mux",
+            "serve",
+            "serve_once",
+            "serve_once_listener",
+            "response",
+            "tls",
+            "sse",
+            "static_file",
+            "static_file_range",
+            "access_log",
+        ],
         // U13 (D-JPK-SECRETCRYPTO1): decrypted-repo-secret read, age-style
         // crypto FFI bridge.
         "core.vault" => &["get"],
@@ -5140,7 +7119,7 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
 pub(crate) fn is_freestanding_forbidden(module: &str) -> bool {
     matches!(
         module,
-        "core.files" | "core.io" | "core.net" | "core.tasks"
+        "core.files" | "core.watcher" | "core.io" | "core.net" | "core.tasks"
             | "core.process" | "core.time" | "jet.http" | "jet.log"
             // D-TERM1: terminal I/O requires an OS terminal device.
             | "core.term"

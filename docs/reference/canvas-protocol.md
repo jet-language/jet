@@ -4,9 +4,102 @@ Canvas is a source-backed projection protocol. The `.jet` file is the only
 semantic source of truth. Clients may cache viewport state locally, but graph
 facts and edits come from checked Jet source.
 
+## Project Document V1
+
+Endpoint: `GET /__jet_canvas/project` or `GET /canvas/project`.
+
+The project document is the workspace/package layer above file graphs. It is
+read-only in v1. Its source truth is ordinary Jet project files:
+
+- single-file mode: the opened `.jet` file;
+- package mode: `pkg.jet` plus package source files;
+- workspace mode: `workspace.jet`, member `pkg.jet` files, member source files,
+  env source, and `.jet/lock`.
+
+Top-level fields:
+
+| Field | Meaning |
+|---|---|
+| `protocol` | Literal `jet.canvas.project`. |
+| `schema_version` | Integer schema version. Current value: `1`. |
+| `project_root` | Display path for the package/workspace root Canvas projected. |
+| `project_revision` | Stable hash of the projected source-truth file set. |
+| `entry` | Entry source path relative to `project_root`. |
+| `mode` | `single_file`, `package`, or `workspace`. |
+| `workspace` | `workspace.jet` projection with member package names/paths, or `null`. |
+| `packages` | Parsed `pkg.jet` facts for the root package and workspace members. |
+| `targets` | Reserved for the package/build target graph. |
+| `envs` / `services` | `env.jet` projection from Jetpack module evaluation, including package refs, prompt, secrets, and dev services. |
+| `files` | Projected source-truth files with per-file revisions and kinds. |
+| `locks` | `.jet/lock` facts used by the projection. |
+| `diagnostics` | Project-level Jet diagnostics. |
+| `source_control` | Git text-truth summary handle; source control remains file text truth. |
+| `state_policy` | Ratified boundary: semantics from source, private view state local. |
+
+Example:
+
+```json
+{"protocol":"jet.canvas.project","schema_version":1,"project_root":"/repo","project_revision":"sha256-...","entry":"packages/game/src/main.jet","mode":"workspace","workspace":{"path":"workspace.jet","members":[{"name":"game","path":"packages/game"}],"diagnostics":[]},"packages":[{"path":"packages/game","manifest":"packages/game/pkg.jet","name":"game","version":"0.1.0","target":"web","deps":[],"targets":[],"effects_enabled":false,"diagnostics":[]}],"targets":[],"envs":[],"services":[],"files":[{"path":"workspace.jet","revision":"sha256-...","kind":"workspace"}],"locks":[],"diagnostics":[],"source_control":{"truth":"git-text"},"state_policy":{"semantic":"source","local":["tabs","viewport","selection","breakpoints","watches"],"shared_visual":"source-anchored-comments"}}
+```
+
+Project documents do not create a Canvas project asset. Package/workspace
+semantics must remain in `pkg.jet`, `workspace.jet`, source files, env source,
+and `.jet/lock`. Local UI state such as tabs, zoom, selected nodes, breakpoints,
+and watches may be cached locally; shared visual intent uses source-anchored
+Canvas comments/collapse hints only when the user chooses to share it.
+
+## Project Transaction V1
+
+Endpoint: `POST /__jet_canvas/project/transaction` or
+`POST /canvas/project/transaction`.
+
+Project transactions edit package/workspace source truth through an explicit
+multi-file envelope. They never write a Canvas project asset.
+
+Required common fields:
+
+| Field | Meaning |
+|---|---|
+| `schema_version` | Integer project transaction schema version. Current value: `1`. |
+| `op` | Project operation name. |
+| `project_revision` | Project revision from `jet.canvas.project`. |
+| `files` | Touched source-truth files, each with `path` and `revision`. |
+| `preview` | `true` returns diff/audit without writing; `false` validates then writes. |
+
+Current transactions:
+
+| `op` | Extra fields | Effect |
+|---|---|---|
+| `add_dependency` | `manifest`, `name`, `spec` | Inserts or updates one `deps:` entry in a `pkg.jet` file using the existing manifest edit helper, then validates the manifest parser before write. |
+| `remove_dependency` | `manifest`, `name` | Removes one `deps:` entry from a `pkg.jet` file using the existing manifest edit helper, then validates the manifest parser before write. |
+| `edit_pkg_field` | `manifest`, `field`, `value` | Edits known string fields in the `payload` block (`name`, `version`, `jet`, `description`, `license`, `repository`, `edition`) and validates the manifest parser before write. |
+| `add_target` | `manifest`, `name`, `target` | Inserts or updates one `packages:` target entry and validates the manifest parser before write. |
+| `create_package` | `package_path`, `name`, `target`, optional `entry` | Creates a package directory with `pkg.jet` and an entry `.jet` file, then validates the manifest parser and generated entry syntax before write. New files must appear in `files` with revision `missing`. |
+| `add_workspace_member` | `workspace`, `member_path` | Creates or edits `workspace.jet` to include a package directory, then validates the workspace evaluator before write. Existing explicit member lists are edited in source; `find("./dir")` workspaces no-op when the member path is already covered. |
+| `add_env_service` | `env`, `name`, optional `enable`, `port`, `init`, `ready`, `shutdown`, `data_dir` | Creates or edits `env.jet` to include a dev service, then validates Jetpack module evaluation before write. |
+
+Successful response:
+
+```json
+{"protocol":"jet.canvas.project.edit","schema_version":1,"ok":true,"op":"add_dependency","preview":true,"changed":true,"project_revision":"sha256-...","after_project_revision":"sha256-...","writes":"preview_only","authority":["canvas.source_edit:project"],"audit":{"touched_files":[{"path":"packages/app/pkg.jet","revision":"sha256-...","changed":true}],"diagnostics":[]},"diff":"diff -- packages/app/pkg.jet\n--- before\n+++ after\n+    logging: path@../logging,\n"}
+```
+
+Failure response:
+
+```json
+{"protocol":"jet.canvas.project.edit","schema_version":1,"ok":false,"kind":"conflict","message":"source file changed since this Canvas project was drawn"}
+```
+
+A stale `project_revision` or touched-file `revision` fails before any write.
+Preview mode and rejected transactions leave source untouched. Apply mode writes
+only after the changed `pkg.jet` parses through Jetpack's manifest parser.
+
 ## Graph Document V1
 
 Endpoint: `GET /__jet_canvas/graph` or `GET /canvas/graph`.
+Add `?source_id=<project-relative .jet path>` to project a source file inside
+the opened package/workspace. Canvas resolves the path through
+`jet.canvas.project` source-truth files and rejects paths outside the project.
 
 Top-level fields:
 
@@ -174,6 +267,8 @@ Endpoint: `POST /__jet_canvas/query` or `POST /canvas/query`.
 
 Queries are read-only. They use the shared semindex facts that LSP uses for
 definitions, references, rename ranges, and impact analysis.
+Requests may include `source_id` to query a different source file inside the
+opened project. The `revision` must match that selected source file.
 
 | `op` | Extra fields | Effect |
 |---|---|---|
@@ -209,7 +304,7 @@ Terms:
 Query actions:
 
 ```json
-{"protocol":"jet.canvas.query","schema_version":1,"ok":true,"op":"actions","revision":"sha256-...","results":[],"impact":null,"diff":null,"actions_schema_version":1,"actions":[{"action_id":"canvas.action:main.jet:square","kind":"canvas.action","title":"square","callee":"square","engine":"checked-tir+jit","authority":["canvas.source_edit:current_file"],"writes":"source_transaction_only"}]}
+{"protocol":"jet.canvas.query","schema_version":1,"ok":true,"op":"actions","revision":"sha256-...","results":[],"impact":null,"diff":null,"actions_schema_version":1,"actions":[{"action_id":"canvas.action:main.jet:square","kind":"canvas.action","title":"square","callee":"square","engine":"checked-tir+jit","authority":["canvas.source_edit:package"],"package_id":"app","version":"0.1.0","touched_files":["main.jet"],"writes":"source_transaction_only"}]}
 ```
 
 Preview an action:
@@ -221,7 +316,7 @@ Preview an action:
 Successful response:
 
 ```json
-{"protocol":"jet.canvas.action","schema_version":1,"ok":true,"changed":true,"engine":"checked-tir+jit","execution":"preview","writes":"source_transaction_only","authority":["canvas.source_edit:current_file"],"diff":"--- before\n+++ after\n+    square(1)\n"}
+{"protocol":"jet.canvas.action","schema_version":1,"ok":true,"changed":true,"engine":"checked-tir+jit","execution":"preview","writes":"source_transaction_only","authority":["canvas.source_edit:package"],"audit":{"package_id":"app","version":"0.1.0","hash":"sha256-...","touched_files":["main.jet"],"diagnostics":[]},"diff":"--- before\n+++ after\n+    square(1)\n"}
 ```
 
 The audit payload records package id/version/hash, touched files, diff, and
@@ -259,12 +354,13 @@ projects:
 
 Endpoint: `GET /__jet_canvas/source-control` or `GET /canvas/source-control`.
 
-Canvas treats Git text as source-control truth. It reports dirty state, exact
-`git diff` text for the `.jet` file, and recent file history. It never creates a
-graph lock, checkout state, or binary asset source of truth.
+Canvas treats Git text as source-control truth. It reports project dirty state,
+recent entry-file history, and per-file status/diff for the package/workspace
+source-truth file set. It never creates a graph lock, checkout state, or binary
+asset source of truth.
 
 Successful response:
 
 ```json
-{"protocol":"jet.canvas.source_control","schema_version":1,"ok":true,"revision":"sha256-...","available":true,"dirty":true,"status":"M Source/main.jet","diff":"diff --git ...","history":["abc123 initial"]}
+{"protocol":"jet.canvas.source_control","schema_version":1,"ok":true,"revision":"sha256-...","project_revision":"sha256-...","project_root":"/repo","available":true,"dirty":true,"dirty_files":2,"status":"M packages/app/main.jet\n?? packages/app/helper.jet","diff":"","history":["abc123 initial"],"files":[{"path":"packages/app/main.jet","revision":"sha256-...","kind":"source","available":true,"dirty":true,"status":"M packages/app/main.jet","diff":"diff --git ..."}]}
 ```

@@ -635,6 +635,23 @@ impl<'a> Checker<'a> {
                 let got = self.infer(&mut arg.expr);
                 self.expected_type = saved_exp;
                 self.lambda_escapes = saved_esc;
+                if method == "zip" && i == 0 {
+                    let recv_elem = match recv_ty {
+                        Type::List(inner) | Type::FixedList { elem: inner, .. } => {
+                            Some((**inner).clone())
+                        }
+                        _ => None,
+                    };
+                    let arg_elem = match &got {
+                        Some(Type::List(inner)) | Some(Type::FixedList { elem: inner, .. }) => {
+                            Some((**inner).clone())
+                        }
+                        _ => None,
+                    };
+                    if let (Some(a), Some(b)) = (recv_elem, arg_elem) {
+                        refined_ret = Some(Type::List(Box::new(Collections::zip_elem_ty(&a, &b))));
+                    }
+                }
                 if let (Some(et), Some(gt)) = (expected.get(i), got) {
                     if Collections::is_closure_method(method) && i == 0 && method == "map" {
                         if let Type::Fn {
@@ -694,6 +711,30 @@ impl<'a> Checker<'a> {
                         } = gt
                         {
                             refined_ret = Some((**r).clone());
+                        }
+                    }
+                    if Collections::is_closure_method(method)
+                        && i == 0
+                        && matches!(method, "group_by" | "count_by")
+                    {
+                        if let Type::Fn {
+                            ret: Some(ref r), ..
+                        } = gt
+                        {
+                            let value = if method == "group_by" {
+                                match recv_ty {
+                                    Type::List(inner) | Type::FixedList { elem: inner, .. } => {
+                                        Type::List(Box::new((**inner).clone()))
+                                    }
+                                    _ => Type::List(Box::new(Type::Int)),
+                                }
+                            } else {
+                                Type::Int
+                            };
+                            refined_ret = Some(Type::Map {
+                                key: Box::new((**r).clone()),
+                                value: Box::new(value),
+                            });
                         }
                     }
                     // Skip E0108 for closure methods with ret: None (open return type).
@@ -895,19 +936,32 @@ impl<'a> Checker<'a> {
                 }
             }
         }
-        if args.len() != 1 {
+        let expected = if method == "weighted_pick" || method == "sample" {
+            2
+        } else {
+            1
+        };
+        if args.len() != expected {
             self.diags.push(Diagnostic::error(
                 "E0104",
-                format!("`.{}()` takes one list, got {}", method, args.len()),
-                "this `Rng` draw operates on a single list".to_string(),
-                format!("call `rng.{}(items)`", method),
+                format!("`.{}()` takes {} argument(s), got {}", method, expected, args.len()),
+                "this `Rng` draw operates on a list and optional draw parameter".to_string(),
+                if method == "weighted_pick" {
+                    "call `rng.weighted_pick(items, weights)`".to_string()
+                } else if method == "sample" {
+                    "call `rng.sample(items, k)`".to_string()
+                } else {
+                    format!("call `rng.{}(items)`", method)
+                },
                 Some(span),
             ));
             for a in args.iter_mut() {
                 self.infer(&mut a.expr);
             }
-            return if method == "pick" {
+            return if method == "pick" || method == "weighted_pick" {
                 Some(Type::Option(Box::new(Type::Int)))
+            } else if method == "sample" {
+                Some(Type::List(Box::new(Type::Int)))
             } else {
                 None
             };
@@ -923,6 +977,32 @@ impl<'a> Checker<'a> {
             ));
         }
         let ty = self.infer(&mut args[0].expr)?;
+        if method == "sample" {
+            if let Some(k) = self.infer(&mut args[1].expr) {
+                if k != Type::Int {
+                    self.diags.push(Diagnostic::error(
+                        "E0112",
+                        format!("`sample` count must be Int, not {}", k.show()),
+                        "rng.sample chooses up to k items without replacement".to_string(),
+                        "pass an Int count".to_string(),
+                        Some(args[1].expr.span()),
+                    ));
+                }
+            }
+        }
+        if method == "weighted_pick" {
+            if let Some(weights_ty) = self.infer(&mut args[1].expr) {
+                if weights_ty != Type::List(Box::new(Type::Float)) {
+                    self.diags.push(Diagnostic::error(
+                        "E0112",
+                        format!("`weighted_pick` weights must be [Float], not {}", weights_ty.show()),
+                        "rng.weighted_pick pairs each item with a non-negative Float weight".to_string(),
+                        "pass a `[Float]` weights list".to_string(),
+                        Some(args[1].expr.span()),
+                    ));
+                }
+            }
+        }
         let Type::List(inner) = ty else {
             self.diags.push(Diagnostic::error(
                 "E0112",
@@ -931,15 +1011,19 @@ impl<'a> Checker<'a> {
                 "pass a `[T]` value".to_string(),
                 Some(args[0].expr.span()),
             ));
-            return if method == "pick" {
+            return if method == "pick" || method == "weighted_pick" {
                 Some(Type::Option(Box::new(Type::Int)))
+            } else if method == "sample" {
+                Some(Type::List(Box::new(Type::Int)))
             } else {
                 None
             };
         };
-        // `pick` returns `T?`; `shuffle` returns nothing.
-        if method == "pick" {
+        // `pick`/`weighted_pick` return `T?`; `sample` returns `[T]`; `shuffle` returns nothing.
+        if method == "pick" || method == "weighted_pick" {
             Some(Type::Option(inner))
+        } else if method == "sample" {
+            Some(Type::List(inner))
         } else {
             None
         }
@@ -1334,6 +1418,98 @@ impl<'a> Checker<'a> {
                     name: "Set".to_string(),
                     args: vec![elem_ty],
                 });
+            }
+            // D-ITERTOOLS1=A: `SortedSet.from([...])` → `SortedSet<T>`.
+            if type_name == Syntax::TYPE_SORTED_SET && method == "from" && args.len() == 1 {
+                let arg_ty = self.infer(&mut args[0].expr);
+                let elem_ty = match arg_ty {
+                    Some(Type::List(inner)) => *inner,
+                    _ => Type::Int,
+                };
+                return Some(Type::Apply {
+                    name: Syntax::TYPE_SORTED_SET.to_string(),
+                    args: vec![elem_ty],
+                });
+            }
+            if type_name == Syntax::TYPE_SORTED_SET && method == "new" && args.is_empty() {
+                let elem_ty = match &self.expected_type {
+                    Some(Type::Apply { name, args, .. })
+                        if name == Syntax::TYPE_SORTED_SET && !args.is_empty() =>
+                    {
+                        args[0].clone()
+                    }
+                    _ => Type::Int,
+                };
+                let ret = Type::Apply {
+                    name: Syntax::TYPE_SORTED_SET.to_string(),
+                    args: vec![elem_ty],
+                };
+                *resolved_ret_out = Some(ret.clone());
+                return Some(ret);
+            }
+            // D-ITERTOOLS1=A: `PriorityQueue.from([...])` / `.new()`.
+            if type_name == Syntax::TYPE_PRIORITY_QUEUE && method == "from" && args.len() == 1 {
+                let arg_ty = self.infer(&mut args[0].expr);
+                let elem_ty = match arg_ty {
+                    Some(Type::List(inner)) => *inner,
+                    _ => Type::Int,
+                };
+                return Some(Type::Apply {
+                    name: Syntax::TYPE_PRIORITY_QUEUE.to_string(),
+                    args: vec![elem_ty],
+                });
+            }
+            if type_name == Syntax::TYPE_PRIORITY_QUEUE && method == "new" && args.is_empty() {
+                let elem_ty = match &self.expected_type {
+                    Some(Type::Apply { name, args, .. })
+                        if name == Syntax::TYPE_PRIORITY_QUEUE && !args.is_empty() =>
+                    {
+                        args[0].clone()
+                    }
+                    _ => Type::Int,
+                };
+                let ret = Type::Apply {
+                    name: Syntax::TYPE_PRIORITY_QUEUE.to_string(),
+                    args: vec![elem_ty],
+                };
+                *resolved_ret_out = Some(ret.clone());
+                return Some(ret);
+            }
+            // D-ITERTOOLS1=A: `Lru<K,V>.new(capacity)`, expected type supplies K/V.
+            if type_name == Syntax::TYPE_LRU && method == "new" && args.len() == 1 {
+                self.expect_core_arg("new", 0, &Type::Int, &mut args[0]);
+                let (key_ty, value_ty) = match &self.expected_type {
+                    Some(Type::Apply { name, args, .. })
+                        if name == Syntax::TYPE_LRU && args.len() >= 2 =>
+                    {
+                        (args[0].clone(), args[1].clone())
+                    }
+                    _ => (Type::String, Type::Int),
+                };
+                let ret = Type::Apply {
+                    name: Syntax::TYPE_LRU.to_string(),
+                    args: vec![key_ty, value_ty],
+                };
+                *resolved_ret_out = Some(ret.clone());
+                return Some(ret);
+            }
+            if type_name == Syntax::TYPE_BIT_SET && method == "new" && args.is_empty() {
+                return Some(Type::Named(Syntax::TYPE_BIT_SET.to_string()));
+            }
+            if type_name == Syntax::TYPE_BYTE_BUFFER && method == "new" && args.is_empty() {
+                return Some(Type::Named(Syntax::TYPE_BYTE_BUFFER.to_string()));
+            }
+            if type_name == Syntax::TYPE_BYTE_BUFFER && method == "from" && args.len() == 1 {
+                self.expect_core_arg(
+                    "from",
+                    0,
+                    &Type::List(Box::new(Type::IntN {
+                        signed: false,
+                        bits: 8,
+                    })),
+                    &mut args[0],
+                );
+                return Some(Type::Named(Syntax::TYPE_BYTE_BUFFER.to_string()));
             }
             // D-COLLBREADTH1=A: `Deque.new()` → `Deque<T>`.
             // T is inferred from the type annotation's expected type.
@@ -2155,10 +2331,144 @@ impl<'a> Checker<'a> {
             });
             return ret;
         }
+        // D-URL1=A: method calls on typed Url/Mime values.
+        if let Some(ret) = url_mime_method_return(&recv_ty, method, args) {
+            let recv_name = match &recv_ty {
+                Type::Named(n) => n.as_str(),
+                _ => "",
+            };
+            match (recv_name, method, args.len()) {
+                ("Url", "join", 1) | ("Mime", "param", 1) => {
+                    self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
+                }
+                ("Url", "set_query" | "add_query", 2) => {
+                    self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
+                    self.expect_core_arg(method, 1, &Type::String, &mut args[1]);
+                }
+                _ => {
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
+                }
+            }
+            *recv_type_out = Some(match &recv_ty {
+                Type::Named(n) => n.clone(),
+                _ => "Url".to_string(),
+            });
+            return ret;
+        }
+        // D-REGEXENGINE1=A: method calls on compiled Regex and Match values.
+        if let Some(ret) = regex_method_return(&recv_ty, method, args) {
+            let recv_name = match &recv_ty {
+                Type::Named(n) => n.as_str(),
+                _ => "",
+            };
+            match (recv_name, method, args.len()) {
+                ("Regex", "is_match" | "match" | "find" | "find_all" | "matches" | "split", 1) => {
+                    self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
+                }
+                ("Regex", "replace" | "replace_all", 2) => {
+                    self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
+                    self.expect_core_arg(method, 1, &Type::String, &mut args[1]);
+                }
+                ("Regex", "split_limit", 2) => {
+                    self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
+                    self.expect_core_arg(method, 1, &Type::Int, &mut args[1]);
+                }
+                ("Regex", "replace_all_with", 2) => {
+                    self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
+                    let cb = Type::Fn {
+                        params: vec![Type::Named("Match".to_string())],
+                        ret: Some(Box::new(Type::String)),
+                        effect_bound: None,
+                    };
+                    self.expect_core_arg(method, 1, &cb, &mut args[1]);
+                }
+                ("Match", "group" | "group_start" | "group_end", 1) => {
+                    self.expect_core_arg(method, 0, &Type::Int, &mut args[0]);
+                }
+                ("Match", "name", 1) => {
+                    self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
+                }
+                _ => {
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
+                }
+            }
+            *recv_type_out = Some(match &recv_ty {
+                Type::Named(n) => n.clone(),
+                _ => "Regex".to_string(),
+            });
+            return ret;
+        }
         // D-TIMEDEPTH1=A: method calls on Date/DateTime.
         if let Some(ret) = civil_time_method_return(&recv_ty, method, args) {
-            for a in args.iter_mut() {
-                self.infer(&mut a.expr);
+            let recv_name = match &recv_ty {
+                Type::Named(n) => n.as_str(),
+                _ => "",
+            };
+            match (recv_name, method, args.len()) {
+                ("Date" | "LocalDate", "add_days" | "add_months", 1) => {
+                    self.expect_core_arg(method, 0, &Type::Int, &mut args[0]);
+                }
+                ("Date" | "LocalDate", "diff_days", 1) => {
+                    self.expect_core_arg(
+                        method,
+                        0,
+                        &Type::Named("LocalDate".to_string()),
+                        &mut args[0],
+                    );
+                }
+                ("Date" | "LocalDate", "add_period", 1) => {
+                    self.expect_core_arg(
+                        method,
+                        0,
+                        &Type::Named("Period".to_string()),
+                        &mut args[0],
+                    );
+                }
+                ("Date" | "LocalDate", "truncate" | "format", 1) => {
+                    self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
+                }
+                ("DateTime", "plus_duration", 1) => {
+                    self.expect_core_arg(
+                        method,
+                        0,
+                        &Type::Named("Duration".to_string()),
+                        &mut args[0],
+                    );
+                }
+                ("DateTime", "in_zone", 1) => {
+                    self.expect_core_arg(method, 0, &Type::Named("Zone".to_string()), &mut args[0]);
+                }
+                ("DateTime", "truncate" | "round" | "format", 1) => {
+                    self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
+                }
+                ("ZonedDateTime", "add_duration", 1) => {
+                    self.expect_core_arg(
+                        method,
+                        0,
+                        &Type::Named("Duration".to_string()),
+                        &mut args[0],
+                    );
+                }
+                ("ZonedDateTime", "add_period", 1) => {
+                    self.expect_core_arg(
+                        method,
+                        0,
+                        &Type::Named("Period".to_string()),
+                        &mut args[0],
+                    );
+                }
+                ("ZonedDateTime", "format", 1) => {
+                    self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
+                }
+                _ => {
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
+                }
             }
             *recv_type_out = Some(match &recv_ty {
                 Type::Named(n) => n.clone(),
@@ -2289,6 +2599,54 @@ impl<'a> Checker<'a> {
                     return ret;
                 }
             }
+            if handle_ty == "ProcessSpec" {
+                if let Some(ret) =
+                    process_spec_method_return(method, args.len(), span, &mut self.diags)
+                {
+                    if matches!(method, "run" | "spawn") {
+                        self.record_effect(Effect::Exec.name());
+                    }
+                    match method {
+                        "cwd" | "env_remove" | "stdin_text" | "stdout" | "stderr"
+                            if args.len() == 1 =>
+                        {
+                            self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
+                        }
+                        "env" if args.len() == 2 => {
+                            self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
+                            self.expect_core_arg(method, 1, &Type::String, &mut args[1]);
+                        }
+                        "timeout_ms" | "output_limit" if args.len() == 1 => {
+                            self.expect_core_arg(method, 0, &Type::Int, &mut args[0]);
+                        }
+                        _ => {
+                            for a in args.iter_mut() {
+                                self.infer(&mut a.expr);
+                            }
+                        }
+                    }
+                    *recv_type_out = Some("ProcessSpec".to_string());
+                    return ret;
+                }
+            }
+            if handle_ty == "ProcessChild" {
+                if let Some(ret) =
+                    process_child_method_return(method, args.len(), span, &mut self.diags)
+                {
+                    if method != "id" {
+                        self.record_effect(Effect::Exec.name());
+                    }
+                    if method == "write_stdin" && args.len() == 1 {
+                        self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
+                    } else {
+                        for a in args.iter_mut() {
+                            self.infer(&mut a.expr);
+                        }
+                    }
+                    *recv_type_out = Some("ProcessChild".to_string());
+                    return ret;
+                }
+            }
             // D-RENDERTGT2=A (c133 M1/M2): UI backend measure/layout/paint/on_event.
             if handle_ty == "NullBackend" || handle_ty == "TuiBackend" || handle_ty == "GtkBackend"
             {
@@ -2330,7 +2688,9 @@ impl<'a> Checker<'a> {
             // element type comes from the `[T]` arg, mirroring the ambient
             // `random.pick`/`random.shuffle`. Resolve element-aware here (the
             // `builtin_method_return` table only carries Int placeholders).
-            if handle_ty == crate::Syntax::RNG_TYPE && matches!(method, "pick" | "shuffle") {
+            if handle_ty == crate::Syntax::RNG_TYPE
+                && matches!(method, "pick" | "weighted_pick" | "sample" | "shuffle")
+            {
                 let handle_ty = handle_ty.clone();
                 let result = self.finish_rng_generic(receiver, method, args, span);
                 *recv_type_out = Some(handle_ty);
@@ -2393,6 +2753,22 @@ impl<'a> Checker<'a> {
                 crate::Syntax::TYPE_SUBSCRIPTION
                     | crate::Syntax::TYPE_EVENT_SCOPE
                     | crate::Syntax::TYPE_EVENT_TRACE
+            ) {
+                if let Some(ret) =
+                    Collections::builtin_method_return(&recv_ty, method, args.len(), false)
+                {
+                    let handle_ty = name.clone();
+                    let result =
+                        self.finish_builtin_method(receiver, method, &recv_ty, args, span, ret);
+                    *recv_type_out = Some(handle_ty);
+                    return result;
+                }
+            }
+        }
+        if let Type::Named(name) = &recv_ty {
+            if matches!(
+                name.as_str(),
+                crate::Syntax::TYPE_WATCH_HANDLE | crate::Syntax::TYPE_WATCH_SET
             ) {
                 if let Some(ret) =
                     Collections::builtin_method_return(&recv_ty, method, args.len(), false)
@@ -3194,6 +3570,25 @@ impl<'a> Checker<'a> {
             return Some(None);
         }
 
+        if call.name == Syntax::BUILTIN_FIND && self.in_comptime {
+            if call.args.len() != 1 {
+                self.diags.push(Diagnostic::error(
+                    "E0103",
+                    "`find` needs exactly one glob".to_string(),
+                    "`find(glob)` expands one build-time glob inside a `comptime` binding"
+                        .to_string(),
+                    "write `find(\"content/**/*.md\")`".to_string(),
+                    Some(call.name_span),
+                ));
+                for arg in call.args.iter_mut() {
+                    self.infer(&mut arg.expr);
+                }
+                return None;
+            }
+            self.expect_core_arg(Syntax::BUILTIN_FIND, 0, &Type::String, &mut call.args[0]);
+            return Some(Some(Type::List(Box::new(Type::String))));
+        }
+
         // D-LIN1-DROP (ratified 2026-06-25): `drop(x)` deliberately discards a
         // value by moving it to nowhere — its `Drop` runs. The blessed use is to
         // satisfy a `#SingleUse` value's consume duty when there is genuinely no
@@ -3256,6 +3651,30 @@ impl<'a> Checker<'a> {
             }
             // Returns a Named type marker so the `.snapshot()` call can detect it.
             return Some(Some(Type::Named("__JetExpect__".to_string())));
+        }
+
+        if matches!(
+            call.name.as_str(),
+            Syntax::TYPED_TEXT_SQL_PREFIX_CALL | Syntax::TYPED_TEXT_HTML_PREFIX_CALL
+        ) {
+            let type_name = if call.name == Syntax::TYPED_TEXT_SQL_PREFIX_CALL {
+                "Sql"
+            } else {
+                "Html"
+            };
+            if let Some(arg) = call.args.get_mut(0) {
+                let span = arg.span;
+                let mut expr = std::mem::replace(&mut arg.expr, Expr::Absent(span));
+                let ty = self.rewrite_typed_text_literal(&mut expr, type_name.to_string(), span);
+                if let Expr::Call(rewritten) = expr {
+                    *call = rewritten;
+                } else {
+                    arg.expr = expr;
+                    call.name = type_name.to_string();
+                }
+                return Some(ty);
+            }
+            return Some(Some(Type::Named(type_name.to_string())));
         }
 
         if self.funcs.get(&call.name).is_none() {

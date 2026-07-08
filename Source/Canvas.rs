@@ -19,6 +19,7 @@ pub const EDIT_SCHEMA_VERSION: u32 = 1;
 pub const DEBUG_SCHEMA_VERSION: u32 = 1;
 pub const QUERY_SCHEMA_VERSION: u32 = 1;
 pub const ACTION_SCHEMA_VERSION: u32 = 1;
+pub const PROJECT_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone)]
 struct InlineExpr {
@@ -112,6 +113,152 @@ pub fn graph_json_for_file(path: &Path) -> Result<String, Vec<Diagnostic>> {
     project_file(path).map(|p| p.json)
 }
 
+/// Project a file graph selected from the entry file's package/workspace graph.
+pub fn graph_json_for_entry_source(
+    entry: &Path,
+    source_id: Option<&str>,
+) -> Result<String, String> {
+    let path = resolve_entry_source_path(entry, source_id)?;
+    graph_json_for_file(&path).map_err(|diags| {
+        let src = fs::read_to_string(&path).unwrap_or_default();
+        query_error(
+            "diagnostic",
+            &crate::render_diagnostics(&path.display().to_string(), &src, &diags),
+        )
+    })
+}
+
+/// Resolve a project-relative source id without escaping the projected source truth.
+pub fn project_path_for_source_id(entry: &Path, source_id: &str) -> Option<PathBuf> {
+    let wanted = clean_project_rel_path(source_id).ok()?;
+    if Path::new(&wanted).extension().and_then(|e| e.to_str()) != Some(crate::Syntax::FILE_EXT) {
+        return None;
+    }
+    let ctx = project_context_for_entry(entry);
+    if let Some(file) = ctx
+        .files
+        .iter()
+        .find(|f| f.kind == "source" && f.path.trim_start_matches("./") == wanted)
+    {
+        return Some(ctx.project_root.join(&file.path));
+    }
+    let candidate = ctx.project_root.join(&wanted);
+    if candidate.is_file()
+        && candidate.extension().and_then(|e| e.to_str()) == Some(crate::Syntax::FILE_EXT)
+        && project_source_roots(&ctx)
+            .iter()
+            .any(|root| canonical_path(&candidate).starts_with(canonical_path(root)))
+    {
+        return Some(candidate);
+    }
+    None
+}
+
+fn resolve_entry_source_path(entry: &Path, source_id: Option<&str>) -> Result<PathBuf, String> {
+    let Some(id) = source_id else {
+        return Ok(entry.to_path_buf());
+    };
+    project_path_for_source_id(entry, id).ok_or_else(|| {
+        query_error(
+            "not_found",
+            "Canvas source_id must name a projected Jet source file",
+        )
+    })
+}
+
+fn project_source_roots(ctx: &ProjectContext) -> Vec<PathBuf> {
+    if let Some(workspace_root) = &ctx.workspace_root {
+        if let Some(Ok(plan)) = crate::Jetpack::WorkspaceFile::load(workspace_root) {
+            return plan
+                .members
+                .into_iter()
+                .map(|member| workspace_root.join(member.path))
+                .collect();
+        }
+    }
+    if let Some(root) = &ctx.manifest_root {
+        return vec![root.clone()];
+    }
+    vec![ctx.entry_path.parent().unwrap_or_else(|| Path::new(".")).to_path_buf()]
+}
+
+/// Project package/workspace source truth into the public Canvas project schema.
+pub fn project_json_for_entry(path: &Path) -> String {
+    let ctx = project_context_for_entry(path);
+    let entry_rel = rel_path(&ctx.project_root, path);
+    let workspace_json = workspace_project_json(&ctx.project_root, ctx.workspace_root.as_deref());
+    let packages_json = packages_project_json(
+        &ctx.project_root,
+        ctx.manifest_root.as_deref(),
+        ctx.workspace_root.as_deref(),
+    );
+    let files_json = ctx
+        .files
+        .iter()
+        .map(|f| {
+            format!(
+                "{{\"path\":{},\"revision\":{},\"kind\":{}}}",
+                json_str(&f.path),
+                json_str(&f.revision),
+                json_str(&f.kind)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let locks_json = lock_project_json(&ctx.project_root);
+    let env_projection = env_project_json(&ctx.project_root);
+    format!(
+        "{{\"protocol\":\"jet.canvas.project\",\"schema_version\":{},\"project_root\":{},\"project_revision\":{},\"entry\":{},\"mode\":{},\"workspace\":{},\"packages\":[{}],\"targets\":[],\"envs\":[{}],\"services\":[{}],\"files\":[{}],\"locks\":[{}],\"diagnostics\":[{}],\"source_control\":{{\"truth\":\"git-text\"}},\"state_policy\":{{\"semantic\":\"source\",\"local\":[\"tabs\",\"viewport\",\"selection\",\"breakpoints\",\"watches\"],\"shared_visual\":\"source-anchored-comments\"}}}}",
+        PROJECT_SCHEMA_VERSION,
+        json_str(&ctx.project_root.display().to_string()),
+        json_str(&ctx.project_revision),
+        json_str(&entry_rel),
+        json_str(if ctx.workspace_root.is_some() {
+            "workspace"
+        } else if ctx.manifest_root.is_some() {
+            "package"
+        } else {
+            "single_file"
+        }),
+        workspace_json,
+        packages_json,
+        env_projection.envs,
+        env_projection.services,
+        files_json,
+        locks_json,
+        env_projection.diagnostics
+    )
+}
+
+/// Apply one versioned package/workspace transaction and write source-truth files.
+pub fn apply_project_transaction_json(path: &Path, request: &str) -> Result<String, String> {
+    let ctx = project_context_for_entry(path);
+    let schema = json_usize_field(request, "schema_version").unwrap_or(0);
+    if schema != PROJECT_SCHEMA_VERSION as usize {
+        return Err(project_edit_error(
+            "schema",
+            "Canvas project transaction schema_version must be 1",
+        ));
+    }
+    let _project_revision = required_project_string(request, "project_revision")?;
+    let op = required_project_string(request, "op")?;
+    let touched = required_project_touched_files(request)?;
+    validate_touched_project_files(&ctx, &touched)?;
+    match op.as_str() {
+        "add_dependency" => apply_project_add_dependency(&ctx, request, &touched),
+        "remove_dependency" => apply_project_remove_dependency(&ctx, request, &touched),
+        "edit_pkg_field" => apply_project_edit_pkg_field(&ctx, request, &touched),
+        "add_target" => apply_project_add_target(&ctx, request, &touched),
+        "create_package" => apply_project_create_package(&ctx, request, &touched),
+        "add_workspace_member" => apply_project_add_workspace_member(&ctx, request, &touched),
+        "add_env_service" => apply_project_add_env_service(&ctx, request, &touched),
+        _ => Err(project_edit_error(
+            "unsupported",
+            "unknown Canvas project transaction operation",
+        )),
+    }
+}
+
 /// Query Canvas graph/source facts through the same semindex data LSP consumes.
 pub fn query_json_for_file(path: &Path, request: &str) -> Result<String, String> {
     let src = fs::read_to_string(path).map_err(|e| query_error("io", &e.to_string()))?;
@@ -155,6 +302,13 @@ pub fn query_json_for_file(path: &Path, request: &str) -> Result<String, String>
     }
 }
 
+/// Query graph/source facts for a selected file inside the entry project.
+pub fn query_json_for_entry(entry: &Path, request: &str) -> Result<String, String> {
+    let source_id = json_string_field(request, "source_id");
+    let path = resolve_entry_source_path(entry, source_id.as_deref())?;
+    query_json_for_file(&path, request)
+}
+
 /// Report Git text truth for Canvas source-control UI.
 pub fn source_control_json_for_file(path: &Path) -> String {
     let src = fs::read_to_string(path).unwrap_or_default();
@@ -190,6 +344,82 @@ pub fn source_control_json_for_file(path: &Path) -> String {
         json_str(status.trim()),
         json_str(&diff),
         history
+    )
+}
+
+/// Report Git text truth for the whole projected package/workspace.
+pub fn source_control_json_for_entry(path: &Path) -> String {
+    let ctx = project_context_for_entry(path);
+    let git_root = git_root(path);
+    let mut dirty_files = 0;
+    let mut statuses = Vec::new();
+    let files = ctx
+        .files
+        .iter()
+        .map(|file| {
+            let abs = ctx.project_root.join(&file.path);
+            let src = fs::read_to_string(&abs).unwrap_or_default();
+            let mut status = String::new();
+            let mut diff = String::new();
+            let mut dirty = false;
+            if let Some(root) = git_root.as_deref() {
+                let git_rel = git_relative_path(root, &abs);
+                status = git_output(root, &["status", "--porcelain", "--", &git_rel])
+                    .unwrap_or_default();
+                let tracked = git_output(root, &["ls-files", "--error-unmatch", "--", &git_rel])
+                    .is_some();
+                diff = if tracked {
+                    git_output(root, &["diff", "--", &git_rel]).unwrap_or_default()
+                } else if abs.exists() {
+                    untracked_diff(&git_rel, &src)
+                } else {
+                    String::new()
+                };
+                dirty = !status.trim().is_empty() || !diff.trim().is_empty();
+                if !status.trim().is_empty() {
+                    statuses.push(status.trim().to_string());
+                }
+            }
+            if dirty {
+                dirty_files += 1;
+            }
+            format!(
+                "{{\"path\":{},\"revision\":{},\"kind\":{},\"available\":{},\"dirty\":{},\"status\":{},\"diff\":{}}}",
+                json_str(&file.path),
+                json_str(&file.revision),
+                json_str(&file.kind),
+                if git_root.is_some() { "true" } else { "false" },
+                if dirty { "true" } else { "false" },
+                json_str(status.trim()),
+                json_str(&diff)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let entry_src = fs::read_to_string(path).unwrap_or_default();
+    let history = git_root
+        .as_deref()
+        .and_then(|root| {
+            let rel = git_relative_path(root, path);
+            git_output(root, &["log", "--oneline", "-5", "--", &rel])
+        })
+        .unwrap_or_default()
+        .lines()
+        .map(json_str)
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{{\"protocol\":\"jet.canvas.source_control\",\"schema_version\":1,\"ok\":true,\"revision\":{},\"project_revision\":{},\"project_root\":{},\"available\":{},\"dirty\":{},\"dirty_files\":{},\"status\":{},\"diff\":{},\"history\":[{}],\"files\":[{}]}}",
+        json_str(&source_revision(&entry_src)),
+        json_str(&ctx.project_revision),
+        json_str(&ctx.project_root.display().to_string()),
+        if git_root.is_some() { "true" } else { "false" },
+        if dirty_files > 0 { "true" } else { "false" },
+        dirty_files,
+        json_str(&statuses.join("\n")),
+        json_str(""),
+        history,
+        files
     )
 }
 
@@ -367,7 +597,7 @@ pub fn apply_transaction_json(path: &Path, request: &str) -> Result<String, Stri
             let candidate =
                 canvas_action_candidate(path, &src, &graph_id, &action_id, &callee, &args)?;
             Ok(canvas_action_preview_ok(
-                &src, &candidate, &action_id, &callee,
+                path, &src, &candidate, &action_id, &callee,
             ))
         }
         _ => Err(edit_error("unsupported", "unknown Canvas edit operation")),
@@ -501,9 +731,15 @@ body:not(.is-dev-mode) .debug-controls { display: none; }
 .panel details[open] summary::before { transform: rotate(90deg); }
 .panel summary .count { justify-self: end; }
 .panel details > :not(summary) { margin-top: 8px; }
-.graph-list, .search-results { display: grid; gap: 6px; }
+.graph-list, .search-results, .project-list { display: grid; gap: 6px; }
 .graph-item { width: 100%; display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 8px; text-align: left; border-color: #283b52; background: #101821; min-height: 38px; }
 .graph-item.is-active { border-color: #35c2ff; background: #102437; box-shadow: inset 3px 0 0 #35c2ff; }
+.project-card { border: 1px solid #263850; border-radius: 6px; background: #0d1520; padding: 8px; display: grid; gap: 5px; }
+button.project-card { width: 100%; text-align: left; cursor: pointer; color: inherit; }
+.project-card.is-active { border-color: #35c2ff; background: #102437; box-shadow: inset 3px 0 0 #35c2ff; }
+.project-card b { color: #eef7ff; font-size: 12px; overflow-wrap: anywhere; }
+.project-card small, .project-card code { color: #8fa7c6; font: 11px ui-monospace, "SFMono-Regular", Consolas, monospace; overflow-wrap: anywhere; }
+.project-card .tag { justify-self: start; }
 .search-item { width: 100%; text-align: left; border-color: #34285e; background: #151229; }
 .search-item.is-active { border-color: #d58cff; background: #21133a; }
 .search-item small { color: #9aa8c5; display: block; margin-top: 3px; overflow-wrap: anywhere; }
@@ -684,6 +920,7 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
   </header>
   <main id="workbench">
     <aside id="left-drawer" class="side">
+      <section id="project-panel" class="panel"><details open><summary><span>Project</span><span id="project-mode" class="count">file</span></summary><div id="project-rail" class="project-list"></div></details></section>
       <section id="graphs-panel" class="panel"><details open><summary><span>Functions</span><span id="graph-count" class="count">0</span></summary><div id="graph-list" class="graph-list"></div></details></section>
       <section id="search-panel" class="panel"><details><summary><span>Search</span></summary><input id="canvas-search" class="search" placeholder="Find in graph"><div id="search-results" class="search-results"></div></details></section>
     </aside>
@@ -741,6 +978,8 @@ pub fn canvas_js() -> String {
   const rightDrawer = document.getElementById("right-drawer");
   const dockGraphs = document.getElementById("dock-graphs");
   const dockDetails = document.getElementById("dock-details");
+  const projectRail = document.getElementById("project-rail");
+  const projectMode = document.getElementById("project-mode");
   const graphList = document.getElementById("graph-list");
   const canvasSearch = document.getElementById("canvas-search");
   const searchResults = document.getElementById("search-results");
@@ -772,6 +1011,8 @@ pub fn canvas_js() -> String {
   let pinPoints = new Map();
   let pinHit = [];
   let latestDoc = null;
+  let latestProject = null;
+  let selectedSourceId = null;
   let debugOverlay = null;
   let debugState = { breakpoints: [], watches: [] };
   let searchState = { results: [], spans: [], active: -1, diff: null, impact: null };
@@ -1130,7 +1371,8 @@ pub fn canvas_js() -> String {
       .then((r) => r.json())
       .then((doc) => {
         scm = doc;
-        scmState.textContent = doc.available ? (doc.dirty ? "git dirty" : "git clean") : "no git";
+        const dirtyCount = doc.dirty_files ? " · " + doc.dirty_files + " files" : "";
+        scmState.textContent = doc.available ? (doc.dirty ? "git dirty" + dirtyCount : "git clean") : "no git";
         scmState.style.color = doc.dirty ? "#fde68a" : "#8fb2dc";
         return doc;
       })
@@ -1143,7 +1385,8 @@ pub fn canvas_js() -> String {
   function showSourceDiff() {
     const render = (doc) => {
       if (!doc) return;
-      const diff = doc.diff || (doc.dirty ? doc.status : "clean");
+      const fileDiff = (doc.files || []).filter((file) => file.dirty).map((file) => file.diff || file.status || file.path).join("\n");
+      const diff = doc.diff || fileDiff || (doc.dirty ? doc.status : "clean");
       searchState.results = [];
       searchState.spans = [];
       searchState.active = -1;
@@ -1493,6 +1736,51 @@ pub fn canvas_js() -> String {
       });
       graphList.appendChild(button);
     }
+  }
+
+  function syncProjectRail(project) {
+    if (!projectRail || !project) return;
+    latestProject = project;
+    projectMode.textContent = project.mode || "file";
+    const cards = [];
+    cards.push(`<div class="project-card"><b>${escapeHtml(project.entry || "entry")}</b><small>${escapeHtml(project.project_root || "")}</small><span class="tag">${escapeHtml(project.mode || "single_file")}</span></div>`);
+    for (const pkg of (project.packages || []).slice(0, 8)) {
+      const deps = (pkg.deps || []).map((d) => d.name).join(", ") || "no deps";
+      const targets = (pkg.targets || []).map((t) => t.target).join(", ") || (pkg.target || "native");
+      cards.push(`<div class="project-card" data-project-package="${escapeAttr(pkg.path || "")}"><b>${escapeHtml(pkg.name || pkg.path || "package")}</b><small>${escapeHtml(pkg.path || "")}</small><code>${escapeHtml(targets)} · ${escapeHtml(deps)}</code></div>`);
+    }
+    const fileCount = (project.files || []).length;
+    const dirty = project.source_control && project.source_control.truth ? project.source_control.truth : "git-text";
+    cards.push(`<div class="project-card"><b>${fileCount} source-truth files</b><small>${escapeHtml(dirty)}</small><code>${escapeHtml((project.state_policy && project.state_policy.semantic) || "source")} semantics</code></div>`);
+    for (const file of (project.files || []).filter((f) => f.kind === "source").slice(0, 12)) {
+      const active = (selectedSourceId || project.entry) === file.path ? " is-active" : "";
+      cards.push(`<button class="project-card${active}" type="button" data-project-file="${escapeAttr(file.path || "")}"><b>${escapeHtml(file.path || "source")}</b><small>${escapeHtml(file.kind || "source")}</small><code>${escapeHtml(file.revision || "")}</code></button>`);
+    }
+    projectRail.innerHTML = cards.join("");
+    window.__jetCanvasProjectRail = { mode: project.mode, packages: (project.packages || []).length, files: fileCount };
+  }
+
+  if (projectRail) {
+    projectRail.addEventListener("click", (event) => {
+      const card = event.target.closest("[data-project-file]");
+      if (!card) return;
+      const sourceId = card.getAttribute("data-project-file");
+      if (sourceId) loadGraph(sourceId);
+    });
+  }
+
+  function loadProject() {
+    const projectUrl = window.__JET_CANVAS_PROJECT__ || ((window.__JET_CANVAS_BASE__ || "/canvas") + "/project");
+    return fetch(projectUrl, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((project) => {
+        syncProjectRail(project);
+        return project;
+      })
+      .catch(() => {
+        if (projectRail) projectRail.innerHTML = "<div class=\"tag\">project unavailable</div>";
+        return null;
+      });
   }
 
   function syncWireStatus(state) {
@@ -3178,6 +3466,7 @@ pub fn canvas_js() -> String {
         }
         showToast(result.json.changed ? "Source updated" : "No change");
         loadSourceControl();
+        loadProject();
         loadGraph();
       })
       .catch((e) => showToast(String(e)));
@@ -3211,8 +3500,14 @@ pub fn canvas_js() -> String {
     restoreSource(entry.after, null, entry);
   }
 
-  function loadGraph() {
-    return fetch(graphUrl, { cache: "no-store" })
+  function graphRequestUrl(sourceId) {
+    if (!sourceId) return graphUrl;
+    return graphUrl + (graphUrl.includes("?") ? "&" : "?") + "source_id=" + encodeURIComponent(sourceId);
+  }
+
+  function loadGraph(sourceId) {
+    if (typeof sourceId === "string") selectedSourceId = sourceId || null;
+    return fetch(graphRequestUrl(selectedSourceId), { cache: "no-store" })
       .then((r) => r.json())
       .then((doc) => {
         latestDoc = doc;
@@ -3221,6 +3516,7 @@ pub fn canvas_js() -> String {
         const firstLoad = selectedGraphId === null;
         drawGraph(doc);
         setViewMode(viewMode);
+        loadProject();
         loadSourceControl();
         loadCanvasActions();
         applySourceHash();
@@ -3300,6 +3596,1279 @@ fn project_file(path: &Path) -> Result<Projection, Vec<Diagnostic>> {
         return Err(diags);
     };
     Ok(project_checked(path, &src, &bundle, &facts))
+}
+
+#[derive(Clone)]
+struct ProjectFileRec {
+    path: String,
+    revision: String,
+    kind: String,
+}
+
+struct ProjectContext {
+    entry_path: PathBuf,
+    project_root: PathBuf,
+    manifest_root: Option<PathBuf>,
+    workspace_root: Option<PathBuf>,
+    files: Vec<ProjectFileRec>,
+    project_revision: String,
+}
+
+struct TouchedProjectFile {
+    path: String,
+    revision: String,
+}
+
+struct ProjectChange {
+    path: PathBuf,
+    rel: String,
+    before: String,
+    after: String,
+}
+
+fn project_context_for_entry(path: &Path) -> ProjectContext {
+    let entry_dir = path.parent().unwrap_or_else(|| Path::new("."));
+    let manifest_root = crate::Loader::find_manifest_root(entry_dir);
+    let workspace_root = find_workspace_root(manifest_root.as_deref().unwrap_or(entry_dir));
+    let project_root = workspace_root
+        .as_deref()
+        .or(manifest_root.as_deref())
+        .unwrap_or(entry_dir)
+        .to_path_buf();
+    let files = collect_project_files(
+        &project_root,
+        path,
+        manifest_root.as_deref(),
+        workspace_root.as_deref(),
+    );
+    let project_revision = project_revision_from_files(&files);
+    ProjectContext {
+        entry_path: path.to_path_buf(),
+        project_root,
+        manifest_root,
+        workspace_root,
+        files,
+        project_revision,
+    }
+}
+
+fn find_workspace_root(start: &Path) -> Option<PathBuf> {
+    let mut dir = start.to_path_buf();
+    loop {
+        if crate::Jetpack::WorkspaceFile::load(&dir).is_some()
+            || crate::Jetpack::WorkspaceLock::load(&dir).is_some()
+        {
+            return Some(dir);
+        }
+        match dir.parent() {
+            Some(parent) => dir = parent.to_path_buf(),
+            None => return None,
+        }
+    }
+}
+
+fn collect_project_files(
+    project_root: &Path,
+    entry_path: &Path,
+    manifest_root: Option<&Path>,
+    workspace_root: Option<&Path>,
+) -> Vec<ProjectFileRec> {
+    let mut paths = Vec::new();
+    push_existing(&mut paths, entry_path);
+    push_existing(&mut paths, &project_root.join(crate::Syntax::ENV_FILE));
+    if let Some(root) = manifest_root {
+        push_existing(&mut paths, &root.join(crate::Syntax::PAYLOAD_FILE));
+    }
+    if let Some(root) = workspace_root {
+        push_existing(&mut paths, &root.join(crate::Syntax::WORKSPACE_FILE));
+        push_existing(&mut paths, &root.join(crate::Syntax::UNIFIED_LOCK_FILE));
+        if let Some(Ok(plan)) = crate::Jetpack::WorkspaceFile::load(root) {
+            for member in plan.members {
+                let member_dir = root.join(member.path);
+                push_existing(&mut paths, &member_dir.join(crate::Syntax::PAYLOAD_FILE));
+                collect_jet_files(&member_dir, &mut paths);
+            }
+        }
+    }
+    if workspace_root.is_none() {
+        if let Some(root) = manifest_root {
+            collect_jet_files(root, &mut paths);
+        }
+    }
+    paths.sort();
+    paths.dedup();
+    paths
+        .into_iter()
+        .filter_map(|path| {
+            let bytes = fs::read(&path).ok()?;
+            let kind = if path.file_name().and_then(|n| n.to_str())
+                == Some(crate::Syntax::PAYLOAD_FILE)
+            {
+                "manifest"
+            } else if path.file_name().and_then(|n| n.to_str())
+                == Some(crate::Syntax::WORKSPACE_FILE)
+            {
+                "workspace"
+            } else if path.file_name().and_then(|n| n.to_str()) == Some(crate::Syntax::ENV_FILE) {
+                "env"
+            } else if rel_path(project_root, &path) == crate::Syntax::UNIFIED_LOCK_FILE {
+                "lock"
+            } else {
+                "source"
+            };
+            Some(ProjectFileRec {
+                path: rel_path(project_root, &path),
+                revision: format!("sha256-{}", SHA256::sha256_hex(&bytes)),
+                kind: kind.to_string(),
+            })
+        })
+        .collect()
+}
+
+fn push_existing(paths: &mut Vec<PathBuf>, path: &Path) {
+    if path.is_file() {
+        paths.push(path.to_path_buf());
+    }
+}
+
+fn collect_jet_files(dir: &Path, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    let mut entries: Vec<_> = entries.flatten().collect();
+    entries.sort_by_key(|e| e.path());
+    for entry in entries {
+        let path = entry.path();
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name == ".git" || name == ".jet" || name == "target" || name == "build" {
+            continue;
+        }
+        if path.is_dir() {
+            collect_jet_files(&path, out);
+            continue;
+        }
+        if path.extension().and_then(|e| e.to_str()) == Some(crate::Syntax::FILE_EXT)
+            && path.file_name().and_then(|n| n.to_str()) != Some(crate::Syntax::PAYLOAD_FILE)
+        {
+            out.push(path);
+        }
+    }
+}
+
+fn project_revision_from_files(files: &[ProjectFileRec]) -> String {
+    let mut acc = String::new();
+    for file in files {
+        acc.push_str(&file.path);
+        acc.push('\n');
+        acc.push_str(&file.revision);
+        acc.push('\n');
+        acc.push_str(&file.kind);
+        acc.push('\n');
+    }
+    source_revision(&acc)
+}
+
+fn workspace_project_json(project_root: &Path, workspace_root: Option<&Path>) -> String {
+    let Some(root) = workspace_root else {
+        return "null".to_string();
+    };
+    let members = match crate::Jetpack::WorkspaceFile::load(root) {
+        Some(Ok(plan)) => plan
+            .members
+            .iter()
+            .map(|m| {
+                format!(
+                    "{{\"name\":{},\"path\":{}}}",
+                    json_str(&m.name),
+                    json_str(&m.path)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(","),
+        Some(Err(d)) => {
+            return format!(
+                "{{\"path\":{},\"members\":[],\"diagnostics\":[{}]}}",
+                json_str(&rel_path(project_root, &root.join(crate::Syntax::WORKSPACE_FILE))),
+                diagnostic_json(&d)
+            );
+        }
+        None => String::new(),
+    };
+    format!(
+        "{{\"path\":{},\"members\":[{}],\"diagnostics\":[]}}",
+        json_str(&rel_path(project_root, &root.join(crate::Syntax::WORKSPACE_FILE))),
+        members
+    )
+}
+
+fn packages_project_json(
+    project_root: &Path,
+    manifest_root: Option<&Path>,
+    workspace_root: Option<&Path>,
+) -> String {
+    let mut dirs = Vec::new();
+    if let Some(root) = manifest_root {
+        dirs.push(root.to_path_buf());
+    }
+    if let Some(root) = workspace_root {
+        if let Some(Ok(plan)) = crate::Jetpack::WorkspaceFile::load(root) {
+            for member in plan.members {
+                dirs.push(root.join(member.path));
+            }
+        }
+    }
+    dirs.sort();
+    dirs.dedup();
+    dirs.iter()
+        .filter_map(|dir| package_project_json(project_root, dir))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn package_project_json(project_root: &Path, dir: &Path) -> Option<String> {
+    let manifest_path = dir.join(crate::Syntax::PAYLOAD_FILE);
+    let raw = fs::read_to_string(&manifest_path).ok()?;
+    match crate::Jetpack::PackageManifest::parse(&raw) {
+        Ok(manifest) => {
+            let deps = manifest
+                .deps
+                .iter()
+                .map(|d| {
+                    format!(
+                        "{{\"name\":{},\"source\":{}}}",
+                        json_str(&d.name),
+                        json_str(&dep_source_label(&d.source))
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(",");
+            let targets = manifest
+                .packages
+                .iter()
+                .flat_map(|p| {
+                    p.targets.iter().map(move |t| {
+                        format!(
+                            "{{\"package\":{},\"target\":{}}}",
+                            json_str(&p.name),
+                            json_str(&target_label(t))
+                        )
+                    })
+                })
+                .collect::<Vec<_>>()
+                .join(",");
+            Some(format!(
+                "{{\"path\":{},\"manifest\":{},\"name\":{},\"version\":{},\"target\":{},\"deps\":[{}],\"targets\":[{}],\"effects_enabled\":{},\"diagnostics\":[]}}",
+                json_str(&rel_path(project_root, dir)),
+                json_str(&rel_path(project_root, &manifest_path)),
+                json_str(&manifest.package.name),
+                json_str(&manifest.package.version),
+                json_str(manifest.package.target.as_deref().unwrap_or("native")),
+                deps,
+                targets,
+                if manifest.effects_enabled { "true" } else { "false" }
+            ))
+        }
+        Err(err) => Some(format!(
+            "{{\"path\":{},\"manifest\":{},\"name\":{},\"version\":\"\",\"target\":\"native\",\"deps\":[],\"targets\":[],\"effects_enabled\":false,\"diagnostics\":[{{\"code\":\"manifest\",\"what\":{},\"why\":\"pkg.jet did not parse as a package manifest\",\"fix\":\"fix pkg.jet before Canvas uses package facts\"}}]}}",
+            json_str(&rel_path(project_root, dir)),
+            json_str(&rel_path(project_root, &manifest_path)),
+            json_str(
+                dir.file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("package")
+            ),
+            json_str(&format!("{:?}", err))
+        )),
+    }
+}
+
+struct EnvProjectJson {
+    envs: String,
+    services: String,
+    diagnostics: String,
+}
+
+fn env_project_json(project_root: &Path) -> EnvProjectJson {
+    let path = project_root.join(crate::Syntax::ENV_FILE);
+    let Ok(src) = fs::read_to_string(&path) else {
+        return EnvProjectJson {
+            envs: String::new(),
+            services: String::new(),
+            diagnostics: String::new(),
+        };
+    };
+    match crate::Jetpack::ModuleEval::evaluate_env(&src, project_root) {
+        Ok(plan) => {
+            let packages = plan
+                .package_refs
+                .iter()
+                .map(|p| json_str(p))
+                .collect::<Vec<_>>()
+                .join(",");
+            let secrets = plan
+                .secrets
+                .iter()
+                .map(|s| json_str(s))
+                .collect::<Vec<_>>()
+                .join(",");
+            let services = plan
+                .dev_services
+                .iter()
+                .map(dev_service_project_json)
+                .collect::<Vec<_>>()
+                .join(",");
+            EnvProjectJson {
+                envs: format!(
+                    "{{\"path\":{},\"prompt\":{},\"packages\":[{}],\"secrets\":[{}],\"diagnostics\":[]}}",
+                    json_str(crate::Syntax::ENV_FILE),
+                    json_str(plan.prompt.as_deref().unwrap_or(crate::Syntax::JETPACK_PROMPT_LABEL)),
+                    packages,
+                    secrets
+                ),
+                services,
+                diagnostics: String::new(),
+            }
+        }
+        Err(d) => EnvProjectJson {
+            envs: String::new(),
+            services: String::new(),
+            diagnostics: diagnostic_json(&d),
+        },
+    }
+}
+
+fn dev_service_project_json(service: &crate::Jetpack::ModuleEval::DevServicePlan) -> String {
+    let ports = service
+        .ports
+        .iter()
+        .map(|port| port.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    let extra = service
+        .extra
+        .iter()
+        .map(|(key, value)| {
+            format!(
+                "{{\"key\":{},\"value\":{}}}",
+                json_str(key),
+                json_str(value)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{{\"name\":{},\"enable\":{},\"ports\":[{}],\"init\":{},\"shutdown\":{},\"data_dir\":{},\"ready\":{},\"extra\":[{}],\"source\":{}}}",
+        json_str(&service.name),
+        if service.enable { "true" } else { "false" },
+        ports,
+        json_optional_str(service.init.as_deref()),
+        json_optional_str(service.shutdown.as_deref()),
+        json_optional_str(service.data_dir.as_deref()),
+        json_optional_str(service.ready.as_deref()),
+        extra,
+        json_str(crate::Syntax::ENV_FILE)
+    )
+}
+
+fn lock_project_json(project_root: &Path) -> String {
+    let lock_path = project_root.join(crate::Syntax::UNIFIED_LOCK_FILE);
+    if !lock_path.is_file() {
+        return String::new();
+    }
+    let revision = fs::read(&lock_path)
+        .map(|bytes| format!("sha256-{}", SHA256::sha256_hex(&bytes)))
+        .unwrap_or_else(|_| source_revision(""));
+    format!(
+        "{{\"path\":{},\"revision\":{},\"kind\":\"unified\"}}",
+        json_str(&rel_path(project_root, &lock_path)),
+        json_str(&revision)
+    )
+}
+
+fn dep_source_label(source: &crate::Jetpack::PackageManifest::DepSource) -> String {
+    match source {
+        crate::Jetpack::PackageManifest::DepSource::Version(v) => format!("version:{v}"),
+        crate::Jetpack::PackageManifest::DepSource::Provider { provider, target } => {
+            format!("{provider:?}@{target}")
+        }
+        crate::Jetpack::PackageManifest::DepSource::Git { url, selector } => {
+            format!("git:{url}@{selector:?}")
+        }
+        crate::Jetpack::PackageManifest::DepSource::CLib { target } => {
+            format!("c:{target}")
+        }
+    }
+}
+
+fn target_label(target: &crate::Jetpack::PackageManifest::Target) -> String {
+    match target {
+        crate::Jetpack::PackageManifest::Target::Library => "library".to_string(),
+        crate::Jetpack::PackageManifest::Target::Executable => "executable".to_string(),
+        crate::Jetpack::PackageManifest::Target::Test => "test".to_string(),
+        crate::Jetpack::PackageManifest::Target::Example => "example".to_string(),
+        crate::Jetpack::PackageManifest::Target::Benchmark => "benchmark".to_string(),
+        crate::Jetpack::PackageManifest::Target::Plugin { .. } => "plugin".to_string(),
+    }
+}
+
+fn required_project_touched_files(request: &str) -> Result<Vec<TouchedProjectFile>, String> {
+    let files_body = json_array_body(request, "files")
+        .ok_or_else(|| project_edit_error("bad_request", "missing `files`"))?;
+    let mut files = Vec::new();
+    for object in json_object_bodies(files_body) {
+        let raw_path = json_string_field(object, "path")
+            .ok_or_else(|| project_edit_error("bad_request", "touched file missing `path`"))?;
+        let path = clean_project_rel_path(&raw_path)?;
+        let revision = json_string_field(object, "revision")
+            .ok_or_else(|| project_edit_error("bad_request", "touched file missing `revision`"))?;
+        files.push(TouchedProjectFile { path, revision });
+    }
+    if files.is_empty() {
+        return Err(project_edit_error(
+            "bad_request",
+            "Canvas project transactions must name touched files",
+        ));
+    }
+    Ok(files)
+}
+
+fn validate_touched_project_files(
+    ctx: &ProjectContext,
+    touched: &[TouchedProjectFile],
+) -> Result<(), String> {
+    for file in touched {
+        if file.path.contains("..") || Path::new(&file.path).is_absolute() {
+            return Err(project_edit_error(
+                "bad_request",
+                "Canvas project file paths must stay inside the project",
+            ));
+        }
+        let Some(current) = ctx.files.iter().find(|f| f.path == file.path) else {
+            if file.revision == "missing" {
+                continue;
+            }
+            return Err(project_edit_error(
+                "not_found",
+                "Canvas project touched file is not in the projected source truth",
+            ));
+        };
+        if current.revision != file.revision {
+            return Err(project_edit_error(
+                "conflict",
+                "source file changed since this Canvas project was drawn",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn apply_project_add_dependency(
+    ctx: &ProjectContext,
+    request: &str,
+    touched: &[TouchedProjectFile],
+) -> Result<String, String> {
+    let manifest_rel = json_string_field(request, "manifest").unwrap_or_else(|| {
+        ctx.manifest_root
+            .as_deref()
+            .map(|root| rel_path(&ctx.project_root, &root.join(crate::Syntax::PAYLOAD_FILE)))
+            .unwrap_or_else(|| crate::Syntax::PAYLOAD_FILE.to_string())
+    });
+    if !touched.iter().any(|f| f.path == manifest_rel) {
+        return Err(project_edit_error(
+            "bad_request",
+            "add_dependency must touch the edited pkg.jet",
+        ));
+    }
+    let name = required_project_string(request, "name")?;
+    validate_ident_for_project(&name)?;
+    let spec_text = required_project_string(request, "spec")?;
+    let spec = project_dep_spec(&spec_text)?;
+    let manifest_path = ctx.project_root.join(&manifest_rel);
+    let before = fs::read_to_string(&manifest_path).map_err(|e| project_edit_error("io", &e.to_string()))?;
+    let after = crate::Manifest::add_dependency(&before, &name, &spec);
+    crate::Jetpack::PackageManifest::parse(&after)
+        .map_err(|e| project_edit_error("diagnostic", &format!("{:?}", e)))?;
+    let change = ProjectChange {
+        path: manifest_path,
+        rel: manifest_rel,
+        before,
+        after,
+    };
+    finish_project_changes(ctx, request, "add_dependency", vec![change])
+}
+
+fn apply_project_remove_dependency(
+    ctx: &ProjectContext,
+    request: &str,
+    touched: &[TouchedProjectFile],
+) -> Result<String, String> {
+    let manifest_rel = json_string_field(request, "manifest").unwrap_or_else(|| {
+        ctx.manifest_root
+            .as_deref()
+            .map(|root| rel_path(&ctx.project_root, &root.join(crate::Syntax::PAYLOAD_FILE)))
+            .unwrap_or_else(|| crate::Syntax::PAYLOAD_FILE.to_string())
+    });
+    if !touched.iter().any(|f| f.path == manifest_rel) {
+        return Err(project_edit_error(
+            "bad_request",
+            "remove_dependency must touch the edited pkg.jet",
+        ));
+    }
+    let name = required_project_string(request, "name")?;
+    validate_ident_for_project(&name)?;
+    let manifest_path = ctx.project_root.join(&manifest_rel);
+    let before = fs::read_to_string(&manifest_path).map_err(|e| project_edit_error("io", &e.to_string()))?;
+    let after = crate::Manifest::remove_dependency(&before, &name);
+    crate::Jetpack::PackageManifest::parse(&after)
+        .map_err(|e| project_edit_error("diagnostic", &format!("{:?}", e)))?;
+    let change = ProjectChange {
+        path: manifest_path,
+        rel: manifest_rel,
+        before,
+        after,
+    };
+    finish_project_changes(ctx, request, "remove_dependency", vec![change])
+}
+
+fn apply_project_edit_pkg_field(
+    ctx: &ProjectContext,
+    request: &str,
+    touched: &[TouchedProjectFile],
+) -> Result<String, String> {
+    let manifest_rel = project_manifest_rel(ctx, request);
+    if !touched.iter().any(|f| f.path == manifest_rel) {
+        return Err(project_edit_error(
+            "bad_request",
+            "edit_pkg_field must touch the edited pkg.jet",
+        ));
+    }
+    let field = required_project_string(request, "field")?;
+    let value = required_project_string(request, "value")?;
+    validate_payload_field(&field, &value)?;
+    let manifest_path = ctx.project_root.join(&manifest_rel);
+    let before = fs::read_to_string(&manifest_path).map_err(|e| project_edit_error("io", &e.to_string()))?;
+    let after = set_manifest_payload_field(&before, &field, &value)?;
+    crate::Jetpack::PackageManifest::parse(&after)
+        .map_err(|e| project_edit_error("diagnostic", &format!("{:?}", e)))?;
+    finish_project_changes(
+        ctx,
+        request,
+        "edit_pkg_field",
+        vec![ProjectChange {
+            path: manifest_path,
+            rel: manifest_rel,
+            before,
+            after,
+        }],
+    )
+}
+
+fn apply_project_add_target(
+    ctx: &ProjectContext,
+    request: &str,
+    touched: &[TouchedProjectFile],
+) -> Result<String, String> {
+    let manifest_rel = project_manifest_rel(ctx, request);
+    if !touched.iter().any(|f| f.path == manifest_rel) {
+        return Err(project_edit_error(
+            "bad_request",
+            "add_target must touch the edited pkg.jet",
+        ));
+    }
+    let name = required_project_string(request, "name")?;
+    validate_ident_for_project(&name)?;
+    let target = project_target_text(
+        &json_string_field(request, "target").unwrap_or_else(|| "executable".to_string()),
+    )?;
+    let manifest_path = ctx.project_root.join(&manifest_rel);
+    let before = fs::read_to_string(&manifest_path).map_err(|e| project_edit_error("io", &e.to_string()))?;
+    let after = add_manifest_target(&before, &name, target)?;
+    crate::Jetpack::PackageManifest::parse(&after)
+        .map_err(|e| project_edit_error("diagnostic", &format!("{:?}", e)))?;
+    finish_project_changes(
+        ctx,
+        request,
+        "add_target",
+        vec![ProjectChange {
+            path: manifest_path,
+            rel: manifest_rel,
+            before,
+            after,
+        }],
+    )
+}
+
+fn project_manifest_rel(ctx: &ProjectContext, request: &str) -> String {
+    json_string_field(request, "manifest").unwrap_or_else(|| {
+        ctx.manifest_root
+            .as_deref()
+            .map(|root| rel_path(&ctx.project_root, &root.join(crate::Syntax::PAYLOAD_FILE)))
+            .unwrap_or_else(|| crate::Syntax::PAYLOAD_FILE.to_string())
+    })
+}
+
+fn apply_project_create_package(
+    ctx: &ProjectContext,
+    request: &str,
+    touched: &[TouchedProjectFile],
+) -> Result<String, String> {
+    let package_rel = clean_project_rel_path(
+        &json_string_field(request, "package_path")
+            .or_else(|| json_string_field(request, "new_package_path"))
+            .ok_or_else(|| project_edit_error("bad_request", "missing `package_path`"))?,
+    )?;
+    let name = json_string_field(request, "name").unwrap_or_else(|| {
+        Path::new(&package_rel)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("package")
+            .to_string()
+    });
+    validate_ident_for_project(&name)?;
+    let entry_rel = json_string_field(request, "entry")
+        .map(|entry| clean_project_rel_path(&entry))
+        .transpose()?
+        .unwrap_or_else(|| format!("{package_rel}/main.jet"));
+    if !entry_rel.starts_with(&format!("{package_rel}/")) {
+        return Err(project_edit_error(
+            "bad_request",
+            "create_package entry must live inside the package path",
+        ));
+    }
+    if !entry_rel.ends_with(".jet") {
+        return Err(project_edit_error(
+            "bad_request",
+            "create_package entry must be a .jet file",
+        ));
+    }
+    let target = json_string_field(request, "target").unwrap_or_else(|| "executable".to_string());
+    let target = project_target_text(&target)?;
+    let manifest_rel = format!("{package_rel}/{}", crate::Syntax::PAYLOAD_FILE);
+    require_touched_revision(touched, &manifest_rel, "missing")?;
+    require_touched_revision(touched, &entry_rel, "missing")?;
+
+    let manifest_path = ctx.project_root.join(&manifest_rel);
+    let entry_path = ctx.project_root.join(&entry_rel);
+    if manifest_path.exists() || entry_path.exists() {
+        return Err(project_edit_error(
+            "conflict",
+            "create_package would overwrite existing source truth",
+        ));
+    }
+    let manifest = format!(
+        "payload: {{\n    name: \"{}\",\n    version: \"0.1.0\",\n}}\npackages: {{\n    {}: {},\n}}\n",
+        name, name, target
+    );
+    crate::Jetpack::PackageManifest::parse(&manifest)
+        .map_err(|e| project_edit_error("diagnostic", &format!("{:?}", e)))?;
+    let entry = if target == "library" {
+        format!("pub fn {}_ready() -> Bool {{\n    return true\n}}\n", name)
+    } else {
+        format!("fn run() {{\n    print(\"{}\")\n}}\n", name)
+    };
+    let (tokens, lex_diags) = crate::Lexer::lex(&entry);
+    if let Some(d) = lex_diags.into_iter().find(|d| d.severity == Severity::Error) {
+        return Err(project_edit_error("diagnostic", &d.what));
+    }
+    crate::Parser::parse(&tokens)
+        .map(|_| ())
+        .map_err(|mut diags| {
+            let what = diags
+                .pop()
+                .map(|d| d.what)
+                .unwrap_or_else(|| "created package entry did not parse".to_string());
+            project_edit_error("diagnostic", &what)
+        })?;
+    let changes = vec![
+        ProjectChange {
+            path: manifest_path,
+            rel: manifest_rel,
+            before: String::new(),
+            after: manifest,
+        },
+        ProjectChange {
+            path: entry_path,
+            rel: entry_rel,
+            before: String::new(),
+            after: entry,
+        },
+    ];
+    finish_project_changes(ctx, request, "create_package", changes)
+}
+
+fn apply_project_add_workspace_member(
+    ctx: &ProjectContext,
+    request: &str,
+    touched: &[TouchedProjectFile],
+) -> Result<String, String> {
+    let workspace_rel = json_string_field(request, "workspace")
+        .map(|path| clean_project_rel_path(&path))
+        .transpose()?
+        .unwrap_or_else(|| crate::Syntax::WORKSPACE_FILE.to_string());
+    let member_path = clean_project_rel_path(&required_project_string(request, "member_path")?)?;
+    let member_dir = ctx.project_root.join(&member_path);
+    if !member_dir.join(crate::Syntax::PAYLOAD_FILE).is_file() {
+        return Err(project_edit_error(
+            "not_found",
+            "workspace member must contain a pkg.jet",
+        ));
+    }
+    let workspace_path = ctx.project_root.join(&workspace_rel);
+    let before = fs::read_to_string(&workspace_path).unwrap_or_default();
+    let existed = workspace_path.is_file();
+    require_touched_revision(
+        touched,
+        &workspace_rel,
+        if existed {
+            ctx.files
+                .iter()
+                .find(|file| file.path == workspace_rel)
+                .map(|file| file.revision.as_str())
+                .unwrap_or("missing")
+        } else {
+            "missing"
+        },
+    )?;
+    let after = if existed {
+        add_workspace_member_to_source(&before, &member_path)?
+    } else {
+        format!(
+            "module workspace {{\n    members: [\"./{}\"]\n}}\n",
+            member_path
+        )
+    };
+    crate::Jetpack::WorkspaceFile::evaluate(&after, &ctx.project_root)
+        .map_err(|d| project_edit_error("diagnostic", &d.what))?;
+    let change = ProjectChange {
+        path: workspace_path,
+        rel: workspace_rel,
+        before,
+        after,
+    };
+    finish_project_changes(ctx, request, "add_workspace_member", vec![change])
+}
+
+fn apply_project_add_env_service(
+    ctx: &ProjectContext,
+    request: &str,
+    touched: &[TouchedProjectFile],
+) -> Result<String, String> {
+    let env_rel = json_string_field(request, "env")
+        .map(|path| clean_project_rel_path(&path))
+        .transpose()?
+        .unwrap_or_else(|| crate::Syntax::ENV_FILE.to_string());
+    let env_path = ctx.project_root.join(&env_rel);
+    let existed = env_path.is_file();
+    require_touched_revision(
+        touched,
+        &env_rel,
+        if existed {
+            ctx.files
+                .iter()
+                .find(|file| file.path == env_rel)
+                .map(|file| file.revision.as_str())
+                .unwrap_or("missing")
+        } else {
+            "missing"
+        },
+    )?;
+    let name = required_project_string(request, "name")?;
+    validate_ident_for_project(&name)?;
+    let service = env_service_source(request, &name)?;
+    let before = fs::read_to_string(&env_path).unwrap_or_default();
+    let after = if existed {
+        add_env_service_to_source(&before, &name, &service)?
+    } else {
+        format!("module env.dev {{\n    services: {{ {service} }}\n}}\n")
+    };
+    crate::Jetpack::ModuleEval::evaluate_env(&after, &ctx.project_root)
+        .map_err(|d| project_edit_error("diagnostic", &d.what))?;
+    finish_project_changes(
+        ctx,
+        request,
+        "add_env_service",
+        vec![ProjectChange {
+            path: env_path,
+            rel: env_rel,
+            before,
+            after,
+        }],
+    )
+}
+
+fn env_service_source(request: &str, name: &str) -> Result<String, String> {
+    let mut fields = vec![format!(
+        "enable: {}",
+        if json_bool_field(request, "enable").unwrap_or(true) {
+            "true"
+        } else {
+            "false"
+        }
+    )];
+    if let Some(port) = json_usize_field(request, "port") {
+        fields.push(format!("ports: [{port}]"));
+    }
+    if let Some(init) = json_string_field(request, "init") {
+        fields.push(format!("init: \"{}\"", manifest_string(&init)));
+    }
+    if let Some(ready) = json_string_field(request, "ready") {
+        fields.push(format!("ready: \"{}\"", manifest_string(&ready)));
+    }
+    if let Some(shutdown) = json_string_field(request, "shutdown") {
+        fields.push(format!("shutdown: \"{}\"", manifest_string(&shutdown)));
+    }
+    if let Some(data_dir) = json_string_field(request, "data_dir") {
+        fields.push(format!("data_dir: \"{}\"", manifest_string(&data_dir)));
+    }
+    Ok(format!("{name}: {{ {} }}", fields.join(", ")))
+}
+
+fn add_env_service_to_source(src: &str, name: &str, service: &str) -> Result<String, String> {
+    if src.contains(&format!("{name}:")) {
+        return Ok(src.to_string());
+    }
+    if let Some((start, end)) = block_body_span(src, "services:") {
+        let body = src[start..end].trim();
+        let addition = if body.is_empty() {
+            service.to_string()
+        } else {
+            format!(", {service}")
+        };
+        let mut out = String::with_capacity(src.len() + addition.len());
+        out.push_str(&src[..end]);
+        out.push_str(&addition);
+        out.push_str(&src[end..]);
+        return Ok(out);
+    }
+    let Some(close) = src.rfind('}') else {
+        return Err(project_edit_error(
+            "diagnostic",
+            "env.jet module is missing its closing brace",
+        ));
+    };
+    let insertion = format!("    services: {{ {service} }}\n");
+    let mut out = String::with_capacity(src.len() + insertion.len());
+    out.push_str(&src[..close]);
+    if !out.ends_with('\n') {
+        out.push('\n');
+    }
+    out.push_str(&insertion);
+    out.push_str(&src[close..]);
+    Ok(out)
+}
+
+fn add_workspace_member_to_source(src: &str, member_path: &str) -> Result<String, String> {
+    let normalized = format!("./{}", member_path.trim_start_matches("./"));
+    if src.contains(&format!("\"{}\"", normalized)) || src.contains(&format!("\"{}\"", member_path)) {
+        return Ok(src.to_string());
+    }
+    if workspace_find_covers(src, member_path) {
+        return Ok(src.to_string());
+    }
+    let Some(members_pos) = src.find("members") else {
+        return Err(project_edit_error(
+            "unsupported",
+            "workspace source has no members field Canvas can edit",
+        ));
+    };
+    let Some(list_start_rel) = src[members_pos..].find('[') else {
+        return Err(project_edit_error(
+            "unsupported",
+            "Canvas can add workspace members to explicit lists or covered find() dirs",
+        ));
+    };
+    let list_start = members_pos + list_start_rel;
+    let Some(list_end_rel) = src[list_start..].find(']') else {
+        return Err(project_edit_error(
+            "diagnostic",
+            "workspace members list is missing its closing bracket",
+        ));
+    };
+    let list_end = list_start + list_end_rel;
+    let body = src[list_start + 1..list_end].trim();
+    let addition = if body.is_empty() {
+        format!("\"{}\"", normalized)
+    } else {
+        format!(", \"{}\"", normalized)
+    };
+    let mut out = String::with_capacity(src.len() + addition.len());
+    out.push_str(&src[..list_end]);
+    out.push_str(&addition);
+    out.push_str(&src[list_end..]);
+    Ok(out)
+}
+
+fn workspace_find_covers(src: &str, member_path: &str) -> bool {
+    let Some(find_pos) = src.find("find(") else {
+        return false;
+    };
+    let rest = &src[find_pos + "find(".len()..];
+    let Some(start) = rest.find('"') else {
+        return false;
+    };
+    let rest = &rest[start + 1..];
+    let Some(end) = rest.find('"') else {
+        return false;
+    };
+    let dir = rest[..end].trim_start_matches("./").trim_end_matches('/');
+    member_path == dir || member_path.starts_with(&format!("{dir}/"))
+}
+
+fn validate_payload_field(field: &str, value: &str) -> Result<(), String> {
+    match field {
+        "name" => validate_ident_for_project(value),
+        "version" | "jet" | "description" | "license" | "repository" | "edition" => Ok(()),
+        _ => Err(project_edit_error(
+            "bad_request",
+            "Canvas can edit known payload string fields only",
+        )),
+    }
+}
+
+fn set_manifest_payload_field(src: &str, field: &str, value: &str) -> Result<String, String> {
+    let (start, end) = block_body_span(src, "payload:")
+        .ok_or_else(|| project_edit_error("diagnostic", "pkg.jet has no payload block"))?;
+    set_block_field(src, start, end, field, &format!("\"{}\"", manifest_string(value)))
+}
+
+fn add_manifest_target(src: &str, name: &str, target: &str) -> Result<String, String> {
+    if let Some((start, end)) = block_body_span(src, "packages:") {
+        return set_block_field(src, start, end, name, target);
+    }
+    let mut out = src.to_string();
+    if !out.ends_with('\n') {
+        out.push('\n');
+    }
+    out.push_str(&format!("packages: {{\n    {name}: {target},\n}}\n"));
+    Ok(out)
+}
+
+fn block_body_span(src: &str, label: &str) -> Option<(usize, usize)> {
+    let label_pos = src.find(label)?;
+    let open = label_pos + src[label_pos..].find('{')?;
+    let bytes = src.as_bytes();
+    let mut depth = 0i32;
+    let mut in_string = false;
+    let mut escaped = false;
+    for i in open..bytes.len() {
+        let b = bytes[i];
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if b == b'\\' {
+                escaped = true;
+            } else if b == b'"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match b {
+            b'"' => in_string = true,
+            b'{' => depth += 1,
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some((open + 1, i));
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn set_block_field(
+    src: &str,
+    start: usize,
+    end: usize,
+    field: &str,
+    value: &str,
+) -> Result<String, String> {
+    validate_ident_for_project(field)?;
+    let body = &src[start..end];
+    let mut offset = start;
+    for line in body.split_inclusive('\n') {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with(&format!("{field}:")) {
+            let indent_len = line.len() - trimmed.len();
+            let indent = &line[..indent_len];
+            let newline = if line.ends_with('\n') { "\n" } else { "" };
+            let replacement = format!("{indent}{field}: {value},{newline}");
+            let mut out = String::with_capacity(src.len() + replacement.len());
+            out.push_str(&src[..offset]);
+            out.push_str(&replacement);
+            out.push_str(&src[offset + line.len()..]);
+            return Ok(out);
+        }
+        offset += line.len();
+    }
+    let insertion = if body.trim().is_empty() {
+        format!("\n    {field}: {value},")
+    } else {
+        format!("    {field}: {value},\n")
+    };
+    let mut out = String::with_capacity(src.len() + insertion.len());
+    out.push_str(&src[..end]);
+    out.push_str(&insertion);
+    out.push_str(&src[end..]);
+    Ok(out)
+}
+
+fn manifest_string(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+fn require_touched_revision(
+    touched: &[TouchedProjectFile],
+    path: &str,
+    revision: &str,
+) -> Result<(), String> {
+    if touched
+        .iter()
+        .any(|file| file.path == path && file.revision == revision)
+    {
+        return Ok(());
+    }
+    Err(project_edit_error(
+        "bad_request",
+        "project transaction touched files do not match the operation",
+    ))
+}
+
+fn clean_project_rel_path(path: &str) -> Result<String, String> {
+    let path = path.trim().trim_start_matches("./");
+    if path.is_empty() || path.contains('\\') || Path::new(path).is_absolute() {
+        return Err(project_edit_error(
+            "bad_request",
+            "Canvas project paths must be relative source paths",
+        ));
+    }
+    let mut parts = Vec::new();
+    for component in Path::new(path).components() {
+        match component {
+            std::path::Component::Normal(part) => {
+                let Some(part) = part.to_str() else {
+                    return Err(project_edit_error(
+                        "bad_request",
+                        "Canvas project paths must be UTF-8",
+                    ));
+                };
+                if is_reserved_project_path_part(part) {
+                    return Err(project_edit_error(
+                        "bad_request",
+                        "Canvas project paths cannot target reserved project directories",
+                    ));
+                }
+                parts.push(part);
+            }
+            _ => {
+                return Err(project_edit_error(
+                    "bad_request",
+                    "Canvas project paths must stay inside the project",
+                ));
+            }
+        }
+    }
+    Ok(parts.join("/"))
+}
+
+fn is_reserved_project_path_part(part: &str) -> bool {
+    matches!(part, ".git" | ".jet" | "target" | "build")
+}
+
+fn project_target_text(target: &str) -> Result<&'static str, String> {
+    match target {
+        "library" => Ok("library"),
+        "executable" => Ok("executable"),
+        "test" => Ok("test"),
+        "example" => Ok("example"),
+        "benchmark" => Ok("benchmark"),
+        _ => Err(project_edit_error(
+            "bad_request",
+            "unknown Canvas package target",
+        )),
+    }
+}
+
+fn project_dep_spec(spec: &str) -> Result<crate::Manifest::DepSpec, String> {
+    if let Some(path) = spec.strip_prefix("path@") {
+        if path.trim().is_empty() {
+            return Err(project_edit_error("bad_request", "path dependency needs a path"));
+        }
+        return Ok(crate::Manifest::DepSpec::Path {
+            path: path.to_string(),
+        });
+    }
+    if spec.starts_with("git@") {
+        return Err(project_edit_error(
+            "unsupported",
+            "Canvas project transactions need an explicit version or path dependency here",
+        ));
+    }
+    if spec.trim().is_empty() {
+        return Err(project_edit_error("bad_request", "dependency spec is empty"));
+    }
+    Ok(crate::Manifest::DepSpec::Registry(spec.to_string()))
+}
+
+fn finish_project_changes(
+    ctx: &ProjectContext,
+    request: &str,
+    op: &str,
+    mut changes: Vec<ProjectChange>,
+) -> Result<String, String> {
+    normalize_and_validate_project_changes(ctx, &mut changes)?;
+    let preview = json_bool_field(request, "preview").unwrap_or(false)
+        || op.starts_with("preview_");
+    let changed = changes.iter().any(|c| c.before != c.after);
+    let diff = changes
+        .iter()
+        .map(|c| {
+            format!(
+                "diff -- {}\n{}",
+                c.rel,
+                simple_diff(&c.before, &c.after)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    if !preview {
+        for change in &changes {
+            if change.before != change.after {
+                if let Some(parent) = change.path.parent() {
+                    fs::create_dir_all(parent)
+                        .map_err(|e| project_edit_error("io", &e.to_string()))?;
+                }
+                fs::write(&change.path, &change.after)
+                    .map_err(|e| project_edit_error("io", &e.to_string()))?;
+            }
+        }
+    }
+    let touched_files = changes
+        .iter()
+        .map(|c| {
+            let after_revision = source_revision(&c.after);
+            format!(
+                "{{\"path\":{},\"revision\":{},\"changed\":{}}}",
+                json_str(&c.rel),
+                json_str(&after_revision),
+                if c.before != c.after { "true" } else { "false" }
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let next_project_revision = if preview {
+        let mut files = ctx.files.clone();
+        for change in &changes {
+            if let Some(file) = files.iter_mut().find(|f| f.path == change.rel) {
+                file.revision = source_revision(&change.after);
+            } else {
+                files.push(ProjectFileRec {
+                    path: change.rel.clone(),
+                    revision: source_revision(&change.after),
+                    kind: project_file_kind_for_rel(&change.rel).to_string(),
+                });
+            }
+        }
+        files.sort_by(|a, b| a.path.cmp(&b.path));
+        project_revision_from_files(&files)
+    } else {
+        project_context_for_entry(&ctx.entry_path).project_revision
+    };
+    Ok(project_edit_ok(
+        op,
+        preview,
+        changed,
+        &ctx.project_revision,
+        &next_project_revision,
+        &touched_files,
+        &diff,
+    ))
+}
+
+fn normalize_and_validate_project_changes(
+    ctx: &ProjectContext,
+    changes: &mut [ProjectChange],
+) -> Result<(), String> {
+    for change in changes {
+        if change.before == change.after {
+            continue;
+        }
+        if change.rel.ends_with(&format!("/{}", crate::Syntax::PAYLOAD_FILE))
+            || change.rel == crate::Syntax::PAYLOAD_FILE
+        {
+            crate::Jetpack::PackageManifest::parse(&change.after)
+                .map_err(|e| project_edit_error("diagnostic", &format!("{:?}", e)))?;
+        } else if change.rel.ends_with(&format!("/{}", crate::Syntax::WORKSPACE_FILE))
+            || change.rel == crate::Syntax::WORKSPACE_FILE
+        {
+            crate::Jetpack::WorkspaceFile::evaluate(&change.after, &ctx.project_root)
+                .map_err(|d| project_edit_error("diagnostic", &d.what))?;
+        } else if change.rel.ends_with(&format!("/{}", crate::Syntax::ENV_FILE))
+            || change.rel == crate::Syntax::ENV_FILE
+        {
+            crate::Jetpack::ModuleEval::evaluate_env(&change.after, &ctx.project_root)
+                .map_err(|d| project_edit_error("diagnostic", &d.what))?;
+        } else if change
+            .path
+            .extension()
+            .and_then(|e| e.to_str())
+            == Some(crate::Syntax::FILE_EXT)
+        {
+            change.after = crate::format_source(&change.after).map_err(|diags| {
+                project_edit_error(
+                    "diagnostic",
+                    &crate::render_diagnostics(
+                        &change.path.display().to_string(),
+                        &change.after,
+                        &diags,
+                    ),
+                )
+            })?;
+        } else {
+            return Err(project_edit_error(
+                "bad_request",
+                "Canvas project transactions may only write Jet source truth",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn project_file_kind_for_rel(rel: &str) -> &'static str {
+    if rel.ends_with(&format!("/{}", crate::Syntax::PAYLOAD_FILE))
+        || rel == crate::Syntax::PAYLOAD_FILE
+    {
+        "manifest"
+    } else if rel.ends_with(&format!("/{}", crate::Syntax::WORKSPACE_FILE))
+        || rel == crate::Syntax::WORKSPACE_FILE
+    {
+        "workspace"
+    } else if rel.ends_with(&format!("/{}", crate::Syntax::ENV_FILE)) || rel == crate::Syntax::ENV_FILE {
+        "env"
+    } else if rel == crate::Syntax::UNIFIED_LOCK_FILE {
+        "lock"
+    } else {
+        "source"
+    }
+}
+
+fn diagnostic_json(d: &Diagnostic) -> String {
+    format!(
+        "{{\"code\":{},\"what\":{},\"why\":{},\"fix\":{}}}",
+        json_str(d.code),
+        json_str(&d.what),
+        json_str(&d.why),
+        json_str(&d.fix)
+    )
+}
+
+fn rel_path(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace(std::path::MAIN_SEPARATOR, "/")
 }
 
 fn project_checked(
@@ -5343,6 +6912,7 @@ fn canvas_preview_rename(path: &Path, src: &str, symbol: &str, to: &str) -> Resu
 
 fn canvas_actions(path: &Path, src: &str) -> Result<String, String> {
     let (_projection, index) = open_query_context(path, src)?;
+    let authority = canvas_authority_context(path);
     let mut entries = Vec::new();
     for def in index.definitions() {
         let SymbolKind::Function { params, ret } = &def.kind else {
@@ -5351,7 +6921,7 @@ fn canvas_actions(path: &Path, src: &str) -> Result<String, String> {
         if def.name == "run" {
             continue;
         }
-        entries.push(canvas_action_json(def, params, ret.as_deref()));
+        entries.push(canvas_action_json(def, params, ret.as_deref(), &authority));
     }
     entries.push(canvas_builtin_action_json(
         "print",
@@ -5359,6 +6929,7 @@ fn canvas_actions(path: &Path, src: &str) -> Result<String, String> {
         &[("value", "Any")],
         "Void",
         &["\"canvas\""],
+        &authority,
     ));
     entries.sort();
     Ok(query_ok(
@@ -5377,6 +6948,7 @@ fn canvas_action_json(
     def: &jet_semindex::SymbolDef,
     params: &[(String, String)],
     ret: Option<&str>,
+    authority: &CanvasAuthority,
 ) -> String {
     let action_id = format!("canvas.action:{}:{}", def.module_path, def.name);
     let default_args = params
@@ -5396,11 +6968,15 @@ fn canvas_action_json(
         .collect::<Vec<_>>()
         .join(",");
     format!(
-        "{{\"action_id\":{},\"kind\":\"canvas.action\",\"title\":{},\"callee\":{},\"module_path\":{},\"engine\":\"checked-tir+jit\",\"authority\":[\"canvas.source_edit:current_file\"],\"writes\":\"source_transaction_only\",\"audit\":[\"package_id\",\"version\",\"hash\",\"authority\",\"touched_files\",\"diff\",\"diagnostics\"],\"source_span\":{},\"ret\":{},\"pins\":[{}],\"default_args\":[{}]}}",
+        "{{\"action_id\":{},\"kind\":\"canvas.action\",\"title\":{},\"callee\":{},\"module_path\":{},\"engine\":\"checked-tir+jit\",\"authority\":[{}],\"package_id\":{},\"version\":{},\"touched_files\":[{}],\"writes\":\"source_transaction_only\",\"audit\":[\"package_id\",\"version\",\"hash\",\"authority\",\"touched_files\",\"diff\",\"diagnostics\"],\"source_span\":{},\"ret\":{},\"pins\":[{}],\"default_args\":[{}]}}",
         json_str(&action_id),
         json_str(&def.name),
         json_str(&def.name),
         json_str(&def.module_path),
+        json_str(&authority.grant),
+        json_str(&authority.package_id),
+        json_str(&authority.version),
+        json_str(&authority.touched_file),
         span_json(def.def_span),
         json_str(ret.unwrap_or("Void")),
         pins,
@@ -5414,6 +6990,7 @@ fn canvas_builtin_action_json(
     params: &[(&str, &str)],
     ret: &str,
     default_args: &[&str],
+    authority: &CanvasAuthority,
 ) -> String {
     let action_id = format!("canvas.action:builtin:{callee}");
     let pins = params
@@ -5433,10 +7010,14 @@ fn canvas_builtin_action_json(
         .collect::<Vec<_>>()
         .join(",");
     format!(
-        "{{\"action_id\":{},\"kind\":\"canvas.builtin\",\"title\":{},\"callee\":{},\"module_path\":\"builtin\",\"engine\":\"checked-tir+jit\",\"authority\":[\"canvas.source_edit:current_file\"],\"writes\":\"source_transaction_only\",\"audit\":[\"package_id\",\"version\",\"hash\",\"authority\",\"touched_files\",\"diff\",\"diagnostics\"],\"source_span\":null,\"ret\":{},\"pins\":[{}],\"default_args\":[{}]}}",
+        "{{\"action_id\":{},\"kind\":\"canvas.builtin\",\"title\":{},\"callee\":{},\"module_path\":\"builtin\",\"engine\":\"checked-tir+jit\",\"authority\":[{}],\"package_id\":{},\"version\":{},\"touched_files\":[{}],\"writes\":\"source_transaction_only\",\"audit\":[\"package_id\",\"version\",\"hash\",\"authority\",\"touched_files\",\"diff\",\"diagnostics\"],\"source_span\":null,\"ret\":{},\"pins\":[{}],\"default_args\":[{}]}}",
         json_str(&action_id),
         json_str(title),
         json_str(callee),
+        json_str(&authority.grant),
+        json_str(&authority.package_id),
+        json_str(&authority.version),
+        json_str(&authority.touched_file),
         json_str(ret),
         pins,
         default_args
@@ -5449,6 +7030,40 @@ fn default_arg_for_type(ty: &str) -> String {
         "String" => "\"canvas\"".to_string(),
         "Float" | "F32" | "F64" => "1.0".to_string(),
         _ => "1".to_string(),
+    }
+}
+
+struct CanvasAuthority {
+    grant: String,
+    package_id: String,
+    version: String,
+    touched_file: String,
+}
+
+fn canvas_authority_context(path: &Path) -> CanvasAuthority {
+    let dir = path.parent().unwrap_or_else(|| Path::new("."));
+    if let Some(root) = crate::Loader::find_manifest_root(dir) {
+        let manifest_path = root.join(crate::Syntax::PAYLOAD_FILE);
+        if let Ok(raw) = fs::read_to_string(&manifest_path) {
+            if let Ok(manifest) = crate::Jetpack::PackageManifest::parse(&raw) {
+                return CanvasAuthority {
+                    grant: "canvas.source_edit:package".to_string(),
+                    package_id: manifest.package.name,
+                    version: manifest.package.version,
+                    touched_file: rel_path(&root, path),
+                };
+            }
+        }
+    }
+    CanvasAuthority {
+        grant: "canvas.source_edit:single_file".to_string(),
+        package_id: "single-file".to_string(),
+        version: "unpackaged".to_string(),
+        touched_file: path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("current.jet")
+            .to_string(),
     }
 }
 
@@ -6367,14 +7982,25 @@ fn preview_ok(before: &str, after: &str) -> String {
     )
 }
 
-fn canvas_action_preview_ok(before: &str, after: &str, action_id: &str, callee: &str) -> String {
+fn canvas_action_preview_ok(
+    path: &Path,
+    before: &str,
+    after: &str,
+    action_id: &str,
+    callee: &str,
+) -> String {
+    let authority = canvas_authority_context(path);
     format!(
-        "{{\"protocol\":\"jet.canvas.action\",\"schema_version\":{},\"ok\":true,\"changed\":{},\"action_id\":{},\"callee\":{},\"engine\":\"checked-tir+jit\",\"execution\":\"preview\",\"writes\":\"source_transaction_only\",\"authority\":[\"canvas.source_edit:current_file\"],\"audit\":{{\"package_id\":\"local-source\",\"version\":\"workspace\",\"hash\":{},\"touched_files\":[\"current_file\"],\"diagnostics\":[]}},\"diff\":{},\"after_revision\":{}}}",
+        "{{\"protocol\":\"jet.canvas.action\",\"schema_version\":{},\"ok\":true,\"changed\":{},\"action_id\":{},\"callee\":{},\"engine\":\"checked-tir+jit\",\"execution\":\"preview\",\"writes\":\"source_transaction_only\",\"authority\":[{}],\"audit\":{{\"package_id\":{},\"version\":{},\"hash\":{},\"touched_files\":[{}],\"diagnostics\":[]}},\"diff\":{},\"after_revision\":{}}}",
         ACTION_SCHEMA_VERSION,
         if before != after { "true" } else { "false" },
         json_str(action_id),
         json_str(callee),
+        json_str(&authority.grant),
+        json_str(&authority.package_id),
+        json_str(&authority.version),
         json_str(&source_revision(after)),
+        json_str(&authority.touched_file),
         json_str(&simple_diff(before, after)),
         json_str(&source_revision(after))
     )
@@ -6544,6 +8170,38 @@ fn query_error(kind: &str, message: &str) -> String {
     format!(
         "{{\"protocol\":\"jet.canvas.query\",\"schema_version\":{},\"ok\":false,\"kind\":{},\"message\":{}}}",
         QUERY_SCHEMA_VERSION,
+        json_str(kind),
+        json_str(message)
+    )
+}
+
+fn project_edit_ok(
+    op: &str,
+    preview: bool,
+    changed: bool,
+    before_revision: &str,
+    after_revision: &str,
+    touched_files: &str,
+    diff: &str,
+) -> String {
+    format!(
+        "{{\"protocol\":\"jet.canvas.project.edit\",\"schema_version\":{},\"ok\":true,\"op\":{},\"preview\":{},\"changed\":{},\"project_revision\":{},\"after_project_revision\":{},\"writes\":{},\"authority\":[\"canvas.source_edit:project\"],\"audit\":{{\"touched_files\":[{}],\"diagnostics\":[]}},\"diff\":{}}}",
+        PROJECT_SCHEMA_VERSION,
+        json_str(op),
+        if preview { "true" } else { "false" },
+        if changed { "true" } else { "false" },
+        json_str(before_revision),
+        json_str(after_revision),
+        if preview { "\"preview_only\"" } else { "\"source_transaction\"" },
+        touched_files,
+        json_str(diff)
+    )
+}
+
+fn project_edit_error(kind: &str, message: &str) -> String {
+    format!(
+        "{{\"protocol\":\"jet.canvas.project.edit\",\"schema_version\":{},\"ok\":false,\"kind\":{},\"message\":{}}}",
+        PROJECT_SCHEMA_VERSION,
         json_str(kind),
         json_str(message)
     )
@@ -6900,6 +8558,22 @@ fn validate_query_ident(name: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn validate_ident_for_project(name: &str) -> Result<(), String> {
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return Err(project_edit_error("bad_request", "empty identifier"));
+    };
+    if (!first.is_ascii_alphabetic() && first != '_')
+        || !chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+    {
+        return Err(project_edit_error(
+            "bad_request",
+            "identifier is not a Jet package name",
+        ));
+    }
+    Ok(())
+}
+
 fn validate_qualified_name(name: &str) -> Result<(), String> {
     for part in name.split('.') {
         validate_ident(part)?;
@@ -7197,6 +8871,11 @@ fn required_query_string(text: &str, key: &str) -> Result<String, String> {
         .ok_or_else(|| query_error("bad_request", &format!("missing `{key}`")))
 }
 
+fn required_project_string(text: &str, key: &str) -> Result<String, String> {
+    json_string_field(text, key)
+        .ok_or_else(|| project_edit_error("bad_request", &format!("missing `{key}`")))
+}
+
 fn json_string_field(text: &str, key: &str) -> Option<String> {
     let needle = format!("\"{key}\"");
     let pos = text.find(&needle)?;
@@ -7204,6 +8883,21 @@ fn json_string_field(text: &str, key: &str) -> Option<String> {
     let colon = rest.find(':')?;
     let rest = &rest[colon + 1..];
     parse_json_string(rest.trim_start()).map(|(s, _)| s)
+}
+
+fn json_bool_field(text: &str, key: &str) -> Option<bool> {
+    let needle = format!("\"{key}\"");
+    let pos = text.find(&needle)?;
+    let rest = &text[pos + needle.len()..];
+    let colon = rest.find(':')?;
+    let rest = rest[colon + 1..].trim_start();
+    if rest.starts_with("true") {
+        Some(true)
+    } else if rest.starts_with("false") {
+        Some(false)
+    } else {
+        None
+    }
 }
 
 fn json_usize_field(text: &str, key: &str) -> Option<usize> {
@@ -7253,6 +8947,87 @@ fn json_usize_array(text: &str, key: &str) -> Vec<usize> {
         rest = rest.trim_start();
         if rest.starts_with(',') {
             rest = &rest[1..];
+        }
+    }
+    out
+}
+
+fn json_array_body<'a>(text: &'a str, key: &str) -> Option<&'a str> {
+    let needle = format!("\"{key}\"");
+    let pos = text.find(&needle)?;
+    let rest = &text[pos + needle.len()..];
+    let colon = rest.find(':')?;
+    let rest = rest[colon + 1..].trim_start();
+    let bytes = rest.as_bytes();
+    if bytes.first().copied()? != b'[' {
+        return None;
+    }
+    let mut depth = 0i32;
+    let mut in_string = false;
+    let mut escaped = false;
+    for (i, b) in bytes.iter().copied().enumerate() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if b == b'\\' {
+                escaped = true;
+            } else if b == b'"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match b {
+            b'"' => in_string = true,
+            b'[' => depth += 1,
+            b']' => {
+                depth -= 1;
+                if depth == 0 {
+                    return rest.get(1..i);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn json_object_bodies(text: &str) -> Vec<&str> {
+    let bytes = text.as_bytes();
+    let mut out = Vec::new();
+    let mut start = None;
+    let mut depth = 0i32;
+    let mut in_string = false;
+    let mut escaped = false;
+    for (i, b) in bytes.iter().copied().enumerate() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if b == b'\\' {
+                escaped = true;
+            } else if b == b'"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match b {
+            b'"' => in_string = true,
+            b'{' => {
+                if depth == 0 {
+                    start = Some(i + 1);
+                }
+                depth += 1;
+            }
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    if let Some(s) = start.take() {
+                        if let Some(body) = text.get(s..i) {
+                            out.push(body);
+                        }
+                    }
+                }
+            }
+            _ => {}
         }
     }
     out
@@ -7351,6 +9126,10 @@ fn json_strs(values: &[String]) -> String {
 
 fn json_str(s: &str) -> String {
     format!("\"{}\"", json_escape(s))
+}
+
+fn json_optional_str(value: Option<&str>) -> String {
+    value.map(json_str).unwrap_or_else(|| "null".to_string())
 }
 
 fn json_escape(s: &str) -> String {

@@ -366,6 +366,8 @@ fn synthesize_computed_field_getter(f: &Field) -> Func {
         unsafe_span: None,
         is_pure: false,
         is_reactive: false,
+        is_replayable: false,
+        replayable_span: None,
         is_must_use: false,
         must_use_span: None,
         is_inline: false,

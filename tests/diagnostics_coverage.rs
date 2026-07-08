@@ -266,6 +266,34 @@ fn snapshot_codes() -> BTreeSet<String> {
     out
 }
 
+fn rendered_snapshot_texts() -> Vec<(PathBuf, String)> {
+    let mut out = Vec::new();
+    for dir in [
+        root().join("tests/ui"),
+        root().join("tests/ui_lint"),
+        root().join("tests/fixtures/jetpack-diagnostics"),
+    ] {
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
+        for e in entries.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                let sub = p.join("stderr");
+                if sub.is_file() {
+                    out.push((sub.clone(), read(&sub)));
+                }
+            } else if matches!(
+                p.extension().and_then(|x| x.to_str()),
+                Some("stderr" | "warn")
+            ) {
+                out.push((p.clone(), read(&p)));
+            }
+        }
+    }
+    out
+}
+
 /// Extract codes from Rust test assertions like `.contains("E1234")` or
 /// `d.code == "E1234"` or `assert_eq!(diag.code, "E1234")`.
 fn extract_assert_codes(text: &str) -> Vec<String> {
@@ -488,6 +516,67 @@ fn i2_rustc_codes_do_not_leak_as_jet_diagnostics() {
         );
         let _ = (in_ffi, &allowed_fn_context, &bracketed);
     }
+}
+
+#[test]
+fn diagnostic_snapshots_do_not_leak_runtime_or_backend_voice() {
+    let banned = [
+        "thread 'main' panicked",
+        "panicked at",
+        "stack backtrace:",
+        "target/debug",
+        ".rs:",
+        "rustc rejected generated code",
+    ];
+    let mut failures = Vec::new();
+    for (path, text) in rendered_snapshot_texts() {
+        for needle in banned {
+            if text.contains(needle) && !allowed_backend_voice_snapshot(&path, &text, needle) {
+                failures.push(format!("{} contains `{}`", path.display(), needle));
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "user-facing diagnostics leaked runtime/backend voice:\n{}",
+        failures.join("\n")
+    );
+}
+
+#[test]
+fn runtime_user_error_codes_use_jet_panic_voice() {
+    let mut failures = Vec::new();
+    for rel in [
+        "crates/jet-codegen/src/Prelude/Core.rs",
+        "crates/jet-codegen/src/Prelude/CoreLib.rs",
+    ] {
+        let path = root().join(rel);
+        let text = read(&path);
+        for (idx, line) in text.lines().enumerate() {
+            if line.contains("panic!(\"E") {
+                failures.push(format!(
+                    "{rel}:{} uses raw panic for a Jet error code",
+                    idx + 1
+                ));
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "runtime user errors must use Jet-owned panic/report helpers:\n{}",
+        failures.join("\n")
+    );
+}
+
+fn allowed_backend_voice_snapshot(path: &std::path::Path, text: &str, needle: &str) -> bool {
+    let p = path.to_string_lossy();
+    if p.ends_with("ffi_bad_path.stderr") {
+        return needle == ".rs:" || needle == "rustc rejected generated code";
+    }
+    if p.ends_with("os_target_unmatched_call.stderr") && text.contains("raw rustc") {
+        return true;
+    }
+    false
 }
 
 // ---------------------------------------------------------------------------

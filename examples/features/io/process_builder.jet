@@ -1,0 +1,16 @@
+use core.process as process
+
+fn run() {
+    result :: process.cmd(["echo", "process-api"]).stdout_capture().stderr_capture().timeout_ms(1000).output_limit(1024).run() ?? panic("process failed")
+    print(result.success)
+    print(result.output.trim())
+
+    piped :: process.pipeline([["echo", "pipeline-api"], ["cat"]]) ?? panic("pipeline failed")
+    print(piped.output.trim())
+
+    child :: process.cmd(["echo", "spawn-api"]).stdout_capture().spawn() ?? panic("spawn failed")
+    line :: child.read_stdout_line() ?? panic("read failed")
+    print((line ?? "").trim())
+    waited :: child.wait() ?? panic("wait failed")
+    print(waited.success)
+}

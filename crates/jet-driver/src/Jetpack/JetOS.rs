@@ -1216,6 +1216,7 @@ fn run_kernel_bootstrap_builder(
         .env("JETOS_KERNEL_OUT", out.join("boot"))
         .env("JETOS_KERNEL_SOURCE", out.join("source"))
         .env("JETOS_KERNEL_PACKAGE", out)
+        .envs(default_cachyos_kernel_env())
         .output();
     let output = match output {
         Ok(output) => output,
@@ -1243,6 +1244,54 @@ fn run_kernel_bootstrap_builder(
         return false;
     }
     true
+}
+
+fn default_cachyos_kernel_env() -> Vec<(&'static str, PathBuf)> {
+    let mut env = Vec::new();
+    if std::env::var_os("JETOS_CACHYOS_KERNEL").is_none() {
+        if let Some(kernel) = first_existing_path(&[
+            "/run/booted-system/kernel",
+            "/run/current-system/kernel",
+        ]) {
+            env.push(("JETOS_CACHYOS_KERNEL", kernel));
+        }
+    }
+    if std::env::var_os("JETOS_CACHYOS_INITRD").is_none() {
+        if let Some(initrd) = first_existing_path(&[
+            "/run/booted-system/initrd",
+            "/run/current-system/initrd",
+        ]) {
+            env.push(("JETOS_CACHYOS_INITRD", initrd));
+        }
+    }
+    if std::env::var_os("JETOS_CACHYOS_MODULES").is_none() {
+        if let Some(modules) = first_existing_path(&[
+            "/run/booted-system/kernel-modules",
+            "/run/current-system/kernel-modules",
+        ]) {
+            env.push((
+                "JETOS_CACHYOS_MODULES",
+                kernel_module_tree(&modules).unwrap_or(modules),
+            ));
+        }
+    }
+    env
+}
+
+fn kernel_module_tree(modules: &Path) -> Option<PathBuf> {
+    let lib_modules = modules.join("lib/modules");
+    fs::read_dir(lib_modules)
+        .ok()?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .find(|path| path.join("kernel").is_dir())
+}
+
+fn first_existing_path(paths: &[&str]) -> Option<PathBuf> {
+    paths
+        .iter()
+        .map(PathBuf::from)
+        .find(|path| path.exists())
 }
 
 fn validate_boot_payloads(
@@ -1615,7 +1664,84 @@ fn write_root_closure(dir: &Path, realized: &[Store::StoreEntry]) -> std::io::Re
             link_or_copy_file(&src, &dst)?;
         }
     }
+    write_jetos_toolchain(dir, &sw_bin, &mut manifest)?;
     fs::write(dir.join("sw/closure.txt"), manifest)
+}
+
+fn write_jetos_toolchain(
+    dir: &Path,
+    sw_bin: &Path,
+    manifest: &mut String,
+) -> std::io::Result<()> {
+    let candidates = jet_toolchain_candidates();
+    for name in ["jet", "jetpack", "jetos"] {
+        let Some(src) = candidates.iter().find(|path| {
+            path.file_name()
+                .and_then(|part| part.to_str())
+                .map(|part| part == name)
+                .unwrap_or(false)
+        }) else {
+            continue;
+        };
+        let dst = sw_bin.join(name);
+        copy_file_replace(src, &dst)?;
+        make_executable(&dst)?;
+        manifest.push_str(&format!("jetos-toolchain {name} {}\n", src.display()));
+        copy_toolchain_runtime_deps(dir, src)?;
+    }
+    Ok(())
+}
+
+fn jet_toolchain_candidates() -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            dirs.push(dir.to_path_buf());
+            if dir.file_name().and_then(|part| part.to_str()) == Some("deps") {
+                if let Some(parent) = dir.parent() {
+                    dirs.push(parent.to_path_buf());
+                }
+            }
+        }
+    }
+    dirs.push(PathBuf::from("target/debug"));
+    dirs.push(PathBuf::from("target/release"));
+
+    let mut out = Vec::new();
+    let mut seen = BTreeSet::new();
+    for dir in dirs {
+        for name in ["jet", "jetpack", "jetos"] {
+            let path = dir.join(name);
+            if path.is_file() && seen.insert(path.clone()) {
+                out.push(path);
+            }
+        }
+    }
+    out
+}
+
+fn copy_toolchain_runtime_deps(dir: &Path, binary: &Path) -> std::io::Result<()> {
+    for dep in ldd_dependency_paths(binary)? {
+        copy_absolute_runtime_file(dir, &dep)?;
+        if let Ok(real) = fs::canonicalize(&dep) {
+            copy_absolute_runtime_file(dir, &real)?;
+        }
+    }
+    Ok(())
+}
+
+fn copy_absolute_runtime_file(dir: &Path, src: &Path) -> std::io::Result<()> {
+    if !src.is_absolute() || !src.is_file() {
+        return Ok(());
+    }
+    let Ok(relative) = src.strip_prefix("/") else {
+        return Ok(());
+    };
+    let dst = dir.join(relative);
+    if let Some(parent) = dst.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    copy_file_replace(src, &dst)
 }
 
 fn write_studio_app_projection(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
@@ -4744,6 +4870,17 @@ modprobe ata_piix 2>/dev/null || true
 modprobe sd_mod 2>/dev/null || true
 modprobe sr_mod 2>/dev/null || true
 modprobe cdrom 2>/dev/null || true
+insmod /jetos/modules/serio.ko.xz 2>/dev/null || true
+insmod /jetos/modules/i8042.ko.xz 2>/dev/null || true
+insmod /jetos/modules/libps2.ko.xz 2>/dev/null || true
+insmod /jetos/modules/atkbd.ko.xz 2>/dev/null || true
+insmod /jetos/modules/hid-generic.ko.xz 2>/dev/null || true
+insmod /jetos/modules/usbhid.ko.xz 2>/dev/null || true
+insmod /jetos/modules/uhci-hcd.ko.xz 2>/dev/null || true
+insmod /jetos/modules/ehci-hcd.ko.xz 2>/dev/null || true
+insmod /jetos/modules/xhci-hcd.ko.xz 2>/dev/null || true
+modprobe atkbd 2>/dev/null || true
+modprobe usbhid 2>/dev/null || true
 cmdline="$(cat /proc/cmdline 2>/dev/null || true)"
 case "$cmdline" in
   *jetos.mode=install*)
@@ -4765,6 +4902,7 @@ case "$cmdline" in
     poweroff -f 2>/dev/null || halt -f 2>/dev/null || exit 0
     ;;
   *jetos.mode=run*)
+    set +e
     mkdir -p /sysroot
     tries=0
     while [ ! -e /dev/vda ] && [ ! -e /dev/vda2 ] && [ ! -e /dev/sda ] && [ ! -e /dev/sda2 ] && [ "$tries" -lt 30 ]; do
@@ -4782,36 +4920,100 @@ case "$cmdline" in
         echo "jetos run: missing installed terminal fallback"
         exec /bin/sh
     fi
+    mkdir -p /run
+    rm -f /run/current-system
+    ln -s "$system" /run/current-system
     export JETOS_SYSTEM_ROOT="$system"
     export PATH="$system/sw/bin:$PATH"
     if [ -r "$system/etc/profile" ]; then
         . "$system/etc/profile"
     fi
+    run_external() {
+        "$@" &
+        child=$!
+        wait "$child"
+        printf '\017'
+    }
+    tty=/dev/tty1
     case "$cmdline" in
-      *console=ttyS0*)
-        if [ -e /dev/ttyS0 ]; then
-            if command -v setsid >/dev/null 2>&1; then
-                exec setsid -c /bin/sh -i < /dev/ttyS0 > /dev/ttyS0 2>&1
-            fi
-            exec /bin/sh -i < /dev/ttyS0 > /dev/ttyS0 2>&1
-        fi
-        ;;
+      *console=ttyS0*) tty=/dev/ttyS0 ;;
     esac
-    if [ -e /dev/tty1 ]; then
-        if command -v setsid >/dev/null 2>&1; then
-            exec setsid -c /bin/sh -i < /dev/tty1 > /dev/tty1 2>&1
-        fi
-        exec /bin/sh -i < /dev/tty1 > /dev/tty1 2>&1
+    if [ ! -e "$tty" ]; then
+        tty=/dev/console
     fi
-    if [ -e /dev/ttyS0 ]; then
-        if command -v setsid >/dev/null 2>&1; then
-            exec setsid -c /bin/sh -i < /dev/ttyS0 > /dev/ttyS0 2>&1
-        fi
-        exec /bin/sh -i < /dev/ttyS0 > /dev/ttyS0 2>&1
-    fi
-    echo "jetos run: opened installed generation at $JETOS_SYSTEM_ROOT"
-    echo "jetos run: try: ls /sysroot/run/current-system ; cat /sysroot/run/current-system/studio/app.json"
-    exec /bin/sh -i
+    {
+        printf '\017\033[2J\033[H'
+        echo "JetOS {host}"
+        echo "installed generation: $JETOS_SYSTEM_ROOT"
+        echo "try: ls /run/current-system ; cat /run/current-system/studio/app.json"
+        while true; do
+            printf '\017JetOS {host} / # '
+            IFS= read -r line || break
+            case "$line" in
+              exit|logout) break ;;
+              reset|clear) printf '\017\033[2J\033[H' ;;
+              jet) echo "jetos: bare jet starts the REPL; run 'jet repl' explicitly, or 'jet --help'" ;;
+              cd' '*) cd "${line#cd }" 2>/dev/null || echo "cd: ${line#cd }: no such directory" ;;
+              pwd) pwd ;;
+              ls|ls' '*)
+                set -- $line
+                shift
+                if [ "$#" -eq 0 ]; then
+                    set -- .
+                fi
+                for target in "$@"; do
+                    if [ -d "$target" ]; then
+                        for item in "$target"/*; do
+                            [ -e "$item" ] && printf '%s\n' "${item##*/}"
+                        done
+                    elif [ -e "$target" ]; then
+                        printf '%s\n' "$target"
+                    else
+                        echo "ls: $target: no such file or directory"
+                    fi
+                done
+                ;;
+              cat' '*)
+                set -- $line
+                shift
+                for file in "$@"; do
+                    if [ ! -r "$file" ]; then
+                        echo "cat: $file: no such file"
+                        continue
+                    fi
+                    while IFS= read -r text || [ -n "$text" ]; do
+                        printf '%s\n' "$text"
+                    done < "$file"
+                done
+                ;;
+              echo|echo' '*) printf '%s\n' "${line#echo }" ;;
+              '') ;;
+              *)
+                set -- $line
+                cmd=${1:-}
+                if [ -z "$cmd" ]; then
+                    continue
+                fi
+                shift
+                if command -v "$cmd" >/dev/null 2>&1; then
+                    run_external "$cmd" "$@"
+                elif [ -x "$system/sw/bin/$cmd" ]; then
+                    run_external "$system/sw/bin/$cmd" "$@"
+                elif [ -x "/jetos/tools/bin/$cmd" ]; then
+                    run_external "/jetos/tools/bin/$cmd" "$@"
+                elif [ -x "/bin/$cmd" ]; then
+                    run_external "/bin/$cmd" "$@"
+                elif [ -x "$cmd" ]; then
+                    run_external "$cmd" "$@"
+                else
+                    echo "$cmd: command not found"
+                fi
+                ;;
+            esac
+        done
+        echo "JetOS console closed"
+    } < "$tty" > "$tty" 2>&1
+    poweroff -f 2>/dev/null || halt -f 2>/dev/null || exec /bin/sh
     ;;
 esac
 mkdir -p /sysroot
@@ -4852,6 +5054,17 @@ exec /bin/sh /jetos/install.sh
             fs::read(gen.path.join("boot/modules/nls_cp437.ko.xz")).ok(),
         ),
     ];
+    let input_modules = [
+        "serio.ko.xz",
+        "i8042.ko.xz",
+        "libps2.ko.xz",
+        "atkbd.ko.xz",
+        "hid-generic.ko.xz",
+        "usbhid.ko.xz",
+        "uhci-hcd.ko.xz",
+        "ehci-hcd.ko.xz",
+        "xhci-hcd.ko.xz",
+    ];
     let mut entries = vec![
         OwnedCpioEntry::dir("jetos"),
         OwnedCpioEntry::dir("jetos/modules"),
@@ -4888,6 +5101,16 @@ exec /bin/sh /jetos/install.sh
             ));
         }
     }
+    for name in input_modules {
+        if let Ok(bytes) = fs::read(gen.path.join("boot/modules").join(name)) {
+            entries.push(OwnedCpioEntry::file(
+                &format!("jetos/modules/{name}"),
+                0o100644,
+                bytes,
+            ));
+        }
+    }
+    entries.extend(generation_tree_cpio_entries(&gen.path.join("nix"), "nix")?);
     entries.extend(installer_tool_overlay_entries()?);
     let overlay = cpio_newc_owned(&entries);
     let initrd_bytes = fs::read(initrd)?;
@@ -4917,6 +5140,42 @@ exec /bin/sh /jetos/install.sh
     use std::io::Write;
     let mut file = fs::OpenOptions::new().append(true).open(initrd)?;
     file.write_all(&overlay)
+}
+
+fn generation_tree_cpio_entries(src: &Path, prefix: &str) -> std::io::Result<Vec<OwnedCpioEntry>> {
+    let mut entries = Vec::new();
+    if !src.is_dir() {
+        return Ok(entries);
+    }
+    add_generation_tree_cpio_entries(src, prefix, &mut entries)?;
+    Ok(entries)
+}
+
+fn add_generation_tree_cpio_entries(
+    src: &Path,
+    prefix: &str,
+    entries: &mut Vec<OwnedCpioEntry>,
+) -> std::io::Result<()> {
+    entries.push(OwnedCpioEntry::dir(prefix));
+    let mut children = fs::read_dir(src)?
+        .filter_map(Result::ok)
+        .collect::<Vec<_>>();
+    children.sort_by_key(|entry| entry.file_name());
+    for child in children {
+        let path = child.path();
+        let name = format!("{prefix}/{}", child.file_name().to_string_lossy());
+        let meta = fs::metadata(&path)?;
+        if meta.is_dir() {
+            add_generation_tree_cpio_entries(&path, &name, entries)?;
+        } else if meta.is_file() {
+            entries.push(OwnedCpioEntry::file(
+                &name,
+                host_cpio_file_mode(&path, 0o100644),
+                fs::read(&path)?,
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn installer_tool_overlay_entries() -> std::io::Result<Vec<OwnedCpioEntry>> {
@@ -5601,8 +5860,10 @@ fn require_vm_run_proof(
     let harness_text = fs::read_to_string(harness)
         .map_err(|e| format!("reading `{}` failed: {e}", harness.display()))?;
     require_json_field(&harness_text, "state", "guest-passed")?;
+    require_json_field(&harness_text, "host", &system.name)?;
+    require_json_field(&harness_text, "generation", &gen.name)?;
     require_json_field(&harness_text, "disk", disk)?;
-    finalize_vm_guest_proof(gen, system, disk, media_proof, harness)?;
+    require_json_field(&harness_text, "media_proof", &media_proof.display().to_string())?;
     Ok(())
 }
 
@@ -5794,11 +6055,7 @@ fn qemu_interactive_run_command(
 ) -> VmCommand {
     let kernel = boot_dir.join("kernel").display().to_string();
     let initrd = boot_dir.join("initrd").display().to_string();
-    let console = if qemu_has_local_display() {
-        "tty0"
-    } else {
-        "ttyS0"
-    };
+    let console = "tty0";
     let cmdline = format!(
         "console={console} rdinit=/jetos/init init=/jetos/init jetos.mode=run jetos.host={host} jetos.generation={generation} root=LABEL=jetos-root rw"
     );
@@ -5806,6 +6063,8 @@ fn qemu_interactive_run_command(
         "qemu-system-x86_64".to_string(),
         "-m".to_string(),
         "2048".to_string(),
+        "-cpu".to_string(),
+        "max".to_string(),
     ];
     if qemu_has_local_display() {
         argv.extend([
@@ -5819,7 +6078,7 @@ fn qemu_interactive_run_command(
             "-display".to_string(),
             "vnc=127.0.0.1:0,to=99".to_string(),
             "-serial".to_string(),
-            "stdio".to_string(),
+            "none".to_string(),
         ]);
     }
     argv.extend([
@@ -5849,6 +6108,9 @@ fn qemu_interactive_run_command(
 }
 
 fn qemu_has_local_display() -> bool {
+    if std::env::var_os("JETOS_QEMU_VNC").is_some() {
+        return false;
+    }
     std::env::var_os("DISPLAY").is_some() || std::env::var_os("WAYLAND_DISPLAY").is_some()
 }
 

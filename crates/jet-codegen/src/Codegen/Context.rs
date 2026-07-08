@@ -152,7 +152,7 @@ pub(crate) struct Cx {
     pub(crate) active_os: crate::Syntax::OsTarget,
 }
 
-pub(crate) const MOD_USE: &str = "use super::{JetShow, JetDisplay, JetDebug, JetArith, jet_panic, jet_panic_rich, jet_trace_err, jet_index_vec, jet_unpack_vec, jet_slice_vec, jet_index_map, jet_map_insert, jet_list_remove, jet_char_len, jet_string_split, jet_string_lines, jet_string_after, jet_string_before, jet_string_slice, jet_list_map, jet_list_map_mut, jet_list_filter, jet_list_each, jet_list_each_ref, jet_list_each_mut, jet_list_find, jet_list_any, jet_list_all, jet_list_sort_by, jet_list_reduce, jet_map_each, jet_list_take, jet_list_skip, jet_list_step_by, jet_list_dedup, jet_list_chunks, jet_list_windows, jet_list_take_while, jet_list_skip_while, jet_list_flat_map, jet_list_scan, jet_list_fold, jet_list_position, jet_list_min_by, jet_list_max_by, jet_list_group_by, jet_list_partition};\n\n";
+pub(crate) const MOD_USE: &str = "use super::{JetShow, JetDisplay, JetDebug, JetArith, jet_panic, jet_panic_rich, jet_trace_err, jet_index_vec, jet_unpack_vec, jet_slice_vec, jet_index_map, jet_map_insert, jet_list_remove, jet_char_len, jet_string_split, jet_string_lines, jet_string_after, jet_string_before, jet_string_slice, jet_list_map, jet_list_map_mut, jet_list_filter, jet_list_each, jet_list_each_ref, jet_list_each_mut, jet_list_find, jet_list_any, jet_list_all, jet_list_sort_by, jet_list_reduce, jet_map_each, jet_list_take, jet_list_skip, jet_list_step_by, jet_list_dedup, jet_list_chunks, jet_list_windows, jet_list_sum, jet_list_product, jet_list_flatten, jet_list_intersperse, jet_list_count_by, jet_list_take_while, jet_list_skip_while, jet_list_flat_map, jet_list_scan, jet_list_fold, jet_list_position, jet_list_min_by, jet_list_max_by, jet_list_group_by, jet_list_partition};\n\n";
 
 /// D-ITER-HOOK: metadata for zero-copy `for x in mytype` lowering.
 #[derive(Debug, Clone)]
@@ -186,6 +186,8 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         n if n == Syntax::TYPE_IO_ERROR || n == "IoError" => Some("IoError"),
         n if n == Syntax::TYPE_UTF8_ERROR || n == "Utf8Error" => Some("Utf8Error"),
         "ProcessResult" => Some("ProcessResult"),
+        "ProcessSpec" => Some("ProcessSpec"),
+        "ProcessChild" => Some("ProcessChild"),
         "Stopwatch" => Some("Stopwatch"),
         // D-DET1: deterministic injected capability handles.
         "Clock" => Some("Clock"),
@@ -194,15 +196,40 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         "Solver" => Some("Solver"),
         // D-DET-CAPAPI: deterministic `Duration` value.
         "Duration" => Some("Duration"),
+        "Instant" => Some("JetInstant"),
+        "Date" | "LocalDate" => Some("JetDate"),
+        "LocalTime" => Some("JetLocalTime"),
+        "DateTime" => Some("JetDateTime"),
+        "Period" => Some("JetPeriod"),
+        "Zone" => Some("JetZone"),
+        "ZonedDateTime" => Some("JetZonedDateTime"),
+        "Url" => Some("JetUrl"),
+        "Mime" => Some("JetMime"),
+        "Regex" => Some("JetRegex"),
+        "RegexFlags" => Some("RegexFlags"),
+        "Match" => Some("JetRegexMatch"),
         // D-BIGINT1 / D-DECIMAL1: precise numerics.
         "BigInt" => Some("JetBigInt"),
         "Decimal" => Some("JetDecimal"),
         "Closed" => Some("Closed"),
         // D-LSDIR1=A: fs.list_dir returns [DirEntry].
         "DirEntry" => Some("DirEntry"),
+        // D-FSOPS1 / D-WATCH-SCOPE1: typed filesystem and watcher values.
+        "Stat" => Some("Stat"),
+        "WalkEntry" => Some("WalkEntry"),
+        "WatchEvent" => Some("WatchEvent"),
+        "WatchHandle" => Some("WatchHandle"),
+        "WatchSet" => Some("WatchSet"),
+        "TempDir" => Some("TempDir"),
+        "TempFile" => Some("TempFile"),
+        "FileLock" => Some("FileLock"),
         // D-DATA-SURFACE1=A / D-DATA-STATUS1=A: core.data summary/status values.
         "DataGroup" => Some("DataGroup"),
         "DataStatus" => Some("DataStatus"),
+        "DataSummary" => Some("DataSummary"),
+        // D-LOGTRACE1=A: structured logging values.
+        "LogField" => Some("LogField"),
+        "LogSpan" => Some("LogSpan"),
         // D-SERDE2: the format-agnostic value tree + typed-decode error live in jet_std.
         "DataTree" => Some("DataTree"),
         "DecodeError" => Some("DecodeError"),
@@ -263,6 +290,9 @@ pub(crate) fn file_handle_rust_type(name: &str) -> Option<&'static str> {
         // D-STDIN1=A: stdin handle types; StdinLines is an internal sema marker.
         "StdinHandle" => Some("JetStdinReader"),
         "StdinLines" => Some("()"),
+        // D-COREIO1=A: standard stream handles.
+        "Stdout" => Some("JetStdout"),
+        "Stderr" => Some("JetStderr"),
         // D-PATHFS1: typed path handle.
         "Path" => Some("JetPath"),
         // D-DBDRIVER1: the SQLite connection handle wrapper.
@@ -305,6 +335,14 @@ pub(crate) fn net_handle_rust_type(name: &str) -> Option<&'static str> {
     match name {
         "TcpListener" => Some("JetTcpListener"),
         "TcpStream" => Some("JetTcpStream"),
+        "IpAddr" => Some("JetIpAddr"),
+        "SocketAddr" => Some("JetSocketAddr"),
+        "UdpSocket" => Some("JetUdpSocket"),
+        "UdpPacket" => Some("JetUdpPacket"),
+        "DnsSrv" => Some("JetDnsSrv"),
+        "UnixListener" => Some("JetUnixListener"),
+        "UnixStream" => Some("JetUnixStream"),
+        "TlsStream" => Some("JetTlsStream"),
         "HttpRequest" => Some("JetHttpRequest"),
         "HttpResponse" => Some("JetHttpResponse"),
         "HttpRouter" => Some("JetHttpRouter"),
@@ -483,7 +521,20 @@ impl Cx {
             Type::Named(name) if name == "ReservoirSampler" => "JetReservoirSampler".to_string(),
             // D-TIMEDEPTH1=A: civil-time types → opaque Rust structs.
             Type::Named(name) if name == "Date" => "JetDate".to_string(),
+            Type::Named(name) if name == "LocalDate" => "JetDate".to_string(),
+            Type::Named(name) if name == "LocalTime" => "JetLocalTime".to_string(),
             Type::Named(name) if name == "DateTime" => "JetDateTime".to_string(),
+            Type::Named(name) if name == "Instant" => "JetInstant".to_string(),
+            Type::Named(name) if name == "Period" => "JetPeriod".to_string(),
+            Type::Named(name) if name == "Zone" => "JetZone".to_string(),
+            Type::Named(name) if name == "ZonedDateTime" => "JetZonedDateTime".to_string(),
+            // D-URL1=A: URL/MIME values live in the corelib prelude module.
+            Type::Named(name) if name == "Url" => {
+                format!("{}jet_std::JetUrl", self.root_prefix)
+            }
+            Type::Named(name) if name == "Mime" => {
+                format!("{}jet_std::JetMime", self.root_prefix)
+            }
             // D-NETDEP1=A / D-HTTPLIB1=A: HTTP types → opaque Rust structs.
             Type::Named(name) if name == "HttpClientReq" => "JetHttpClientReq".to_string(),
             Type::Named(name) if name == "HttpClientResp" => "JetHttpClientResp".to_string(),
@@ -497,9 +548,6 @@ impl Cx {
             Type::Named(name) if name == "ParseError" && !self.type_names.contains(name) => {
                 "String".to_string()
             }
-            // D-REGEX1: a regex `Match` is a list of capture groups (index 0 = whole
-            // match), each `Some` if it participated. `.group(n)` is plain indexing.
-            Type::Named(name) if name == "Match" => "Vec<Option<String>>".to_string(),
             // D-TYPEDTEXT1=D: `Sql` is a checked (template, bound params) pair — the
             // params never re-enter the template text. `Html` is already the fully
             // escaped text, so it's just a `String` underneath.
@@ -806,6 +854,21 @@ impl Cx {
             // D-COLLBREADTH1=A: Set<T> → HashSet<T>, Deque<T> → VecDeque<T>.
             Type::Apply { name, args } if name == "Set" && !args.is_empty() => {
                 format!("std::collections::HashSet<{}>", self.rust_type(&args[0]))
+            }
+            Type::Apply { name, args } if name == Syntax::TYPE_SORTED_SET && !args.is_empty() => {
+                format!("std::collections::BTreeSet<{}>", self.rust_type(&args[0]))
+            }
+            Type::Apply { name, args }
+                if name == Syntax::TYPE_PRIORITY_QUEUE && !args.is_empty() =>
+            {
+                format!("std::collections::BinaryHeap<{}>", self.rust_type(&args[0]))
+            }
+            Type::Apply { name, args } if name == Syntax::TYPE_LRU && args.len() >= 2 => {
+                format!(
+                    "JetLru<{}, {}>",
+                    self.rust_type(&args[0]),
+                    self.rust_type(&args[1])
+                )
             }
             // D-TAG1: Bag<T> → HashMap<T, usize>.
             Type::Apply { name, args } if name == "Bag" && !args.is_empty() => {

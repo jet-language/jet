@@ -10,7 +10,12 @@ pub const RESERVED_TYPES: &[&str] = &[
     Syntax::TYPE_HASH_MAP,
     Syntax::TYPE_BTREE_MAP,
     Syntax::TYPE_CHAR,
+    Syntax::TYPE_BIT_SET,
+    Syntax::TYPE_BYTE_BUFFER,
     Syntax::TYPE_SET,
+    Syntax::TYPE_SORTED_SET,
+    Syntax::TYPE_PRIORITY_QUEUE,
+    Syntax::TYPE_LRU,
     "Bag",
     Syntax::TYPE_DEQUE,
     Syntax::TYPE_BIGINT,
@@ -56,7 +61,7 @@ pub fn is_closure_method(method: &str) -> bool {
         "map" | "filter" | "each" | "find" | "any" | "all" | "sort_by" | "reduce"
         // D-ITER1: lazy adapter set
         | "take_while" | "skip_while" | "flat_map" | "scan"
-        | "position" | "min_by" | "max_by" | "fold" | "group_by"
+        | "position" | "min_by" | "max_by" | "fold" | "group_by" | "count_by"
         // D-FAILCOMP1: failure-aware adapters
         | "filter_map"
         // D-AUTOPAR1=A: explicit parallel adapters
@@ -145,9 +150,25 @@ pub fn builtin_method_return(
         Type::Named(n) if n == crate::Syntax::TYPE_EVENT_TRACE => {
             event_trace_method_return(method, arg_count)
         }
+        // D-WATCH-SCOPE1: unified file/process/port watcher handles.
+        Type::Named(n) if n == crate::Syntax::TYPE_WATCH_HANDLE => {
+            watch_handle_method_return(method, arg_count)
+        }
+        Type::Named(n) if n == crate::Syntax::TYPE_WATCH_SET => {
+            watch_set_method_return(method, arg_count)
+        }
         // D-COLLBREADTH1=A: Set<T> and Deque<T>.
         Type::Apply { name, args } if name == "Set" => {
             set_method_return(args.first().unwrap_or(&Type::Int), method, arg_count)
+        }
+        Type::Apply { name, args } if name == Syntax::TYPE_SORTED_SET => {
+            sorted_set_method_return(args.first().unwrap_or(&Type::Int), method, arg_count)
+        }
+        Type::Apply { name, args } if name == Syntax::TYPE_PRIORITY_QUEUE => {
+            priority_queue_method_return(args.first().unwrap_or(&Type::Int), method, arg_count)
+        }
+        Type::Apply { name, args } if name == Syntax::TYPE_LRU && args.len() >= 2 => {
+            lru_method_return(&args[0], &args[1], method, arg_count)
         }
         // D-TAG1: Bag<T> counted multiset.
         Type::Apply { name, args } if name == "Bag" => {
@@ -155,6 +176,10 @@ pub fn builtin_method_return(
         }
         Type::Apply { name, args } if name == "Deque" => {
             deque_method_return(args.first().unwrap_or(&Type::Int), method, arg_count)
+        }
+        Type::Named(n) if n == Syntax::TYPE_BIT_SET => bit_set_method_return(method, arg_count),
+        Type::Named(n) if n == Syntax::TYPE_BYTE_BUFFER => {
+            byte_buffer_method_return(method, arg_count)
         }
         // D-DYNARRAY1: `View<T>` — read-only method surface on a zero-copy window.
         Type::Apply { name, args } if name == "View" => {
@@ -345,6 +370,8 @@ fn list_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
         }
         ("contains", 1) => Some(Some(Type::Bool)),
         ("join", 1) => Some(Some(Type::String)),
+        ("sum" | "product", 0) => Some(Some(inner.clone())),
+        ("min" | "max", 0) => Some(Some(Type::Option(Box::new(inner.clone())))),
         // M8 closure methods — return type depends on callback; sema fills `map` element type.
         ("map", 1) => Some(Some(Type::List(Box::new(Type::Int)))), // placeholder; sema refines
         ("filter", 1) => Some(Some(Type::List(Box::new(inner.clone())))),
@@ -359,6 +386,11 @@ fn list_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
         ("chunks" | "windows", 1) => Some(Some(Type::List(Box::new(Type::List(Box::new(
             inner.clone(),
         )))))),
+        ("flatten", 0) => match inner {
+            Type::List(elem) => Some(Some(Type::List(elem.clone()))),
+            _ => Some(Some(Type::List(Box::new(Type::Int)))),
+        },
+        ("intersperse", 1) => Some(Some(Type::List(Box::new(inner.clone())))),
         // D-ITER1: enumerate → [(idx: Int, item: T)].
         ("enumerate", 0) => Some(Some(Type::List(Box::new(enumerate_elem_ty(inner))))),
         // D-ITER1: zip([U]) → [(a: T, b: U)]; sema refines `b` from arg type.
@@ -366,6 +398,28 @@ fn list_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
             // placeholder element type (Int for `b`); sema will correct via resolved_ret.
             Some(Some(Type::List(Box::new(zip_elem_ty(inner, &Type::Int)))))
         }
+        ("unzip", 0) => match inner {
+            Type::Tuple(fields) => {
+                let a = fields
+                    .iter()
+                    .find(|(name, _)| name == "a")
+                    .map(|(_, ty)| (**ty).clone())
+                    .unwrap_or(Type::Int);
+                let b = fields
+                    .iter()
+                    .find(|(name, _)| name == "b")
+                    .map(|(_, ty)| (**ty).clone())
+                    .unwrap_or(Type::Int);
+                Some(Some(Type::Tuple(vec![
+                    ("a".to_string(), Box::new(Type::List(Box::new(a)))),
+                    ("b".to_string(), Box::new(Type::List(Box::new(b)))),
+                ])))
+            }
+            _ => Some(Some(Type::Tuple(vec![
+                ("a".to_string(), Box::new(Type::List(Box::new(Type::Int)))),
+                ("b".to_string(), Box::new(Type::List(Box::new(Type::Int)))),
+            ]))),
+        },
         // D-ITER1: partition(f) → (false_: [T], true_: [T]).
         ("partition", 1) => Some(Some(partition_ret_ty(inner))),
         // D-ITER1: closure adapters returning [T].
@@ -396,6 +450,10 @@ fn list_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
         ("group_by", 1) => Some(Some(Type::Map {
             key: Box::new(Type::String), // placeholder; sema refines
             value: Box::new(Type::List(Box::new(inner.clone()))),
+        })),
+        ("count_by", 1) => Some(Some(Type::Map {
+            key: Box::new(Type::String), // placeholder; sema refines
+            value: Box::new(Type::Int),
         })),
         // D-AUTOPAR1=A: parallel adapters. Return types mirror their sequential equivalents;
         // sema refines V/acc from closure body (ret: None open return).
@@ -522,21 +580,31 @@ fn clock_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
 /// `[0, 1)`. Reproducible — the stream is fixed by the seed passed to
 /// `random.rng(seed)`, so the same seed yields the same draws on every machine.
 ///
-/// D-DET-CAPAPI widens the surface to mirror the ambient `random.*` set:
-/// `rng.bool()` draws a coin; `rng.pick(list)` returns a uniform `T?`;
-/// `rng.shuffle(&list)` shuffles in place (Fisher–Yates). `pick`/`shuffle` are
-/// generic, so their element-aware return types are resolved in the checker
-/// dispatch (Source/Sema/CheckerInfer/calls.rs) — the placeholders here keep the
+/// D-DET-CAPAPI/D-RANDOMDIST1 widens the surface to mirror the ambient
+/// `random.*` set: distributions, bytes, sample/weighted choice, and in-place
+/// shuffle. Generic element-aware return types are resolved in the checker
+/// dispatch (Source/Sema/CheckerInfer/calls.rs) — placeholders here keep the
 /// codegen totality path (lower.rs) honest.
 fn rng_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
     match (method, nargs) {
         ("int", 2) => Some(Some(Type::Int)),
         ("float", 0) => Some(Some(Type::Float)),
-        // D-DET-CAPAPI: coin draw.
+        ("float_range", 2) => Some(Some(Type::Float)),
+        // D-DET-CAPAPI: coin draw; D-RANDOMDIST1: probability draw.
         ("bool", 0) => Some(Some(Type::Bool)),
-        // D-DET-CAPAPI: generic — element type refined in sema. `pick` → `T?`,
-        // `shuffle` → void. Placeholders (Int) here, refined by the dispatch.
+        ("bool", 1) => Some(Some(Type::Bool)),
+        ("normal", 2) => Some(Some(Type::Float)),
+        ("exponential", 1) => Some(Some(Type::Float)),
+        ("bytes", 1) => Some(Some(Type::List(Box::new(Type::IntN {
+            signed: false,
+            bits: 8,
+        })))),
+        ("split", 0) => Some(Some(Type::Named(crate::Syntax::RNG_TYPE.to_string()))),
+        // Generic — element type refined in sema. Placeholders (Int) here,
+        // refined by the dispatch.
         ("pick", 1) => Some(Some(Type::Option(Box::new(Type::Int)))),
+        ("weighted_pick", 2) => Some(Some(Type::Option(Box::new(Type::Int)))),
+        ("sample", 2) => Some(Some(Type::List(Box::new(Type::Int)))),
         ("shuffle", 1) => Some(None),
         _ => None,
     }
@@ -553,11 +621,10 @@ fn solver_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
     }
 }
 
-/// D-DET-CAPAPI: methods on the deterministic `Duration` value. `millis()` reads
-/// the span back as an Int (the ms the `time.ms`/`time.secs` constructor minted).
+/// D-DET-CAPAPI: methods on the deterministic `Duration` value.
 fn duration_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
     match (method, nargs) {
-        ("millis", 0) => Some(Some(Type::Int)),
+        ("millis" | "seconds", 0) => Some(Some(Type::Int)),
         _ => None,
     }
 }
@@ -700,6 +767,32 @@ fn event_trace_method_return(method: &str, nargs: usize) -> Option<Option<Type>>
     }
 }
 
+fn watch_handle_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
+    match (method, nargs) {
+        ("poll", 0) | ("events", 0) => Some(Some(Type::List(Box::new(Type::Named(
+            crate::Syntax::TYPE_WATCH_EVENT.to_string(),
+        ))))),
+        ("on" | "once", 2) => Some(Some(Type::Named(
+            crate::Syntax::TYPE_SUBSCRIPTION.to_string(),
+        ))),
+        ("summary", 0) => Some(Some(Type::String)),
+        ("active", 0) => Some(Some(Type::Bool)),
+        ("cancel", 0) => Some(None),
+        _ => None,
+    }
+}
+
+fn watch_set_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
+    match (method, nargs) {
+        ("add", 1) => Some(None),
+        ("poll", 0) | ("events", 0) => Some(Some(Type::List(Box::new(Type::Named(
+            crate::Syntax::TYPE_WATCH_EVENT.to_string(),
+        ))))),
+        ("summary", 0) => Some(Some(Type::String)),
+        _ => None,
+    }
+}
+
 /// D-COLLBREADTH1=A: `Set<T>` methods (hash-backed unordered set).
 fn set_method_return(elem: &Type, method: &str, nargs: usize) -> Option<Option<Type>> {
     let set_of_elem = || Type::Apply {
@@ -713,6 +806,77 @@ fn set_method_return(elem: &Type, method: &str, nargs: usize) -> Option<Option<T
         ("contains", 1) => Some(Some(Type::Bool)),
         ("union", 1) => Some(Some(set_of_elem())),
         ("to_list", 0) => Some(Some(Type::List(Box::new(elem.clone())))),
+        _ => None,
+    }
+}
+
+/// D-ITERTOOLS1=A: `SortedSet<T>` methods (BTreeSet-backed ordered set).
+fn sorted_set_method_return(elem: &Type, method: &str, nargs: usize) -> Option<Option<Type>> {
+    let set_of_elem = || Type::Apply {
+        name: Syntax::TYPE_SORTED_SET.to_string(),
+        args: vec![elem.clone()],
+    };
+    match (method, nargs) {
+        ("len", 0) => Some(Some(Type::Int)),
+        ("is_empty", 0) => Some(Some(Type::Bool)),
+        ("add" | "remove" | "clear", _) => Some(None),
+        ("contains", 1) => Some(Some(Type::Bool)),
+        ("union", 1) => Some(Some(set_of_elem())),
+        ("to_list", 0) => Some(Some(Type::List(Box::new(elem.clone())))),
+        ("first" | "last", 0) => Some(Some(Type::Option(Box::new(elem.clone())))),
+        _ => None,
+    }
+}
+
+/// D-ITERTOOLS1=A: `PriorityQueue<T>` methods (BinaryHeap-backed max-heap).
+fn priority_queue_method_return(elem: &Type, method: &str, nargs: usize) -> Option<Option<Type>> {
+    match (method, nargs) {
+        ("len", 0) => Some(Some(Type::Int)),
+        ("is_empty", 0) => Some(Some(Type::Bool)),
+        ("push" | "clear", _) => Some(None),
+        ("pop" | "peek", 0) => Some(Some(Type::Option(Box::new(elem.clone())))),
+        ("to_sorted_list", 0) => Some(Some(Type::List(Box::new(elem.clone())))),
+        _ => None,
+    }
+}
+
+/// D-ITERTOOLS1=A: `Lru<K,V>` bounded cache methods.
+fn lru_method_return(key: &Type, value: &Type, method: &str, nargs: usize) -> Option<Option<Type>> {
+    match (method, nargs) {
+        ("len" | "capacity", 0) => Some(Some(Type::Int)),
+        ("is_empty", 0) => Some(Some(Type::Bool)),
+        ("put" | "clear", _) => Some(None),
+        ("get" | "remove", 1) => Some(Some(Type::Option(Box::new(value.clone())))),
+        ("contains_key", 1) => Some(Some(Type::Bool)),
+        ("keys", 0) => Some(Some(Type::List(Box::new(key.clone())))),
+        _ => None,
+    }
+}
+
+/// D-ITERTOOLS1=A: `BitSet` methods.
+fn bit_set_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
+    match (method, nargs) {
+        ("len" | "count", 0) => Some(Some(Type::Int)),
+        ("is_empty", 0) => Some(Some(Type::Bool)),
+        ("add" | "remove" | "clear", _) => Some(None),
+        ("contains", 1) => Some(Some(Type::Bool)),
+        ("to_list", 0) => Some(Some(Type::List(Box::new(Type::Int)))),
+        _ => None,
+    }
+}
+
+/// D-ITERTOOLS1=A: `ByteBuffer` builder methods.
+fn byte_buffer_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
+    match (method, nargs) {
+        ("len", 0) => Some(Some(Type::Int)),
+        ("is_empty", 0) => Some(Some(Type::Bool)),
+        ("clear", 0) => Some(None),
+        ("to_bytes", 0) => Some(Some(Type::List(Box::new(u8t())))),
+        (
+            "write_u8" | "write_u16_le" | "write_u16_be" | "write_u32_le" | "write_u32_be"
+            | "write_u64_le" | "write_u64_be" | "write_bytes",
+            1,
+        ) => Some(None),
         _ => None,
     }
 }
@@ -755,6 +919,30 @@ pub fn builtin_method_mutates(recv_ty: &Type, method: &str) -> bool {
         Type::Apply { name, .. } if name == "Set" => {
             matches!(method, "add" | "remove" | "clear")
         }
+        Type::Apply { name, .. } if name == Syntax::TYPE_SORTED_SET => {
+            matches!(method, "add" | "remove" | "clear")
+        }
+        Type::Apply { name, .. } if name == Syntax::TYPE_PRIORITY_QUEUE => {
+            matches!(method, "push" | "pop" | "clear")
+        }
+        Type::Apply { name, .. } if name == Syntax::TYPE_LRU => {
+            matches!(method, "put" | "get" | "remove" | "clear")
+        }
+        Type::Named(n) if n == Syntax::TYPE_BIT_SET => {
+            matches!(method, "add" | "remove" | "clear")
+        }
+        Type::Named(n) if n == Syntax::TYPE_BYTE_BUFFER => matches!(
+            method,
+            "write_u8"
+                | "write_u16_le"
+                | "write_u16_be"
+                | "write_u32_le"
+                | "write_u32_be"
+                | "write_u64_le"
+                | "write_u64_be"
+                | "write_bytes"
+                | "clear"
+        ),
         // D-TAG1: Bag mutating methods.
         Type::Apply { name, .. } if name == "Bag" => {
             matches!(method, "add" | "remove" | "clear")
@@ -773,7 +961,21 @@ pub fn builtin_method_mutates(recv_ty: &Type, method: &str) -> bool {
             matches!(method, "tick" | "advance" | "wait")
         }
         Type::Named(n) if n == crate::Syntax::RNG_TYPE => {
-            matches!(method, "int" | "float" | "bool" | "pick" | "shuffle")
+            matches!(
+                method,
+                "int"
+                    | "float"
+                    | "float_range"
+                    | "bool"
+                    | "normal"
+                    | "exponential"
+                    | "bytes"
+                    | "split"
+                    | "pick"
+                    | "weighted_pick"
+                    | "sample"
+                    | "shuffle"
+            )
         }
         Type::Named(n) if n == crate::Syntax::SOLVER_TYPE => matches!(method, "require"),
         _ => false,
@@ -806,9 +1008,9 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                 effect_bound: None,
             }]),
             // D-ITER1: key-extracting closure methods.
-            "sort_by" | "min_by" | "max_by" | "group_by" => Some(vec![Type::Fn {
+            "sort_by" | "min_by" | "max_by" | "group_by" | "count_by" => Some(vec![Type::Fn {
                 params: vec![(**inner).clone()],
-                ret: Some(Box::new(Type::Int)), // sema refines key type
+                ret: None, // sema refines key type
                 effect_bound: None,
             }]),
             "reduce" | "fold" => Some(vec![
@@ -860,8 +1062,11 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             ]),
             // D-ITER1: non-closure adapters.
             "take" | "skip" | "step_by" | "chunks" | "windows" => Some(vec![Type::Int]),
-            "zip" => Some(vec![Type::List(Box::new((**inner).clone()))]),
-            "dedup" | "enumerate" => Some(vec![]),
+            "intersperse" => Some(vec![(**inner).clone()]),
+            "zip" => Some(vec![]),
+            "dedup" | "enumerate" | "sum" | "product" | "min" | "max" | "flatten" | "unzip" => {
+                Some(vec![])
+            }
             // D-DYNARRAY1: `.view(a..b)` — both range ends are Int (parsed
             // specially; always arrives as exactly 2 args).
             "view" => Some(vec![Type::Int, Type::Int]),
@@ -904,6 +1109,44 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             _ => Some(vec![]),
         },
         Type::Apply { name, .. } if name == "Task" || name == "Channel" => Some(vec![]),
+        Type::Apply { name, args } if name == Syntax::TYPE_SORTED_SET => match method {
+            "add" | "remove" | "contains" => Some(vec![args.first().cloned().unwrap_or(Type::Int)]),
+            "union" => Some(vec![Type::Apply {
+                name: Syntax::TYPE_SORTED_SET.to_string(),
+                args: vec![args.first().cloned().unwrap_or(Type::Int)],
+            }]),
+            _ => Some(vec![]),
+        },
+        Type::Apply { name, args } if name == Syntax::TYPE_PRIORITY_QUEUE => match method {
+            "push" => Some(vec![args.first().cloned().unwrap_or(Type::Int)]),
+            _ => Some(vec![]),
+        },
+        Type::Apply { name, args } if name == Syntax::TYPE_LRU && args.len() >= 2 => match method {
+            "put" => Some(vec![args[0].clone(), args[1].clone()]),
+            "get" | "remove" | "contains_key" => Some(vec![args[0].clone()]),
+            _ => Some(vec![]),
+        },
+        Type::Named(n) if n == Syntax::TYPE_BIT_SET => match method {
+            "add" | "remove" | "contains" => Some(vec![Type::Int]),
+            _ => Some(vec![]),
+        },
+        Type::Named(n) if n == Syntax::TYPE_BYTE_BUFFER => match method {
+            "write_bytes" => Some(vec![Type::List(Box::new(u8t()))]),
+            "write_u8" => Some(vec![u8t()]),
+            "write_u16_le" | "write_u16_be" => Some(vec![Type::IntN {
+                signed: false,
+                bits: 16,
+            }]),
+            "write_u32_le" | "write_u32_be" => Some(vec![Type::IntN {
+                signed: false,
+                bits: 32,
+            }]),
+            "write_u64_le" | "write_u64_be" => Some(vec![Type::IntN {
+                signed: false,
+                bits: 64,
+            }]),
+            _ => Some(vec![]),
+        },
         // D-REACT1=B: `Signal.set(v)` expects a value of the signal's element type.
         Type::Apply { name, args } if name == crate::Syntax::TYPE_SIGNAL => match method {
             "set" => Some(vec![args.first().cloned().unwrap_or(Type::Int)]),
@@ -967,6 +1210,23 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
         {
             Some(vec![])
         }
+        Type::Named(n) if n == crate::Syntax::TYPE_WATCH_HANDLE => match method {
+            "on" | "once" => Some(vec![
+                Type::Named(crate::Syntax::TYPE_EVENT_SCOPE.to_string()),
+                Type::Fn {
+                    params: vec![Type::Named(crate::Syntax::TYPE_WATCH_EVENT.to_string())],
+                    ret: None,
+                    effect_bound: None,
+                },
+            ]),
+            _ => Some(vec![]),
+        },
+        Type::Named(n) if n == crate::Syntax::TYPE_WATCH_SET => match method {
+            "add" => Some(vec![Type::Named(
+                crate::Syntax::TYPE_WATCH_HANDLE.to_string(),
+            )]),
+            _ => Some(vec![]),
+        },
         // D-COLLBREADTH1=A: Set<T> arg types.
         Type::Apply { name, args } if name == "Set" => {
             let elem = args.first().cloned().unwrap_or(Type::Int);
@@ -1031,6 +1291,11 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
         },
         Type::Named(n) if n == crate::Syntax::RNG_TYPE => match method {
             "int" => Some(vec![Type::Int, Type::Int]),
+            "float_range" => Some(vec![Type::Float, Type::Float]),
+            "bool" => Some(vec![Type::Float]),
+            "normal" => Some(vec![Type::Float, Type::Float]),
+            "exponential" => Some(vec![Type::Float]),
+            "bytes" => Some(vec![Type::Int]),
             _ => Some(vec![]),
         },
         Type::Named(n) if n == crate::Syntax::SOLVER_TYPE => match method {

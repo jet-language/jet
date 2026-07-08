@@ -23,6 +23,7 @@
           pkgs.stdenv.cc
           pkgs.lld
         ];
+        jetTzdb = "${pkgs.tzdata}/share/zoneinfo";
 
         jet = pkgs.rustPlatform.buildRustPackage {
           pname = "jet";
@@ -37,7 +38,8 @@
 
           postInstall = ''
             wrapProgram $out/bin/jet \
-              --prefix PATH : "${jetRuntimePath}"
+              --prefix PATH : "${jetRuntimePath}" \
+              --set-default TZDIR "${jetTzdb}"
           '';
 
           meta = with pkgs.lib; {
@@ -140,6 +142,7 @@
 
           shellHook = ''
             export JET_ROOT="$PWD"
+            export TZDIR="${jetTzdb}"
             export JETOS_OVMF_CODE="${pkgs.OVMF.fd}/FV/OVMF_CODE.fd"
 
             # banner on stderr: `nix develop -c <cmd>` stdout stays clean for

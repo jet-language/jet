@@ -68,6 +68,119 @@ const FORBIDDEN: &[&str] = &[
 
 const OLD_BINDING_CODES: &[&str] = &["E0009", "E0010", "E0985"];
 const OLD_BINDING_WORDS: &[&str] = &["let", "val", "var", "set"];
+const SYNTAX_STATUS_MATRIX: &str =
+    "tools/Tower/docs/plans/epoch-3/syntax-law-source-status-matrix-2026-07-07.md";
+const MARKER_PLANE_MATRIX: &str =
+    "tools/Tower/docs/plans/epoch-3/marker-plane-source-of-truth-matrix-2026-07-07.md";
+const MATRIX_UNBUILT_MARKERS: &[&str] = &[
+    "S74-D-DESTRUCT1-ARM",
+    "D-REFINE1",
+    "D-IGNORERET1",
+    "D-SMELLLINT1",
+    "D-NOSTD1",
+    "D-PATHFS1",
+    "D-TIMEDEPTH1",
+    "D-MATHLIB1",
+    "D-HTTPLIB1",
+    "D-HTTPLIB2",
+    "D-HTTPLIB3",
+    "D-ROUTE1",
+    "D-HONESTNUM1",
+    "D-OPTGC1",
+];
+const MARKER_PLANE_ROWS: &[(&str, &[&str])] = &[
+    (
+        "file-target-directives",
+        &[
+            "#PubFile",
+            "#Target(Web)",
+            "#Html",
+            "#Js",
+            "#Wasm",
+            "#WasmExport",
+        ],
+    ),
+    (
+        "type-layout-directives",
+        &[
+            "#Layout(c)",
+            "#Layout(columnar)",
+            "#SingleUse",
+            "#UnitFamily",
+        ],
+    ),
+    (
+        "serde-directive-attributes",
+        &[
+            "#[Rename",
+            "#[Skip]",
+            "#[Default]",
+            "#RenameAll",
+            "#Tag",
+            "#Untagged",
+        ],
+    ),
+    (
+        "derive-contract-markers",
+        &[
+            "@Codable",
+            "@[Encode, Decode]",
+            "@Debug",
+            "@Summarize",
+            "@Comparable",
+        ],
+    ),
+    (
+        "general-contract-markers",
+        &[
+            "@Pure", "@MustUse", "@Pre", "@Post", "@Inline", "@Persist", "@Cli",
+        ],
+    ),
+    (
+        "distinct-capability-bundles",
+        &["@Numeric", "@Printable", "@CodableAsBase"],
+    ),
+    (
+        "effect-capability-directives",
+        &["#(Fs)", "#(via f)", "#Caps", "#Grant"],
+    ),
+    (
+        "unsafe-impure-gates",
+        &["#Unsafe", "#Impure", "D-UNSAFE-REASON1"],
+    ),
+    (
+        "test-bench-directives",
+        &["#Test(\"name\")", "#Test fn", "#Bench(\"name\")"],
+    ),
+    (
+        "typing-fact-directives",
+        &[
+            "#Tainted",
+            "#Sanitizer",
+            "#Replayable",
+            "#State",
+            "#Transition",
+            "#Suppress",
+            "#Track",
+        ],
+    ),
+    (
+        "comptime-metaprogramming",
+        &["comptime", "$name", "derive T.Trait"],
+    ),
+    (
+        "capability-sigils",
+        &["^T", "&T", "copy x", "p.*", "edit", "share"],
+    ),
+    (
+        "maturity-markers",
+        &["#Experimental", "#Tested", "#Hardened"],
+    ),
+    (
+        "retired-paused-marker-spellings",
+        &["@unsafe", "#extern", "#layout", "#Bench \"", "#[Serialize"],
+    ),
+];
 
 #[test]
 fn live_surface_has_no_retired_spellings() {
@@ -121,6 +234,104 @@ fn old_binding_migration_paths_stay_removed() {
         "old binding migration path found:\n{}",
         failures.join("\n")
     );
+}
+
+#[test]
+fn syntax_status_matrix_covers_unbuilt_notes() {
+    let spec = fs::read_to_string("docs/spec/syntax-decisions.md").expect("read syntax decisions");
+    let matrix = fs::read_to_string(SYNTAX_STATUS_MATRIX).expect("read syntax status matrix");
+
+    for marker in MATRIX_UNBUILT_MARKERS {
+        let row = format!("| `{}` |", marker);
+        assert!(
+            matrix.contains(&row),
+            "syntax status matrix missing row for {marker}"
+        );
+    }
+
+    let lines: Vec<&str> = spec.lines().collect();
+    let mut uncovered = Vec::new();
+    for (idx, line) in lines.iter().enumerate() {
+        let lower = line.to_ascii_lowercase();
+        if !(lower.contains("unbuilt") || lower.contains("not yet implemented")) {
+            continue;
+        }
+        if idx < 20 || lower.contains("have/have-not ledger") {
+            continue;
+        }
+        let start = idx.saturating_sub(4);
+        let end = (idx + 2).min(lines.len());
+        let context = lines[start..end].join("\n");
+        let covered_by_marker = MATRIX_UNBUILT_MARKERS
+            .iter()
+            .any(|marker| context.contains(marker));
+        let covered_by_named_prose = context.contains("dispatch-arm struct-pattern head")
+            && matrix.contains("S74-D-DESTRUCT1-ARM");
+        if !(covered_by_marker || covered_by_named_prose) {
+            uncovered.push(format!("{}: {}", idx + 1, line.trim()));
+        }
+    }
+
+    assert!(
+        uncovered.is_empty(),
+        "unbuilt syntax note lacks matrix coverage:\n{}",
+        uncovered.join("\n")
+    );
+}
+
+#[test]
+fn marker_plane_matrix_covers_current_marker_families() {
+    let matrix = fs::read_to_string(MARKER_PLANE_MATRIX).expect("read marker-plane matrix");
+    let syntax = fs::read_to_string("crates/jet-foundation/src/Syntax.rs").expect("read Syntax.rs");
+    let decisions =
+        fs::read_to_string("docs/spec/syntax-decisions.md").expect("read syntax decisions");
+
+    for (row, spellings) in MARKER_PLANE_ROWS {
+        let row_token = format!("| `{}` |", row);
+        assert!(
+            matrix.contains(&row_token),
+            "marker-plane matrix missing row `{row}`"
+        );
+        for spelling in *spellings {
+            assert!(
+                matrix.contains(spelling),
+                "marker-plane matrix row `{row}` missing spelling `{spelling}`"
+            );
+        }
+    }
+
+    for syntax_anchor in [
+        "MARKER_PUB_FILE",
+        "ATTR_TARGET",
+        "ATTR_LAYOUT",
+        "ATTR_CODABLE",
+        "CONTRACT_MARKERS",
+        "KW_CAPS",
+        "KW_GRANT",
+        "KW_COMPTIME",
+        "KW_DERIVE",
+        "ATTR_TRACK",
+    ] {
+        assert!(
+            matrix.contains(syntax_anchor) && syntax.contains(syntax_anchor),
+            "marker-plane matrix must cite live Syntax.rs anchor `{syntax_anchor}`"
+        );
+    }
+
+    for decision_anchor in [
+        "D-MARKER-FAMILY1",
+        "D-MARKERMOVE1",
+        "D-UNSAFE2",
+        "D-TESTPAREN1",
+        "D-BENCH1",
+        "D-CAPBUNDLE1",
+        "D-CTMARKER1",
+    ] {
+        assert!(
+            matrix.contains(decision_anchor) && decisions.contains(decision_anchor),
+            "marker-plane matrix must cite syntax decision `{decision_anchor}`"
+        );
+    }
 }
 
 fn scan_old_binding_codes(path: &Path, text: &str, failures: &mut Vec<String>) {

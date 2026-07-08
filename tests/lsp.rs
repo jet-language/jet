@@ -12,9 +12,15 @@
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::sync::{Mutex, OnceLock};
 
 fn jet_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_jet"))
+}
+
+fn lsp_process_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
 }
 
 fn send_msg(stdin: &mut impl Write, json: &str) {
@@ -560,6 +566,7 @@ mod transcript_parser {
 
 /// Execute one JSON transcript file against a live `jet lsp` process.
 fn run_json_transcript_file(jet: &std::path::Path, path: &std::path::Path) {
+    let _guard = lsp_process_lock().lock().unwrap();
     let content =
         std::fs::read_to_string(path).unwrap_or_else(|e| panic!("read {:?}: {}", path, e));
     let transcript = transcript_parser::parse(&content);
@@ -639,6 +646,7 @@ fn lsp_initialize_capabilities_have_named_test_coverage() {
     if !jet.exists() {
         return;
     }
+    let _guard = lsp_process_lock().lock().unwrap();
 
     let mut child = Command::new(&jet)
         .arg("lsp")
@@ -694,6 +702,7 @@ fn lsp_teaching_autocorrect_let_to_val() {
     if !jet.exists() {
         return;
     }
+    let _guard = lsp_process_lock().lock().unwrap();
 
     let mut child = Command::new(&jet)
         .arg("lsp")
@@ -775,6 +784,7 @@ fn lsp_incremental_sync_range_edit_updates_document() {
     if !jet.exists() {
         return;
     }
+    let _guard = lsp_process_lock().lock().unwrap();
 
     let mut child = Command::new(&jet)
         .arg("lsp")
@@ -986,8 +996,8 @@ fn lsp_execute_command_impact_returns_report() {
 
 #[test]
 fn lsp_c_style_snippet_autocorrects() {
-    let src = r#"def greet() {
-    print("ok");
+    let src = r#"fn greet() {
+    println("ok");
 }
 
 fn run() {
@@ -996,8 +1006,11 @@ fn run() {
 }
 "#;
     let diags = jet::check_document("snippet.jet", src);
-    assert!(diags.iter().any(|d| d.code == "E0037"), "println → print");
-    assert!(diags.iter().any(|d| d.code == "E0008"), "def → fn");
+    assert!(diags.iter().any(|d| d.code == "E0037"), "println -> print");
+    assert!(
+        diags.iter().all(|d| d.code != "E0008"),
+        "def/func teaching is paused under D-S14-PAUSE"
+    );
 
     let mut edits: Vec<_> = diags.iter().filter_map(|d| d.edit.clone()).collect();
     edits.sort_by_key(|e| std::cmp::Reverse(e.span.start));
@@ -1006,11 +1019,10 @@ fn run() {
         fixed = jet::LSP::apply_edit(&fixed, &edit);
     }
     assert!(!fixed.contains("val count"));
-    // E0037 and E0008 are single-token swaps and apply.
+    // E0037 is still a live single-token fix.
     assert!(fixed.contains("print("));
     assert!(!fixed.contains("println("));
     assert!(fixed.contains("fn greet"));
-    assert!(!fixed.contains("def greet"));
 }
 
 // ── M13 transcript tests ──────────────────────────────────────────────────────
@@ -1021,6 +1033,7 @@ fn run_transcript(source: &str, steps: &[TranscriptStep]) {
     if !jet.exists() {
         return;
     }
+    let _guard = lsp_process_lock().lock().unwrap();
 
     let mut child = Command::new(&jet)
         .arg("lsp")
@@ -1202,6 +1215,7 @@ fn lsp_completion_uses_local_discovery_index_for_packages_and_options() {
     if !jet.exists() {
         return;
     }
+    let _guard = lsp_process_lock().lock().unwrap();
 
     let root = std::env::temp_dir().join(format!("lsp_discovery_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
@@ -1734,7 +1748,7 @@ fn lsp_type_hierarchy_trait_impls() {
 }
 
 #[test]
-fn lsp_prepare_rename_rejects_foreign_symbol() {
+fn lsp_prepare_rename_accepts_paused_teaching_words() {
     let jet = jet_bin();
     if !jet.exists() {
         return;
@@ -1764,11 +1778,7 @@ fn lsp_prepare_rename_rejects_foreign_symbol() {
                     r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/prepareRename","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":0,"character":3}}}}}}"#,
                     uri
                 ),
-                expect_contains: Some(vec![
-                    "\"error\"".to_string(),
-                    "`func` is a retired foreign spelling, not a Jet symbol you can rename"
-                        .to_string(),
-                ]),
+                expect_contains: Some(vec!["\"placeholder\":\"func\"".to_string()]),
             },
             TranscriptStep::Send {
                 msg: r#"{"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}}"#.to_string(),
@@ -1992,6 +2002,7 @@ fn lsp_semantic_tokens_classify_ownership_markers_and_skip_retired_words() {
     if !jet.exists() {
         return;
     }
+    let _guard = lsp_process_lock().lock().unwrap();
 
     let source = r#"#Test("semantic") {
 }
@@ -2002,7 +2013,8 @@ fn lsp_semantic_tokens_classify_ownership_markers_and_skip_retired_words() {
 @Pure fn clean(x: Int) -> Int { return x }
 fn run() {
     old :: 1
-    while true { break }
+    while :: 2
+    for :: 3
     mut borrowed
     take borrowed
     view borrowed
@@ -2058,6 +2070,7 @@ fn run() {
 
     const TOKEN_OWNERSHIP: u32 = 12;
     const TOKEN_DECORATOR: u32 = 13;
+    const TOKEN_VARIABLE: u32 = 3;
     const MOD_MOVE: u32 = 1 << 2;
     const MOD_WRITE_BORROW: u32 = 1 << 3;
     const MOD_COPY: u32 = 1 << 4;
@@ -2074,10 +2087,19 @@ fn run() {
     assert_semantic_token(&tokens, "@", TOKEN_DECORATOR, MOD_CONTRACT);
     assert_semantic_token(&tokens, "Pure", TOKEN_DECORATOR, MOD_CONTRACT);
 
-    for retired in ["val", "while", "mut", "take", "view"] {
+    for ordinary in ["while", "for"] {
+        assert!(
+            tokens
+                .iter()
+                .any(|t| t.text == ordinary && t.token_type == TOKEN_VARIABLE),
+            "paused retired spelling `{ordinary}` should emit an ordinary variable token: {tokens:?}"
+        );
+    }
+
+    for retired in ["val", "mut", "take", "view"] {
         assert!(
             !tokens.iter().any(|t| t.text == retired),
-            "retired/foreign spelling `{retired}` should not emit semantic token: {tokens:?}"
+            "reserved ownership spelling `{retired}` should not emit semantic token: {tokens:?}"
         );
     }
 
@@ -2229,7 +2251,7 @@ fn lsp_references_finds_all_uses() {
 #[test]
 fn c40_is_keyword_retired_words_not_keywords() {
     // `switch`, `import`, `val`, `var` are NOT keywords in Jet —
-    // they are FOREIGN_ teaching-error tokens. Rename must accept them as names.
+    // paused retired words are ordinary names for rename.
     let diags = jet::check_document(
         "c40_retired.jet",
         "fn run() {\n    switch_count :: 0\n    import_count :: 1\n}\n",
@@ -2346,7 +2368,7 @@ fn c40_is_keyword_value_is_not_a_keyword() {
 
 #[test]
 fn c40_is_keyword_switch_not_a_keyword() {
-    // `switch` is FOREIGN_SWITCH — a teaching-error word, not a real keyword.
+    // `switch` is paused retired syntax, not a real keyword.
     // Rename to "switch" should NOT be rejected as a keyword.
     let jet = jet_bin();
     if !jet.exists() {
@@ -2377,7 +2399,7 @@ fn c40_is_keyword_switch_not_a_keyword() {
                     r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/rename","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":0,"character":3}},"newName":"switch"}}}}"#,
                     uri
                 ),
-                // Must NOT say "switch is a keyword" — switch is a foreign/teaching word
+                // Must NOT say "switch is a keyword" — switch is paused syntax.
                 expect_contains: Some(vec!["result".to_string()]),
             },
             TranscriptStep::Send {
@@ -2390,7 +2412,7 @@ fn c40_is_keyword_switch_not_a_keyword() {
 
 #[test]
 fn c40_is_keyword_import_not_a_keyword() {
-    // `import` is FOREIGN_IMPORT — renamed to `use` (D-S16-USE). Not a keyword.
+    // `import` is paused retired syntax, not a keyword.
     // Rename to "import" should NOT be rejected as a keyword.
     let jet = jet_bin();
     if !jet.exists() {
@@ -2421,7 +2443,7 @@ fn c40_is_keyword_import_not_a_keyword() {
                     r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/rename","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":0,"character":3}},"newName":"import"}}}}"#,
                     uri
                 ),
-                // Must NOT say "import is a keyword" — import is a foreign/teaching word
+                // Must NOT say "import is a keyword" — import is paused syntax.
                 expect_contains: Some(vec!["result".to_string()]),
             },
             TranscriptStep::Send {
@@ -2458,7 +2480,7 @@ fn c40_keyword_like_identifier_usable_as_variable() {
 
 #[test]
 fn c40_drift_guard_foreign_words_not_blocked_in_rename() {
-    // Structural drift guard: foreign/retired words that were wrongly listed in
+    // Structural drift guard: paused/live teaching words that were wrongly listed in
     // JET_KEYWORDS must NOT block rename. Test via live LSP rename endpoint.
     //
     // For each banned word, we rename a function to that name and assert the
@@ -2469,7 +2491,7 @@ fn c40_drift_guard_foreign_words_not_blocked_in_rename() {
         return;
     }
 
-    // `switch` — FOREIGN_SWITCH, not a keyword; was wrongly in JET_KEYWORDS
+    // `switch` — paused retired syntax, not a keyword; was wrongly in JET_KEYWORDS
     {
         let source = "fn greet() {}\nfn run() {\n    greet();\n}\n";
         let uri = "file:///tmp/c40_drift_switch.jet";
@@ -2516,7 +2538,7 @@ fn c40_drift_guard_foreign_words_not_blocked_in_rename() {
 ///
 /// Since Completion::JET_KEYWORDS is now a direct alias (`= Syntax::JET_KEYWORD_LIST`),
 /// this test is a pointer-equality sanity check. It also encodes that key words
-/// we care about are present, and that FOREIGN_* words are absent.
+/// we care about are present, and that paused/live teaching words are absent.
 #[test]
 fn c44_lsp_keywords_derive_from_syntax() {
     use jet::Syntax;
@@ -2557,7 +2579,7 @@ fn c44_lsp_keywords_derive_from_syntax() {
             kw
         );
     }
-    // 2. FOREIGN_* teaching words must NOT be in the keyword list.
+    // 2. Paused/live teaching words must NOT be in the keyword list.
     let banned = [
         Syntax::FOREIGN_SWITCH,
         Syntax::FOREIGN_IMPORT,

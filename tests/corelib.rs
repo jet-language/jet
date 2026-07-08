@@ -1,4 +1,6 @@
 use std::fs;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -16,8 +18,155 @@ fn compile_temp(name: &str, src: &str) -> jet::CompileOutput {
     })
 }
 
+#[test]
+fn comptime_find_glob_records_sorted_lock_inputs() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_comptime_find_{}_{}",
+        std::process::id(),
+        "lock"
+    ));
+    fs::create_dir_all(dir.join("inputs/nested")).unwrap();
+    fs::write(dir.join("inputs/alpha-1.txt"), "alpha").unwrap();
+    fs::write(dir.join("inputs/nested/beta-2.txt"), "beta").unwrap();
+    fs::write(dir.join("inputs/nested/gamma-3.txt"), "gamma").unwrap();
+    fs::write(dir.join("inputs/nested/beta-2.md"), "skip").unwrap();
+    let src = r#"
+comptime PATHS = find("inputs/**/{{alpha,beta}}-[0-9].t?t")
+
+fn run() {
+    print(PATHS.join("|"))
+}
+"#;
+    let path = dir.join("main.jet");
+    fs::write(&path, src).unwrap();
+    let shown = path.to_string_lossy();
+    let out = jet::compile_with_path(src, &shown).unwrap_or_else(|diags| {
+        panic!(
+            "front end rejected find fixture:\n{}",
+            jet::render_diagnostics(&shown, src, &diags)
+        )
+    });
+    let paths: Vec<&str> = out
+        .comptime_inputs
+        .iter()
+        .map(|input| input.path.as_str())
+        .collect();
+    assert_eq!(
+        paths,
+        vec!["inputs/alpha-1.txt", "inputs/nested/beta-2.txt"]
+    );
+    assert!(out
+        .comptime_inputs
+        .iter()
+        .all(|input| input.hash.len() == 64));
+}
+
 fn jet_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_jet"))
+}
+
+#[test]
+fn core_args_audit_surface_runs_and_reports_suggestions() {
+    let dir = std::env::temp_dir().join(format!("jet_corelib_args_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let src = r#"
+use core.args as args
+
+fn run() {
+    spec :: args.spec()
+        .flag_short("verbose", "v", "print extra detail")
+        .option_env("profile", "config profile", "NAME", "JET_ARGS_PROFILE")
+        .option_int("jobs", "worker count", "N")
+        .repeat("tag", "classification tag", "TAG")
+    parsed :: spec.parse(["tool", "-vv", "--jobs", "8", "--tag", "a", "--tag=b"]) ?? panic("parse failed")
+    print(parsed.flag("verbose"))
+    print(parsed.option("profile") ?? "")
+    print(parsed.option_int("jobs") ?? 0)
+    print(parsed.options("tag").len())
+    if spec.parse(["tool", "--verbse"]) == {
+        ok(_) -> {
+            print("unexpected")
+        }
+        err(e) -> {
+            print(e)
+        }
+    }
+}
+"#;
+    let (_code, stdout, stderr) = build_and_run(
+        &dir,
+        "args_audit",
+        src,
+        &[("JET_ARGS_PROFILE", "dev")],
+        None,
+    );
+    assert!(
+        stdout.contains("unknown option `--verbse`")
+            && stdout.contains("did you mean `--verbose`?"),
+        "core.args suggestion missing:\nstdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+    assert!(stdout.starts_with("true\ndev\n8\n2\n"));
+}
+
+#[test]
+fn core_os_facts_and_interrupt_hook_compile() {
+    let dir = std::env::temp_dir().join(format!("jet_corelib_os_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let src = r#"
+use core.os as os
+
+fn run() {
+    os.on_interrupt(() => {
+        print("interrupted")
+    })
+    print(os.name().len() > 0)
+    print(os.family().len() > 0)
+    print(os.arch().len() > 0)
+    print(os.cpu_count() >= 1)
+    print(os.pid() >= 1)
+    print(os.hostname().len() > 0)
+}
+"#;
+    let (code, stdout, stderr) = build_and_run(&dir, "os_facts", src, &[], None);
+    assert_eq!(code, 0, "core.os program failed: {stderr}");
+    assert_eq!(stdout, "true\ntrue\ntrue\ntrue\ntrue\ntrue\n");
+}
+
+#[test]
+fn core_os_interrupt_prelude_is_emitted_only_when_used() {
+    let facts_only = compile_temp(
+        "os_facts_only.jet",
+        r#"
+use core.os as os
+
+fn run() {
+    print(os.name())
+}
+"#,
+    );
+    assert!(
+        !facts_only.rust.contains("mod jet_os_unix")
+            && !facts_only.rust.contains("jet_std_os_on_interrupt"),
+        "ordinary core.os facts should not inherit signal FFI"
+    );
+
+    let with_interrupt = compile_temp(
+        "os_interrupt.jet",
+        r#"
+use core.os as os
+
+fn run() {
+    os.on_interrupt(() => {
+        print("interrupted")
+    })
+}
+"#,
+    );
+    assert!(
+        with_interrupt.rust.contains("mod jet_os_unix")
+            && with_interrupt.rust.contains("jet_std_os_on_interrupt"),
+        "on_interrupt should keep its vetted signal helper"
+    );
 }
 
 fn build_and_run(
@@ -39,16 +188,25 @@ fn build_and_run(
     let rs = dir.join(format!("{name}.rs"));
     let bin = dir.join(name);
     fs::write(&rs, &out.rust).unwrap();
-    let rustc = Command::new("rustc")
-        .args([
-            "--edition",
-            "2021",
-            rs.to_str().unwrap(),
-            "-o",
-            bin.to_str().unwrap(),
-        ])
-        .output()
-        .unwrap();
+    let mut rustc_cmd = Command::new("rustc");
+    rustc_cmd.args([
+        "--edition",
+        "2021",
+        rs.to_str().unwrap(),
+        "-o",
+        bin.to_str().unwrap(),
+    ]);
+    if let Some(link) = &out.ffi {
+        rustc_cmd
+            .arg("--extern")
+            .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
+        if link.deps_dir.is_dir() {
+            rustc_cmd
+                .arg("-L")
+                .arg(format!("dependency={}", link.deps_dir.display()));
+        }
+    }
+    let rustc = rustc_cmd.output().unwrap();
     assert!(
         rustc.status.success(),
         "rustc rejected generated code:\n{}",
@@ -81,6 +239,105 @@ fn build_and_run(
         String::from_utf8_lossy(&out.stdout).into_owned(),
         String::from_utf8_lossy(&out.stderr).into_owned(),
     )
+}
+
+#[cfg(unix)]
+fn write_executable(path: &std::path::Path, body: &str) {
+    fs::write(path, body).unwrap();
+    let mut perms = fs::metadata(path).unwrap().permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(path, perms).unwrap();
+}
+
+fn jet_string_path(path: &std::path::Path) -> String {
+    path.to_string_lossy()
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+}
+
+fn dns_name_wire(name: &str) -> Vec<u8> {
+    let mut out = Vec::new();
+    for label in name.trim_end_matches('.').split('.') {
+        out.push(label.len() as u8);
+        out.extend_from_slice(label.as_bytes());
+    }
+    out.push(0);
+    out
+}
+
+fn dns_fixture_response(query: &[u8]) -> Vec<u8> {
+    let mut pos = 12usize;
+    while pos < query.len() && query[pos] != 0 {
+        pos += query[pos] as usize + 1;
+    }
+    pos += 1;
+    let qtype = u16::from_be_bytes([query[pos], query[pos + 1]]);
+    let question_end = pos + 4;
+    let mut resp = Vec::new();
+    resp.extend_from_slice(&query[0..2]);
+    resp.extend_from_slice(&0x8180u16.to_be_bytes());
+    resp.extend_from_slice(&1u16.to_be_bytes());
+    resp.extend_from_slice(&1u16.to_be_bytes());
+    resp.extend_from_slice(&0u16.to_be_bytes());
+    resp.extend_from_slice(&0u16.to_be_bytes());
+    resp.extend_from_slice(&query[12..question_end]);
+    resp.extend_from_slice(&[0xc0, 0x0c]);
+    resp.extend_from_slice(&qtype.to_be_bytes());
+    resp.extend_from_slice(&1u16.to_be_bytes());
+    resp.extend_from_slice(&0u32.to_be_bytes());
+    let rdata = match qtype {
+        16 => {
+            let mut r = Vec::new();
+            r.push(3);
+            r.extend_from_slice(b"jet");
+            r
+        }
+        33 => {
+            let mut r = Vec::new();
+            r.extend_from_slice(&10u16.to_be_bytes());
+            r.extend_from_slice(&20u16.to_be_bytes());
+            r.extend_from_slice(&443u16.to_be_bytes());
+            r.extend_from_slice(&dns_name_wire("srv.example.test"));
+            r
+        }
+        _ => Vec::new(),
+    };
+    resp.extend_from_slice(&(rdata.len() as u16).to_be_bytes());
+    resp.extend_from_slice(&rdata);
+    resp
+}
+
+#[test]
+fn core_net_dns_txt_and_srv_are_real_udp_queries() {
+    let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    let addr = socket.local_addr().unwrap();
+    let server = std::thread::spawn(move || {
+        for _ in 0..2 {
+            let mut buf = [0u8; 512];
+            let (n, peer) = socket.recv_from(&mut buf).unwrap();
+            let resp = dns_fixture_response(&buf[..n]);
+            socket.send_to(&resp, peer).unwrap();
+        }
+    });
+    let dir = std::env::temp_dir().join(format!("jet_core_net_dns_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let src = format!(
+        r#"
+use core.net as net
+
+fn run() {{
+    txts :: net.dns_txt_at("{}", "service.example.test", 1000) ?? panic("txt")
+    print(txts[0])
+    srvs :: net.dns_srv_at("{}", "_jet._tcp.example.test", 1000) ?? panic("srv")
+    print("{{net.dns_srv_target(srvs[0])}}:{{net.dns_srv_port(srvs[0])}}")
+}}
+"#,
+        addr, addr
+    );
+    let (code, stdout, stderr) = build_and_run(&dir, "dns_fixture", &src, &[], None);
+    server.join().unwrap();
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(stdout, "jet\nsrv.example.test:443\n");
 }
 
 #[test]
@@ -143,6 +400,220 @@ fn run() {
     );
     assert!(out.rust.contains("jet_enc_csv_decode"));
     assert!(out.rust.contains("jet_data_count"));
+}
+
+#[test]
+fn core_files_depth_example_runs() {
+    let jet = jet_bin();
+    if !jet.exists() {
+        return;
+    }
+    let out = Command::new(&jet)
+        .args(["run", "examples/features/io/files_depth.jet"])
+        .output()
+        .expect("run files_depth");
+    assert!(
+        out.status.success(),
+        "files_depth failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let expected = fs::read_to_string("examples/features/expected/io/files_depth.out").unwrap();
+    assert_eq!(String::from_utf8_lossy(&out.stdout), expected);
+}
+
+#[test]
+fn core_watcher_example_runs() {
+    let jet = jet_bin();
+    if !jet.exists() {
+        return;
+    }
+    let out = Command::new(&jet)
+        .args(["run", "examples/features/io/watcher.jet"])
+        .output()
+        .expect("run watcher");
+    assert!(
+        out.status.success(),
+        "watcher failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let expected = fs::read_to_string("examples/features/expected/io/watcher.out").unwrap();
+    assert_eq!(String::from_utf8_lossy(&out.stdout), expected);
+}
+
+#[cfg(unix)]
+#[test]
+fn core_process_builder_pipeline_and_spawn_run() {
+    let dir = std::env::temp_dir().join(format!("jet_corelib_process_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let work = dir.join("work");
+    fs::create_dir_all(&work).unwrap();
+
+    let probe = dir.join("probe.sh");
+    let emit = dir.join("emit.sh");
+    let cat = dir.join("cat.sh");
+    let lines = dir.join("lines.sh");
+    write_executable(
+        &probe,
+        "#!/bin/sh\nprintf 'env=%s\\n' \"$JET_PROCESS_TEST\"\nprintf 'cwd=%s\\n' \"$(pwd)\"\nread line\nprintf 'stdin=%s\\n' \"$line\"\n",
+    );
+    write_executable(&emit, "#!/bin/sh\nprintf 'pipe-ok\\n'\n");
+    write_executable(&cat, "#!/bin/sh\ncat\n");
+    write_executable(&lines, "#!/bin/sh\nprintf 'line-one\\nline-two\\n'\n");
+
+    let src = format!(
+        r#"
+use core.process as process
+
+fn run() {{
+    spec :: process.cmd(["{probe}"]).cwd("{work}").env_clear().env("JET_PROCESS_TEST", "ok").stdin_text("from-stdin\n").stdout_capture().stderr_capture().timeout_ms(2000).output_limit(10000)
+    result :: spec.run() ?? panic("process run failed")
+    print(result.success)
+    print(result.code)
+    print(result.timed_out)
+    print(result.output)
+
+    piped :: process.pipeline([["{emit}"], ["{cat}"]]) ?? panic("pipeline failed")
+    print(piped.success)
+    print(piped.output)
+
+    child :: process.cmd(["{lines}"]).stdout_capture().spawn() ?? panic("spawn failed")
+    line1 :: child.read_stdout_line() ?? panic("read failed")
+    print(line1 ?? "none")
+    waited :: child.wait() ?? panic("wait failed")
+    print(waited.success)
+}}
+"#,
+        probe = jet_string_path(&probe),
+        work = jet_string_path(&work),
+        emit = jet_string_path(&emit),
+        cat = jet_string_path(&cat),
+        lines = jet_string_path(&lines)
+    );
+
+    let (code, stdout, stderr) = build_and_run(&dir, "process_api", &src, &[], None);
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert!(stdout.contains("true\n0\nfalse\n"), "{stdout}");
+    assert!(stdout.contains("env=ok\n"), "{stdout}");
+    assert!(
+        stdout.contains(&format!("cwd={}\n", work.display())),
+        "{stdout}"
+    );
+    assert!(stdout.contains("stdin=from-stdin\n"), "{stdout}");
+    assert!(stdout.contains("pipe-ok\n"), "{stdout}");
+    assert!(stdout.contains("line-one\n"), "{stdout}");
+}
+
+#[test]
+fn core_time_calendar_zone_and_dst_run() {
+    let source_zone = std::env::var_os("TZDIR")
+        .map(|dir| PathBuf::from(dir).join("America/New_York"))
+        .filter(|path| path.exists())
+        .unwrap_or_else(|| PathBuf::from("/usr/share/zoneinfo/America/New_York"));
+    if !source_zone.exists() {
+        return;
+    }
+    let dir =
+        std::env::temp_dir().join(format!("jet_corelib_time_calendar_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let tzdb = dir.join("tzdb");
+    fs::create_dir_all(tzdb.join("America")).unwrap();
+    fs::copy(&source_zone, tzdb.join("America/New_York")).unwrap();
+    let src = r#"
+use core.time as time
+use core.time.date as Date
+
+fn run() {
+    zone :: time.zone("America/New_York") ?? panic("missing zone")
+    local :: time.zoned_local(Date.new(2024, 3, 10), time.local_time(1, 30, 0), zone)
+    print(local.format("yyyy-MM-dd HH:mm:ss VV XXX"))
+    civil :: local.add_period(time.period_days(1))
+    absolute :: local.add_duration(time.hours(24))
+    print(civil.format("yyyy-MM-dd HH:mm:ss VV XXX"))
+    print(absolute.format("yyyy-MM-dd HH:mm:ss VV XXX"))
+    print(local.to_datetime().format_rfc3339())
+    parsed :: time.parse_rfc3339("2024-03-10T06:30:00Z") ?? panic("bad parse")
+    print(parsed.in_zone(zone).format("yyyy-MM-dd HH:mm:ss VV XXX"))
+}
+"#;
+    let tzdb_env = tzdb.to_string_lossy().into_owned();
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "time_calendar",
+        src,
+        &[("JET_TZDB_DIR", &tzdb_env)],
+        None,
+    );
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert_eq!(
+        stdout,
+        "2024-03-10 01:30:00 America/New_York -05:00\n2024-03-11 01:30:00 America/New_York -04:00\n2024-03-11 02:30:00 America/New_York -04:00\n2024-03-10T06:30:00Z\n2024-03-10 01:30:00 America/New_York -05:00\n"
+    );
+}
+
+#[test]
+fn core_url_mime_parse_join_query_and_http_url_run() {
+    let dir = std::env::temp_dir().join(format!("jet_corelib_url_mime_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let src = r#"
+use core.mime as mime
+use core.url as url
+
+fn run() {
+    base :: url.parse("https://Bücher.example:443/a/./b/../c?x=1#frag") ?? panic("bad url")
+    print(base.to_string())
+    print(base.host() ?? "none")
+    print(base.path())
+    print(base.query_pairs()[0][0])
+    print(base.query_pairs()[0][1])
+    rel :: base.join("../notify?user=ada lovelace&user=grace#done") ?? panic("bad join")
+    print(rel.to_string())
+    print(rel.path_segments().join("|"))
+    print(rel.fragment() ?? "none")
+    print(url.query([["user", "ada lovelace"], ["user", "grace"], ["empty", ""]]))
+    print(url.percent_encode("a b/c"))
+    print(url.percent_decode("a%20b%2Fc") ?? "bad")
+    html :: mime.parse("Text/HTML; charset=UTF-8") ?? panic("bad mime")
+    print(html.essence())
+    print(html.param("charset") ?? "none")
+    print(mime.from_extension("png") ?? "none")
+    print(mime.extension("image/png") ?? "none")
+    png :: mime.parse("image/png") ?? panic("bad mime")
+    print(url.data(png, "<h1>Hi</h1>").to_string())
+    print(url.file("/tmp/a b.txt").to_string())
+}
+"#;
+    let (code, stdout, stderr) = build_and_run(&dir, "url_mime", src, &[], None);
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert_eq!(
+        stdout,
+        "https://xn--bcher-kva.example:443/a/c?x=1#frag\nxn--bcher-kva.example\n/a/c\nx\n1\nhttps://xn--bcher-kva.example:443/notify?user=ada%20lovelace&user=grace#done\nnotify\ndone\nuser=ada%20lovelace&user=grace&empty=\na%20b%2Fc\na b/c\ntext/html\nUTF-8\nimage/png\npng\ndata:image/png,%3Ch1%3EHi%3C%2Fh1%3E\nfile:///tmp/a%20b.txt\n"
+    );
+}
+
+#[test]
+fn core_http_client_accepts_typed_url_in_codegen() {
+    let out = compile_temp(
+        "http_url.jet",
+        r#"
+use core.http.client as http
+use core.url as url
+
+fn run() {
+    u :: url.parse("https://example.com/a") ?? panic("bad url")
+    req :: http.request("GET", u).timeout(1)
+}
+"#,
+    );
+    assert!(
+        out.rust.contains(".to_string_value()"),
+        "typed Url should render to String at HTTP boundary:\n{}",
+        out.rust
+    );
 }
 
 #[test]
@@ -257,6 +728,336 @@ fn run() {
     );
     assert_eq!(code, 0);
     assert_eq!(stdout, "9\n0.05534409481976061\n1700000000000\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn random_distribution_surface_is_deterministic() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc {
+        eprintln!("note: skipping random distribution test (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_corelib_random_dist_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "random_dist",
+        r#"
+use core.random as random
+
+fn run() {
+    random.seed(7)
+    print(random.bool(1.0))
+    print(random.float_range(10.0, 20.0) >= 10.0)
+    random.seed(11)
+    a := random.normal(0.0, 1.0)
+    random.seed(11)
+    b := random.normal(0.0, 1.0)
+    print(a == b)
+    print(random.exponential(2.0) >= 0.0)
+    items := ["red", "green", "blue"]
+    weights := [0.0, 1.0, 0.0]
+    print(random.weighted_pick(items, weights) ?? "none")
+    print(random.sample(items, 2).len())
+    print(random.bytes(4).len())
+    rng := random.rng(99)
+    print(rng.float_range(1.0, 2.0) >= 1.0)
+    print(rng.bool(1.0))
+    print(rng.weighted_pick(items, weights) ?? "none")
+    print(rng.sample(items, 2).len())
+    print(rng.bytes(3).len())
+    child := rng.split()
+    print(child.int(1, 1))
+}
+"#,
+        &[],
+        None,
+    );
+    assert_eq!(code, 0, "random distribution test failed: {stderr}");
+    assert_eq!(
+        stdout,
+        "true\ntrue\ntrue\ntrue\ngreen\n2\n4\ntrue\ntrue\ngreen\n2\n3\n1\n"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn encoding_breadth_codecs_share_data_tree() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc {
+        eprintln!("note: skipping encoding breadth test (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_corelib_encoding_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "encoding_breadth",
+        r#"
+use core.encoding.json as json
+use core.encoding.jsonl as jsonl
+use core.encoding.xml as xml
+use core.encoding.cbor as cbor
+use core.encoding.base64 as base64
+use core.encoding.base32 as base32
+
+fn run() {
+    data := json.parse("{{\"b\":2,\"a\":1}}") ?? panic("json")
+    print(json.canonical(data))
+    print(json.events(data).contains("object_start $"))
+    rows := jsonl.parse("{{\"a\":1}}\n{{\"a\":2}}\n") ?? panic("jsonl")
+    print(rows.len())
+    print(jsonl.to_string(rows).contains("\"a\":1"))
+    doc := xml.parse("<r xmlns:h=\"urn:h\"><h:c id=\"7\">ok</h:c></r>") ?? panic("xml")
+    print(xml.to_string(doc))
+    encoded := cbor.encode(data)
+    print(encoded.len() > 0)
+    decoded := cbor.decode(encoded) ?? panic("cbor")
+    print(json.canonical(decoded))
+    bytes: [U8] :: [104, 105]
+    u := base64.encode_url(bytes)
+    print(u)
+    print((base64.decode_url(u) ?? panic("base64url")).len())
+    b32 := base32.encode(bytes)
+    print(b32)
+    print((base32.decode(b32) ?? panic("base32")).len())
+}
+"#,
+        &[],
+        None,
+    );
+    assert_eq!(code, 0, "encoding breadth test failed: {stderr}");
+    assert_eq!(
+        stdout,
+        "{\"a\":1,\"b\":2}\ntrue\n2\ntrue\n<r xmlns:h=\"urn:h\"><h:c id=\"7\">ok</h:c></r>\ntrue\n{\"a\":1,\"b\":2}\naGk\n2\nNBUQ====\n2\n"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn text_unicode_audit_surface_runs() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc {
+        eprintln!("note: skipping text unicode test (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_corelib_text_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "text_unicode",
+        r#"
+use core.text as text
+
+fn run() {
+    print(text.caseless_eq("Straße", "STRASSE"))
+    print(text.nfc("é") == "é")
+    print(text.nfkc("ﬃ"))
+    print(text.graphemes("é👍").len())
+    print(text.words("Hi, κόσμε 123.").len())
+    print(text.sentences("One. Two!").len())
+    print(text.width("表a"))
+    print(text.is_alphabetic("Ж"))
+    print(text.is_numeric("٣"))
+    print(text.pad_start("7", 3, "0"))
+    print(text.center("x", 3, "."))
+    print(text.starts_any("jetpack", ["jet", "go"]))
+    print(text.char_indices("éa")[1])
+}
+"#,
+        &[],
+        None,
+    );
+    assert_eq!(code, 0, "text unicode test failed: {stderr}");
+    assert_eq!(
+        stdout,
+        "true\ntrue\nffi\n2\n3\n2\n3\ntrue\ntrue\n007\n.x.\ntrue\n2:a\n"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn db_checked_sql_params_feed_parameterized_execute() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc {
+        eprintln!("note: skipping db checked sql test (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_corelib_db_sql_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "db_checked_sql",
+        r#"
+use core.db as db
+
+fn run() {
+    conn := db.open_memory()
+    created :: db.migrate(conn, "person-v1", [
+        "CREATE TABLE person (id INTEGER PRIMARY KEY, name TEXT, active INTEGER)"
+    ]) ?? panic("migrate")
+    skipped :: db.migrate(conn, "person-v1", [
+        "CREATE TABLE person (id INTEGER PRIMARY KEY, name TEXT, active INTEGER)"
+    ]) ?? panic("migrate again")
+    id :: 7
+    name :: "Ada"
+    insert :: sql"INSERT INTO person (id, name, active) VALUES ({id}, {name}, 1)"
+    _inserted :: conn.execute(insert.template(), db.params(insert)) ?? panic("insert")
+    failed :: db.transaction(conn, "bad batch", [
+        "INSERT INTO person (id, name, active) VALUES (8, 'Grace', 1)",
+        "INSERT INTO missing_table VALUES (1)"
+    ]) ?? 0
+    row :: conn.query_one("SELECT id, name, active FROM person WHERE id = ?", [DbValue.Int(7)]) ?? panic("query")
+    found :: row ?? panic("missing")
+    count :: conn.query_one("SELECT COUNT(*) AS n FROM person", []) ?? panic("count")
+    counted :: count ?? panic("missing count")
+    print(created)
+    print(skipped)
+    print(failed)
+    print(db.row_int(found, "id") ?? 0)
+    print(db.row_text(found, "name") ?? "bad")
+    print(db.row_int(found, "active") ?? 0)
+    print(db.row_int(counted, "n") ?? 0)
+    _closed :: conn.close()
+}
+"#,
+        &[],
+        None,
+    );
+    assert_eq!(code, 0, "db checked sql test failed: {stderr}");
+    assert_eq!(stdout, "1\n0\n0\n7\nAda\n1\n1\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn core_fmt_human_formatting_surface_runs() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc {
+        eprintln!("note: skipping core.fmt runtime test (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_corelib_fmt_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "human_format",
+        r#"
+use core.fmt as fmt
+
+fn run() {
+    print(fmt.number(1204331))
+    print(fmt.decimal(1234.5678, 2))
+    print(fmt.percent(0.1234, 1))
+    print(fmt.bytes(1500000000))
+    print(fmt.duration(222000))
+    print(fmt.ordinal(21))
+    print(fmt.plural(2, "row", "rows"))
+    print(fmt.pad_left("7", 3, "0"))
+    print(fmt.pad_right("go", 4, "."))
+    print(fmt.pad_center("x", 3, "."))
+}
+"#,
+        &[],
+        None,
+    );
+    assert_eq!(code, 0, "core.fmt program failed: {stderr}");
+    assert_eq!(
+        stdout,
+        "1,204,331\n1,234.57\n12.3%\n1.5 GB\n3m 42s\n21st\n2 rows\n007\ngo..\n.x.\n"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn core_log_structured_file_sink_runs() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc {
+        eprintln!("note: skipping core.log file sink test (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_corelib_log_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "log_file",
+        r#"
+use core.log as log
+
+fn run() {
+    log.set_sink("jsonl", "service.log")
+    s :: log.span("request")
+    log.enter(s)
+    log.info_fields("served", [log.field("route", "/"), log.int("status", 200), log.redact("token")])
+    log.close(s)
+    print("done")
+}
+"#,
+        &[],
+        None,
+    );
+    assert_eq!(code, 0, "core.log file sink failed: {stderr}");
+    assert_eq!(stdout, "done\n");
+    let log = fs::read_to_string(dir.join("service.log")).expect("service.log must be written");
+    assert!(log.contains("\"body\":\"served\""), "log: {log}");
+    assert!(log.contains("\"route\":\"/\""), "log: {log}");
+    assert!(log.contains("\"status\":200"), "log: {log}");
+    assert!(log.contains("\"token\":\"[redacted]\""), "log: {log}");
+    assert!(log.contains("\"spans\":[\"request\"]"), "log: {log}");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn core_testing_helpers_run_against_files() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc {
+        eprintln!("note: skipping core.testing helper test (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_corelib_testing_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(dir.join("corpus")).unwrap();
+    fs::write(dir.join("fixture.txt"), "fixture").unwrap();
+    fs::write(dir.join("golden.txt"), "gold").unwrap();
+    fs::write(dir.join("corpus/a.txt"), "alpha").unwrap();
+    fs::write(dir.join("corpus/b.txt"), "beta").unwrap();
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "testing_helpers",
+        r#"
+use core.testing as testing
+
+fn run() {
+    print(testing.fixture("fixture.txt"))
+    print(testing.golden("golden.txt", "gold"))
+    print(testing.snap("case", "snap"))
+    print(testing.corpus("corpus").len())
+    print(testing.temp_dir("case").len() > 0)
+    clock :: testing.fake_clock(99)
+    rng := testing.fake_rng(5)
+    print(clock.now())
+    print(rng.int(1, 4) >= 1)
+    print(testing.bench_budget("parse", 10))
+}
+"#,
+        &[],
+        None,
+    );
+    assert_eq!(code, 0, "core.testing helpers failed: {stderr}");
+    assert_eq!(
+        stdout,
+        "fixture\ntrue\ntrue\n2\ntrue\n99\ntrue\ntrue\n"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.join("__snapshots__/case.snap")).unwrap(),
+        "snap"
+    );
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -839,6 +1640,23 @@ fn core_module_items_covers_known_core_modules() {
         "core_module_items has arms for modules NOT in KNOWN_CORE_MODULES: {:?}\n\
          Either add to KNOWN_CORE_MODULES in Source/Loader.rs or remove the arm.",
         extra_in_items
+    );
+}
+
+#[test]
+fn core_reference_lists_every_built_core_module() {
+    let docs = fs::read_to_string("docs/reference/core-library.md")
+        .expect("core library reference must exist");
+    let missing: Vec<&str> = jet::Loader::KNOWN_CORE_MODULES
+        .iter()
+        .copied()
+        .filter(|module| *module != "core")
+        .filter(|module| !docs.contains(&format!("`{module}`")))
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "docs/reference/core-library.md must list every built Core module from KNOWN_CORE_MODULES: {:?}",
+        missing
     );
 }
 

@@ -1,0 +1,21 @@
+use core.data as data
+
+@[Codable]
+struct Ticket {
+    team: String
+    minutes: Float
+}
+
+fn run() {
+    raw :: "team,minutes\nCore,4.0\nTools,5.0\nCore,8.0\nDocs,3.0"
+    rows :: data.csv<Ticket>(raw) ?? panic("bad csv")
+    focused :: data.filter(rows, (t) => t.minutes >= 4.0)
+    sorted :: data.sort_by(focused, (t) => t.team)
+    groups :: data.group_sum(sorted, (t) => t.team, (t) => t.minutes)
+    values :: [4.0, 5.0, 8.0, 3.0]
+    summary :: data.describe(values)
+    print(data.count(sorted))
+    print(data.bar_text(groups))
+    print(summary.count)
+    print(summary.median)
+}

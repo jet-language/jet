@@ -10,6 +10,9 @@ use aes_gcm::{
 };
 use chacha20poly1305::{ChaCha20Poly1305, Nonce as ChaNonce};
 use ed25519_dalek::{Signer, SigningKey, Verifier, VerifyingKey};
+use hkdf::Hkdf;
+use sha2::{Digest, Sha512};
+use subtle::ConstantTimeEq;
 
 const MAGIC: &[u8; 4] = b"JETC";
 const VERSION: u8 = 1;
@@ -197,4 +200,100 @@ pub fn jet_crypto_verify_impl(
     verifying_key
         .verify(message, &sig)
         .map_err(|_| "crypto.verify: signature invalid".to_string())
+}
+
+pub fn jet_crypto_sha512_impl(data: &Vec<u8>) -> String {
+    let digest = Sha512::digest(data);
+    hex_encode(&digest)
+}
+
+pub fn jet_crypto_blake3_impl(data: &Vec<u8>) -> String {
+    let digest = blake3::hash(data);
+    digest.to_hex().to_string()
+}
+
+pub fn jet_crypto_constant_time_eq_impl(a: &Vec<u8>, b: &Vec<u8>) -> bool {
+    a.as_slice().ct_eq(b.as_slice()).into()
+}
+
+pub fn jet_crypto_hkdf_sha256_impl(
+    ikm: &Vec<u8>,
+    salt: &Vec<u8>,
+    info: &Vec<u8>,
+    len: i64,
+) -> Result<Vec<u8>, String> {
+    if len < 0 {
+        return Err("crypto.hkdf_sha256 length must be non-negative".to_string());
+    }
+    let mut out = vec![0u8; len as usize];
+    let hk = Hkdf::<sha2::Sha256>::new(Some(salt.as_slice()), ikm);
+    hk.expand(info, &mut out)
+        .map_err(|_| "crypto.hkdf_sha256 length is too large".to_string())?;
+    Ok(out)
+}
+
+pub fn jet_crypto_x25519_public_impl(secret: &Vec<u8>) -> Result<Vec<u8>, String> {
+    let sk = bytes32(secret, "crypto.x25519_public secret")?;
+    let public = x25519_dalek::x25519(sk, x25519_dalek::X25519_BASEPOINT_BYTES);
+    Ok(public.to_vec())
+}
+
+pub fn jet_crypto_x25519_shared_impl(
+    secret: &Vec<u8>,
+    public: &Vec<u8>,
+) -> Result<Vec<u8>, String> {
+    let sk = bytes32(secret, "crypto.x25519_shared secret")?;
+    let pk = bytes32(public, "crypto.x25519_shared public key")?;
+    Ok(x25519_dalek::x25519(sk, pk).to_vec())
+}
+
+pub fn jet_crypto_password_hash_impl(password: &String) -> Result<String, String> {
+    let mut salt = [0u8; 16];
+    jet_fill_random(&mut salt);
+    jet_crypto_password_hash_with_salt_impl(password, &salt.to_vec())
+}
+
+pub fn jet_crypto_password_hash_with_salt_impl(
+    password: &String,
+    salt: &Vec<u8>,
+) -> Result<String, String> {
+    if salt.len() < 8 {
+        return Err("crypto.password_hash salt must be at least 8 bytes".to_string());
+    }
+    let salt = argon2::password_hash::SaltString::encode_b64(salt)
+        .map_err(|e| format!("crypto.password_hash salt failed: {e}"))?;
+    let argon2 = argon2::Argon2::default();
+    argon2::PasswordHasher::hash_password(&argon2, password.as_bytes(), &salt)
+        .map(|h| h.to_string())
+        .map_err(|e| format!("crypto.password_hash failed: {e}"))
+}
+
+pub fn jet_crypto_password_verify_impl(password: &String, stored: &String) -> bool {
+    let Ok(hash) = argon2::PasswordHash::new(stored) else {
+        return false;
+    };
+    argon2::PasswordVerifier::verify_password(
+        &argon2::Argon2::default(),
+        password.as_bytes(),
+        &hash,
+    )
+    .is_ok()
+}
+
+pub fn jet_crypto_file_seal_impl(key: &Vec<u8>, plaintext: &Vec<u8>) -> Result<Vec<u8>, String> {
+    jet_crypto_seal_impl(key, plaintext)
+}
+
+pub fn jet_crypto_file_open_impl(key: &Vec<u8>, envelope: &Vec<u8>) -> Result<Vec<u8>, String> {
+    jet_crypto_open_impl(key, envelope)
+}
+
+fn bytes32(bytes: &[u8], label: &str) -> Result<[u8; 32], String> {
+    bytes
+        .try_into()
+        .map_err(|_| format!("{label} expects 32 bytes, got {}", bytes.len()))
+}
+
+fn hex_encode(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{:02x}", b)).collect()
 }

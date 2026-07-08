@@ -92,7 +92,7 @@ fn layer_of_normalized(module: &str) -> RuntimeLayer {
         | "jet.regex" => RuntimeLayer::Alloc,
 
         // ── hosted: OS I/O, networking, processes ──────────────────────────
-        "core.io" | "core.env" | "core.process" | "core.files" | "core.path"
+        "core.io" | "core.env" | "core.process" | "core.files" | "core.path" | "core.watcher"
         | "core.net" | "core.term" | "core.time" | "core.time.date" | "core.time.datetime"
         | "core.tasks" | "jet.http" | "core.http.client" | "core.http.server" | "core.archive"
         | "core.raylib" | "core.compress.gzip" | "core.compress.zstd" | "jet.db"

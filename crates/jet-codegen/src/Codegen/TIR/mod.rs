@@ -1350,6 +1350,7 @@ pub enum TExprKind {
     SelectAfter {
         builder: Box<TExpr>,
         millis: Box<TExpr>,
+        value: Option<Box<TExpr>>,
     },
     /// D-CONCSELECT1=A: `.read(stream)` on a select builder.
     SelectRead {
@@ -1533,6 +1534,8 @@ pub enum TClosureOp {
     Fold,
     /// `group_by(f)` — `jet_list_group_by((recv).clone(), f)`.
     GroupBy,
+    /// `count_by(f)` — `jet_list_count_by((recv).clone(), f)`.
+    CountBy,
     /// `partition(f)` — inline emit; struct name embedded. `TupleStruct` is `JetTup_<hash>`.
     Partition { tuple_struct: String },
     // D-FAILCOMP1: failure-aware adapters.
@@ -1683,6 +1686,15 @@ pub enum TBuiltinOp {
     Sort,
     /// `join(sep)` → `(recv).iter().map(|x| x.jet_show()).collect::<Vec<_>>().join((a0).as_str())`.
     JoinSep,
+    Sum,
+    Product,
+    Min,
+    Max,
+    Flatten,
+    Intersperse,
+    Unzip {
+        tuple_struct: String,
+    },
     /// `clear()` → `(recv).clear()`.
     Clear,
     /// `chars()` → `(recv).chars().collect::<Vec<char>>()`.
@@ -1740,9 +1752,7 @@ pub enum TBuiltinOp {
     ContainsKey,
     /// `to_string()` (on a String receiver) → `(recv).jet_show()`.
     ToString,
-    /// c109 Phase 24: `Match.group(n)` (D-REGEX1) → `(recv).get((a0) as usize).cloned().
-    /// flatten()`. The `Match` renders to `Vec<Option<String>>`; `group` is plain
-    /// indexing into it (the result is `String?`).
+    /// D-REGEXENGINE1=A: `Match.group(n)` → `(recv).group(a0)`.
     MatchGroup,
     // D-ITER1: non-closure lazy adapters.
     /// `take(n)` → `jet_list_take((recv).clone(), a0)`.
@@ -1787,6 +1797,29 @@ pub enum TBuiltinOp {
     SetToList,
     /// `set.union(other)` → `(recv).union(&(a0)).cloned().collect::<std::collections::HashSet<_>>()`.
     SetUnion,
+    SortedSetFrom,
+    SortedSetInsert,
+    SortedSetRemove,
+    SortedSetToList,
+    SortedSetUnion,
+    PriorityQueueFrom,
+    PriorityQueuePeek,
+    PriorityQueueToSortedList,
+    LruPut,
+    LruGet,
+    LruCapacity,
+    LruKeys,
+    BitSetAdd,
+    BitSetRemove,
+    BitSetCount,
+    BitSetToList,
+    BitSetNew,
+    ByteBufferNew,
+    ByteBufferFrom,
+    ByteBufferWrite {
+        method: String,
+    },
+    ByteBufferToBytes,
     // D-TAG1: Bag<T> counted multiset (HashMap-backed).
     BagAdd,
     BagRemove,
@@ -1835,6 +1868,17 @@ pub enum THandleOp {
     FileWriterFlush,
     /// StdinHandle: `read_line()` → `{root}jet_std_io_stdin_read_line(&mut (recv))`.
     StdinReadLine,
+    /// Stdout/Stderr: stream writes and facts (D-COREIO1=A).
+    StdoutWrite,
+    StdoutWriteLine,
+    StdoutWriteBytes,
+    StdoutFlush,
+    StdoutIsTty,
+    StderrWrite,
+    StderrWriteLine,
+    StderrWriteBytes,
+    StderrFlush,
+    StderrIsTty,
     /// Stopwatch: `elapsed_millis()` → `{root}jet_stopwatch_elapsed_millis(&(recv))`.
     StopwatchElapsedMillis,
     /// D-DET1 Clock: `now()` → `{root}jet_clock_now(&(recv))` (current ms, no advance).
@@ -1849,10 +1893,26 @@ pub enum THandleOp {
     RngInt,
     /// D-DET1 Rng: `float()` → `{root}jet_rng_float(&mut (recv))` (draw in [0,1)).
     RngFloat,
+    /// D-RANDOMDIST1 Rng: `float_range(lo, hi)` → `{root}jet_rng_float_range(&mut (recv), a0, a1)`.
+    RngFloatRange,
     /// D-DET-CAPAPI Rng: `bool()` → `{root}jet_rng_bool(&mut (recv))` (coin draw).
     RngBool,
+    /// D-RANDOMDIST1 Rng: `bool(p)` → `{root}jet_rng_bool_p(&mut (recv), a0)`.
+    RngBoolP,
+    /// D-RANDOMDIST1 Rng: `normal(mean, stddev)` → `{root}jet_rng_normal(&mut (recv), a0, a1)`.
+    RngNormal,
+    /// D-RANDOMDIST1 Rng: `exponential(lambda)` → `{root}jet_rng_exponential(&mut (recv), a0)`.
+    RngExponential,
+    /// D-RANDOMDIST1 Rng: `bytes(n)` → `{root}jet_rng_bytes(&mut (recv), a0)`.
+    RngBytes,
+    /// D-RANDOMDIST1 Rng: `split()` → `{root}jet_rng_split(&mut (recv))`.
+    RngSplit,
     /// D-DET-CAPAPI Rng: `pick(list)` → `{root}jet_rng_pick(&mut (recv), &(a0))` (uniform `T?`).
     RngPick,
+    /// D-RANDOMDIST1 Rng: `weighted_pick(list, weights)` → `{root}jet_rng_weighted_pick(&mut (recv), &(a0), &(a1))`.
+    RngWeightedPick,
+    /// D-RANDOMDIST1 Rng: `sample(list, k)` → `{root}jet_rng_sample(&mut (recv), &(a0), a1)`.
+    RngSample,
     /// D-DET-CAPAPI Rng: `shuffle(&list)` → `{root}jet_rng_shuffle(&mut (recv), &mut (a0))` (in-place).
     RngShuffle,
     /// D-SOLVER-LIB1=A: `Solver.new(seed)` → `{root}jet_solver_new(seed)`.
@@ -1877,6 +1937,8 @@ pub enum THandleOp {
     GameInputPressed,
     /// D-DET-CAPAPI Duration: `millis()` → `{root}jet_duration_millis(&(recv))` (span as ms).
     DurationMillis,
+    /// D-TIME-CALENDAR1 Duration: `seconds()` → `{root}jet_duration_seconds(&(recv))`.
+    DurationSeconds,
     /// D-BIGINT1 / D-DECIMAL1: instance methods on precise numeric types.
     PreciseMethod {
         type_name: String,
@@ -1915,10 +1977,22 @@ pub enum THandleOp {
     HttpRespHeader,
     /// D-ARGS1: ArgsSpec `.flag(name, help)` → `(recv).flag(&a0, &a1)` → `JetArgsSpec`.
     ArgsSpecFlag,
+    ArgsSpecFlagShort,
     /// D-ARGS1: ArgsSpec `.option(name, help, meta)` → `(recv).option(&a0, &a1, &a2)` → `JetArgsSpec`.
     ArgsSpecOption,
+    ArgsSpecOptionShort,
+    ArgsSpecOptionDefault,
+    ArgsSpecOptionEnv,
+    ArgsSpecOptionInt,
+    ArgsSpecOptionFloat,
+    ArgsSpecOptionChoice,
+    ArgsSpecRepeat,
+    ArgsSpecRequiredOption,
     /// D-ARGS1: ArgsSpec `.positional(name, help)` → `(recv).positional(&a0, &a1)` → `JetArgsSpec`.
     ArgsSpecPositional,
+    ArgsSpecSubcommand,
+    ArgsSpecVersion,
+    ArgsSpecCompletion,
     /// D-ARGS1: ArgsSpec `.help()` → `(recv).help()` → `String`.
     ArgsSpecHelp,
     /// D-ARGS1: ArgsSpec `.parse(argv)` → `{root}jet_args_parse(&(recv), &(a0))` → `Result<JetParsedArgs, String>`.
@@ -1927,8 +2001,20 @@ pub enum THandleOp {
     ParsedArgsFlag,
     /// D-ARGS1: ParsedArgs `.option(name)` → `{root}jet_args_option(&(recv), &(a0))` → `Option<String>`.
     ParsedArgsOption,
+    ParsedArgsOptionInt,
+    ParsedArgsOptionFloat,
+    ParsedArgsOptions,
+    ParsedArgsSubcommand,
     /// D-ARGS1: ParsedArgs `.positional(n)` → `{root}jet_args_positional(&(recv), a0)` → `Option<String>`.
     ParsedArgsPositional,
+    /// D-PROCESS1: ProcessSpec builder/run/spawn methods.
+    ProcessSpecMethod {
+        method: String,
+    },
+    /// D-PROCESS1: ProcessChild control/streaming methods.
+    ProcessChildMethod {
+        method: String,
+    },
     /// D-ANY-JAI1 (c7jaiany §6): `reflect.of(x)`'s `Value` handle — plain
     /// inherent-method passthrough, same shape as `ArgsSpecHelp`.
     ReflectValueTypeName,
@@ -1965,6 +2051,8 @@ pub enum THandleOp {
     HttpRouterRegister {
         verb: &'static str,
         handler: String,
+        file: String,
+        line: usize,
     },
     /// D-SIMD2 / D-LINALG1: an INSTANCE method on a built-in math value type. Emits
     /// the prelude free function `{root}jet_math_<type>_<method>(&(recv), <args>)`
@@ -1981,6 +2069,10 @@ pub enum THandleOp {
     ReactiveSet,
     /// D-EVENT1=D: Event/Hook/Subscription/EventScope/EventTrace runtime methods.
     EventMethod {
+        method: String,
+    },
+    /// D-WATCH-SCOPE1: WatchHandle/WatchSet polling and callback methods.
+    WatchMethod {
         method: String,
     },
     /// D-HONESTNUM1=A: `Measurement<Float>` arithmetic / accessors.
@@ -2019,6 +2111,16 @@ pub enum THandleOp {
     },
     /// D-TIMEDEPTH1=A: method call on a civil-time type (Date/DateTime).
     CivilTimeMethod {
+        kind: String,
+        method: String,
+    },
+    /// D-URL1=A: method call on Url/Mime value types.
+    UrlMimeMethod {
+        kind: String,
+        method: String,
+    },
+    /// D-REGEXENGINE1=A: method call on Regex/Match value types.
+    RegexMethod {
         kind: String,
         method: String,
     },
@@ -3189,6 +3291,8 @@ fn mk() {
         assert!(core_call_covered("core.math", "max"));
         assert!(core_call_covered("core.math", "clamp"));
         assert!(core_call_covered("core.random", "pick"));
+        assert!(core_call_covered("core.random", "weighted_pick"));
+        assert!(core_call_covered("core.random", "sample"));
         assert!(core_call_covered("core.random", "shuffle"));
         assert!(core_call_covered("core.io", "eprint"));
         // c109 Phase 21 / D-TUPLE-DESTRUCT1: the `tasks.channel<T>()` producer is

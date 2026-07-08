@@ -320,7 +320,7 @@ fn semantic_token_type_for(tokens: &[Token], idx: usize, src: &str) -> Option<(u
         | TokKind::KwView => None,
 
         TokKind::Ident(name) => {
-            if is_foreign_semantic_word(name) {
+            if is_live_teaching_semantic_word(name) {
                 return None;
             }
             // Classify identifiers by name convention:
@@ -455,50 +455,16 @@ fn token_text<'a>(src: &'a str, tok: &Token) -> &'a str {
         .unwrap_or("")
 }
 
-pub(crate) fn is_foreign_semantic_word(name: &str) -> bool {
+pub(crate) fn is_live_teaching_semantic_word(name: &str) -> bool {
     matches!(
         name,
         crate::Syntax::FOREIGN_PRIVATE
             | crate::Syntax::FOREIGN_UNSAFE
-            | crate::Syntax::FOREIGN_AND
-            | crate::Syntax::FOREIGN_OR
-            | crate::Syntax::FOREIGN_NOT
-            | crate::Syntax::FOREIGN_WHILE
-            | crate::Syntax::FOREIGN_FOR
-            | crate::Syntax::FOREIGN_TRY
-            | crate::Syntax::FOREIGN_FUNC
-            | crate::Syntax::FOREIGN_DEF
-            | crate::Syntax::FOREIGN_IMPORT
-            | crate::Syntax::FOREIGN_MATCH
-            | crate::Syntax::FOREIGN_SWITCH
-            | crate::Syntax::FOREIGN_SOME
-            | crate::Syntax::FOREIGN_NIL
-            | crate::Syntax::FOREIGN_NONE_LOWER
-            | crate::Syntax::FOREIGN_SOME_LOWER
-            | crate::Syntax::FOREIGN_CLASS
-            | crate::Syntax::FOREIGN_INTERFACE
             | crate::Syntax::FOREIGN_NAMESPACE
-            | crate::Syntax::FOREIGN_DYN
-            | crate::Syntax::FOREIGN_BOX
-            | crate::Syntax::FOREIGN_CASE
-            | crate::Syntax::FOREIGN_DEFAULT
-            | crate::Syntax::FOREIGN_READ
-            | crate::Syntax::FOREIGN_WRITE
             | crate::Syntax::FOREIGN_OWNED
-            | crate::Syntax::FOREIGN_TEST
-            | crate::Syntax::FOREIGN_PURE
-            | crate::Syntax::FOREIGN_TODO
             | crate::Syntax::FOREIGN_SANITIZER
-            | crate::Syntax::FOREIGN_LAMBDA
             | crate::Syntax::FOREIGN_VEC
             | crate::Syntax::FOREIGN_DICT
-            | crate::Syntax::FOREIGN_APPEND
-            | crate::Syntax::FOREIGN_THROW
-            | crate::Syntax::FOREIGN_RAISE
-            | crate::Syntax::FOREIGN_CATCH
-            | crate::Syntax::FOREIGN_EXCEPT
-            | crate::Syntax::FOREIGN_UNWRAP
-            | crate::Syntax::FOREIGN_EXPECT
             | crate::Syntax::FOREIGN_EPRINTLN
             | crate::Syntax::FOREIGN_OPEN
             | crate::Syntax::FOREIGN_GETENV

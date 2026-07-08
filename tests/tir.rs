@@ -429,11 +429,11 @@ fn run() {
     assert_eq!(stdout, "success\nclient error\nother\nnetwork error\n");
 }
 
-/// An arm-head range switch over a scalar subject with an `else` (the mixed-switch
+/// An arm-head range dispatch over a scalar subject with an `else` (the mixed-dispatch
 /// `if/else if … else` lowering, with the parity `_jet_switch_subject` binding).
 /// Mirrors examples/features/basics/pattern_matching.jet's `score_grade`.
 #[test]
-fn arm_head_range_switch() {
+fn arm_head_range_dispatch() {
     if !have_rustc() {
         return;
     }
@@ -454,7 +454,7 @@ fn run() {
     print(grade(120))
 }
 ";
-    let (code, stdout) = build_and_run("tir_range_switch", src);
+    let (code, stdout) = build_and_run("tir_range_dispatch", src);
     assert_eq!(code, 0);
     assert_eq!(stdout, "A\nC\nF\n?\n");
 }
@@ -1234,12 +1234,8 @@ fn run() {
     assert_eq!(stdout, "missing\n");
 }
 
-// NOTE: a regex call (`re.is_match(…)?? …`) also routes through the TIR — the
-// emitted `<ffi_crate>::jet_regex_is_match(…)` matches the old emitter baseline
-// (verified via the forced-baseline diff). It is NOT given a `build_and_run` test
-// here because the call references the external FFI bridge crate (`cx.ffi_crate`),
-// which the bare-`rustc` harness can't resolve standalone — the same reason the
-// example suite drives the regex example through the project build, not this file.
+// NOTE: regex calls (`re.is_match(…)?? …`) route through the TIR and now emit
+// `jet_std::jet_regex_*` helpers, so regex-only programs build without an FFI bridge.
 
 // ===================================================================
 // c109 Phase 11: lambdas/closures, fan-out, closure-taking collection
@@ -3101,12 +3097,8 @@ fn run() {
     assert_eq!(stdout, "8081\napi\n");
 }
 
-/// c109 Phase 24: regex `Match` value type + `.group(n)` accessor (`74_regex`). The
-/// `Match?` value (`if m == Val(mat)` binds `mat: Match`) and `mat.group(0)` route.
-/// Regex needs the FFI bridge crate (not linkable from a standalone `rustc`), so this
-/// is a COMPILE-only check that the `Match.group` lowering emits the AST's
-/// `.get((n) as usize).cloned().flatten()` form (byte-parity is proven by the
-/// whole-suite diff on `74_regex` + the `74_regex` golden run).
+/// D-REGEXENGINE1=A: regex `Match` value type + `.group(n)` accessor. Regex is
+/// std-only now, so this pins `Match.group` to the opaque match-value method.
 #[test]
 fn regex_match_group() {
     let src = "\
@@ -3126,15 +3118,14 @@ fn run() {
     fs::write(&path, src).unwrap();
     let shown = path.to_string_lossy().into_owned();
     let out = jet::compile_with_path(src, &shown).expect("front end rejected regex fixture");
-    // The `if let Some(user_mat)` if-let binds the `Match`; `.group(0)` indexes it.
+    // The `if let Some(user_mat)` if-let binds the `Match`; `.group(0)` reads it.
     assert!(
         out.rust.contains("if let Some(user_mat) ="),
         "Match value not bound via if-let:\n{}",
         out.rust
     );
     assert!(
-        out.rust
-            .contains("(user_mat).get((0i64) as usize).cloned().flatten()"),
+        out.rust.contains("(user_mat).group(0i64)"),
         "Match.group lowering not byte-exact:\n{}",
         out.rust
     );
@@ -3322,6 +3313,41 @@ fn run() {
     let (code, stdout) = build_and_run("tir_http_router", src);
     assert_eq!(code, 0);
     assert_eq!(stdout, "welcome\n");
+}
+
+/// c109 Phase 25 / E2804: duplicate routes are user runtime errors. They must
+/// print Jet-owned panic text with the Jet source line, not Rust's panic banner.
+#[test]
+fn http_router_duplicate_route_is_jet_runtime_error() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+use core.http as http
+fn handle(req: HttpRequest) -> HttpResponse {
+    return HttpResponse.{status: \"200 OK\", body: \"ok\", headers: []}
+}
+fn run() {
+    router :: http.router()
+    router.get(\"/users/:id\", handle)
+    router.get(\"/users/:name\", handle)
+}
+";
+    let (code, _stdout, stderr) =
+        common::build_and_run("jet_tir_test", "tir_http_duplicate_route", src);
+    assert_ne!(code, 0);
+    assert!(
+        stderr.contains("panic: E2804: duplicate route `GET /users/:name`"),
+        "missing Jet-owned E2804 runtime text:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("tir_http_duplicate_route.jet:8"),
+        "missing Jet source location:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("thread 'main' panicked"),
+        "raw Rust panic banner leaked:\n{stderr}"
+    );
 }
 
 /// c109 Phase 26: the `require(cond[, msg])` / `require_eq` rich-report builtins (S36,
@@ -4053,6 +4079,41 @@ fn run() {
     let (code, stdout) = build_and_run("tir_struct_destructure", src);
     assert_eq!(code, 0);
     assert_eq!(stdout, "3\n");
+}
+
+/// D-DESTRUCT1: struct-shaped dispatch arm heads bind fields and test literal
+/// fields in the same arm. This is the source-level dispatch spelling; the
+/// internal Rust lowering may still call the helper path a switch.
+#[test]
+fn struct_pattern_dispatch_arm_head_runs() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+struct Incident {
+    kind: String
+    title: String
+    retries: Int
+}
+fn route(i: Incident) -> String {
+    if i == {
+        .{ kind: \"page\", title, .. } -> { return title }
+        .{ kind: \"ticket\", title, .. } -> { return title }
+        else -> { return \"other\" }
+    }
+}
+fn run() {
+    page :: Incident.{ kind: \"page\", title: \"database\", retries: 2 }
+    ticket :: Incident.{ kind: \"ticket\", title: \"docs\", retries: 1 }
+    other :: Incident.{ kind: \"note\", title: \"memo\", retries: 0 }
+    print(route(page))
+    print(route(ticket))
+    print(route(other))
+}
+";
+    let (code, stdout) = build_and_run("tir_struct_pattern_dispatch", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "database\ndocs\nother\n");
 }
 
 /// c109 (B4): a user-enum variant if-let condition `if m == Ping(n) { } else { }`

@@ -284,7 +284,9 @@ impl<'a> Parser<'a> {
             match &self.peek().kind {
                 TokKind::QuestionQuestion => {}
                 // S71 (D-SG6): the retired word `or` — teach `??`, then recover.
-                TokKind::Ident(n) if n == Syntax::FOREIGN_OR_FALLBACK => {
+                TokKind::Ident(n)
+                    if retired_s14_teaching_enabled() && n == Syntax::FOREIGN_OR_FALLBACK =>
+                {
                     let span = self.peek().span;
                     self.diags.push(Diagnostic::error(
                         "E0045",
@@ -364,7 +366,7 @@ impl<'a> Parser<'a> {
         loop {
             let is_and = match &self.peek().kind {
                 TokKind::AndAnd => true,
-                TokKind::Ident(n) if n == Syntax::FOREIGN_AND => {
+                TokKind::Ident(n) if retired_s14_teaching_enabled() && n == Syntax::FOREIGN_AND => {
                     self.foreign_logic_error(Syntax::FOREIGN_AND, Syntax::OP_AND);
                     true
                 }
@@ -624,7 +626,9 @@ impl<'a> Parser<'a> {
                 Ok(Expr::Unary(UnOp::Not, Box::new(inner), full))
             }
             TokKind::Ident(n)
-                if n == Syntax::FOREIGN_NOT && self.starts_expr(&self.peek2().kind) =>
+                if retired_s14_teaching_enabled()
+                    && n == Syntax::FOREIGN_NOT
+                    && self.starts_expr(&self.peek2().kind) =>
             {
                 self.foreign_logic_error(Syntax::FOREIGN_NOT, Syntax::OP_NOT);
                 let span = self.bump().span;
@@ -633,7 +637,9 @@ impl<'a> Parser<'a> {
                 Ok(Expr::Unary(UnOp::Not, Box::new(inner), full))
             }
             TokKind::Ident(n)
-                if n == Syntax::FOREIGN_TRY && self.starts_expr(&self.peek2().kind) =>
+                if retired_s14_teaching_enabled()
+                    && n == Syntax::FOREIGN_TRY
+                    && self.starts_expr(&self.peek2().kind) =>
             {
                 let t = self.bump();
                 self.diags.push(Diagnostic::error(
@@ -1261,6 +1267,42 @@ impl<'a> Parser<'a> {
                 let full = Span::new(span.start, inner.span().end);
                 Ok(Expr::Present(Box::new(inner), full))
             }
+            TokKind::Ident(name)
+                if matches!(name.as_str(), "sql" | "html")
+                    && matches!(
+                        self.toks.get(self.pos + 1).map(|t| &t.kind),
+                        Some(TokKind::Str(_))
+                    )
+                    && self
+                        .toks
+                        .get(self.pos + 1)
+                        .is_some_and(|next| self.peek().span.end == next.span.start) =>
+            {
+                let prefix = self.bump();
+                let str_tok = self.bump();
+                let TokKind::Str(parts) = str_tok.kind else {
+                    unreachable!()
+                };
+                let str_expr = self.str_expr_from_parts(parts, str_tok.span)?;
+                let name = if name == "sql" {
+                    Syntax::TYPED_TEXT_SQL_PREFIX_CALL
+                } else {
+                    Syntax::TYPED_TEXT_HTML_PREFIX_CALL
+                };
+                Ok(Expr::Call(Call {
+                    name: name.to_string(),
+                    name_span: prefix.span,
+                    args: vec![CallArg {
+                        convention: AccessConvention::Read,
+                        expr: str_expr,
+                        span: str_tok.span,
+                        flags: crate::AST::CallArgFlags::default(),
+                        label: None,
+                        spread: false,
+                    }],
+                    range_checked: false,
+                }))
+            }
             TokKind::KwNull => {
                 let span = self.bump().span;
                 return Ok(Expr::Absent(span));
@@ -1321,7 +1363,9 @@ impl<'a> Parser<'a> {
                 let span = Span::new(start, tok.span.end);
                 return Ok(Expr::ReduceMarker(name, span));
             }
-            TokKind::Ident(name) if name == Syntax::FOREIGN_TODO => {
+            TokKind::Ident(name)
+                if retired_s14_teaching_enabled() && name == Syntax::FOREIGN_TODO =>
+            {
                 // S14: bare lowercase `todo` is the retired spelling (E0054).
                 let t = self.bump();
                 self.diags.push(Diagnostic::error(
@@ -1344,7 +1388,8 @@ impl<'a> Parser<'a> {
                 });
             }
             TokKind::Ident(name)
-                if matches!(name.as_str(), Syntax::FOREIGN_THROW | Syntax::FOREIGN_RAISE) =>
+                if retired_s14_teaching_enabled()
+                    && matches!(name.as_str(), Syntax::FOREIGN_THROW | Syntax::FOREIGN_RAISE) =>
             {
                 let t = self.bump();
                 let foreign = name.clone();
@@ -1362,7 +1407,7 @@ impl<'a> Parser<'a> {
                 if matches!(
                     name.as_str(),
                     Syntax::FOREIGN_CATCH | Syntax::FOREIGN_EXCEPT
-                ) =>
+                ) && retired_s14_teaching_enabled() =>
             {
                 let t = self.bump();
                 let foreign = name.clone();
@@ -1383,7 +1428,7 @@ impl<'a> Parser<'a> {
                 if matches!(
                     name.as_str(),
                     Syntax::FOREIGN_UNWRAP | Syntax::FOREIGN_EXPECT
-                ) =>
+                ) && retired_s14_teaching_enabled() =>
             {
                 let t = self.bump();
                 let foreign = name.clone();
@@ -1399,10 +1444,7 @@ impl<'a> Parser<'a> {
                 ));
                 return self.expr_primary(allow_struct_lit);
             }
-            // D-OPT-SPELL1: `None` is retired from this list — it's the real
-            // absent spelling now (lexed as `TokKind::KwNull` above), not a
-            // foreign guess. `Some`/`nil`/`none`/`some` are still wrong; all
-            // point learners at `Val`/`None`.
+            // D-S14-PAUSE: optional spelling teaching is paused.
             TokKind::Ident(name)
                 if matches!(
                     name.as_str(),
@@ -1410,7 +1452,7 @@ impl<'a> Parser<'a> {
                         | Syntax::FOREIGN_NIL
                         | Syntax::FOREIGN_NONE_LOWER
                         | Syntax::FOREIGN_SOME_LOWER
-                ) =>
+                ) && retired_s14_teaching_enabled() =>
             {
                 let t = self.bump();
                 let foreign = if let TokKind::Ident(n) = &t.kind {
@@ -1454,60 +1496,7 @@ impl<'a> Parser<'a> {
             }
             TokKind::Str(parts) => {
                 let span = self.bump().span;
-                let mut out = Vec::new();
-                for part in parts {
-                    match part {
-                        StrTokPart::Lit(s) => out.push(StrPart::Lit(s)),
-                        StrTokPart::Interp(toks) => {
-                            let mut sub = Parser {
-                                toks: &toks,
-                                pos: 0,
-                                diags: Vec::new(),
-                                pending_type_gt: false,
-                                depth: self.depth,
-                                type_generic_depth: 0,
-                                type_generic_chain: Vec::new(),
-                                type_generic_truncated: false,
-                                arm_head_term: false,
-                                pub_file_default: false,
-                                in_layout_body: self.in_layout_body,
-                            };
-                            let e = sub.expr()?;
-                            if !sub.diags.is_empty() {
-                                let mut ds = sub.diags;
-                                let first = ds.remove(0);
-                                self.diags.extend(ds);
-                                return Err(first);
-                            }
-                            let mut format = crate::AST::StrFormat::Display;
-                            if matches!(sub.peek().kind, TokKind::At) {
-                                sub.bump();
-                                let (sel, sel_span) =
-                                    sub.expect_ident("after `@` in interpolation")?;
-                                if sel == crate::Syntax::INTERP_SELECTOR_DEBUG {
-                                    format = crate::AST::StrFormat::Debug;
-                                } else {
-                                    self.diags.push(crate::Generics::e0914(&sel, sel_span));
-                                }
-                            }
-                            if !matches!(sub.peek().kind, TokKind::Eof) {
-                                return Err(Diagnostic::error(
-                                    "E0003",
-                                    format!(
-                                        "unexpected {} inside this interpolated `{{ }}`",
-                                        describe(&sub.peek().kind)
-                                    ),
-                                    "the braces hold exactly one value (and an optional `@Debug` selector)"
-                                        .to_string(),
-                                    "keep one value per `{ }`, e.g. \"{a}\" or \"{a@Debug}\"".to_string(),
-                                    Some(sub.peek().span),
-                                ));
-                            }
-                            out.push(StrPart::Interp(Box::new(e), format));
-                        }
-                    }
-                }
-                Ok(Expr::Str(out, span))
+                self.str_expr_from_parts(parts, span)
             }
             TokKind::Int(n) => {
                 let span = self.bump().span;
@@ -1576,7 +1565,7 @@ impl<'a> Parser<'a> {
                 Ok(Expr::Lambda(self.parse_bare_lambda()?))
             }
             TokKind::LParen => self.parse_paren_primary(allow_struct_lit),
-            TokKind::Pipe => {
+            TokKind::Pipe if retired_s14_teaching_enabled() => {
                 let span = self.bump().span;
                 self.diags.push(Diagnostic::error(
                     "E0033",
@@ -1593,7 +1582,9 @@ impl<'a> Parser<'a> {
                 }
                 return self.expr_primary(allow_struct_lit);
             }
-            TokKind::Ident(name) if name == Syntax::FOREIGN_LAMBDA => {
+            TokKind::Ident(name)
+                if retired_s14_teaching_enabled() && name == Syntax::FOREIGN_LAMBDA =>
+            {
                 let span = self.bump().span;
                 self.diags.push(Diagnostic::error(
                     "E0032",
@@ -1608,7 +1599,9 @@ impl<'a> Parser<'a> {
                 ));
                 return self.expr_primary(allow_struct_lit);
             }
-            TokKind::Ident(name) if name == Syntax::FOREIGN_AS => {
+            TokKind::Ident(name)
+                if retired_s14_teaching_enabled() && name == Syntax::FOREIGN_AS =>
+            {
                 let t = self.bump();
                 self.diags.push(Diagnostic::error(
                     "E0030",
@@ -1623,7 +1616,9 @@ impl<'a> Parser<'a> {
                 ));
                 return self.expr_primary(allow_struct_lit);
             }
-            TokKind::Ident(name) if name == Syntax::FOREIGN_APPEND => {
+            TokKind::Ident(name)
+                if retired_s14_teaching_enabled() && name == Syntax::FOREIGN_APPEND =>
+            {
                 let span = self.bump().span;
                 self.diags.push(Diagnostic::error(
                     "E0027",
@@ -1825,6 +1820,66 @@ impl<'a> Parser<'a> {
                 Some(self.peek().span),
             )),
         }
+    }
+
+    fn str_expr_from_parts(
+        &mut self,
+        parts: Vec<StrTokPart>,
+        span: Span,
+    ) -> Result<Expr, Diagnostic> {
+        let mut out = Vec::new();
+        for part in parts {
+            match part {
+                StrTokPart::Lit(s) => out.push(StrPart::Lit(s)),
+                StrTokPart::Interp(toks) => {
+                    let mut sub = Parser {
+                        toks: &toks,
+                        pos: 0,
+                        diags: Vec::new(),
+                        pending_type_gt: false,
+                        depth: self.depth,
+                        type_generic_depth: 0,
+                        type_generic_chain: Vec::new(),
+                        type_generic_truncated: false,
+                        arm_head_term: false,
+                        pub_file_default: false,
+                        in_layout_body: self.in_layout_body,
+                    };
+                    let e = sub.expr()?;
+                    if !sub.diags.is_empty() {
+                        let mut ds = sub.diags;
+                        let first = ds.remove(0);
+                        self.diags.extend(ds);
+                        return Err(first);
+                    }
+                    let mut format = crate::AST::StrFormat::Display;
+                    if matches!(sub.peek().kind, TokKind::At) {
+                        sub.bump();
+                        let (sel, sel_span) = sub.expect_ident("after `@` in interpolation")?;
+                        if sel == crate::Syntax::INTERP_SELECTOR_DEBUG {
+                            format = crate::AST::StrFormat::Debug;
+                        } else {
+                            self.diags.push(crate::Generics::e0914(&sel, sel_span));
+                        }
+                    }
+                    if !matches!(sub.peek().kind, TokKind::Eof) {
+                        return Err(Diagnostic::error(
+                            "E0003",
+                            format!(
+                                "unexpected {} inside this interpolated `{{ }}`",
+                                describe(&sub.peek().kind)
+                            ),
+                            "the braces hold exactly one value (and an optional `@Debug` selector)"
+                                .to_string(),
+                            "keep one value per `{ }`, e.g. \"{a}\" or \"{a@Debug}\"".to_string(),
+                            Some(sub.peek().span),
+                        ));
+                    }
+                    out.push(StrPart::Interp(Box::new(e), format));
+                }
+            }
+        }
+        Ok(Expr::Str(out, span))
     }
 
     /// S37/S38: `[a, b]` or `["k": v]` or `[]`. D-EMPTYLIT1: `[]` is the one
@@ -2872,7 +2927,7 @@ impl<'a> Parser<'a> {
         }
         if let TokKind::Ident(name) = self.peek().kind.clone() {
             match name.as_str() {
-                Syntax::FOREIGN_READ => {
+                Syntax::FOREIGN_READ if retired_s14_teaching_enabled() => {
                     let span = self.peek().span;
                     self.bump();
                     self.diags.push(Diagnostic::error(
@@ -2888,7 +2943,7 @@ impl<'a> Parser<'a> {
                     ));
                     return AccessConvention::Read;
                 }
-                Syntax::FOREIGN_WRITE => {
+                Syntax::FOREIGN_WRITE if retired_s14_teaching_enabled() => {
                     let span = self.peek().span;
                     self.bump();
                     self.diags.push(Diagnostic::error(
@@ -2913,13 +2968,13 @@ impl<'a> Parser<'a> {
             }
         }
         match self.peek().kind {
-            // D-MEM1: `mut` is retired in favor of `&`. Teach + recover as Write.
-            TokKind::KwMutate => {
+            // D-S14-PAUSE: `mut` teaching is paused.
+            TokKind::KwMutate if retired_s14_teaching_enabled() => {
                 let span = self.bump().span;
                 self.push_cap_keyword_teach("E0056", Syntax::KW_MUTATE, Syntax::SIGIL_WRITE, span);
                 AccessConvention::Write
             }
-            TokKind::KwMove => {
+            TokKind::KwMove if retired_s14_teaching_enabled() => {
                 // `take(names) () =>` is a lambda take-prefix, not an arg convention.
                 // Only treat bare `take name` as the retired move keyword.
                 let is_lambda_take = matches!(
@@ -2931,7 +2986,7 @@ impl<'a> Parser<'a> {
                     // here is unmarked, so it's `Read` (D-MEM1/S2).
                     AccessConvention::Read
                 } else {
-                    // D-MEM1: `take` is retired in favor of `^`. Teach + recover as Move.
+                    // D-S14-PAUSE: bare `take` teaching is paused.
                     let span = self.bump().span;
                     self.push_cap_keyword_teach("E0057", Syntax::KW_MOVE, Syntax::SIGIL_MOVE, span);
                     AccessConvention::Move
@@ -2943,10 +2998,8 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// D-MEM1: the `mut`/`take`/`view` capability words are retired in favor of
-    /// the `&`/`^` sigils. Recognized only to fire this teaching error
-    /// (E0056/E0057/E0058), which then recovers as if the sigil were written
-    /// (S14 idiom — see `is_teaching_parse_diag`).
+    /// D-S14-PAUSE keeps retired capability-word teaching disabled. This helper
+    /// remains for any future explicit teaching mode.
     pub(super) fn push_cap_keyword_teach(
         &mut self,
         code: &'static str,

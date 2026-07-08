@@ -624,6 +624,8 @@ impl<'a> Parser<'a> {
                 TokKind::Hash | TokKind::At if self.at_pure_fn() => self.func().map(Item::Func),
                 // D-TAINT1: `#Sanitizer fn name(…)` taint-strip modifier.
                 TokKind::Hash if self.at_sanitizer_fn() => self.func().map(Item::Func),
+                // D-REPLAY1: `#Replayable fn name(…)` deterministic replay guard.
+                TokKind::Hash if self.at_replayable_fn() => self.func().map(Item::Func),
                 // D-MUSTUSE1 / D-MARKERMOVE1: `@MustUse fn name(…)` — result cannot be
                 // silently ignored (old `@MustUse` spelling is E0062, taught in `func()`).
                 TokKind::Hash | TokKind::At if self.at_must_use_fn() => self.func().map(Item::Func),
@@ -643,8 +645,12 @@ impl<'a> Parser<'a> {
                     self.func().map(Item::Func)
                 }
                 TokKind::Hash if self.at_web_partition_fn() => self.func().map(Item::Func),
-                // S14: bare lowercase `pure` is the retired spelling (E0053).
-                TokKind::Ident(n) if n == Syntax::FOREIGN_PURE && self.foreign_pure_follows() => {
+                // D-S14-PAUSE: bare lowercase `pure` teaching is paused.
+                TokKind::Ident(n)
+                    if retired_s14_teaching_enabled()
+                        && n == Syntax::FOREIGN_PURE
+                        && self.foreign_pure_follows() =>
+                {
                     let t = self.bump();
                     self.diags.push(self.foreign_pure_diag(t.span));
                     self.func_with_purity(true).map(Item::Func)
@@ -765,6 +771,8 @@ impl<'a> Parser<'a> {
                                     false,
                                     false,
                                     None,
+                                    false,
+                                    None,
                                 )
                                 .map(Item::Func),
                         }
@@ -861,8 +869,12 @@ impl<'a> Parser<'a> {
                 TokKind::Hash if self.at_test_def() => self.test_def().map(Item::Test),
                 // D-BENCH1 + D-BENCH-MARKER1=A: `#Bench("name") { … }`.
                 TokKind::Hash if self.at_bench_def() => self.bench_def().map(Item::Bench),
-                // S14: bare lowercase `test "name" { … }` is the retired spelling (E0052).
-                TokKind::Ident(n) if n == Syntax::FOREIGN_TEST && self.foreign_test_follows() => {
+                // D-S14-PAUSE: bare lowercase `test "name" { … }` teaching is paused.
+                TokKind::Ident(n)
+                    if retired_s14_teaching_enabled()
+                        && n == Syntax::FOREIGN_TEST
+                        && self.foreign_test_follows() =>
+                {
                     let t = self.bump();
                     self.diags.push(self.foreign_test_diag(t.span));
                     self.test_def_after_kw().map(Item::Test)
@@ -988,7 +1000,9 @@ impl<'a> Parser<'a> {
                     self.distinct_def(is_pub, is_package_pub)
                         .map(Item::Distinct)
                 }
-                TokKind::Ident(name) if name == Syntax::FOREIGN_CLASS => {
+                TokKind::Ident(name)
+                    if retired_s14_teaching_enabled() && name == Syntax::FOREIGN_CLASS =>
+                {
                     let t = self.bump();
                     self.diags.push(Diagnostic::error(
                         "E0021",
@@ -1010,7 +1024,9 @@ impl<'a> Parser<'a> {
                     ));
                     self.struct_def(false).map(Item::Struct)
                 }
-                TokKind::Ident(name) if name == Syntax::FOREIGN_INTERFACE => {
+                TokKind::Ident(name)
+                    if retired_s14_teaching_enabled() && name == Syntax::FOREIGN_INTERFACE =>
+                {
                     let t = self.bump();
                     self.diags.push(Diagnostic::error(
                         "E0022",
@@ -1049,9 +1065,10 @@ impl<'a> Parser<'a> {
                     continue;
                 }
                 TokKind::Ident(name)
-                    if name == Syntax::FOREIGN_DEF || name == Syntax::FOREIGN_FUNC =>
+                    if retired_s14_teaching_enabled()
+                        && (name == Syntax::FOREIGN_DEF || name == Syntax::FOREIGN_FUNC) =>
                 {
-                    // S14 teaching error E0008, then parse as if `fn`.
+                    // D-S14-PAUSE: def/func teaching is paused.
                     let t = self.bump();
                     let foreign = if let TokKind::Ident(n) = &t.kind {
                         n.clone()
@@ -1072,11 +1089,13 @@ impl<'a> Parser<'a> {
                     ));
                     self.func_after_fn(
                         false, false, false, None, None, false, false, None, None, false, None,
-                        false, None, false, false, None,
+                        false, None, false, false, None, false, None,
                     )
                     .map(Item::Func)
                 }
-                TokKind::Ident(name) if name == Syntax::FOREIGN_IMPORT => {
+                TokKind::Ident(name)
+                    if retired_s14_teaching_enabled() && name == Syntax::FOREIGN_IMPORT =>
+                {
                     let t = self.bump();
                     self.diags.push(Diagnostic::error(
                         "E0015",
@@ -1309,6 +1328,14 @@ impl<'a> Parser<'a> {
     pub(super) fn at_sanitizer_fn(&self) -> bool {
         matches!(self.peek().kind, TokKind::Hash)
             && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_SANITIZER)
+            && matches!(self.peek3().kind, TokKind::KwFn | TokKind::KwPub)
+    }
+
+    /// D-REPLAY1: true when the cursor is at `#Replayable fn` /
+    /// `#Replayable pub fn`.
+    pub(super) fn at_replayable_fn(&self) -> bool {
+        matches!(self.peek().kind, TokKind::Hash)
+            && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_REPLAYABLE)
             && matches!(self.peek3().kind, TokKind::KwFn | TokKind::KwPub)
     }
 
@@ -1676,6 +1703,8 @@ impl<'a> Parser<'a> {
             false,
             false,
             None,
+            false,
+            None,
         )
     }
 
@@ -1748,6 +1777,8 @@ impl<'a> Parser<'a> {
             false,
             None,
             false,
+            false,
+            None,
             false,
             None,
         )
@@ -2136,6 +2167,8 @@ impl<'a> Parser<'a> {
         let mut state_requires = None;
         let mut state_transition = None;
         let mut web_marker = None;
+        let mut is_replayable = false;
+        let mut replayable_span = None;
         // D-PREPOST1: `@Pre(cond, "msg")` / `@Post(cond, "msg")` — repeatable,
         // any order, alongside the typestate/web markers above.
         let mut pre = Vec::new();
@@ -2153,6 +2186,11 @@ impl<'a> Parser<'a> {
                 state_requires = Some(self.parse_state_require_marker()?);
             } else if state_transition.is_none() && self.at_transition_fn() {
                 state_transition = Some(self.parse_transition_marker()?);
+            } else if !is_replayable && self.at_replayable_fn() {
+                let start = self.bump().span.start; // `#`
+                let end = self.bump().span.end; // `Replayable`
+                is_replayable = true;
+                replayable_span = Some(Span::new(start, end));
             } else if self.at_contract_clause_fn(Syntax::CONTRACT_PRE) {
                 pre.push(self.parse_contract_clause(Syntax::CONTRACT_PRE)?);
             } else if self.at_contract_clause_fn(Syntax::CONTRACT_POST) {
@@ -2191,6 +2229,8 @@ impl<'a> Parser<'a> {
             is_inline,
             is_inline_always,
             inline_span,
+            is_replayable,
+            replayable_span,
         )?;
         Ok(Func { pre, post, ..f })
     }
@@ -2768,6 +2808,8 @@ impl<'a> Parser<'a> {
             false,
             false,
             None,
+            false,
+            None,
         )
     }
 
@@ -2786,6 +2828,8 @@ impl<'a> Parser<'a> {
         is_inline: bool,
         is_inline_always: bool,
         inline_span: Option<Span>,
+        is_replayable: bool,
+        replayable_span: Option<Span>,
     ) -> Result<Func, Diagnostic> {
         let (is_pub, is_package_pub) = self.parse_item_visibility();
         self.expect_kw(TokKind::KwFn, "to start a function definition")?;
@@ -2806,6 +2850,8 @@ impl<'a> Parser<'a> {
             is_inline,
             is_inline_always,
             inline_span,
+            is_replayable,
+            replayable_span,
         )
     }
 
@@ -2828,6 +2874,8 @@ impl<'a> Parser<'a> {
         is_inline: bool,
         is_inline_always: bool,
         inline_span: Option<Span>,
+        is_replayable: bool,
+        replayable_span: Option<Span>,
     ) -> Result<Func, Diagnostic> {
         let (mut name, mut name_span) = self.expect_ident("after `fn`")?;
         let external_type = if (matches!(self.peek().kind, TokKind::Dot)
@@ -2917,6 +2965,8 @@ impl<'a> Parser<'a> {
                 is_pure,
                 is_sanitizer,
                 is_reactive,
+                is_replayable,
+                replayable_span,
                 declared_effects,
                 effect_via,
                 state_requires,
@@ -2949,6 +2999,8 @@ impl<'a> Parser<'a> {
             is_pure,
             is_sanitizer,
             is_reactive,
+            is_replayable,
+            replayable_span,
             declared_effects,
             effect_via,
             state_requires,
@@ -2995,6 +3047,8 @@ impl<'a> Parser<'a> {
             is_must_use,
             must_use_span,
             false,
+            false,
+            None,
             false,
             None,
         )
@@ -4343,7 +4397,8 @@ impl<'a> Parser<'a> {
         let is_pure = if self.at_pure_fn() {
             self.bump_pure_marker();
             true
-        } else if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::FOREIGN_PURE)
+        } else if retired_s14_teaching_enabled()
+            && matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::FOREIGN_PURE)
             && self.foreign_pure_follows()
         {
             let t = self.bump();
@@ -4360,6 +4415,14 @@ impl<'a> Parser<'a> {
         } else {
             false
         };
+        let mut is_replayable = false;
+        let mut replayable_span = None;
+        if self.at_replayable_fn() {
+            let start = self.bump().span.start; // `#`
+            let end = self.bump().span.end; // `Replayable`
+            is_replayable = true;
+            replayable_span = Some(Span::new(start, end));
+        }
         // D-METHODMACRO1=A: `@Inline`/`@InlineAlways` on methods too.
         let (is_inline, is_inline_always, inline_span) = self.parse_inline_marker()?;
         // D-STATE1: `#State(S)` / `#Transition(From -> To)` typestate markers on
@@ -4394,6 +4457,8 @@ impl<'a> Parser<'a> {
             is_inline,
             is_inline_always,
             inline_span,
+            is_replayable,
+            replayable_span,
         )
     }
 
@@ -5612,7 +5677,12 @@ impl<'a> Parser<'a> {
         let start = self.peek().span.start;
         self.bump(); // consume `derive`
         let (type_param, type_param_span) = self.expect_ident("after `derive`")?;
-        if matches!(self.peek().kind, TokKind::KwFor) {
+        let old_derive_for = match &self.peek().kind {
+            TokKind::KwFor => true,
+            TokKind::Ident(n) if n == "for" => true,
+            _ => false,
+        };
+        if old_derive_for {
             // Old spelling `derive Trait for T`: the first ident was the trait name.
             return Err(Diagnostic::error(
                 "E2714",

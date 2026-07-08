@@ -1,0 +1,25 @@
+// D-TASKRUNTIME1=A: bounded channels, typed timer channels, and select timeouts.
+use core.tasks as tasks
+
+fn run() {
+    taskgroup g {
+        (sender, ch) :: tasks.channel<Int>(1)
+        sender.send(1)
+        blocked :: g.task(take(sender) () => {
+            sender.send(2)
+        })
+        print(ch.receive() ?? panic("channel closed"))
+        print(ch.receive() ?? panic("channel closed"))
+        blocked.join()
+
+        timeout :: g.select().after(0, -1).wait()
+        print(timeout)
+
+        once :: tasks.after(0, 7)
+        print(once.receive() ?? panic("timer closed"))
+
+        ticks :: tasks.interval(1)
+        print(ticks.receive() ?? panic("interval closed"))
+        print(ticks.receive() ?? panic("interval closed"))
+    }
+}

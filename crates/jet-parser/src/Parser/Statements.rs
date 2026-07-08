@@ -614,7 +614,7 @@ impl<'a> Parser<'a> {
                 self.finish_stmt()?;
                 Ok(Stmt::Val(binding))
             }
-            TokKind::Ident(n) if n == Syntax::FOREIGN_MATCH => {
+            TokKind::Ident(n) if retired_s14_teaching_enabled() && n == Syntax::FOREIGN_MATCH => {
                 let t = self.bump();
                 self.diags.push(Diagnostic::error(
                     "E0016",
@@ -636,7 +636,7 @@ impl<'a> Parser<'a> {
                 ));
                 self.switch_after_kw(t.span)
             }
-            TokKind::Ident(n) if n == Syntax::FOREIGN_SWITCH => {
+            TokKind::Ident(n) if retired_s14_teaching_enabled() && n == Syntax::FOREIGN_SWITCH => {
                 let t = self.bump();
                 self.diags.push(Diagnostic::error(
                     "E0044",
@@ -675,8 +675,8 @@ impl<'a> Parser<'a> {
                 Ok(Stmt::Yield(expr, span))
             }
             TokKind::KwIf => self.if_or_dispatch(),
-            TokKind::KwWhile => {
-                // S19-amend (E0050): `while` is now a teaching error; use `loop cond { }`.
+            TokKind::KwWhile if retired_s14_teaching_enabled() => {
+                // D-S14-PAUSE: `while` teaching is paused.
                 let t = self.bump();
                 let span = t.span;
                 self.diags.push(Diagnostic::error(
@@ -707,8 +707,8 @@ impl<'a> Parser<'a> {
                     label: None,
                 })
             }
-            TokKind::KwFor => {
-                // S19-amend (E0051): `for` is now a teaching error; use `loop x in ... { }`.
+            TokKind::KwFor if retired_s14_teaching_enabled() => {
+                // D-S14-PAUSE: `for` teaching is paused.
                 let t = self.bump();
                 let span = t.span;
                 self.diags.push(Diagnostic::error(
@@ -768,10 +768,8 @@ impl<'a> Parser<'a> {
                     label: None,
                 })
             }
-            // D-IF1: `when` is retired — `if` is the one branching keyword. Emit
-            // E0984, then parse the old body so `jet fmt` can migrate it to
-            // `if subject { arm -> body }`.
-            TokKind::KwSwitch => {
+            // D-S14-PAUSE: `when` teaching is paused.
+            TokKind::KwSwitch if retired_s14_teaching_enabled() => {
                 let span = self.bump().span;
                 self.diags.push(Diagnostic::error(
                     "E0984",
@@ -1936,7 +1934,8 @@ impl<'a> Parser<'a> {
                     }
                 }
                 TokKind::Ident(name)
-                    if name == Syntax::FOREIGN_CASE || name == Syntax::FOREIGN_DEFAULT =>
+                    if retired_s14_teaching_enabled()
+                        && (name == Syntax::FOREIGN_CASE || name == Syntax::FOREIGN_DEFAULT) =>
                 {
                     let t = self.bump();
                     let foreign = if let TokKind::Ident(n) = &t.kind {

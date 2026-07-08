@@ -91,6 +91,13 @@ fn http_post(port: u16, path: &str, body: &str) -> Option<(u16, Vec<u8>)> {
     Some((status, raw[split..].to_vec()))
 }
 
+fn json_field(haystack: &str, field: &str) -> String {
+    let key = format!("\"{field}\":\"");
+    let start = haystack.find(&key).expect("json field") + key.len();
+    let rest = &haystack[start..];
+    rest[..rest.find('"').expect("json field terminator")].to_string()
+}
+
 /// Polls `/__jet_dev_version` until it differs from `baseline`, or panics
 /// after a generous timeout — the rebuild-on-save proof point.
 fn wait_for_version_change(port: u16, baseline: &str, timeout: Duration) -> String {
@@ -181,7 +188,6 @@ fn jet_dev_web_serves_and_rebuilds_on_save() {
     fs::create_dir_all(&dir).unwrap();
     let src_path = dir.join("app.jet");
     fs::write(&src_path, FIXTURE_SRC).unwrap();
-
     let mut child = Command::new(jet_bin())
         .args(["dev", "app.jet", "--target=web"])
         .current_dir(&dir)
@@ -298,6 +304,9 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(html.contains("<canvas id=\"jet-canvas-view\""));
     assert!(html.contains("<canvas id=\"minimap\""));
     assert!(html.contains("id=\"graph-list\""));
+    assert!(html.contains("id=\"project-panel\""));
+    assert!(html.contains("id=\"project-rail\""));
+    assert!(html.contains("id=\"project-mode\""));
     assert!(html.contains("id=\"canvas-dock\""));
     assert!(html.contains("id=\"graph-strip\""));
     assert!(html.contains("id=\"wire-status\""));
@@ -343,6 +352,7 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(html.contains("#first-run-tour.is-open"));
     assert!(html.contains("id=\"graph-count\""));
     assert!(html.contains("<summary><span>Functions</span>"));
+    assert!(html.contains("<summary><span>Project</span>"));
     assert!(html.contains("#graph-overview { display: none; }"));
     assert!(html.contains(".graph-overview-title"));
     assert!(html.contains(".graph-stat"));
@@ -367,7 +377,14 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(js.contains("window.__jetCanvasHitMap"));
     assert!(js.contains("ctx.fillRect"));
     assert!(js.contains("const graphUrl"));
-    assert!(js.contains("fetch(graphUrl"));
+    assert!(js.contains("fetch(graphRequestUrl"));
+    assert!(js.contains("latestProject"));
+    assert!(js.contains("function loadProject"));
+    assert!(js.contains("function syncProjectRail"));
+    assert!(js.contains("__jetCanvasProjectRail"));
+    assert!(js.contains("data-project-file"));
+    assert!(js.contains("function graphRequestUrl"));
+    assert!(js.contains("source_id="));
     assert!(js.contains("function fitGraph"));
     assert!(js.contains("Math.min(1.05"));
     assert!(js.contains("const layoutScale = { x: 1.08, y: 1.08 }"));
@@ -595,6 +612,60 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
         http_get(port, "/canvas/source-control").expect("GET Canvas source control");
     assert_eq!(status, 200);
     assert!(String::from_utf8_lossy(&body).contains("\"protocol\":\"jet.canvas.source_control\""));
+
+    fs::write(
+        dir.join("pkg.jet"),
+        "payload: {\n    name: \"canvas_app\",\n    version: \"0.1.0\",\n}\n",
+    )
+    .unwrap();
+    fs::write(dir.join("helper.jet"), "fn run() {\n    print(\"helper\")\n}\n").unwrap();
+    let (status, project) = http_get(port, "/canvas/project").expect("GET Canvas project");
+    assert_eq!(status, 200);
+    let project = String::from_utf8_lossy(&project);
+    assert!(project.contains("\"protocol\":\"jet.canvas.project\""));
+    assert!(project.contains("\"schema_version\":1"));
+    assert!(project.contains("\"project_revision\":\"sha256-"));
+    assert!(project.contains("\"entry\""));
+    assert!(project.contains("\"state_policy\""));
+
+    let (status, helper_graph) =
+        http_get(port, "/canvas/graph?source_id=helper.jet").expect("GET helper graph");
+    assert_eq!(
+        status,
+        200,
+        "helper graph response: {}",
+        String::from_utf8_lossy(&helper_graph)
+    );
+    let helper_graph = String::from_utf8_lossy(&helper_graph);
+    assert!(helper_graph.contains("helper.jet"), "{helper_graph}");
+    assert!(helper_graph.contains("print(\\\"helper\\\")"), "{helper_graph}");
+
+    let helper_src = fs::read_to_string(dir.join("helper.jet")).unwrap();
+    let helper_revision = jet::Canvas::source_revision(&helper_src);
+    let helper_query = format!(
+        "{{\"schema_version\":1,\"op\":\"find\",\"source_id\":\"helper.jet\",\"revision\":\"{}\",\"query\":\"run\"}}",
+        helper_revision
+    );
+    let (status, helper_query_body) =
+        http_post(port, "/canvas/query", &helper_query).expect("POST helper query");
+    assert_eq!(status, 200);
+    assert!(String::from_utf8_lossy(&helper_query_body).contains("\"protocol\":\"jet.canvas.query\""));
+
+    let project_revision = json_field(&project, "project_revision");
+    let manifest_src = fs::read_to_string(dir.join("pkg.jet")).unwrap();
+    let manifest_revision = jet::Canvas::source_revision(&manifest_src);
+    let project_req = format!(
+        "{{\"schema_version\":1,\"op\":\"add_dependency\",\"preview\":true,\"project_revision\":\"{}\",\"files\":[{{\"path\":\"pkg.jet\",\"revision\":\"{}\"}}],\"manifest\":\"pkg.jet\",\"name\":\"logging\",\"spec\":\"0.1.0\"}}",
+        project_revision, manifest_revision
+    );
+    let (status, body) =
+        http_post(port, "/canvas/project/transaction", &project_req).expect("POST project tx");
+    assert_eq!(status, 200);
+    let body = String::from_utf8_lossy(&body);
+    assert!(body.contains("\"protocol\":\"jet.canvas.project.edit\""), "{body}");
+    assert!(body.contains("\"writes\":\"preview_only\""), "{body}");
+    assert!(body.contains("+    logging: \\\"0.1.0\\\","), "{body}");
+    assert!(!fs::read_to_string(dir.join("pkg.jet")).unwrap().contains("logging"));
 
     drop(guard);
     let _ = fs::remove_dir_all(&dir);

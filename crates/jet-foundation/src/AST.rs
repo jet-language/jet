@@ -1495,6 +1495,10 @@ pub struct Func {
     pub state_transition: Option<StateTransition>,
     /// D-REACTCORE1: `#Reactive fn` — reactive effect scope; must not return a value.
     pub is_reactive: bool,
+    /// D-REPLAY1: `#Replayable fn` — the reachable effect set must not include
+    /// ambient Time/Rand/Net/Io unless routed through deterministic capabilities.
+    pub is_replayable: bool,
+    pub replayable_span: Option<Span>,
     /// D-MUSTUSE1 (c18iwxqx): `@MustUse fn` / `@MustUse` method — callers must not
     /// drop the return value as a bare expression statement (E0419).
     pub is_must_use: bool,

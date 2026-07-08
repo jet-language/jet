@@ -42,11 +42,11 @@ lexer change. No leading/trailing/doubled hyphen. Code identifiers stay plain
 
 **S14 — Alias policy**: one canonical spelling per construct; **no aliases,
 ever**. The compiler may recognize foreign syntax to emit a teaching error
-naming the canonical form. **D-S14-PAUSE**: this teaching layer is paused
-until post-Epoch 6 — retired spellings currently get ordinary syntax errors;
-stale teaching fixtures were deleted. **D-CAP10**: one definition per name
-(E0105); no overloading — capability disambiguation is call-site sigils on a
-single definition.
+naming the canonical form. **D-S14-PAUSE / D-TEACHING-LAYER1=A**: this
+teaching layer is paused until post-Epoch 6 — retired spellings currently get
+ordinary syntax errors; stale teaching fixtures were deleted. **D-CAP10**: one
+definition per name (E0105); no overloading — capability disambiguation is
+call-site sigils on a single definition.
 
 **D-CASING1 — Casing law + "Core"** *(with D-MARKER-CANON1, D-CONTRACTCASE1)*:
 every `#`-marker and every `@`-marker is PascalCase (`#Test`, `#Unsafe`,
@@ -250,9 +250,9 @@ destructure structs, tuples, and lists:
 Val(n) :: maybe_port() ?? return      // refutable bind needs ?? fallback
 ```
 
-Redundant `..` on a full pattern is E0327. Nesting one level.
-*Gap: the dispatch-arm struct-pattern head (`.{ kind: "page", target, .. } ->
-…`) is ratified but unbuilt — no `Pattern::Struct` in arm heads yet.*
+Redundant `..` on a full pattern is E0327. Nesting one level. Dispatch-arm
+struct-pattern heads (`.{ kind: "page", target, .. } -> …`) are source-shipped;
+#341 owns the remaining user-facing dispatch/pattern wording audit.
 
 **S77 — Field punning**: in a struct literal, bare `name` ≡ `name: name` when
 a binding of that name is in scope; mixes freely with explicit fields.
@@ -385,8 +385,10 @@ shortening generic spellings only — not primitive/unit newtypes (use
 `distinct`). **D-TYPE-ALIAS-CANON1** + **D-LISTMAP-CANON1=A**: `[T]`, `[K: V]`, `*T`
 are the only default container/pointer spellings; `List<T>`/`Map<K,V>`/`Ptr<T>`
 are dead. Named specific collection spellings stay named rather than short
-bracket forms; shipped today: `Deque<T>` and `Set<T>`. `HashMap<K,V>` and
-`BTreeMap<K,V>` are reserved names for the specialized map implementations.
+bracket forms; shipped today: `Set<T>`, `SortedSet<T>`, `Deque<T>`,
+`PriorityQueue<T>`, `Lru<K,V>`, `Bag<T>`, `BitSet`, and `ByteBuffer`.
+`HashMap<K,V>` and `BTreeMap<K,V>` are reserved names for specialized map
+implementations.
 
 **D-BIGINT1**: Core `BigInt`, explicit construction `BigInt(…)`/`BigInt("…")`;
 `Int` never auto-promotes (E0130–E0133). **D-DECIMAL1**: arbitrary-precision
@@ -400,8 +402,8 @@ Wrong-state call E0150; markers erase in codegen. Ordering falls out of the
 transition graph.
 
 **D-REFINE1 — Refinements**: extend `distinct` with `#Invariant` + a pure-Rust
-linear-integer-arithmetic prover for bounds proofs; no new keyword.
-*(ratified, unbuilt — c25)*
+linear-integer-arithmetic prover for bounds proofs; no new keyword. Ratified
+implementation gap tracked by #347.
 
 **D-PENDING1**: blessed loading-state enum `Loadable<T, E>`
 (idle/loading/loaded/failed) in Core. **Declined (types)**: `newtype` keyword
@@ -433,13 +435,19 @@ OOB/missing key; `xs.get(i) -> (T?)` safe access; `m[k] = v` inserts.
 `s.slice(a..b) -> String` on character positions; L0501 lints slice copies in
 loops.
 
-**D-ITER1 — Iterator adapters**: the full lazy family (enumerate, zip,
-chunks, windows, take/skip(_while), flat_map, scan, group_by, dedup, step_by,
-peekable, partition, find/position, fold/reduce, min/max_by, …) on the
-iterator protocol; allocation-free until a terminal op.
+**D-ITER1 / D-ITERTOOLS1=A — Iterator adapters**: `map`, `filter`, `each`,
+`find`, `any`, `all`, `sort_by`, `reduce`, `take`, `skip`, `step_by`, `dedup`,
+`chunks`, `windows`, `enumerate`, `zip`, `unzip`, `take_while`, `skip_while`,
+`flat_map`, `filter_map`, `scan`, `fold`, `sum`, `product`, `min`, `max`,
+`min_by`, `max_by`, `group_by`, `count_by`, `partition`, `flatten`, and
+`intersperse` use one iterator model. Methods return materialized collections
+until the lazy protocol lands; no second adapter spelling is introduced.
 
-**D-COLLBREADTH1**: `Set<T: [Hash, Eq]>` and ring-buffer `Deque<T>` in
-`core.collections` (E0506). **D-ENC-DYN1**: `Data` is the single dynamic value
+**D-COLLBREADTH1 / D-ITERTOOLS1=A**: `Set<T: [Hash, Eq]>`,
+`SortedSet<T>`, ring-buffer `Deque<T>`, `PriorityQueue<T>`, `Lru<K,V>`,
+`Bag<T>`, `BitSet`, and `ByteBuffer` in Core (E0506). `[K: V]` is the default
+ordered map spelling; specialized map names stay reserved. **D-ENC-DYN1**:
+`Data` is the single dynamic value
 (`.Object/.Array/.Int/.Float/.Text/.Bool/.Null`); `Json`/`Toml`/`Yaml`/`Csv`
 are aliases over it. **Declined**: `[..]T` spelling — zero-copy comes as
 `View<T>` library type (D-DYNARRAY1).
@@ -494,9 +502,8 @@ the expected-type path (function params, bindings); `.template()`/
 `.params()` (Sql) and `.text()` (Html) read the checked value back.
 **D-TYPEDTEXT2 — Typed text amendment**: hole-free string literals also
 elaborate (not just interpolated ones); `sql"…"`/`html"…"` prefixes for
-bindings without an expected type — **not yet implemented** (lexer prefix-
-scan gap, no upstream gate; the no-prefix expected-type path is the common
-case and covers it); user-defined prefixes deferred to E4.
+bindings without an expected type use the same typed-text rewrite as
+expected-type literals; user-defined prefixes deferred to E4.
 
 **D-SHIFT1 — Shift-style stream parsing (ratified 2026-07-01, c7shift)**: the
 Jai `shift` idiom lands as a core cursor surface, not an operator (option C —
@@ -533,13 +540,14 @@ stdlib `.context("msg {var}")` (lazy) for human wording. No new grammar.
 **S36 — Bug stops**: `panic("msg")` (friendly report, exit 70);
 `require(cond[, "msg"])` for invariants/preconditions. Prelude builtins.
 
-**D-IGNORERET1**: discarding a fallible/`#MustUse` result requires a visible
-discard sigil at the call site; sema lints at the discard point. *(unbuilt)*
+**D-IGNORERET1 / D-IGNORERET2**: discarding a fallible/`#MustUse` result
+requires visible intent. Shipped spelling is `.drop("reason")`; sema lints at
+the discard point and examples cover the fallible path.
 
 **Teaching & lint law**: `=` in a condition is E0322 with a "did you mean
 `==`?" fix (D-ASSIGNCOND1). Homoglyph confusable names lint L0503 default-on
 (D-CONFUSE1). Semantic-smell lints — float `==`, duplicate branches
-default-on; always-true condition opt-in (D-SMELLLINT1, unbuilt).
+default-on; full always-true condition coverage is tracked by #343.
 
 ### Modules, visibility & imports
 
@@ -725,8 +733,8 @@ read). Capability sits on the type side (`name: &Type`, D-CAP3). `copy x`
 stays a verb — no third sigil (D-CAP2). Dereference is **postfix `p.*`**
 (composes: `p.*.field`); prefix `*x` is raw-pointer-of only, `#Unsafe`-gated
 (D-CAP9), and is not a parameter capability. `mut`/`take`/`view` are not
-keywords (E0056/E0058 point at the sigils; E0057 retired earlier by
-D-S14-PAUSE).
+keywords (E0056/E0057 retired by D-S14-PAUSE; E0058 retired earlier by
+D-MEM1/S3).
 
 *History:* D-CAP7's original text (pre-2026-07-03) had a third visible
 parameter sigil `~T` (edit/mutate), a fourth `*T` in parameter position, and
@@ -900,7 +908,8 @@ wall-clock/OS-rng/fs/net rejected (E3401/E3403); injectable `Clock`
 pure-callable capabilities; `assume_deterministic { }` expert escape.
 
 **D-REPLAY1**: `#Replayable` rejects any reachable `Time`/`Rand`/`Net`/`Io`
-not routed through a mockable capability. *(unbuilt)*
+not routed through a deterministic/mockable capability. Implemented by the
+effect fixpoint as E0725; deterministic `Clock`/`Rng` handles remain pure.
 
 **D-TXN1–4, D-TXN-ROLLBACK — Transactions**: `#Transact(name) { … }` — on a
 `?`-failure, mutated locals restore LIFO from auto-snapshots (layer 1);
@@ -974,7 +983,7 @@ hashed-reproducible recorded into `.jet/lock` (`@embed`, `find`,
 `fetch(url, sha256:)`); Tier 2 ambient requires `#Impure("reason")` **and**
 `--allow-impure`. **D-CTFIND1/2**: `find(glob) -> [String]` builtin, sorted,
 hash-recorded; hand-rolled std-only glob (`*`, `**`, `?`, `{a,b}`, `[a-z]`).
-*(ratified, unbuilt — c157)*
+Shipped by #350.
 
 **D-METADEPTH1/2 — Metaprogramming ceiling**: read-only reflection + derives.
 Rung B granted: whole-program read-only reflection + structured diagnostics
@@ -1086,8 +1095,12 @@ release build — divergence is a release blocker.
 
 **D-PLUGIN1 / D-DEP-WASM1**: `target: plugin` compiles to a sandboxed WASM
 module (wasmtime + Component Model, typed `.wit` contract), safe by default.
-*(reserved keyword today; unbuilt)* **D-NOSTD1**: no `no_std` flag — the std
-baseline follows the typed platform `target:` (bare-metal ⇒ no-std).
+Plugin target support is shipped for the v1 scope: all-`Int` or all-`Float`
+exported functions, deny-by-default plugin effects, `.wit` emission, component
+lifting through `wasm-tools`, host loading through `core.plugin`, version
+compatibility checks, and Jet-owned diagnostics E1257-E1260. **D-NOSTD1**: no
+`no_std` flag — the std baseline follows the typed platform `target:`
+(bare-metal ⇒ no-std).
 **D-OOBPROOF1**: bounds-check elision must be proof-carrying (rides
 D-REFINE1).
 
@@ -1114,7 +1127,10 @@ with `-u`/`--update-snapshots`. **D-A11YGATE1**: accessibility issues are
 test syntax. `core.testing` adds snapshots, fixtures, corpora, temp dirs, fake
 clocks/random, HTTP servers, golden files, and benchmark budgets as library
 helpers. Helpers emit structured test metadata so reports and CI can render
-categories without adding markers for every feature.
+categories without adding markers for every feature. Epoch 3 ships `snap`,
+`golden`, `fixture`, `temp_dir`, `corpus`, `fake_clock`, `fake_rng`, and
+`bench_budget`; the existing `expect(...).snapshot()` remains the canonical
+assertion snapshot path.
 
 ### Formatting & comments
 
@@ -1218,8 +1234,8 @@ loader crash (I2).
 **D-DEP1 — Dependency law**: the compiler stays zero-external-crate (I6).
 Any crate-backed capability ships as a Jet package wrapping the crate via
 `extern rust`, source vendored + hash-pinned (D-BFS1). Owner-sanctioned
-bootstrap wraps (all carry a native-ize obligation): `regex` (D-REGEX1,
-`core.regex`), rustls bridge (D-NET1/D-HTTPLIB4; `core.http` client default
+bootstrap wraps (all carry a native-ize obligation): rustls bridge
+(D-NET1/D-HTTPLIB4; `core.http` client default
 HTTPS via rustls + system roots, D-TLS1=A; `core.tls` reserved for advanced
 client TLS config), zip/tar/flate2 (`core.archive`, D-DEP-ARCHIVE1),
 rusqlite-bundled (`core.db`, D-DEP-DB1), ureq/hyper/tungstenite
@@ -1325,6 +1341,10 @@ piped (JSON); `log.setup(format:)` overrides (D-LOGFMT1).
   bytes, TTY facts, and terminal capabilities. Style/progress/raw mode/key
   events live under `io.terminal` or stream methods, honor TTY/NO_COLOR by
   default, and expose explicit force/raw controls for experts.
+  Implemented Epoch 3 stream surface: `io.stdout()` / `io.stderr()` handles with
+  `.write`, `.write_line`, `.write_bytes`, `.flush`, `.is_tty`,
+  `io.terminal_width/height`, `io.style`, `io.style_force`, and `io.progress`;
+  D-TERM1's `core.term` remains the direct raw-key bridge.
 - **D-COREARGS1=A**: `ArgsSpec` is the one CLI parsing model. Typed
   `fn run(args: T)` derives an `ArgsSpec`; library/tooling code may build the
   same spec dynamically for subcommands, env fallbacks, completions, and tests.
@@ -1333,31 +1353,51 @@ piped (JSON); `log.setup(format:)` overrides (D-LOGFMT1).
   LSP completion, and snippets may discover helpers, but emitted code uses the
   same `core.math` names.
 - **D-RANDOMDIST1=A**: `core.random` owns deterministic PRNGs,
-  distributions, shuffling, sampling, seed splitting, and test fixtures.
-  Secret randomness remains in `core.crypto`.
+  distributions, shuffling, sampling, seed splitting, and test fixtures:
+  `bool(p)`, `float_range`, `normal`, `exponential`, `weighted_pick`,
+  `sample`, `bytes`, `split`, and matching `Rng` draws. Secret randomness
+  remains in `core.crypto`.
 - **D-TIME-CALENDAR1=A**: time uses distinct `Instant`, `DateTime`,
   `LocalDate`, `LocalTime`, `Duration`, and `Zone` types, with easy beginner
   constructors plus expert control over timezone data, monotonic clocks, fake
   clocks, and schedulers.
+- **D-URL1=A**: `core.url` and `core.mime` are separate typed modules. `Url`
+  owns parse/build/join/normalize, typed repeated query pairs, component
+  percent-encoding, IDNA host handling, and `file:`/`data:` URLs. `Mime` owns
+  extension mapping plus `type/subtype; param=value` parsing. `core.http` and
+  `core.web` consume typed values instead of re-solving string escaping.
 - **D-ENCSTREAM1=A**: each `core.encoding` codec has one adapter identity with
   whole-value and reader/writer stream modes over the shared `Data`/`DataTree`
   and `Codable` machinery. XML, JSONL, canonical JSON, and CBOR follow this
-  model.
+  model. Epoch 3 ships JSON canonical output/events, JSON Lines, namespace-
+  preserving XML tree parse/render, CBOR, base32, and URL-safe base64 beside
+  existing JSON/CSV/TOML/YAML/hex/base64.
 - **D-TEXTUNICODE1=A**: `core.text` owns Unicode algorithms: normalization,
   case folding, segmentation, width, classification, and UTF-8/scalar helpers.
   `String` stays small; tooling may insert `core.text` calls from String
-  contexts.
+  contexts. Epoch 3 ships `core.text` helpers for NFC/NFD/NFKC/NFKD, casefold
+  and caseless compare, grapheme/word/sentence slices, terminal display width,
+  Unicode classification, scalar/byte counts, split/trim/pad/center,
+  prefix/suffix combinators, and char-index views. Locale collation is an i18n
+  data problem and is not part of v1 core.
+- **D-HUMANFMT1=A**: `core.fmt` owns human-readable formatting as ordinary
+  library calls, with no interpolation sublanguage. Epoch 3 ships thousands
+  numbers, fixed decimals, percents, SI bytes, compact durations, ordinals,
+  plural phrases, and width padding helpers.
 - **D-REGEXENGINE1=A**: `core.regex` is RE2-class and linear by default,
   including captures, named groups, replace, split, flags, and Unicode
-  classes. Any PCRE/backtracking compatibility is explicit and never the
-  default.
+  classes. It is std-only in the generated prelude; the old bootstrap `regex`
+  crate bridge is retired. Any PCRE/backtracking compatibility is explicit and
+  never the default.
 - **D-NETSOCKET1=A**: `core.net` exposes typed blocking-looking
-  TCP/UDP/Unix/DNS APIs over handles compatible with the task runtime, so
+  TCP/UDP/Unix/DNS/TLS APIs over handles compatible with the task runtime, so
   deadlines, cancellation, readiness, and high-concurrency serving stay one
-  socket model.
+  socket model. String entrypoints remain the beginner path; `IpAddr` and
+  `SocketAddr` are the expert/control path over the same semantics.
 - **D-HTTPDEPTH1=A**: `core.http` owns Client, Server, Router, middleware,
   streaming bodies, forms/multipart, cookies, redirects, timeouts, TLS policy,
-  SSE, and WebSocket home, built on `core.url`, `core.mime`, and `core.net`.
+  and SSE, built on `core.url`, `core.mime`, and `core.net`. WebSocket support
+  has its own top-level home, `core.ws`, per D-WS1=B.
 - **D-CRYPTO-SUITE1=A**: beginner crypto APIs are safe envelopes
   (`seal`/`open`, `sign`/`verify`, password hashing, key agreement, file
   envelope, `Secret`/`Key` types). Expert primitives live under
@@ -1368,13 +1408,20 @@ piped (JSON); `log.setup(format:)` overrides (D-LOGFMT1).
   plan.
 - **D-LOGTRACE1=A**: `core.log` records typed events, spans, and fields as
   source truth; text, JSON, and OTel are output sinks. Expert controls cover
-  propagation, sampling, redaction, trace IDs, and export policy.
+  propagation, sampling, redaction, trace IDs, and export policy. Epoch 3
+  ships typed `LogField` builders, `LogSpan` enter/close, stderr/text/JSON,
+  JSONL file sinks, OTLP-file export, sampling, redaction, and counter fields.
 - **D-ITERTOOLS1=A**: one lazy `Iterable`/`Iterator` model powers collection
   adapters. Collections expose beginner-friendly methods returning lazy views;
   materialization is explicit via `collect`, `to_list`, or reducers.
 - **D-TASKRUNTIME1=A**: task groups remain the structured lifetime boundary.
   Channels, timers, deadlines, cancellation, and select produce typed event
   values; scheduler budgets, tracing, and deterministic tests are expert hooks.
+  Implemented Epoch 3 surface: `tasks.channel<T>()`, bounded
+  `tasks.channel<T>(capacity: N)`, `tasks.after(ms: N)`,
+  `tasks.after(ms: N, value: fallback)`, `tasks.interval(ms: N)`, and
+  `g.select().recv(rx).after(ms: N, value: fallback).wait()` over one return
+  type.
 - **D-DATAFRAME1=A**: `core.data` exposes typed `Table`/`Series<T>`, schema,
   typed rows, lazy query plans, joins, windows, missing values, and plotting.
   Eager helpers and lazy plans share the same operations.
@@ -1383,11 +1430,19 @@ piped (JSON); `log.setup(format:)` overrides (D-LOGFMT1).
   declined stdlib domains.
 
 **Filesystem & time**: typed `Path` (`from`/`join`/`parent`/`extension`/
-`stem`), `write_atomic()`, lazy cycle-safe `walk()` (D-PATHFS1, unbuilt);
-`fs.list_dir -> [DirEntry]` (D-LSDIR1). Full civil time — Date/DateTime/
-Duration/Zone over IANA tz, layered on the injectable `Clock`
-(D-TIMEDEPTH1, unbuilt). PRNG `core.random` (SplitMix64, seedable) vs CSPRNG
-`core.crypto.random` (D-RANDSPLIT1); both carry `Rand`.
+`stem`), `write_atomic()`, lazy cycle-safe `walk()` (D-PATHFS1 shipped).
+`core.files` now ships D-FSOPS1 depth: `Stat`, `WalkEntry`, `TempDir`,
+`TempFile`, `FileLock`, recursive `walk`/`glob`, metadata, create/remove tree,
+copy tree, symlink/readlink/hardlink, temp handles, advisory lock files,
+canonical/absolute, offset bytes, fsync, and atomic writes (#288). Watch APIs
+follow the owner's D-WATCH-SCOPE1 comment: `core.watcher` owns file, process,
+and port watch handles with `WatchEvent` values plus callback methods through
+`core.event`. `fs.list_dir -> [DirEntry]` (D-LSDIR1). Civil time uses
+Instant/DateTime/LocalDate/LocalTime/Duration/Period/Zone/ZonedDateTime over
+IANA TZif zoneinfo, layered on the injectable `Clock` (D-TIMEDEPTH1 +
+D-TIME-CALENDAR1; #295). PRNG
+`core.random` (SplitMix64, seedable) vs CSPRNG `core.crypto.random`
+(D-RANDSPLIT1); both carry `Rand`.
 
 **Crypto**: misuse-resistant `seal`/`open` + `sign`/`verify` defaults; raw
 primitives require `core.crypto.expert` behind `#Unsafe` (D-CRYPTOENV1,
@@ -1397,18 +1452,23 @@ v4/v7 (D-UUIDENC1).
 
 **Numerics & data**: `core.linalg` ring package — `Vec2/3/4`, `Mat3/Mat4`,
 `.dot()`/`.cross()`/`.matmul()` as aliases over a generic `Vec<N>`/
-`Matrix<M,N>` substrate (const-generic substrate unbuilt) (D-MATHLIB1,
+`Matrix<M,N>` substrate (const-generic substrate tracked by #293) (D-MATHLIB1,
 D-LINALG1). `core.db`: backend-neutral `Driver` trait, parameterized-only
 API, SQLite first; explicit `.begin/.commit/.rollback` distinct from
-`#Transact` (D-DBDRIVER1). `core.http`: client+server submodules; client
+`#Transact` (D-DBDRIVER1). D-DBMIGRATE1 ships the hybrid database floor:
+checked `Sql` literals feed `db.params(sql)`, rows stay inspectable maps with
+typed `db.row_*` reads, and `db.transaction`/`db.migrate` provide rollback and
+checksum-recorded migration helpers over the same parameterized path. `core.http`: client+server submodules; client
 supports HTTPS by default via rustls + system roots (D-TLS1=A); server is
 plain `fn(req: Request) -> Response` on a `mux` (`mux.get("/path", handler)`,
 `req.params["id"]`, `Server.serve(addr, mux)?`) with HTTPS enabled by the named
-option `Server.serve(addr, mux, tls: Server.tls(cert, key))` (D-TLSSERVE1=A);
-HTTP/1.1+2+WebSocket
-(D-HTTPLIB1–3, D-ROUTE1; unbuilt — c164). Compression
+option `Server.serve(addr, mux, tls: Server.tls(cert, key))` (D-TLSSERVE1=A).
+HTTP/1.1 depth is tracked by #301; HTTP/2 remains a separate transport upgrade,
+and WebSocket belongs to `core.ws` per D-WS1=B (D-HTTPLIB1–3, D-ROUTE1).
+Compression
 `core.compress.{gzip,zstd}` (D-CODECS1). Measurement-with-uncertainty in
-`core.science.measurement` (D-HONESTNUM1, unbuilt). Opt-in `Gc<T>` module
+`core.science.measurement` (D-HONESTNUM1 shipped/partial; #310 verifies module
+map truth). Opt-in `Gc<T>` module
 for cyclic data (D-OPTGC1, gated on its I6 ballot). Approximate/sketch algos
 are libraries (D-APPROX1); parallelism stays explicit `par_*`
 (D-AUTOPAR1); adaptive fidelity is a manual runtime-global knob:
@@ -1444,11 +1504,11 @@ page (explicit > sibling `<stem>.html` > generated; missing path = build
 error). `Os.*` gates a single `impl` block (item-scoped), not a file/module —
 `E-OSTARGET-MIXED-AXIS`/`E-OSTARGET-UNMATCHED-CALL` enforce it.
 **D-OSTARGET2 (=B, ratified 2026-07-03, c2qj06uq)**: ungated code reaches
-the surviving OS-gated impl through a comptime switch on `build.os` — a
+the surviving OS-gated impl through a comptime dispatch on `build.os` — a
 compiler-known comptime value matched with `.Linux`/`.Macos`/`.Windows`
 arms; non-matching arms are discarded before OS-gating checks run.
 fn-level `#Target(Os.*)` gating (option A) rejected.
-*Shipped spelling (2026-07-03):* the ballot wrote the switch loosely as `match
+*Shipped spelling (2026-07-03):* the ballot wrote the dispatch loosely as `match
 build.os { … }`; reconciled to Jet's one canonical branching form (D-IF1/D-IF3
 `if subject == { }` if-table) with the existing `comptime if` lead (D-WHEN1) —
 **no `match` keyword was added** (I8). Statement-position dispatch:
@@ -1465,7 +1525,7 @@ fn run() {
 
 `build.os` resolves to `ProgramBundle.active_os` (the `--target=<triple>` OS
 bucket, host OS when omitted; a web/wasm target falls back to the host per
-`OsTarget::active`). Sema desugars the switch into a `comptime if` chain
+`OsTarget::active`). Sema desugars the dispatch into a `comptime if` chain
 (D-WHEN1/D-WHEN2 machinery) as the *first* step of `check_bundle`, folding to
 the arm matching `active_os` and discarding the rest before any OS-gating
 check, type-check, or codegen sees a body — so constructing an OS-gated type
@@ -1475,7 +1535,7 @@ set must cover `.Linux`, `.Macos`, and `.Windows`, or carry an `else` — missin
 an OS with no `else` is `E-OSTARGET-DISPATCH-EXHAUSTIVE` (so the same source
 compiles or fails identically on every platform). A non-`build.os` subject is
 `E-OSTARGET-BUILD-CONTEXT`; a non-OS arm head is `E-OSTARGET-DISPATCH-ARM`.
-`build.os` is meaningful *only* as this switch's subject — `build` is not a
+`build.os` is meaningful *only* as this dispatch's subject — `build` is not a
 reserved word, so anywhere else it is an ordinary identifier (undefined at
 runtime → E0107), never a magic runtime value.
 **D-UIDEVSHELL1 (=A, ratified 2026-07-03, c2qj06uq)**: Phase 8 native
@@ -1878,8 +1938,9 @@ switch --name <name>` overrides it. `jet os generations` lists newest first.
 
 **D-JPK-OSNS1=B / D-JOS-SYSTEMTREE1=A**: jetos option keys use full-word
 namespaces: `filesystem.*`, `network.*`, `packages.*`, `services.*`,
-`users.*`, `groups.*`, `secrets.*`, `boot.*`, `kernel.*`, `init.*`, and
-`health.*`. The current generation projection covers package closure/cache
+`users.*`, `user.*`, `apps.*`, `performance.*`, `storage.*`, `theme.*`,
+`workload.*`, `hardware.*`, `groups.*`, `secrets.*`, `boot.*`, `kernel.*`,
+`init.*`, `health.*`, and `deploy.*`. The current generation projection covers package closure/cache
 facts, users/groups, filesystems and swap, network/firewall/wireless facts,
 systemd services/timers/sockets plus target wants, kernel firmware/driver
 facts, desktop display manager facts under `services.*`, secrets, health checks,

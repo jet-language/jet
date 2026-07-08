@@ -1,5 +1,5 @@
-//! D-REGEX1 — jet.regex integration. The `regex` crate is linked via the hidden
-//! FFI bridge, so these are gated on `cargo`/`rustc` like the FFI goldens.
+//! D-REGEXENGINE1 — core.regex is std-only in the generated prelude. Regex-only
+//! programs must not ask for the hidden FFI bridge or the old `regex` crate.
 
 use std::fs;
 
@@ -28,7 +28,14 @@ fn run_regex(src: &str) -> String {
             jet::render_diagnostics(&shown, src, &diags)
         )
     });
-    assert!(out.ffi.is_some(), "jet.regex must produce an FFI bridge");
+    assert!(
+        out.ffi.is_none(),
+        "core.regex must not produce an FFI bridge"
+    );
+    assert!(
+        !out.rust.contains("regex::") && !out.rust.contains("extern crate regex"),
+        "core.regex must not reference the old regex crate"
+    );
     assert!(
         !out.rust.contains("unsafe"),
         "I1: regex output must not contain unsafe"
@@ -37,19 +44,14 @@ fn run_regex(src: &str) -> String {
     let rs = dir.join("regex_test.rs");
     let bin = dir.join("regex_test_bin");
     fs::write(&rs, &out.rust).unwrap();
-    let link = out.ffi.as_ref().unwrap();
     let status = Command::new("rustc")
         .args(["--edition", "2021"])
         .arg(&rs)
         .arg("-o")
         .arg(&bin)
-        .arg("--extern")
-        .arg(format!("{}={}", link.crate_name, link.rlib_path.display()))
-        .arg("-L")
-        .arg(format!("dependency={}", link.deps_dir.display()))
         .status()
         .unwrap();
-    assert!(status.success(), "I2: rustc rejected regex-linked output");
+    assert!(status.success(), "I2: rustc rejected regex output");
 
     let run = Command::new(&bin).output().unwrap();
     assert!(
@@ -150,4 +152,50 @@ fn run() {
 "##;
     let out = run_regex(src);
     assert_eq!(out.trim(), "caught", "bad pattern surfaces as Err");
+}
+
+#[test]
+fn compiled_regex_flags_spans_names_limit_and_callback() {
+    if !have_toolchain() {
+        eprintln!("note: cargo/rustc not found; skipping core.regex API test");
+        return;
+    }
+    let src = r##"
+use core.regex as re
+
+fn run() {
+    flags :: re.flags(true, true, false)
+    rx :: re.compile_with("^(?<word>[a-z]+)", flags) ?? panic("bad pattern")
+    text :: "Ada\nlovelace"
+    matches :: rx.matches(text)
+    print(matches.len())
+    first :: rx.match(text)
+    if first == Val(mat) {
+        print(mat.name("word") ?? "none")
+        print(mat.start())
+        print(mat.end())
+        print(mat.group_start(1) ?? -1)
+        print(mat.group_end(1) ?? -1)
+    }
+
+    sep :: re.compile(",\\s*") ?? panic("bad sep")
+    pieces :: sep.split_limit("a, b, c", 2)
+    print(pieces.len())
+    print(pieces[1])
+
+    word :: re.compile("\\w+") ?? panic("bad word")
+    print(word.replace_all_with("a b", (m: Match) => "hit"))
+}
+"##;
+    let out = run_regex(src);
+    let lines: Vec<&str> = out.lines().collect();
+    assert_eq!(lines[0], "2", "multiline + case-insensitive flags");
+    assert_eq!(lines[1], "Ada", "named group");
+    assert_eq!(lines[2], "0", "match start");
+    assert_eq!(lines[3], "3", "match end");
+    assert_eq!(lines[4], "0", "group start");
+    assert_eq!(lines[5], "3", "group end");
+    assert_eq!(lines[6], "2", "split limit len");
+    assert_eq!(lines[7], "b, c", "split limit remainder");
+    assert_eq!(lines[8], "hit hit", "callback replacement");
 }

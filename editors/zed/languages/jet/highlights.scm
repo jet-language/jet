@@ -117,7 +117,7 @@
   "true"
 ] @constant.builtin
 
-; type.builtin: BTreeMap BigInt Bool Char Computed Csv Data DbValue Decimal Deque Derived Effect Error Event EventPolicy EventScope EventTrace F32 F64 Float HashMap Hook I16 I32 I64 I8 IOError Int JSON JSONError Json Key Measurement Ptr SelectBuilder Set Shared Signal Stream String Subscription TaskGroup Toml U16 U32 U64 U8 UTF8Error Void Yaml
+; type.builtin: BTreeMap BigInt BitSet Bool ByteBuffer Char Computed Csv Data DbValue Decimal Deque Derived Effect Error Event EventPolicy EventScope EventTrace F32 F64 Float HashMap Hook I16 I32 I64 I8 IOError Int JSON JSONError Json Key Lru Measurement PriorityQueue Ptr SelectBuilder Set Shared Signal SortedSet Stream String Subscription TaskGroup Toml U16 U32 U64 U8 UTF8Error Void WatchEvent WatchHandle WatchSet Yaml
 [
   "Bool"
   "Char"
@@ -139,7 +139,7 @@
 ] @type.builtin
 
 ; builtin: input print
-; marker.directive: Bench Bindgen Caller Caps Default DenyUnknownFields Extern Flatten Grant Html Impure Js Layout Reactive Rename RenameAll Sanitizer SingleUse Skip Sql State Suppress Tag Tainted Target Test Todo Track Transact Transition UnitFamily Unsafe Untagged Wasm WasmExport
+; marker.directive: Bench Bindgen Caller Caps Default DenyUnknownFields Extern Flatten Grant Html Impure Js Layout Reactive Rename RenameAll Replayable Sanitizer SingleUse Skip Sql State Suppress Tag Tainted Target Test Todo Track Transact Transition UnitFamily Unsafe Untagged Wasm WasmExport
 ; marker.contract: Cli Codable CodableAsBase Comparable Debug Decode Doc Encode Experimental Hardened Inline InlineAlways MustUse Numeric Patchable Persist Post Pre Printable PublishedSchema Pure Redact Summarize Tested
 ; sigil: # & ... :: := @ ^
 ; operator: ! != % %= && &= * *= + ++ += - -- -= -> .. .[ .{ / /= < << <<= <= == => > >= >> >>= ? ?. ?? ^= | |= ||

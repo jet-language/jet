@@ -584,16 +584,17 @@ impl<'a> Checker<'a> {
         span: Span,
         elem: Option<&Type>,
     ) -> Option<Type> {
-        if args.len() != 1 {
+        if !(args.len() == 1 || args.len() == 2) {
             self.diags.push(Diagnostic::error(
                 "E0104",
                 format!(
-                    "`.after()` takes one `ms:` duration, got {} argument{}",
+                    "`.after()` takes one `ms:` duration and an optional value, got {} argument{}",
                     args.len(),
                     if args.len() == 1 { "" } else { "s" }
                 ),
-                "a select timer arm fires after the given milliseconds".to_string(),
-                "write `.after(ms: 100)`".to_string(),
+                "a select timer arm fires after the given milliseconds; mixed recv/timer selects need a typed value"
+                    .to_string(),
+                "write `.after(ms: 100)` or `.after(ms: 100, value: fallback)`".to_string(),
                 Some(span),
             ));
             for a in args.iter_mut() {
@@ -602,7 +603,9 @@ impl<'a> Checker<'a> {
             return None;
         }
         let ms_ty = self.infer(&mut args[0].expr)?;
-        if !matches!(ms_ty, Type::Named(ref n) if n == "Int" || n == "I64" || n == "I32") {
+        if !(matches!(ms_ty, Type::Int)
+            || matches!(ms_ty, Type::Named(ref n) if n == "Int" || n == "I64" || n == "I32"))
+        {
             self.diags.push(Diagnostic::error(
                 "E0112",
                 format!(
@@ -614,15 +617,45 @@ impl<'a> Checker<'a> {
                 Some(args[0].expr.span()),
             ));
         }
-        Some(match elem {
-            Some(t) => Type::Apply {
-                name: Syntax::TYPE_SELECT_BUILDER.to_string(),
-                args: vec![t.clone()],
-            },
-            None => Type::Apply {
-                name: Syntax::TYPE_SELECT_BUILDER.to_string(),
-                args: vec![],
-            },
+        let value_ty = if args.len() == 2 {
+            Some(self.infer(&mut args[1].expr)?)
+        } else {
+            None
+        };
+        if let (Some(prev), Some(value)) = (elem, value_ty.as_ref()) {
+            if prev.show() != value.show() {
+                self.diags.push(Diagnostic::error(
+                    "E0112",
+                    format!(
+                        "select timer value must match receive element type, got `{}` and `{}`",
+                        prev.show(),
+                        value.show()
+                    ),
+                    "one select returns one type no matter which arm wins".to_string(),
+                    "use a timer value with the same type as the receive arms".to_string(),
+                    Some(args[1].expr.span()),
+                ));
+                return None;
+            }
+        }
+        if elem.is_some() && value_ty.is_none() {
+            self.diags.push(Diagnostic::error(
+                "E0112",
+                "a timer arm mixed with receive arms needs a typed value".to_string(),
+                "otherwise the select would have no value to return when the timer wins"
+                    .to_string(),
+                "write `.after(ms: 100, value: fallback)`".to_string(),
+                Some(span),
+            ));
+            return None;
+        }
+        Some(Type::Apply {
+            name: Syntax::TYPE_SELECT_BUILDER.to_string(),
+            args: elem
+                .cloned()
+                .or(value_ty)
+                .map(|t| vec![t])
+                .unwrap_or_default(),
         })
     }
 

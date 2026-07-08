@@ -1,6 +1,6 @@
 //! Purity check: walk the call graph reachable from a comptime `init` and
 //! reject the first impure call (IO, FFI) with the path that reached it
-//! (E0951). `embed_file`, `panic`, and `require` are allowed.
+//! (E0951). `embed_file`, `embed_bytes`, `find`, `panic`, and `require` are allowed.
 
 use std::collections::{HashMap, HashSet};
 
@@ -10,8 +10,8 @@ use crate::AST::{EnumLitArg, Expr, Func, Stmt, StrPart};
 use super::Diagnostics::impurity_diag;
 
 /// Walk the call graph reachable from `init`; reject the first impure call
-/// (IO, FFI) with the path that reached it (E0951). `embed_file`, `panic`,
-/// and `require` are allowed.
+/// (IO, FFI) with the path that reached it (E0951). `embed_file`,
+/// `embed_bytes`, `find`, `panic`, and `require` are allowed.
 pub(super) fn check_purity_stmts(
     stmts: &[Stmt],
     funcs: &HashMap<String, &Func>,

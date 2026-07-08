@@ -103,7 +103,8 @@ pub(crate) fn is_nondeterministic_core(module: &str, method: &str) -> bool {
         ("core.time", "now" | "sleep" | "start")
             | (
                 "core.random",
-                "int" | "float" | "pick" | "shuffle" | "seed" | "bytes"
+                "int" | "float" | "float_range" | "bool" | "normal" | "exponential" | "pick"
+                    | "weighted_pick" | "sample" | "shuffle" | "seed" | "split" | "bytes"
             )
             | ("core.crypto.random", "bytes")
     )

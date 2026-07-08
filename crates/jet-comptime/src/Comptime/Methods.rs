@@ -3,6 +3,7 @@
 //! `impl Interp` methods; the struct and spine live in `interp.rs`.
 
 use std::collections::HashMap;
+use std::path::Path;
 
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::AST::{CallArg, Expr, Func, LambdaBody, StrPart, Type, UnOp};
@@ -19,7 +20,7 @@ use super::Value::CtValue;
 /// literal that stays inside the project — never computed, never absolute, and
 /// never escaping via `..`. Computed or escaping paths can't be audited at
 /// build time and open a supply-chain hole, so they are E0957, not file reads.
-/// `builtin` names the function (`embed_file` / `embed_bytes`) for the message.
+/// `builtin` names the function (`embed_file` / `embed_bytes` / `find`) for the message.
 fn check_embed_path(builtin: &str, arg: &CallArg, span: Span) -> Result<String, Diagnostic> {
     let path = match &arg.expr {
         Expr::Str(parts, _) if parts.len() == 1 => match &parts[0] {
@@ -41,24 +42,227 @@ fn check_embed_path(builtin: &str, arg: &CallArg, span: Span) -> Result<String, 
 }
 
 fn embed_path_err(builtin: &str, kind: &str, span: Span) -> Diagnostic {
+    let noun = if builtin == crate::Syntax::BUILTIN_FIND {
+        "glob"
+    } else {
+        "path"
+    };
+    let inline_example = if builtin == crate::Syntax::BUILTIN_FIND {
+        format!("{builtin}(\"content/**/*.jet\")")
+    } else {
+        format!("{builtin}(\"data/file\")")
+    };
     let (msg, why, fix) = match kind {
         "literal" => (
-            format!("`{builtin}` path must be a string literal"),
-            "a computed path can't be audited at build time, so the compiler can't tell which file it reads".to_string(),
-            format!("pass the path inline, e.g. `{builtin}(\"data/file\")`"),
+            format!("`{builtin}` {noun} must be a string literal"),
+            format!("a computed {noun} can't be audited at build time, so the compiler can't tell which file it reads"),
+            format!("pass the {noun} inline, e.g. `{inline_example}`"),
         ),
         "absolute" => (
-            format!("`{builtin}` path must be relative"),
-            "an absolute path reaches outside the project".to_string(),
-            "use a path relative to this file's own directory".to_string(),
+            format!("`{builtin}` {noun} must be relative"),
+            format!("an absolute {noun} reaches outside the project"),
+            format!("use a {noun} relative to this file's own directory"),
         ),
         _ => (
-            format!("`{builtin}` path escapes the project with `..`"),
-            "`..` could read files outside your project; embeds must stay inside it".to_string(),
-            "drop the `..` and use a path under this file's directory".to_string(),
+            format!("`{builtin}` {noun} escapes the project with `..`"),
+            "`..` could read files outside your project; comptime inputs must stay inside it".to_string(),
+            format!("drop the `..` and use a {noun} under this file's directory"),
         ),
     };
     Diagnostic::error("E0957", msg, why, fix, Some(span))
+}
+
+fn find_glob(base_dir: &Path, glob: &str, span: Span) -> Result<Vec<String>, Diagnostic> {
+    let pattern = normalize_rel(glob);
+    let segments = split_rel(&pattern);
+    let root_rel = static_glob_prefix(&segments);
+    let root = if root_rel.is_empty() {
+        base_dir.to_path_buf()
+    } else {
+        base_dir.join(root_rel.join("/"))
+    };
+    let has_recursive = segments.iter().any(|segment| segment == "**");
+    let max_depth = if has_recursive {
+        usize::MAX
+    } else {
+        segments.len()
+    };
+    let mut out = Vec::new();
+    if root.is_file() {
+        let rel = root_rel.join("/");
+        if glob_segments_match(&segments, &split_rel(&rel)) {
+            out.push(rel);
+        }
+        return Ok(out);
+    }
+    if !root.exists() {
+        return Ok(out);
+    }
+    walk_find(
+        base_dir,
+        &root,
+        &segments,
+        root_rel.len(),
+        max_depth,
+        &mut out,
+    )
+    .map_err(|e| {
+        Diagnostic::error(
+            "E0955",
+            format!("`{}` can't walk `{glob}`", crate::Syntax::BUILTIN_FIND),
+            e.to_string(),
+            "check that every directory matched by the glob can be read".to_string(),
+            Some(span),
+        )
+    })?;
+    Ok(out)
+}
+
+fn normalize_rel(path: &str) -> String {
+    path.replace('\\', "/")
+}
+
+fn split_rel(path: &str) -> Vec<String> {
+    path.split('/')
+        .filter(|part| !part.is_empty() && *part != ".")
+        .map(str::to_string)
+        .collect()
+}
+
+fn static_glob_prefix(segments: &[String]) -> Vec<String> {
+    let mut prefix = Vec::new();
+    for segment in segments {
+        if segment == "**" || segment_has_glob(segment) {
+            break;
+        }
+        prefix.push(segment.clone());
+    }
+    prefix
+}
+
+fn segment_has_glob(segment: &str) -> bool {
+    segment.chars().any(|c| matches!(c, '*' | '?' | '{' | '['))
+}
+
+fn walk_find(
+    base_dir: &Path,
+    dir: &Path,
+    pattern: &[String],
+    depth: usize,
+    max_depth: usize,
+    out: &mut Vec<String>,
+) -> std::io::Result<()> {
+    let mut entries = std::fs::read_dir(dir)?.collect::<Result<Vec<_>, _>>()?;
+    entries.sort_by_key(|entry| entry.path());
+    for entry in entries {
+        let ty = entry.file_type()?;
+        let path = entry.path();
+        if ty.is_dir() {
+            let dir_depth = depth + 1;
+            if dir_depth < max_depth {
+                walk_find(base_dir, &path, pattern, dir_depth, max_depth, out)?;
+            }
+        } else if ty.is_file() {
+            let rel = path.strip_prefix(base_dir).unwrap_or(&path);
+            let rel = normalize_rel(&rel.to_string_lossy());
+            if glob_segments_match(pattern, &split_rel(&rel)) {
+                out.push(rel);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn glob_segments_match(pattern: &[String], path: &[String]) -> bool {
+    if pattern.is_empty() {
+        return path.is_empty();
+    }
+    if pattern[0] == "**" {
+        return glob_segments_match(&pattern[1..], path)
+            || (!path.is_empty() && glob_segments_match(pattern, &path[1..]));
+    }
+    !path.is_empty()
+        && segment_match(&pattern[0], &path[0])
+        && glob_segments_match(&pattern[1..], &path[1..])
+}
+
+fn segment_match(pattern: &str, text: &str) -> bool {
+    segment_match_chars(
+        &pattern.chars().collect::<Vec<_>>(),
+        &text.chars().collect::<Vec<_>>(),
+    )
+}
+
+fn segment_match_chars(pattern: &[char], text: &[char]) -> bool {
+    if pattern.is_empty() {
+        return text.is_empty();
+    }
+    match pattern[0] {
+        '*' => {
+            segment_match_chars(&pattern[1..], text)
+                || (!text.is_empty() && segment_match_chars(pattern, &text[1..]))
+        }
+        '?' => !text.is_empty() && segment_match_chars(&pattern[1..], &text[1..]),
+        '{' => match find_closing(pattern, 0, '}') {
+            Some(end) => split_alternatives(&pattern[1..end]).into_iter().any(|alt| {
+                let mut next = alt;
+                next.extend_from_slice(&pattern[end + 1..]);
+                segment_match_chars(&next, text)
+            }),
+            None => {
+                !text.is_empty() && text[0] == '{' && segment_match_chars(&pattern[1..], &text[1..])
+            }
+        },
+        '[' => match find_closing(pattern, 0, ']') {
+            Some(end) => {
+                !text.is_empty()
+                    && class_matches(&pattern[1..end], text[0])
+                    && segment_match_chars(&pattern[end + 1..], &text[1..])
+            }
+            None => {
+                !text.is_empty() && text[0] == '[' && segment_match_chars(&pattern[1..], &text[1..])
+            }
+        },
+        c => !text.is_empty() && text[0] == c && segment_match_chars(&pattern[1..], &text[1..]),
+    }
+}
+
+fn find_closing(chars: &[char], start: usize, close: char) -> Option<usize> {
+    chars
+        .iter()
+        .enumerate()
+        .skip(start + 1)
+        .find_map(|(idx, c)| (*c == close).then_some(idx))
+}
+
+fn split_alternatives(chars: &[char]) -> Vec<Vec<char>> {
+    let mut out = Vec::new();
+    let mut cur = Vec::new();
+    for c in chars {
+        if *c == ',' {
+            out.push(cur);
+            cur = Vec::new();
+        } else {
+            cur.push(*c);
+        }
+    }
+    out.push(cur);
+    out
+}
+
+fn class_matches(class: &[char], needle: char) -> bool {
+    let mut i = 0;
+    let mut matched = false;
+    while i < class.len() {
+        if i + 2 < class.len() && class[i + 1] == '-' {
+            matched |= class[i] <= needle && needle <= class[i + 2];
+            i += 3;
+        } else {
+            matched |= class[i] == needle;
+            i += 1;
+        }
+    }
+    matched
 }
 
 /// D-CTMARKER1=C: substitute `$name` splices in a string using values from the
@@ -190,6 +394,9 @@ impl<'a> Interp<'a> {
         }
         if name == crate::Syntax::BUILTIN_EMBED_BYTES {
             return self.eval_embed_bytes(args, span);
+        }
+        if name == crate::Syntax::BUILTIN_FIND {
+            return self.eval_find(args, span);
         }
         if name == "panic" {
             let msg = match args.first() {
@@ -574,6 +781,44 @@ impl<'a> Interp<'a> {
         let builtin = crate::Syntax::BUILTIN_EMBED_BYTES;
         let (_rel, bytes) = self.read_embed(builtin, args, span)?;
         Ok(CtValue::Bytes(bytes))
+    }
+
+    /// D-CTFIND1/2: `find(glob) -> [String]` walks inside the source file's
+    /// directory, returns sorted relative file paths, and records each match's
+    /// hash as Tier-1 lock evidence.
+    fn eval_find(&mut self, args: &[CallArg], span: Span) -> Result<CtValue, Diagnostic> {
+        let builtin = crate::Syntax::BUILTIN_FIND;
+        let arg = args
+            .first()
+            .ok_or_else(|| unsupported(&format!("{builtin} with no glob"), span))?;
+        let glob = check_embed_path(builtin, arg, span)?;
+        if args.len() != 1 {
+            return Err(unsupported(
+                &format!("{builtin} with extra arguments"),
+                span,
+            ));
+        }
+        let mut matches = find_glob(self.base_dir, &glob, span)?;
+        matches.sort();
+        for rel in &matches {
+            let full = self.base_dir.join(rel);
+            let bytes = std::fs::read(&full).map_err(|e| {
+                Diagnostic::error(
+                    "E0955",
+                    format!("`{builtin}` can't open `{rel}`"),
+                    format!("{} (matched while expanding `{glob}`)", e),
+                    "check the glob and remove unreadable files from its match set".to_string(),
+                    Some(span),
+                )
+            })?;
+            self.embed_inputs.push(crate::AST::ComptimeInput {
+                path: rel.clone(),
+                hash: crate::SHA256::sha256_hex(&bytes),
+            });
+        }
+        Ok(CtValue::List(
+            matches.into_iter().map(CtValue::Str).collect(),
+        ))
     }
 
     /// Shared `embed_file`/`embed_bytes` front half: validate the path (E0957)
@@ -1494,7 +1739,7 @@ fn apply_core_call(
                 fields: vec![("now".to_string(), CtValue::Int(seed))],
             })
         }
-        // --- jet.regex / core.regex (D-REGEX1) ---
+        // --- jet.regex / core.regex (D-REGEXENGINE1) ---
         ("jet.regex", "is_match") => regex_is_match(args, span),
         ("jet.regex", "find") => regex_find(args, span),
         ("jet.regex", "find_all") => regex_find_all(args, span),

@@ -61,25 +61,22 @@ fn extern_entry(ef: &ExternFn, block: &ExternRustBlock, _file: &str) -> ExternEn
 }
 
 /// Build (or reuse) the hidden wrapper crate. Returns `Ok(None)` when the
-/// program has no `extern rust` declarations and does not use `jet.regex`,
-/// `core.archive`, `jet.db`, or `core.compress.{gzip,zstd}`.
+/// program has no `extern rust` declarations and does not use `core.archive`,
+/// `jet.db`, or `core.compress.{gzip,zstd}`.
 ///
-/// `jet.regex` (D-REGEX1), `core.archive` (D-DEP-ARCHIVE1), `jet.db`
+/// `core.archive` (D-DEP-ARCHIVE1), `jet.db`
 /// (D-DEP-DB1), and `core.compress` (D-CODECS1) are delivered through this
 /// same hidden-cargo bridge: when a program imports any of them, the bridge
 /// crate gains the matching dependency and a hand-written runtime
-/// (`Source/Prelude/Regex.rs`, `Source/Prelude/Archive.rs`,
-/// `Source/Prelude/Db.rs`, `Source/Prelude/Compress.rs`). The compiler crate
+/// (`Source/Prelude/Archive.rs`, `Source/Prelude/Db.rs`,
+/// `Source/Prelude/Compress.rs`). The compiler crate
 /// (`Source/`) stays zero-dependency (I6). These are the owner-approved I6
 /// bootstrap exceptions, to be native-ized before the end of Epoch 3.
 pub fn prepare(bundle: &ProgramBundle) -> Result<Option<FfiLink>, Vec<Diagnostic>> {
     let entries = collect_externs(bundle);
-    // `used_core` entries are `"{module}::{method}"` (e.g. `jet.regex::is_match`),
-    // so match on the module prefix, not a bare module name.
-    let needs_regex = bundle
-        .used_core
-        .iter()
-        .any(|u| u == "jet.regex" || u.starts_with("jet.regex::"));
+    // D-REGEXENGINE1=A: core.regex is std-only in the generated prelude now, so
+    // it never asks for a hidden bridge crate.
+    let needs_regex = false;
     let needs_archive = bundle
         .used_core
         .iter()
@@ -107,6 +104,12 @@ pub fn prepare(bundle: &ProgramBundle) -> Result<Option<FfiLink>, Vec<Diagnostic
         .used_core
         .iter()
         .any(|u| u == "core.http.server::tls");
+    // D-NETSOCKET1=A / D-TLS1=A: `core.net.tls_connect` upgrades an existing
+    // TcpStream through the same hidden rustls bridge family as HTTP TLS.
+    let needs_net_tls = bundle
+        .used_core
+        .iter()
+        .any(|u| u == "core.net::tls_connect");
     // D-DEP-CRYPTO1=A: RustCrypto AEAD + Ed25519 for core.crypto envelope APIs.
     let needs_crypto = bundle.used_core.iter().any(|u| {
         u == "jet.crypto"
@@ -132,6 +135,7 @@ pub fn prepare(bundle: &ProgramBundle) -> Result<Option<FfiLink>, Vec<Diagnostic
         && !needs_db
         && !needs_http_client
         && !needs_http_server_tls
+        && !needs_net_tls
         && !needs_crypto
         && !needs_compress
         && !needs_plugin
@@ -147,6 +151,7 @@ pub fn prepare(bundle: &ProgramBundle) -> Result<Option<FfiLink>, Vec<Diagnostic
         needs_db,
         needs_http_client,
         needs_http_server_tls,
+        needs_net_tls,
         needs_crypto,
         needs_compress,
         needs_plugin,
@@ -154,10 +159,6 @@ pub fn prepare(bundle: &ProgramBundle) -> Result<Option<FfiLink>, Vec<Diagnostic
     )
     .map(Some)
 }
-
-/// The `regex` crate version that backs `jet.regex` (D-REGEX1). Lives only here,
-/// never in the compiler's Cargo.toml (I6).
-pub const REGEX_CRATE_SPEC: (&str, &str) = ("regex", "1");
 
 /// The `flate2` crate version that backs `core.archive` gzip (D-DEP-ARCHIVE1).
 /// Lives only here — never in the compiler's Cargo.toml (I6).
@@ -191,9 +192,15 @@ pub const HTTP_SERVER_TLS_CRATE_SPEC: (&str, &str) = ("rustls", "0.23");
 /// PEM parser used by the server TLS bridge.
 pub const HTTP_SERVER_TLS_PEMFILE_CRATE_SPEC: (&str, &str) = ("rustls-pemfile", "2");
 
+/// System root loader used by `core.net.tls_connect` (D-NETSOCKET1=A / D-TLS1=A).
+pub const RUSTLS_NATIVE_CERTS_CRATE_SPEC: (&str, &str) = ("rustls-native-certs", "0.7");
+
 /// Hand-written HTTP server TLS runtime emitted into the bridge crate when
 /// `core.http.server.tls` is used.
 const HTTP_SERVER_TLS_RUNTIME: &str = include_str!("Prelude/HttpServerTls.rs");
+
+/// Hand-written client TLS stream runtime emitted when `core.net.tls_connect` is used.
+const NET_TLS_RUNTIME: &str = include_str!("Prelude/NetTls.rs");
 
 /// Crate dependency specs that require non-trivial TOML values (e.g. feature flags).
 /// These are emitted verbatim as the right-hand side of the `name = …` line.
@@ -216,10 +223,6 @@ const FEATURED_DEPS: &[(&str, &str)] = &[
     ),
 ];
 
-/// Hand-written regex runtime emitted into the bridge crate when `jet.regex` is
-/// used. This is the only code that touches the `regex` crate.
-const REGEX_RUNTIME: &str = include_str!("Prelude/Regex.rs");
-
 /// Hand-written archive runtime emitted into the bridge crate when `core.archive`
 /// is used. This is the only code that touches the `flate2`, `zip`, and `tar` crates.
 const ARCHIVE_RUNTIME: &str = include_str!("Prelude/Archive.rs");
@@ -236,6 +239,24 @@ pub const CHACHA_POLY_CRATE_SPEC: (&str, &str) = ("chacha20poly1305", "0.10");
 
 /// The `ed25519-dalek` crate version backing `core.crypto.sign/verify` (D-DEP-CRYPTO1).
 pub const ED25519_CRATE_SPEC: (&str, &str) = ("ed25519-dalek", "2");
+
+/// The `argon2` crate version backing `core.crypto.password_hash` (D-PWHASH1).
+pub const ARGON2_CRATE_SPEC: (&str, &str) = ("argon2", "0.5");
+
+/// The `sha2` crate version backing SHA-512 + HKDF-SHA256 (D-CRYPTO-SUITE1).
+pub const SHA2_CRATE_SPEC: (&str, &str) = ("sha2", "0.10");
+
+/// The `blake3` crate version backing `core.crypto.blake3_bytes` (D-CRYPTO-SUITE1).
+pub const BLAKE3_CRATE_SPEC: (&str, &str) = ("blake3", "1");
+
+/// The `hkdf` crate version backing `core.crypto.hkdf_sha256` (D-CRYPTO-SUITE1).
+pub const HKDF_CRATE_SPEC: (&str, &str) = ("hkdf", "0.12");
+
+/// The `x25519-dalek` crate version backing key agreement (D-CRYPTO-SUITE1).
+pub const X25519_CRATE_SPEC: (&str, &str) = ("x25519-dalek", "2");
+
+/// Constant-time byte equality helper (D-CRYPTO-SUITE1).
+pub const SUBTLE_CRATE_SPEC: (&str, &str) = ("subtle", "2");
 
 /// Hand-written crypto runtime emitted into the bridge crate when `core.crypto`
 /// seal/open/sign/verify is used (D-CRYPTOENV1, D-DEP-CRYPTO1).
@@ -298,6 +319,7 @@ pub fn build_bridge(
         needs_db,
         needs_http_client,
         false,
+        false,
         needs_crypto,
         needs_compress,
         needs_plugin,
@@ -312,18 +334,13 @@ fn build_bridge_full(
     needs_db: bool,
     needs_http_client: bool,
     needs_http_server_tls: bool,
+    needs_net_tls: bool,
     needs_crypto: bool,
     needs_compress: bool,
     needs_plugin: bool,
     needs_secrets: bool,
 ) -> Result<FfiLink, Vec<Diagnostic>> {
     let mut deps = collect_crate_deps(entries);
-    if needs_regex {
-        deps.insert(
-            REGEX_CRATE_SPEC.0.to_string(),
-            REGEX_CRATE_SPEC.1.to_string(),
-        );
-    }
     if needs_archive {
         deps.insert(
             ARCHIVE_CRATE_SPEC.0.to_string(),
@@ -351,6 +368,16 @@ fn build_bridge_full(
             HTTP_SERVER_TLS_PEMFILE_CRATE_SPEC.1.to_string(),
         );
     }
+    if needs_net_tls {
+        deps.insert(
+            HTTP_SERVER_TLS_CRATE_SPEC.0.to_string(),
+            HTTP_SERVER_TLS_CRATE_SPEC.1.to_string(),
+        );
+        deps.insert(
+            RUSTLS_NATIVE_CERTS_CRATE_SPEC.0.to_string(),
+            RUSTLS_NATIVE_CERTS_CRATE_SPEC.1.to_string(),
+        );
+    }
     if needs_crypto {
         deps.insert(
             AES_GCM_CRATE_SPEC.0.to_string(),
@@ -363,6 +390,24 @@ fn build_bridge_full(
         deps.insert(
             ED25519_CRATE_SPEC.0.to_string(),
             ED25519_CRATE_SPEC.1.to_string(),
+        );
+        deps.insert(
+            ARGON2_CRATE_SPEC.0.to_string(),
+            ARGON2_CRATE_SPEC.1.to_string(),
+        );
+        deps.insert(SHA2_CRATE_SPEC.0.to_string(), SHA2_CRATE_SPEC.1.to_string());
+        deps.insert(
+            BLAKE3_CRATE_SPEC.0.to_string(),
+            BLAKE3_CRATE_SPEC.1.to_string(),
+        );
+        deps.insert(HKDF_CRATE_SPEC.0.to_string(), HKDF_CRATE_SPEC.1.to_string());
+        deps.insert(
+            X25519_CRATE_SPEC.0.to_string(),
+            X25519_CRATE_SPEC.1.to_string(),
+        );
+        deps.insert(
+            SUBTLE_CRATE_SPEC.0.to_string(),
+            SUBTLE_CRATE_SPEC.1.to_string(),
         );
     }
     if needs_compress {
@@ -395,6 +440,7 @@ fn build_bridge_full(
         needs_db,
         needs_http_client,
         needs_http_server_tls,
+        needs_net_tls,
         needs_crypto,
         needs_compress,
         needs_plugin,
@@ -497,6 +543,7 @@ fn build_bridge_full(
             needs_db,
             needs_http_client,
             needs_http_server_tls,
+            needs_net_tls,
             needs_crypto,
             needs_compress,
             needs_plugin,
@@ -877,6 +924,7 @@ fn cache_key_full(
     needs_db: bool,
     needs_http_client: bool,
     needs_http_server_tls: bool,
+    needs_net_tls: bool,
     needs_crypto: bool,
     needs_compress: bool,
     needs_plugin: bool,
@@ -891,27 +939,39 @@ fn cache_key_full(
     }
     if needs_archive {
         needs_archive.hash(&mut h);
+        ARCHIVE_RUNTIME.hash(&mut h);
     }
     if needs_db {
         needs_db.hash(&mut h);
+        DB_RUNTIME.hash(&mut h);
     }
     if needs_http_client {
         needs_http_client.hash(&mut h);
+        HTTP_CLIENT_RUNTIME.hash(&mut h);
     }
     if needs_http_server_tls {
         needs_http_server_tls.hash(&mut h);
+        HTTP_SERVER_TLS_RUNTIME.hash(&mut h);
+    }
+    if needs_net_tls {
+        needs_net_tls.hash(&mut h);
+        NET_TLS_RUNTIME.hash(&mut h);
     }
     if needs_crypto {
         needs_crypto.hash(&mut h);
+        CRYPTO_RUNTIME.hash(&mut h);
     }
     if needs_compress {
         needs_compress.hash(&mut h);
+        COMPRESS_RUNTIME.hash(&mut h);
     }
     if needs_plugin {
         needs_plugin.hash(&mut h);
+        PLUGIN_RUNTIME.hash(&mut h);
     }
     if needs_secrets {
         needs_secrets.hash(&mut h);
+        SECRETS_RUNTIME.hash(&mut h);
     }
     for (k, v) in deps {
         k.hash(&mut h);
@@ -1009,11 +1069,12 @@ fn emit_cargo_toml(crate_name: &str, deps: &BTreeMap<String, String>) -> String 
 
 fn emit_wrapper_lib(
     entries: &[ExternEntry],
-    needs_regex: bool,
+    _needs_regex: bool,
     needs_archive: bool,
     needs_db: bool,
     needs_http_client: bool,
     needs_http_server_tls: bool,
+    needs_net_tls: bool,
     needs_crypto: bool,
     needs_compress: bool,
     needs_plugin: bool,
@@ -1022,11 +1083,6 @@ fn emit_wrapper_lib(
     let mut out = String::from(
         "// Auto-generated FFI wrappers — do not edit.\n#![allow(warnings)]\n\nfn ffi_panic() -> ! {\n    eprintln!(\"panic: a foreign function panicked\");\n    std::process::exit(70);\n}\n\n",
     );
-    if needs_regex {
-        // D-REGEX1: the regex runtime is the only place the `regex` crate is touched.
-        out.push_str(REGEX_RUNTIME);
-        out.push('\n');
-    }
     if needs_archive {
         // D-DEP-ARCHIVE1: the archive runtime is the only place `flate2`, `zip`,
         // and `tar` crates are touched.
@@ -1047,6 +1103,11 @@ fn emit_wrapper_lib(
         // D-TLSSERVE1=A: the server TLS runtime is the only place serving
         // touches rustls.
         out.push_str(HTTP_SERVER_TLS_RUNTIME);
+        out.push('\n');
+    }
+    if needs_net_tls {
+        // D-NETSOCKET1=A / D-TLS1=A: client stream TLS over an existing TcpStream.
+        out.push_str(NET_TLS_RUNTIME);
         out.push('\n');
     }
     if needs_crypto {

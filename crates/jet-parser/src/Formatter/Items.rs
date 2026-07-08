@@ -447,6 +447,10 @@ impl<'a> Fmt<'a> {
         if f.is_sanitizer {
             self.write(&format!("#{} ", Syntax::KW_SANITIZER));
         }
+        // D-REPLAY1: `#Replayable` deterministic replay guard precedes `pub`/`fn`.
+        if f.is_replayable {
+            self.write(&format!("#{} ", Syntax::ATTR_REPLAYABLE));
+        }
         // D-MUSTUSE1 (c18iwxqx): `@MustUse fn` / method precedes `pub`/`fn`.
         if f.is_must_use {
             self.write(&format!("@{} ", Syntax::ATTR_MUST_USE));

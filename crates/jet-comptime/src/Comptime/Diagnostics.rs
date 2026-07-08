@@ -118,7 +118,7 @@ pub(super) fn impurity_diag(name: &str, path: &[String], span: Span) -> Diagnost
         "E0951",
         format!("`{}` is not allowed in comptime code", name),
         why,
-        "compute this at runtime instead; the exceptions are `embed_file(\"path\")` and `embed_bytes(\"path\")`".to_string(),
+        "compute this at runtime instead; the exceptions are `embed_file(\"path\")`, `embed_bytes(\"path\")`, and `find(\"glob\")`".to_string(),
         Some(span),
     )
 }

@@ -1,6 +1,6 @@
-// D-TYPEDTEXT1=D: a string literal in a position expecting `Sql`/`Html`
-// elaborates to a checked value — the same expected-type law as `.{ }`
-// construction. Each `{hole}` becomes a bound parameter (Sql) or an escaped
+// D-TYPEDTEXT1/2: a string literal in a position expecting `Sql`/`Html`, or a
+// prefix literal (`sql"..."` / `html"..."`) with no expected type, elaborates to
+// a checked value. Each `{hole}` becomes a bound parameter (Sql) or an escaped
 // insertion (Html); a runtime `String` can never fill the position directly
 // (E0149) — `.raw("…")` is the sole audited escape.
 fn run_query(q: Sql) {
@@ -14,9 +14,11 @@ fn render(h: Html) {
 
 fn run() {
     id :: 42
-    run_query("select * from incidents where id = {id}")
+    q :: sql"select * from incidents where id = {id}"
+    run_query(q)
     name :: "<script>alert(1)</script>"
-    render("<p>{name}</p>")
+    page :: html"<p>{name}</p>"
+    render(page)
     trusted :: Html.raw("<b>audited</b>")
     render(trusted)
 }

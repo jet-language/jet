@@ -162,7 +162,7 @@ function cmdDecision(store, { pos, flags }) {
       if (flags.open) ds = ds.filter(d => d.status !== 'ratified');
       if (flags.card) { const c = db.findCard(s, flags.card); ds = ds.filter(d => c && d.cardId === c.id); }
       if (flags.json) return out(flags, null, ds);
-      for (const d of ds) console.log(`${d.id.padEnd(16)} ${(d.status || 'open').padEnd(9)} ${d.title.slice(0, 60)}${d.outcome ? ` → ${d.outcome}` : ''}`);
+      for (const d of ds) console.log(`${String(d.id || '(no id)').padEnd(16)} ${(d.status || 'open').padEnd(9)} ${String(d.title || '(untitled)').slice(0, 60)}${d.outcome ? ` → ${d.outcome}` : ''}`);
       if (!ds.length) console.log('(no decisions match)');
       return;
     }

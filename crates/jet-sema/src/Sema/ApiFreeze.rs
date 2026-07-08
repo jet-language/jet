@@ -285,6 +285,8 @@ mod tests {
             unsafe_span: None,
             is_pure: false,
             is_reactive: false,
+            is_replayable: false,
+            replayable_span: None,
             is_sanitizer: false,
             declared_effects: None,
             effect_via: None,

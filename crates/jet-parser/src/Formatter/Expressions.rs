@@ -303,6 +303,23 @@ impl<'a> Fmt<'a> {
                 self.write("]");
             }
             Expr::Ident(name, _) => self.write(name),
+            Expr::Call(c)
+                if matches!(
+                    c.name.as_str(),
+                    Syntax::TYPED_TEXT_SQL_PREFIX_CALL | Syntax::TYPED_TEXT_HTML_PREFIX_CALL
+                ) =>
+            {
+                self.write(if c.name == Syntax::TYPED_TEXT_SQL_PREFIX_CALL {
+                    "sql"
+                } else {
+                    "html"
+                });
+                if let Some(arg) = c.args.first() {
+                    if let Expr::Str(parts, _) = &arg.expr {
+                        self.fmt_str(parts);
+                    }
+                }
+            }
             Expr::Call(c) => self.fmt_call(c),
             Expr::Unary(op, inner, _) => {
                 let inner_prec = Prec::Unary;

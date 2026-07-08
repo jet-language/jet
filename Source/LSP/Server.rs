@@ -12,7 +12,7 @@ use super::Check::{check_document_with_bundle, collect_fixes, Fix};
 use super::Completion::compute_completions;
 use super::Features::{
     compute_definition, compute_hover, compute_references, compute_rename, encode_semantic_tokens,
-    encode_semantic_tokens_in_span, format_inlay_hints, is_foreign_semantic_word,
+    encode_semantic_tokens_in_span, format_inlay_hints,
 };
 use super::Position::{
     apply_lsp_edit, byte_offset_to_lsp, byte_span_to_range, full_document_range, lsp_pos_to_offset,
@@ -1443,14 +1443,6 @@ fn prepare_rename_response(
     };
     let text = token_text(&doc.text, tok);
     match &tok.kind {
-        TokKind::Ident(name) if is_foreign_semantic_word(name) => Some(error_response(
-            id,
-            -32600,
-            &format!(
-                "`{}` is a retired foreign spelling, not a Jet symbol you can rename",
-                name
-            ),
-        )),
         TokKind::Ident(name) => {
             let range = range_json(byte_span_to_range(&doc.text, tok.span));
             Some(response(

@@ -50,10 +50,9 @@ before continuing.
   changed, nobody else may be looking at it.*
 - Staged features name their milestone and give today's workaround
   (see E0117). A future feature must never die as a generic error.
-- Teaching errors (S14, E0008–E0016) recognize a familiar foreign
-  spelling, name the one Jet form, and then keep going as if the canonical
-  form had been written — one foreign word never hides the rest of the
-  file's problems.
+- Live teaching errors recognize a familiar non-canonical form, name the one
+  Jet form, and then keep going as if the canonical form had been written.
+  D-S14-PAUSE keeps old syntax spellings out of this default path.
 - Typos get suggestions (edit distance ≤ 2): "did you mean `print`?"
 - Fixes are imperative and specific: "add a closing `\"`", never
   "consider revising".
@@ -116,7 +115,7 @@ before continuing.
 | E0053 | parse | *retired by D-S14-PAUSE* (was: bare `pure` teaching) |
 | E0054 | parse | *retired by D-S14-PAUSE* (was: bare `todo` teaching) |
 | E0055 | parse | teaching: `#Audit("…")` retired → reason is now the argument of `#Unsafe("…")` (D-UNSAFE2) |
-| E0056 | parse | teaching: `mut` capability keyword → `&` sigil (D-MEM1) |
+| E0056 | parse | *retired by D-S14-PAUSE* (was: `mut` capability keyword teaching) |
 | E0057 | parse | *retired by D-S14-PAUSE* (was: `take` keyword teaching) |
 | E0058 | parse | *retired by D-MEM1/S3* (was: `view` return keyword teaching → `&` sigil; `-> &T` returns no longer exist to point at) |
 | E0059 | parse | teaching: bare `sanitizer fn` → `#Sanitizer fn` (D-TAINT-SAN) |
@@ -216,7 +215,7 @@ before continuing.
 | E0304 | sema  | unknown enum variant (with suggestion)    |
 | E0305 | sema  | pattern doesn't belong to value's type    |
 | E0306 | sema  | pattern binding count mismatch            |
-| E0307 | sema  | `switch` not exhaustive (lists missing)   |
+| E0307 | sema  | `if` dispatch not exhaustive (lists missing)   |
 | E0308 | sema  | bare `None` needs a known `T?` type       |
 | E0309 | sema  | nested `T??` rejected                     |
 | E0310 | sema  | `T?` used where plain `T` expected        |
@@ -250,7 +249,7 @@ before continuing.
 | E0340 | sema  | teaching: `read_dir` is not a Jet API — use `Path.from(p).walk()` (D-PATHFS1) |
 | E0341 | sema  | *retired by D-CORENS-CANON1* (was: old first-party namespace teaching) |
 | E0350 | sema  | `Any` type requested, but Jet has no general top type (D-DYNAMIC-TYPE1) |
-| L0301 | sema  | unreachable `switch` pattern arm (lint)   |
+| L0301 | sema  | unreachable dispatch pattern arm (lint)   |
 | E0401 | sema  | fallible value used where plain `T` expected |
 | E0402 | sema  | fallible call ignored as a statement      |
 | E0403 | sema  | `?` error type / return context mismatch  |
@@ -322,6 +321,7 @@ before continuing.
 | E0711 | sema  | the capability handle bound by a `#Grant(…)` region escapes its scope — returned, stored, or captured (D-SCAP1) |
 | E0712 | sema  | an effect used inside a `#Grant(…)` region has no capability — it isn't in the grant's list (D-SCAP1) |
 | E0721 | sema  | an untrusted (`#Tainted`) value reaches a sink effect (`Db`/`Exec`/`Net`) without passing through a `#Sanitizer fn` (D-TAINT1) |
+| E0725 | sema  | a `#Replayable` function reaches ambient `Time`/`Rand`/`Net`/`Io` (D-REPLAY1) |
 | E0731 | sema  | a `tag` is used where dispatch/methods are expected — `derive`d, or implemented/used as a trait (D-QUAL2) |
 | E0732 | sema  | a method is declared in a `tag` body, but tags have no methods (D-QUAL2) |
 | E0745 | sema  | a `@Pure fn` also carries a non-empty `#(…)` effect list — a contradiction (D-EFF1) |
@@ -335,9 +335,9 @@ before continuing.
 | E-WEB-TIR-UNSUPPORTED | driver | a web-targeted executable body is outside the checked TIR boundary (D-WEBTIR1) |
 | E-OSTARGET-MIXED-AXIS | sema | a `#Target(Os.*)`-gated impl's file/module also carries a web-bucket ceiling (D-OSTARGET1) |
 | E-OSTARGET-UNMATCHED-CALL | sema | a function/method not gated to match takes or returns a value of a `#Target(Os.*)`-gated type (D-OSTARGET1) |
-| E-OSTARGET-BUILD-CONTEXT | sema | a `comptime if … == { }` OS switch's subject is not `build.os` (D-OSTARGET2) |
+| E-OSTARGET-BUILD-CONTEXT | sema | a `comptime if … == { }` OS dispatch's subject is not `build.os` (D-OSTARGET2) |
 | E-OSTARGET-DISPATCH-ARM | sema | a `comptime if build.os == { }` arm head is not a bare `.Linux`/`.Macos`/`.Windows` variant, or repeats one (D-OSTARGET2) |
-| E-OSTARGET-DISPATCH-EXHAUSTIVE | sema | a `comptime if build.os == { }` switch leaves some target OS uncovered with no `else` (D-OSTARGET2) |
+| E-OSTARGET-DISPATCH-EXHAUSTIVE | sema | a `comptime if build.os == { }` dispatch leaves some target OS uncovered with no `else` (D-OSTARGET2) |
 | E0760 | parser | `#Context` field uses `=` instead of `:` (D-CTX1, S17) |
 | E0761 | parser | unknown `#Context` field name (v1 allows only `allocator`, `logger`, `deadline`) |
 | E0762 | sema   | `#Context` field type mismatch (`allocator` must be an allocator handle; `deadline` must be Int epoch-ms) |
@@ -415,9 +415,9 @@ before continuing.
 | E0952 | sema  | comptime budget exhausted (fuel) |
 | E0953 | sema  | comptime panic = user-authored compile error (message verbatim) |
 | E0954 | parse | *retired by D-S14-PAUSE* (was: two-keyword comptime binding teaching) |
-| E0955 | sema  | `embed_file`/`embed_bytes`: missing / unreadable file (`embed_file` also: not UTF-8) |
+| E0955 | sema  | comptime file input missing / unreadable (`embed_file` also: not UTF-8) |
 | E0956 | sema  | construct not yet supported in comptime evaluation |
-| E0957 | sema  | `embed_file`/`embed_bytes` path not a literal, absolute, or escaping via `..` |
+| E0957 | sema  | `embed_file`/`embed_bytes` path or `find` glob not a literal, absolute, or escaping via `..` |
 | E0958 | sema  | **retired** (D-CTEFFECT1 2026-06-25): replaced by E3410 (Tier-2 effect without `#Impure` gate) |
 | E0960 | parse | module contribution names a non-reserved namespace (U3: `env`/`system`/`image`) |
 | E0961 | sema  | fan-out callee is not callable with exactly one argument (S75) |
@@ -979,7 +979,7 @@ operations that can violate memory safety. Ordinary Jet never reaches these.
 ## Comptime effect tiers (D-CTEFFECT1)
 
 Tier-0 (pure) calls are whitelisted Core builtins — always safe, no gate needed.
-Tier-1 (`embed_file`/`embed_bytes`) hashes inputs into `.jet/lock`.
+Tier-1 (`embed_file`/`embed_bytes`/`find`) hashes inputs into `.jet/lock`.
 Tier-2 (ambient) requires both a `#Impure("reason") { … }` gate **and** `--allow-impure`.
 
 | code | what | why | fix |
@@ -1031,6 +1031,7 @@ reported as **E0119** (unknown name).
 | E0711 | The capability `{handle}` can't escape its `#Grant` block. | `#Grant(…)` grants a capability into a lexical scope and revokes it at scope end (RAII, S63); returning, storing, or capturing the handle would let a revoked authority outlive the block (D-SCAP1). | Use the handle only inside the `#Grant` block, or perform the work that needs it there. |
 | E0712 | This `#Grant` region uses the effect `{effect}`, which it has no capability for. | `#Grant(…)` authorizes exactly the listed effects through its handle; the dual of `#Caps`, an effect reached inside — even transitively through a call — that the grant omits has no capability backing it (D-SCAP1). | Add the named effect to the `#Grant(…)` list, or move that work outside the grant. |
 | E0721 | Untrusted (`#Tainted`) data reaches `{api}` without being sanitized. | A `#Tainted` value is untrusted input; it spreads to anything derived from it. `{api}` is a sink effect (`Db`/`Exec`/`Net` — a database query, subprocess command, or network request), and an untrusted value used there unchecked is the classic injection bug (D-TAINT1). | Pass the value through a `#Sanitizer fn` first — its return value is trusted by contract, so it may reach the sink. |
+| E0725 | `{fn}` is `#Replayable` but reaches `{effect}`. | `#Replayable` code must replay from explicit inputs; ambient time, randomness, network, or console IO would make the same replay diverge. | Inject a deterministic clock/RNG or mockable capability, pass recorded data in, or move the ambient effect outside the replayable function. |
 | E0745 | `{fn}` is `@Pure` but also declares effects. | `@Pure` already means the empty effect set; a non-empty `#(…)` list on the same function asks for both empty and non-empty at once. | Drop the `#(…)` list to keep the function pure, or remove `@Pure` to allow the listed effects. |
 | E0746 | `{api}` has the `{effect}` effect, which can't be rolled back inside a `#Transact` block. | A `#Transact` block undoes its work on a `?`-failure; a network, file, or subprocess effect (`Net`/`Fs`/`Exec`) leaves committed external state a rollback can't take back, so performing it on the block's direct path would break the all-or-nothing contract (D-TXN2). | Move the call after the block, or register it with `<handle>.on_commit(() => { … })` so it runs only after a clean commit. |
 | E0747 | This callback uses the effect `{effect}`, which the parameter doesn't allow. | A `@Pure fn(…)` parameter demands a pure callback, and a `#(E) fn(…)` parameter bounds the callback to the listed effects; the actual callback's inferred effects must be a subset (D-EFF2). The bound is checked at the call site, so an impure callback is rejected before it runs. | Pass a callback within the bound (a `@Pure fn` for a pure parameter), or widen the parameter's effect bound. |
@@ -1051,9 +1052,9 @@ reported as **E0119** (unknown name).
 |------|------|-----|-----|
 | E-OSTARGET-MIXED-AXIS | `#Target(Os.{os})` can't combine with `#Target({web})` on `{item}`. | The OS axis (`Os.Linux`/`Os.Macos`/`Os.Windows`, native platform gating) and the web axis (`Wasm`/`Js`/`Web`, D-WASM1's browser partition) are mutually exclusive — one item can't compile for both a specific native OS and a web bucket. | Pick one axis: remove the `#Target(Os.{os})` marker or the web-axis marker. |
 | E-OSTARGET-UNMATCHED-CALL | `{caller}` uses `{gated_type}`, whose `impl` is gated to `#Target(Os.{os})`, without itself being gated to match. | An OS-gated impl only exists in the build for that OS; code reachable on other platforms would hit a missing method, so this is caught at compile time, not left to fail as a link (or a raw rustc) error. | Only use `{gated_type}` from inside an `impl` already gated to `#Target(Os.{os})`, or move `{caller}`'s body into one. |
-| E-OSTARGET-BUILD-CONTEXT | a `comptime if … == { … }` switch dispatches on `build.os`. | `build.os` is the one compiler-known comptime value this switch folds on — it selects the arm matching the build's target OS at compile time (D-OSTARGET2). | write `comptime if build.os == { .Linux -> … .Macos -> … .Windows -> … }`, or use a plain runtime `if` for a value that isn't known at compile time. |
-| E-OSTARGET-DISPATCH-ARM | `{found}` is not an OS arm — a `build.os` switch matches `.Linux`, `.Macos`, or `.Windows`. | Each arm gates code for exactly one native OS, so its head is a bare, payload-free OS variant — the same set `#Target(Os.*)` uses — and each OS appears at most once. | write `.Linux -> …`, `.Macos -> …`, or `.Windows -> …` (add an `else -> …` for a shared fallback). |
-| E-OSTARGET-DISPATCH-EXHAUSTIVE | this `build.os` switch doesn't cover every target OS — missing: {list}. | A build can target any native OS, so the switch must handle each one — otherwise a build for a missing OS would have no arm to run. | add an arm for each missing OS ({list}), or an `else -> …` catch-all. |
+| E-OSTARGET-BUILD-CONTEXT | a `comptime if … == { … }` dispatch branches on `build.os`. | `build.os` is the one compiler-known comptime value this dispatch folds on — it selects the arm matching the build's target OS at compile time (D-OSTARGET2). | write `comptime if build.os == { .Linux -> … .Macos -> … .Windows -> … }`, or use a plain runtime `if` for a value that isn't known at compile time. |
+| E-OSTARGET-DISPATCH-ARM | `{found}` is not an OS arm — a `build.os` dispatch matches `.Linux`, `.Macos`, or `.Windows`. | Each arm gates code for exactly one native OS, so its head is a bare, payload-free OS variant — the same set `#Target(Os.*)` uses — and each OS appears at most once. | write `.Linux -> …`, `.Macos -> …`, or `.Windows -> …` (add an `else -> …` for a shared fallback). |
+| E-OSTARGET-DISPATCH-EXHAUSTIVE | this `build.os` dispatch doesn't cover every target OS — missing: {list}. | A build can target any native OS, so the dispatch must handle each one — otherwise a build for a missing OS would have no arm to run. | add an arm for each missing OS ({list}), or an `else -> …` catch-all. |
 
 ## Qualifier taxonomy diagnostics (D-QUAL2)
 
@@ -1386,7 +1387,7 @@ A **`suggestions`** entry is `{ "message", "replacements": [...] }`, where
 each replacement is `{ "file", "span", "new_text" }` — apply `new_text`
 over the byte range `[start_byte, end_byte)` in `file`. This is the
 contract the future `jet fix` engine and LSP code actions consume; today
-it is populated from the S14 teaching auto-corrects (e.g. E0037 "replace
+it is populated from live teaching auto-corrects (e.g. E0037 "replace
 `println` with `print`"). Diagnostics with no mechanical fix emit
 `"suggestions": []` — the field is always present so consumers never
 special-case its absence.
@@ -1485,7 +1486,7 @@ name as a value, so this only ever fires for top-level functions.
 
 The ceiling is a statement count (`INLINE_ALWAYS_MAX_STMTS = 40` in
 `crates/jet-sema/src/Sema/CheckerInline.rs`), counted transitively through
-nested blocks (`if`/`loop`/`switch`/etc.) but not through a nested lambda
+nested blocks (`if`/`loop`/dispatch/etc.) but not through a nested lambda
 literal's body (a separate closure, not inline text of the function).
 
 ### E0920 — conflicting `@Inline`/`@InlineAlways` markers (D-METHODMACRO1)
