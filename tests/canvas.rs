@@ -1063,6 +1063,9 @@ fn canvas_project_json_projects_workspace_packages_and_files() {
     assert!(json.contains("\"manifest\":\"packages/hello/pkg.jet\""), "{json}");
     assert!(json.contains("\"target\":\"web\""), "{json}");
     assert!(json.contains("\"name\":\"ranker\""), "{json}");
+    assert!(json.contains("\"targets\":[{\"package\":\"hello\""), "{json}");
+    assert!(json.contains("\"package_path\":\"packages/hello\""), "{json}");
+    assert!(json.contains("\"manifest\":\"packages/hello/pkg.jet\""), "{json}");
     assert!(json.contains("\"target\":\"executable\""), "{json}");
     assert!(json.contains("\"target\":\"library\""), "{json}");
     assert!(json.contains("\"source\":\"version:0.1.0\""), "{json}");

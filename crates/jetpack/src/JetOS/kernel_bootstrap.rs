@@ -1,0 +1,168 @@
+fn run_kernel_bootstrap_builder(
+    theme: &Theme,
+    boot: &BootProfile,
+    realized: &[Store::StoreEntry],
+) -> bool {
+    if boot.kernel != "CachyOS" {
+        return true;
+    }
+    let Some(entry) = cachyos_kernel_entry(realized) else {
+        return true;
+    };
+    if missing_kernel_source_files(entry).is_some() {
+        return true;
+    }
+    let out = Path::new(&entry.out);
+    let script = out.join("source/build.sh");
+    if !script.is_file() {
+        return true;
+    }
+    if let Err(e) = fs::create_dir_all(out.join("boot")) {
+        theme.error_coded(
+            "E1286",
+            "jetos CachyOS source build failed",
+            &format!("could not create the cachyos-kernel boot artifact directory: {e}."),
+            "check the first-party cachyos-kernel source recipe and rerun `jet os build`.",
+        );
+        return false;
+    }
+    let output = Command::new(&script)
+        .current_dir(out)
+        .env("JETOS_KERNEL_OUT", out.join("boot"))
+        .env("JETOS_KERNEL_SOURCE", out.join("source"))
+        .env("JETOS_KERNEL_PACKAGE", out)
+        .envs(default_cachyos_kernel_env())
+        .output();
+    let output = match output {
+        Ok(output) => output,
+        Err(e) => {
+            theme.error_coded(
+                "E1286",
+                "jetos CachyOS source build failed",
+                &format!("running `source/build.sh` failed: {e}."),
+                "check the first-party cachyos-kernel source recipe and rerun `jet os build`.",
+            );
+            return false;
+        }
+    };
+    if !output.status.success() {
+        theme.error_coded(
+            "E1286",
+            "jetos CachyOS source build failed",
+            &format!(
+                "`source/build.sh` exited with {}; stderr: {}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            ),
+            "check the first-party cachyos-kernel source recipe and rerun `jet os build`.",
+        );
+        return false;
+    }
+    true
+}
+
+fn default_cachyos_kernel_env() -> Vec<(&'static str, PathBuf)> {
+    let mut env = Vec::new();
+    if std::env::var_os("JETOS_CACHYOS_KERNEL").is_none() {
+        if let Some(kernel) = first_existing_path(&[
+            "/run/booted-system/kernel",
+            "/run/current-system/kernel",
+        ]) {
+            env.push(("JETOS_CACHYOS_KERNEL", kernel));
+        }
+    }
+    if std::env::var_os("JETOS_CACHYOS_INITRD").is_none() {
+        if let Some(initrd) = first_existing_path(&[
+            "/run/booted-system/initrd",
+            "/run/current-system/initrd",
+        ]) {
+            env.push(("JETOS_CACHYOS_INITRD", initrd));
+        }
+    }
+    if std::env::var_os("JETOS_CACHYOS_MODULES").is_none() {
+        if let Some(modules) = first_existing_path(&[
+            "/run/booted-system/kernel-modules",
+            "/run/current-system/kernel-modules",
+        ]) {
+            env.push((
+                "JETOS_CACHYOS_MODULES",
+                kernel_module_tree(&modules).unwrap_or(modules),
+            ));
+        }
+    }
+    env
+}
+
+fn kernel_module_tree(modules: &Path) -> Option<PathBuf> {
+    let lib_modules = modules.join("lib/modules");
+    fs::read_dir(lib_modules)
+        .ok()?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .find(|path| path.join("kernel").is_dir())
+}
+
+fn first_existing_path(paths: &[&str]) -> Option<PathBuf> {
+    paths
+        .iter()
+        .map(PathBuf::from)
+        .find(|path| path.exists())
+}
+
+fn validate_boot_payloads(
+    theme: &Theme,
+    boot: &BootProfile,
+    realized: &[Store::StoreEntry],
+) -> bool {
+    if boot.kernel == "CachyOS" {
+        let Some(entry) = cachyos_kernel_entry(realized) else {
+            return true;
+        };
+        let kernel = boot_artifact(entry, &["boot/vmlinuz-cachyos", "bzImage", "vmlinuz"]);
+        let initrd = boot_artifact(entry, &["boot/initrd-cachyos", "initrd", "initrd.img"]);
+        let kernel_ok = kernel
+            .as_ref()
+            .map(|path| is_linux_kernel_image(path))
+            .unwrap_or(false);
+        let initrd_ok = initrd
+            .as_ref()
+            .map(|path| is_initrd_image(path))
+            .unwrap_or(false);
+        if !kernel_ok || !initrd_ok {
+            theme.error_coded(
+                "E1282",
+                "jetos CachyOS boot artifacts are missing",
+                "D-JOS-KERNELSRC1=A: the first-party `cachyos-kernel` package must provide a Linux kernel image and initrd with bootable file headers so the generation and installer can boot the same payload.",
+                "add boot/vmlinuz-cachyos and boot/initrd-cachyos with real boot payloads, or select a different ratified kernel.",
+            );
+            return false;
+        }
+        if missing_kernel_source_files(entry).is_some() {
+            theme.error_coded(
+                "E1284",
+                "jetos CachyOS source recipe is missing",
+                "D-JOS-KERNELBOOTSTRAP1=A: the first-party `cachyos-kernel` package must carry source-built recipe, builder, config, patch, and initrd-input provenance beside the boot artifacts.",
+                "add source/recipe.jet, source/build.sh, source/config, source/patches.manifest, and source/initrd-inputs.manifest to the package output.",
+            );
+            return false;
+        }
+    }
+    if boot.init == "/sbin/init" {
+        let Some(entry) = realized
+            .iter()
+            .find(|entry| entry.name == SYSTEMD_INIT_PACKAGE)
+        else {
+            return true;
+        };
+        if boot_artifact(entry, &["bin/systemd", "lib/systemd/systemd", "sbin/init"]).is_none() {
+            theme.error_coded(
+                "E1283",
+                "jetos systemd init artifact is missing",
+                "D-JPK-OSINIT1=A: the first-party `systemd` package must provide a bootable init binary for `/sbin/init`.",
+                "add bin/systemd, lib/systemd/systemd, or sbin/init to the package output, or select a ratified init override.",
+            );
+            return false;
+        }
+    }
+    true
+}

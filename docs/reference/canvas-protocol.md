@@ -28,7 +28,7 @@ Top-level fields:
 | `mode` | `single_file`, `package`, or `workspace`. |
 | `workspace` | `workspace.jet` projection with member package names/paths, or `null`. |
 | `packages` | Parsed `pkg.jet` facts for the root package and workspace members. |
-| `targets` | Reserved for the package/build target graph. |
+| `targets` | Package/build targets projected from `pkg.jet` with package path and manifest source. |
 | `envs` / `services` | `env.jet` projection from Jetpack module evaluation, including package refs, prompt, secrets, and dev services. |
 | `files` | Projected source-truth files with per-file revisions and kinds. |
 | `locks` | `.jet/lock` facts used by the projection. |
@@ -39,7 +39,7 @@ Top-level fields:
 Example:
 
 ```json
-{"protocol":"jet.canvas.project","schema_version":1,"project_root":"/repo","project_revision":"sha256-...","entry":"packages/game/src/main.jet","mode":"workspace","workspace":{"path":"workspace.jet","members":[{"name":"game","path":"packages/game"}],"diagnostics":[]},"packages":[{"path":"packages/game","manifest":"packages/game/pkg.jet","name":"game","version":"0.1.0","target":"web","deps":[],"targets":[],"effects_enabled":false,"diagnostics":[]}],"targets":[],"envs":[],"services":[],"files":[{"path":"workspace.jet","revision":"sha256-...","kind":"workspace"}],"locks":[],"diagnostics":[],"source_control":{"truth":"git-text"},"state_policy":{"semantic":"source","local":["tabs","viewport","selection","breakpoints","watches"],"shared_visual":"source-anchored-comments"}}
+{"protocol":"jet.canvas.project","schema_version":1,"project_root":"/repo","project_revision":"sha256-...","entry":"packages/game/src/main.jet","mode":"workspace","workspace":{"path":"workspace.jet","members":[{"name":"game","path":"packages/game"}],"diagnostics":[]},"packages":[{"path":"packages/game","manifest":"packages/game/pkg.jet","name":"game","version":"0.1.0","target":"web","deps":[],"targets":[{"package":"game","target":"executable"}],"effects_enabled":false,"diagnostics":[]}],"targets":[{"package":"game","package_path":"packages/game","manifest":"packages/game/pkg.jet","target":"executable"}],"envs":[],"services":[],"files":[{"path":"workspace.jet","revision":"sha256-...","kind":"workspace"}],"locks":[],"diagnostics":[],"source_control":{"truth":"git-text"},"state_policy":{"semantic":"source","local":["tabs","viewport","selection","breakpoints","watches"],"shared_visual":"source-anchored-comments"}}
 ```
 
 Project documents do not create a Canvas project asset. Package/workspace
