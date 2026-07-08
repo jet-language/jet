@@ -1,0 +1,185 @@
+<title>jet repl — notebook archetype</title>
+<style>
+:root{
+  --bg:#0e141b;--panel:#0b1119;--chrome:#161f2b;--fg:#d9e6f2;--dim:#7e93a8;
+  --cyan:#3fc6ff;--green:#58d68d;--yellow:#ffb454;--red:#ff5c5c;--mag:#c88bf0;
+  --line:#22303f;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:14px/1.6 ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  -webkit-font-smoothing:antialiased;padding:40px 20px}
+.wrap{max-width:900px;margin:0 auto}
+h1{font-size:22px;font-weight:600;margin:0 0 4px;letter-spacing:-.01em}
+.sub{color:var(--dim);margin:0 0 4px;font-size:13px}
+.loop{color:var(--cyan);font-size:13px;margin:0 0 28px;padding-left:12px;
+  border-left:2px solid var(--cyan)}
+.still{margin:0 0 34px}
+.cap{color:var(--dim);font-size:12px;margin:0 0 8px;display:flex;gap:8px;
+  align-items:baseline;flex-wrap:wrap}
+.cap .n{color:var(--mag);font-weight:600}
+.term{background:var(--panel);border:1px solid var(--line);border-radius:8px;
+  overflow:hidden;box-shadow:0 8px 24px rgba(0,0,0,.35)}
+.bar{display:flex;align-items:center;gap:8px;padding:8px 12px;
+  background:var(--chrome);border-bottom:1px solid var(--line)}
+.dot{width:10px;height:10px;border-radius:50%;background:#31414f}
+.bar .t{margin-left:6px;color:var(--dim);font-size:12px}
+pre{margin:0;padding:14px 16px;white-space:pre;overflow-x:auto;
+  font:13px/1.55 inherit;tab-size:2}
+.c{color:var(--cyan)}.g{color:var(--green)}.y{color:var(--yellow)}
+.r{color:var(--red)}.m{color:var(--mag)}.d{color:var(--dim)}.b{font-weight:600}
+.sel{background:#2a2140;color:#e7d6ff}
+.cur{background:var(--cyan);color:#04121b}
+.pin{color:var(--mag)}
+.note{color:var(--dim);font-size:12px;margin:8px 2px 0;line-height:1.55}
+.note b{color:var(--fg);font-weight:600}
+.nocolor pre .c,.nocolor pre .g,.nocolor pre .y,.nocolor pre .r,
+.nocolor pre .m,.nocolor pre .cur,.nocolor pre .pin{color:var(--fg);
+  background:transparent}
+.nocolor pre .sel{background:transparent;color:var(--fg)}
+.legend{border-top:1px solid var(--line);margin-top:20px;padding-top:16px;
+  color:var(--dim);font-size:12px;line-height:1.8}
+.legend b{color:var(--fg)}
+.sw{display:inline-block;width:9px;height:9px;border-radius:2px;
+  margin-right:5px;vertical-align:middle}
+@media (prefers-reduced-motion:no-preference){.blink{animation:bl 1.1s steps(2) infinite}}
+@keyframes bl{50%{opacity:0}}
+</style>
+<div class="wrap">
+<h1>jet repl · notebook</h1>
+<p class="sub">Block session REPL. Every turn is a discrete block you can fold,
+rerun, edit in place, and pin — outputs are structured and browsable.</p>
+<p class="loop">Core loop: build up a session of living blocks you keep
+revisiting, not a one-way scroll.</p>
+
+<div class="still">
+<div class="cap"><span class="n">1</span> Each turn is a block — header carries
+index, status, and run time; the value echo stays <code>value : Type</code>.</div>
+<div class="term">
+<div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="t">jet repl · blocks</span></div>
+<pre><span class="d">╭─</span> <span class="m b">1</span> <span class="d">·</span> <span class="g">ok</span> <span class="d">· 2ms ──────────────────────────</span> <span class="d">fold  rerun  pin</span>
+<span class="d">│</span> nums :: [1, 2, 3, 4, 5]
+<span class="d">│</span> [1, 2, 3, 4, 5] <span class="d">: List</span>
+<span class="d">╰────────────────────────────────────────────────────────────</span>
+<span class="d">╭─</span> <span class="m b">2</span> <span class="d">·</span> <span class="g">ok</span> <span class="d">· 3ms ──────────────────────────</span> <span class="d">fold  rerun  pin</span>
+<span class="d">│</span> nums.map((n: Int) =&gt; (n * n))
+<span class="d">│</span> [1, 4, 9, 16, 25] <span class="d">: List</span>
+<span class="d">╰────────────────────────────────────────────────────────────</span>
+<span class="c b">user&gt;</span> <span class="cur blink"> </span></pre>
+</div>
+<p class="note">A block is command + output + status + timing, addressable by
+its index — the Warp block, applied to evaluations instead of shell lines.</p>
+</div>
+
+<div class="still">
+<div class="cap"><span class="n">2</span> Fold a block to a one-liner; pin one to
+keep it on screen as later blocks scroll past.</div>
+<div class="term">
+<div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="t">jet repl · blocks</span></div>
+<pre><span class="pin">📌</span> <span class="d">╭─</span> <span class="m b">1</span> <span class="d">·</span> <span class="g">ok</span> <span class="d">· pinned ──────────────────────────────────────────</span>
+<span class="pin">│</span> nums <span class="d">: List =</span> [1, 2, 3, 4, 5]
+<span class="pin">╰────────────────────────────────────────────────────────────</span>
+<span class="d">╭─</span> <span class="m b">2</span> <span class="d">·</span> <span class="g">ok</span> <span class="d">· folded ──</span> nums.map(…) <span class="g">→</span> [1, 4, 9, 16, 25] <span class="d">─ unfold</span>
+<span class="d">╭─</span> <span class="m b">3</span> <span class="d">·</span> <span class="g">ok</span> <span class="d">· 4ms ──────────────────────────</span> <span class="d">fold  rerun  pin</span>
+<span class="d">│</span> nums.reduce(0, (a: Int, n: Int) =&gt; (a + n))
+<span class="d">│</span> 15 <span class="d">: Int</span>
+<span class="d">╰────────────────────────────────────────────────────────────</span>
+<span class="c b">user&gt;</span> <span class="cur blink"> </span></pre>
+</div>
+<p class="note">Pinned block sticks to the top and shows its binding as
+<b>name : Type = value</b>. Folded block keeps status and a result preview so a
+long session stays scannable.</p>
+</div>
+
+<div class="still">
+<div class="cap"><span class="n">3</span> Structured output — a list is a browsable
+table, not flat text; scroll rows, expand nested values.</div>
+<div class="term">
+<div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="t">jet repl · blocks</span></div>
+<pre><span class="d">╭─</span> <span class="m b">4</span> <span class="d">·</span> <span class="g">ok</span> <span class="d">· 1ms ──────────────────────────</span> <span class="d">fold  rerun  pin</span>
+<span class="d">│</span> nums.map((n: Int) =&gt; (n * n))
+<span class="d">│</span> <span class="d">idx  value</span>       <span class="d">[U] · 5 items</span>
+<span class="sel"> │  0    1                                   </span>
+<span class="d">│</span>  1    4
+<span class="d">│</span>  2    9
+<span class="d">│</span>  3    16
+<span class="d">│</span>  4    25
+<span class="d">│</span> <span class="d">j/k scroll · → expand nested · y copy value</span>
+<span class="d">╰────────────────────────────────────────────────────────────</span></pre>
+</div>
+<p class="note">Big collections page inside the block instead of flooding the
+screen. Transplanted from jupyter console / nushell tabular output.</p>
+</div>
+
+<div class="still">
+<div class="cap"><span class="n">4</span> Edit in place and rerun — change block 4,
+press rerun, the value updates without a new block.</div>
+<div class="term">
+<div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="t">jet repl · blocks</span></div>
+<pre><span class="d">╭─</span> <span class="m b">4</span> <span class="d">·</span> <span class="y">edited</span> <span class="d">·──────────────────</span> <span class="c">rerun ⏎</span> <span class="d">·  revert  fold</span>
+<span class="d">│</span> nums.map((n: Int) =&gt; (n * n * n))<span class="cur blink"> </span>
+<span class="d">│</span> <span class="d">was</span> [1, 4, 9, 16, 25]
+<span class="d">╰────────────────────────────────────────────────────────────</span>
+<span class="d">after rerun:</span>
+<span class="d">╭─</span> <span class="m b">4</span> <span class="d">·</span> <span class="g">ok</span> <span class="d">· 2ms ──────────────────────────</span> <span class="d">fold  rerun  pin</span>
+<span class="d">│</span> nums.map((n: Int) =&gt; (n * n * n))
+<span class="d">│</span> [1, 8, 27, 64, 125] <span class="d">: List</span>
+<span class="d">╰────────────────────────────────────────────────────────────</span></pre>
+</div>
+<p class="note">Editing a block marks it <span class="y">edited</span> and shows the
+prior result until you rerun — a reproducible session, not append-only history.</p>
+</div>
+
+<div class="still">
+<div class="cap"><span class="n">5</span> A failing block turns its header red and
+carries the verbatim diagnostic (I4) inside its frame.</div>
+<div class="term">
+<div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="t">jet repl · blocks</span></div>
+<pre><span class="d">╭─</span> <span class="m b">5</span> <span class="d">·</span> <span class="r b">error</span> <span class="d">· E0112 ───────────────────────</span> <span class="d">edit  rerun  fold</span>
+<span class="d">│</span> show("hi")
+<span class="d">│</span> <span class="r b">Error [E0112]:</span> `show` wants Int (a whole number) for argument 1, but this is String (text)
+<span class="d">│</span>   <span class="c">--&gt;</span> tests/ui/arg_type_mismatch.jet:5:10
+<span class="d">│</span>     <span class="c">|</span>
+<span class="d">│</span>   <span class="c">5 |</span>     show("hi")
+<span class="d">│</span>     <span class="c">|</span>          <span class="r">^^^^</span>
+<span class="d">│</span>  <span class="b">Why:</span> every argument must match its parameter's type
+<span class="d">│</span>  <span class="b">Fix:</span> use Int (a whole number) here
+<span class="d">╰────────────────────────────────────────────────────────────</span></pre>
+</div>
+<p class="note">The frame is chrome; the diagnostic words and code inside it are
+byte-for-byte the <code>tests/ui</code> snapshot. Fix and rerun in place.</p>
+</div>
+
+<div class="still nocolor">
+<div class="cap"><span class="n">6</span> <code>NO_COLOR=1</code> / non-TTY — status
+words replace color, the box carries block boundaries.</div>
+<div class="term">
+<div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="t">jet repl · blocks · NO_COLOR</span></div>
+<pre>╭─ 2 · ok · folded ── nums.map(…) → [1, 4, 9, 16, 25] ─ unfold
+╭─ 5 · error · E0112 ─────────────────────────── edit  rerun  fold
+│ show("hi")
+│ Error [E0112]: `show` wants Int (a whole number) for argument 1, but this is String (text)
+│   --&gt; tests/ui/arg_type_mismatch.jet:5:10
+│     |
+│   5 |     show("hi")
+│     |          ^^^^
+│  Why: every argument must match its parameter's type
+│  Fix: use Int (a whole number) here
+╰────────────────────────────────────────────────────────────</pre>
+</div>
+<p class="note">Block status is a word (<b>ok</b> / <b>error</b> / <b>folded</b>),
+never color alone. The pin glyph is a plain marker. Structure survives a pipe.</p>
+</div>
+
+<div class="legend">
+<b>Shared TUI palette</b> —
+<span class="sw" style="background:var(--cyan)"></span>cyan accent ·
+<span class="sw" style="background:var(--green)"></span>green ok ·
+<span class="sw" style="background:var(--yellow)"></span>yellow edited/warn ·
+<span class="sw" style="background:var(--red)"></span>red error ·
+<span class="sw" style="background:var(--mag)"></span>magenta index/selection/pin ·
+<span class="sw" style="background:var(--dim)"></span>bright-black frame.<br>
+Std-only ANSI (I6): box-drawing block frames, SGR color, a paged table region.
+Every block carries a status word so <b>NO_COLOR</b> loses nothing.
+</div>
+</div>

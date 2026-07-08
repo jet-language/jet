@@ -1,0 +1,398 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>jetos Studio — Source</title>
+<style>
+:root{
+  --ground:#0B1119; --panel:#16202E; --panel-2:#1B2838; --panel-3:#213249;
+  --accent:#3FC6FF; --ok:#58D68D; --warn:#FFB454; --err:#FF5C5C;
+  --text:#D9E6F2; --dim:#7E93A8; --line:#223247; --line-2:#2C4056;
+  /* source token colors, tuned to the shared palette */
+  --tok-key:#9CC6E8; --tok-punct:#5E7A93; --tok-str:#8FE0B4; --tok-enum:#C6A0FF; --tok-num:#FFC98A; --tok-cmt:#5B6E82; --tok-mod:#3FC6FF;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--ground);color:var(--text);font-family:var(--sans);font-size:14px}
+:focus-visible{outline:2px solid var(--accent);outline-offset:1px;border-radius:3px}
+button{font:inherit;color:inherit;cursor:pointer}
+
+.top{display:flex;align-items:center;gap:14px;height:54px;padding:0 18px;border-bottom:1px solid var(--line);background:var(--panel)}
+.brand{font-weight:650}.brand small{color:var(--dim);margin-left:6px;font-weight:500}
+.file-tab{margin-left:10px;display:inline-flex;align-items:center;gap:8px;padding:6px 12px;border:1px solid var(--line-2);border-radius:6px;background:var(--panel-2);font-family:var(--mono);font-size:12.5px}
+.file-tab .mark{width:7px;height:7px;border-radius:50%;background:var(--warn);opacity:0}
+.file-tab.dirty .mark{opacity:1}
+.top .right{margin-left:auto;display:flex;align-items:center;gap:10px}
+.genpick{display:inline-flex;align-items:center;gap:8px;padding:6px 12px;border:1px solid var(--line-2);border-radius:6px;background:var(--panel-2);font-size:12.5px}
+.genpick select{background:transparent;border:0;color:var(--text);font-family:var(--mono);font-size:12.5px}
+.viewing{color:var(--warn);font-size:12px}
+.seg{display:flex;border:1px solid var(--line-2);border-radius:6px;overflow:hidden}
+.seg button{padding:6px 12px;background:transparent;color:var(--dim);border:0;font-size:12.5px}
+.seg button[aria-pressed=true]{background:var(--panel-3);color:var(--text)}
+.btn{padding:8px 15px;border-radius:6px;border:1px solid var(--line-2);background:var(--panel-2);font-weight:550;font-size:13px}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:var(--accent);color:#04121c;border-color:var(--accent)}
+.btn.primary:disabled{opacity:.45;cursor:not-allowed}
+.btn.ghost{background:transparent}
+.btn.sm{padding:5px 10px;font-size:12px}
+
+.doc-wrap{height:calc(100% - 54px);display:flex;justify-content:center;overflow:auto;padding:26px 16px 120px}
+.doc{width:100%;max-width:940px}
+.editor{font-family:var(--mono);font-size:13.5px;line-height:2.15;background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.ln{display:grid;grid-template-columns:52px 20px 1fr;align-items:center;padding:0 8px 0 0;position:relative}
+.ln:hover{background:rgba(63,198,255,.03)}
+.ln .g{color:var(--dim);opacity:.5;text-align:right;padding-right:14px;user-select:none;font-size:12px}
+.ln .gutter{width:3px;height:100%;justify-self:center;border-radius:2px}
+.ln.changed .gutter{background:var(--warn)}
+.ln.changed .g{opacity:.9;color:var(--warn)}
+.ln .src{white-space:pre;overflow-x:visible;padding:1px 0}
+.cmt{color:var(--tok-cmt);font-style:italic}
+.k{color:var(--tok-key)}
+.mod{color:var(--tok-mod);font-weight:600}
+.punct{color:#5E7A93}
+.str{color:var(--tok-str)}
+.enumv{color:var(--tok-enum)}
+.num{color:var(--tok-num)}
+
+/* inline widgets — the projection: a value becomes a control in place */
+.w{display:inline-flex;align-items:center;vertical-align:baseline;font-family:var(--mono);font-size:13px;border-radius:5px;cursor:pointer;position:relative}
+.w:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.w.enum,.w.ver{color:var(--tok-enum);background:rgba(198,160,255,.10);border:1px solid rgba(198,160,255,.28);padding:0 7px;gap:5px}
+.w.enum:hover,.w.ver:hover{background:rgba(198,160,255,.18)}
+.w.enum::after,.w.ver::after{content:"▾";font-size:9px;opacity:.7}
+.w.ver{color:var(--tok-num);background:rgba(255,201,138,.10);border-color:rgba(255,201,138,.28)}
+.w.str{color:var(--tok-str);background:rgba(143,224,180,.08);border:1px solid rgba(143,224,180,.22);padding:0 6px}
+.w.str[contenteditable]{cursor:text;min-width:20px;outline:none}
+.w.str:hover{background:rgba(143,224,180,.16)}
+.w.num{color:var(--tok-num);background:rgba(255,201,138,.10);border:1px solid rgba(255,201,138,.26);padding:0 4px 0 7px;gap:2px}
+.w.num .stp{display:inline-flex;flex-direction:column;margin-left:2px}
+.w.num .stp button{background:transparent;border:0;color:var(--tok-num);font-size:8px;line-height:8px;padding:0 3px;cursor:pointer;opacity:.6}
+.w.num .stp button:hover{opacity:1}
+.w.bool{padding:0}
+.switch{width:38px;height:20px;border-radius:999px;background:var(--panel-3);border:1px solid var(--line-2);position:relative;transition:background .15s;vertical-align:middle}
+.switch[aria-checked=true]{background:var(--ok);border-color:var(--ok)}
+.switch::after{content:"";position:absolute;top:1px;left:1px;width:16px;height:16px;border-radius:50%;background:#0B1119;transition:transform .15s}
+.switch[aria-checked=true]::after{transform:translateX(18px);background:#04120a}
+.chips{display:inline-flex;gap:5px;flex-wrap:wrap;vertical-align:middle}
+.chip{display:inline-flex;align-items:center;gap:5px;background:rgba(143,224,180,.10);border:1px solid rgba(143,224,180,.22);color:var(--tok-str);border-radius:999px;padding:1px 8px;font-size:12px}
+.chip .rm{opacity:.5;cursor:pointer}.chip .rm:hover{opacity:1;color:var(--err)}
+.chip.add{background:transparent;border-style:dashed;color:var(--dim);cursor:pointer}
+
+/* popover for enum/version */
+.pop{position:absolute;z-index:30;background:var(--panel-3);border:1px solid var(--line-2);border-radius:8px;box-shadow:0 14px 40px rgba(0,0,0,.55);padding:4px;min-width:180px}
+.pop button{display:flex;align-items:center;gap:8px;width:100%;text-align:left;padding:7px 10px;border:0;background:transparent;border-radius:5px;font-family:var(--mono);font-size:12.5px}
+.pop button:hover,.pop button:focus{background:var(--panel-2)}
+.pop button .tick{width:12px;color:var(--accent)}
+.pop button .hint{margin-left:auto;color:var(--dim);font-size:11px}
+.pop .warnnote{padding:6px 10px;color:var(--warn);font-size:11.5px;border-top:1px solid var(--line);margin-top:4px}
+
+/* raw text mirror */
+.raw{font-family:var(--mono);font-size:13px;line-height:1.7;background:var(--ground);border:1px solid var(--line);border-radius:10px;padding:18px 20px;white-space:pre;overflow-x:auto;color:var(--text)}
+.raw .d{color:var(--dim)}
+
+/* pending action bar */
+.bar{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);display:flex;align-items:center;gap:14px;background:rgba(11,17,25,.94);backdrop-filter:blur(10px);border:1px solid var(--line-2);border-radius:12px;padding:10px 12px 10px 18px;box-shadow:0 16px 50px rgba(0,0,0,.5);z-index:20;opacity:0;pointer-events:none;transition:.2s}
+.bar.show{opacity:1;pointer-events:auto}
+.bar .n{background:var(--warn);color:#1a1200;font-weight:700;font-size:12px;padding:2px 9px;border-radius:999px}
+.bar .txt{font-size:13px;color:var(--dim)}
+.bar .txt b{color:var(--text)}
+
+.viewbar{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);display:none;align-items:center;gap:12px;background:rgba(255,180,84,.10);border:1px solid rgba(255,180,84,.4);border-radius:12px;padding:10px 12px 10px 18px;z-index:20}
+.viewbar.show{display:flex}
+.viewbar .txt{font-size:13px;color:var(--warn)}
+
+.toast{position:fixed;right:20px;bottom:22px;background:var(--panel-3);border:1px solid var(--line-2);border-left:3px solid var(--ok);border-radius:6px;padding:12px 16px;box-shadow:0 12px 40px rgba(0,0,0,.5);opacity:0;transform:translateY(14px);transition:.2s;max-width:360px;z-index:40}
+.toast.show{opacity:1;transform:none}
+.toast b{display:block;margin-bottom:2px}.toast small{color:var(--dim)}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<header class="top">
+  <span class="brand">jetos Studio <small>source</small></span>
+  <span class="file-tab" id="fileTab"><span class="mark"></span>config.jet</span>
+  <div class="right">
+    <span class="genpick">generation
+      <select id="genSel" aria-label="View generation">
+        <option value="41" selected>41 · running</option>
+        <option value="40">40 · 6d ago</option>
+        <option value="39">39 · 9d ago</option>
+      </select>
+    </span>
+    <div class="seg" role="group" aria-label="View mode">
+      <button id="viewGui" aria-pressed="true">Controls</button>
+      <button id="viewRaw" aria-pressed="false">Text</button>
+    </div>
+    <button class="btn primary" id="buildBtn" disabled>Build &amp; switch</button>
+  </div>
+</header>
+
+<div class="doc-wrap">
+  <div class="doc">
+    <div class="editor" id="editor"></div>
+    <pre class="raw" id="raw" hidden></pre>
+  </div>
+</div>
+
+<div class="bar" id="bar">
+  <span class="n" id="barN">0</span>
+  <span class="txt" id="barTxt"></span>
+  <button class="btn ghost sm" id="revertBtn">Revert all</button>
+  <button class="btn primary sm" id="buildBtn2">Build &amp; switch</button>
+</div>
+<div class="viewbar" id="viewbar">
+  <span class="txt" id="viewbarTxt"></span>
+  <button class="btn sm" id="restoreBtn">Restore these values</button>
+  <button class="btn ghost sm" id="backLiveBtn">Back to live</button>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+"use strict";
+/* ---------------------------------------------------------------
+   jetos Studio — projectional source editor.
+   Core loop: read the config AS the document; each option value in the
+   source is an inline control (toggle, dropdown, stepper, chips). Edit
+   the control and the file changes in place — the GUI and the text are
+   the same artifact, so you edit system.jet without typing syntax.
+   The generation picker turns the document into a time machine: view a
+   past generation's values and restore them (rollback).
+----------------------------------------------------------------*/
+
+// the document model: an ordered list of source lines.
+// kind "opt" lines carry a live value that renders as a widget.
+const DOC = [
+  {t:"cmt", s:"// config.jet — the halcyon system module. This is the whole"},
+  {t:"cmt", s:"// machine: one line per option, edited here without the syntax."},
+  {t:"raw", s:"module <span class='mod'>halcyon</span> <span class='punct'>{</span>"},
+  {t:"raw", s:"    system.halcyon<span class='punct'>:</span> <span class='punct'>{</span>", i:1},
+  {t:"kv",  s:"        <span class='k'>target</span><span class='punct'>:</span> <span class='enumv'>linux.x64</span><span class='punct'>,</span>"},
+  {t:"raw", s:"        <span class='k'>packages</span><span class='punct'>:</span> <span class='punct'>[</span>mine.<span class='punct'>[</span>hello<span class='punct'>,</span> btop<span class='punct'>]</span><span class='punct'>]</span><span class='punct'>,</span>"},
+  {t:"raw", s:"        <span class='k'>services</span><span class='punct'>:</span> <span class='punct'>{</span>"},
+  {t:"opt", key:"services.openssh.enable", label:"            openssh", kind:"bool", value:"true", tail:", ports: [22]"},
+  {t:"opt", key:"services.metrics.enable", label:"            metrics", kind:"bool", value:"true", tail:", socket: \"127.0.0.1:9999\""},
+  {t:"raw", s:"        <span class='punct'>}</span><span class='punct'>,</span>"},
+  {t:"raw", s:"        <span class='k'>options</span><span class='punct'>:</span> <span class='punct'>[</span>"},
+  {t:"opt", key:"network.hostName", kind:"str", value:"halcyon", raw:true},
+  {t:"opt", key:"network.firewall.allowedTcpPorts", kind:"list", value:["22","443"], num:true},
+  {t:"opt", key:"boot.loader", kind:"enum", value:".Limine", enum:[".Limine",".SystemdBoot",".Grub"]},
+  {t:"opt", key:"boot.kernel", kind:"enum", value:".CachyOS", enum:[".CachyOS",".Zen",".Lts",".Hardened"], rebuild:true,
+   hints:{".CachyOS":"performance",".Zen":"low-latency",".Lts":"stable",".Hardened":"security"}},
+  {t:"opt", key:"boot.kernel.profile", kind:"ver", value:".CachyOSLatest", enum:[".CachyOSLatest",".CachyOSLts",".Server"], rebuild:true},
+  {t:"opt", key:"boot.loader.limine.maxGenerations", kind:"int", value:"7"},
+  {t:"opt", key:"performance.profile", kind:"enum", value:".Gaming", enum:[".Gaming",".Balanced",".Powersave"]},
+  {t:"opt", key:"performance.scheduler", kind:"enum", value:".ScxLavd", enum:[".ScxLavd",".ScxRusty",".None"], rebuild:true},
+  {t:"opt", key:"performance.zram.memoryPercent", kind:"int", value:"50"},
+  {t:"opt", key:"services.desktop.plasma.enable", kind:"bool", value:"true"},
+  {t:"opt", key:"theme.polarity", kind:"enum", value:".Dark", enum:[".Dark",".Light"]},
+  {t:"opt", key:"secrets.wifi.source", kind:"secret", value:"secrets/wifi.age"},
+  {t:"raw", s:"        <span class='punct'>]</span><span class='punct'>,</span>"},
+  {t:"raw", s:"    <span class='punct'>}</span><span class='punct'>,</span>"},
+  {t:"raw", s:"<span class='punct'>}</span>"},
+];
+
+// past-generation value snapshots (for the generation picker / rollback)
+const GEN_VALUES = {
+  40:{"boot.kernel":".Zen","boot.kernel.profile":".CachyOSLts","performance.scheduler":".None","performance.zram.memoryPercent":"0"},
+  39:{"boot.kernel":".Zen","boot.kernel.profile":".CachyOSLts","network.firewall.allowedTcpPorts":["22"]},
+};
+const base = {};   // baseline (generation 41 live)
+DOC.forEach(l=>{if(l.t==="opt")base[l.key]=clone(l.value);});
+const model = {};  // current edited values
+Object.keys(base).forEach(k=>model[k]=clone(base[k]));
+let viewingGen = 41;
+
+function clone(v){return Array.isArray(v)?v.slice():v;}
+function eq(a,b){return Array.isArray(a)?JSON.stringify(a)===JSON.stringify(b):a===b;}
+function changed(key){return !eq(model[key],base[key]);}
+function editable(){return viewingGen===41;}
+
+function render(){
+  const ed=document.getElementById("editor");
+  let n=0,html="";
+  for(const l of DOC){
+    n++;
+    const isChanged = l.t==="opt" && changed(l.key);
+    html+=`<div class="ln ${isChanged?"changed":""}" data-line="${n}"><span class="g">${n}</span><span class="gutter"></span><span class="src">${lineHtml(l)}</span></div>`;
+  }
+  ed.innerHTML=html;
+  bind();
+  updateBars();
+}
+
+function lineHtml(l){
+  if(l.t==="cmt") return `<span class="cmt">${l.s}</span>`;
+  if(l.t==="raw"||l.t==="kv") return l.s;
+  // opt line
+  const v=model[l.key];
+  const w=widget(l,v);
+  if(l.label!==undefined){ // service-style: label { enable: <widget> tail }
+    return `<span class="k">${l.label}</span><span class="punct">: {</span> enable: ${w}<span class="punct">${l.tail||""} }</span><span class="punct">,</span>`;
+  }
+  const indent="            ";
+  return `${indent}<span class="k">${l.key}</span><span class="punct">:</span> ${w}<span class="punct">,</span>`;
+}
+
+function widget(l,v){
+  const dis=editable()?"":' data-disabled="1"';
+  if(l.kind==="bool")
+    return `<button class="w bool" data-w="bool" data-key="${l.key}"${dis}><span class="switch" role="switch" aria-checked="${v==="true"}" aria-label="${l.key}"></span></button>`;
+  if(l.kind==="enum"||l.kind==="ver")
+    return `<button class="w ${l.kind}" data-w="enum" data-key="${l.key}"${dis}>${esc(v)}</button>`;
+  if(l.kind==="int")
+    return `<span class="w num" data-key="${l.key}"><span data-w="numval" tabindex="0" role="spinbutton" aria-valuenow="${v}" aria-label="${l.key}">${esc(v)}</span><span class="stp"><button data-w="inc" data-key="${l.key}" aria-label="increase">▲</button><button data-w="dec" data-key="${l.key}" aria-label="decrease">▼</button></span></span>`;
+  if(l.kind==="str")
+    return `<span class="str punct">"</span><span class="w str" data-w="str" data-key="${l.key}" contenteditable="${editable()}" spellcheck="false" role="textbox" aria-label="${l.key}">${esc(v)}</span><span class="str punct">"</span>`;
+  if(l.kind==="secret")
+    return `<span class="str punct">"</span><span class="w str" style="cursor:default">${esc(v)}</span><span class="str punct">"</span> <span class="cmt" style="font-size:11px">// age-encrypted · value sealed</span>`;
+  if(l.kind==="list"){
+    const chips=v.map((x,i)=>`<span class="chip">${l.num?`<span class="num">${esc(x)}</span>`:`<span class="str">"${esc(x)}"</span>`}<span class="rm" data-w="rmchip" data-key="${l.key}" data-idx="${i}" title="remove">×</span></span>`).join("");
+    return `<span class="punct">[</span><span class="chips">${chips}<span class="chip add" data-w="addchip" data-key="${l.key}" tabindex="0">+ add</span></span><span class="punct">]</span>`;
+  }
+  return esc(String(v));
+}
+
+function bind(){
+  const ed=document.getElementById("editor");
+  ed.querySelectorAll('[data-w="bool"]').forEach(b=>b.onclick=()=>{if(!editable())return blocked();toggleBool(b.dataset.key,b);});
+  ed.querySelectorAll('[data-w="enum"]').forEach(b=>b.onclick=()=>{if(!editable())return blocked();openEnum(b);});
+  ed.querySelectorAll('[data-w="inc"]').forEach(b=>b.onclick=()=>stepInt(b.dataset.key,1));
+  ed.querySelectorAll('[data-w="dec"]').forEach(b=>b.onclick=()=>stepInt(b.dataset.key,-1));
+  ed.querySelectorAll('[data-w="numval"]').forEach(b=>b.onkeydown=e=>{if(e.key==="ArrowUp"){e.preventDefault();stepInt(b.closest(".num").dataset.key,1);}if(e.key==="ArrowDown"){e.preventDefault();stepInt(b.closest(".num").dataset.key,-1);}});
+  ed.querySelectorAll('[data-w="str"]').forEach(el=>{
+    el.onblur=()=>{if(!editable())return;setVal(el.dataset.key,el.textContent.trim());};
+    el.onkeydown=e=>{if(e.key==="Enter"){e.preventDefault();el.blur();}};
+  });
+  ed.querySelectorAll('[data-w="rmchip"]').forEach(el=>el.onclick=()=>{if(!editable())return blocked();rmChip(el.dataset.key,+el.dataset.idx);});
+  ed.querySelectorAll('[data-w="addchip"]').forEach(el=>{el.onclick=()=>addChip(el.dataset.key);el.onkeydown=e=>{if(e.key==="Enter")addChip(el.dataset.key);};});
+}
+
+function toggleBool(key,btn){setVal(key, model[key]==="true"?"false":"true");}
+function setVal(key,val){if(eq(model[key],val))return;model[key]=val;render();}
+function stepInt(key,d){if(!editable())return blocked();const n=Math.max(0,(parseInt(model[key],10)||0)+d);setVal(key,String(n));}
+function rmChip(key,idx){model[key]=model[key].slice();model[key].splice(idx,1);render();}
+function addChip(key){if(!editable())return blocked();const v=prompt("Add value to "+key);if(v==null||v.trim()==="")return;model[key]=model[key].concat(v.trim());render();}
+
+function openEnum(btn){
+  closePop();
+  const l=DOC.find(x=>x.key===btn.dataset.key);
+  const pop=document.createElement("div");pop.className="pop";pop.id="pop";
+  pop.innerHTML=l.enum.map(o=>{
+    const cur=o===model[l.key];
+    const hint=(l.hints&&l.hints[o])?`<span class="hint">${l.hints[o]}</span>`:"";
+    return `<button data-o="${o}"><span class="tick">${cur?"✓":""}</span>${o}${hint}</button>`;
+  }).join("")+(l.rebuild?`<div class="warnnote">changing this rebuilds the system${l.key.startsWith("boot.kernel")?" and needs a reboot":""}</div>`:"");
+  document.body.appendChild(pop);
+  const r=btn.getBoundingClientRect();
+  pop.style.left=Math.min(r.left,window.innerWidth-pop.offsetWidth-12)+"px";
+  pop.style.top=(r.bottom+6)+"px";
+  pop.querySelectorAll("button").forEach(b=>b.onclick=()=>{setVal(l.key,b.dataset.o);closePop();});
+  pop.querySelector("button").focus();
+  setTimeout(()=>document.addEventListener("click",outside),0);
+}
+function outside(e){if(!e.target.closest("#pop")&&!e.target.closest('[data-w="enum"]'))closePop();}
+function closePop(){const p=document.getElementById("pop");if(p)p.remove();document.removeEventListener("click",outside);}
+
+function blocked(){toast("Viewing a past generation",`You're looking at generation ${viewingGen}. Restore it to edit, or switch back to live (41).`,"warn");}
+
+/* ---- raw text mirror: proves GUI and text are one artifact ---- */
+function producedText(){
+  let out="";
+  for(const l of DOC){
+    if(l.t==="cmt"){out+=strip(l.s)+"\n";continue;}
+    if(l.t==="raw"||l.t==="kv"){out+=strip(l.s)+"\n";continue;}
+    const v=model[l.key];
+    if(l.label!==undefined){out+=`${l.label.trim().padStart? "":""}            ${l.label.trim()}: { enable: ${v}${l.tail||""} },\n`;continue;}
+    let rv = l.kind==="list"?("["+v.map(x=>l.num?x:`"${x}"`).join(", ")+"]")
+      : l.kind==="str"||l.kind==="secret"?`"${v}"`
+      : v;
+    const mark = (l.t==="opt"&&changed(l.key))?"  ":"  ";
+    out+=`            ${l.key}: ${rv},${(l.t==="opt"&&changed(l.key))?"   // edited":""}\n`;
+  }
+  return out;
+}
+function strip(s){return s.replace(/<[^>]+>/g,"").replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&amp;/g,"&");}
+
+/* ---- generation picker / rollback ---- */
+document.getElementById("genSel").onchange=e=>{
+  viewingGen=+e.target.value;
+  if(viewingGen===41){
+    Object.keys(base).forEach(k=>model[k]=clone(base[k]));
+  } else {
+    // overlay the snapshot on top of 41's values to show that generation's document
+    Object.keys(base).forEach(k=>model[k]=clone(base[k]));
+    Object.entries(GEN_VALUES[viewingGen]||{}).forEach(([k,v])=>model[k]=clone(v));
+  }
+  render();
+};
+document.getElementById("restoreBtn").onclick=()=>{
+  const g=viewingGen;
+  // treat restore as: make these values the live edit, switch back to editable
+  document.getElementById("genSel").value="41";viewingGen=41;
+  // keep the restored values as pending edits vs base
+  render();
+  toast("Values restored",`Generation ${g}'s values are staged as edits against live. Review the changed lines, then build & switch to roll back.`,"ok");
+};
+document.getElementById("backLiveBtn").onclick=()=>{document.getElementById("genSel").value="41";document.getElementById("genSel").onchange({target:{value:"41"}});};
+
+/* ---- bars ---- */
+function updateBars(){
+  const edits=Object.keys(base).filter(changed);
+  const dirty=edits.length>0;
+  document.getElementById("fileTab").classList.toggle("dirty",dirty);
+  const bar=document.getElementById("bar"),vb=document.getElementById("viewbar");
+  if(!editable()){
+    bar.classList.remove("show");
+    vb.classList.add("show");
+    document.getElementById("viewbarTxt").textContent=`Viewing generation ${viewingGen} (read-only) — this is what its config.jet looked like.`;
+    document.getElementById("buildBtn").disabled=true;
+    return;
+  }
+  vb.classList.remove("show");
+  document.getElementById("buildBtn").disabled=!dirty;
+  bar.classList.toggle("show",dirty);
+  if(dirty){
+    const rebuild=edits.some(k=>{const l=DOC.find(x=>x.key===k);return l&&l.rebuild;});
+    document.getElementById("barN").textContent=edits.length;
+    document.getElementById("barTxt").innerHTML=`<b>${edits.length}</b> line${edits.length>1?"s":""} edited in config.jet${rebuild?` · <b style="color:var(--warn)">rebuild + reboot</b>`:""}`;
+  }
+}
+
+function build(){
+  const edits=Object.keys(base).filter(changed);
+  if(!edits.length)return;
+  const rebuild=edits.some(k=>{const l=DOC.find(x=>x.key===k);return l&&l.rebuild;});
+  edits.forEach(k=>base[k]=clone(model[k]));
+  render();
+  toast("Built & switched",`${edits.length} edit${edits.length>1?"s":""} written to config.jet and built as generation 42.${rebuild?" Reboot to load it — generation 41 stays bootable for rollback.":""}`,"ok");
+}
+document.getElementById("buildBtn").onclick=build;
+document.getElementById("buildBtn2").onclick=build;
+document.getElementById("revertBtn").onclick=()=>{Object.keys(base).forEach(k=>model[k]=clone(base[k]));render();};
+
+/* view mode toggle */
+document.getElementById("viewGui").onclick=()=>setView("gui");
+document.getElementById("viewRaw").onclick=()=>setView("raw");
+function setView(v){
+  document.getElementById("viewGui").setAttribute("aria-pressed",String(v==="gui"));
+  document.getElementById("viewRaw").setAttribute("aria-pressed",String(v==="raw"));
+  document.getElementById("editor").hidden=v!=="gui";
+  const raw=document.getElementById("raw");raw.hidden=v!=="raw";
+  if(v==="raw")raw.textContent=producedText();
+}
+
+function esc(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
+function toast(title,msg,kind){
+  const t=document.getElementById("toast");
+  t.style.borderLeftColor=kind==="ok"?"var(--ok)":kind==="warn"?"var(--warn)":"var(--err)";
+  t.innerHTML=`<b>${title}</b><small>${msg}</small>`;t.classList.add("show");
+  clearTimeout(toast._t);toast._t=setTimeout(()=>t.classList.remove("show"),4600);
+}
+render();
+</script>
+</body>
+</html>

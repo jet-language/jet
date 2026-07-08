@@ -1,0 +1,385 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>jetos Studio — Changeset</title>
+<style>
+:root{
+  --ground:#0B1119; --panel:#16202E; --panel-2:#1B2838; --panel-3:#213249;
+  --accent:#3FC6FF; --ok:#58D68D; --warn:#FFB454; --err:#FF5C5C;
+  --text:#D9E6F2; --dim:#7E93A8; --line:#223247; --line-2:#2C4056;
+  --add-bg:rgba(88,214,141,.10); --del-bg:rgba(255,92,92,.10);
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--ground);color:var(--text);font-family:var(--sans);font-size:14px;line-height:1.45}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer}
+.mono{font-family:var(--mono)}
+
+.top{display:flex;align-items:center;gap:14px;height:54px;padding:0 18px;border-bottom:1px solid var(--line);background:var(--panel)}
+.brand{font-weight:650}.brand small{color:var(--dim);margin-left:6px;font-weight:500}
+.cs-title{margin-left:6px;font-weight:600}
+.cs-title .edit{color:var(--dim);font-weight:500;margin-left:6px;font-size:12.5px}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;border:1px solid var(--line-2);font-size:12.5px;color:var(--dim)}
+.pill .dot{width:7px;height:7px;border-radius:50%;background:var(--warn)}
+.top .right{margin-left:auto;display:flex;gap:10px;align-items:center}
+.tabs{display:flex;gap:4px}
+.tab{padding:6px 12px;border-radius:6px;border:1px solid transparent;background:transparent;color:var(--dim)}
+.tab[aria-selected=true]{background:var(--panel-3);color:var(--text);border-color:var(--line-2)}
+
+.wrap{display:grid;grid-template-columns:300px 1fr;height:calc(100% - 54px)}
+.rail{border-right:1px solid var(--line);background:var(--panel);overflow:auto;padding:16px 14px 40px}
+.rail h2{font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--dim);margin:0 0 10px}
+.rail h2:not(:first-child){margin-top:24px}
+.stage-list{display:flex;flex-direction:column;gap:6px}
+.stage{display:grid;grid-template-columns:auto 1fr auto;gap:8px;align-items:center;padding:9px 10px;border:1px solid var(--line);border-radius:6px;background:var(--panel-2);text-align:left;width:100%}
+.stage:hover{border-color:var(--line-2)}
+.stage.active{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
+.stage .op{font-family:var(--mono);font-weight:700;font-size:13px}
+.stage.mod .op{color:var(--warn)}.stage.add .op{color:var(--ok)}.stage.del .op{color:var(--err)}
+.stage .k{font-family:var(--mono);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.stage .x{color:var(--dim);opacity:0;font-size:16px;line-height:1}
+.stage:hover .x{opacity:1}
+.addform{margin-top:10px;display:grid;gap:8px}
+.addform input,.addform select{width:100%;padding:8px 9px;background:var(--ground);border:1px solid var(--line-2);border-radius:6px;font-family:var(--mono);font-size:12.5px}
+.addform .lbl{font-size:11px;color:var(--dim);font-family:var(--sans)}
+.btn{padding:8px 14px;border-radius:6px;border:1px solid var(--line-2);background:var(--panel-2);font-weight:550}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:var(--accent);color:#04121c;border-color:var(--accent)}
+.btn.ghost{background:transparent}
+.btn.block{width:100%;justify-content:center;display:flex}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn.sm{padding:5px 10px;font-size:12.5px}
+
+.review{overflow:auto;padding:22px 26px 60px}
+.review-head{display:flex;align-items:flex-start;gap:16px;margin-bottom:18px}
+.review-head h1{font-size:20px;margin:0 0 4px}
+.review-head p{margin:0;color:var(--dim);max-width:70ch}
+.summary{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin-bottom:18px}
+.summary h3{margin:0 0 10px;font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:var(--dim)}
+.plain{display:flex;flex-direction:column;gap:8px}
+.plain li{list-style:none;display:flex;gap:10px;align-items:flex-start}
+.plain .m{width:18px;flex:0 0 18px;text-align:center;font-weight:700}
+.plain .m.mod{color:var(--warn)}.plain .m.add{color:var(--ok)}.plain .m.del{color:var(--err)}
+.plain b{font-weight:600}
+
+.ledger{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:16px 0 22px}
+.lcard{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 14px}
+.lcard .v{font-size:20px;font-weight:650;font-family:var(--mono)}
+.lcard .l{color:var(--dim);font-size:12px;margin-top:2px}
+.lcard.warn{border-color:rgba(255,180,84,.35)}.lcard.warn .v{color:var(--warn)}
+.lcard.accent .v{color:var(--accent)}
+
+.file{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-bottom:18px}
+.file>.fh{display:flex;align-items:center;gap:10px;padding:11px 16px;border-bottom:1px solid var(--line);background:var(--panel-2)}
+.file>.fh .name{font-family:var(--mono);font-size:13px}
+.file>.fh .stat{margin-left:auto;font-family:var(--mono);font-size:12px}
+.file>.fh .stat .p{color:var(--ok)}.file>.fh .stat .m{color:var(--err)}
+.hunk{border-top:1px solid var(--line)}
+.hunk:first-child{border-top:0}
+.hunk .hh{display:flex;align-items:center;gap:10px;padding:8px 16px;background:rgba(63,198,255,.05);font-size:12.5px;color:var(--dim)}
+.hunk .hh .why{color:var(--text)}
+.hunk .hh label{margin-left:auto;display:flex;align-items:center;gap:6px;color:var(--dim);cursor:pointer}
+.code{font-family:var(--mono);font-size:12.5px;line-height:1.7}
+.code .ln{display:grid;grid-template-columns:44px 1fr;white-space:pre}
+.code .ln .g{color:var(--dim);text-align:right;padding-right:12px;user-select:none;opacity:.6}
+.code .ln.add{background:var(--add-bg)}
+.code .ln.del{background:var(--del-bg)}
+.code .ln.add .t{color:#a8ecc4}
+.code .ln.del .t{color:#f2b8b8}
+.hunk.excluded{opacity:.42}
+.hunk.excluded .code .ln.add,.hunk.excluded .code .ln.del{filter:grayscale(1)}
+
+.apply-bar{position:sticky;bottom:0;margin:0 -26px -60px;padding:16px 26px;background:linear-gradient(to top,var(--ground) 60%,transparent);display:flex;align-items:center;gap:14px}
+.apply-bar .note{color:var(--dim);font-size:12.5px;max-width:44ch}
+.apply-bar .acts{margin-left:auto;display:flex;gap:10px}
+
+/* history */
+.hist{display:flex;flex-direction:column;gap:10px}
+.hrow{display:grid;grid-template-columns:auto 1fr auto;gap:16px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px 18px}
+.hrow .gn{font-family:var(--mono);font-size:16px;font-weight:600}
+.hrow.cur .gn{color:var(--accent)}
+.hrow .meta{color:var(--dim);font-size:12.5px}
+.hrow .meta b{color:var(--text)}
+.badge{font-size:10.5px;padding:2px 7px;border-radius:4px;font-weight:600;margin-left:6px}
+.badge.cur{background:rgba(63,198,255,.15);color:var(--accent)}
+.badge.good{background:rgba(88,214,141,.14);color:var(--ok)}
+
+.toast{position:fixed;right:20px;bottom:20px;background:var(--panel-3);border:1px solid var(--line-2);border-left:3px solid var(--ok);border-radius:6px;padding:12px 16px;box-shadow:0 12px 40px rgba(0,0,0,.5);opacity:0;transform:translateY(16px);transition:.2s;max-width:360px;z-index:30}
+.toast.show{opacity:1;transform:none}
+.toast b{display:block;margin-bottom:2px}.toast small{color:var(--dim)}
+.hide{display:none!important}
+@media (max-width:860px){.wrap{grid-template-columns:1fr}.rail{display:none}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<header class="top">
+  <span class="brand">jetos Studio <small>changeset</small></span>
+  <span class="cs-title" id="csTitle">Untitled changeset <span class="edit">on halcyon</span></span>
+  <span class="pill" id="stagePill"><span class="dot"></span> 3 edits staged</span>
+  <div class="right">
+    <div class="tabs" role="tablist">
+      <button class="tab" role="tab" aria-selected="true" data-view="review">Review</button>
+      <button class="tab" role="tab" aria-selected="false" data-view="history">History</button>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+  <aside class="rail">
+    <h2>Staged edits</h2>
+    <div class="stage-list" id="stageList"></div>
+    <h2>Add an edit</h2>
+    <div class="addform">
+      <div>
+        <div class="lbl">Option</div>
+        <input id="fKey" list="keys" placeholder="performance.scheduler">
+        <datalist id="keys"></datalist>
+      </div>
+      <div>
+        <div class="lbl">New value</div>
+        <input id="fVal" placeholder=".ScxRusty">
+      </div>
+      <button class="btn primary block" id="fAdd">Stage edit</button>
+    </div>
+  </aside>
+
+  <main class="review" id="reviewPane">
+    <div class="review-head">
+      <div>
+        <h1 id="rTitle">Review changeset</h1>
+        <p>Every edit you make lands here first. Read the plain summary, the exact source diff, and what it will do to the running machine — then apply the whole set as one build. You are never surprised by an apply.</p>
+      </div>
+    </div>
+
+    <section class="summary">
+      <h3>What this changes</h3>
+      <ul class="plain" id="plainList"></ul>
+    </section>
+
+    <div class="ledger" id="ledger"></div>
+
+    <div class="file">
+      <div class="fh"><span class="name">config.jet</span><span class="stat" id="fileStat"></span></div>
+      <div id="hunks"></div>
+    </div>
+
+    <div class="apply-bar">
+      <div class="note" id="applyNote"></div>
+      <div class="acts">
+        <button class="btn ghost" id="buildOnly">Build only</button>
+        <button class="btn primary" id="apply">Build &amp; switch</button>
+      </div>
+    </div>
+  </main>
+
+  <main class="review hide" id="historyPane">
+    <div class="review-head"><div><h1>History</h1><p>Applied changesets, newest first. Each one is a generation. Roll back to any previous generation — that stages the inverse as a new changeset you review the same way.</p></div></div>
+    <div class="hist" id="histList"></div>
+  </main>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+"use strict";
+/* ---------------------------------------------------------------
+   jetos Studio — changeset (review-first).
+   Core loop: stage edits from anywhere → they collect into one
+   changeset whose PRIMARY screen is the diff review (source diff +
+   plain summary + impact ledger) → apply the reviewed set as a single
+   build & switch.  Each staged edit is a set-option transaction held
+   back from the file until the whole changeset is applied.
+----------------------------------------------------------------*/
+
+// authoritative source lines we know about (for realistic hunks + context)
+const SRC = {
+  "performance.scheduler":{val:".ScxLavd", line:38, ctx:["performance.profile: .Gaming,","performance.zram.memoryPercent: 50,"]},
+  "network.firewall.allowedTcpPorts":{val:"[22, 443]", line:14, ctx:["network.gateway: \"192.0.2.1\",","network.wireless.ssid: \"JetLab\","]},
+  "services.metrics.enable":{val:"true", line:71, ctx:["services.audio.pipewire.enable: true,","services.desktop.plasma.enable: true,"]},
+  "boot.kernel":{val:".CachyOS", line:49, ctx:["boot.loader: .Limine,","boot.kernel.profile: .CachyOSLatest,"]},
+  "boot.kernel.profile":{val:".CachyOSLatest", line:50, ctx:[]},
+};
+const KEY_LIST = ["performance.scheduler","performance.profile","boot.kernel","boot.kernel.profile","boot.kernel.params","network.hostName","network.firewall.allowedTcpPorts","services.metrics.enable","services.gaming.steam.enable","theme.polarity"];
+document.getElementById("keys").innerHTML = KEY_LIST.map(k=>`<option value="${k}">`).join("");
+
+// plain-language descriptions + impact classification
+const META = {
+  "performance.scheduler":{name:"CPU scheduler", impact:{rebuild:true}},
+  "boot.kernel":{name:"Kernel", impact:{rebuild:true,reboot:true}},
+  "boot.kernel.profile":{name:"Kernel profile", impact:{rebuild:true,reboot:true}},
+  "network.firewall.allowedTcpPorts":{name:"Open firewall ports", impact:{}},
+  "services.metrics.enable":{name:"metrics service", impact:{service:true}},
+  "services.gaming.steam.enable":{name:"Steam", impact:{packages:true}},
+};
+
+// pre-seeded changeset so the review screen has content
+let changeset = [
+  {key:"performance.scheduler", from:".ScxLavd", to:".ScxRusty"},
+  {key:"network.firewall.allowedTcpPorts", from:"[22, 443]", to:"[22, 443, 8080]"},
+  {key:"services.metrics.enable", from:"true", to:"false"},
+];
+const excluded = new Set();
+let activeKey = null;
+
+const HISTORY = [
+  {n:41, cur:true, title:"Enable Plasma 6 beta specialisation", when:"2h ago", when2:"today 14:20", edits:2},
+  {n:40, good:true, title:"CachyOS kernel bump + zram 50%", when:"2 days ago", when2:"Jul 06", edits:3},
+  {n:39, title:"Open port 443 for web", when:"5 days ago", when2:"Jul 03", edits:1},
+  {n:38, title:"Initial halcyon build", when:"9 days ago", when2:"Jun 29", edits:24},
+];
+
+function metaFor(k){return META[k]||{name:k,impact:{}};}
+function opClass(e){return e.from===undefined?"add":e.to===undefined?"del":"mod";}
+function opSym(e){return e.from===undefined?"+":e.to===undefined?"−":"~";}
+
+function renderStages(){
+  const el=document.getElementById("stageList");
+  if(!changeset.length){el.innerHTML=`<div style="color:var(--dim);font-size:12.5px;padding:8px 2px">No edits yet. Add one below — it lands in the review, not on the machine.</div>`;}
+  else el.innerHTML=changeset.map(e=>{
+    const c=opClass(e), ex=excluded.has(e.key);
+    return `<button class="stage ${c} ${activeKey===e.key?"active":""}" data-key="${e.key}" style="${ex?"opacity:.5":""}">
+      <span class="op">${opSym(e)}</span>
+      <span class="k">${e.key}</span>
+      <span class="x" data-del="${e.key}" title="Remove from changeset">×</span>
+    </button>`;
+  }).join("");
+  el.querySelectorAll(".stage").forEach(b=>b.onclick=ev=>{
+    if(ev.target.dataset.del!==undefined){removeEdit(ev.target.dataset.del);return;}
+    activeKey=b.dataset.key;renderStages();
+    const h=document.getElementById("hunk-"+cssId(activeKey));if(h)h.scrollIntoView({behavior:"smooth",block:"center"});
+  });
+  document.getElementById("stagePill").innerHTML=`<span class="dot"></span> ${changeset.length} edit${changeset.length!==1?"s":""} staged`;
+}
+
+function renderPlain(){
+  const el=document.getElementById("plainList");
+  const active=changeset.filter(e=>!excluded.has(e.key));
+  if(!active.length){el.innerHTML=`<li style="color:var(--dim)">Nothing staged. This changeset is empty.</li>`;return;}
+  el.innerHTML=active.map(e=>{
+    const m=metaFor(e.key),c=opClass(e);
+    let phrase = c==="del"?`Remove <b>${m.name}</b>`:c==="add"?`Add <b>${m.name}</b> = <span class="mono">${esc(e.to)}</span>`:
+      `<b>${m.name}</b> from <span class="mono">${esc(e.from)}</span> to <span class="mono">${esc(e.to)}</span>`;
+    if(e.key==="services.metrics.enable"&&e.to==="false") phrase=`Stop and remove the <b>metrics</b> service`;
+    return `<li><span class="m ${c}">${opSym(e)}</span><span>${phrase}</span></li>`;
+  }).join("");
+}
+
+function activeEdits(){return changeset.filter(e=>!excluded.has(e.key));}
+
+function renderLedger(){
+  const edits=activeEdits();
+  const imp=edits.reduce((a,e)=>{const i=metaFor(e.key).impact;Object.keys(i).forEach(k=>a[k]=true);return a;},{});
+  const svc=edits.filter(e=>metaFor(e.key).impact.service).length;
+  const cards=[
+    {v:"41 → "+(edits.length?"42":"41"),l:"generation",cls:"accent"},
+    {v:svc?svc:"0",l:"services restarted",cls:svc?"":""},
+    {v:imp.packages?"yes":"no",l:"packages rebuilt",cls:""},
+    {v:imp.reboot?"required":imp.rebuild?"in place":"none",l:"reboot",cls:imp.reboot?"warn":""},
+  ];
+  document.getElementById("ledger").innerHTML=cards.map(c=>`<div class="lcard ${c.cls}"><div class="v">${c.v}</div><div class="l">${c.l}</div></div>`).join("");
+  const note=document.getElementById("applyNote");
+  if(!edits.length){note.textContent="Empty changeset — nothing to apply.";document.getElementById("apply").disabled=true;document.getElementById("buildOnly").disabled=true;}
+  else{document.getElementById("apply").disabled=false;document.getElementById("buildOnly").disabled=false;
+    note.innerHTML=imp.reboot
+      ? `Kernel change: builds generation 42 now, boots into it on reboot. Generation 41 stays in the boot menu for rollback.`
+      : `Builds generation 42 and switches to it live. Excluded hunks stay in this changeset for later.`;}
+}
+
+function renderHunks(){
+  const el=document.getElementById("hunks");
+  let added=0,removed=0;
+  el.innerHTML=changeset.map(e=>{
+    const s=SRC[e.key]||{val:e.from,line:"?",ctx:[]};
+    const ex=excluded.has(e.key), c=opClass(e);
+    const m=metaFor(e.key);
+    let body="";
+    const ctxTop = s.ctx[0]?`<div class="ln"><span class="g">${(+s.line-1)||""}</span><span class="t">            ${s.ctx[0]}</span></div>`:"";
+    if(c!=="add"){body+=`<div class="ln del"><span class="g">${s.line}</span><span class="t">-           ${e.key}: ${e.from},</span></div>`;removed++;}
+    if(c!=="del"){body+=`<div class="ln add"><span class="g">${s.line}</span><span class="t">+           ${e.key}: ${e.to},</span></div>`;added++;}
+    const ctxBot = s.ctx[1]?`<div class="ln"><span class="g">${(+s.line+1)||""}</span><span class="t">            ${s.ctx[1]}</span></div>`:"";
+    const why = m.impact.reboot?"reboot to apply":m.impact.rebuild?"rebuilds system":m.impact.service?"service restart":m.impact.packages?"pulls packages":"applied live";
+    return `<div class="hunk ${ex?"excluded":""}" id="hunk-${cssId(e.key)}">
+      <div class="hh"><span class="mono">@@ options · ${e.key} @@</span><span class="why">${m.name} — ${why}</span>
+        <label><input type="checkbox" data-inc="${e.key}" ${ex?"":"checked"}> include</label></div>
+      <div class="code">${ctxTop}${body}${ctxBot}</div>
+    </div>`;
+  }).join("");
+  el.querySelectorAll("[data-inc]").forEach(cb=>cb.onchange=()=>{
+    if(cb.checked) excluded.delete(cb.dataset.inc); else excluded.add(cb.dataset.inc);
+    renderAll();
+  });
+  document.getElementById("fileStat").innerHTML=`<span class="p">+${added}</span> <span class="m">−${removed}</span>`;
+}
+
+function renderHistory(){
+  document.getElementById("histList").innerHTML=HISTORY.map(h=>{
+    const badge=h.cur?`<span class="badge cur">current</span>`:h.good?`<span class="badge good">last good</span>`:"";
+    const act=h.cur?`<span class="mono" style="color:var(--dim)">running</span>`:`<button class="btn sm" data-roll="${h.n}">Roll back</button>`;
+    return `<div class="hrow ${h.cur?"cur":""}"><div class="gn">${h.n}</div>
+      <div><div style="font-weight:600">${h.title}${badge}</div><div class="meta">applied <b>${h.when}</b> · ${h.when2} · ${h.edits} edit${h.edits>1?"s":""}</div></div>
+      <div>${act}</div></div>`;
+  }).join("");
+  document.getElementById("histList").querySelectorAll("[data-roll]").forEach(b=>b.onclick=()=>{
+    const n=+b.dataset.roll;
+    toast("Rollback staged", `Staged the inverse of everything after generation ${n} as a new changeset. Review it, then build & switch to go back safely.`,"ok");
+    switchView("review");
+  });
+}
+
+function renderAll(){renderStages();renderPlain();renderLedger();renderHunks();}
+
+function removeEdit(key){changeset=changeset.filter(e=>e.key!==key);excluded.delete(key);if(activeKey===key)activeKey=null;renderAll();}
+
+document.getElementById("fAdd").onclick=()=>{
+  const key=document.getElementById("fKey").value.trim();
+  const val=document.getElementById("fVal").value.trim();
+  if(!key||!val){toast("Add an edit","Enter an option key and a new value.","warn");return;}
+  const from = SRC[key]?SRC[key].val:undefined;
+  const existing=changeset.find(e=>e.key===key);
+  if(existing) existing.to=val; else changeset.push({key,from,to:val});
+  document.getElementById("fKey").value="";document.getElementById("fVal").value="";
+  activeKey=key;renderAll();
+  toast("Staged", `${key} added to the changeset. Review it before it touches the machine.`,"ok");
+};
+
+document.getElementById("apply").onclick=()=>doApply(true);
+document.getElementById("buildOnly").onclick=()=>doApply(false);
+function doApply(sw){
+  const edits=activeEdits();if(!edits.length)return;
+  const reboot=edits.some(e=>metaFor(e.key).impact.reboot);
+  changeset=changeset.filter(e=>excluded.has(e.key));
+  excluded.clear();activeKey=null;renderAll();
+  HISTORY.forEach(h=>h.cur=false);
+  toast(sw?"Built & switched":"Built", sw
+    ? `${edits.length} edit${edits.length>1?"s":""} applied as generation 42.${reboot?" Reboot to load the new kernel — generation 41 stays bootable.":""}`
+    : `Generation 42 built but not switched. Run switch when ready.`,"ok");
+}
+
+/* view switching */
+function switchView(v){
+  document.querySelectorAll(".tab").forEach(t=>t.setAttribute("aria-selected", String(t.dataset.view===v)));
+  document.getElementById("reviewPane").classList.toggle("hide",v!=="review");
+  document.getElementById("historyPane").classList.toggle("hide",v!=="history");
+  if(v==="history")renderHistory();
+}
+document.querySelectorAll(".tab").forEach(t=>t.onclick=()=>switchView(t.dataset.view));
+
+function cssId(k){return k.replace(/[^a-z0-9]/gi,"_");}
+function esc(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
+function toast(title,msg,kind){
+  const t=document.getElementById("toast");
+  t.style.borderLeftColor=kind==="ok"?"var(--ok)":kind==="warn"?"var(--warn)":"var(--err)";
+  t.innerHTML=`<b>${title}</b><small>${msg}</small>`;t.classList.add("show");
+  clearTimeout(toast._t);toast._t=setTimeout(()=>t.classList.remove("show"),4400);
+}
+renderAll();
+</script>
+</body>
+</html>

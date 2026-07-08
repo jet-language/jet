@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jet Canvas — Dual lens</title>
+<style>
+:root{
+  --bg:#0B1119; --panel:#16202E; --panel-2:#1C2A3B; --raise:#22334A;
+  --accent:#3FC6FF; --ok:#58D68D; --warn:#FFB454; --err:#FF5C5C;
+  --text:#D9E6F2; --dim:#7E93A8; --line:#243247; --line-2:#2E4059;
+  --rail-control:#C6D4E4; --rail-data:#3FC6FF; --rail-fallible:#FFB454;
+  --rail-effect:#B491F0; --rail-async:#58D68D; --rail-proof:#8FA6C0; --rail-debug:#FF5C5C;
+  --mono:"SF Mono",ui-monospace,"JetBrains Mono","Cascadia Code",Menlo,Consolas,monospace;
+  --ui:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --r:6px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--text);font:13px/1.5 var(--ui)}
+button,input{font:inherit;color:inherit}
+button{border:1px solid var(--line-2);background:var(--panel-2);color:var(--text);min-height:28px;padding:0 10px;border-radius:var(--r);cursor:pointer}
+button:hover,button:focus-visible{border-color:var(--accent);outline:none;box-shadow:0 0 0 2px rgba(63,198,255,.22)}
+button.primary{background:#123945;border-color:var(--accent);color:#e8fbff}
+button.on{border-color:var(--warn);background:#33290f;color:#ffe9c2}
+:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.ty{font:11px var(--mono);color:var(--accent)}
+
+#shell{height:100%;display:grid;grid-template-rows:auto minmax(0,1fr) 26px}
+#bar{display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--panel);border-bottom:1px solid var(--line);flex-wrap:wrap}
+#bar .brand{font-weight:700;letter-spacing:.05em;padding-left:6px;border-left:3px solid var(--accent);margin-right:6px}
+#bar .brand small{display:block;font:10px var(--mono);color:var(--dim);font-weight:400}
+.tabs{display:flex;gap:4px}
+.tab{padding:5px 11px;border:1px solid var(--line-2);border-radius:var(--r);background:#0E1723;color:var(--dim);cursor:pointer;font:12px var(--mono)}
+.tab.on{color:var(--text);border-color:var(--accent);background:#0F2536;box-shadow:inset 0 -2px 0 var(--accent)}
+.tab.err{border-color:var(--err)}
+.bar-r{margin-left:auto;display:flex;gap:6px;align-items:center}
+.synced{display:flex;align-items:center;gap:6px;font:11px var(--mono);color:var(--ok)}
+.synced .dot{width:8px;height:8px;border-radius:50%;background:var(--ok);box-shadow:0 0 8px var(--ok)}
+
+/* two equal lenses over ONE source */
+#lenses{display:grid;grid-template-columns:1fr 6px 1fr;min-height:0}
+.lens{min-width:0;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+.lens-head{display:flex;align-items:center;gap:8px;padding:6px 12px;background:#0C141F;border-bottom:1px solid var(--line);font:10px var(--ui);letter-spacing:.12em;text-transform:uppercase;color:#AFC2DA}
+.lens-head .badge{margin-left:auto;font:10px var(--mono);color:var(--dim);text-transform:none;letter-spacing:0}
+.split{background:var(--line);cursor:col-resize}
+.split:hover{background:var(--accent)}
+
+/* CODE lens */
+#code{flex:1;overflow:auto;background:#07101a;font:13px/1.7 var(--mono)}
+.cl{display:grid;grid-template-columns:20px 40px 1fr;align-items:center}
+.cl .bp{justify-self:center;width:11px;height:11px;border-radius:50%;cursor:pointer;opacity:0}
+.cl:hover .bp{opacity:.4;background:var(--err)}
+.cl.hasbp .bp{opacity:1;background:var(--err);box-shadow:0 0 8px var(--err)}
+.cl .ln{color:#41546b;text-align:right;padding-right:12px;user-select:none;font-size:11px}
+.cl .src{padding:0 12px;white-space:pre;color:#cfe0f2}
+.cl[data-node]{cursor:pointer}
+.cl[data-node]:hover{background:rgba(63,198,255,.06)}
+.cl.link{background:rgba(63,198,255,.14);box-shadow:inset 3px 0 0 var(--accent)}
+.cl.exec{background:#33290f;box-shadow:inset 3px 0 0 var(--warn)}
+.cl.errln{background:rgba(255,92,92,.1)}
+.cl .src .kw{color:#9db8ff}.cl .src .st{color:#FDE68A}.cl .src .fn{color:#8fe3c0}.cl .src .sq{text-decoration:wavy underline var(--err);text-underline-offset:3px}
+.gutter-legend{padding:6px 12px;color:var(--dim);font:10px var(--mono);border-top:1px solid var(--line);background:#0a121c;display:flex;gap:14px}
+
+/* GRAPH lens */
+#graphwrap{flex:1;position:relative;overflow:hidden;background:
+  radial-gradient(circle at 1px 1px, rgba(126,147,168,.16) 1px, transparent 0) 0 0/22px 22px, var(--bg)}
+#rails{position:absolute;right:0;top:0;bottom:0;width:20px;z-index:3;display:flex;flex-direction:column;gap:3px;padding:10px 0;align-items:center}
+.rk{width:5px;flex:1;border-radius:3px;background:var(--rc);opacity:.85}
+.rk.off{opacity:.2}
+.rk.live{box-shadow:0 0 10px var(--rail-debug);animation:pulse 1.3s infinite}
+@keyframes pulse{50%{opacity:.5}}
+.wires{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:visible}
+.wires path{fill:none;stroke-width:2.5}
+.wire-control{stroke:var(--rail-control)}.wire-data{stroke:var(--rail-data)}
+.wire-fallible{stroke:var(--rail-fallible);stroke-dasharray:1 6;stroke-linecap:round}
+.node{position:absolute;width:180px;background:linear-gradient(180deg,var(--panel-2),#101a26);border:1px solid var(--line-2);border-radius:var(--r);box-shadow:0 8px 22px rgba(0,0,0,.4);font-size:12px;cursor:pointer}
+.node.link{border-color:var(--accent);box-shadow:0 0 0 2px rgba(63,198,255,.32),0 10px 26px rgba(0,0,0,.5)}
+.node.exec{box-shadow:0 0 0 2px var(--warn),0 0 22px rgba(255,180,84,.38)}
+.node.errn{border-color:var(--err);box-shadow:0 0 0 2px rgba(255,92,92,.4)}
+.node.bp::before{content:"";position:absolute;left:-6px;top:-6px;width:12px;height:12px;border-radius:50%;background:var(--err);box-shadow:0 0 8px var(--err)}
+.nhead{display:flex;align-items:center;gap:6px;padding:5px 8px;border-bottom:1px solid var(--line);border-radius:var(--r) var(--r) 0 0;background:linear-gradient(180deg,color-mix(in srgb,var(--kc,var(--accent)) 26%,#0f1a27),#0f1a27)}
+.nhead .g{width:16px;height:16px;display:grid;place-items:center;border-radius:3px;font:9px var(--mono);color:var(--kc,var(--accent));border:1px solid color-mix(in srgb,var(--kc,var(--accent)) 55%,transparent)}
+.nhead b{font-weight:700;font-size:11px}
+.nhead .k{margin-left:auto;font:8px var(--mono);color:var(--dim);text-transform:uppercase}
+.nbody{padding:6px 0}
+.pin{display:flex;align-items:center;gap:6px;font:11px var(--mono);padding:2px 8px}
+.pin.out{justify-content:flex-end}
+.pin .port{width:10px;height:10px;background:var(--pc,var(--rail-data));border-radius:50%;flex:0 0 auto}
+.pin.exec .port{clip-path:polygon(0 0,100% 50%,0 100%);background:var(--rail-control);border-radius:1px}
+.pin .pty{color:var(--dim)}
+.inline{margin:4px 8px 2px;padding:4px 6px;border:1px dashed var(--line-2);border-radius:4px;font:11px var(--mono);color:#FDE68A;background:rgba(0,0,0,.2)}
+.nval{margin:3px 8px 0;font:10px var(--mono);color:var(--ok)}
+.badge-eff{font:8px var(--mono);padding:1px 5px;border-radius:999px;border:1px solid;margin:4px 0 0 8px;display:inline-block}
+.b-control{color:var(--rail-control);border-color:color-mix(in srgb,var(--rail-control) 40%,transparent)}
+
+/* problems strip (both lenses share) */
+#problems{position:absolute;left:12px;right:32px;bottom:12px;z-index:5;display:none;background:#1b1013;border:1px solid var(--err);border-radius:var(--r);box-shadow:0 14px 34px rgba(0,0,0,.5);overflow:hidden}
+#problems.on{display:block}
+#problems h5{margin:0;padding:7px 11px;background:rgba(255,92,92,.14);border-bottom:1px solid rgba(255,92,92,.3);font:12px var(--mono);color:#ffd0d0}
+#problems .code{font-weight:700;color:var(--err)}
+#problems .src{padding:8px 11px;font:11px/1.5 var(--mono);white-space:pre;color:#e7d6d8}
+#problems .car{color:var(--err)}#problems .lnn{color:var(--dim)}
+#problems .wf{padding:0 11px 9px;font:11px var(--mono)}
+#problems .w{color:var(--warn);padding:2px 0}#problems .f{color:var(--ok);padding:2px 0}
+
+/* shared replay timeline in status */
+#status{display:flex;align-items:center;gap:14px;padding:0 12px;background:#0C141F;border-top:1px solid var(--line);font:11px var(--mono);color:var(--dim)}
+#status .ok{color:var(--ok)}
+#status .timeline{display:flex;align-items:center;gap:8px;flex:1;max-width:420px}
+#status .timeline input{flex:1;accent-color:var(--warn)}
+#status .r{margin-left:auto}
+
+@media (max-width:900px){#lenses{grid-template-columns:1fr}.split,.lens.right{display:none}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div id="shell">
+  <div id="bar">
+    <div class="brand">Jet Canvas<small>dual lens</small></div>
+    <div class="tabs">
+      <div class="tab on" data-g="label">label · fizzbuzz.jet</div>
+      <div class="tab" data-g="run">run</div>
+      <div class="tab err" data-g="borrow">run · borrow_conflict.jet</div>
+    </div>
+    <div class="bar-r">
+      <span class="synced"><span class="dot"></span> lenses synced</span>
+      <button id="runbtn" class="primary">Run</button>
+      <button id="dbgbtn">Debug</button>
+    </div>
+  </div>
+
+  <div id="lenses">
+    <!-- LEFT: code lens -->
+    <section class="lens left">
+      <div class="lens-head">Source <span class="badge">fizzbuzz.jet · editable</span></div>
+      <div id="code">
+        <div class="cl" data-node="entry"><span class="bp"></span><span class="ln">5</span><span class="src"><span class="kw">fn</span> <span class="fn">label</span>(n: Int) -> String {</span></div>
+        <div class="cl" data-node="b15"><span class="bp"></span><span class="ln">6</span><span class="src">    <span class="kw">if</span> (n % 15) == 0 {</span></div>
+        <div class="cl" data-node="r15"><span class="bp"></span><span class="ln">7</span><span class="src">        <span class="kw">return</span> <span class="st">"FizzBuzz"</span></span></div>
+        <div class="cl" data-node="b3"><span class="bp"></span><span class="ln">8</span><span class="src">    } <span class="kw">else if</span> (n % 3) == 0 {</span></div>
+        <div class="cl" data-node="r3"><span class="bp"></span><span class="ln">9</span><span class="src">        <span class="kw">return</span> <span class="st">"Fizz"</span></span></div>
+        <div class="cl" data-node="b5"><span class="bp"></span><span class="ln">10</span><span class="src">    } <span class="kw">else if</span> (n % 5) == 0 {</span></div>
+        <div class="cl" data-node="r5"><span class="bp"></span><span class="ln">11</span><span class="src">        <span class="kw">return</span> <span class="st">"Buzz"</span></span></div>
+        <div class="cl"><span class="bp"></span><span class="ln">12</span><span class="src">    }</span></div>
+        <div class="cl" data-node="rn"><span class="bp"></span><span class="ln">13</span><span class="src">    <span class="kw">return</span> <span class="st">"{n}"</span></span></div>
+        <div class="cl"><span class="bp"></span><span class="ln">14</span><span class="src">}</span></div>
+      </div>
+      <div class="gutter-legend"><span>● click gutter = breakpoint</span><span>click a line = select its node →</span></div>
+    </section>
+
+    <div class="split" id="split"></div>
+
+    <!-- RIGHT: graph lens -->
+    <section class="lens right">
+      <div class="lens-head">Graph <span class="badge">source-order · edits write back through fmt</span></div>
+      <div id="graphwrap">
+        <div id="rails" aria-label="Active rails">
+          <span class="rk" style="--rc:var(--rail-control)" title="control"></span>
+          <span class="rk" style="--rc:var(--rail-data)" title="data"></span>
+          <span class="rk off" style="--rc:var(--rail-fallible)" title="fallible"></span>
+          <span class="rk off" style="--rc:var(--rail-effect)" title="effect"></span>
+          <span class="rk off" style="--rc:var(--rail-async)" title="async"></span>
+          <span class="rk off" style="--rc:var(--rail-proof)" title="proof"></span>
+          <span class="rk live" style="--rc:var(--rail-debug)" title="debug"></span>
+        </div>
+        <svg class="wires">
+          <path class="wire-control" d="M120,80 C160,80 130,130 170,130"/>
+          <path class="wire-control" d="M290,148 C330,148 300,80 340,80"/>
+          <path class="wire-control" d="M170,166 C150,220 160,220 170,240"/>
+          <path class="wire-control" d="M290,258 C330,258 300,200 340,200"/>
+          <path class="wire-control" d="M170,276 C150,320 160,320 170,340"/>
+          <path class="wire-control" d="M290,358 C330,358 300,300 340,300"/>
+          <path class="wire-control" d="M170,376 C150,420 160,420 170,430"/>
+        </svg>
+
+        <div class="node" data-node="entry" style="--kc:var(--ok);left:20px;top:52px;width:140px">
+          <div class="nhead"><span class="g">▸</span><b>label</b><span class="k">entry</span></div>
+          <div class="nbody"><div class="pin out"><span>n</span><span class="pty">Int</span><span class="port"></span></div></div>
+        </div>
+
+        <div class="node" data-node="b15" style="--kc:var(--rail-control);left:170px;top:112px">
+          <div class="nhead"><span class="g">?</span><b>if n%15==0</b><span class="k">branch</span></div>
+          <div class="nbody">
+            <div class="pin exec"><span class="port"></span><span>exec</span></div>
+            <div class="pin exec out"><span>then</span><span class="port"></span></div>
+            <div class="pin exec out"><span>else</span><span class="port"></span></div>
+          </div>
+        </div>
+        <div class="node" data-node="r15" style="--kc:var(--rail-data);left:340px;top:52px;width:150px">
+          <div class="nhead"><span class="g">⏎</span><b>return</b><span class="k">return</span></div>
+          <div class="nbody"><div class="inline">"FizzBuzz"</div></div>
+        </div>
+
+        <div class="node" data-node="b3" style="--kc:var(--rail-control);left:170px;top:222px">
+          <div class="nhead"><span class="g">?</span><b>if n%3==0</b><span class="k">branch</span></div>
+          <div class="nbody"><div class="pin exec"><span class="port"></span><span>exec</span></div><div class="pin exec out"><span>then</span><span class="port"></span></div><div class="pin exec out"><span>else</span><span class="port"></span></div></div>
+        </div>
+        <div class="node" data-node="r3" style="--kc:var(--rail-data);left:340px;top:172px;width:150px">
+          <div class="nhead"><span class="g">⏎</span><b>return</b><span class="k">return</span></div>
+          <div class="nbody"><div class="inline">"Fizz"</div></div>
+        </div>
+
+        <div class="node" data-node="b5" style="--kc:var(--rail-control);left:170px;top:322px">
+          <div class="nhead"><span class="g">?</span><b>if n%5==0</b><span class="k">branch</span></div>
+          <div class="nbody"><div class="pin exec"><span class="port"></span><span>exec</span></div><div class="pin exec out"><span>then</span><span class="port"></span></div><div class="pin exec out"><span>else</span><span class="port"></span></div></div>
+        </div>
+        <div class="node" data-node="r5" style="--kc:var(--rail-data);left:340px;top:272px;width:150px">
+          <div class="nhead"><span class="g">⏎</span><b>return</b><span class="k">return</span></div>
+          <div class="nbody"><div class="inline">"Buzz"</div></div>
+        </div>
+
+        <div class="node" data-node="rn" style="--kc:var(--rail-data);left:170px;top:412px;width:150px">
+          <div class="nhead"><span class="g">⏎</span><b>return</b><span class="k">return</span></div>
+          <div class="nbody"><div class="inline">"{n}"</div><div class="nval">→ interpolates Int → String</div></div>
+        </div>
+
+        <div id="problems">
+          <h5><span class="code">E0204</span> `x` is being changed in this call, so it can't be used again here</h5>
+          <div class="src"><span class="lnn">6 |</span>     both(&x, x)
+       <span class="car">             ^</span></div>
+          <div class="wf"><div class="w">Why: while something is being changed, nobody else may be looking at it</div>
+          <div class="f">Fix: pass `&x` only once, or copy first with `copy x`</div></div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div id="status">
+    <span class="ok">● checked</span>
+    <span>rev sha256-4b8…</span>
+    <span id="selinfo">select a line or node — the other lens follows</span>
+    <span class="timeline">replay <input type="range" min="0" max="8" value="5" id="scrub"> <span id="scrubl">n=3 · step 5/8</span></span>
+    <span class="r">canvas schema v1</span>
+  </div>
+</div>
+
+<script>
+const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
+function clearLink(){$$('.link').forEach(e=>e.classList.remove('link'));}
+function link(id){
+  clearLink();
+  const cl=$(`.cl[data-node="${id}"]`),nd=$(`.node[data-node="${id}"]`);
+  if(cl){cl.classList.add('link');cl.scrollIntoView({block:'nearest'});}
+  if(nd){nd.classList.add('link');}
+  $('#selinfo').textContent=cl?`selected ${id} · line ${cl.querySelector('.ln').textContent} ⇄ node`:'';
+}
+// bidirectional sync
+$$('.cl[data-node]').forEach(cl=>{
+  cl.addEventListener('click',e=>{if(e.target.classList.contains('bp'))return;link(cl.dataset.node);});
+});
+$$('.node[data-node]').forEach(nd=>nd.addEventListener('click',()=>link(nd.dataset.node)));
+// breakpoints in code gutter mirror a halo in the graph
+$$('.cl .bp').forEach(bp=>bp.addEventListener('click',e=>{
+  e.stopPropagation();const cl=bp.closest('.cl');cl.classList.toggle('hasbp');
+  const id=cl.dataset.node;if(id){const nd=$(`.node[data-node="${id}"]`);if(nd)nd.classList.toggle('bp',cl.classList.contains('hasbp'));}
+}));
+// debug: mark exec line + node (paused mid-run), replay scrub
+function markExec(id){$$('.exec').forEach(e=>e.classList.remove('exec'));const cl=$(`.cl[data-node="${id}"]`),nd=$(`.node[data-node="${id}"]`);if(cl)cl.classList.add('exec');if(nd)nd.classList.add('exec');}
+$('#dbgbtn').onclick=$('#runbtn').onclick=()=>{markExec('b3');$('#scrubl').textContent='n=3 · at if n%3 · step 5/8';};
+$('#scrub').oninput=e=>{const steps=['entry','b15','r15','b3','r3','b5','r5','rn','rn'];markExec(steps[e.target.value]);$('#scrubl').textContent='step '+e.target.value+'/8';};
+// tabs: borrow tab shows the diagnostic in BOTH lenses
+$$('.tab').forEach(t=>t.addEventListener('click',()=>{
+  $$('.tab').forEach(x=>x.classList.remove('on'));t.classList.add('on');
+  const borrow=t.dataset.g==='borrow';
+  $('#problems').classList.toggle('on',borrow);
+  clearLink();$$('.exec').forEach(e=>e.classList.remove('exec'));
+  if(borrow){
+    // squiggle in code lens + red node in graph lens (shared truth)
+    const cl=$('.cl[data-node="b15"]');cl.classList.add('errln');cl.querySelector('.src').innerHTML='    both(&x, <span class="sq">x</span>)';
+    $('.node[data-node="b15"]').classList.add('errn');
+  }else{
+    $$('.errln').forEach(e=>e.classList.remove('errln'));
+    $$('.errn').forEach(e=>e.classList.remove('errn'));
+  }
+}));
+// split drag (visual)
+let drag=false;$('#split').addEventListener('mousedown',()=>drag=true);
+addEventListener('mouseup',()=>drag=false);
+addEventListener('mousemove',e=>{if(!drag)return;const f=Math.max(20,Math.min(80,e.clientX/innerWidth*100));$('#lenses').style.gridTemplateColumns=`${f}fr 6px ${100-f}fr`;});
+</script>
+</body>
+</html>

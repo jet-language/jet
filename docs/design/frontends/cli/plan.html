@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CLI output — Plan</title>
+<style>
+  :root{
+    --ground:#0B1119; --panel:#16202E; --panel2:#0E1622; --line:#1E2A3A;
+    --accent:#3FC6FF; --ok:#58D68D; --warn:#FFB454; --err:#FF5C5C; --sel:#C792EA;
+    --text:#D9E6F2; --sec:#7E93A8; --scaf:#3A4A5C;
+    --mono:ui-monospace,"Cascadia Code","JetBrains Mono",Menlo,"DejaVu Sans Mono",monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+    --sp1:4px; --sp2:8px; --sp3:12px; --sp4:16px; --sp6:24px; --sp10:40px;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--ground);color:var(--text);font-family:var(--sans);font-size:15px;line-height:1.6;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:960px;margin:0 auto;padding:var(--sp10) var(--sp6) 96px}
+  .eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent)}
+  h1{font-size:40px;line-height:1.05;letter-spacing:-.02em;margin:var(--sp3) 0 var(--sp2);font-weight:650}
+  .loop{font-size:19px;color:var(--text);margin:0 0 var(--sp4);max-width:62ch}
+  .loop b{color:var(--accent);font-weight:600}
+  .meta{display:flex;flex-wrap:wrap;gap:var(--sp2) var(--sp6);font-family:var(--mono);font-size:12.5px;color:var(--sec);
+    border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:var(--sp3) 0;margin-bottom:var(--sp10)}
+  .meta b{color:var(--text);font-weight:500}
+  .steps{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--sp3);margin-bottom:var(--sp10)}
+  .step{border:1px solid var(--line);border-radius:6px;padding:var(--sp3) var(--sp4);background:var(--panel2)}
+  .step .n{font-family:var(--mono);font-size:12px;color:var(--accent)}
+  .step .t{font-size:14px;color:var(--sec);margin-top:var(--sp1)}
+  .still{position:relative;padding-left:var(--sp6);margin:0 0 var(--sp10)}
+  .rail{position:absolute;left:0;top:6px;bottom:-24px;width:1px;background:var(--line)}
+  .still:last-of-type .rail{bottom:auto;height:14px}
+  .dot{position:absolute;left:-4px;top:4px;width:9px;height:9px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 4px var(--ground)}
+  .cap{display:flex;gap:var(--sp3);align-items:baseline;margin-bottom:var(--sp3);flex-wrap:wrap}
+  .cap .k{font-family:var(--mono);font-size:12px;color:var(--accent);white-space:nowrap}
+  .cap .v{font-size:14.5px;color:var(--sec)}
+  .cap .v b{color:var(--text);font-weight:500}
+  .term{border:1px solid var(--line);border-radius:6px;overflow:hidden;background:var(--ground)}
+  .tbar{display:flex;align-items:center;gap:var(--sp2);height:30px;padding:0 var(--sp3);background:var(--panel2);border-bottom:1px solid var(--line)}
+  .tbar i{width:9px;height:9px;border-radius:50%;background:#2A3849;display:inline-block}
+  .tbar .title{margin-left:var(--sp2);font-family:var(--mono);font-size:11.5px;color:var(--scaf)}
+  .tbar .tag{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--scaf)}
+  pre.body{margin:0;padding:var(--sp4);font-family:var(--mono);font-size:12.5px;line-height:1.6;color:var(--text);overflow-x:auto;white-space:pre;tab-size:2}
+  .c{color:var(--accent)} .g{color:var(--ok)} .y{color:var(--warn)} .r{color:var(--err)}
+  .m{color:var(--sel)} .s{color:var(--sec)} .d{color:var(--scaf)} .b{font-weight:600}
+  .cur{background:var(--accent);color:var(--ground)}
+  .prompt{background:#0f1a24;color:var(--text)}
+  .note{border-left:2px solid var(--scaf);padding:2px 0 2px var(--sp3);margin:var(--sp3) 0 0;font-size:13.5px;color:var(--sec)}
+  .note b{color:var(--text);font-weight:500}
+  .tag2{display:inline-block;font-family:var(--mono);font-size:11px;padding:1px 7px;border-radius:4px;border:1px solid var(--line);color:var(--sec)}
+  .tag2.fail{color:var(--err);border-color:#3a2430}
+  h2.sec{font-size:13px;font-family:var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--sec);
+    margin:64px 0 var(--sp6);padding-bottom:var(--sp2);border-bottom:1px solid var(--line)}
+  a{color:var(--accent)}
+  @media(max-width:640px){.steps{grid-template-columns:1fr}h1{font-size:30px}}
+  @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="eyebrow">CLI output · archetype 3 of 3</div>
+  <h1>Plan</h1>
+  <p class="loop">Every mutating command first prints a <b>complete plan</b> — what is added,
+    changed, removed, plus download and closure deltas — asks <b>once</b>, then applies with
+    minimal output tied back to the plan lines.</p>
+  <div class="meta">
+    <span>Surface <b>CLI output</b></span>
+    <span>Model <b>terraform plan / nh</b></span>
+    <span>Gate <b>one y/N per mutation</b></span>
+    <span>Fit <b>80 col</b></span>
+  </div>
+
+  <div class="steps">
+    <div class="step"><div class="n">01 plan</div><div class="t">Full diff: adds, changes, removes, and the size / generation delta.</div></div>
+    <div class="step"><div class="n">02 confirm</div><div class="t">One prompt. Default is no; nothing has touched the system yet.</div></div>
+    <div class="step"><div class="n">03 apply</div><div class="t">Quiet execution; each done line points back to a plan line.</div></div>
+  </div>
+
+  <!-- STILL 1 -->
+  <div class="still">
+    <div class="rail"></div><div class="dot"></div>
+    <div class="cap"><span class="k">jetpack add</span><span class="v"><b>The plan.</b> Read it, then decide — no work has started.</span></div>
+    <div class="term">
+      <div class="tbar"><i></i><i></i><i></i><span class="title">zsh — myproj</span><span class="tag">80×24</span></div>
+<pre class="body">  <span class="c">jetpack</span>  add ripgrep fd
+
+  <span class="b">Plan</span>  <span class="s">2 to add, 0 to change, 0 to remove</span>
+
+    <span class="g">+</span> <span class="b">ripgrep</span>  <span class="s">14.1.0   nixpkgs    8.4 MB</span>
+    <span class="g">+</span> <span class="b">fd</span>       <span class="s">9.0.0    nixpkgs    2.1 MB</span>
+
+  <span class="s">Download 10.5 MB · unpack 31 MB · env.jet gains 2 lines</span>
+
+  Apply? <span class="s">[y/N]</span> <span class="cur"> </span>
+</pre>
+    </div>
+    <div class="note">Transplants terraform's <b>+/~/-</b> ledger and nh's size line. The
+      <b>[y/N]</b> default-no means a reflexive Enter is always safe.</div>
+  </div>
+
+  <!-- STILL 2 -->
+  <div class="still">
+    <div class="rail"></div><div class="dot"></div>
+    <div class="cap"><span class="k">…applied</span><span class="v">Answer <b>y</b>; apply is terse, one done line per planned add.</span></div>
+    <div class="term">
+      <div class="tbar"><i></i><i></i><i></i><span class="title">zsh — myproj</span><span class="tag">80×24</span></div>
+<pre class="body">  Apply? <span class="s">[y/N]</span> y
+
+  <span class="c">jetpack</span>  applying
+           <span class="g">✓</span> <span class="b">ripgrep</span>  <span class="s">14.1.0</span>
+           <span class="g">✓</span> <span class="b">fd</span>       <span class="s">9.0.0</span>
+  <span class="c">jetpack</span>  plan applied · 2 added  <span class="g">✓</span>
+</pre>
+    </div>
+    <div class="note">No spinners, no progress bars — the plan already set expectations, so
+      apply just confirms each line landed. Minimal by design.</div>
+  </div>
+
+  <!-- STILL 3 -->
+  <div class="still">
+    <div class="rail"></div><div class="dot"></div>
+    <div class="cap"><span class="k">jetos switch</span><span class="v">Where a plan earns its keep — a full generation diff before any rebuild.</span></div>
+    <div class="term">
+      <div class="tbar"><i></i><i></i><i></i><span class="title">zsh — myproj</span><span class="tag">80×24</span></div>
+<pre class="body">  <span class="c">jetos</span>  switch
+
+  <span class="b">Plan</span>  <span class="s">generation 42 → 43 · 1 add, 1 change, 1 remove</span>
+
+    <span class="g">+</span> <span class="b">firefox</span>       <span class="s">—        → 129.0</span>
+    <span class="y">~</span> <span class="b">linux</span>         <span class="s">6.9.7    → 6.10.1</span>
+    <span class="r">-</span> <span class="b">obsolete-lib</span>  <span class="s">1.2.0    → —</span>
+
+  <span class="s">Download 240 MB · closure +18 MB · rebuild boot + current</span>
+
+  Apply? <span class="s">[y/N]</span> <span class="cur"> </span>
+</pre>
+    </div>
+    <div class="note">This is the nh benchmark, improved: version-to-version columns, closure
+      delta, and boot target stated up front. Decide from the diff, apply blind.</div>
+  </div>
+
+  <!-- STILL 4 -->
+  <div class="still">
+    <div class="rail"></div><div class="dot"></div>
+    <div class="cap"><span class="k">jetpack gc</span><span class="v">Destructive, so it plans too — you see exactly what is reclaimed.</span></div>
+    <div class="term">
+      <div class="tbar"><i></i><i></i><i></i><span class="title">zsh — myproj</span><span class="tag">80×24</span></div>
+<pre class="body">  <span class="c">jetpack</span>  gc
+
+  <span class="b">Plan</span>  <span class="s">remove 12 unused · reclaim 1.8 GB</span>
+
+    <span class="r">-</span> <span class="b">ripgrep</span>  <span class="s">13.0.0   240 MB</span>
+    <span class="r">-</span> <span class="b">node</span>     <span class="s">20.11.0  610 MB</span>
+    <span class="s">… 10 more</span>
+
+  Apply? <span class="s">[y/N]</span> <span class="cur"> </span>
+</pre>
+    </div>
+    <div class="note">A delete you can preview beats a delete you can only regret. Same
+      plan→confirm→apply shape as every other mutation.</div>
+  </div>
+
+  <!-- STILL 5 — FAILURE -->
+  <div class="still">
+    <div class="rail"></div><div class="dot" style="background:var(--err)"></div>
+    <div class="cap"><span class="k">build failure</span><span class="tag2 fail">E0102</span><span class="v">If apply hits a compile error, it stops and prints the diagnostic <b>verbatim</b>.</span></div>
+    <div class="term">
+      <div class="tbar"><i></i><i></i><i></i><span class="title">zsh — myproj</span><span class="tag">80×24</span></div>
+<pre class="body">  Apply? <span class="s">[y/N]</span> y
+
+  <span class="c">jetpack</span>  applying
+
+Error [E0102]: nothing named `nonexistent_function_xyz` exists here
+  --&gt; tests/ui/comptime_if_unknown_fn_dropped.jet:8:9
+    |
+  8 |         nonexistent_function_xyz()
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^
+ Why: only functions that have been defined (or built in, like `print` / `input`) can be called
+ Fix: define it first (fn nonexistent_function_xyz() { ... }), or call one that exists
+
+  <span class="c">jetpack</span>  <span class="r">apply stopped</span> · nothing changed
+</pre>
+    </div>
+    <div class="note">Apply is transactional: a failed line means the plan is abandoned and
+      the system is left exactly as the plan promised it would be before <b>y</b>.</div>
+  </div>
+
+  <h2 class="sec">NO_COLOR / CI — plan reads the same, gate auto-declines</h2>
+  <div class="still">
+    <div class="rail" style="display:none"></div>
+    <div class="cap"><span class="k">NO_COLOR=1</span><span class="tag2">non-TTY</span><span class="v">Symbols carry the meaning without color; a non-interactive run needs <b>--yes</b> or it stops at the gate.</span></div>
+    <div class="term">
+      <div class="tbar"><i></i><i></i><i></i><span class="title">ci-runner — no tty</span><span class="tag">plain</span></div>
+<pre class="body">  jetpack  add ripgrep fd
+
+  Plan  2 to add, 0 to change, 0 to remove
+
+    + ripgrep  14.1.0   nixpkgs    8.4 MB
+    + fd       9.0.0    nixpkgs    2.1 MB
+
+  Download 10.5 MB · unpack 31 MB · env.jet gains 2 lines
+
+  No TTY to confirm. Re-run with --yes to apply this plan.
+</pre>
+    </div>
+    <div class="note">The <b>+/~/-</b> glyphs mean the same in monochrome. In CI the prompt can't
+      be answered, so the plan prints and the command exits without touching anything.</div>
+  </div>
+
+</div>
+</body>
+</html>
