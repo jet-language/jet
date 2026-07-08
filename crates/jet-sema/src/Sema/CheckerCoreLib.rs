@@ -752,6 +752,104 @@ impl<'a> Checker<'a> {
                 }
                 return Some(Type::List(Box::new(Type::Named("DataGroup".to_string()))));
             }
+            ("core.data", "inner_join" | "left_join") => {
+                if args.len() != 4 {
+                    self.diags.push(wrong_core_arity(name, 4, args.len(), span));
+                }
+                let left_ty = args.get_mut(0).and_then(|a| self.infer(&mut a.expr));
+                let right_ty = args.get_mut(1).and_then(|a| self.infer(&mut a.expr));
+                let left_row = match left_ty {
+                    Some(Type::List(inner)) => *inner,
+                    Some(other) => {
+                        if let Some(arg) = args.get(0) {
+                            self.diags.push(Diagnostic::error(
+                                "E0112",
+                                format!("`data.{}` needs a typed left table, not {}", name, other.show()),
+                                "core.data joins rows from list-backed typed tables".to_string(),
+                                "pass `[LeftRow]` and `[RightRow]` values".to_string(),
+                                Some(arg.expr.span()),
+                            ));
+                        }
+                        Type::Int
+                    }
+                    None => Type::Int,
+                };
+                let right_row = match right_ty {
+                    Some(Type::List(inner)) => *inner,
+                    Some(other) => {
+                        if let Some(arg) = args.get(1) {
+                            self.diags.push(Diagnostic::error(
+                                "E0112",
+                                format!("`data.{}` needs a typed right table, not {}", name, other.show()),
+                                "core.data joins rows from list-backed typed tables".to_string(),
+                                "pass `[LeftRow]` and `[RightRow]` values".to_string(),
+                                Some(arg.expr.span()),
+                            ));
+                        }
+                        Type::Int
+                    }
+                    None => Type::Int,
+                };
+                if let Some(left_key) = args.get_mut(2) {
+                    let key_fn = Type::Fn {
+                        params: vec![left_row],
+                        ret: Some(Box::new(Type::String)),
+                        effect_bound: None,
+                    };
+                    self.expect_core_arg(name, 2, &key_fn, left_key);
+                }
+                if let Some(right_key) = args.get_mut(3) {
+                    let key_fn = Type::Fn {
+                        params: vec![right_row],
+                        ret: Some(Box::new(Type::String)),
+                        effect_bound: None,
+                    };
+                    self.expect_core_arg(name, 3, &key_fn, right_key);
+                }
+                return Some(Type::List(Box::new(Type::Named("DataGroup".to_string()))));
+            }
+            ("core.data", "pivot_sum") => {
+                if args.len() != 4 {
+                    self.diags.push(wrong_core_arity(name, 4, args.len(), span));
+                }
+                let Some(rows_arg) = args.get_mut(0) else {
+                    return Some(Type::List(Box::new(Type::Named("DataGroup".to_string()))));
+                };
+                let rows_ty = self.infer(&mut rows_arg.expr);
+                let row_ty = match rows_ty {
+                    Some(Type::List(inner)) => *inner,
+                    Some(other) => {
+                        self.diags.push(Diagnostic::error(
+                            "E0112",
+                            format!("`data.{}` needs a typed table, not {}", name, other.show()),
+                            "core.data pivots rows from a list-backed typed table".to_string(),
+                            "pass a `[Row]` value, such as `data.csv<Row>(text)?`".to_string(),
+                            Some(rows_arg.expr.span()),
+                        ));
+                        Type::Int
+                    }
+                    None => Type::Int,
+                };
+                for idx in [1usize, 2usize] {
+                    if let Some(arg) = args.get_mut(idx) {
+                        let key_fn = Type::Fn {
+                            params: vec![row_ty.clone()],
+                            ret: Some(Box::new(Type::String)),
+                            effect_bound: None,
+                        };
+                        self.expect_core_arg(name, idx, &key_fn, arg);
+                    }
+                }
+                if let Some(value_arg) = args.get_mut(3) {
+                    let value_fn = Type::Fn {
+                        params: vec![row_ty],
+                        ret: Some(Box::new(Type::Float)),
+                        effect_bound: None,
+                    };
+                    self.expect_core_arg(name, 3, &value_fn, value_arg);
+                }
+                return Some(Type::List(Box::new(Type::Named("DataGroup".to_string()))));
+            }
             ("core.mem", "volatile_read") => {
                 if !self.in_unsafe {
                     self.diags.push(e3101(Syntax::MEM_VOLATILE_READ, span));
@@ -5071,6 +5169,10 @@ pub fn core_fixed_sig(
             vec![(read, Type::List(Box::new(Type::Float))), (read, Type::Float)],
             Some(Type::Float),
         )),
+        ("core.data", "rolling_mean") => Some((
+            vec![(read, Type::List(Box::new(Type::Float))), (read, Type::Int)],
+            Some(Type::List(Box::new(Type::Float))),
+        )),
         ("core.data", "describe") => Some((
             vec![(read, Type::List(Box::new(Type::Float)))],
             Some(Type::Named("DataSummary".to_string())),
@@ -6720,12 +6822,16 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
             "count",
             "filter",
             "sort_by",
+            "inner_join",
+            "left_join",
+            "pivot_sum",
             "sum",
             "mean",
             "min",
             "max",
             "median",
             "quantile",
+            "rolling_mean",
             "variance",
             "stddev",
             "describe",

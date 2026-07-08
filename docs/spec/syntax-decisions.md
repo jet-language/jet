@@ -1424,7 +1424,10 @@ piped (JSON); `log.setup(format:)` overrides (D-LOGFMT1).
   type.
 - **D-DATAFRAME1=A**: `core.data` exposes typed `Table`/`Series<T>`, schema,
   typed rows, lazy query plans, joins, windows, missing values, and plotting.
-  Eager helpers and lazy plans share the same operations.
+  Eager helpers and lazy plans share the same operations. Current shipped floor:
+  typed CSV rows, typed-lambda `filter`/`sort_by`, group stats, inner/left
+  key-join summaries, pivot sums, rolling means, distribution summaries, and
+  deterministic text/SVG plots.
 - **D-STDLIBLEDGER1=C**: Core docs track built modules only. Missing domains
   are implicit; Jet does not maintain a have/have-not ledger of unbuilt or
   declined stdlib domains.

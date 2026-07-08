@@ -10074,6 +10074,117 @@ where
     jet_data_group_sum(rows, key, value)
 }
 
+fn jet_data_inner_join<T, U, FL, FR>(
+    left: &Vec<T>,
+    right: &Vec<U>,
+    left_key: FL,
+    right_key: FR,
+) -> Vec<jet_std::DataGroup>
+where
+    T: Clone,
+    U: Clone,
+    FL: Fn(T) -> String,
+    FR: Fn(U) -> String,
+{
+    let mut left_counts = std::collections::BTreeMap::<String, i64>::new();
+    let mut right_counts = std::collections::BTreeMap::<String, i64>::new();
+    for row in left.iter().cloned() {
+        *left_counts.entry(left_key(row)).or_insert(0) += 1;
+    }
+    for row in right.iter().cloned() {
+        *right_counts.entry(right_key(row)).or_insert(0) += 1;
+    }
+    left_counts
+        .into_iter()
+        .filter_map(|(key, left_count)| {
+            let right_count = *right_counts.get(&key)?;
+            let matches = left_count * right_count;
+            Some(jet_std::DataGroup {
+                key,
+                count: matches,
+                sum: right_count as f64,
+                mean: if left_count == 0 { 0.0 } else { matches as f64 / left_count as f64 },
+            })
+        })
+        .collect()
+}
+
+fn jet_data_left_join<T, U, FL, FR>(
+    left: &Vec<T>,
+    right: &Vec<U>,
+    left_key: FL,
+    right_key: FR,
+) -> Vec<jet_std::DataGroup>
+where
+    T: Clone,
+    U: Clone,
+    FL: Fn(T) -> String,
+    FR: Fn(U) -> String,
+{
+    let mut left_counts = std::collections::BTreeMap::<String, i64>::new();
+    let mut right_counts = std::collections::BTreeMap::<String, i64>::new();
+    for row in left.iter().cloned() {
+        *left_counts.entry(left_key(row)).or_insert(0) += 1;
+    }
+    for row in right.iter().cloned() {
+        *right_counts.entry(right_key(row)).or_insert(0) += 1;
+    }
+    left_counts
+        .into_iter()
+        .map(|(key, left_count)| {
+            let right_count = *right_counts.get(&key).unwrap_or(&0);
+            let matches = left_count * right_count;
+            jet_std::DataGroup {
+                key,
+                count: left_count,
+                sum: right_count as f64,
+                mean: if left_count == 0 { 0.0 } else { matches as f64 / left_count as f64 },
+            }
+        })
+        .collect()
+}
+
+fn jet_data_pivot_sum<T, FR, FC, FV>(
+    rows: &Vec<T>,
+    row_key: FR,
+    col_key: FC,
+    value: FV,
+) -> Vec<jet_std::DataGroup>
+where
+    T: Clone,
+    FR: Fn(T) -> String,
+    FC: Fn(T) -> String,
+    FV: Fn(T) -> f64,
+{
+    let mut groups = std::collections::BTreeMap::<String, (i64, f64)>::new();
+    for row in rows.iter().cloned() {
+        let key = format!("{}|{}", row_key(row.clone()), col_key(row.clone()));
+        let entry = groups.entry(key).or_insert((0, 0.0));
+        entry.0 += 1;
+        entry.1 += value(row);
+    }
+    groups
+        .into_iter()
+        .map(|(key, (count, sum))| jet_std::DataGroup {
+            key,
+            count,
+            sum,
+            mean: if count == 0 { 0.0 } else { sum / count as f64 },
+        })
+        .collect()
+}
+
+fn jet_data_rolling_mean(values: &Vec<f64>, width: i64) -> Vec<f64> {
+    let width = width.max(1) as usize;
+    let mut out = Vec::with_capacity(values.len());
+    for i in 0..values.len() {
+        let start = i.saturating_add(1).saturating_sub(width);
+        let window = &values[start..=i];
+        out.push(window.iter().sum::<f64>() / window.len() as f64);
+    }
+    out
+}
+
 fn jet_data_status() -> Vec<jet_std::DataStatus> {
     vec![
         jet_std::DataStatus {

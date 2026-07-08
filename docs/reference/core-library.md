@@ -1279,9 +1279,16 @@ field is a Jet field error before codegen.
 | `csv<T>(text)` | `[T] ? DecodeError` | Header-mapped typed CSV rows |
 | `count(rows)` | `Int` | Count table rows or series values |
 | `sum(values)` / `mean(values)` / `min(values)` / `max(values)` | `Float` | Numeric series stats over `[Float]` |
+| `median(values)` / `quantile(values, q)` | `Float` | Sorted numeric quantiles |
+| `variance(values)` / `stddev(values)` / `describe(values)` | `Float` / `Float` / `DataSummary` | Numeric distribution summary |
+| `rolling_mean(values, width)` | `[Float]` | Prefix-safe rolling window mean |
 | `group_count(rows, row => row.key)` | `[DataGroup]` | Count rows by a `String` key |
 | `group_sum(rows, row => row.key, row => row.value)` | `[DataGroup]` | Sum a `Float` selector per key |
 | `group_mean(rows, row => row.key, row => row.value)` | `[DataGroup]` | Mean a `Float` selector per key |
+| `filter(rows, row => ok)` / `sort_by(rows, row => key)` | `[T]` | Typed in-memory row pipeline |
+| `inner_join(left, right, l => key, r => key)` | `[DataGroup]` | Matched-key counts between typed tables |
+| `left_join(left, right, l => key, r => key)` | `[DataGroup]` | Left-key counts plus match counts |
+| `pivot_sum(rows, row => row_key, row => col_key, row => value)` | `[DataGroup]` | Deterministic row/column sum cells as `row|col` keys |
 | `status()` | `[DataStatus]` | Native/bridge replacement facts for data workflows |
 | `bar_text(groups)` / `bar_svg(groups)` | `String` | Deterministic text/SVG bar output |
 
@@ -2066,7 +2073,9 @@ method aliases for the common TCP path.
 `core.db` opens SQLite connections through `db.open(path)` or
 `db.open_memory()`. Queries use one path: SQL text plus `[DbValue]` parameters.
 Checked `Sql` literals feed that path through `db.params(sql)`, so holes become
-bound parameters, not string interpolation.
+bound parameters, not string interpolation. The runtime uses SQLite's prepared
+statement cache under that same path; there is no separate unsafe raw-query or
+prepare-only API.
 
 | API | Returns | Notes |
 |-----|---------|-------|

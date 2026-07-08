@@ -4451,6 +4451,22 @@ pub(crate) fn core_closure_call_in_subset(
                 && lambda_arg(1)
                 && lambda_arg(2)
         }
+        ("core.data", "inner_join" | "left_join") => {
+            args.len() == 4
+                && no_labels
+                && expr_in_subset(&args[0].expr, cx, locals)
+                && expr_in_subset(&args[1].expr, cx, locals)
+                && lambda_arg(2)
+                && lambda_arg(3)
+        }
+        ("core.data", "pivot_sum") => {
+            args.len() == 4
+                && no_labels
+                && expr_in_subset(&args[0].expr, cx, locals)
+                && lambda_arg(1)
+                && lambda_arg(2)
+                && lambda_arg(3)
+        }
         // D-REACT1=B / D-SIGNAL1: `reactive.derived/computed/effect(<lambda>)` —
         // 1 arg, a literal zero-param in-subset lambda (rendered by `render_lambda_str`).
         ("jet.reactive", "derived" | "computed" | "effect") => {

@@ -90,6 +90,7 @@ fn compiled_binary_output(
     };
     let rs = dir.join(format!("jet_{tag}_{}.rs", i));
     let bin = dir.join(format!("jet_{tag}_{}", i));
+    fs::create_dir_all(dir).unwrap();
     fs::write(&rs, &compiled.rust).unwrap();
     let mut rustc_cmd = Command::new("rustc");
     rustc_cmd

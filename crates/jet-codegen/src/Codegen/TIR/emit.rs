@@ -4089,6 +4089,30 @@ pub(crate) fn emit_tir_core_call(
             arg(1),
             arg(2)
         ),
+        ("core.data", "inner_join") => format!(
+            "{}(&({}), &({}), {}, {})",
+            helper("jet_data_inner_join"),
+            arg(0),
+            arg(1),
+            arg(2),
+            arg(3)
+        ),
+        ("core.data", "left_join") => format!(
+            "{}(&({}), &({}), {}, {})",
+            helper("jet_data_left_join"),
+            arg(0),
+            arg(1),
+            arg(2),
+            arg(3)
+        ),
+        ("core.data", "pivot_sum") => format!(
+            "{}(&({}), {}, {}, {})",
+            helper("jet_data_pivot_sum"),
+            arg(0),
+            arg(1),
+            arg(2),
+            arg(3)
+        ),
         ("core.data", "sum") => format!("{}(&({}))", helper("jet_data_sum"), arg(0)),
         ("core.data", "mean") => format!("{}(&({}))", helper("jet_data_mean"), arg(0)),
         ("core.data", "min") => format!("{}(&({}))", helper("jet_data_min"), arg(0)),
@@ -4099,6 +4123,9 @@ pub(crate) fn emit_tir_core_call(
         }
         ("core.data", "variance") => format!("{}(&({}))", helper("jet_data_variance"), arg(0)),
         ("core.data", "stddev") => format!("{}(&({}))", helper("jet_data_stddev"), arg(0)),
+        ("core.data", "rolling_mean") => {
+            format!("{}(&({}), {})", helper("jet_data_rolling_mean"), arg(0), arg(1))
+        }
         ("core.data", "describe") => format!("{}(&({}))", helper("jet_data_describe"), arg(0)),
         ("core.data", "status") => format!("{}()", helper("jet_data_status")),
         ("core.data", "bar_text") => format!("{}(&({}))", helper("jet_data_bar_text"), arg(0)),

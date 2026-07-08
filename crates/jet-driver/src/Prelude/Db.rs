@@ -96,7 +96,7 @@ pub fn jet_db_query(handle: u64, sql: &str, params_wire: &str) -> String {
         let params = decode_params(params_wire);
         let param_refs: Vec<&dyn rusqlite::types::ToSql> =
             params.iter().map(|v| v as &dyn rusqlite::types::ToSql).collect();
-        let mut stmt = match conn.prepare(sql) {
+        let mut stmt = match conn.prepare_cached(sql) {
             Ok(s) => s,
             Err(e) => return format!("E:{}", e),
         };
@@ -150,7 +150,11 @@ pub fn jet_db_execute(handle: u64, sql: &str, params_wire: &str) -> String {
         let params = decode_params(params_wire);
         let param_refs: Vec<&dyn rusqlite::types::ToSql> =
             params.iter().map(|v| v as &dyn rusqlite::types::ToSql).collect();
-        match conn.execute(sql, param_refs.as_slice()) {
+        let mut stmt = match conn.prepare_cached(sql) {
+            Ok(s) => s,
+            Err(e) => return format!("E:{}", e),
+        };
+        match stmt.execute(param_refs.as_slice()) {
             Ok(n) => format!("O:{}", n),
             Err(e) => format!("E:{}", e),
         }

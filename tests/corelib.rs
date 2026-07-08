@@ -638,9 +638,17 @@ struct Ticket {
     minutes: Float
 }
 
+@Codable
+struct Budget {
+    team: String
+    owner: String
+}
+
 fn run() {
     raw :: "team,minutes\nCore,4.0\nTools,5.0\nCore,8.0\nTools,7.0"
     rows :: data.csv<Ticket>(raw) ?? panic("bad csv")
+    budget_raw :: "team,owner\nCore,Ada\nTools,Grace"
+    budgets :: data.csv<Budget>(budget_raw) ?? panic("bad budget")
     print(data.count(rows))
     groups :: data.group_mean(rows, (t) => t.team, (t) => t.minutes)
     loop g in groups {
@@ -649,6 +657,12 @@ fn run() {
     values :: [2.0, 4.0, 6.0]
     print(data.sum(values))
     print(data.mean(values))
+    joined :: data.inner_join(rows, budgets, (t) => t.team, (b) => b.team)
+    print(data.bar_text(joined))
+    pivot :: data.pivot_sum(rows, (t) => t.team, (t) => if t.minutes >= 6.0 { "long" } else { "short" }, (t) => t.minutes)
+    print(data.bar_text(pivot))
+    rolling :: data.rolling_mean([2.0, 4.0, 6.0], 2)
+    print(rolling[2])
     counts :: data.group_count(rows, (t) => t.team)
     print(data.bar_text(counts))
     print(data.bar_svg(counts).len())
@@ -662,7 +676,7 @@ fn run() {
     assert_eq!(code, 0, "core.data program failed: {stderr}");
     assert_eq!(
         stdout,
-        "4\nCore:2:12.0:6.0\nTools:2:12.0:6.0\n12.0\n4.0\nCore | ## 2\nTools | ## 2\n531\ncore.data.csv:native\n"
+        "4\nCore:2:12.0:6.0\nTools:2:12.0:6.0\n12.0\n4.0\nCore | ## 2\nTools | ## 2\nCore|long | # 1\nCore|short | # 1\nTools|long | # 1\nTools|short | # 1\n5.0\nCore | ## 2\nTools | ## 2\n531\ncore.data.csv:native\n"
     );
     let _ = fs::remove_dir_all(&dir);
 }
