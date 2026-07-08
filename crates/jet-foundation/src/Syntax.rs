@@ -1743,6 +1743,10 @@ pub const OS_VM_ACTION_RUN: &str = "run";
 pub const OS_VM_ACTION_TEST: &str = "test";
 /// D-JOS-STUDIO-LAUNCH1=A / D-JOS-STUDIO-HOST1=A: `jetos studio`.
 pub const STUDIO_SUBCOMMAND: &str = "studio";
+/// D-JOS-USERAPPLY1=A: standalone user-profile management entrypoint.
+pub const USER_SUBCOMMAND: &str = "user";
+/// D-JOS-USERAPPLY1=A: standalone user-profile verbs.
+pub const USER_VERBS: &[&str] = &["plan", "build", "switch", "rollback", "prove"];
 /// D-JOS-STUDIO-HOST1=A: headless review mode over the same local protocol.
 pub const STUDIO_FLAG_HEADLESS: &str = "--headless";
 /// D-JOS-STUDIO-HOST1=A: serve browser fallback over local projection protocol.
