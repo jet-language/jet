@@ -89,7 +89,9 @@ fn build_generation(
             .iter()
             .any(|entry| entry.name == SYSTEMD_INIT_PACKAGE)
     {
-        let Some(raw) = first_party_package_ref(&plan.table, SYSTEMD_INIT_PACKAGE) else {
+        let Some(raw) =
+            jetos_runtime_package_ref(&plan.table, SYSTEMD_INIT_PACKAGE, flags.offline)
+        else {
             theme.error_coded(
                 "E1281",
                 "jetos systemd init package is missing",
@@ -130,7 +132,7 @@ fn build_generation(
         if realized.iter().any(|entry| entry.name == *package) {
             continue;
         }
-        let Some(raw) = first_party_package_ref(&plan.table, package) else {
+        let Some(raw) = jetos_runtime_package_ref(&plan.table, package, flags.offline) else {
             theme.error_coded(
                 "E1288",
                 "jetos GNOME desktop package is missing",

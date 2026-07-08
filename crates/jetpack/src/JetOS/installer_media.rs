@@ -13,7 +13,7 @@ fn write_installer_media(
     fs::create_dir_all(staging.join("boot"))?;
     fs::create_dir_all(staging.join("install"))?;
     fs::create_dir_all(staging.join("jetos"))?;
-    copy_dir_recursive_deref(&gen.path, &staging.join("jetos/current-system")).map_err(|e| {
+    copy_generation_payload_deref(&gen.path, &staging.join("jetos/current-system")).map_err(|e| {
         std::io::Error::new(
             e.kind(),
             format!(
@@ -30,22 +30,20 @@ fn write_installer_media(
         staging.join("boot/installed-limine.conf"),
         render_installed_limine_conf(system, gen),
     )?;
-    copy_file_replace(&gen.path.join("boot/kernel"), &staging.join("boot/kernel")).map_err(
-        |e| {
+    copy_runtime_file_filtered(&gen.path.join("boot/kernel"), &staging.join("boot/kernel"))
+        .map_err(|e| {
             std::io::Error::new(
                 e.kind(),
                 format!("copying installer kernel failed: {e}"),
             )
-        },
-    )?;
-    copy_file_replace(&gen.path.join("boot/initrd"), &staging.join("boot/initrd")).map_err(
-        |e| {
+        })?;
+    copy_initrd_runtime_filtered(&gen.path.join("boot/initrd"), &staging.join("boot/initrd"))
+        .map_err(|e| {
             std::io::Error::new(
                 e.kind(),
                 format!("copying installer initrd failed: {e}"),
             )
-        },
-    )?;
+        })?;
     append_installer_initrd_overlay(&staging.join("boot/initrd"), system, gen).map_err(|e| {
         std::io::Error::new(
             e.kind(),
@@ -117,6 +115,70 @@ fn write_installer_media(
     Ok(proof)
 }
 
+fn copy_generation_payload_deref(src: &Path, dst: &Path) -> std::io::Result<()> {
+    fs::create_dir_all(dst)?;
+    let mut entries = fs::read_dir(src)?
+        .filter_map(Result::ok)
+        .collect::<Vec<_>>();
+    entries.sort_by_key(|entry| entry.file_name());
+    for entry in entries {
+        if entry.file_name() == "root" {
+            continue;
+        }
+        let path = entry.path();
+        let target = dst.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_dir_recursive_deref(&path, &target)?;
+        } else {
+            copy_runtime_file_filtered(&path, &target)?;
+        }
+    }
+    Ok(())
+}
+
+fn copy_initrd_runtime_filtered(src: &Path, dst: &Path) -> std::io::Result<()> {
+    let bytes = fs::read(src)?;
+    if installer_initrd_is_zstd_stream(&bytes) {
+        if let Some(zstd) = find_path_tool("zstd") {
+            let decompressed = Command::new(&zstd).args(["-d", "-q", "-c"]).arg(src).output()?;
+            if decompressed.status.success() {
+                let mut plain = decompressed.stdout;
+                if let Some(sanitized) = sanitize_runtime_branding_bytes(&plain) {
+                    plain = sanitized;
+                }
+                let mut child = Command::new(zstd)
+                    .args(["-q", "-c"])
+                    .stdin(Stdio::piped())
+                    .stdout(Stdio::piped())
+                    .spawn()?;
+                {
+                    use std::io::Write;
+                    let stdin = child.stdin.as_mut().ok_or_else(|| {
+                        std::io::Error::new(
+                            std::io::ErrorKind::BrokenPipe,
+                            "could not open zstd stdin",
+                        )
+                    })?;
+                    stdin.write_all(&plain)?;
+                }
+                let compressed = child.wait_with_output()?;
+                if compressed.status.success() {
+                    if let Some(parent) = dst.parent() {
+                        fs::create_dir_all(parent)?;
+                    }
+                    fs::write(dst, compressed.stdout)?;
+                    return Ok(());
+                }
+            }
+        }
+    }
+    copy_runtime_file_filtered(src, dst)
+}
+
+fn installer_initrd_is_zstd_stream(bytes: &[u8]) -> bool {
+    bytes.starts_with(&[0x28, 0xb5, 0x2f, 0xfd])
+}
+
 fn write_image_variant_artifacts(
     gen: &Generation,
     system: &SystemPlan,
@@ -157,8 +219,8 @@ fn write_image_variant_artifacts(
         128 * 1024 * 1024,
         &format!("JETOS-SD\nhost={host}\ngeneration={}\n", gen.name),
     )?;
-    copy_file_replace(&gen.path.join("boot/kernel"), &netboot.join("vmlinuz"))?;
-    copy_file_replace(&gen.path.join("boot/initrd"), &netboot.join("initrd"))?;
+    copy_runtime_file_filtered(&gen.path.join("boot/kernel"), &netboot.join("vmlinuz"))?;
+    copy_initrd_runtime_filtered(&gen.path.join("boot/initrd"), &netboot.join("initrd"))?;
     fs::write(
         netboot.join("ipxe.conf"),
         format!(

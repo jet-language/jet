@@ -359,6 +359,12 @@ fn copy_runtime_file_filtered(src: &Path, dst: &Path) -> std::io::Result<()> {
 }
 
 fn sanitize_runtime_branding_file(path: &Path) -> std::io::Result<()> {
+    if fs::symlink_metadata(path)
+        .map(|meta| meta.file_type().is_symlink())
+        .unwrap_or(false)
+    {
+        return Ok(());
+    }
     let bytes = fs::read(path)?;
     if let Some(sanitized) = sanitize_runtime_branding_bytes(&bytes) {
         fs::write(path, sanitized)?;

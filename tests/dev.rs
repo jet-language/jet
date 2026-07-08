@@ -14,9 +14,11 @@
 use std::fs;
 use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
+mod common;
+use common::{panic_message, test_worker_count, FfiBridgeLock};
 use jet::Interpreter::{dev_iteration, RunOutcome};
 use jet::JitBackend::{InterpreterBackend, JitBackend};
 use jet_jit::CraneliftBackend;
@@ -53,6 +55,22 @@ fn host_expected_stdout(stem: &str) -> Option<&'static str> {
         "lowlevel/os_target_gating" if cfg!(target_os = "windows") => Some("windows: win32\n"),
         _ => None,
     }
+}
+
+fn uses_ffi_bridge(stem: &str) -> bool {
+    matches!(
+        stem,
+        "lowlevel/ffi"
+            | "io/archive"
+            | "io/db"
+            | "crypto/crypto_envelope"
+            | "crypto/crypto_sign"
+            | "crypto/crypto_migration"
+            | "crypto/crypto_suite"
+            | "crypto/vault_secret"
+            | "io/compress_gzip"
+            | "io/compress_zstd"
+    )
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -467,16 +485,157 @@ const DEFAULT_BACKEND_BOUNDARIES: &[&str] = &[
     // default dev path; skip before spawning the worker thread so the harness
     // does not wait for a panic that cannot send a RunOutcome.
     "tooling/data_pipeline",
+    // Native path walking touches host filesystem traversal that the default
+    // dev interpreter/JIT tier does not own today.
+    "io/path",
     // Native GTK backend is intentionally outside default dev's source-level
     // interpreter/JIT surface on this host.
     "ui/ui_native_linux",
 ];
+
+#[derive(Default, Clone, Copy)]
+struct DevBatteryStats {
+    ran: usize,
+    boundary: usize,
+    manifested: usize,
+}
+
+impl DevBatteryStats {
+    fn add(&mut self, other: DevBatteryStats) {
+        self.ran += other.ran;
+        self.boundary += other.boundary;
+        self.manifested += other.manifested;
+    }
+}
 
 fn is_named_dev_boundary(stem: &str, diags: &[jet::Diagnostics::Diagnostic]) -> bool {
     diags.iter().any(|d| BOUNDARY_CODES.contains(&d.code))
         // D-DBDRIVER1/D-DBMIGRATE1: the checked-SQL DB example is an AOT-backed
         // core.db surface today; the dev default tier stops before execution.
         || (stem == "io/db_checked_sql" && diags.iter().all(|d| d.code == "E1004"))
+}
+
+fn check_dev_default_stem(
+    i: usize,
+    stem: &str,
+    dir: &std::path::Path,
+    manifested_divergences: &[String],
+) -> DevBatteryStats {
+    let _ffi_lock = uses_ffi_bridge(stem).then(FfiBridgeLock::acquire);
+    let file = example_path(stem);
+    eprintln!("dev-default checking {stem}");
+    if DEFAULT_BACKEND_BOUNDARIES.contains(&stem) {
+        eprintln!("manifested default-backend boundary: {stem}");
+        return DevBatteryStats {
+            boundary: 1,
+            ..DevBatteryStats::default()
+        };
+    }
+
+    let interpreted = match dev_iteration_with_timeout(stem, &file, false) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => ProgramOutput::ran(stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => {
+            eprintln!(
+                "default boundary: {stem}: {}",
+                diags.iter().map(|d| d.code).collect::<Vec<_>>().join(",")
+            );
+            assert!(
+                is_named_dev_boundary(stem, &diags),
+                "`{}` neither ran nor stopped at a named boundary {:?} under the default \
+                 jet dev backend; codes were {:?}",
+                stem,
+                BOUNDARY_CODES,
+                diags.iter().map(|d| d.code).collect::<Vec<_>>()
+            );
+            return DevBatteryStats {
+                boundary: 1,
+                ..DevBatteryStats::default()
+            };
+        }
+    };
+
+    let compiled = compiled_binary_output(dir, "dev_default_diff", i, stem, &file);
+    let interpreted = normalize_for_parity(stem, interpreted);
+    let compiled = normalize_for_parity(stem, compiled);
+    if interpreted != compiled {
+        if is_manifested_parity_divergence(stem, manifested_divergences) {
+            eprintln!("manifested parity divergence: {stem}");
+            return DevBatteryStats {
+                ran: 1,
+                manifested: 1,
+                ..DevBatteryStats::default()
+            };
+        }
+        assert_eq!(
+            interpreted, compiled,
+            "DIVERGENCE for `{}` under the default jet dev backend: JIT/fallback and compiled \
+             binary disagree on stdout/stderr/exit code — this is a P0 miscompile",
+            stem
+        );
+    }
+    DevBatteryStats {
+        ran: 1,
+        ..DevBatteryStats::default()
+    }
+}
+
+fn run_dev_default_battery_parallel(
+    stems: Vec<String>,
+    dir: PathBuf,
+    manifested_divergences: Vec<String>,
+) -> DevBatteryStats {
+    let jobs = Arc::new(Mutex::new(
+        stems
+            .into_iter()
+            .enumerate()
+            .collect::<std::collections::VecDeque<_>>(),
+    ));
+    let dir = Arc::new(dir);
+    let manifested_divergences = Arc::new(manifested_divergences);
+    let failures = Arc::new(Mutex::new(Vec::<String>::new()));
+    let worker_count = test_worker_count(4);
+    let mut handles = Vec::new();
+    for _ in 0..worker_count {
+        let jobs = Arc::clone(&jobs);
+        let dir = Arc::clone(&dir);
+        let manifested_divergences = Arc::clone(&manifested_divergences);
+        let failures = Arc::clone(&failures);
+        handles.push(std::thread::spawn(move || {
+            let mut stats = DevBatteryStats::default();
+            loop {
+                let Some((i, stem)) = jobs.lock().unwrap().pop_front() else {
+                    break;
+                };
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    check_dev_default_stem(i, &stem, &dir, &manifested_divergences)
+                }));
+                match result {
+                    Ok(next) => stats.add(next),
+                    Err(payload) => failures
+                        .lock()
+                        .unwrap()
+                        .push(format!("{stem}: {}", panic_message(payload))),
+                }
+            }
+            stats
+        }));
+    }
+
+    let mut stats = DevBatteryStats::default();
+    for handle in handles {
+        stats.add(handle.join().expect("dev default worker panicked outside harness"));
+    }
+    let failures = failures.lock().unwrap();
+    assert!(
+        failures.is_empty(),
+        "dev default parity failures:\n{}",
+        failures.join("\n\n")
+    );
+    stats
 }
 
 /// c77 widened battery: EVERY example either runs (interpreted stdout/stderr/exit
@@ -576,80 +735,26 @@ fn dev_default_matches_compiled_binary() {
     let dir = std::env::temp_dir().join(format!("jet_dev_default_diff_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
     let (_, _, manifested_divergences) = parse_jit_gap_manifest();
-    let mut ran = 0usize;
-    let mut boundary = 0usize;
-    let mut manifested = 0usize;
-    for (i, stem) in all_example_stems().iter().enumerate() {
-        let file = example_path(stem);
-        eprintln!("dev-default checking {stem}");
-        if DEFAULT_BACKEND_BOUNDARIES.contains(&stem.as_str()) {
-            boundary += 1;
-            eprintln!("manifested default-backend boundary: {stem}");
-            continue;
-        }
-
-        let interpreted = match dev_iteration_with_timeout(stem, &file, false) {
-            RunOutcome::Ran {
-                stdout,
-                stderr,
-                exit_code,
-            } => ProgramOutput::ran(stdout, stderr, exit_code),
-            RunOutcome::Problems(diags) => {
-                eprintln!(
-                    "default boundary: {stem}: {}",
-                    diags.iter().map(|d| d.code).collect::<Vec<_>>().join(",")
-                );
-                assert!(
-                    is_named_dev_boundary(&stem, &diags),
-                    "`{}` neither ran nor stopped at a named boundary {:?} under the default \
-                     jet dev backend; codes were {:?}",
-                    stem,
-                    BOUNDARY_CODES,
-                    diags.iter().map(|d| d.code).collect::<Vec<_>>()
-                );
-                boundary += 1;
-                continue;
-            }
-        };
-        ran += 1;
-
-        let compiled = compiled_binary_output(&dir, "dev_default_diff", i, stem, &file);
-
-        let interpreted = normalize_for_parity(stem, interpreted);
-        let compiled = normalize_for_parity(stem, compiled);
-        if interpreted != compiled {
-            if is_manifested_parity_divergence(stem, &manifested_divergences) {
-                manifested += 1;
-                eprintln!("manifested parity divergence: {stem}");
-                continue;
-            }
-            assert_eq!(
-                interpreted, compiled,
-                "DIVERGENCE for `{}` under the default jet dev backend: JIT/fallback and compiled \
-                 binary disagree on stdout/stderr/exit code — this is a P0 miscompile",
-                stem
-            );
-        }
-    }
+    let stats = run_dev_default_battery_parallel(all_example_stems(), dir, manifested_divergences);
     eprintln!(
         "c125 default-backend battery: {} ran ({} default==compiled, {} manifested divergences), {} boundary-asserted, {} total",
-        ran,
-        ran - manifested,
-        manifested,
-        boundary,
-        ran + boundary
+        stats.ran,
+        stats.ran - stats.manifested,
+        stats.manifested,
+        stats.boundary,
+        stats.ran + stats.boundary
     );
     assert!(
-        ran > 0,
+        stats.ran > 0,
         "expected at least some examples to run via the default jet dev backend"
     );
     assert_eq!(
-        boundary,
+        stats.boundary,
         DEFAULT_BACKEND_BOUNDARIES.len(),
         "default jet dev boundary set must stay explicit and narrow"
     );
     assert_eq!(
-        manifested, 0,
+        stats.manifested, 0,
         "default jet dev must not carry manifested stdout/stderr/exit-code divergences"
     );
 }

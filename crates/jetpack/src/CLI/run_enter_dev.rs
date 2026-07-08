@@ -20,6 +20,8 @@ fn cmd_run(theme: &Theme, parsed: &Parsed) -> i32 {
                     adapters: Vec::new(),
                     table: cwd_table(),
                     label: Syntax::JETPACK_PROMPT_LABEL.to_string(),
+                    prompt_path: ModuleEval::PromptPathMode::default(),
+                    prompt_strip: ModuleEval::PromptStripMode::default(),
                     dev_services: Vec::new(),
                     secrets: Vec::new(),
                 }
@@ -138,6 +140,8 @@ fn cmd_enter(theme: &Theme, parsed: &Parsed) -> i32 {
             adapters: Vec::new(),
             table: RefSpec::SourceTable::empty(),
             label: Syntax::JETPACK_PROMPT_LABEL.to_string(),
+            prompt_path: ModuleEval::PromptPathMode::default(),
+            prompt_strip: ModuleEval::PromptStripMode::default(),
             dev_services: Vec::new(),
             secrets: Vec::new(),
         }

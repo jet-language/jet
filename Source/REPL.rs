@@ -161,6 +161,24 @@ pub struct Session {
     /// `run_repl_step` so the comptime interpreter can execute whitelisted
     /// pure Core calls (e.g. `math.sqrt(16.0)`) inline instead of E0956.
     pub core_imports: HashMap<String, String>,
+    /// Notebook controls state: every accepted input gets an addressable turn.
+    pub turns: Vec<ReplTurn>,
+}
+
+#[derive(Clone)]
+pub struct ReplTurn {
+    pub id: usize,
+    pub input: String,
+    pub summary: String,
+    pub status: ReplTurnStatus,
+    pub folded: bool,
+    pub pinned: bool,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ReplTurnStatus {
+    Ok,
+    Error,
 }
 
 impl Default for Session {
@@ -182,6 +200,7 @@ impl Session {
             moved_names: HashSet::new(),
             stmt_srcs: Vec::new(),
             core_imports: HashMap::new(),
+            turns: Vec::new(),
         }
     }
 
@@ -195,7 +214,20 @@ impl Session {
         self.moved_names.clear();
         self.stmt_srcs.clear();
         self.core_imports.clear();
+        self.turns.clear();
         // Keep shown_preload_note — no need to repeat the teaching note.
+    }
+
+    fn record_turn(&mut self, input: &str, status: ReplTurnStatus, summary: String) {
+        let id = self.turns.len() + 1;
+        self.turns.push(ReplTurn {
+            id,
+            input: input.to_string(),
+            summary: turn_summary(&summary),
+            status,
+            folded: summary.lines().count() > 6 || summary.len() > 240,
+            pinned: false,
+        });
     }
 
     /// Build the accumulated item declarations source text (functions, structs…).
@@ -282,6 +314,98 @@ impl Session {
         };
         self.binding_srcs.push(format!("{}{}", name, type_and_val));
     }
+}
+
+fn turn_summary(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        "ok".to_string()
+    } else {
+        trimmed
+            .lines()
+            .next()
+            .unwrap_or("ok")
+            .chars()
+            .take(96)
+            .collect()
+    }
+}
+
+fn parse_turn_id(arg: Option<&str>) -> Result<usize, String> {
+    let Some(arg) = arg else {
+        return Err("usage: turn command needs a turn id".to_string());
+    };
+    let id = arg
+        .trim()
+        .parse::<usize>()
+        .map_err(|_| format!("`{arg}` is not a turn id"))?;
+    if id == 0 {
+        Err("turn ids start at 1".to_string())
+    } else {
+        Ok(id)
+    }
+}
+
+fn status_word(status: ReplTurnStatus) -> &'static str {
+    match status {
+        ReplTurnStatus::Ok => "ok",
+        ReplTurnStatus::Error => "error",
+    }
+}
+
+fn render_turns(session: &Session, color: bool) {
+    if !color {
+        print!("{}", render_turns_text(session));
+        return;
+    }
+    if session.turns.is_empty() {
+        println!("no turns yet");
+        return;
+    }
+    for turn in &session.turns {
+        let pin = if turn.pinned { " pinned" } else { "" };
+        let fold = if turn.folded { " folded" } else { "" };
+        println!(
+            "{} {}{}{}  {}",
+            bold(&format!("#{}", turn.id), color),
+            status_word(turn.status),
+            pin,
+            fold,
+            turn.summary
+        );
+    }
+}
+
+fn render_turns_text(session: &Session) -> String {
+    if session.turns.is_empty() {
+        return "no turns yet\n".to_string();
+    }
+    let mut out = String::new();
+    for turn in &session.turns {
+        let pin = if turn.pinned { " pinned" } else { "" };
+        let fold = if turn.folded { " folded" } else { "" };
+        out.push_str(&format!(
+            "#{} {}{}{}  {}\n",
+            turn.id,
+            status_word(turn.status),
+            pin,
+            fold,
+            turn.summary
+        ));
+    }
+    out
+}
+
+fn set_turn_flag(session: &mut Session, id: usize, flag: &str, value: bool) -> Result<(), String> {
+    let Some(turn) = session.turns.iter_mut().find(|t| t.id == id) else {
+        return Err(format!("turn #{id} does not exist"));
+    };
+    match flag {
+        "folded" => turn.folded = value,
+        "pinned" => turn.pinned = value,
+        _ => {}
+    }
+    Ok(())
 }
 
 // ── move detection (D-REPL8=A) ─────────────────────────────────────────────
@@ -1239,6 +1363,14 @@ pub fn run(project_dir: Option<&str>) -> i32 {
             Ok(k) => k,
             Err(ds) => {
                 render_diags(&step_src, trimmed, &ds, color);
+                session.record_turn(
+                    trimmed,
+                    ReplTurnStatus::Error,
+                    ds.iter()
+                        .map(|d| format!("{}: {}", d.code, d.what))
+                        .collect::<Vec<_>>()
+                        .join("; "),
+                );
                 continue;
             }
         };
@@ -1253,17 +1385,28 @@ pub fn run(project_dir: Option<&str>) -> i32 {
             InputKind::Reject(feature) => {
                 let d = e1802(&feature);
                 render_diags(&step_src, trimmed, &[d], color);
+                session.record_turn(trimmed, ReplTurnStatus::Error, "E1802".to_string());
             }
 
             InputKind::Item(src) => {
                 let errors = type_check_item(&session, &src);
                 if !errors.is_empty() {
                     render_diags(&step_src, trimmed, &errors, color);
+                    session.record_turn(
+                        trimmed,
+                        ReplTurnStatus::Error,
+                        errors
+                            .iter()
+                            .map(|d| format!("{}: {}", d.code, d.what))
+                            .collect::<Vec<_>>()
+                            .join("; "),
+                    );
                     continue;
                 }
                 session.item_srcs.push(src);
                 rebuild_funcs(&mut session);
                 println!("{}", green("ok", color));
+                session.record_turn(trimmed, ReplTurnStatus::Ok, "ok".to_string());
             }
 
             InputKind::Import(src) => {
@@ -1274,18 +1417,37 @@ pub fn run(project_dir: Option<&str>) -> i32 {
                 if !errors.is_empty() {
                     session.import_srcs.pop();
                     render_diags(&step_src, trimmed, &errors, color);
+                    session.record_turn(
+                        trimmed,
+                        ReplTurnStatus::Error,
+                        errors
+                            .iter()
+                            .map(|d| format!("{}: {}", d.code, d.what))
+                            .collect::<Vec<_>>()
+                            .join("; "),
+                    );
                     continue;
                 }
                 // D-CTCORE1: register any core alias → module path so the
                 // comptime interpreter can execute whitelisted pure Core calls.
                 update_core_imports(&src, &mut session.core_imports);
                 println!("{}", green("ok", color));
+                session.record_turn(trimmed, ReplTurnStatus::Ok, "ok".to_string());
             }
 
             InputKind::Stmts(stmts, suppress, check_src) => {
                 let errors = type_check_stmts(&session, &check_src, session.step);
                 if !errors.is_empty() {
                     render_diags(&step_src, trimmed, &errors, color);
+                    session.record_turn(
+                        trimmed,
+                        ReplTurnStatus::Error,
+                        errors
+                            .iter()
+                            .map(|d| format!("{}: {}", d.code, d.what))
+                            .collect::<Vec<_>>()
+                            .join("; "),
+                    );
                     continue;
                 }
 
@@ -1315,6 +1477,7 @@ pub fn run(project_dir: Option<&str>) -> i32 {
                     &session.core_imports,
                 ) {
                     Ok(echo_val) => {
+                        let mut summary = String::new();
                         // Track moves: bindings consumed in this input are gone.
                         session.moved_names.extend(newly_moved);
                         // Record stmt source for :run materialization.
@@ -1338,15 +1501,20 @@ pub fn run(project_dir: Option<&str>) -> i32 {
                         }
                         if !sink.stdout.is_empty() {
                             print!("{}", sink.stdout);
+                            summary.push_str(&sink.stdout);
                         }
                         if !sink.stderr.is_empty() {
                             eprint!("{}", sink.stderr);
+                            summary.push_str(&sink.stderr);
                         }
                         if let Some(v) = echo_val {
                             if !matches!(v, CtValue::Unit) {
-                                println!("{}", display_value(&v));
+                                let shown = display_value(&v);
+                                println!("{}", shown);
+                                summary.push_str(&shown);
                             }
                         }
+                        session.record_turn(trimmed, ReplTurnStatus::Ok, summary);
                     }
                     Err(d) => {
                         let d = if d.code == "E2202" {
@@ -1354,7 +1522,12 @@ pub fn run(project_dir: Option<&str>) -> i32 {
                         } else {
                             d
                         };
-                        render_diags(&step_src, trimmed, &[d], color);
+                        render_diags(&step_src, trimmed, std::slice::from_ref(&d), color);
+                        session.record_turn(
+                            trimmed,
+                            ReplTurnStatus::Error,
+                            format!("{}: {}", d.code, d.what),
+                        );
                     }
                 }
             }
@@ -1401,6 +1574,48 @@ fn handle_meta(cmd: &str, arg: Option<&str>, session: &mut Session, base_dir: &P
             let mut stdout = io::stdout();
             cmd_run_native(session, color, &mut stdout);
         }
+        "turns" => render_turns(session, color),
+        "fold" => match parse_turn_id(arg).and_then(|id| set_turn_flag(session, id, "folded", true))
+        {
+            Ok(()) => println!("turn folded"),
+            Err(msg) => eprintln!("{msg}"),
+        },
+        "unfold" => {
+            match parse_turn_id(arg).and_then(|id| set_turn_flag(session, id, "folded", false)) {
+                Ok(()) => println!("turn unfolded"),
+                Err(msg) => eprintln!("{msg}"),
+            }
+        }
+        "pin" => match parse_turn_id(arg).and_then(|id| set_turn_flag(session, id, "pinned", true))
+        {
+            Ok(()) => println!("turn pinned"),
+            Err(msg) => eprintln!("{msg}"),
+        },
+        "unpin" => {
+            match parse_turn_id(arg).and_then(|id| set_turn_flag(session, id, "pinned", false)) {
+                Ok(()) => println!("turn unpinned"),
+                Err(msg) => eprintln!("{msg}"),
+            }
+        }
+        "rerun" => match parse_turn_id(arg) {
+            Ok(id) => {
+                if let Some(input) = session.turns.iter().find(|t| t.id == id).map(|t| t.input.clone()) {
+                    println!("{}", dim(&format!("rerun #{id}: {input}"), color));
+                    let preview = run_transcript(&[input.as_str()], None);
+                    print!("{preview}");
+                } else {
+                    eprintln!("turn #{id} does not exist");
+                }
+            }
+            Err(msg) => eprintln!("{msg}"),
+        },
+        "?" => {
+            if let Some(name) = arg {
+                cmd_type(name, session, color);
+            } else {
+                print_help(color);
+            }
+        }
         "help" => print_help(color),
         _ => {
             eprintln!(
@@ -1430,6 +1645,26 @@ fn print_help(color: bool) {
     println!(
         "  {}           compile + run the session (bypasses fuel cap)",
         bold(":run", color)
+    );
+    println!(
+        "  {}         list notebook turns, status, pins, and folds",
+        bold(":turns", color)
+    );
+    println!(
+        "  {}       rerun a prior turn as a preview",
+        bold(":rerun <id>", color)
+    );
+    println!(
+        "  {}        fold or unfold a turn's output summary",
+        bold(":fold <id>", color)
+    );
+    println!(
+        "  {}         pin or unpin a turn in the notebook rail",
+        bold(":pin <id>", color)
+    );
+    println!(
+        "  {}         show docs/type info for a name",
+        bold(":? <name>", color)
     );
     println!("  {}          show this message", bold(":help", color));
     println!();
@@ -1484,6 +1719,14 @@ pub fn run_transcript(inputs: &[&str], project_dir: Option<&str>) -> String {
                 for d in &ds {
                     out.push_str(&format!("error [{}]: {}\n", d.code, d.what));
                 }
+                session.record_turn(
+                    trimmed,
+                    ReplTurnStatus::Error,
+                    ds.iter()
+                        .map(|d| format!("{}: {}", d.code, d.what))
+                        .collect::<Vec<_>>()
+                        .join("; "),
+                );
                 continue;
             }
         };
@@ -1538,6 +1781,68 @@ pub fn run_transcript(inputs: &[&str], project_dir: Option<&str>) -> String {
                         let run_out = cmd_run_transcript(&session);
                         out.push_str(&run_out);
                     }
+                    "turns" => out.push_str(&render_turns_text(&session)),
+                    "fold" => {
+                        match parse_turn_id(arg.as_deref())
+                            .and_then(|id| set_turn_flag(&mut session, id, "folded", true))
+                        {
+                            Ok(()) => out.push_str("turn folded\n"),
+                            Err(msg) => out.push_str(&format!("{msg}\n")),
+                        }
+                    }
+                    "unfold" => {
+                        match parse_turn_id(arg.as_deref())
+                            .and_then(|id| set_turn_flag(&mut session, id, "folded", false))
+                        {
+                            Ok(()) => out.push_str("turn unfolded\n"),
+                            Err(msg) => out.push_str(&format!("{msg}\n")),
+                        }
+                    }
+                    "pin" => {
+                        match parse_turn_id(arg.as_deref())
+                            .and_then(|id| set_turn_flag(&mut session, id, "pinned", true))
+                        {
+                            Ok(()) => out.push_str("turn pinned\n"),
+                            Err(msg) => out.push_str(&format!("{msg}\n")),
+                        }
+                    }
+                    "unpin" => {
+                        match parse_turn_id(arg.as_deref())
+                            .and_then(|id| set_turn_flag(&mut session, id, "pinned", false))
+                        {
+                            Ok(()) => out.push_str("turn unpinned\n"),
+                            Err(msg) => out.push_str(&format!("{msg}\n")),
+                        }
+                    }
+                    "rerun" => match parse_turn_id(arg.as_deref()) {
+                        Ok(id) => {
+                            if let Some(input) =
+                                session.turns.iter().find(|t| t.id == id).map(|t| t.input.clone())
+                            {
+                                out.push_str(&format!("rerun #{id}: {input}\n"));
+                                out.push_str(&run_transcript(&[input.as_str()], project_dir));
+                            } else {
+                                out.push_str(&format!("turn #{id} does not exist\n"));
+                            }
+                        }
+                        Err(msg) => out.push_str(&format!("{msg}\n")),
+                    },
+                    "?" => {
+                        if let Some(name) = arg.as_deref() {
+                            if let Some(v) = session.scope.get(name) {
+                                out.push_str(&format!("{} : {}\n", name, type_name(v)));
+                            } else if session.func_defs.contains_key(name) {
+                                out.push_str(&format!("{} : fn\n", name));
+                            } else {
+                                out.push_str(&format!(
+                                    "note: `{}` isn't defined in this session\n",
+                                    name
+                                ));
+                            }
+                        } else {
+                            out.push_str("REPL meta-commands\n");
+                        }
+                    }
                     "help" => out.push_str("REPL meta-commands\n"),
                     _ => out.push_str(&format!("unknown meta-command `:{}`\n", cmd)),
                 }
@@ -1546,6 +1851,7 @@ pub fn run_transcript(inputs: &[&str], project_dir: Option<&str>) -> String {
             InputKind::Reject(feature) => {
                 let d = e1802(&feature);
                 out.push_str(&format!("error [E1802]: {}\n", d.what));
+                session.record_turn(trimmed, ReplTurnStatus::Error, "E1802".to_string());
             }
 
             InputKind::Item(src) => {
@@ -1554,11 +1860,21 @@ pub fn run_transcript(inputs: &[&str], project_dir: Option<&str>) -> String {
                     for d in &errors {
                         out.push_str(&format!("error [{}]: {}\n", d.code, d.what));
                     }
+                    session.record_turn(
+                        trimmed,
+                        ReplTurnStatus::Error,
+                        errors
+                            .iter()
+                            .map(|d| format!("{}: {}", d.code, d.what))
+                            .collect::<Vec<_>>()
+                            .join("; "),
+                    );
                     continue;
                 }
                 session.item_srcs.push(src);
                 rebuild_funcs(&mut session);
                 out.push_str("ok\n");
+                session.record_turn(trimmed, ReplTurnStatus::Ok, "ok".to_string());
             }
 
             InputKind::Import(src) => {
@@ -1569,12 +1885,22 @@ pub fn run_transcript(inputs: &[&str], project_dir: Option<&str>) -> String {
                     for d in &errors {
                         out.push_str(&format!("error [{}]: {}\n", d.code, d.what));
                     }
+                    session.record_turn(
+                        trimmed,
+                        ReplTurnStatus::Error,
+                        errors
+                            .iter()
+                            .map(|d| format!("{}: {}", d.code, d.what))
+                            .collect::<Vec<_>>()
+                            .join("; "),
+                    );
                     continue;
                 }
                 // D-CTCORE1: register any core alias → module path so the
                 // comptime interpreter can execute whitelisted pure Core calls.
                 update_core_imports(&src, &mut session.core_imports);
                 out.push_str("ok\n");
+                session.record_turn(trimmed, ReplTurnStatus::Ok, "ok".to_string());
             }
 
             InputKind::Stmts(stmts, suppress, check_src) => {
@@ -1583,6 +1909,15 @@ pub fn run_transcript(inputs: &[&str], project_dir: Option<&str>) -> String {
                     for d in &errors {
                         out.push_str(&format!("error [{}]: {}\n", d.code, d.what));
                     }
+                    session.record_turn(
+                        trimmed,
+                        ReplTurnStatus::Error,
+                        errors
+                            .iter()
+                            .map(|d| format!("{}: {}", d.code, d.what))
+                            .collect::<Vec<_>>()
+                            .join("; "),
+                    );
                     continue;
                 }
 
@@ -1611,6 +1946,7 @@ pub fn run_transcript(inputs: &[&str], project_dir: Option<&str>) -> String {
                     &session.core_imports,
                 ) {
                     Ok(echo_val) => {
+                        let mut summary = String::new();
                         // Track moves for cross-input detection (D-REPL8=A).
                         session.moved_names.extend(newly_moved);
                         // Record stmt source for :run materialization.
@@ -1634,15 +1970,20 @@ pub fn run_transcript(inputs: &[&str], project_dir: Option<&str>) -> String {
                         }
                         if !sink.stdout.is_empty() {
                             out.push_str(&sink.stdout);
+                            summary.push_str(&sink.stdout);
                         }
                         if !sink.stderr.is_empty() {
                             out.push_str(&sink.stderr);
+                            summary.push_str(&sink.stderr);
                         }
                         if let Some(v) = echo_val {
                             if !matches!(v, CtValue::Unit) {
-                                out.push_str(&format!("{}\n", display_value(&v)));
+                                let shown = display_value(&v);
+                                out.push_str(&format!("{}\n", shown));
+                                summary.push_str(&shown);
                             }
                         }
+                        session.record_turn(trimmed, ReplTurnStatus::Ok, summary);
                     }
                     Err(d) => {
                         let d = if d.code == "E2202" {
@@ -1651,6 +1992,11 @@ pub fn run_transcript(inputs: &[&str], project_dir: Option<&str>) -> String {
                             d
                         };
                         out.push_str(&format!("error [{}]: {}\n", d.code, d.what));
+                        session.record_turn(
+                            trimmed,
+                            ReplTurnStatus::Error,
+                            format!("{}: {}", d.code, d.what),
+                        );
                     }
                 }
             }

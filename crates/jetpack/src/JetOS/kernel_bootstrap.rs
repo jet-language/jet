@@ -83,7 +83,7 @@ fn jetos_bootstrap_path() -> String {
     if existing.is_empty() {
         defaults.to_string()
     } else {
-        format!("{existing}:{defaults}")
+        format!("{defaults}:{existing}")
     }
 }
 

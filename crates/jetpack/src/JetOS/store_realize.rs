@@ -6,6 +6,18 @@ fn first_party_package_ref(table: &RefSpec::SourceTable, package: &str) -> Optio
         .map(|(name, _, _)| format!("{name}:{package}"))
 }
 
+fn jetos_runtime_package_ref(
+    table: &RefSpec::SourceTable,
+    package: &str,
+    offline: bool,
+) -> Option<String> {
+    if offline {
+        first_party_package_ref(table, package)
+    } else {
+        Some(format!("nixpkgs:{package}"))
+    }
+}
+
 fn desktop_default_required_packages(system: &SystemPlan) -> &'static [&'static str] {
     let requested = option_value(
         system,

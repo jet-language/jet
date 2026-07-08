@@ -99,8 +99,11 @@ update docs touched → done means: tests pass, docs match behavior, no
 invariant bent.
 
 While iterating, run targeted tests (`cargo test --test <name>`); run the
-full suite once at the end of a card, before claiming done. Never trust a
-sub-agent's "green" — re-run yourself.
+full suite once at the end of a card, before claiming done:
+`nix develop -c scripts/agent/verify-full.sh`. This keeps the suite parallel
+and uses a repo-local `TMPDIR`; do not add global `-- --test-threads=1`
+unless you are reproducing a specific race. Never trust a sub-agent's "green"
+— re-run yourself.
 
 ## Syntax decision protocol
 

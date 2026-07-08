@@ -1,6 +1,7 @@
 struct StudioContext {
     config: PathBuf,
     host: String,
+    offline: bool,
 }
 
 fn studio_host(parsed: &Parsed) -> Option<String> {
@@ -20,7 +21,12 @@ fn studio_context(parsed: &Parsed) -> Option<StudioContext> {
         project
     };
     let host = studio_host(parsed).unwrap_or_else(|| "host".to_string());
-    Some(StudioContext { config, host })
+    let offline = parsed.flags.offline || !Provider::nix_on_path();
+    Some(StudioContext {
+        config,
+        host,
+        offline,
+    })
 }
 
 fn serve_studio(

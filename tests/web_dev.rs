@@ -229,12 +229,19 @@ fn jet_dev_web_serves_and_rebuilds_on_save() {
         http_get(port, "/__jet_dev_version").expect("GET /__jet_dev_version failed");
     assert_eq!(status, 200);
     let baseline_version = String::from_utf8_lossy(&version_body).trim().to_string();
+    let (status, status_body) =
+        http_get(port, "/__jet_dev_status").expect("GET /__jet_dev_status failed");
+    assert_eq!(status, 200);
+    let status_text = String::from_utf8_lossy(&status_body);
+    assert!(status_text.contains("\"state\":\"ready\""), "{status_text}");
+    assert!(status_text.contains("\"clients\":"), "{status_text}");
 
     // index.html should carry the injected live-reload poller.
     let (status, html_body) = http_get(port, "/").expect("GET / failed");
     assert_eq!(status, 200);
+    let html = String::from_utf8_lossy(&html_body);
     assert!(
-        String::from_utf8_lossy(&html_body).contains("__jet_dev_version"),
+        html.contains("__jet_dev_status") && html.contains("Build failed"),
         "served index.html should have the live-reload script injected"
     );
 
@@ -307,6 +314,11 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(html.contains("id=\"project-panel\""));
     assert!(html.contains("id=\"project-rail\""));
     assert!(html.contains("id=\"project-mode\""));
+    assert!(html.contains("id=\"package-summary\""));
+    assert!(html.contains("id=\"dependency-summary\""));
+    assert!(html.contains("id=\"dev-summary\""));
+    assert!(html.contains("id=\"diagnostics-summary\""));
+    assert!(html.contains("id=\"trust-summary\""));
     assert!(html.contains("id=\"canvas-dock\""));
     assert!(html.contains("id=\"graph-strip\""));
     assert!(html.contains("id=\"wire-status\""));
@@ -331,6 +343,16 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(html.contains("id=\"graph-forward\""));
     assert!(html.contains("id=\"source-diff\""));
     assert!(html.contains("id=\"view-toggle\""));
+    assert!(html.contains("id=\"lens-switch\""));
+    assert!(html.contains("id=\"view-code\""));
+    assert!(html.contains("id=\"view-split\""));
+    assert!(html.contains("id=\"view-graph\""));
+    assert!(html.contains("id=\"detail-toggles\""));
+    assert!(html.contains("data-detail-toggle=\"types\""));
+    assert!(html.contains("data-detail-toggle=\"diagnostics\""));
+    assert!(html.contains("data-detail-toggle=\"effects\""));
+    assert!(html.contains("data-detail-toggle=\"debug\""));
+    assert!(html.contains("data-detail-toggle=\"package\""));
     assert!(html.contains("id=\"developer-mode\""));
     assert!(html.contains("id=\"source-view\""));
     assert!(html.contains("id=\"context-menu\""));
@@ -352,7 +374,15 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(html.contains("#first-run-tour.is-open"));
     assert!(html.contains("id=\"graph-count\""));
     assert!(html.contains("<summary><span>Functions</span>"));
-    assert!(html.contains("<summary><span>Project</span>"));
+    assert!(html.contains("<summary><span>Project files</span>"));
+    assert!(html.contains(".project-section"));
+    assert!(html.contains(".lens-switch"));
+    assert!(html.contains(".detail-toggles"));
+    assert!(html.contains(".type-detail"));
+    assert!(html.contains(".pin-port.is-exec"));
+    assert!(html.contains(".pin-port.is-fallible"));
+    assert!(html.contains("#stage.is-code"));
+    assert!(html.contains("#stage.is-split"));
     assert!(html.contains("#graph-overview { display: none; }"));
     assert!(html.contains(".graph-overview-title"));
     assert!(html.contains(".graph-stat"));
@@ -382,6 +412,7 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(js.contains("function loadProject"));
     assert!(js.contains("function syncProjectRail"));
     assert!(js.contains("__jetCanvasProjectRail"));
+    assert!(js.contains("__jetCanvasWorkspacePanels"));
     assert!(js.contains("data-project-file"));
     assert!(js.contains("function graphRequestUrl"));
     assert!(js.contains("source_id="));
@@ -482,6 +513,20 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(js.contains("pendingPin"));
     assert!(js.contains("function setPendingPin"));
     assert!(js.contains("__jetCanvasPendingPin"));
+    assert!(js.contains("__jetCanvasFrontendFamily"));
+    assert!(js.contains("family: \"modified_hybrid\""));
+    assert!(js.contains("codeSplitGraphLens: true"));
+    assert!(js.contains("workbenchProjectViewer: true"));
+    assert!(js.contains("dragPinCompatibleMenu: true"));
+    assert!(js.contains("hoverOnlyTypes: true"));
+    assert!(js.contains("getterCapsules: true"));
+    assert!(js.contains("embeddedVariables: true"));
+    assert!(js.contains("graphiteDetailToggles"));
+    assert!(js.contains("detailToggles"));
+    assert!(js.contains("function syncDetailToggles"));
+    assert!(js.contains("data-detail-toggle"));
+    assert!(js.contains("data-view-mode"));
+    assert!(js.contains("__jetCanvasLensMode"));
     assert!(js.contains("Select destination socket"));
     assert!(js.contains("function drawCompatibleDropTargets"));
     assert!(js.contains("function drawConnectionBadge"));
@@ -500,7 +545,7 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(js.contains("function shouldDrawNodeBadge"));
     assert!(js.contains("function nodeSize"));
     assert!(js.contains("function drawTypeLegend"));
-    assert!(js.contains("if (!developerMode || compactCanvasMode()"));
+    assert!(js.contains("if (!detailToggles.types || compactCanvasMode()"));
     assert!(js.contains("[\"Bool\", \"Bool\"]"));
     assert!(js.contains("nodeKindLabel(node, graph).toUpperCase()"));
     assert!(js.contains("function reflowGraph"));
@@ -551,6 +596,11 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(js.contains("constant"));
     assert!(js.contains("Set variable"));
     assert!(js.contains("Get variable"));
+    assert!(js.contains("function isGetterCapsule"));
+    assert!(js.contains("function simpleEmbeddedValue"));
+    assert!(js.contains("__jetCanvasGetterCapsules"));
+    assert!(js.contains("__jetCanvasEmbeddedVariables"));
+    assert!(js.contains("Refused: E0204"));
     assert!(js.contains("functionsForPin"));
     assert!(js.contains("openPinMenu"));
     assert!(js.contains("Create function accepting"));

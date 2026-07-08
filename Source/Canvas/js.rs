@@ -5,6 +5,8 @@ pub fn canvas_js() -> String {
   const stage = document.getElementById("stage");
   const sourceView = document.getElementById("source-view");
   const viewToggle = document.getElementById("view-toggle");
+  const lensButtons = Array.from(document.querySelectorAll("[data-view-mode]"));
+  const detailToggleInputs = Array.from(document.querySelectorAll("[data-detail-toggle]"));
   const developerModeButton = document.getElementById("developer-mode");
   const contextMenu = document.getElementById("context-menu");
   const minimap = document.getElementById("minimap");
@@ -24,6 +26,11 @@ pub fn canvas_js() -> String {
   const dockDetails = document.getElementById("dock-details");
   const projectRail = document.getElementById("project-rail");
   const projectMode = document.getElementById("project-mode");
+  const packageSummary = document.getElementById("package-summary");
+  const dependencySummary = document.getElementById("dependency-summary");
+  const devSummary = document.getElementById("dev-summary");
+  const diagnosticsSummary = document.getElementById("diagnostics-summary");
+  const trustSummary = document.getElementById("trust-summary");
   const graphList = document.getElementById("graph-list");
   const canvasSearch = document.getElementById("canvas-search");
   const searchResults = document.getElementById("search-results");
@@ -79,6 +86,7 @@ pub fn canvas_js() -> String {
   let pendingPin = null;
   let spaceDown = false;
   let viewMode = "graph";
+  let detailToggles = { types: false, diagnostics: true, effects: false, debug: false, package: true };
   let developerMode = false;
   const layoutScale = { x: 1.08, y: 1.08 };
   const palette = [
@@ -257,6 +265,29 @@ pub fn canvas_js() -> String {
     if (latestDoc) window.requestAnimationFrame(fitGraph);
   }
 
+  function detailStateKey(doc) {
+    return "jet.canvas.detail:" + ((doc && doc.source_id) || "source");
+  }
+
+  function loadDetailToggles(doc) {
+    try {
+      detailToggles = Object.assign(detailToggles, JSON.parse(localStorage.getItem(detailStateKey(doc)) || "null") || {});
+    } catch (_) {}
+    syncDetailToggles();
+  }
+
+  function saveDetailToggles() {
+    if (!latestDoc) return;
+    try { localStorage.setItem(detailStateKey(latestDoc), JSON.stringify(detailToggles)); }
+    catch (_) {}
+  }
+
+  function syncDetailToggles() {
+    for (const key of Object.keys(detailToggles)) document.body.classList.toggle("detail-" + key, !!detailToggles[key]);
+    for (const input of detailToggleInputs) input.checked = !!detailToggles[input.getAttribute("data-detail-toggle")];
+    window.__jetCanvasDetailToggles = Object.assign({}, detailToggles);
+  }
+
   function showToast(text) {
     toast.textContent = text;
     window.clearTimeout(showToast.timer);
@@ -342,12 +373,17 @@ pub fn canvas_js() -> String {
   }
 
   function setViewMode(mode) {
-    viewMode = mode === "source" ? "source" : "graph";
-    stage.classList.toggle("is-source", viewMode === "source");
-    viewToggle.textContent = viewMode === "source" ? "Nodes" : "Code";
-    viewToggle.classList.toggle("is-active", viewMode === "source");
+    viewMode = mode === "code" || mode === "split" ? mode : "graph";
+    stage.classList.toggle("is-code", viewMode === "code");
+    stage.classList.toggle("is-split", viewMode === "split");
+    viewToggle.textContent = viewMode === "graph" ? "Code" : "Graph";
+    viewToggle.classList.toggle("is-active", viewMode !== "graph");
+    for (const button of lensButtons) {
+      button.classList.toggle("is-active", button.getAttribute("data-view-mode") === viewMode);
+    }
     sourceView.textContent = latestDoc && latestDoc.source_text ? latestDoc.source_text : "";
-    if (viewMode === "graph" && latestDoc) drawGraph(latestDoc);
+    window.__jetCanvasLensMode = viewMode;
+    if (viewMode !== "code" && latestDoc) drawGraph(latestDoc);
   }
 
   function hexToRgba(hex, alpha) {
@@ -722,6 +758,12 @@ pub fn canvas_js() -> String {
       group: "call",
       run: () => runPalette(entry)
     }));
+    actions.push({
+      title: "Use same value twice",
+      detail: "Refused: E0204. Fix: clone first or end the active change before reading it again.",
+      group: "refused",
+      run: () => showToast("E0204: clone first or end the active change")
+    });
     actions.unshift({
       title: "Create function accepting " + (pin.type || "Value"),
       detail: pin.name || "value",
@@ -782,6 +824,62 @@ pub fn canvas_js() -> String {
     }
   }
 
+  function projectMiniCard(title, small, code) {
+    return `<div class="project-card"><b>${escapeHtml(title || "")}</b><small>${escapeHtml(small || "")}</small><code>${escapeHtml(code || "")}</code></div>`;
+  }
+
+  function syncProjectPanel(panel, title, rows, empty) {
+    if (!panel) return;
+    panel.innerHTML = `<h3>${escapeHtml(title)}</h3>` + (rows.length ? rows.join("") : `<div class="tag">${escapeHtml(empty)}</div>`);
+  }
+
+  function collectProjectDiagnostics(project) {
+    const rows = [];
+    const push = (scope, diag) => rows.push(projectMiniCard(diag.code || "diagnostic", scope, diag.what || diag.message || diag.fix || "project diagnostic"));
+    for (const diag of project.diagnostics || []) push("project", diag);
+    if (project.workspace) for (const diag of project.workspace.diagnostics || []) push(project.workspace.path || "workspace.jet", diag);
+    for (const pkg of project.packages || []) for (const diag of pkg.diagnostics || []) push(pkg.manifest || pkg.path || "pkg.jet", diag);
+    for (const env of project.envs || []) for (const diag of env.diagnostics || []) push(env.path || "env.jet", diag);
+    return rows;
+  }
+
+  function syncProjectPanels(project) {
+    const packageRows = (project.packages || []).map((pkg) => {
+      const targets = (pkg.targets || []).map((t) => `${t.package || pkg.name}:${t.target}`).join(", ") || pkg.target || "native";
+      return projectMiniCard(pkg.name || pkg.path || "package", `${pkg.path || ""} · ${pkg.version || ""}`, targets + (pkg.effects_enabled ? " · effects" : ""));
+    });
+    const depRows = [];
+    for (const pkg of project.packages || []) {
+      for (const dep of pkg.deps || []) depRows.push(projectMiniCard(dep.name || "dependency", pkg.name || pkg.path || "package", dep.source || "source"));
+    }
+    const devRows = [];
+    for (const env of project.envs || []) {
+      const packages = (env.packages || []).join(", ") || "no packages";
+      const secrets = (env.secrets || []).length ? `${env.secrets.length} secrets` : "no secrets";
+      devRows.push(projectMiniCard(env.path || "env.jet", env.prompt || "dev", `${packages} · ${secrets}`));
+    }
+    for (const svc of project.services || []) {
+      const ports = (svc.ports || []).join(", ") || "no ports";
+      devRows.push(projectMiniCard(svc.name || "service", svc.enable === false ? "disabled" : "enabled", `${ports} · ${svc.ready || svc.init || "no command"}`));
+    }
+    const diagRows = collectProjectDiagnostics(project);
+    const lockRows = (project.locks || []).map((lock) => projectMiniCard(lock.path || ".jet/lock", lock.kind || "lock", lock.revision || ""));
+    const policy = project.state_policy || {};
+    lockRows.unshift(projectMiniCard("Source truth", project.source_control && project.source_control.truth || "git-text", `${policy.semantic || "source"} semantics · ${(policy.local || []).join(", ") || "local viewport"}`));
+    syncProjectPanel(packageSummary, "Packages", packageRows, "no packages");
+    syncProjectPanel(dependencySummary, "Dependencies", depRows, "no dependencies");
+    syncProjectPanel(devSummary, "Dev", devRows, "no env or services");
+    syncProjectPanel(diagnosticsSummary, "Diagnostics", diagRows, "clean");
+    syncProjectPanel(trustSummary, "Trust", lockRows, "source-only");
+    window.__jetCanvasWorkspacePanels = {
+      packages: packageRows.length,
+      dependencies: depRows.length,
+      dev: devRows.length,
+      diagnostics: diagRows.length,
+      trust: lockRows.length
+    };
+  }
+
   function syncProjectRail(project) {
     if (!projectRail || !project) return;
     latestProject = project;
@@ -801,7 +899,8 @@ pub fn canvas_js() -> String {
       cards.push(`<button class="project-card${active}" type="button" data-project-file="${escapeAttr(file.path || "")}"><b>${escapeHtml(file.path || "source")}</b><small>${escapeHtml(file.kind || "source")}</small><code>${escapeHtml(file.revision || "")}</code></button>`);
     }
     projectRail.innerHTML = cards.join("");
-    window.__jetCanvasProjectRail = { mode: project.mode, packages: (project.packages || []).length, files: fileCount };
+    syncProjectPanels(project);
+    window.__jetCanvasProjectRail = { mode: project.mode, packages: (project.packages || []).length, files: fileCount, panels: window.__jetCanvasWorkspacePanels };
   }
 
   if (projectRail) {
@@ -878,7 +977,7 @@ pub fn canvas_js() -> String {
 
   function nodeContextActions(graph, node) {
     const actions = [
-      { title: "Jump source", detail: "span", group: "source", run: () => { const s = node.source_span || { start: 0, end: 0 }; setSourceHash(s); setViewMode("source"); } },
+      { title: "Jump source", detail: "span", group: "source", run: () => { const s = node.source_span || { start: 0, end: 0 }; setSourceHash(s); setViewMode("code"); } },
       { title: "Find references", detail: "semindex", group: "query", run: () => postQuery({ op: "references", symbol: node.title }) },
       { title: "Set breakpoint", detail: "local span", group: "debug", run: () => toggleBreakpoint(node) }
     ];
@@ -914,7 +1013,7 @@ pub fn canvas_js() -> String {
         const name = window.prompt("Function name", "helper");
         if (name) postTransaction({ schema_version: 1, op: "create_function", revision: latestDoc.revision, name, params: "", ret_type: "Int" });
       } },
-      { title: "Show source", detail: "toggle", group: "view", run: () => setViewMode("source") },
+      { title: "Show source", detail: "toggle", group: "view", run: () => setViewMode("code") },
       { title: "Align top", detail: "local view state", group: "layout", run: () => alignSelectedNodes("y") },
       { title: "Align left", detail: "local view state", group: "layout", run: () => alignSelectedNodes("x") },
       { title: "Auto tidy", detail: "local view state", group: "layout", run: tidyGraphLayout },
@@ -1166,7 +1265,7 @@ pub fn canvas_js() -> String {
   }
 
   function drawTypeLegend(size) {
-    if (!developerMode || compactCanvasMode() || size.width < 760 || viewMode !== "graph") return;
+    if (!detailToggles.types || compactCanvasMode() || size.width < 760 || viewMode === "code") return;
     const items = [
       ["Exec", "exec"],
       ["Bool", "Bool"],
@@ -1258,12 +1357,21 @@ pub fn canvas_js() -> String {
     return false;
   }
 
+  function isGetterCapsule(node) {
+    return node && (node.kind === "variable_get" || node.kind === "constant");
+  }
+
+  function simpleEmbeddedValue(expr) {
+    const s = String((expr && expr.source) || "").trim();
+    return /^[A-Za-z_][A-Za-z0-9_]*$/.test(s) || /^-?\d+(\.\d+)?$/.test(s) || /^"[^"]*"$/.test(s);
+  }
+
   function nodeSize(graph, node) {
     const inputData = pinsForNode(graph, node, "input", false).length;
     const outputData = pinsForNode(graph, node, "output", false).length;
     const execIn = pinsForNode(graph, node, "input", true).length;
     const execOut = pinsForNode(graph, node, "output", true).length;
-    const compact = node.kind === "variable_get" || node.kind === "constant";
+    const compact = isGetterCapsule(node);
     const w = compact ? 216 : node.kind === "branch" || node.kind === "dispatch" ? 340 : 314;
     const execRows = Math.max(execIn, execOut);
     const dataRows = Math.max(inputData, outputData);
@@ -1365,6 +1473,42 @@ pub fn canvas_js() -> String {
     const style = nodeStyle(node, graph);
     const headerH = Math.min(48, size.h - 20) * view.zoom;
 
+    if (isGetterCapsule(node)) {
+      const out = pinsForNode(graph, node, "output", false)[0] || {};
+      const color = colorForType(out.type || "Value");
+      ctx.shadowColor = selected ? hexToRgba(color, .42) : "rgba(0,0,0,.38)";
+      ctx.shadowBlur = selected ? 22 : 12;
+      ctx.shadowOffsetY = 8;
+      roundRect(x, y + 14 * view.zoom, w, 42 * view.zoom, 21 * view.zoom);
+      ctx.fillStyle = "rgba(18,23,30,.96)";
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.shadowOffsetY = 0;
+      ctx.strokeStyle = selected ? color : hexToRgba(color, .62);
+      ctx.lineWidth = selected ? 2.2 : 1.2;
+      ctx.stroke();
+      ctx.fillStyle = hexToRgba(color, .16);
+      roundRect(x + 9 * view.zoom, y + 22 * view.zoom, 42 * view.zoom, 25 * view.zoom, 13 * view.zoom);
+      ctx.fill();
+      ctx.fillStyle = color;
+      ctx.font = `${Math.max(8, 10 * view.zoom)}px ui-monospace, Consolas, monospace`;
+      ctx.textAlign = "center";
+      ctx.fillText(node.kind === "constant" ? "LIT" : "GET", x + 30 * view.zoom, y + 38 * view.zoom);
+      ctx.textAlign = "left";
+      ctx.fillStyle = "#f8fbff";
+      ctx.font = `${Math.max(12, 14 * view.zoom)}px "Segoe UI", system-ui, sans-serif`;
+      ctx.fillText(clipText(node.title, 22), x + 62 * view.zoom, y + 38 * view.zoom);
+      if (out.pin_id) drawPin(out, x + w, y + 35 * view.zoom, "output", recordHit);
+      if (detailToggles.types) {
+        ctx.fillStyle = color;
+        ctx.font = `${Math.max(9, 10 * view.zoom)}px ui-monospace, Consolas, monospace`;
+        ctx.fillText(clipText(out.type || "Value", 16), x + 62 * view.zoom, y + 52 * view.zoom);
+      }
+      if (recordHit) hit.push({ x, y: y + 14 * view.zoom, w, h: 42 * view.zoom, node });
+      window.__jetCanvasGetterCapsules = true;
+      return;
+    }
+
     ctx.shadowColor = active ? "rgba(250,204,21,.58)" : selected ? hexToRgba(style.accent, .42) : searchHit ? "rgba(192,132,252,.42)" : "rgba(0,0,0,.45)";
     ctx.shadowBlur = active ? 34 : selected ? 26 : searchHit ? 22 : 16;
     ctx.shadowOffsetY = 12;
@@ -1454,11 +1598,15 @@ pub fn canvas_js() -> String {
     inline.forEach((expr, i) => {
       const cy = y + (dataTop + Math.max(inputs.length, outputs.length) * 30 + 12 + i * 24) * view.zoom;
       roundRect(x + 12 * view.zoom, cy - 13 * view.zoom, w - 24 * view.zoom, 18 * view.zoom, 5 * view.zoom);
-      ctx.fillStyle = "rgba(246,211,101,.11)";
+      ctx.fillStyle = simpleEmbeddedValue(expr) ? "rgba(212,212,216,.16)" : "rgba(246,211,101,.11)";
       ctx.fill();
-      ctx.fillStyle = "#f6d365";
+      ctx.strokeStyle = simpleEmbeddedValue(expr) ? "rgba(212,212,216,.38)" : "rgba(246,211,101,.24)";
+      ctx.lineWidth = Math.max(.8, view.zoom);
+      ctx.stroke();
+      ctx.fillStyle = simpleEmbeddedValue(expr) ? "#e4e4e7" : "#f6d365";
       ctx.font = `${Math.max(9, 11 * view.zoom)}px ui-monospace, Consolas, monospace`;
       ctx.fillText(clipText(expr.source, 34), x + 19 * view.zoom, cy);
+      if (simpleEmbeddedValue(expr)) window.__jetCanvasEmbeddedVariables = true;
     });
 
     if (recordHit) hit.push({ x, y, w, h, node });
@@ -1525,7 +1673,7 @@ pub fn canvas_js() -> String {
       const activeWire = debugOverlay && debugOverlay.active_wire_id === wire.wire_id;
       const selectedWire = selectedNodeIds.has(from.pin.node_id) || selectedNodeIds.has(to.pin.node_id);
       drawWire(wire, from, to, activeWire, selectedWire);
-      if (activeWire || selectedWire || view.zoom >= 1.05) drawWireTypeBadge(wire, from, to);
+      if (detailToggles.types && (activeWire || selectedWire || view.zoom >= 1.05)) drawWireTypeBadge(wire, from, to);
     }
 
     drawRerouteKnots(graph);
@@ -1698,7 +1846,9 @@ pub fn canvas_js() -> String {
   }
 
   function pinPortHtml(type) {
-    return `<span class="pin-port" style="color:${escapeAttr(colorForType(type))}"></span>`;
+    const t = type || "Value";
+    const cls = t === "exec" || t === "control" || t === "Void" ? " is-exec" : String(t).endsWith("?") ? " is-fallible" : "";
+    return `<span class="pin-port${cls}" style="color:${escapeAttr(colorForType(t))}"></span>`;
   }
 
   function typeChipHtml(type) {
@@ -1738,7 +1888,7 @@ pub fn canvas_js() -> String {
     const color = colorForType(type);
     const rail = pinRail(p);
     const flags = [p.direction, rail, p.fallible ? "fallible" : "", p.effect_grant_need ? "effect" : ""].filter(Boolean).join(" / ");
-    return `<div class="pin-card" style="--pin-color:${escapeAttr(color)}">${pinPortHtml(type)}<div class="pin-card-title"><b>${escapeHtml(p.name)}</b><small>${escapeHtml(flags)} - ${escapeHtml(type)}</small></div><button data-pin-menu="${escapeAttr(p.pin_id)}">Actions</button></div>`;
+    return `<div class="pin-card" style="--pin-color:${escapeAttr(color)}">${pinPortHtml(isExecPin(p) ? "exec" : type)}<div class="pin-card-title"><b>${escapeHtml(p.name)}</b><small>${escapeHtml(flags)}<span class="type-detail"> - ${escapeHtml(type)}</span></small></div><button data-pin-menu="${escapeAttr(p.pin_id)}">Actions</button></div>`;
   }
 
   function updateDetails(graph, node, pins, inline) {
@@ -1773,7 +1923,7 @@ pub fn canvas_js() -> String {
     details.innerHTML = `
       <div class="details-hero">
         <div class="details-titleline"><span class="node-glyph">${escapeHtml(style.glyph)}</span><div class="details-title"><p class="title">${escapeHtml(node.title)}</p><div class="kind">${escapeHtml(nodeKindLabel(node, graph))}</div></div></div>
-        <div class="details-chips dev-only"><span class="details-chip">${escapeHtml(node.kind)}</span><span class="details-chip">${pins.length} pins</span>${affords}</div>
+        <div class="details-chips dev-only"><span class="details-chip">${escapeHtml(node.kind)}</span><span class="details-chip type-detail">${pins.length} pins</span>${affords}</div>
         <div class="quick-actions"><button id="source-jump">Jump source</button><button id="find-references">Find refs</button>${calleeOpen ? calleeOpen.replace("<button", "<button class=\"wide\"") : ""}</div>
         <dl class="dev-only">
           <dt>span</dt><dd>${span.start}..${span.end}</dd>
@@ -1782,11 +1932,15 @@ pub fn canvas_js() -> String {
       </div>
       ${rename}
       ${fnPanel}
-      <div class="dev-only">
+      <div class="debug-detail">
         <h2>Debug</h2>
         <div class="edit-grid"><button id="debug-toggle-break">${bpLabel}</button><button id="debug-add-watch">Add watch</button></div>
         <div class="pin-list">${locals || watches || stack ? locals + watches + stack : "<div class=\"tag\">no live values</div>"}</div>
+      </div>
+      <div class="diagnostic-detail">
         <h2>Comments</h2><div class="inline-list">${regionRows || "<div class=\"tag\">none</div>"}</div>
+      </div>
+      <div class="type-detail">
         <h2>Pins</h2><div class="pin-list">${pinRows || "<div class=\"tag\">none</div>"}</div>
         <h2>Inline</h2><div class="inline-list">${inlineRows || "<div class=\"tag\">none</div>"}</div>
       </div>
@@ -2290,7 +2444,19 @@ pub fn canvas_js() -> String {
   document.getElementById("fit").addEventListener("click", fitGraph);
   document.getElementById("reload").addEventListener("click", loadGraph);
   sourceDiff.addEventListener("click", showSourceDiff);
-  viewToggle.addEventListener("click", () => setViewMode(viewMode === "source" ? "graph" : "source"));
+  viewToggle.addEventListener("click", () => setViewMode(viewMode === "graph" ? "code" : "graph"));
+  for (const button of lensButtons) {
+    button.addEventListener("click", () => setViewMode(button.getAttribute("data-view-mode") || "graph"));
+  }
+  for (const input of detailToggleInputs) {
+    input.addEventListener("change", () => {
+      const key = input.getAttribute("data-detail-toggle");
+      detailToggles[key] = input.checked;
+      syncDetailToggles();
+      saveDetailToggles();
+      if (latestDoc) drawGraph(latestDoc);
+    });
+  }
   developerModeButton.addEventListener("click", () => setDeveloperMode(!developerMode));
   undoEdit.addEventListener("click", undoTransaction);
   redoEdit.addEventListener("click", redoTransaction);
@@ -2326,10 +2492,17 @@ pub fn canvas_js() -> String {
     if (ev.key === "Escape") closeContextMenu();
     if ((ev.ctrlKey || ev.metaKey) && ev.key === "`") {
       ev.preventDefault();
-      setViewMode(viewMode === "source" ? "graph" : "source");
+      setViewMode(viewMode === "graph" ? "code" : "graph");
       return;
     }
-    if ((ev.ctrlKey || ev.metaKey) && (ev.key === "k" || ev.key === "f")) {
+    if ((ev.ctrlKey || ev.metaKey) && ev.key === "k") {
+      ev.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      openGraphActionPalette(rect.left + Math.min(rect.width - 20, 220), rect.top + 90);
+      showToast("Context actions");
+      return;
+    }
+    if ((ev.ctrlKey || ev.metaKey) && ev.key === "f") {
       ev.preventDefault();
       canvasSearch.focus();
       canvasSearch.select();
@@ -2558,6 +2731,7 @@ pub fn canvas_js() -> String {
       .then((doc) => {
         latestDoc = doc;
         loadEditorState(doc);
+        loadDetailToggles(doc);
         sourceView.textContent = doc.source_text || "";
         const firstLoad = selectedGraphId === null;
         drawGraph(doc);
@@ -2611,7 +2785,20 @@ pub fn canvas_js() -> String {
 
   window.__jetCanvasPinAuthoring = true;
   window.__jetCanvasDebugOverlay = true;
+  window.__jetCanvasFrontendFamily = {
+    family: "modified_hybrid",
+    workbenchProjectViewer: true,
+    codeSplitGraphLens: true,
+    contextCommands: true,
+    dragPinCompatibleMenu: true,
+    hoverOnlyTypes: true,
+    getterCapsules: true,
+    embeddedVariables: true,
+    graphiteDetailToggles: ["types", "diagnostics", "effects", "debug", "package"]
+  };
   setDeveloperMode(storedFlag("jet.canvas.developerMode"));
+  syncDetailToggles();
+  setViewMode("graph");
   details.innerHTML = "<h2>Details</h2><p>Select a node.</p>";
   window.addEventListener("resize", function () {
     if (!compactCanvasMode()) setDrawer(null);

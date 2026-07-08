@@ -16,6 +16,31 @@ pub struct Theme {
     pub color: bool,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PlanMark {
+    Add,
+    Remove,
+    Change,
+}
+
+impl PlanMark {
+    fn symbol(self) -> &'static str {
+        match self {
+            PlanMark::Add => "+",
+            PlanMark::Remove => "-",
+            PlanMark::Change => "~",
+        }
+    }
+
+    fn sgr(self) -> &'static str {
+        match self {
+            PlanMark::Add => "32",
+            PlanMark::Remove => "31",
+            PlanMark::Change => "33",
+        }
+    }
+}
+
 impl Theme {
     /// Resolve color from flags + environment. Precedence: explicit
     /// `--no-color` wins, then `NO_COLOR` (any value), then TTY detection.
@@ -95,6 +120,94 @@ impl Theme {
             self.gray(&format!("{v:<8}")),
             self.gray(state),
         );
+    }
+
+    pub fn render_plan_row(
+        &self,
+        mark: PlanMark,
+        name: &str,
+        name_w: usize,
+        from: &str,
+        to: &str,
+    ) -> String {
+        let symbol = self.paint(mark.sgr(), mark.symbol());
+        format!(
+            "{} {}  {} -> {}",
+            symbol,
+            self.bold(&format!("{name:<name_w$}")),
+            self.gray(from),
+            self.gray(to),
+        )
+    }
+
+    /// A mutation plan row. Color carries the mark in a TTY; plain output keeps
+    /// the same + / - / ~ symbols for deterministic logs and review.
+    pub fn plan_row(&self, mark: PlanMark, name: &str, name_w: usize, from: &str, to: &str) {
+        let pad = " ".repeat(Syntax::JETPACK_PROMPT_LABEL.len() + 4);
+        eprintln!("{pad}{}", self.render_plan_row(mark, name, name_w, from, to));
+    }
+
+    pub fn render_progress_chain(
+        &self,
+        phase: &str,
+        done: usize,
+        total: usize,
+        node: &str,
+        edge: &str,
+    ) -> String {
+        let count = if total == 0 {
+            String::new()
+        } else {
+            format!(" {done}/{total}")
+        };
+        let edge = if edge.is_empty() {
+            String::new()
+        } else {
+            format!(" -> {edge}")
+        };
+        format!(
+            "{} {}{} {}{}",
+            self.gray("▸"),
+            phase,
+            self.gray(&count),
+            self.bold(node),
+            self.gray(&edge),
+        )
+    }
+
+    /// Dependency-chain progress for long realization/build phases. TTY output
+    /// can later pin/redraw this same line; non-TTY appends it as stable ledger.
+    pub fn progress_chain(&self, phase: &str, done: usize, total: usize, node: &str, edge: &str) {
+        let pad = " ".repeat(Syntax::JETPACK_PROMPT_LABEL.len() + 4);
+        eprintln!(
+            "{pad}{}",
+            self.render_progress_chain(phase, done, total, node, edge)
+        );
+    }
+
+    pub fn confirm_apply(&self, assume_yes: bool) -> bool {
+        if assume_yes {
+            self.status("applying plan (--yes)");
+            return true;
+        }
+        if !std::io::stdin().is_terminal() {
+            self.status("plan only; pass -y or --yes to apply in a non-interactive shell.");
+            return false;
+        }
+        eprint!("  {}  Apply? [y/N] ", self.gutter());
+        use std::io::Write;
+        let _ = std::io::stderr().flush();
+        let mut answer = String::new();
+        if std::io::stdin().read_line(&mut answer).is_err() {
+            self.status("plan cancelled.");
+            return false;
+        }
+        let answer = answer.trim();
+        let apply = answer.eq_ignore_ascii_case("y") || answer.eq_ignore_ascii_case("yes");
+        if !apply {
+            self.status("plan cancelled.");
+        }
+        apply
     }
 
     /// The threshold rule — the one visual signature of entering/leaving a
@@ -298,5 +411,36 @@ pub fn ref_error(theme: &Theme, err: &RefError) {
                 &did_you_mean,
             )
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plan_rows_keep_symbols_without_color() {
+        let theme = Theme { color: false };
+        assert_eq!(
+            theme.render_plan_row(PlanMark::Add, "ripgrep", 8, "-", "14.1.0"),
+            "+ ripgrep   - -> 14.1.0"
+        );
+        assert_eq!(
+            theme.render_plan_row(PlanMark::Remove, "old", 8, "1.0.0", "-"),
+            "- old       1.0.0 -> -"
+        );
+        assert_eq!(
+            theme.render_plan_row(PlanMark::Change, "linux", 8, "6.9", "6.10"),
+            "~ linux     6.9 -> 6.10"
+        );
+    }
+
+    #[test]
+    fn progress_chain_has_deterministic_plain_fallback() {
+        let theme = Theme { color: false };
+        assert_eq!(
+            theme.render_progress_chain("realize", 2, 5, "ripgrep", "nixpkgs"),
+            "▸ realize 2/5 ripgrep -> nixpkgs"
+        );
     }
 }

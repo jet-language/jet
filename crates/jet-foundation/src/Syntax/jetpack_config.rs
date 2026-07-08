@@ -127,6 +127,8 @@ pub const NS_VMTEST: &str = "vmtest";
 
 /// U3 (ratified 2026-06-16): the type matching each reserved namespace.
 pub const TYPE_ENV: &str = "Env";
+/// D-FE-PROMPT-STRIP1: structured prompt config inside an `Env` contribution.
+pub const TYPE_PROMPT: &str = "Prompt";
 pub const TYPE_SYSTEM: &str = "System";
 pub const TYPE_IMAGE: &str = "Image";
 /// D-JPK-FLEET1: the type name of a `fleet.<name>` contribution record.
@@ -315,6 +317,11 @@ pub const OS_FLAG_MANUAL_DISK: &str = "--manual";
 /// D-JOS-VMCOMMAND1=A: VM proof target disk path.
 pub const OS_FLAG_DISK: &str = "--disk";
 
+/// D-FE-CLI1=D: consequence-scaled CLI output accepts both spellings for
+/// bypassing mutation confirmation gates.
+pub const CLI_FLAG_YES_SHORT: &str = "-y";
+pub const CLI_FLAG_YES_LONG: &str = "--yes";
+
 /// D-JPK-OSNS1=B: full-word option namespaces.
 pub const OS_OPTION_NS_FILESYSTEM: &str = "filesystem";
 pub const OS_OPTION_NS_NETWORK: &str = "network";
@@ -385,6 +392,16 @@ pub const DEFAULT_SOURCE: &str = "default";
 
 /// U3/U8: the `Env` contribution field carrying the shell prompt label.
 pub const ENV_FIELD_PROMPT: &str = "prompt";
+/// D-FE-PROMPT-STRIP1: `Prompt.{ label: "...", path: .Short, strip: .On }`.
+pub const PROMPT_FIELD_LABEL: &str = "label";
+pub const PROMPT_FIELD_PATH: &str = "path";
+pub const PROMPT_FIELD_STRIP: &str = "strip";
+pub const PROMPT_SETTING_PATH: &str = "prompt.path";
+pub const PROMPT_SETTING_STRIP: &str = "prompt.strip";
+pub const PROMPT_PATH_SHORT: &str = "Short";
+pub const PROMPT_PATH_FULL: &str = "Full";
+pub const PROMPT_STRIP_ON: &str = "On";
+pub const PROMPT_STRIP_OFF: &str = "Off";
 
 /// U6 (ratified 2026-06-16): package value type, and the `provider@target`
 /// source-ref separator (`github@owner/repo/rev`, `path@../local`, `nixpkgs@…`).

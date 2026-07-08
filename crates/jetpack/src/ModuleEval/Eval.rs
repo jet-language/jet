@@ -13,7 +13,10 @@ use crate::AST::{ContribValue, Contribution, EnvLit, Expr, Func, Item, ModuleDec
 
 use super::super::Merge::{self, EntryContribution, MergeError, MergedEntry, Scalar};
 use super::DevService::evaluate_dev_service;
-use super::Diagnostics::{not_a_namespace_literal, packages_not_a_list, wrong_namespace_type};
+use super::Diagnostics::{
+    not_a_namespace_literal, packages_not_a_list, prompt_bad_field, prompt_bad_value,
+    wrong_namespace_type,
+};
 use super::System::{evaluate_fleet, evaluate_image, evaluate_system, evaluate_vmtest};
 use super::Types::{AdapterPlan, AdapterRecipe, DevServicePlan, EvaluatedModule};
 
@@ -225,6 +228,8 @@ fn evaluate_env_fields(
             let extracted = extract_packages(value, src)?;
             entry.packages.extend(extracted.packages);
             adapters.extend(extracted.adapters);
+        } else if name == Syntax::ENV_FIELD_PROMPT {
+            capture_prompt_setting(&mut entry, value, base_dir, funcs)?;
         } else if name == Syntax::ENV_FIELD_SECRETS {
             // U13: `secrets: ["name", …]` — a plain list of strings, no Pkg
             // sugar. Evaluated as an ordinary comptime expression; anything
@@ -254,6 +259,95 @@ fn evaluate_env_fields(
         }
     }
     Ok((entry, secrets, adapters))
+}
+
+fn capture_prompt_setting(
+    entry: &mut EntryContribution,
+    value: &Expr,
+    base_dir: &Path,
+    funcs: &HashMap<String, &Func>,
+) -> Result<(), Diagnostic> {
+    if let Expr::StructLit {
+        type_name, fields, ..
+    } = value
+    {
+        if type_name == Syntax::TYPE_PROMPT {
+            let extern_names = HashSet::new();
+            let globals = HashMap::new();
+            for (field, span, expr) in fields {
+                check_build_io(expr)?;
+                let v = Comptime::evaluate(expr, funcs, &extern_names, base_dir, &globals)?;
+                match field.as_str() {
+                    Syntax::PROMPT_FIELD_LABEL => {
+                        let Some(label) = string_value(&v) else {
+                            return Err(prompt_bad_value(field, "a quoted label", *span));
+                        };
+                        entry
+                            .settings
+                            .entry(Syntax::ENV_FIELD_PROMPT.to_string())
+                            .or_default()
+                            .push(Scalar::normal(label));
+                    }
+                    Syntax::PROMPT_FIELD_PATH => {
+                        let Some(word) = prompt_word(&v) else {
+                            return Err(prompt_bad_value(field, ".Short or .Full", *span));
+                        };
+                        if word != Syntax::PROMPT_PATH_SHORT && word != Syntax::PROMPT_PATH_FULL {
+                            return Err(prompt_bad_value(field, ".Short or .Full", *span));
+                        }
+                        entry
+                            .settings
+                            .entry(Syntax::PROMPT_SETTING_PATH.to_string())
+                            .or_default()
+                            .push(Scalar::normal(word));
+                    }
+                    Syntax::PROMPT_FIELD_STRIP => {
+                        let Some(word) = prompt_word(&v) else {
+                            return Err(prompt_bad_value(field, ".On or .Off", *span));
+                        };
+                        if word != Syntax::PROMPT_STRIP_ON && word != Syntax::PROMPT_STRIP_OFF {
+                            return Err(prompt_bad_value(field, ".On or .Off", *span));
+                        }
+                        entry
+                            .settings
+                            .entry(Syntax::PROMPT_SETTING_STRIP.to_string())
+                            .or_default()
+                            .push(Scalar::normal(word));
+                    }
+                    _ => return Err(prompt_bad_field(field, *span)),
+                }
+            }
+            return Ok(());
+        }
+    }
+
+    check_build_io(value)?;
+    let extern_names = HashSet::new();
+    let globals = HashMap::new();
+    let v = Comptime::evaluate(value, funcs, &extern_names, base_dir, &globals)?;
+    entry
+        .settings
+        .entry(Syntax::ENV_FIELD_PROMPT.to_string())
+        .or_default()
+        .push(Scalar::normal(v.jet_show()));
+    Ok(())
+}
+
+fn string_value(v: &crate::Comptime::CtValue) -> Option<String> {
+    match v {
+        crate::Comptime::CtValue::Str(s) => Some(s.clone()),
+        _ => None,
+    }
+}
+
+fn prompt_word(v: &crate::Comptime::CtValue) -> Option<String> {
+    match v {
+        crate::Comptime::CtValue::Enum { variant, .. } => {
+            variant.rsplit('.').next().map(str::to_string)
+        }
+        crate::Comptime::CtValue::Str(s) => Some(s.clone()),
+        _ => None,
+    }
 }
 
 /// U13: `[String]` → `Vec<String>`, or `None` if `v` isn't a list of strings

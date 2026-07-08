@@ -1267,7 +1267,11 @@ dashed-name = ident { "-" ident } ;                (* S84: kebab-case names *)
   or jetos installer input).
 - **`env.<name>:` values reuse the ordinary expression parser** — typically a
   struct literal (`Env.{ packages: […], prompt: "…" }`), so lists and strings
-  work with no new grammar.
+  work with no new grammar. `prompt: "name"` is the beginner shorthand. For
+  prompt depth, write `prompt: Prompt.{ label: "name", path: .Short, strip: .On }`
+  (`path: .Full` and `strip: .Off` are the other modes). `jet env` renders that
+  as one hybrid prompt: label plus path by default, `Ctrl-G` status glance on
+  demand, and the optional strip showing the same status words.
 - **`image.<name>:` values are Jetpack OCI images.** Active fields are
   `kind: .Oci` (optional when `from: packages.<name>` makes it clear),
   `from: packages.<name>`, `expose: [Int]`, `env_vars: ["KEY": "value"]`,
@@ -1298,6 +1302,12 @@ dashed-name = ident { "-" ident } ;                (* S84: kebab-case names *)
   and the diagnostic names `jet logs <pkg>` plus `--shell-on-fail`. Package-form
   `jet explain <ref>` prints the latest resolution/build record; code-form
   `jet explain E1234` keeps the existing diagnostic essay behavior.
+- **Hybrid CLI output (D-FE-CLI1):** trivial reads stay quiet, multi-package
+  realization/build work reports dependency-chain progress, and mutations plan
+  before applying. Plan rows use `+`, `-`, and `~` in both colored and plain
+  output. `-y` and `--yes` are the same confirmation bypass; non-interactive
+  mutation without either prints the plan and changes nothing. Diagnostic text
+  and JSON output remain unchanged.
 - **Package overlays and overrides (D-JPK-OVERLAY1):** `workspace.jet` may carry
   reviewed overlay policy inside `module workspace`. An `overlay <name> { ... }`
   block records provider/channel swaps (`provider: Provider.nixpkgs(channel:

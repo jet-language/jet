@@ -1771,6 +1771,22 @@ when the lock is satisfied. One canonical merge table (unified-ecosystem §6)
 across env/system/image. Monorepo addressing: `source.package` dot form +
 in-repo path-style + bare-name sugar when unambiguous.
 
+**D-FE-PROMPT1 (=D) + D-FE-PROMPT-STRIP1 (=B, ratified 2026-07-08, #359)**:
+`jet env` uses one hybrid prompt engine. Default prompt shows the env label and
+compact path; `Ctrl-G` pulls the same status words the optional always-on strip
+shows. Shorthand remains `prompt: "web-api"`. Expert config is
+`prompt: Prompt.{ label: "web-api", path: .Short, strip: .On }`
+(`path: .Full` and `strip: .Off` also valid). Shell state is only a renderer;
+source truth stays in `env.jet`.
+
+**D-FE-CLI1 (=D, ratified 2026-07-08, #361)**: jetpack/jetos CLI output is
+hybrid and consequence-scaled. Trivial reads stay quiet. Long realization/build
+work uses the shared dependency-chain progress renderer, with deterministic
+plain ledger fallback. Mutations print a plan first with the same `+`, `-`, `~`
+marks in color and plain logs; `-y` and `--yes` are equivalent confirmation
+bypasses. Non-interactive mutation without either flag prints the plan and
+does not apply it. Diagnostics remain verbatim and JSON schemas are unchanged.
+
 **D-JPK-RINGSHIP1 (=C, ratified 2026-07-03, c1rixz5d)**: first-party
 `core.*` ring libraries ship as prebuilt per-platform artifacts riding the
 pinned toolchain object (D-JPK-TOOLCHAIN1) — realizing the toolchain stages

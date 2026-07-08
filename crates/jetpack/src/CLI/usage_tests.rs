@@ -89,6 +89,7 @@ fn usage() -> String {
 {flags}
   --no-color                           disable colored output (also: NO_COLOR)
   --offline                            resolve from fixtures only, never network
+  -y, --yes                            apply a mutation plan without prompting
   --shell-on-fail                      after a failed build, open a shell in preserved scratch
   --fixtures <dir>                     read provider output from captured fixtures
   --trust                              skip the trust prompt for this one run
@@ -135,13 +136,25 @@ mod tests {
     fn parses_flags() {
         let fixtures = std::env::temp_dir().join("fx");
         let fixtures_arg = fixtures.to_string_lossy().to_string();
-        let args: Vec<String> = ["--no-color", "--fixtures", &fixtures_arg, "nixpkgs:jq"]
+        let args: Vec<String> = ["--no-color", "--fixtures", &fixtures_arg, "-y", "nixpkgs:jq"]
             .iter()
             .map(|s| s.to_string())
             .collect();
         let p = parse_args(&args);
         assert!(p.flags.no_color);
+        assert!(p.flags.assume_yes);
         assert_eq!(p.flags.fixtures, Some(fixtures));
+        assert_eq!(p.positional, vec!["nixpkgs:jq"]);
+    }
+
+    #[test]
+    fn parses_long_yes_flag() {
+        let args: Vec<String> = ["--yes", "nixpkgs:jq"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let p = parse_args(&args);
+        assert!(p.flags.assume_yes);
         assert_eq!(p.positional, vec!["nixpkgs:jq"]);
     }
 

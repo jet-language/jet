@@ -43,6 +43,8 @@ struct Flags {
     shell_on_fail: bool,
     /// D-JPK-GRANTCMD1=A: `jet trust grant <selector> --scope repo|user`.
     trust_scope: Option<String>,
+    /// D-FE-CLI1: bypass mutation confirmation gates (`-y` / `--yes`).
+    assume_yes: bool,
 }
 
 /// Result of separating flags, positional args, and a trailing `-- cmd`.
@@ -68,6 +70,7 @@ fn parse_args(args: &[String]) -> Parsed {
         json: false,
         shell_on_fail: false,
         trust_scope: None,
+        assume_yes: false,
         os_name: None,
         os_manual: None,
         os_disk: None,
@@ -88,6 +91,9 @@ fn parse_args(args: &[String]) -> Parsed {
             "--color=never" => flags.no_color = true,
             "--color=auto" | "--color=always" => {}
             "--offline" => flags.offline = true,
+            a if a == Syntax::CLI_FLAG_YES_SHORT || a == Syntax::CLI_FLAG_YES_LONG => {
+                flags.assume_yes = true;
+            }
             a if a == Syntax::TRUST_BYPASS_FLAG => flags.trust = true,
             a if a == Syntax::ENV_FLAG_FLAKE => flags.flake = true,
             a if a == Syntax::ENV_FLAG_PURE => flags.pure = true,
@@ -189,7 +195,7 @@ pub fn main(args: Vec<String>) -> i32 {
         "hangar" => cmd_hangar(&theme, &parsed),
         "vendor" => cmd_vendor(&theme, &parsed),
         "audit" => cmd_audit(&theme),
-        "clean" => cmd_clean(&theme),
+        "clean" => cmd_clean(&theme, &parsed),
         "add" => cmd_add(&theme, &parsed),
         "remove" => cmd_remove(&theme, &parsed),
         "update" => cmd_update(&theme, &parsed),

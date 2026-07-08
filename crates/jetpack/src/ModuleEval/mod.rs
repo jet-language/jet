@@ -30,7 +30,8 @@ pub use Eval::{evaluate_modules, evaluate_source, merge_all, pkg_ref};
 pub use Source::{evaluate_env, is_module_surface};
 pub use Types::{
     AdapterPlan, AdapterRecipe, DevServicePlan, EnvPlan, EvaluatedModule, FleetPlan, HostPlan,
-    ImageKind, ImagePlan, OptionPlan, ServicePlan, SystemPlan, VmTestPlan,
+    ImageKind, ImagePlan, OptionPlan, PromptPathMode, PromptStripMode, ServicePlan, SystemPlan,
+    VmTestPlan,
 };
 
 #[cfg(test)]
@@ -170,6 +171,34 @@ module dev {
             plan.table.upstream("default"),
             Some("github:NixOS/nixpkgs/nixos-24.05")
         );
+    }
+
+    #[test]
+    fn evaluate_env_captures_structured_prompt_config() {
+        let src = r#"
+module dev {
+    env.dev: Env.{
+        prompt: Prompt.{ label: "web-api", path: .Short, strip: .On },
+    }
+}
+"#;
+        let plan = evaluate_env(src, &base_dir()).unwrap();
+        assert_eq!(plan.prompt.as_deref(), Some("web-api"));
+        assert_eq!(plan.prompt_path, PromptPathMode::Short);
+        assert_eq!(plan.prompt_strip, PromptStripMode::On);
+    }
+
+    #[test]
+    fn evaluate_env_prompt_shorthand_keeps_default_modes() {
+        let src = r#"
+module dev {
+    env.dev: Env.{ prompt: "wordstats" }
+}
+"#;
+        let plan = evaluate_env(src, &base_dir()).unwrap();
+        assert_eq!(plan.prompt.as_deref(), Some("wordstats"));
+        assert_eq!(plan.prompt_path, PromptPathMode::Short);
+        assert_eq!(plan.prompt_strip, PromptStripMode::Off);
     }
 
     #[test]

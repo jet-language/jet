@@ -23,6 +23,27 @@ pub fn have_rustc() -> bool {
     Command::new("rustc").arg("--version").output().is_ok()
 }
 
+pub fn test_worker_count(cap: usize) -> usize {
+    let requested = std::env::var("JET_TEST_JOBS")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .filter(|n| *n > 0);
+    let available = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(2);
+    requested.unwrap_or(available).clamp(1, cap.max(1))
+}
+
+pub fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
+    if let Some(s) = payload.downcast_ref::<String>() {
+        s.clone()
+    } else if let Some(s) = payload.downcast_ref::<&'static str>() {
+        (*s).to_string()
+    } else {
+        "panic with non-string payload".to_string()
+    }
+}
+
 /// Cross-process advisory lock serializing access to Jet's hidden global FFI
 /// bridge cache (`~/.cache/jet/ffi/<key>/`, keyed by a hash of the `extern
 /// rust`/`jet.regex`/`core.archive`/etc. signature — see

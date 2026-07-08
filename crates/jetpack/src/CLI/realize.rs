@@ -380,6 +380,8 @@ struct RunPlan {
     adapters: Vec<ModuleEval::AdapterPlan>,
     table: RefSpec::SourceTable,
     label: String,
+    prompt_path: ModuleEval::PromptPathMode,
+    prompt_strip: ModuleEval::PromptStripMode,
     /// U12: dev-supervised `services:` entries the typed env surface
     /// declared, empty for the Phase-1 directive surface (which predates
     /// U12). `jetpack services <verb>` and `jet dev`'s health gate are the
@@ -432,6 +434,8 @@ fn load_project_plan(theme: &Theme) -> Result<RunPlan, i32> {
         adapters: Vec::new(),
         table,
         label: ef.prompt_label(),
+        prompt_path: ModuleEval::PromptPathMode::default(),
+        prompt_strip: ModuleEval::PromptStripMode::default(),
         dev_services: Vec::new(),
         secrets: Vec::new(),
     })
@@ -478,6 +482,8 @@ fn typed_plan_with_defaults(
         label: plan
             .prompt
             .unwrap_or_else(|| Syntax::JETPACK_PROMPT_LABEL.to_string()),
+        prompt_path: plan.prompt_path,
+        prompt_strip: plan.prompt_strip,
         dev_services: plan.dev_services,
         secrets: plan.secrets,
     })

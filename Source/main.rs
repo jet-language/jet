@@ -616,6 +616,63 @@ fn find_external(cmd: &str) -> Option<PathBuf> {
     None
 }
 
+fn question_mark_palette(is_tty: bool) -> String {
+    let controls = if is_tty {
+        "\ncontrols:\n  type to filter · Tab expands · F1 opens reference · Enter prefills · Esc/q closes\n"
+    } else {
+        "\ncontrols:\n  filter text narrows commands; Tab/F1/Enter are interactive-only\n"
+    };
+    format!(
+        "\
+jet ? — command palette
+
+Build and run
+  jet run <file.jet>              run a file
+  jet run --watch <file.jet>      rebuild and rerun on save
+  jet build <file.jet>            compile to ./build/
+  jet test <file|dir>             run #Test blocks
+  jet check <file.jet>            check without building
+
+Project and env
+  jet new <name>                  create a project
+  jet env                         enter project dev shell
+  jet fmt <file.jet>              format source
+  jet fix <file.jet>              apply safe fixes
+
+Packages
+  jet add <dep>                   add dependency
+  jet fetch                       fetch dependencies
+  jet update [dep]                refresh moving selectors
+  jet clean                       clean Jetpack hangar
+
+jetos
+  jet os plan <host>              show checked system plan
+  jet os build <host>             build generation
+  jet os vm test <name>           run VM scenario
+
+Dev server
+  jet dev <file.jet>              native dev loop
+  jet dev <file.jet> --target=web web dev server + Canvas
+  jet serve <file.jet>            resident hot-swap server
+
+Reference
+  jet explain E0102               explain diagnostic
+  jet doctor                      diagnose toolchain
+  jet repl                        notebook REPL
+  jet help                        full command reference
+
+Error codes
+  type E0102 or run `jet explain E0102` for verbatim diagnostic help
+
+Task keywords
+  run on save -> jet run --watch
+  start web app -> jet dev --target=web
+  add dependency -> jet add
+  understand error -> jet explain
+{controls}"
+    )
+}
+
 #[cfg(unix)]
 fn is_executable(p: &Path) -> bool {
     use std::os::unix::fs::PermissionsExt;
@@ -637,7 +694,7 @@ fn main() {
         return;
     }
     if raw.len() == 1 && raw[0] == "?" {
-        print!("{}", usage());
+        print!("{}", question_mark_palette(std::io::stdout().is_terminal()));
         exit(ExitCodes::OK);
     }
 

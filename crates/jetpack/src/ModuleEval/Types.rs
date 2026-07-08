@@ -8,6 +8,30 @@ use super::super::Merge::{self, EntryContribution};
 use super::super::Recipe::BuildRecipe;
 use super::super::RefSpec::SourceTable;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PromptPathMode {
+    Short,
+    Full,
+}
+
+impl Default for PromptPathMode {
+    fn default() -> PromptPathMode {
+        PromptPathMode::Short
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PromptStripMode {
+    Off,
+    On,
+}
+
+impl Default for PromptStripMode {
+    fn default() -> PromptStripMode {
+        PromptStripMode::Off
+    }
+}
+
 /// One module's contributions, keyed by `(namespace, path)` so `merge_all`
 /// can combine same-keyed contributions from different modules.
 #[derive(Debug)]
@@ -234,6 +258,8 @@ pub struct EnvPlan {
     /// because they have inline build identity and no provider selector.
     pub adapters: Vec<AdapterPlan>,
     pub prompt: Option<String>,
+    pub prompt_path: PromptPathMode,
+    pub prompt_strip: PromptStripMode,
     /// U11: every captured `System` across all evaluated modules, in source order.
     /// The jetos tier (gap #4) realizes these; the dev-shell path ignores them.
     pub systems: Vec<SystemPlan>,

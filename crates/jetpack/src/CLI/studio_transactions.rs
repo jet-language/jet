@@ -113,6 +113,9 @@ fn handle_studio_run(body: &str, context: Option<&StudioContext>) -> (&'static s
     if action == "plan" || action == "proof" {
         cmd.arg("--json");
     }
+    if context.offline {
+        cmd.arg("--offline");
+    }
     if action == "build" {
         cmd.arg("--name").arg("zz-studio-candidate");
     }

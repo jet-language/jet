@@ -15,9 +15,9 @@ use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::exit;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use jet::ExitCodes;
 
@@ -35,6 +35,106 @@ const PORT_RANGE: std::ops::RangeInclusive<u16> = 8080..=8089;
 /// (judgment call — 400ms is fast enough to feel instant after a save,
 /// without hammering the dev server on every open tab).
 const LIVE_RELOAD_POLL_MS: u64 = 400;
+
+#[derive(Clone)]
+struct DevStatusSnapshot {
+    state: String,
+    message: String,
+    diagnostic: String,
+    last_build_ms: u128,
+}
+
+struct DevStatus {
+    version: AtomicU64,
+    clients: AtomicU64,
+    state: Mutex<DevStatusSnapshot>,
+}
+
+impl DevStatus {
+    fn new() -> DevStatus {
+        DevStatus {
+            version: AtomicU64::new(1),
+            clients: AtomicU64::new(0),
+            state: Mutex::new(DevStatusSnapshot {
+                state: "ready".to_string(),
+                message: "initial build ready".to_string(),
+                diagnostic: String::new(),
+                last_build_ms: 0,
+            }),
+        }
+    }
+
+    fn mark_building(&self, file: &str) {
+        *self.state.lock().unwrap() = DevStatusSnapshot {
+            state: "building".to_string(),
+            message: format!("building {file}"),
+            diagnostic: String::new(),
+            last_build_ms: 0,
+        };
+    }
+
+    fn mark_ready(&self, file: &str, elapsed_ms: u128, bump_version: bool) {
+        if bump_version {
+            self.version.fetch_add(1, Ordering::SeqCst);
+        }
+        *self.state.lock().unwrap() = DevStatusSnapshot {
+            state: "ready".to_string(),
+            message: format!("built {file} in {elapsed_ms}ms"),
+            diagnostic: String::new(),
+            last_build_ms: elapsed_ms,
+        };
+    }
+
+    fn mark_error(&self, diagnostic: String) {
+        *self.state.lock().unwrap() = DevStatusSnapshot {
+            state: "error".to_string(),
+            message: "build failed; serving last good output".to_string(),
+            diagnostic,
+            last_build_ms: 0,
+        };
+    }
+
+    fn json(&self) -> String {
+        let state = self.state.lock().unwrap().clone();
+        format!(
+            "{{\"version\":{},\"state\":\"{}\",\"message\":\"{}\",\"diagnostic\":\"{}\",\"clients\":{},\"last_build_ms\":{}}}",
+            self.version.load(Ordering::SeqCst),
+            json_escape(&state.state),
+            json_escape(&state.message),
+            json_escape(&state.diagnostic),
+            self.clients.load(Ordering::SeqCst),
+            state.last_build_ms
+        )
+    }
+
+    fn terminal_line(&self, port: u16, file: &str) -> String {
+        let state = self.state.lock().unwrap().clone();
+        format!(
+            "jet dev  [{}] localhost:{} · {} clients · {} · watching {}",
+            state.state,
+            port,
+            self.clients.load(Ordering::SeqCst),
+            state.message,
+            file
+        )
+    }
+}
+
+fn json_escape(s: &str) -> String {
+    let mut out = String::new();
+    for ch in s.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if c.is_control() => out.push(' '),
+            c => out.push(c),
+        }
+    }
+    out
+}
 
 /// `jet dev <file>.jet --target=web`: build once, serve `build/` over plain
 /// HTTP with live-reload, then watch `file` and rebuild on every save.
@@ -54,11 +154,11 @@ pub(crate) fn run_dev_web(file: &str, mode: OutputMode, verbose: bool, port: Opt
 
     // The initial build must succeed — there's nothing to serve otherwise.
     // `rebuild_web` already prints diagnostics/ICE messages on failure.
-    if !rebuild_web(file, mode, verbose, false) {
+    let status = Arc::new(DevStatus::new());
+    if !rebuild_web(file, mode, verbose, false, Some(&status)) {
         exit(ExitCodes::USER_ERROR);
     }
 
-    let version = Arc::new(AtomicU64::new(1));
     let listener = bind_dev_server(port);
     let port = listener
         .local_addr()
@@ -66,15 +166,16 @@ pub(crate) fn run_dev_web(file: &str, mode: OutputMode, verbose: bool, port: Opt
         .unwrap_or(*PORT_RANGE.start());
 
     {
-        let version = Arc::clone(&version);
+        let status = Arc::clone(&status);
         let canvas_file = file.to_string();
-        thread::spawn(move || serve_forever(listener, version, canvas_file));
+        thread::spawn(move || serve_forever(listener, status, canvas_file));
     }
 
     println!(
         "serving http://localhost:{} — watching {} … (Ctrl-C to stop)",
         port, file
     );
+    println!("{}", status.terminal_line(port, file));
     println!("Canvas: http://localhost:{}/canvas", port);
 
     // Same mtime-poll/debounce shape as `run_dev` (Source/CmdDevTools.rs),
@@ -87,8 +188,8 @@ pub(crate) fn run_dev_web(file: &str, mode: OutputMode, verbose: bool, port: Opt
             last_mtime = now;
             // A debounce sleep lets editors finish writing before we read.
             thread::sleep(Duration::from_millis(30));
-            if rebuild_web(file, mode, verbose, true) {
-                version.fetch_add(1, Ordering::SeqCst);
+            if rebuild_web(file, mode, verbose, true, Some(&status)) {
+                eprintln!("{}", status.terminal_line(port, file));
             }
             // On failure: `rebuild_web` never touches `build/` until every
             // artifact (including the wasm rustc pass) has compiled clean —
@@ -108,7 +209,17 @@ pub(crate) fn run_dev_web(file: &str, mode: OutputMode, verbose: bool, port: Opt
 /// untouched, because the new artifacts are written to a staging directory
 /// first and only moved into place once the whole set, wasm included,
 /// compiled successfully.
-fn rebuild_web(file: &str, mode: OutputMode, verbose: bool, is_rebuild: bool) -> bool {
+fn rebuild_web(
+    file: &str,
+    mode: OutputMode,
+    verbose: bool,
+    is_rebuild: bool,
+    status: Option<&DevStatus>,
+) -> bool {
+    let started = Instant::now();
+    if let Some(status) = status {
+        status.mark_building(file);
+    }
     let src = fs::read_to_string(file).unwrap_or_default();
     let out = match jet::compile_web(file) {
         Ok(out) => out,
@@ -117,6 +228,9 @@ fn rebuild_web(file: &str, mode: OutputMode, verbose: bool, is_rebuild: bool) ->
                 eprintln!("\n— {} changed —", file);
             }
             report_problems(mode, file, &src, &diags);
+            if let Some(status) = status {
+                status.mark_error(jet::render_diagnostics(file, &src, &diags));
+            }
             return false;
         }
     };
@@ -124,6 +238,9 @@ fn rebuild_web(file: &str, mode: OutputMode, verbose: bool, is_rebuild: bool) ->
         Some(w) => w,
         None => {
             eprintln!("error: internal compiler error: missing web codegen output");
+            if let Some(status) = status {
+                status.mark_error("internal compiler error: missing web codegen output".to_string());
+            }
             return false;
         }
     };
@@ -131,13 +248,22 @@ fn rebuild_web(file: &str, mode: OutputMode, verbose: bool, is_rebuild: bool) ->
     let staging = PathBuf::from("build").join(".jet-dev-staging");
     if let Err(msg) = write_web_artifacts(file, web, verbose, &staging) {
         eprintln!("{}", msg);
+        if let Some(status) = status {
+            status.mark_error(msg);
+        }
         return false;
     }
     if let Err(e) = stage_and_swap(&staging, Path::new("build")) {
         eprintln!("error: couldn't finalize web build: {}", e);
+        if let Some(status) = status {
+            status.mark_error(format!("couldn't finalize web build: {e}"));
+        }
         return false;
     }
 
+    if let Some(status) = status {
+        status.mark_ready(file, started.elapsed().as_millis(), is_rebuild);
+    }
     if is_rebuild {
         eprintln!("[dev] rebuilt after change to {}", file);
     }
@@ -233,13 +359,15 @@ fn bind_dev_server(port: Option<u16>) -> TcpListener {
 
 /// Accept connections forever, one thread per connection (a dev tool serving
 /// a handful of small files has no need for a worker pool).
-fn serve_forever(listener: TcpListener, version: Arc<AtomicU64>, canvas_file: String) {
+fn serve_forever(listener: TcpListener, status: Arc<DevStatus>, canvas_file: String) {
     for stream in listener.incoming() {
         if let Ok(stream) = stream {
-            let version = Arc::clone(&version);
+            let status = Arc::clone(&status);
             let canvas_file = canvas_file.clone();
             thread::spawn(move || {
-                let _ = handle_connection(stream, &version, &canvas_file);
+                status.clients.fetch_add(1, Ordering::SeqCst);
+                let _ = handle_connection(stream, &status, &canvas_file);
+                status.clients.fetch_sub(1, Ordering::SeqCst);
             });
         }
     }
@@ -249,7 +377,7 @@ fn serve_forever(listener: TcpListener, version: Arc<AtomicU64>, canvas_file: St
 /// this is a dev tool, not a production server) and serve a response.
 fn handle_connection(
     stream: TcpStream,
-    version: &AtomicU64,
+    status: &DevStatus,
     canvas_file: &str,
 ) -> std::io::Result<()> {
     let mut reader = BufReader::new(stream.try_clone()?);
@@ -424,10 +552,10 @@ fn handle_connection(
         if method != "POST" {
             return method_not_allowed(&mut stream);
         }
-        let request = String::from_utf8_lossy(&body);
+                let request = String::from_utf8_lossy(&body);
         return match jet::Canvas::apply_transaction_json(Path::new(canvas_file), &request) {
             Ok(body) => {
-                version.fetch_add(1, Ordering::SeqCst);
+                status.version.fetch_add(1, Ordering::SeqCst);
                 write_response(
                     &mut stream,
                     "200 OK",
@@ -454,7 +582,7 @@ fn handle_connection(
         return match jet::Canvas::apply_project_transaction_json(Path::new(canvas_file), &request)
         {
             Ok(body) => {
-                version.fetch_add(1, Ordering::SeqCst);
+                status.version.fetch_add(1, Ordering::SeqCst);
                 write_response(
                     &mut stream,
                     "200 OK",
@@ -514,11 +642,23 @@ fn handle_connection(
         if method != "GET" {
             return method_not_allowed(&mut stream);
         }
-        let body = version.load(Ordering::SeqCst).to_string();
+        let body = status.version.load(Ordering::SeqCst).to_string();
         return write_response(
             &mut stream,
             "200 OK",
             "text/plain; charset=utf-8",
+            body.as_bytes(),
+        );
+    }
+    if path == "/__jet_dev_status" {
+        if method != "GET" {
+            return method_not_allowed(&mut stream);
+        }
+        let body = status.json();
+        return write_response(
+            &mut stream,
+            "200 OK",
+            "application/json; charset=utf-8",
             body.as_bytes(),
         );
     }
@@ -632,10 +772,33 @@ fn live_reload_script() -> String {
         r#"<script>
 (function () {{
   var jetDevVersion = null;
+  var panel = null;
+  function ensurePanel() {{
+    if (panel) return panel;
+    panel = document.createElement("div");
+    panel.id = "jet-dev-status";
+    panel.setAttribute("style", "position:fixed;right:12px;bottom:12px;z-index:2147483647;max-width:min(560px,calc(100vw - 24px));font:12px ui-monospace, SFMono-Regular, Consolas, monospace;background:#101820;color:#d6e7ff;border:1px solid #3b5675;border-radius:6px;padding:8px 10px;box-shadow:0 8px 24px rgba(0,0,0,.32)");
+    document.body.appendChild(panel);
+    return panel;
+  }}
+  function esc(s) {{ return String(s || "").replace(/[&<>]/g, function (c) {{ return {{ "&":"&amp;","<":"&lt;",">":"&gt;" }}[c]; }}); }}
+  function renderStatus(s) {{
+    var el = ensurePanel();
+    var state = s.state || "ready";
+    var diag = s.diagnostic || "";
+    var head = "jet dev [" + state + "] · " + (s.clients || 0) + " clients · v" + (s.version || 0);
+    if (state === "error") {{
+      el.innerHTML = "<b>Build failed</b><br><span>" + esc(head) + "</span><pre style=\"white-space:pre-wrap;margin:8px 0 0;max-height:45vh;overflow:auto\">" + esc(diag) + "</pre>";
+    }} else {{
+      el.innerHTML = "<b>" + esc(head) + "</b><br><span>" + esc(s.message || "") + "</span>";
+    }}
+  }}
   setInterval(function () {{
-    fetch("/__jet_dev_version", {{ cache: "no-store" }})
-      .then(function (r) {{ return r.text(); }})
-      .then(function (v) {{
+    fetch("/__jet_dev_status", {{ cache: "no-store" }})
+      .then(function (r) {{ return r.json(); }})
+      .then(function (s) {{
+        renderStatus(s);
+        var v = String(s.version || "");
         if (jetDevVersion === null) {{ jetDevVersion = v; return; }}
         if (v !== jetDevVersion) {{ location.reload(); }}
       }})

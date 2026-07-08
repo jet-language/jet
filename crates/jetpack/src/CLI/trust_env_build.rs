@@ -162,7 +162,11 @@ fn compose_env(theme: &Theme, roots: &Roots, flags: &Flags, plan: &RunPlan) -> R
         ));
     }
     let (mut built, mut cached, mut substituted) = (0usize, 0usize, 0usize);
-    for spec in &plan.refs {
+    let total_steps = plan.refs.len() + plan.adapters.len();
+    for (idx, spec) in plan.refs.iter().enumerate() {
+        if total_steps > 1 {
+            theme.progress_chain("realize", idx + 1, total_steps, &spec.raw, "provider");
+        }
         match realize_ref_outcome(theme, roots, flags, &plan.table, spec, name_w) {
             RefOutcome::Realized(entry, state) => {
                 match state {
@@ -181,7 +185,16 @@ fn compose_env(theme: &Theme, roots: &Roots, flags: &Flags, plan: &RunPlan) -> R
             RefOutcome::Failed => failed = true,
         }
     }
-    for adapter in &plan.adapters {
+    for (idx, adapter) in plan.adapters.iter().enumerate() {
+        if total_steps > 1 {
+            theme.progress_chain(
+                "adapt",
+                plan.refs.len() + idx + 1,
+                total_steps,
+                &adapter.name,
+                "adapter",
+            );
+        }
         match realize_adapter(theme, roots, flags, adapter) {
             Some((entry, _state)) => {
                 if !entry.bin.is_empty() {
@@ -209,6 +222,8 @@ fn compose_env(theme: &Theme, roots: &Roots, flags: &Flags, plan: &RunPlan) -> R
         bin_dirs,
         refs: realized_refs,
         label: plan.label.clone(),
+        prompt_path: plan.prompt_path,
+        prompt_strip: plan.prompt_strip,
     })
 }
 
@@ -253,7 +268,7 @@ fn cmd_build(theme: &Theme, parsed: &Parsed) -> i32 {
                 Err(code) => code,
                 Ok(plan) => {
                     let mut ok = true;
-                    for member in &plan.members {
+                    for (idx, member) in plan.members.iter().enumerate() {
                         let abs = if std::path::Path::new(&member.path).is_absolute() {
                             std::path::PathBuf::from(&member.path)
                         } else {
@@ -269,6 +284,15 @@ fn cmd_build(theme: &Theme, parsed: &Parsed) -> i32 {
                             ProviderKind::Core,
                         )]);
                         let raw = format!("{}:{}", member.name, member.name);
+                        if plan.members.len() > 1 {
+                            theme.progress_chain(
+                                "build",
+                                idx + 1,
+                                plan.members.len(),
+                                &member.name,
+                                "workspace",
+                            );
+                        }
                         let spec = match RefSpec::classify_in(&raw, &table) {
                             Ok(s) => s,
                             Err(e) => {
@@ -312,6 +336,8 @@ fn cmd_build(theme: &Theme, parsed: &Parsed) -> i32 {
                 adapters: Vec::new(),
                 table: cwd_table(),
                 label: Syntax::JETPACK_PROMPT_LABEL.to_string(),
+                prompt_path: ModuleEval::PromptPathMode::default(),
+                prompt_strip: ModuleEval::PromptStripMode::default(),
                 dev_services: Vec::new(),
                 secrets: Vec::new(),
             },
@@ -331,7 +357,11 @@ fn cmd_build(theme: &Theme, parsed: &Parsed) -> i32 {
     let mut realized_refs = Vec::new();
     let mut holes = Vec::new();
     let name_w = name_column_width(&plan.refs);
-    for spec in &plan.refs {
+    let total_steps = plan.refs.len() + plan.adapters.len();
+    for (idx, spec) in plan.refs.iter().enumerate() {
+        if total_steps > 1 {
+            theme.progress_chain("realize", idx + 1, total_steps, &spec.raw, "provider");
+        }
         match realize_ref_outcome(theme, &roots, &parsed.flags, &plan.table, spec, name_w) {
             RefOutcome::Realized(entry, state) => {
                 realized_refs.push(entry.reference);
@@ -345,7 +375,16 @@ fn cmd_build(theme: &Theme, parsed: &Parsed) -> i32 {
             RefOutcome::Failed => ok = false,
         }
     }
-    for adapter in &plan.adapters {
+    for (idx, adapter) in plan.adapters.iter().enumerate() {
+        if total_steps > 1 {
+            theme.progress_chain(
+                "adapt",
+                plan.refs.len() + idx + 1,
+                total_steps,
+                &adapter.name,
+                "adapter",
+            );
+        }
         match realize_adapter(theme, &roots, &parsed.flags, adapter) {
             Some((entry, state)) => {
                 realized_refs.push(entry.reference);

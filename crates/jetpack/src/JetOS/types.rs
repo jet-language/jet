@@ -25,6 +25,7 @@ pub struct OsFlags {
     pub manual_disk: Option<String>,
     pub disk: Option<String>,
     pub json: bool,
+    pub assume_yes: bool,
 }
 
 struct Target {

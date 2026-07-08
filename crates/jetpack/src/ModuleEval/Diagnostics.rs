@@ -13,7 +13,8 @@ pub(super) fn bad_source_ref(ref_text: &str, span: Option<Span>) -> Diagnostic {
         "E0968",
         format!("`{ref_text}` isn't a `provider@target` source ref"),
         "a named source resolves to an upstream written as `provider@target` (U6) — `github@owner/repo/rev`, `path@../local`, `nixpkgs@channel`".to_string(),
-        "write the ref as `provider@target`, e.g. `github@owner/repo/rev`".to_string(),
+        "write the ref as `provider@target`, e.g. `github@NixOS/nixpkgs/nixos-24.05`"
+            .to_string(),
         span,
     )
 }
@@ -84,6 +85,27 @@ pub(super) fn packages_not_a_list(span: Span) -> Diagnostic {
         "`packages: [ … ]` lists the packages this contribution adds, using the Pkg sugar (U6)"
             .to_string(),
         "write `packages: [ … ]`".to_string(),
+        Some(span),
+    )
+}
+
+pub(super) fn prompt_bad_field(field: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0966",
+        format!("`{field}` isn't a field of `Prompt`"),
+        "`Prompt` config has fixed fields: `label`, `path`, and `strip`".to_string(),
+        "remove this field, or write `label`, `path`, or `strip`".to_string(),
+        Some(span),
+    )
+}
+
+pub(super) fn prompt_bad_value(field: &str, expected: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0966",
+        format!("`Prompt.{field}` isn't shaped like {expected}"),
+        "the shell prompt is source-owned by `env.jet`; each prompt setting has one typed shape"
+            .to_string(),
+        format!("write `{field}: {expected}`"),
         Some(span),
     )
 }

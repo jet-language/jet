@@ -15,8 +15,12 @@ description: Verify a Jet compiler/stdlib change end-to-end in THIS repo — the
 ## Test strategy
 
 - **Iterating:** targeted only — `nix develop -c cargo test --test <name>`.
-- **Claiming done:** the FULL suite once — `nix develop -c cargo test`.
-  Run it yourself; never accept a sub-agent's "green".
+- **Claiming done:** the FULL suite once —
+  `nix develop -c scripts/agent/verify-full.sh`. It runs `cargo test` with a
+  repo-local `TMPDIR` and normal test parallelism. Run it yourself; never accept
+  a sub-agent's "green".
+- Do not use global `-- --test-threads=1` for completion proof. Use it only for
+  a targeted race reproduction after a parallel failure.
 
 ## Runtime smoke test (always, for compiler changes)
 

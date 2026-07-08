@@ -28,35 +28,55 @@ fn cmd_update(theme: &Theme, parsed: &Parsed) -> i32 {
     }
 
     let mut ok = true;
+    let mut updates = Vec::new();
     for source in &selected {
         match resolve_source_channel(source, &parsed.flags) {
-            Ok(exact) => {
-                Lock::record_source_channel(
-                    &project_dir,
-                    Lock::LockedSourceChannel {
-                        name: source.name.clone(),
-                        channel: source.channel.as_str().to_string(),
-                        exact: exact.clone(),
-                    },
-                );
-                theme.status(&format!(
-                    "{} {} → {}",
-                    theme.bold(&source.name),
-                    theme.gray(source.channel.as_str()),
-                    exact
-                ));
-            }
+            Ok(exact) => updates.push((source, exact)),
             Err(e) => {
                 report_provider_error(theme, &e);
                 ok = false;
             }
         }
     }
-    if ok {
-        0
-    } else {
-        2
+    if !ok {
+        return 2;
     }
+    theme.status("Plan channel update");
+    let name_w = updates
+        .iter()
+        .map(|(source, _)| source.name.len())
+        .max()
+        .unwrap_or(0)
+        .max(8);
+    for (source, exact) in &updates {
+        theme.plan_row(
+            Output::PlanMark::Change,
+            &source.name,
+            name_w,
+            source.channel.as_str(),
+            exact,
+        );
+    }
+    if !theme.confirm_apply(parsed.flags.assume_yes) {
+        return 0;
+    }
+    for (source, exact) in updates {
+        Lock::record_source_channel(
+            &project_dir,
+            Lock::LockedSourceChannel {
+                name: source.name.clone(),
+                channel: source.channel.as_str().to_string(),
+                exact: exact.clone(),
+            },
+        );
+        theme.status(&format!(
+            "{} {} → {}",
+            theme.bold(&source.name),
+            theme.gray(source.channel.as_str()),
+            exact
+        ));
+    }
+    0
 }
 
 /// `jetpack outdated` — read-only channel freshness report. It may query

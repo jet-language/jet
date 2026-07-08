@@ -170,6 +170,35 @@ fn repl_help_shows_commands() {
 }
 
 #[test]
+fn repl_notebook_turn_controls() {
+    let out = run_transcript(
+        &[
+            "1 + 2",
+            ":turns",
+            ":pin 1",
+            ":fold 1",
+            ":turns",
+            ":unfold 1",
+            ":unpin 1",
+            ":rerun 1",
+        ],
+        None,
+    );
+    assert!(out.contains("#1 ok"), "got: {out:?}");
+    assert!(out.contains("turn pinned"), "got: {out:?}");
+    assert!(out.contains("turn folded"), "got: {out:?}");
+    assert!(out.contains("#1 ok pinned folded"), "got: {out:?}");
+    assert!(out.contains("rerun #1: 1 + 2"), "got: {out:?}");
+    assert!(out.matches("3 : Int").count() >= 2, "got: {out:?}");
+}
+
+#[test]
+fn repl_question_name_shows_type() {
+    let out = run_transcript(&["answer :: 42", ":? answer"], None);
+    assert!(out.contains("answer : Int"), "got: {out:?}");
+}
+
+#[test]
 fn repl_strips_terminal_control_bytes() {
     let out = run_transcript(&["\x0e1 + 2"], None);
     assert_eq!(out.trim(), "3 : Int");

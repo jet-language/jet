@@ -187,6 +187,17 @@ fn cmd_remove(theme: &Theme, parsed: &Parsed) -> i32 {
             return 2;
         }
     };
+    theme.status("Plan env edit");
+    theme.plan_row(
+        Output::PlanMark::Remove,
+        &spec.package,
+        spec.package.len().max(8),
+        raw,
+        Syntax::ENV_FILE,
+    );
+    if !theme.confirm_apply(parsed.flags.assume_yes) {
+        return 0;
+    }
     match EnvFile::remove(&dir, &spec) {
         Ok((_ef, true)) => {
             theme.ok(&format!(

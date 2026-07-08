@@ -380,6 +380,8 @@ pub fn logs(project_dir: &Path, name: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use crate::ModuleEval::{PromptPathMode, PromptStripMode};
+
     use super::*;
 
     fn scratch(tag: &str) -> PathBuf {
@@ -397,6 +399,8 @@ mod tests {
             bin_dirs: Vec::new(),
             refs: Vec::new(),
             label: "jetpack".to_string(),
+            prompt_path: PromptPathMode::Short,
+            prompt_strip: PromptStripMode::Off,
         }
     }
 

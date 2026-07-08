@@ -224,8 +224,62 @@ fn copy_dir(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()>
 }
 
 /// `jetpack clean` — collect stale hangar objects and optimize owned bytes.
-fn cmd_clean(theme: &Theme) -> i32 {
+fn cmd_clean(theme: &Theme, parsed: &Parsed) -> i32 {
     let roots = Store::resolve();
+    match Store::clean_plan(&roots) {
+        Ok(plan) if plan.is_empty() => {
+            theme.status("hangar clean plan: nothing to change.");
+            return 0;
+        }
+        Ok(plan) => {
+            theme.status("Plan hangar clean");
+            let name_w = 16;
+            if plan.removed_objects > 0 {
+                theme.plan_row(
+                    Output::PlanMark::Remove,
+                    "stale-objects",
+                    name_w,
+                    &format!("{} object(s)", plan.removed_objects),
+                    "removed",
+                );
+                theme.detail(&format!("would free {}", human_bytes(plan.removed_bytes)));
+            }
+            if plan.swept_tmp > 0 {
+                theme.plan_row(
+                    Output::PlanMark::Remove,
+                    "build-scratch",
+                    name_w,
+                    &format!("{} item(s)", plan.swept_tmp),
+                    "removed",
+                );
+                theme.detail(&format!("would free {}", human_bytes(plan.swept_tmp_bytes)));
+            }
+            if plan.optimized_files > 0 {
+                theme.plan_row(
+                    Output::PlanMark::Change,
+                    "deduplicate",
+                    name_w,
+                    &format!("{} file(s)", plan.optimized_files),
+                    "hardlinked",
+                );
+                theme.detail(&format!(
+                    "would save {}",
+                    human_bytes(plan.optimized_bytes)
+                ));
+            }
+            if !theme.confirm_apply(parsed.flags.assume_yes) {
+                return 0;
+            }
+        }
+        Err(e) => {
+            theme.error(
+                "could not plan the hangar clean",
+                &format!("{e}"),
+                "check permissions on the hangar root.",
+            );
+            return 1;
+        }
+    }
     match Store::clean(&roots) {
         Ok(report) => {
             theme.ok(&format!(

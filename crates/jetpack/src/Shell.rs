@@ -6,6 +6,7 @@
 //! never mutated. bash, fish, and zsh are supported.
 
 use super::Output::Theme;
+use super::ModuleEval::{PromptPathMode, PromptStripMode};
 use crate::Syntax;
 use std::path::PathBuf;
 use std::process::Command;
@@ -44,6 +45,8 @@ pub struct Env {
     pub bin_dirs: Vec<String>,
     pub refs: Vec<String>,
     pub label: String,
+    pub prompt_path: PromptPathMode,
+    pub prompt_strip: PromptStripMode,
 }
 
 impl Env {
@@ -116,19 +119,19 @@ pub fn enter(theme: &Theme, env: &Env, kind: ShellKind) -> i32 {
     // Per-shell prompt + init wiring. Temp files are cleaned on the way out.
     let _scratch = match kind {
         ShellKind::Bash => {
-            let rc = write_temp("jetpack-bashrc", &bash_rc(&env.label));
+            let rc = write_temp("jetpack-bashrc", &bash_rc(&env.label, env.prompt_path, env.prompt_strip));
             cmd.arg("--rcfile").arg(&rc).arg("-i");
             Some(Scratch::File(rc))
         }
         ShellKind::Zsh => {
             // zsh reads `.zshrc` from ZDOTDIR; point it at a scratch dir.
             let dir = write_temp_dir("jetpack-zdotdir");
-            std::fs::write(dir.join(".zshrc"), zsh_rc(&env.label)).ok();
+            std::fs::write(dir.join(".zshrc"), zsh_rc(&env.label, env.prompt_path, env.prompt_strip)).ok();
             cmd.env("ZDOTDIR", &dir).arg("-i");
             Some(Scratch::Dir(dir))
         }
         ShellKind::Fish => {
-            cmd.arg("-C").arg(fish_init(&env.label)).arg("-i");
+            cmd.arg("-C").arg(fish_init(&env.label, env.prompt_path, env.prompt_strip)).arg("-i");
             None
         }
     };
@@ -174,9 +177,11 @@ impl BrandedShell {
 
 /// Build a [`BrandedShell`] for `kind`, labeling the prompt with `label`.
 pub fn branded_shell(kind: ShellKind, label: &str) -> BrandedShell {
+    let path = PromptPathMode::Short;
+    let strip = PromptStripMode::Off;
     match kind {
         ShellKind::Bash => {
-            let rc = write_temp("jetpack-bashrc", &bash_rc(label));
+            let rc = write_temp("jetpack-bashrc", &bash_rc(label, path, strip));
             BrandedShell {
                 command_tail: vec![
                     "bash".to_string(),
@@ -191,7 +196,7 @@ pub fn branded_shell(kind: ShellKind, label: &str) -> BrandedShell {
         }
         ShellKind::Zsh => {
             let dir = write_temp_dir("jetpack-zdotdir");
-            std::fs::write(dir.join(".zshrc"), zsh_rc(label)).ok();
+            std::fs::write(dir.join(".zshrc"), zsh_rc(label, path, strip)).ok();
             BrandedShell {
                 command_tail: vec!["zsh".to_string(), "-i".to_string()],
                 env_vars: vec![("ZDOTDIR".to_string(), dir.display().to_string())],
@@ -203,7 +208,7 @@ pub fn branded_shell(kind: ShellKind, label: &str) -> BrandedShell {
             command_tail: vec![
                 "fish".to_string(),
                 "-C".to_string(),
-                fish_init(label),
+                fish_init(label, path, strip),
                 "-i".to_string(),
             ],
             env_vars: Vec::new(),
@@ -215,7 +220,7 @@ pub fn branded_shell(kind: ShellKind, label: &str) -> BrandedShell {
 
 // ── prompt / rc generation ───────────────────────────────────────────────
 
-fn bash_rc(label: &str) -> String {
+fn bash_rc(label: &str, path: PromptPathMode, strip: PromptStripMode) -> String {
     // Source the user's real bashrc first, then override the prompt so the
     // jetpack label is unmistakable: bold cyan label, blue path, green ❯.
     //
@@ -226,25 +231,73 @@ fn bash_rc(label: &str) -> String {
     // and are invisible control bytes when readline isn't displaying at all.
     const S: char = '\u{1}';
     const E: char = '\u{2}';
+    let path_escape = match path {
+        PromptPathMode::Short => "\\W",
+        PromptPathMode::Full => "\\w",
+    };
+    let status_prefix = if strip == PromptStripMode::On {
+        "$(__jetpack_status_words)\\n"
+    } else {
+        ""
+    };
     format!(
         "[ -f /etc/bash.bashrc ] && . /etc/bash.bashrc\n\
          [ -f \"$HOME/.bashrc\" ] && . \"$HOME/.bashrc\"\n\
-         PS1='{S}\u{1b}[1;36m{E}{label}{S}\u{1b}[0m{E} {S}\u{1b}[34m{E}\\w{S}\u{1b}[0m{E} {S}\u{1b}[32m{E}❯{S}\u{1b}[0m{E} '\n"
+         __jetpack_status_words() {{ printf 'build unknown · test unknown · git unknown'; }}\n\
+         __jetpack_status_glance() {{ printf '\\n%s\\n' \"$(__jetpack_status_words)\"; }}\n\
+         bind -x '\"\\C-g\":__jetpack_status_glance' 2>/dev/null || true\n\
+         if [ -n \"${{NO_COLOR:-}}\" ]; then\n\
+           PS1='{status_prefix}{label} {path_escape} > '\n\
+         else\n\
+           PS1='{status_prefix}{S}\u{1b}[1;36m{E}{label}{S}\u{1b}[0m{E} {S}\u{1b}[34m{E}{path_escape}{S}\u{1b}[0m{E} {S}\u{1b}[32m{E}❯{S}\u{1b}[0m{E} '\n\
+         fi\n"
     )
 }
 
-fn zsh_rc(label: &str) -> String {
+fn zsh_rc(label: &str, path: PromptPathMode, strip: PromptStripMode) -> String {
+    let path_escape = match path {
+        PromptPathMode::Short => "%1~",
+        PromptPathMode::Full => "%~",
+    };
+    let status_prefix = if strip == PromptStripMode::On {
+        "$(__jetpack_status_words)\n"
+    } else {
+        ""
+    };
     format!(
         "[ -f \"$HOME/.zshrc\" ] && source \"$HOME/.zshrc\"\n\
-         PROMPT='%B%F{{cyan}}{label}%f%b %F{{blue}}%~%f %F{{green}}❯%f '\n"
+         setopt prompt_subst\n\
+         __jetpack_status_words() {{ printf 'build unknown · test unknown · git unknown'; }}\n\
+         __jetpack_status_glance() {{ printf '\\n%s\\n' \"$(__jetpack_status_words)\"; zle reset-prompt; }}\n\
+         zle -N __jetpack_status_glance 2>/dev/null || true\n\
+         bindkey '^G' __jetpack_status_glance 2>/dev/null || true\n\
+         if [ -n \"${{NO_COLOR:-}}\" ]; then\n\
+           PROMPT='{status_prefix}{label} {path_escape} > '\n\
+         else\n\
+           PROMPT='{status_prefix}%B%F{{cyan}}{label}%f%b %F{{blue}}{path_escape}%f %F{{green}}❯%f '\n\
+         fi\n"
     )
 }
 
-fn fish_init(label: &str) -> String {
+fn fish_init(label: &str, path: PromptPathMode, strip: PromptStripMode) -> String {
+    let path_expr = match path {
+        PromptPathMode::Short => "prompt_pwd",
+        PromptPathMode::Full => "pwd",
+    };
+    let strip_line = if strip == PromptStripMode::On {
+        "__jetpack_status_words; echo; "
+    } else {
+        ""
+    };
     format!(
-        "function fish_prompt; set_color -o cyan; echo -n '{label} '; \
-         set_color blue; echo -n (prompt_pwd); \
-         set_color green; echo -n ' ❯ '; set_color normal; end"
+        "function __jetpack_status_words; echo -n 'build unknown · test unknown · git unknown'; end; \
+         function __jetpack_status_glance; echo; __jetpack_status_words; echo; commandline -f repaint; end; \
+         bind \\cg __jetpack_status_glance; \
+         function fish_prompt; {strip_line}\
+         if set -q NO_COLOR; echo -n '{label} '; echo -n ({path_expr}); echo -n ' > '; \
+         else; set_color -o cyan; echo -n '{label} '; \
+         set_color blue; echo -n ({path_expr}); \
+         set_color green; echo -n ' ❯ '; set_color normal; end; end"
     )
 }
 
@@ -297,6 +350,8 @@ mod tests {
             bin_dirs: dirs.iter().map(|s| s.to_string()).collect(),
             refs: vec![],
             label: Syntax::JETPACK_PROMPT_LABEL.to_string(),
+            prompt_path: PromptPathMode::Short,
+            prompt_strip: PromptStripMode::Off,
         }
     }
 
@@ -316,9 +371,34 @@ mod tests {
 
     #[test]
     fn bash_rc_sets_label() {
-        let rc = bash_rc("jetpack");
+        let rc = bash_rc("jetpack", PromptPathMode::Short, PromptStripMode::Off);
         assert!(rc.contains("PS1="));
         assert!(rc.contains("jetpack"));
+    }
+
+    #[test]
+    fn prompt_rc_supports_glance_and_optional_strip() {
+        let bash = bash_rc("web-api", PromptPathMode::Short, PromptStripMode::On);
+        assert!(bash.contains("__jetpack_status_words"));
+        assert!(bash.contains("\\C-g"));
+        assert!(bash.contains("$(__jetpack_status_words)\\n"));
+        assert!(bash.contains("\\W"));
+
+        let zsh = zsh_rc("web-api", PromptPathMode::Full, PromptStripMode::On);
+        assert!(zsh.contains("bindkey '^G' __jetpack_status_glance"));
+        assert!(zsh.contains("%~"));
+
+        let fish = fish_init("web-api", PromptPathMode::Short, PromptStripMode::On);
+        assert!(fish.contains("bind \\cg __jetpack_status_glance"));
+        assert!(fish.contains("__jetpack_status_words; echo;"));
+        assert!(fish.contains("prompt_pwd"));
+    }
+
+    #[test]
+    fn prompt_rc_has_plain_no_color_fallback() {
+        let rc = bash_rc("web-api", PromptPathMode::Full, PromptStripMode::Off);
+        assert!(rc.contains("NO_COLOR"));
+        assert!(rc.contains("web-api \\w > "));
     }
 
     #[test]

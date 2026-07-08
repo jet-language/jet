@@ -385,7 +385,7 @@ fn clean_removes_only_stale_unreferenced_hangar_objects() {
     fs::write(fresh.join("payload"), "fresh bytes").unwrap();
 
     let out = jetpack()
-        .args(["clean", "--no-color"])
+        .args(["clean", "--no-color", "--yes"])
         .env("JETPACK_ROOT", &root.path)
         .output()
         .unwrap();
@@ -404,6 +404,29 @@ fn clean_removes_only_stale_unreferenced_hangar_objects() {
 }
 
 #[test]
+fn clean_without_yes_prints_plan_and_does_not_apply_in_non_tty() {
+    let root = Scratch::new("root");
+    let stale = write_hangar_meta(&root.path, "old-plan", "oldplan", "1.0", "", Some(1));
+    fs::write(stale.join("payload"), "old bytes").unwrap();
+
+    let out = jetpack()
+        .args(["clean", "--no-color"])
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(stale.exists(), "plan-only clean must not delete objects");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("Plan hangar clean"), "stderr: {stderr}");
+    assert!(stderr.contains("- stale-objects"), "stderr: {stderr}");
+    assert!(stderr.contains("-y or --yes"), "stderr: {stderr}");
+}
+
+#[test]
 fn clean_keeps_lock_reachable_and_legacy_unknown_hangar_objects() {
     let root = Scratch::new("root");
     let project = Scratch::new("proj");
@@ -412,7 +435,7 @@ fn clean_keeps_lock_reachable_and_legacy_unknown_hangar_objects() {
     write_lock_with_live_output(&project.path, "live", "1.0", "sha256-live");
 
     let out = jetpack()
-        .args(["clean", "--no-color"])
+        .args(["clean", "--no-color", "--yes"])
         .current_dir(&project.path)
         .env("JETPACK_ROOT", &root.path)
         .output()
@@ -442,7 +465,7 @@ fn clean_sweeps_orphan_build_scratch_but_keeps_active_scratch() {
     fs::write(active.join("tmp"), "live").unwrap();
 
     let out = jetpack()
-        .args(["clean", "--no-color"])
+        .args(["clean", "--no-color", "--yes"])
         .env("JETPACK_ROOT", &root.path)
         .output()
         .unwrap();
@@ -478,7 +501,7 @@ fn clean_optimizes_duplicate_files_inside_hangar_only() {
     fs::write(second.join("blob"), "same payload").unwrap();
 
     let out = jetpack()
-        .args(["clean", "--no-color"])
+        .args(["clean", "--no-color", "--yes"])
         .env("JETPACK_ROOT", &root.path)
         .output()
         .unwrap();
@@ -505,7 +528,7 @@ fn jet_clean_delegates_to_jetpack_clean() {
     let stale = write_hangar_meta(&root.path, "old-top", "oldtop", "1.0", "", Some(1));
 
     let out = jet()
-        .args(["clean", "--no-color"])
+        .args(["clean", "--no-color", "--yes"])
         .env("JETPACK_ROOT", &root.path)
         .output()
         .unwrap();
@@ -695,7 +718,7 @@ fn add_then_remove_edits_env_file() {
     assert!(env.contains("pkg.packages"), "env.jet: {env}");
 
     let remove = jetpack()
-        .args(["remove", "nixpkgs:ripgrep", "--no-color"])
+        .args(["remove", "nixpkgs:ripgrep", "--no-color", "--yes"])
         .current_dir(&proj.path)
         .output()
         .unwrap();
@@ -705,6 +728,30 @@ fn add_then_remove_edits_env_file() {
         !env.contains("\"ripgrep\""),
         "env.jet still has ripgrep: {env}"
     );
+}
+
+#[test]
+fn remove_without_yes_prints_plan_and_keeps_env_file_in_non_tty() {
+    let proj = Scratch::new("proj");
+    let add = jetpack()
+        .args(["add", "nixpkgs:ripgrep", "--no-color"])
+        .current_dir(&proj.path)
+        .output()
+        .unwrap();
+    assert!(add.status.success());
+
+    let remove = jetpack()
+        .args(["remove", "nixpkgs:ripgrep", "--no-color"])
+        .current_dir(&proj.path)
+        .output()
+        .unwrap();
+    assert!(remove.status.success());
+    let env = fs::read_to_string(proj.join("env.jet")).unwrap();
+    assert!(env.contains("\"ripgrep\""), "env.jet was changed: {env}");
+    let stderr = String::from_utf8_lossy(&remove.stderr);
+    assert!(stderr.contains("Plan env edit"), "stderr: {stderr}");
+    assert!(stderr.contains("- ripgrep"), "stderr: {stderr}");
+    assert!(stderr.contains("-y or --yes"), "stderr: {stderr}");
 }
 
 #[test]
@@ -1001,7 +1048,7 @@ module dev {
     .unwrap();
 
     let update = jetpack()
-        .args(["update", "--no-color", "--fixtures"])
+        .args(["update", "--no-color", "--yes", "--fixtures"])
         .arg(&fixtures.path)
         .current_dir(&proj.path)
         .env("JETPACK_ROOT", &root.path)
@@ -1090,7 +1137,7 @@ module dev {
     .unwrap();
 
     let out = jetpack()
-        .args(["update", "--no-color", "--fixtures"])
+        .args(["update", "--no-color", "--yes", "--fixtures"])
         .arg(&fixtures.path)
         .current_dir(&proj.path)
         .env("JETPACK_ROOT", &root.path)
@@ -4820,6 +4867,13 @@ fn os_vm_prove_rejects_stale_guest_generation() {
 fn os_image_writes_jetos_installer_media_proof() {
     let root = Scratch::new("os-image-root");
     let tools = Scratch::new("os-image-tools");
+    let boot = Scratch::new("os-image-boot");
+    fs::write(boot.join("kernel"), "MZ test kernel\nHdrS\n").unwrap();
+    fs::write(
+        boot.join("initrd"),
+        b"070701 test initrd with embedded zstd magic \x28\xb5\x2f\xfd\n",
+    )
+    .unwrap();
     write_fake_vm_tools(&tools.path, true);
     let out = jet()
         .args([
@@ -4829,10 +4883,13 @@ fn os_image_writes_jetos_installer_media_proof() {
             "--manual",
             "/dev/sda",
             "--no-color",
+            "--offline",
         ])
         .current_dir(config_example_dir())
         .env("JETPACK_ROOT", &root.path)
         .env("PATH", &tools.path)
+        .env("JETOS_CACHYOS_KERNEL", boot.join("kernel"))
+        .env("JETOS_CACHYOS_INITRD", boot.join("initrd"))
         .output()
         .unwrap();
     assert!(
@@ -4956,6 +5013,10 @@ fn os_image_writes_jetos_installer_media_proof() {
     );
     assert!(verify.contains("\"rollback\""), "verify: {verify}");
     let initrd_bytes = fs::read(staging.join("boot/initrd")).unwrap();
+    assert!(
+        initrd_bytes.starts_with(b"070701"),
+        "raw newc initrd with embedded compressed payload bytes must stay a raw cpio archive"
+    );
     let initrd = String::from_utf8_lossy(&initrd_bytes);
     assert!(initrd.contains("jetos.mode=install"), "initrd: {initrd}");
     assert!(initrd.contains("jetos.mode=verify"), "initrd: {initrd}");

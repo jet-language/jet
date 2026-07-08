@@ -46,6 +46,7 @@ fn cmd_os(theme: &Theme, parsed: &Parsed) -> i32 {
         manual_disk: parsed.flags.os_manual.clone(),
         disk: parsed.flags.os_disk.clone(),
         json: parsed.flags.json,
+        assume_yes: parsed.flags.assume_yes,
     };
     if verb == Some(Syntax::USER_SUBCOMMAND) {
         let user_verb = args.first().map(String::as_str);
@@ -75,6 +76,7 @@ fn cmd_user(theme: &Theme, parsed: &Parsed) -> i32 {
         manual_disk: parsed.flags.os_manual.clone(),
         disk: parsed.flags.os_disk.clone(),
         json: parsed.flags.json,
+        assume_yes: parsed.flags.assume_yes,
     };
     super::JetOS::user_main(theme, verb, args, &flags)
 }

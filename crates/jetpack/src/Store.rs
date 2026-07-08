@@ -295,6 +295,38 @@ impl CleanReport {
 /// D-JPK-GC1=B / U22: collect only unreferenced stale hangar objects, sweep
 /// orphan build scratch, then optimize duplicate Jet-owned files. Lockfile
 /// reachable entries and unknown legacy records are retained.
+pub fn clean_plan(roots: &Roots) -> std::io::Result<CleanReport> {
+    let store = roots.hangar_dir();
+    if !store.exists() {
+        return Ok(CleanReport::default());
+    }
+    let live = current_lock_roots();
+    let mut report = sweep_build_scratch_plan(&store)?;
+    let now = now_secs();
+
+    for ent in object_dirs(&store)? {
+        let path = ent.path();
+        let id = ent.file_name().to_string_lossy().into_owned();
+        let Some(meta) = read_meta(&path) else {
+            continue;
+        };
+        if is_live(&id, &meta, &live) || meta.last_used_at.is_none() {
+            continue;
+        }
+        let last_used = meta.last_used_at.unwrap_or(now);
+        if now.saturating_sub(last_used) < STALE_AFTER.as_secs() {
+            continue;
+        }
+        report.removed_objects += 1;
+        report.removed_bytes += dir_size(&path);
+    }
+
+    let opt = optimize_hangar_plan(&store)?;
+    report.optimized_files += opt.optimized_files;
+    report.optimized_bytes += opt.optimized_bytes;
+    Ok(report)
+}
+
 pub fn clean(roots: &Roots) -> std::io::Result<CleanReport> {
     super::RuntimePolicy::with_lock(&roots.root, "hangar-clean", || clean_unlocked(roots))
 }
@@ -352,6 +384,23 @@ pub fn maybe_auto_clean(roots: &Roots) -> std::io::Result<Option<CleanReport>> {
     })
 }
 
+fn sweep_build_scratch_plan(hangar: &Path) -> std::io::Result<CleanReport> {
+    let root = hangar.join(BUILD_SCRATCH_DIR);
+    let mut report = CleanReport::default();
+    let Ok(rd) = fs::read_dir(&root) else {
+        return Ok(report);
+    };
+    for ent in rd.flatten() {
+        let path = ent.path();
+        if path.join(ACTIVE_TMP_MARKER).exists() {
+            continue;
+        }
+        report.swept_tmp += 1;
+        report.swept_tmp_bytes += dir_size(&path);
+    }
+    Ok(report)
+}
+
 fn sweep_build_scratch(hangar: &Path) -> std::io::Result<CleanReport> {
     let root = hangar.join(BUILD_SCRATCH_DIR);
     let mut report = CleanReport::default();
@@ -371,6 +420,33 @@ fn sweep_build_scratch(hangar: &Path) -> std::io::Result<CleanReport> {
         }
         report.swept_tmp += 1;
         report.swept_tmp_bytes += bytes;
+    }
+    Ok(report)
+}
+
+fn optimize_hangar_plan(hangar: &Path) -> std::io::Result<CleanReport> {
+    let mut seen: BTreeMap<(u64, String), PathBuf> = BTreeMap::new();
+    let mut report = CleanReport::default();
+    for obj in object_dirs(hangar)? {
+        for file in files_under(&obj.path()) {
+            if file.file_name().and_then(|n| n.to_str()) == Some("meta.json") {
+                continue;
+            }
+            let Ok(meta) = fs::metadata(&file) else {
+                continue;
+            };
+            if !meta.is_file() || meta.len() == 0 {
+                continue;
+            }
+            let Ok(bytes) = fs::read(&file) else { continue };
+            let key = (meta.len(), SHA256::sha256_hex(&bytes));
+            if seen.contains_key(&key) {
+                report.optimized_files += 1;
+                report.optimized_bytes += meta.len();
+            } else {
+                seen.insert(key, file);
+            }
+        }
     }
     Ok(report)
 }

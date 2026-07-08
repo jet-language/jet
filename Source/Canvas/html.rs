@@ -47,6 +47,15 @@ select { min-width: 180px; }
 body.is-dev-mode #graph-select { display: block; }
 #topbar > select { flex: 1 1 190px; min-width: 140px; max-width: 360px; }
 #topbar > button { flex: 0 0 auto; padding-inline: 8px; }
+.lens-switch { display: flex; gap: 3px; padding: 3px; border: 1px solid #2c4058; background: #080d13; border-radius: 6px; }
+.lens-switch button { min-height: 26px; padding-inline: 9px; border-radius: 4px; background: transparent; border-color: transparent; box-shadow: none; }
+.lens-switch button.is-active { border-color: #d4d4d8; background: #242931; color: #fafafa; }
+.detail-toggles { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; padding: 3px 5px; border: 1px solid #25364b; background: #080d13; border-radius: 6px; }
+.detail-toggle { display: flex; align-items: center; gap: 4px; color: #9db4d2; font: 10px ui-monospace, "SFMono-Regular", Consolas, monospace; text-transform: uppercase; }
+.detail-toggle input { width: 13px; height: 13px; min-height: 0; accent-color: #d4d4d8; }
+.type-detail, .diagnostic-detail, .effect-detail, .debug-detail, .package-detail { display: none !important; }
+body.detail-types .type-detail, body.detail-diagnostics .diagnostic-detail, body.detail-effects .effect-detail, body.detail-debug .debug-detail, body.detail-package .package-detail { display: revert !important; }
+body.detail-package .project-section.package-detail, body.detail-diagnostics .project-section.diagnostic-detail { display: grid !important; }
 #jump { flex: 1 1 150px; min-width: 94px; color: #9db4d2; font: 12px ui-monospace, "SFMono-Regular", Consolas, monospace; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 body:not(.is-dev-mode) #jump { display: none; }
 .debug-controls { margin-left: auto; display: flex; align-items: center; gap: 5px; flex: 1 1 380px; min-width: 0; justify-content: flex-end; flex-wrap: wrap; }
@@ -66,6 +75,8 @@ body:not(.is-dev-mode) .debug-controls { display: none; }
 .panel summary .count { justify-self: end; }
 .panel details > :not(summary) { margin-top: 8px; }
 .graph-list, .search-results, .project-list { display: grid; gap: 6px; }
+.project-section { display: grid; gap: 7px; margin-top: 10px; padding-top: 10px; border-top: 1px solid #22364d; }
+.project-section h3 { margin: 0; color: #8fb2dc; font: 10px ui-monospace, "SFMono-Regular", Consolas, monospace; letter-spacing: .09em; text-transform: uppercase; }
 .graph-item { width: 100%; display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 8px; text-align: left; border-color: #283b52; background: #101821; min-height: 38px; }
 .graph-item.is-active { border-color: #35c2ff; background: #102437; box-shadow: inset 3px 0 0 #35c2ff; }
 .project-card { border: 1px solid #263850; border-radius: 6px; background: #0d1520; padding: 8px; display: grid; gap: 5px; }
@@ -108,8 +119,14 @@ body:not(.is-dev-mode) #wire-status { display: none; }
 .graph-stat b { color: #eaf5ff; font-size: 13px; }
 .graph-stat span { color: #84a8cf; font: 9px ui-monospace, "SFMono-Regular", Consolas, monospace; text-transform: uppercase; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 #source-view { position: absolute; inset: 0; display: none; margin: 0; padding: 20px 24px 84px; overflow: auto; color: #dbeafe; background: #07101a; border: 0; font: 12px ui-monospace, "SFMono-Regular", Consolas, monospace; line-height: 1.6; white-space: pre; tab-size: 4; }
-#stage.is-source #jet-canvas-view, #stage.is-source #minimap, #stage.is-source #graph-strip, #stage.is-source #wire-status, #stage.is-source #graph-overview { display: none; }
-#stage.is-source #source-view { display: block; }
+#stage.is-code #jet-canvas-view, #stage.is-code #minimap, #stage.is-code #graph-strip, #stage.is-code #wire-status, #stage.is-code #graph-overview { display: none; }
+#stage.is-code #source-view { display: block; }
+#stage.is-split #source-view { display: block; right: 50%; border-right: 1px solid #25364b; box-shadow: 12px 0 30px rgba(0,0,0,.28); }
+#stage.is-split #jet-canvas-view { position: absolute; right: 0; top: 0; width: 50%; height: 100%; border-left: 1px solid #25364b; }
+#stage.is-split #graph-strip { left: calc(50% + 12px); }
+#stage.is-split #wire-status { left: calc(50% + 10px); }
+#stage.is-split #hud { left: calc(50% + 16px); }
+#stage.is-split #minimap { width: min(180px, 18vw); }
 #minimap { position: absolute; right: clamp(8px, 1.4vw, 16px); bottom: clamp(8px, 1.4vw, 16px); width: min(210px, 22vw); height: min(132px, 15vw); min-width: 120px; min-height: 78px; border: 1px solid #365a7f; background: rgba(7,16,28,.9); box-shadow: 0 14px 42px rgba(0,0,0,.42); border-radius: 6px; }
 #hud { position: absolute; left: clamp(8px, 1.4vw, 16px); bottom: clamp(8px, 1.4vw, 16px); display: flex; gap: 8px; color: #9bb4d3; font: 12px ui-monospace, "SFMono-Regular", Consolas, monospace; max-width: calc(100% - 32px); flex-wrap: wrap; }
 #hud span { border: 1px solid #263b59; background: rgba(8,17,29,.88); padding: 5px 8px; border-radius: 4px; }
@@ -161,6 +178,8 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
 .pin-editor-title { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 7px; min-width: 0; }
 .pin-editor-title b { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .pin-port { width: 12px; height: 12px; border-radius: 50%; display: inline-block; box-shadow: 0 0 0 3px rgba(255,255,255,.07), 0 0 16px currentColor; background: currentColor; }
+.pin-port.is-exec { width: 14px; height: 14px; border-radius: 2px; clip-path: polygon(0 0, 100% 50%, 0 100%); }
+.pin-port.is-fallible { border-radius: 2px; transform: rotate(45deg); }
 .type-chip { color: #cfe9ff; border: 1px solid currentColor; background: rgba(255,255,255,.04); border-radius: 999px; padding: 2px 7px; font: 10px ui-monospace, "SFMono-Regular", Consolas, monospace; max-width: 98px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pin-empty { color: #7890ad; border: 1px dashed #31445d; padding: 8px; border-radius: 4px; font: 11px ui-monospace, "SFMono-Regular", Consolas, monospace; }
 .pin-tools { display: grid; grid-template-columns: minmax(0, 1fr) 68px 32px; gap: 6px; margin-top: 2px; }
@@ -224,14 +243,16 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
 <body>
 <div id="shell">
   <header id="topbar">
-    <div id="brand"><strong>Jet Canvas</strong><span>source-backed blueprint</span></div>
+    <div id="brand"><strong>Jet Canvas</strong><span>source-backed workbench</span></div>
     <button id="graph-back" title="Back graph">‹</button>
     <button id="graph-forward" title="Forward graph">›</button>
     <select id="graph-select" aria-label="Graph"></select>
     <button id="fit">Fit</button>
     <button id="reload">Reload</button>
     <button id="source-diff">Diff</button>
+    <div id="lens-switch" class="lens-switch" role="group" aria-label="Canvas lens"><button id="view-code" data-view-mode="code">Code</button><button id="view-split" data-view-mode="split">Split</button><button id="view-graph" data-view-mode="graph">Graph</button></div>
     <button id="view-toggle">Code</button>
+    <div id="detail-toggles" class="detail-toggles" aria-label="Detail toggles"><label class="detail-toggle"><input id="toggle-types" data-detail-toggle="types" type="checkbox">Types</label><label class="detail-toggle"><input id="toggle-diagnostics" data-detail-toggle="diagnostics" type="checkbox">Diagnostics</label><label class="detail-toggle"><input id="toggle-effects" data-detail-toggle="effects" type="checkbox">Effects</label><label class="detail-toggle"><input id="toggle-debug" data-detail-toggle="debug" type="checkbox">Debug</label><label class="detail-toggle"><input id="toggle-package" data-detail-toggle="package" type="checkbox">Package</label></div>
     <button id="developer-mode" title="Show Canvas internals">Developer</button>
     <button id="undo-edit">Undo</button>
     <button id="redo-edit">Redo</button>
@@ -254,7 +275,7 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
   </header>
   <main id="workbench">
     <aside id="left-drawer" class="side">
-      <section id="project-panel" class="panel"><details open><summary><span>Project</span><span id="project-mode" class="count">file</span></summary><div id="project-rail" class="project-list"></div></details></section>
+      <section id="project-panel" class="panel"><details open><summary><span>Project files</span><span id="project-mode" class="count">file</span></summary><div id="project-rail" class="project-list"></div><div id="package-summary" class="project-section package-detail"></div><div id="dependency-summary" class="project-section package-detail"></div><div id="dev-summary" class="project-section package-detail"></div><div id="diagnostics-summary" class="project-section diagnostic-detail"></div><div id="trust-summary" class="project-section package-detail"></div></details></section>
       <section id="graphs-panel" class="panel"><details open><summary><span>Functions</span><span id="graph-count" class="count">0</span></summary><div id="graph-list" class="graph-list"></div></details></section>
       <section id="search-panel" class="panel"><details><summary><span>Search</span></summary><input id="canvas-search" class="search" placeholder="Find in graph"><div id="search-results" class="search-results"></div></details></section>
     </aside>
@@ -278,7 +299,7 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
 <div id="context-menu" role="menu"></div>
 <div id="first-run-tour" role="dialog" aria-label="Canvas first run">
   <b>Canvas uses source as truth.</b>
-  <span>Use search, right-click actions, pin menus, graph bookmarks, and Run without creating graph assets.</span>
+  <span>Use Code, Split, or Graph, then right-click or release a socket for source-backed actions.</span>
   <button id="tour-dismiss">Dismiss</button>
 </div>
 __JET_CANVAS_BOOTSTRAP__

@@ -292,7 +292,7 @@ exec /bin/sh /jetos/install.sh
     entries.extend(installer_tool_overlay_entries()?);
     let overlay = cpio_newc_owned(&entries);
     let initrd_bytes = fs::read(initrd)?;
-    let overlay = if contains_zstd_frame(&initrd_bytes) && find_path_tool("zstd").is_some() {
+    let overlay = if is_zstd_stream(&initrd_bytes) && find_path_tool("zstd").is_some() {
         let overlay_path = initrd.with_extension("jetos-overlay.cpio");
         fs::write(&overlay_path, &overlay)?;
         let compressed = Command::new("zstd")
@@ -307,16 +307,12 @@ exec /bin/sh /jetos/install.sh
     } else {
         overlay
     };
-    if is_newc_bytes(&initrd_bytes) && !contains_zstd_frame(&initrd_bytes) {
-        let mut existing = initrd_bytes;
-        if let Some(header) = cpio_trailer_header_offset(&existing) {
-            existing.truncate(header);
-            existing.extend_from_slice(&overlay);
-            return fs::write(initrd, existing);
-        }
-    }
     use std::io::Write;
     let mut file = fs::OpenOptions::new().append(true).open(initrd)?;
+    let pad = (4 - (initrd_bytes.len() % 4)) % 4;
+    if pad != 0 {
+        file.write_all(&vec![0; pad])?;
+    }
     file.write_all(&overlay)
 }
 
@@ -419,6 +415,7 @@ fn add_cpio_file(
 ) {
     add_cpio_parent_dirs(dirs, name);
     if seen_files.insert(name.to_string()) {
+        let data = sanitize_runtime_branding_bytes(&data).unwrap_or(data);
         files.push(OwnedCpioEntry::file(name, mode, data));
     }
 }
@@ -475,26 +472,8 @@ fn ldd_dependency_paths(path: &Path) -> std::io::Result<Vec<PathBuf>> {
     Ok(deps)
 }
 
-fn contains_zstd_frame(bytes: &[u8]) -> bool {
-    bytes
-        .windows(4)
-        .any(|window| window == [0x28, 0xb5, 0x2f, 0xfd])
-}
-
-fn is_newc_bytes(bytes: &[u8]) -> bool {
-    bytes.starts_with(b"070701") || bytes.starts_with(b"070702")
-}
-
-fn cpio_trailer_header_offset(bytes: &[u8]) -> Option<usize> {
-    let marker = b"TRAILER!!!\0";
-    bytes
-        .windows(marker.len())
-        .rposition(|window| window == marker)
-        .and_then(|name| {
-            name.checked_sub(110).filter(|header| {
-                bytes[*header..].starts_with(b"070701") || bytes[*header..].starts_with(b"070702")
-            })
-        })
+fn is_zstd_stream(bytes: &[u8]) -> bool {
+    bytes.starts_with(&[0x28, 0xb5, 0x2f, 0xfd])
 }
 
 struct OwnedCpioEntry {

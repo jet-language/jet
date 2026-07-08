@@ -183,8 +183,9 @@ impl<'a> Parser<'a> {
             let kind = match &self.peek().kind {
                 TokKind::KwExtern => {
                     let span = Span::new(start.start, self.bump().span.end);
+                    let old = format!("#{}", "extern");
                     self.diags
-                        .push(self.retired_c_module_marker_diag("#extern", "#Extern", span));
+                        .push(self.retired_c_module_marker_diag(&old, "#Extern", span));
                     CModuleKind::Extern
                 }
                 TokKind::Ident(n) if n == Syntax::ATTR_EXTERN_MODULE => {
@@ -197,8 +198,9 @@ impl<'a> Parser<'a> {
                 }
                 TokKind::Ident(n) if n == Syntax::ATTR_BINDGEN_RETIRED => {
                     let span = Span::new(start.start, self.bump().span.end);
+                    let old = format!("#{}", Syntax::ATTR_BINDGEN_RETIRED);
                     self.diags
-                        .push(self.retired_c_module_marker_diag("#bindgen", "#Bindgen", span));
+                        .push(self.retired_c_module_marker_diag(&old, "#Bindgen", span));
                     CModuleKind::Bindgen
                 }
                 other => {
@@ -225,14 +227,16 @@ impl<'a> Parser<'a> {
             let kind = match &self.peek().kind {
                 TokKind::KwExtern => {
                     let span = Span::new(start.start, self.bump().span.end);
+                    let old = format!("@{}", "extern");
                     self.diags
-                        .push(self.retired_c_module_marker_diag("@extern", "#Extern", span));
+                        .push(self.retired_c_module_marker_diag(&old, "#Extern", span));
                     CModuleKind::Extern
                 }
                 TokKind::Ident(n) if n == Syntax::ATTR_BINDGEN_RETIRED => {
                     let span = Span::new(start.start, self.bump().span.end);
+                    let old = format!("@{}", Syntax::ATTR_BINDGEN_RETIRED);
                     self.diags
-                        .push(self.retired_c_module_marker_diag("@bindgen", "#Bindgen", span));
+                        .push(self.retired_c_module_marker_diag(&old, "#Bindgen", span));
                     CModuleKind::Bindgen
                 }
                 _ => unreachable!("at_retired_at_c_module guards marker spelling"),

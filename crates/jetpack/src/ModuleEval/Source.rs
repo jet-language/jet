@@ -18,7 +18,10 @@ use super::Diagnostics::{
     oci_from_non_executable,
 };
 use super::Eval::{evaluate_modules, merge_all, parse_program, pkg_ref};
-use super::Types::{AdapterPlan, EnvPlan, FleetPlan, ImageKind, ImagePlan, SystemPlan};
+use super::Types::{
+    AdapterPlan, EnvPlan, FleetPlan, ImageKind, ImagePlan, PromptPathMode, PromptStripMode,
+    SystemPlan,
+};
 
 /// True when `src` uses the typed `module { … }` surface (U3/U8) rather than
 /// the Phase-1 `pkg.*` directive surface. The CLI routes loading on this: a
@@ -163,6 +166,8 @@ pub fn evaluate_env(src: &str, base_dir: &Path) -> Result<EnvPlan, Diagnostic> {
 
     let mut package_refs = Vec::new();
     let mut prompt = None;
+    let mut prompt_path = PromptPathMode::default();
+    let mut prompt_strip = PromptStripMode::default();
     for key in &env_keys {
         let entry = &merged[key];
         for pkg in &entry.packages {
@@ -173,12 +178,20 @@ pub fn evaluate_env(src: &str, base_dir: &Path) -> Result<EnvPlan, Diagnostic> {
                 prompt = Some(label.clone());
             }
         }
+        if let Some(path) = entry.settings.get(Syntax::PROMPT_SETTING_PATH) {
+            prompt_path = prompt_path_mode(path);
+        }
+        if let Some(strip) = entry.settings.get(Syntax::PROMPT_SETTING_STRIP) {
+            prompt_strip = prompt_strip_mode(strip);
+        }
     }
     Ok(EnvPlan {
         table,
         package_refs,
         adapters,
         prompt,
+        prompt_path,
+        prompt_strip,
         systems,
         images,
         fleets,
@@ -186,6 +199,20 @@ pub fn evaluate_env(src: &str, base_dir: &Path) -> Result<EnvPlan, Diagnostic> {
         dev_services,
         secrets,
     })
+}
+
+fn prompt_path_mode(value: &str) -> PromptPathMode {
+    match value {
+        Syntax::PROMPT_PATH_FULL => PromptPathMode::Full,
+        _ => PromptPathMode::Short,
+    }
+}
+
+fn prompt_strip_mode(value: &str) -> PromptStripMode {
+    match value {
+        Syntax::PROMPT_STRIP_ON => PromptStripMode::On,
+        _ => PromptStripMode::Off,
+    }
 }
 
 /// One parsed `.jet` file contributing modules: the root `env.jet` and every
