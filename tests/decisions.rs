@@ -1,9 +1,9 @@
 //! Ratification enforcement (invariant I7 + docs/spec/syntax-decisions.md).
 //!
 //! Every `cargo test` run verifies that `docs/spec/syntax-decisions.md` and
-//! `crates/jet-foundation/src/Syntax.rs` stay in sync — ratified decisions cannot drift back to
-//! "provisional" in code, and open/deferred decisions cannot land in
-//! syntax.rs without owner sign-off.
+//! `crates/jet-foundation/src/Syntax.rs` plus its split fragments stay in sync — ratified decisions
+//! cannot drift back to "provisional" in code, and open/deferred decisions cannot land in syntax
+//! without owner sign-off.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -12,8 +12,7 @@ use std::fs;
 fn ratified_decisions_enforced() {
     let docs =
         fs::read_to_string("docs/spec/syntax-decisions.md").expect("docs/spec/syntax-decisions.md");
-    let syntax = fs::read_to_string("crates/jet-foundation/src/Syntax.rs")
-        .expect("crates/jet-foundation/src/Syntax.rs");
+    let syntax = read_syntax_surface();
     let diag = fs::read_to_string("docs/spec/diagnostics.md").expect("docs/spec/diagnostics.md");
 
     let ratified = extract_section_ids(&docs, "## Ratified", "## Provisional");
@@ -36,15 +35,15 @@ fn ratified_decisions_enforced() {
     for id in &syntax_ids {
         assert!(
             ratified.contains(id.as_str()),
-            "{id} is in crates/jet-foundation/src/Syntax.rs but not ratified in docs/spec/syntax-decisions.md Ratified section"
+            "{id} is in crates/jet-foundation/src/Syntax.rs or Syntax/ fragments but not ratified in docs/spec/syntax-decisions.md Ratified section"
         );
         assert!(
             !open.contains(id.as_str()),
-            "{id} is open in docs/spec/syntax-decisions.md but already present in crates/jet-foundation/src/Syntax.rs — ratify or remove"
+            "{id} is open in docs/spec/syntax-decisions.md but already present in crates/jet-foundation/src/Syntax.rs or Syntax/ fragments — ratify or remove"
         );
         assert!(
             !deferred.contains(id.as_str()),
-            "{id} is deferred in docs/spec/syntax-decisions.md but present in crates/jet-foundation/src/Syntax.rs"
+            "{id} is deferred in docs/spec/syntax-decisions.md but present in crates/jet-foundation/src/Syntax.rs or Syntax/ fragments"
         );
     }
 
@@ -54,7 +53,7 @@ fn ratified_decisions_enforced() {
             assert_ne!(
                 status.as_str(),
                 "provisional",
-                "{id} is ratified in docs/spec/syntax-decisions.md but still provisional in crates/jet-foundation/src/Syntax.rs"
+                "{id} is ratified in docs/spec/syntax-decisions.md but still provisional in crates/jet-foundation/src/Syntax.rs or Syntax/ fragments"
             );
         }
     }
@@ -71,7 +70,7 @@ fn ratified_decisions_enforced() {
         if ratified.contains(*id) {
             assert!(
                 syntax_ids.contains(*id),
-                "ratified surface decision {id} must have an entry in crates/jet-foundation/src/Syntax.rs"
+                "ratified surface decision {id} must have an entry in crates/jet-foundation/src/Syntax.rs or Syntax/ fragments"
             );
         }
     }
@@ -109,6 +108,25 @@ fn ratified_decisions_enforced() {
         !staged.contains_key("S7"),
         "S7 must not remain staged after M4"
     );
+}
+
+fn read_syntax_surface() -> String {
+    let root = "crates/jet-foundation/src/Syntax.rs";
+    let mut syntax = fs::read_to_string(root).expect(root);
+    let dir = "crates/jet-foundation/src/Syntax";
+    let mut entries: Vec<_> = fs::read_dir(dir)
+        .expect(dir)
+        .map(|entry| entry.expect("Syntax fragment entry").path())
+        .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("rs"))
+        .collect();
+    entries.sort();
+    for path in entries {
+        syntax.push('\n');
+        syntax.push_str(&fs::read_to_string(&path).unwrap_or_else(|err| {
+            panic!("{}: {err}", path.display());
+        }));
+    }
+    syntax
 }
 
 fn extract_section_ids(docs: &str, start: &str, end: &str) -> BTreeSet<String> {
