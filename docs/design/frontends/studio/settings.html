@@ -1,0 +1,447 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>jetos Studio — Settings</title>
+<style>
+:root{
+  --ground:#0B1119; --panel:#16202E; --panel-2:#1B2838; --panel-3:#213249;
+  --accent:#3FC6FF; --ok:#58D68D; --warn:#FFB454; --err:#FF5C5C;
+  --text:#D9E6F2; --dim:#7E93A8; --line:#223247; --line-2:#2C4056;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  --r:6px;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--ground);color:var(--text);font-family:var(--sans);font-size:14px;line-height:1.45;-webkit-font-smoothing:antialiased}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+button{font:inherit;color:inherit;cursor:pointer}
+.mono{font-family:var(--mono)}
+
+/* ---- shell ---- */
+.app{display:grid;grid-template-columns:264px 1fr;grid-template-rows:52px 1fr;height:100%}
+.topbar{grid-column:1/3;display:flex;align-items:center;gap:16px;padding:0 16px;border-bottom:1px solid var(--line);background:var(--panel)}
+.brand{font-weight:650;letter-spacing:.2px}
+.brand small{color:var(--dim);font-weight:500;margin-left:6px}
+.host-pick{margin-left:8px;display:flex;align-items:center;gap:8px;padding:5px 10px;border:1px solid var(--line-2);border-radius:999px;background:var(--panel-2);font-size:13px}
+.host-pick .dot{width:7px;height:7px;border-radius:50%;background:var(--ok)}
+.topbar .gen{margin-left:auto;color:var(--dim);font-size:12.5px}
+.topbar .gen b{color:var(--text);font-weight:600}
+
+/* ---- sidebar ---- */
+.side{border-right:1px solid var(--line);background:var(--panel);overflow:auto;padding:12px 10px 40px}
+.search{position:relative;margin:4px 6px 12px}
+.search input{width:100%;padding:8px 10px 8px 30px;background:var(--ground);border:1px solid var(--line-2);border-radius:var(--r);color:var(--text)}
+.search svg{position:absolute;left:9px;top:9px;color:var(--dim)}
+.navgroup{margin:14px 6px 4px;color:var(--dim);font-size:11px;letter-spacing:.6px;text-transform:uppercase}
+.navitem{display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:8px 10px;border:0;background:transparent;border-radius:var(--r);color:var(--text)}
+.navitem:hover{background:var(--panel-2)}
+.navitem[aria-current=true]{background:var(--panel-3);box-shadow:inset 2px 0 0 var(--accent)}
+.navitem .ic{width:18px;height:18px;flex:0 0 18px;color:var(--dim)}
+.navitem[aria-current=true] .ic{color:var(--accent)}
+.navitem .cnt{margin-left:auto;color:var(--dim);font-size:11.5px}
+.navitem .warndot{margin-left:auto;width:7px;height:7px;border-radius:50%;background:var(--warn)}
+
+/* ---- detail ---- */
+.detail{overflow:auto;padding:28px 32px 140px;position:relative}
+.detail h1{font-size:22px;font-weight:650;margin:0 0 2px}
+.detail .lede{color:var(--dim);margin:0 0 24px;max-width:60ch}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-bottom:20px}
+.row{display:grid;grid-template-columns:1fr auto;gap:16px;align-items:center;padding:14px 18px;border-top:1px solid var(--line)}
+.row:first-child{border-top:0}
+.row .lbl{font-weight:550}
+.row .desc{color:var(--dim);font-size:12.5px;margin-top:2px}
+.row .path{font-family:var(--mono);font-size:11.5px;color:var(--accent);opacity:.85;margin-top:5px}
+.row.changed{background:linear-gradient(90deg,rgba(63,198,255,.06),transparent)}
+.row.changed .path{opacity:1}
+.tag{display:inline-block;font-size:10.5px;padding:1px 6px;border-radius:4px;border:1px solid var(--line-2);color:var(--dim);margin-left:8px;vertical-align:middle}
+.tag.rebuild{color:var(--warn);border-color:rgba(255,180,84,.4)}
+
+/* controls */
+.ctl{display:flex;align-items:center;gap:8px;justify-content:flex-end}
+.switch{--w:44px;position:relative;width:var(--w);height:24px;border-radius:999px;background:var(--panel-3);border:1px solid var(--line-2);transition:background .15s}
+.switch[aria-checked=true]{background:var(--accent);border-color:var(--accent)}
+.switch::after{content:"";position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:#0B1119;transition:transform .15s}
+.switch[aria-checked=true]::after{transform:translateX(20px);background:#04121c}
+select,input.val{background:var(--ground);border:1px solid var(--line-2);border-radius:var(--r);color:var(--text);padding:7px 9px;font-family:var(--mono);font-size:13px;min-width:120px}
+select{min-width:150px}
+input.num{width:88px;text-align:right}
+.enumpill{font-family:var(--mono);color:var(--accent)}
+
+/* pending tray */
+.tray{position:fixed;left:264px;right:0;bottom:0;background:rgba(11,17,25,.92);backdrop-filter:blur(10px);border-top:1px solid var(--line-2);transform:translateY(calc(100% - 44px));transition:transform .22s ease}
+.tray.open{transform:translateY(0)}
+.tray .handle{height:44px;display:flex;align-items:center;gap:12px;padding:0 20px;cursor:pointer}
+.tray .handle .n{background:var(--accent);color:#04121c;font-weight:700;font-size:12px;padding:2px 9px;border-radius:999px}
+.tray .handle .txt{font-weight:550}
+.tray .handle .sp{margin-left:auto;display:flex;gap:10px}
+.btn{padding:8px 16px;border-radius:var(--r);border:1px solid var(--line-2);background:var(--panel-2);font-weight:550}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:var(--accent);color:#04121c;border-color:var(--accent)}
+.btn.ghost{background:transparent}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.tray .body{max-height:min(46vh,420px);overflow:auto;padding:4px 20px 20px;border-top:1px solid var(--line)}
+.diff{font-family:var(--mono);font-size:12.5px;background:var(--ground);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px;margin:12px 0;white-space:pre-wrap;line-height:1.6}
+.diff .add{color:var(--ok)}
+.diff .del{color:var(--err)}
+.diff .ctx{color:var(--dim)}
+.impact{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px}
+.impact span{font-size:12px;padding:4px 9px;border-radius:999px;border:1px solid var(--line-2);color:var(--dim)}
+.impact span b{color:var(--text);font-weight:600}
+.impact span.warn{color:var(--warn);border-color:rgba(255,180,84,.4)}
+
+/* generations view */
+.gen-list{display:flex;flex-direction:column}
+.gen-row{display:grid;grid-template-columns:auto 1fr auto;gap:16px;align-items:center;padding:14px 18px;border-top:1px solid var(--line)}
+.gen-row:first-child{border-top:0}
+.gen-num{font-family:var(--mono);font-size:16px;font-weight:600;color:var(--text)}
+.gen-row.cur .gen-num{color:var(--accent)}
+.gen-meta{color:var(--dim);font-size:12.5px}
+.gen-meta b{color:var(--text);font-weight:600}
+.badge{font-size:10.5px;padding:2px 7px;border-radius:4px;font-weight:600}
+.badge.cur{background:rgba(63,198,255,.15);color:var(--accent)}
+.badge.good{background:rgba(88,214,141,.14);color:var(--ok)}
+
+/* toast */
+.toast{position:fixed;right:20px;bottom:64px;background:var(--panel-3);border:1px solid var(--line-2);border-left:3px solid var(--ok);border-radius:var(--r);padding:12px 16px;box-shadow:0 12px 40px rgba(0,0,0,.5);transform:translateY(20px);opacity:0;transition:.2s;z-index:20;max-width:340px}
+.toast.show{transform:none;opacity:1}
+.toast b{display:block;margin-bottom:2px}
+.toast small{color:var(--dim)}
+
+.empty{color:var(--dim);padding:40px;text-align:center}
+@media (max-width:820px){
+  .app{grid-template-columns:1fr}
+  .side{display:none}
+  .tray{left:0}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <span class="brand">jetos Studio <small>settings</small></span>
+    <button class="host-pick" title="Switch host"><span class="dot"></span> halcyon <span class="mono" style="color:var(--dim)">linux.x64</span> ▾</button>
+    <span class="gen">Active generation <b>41</b> · switched 2h ago</span>
+  </header>
+
+  <nav class="side" aria-label="Settings categories">
+    <div class="search">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3-3"/></svg>
+      <input id="filter" type="search" placeholder="Search settings" aria-label="Search settings">
+    </div>
+    <div id="nav"></div>
+  </nav>
+
+  <main class="detail" id="detail" tabindex="-1"></main>
+</div>
+
+<aside class="tray" id="tray" aria-label="Pending changes">
+  <div class="handle" id="trayHandle" role="button" tabindex="0" aria-expanded="false">
+    <span class="n" id="trayN">0</span>
+    <span class="txt">Pending changes</span>
+    <span class="mono" style="color:var(--dim);font-size:12px" id="traySub">no edits — settings match source</span>
+    <span class="sp">
+      <button class="btn ghost" id="discardBtn" disabled>Discard</button>
+      <button class="btn primary" id="applyBtn" disabled>Review &amp; apply</button>
+    </span>
+  </div>
+  <div class="body" id="trayBody" hidden></div>
+</aside>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+"use strict";
+/* ---------------------------------------------------------------
+   jetos Studio — grouped settings navigator.
+   Core loop: pick a category, change one option, confirm the single
+   source line it writes, apply.  Every control is bound to a dotted
+   system.jet option key; flipping it stages the exact +/- source line
+   into the pending tray (a preview of the set-option transaction diff).
+----------------------------------------------------------------*/
+
+// enum choices per key (Jet .Variant values)
+const ENUMS = {
+  "boot.kernel":[".CachyOS",".Zen",".Lts",".Hardened",".Latest"],
+  "boot.kernel.profile":[".CachyOSLatest",".CachyOSLts",".Server"],
+  "boot.loader":[".Limine",".SystemdBoot",".Grub"],
+  "performance.profile":[".Gaming",".Balanced",".Powersave"],
+  "performance.scheduler":[".ScxLavd",".ScxRusty",".None"],
+  "theme.polarity":[".Dark",".Light"],
+};
+
+// category tree — mirrors the option namespaces in config.jet
+const CATS = [
+  {id:"boot", group:"System", name:"Boot & kernel", icon:"cpu", desc:"Bootloader, kernel package, profile, and initrd. Kernel changes rebuild the system and take effect on next boot.", rows:[
+    {key:"boot.loader", label:"Bootloader", type:"enum", value:".Limine"},
+    {key:"boot.kernel", label:"Kernel", type:"enum", value:".CachyOS", rebuild:true, desc:"The kernel package this generation boots."},
+    {key:"boot.kernel.profile", label:"Kernel profile", type:"enum", value:".CachyOSLatest", rebuild:true},
+    {key:"boot.kernel.params", label:"Boot parameters", type:"list", value:'["quiet"]'},
+    {key:"boot.loader.limine.maxGenerations", label:"Boot menu entries", type:"int", value:"7", desc:"How many past generations stay bootable for rollback."},
+  ]},
+  {id:"perf", group:"System", name:"Performance", icon:"gauge", desc:"Scheduler, zram, and the safe/expert performance profile.", rows:[
+    {key:"performance.profile", label:"Profile", type:"enum", value:".Gaming"},
+    {key:"performance.scheduler", label:"CPU scheduler", type:"enum", value:".ScxLavd", rebuild:true},
+    {key:"performance.zram.memoryPercent", label:"zram size (% of RAM)", type:"int", value:"50"},
+    {key:"performance.sysctl.vm.swappiness", label:"Swappiness", type:"int", value:"10"},
+  ]},
+  {id:"net", group:"System", name:"Network", icon:"globe", desc:"Host identity, firewall, and wireless.", rows:[
+    {key:"network.hostName", label:"Host name", type:"string", value:"halcyon"},
+    {key:"network.firewall.allowedTcpPorts", label:"Open TCP ports", type:"list", value:"[22, 443]"},
+    {key:"network.wireless.ssid", label:"Wireless network", type:"string", value:"JetLab"},
+  ]},
+  {id:"desktop", group:"Desktop", name:"Desktop & theme", icon:"monitor", desc:"Display manager, desktop session, audio, and the shared theme projection.", rows:[
+    {key:"services.desktop.plasma.enable", label:"KDE Plasma session", type:"bool", value:"true"},
+    {key:"services.displayManager", label:"Display manager", type:"string", value:"sddm"},
+    {key:"services.audio.pipewire.enable", label:"PipeWire audio", type:"bool", value:"true"},
+    {key:"theme.name", label:"Theme", type:"string", value:"halcyon"},
+    {key:"theme.polarity", label:"Theme polarity", type:"enum", value:".Dark"},
+  ]},
+  {id:"apps", group:"Desktop", name:"Apps", icon:"grid", desc:"Foreign app ecosystems and per-program config.", rows:[
+    {key:"services.gaming.steam.enable", label:"Steam", type:"bool", value:"true"},
+    {key:"apps.flatpak.reconcile", label:"Flatpak reconcile", type:"string", value:".Exact"},
+    {key:"apps.program.git.userName", label:"Git user name", type:"string", value:"Nate"},
+  ]},
+  {id:"services", group:"Running", name:"Services", icon:"activity", kind:"services"},
+  {id:"packages", group:"Running", name:"Packages", icon:"box", kind:"packages"},
+  {id:"secrets", group:"Running", name:"Secrets", icon:"key", kind:"secrets"},
+  {id:"generations", group:"Running", name:"Generations", icon:"clock", kind:"generations", warn:true},
+];
+
+const SERVICES = [
+  {name:"openssh", enable:true, fields:{ports:"[22]", hardening:'"network-service"', journal:'"persistent"'}},
+  {name:"backup", enable:true, fields:{exec:'"…/hello"', timer:'"daily"'}},
+  {name:"metrics", enable:true, fields:{exec:'"…/btop"', socket:'"127.0.0.1:9999"'}},
+];
+const PACKAGES = [
+  {name:"hello", source:"mine (core)"},
+  {name:"btop", source:"mine (core)"},
+];
+const SECRETS = [
+  {name:"wifi", age:"secrets/wifi.age", used:"network.wireless"},
+];
+const GENERATIONS = [
+  {n:41, cur:true, when:"2h ago", kernel:".CachyOS 6.11", note:"current"},
+  {n:40, good:true, when:"2 days ago", kernel:".CachyOS 6.11", note:"last confirmed good"},
+  {n:39, when:"5 days ago", kernel:".Zen 6.10"},
+  {n:38, when:"9 days ago", kernel:".Zen 6.10"},
+];
+
+const ICONS = {
+  cpu:'<rect x="5" y="5" width="14" height="14" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/>',
+  gauge:'<path d="M12 14 18 8"/><circle cx="12" cy="14" r="9"/><path d="M3 14h2M19 14h2M12 5v0"/>',
+  globe:'<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/>',
+  monitor:'<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>',
+  grid:'<rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="4" width="7" height="7" rx="1"/><rect x="4" y="13" width="7" height="7" rx="1"/><rect x="13" y="13" width="7" height="7" rx="1"/>',
+  activity:'<path d="M3 12h4l3 8 4-16 3 8h4"/>',
+  box:'<path d="M12 3 3 8v8l9 5 9-5V8z"/><path d="M3 8l9 5 9-5M12 13v8"/>',
+  key:'<circle cx="8" cy="14" r="4"/><path d="M11 11l9-9M17 4l3 3M14 7l3 3"/>',
+  clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+};
+
+// live edit state: key -> new value string (canonical source form)
+const pending = new Map();
+// baseline source values for diffing
+const base = {};
+CATS.forEach(c=>(c.rows||[]).forEach(r=>base[r.key]=r.value));
+
+let activeCat = "boot";
+
+function icon(name){return `<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${ICONS[name]||""}</svg>`;}
+
+function renderNav(filter=""){
+  const nav = document.getElementById("nav");
+  const f = filter.trim().toLowerCase();
+  let html="", lastGroup="";
+  for(const c of CATS){
+    const match = !f || c.name.toLowerCase().includes(f) || (c.rows||[]).some(r=>r.key.includes(f)||r.label.toLowerCase().includes(f));
+    if(!match) continue;
+    if(c.group!==lastGroup){html+=`<div class="navgroup">${c.group}</div>`;lastGroup=c.group;}
+    const pend = countPendingIn(c);
+    const badge = c.warn && !pend ? `<span class="warndot" title="rollback available"></span>`
+      : pend ? `<span class="cnt" style="color:var(--accent)">${pend} edited</span>`
+      : `<span class="cnt">${(c.rows||[]).length||""}</span>`;
+    html+=`<button class="navitem" data-cat="${c.id}" aria-current="${c.id===activeCat}">${icon(c.icon)}<span>${c.name}</span>${badge}</button>`;
+  }
+  nav.innerHTML=html;
+  nav.querySelectorAll(".navitem").forEach(b=>b.onclick=()=>{activeCat=b.dataset.cat;renderNav(document.getElementById("filter").value);renderDetail();document.getElementById("detail").focus();});
+}
+
+function countPendingIn(c){
+  if(!c.rows) return 0;
+  return c.rows.filter(r=>pending.has(r.key)).length;
+}
+
+function curVal(key){return pending.has(key)?pending.get(key):base[key];}
+
+function renderDetail(){
+  const c = CATS.find(x=>x.id===activeCat);
+  const d = document.getElementById("detail");
+  if(c.kind==="generations") return renderGenerations(d,c);
+  if(c.kind==="services") return renderServices(d,c);
+  if(c.kind==="packages") return renderPackages(d,c);
+  if(c.kind==="secrets") return renderSecrets(d,c);
+
+  let rows="";
+  for(const r of c.rows){
+    const changed = pending.has(r.key);
+    rows+=`<div class="row ${changed?"changed":""}">
+      <div>
+        <div class="lbl">${r.label}${r.rebuild?'<span class="tag rebuild">rebuild + reboot</span>':""}</div>
+        ${r.desc?`<div class="desc">${r.desc}</div>`:""}
+        <div class="path">${r.key}: ${escape(curVal(r.key))}</div>
+      </div>
+      <div class="ctl">${control(r)}</div>
+    </div>`;
+  }
+  d.innerHTML=`<h1>${c.name}</h1><p class="lede">${c.desc}</p><div class="card">${rows}</div>`;
+  bindControls(d,c);
+}
+
+function control(r){
+  const v = curVal(r.key);
+  if(r.type==="bool"){
+    return `<button class="switch" role="switch" aria-checked="${v==="true"}" aria-label="${r.label}" data-key="${r.key}"></button>`;
+  }
+  if(r.type==="enum"){
+    const opts=(ENUMS[r.key]||[v]).map(o=>`<option ${o===v?"selected":""}>${o}</option>`).join("");
+    return `<select data-key="${r.key}" aria-label="${r.label}">${opts}</select>`;
+  }
+  if(r.type==="int"){
+    return `<input class="val num" type="number" value="${v}" data-key="${r.key}" aria-label="${r.label}">`;
+  }
+  return `<input class="val" style="min-width:180px" value="${escape(v)}" data-key="${r.key}" aria-label="${r.label}">`;
+}
+
+function bindControls(root){
+  root.querySelectorAll(".switch").forEach(sw=>sw.onclick=()=>{
+    const on = sw.getAttribute("aria-checked")!=="true";
+    stage(sw.dataset.key, String(on));
+  });
+  root.querySelectorAll("select[data-key]").forEach(s=>s.onchange=()=>stage(s.dataset.key,s.value));
+  root.querySelectorAll("input.val").forEach(i=>i.onchange=()=>stage(i.dataset.key,i.value));
+}
+
+function stage(key,val){
+  if(val===base[key]) pending.delete(key); else pending.set(key,val);
+  renderNav(document.getElementById("filter").value);
+  renderDetail();
+  renderTray();
+}
+
+/* ---- specialized read-mostly views (edit funnels back to option keys) ---- */
+function renderServices(d){
+  const rows=SERVICES.map(s=>`<div class="row">
+    <div><div class="lbl">${s.name}<span class="tag">supervised</span></div>
+      <div class="desc mono">${Object.entries(s.fields).map(([k,v])=>k+": "+v).join(" · ")}</div>
+      <div class="path">services.${s.name}.enable: ${s.enable}</div></div>
+    <div class="ctl"><button class="switch" role="switch" aria-checked="${s.enable}" data-key="services.${s.name}.enable"></button></div>
+  </div>`).join("");
+  d.innerHTML=`<h1>Services</h1><p class="lede">Typed supervised services. Each projects to a systemd unit; the toggle writes its <span class="mono">enable</span> option.</p><div class="card">${rows}</div>`;
+  bindControls(d);
+}
+function renderPackages(d){
+  const rows=PACKAGES.map(p=>`<div class="row"><div><div class="lbl">${p.name}</div><div class="path">packages: [ … ${p.name} … ]</div></div><div class="ctl"><span class="enumpill">${p.source}</span> <button class="btn ghost" disabled>Remove</button></div></div>`).join("");
+  d.innerHTML=`<h1>Packages</h1><p class="lede">System packages resolved from the <span class="mono">mine</span> core source. Realized offline, no Nix.</p><div class="card">${rows}</div><button class="btn" style="margin-top:4px">Add package…</button>`;
+}
+function renderSecrets(d){
+  const rows=SECRETS.map(s=>`<div class="row"><div><div class="lbl">${s.name} <span class="tag">age-encrypted</span></div><div class="desc">Used by <span class="mono">${s.used}</span>. Value never leaves the encrypted store.</div><div class="path">secrets.${s.name}.source: "${s.age}"</div></div><div class="ctl"><span class="mono" style="color:var(--dim)">•••••••• sealed</span> <button class="btn ghost">Re-key</button></div></div>`).join("");
+  d.innerHTML=`<h1>Secrets</h1><p class="lede">Studio shows secret names and their age files only — never plaintext. Editing a value re-encrypts in place.</p><div class="card">${rows}</div><button class="btn" style="margin-top:4px">Add secret…</button>`;
+}
+function renderGenerations(d){
+  const rows=GENERATIONS.map(g=>{
+    const badge = g.cur?`<span class="badge cur">active</span>`:g.good?`<span class="badge good">last good</span>`:"";
+    const act = g.cur?`<span class="mono" style="color:var(--dim)">running</span>`:`<button class="btn" data-roll="${g.n}">Roll back to ${g.n}</button>`;
+    return `<div class="gen-row ${g.cur?"cur":""}"><div class="gen-num">${g.n}</div><div class="gen-meta">switched <b>${g.when}</b> · kernel <span class="mono">${g.kernel}</span> ${badge}</div><div>${act}</div></div>`;
+  }).join("");
+  d.innerHTML=`<h1>Generations</h1><p class="lede">Every apply builds a new numbered generation. Rollback switches back atomically and reboots into the chosen one — your escape hatch when a change (a kernel, a driver) breaks the machine.</p><div class="card gen-list">${rows}</div>`;
+  d.querySelectorAll("[data-roll]").forEach(b=>b.onclick=()=>rollback(+b.dataset.roll));
+}
+function rollback(n){
+  toast("Rolled back", `Switched to generation ${n}. Reboot to boot it, or it is active now on next switch.`, "ok");
+}
+
+/* ---- pending tray = live preview of the set-option transaction ---- */
+function renderTray(){
+  const n = pending.size;
+  const tray=document.getElementById("tray");
+  document.getElementById("trayN").textContent=n;
+  document.getElementById("discardBtn").disabled=!n;
+  document.getElementById("applyBtn").disabled=!n;
+  const sub=document.getElementById("traySub");
+  const rebuild = anyRebuild();
+  sub.textContent = n? (n+" option"+(n>1?"s":"")+" edited"+(rebuild?" · rebuild required":"")) : "no edits — settings match source";
+  sub.style.color = rebuild? "var(--warn)":"var(--dim)";
+  if(!n){tray.classList.remove("open");document.getElementById("trayBody").hidden=true;document.getElementById("trayHandle").setAttribute("aria-expanded","false");}
+  if(!document.getElementById("trayBody").hidden) renderTrayBody();
+}
+function anyRebuild(){
+  for(const key of pending.keys()){
+    const r = flatRows().find(x=>x.key===key);
+    if(r&&r.rebuild) return true;
+    if(/^boot\.|^performance\.scheduler|kernel/.test(key)) return true;
+  }
+  return false;
+}
+function flatRows(){return CATS.flatMap(c=>c.rows||[]);}
+function renderTrayBody(){
+  const body=document.getElementById("trayBody");
+  if(!pending.size){body.innerHTML="";return;}
+  let diff="";
+  for(const [key,val] of pending){
+    diff+=`<span class="del">- ${key}: ${escape(base[key])},</span>\n<span class="add">+ ${key}: ${escape(val)},</span>\n`;
+  }
+  const impact=impactChips();
+  body.innerHTML=`<div class="impact">${impact}</div>
+    <div class="diff">${diff}</div>
+    <div style="color:var(--dim);font-size:12.5px">Apply builds a new generation from this source, then switches. Nothing changes on the machine until you apply.</div>`;
+}
+function impactChips(){
+  const chips=[`<span>generation <b>41 → 42</b></span>`];
+  const svc=[...pending.keys()].filter(k=>k.startsWith("services.")).length;
+  if(svc) chips.push(`<span><b>${svc}</b> service${svc>1?"s":""} restart</span>`);
+  if(anyRebuild()) chips.push(`<span class="warn"><b>reboot</b> required (kernel/scheduler)</span>`);
+  const pkg=[...pending.keys()].some(k=>k.startsWith("packages"));
+  if(pkg) chips.push(`<span>packages rebuilt</span>`);
+  return chips.join("");
+}
+
+document.getElementById("trayHandle").addEventListener("click",e=>{
+  if(e.target.closest("button")) return;
+  toggleTray();
+});
+document.getElementById("trayHandle").addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();toggleTray();}});
+function toggleTray(){
+  const tray=document.getElementById("tray"),body=document.getElementById("trayBody"),h=document.getElementById("trayHandle");
+  const open=!tray.classList.contains("open");
+  if(open&&!pending.size) return;
+  tray.classList.toggle("open",open);
+  body.hidden=!open;h.setAttribute("aria-expanded",String(open));
+  if(open) renderTrayBody();
+}
+document.getElementById("discardBtn").onclick=()=>{pending.clear();renderNav(document.getElementById("filter").value);renderDetail();renderTray();};
+document.getElementById("applyBtn").onclick=()=>{
+  if(!pending.size) return;
+  const n=pending.size, rebuild=anyRebuild();
+  pending.clear();
+  renderNav(document.getElementById("filter").value);renderDetail();renderTray();
+  toast("Applied", `${n} change${n>1?"s":""} built into generation 42${rebuild?". Reboot to load the new kernel — generation 41 stays bootable for rollback.":" and switched."}`, "ok");
+};
+
+function toast(title,msg,kind){
+  const t=document.getElementById("toast");
+  t.style.borderLeftColor = kind==="ok"?"var(--ok)":kind==="warn"?"var(--warn)":"var(--err)";
+  t.innerHTML=`<b>${title}</b><small>${msg}</small>`;
+  t.classList.add("show");
+  clearTimeout(toast._t);toast._t=setTimeout(()=>t.classList.remove("show"),4200);
+}
+function escape(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
+
+document.getElementById("filter").addEventListener("input",e=>renderNav(e.target.value));
+renderNav();renderDetail();renderTray();
+</script>
+</body>
+</html>
