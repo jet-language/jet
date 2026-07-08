@@ -80,6 +80,54 @@
         jetDev = mkJetDevBin "jet";
         jetpackDev = mkJetDevBin "jetpack";
         jetosDev = mkJetDevBin "jetos";
+        jetosGnomeIso =
+          (nixpkgs.lib.nixosSystem {
+            inherit system;
+            modules = [
+              "${nixpkgs}/nixos/modules/installer/cd-dvd/installation-cd-graphical-gnome.nix"
+              (
+                { pkgs, lib, ... }:
+                {
+                  isoImage.isoName = "jetos-gnome-${self.shortRev or "dirty"}.iso";
+                  networking.hostName = "jetos-live";
+
+                  services.xserver.enable = true;
+                  services.xserver.displayManager.gdm.enable = true;
+                  services.xserver.desktopManager.gnome.enable = true;
+
+                  environment.systemPackages = with pkgs; [
+                    self.packages.${system}.jet
+                    git
+                    gparted
+                    parted
+                    efibootmgr
+                    firefox
+                    gnome-console
+                    gnome-text-editor
+                    neovim
+                  ];
+
+                  environment.etc."jetos-release".text = ''
+                    NAME=JetOS
+                    VARIANT=GNOME live installer
+                    JETOS_SOURCE=${self.rev or self.dirtyRev or "dirty"}
+                  '';
+
+                  users.users.nate = {
+                    isNormalUser = true;
+                    extraGroups = [ "wheel" "networkmanager" ];
+                    initialPassword = "jetos";
+                  };
+                  security.sudo.wheelNeedsPassword = false;
+
+                  programs.firefox.enable = true;
+                  services.openssh.enable = true;
+
+                  system.stateVersion = "26.05";
+                }
+              )
+            ];
+          }).config.system.build.isoImage;
       in
       {
         packages = {
@@ -87,6 +135,7 @@
           inherit jet;
           jetpack = jet;
           jetos = jet;
+          jetos-gnome-iso = jetosGnomeIso;
         };
 
         apps.default = {
