@@ -115,3 +115,57 @@ for trivial/CI); non-TTY must not hang — prints plan, exits without applying.
      │ y → quiet apply, one ✓ per planned line
      │ Enter/N → nothing touched
 ```
+
+---
+
+## hybrid.html — consequence-scaled output
+
+**Core loop:** output scales with consequence — trivial ops print a quiet
+ledger, long builds pin a live region that promotes finished lines into that
+ledger, and mutations gate on a plan first; the scrollback is always the record.
+
+One output model, three depths selected by what the command does, not by which
+command it is. The ledger is the spine underneath all three.
+
+| Source option | Transplanted aspect |
+|---------------|--------------------|
+| ledger | The spine: every finished line freezes into scrollback and never moves. This is tier 1 (trivial/read-only: `jetpack add`, `jet env`) in full. |
+| live | Tier 2: a long build pins a bottom region that redraws in place, promotes each finished item up as a permanent ledger line, then collapses to a summary — the region *was* the record. |
+| plan | Tier 3: any mutation (`jetos switch`, `jetpack gc`) prints a full `+/~/-` diff + closure/size delta, asks once `[y/N]`, then applies via the tier-2 region-into-ledger flow, each `✓` tied to a plan line. |
+
+**Deliberately left out**
+- plan's gate on trivial adds — an owner benchmark, but prompt fatigue on
+  `jetpack add ripgrep` is a real cost; the consequence tier drops the gate for
+  safe ops (`--yes` still available, gate still there for mutations).
+- live's pinned region for short ops — a two-package add doesn't earn a progress
+  bar; it just appends. The region only opens for genuinely long work.
+- Two separate reporting mechanisms — apply after a plan is *not* a new format;
+  it reuses the exact region-into-ledger flow, so there is one progress
+  experience, not three (I8).
+
+**Risks**
+- The tier boundary ("trivial" vs "long" vs "mutating") must be a clear, stated
+  rule, not a guess — misclassifying a mutation as trivial skips a needed gate.
+- live region redraw math on resize; region must erase cleanly before any
+  diagnostic prints (I4) or a bar mid-rewrite corrupts the error.
+- non-TTY must never hang: region falls back to appended lines, and a mutation
+  prints its plan then exits (needs `--yes` to apply).
+- apply must stay transactional — a failed line abandons the plan, nothing
+  changed.
+
+```
+tier 1 (trivial)          tier 2 (long build)         tier 3 (mutation)
+  jetpack add ripgrep fd    jetpack build               jetos switch
+    ✓ ripgrep 14.1.0          ✓ ripgrep 14.1.0          Plan  gen 42 → 43
+    ✓ fd      9.0.0         ── live region ──────         + firefox  → 129.0
+  2 packages ready ✓         building 31/42 · linux       ~ linux 6.9.7→6.10.1
+                             ██████████░░░  compiling      - obsolete-lib → —
+  jet env                       │ finished rows          Download 240 MB
+    ✓ node     22.3.0            ▼ promote UP             Apply? [y/N] _
+    ✓ postgres 16.3.0        jetpack  build ready ✓          │ y → region+ledger
+  ── myproj ─ dev shell ──     (region → ledger line)        │   ✓ firefox (plan +)
+                                                             │ N → nothing touched
+
+failure (any tier): region erased → verbatim E0102 → stop; mutation abandons plan.
+NO_COLOR/CI: no region, no gate — trivial appends; mutation prints plan + exits.
+```

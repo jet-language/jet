@@ -126,3 +126,62 @@ metrics.
  └─────────────────────────────┘    │  ● error · E0102 · 2 clients │
    (same frame, same words)         └─────────────────────────────┘
 ```
+
+---
+
+## hybrid.html — mirrored status with on-demand depth
+
+**Core loop:** a one-line terminal status and a browser corner strip mirror the
+same poll (same words, same state); on error the browser strip expands to a full
+overlay and the terminal can expand to a request log, but the one-line parity
+status is always the shared truth.
+
+Parity is the contract; depth is opt-in on either surface and never breaks the
+mirror, because both still read the same `/__jet_dev_version` poll.
+
+| Source option | Transplanted aspect |
+|---------------|--------------------|
+| paired | The contract: terminal one-line status ⇄ browser corner strip, identical state from one poll — they cannot drift. Covers ready/building/error/reconnecting/n-clients. |
+| quiet | The browser's full vite-class error overlay — the corner strip is that overlay collapsed; expanding it adds room, not a second source of truth. |
+| dashboard | The terminal's opt-in request/rebuild log (`v` key or `--verbose`), printed *under* the same parity header, not instead of it. |
+
+**Deliberately left out**
+- dashboard's browser as an information-poor banner — the browser here gets the
+  full overlay (quiet's strength), so no surface is deliberately starved.
+- quiet's silent three-line terminal — the terminal keeps its parity one-liner
+  always, and gains the log only on `v`; it is never a mute daemon.
+- Any surface being "authoritative" — the whole point of parity is that neither
+  is; depth is additive on top of the shared poll (I8: one status mechanism,
+  two entrypoints).
+
+**Risks**
+- Parity is a lie unless both sides genuinely read one source (the poll) — the
+  overlay footer and the log header must render the exact parity words.
+- Browser overlay CSS must stay self-contained (no CDN); reload/poll is 400ms
+  HTTP, no WebSocket/SSE (I6).
+- The verbose header needs cursor-home redraw and degrades on non-TTY to a plain
+  status line; overlay must clear on the next clean build.
+- With no browser tab open, a build error is invisible until you look — it falls
+  back to the terminal diagnostic (stated in NO_COLOR still).
+
+```
+ terminal (parity line)            browser (corner strip = collapsed overlay)
+ jet dev  ● ready · :8080 · 2 cl   ┌ localhost:8080 ─────────────┐
+                                   │  (app)      ● ready · 2 cl   │
+                                   └─────────────────────────────┘
+ on error — browser strip EXPANDS to the full overlay:
+ jet dev  ● error · E0102 · 2 cl   ┌ localhost:8080 ─────────────┐
+ ┌ E0102 ─────────────────────┐    │  (app, dimmed)              │
+ │ Error [E0102]: nothing      │    │  ┌ Build failed ── app.jet ┐│
+ │   named `nonexistent_...`   │    │  │ Error [E0102]: nothing  ││
+ │  8 | nonexistent_function() │    │  │  8 | nonexistent_fn()   ││
+ │ Why / Fix …                 │    │  │ Why / Fix …             ││
+ └─────────────────────────────┘    │  │ error · E0102 · 2 cl    ││
+                                    │  └─────────────────────────┘│
+ terminal verbose (press v):        └─────────────────────────────┘
+ jet dev  ● ready · :8080 · 2 cl · built 0.4s     (parity header stays)
+ 14:22:03  GET /         200  2ms
+ 14:22:07  save app.jet  →  rebuilt 0.4s
+ reconnect: both show "● reconnecting · retry 2", then "● ready" together.
+ NO_COLOR: dot → [error]; header unpinned; overlay falls back to terminal diag.
+```

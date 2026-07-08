@@ -118,3 +118,62 @@ open "run a file and rebuild on save":
 │      jet test --watch                                     │
 │ Every save rebuilds and reruns. Ctrl-C stops the watcher. │
 ```
+
+---
+
+## hybrid.html — goal-aware palette with layered depth
+
+**Core loop:** summon the overlay — empty, it offers goals; typing fuzzy-finds
+commands, flags, examples, and error codes; `Tab` expands full detail in place;
+`Enter` prefills the shell; `F1` opens the same index as a full reference.
+
+The palette overlay is the fast door everyone uses; the goal list, inline
+man-depth, and full reference are the same index seen at different depths.
+
+| Source option | Transplanted aspect |
+|---------------|--------------------|
+| palette | Foundation: `jet ?` drops a fuzzy finder over the (dimmed) shell; Enter prefills the shell line and never runs it. |
+| tasks | The empty state — before you type, the overlay lists outcomes (goals), so a beginner starts from what they want, not a command name. |
+| browser | Depth two ways — `Tab` expands one result to a man page (usage/flags/examples/see-also) inline; `F1` opens the full two-pane reference over the same index, error codes included. |
+
+**Deliberately left out**
+- tasks' numbered multi-step recipes as a distinct screen — the goal list feeds
+  the same fuzzy finder; a goal resolves to commands/flags, not a separate
+  recipe format. (Recipe-style ordered steps can live inside a goal's expanded
+  detail if a goal genuinely needs order, but that is not the default view.)
+- browser as a separate launch — it is not a rival app, it is `F1` over the
+  palette's index, so there is one help surface with two depths (I8).
+- tasks' full "understand an error" recipe framing — error codes are just index
+  entries here; typing `E0112` renders the verbatim code page directly.
+
+**Risks**
+- Prefill-not-run must be unmistakable, or users fear it executed.
+- The goal list is curated content — must stay small and outcome-worded or it
+  becomes a second command list (I8).
+- Overlay redraw must restore the shell exactly on Esc; `F1` alt-screen must
+  restore back to the overlay, not the bare shell.
+- Fuzzy ranking quality across commands + flags + examples + error codes is the
+  whole UX.
+
+```
+web-api ❯ jet ?           (empty → goals first)
+┌─ what do you want to do? ─────────────────────────────────┐
+│ > _                                       type to search  │
+├───────────────────────────────────────────────────────────┤
+> run a file and rebuild on save
+│ start a web app                                           │
+│ add a dependency · understand an error message            │
+└───────────────────────────────────────────────────────────┘
+
+type "run" → fuzzy commands/flags/examples; Tab → man-depth inline;
+type "E0112" → verbatim code page; Enter → shell prefilled (never runs);
+F1 → full two-pane reference over the same index:
+jet ? reference              Build & run › run › usage
+┌─ commands ─────────┬─ jet run ───────────────────────────┐
+│ ▾ Build & run      │ Usage  jet run <file> [flags]        │
+│    run             │ Flags  --watch  rebuild + rerun      │
+│ ▾ Reference        │ Examples  jet run --watch src/main   │
+│    error codes     │ See also  build · test · env         │
+└────────────────────┴──────────────────────────────────────┘
+NO_COLOR: > selection, [run] match brackets, box survives.
+```

@@ -130,3 +130,63 @@ jet repl · workspace ───────────────────�
 └─────────────────────────────────────┴────────────────────────────┘
 ⏎ eval   ⇥ complete   ^L clear session   ^B focus bindings
 ```
+
+---
+
+## hybrid.html — curated line REPL with layered depth
+
+**Core loop:** type an expression, read its value, keep typing — and every turn
+stays quietly addressable, so you can pin, fold, or rerun any of them, or press
+`^B` for live bindings, without leaving the line.
+
+The line REPL is the ground floor; nothing above changes the mental model of
+"type, read, continue." Each layer is reachable by one key and invisible until
+asked for.
+
+| Source option | Transplanted aspect |
+|---------------|--------------------|
+| line | Foundation: plain-text scrollback, `user>`, ghost autosuggest, completion menu, inline `?name` docs, live highlight on the editing line. |
+| notebook | The addressable turn — a dim turn-number gutter, `^P` pin / `^F` fold / `^R` rerun, and big outputs paging in place as a browsable table. |
+| workspace | The live bindings inspector (`name : Type = value`, changed-row marker), toggled on demand with `^B`. |
+
+**Deliberately left out**
+- notebook's heavy per-turn block frames (`╭─ 1 · ok · 2ms ─╮`) — they cost
+  vertical space and fight the flat scroll that is the whole point of a line
+  REPL. Replaced by a one-character dim gutter number.
+- notebook's structured table as the default output — paging engages only for
+  big collections; a scalar or short list still prints as one plain value line.
+- workspace's always-docked split — the bindings pane is opt-in (`^B`), not the
+  resting layout, so the default surface is a single clean column.
+- Pinned block showing full output — a pin is one line (`name : Type = value`)
+  above the prompt, not a re-hosted frame.
+
+**Risks**
+- `?name` symbol-docs is new syntax (not in REPL.rs) — carries an owner ballot
+  row.
+- notebook edit-in-place rerun must recompute or stale downstream bindings —
+  semantics need a ballot before `^R` on a past turn ships.
+- `^B` alt-screen must restore the scrollback cleanly on toggle-off; `^P/^F/^R`
+  must not collide with readline bindings.
+- Turn-gutter width must stay stable as indices grow (align output under it).
+
+```
+Jet 0.1.0 — interactive REPL  (:quit, :help, ^B bindings)
+
+1 user> nums :: [1, 2, 3, 4, 5]
+  [1, 2, 3, 4, 5] : List
+2 user> nums.map((n: Int) => (n * n))
+  [1, 4, 9, 16, 25] : List
+📌 total : Int = 15                          turn 3 · unpin ^P
+────────────────────────────────────────────────────────────
+4 user> data.rows()
+  ⋯ 42 rows folded · [Row] · unfold ⏎
+5 user> _
+
+^B opens the bindings pane on the right:
+┌─ session ──────────────────┬─ bindings ───────────────┐
+│ 5 user> _                  │ nums    : List = [1,2,3…] │
+│                            │ total   : Int  = 15       │
+│                            │ ◂ new this step           │
+└────────────────────────────┴───────────────────────────┘
+NO_COLOR / non-TTY → pane folds away, plain line transcript, turn digits stay.
+```

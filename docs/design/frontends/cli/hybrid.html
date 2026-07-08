@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CLI output — Hybrid (curated)</title>
+<style>
+  :root{
+    --ground:#0B1119; --panel:#16202E; --panel2:#0E1622; --line:#1E2A3A;
+    --accent:#3FC6FF; --ok:#58D68D; --warn:#FFB454; --err:#FF5C5C; --sel:#C792EA;
+    --text:#D9E6F2; --sec:#7E93A8; --scaf:#3A4A5C;
+    --mono:ui-monospace,"Cascadia Code","JetBrains Mono",Menlo,"DejaVu Sans Mono",monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+    --sp1:4px; --sp2:8px; --sp3:12px; --sp4:16px; --sp6:24px; --sp10:40px;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--ground);color:var(--text);font-family:var(--sans);
+    font-size:15px;line-height:1.6;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:960px;margin:0 auto;padding:var(--sp10) var(--sp6) 96px}
+  .eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.14em;
+    text-transform:uppercase;color:var(--accent)}
+  h1{font-size:40px;line-height:1.05;letter-spacing:-.02em;margin:var(--sp3) 0 var(--sp2);font-weight:650}
+  .loop{font-size:19px;color:var(--text);margin:0 0 var(--sp4);max-width:62ch}
+  .loop b{color:var(--accent);font-weight:600}
+  .meta{display:flex;flex-wrap:wrap;gap:var(--sp2) var(--sp6);font-family:var(--mono);
+    font-size:12.5px;color:var(--sec);border-top:1px solid var(--line);
+    border-bottom:1px solid var(--line);padding:var(--sp3) 0;margin-bottom:var(--sp6)}
+  .meta b{color:var(--text);font-weight:500}
+  .fuse{border:1px solid var(--line);border-radius:6px;padding:var(--sp3) var(--sp4);
+    margin:0 0 var(--sp10);font-size:13.5px;color:var(--sec);line-height:1.7;background:var(--panel2)}
+  .fuse b{color:var(--text);font-weight:600}
+  .fuse .k{color:var(--sel);font-weight:600;font-family:var(--mono);font-size:12.5px}
+  .steps{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--sp3);margin-bottom:var(--sp10)}
+  .step{border:1px solid var(--line);border-radius:6px;padding:var(--sp3) var(--sp4);background:var(--panel2)}
+  .step .n{font-family:var(--mono);font-size:12px;color:var(--accent)}
+  .step .t{font-size:14px;color:var(--sec);margin-top:var(--sp1)}
+  .still{position:relative;padding-left:var(--sp6);margin:0 0 var(--sp10)}
+  .rail{position:absolute;left:0;top:6px;bottom:-24px;width:1px;background:var(--line)}
+  .still:last-of-type .rail{bottom:auto;height:14px}
+  .dot{position:absolute;left:-4px;top:4px;width:9px;height:9px;border-radius:50%;
+    background:var(--accent);box-shadow:0 0 0 4px var(--ground)}
+  .cap{display:flex;gap:var(--sp3);align-items:baseline;margin-bottom:var(--sp3);flex-wrap:wrap}
+  .cap .k{font-family:var(--mono);font-size:12px;color:var(--accent);white-space:nowrap}
+  .cap .v{font-size:14.5px;color:var(--sec)}
+  .cap .v b{color:var(--text);font-weight:500}
+  .term{border:1px solid var(--line);border-radius:6px;overflow:hidden;background:var(--ground)}
+  .tbar{display:flex;align-items:center;gap:var(--sp2);height:30px;padding:0 var(--sp3);
+    background:var(--panel2);border-bottom:1px solid var(--line)}
+  .tbar i{width:9px;height:9px;border-radius:50%;background:#2A3849;display:inline-block}
+  .tbar .title{margin-left:var(--sp2);font-family:var(--mono);font-size:11.5px;color:var(--scaf)}
+  .tbar .tag{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--scaf)}
+  pre.body{margin:0;padding:var(--sp4);font-family:var(--mono);font-size:12.5px;line-height:1.6;
+    color:var(--text);overflow-x:auto;white-space:pre;tab-size:2}
+  pre.region{margin:0;padding:var(--sp3) var(--sp4);font-family:var(--mono);font-size:12.5px;line-height:1.6;
+    color:var(--text);white-space:pre;overflow-x:auto;background:var(--panel2);border-top:1px dashed var(--line)}
+  .regionlbl{display:flex;align-items:center;gap:var(--sp2);padding:2px var(--sp4);background:var(--panel2);
+    font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--sel);border-top:1px dashed var(--line)}
+  .regionlbl .pulse{width:6px;height:6px;border-radius:50%;background:var(--sel)}
+  .c{color:var(--accent)} .g{color:var(--ok)} .y{color:var(--warn)} .r{color:var(--err)}
+  .m{color:var(--sel)} .s{color:var(--sec)} .d{color:var(--scaf)} .b{font-weight:600}
+  .cur{background:var(--accent);color:var(--ground)}
+  .note{border-left:2px solid var(--scaf);padding:2px 0 2px var(--sp3);margin:var(--sp3) 0 0;
+    font-size:13.5px;color:var(--sec)}
+  .note b{color:var(--text);font-weight:500}
+  .tag2{display:inline-block;font-family:var(--mono);font-size:11px;padding:1px 7px;border-radius:4px;
+    border:1px solid var(--line);color:var(--sec)}
+  .tag2.fail{color:var(--err);border-color:#3a2430}
+  .tag2.plain{color:var(--sec)}
+  h2.sec{font-size:13px;font-family:var(--mono);letter-spacing:.12em;text-transform:uppercase;
+    color:var(--sec);margin:64px 0 var(--sp6);padding-bottom:var(--sp2);border-bottom:1px solid var(--line)}
+  a{color:var(--accent)}
+  @media(max-width:640px){.steps{grid-template-columns:1fr}h1{font-size:30px}}
+  @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="eyebrow">CLI output · curated hybrid</div>
+  <h1>Consequence-scaled output</h1>
+  <p class="loop">One output model, three depths chosen by <b>consequence</b>. Trivial ops print a
+    quiet ledger; long builds pin a live region that <b>promotes finished lines into that
+    ledger</b>; mutations gate on a plan first, then apply through the same region-into-ledger flow.
+    The scrollback is always the permanent record.</p>
+  <div class="meta">
+    <span>Surface <b>CLI output</b></span>
+    <span>Ledger <b>current jetpack</b></span>
+    <span>Region <b>uv / pnpm</b></span>
+    <span>Gate <b>terraform / nh</b></span>
+    <span>Fit <b>80 col</b></span>
+  </div>
+
+  <div class="fuse">
+    <span class="k">ledger</span> is the spine — every finished line freezes into scrollback and never moves.
+    <span class="k">live</span> is what a long op looks like <i>while it works</i>: a pinned region that
+    redraws in place and promotes each done item up as a permanent ledger line, then collapses to a summary.
+    <span class="k">plan</span> guards anything consequential — a full diff and one <b>[y/N]</b> before the
+    region-and-ledger apply runs. Same record underneath all three.
+  </div>
+
+  <div class="steps">
+    <div class="step"><div class="n">tier 1 · trivial</div><div class="t">Read-only or small (add a package, enter a shell) → quiet ledger, as today.</div></div>
+    <div class="step"><div class="n">tier 2 · long</div><div class="t">Big build → live region while working, finished items promote into the ledger.</div></div>
+    <div class="step"><div class="n">tier 3 · mutating</div><div class="t">System change (switch, gc) → plan → confirm → apply via region + ledger.</div></div>
+  </div>
+
+  <!-- STILL 1 — trivial add -->
+  <div class="still">
+    <div class="rail"></div><div class="dot"></div>
+    <div class="cap"><span class="k">jetpack add</span><span class="v"><b>Tier 1.</b> Two small packages — a quiet ledger, no ceremony.</span></div>
+    <div class="term">
+      <div class="tbar"><i></i><i></i><i></i><span class="title">zsh — myproj</span><span class="tag">80×24</span></div>
+<pre class="body">  <span class="c">jetpack</span>  add ripgrep fd
+           <span class="s">▸</span> <span class="s">resolving from nixpkgs</span>
+           <span class="g">✓</span> <span class="b">ripgrep</span>  <span class="s">14.1.0  </span><span class="s">built 6s</span>
+           <span class="g">✓</span> <span class="b">fd</span>       <span class="s">9.0.0   </span><span class="s">cached</span>
+  <span class="c">jetpack</span>  2 packages ready  <span class="g">✓</span>
+</pre>
+    </div>
+    <div class="note">A quick, safe op does not earn a plan gate or a progress region — it just
+      appends done lines. Scroll up in an hour, the record is intact.</div>
+  </div>
+
+  <!-- STILL 2 — env enter -->
+  <div class="still">
+    <div class="rail"></div><div class="dot"></div>
+    <div class="cap"><span class="k">jet env</span><span class="v"><b>Tier 1, read-only.</b> Realize the shell, then the threshold rule.</span></div>
+    <div class="term">
+      <div class="tbar"><i></i><i></i><i></i><span class="title">zsh — myproj</span><span class="tag">80×24</span></div>
+<pre class="body">  <span class="c">jetpack</span>  env
+           <span class="g">✓</span> <span class="b">node</span>     <span class="s">22.3.0  </span><span class="s">cached</span>
+           <span class="g">✓</span> <span class="b">postgres</span> <span class="s">16.3.0  </span><span class="s">cached</span>
+
+  <span class="s">──</span> <span class="c b">myproj</span> <span class="s">─ dev shell · exit to leave ─────────────────────</span>
+
+<span class="s">myproj</span> $ <span class="cur"> </span>
+</pre>
+    </div>
+    <div class="note">Entering a shell changes nothing on disk, so there is nothing to confirm.
+      The one visual event is crossing into the shell — bold cyan label, quiet fill.</div>
+  </div>
+
+  <!-- STILL 3 — long build: live region -->
+  <div class="still">
+    <div class="rail"></div><div class="dot"></div>
+    <div class="cap"><span class="k">jetpack build</span><span class="v"><b>Tier 2, in flight.</b> A long build pins a region; ripgrep already promoted above it.</span></div>
+    <div class="term">
+      <div class="tbar"><i></i><i></i><i></i><span class="title">zsh — myproj</span><span class="tag">80×24</span></div>
+<pre class="body">  <span class="c">jetpack</span>  build
+           <span class="g">✓</span> <span class="b">ripgrep</span>  <span class="s">14.1.0  </span><span class="s">built 6s</span>
+</pre>
+      <div class="regionlbl"><span class="pulse"></span> live region · redraws in place</div>
+<pre class="region">  building <span class="b">31/42</span> · linux-6.10.1        <span class="s">01:12 · 240 MB</span>
+  <span class="c">██████████████</span><span class="d">░░░░░░░░░░</span>  <span class="s">compiling</span>
+</pre>
+    </div>
+    <div class="note">One aggregate counter (<b>31/42</b>) beats 42 log lines. Finished items push
+      up <b>above</b> the region as permanent ledger rows; the live area itself never scrolls.</div>
+  </div>
+
+  <!-- STILL 4 — long build collapses to ledger summary -->
+  <div class="still">
+    <div class="rail"></div><div class="dot"></div>
+    <div class="cap"><span class="k">…settled</span><span class="v">Region collapses into one summary ledger line — the region <b>was</b> the record all along.</span></div>
+    <div class="term">
+      <div class="tbar"><i></i><i></i><i></i><span class="title">zsh — myproj</span><span class="tag">80×24</span></div>
+<pre class="body">  <span class="c">jetpack</span>  build
+           <span class="g">✓</span> <span class="b">ripgrep</span>  <span class="s">14.1.0  </span><span class="s">built 6s</span>
+           <span class="g">✓</span> <span class="b">linux</span>    <span class="s">6.10.1  </span><span class="s">built 1m18s</span>
+  <span class="c">jetpack</span>  build ready · 42 units in 1m18s  <span class="g">✓</span>
+</pre>
+    </div>
+    <div class="note">When work ends the region is erased and its last state written as permanent
+      lines — no leftover bar, no double report. The scrollback reads like the plain ledger.</div>
+  </div>
+
+  <!-- STILL 5 — switch: plan gate -->
+  <div class="still">
+    <div class="rail"></div><div class="dot"></div>
+    <div class="cap"><span class="k">jetos switch</span><span class="v"><b>Tier 3.</b> A system change plans first — full diff, ask once, nothing touched yet.</span></div>
+    <div class="term">
+      <div class="tbar"><i></i><i></i><i></i><span class="title">zsh — myproj</span><span class="tag">80×24</span></div>
+<pre class="body">  <span class="c">jetos</span>  switch
+
+  <span class="b">Plan</span>  <span class="s">generation 42 → 43 · 1 add, 1 change, 1 remove</span>
+
+    <span class="g">+</span> <span class="b">firefox</span>       <span class="s">—        → 129.0</span>
+    <span class="y">~</span> <span class="b">linux</span>         <span class="s">6.9.7    → 6.10.1</span>
+    <span class="r">-</span> <span class="b">obsolete-lib</span>  <span class="s">1.2.0    → —</span>
+
+  <span class="s">Download 240 MB · closure +18 MB · rebuild boot + current</span>
+
+  Apply? <span class="s">[y/N]</span> <span class="cur"> </span>
+</pre>
+    </div>
+    <div class="note">Only mutations reach for the gate. The <b>+/~/-</b> diff and closure delta let
+      you decide from the plan; the <b>[y/N]</b> default-no means a reflexive Enter is safe.
+      <b>--yes</b> skips the gate for scripts.</div>
+  </div>
+
+  <!-- STILL 6 — switch: apply via region + ledger -->
+  <div class="still">
+    <div class="rail"></div><div class="dot"></div>
+    <div class="cap"><span class="k">…applied</span><span class="v">Answer <b>y</b>; apply runs through the live region, each <span class="g">✓</span> promoted up and tied to a plan line.</span></div>
+    <div class="term">
+      <div class="tbar"><i></i><i></i><i></i><span class="title">zsh — myproj</span><span class="tag">80×24</span></div>
+<pre class="body">  Apply? <span class="s">[y/N]</span> y
+
+  <span class="c">jetos</span>  applying · generation 42 → 43
+           <span class="g">✓</span> <span class="b">firefox</span>       <span class="s">129.0     (plan: +)</span>
+           <span class="g">✓</span> <span class="b">linux</span>         <span class="s">6.10.1    (plan: ~)</span>
+           <span class="g">✓</span> <span class="b">obsolete-lib</span>  <span class="s">removed   (plan: -)</span>
+</pre>
+      <div class="regionlbl"><span class="pulse"></span> live region · redraws in place</div>
+<pre class="region">  activating <span class="b">3/3</span> · boot + current       <span class="s">00:04</span>
+  <span class="c">████████████████████████</span>  <span class="s">switching</span>
+</pre>
+    </div>
+    <div class="note">The plan sets expectations; apply is the region-into-ledger flow from tier 2,
+      each done line tagged back to the plan symbol it fulfils. On settle: <code>jetos  now on generation 43  ✓</code>.</div>
+  </div>
+
+  <!-- STILL 7 — gc: destructive plan -->
+  <div class="still">
+    <div class="rail"></div><div class="dot"></div>
+    <div class="cap"><span class="k">jetpack gc</span><span class="v"><b>Tier 3, destructive.</b> A delete you can preview beats one you can only regret.</span></div>
+    <div class="term">
+      <div class="tbar"><i></i><i></i><i></i><span class="title">zsh — myproj</span><span class="tag">80×24</span></div>
+<pre class="body">  <span class="c">jetpack</span>  gc
+
+  <span class="b">Plan</span>  <span class="s">remove 12 unused · reclaim 1.8 GB</span>
+
+    <span class="r">-</span> <span class="b">ripgrep</span>  <span class="s">13.0.0   240 MB</span>
+    <span class="r">-</span> <span class="b">node</span>     <span class="s">20.11.0  610 MB</span>
+    <span class="s">… 10 more</span>
+
+  Apply? <span class="s">[y/N]</span> <span class="cur"> </span>
+</pre>
+    </div>
+    <div class="note">Same plan→confirm→apply shape as switch — consequence, not command name,
+      decides the tier. On <b>y</b>, the removals stream through the live region into the ledger.</div>
+  </div>
+
+  <!-- STILL 8 — build failure -->
+  <div class="still">
+    <div class="rail"></div><div class="dot" style="background:var(--err)"></div>
+    <div class="cap"><span class="k">build failure</span><span class="tag2 fail">E0102</span><span class="v">Any tier stops at the failing line; the region is erased first, then the <b>verbatim</b> diagnostic prints (I4).</span></div>
+    <div class="term">
+      <div class="tbar"><i></i><i></i><i></i><span class="title">zsh — myproj</span><span class="tag">80×24</span></div>
+<pre class="body">  <span class="c">jetpack</span>  build
+
+Error [E0102]: nothing named `nonexistent_function_xyz` exists here
+  --&gt; tests/ui/comptime_if_unknown_fn_dropped.jet:8:9
+    |
+  8 |         nonexistent_function_xyz()
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^
+ Why: only functions that have been defined (or built in, like `print` / `input`) can be called
+ Fix: define it first (fn nonexistent_function_xyz() { ... }), or call one that exists
+</pre>
+    </div>
+    <div class="note">The live region must clear before an error, or the diagnostic would print into
+      a bar mid-rewrite. Erase region → print block → stop. On a mutation, apply is transactional:
+      a failed line abandons the plan and nothing changed.</div>
+  </div>
+
+  <h2 class="sec">NO_COLOR / CI — plan prints and exits, or the ledger degrades plainly</h2>
+  <div class="still">
+    <div class="rail" style="display:none"></div>
+    <div class="cap"><span class="k">NO_COLOR=1</span><span class="tag2 plain">non-TTY</span><span class="v">No region to redraw and no prompt to answer — trivial ops append plainly; a mutation prints its plan and exits.</span></div>
+    <div class="term">
+      <div class="tbar"><i></i><i></i><i></i><span class="title">ci-runner — no tty</span><span class="tag">plain</span></div>
+<pre class="body">  jetpack  add ripgrep fd
+           ✓ ripgrep  14.1.0  built 6s
+           ✓ fd       9.0.0   cached
+  jetpack  2 packages ready  ✓
+
+  jetos  switch
+  Plan  generation 42 → 43 · 1 add, 1 change, 1 remove
+    + firefox       —      → 129.0
+    ~ linux         6.9.7  → 6.10.1
+    - obsolete-lib  1.2.0  → —
+  No TTY to confirm. Re-run with --yes to apply this plan.
+</pre>
+    </div>
+    <div class="note">On a pipe the region can't pin (it falls back to appended lines) and the gate
+      can't be answered — so a mutation prints the plan and exits without touching anything. Never hangs.
+      Same words, no escape codes reach the log.</div>
+  </div>
+
+</div>
+</body>
+</html>

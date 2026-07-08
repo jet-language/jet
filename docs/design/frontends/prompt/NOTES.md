@@ -105,3 +105,62 @@ on failure — one inserted action line:
 ❯
 NO_COLOR: spinner ⠹ stays; arrow → degrades to ->
 ```
+
+---
+
+## hybrid.html — silent-by-default with pulled and opt-in status
+
+**Core loop:** the prompt stays silent until something changes — then it shows
+exactly one line — while `^G` pulls a status glance on demand and a per-env flag
+can pin an always-on strip.
+
+Adaptive's silence is the default; the other archetypes contribute optional
+surfaces that never add standing noise unless the user reaches for them.
+
+| Source option | Transplanted aspect |
+|---------------|--------------------|
+| adaptive | Foundation: bare chevron when clean, one live Braille spinner line while running, one inserted next-action line (a verb + runnable command) on failure. |
+| segments | Finished commands collapse to a transient receipt (`cmd ✓/✗ · duration`); the always-on segments line survives as an opt-in per-env config flag. |
+| minimal | The `^G` glance — pull one dim status line (last build/test) any time; it collapses on the next command. |
+
+**Deliberately left out**
+- segments' always-on two-line strip as the default — it contradicts adaptive's
+  "silence is the signal." Kept only behind `prompt: { strip: on }` in env.jet,
+  shown once and labelled opt-in.
+- minimal's exit-code-colored chevron as the persistent signal — adaptive
+  already speaks on failure with a full action line, so a colored chevron would
+  be a second, redundant status channel (I8).
+- segments' git/version segments at rest — they only appear inside the opt-in
+  strip, never in the default prompt.
+
+**Risks**
+- The inserted action line is prompt copy, not a diagnostic — it must never
+  restate the verbatim E-code text (I4); it points and hands a command only.
+- Deciding "something changed" needs a build/test event feed.
+- `^G` must not clash with readline; the opt-in strip must drop segments
+  right-to-left on a narrow terminal.
+- Two status entrypoints (`^G` glance vs strip) must read identically so they
+  never disagree.
+
+```
+❯                                   (clean: bare chevron)
+❯ jet test
+⠹ running tests · 6/12 · 0.2s       (live, then collapses)
+❯ jet test                          ✓ 12/12 · 0.3s   (receipt)
+❯
+
+on failure — receipt + one action line:
+❯ jet test                          ✗ 11/12 · 0.3s
+11 passed · 1 failed
+→ 1 test failed. Rerun just it: jet test url_parse
+❯
+
+^G glance (pulled, collapses next command):
+❯            (press ^G)
+        build ok · 0.4s     test 12/12 · 8ms ago
+
+opt-in strip (env.jet: prompt.strip = on):
+web-api · jet 0.1.0 · build ok · test 12/12 · main ✓
+❯ _
+NO_COLOR: spinner ⠹ stays; → degrades to ->; receipts/segments are words.
+```
