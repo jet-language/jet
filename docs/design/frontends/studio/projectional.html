@@ -306,12 +306,11 @@ function producedText(){
     if(l.t==="cmt"){out+=strip(l.s)+"\n";continue;}
     if(l.t==="raw"||l.t==="kv"){out+=strip(l.s)+"\n";continue;}
     const v=model[l.key];
-    if(l.label!==undefined){out+=`${l.label.trim().padStart? "":""}            ${l.label.trim()}: { enable: ${v}${l.tail||""} },\n`;continue;}
+    if(l.label!==undefined){out+=`            ${l.label.trim()}: { enable: ${v}${l.tail||""} },\n`;continue;}
     let rv = l.kind==="list"?("["+v.map(x=>l.num?x:`"${x}"`).join(", ")+"]")
       : l.kind==="str"||l.kind==="secret"?`"${v}"`
       : v;
-    const mark = (l.t==="opt"&&changed(l.key))?"  ":"  ";
-    out+=`            ${l.key}: ${rv},${(l.t==="opt"&&changed(l.key))?"   // edited":""}\n`;
+    out+=`            ${l.key}: ${rv},${changed(l.key)?"   // edited":""}\n`;
   }
   return out;
 }
