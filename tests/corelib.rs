@@ -19,6 +19,29 @@ fn compile_temp(name: &str, src: &str) -> jet::CompileOutput {
 }
 
 #[test]
+fn invariant_refinement_proves_fixed_array_index() {
+    let src = r#"
+#Invariant("value >= 0 && value < 4")
+Index4 :: distinct Int
+
+fn pick(xs: [String#4], i: Index4) -> String {
+    return xs[i]
+}
+
+fn run() {
+    words: [String#4] :: ["zero", "one", "two", "three"]
+    print(pick(words, Index4(2)))
+}
+"#;
+    let out = compile_temp("refinement_index.jet", src);
+    assert!(
+        !out.rust.contains("jet_index_vec(&"),
+        "proof-carrying fixed-array index should not emit runtime list bounds helper:\n{}",
+        out.rust
+    );
+}
+
+#[test]
 fn comptime_find_glob_records_sorted_lock_inputs() {
     let dir = std::env::temp_dir().join(format!(
         "jet_comptime_find_{}_{}",

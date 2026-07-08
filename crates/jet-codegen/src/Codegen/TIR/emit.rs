@@ -4992,11 +4992,28 @@ pub(crate) fn emit_tir_core_call(
                 arg(4)
             )
         }
+        ("core.raylib", "draw_rectangle") => {
+            format!(
+                "{}jet_raylib_draw_rectangle({}, {}, {}, {}, &({}))",
+                cx.root_prefix,
+                arg(0),
+                arg(1),
+                arg(2),
+                arg(3),
+                arg(4)
+            )
+        }
         ("core.raylib", "end_drawing") => {
             format!("{}jet_raylib_end_drawing()", cx.root_prefix)
         }
         ("core.raylib", "close_window") => {
             format!("{}jet_raylib_close_window(&({}))", cx.root_prefix, arg(0))
+        }
+        ("core.raylib", "key_down") => {
+            format!("{}jet_raylib_key_down(&({}))", cx.root_prefix, arg(0))
+        }
+        ("core.raylib", "set_target_fps") => {
+            format!("{}jet_raylib_set_target_fps({})", cx.root_prefix, arg(0))
         }
         ("core.raylib", "color") => {
             format!(

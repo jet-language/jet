@@ -6606,10 +6606,13 @@ type JetRaylibInitWindow = unsafe extern "C" fn(i32, i32, *const std::os::raw::c
 type JetRaylibWindowShouldClose = unsafe extern "C" fn() -> bool;
 type JetRaylibBeginDrawing = unsafe extern "C" fn();
 type JetRaylibClearBackground = unsafe extern "C" fn(JetRaylibCColor);
+type JetRaylibDrawRectangle = unsafe extern "C" fn(i32, i32, i32, i32, JetRaylibCColor);
 type JetRaylibDrawText =
     unsafe extern "C" fn(*const std::os::raw::c_char, i32, i32, i32, JetRaylibCColor);
 type JetRaylibEndDrawing = unsafe extern "C" fn();
 type JetRaylibCloseWindow = unsafe extern "C" fn();
+type JetRaylibIsKeyDown = unsafe extern "C" fn(i32) -> bool;
+type JetRaylibSetTargetFps = unsafe extern "C" fn(i32);
 
 #[derive(Clone, Copy)]
 struct JetRaylibApi {
@@ -6617,9 +6620,12 @@ struct JetRaylibApi {
     window_should_close: JetRaylibWindowShouldClose,
     begin_drawing: JetRaylibBeginDrawing,
     clear_background: JetRaylibClearBackground,
+    draw_rectangle: JetRaylibDrawRectangle,
     draw_text: JetRaylibDrawText,
     end_drawing: JetRaylibEndDrawing,
     close_window: JetRaylibCloseWindow,
+    is_key_down: JetRaylibIsKeyDown,
+    set_target_fps: JetRaylibSetTargetFps,
 }
 
 static JET_RAYLIB_WINDOW_OPEN: std::sync::atomic::AtomicBool =
@@ -6694,9 +6700,12 @@ mod jet_raylib_dyn {
             window_should_close: symbol(handle, b"WindowShouldClose\0")?,
             begin_drawing: symbol(handle, b"BeginDrawing\0")?,
             clear_background: symbol(handle, b"ClearBackground\0")?,
+            draw_rectangle: symbol(handle, b"DrawRectangle\0")?,
             draw_text: symbol(handle, b"DrawText\0")?,
             end_drawing: symbol(handle, b"EndDrawing\0")?,
             close_window: symbol(handle, b"CloseWindow\0")?,
+            is_key_down: symbol(handle, b"IsKeyDown\0")?,
+            set_target_fps: symbol(handle, b"SetTargetFPS\0")?,
         })
     }
 
@@ -6791,6 +6800,23 @@ fn jet_raylib_draw_text(text: &String, x: i64, y: i64, size: i64, color: &Raylib
     }
 }
 
+fn jet_raylib_draw_rectangle(x: i64, y: i64, width: i64, height: i64, color: &RaylibColor) {
+    if JET_RAYLIB_WINDOW_OPEN.load(std::sync::atomic::Ordering::SeqCst) {
+        if let Some(api) = jet_raylib_api() {
+            // SAFETY: color is a repr(C) mirror of raylib Color.
+            unsafe {
+                (api.draw_rectangle)(
+                    x as i32,
+                    y as i32,
+                    width as i32,
+                    height as i32,
+                    jet_raylib_c_color(color),
+                )
+            };
+        }
+    }
+}
+
 fn jet_raylib_end_drawing() {
     if JET_RAYLIB_WINDOW_OPEN.load(std::sync::atomic::Ordering::SeqCst) {
         if let Some(api) = jet_raylib_api() {
@@ -6812,6 +6838,47 @@ fn jet_raylib_close_window(window: &RaylibWindow) {
 
 fn jet_raylib_color(r: i64, g: i64, b: i64, a: i64) -> RaylibColor {
     RaylibColor { r, g, b, a }
+}
+
+fn jet_raylib_key_code(name: &String) -> i32 {
+    match name.as_str() {
+        "Space" | "space" => 32,
+        "Enter" | "enter" => 257,
+        "Escape" | "escape" | "Esc" | "esc" => 256,
+        "Right" | "right" => 262,
+        "Left" | "left" => 263,
+        "Down" | "down" => 264,
+        "Up" | "up" => 265,
+        "A" | "a" => 65,
+        "D" | "d" => 68,
+        "S" | "s" => 83,
+        "W" | "w" => 87,
+        _ => -1,
+    }
+}
+
+fn jet_raylib_key_down(name: &String) -> bool {
+    let key = jet_raylib_key_code(name);
+    if key < 0 {
+        return false;
+    }
+    if JET_RAYLIB_WINDOW_OPEN.load(std::sync::atomic::Ordering::SeqCst) {
+        if let Some(api) = jet_raylib_api() {
+            // SAFETY: key code is a plain raylib KeyboardKey integer.
+            return unsafe { (api.is_key_down)(key) };
+        }
+    }
+    false
+}
+
+fn jet_raylib_set_target_fps(fps: i64) {
+    if JET_RAYLIB_WINDOW_OPEN.load(std::sync::atomic::Ordering::SeqCst) {
+        if let Some(api) = jet_raylib_api() {
+            let fps = fps.clamp(1, 240) as i32;
+            // SAFETY: the raylib window was opened by this bridge.
+            unsafe { (api.set_target_fps)(fps) };
+        }
+    }
 }
 // jet:raylib-end
 

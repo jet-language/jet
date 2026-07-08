@@ -2120,6 +2120,11 @@ pub const ATTR_SINGLE_USE: &str = "SingleUse"; // D-LIN1
 /// the work is routed through explicit deterministic/mockable capabilities.
 pub const ATTR_REPLAYABLE: &str = "Replayable";
 
+/// D-REFINE1: directive-plane invariant marker for distinct refinements.
+/// First shipped form is `#Invariant("value >= lo && value < hi")` before a
+/// `distinct Int` declaration; sema normalizes it to proof-carrying bounds.
+pub const ATTR_INVARIANT: &str = "Invariant";
+
 /// D-MUSTUSE1 (c18iwxqx): `@MustUse` — marks a type, function, or method whose
 /// result cannot be silently ignored as a bare expression statement (E0419).
 /// Explicit discard uses `.drop("reason")` or `#Suppress(MustUse) { … }`
@@ -2627,6 +2632,7 @@ pub const DIRECTIVE_MARKERS: &[&str] = &[
     ATTR_UNIT_FAMILY,
     ATTR_SINGLE_USE,
     ATTR_REPLAYABLE,
+    ATTR_INVARIANT,
     ATTR_LAYOUT,
     ATTR_SUPPRESS,
     ATTR_EXTERN_MODULE,

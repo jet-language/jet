@@ -87,15 +87,100 @@ fn load_example_seeds(root: &PathBuf) -> Vec<(String, String)> {
         }
     }
     seeds.sort_by(|a, b| a.0.cmp(&b.0));
+    seeds.extend(curated_soundness_seeds());
     seeds
+}
+
+fn curated_soundness_seeds() -> Vec<(String, String)> {
+    vec![
+        (
+            "curated/generic_identity".to_string(),
+            r#"
+fn id<T>(x: T) -> T {
+    return x
+}
+
+fn run() {
+    print(id<Int>(7))
+}
+"#
+            .to_string(),
+        ),
+        (
+            "curated/fixed_list_literal_index".to_string(),
+            r#"
+fn second(xs: [Int#3]) -> Int {
+    return xs[1]
+}
+
+fn run() {
+    xs: [Int#3] :: [1, 2, 3]
+    print(second(xs))
+}
+"#
+            .to_string(),
+        ),
+        (
+            "curated/refined_index".to_string(),
+            r#"
+#Invariant("value >= 0 && value < 3")
+Index3 :: distinct Int
+
+fn pick(xs: [Int#3], i: Index3) -> Int {
+    return xs[i]
+}
+
+fn run() {
+    xs: [Int#3] :: [1, 2, 3]
+    print(pick(xs, Index3(2)))
+}
+"#
+            .to_string(),
+        ),
+        (
+            "curated/fanout_fixed_list".to_string(),
+            r#"
+fn inc(x: Int) -> Int {
+    return x + 1
+}
+
+fn run() {
+    ys: [Int#3] :: inc.[1, 2, 3]
+    print(ys[2])
+}
+"#
+            .to_string(),
+        ),
+        (
+            "curated/pure_boundary".to_string(),
+            r#"
+@Pure fn add1(x: Int) -> Int {
+    return x + 1
+}
+
+fn run() {
+    print(add1(4))
+}
+"#
+            .to_string(),
+        ),
+    ]
 }
 
 fn mutate_source(rng: &mut Rng, src: &str, variant: usize) -> String {
     let n = variant;
-    match rng.next() % 3 {
-        0 => format!("{src}\nval _fuzz_{n} = {n};\n"),
-        1 => format!("{src}\nfn _fuzz_fn_{n}() {{\n    val _x = {n};\n    return;\n}}\n"),
-        _ => format!("{src}\nfn _fuzz_wrap_{n}() -> Int {{\n    return {n};\n}}\n"),
+    match rng.next() % 7 {
+        0 => format!("{src}\n_fuzz_{n} :: {n};\n"),
+        1 => format!("{src}\nfn _fuzz_fn_{n}() {{\n    _x :: {n};\n    return;\n}}\n"),
+        2 => format!("{src}\nfn _fuzz_wrap_{n}() -> Int {{\n    return {n};\n}}\n"),
+        3 => format!("{src}\nfn _fuzz_id_{n}<T>(x: T) -> T {{\n    return x\n}}\n"),
+        4 => format!("{src}\nfn _fuzz_fixed_{n}(xs: [Int#3]) -> Int {{\n    return xs[1]\n}}\n"),
+        5 => format!(
+            "{src}\n#Invariant(\"value >= 0 && value < 3\")\n_FuzzIndex{n} :: distinct Int\nfn _fuzz_refined_{n}(xs: [Int#3], i: _FuzzIndex{n}) -> Int {{\n    return xs[i]\n}}\n"
+        ),
+        _ => format!(
+            "{src}\nfn _fuzz_inc_{n}(x: Int) -> Int {{\n    return x + 1\n}}\nfn _fuzz_fanout_{n}() -> [Int#3] {{\n    return _fuzz_inc_{n}.[1, 2, 3]\n}}\n"
+        ),
     }
 }
 

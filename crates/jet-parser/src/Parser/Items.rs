@@ -886,6 +886,14 @@ impl<'a> Parser<'a> {
                 TokKind::KwTrait => self.trait_def(false).map(Item::Trait),
                 TokKind::KwTag => self.tag_def(false).map(Item::Tag),
                 TokKind::KwImpl => self.impl_or_error_conv(),
+                TokKind::Hash | TokKind::At
+                    if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_INVARIANT)
+                        || self.at_bundle_distinct_def() =>
+                {
+                    let (is_pub, is_package_pub) = self.parse_item_visibility();
+                    self.distinct_def(is_pub, is_package_pub)
+                        .map(Item::Distinct)
+                }
                 // D-ATTR2 / D-SERDE: `#[RenameAll(camel)] struct …` (serde stays `#`).
                 // D-ATTR1: `#Rename(...) struct …` — one marker, no brackets.
                 // D-MARKER-FAMILY1/G2/G3: `@[Codable, Debug]` / `@Codable struct …`
@@ -908,11 +916,6 @@ impl<'a> Parser<'a> {
                     let (is_pub, is_package_pub) = self.parse_item_visibility();
                     self.unit_family_def(is_pub, is_package_pub)
                         .map(Item::UnitFamily)
-                }
-                TokKind::Hash | TokKind::At if self.at_bundle_distinct_def() => {
-                    let (is_pub, is_package_pub) = self.parse_item_visibility();
-                    self.distinct_def(is_pub, is_package_pub)
-                        .map(Item::Distinct)
                 }
                 // D-REPRC1: `#layout(c) struct Name { … }`
                 TokKind::Hash if self.at_layout_struct() => {
@@ -4593,6 +4596,10 @@ impl<'a> Parser<'a> {
             || name == Syntax::CONTRACT_BUNDLE_CODABLE_AS_BASE
     }
 
+    fn is_distinct_prefix_marker(name: &str) -> bool {
+        Self::is_capability_bundle_marker(name) || name == Syntax::ATTR_INVARIANT
+    }
+
     /// D-DIST3 / D-CAPBUNDLE1 / D-MARKERMOVE1 (ratified 2026-06-20 /
     /// 2026-07-01): true when a stack of one or more capability-bundle
     /// markers (`@Numeric`, `@Comparable`, `@Printable`, `@CodableAsBase`,
@@ -4607,14 +4614,39 @@ impl<'a> Parser<'a> {
             match self.toks.get(i).map(|t| &t.kind) {
                 Some(TokKind::Hash) | Some(TokKind::At) => {
                     match self.toks.get(i + 1).map(|t| &t.kind) {
-                        Some(TokKind::Ident(n)) if Self::is_capability_bundle_marker(n) => {
+                        Some(TokKind::Ident(n)) if Self::is_distinct_prefix_marker(n) => {
                             saw_marker = true;
                             i += 2;
-                        }
-                        _ => break,
-                    }
-                }
-                _ => break,
+                            if matches!(
+                                self.toks.get(i - 1).map(|t| &t.kind),
+                                Some(TokKind::Ident(n)) if n == Syntax::ATTR_INVARIANT
+	                            ) && matches!(self.toks.get(i).map(|t| &t.kind), Some(TokKind::LParen))
+	                            {
+	                                let mut depth = 0i32;
+	                                while let Some(tok) = self.toks.get(i) {
+                                    match tok.kind {
+                                        TokKind::LParen => depth += 1,
+                                        TokKind::RParen => {
+                                            depth -= 1;
+                                            i += 1;
+                                            if depth == 0 {
+                                                break;
+                                            }
+                                            continue;
+                                        }
+                                        _ => {}
+                                    }
+	                                    i += 1;
+	                                }
+	                            }
+	                            while matches!(self.toks.get(i).map(|t| &t.kind), Some(TokKind::Semi)) {
+	                                i += 1;
+	                            }
+	                        }
+	                        _ => break,
+	                    }
+	                }
+	                _ => break,
             }
         }
         if !saw_marker {
@@ -4649,11 +4681,32 @@ impl<'a> Parser<'a> {
         let mut printable_span = None;
         let mut is_codable_as_base = false;
         let mut codable_as_base_span = None;
-        while matches!(&self.peek().kind, TokKind::Hash | TokKind::At)
-            && matches!(&self.peek2().kind, TokKind::Ident(n) if Self::is_capability_bundle_marker(n))
-        {
-            let sigil = self.bump(); // consume `#` or `@`
-            let (attr, attr_span) = self.expect_ident("after the marker sigil")?;
+        let mut invariant_range = None;
+	        loop {
+	            while matches!(self.peek().kind, TokKind::Semi) {
+	                self.bump();
+	            }
+	            if !(matches!(&self.peek().kind, TokKind::Hash | TokKind::At)
+	                && matches!(&self.peek2().kind, TokKind::Ident(n) if Self::is_distinct_prefix_marker(n)))
+	            {
+	                break;
+	            }
+	            let sigil = self.bump(); // consume `#` or `@`
+	            let (attr, attr_span) = self.expect_ident("after the marker sigil")?;
+	            if attr == Syntax::ATTR_INVARIANT {
+	                if matches!(sigil.kind, TokKind::At) {
+                    return Err(Diagnostic::error(
+                        "E0003",
+                        format!("`@{}` is on the wrong marker plane", Syntax::ATTR_INVARIANT),
+                        "refinement invariants are directive markers on distinct declarations".to_string(),
+                        format!("write `#{}(\"value >= lo && value < hi\")`", Syntax::ATTR_INVARIANT),
+                        Some(attr_span),
+                    ));
+                }
+                let (lo, hi, span) = self.parse_invariant_range(attr_span)?;
+                invariant_range = Some((lo, hi, span));
+                continue;
+            }
             if matches!(sigil.kind, TokKind::Hash) {
                 self.diags
                     .push(Self::e0062_contract_on_hash(&attr, attr_span));
@@ -4668,9 +4721,12 @@ impl<'a> Parser<'a> {
                 printable_span = Some(attr_span);
             } else if attr == Syntax::CONTRACT_BUNDLE_CODABLE_AS_BASE {
                 is_codable_as_base = true;
-                codable_as_base_span = Some(attr_span);
-            }
-        }
+	                codable_as_base_span = Some(attr_span);
+	            }
+	        }
+	        while matches!(self.peek().kind, TokKind::Semi) {
+	            self.bump();
+	        }
         // A `#`/`@` here that isn't one of the four bundle markers is a
         // mistake — teach the closed set instead of falling through to a
         // confusing "expected a name" error.
@@ -4778,7 +4834,7 @@ impl<'a> Parser<'a> {
             }
             Some((lo, hi, range_span))
         } else {
-            None
+            invariant_range
         };
         self.expect(TokKind::Semi, "after a distinct type declaration")?;
         let end = self.toks[self.pos - 1].span.end;
@@ -4820,6 +4876,48 @@ impl<'a> Parser<'a> {
                 "a range constraint's bounds are literal whole numbers".to_string(),
                 "write a plain integer, e.g. `0..10`".to_string(),
                 Some(self.peek().span),
+            )),
+        }
+    }
+
+    /// D-REFINE1: first shipped `#Invariant` prover accepts a quoted linear
+    /// integer range over the reserved value name:
+    /// `#Invariant("value >= 0 && value < 4")`.
+    fn parse_invariant_range(&mut self, attr_span: Span) -> Result<(i64, i64, Span), Diagnostic> {
+        let open = self.peek().span;
+        self.expect(TokKind::LParen, "after `#Invariant`")?;
+        let text_span = self.peek().span;
+        let text = match &self.peek().kind {
+            TokKind::Str(parts) => string_literal_value(parts)?,
+            other => {
+                return Err(Diagnostic::error(
+                    "E0003",
+                    format!("expected invariant text, found {}", describe(other)),
+                    "`#Invariant` takes a quoted linear integer bound over `value`".to_string(),
+                    "write `#Invariant(\"value >= 0 && value < 10\")`".to_string(),
+                    Some(self.peek().span),
+                ));
+            }
+        };
+        self.bump();
+        let close = self.peek().span;
+        self.expect(TokKind::RParen, "after the invariant text")?;
+        let span = Span::new(open.start, close.end);
+        match parse_invariant_bounds(&text) {
+            Some((lo, hi)) if lo <= hi => Ok((lo, hi, span)),
+            Some((lo, hi)) => Err(Diagnostic::error(
+                "E0137",
+                format!("this invariant range is empty — {} is after {}", lo, hi),
+                "a refinement's low bound must not be greater than its high bound".to_string(),
+                "fix the `#Invariant` bounds".to_string(),
+                Some(text_span),
+            )),
+            None => Err(Diagnostic::error(
+                "E0003",
+                "`#Invariant` only supports linear integer bounds over `value`".to_string(),
+                "the first D-REFINE1 prover accepts comparisons joined with `&&`".to_string(),
+                "write `value >= lo && value < hi`, `lo <= value && value <= hi`, or `value == n`".to_string(),
+                Some(attr_span),
             )),
         }
     }
@@ -5722,4 +5820,63 @@ fn format_version_segment(f: f64) -> String {
     } else {
         format!("{s}.0")
     }
+}
+
+fn parse_invariant_bounds(text: &str) -> Option<(i64, i64)> {
+    let mut lo = i64::MIN;
+    let mut hi = i64::MAX;
+    let mut saw = false;
+    for raw in text.split("&&") {
+        let clause = raw.trim();
+        if clause.is_empty() {
+            return None;
+        }
+        if let Some((new_lo, new_hi)) = parse_invariant_clause(clause) {
+            lo = lo.max(new_lo);
+            hi = hi.min(new_hi);
+            saw = true;
+        } else {
+            return None;
+        }
+    }
+    if saw && lo != i64::MIN && hi != i64::MAX {
+        Some((lo, hi))
+    } else {
+        None
+    }
+}
+
+fn parse_invariant_clause(clause: &str) -> Option<(i64, i64)> {
+    for op in ["<=", ">=", "==", "<", ">"] {
+        if let Some((left, right)) = clause.split_once(op) {
+            let left = left.trim();
+            let right = right.trim();
+            return match (left == "value", right == "value") {
+                (true, false) => {
+                    let n = right.parse::<i64>().ok()?;
+                    match op {
+                        ">=" => Some((n, i64::MAX)),
+                        ">" => n.checked_add(1).map(|v| (v, i64::MAX)),
+                        "<=" => Some((i64::MIN, n)),
+                        "<" => n.checked_sub(1).map(|v| (i64::MIN, v)),
+                        "==" => Some((n, n)),
+                        _ => None,
+                    }
+                }
+                (false, true) => {
+                    let n = left.parse::<i64>().ok()?;
+                    match op {
+                        "<=" => Some((n, i64::MAX)),
+                        "<" => n.checked_add(1).map(|v| (v, i64::MAX)),
+                        ">=" => Some((i64::MIN, n)),
+                        ">" => n.checked_sub(1).map(|v| (i64::MIN, v)),
+                        "==" => Some((n, n)),
+                        _ => None,
+                    }
+                }
+                _ => None,
+            };
+        }
+    }
+    None
 }

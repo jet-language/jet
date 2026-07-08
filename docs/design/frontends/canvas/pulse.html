@@ -1,3 +1,7 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Jet Canvas — Pulse</title>
 <style>
   /* ===== Family C — Pulse : dark, bold, one hot highlight per screen ===== */
@@ -32,8 +36,7 @@
   /* top-left command pill */
   #cmd{left:14px;top:14px;display:flex;align-items:center;gap:10px;padding:8px 12px}
   #cmd .brand{font-weight:800;letter-spacing:-.02em;font-size:15px;padding-right:10px;border-right:1px solid var(--line)}
-  #cmd .brand em{font-style:normal;background:linear-gradient(90deg,var(--hot),var(--hot2));
-    -webkit-background-clip:text;background-clip:text;color:transparent}
+  #cmd .brand em{font-style:normal;color:var(--cool)}
   #cmd select{font:12px var(--mono);min-height:28px;background:transparent;border-color:transparent;color:var(--cool);cursor:pointer;max-width:210px}
   #cmd select:hover{border-color:var(--line)}
   .seg{display:flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
@@ -82,7 +85,7 @@
     box-shadow:0 0 34px rgba(255,84,110,.35),0 12px 34px rgba(0,0,0,.5)}
   .node.running .hd b{background:linear-gradient(90deg,var(--hot),var(--hot2));-webkit-background-clip:text;background-clip:text;color:transparent}
   .bp{position:absolute;left:-8px;top:10px;width:13px;height:13px;border-radius:50%;
-    background:linear-gradient(120deg,var(--hot),var(--hot2));border:2px solid var(--ground);box-shadow:0 0 12px rgba(255,84,110,.6)}
+    background:var(--error);border:2px solid var(--ground)}
 
   .wire{fill:none;stroke-width:2.2}
   .wire.exec{stroke-width:2.8;stroke-linecap:round}
@@ -97,14 +100,14 @@
   #transport button{min-height:28px;min-width:34px}
   #transport #cont{font-weight:800}
   #transport .rep{display:flex;align-items:center;gap:8px;padding-left:10px;border-left:1px solid var(--line);font:10.5px var(--mono);color:var(--dim)}
-  #transport input[type=range]{width:130px;accent-color:#FF5481}
+  #transport input[type=range]{width:130px;accent-color:var(--cool)}
   #wstat{left:50%;bottom:66px;transform:translateX(-50%);display:flex;align-items:center;gap:9px;padding:7px 13px;
     font:11.5px var(--mono);color:var(--dim);max-width:520px;white-space:nowrap}
-  #wstat .dot{width:9px;height:9px;border-radius:50%;background:linear-gradient(120deg,var(--hot),var(--hot2));box-shadow:0 0 10px rgba(255,84,110,.7)}
+  #wstat .dot{width:9px;height:9px;border-radius:50%;background:var(--cool)}
   #wstat b{color:#fff}
 
-  #hud{position:absolute;left:14px;bottom:16px;z-index:9;display:flex;gap:8px;font:10.5px var(--mono);color:var(--dim)}
-  #hud span{background:rgba(19,14,28,.9);border:1px solid var(--line);border-radius:5px;padding:4px 8px}
+  #viewbar{position:absolute;left:14px;bottom:16px;z-index:9;display:flex;gap:8px;font:10.5px var(--mono);color:var(--dim)}
+  #viewbar span{background:rgba(19,14,28,.9);border:1px solid var(--line);border-radius:5px;padding:4px 8px}
   #mini{right:14px;bottom:16px;width:180px;height:112px;overflow:hidden;padding:0}
   #mini svg{width:100%;height:100%;display:block}
 
@@ -247,10 +250,10 @@
     <div class="diag" role="status">
       <div class="dh"><span>Diagnostic</span><span>E0204</span></div>
 <pre>Error [E0204]: `x` is being changed in this call, so it can't be used again here
-  --&gt; net/http_client.jet:15:32
+  --&gt; net/http_client.jet:6:14
     |
- 15 |     net.tcp_reply(stream, "200 OK", body)
-    |                                ^
+  6 |     both(&amp;x, x)
+    |              ^
 <span class="why"> Why: while something is being changed, nobody else may be looking at it</span>
 <span class="fix"> Fix: pass `&amp;x` only once, or copy first with `copy x`</span></pre>
     </div>
@@ -268,7 +271,7 @@
     <span class="rep">Replay <input id="scrubrange" type="range" min="0" max="100" value="62" aria-label="Replay position"><span id="scrubt">t=3.2s</span></span>
   </div>
 
-  <div id="hud"><span id="zoom">100%</span><span>8 nodes · 11 wires</span></div>
+  <div id="viewbar"><span id="zoom">100%</span><span>8 nodes · 11 wires</span></div>
   <div id="mini" class="float"><svg id="minisvg" viewBox="0 0 180 112" aria-hidden="true"></svg></div>
 
   <!-- context palette -->
@@ -370,7 +373,7 @@ function drawWires(sel){
 }
 function drawMini(){
   document.getElementById('minisvg').innerHTML=
-    nodes.map(n=>`<rect x="${n.x*180/1400}" y="${n.y*112/700}" width="${n.w*180/1400}" height="8" rx="1.5" fill="${n.id==='branch'?'#FF5481':'#2A2438'}" stroke="#3A3054"/>`).join('')
+    nodes.map(n=>`<rect x="${n.x*180/1400}" y="${n.y*112/700}" width="${n.w*180/1400}" height="8" rx="1.5" fill="${n.id==='branch'?'#8B7CFF':'#2A2438'}" stroke="#3A3054"/>`).join('')
     +`<rect x="20" y="8" width="130" height="76" fill="none" stroke="#8B7CFF" stroke-dasharray="3 3"/>`;
 }
 let cur='branch';

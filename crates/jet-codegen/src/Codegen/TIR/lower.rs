@@ -4382,6 +4382,18 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     )),
                 };
             }
+            if matches!(kind, IndexKind::FixedListProof) {
+                let elem_ty = match &base_t.ty {
+                    Type::FixedList { elem, .. } => (**elem).clone(),
+                    _ => Type::Int,
+                };
+                let b = emit_tir_expr(&base_t, cx);
+                let i = emit_tir_expr(&index_t, cx);
+                return TExpr {
+                    ty: elem_ty,
+                    kind: TExprKind::ConstInline(format!("(({b})[({i}).0 as usize].clone())")),
+                };
+            }
             let result_ty = match &base_t.ty {
                 Type::List(elem) => (**elem).clone(),
                 Type::Map { value, .. } => (**value).clone(),

@@ -467,6 +467,9 @@ const DEFAULT_BACKEND_BOUNDARIES: &[&str] = &[
     // default dev path; skip before spawning the worker thread so the harness
     // does not wait for a panic that cannot send a RunOutcome.
     "tooling/data_pipeline",
+    // Native GTK backend is intentionally outside default dev's source-level
+    // interpreter/JIT surface on this host.
+    "ui/ui_native_linux",
 ];
 
 fn is_named_dev_boundary(stem: &str, diags: &[jet::Diagnostics::Diagnostic]) -> bool {

@@ -45,7 +45,7 @@ animation or the band turns into noise; dark-only.
 
 Rationale: the counter-position — Canvas as a calm, editorial document. Light
 ground, white node cards with a thin type-colored top rule, hairline structure,
-type does hierarchy. Aims at the beginner facet: reads like docs, not a cockpit.
+type does hierarchy. Aims at the beginner facet: reads like docs, not a dense instrument panel.
 
 Signature: the fading hairline — every label→value row in the inspector and every
 section head leads the eye with a rule that starts solid and fades to nothing.

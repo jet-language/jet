@@ -424,7 +424,7 @@ before continuing.
 | E0962 | sema  | fan-out item doesn't fit the parameter type (S75) |
 | E0963 | sema  | positional destructure count ≠ fixed-size list length (S76) |
 | E0964 | sema  | length-changing op (`push`/`pop`/`insert`) on a fixed-size `[T#N]` (S76) |
-| E0965 | sema  | compile-time index out of range on `[T#N]` (S76) |
+| E0965 | sema  | compile-time or refinement-proven index out of range on `[T#N]` (S76, D-REFINE1) |
 | E1310 | parse/sema | variadic parameter not last, or variadic param has a default (D-VARIADIC1) |
 | E1311 | sema  | spread operand is not a list (D-VARIADIC1) |
 | E1312 | sema  | call spread at a callee without a variadic rest parameter (D-VARIADIC1) |
@@ -674,7 +674,7 @@ parse error.
 | E0962 | A fan-out item has the wrong type for the callee's parameter. | Each item in `f.[a, b, c]` is passed to `f`; they must match `f`'s parameter type. | Change the item to match the parameter type, or adjust the function. |
 | E0963 | A positional destructure pattern has a different count than the fixed-size list's known length. | `[T#N]` has exactly N elements at compile time; the pattern must name exactly N bindings or the binding would leave elements unnamed. | Match the number of names in the pattern to the size N shown in the error. |
 | E0964 | A length-changing method (`push`, `pop`, `insert`, `remove`, `clear`) was called on a fixed-size `[T#N]`. | The length of `[T#N]` is fixed at compile time and cannot change at runtime. | If you need a growable list, bind it with `:=` (e.g. `r := [...]`) so its length can change. |
-| E0965 | A literal index is out of range for a `[T#N]` at compile time. | The valid indexes for `[T#N]` are 0 through N−1; anything outside that range would panic at runtime. | Use an index in the valid range, or check at runtime with a condition. |
+| E0965 | An index is out of range for a `[T#N]` at compile time. | Literal indexes and `#Invariant`-refined distinct indexes must fit 0 through N−1; anything outside that range would panic at runtime. | Use an index in the valid range, widen to `[T]` for runtime checking, or tighten the refinement invariant. |
 
 ## Variadic and spread diagnostics (D-VARIADIC1)
 

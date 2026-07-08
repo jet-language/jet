@@ -21,8 +21,8 @@ Error [E0102]: nothing named `rende` exists here
     |
  14 |     rende(scene)
     |     ^^^^^
- Why: only functions that have been defined (or built in, like `print`) can be called
- Fix: did you mean `render`?
+ Why: only functions that have been defined (or built in, like `print` / `input`) can be called
+ Fix: define it first (fn rende() { ... }), or call one that exists
 ```
 
 ---
@@ -46,7 +46,7 @@ Error [E0102]: nothing named `rende` exists here
   ┌ Build failed ───────────────────── app.jet:14:5 ┐
   │ Error [E0102]: nothing named `rende` exists here │
   │   --> app.jet:14:5   14 | rende(scene)  ^^^^^     │
-  │  Why: … can be called   Fix: did you mean `render`?│
+  │  Why: … can be called   Fix: define it first, … │
   └ Fix the code to dismiss · Esc to hide ───────────┘
 ```
 
@@ -72,7 +72,7 @@ Error [E0102]: nothing named `rende` exists here
   │ 14 |  rende(scene)                                │
   │       ^^^^^                                        │
   │  Why: … can be called                             │
-  │  Fix: did you mean `render`?                       │
+  │  Fix: define it first, or call one that exists    │
   └ Fix the code to dismiss · Esc to hide ────────────┘
 ```
 
@@ -97,7 +97,7 @@ Error [E0102]: nothing named `rende` exists here
   │ Build failed                    app.jet:14:5 │
   │ Error [E0102]: nothing named `rende` exists… │
   │   --> app.jet:14:5   14 | rende(scene) ^^^^^ │
-  │  Why: … can be called  Fix: did you mean render?│
+  │  Why: … can be called  Fix: define it first, … │
   └ Fix the code to dismiss · Esc to hide ───────┘
 ```
 

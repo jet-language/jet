@@ -1500,6 +1500,31 @@ impl<'a> Checker<'a> {
             Type::FixedList { elem, len } => {
                 *kind = IndexKind::List;
                 if idx_ty != Type::Int {
+                    if let Type::Named(name) = &idx_ty {
+                        if let Some((lo, hi)) = self.registry.distinct_range(name) {
+                            let base_is_int =
+                                matches!(self.registry.distinct_base(name), Some(Type::Int));
+                            if base_is_int && lo >= 0 && (hi as u64) < *len {
+                                *kind = IndexKind::FixedListProof;
+                                return Some((**elem).clone());
+                            }
+                            self.diags.push(Diagnostic::error(
+                                "E0965",
+                                format!(
+                                    "`{}` proves {}..{}, which is not inside this fixed-size list's indexes",
+                                    name, lo, hi
+                                ),
+                                format!(
+                                    "this `[T#{}]` value only has proven indexes 0 through {}",
+                                    len,
+                                    len.saturating_sub(1)
+                                ),
+                                "use a refinement whose invariant fits the list length".to_string(),
+                                Some(index.span()),
+                            ));
+                            return Some((**elem).clone());
+                        }
+                    }
                     self.diags.push(Diagnostic::error(
                         "E0505",
                         format!(

@@ -401,9 +401,10 @@ money-named field holds a float (`#[allow(float_money)]` suppresses).
 Wrong-state call E0150; markers erase in codegen. Ordering falls out of the
 transition graph.
 
-**D-REFINE1 — Refinements**: extend `distinct` with `#Invariant` + a pure-Rust
-linear-integer-arithmetic prover for bounds proofs; no new keyword. Ratified
-implementation gap tracked by #347.
+**D-REFINE1 — Refinements**: `#Invariant("value >= lo && value < hi")` before
+a `distinct Int` declaration records a pure linear integer bound. The first
+shipped prover uses that bound to prove fixed-list indexes in-bounds; no new
+keyword.
 
 **D-PENDING1**: blessed loading-state enum `Loadable<T, E>`
 (idle/loading/loaded/failed) in Core. **Declined (types)**: `newtype` keyword
@@ -1101,8 +1102,9 @@ lifting through `wasm-tools`, host loading through `core.plugin`, version
 compatibility checks, and Jet-owned diagnostics E1257-E1260. **D-NOSTD1**: no
 `no_std` flag — the std baseline follows the typed platform `target:`
 (bare-metal ⇒ no-std).
-**D-OOBPROOF1**: bounds-check elision must be proof-carrying (rides
-D-REFINE1).
+**D-OOBPROOF1**: bounds-check elision is proof-carrying: a fixed-list index
+whose distinct-`Int` invariant fits `0..N-1` lowers without the runtime bounds
+helper; other dynamic indexes keep the check.
 
 ### Testing & benchmarks
 
@@ -1268,9 +1270,9 @@ interim compatibility floor beneath the native-shaped stack.
 **D-FLAGSHIP-RAYLIB1 — Native raylib bridge** *(ratified 2026-07-07,
 card #9)*: the flagship raylib slice uses the already-ratified `core.raylib`
 surface. Generated code is headless by default; with `JET_RAYLIB_DISPLAY=1` it
-dynamically loads native raylib and calls the real C window/draw APIs. Missing
-raylib degrades to the same headless path so CI and ordinary test runs do not
-link raylib or require a display server.
+dynamically loads native raylib and calls the real C window, draw, keyboard, and
+FPS APIs. Missing raylib degrades to the same headless path so CI and ordinary
+test runs do not link raylib or require a display server.
 
 **D-GAME-ASSET1 / D-GAME-ECS1 / D-GAME-INPUT1 / D-GAME-REPLAY1 /
 D-GAME-BACKEND1 / D-GAME-BUDGET1 — Stable `core.game` substrate** *(ratified

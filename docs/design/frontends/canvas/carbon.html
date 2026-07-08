@@ -1,3 +1,7 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Jet Canvas — Carbon</title>
 <style>
   /* ===== Family A — Carbon : dense, dark, engineered ===== */
@@ -110,8 +114,8 @@
     background:rgba(9,16,25,.9);font:10px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:#b9cbe0}
   .rail i{width:16px;height:0;border-top:3px solid var(--c);display:inline-block;border-radius:2px}
   .rail.exec i{border-top-style:solid;position:relative}
-  #hud{position:absolute;left:12px;bottom:12px;z-index:5;display:flex;gap:6px;font:11px var(--mono);color:var(--dim)}
-  #hud span{border:1px solid var(--line);background:rgba(9,16,25,.9);padding:4px 8px;border-radius:5px}
+  #viewbar{position:absolute;left:12px;bottom:12px;z-index:5;display:flex;gap:6px;font:11px var(--mono);color:var(--dim)}
+  #viewbar span{border:1px solid var(--line);background:rgba(9,16,25,.9);padding:4px 8px;border-radius:5px}
   #wstat{position:absolute;left:12px;bottom:44px;z-index:5;display:flex;align-items:center;gap:8px;
     padding:6px 10px;border:1px solid var(--line);border-radius:5px;background:rgba(9,16,25,.92);
     font:11px var(--mono);color:#9fb6cd;max-width:440px}
@@ -258,7 +262,7 @@
       </div>
 
       <div id="wstat" aria-live="polite"><span class="dot"></span><b>Paused at breakpoint</b><span id="wsmsg">Branch · total &gt; 10 → False</span></div>
-      <div id="hud"><span id="zoom">100%</span><span id="gmeta">8 nodes · 11 wires</span><span>net/tasks effects live</span></div>
+      <div id="viewbar"><span id="zoom">100%</span><span id="gmeta">8 nodes · 11 wires</span><span>net/tasks effects live</span></div>
       <svg id="mini" viewBox="0 0 190 120" aria-hidden="true"></svg>
 
       <!-- context search palette -->
@@ -317,10 +321,10 @@
         <div class="diag" role="status">
           <div class="dh"><span>Diagnostic</span><span>E0204</span></div>
 <pre>Error [E0204]: `x` is being changed in this call, so it can't be used again here
-  --&gt; net/http_client.jet:15:32
+  --&gt; net/http_client.jet:6:14
     |
- 15 |     net.tcp_reply(stream, "200 OK", body)
-    |                                ^
+  6 |     both(&amp;x, x)
+    |              ^
 <span class="why"> Why: while something is being changed, nobody else may be looking at it</span>
 <span class="fix"> Fix: pass `&amp;x` only once, or copy first with `copy x`</span></pre>
         </div>
@@ -497,7 +501,7 @@ const palItems=[
 const pal=document.getElementById('pal'),pallist=document.getElementById('pallist');
 function fillPal(q=''){pallist.innerHTML=palItems.filter(i=>i.t.toLowerCase().includes(q.toLowerCase()))
   .map(i=>`<button class="palrow" style="--k:var(${i.k})"><b>${i.t}</b><small>${i.s}</small></button>`).join('')
-  ||'<div style="padding:10px;color:var(--dim);font:11px var(--mono)">No matching node</div>';}
+  ||'<div style="padding:10px;color:var(--dim);font:11px var(--mono)">No matching node. Try a shorter search.</div>';}
 function openPal(x,y){pal.style.left=Math.min(x,innerWidth-320)+'px';pal.style.top=y+'px';pal.classList.add('open');
   fillPal();const q=document.getElementById('palq');q.value='';q.focus();}
 stage.addEventListener('contextmenu',e=>{e.preventDefault();const r=stage.getBoundingClientRect();openPal(e.clientX-r.left,e.clientY-r.top);});

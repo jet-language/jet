@@ -74,7 +74,6 @@ const MARKER_PLANE_MATRIX: &str =
     "tools/Tower/docs/plans/epoch-3/marker-plane-source-of-truth-matrix-2026-07-07.md";
 const MATRIX_UNBUILT_MARKERS: &[&str] = &[
     "S74-D-DESTRUCT1-ARM",
-    "D-REFINE1",
     "D-IGNORERET1",
     "D-SMELLLINT1",
     "D-NOSTD1",

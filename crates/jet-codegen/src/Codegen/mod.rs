@@ -839,7 +839,10 @@ mod tests {
             "raylib bridge handles must lower to top-level prelude types"
         );
         assert!(rust.contains("jet_raylib_begin_drawing"));
+        assert!(rust.contains("jet_raylib_draw_rectangle"));
         assert!(rust.contains("jet_raylib_draw_text"));
+        assert!(rust.contains("jet_raylib_key_down"));
+        assert!(rust.contains("jet_raylib_set_target_fps"));
         assert!(rust.contains("jet_raylib_close_window"));
         assert!(rust.contains("dlopen"));
         assert!(rust.contains("JET_RAYLIB_DISPLAY"));

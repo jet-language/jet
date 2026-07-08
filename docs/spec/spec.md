@@ -1560,6 +1560,8 @@ result@ [Int#3]=  double.[1, 2, 3];
 - Destructuring a `[T#N]` with the wrong number of names is **E0963**.
 - Calling `push`, `pop`, `insert`, `remove`, or `clear` on a `[T#N]` is **E0964**.
 - A literal index outside `0..N-1` on a `[T#N]` is **E0965** (compile-time check).
+- A `distinct Int` with `#Invariant("value >= lo && value < hi")` may index a
+  `[T#N]` without a runtime bounds check when `lo >= 0` and `hi < N`.
 - `[T#N]` is accepted wherever `[T]` is expected (widening coercion); the
   length information is erased at that point.
 
@@ -1612,10 +1614,11 @@ TLS config is rejected so the transport switch is visible at the call site.
 
 `core.raylib` is the first-party graphics bridge package. The typed surface is
 `window_open`, `window_should_close`, `begin_drawing`, `clear_background`,
-`draw_text`, `end_drawing`, `close_window`, and `color`. By default the bridge
-runs headless so CI does not need a display server. With `JET_RAYLIB_DISPLAY=1`,
-generated code dynamically loads the native raylib shared library and calls the
-real C API; if the library is absent, it degrades to the same headless path.
+`draw_rectangle`, `draw_text`, `end_drawing`, `close_window`, `key_down`,
+`set_target_fps`, and `color`. By default the bridge runs headless so CI does
+not need a display server. With `JET_RAYLIB_DISPLAY=1`, generated code
+dynamically loads the native raylib shared library and calls the real C API; if
+the library is absent, it degrades to the same headless path.
 
 `core.game` is the flagship engine name (D-GAME2=A). Its public beginner API is
 scene-first with a frame hook (D-GAME3=C): a `Scene` owns durable editable game

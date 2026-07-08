@@ -6170,6 +6170,16 @@ pub fn core_fixed_sig(
         ("core.raylib", "clear_background") => {
             Some((vec![(read, Type::Named("RaylibColor".to_string()))], None))
         }
+        ("core.raylib", "draw_rectangle") => Some((
+            vec![
+                (read, Type::Int),
+                (read, Type::Int),
+                (read, Type::Int),
+                (read, Type::Int),
+                (read, Type::Named("RaylibColor".to_string())),
+            ],
+            None,
+        )),
         ("core.raylib", "draw_text") => Some((
             vec![
                 (read, Type::String),
@@ -6184,6 +6194,10 @@ pub fn core_fixed_sig(
         ("core.raylib", "close_window") => {
             Some((vec![(read, Type::Named("RaylibWindow".to_string()))], None))
         }
+        ("core.raylib", "key_down") => {
+            Some((vec![(read, Type::String)], Some(Type::Bool)))
+        }
+        ("core.raylib", "set_target_fps") => Some((vec![(read, Type::Int)], None)),
         ("core.raylib", "color") => Some((
             vec![
                 (read, Type::Int),
@@ -7324,9 +7338,12 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
             "window_should_close",
             "begin_drawing",
             "clear_background",
+            "draw_rectangle",
             "draw_text",
             "end_drawing",
             "close_window",
+            "key_down",
+            "set_target_fps",
             "color",
         ],
         // D-CODECS1: standalone compression codecs, separate from core.archive.
@@ -8006,6 +8023,8 @@ mod tests {
 
         let items = core_module_items("core.raylib");
         assert!(items.contains(&"draw_text".to_string()));
+        assert!(items.contains(&"draw_rectangle".to_string()));
+        assert!(items.contains(&"key_down".to_string()));
         assert!(items.contains(&"close_window".to_string()));
     }
 }

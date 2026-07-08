@@ -1,4 +1,5 @@
 use core.game as game
+use core.raylib as rl
 use "./level" as level
 
 struct Ship {
@@ -36,13 +37,52 @@ fn step(ship: Ship, rock: Asteroid, input: String) -> Ship {
     if input == "right" {
         next = Ship.{x: ship.x + 1, y: ship.y, score: ship.score}
     }
+    if input == "left" {
+        next = Ship.{x: ship.x - 1, y: ship.y, score: ship.score}
+    }
     if input == "up" {
         next = Ship.{x: ship.x, y: ship.y + 1, score: ship.score}
+    }
+    if input == "down" {
+        next = Ship.{x: ship.x, y: ship.y - 1, score: ship.score}
     }
     if hit(next, rock) {
         next = Ship.{x: next.x, y: next.y, score: next.score + 250}
     }
     return next
+}
+
+fn keep_in_arena(ship: Ship) -> Ship {
+    next := Ship.{x: ship.x, y: ship.y, score: ship.score}
+    if next.x < 0 {
+        next = Ship.{x: 0, y: next.y, score: next.score}
+    }
+    if next.x > 6 {
+        next = Ship.{x: 6, y: next.y, score: next.score}
+    }
+    if next.y < 0 {
+        next = Ship.{x: next.x, y: 0, score: next.score}
+    }
+    if next.y > 3 {
+        next = Ship.{x: next.x, y: 3, score: next.score}
+    }
+    return next
+}
+
+fn visual_input() -> String {
+    if rl.key_down("Right") || rl.key_down("D") {
+        return "right"
+    }
+    if rl.key_down("Left") || rl.key_down("A") {
+        return "left"
+    }
+    if rl.key_down("Up") || rl.key_down("W") {
+        return "up"
+    }
+    if rl.key_down("Down") || rl.key_down("S") {
+        return "down"
+    }
+    return "none"
 }
 
 fn replay() -> [Ship] {
@@ -70,6 +110,54 @@ fn export_manifest() -> [String] {
         "web-editor: jet build --target=web examples/apps/jetfighter/workbench_ui.jet",
         "replay: runs/jetfighter.jreplay",
     ]
+}
+
+fn play_visual() {
+    window :: rl.window_open(720, 480, "JetPlay")
+    rl.set_target_fps(60)
+
+    bg :: rl.color(14, 18, 28, 255)
+    grid :: rl.color(42, 52, 72, 255)
+    ship_color :: rl.color(47, 220, 180, 255)
+    rock_color :: rl.color(245, 110, 83, 255)
+    text :: rl.color(232, 238, 247, 255)
+    dim :: rl.color(140, 150, 170, 255)
+
+    rock := asteroid()
+    ship := Ship.{x: 0, y: 0, score: 0}
+    loop rl.window_should_close(window) == false {
+        input :: visual_input()
+        if input != "none" {
+            ship = keep_in_arena(step(ship, rock, input))
+            if hit(ship, rock) {
+                rock = Asteroid.{x: rock.x, y: rock.y, alive: false}
+            }
+        }
+
+        rl.begin_drawing(window)
+        rl.clear_background(bg)
+        rl.draw_text("JetPlay", 24, 18, 32, text)
+        rl.draw_text("Arrows/WASD move. Hit asteroid for 250. Esc exits.", 24, 56, 18, dim)
+        rl.draw_text("score {ship.score}", 24, 426, 24, text)
+
+        loop row in 0..3 {
+            loop col in 0..6 {
+                rl.draw_rectangle(80 + col * 82, 104 + row * 82, 64, 64, grid)
+            }
+        }
+
+        if rock.alive {
+            rl.draw_rectangle(86 + rock.x * 82, 110 + (3 - rock.y) * 82, 52, 52, rock_color)
+            rl.draw_text("asteroid", 84 + rock.x * 82, 168 + (3 - rock.y) * 82, 14, dim)
+        } else {
+            rl.draw_text("asteroid cleared", 470, 426, 22, text)
+        }
+        rl.draw_rectangle(86 + ship.x * 82, 110 + (3 - ship.y) * 82, 52, 52, ship_color)
+        rl.draw_text("ship", 96 + ship.x * 82, 168 + (3 - ship.y) * 82, 14, text)
+        rl.end_drawing()
+    }
+
+    rl.close_window(window)
 }
 
 fn run() {
@@ -102,6 +190,7 @@ fn run() {
         print("export {artifact}")
     }
     print(game.run(scene, replay: game.Replay.record("runs/jetfighter.jreplay")))
+    play_visual()
 }
 
 #Test("collision awards points") {

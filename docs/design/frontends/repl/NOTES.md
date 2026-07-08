@@ -19,21 +19,25 @@ Value line = engineered readout, dotted rule name→value, type in select
 magenta. Best for heavy daily users who want state always in view.
 
 ```
-┌ jet repl ───────────────────────────────── 80×24 ┐
+┌ jet repl ───────────────────────────────────── 80×24 ┐
 │ SESSION ● live │ CORE ● loaded │ FUEL 65000 │ STEP 4 │
-├───────────────────────────────────────────────────┤
-│ [4] ▸ grid.take(5)                                │
-│                                                   │
-│   grid ····· : [String] = ["1","2","Fizz","4",..] │
-│                                                   │
-│ [5] ▸ label("3")                                  │
-│   error[E0308] this call wants an Int, got String │
-│   │  label("3")                                   │
-│   │        ^^^ String here                        │
-│   │  fix: pass a number — label(3)                │
-│   1 problem found                                 │
-│ [6] ▸ _                                           │
-└───────────────────────────────────────────────────┘
+├──────────────────────────────────────────────────────┤
+│ [4] ▸ grid.take(5)                                   │
+│                                                      │
+│   grid ····· : [String] = ["1","2","Fizz","4",..]    │
+│                                                      │
+│ [5] ▸ show("hi")                                     │
+│                                                      │
+│ Error [E0112]: `show` wants Int (a whole number)     │
+│ for argument 1, but this is String (text)            │
+│   --> <repl:6>                                       │
+│     |                                                │
+│   6 |     show("hi")                                 │
+│     |          ^^^^                                  │
+│  Why: every argument must match its parameter's type │
+│  Fix: use Int (a whole number) here                  │
+│ [6] ▸ _                                              │
+└──────────────────────────────────────────────────────┘
 ```
 
 NO_COLOR: LEDs drop, band stays as labelled text. ANSI-16: 1:1 map.
@@ -56,11 +60,15 @@ flare-orange, never a red wall. Best for docs-adjacent, teaching, newcomers.
 |                                                     |
 |  grid --------- : [String] = ["1","2","Fizz",..]    |
 +-----------------------------------------------------+
-|> label("3")                                         |
-|  error[E0308] this call wants an Int, got String    |
-|  '  label("3")                                      |
-|  '        ^^^ String here                           |
-|  fix  pass a number — label(3)                      |
+|> show("hi")                                         |
+|Error [E0112]: `show` wants Int (a whole number)     |
+|for argument 1, but this is String (text)            |
+|  --> <repl:6>                                       |
+|    |                                                |
+|  6 |     show("hi")                                 |
+|    |          ^^^^                                  |
+| Why: every argument must match its parameter's type |
+| Fix: use Int (a whole number) here                  |
 +-----------------------------------------------------+
 ```
 
@@ -85,11 +93,15 @@ with glowing chevron. Best when the REPL is a showpiece / demo surface.
   grid ····· : [String] = ["1","2","Fizz","4","Buzz"]
              (^ name grid glows: it is the live value)
 
-[6] ▸ label("3")
-  error[E0308] this call wants an Int, got String
-  ╵  label("3")
-  ╵        ^^^ String here   (^ caret is the one glow)
-  fix: pass a number — label(3)
+[6] ▸ show("hi")
+  Error [E0112]: `show` wants Int (a whole number)
+  for argument 1, but this is String (text)
+    --> <repl:6>
+      |
+    6 |     show("hi")
+      |          ^^^^   (^ caret is the one glow)
+   Why: every argument must match its parameter's type
+   Fix: use Int (a whole number) here
 ```
 
 Truecolor: gradient. 16-color: solid bright-red. NO_COLOR: glow → bold ▸.

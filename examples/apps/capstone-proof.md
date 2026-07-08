@@ -24,7 +24,7 @@ whole gate.
 | `jetgrep` | slice | CLI modes, recursive fixture scan, golden output, error tests | packaging, perf/LOC comparison, larger real corpus |
 | `jetpaste` | slice | loopback HTTP create/read routes, persistence fixture, health/stats probes | real server workflow, route state through `core.http`, deploy story, perf/LOC comparison |
 | `jettasks` | slice | reducer transcript plus web build | browser interaction test, persistence workflow, packaging, perf/LOC comparison |
-| `jetfighter` / `JetPlay` | capstone | standalone run path, source-backed editor loop, headless tests, web editor build, native build, perf/LOC proof, offline replay | none |
+| `jetfighter` / `JetPlay` | capstone | standalone run path, playable raylib visual mode, source-backed editor loop, headless tests, web editor build, native build, perf/LOC proof, offline replay | none |
 | `metal` | slice | host-runnable core plus freestanding build proof | board/QEMU proof, deploy image, perf/size budget, LOC comparison |
 
 ## Product Capstones
