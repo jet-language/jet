@@ -3,8 +3,8 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 356,
-    "rev": 1771,
+    "nextNum": 363,
+    "rev": 1786,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -17883,12 +17883,17 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "building",
       "priority": "P1",
       "plan": "Order: (1) map current jet-driver module graph + who imports what (rg + cargo tree); (2) write the target crate map as a short architecture.md draft section — get it reviewed in-repo before moving code; (3) extract JetOS first (most self-contained), then Jetpack engine, then CLI dispatch cleanup — one extraction per commit, full suite green between each; (4) shell-crate verdicts: implement or fold, one commit each; (5) jet-queries decision writeup (incrementality now vs later) — this is a design recommendation, not a gate: record in architecture.md; (6) final pass: dependency-direction test, docs updated, full nix develop -c cargo test green.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "Started #354. Current evidence: Jetpack modules are isolated under crates/jet-driver/src/Jetpack but still call driver seams: Manifest, Lock, FFI, CFFI/CBind, Compile/Driver, SHA256, Syntax/AST/Parser/Sema/Comptime. Shell crates are no longer empty in current tree: jet-queries has a real query cache; jet-rt owns runtime arena/string/list helpers; jet-net owns fetch/TLS diagnostics; jet-impact owns semindex blast-radius reports. Safe path is to codify dependency direction first, update architecture crate map, and avoid a blind Jetpack mv until shared seams are split/re-exported without cycles. No user-facing gate found."
+        },
         {
           "at": "2026-07-08",
           "by": "claude-main",
@@ -17920,6 +17925,132 @@
         }
       ],
       "created": "2026-07-08T11:24:45.615Z",
+      "updated": "2026-07-08"
+    },
+    {
+      "id": "c0bsg5zl",
+      "num": 356,
+      "title": "Canvas frontend redesign — implement ratified family",
+      "body": "Implement the ratified Canvas design family across the embedded UI in Source/Canvas.rs (HTML/CSS/JS served at /canvas). Mockups: docs/design/frontends/canvas/{carbon,paper,pulse}.html; review: docs/design/frontends/REVIEW.md. Exit: shipped Canvas matches the ratified mockup (all existing features restyled, no stubs), keyboard focus visible, reduced-motion respected, goldens/snapshots green.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "triage",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "created": "2026-07-08T13:10:16.530Z",
+      "updated": "2026-07-08"
+    },
+    {
+      "id": "c0e7rot4",
+      "num": 357,
+      "title": "jetos Studio frontend redesign — implement ratified family",
+      "body": "Implement the ratified Studio design family in the studio bundle served by cmd_studio/serve_studio (crates/jet-driver/src/Jetpack/CLI.rs). Mockups: docs/design/frontends/studio/{carbon,paper,pulse}.html. All 8 screens (overview, modules/options, pending+switch, generations, packages, services, secrets, fleet) source-backed per the mockups. Exit: Studio serves the ratified design end to end against a real system; no stub controls.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "triage",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "created": "2026-07-08T13:10:16.677Z",
+      "updated": "2026-07-08"
+    },
+    {
+      "id": "c0gk8k3t",
+      "num": 358,
+      "title": "REPL frontend redesign — implement ratified family",
+      "body": "Implement the ratified REPL design family in Source/REPL.rs: banner, prompt, status presentation, completion menu, ghost autosuggest, ?name docs mode, value/error framing. Std-only ANSI (I6); diagnostic words/codes unchanged (I4 — frame/color only). Mockups: docs/design/frontends/repl/. Exit: REPL matches ratified mockup incl. NO_COLOR/ANSI-16 fallbacks; repl tests + ui snapshots green.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "triage",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "created": "2026-07-08T13:10:16.819Z",
+      "updated": "2026-07-08"
+    },
+    {
+      "id": "c0iyfhaf",
+      "num": 359,
+      "title": "jet env shell prompt — implement ratified family",
+      "body": "Implement the ratified prompt design for jet env dev shells: segments (env, jet version, build/test state, git, dirty), transient collapse of finished commands, running-command spinner. Height budget ≤2 lines. Std-only ANSI (I6). Mockups: docs/design/frontends/prompt/. Exit: prompt renders all four states per ratified mockup in bash/zsh/fish; NO_COLOR fallback.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "triage",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "created": "2026-07-08T13:10:16.964Z",
+      "updated": "2026-07-08"
+    },
+    {
+      "id": "c0l5fmyy",
+      "num": 360,
+      "title": "jet ? help app — implement ratified family",
+      "body": "Elevate jet ? (card #159 alias) into the ratified full-screen help app: alt-screen TUI, fuzzy search, category browse, command detail with examples, exit-prefills-shell-line. Std-only ANSI (I6), no TUI crate. Mockups: docs/design/frontends/help/. Exit: jet ? opens the app, q restores shell, Enter prefills; flat --help unchanged for jet help/non-TTY.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "triage",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "created": "2026-07-08T13:10:17.096Z",
+      "updated": "2026-07-08"
+    },
+    {
+      "id": "c0nhjxh4",
+      "num": 361,
+      "title": "jetpack/jetos CLI output redesign — implement ratified family",
+      "body": "Implement the ratified CLI output family in crates/jet-driver/src/Jetpack/Output.rs (Theme) and call sites: jetpack add/gc, jet env enter/exit, jetos switch generation diff, build-failure block. Keep quiet/aligned baseline; diagnostics verbatim (I4); std-only ANSI (I6). Mockups: docs/design/frontends/cli/. Exit: all five flows match ratified mockup; NO_COLOR/non-TTY converge to plain baseline; snapshot tests green.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "triage",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "created": "2026-07-08T13:10:17.238Z",
+      "updated": "2026-07-08"
+    },
+    {
+      "id": "c0prf2ws",
+      "num": 362,
+      "title": "jet dev server output + error overlay — implement ratified family",
+      "body": "Implement the ratified dev-server design in Source/CmdDevWeb.rs: terminal output (banner, watch, timestamped rebuild lines) and the injected browser error overlay (compile diagnostic verbatim over last-good build, polling states Rebuilding/Reloading/offline). Self-contained injected HTML/JS, no CDN (I6). Mockups: docs/design/frontends/devserver/. Exit: overlay shows on compile error, auto-clears on clean rebuild, matches ratified mockup.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "triage",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "created": "2026-07-08T13:10:17.375Z",
       "updated": "2026-07-08"
     }
   ],
@@ -38792,6 +38923,343 @@
       "created": "2026-07-08T10:25:13.811Z",
       "outcome": "A",
       "ratifiedAt": "2026-07-08"
+    },
+    {
+      "id": "D-FE-CANVAS1",
+      "cardId": "c0bsg5zl",
+      "group": "web-ui",
+      "title": "Canvas visual editor — pick the design family",
+      "gist": "Which of three complete visual designs the Canvas node editor ships with.",
+      "explainer": "Carbon — a debugger workbench rewards density, and the status band carries build/watch/diagnostic/port state at a glance. Paper is the strongest newcomer-facing alternative if Canvas should read as the beginner surface.",
+      "story": "Maya opens Canvas for the first time after hearing Jet has \"the Blueprint editor Unreal dropped.\" She spends the next three hours wiring nodes, stepping a breakpoint, and reading one type error. Whether she stays depends on whether the editor feels like a professional instrument she can trust for a workday — this ballot picks that look. All three options render the identical feature set (typed pins per rail, right-click node search, graph⇄source view, debugger overlay, replay scrubber, verbatim E0204 diagnostic); only the visual language differs.",
+      "inWild": "// examples/features/tooling/canvas_blueprint_demo.jet — the graph shown in every mockup\nfn square(n: Int) -> Int { n * n }\n\nfn summarize(values: [Int]) -> String {\n    let total = values.fold(0, fn(acc: Int, v: Int) -> Int { acc + v })\n    \"total=\" + total.to_string()\n}\n\nfn run() {\n    let nums = [1, 2, 3, 4]\n    let squared = square.[1, 2, 3]\n    print(summarize(nums))\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Carbon — dense dark workbench",
+          "detail": "Professional instrument for all-day use (Linear/Zed density). Three-column workbench, kind-tinted node headers, everything monospaced and scannable. Signature: bottom status band of labeled lamps — BUILD / WATCH / DIAG / PORT state in one glance. Transplants: Unreal's exec-triangle vs data-circle pins and type-filtered right-click search, Blender's kind-colored headers, Node-RED's palette rows. Closest in spirit to the shipped Canvas. Risk: density punishes first-run newcomers; needs the existing tour/empty-state path.",
+          "code": "REVIEW IN BROWSER:\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/canvas/carbon.html\n\nStatus band: BUILD ● OK · WATCH ● 3 files · DIAG ● E0204 ×1 · PORT ● 8080"
+        },
+        {
+          "key": "B",
+          "name": "Paper — light editorial document",
+          "detail": "The counter-position: Canvas as a calm, light document. White node cards with a thin type-colored top rule, hairline structure, breadcrumb selector. Signature: fading hairline leading every label to its value. Transplants: Figma's quiet left nav and soft-ring selection, Blender's kind color moved to a restrained top rule, Stripe-docs layout. Best first impression for the beginner facet — reads like documentation. Risk: wire colors need the darker tuning it ships with; long debug sessions on white can fatigue.",
+          "code": "REVIEW IN BROWSER:\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/canvas/paper.html\n\nSignature: label ───────╌╌ · value  (rule fades toward the value)"
+        },
+        {
+          "key": "C",
+          "name": "Pulse — full-bleed canvas, floating chrome",
+          "detail": "Maximal graph, minimal chrome: no fixed panels — floating command pill, drawer, inspector, and a media-style transport bar (debug step + replay scrub) over an edge-to-edge canvas. Signature: exactly one hot gradient on screen — the paused node and the execution pulse flowing into it; when nothing runs, nothing is hot. Transplants: tldraw's floating panels, Rive's transport bar, Unreal's wire pulse recolored as the single hot element. Risk: floating panels can occlude the graph on small laptops; the one-hot-thing rule needs discipline as features grow.",
+          "code": "REVIEW IN BROWSER:\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/canvas/pulse.html\n\nSignature: paused Branch node + its exec wire = the only warm pixels"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Unreal Blueprint",
+          "note": "The benchmark all three transplant from: exec triangles vs typed data circles, thicker exec wires, type-filtered right-click node search, execution-path highlight while paused.",
+          "code": "Right-click on canvas → search pre-filtered to \"compatible with Int\""
+        },
+        {
+          "lang": "tldraw / Rive",
+          "note": "Option C's chrome model: an edge-to-edge canvas with floating panels and a bottom transport strip, instead of fixed docked columns.",
+          "code": "[pill: select · pan · wire]        [transport: ⏮ ◀ ▶ ⏭  ●rec  scrub ────]"
+        }
+      ],
+      "rec": "A",
+      "status": "open",
+      "created": "2026-07-08T13:10:16.606Z"
+    },
+    {
+      "id": "D-FE-STUDIO1",
+      "cardId": "c0e7rot4",
+      "group": "web-ui",
+      "title": "jetos Studio — pick the design family",
+      "gist": "Which of three complete visual designs the jetos Studio system manager ships with.",
+      "explainer": "Carbon — an admin/settings app rewards density; SET-vs-DEF provenance, line-select keys, and the sticky source pane are the strongest expression of \"toggle = a line of source.\" Paper is the clean newcomer-facing alternative.",
+      "story": "Nate runs `jetos studio` on halcyon to bump the kernel and flip a stylix option. The app must show him exactly which line of system.jet each toggle rewrites, what the pending diff is, and let him build and switch generations without fear — with rollback one click away. All three options render the same 8 screens (overview, module/option editor, pending review + build/switch, generations timeline, packages, services, secrets, fleet) with the same source-backed edit model; only the visual language differs.",
+      "inWild": "// system.jet — the source every Studio toggle projects\nmodule system.host {\n    hostname: \"halcyon\"\n    kernel: \"linux-cachyos\"\n}\n\nmodule desktop.plasma {\n    enable: true\n    theme: stylix.catppuccin(\"mocha\")\n}\n\n// Studio edit = a set-option transaction that rewrites one line\n// and shows the diff before jet os build && switch",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Carbon — dense dark console",
+          "detail": "Admin console at Linear/Zed density: every value monospaced, strict alignment, scan-not-read. Signature: sticky status band — BUILD OK · GEN 47 · PENDING 3 · PROOF SIGNED. Option rows carry SET vs DEF provenance badges; a per-module system.jet:NN button flips the source pane to that block with the live pending diff. Line-select keys (L1..L4) and number keys 1–8 make it fully keyboard-driven. Transplants: Apple System Settings grouped rows, Home Assistant's config-vs-source duality, Tailscale fleet density, Vercel generation timeline, Proxmox task steps. Risk: density fatigue — mitigated with generous row padding.",
+          "code": "REVIEW IN BROWSER:\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/studio/carbon.html\n\nOption row:  desktop.plasma.enable   [on]   SET · system.jet:12"
+        },
+        {
+          "key": "B",
+          "name": "Paper — light editorial settings",
+          "detail": "Stripe-docs calm: light ground, whitespace and type hierarchy do the work; the only dark surfaces are code and logs. Signature: fading hairline leading each label to its value and each step to the next. The source aside is persistent — the current system.jet block and pending diff are always visible, never hidden behind a click. Transplants: Stripe editorial hierarchy, Vercel dot-rail deploy timeline, Home Assistant set/default tags, Apple Settings grouped cards. Contrast verified (ink 13:1, secondary 5.2:1 AA). Risk: long tables can feel sparse on white — hairlines and the header wash add structure.",
+          "code": "REVIEW IN BROWSER:\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/studio/paper.html\n\nStat card:  generation ───────╌╌ · 47   kernel ───────╌╌ · linux-cachyos"
+        },
+        {
+          "key": "C",
+          "name": "Pulse — dark, one hot subject",
+          "detail": "Bold display type, big numbers, and exactly one hot gradient element per screen: the live generation tile on overview, the selected option row in modules, the running build step during switch, the current node on the timeline. Selecting a row and loading its source line are the same gesture — the selection is the glow. Warnings stay amber/red, never hot, so status never competes with the accent. Transplants: Vercel's loud \"current\" deployment, Tailscale fleet rows, Portainer service badges, Synology install-state buttons. Risk: gradient discipline must hold as screens grow — the mockup enforces thin gradient borders, never fills.",
+          "code": "REVIEW IN BROWSER:\nfile:///home/nate/Projects/Github/jet/docs/design/frontends/studio/pulse.html\n\nOne glow per screen: overview→gen tile · modules→selected row · switch→running step"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Home Assistant",
+          "note": "The config-vs-UI duality all three transplant — but made always-visible instead of a hidden YAML mode: every toggle shows its system.jet line and pending diff.",
+          "code": "toggle → set-option transaction → source diff shown before apply"
+        },
+        {
+          "lang": "Vercel",
+          "note": "Generations as a deploy timeline with one-click rollback and closure-size delta — the model for the generations screen in every option.",
+          "code": "gen 47 (current) ← gen 46 · rollback · closure 2.1 GiB (+34 MiB)"
+        }
+      ],
+      "rec": "A",
+      "status": "open",
+      "created": "2026-07-08T13:10:16.749Z"
+    },
+    {
+      "id": "D-FE-REPL1",
+      "cardId": "c0gk8k3t",
+      "group": "tooling",
+      "title": "Jet REPL — pick the design family",
+      "gist": "Which of three visual designs the interactive REPL ships with.",
+      "explainer": "Carbon — a persistent status band gives whole-session state to the daily driver; Paper is the better teaching/newcomer swap if the REPL should lead with approachability.",
+      "story": "Priya keeps a REPL open all day next to her editor: she pastes a function, probes a value, and reads one type error an hour. The REPL's look decides whether that loop feels like a first-class instrument or an afterthought. All three options share the same features — ghost autosuggest from history, Tab completion with a signature column, `?name` inline docs, multiline editing, the pinned `name : Type = value` output — and show the real E0112 diagnostic verbatim (I4). Only the frame differs.",
+      "inWild": "$ jet repl\nJet 0.9.2 — interactive REPL\n\nuser> let grid = fizzbuzz(20)\ngrid : [String] = [\"1\", \"2\", \"Fizz\", \"4\", \"Buzz\", ...]\n\nuser> show(\"hi\")\nError [E0112]: `show` wants Int (a whole number) for argument 1, but this is String (text)",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Carbon — status band + step-indexed prompt",
+          "detail": "Persistent status band under the title (session, core, fuel, step count with state LEDs) and a step-indexed prompt `[n] ▸` replacing flat `user>`. Value lines read as engineered readouts with a dotted rule from name to value. For heavy daily users who want session state always in view. Full HTML flow: file:///home/nate/Projects/Github/jet/docs/design/frontends/repl/carbon.html",
+          "code": "┌ jet repl ───────────────────────────────────── 80×24 ┐\n│ SESSION ● live │ CORE ● loaded │ FUEL 65000 │ STEP 4 │\n├──────────────────────────────────────────────────────┤\n│ [4] ▸ grid.take(5)                                   │\n│                                                      │\n│   grid ····· : [String] = [\"1\",\"2\",\"Fizz\",\"4\",..]    │\n│                                                      │\n│ [5] ▸ show(\"hi\")                                     │\n│                                                      │\n│ Error [E0112]: `show` wants Int (a whole number)     │\n│ for argument 1, but this is String (text)            │\n│   --> <repl:6>                                       │\n│     |                                                │\n│   6 |     show(\"hi\")                                 │\n│     |          ^^^^                                  │\n│  Why: every argument must match its parameter's type │\n│  Fix: use Int (a whole number) here                  │\n│ [6] ▸ _                                              │\n└──────────────────────────────────────────────────────┘"
+        },
+        {
+          "key": "B",
+          "name": "Paper — light shell, foldable blocks",
+          "detail": "Each turn is a Warp-style block you can fold and rerun, separated by hairline rules; the prompt is a single accent chevron. A light terminal by default (dark swap available) — the deliberate counter-position to every dark tool. Errors are a calm orange-accented card, never a red wall. Best for teaching, docs-adjacent work, and newcomers. Full HTML flow: file:///home/nate/Projects/Github/jet/docs/design/frontends/repl/paper.html",
+          "code": "+-- jet repl -------------------------------- 80x24 --+\n| Jet 0.9.2  interactive REPL   core loaded fuel 65k  |\n| ?name for docs · :help commands · :quit exit        |\n+-----------------------------------------------------+\n|> grid.take(5)                                       |\n|                                                     |\n|  grid --------- : [String] = [\"1\",\"2\",\"Fizz\",..]    |\n+-----------------------------------------------------+\n|> show(\"hi\")                                         |\n|Error [E0112]: `show` wants Int (a whole number)     |\n|for argument 1, but this is String (text)            |\n|  --> <repl:6>                                       |\n|    |                                                |\n|  6 |     show(\"hi\")                                 |\n|    |          ^^^^                                  |\n| Why: every argument must match its parameter's type |\n| Fix: use Int (a whole number) here                  |\n+-----------------------------------------------------+"
+        },
+        {
+          "key": "C",
+          "name": "Pulse — dark, one glow follows the live edge",
+          "detail": "Exactly one hot gradient element on screen, and it follows the action: the prompt chevron when idle, the selected completion row, the just-computed value name, or the error caret. All syntax highlighting is cool-toned so nothing competes. The showpiece option — strongest in demos and screencasts. Full HTML flow: file:///home/nate/Projects/Github/jet/docs/design/frontends/repl/pulse.html",
+          "code": "  JET  interactive REPL · v0.9.2\n  core loaded · fuel 65k · :help · :quit\n\n[4] ▸ grid.take(5)                     (▸ = the one glow)\n\n  grid ····· : [String] = [\"1\",\"2\",\"Fizz\",\"4\",\"Buzz\"]\n             (glow moves to `grid`: it is the live value)\n\n[6] ▸ show(\"hi\")\n  Error [E0112]: `show` wants Int (a whole number)\n  for argument 1, but this is String (text)\n    --> <repl:6>\n      |\n    6 |     show(\"hi\")\n      |          ^^^^   (glow moves to the caret)\n   Why: every argument must match its parameter's type\n   Fix: use Int (a whole number) here"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "ipython / ptpython",
+          "note": "Numbered turns and ghost autosuggest from history — Option A's step index makes the turn number a first-class part of the prompt.",
+          "code": "In [4]: grid.take(5)\nOut[4]: [\"1\", \"2\", \"Fizz\", \"4\", \"Buzz\"]"
+        },
+        {
+          "lang": "Julia",
+          "note": "The `?name` help mode all three adopt: type ? and the prompt switches to documentation lookup.",
+          "code": "help?> fold\n  fold(init, f) — combine elements left to right"
+        },
+        {
+          "lang": "Warp",
+          "note": "Option B's block model: every command+output is a discrete card you can fold, copy, or rerun.",
+          "code": "[block] > jet test ........ ✓ 0.8s   (fold ▾ · rerun ↻)"
+        }
+      ],
+      "rec": "A",
+      "status": "open",
+      "created": "2026-07-08T13:10:16.894Z"
+    },
+    {
+      "id": "D-FE-PROMPT1",
+      "cardId": "c0iyfhaf",
+      "group": "tooling",
+      "title": "Jet shell prompt — pick the design family",
+      "gist": "Which of three designs the prompt inside jet env dev shells ships with.",
+      "explainer": "Pulse — a two-line prompt is exactly where one moving glow pays off: idle, broken, or busy is legible before reading a single word. Paper is the pick if silence-by-default matters more.",
+      "story": "Sam enters `jet env`, works for four hours, and glances at the prompt hundreds of times: is the build green, is the tree dirty, is that benchmark still running? The prompt is the highest-frequency surface Jet ships — it must answer in a glance and never cost more than two lines. All three options show the same segments (env name, jet version, build/test state, git branch, dirty markers) and collapse finished commands starship-transient-style; only the visual language differs.",
+      "inWild": "$ jet env\n── webapp · dev shell ──────────────────────────\n# four hours of: edit, build, test, glance at prompt\n$ jet build   # fails with E0308 — the prompt must surface this\n$ jet bench   # runs 90s — the prompt must show it is alive",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Carbon — status-band prompt",
+          "detail": "The info line is a flat run of segments with condition LEDs; a failing build shows its error code inline. Full state on every prompt, nothing hidden. Finished commands collapse to verb + LED + duration. NO_COLOR: LEDs become [ok]/[FAIL] tags. Full HTML states: file:///home/nate/Projects/Github/jet/docs/design/frontends/prompt/carbon.html",
+          "code": "webapp · jet 0.9.2 · ● tests ok · ⎇ main          (normal)\n▸ _\n\nwebapp · jet 0.9.2 · ● tests ok · ⎇ main ●3 +42 −7 (dirty)\n▸ git add .\n\nwebapp · jet 0.9.2 · ● build failed E0308 · ⎇ main ●1 (fail)\n▸ _\n\n▸ jet build            ● 1.2s                      (transient)\n▸ jet test             ● 0.8s\nwebapp · ⣾ running jet bench · 12s · ⎇ main"
+        },
+        {
+          "key": "B",
+          "name": "Paper — quiet prompt, absence is the all-clear",
+          "detail": "Hairline-separated segments — and a clean passing shell hides the info line entirely: silence means everything is fine. Only a failed build raises its voice, phrased as the next action to take. The lowest-noise option; state appears exactly when it changes. NO_COLOR: markers become [!] tags. Full HTML states: file:///home/nate/Projects/Github/jet/docs/design/frontends/prompt/paper.html",
+          "code": "webapp ─ jet 0.9.2 ─ main                          (normal)\n> _\n\nwebapp ─ jet 0.9.2 ─ main  ✎ 3 · +42 −7            (dirty)\n> git add .\n\nwebapp ─ jet 0.9.2 ─ main  ✎ 1                     (fail)\nbuild failed · E0308 in label() · run jet build to see it\n> _\n\n> jet build   ✓ 1.2s                               (transient)\n> jet test    ✓ 0.8s\nwebapp ─ ⣾ jet bench 12s   Ctrl-C to stop"
+        },
+        {
+          "key": "C",
+          "name": "Pulse — one glow that moves to what matters",
+          "detail": "Exactly one hot element, and it travels: the cursor when idle, the failed segment when broken, the spinner while work runs. A dirty tree stays cool — it is a normal working state, not an alarm. No glow anywhere means nothing needs you. NO_COLOR: the glow becomes a bold leading glyph. Full HTML states: file:///home/nate/Projects/Github/jet/docs/design/frontends/prompt/pulse.html",
+          "code": "webapp · jet 0.9.2 · ✓ tests · ⎇ main              (normal)\n▸ _                        (▸ glows)\n\nwebapp · jet 0.9.2 · ✓ tests · ⎇ main ●3 +42 −7    (dirty)\n▸ git add .                (▸ glows; markers cool)\n\nwebapp · jet 0.9.2 · ✗ build E0308 · ⎇ main        (fail)\n▸ _                        (✗ segment glows; ▸ cool)\n\n▸ jet build   ✓ 1.2s                               (transient)\nwebapp · ⣾ jet bench 12s · ⎇ main   (spinner glows)"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "starship",
+          "note": "The segment model and transient prompt all three build on: finished commands collapse to one line with duration.",
+          "code": "webapp on  main [!3] via ⬢ v22 took 1.2s\n❯"
+        },
+        {
+          "lang": "powerlevel10k",
+          "note": "Instant prompt + condition-dependent segments — Option A's always-on LED band is the same idea with a fixed layout.",
+          "code": "╭─ webapp  main ✗3 ─ ok ╰─❯"
+        }
+      ],
+      "rec": "C",
+      "status": "open",
+      "created": "2026-07-08T13:10:17.032Z"
+    },
+    {
+      "id": "D-FE-HELP1",
+      "cardId": "c0l5fmyy",
+      "group": "tooling",
+      "title": "jet ? help app — pick the design family",
+      "gist": "Which of three designs the full-screen jet ? help browser ships with.",
+      "explainer": "Paper — help is the discovery surface for newcomers; the editorial reading view serves \"find what you want faster and enjoy exploring\" best. Carbon suits it once you already know the tool.",
+      "story": "Ana installed Jet an hour ago. She knows roughly what she wants — \"run my file and rebuild on save\" — but not the flag. She types `jet ?`, and instead of eighty lines of flat --help scrolling past, a navigable app opens: fuzzy search, command groups, runnable examples, and Enter drops the chosen command onto her shell line ready to edit. All three options share that flow (lazygit two-pane, fzf fuzzy match, atuin-style prefill exit); only the visual language differs.",
+      "inWild": "$ jet ?\n# full-screen help opens (alt-screen; q restores the shell untouched)\n# Ana types: watch → fuzzy-matches `jet run --watch`\n# Enter → app closes, shell line reads:\n$ jet run app.jet --watch▌   ← prefilled, not executed",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Carbon — dense two-pane browser",
+          "detail": "Status band up top (match count, active command), engineered list/detail split, examples inline with a run marker. Maximum information per screen — built for people who already know the tool and want speed. NO_COLOR: selection becomes reverse video, matches underline. Full HTML flow: file:///home/nate/Projects/Github/jet/docs/design/frontends/help/carbon.html",
+          "code": " jet ?  help browser              ↑↓ / search  ? keys  q quit\n ⌕ _                                    filter 26 commands\n ┌ BUILD & RUN ────────┬ jet run ─────────────────────────┐\n │▸run    build & run  │ build the current program, run it│\n │ build  compile bin  │ USAGE  jet run [FILE] [--watch]   │\n │ test   run tests    │ EXAMPLES                          │\n │ CODE QUALITY        │  ❯ jet run            enter→shell │\n │ check  type-check   │  ❯ jet run app.jet --watch        │\n └─────────────────────┴───────────────────────────────────┘\n enter use · tab pane · / search · c categories · q quit"
+        },
+        {
+          "key": "B",
+          "name": "Paper — editorial reading view",
+          "detail": "Reads like good documentation: real heading hierarchy in the detail pane, fading hairline under section labels, whitespace doing the structure. The one warm accent marks fuzzy-match characters. Built for newcomers and discovery — the surface most aligned with \"make exploration enjoyable.\" NO_COLOR: matches underline, selection is a left bar + bold. Full HTML flow: file:///home/nate/Projects/Github/jet/docs/design/frontends/help/paper.html",
+          "code": " jet ?  help                      ↑↓ / search  ? keys  q quit\n ⌕ _                                    filter 26 commands\n BUILD & RUN            │ jet run\n  run   build & run     │ Build the current program and run\n  build compile binary  │ it — fastest path from code to out.\n  test  run tests       │ USAGE ─────────────\n CODE QUALITY           │  jet run [FILE] [--watch]\n  check type-check      │ EXAMPLES\n  fmt   format source   │  [ ❯ jet run ]        enter→shell\n                        │  [ ❯ jet run app.jet --watch ]\n enter use · / search · c categories · q quit"
+        },
+        {
+          "key": "C",
+          "name": "Pulse — one glow follows focus",
+          "detail": "Exactly one hot element: the selected command, then the chosen example, then — on exit — the command riding out onto the shell line still glowing. Fuzzy-matched characters light inside the word. The showpiece option; help as a demo of the product's polish. NO_COLOR: reverse-video selection, underlined matches. Full HTML flow: file:///home/nate/Projects/Github/jet/docs/design/frontends/help/pulse.html",
+          "code": " jet ?  help                      ↑↓ / search  ? keys  q quit\n ⌕ biuld                                3 of 26 match\n MATCHES               │ jet build\n ▸build  (b·ild glow)  │ compile the current program to a bin\n  bundle assets        │ USAGE jet build [--release] [--target]\n  rebuild clean        │ EXAMPLES\n                       │  ❯ jet build\n                       │ [❯ jet build --release]  ← the one glow\n enter use · esc clear · ↑↓ move · q quit"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "fzf / atuin",
+          "note": "The interaction spine of all three: fuzzy subsequence match while typing, Enter drops the choice onto the shell line without executing it.",
+          "code": "⌕ biuld  →  matches `build` · Enter → $ jet build --release▌"
+        },
+        {
+          "lang": "lazygit",
+          "note": "The two-pane list/detail layout with single-key navigation that Options A and B structure around.",
+          "code": "[list pane] ▸ run          [detail pane] usage · examples · flags"
+        },
+        {
+          "lang": "trogon (Textualize)",
+          "note": "The precedent for elevating --help into a full TUI; these designs skip its form-builder in favor of prefill-on-exit.",
+          "code": "trogon builds the command in-app; jet ? hands it to your shell instead"
+        }
+      ],
+      "rec": "B",
+      "status": "open",
+      "created": "2026-07-08T13:10:17.169Z"
+    },
+    {
+      "id": "D-FE-CLI1",
+      "cardId": "c0nhjxh4",
+      "group": "tooling",
+      "title": "jetpack / jetos CLI output — pick the design family",
+      "gist": "Which of three output designs the jetpack and jetos command line ships with.",
+      "explainer": "Carbon — the status band plus the aligned resolve/build ledger fits a package-manager/OS power tool; state survives scrollback. Paper is the pick if the CLI should read maximally calm.",
+      "story": "Leo maintains three machines on jetos. His day is `jetpack add`, `jet env`, `jetos switch`, and the occasional `jetpack gc` — plus one build failure a week where the output has to hand him the next move (`--shell-on-fail`). He wants what nh gives nix — a clean generation diff, readable progress — but tighter. All three options keep today's quiet, aligned baseline (gutter label, ✓ ledger rows, threshold rule, uv-style resolve summary, nh-style generation diff) and converge to the identical plain output under NO_COLOR/CI; only color and emphasis differ.",
+      "inWild": "$ jetos switch\n# build 1240 derivations → show what changes → confirm → atomic switch\n\nchanges\n  + hello           2.12.1\n  ↑ ripgrep         14.1.0 → 14.1.1\n  ↓ nodejs          22.5.0 → 20.15.1\n  − obsolete-tool   1.0.0\n  4 changed · +1 −1 ↑1 ↓1 · closure 2.1 GiB (+34 MiB)",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Carbon — status band over the log",
+          "detail": "A labeled state-light line sits above the scroll (HANGAR / BUILD / CLOSURE / SWITCH), so system state stays legible after a thousand log lines pass. Four-color generation diff scans without reading versions. Cyan accent, magenta select, amber warn. The densest, most instrument-like option. Full HTML flows (add/env/switch/gc/failure/NO_COLOR): file:///home/nate/Projects/Github/jet/docs/design/frontends/cli/carbon.html",
+          "code": "$ jetos switch\n HANGAR ● OK   BUILD ● OK   CLOSURE ● +34M   SWITCH ● pending\n  jetos  building generation\n         ▸ realised 1240 / 1240 derivations\n  jetos  generation 42 → 43\n\n  changes\n    + hello           2.12.1\n    ↑ ripgrep         14.1.0 → 14.1.1\n    ↓ nodejs          22.5.0 → 20.15.1\n    − obsolete-tool   1.0.0\n    4 changed · +1 −1 ↑1 ↓1 · closure 2.1 GiB (+34 MiB)\n\n  jetos  switch to generation 43? [Y/n] y\n  jetos  activated generation 43 ✓"
+        },
+        {
+          "key": "B",
+          "name": "Paper — receipt-style, fading hairlines",
+          "detail": "Output reads like a printed receipt: fading hairline rules lead each label to its value, generous alignment, one warm accent per screen (the single downgrade, the reclaimable figure). Designed for light terminals but degrades to dash-density on any ground. The calmest option. Full HTML flows: file:///home/nate/Projects/Github/jet/docs/design/frontends/cli/paper.html",
+          "code": "$ jetpack gc\n  jetpack  hangar disk report\n\n    generations  ──────╌╌ ·  12 kept · 8 reclaimable\n    store paths  ──────╌╌ ·  1,204 live · 318 dead\n    reclaimable  ──────╌╌ ·  4.7 GiB\n\n  jetpack  remove 318 dead paths + 8 generations? [y/N] y\n  jetpack  freed 4.7 GiB ✓"
+        },
+        {
+          "key": "C",
+          "name": "Pulse — one glow on the live line",
+          "detail": "Exactly one hot highlight per screen, always on the thing currently happening: the package being built, the target generation through confirm→activate, the reclaimable figure awaiting a decision. Everything else stays cool — a finished command has no heat at all. Full HTML flows: file:///home/nate/Projects/Github/jet/docs/design/frontends/cli/pulse.html",
+          "code": "$ jetpack add nixpkgs:ripgrep\n  jetpack  resolving 1 request\n  jetpack  Resolved 4 packages in 312ms\n           ⠹ building ripgrep 14.1.1 …      ← the one glow\n           ✓ pcre2      10.44    cached\n           ✓ oniguruma  6.9.9    cached\n  jetpack  added ripgrep to env.jet ✓"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "nh (nix helper)",
+          "note": "The owner-named benchmark: its os-switch generation diff table is the direct ancestor of the changes block in every option — improved with aligned columns and a one-line summary row.",
+          "code": "nh os switch → [ + added  − removed  ↑ upgraded  ↓ downgraded ] + closure delta"
+        },
+        {
+          "lang": "uv",
+          "note": "The compact resolve summary all three reuse: one line that says what happened and how fast, then a ledger of packages.",
+          "code": "Resolved 4 packages in 312ms"
+        },
+        {
+          "lang": "cargo",
+          "note": "The aligned verb-gutter output style the current Output.rs already follows; all three options keep it rather than reinventing.",
+          "code": "   Compiling jet-sema v0.9.2\n    Finished dev [unoptimized] in 4.2s"
+        }
+      ],
+      "rec": "A",
+      "status": "open",
+      "created": "2026-07-08T13:10:17.309Z"
+    },
+    {
+      "id": "D-FE-DEVSRV1",
+      "cardId": "c0prf2ws",
+      "group": "web-ui",
+      "title": "jet dev server — pick the design family",
+      "gist": "Which of three designs the dev server terminal output and browser error overlay ship with.",
+      "explainer": "Carbon — the status band makes app health one glance in a terminal that scrolls all day, and the dark overlay is the proven pattern. Paper is the pick to visually align dev errors with a light docs-first brand.",
+      "story": "Kai runs `jet dev app.jet --target=web`, keeps the browser on one monitor and the terminal on the other, and saves every thirty seconds. On a typo, the browser must show the compile error over the running app (last good build keeps serving) and clear itself on the next clean save — vite-class. All three options show the identical verbatim E0102 diagnostic (I4) in both terminal and overlay, and the same three polling states (Rebuilding / Reloading / offline–retrying); only the chrome differs.",
+      "inWild": "$ jet dev app.jet --target=web\nserving http://localhost:8080 — watching app.jet …\n\n# save with a typo:\nError [E0102]: nothing named `rende` exists here\n  --> app.jet:14:5\n    |\n 14 |     rende(scene)\n    |     ^^^^^\n Why: only functions that have been defined (or built in, like `print` / `input`) can be called\n Fix: define it first (fn rende() { ... }), or call one that exists",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Carbon — status band + dark full-bleed overlay",
+          "detail": "Terminal: a status band above the log flips BUILD ● 1 error, so app health is legible regardless of scroll; rebuild lines are timestamped. Browser: vite-class full-viewport dark card with a clickable file:line header and dismiss tip, diagnostic body verbatim. Full HTML (terminal + real overlay): file:///home/nate/Projects/Github/jet/docs/design/frontends/devserver/carbon.html",
+          "code": " SERVE ● :8080   WATCH ● app.jet   BUILD ● 1 error   CLIENTS ● 1\n  jet dev  web target\n    serve   http://localhost:8080\n    watch   app.jet\n    ready in 640ms · Ctrl-C to stop\n  14:22:08  app.jet changed → rebuilt in 210ms ✓\n  14:22:19  app.jet changed → 1 error\n  ┌ Build failed ───────────────────── app.jet:14:5 ┐\n  │ Error [E0102]: nothing named `rende` exists here │\n  │ … verbatim diagnostic …                          │\n  └ Fix the code to dismiss · Esc to hide ───────────┘"
+        },
+        {
+          "key": "B",
+          "name": "Paper — light overlay, the calm bet",
+          "detail": "Terminal: fading hairline leads each timestamp to its result. Browser: the one real aesthetic risk in this sweep — a light error overlay. The compile error arrives as a calm, readable card instead of a dark takeover; blue file link, diagnostic verbatim. Full HTML: file:///home/nate/Projects/Github/jet/docs/design/frontends/devserver/paper.html",
+          "code": "  jet dev  web target\n    serve   http://localhost:8080\n    ready in 640ms · Ctrl-C to stop\n  14:22:08  app.jet changed ──╌ · rebuilt in 210ms ✓\n  14:22:19  app.jet changed ──╌ · 1 error\n  ┌ Build failed   app.jet:14:5 ─────────────────╌╌ ┐  (light card)\n  │ Error [E0102]: nothing named `rende` exists here │\n  │ … verbatim diagnostic …                          │\n  └ Fix the code to dismiss · Esc to hide ───────────┘"
+        },
+        {
+          "key": "C",
+          "name": "Pulse — heat moves from banner to failure",
+          "detail": "Terminal: the `jet dev` banner carries the one glow while the server is healthy — the heat IS the liveness indicator. On failure it moves to a single gradient bar across the overlay header; the healthy banner goes cold. Browser: dark card, cool file link, diagnostic verbatim. Full HTML: file:///home/nate/Projects/Github/jet/docs/design/frontends/devserver/pulse.html",
+          "code": "  jet dev  web target            (banner glows = server live)\n    serve   http://localhost:8080\n    ready in 640ms · Ctrl-C to stop\n  14:22:08  app.jet changed → rebuilt in 210ms ✓\n  14:22:19  app.jet changed → 1 error     (heat moves ↓)\n  ▟▟▟▟▟▟▟▟ gradient bar ▟▟▟▟▟▟▟▟▟▟▟▟▟▟▟▟\n  │ Build failed                    app.jet:14:5 │\n  │ Error [E0102]: nothing named `rende` exists… │\n  └ Fix the code to dismiss · Esc to hide ───────┘"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "vite",
+          "note": "The overlay benchmark: full-bleed card over the app, clickable file:line, code frame, auto-clears on the next clean build. All three keep that contract; they restyle the chrome only.",
+          "code": "[plugin:vite] Transform failed — app.tsx:14:5   (click → editor)"
+        },
+        {
+          "lang": "next.js",
+          "note": "Precedent for the light-ground error surface Option B bets on — its dev overlay renders diagnostics on white.",
+          "code": "Build Error · light card · readable stack, no dark takeover"
+        }
+      ],
+      "rec": "A",
+      "status": "open",
+      "created": "2026-07-08T13:10:17.448Z"
     }
   ],
   "questions": [
@@ -40056,6 +40524,111 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-08T13:10:17.449Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-FE-DEVSRV1",
+      "note": "jet dev server — pick the design family"
+    },
+    {
+      "at": "2026-07-08T13:10:17.376Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0prf2ws",
+      "note": "jet dev server output + error overlay — implement ratified family"
+    },
+    {
+      "at": "2026-07-08T13:10:17.310Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-FE-CLI1",
+      "note": "jetpack / jetos CLI output — pick the design family"
+    },
+    {
+      "at": "2026-07-08T13:10:17.238Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0nhjxh4",
+      "note": "jetpack/jetos CLI output redesign — implement ratified family"
+    },
+    {
+      "at": "2026-07-08T13:10:17.169Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-FE-HELP1",
+      "note": "jet ? help app — pick the design family"
+    },
+    {
+      "at": "2026-07-08T13:10:17.097Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0l5fmyy",
+      "note": "jet ? help app — implement ratified family"
+    },
+    {
+      "at": "2026-07-08T13:10:17.032Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-FE-PROMPT1",
+      "note": "Jet shell prompt — pick the design family"
+    },
+    {
+      "at": "2026-07-08T13:10:16.964Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0iyfhaf",
+      "note": "jet env shell prompt — implement ratified family"
+    },
+    {
+      "at": "2026-07-08T13:10:16.894Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-FE-REPL1",
+      "note": "Jet REPL — pick the design family"
+    },
+    {
+      "at": "2026-07-08T13:10:16.819Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0gk8k3t",
+      "note": "REPL frontend redesign — implement ratified family"
+    },
+    {
+      "at": "2026-07-08T13:10:16.750Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-FE-STUDIO1",
+      "note": "jetos Studio — pick the design family"
+    },
+    {
+      "at": "2026-07-08T13:10:16.677Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0e7rot4",
+      "note": "jetos Studio frontend redesign — implement ratified family"
+    },
+    {
+      "at": "2026-07-08T13:10:16.606Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-FE-CANVAS1",
+      "note": "Canvas visual editor — pick the design family"
+    },
+    {
+      "at": "2026-07-08T13:10:16.531Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0bsg5zl",
+      "note": "Canvas frontend redesign — implement ratified family"
+    },
+    {
+      "at": "2026-07-08T13:04:49.625Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c077qyuw",
+      "note": "phase,logEntry"
+    },
     {
       "at": "2026-07-08T13:03:16.260Z",
       "by": "codex",

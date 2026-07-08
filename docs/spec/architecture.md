@@ -52,12 +52,26 @@ D-COMPILERSEAMS1/2 split the compiler into workspace seam crates. The root
 | `jet-comptime` | comptime values and interpreter support | no user-facing surface by itself |
 | `jet-sema` | all semantic checks, collects all front-end diagnostics | yes (E01xx+) |
 | `jet-codegen` | checked program to Rust text; TIR is internal here | **never** |
-| `jet-driver` | CLI/build orchestration, rustc invocation, ICE policy | only I/O + ICE |
+| `jet-driver` | CLI/build orchestration, rustc invocation, ICE policy, current Jetpack/JetOS host until package seams split out | only I/O + ICE |
+| `jet-queries` | std-only demand cache for incremental inputs and derived query values | no |
+| `jet-semindex` | stable semantic index over checked programs for tooling | no new diagnostics |
+| `jet-impact` | blast-radius reports over `jet-semindex` | no |
+| `jet-rt` | runtime helpers shared by generated code and JIT/dev paths | no |
+| `jet-jit` | dev/JIT execution tier over codegen/TIR facts | internal fallback only |
+| `jet-net` | runtime/comptime fetch helper with TLS diagnostics | yes, for fetch failures |
 
 I6 is machine-checked by `tests/truthfulness.rs`: the compiler seam crates may
 depend only on each other through path dependencies. Runtime-side crates such as
 `jet-jit` and `jet-net` are separate workspace members with their own
 owner-approved dependency posture.
+
+`tests/workspace_crates.rs` pins the current path-dependency direction. Compiler
+front-end crates may not grow back-edges into driver/codegen clients. Tooling and
+runtime crates stay outside the compiler seam unless their dependency row is
+changed here and in the test. The remaining #354 repartition boundary is
+Jetpack/JetOS: moving it out of `jet-driver` requires first splitting or
+relocating the shared package seams it still uses (`Manifest`, `Lock`, FFI bridge
+helpers, package export checks), otherwise the extraction would create a cycle.
 
 ### Incremental Compiler Service
 

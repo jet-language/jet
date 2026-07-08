@@ -1,4 +1,5 @@
 use core.game as game
+use core.env as env
 use core.raylib as rl
 use "./level" as level
 
@@ -161,6 +162,11 @@ fn play_visual() {
 }
 
 fn run() {
+    if (env.get("JET_RAYLIB_DISPLAY") ?? "") == "1" {
+        play_visual()
+        return
+    }
+
     scene := game.Scene.new("jetfighter")
     scene.assets.image("assets/player.png") ?? panic("image")
     scene.assets.sound("assets/laser.wav") ?? panic("sound")

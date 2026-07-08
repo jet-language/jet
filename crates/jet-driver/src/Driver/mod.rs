@@ -565,14 +565,14 @@ fn compile_bundle_path_opts_full(
     let plugin = if plugin_target {
         // E1260: every `pub fn` in the entry module must be exportable —
         // never a silent skip (I3/I4).
-        let surface_errors = crate::Jetpack::PluginExport::validate_export_surface(&bundle);
+        let surface_errors = crate::PluginExport::validate_export_surface(&bundle);
         if !surface_errors.is_empty() {
             return Err(surface_errors);
         }
-        let export_name = crate::Jetpack::PluginExport::resolve_export_name(&bundle);
+        let export_name = crate::PluginExport::resolve_export_name(&bundle);
         // D-PLUGIN-VERSION1=A: freeze/diff the exported interface (E1257 on an
         // incompatible change) before handing artifacts to the wasm build step.
-        crate::Jetpack::PluginExport::check_and_freeze_version(&bundle, &export_name)?;
+        crate::PluginExport::check_and_freeze_version(&bundle, &export_name)?;
         Some(crate::Codegen::emit_plugin(&bundle, &rust, &export_name))
     } else {
         None
