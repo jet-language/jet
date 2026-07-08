@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 363,
-    "rev": 1805,
+    "rev": 1806,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -17937,12 +17937,17 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "verify",
       "priority": "P2",
       "plan": "Order: (1) CoreLib.rs — split by core.* family, mod.rs keeps the registration table; (2) CheckerCoreLib.rs — mirror the same family split; (3) TIR lower.rs then emit.rs then subset.rs — split by construct family (items, exprs, patterns, control flow, closures, tasks); (4) Parser/Items.rs + CheckerInfer/calls.rs; (5) jet-jit/src/lib.rs; (6) wait for re-partition card, then JetOS.rs, Jetpack/CLI.rs, Canvas.rs inside their new homes. Per file: read wholly first, write the module map, mechanical motion, cargo test --test golden + targeted suites, one commit; full suite at card close.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "Implementation complete for #355. Decomposed all previously listed monster files and additional >3k holdouts: CoreLib, AST, Syntax, TIR lower/emit/subset/tests, CheckerCoreLib, Parser Items/Expressions, CheckerInfer/calls, CheckerCore, Comptime/Build, jet-jit lib, jetpack JetOS/CLI, Source/Canvas. Current line-count proof: find Source crates -type f -name *.rs ... shows largest file 2920 lines (Parser/Statements.rs), so no .rs source remains above 3k. Targeted verification green: cargo check; cargo check -p jetpack -p jet-driver; cargo test -p jet-codegen --lib; cargo test -p jet-sema --lib; cargo test -p jet-parser --lib; cargo test -p jet-comptime --lib; cargo test -p jet-jit --lib; cargo test -p jetpack --lib; cargo test --lib. Also fixed stale comptime test Func fixture by adding default replay fields. Ready for full-suite verify."
+        },
         {
           "at": "2026-07-08",
           "by": "codex",
@@ -40576,6 +40581,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-08T13:44:46.046Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c0y0vvf0",
+      "note": "phase,logEntry"
+    },
     {
       "at": "2026-07-08T13:43:35.874Z",
       "by": "codex-main",
