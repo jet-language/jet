@@ -19,6 +19,7 @@ fn jet_command_lock() -> &'static Mutex<()> {
 fn run_jet(args: &[&str]) -> std::process::Output {
     let _guard = jet_command_lock().lock().unwrap();
     Command::new(jet_bin())
+        .env("JETPLAY_HEADLESS", "1")
         .args(args)
         .output()
         .unwrap_or_else(|e| panic!("failed to run jet {:?}: {e}", args))
@@ -27,6 +28,7 @@ fn run_jet(args: &[&str]) -> std::process::Output {
 fn run_jet_in(cwd: &Path, args: &[&str]) -> std::process::Output {
     let _guard = jet_command_lock().lock().unwrap();
     Command::new(jet_bin())
+        .env("JETPLAY_HEADLESS", "1")
         .args(args)
         .current_dir(cwd)
         .output()

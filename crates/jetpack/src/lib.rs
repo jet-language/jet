@@ -9,18 +9,30 @@
 //! Built std-only (I6) and independent from the `jet` binary (D-JPK1). The
 //! consolidated plan lives in `tools/Tower/docs/plans/epoch-5/README.md`.
 
+#![allow(non_snake_case)]
+#![deny(warnings)]
+
+pub use jet_codegen::{
+    Codegen, Comptime, Diagnostics, Lexer, Parser, Sema, Syntax, AST, SHA256,
+};
+
 pub mod Bridge;
 pub mod BuildDebug;
+pub mod CBind;
+pub mod CFFI;
 pub mod CLI;
 pub mod Components;
 pub mod Discovery;
 pub mod EffectBudget;
 pub mod EnvFile;
 pub mod Envelope;
+pub mod FFI;
 pub mod Image;
 pub mod JSON;
 pub mod JetOS;
 pub mod JetPin;
+pub mod Lock;
+pub mod Manifest;
 pub mod ManifestTOML;
 pub mod Merge;
 pub mod MigrationImport;

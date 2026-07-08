@@ -58,6 +58,17 @@ pub fn is_c_import(imp: &ImportDecl) -> bool {
     c_module_lib(imp).is_some() || c_header_lib(imp).is_some()
 }
 
+fn import_alias(imp: &ImportDecl) -> String {
+    imp.import_alias()
+}
+
+fn binding_cache_file(project_root: &Path, language: ForeignLanguage, lib: &str) -> std::path::PathBuf {
+    project_root
+        .join(Syntax::SOURCE_ROOT_DIR)
+        .join(language.bindings_subdir())
+        .join(format!("{}.{}", lib, Syntax::FILE_EXT))
+}
+
 /// The synthetic module alias for a C library (`__c_raylib`). Never typeable by
 /// users (a `c.` prefix is reserved and `__` mirrors the reserved segment).
 fn synthetic_alias(lib: &str) -> String {
@@ -367,7 +378,7 @@ pub fn assemble(bundle: &mut ProgramBundle) -> Result<CFfi, Vec<Diagnostic>> {
                     synth_idx
                 }
             };
-            let alias = crate::Loader::import_alias(imp);
+            let alias = import_alias(imp);
             cffi.import_links.push(CImportLink {
                 importing_idx: idx,
                 alias,
@@ -420,8 +431,7 @@ fn load_binding_caches(bundle: &mut ProgramBundle, diags: &mut Vec<Diagnostic>) 
         bundle.modules.iter().map(|m| m.path.clone()).collect();
 
     for lib in libs {
-        let cache_path =
-            crate::Foreign::binding_cache_file(&bundle.project_root, ForeignLanguage::C, &lib);
+        let cache_path = binding_cache_file(&bundle.project_root, ForeignLanguage::C, &lib);
 
         if already.contains(&cache_path) {
             continue;
@@ -595,7 +605,7 @@ pub fn resolve_link(lib: &str, project_root: &Path) -> Result<LinkFlags, Diagnos
 /// present. Uses the real PackageManifest parser — the same one that produces
 /// `pm.deps` — not an ad-hoc reader.
 fn declared_c_dep(lib: &str, project_root: &Path) -> Option<String> {
-    use crate::Jetpack::PackageManifest::{DepSource, PackManifest};
+    use crate::PackageManifest::{DepSource, PackManifest};
     let pm: PackManifest = PackManifest::load(project_root)?.ok()?;
     pm.deps.into_iter().find_map(|dep| {
         if dep.name != lib {

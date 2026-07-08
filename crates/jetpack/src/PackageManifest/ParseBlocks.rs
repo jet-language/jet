@@ -6,7 +6,7 @@ use super::{
     BuildOptimize, BuildProfileDef, Dep, DepSource, ManifestError, PackageEntry, PackageMeta,
     Target, TrustDecision, TrustPolicy,
 };
-use crate::Jetpack::RefSpec;
+use crate::RefSpec;
 use crate::Syntax;
 use std::collections::HashSet;
 

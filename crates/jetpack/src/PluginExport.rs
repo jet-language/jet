@@ -23,10 +23,10 @@ use crate::AST::{Item, ProgramBundle};
 /// "defaults to the package name when omitted").
 pub fn resolve_export_name(bundle: &ProgramBundle) -> String {
     if let Some(Ok(mf)) = crate::Manifest::load(&bundle.project_root) {
-        if let Ok(pm) = crate::Jetpack::PackageManifest::parse(&mf.raw) {
+        if let Ok(pm) = crate::PackageManifest::parse(&mf.raw) {
             for pkg in &pm.packages {
                 for t in &pkg.targets {
-                    if let crate::Jetpack::PackageManifest::Target::Plugin { export } = t {
+                    if let crate::PackageManifest::Target::Plugin { export } = t {
                         return export.clone().unwrap_or_else(|| pkg.name.clone());
                     }
                 }

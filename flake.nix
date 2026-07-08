@@ -138,12 +138,14 @@
             # a non-Nix user gets E3201 naming the fix at build time.
             pkg-config
             gtk4
+            raylib
           ];
 
           shellHook = ''
             export JET_ROOT="$PWD"
             export TZDIR="${jetTzdb}"
             export JETOS_OVMF_CODE="${pkgs.OVMF.fd}/FV/OVMF_CODE.fd"
+            export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath [ pkgs.raylib ]}:''${LD_LIBRARY_PATH:-}"
 
             # banner on stderr: `nix develop -c <cmd>` stdout stays clean for
             # grepping/capture (agents misread results otherwise)

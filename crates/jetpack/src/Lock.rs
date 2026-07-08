@@ -54,7 +54,7 @@ pub struct LockedPackage {
 }
 
 /// D-JPK-CACHE1=A (U24/A4): the lock-serialized form of a realized object's
-/// [`crate::Jetpack::Envelope::Envelope`]. Same four fields — not a second
+/// [`crate::Envelope::Envelope`]. Same four fields — not a second
 /// envelope model, just its on-disk shape in `.jet/lock`. `signature` stays
 /// empty until package signing (card #13) fills it.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]

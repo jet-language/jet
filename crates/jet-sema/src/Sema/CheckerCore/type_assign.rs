@@ -1,0 +1,374 @@
+impl<'a> Checker<'a> {
+        pub(crate) fn check_declared_type(&mut self, ty: &Type, span: Span) {
+            if let Some(chain) = generic_depth_exceeded(ty) {
+                self.diags.push(e0909(&chain, span));
+            }
+            match ty {
+                Type::Named(n) => {
+                    if n == "Any" {
+                        self.diags.push(no_any_type(span));
+                        return;
+                    }
+                    if core_type_known(n) {
+                        return;
+                    }
+                    if self.type_param_scope.iter().any(|p| p.name == *n) {
+                        return;
+                    }
+                    if self.trait_reg.is_trait_name(n) {
+                        return;
+                    }
+                    if self.registry.is_type_alias(n) {
+                        self.diags.push(Diagnostic::error(
+                            "E0119",
+                            format!("`{}` is a type alias and needs type arguments", n),
+                            format!(
+                                "write `{}`<{}>",
+                                n,
+                                self.registry
+                                    .type_alias(n)
+                                    .map(|(params, _)| {
+                                        params
+                                            .iter()
+                                            .map(|p| p.name.as_str())
+                                            .collect::<Vec<_>>()
+                                            .join(", ")
+                                    })
+                                    .unwrap_or_default()
+                            ),
+                            format!("instantiate the alias, like `{}`<T>", n),
+                            Some(span),
+                        ));
+                        return;
+                    }
+                    if self.registry.contains(n) {
+                        return;
+                    }
+                    // Check imported file-module registries for pub types.
+                    if let Some(mods) = self.modules {
+                        let found = self
+                            .imports
+                            .values()
+                            .any(|&idx| mods[idx].registry.contains(n) && self.type_is_pub_in(idx, n));
+                        if found {
+                            return;
+                        }
+                    }
+                    self.diags.push(Diagnostic::error(
+                        "E0119",
+                        format!("there's no type called `{}`", n),
+                        format!(
+                            "the types are `{}`, `{}`, `{}`, and `{}` (plus types you define)",
+                            Syntax::TYPE_INT,
+                            Syntax::TYPE_FLOAT,
+                            Syntax::TYPE_BOOL,
+                            Syntax::TYPE_STRING
+                        ),
+                        "check the spelling, or define the struct or enum first".to_string(),
+                        Some(span),
+                    ));
+                }
+                Type::Apply { name, args } => {
+                    if name == "Any" {
+                        self.diags.push(no_any_type(span));
+                        for arg in args {
+                            self.check_declared_type(arg, span);
+                        }
+                        return;
+                    }
+                    if let Some((params, target)) = self.registry.type_alias(&name) {
+                        if params.len() != args.len() {
+                            self.diags.push(Diagnostic::error(
+                                "E0119",
+                                format!(
+                                    "`{}` expects {} type argument{}, got {}",
+                                    name,
+                                    params.len(),
+                                    if params.len() == 1 { "" } else { "s" },
+                                    args.len()
+                                ),
+                                "every generic parameter needs a matching type argument".to_string(),
+                                format!(
+                                    "write `{}`<{}>",
+                                    name,
+                                    params
+                                        .iter()
+                                        .map(|p| p.name.as_str())
+                                        .collect::<Vec<_>>()
+                                        .join(", ")
+                                ),
+                                Some(span),
+                            ));
+                        }
+                        for arg in args {
+                            self.check_declared_type(arg, span);
+                        }
+                        let subst: std::collections::HashMap<String, Type> = params
+                            .iter()
+                            .zip(args.iter())
+                            .map(|(p, a)| (p.name.clone(), a.clone()))
+                            .collect();
+                        self.check_declared_type(&substitute_type(target, &subst), span);
+                        return;
+                    }
+                    let is_core_generic = matches!(
+                        name.as_str(),
+                        "Task" | "Channel" | "Sender" | "Ptr"
+                            // D-COLLBREADTH1=A: Set<T> and Deque<T>.
+                            | "Set" | "Bag" | "Deque"
+                            // D-ITERTOOLS1=A: expanded generic collection handles.
+                            | "SortedSet" | "PriorityQueue" | "Lru"
+                            | "BigInt" | "Decimal"
+                            // D-REACT1=B: reactive handle types.
+                            | "Signal" | "Derived" | "Computed"
+                            // D-EVENT1=D: first-party typed event/hook handles.
+                            | "Event" | "Hook"
+                            // D-STREAMYIELD1: generator return type.
+                            | "Stream"
+                            // D-MIGRATE3=A: `decode_traced<T>`'s return-shape wrapper.
+                            | "DecodeResult"
+                            // D-DATAFRAME1=A: reserved core.data generic value types.
+                            | "Table" | "Series" | "LazyFrame"
+                            // D-MEM1 S6 (D-POOLID-API1=A): generational-arena handle pair.
+                            | "Pool" | "Id"
+                    );
+                    if !is_core_generic && !self.registry.contains(name) {
+                        self.diags.push(Diagnostic::error(
+                            "E0119",
+                            format!("there's no type called `{}`", name),
+                            "generic types must name a struct or enum you defined".to_string(),
+                            "check the spelling, or define the type first".to_string(),
+                            Some(span),
+                        ));
+                    }
+                    if !is_core_generic {
+                        let expected = self
+                            .trait_reg
+                            .struct_params
+                            .get(name)
+                            .or_else(|| self.trait_reg.enum_params.get(name));
+                        if let Some(params) = expected {
+                            if params.len() != args.len() {
+                                self.diags.push(Diagnostic::error(
+                                    "E0119",
+                                    format!(
+                                        "`{}` expects {} type argument{}, got {}",
+                                        name,
+                                        params.len(),
+                                        if params.len() == 1 { "" } else { "s" },
+                                        args.len()
+                                    ),
+                                    "every generic parameter needs a matching type argument"
+                                        .to_string(),
+                                    format!(
+                                        "write `{}`<{}>",
+                                        name,
+                                        params
+                                            .iter()
+                                            .map(|p| p.name.as_str())
+                                            .collect::<Vec<_>>()
+                                            .join(", ")
+                                    ),
+                                    Some(span),
+                                ));
+                            }
+                        } else if !args.is_empty() {
+                            self.diags.push(Diagnostic::error(
+                                "E0119",
+                                format!("`{}` isn't generic", name),
+                                "only types declared with type parameters accept `<…>`".to_string(),
+                                format!("use `{}` without type arguments", name),
+                                Some(span),
+                            ));
+                        }
+                    }
+                    for arg in args {
+                        self.check_declared_type(arg, span);
+                    }
+                }
+                Type::TraitObject(ts) => {
+                    for t in ts {
+                        if !self.trait_reg.is_trait_name(t) {
+                            self.diags.push(Diagnostic::error(
+                                "E0119",
+                                format!("there's no trait called `{t}`"),
+                                "a trait name in type position must name a declared trait".to_string(),
+                                format!("add `trait {t} {{ … }}` first"),
+                                Some(span),
+                            ));
+                        }
+                    }
+                }
+                Type::Option(inner) => {
+                    if matches!(**inner, Type::Option(_)) {
+                        self.diags.push(Diagnostic::error(
+                            "E0309",
+                            "an optional type can't hold another optional type".to_string(),
+                            format!(
+                                "`{}??` isn't supported — use one `?` only (S32)",
+                                inner.name()
+                            ),
+                            "drop the inner `?` or unwrap before wrapping again".to_string(),
+                            Some(span),
+                        ));
+                    }
+                    self.check_declared_type(inner, span);
+                }
+                Type::List(inner) | Type::Shared(inner) => self.check_declared_type(inner, span),
+                Type::Map { key, value } => {
+                    self.check_declared_type(key, span);
+                    self.check_declared_type(value, span);
+                    if !is_map_key_type(key) {
+                        self.diags.push(Diagnostic::error(
+                            "E0502",
+                            format!("`{}` can't be a map key type yet", key.name()),
+                            "map keys must be Int, String, Bool, Char, or a payload-free enum"
+                                .to_string(),
+                            "pick a simpler key type, or store a struct as the value".to_string(),
+                            Some(span),
+                        ));
+                    }
+                }
+                Type::Char => {}
+                Type::Result { ok, err } => {
+                    self.check_declared_type(ok, span);
+                    self.check_declared_type(err, span);
+                }
+                Type::Fn { params, ret, .. } => {
+                    for p in params {
+                        self.check_declared_type(p, span);
+                    }
+                    if let Some(r) = ret {
+                        self.check_declared_type(r, span);
+                    }
+                }
+                Type::Tuple(fields) => {
+                    for (_, t) in fields {
+                        self.check_declared_type(t, span);
+                    }
+                }
+                _ => {}
+            }
+        }
+    
+        /// Returns true when a diagnostic was emitted (the mismatch is already
+        /// reported); callers may add a context-specific error otherwise.
+        pub(crate) fn check_type_assignable(&mut self, want: &Type, got: &Type, span: Span) -> bool {
+            if want == got {
+                return false;
+            }
+            if result_used_where_plain_expected(want, got) {
+                self.diags.push(Diagnostic::error(
+                    "E0401",
+                    format!(
+                        "this needs {}, but the value is {}",
+                        want.show(),
+                        got.show()
+                    ),
+                    "a fallible result must be checked before its value is used".to_string(),
+                    format!(
+                        "use `{}`, `{}`, or test with `== {}(...)` / `== {}(...)`",
+                        Syntax::OP_TRY_SUFFIX,
+                        Syntax::OP_FALLBACK,
+                        Syntax::LIT_OK,
+                        Syntax::LIT_ERR
+                    ),
+                    Some(span),
+                ));
+                return true;
+            }
+            if option_used_where_plain_expected(want, got) {
+                self.diags.push(Diagnostic::error(
+                    "E0310",
+                    format!(
+                        "this needs {}, but the value is {}",
+                        want.show(),
+                        got.show()
+                    ),
+                    "a plain value is required here, not an optional one".to_string(),
+                    format!(
+                        "test with `== {}(...)` or `== {}` first, e.g. `if x == {}(n) {{ ... }}`",
+                        Syntax::LIT_VALUE,
+                        Syntax::LIT_NULL,
+                        Syntax::LIT_VALUE
+                    ),
+                    Some(span),
+                ));
+                return true;
+            }
+            if let Type::Option(inner) = got {
+                if want.unwrap_option().is_some() {
+                    if let Some(want_inner) = want.unwrap_option() {
+                        if **inner != *want_inner {
+                            self.report_option_mismatch(want, got, span);
+                            return true;
+                        }
+                    }
+                } else if **inner != *want {
+                    self.report_option_mismatch(want, got, span);
+                    return true;
+                }
+                return false;
+            }
+            if want.unwrap_option().is_some() && got.unwrap_option().is_none() {
+                self.diags.push(Diagnostic::error(
+                    "E0108",
+                    format!(
+                        "this needs {}, but the value is {}",
+                        want.show(),
+                        got.show()
+                    ),
+                    "an optional value is required here".to_string(),
+                    format!("wrap it with `{}(...)`", Syntax::LIT_VALUE),
+                    Some(span),
+                ));
+                return true;
+            }
+            match (want, got) {
+                // D-FIXARR1: a `[T#N]` widens to `[T]` — codegen emits `.to_vec()`.
+                (Type::List(want_elem), Type::FixedList { elem: got_elem, .. })
+                    if want_elem == got_elem =>
+                {
+                    return false;
+                }
+                (Type::TraitObject(trait_names), Type::Named(type_name)) => {
+                    for trait_name in trait_names {
+                        if !self.trait_reg.implements_trait(type_name, trait_name) {
+                            let needs_derive = trait_name == COMPARABLE || trait_name == "Serialize";
+                            self.diags
+                                .push(e0905(type_name, trait_name, span, needs_derive));
+                            return true;
+                        }
+                    }
+                    return false;
+                }
+                (Type::TraitObject(trait_names), Type::Apply { name, .. }) => {
+                    for trait_name in trait_names {
+                        if !self.trait_reg.implements_trait(name, trait_name) {
+                            let needs_derive = trait_name == COMPARABLE || trait_name == "Serialize";
+                            self.diags.push(e0905(name, trait_name, span, needs_derive));
+                            return true;
+                        }
+                    }
+                    return false;
+                }
+                _ => {}
+            }
+            false
+        }
+    
+        pub(crate) fn report_option_mismatch(&mut self, want: &Type, got: &Type, span: Span) {
+            self.diags.push(Diagnostic::error(
+                "E0108",
+                format!(
+                    "this needs {}, but the value is {}",
+                    want.show(),
+                    got.show()
+                ),
+                "the types must match".to_string(),
+                type_fix_hint(want, got),
+                Some(span),
+            ));
+        }
+    
+}

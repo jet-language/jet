@@ -731,7 +731,21 @@ fn canvas_actions_project_palette_entries_and_preview_jit_backed_source_transact
         "\"ret\":\"Void\"",
         "\"pins\":[{\"name\":\"value\",\"direction\":\"input\",\"type\":\"Any\"}]",
         "\"default_args\":[\"\\\"canvas\\\"\"]",
-    ] {
+        "\"kind\":\"canvas.command\"",
+        "\"op\":\"command_authority\"",
+        "\"engine\":\"jet-cli\"",
+        "\"action_id\":\"canvas.command:check\"",
+        "\"command\":[\"jet\",\"check\",\"main.jet\"]",
+        "\"writes\":\"none\"",
+        "\"requires_confirmation\":false",
+        "\"action_id\":\"canvas.command:build\"",
+        "\"authority\":[\"canvas.command:build\",\"canvas.build_output:binary\",\"canvas.source_edit:single_file\"]",
+        "\"command\":[\"jet\",\"dev\",\"main.jet\",\"--target=web\"]",
+        "\"writes\":\"dev_server\"",
+        "\"action_id\":\"canvas.command:service.start\"",
+        "\"available\":false",
+        "\"denied_reason\":\"no env service selected\"",
+        ] {
         assert!(actions.contains(field), "actions missing {field}: {actions}");
     }
 
@@ -782,6 +796,8 @@ fn canvas_actions_project_palette_entries_and_preview_jit_backed_source_transact
         "\"package_id\":\"canvas_actions\"",
         "\"version\":\"0.7.0\"",
         "\"touched_files\":[\"main.jet\"]",
+        "\"command\":[\"jet\",\"build\",\"main.jet\"]",
+        "\"authority\":[\"canvas.command:dev\",\"canvas.service:dev_server\",\"canvas.source_edit:package\"]",
     ] {
         assert!(pkg_actions.contains(field), "package actions missing {field}: {pkg_actions}");
     }
@@ -1180,6 +1196,44 @@ fn canvas_project_transactions_reject_reserved_create_package_path() {
     assert!(
         !dir.join(".git/hooks/pkg.jet").exists(),
         "reserved path write escaped source truth"
+    );
+}
+
+#[test]
+fn canvas_project_transactions_roll_back_when_later_write_fails() {
+    let dir = temp_dir("project_rollback");
+    fs::create_dir_all(dir.join("packages/app")).unwrap();
+    fs::write(
+        dir.join("workspace.jet"),
+        "module workspace {\n    members: [\"./packages/app\"]\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("packages/app/pkg.jet"),
+        "payload: { name: \"app\", version: \"0.1.0\" }\npackages: { app: executable }\n",
+    )
+    .unwrap();
+    let entry = dir.join("packages/app/main.jet");
+    fs::write(&entry, "fn run() {\n    print(\"app\")\n}\n").unwrap();
+    fs::create_dir_all(dir.join("packages/tools")).unwrap();
+    fs::write(dir.join("packages/tools/nested"), "not a directory").unwrap();
+
+    let project = jet::Canvas::project_json_for_entry(&entry);
+    let project_revision = json_field(&project, "project_revision");
+    let req = format!(
+        "{{\"schema_version\":1,\"op\":\"create_package\",\"preview\":false,\"project_revision\":\"{}\",\"package_path\":\"packages/tools\",\"entry\":\"packages/tools/nested/main.jet\",\"files\":[{{\"path\":\"packages/tools/pkg.jet\",\"revision\":\"missing\"}},{{\"path\":\"packages/tools/nested/main.jet\",\"revision\":\"missing\"}}],\"name\":\"tools\",\"target\":\"executable\"}}",
+        project_revision
+    );
+    let err = jet::Canvas::apply_project_transaction_json(&entry, &req)
+        .expect_err("second write should fail and rollback first write");
+    assert!(err.contains("\"kind\":\"io\""), "{err}");
+    assert!(
+        !dir.join("packages/tools/pkg.jet").exists(),
+        "first project write must be rolled back"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.join("packages/tools/nested")).unwrap(),
+        "not a directory"
     );
 }
 

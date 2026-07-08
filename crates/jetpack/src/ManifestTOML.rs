@@ -21,7 +21,7 @@
 //! monorepo index becomes E1225. Parsing continues past errors so the caller
 //! sees all problems in one run.
 
-use crate::Jetpack::TOML;
+use crate::TOML;
 use crate::Syntax;
 use crate::Syntax::edit_distance;
 use std::path::Path;

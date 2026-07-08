@@ -3411,6 +3411,8 @@ pub fn canvas_js() -> String {
     if (!latestDoc || !selectedGraphId) return;
     if (item.op === "preview_canvas_action") {
       postTransaction({ schema_version: 1, op: "preview_canvas_action", revision: latestDoc.revision, graph_id: selectedGraphId, action_id: item.action_id, callee: item.callee, args: item.args || ["\"canvas\""] });
+    } else if (item.op === "command_authority") {
+      showToast(item.available ? item.title + " requires command approval" : item.denied_reason || "Command unavailable");
     } else if (item.op === "insert_print") {
       postTransaction({ schema_version: 1, op: "insert_call", revision: latestDoc.revision, graph_id: selectedGraphId, callee: "print", args: ["\"canvas\""] });
     } else if (item.op === "insert_call") {
@@ -3545,10 +3547,12 @@ pub fn canvas_js() -> String {
         if (!doc || !doc.actions) return;
         actionEntries = doc.actions.map((action) => ({
           title: action.title || action.callee,
-          detail: (action.kind || "canvas.action") + " · " + (action.engine || "checked-tir+jit") + " · " + (action.callee || "") + "(" + (action.pins || []).filter((p) => p.direction === "input").map((p) => p.type || "Value").join(", ") + ") -> " + (action.ret || "Void"),
-          op: "preview_canvas_action",
+          detail: action.command ? ((action.kind || "canvas.command") + " · " + (action.command || []).join(" ") + " · " + (action.writes || "none")) : ((action.kind || "canvas.action") + " · " + (action.engine || "checked-tir+jit") + " · " + (action.callee || "") + "(" + (action.pins || []).filter((p) => p.direction === "input").map((p) => p.type || "Value").join(", ") + ") -> " + (action.ret || "Void")),
+          op: action.op || "preview_canvas_action",
           action_id: action.action_id,
           callee: action.callee,
+          available: action.available !== false,
+          denied_reason: action.denied_reason || "",
           pins: action.pins || [],
           args: action.default_args || ["\"canvas\""]
         }));
@@ -4734,16 +4738,7 @@ fn finish_project_changes(
         .collect::<Vec<_>>()
         .join("\n");
     if !preview {
-        for change in &changes {
-            if change.before != change.after {
-                if let Some(parent) = change.path.parent() {
-                    fs::create_dir_all(parent)
-                        .map_err(|e| project_edit_error("io", &e.to_string()))?;
-                }
-                fs::write(&change.path, &change.after)
-                    .map_err(|e| project_edit_error("io", &e.to_string()))?;
-            }
-        }
+        write_project_changes_with_rollback(&changes)?;
     }
     let touched_files = changes
         .iter()
@@ -4826,6 +4821,7 @@ fn normalize_and_validate_project_changes(
                     ),
                 )
             })?;
+            validate_project_jet_overlay(&change.path, &change.after)?;
         } else {
             return Err(project_edit_error(
                 "bad_request",
@@ -4834,6 +4830,69 @@ fn normalize_and_validate_project_changes(
         }
     }
     Ok(())
+}
+
+fn validate_project_jet_overlay(path: &Path, src: &str) -> Result<(), String> {
+    let shown = path.display().to_string();
+    let diags = if path.exists() {
+        let (diags, _) = crate::Driver::check_file(&shown, Some((path, src)), false);
+        diags
+    } else {
+        crate::check_for_eval(src, &shown)
+    };
+    let errors = diags
+        .into_iter()
+        .filter(|d| d.severity == Severity::Error)
+        .collect::<Vec<_>>();
+    if errors.is_empty() {
+        return Ok(());
+    }
+    Err(project_edit_error(
+        "diagnostic",
+        &crate::render_diagnostics(&shown, src, &errors),
+    ))
+}
+
+fn write_project_changes_with_rollback(changes: &[ProjectChange]) -> Result<(), String> {
+    let mut written = Vec::new();
+    for change in changes {
+        if change.before == change.after {
+            continue;
+        }
+        let existed = change.path.exists();
+        if let Some(parent) = change.path.parent() {
+            if let Err(e) = fs::create_dir_all(parent) {
+                rollback_project_writes(&written);
+                return Err(project_edit_error("io", &e.to_string()));
+            }
+        }
+        if let Err(e) = fs::write(&change.path, &change.after) {
+            rollback_project_writes(&written);
+            return Err(project_edit_error("io", &e.to_string()));
+        }
+        written.push(ProjectWriteBackup {
+            path: change.path.clone(),
+            before: change.before.clone(),
+            existed,
+        });
+    }
+    Ok(())
+}
+
+fn rollback_project_writes(written: &[ProjectWriteBackup]) {
+    for backup in written.iter().rev() {
+        if backup.existed {
+            let _ = fs::write(&backup.path, &backup.before);
+        } else {
+            let _ = fs::remove_file(&backup.path);
+        }
+    }
+}
+
+struct ProjectWriteBackup {
+    path: PathBuf,
+    before: String,
+    existed: bool,
 }
 
 fn project_file_kind_for_rel(rel: &str) -> &'static str {
@@ -6931,6 +6990,7 @@ fn canvas_actions(path: &Path, src: &str) -> Result<String, String> {
         &["\"canvas\""],
         &authority,
     ));
+    entries.extend(canvas_command_action_jsons(&authority));
     entries.sort();
     Ok(query_ok(
         "actions",
@@ -7033,11 +7093,125 @@ fn default_arg_for_type(ty: &str) -> String {
     }
 }
 
+fn canvas_command_action_jsons(authority: &CanvasAuthority) -> Vec<String> {
+    let source = authority.touched_file.as_str();
+    let mut actions = vec![
+        canvas_command_action_json(
+            "check",
+            "Check project",
+            &["jet", "check", source],
+            "none",
+            &[
+                "canvas.command:check",
+                authority.grant.as_str(),
+            ],
+            true,
+            None,
+            authority,
+        ),
+        canvas_command_action_json(
+            "test",
+            "Test project",
+            &["jet", "test", source],
+            "test_outputs",
+            &[
+                "canvas.command:test",
+                "canvas.build_output:test",
+                authority.grant.as_str(),
+            ],
+            true,
+            None,
+            authority,
+        ),
+        canvas_command_action_json(
+            "build",
+            "Build project",
+            &["jet", "build", source],
+            "build_outputs",
+            &[
+                "canvas.command:build",
+                "canvas.build_output:binary",
+                authority.grant.as_str(),
+            ],
+            true,
+            None,
+            authority,
+        ),
+        canvas_command_action_json(
+            "dev",
+            "Run dev server",
+            &["jet", "dev", source, "--target=web"],
+            "dev_server",
+            &[
+                "canvas.command:dev",
+                "canvas.service:dev_server",
+                authority.grant.as_str(),
+            ],
+            true,
+            None,
+            authority,
+        ),
+    ];
+    let services_available = !env_project_json(&authority.project_root).services.is_empty();
+    actions.push(canvas_command_action_json(
+        "service.start",
+        "Start service",
+        &["jetpack", "dev", "service", "start"],
+        "service_process",
+        &["canvas.service:start", "canvas.env:service"],
+        services_available,
+        if services_available {
+            None
+        } else {
+            Some("no env service selected")
+        },
+        authority,
+    ));
+    actions
+}
+
+fn canvas_command_action_json(
+    name: &str,
+    title: &str,
+    command: &[&str],
+    writes: &str,
+    grants: &[&str],
+    available: bool,
+    denied: Option<&str>,
+    authority: &CanvasAuthority,
+) -> String {
+    let command_json = command
+        .iter()
+        .map(|arg| json_str(arg))
+        .collect::<Vec<_>>()
+        .join(",");
+    let grants_json = grants
+        .iter()
+        .map(|grant| json_str(grant))
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{{\"action_id\":{},\"kind\":\"canvas.command\",\"title\":{},\"op\":\"command_authority\",\"engine\":\"jet-cli\",\"execution\":\"external_command\",\"available\":{},\"denied_reason\":{},\"command\":[{}],\"authority\":[{}],\"package_id\":{},\"version\":{},\"touched_files\":[{}],\"writes\":{},\"requires_confirmation\":{},\"audit\":[\"package_id\",\"version\",\"command\",\"authority\",\"touched_files\",\"diagnostics\"]}}",
+        json_str(&format!("canvas.command:{name}")),
+        json_str(title),
+        if available { "true" } else { "false" },
+        json_optional_str(denied),
+        command_json,
+        grants_json,
+        json_str(&authority.package_id),
+        json_str(&authority.version),
+        json_str(&authority.touched_file),
+        json_str(writes),
+        if writes == "none" { "false" } else { "true" },
+    )
+}
+
 struct CanvasAuthority {
     grant: String,
     package_id: String,
     version: String,
     touched_file: String,
+    project_root: PathBuf,
 }
 
 fn canvas_authority_context(path: &Path) -> CanvasAuthority {
@@ -7051,6 +7225,7 @@ fn canvas_authority_context(path: &Path) -> CanvasAuthority {
                     package_id: manifest.package.name,
                     version: manifest.package.version,
                     touched_file: rel_path(&root, path),
+                    project_root: root,
                 };
             }
         }
@@ -7064,6 +7239,7 @@ fn canvas_authority_context(path: &Path) -> CanvasAuthority {
             .and_then(|n| n.to_str())
             .unwrap_or("current.jet")
             .to_string(),
+        project_root: dir.to_path_buf(),
     }
 }
 

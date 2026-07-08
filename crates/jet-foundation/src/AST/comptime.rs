@@ -1,0 +1,602 @@
+/// Semantic signature of a function — the compiler's internal view after
+/// registration. Lives in `AST` so that `Traits`, `Codegen`, and `Sema` can
+/// all depend on it without creating cycles.
+#[derive(Debug, Clone)]
+pub struct FuncSig {
+    pub params: Vec<(AccessConvention, Type)>,
+    pub return_type: Option<Type>,
+    /// S50: declared in `extern rust`, implemented by the FFI bridge.
+    pub is_extern: bool,
+    /// S58 (E2-M13): `#Unsafe fn` — calling it requires an enclosing `#Unsafe`
+    /// block (E3103).
+    pub is_unsafe: bool,
+    /// S60 (E2-M16): `pure fn` — this function is free of ambient I/O and
+    /// non-determinism. Call sites inside a `pure fn` must also be pure (E3401).
+    pub is_pure: bool,
+    /// D-TAINT1: `#Sanitizer fn` — its return value is untainted by contract.
+    pub is_sanitizer: bool,
+    /// D-MUSTUSE1 (c18iwxqx): `@MustUse fn` / method — return value cannot be
+    /// silently ignored as a bare expression statement (E0419).
+    pub is_must_use: bool,
+    /// S61: parameter names and default-value presence, parallel to `params`.
+    /// Empty for extern/built-in functions.
+    pub param_info: Vec<(String, bool)>,
+    /// S61: default expressions for parameters that have them, parallel to `params`.
+    pub defaults: Vec<Option<Expr>>,
+    /// D-VARIADIC1: parallel to `params` — true when that parameter is variadic.
+    pub param_variadic: Vec<bool>,
+    /// D-ANY-JAI1/D-VARARGBOUND1 (c7jaiany): the trailing variadic parameter's
+    /// resolved trait-bound list (`Param::variadic_trait_bounds`), or `None` for
+    /// a non-variadic function or a plain D-VARIADIC1 homogeneous-concrete-type
+    /// variadic. Call-site checking (E1313) and codegen's per-arity
+    /// monomorphization both key off this.
+    pub variadic_bounds: Option<Vec<String>>,
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Shared data types — placed in AST so every seam crate can depend on them
+// without creating cross-seam dep cycles.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── CtValue / CtKey ──────────────────────────────────────────────────────────
+
+/// A fully-evaluated compile-time value.
+#[derive(Clone, Debug, PartialEq)]
+pub enum CtValue {
+    Int(i64),
+    Float(f64),
+    Bool(bool),
+    Char(char),
+    Str(String),
+    /// `[U8]` byte buffer (D-CTIO1 `embed_bytes`).
+    Bytes(Vec<u8>),
+    List(Vec<CtValue>),
+    Map(BTreeMap<CtKey, CtValue>),
+    Struct {
+        type_name: String,
+        fields: Vec<(String, CtValue)>,
+    },
+    Enum {
+        type_name: String,
+        variant: String,
+        args: Vec<(Option<String>, CtValue)>,
+    },
+    Some(Box<CtValue>),
+    None(Type),
+    ResOk(Box<CtValue>),
+    ResErr(Box<CtValue>),
+    Unit,
+    /// c139 JIT/interpreter-parity: a lambda value (`(x) => x > 3`) captured
+    /// at the point it's created, so the interpreter can invoke it later —
+    /// passed to a higher-order method (`.filter`/`.map`/`.each`/`.sort_by`/
+    /// `Option.lift2`), stored, or returned. See `ClosureData` below.
+    Closure(std::sync::Arc<ClosureData>),
+}
+
+/// c139: a closure's captured state — the AST `Lambda` node plus every
+/// binding in scope where it was created (a tree-walker over-captures rather
+/// than tracking free variables, which is simpler and behaviorally
+/// equivalent here). `PartialEq` is reference identity (the `Arc`'s shared
+/// allocation address) rather than structural — closures aren't
+/// meaningfully comparable, and nothing in the language surface needs them
+/// to be; deriving `PartialEq` on the whole AST just to satisfy `CtValue`'s
+/// derive would be a much larger, unrelated change. `Arc` (not `Rc`) so
+/// `CtValue` stays `Send + Sync`, matching every other variant.
+#[derive(Clone, Debug)]
+pub struct ClosureData {
+    pub lambda: Lambda,
+    pub captured: std::collections::HashMap<String, CtValue>,
+}
+
+impl PartialEq for ClosureData {
+    fn eq(&self, other: &Self) -> bool {
+        std::ptr::eq(self, other)
+    }
+}
+
+/// Orderable map key (S38: maps are `BTreeMap`, so keys must be `Ord`).
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum CtKey {
+    Int(i64),
+    Str(String),
+    Bool(bool),
+    Char(char),
+}
+
+impl CtKey {
+    pub fn from_value(v: CtValue) -> Option<CtKey> {
+        match v {
+            CtValue::Int(n) => Some(CtKey::Int(n)),
+            CtValue::Str(s) => Some(CtKey::Str(s)),
+            CtValue::Bool(b) => Some(CtKey::Bool(b)),
+            CtValue::Char(c) => Some(CtKey::Char(c)),
+            _ => None,
+        }
+    }
+    pub fn to_value(&self) -> CtValue {
+        match self {
+            CtKey::Int(n) => CtValue::Int(*n),
+            CtKey::Str(s) => CtValue::Str(s.clone()),
+            CtKey::Bool(b) => CtValue::Bool(*b),
+            CtKey::Char(c) => CtValue::Char(*c),
+        }
+    }
+    pub(crate) fn jet_type(&self) -> Type {
+        match self {
+            CtKey::Int(_) => Type::Int,
+            CtKey::Str(_) => Type::String,
+            CtKey::Bool(_) => Type::Bool,
+            CtKey::Char(_) => Type::Char,
+        }
+    }
+    pub(crate) fn jet_show(&self) -> String {
+        self.to_value().jet_show()
+    }
+}
+
+impl CtValue {
+    pub fn jet_type(&self) -> Type {
+        match self {
+            CtValue::Int(_) => Type::Int,
+            CtValue::Float(_) => Type::Float,
+            CtValue::Bool(_) => Type::Bool,
+            CtValue::Char(_) => Type::Char,
+            CtValue::Str(_) => Type::String,
+            CtValue::Bytes(_) => Type::List(Box::new(Type::IntN {
+                signed: false,
+                bits: 8,
+            })),
+            CtValue::List(xs) => {
+                let inner = xs.first().map(|x| x.jet_type()).unwrap_or(Type::Int);
+                Type::List(Box::new(inner))
+            }
+            CtValue::Map(m) => {
+                let (k, v) = m
+                    .iter()
+                    .next()
+                    .map(|(k, v)| (k.jet_type(), v.jet_type()))
+                    .unwrap_or((Type::String, Type::Int));
+                Type::Map {
+                    key: Box::new(k),
+                    value: Box::new(v),
+                }
+            }
+            CtValue::Some(inner) => Type::Option(Box::new(inner.jet_type())),
+            CtValue::None(t) => Type::Option(Box::new(t.clone())),
+            CtValue::ResOk(inner) => Type::Result {
+                ok: Box::new(inner.jet_type()),
+                err: Box::new(Type::Named("ParseError".to_string())),
+            },
+            CtValue::ResErr(e) => Type::Result {
+                ok: Box::new(Type::Int),
+                err: Box::new(e.jet_type()),
+            },
+            CtValue::Struct { type_name, .. } | CtValue::Enum { type_name, .. } => {
+                Type::Named(type_name.clone())
+            }
+            CtValue::Unit => Type::Named(String::new()),
+            // c139: no return-type info is threaded to a closure value at
+            // runtime (the interpreter is untyped past sema); the exact
+            // signature is never read back from `jet_type()` for a closure
+            // in practice (unlike `None(Type)`, which needs it to pick an
+            // empty list/option's element type).
+            CtValue::Closure(_) => Type::Fn {
+                params: Vec::new(),
+                ret: None,
+                effect_bound: None,
+            },
+        }
+    }
+
+    pub fn jet_show(&self) -> String {
+        match self {
+            CtValue::Int(n) => n.to_string(),
+            CtValue::Float(f) => format!("{:?}", f),
+            CtValue::Bool(b) => b.to_string(),
+            CtValue::Char(c) => c.to_string(),
+            CtValue::Str(s) => s.clone(),
+            CtValue::Bytes(bs) => {
+                let parts: Vec<String> = bs.iter().map(|b| b.to_string()).collect();
+                format!("[{}]", parts.join(", "))
+            }
+            CtValue::List(xs) => {
+                let parts: Vec<String> = xs.iter().map(|x| x.jet_show()).collect();
+                format!("[{}]", parts.join(", "))
+            }
+            CtValue::Map(m) => {
+                let parts: Vec<String> = m
+                    .iter()
+                    .map(|(k, v)| format!("{}: {}", k.jet_show(), v.jet_show()))
+                    .collect();
+                format!("[{}]", parts.join(", "))
+            }
+            CtValue::Some(v) => v.jet_show(),
+            CtValue::None(_) => "null".to_string(),
+            CtValue::ResOk(v) => v.jet_show(),
+            CtValue::ResErr(_) => "err".to_string(),
+            CtValue::Struct { type_name, fields } => {
+                let parts: Vec<String> = fields
+                    .iter()
+                    .map(|(n, v)| format!("{}: {}", n, v.jet_show()))
+                    .collect();
+                format!("{}({})", type_name, parts.join(", "))
+            }
+            // The compiled program's Rust `#[derive(Debug)]` output for a user
+            // enum: the variant's Rust identifier is `user_<Variant>` (S34,
+            // `Codegen::mangle_variant`), and a payload prints tuple-style with
+            // each arg in Rust `{:?}` form — matching that exactly here keeps
+            // `jet dev` byte-identical to the compiled binary (I2).
+            CtValue::Enum { variant, args, .. } => {
+                let mangled = format!("user_{}", variant.replace('.', "__"));
+                if args.is_empty() {
+                    mangled
+                } else if args.iter().all(|(label, _)| label.is_some()) {
+                    let parts: Vec<String> = args
+                        .iter()
+                        .map(|(label, v)| {
+                            format!("{}: {}", label.as_deref().unwrap_or(""), v.debug_rust())
+                        })
+                        .collect();
+                    format!("{} {{ {} }}", mangled, parts.join(", "))
+                } else {
+                    let parts: Vec<String> = args.iter().map(|(_, v)| v.debug_rust()).collect();
+                    format!("{}({})", mangled, parts.join(", "))
+                }
+            }
+            CtValue::Unit => String::new(),
+            // c139: never reached in practice — a closure is a callable, not
+            // a printable value, so no example interpolates one directly.
+            CtValue::Closure(_) => "<closure>".to_string(),
+        }
+    }
+
+    /// Rust `{:?}` (Debug) rendering of this value — used to format a value
+    /// nested inside an enum-variant payload the same way the compiled
+    /// program's derived `Debug` impl would (I2). Distinct from `jet_show`,
+    /// which is the user-facing `Display`-style rendering `print` uses at the
+    /// top level (e.g. an unquoted string).
+    pub fn debug_rust(&self) -> String {
+        match self {
+            CtValue::Int(n) => n.to_string(),
+            CtValue::Float(f) => format!("{:?}", f),
+            CtValue::Bool(b) => b.to_string(),
+            CtValue::Char(c) => format!("{:?}", c),
+            CtValue::Str(s) => format!("{:?}", s),
+            CtValue::Bytes(bs) => format!("{:?}", bs),
+            CtValue::List(xs) => {
+                let parts: Vec<String> = xs.iter().map(|x| x.debug_rust()).collect();
+                format!("[{}]", parts.join(", "))
+            }
+            CtValue::Map(m) => {
+                let parts: Vec<String> = m
+                    .iter()
+                    .map(|(k, v)| format!("{}: {}", k.to_value().debug_rust(), v.debug_rust()))
+                    .collect();
+                format!("{{{}}}", parts.join(", "))
+            }
+            CtValue::Some(v) => format!("Some({})", v.debug_rust()),
+            CtValue::None(_) => "None".to_string(),
+            CtValue::ResOk(v) => format!("Ok({})", v.debug_rust()),
+            CtValue::ResErr(v) => format!("Err({})", v.debug_rust()),
+            CtValue::Struct { type_name, fields } => {
+                let mangled = format!("user_{}", type_name.replace('.', "__"));
+                if fields.is_empty() {
+                    mangled
+                } else {
+                    let parts: Vec<String> = fields
+                        .iter()
+                        .map(|(n, v)| format!("{}: {}", n, v.debug_rust()))
+                        .collect();
+                    format!("{} {{ {} }}", mangled, parts.join(", "))
+                }
+            }
+            CtValue::Enum { variant, args, .. } => {
+                let mangled = format!("user_{}", variant.replace('.', "__"));
+                if args.is_empty() {
+                    mangled
+                } else if args.iter().all(|(label, _)| label.is_some()) {
+                    let parts: Vec<String> = args
+                        .iter()
+                        .map(|(label, v)| {
+                            format!("{}: {}", label.as_deref().unwrap_or(""), v.debug_rust())
+                        })
+                        .collect();
+                    format!("{} {{ {} }}", mangled, parts.join(", "))
+                } else {
+                    let parts: Vec<String> = args.iter().map(|(_, v)| v.debug_rust()).collect();
+                    format!("{}({})", mangled, parts.join(", "))
+                }
+            }
+            CtValue::Unit => "()".to_string(),
+            CtValue::Closure(_) => "<closure>".to_string(),
+        }
+    }
+
+    pub fn render_pretty(&self) -> String {
+        let mut out = String::new();
+        self.render_pretty_inner(&mut out, 0);
+        out
+    }
+
+    fn render_pretty_inner(&self, out: &mut String, depth: usize) {
+        let indent = "  ".repeat(depth);
+        let inner_indent = "  ".repeat(depth + 1);
+        match self {
+            CtValue::Int(n) => out.push_str(&n.to_string()),
+            CtValue::Float(f) => out.push_str(&format!("{:?}", f)),
+            CtValue::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
+            CtValue::Char(c) => {
+                out.push('\'');
+                out.push(*c);
+                out.push('\'');
+            }
+            CtValue::Str(s) => {
+                out.push('"');
+                out.push_str(s);
+                out.push('"');
+            }
+            CtValue::Bytes(bs) => {
+                let parts: Vec<String> = bs.iter().map(|b| b.to_string()).collect();
+                out.push('[');
+                out.push_str(&parts.join(", "));
+                out.push(']');
+            }
+            CtValue::List(xs) => {
+                if xs.is_empty() {
+                    out.push_str("[]");
+                } else {
+                    out.push_str("[\n");
+                    for item in xs {
+                        out.push_str(&inner_indent);
+                        item.render_pretty_inner(out, depth + 1);
+                        out.push_str(",\n");
+                    }
+                    out.push_str(&indent);
+                    out.push(']');
+                }
+            }
+            CtValue::Map(m) => {
+                if m.is_empty() {
+                    out.push_str("{}");
+                } else {
+                    out.push_str("{\n");
+                    for (k, v) in m {
+                        out.push_str(&inner_indent);
+                        out.push_str(&k.jet_show());
+                        out.push_str(": ");
+                        v.render_pretty_inner(out, depth + 1);
+                        out.push_str(",\n");
+                    }
+                    out.push_str(&indent);
+                    out.push('}');
+                }
+            }
+            CtValue::Struct { type_name, fields } => {
+                if fields.is_empty() {
+                    out.push_str(type_name);
+                    out.push_str(" {}");
+                } else {
+                    out.push_str(type_name);
+                    out.push_str(" {\n");
+                    for (name, value) in fields {
+                        out.push_str(&inner_indent);
+                        out.push_str(name);
+                        out.push_str(": ");
+                        value.render_pretty_inner(out, depth + 1);
+                        out.push_str(",\n");
+                    }
+                    out.push_str(&indent);
+                    out.push('}');
+                }
+            }
+            CtValue::Enum {
+                type_name,
+                variant,
+                args,
+            } => {
+                out.push_str(type_name);
+                out.push_str("::");
+                out.push_str(variant);
+                if !args.is_empty() {
+                    out.push('(');
+                    let mut first = true;
+                    for (label, v) in args {
+                        if !first {
+                            out.push_str(", ");
+                        }
+                        first = false;
+                        if let Some(lbl) = label {
+                            out.push_str(lbl);
+                            out.push_str(": ");
+                        }
+                        v.render_pretty_inner(out, depth);
+                    }
+                    out.push(')');
+                }
+            }
+            CtValue::Some(v) => {
+                out.push_str("Some(");
+                v.render_pretty_inner(out, depth);
+                out.push(')');
+            }
+            CtValue::None(_) => out.push_str("None"),
+            CtValue::ResOk(v) => {
+                out.push_str("ok(");
+                v.render_pretty_inner(out, depth);
+                out.push(')');
+            }
+            CtValue::ResErr(e) => {
+                out.push_str("err(");
+                e.render_pretty_inner(out, depth);
+                out.push(')');
+            }
+            CtValue::Unit => out.push_str("()"),
+            CtValue::Closure(_) => out.push_str("<closure>"),
+        }
+    }
+
+    pub fn to_json(&self) -> String {
+        match self {
+            CtValue::Int(n) => n.to_string(),
+            CtValue::Float(f) => {
+                let s = format!("{:?}", f);
+                if s.contains('.') || s.contains('e') || s.contains('E') {
+                    s
+                } else {
+                    format!("{}.0", s)
+                }
+            }
+            CtValue::Bool(b) => b.to_string(),
+            CtValue::Char(c) => format!("\"{}\"", c),
+            CtValue::Str(s) => {
+                let mut out = String::from('"');
+                for ch in s.chars() {
+                    match ch {
+                        '"' => out.push_str("\\\""),
+                        '\\' => out.push_str("\\\\"),
+                        '\n' => out.push_str("\\n"),
+                        '\r' => out.push_str("\\r"),
+                        '\t' => out.push_str("\\t"),
+                        c => out.push(c),
+                    }
+                }
+                out.push('"');
+                out
+            }
+            CtValue::Bytes(bs) => {
+                let parts: Vec<String> = bs.iter().map(|b| b.to_string()).collect();
+                format!("[{}]", parts.join(","))
+            }
+            CtValue::List(xs) => {
+                let parts: Vec<String> = xs.iter().map(|x| x.to_json()).collect();
+                format!("[{}]", parts.join(","))
+            }
+            CtValue::Map(m) => {
+                let parts: Vec<String> = m
+                    .iter()
+                    .map(|(k, v)| format!("{}:{}", k.to_value().to_json(), v.to_json()))
+                    .collect();
+                format!("{{{}}}", parts.join(","))
+            }
+            CtValue::Struct { fields, .. } => {
+                let parts: Vec<String> = fields
+                    .iter()
+                    .map(|(n, v)| format!("\"{}\":{}", n, v.to_json()))
+                    .collect();
+                format!("{{{}}}", parts.join(","))
+            }
+            CtValue::Enum { variant, args, .. } => {
+                if args.is_empty() {
+                    format!("\"{}\"", variant)
+                } else {
+                    let parts: Vec<String> = args
+                        .iter()
+                        .map(|(label, v)| {
+                            if let Some(lbl) = label {
+                                format!("\"{}\":{}", lbl, v.to_json())
+                            } else {
+                                v.to_json()
+                            }
+                        })
+                        .collect();
+                    if args.iter().all(|(label, _)| label.is_some()) {
+                        format!("{{\"{}\":{{{}}}}}", variant, parts.join(","))
+                    } else {
+                        format!("{{\"{}\":[{}]}}", variant, parts.join(","))
+                    }
+                }
+            }
+            CtValue::Some(v) => v.to_json(),
+            CtValue::None(_) => "null".to_string(),
+            CtValue::ResOk(v) => format!("{{\"ok\":{}}}", v.to_json()),
+            CtValue::ResErr(e) => format!("{{\"err\":{}}}", e.to_json()),
+            CtValue::Unit => "null".to_string(),
+            // c139: a closure has no JSON representation — unreachable in
+            // practice (a value routed through the encoder never contains
+            // one; codable derives never target a `fn`-typed field).
+            CtValue::Closure(_) => "null".to_string(),
+        }
+    }
+
+    pub fn serialize(&self) -> String {
+        match self {
+            CtValue::Int(n) => format!("{}i64", n),
+            CtValue::Float(f) => format!("{:?}f64", f),
+            CtValue::Bool(b) => b.to_string(),
+            CtValue::Char(c) => format!("{:?}", c),
+            CtValue::Str(s) => format!("{:?}.to_string()", s),
+            CtValue::Bytes(bs) => {
+                let parts: Vec<String> = bs.iter().map(|b| format!("{}u8", b)).collect();
+                format!("vec![{}]", parts.join(", "))
+            }
+            CtValue::List(xs) => {
+                let parts: Vec<String> = xs.iter().map(|x| x.serialize()).collect();
+                format!("vec![{}]", parts.join(", "))
+            }
+            CtValue::Map(m) => {
+                if m.is_empty() {
+                    "std::collections::BTreeMap::new()".to_string()
+                } else {
+                    let mut s = String::from("{ let mut _m = std::collections::BTreeMap::new(); ");
+                    for (k, v) in m {
+                        s.push_str(&format!(
+                            "_m.insert(({}), {}); ",
+                            k.to_value().serialize(),
+                            v.serialize()
+                        ));
+                    }
+                    s.push_str("_m }");
+                    s
+                }
+            }
+            CtValue::Some(v) => format!("Some({})", v.serialize()),
+            CtValue::None(_) => "None".to_string(),
+            CtValue::ResOk(v) => format!("Ok({})", v.serialize()),
+            CtValue::ResErr(e) => format!("Err({})", e.serialize()),
+            CtValue::Struct { type_name, fields } => {
+                let parts: Vec<String> = fields
+                    .iter()
+                    .map(|(n, v)| format!("{}: {}", ct_mangle(n), v.serialize()))
+                    .collect();
+                format!("user_{} {{ {} }}", type_name, parts.join(", "))
+            }
+            CtValue::Enum {
+                type_name,
+                variant,
+                args,
+            } => {
+                let prefix = format!("user_{}::{}", type_name, ct_mangle(variant));
+                if args.is_empty() {
+                    prefix
+                } else if args.iter().all(|(label, _)| label.is_none()) {
+                    let parts: Vec<String> = args.iter().map(|(_, v)| v.serialize()).collect();
+                    format!("{}({})", prefix, parts.join(", "))
+                } else {
+                    let parts: Vec<String> = args
+                        .iter()
+                        .filter_map(|(label, v)| {
+                            label
+                                .as_ref()
+                                .map(|name| format!("{}: {}", ct_mangle(name), v.serialize()))
+                        })
+                        .collect();
+                    format!("{} {{ {} }}", prefix, parts.join(", "))
+                }
+            }
+            CtValue::Unit => "()".to_string(),
+            // c139: a closure can't be baked into a Rust literal — but it
+            // also can't reach here: a `comptime` binding's value must be an
+            // encodable type (sema rejects a function-typed `comptime` const
+            // before evaluation), and this method exists only to serialize a
+            // `comptime` binding's final value for codegen.
+            CtValue::Closure(_) => {
+                unreachable!("a closure value can't be a comptime binding's serialized result")
+            }
+        }
+    }
+}
+
+fn ct_mangle(name: &str) -> String {
+    format!("user_{}", name)
+}
+

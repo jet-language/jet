@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 363,
-    "rev": 1786,
+    "rev": 1801,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -17805,6 +17805,16 @@
         {
           "at": "2026-07-08",
           "by": "codex-main",
+          "text": "Hardened #352 project transaction authority/proof slice. Project writes now validate changed .jet overlays through the front end after formatting, not formatter-only, and apply writes through rollback-on-failure transaction helper. Added regression canvas_project_transactions_roll_back_when_later_write_fails. Proof green: cargo test --test canvas (42/42), cargo test --test web_dev (4/4), cargo test --test dev jit_coverage_audit -- --exact. Next gaps: command/action bridge metadata and richer project nav/UI proof."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex-main",
+          "text": "Canvas workspace architecture implementation remains built, but final repo-wide closeout is blocked by unrelated active repartition edits in this worktree. Green evidence before collision: cargo test --test canvas (41/41), cargo test --test web_dev (4/4), cargo test --test corelib core_os_interrupt_prelude_is_emitted_only_when_used -- --exact, cargo test --test dev jit_coverage_audit -- --exact, cargo test --test dev jit_try_compile_manifest_matches -- --exact, cargo test --test dev dev_default_matches_compiled_binary -- --exact, cargo test --test dev interpreter_matches_compiled_binary -- --exact, git diff --check on touched Canvas/dev/JIT/doc files. Current blocker: cargo test --test dev jit_coverage_audit -- --exact now fails before tests in jet-foundation after concurrent AST split (E0753 inner docs in AST/types.rs plus truncated split modules missing derives/items). Not closing #352 until full nix develop -c cargo test can run green on a stable tree."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex-main",
           "text": "Implemented remaining planned Canvas workspace surface: remove_dependency, edit_pkg_field, add_target, add_env_service; env.jet/service projection via ModuleEval with diagnostics; package-backed Canvas action authority metadata; docs/plan/tests updated. Proof green: cargo test --test canvas (39/39), cargo test --test web_dev (4/4), git diff --check. Full cargo test blocked outside Canvas in tests/archive.rs: gzip_compress_decompress_round_trip and gzip_compress_reduces_repetitive_data fail I1 archive output must not contain unsafe. Card remains building until that repo-wide gate is resolved or owner accepts scoped closeout."
         },
         {
@@ -17883,12 +17893,17 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "verify",
       "priority": "P1",
       "plan": "Order: (1) map current jet-driver module graph + who imports what (rg + cargo tree); (2) write the target crate map as a short architecture.md draft section — get it reviewed in-repo before moving code; (3) extract JetOS first (most self-contained), then Jetpack engine, then CLI dispatch cleanup — one extraction per commit, full suite green between each; (4) shell-crate verdicts: implement or fold, one commit each; (5) jet-queries decision writeup (incrementality now vs later) — this is a design recommendation, not a gate: record in architecture.md; (6) final pass: dependency-direction test, docs updated, full nix develop -c cargo test green.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "Implemented #354 repartition slice. Jetpack/JetOS engine lives in crates/jetpack; root Cargo now has jetpack + jetos bins, jet-driver depends one-way on jetpack and re-exports legacy Manifest/Lock/FFI/CBind/CFFI/PluginExport/Jetpack names for existing callers. Remaining driver-owned package seams moved into jetpack: Manifest.rs, Lock.rs, FFI.rs, CFFI.rs, CBind.rs, Prelude runtime assets; driver PluginExport/bin jetos removed. Architecture crate map updated. Added tests/workspace_crates.rs to pin workspace path-dependency direction including jetpack. Targeted proof green: cargo check -p jetpack -p jet-driver; cargo test --test workspace_crates -- --nocapture; cargo check; cargo test --test jetpack_no_daemon -- --nocapture; cargo build --bin jetos. Full repo-wide cargo test still pending final Epoch 3 closeout. Unrelated dirty jetfighter files belong to other agents and were not touched."
+        },
         {
           "at": "2026-07-08",
           "by": "codex",
@@ -17912,12 +17927,37 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "building",
       "priority": "P2",
       "plan": "Order: (1) CoreLib.rs — split by core.* family, mod.rs keeps the registration table; (2) CheckerCoreLib.rs — mirror the same family split; (3) TIR lower.rs then emit.rs then subset.rs — split by construct family (items, exprs, patterns, control flow, closures, tasks); (4) Parser/Items.rs + CheckerInfer/calls.rs; (5) jet-jit/src/lib.rs; (6) wait for re-partition card, then JetOS.rs, Jetpack/CLI.rs, Canvas.rs inside their new homes. Per file: read wholly first, write the module map, mechanical motion, cargo test --test golden + targeted suites, one commit; full suite at card close.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "More #355 progress: decomposed TIR lower.rs, emit.rs, subset.rs into responsibility fragments under Codegen/TIR/{lower,emit,subset}; cargo check -p jet-codegen green. Decomposed CheckerCoreLib.rs into CheckerCoreLib fragments; cargo check -p jet-sema green. Decomposed Parser/Items.rs and Parser/Expressions.rs into Parser/{Items,Expressions} fragments; cargo check -p jet-parser green. Remaining files >3k by wc: Source/Canvas.rs, jetpack/src/JetOS.rs, Sema/CheckerInfer/calls.rs, jetpack/src/CLI.rs, jet-jit/src/lib.rs, Sema/CheckerCore.rs, Comptime/Build.rs."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "More #355 progress: split crates/jet-foundation/src/Syntax.rs into responsibility fragments under crates/jet-foundation/src/Syntax/{core_surface,math_layout,effects_tests,jetpack_config,package_files,markers,highlights,predicates}. Syntax.rs now keeps docs/imports and ordered includes. Targeted proof green: nix develop -c cargo check -p jet-foundation. Current count still shows remaining >3k files: Source/Canvas.rs, TIR lower/emit/subset, CheckerCoreLib, jetpack JetOS/CLI, Parser Items/Expressions, CheckerInfer/calls, jet-jit lib, CheckerCore, Comptime Build."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "More #355 progress. Split crates/jet-foundation/src/AST.rs into responsibility fragments under crates/jet-foundation/src/AST/{types,program_imports,items,patterns,statements,lvalues,expressions,comptime,ffi}. AST.rs now only holds module docs/import and ordered includes. Targeted proof green: cargo check -p jet-foundation. Also moved TIR/mod.rs tests to crates/jet-codegen/src/Codegen/TIR/tests.rs; codegen lib tests green: cargo test -p jet-codegen --lib. Attempted lower.rs include split, rejected because safe top-level boundaries still left huge private functions and one naive boundary failed check; reverted before continuing. Card remains building; remaining monster files still above target."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "Progress on #355: decomposed CoreLib.rs by responsibility into include_str fragments under crates/jet-codegen/src/Prelude/CoreLib/{JetStd,Top}/. Codegen/mod.rs now pushes ordered fragments; emitted prelude text was byte-for-byte validated before removing the monolithic CoreLib.rs. Targeted proof green: cargo check -p jet-codegen; cargo test --test corelib -- --nocapture. Remaining >3k files still require decomposition before #355 can move to verify: Canvas.rs, TIR lower/emit/subset/mod, CheckerCoreLib, jetpack JetOS/CLI, Parser/Items, CheckerInfer/calls, jet-jit lib, Syntax, CheckerCore, AST, Comptime Build, Parser Expressions. Read-only TIR split plan is available in thread; not applied yet."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "Started #355 after #354 repartition. Current >3k files after extraction: CoreLib.rs 14.4k, Source/Canvas.rs 9.1k, TIR lower 8.4k, CheckerCoreLib 8.0k, jetpack JetOS 7.3k, Parser/Items 5.9k, TIR emit 5.6k, TIR subset 5.2k, CheckerInfer/calls 4.8k, jetpack CLI 4.5k, jet-jit lib 4.5k, TIR mod 4.2k, Syntax 4.1k, CheckerCore 3.8k, AST 3.8k, Comptime Build 3.2k, Parser Expressions 3.1k. Read-only explorers launched for CoreLib and TIR split plans. No code-motion edits for #355 yet."
+        },
         {
           "at": "2026-07-08",
           "by": "claude-main",
@@ -38968,7 +39008,8 @@
       ],
       "rec": "A",
       "status": "open",
-      "created": "2026-07-08T13:10:16.606Z"
+      "created": "2026-07-08T13:10:16.606Z",
+      "comment": "Overall A is the best but it should be more gray/graphite than the blue hue. Also there is too much mess going on, it needs to be simplified. If people want to see more info they should have a toggle in the ui"
     },
     {
       "id": "D-FE-STUDIO1",
@@ -39014,7 +39055,8 @@
       ],
       "rec": "A",
       "status": "open",
-      "created": "2026-07-08T13:10:16.749Z"
+      "created": "2026-07-08T13:10:16.749Z",
+      "comment": "Give me the bones of C but with the visual style of A -> I dont love the look of c but the structure & info shown is better than a. The visual identity of a is better"
     },
     {
       "id": "D-FE-REPL1",
@@ -40524,6 +40566,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-08T13:37:57.391Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c0y0vvf0",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-08T13:36:03.193Z",
+      "by": "claude-main",
+      "action": "decision.reopen",
+      "ref": "D-FE-STUDIO1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-08T13:36:03.118Z",
+      "by": "claude-main",
+      "action": "decision.reopen",
+      "ref": "D-FE-CANVAS1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-08T13:34:20.758Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0khyif2",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-08T13:31:16.245Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c0y0vvf0",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-08T13:29:24.758Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msg5dtds05j",
+      "note": "→ jetos-agent: [tower] 1 decision ratified: D-FE-STUDIO1→C (\"Give me the bo"
+    },
+    {
+      "at": "2026-07-08T13:29:24.758Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msg5ctdrydt",
+      "note": "→ codex-jetos: [tower] 1 decision ratified: D-FE-STUDIO1→C (\"Give me the bo"
+    },
+    {
+      "at": "2026-07-08T13:29:24.758Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msg5btdrwli",
+      "note": "→ codex-canvas: [tower] 1 decision ratified: D-FE-STUDIO1→C (\"Give me the bo"
+    },
+    {
+      "at": "2026-07-08T13:29:24.758Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msg5atdruqg",
+      "note": "→ codex-main: [tower] 1 decision ratified: D-FE-STUDIO1→C (\"Give me the bo"
+    },
+    {
+      "at": "2026-07-08T13:29:24.758Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msg59tdrrgq",
+      "note": "→ codex-1: [tower] 1 decision ratified: D-FE-STUDIO1→C (\"Give me the bo"
+    },
+    {
+      "at": "2026-07-08T13:29:24.758Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msg58tdrfq9",
+      "note": "→ claude-main: [tower] 1 decision ratified: D-FE-STUDIO1→C (\"Give me the bo"
+    },
+    {
+      "at": "2026-07-08T13:27:54.721Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-FE-STUDIO1",
+      "note": "C"
+    },
+    {
+      "at": "2026-07-08T13:27:11.216Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0khyif2",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-08T13:27:06.061Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c0y0vvf0",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-08T13:26:09.770Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msg578ml0gn",
+      "note": "→ jetos-agent: [tower] 1 decision ratified: D-FE-CANVAS1→A (\"Overall A is t"
+    },
+    {
+      "at": "2026-07-08T13:26:09.770Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msg568mkx8v",
+      "note": "→ codex-jetos: [tower] 1 decision ratified: D-FE-CANVAS1→A (\"Overall A is t"
+    },
+    {
+      "at": "2026-07-08T13:26:09.770Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msg558mkslc",
+      "note": "→ codex-canvas: [tower] 1 decision ratified: D-FE-CANVAS1→A (\"Overall A is t"
+    },
+    {
+      "at": "2026-07-08T13:26:09.770Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msg548mkpj4",
+      "note": "→ codex-main: [tower] 1 decision ratified: D-FE-CANVAS1→A (\"Overall A is t"
+    },
+    {
+      "at": "2026-07-08T13:26:09.770Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msg538mkl5b",
+      "note": "→ codex-1: [tower] 1 decision ratified: D-FE-CANVAS1→A (\"Overall A is t"
+    },
+    {
+      "at": "2026-07-08T13:26:09.770Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msg528mjwdm",
+      "note": "→ claude-main: [tower] 1 decision ratified: D-FE-CANVAS1→A (\"Overall A is t"
+    },
+    {
+      "at": "2026-07-08T13:24:39.733Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-FE-CANVAS1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-08T13:22:14.431Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c0y0vvf0",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-08T13:16:33.420Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c0y0vvf0",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-08T13:14:56.994Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c077qyuw",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-08T13:10:50.139Z",
+      "by": "claude-main",
+      "action": "message.send",
+      "ref": "msg51rm1kar",
+      "note": "→ owner: 7 frontend design ballots ready: D-FE-CANVAS1 #356, D-FE-STU"
+    },
     {
       "at": "2026-07-08T13:10:17.449Z",
       "by": "claude-main",
@@ -54686,6 +54903,149 @@
       "cardId": null,
       "file": null,
       "at": "2026-07-08T10:32:38.402Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg51rm1kar",
+      "from": "claude-main",
+      "to": "owner",
+      "text": "7 frontend design ballots ready: D-FE-CANVAS1 #356, D-FE-STUDIO1 #357, D-FE-REPL1 #358, D-FE-PROMPT1 #359, D-FE-HELP1 #360, D-FE-CLI1 #361, D-FE-DEVSRV1 #362. Each offers Carbon (dense dark) / Paper (light editorial) / Pulse (dark, one glow) — full HTML mockups linked in every option (docs/design/frontends/), TUI ballots also embed plain-text mockups. Review pass done (REVIEW.md): real pinned diagnostics, no theming, no stub UI. Recs: Carbon for canvas/studio/repl/cli/devserver, Pulse for prompt, Paper for help.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-08T13:10:50.139Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg528mjwdm",
+      "from": "tower",
+      "to": "claude-main",
+      "text": "[tower] 1 decision ratified: D-FE-CANVAS1→A (\"Overall A is the best but it should be more gray/graphite than the blue hue. Als\"). Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-08T13:26:09.770Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg538mkl5b",
+      "from": "tower",
+      "to": "codex-1",
+      "text": "[tower] 1 decision ratified: D-FE-CANVAS1→A (\"Overall A is the best but it should be more gray/graphite than the blue hue. Als\"). Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-08T13:26:09.770Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg548mkpj4",
+      "from": "tower",
+      "to": "codex-main",
+      "text": "[tower] 1 decision ratified: D-FE-CANVAS1→A (\"Overall A is the best but it should be more gray/graphite than the blue hue. Als\"). Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-08T13:26:09.770Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg558mkslc",
+      "from": "tower",
+      "to": "codex-canvas",
+      "text": "[tower] 1 decision ratified: D-FE-CANVAS1→A (\"Overall A is the best but it should be more gray/graphite than the blue hue. Als\"). Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-08T13:26:09.770Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg568mkx8v",
+      "from": "tower",
+      "to": "codex-jetos",
+      "text": "[tower] 1 decision ratified: D-FE-CANVAS1→A (\"Overall A is the best but it should be more gray/graphite than the blue hue. Als\"). Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-08T13:26:09.770Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg578ml0gn",
+      "from": "tower",
+      "to": "jetos-agent",
+      "text": "[tower] 1 decision ratified: D-FE-CANVAS1→A (\"Overall A is the best but it should be more gray/graphite than the blue hue. Als\"). Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-08T13:26:09.770Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg58tdrfq9",
+      "from": "tower",
+      "to": "claude-main",
+      "text": "[tower] 1 decision ratified: D-FE-STUDIO1→C (\"Give me the bones of C but with the visual style of A -> I dont love the look of\"). Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-08T13:29:24.758Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg59tdrrgq",
+      "from": "tower",
+      "to": "codex-1",
+      "text": "[tower] 1 decision ratified: D-FE-STUDIO1→C (\"Give me the bones of C but with the visual style of A -> I dont love the look of\"). Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-08T13:29:24.758Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg5atdruqg",
+      "from": "tower",
+      "to": "codex-main",
+      "text": "[tower] 1 decision ratified: D-FE-STUDIO1→C (\"Give me the bones of C but with the visual style of A -> I dont love the look of\"). Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-08T13:29:24.758Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg5btdrwli",
+      "from": "tower",
+      "to": "codex-canvas",
+      "text": "[tower] 1 decision ratified: D-FE-STUDIO1→C (\"Give me the bones of C but with the visual style of A -> I dont love the look of\"). Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-08T13:29:24.758Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg5ctdrydt",
+      "from": "tower",
+      "to": "codex-jetos",
+      "text": "[tower] 1 decision ratified: D-FE-STUDIO1→C (\"Give me the bones of C but with the visual style of A -> I dont love the look of\"). Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-08T13:29:24.758Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg5dtds05j",
+      "from": "tower",
+      "to": "jetos-agent",
+      "text": "[tower] 1 decision ratified: D-FE-STUDIO1→C (\"Give me the bones of C but with the visual style of A -> I dont love the look of\"). Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-08T13:29:24.758Z",
       "deliveredAt": null,
       "readAt": null
     }

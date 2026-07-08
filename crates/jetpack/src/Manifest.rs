@@ -9,7 +9,7 @@
 //! no back-compat alias.
 
 use crate::Diagnostics::{Diagnostic, Span};
-use crate::Jetpack::PackageManifest::{self, ManifestError};
+use crate::PackageManifest::{self, ManifestError};
 use crate::Syntax;
 use std::collections::BTreeMap;
 use std::path::Path;

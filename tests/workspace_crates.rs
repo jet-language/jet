@@ -18,7 +18,7 @@ fn manifest_deps(manifest: &str) -> BTreeSet<String> {
             continue;
         };
         let name = name.trim();
-        if name.starts_with("jet-") {
+        if name.starts_with("jet-") || name == "jetpack" {
             deps.insert(name.to_string());
         }
     }
@@ -70,6 +70,18 @@ fn workspace_crates_keep_declared_dependency_direction() {
             "jet-lexer",
             "jet-parser",
             "jet-sema",
+            "jetpack",
+        ],
+    );
+    assert_deps(
+        "crates/jetpack/Cargo.toml",
+        &[
+            "jet-codegen",
+            "jet-comptime",
+            "jet-foundation",
+            "jet-lexer",
+            "jet-parser",
+            "jet-sema",
         ],
     );
     assert_deps("crates/jet-queries/Cargo.toml", &[]);
@@ -93,6 +105,7 @@ fn workspace_crates_keep_declared_dependency_direction() {
             "jet-jit",
             "jet-queries",
             "jet-semindex",
+            "jetpack",
         ],
     );
 }

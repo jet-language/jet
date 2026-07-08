@@ -52,7 +52,8 @@ D-COMPILERSEAMS1/2 split the compiler into workspace seam crates. The root
 | `jet-comptime` | comptime values and interpreter support | no user-facing surface by itself |
 | `jet-sema` | all semantic checks, collects all front-end diagnostics | yes (E01xx+) |
 | `jet-codegen` | checked program to Rust text; TIR is internal here | **never** |
-| `jet-driver` | CLI/build orchestration, rustc invocation, ICE policy, current Jetpack/JetOS host until package seams split out | only I/O + ICE |
+| `jetpack` | package manager, JetOS engine, package manifest/lock, FFI bridge runtime assets | package/JetOS/FFI diagnostics |
+| `jet-driver` | compile/build orchestration, rustc invocation, ICE policy | only I/O + ICE |
 | `jet-queries` | std-only demand cache for incremental inputs and derived query values | no |
 | `jet-semindex` | stable semantic index over checked programs for tooling | no new diagnostics |
 | `jet-impact` | blast-radius reports over `jet-semindex` | no |
@@ -68,10 +69,9 @@ owner-approved dependency posture.
 `tests/workspace_crates.rs` pins the current path-dependency direction. Compiler
 front-end crates may not grow back-edges into driver/codegen clients. Tooling and
 runtime crates stay outside the compiler seam unless their dependency row is
-changed here and in the test. The remaining #354 repartition boundary is
-Jetpack/JetOS: moving it out of `jet-driver` requires first splitting or
-relocating the shared package seams it still uses (`Manifest`, `Lock`, FFI bridge
-helpers, package export checks), otherwise the extraction would create a cycle.
+changed here and in the test. Jetpack/JetOS live in `crates/jetpack`; `jet-driver`
+depends on that crate for package manifest/lock and FFI bridge seams, then
+re-exports the legacy module names so existing API callers keep compiling.
 
 ### Incremental Compiler Service
 

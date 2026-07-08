@@ -2,16 +2,16 @@
 
 Product capstone for a small 2D game plus source-backed editor workflow.
 
-Run the playable deterministic build:
+Run the playable visual build:
 
 ```sh
 jet run examples/apps/jetfighter/main.jet
 ```
 
-Run the playable visual build:
+Run the deterministic transcript used by tests:
 
 ```sh
-JET_RAYLIB_DISPLAY=1 jet run examples/apps/jetfighter/main.jet
+JETPLAY_HEADLESS=1 jet run examples/apps/jetfighter/main.jet
 ```
 
 Run the editor on a copied checkout or temp app root:
@@ -20,10 +20,16 @@ Run the editor on a copied checkout or temp app root:
 jet run examples/apps/jetfighter/workbench.jet -- /tmp/jetfighter 2 0
 ```
 
+Build the web editor UI:
+
+```sh
+jet build --target=web examples/apps/jetfighter/workbench_ui.jet
+```
+
 The editor rewrites `level.jet`; the game imports that source file, so the next
 run compiles and plays the edited level. `workbench_ui.jet` is the web-buildable
-editor surface. Native display is opt-in through the raylib bridge with
-`JET_RAYLIB_DISPLAY=1`; CI keeps the same path headless.
+editor surface; open `build/index.html` after the web build. CI sets
+`JETPLAY_HEADLESS=1` for the deterministic transcript.
 
 Proof:
 

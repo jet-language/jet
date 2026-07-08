@@ -1613,10 +1613,11 @@ TLS config is rejected so the transport switch is visible at the call site.
 ### Graphics and games (D-RAYLIB1, D-GAME1-3)
 
 `core.raylib` is the first-party graphics bridge package. The typed surface is
-`window_open`, `window_should_close`, `begin_drawing`, `clear_background`,
-`draw_rectangle`, `draw_text`, `end_drawing`, `close_window`, `key_down`,
-`set_target_fps`, and `color`. By default the bridge runs headless so CI does
-not need a display server. With `JET_RAYLIB_DISPLAY=1`, generated code
+`window_open`, `window_should_close`, `window_ready`, `begin_drawing`,
+`clear_background`, `draw_rectangle`, `draw_text`, `end_drawing`,
+`close_window`, `key_down`, `set_target_fps`, and `color`. By default the
+bridge runs headless so CI does not need a display server. With
+`JET_RAYLIB_DISPLAY=1`, generated code
 dynamically loads the native raylib shared library and calls the real C API; if
 the library is absent, it degrades to the same headless path.
 

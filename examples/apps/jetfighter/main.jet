@@ -115,6 +115,11 @@ fn export_manifest() -> [String] {
 
 fn play_visual() {
     window :: rl.window_open(720, 480, "JetPlay")
+    if rl.window_ready(window) == false {
+        print("JetPlay could not open a native raylib window.")
+        print("Run inside `nix develop` so `libraylib.so` is on LD_LIBRARY_PATH, and make sure DISPLAY/WAYLAND_DISPLAY points at your desktop.")
+        return
+    }
     rl.set_target_fps(60)
 
     bg :: rl.color(14, 18, 28, 255)
@@ -162,7 +167,8 @@ fn play_visual() {
 }
 
 fn run() {
-    if (env.get("JET_RAYLIB_DISPLAY") ?? "") == "1" {
+    if (env.get("JETPLAY_HEADLESS") ?? "") != "1" {
+        env.set("JET_RAYLIB_DISPLAY", "1")
         play_visual()
         return
     }
@@ -196,7 +202,6 @@ fn run() {
         print("export {artifact}")
     }
     print(game.run(scene, replay: game.Replay.record("runs/jetfighter.jreplay")))
-    play_visual()
 }
 
 #Test("collision awards points") {

@@ -1,0 +1,360 @@
+// -- core.game headless substrate (D-GAME1/2/3, D-WD10, D-GAME-*) -------------
+#[derive(Default, Debug)]
+struct GameState {
+    assets: Vec<(String, String)>,
+    bindings: Vec<(String, String)>,
+    budgets: Option<GameBudgets>,
+    components: Vec<String>,
+}
+
+#[derive(Clone)]
+struct GameAssets {
+    state: std::rc::Rc<std::cell::RefCell<GameState>>,
+}
+
+#[derive(Clone)]
+struct GameInputMap {
+    state: std::rc::Rc<std::cell::RefCell<GameState>>,
+}
+
+#[derive(Clone)]
+struct GameBudgetsSlot {
+    state: std::rc::Rc<std::cell::RefCell<GameState>>,
+}
+
+struct GameScene {
+    name: String,
+    assets: GameAssets,
+    user_assets: GameAssets,
+    input: GameInputMap,
+    user_input: GameInputMap,
+    budgets: GameBudgetsSlot,
+    user_budgets: GameBudgetsSlot,
+    callbacks: std::rc::Rc<std::cell::RefCell<Vec<Box<dyn FnMut(GameFrame)>>>>,
+}
+
+#[derive(Clone, Debug)]
+struct GameImage {
+    path: String,
+}
+
+#[derive(Clone, Debug)]
+struct GameSound {
+    path: String,
+}
+
+#[derive(Clone, Debug)]
+struct GameReplay {
+    path: String,
+}
+
+#[derive(Clone, Debug)]
+struct GameBackend {
+    renderer: String,
+    audio: String,
+    editor: String,
+}
+
+#[derive(Clone, Debug)]
+struct GameBudgets {
+    frame_ms: i64,
+    memory_mb: i64,
+    asset_kb: i64,
+    draw_calls: i64,
+}
+
+#[derive(Clone, Debug)]
+struct GameInputSnapshot {
+    pressed: Vec<String>,
+}
+
+#[derive(Clone, Debug)]
+struct GameFrame {
+    index: i64,
+    user_index: i64,
+    input: GameInputSnapshot,
+    user_input: GameInputSnapshot,
+}
+
+impl JetShow for GameScene {
+    fn jet_show(&self) -> String {
+        format!("GameScene({})", self.name)
+    }
+}
+impl JetShow for GameAssets {
+    fn jet_show(&self) -> String {
+        "GameAssets".to_string()
+    }
+}
+impl JetShow for GameInputMap {
+    fn jet_show(&self) -> String {
+        "GameInputMap".to_string()
+    }
+}
+impl JetShow for GameBudgetsSlot {
+    fn jet_show(&self) -> String {
+        "GameBudgetsSlot".to_string()
+    }
+}
+impl JetShow for GameImage {
+    fn jet_show(&self) -> String {
+        format!("GameImage({})", self.path)
+    }
+}
+impl JetDebug for GameImage {
+    fn jet_debug(&self) -> String {
+        self.jet_show()
+    }
+}
+impl JetShow for GameSound {
+    fn jet_show(&self) -> String {
+        format!("GameSound({})", self.path)
+    }
+}
+impl JetDebug for GameSound {
+    fn jet_debug(&self) -> String {
+        self.jet_show()
+    }
+}
+impl JetShow for GameReplay {
+    fn jet_show(&self) -> String {
+        format!("GameReplay({})", self.path)
+    }
+}
+impl JetShow for GameBackend {
+    fn jet_show(&self) -> String {
+        format!(
+            "GameBackend(renderer: {}, audio: {}, editor: {})",
+            self.renderer, self.audio, self.editor
+        )
+    }
+}
+impl JetShow for GameBudgets {
+    fn jet_show(&self) -> String {
+        format!(
+            "GameBudgets(frame_ms: {}, memory_mb: {}, asset_kb: {}, draw_calls: {})",
+            self.frame_ms, self.memory_mb, self.asset_kb, self.draw_calls
+        )
+    }
+}
+impl JetShow for GameInputSnapshot {
+    fn jet_show(&self) -> String {
+        format!("GameInputSnapshot({})", self.pressed.join(","))
+    }
+}
+impl JetShow for GameFrame {
+    fn jet_show(&self) -> String {
+        format!("GameFrame({})", self.index)
+    }
+}
+
+fn jet_game_scene_new(name: &String) -> GameScene {
+    let state = std::rc::Rc::new(std::cell::RefCell::new(GameState::default()));
+    let assets = GameAssets {
+        state: state.clone(),
+    };
+    let input = GameInputMap {
+        state: state.clone(),
+    };
+    let budgets = GameBudgetsSlot { state };
+    GameScene {
+        name: name.clone(),
+        assets: assets.clone(),
+        user_assets: assets,
+        input: input.clone(),
+        user_input: input,
+        budgets: budgets.clone(),
+        user_budgets: budgets,
+        callbacks: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
+    }
+}
+
+fn jet_game_replay_record(path: &String) -> GameReplay {
+    GameReplay { path: path.clone() }
+}
+
+fn jet_game_backend_headless() -> GameBackend {
+    GameBackend {
+        renderer: "headless".to_string(),
+        audio: "none".to_string(),
+        editor: "none".to_string(),
+    }
+}
+
+fn jet_game_budgets_new(
+    frame_ms: i64,
+    memory_mb: i64,
+    asset_kb: i64,
+    draw_calls: i64,
+) -> GameBudgets {
+    GameBudgets {
+        frame_ms,
+        memory_mb,
+        asset_kb,
+        draw_calls,
+    }
+}
+
+fn jet_game_scene_on_frame(scene: &mut GameScene, f: Box<dyn FnMut(GameFrame)>) {
+    scene.callbacks.borrow_mut().push(f);
+}
+
+fn jet_game_scene_component(scene: &mut GameScene, name: &String) {
+    let mut state = scene.assets.state.borrow_mut();
+    if !state.components.iter().any(|existing| existing == name) {
+        state.components.push(name.clone());
+    }
+}
+
+fn jet_game_scene_query(scene: &GameScene, names: &String) -> Vec<String> {
+    let state = scene.assets.state.borrow();
+    let wanted: Vec<&str> = names.split(',').filter(|s| !s.is_empty()).collect();
+    if wanted
+        .iter()
+        .all(|name| state.components.iter().any(|c| c == name))
+    {
+        vec![wanted.join("+")]
+    } else {
+        Vec::new()
+    }
+}
+
+fn jet_game_assets_image(assets: &GameAssets, path: &String) -> Result<GameImage, String> {
+    if path.contains("missing") {
+        return Err(format!("asset not found: {}", path));
+    }
+    assets
+        .state
+        .borrow_mut()
+        .assets
+        .push(("image".to_string(), path.clone()));
+    Ok(GameImage { path: path.clone() })
+}
+
+fn jet_game_assets_sound(assets: &GameAssets, path: &String) -> Result<GameSound, String> {
+    if path.contains("missing") {
+        return Err(format!("asset not found: {}", path));
+    }
+    assets
+        .state
+        .borrow_mut()
+        .assets
+        .push(("sound".to_string(), path.clone()));
+    Ok(GameSound { path: path.clone() })
+}
+
+fn jet_game_input_bind(input: &GameInputMap, action: &String, key: &String) {
+    let mut state = input.state.borrow_mut();
+    if !state.bindings.iter().any(|(a, k)| a == action && k == key) {
+        state.bindings.push((action.clone(), key.clone()));
+    }
+}
+
+fn jet_game_budgets_set(slot: &GameBudgetsSlot, budgets: &GameBudgets) {
+    slot.state.borrow_mut().budgets = Some(budgets.clone());
+}
+
+fn jet_game_input_pressed(input: &GameInputSnapshot, action: &String) -> bool {
+    input.pressed.iter().any(|a| a == action)
+}
+
+fn jet_game_run(
+    scene: &mut GameScene,
+    replay: Option<&GameReplay>,
+    backend: Option<&GameBackend>,
+) -> String {
+    let backend = backend.cloned().unwrap_or_else(jet_game_backend_headless);
+    let replay_path = replay
+        .map(|r| r.path.clone())
+        .unwrap_or_else(|| "<none>".to_string());
+    let mut out = Vec::new();
+    out.push(format!("scene:{}", scene.name));
+    out.push(format!(
+        "backend:{}/{}/{}",
+        backend.renderer, backend.audio, backend.editor
+    ));
+    out.push(format!("replay:{}", replay_path));
+    {
+        let state = scene.assets.state.borrow();
+        let assets = state
+            .assets
+            .iter()
+            .map(|(kind, path)| format!("{}:{}", kind, path))
+            .collect::<Vec<_>>()
+            .join(",");
+        out.push(format!(
+            "assets:{}",
+            if assets.is_empty() {
+                "none".to_string()
+            } else {
+                assets
+            }
+        ));
+        let bindings = state
+            .bindings
+            .iter()
+            .map(|(action, key)| format!("{}={}", action, key))
+            .collect::<Vec<_>>()
+            .join(",");
+        out.push(format!(
+            "input:{}",
+            if bindings.is_empty() {
+                "none".to_string()
+            } else {
+                bindings
+            }
+        ));
+        let components = state.components.join(",");
+        out.push(format!(
+            "components:{}",
+            if components.is_empty() {
+                "none".to_string()
+            } else {
+                components
+            }
+        ));
+        if let Some(b) = &state.budgets {
+            out.push(format!(
+                "budgets:frame={}ms,memory={}mb,assets={}kb,draws={}",
+                b.frame_ms, b.memory_mb, b.asset_kb, b.draw_calls
+            ));
+        } else {
+            out.push("budgets:none".to_string());
+        }
+    }
+    for frame_idx in 0..3 {
+        let pressed = if frame_idx == 1 {
+            scene
+                .assets
+                .state
+                .borrow()
+                .bindings
+                .iter()
+                .map(|(action, _)| action.clone())
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        let frame = GameFrame {
+            index: frame_idx,
+            user_index: frame_idx,
+            input: GameInputSnapshot {
+                pressed: pressed.clone(),
+            },
+            user_input: GameInputSnapshot {
+                pressed: pressed.clone(),
+            },
+        };
+        for cb in scene.callbacks.borrow_mut().iter_mut() {
+            cb(frame.clone());
+        }
+        let input = if pressed.is_empty() {
+            "none".to_string()
+        } else {
+            pressed.join("+")
+        };
+        out.push(format!("frame:{} input:{}", frame_idx, input));
+    }
+    out.join("\n")
+}
+

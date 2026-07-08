@@ -1,7 +1,7 @@
 //! `jet:` self-toolchain pin — pinning **which `jet` compiler** a project runs
 //! (D-JPK-TOOLCHAIN1=A, card #179, U30).
 //!
-//! DISTINCT from [`crate::Jetpack::Toolchain`] (D-JPK-BUILDTOOL1): that module
+//! DISTINCT from [`crate::Toolchain`] (D-JPK-BUILDTOOL1): that module
 //! is the Rust/native **build** toolchain that compiles a user's `extern rust`
 //! bridge crates. THIS module pins the Jet compiler itself. A `pkg.jet` gains a
 //! `jet:` channel ref (`jet: 0.4`); a running `jet` whose version differs from

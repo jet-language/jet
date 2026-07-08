@@ -1,0 +1,638 @@
+impl<'a> Checker<'a> {
+        /// D-UNINIT-SENTINEL1: `name: Type := uninit` — gate on `use core.mem`,
+        /// restrict to plain-data types (E0423), declare the binding, and record
+        /// it as not-yet-written so the dataflow can prove write-before-read
+        /// (E0420). Reuses D-UNINIT1's engine unchanged; only the surface syntax
+        /// (and this function's diagnostic wording) moved off the retired
+        /// `#Uninit` marker.
+        pub(crate) fn check_uninit_binding(&mut self, b: &mut Binding) {
+            let has_mem = self
+                .core_imports
+                .values()
+                .any(|m| m == Syntax::CORE_MEM_MODULE);
+            if !has_mem {
+                self.diags.push(Diagnostic::error(
+                    "E0424",
+                    format!("`{}` needs the low-level memory tier", Syntax::KW_UNINIT),
+                    format!(
+                        "`{}` skips the automatic zero-fill — an expert-tier operation",
+                        Syntax::KW_UNINIT
+                    ),
+                    format!(
+                        "add `use {}` at the top of this file to opt in",
+                        Syntax::CORE_MEM_MODULE
+                    ),
+                    Some(b.name_span),
+                ));
+            }
+            let (ty, ty_span) = match (&b.ty, b.ty_span) {
+                (Some(t), Some(s)) => (self.resolve_type(t.clone()), s),
+                _ => return,
+            };
+            if let Some(slot) = b.ty.as_mut() {
+                *slot = ty.clone();
+            }
+            self.check_declared_type(&ty, ty_span);
+            if !is_pod_uninit_type(&ty) {
+                self.diags.push(Diagnostic::error(
+                    "E0423",
+                    format!("`{}` needs a plain-data type", Syntax::KW_UNINIT),
+                    format!(
+                        "`{}` may own heap memory or need cleanup, so leaving it uninitialized is unsafe",
+                        ty.show()
+                    ),
+                    "use plain data — a number, `Bool`, `Char`, `U8`, or a fixed array of those (e.g. `[4096]U8`)".to_string(),
+                    Some(ty_span),
+                ));
+            }
+            self.declare(
+                &b.name,
+                b.name_span,
+                LocalInfo {
+                    ty,
+                    mutable: true,
+                    param_conv: None,
+                    decl_loop_depth: self.loop_depth,
+                    sendable: true,
+                    task_lint_span: None,
+                    single_use_span: None,
+                    task_has_view_capture: false,
+                },
+            );
+            self.uninit.insert(b.name.clone(), b.name_span);
+        }
+    
+        /// D-UNINIT1 engine (reused by D-UNINIT-SENTINEL1): clear a `:= uninit`
+        /// binding's not-yet-written flag when it is passed as a `mut` argument (the
+        /// fill case) — the callee writes it. Call before inferring the args so the
+        /// read-hook doesn't flag the fill site.
+        pub(crate) fn clear_uninit_mut_args(&mut self, args: &[CallArg]) {
+            if self.uninit.is_empty() {
+                return;
+            }
+            for arg in args {
+                if arg.convention == AccessConvention::Write {
+                    if let Expr::Ident(n, _) = &arg.expr {
+                        self.uninit.remove(n);
+                    }
+                }
+            }
+        }
+    
+        pub(crate) fn check_binding(&mut self, b: &mut Binding) {
+            // D-DETACH1: record the binding name so report_unsendable can flag view-capturing tasks.
+            let prev_binding_name = self.current_binding_name.take();
+            self.current_binding_name = Some(b.name.clone());
+            if b.pattern.is_some() {
+                self.check_destructuring_binding(b);
+                self.current_binding_name = prev_binding_name;
+                return;
+            }
+            if b.uninit {
+                self.check_uninit_binding(b);
+                self.current_binding_name = prev_binding_name;
+                return;
+            }
+            let mut annot_valid = true;
+            let saved_expected = self.expected_type.clone();
+            if let (Some(ty), Some(span)) = (&mut b.ty, b.ty_span) {
+                let t = self.resolve_type(ty.clone());
+                *ty = t.clone();
+                self.expected_type = Some(t.clone());
+                let before = self.diags.len();
+                self.check_declared_type(&t, span);
+                if self.diags.len() > before {
+                    annot_valid = false;
+                }
+            }
+            if let Expr::Ident(n, nspan) = &mut b.init {
+                if let Some(info) = self.lookup(n) {
+                    if !info.ty.is_scalar() {
+                        if matches!(info.param_conv, Some(AccessConvention::Read))
+                            && is_cloneable(&info.ty, self.registry, self.structs)
+                        {
+                            // D-CAP2 (D-MEM1/S4): same node `copy x` desugars to —
+                            // one mechanism for "duplicate this value".
+                            let span = *nspan;
+                            let old = std::mem::replace(&mut b.init, Expr::Absent(span));
+                            b.init = Expr::Copy(Box::new(old), span);
+                        } else if matches!(
+                            info.param_conv,
+                            Some(AccessConvention::Read) | Some(AccessConvention::Write)
+                        ) {
+                            self.diags.push(Diagnostic::error(
+                                "E0120",
+                                format!("`{}` was not moved here, so it cannot be taken (`^`)", n),
+                                "this function has read access only and does not own the value"
+                                    .to_string(),
+                                format!(
+                                    "copy it instead: `{} {} {} {}`",
+                                    b.name,
+                                    if b.mutable {
+                                        Syntax::SIGIL_BIND_MUT
+                                    } else {
+                                        Syntax::SIGIL_BIND_IMMUT
+                                    },
+                                    Syntax::KW_COPY,
+                                    n
+                                ),
+                                Some(*nspan),
+                            ));
+                        }
+                    }
+                }
+            }
+            let saved_esc = self.lambda_escapes;
+            let saved_bind = self.lambda_binding.clone();
+            if matches!(&b.init, Expr::Lambda(_)) {
+                self.lambda_escapes = true;
+                self.lambda_binding = Some(b.name.clone());
+            }
+            // D-CTMARKER1=C: `$name` in a comptime binding RHS is valid; set
+            // `in_comptime` before `infer()` so E2712 is suppressed during type
+            // inference of the RHS (the evaluator runs after, independently).
+            if b.is_comptime {
+                self.in_comptime = true;
+            }
+            let it = self.infer(&mut b.init);
+            if b.is_comptime {
+                self.in_comptime = false;
+            }
+            self.lambda_escapes = saved_esc;
+            self.lambda_binding = saved_bind;
+            self.expected_type = saved_expected;
+    
+            // E2502 (E2-M7): a line stream — `FileReader.lines()` / `StdinHandle
+            // .lines()` — is a loop-source-only value. It may only be consumed
+            // directly by `loop line in handle.lines()`; binding it to a name lets it
+            // escape loop position, where there is no meaningful lowering. (Codegen
+            // previously emitted a placeholder that rustc rejected — an I2 hole. This
+            // moves the guarantee into sema, c109/I3.)
+            if let Some(Type::Named(n)) = &it {
+                if n == "FileLines" || n == "StdinLines" {
+                    self.diags.push(Diagnostic::error(
+                        "E2502",
+                        "a line stream can only be used directly in a loop".to_string(),
+                        "`.lines()` hands back a lazy line reader meant to be iterated in place; storing it in a name would let it leave the loop, where it has no use".to_string(),
+                        format!(
+                            "iterate it directly: `loop {} in handle.lines() {{ … }}`",
+                            if b.name.is_empty() { "line" } else { b.name.as_str() }
+                        ),
+                        Some(b.init.span()),
+                    ));
+                }
+            }
+    
+            if let Expr::Lambda(lam) = &b.init {
+                if lam.meta.escapes {
+                    for name in &lam.meta.mut_captures {
+                        self.lambda_mut_borrow_stack
+                            .last_mut()
+                            .unwrap()
+                            .insert(name.clone());
+                    }
+                }
+            }
+    
+            // `a :: b` moves `b` when the type isn't a scalar (M2 model:
+            // assignment moves). Borrowed parameters can't be moved at all.
+            if let Expr::Ident(n, nspan) = &b.init {
+                if let Some(info) = self.lookup(n) {
+                    if !info.ty.is_scalar() {
+                        if info.param_conv.is_none() {
+                            self.mark_moved(n.clone(), *nspan);
+                        }
+                    }
+                }
+            }
+    
+            let final_ty = match (&b.ty, it) {
+                (Some(_), Some(actual)) if !annot_valid => actual,
+                (Some(annot), Some(actual)) => {
+                    let annot = self.resolve_type(annot.clone());
+                    let actual = self.resolve_type(actual.clone());
+                    // D-SG9: a fixed-width literal is range-checked and re-typed in
+                    // `infer` (E1003), so it arrives matching `annot`. A non-literal
+                    // width mismatch falls to E0108 below — no implicit narrowing or
+                    // widening between integer widths.
+                    if annot != actual {
+                        // D-DIST1/D-DIST3 (E0128): distinct-type coercion is never implicit.
+                        let distinct_name = if let Type::Named(n) = &annot {
+                            if self.registry.is_distinct(n) {
+                                Some(n.clone())
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        };
+                        if let Some(dt) = distinct_name {
+                            self.diags.push(Diagnostic::error(
+                                "E0128",
+                                format!("a `{}` can't be used where a `{}` is expected", actual.name(), dt),
+                                format!("`{}` and `{}` are different types — even though `{}` is built on `{}`, one is never accepted in place of the other", dt, actual.name(), dt, self.registry.distinct_base(&dt).map(|t| t.name()).unwrap_or_default()),
+                                format!("construct a `{}`: `{}({})`", dt, dt, "expr"),
+                                Some(b.init.span()),
+                            ));
+                        } else if let Some(diag) = crate::Sema::Diagnostics::typed_text_mismatch(
+                            &annot,
+                            &actual,
+                            b.init.span(),
+                        ) {
+                            self.diags.push(diag);
+                        } else {
+                            self.diags.push(Diagnostic::error(
+                                "E0108",
+                                format!(
+                                    "`{}` says it holds {}, but the value is {}",
+                                    b.name,
+                                    annot.show(),
+                                    actual.show()
+                                ),
+                                "the type written after `:` must match the value".to_string(),
+                                type_fix_hint(&annot, &actual),
+                                Some(b.init.span()),
+                            ));
+                        }
+                    }
+                    annot
+                }
+                (Some(annot), None) => self.resolve_type(annot.clone()),
+                (None, Some(actual)) => actual,
+                (None, None) => Type::Int, // an error was already reported
+            };
+            if b.ty.is_none() {
+                b.ty = Some(final_ty.clone());
+            }
+            // D-DECIMAL1: default-on float-money lint for money-like binding names.
+            if final_ty.is_float() && crate::Numeric::is_money_like_name(&b.name) {
+                self.diags.push(Diagnostic::lint(
+                    "L0504",
+                    format!("binding `{}` looks like money but has type `Float`", b.name),
+                    "floating-point money loses cents on common values like `0.1 + 0.2`".to_string(),
+                    "use `Decimal` for exact money: `price: Decimal := Decimal(\"9.99\")`".to_string(),
+                    Some(b.name_span),
+                ));
+            }
+            if b.is_comptime {
+                let globals = self.current_ct_globals();
+                // D-CTCORE1: pass core_imports so the interpreter can evaluate
+                // whitelisted pure Core calls (e.g. `math.sqrt(x)`).
+                // D-CTEFFECT1: pass impure context so bindings inside #Impure blocks
+                // start with the gate already open.
+                match crate::Comptime::evaluate_owned_with_imports_opts_collecting(
+                    &b.init,
+                    self.ct_funcs,
+                    self.ct_externs,
+                    self.ct_base_dir,
+                    &globals,
+                    self.core_imports,
+                    self.allow_impure && self.ct_impure_depth > 0,
+                    self.ct_impure_depth,
+                ) {
+                    Ok((v, inputs)) => {
+                        b.ct = Some(v.clone());
+                        self.ct_scopes.last_mut().unwrap().insert(b.name.clone(), v);
+                        // D-CTEFFECT1 Tier-1: accumulate embed inputs for .jet/lock.
+                        self.ct_embed_inputs.extend(inputs);
+                    }
+                    Err(d) => self.diags.push(d),
+                }
+            }
+            let binding_sendable = if let Expr::Lambda(lam) = &b.init {
+                self.lambda_value_sendable(lam, &final_ty)
+            } else {
+                self.sendability_problem(&final_ty, true).is_none()
+            };
+            let task_lint_span = if is_task_type(&final_ty) && !self.in_taskgroup_spawn {
+                Some(b.name_span)
+            } else {
+                None
+            };
+            // D-LIN1: a binding that owns a `#SingleUse` value carries the duty to
+            // consume it exactly once. The duty transfers on `y :: x` (the move marks
+            // `x` consumed via `note_move_if_direct_ident`; `y` now owns it).
+            let single_use_span = if self.type_is_single_use(&final_ty) {
+                Some(b.name_span)
+            } else {
+                None
+            };
+            // D-ALLOC2: `x :: arena.alloc(v)` makes `x` a scope-bound view into
+            // `arena`. Record it so E0631 (escape) / E0632 (use-after-reset) can
+            // fire, and flag the binding for codegen (it lowers to a `&mut T`, read
+            // through a deref). E0631: a binding whose *initializer is itself a view
+            // name* (`y :: x`) would move the view to a new — possibly
+            // longer-lived — binding; reject it (views are non-reassignable
+            // non-escaping locals, I8).
+            if let Some(arena) = self.arena_alloc_source(&b.init) {
+                b.arena_view = true;
+                self.record_arena_view(&b.name, arena);
+            } else if let Expr::Ident(src, src_span) = &b.init {
+                if self.is_arena_view(src) {
+                    self.report_view_escape(src, "be stored in another binding", *src_span);
+                }
+            }
+            // D-DYNARRAY1: `x :: list.view(a..b)` makes `x` a scope-bound window
+            // into `list`. E2305 fires the same way E0631 does for arena views —
+            // rebinding a live view to a second name is itself an escape (views
+            // are non-reassignable non-escaping locals, I8), not re-tracked.
+            if let Some(owner) = self.view_call_source(&b.init) {
+                self.record_list_view(&b.name, owner);
+            } else if let Expr::Ident(src, src_span) = &b.init {
+                if self.is_list_view(src) {
+                    self.report_list_view_escape(src, "be stored in another binding", *src_span);
+                }
+            }
+            // D-MEM1 stage S5: `x :: s.trim()` / `x :: s.after(sep)` / `x ::
+            // s.before(sep)` makes `x` a scope-bound string view into `s` — the
+            // same E2305 reasoning as `View<T>`, reported as E2307 since `String`
+            // has no distinct view type for codegen to key off (`b.string_view`
+            // flags the binding itself instead). Immutable (`::`) only, matching
+            // "views are non-reassignable non-escaping locals" (I8) — a `:=`
+            // binding can be reassigned to an ordinary owned `String` later, and
+            // codegen's `&str` place has nowhere to put that; fall back to the
+            // ordinary eager/owned lowering for `:=` (unchanged pre-S5 behavior).
+            if !b.mutable {
+                if let Some(owner) = self.string_view_call_source(&b.init) {
+                    b.string_view = true;
+                    self.record_string_view(&b.name, owner);
+                }
+            }
+            // No dedicated "rebound to another binding" check here — the general
+            // E2307 check on `Expr::Ident` reads (this binding's init was already
+            // inferred above) already caught `y :: d` for a live view `d`; a
+            // second check here would double-report the same span.
+            let task_has_view_capture = self.view_capture_tasks.contains(&b.name);
+            self.declare(
+                &b.name,
+                b.name_span,
+                LocalInfo {
+                    ty: final_ty,
+                    mutable: b.mutable && !b.is_comptime,
+                    param_conv: None,
+                    decl_loop_depth: self.loop_depth,
+                    sendable: binding_sendable,
+                    task_lint_span,
+                    single_use_span,
+                    task_has_view_capture,
+                },
+            );
+            self.current_binding_name = prev_binding_name;
+        }
+    
+        /// S74: a `val`/`var` binding that destructures a struct (`Point { x, y }`)
+        /// or a list (`[a, b]`). Each bound name is declared separately; move and
+        /// mutability follow the per-name M2 rules. Struct destructuring is
+        /// irrefutable (you may bind any subset of fields); list destructuring is
+        /// guarded by a runtime length check in codegen, and a literal of the wrong
+        /// length is caught here (E0315).
+        pub(crate) fn check_destructuring_binding(&mut self, b: &mut Binding) {
+            let inferred = self.infer(&mut b.init);
+            let pattern = b
+                .pattern
+                .clone()
+                .expect("destructuring binding has a pattern");
+            let Some(it) = inferred else {
+                // The initializer itself didn't type-check; declare error
+                // placeholders so the bound names don't cascade into E0107.
+                for n in pattern.names() {
+                    self.declare_bound(n.local_name(), n.span, Type::Int, b.mutable);
+                }
+                return;
+            };
+            let it = self.resolve_type(it);
+            match &pattern {
+                BindPattern::Struct {
+                    type_name,
+                    type_span,
+                    fields,
+                    rest,
+                    span: pat_span,
+                } => {
+                    let actual = match &it {
+                        Type::Named(n) => Some(n.clone()),
+                        Type::Apply { name, .. } => Some(name.clone()),
+                        _ => None,
+                    };
+                    let is_struct = actual.as_deref().is_some_and(|n| {
+                        self.struct_owner_module(n, None)
+                            .and_then(|m| self.struct_fields_of(m, n))
+                            .is_some()
+                    });
+                    if !is_struct {
+                        self.diags.push(Diagnostic::error(
+                            "E0313",
+                            format!(
+                                "`{} {{ … }}` can only destructure a `{}` value, but this is {}",
+                                type_name,
+                                type_name,
+                                it.show()
+                            ),
+                            "destructuring with `{ }` pulls fields out of a struct value".to_string(),
+                            format!(
+                                "destructure a `{}`, or bind the whole value with a name",
+                                type_name
+                            ),
+                            Some(*type_span),
+                        ));
+                        for n in pattern.names() {
+                            self.declare_bound(n.local_name(), n.span, Type::Int, b.mutable);
+                        }
+                        return;
+                    }
+                    let actual = actual.unwrap();
+                    if actual != *type_name {
+                        self.diags.push(Diagnostic::error(
+                            "E0313",
+                            format!("this value is a `{}`, not a `{}`", actual, type_name),
+                            "the type named before `{ }` must match the value you destructure"
+                                .to_string(),
+                            format!("write `{} {{ … }}` to match the value", actual),
+                            Some(*type_span),
+                        ));
+                        for n in pattern.names() {
+                            self.declare_bound(n.local_name(), n.span, Type::Int, b.mutable);
+                        }
+                        return;
+                    }
+                    for f in fields {
+                        // `field_type` resolves the field's type and reports E0302
+                        // with a suggestion if the field name is unknown.
+                        let fty = self.field_type(&it, &f.name, f.span).unwrap_or(Type::Int);
+                        self.declare_bound(f.local_name(), f.span, fty, b.mutable);
+                    }
+                    // D-DESTRUCT1: `..` is mandatory whenever the pattern doesn't
+                    // name every field, and redundant when it already does.
+                    let total_fields = self
+                        .struct_owner_module(&actual, None)
+                        .and_then(|m| self.struct_fields_of(m, &actual))
+                        .map(|fs| fs.len());
+                    if let Some(total) = total_fields {
+                        let partial = fields.len() < total;
+                        if partial && rest.is_none() {
+                            self.diags.push(Diagnostic::error(
+                                "E0326",
+                                format!("this pattern leaves out fields of `{}`", type_name),
+                                "a destructure that doesn't name every field must end with `..` so the skipped fields are visible at a glance".to_string(),
+                                "add `, ..` before the closing `}`, or name the remaining fields".to_string(),
+                                Some(*pat_span),
+                            ));
+                        } else if !partial {
+                            if let Some(rest_span) = rest {
+                                self.diags.push(Diagnostic::error(
+                                    "E0327",
+                                    format!("`..` is redundant — this pattern already names every field of `{}`", type_name),
+                                    "a trailing `..` only makes sense when some fields are left unnamed".to_string(),
+                                    "remove the `..`".to_string(),
+                                    Some(*rest_span),
+                                ));
+                            }
+                        }
+                    }
+                }
+                BindPattern::List { elems, span } => {
+                    let (elem_ty, fixed_len) = match &it {
+                        Type::List(inner) => ((**inner).clone(), None),
+                        // S76: [T#N] can be destructured; E0963 if count doesn't match.
+                        Type::FixedList { elem, len } => ((**elem).clone(), Some(*len)),
+                        _ => {
+                            self.diags.push(Diagnostic::error(
+                                "E0313",
+                                format!(
+                                    "`[ … ]` can only destructure a list, but this is {}",
+                                    it.show()
+                                ),
+                                "destructuring with `[ ]` pulls elements out of a list value"
+                                    .to_string(),
+                                "destructure a list, or bind the whole value with a name".to_string(),
+                                Some(*span),
+                            ));
+                            for n in pattern.names() {
+                                self.declare_bound(n.local_name(), n.span, Type::Int, b.mutable);
+                            }
+                            return;
+                        }
+                    };
+                    // E0963: destructure count must match the fixed-size length.
+                    if let Some(fixed) = fixed_len {
+                        if elems.len() as u64 != fixed {
+                            self.diags.push(Diagnostic::error(
+                                "E0963",
+                                format!(
+                                    "destructuring with {} name{}, but this fixed-size list has {} element{}",
+                                    elems.len(),
+                                    if elems.len() == 1 { "" } else { "s" },
+                                    fixed,
+                                    if fixed == 1 { "" } else { "s" }
+                                ),
+                                "a fixed-size list `[T#N]` has a known length — the pattern must match exactly".to_string(),
+                                format!(
+                                    "use {} name{} in the pattern",
+                                    fixed,
+                                    if fixed == 1 { "" } else { "s" }
+                                ),
+                                Some(*span),
+                            ));
+                        }
+                    }
+                    // A list literal has a known length: a mismatch is a compile
+                    // error rather than a runtime length failure.
+                    if let Expr::ListLit(items, _) = &b.init {
+                        if items.len() != elems.len() {
+                            self.diags.push(Diagnostic::error(
+                                "E0315",
+                                format!(
+                                    "this pattern binds {} item{}, but the list has {}",
+                                    elems.len(),
+                                    if elems.len() == 1 { "" } else { "s" },
+                                    items.len()
+                                ),
+                                "a list pattern must name exactly as many items as the list holds"
+                                    .to_string(),
+                                format!(
+                                    "name {} item{} to match the list",
+                                    items.len(),
+                                    if items.len() == 1 { "" } else { "s" }
+                                ),
+                                Some(*span),
+                            ));
+                        }
+                    }
+                    for e in elems {
+                        self.declare_bound(&e.name, e.span, elem_ty.clone(), b.mutable);
+                    }
+                }
+                BindPattern::Tuple { elems, span } => {
+                    let Type::Tuple(fields) = &it else {
+                        self.diags.push(Diagnostic::error(
+                            "E0313",
+                            format!(
+                                "`( … )` can only destructure a tuple, but this is {}",
+                                it.show()
+                            ),
+                            "destructuring with `( )` pulls named members out of a tuple value"
+                                .to_string(),
+                            "destructure a tuple, or bind the whole value with a name".to_string(),
+                            Some(*span),
+                        ));
+                        for n in pattern.names() {
+                            self.declare_bound(n.local_name(), n.span, Type::Int, b.mutable);
+                        }
+                        return;
+                    };
+                    if elems.len() != fields.len() {
+                        self.diags.push(Diagnostic::error(
+                            "E0315",
+                            format!(
+                                "this pattern binds {} member{}, but the tuple has {}",
+                                elems.len(),
+                                if elems.len() == 1 { "" } else { "s" },
+                                fields.len()
+                            ),
+                            "a tuple pattern must name exactly as many members as the tuple holds"
+                                .to_string(),
+                            format!(
+                                "name {} member{} to match the tuple",
+                                fields.len(),
+                                if fields.len() == 1 { "" } else { "s" }
+                            ),
+                            Some(*span),
+                        ));
+                    } else if let Expr::TupleLit(items, _, _) = &b.init {
+                        if items.len() != elems.len() {
+                            self.diags.push(Diagnostic::error(
+                                "E0315",
+                                format!(
+                                    "this pattern binds {} member{}, but the tuple literal has {}",
+                                    elems.len(),
+                                    if elems.len() == 1 { "" } else { "s" },
+                                    items.len()
+                                ),
+                                "a tuple pattern must name exactly as many members as the literal holds"
+                                    .to_string(),
+                                format!(
+                                    "name {} member{} to match the tuple",
+                                    items.len(),
+                                    if items.len() == 1 { "" } else { "s" }
+                                ),
+                                Some(*span),
+                            ));
+                        }
+                    }
+                    for (e, (_, fty)) in elems.iter().zip(fields.iter()) {
+                        self.declare_bound(&e.name, e.span, (**fty).clone(), b.mutable);
+                    }
+                }
+            }
+            // Move the initializer when it's an owned, non-scalar local (M2): the
+            // whole value is consumed to produce the bound parts.
+            if let Expr::Ident(n, nspan) = &b.init {
+                if let Some(info) = self.lookup(n) {
+                    if !info.ty.is_scalar() && info.param_conv.is_none() {
+                        self.mark_moved(n.clone(), *nspan);
+                    }
+                }
+            }
+        }
+    
+}

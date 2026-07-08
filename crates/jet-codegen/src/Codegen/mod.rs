@@ -238,7 +238,41 @@ fn jet_cov_dump() {
     }
 }
 "#;
-const CORELIB_PRELUDE: &str = include_str!("../Prelude/CoreLib.rs");
+const CORELIB_PRELUDE_PARTS: &[&str] = &[
+    include_str!("../Prelude/CoreLib/JetStd/Open.rs"),
+    include_str!("../Prelude/CoreLib/JetStd/UrlMime.rs"),
+    include_str!("../Prelude/CoreLib/JetStd/CommonTypes.rs"),
+    include_str!("../Prelude/CoreLib/JetStd/DbPluginWire.rs"),
+    include_str!("../Prelude/CoreLib/JetStd/DataTree.rs"),
+    include_str!("../Prelude/CoreLib/JetStd/MathTaskMem.rs"),
+    include_str!("../Prelude/CoreLib/JetStd/ReactiveEventWatch.rs"),
+    include_str!("../Prelude/CoreLib/JetStd/Json.rs"),
+    include_str!("../Prelude/CoreLib/JetStd/Toml.rs"),
+    include_str!("../Prelude/CoreLib/JetStd/Yaml.rs"),
+    include_str!("../Prelude/CoreLib/Top/HandlesRaylib.rs"),
+    include_str!("../Prelude/CoreLib/Top/Game.rs"),
+    include_str!("../Prelude/CoreLib/Top/PathFiles.rs"),
+    include_str!("../Prelude/CoreLib/Top/Text.rs"),
+    include_str!("../Prelude/CoreLib/Top/FsIoEnvOsTesting.rs"),
+    include_str!("../Prelude/CoreLib/Top/Process.rs"),
+    include_str!("../Prelude/CoreLib/Top/MathRandomTime.rs"),
+    include_str!("../Prelude/CoreLib/Top/LinalgFns.rs"),
+    include_str!("../Prelude/CoreLib/Top/EncodingTraits.rs"),
+    include_str!("../Prelude/CoreLib/Top/DataFmt.rs"),
+    include_str!("../Prelude/CoreLib/Top/RingCsvLogTimeCrypto.rs"),
+    include_str!("../Prelude/CoreLib/Top/EncodingCodecs.rs"),
+    include_str!("../Prelude/CoreLib/Top/NetHttp.rs"),
+    include_str!("../Prelude/CoreLib/Top/HttpClient.rs"),
+    include_str!("../Prelude/CoreLib/Top/HttpServer.rs"),
+    include_str!("../Prelude/CoreLib/Top/Args.rs"),
+    include_str!("../Prelude/CoreLib/Top/Reflect.rs"),
+];
+
+fn push_corelib_prelude(out: &mut String) {
+    for part in CORELIB_PRELUDE_PARTS {
+        out.push_str(part);
+    }
+}
 const SCHEDULER_PRELUDE_RAW: &str = include_str!("../Prelude/Scheduler.rs");
 /// D-RENDERTGT1=A + D-RENDERTGT2=A (c133 M1): UI backend trait seam + null backend.
 const UI_PRELUDE: &str = include_str!("../Prelude/Ui.rs");
@@ -1209,7 +1243,7 @@ pub fn emit_bundle_dbg(
     out.push_str(GC_PRELUDE);
     out.push_str(LAYOUT_PRELUDE);
     if !bundle.used_core.is_empty() {
-        out.push_str(CORELIB_PRELUDE);
+        push_corelib_prelude(&mut out);
         out.push_str(scheduler_prelude_for_emit());
         out.push_str(UI_PRELUDE);
         if uses_gtk_backend(bundle) {
@@ -1337,7 +1371,7 @@ pub fn emit_bundle_tests_cov(
         out.push_str(COV_PRELUDE);
     }
     if !bundle.used_core.is_empty() {
-        out.push_str(CORELIB_PRELUDE);
+        push_corelib_prelude(&mut out);
         out.push_str(scheduler_prelude_for_emit());
         out.push_str(UI_PRELUDE);
         if uses_gtk_backend(bundle) {
@@ -1460,7 +1494,7 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
         out.push_str(COV_PRELUDE);
     }
     if !bundle.used_core.is_empty() {
-        out.push_str(CORELIB_PRELUDE);
+        push_corelib_prelude(&mut out);
         out.push_str(scheduler_prelude_for_emit());
         out.push_str(UI_PRELUDE);
         if uses_gtk_backend(bundle) {

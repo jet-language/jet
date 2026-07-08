@@ -5,15 +5,11 @@ pub use jet_codegen::{
     CanonicalAST, Codegen, Collections, Comptime, Diagnostics, Formatter, Generics, Lexer, Parser,
     Sema, Syntax, TargetProfile, Traits, AST, SHA256,
 };
-pub mod CBind;
-pub mod CFFI;
 pub mod Compile;
 pub mod Driver;
-pub mod FFI;
 pub mod Foreign;
 pub mod Loader;
-pub mod Lock;
-pub mod Manifest;
 pub mod PhaseTiming;
-pub mod PluginExport;
+pub use jetpack as Jetpack;
+pub use jetpack::{CBind, CFFI, FFI, Lock, Manifest, PluginExport};
 pub use Compile::{bundle_uses_unsafe, Capabilities, CompileOutput};

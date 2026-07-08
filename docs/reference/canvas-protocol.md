@@ -299,12 +299,13 @@ Terms:
 |---|---|
 | Palette entry | Read-only function/type/docs metadata projected from ordinary Jet code. |
 | Canvas action | Behavior-producing Jet action with explicit authority and audited output. |
+| Command action | Existing Jet/Jetpack command surfaced with authority, command argv, write class, and approval state. |
 | External adapter | Opt-in native/tool bridge for heavyweight integrations. |
 
 Query actions:
 
 ```json
-{"protocol":"jet.canvas.query","schema_version":1,"ok":true,"op":"actions","revision":"sha256-...","results":[],"impact":null,"diff":null,"actions_schema_version":1,"actions":[{"action_id":"canvas.action:main.jet:square","kind":"canvas.action","title":"square","callee":"square","engine":"checked-tir+jit","authority":["canvas.source_edit:package"],"package_id":"app","version":"0.1.0","touched_files":["main.jet"],"writes":"source_transaction_only"}]}
+{"protocol":"jet.canvas.query","schema_version":1,"ok":true,"op":"actions","revision":"sha256-...","results":[],"impact":null,"diff":null,"actions_schema_version":1,"actions":[{"action_id":"canvas.action:main.jet:square","kind":"canvas.action","title":"square","callee":"square","engine":"checked-tir+jit","authority":["canvas.source_edit:package"],"package_id":"app","version":"0.1.0","touched_files":["main.jet"],"writes":"source_transaction_only"},{"action_id":"canvas.command:build","kind":"canvas.command","title":"Build project","op":"command_authority","engine":"jet-cli","execution":"external_command","available":true,"command":["jet","build","main.jet"],"authority":["canvas.command:build","canvas.build_output:binary","canvas.source_edit:package"],"package_id":"app","version":"0.1.0","touched_files":["main.jet"],"writes":"build_outputs","requires_confirmation":true}]}
 ```
 
 Preview an action:
@@ -320,8 +321,11 @@ Successful response:
 ```
 
 The audit payload records package id/version/hash, touched files, diff, and
-diagnostics. A future external adapter must ask for extra authority before any
-tool, file, network, cache, or unsafe access.
+diagnostics. Command actions do not execute through the source-preview endpoint:
+Canvas shows exact `command`, `authority`, `writes`, `available`, and
+`denied_reason`, then delegates to the existing Jet/Jetpack command surface only
+after user approval. A future external adapter must ask for extra authority
+before any tool, file, network, cache, or unsafe access.
 
 ## Functions And Callback Views V1
 

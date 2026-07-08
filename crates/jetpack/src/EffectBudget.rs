@@ -18,7 +18,7 @@
 //! `use <pkg>` libraries (U17).
 
 use crate::Diagnostics::{Diagnostic, Span};
-use crate::Jetpack::PackageManifest::PackManifest;
+use crate::PackageManifest::PackManifest;
 use crate::Sema::{effect_covers, parse_effect_name, EffectSet};
 use crate::AST::{Item, ProgramBundle};
 use std::collections::{BTreeMap, HashMap};

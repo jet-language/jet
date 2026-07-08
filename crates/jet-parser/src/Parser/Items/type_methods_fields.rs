@@ -1,0 +1,238 @@
+impl<'a> Parser<'a> {
+        fn trait_method_sig(&mut self, is_pure: bool) -> Result<TraitMethodSig, Diagnostic> {
+            let start = self.peek().span;
+            self.expect_kw(TokKind::KwFn, "to start a trait method signature")?;
+            let (name, name_span) = self.expect_ident("after `fn`")?;
+            self.expect(TokKind::LParen, "after the method name")?;
+            let mut params = Vec::new();
+            if !matches!(self.peek().kind, TokKind::RParen) {
+                loop {
+                    params.push(self.param()?);
+                    if matches!(self.peek().kind, TokKind::RParen) {
+                        break;
+                    }
+                    self.expect(TokKind::Comma, "between parameters")?;
+                }
+            }
+            self.expect(TokKind::RParen, "to close the parameter list")?;
+            self.validate_variadic_params(&params);
+            // D-EFF3: optional `#(Gpu)` effect bound between params and the arrow.
+            let declared_effects = self.parse_opt_effect_annotation()?;
+            let mut return_type = None;
+            if matches!(self.peek().kind, TokKind::Arrow) {
+                self.bump();
+                let (ty, _) = self.return_type()?;
+                return_type = Some(ty);
+            }
+            // D-LIB2: optional default body `{ … }` instead of `;`.
+            let default_body = if matches!(self.peek().kind, TokKind::LBrace) {
+                self.bump();
+                let stmts = self.block_stmts();
+                Some(stmts)
+            } else {
+                let end = self.peek().span.end;
+                self.finish_stmt()?;
+                let _ = end;
+                None
+            };
+            let end = self.peek().span.end;
+            Ok(TraitMethodSig {
+                name,
+                name_span,
+                params,
+                return_type,
+                span: Span::new(start.start, end),
+                default_body,
+                is_pure,
+                declared_effects,
+            })
+        }
+    
+        /// S27: method inside a type body or `impl` block.
+        fn method_in_type(&mut self) -> Result<Func, Diagnostic> {
+            let (is_must_use, must_use_span) = if self.at_must_use_fn() {
+                (true, Some(self.bump_must_use_marker()?))
+            } else {
+                (false, None)
+            };
+            // S60 (D-CASING1 follow-on) / D-MARKERMOVE2: allow `@Pure fn` on methods
+            // too; the marker precedes `pub`.
+            let is_pure = if self.at_pure_fn() {
+                self.bump_pure_marker();
+                true
+            } else if retired_s14_teaching_enabled()
+                && matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::FOREIGN_PURE)
+                && self.foreign_pure_follows()
+            {
+                let t = self.bump();
+                self.diags.push(self.foreign_pure_diag(t.span));
+                true
+            } else {
+                false
+            };
+            // D-TAINT1: `#Sanitizer fn` is valid on methods too.
+            let is_sanitizer = if self.at_sanitizer_fn() {
+                self.bump(); // `#`
+                self.bump(); // `Sanitizer`
+                true
+            } else {
+                false
+            };
+            let mut is_replayable = false;
+            let mut replayable_span = None;
+            if self.at_replayable_fn() {
+                let start = self.bump().span.start; // `#`
+                let end = self.bump().span.end; // `Replayable`
+                is_replayable = true;
+                replayable_span = Some(Span::new(start, end));
+            }
+            // D-METHODMACRO1=A: `@Inline`/`@InlineAlways` on methods too.
+            let (is_inline, is_inline_always, inline_span) = self.parse_inline_marker()?;
+            // D-STATE1: `#State(S)` / `#Transition(From -> To)` typestate markers on
+            // methods — the common case (typestate methods carry `self`).
+            let mut state_requires = None;
+            let mut state_transition = None;
+            loop {
+                if state_requires.is_none() && self.at_state_fn() {
+                    state_requires = Some(self.parse_state_require_marker()?);
+                } else if state_transition.is_none() && self.at_transition_fn() {
+                    state_transition = Some(self.parse_transition_marker()?);
+                } else {
+                    break;
+                }
+            }
+            let (is_pub, is_package_pub) = self.parse_pub_qualifier();
+            self.expect_kw(TokKind::KwFn, "to start a method")?;
+            self.func_after_fn(
+                is_pub,
+                is_package_pub,
+                false,
+                None,
+                None,
+                is_pure,
+                is_sanitizer,
+                state_requires,
+                state_transition,
+                false,
+                None,
+                is_must_use,
+                must_use_span,
+                is_inline,
+                is_inline_always,
+                inline_span,
+                is_replayable,
+                replayable_span,
+            )
+        }
+    
+        fn field(&mut self) -> Result<Field, Diagnostic> {
+            let (is_pub, is_package_pub) = self.parse_pub_qualifier();
+            let (name, name_span) = self.expect_ident("for a field name")?;
+            self.expect(TokKind::Colon, "after a field name")?;
+            let (ty, ty_span) = self.type_()?;
+            // D-FIELDPOL1: `name: T => expr` — a computed field. `expr` is a
+            // single expression (no block); sibling field names inside it are
+            // still bare `Ident`s here — `Sema::CheckerFieldPolicy` rewrites them
+            // to `self.<field>` once every field of the struct is known.
+            let computed = if matches!(self.peek().kind, TokKind::LambdaArrow) {
+                self.bump();
+                Some(Box::new(self.expr()?))
+            } else {
+                None
+            };
+            Ok(Field {
+                is_pub,
+                is_package_pub,
+                name,
+                name_span,
+                ty,
+                ty_span,
+                serde_markers: Vec::new(),
+                redact: false,
+                computed,
+            })
+        }
+    
+        /// D-PERSIST1: true at `@Persist` immediately before `const`/`#` (module
+        /// top level only — this predicate is never consulted by the statement
+        /// parser, so a local binding's `@Persist` falls through to the E0145
+        /// teaching diagnostic in `Statements.rs` instead).
+        fn at_persist_const(&self) -> bool {
+            matches!(&self.peek().kind, TokKind::At)
+                && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::CONTRACT_PERSIST)
+        }
+    
+        pub(super) fn const_def(&mut self) -> Result<ConstDef, Diagnostic> {
+            // D-PERSIST1: optional `@Persist` (retired `#Persist` teaches E0062).
+            let (is_persist, persist_span) = if matches!(&self.peek().kind, TokKind::At | TokKind::Hash)
+                && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::CONTRACT_PERSIST)
+            {
+                let sigil = self.bump(); // `#` or `@`
+                let name_tok = self.bump(); // `Persist`
+                let span = Span::new(sigil.span.start, name_tok.span.end);
+                if matches!(sigil.kind, TokKind::Hash) {
+                    self.diags
+                        .push(Self::e0062_contract_on_hash(Syntax::CONTRACT_PERSIST, span));
+                }
+                (true, Some(span))
+            } else {
+                (false, None)
+            };
+            let mut attrs = Vec::new();
+            while matches!(self.peek().kind, TokKind::Hash) {
+                self.bump();
+                let (attr_name, _) = self.expect_ident("after `#`")?;
+                match attr_name.as_str() {
+                    "static" => attrs.push(ConstAttr::ForceStatic),
+                    "inline" => attrs.push(ConstAttr::ForceInline),
+                    other => {
+                        return Err(Diagnostic::error(
+                            "E0003",
+                            format!("`#{}` isn't a known attribute on a const", other),
+                            "only `#static` and `#inline` are supported on const declarations"
+                                .to_string(),
+                            "remove the attribute or use `#static` or `#inline`".to_string(),
+                            Some(self.peek().span),
+                        ));
+                    }
+                }
+            }
+            self.expect_kw(TokKind::KwConst, "to start a const declaration")?;
+            let (name, name_span) = self.expect_ident("after `const`")?;
+            self.expect(TokKind::Eq, "after the const name")?;
+            let value = self.expr()?;
+            self.expect(TokKind::Semi, "after a const value")?;
+            Ok(ConstDef {
+                name,
+                name_span,
+                value,
+                attrs,
+                rust_kind: crate::AST::RustConstKind::Const,
+                is_comptime: false,
+                ct: None,
+                is_persist,
+                persist_span,
+            })
+        }
+    
+        /// S57 (M9.5): `comptime NAME = expr;` — a compile-time constant binding.
+        pub(super) fn comptime_def(&mut self) -> Result<ConstDef, Diagnostic> {
+            self.expect_kw(TokKind::KwComptime, "to start a comptime binding")?;
+            let (name, name_span) = self.expect_ident("after `comptime`")?;
+            self.expect(TokKind::Eq, "after the comptime name")?;
+            let value = self.expr()?;
+            self.expect(TokKind::Semi, "after a comptime value")?;
+            Ok(ConstDef {
+                name,
+                name_span,
+                value,
+                attrs: Vec::new(),
+                rust_kind: crate::AST::RustConstKind::Const,
+                is_comptime: true,
+                ct: None,
+                is_persist: false,
+                persist_span: None,
+            })
+        }
+    
+}

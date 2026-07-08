@@ -3,7 +3,7 @@
 
 use super::{DepSource, PackManifest};
 use crate::Diagnostics::Diagnostic;
-use crate::Jetpack::RefSpec::Source;
+use crate::RefSpec::Source;
 
 /// Convert a parsed `PackManifest` into the compiler's `Manifest::Manifest`
 /// — the type `loader.rs`/`fetch.rs`/`lock.rs` operate on. `raw` is the
