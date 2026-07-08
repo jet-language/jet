@@ -428,15 +428,28 @@ fn write_vm_proof(dir: &Path, system: &SystemPlan, plan_text: &str) -> std::io::
 fn missing_vm_tools() -> Vec<String> {
     VM_TOOLS
         .iter()
-        .filter(|tool| find_path_tool(tool).is_none())
+        .filter(|tool| find_path_tool_in_path(tool).is_none())
         .map(|tool| (*tool).to_string())
         .collect()
 }
 
-fn find_path_tool(name: &str) -> Option<PathBuf> {
-    let mut dirs = std::env::var_os("PATH")
+fn find_path_tool_in_path(name: &str) -> Option<PathBuf> {
+    let dirs = std::env::var_os("PATH")
         .map(|paths| std::env::split_paths(&paths).collect::<Vec<_>>())
         .unwrap_or_default();
+    for dir in dirs {
+        let candidate = dir.join(name);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+fn find_path_tool(name: &str) -> Option<PathBuf> {
+    if let Some(found) = find_path_tool_in_path(name) {
+        return Some(found);
+    }
     for fallback in [
         "/run/current-system/sw/bin",
         "/usr/bin",
@@ -444,10 +457,7 @@ fn find_path_tool(name: &str) -> Option<PathBuf> {
         "/usr/sbin",
         "/sbin",
     ] {
-        dirs.push(PathBuf::from(fallback));
-    }
-    for dir in dirs {
-        let candidate = dir.join(name);
+        let candidate = PathBuf::from(fallback).join(name);
         if candidate.is_file() {
             return Some(candidate);
         }

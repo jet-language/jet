@@ -287,6 +287,8 @@ pub const OS_VERBS: &[&str] = &[
     OS_VERB_LIFT,
     OS_VERB_IMAGE,
     OS_VERB_VM,
+    STUDIO_SUBCOMMAND,
+    USER_SUBCOMMAND,
 ];
 
 /// c146 (D-PKGSIGN1, ratified): package-signing CLI verbs (I7). `jet keygen`
@@ -485,4 +487,3 @@ pub const MANIFEST_FIELD_EDITION: &str = "edition";
 
 /// D-RINGLAYER1=A: optional package runtime-layer ceiling in `payload: { … }`.
 pub const MANIFEST_FIELD_LAYER: &str = "layer";
-

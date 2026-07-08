@@ -89,14 +89,12 @@ fn build_generation(
             .iter()
             .any(|entry| entry.name == SYSTEMD_INIT_PACKAGE)
     {
-        let Some(raw) =
-            jetos_runtime_package_ref(&plan.table, SYSTEMD_INIT_PACKAGE, !flags.offline)
-        else {
+        let Some(raw) = first_party_package_ref(&plan.table, SYSTEMD_INIT_PACKAGE) else {
             theme.error_coded(
                 "E1281",
                 "jetos systemd init package is missing",
-                "D-JPK-OSINIT1=A: the default jetos init path is systemd, so the generation needs a bootable `systemd` package in the system closure.",
-                "declare a first-party source that provides `systemd`, allow the built-in nixpkgs adapter, or select a ratified init override.",
+                "D-JPK-OSINIT1=A: the default jetos init path is systemd, so the generation needs a first-party `systemd` package with bootable init artifacts.",
+                "declare a first-party source that provides `systemd`, or select a ratified init override.",
             );
             return None;
         };
@@ -120,8 +118,8 @@ fn build_generation(
                 theme.error_coded(
                     "E1281",
                     "jetos systemd init package is missing",
-                    "D-JPK-OSINIT1=A: the default jetos init path is systemd, so the generation needs a bootable `systemd` package in the system closure.",
-                    "declare a first-party source that provides `systemd`, allow the built-in nixpkgs adapter, or select a ratified init override.",
+                    "D-JPK-OSINIT1=A: the default jetos init path is systemd, so the generation needs a first-party `systemd` package with bootable init artifacts.",
+                    "declare a first-party source that provides `systemd`, or select a ratified init override.",
                 );
                 return None;
             }
@@ -132,12 +130,12 @@ fn build_generation(
         if realized.iter().any(|entry| entry.name == *package) {
             continue;
         }
-        let Some(raw) = jetos_runtime_package_ref(&plan.table, package, !flags.offline) else {
+        let Some(raw) = first_party_package_ref(&plan.table, package) else {
             theme.error_coded(
                 "E1288",
                 "jetos GNOME desktop package is missing",
-                "D-JOS-DESKTOP1=A: the default jetos desktop profile needs GNOME session packages in the system closure.",
-                "declare first-party packages for gdm, gnome-session, and gnome-shell, allow the built-in nixpkgs adapter, or select a ratified non-GNOME desktop profile.",
+                "D-JOS-DESKTOP1=A: the default jetos desktop profile needs first-party GNOME session packages in the system closure.",
+                "declare first-party packages for gdm, gnome-session, and gnome-shell, or select a ratified non-GNOME desktop profile.",
             );
             return None;
         };
@@ -161,8 +159,8 @@ fn build_generation(
                 theme.error_coded(
                     "E1288",
                     "jetos GNOME desktop package is missing",
-                    "D-JOS-DESKTOP1=A: the default jetos desktop profile needs GNOME session packages in the system closure.",
-                    "declare first-party packages for gdm, gnome-session, and gnome-shell, allow the built-in nixpkgs adapter, or select a ratified non-GNOME desktop profile.",
+                    "D-JOS-DESKTOP1=A: the default jetos desktop profile needs first-party GNOME session packages in the system closure.",
+                    "declare first-party packages for gdm, gnome-session, and gnome-shell, or select a ratified non-GNOME desktop profile.",
                 );
                 return None;
             }

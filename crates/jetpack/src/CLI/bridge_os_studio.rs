@@ -47,6 +47,19 @@ fn cmd_os(theme: &Theme, parsed: &Parsed) -> i32 {
         disk: parsed.flags.os_disk.clone(),
         json: parsed.flags.json,
     };
+    if verb == Some(Syntax::USER_SUBCOMMAND) {
+        let user_verb = args.first().map(String::as_str);
+        let user_args = args.get(1..).unwrap_or(&[]);
+        return super::JetOS::user_main(theme, user_verb, user_args, &flags);
+    }
+    if verb == Some(Syntax::STUDIO_SUBCOMMAND) {
+        let nested = Parsed {
+            flags: parsed.flags.clone(),
+            positional: args.to_vec(),
+            command: parsed.command.clone(),
+        };
+        return cmd_studio(theme, &nested);
+    }
     super::JetOS::main(theme, verb, args, &flags)
 }
 

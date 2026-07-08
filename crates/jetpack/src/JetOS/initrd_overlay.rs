@@ -47,6 +47,10 @@ case "$cmdline" in
     for candidate in LABEL=jetos-root /dev/vda2 /dev/sda2 /dev/vda /dev/sda; do
         mount "$candidate" /sysroot 2>/dev/null && break
     done
+    system="/sysroot/var/lib/jetos/generations/@JETOS_GENERATION@"
+    if [ -d "$system/nix" ] && [ ! -e /nix ]; then
+        ln -s "$system/nix" /nix
+    fi
     JETOS_TARGET_ROOT=/sysroot /bin/sh /jetos/guest-verify.sh
     poweroff -f 2>/dev/null || halt -f 2>/dev/null || exit 0
     ;;
@@ -76,6 +80,9 @@ case "$cmdline" in
     export PATH="$system/sw/bin:$PATH"
     if [ -r "$system/etc/profile" ]; then
         . "$system/etc/profile"
+    fi
+    if [ -d "$system/nix" ] && [ ! -e /nix ]; then
+        ln -s "$system/nix" /nix
     fi
     if [ -x "$system/sbin/init" ] && command -v switch_root >/dev/null 2>&1; then
         generation_target="/var/lib/jetos/generations/@JETOS_GENERATION@"
@@ -194,6 +201,10 @@ for candidate in LABEL=jetos-root /dev/vda2 /dev/sda2 /dev/vda /dev/sda; do
     mount "$candidate" /sysroot 2>/dev/null && break
 done
 if [ -e /sysroot/var/lib/jetos/generations/log ] || [ -L /sysroot/run/current-system ]; then
+    system="/sysroot/var/lib/jetos/generations/@JETOS_GENERATION@"
+    if [ -d "$system/nix" ] && [ ! -e /nix ]; then
+        ln -s "$system/nix" /nix
+    fi
     JETOS_TARGET_ROOT=/sysroot /bin/sh /jetos/guest-verify.sh
     poweroff -f 2>/dev/null || halt -f 2>/dev/null || exit 0
 fi
@@ -278,7 +289,6 @@ exec /bin/sh /jetos/install.sh
             ));
         }
     }
-    entries.extend(generation_tree_cpio_entries(&gen.path.join("nix"), "nix")?);
     entries.extend(installer_tool_overlay_entries()?);
     let overlay = cpio_newc_owned(&entries);
     let initrd_bytes = fs::read(initrd)?;
@@ -308,42 +318,6 @@ exec /bin/sh /jetos/install.sh
     use std::io::Write;
     let mut file = fs::OpenOptions::new().append(true).open(initrd)?;
     file.write_all(&overlay)
-}
-
-fn generation_tree_cpio_entries(src: &Path, prefix: &str) -> std::io::Result<Vec<OwnedCpioEntry>> {
-    let mut entries = Vec::new();
-    if !src.is_dir() {
-        return Ok(entries);
-    }
-    add_generation_tree_cpio_entries(src, prefix, &mut entries)?;
-    Ok(entries)
-}
-
-fn add_generation_tree_cpio_entries(
-    src: &Path,
-    prefix: &str,
-    entries: &mut Vec<OwnedCpioEntry>,
-) -> std::io::Result<()> {
-    entries.push(OwnedCpioEntry::dir(prefix));
-    let mut children = fs::read_dir(src)?
-        .filter_map(Result::ok)
-        .collect::<Vec<_>>();
-    children.sort_by_key(|entry| entry.file_name());
-    for child in children {
-        let path = child.path();
-        let name = format!("{prefix}/{}", child.file_name().to_string_lossy());
-        let meta = fs::metadata(&path)?;
-        if meta.is_dir() {
-            add_generation_tree_cpio_entries(&path, &name, entries)?;
-        } else if meta.is_file() {
-            entries.push(OwnedCpioEntry::file(
-                &name,
-                host_cpio_file_mode(&path, 0o100644),
-                fs::read(&path)?,
-            ));
-        }
-    }
-    Ok(())
 }
 
 fn installer_tool_overlay_entries() -> std::io::Result<Vec<OwnedCpioEntry>> {
@@ -545,6 +519,7 @@ impl OwnedCpioEntry {
             data,
         }
     }
+
 }
 
 fn cpio_newc_owned(entries: &[OwnedCpioEntry]) -> Vec<u8> {

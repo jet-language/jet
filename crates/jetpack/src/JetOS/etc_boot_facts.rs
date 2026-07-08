@@ -120,6 +120,7 @@ fn write_boot_facts(
     )?;
     if kernel_path.is_file() {
         link_or_copy_file(&kernel_path, &boot_dir.join("kernel"))?;
+        sanitize_runtime_branding_file(&boot_dir.join("kernel"))?;
     } else {
         fs::write(
             boot_dir.join("kernel"),
@@ -127,7 +128,10 @@ fn write_boot_facts(
         )?;
     }
     match initrd_path {
-        Some(path) if path.is_file() => link_or_copy_file(&path, &boot_dir.join("initrd"))?,
+        Some(path) if path.is_file() => {
+            link_or_copy_file(&path, &boot_dir.join("initrd"))?;
+            sanitize_runtime_branding_file(&boot_dir.join("initrd"))?;
+        }
         Some(path) => fs::write(
             boot_dir.join("initrd"),
             format!(

@@ -4256,6 +4256,7 @@ fn os_generations_are_newest_first_and_rollback_activates_prior() {
 #[test]
 fn os_vm_prove_requires_pinned_media_tools() {
     let root = Scratch::new("os-vm-tools-root");
+    let tools = Scratch::new("os-vm-tools-empty");
     let out = jet()
         .args([
             "os",
@@ -4269,7 +4270,7 @@ fn os_vm_prove_requires_pinned_media_tools() {
         ])
         .current_dir(config_example_dir())
         .env("JETPACK_ROOT", &root.path)
-        .env("PATH", "/usr/bin:/bin")
+        .env("PATH", &tools.path)
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(2));

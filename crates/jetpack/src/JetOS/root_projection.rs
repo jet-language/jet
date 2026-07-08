@@ -117,14 +117,59 @@ fn copy_dir_recursive_deref(src: &Path, dst: &Path) -> std::io::Result<()> {
     for entry in entries {
         let path = entry.path();
         let target = dst.join(entry.file_name());
-        let meta = fs::metadata(&path)?;
+        if entry.file_type()?.is_symlink() {
+            let link_target = fs::read_link(&path)?;
+            if should_preserve_staged_symlink(&link_target) {
+                copy_runtime_symlink(&path, &target)?;
+                continue;
+            }
+        }
+        let meta = match fs::metadata(&path) {
+            Ok(meta) => meta,
+            Err(_e) if entry.file_type()?.is_symlink() => {
+                copy_runtime_symlink(&path, &target)?;
+                continue;
+            }
+            Err(e) => {
+                return Err(std::io::Error::new(
+                    e.kind(),
+                    format!(
+                        "reading `{}` while copying to `{}` failed: {e}",
+                        path.display(),
+                        target.display()
+                    ),
+                ))
+            }
+        };
         if meta.is_dir() {
-            copy_dir_recursive_deref(&path, &target)?;
+            copy_dir_recursive_deref(&path, &target).map_err(|e| {
+                std::io::Error::new(
+                    e.kind(),
+                    format!(
+                        "copying directory `{}` to `{}` failed: {e}",
+                        path.display(),
+                        target.display()
+                    ),
+                )
+            })?;
         } else if meta.is_file() {
-            copy_file_replace(&path, &target)?;
+            copy_runtime_file_filtered(&path, &target).map_err(|e| {
+                std::io::Error::new(
+                    e.kind(),
+                    format!(
+                        "copying file `{}` to `{}` failed: {e}",
+                        path.display(),
+                        target.display()
+                    ),
+                )
+            })?;
         }
     }
     Ok(())
+}
+
+fn should_preserve_staged_symlink(target: &Path) -> bool {
+    target.starts_with("/nix/store") || !target.is_absolute()
 }
 
 fn enable_unit(unit_dir: &Path, target: &str, unit_name: &str) -> std::io::Result<()> {

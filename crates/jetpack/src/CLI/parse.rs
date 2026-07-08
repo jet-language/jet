@@ -1,4 +1,5 @@
 /// Parsed global flags shared by every command.
+#[derive(Clone)]
 struct Flags {
     no_color: bool,
     fixtures: Option<PathBuf>,
@@ -45,6 +46,7 @@ struct Flags {
 }
 
 /// Result of separating flags, positional args, and a trailing `-- cmd`.
+#[derive(Clone)]
 struct Parsed {
     flags: Flags,
     positional: Vec<String>,
