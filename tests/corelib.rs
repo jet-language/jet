@@ -1616,7 +1616,7 @@ fn run() {
     let _ = fs::remove_dir_all(&dir);
 }
 
-/// c45 drift-guard: `core_module_items` in Sema/CheckerCoreLib.rs must cover
+/// c45 drift-guard: `core_module_items` in Sema/CheckerCoreLib must cover
 /// every module in `Loader::KNOWN_CORE_MODULES` (and no extras).
 ///
 /// `core_module_items` is `pub(crate)` so we can't call it directly from here.
@@ -1626,13 +1626,13 @@ fn run() {
 /// exactly the right tripwire: a format change must be mirrored here.
 #[test]
 fn core_module_items_covers_known_core_modules() {
-    let src = fs::read_to_string("crates/jet-sema/src/Sema/CheckerCoreLib.rs")
-        .expect("Source/Sema/CheckerCoreLib.rs must exist");
+    let src = fs::read_to_string("crates/jet-sema/src/Sema/CheckerCoreLib/module_items.rs")
+        .expect("CheckerCoreLib/module_items.rs must exist");
 
     // Extract the `core_module_items` function body.
     let fn_start = src
         .find("pub(crate) fn core_module_items(")
-        .expect("core_module_items function not found in CheckerCoreLib.rs");
+        .expect("core_module_items function not found in CheckerCoreLib/module_items.rs");
     // Find the closing `}` at top-level indent (just after the last arm).
     let fn_body = &src[fn_start..];
     // Collect ALL string literals from match arm heads (handles `"a" | "b" => &[` form too).
