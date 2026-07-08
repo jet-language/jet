@@ -1,0 +1,456 @@
+<title>Jet Canvas — Paper</title>
+<style>
+  /* ===== Family B — Paper : light-first, calm, editorial ===== */
+  :root{
+    --paper:#F7F9FC; --ink:#1B2733; --accent:#1E63E9; --hairline:#C4D2E0;
+    --flare:#FF7A45; --dim:#5C6E80; --card:#FFFFFF;
+    --ok:#1B7F4D; --error:#C62828; --warn:#B45309;
+    /* pin type colours — tuned for light ground */
+    --ctl:#64748B; --data:#1E63E9; --eff:#7C3AED; --fall:#B45309; --bool:#C2185B;
+    --mono:ui-monospace,"SFMono-Regular",Menlo,Consolas,monospace;
+    --sans:system-ui,"Segoe UI",Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;overflow:hidden;background:var(--paper);color:var(--ink);font:13.5px/1.5 var(--sans)}
+  button,input,select{font:inherit;color:var(--ink)}
+  ::selection{background:rgba(30,99,233,.18)}
+  :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  button{border:1px solid var(--hairline);background:#fff;border-radius:6px;min-height:30px;padding:0 12px;cursor:pointer}
+  button:hover{border-color:var(--accent);color:var(--accent)}
+  button.on{border-color:var(--accent);background:#EBF2FE;color:var(--accent)}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  button.primary:hover{background:#1854c4;color:#fff}
+  input,select{border:1px solid var(--hairline);background:#fff;border-radius:6px;min-height:30px;padding:0 10px}
+
+  /* --- signature: the fading hairline --- */
+  .fade-rule{height:1px;border:0;margin:0;background:linear-gradient(90deg,var(--hairline),transparent)}
+  .lead{display:flex;align-items:baseline;gap:12px;min-width:0}
+  .lead .rule{flex:1;height:1px;align-self:center;background:linear-gradient(90deg,var(--hairline) 0%,rgba(196,210,224,0) 100%)}
+
+  #shell{height:100%;display:grid;grid-template-rows:auto minmax(0,1fr) auto}
+  /* ---- header on wash gradient ---- */
+  #top{display:flex;align-items:center;gap:12px;padding:12px 24px;background:linear-gradient(180deg,#DCEBFF,#FFFFFF);border-bottom:1px solid var(--hairline)}
+  #brand b{font-size:17px;font-weight:650;letter-spacing:-.01em}
+  #brand span{color:var(--dim);font-size:12px;margin-left:8px}
+  #crumb{display:flex;align-items:center;gap:6px;font:12.5px var(--mono);color:var(--dim)}
+  #crumb select{font:12px var(--mono);border-color:transparent;background:transparent;color:var(--accent);padding:0 4px;min-height:26px;cursor:pointer}
+  #crumb select:hover{border-color:var(--hairline)}
+  .seg{display:flex;border:1px solid var(--hairline);border-radius:6px;overflow:hidden;background:#fff}
+  .seg button{border:0;border-radius:0;min-width:56px}
+  .spacer{flex:1}
+  .dbg{display:flex;gap:6px;align-items:center}
+  #scrub{display:flex;align-items:center;gap:8px;font:11px var(--mono);color:var(--dim);padding-left:12px;border-left:1px solid var(--hairline)}
+  #scrub input[type=range]{width:120px;accent-color:var(--accent)}
+
+  /* ---- workbench ---- */
+  #work{min-height:0;display:grid;grid-template-columns:236px minmax(0,1fr) 316px}
+  aside{min-width:0;overflow:auto;background:var(--paper)}
+  aside.left{border-right:1px solid var(--hairline)}
+  aside.right{border-left:1px solid var(--hairline);background:#FBFCFE}
+  .grp{padding:16px}
+  .grp h2{margin:0 0 12px;font-size:11px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
+  .grp h2.lead .rule{margin-left:4px}
+  .navrow{display:block;width:100%;text-align:left;margin:4px 0;padding:8px 10px;border:1px solid transparent;border-radius:6px;background:transparent;cursor:pointer}
+  .navrow:hover{background:#EFF4FB;border-color:transparent;color:inherit}
+  .navrow.on{background:#EBF2FE;border-color:#BBD2F8}
+  .navrow b{font-weight:600;font-size:13px}
+  .navrow b .sig{color:var(--dim);font:11.5px var(--mono);font-weight:400}
+  .navrow small{display:block;color:var(--dim);font-size:11.5px;margin-top:1px}
+  .fld{width:100%;margin-bottom:8px;font:12px var(--mono)}
+
+  /* ---- stage ---- */
+  #stage{position:relative;overflow:hidden;background:
+    radial-gradient(circle at 1px 1px,#E2EAF3 1px,transparent 0) 0 0/24px 24px,#F3F6FA}
+  #world{position:absolute;inset:0}
+  #wires{position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none}
+  .node{position:absolute;width:var(--w);background:var(--card);border:1px solid var(--hairline);border-radius:6px;
+    box-shadow:0 1px 2px rgba(27,39,51,.06),0 6px 18px rgba(27,39,51,.05);cursor:grab}
+  .node::before{content:"";position:absolute;left:-1px;right:-1px;top:-1px;height:3px;border-radius:6px 6px 0 0;background:var(--k)}
+  .node.sel{border-color:var(--accent);box-shadow:0 0 0 2px rgba(30,99,233,.25),0 8px 22px rgba(27,39,51,.08)}
+  .node .hd{display:flex;align-items:baseline;gap:8px;padding:9px 12px 5px}
+  .node .hd b{font-size:13px;font-weight:650}
+  .node .hd .badge{margin-left:auto;font:10px var(--mono);color:var(--k);text-transform:uppercase;letter-spacing:.1em}
+  .node .body{padding:4px 8px 6px;display:grid;gap:4px}
+  .prow{display:flex;align-items:center;gap:7px;font:11.5px var(--mono);min-height:19px}
+  .prow.out{justify-content:flex-end;text-align:right}
+  .prow b{font-weight:500}
+  .pin{width:10px;height:10px;flex:0 0 auto;background:var(--c)}
+  .pin.circle{border-radius:50%}
+  .pin.exec{width:0;height:0;background:transparent;border-left:8px solid var(--c);border-top:5px solid transparent;border-bottom:5px solid transparent}
+  .pin.diamond{transform:rotate(45deg);width:9px;height:9px;border-radius:1px}
+  .prow .ty{color:var(--dim);font-size:10px}
+  .prow.out .pin{order:2}
+  .node .code{margin:2px 12px 10px;padding:5px 8px;border-left:2px solid var(--hairline);color:var(--dim);font:10.5px var(--mono);white-space:pre;overflow:hidden;text-overflow:ellipsis}
+  .node.running{border-color:var(--ok)}
+  .node.running::before{background:var(--ok)}
+  .bp{position:absolute;left:-7px;top:10px;width:12px;height:12px;border-radius:50%;background:var(--flare);border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.25)}
+
+  .wire{fill:none;stroke-width:2.2}
+  .wire.exec{stroke-width:2.8;stroke-linecap:round}
+  .wire.dim{opacity:.25}
+  .pulse{stroke:var(--ok);stroke-width:2.4;stroke-dasharray:5 190;animation:flow 1.1s linear infinite}
+  @keyframes flow{to{stroke-dashoffset:-195}}
+  @media(prefers-reduced-motion:reduce){.pulse{animation:none;stroke-dasharray:none;opacity:.4}}
+
+  /* rails legend */
+  #rails{position:absolute;left:16px;top:12px;z-index:5;display:flex;gap:14px;padding:6px 12px;background:rgba(255,255,255,.92);
+    border:1px solid var(--hairline);border-radius:6px;font:10.5px var(--mono);color:var(--dim);text-transform:uppercase;letter-spacing:.08em}
+  .rail{display:flex;align-items:center;gap:6px}
+  .rail i{width:18px;height:0;border-top:2.5px solid var(--c);display:inline-block}
+  #wstat{position:absolute;left:16px;bottom:44px;z-index:5;display:flex;align-items:center;gap:8px;padding:7px 12px;
+    background:#fff;border:1px solid var(--hairline);border-radius:6px;font:12px var(--mono);color:var(--dim);max-width:460px}
+  #wstat .dot{width:8px;height:8px;border-radius:50%;background:var(--ok)}
+  #wstat b{color:var(--ink)}
+  #hud{position:absolute;left:16px;bottom:12px;z-index:5;display:flex;gap:10px;font:11px var(--mono);color:var(--dim)}
+  #hud span{background:rgba(255,255,255,.9);border:1px solid var(--hairline);padding:3px 8px;border-radius:4px}
+  #mini{position:absolute;right:16px;bottom:14px;z-index:5;width:190px;height:120px;border:1px solid var(--hairline);border-radius:6px;background:#fff;overflow:hidden}
+  #mini svg{width:100%;height:100%}
+
+  /* context palette */
+  #pal{position:absolute;z-index:20;width:300px;display:none;background:#fff;border:1px solid var(--hairline);
+    border-radius:8px;box-shadow:0 12px 40px rgba(27,39,51,.18)}
+  #pal.open{display:block}
+  #pal .ctx{font:11px var(--mono);color:var(--dim);padding:8px 12px 0;display:flex;gap:6px;align-items:center}
+  #pal .ctx .pin{width:9px;height:9px;border-radius:50%;background:var(--data)}
+  #pal .ph{padding:8px 10px;border-bottom:1px solid var(--hairline)}
+  #pal .ph input{width:100%}
+  #pal .list{max-height:280px;overflow:auto;padding:6px}
+  .palrow{display:block;width:100%;text-align:left;margin:2px 0;padding:7px 10px;border:0;border-left:3px solid var(--k,var(--accent));
+    border-radius:4px;background:transparent;cursor:pointer;font:12px var(--mono)}
+  .palrow:hover{background:#EFF4FB;color:inherit}
+  .palrow b{font-weight:600}.palrow small{display:block;color:var(--dim);font-size:10.5px}
+
+  /* code view */
+  #codev{position:absolute;inset:0;display:none;background:#fff;overflow:auto}
+  #stage.code #world,#stage.code #rails,#stage.code #mini,#stage.code #wstat{display:none}
+  #stage.code #codev{display:block}
+  .codewrap{display:grid;grid-template-columns:48px 1fr;font:13px/1.65 var(--mono)}
+  .gutter{text-align:right;padding:16px 10px;color:#9FB0C0;background:#F3F6FA;user-select:none;border-right:1px solid var(--hairline)}
+  pre.src{margin:0;padding:16px 20px;white-space:pre;color:var(--ink)}
+  .src .kw{color:#7C3AED}.src .fn{color:var(--accent)}.src .ty{color:var(--ok)}.src .nu{color:var(--warn)}
+  .src .hl{background:#EBF2FE;display:block;margin:0 -20px;padding:0 20px;box-shadow:inset 3px 0 0 var(--accent)}
+
+  /* inspector — editorial, fading hairlines */
+  .kvrow{display:flex;align-items:baseline;gap:10px;margin:7px 0;font-size:12.5px}
+  .kvrow dt{color:var(--dim);font-size:11.5px;white-space:nowrap}
+  .kvrow .rule{flex:1;height:1px;align-self:center;background:linear-gradient(90deg,var(--hairline),transparent)}
+  .kvrow dd{margin:0;font:12px var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .insp-title b{font-size:19px;font-weight:650;letter-spacing:-.01em;display:block}
+  .insp-title span{font:11px var(--mono);color:var(--k2,var(--accent));text-transform:uppercase;letter-spacing:.12em}
+  .pinrow{display:flex;align-items:center;gap:9px;padding:7px 0;font:12px var(--mono)}
+  .pinrow+.pinrow{border-top:1px solid transparent;border-image:linear-gradient(90deg,var(--hairline),transparent) 1}
+  .pinrow .pin{width:11px;height:11px;border-radius:50%;background:var(--c);flex:0 0 auto}
+  .pinrow b{font-weight:600}
+  .pinrow .ty{margin-left:auto;color:var(--c);font-size:11px}
+  .convert{margin-top:12px;padding:10px 12px;border:1px dashed var(--hairline);border-radius:6px;background:#fff}
+  .convert h3{margin:0 0 8px;font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim)}
+  .convert .flow{display:flex;align-items:center;gap:8px;font:12px var(--mono)}
+  .convert .chip{border:1px solid var(--data);color:var(--data);border-radius:999px;padding:1px 9px}
+  .convert select{flex:1;font:11.5px var(--mono)}
+  .qa{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}
+  .qa .wide{grid-column:1/-1}
+
+  /* diagnostics — verbatim (I4) */
+  .diag{margin-top:16px;background:#fff;border:1px solid var(--hairline);border-left:3px solid var(--error);border-radius:6px;overflow:hidden}
+  .diag .dh{padding:7px 12px;font:10.5px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--error);
+    display:flex;justify-content:space-between;border-bottom:1px solid var(--hairline)}
+  .diag pre{margin:0;padding:10px 14px;font:11.5px/1.55 var(--mono);white-space:pre-wrap;color:var(--ink)}
+  .diag .why{color:var(--warn)}.diag .fix{color:var(--ok)}
+
+  /* footer */
+  #foot{display:flex;align-items:center;gap:18px;padding:6px 24px;border-top:1px solid var(--hairline);background:#fff;
+    font:11.5px var(--mono);color:var(--dim)}
+  #foot b{color:var(--ink);font-weight:600}
+  #foot .st{display:flex;align-items:center;gap:6px}
+  #foot .st i{width:7px;height:7px;border-radius:50%;display:inline-block}
+  #foot .push{margin-left:auto}
+
+  @media(max-width:1100px){#work{grid-template-columns:0 1fr 0}aside{display:none}}
+</style>
+
+<div id="shell">
+  <header id="top">
+    <div id="brand"><b>Jet Canvas</b><span>graphs are the source, drawn</span></div>
+    <nav id="crumb" aria-label="Location">
+      <select aria-label="Project"><option>canvas_blueprint_demo</option><option>http_client</option><option>data_pipeline</option></select>
+      <span>/</span>
+      <select id="graphsel" aria-label="Function"><option>fn run</option><option selected>fn summarize</option><option>fn square</option><option>fn helper</option></select>
+    </nav>
+    <div class="seg" role="tablist" aria-label="View">
+      <button id="v-graph" class="on" role="tab" aria-selected="true">Graph</button>
+      <button id="v-code" role="tab" aria-selected="false">Code</button>
+    </div>
+    <button id="fit">Fit</button>
+    <button id="addnode" title="Add node (A or right-click)">Add node</button>
+    <div class="spacer"></div>
+    <div class="dbg" aria-label="Debugger">
+      <button id="brk" class="on" title="Breakpoint on Branch">Breakpoint</button>
+      <button id="step">Step</button>
+      <button id="next">Next</button>
+      <button id="cont" class="primary">Continue</button>
+      <button id="stop">Stop</button>
+    </div>
+    <div id="scrub" aria-label="Replay">
+      <span>Replay</span><input id="scrubrange" type="range" min="0" max="100" value="62" aria-label="Replay position"><span id="scrubt">t=3.2s</span>
+    </div>
+  </header>
+
+  <main id="work">
+    <aside class="left">
+      <section class="grp">
+        <h2 class="lead">Project <span class="rule"></span></h2>
+        <button class="navrow on"><b>canvas_blueprint_demo</b><small>tooling/ · 4 functions</small></button>
+        <button class="navrow"><b>http_client</b><small>net/ · effects: net, tasks</small></button>
+        <button class="navrow"><b>data_pipeline</b><small>tooling/ · 3 functions</small></button>
+      </section>
+      <section class="grp">
+        <h2 class="lead">Functions <span class="rule"></span></h2>
+        <button class="navrow"><b>run <span class="sig">()</span></b><small>calls summarize · prints</small></button>
+        <button class="navrow on"><b>summarize <span class="sig">(limit: Int) → Int</span></b><small>breakpoint · paused</small></button>
+        <button class="navrow"><b>square <span class="sig">(n: Int) → Int</span></b><small>pure</small></button>
+        <button class="navrow"><b>helper <span class="sig">() → Int</span></b><small>pure</small></button>
+      </section>
+      <section class="grp">
+        <h2 class="lead">Search <span class="rule"></span></h2>
+        <input class="fld" placeholder="Find in graph…">
+        <button class="navrow"><b>square</b><small>call · summarize line 10</small></button>
+        <button class="navrow"><b>total</b><small>binding · Int</small></button>
+      </section>
+    </aside>
+
+    <section id="stage">
+      <div id="rails" aria-label="Rails">
+        <span class="rail" style="--c:var(--ctl)"><i></i>Control</span>
+        <span class="rail" style="--c:var(--data)"><i></i>Data</span>
+        <span class="rail" style="--c:var(--eff)"><i></i>Effects</span>
+        <span class="rail" style="--c:var(--fall)"><i></i>Fallibility</span>
+      </div>
+      <div id="world"><svg id="wires"></svg></div>
+      <div id="wstat" aria-live="polite"><span class="dot"></span><b>Paused at breakpoint</b><span id="wsmsg">Branch · total &gt; 10 → False</span></div>
+      <div id="hud"><span id="zoom">100%</span><span>8 nodes · 11 wires</span><span>effects: io</span></div>
+      <svg id="mini" viewBox="0 0 190 120" aria-hidden="true"></svg>
+
+      <div id="pal" role="dialog" aria-label="Add node">
+        <div class="ctx"><span class="pin"></span>from <b style="color:var(--data)">Int</b> output · square → return</div>
+        <div class="ph"><input id="palq" placeholder="Search nodes compatible with Int…"></div>
+        <div class="list" id="pallist"></div>
+      </div>
+
+      <div id="codev"><div class="codewrap"><div class="gutter" id="gut"></div><pre class="src" id="src"></pre></div></div>
+    </section>
+
+    <aside class="right">
+      <section class="grp">
+        <div class="insp-title"><span id="ik" style="--k2:var(--warn)">selection · if</span><b id="it">Branch</b></div>
+        <dl style="margin:12px 0 0">
+          <div class="kvrow"><dt>source</dt><span class="rule"></span><dd>canvas_blueprint_demo.jet:11</dd></div>
+          <div class="kvrow"><dt>effects</dt><span class="rule"></span><dd>none (pure)</dd></div>
+          <div class="kvrow"><dt>returns</dt><span class="rule"></span><dd>Int on both arms</dd></div>
+          <div class="kvrow"><dt>condition</dt><span class="rule"></span><dd>total &gt; 10</dd></div>
+        </dl>
+      </section>
+      <section class="grp" style="padding-top:0">
+        <h2 class="lead">Pins <span class="rule"></span></h2>
+        <div class="pinrow" style="--c:var(--ctl)"><span class="pin"></span><b>exec</b><span class="ty">Control</span></div>
+        <div class="pinrow" style="--c:var(--data)"><span class="pin"></span><b>total</b><span class="ty">Int</span></div>
+        <div class="pinrow" style="--c:var(--bool)"><span class="pin"></span><b>&gt; 10</b><span class="ty">Bool</span></div>
+        <div class="pinrow" style="--c:var(--ctl)"><span class="pin"></span><b>True → return</b><span class="ty">Control</span></div>
+        <div class="pinrow" style="--c:var(--ctl)"><span class="pin"></span><b>False → +1</b><span class="ty">Control</span></div>
+        <div class="convert">
+          <h3>Convert pin type</h3>
+          <div class="flow"><span class="chip">Int</span>→
+            <select><option>Float (widen · lossless)</option><option>String (via .show)</option><option>Int? (wrap optional)</option></select>
+          </div>
+        </div>
+        <div class="qa">
+          <button>Rename</button><button>Break here</button>
+          <button>Watch value</button><button>Extract fn</button>
+          <button class="wide">Reveal in source · line 11</button>
+        </div>
+        <div class="diag" role="status">
+          <div class="dh"><span>Diagnostic</span><span>E0204</span></div>
+<pre>Error [E0204]: `x` is being changed in this call, so it can't be used again here
+  --&gt; net/http_client.jet:15:32
+    |
+ 15 |     net.tcp_reply(stream, "200 OK", body)
+    |                                ^
+<span class="why"> Why: while something is being changed, nobody else may be looking at it</span>
+<span class="fix"> Fix: pass `&amp;x` only once, or copy first with `copy x`</span></pre>
+        </div>
+      </section>
+    </aside>
+  </main>
+
+  <footer id="foot">
+    <span class="st"><i style="background:var(--ok)"></i>Build <b>ok</b></span>
+    <span class="st"><i style="background:var(--warn)"></i>Watching <b>3 files</b></span>
+    <span class="st"><i style="background:var(--error)"></i>Diagnostics <b>1</b></span>
+    <span>Revision <b>a3f9c1</b></span>
+    <span>Git <b>clean</b></span>
+    <span class="push">canvas v1 · source-backed</span>
+  </footer>
+</div>
+
+<script>
+/* graph model : real Jet from examples/features/tooling/canvas_blueprint_demo.jet + net/http_client.jet */
+const K={entry:'var(--ok)',call:'var(--accent)',branch:'var(--warn)',op:'var(--eff)',io:'var(--eff)',fall:'var(--fall)'};
+const nodes=[
+ {id:'entry',t:'fn summarize',badge:'entry',k:K.entry,x:40,y:150,w:196,code:'summarize(limit: Int)',
+   pins:[{s:'out',n:'exec',c:'--ctl',sh:'exec'},{s:'out',n:'limit',c:'--data',sh:'circle',ty:'Int'}]},
+ {id:'square',t:'square',badge:'call',k:K.call,x:300,y:120,w:186,code:'total := square(limit)',
+   pins:[{s:'in',n:'exec',c:'--ctl',sh:'exec'},{s:'in',n:'n',c:'--data',sh:'circle',ty:'Int'},
+         {s:'out',n:'exec',c:'--ctl',sh:'exec'},{s:'out',n:'→ Int',c:'--data',sh:'circle',ty:'Int'}]},
+ {id:'branch',t:'Branch',badge:'if',k:K.branch,x:556,y:150,w:196,code:'if total > 10',
+   pins:[{s:'in',n:'exec',c:'--ctl',sh:'exec'},{s:'in',n:'total',c:'--data',sh:'circle',ty:'Int'},
+         {s:'in',n:'> 10',c:'--bool',sh:'diamond',ty:'Bool'},
+         {s:'out',n:'True',c:'--ctl',sh:'exec'},{s:'out',n:'False',c:'--ctl',sh:'exec'}],bp:true},
+ {id:'ret1',t:'return total',badge:'return',k:K.entry,x:830,y:70,w:170,code:'return total',
+   pins:[{s:'in',n:'exec',c:'--ctl',sh:'exec'},{s:'in',n:'total',c:'--data',sh:'circle',ty:'Int'}]},
+ {id:'add',t:'total + 1',badge:'op',k:K.op,x:820,y:230,w:180,code:'return total + 1',
+   pins:[{s:'in',n:'exec',c:'--ctl',sh:'exec'},{s:'in',n:'a',c:'--data',sh:'circle',ty:'Int'},
+         {s:'out',n:'exec',c:'--ctl',sh:'exec'},{s:'out',n:'sum',c:'--data',sh:'circle',ty:'Int'}]},
+ {id:'print',t:'print',badge:'io',k:K.io,x:556,y:410,w:210,code:'print(summarize(4))',
+   pins:[{s:'in',n:'exec',c:'--ctl',sh:'exec'},{s:'in',n:'value',c:'--data',sh:'circle',ty:'Int'},
+         {s:'out',n:'!io',c:'--eff',sh:'circle',ty:'Effect'}]},
+ {id:'listen',t:'tcp_listen',badge:'fallible',k:K.fall,x:60,y:430,w:230,code:'net.tcp_listen("127.0.0.1:0")',
+   pins:[{s:'out',n:'exec',c:'--ctl',sh:'exec'},{s:'out',n:'Listener?',c:'--fall',sh:'diamond',ty:'Listener?'},
+         {s:'out',n:'!net',c:'--eff',sh:'circle',ty:'Effect'}]},
+ {id:'guard',t:'?? panic',badge:'guard',k:K.fall,x:350,y:470,w:170,code:'?? panic("bind failed")',
+   pins:[{s:'in',n:'in?',c:'--fall',sh:'diamond',ty:'Listener?'},{s:'out',n:'Listener',c:'--data',sh:'circle',ty:'Listener'}]},
+];
+const wires=[
+ ['entry',0,'square',0,'--ctl'],['entry',1,'square',1,'--data'],
+ ['square',2,'branch',0,'--ctl'],['square',3,'branch',1,'--data'],
+ ['branch',3,'ret1',0,'--ctl'],['branch',4,'add',0,'--ctl'],
+ ['branch',1,'add',1,'--data'],
+ ['ret1',1,'print',1,'--data'],
+ ['square',2,'print',0,'--ctl','dim'],
+ ['listen',1,'guard',0,'--fall'],
+ ['listen',2,'print',2,'--eff','dim'],
+];
+const world=document.getElementById('world'),svg=document.getElementById('wires');
+const pinPos={};
+function render(){
+  nodes.forEach(nd=>{
+    const el=document.createElement('div');el.className='node';el.id='N-'+nd.id;
+    el.style.cssText=`left:${nd.x}px;top:${nd.y}px;--w:${nd.w}px;--k:${nd.k}`;
+    if(nd.id==='branch')el.classList.add('running');
+    el.innerHTML=`${nd.bp?'<span class="bp" title="breakpoint"></span>':''}
+      <div class="hd"><b>${nd.t}</b><span class="badge">${nd.badge}</span></div>
+      <div class="body">${nd.pins.map((p,i)=>rowHTML(nd.id,p,i)).join('')}</div>
+      <div class="code">${nd.code}</div>`;
+    el.addEventListener('click',()=>select(nd.id));
+    world.appendChild(el);
+  });
+  measure();drawWires();drawMini();
+}
+function rowHTML(nid,p,i){
+  const dot=`<span class="pin ${p.sh} pin-${nid}-${i}" style="--c:var(${p.c})"></span>`;
+  const ty=p.ty?`<span class="ty">${p.ty}</span>`:'';
+  return `<div class="prow ${p.s==='out'?'out':''}">${p.s==='out'?ty+`<b>${p.n}</b>`+dot : dot+`<b>${p.n}</b>`+ty}</div>`;
+}
+function measure(){
+  const wr=world.getBoundingClientRect();
+  nodes.forEach(nd=>nd.pins.forEach((p,i)=>{
+    const el=document.querySelector('.pin-'+nd.id+'-'+i);const r=el.getBoundingClientRect();
+    pinPos[nd.id+'-'+i]={x:r.left+r.width/2-wr.left,y:r.top+r.height/2-wr.top};
+  }));
+}
+function drawWires(sel){
+  svg.innerHTML='';
+  wires.forEach(w=>{
+    const a=pinPos[w[0]+'-'+w[1]],b=pinPos[w[2]+'-'+w[3]];if(!a||!b)return;
+    const dx=Math.max(40,Math.abs(b.x-a.x)*.5);
+    const d=`M${a.x},${a.y} C${a.x+dx},${a.y} ${b.x-dx},${b.y} ${b.x},${b.y}`;
+    const exec=w[4]==='--ctl';
+    const p=document.createElementNS('http://www.w3.org/2000/svg','path');
+    p.setAttribute('d',d);p.setAttribute('class','wire'+(exec?' exec':'')+(w[5]==='dim'?' dim':''));
+    p.setAttribute('stroke',`var(${w[4]})`);
+    if(sel&&!(w[0]===sel||w[2]===sel))p.classList.add('dim');
+    svg.appendChild(p);
+    if((w[0]==='entry'||w[0]==='square')&&exec){
+      const pu=p.cloneNode();pu.setAttribute('class','pulse');pu.removeAttribute('stroke');svg.appendChild(pu);
+    }
+  });
+}
+function drawMini(){
+  document.getElementById('mini').innerHTML=
+    nodes.map(n=>`<rect x="${n.x*190/1080}" y="${n.y*120/560}" width="${n.w*190/1080}" height="9" rx="1.5" fill="#DCE6F2" stroke="#C4D2E0"/>`).join('')
+    +`<rect x="2" y="2" width="120" height="70" fill="none" stroke="#1E63E9" stroke-dasharray="3 3"/>`;
+}
+let cur='branch';
+function select(id){
+  cur=id;document.querySelectorAll('.node').forEach(n=>n.classList.toggle('sel',n.id==='N-'+id));
+  drawWires(id);
+  const nd=nodes.find(n=>n.id===id);if(!nd)return;
+  document.getElementById('it').textContent=nd.t;
+  document.getElementById('ik').textContent=nd.badge+' · '+nd.code;
+}
+render();
+
+const stage=document.getElementById('stage');
+function view(v){
+  ['graph','code'].forEach(x=>{const b=document.getElementById('v-'+x);b.classList.toggle('on',x===v);b.setAttribute('aria-selected',x===v);});
+  stage.classList.toggle('code',v==='code');
+  if(v!=='code'){measure();drawWires(cur);}
+}
+document.getElementById('v-graph').onclick=()=>view('graph');
+document.getElementById('v-code').onclick=()=>view('code');
+
+const source=`fn helper() -> Int {
+    return 1
+}
+
+fn square(n: Int) -> Int {
+    return n * n
+}
+
+fn summarize(limit: Int) -> Int {
+    total := square(limit)
+    if total > 10 {
+        return total
+    } else {
+        return total + 1
+    }
+}
+
+fn run() {
+    print(summarize(4))
+}`;
+(function(){
+  const hl=source.replace(/\b(fn|if|else|return|use)\b/g,'<span class="kw">$1</span>')
+    .replace(/\b(Int|String|Bool)\b/g,'<span class="ty">$1</span>')
+    .replace(/\b(\d+)\b/g,'<span class="nu">$1</span>');
+  const lines=hl.split('\n');
+  document.getElementById('src').innerHTML=lines.map((l,i)=>(i>=9&&i<=15)?`<span class="hl">${l||' '}</span>`:l).join('\n');
+  document.getElementById('gut').innerHTML=lines.map((_,i)=>i+1).join('\n');
+})();
+
+const palItems=[
+ {t:'square',s:'fn(n: Int) → Int · pure',k:'--data'},
+ {t:'abs',s:'fn(n: Int) → Int · std.math',k:'--data'},
+ {t:'clamp',s:'fn(n: Int, lo, hi) → Int',k:'--data'},
+ {t:'to Float',s:'convert Int → Float · lossless',k:'--data'},
+ {t:'print',s:'fn(value) !io · console',k:'--eff'},
+ {t:'if',s:'branch on Bool · control',k:'--ctl'},
+ {t:'?? else',s:'unwrap fallible or fallback',k:'--fall'},
+];
+const pal=document.getElementById('pal'),pallist=document.getElementById('pallist');
+function fillPal(q=''){pallist.innerHTML=palItems.filter(i=>i.t.toLowerCase().includes(q.toLowerCase()))
+  .map(i=>`<button class="palrow" style="--k:var(${i.k})"><b>${i.t}</b><small>${i.s}</small></button>`).join('')
+  ||'<div style="padding:10px;color:var(--dim);font:11px var(--mono)">No matching node. Try a shorter search.</div>';}
+function openPal(x,y){pal.style.left=Math.min(x,innerWidth-320)+'px';pal.style.top=y+'px';pal.classList.add('open');
+  fillPal();const q=document.getElementById('palq');q.value='';q.focus();}
+stage.addEventListener('contextmenu',e=>{e.preventDefault();const r=stage.getBoundingClientRect();openPal(e.clientX-r.left,e.clientY-r.top);});
+document.getElementById('addnode').onclick=()=>openPal(300,120);
+document.getElementById('palq').addEventListener('input',e=>fillPal(e.target.value));
+document.addEventListener('click',e=>{if(!pal.contains(e.target)&&e.target.id!=='addnode')pal.classList.remove('open');});
+document.addEventListener('keydown',e=>{if(e.key==='a'&&e.target.tagName!=='INPUT'){openPal(320,140);}if(e.key==='Escape')pal.classList.remove('open');});
+
+const wsmsg=document.getElementById('wsmsg');
+document.getElementById('cont').onclick=()=>wsmsg.textContent='running · summarize(4) → square(4) = 16';
+document.getElementById('step').onclick=()=>wsmsg.textContent='step → return total  (16)';
+document.getElementById('scrubrange').addEventListener('input',e=>{
+  document.getElementById('scrubt').textContent='t='+(e.target.value/20).toFixed(1)+'s';});
+addEventListener('resize',()=>{measure();drawWires(cur);});
+</script>

@@ -7197,6 +7197,30 @@ pub(crate) fn lower_core_closure_call(
                 kind: TExprKind::ConstInline(code),
             });
         }
+        ("core.data", "lazy_filter" | "lazy_sort_by") => {
+            let frame = lower_expr(&args[0].expr, cx, env);
+            let row_ty = match &frame.ty {
+                Type::Apply { name, args } if name == "LazyFrame" && args.len() == 1 => {
+                    args[0].clone()
+                }
+                _ => Type::Int,
+            };
+            let frame_s = emit_tir_expr(&frame, cx);
+            let closure = render_lambda_str_expecting(lam_at(1)?, cx, env, Some(&[row_ty.clone()]));
+            let helper = if method == "lazy_filter" {
+                "jet_data_lazy_filter"
+            } else {
+                "jet_data_lazy_sort_by"
+            };
+            let code = format!("{}{}(&({}), {})", cx.root_prefix, helper, frame_s, closure);
+            return Some(TExpr {
+                ty: Type::Apply {
+                    name: "LazyFrame".to_string(),
+                    args: vec![row_ty],
+                },
+                kind: TExprKind::ConstInline(code),
+            });
+        }
         // D-REACT1=B: the `derived` closure's body type is the `Derived<T>` element.
         ("jet.reactive", "derived") => {
             let lam = lam_at(0)?;

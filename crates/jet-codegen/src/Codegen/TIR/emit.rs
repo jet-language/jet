@@ -4069,6 +4069,22 @@ pub(crate) fn emit_tir_core_call(
             )
         }
         ("core.data", "count") => format!("{}(&({}))", helper("jet_data_count"), arg(0)),
+        ("core.data", "table") => format!("{}(&({}))", helper("jet_data_table"), arg(0)),
+        ("core.data", "rows") => format!("{}(&({}))", helper("jet_data_rows"), arg(0)),
+        ("core.data", "series") => format!("{}(&({}))", helper("jet_data_series"), arg(0)),
+        ("core.data", "values") => format!("{}(&({}))", helper("jet_data_series_values"), arg(0)),
+        ("core.data", "missing_count") => {
+            format!("{}(&({}))", helper("jet_data_missing_count"), arg(0))
+        }
+        ("core.data", "lazy") => format!("{}(&({}))", helper("jet_data_lazy"), arg(0)),
+        ("core.data", "collect") => format!("{}(&({}))", helper("jet_data_collect"), arg(0)),
+        ("core.data", "plan") => format!("{}(&({}))", helper("jet_data_plan"), arg(0)),
+        ("core.data", "lazy_filter") => {
+            format!("{}(&({}), {})", helper("jet_data_lazy_filter"), arg(0), arg(1))
+        }
+        ("core.data", "lazy_sort_by") => {
+            format!("{}(&({}), {})", helper("jet_data_lazy_sort_by"), arg(0), arg(1))
+        }
         ("core.data", "group_count") => format!(
             "{}(&({}), {})",
             helper("jet_data_group_count"),

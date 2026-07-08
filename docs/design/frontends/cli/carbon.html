@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Carbon — jetpack / jetos / jet env CLI</title>
+<style>
+  :root{
+    --ground:#0B1119; --raised:#16202E; --accent:#3FC6FF; --select:#D678FF;
+    --warn:#FFB454; --error:#FF5C5C; --ok:#58D68D; --text:#D9E6F2; --sec:#7E93A8;
+    --mono:"SF Mono",ui-monospace,"Cascadia Code","JetBrains Mono",Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:
+      radial-gradient(1200px 600px at 80% -10%,#12202f 0%,transparent 60%),
+      var(--ground);color:var(--text);font-family:var(--sans);
+      -webkit-font-smoothing:antialiased;padding:40px 24px 96px}
+  .wrap{max-width:920px;margin:0 auto}
+  header{border-bottom:1px solid var(--raised);padding-bottom:24px;margin-bottom:40px}
+  .kicker{font-family:var(--mono);font-size:12px;letter-spacing:.32em;
+      text-transform:uppercase;color:var(--accent)}
+  h1{font-size:34px;margin:10px 0 6px;letter-spacing:-.01em;font-weight:650}
+  .lede{color:var(--sec);max-width:62ch;line-height:1.55;margin:0}
+  .palette{display:flex;gap:6px;margin-top:20px;flex-wrap:wrap}
+  .chip{font-family:var(--mono);font-size:11px;color:#0B1119;padding:3px 8px;
+      border-radius:3px;font-weight:600}
+  section{margin:40px 0}
+  .eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.18em;
+      text-transform:uppercase;color:var(--select);margin-bottom:4px}
+  .flowname{font-family:var(--mono);color:var(--text);font-size:15px;margin-bottom:14px}
+  .flowname b{color:var(--accent);font-weight:600}
+  .cap{color:var(--sec);font-size:13.5px;line-height:1.55;margin-top:12px;max-width:74ch}
+  .cap .tp{color:var(--warn);font-weight:600}
+  code{font-family:var(--mono);font-size:.92em;color:var(--text)}
+
+  .term{background:var(--ground);border:1px solid var(--raised);border-radius:6px;
+      overflow:hidden;box-shadow:0 20px 50px -30px #000}
+  .bar{display:flex;align-items:center;gap:8px;padding:9px 14px;
+      background:var(--raised);border-bottom:1px solid #0a121b}
+  .dot{width:11px;height:11px;border-radius:50%}
+  .d1{background:#FF5C5C}.d2{background:#FFB454}.d3{background:#58D68D}
+  .bar .name{font-family:var(--mono);font-size:12px;color:var(--sec);margin-left:8px}
+  /* status band — Carbon signature */
+  .band{display:flex;gap:18px;padding:6px 16px;background:#0d1622;
+      border-bottom:1px solid var(--raised);font-family:var(--mono);font-size:11px;
+      letter-spacing:.14em;color:var(--sec)}
+  .band i{font-style:normal}
+  .band .lit{color:var(--ok)}.band .warn{color:var(--warn)}
+  pre{margin:0;padding:16px 18px;font-family:var(--mono);font-size:13px;
+      line-height:1.6;color:var(--text);overflow-x:auto;tab-size:2}
+  .accent{color:var(--accent)}.select{color:var(--select)}.warnc{color:var(--warn)}
+  .errorc{color:var(--error)}.ok{color:var(--ok)}.sec{color:var(--sec)}.b{font-weight:650}
+  .rule{color:var(--sec)}
+  .nocolor pre,.nocolor .bar .name{color:#c9c9c9}
+  .nocolor{filter:saturate(0)}
+  .nocolor .term{border-color:#333;background:#0c0c0c}
+  .nocolor .bar{background:#1a1a1a}
+  footer{margin-top:64px;color:var(--sec);font-size:12px;font-family:var(--mono);
+      border-top:1px solid var(--raised);padding-top:18px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <div class="kicker">Family A · Carbon</div>
+  <h1>jetpack &nbsp;·&nbsp; jetos &nbsp;·&nbsp; jet env</h1>
+  <p class="lede">Dense, dark, engineered — the professional instrument for people who live in the
+  tool all day. Every value monospaced and strictly aligned; a persistent status band carries
+  whole-system state in one glance.</p>
+  <div class="palette">
+    <span class="chip" style="background:#3FC6FF">accent</span>
+    <span class="chip" style="background:#D678FF">select</span>
+    <span class="chip" style="background:#FFB454">warn</span>
+    <span class="chip" style="background:#58D68D">ok</span>
+    <span class="chip" style="background:#FF5C5C">error</span>
+    <span class="chip" style="background:#7E93A8">secondary</span>
+  </div>
+</header>
+
+<!-- 1. jetpack add -->
+<section>
+  <div class="eyebrow">Flow 01 · resolve → fetch → build</div>
+  <div class="flowname"><b>jetpack add</b> nixpkgs:ripgrep</div>
+  <div class="term">
+    <div class="bar"><span class="dot d1"></span><span class="dot d2"></span><span class="dot d3"></span><span class="name">~/myproj — jetpack</span></div>
+    <div class="band"><i>HANGAR <span class="lit">●</span> OK</i><i>ENV <span class="lit">●</span> myproj</i><i>SOURCE <span class="lit">●</span> nixpkgs</i><i>JOBS <span class="lit">●</span> 4</i></div>
+<pre><span class="sec">$</span> jetpack add nixpkgs:ripgrep
+
+  <span class="accent b">jetpack</span>  <span class="sec">▸</span> resolving 1 request
+  <span class="accent b">jetpack</span>  Resolved <span class="b">4</span> packages in <span class="sec">312ms</span>
+            <span class="ok">✓</span> <span class="b">ripgrep  </span>  <span class="sec">14.1.1  </span>  <span class="sec">built 8s</span>
+            <span class="ok">✓</span> <span class="b">pcre2    </span>  <span class="sec">10.44   </span>  <span class="sec">cached</span>
+            <span class="ok">✓</span> <span class="b">oniguruma</span>  <span class="sec">6.9.9   </span>  <span class="sec">cached</span>
+  <span class="accent b">jetpack</span>  added <span class="accent">ripgrep</span> to <span class="select">env.jet</span> <span class="ok">✓</span>
+</pre>
+  </div>
+  <p class="cap"><span class="tp">uv transplant:</span> the one-line <code>Resolved N packages in Xms</code>
+  summary replaces a scrolling resolver log. Then the existing <code>✓ name version state</code>
+  ledger from <code>Output.rs</code> lands each realized package as an aligned row —
+  <code>built 8s</code> vs <code>cached</code> read at a glance. The Braille spinner collapses into the row on finish.</p>
+</section>
+
+<!-- 2. jet env threshold -->
+<section>
+  <div class="eyebrow">Flow 02 · shell entry / exit · env rule</div>
+  <div class="flowname"><b>jet env</b> &nbsp;<span class="sec">(enter, then exit)</span></div>
+  <div class="term">
+    <div class="bar"><span class="dot d1"></span><span class="dot d2"></span><span class="dot d3"></span><span class="name">~/myproj — jet env</span></div>
+<pre><span class="sec">$</span> jet env
+
+  <span class="rule">──</span> <span class="accent b">myproj</span> <span class="rule">─</span> <span class="sec">temporary shell · exit to leave</span> <span class="rule">────────────</span>
+
+<span class="sec">myproj $</span> which ripgrep
+/hangar/store/rp-14.1.1/bin/rg
+<span class="sec">myproj $</span> exit
+
+  <span class="rule">──</span> <span class="accent b">left myproj</span> <span class="rule">─</span> <span class="sec">back to your shell</span> <span class="rule">──────────────</span>
+</pre>
+  </div>
+  <p class="cap">The existing <code>rule()</code> line is kept verbatim in words — it is the one marker of crossing into
+  a jetpack env. Carbon tints only the label bold-accent; the fill stays quiet gray, so it survives NO_COLOR as
+  pure layout. The rule prints on <em>both</em> sides of the crossing.</p>
+</section>
+
+<!-- 3. jetos switch -->
+<section>
+  <div class="eyebrow">Flow 03 · build → generation diff → atomic switch</div>
+  <div class="flowname"><b>jetos switch</b></div>
+  <div class="term">
+    <div class="bar"><span class="dot d1"></span><span class="dot d2"></span><span class="dot d3"></span><span class="name">halcyon — jetos</span></div>
+    <div class="band"><i>GEN <span class="lit">●</span> 42→43</i><i>BUILD <span class="lit">●</span> OK</i><i>CLOSURE <span class="warn">●</span> +34M</i><i>SWITCH <span class="sec">●</span> pending</i></div>
+<pre><span class="sec">$</span> jetos switch
+
+  <span class="accent b">jetos</span>  building generation
+          <span class="sec">▸</span> realised 1240 / 1240 derivations
+  <span class="accent b">jetos</span>  generation <span class="b">42</span> <span class="sec">→</span> <span class="select b">43</span>
+
+  <span class="sec">changes</span>
+    <span class="ok">+</span> hello           <span class="sec">2.12.1</span>
+    <span class="warnc">↑</span> ripgrep         14.1.0 <span class="sec">→</span> <span class="ok">14.1.1</span>
+    <span class="select">↓</span> nodejs          22.5.0 <span class="sec">→</span> <span class="select">20.15.1</span>
+    <span class="errorc">−</span> obsolete-tool   <span class="sec">1.0.0</span>
+
+    <span class="sec">4 changed ·</span> <span class="ok">+1</span> <span class="errorc">−1</span> <span class="warnc">↑1</span> <span class="select">↓1</span> <span class="sec">· closure 2.1 GiB</span> <span class="warnc">(+34 MiB)</span>
+
+  <span class="accent b">jetos</span>  switch to generation <span class="select b">43</span>? <span class="sec">[Y/n]</span> y
+  <span class="accent b">jetos</span>  activated generation <span class="select b">43</span> <span class="ok">✓</span>
+</pre>
+  </div>
+  <p class="cap"><span class="tp">nh transplant:</span> the generation diff table — <code>+</code> add, <code>−</code> remove,
+  <code>↑</code> upgrade, <code>↓</code> downgrade, with a closure-size delta footer. Carbon maps the four verbs to
+  four colors (green add / red remove / amber up / magenta down) so the diff is scannable without reading versions.
+  The summary line is the whole switch in one row.</p>
+</section>
+
+<!-- 4. jetpack gc -->
+<section>
+  <div class="eyebrow">Flow 04 · hangar disk report</div>
+  <div class="flowname"><b>jetpack gc</b></div>
+  <div class="term">
+    <div class="bar"><span class="dot d1"></span><span class="dot d2"></span><span class="dot d3"></span><span class="name">~/ — jetpack gc</span></div>
+<pre><span class="sec">$</span> jetpack gc
+
+  <span class="accent b">jetpack</span>  hangar disk report
+
+    <span class="sec">generations</span>   12 kept <span class="sec">·</span> <span class="warnc">8 reclaimable</span>
+    <span class="sec">store paths</span>   1,204 live <span class="sec">·</span> <span class="warnc">318 dead</span>
+    <span class="sec">reclaimable</span>   <span class="b warnc">4.7 GiB</span>
+
+  <span class="accent b">jetpack</span>  remove 318 dead paths + 8 generations? <span class="sec">[y/N]</span> y
+  <span class="accent b">jetpack</span>  freed <span class="ok b">4.7 GiB</span> <span class="ok">✓</span>
+</pre>
+  </div>
+  <p class="cap">A two-column figure (kept vs reclaimable) instead of a wall of paths. The reclaimable size is the
+  headline value in amber — the one number worth acting on — echoed green after the sweep. <code>hangar</code> is
+  the shipped store name.</p>
+</section>
+
+<!-- 5. failure -->
+<section>
+  <div class="eyebrow">Flow 05 · build failure · --shell-on-fail</div>
+  <div class="flowname"><b>jetpack add</b> nixpkgs:openssl &nbsp;<span class="errorc">✗</span></div>
+  <div class="term">
+    <div class="bar"><span class="dot d1"></span><span class="dot d2"></span><span class="dot d3"></span><span class="name">~/myproj — jetpack</span></div>
+    <div class="band"><i>HANGAR <span class="lit">●</span> OK</i><i>BUILD <span class="errorc">● FAIL</span></i><i>STEP <span class="warn">● configure</span></i><i>JOBS <span class="sec">●</span> 0</i></div>
+<pre><span class="sec">$</span> jetpack add nixpkgs:openssl
+
+  <span class="accent b">jetpack</span>  <span class="sec">▸</span> building openssl 3.3.1
+  <span class="accent b">jetpack</span>  build failed  <span class="errorc">✗</span>
+
+  <span class="errorc">error:</span> <span class="b">openssl 3.3.1 failed to build</span>
+    the build stopped at the <span class="accent">`configure`</span> step (exit 1).
+    <span class="sec">fix:</span> run <span class="accent">`jetpack add openssl --shell-on-fail`</span> to drop into
+         the build sandbox and retry the step by hand.
+</pre>
+  </div>
+  <p class="cap">The <code>error() / fix:</code> block from <code>Output.rs</code>, words untouched (I2: a build failure is
+  the package's fault, never rustc). Error red used exactly once; the status band flips <code>BUILD ● FAIL</code>
+  so the state is legible even scrolled past. The <code>--shell-on-fail</code> hint is the concrete next step.</p>
+</section>
+
+<!-- 6. NO_COLOR -->
+<section class="nocolor">
+  <div class="eyebrow" style="color:#999">Degraded · NO_COLOR / non-TTY (CI logs)</div>
+  <div class="flowname" style="color:#ccc"><b style="color:#eee">jetpack add</b> · same words, layout-only</div>
+  <div class="term">
+    <div class="bar"><span class="dot d1"></span><span class="dot d2"></span><span class="dot d3"></span><span class="name">CI — no tty</span></div>
+<pre>$ jetpack add nixpkgs:ripgrep
+
+  jetpack  resolving 1 request
+  jetpack  Resolved 4 packages in 312ms
+           [ok] ripgrep    14.1.1   built 8s
+           [ok] pcre2      10.44    cached
+           [ok] oniguruma  6.9.9    cached
+  jetpack  added ripgrep to env.jet
+
+  -- myproj - temporary shell - exit to leave --------------
+</pre>
+  </div>
+  <p class="cap" style="color:#999">No SGR, spinner inert (Braille never prints off-TTY), <code>✓</code> degrades to <code>[ok]</code>,
+  the env rule falls back to ASCII <code>--</code>. Alignment carries all the meaning color did. This is the CI-log truth of every still above.</p>
+</section>
+
+<footer>Carbon · std-only ANSI (SGR + box-drawing + Braille spinner, \r redraw) · 80-col safe · NO_COLOR degrades to layout</footer>
+</div>
+</body>
+</html>

@@ -657,7 +657,14 @@ impl<'a> Checker<'a> {
                     return Some(Type::Int);
                 };
                 let ty = self.infer(&mut arg.expr)?;
-                if !matches!(ty, Type::List(_)) {
+                let countable = match &ty {
+                    Type::List(_) => true,
+                    Type::Apply { name, .. } => {
+                        matches!(name.as_str(), "Table" | "Series" | "LazyFrame")
+                    }
+                    _ => false,
+                };
+                if !countable {
                     self.diags.push(Diagnostic::error(
                         "E0112",
                         format!(
@@ -670,6 +677,200 @@ impl<'a> Checker<'a> {
                     ));
                 }
                 return Some(Type::Int);
+            }
+            ("core.data", "table" | "series") => {
+                if args.len() != 1 {
+                    self.diags.push(wrong_core_arity(name, 1, args.len(), span));
+                }
+                let Some(rows_arg) = args.get_mut(0) else {
+                    return Some(Type::Apply {
+                        name: if name == "table" { "Table" } else { "Series" }.to_string(),
+                        args: vec![Type::Int],
+                    });
+                };
+                let ty = self.infer(&mut rows_arg.expr);
+                let elem = match ty {
+                    Some(Type::List(inner)) => *inner,
+                    Some(other) => {
+                        self.diags.push(Diagnostic::error(
+                            "E0112",
+                            format!("`data.{}` needs a list-backed value, not {}", name, other.show()),
+                            "core.data tables and series are built from typed lists".to_string(),
+                            "pass `[Row]` to `data.table` or `[T]` to `data.series`".to_string(),
+                            Some(rows_arg.expr.span()),
+                        ));
+                        Type::Int
+                    }
+                    None => Type::Int,
+                };
+                return Some(Type::Apply {
+                    name: if name == "table" { "Table" } else { "Series" }.to_string(),
+                    args: vec![elem],
+                });
+            }
+            ("core.data", "rows" | "values") => {
+                if args.len() != 1 {
+                    self.diags.push(wrong_core_arity(name, 1, args.len(), span));
+                }
+                let Some(arg) = args.get_mut(0) else {
+                    return Some(Type::List(Box::new(Type::Int)));
+                };
+                let want = if name == "rows" { "Table" } else { "Series" };
+                let ty = self.infer(&mut arg.expr);
+                let elem = match ty {
+                    Some(Type::Apply { name: head, args }) if head == want && args.len() == 1 => {
+                        args[0].clone()
+                    }
+                    Some(other) => {
+                        self.diags.push(Diagnostic::error(
+                            "E0112",
+                            format!("`data.{}` needs a `{}` value, not {}", name, want, other.show()),
+                            "core.data unwraps typed table/series containers through explicit helpers".to_string(),
+                            format!("pass a `{want}<T>` value"),
+                            Some(arg.expr.span()),
+                        ));
+                        Type::Int
+                    }
+                    None => Type::Int,
+                };
+                return Some(Type::List(Box::new(elem)));
+            }
+            ("core.data", "missing_count") => {
+                if args.len() != 1 {
+                    self.diags.push(wrong_core_arity(name, 1, args.len(), span));
+                }
+                let Some(arg) = args.get_mut(0) else {
+                    return Some(Type::Int);
+                };
+                let ty = self.infer(&mut arg.expr);
+                if !matches!(&ty, Some(Type::Apply { name: head, args }) if head == "Series" && args.len() == 1) {
+                    let shown = ty.map(|t| t.show()).unwrap_or_else(|| "<unknown>".to_string());
+                    self.diags.push(Diagnostic::error(
+                        "E0112",
+                        format!("`data.missing_count` needs a `Series<T?>`, not {}", shown),
+                        "missing values are represented by Jet optionals in a typed series".to_string(),
+                        "build a series from `[T?]` values with `data.series(values)`".to_string(),
+                        Some(arg.expr.span()),
+                    ));
+                }
+                return Some(Type::Int);
+            }
+            ("core.data", "lazy") => {
+                if args.len() != 1 {
+                    self.diags.push(wrong_core_arity(name, 1, args.len(), span));
+                }
+                let Some(arg) = args.get_mut(0) else {
+                    return Some(Type::Apply {
+                        name: "LazyFrame".to_string(),
+                        args: vec![Type::Int],
+                    });
+                };
+                let ty = self.infer(&mut arg.expr);
+                let elem = match ty {
+                    Some(Type::Apply { name: head, args }) if head == "Table" && args.len() == 1 => {
+                        args[0].clone()
+                    }
+                    Some(other) => {
+                        self.diags.push(Diagnostic::error(
+                            "E0112",
+                            format!("`data.lazy` needs a `Table<T>`, not {}", other.show()),
+                            "lazy plans start from the same typed table model as eager helpers".to_string(),
+                            "wrap rows with `data.table(rows)` first".to_string(),
+                            Some(arg.expr.span()),
+                        ));
+                        Type::Int
+                    }
+                    None => Type::Int,
+                };
+                return Some(Type::Apply {
+                    name: "LazyFrame".to_string(),
+                    args: vec![elem],
+                });
+            }
+            ("core.data", "collect" | "plan") => {
+                if args.len() != 1 {
+                    self.diags.push(wrong_core_arity(name, 1, args.len(), span));
+                }
+                let Some(arg) = args.get_mut(0) else {
+                    return Some(if name == "collect" {
+                        Type::Apply {
+                            name: "Table".to_string(),
+                            args: vec![Type::Int],
+                        }
+                    } else {
+                        Type::List(Box::new(Type::String))
+                    });
+                };
+                let ty = self.infer(&mut arg.expr);
+                let elem = match ty {
+                    Some(Type::Apply { name: head, args }) if head == "LazyFrame" && args.len() == 1 => {
+                        args[0].clone()
+                    }
+                    Some(other) => {
+                        self.diags.push(Diagnostic::error(
+                            "E0112",
+                            format!("`data.{}` needs a `LazyFrame<T>`, not {}", name, other.show()),
+                            "lazy plan inspection and collection operate on core.data lazy frames".to_string(),
+                            "call `data.lazy(table)` first".to_string(),
+                            Some(arg.expr.span()),
+                        ));
+                        Type::Int
+                    }
+                    None => Type::Int,
+                };
+                return Some(if name == "collect" {
+                    Type::Apply {
+                        name: "Table".to_string(),
+                        args: vec![elem],
+                    }
+                } else {
+                    Type::List(Box::new(Type::String))
+                });
+            }
+            ("core.data", "lazy_filter" | "lazy_sort_by") => {
+                if args.len() != 2 {
+                    self.diags.push(wrong_core_arity(name, 2, args.len(), span));
+                }
+                let Some(frame_arg) = args.get_mut(0) else {
+                    return Some(Type::Apply {
+                        name: "LazyFrame".to_string(),
+                        args: vec![Type::Int],
+                    });
+                };
+                let frame_ty = self.infer(&mut frame_arg.expr);
+                let row_ty = match frame_ty {
+                    Some(Type::Apply { name: head, args }) if head == "LazyFrame" && args.len() == 1 => {
+                        args[0].clone()
+                    }
+                    Some(other) => {
+                        self.diags.push(Diagnostic::error(
+                            "E0112",
+                            format!("`data.{}` needs a `LazyFrame<T>`, not {}", name, other.show()),
+                            "lazy table operations keep a typed row model through the plan".to_string(),
+                            "call `data.lazy(table)` first".to_string(),
+                            Some(frame_arg.expr.span()),
+                        ));
+                        Type::Int
+                    }
+                    None => Type::Int,
+                };
+                if let Some(fn_arg) = args.get_mut(1) {
+                    let ret = if name == "lazy_filter" {
+                        Type::Bool
+                    } else {
+                        Type::String
+                    };
+                    let fn_ty = Type::Fn {
+                        params: vec![row_ty.clone()],
+                        ret: Some(Box::new(ret)),
+                        effect_bound: None,
+                    };
+                    self.expect_core_arg(name, 1, &fn_ty, fn_arg);
+                }
+                return Some(Type::Apply {
+                    name: "LazyFrame".to_string(),
+                    args: vec![row_ty],
+                });
             }
             ("core.data", "filter" | "sort_by") => {
                 if args.len() != 2 {
@@ -4761,7 +4962,12 @@ pub fn is_polymorphic_core_special(module: &str, name: &str) -> bool {
             // `T` read off the call-site turbofish — not in `core_fixed_sig`, so codegen
             // reads the whole tuple type from resolved_ret (I3).
             | ("core.tasks", "channel" | "after")
-            | ("core.data", "csv" | "count" | "filter" | "sort_by" | "group_count" | "group_sum" | "group_mean")
+            | (
+                "core.data",
+                "csv" | "count" | "table" | "rows" | "series" | "values" | "missing_count"
+                    | "lazy" | "lazy_filter" | "lazy_sort_by" | "collect" | "plan"
+                    | "filter" | "sort_by" | "group_count" | "group_sum" | "group_mean",
+            )
     )
 }
 
@@ -6820,6 +7026,16 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         "core.data" => &[
             "csv",
             "count",
+            "table",
+            "rows",
+            "series",
+            "values",
+            "missing_count",
+            "lazy",
+            "lazy_filter",
+            "lazy_sort_by",
+            "collect",
+            "plan",
             "filter",
             "sort_by",
             "inner_join",

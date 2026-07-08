@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Paper — jet dev server</title>
+<style>
+  :root{
+    --paper:#F7F9FC; --ink:#1B2733; --accent:#1E63E9; --hairline:#C4D2E0;
+    --flare:#FF7A45; --ok:#157F52; --error:#D93A3A; --sec:#5B6B7B;
+    --mono:"SF Mono",ui-monospace,"Cascadia Code","JetBrains Mono",Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);
+      -webkit-font-smoothing:antialiased;padding:0 0 96px}
+  header{background:linear-gradient(180deg,#DCEBFF,#FFFFFF 88%);border-bottom:1px solid var(--hairline)}
+  .hin{max-width:960px;margin:0 auto;padding:52px 24px 36px}
+  .wrap{max-width:960px;margin:0 auto;padding:0 24px}
+  .kicker{font-family:var(--mono);font-size:12px;letter-spacing:.28em;text-transform:uppercase;color:var(--accent)}
+  h1{font-size:40px;margin:12px 0 8px;font-weight:680;letter-spacing:-.02em}
+  .lede{color:var(--sec);max-width:62ch;line-height:1.55;margin:0;font-size:16px}
+  h2{font-family:var(--mono);font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--sec);
+      margin:46px 0 6px}
+  .hr{height:1px;border:0;margin:0 0 16px;background:linear-gradient(90deg,var(--hairline) 60%,transparent)}
+  .cap{color:var(--sec);font-size:14px;line-height:1.6;margin-top:12px;max-width:76ch}
+  .cap .tp{color:var(--flare);font-weight:700}
+  code{font-family:var(--mono);font-size:.9em;background:#EEF2F8;padding:1px 5px;border-radius:3px}
+
+  .term{background:#FFFFFF;border:1px solid var(--hairline);border-radius:8px;overflow:hidden;
+      box-shadow:0 18px 44px -30px rgba(27,39,51,.5)}
+  .bar{display:flex;align-items:center;gap:8px;padding:10px 14px;background:#F1F5FA;border-bottom:1px solid var(--hairline)}
+  .dot{width:11px;height:11px;border-radius:50%;border:1px solid rgba(0,0,0,.08)}
+  .d1{background:#FF6159}.d2{background:#FFBD2E}.d3{background:#28C840}
+  .bar .name{font-family:var(--mono);font-size:12px;color:var(--sec);margin-left:8px}
+  pre{margin:0;padding:18px 20px;font-family:var(--mono);font-size:13px;line-height:1.65;color:var(--ink);overflow-x:auto}
+  .accent{color:var(--accent)}.ok{color:var(--ok)}.errorc{color:var(--error)}.sec{color:var(--sec)}.b{font-weight:680}
+
+  .browser{border:1px solid var(--hairline);border-radius:8px;overflow:hidden;margin-top:6px;
+      box-shadow:0 18px 44px -30px rgba(27,39,51,.5)}
+  .chrome{display:flex;align-items:center;gap:10px;padding:9px 12px;background:#F1F5FA;border-bottom:1px solid var(--hairline)}
+  .url{flex:1;background:#fff;border:1px solid var(--hairline);border-radius:5px;padding:5px 10px;
+      font-family:var(--mono);font-size:12px;color:var(--sec)}
+  .url b{color:var(--ink);font-weight:500}
+  .pill{font-family:var(--mono);font-size:11px;padding:3px 9px;border-radius:20px;border:1px solid var(--hairline);
+      color:var(--accent);display:flex;align-items:center;gap:6px}
+  .pdot{width:7px;height:7px;border-radius:50%;background:var(--accent)}
+  .viewport{position:relative;background:#fff;min-height:340px}
+  .app{padding:40px;filter:blur(1px);opacity:.28}
+  .app h3{font-size:26px;margin:0 0 10px}.app p{color:var(--sec);max-width:40ch}
+  .app .box{margin-top:20px;height:120px;border:1px solid var(--hairline);border-radius:8px;background:#F3F6FB}
+  /* Paper bet: a LIGHT error overlay */
+  .overlay{position:absolute;inset:0;background:rgba(220,231,245,.72);backdrop-filter:blur(3px);
+      display:flex;align-items:flex-start;justify-content:center;padding:34px}
+  .card{width:100%;max-width:680px;background:#FFFFFF;border:1px solid var(--hairline);border-radius:10px;
+      overflow:hidden;box-shadow:0 40px 90px -30px rgba(27,39,51,.55)}
+  .ohead{padding:14px 18px 10px;border-bottom:1px solid transparent}
+  .ohead .t{font-family:var(--mono);font-size:13px;color:var(--error);font-weight:700}
+  .ohead .file{font-family:var(--mono);font-size:12px;color:var(--accent);text-decoration:underline;
+      text-underline-offset:2px;cursor:pointer;margin-left:10px}
+  .ofade{height:1px;background:linear-gradient(90deg,var(--hairline) 55%,transparent);margin:0 18px}
+  .diag{padding:16px 18px 8px;margin:0;font-family:var(--mono);font-size:12.5px;line-height:1.65;color:var(--ink);overflow-x:auto}
+  .diag .k{color:var(--error);font-weight:700}.diag .loc{color:var(--accent)}
+  .diag .caret{color:var(--error)}.diag .why{color:var(--sec)}.diag .fix{color:var(--ok)}
+  .otip{padding:11px 18px;color:var(--sec);font-family:var(--mono);font-size:11.5px;background:#F7F9FC;border-top:1px solid var(--hairline)}
+  .states{display:flex;gap:10px;margin-top:14px;flex-wrap:wrap}
+  .state{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:12px;color:var(--sec);
+      border:1px solid var(--hairline);border-radius:20px;padding:6px 12px;background:#fff}
+  .s-dot{width:8px;height:8px;border-radius:50%}.s1{background:var(--accent)}.s2{background:var(--flare)}.s3{background:var(--error)}
+  footer{margin-top:56px;color:var(--sec);font-size:12px;font-family:var(--mono);border-top:1px solid var(--hairline);padding-top:18px}
+</style>
+</head>
+<body>
+<header><div class="hin">
+  <div class="kicker">Family B · Paper · dev server</div>
+  <h1>jet dev — web target</h1>
+  <p class="lede">The dev server on a light ground: quiet terminal, and a light error overlay —
+  the bet that a compile error can be a calm, readable page instead of a dark takeover.</p>
+</div></header>
+<div class="wrap">
+
+  <h2>Terminal · start · watch · rebuild · compile error</h2>
+  <div class="hr"></div>
+  <div class="term">
+    <div class="bar"><span class="dot d1"></span><span class="dot d2"></span><span class="dot d3"></span><span class="name">~/myapp — jet dev</span></div>
+<pre><span class="sec">$</span> jet dev app.jet --target=web
+
+  <span class="accent b">jet dev</span>  web target
+    serve   <span class="accent">http://localhost:8080</span>
+    canvas  <span class="accent">http://localhost:8080/canvas</span>
+    watch   app.jet
+    <span class="sec">ready in 640ms · Ctrl-C to stop</span>
+
+  <span class="sec">14:22:08</span>  app.jet changed <span class="sec">──╌ ·</span> rebuilt in 210ms <span class="ok">✓</span>
+  <span class="sec">14:22:19</span>  app.jet changed <span class="sec">──╌ ·</span> <span class="errorc">1 error</span>
+
+<span class="errorc b">Error [E0102]</span>: nothing named `rende` exists here
+  <span class="accent">--&gt; app.jet:14:5</span>
+    |
+ 14 |     rende(scene)
+    |     <span class="errorc">^^^^^</span>
+ <span class="sec">Why:</span> only functions that have been defined (or built in, like `print`) can be called
+ <span class="ok">Fix:</span> did you mean `render`?
+
+  <span class="sec">14:22:24</span>  app.jet changed <span class="sec">──╌ ·</span> rebuilt in 190ms <span class="ok">✓</span>
+</pre>
+  </div>
+  <p class="cap">Rebuild lines use the fading hairline to lead the timestamp to its result. The compile error is the
+  <strong>verbatim Jet diagnostic</strong> (I4) from <code>report_problems</code> — code, caret, Why/Fix untouched. The
+  last good build keeps serving; the error is informational, not fatal.</p>
+
+  <h2>Browser · error overlay on compile failure</h2>
+  <div class="hr"></div>
+  <div class="browser">
+    <div class="chrome">
+      <span class="dot d1"></span><span class="dot d2"></span><span class="dot d3"></span>
+      <span class="url"><b>localhost:8080</b> /app</span>
+      <span class="pill"><span class="pdot"></span> live</span>
+    </div>
+    <div class="viewport">
+      <div class="app"><h3>My App</h3><p>The last good build stays on screen behind the overlay.</p><div class="box"></div></div>
+      <div class="overlay">
+        <div class="card">
+          <div class="ohead"><span class="t">Build failed</span><span class="file">app.jet:14:5</span></div>
+          <div class="ofade"></div>
+<pre class="diag"><span class="k">Error [E0102]</span>: nothing named `rende` exists here
+  <span class="loc">--&gt; app.jet:14:5</span>
+    |
+ 14 |     rende(scene)
+    |     <span class="caret">^^^^^</span>
+ <span class="why">Why:</span> only functions that have been defined (or built in, like `print`) can be called
+ <span class="fix">Fix:</span> did you mean `render`?</pre>
+          <div class="otip">Fix the code to dismiss — the overlay clears on the next clean build. Esc to hide.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <p class="cap"><span class="tp">vite transplant:</span> full-viewport overlay, clickable <code>file:line</code> link,
+  dismiss tip — but rendered light, with a fading hairline under the header instead of a hard rule. The diagnostic body
+  is the <strong>exact</strong> Jet output; the chrome around it never rewords the compiler. Auto-clears on the next clean
+  polled version.</p>
+
+  <h2>Reconnect / reload states (polling, I6)</h2>
+  <div class="states">
+    <span class="state"><span class="s-dot s1"></span> Rebuilding… <span class="sec">(save detected)</span></span>
+    <span class="state"><span class="s-dot s1"></span> Reloading… <span class="sec">(new version 5)</span></span>
+    <span class="state"><span class="s-dot s3"></span> Dev server offline — retrying <span class="sec">(poll failed)</span></span>
+  </div>
+  <p class="cap">The injected script polls <code>/__jet_dev_version</code> every 400ms. States render as a small pill in
+  the corner: <em>Rebuilding…</em> on save, <em>Reloading…</em> on a version bump, <em>offline — retrying</em> when a
+  poll fails, clearing once the server answers.</p>
+
+  <footer>Paper · terminal std-only ANSI (light-terminal palette) · overlay self-contained injected HTML/CSS/JS · diagnostic verbatim (I4)</footer>
+</div>
+</body>
+</html>

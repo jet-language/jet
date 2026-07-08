@@ -267,6 +267,20 @@ pub(crate) fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
         || is_covered_reactive_ty(&ty, cx)
         || is_covered_shared_ty(&ty, cx)
         || is_covered_pool_ty(&ty, cx)
+        || is_covered_data_ty(&ty, cx)
+}
+
+/// D-DATAFRAME1=A: core.data value containers. They are plain owned prelude
+/// structs over a covered row/value type; method-like behavior is exposed
+/// through core.data functions, so binding/passing/returning the containers
+/// needs no special emit beyond `cx.rust_type`.
+pub(crate) fn is_covered_data_ty(ty: &Type, cx: &Cx) -> bool {
+    let Type::Apply { name, args } = ty else {
+        return false;
+    };
+    matches!(name.as_str(), "Table" | "Series" | "LazyFrame")
+        && args.len() == 1
+        && is_subset_param_ty(&args[0], cx)
 }
 
 /// D-MEM1 S6 (D-POOLID-API1=A): `Pool<T>` / `Id<T>` — the generational arena and
@@ -4466,6 +4480,12 @@ pub(crate) fn core_closure_call_in_subset(
                 && lambda_arg(1)
                 && lambda_arg(2)
                 && lambda_arg(3)
+        }
+        ("core.data", "lazy_filter" | "lazy_sort_by") => {
+            args.len() == 2
+                && no_labels
+                && expr_in_subset(&args[0].expr, cx, locals)
+                && lambda_arg(1)
         }
         // D-REACT1=B / D-SIGNAL1: `reactive.derived/computed/effect(<lambda>)` —
         // 1 arg, a literal zero-param in-subset lambda (rendered by `render_lambda_str`).

@@ -819,6 +819,35 @@ impl Cx {
                     self.rust_type(&args[0])
                 )
             }
+            // D-DATAFRAME1=A: core.data typed containers, backed by std-only
+            // prelude values. User types with the same names still win.
+            Type::Apply { name, args }
+                if name == "Table" && !args.is_empty() && !self.type_names.contains(name) =>
+            {
+                format!(
+                    "{}jet_std::DataTable<{}>",
+                    self.root_prefix,
+                    self.rust_type(&args[0])
+                )
+            }
+            Type::Apply { name, args }
+                if name == "Series" && !args.is_empty() && !self.type_names.contains(name) =>
+            {
+                format!(
+                    "{}jet_std::DataSeries<{}>",
+                    self.root_prefix,
+                    self.rust_type(&args[0])
+                )
+            }
+            Type::Apply { name, args }
+                if name == "LazyFrame" && !args.is_empty() && !self.type_names.contains(name) =>
+            {
+                format!(
+                    "{}jet_std::DataLazyFrame<{}>",
+                    self.root_prefix,
+                    self.rust_type(&args[0])
+                )
+            }
             // D-HONESTNUM1=A: Measurement<T> → jet_std::JetMeasurement<T>.
             Type::Apply { name, args } if name == Syntax::TYPE_MEASUREMENT && !args.is_empty() => {
                 format!(

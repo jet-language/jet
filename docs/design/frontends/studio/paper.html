@@ -1,0 +1,494 @@
+<title>jetos Studio — Paper</title>
+<style>
+  :root{
+    --paper:#F7F9FC; --card:#FFFFFF; --ink:#1B2733; --sub:#5A6B7B;
+    --accent:#1E63E9; --accent-d:#1550c8;
+    --hair:#C4D2E0; --hair-soft:#E3EBF3; --flare:#FF7A45;
+    --ok:#128a4f; --okbg:#e4f6ec; --warn:#9a5a00; --warnbg:#fdf0dc; --err:#c4372e;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --sans:ui-sans-serif,system-ui,"Segoe UI",Inter,Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{background:var(--paper);color:var(--ink);font-family:var(--sans);
+    font-size:14.5px;line-height:1.5;-webkit-font-smoothing:antialiased}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  button{font-family:inherit;color:inherit;cursor:pointer}
+  :focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+  .mono{font-family:var(--mono)}
+  .num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+  .eyebrow{font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--sub);font-weight:600}
+
+  header.top{position:sticky;top:0;z-index:40;
+    background:linear-gradient(180deg,#DCEBFF 0%, #F7F9FC 90%);
+    border-bottom:1px solid var(--hair);}
+  .topin{max-width:1200px;margin:0 auto;display:flex;align-items:center;gap:20px;padding:14px 28px}
+  .logo{font-weight:700;font-size:16px;letter-spacing:-.01em}
+  .logo b{color:var(--accent)}
+  /* signature: fading hairline status band */
+  .status{display:flex;align-items:center;gap:0;margin-left:8px;flex-wrap:wrap}
+  .st{display:flex;align-items:center;gap:8px;padding:0 18px;position:relative;font-size:12.5px;color:var(--sub)}
+  .st::after{content:"";position:absolute;right:0;top:50%;width:24px;height:1px;
+    background:linear-gradient(90deg,var(--hair),transparent)}
+  .st:last-child::after{display:none}
+  .st b{color:var(--ink);font-weight:600}
+  .st .d{width:7px;height:7px;border-radius:50%}
+  .d.ok{background:var(--ok)}.d.blue{background:var(--accent)}.d.warn{background:var(--flare)}
+  .top .host{margin-left:auto;display:flex;align-items:center;gap:9px;font-size:13px;
+    border:1px solid var(--hair);background:var(--card);border-radius:20px;padding:5px 14px}
+  .top .host .d{width:8px;height:8px;border-radius:50%;background:var(--ok)}
+
+  .wrap{max-width:1200px;margin:0 auto;display:grid;grid-template-columns:210px 1fr;gap:0}
+  nav.side{padding:26px 14px;border-right:1px solid var(--hair-soft);position:sticky;top:57px;height:calc(100vh - 57px);overflow:auto}
+  nav .lbl{font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--sub);margin:16px 10px 6px;font-weight:600}
+  nav button{width:100%;text-align:left;background:transparent;border:0;border-radius:7px;
+    padding:8px 12px;color:var(--sub);font-size:14px;display:flex;align-items:center;gap:8px}
+  nav button:hover{background:#eef3fa;color:var(--ink)}
+  nav button[aria-current="true"]{background:#e8f0fe;color:var(--accent);font-weight:600}
+  nav .ct{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--flare);
+    background:var(--warnbg);border-radius:20px;padding:1px 8px}
+
+  main{padding:34px 40px 80px;min-width:0}
+  @media(max-width:860px){.wrap{grid-template-columns:1fr}nav.side{position:static;height:auto;border-right:0;border-bottom:1px solid var(--hair-soft)}}
+  .screen{display:none}.screen.on{display:block;animation:f .2s ease}
+  @keyframes f{from{opacity:0;transform:translateY(6px)}to{opacity:1}}
+
+  .ph{margin-bottom:26px}
+  .ph h1{margin:6px 0 6px;font-size:30px;font-weight:680;letter-spacing:-.02em;line-height:1.1}
+  .ph p{margin:0;color:var(--sub);font-size:15px;max-width:70ch}
+  .row{display:flex;align-items:center;gap:10px}
+  .spread{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;flex-wrap:wrap}
+
+  .btn{background:var(--card);border:1px solid var(--hair);border-radius:8px;padding:9px 15px;
+    font-size:14px;color:var(--ink);display:inline-flex;align-items:center;gap:8px;transition:.12s}
+  .btn:hover{border-color:#9db4cc;box-shadow:0 1px 3px #1b273312}
+  .btn.pri{background:var(--accent);border-color:var(--accent);color:#fff}
+  .btn.pri:hover{background:var(--accent-d);box-shadow:0 2px 8px #1e63e94a}
+  .btn.ghost{border-color:transparent;color:var(--accent)}
+  .btn.warn{color:var(--flare);border-color:#f3c9b3}
+  .btn.sm{padding:5px 11px;font-size:13px}
+
+  .card{background:var(--card);border:1px solid var(--hair-soft);border-radius:12px;
+    box-shadow:0 1px 2px #1b27330a}
+  .cardp{padding:20px 22px}
+  .grid{display:grid;gap:18px}
+  .g4{grid-template-columns:repeat(4,1fr)}.g3{grid-template-columns:repeat(3,1fr)}.g2{grid-template-columns:1fr 1fr}
+  @media(max-width:980px){.g4{grid-template-columns:1fr 1fr}.g3,.g2{grid-template-columns:1fr}}
+
+  .stat .eyebrow{margin-bottom:8px}
+  .stat .big{font-size:34px;font-weight:680;letter-spacing:-.02em;line-height:1}
+  .stat .foot{color:var(--sub);font-size:13px;margin-top:8px}
+  /* fading hairline used as a lead line */
+  .lead{height:1px;background:linear-gradient(90deg,var(--hair) 0%, var(--hair) 55%, transparent 100%);margin:14px 0}
+
+  .pill{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;
+    padding:3px 10px;border-radius:20px;border:1px solid transparent}
+  .pill.ok{color:var(--ok);background:var(--okbg)}
+  .pill.warn{color:var(--warn);background:var(--warnbg)}
+  .pill.err{color:var(--err);background:#fbe6e4}
+  .pill.blue{color:var(--accent);background:#e8f0fe}
+  .pill.grey{color:var(--sub);background:#eef2f7}
+  .pill .d{width:7px;height:7px;border-radius:50%;background:currentColor}
+
+  table{width:100%;border-collapse:collapse}
+  th{text-align:left;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--sub);
+    font-weight:600;padding:0 14px 10px}
+  td{padding:12px 14px;border-top:1px solid var(--hair-soft);font-size:14px;vertical-align:middle}
+  tbody tr:hover{background:#f9fbfe}
+  .tbl-card{padding:16px 8px 6px}
+
+  /* option editor — grouped rows, fading lead line label→value, source link */
+  .optcols{display:grid;grid-template-columns:1fr 360px;gap:24px}
+  @media(max-width:980px){.optcols{grid-template-columns:1fr}}
+  .modblk{margin-bottom:22px}
+  .modhead{display:flex;align-items:baseline;gap:12px;margin-bottom:4px}
+  .modhead h3{margin:0;font-size:17px;font-weight:650}
+  .modhead .path{font-family:var(--mono);font-size:12.5px;color:var(--accent)}
+  .modhead .path:hover{text-decoration:underline;cursor:pointer}
+  .modblk>.card{overflow:hidden}
+  .opt{display:grid;grid-template-columns:1fr auto;align-items:center;gap:16px;padding:14px 20px}
+  .opt+.opt{border-top:1px solid var(--hair-soft)}
+  .opt .name{font-family:var(--mono);font-size:14px}
+  .opt .name small{display:block;font-family:var(--sans);color:var(--sub);font-size:12.5px;margin-top:3px}
+  .opt .set{display:flex;align-items:center;gap:10px}
+  .val-set{font-family:var(--mono);font-size:14px;color:var(--ink);font-weight:600}
+  .val-def{font-family:var(--mono);font-size:14px;color:var(--sub)}
+  .tag{font-size:10px;font-weight:700;letter-spacing:.08em;padding:2px 6px;border-radius:4px}
+  .tag.set{color:var(--accent);background:#e8f0fe}
+  .tag.def{color:var(--sub);background:#eef2f7}
+  .sw{width:40px;height:23px;border-radius:20px;border:1px solid var(--hair);background:#e7edf4;position:relative;padding:0}
+  .sw::after{content:"";position:absolute;top:2px;left:2px;width:17px;height:17px;border-radius:50%;background:#fff;box-shadow:0 1px 2px #0003;transition:.15s}
+  .sw[aria-pressed="true"]{background:var(--accent);border-color:var(--accent)}
+  .sw[aria-pressed="true"]::after{left:19px}
+
+  .srcaside{position:sticky;top:74px;align-self:start}
+  .srcaside .card{overflow:hidden}
+  .srchead{display:flex;align-items:center;gap:8px;padding:12px 16px;border-bottom:1px solid var(--hair-soft)}
+  .srchead .fp{font-family:var(--mono);font-size:12px;color:var(--sub)}
+  .code{font-family:var(--mono);font-size:12.5px;line-height:1.75;padding:14px 6px;overflow:auto;background:#fbfcfe}
+  .code .ln{display:grid;grid-template-columns:32px 1fr;gap:10px}
+  .code .n{color:#9fb0c1;text-align:right;user-select:none}
+  .code .key{color:var(--accent)}.code .str{color:#0a7d55}.code .kw{color:#8a3ffb}
+  .code .hl{background:#eaf1fd;box-shadow:inset 3px 0 0 var(--accent)}
+  .diff .add{color:#0a7d55;background:#e9f7ef}.diff .del{color:var(--err);background:#fbe9e7}
+
+  /* generations — vercel-style timeline */
+  .tline{position:relative;padding-left:26px}
+  .tline::before{content:"";position:absolute;left:6px;top:8px;bottom:8px;width:2px;
+    background:linear-gradient(180deg,var(--hair),var(--hair-soft))}
+  .titem{position:relative;margin-bottom:16px}
+  .titem .dot{position:absolute;left:-26px;top:20px;width:14px;height:14px;border-radius:50%;
+    background:#fff;border:2px solid var(--hair)}
+  .titem.cur .dot{border-color:var(--accent);background:var(--accent);box-shadow:0 0 0 4px #1e63e926}
+  .tmeta{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  .tmeta h4{margin:0;font-size:16px;font-family:var(--mono)}
+  .tmeta .when{color:var(--sub);font-size:13px}
+  .facts{display:flex;gap:26px;flex-wrap:wrap;margin-top:10px}
+  .facts .f .k{font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--sub);font-weight:600}
+  .facts .f .v{font-size:13.5px;margin-top:2px}
+
+  .steps{list-style:none;margin:0;padding:0}
+  .steps li{display:flex;align-items:center;gap:12px;padding:11px 0;border-top:1px solid var(--hair-soft);font-size:14px}
+  .steps li:first-child{border-top:0}
+  .steps .ic{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;font-size:12px;
+    border:1.5px solid var(--hair);color:var(--sub)}
+  .steps .done .ic{background:var(--ok);border-color:var(--ok);color:#fff}
+  .steps .run .ic{border-color:var(--accent);color:var(--accent)}
+  .steps .lbl2{flex:1}.steps .t{color:var(--sub);font-size:13px;font-family:var(--mono)}
+  .bar{height:8px;border-radius:20px;background:#e7edf4;overflow:hidden}
+  .bar>span{display:block;height:100%;background:var(--accent);transition:width .3s}
+
+  .search{display:flex;align-items:center;gap:12px;background:var(--card);border:1px solid var(--hair);
+    border-radius:10px;padding:11px 16px;margin-bottom:20px}
+  .search input{flex:1;border:0;outline:none;font-size:15px;color:var(--ink);background:transparent}
+  .kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--hair);border-radius:5px;padding:1px 7px;color:var(--sub)}
+  .muted{color:var(--sub);font-size:13.5px}
+  .logbox{font-family:var(--mono);font-size:12.5px;line-height:1.8;background:#0f1a27;color:#cfe0ef;
+    border-radius:10px;padding:14px 16px;overflow:auto}
+  .logbox .ok{color:#7be0a3}.logbox .t{color:#7e93a8}
+</style>
+
+<header class="top">
+  <div class="topin">
+    <div class="logo"><b>jetos</b> Studio</div>
+    <div class="status">
+      <div class="st"><span class="d ok"></span>Build <b>passing</b></div>
+      <div class="st">Generation <b>47</b></div>
+      <div class="st"><span class="d warn"></span>Pending <b>3</b></div>
+      <div class="st"><span class="d ok"></span>Proof <b>signed</b></div>
+    </div>
+    <div class="host"><span class="d"></span><span class="mono">halcyon</span> <span class="muted">▾</span></div>
+  </div>
+</header>
+
+<div class="wrap">
+  <nav class="side" aria-label="Sections">
+    <div class="lbl">System</div>
+    <button data-s="overview" aria-current="true">Overview</button>
+    <button data-s="modules">Modules &amp; options</button>
+    <button data-s="pending">Pending<span class="ct">3</span></button>
+    <button data-s="generations">Generations</button>
+    <div class="lbl">Runtime</div>
+    <button data-s="packages">Packages</button>
+    <button data-s="services">Services</button>
+    <button data-s="secrets">Secrets</button>
+    <div class="lbl">Fleet</div>
+    <button data-s="fleet">Hosts</button>
+  </nav>
+
+  <main>
+    <!-- OVERVIEW -->
+    <section class="screen on" data-screen="overview">
+      <div class="ph spread">
+        <div><div class="eyebrow">Workstation · linux.x64</div><h1>halcyon</h1>
+          <p>Generation 47 active since 09:14 today. Three changes are staged and ready to build.</p></div>
+        <div class="row"><button class="btn" onclick="go('generations')">History</button>
+          <button class="btn pri" onclick="go('pending')">Review 3 pending</button></div>
+      </div>
+
+      <div class="grid g4" style="margin-bottom:18px">
+        <div class="card cardp stat"><div class="eyebrow">Generation</div><div class="big">47</div>
+          <div class="lead"></div><div class="foot">Built 09:14 · 2 changes over gen 46</div></div>
+        <div class="card cardp stat"><div class="eyebrow">Kernel</div><div class="big">6.11</div>
+          <div class="lead"></div><div class="foot">linux-cachyos · BORE scheduler</div></div>
+        <div class="card cardp stat"><div class="eyebrow">Store</div><div class="big">14.2 GB</div>
+          <div class="lead"></div><div class="foot">3 generations retained</div></div>
+        <div class="card cardp stat"><div class="eyebrow">Health</div><div class="big" style="color:var(--ok)">6/6</div>
+          <div class="lead"></div><div class="foot">All checks passing</div></div>
+      </div>
+
+      <div class="grid g2">
+        <div class="card">
+          <div class="cardp" style="padding-bottom:6px"><div class="spread"><h3 style="margin:0;font-size:16px">Pending changes</h3>
+            <a href="#" onclick="go('pending');return false">Apply →</a></div></div>
+          <table><tbody>
+            <tr><td><span class="pill blue">add</span></td><td class="mono">services.tailscale</td><td class="muted">New supervised unit</td></tr>
+            <tr><td><span class="pill warn">set</span></td><td class="mono">stylix.polarity</td><td class="muted">light → dark</td></tr>
+            <tr><td><span class="pill warn">bump</span></td><td class="mono">pkgs.ripgrep</td><td class="muted">14.1.0 → 14.1.1</td></tr>
+          </tbody></table>
+        </div>
+        <div class="card">
+          <div class="cardp" style="padding-bottom:6px"><div class="spread"><h3 style="margin:0;font-size:16px">Health checks</h3>
+            <span class="pill ok"><span class="d"></span>6 passing</span></div></div>
+          <table><tbody>
+            <tr><td class="mono">boot.loader</td><td class="muted">systemd-boot, 3 entries</td><td><span class="pill ok">pass</span></td></tr>
+            <tr><td class="mono">filesystem.root</td><td class="muted">btrfs · 41% used</td><td><span class="pill ok">pass</span></td></tr>
+            <tr><td class="mono">network.online</td><td class="muted">NetworkManager reachable</td><td><span class="pill ok">pass</span></td></tr>
+            <tr><td class="mono">secrets.decrypt</td><td class="muted">5 secrets · host key ok</td><td><span class="pill ok">pass</span></td></tr>
+          </tbody></table>
+        </div>
+      </div>
+    </section>
+
+    <!-- MODULES -->
+    <section class="screen" data-screen="modules">
+      <div class="ph"><div class="eyebrow">The heart of Studio</div><h1>Modules &amp; options</h1>
+        <p>Every value here is a projection of <span class="mono">system.jet</span>. A bold value is one you set; a grey value is the module default. Editing writes the source line and shows the diff.</p></div>
+      <div class="search"><span class="muted">Find</span><input placeholder="Search options, modules, or values…" aria-label="Search options"><span class="kbd">/</span></div>
+
+      <div class="optcols">
+        <div>
+          <div class="modblk">
+            <div class="modhead"><h3>Desktop</h3><span class="path" onclick="showSrc('plasma')">desktop.plasma · system.jet:18</span></div>
+            <div class="card">
+              <div class="opt"><div class="name">enable<small>Install the KDE Plasma 6 session</small></div>
+                <div class="set"><span class="tag set">set</span><button class="sw" aria-pressed="true" aria-label="enable plasma"></button></div></div>
+              <div class="opt"><div class="name">version<small>Plasma major series</small></div>
+                <div class="set"><span class="tag set">set</span><span class="val-set">6.1</span></div></div>
+              <div class="opt"><div class="name">wayland<small>Default session protocol</small></div>
+                <div class="set"><span class="tag def">default</span><button class="sw" aria-pressed="true" aria-label="wayland"></button></div></div>
+              <div class="opt"><div class="name">excludePackages<small>Drop from the default suite</small></div>
+                <div class="set"><span class="tag def">default</span><span class="val-def">[ ]</span></div></div>
+            </div>
+          </div>
+
+          <div class="modblk">
+            <div class="modhead"><h3>Theming</h3><span class="path" onclick="showSrc('stylix')">stylix · system.jet:26</span></div>
+            <div class="card">
+              <div class="opt"><div class="name">base16Scheme<small>System-wide color scheme</small></div>
+                <div class="set"><span class="tag set">set</span><span class="val-set">"catppuccin-mocha"</span></div></div>
+              <div class="opt"><div class="name">polarity<small>Light or dark derivation</small></div>
+                <div class="set"><span class="tag set">set</span><span class="val-set">dark</span></div></div>
+              <div class="opt"><div class="name">image<small>Wallpaper source</small></div>
+                <div class="set"><span class="tag set">set</span><span class="val-set">"./wall/aurora.png"</span></div></div>
+              <div class="opt"><div class="name">fonts.monospace<small>Terminal and editor face</small></div>
+                <div class="set"><span class="tag set">set</span><span class="val-set">"JetBrains Mono"</span></div></div>
+            </div>
+          </div>
+
+          <div class="modblk">
+            <div class="modhead"><h3>Boot</h3><span class="path" onclick="showSrc('boot')">boot · system.jet:9</span></div>
+            <div class="card">
+              <div class="opt"><div class="name">kernelPackage<small>Kernel build</small></div>
+                <div class="set"><span class="tag set">set</span><span class="val-set">linux-cachyos</span></div></div>
+              <div class="opt"><div class="name">kernelParams<small>Appended to the kernel command line</small></div>
+                <div class="set"><span class="tag set">set</span><span class="val-set">["quiet","mitigations=off"]</span></div></div>
+              <div class="opt"><div class="name">loader.timeout<small>Menu wait, seconds</small></div>
+                <div class="set"><span class="tag def">default</span><span class="val-def">5</span></div></div>
+            </div>
+          </div>
+        </div>
+
+        <aside class="srcaside">
+          <div class="card">
+            <div class="srchead"><span class="pill blue" style="padding:2px 8px">source</span><span class="fp" id="fp">system.jet · stylix</span></div>
+            <div class="code" id="src"></div>
+            <div class="srchead" style="border-top:1px solid var(--hair-soft);border-bottom:0"><span class="muted" style="font-size:12px">Pending diff</span></div>
+            <div class="code diff"><div class="ln"><span class="n">28</span><span class="del">- polarity: light,</span></div>
+              <div class="ln"><span class="n">28</span><span class="add">+ polarity: dark,</span></div></div>
+          </div>
+          <p class="muted" style="margin:12px 4px">Studio never edits behind your back. Every toggle maps to one line of <span class="mono">system.jet</span>; the diff is what will be written.</p>
+        </aside>
+      </div>
+    </section>
+
+    <!-- PENDING -->
+    <section class="screen" data-screen="pending">
+      <div class="ph spread"><div><div class="eyebrow">Build &amp; switch</div><h1>Pending changes</h1>
+        <p>Three staged edits to <span class="mono">system.jet</span>. Studio builds a candidate generation, then switches to it atomically. If the switch fails, you stay on gen 47.</p></div>
+        <div class="row"><button class="btn warn" onclick="resetApply()">Discard</button>
+          <button class="btn" onclick="startApply('check')">Check</button>
+          <button class="btn pri" onclick="startApply('build')">Build &amp; switch</button></div></div>
+      <div class="grid g2">
+        <div class="card cardp">
+          <div class="spread" style="margin-bottom:12px"><h3 style="margin:0;font-size:16px">Staged diff</h3><span class="pill blue">3 hunks</span></div>
+          <div class="code diff" style="border-radius:10px;border:1px solid var(--hair-soft)">
+            <div class="ln"><span class="n">28</span><span class="del">- polarity: light,</span></div>
+            <div class="ln"><span class="n">28</span><span class="add">+ polarity: dark,</span></div>
+            <div class="ln"><span class="n">41</span><span class="add">+ services.tailscale: { enable: true, exitNode: false },</span></div>
+            <div class="ln"><span class="n">52</span><span class="del">- pkgs.ripgrep: "14.1.0",</span></div>
+            <div class="ln"><span class="n">52</span><span class="add">+ pkgs.ripgrep: "14.1.1",</span></div>
+          </div>
+        </div>
+        <div class="card cardp">
+          <div class="spread" style="margin-bottom:14px"><h3 style="margin:0;font-size:16px">Switch sequence</h3><span class="pill grey" id="aState">Idle</span></div>
+          <ul class="steps" id="aSteps">
+            <li class="wait"><span class="ic">1</span><span class="lbl2">Evaluate system.jet</span><span class="t">—</span></li>
+            <li class="wait"><span class="ic">2</span><span class="lbl2">Type &amp; policy check</span><span class="t">—</span></li>
+            <li class="wait"><span class="ic">3</span><span class="lbl2">Build candidate gen 48</span><span class="t">—</span></li>
+            <li class="wait"><span class="ic">4</span><span class="lbl2">Sign proof</span><span class="t">—</span></li>
+            <li class="wait"><span class="ic">5</span><span class="lbl2">Atomic switch to gen 48</span><span class="t">—</span></li>
+          </ul>
+          <div class="bar" style="margin:14px 0 10px"><span id="aBar" style="width:0"></span></div>
+          <div class="logbox" id="aLog">jet os build halcyon — ready</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- GENERATIONS -->
+    <section class="screen" data-screen="generations">
+      <div class="ph spread"><div><div class="eyebrow">Reversible by design</div><h1>Generations</h1>
+        <p>Each switch is atomic. Roll back to any recorded generation in one action; the boot menu keeps them too.</p></div>
+        <button class="btn pri" onclick="go('pending')">Build new</button></div>
+      <div class="grid" style="grid-template-columns:1fr 400px;gap:26px">
+        <div class="tline">
+          <div class="titem cur"><span class="dot"></span>
+            <div class="card cardp"><div class="tmeta"><h4>gen 47</h4><span class="pill ok"><span class="d"></span>Current</span><span class="when">2026-07-08 09:14</span></div>
+              <div class="facts"><div class="f"><div class="k">Source</div><div class="v">studio · set-option</div></div>
+                <div class="f"><div class="k">Delta</div><div class="v">+ cachyos kernel, + stylix dark</div></div>
+                <div class="f"><div class="k">Proof</div><div class="v">signed ✓</div></div></div></div></div>
+          <div class="titem"><span class="dot"></span>
+            <div class="card cardp"><div class="tmeta"><h4>gen 46</h4><span class="pill warn">rollback target</span><span class="when">2026-07-05 21:40</span>
+              <button class="btn sm" style="margin-left:auto" onclick="alert('jet os rollback halcyon 46 — atomic switch to gen 46')">Roll back</button></div>
+              <div class="facts"><div class="f"><div class="k">Source</div><div class="v">cli · os build</div></div>
+                <div class="f"><div class="k">Delta</div><div class="v">+ obsidian, ~ pipewire</div></div>
+                <div class="f"><div class="k">Proof</div><div class="v">signed ✓</div></div></div></div></div>
+          <div class="titem"><span class="dot"></span>
+            <div class="card cardp"><div class="tmeta"><h4>gen 45</h4><span class="when">2026-07-01 12:02</span>
+              <button class="btn sm" style="margin-left:auto">Roll back</button></div>
+              <div class="facts"><div class="f"><div class="k">Source</div><div class="v">cli · os switch</div></div>
+                <div class="f"><div class="k">Delta</div><div class="v">initial halcyon install</div></div>
+                <div class="f"><div class="k">Proof</div><div class="v">signed ✓</div></div></div></div></div>
+        </div>
+        <div class="card cardp" style="align-self:start">
+          <div class="spread" style="margin-bottom:12px"><h3 style="margin:0;font-size:16px">Diff 46 → 47</h3><span class="pill blue">3 changes</span></div>
+          <div class="code diff" style="border-radius:10px;border:1px solid var(--hair-soft)">
+            <div class="ln"><span class="n">11</span><span class="del">- kernelPackage: linux-zen,</span></div>
+            <div class="ln"><span class="n">11</span><span class="add">+ kernelPackage: linux-cachyos,</span></div>
+            <div class="ln"><span class="n">28</span><span class="del">- polarity: light,</span></div>
+            <div class="ln"><span class="n">28</span><span class="add">+ polarity: dark,</span></div>
+            <div class="ln"><span class="n">41</span><span class="add">+ services.tailscale: { enable: true },</span></div>
+          </div>
+          <p class="muted" style="margin-top:12px">Closure delta <span class="mono">+312 MB</span> · 41 rebuilt paths · 1 new boot entry.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- PACKAGES -->
+    <section class="screen" data-screen="packages">
+      <div class="ph"><div class="eyebrow">Declared in system.jet · pkgs</div><h1>Packages</h1>
+        <p>Installing stages a change to your config; it lands on the next switch, alongside everything else.</p></div>
+      <div class="search"><span class="muted">Search</span><input value="media" aria-label="Search packages"><span class="kbd">↵</span></div>
+      <div class="card tbl-card">
+        <table><thead><tr><th>Package</th><th>Version</th><th>Source</th><th>State</th><th></th></tr></thead><tbody>
+          <tr><td class="mono">firefox</td><td class="num">128.2</td><td class="muted">core</td><td><span class="pill ok">installed</span></td><td style="text-align:right"><button class="btn sm">Remove</button></td></tr>
+          <tr><td class="mono">ripgrep</td><td class="num">14.1.0 → 14.1.1</td><td class="muted">core</td><td><span class="pill warn">update staged</span></td><td style="text-align:right"><button class="btn sm">Revert</button></td></tr>
+          <tr><td class="mono">kitty</td><td class="num">0.36.1</td><td class="muted">core</td><td><span class="pill ok">installed</span></td><td style="text-align:right"><button class="btn sm">Remove</button></td></tr>
+          <tr><td class="mono">mpv</td><td class="num">0.38.0</td><td class="muted">core</td><td><span class="pill ok">installed</span></td><td style="text-align:right"><button class="btn sm">Remove</button></td></tr>
+          <tr><td class="mono">obsidian</td><td class="num">1.6.7</td><td class="muted">core · unfree</td><td><span class="pill ok">installed</span></td><td style="text-align:right"><button class="btn sm">Remove</button></td></tr>
+          <tr><td class="mono">signal-desktop</td><td class="num">7.18.0</td><td class="muted">core</td><td><span class="pill grey">available</span></td><td style="text-align:right"><button class="btn pri sm">Install</button></td></tr>
+          <tr><td class="mono">handbrake</td><td class="num">1.8.1</td><td class="muted">core</td><td><span class="pill grey">available</span></td><td style="text-align:right"><button class="btn pri sm">Install</button></td></tr>
+        </tbody></table>
+      </div>
+    </section>
+
+    <!-- SERVICES -->
+    <section class="screen" data-screen="services">
+      <div class="ph"><div class="eyebrow">Typed, supervised</div><h1>Services</h1>
+        <p>Live status for every unit. The declaration lives in <span class="mono">system.jet</span>; restart and logs act on the running system.</p></div>
+      <div class="card tbl-card" style="margin-bottom:20px">
+        <table><thead><tr><th>Unit</th><th>State</th><th>Since</th><th>CPU</th><th>Memory</th><th></th></tr></thead><tbody>
+          <tr><td class="mono">sshd</td><td><span class="pill ok"><span class="d"></span>running</span></td><td class="num muted">3d 04h</td><td class="num">0.0%</td><td class="num">7 MB</td><td style="text-align:right"><button class="btn sm" onclick="pickSvc('sshd')">Logs · Restart</button></td></tr>
+          <tr><td class="mono">NetworkManager</td><td><span class="pill ok"><span class="d"></span>running</span></td><td class="num muted">3d 04h</td><td class="num">0.1%</td><td class="num">22 MB</td><td style="text-align:right"><button class="btn sm">Logs · Restart</button></td></tr>
+          <tr><td class="mono">pipewire</td><td><span class="pill ok"><span class="d"></span>running</span></td><td class="num muted">3d 04h</td><td class="num">0.4%</td><td class="num">31 MB</td><td style="text-align:right"><button class="btn sm">Logs · Restart</button></td></tr>
+          <tr><td class="mono">sddm</td><td><span class="pill ok"><span class="d"></span>running</span></td><td class="num muted">3d 04h</td><td class="num">0.0%</td><td class="num">18 MB</td><td style="text-align:right"><button class="btn sm">Logs · Restart</button></td></tr>
+          <tr><td class="mono">tailscaled</td><td><span class="pill warn">enable staged</span></td><td class="num muted">—</td><td class="num">—</td><td class="num">—</td><td style="text-align:right"><button class="btn sm" onclick="go('pending')">Review</button></td></tr>
+          <tr><td class="mono">borgbackup.timer</td><td><span class="pill blue">scheduled 02:00</span></td><td class="num muted">daily</td><td class="num">—</td><td class="num">—</td><td style="text-align:right"><button class="btn sm">Run now</button></td></tr>
+          <tr><td class="mono">docker</td><td><span class="pill grey">stopped</span></td><td class="num muted">—</td><td class="num">—</td><td class="num">—</td><td style="text-align:right"><button class="btn sm">Start</button></td></tr>
+        </tbody></table>
+      </div>
+      <div class="card cardp">
+        <div class="spread" style="margin-bottom:12px"><h3 style="margin:0;font-size:16px">Log preview · <span class="mono" id="svc">sshd</span></h3><span class="pill ok">following</span></div>
+        <div class="logbox">
+          <div><span class="t">09:41</span> Accepted publickey for nate from 100.84.0.12 port 51044</div>
+          <div><span class="t">09:41</span> pam_unix(sshd:session): session opened for user nate</div>
+          <div><span class="t">10:02</span> Received disconnect: disconnected by user</div>
+          <div><span class="t">10:02</span> <span class="ok">session closed · 0 failures in window</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SECRETS -->
+    <section class="screen" data-screen="secrets">
+      <div class="ph spread"><div><div class="eyebrow">Encrypted to this host's key</div><h1>Secrets</h1>
+        <p>Studio shows the name, age, and consumers of each secret — never the value. Values are decrypted only on the host, at activation.</p></div>
+        <button class="btn pri">Add secret</button></div>
+      <div class="card tbl-card">
+        <table><thead><tr><th>Name</th><th>Age</th><th>Used by</th><th>Cipher</th><th></th></tr></thead><tbody>
+          <tr><td class="mono">wireguard-privkey</td><td class="num muted">62 days</td><td class="mono muted">services.wireguard</td><td><span class="pill blue">age · sealed</span></td><td style="text-align:right"><button class="btn sm">Rotate</button></td></tr>
+          <tr><td class="mono">borg-passphrase</td><td class="num muted">14 days</td><td class="mono muted">borgbackup.timer</td><td><span class="pill blue">age · sealed</span></td><td style="text-align:right"><button class="btn sm">Rotate</button></td></tr>
+          <tr><td class="mono">github-token</td><td class="num muted">8 days</td><td class="mono muted">pkgs.gh</td><td><span class="pill blue">age · sealed</span></td><td style="text-align:right"><button class="btn sm">Rotate</button></td></tr>
+          <tr><td class="mono">acme-cloudflare-dns</td><td class="num muted">31 days</td><td class="mono muted">security.acme</td><td><span class="pill blue">age · sealed</span></td><td style="text-align:right"><button class="btn sm">Rotate</button></td></tr>
+          <tr><td class="mono">restic-repo-key</td><td class="num" style="color:var(--warn)">201 days</td><td class="mono muted">— unused</td><td><span class="pill warn">age · stale</span></td><td style="text-align:right"><button class="btn warn sm">Rotate</button></td></tr>
+        </tbody></table>
+      </div>
+    </section>
+
+    <!-- FLEET -->
+    <section class="screen" data-screen="fleet">
+      <div class="ph spread"><div><div class="eyebrow">One config repo, many machines</div><h1>Hosts</h1>
+        <p>Each host builds its own generation from the same source. Deploy switches the selected hosts; any failure holds that host on its current generation.</p></div>
+        <button class="btn pri">Deploy to selected</button></div>
+      <div class="card tbl-card">
+        <table><thead><tr><th style="width:20px"></th><th>Host</th><th>Address</th><th>Role</th><th>Gen</th><th>Kernel</th><th>State</th><th>Last seen</th></tr></thead><tbody>
+          <tr><td><input type="checkbox" checked></td><td class="mono">halcyon</td><td class="num muted">100.84.0.1</td><td class="muted">workstation</td><td class="num">47</td><td class="mono muted">cachyos</td><td><span class="pill ok"><span class="d"></span>online · this host</span></td><td class="num muted">now</td></tr>
+          <tr><td><input type="checkbox"></td><td class="mono">bunker</td><td class="num muted">100.84.0.7</td><td class="muted">NAS · server</td><td class="num">33</td><td class="mono muted">lts</td><td><span class="pill ok"><span class="d"></span>online</span></td><td class="num muted">12s</td></tr>
+          <tr><td><input type="checkbox"></td><td class="mono">tempest</td><td class="num muted">100.84.0.9</td><td class="muted">laptop</td><td class="num">28</td><td class="mono muted">cachyos</td><td><span class="pill ok"><span class="d"></span>online</span></td><td class="num muted">2m</td></tr>
+          <tr><td><input type="checkbox"></td><td class="mono">relay</td><td class="num muted">100.84.0.3</td><td class="muted">VPS · edge</td><td class="num">19</td><td class="mono muted">hardened</td><td><span class="pill ok"><span class="d"></span>online</span></td><td class="num muted">40s</td></tr>
+          <tr><td><input type="checkbox"></td><td class="mono">avalon</td><td class="num muted">100.84.0.5</td><td class="muted">media box</td><td class="num">15</td><td class="mono muted">lts</td><td><span class="pill err">offline</span></td><td class="num muted">6h</td></tr>
+        </tbody></table>
+      </div>
+      <p class="muted" style="margin-top:14px">Deploy runs <span class="mono">jet os build &lt;host&gt;</span> then an atomic switch per host, in parallel.</p>
+    </section>
+  </main>
+</div>
+
+<script>
+  const nav=[...document.querySelectorAll('nav.side button')];
+  const screens=[...document.querySelectorAll('.screen')];
+  function go(s){screens.forEach(el=>el.classList.toggle('on',el.dataset.screen===s));
+    nav.forEach(b=>b.setAttribute('aria-current',b.dataset.s===s));window.scrollTo({top:0,behavior:'smooth'});}
+  nav.forEach(b=>b.addEventListener('click',()=>go(b.dataset.s)));
+
+  const SRC={
+    plasma:{fp:'system.jet · desktop.plasma',l:[[18,'<span class="key">module</span> desktop.plasma {'],[19,'&nbsp;&nbsp;<span class="key">enable</span>: <span class="kw">true</span>,',1],[20,'&nbsp;&nbsp;<span class="key">version</span>: <span class="str">"6.1"</span>,',1],[21,'&nbsp;&nbsp;<span class="key">wayland</span>: <span class="kw">true</span>,'],[22,'&nbsp;&nbsp;<span class="key">excludePackages</span>: [],'],[23,'}']]},
+    stylix:{fp:'system.jet · stylix',l:[[26,'<span class="key">module</span> stylix {'],[27,'&nbsp;&nbsp;<span class="key">base16Scheme</span>: <span class="str">"catppuccin-mocha"</span>,',1],[28,'&nbsp;&nbsp;<span class="key">polarity</span>: <span class="kw">dark</span>,',1],[29,'&nbsp;&nbsp;<span class="key">image</span>: <span class="str">"./wall/aurora.png"</span>,'],[30,'&nbsp;&nbsp;<span class="key">fonts.monospace</span>: <span class="str">"JetBrains Mono"</span>,'],[31,'}']]},
+    boot:{fp:'system.jet · boot',l:[[9,'<span class="key">module</span> boot {'],[10,'&nbsp;&nbsp;<span class="key">kernelPackage</span>: <span class="kw">linux-cachyos</span>,',1],[11,'&nbsp;&nbsp;<span class="key">kernelParams</span>: [<span class="str">"quiet"</span>, <span class="str">"mitigations=off"</span>],',1],[12,'&nbsp;&nbsp;<span class="key">loader.timeout</span>: <span class="kw">5</span>,'],[13,'}']]},
+  };
+  function showSrc(k){const s=SRC[k];if(!s)return;document.getElementById('fp').textContent=s.fp;
+    document.getElementById('src').innerHTML=s.l.map(x=>`<div class="ln${x[2]?' hl':''}"><span class="n">${x[0]}</span><span>${x[1]}</span></div>`).join('');}
+  showSrc('stylix');
+  function pickSvc(n){document.getElementById('svc').textContent=n;}
+
+  let timer=null;
+  const st=()=>[...document.querySelectorAll('#aSteps li')];
+  function resetApply(){clearInterval(timer);st().forEach(li=>{li.className='wait';li.querySelector('.ic').textContent=[...st()].indexOf(li)+1;li.querySelector('.t').textContent='—';});
+    document.getElementById('aBar').style.width='0';const b=document.getElementById('aState');b.textContent='Idle';b.className='pill grey';
+    document.getElementById('aLog').textContent='jet os build halcyon — ready';}
+  function startApply(mode){resetApply();const steps=st();let i=0;
+    const logs=['jet os check halcyon','type + field-policy pass','131 derivations · 41 rebuilt','proof signed to host key','activated · gen 48 is current'];
+    const total=mode==='check'?2:steps.length;const b=document.getElementById('aState');
+    b.textContent=mode==='check'?'Checking':'Building';b.className='pill blue';
+    timer=setInterval(()=>{
+      if(i>0){steps[i-1].className='done';steps[i-1].querySelector('.ic').textContent='✓';steps[i-1].querySelector('.t').textContent='ok';}
+      if(i>=total){clearInterval(timer);b.textContent=mode==='check'?'Check passed':'Switched';b.className='pill ok';
+        document.getElementById('aLog').innerHTML=mode==='check'?'<span class="ok">no errors — safe to build</span>':'<span class="ok">gen 48 active · rollback to 47 available</span>';return;}
+      steps[i].className='run';steps[i].querySelector('.ic').textContent='●';steps[i].querySelector('.t').textContent='…';
+      document.getElementById('aBar').style.width=((i+1)/total*100)+'%';
+      document.getElementById('aLog').textContent=logs[i];i++;
+    },820);
+  }
+  addEventListener('keydown',e=>{if(e.target.tagName==='INPUT')return;
+    const m={'1':'overview','2':'modules','3':'pending','4':'generations','5':'packages','6':'services','7':'secrets','8':'fleet'};if(m[e.key])go(m[e.key]);});
+</script>

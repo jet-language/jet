@@ -1,0 +1,451 @@
+<title>Jet Canvas — Pulse</title>
+<style>
+  /* ===== Family C — Pulse : dark, bold, one hot highlight per screen ===== */
+  :root{
+    --ground:#120E1A; --hot:#FF6B35; --hot2:#FF3D81; --cool:#8B7CFF;
+    --text:#E8E3F2; --dim:#8E86A3; --line:#2A2438; --card:#191325;
+    --ok:#58D68D; --warn:#D9A441; --error:#FF5C5C;
+    /* pin type colours — cold set; hot is reserved for the live thing */
+    --ctl:#E8E3F2; --data:#8B7CFF; --eff:#4FC3E8; --fall:#D9A441; --bool:#58D68D;
+    --mono:ui-monospace,"SFMono-Regular",Menlo,Consolas,monospace;
+    --sans:system-ui,"Segoe UI",Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;overflow:hidden;background:var(--ground);color:var(--text);font:13px/1.5 var(--sans)}
+  button,input,select{font:inherit;color:var(--text)}
+  ::selection{background:rgba(139,124,255,.35)}
+  :focus-visible{outline:2px solid var(--cool);outline-offset:2px}
+  button{border:1px solid var(--line);background:var(--card);border-radius:6px;min-height:30px;padding:0 11px;cursor:pointer}
+  button:hover{border-color:var(--cool);color:#fff}
+  button.on{border-color:var(--cool);background:#221A38;color:#fff}
+  input,select{border:1px solid var(--line);background:#0E0A16;border-radius:6px;min-height:30px;padding:0 9px}
+
+  /* full-bleed canvas, floating chrome */
+  #stage{position:absolute;inset:0;overflow:hidden;background:
+    radial-gradient(circle at 1px 1px,#221B31 1px,transparent 0) 0 0/26px 26px,var(--ground)}
+  #world{position:absolute;inset:0}
+  #wires{position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none}
+
+  .float{position:absolute;z-index:10;background:rgba(19,14,28,.92);border:1px solid var(--line);border-radius:10px;
+    box-shadow:0 16px 44px rgba(0,0,0,.5);backdrop-filter:blur(6px)}
+
+  /* top-left command pill */
+  #cmd{left:14px;top:14px;display:flex;align-items:center;gap:10px;padding:8px 12px}
+  #cmd .brand{font-weight:800;letter-spacing:-.02em;font-size:15px;padding-right:10px;border-right:1px solid var(--line)}
+  #cmd .brand em{font-style:normal;background:linear-gradient(90deg,var(--hot),var(--hot2));
+    -webkit-background-clip:text;background-clip:text;color:transparent}
+  #cmd select{font:12px var(--mono);min-height:28px;background:transparent;border-color:transparent;color:var(--cool);cursor:pointer;max-width:210px}
+  #cmd select:hover{border-color:var(--line)}
+  .seg{display:flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+  .seg button{border:0;border-radius:0;background:transparent;min-width:54px;min-height:28px}
+  .seg button.on{background:#221A38;color:#fff}
+  #cmd .tools{display:flex;gap:6px;padding-left:10px;border-left:1px solid var(--line)}
+  #cmd .tools button{min-height:28px}
+
+  /* left drawer: project + functions + search */
+  #drawer{left:14px;top:76px;width:236px;max-height:calc(100% - 210px);overflow:auto;padding:12px}
+  #drawer h2{margin:12px 0 8px;font:800 11px var(--sans);letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
+  #drawer h2:first-child{margin-top:0}
+  .navrow{display:block;width:100%;text-align:left;margin:4px 0;padding:7px 9px;border:1px solid transparent;border-radius:6px;background:transparent;cursor:pointer}
+  .navrow:hover{background:#1E1730;color:inherit;border-color:transparent}
+  .navrow.on{background:#221A38;border-color:#3A3054}
+  .navrow b{font-size:12.5px}.navrow small{display:block;color:var(--dim);font:10.5px var(--mono);margin-top:1px}
+  .fld{width:100%;font:12px var(--mono);margin:2px 0 6px}
+
+  /* rails legend, top right */
+  #rails{right:14px;top:14px;display:flex;gap:12px;padding:8px 12px;font:10px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--dim)}
+  .rail{display:flex;align-items:center;gap:6px}
+  .rail i{width:16px;height:0;border-top:2.5px solid var(--c);display:inline-block}
+
+  /* nodes */
+  .node{position:absolute;width:var(--w);background:var(--card);border:1px solid var(--line);border-radius:8px;
+    box-shadow:0 10px 28px rgba(0,0,0,.45);cursor:grab}
+  .node .hd{display:flex;align-items:center;gap:8px;padding:8px 11px;border-bottom:1px solid var(--line)}
+  .node .hd b{font-weight:800;letter-spacing:-.01em;font-size:13px}
+  .node .hd .badge{margin-left:auto;font:9.5px var(--mono);color:var(--k);text-transform:uppercase;letter-spacing:.12em}
+  .node .body{padding:7px 7px;display:grid;gap:4px}
+  .prow{display:flex;align-items:center;gap:7px;font:11px var(--mono);min-height:19px}
+  .prow.out{justify-content:flex-end;text-align:right}
+  .pin{width:10px;height:10px;flex:0 0 auto;background:var(--c);box-shadow:0 0 7px color-mix(in srgb,var(--c) 60%,transparent)}
+  .pin.circle{border-radius:50%}
+  .pin.exec{width:0;height:0;background:transparent;box-shadow:none;border-left:8px solid var(--c);border-top:5px solid transparent;border-bottom:5px solid transparent}
+  .pin.diamond{transform:rotate(45deg);width:9px;height:9px;border-radius:1px}
+  .prow .ty{color:var(--dim);font-size:10px}
+  .prow.out .pin{order:2}
+  .node .code{margin:2px 10px 9px;color:var(--dim);font:10.5px var(--mono);white-space:pre;overflow:hidden;text-overflow:ellipsis}
+  .node.sel{border-color:var(--cool);box-shadow:0 0 0 1px var(--cool),0 12px 30px rgba(0,0,0,.5)}
+  /* THE one hot thing: the paused node */
+  .node.running{border-color:transparent;background:
+    linear-gradient(var(--card),var(--card)) padding-box,
+    linear-gradient(120deg,var(--hot),var(--hot2)) border-box;
+    border:2px solid transparent;
+    box-shadow:0 0 34px rgba(255,84,110,.35),0 12px 34px rgba(0,0,0,.5)}
+  .node.running .hd b{background:linear-gradient(90deg,var(--hot),var(--hot2));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .bp{position:absolute;left:-8px;top:10px;width:13px;height:13px;border-radius:50%;
+    background:linear-gradient(120deg,var(--hot),var(--hot2));border:2px solid var(--ground);box-shadow:0 0 12px rgba(255,84,110,.6)}
+
+  .wire{fill:none;stroke-width:2.2}
+  .wire.exec{stroke-width:2.8;stroke-linecap:round}
+  .wire.dim{opacity:.25}
+  .pulse{stroke:url(#hotgrad);stroke-width:2.6;stroke-dasharray:6 190;filter:drop-shadow(0 0 6px rgba(255,84,110,.7));animation:flow 1.1s linear infinite}
+  @keyframes flow{to{stroke-dashoffset:-196}}
+  @media(prefers-reduced-motion:reduce){.pulse{animation:none;stroke-dasharray:none;opacity:.5}}
+
+  /* transport bar, bottom center: debug + replay */
+  #transport{left:50%;bottom:16px;transform:translateX(-50%);display:flex;align-items:center;gap:8px;padding:9px 14px}
+  #transport .lab{font:800 10px var(--sans);letter-spacing:.14em;text-transform:uppercase;color:var(--dim);padding-right:8px;border-right:1px solid var(--line)}
+  #transport button{min-height:28px;min-width:34px}
+  #transport #cont{font-weight:800}
+  #transport .rep{display:flex;align-items:center;gap:8px;padding-left:10px;border-left:1px solid var(--line);font:10.5px var(--mono);color:var(--dim)}
+  #transport input[type=range]{width:130px;accent-color:#FF5481}
+  #wstat{left:50%;bottom:66px;transform:translateX(-50%);display:flex;align-items:center;gap:9px;padding:7px 13px;
+    font:11.5px var(--mono);color:var(--dim);max-width:520px;white-space:nowrap}
+  #wstat .dot{width:9px;height:9px;border-radius:50%;background:linear-gradient(120deg,var(--hot),var(--hot2));box-shadow:0 0 10px rgba(255,84,110,.7)}
+  #wstat b{color:#fff}
+
+  #hud{position:absolute;left:14px;bottom:16px;z-index:9;display:flex;gap:8px;font:10.5px var(--mono);color:var(--dim)}
+  #hud span{background:rgba(19,14,28,.9);border:1px solid var(--line);border-radius:5px;padding:4px 8px}
+  #mini{right:14px;bottom:16px;width:180px;height:112px;overflow:hidden;padding:0}
+  #mini svg{width:100%;height:100%;display:block}
+
+  /* inspector, floating right */
+  #insp{right:14px;top:64px;width:300px;max-height:calc(100% - 220px);overflow:auto;padding:14px}
+  #insp .title b{display:block;font-size:18px;font-weight:800;letter-spacing:-.02em}
+  #insp .title span{font:10px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--k2,var(--cool))}
+  dl.kv{display:grid;grid-template-columns:74px 1fr;gap:5px 10px;margin:12px 0 0;font:11px var(--mono)}
+  dl.kv dt{color:var(--dim)}dl.kv dd{margin:0}
+  #insp h2{margin:16px 0 8px;font:800 10.5px var(--sans);letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
+  .pinrow{display:flex;align-items:center;gap:9px;padding:6px 8px;margin:4px 0;border:1px solid var(--line);border-radius:6px;background:#141021;font:11px var(--mono)}
+  .pinrow .pin{width:10px;height:10px;border-radius:50%;background:var(--c);box-shadow:0 0 7px color-mix(in srgb,var(--c) 60%,transparent);flex:0 0 auto}
+  .pinrow b{font-weight:700}
+  .pinrow .ty{margin-left:auto;color:var(--c);font-size:10px}
+  .convert{margin-top:10px;padding:10px;border:1px dashed var(--line);border-radius:8px;background:#141021}
+  .convert h3{margin:0 0 7px;font:800 9.5px var(--sans);letter-spacing:.12em;text-transform:uppercase;color:var(--dim)}
+  .convert .flow{display:flex;align-items:center;gap:7px;font:11px var(--mono)}
+  .convert .chip{border:1px solid var(--data);color:var(--data);border-radius:999px;padding:1px 8px}
+  .convert select{flex:1;font:11px var(--mono)}
+  .qa{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:10px}
+  .qa .wide{grid-column:1/-1}
+  .diag{margin-top:14px;border:1px solid var(--line);border-left:3px solid var(--error);border-radius:8px;background:#141021;overflow:hidden}
+  .diag .dh{padding:6px 11px;font:10px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--error);
+    display:flex;justify-content:space-between;border-bottom:1px solid var(--line)}
+  .diag pre{margin:0;padding:9px 12px;font:11px/1.55 var(--mono);white-space:pre-wrap;color:#EDE6F5}
+  .diag .why{color:var(--warn)}.diag .fix{color:var(--ok)}
+
+  /* status chips, top center */
+  #status{left:50%;top:14px;transform:translateX(-50%);display:flex;gap:0;padding:0;font:10.5px var(--mono);overflow:hidden}
+  #status span{display:flex;align-items:center;gap:6px;padding:8px 13px;color:var(--dim);border-right:1px solid var(--line)}
+  #status span:last-child{border-right:0}
+  #status i{width:7px;height:7px;border-radius:50%;display:inline-block}
+  #status b{color:var(--text)}
+
+  /* context palette */
+  #pal{position:absolute;z-index:20;width:296px;display:none;background:#151022;border:1px solid var(--cool);border-radius:10px;
+    box-shadow:0 22px 60px rgba(0,0,0,.65)}
+  #pal.open{display:block}
+  #pal .ctx{font:10.5px var(--mono);color:var(--dim);padding:9px 12px 0;display:flex;gap:6px;align-items:center}
+  #pal .ctx .pin{width:9px;height:9px;border-radius:50%;background:var(--data)}
+  #pal .ph{padding:8px 10px;border-bottom:1px solid var(--line)}
+  #pal .ph input{width:100%}
+  #pal .list{max-height:270px;overflow:auto;padding:6px}
+  .palrow{display:block;width:100%;text-align:left;margin:2px 0;padding:7px 10px;border:0;border-left:3px solid var(--k,var(--cool));
+    border-radius:4px;background:transparent;cursor:pointer;font:11.5px var(--mono)}
+  .palrow:hover{background:#1E1730;color:inherit}
+  .palrow b{font-weight:700}.palrow small{display:block;color:var(--dim);font-size:10px}
+
+  /* code view overlay */
+  #codev{position:absolute;inset:64px 330px 100px 264px;z-index:8;display:none;background:#0E0A16;border:1px solid var(--line);
+    border-radius:10px;overflow:auto;box-shadow:0 20px 50px rgba(0,0,0,.5)}
+  body.code #codev{display:block}
+  .codewrap{display:grid;grid-template-columns:46px 1fr;font:12.5px/1.6 var(--mono)}
+  .gutter{text-align:right;padding:14px 9px;color:#4E4569;background:#120E1A;user-select:none;border-right:1px solid var(--line)}
+  pre.src{margin:0;padding:14px 18px;white-space:pre;color:#DED7EC}
+  .src .kw{color:var(--cool)}.src .ty{color:var(--eff)}.src .nu{color:var(--warn)}
+  .src .hl{background:rgba(139,124,255,.12);display:block;margin:0 -18px;padding:0 18px;box-shadow:inset 3px 0 0 var(--cool)}
+
+  @media(max-width:1100px){#drawer{display:none}#codev{inset:64px 14px 100px 14px}}
+  @media(max-width:900px){#insp{display:none}#status{display:none}}
+</style>
+
+<div id="stage">
+  <div id="world"><svg id="wires">
+    <defs><linearGradient id="hotgrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#FF6B35"/><stop offset="1" stop-color="#FF3D81"/>
+    </linearGradient></defs>
+  </svg></div>
+
+  <!-- command pill -->
+  <div id="cmd" class="float">
+    <span class="brand">Jet <em>Canvas</em></span>
+    <select aria-label="Project"><option>canvas_blueprint_demo</option><option>http_client</option><option>data_pipeline</option></select>
+    <select id="graphsel" aria-label="Function"><option>fn run</option><option selected>fn summarize</option><option>fn square</option><option>fn helper</option></select>
+    <div class="seg" role="tablist" aria-label="View">
+      <button id="v-graph" class="on" role="tab" aria-selected="true">Graph</button>
+      <button id="v-code" role="tab" aria-selected="false">Code</button>
+    </div>
+    <div class="tools"><button id="fit">Fit</button><button id="addnode" title="Add node (A or right-click)">+ Node</button></div>
+  </div>
+
+  <!-- status chips -->
+  <div id="status" class="float" aria-label="Status">
+    <span><i style="background:var(--ok)"></i>build <b>ok</b></span>
+    <span><i style="background:var(--warn)"></i>watch <b>3</b></span>
+    <span><i style="background:var(--error)"></i>diag <b>1</b></span>
+    <span>rev <b>a3f9c1</b></span>
+  </div>
+
+  <!-- rails legend -->
+  <div id="rails" class="float" aria-label="Rails">
+    <span class="rail" style="--c:var(--ctl)"><i></i>Control</span>
+    <span class="rail" style="--c:var(--data)"><i></i>Data</span>
+    <span class="rail" style="--c:var(--eff)"><i></i>Effects</span>
+    <span class="rail" style="--c:var(--fall)"><i></i>Fallibility</span>
+  </div>
+
+  <!-- left drawer -->
+  <div id="drawer" class="float">
+    <h2>Project</h2>
+    <button class="navrow on"><b>canvas_blueprint_demo</b><small>tooling/ · 4 functions</small></button>
+    <button class="navrow"><b>http_client</b><small>net/ · effects: net, tasks</small></button>
+    <h2>Functions</h2>
+    <button class="navrow"><b>run</b><small>() · calls summarize</small></button>
+    <button class="navrow on"><b>summarize</b><small>(limit: Int) → Int · paused</small></button>
+    <button class="navrow"><b>square</b><small>(n: Int) → Int · pure</small></button>
+    <button class="navrow"><b>helper</b><small>() → Int · pure</small></button>
+    <h2>Search</h2>
+    <input class="fld" placeholder="Find in graph…">
+    <button class="navrow"><b>square</b><small>call · summarize:10</small></button>
+    <button class="navrow"><b>total</b><small>binding · Int</small></button>
+  </div>
+
+  <!-- inspector -->
+  <div id="insp" class="float">
+    <div class="title"><span id="ik" style="--k2:var(--warn)">selection · if</span><b id="it">Branch</b></div>
+    <dl class="kv">
+      <dt>source</dt><dd>canvas_blueprint_demo.jet:11</dd>
+      <dt>effects</dt><dd>none (pure)</dd>
+      <dt>returns</dt><dd>Int on both arms</dd>
+      <dt>condition</dt><dd>total &gt; 10</dd>
+    </dl>
+    <h2>Pins</h2>
+    <div class="pinrow" style="--c:var(--ctl)"><span class="pin"></span><b>exec</b><span class="ty">Control</span></div>
+    <div class="pinrow" style="--c:var(--data)"><span class="pin"></span><b>total</b><span class="ty">Int</span></div>
+    <div class="pinrow" style="--c:var(--bool)"><span class="pin"></span><b>&gt; 10</b><span class="ty">Bool</span></div>
+    <div class="pinrow" style="--c:var(--ctl)"><span class="pin"></span><b>True → return</b><span class="ty">Control</span></div>
+    <div class="pinrow" style="--c:var(--ctl)"><span class="pin"></span><b>False → +1</b><span class="ty">Control</span></div>
+    <div class="convert">
+      <h3>Convert pin type</h3>
+      <div class="flow"><span class="chip">Int</span>→
+        <select><option>Float (widen · lossless)</option><option>String (via .show)</option><option>Int? (wrap optional)</option></select>
+      </div>
+    </div>
+    <div class="qa">
+      <button>Rename</button><button>Break here</button>
+      <button>Watch value</button><button>Extract fn</button>
+      <button class="wide">Reveal in source · line 11</button>
+    </div>
+    <div class="diag" role="status">
+      <div class="dh"><span>Diagnostic</span><span>E0204</span></div>
+<pre>Error [E0204]: `x` is being changed in this call, so it can't be used again here
+  --&gt; net/http_client.jet:15:32
+    |
+ 15 |     net.tcp_reply(stream, "200 OK", body)
+    |                                ^
+<span class="why"> Why: while something is being changed, nobody else may be looking at it</span>
+<span class="fix"> Fix: pass `&amp;x` only once, or copy first with `copy x`</span></pre>
+    </div>
+  </div>
+
+  <!-- paused banner + transport -->
+  <div id="wstat" class="float" aria-live="polite"><span class="dot"></span><b>Paused at breakpoint</b><span id="wsmsg">Branch · total &gt; 10 → False</span></div>
+  <div id="transport" class="float" aria-label="Debugger and replay">
+    <span class="lab">Debug</span>
+    <button id="brk" class="on" title="Breakpoint on Branch">●</button>
+    <button id="step">Step</button>
+    <button id="next">Next</button>
+    <button id="cont">▶ Continue</button>
+    <button id="stop">■</button>
+    <span class="rep">Replay <input id="scrubrange" type="range" min="0" max="100" value="62" aria-label="Replay position"><span id="scrubt">t=3.2s</span></span>
+  </div>
+
+  <div id="hud"><span id="zoom">100%</span><span>8 nodes · 11 wires</span></div>
+  <div id="mini" class="float"><svg id="minisvg" viewBox="0 0 180 112" aria-hidden="true"></svg></div>
+
+  <!-- context palette -->
+  <div id="pal" role="dialog" aria-label="Add node">
+    <div class="ctx"><span class="pin"></span>from <b style="color:var(--data)">Int</b> output · square → return</div>
+    <div class="ph"><input id="palq" placeholder="Search nodes compatible with Int…"></div>
+    <div class="list" id="pallist"></div>
+  </div>
+
+  <!-- code view -->
+  <div id="codev"><div class="codewrap"><div class="gutter" id="gut"></div><pre class="src" id="src"></pre></div></div>
+</div>
+
+<script>
+/* graph model : real Jet from examples/features/tooling/canvas_blueprint_demo.jet + net/http_client.jet */
+const K={entry:'var(--ok)',call:'var(--cool)',branch:'var(--warn)',op:'var(--eff)',io:'var(--eff)',fall:'var(--fall)'};
+const nodes=[
+ {id:'entry',t:'fn summarize',badge:'entry',k:K.entry,x:250,y:170,w:196,code:'summarize(limit: Int)',
+   pins:[{s:'out',n:'exec',c:'--ctl',sh:'exec'},{s:'out',n:'limit',c:'--data',sh:'circle',ty:'Int'}]},
+ {id:'square',t:'square',badge:'call',k:K.call,x:510,y:140,w:186,code:'total := square(limit)',
+   pins:[{s:'in',n:'exec',c:'--ctl',sh:'exec'},{s:'in',n:'n',c:'--data',sh:'circle',ty:'Int'},
+         {s:'out',n:'exec',c:'--ctl',sh:'exec'},{s:'out',n:'→ Int',c:'--data',sh:'circle',ty:'Int'}]},
+ {id:'branch',t:'Branch',badge:'if',k:K.branch,x:766,y:170,w:196,code:'if total > 10',
+   pins:[{s:'in',n:'exec',c:'--ctl',sh:'exec'},{s:'in',n:'total',c:'--data',sh:'circle',ty:'Int'},
+         {s:'in',n:'> 10',c:'--bool',sh:'diamond',ty:'Bool'},
+         {s:'out',n:'True',c:'--ctl',sh:'exec'},{s:'out',n:'False',c:'--ctl',sh:'exec'}],bp:true},
+ {id:'ret1',t:'return total',badge:'return',k:K.entry,x:1040,y:96,w:170,code:'return total',
+   pins:[{s:'in',n:'exec',c:'--ctl',sh:'exec'},{s:'in',n:'total',c:'--data',sh:'circle',ty:'Int'}]},
+ {id:'add',t:'total + 1',badge:'op',k:K.op,x:1030,y:256,w:180,code:'return total + 1',
+   pins:[{s:'in',n:'exec',c:'--ctl',sh:'exec'},{s:'in',n:'a',c:'--data',sh:'circle',ty:'Int'},
+         {s:'out',n:'exec',c:'--ctl',sh:'exec'},{s:'out',n:'sum',c:'--data',sh:'circle',ty:'Int'}]},
+ {id:'print',t:'print',badge:'io',k:K.io,x:766,y:430,w:210,code:'print(summarize(4))',
+   pins:[{s:'in',n:'exec',c:'--ctl',sh:'exec'},{s:'in',n:'value',c:'--data',sh:'circle',ty:'Int'},
+         {s:'out',n:'!io',c:'--eff',sh:'circle',ty:'Effect'}]},
+ {id:'listen',t:'tcp_listen',badge:'fallible',k:K.fall,x:270,y:440,w:230,code:'net.tcp_listen("127.0.0.1:0")',
+   pins:[{s:'out',n:'exec',c:'--ctl',sh:'exec'},{s:'out',n:'Listener?',c:'--fall',sh:'diamond',ty:'Listener?'},
+         {s:'out',n:'!net',c:'--eff',sh:'circle',ty:'Effect'}]},
+ {id:'guard',t:'?? panic',badge:'guard',k:K.fall,x:560,y:480,w:170,code:'?? panic("bind failed")',
+   pins:[{s:'in',n:'in?',c:'--fall',sh:'diamond',ty:'Listener?'},{s:'out',n:'Listener',c:'--data',sh:'circle',ty:'Listener'}]},
+];
+const wires=[
+ ['entry',0,'square',0,'--ctl'],['entry',1,'square',1,'--data'],
+ ['square',2,'branch',0,'--ctl'],['square',3,'branch',1,'--data'],
+ ['branch',3,'ret1',0,'--ctl'],['branch',4,'add',0,'--ctl'],
+ ['branch',1,'add',1,'--data'],
+ ['ret1',1,'print',1,'--data'],
+ ['square',2,'print',0,'--ctl','dim'],
+ ['listen',1,'guard',0,'--fall'],
+ ['listen',2,'print',2,'--eff','dim'],
+];
+const world=document.getElementById('world'),svg=document.getElementById('wires');
+const defs=svg.innerHTML;
+const pinPos={};
+function render(){
+  nodes.forEach(nd=>{
+    const el=document.createElement('div');el.className='node';el.id='N-'+nd.id;
+    el.style.cssText=`left:${nd.x}px;top:${nd.y}px;--w:${nd.w}px;--k:${nd.k}`;
+    if(nd.id==='branch')el.classList.add('running');
+    el.innerHTML=`${nd.bp?'<span class="bp" title="breakpoint"></span>':''}
+      <div class="hd"><b>${nd.t}</b><span class="badge">${nd.badge}</span></div>
+      <div class="body">${nd.pins.map((p,i)=>rowHTML(nd.id,p,i)).join('')}</div>
+      <div class="code">${nd.code}</div>`;
+    el.addEventListener('click',()=>select(nd.id));
+    world.appendChild(el);
+  });
+  measure();drawWires();drawMini();
+}
+function rowHTML(nid,p,i){
+  const dot=`<span class="pin ${p.sh} pin-${nid}-${i}" style="--c:var(${p.c})"></span>`;
+  const ty=p.ty?`<span class="ty">${p.ty}</span>`:'';
+  return `<div class="prow ${p.s==='out'?'out':''}">${p.s==='out'?ty+`<b>${p.n}</b>`+dot : dot+`<b>${p.n}</b>`+ty}</div>`;
+}
+function measure(){
+  const wr=world.getBoundingClientRect();
+  nodes.forEach(nd=>nd.pins.forEach((p,i)=>{
+    const el=document.querySelector('.pin-'+nd.id+'-'+i);const r=el.getBoundingClientRect();
+    pinPos[nd.id+'-'+i]={x:r.left+r.width/2-wr.left,y:r.top+r.height/2-wr.top};
+  }));
+}
+function drawWires(sel){
+  svg.innerHTML=defs;
+  wires.forEach(w=>{
+    const a=pinPos[w[0]+'-'+w[1]],b=pinPos[w[2]+'-'+w[3]];if(!a||!b)return;
+    const dx=Math.max(40,Math.abs(b.x-a.x)*.5);
+    const d=`M${a.x},${a.y} C${a.x+dx},${a.y} ${b.x-dx},${b.y} ${b.x},${b.y}`;
+    const exec=w[4]==='--ctl';
+    const p=document.createElementNS('http://www.w3.org/2000/svg','path');
+    p.setAttribute('d',d);p.setAttribute('class','wire'+(exec?' exec':'')+(w[5]==='dim'?' dim':''));
+    p.setAttribute('stroke',`var(${w[4]})`);p.setAttribute('opacity',exec?'.7':'.55');
+    if(sel&&!(w[0]===sel||w[2]===sel))p.classList.add('dim');
+    svg.appendChild(p);
+    /* the ONE hot element: live execution pulse into the paused node */
+    if((w[0]==='entry'||w[0]==='square')&&exec&&w[5]!=='dim'){
+      const pu=document.createElementNS('http://www.w3.org/2000/svg','path');
+      pu.setAttribute('d',d);pu.setAttribute('class','pulse');pu.setAttribute('fill','none');
+      svg.appendChild(pu);
+    }
+  });
+}
+function drawMini(){
+  document.getElementById('minisvg').innerHTML=
+    nodes.map(n=>`<rect x="${n.x*180/1400}" y="${n.y*112/700}" width="${n.w*180/1400}" height="8" rx="1.5" fill="${n.id==='branch'?'#FF5481':'#2A2438'}" stroke="#3A3054"/>`).join('')
+    +`<rect x="20" y="8" width="130" height="76" fill="none" stroke="#8B7CFF" stroke-dasharray="3 3"/>`;
+}
+let cur='branch';
+function select(id){
+  cur=id;document.querySelectorAll('.node').forEach(n=>n.classList.toggle('sel',n.id==='N-'+id));
+  drawWires(id);
+  const nd=nodes.find(n=>n.id===id);if(!nd)return;
+  document.getElementById('it').textContent=nd.t;
+  document.getElementById('ik').textContent=nd.badge+' · '+nd.code;
+}
+render();
+
+function view(v){
+  ['graph','code'].forEach(x=>{const b=document.getElementById('v-'+x);b.classList.toggle('on',x===v);b.setAttribute('aria-selected',x===v);});
+  document.body.classList.toggle('code',v==='code');
+  if(v!=='code'){measure();drawWires(cur);}
+}
+document.getElementById('v-graph').onclick=()=>view('graph');
+document.getElementById('v-code').onclick=()=>view('code');
+
+const source=`fn helper() -> Int {
+    return 1
+}
+
+fn square(n: Int) -> Int {
+    return n * n
+}
+
+fn summarize(limit: Int) -> Int {
+    total := square(limit)
+    if total > 10 {
+        return total
+    } else {
+        return total + 1
+    }
+}
+
+fn run() {
+    print(summarize(4))
+}`;
+(function(){
+  const hl=source.replace(/\b(fn|if|else|return|use)\b/g,'<span class="kw">$1</span>')
+    .replace(/\b(Int|String|Bool)\b/g,'<span class="ty">$1</span>')
+    .replace(/\b(\d+)\b/g,'<span class="nu">$1</span>');
+  const lines=hl.split('\n');
+  document.getElementById('src').innerHTML=lines.map((l,i)=>(i>=9&&i<=15)?`<span class="hl">${l||' '}</span>`:l).join('\n');
+  document.getElementById('gut').innerHTML=lines.map((_,i)=>i+1).join('\n');
+})();
+
+const palItems=[
+ {t:'square',s:'fn(n: Int) → Int · pure',k:'--data'},
+ {t:'abs',s:'fn(n: Int) → Int · std.math',k:'--data'},
+ {t:'clamp',s:'fn(n: Int, lo, hi) → Int',k:'--data'},
+ {t:'to Float',s:'convert Int → Float · lossless',k:'--data'},
+ {t:'print',s:'fn(value) !io · console',k:'--eff'},
+ {t:'if',s:'branch on Bool · control',k:'--ctl'},
+ {t:'?? else',s:'unwrap fallible or fallback',k:'--fall'},
+];
+const pal=document.getElementById('pal'),pallist=document.getElementById('pallist');
+function fillPal(q=''){pallist.innerHTML=palItems.filter(i=>i.t.toLowerCase().includes(q.toLowerCase()))
+  .map(i=>`<button class="palrow" style="--k:var(${i.k})"><b>${i.t}</b><small>${i.s}</small></button>`).join('')
+  ||'<div style="padding:10px;color:var(--dim);font:11px var(--mono)">No matching node. Try a shorter search.</div>';}
+function openPal(x,y){pal.style.left=Math.min(x,innerWidth-316)+'px';pal.style.top=Math.min(y,innerHeight-360)+'px';
+  pal.classList.add('open');fillPal();const q=document.getElementById('palq');q.value='';q.focus();}
+const stage=document.getElementById('stage');
+stage.addEventListener('contextmenu',e=>{e.preventDefault();openPal(e.clientX,e.clientY);});
+document.getElementById('addnode').onclick=()=>openPal(320,140);
+document.getElementById('palq').addEventListener('input',e=>fillPal(e.target.value));
+document.addEventListener('click',e=>{if(!pal.contains(e.target)&&e.target.id!=='addnode')pal.classList.remove('open');});
+document.addEventListener('keydown',e=>{if(e.key==='a'&&e.target.tagName!=='INPUT'){openPal(320,140);}if(e.key==='Escape')pal.classList.remove('open');});
+
+const wsmsg=document.getElementById('wsmsg');
+document.getElementById('cont').onclick=()=>wsmsg.textContent='running · summarize(4) → square(4) = 16';
+document.getElementById('step').onclick=()=>wsmsg.textContent='step → return total  (16)';
+document.getElementById('scrubrange').addEventListener('input',e=>{
+  document.getElementById('scrubt').textContent='t='+(e.target.value/20).toFixed(1)+'s';});
+addEventListener('resize',()=>{measure();drawWires(cur);});
+</script>

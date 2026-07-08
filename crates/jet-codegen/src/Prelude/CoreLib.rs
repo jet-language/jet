@@ -1896,6 +1896,26 @@ mod jet_std {
     }
 
     #[derive(Clone, Debug, PartialEq)]
+    pub struct DataTable<T> {
+        pub rows: Vec<T>,
+        pub missing: i64,
+        pub plan: Vec<String>,
+    }
+
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct DataSeries<T> {
+        pub values: Vec<T>,
+        pub missing: i64,
+    }
+
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct DataLazyFrame<T> {
+        pub rows: Vec<T>,
+        pub missing: i64,
+        pub plan: Vec<String>,
+    }
+
+    #[derive(Clone, Debug, PartialEq)]
     pub struct LogField {
         pub key: String,
         pub value: String,
@@ -9920,8 +9940,121 @@ fn jet_enc_csv_decode<T: user_Decode>(text: &String) -> Result<Vec<T>, jet_std::
     Ok(out)
 }
 
-fn jet_data_count<T>(rows: &Vec<T>) -> i64 {
-    rows.len() as i64
+trait JetDataCount {
+    fn jet_data_count(&self) -> i64;
+}
+
+impl<T> JetDataCount for Vec<T> {
+    fn jet_data_count(&self) -> i64 {
+        self.len() as i64
+    }
+}
+
+impl<T> JetDataCount for jet_std::DataTable<T> {
+    fn jet_data_count(&self) -> i64 {
+        self.rows.len() as i64
+    }
+}
+
+impl<T> JetDataCount for jet_std::DataSeries<T> {
+    fn jet_data_count(&self) -> i64 {
+        self.values.len() as i64
+    }
+}
+
+impl<T> JetDataCount for jet_std::DataLazyFrame<T> {
+    fn jet_data_count(&self) -> i64 {
+        self.rows.len() as i64
+    }
+}
+
+fn jet_data_count<T: JetDataCount + ?Sized>(rows: &T) -> i64 {
+    rows.jet_data_count()
+}
+
+fn jet_data_table<T: Clone>(rows: &Vec<T>) -> jet_std::DataTable<T> {
+    jet_std::DataTable {
+        rows: rows.clone(),
+        missing: 0,
+        plan: vec!["table".to_string()],
+    }
+}
+
+fn jet_data_rows<T: Clone>(table: &jet_std::DataTable<T>) -> Vec<T> {
+    table.rows.clone()
+}
+
+fn jet_data_series<T: Clone>(values: &Vec<T>) -> jet_std::DataSeries<T> {
+    jet_std::DataSeries {
+        values: values.clone(),
+        missing: 0,
+    }
+}
+
+fn jet_data_series_values<T: Clone>(series: &jet_std::DataSeries<T>) -> Vec<T> {
+    series.values.clone()
+}
+
+fn jet_data_missing_count<T>(series: &jet_std::DataSeries<Option<T>>) -> i64 {
+    series.missing + series.values.iter().filter(|v| v.is_none()).count() as i64
+}
+
+fn jet_data_lazy<T: Clone>(table: &jet_std::DataTable<T>) -> jet_std::DataLazyFrame<T> {
+    jet_std::DataLazyFrame {
+        rows: table.rows.clone(),
+        missing: table.missing,
+        plan: table.plan.clone(),
+    }
+}
+
+fn jet_data_lazy_filter<T, F>(
+    frame: &jet_std::DataLazyFrame<T>,
+    pred: F,
+) -> jet_std::DataLazyFrame<T>
+where
+    T: Clone,
+    F: Fn(T) -> bool,
+{
+    let mut plan = frame.plan.clone();
+    plan.push("filter".to_string());
+    jet_std::DataLazyFrame {
+        rows: frame.rows.iter().cloned().filter(|row| pred(row.clone())).collect(),
+        missing: frame.missing,
+        plan,
+    }
+}
+
+fn jet_data_lazy_sort_by<T, F>(
+    frame: &jet_std::DataLazyFrame<T>,
+    key: F,
+) -> jet_std::DataLazyFrame<T>
+where
+    T: Clone,
+    F: Fn(T) -> String,
+{
+    let mut rows = frame.rows.clone();
+    rows.sort_by_key(|row| key(row.clone()));
+    let mut plan = frame.plan.clone();
+    plan.push("sort_by".to_string());
+    jet_std::DataLazyFrame {
+        rows,
+        missing: frame.missing,
+        plan,
+    }
+}
+
+fn jet_data_collect<T: Clone>(frame: &jet_std::DataLazyFrame<T>) -> jet_std::DataTable<T> {
+    let mut plan = frame.plan.clone();
+    plan.push("collect".to_string());
+    jet_std::DataTable {
+        rows: frame.rows.clone(),
+        missing: frame.missing,
+        plan,
+    }
+}
+
+fn jet_data_plan<T>(frame: &jet_std::DataLazyFrame<T>) -> Vec<String> {
+    frame.plan.clone()
 }
 
 fn jet_data_filter<T, F>(rows: &Vec<T>, pred: F) -> Vec<T>
@@ -10194,6 +10327,21 @@ fn jet_data_status() -> Vec<jet_std::DataStatus> {
         },
         jet_std::DataStatus {
             step: "core.data.stats".to_string(),
+            path: "native".to_string(),
+            replacement: "native".to_string(),
+        },
+        jet_std::DataStatus {
+            step: "core.data.table".to_string(),
+            path: "native".to_string(),
+            replacement: "native".to_string(),
+        },
+        jet_std::DataStatus {
+            step: "core.data.lazy".to_string(),
+            path: "native".to_string(),
+            replacement: "native".to_string(),
+        },
+        jet_std::DataStatus {
+            step: "core.data.missing".to_string(),
             path: "native".to_string(),
             replacement: "native".to_string(),
         },

@@ -1277,7 +1277,13 @@ field is a Jet field error before codegen.
 | Function | Returns | What it does |
 |----------|---------|--------------|
 | `csv<T>(text)` | `[T] ? DecodeError` | Header-mapped typed CSV rows |
-| `count(rows)` | `Int` | Count table rows or series values |
+| `table(rows)` / `rows(table)` | `Table<T>` / `[T]` | Wrap and unwrap the typed in-memory table model |
+| `series(values)` / `values(series)` | `Series<T>` / `[T]` | Wrap and unwrap typed series values |
+| `missing_count(series)` | `Int` | Count absent `T?` values in a typed series |
+| `lazy(table)` / `collect(plan)` | `LazyFrame<T>` / `Table<T>` | Build and materialize a typed lazy plan |
+| `lazy_filter(plan, row => ok)` / `lazy_sort_by(plan, row => key)` | `LazyFrame<T>` | Typed lazy plan operations |
+| `plan(frame)` | `[String]` | Deterministic plan-step names for audit/test output |
+| `count(value)` | `Int` | Count rows/values in `[T]`, `Table<T>`, `Series<T>`, or `LazyFrame<T>` |
 | `sum(values)` / `mean(values)` / `min(values)` / `max(values)` | `Float` | Numeric series stats over `[Float]` |
 | `median(values)` / `quantile(values, q)` | `Float` | Sorted numeric quantiles |
 | `variance(values)` / `stddev(values)` / `describe(values)` | `Float` / `Float` / `DataSummary` | Numeric distribution summary |
@@ -1292,8 +1298,10 @@ field is a Jet field error before codegen.
 | `status()` | `[DataStatus]` | Native/bridge replacement facts for data workflows |
 | `bar_text(groups)` / `bar_svg(groups)` | `String` | Deterministic text/SVG bar output |
 
-`DataGroup` fields: `.key: String`, `.count: Int`, `.sum: Float`, `.mean:
-Float`. `DataStatus` fields: `.step`, `.path`, `.replacement`.
+`Table<T>` and `LazyFrame<T>` keep typed rows; `Series<T>` keeps typed values.
+Missing values are ordinary Jet optionals (`T?`) inside a series, not a second
+sentinel type. `DataGroup` fields: `.key: String`, `.count: Int`, `.sum: Float`,
+`.mean: Float`. `DataStatus` fields: `.step`, `.path`, `.replacement`.
 
 ```jet
 use core.data as data

@@ -650,6 +650,19 @@ fn run() {
     budget_raw :: "team,owner\nCore,Ada\nTools,Grace"
     budgets :: data.csv<Budget>(budget_raw) ?? panic("bad budget")
     print(data.count(rows))
+    table :: data.table(rows)
+    lazy :: data.lazy(table)
+    planned :: data.lazy_sort_by(data.lazy_filter(lazy, (t) => t.minutes >= 6.0), (t) => t.team)
+    collected :: data.collect(planned)
+    print(data.count(table))
+    print(data.count(planned))
+    print(data.count(data.rows(collected)))
+    print(data.plan(planned)[2])
+    none: Float? :: None
+    maybe_minutes: [Float?] :: [Val(2.0), none, Val(6.0), none]
+    series :: data.series(maybe_minutes)
+    print(data.count(series))
+    print(data.missing_count(series))
     groups :: data.group_mean(rows, (t) => t.team, (t) => t.minutes)
     loop g in groups {
         print("{g.key}:{g.count}:{g.sum}:{g.mean}")
@@ -676,7 +689,7 @@ fn run() {
     assert_eq!(code, 0, "core.data program failed: {stderr}");
     assert_eq!(
         stdout,
-        "4\nCore:2:12.0:6.0\nTools:2:12.0:6.0\n12.0\n4.0\nCore | ## 2\nTools | ## 2\nCore|long | # 1\nCore|short | # 1\nTools|long | # 1\nTools|short | # 1\n5.0\nCore | ## 2\nTools | ## 2\n531\ncore.data.csv:native\n"
+        "4\n4\n2\n2\nsort_by\n4\n2\nCore:2:12.0:6.0\nTools:2:12.0:6.0\n12.0\n4.0\nCore | ## 2\nTools | ## 2\nCore|long | # 1\nCore|short | # 1\nTools|long | # 1\nTools|short | # 1\n5.0\nCore | ## 2\nTools | ## 2\n531\ncore.data.csv:native\n"
     );
     let _ = fs::remove_dir_all(&dir);
 }

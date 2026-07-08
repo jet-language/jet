@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jet prompt — Carbon</title>
+<style>
+  :root{
+    --page:#06090F; --ground:#0B1119; --raised:#16202E; --line:#1E2C3D;
+    --accent:#3FC6FF; --select:#D678FF; --warn:#FFB454; --error:#FF5C5C;
+    --ok:#58D68D; --text:#D9E6F2; --sec:#7E93A8;
+    --mono:ui-monospace,"SF Mono","Cascadia Code","JetBrains Mono",Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--page);color:var(--text);font-family:var(--sans);line-height:1.5}
+  .wrap{max-width:920px;margin:0 auto;padding:56px 24px 96px}
+  header.doc{border-bottom:1px solid var(--line);padding-bottom:28px}
+  .kicker{font-family:var(--mono);font-size:12px;letter-spacing:.32em;text-transform:uppercase;color:var(--accent)}
+  h1{font-size:34px;margin:10px 0 6px;font-weight:650;letter-spacing:-.01em}
+  .sub{color:var(--sec);max-width:64ch;font-size:15px}
+  .budget{font-family:var(--mono);font-size:12px;color:var(--warn);margin-top:12px}
+  .plate{margin-top:40px}
+  .eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.18em;text-transform:uppercase;
+    color:var(--select);display:flex;align-items:center;gap:10px}
+  .eyebrow::before{content:"";width:22px;height:1px;background:var(--select)}
+  .caption{color:var(--sec);font-size:14px;margin:6px 0 14px;max-width:70ch}
+  .term{background:var(--ground);border:1px solid var(--raised);border-radius:6px;overflow:hidden;
+    box-shadow:0 18px 50px -24px #000}
+  .bar{display:flex;align-items:center;gap:8px;padding:9px 12px;background:var(--raised);
+    border-bottom:1px solid #0c141d}
+  .dot{width:11px;height:11px;border-radius:50%}
+  .bar .t{font-family:var(--mono);font-size:12px;color:var(--sec);margin-left:8px}
+  pre{margin:0;padding:16px 18px;font-family:var(--mono);font-size:13.5px;line-height:1.7;
+    white-space:pre;overflow-x:auto}
+  .led{color:var(--ok)} .ledw{color:var(--error)} .seg{color:var(--sec)}
+  .env{color:var(--accent);font-weight:650} .ver{color:var(--sec)} .git{color:var(--select)}
+  .ok{color:var(--ok)} .er{color:var(--error)} .wn{color:var(--warn)} .ac{color:var(--accent)}
+  .sec{color:var(--sec)} .dirty{color:var(--warn)} .prm{color:var(--accent);font-weight:700}
+  .cmd{color:var(--text)} .cur{background:var(--accent);color:var(--ground)}
+  .b{font-weight:650}
+  footer{margin-top:60px;border-top:1px solid var(--line);padding-top:20px;color:var(--sec);
+    font-family:var(--mono);font-size:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="doc">
+    <div class="kicker">Family A · Carbon</div>
+    <h1>Jet prompt</h1>
+    <p class="sub">The status band, shrunk to a shell prompt. One info line of whole-shell state with
+      condition LEDs, one input line. Injected into every <code>jet env</code> dev shell.</p>
+    <div class="budget">height budget · 2 lines (info + input) — transient collapses history to 1</div>
+  </header>
+
+  <section class="plate">
+    <div class="eyebrow">Normal</div>
+    <p class="caption">Env name, Jet version, test state, branch. Green LED = last build/tests passed.
+      Segments are space-separated, not powerline arrows — flat and engineered.</p>
+    <div class="term">
+      <div class="bar"><span class="dot" style="background:#FF5C5C"></span><span class="dot" style="background:#FFB454"></span>
+        <span class="dot" style="background:#58D68D"></span><span class="t">jet env · webapp</span></div>
+<pre><span class="env">webapp</span> <span class="seg">·</span> <span class="ver">jet 0.9.2</span> <span class="seg">·</span> <span class="led">●</span> <span class="ok">tests ok</span> <span class="seg">·</span> <span class="git">⎇ main</span>
+<span class="prm">▸</span> <span class="cur"> </span></pre>
+    </div>
+  </section>
+
+  <section class="plate">
+    <div class="eyebrow">Dirty git</div>
+    <p class="caption">Working tree changes append to the branch segment: <code>●3</code> tracked edits,
+      <code>+42 −7</code> line delta. The dot turns amber the moment the tree diverges.</p>
+    <div class="term">
+      <div class="bar"><span class="dot" style="background:#FF5C5C"></span><span class="dot" style="background:#FFB454"></span>
+        <span class="dot" style="background:#58D68D"></span><span class="t">jet env · webapp</span></div>
+<pre><span class="env">webapp</span> <span class="seg">·</span> <span class="ver">jet 0.9.2</span> <span class="seg">·</span> <span class="led">●</span> <span class="ok">tests ok</span> <span class="seg">·</span> <span class="git">⎇ main</span> <span class="dirty">●3 +42 −7</span>
+<span class="prm">▸</span> <span class="cmd">git add .</span><span class="cur"> </span></pre>
+    </div>
+  </section>
+
+  <section class="plate">
+    <div class="eyebrow">Failing build</div>
+    <p class="caption">A failed <code>jet build</code> flips the test segment to a red LED and shows the
+      first error code inline — you see <em>what</em> broke without scrolling up.</p>
+    <div class="term">
+      <div class="bar"><span class="dot" style="background:#FF5C5C"></span><span class="dot" style="background:#FFB454"></span>
+        <span class="dot" style="background:#58D68D"></span><span class="t">jet env · webapp</span></div>
+<pre><span class="env">webapp</span> <span class="seg">·</span> <span class="ver">jet 0.9.2</span> <span class="seg">·</span> <span class="ledw">●</span> <span class="er">build failed E0308</span> <span class="seg">·</span> <span class="git">⎇ main</span> <span class="dirty">●1</span>
+<span class="prm">▸</span> <span class="cur"> </span></pre>
+    </div>
+  </section>
+
+  <section class="plate">
+    <div class="eyebrow">Long-running · transient collapse</div>
+    <p class="caption">While a command runs, a Braille spinner and elapsed clock live in the info line.
+      Finished commands above collapse to a one-line transient (starship/oh-my-posh) — verb, result LED,
+      duration — so scrollback stays skimmable.</p>
+    <div class="term">
+      <div class="bar"><span class="dot" style="background:#FF5C5C"></span><span class="dot" style="background:#FFB454"></span>
+        <span class="dot" style="background:#58D68D"></span><span class="t">jet env · webapp</span></div>
+<pre><span class="prm">▸</span> <span class="cmd">jet build</span><span class="seg">            </span><span class="led">●</span> <span class="sec">1.2s</span>
+<span class="prm">▸</span> <span class="cmd">jet test</span><span class="seg">             </span><span class="led">●</span> <span class="sec">0.8s</span>
+<span class="env">webapp</span> <span class="seg">·</span> <span class="ac">⣾ running jet bench</span> <span class="sec">·</span> <span class="wn">12s</span> <span class="seg">·</span> <span class="git">⎇ main</span>
+<span class="sec">   press Ctrl-C to stop</span></pre>
+    </div>
+  </section>
+
+  <footer>Carbon · Spinner frames ⣾⣽⣻⢿⡿⣟⣯⣷ (std Braille). NO_COLOR → LEDs render as
+    [ok]/[FAIL] text tags; layout unchanged. ANSI-16 → cyan/magenta/amber/red/green 1:1.</footer>
+</div>
+</body>
+</html>

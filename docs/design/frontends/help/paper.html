@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jet help TUI — Paper</title>
+<style>
+  :root{
+    --paper:#F7F9FC; --page:#FFFFFF; --ink:#1B2733; --accent:#1E63E9;
+    --hairline:#C4D2E0; --flare:#FF7A45; --mut:#5E7387; --faint:#8A9BAC; --grn:#1F8F5F;
+    --mono:ui-monospace,"SF Mono","Cascadia Code","JetBrains Mono",Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--page);color:var(--ink);font-family:var(--sans);line-height:1.5}
+  .wrap{max-width:960px;margin:0 auto;padding:0 24px 96px}
+  header.doc{background:linear-gradient(180deg,#DCEBFF 0%,#FFFFFF 100%);margin:0 -24px;
+    padding:60px 24px 36px;border-bottom:1px solid var(--hairline)}
+  .kicker{font-family:var(--mono);font-size:12px;letter-spacing:.32em;text-transform:uppercase;color:var(--accent)}
+  h1{font-size:40px;margin:12px 0 8px;font-weight:680;letter-spacing:-.02em}
+  .sub{color:var(--mut);max-width:60ch;font-size:16px}
+  .plate{margin-top:46px}
+  .eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.16em;text-transform:uppercase;
+    color:var(--accent);display:flex;align-items:center;gap:12px}
+  .eyebrow::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,var(--accent),var(--hairline) 60%,transparent)}
+  .caption{color:var(--mut);font-size:14.5px;margin:8px 0 16px;max-width:70ch}
+  .scr{background:var(--paper);border:1px solid var(--hairline);border-radius:6px;overflow:hidden;
+    font-family:var(--mono);font-size:13px;box-shadow:0 12px 30px -18px rgba(27,39,51,.35)}
+  .top{display:flex;align-items:center;gap:10px;padding:10px 16px;background:#EEF3F9;border-bottom:1px solid var(--hairline)}
+  .top .b{font-weight:700;color:var(--accent)}
+  .top .sp{flex:1} .top .keys{color:var(--faint);font-size:12px}
+  .search{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--hairline);background:#fff}
+  .search .mag{color:var(--accent)} .search .q{color:var(--ink)} .cur{background:var(--accent);color:#fff}
+  .search .hint{margin-left:auto;color:var(--faint);font-size:12px}
+  .body{display:flex;min-height:340px;background:#fff}
+  .list{width:44%;border-right:1px solid var(--hairline);padding:10px 0}
+  .grp{color:var(--faint);font-size:11px;letter-spacing:.14em;padding:12px 18px 6px}
+  .row{padding:5px 18px;display:flex;gap:12px}
+  .row .nm{color:var(--accent);width:66px} .row .ds{color:var(--mut)}
+  .row.sel{background:#EAF1FE} .row.sel .nm{color:var(--ink);font-weight:680}
+  .detail{flex:1;padding:18px 22px;color:var(--ink)}
+  .detail h2{font-size:18px;margin:0 0 4px;font-family:var(--sans);font-weight:680;letter-spacing:-.01em}
+  .detail .sig{color:var(--mut);margin-bottom:14px;font-family:var(--sans);font-size:14px}
+  .lbl{color:var(--faint);font-size:11px;letter-spacing:.14em;margin:16px 0 6px;display:flex;align-items:center;gap:10px}
+  .lbl::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,var(--hairline),transparent)}
+  .flag{display:flex;gap:12px;padding:2px 0} .flag .fn{color:var(--accent);width:180px} .flag .fd{color:var(--ink)}
+  .ex{border:1px solid var(--hairline);border-radius:5px;padding:8px 12px;margin:6px 0;display:flex;
+    align-items:center;gap:10px;background:var(--paper)}
+  .ex .run{color:var(--grn)} .ex .cmd{color:var(--ink)} .ex .go{margin-left:auto;color:var(--faint);font-size:11px}
+  .ex.sel{border-color:var(--accent);background:#EAF1FE}
+  .foot{display:flex;background:#EEF3F9;border-top:1px solid var(--hairline);font-size:12px}
+  .foot .k{padding:8px 14px;border-right:1px solid var(--hairline);color:var(--mut)}
+  .foot .k b{color:var(--accent)}
+  .hi{color:var(--flare);font-weight:700}
+  .shell{background:#0B1119;border:1px solid var(--hairline);border-radius:6px;padding:16px;
+    font-family:var(--mono);font-size:13px;color:#D9E6F2}
+  .shell .prm{color:#3FC6FF;font-weight:700} .shell .cur{background:#3FC6FF;color:#0B1119}
+  footer{margin-top:60px;border-top:1px solid var(--hairline);padding-top:20px;color:var(--mut);
+    font-family:var(--mono);font-size:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="doc">
+    <div class="kicker">Family B · Paper</div>
+    <h1>Jet help — <code>jet ?</code></h1>
+    <p class="sub">A calm, editorial help browser. Type carries the hierarchy; fading hairlines lead label to
+      value. Discovery should feel like reading good docs, not parsing a man page.</p>
+  </header>
+
+  <section class="plate">
+    <div class="eyebrow">Home</div>
+    <p class="caption">Generous whitespace, a real heading font in the detail pane. Search pre-focused;
+      first command open. The page invites reading, not just scanning.</p>
+    <div class="scr">
+      <div class="top"><span class="b">jet ?</span><span style="color:var(--mut)">help</span><span class="sp"></span>
+        <span class="keys">↑↓ move · / search · ? keys · q quit</span></div>
+      <div class="search"><span class="mag">⌕</span><span class="q"></span><span class="cur"> </span>
+        <span class="hint">filter 26 commands</span></div>
+      <div class="body">
+        <div class="list">
+          <div class="grp">BUILD &amp; RUN</div>
+          <div class="row sel"><span class="nm">run</span><span class="ds">build and run a program</span></div>
+          <div class="row"><span class="nm">build</span><span class="ds">compile to a binary</span></div>
+          <div class="row"><span class="nm">test</span><span class="ds">run the test suite</span></div>
+          <div class="grp">CODE QUALITY</div>
+          <div class="row"><span class="nm">check</span><span class="ds">type-check only</span></div>
+          <div class="row"><span class="nm">fmt</span><span class="ds">format source</span></div>
+          <div class="grp">PROJECT</div>
+          <div class="row"><span class="nm">new</span><span class="ds">scaffold a project</span></div>
+        </div>
+        <div class="detail">
+          <h2>jet run</h2>
+          <div class="sig">Build the current program and run it — the fastest path from code to output.</div>
+          <div class="lbl">USAGE</div>
+          <div>jet run [FILE] [--watch] [-- ARGS…]</div>
+          <div class="lbl">OPTIONS</div>
+          <div class="flag"><span class="fn">--watch</span><span class="fd">rebuild and rerun on change</span></div>
+          <div class="flag"><span class="fn">-- ARGS</span><span class="fd">pass the rest to your program</span></div>
+          <div class="lbl">EXAMPLES</div>
+          <div class="ex sel"><span class="run">❯</span><span class="cmd">jet run</span><span class="go">enter → shell</span></div>
+          <div class="ex"><span class="run">❯</span><span class="cmd">jet run app.jet --watch</span></div>
+        </div>
+      </div>
+      <div class="foot"><span class="k"><b>enter</b> use example</span><span class="k"><b>/</b> search</span>
+        <span class="k"><b>c</b> categories</span><span class="k"><b>q</b> quit</span></div>
+    </div>
+  </section>
+
+  <section class="plate">
+    <div class="eyebrow">Fuzzy search</div>
+    <p class="caption">fzf-style subsequence match with typo tolerance. Matched letters take the single flare
+      accent — the one warm mark on an otherwise cool page.</p>
+    <div class="scr">
+      <div class="top"><span class="b">jet ?</span><span style="color:var(--mut)">3 of 26 match</span><span class="sp"></span>
+        <span class="keys">esc to clear</span></div>
+      <div class="search"><span class="mag">⌕</span><span class="q">biuld</span><span class="cur"> </span>
+        <span class="hint">fuzzy</span></div>
+      <div class="body">
+        <div class="list">
+          <div class="grp">MATCHES</div>
+          <div class="row sel"><span class="nm"><span class="hi">b</span>u<span class="hi">ild</span></span><span class="ds">compile to a binary</span></div>
+          <div class="row"><span class="nm"><span class="hi">bu</span>nd<span class="hi">l</span>e</span><span class="ds">bundle assets</span></div>
+          <div class="row"><span class="nm">re<span class="hi">buil</span>d</span><span class="ds">force a clean build</span></div>
+        </div>
+        <div class="detail">
+          <h2>jet build</h2>
+          <div class="sig">Compile the current program to a binary.</div>
+          <div class="lbl">USAGE</div>
+          <div>jet build [--release] [--target T] [--out PATH]</div>
+          <div class="lbl">EXAMPLES</div>
+          <div class="ex sel"><span class="run">❯</span><span class="cmd">jet build --release</span><span class="go">enter → shell</span></div>
+        </div>
+      </div>
+      <div class="foot"><span class="k"><b>enter</b> use example</span><span class="k"><b>esc</b> clear</span>
+        <span class="k"><b>↑↓</b> move</span></div>
+    </div>
+  </section>
+
+  <section class="plate">
+    <div class="eyebrow">Command detail · runnable examples</div>
+    <p class="caption">Full-width reading view: usage, an aligned option table under a fading rule, and real
+      examples as cards. Pick one and press enter for the exit-to-shell flow.</p>
+    <div class="scr">
+      <div class="top"><span class="b">jet ?</span><span style="color:var(--accent)">build</span><span class="sp"></span>
+        <span class="keys">tab back</span></div>
+      <div class="body">
+        <div class="detail" style="width:100%">
+          <h2>jet build</h2>
+          <div class="sig">Compile the current program to a binary. Safe by default; opt into an optimized
+            release with a flag.</div>
+          <div class="lbl">USAGE</div>
+          <div>jet build [--release] [--target T] [--out PATH]</div>
+          <div class="lbl">OPTIONS</div>
+          <div class="flag"><span class="fn">--release</span><span class="fd">optimize; strip debug info</span></div>
+          <div class="flag"><span class="fn">--target &lt;triple&gt;</span><span class="fd">cross-compile, e.g. linux-arm64</span></div>
+          <div class="flag"><span class="fn">--out &lt;path&gt;</span><span class="fd">write the binary here</span></div>
+          <div class="lbl">EXAMPLES</div>
+          <div class="ex"><span class="run">❯</span><span class="cmd">jet build</span></div>
+          <div class="ex sel"><span class="run">❯</span><span class="cmd">jet build --release</span><span class="go">enter → shell</span></div>
+          <div class="ex"><span class="run">❯</span><span class="cmd">jet build --target linux-arm64 --out dist/app</span></div>
+        </div>
+      </div>
+      <div class="foot"><span class="k"><b>enter</b> prefill in shell</span><span class="k"><b>y</b> copy</span>
+        <span class="k"><b>tab</b> list</span></div>
+    </div>
+  </section>
+
+  <section class="plate">
+    <div class="eyebrow">Category browse</div>
+    <p class="caption">Press <code>c</code> to browse by task. A quiet index for when you know the goal but not
+      the verb.</p>
+    <div class="scr">
+      <div class="top"><span class="b">jet ?</span><span style="color:var(--mut)">categories</span><span class="sp"></span>
+        <span class="keys">c toggle</span></div>
+      <div class="body">
+        <div class="list">
+          <div class="row sel"><span class="nm">Build</span><span class="ds">3</span></div>
+          <div class="row"><span class="nm">Quality</span><span class="ds">2</span></div>
+          <div class="row"><span class="nm">Project</span><span class="ds">4</span></div>
+          <div class="row"><span class="nm">Packages</span><span class="ds">5</span></div>
+        </div>
+        <div class="detail">
+          <h2>Build &amp; run</h2>
+          <div class="sig">Turn source into a running program.</div>
+          <div class="lbl">COMMANDS</div>
+          <div class="flag"><span class="fn">run</span><span class="fd">build and run in one step</span></div>
+          <div class="flag"><span class="fn">build</span><span class="fd">compile to a binary</span></div>
+          <div class="flag"><span class="fn">test</span><span class="fd">run the test suite</span></div>
+        </div>
+      </div>
+      <div class="foot"><span class="k"><b>enter</b> open</span><span class="k"><b>c</b> back to search</span></div>
+    </div>
+  </section>
+
+  <section class="plate">
+    <div class="eyebrow">Exit → shell, command prefilled</div>
+    <p class="caption">Enter on an example closes the browser and drops the command onto your prompt — not run.
+      Edit or press enter. The shell is dark even in Paper, since it is the user's terminal, not our page.</p>
+    <div class="shell">
+      <div style="color:#7E93A8;margin-bottom:8px">— jet ? closed —</div>
+      <span class="prm">webapp ›</span> jet build --release<span class="cur"> </span>
+    </div>
+  </section>
+
+  <footer>Paper · &lt;90 cols: detail stacks under the list. NO_COLOR → flare matches become underline,
+    selection is a left bar + bold. <code>--dark</code> serves the same browser on dark terminals.</footer>
+</div>
+</body>
+</html>

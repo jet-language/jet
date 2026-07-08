@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pulse — jet dev server</title>
+<style>
+  :root{
+    --ground:#120E1A; --hot:#FF6B35; --hot2:#FF3D81; --cool:#8B7CFF;
+    --text:#E8E3F2; --sec:#8E86A3; --ok:#5FD39A; --error:#FF5C5C;
+    --mono:"SF Mono",ui-monospace,"Cascadia Code","JetBrains Mono",Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    --glow:linear-gradient(90deg,var(--hot),var(--hot2));
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(900px 500px at 15% -5%,#241427,transparent 55%),var(--ground);
+      color:var(--text);font-family:var(--sans);-webkit-font-smoothing:antialiased;padding:40px 24px 96px}
+  .wrap{max-width:960px;margin:0 auto}
+  .kicker{font-family:var(--mono);font-size:12px;letter-spacing:.3em;text-transform:uppercase;color:var(--cool)}
+  h1{font-size:34px;margin:12px 0 8px;font-weight:800;letter-spacing:-.02em}
+  h1 .g{background:var(--glow);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .lede{color:var(--sec);max-width:64ch;line-height:1.55;margin:0;font-size:15.5px}
+  h2{font-family:var(--mono);font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--cool);margin:46px 0 12px}
+  .cap{color:var(--sec);font-size:13.5px;line-height:1.6;margin-top:12px;max-width:76ch}
+  .cap .tp{color:var(--hot);font-weight:700}
+  code{font-family:var(--mono);color:var(--text)}
+
+  .term{background:#0d0a14;border:1px solid #251d33;border-radius:8px;overflow:hidden;box-shadow:0 22px 55px -30px #000}
+  .bar{display:flex;align-items:center;gap:8px;padding:10px 14px;background:#171021;border-bottom:1px solid #251d33}
+  .dot{width:11px;height:11px;border-radius:50%}.d1{background:#FF5C5C}.d2{background:#FFB454}.d3{background:#5FD39A}
+  .bar .name{font-family:var(--mono);font-size:12px;color:var(--sec);margin-left:8px}
+  pre{margin:0;padding:16px 18px;font-family:var(--mono);font-size:13px;line-height:1.6;color:var(--text);overflow-x:auto}
+  .cool{color:var(--cool)}.ok{color:var(--ok)}.errorc{color:var(--error)}.sec{color:var(--sec)}.b{font-weight:700}
+  .glow{background:var(--glow);-webkit-background-clip:text;background-clip:text;color:transparent;font-weight:700}
+  .spin{color:#FF6B35}
+
+  .browser{border:1px solid #251d33;border-radius:8px;overflow:hidden;margin-top:8px;box-shadow:0 22px 55px -30px #000}
+  .chrome{display:flex;align-items:center;gap:10px;padding:8px 12px;background:#171021}
+  .url{flex:1;background:#0d0a14;border:1px solid #2b2140;border-radius:5px;padding:5px 10px;
+      font-family:var(--mono);font-size:12px;color:var(--sec)}
+  .url b{color:var(--text);font-weight:500}
+  .pill{font-family:var(--mono);font-size:11px;padding:3px 10px;border-radius:20px;border:1px solid #33264d;
+      color:transparent;background:var(--glow);-webkit-background-clip:text;background-clip:text;display:flex;align-items:center;gap:6px}
+  .pdot{width:7px;height:7px;border-radius:50%;background:var(--hot);box-shadow:0 0 10px var(--hot2)}
+  .viewport{position:relative;background:#0f0b17;min-height:340px}
+  .app{padding:40px;filter:blur(1px);opacity:.3}
+  .app h3{font-size:26px;margin:0 0 10px}.app p{color:var(--sec);max-width:40ch}
+  .app .box{margin-top:20px;height:120px;border:1px solid #251d33;border-radius:8px;background:#171021}
+  .overlay{position:absolute;inset:0;background:rgba(9,6,14,.86);backdrop-filter:blur(3px);
+      display:flex;align-items:flex-start;justify-content:center;padding:34px}
+  .card{width:100%;max-width:680px;background:#0d0a14;border:1px solid #2b2140;border-radius:10px;overflow:hidden;
+      box-shadow:0 40px 90px -20px #000}
+  /* the single glow lives on the failure header */
+  .ohead{display:flex;align-items:center;justify-content:space-between;padding:0;border-bottom:1px solid #2b2140}
+  .ohead .barglow{height:3px;width:100%;background:var(--glow);box-shadow:0 0 16px rgba(255,61,129,.6)}
+  .ohrow{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;width:100%}
+  .ohead .t{font-family:var(--mono);font-size:13px;font-weight:700;
+      background:var(--glow);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .ohead .file{font-family:var(--mono);font-size:12px;color:var(--cool);text-decoration:underline;text-underline-offset:2px;cursor:pointer}
+  .headwrap{width:100%}
+  .diag{padding:16px 18px 8px;margin:0;font-family:var(--mono);font-size:12.5px;line-height:1.65;color:var(--text);overflow-x:auto}
+  .diag .k{color:var(--error);font-weight:700}.diag .loc{color:var(--cool)}
+  .diag .caret{color:var(--error)}.diag .why{color:var(--sec)}.diag .fix{color:var(--ok)}
+  .otip{padding:11px 18px;color:var(--sec);font-family:var(--mono);font-size:11.5px;background:#0a0710;border-top:1px solid #2b2140}
+  .states{display:flex;gap:10px;margin-top:14px;flex-wrap:wrap}
+  .state{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:12px;color:var(--sec);
+      border:1px solid #251d33;border-radius:20px;padding:6px 12px}
+  .s-dot{width:8px;height:8px;border-radius:50%}.s1{background:var(--hot)}.s2{background:var(--cool)}.s3{background:var(--error)}
+  footer{margin-top:60px;color:var(--sec);font-size:12px;font-family:var(--mono);border-top:1px solid #251d33;padding-top:18px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="kicker">Family C · Pulse · dev server</div>
+  <h1>jet dev — <span class="g">web target</span></h1>
+  <p class="lede">Dark and bold, one hot highlight at a time. The live server glows; a compile error moves
+  the heat to a single gradient bar on the overlay. Everything else stays cold.</p>
+
+  <h2>Terminal · start · watch · rebuild · compile error</h2>
+  <div class="term">
+    <div class="bar"><span class="dot d1"></span><span class="dot d2"></span><span class="dot d3"></span><span class="name">~/myapp — jet dev</span></div>
+<pre><span class="sec">$</span> jet dev app.jet --target=web
+
+  <span class="glow">jet dev</span>  <span class="sec">web target</span>
+    serve   <span class="cool">http://localhost:8080</span>
+    canvas  <span class="cool">http://localhost:8080/canvas</span>
+    watch   app.jet
+    <span class="sec">ready in 640ms · Ctrl-C to stop</span>
+
+  <span class="sec">14:22:08</span>  app.jet changed <span class="sec">→</span> rebuilt in 210ms <span class="ok">✓</span>
+  <span class="sec">14:22:19</span>  app.jet changed <span class="sec">→</span> <span class="errorc">1 error</span>
+
+<span class="errorc b">Error [E0102]</span>: nothing named `rende` exists here
+  <span class="cool">--&gt; app.jet:14:5</span>
+    |
+ 14 |     rende(scene)
+    |     <span class="errorc">^^^^^</span>
+ <span class="sec">Why:</span> only functions that have been defined (or built in, like `print`) can be called
+ <span class="ok">Fix:</span> did you mean `render`?
+
+  <span class="sec">14:22:24</span>  app.jet changed <span class="sec">→</span> rebuilt in 190ms <span class="ok">✓</span>
+</pre>
+  </div>
+  <p class="cap">The running server is the live thing, so the <code>jet dev</code> banner title carries the one glow;
+  the URLs and watch line stay cold cool/gray. On failure the heat leaves the gradient and the error goes red — a screen
+  is running <em>or</em> broken, never both. The compile error is the <strong>verbatim Jet diagnostic</strong> (I4).</p>
+
+  <h2>Browser · error overlay on compile failure</h2>
+  <div class="browser">
+    <div class="chrome">
+      <span class="dot d1"></span><span class="dot d2"></span><span class="dot d3"></span>
+      <span class="url"><b>localhost:8080</b> /app</span>
+      <span class="pill"><span class="pdot"></span> live</span>
+    </div>
+    <div class="viewport">
+      <div class="app"><h3>My App</h3><p>The last good build stays on screen behind the overlay.</p><div class="box"></div></div>
+      <div class="overlay">
+        <div class="card">
+          <div class="headwrap">
+            <div class="barglow" style="height:3px;background:var(--glow);box-shadow:0 0 16px rgba(255,61,129,.6)"></div>
+            <div class="ohrow"><span class="t">Build failed</span><span class="file">app.jet:14:5</span></div>
+          </div>
+<pre class="diag"><span class="k">Error [E0102]</span>: nothing named `rende` exists here
+  <span class="loc">--&gt; app.jet:14:5</span>
+    |
+ 14 |     rende(scene)
+    |     <span class="caret">^^^^^</span>
+ <span class="why">Why:</span> only functions that have been defined (or built in, like `print`) can be called
+ <span class="fix">Fix:</span> did you mean `render`?</pre>
+          <div class="otip">Fix the code to dismiss — the overlay clears on the next clean build. Esc to hide.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <p class="cap"><span class="tp">vite transplant:</span> full-bleed overlay, clickable <code>file:line</code>, dismiss
+  tip. Pulse spends its one glow here on a single hot→hot2 bar across the failure header — the whole overlay's urgency in
+  one stroke — while the diagnostic body stays the <strong>exact</strong> Jet output, never reworded. Auto-clears on the
+  next clean polled version.</p>
+
+  <h2>Reconnect / reload states (polling, I6)</h2>
+  <div class="states">
+    <span class="state"><span class="s-dot s1"></span> Rebuilding… <span class="sec">(save detected)</span></span>
+    <span class="state"><span class="s-dot s2"></span> Reloading… <span class="sec">(new version 5)</span></span>
+    <span class="state"><span class="s-dot s3"></span> Dev server offline — retrying <span class="sec">(poll failed)</span></span>
+  </div>
+  <p class="cap">Polls <code>/__jet_dev_version</code> every 400ms. The active state (rebuilding) takes the hot dot;
+  reload is cool; offline is red. One warm indicator at a time, matching the family rule.</p>
+
+  <footer>Pulse · terminal std-only ANSI (truecolor gradient, 16-color fallback) · overlay self-contained injected HTML/CSS/JS · diagnostic verbatim (I4)</footer>
+</div>
+</body>
+</html>
