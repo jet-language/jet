@@ -182,3 +182,54 @@ Offer ranking quality is load-bearing; a bad first offer misleads novices.
 - Each answers beginner-first-node and expert-stays-fast above.
 - All self-contained, system fonts, offline `file://`, reduced-motion
   respected, visible focus, laptop-responsive, each <35KB (< 300KB cap).
+
+---
+
+## hybrid.html
+
+Curated hybrid — not the ballot, a single coherent editor combining the best
+of all four. Existing four untouched.
+
+Core loop: **read or write in whichever lens fits, summon nodes at the cursor,
+and the other lens plus any docks you opt into follow — one program, one truth.**
+
+Foundation = duallens (synced code⇄graph). Everything else layers on top with a
+place, never a second way to do the same job (I8).
+
+Content: effect_grant.jet `run()` (default tab — richest: control/data/fallible/
+effect rails, `#Grant(Fs, Io)` region, paused `fs.read`), fizzbuzz.jet `label()`
+(2nd tab, control-flow), borrow_conflict.jet (error tab), `＋ new` empty-state.
+Diagnostic E0204 verbatim from `tests/ui/borrow_conflict.stderr` (I4).
+
+### Taken from
+
+| source | transplanted aspect |
+|--------|--------------------|
+| duallens (base) | synced twin lenses over one source; bidirectional line⇄node click; gutter breakpoint mirrors a node halo; shared replay timeline steps both lenses; diagnostic = one truth (squiggle + red node + verbatim card) |
+| flow | ⌘K / double-click summoner opens **at the cursor**, type-filtered — the primary authoring verb inside the graph pane; drag an out-pin to empty space → summon |
+| flow + guided | that dragged-pin summon is **pre-filtered to type-compatible + Hazel-ordered** offers (String / Int sets), and carries a **refused offer** (disabled `both(&x, x)` → E0204 why/fix) so the rule is taught at the moment the move would break |
+| workbench | collapsible, **off-by-default** docks: palette catalog (left, browse when you don't know the name), inspector (right, node facts + edit actions), docked debugger (bottom: stack / locals / watches / replay scrubber); Code‑Split‑Graph lens seg collapses to pure editor or pure canvas (workbench/flow feel on demand) |
+| guided | beginner **empty-state** (`＋ new`): a seed spine of typed offers that grows correct-by-construction and IS the normal graph+code underneath — "switch to Split anytime"; graduates seamlessly |
+
+### Left out (folded, not stapled)
+
+- guided's permanent linear spine as a top-level mode → demoted to the
+  empty-state launcher only. Foundation is the graph; a second always-on IA
+  would fight the dual lens.
+- flow's everything-floats → docks exist but start closed; only the summoner and
+  a transient inspector float. The lens is authoritative, not a floating panel.
+- workbench's minimap + Align/Tidy + heavy menubar → cut to keep chrome quiet
+  (spend boldness on the rail readout + sync, per design brief). Tabs kept.
+- a 3rd hand-built graph for borrow_conflict → it overlays the fizzbuzz graph
+  (as duallens does), one E0204 truth, no duplicate scene.
+
+### UX risks
+
+- Surface count: 3 optional docks × 3 lens modes = many states. Discoverability
+  of collapse/summon rides on the first-run coach mark + labelled toolbar; a real
+  build needs onboarding + remembered layout.
+- Summon-from-pin gesture is invisible until tried (flow's original risk,
+  inherited).
+- Two lenses + open docks get tight <1100px; docks auto-drop, graph-only under
+  900px. Keeping sync instant is still the whole value — any lag breaks it.
+- Empty-state offer ranking is load-bearing; a bad first offer misleads novices.

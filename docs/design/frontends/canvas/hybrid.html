@@ -742,7 +742,7 @@ function openSum(x,y,mode){
 function closeSum(){sum.classList.remove('open');}
 $('#sinput').oninput=()=>renderSum(sum._groups||FREE);
 // remember which groups are active for filtering
-const _openSum=openSum;openSum=function(x,y,mode){sum._groups=mode&&mode.type?(mode.type==='Int'?INT_OFFERS:STRING_OFFERS):FREE;_openSum(x,y,mode);};
+const _openSum=openSum;openSum=function(x,y,mode){sum._groups=mode&&mode.type?(mode.type==='Int'?INT_OFFERS:STRING_OFFERS):FREE;sum._openedAt=Date.now();_openSum(x,y,mode);};
 $('#sinput').addEventListener('keydown',e=>{
   if(!sumFlat.length)return;
   if(e.key==='ArrowDown'){e.preventDefault();sumHi=Math.min(sumFlat.length-1,sumHi+1);}
@@ -757,7 +757,7 @@ addEventListener('keydown',e=>{
   if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){e.preventDefault();openSum(innerWidth/2-196,160);}
   if(e.key==='Escape'){closeSum();}
 });
-document.addEventListener('click',e=>{if(!e.target.closest('#summoner')&&!e.target.closest('#kbtn'))closeSum();},true);
+document.addEventListener('click',e=>{if(Date.now()-(sum._openedAt||0)<300)return;if(!e.target.closest('#summoner')&&!e.target.closest('#kbtn'))closeSum();},true);
 
 /* ---------- drag a wire from an out-pin → offer-filtered summon ---------- */
 let dragging=null;

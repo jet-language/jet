@@ -167,3 +167,56 @@ stay rendered-but-static in the mock) — a full impl must widgetize all values.
 - Not yet real: multi-host data is illustrative; secret re-key is a stub button;
   projectional widgetizes option values only (not package/service sub-records).
   Flagged here, not hidden.
+
+---
+
+## hybrid.html
+
+Curated hybrid — one coherent Studio combining the best of all four archetypes.
+Existing four untouched.
+
+Core loop: **land on the fleet health strip; read config.jet as a live document
+the category rail navigates; every widget edit stages into one changeset; open
+the tray to review the diff + impact, then build — a red alert and a past
+generation both funnel back through that same changeset.**
+
+Foundation = projectional (the file IS the document). Everything else layers on
+with one apply path and one source of truth (I8). Data is the halcyon fixture
+(`.CachyOS`, `.ScxLavd`, `.Limine`, Plasma, wifi.age, mine core packages).
+
+### Taken from
+
+| source | transplanted aspect |
+|--------|--------------------|
+| projectional (base) | config.jet rendered AS the doc; inline widgets (toggle / enum / stepper / chips / sealed secret); git-gutter marks edited lines; Text toggle mirrors exact source; generation picker = read-only time machine |
+| settings | left **category rail — but as navigation into the document**: click a category → doc scrolls to that namespace section (search filters); per-section "N edited" badge; rebuild+reboot tag. No separate detail pane — the doc is the detail. |
+| changeset | the **only apply path**: a widget edit stages (never applies inline); a persistent bottom tray counts; opening it is the review sheet — plain "what this changes" + impact ledger + unified diff hunks + per-hunk include + Build only / Build & switch. Rollback stages the inverse as a reviewable changeset. |
+| opsboard | **landing health strip**: fleet KPIs + host pills with generation ribbons + alert rows (from workspace.jet). A red alert drill-in **scrolls the doc to the offending option** and opens the what/why/fix diagnosis; discard-failed / restart heal the strip live. |
+
+### Left out (folded, not stapled)
+
+- settings' separate right-hand detail pane → gone. The document is the detail
+  (one artifact); the rail only navigates it.
+- settings' per-change apply + its own pending tray → replaced by the single
+  changeset tray. No competing apply surfaces — every edit goes through review.
+- changeset's key/value add-form authoring → dropped; edits originate from the
+  widgets in the doc (discoverable), review stays the gate.
+- opsboard's shallow drawer editor → removed; drill-in deep-links into the real
+  document + diagnosis instead of a shadow editor.
+- opsboard auto-heal pulse → kept minimal, reduced-motion gated.
+
+### UX risks
+
+- Dense first paint (strip + rail + doc + tray). Strip is collapsible; tray is
+  idle until an edit exists.
+- Fleet of 3 is illustrative; a single-machine user sees one host (noted —
+  members come from workspace.jet).
+- Projectional caveat carries: only option *values* are widgets; package/service
+  sub-records stay partly static; a full impl reuses the formatter for the Text
+  round-trip.
+- Rail grouping is our editorial call, not source order — a setting may sit
+  "elsewhere than expected"; search mitigates.
+- Kernel-panic drill-in edits the *live* doc while the fault was a *past* build;
+  copy must keep "42 failed / 41 is live" unambiguous (handled: diagnosis names
+  gen 42, action is discard-42, live stays 41; a real config change would stage a
+  new changeset like any other edit).
