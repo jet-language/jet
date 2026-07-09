@@ -804,17 +804,29 @@ fn run_real_tier_build_and_boot(
     make_writable(&ovmf_vars)?;
     let log_path = dir.join(format!("{}-real-boot.serial.log", gen.name));
     let _ = fs::remove_file(&log_path);
-    let sock_path = dir.join(format!("{}-real-boot.qmp.sock", gen.name));
+    // AF_UNIX socket paths are capped at ~107 bytes; the backend dir easily
+    // exceeds that, so the QMP socket lives in the system temp dir.
+    let sock_path = std::env::temp_dir().join(format!("jetos-qmp-{}.sock", std::process::id()));
     let _ = fs::remove_file(&sock_path);
     let screenshot_path = dir.join(format!("{}-real-boot.png", gen.name));
-    let argv = real_qemu_prove_argv(disk, &ovmf_code, &ovmf_vars, &log_path, &sock_path);
+    let stderr_path = dir.join(format!("{}-real-boot.qemu.stderr", gen.name));
+    let stderr_file = fs::File::create(&stderr_path)
+        .map_err(|e| format!("creating `{}` failed: {e}", stderr_path.display()))?;
+    let disk_abs = fs::canonicalize(disk_path)
+        .map_err(|e| format!("resolving `{}` failed: {e}", disk_path.display()))?
+        .display()
+        .to_string();
+    let argv = real_qemu_prove_argv(&disk_abs, &ovmf_code, &ovmf_vars, &log_path, &sock_path);
     let mut child = Command::new(&argv[0])
         .args(&argv[1..])
+        .stdout(Stdio::null())
+        .stderr(Stdio::from(stderr_file))
         .spawn()
         .map_err(|e| format!("starting real QEMU proof failed: {e}"))?;
-    let report = poll_for_guest_proof(&log_path, real_tier_timeout());
+    let report = poll_for_guest_proof(&mut child, &stderr_path, &log_path, real_tier_timeout());
     let qmp_result = qmp_screendump_and_powerdown(&sock_path, &screenshot_path);
     let _ = wait_child_with_timeout(&mut child, Duration::from_secs(30));
+    let _ = fs::remove_file(&sock_path);
     let report = report?;
     require_report_live_desktop(&report)?;
     qmp_result?;
@@ -930,13 +942,33 @@ fn wait_child_with_timeout(
     }
 }
 
-fn poll_for_guest_proof(log_path: &Path, timeout: Duration) -> Result<String, String> {
+fn poll_for_guest_proof(
+    child: &mut std::process::Child,
+    stderr_path: &Path,
+    log_path: &Path,
+    timeout: Duration,
+) -> Result<String, String> {
     let start = Instant::now();
     loop {
         if let Ok(text) = fs::read_to_string(log_path) {
             if let Some(report) = extract_guest_proof_report(&text) {
                 return Ok(report);
             }
+        }
+        // A dead QEMU can never produce the marker — fail fast with its
+        // stderr instead of burning the whole timeout.
+        if let Ok(Some(status)) = child.try_wait() {
+            let stderr = fs::read_to_string(stderr_path).unwrap_or_default();
+            let line = stderr
+                .lines()
+                .map(str::trim)
+                .find(|line| !line.is_empty())
+                .unwrap_or("no stderr output");
+            let excerpt: String = line.chars().take(240).collect();
+            return Err(format!(
+                "QEMU exited ({status}) before the guest proof marker; {excerpt}; full stderr at `{}`",
+                stderr_path.display()
+            ));
         }
         if start.elapsed() > timeout {
             return Err(format!(
