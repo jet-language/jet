@@ -4932,6 +4932,16 @@ module vmtest.ssh-smoke {
     );
 }
 
+/// Scrape a string field's value out of a harness/proof JSON blob (the VM
+/// proof files are flat string fields, so a split is enough).
+fn harness_json_field(text: &str, key: &str) -> String {
+    let needle = format!("\"{key}\":\"");
+    let (_, rest) = text
+        .split_once(&needle)
+        .unwrap_or_else(|| panic!("harness JSON lacks `{key}`: {text}"));
+    rest.split('"').next().unwrap().to_string()
+}
+
 #[test]
 fn os_vm_prove_accepts_matching_guest_proof() {
     let root = Scratch::new("os-vm-guest-proof-root");
@@ -4970,8 +4980,10 @@ fn os_vm_prove_accepts_matching_guest_proof() {
     fs::write(
         &guest,
         format!(
-            "{{\"state\":\"guest-passed\",\"host\":\"halcyon\",\"generation\":\"vm-proof\",\"disk\":\"halcyon.qcow2\",\"media_proof\":\"{}\",\"assertions\":[\"current-generation-matches\",\"packages-present\",\"services-active\",\"network-up\",\"rollback-generation-bootable\",\"terminal-login-ready\",\"desktop-session-ready\",\"graphical-console-ready\",\"desktop-launchers-run\"],\"toolchain\":\"{}\"}}\n",
+            "{{\"state\":\"guest-passed\",\"host\":\"halcyon\",\"generation\":\"vm-proof\",\"disk\":\"halcyon.qcow2\",\"media_proof\":\"{}\",\"media_proof_sha256\":\"{}\",\"installer_iso_fingerprint\":\"{}\",\"assertions\":[\"current-generation-matches\",\"packages-present\",\"services-active\",\"network-up\",\"rollback-generation-bootable\",\"terminal-login-ready\",\"desktop-session-ready\",\"graphical-console-ready\",\"desktop-launchers-run\"],\"toolchain\":\"{}\"}}\n",
             test_json_escape(&media_proof.display().to_string()),
+            harness_json_field(&harness, "media_proof_sha256"),
+            harness_json_field(&harness, "installer_iso_fingerprint"),
             test_json_escape(&harness)
         ),
     )
@@ -5038,8 +5050,10 @@ fn os_vm_prove_rejects_incomplete_guest_proof() {
     fs::write(
         &guest,
         format!(
-            "{{\"state\":\"guest-passed\",\"host\":\"halcyon\",\"generation\":\"vm-proof\",\"disk\":\"halcyon.qcow2\",\"media_proof\":\"{}\",\"assertions\":[\"current-generation-matches\",\"packages-present\",\"services-active\",\"network-up\"],\"toolchain\":\"{}\"}}\n",
+            "{{\"state\":\"guest-passed\",\"host\":\"halcyon\",\"generation\":\"vm-proof\",\"disk\":\"halcyon.qcow2\",\"media_proof\":\"{}\",\"media_proof_sha256\":\"{}\",\"installer_iso_fingerprint\":\"{}\",\"assertions\":[\"current-generation-matches\",\"packages-present\",\"services-active\",\"network-up\"],\"toolchain\":\"{}\"}}\n",
             test_json_escape(&media_proof.display().to_string()),
+            harness_json_field(&harness, "media_proof_sha256"),
+            harness_json_field(&harness, "installer_iso_fingerprint"),
             test_json_escape(&harness)
         ),
     )

@@ -18,14 +18,18 @@ fn write_vm_install_plan(
     let commands = qemu_proof_commands_json(&staging_boot, disk, &iso, &system.name, &gen.name);
     let guest = guest_proof_path(&proof);
     let proof_tier = if real_guest { "real-guest" } else { "plumbing" };
+    let media_proof_sha256 = file_sha256(media_proof).map_err(std::io::Error::other)?;
+    let iso_fingerprint = file_fingerprint(&iso).map_err(std::io::Error::other)?;
     let text = format!(
-        "{{\"host\":{},\"generation\":{},\"state\":\"harness-ready\",\"proof_tier\":{},\"disk\":{},\"installer_media\":{},\"media_proof\":{},\"expected_guest_proof\":{},\"tools\":[{}],\"commands\":[{}],\"steps\":[\"build-generation\",\"create-hybrid-iso\",\"boot-installer-qemu\",\"install-to-disk\",\"reboot-installed-disk\",\"verify-guest-proof\",\"boot-graphical-desktop\"],\"guest_assertions\":[{}]}}",
+        "{{\"host\":{},\"generation\":{},\"state\":\"harness-ready\",\"proof_tier\":{},\"disk\":{},\"installer_media\":{},\"media_proof\":{},\"media_proof_sha256\":{},\"installer_iso_fingerprint\":{},\"expected_guest_proof\":{},\"tools\":[{}],\"commands\":[{}],\"steps\":[\"build-generation\",\"create-hybrid-iso\",\"boot-installer-qemu\",\"install-to-disk\",\"reboot-installed-disk\",\"verify-guest-proof\",\"boot-graphical-desktop\"],\"guest_assertions\":[{}]}}",
         JSON::quote(&system.name),
         JSON::quote(&gen.name),
         JSON::quote(proof_tier),
         JSON::quote(disk),
         JSON::quote(&format!("jetos-installer-{}.iso", system.name)),
         JSON::quote(&media_proof.display().to_string()),
+        JSON::quote(&media_proof_sha256),
+        JSON::quote(&iso_fingerprint),
         JSON::quote(&guest.display().to_string()),
         tools,
         commands,
@@ -248,9 +252,11 @@ fn finalize_vm_guest_proof(
     }
     let text = fs::read_to_string(&guest)
         .map_err(|e| format!("reading `{}` failed: {e}", guest.display()))?;
-    if validate_cached_guest_proof(&text, system, gen, disk, media_proof).is_err() {
+    if let Err(e) = validate_cached_guest_proof(&text, system, gen, disk, media_proof) {
+        // Drop the unusable cached proof so a rerun records a fresh one, but
+        // surface why it was rejected — silent invalidation hides real drift.
         let _ = fs::remove_file(&guest);
-        return Ok(None);
+        return Err(e);
     }
     for (name, _path, sha) in vm_tool_facts() {
         if !text.contains(&name) || !text.contains(&sha) {
@@ -327,15 +333,9 @@ fn file_sha256(path: &Path) -> Result<String, String> {
 }
 
 fn file_fingerprint(path: &Path) -> Result<String, String> {
-    let meta = fs::metadata(path)
-        .map_err(|e| format!("reading metadata for `{}` failed: {e}", path.display()))?;
-    let modified = meta
-        .modified()
-        .ok()
-        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
-        .map(|duration| duration.as_nanos())
-        .unwrap_or(0);
-    Ok(format!("len={};mtime_ns={modified}", meta.len()))
+    // Content-bound: installer media is restaged on every prove run, so an
+    // mtime-based fingerprint would invalidate every cached guest proof.
+    Ok(format!("sha256={}", file_sha256(path)?))
 }
 
 fn guest_proof_path(harness: &Path) -> PathBuf {
