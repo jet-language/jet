@@ -342,6 +342,13 @@ fn plan_from_live_facts(
     }
     if let Some(JSON::Json::Object(sysctl)) = root.get("sysctl") {
         for (key, value) in sysctl {
+            // Values embedding store paths are NixOS machinery echoes (e.g.
+            // `kernel.poweroff_cmd` from shutdown.nix), not configuration
+            // intent — the target system regenerates them itself, and
+            // re-declaring them collides with the module that owns them.
+            if matches!(value, JSON::Json::Str(s) if s.contains("/nix/store/")) {
+                continue;
+            }
             let rendered = match value {
                 JSON::Json::Num(n) => render_live_number(*n),
                 JSON::Json::Bool(b) => b.to_string(),

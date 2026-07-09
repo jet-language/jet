@@ -375,7 +375,9 @@ fn map_system_to_nixos(
             } else {
                 nix_string(&cleaned)
             };
-            body_lines.push(format!("    \"{key}\" = {rendered};"));
+            // mkForce: a declared sysctl is user intent and must win over any
+            // NixOS module that also touches the key.
+            body_lines.push(format!("    \"{key}\" = lib.mkForce {rendered};"));
         }
         body_lines.push("  };".to_string());
     }

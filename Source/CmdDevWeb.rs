@@ -10,7 +10,7 @@
 //! from `run_dev`, not any of its interpreter/JIT machinery.
 
 use std::fs;
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{BufRead, BufReader, IsTerminal, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::exit;
@@ -19,6 +19,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use jet::Diagnostics::ColorChoice;
 use jet::ExitCodes;
 
 use crate::CmdCompile::write_web_artifacts;
@@ -36,10 +37,18 @@ const PORT_RANGE: std::ops::RangeInclusive<u16> = 8080..=8089;
 /// without hammering the dev server on every open tab).
 const LIVE_RELOAD_POLL_MS: u64 = 400;
 
+/// D-FE-DEVSRV1 outcome D (hybrid, owner-modified 2026-07-08: pinned parity
+/// header required as the terminal anchor): a one-line terminal status and a
+/// browser corner strip mirror the exact same words from one shared status
+/// (`header_words`/`json`'s `message` field) — they cannot drift because both
+/// read the same source. On error both sides show the identical verbatim
+/// diagnostic (I4): terminal frames it in a box (TTY) or prints it plain (CI
+/// floor); the browser expands its strip into a full overlay. `--verbose`
+/// (or `-v`) adds a request/rebuild log under the still-pinned header.
 #[derive(Clone)]
 struct DevStatusSnapshot {
     state: String,
-    message: String,
+    code: String,
     diagnostic: String,
     last_build_ms: u128,
 }
@@ -49,63 +58,254 @@ struct DevStatus {
     clients: AtomicU64,
     state: Mutex<DevStatusSnapshot>,
     command_receipt: Mutex<Option<String>>,
+    /// The file `jet dev` is watching — used in the `building` parity line
+    /// and the `save <file> → …` verbose log lines.
+    watched_file: String,
+    /// Set once, right after `bind_dev_server` — 0 until then.
+    port: AtomicU64,
+    /// `--verbose`/`-v`: opt-in request/rebuild log under the parity header
+    /// (dashboard's depth, D-FE-DEVSRV1=D "on-demand depth").
+    verbose: bool,
+    /// Redraw the parity line in place instead of appending a new one each
+    /// time. Only when stderr is a real TTY *and* color is on — `NO_COLOR`
+    /// degrades straight to the CI floor (plain, append-only, unpinned), same
+    /// as a non-TTY pipe.
+    pin: bool,
+    /// Serializes every write to stderr from the status/log renderer so
+    /// concurrent request threads and the rebuild-watch thread never
+    /// interleave partial ANSI escape sequences.
+    term_lock: Mutex<()>,
+    /// How many lines the last pinned (non-verbose) redraw occupied — lets
+    /// the next redraw move the cursor up and erase exactly that block
+    /// (parity line, or parity line + framed diagnostic).
+    last_block_lines: Mutex<usize>,
+    /// Whether the verbose pinned header's scroll region has been set up yet
+    /// (`\x1b[2r`, cursor parked in the scrolling log area below row 1).
+    header_started: Mutex<bool>,
 }
 
 impl DevStatus {
-    fn new() -> DevStatus {
+    fn new(file: &str, verbose: bool) -> DevStatus {
+        let is_tty = std::io::stderr().is_terminal();
+        // `NO_COLOR`/`FORCE_COLOR` resolution — the same one every other jet
+        // command uses. Pinning (cursor redraw) additionally requires a real
+        // TTY: `FORCE_COLOR` off-TTY still can't redraw in place.
+        let color = ColorChoice::Auto.resolve(is_tty);
         DevStatus {
             version: AtomicU64::new(1),
             clients: AtomicU64::new(0),
             state: Mutex::new(DevStatusSnapshot {
                 state: "ready".to_string(),
-                message: "initial build ready".to_string(),
+                code: String::new(),
                 diagnostic: String::new(),
                 last_build_ms: 0,
             }),
             command_receipt: Mutex::new(None),
+            watched_file: file.to_string(),
+            port: AtomicU64::new(0),
+            verbose,
+            pin: is_tty && color,
+            term_lock: Mutex::new(()),
+            last_block_lines: Mutex::new(0),
+            header_started: Mutex::new(false),
         }
     }
 
-    fn mark_building(&self, file: &str) {
+    fn set_port(&self, port: u16) {
+        self.port.store(port as u64, Ordering::SeqCst);
+    }
+
+    fn port(&self) -> u16 {
+        self.port.load(Ordering::SeqCst) as u16
+    }
+
+    fn header_text_for(&self, snap: &DevStatusSnapshot) -> (String, String) {
+        header_words(
+            &snap.state,
+            &self.watched_file,
+            &snap.code,
+            self.port(),
+            self.clients.load(Ordering::SeqCst),
+            snap.last_build_ms,
+        )
+    }
+
+    fn format_line(&self, word: &str, rest: &str) -> String {
+        if self.pin {
+            format_line_colored(word, rest)
+        } else {
+            format_line_plain(word, rest)
+        }
+    }
+
+    /// Recompute the parity words from current state and redraw the
+    /// terminal's live region (single source shared with `json()`'s
+    /// `message` field — the browser strip renders that exact string).
+    fn refresh(&self) {
+        let snap = self.state.lock().unwrap().clone();
+        let (word, rest) = self.header_text_for(&snap);
+        let line = self.format_line(&word, &rest);
+
+        if self.verbose {
+            if self.pin {
+                self.write_header_verbose(&line);
+            } else {
+                let _g = self.term_lock.lock().unwrap();
+                let mut out = std::io::stderr();
+                let _ = writeln!(out, "{}", line);
+                let _ = out.flush();
+            }
+            return;
+        }
+
+        if self.pin {
+            let mut lines = vec![line];
+            if snap.state == "error" {
+                lines.extend(frame_lines(&snap.code, &snap.diagnostic));
+            }
+            self.write_block(&lines);
+            return;
+        }
+
+        // CI floor: append-only, plain, no framing — the diagnostic prints
+        // byte-for-byte what `render_diagnostics` produced (I4).
+        let _g = self.term_lock.lock().unwrap();
+        let mut out = std::io::stderr();
+        let _ = writeln!(out, "{}", line);
+        if snap.state == "error" {
+            let _ = writeln!(out, "{}", snap.diagnostic);
+        }
+        let _ = out.flush();
+    }
+
+    /// Redraw a pinned (non-verbose) block in place: move the cursor up to
+    /// the top of the previous block, erase to end of screen, print the new
+    /// block. Cursor ends on the block's last line, no trailing newline —
+    /// every caller (including the next redraw) relies on that invariant.
+    fn write_block(&self, lines: &[String]) {
+        let _g = self.term_lock.lock().unwrap();
+        let mut out = std::io::stderr();
+        let mut prev = self.last_block_lines.lock().unwrap();
+        if *prev > 0 {
+            if *prev > 1 {
+                let _ = write!(out, "\x1b[{}A", *prev - 1);
+            }
+            let _ = write!(out, "\r\x1b[0J");
+        }
+        let _ = write!(out, "{}", lines.join("\n"));
+        let _ = out.flush();
+        *prev = lines.len();
+    }
+
+    /// Pin the parity header to terminal row 1 via a DECSTBM scroll region
+    /// (`\x1b[2r`) so `log_line` can print request/rebuild lines below it
+    /// forever without ever touching row 1. Std ANSI only (I6) — no terminal-
+    /// size query, which is why the region's bottom is left at the display
+    /// default instead of being computed.
+    fn write_header_verbose(&self, line: &str) {
+        let _g = self.term_lock.lock().unwrap();
+        let mut out = std::io::stderr();
+        let mut started = self.header_started.lock().unwrap();
+        if !*started {
+            let _ = write!(out, "\x1b[2J\x1b[H{}\n\x1b[2r\x1b[2;1H", line);
+            *started = true;
+        } else {
+            // DECSC/DECRC save+restore the log cursor across the jump to row 1.
+            let _ = write!(out, "\x1b7\x1b[1;1H\x1b[2K{}\x1b8", line);
+        }
+        let _ = out.flush();
+    }
+
+    /// One line in the verbose request/rebuild log, printed under the pinned
+    /// header. No-op unless `--verbose`/`-v` was passed.
+    fn log_line(&self, text: &str) {
+        if !self.verbose {
+            return;
+        }
+        let _g = self.term_lock.lock().unwrap();
+        let mut out = std::io::stderr();
+        if self.pin {
+            let _ = write!(out, "{}\r\n", text);
+        } else {
+            let _ = writeln!(out, "{}", text);
+        }
+        let _ = out.flush();
+    }
+
+    fn log_rebuild(&self, ok: bool, detail: &str) {
+        let arrow = if ok { "rebuilt" } else { "error" };
+        self.log_line(&format!(
+            "{}  save {}  →  {} {}",
+            clock_time(),
+            self.watched_file,
+            arrow,
+            detail
+        ));
+    }
+
+    fn log_request(&self, method: &str, path: &str, code: u16, elapsed: Duration) {
+        self.log_line(&format!(
+            "{}  {}  {:<20} {}  {}ms",
+            clock_time(),
+            method,
+            path,
+            code,
+            elapsed.as_millis()
+        ));
+    }
+
+    fn mark_building(&self) {
         *self.state.lock().unwrap() = DevStatusSnapshot {
             state: "building".to_string(),
-            message: format!("building {file}"),
+            code: String::new(),
             diagnostic: String::new(),
             last_build_ms: 0,
         };
+        self.refresh();
     }
 
-    fn mark_ready(&self, file: &str, elapsed_ms: u128, bump_version: bool) {
-        if bump_version {
+    fn mark_ready(&self, elapsed_ms: u128, is_rebuild: bool) {
+        if is_rebuild {
             self.version.fetch_add(1, Ordering::SeqCst);
         }
         *self.state.lock().unwrap() = DevStatusSnapshot {
             state: "ready".to_string(),
-            message: format!("built {file} in {elapsed_ms}ms"),
+            code: String::new(),
             diagnostic: String::new(),
             last_build_ms: elapsed_ms,
         };
+        self.refresh();
+        if is_rebuild {
+            self.log_rebuild(true, &format_build_time(elapsed_ms));
+        }
     }
 
-    fn mark_error(&self, diagnostic: String) {
+    fn mark_error(&self, code: String, diagnostic: String, is_rebuild: bool) {
         *self.state.lock().unwrap() = DevStatusSnapshot {
             state: "error".to_string(),
-            message: "build failed; serving last good output".to_string(),
+            code: code.clone(),
             diagnostic,
             last_build_ms: 0,
         };
+        self.refresh();
+        if is_rebuild {
+            self.log_rebuild(false, &code);
+        }
     }
 
     fn json(&self) -> String {
-        let state = self.state.lock().unwrap().clone();
+        let snap = self.state.lock().unwrap().clone();
+        let (word, rest) = self.header_text_for(&snap);
+        let message = format!("{} · {}", word, rest);
         format!(
-            "{{\"version\":{},\"state\":\"{}\",\"message\":\"{}\",\"diagnostic\":\"{}\",\"clients\":{},\"last_build_ms\":{}}}",
+            "{{\"version\":{},\"state\":\"{}\",\"message\":\"{}\",\"code\":\"{}\",\"diagnostic\":\"{}\",\"clients\":{},\"last_build_ms\":{}}}",
             self.version.load(Ordering::SeqCst),
-            json_escape(&state.state),
-            json_escape(&state.message),
-            json_escape(&state.diagnostic),
+            json_escape(&word),
+            json_escape(&message),
+            json_escape(&snap.code),
+            json_escape(&snap.diagnostic),
             self.clients.load(Ordering::SeqCst),
-            state.last_build_ms
+            snap.last_build_ms
         )
     }
 
@@ -116,18 +316,85 @@ impl DevStatus {
     fn command_receipt(&self) -> Option<String> {
         self.command_receipt.lock().unwrap().clone()
     }
+}
 
-    fn terminal_line(&self, port: u16, file: &str) -> String {
-        let state = self.state.lock().unwrap().clone();
-        format!(
-            "jet dev  [{}] localhost:{} · {} clients · {} · watching {}",
-            state.state,
-            port,
-            self.clients.load(Ordering::SeqCst),
-            state.message,
-            file
-        )
+/// Pure — the parity words shared verbatim by the terminal line and the
+/// browser strip's `message` field (`(state_word, rest)`; callers join them
+/// with " · "). No I/O, no locking: easy to unit test every state directly.
+fn header_words(
+    state: &str,
+    file: &str,
+    code: &str,
+    port: u16,
+    clients: u64,
+    last_build_ms: u128,
+) -> (String, String) {
+    let plural = if clients == 1 { "" } else { "s" };
+    match state {
+        "building" => (
+            "building".to_string(),
+            format!("{} · {} client{}", file, clients, plural),
+        ),
+        "error" => (
+            "error".to_string(),
+            format!("{} · {} client{}", code, clients, plural),
+        ),
+        _ => {
+            let mut rest = format!("localhost:{} · {} client{}", port, clients, plural);
+            if last_build_ms > 0 {
+                rest.push_str(&format!(" · built {}", format_build_time(last_build_ms)));
+            }
+            ("ready".to_string(), rest)
+        }
     }
+}
+
+fn format_build_time(ms: u128) -> String {
+    format!("{:.1}s", ms as f64 / 1000.0)
+}
+
+fn format_line_colored(word: &str, rest: &str) -> String {
+    let sgr = match word {
+        "ready" => "32",
+        "building" => "33",
+        "error" => "31",
+        _ => "37",
+    };
+    format!("jet dev  \x1b[{}m\u{25CF}\x1b[0m {} · {}", sgr, word, rest)
+}
+
+fn format_line_plain(word: &str, rest: &str) -> String {
+    format!("jet dev  [{}] {}", word, rest)
+}
+
+/// Frame a verbatim diagnostic in a box for the pinned (TTY) terminal
+/// surface — border/frame chars only, never a changed word or code (I4).
+/// Off-TTY (`refresh`'s CI-floor branch) prints the same diagnostic
+/// unframed instead of calling this at all.
+fn frame_lines(code: &str, diagnostic: &str) -> Vec<String> {
+    let lines: Vec<&str> = diagnostic.lines().collect();
+    let content_width = lines.iter().map(|l| l.chars().count()).max().unwrap_or(0);
+    let width = content_width.max(code.len() + 2).clamp(20, 96);
+    let dash_count = width.saturating_sub(code.len() + 3).max(1);
+    let mut out = Vec::with_capacity(lines.len() + 2);
+    out.push(format!("┌ {} {}", code, "─".repeat(dash_count)));
+    for line in lines {
+        out.push(format!("│ {}", line));
+    }
+    out.push(format!("└{}", "─".repeat(width + 2)));
+    out
+}
+
+/// Wall-clock `HH:MM:SS` (UTC — std has no local-offset lookup without a
+/// crate, I6) for verbose request/rebuild log lines. Cosmetic only, never
+/// part of a diagnostic's verbatim text.
+fn clock_time() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let sod = secs % 86400;
+    format!("{:02}:{:02}:{:02}", sod / 3600, (sod % 3600) / 60, sod % 60)
 }
 
 fn json_escape(s: &str) -> String {
@@ -162,18 +429,22 @@ pub(crate) fn run_dev_web(file: &str, mode: OutputMode, verbose: bool, port: Opt
         exit(ExitCodes::USER_ERROR);
     }
 
-    // The initial build must succeed — there's nothing to serve otherwise.
-    // `rebuild_web` already prints diagnostics/ICE messages on failure.
-    let status = Arc::new(DevStatus::new());
-    if !rebuild_web(file, mode, verbose, false, Some(&status)) {
-        exit(ExitCodes::USER_ERROR);
-    }
-
+    // Bind first so the port is known before the initial build's status
+    // renders its parity line (D-FE-DEVSRV1=D: `ready · localhost:<port> …`).
     let listener = bind_dev_server(port);
     let port = listener
         .local_addr()
         .map(|a| a.port())
         .unwrap_or(*PORT_RANGE.start());
+
+    let status = Arc::new(DevStatus::new(file, verbose));
+    status.set_port(port);
+
+    // The initial build must succeed — there's nothing to serve otherwise.
+    // `rebuild_web` already prints diagnostics/ICE messages on failure.
+    if !rebuild_web(file, mode, verbose, false, Some(&status)) {
+        exit(ExitCodes::USER_ERROR);
+    }
 
     {
         let status = Arc::clone(&status);
@@ -185,7 +456,6 @@ pub(crate) fn run_dev_web(file: &str, mode: OutputMode, verbose: bool, port: Opt
         "serving http://localhost:{} — watching {} … (Ctrl-C to stop)",
         port, file
     );
-    println!("{}", status.terminal_line(port, file));
     println!("Canvas: http://localhost:{}/canvas", port);
 
     // Same mtime-poll/debounce shape as `run_dev` (Source/CmdDevTools.rs),
@@ -198,9 +468,10 @@ pub(crate) fn run_dev_web(file: &str, mode: OutputMode, verbose: bool, port: Opt
             last_mtime = now;
             // A debounce sleep lets editors finish writing before we read.
             thread::sleep(Duration::from_millis(30));
-            if rebuild_web(file, mode, verbose, true, Some(&status)) {
-                eprintln!("{}", status.terminal_line(port, file));
-            }
+            rebuild_web(file, mode, verbose, true, Some(&status));
+            // `rebuild_web` drives the parity header + verbose log itself
+            // (`DevStatus::refresh`/`log_rebuild`) on both success and
+            // failure — nothing left to print here.
             // On failure: `rebuild_web` never touches `build/` until every
             // artifact (including the wasm rustc pass) has compiled clean —
             // see `stage_and_swap` — so the dev server keeps serving the last
@@ -228,18 +499,28 @@ fn rebuild_web(
 ) -> bool {
     let started = Instant::now();
     if let Some(status) = status {
-        status.mark_building(file);
+        status.mark_building();
     }
     let src = fs::read_to_string(file).unwrap_or_default();
     let out = match jet::compile_web(file) {
         Ok(out) => out,
         Err(diags) => {
-            if is_rebuild {
-                eprintln!("\n— {} changed —", file);
+            // On the very first build the process exits right after this
+            // (no dev loop has started yet), so the standard rich CLI
+            // diagnostic (color, hyperlinks, "N problems found") is exactly
+            // right — same as `jet build`. On a save-triggered rebuild the
+            // parity header + framed/plain diagnostic (`DevStatus::refresh`,
+            // driven by `mark_error` below) IS the terminal error surface
+            // (D-FE-DEVSRV1=D); printing `report_problems` too would just
+            // duplicate the same diagnostic in a second, different format.
+            if !is_rebuild {
+                report_problems(mode, file, &src, &diags);
             }
-            report_problems(mode, file, &src, &diags);
             if let Some(status) = status {
-                status.mark_error(jet::render_diagnostics(file, &src, &diags));
+                let code = diags.first().map(|d| d.code.to_string()).unwrap_or_default();
+                status.mark_error(code, jet::render_diagnostics(file, &src, &diags), is_rebuild);
+            } else if is_rebuild {
+                report_problems(mode, file, &src, &diags);
             }
             return false;
         }
@@ -249,7 +530,11 @@ fn rebuild_web(
         None => {
             eprintln!("error: internal compiler error: missing web codegen output");
             if let Some(status) = status {
-                status.mark_error("internal compiler error: missing web codegen output".to_string());
+                status.mark_error(
+                    "ICE".to_string(),
+                    "internal compiler error: missing web codegen output".to_string(),
+                    is_rebuild,
+                );
             }
             return false;
         }
@@ -259,23 +544,20 @@ fn rebuild_web(
     if let Err(msg) = write_web_artifacts(file, web, verbose, &staging) {
         eprintln!("{}", msg);
         if let Some(status) = status {
-            status.mark_error(msg);
+            status.mark_error("ICE".to_string(), msg, is_rebuild);
         }
         return false;
     }
     if let Err(e) = stage_and_swap(&staging, Path::new("build")) {
         eprintln!("error: couldn't finalize web build: {}", e);
         if let Some(status) = status {
-            status.mark_error(format!("couldn't finalize web build: {e}"));
+            status.mark_error("ICE".to_string(), format!("couldn't finalize web build: {e}"), is_rebuild);
         }
         return false;
     }
 
     if let Some(status) = status {
-        status.mark_ready(file, started.elapsed().as_millis(), is_rebuild);
-    }
-    if is_rebuild {
-        eprintln!("[dev] rebuilt after change to {}", file);
+        status.mark_ready(started.elapsed().as_millis(), is_rebuild);
     }
     true
 }
@@ -768,7 +1050,13 @@ fn handle_connection(
             body.as_bytes(),
         );
     }
-    serve_static(&mut stream, path)
+    // Only page/asset GETs are worth a request-log line (D-FE-DEVSRV1=D's
+    // verbose log shows `GET / 200 2ms`, not the 400ms `/__jet_dev_version`
+    // poll noise) — those are handled above and already returned.
+    let started = Instant::now();
+    let code = serve_static(&mut stream, path)?;
+    status.log_request(method, path, code, started.elapsed());
+    Ok(())
 }
 
 fn query_param(target: &str, key: &str) -> Option<String> {
@@ -822,14 +1110,15 @@ fn method_not_allowed(stream: &mut TcpStream) -> std::io::Result<()> {
 /// `index.html` on the way out. GET-only, no directory listing, no range
 /// requests, no compression — a dev tool serving a few small files needs
 /// none of that.
-fn serve_static(stream: &mut TcpStream, path: &str) -> std::io::Result<()> {
+fn serve_static(stream: &mut TcpStream, path: &str) -> std::io::Result<u16> {
     if path.contains("..") {
-        return write_response(
+        write_response(
             stream,
             "400 Bad Request",
             "text/plain; charset=utf-8",
             b"bad path",
-        );
+        )?;
+        return Ok(400);
     }
     let rel = if path == "/" {
         "index.html"
@@ -841,12 +1130,13 @@ fn serve_static(stream: &mut TcpStream, path: &str) -> std::io::Result<()> {
         Ok(b) => b,
         Err(_) => {
             let body = format!("not found: {}", path);
-            return write_response(
+            write_response(
                 stream,
                 "404 Not Found",
                 "text/plain; charset=utf-8",
                 body.as_bytes(),
-            );
+            )?;
+            return Ok(404);
         }
     };
 
@@ -854,9 +1144,11 @@ fn serve_static(stream: &mut TcpStream, path: &str) -> std::io::Result<()> {
     if file_path.file_name().and_then(|f| f.to_str()) == Some("index.html") {
         let html = String::from_utf8_lossy(&bytes).into_owned();
         let injected = inject_live_reload(&html);
-        return write_response(stream, "200 OK", content_type, injected.as_bytes());
+        write_response(stream, "200 OK", content_type, injected.as_bytes())?;
+        return Ok(200);
     }
-    write_response(stream, "200 OK", content_type, &bytes)
+    write_response(stream, "200 OK", content_type, &bytes)?;
+    Ok(200)
 }
 
 fn content_type_for(path: &Path) -> &'static str {
@@ -871,32 +1163,77 @@ fn content_type_for(path: &Path) -> &'static str {
 }
 
 /// Plain polling live-reload (no WebSocket/SSE — I6 + correct scoping for a
-/// dev tool): fetch `/__jet_dev_version` on an interval, reload the page the
-/// first time it differs from the version seen at page load.
+/// dev tool): fetch `/__jet_dev_status` on an interval, reload the page the
+/// first time `version` differs from the value seen at page load.
+///
+/// D-FE-DEVSRV1=D (hybrid): the corner strip is a collapsed pill mirroring
+/// the exact same `message` string the terminal's parity line renders —
+/// same poll, same words, cannot drift. On `state:"error"` the strip expands
+/// into a full-viewport dimmed overlay framing the verbatim diagnostic
+/// (I4 — `s.diagnostic` is written via `textContent`, never re-escaped or
+/// reworded); a clean rebuild (browser strip is dumb — it just re-renders
+/// whatever the poll says) collapses it back to the pill.
 fn live_reload_script() -> String {
     format!(
-        r#"<script>
+        r##"<script>
 (function () {{
   var jetDevVersion = null;
-  var panel = null;
-  function ensurePanel() {{
-    if (panel) return panel;
-    panel = document.createElement("div");
-    panel.id = "jet-dev-status";
-    panel.setAttribute("style", "position:fixed;right:12px;bottom:12px;z-index:2147483647;max-width:min(560px,calc(100vw - 24px));font:12px ui-monospace, SFMono-Regular, Consolas, monospace;background:#101820;color:#d6e7ff;border:1px solid #3b5675;border-radius:6px;padding:8px 10px;box-shadow:0 8px 24px rgba(0,0,0,.32)");
-    document.body.appendChild(panel);
-    return panel;
+  var pill = null, overlay = null, overlayTitle = null, overlayBody = null, overlayFooter = null;
+  function ensureUi() {{
+    if (pill) return;
+    var style = document.createElement("style");
+    style.textContent =
+      "#jet-dev-pill{{position:fixed;right:12px;bottom:12px;z-index:2147483647;" +
+      "font:12px ui-monospace,SFMono-Regular,Consolas,monospace;background:#101820;" +
+      "color:#d6e7ff;border:1px solid #3b5675;border-radius:999px;padding:4px 10px;" +
+      "box-shadow:0 4px 16px rgba(0,0,0,.35)}}" +
+      "#jet-dev-pill .dot{{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}}" +
+      "#jet-dev-overlay{{position:fixed;inset:0;z-index:2147483646;background:rgba(6,10,16,.82);" +
+      "display:none;align-items:center;justify-content:center;padding:24px}}" +
+      "#jet-dev-overlay .box{{max-width:min(760px,92vw);max-height:82vh;overflow:auto;" +
+      "background:#101820;color:#f2f6fb;border:1px solid #3b5675;border-radius:8px;" +
+      "box-shadow:0 24px 64px rgba(0,0,0,.5)}}" +
+      "#jet-dev-overlay .box h3{{margin:0;padding:10px 14px;border-bottom:1px solid #263a52;" +
+      "font:600 13px ui-monospace,SFMono-Regular,Consolas,monospace;color:#ff8a80}}" +
+      "#jet-dev-overlay .box pre{{margin:0;padding:14px;white-space:pre-wrap;" +
+      "font:12px ui-monospace,SFMono-Regular,Consolas,monospace;line-height:1.5}}" +
+      "#jet-dev-overlay .box footer{{padding:8px 14px;border-top:1px solid #263a52;" +
+      "font:12px ui-monospace,SFMono-Regular,Consolas,monospace;color:#9fb4cc}}";
+    document.head.appendChild(style);
+    pill = document.createElement("div");
+    pill.id = "jet-dev-pill";
+    pill.innerHTML = "<span class=\"dot\"></span><span class=\"label\"></span>";
+    document.body.appendChild(pill);
+    overlay = document.createElement("div");
+    overlay.id = "jet-dev-overlay";
+    overlay.innerHTML = "<div class=\"box\"><h3>Build failed</h3><pre></pre><footer></footer></div>";
+    document.body.appendChild(overlay);
+    overlayTitle = overlay.querySelector("h3");
+    overlayBody = overlay.querySelector("pre");
+    overlayFooter = overlay.querySelector("footer");
   }}
-  function esc(s) {{ return String(s || "").replace(/[&<>]/g, function (c) {{ return {{ "&":"&amp;","<":"&lt;",">":"&gt;" }}[c]; }}); }}
+  function dotColor(state) {{
+    if (state === "error") return "#FF5C5C";
+    if (state === "building") return "#FFB454";
+    return "#58D68D";
+  }}
   function renderStatus(s) {{
-    var el = ensurePanel();
+    ensureUi();
     var state = s.state || "ready";
-    var diag = s.diagnostic || "";
-    var head = "jet dev [" + state + "] · " + (s.clients || 0) + " clients · v" + (s.version || 0);
+    pill.querySelector(".dot").style.background = dotColor(state);
+    // `.textContent` — never re-escape or reword the shared parity string
+    // (I8: one status mechanism, two entrypoints reading the same words).
+    pill.querySelector(".label").textContent = s.message || state;
     if (state === "error") {{
-      el.innerHTML = "<b>Build failed</b><br><span>" + esc(head) + "</span><pre style=\"white-space:pre-wrap;margin:8px 0 0;max-height:45vh;overflow:auto\">" + esc(diag) + "</pre>";
+      // The overlay's own translucent backdrop (rgba(6,10,16,.82)) is what
+      // reads as "app, dimmed" — it sits over the still-live last-good page.
+      overlay.style.display = "flex";
+      // Verbatim diagnostic (I4): exactly what the terminal's framed box
+      // and `render_diagnostics` produced, byte-for-byte via `textContent`.
+      overlayBody.textContent = s.diagnostic || "";
+      overlayFooter.textContent = (s.message || state) + " — clears on the next clean build";
     }} else {{
-      el.innerHTML = "<b>" + esc(head) + "</b><br><span>" + esc(s.message || "") + "</span>";
+      overlay.style.display = "none";
     }}
   }}
   setInterval(function () {{
@@ -906,13 +1243,16 @@ fn live_reload_script() -> String {
         renderStatus(s);
         var v = String(s.version || "");
         if (jetDevVersion === null) {{ jetDevVersion = v; return; }}
-        if (v !== jetDevVersion) {{ location.reload(); }}
+        // Never bumps on an error build (`DevStatus::mark_error` doesn't
+        // touch `version`) — a reload only ever follows the next clean build,
+        // which is also what auto-collapses the overlay above.
+        if (v !== jetDevVersion) {{ jetDevVersion = v; location.reload(); }}
       }})
       .catch(function () {{}});
   }}, {poll_ms});
 }})();
 </script>
-"#,
+"##,
         poll_ms = LIVE_RELOAD_POLL_MS
     )
 }
@@ -954,7 +1294,10 @@ fn write_response(
 
 #[cfg(test)]
 mod tests {
-    use super::inject_live_reload;
+    use super::{
+        format_build_time, format_line_colored, format_line_plain, frame_lines, header_words,
+        inject_live_reload,
+    };
 
     #[test]
     fn injects_before_closing_body_tag() {
@@ -970,5 +1313,101 @@ mod tests {
         let out = inject_live_reload(html);
         assert!(out.starts_with(html));
         assert!(out.contains("<script>"));
+    }
+
+    #[test]
+    fn injected_script_shows_verbatim_overlay_and_parity_pill() {
+        let html = "<html><body></body></html>";
+        let out = inject_live_reload(html);
+        // The browser overlay's title is a static literal, not derived from
+        // the diagnostic — the diagnostic body is written via `textContent`
+        // (never re-escaped/re-worded, I4).
+        assert!(out.contains("Build failed"));
+        assert!(out.contains("__jet_dev_status"));
+        assert!(out.contains("overlayBody.textContent = s.diagnostic"));
+        assert!(out.contains("pill.querySelector(\".label\").textContent = s.message"));
+    }
+
+    // --- D-FE-DEVSRV1=D: parity words shared verbatim by terminal + browser ---
+
+    #[test]
+    fn header_words_ready_includes_port_clients_and_build_time() {
+        let (word, rest) = header_words("ready", "app.jet", "", 8080, 2, 420);
+        assert_eq!(word, "ready");
+        assert_eq!(rest, "localhost:8080 · 2 clients · built 0.4s");
+    }
+
+    #[test]
+    fn header_words_ready_omits_build_time_before_first_build() {
+        let (word, rest) = header_words("ready", "app.jet", "", 8080, 0, 0);
+        assert_eq!(word, "ready");
+        assert_eq!(rest, "localhost:8080 · 0 clients");
+    }
+
+    #[test]
+    fn header_words_building_shows_watched_file_not_port() {
+        let (word, rest) = header_words("building", "app.jet", "", 8080, 1, 0);
+        assert_eq!(word, "building");
+        assert_eq!(rest, "app.jet · 1 client");
+    }
+
+    #[test]
+    fn header_words_error_shows_diagnostic_code_not_port() {
+        let (word, rest) = header_words("error", "app.jet", "E0102", 8080, 2, 0);
+        assert_eq!(word, "error");
+        assert_eq!(rest, "E0102 · 2 clients");
+    }
+
+    #[test]
+    fn header_words_singular_client_count() {
+        let (_, rest) = header_words("ready", "app.jet", "", 8080, 1, 0);
+        assert!(rest.ends_with("1 client"), "{rest}");
+        assert!(!rest.contains("1 clients"), "{rest}");
+    }
+
+    #[test]
+    fn format_build_time_renders_seconds_with_one_decimal() {
+        assert_eq!(format_build_time(420), "0.4s");
+        assert_eq!(format_build_time(1500), "1.5s");
+        assert_eq!(format_build_time(0), "0.0s");
+    }
+
+    #[test]
+    fn format_line_colored_carries_a_dot_and_the_full_parity_words() {
+        let line = format_line_colored("ready", "localhost:8080 · 2 clients · built 0.4s");
+        assert!(line.starts_with("jet dev  "));
+        assert!(line.contains('\u{25CF}'), "{line}");
+        assert!(line.contains("ready · localhost:8080 · 2 clients · built 0.4s"));
+    }
+
+    #[test]
+    fn format_line_plain_uses_bracketed_state_word_no_color() {
+        let line = format_line_plain("error", "E0102 · 2 clients");
+        assert_eq!(line, "jet dev  [error] E0102 · 2 clients");
+        assert!(!line.contains('\x1b'), "NO_COLOR/CI floor must carry no ANSI: {line}");
+    }
+
+    #[test]
+    fn frame_lines_keeps_diagnostic_words_verbatim() {
+        let diagnostic = "Error [E0102]: nothing named `nonexistent_function_xyz` exists here\n  8 | nonexistent_function_xyz()\n    | ^^^^^^^^^^^^^^^^^^^^^^^^\nWhy: only defined names can be called\nFix: define it first";
+        let framed = frame_lines("E0102", diagnostic);
+        // Every diagnostic line survives byte-for-byte inside the frame —
+        // only a "│ " border is added, never a reworded/retruncated line (I4).
+        for line in diagnostic.lines() {
+            assert!(
+                framed.iter().any(|f| f == &format!("│ {}", line)),
+                "missing verbatim line {:?} in {:#?}",
+                line,
+                framed
+            );
+        }
+        assert!(framed.first().unwrap().starts_with("┌ E0102 "));
+        assert!(framed.last().unwrap().starts_with('└'));
+    }
+
+    #[test]
+    fn frame_lines_top_border_names_the_diagnostic_code() {
+        let framed = frame_lines("E0204", "one line");
+        assert!(framed[0].contains("E0204"));
     }
 }
