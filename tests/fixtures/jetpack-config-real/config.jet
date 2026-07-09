@@ -1,0 +1,47 @@
+// config.jet — real-guest tier fixture (card #363). Every option/service/
+// package here maps to a NixOS setting the hidden backend understands, so
+// `jet os vm prove halcyon-gnome --disk <path> --real` can generate
+// flake.nix/configuration.nix without hitting the unmapped-declaration gate
+// (E1291). `mine.*` packages satisfy the plumbing-tier boot/init/desktop
+// first-party requirements (E1280/E1281/E1288) via the same fixture pkg tree
+// jetpack-config uses; `default.*` packages are the nixpkgs-sourced real-tier
+// user packages.
+module halcyon-gnome {
+    sources: {
+        default: github@NixOS/nixpkgs/fef9403a3e4d31b0a23f0bacebbec52c248fbb51,
+        mine: path@./jet-pkgs,
+    }
+    system.halcyon-gnome: {
+        target: linux.x64,
+        packages: [
+            default.[firefox, ghostty, ripgrep, git, btop],
+            mine.[cachyos-kernel, systemd, gdm, gnome-session, gnome-shell],
+        ],
+        services: {
+            openssh: { enable: true, ports: [22] },
+        },
+        options: [
+            network.hostName: halcyon-gnome,
+            network.networkmanager.enable: true,
+            network.firewall.allowedTcpPorts: [22, 443],
+            network.dns: ["1.1.1.1", "8.8.8.8"],
+            filesystem.timeZone: "America/New_York",
+            services.localization.locale: "en_US.UTF-8",
+            services.localization.keyboardLayout: "us",
+            users.nate.normal: true,
+            users.nate.home: "/home/nate",
+            users.nate.groups: ["wheel", "networkmanager"],
+            users.nate.initialPassword: "jetos",
+            users.nate.shell: mine.hello,
+            boot.loader: .SystemdBoot,
+            boot.loader.efi.canTouchVariables: false,
+            boot.kernel.params: ["quiet"],
+            init.defaultTarget: "graphical.target",
+            services.desktop.profile: .Default,
+            services.displayManager: "gdm",
+            services.desktop.autoLogin.user: "nate",
+            services.audio.pipewire.enable: true,
+            services.audio.rtkit.enable: true,
+        ],
+    }
+}

@@ -93,6 +93,9 @@ fn cmd_vm(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 {
     let Some(gen) = build_generation(theme, &plan, &system, flags) else {
         return 2;
     };
+    if real_guest {
+        return cmd_vm_prove_real(theme, &gen, &plan.table, &system, disk, flags);
+    }
     let media = match write_installer_media(&gen, &system, "guided-ext4") {
         Ok(path) => path,
         Err(e) => {
@@ -214,6 +217,10 @@ fn cmd_vm_test(theme: &Theme, target: &Target, disk: &str, flags: &OsFlags) -> i
 }
 
 fn cmd_vm_run(theme: &Theme, system: &SystemPlan, disk: &str) -> i32 {
+    let real_marker = real_tier_proof_marker_path(disk);
+    if real_marker.is_file() {
+        return cmd_vm_run_real(theme, system, disk, &real_marker);
+    }
     let missing = missing_vm_tools();
     let missing = missing
         .into_iter()

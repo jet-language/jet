@@ -2067,6 +2067,15 @@ local UI cache ratified by D-JOS-STUDIO-STATE1.
   disk, logs in, launches Studio/desktop paths, checks packages/services/network
   and rollback, and records guest-bound artifacts. Fake-QEMU or host-only
   harness artifacts may test plumbing, but may not close replacement acceptance.
+- **D-JOS-NIXBACKEND1=C**: `jet os vm prove <host> --disk <path> --real`
+  realizes the system through a hidden NixOS backend — a generated
+  `flake.nix`/`configuration.nix` under the Jetpack root, `nix build` for a
+  bootable qcow2, and QEMU for the guest boot. The user only ever writes
+  `.jet`; the backend is a build artifact, never a user-facing surface (I2).
+  Every `SystemPlan` option/service/package this backend cannot map to a
+  NixOS setting is collected and reported in one diagnostic (E1291) before
+  `nix` ever runs — no silent omissions, mirroring D-JOS-NIXIMPORT1=C's
+  discipline for the import direction.
 - **D-JOS-DESKTOPPROOF1=C**: desktop proof means a live guest display-manager
   and session path, Studio/app presence, terminal fallback, and user-home facts.
   File presence and launcher `--jetos-proof` checks are preflight only.

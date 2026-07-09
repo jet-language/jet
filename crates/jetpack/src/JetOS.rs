@@ -36,6 +36,7 @@ include!("JetOS/installer_media.rs");
 include!("JetOS/initrd_overlay.rs");
 include!("JetOS/iso_vm_commands.rs");
 include!("JetOS/vm_proof.rs");
+include!("JetOS/nixos_backend.rs");
 include!("JetOS/activation_provenance.rs");
 include!("JetOS/options_rendering.rs");
 include!("JetOS/generations_activation.rs");
