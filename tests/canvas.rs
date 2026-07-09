@@ -19,6 +19,64 @@ fn write_fixture(tag: &str, src: &str) -> PathBuf {
     path
 }
 
+fn ast_enum_variants(path: &str, enum_name: &str) -> Vec<String> {
+    let src = fs::read_to_string(path).unwrap_or_else(|e| panic!("read {path}: {e}"));
+    let marker = format!("enum {enum_name}");
+    let mut variants = Vec::new();
+    let mut in_enum = false;
+    let mut depth = 0i32;
+    for line in src.lines() {
+        let code = line.split("//").next().unwrap_or("");
+        if !in_enum {
+            if let Some(pos) = code.find(&marker) {
+                in_enum = true;
+                for ch in code[pos..].chars() {
+                    if ch == '{' {
+                        depth += 1;
+                    } else if ch == '}' {
+                        depth -= 1;
+                    }
+                }
+            }
+            continue;
+        }
+        if depth == 1 {
+            if let Some(name) = variant_name(code) {
+                variants.push(name.to_string());
+            }
+        }
+        for ch in code.chars() {
+            match ch {
+                '{' | '(' | '[' => depth += 1,
+                '}' | ')' | ']' => depth -= 1,
+                _ => {}
+            }
+        }
+        if depth == 0 {
+            break;
+        }
+    }
+    assert!(!variants.is_empty(), "missing {marker} variants in {path}");
+    variants
+}
+
+fn variant_name(chunk: &str) -> Option<&str> {
+    let line = chunk
+        .lines()
+        .map(str::trim)
+        .filter(|line| {
+            !line.is_empty()
+                && !line.starts_with("///")
+                && !line.starts_with("//")
+                && !line.starts_with("#[")
+        })
+        .find(|line| line.chars().next().map(|c| c.is_uppercase()).unwrap_or(false))?;
+    let end = line
+        .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+        .unwrap_or(line.len());
+    Some(&line[..end])
+}
+
 const CANVAS_FIXTURE: &str = r#"fn square(n: Int) -> Int {
     return n * n
 }
@@ -118,6 +176,29 @@ const CANVAS_COMMENT_FIXTURE: &str = r#"fn run() {
     print("damage")
 }
 "#;
+
+#[test]
+fn canvas_parity_matrix_tracks_ast_language_forms() {
+    let matrix = fs::read_to_string("docs/reference/canvas-parity.md")
+        .expect("Canvas parity matrix must exist");
+    for (enum_name, path) in [
+        ("Item", "crates/jet-foundation/src/AST/items.rs"),
+        ("Stmt", "crates/jet-foundation/src/AST/statements.rs"),
+        ("Expr", "crates/jet-foundation/src/AST/expressions.rs"),
+        ("Type", "crates/jet-foundation/src/AST/types.rs"),
+        ("Pattern", "crates/jet-foundation/src/AST/patterns.rs"),
+        ("BindPattern", "crates/jet-foundation/src/AST/patterns.rs"),
+        ("LValue", "crates/jet-foundation/src/AST/lvalues.rs"),
+    ] {
+        for variant in ast_enum_variants(path, enum_name) {
+            let token = format!("[{enum_name}::{variant}]");
+            assert!(
+                matrix.contains(&token),
+                "Canvas parity matrix missing {token} from {path}"
+            );
+        }
+    }
+}
 
 const CANVAS_COLLAPSE_FIXTURE: &str = r#"fn compute(limit: Int) -> Int {
     return limit + 1
@@ -641,6 +722,23 @@ fn canvas_stale_transaction_conflicts_without_writing() {
 }
 
 #[test]
+fn canvas_code_lens_source_edit_uses_replace_source_transaction() {
+    let path = write_fixture("code_lens_edit", "fn run() {\n    print(\"old\")\n}\n");
+    let before = fs::read_to_string(&path).unwrap();
+    let revision = jet::Canvas::source_revision(&before);
+    let edit = format!(
+        "{{\"schema_version\":1,\"op\":\"replace_source\",\"revision\":\"{}\",\"source\":\"fn run() {{\\n    print(\\\"new\\\")\\n}}\\n\",\"source_edit\":true}}",
+        revision
+    );
+    let out = jet::Canvas::apply_transaction_json(&path, &edit).expect("source edit");
+    assert!(out.contains("\"changed\":true"), "{out}");
+    assert!(out.contains("print(\\\"new\\\")"), "{out}");
+    let graph = jet::Canvas::graph_json_for_file(&path).expect("graph after source edit");
+    assert!(graph.contains("print(\\\"new\\\")"), "{graph}");
+    assert!(fs::read_to_string(&path).unwrap().contains("print(\"new\")"));
+}
+
+#[test]
 fn canvas_query_search_references_source_jump_and_rename_preview() {
     let path = write_fixture("query", CANVAS_FIXTURE);
     let src = fs::read_to_string(&path).unwrap();
@@ -731,9 +829,19 @@ fn canvas_actions_project_palette_entries_and_preview_jit_backed_source_transact
         "\"ret\":\"Void\"",
         "\"pins\":[{\"name\":\"value\",\"direction\":\"input\",\"type\":\"Any\"}]",
         "\"default_args\":[\"\\\"canvas\\\"\"]",
+        "\"kind\":\"canvas.core_catalog\"",
+        "\"engine\":\"core-catalog\"",
+        "\"execution\":\"source_browse\"",
+        "\"authority\":[\"canvas.catalog:core.read\"]",
+        "\"writes\":\"none\"",
+        "\"source\":\"docs/reference/core-library.md\"",
         "\"kind\":\"canvas.command\"",
         "\"op\":\"command_authority\"",
         "\"engine\":\"jet-cli\"",
+        "\"action_id\":\"canvas.command:run\"",
+        "\"title\":\"Run program\"",
+        "\"command\":[\"jet\",\"run\",\"main.jet\"]",
+        "\"authority\":[\"canvas.command:run\",\"canvas.source_edit:single_file\"]",
         "\"action_id\":\"canvas.command:check\"",
         "\"command\":[\"jet\",\"check\",\"main.jet\"]",
         "\"writes\":\"none\"",
@@ -814,6 +922,56 @@ fn canvas_actions_project_palette_entries_and_preview_jit_backed_source_transact
         fs::read_to_string(&path).unwrap(),
         src,
         "Built-in Canvas action preview must not write source"
+    );
+}
+
+#[test]
+fn canvas_core_catalog_browses_canonical_core_library_without_write_authority() {
+    let path = write_fixture("core_catalog", "fn run() {\n    print(\"core\")\n}\n");
+    let src = fs::read_to_string(&path).unwrap();
+    let revision = jet::Canvas::source_revision(&src);
+    let query = format!(
+        "{{\"schema_version\":1,\"op\":\"core_catalog\",\"revision\":\"{}\",\"query\":\"\"}}",
+        revision
+    );
+    let catalog =
+        jet::Canvas::query_json_for_file(&path, &query).expect("Canvas core catalog query");
+
+    for field in [
+        "\"op\":\"core_catalog\"",
+        "\"catalog_schema_version\":1",
+        "\"authority\":[\"canvas.catalog:core.read\"]",
+        "\"writes\":\"none\"",
+        "\"source\":\"docs/reference/core-library.md\"",
+        "\"path\":\"core.http\"",
+        "\"path\":\"core.http.client\"",
+        "\"signature\":\"Client.request(method, url)\"",
+        "\"name\":\"request\"",
+    ] {
+        assert!(catalog.contains(field), "catalog missing {field}: {catalog}");
+    }
+
+    let sema_query = format!(
+        "{{\"schema_version\":1,\"op\":\"core_catalog\",\"revision\":\"{}\",\"query\":\"window_open\"}}",
+        revision
+    );
+    let sema_catalog =
+        jet::Canvas::query_json_for_file(&path, &sema_query).expect("Canvas sema catalog query");
+    for field in [
+        "\"path\":\"core.raylib\"",
+        "\"name\":\"window_open\"",
+        "\"signature\":\"core.raylib.window_open\"",
+        "\"source\":\"crates/jet-sema/src/Sema/CheckerCoreLib/module_items.rs\"",
+    ] {
+        assert!(
+            sema_catalog.contains(field),
+            "sema catalog missing {field}: {sema_catalog}"
+        );
+    }
+    assert_eq!(
+        fs::read_to_string(&path).unwrap(),
+        src,
+        "Core catalog browsing must not edit source"
     );
 }
 
@@ -1012,6 +1170,75 @@ fn canvas_source_control_reports_project_file_set() {
     assert!(scm.contains("+    print(\\\"changed\\\")"), "{scm}");
     assert!(scm.contains("?? helper.jet"), "{scm}");
     assert!(scm.contains("+fn helper() -> Int"), "{scm}");
+}
+
+#[test]
+fn canvas_proof_lens_reports_revision_check_git_and_missing_receipts() {
+    let dir = temp_dir("proof_lens");
+    let entry = dir.join("main.jet");
+    fs::write(&entry, "fn run() {\n    print(\"proof\")\n}\n").unwrap();
+
+    let proof = jet::Canvas::proof_json_for_entry(&entry, None).expect("canvas proof");
+    let src = fs::read_to_string(&entry).unwrap();
+    assert!(proof.contains("\"protocol\":\"jet.canvas.proof\""), "{proof}");
+    assert!(proof.contains("\"schema_version\":1"), "{proof}");
+    assert!(proof.contains(&format!(
+        "\"revision\":\"{}\"",
+        jet::Canvas::source_revision(&src)
+    )));
+    assert!(proof.contains("\"check\":{\"state\":\"ok\""), "{proof}");
+    assert!(proof.contains("\"source_control\":{\"truth\":\"git-text\""), "{proof}");
+    assert!(proof.contains("\"command_receipts\":{\"state\":\"missing\""), "{proof}");
+    assert!(proof.contains("no Canvas command authority receipt has run"), "{proof}");
+    assert!(proof.contains("\"proof\":{\"state\":\"missing\",\"stale\":true"), "{proof}");
+
+    if Command::new("git")
+        .arg("--version")
+        .output()
+        .map(|o| !o.status.success())
+        .unwrap_or(true)
+    {
+        eprintln!("note: skipping canvas proof dirty-git assertion (need git)");
+    } else {
+        Command::new("git")
+            .args(["init"])
+            .current_dir(&dir)
+            .output()
+            .expect("git init");
+        Command::new("git")
+            .args(["config", "user.email", "canvas@example.invalid"])
+            .current_dir(&dir)
+            .output()
+            .expect("git config email");
+        Command::new("git")
+            .args(["config", "user.name", "Canvas Test"])
+            .current_dir(&dir)
+            .output()
+            .expect("git config name");
+        Command::new("git")
+            .args(["add", "main.jet"])
+            .current_dir(&dir)
+            .output()
+            .expect("git add");
+        Command::new("git")
+            .args(["commit", "-m", "initial"])
+            .current_dir(&dir)
+            .output()
+            .expect("git commit");
+        fs::write(&entry, "fn run() {\n    print(\"proof dirty\")\n}\n").unwrap();
+        let dirty = jet::Canvas::proof_json_for_entry(&entry, None).expect("dirty proof");
+        assert!(dirty.contains("\"available\":true"), "{dirty}");
+        assert!(dirty.contains("\"dirty\":true"), "{dirty}");
+    }
+
+    let broken = dir.join("broken.jet");
+    fs::write(&broken, "fn run() {\n    missing(\n}\n").unwrap();
+    let diagnostic = jet::Canvas::proof_json_for_entry(&broken, None).expect("diagnostic proof");
+    assert!(
+        diagnostic.contains("\"check\":{\"state\":\"diagnostic\""),
+        "{diagnostic}"
+    );
+    assert!(diagnostic.contains("\"diagnostics_count\":"), "{diagnostic}");
 }
 
 #[test]

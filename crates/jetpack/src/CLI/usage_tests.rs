@@ -54,6 +54,8 @@ fn usage() -> String {
   jet os rollback <host> [<name>]      activate a previous generation
   jet os init <host> [--manual <path>] write starter ./config.jet
   jet os lift <host> [<root>]          draft ./config.jet from a host root
+  jet os import <flake-or-dir> --host <host>
+                                      import NixOS/flake-parts/Home Manager facts
   jet os image <host> [--manual <path>] write jetos hybrid ISO media/proof
   jet os vm prove <host> --disk <path> boot installer, install, reboot, prove
   jet os vm test <vmtest> --disk <path> run declared VM scenario proof
@@ -103,7 +105,7 @@ fn usage() -> String {
   --disk <path>                        (os vm prove) target qcow2/raw disk image
   --headless                           (jetos studio) print app path without opening
   --serve <addr>                       (jetos studio) run local projection service
-  --host <host>                        (jetos studio) select system host
+  --host <host>                        (os import/studio) select system host
 ",
         title = h(&format!("{bin} — Jet's package manager (Phase 1)")),
         envs = h("environments:"),

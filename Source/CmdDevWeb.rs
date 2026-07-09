@@ -48,6 +48,7 @@ struct DevStatus {
     version: AtomicU64,
     clients: AtomicU64,
     state: Mutex<DevStatusSnapshot>,
+    command_receipt: Mutex<Option<String>>,
 }
 
 impl DevStatus {
@@ -61,6 +62,7 @@ impl DevStatus {
                 diagnostic: String::new(),
                 last_build_ms: 0,
             }),
+            command_receipt: Mutex::new(None),
         }
     }
 
@@ -105,6 +107,14 @@ impl DevStatus {
             self.clients.load(Ordering::SeqCst),
             state.last_build_ms
         )
+    }
+
+    fn record_command_receipt(&self, receipt: String) {
+        *self.command_receipt.lock().unwrap() = Some(receipt);
+    }
+
+    fn command_receipt(&self) -> Option<String> {
+        self.command_receipt.lock().unwrap().clone()
     }
 
     fn terminal_line(&self, port: u16, file: &str) -> String {
@@ -544,6 +554,78 @@ fn handle_connection(
             "application/json; charset=utf-8",
             body.as_bytes(),
         );
+    }
+    if path == "/__jet_canvas/core-catalog"
+        || path == "/canvas/core-catalog"
+        || path == "/panel/core-catalog"
+    {
+        if method != "GET" {
+            return method_not_allowed(&mut stream);
+        }
+        let query = query_param(target, "query").unwrap_or_default();
+        return match jet::Canvas::core_catalog_json_for_entry(Path::new(canvas_file), &query) {
+            Ok(body) => write_response(
+                &mut stream,
+                "200 OK",
+                "application/json; charset=utf-8",
+                body.as_bytes(),
+            ),
+            Err(body) => write_response(
+                &mut stream,
+                "409 Conflict",
+                "application/json; charset=utf-8",
+                body.as_bytes(),
+            ),
+        };
+    }
+    if path == "/__jet_canvas/proof" || path == "/canvas/proof" || path == "/panel/proof" {
+        if method != "GET" {
+            return method_not_allowed(&mut stream);
+        }
+        let source_id = query_param(target, "source_id");
+        let receipt = status.command_receipt();
+        return match jet::Canvas::proof_json_for_entry_with_receipt(
+            Path::new(canvas_file),
+            source_id.as_deref(),
+            receipt.as_deref(),
+        ) {
+            Ok(body) => write_response(
+                &mut stream,
+                "200 OK",
+                "application/json; charset=utf-8",
+                body.as_bytes(),
+            ),
+            Err(body) => write_response(
+                &mut stream,
+                "409 Conflict",
+                "application/json; charset=utf-8",
+                body.as_bytes(),
+            ),
+        };
+    }
+    if path == "/__jet_canvas/command" || path == "/canvas/command" || path == "/panel/command" {
+        if method != "POST" {
+            return method_not_allowed(&mut stream);
+        }
+        let request = String::from_utf8_lossy(&body);
+        return match jet::Canvas::command_receipt_json_for_entry(Path::new(canvas_file), &request)
+        {
+            Ok(body) => {
+                status.record_command_receipt(body.clone());
+                write_response(
+                    &mut stream,
+                    "200 OK",
+                    "application/json; charset=utf-8",
+                    body.as_bytes(),
+                )
+            }
+            Err(body) => write_response(
+                &mut stream,
+                "409 Conflict",
+                "application/json; charset=utf-8",
+                body.as_bytes(),
+            ),
+        };
     }
     if path == "/__jet_canvas/transaction"
         || path == "/canvas/transaction"

@@ -281,5 +281,5 @@ fn now_secs() -> u64 {
 }
 
 fn print_help() {
-    println!("jet os check|init|plan|proof|build|switch|rollback|generations|lift|image|vm <host>|path@host");
+    println!("jet os check|init|plan|proof|build|switch|rollback|generations|lift|import|image|vm <host>|path@host");
 }

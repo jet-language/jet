@@ -209,6 +209,7 @@ fn canvas_actions(path: &Path, src: &str) -> Result<String, String> {
         &["\"canvas\""],
         &authority,
     ));
+    entries.extend(canvas_core_catalog_action_jsons(&authority));
     entries.extend(canvas_command_action_jsons(&authority));
     entries.sort();
     Ok(query_ok(
@@ -221,6 +222,386 @@ fn canvas_actions(path: &Path, src: &str) -> Result<String, String> {
             entries.join(",")
         ),
     ))
+}
+
+fn canvas_core_catalog_query(path: &Path, src: &str, request: &str) -> Result<String, String> {
+    let query = json_string_field(request, "query").unwrap_or_default();
+    canvas_core_catalog(path, src, &query)
+}
+
+fn canvas_core_catalog(_path: &Path, src: &str, query: &str) -> Result<String, String> {
+    let catalog = core_catalog_entries(query);
+    let modules = catalog
+        .iter()
+        .map(core_module_json)
+        .collect::<Vec<_>>()
+        .join(",");
+    Ok(query_ok(
+        "core_catalog",
+        src,
+        "[]",
+        &format!(
+            "\"impact\":null,\"diff\":null,\"catalog_schema_version\":{},\"authority\":[{}],\"writes\":\"none\",\"source\":{},\"modules\":[{}]",
+            CORE_CATALOG_SCHEMA_VERSION,
+            json_str("canvas.catalog:core.read"),
+            json_str("docs/reference/core-library.md"),
+            modules
+        ),
+    ))
+}
+
+fn canvas_core_catalog_action_jsons(authority: &CanvasAuthority) -> Vec<String> {
+    core_catalog_entries("")
+        .into_iter()
+        .flat_map(|module| {
+            let module_path = module.path.clone();
+            module
+                .members
+                .into_iter()
+                .take(8)
+                .map(move |member| core_catalog_action_json(&module_path, &member, authority))
+        })
+        .collect()
+}
+
+fn core_catalog_action_json(
+    module_path: &str,
+    member: &CoreCatalogMember,
+    authority: &CanvasAuthority,
+) -> String {
+    let action_id = format!("canvas.core_catalog:{module_path}:{}", member.name);
+    format!(
+        "{{\"action_id\":{},\"kind\":\"canvas.core_catalog\",\"title\":{},\"module_path\":{},\"callee\":{},\"engine\":\"core-catalog\",\"execution\":\"source_browse\",\"available\":true,\"authority\":[{}],\"package_id\":{},\"version\":{},\"touched_files\":[{}],\"writes\":\"none\",\"requires_confirmation\":false,\"audit\":[\"source\",\"module_path\",\"signature\"],\"signature\":{},\"summary\":{},\"source\":{}}}",
+        json_str(&action_id),
+        json_str(&format!("{} · {}", member.name, module_path)),
+        json_str(module_path),
+        json_str(&format!("{}.{}", module_path, member.name)),
+        json_str("canvas.catalog:core.read"),
+        json_str(&authority.package_id),
+        json_str(&authority.version),
+        json_str(&authority.touched_file),
+        json_str(&member.signature),
+        json_str(&member.summary),
+        json_str(&member.source)
+    )
+}
+
+#[derive(Clone)]
+struct CoreCatalogModule {
+    path: String,
+    title: String,
+    summary: String,
+    members: Vec<CoreCatalogMember>,
+}
+
+#[derive(Clone)]
+struct CoreCatalogMember {
+    name: String,
+    signature: String,
+    summary: String,
+    source: String,
+}
+
+fn core_catalog_entries(query: &str) -> Vec<CoreCatalogModule> {
+    let needle = query.trim();
+    let mut modules = parse_core_catalog_markdown(include_str!("../../docs/reference/core-library.md"));
+    merge_sema_core_registry(
+        &mut modules,
+        include_str!("../../crates/jet-sema/src/Sema/CheckerCoreLib/module_items.rs"),
+    );
+    if !needle.is_empty() {
+        modules = modules
+            .into_iter()
+            .filter_map(|mut module| {
+                module.members = module
+                    .members
+                    .into_iter()
+                    .filter(|member| {
+                        contains_ci(&member.name, needle)
+                            || contains_ci(&member.signature, needle)
+                            || contains_ci(&member.summary, needle)
+                    })
+                    .collect();
+                if contains_ci(&module.path, needle)
+                    || contains_ci(&module.title, needle)
+                    || contains_ci(&module.summary, needle)
+                    || !module.members.is_empty()
+                {
+                    Some(module)
+                } else {
+                    None
+                }
+            })
+            .collect();
+    }
+    modules.sort_by(|a, b| a.path.cmp(&b.path));
+    for module in &mut modules {
+        module.members.sort_by(|a, b| a.name.cmp(&b.name));
+    }
+    modules
+}
+
+fn merge_sema_core_registry(modules: &mut Vec<CoreCatalogModule>, registry: &str) {
+    for (path, names) in parse_sema_core_module_items(registry) {
+        let pos = modules
+            .iter()
+            .position(|module| module.path == path)
+            .unwrap_or_else(|| {
+                modules.push(CoreCatalogModule {
+                    title: path.clone(),
+                    path: path.clone(),
+                    summary: "Compiler-known Core module from the sema registry.".to_string(),
+                    members: Vec::new(),
+                });
+                modules.len() - 1
+            });
+        let module = &mut modules[pos];
+        if module.summary.is_empty() {
+            module.summary = "Compiler-known Core module from the sema registry.".to_string();
+        }
+        for name in names {
+            if module.members.iter().any(|member| member.name == name) {
+                continue;
+            }
+            module.members.push(CoreCatalogMember {
+                signature: format!("{path}.{name}"),
+                summary: "Compiler-known Core item from sema registry.".to_string(),
+                source: "crates/jet-sema/src/Sema/CheckerCoreLib/module_items.rs".to_string(),
+                name,
+            });
+        }
+    }
+}
+
+fn parse_sema_core_module_items(registry: &str) -> Vec<(String, Vec<String>)> {
+    let mut out = Vec::new();
+    let mut lines = registry.lines().peekable();
+    while let Some(line) = lines.next() {
+        let trimmed = line.trim();
+        if !trimmed.starts_with('"') || !trimmed.contains("=> &[") {
+            continue;
+        }
+        let Some(path) = parse_quoted(trimmed) else {
+            continue;
+        };
+        if !(path == "core" || path.starts_with("core.")) {
+            continue;
+        }
+        let mut names = Vec::new();
+        let after_array = trimmed
+            .split_once("&[")
+            .map(|(_, rest)| rest)
+            .unwrap_or_default();
+        if let Some((same_line, _)) = after_array.split_once(']') {
+            for name in quoted_strings(same_line) {
+                if !names.iter().any(|existing| existing == &name) {
+                    names.push(name);
+                }
+            }
+            out.push((path, names));
+            continue;
+        }
+        for body_line in lines.by_ref() {
+            let body = body_line.trim();
+            if body.starts_with("],") || body.starts_with("]") {
+                break;
+            }
+            for name in quoted_strings(body) {
+                if !names.iter().any(|existing| existing == &name) {
+                    names.push(name);
+                }
+            }
+        }
+        out.push((path, names));
+    }
+    out
+}
+
+fn quoted_strings(line: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest = line;
+    while let Some(value) = parse_quoted(rest) {
+        let skip = rest.find('"').map(|i| i + 1).unwrap_or(0);
+        let after_open = &rest[skip..];
+        let Some(end) = after_open.find('"') else {
+            break;
+        };
+        out.push(value);
+        rest = &after_open[end + 1..];
+    }
+    out
+}
+
+fn parse_quoted(text: &str) -> Option<String> {
+    let first = text.find('"')?;
+    let rest = &text[first + 1..];
+    let end = rest.find('"')?;
+    Some(rest[..end].to_string())
+}
+
+fn parse_core_catalog_markdown(markdown: &str) -> Vec<CoreCatalogModule> {
+    let mut modules = Vec::new();
+    let mut current: Option<CoreCatalogModule> = None;
+    for line in markdown.lines() {
+        if let Some(path) = core_heading_path(line) {
+            if let Some(module) = current.take() {
+                modules.push(module);
+            }
+            current = Some(CoreCatalogModule {
+                path,
+                title: strip_markdown_heading(line),
+                summary: String::new(),
+                members: Vec::new(),
+            });
+            continue;
+        }
+        let Some(module) = current.as_mut() else {
+            continue;
+        };
+        let trimmed = line.trim();
+        if module.summary.is_empty()
+            && !trimmed.is_empty()
+            && !trimmed.starts_with('|')
+            && !trimmed.starts_with("```")
+            && !trimmed.starts_with('#')
+        {
+            module.summary = strip_markdown_inline(trimmed);
+        }
+        if let Some(member) = core_catalog_member_from_line(trimmed) {
+            if !module
+                .members
+                .iter()
+                .any(|existing| existing.signature == member.signature)
+            {
+                module.members.push(member);
+            }
+        }
+    }
+    if let Some(module) = current {
+        modules.push(module);
+    }
+    for path in core_paths_in_markdown(markdown) {
+        if !modules.iter().any(|module| module.path == path) {
+            modules.push(CoreCatalogModule {
+                title: path.clone(),
+                path,
+                summary: "Listed in the canonical Core library reference.".to_string(),
+                members: Vec::new(),
+            });
+        }
+    }
+    modules
+}
+
+fn core_paths_in_markdown(markdown: &str) -> Vec<String> {
+    let mut paths = Vec::new();
+    for token in markdown.split(|c: char| {
+        !(c.is_ascii_alphanumeric() || c == '_' || c == '.')
+    }) {
+        if token == "core" || token.starts_with("core.") {
+            let path = token.trim_matches('.');
+            if !path.is_empty() && !paths.iter().any(|existing| existing == path) {
+                paths.push(path.to_string());
+            }
+        }
+    }
+    paths
+}
+
+fn core_heading_path(line: &str) -> Option<String> {
+    let trimmed = line.trim_start();
+    if !(trimmed.starts_with("## ") || trimmed.starts_with("### ")) {
+        return None;
+    }
+    let first = trimmed.find('`')?;
+    let rest = &trimmed[first + 1..];
+    let end = rest.find('`')?;
+    let path = &rest[..end];
+    if path == "core" || path.starts_with("core.") {
+        Some(path.to_string())
+    } else {
+        None
+    }
+}
+
+fn core_catalog_member_from_line(line: &str) -> Option<CoreCatalogMember> {
+    if !line.starts_with('|') || !line.contains('`') || line.starts_with("| ---") {
+        return None;
+    }
+    let first = line.find('`')?;
+    let rest = &line[first + 1..];
+    let end = rest.find('`')?;
+    let signature = rest[..end].trim();
+    if signature.is_empty() || signature == "Function/method" || signature == "Type" {
+        return None;
+    }
+    let name_source = signature
+        .split('/')
+        .next()
+        .unwrap_or(signature)
+        .split('(')
+        .next()
+        .unwrap_or(signature)
+        .trim();
+    let name = name_source
+        .rsplit('.')
+        .next()
+        .unwrap_or(name_source)
+        .split_whitespace()
+        .next()
+        .unwrap_or(name_source)
+        .trim_matches('`')
+        .to_string();
+    let summary = line
+        .split('|')
+        .nth(3)
+        .map(strip_markdown_inline)
+        .unwrap_or_default();
+    Some(CoreCatalogMember {
+        name,
+        signature: signature.to_string(),
+        summary,
+        source: "docs/reference/core-library.md".to_string(),
+    })
+}
+
+fn core_module_json(module: &CoreCatalogModule) -> String {
+    let members = module
+        .members
+        .iter()
+        .map(core_member_json)
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{{\"path\":{},\"title\":{},\"summary\":{},\"source\":{},\"members\":[{}]}}",
+        json_str(&module.path),
+        json_str(&module.title),
+        json_str(&module.summary),
+        json_str("docs/reference/core-library.md"),
+        members
+    )
+}
+
+fn core_member_json(member: &CoreCatalogMember) -> String {
+    format!(
+        "{{\"name\":{},\"signature\":{},\"summary\":{},\"source\":{},\"writes\":\"none\"}}",
+        json_str(&member.name),
+        json_str(&member.signature),
+        json_str(&member.summary),
+        json_str(&member.source)
+    )
+}
+
+fn strip_markdown_heading(line: &str) -> String {
+    strip_markdown_inline(line.trim_start_matches('#').trim())
+}
+
+fn strip_markdown_inline(text: &str) -> String {
+    text.replace('`', "")
+        .replace("**", "")
+        .replace("<br>", " ")
+        .trim()
+        .to_string()
 }
 
 fn canvas_action_json(
@@ -315,6 +696,16 @@ fn default_arg_for_type(ty: &str) -> String {
 fn canvas_command_action_jsons(authority: &CanvasAuthority) -> Vec<String> {
     let source = authority.touched_file.as_str();
     let mut actions = vec![
+        canvas_command_action_json(
+            "run",
+            "Run program",
+            &["jet", "run", source],
+            "none",
+            &["canvas.command:run", authority.grant.as_str()],
+            true,
+            None,
+            authority,
+        ),
         canvas_command_action_json(
             "check",
             "Check project",

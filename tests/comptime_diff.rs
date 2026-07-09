@@ -8,9 +8,12 @@
 //! char-counted Strings (S41), BTreeMap ordering (S38)).
 
 use std::fs;
-use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
+
+mod common;
+use common::{panic_message, test_worker_count};
 
 /// Expressions whose comptime and runtime evaluation must agree. Each is
 /// inlined verbatim on both sides, so it must be a self-contained
@@ -64,61 +67,88 @@ fn comptime_matches_runtime() {
         eprintln!("note: rustc not found; skipping comptime differential battery");
         return;
     }
-    let dir = std::env::temp_dir();
-    for (i, expr) in CASES.iter().enumerate() {
-        let src = format!(
-            "comptime C = {e}\n\nfn run() {{\n    r :: {e}\n    print(\"{{C}}\")\n    print(\"{{r}}\")\n}}\n",
-            e = expr
-        );
-        let compiled = match jet::compile(&src) {
-            Ok(c) => c,
-            Err(diags) => panic!(
-                "case {} `{}` failed the front end:\n{}",
-                i,
-                expr,
-                jet::render_diagnostics("comptime_diff.jet", &src, &diags)
-            ),
-        };
-        assert!(
-            !compiled.rust.contains("unsafe"),
-            "case `{}` generated unsafe",
-            expr
-        );
-
-        let rs = dir.join(format!("jet_ctdiff_{}.rs", i));
-        let bin = dir.join(format!("jet_ctdiff_{}", i));
-        fs::write(&rs, &compiled.rust).unwrap();
-        let out = Command::new("rustc")
-            .args(["--edition", "2021"])
-            .arg(&rs)
-            .arg("-o")
-            .arg(&bin)
-            .output()
-            .unwrap();
-        assert!(
-            out.status.success(),
-            "I2 violated: rustc rejected generated code for `{}`:\n{}",
-            expr,
-            String::from_utf8_lossy(&out.stderr)
-        );
-        let run = Command::new(&bin).output().unwrap();
-        assert!(run.status.success(), "case `{}` panicked at runtime", expr);
-        let stdout = String::from_utf8_lossy(&run.stdout);
-        let lines: Vec<&str> = stdout.lines().collect();
-        assert_eq!(
-            lines.len(),
-            2,
-            "case `{}` printed {} lines, expected 2",
-            expr,
-            lines.len()
-        );
-        assert_eq!(
-            lines[0], lines[1],
-            "DIVERGENCE for `{}`: comptime gave {:?}, runtime gave {:?} — this is a P0 miscompile",
-            expr, lines[0], lines[1]
-        );
+    let next = Arc::new(AtomicUsize::new(0));
+    let failures = Arc::new(Mutex::new(Vec::new()));
+    let workers = test_worker_count(16).min(CASES.len().max(1));
+    let mut handles = Vec::new();
+    for _ in 0..workers {
+        let next = Arc::clone(&next);
+        let failures = Arc::clone(&failures);
+        handles.push(std::thread::spawn(move || {
+            loop {
+                let i = next.fetch_add(1, Ordering::Relaxed);
+                if i >= CASES.len() {
+                    break;
+                }
+                if let Err(payload) = std::panic::catch_unwind(|| check_comptime_case(i, CASES[i]))
+                {
+                    failures.lock().unwrap().push(panic_message(payload));
+                }
+            }
+        }));
     }
-    let _ = PathBuf::new();
+    for handle in handles {
+        handle.join().unwrap();
+    }
+    let failures = failures.lock().unwrap();
+    if !failures.is_empty() {
+        panic!("{}", failures.join("\n\n"));
+    }
+}
+
+fn check_comptime_case(i: usize, expr: &str) {
+    let src = format!(
+        "comptime C = {e}\n\nfn run() {{\n    r :: {e}\n    print(\"{{C}}\")\n    print(\"{{r}}\")\n}}\n",
+        e = expr
+    );
+    let compiled = match jet::compile(&src) {
+        Ok(c) => c,
+        Err(diags) => panic!(
+            "case {} `{}` failed the front end:\n{}",
+            i,
+            expr,
+            jet::render_diagnostics("comptime_diff.jet", &src, &diags)
+        ),
+    };
+    assert!(
+        !compiled.rust.contains("unsafe"),
+        "case `{}` generated unsafe",
+        expr
+    );
+
+    let dir = std::env::temp_dir();
+    let rs = dir.join(format!("jet_ctdiff_{}_{}.rs", std::process::id(), i));
+    let bin = dir.join(format!("jet_ctdiff_{}_{}", std::process::id(), i));
+    fs::write(&rs, &compiled.rust).unwrap();
+    let out = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&rs)
+        .arg("-o")
+        .arg(&bin)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "I2 violated: rustc rejected generated code for `{}`:\n{}",
+        expr,
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let run = Command::new(&bin).output().unwrap();
+    assert!(run.status.success(), "case `{}` panicked at runtime", expr);
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    let lines: Vec<&str> = stdout.lines().collect();
+    assert_eq!(
+        lines.len(),
+        2,
+        "case `{}` printed {} lines, expected 2",
+        expr,
+        lines.len()
+    );
+    assert_eq!(
+        lines[0], lines[1],
+        "DIVERGENCE for `{}`: comptime gave {:?}, runtime gave {:?} — this is a P0 miscompile",
+        expr, lines[0], lines[1]
+    );
 }
 
 #[test]

@@ -597,7 +597,7 @@ fn run_dev_default_battery_parallel(
     let dir = Arc::new(dir);
     let manifested_divergences = Arc::new(manifested_divergences);
     let failures = Arc::new(Mutex::new(Vec::<String>::new()));
-    let worker_count = test_worker_count(4);
+    let worker_count = test_worker_count(16);
     let mut handles = Vec::new();
     for _ in 0..worker_count {
         let jobs = Arc::clone(&jobs);
@@ -638,6 +638,115 @@ fn run_dev_default_battery_parallel(
     stats
 }
 
+fn check_interpreter_stem(
+    i: usize,
+    stem: &str,
+    dir: &std::path::Path,
+    manifested_divergences: &[String],
+) -> DevBatteryStats {
+    let _ffi_lock = uses_ffi_bridge(stem).then(FfiBridgeLock::acquire);
+    let file = example_path(stem);
+    eprintln!("interpreter checking {stem}");
+    let interpreted = match dev_iteration_with_timeout(stem, &file, true) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => ProgramOutput::ran(stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => {
+            assert!(
+                is_named_dev_boundary(stem, &diags),
+                "`{}` neither ran nor stopped at a named boundary {:?}; codes were {:?}",
+                stem,
+                BOUNDARY_CODES,
+                diags.iter().map(|d| d.code).collect::<Vec<_>>()
+            );
+            return DevBatteryStats {
+                boundary: 1,
+                ..DevBatteryStats::default()
+            };
+        }
+    };
+
+    let compiled = compiled_binary_output(dir, "dev_diff", i, stem, &file);
+    let interpreted = normalize_for_parity(stem, interpreted);
+    let compiled = normalize_for_parity(stem, compiled);
+    if interpreted != compiled {
+        if is_manifested_parity_divergence(stem, manifested_divergences) {
+            eprintln!("manifested parity divergence: {stem}");
+            return DevBatteryStats {
+                ran: 1,
+                manifested: 1,
+                ..DevBatteryStats::default()
+            };
+        }
+        assert_eq!(
+            interpreted, compiled,
+            "DIVERGENCE for `{}`: interpreter and compiled binary disagree on stdout/stderr/exit code — this is a P0 miscompile",
+            stem
+        );
+    }
+    DevBatteryStats {
+        ran: 1,
+        ..DevBatteryStats::default()
+    }
+}
+
+fn run_interpreter_battery_parallel(
+    stems: Vec<String>,
+    dir: PathBuf,
+    manifested_divergences: Vec<String>,
+) -> DevBatteryStats {
+    let jobs = Arc::new(Mutex::new(
+        stems
+            .into_iter()
+            .enumerate()
+            .collect::<std::collections::VecDeque<_>>(),
+    ));
+    let dir = Arc::new(dir);
+    let manifested_divergences = Arc::new(manifested_divergences);
+    let failures = Arc::new(Mutex::new(Vec::<String>::new()));
+    let worker_count = test_worker_count(16);
+    let mut handles = Vec::new();
+    for _ in 0..worker_count {
+        let jobs = Arc::clone(&jobs);
+        let dir = Arc::clone(&dir);
+        let manifested_divergences = Arc::clone(&manifested_divergences);
+        let failures = Arc::clone(&failures);
+        handles.push(std::thread::spawn(move || {
+            let mut stats = DevBatteryStats::default();
+            loop {
+                let Some((i, stem)) = jobs.lock().unwrap().pop_front() else {
+                    break;
+                };
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    check_interpreter_stem(i, &stem, &dir, &manifested_divergences)
+                }));
+                match result {
+                    Ok(next) => stats.add(next),
+                    Err(payload) => failures
+                        .lock()
+                        .unwrap()
+                        .push(format!("{stem}: {}", panic_message(payload))),
+                }
+            }
+            stats
+        }));
+    }
+
+    let mut stats = DevBatteryStats::default();
+    for handle in handles {
+        stats.add(handle.join().expect("interpreter worker panicked outside harness"));
+    }
+    let failures = failures.lock().unwrap();
+    assert!(
+        failures.is_empty(),
+        "interpreter parity failures:\n{}",
+        failures.join("\n\n")
+    );
+    stats
+}
+
 /// c77 widened battery: EVERY example either runs (interpreted stdout/stderr/exit
 /// code == compiled-binary stdout/stderr/exit code, byte for byte — I2) or stops at a named boundary
 /// (E2201/E2202/E0956 — never a silent skip). Reports the run/boundary split so
@@ -653,61 +762,17 @@ fn interpreter_matches_compiled_binary() {
     let dir = std::env::temp_dir().join(format!("jet_dev_diff_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
     let (_, _, manifested_divergences) = parse_jit_gap_manifest();
-    let mut ran = 0usize;
-    let mut boundary = 0usize;
-    let mut manifested = 0usize;
-    for (i, stem) in all_example_stems().iter().enumerate() {
-        let file = example_path(stem);
-
-        let interpreted = match dev_iteration_with_timeout(stem, &file, true) {
-            RunOutcome::Ran {
-                stdout,
-                stderr,
-                exit_code,
-            } => ProgramOutput::ran(stdout, stderr, exit_code),
-            RunOutcome::Problems(diags) => {
-                // Not runnable → must be an honest, named boundary, not a silent
-                // skip and not a stray internal error.
-                assert!(
-                    is_named_dev_boundary(&stem, &diags),
-                    "`{}` neither ran nor stopped at a named boundary {:?}; codes were {:?}",
-                    stem,
-                    BOUNDARY_CODES,
-                    diags.iter().map(|d| d.code).collect::<Vec<_>>()
-                );
-                boundary += 1;
-                continue;
-            }
-        };
-        ran += 1;
-
-        let compiled = compiled_binary_output(&dir, "dev_diff", i, stem, &file);
-
-        let interpreted = normalize_for_parity(stem, interpreted);
-        let compiled = normalize_for_parity(stem, compiled);
-        if interpreted != compiled {
-            if is_manifested_parity_divergence(stem, &manifested_divergences) {
-                manifested += 1;
-                eprintln!("manifested parity divergence: {stem}");
-                continue;
-            }
-            assert_eq!(
-                interpreted, compiled,
-                "DIVERGENCE for `{}`: interpreter and compiled binary disagree on stdout/stderr/exit code — this is a P0 miscompile",
-                stem
-            );
-        }
-    }
+    let stats = run_interpreter_battery_parallel(all_example_stems(), dir, manifested_divergences);
     eprintln!(
         "c77 battery: {} ran ({} interp==compiled, {} manifested divergences), {} boundary-asserted, {} total",
-        ran,
-        ran - manifested,
-        manifested,
-        boundary,
-        ran + boundary
+        stats.ran,
+        stats.ran - stats.manifested,
+        stats.manifested,
+        stats.boundary,
+        stats.ran + stats.boundary
     );
     assert!(
-        ran > 0,
+        stats.ran > 0,
         "expected at least some examples to run in the interpreter"
     );
 }

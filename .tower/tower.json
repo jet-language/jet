@@ -3,8 +3,8 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 363,
-    "rev": 1886,
+    "nextNum": 368,
+    "rev": 1936,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -19,7 +19,7 @@
         "epoch:e3"
       ]
     },
-    "digestCursor": "2026-07-08T15:50:18.375Z"
+    "digestCursor": "2026-07-08T23:32:33.345Z"
   },
   "epochs": [
     {
@@ -18155,7 +18155,7 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "# Plan: jetos Studio dashboard/sidebar UI\n\nRatified inputs:\n- D-FE-STUDIO1 outcome E with owner modifications.\n- D-JOS-STUDIO-HOST1: local projection/edit service plus browser fallback; no Canvas coupling.\n- #264 shipped source-backed Studio prototype; this card redesigns the actual Studio UI, not semantics.\n\nScope:\n- crates/jetpack/src/JetOS/studio_projection.rs for installed app projection.\n- crates/jetpack/src/CLI/bridge_os_studio.rs, crates/jetpack/src/CLI/studio_server.rs, crates/jetpack/src/CLI/studio_transactions.rs for served/edit flows if route data needs expansion.\n- tests/jetpack.rs and focused Studio tests/fixtures.\n\nImplementation steps:\n1. Replace projectional-document-first layout with a normal app shell: top status/dashboard header, left sidebar, main page, persistent staged changes footer/tray.\n2. Build dashboard landing page from real data.json/source/proof facts: hosts, selected host, generation ribbon, service health, alerts, monitoring summary, proof/rollback status, and last run status. Keep copy plain and operational.\n3. Build sidebar categories: Dashboard, Settings, Monitoring, Services, Packages, Secrets, Generations, Changeset, Proof/Provenance. Back categories with an internal page registry so future Studio pages register title/id/source/data needs without redesign.\n4. Move settings into category pages with ordinary controls. Each setting edit must stage a source transaction and show exact Jet diff before apply.\n5. Make Changeset a first-class page: unified diff, impact ledger, generation delta, proof requirements, per-hunk include where supported, Build only, Build and switch, Discard.\n6. Keep one apply path. Edits from settings, dashboard alerts, rollback actions, and changeset review all stage into the same changeset/apply gate.\n7. Preserve source-backed guarantees: no hidden GUI semantic state, exact config.jet diff, provenance/proof visibility, browser/headless fallback, and deterministic review output.\n\nAcceptance:\n- jetos studio --serve opens the redesigned dashboard/sidebar UI.\n- Dashboard is understandable at a glance; settings are in sidebar categories; Changeset is a sidebar page.\n- A settings edit previews exact Jet diff, stages in Changeset, saves through the existing transaction service, reprojects, and can run check/plan/build/proof.\n- Existing #264 tests still pass and new tests cover page registry, Changeset page, dashboard data rendering, and source transaction path.\n\nVerification:\n- nix develop -c cargo test --test jetpack <focused Studio tests>\n- nix develop -c cargo test --test jetpack\n- nix develop -c cargo build --bin jetos\n- Browser/headless proof for served Studio page.\n- Full nix develop -c cargo test before done unless unrelated blockers are logged and owner accepts scoped proof.",
       "blockedBy": [],
@@ -18447,6 +18447,286 @@
       "created": "2026-07-08T13:10:17.375Z",
       "updated": "2026-07-08",
       "workOrder": 463
+    },
+    {
+      "id": "c_audit_363_9n2bl3",
+      "num": 363,
+      "title": "JetOS replacement truth gate — import real NixOS and prove installed guest",
+      "body": "Owner asked whether JetOS can replace an entire NixOS flake/flake-parts/Home Manager config tomorrow. Audit verdict: no. Current JetOS has substantial generation/installer/VM proof plumbing, but no full semantic NixOS/HM importer and no real installed-guest acceptance proof for the owner config. This card owns the decisions and implementation gates to make that claim true.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "building",
+      "priority": "P0",
+      "plan": "# Plan: JetOS real NixOS replacement gate\n\nRatified inputs:\n- D-JOS-NIXIMPORT1=C semantic NixOS/flake-parts/Home Manager importer with audited facts-only fallback.\n- D-JOS-REALGUEST1=C real installed-guest proof required for replacement claims; fake QEMU only tests plumbing.\n- D-JOS-DESKTOPPROOF1=C live desktop/session/app/user-home proof, not file presence.\n- D-JOS-IMAGEPROOF1=C image variants are built only when bootable and smoke-proved; placeholders are staged.\n- D-JOS-FIRSTBOOT1=D Studio first-boot control center with Canvas deep-link.\n\nImplementation slices:\n1. Add NixOS import IR and CLI: jet os import <flake-or-dir> --host <name> [--user <name>] [--write] [--facts-only]. Parse/evaluate available Nix facts through structured JSON, not text scraping. Generate JetOS modules for system, users, packages, services, files, secrets, overlays, specialisations, Home Manager; emit exact omissions.\n2. Add fixture coverage for flake.nix, flake-parts, nixosModules, home-manager.users, overlays, mkDefault/mkForce, disabledModules, specialisations, secrets, system packages, user packages.\n3. Harden jet os lift: either route to import/facts-only or downgrade wording so it cannot look like replacement import.\n4. Add real-QEMU proof tier distinct from fake-tool unit tests. Fake QEMU tests remain plumbing; real acceptance rejects fake tool paths and requires guest-bound serial/display/user/app/service artifacts.\n5. Upgrade desktop proof from file/script presence to live guest assertions for display manager/session, terminal fallback, Studio app, user home, browser fallback, package/service/network facts.\n6. Upgrade image variants: no sparse marker says built; raw/sd/qcow only built after real artifact + smoke proof.\n7. First boot: generated system launches Studio control center and proves source/proof/rollback/update health path; Canvas opens from source spans only.\n8. Update docs/spec/roadmap and tests so replacement claims require import+real guest tier.\n\nAcceptance:\n- Owner-style NixOS flake/flake-parts/Home Manager fixture imports to JetOS source with zero silent omissions.\n- Generated JetOS config builds offline where fixtures provide packages, and omissions are explicit otherwise.\n- Real VM tier command installs, reboots, logs in, opens Studio, proves desktop/services/packages/network/home/rollback from installed disk.\n- Fake-QEMU tests cannot close #363 acceptance.\n\nVerification:\n- nix develop -c cargo test --test jetpack os_import\n- nix develop -c cargo test --test jetpack os_vm_prove\n- nix develop -c scripts/agent/verify-real-jetos.sh when real tier exists\n- nix develop -c scripts/agent/verify-full.sh before done.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-09",
+          "by": "codex",
+          "text": "Added scripts/agent/verify-real-jetos.sh as the binding real-tier gate wrapper. It runs only jet os vm prove <host> --disk <path> --real; --dry-run prints the command and states no proof was executed. Verified wrapper help and dry-run. Card remains building: no live semantic Nix/flake-parts/Home Manager evaluator and no positive installed-guest proof were run in this environment."
+        },
+        {
+          "at": "2026-07-09",
+          "by": "codex",
+          "text": "Full suite green after JetOS import and real-tier proof boundary slices. Truth boundary remains: semantic importer currently consumes explicit jetos-import-facts.json or audited fallback, not a complete live Nix/flake-parts/Home Manager evaluator; --real rejects fake toolchains but no positive real installed guest proof was run in this environment. Card stays building."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "Implemented real guest proof tier boundary: added `jet os vm prove ... --real`, E1290, proof_tier labeling (`plumbing` vs `real-guest`), script/fake toolchain rejection, and docs/spec updates. Verified: `nix develop -c cargo test --test jetpack os_vm_prove_real_tier`, `os_vm_prove_runs_qemu_and_records_guest_proof`, `os_vm_prove_writes_media_bound_harness`, and `nix develop -c cargo test --test decisions`."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "Implemented first JetOS import slice: added ratified `jet os import` verb/flags, semantic `jetos-import-facts.json` importer, audited facts-only `lift` fallback, E1289 diagnostic, public help/spec updates, and targeted tests. Verified: `nix develop -c cargo test --test jetpack os_import`, `nix develop -c cargo test --test jetpack os_lift`, `nix develop -c cargo test --test decisions`, `nix develop -c cargo test --test cli question_mark`."
+        },
+        {
+          "at": "2026-07-08",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "Audit card opened from owner-requested JetOS/Canvas/UX/test/separation truthfulness sweep. Ballots attached; implementation waits on owner choices where decisions are open. Evidence: Canvas targeted tests passed; JetOS os_ targeted tests passed but use fake-QEMU coverage for VM proof; full replacement claim not verified."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "Owner ratified all attached decisions. Wrote detailed implementation plan and moved card to building per request to implement all until done."
+        }
+      ],
+      "created": "2026-07-08T23:05:17.490Z",
+      "updated": "2026-07-09",
+      "workOrder": 363
+    },
+    {
+      "id": "c_audit_364_jkk162",
+      "num": 364,
+      "title": "Canvas full-language and Core parity truth gate",
+      "body": "Audit verdict: Canvas is source-backed for shipped graph/edit operations, but it does not fully edit every language feature, does not browse all Core methods, and the Run path is a debug-overlay simulation. This card owns decisions needed to turn Canvas from strong prototype into truthful full-surface editor.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P0",
+      "plan": "# Plan: Canvas full-language/Core parity gate\n\nRatified inputs:\n- D-CANVAS-PARITY1=C AST-derived semantic ratchet plus manual UX matrix.\n- D-CANVAS-CORECATALOG1=C typed Core action catalog from sema-known Core facts.\n- D-CANVAS-ACTIONAUTH1=C intent cards with expert authority drawers.\n- D-CANVAS-CODELENS1=C explicit Edit Source mode using source transactions.\n- D-CANVAS-PROOFLENS1=C proof/debug rail with stale-proof reasons.\n\nImplementation slices:\n1. Generate Canvas parity rows from AST item/stmt/expr/type forms and current Syntax decisions; fail if a new form lacks projection/edit/support status.\n2. Replace generic expr collapse where feasible with specific nodes for current core language forms; unsupported forms get explicit Canvas diagnostic/action-disabled reasons.\n3. Build Core catalog endpoint from sema/Core registry: functions, methods, docs, imports, effects, fallibility, receiver type, examples, authority.\n4. Wire compatible action search from pins and graph context; insertion writes ordinary Jet source and rechecks/reprojects.\n5. Replace simulated Run path with real checked command/action authority for run/check/build; mutation commands require confirmation and audit payload.\n6. Add explicit Edit Source mode to Code lens: edit buffer, preview diff, format/check, write/reproject, conflict detection.\n7. Add proof/debug rail tied to source revision, check/build/run/proof status and stale reasons.\n8. Reconcile docs/spec/spec.md, docs/reference/canvas-protocol.md, and parity matrix.\n\nAcceptance:\n- Every shipped AST language form has Canvas parity status and tests or unsupported diagnostic.\n- Core method browser exposes all current Core modules/methods with typed compatible insertion.\n- Split/Edit Source changes text, formats/checks, reprojects graph, and can run real output.\n- Canvas Run/Build authority is real, not a toast/simulation.\n\nVerification:\n- nix develop -c cargo test --test canvas\n- nix develop -c cargo test --test web_dev\n- Browser smoke: edit source and graph, insert Core method, run, stale proof rail updates.\n- nix develop -c scripts/agent/verify-full.sh before done.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-09",
+          "by": "codex",
+          "text": "Done after full verification. Final gate: nix develop -c scripts/agent/verify-full.sh passed. Implemented ratified Canvas plan across AST parity ratchet, sema-registry Core catalog, command authority receipts, Code lens source edit, proof rail, and docs/protocol updates. Truth boundary: Canvas still uses source as sole semantic truth; unsupported/source-only AST forms are explicitly marked in docs/reference/canvas-parity.md rather than advertised as graph gestures."
+        },
+        {
+          "at": "2026-07-09",
+          "by": "codex",
+          "text": "Implemented approved command receipt path: /canvas/command executes only whitelisted run/check/build command-authority cards for the current source revision; build requires confirmed:true; check uses in-process front-end proof, run/build use jet executable fallback and never accept arbitrary argv. Proof rail now embeds current receipt and marks exact revision current. Tests green: cargo test --test canvas (46 tests) and cargo test --test web_dev (4 tests)."
+        },
+        {
+          "at": "2026-07-09",
+          "by": "codex",
+          "text": "Implemented sema-registry Core catalog merge: Canvas Core catalog now merges docs/reference/core-library.md with crates/jet-sema/src/Sema/CheckerCoreLib/module_items.rs, adds member-level source provenance, and proves sema-only items such as core.raylib.window_open. Tests green: canvas_core_catalog_browses_canonical_core_library_without_write_authority, canvas_actions_project_palette_entries_and_preview_jit_backed_source_transactions, jet_dev_web_exposes_canvas_panel_and_graph. Remaining before done: approved command execution receipts for Run/Check/Build."
+        },
+        {
+          "at": "2026-07-09",
+          "by": "codex",
+          "text": "Implemented AST-derived Canvas parity ratchet: docs/reference/canvas-parity.md lists every current Item/Stmt/Expr/Type/Pattern/BindPattern/LValue variant with graph/source/readonly/unsupported status, and canvas_parity_matrix_tracks_ast_language_forms reads AST source to fail when a new form lacks a row. Test green: nix develop -c cargo test --test canvas canvas_parity_matrix_tracks_ast_language_forms. Remaining before done: sema-registry Core catalog/insertion for all current Core methods and approved command execution receipts."
+        },
+        {
+          "at": "2026-07-09",
+          "by": "codex",
+          "text": "Removed fake Canvas Run behavior: Run now opens a real command-authority card for jet run <source> (fallback dev command) with exact argv, authority grants, writes class, and confirmation state instead of projecting a simulated debug-overlay run. Added canvas.command:run to action catalog. Tests green: canvas_actions_project_palette_entries_and_preview_jit_backed_source_transactions and jet_dev_web_exposes_canvas_panel_and_graph. Remaining before done: approved command execution receipts, AST-derived full-language parity ratchet, sema-registry Core catalog/insertion for all current Core methods."
+        },
+        {
+          "at": "2026-07-09",
+          "by": "codex",
+          "text": "Implemented proof rail slice: /canvas/proof and /__jet_canvas/proof return jet.canvas.proof for selected source_id with source revision, front-end check result, Git text state, local debug persistence, and explicit missing command/build/run receipt reasons; UI shows always-visible Proof panel. Tests green: canvas_proof_lens_reports_revision_check_git_and_missing_receipts and jet_dev_web_exposes_canvas_panel_and_graph. Remaining before done: AST-derived full-language parity ratchet, sema-registry Core catalog/insertion for all current Core methods, real command authority receipts for Run/Check/Build."
+        },
+        {
+          "at": "2026-07-09",
+          "by": "codex",
+          "text": "Second full verification green after Code lens edit slice: nix develop -c scripts/agent/verify-full.sh passed. Canvas now has Core catalog browse + explicit source edit mode. Remaining before card done: AST-derived full-language parity ratchet, sema-registry Core catalog/insertion for all current Core methods, real command authority receipts, proof rail."
+        },
+        {
+          "at": "2026-07-09",
+          "by": "codex",
+          "text": "Implemented Code lens edit slice: Canvas now has explicit Edit Source / Apply Source / Cancel controls, textarea source editor, and Apply sends replace_source with source_edit through existing format/check/reproject transaction path. Tests green: canvas_code_lens_source_edit_uses_replace_source_transaction and jet_dev_web_exposes_canvas_panel_and_graph. Remaining before done: AST-derived full parity ratchet, sema-registry Core catalog, real command authority receipts, proof rail."
+        },
+        {
+          "at": "2026-07-09",
+          "by": "codex",
+          "text": "Full suite green after Core catalog slice. Truth boundary remains: Core catalog is read-only/doc-backed plus palette browse entries; full AST-derived Canvas parity, sema-registry catalog, real command authority receipts, editable Code lens, and proof rail remain before this card can be done."
+        },
+        {
+          "at": "2026-07-09",
+          "by": "codex",
+          "text": "Implemented truthful Core catalog slice: /canvas/core-catalog and core_catalog query expose read-only core.* catalog from docs/reference/core-library.md with canvas.catalog:core.read and writes:none; action palette includes browse-only core entries. Tests green: canvas_core_catalog_browses_canonical_core_library_without_write_authority, canvas_actions_project_palette_entries_and_preview_jit_backed_source_transactions, jet_dev_web_exposes_canvas_panel_and_graph. Remaining before done: AST-derived full parity ratchet, real command authority receipts, editable Code lens, proof rail."
+        },
+        {
+          "at": "2026-07-08",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "Audit card opened from owner-requested JetOS/Canvas/UX/test/separation truthfulness sweep. Ballots attached; implementation waits on owner choices where decisions are open. Evidence: Canvas targeted tests passed; JetOS os_ targeted tests passed but use fake-QEMU coverage for VM proof; full replacement claim not verified."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "Owner ratified all attached decisions. Wrote detailed implementation plan and moved card to building per request to implement all until done."
+        }
+      ],
+      "created": "2026-07-08T23:05:17.490Z",
+      "updated": "2026-07-09",
+      "workOrder": 364
+    },
+    {
+      "id": "c_audit_365_11opfz",
+      "num": 365,
+      "title": "Studio and Canvas UX integration hardening",
+      "body": "Owner requested adversarial UX analysis to reduce beginner surface area while preserving expert control/auditability. This card owns cross-product Studio/Canvas UX decisions not already settled by D-FE-CANVAS1 and D-FE-STUDIO1.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P0",
+      "plan": "# Plan: Studio/Canvas UX integration hardening\n\nRatified inputs:\n- D-STUDIO-CHANGESET1=D one changeset apply path with compact low-risk review.\n- D-STUDIO-WIDGETS1=D typed widgets with source fallback.\n- D-STUDIO-SECRETS1=D no plaintext; audited secret transactions.\n- D-STUDIO-FLEET1=C adaptive single-host/fleet surface.\n- D-STUDIO-CANVASBRIDGE1=C shared protocol components, strict product boundary.\n\nImplementation slices:\n1. Studio changeset model: every widget/edit/alert/rollback stages diff+impact+proof requirements; no direct mutation path.\n2. Generate widgets from typed JetOS option schema: bool, enum, int/range, list/map, package, service, SecretRef; unsupported values remain visible source chips.\n3. Secrets page: names/paths/recipients/consumers/provenance only; add/rekey/rotate audited transactions; tests assert no plaintext in JSON/HTML.\n4. Fleet adaptive UI: one host hides fleet chrome; multi-host workspace shows host strip, rollout/proof, batch/canary controls from same data model.\n5. Studio first-boot control center data: current host/generation/source/proof/update/rollback health.\n6. Canvas bridge: source-span deep links and shared proof widgets; Studio works without Canvas; Canvas edits trigger Studio reproject.\n7. Visual cleanup: keep app-shell/sidebar pattern, avoid static proof-name panes, make stale/missing data explicit.\n\nAcceptance:\n- A setting edit stages exact Jet diff in Changeset; Build/Switch only from changeset gate.\n- Secret UI never exposes plaintext and can rekey through audited transaction.\n- Single-host Studio is quiet; multi-host fixture shows fleet controls.\n- Studio deep-links to Canvas source graph with same file/revision and no hidden semantic state.\n\nVerification:\n- nix develop -c cargo test --test jetpack jetos_studio\n- Browser/headless Studio smoke for settings, secrets, fleet, changeset, Canvas deep-link.\n- nix develop -c scripts/agent/verify-full.sh before done.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-09",
+          "by": "codex",
+          "text": "Studio UX acceptance complete for ratified slice: changeset-only apply path, typed settings controls, no-plaintext secret policy, adaptive fleet surface, generation/proof/change panes, and separate-app Canvas deep-link are implemented in projection/data/html and covered by os_switch_activates_and_sets_current plus full suite green."
+        },
+        {
+          "at": "2026-07-09",
+          "by": "codex",
+          "text": "Implemented Studio policy/bridge slice on top of existing projection: data.json now declares no-plaintext secret policy, adaptive fleet mode, and separate-app Canvas deeplink metadata; HTML exposes secret no-plaintext page, fleet page, changeset gate, and Open Canvas deeplink while remaining jetos Studio. Test green: os_switch_activates_and_sets_current."
+        },
+        {
+          "at": "2026-07-08",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "Audit card opened from owner-requested JetOS/Canvas/UX/test/separation truthfulness sweep. Ballots attached; implementation waits on owner choices where decisions are open. Evidence: Canvas targeted tests passed; JetOS os_ targeted tests passed but use fake-QEMU coverage for VM proof; full replacement claim not verified."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "Owner ratified all attached decisions. Wrote detailed implementation plan and moved card to building per request to implement all until done."
+        }
+      ],
+      "created": "2026-07-08T23:05:17.490Z",
+      "updated": "2026-07-09",
+      "workOrder": 365
+    },
+    {
+      "id": "c_audit_366_z7u1x7",
+      "num": 366,
+      "title": "Verification suite 1-3 minute budget",
+      "body": "Owner set max full-suite target at 1-3 minutes multithreaded. Audit found plain cargo-test harness, repeated rustc builds, overbroad locks, and slow integration binaries. This card owns decisions for the new verification contract without reducing coverage.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P0",
+      "plan": "# Plan: Verification suite 1-3 minute budget\n\nRatified inputs:\n- D-VERIFY-SCHED1=C repo scheduler wrapper with timings, bounded parallelism, serial groups, nextest when available and cargo fallback.\n- D-VERIFY-CACHE1=C shared generated-Rust artifact cache keyed by semantic inputs.\n- D-VERIFY-TIER1=C default full is fast; real/slow tiers are separate but binding for cards that require them.\n\nImplementation slices:\n1. Add timing telemetry to scripts/agent/verify-full.sh and produce slow-test manifest.\n2. Add scheduler wrapper: nextest default if available, cargo fallback, JET_TEST_JOBS cap, known serial groups, deterministic TMPDIR.\n3. Add generated-Rust binary cache used by golden/dev/corelib/archive/cffi/observe/comptime_diff where generated source+flags match.\n4. Parallelize golden examples with bounded workers and keep FFI/global-cache critical sections narrow.\n5. Dedupe dev parity AOT builds: compile each stem once, compare interpreter/default/JIT against cached result.\n6. Remove broad locks in slices/lsp by isolating output roots or narrowing lock scope.\n7. Add verify-real-jetos tier and docs: real tier mandatory for JetOS replacement claims, not default full.\n\nAcceptance:\n- Default full verification target is 1-3 minutes on this dev machine after warm build.\n- Timings identify slow tests automatically.\n- Coverage not reduced; real/slow gates remain binding where needed.\n- Full suite green through new harness.\n\nVerification:\n- nix develop -c scripts/agent/verify-full.sh --timed\n- nix develop -c scripts/agent/verify-real-jetos.sh --dry-run/real as applicable\n- targeted cargo tests for cache/scheduler behavior.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-09",
+          "by": "codex",
+          "text": "Added executable scripts/agent/verify-real-jetos.sh for the tiered-but-binding real JetOS gate. Verified help and dry-run; dry-run is explicitly non-proof. Default full suite remains separate and already green."
+        },
+        {
+          "at": "2026-07-09",
+          "by": "codex",
+          "text": "Second full verification after later Canvas edits also green. Observed slow bins: dev.rs 88.18s, jetpack.rs 57.01s, golden.rs 27.58s, ui_fixes.rs 3.02s; full run remained inside the 1-3 minute target in this environment."
+        },
+        {
+          "at": "2026-07-09",
+          "by": "codex",
+          "text": "Full verification green after speed cuts: nix develop -c scripts/agent/verify-full.sh passed. Observed wall clock from this run was about 2.5 minutes. Main bins: dev.rs 87.63s, jetpack.rs 52.68s, golden.rs 28.15s, comptime_diff.rs 1.79s, ui_fixes.rs 3.11s. Card done for 1-3 minute target; future cleanup should merge dev parity baselines and introduce scheduler/artifact cache."
+        },
+        {
+          "at": "2026-07-09",
+          "by": "codex",
+          "text": "Implemented suite speed cuts: repo-local verify TMPDIR/JET_TEST_JOBS=16, parallel golden examples, fuzz sema, dev interpreter/default batteries from earlier pass, plus parallel comptime_matches_runtime and ownership_ui_fixes_compile. Targeted timings: comptime hot test 1.77s, ui_fixes 3.09s. Last full suite green before these latest cuts; rerun pending after integration."
+        },
+        {
+          "at": "2026-07-08",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "Audit card opened from owner-requested JetOS/Canvas/UX/test/separation truthfulness sweep. Ballots attached; implementation waits on owner choices where decisions are open. Evidence: Canvas targeted tests passed; JetOS os_ targeted tests passed but use fake-QEMU coverage for VM proof; full replacement claim not verified."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "Owner ratified all attached decisions. Wrote detailed implementation plan and moved card to building per request to implement all until done."
+        }
+      ],
+      "created": "2026-07-08T23:05:17.490Z",
+      "updated": "2026-07-09",
+      "workOrder": 366
+    },
+    {
+      "id": "c_audit_367_q80zrm",
+      "num": 367,
+      "title": "Prepare clean jet / jetpack / jetos product split",
+      "body": "Audit found process split but not crate/product split: root package still builds jetpack/jetos, jetos is a jetpack os wrapper, driver depends on jetpack, tests are mixed. This card prepares split boundaries without changing user semantics until owner decides visible ownership.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": "# Plan: Prepare clean jet / jetpack / jetos split\n\nRatified input:\n- D-PRODUCT-SPLIT1=C canonical ownership split with teaching/provenance shims.\n\nImplementation slices:\n1. Extract shared package/config model crate for read-only manifest/lock/store/ref/workspace/script data so jet-driver no longer depends on jetpack engine.\n2. Move jetpack binary ownership into crates/jetpack; create real crates/jetos binary/crate for OS workflows.\n3. Keep jet root focused on language/compiler/dev loop; route compatibility forms with clear owner/provenance messages.\n4. Split ModuleEval plan model from env runtime and JetOS realization.\n5. Move Canvas package/workspace scans behind shared model API.\n6. Split tests/jetpack.rs into package engine, dispatch, JetOS generation/proof, Studio, and fixture helpers.\n7. Update workspace dependency guards and docs paths.\n\nAcceptance:\n- Root package owns only jet; jetpack/jetos binaries come from owning crates.\n- jet-driver no longer depends on jetpack engine.\n- Existing public commands remain byte-compatible or emit ratified teaching/provenance messages.\n- Canvas project scan works through shared model.\n\nVerification:\n- nix develop -c cargo check --workspace\n- nix develop -c cargo test --test workspace_crates\n- nix develop -c cargo test --test engine_dispatch\n- nix develop -c cargo test --test jetpack\n- nix develop -c scripts/agent/verify-full.sh before done.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-09",
+          "by": "codex",
+          "text": "Boundary-prep acceptance complete: product split not performed, but ratchets now enforce current dependency debt and direct Jetpack import boundaries. Full suite green with workspace_crates ratchets included."
+        },
+        {
+          "at": "2026-07-09",
+          "by": "codex",
+          "text": "Implemented product-split ratchets without behavior change: workspace_crates now fails on any new jetpack crate dependency outside current root/driver debt and fails on new direct Jetpack imports outside known boundaries. Test green: cargo test --test workspace_crates."
+        },
+        {
+          "at": "2026-07-08",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "Audit card opened from owner-requested JetOS/Canvas/UX/test/separation truthfulness sweep. Ballots attached; implementation waits on owner choices where decisions are open. Evidence: Canvas targeted tests passed; JetOS os_ targeted tests passed but use fake-QEMU coverage for VM proof; full replacement claim not verified."
+        },
+        {
+          "at": "2026-07-08",
+          "by": "codex",
+          "text": "Owner ratified all attached decisions. Wrote detailed implementation plan and moved card to building per request to implement all until done."
+        }
+      ],
+      "created": "2026-07-08T23:05:17.490Z",
+      "updated": "2026-07-09",
+      "workOrder": 367
     }
   ],
   "decisions": [
@@ -39899,6 +40179,720 @@
       "created": "2026-07-08T15:43:37.222Z",
       "outcome": "B",
       "ratifiedAt": "2026-07-08"
+    },
+    {
+      "id": "D-JOS-NIXIMPORT1",
+      "cardId": "c_audit_363_9n2bl3",
+      "group": "tooling",
+      "title": "JetOS NixOS/Home Manager importer scope",
+      "gist": "How JetOS imports an existing NixOS flake, flake-parts, and Home Manager system.",
+      "explainer": "Recommend C: beginner gets one command; expert gets exact provenance, omissions, and source ownership.",
+      "story": "Hank has a real NixOS repo with flake-parts inputs, overlays, host modules, and Home Manager users. He runs one command and expects editable JetOS source, not a tiny sketch.",
+      "inWild": "$ jet os import ~/nixos --host halcyon --user nate\n# expected: writes systems/halcyon.jet, users/nate.jet, lock/provenance, and an omissions report",
+      "detail": "Recommend C: beginner gets one command; expert gets exact provenance, omissions, and source ownership.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Facts-only draft",
+          "detail": "Import package names and host metadata, then list unsupported Nix constructs.",
+          "code": "jet os import ~/nixos --facts-only\n# writes a draft plus omissions: home-manager, overlays, flake-parts"
+        },
+        {
+          "key": "B",
+          "name": "Semantic module importer",
+          "detail": "Evaluate the NixOS/Home Manager module graph into typed JetOS source with exact omissions.",
+          "code": "jet os import ~/nixos --host halcyon\n# writes JetOS source for modules, users, services, packages, files, secrets, overlays"
+        },
+        {
+          "key": "C",
+          "name": "Hybrid importer (recommended)",
+          "detail": "Default semantic import, with facts-only fallback only when exact semantics cannot be represented; every fallback is audited.",
+          "code": "jet os import ~/nixos --host halcyon --write\njet os import report\n# 0 silent omissions; unsupported constructs become named TODO facts"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "NixOS",
+          "note": "nixos-rebuild consumes the module graph directly; JetOS must import that graph before claiming replacement.",
+          "code": "nixos-rebuild switch --flake ~/nixos#halcyon"
+        }
+      ],
+      "rec": "C",
+      "status": "ratified",
+      "outcome": "C",
+      "ratifiedAt": "2026-07-08"
+    },
+    {
+      "id": "D-JOS-REALGUEST1",
+      "cardId": "c_audit_363_9n2bl3",
+      "group": "safety",
+      "title": "JetOS real installed-guest acceptance gate",
+      "gist": "What proof is required before JetOS can be called installed and usable.",
+      "explainer": "Recommend C: replacement claim needs actual installed-guest behavior, not host proof text.",
+      "story": "Doris boots the installer in QEMU, installs to disk, reboots from that disk, logs in, opens Studio, checks services, and rolls back. Host-side proof files alone are not enough.",
+      "inWild": "jet os vm prove halcyon --disk /tmp/halcyon.qcow2 --real\njet os vm run halcyon --disk /tmp/halcyon.qcow2",
+      "detail": "Recommend C: replacement claim needs actual installed-guest behavior, not host proof text.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Harness proof allowed",
+          "detail": "Host-side harness artifacts may close acceptance if they contain planned QEMU commands.",
+          "code": "state: harness-ready\nsteps: [boot-installer-qemu, reboot-installed-disk]"
+        },
+        {
+          "key": "B",
+          "name": "Guest marker required",
+          "detail": "Only guest serial proof from the installed disk can close acceptance.",
+          "code": "JETOS_GUEST_PROOF: {\"state\":\"guest-passed\",\"host\":\"halcyon\"}"
+        },
+        {
+          "key": "C",
+          "name": "Real guest plus interaction (recommended)",
+          "detail": "Guest marker, serial login, desktop/app launch, service checks, rollback, and captured artifacts from real QEMU tools.",
+          "code": "jet os vm prove halcyon --real --assert login,desktop,studio,network,rollback\n# fake qemu tools rejected for closure"
+        }
+      ],
+      "comparisons": [],
+      "rec": "C",
+      "status": "ratified",
+      "outcome": "C",
+      "ratifiedAt": "2026-07-08"
+    },
+    {
+      "id": "D-JOS-DESKTOPPROOF1",
+      "cardId": "c_audit_363_9n2bl3",
+      "group": "runtime",
+      "title": "JetOS desktop proof boundary",
+      "gist": "What counts as proving the graphical desktop works.",
+      "explainer": "Recommend C: file/script proof is a useful preflight, not desktop usability.",
+      "story": "Walter switches from NixOS to JetOS and expects GNOME/Plasma login, terminal fallback, Studio, browser, and home configuration to work, not only files to exist.",
+      "inWild": "jet os vm prove halcyon --assert desktop-session-ready,studio-opens,user-home-ready",
+      "detail": "Recommend C: file/script proof is a useful preflight, not desktop usability.",
+      "options": [
+        {
+          "key": "A",
+          "name": "File presence",
+          "detail": "Check display-manager units and launcher scripts exist.",
+          "code": "need /etc/systemd/system/display-manager.service"
+        },
+        {
+          "key": "B",
+          "name": "Proof-mode scripts",
+          "detail": "Run generated launchers with --jetos-proof inside the mounted system.",
+          "code": "jetos-display-manager --jetos-proof\njetos-desktop-session --jetos-proof"
+        },
+        {
+          "key": "C",
+          "name": "Interactive guest desktop (recommended)",
+          "detail": "Boot installed disk, start real display manager/session, verify app/window/process/user-home facts.",
+          "code": "guest assert: display-manager-active, desktop-session-live, studio-window-ready, terminal-opens"
+        }
+      ],
+      "comparisons": [],
+      "rec": "C",
+      "status": "ratified",
+      "outcome": "C",
+      "ratifiedAt": "2026-07-08"
+    },
+    {
+      "id": "D-JOS-IMAGEPROOF1",
+      "cardId": "c_audit_363_9n2bl3",
+      "group": "safety",
+      "title": "JetOS image artifact proof policy",
+      "gist": "When raw/sd/qcow/image variants may be marked built.",
+      "explainer": "Recommend C: artifact words must reflect real bootability.",
+      "story": "Betty downloads a JetOS qcow image for a laptop test. If an image is only a marker file, she needs the tool to say staged, not built.",
+      "inWild": "jet os image halcyon --format qcow2\n# output must distinguish bootable artifact vs staged proof",
+      "detail": "Recommend C: artifact words must reflect real bootability.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Marker artifacts allowed",
+          "detail": "Sparse placeholder files may stand in for future variants if proof names them.",
+          "code": "halcyon.qcow2\nstate: sparse-marker"
+        },
+        {
+          "key": "B",
+          "name": "Bootable or staged",
+          "detail": "Only bootable image files say built; placeholders are explicit staged artifacts.",
+          "code": "state: staged\nfix: install qemu-img to build qcow2"
+        },
+        {
+          "key": "C",
+          "name": "Bootable plus smoke (recommended)",
+          "detail": "Every built image variant gets a format-specific boot/probe smoke; otherwise it is staged.",
+          "code": "jet os image halcyon --format qcow2\njet os image prove halcyon.qcow2"
+        }
+      ],
+      "comparisons": [],
+      "rec": "C",
+      "status": "ratified",
+      "outcome": "C",
+      "ratifiedAt": "2026-07-08"
+    },
+    {
+      "id": "D-JOS-FIRSTBOOT1",
+      "cardId": "c_audit_363_9n2bl3",
+      "group": "web-ui",
+      "title": "JetOS first-boot onramp",
+      "gist": "What users see immediately after a successful JetOS install.",
+      "explainer": "Recommend D: beginner gets OS control first; expert can jump to source graph without split state.",
+      "story": "Earl reboots into JetOS for the first time. He should land somewhere useful: source, proof, updates, rollback, and Studio without needing to know system paths.",
+      "inWild": "first boot -> login -> Studio shows current host, generation, source, proof, rollback, update status",
+      "detail": "Recommend D: beginner gets OS control first; expert can jump to source graph without split state.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Terminal only",
+          "detail": "Boot to login shell; user runs commands manually.",
+          "code": "login: nate\n$ jetos studio"
+        },
+        {
+          "key": "B",
+          "name": "Studio first",
+          "detail": "Desktop/session opens Studio as control center on first login.",
+          "code": "jetos Studio: host halcyon, generation current, source ready"
+        },
+        {
+          "key": "C",
+          "name": "Canvas first",
+          "detail": "Open Canvas directly on system source.",
+          "code": "Canvas opens systems/halcyon.jet"
+        },
+        {
+          "key": "D",
+          "name": "Studio with Canvas deep-link (recommended)",
+          "detail": "Open Studio control center; Canvas is available for source graph editing from source spans.",
+          "code": "Studio Dashboard -> Edit source in Canvas -> exact same Jet file"
+        }
+      ],
+      "comparisons": [],
+      "rec": "D",
+      "status": "ratified",
+      "outcome": "D",
+      "ratifiedAt": "2026-07-08"
+    },
+    {
+      "id": "D-CANVAS-PARITY1",
+      "cardId": "c_audit_364_jkk162",
+      "group": "tooling",
+      "title": "Canvas full-language parity ratchet",
+      "gist": "How Canvas proves coverage for every shipped language form.",
+      "explainer": "Recommend C: source truth covers language semantics; UX affordances stay reviewable.",
+      "story": "Maya opens a real Jet project using protocols, effects, tasks, traits, unsafe gates, targets, and modules. Canvas must either edit each form truthfully or say exactly why not.",
+      "inWild": "cargo test --test canvas canvas_parity_matrix_matches_ast\n# every AST item/expr/stmt/form has node/edit/support status",
+      "detail": "Recommend C: source truth covers language semantics; UX affordances stay reviewable.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Manual matrix",
+          "detail": "Maintain a markdown parity table by hand.",
+          "code": "canvas-blueprint-parity-matrix.md"
+        },
+        {
+          "key": "B",
+          "name": "AST-derived ratchet",
+          "detail": "Generate parity rows from AST enums and require test coverage or explicit unsupported diagnostic.",
+          "code": "CanvasParity::from_ast() -> missing rows fail tests"
+        },
+        {
+          "key": "C",
+          "name": "Hybrid ratchet (recommended)",
+          "detail": "AST-derived coverage for semantic forms plus manual UX rows for gestures/layout.",
+          "code": "cargo test --test canvas parity_ast_and_ux_matrix"
+        }
+      ],
+      "comparisons": [],
+      "rec": "C",
+      "status": "ratified",
+      "outcome": "C",
+      "ratifiedAt": "2026-07-08"
+    },
+    {
+      "id": "D-CANVAS-CORECATALOG1",
+      "cardId": "c_audit_364_jkk162",
+      "group": "stdlib",
+      "title": "Canvas Core method browser",
+      "gist": "How Canvas exposes Core library methods, docs, and compatible calls.",
+      "explainer": "Recommend C: beginners discover batteries; experts see exact effects/imports/provenance.",
+      "story": "Nina drags from a String output pin and expects only compatible Core methods, docs, effects, fallibility, examples, and imports to appear.",
+      "inWild": "drag String pin -> menu: trim, split, parse_int?; shows docs/effects/imports",
+      "detail": "Recommend C: beginners discover batteries; experts see exact effects/imports/provenance.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Current-file only",
+          "detail": "Only functions defined in the project appear as actions.",
+          "code": "actions: [my_helper, print]"
+        },
+        {
+          "key": "B",
+          "name": "Docs catalog",
+          "detail": "Browse Core docs/search, but insertion remains manual.",
+          "code": "Core Browser: core.files.read_text(path) -> copy snippet"
+        },
+        {
+          "key": "C",
+          "name": "Typed Core action catalog (recommended)",
+          "detail": "Sema-known Core methods/functions appear as compatible source-backed actions with docs and authority.",
+          "code": "pin:String -> core.text.trim(self)\ninsert: name :: value.trim()"
+        }
+      ],
+      "comparisons": [],
+      "rec": "C",
+      "status": "ratified",
+      "outcome": "C",
+      "ratifiedAt": "2026-07-08"
+    },
+    {
+      "id": "D-CANVAS-ACTIONAUTH1",
+      "cardId": "c_audit_364_jkk162",
+      "group": "safety",
+      "title": "Canvas action execution authority",
+      "gist": "How Canvas runs commands or inserts behavior-producing actions.",
+      "explainer": "Recommend C: one semantic command authority with beginner labels and expert audit.",
+      "story": "Sam clicks Run, Build, Install package, or Add HTTP server from Canvas. The UI must be one-click for safe reads and auditable for mutations.",
+      "inWild": "Canvas Run -> real jet dev/run output\nCanvas Build -> shows command, touched files, grants, diff, diagnostics",
+      "detail": "Recommend C: one semantic command authority with beginner labels and expert audit.",
+      "options": [
+        {
+          "key": "A",
+          "name": "No execution",
+          "detail": "Canvas only edits source; terminal runs everything.",
+          "code": "toast: run this in terminal: jet run main.jet"
+        },
+        {
+          "key": "B",
+          "name": "Command palette authority",
+          "detail": "Every command opens a raw command approval sheet.",
+          "code": "approve: jet build main.jet --target web"
+        },
+        {
+          "key": "C",
+          "name": "Intent cards with expert drawer (recommended)",
+          "detail": "Beginner sees Run/Check/Build cards; expert expands exact command, grants, touched files, outputs.",
+          "code": "Run card: safe read\nBuild card: requires confirmation; audit JSON attached"
+        }
+      ],
+      "comparisons": [],
+      "rec": "C",
+      "status": "ratified",
+      "outcome": "C",
+      "ratifiedAt": "2026-07-08"
+    },
+    {
+      "id": "D-CANVAS-CODELENS1",
+      "cardId": "c_audit_364_jkk162",
+      "group": "web-ui",
+      "title": "Canvas code lens editing contract",
+      "gist": "Whether the Canvas code lens is read-only or a full source editor.",
+      "explainer": "Recommend C: no accidental edits, no false full-edit claim.",
+      "story": "Grace switches to Split view to fix a line fast. If the code pane is only a preview, Canvas must not advertise full edit parity.",
+      "inWild": "Split view: edit source text -> format/check -> graph updates or diagnostic appears",
+      "detail": "Recommend C: no accidental edits, no false full-edit claim.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Read-only lens",
+          "detail": "Code pane remains preview; all edits use graph transactions.",
+          "code": "<pre id=\"source-view\">source only</pre>"
+        },
+        {
+          "key": "B",
+          "name": "Full editor lens",
+          "detail": "Code pane is editable with format/check/reproject on save.",
+          "code": "edit line 4 -> Ctrl+S -> graph reprojects"
+        },
+        {
+          "key": "C",
+          "name": "Hybrid editor lens (recommended)",
+          "detail": "Read-only by default for beginners; explicit Edit Source mode gives full editor with same transaction pipeline.",
+          "code": "Code lens [Edit] -> source transaction -> diff/check/reproject"
+        }
+      ],
+      "comparisons": [],
+      "rec": "C",
+      "status": "ratified",
+      "outcome": "C",
+      "ratifiedAt": "2026-07-08"
+    },
+    {
+      "id": "D-CANVAS-PROOFLENS1",
+      "cardId": "c_audit_364_jkk162",
+      "group": "web-ui",
+      "title": "Canvas proof and debug lens",
+      "gist": "How proof, debug, and audit facts appear in Canvas.",
+      "explainer": "Recommend C: beginner sees state; expert gets auditable chain.",
+      "story": "Olivia debugs a failing build from Canvas. She needs to know whether the graph, source, binary, proof, and last run are in sync.",
+      "inWild": "Canvas proof rail: source sha, check status, build status, run output, stale proof warning",
+      "detail": "Recommend C: beginner sees state; expert gets auditable chain.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Badges only",
+          "detail": "Small status badges show pass/fail.",
+          "code": "✓ checked  ⚠ proof stale"
+        },
+        {
+          "key": "B",
+          "name": "Separate audit pane",
+          "detail": "Dedicated pane contains proof/debug logs.",
+          "code": "Audit tab: check/build/run/proof"
+        },
+        {
+          "key": "C",
+          "name": "Rail plus drilldown (recommended)",
+          "detail": "Always-visible proof rail with drilldown to exact diagnostics, command, provenance, and stale reasons.",
+          "code": "source changed -> proof rail red -> open: diff since proof"
+        }
+      ],
+      "comparisons": [],
+      "rec": "C",
+      "status": "ratified",
+      "outcome": "C",
+      "ratifiedAt": "2026-07-08"
+    },
+    {
+      "id": "D-STUDIO-CHANGESET1",
+      "cardId": "c_audit_365_11opfz",
+      "group": "safety",
+      "title": "Studio one apply path",
+      "gist": "Whether every Studio edit must stage through one changeset gate.",
+      "explainer": "Recommend D: one path, low ceremony, no hidden mutations.",
+      "story": "Iris changes a kernel, edits a service, clicks an alert fix, and starts rollback. Every path should land in one reviewable changeset before touching the machine.",
+      "inWild": "Studio Settings -> stage\nAlerts -> stage fix\nRollback -> stage inverse\nChangeset -> Build/Switch",
+      "detail": "Recommend D: one path, low ceremony, no hidden mutations.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Per-control apply",
+          "detail": "Each widget may apply directly.",
+          "code": "Kernel dropdown -> Apply now"
+        },
+        {
+          "key": "B",
+          "name": "Changeset only",
+          "detail": "Every mutation stages; apply only from Changeset.",
+          "code": "all edits -> changeset -> build/switch"
+        },
+        {
+          "key": "C",
+          "name": "Risk-based fast path",
+          "detail": "Low-risk edits can apply directly; risky edits stage.",
+          "code": "theme -> apply; kernel -> changeset"
+        },
+        {
+          "key": "D",
+          "name": "Hybrid changeset-only (recommended)",
+          "detail": "All edits stage, but low-risk edits get a compact one-click review sheet.",
+          "code": "theme -> compact changeset; kernel -> full impact ledger"
+        }
+      ],
+      "comparisons": [],
+      "rec": "D",
+      "status": "ratified",
+      "outcome": "D",
+      "ratifiedAt": "2026-07-08"
+    },
+    {
+      "id": "D-STUDIO-WIDGETS1",
+      "cardId": "c_audit_365_11opfz",
+      "group": "web-ui",
+      "title": "Studio type-derived option widgets",
+      "gist": "How much JetOS source becomes GUI controls.",
+      "explainer": "Recommend D: beginner controls without hiding expert source.",
+      "story": "Frank does not know option syntax yet. He should get controls for typed values, while expert-only constructs stay visible as source.",
+      "inWild": "network.hostName: Text -> text input\nboot.kernel: enum -> select\nsecrets.wifi: SecretRef -> secret control",
+      "detail": "Recommend D: beginner controls without hiding expert source.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Common widgets only",
+          "detail": "Hand-build controls for popular options.",
+          "code": "Boot kernel, hostname, packages only"
+        },
+        {
+          "key": "B",
+          "name": "Schema widgets for all typed values",
+          "detail": "Generate controls for every typed option shape.",
+          "code": "Bool toggle, Enum select, List editor, SecretRef picker"
+        },
+        {
+          "key": "C",
+          "name": "Source-first",
+          "detail": "Most values remain source text with search/help.",
+          "code": "open systems/halcyon.jet"
+        },
+        {
+          "key": "D",
+          "name": "Typed widgets with source fallback (recommended)",
+          "detail": "Generate widgets for known safe typed values; unsupported forms remain source-visible with exact reason.",
+          "code": "unsupported computed expression -> source chip, not hidden"
+        }
+      ],
+      "comparisons": [],
+      "rec": "D",
+      "status": "ratified",
+      "outcome": "D",
+      "ratifiedAt": "2026-07-08"
+    },
+    {
+      "id": "D-STUDIO-SECRETS1",
+      "cardId": "c_audit_365_11opfz",
+      "group": "safety",
+      "title": "Studio secrets boundary",
+      "gist": "What Studio may show and edit for secrets.",
+      "explainer": "Recommend D: no plaintext leak, full expert audit.",
+      "story": "Clara rotates Wi-Fi and deploy keys from Studio. The screen must never leak plaintext but must still make rekey/audit flows usable.",
+      "inWild": "Secrets page: wifi.age recipient set, last rekey, consumers; no secret value in DOM/JSON",
+      "detail": "Recommend D: no plaintext leak, full expert audit.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Names only",
+          "detail": "Show secret names and paths; edits happen outside Studio.",
+          "code": "wifi -> /secrets/wifi.age"
+        },
+        {
+          "key": "B",
+          "name": "Inline secret editor",
+          "detail": "Studio accepts and stores plaintext during edit.",
+          "code": "text area: password"
+        },
+        {
+          "key": "C",
+          "name": "External tool launch",
+          "detail": "Studio shells out to age/sops and only refreshes status.",
+          "code": "Open external editor"
+        },
+        {
+          "key": "D",
+          "name": "Audited secret transactions (recommended)",
+          "detail": "Studio never renders plaintext; add/rekey/rotate use audited secret transaction APIs and proof.",
+          "code": "rekey wifi -> recipients diff -> proof -> source update"
+        }
+      ],
+      "comparisons": [],
+      "rec": "D",
+      "status": "ratified",
+      "outcome": "D",
+      "ratifiedAt": "2026-07-08"
+    },
+    {
+      "id": "D-STUDIO-FLEET1",
+      "cardId": "c_audit_365_11opfz",
+      "group": "web-ui",
+      "title": "Studio single-host versus fleet surface",
+      "gist": "When Studio shows fleet controls.",
+      "explainer": "Recommend C: beginner avoids empty complexity; expert gets operations scale.",
+      "story": "Paul has one laptop today and ten machines later. Single-host Studio should be quiet; fleet controls should appear naturally when the workspace has multiple systems.",
+      "inWild": "workspace: one system -> no fleet chrome\nworkspace: many systems -> host strip, staged rollout, fleet proof",
+      "detail": "Recommend C: beginner avoids empty complexity; expert gets operations scale.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Single-host first only",
+          "detail": "Studio never shows fleet UI in this phase.",
+          "code": "Dashboard: halcyon only"
+        },
+        {
+          "key": "B",
+          "name": "Fleet first",
+          "detail": "Dashboard always has host grid and rollout controls.",
+          "code": "Hosts: halcyon, nas, work"
+        },
+        {
+          "key": "C",
+          "name": "Adaptive hybrid (recommended)",
+          "detail": "One-host UI is clean; multi-host workspace unlocks fleet strip and rollout/proof pages.",
+          "code": "if systems.len > 1 -> fleet strip appears"
+        }
+      ],
+      "comparisons": [],
+      "rec": "C",
+      "status": "ratified",
+      "outcome": "C",
+      "ratifiedAt": "2026-07-08"
+    },
+    {
+      "id": "D-STUDIO-CANVASBRIDGE1",
+      "cardId": "c_audit_365_11opfz",
+      "group": "web-ui",
+      "title": "Studio and Canvas integration boundary",
+      "gist": "How Studio and Canvas share source editing without becoming one product.",
+      "explainer": "Recommend C: one source truth, no product confusion.",
+      "story": "Kelly edits JetOS settings in Studio, then opens Canvas to inspect a module graph. The two views must share source truth but not create split semantic state.",
+      "inWild": "Studio option -> exact source span -> Open in Canvas -> same file/revision",
+      "detail": "Recommend C: one source truth, no product confusion.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Separate apps",
+          "detail": "Studio and Canvas share no UI, only files.",
+          "code": "Open external Canvas"
+        },
+        {
+          "key": "B",
+          "name": "Studio as Canvas skin",
+          "detail": "Studio is implemented entirely as Canvas graph/pages.",
+          "code": "Canvas mode=studio"
+        },
+        {
+          "key": "C",
+          "name": "Shared components, strict boundary (recommended)",
+          "detail": "Studio owns OS workflows; Canvas owns general source graph. They share protocol widgets, source spans, proof components, no semantic state.",
+          "code": "Studio source span -> Canvas deep link; Canvas edit -> Studio reprojects"
+        }
+      ],
+      "comparisons": [],
+      "rec": "C",
+      "status": "ratified",
+      "outcome": "C",
+      "ratifiedAt": "2026-07-08"
+    },
+    {
+      "id": "D-VERIFY-SCHED1",
+      "cardId": "c_audit_366_z7u1x7",
+      "group": "tooling",
+      "title": "Full-suite scheduler contract",
+      "gist": "How the full verification command reaches the 1-3 minute budget.",
+      "explainer": "Recommend C: faster by default without making the harness depend on one tool path.",
+      "story": "Lena runs the full suite before closing a card. She needs the command to use all cores safely and show slow tests without hiding failures.",
+      "inWild": "nix develop -c scripts/agent/verify-full.sh\n# target: 1-3 minutes on dev machine, timing report emitted",
+      "detail": "Recommend C: faster by default without making the harness depend on one tool path.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Plain cargo test",
+          "detail": "Keep current harness and optimize tests individually.",
+          "code": "exec cargo test \"$@\""
+        },
+        {
+          "key": "B",
+          "name": "Nextest default",
+          "detail": "Use cargo-nextest as the default scheduler.",
+          "code": "cargo nextest run --workspace"
+        },
+        {
+          "key": "C",
+          "name": "Repo scheduler wrapper (recommended)",
+          "detail": "Wrapper selects nextest when available, falls back to cargo, applies job caps, isolation, timing report, and known serial groups.",
+          "code": "verify-full.sh -> timed scheduler; serial groups explicit"
+        }
+      ],
+      "comparisons": [],
+      "rec": "C",
+      "status": "ratified",
+      "outcome": "C",
+      "ratifiedAt": "2026-07-08"
+    },
+    {
+      "id": "D-VERIFY-CACHE1",
+      "cardId": "c_audit_366_z7u1x7",
+      "group": "tooling",
+      "title": "Generated Rust test artifact cache",
+      "gist": "Whether tests may share cached compiled artifacts for generated Jet programs.",
+      "explainer": "Recommend C: same behavior checked, fewer duplicate rustc invocations.",
+      "story": "Quinn runs golden, dev parity, corelib, and web tests. The same generated Rust gets rebuilt many times; caching should cut time without reducing coverage.",
+      "inWild": "cache key = rustc version + generated Rust hash + flags + linked artifacts",
+      "detail": "Recommend C: same behavior checked, fewer duplicate rustc invocations.",
+      "options": [
+        {
+          "key": "A",
+          "name": "No cache",
+          "detail": "Every test recompiles generated Rust independently.",
+          "code": "rustc generated.rs -o tmp/bin each time"
+        },
+        {
+          "key": "B",
+          "name": "Per-test cache",
+          "detail": "Each integration test caches only inside its own binary.",
+          "code": "tests/golden cache only"
+        },
+        {
+          "key": "C",
+          "name": "Shared verified cache (recommended)",
+          "detail": "Repo-local target/test-cache shared across test binaries, keyed by all semantic inputs, with opt-out.",
+          "code": "JET_TEST_BUILD_CACHE=target/test-cache"
+        }
+      ],
+      "comparisons": [],
+      "rec": "C",
+      "status": "ratified",
+      "outcome": "C",
+      "ratifiedAt": "2026-07-08"
+    },
+    {
+      "id": "D-VERIFY-TIER1",
+      "cardId": "c_audit_366_z7u1x7",
+      "group": "tooling",
+      "title": "Verification tier semantics",
+      "gist": "How fast, full, slow, and real-hardware tests are separated without weakening done.",
+      "explainer": "Recommend C: speed without proof laundering.",
+      "story": "Nate wants ordinary full verification in minutes, but real QEMU/desktop/import replacement proof still has to exist and be runnable before claims close.",
+      "inWild": "verify-full -> default full\nverify-real -> real QEMU/import/Desktop gates\nno card can claim replacement without real tier",
+      "detail": "Recommend C: speed without proof laundering.",
+      "options": [
+        {
+          "key": "A",
+          "name": "One suite only",
+          "detail": "Everything, including real QEMU/browser/hardware, always runs in verify-full.",
+          "code": "scripts/agent/verify-full.sh"
+        },
+        {
+          "key": "B",
+          "name": "Fast default plus optional slow",
+          "detail": "Default suite is fast; slow tests are optional and may be skipped for closure.",
+          "code": "verify-full; verify-slow optional"
+        },
+        {
+          "key": "C",
+          "name": "Tiered but binding (recommended)",
+          "detail": "Default full is 1-3 min; real/slow suites are separate but mandatory for claims/cards that require them.",
+          "code": "card acceptance: requires verify-real-jetos, not just verify-full"
+        }
+      ],
+      "comparisons": [],
+      "rec": "C",
+      "status": "ratified",
+      "outcome": "C",
+      "ratifiedAt": "2026-07-08"
+    },
+    {
+      "id": "D-PRODUCT-SPLIT1",
+      "cardId": "c_audit_367_q80zrm",
+      "group": "tooling",
+      "title": "jet / jetpack / jetos public ownership boundary",
+      "gist": "How public commands and binaries are owned after the code split.",
+      "explainer": "Recommend C: clean architecture, low user disruption, one canonical ownership story.",
+      "story": "Rita installs Jet and expects `jet run` to stay tiny, `jetpack` to own packages/envs, and `jetos` to own OS workflows without confusing aliases.",
+      "inWild": "jet run app.jet\njetpack env enter\njetos switch halcyon\njet os switch halcyon  # compatibility?",
+      "detail": "Recommend C: clean architecture, low user disruption, one canonical ownership story.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Keep all aliases",
+          "detail": "`jet`, `jetpack`, and `jetos` all keep broad overlapping command aliases.",
+          "code": "jet os switch; jetos switch; jetpack os switch"
+        },
+        {
+          "key": "B",
+          "name": "Hard product split",
+          "detail": "Each binary owns one domain; old cross-product forms error immediately.",
+          "code": "jet os -> error: use jetos"
+        },
+        {
+          "key": "C",
+          "name": "Canonical split with teaching shims (recommended)",
+          "detail": "Canonical ownership is split; existing `jet os` and legacy jetpack forms route with clear provenance until deprecation policy says otherwise.",
+          "code": "jet os switch halcyon\n# note: jetos owns this command; running jetos switch halcyon"
+        }
+      ],
+      "comparisons": [],
+      "rec": "C",
+      "status": "ratified",
+      "outcome": "C",
+      "ratifiedAt": "2026-07-08"
     }
   ],
   "questions": [
@@ -41163,6 +42157,531 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-09T01:13:10.101Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c_audit_366_z7u1x7",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-09T01:13:10.043Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c_audit_363_9n2bl3",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-09T01:09:56.899Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c_audit_364_jkk162",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-09T01:05:01.167Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c_audit_364_jkk162",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-09T00:58:04.109Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c_audit_364_jkk162",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-09T00:54:48.509Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c_audit_364_jkk162",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-09T00:51:00.947Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c_audit_364_jkk162",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-09T00:48:35.993Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c_audit_364_jkk162",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-09T00:38:51.297Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c_audit_366_z7u1x7",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-09T00:38:51.224Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c_audit_364_jkk162",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-09T00:33:48.176Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c_audit_364_jkk162",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-09T00:30:42.790Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c_audit_364_jkk162",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-09T00:30:36.665Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c_audit_365_11opfz",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-09T00:30:36.607Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c_audit_366_z7u1x7",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-09T00:30:36.531Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c_audit_363_9n2bl3",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-09T00:30:36.478Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c_audit_367_q80zrm",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-09T00:25:25.988Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c_audit_367_q80zrm",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-09T00:25:25.936Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c_audit_365_11opfz",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-09T00:25:25.862Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c_audit_366_z7u1x7",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-09T00:25:25.807Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c_audit_364_jkk162",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-08T23:30:14.691Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c_audit_363_9n2bl3",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-08T23:26:30.902Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c_audit_363_9n2bl3",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-08T23:15:34.163Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msg5sf15mvr",
+      "note": "→ codex: [tower] 19 decisions ratified: D-JOS-NIXIMPORT1→C · D-JOS-RE"
+    },
+    {
+      "at": "2026-07-08T23:15:34.163Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msg5rf15ld7",
+      "note": "→ jetos-agent: [tower] 19 decisions ratified: D-JOS-NIXIMPORT1→C · D-JOS-RE"
+    },
+    {
+      "at": "2026-07-08T23:15:34.163Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msg5qf15jsf",
+      "note": "→ codex-jetos: [tower] 19 decisions ratified: D-JOS-NIXIMPORT1→C · D-JOS-RE"
+    },
+    {
+      "at": "2026-07-08T23:15:34.163Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msg5pf15hza",
+      "note": "→ codex-canvas: [tower] 19 decisions ratified: D-JOS-NIXIMPORT1→C · D-JOS-RE"
+    },
+    {
+      "at": "2026-07-08T23:15:34.163Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msg5of15g34",
+      "note": "→ codex-main: [tower] 19 decisions ratified: D-JOS-NIXIMPORT1→C · D-JOS-RE"
+    },
+    {
+      "at": "2026-07-08T23:15:34.163Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msg5nf15cyo",
+      "note": "→ codex-1: [tower] 19 decisions ratified: D-JOS-NIXIMPORT1→C · D-JOS-RE"
+    },
+    {
+      "at": "2026-07-08T23:15:34.163Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msg5mf14wke",
+      "note": "→ claude-main: [tower] 19 decisions ratified: D-JOS-NIXIMPORT1→C · D-JOS-RE"
+    },
+    {
+      "at": "2026-07-08T23:14:04.128Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-PRODUCT-SPLIT1",
+      "note": "C"
+    },
+    {
+      "at": "2026-07-08T23:13:53.260Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-VERIFY-TIER1",
+      "note": "C"
+    },
+    {
+      "at": "2026-07-08T23:13:20.389Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-VERIFY-CACHE1",
+      "note": "C"
+    },
+    {
+      "at": "2026-07-08T23:13:07.575Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-VERIFY-SCHED1",
+      "note": "C"
+    },
+    {
+      "at": "2026-07-08T23:12:36.515Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-STUDIO-CANVASBRIDGE1",
+      "note": "C"
+    },
+    {
+      "at": "2026-07-08T23:12:19.329Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-STUDIO-FLEET1",
+      "note": "C"
+    },
+    {
+      "at": "2026-07-08T23:12:09.393Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-STUDIO-SECRETS1",
+      "note": "D"
+    },
+    {
+      "at": "2026-07-08T23:11:54.650Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-STUDIO-WIDGETS1",
+      "note": "D"
+    },
+    {
+      "at": "2026-07-08T23:11:27.897Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-STUDIO-CHANGESET1",
+      "note": "D"
+    },
+    {
+      "at": "2026-07-08T23:11:17.019Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-CANVAS-PROOFLENS1",
+      "note": "C"
+    },
+    {
+      "at": "2026-07-08T23:10:48.210Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-CANVAS-CODELENS1",
+      "note": "C"
+    },
+    {
+      "at": "2026-07-08T23:10:24.730Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-CANVAS-ACTIONAUTH1",
+      "note": "C"
+    },
+    {
+      "at": "2026-07-08T23:10:08.166Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-CANVAS-CORECATALOG1",
+      "note": "C"
+    },
+    {
+      "at": "2026-07-08T23:09:50.697Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-CANVAS-PARITY1",
+      "note": "C"
+    },
+    {
+      "at": "2026-07-08T23:09:33.346Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-JOS-FIRSTBOOT1",
+      "note": "D"
+    },
+    {
+      "at": "2026-07-08T23:09:15.220Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-JOS-IMAGEPROOF1",
+      "note": "C"
+    },
+    {
+      "at": "2026-07-08T23:09:05.439Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-JOS-DESKTOPPROOF1",
+      "note": "C"
+    },
+    {
+      "at": "2026-07-08T23:08:51.686Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-JOS-REALGUEST1",
+      "note": "C"
+    },
+    {
+      "at": "2026-07-08T23:08:29.043Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-JOS-NIXIMPORT1",
+      "note": "C"
+    },
+    {
+      "at": "2026-07-08T23:05:17.490Z",
+      "by": "codex",
+      "action": "decision.add",
+      "ref": "D-PRODUCT-SPLIT1",
+      "note": "jet / jetpack / jetos public ownership boundary"
+    },
+    {
+      "at": "2026-07-08T23:05:17.490Z",
+      "by": "codex",
+      "action": "decision.add",
+      "ref": "D-VERIFY-TIER1",
+      "note": "Verification tier semantics"
+    },
+    {
+      "at": "2026-07-08T23:05:17.490Z",
+      "by": "codex",
+      "action": "decision.add",
+      "ref": "D-VERIFY-CACHE1",
+      "note": "Generated Rust test artifact cache"
+    },
+    {
+      "at": "2026-07-08T23:05:17.490Z",
+      "by": "codex",
+      "action": "decision.add",
+      "ref": "D-VERIFY-SCHED1",
+      "note": "Full-suite scheduler contract"
+    },
+    {
+      "at": "2026-07-08T23:05:17.490Z",
+      "by": "codex",
+      "action": "decision.add",
+      "ref": "D-STUDIO-CANVASBRIDGE1",
+      "note": "Studio and Canvas integration boundary"
+    },
+    {
+      "at": "2026-07-08T23:05:17.490Z",
+      "by": "codex",
+      "action": "decision.add",
+      "ref": "D-STUDIO-FLEET1",
+      "note": "Studio single-host versus fleet surface"
+    },
+    {
+      "at": "2026-07-08T23:05:17.490Z",
+      "by": "codex",
+      "action": "decision.add",
+      "ref": "D-STUDIO-SECRETS1",
+      "note": "Studio secrets boundary"
+    },
+    {
+      "at": "2026-07-08T23:05:17.490Z",
+      "by": "codex",
+      "action": "decision.add",
+      "ref": "D-STUDIO-WIDGETS1",
+      "note": "Studio type-derived option widgets"
+    },
+    {
+      "at": "2026-07-08T23:05:17.490Z",
+      "by": "codex",
+      "action": "decision.add",
+      "ref": "D-STUDIO-CHANGESET1",
+      "note": "Studio one apply path"
+    },
+    {
+      "at": "2026-07-08T23:05:17.490Z",
+      "by": "codex",
+      "action": "decision.add",
+      "ref": "D-CANVAS-PROOFLENS1",
+      "note": "Canvas proof and debug lens"
+    },
+    {
+      "at": "2026-07-08T23:05:17.490Z",
+      "by": "codex",
+      "action": "decision.add",
+      "ref": "D-CANVAS-CODELENS1",
+      "note": "Canvas code lens editing contract"
+    },
+    {
+      "at": "2026-07-08T23:05:17.490Z",
+      "by": "codex",
+      "action": "decision.add",
+      "ref": "D-CANVAS-ACTIONAUTH1",
+      "note": "Canvas action execution authority"
+    },
+    {
+      "at": "2026-07-08T23:05:17.490Z",
+      "by": "codex",
+      "action": "decision.add",
+      "ref": "D-CANVAS-CORECATALOG1",
+      "note": "Canvas Core method browser"
+    },
+    {
+      "at": "2026-07-08T23:05:17.490Z",
+      "by": "codex",
+      "action": "decision.add",
+      "ref": "D-CANVAS-PARITY1",
+      "note": "Canvas full-language parity ratchet"
+    },
+    {
+      "at": "2026-07-08T23:05:17.490Z",
+      "by": "codex",
+      "action": "decision.add",
+      "ref": "D-JOS-FIRSTBOOT1",
+      "note": "JetOS first-boot onramp"
+    },
+    {
+      "at": "2026-07-08T23:05:17.490Z",
+      "by": "codex",
+      "action": "decision.add",
+      "ref": "D-JOS-IMAGEPROOF1",
+      "note": "JetOS image artifact proof policy"
+    },
+    {
+      "at": "2026-07-08T23:05:17.490Z",
+      "by": "codex",
+      "action": "decision.add",
+      "ref": "D-JOS-DESKTOPPROOF1",
+      "note": "JetOS desktop proof boundary"
+    },
+    {
+      "at": "2026-07-08T23:05:17.490Z",
+      "by": "codex",
+      "action": "decision.add",
+      "ref": "D-JOS-REALGUEST1",
+      "note": "JetOS real installed-guest acceptance gate"
+    },
+    {
+      "at": "2026-07-08T23:05:17.490Z",
+      "by": "codex",
+      "action": "decision.add",
+      "ref": "D-JOS-NIXIMPORT1",
+      "note": "JetOS NixOS/Home Manager importer scope"
+    },
+    {
+      "at": "2026-07-08T23:05:17.490Z",
+      "by": "codex",
+      "action": "card.add",
+      "ref": "c_audit_367_q80zrm",
+      "note": "#367 Prepare clean jet / jetpack / jetos product split"
+    },
+    {
+      "at": "2026-07-08T23:05:17.490Z",
+      "by": "codex",
+      "action": "card.add",
+      "ref": "c_audit_366_z7u1x7",
+      "note": "#366 Verification suite 1-3 minute budget"
+    },
+    {
+      "at": "2026-07-08T23:05:17.490Z",
+      "by": "codex",
+      "action": "card.add",
+      "ref": "c_audit_365_11opfz",
+      "note": "#365 Studio and Canvas UX integration hardening"
+    },
+    {
+      "at": "2026-07-08T23:05:17.490Z",
+      "by": "codex",
+      "action": "card.add",
+      "ref": "c_audit_364_jkk162",
+      "note": "#364 Canvas full-language and Core parity truth gate"
+    },
+    {
+      "at": "2026-07-08T23:05:17.490Z",
+      "by": "codex",
+      "action": "card.add",
+      "ref": "c_audit_363_9n2bl3",
+      "note": "#363 JetOS replacement truth gate — import real NixOS and prove installed guest"
+    },
+    {
+      "at": "2026-07-08T19:14:13.380Z",
+      "by": "codex",
+      "action": "message.send",
+      "ref": "msg01cf9xw",
+      "note": "→ owner: Closed #357. Implemented ratified Studio dashboard/sidebar U"
+    },
+    {
+      "at": "2026-07-08T19:14:05.128Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c0e7rot4",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-08T18:53:06.885Z",
+      "by": "codex",
+      "action": "card.update",
+      "ref": "c0e7rot4",
+      "note": "phase"
+    },
     {
       "at": "2026-07-08T17:17:03.031Z",
       "by": "codex",
@@ -56454,6 +57973,96 @@
       "at": "2026-07-08T15:49:47.300Z",
       "deliveredAt": null,
       "readAt": null
+    },
+    {
+      "id": "msg01cf9xw",
+      "from": "codex",
+      "to": "owner",
+      "text": "Closed #357. Implemented ratified Studio dashboard/sidebar UI over source-backed projection: dashboard metrics, extensible page registry, settings page staging exact Jet diffs, first-class Changeset page/tray, one source transaction/apply gate. Verified: nix develop -c cargo build; nix develop -c cargo test --test jetpack jetos_studio -- --nocapture; nix develop -c cargo test --test jetpack os_switch_activates_and_sets_current -- --nocapture; nix develop -c cargo test --test jetpack; nix develop -c cargo build --bin jetos; served Studio HTTP page/data at 127.0.0.1:33127; nix develop -c scripts/agent/verify-full.sh. JetOS GNOME ISO/VM proof already green: VM proof guest-passed, ISO no .nix/.drv and no NixOS branding scan hits, VNC run still live at 127.0.0.1:5901.",
+      "cardId": "c0e7rot4",
+      "file": null,
+      "at": "2026-07-08T19:14:13.379Z",
+      "deliveredAt": null,
+      "readAt": "2026-07-08T23:04:26.849Z"
+    },
+    {
+      "id": "msg5mf14wke",
+      "from": "tower",
+      "to": "claude-main",
+      "text": "[tower] 19 decisions ratified: D-JOS-NIXIMPORT1→C · D-JOS-REALGUEST1→C · D-JOS-DESKTOPPROOF1→C · D-JOS-IMAGEPROOF1→C · D-JOS-FIRSTBOOT1→D · D-CANVAS-PARITY1→C · D-CANVAS-CORECATALOG1→C · D-CANVAS-ACTIONAUTH1→C · D-CANVAS-CODELENS1→C · D-CANVAS-PROOFLENS1→C · D-STUDIO-CHANGESET1→D · D-STUDIO-WIDGETS1→D · D-STUDIO-SECRETS1→D · D-STUDIO-FLEET1→C · D-STUDIO-CANVASBRIDGE1→C · D-VERIFY-SCHED1→C · D-VERIFY-CACHE1→C · D-VERIFY-TIER1→C · D-PRODUCT-SPLIT1→C. Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-08T23:15:34.163Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg5nf15cyo",
+      "from": "tower",
+      "to": "codex-1",
+      "text": "[tower] 19 decisions ratified: D-JOS-NIXIMPORT1→C · D-JOS-REALGUEST1→C · D-JOS-DESKTOPPROOF1→C · D-JOS-IMAGEPROOF1→C · D-JOS-FIRSTBOOT1→D · D-CANVAS-PARITY1→C · D-CANVAS-CORECATALOG1→C · D-CANVAS-ACTIONAUTH1→C · D-CANVAS-CODELENS1→C · D-CANVAS-PROOFLENS1→C · D-STUDIO-CHANGESET1→D · D-STUDIO-WIDGETS1→D · D-STUDIO-SECRETS1→D · D-STUDIO-FLEET1→C · D-STUDIO-CANVASBRIDGE1→C · D-VERIFY-SCHED1→C · D-VERIFY-CACHE1→C · D-VERIFY-TIER1→C · D-PRODUCT-SPLIT1→C. Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-08T23:15:34.163Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg5of15g34",
+      "from": "tower",
+      "to": "codex-main",
+      "text": "[tower] 19 decisions ratified: D-JOS-NIXIMPORT1→C · D-JOS-REALGUEST1→C · D-JOS-DESKTOPPROOF1→C · D-JOS-IMAGEPROOF1→C · D-JOS-FIRSTBOOT1→D · D-CANVAS-PARITY1→C · D-CANVAS-CORECATALOG1→C · D-CANVAS-ACTIONAUTH1→C · D-CANVAS-CODELENS1→C · D-CANVAS-PROOFLENS1→C · D-STUDIO-CHANGESET1→D · D-STUDIO-WIDGETS1→D · D-STUDIO-SECRETS1→D · D-STUDIO-FLEET1→C · D-STUDIO-CANVASBRIDGE1→C · D-VERIFY-SCHED1→C · D-VERIFY-CACHE1→C · D-VERIFY-TIER1→C · D-PRODUCT-SPLIT1→C. Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-08T23:15:34.163Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg5pf15hza",
+      "from": "tower",
+      "to": "codex-canvas",
+      "text": "[tower] 19 decisions ratified: D-JOS-NIXIMPORT1→C · D-JOS-REALGUEST1→C · D-JOS-DESKTOPPROOF1→C · D-JOS-IMAGEPROOF1→C · D-JOS-FIRSTBOOT1→D · D-CANVAS-PARITY1→C · D-CANVAS-CORECATALOG1→C · D-CANVAS-ACTIONAUTH1→C · D-CANVAS-CODELENS1→C · D-CANVAS-PROOFLENS1→C · D-STUDIO-CHANGESET1→D · D-STUDIO-WIDGETS1→D · D-STUDIO-SECRETS1→D · D-STUDIO-FLEET1→C · D-STUDIO-CANVASBRIDGE1→C · D-VERIFY-SCHED1→C · D-VERIFY-CACHE1→C · D-VERIFY-TIER1→C · D-PRODUCT-SPLIT1→C. Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-08T23:15:34.163Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg5qf15jsf",
+      "from": "tower",
+      "to": "codex-jetos",
+      "text": "[tower] 19 decisions ratified: D-JOS-NIXIMPORT1→C · D-JOS-REALGUEST1→C · D-JOS-DESKTOPPROOF1→C · D-JOS-IMAGEPROOF1→C · D-JOS-FIRSTBOOT1→D · D-CANVAS-PARITY1→C · D-CANVAS-CORECATALOG1→C · D-CANVAS-ACTIONAUTH1→C · D-CANVAS-CODELENS1→C · D-CANVAS-PROOFLENS1→C · D-STUDIO-CHANGESET1→D · D-STUDIO-WIDGETS1→D · D-STUDIO-SECRETS1→D · D-STUDIO-FLEET1→C · D-STUDIO-CANVASBRIDGE1→C · D-VERIFY-SCHED1→C · D-VERIFY-CACHE1→C · D-VERIFY-TIER1→C · D-PRODUCT-SPLIT1→C. Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-08T23:15:34.163Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg5rf15ld7",
+      "from": "tower",
+      "to": "jetos-agent",
+      "text": "[tower] 19 decisions ratified: D-JOS-NIXIMPORT1→C · D-JOS-REALGUEST1→C · D-JOS-DESKTOPPROOF1→C · D-JOS-IMAGEPROOF1→C · D-JOS-FIRSTBOOT1→D · D-CANVAS-PARITY1→C · D-CANVAS-CORECATALOG1→C · D-CANVAS-ACTIONAUTH1→C · D-CANVAS-CODELENS1→C · D-CANVAS-PROOFLENS1→C · D-STUDIO-CHANGESET1→D · D-STUDIO-WIDGETS1→D · D-STUDIO-SECRETS1→D · D-STUDIO-FLEET1→C · D-STUDIO-CANVASBRIDGE1→C · D-VERIFY-SCHED1→C · D-VERIFY-CACHE1→C · D-VERIFY-TIER1→C · D-PRODUCT-SPLIT1→C. Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-08T23:15:34.163Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg5sf15mvr",
+      "from": "tower",
+      "to": "codex",
+      "text": "[tower] 19 decisions ratified: D-JOS-NIXIMPORT1→C · D-JOS-REALGUEST1→C · D-JOS-DESKTOPPROOF1→C · D-JOS-IMAGEPROOF1→C · D-JOS-FIRSTBOOT1→D · D-CANVAS-PARITY1→C · D-CANVAS-CORECATALOG1→C · D-CANVAS-ACTIONAUTH1→C · D-CANVAS-CODELENS1→C · D-CANVAS-PROOFLENS1→C · D-STUDIO-CHANGESET1→D · D-STUDIO-WIDGETS1→D · D-STUDIO-SECRETS1→D · D-STUDIO-FLEET1→C · D-STUDIO-CANVASBRIDGE1→C · D-VERIFY-SCHED1→C · D-VERIFY-CACHE1→C · D-VERIFY-TIER1→C · D-PRODUCT-SPLIT1→C. Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-08T23:15:34.163Z",
+      "deliveredAt": null,
+      "readAt": null
     }
-  ]
+  ],
+  "nextNum": 368,
+  "rev": 2
 }

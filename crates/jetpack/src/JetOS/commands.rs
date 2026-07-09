@@ -230,14 +230,16 @@ fn cmd_init(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 {
     }
 }
 
-fn cmd_lift(theme: &Theme, args: &[String]) -> i32 {
+fn cmd_lift(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 {
     let host = args.first().map_or("host", String::as_str);
     let root = args.get(1).map_or("/", String::as_str);
-    println!(
-        "module {host} {{\n    system.{host}: {{\n        target: linux.x64,\n        packages: [],\n        options: [\n            filesystem.root.source: \"{root}\",\n        ],\n    }}\n}}"
-    );
-    theme.status("drafted jetos config from host root");
-    0
+    let import_args = vec![
+        root.to_string(),
+        Syntax::OS_IMPORT_FLAG_HOST.to_string(),
+        host.to_string(),
+        Syntax::OS_IMPORT_FLAG_FACTS_ONLY.to_string(),
+    ];
+    cmd_import(theme, &import_args, flags)
 }
 
 fn cmd_image(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 {

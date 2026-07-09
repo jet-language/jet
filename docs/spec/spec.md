@@ -1362,7 +1362,7 @@ capture into a plan model). The U5 merge engine consumes `env` contributions.
 
 ### jetos Runtime Slice
 
-`jet os check|init|plan|proof|build|switch|rollback|generations|lift|image|vm`
+`jet os check|init|plan|proof|build|switch|rollback|generations|lift|import|image|vm`
 is active. A bare host (`jet os switch laptop`) selects `system.laptop` in
 `./config.jet`; `path@host` selects an exact external root. Builds create named
 generations; `generations` lists newest first; `switch --name <name>` overrides
@@ -1375,6 +1375,8 @@ networkd/firewall/wireless facts, Limine + CachyOS boot facts, first-party
 systemd init closure with `/sbin/init`, kernel firmware/driver facts, desktop/display-manager facts,
 terminal login facts with serial/virtual getty units and user home/profile
 projection,
+NixOS/flake-parts/Home Manager import through `jet os import <flake-or-dir>`
+with semantic `jetos-import-facts.json` input and audited facts-only fallback,
 per-user generation profiles under `users/`, Flatpak exact reconcile plans,
 permission overrides, undeclared-app removal, and AppImage runtime integration under
 `flatpak/`/`appimage/`, performance profile, sysctl, zram, sched-ext scheduler, initrd, and
@@ -1431,6 +1433,7 @@ hatches such as overlays and specialArgs are allowed only as explicit
 `packages.*` options; each one is written to the generation's compat audit file
 and provenance so Studio can show it and native replacement work can track it.
 `jet os vm prove <host> --disk <path>` is the install/reboot proof entrypoint;
+`--real` upgrades it to replacement acceptance and rejects script/fake VM tools.
 it fails with E1279 rather than faking boot media when pinned QEMU/media tools
 are missing, and it fails with E1285 rather than treating a prepared QEMU harness
 as a passed guest proof. It writes the VM proof harness, runs the recorded QEMU
@@ -1494,9 +1497,12 @@ terminal launcher instead of blocking boot. Each generation also installs the
 first-party jetos Studio app projection under `sw/bin/jetos-studio`,
 `share/applications`, and `studio/`;
 `studio/data.json` carries the read-only host/package/service/option projection
-and artifact paths. The root projection carries these files into
+artifact paths, no-plaintext secret policy, adaptive fleet surface, separate-app
+Canvas deep-link metadata, and changeset apply gates. The root projection carries these files into
 `/run/current-system`. Studio remains a separate jetos system app from Canvas
-and may fall back to the browser over the same local projection service. The
+and may fall back to the browser over the same local projection service. It may
+deep-link to Canvas for generic source graph editing, but it stores no Canvas
+semantic state. The
 direct launch command is `jetos studio`; `jetos studio --headless` prints the
 installed app path for CI/review without opening a browser, and `--json` prints
 the root, app, metadata, and data paths without opening a browser.
@@ -2066,13 +2072,41 @@ emits `jet.canvas.graph` schema v1 with one function graph per checked function:
 deterministic source-order layout, structural nodes, typed pins, data/fallible
 wires, inline pure expressions, source byte spans, and semindex fact handles.
 
-`POST /__jet_canvas/transaction` accepts `jet.canvas.edit` schema v1. Prototype
-transactions are `noop`, `rename_binding`, `edit_inline_expr`, and
-`insert_call`. Each transaction must carry the current source `revision`; stale
-revisions fail with a conflict. Successful writes go through `jet fmt`, re-check
-through the front end, replace ordinary `.jet` source, and then reproject.
+`POST /__jet_canvas/transaction` accepts `jet.canvas.edit` schema v1.
+Transactions include source no-op/reprojection, rename, inline expression edit,
+binding promotion, call insertion, function/signature edits, trait impl creation,
+wire break/move, source replace, structural rail inserts, comment/collapse
+regions, and action preview. Each transaction must carry the current source
+`revision`; stale revisions fail with a conflict. Successful writes go through
+`jet fmt`, re-check through the front end, replace ordinary `.jet` source, and
+then reproject.
+
+The Code lens is read-only by default. `Edit Source` switches to an explicit
+source editor, and `Apply Source` sends a `replace_source` transaction through
+the same format/check/reproject path. Canvas never writes a graph asset or owns a
+second parser/checker.
+
+`POST /__jet_canvas/query` accepts read-only query schema v1 for find,
+references, source-to-graph, rename preview, action palette, and Core catalog
+browsing. `GET /canvas/core-catalog` exposes the same read-only `core.*`
+catalog from the canonical Core library reference. Catalog entries carry
+`canvas.catalog:core.read` authority and `writes:"none"`; browsing never claims
+that a Core call executed.
+
+`GET /canvas/proof` reports the selected source revision's current proof state:
+front-end check result, Git text state, local debug persistence, and command
+receipt status. Missing build/run authority receipts are reported as missing and
+stale; Canvas never converts a graph projection into proof that code ran.
+The Run button opens the real `jet run <source>` command authority card; it does
+not simulate output. `POST /canvas/command` executes only whitelisted
+run/check/build authority cards for the current revision, records the receipt,
+and lets the proof rail mark that exact revision current. Build output commands
+require explicit confirmation.
+
 The public v1 graph/edit field contract is pinned in
-[`docs/reference/canvas-protocol.md`](../reference/canvas-protocol.md).
+[`docs/reference/canvas-protocol.md`](../reference/canvas-protocol.md), and the
+AST-derived Canvas coverage ratchet is pinned in
+[`docs/reference/canvas-parity.md`](../reference/canvas-parity.md).
 Unknown request fields are ignored by v1; unknown operations fail as Canvas edit
 errors, and unknown future graph fields may never carry hidden semantics.
 

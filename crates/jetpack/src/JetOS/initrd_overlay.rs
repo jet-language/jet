@@ -13,6 +13,13 @@ mkdir -p /dev
 mount -t devtmpfs devtmpfs /dev 2>/dev/null || true
 mkdir -p /sys
 mount -t sysfs sysfs /sys 2>/dev/null || true
+use_system_nix() {
+    system_nix="$1"
+    [ -d "$system_nix" ] || return 0
+    if [ ! -e /nix ]; then
+        ln -s "$system_nix" /nix 2>/dev/null || true
+    fi
+}
 modprobe virtio_pci 2>/dev/null || true
 modprobe virtio_blk 2>/dev/null || true
 modprobe ata_piix 2>/dev/null || true
@@ -35,7 +42,7 @@ case "$cmdline" in
   *jetos.mode=install*)
     mkdir -p /media /mnt/jetos
     mount -o ro /dev/sr0 /media 2>/dev/null || mount -o ro /dev/cdrom /media 2>/dev/null || true
-    exec /bin/sh /jetos/install.sh
+    exec /jetos/tools/bin/sh /jetos/install.sh
     ;;
   *jetos.mode=verify*|*jetos.mode=desktop-verify*)
     mkdir -p /sysroot
@@ -48,10 +55,8 @@ case "$cmdline" in
         mount "$candidate" /sysroot 2>/dev/null && break
     done
     system="/sysroot/var/lib/jetos/generations/@JETOS_GENERATION@"
-    if [ -d "$system/nix" ] && [ ! -e /nix ]; then
-        ln -s "$system/nix" /nix
-    fi
-    JETOS_TARGET_ROOT=/sysroot /bin/sh /jetos/guest-verify.sh
+    use_system_nix "$system/nix"
+    JETOS_TARGET_ROOT=/sysroot /jetos/tools/bin/sh /jetos/guest-verify.sh
     poweroff -f 2>/dev/null || halt -f 2>/dev/null || exit 0
     ;;
   *jetos.mode=run*)
@@ -71,7 +76,7 @@ case "$cmdline" in
     fi
     if [ ! -e "$system/sw/bin/jetos-terminal-fallback" ]; then
         echo "jetos run: missing installed terminal fallback"
-        exec /bin/sh
+        exec /jetos/tools/bin/sh
     fi
     mkdir -p /run
     rm -f /run/current-system
@@ -81,9 +86,7 @@ case "$cmdline" in
     if [ -r "$system/etc/profile" ]; then
         . "$system/etc/profile"
     fi
-    if [ -d "$system/nix" ] && [ ! -e /nix ]; then
-        ln -s "$system/nix" /nix
-    fi
+    use_system_nix "$system/nix"
     if [ -x "$system/sbin/init" ] && command -v switch_root >/dev/null 2>&1; then
         generation_target="/var/lib/jetos/generations/@JETOS_GENERATION@"
         mkdir -p /sysroot/run /sysroot/proc /sysroot/dev /sysroot/sys
@@ -188,7 +191,7 @@ case "$cmdline" in
         done
         echo "JetOS console closed"
     } < "$tty" > "$tty" 2>&1
-    poweroff -f 2>/dev/null || halt -f 2>/dev/null || exec /bin/sh
+    poweroff -f 2>/dev/null || halt -f 2>/dev/null || exec /jetos/tools/bin/sh
     ;;
 esac
 mkdir -p /sysroot
@@ -202,13 +205,11 @@ for candidate in LABEL=jetos-root /dev/vda2 /dev/sda2 /dev/vda /dev/sda; do
 done
 if [ -e /sysroot/var/lib/jetos/generations/log ] || [ -L /sysroot/run/current-system ]; then
     system="/sysroot/var/lib/jetos/generations/@JETOS_GENERATION@"
-    if [ -d "$system/nix" ] && [ ! -e /nix ]; then
-        ln -s "$system/nix" /nix
-    fi
-    JETOS_TARGET_ROOT=/sysroot /bin/sh /jetos/guest-verify.sh
+    use_system_nix "$system/nix"
+    JETOS_TARGET_ROOT=/sysroot /jetos/tools/bin/sh /jetos/guest-verify.sh
     poweroff -f 2>/dev/null || halt -f 2>/dev/null || exit 0
 fi
-exec /bin/sh /jetos/install.sh
+exec /jetos/tools/bin/sh /jetos/install.sh
 "#
     .replace("@JETOS_GENERATION@", &gen.name);
     let install = render_installer_script(system, gen);
@@ -292,28 +293,34 @@ exec /bin/sh /jetos/install.sh
     entries.extend(installer_tool_overlay_entries()?);
     let overlay = cpio_newc_owned(&entries);
     let initrd_bytes = fs::read(initrd)?;
-    let overlay = if is_zstd_stream(&initrd_bytes) && find_path_tool("zstd").is_some() {
-        let overlay_path = initrd.with_extension("jetos-overlay.cpio");
-        fs::write(&overlay_path, &overlay)?;
-        let compressed = Command::new("zstd")
-            .args(["-q", "-c"])
-            .arg(&overlay_path)
-            .output()?;
-        if compressed.status.success() {
-            compressed.stdout
-        } else {
-            overlay
+    if let Some(offset) = first_zstd_frame_offset(&initrd_bytes) {
+        let zstd = find_path_tool("zstd").ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "missing zstd for installer initrd overlay",
+            )
+        })?;
+        let compressed_path = unique_initrd_temp_path(initrd, "main.zst");
+        fs::write(&compressed_path, &initrd_bytes[offset..])?;
+        let mut plain = zstd_decode_file(&zstd, &compressed_path)?;
+        let _ = fs::remove_file(&compressed_path);
+        if let Some(sanitized) = sanitize_runtime_branding_bytes(&plain) {
+            plain = sanitized;
         }
-    } else {
-        overlay
-    };
-    use std::io::Write;
-    let mut file = fs::OpenOptions::new().append(true).open(initrd)?;
-    let pad = (4 - (initrd_bytes.len() % 4)) % 4;
-    if pad != 0 {
-        file.write_all(&vec![0; pad])?;
+        let merged = append_overlay_to_cpio_plain(plain, &overlay);
+        let plain_path = unique_initrd_temp_path(initrd, "main.cpio");
+        fs::write(&plain_path, &merged)?;
+        let compressed = zstd_encode_file(&zstd, &plain_path)?;
+        let _ = fs::remove_file(&plain_path);
+        let mut out = Vec::with_capacity(offset + compressed.len());
+        out.extend_from_slice(&initrd_bytes[..offset]);
+        out.extend_from_slice(&compressed);
+        fs::write(initrd, out)?;
+        return Ok(());
     }
-    file.write_all(&overlay)
+
+    let merged = append_overlay_to_cpio_plain(initrd_bytes, &overlay);
+    fs::write(initrd, merged)
 }
 
 fn installer_tool_overlay_entries() -> std::io::Result<Vec<OwnedCpioEntry>> {
@@ -322,6 +329,7 @@ fn installer_tool_overlay_entries() -> std::io::Result<Vec<OwnedCpioEntry>> {
     let mut files = Vec::new();
     for tool in [
         "cat",
+        "sh",
         "cp",
         "ln",
         "mkdir",
@@ -345,6 +353,26 @@ fn installer_tool_overlay_entries() -> std::io::Result<Vec<OwnedCpioEntry>> {
             )
         })?;
         let actual = fs::canonicalize(&tool_path).unwrap_or_else(|_| tool_path.clone());
+        if tool == "sh" {
+            add_host_file_to_cpio_as(
+                &mut dirs,
+                &mut seen_files,
+                &mut files,
+                &actual,
+                "jetos/tools/bin/sh",
+                host_cpio_file_mode(&actual, 0o100755),
+            )?;
+            for dep in ldd_dependency_paths(&actual)? {
+                add_host_file_to_cpio(
+                    &mut dirs,
+                    &mut seen_files,
+                    &mut files,
+                    &dep,
+                    host_cpio_file_mode(&dep, 0o100644),
+                )?;
+            }
+            continue;
+        }
         let wrapper = format!("#!/bin/sh\nexec {} \"$@\"\n", tool_path.display());
         add_cpio_file(
             &mut dirs,
@@ -389,6 +417,19 @@ fn add_host_file_to_cpio(
     };
     let data = fs::read(path)?;
     add_cpio_file(dirs, seen_files, files, &name, mode, data);
+    Ok(())
+}
+
+fn add_host_file_to_cpio_as(
+    dirs: &mut BTreeSet<String>,
+    seen_files: &mut BTreeSet<String>,
+    files: &mut Vec<OwnedCpioEntry>,
+    path: &Path,
+    name: &str,
+    mode: u32,
+) -> std::io::Result<()> {
+    let data = fs::read(path)?;
+    add_cpio_file(dirs, seen_files, files, name, mode, data);
     Ok(())
 }
 
@@ -472,8 +513,94 @@ fn ldd_dependency_paths(path: &Path) -> std::io::Result<Vec<PathBuf>> {
     Ok(deps)
 }
 
-fn is_zstd_stream(bytes: &[u8]) -> bool {
-    bytes.starts_with(&[0x28, 0xb5, 0x2f, 0xfd])
+fn first_zstd_frame_offset(bytes: &[u8]) -> Option<usize> {
+    bytes
+        .windows(4)
+        .enumerate()
+        .find_map(|(offset, window)| {
+            if window != [0x28, 0xb5, 0x2f, 0xfd] || offset % 4 != 0 {
+                return None;
+            }
+            if offset == 0 || cpio_trailer_header_offset(&bytes[..offset]).is_some() {
+                Some(offset)
+            } else {
+                None
+            }
+        })
+}
+
+fn zstd_decode_file(zstd: &Path, input: &Path) -> std::io::Result<Vec<u8>> {
+    let output = Command::new(zstd)
+        .args(["-d", "-q", "-c"])
+        .arg(input)
+        .output()?;
+    if output.status.success() {
+        Ok(output.stdout)
+    } else {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "zstd could not decode installer initrd payload",
+        ))
+    }
+}
+
+fn zstd_encode_file(zstd: &Path, input: &Path) -> std::io::Result<Vec<u8>> {
+    let output = Command::new(zstd).args(["-q", "-c"]).arg(input).output()?;
+    if output.status.success() {
+        Ok(output.stdout)
+    } else {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "zstd could not encode installer initrd payload",
+        ))
+    }
+}
+
+fn unique_initrd_temp_path(initrd: &Path, label: &str) -> PathBuf {
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    let file_name = initrd
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("initrd");
+    initrd.with_file_name(format!("{file_name}.{stamp}.{label}"))
+}
+
+fn append_overlay_to_cpio_plain(mut plain: Vec<u8>, overlay: &[u8]) -> Vec<u8> {
+    if let Some(offset) = cpio_trailer_header_offset(&plain) {
+        plain.truncate(offset);
+    } else {
+        while plain.len() % 4 != 0 {
+            plain.push(0);
+        }
+    }
+    plain.extend_from_slice(overlay);
+    plain
+}
+
+fn cpio_trailer_header_offset(bytes: &[u8]) -> Option<usize> {
+    let mut pos = 0;
+    let mut found = None;
+    while let Some(rel) = bytes[pos..]
+        .windows("TRAILER!!!".len())
+        .position(|window| window == b"TRAILER!!!")
+    {
+        let name_offset = pos + rel;
+        if name_offset >= 110 {
+            let header_offset = name_offset - 110;
+            if bytes
+                .get(header_offset..header_offset + 6)
+                .map(|magic| magic == b"070701" || magic == b"070702")
+                .unwrap_or(false)
+            {
+                found = Some(header_offset);
+            }
+        }
+        pos = name_offset + 1;
+    }
+    found
 }
 
 struct OwnedCpioEntry {

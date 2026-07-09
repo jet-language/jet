@@ -4,6 +4,10 @@
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::{Arc, Mutex};
+
+mod common;
+use common::{panic_message, test_worker_count};
 
 const VARIANTS: usize = 50;
 
@@ -232,54 +236,81 @@ fn fuzz_sema_rustc_agreement() {
     let _ = fs::remove_dir_all(&fuzz_dir);
     fs::create_dir_all(&fuzz_dir).unwrap();
 
+    let mut variants = Vec::new();
     for i in 0..VARIANTS {
         let (shown, src) = rng.pick(&seeds).clone();
         let mutated = mutate_source(&mut rng, &src, i);
         let file = fuzz_dir.join(format!("variant_{i}.jet"));
         fs::write(&file, &mutated).unwrap();
         let file_str = file.to_string_lossy().into_owned();
+        variants.push((i, shown, mutated, file_str));
+    }
 
-        match jet::compile_with_path(&mutated, &file_str) {
-            Ok(out) => {
-                // I1 (D-LL1 amendment): generated `unsafe` is only allowed when
-                // the source explicitly uses `#Unsafe` (the expert gate, E2-M13).
-                // Sources without `#Unsafe` must produce zero `unsafe` in output.
-                if !mutated.contains("#Unsafe") {
-                    assert!(
-                        !out.rust.contains("unsafe"),
-                        "I1 violated in fuzz variant {i} from {shown}: source has no #Unsafe but generated code contains `unsafe`"
-                    );
-                }
-                // FFI ring crates (jet.regex etc.) emit `extern crate jet_ffi_…`,
-                // which a bare `rustc` invocation can't resolve — the FFI crate is
-                // built and linked only by the full pipeline (I6 bootstrap), not by
-                // this standalone check. Sema-acceptance is still exercised above;
-                // skip just the rustc link-check for these variants.
-                if out.rust.contains("extern crate jet_ffi_") {
-                    continue;
-                }
-                if let Err(rustc_err) = rustc_accepts(&format!("v{i}"), &out.rust) {
-                    panic!(
-                        "I2 violated: sema accepted variant {i} from {shown} but rustc rejected:\n{rustc_err}\n--- generated ---\n{}",
-                        out.rust
-                    );
-                }
+    let jobs = Arc::new(Mutex::new(std::collections::VecDeque::from(variants)));
+    let failures = Arc::new(Mutex::new(Vec::<String>::new()));
+    let mut handles = Vec::new();
+    for _ in 0..test_worker_count(16) {
+        let jobs = Arc::clone(&jobs);
+        let failures = Arc::clone(&failures);
+        handles.push(std::thread::spawn(move || loop {
+            let Some((i, shown, mutated, file_str)) = jobs.lock().unwrap().pop_front() else {
+                break;
+            };
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                check_fuzz_variant(i, &shown, &mutated, &file_str)
+            }));
+            if let Err(payload) = result {
+                failures
+                    .lock()
+                    .unwrap()
+                    .push(format!("variant {i} from {shown}: {}", panic_message(payload)));
             }
-            Err(diags) => {
+        }));
+    }
+    for handle in handles {
+        handle.join().expect("fuzz worker panicked outside harness");
+    }
+    let failures = failures.lock().unwrap();
+    assert!(
+        failures.is_empty(),
+        "fuzz sema failures:\n{}",
+        failures.join("\n\n")
+    );
+
+    let _ = fs::remove_dir_all(&fuzz_dir);
+}
+
+fn check_fuzz_variant(i: usize, shown: &str, mutated: &str, file_str: &str) {
+    match jet::compile_with_path(mutated, file_str) {
+        Ok(out) => {
+            if !mutated.contains("#Unsafe") {
                 assert!(
-                    !diags.is_empty(),
-                    "compile_with_path returned empty diags for variant {i} from {shown}"
+                    !out.rust.contains("unsafe"),
+                    "I1 violated in fuzz variant {i} from {shown}: source has no #Unsafe but generated code contains `unsafe`"
                 );
-                for d in &diags {
-                    assert!(
-                        is_jet_diagnostic(d),
-                        "variant {i} from {shown}: non-jet diagnostic code `{}`",
-                        d.code
-                    );
-                }
+            }
+            if out.rust.contains("extern crate jet_ffi_") {
+                return;
+            }
+            if let Err(rustc_err) = rustc_accepts(&format!("v{i}"), &out.rust) {
+                panic!(
+                    "I2 violated: sema accepted variant {i} from {shown} but rustc rejected:\n{rustc_err}\n--- generated ---\n{}",
+                    out.rust
+                );
+            }
+        }
+        Err(diags) => {
+            assert!(
+                !diags.is_empty(),
+                "compile_with_path returned empty diags for variant {i} from {shown}"
+            );
+            for d in &diags {
+                assert!(
+                    is_jet_diagnostic(d),
+                    "variant {i} from {shown}: non-jet diagnostic code `{}`",
+                    d.code
+                );
             }
         }
     }
-
-    let _ = fs::remove_dir_all(&fuzz_dir);
 }

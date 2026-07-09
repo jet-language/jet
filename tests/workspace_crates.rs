@@ -36,6 +36,36 @@ fn assert_deps(path: &str, allowed: &[&str]) {
     assert_eq!(actual, allowed, "{path} Jet path-dependency drift");
 }
 
+fn repo_files_with_suffix(dir: &str, suffix: &str) -> Vec<PathBuf> {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let mut out = Vec::new();
+    let mut stack = vec![root.join(dir)];
+    while let Some(path) = stack.pop() {
+        let Ok(meta) = fs::metadata(&path) else {
+            continue;
+        };
+        if meta.is_dir() {
+            for entry in fs::read_dir(&path).unwrap() {
+                let entry = entry.unwrap().path();
+                let name = entry.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                if name == "target" || name == ".git" {
+                    continue;
+                }
+                stack.push(entry);
+            }
+        } else if path
+            .strip_prefix(&root)
+            .unwrap()
+            .to_string_lossy()
+            .ends_with(suffix)
+        {
+            out.push(path);
+        }
+    }
+    out.sort();
+    out
+}
+
 #[test]
 fn workspace_crates_keep_declared_dependency_direction() {
     assert_deps("crates/jet-foundation/Cargo.toml", &[]);
@@ -107,5 +137,81 @@ fn workspace_crates_keep_declared_dependency_direction() {
             "jet-semindex",
             "jetpack",
         ],
+    );
+}
+
+#[test]
+fn jetpack_dependency_debt_is_explicit_until_product_split() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let allowed = ["Cargo.toml", "crates/jet-driver/Cargo.toml"];
+    let mut actual = Vec::new();
+    for manifest in repo_files_with_suffix("crates", "Cargo.toml")
+        .into_iter()
+        .chain([root.join("Cargo.toml")])
+    {
+        let rel = manifest
+            .strip_prefix(&root)
+            .unwrap()
+            .to_string_lossy()
+            .replace('\\', "/");
+        if manifest_deps(&fs::read_to_string(&manifest).unwrap()).contains("jetpack") {
+            actual.push(rel);
+        }
+    }
+    actual.sort();
+    assert_eq!(
+        actual, allowed,
+        "new jetpack crate dependency added outside the current product-split debt list"
+    );
+}
+
+#[test]
+fn direct_jetpack_imports_stay_behind_known_boundaries() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let allowed = [
+        "Source/Bin/JetOS.rs",
+        "Source/Canvas/project_scan.rs",
+        "Source/Canvas/project_transactions.rs",
+        "Source/Canvas/query_actions.rs",
+        "Source/Canvas/schema_api.rs",
+        "Source/LSP/Completion.rs",
+        "Source/LSP/Server.rs",
+        "Source/lib.rs",
+        "crates/jet-driver/src/Loader.rs",
+        "crates/jet-driver/src/lib.rs",
+    ]
+    .into_iter()
+    .map(String::from)
+    .collect::<BTreeSet<_>>();
+    let mut actual = BTreeSet::new();
+    for file in repo_files_with_suffix("Source", ".rs")
+        .into_iter()
+        .chain(repo_files_with_suffix("crates", ".rs"))
+    {
+        let text = fs::read_to_string(&file).unwrap();
+        let code_text = text
+            .lines()
+            .map(|line| line.split_once("//").map(|(code, _)| code).unwrap_or(line))
+            .collect::<Vec<_>>()
+            .join("\n");
+        if code_text.contains("crate::Jetpack")
+            || code_text.contains("pub use jetpack")
+            || code_text.contains("use jetpack")
+            || code_text.contains("jetpack::")
+        {
+            let rel = file
+                .strip_prefix(&root)
+                .unwrap()
+                .to_string_lossy()
+                .replace('\\', "/");
+            if rel.contains("/tests/") || code_text.contains("use jetpack as pkg;") {
+                continue;
+            }
+            actual.insert(rel);
+        }
+    }
+    assert_eq!(
+        actual, allowed,
+        "new direct Jetpack coupling added; route it through a product boundary first"
     );
 }

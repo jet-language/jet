@@ -13,7 +13,7 @@ pub fn canvas_html_for(base: &str) -> String {
 
 pub fn canvas_html_query() -> String {
     canvas_html_document(
-        r#"<script>window.__JET_CANVAS_BASE__ = ""; window.__JET_CANVAS_GRAPH__ = "/?jet_panel_graph=1"; window.__JET_CANVAS_TX__ = "/canvas/transaction"; window.__JET_CANVAS_QUERY__ = "/canvas/query"; window.__JET_CANVAS_SCM__ = "/canvas/source-control";</script>
+        r#"<script>window.__JET_CANVAS_BASE__ = ""; window.__JET_CANVAS_GRAPH__ = "/?jet_panel_graph=1"; window.__JET_CANVAS_TX__ = "/canvas/transaction"; window.__JET_CANVAS_QUERY__ = "/canvas/query"; window.__JET_CANVAS_SCM__ = "/canvas/source-control"; window.__JET_CANVAS_PROOF__ = "/canvas/proof"; window.__JET_CANVAS_COMMAND__ = "/canvas/command";</script>
 <script src="/?jet_panel_app=1&canvas_ui=blueprint23"></script>"#,
     )
 }
@@ -77,6 +77,11 @@ body:not(.is-dev-mode) .debug-controls { display: none; }
 .graph-list, .search-results, .project-list { display: grid; gap: 6px; }
 .project-section { display: grid; gap: 7px; margin-top: 10px; padding-top: 10px; border-top: 1px solid #22364d; }
 .project-section h3 { margin: 0; color: #8fb2dc; font: 10px ui-monospace, "SFMono-Regular", Consolas, monospace; letter-spacing: .09em; text-transform: uppercase; }
+.proof-rail { display: grid; gap: 6px; }
+.proof-row { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 8px; padding: 7px 8px; border: 1px solid #21344b; background: rgba(7,13,22,.72); border-radius: 4px; }
+.proof-row b { color: #8fb2dc; font: 10px ui-monospace, "SFMono-Regular", Consolas, monospace; letter-spacing: .08em; text-transform: uppercase; }
+.proof-row span { min-width: 0; overflow-wrap: anywhere; }
+.proof-row.is-missing span { color: #f8c76a; }
 .graph-item { width: 100%; display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 8px; text-align: left; border-color: #283b52; background: #101821; min-height: 38px; }
 .graph-item.is-active { border-color: #35c2ff; background: #102437; box-shadow: inset 3px 0 0 #35c2ff; }
 .project-card { border: 1px solid #263850; border-radius: 6px; background: #0d1520; padding: 8px; display: grid; gap: 5px; }
@@ -118,10 +123,14 @@ body:not(.is-dev-mode) #wire-status { display: none; }
 .graph-stat { display: grid; gap: 2px; padding: 6px; border: 1px solid #243852; background: rgba(8,16,27,.74); border-radius: 4px; min-width: 0; }
 .graph-stat b { color: #eaf5ff; font-size: 13px; }
 .graph-stat span { color: #84a8cf; font: 9px ui-monospace, "SFMono-Regular", Consolas, monospace; text-transform: uppercase; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-#source-view { position: absolute; inset: 0; display: none; margin: 0; padding: 20px 24px 84px; overflow: auto; color: #dbeafe; background: #07101a; border: 0; font: 12px ui-monospace, "SFMono-Regular", Consolas, monospace; line-height: 1.6; white-space: pre; tab-size: 4; }
+#source-view, #source-editor { position: absolute; inset: 0; display: none; margin: 0; padding: 20px 24px 84px; overflow: auto; color: #dbeafe; background: #07101a; border: 0; font: 12px ui-monospace, "SFMono-Regular", Consolas, monospace; line-height: 1.6; white-space: pre; tab-size: 4; }
+#source-editor { resize: none; outline: none; }
 #stage.is-code #jet-canvas-view, #stage.is-code #minimap, #stage.is-code #graph-strip, #stage.is-code #wire-status, #stage.is-code #graph-overview { display: none; }
 #stage.is-code #source-view { display: block; }
+#stage.is-source-edit #source-view { display: none; }
+#stage.is-source-edit #source-editor { display: block; }
 #stage.is-split #source-view { display: block; right: 50%; border-right: 1px solid #25364b; box-shadow: 12px 0 30px rgba(0,0,0,.28); }
+#stage.is-split.is-source-edit #source-editor { display: block; right: 50%; border-right: 1px solid #25364b; box-shadow: 12px 0 30px rgba(0,0,0,.28); }
 #stage.is-split #jet-canvas-view { position: absolute; right: 0; top: 0; width: 50%; height: 100%; border-left: 1px solid #25364b; }
 #stage.is-split #graph-strip { left: calc(50% + 12px); }
 #stage.is-split #wire-status { left: calc(50% + 10px); }
@@ -250,6 +259,9 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
     <button id="fit">Fit</button>
     <button id="reload">Reload</button>
     <button id="source-diff">Diff</button>
+    <button id="edit-source">Edit Source</button>
+    <button id="apply-source-edit">Apply Source</button>
+    <button id="cancel-source-edit">Cancel</button>
     <div id="lens-switch" class="lens-switch" role="group" aria-label="Canvas lens"><button id="view-code" data-view-mode="code">Code</button><button id="view-split" data-view-mode="split">Split</button><button id="view-graph" data-view-mode="graph">Graph</button></div>
     <button id="view-toggle">Code</button>
     <div id="detail-toggles" class="detail-toggles" aria-label="Detail toggles"><label class="detail-toggle"><input id="toggle-types" data-detail-toggle="types" type="checkbox">Types</label><label class="detail-toggle"><input id="toggle-diagnostics" data-detail-toggle="diagnostics" type="checkbox">Diagnostics</label><label class="detail-toggle"><input id="toggle-effects" data-detail-toggle="effects" type="checkbox">Effects</label><label class="detail-toggle"><input id="toggle-debug" data-detail-toggle="debug" type="checkbox">Debug</label><label class="detail-toggle"><input id="toggle-package" data-detail-toggle="package" type="checkbox">Package</label></div>
@@ -260,6 +272,7 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
     <button id="org-tidy" title="Tidy visible graph">Tidy</button>
     <button id="bookmark-add" title="Bookmark graph">Mark</button>
     <button id="bookmark-jump" title="Jump to bookmark">Go</button>
+    <button id="core-catalog" title="Browse Core library">Core</button>
     <button id="favorite-action" title="Pin first compatible action">Fav</button>
     <button id="run-current" title="Run current entry">Run</button>
     <span id="jump">loading graph</span>
@@ -287,11 +300,13 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
       <div id="run-hud" aria-live="polite">run idle</div>
       <canvas id="jet-canvas-view" width="1400" height="900"></canvas>
       <pre id="source-view" aria-label="Jet source"></pre>
+      <textarea id="source-editor" aria-label="Editable Jet source"></textarea>
       <canvas id="minimap" width="190" height="124"></canvas>
       <div id="hud"><span id="zoom-label">100%</span><span id="graph-meta">0 nodes</span></div>
     </section>
     <aside id="right-drawer" class="side right">
       <section id="details" class="panel"></section>
+      <section id="proof-panel" class="panel"><details open><summary><span>Proof</span><span id="proof-state" class="count">unknown</span></summary><div id="proof-rail" class="proof-rail"></div></details></section>
     </aside>
   </main>
   <footer id="statusbar"><span id="source-id">source</span><span id="revision">revision</span><span id="schema">canvas v1</span><span id="scm-state">git</span><span id="toast"></span></footer>

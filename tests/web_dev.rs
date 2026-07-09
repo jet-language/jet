@@ -334,6 +334,7 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(html.contains("id=\"org-tidy\""));
     assert!(html.contains("id=\"bookmark-add\""));
     assert!(html.contains("id=\"bookmark-jump\""));
+    assert!(html.contains("id=\"core-catalog\""));
     assert!(html.contains("id=\"favorite-action\""));
     assert!(html.contains("id=\"run-current\""));
     assert!(html.contains("id=\"run-hud\""));
@@ -342,6 +343,9 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(html.contains("id=\"graph-back\""));
     assert!(html.contains("id=\"graph-forward\""));
     assert!(html.contains("id=\"source-diff\""));
+    assert!(html.contains("id=\"edit-source\""));
+    assert!(html.contains("id=\"apply-source-edit\""));
+    assert!(html.contains("id=\"cancel-source-edit\""));
     assert!(html.contains("id=\"view-toggle\""));
     assert!(html.contains("id=\"lens-switch\""));
     assert!(html.contains("id=\"view-code\""));
@@ -355,6 +359,7 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(html.contains("data-detail-toggle=\"package\""));
     assert!(html.contains("id=\"developer-mode\""));
     assert!(html.contains("id=\"source-view\""));
+    assert!(html.contains("id=\"source-editor\""));
     assert!(html.contains("id=\"context-menu\""));
     assert!(html.contains("grid-template-rows: auto minmax(0, 1fr) 28px"));
     assert!(html.contains("flex-wrap: wrap"));
@@ -398,6 +403,9 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(!html.contains("id=\"node-action-strip\""));
     assert!(!html.contains("id=\"dock-palette\""));
     assert!(!html.contains("id=\"palette-panel\""));
+    assert!(html.contains("id=\"proof-panel\""));
+    assert!(html.contains("id=\"proof-rail\""));
+    assert!(html.contains("id=\"proof-state\""));
     assert!(html.contains("/canvas/app.js"));
 
     let (status, js) = http_get(port, "/canvas/app.js").expect("GET Canvas JS");
@@ -426,8 +434,14 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(js.contains("sourceControlUrl"));
     assert!(js.contains("loadSourceControl"));
     assert!(js.contains("showSourceDiff"));
+    assert!(js.contains("proofUrl"));
+    assert!(js.contains("loadProofRail"));
+    assert!(js.contains("__JET_CANVAS_PROOF__"));
+    assert!(js.contains("__jetCanvasProofRail"));
     assert!(js.contains("function postQuery"));
     assert!(js.contains("loadCanvasActions"));
+    assert!(js.contains("openCoreCatalogPalette"));
+    assert!(js.contains("__JET_CANVAS_CORE_CATALOG__"));
     assert!(js.contains("preview_canvas_action"));
     assert!(js.contains("jet.canvas.action"));
     assert!(js.contains("checked-tir+jit"));
@@ -468,7 +482,13 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(js.contains("function jumpBookmark"));
     assert!(js.contains("function toggleFavoriteAction"));
     assert!(js.contains("function runCurrentGraph"));
+    assert!(js.contains("function renderCommandAuthority"));
+    assert!(js.contains("executeCommandAuthority"));
+    assert!(js.contains("commandUrl"));
+    assert!(js.contains("__JET_CANVAS_COMMAND__"));
     assert!(js.contains("__jetCanvasRunLoop"));
+    assert!(js.contains("authority_required"));
+    assert!(!js.contains("last run projected into debug overlay"));
     assert!(js.contains("function visibleGraphNodes"));
     assert!(js.contains("__jetCanvasVirtualizationStats"));
     assert!(js.contains("wireStyle === \"straight\""));
@@ -607,6 +627,9 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(js.contains("move_link"));
     assert!(js.contains("viewMode"));
     assert!(js.contains("setViewMode"));
+    assert!(js.contains("setSourceEditMode"));
+    assert!(js.contains("applySourceEditBuffer"));
+    assert!(js.contains("source_edit: true"));
     assert!(js.contains("function setDeveloperMode"));
     assert!(js.contains("storedFlag(\"jet.canvas.developerMode\")"));
     assert!(js.contains("developerModeButton.addEventListener"));
@@ -663,6 +686,37 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert_eq!(status, 200);
     assert!(String::from_utf8_lossy(&body).contains("\"protocol\":\"jet.canvas.source_control\""));
 
+    let (status, body) = http_get(port, "/canvas/proof").expect("GET Canvas proof");
+    assert_eq!(status, 200);
+    let proof = String::from_utf8_lossy(&body);
+    assert!(proof.contains("\"protocol\":\"jet.canvas.proof\""), "{proof}");
+    assert!(proof.contains("\"schema_version\":1"), "{proof}");
+    assert!(proof.contains("\"check\":{\"state\":\"ok\""), "{proof}");
+    assert!(proof.contains("\"command_receipts\":{\"state\":\"missing\""), "{proof}");
+
+    let command_req = format!(
+        "{{\"schema_version\":1,\"action_id\":\"canvas.command:check\",\"revision\":\"{}\"}}",
+        revision
+    );
+    let (status, receipt) =
+        http_post(port, "/canvas/command", &command_req).expect("POST Canvas command");
+    let receipt = String::from_utf8_lossy(&receipt);
+    assert_eq!(status, 200, "command receipt response: {receipt}");
+    assert!(
+        receipt.contains("\"protocol\":\"jet.canvas.command_receipt\""),
+        "{receipt}"
+    );
+    assert!(receipt.contains("\"action_id\":\"canvas.command:check\""), "{receipt}");
+    assert!(receipt.contains("\"command\":[\"jet\",\"check\",\"app.jet\"]"), "{receipt}");
+    assert!(receipt.contains("\"success\":true"), "{receipt}");
+
+    let (status, body) = http_get(port, "/canvas/proof").expect("GET Canvas proof after command");
+    assert_eq!(status, 200);
+    let proof = String::from_utf8_lossy(&body);
+    assert!(proof.contains("\"command_receipts\":{\"state\":\"current\""), "{proof}");
+    assert!(proof.contains("\"protocol\":\"jet.canvas.command_receipt\""), "{proof}");
+    assert!(proof.contains("\"proof\":{\"state\":\"current\",\"stale\":false"), "{proof}");
+
     fs::write(
         dir.join("pkg.jet"),
         "payload: {\n    name: \"canvas_app\",\n    version: \"0.1.0\",\n}\n",
@@ -690,6 +744,13 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(helper_graph.contains("helper.jet"), "{helper_graph}");
     assert!(helper_graph.contains("print(\\\"helper\\\")"), "{helper_graph}");
 
+    let (status, helper_proof) =
+        http_get(port, "/canvas/proof?source_id=helper.jet").expect("GET helper proof");
+    assert_eq!(status, 200);
+    let helper_proof = String::from_utf8_lossy(&helper_proof);
+    assert!(helper_proof.contains("\"protocol\":\"jet.canvas.proof\""), "{helper_proof}");
+    assert!(helper_proof.contains("\"source_id\":\"helper.jet\""), "{helper_proof}");
+
     let helper_src = fs::read_to_string(dir.join("helper.jet")).unwrap();
     let helper_revision = jet::Canvas::source_revision(&helper_src);
     let helper_query = format!(
@@ -700,6 +761,16 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
         http_post(port, "/canvas/query", &helper_query).expect("POST helper query");
     assert_eq!(status, 200);
     assert!(String::from_utf8_lossy(&helper_query_body).contains("\"protocol\":\"jet.canvas.query\""));
+
+    let (status, catalog) =
+        http_get(port, "/canvas/core-catalog?query=http").expect("GET Canvas core catalog");
+    assert_eq!(status, 200);
+    let catalog = String::from_utf8_lossy(&catalog);
+    assert!(catalog.contains("\"op\":\"core_catalog\""), "{catalog}");
+    assert!(catalog.contains("\"catalog_schema_version\":1"), "{catalog}");
+    assert!(catalog.contains("\"authority\":[\"canvas.catalog:core.read\"]"), "{catalog}");
+    assert!(catalog.contains("\"path\":\"core.http\""), "{catalog}");
+    assert!(catalog.contains("\"source\":\"docs/reference/core-library.md\""), "{catalog}");
 
     let project_revision = json_field(&project, "project_revision");
     let manifest_src = fs::read_to_string(dir.join("pkg.jet")).unwrap();

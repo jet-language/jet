@@ -3,6 +3,7 @@ fn write_vm_install_plan(
     system: &SystemPlan,
     disk: &str,
     media_proof: &Path,
+    real_guest: bool,
 ) -> std::io::Result<PathBuf> {
     let proof_dir = systems_dir().join("vm-proofs");
     fs::create_dir_all(&proof_dir)?;
@@ -16,10 +17,12 @@ fn write_vm_install_plan(
         .join(format!("jetos-installer-{}.iso.d/boot", system.name));
     let commands = qemu_proof_commands_json(&staging_boot, disk, &iso, &system.name, &gen.name);
     let guest = guest_proof_path(&proof);
+    let proof_tier = if real_guest { "real-guest" } else { "plumbing" };
     let text = format!(
-        "{{\"host\":{},\"generation\":{},\"state\":\"harness-ready\",\"disk\":{},\"installer_media\":{},\"media_proof\":{},\"expected_guest_proof\":{},\"tools\":[{}],\"commands\":[{}],\"steps\":[\"build-generation\",\"create-hybrid-iso\",\"boot-installer-qemu\",\"install-to-disk\",\"reboot-installed-disk\",\"verify-guest-proof\",\"boot-graphical-desktop\"],\"guest_assertions\":[{}]}}",
+        "{{\"host\":{},\"generation\":{},\"state\":\"harness-ready\",\"proof_tier\":{},\"disk\":{},\"installer_media\":{},\"media_proof\":{},\"expected_guest_proof\":{},\"tools\":[{}],\"commands\":[{}],\"steps\":[\"build-generation\",\"create-hybrid-iso\",\"boot-installer-qemu\",\"install-to-disk\",\"reboot-installed-disk\",\"verify-guest-proof\",\"boot-graphical-desktop\"],\"guest_assertions\":[{}]}}",
         JSON::quote(&system.name),
         JSON::quote(&gen.name),
+        JSON::quote(proof_tier),
         JSON::quote(disk),
         JSON::quote(&format!("jetos-installer-{}.iso", system.name)),
         JSON::quote(&media_proof.display().to_string()),
@@ -38,11 +41,12 @@ fn prove_vm_guest(
     disk: &str,
     media_proof: &Path,
     harness: &Path,
+    real_guest: bool,
 ) -> Result<Option<PathBuf>, String> {
     if let Some(final_path) = finalize_vm_guest_proof(gen, system, disk, media_proof, harness)? {
         return Ok(Some(final_path));
     }
-    if !run_vm_install_harness(gen, system, disk, media_proof, harness)? {
+    if !run_vm_install_harness(gen, system, disk, media_proof, harness, real_guest)? {
         return Ok(None);
     }
     finalize_vm_guest_proof(gen, system, disk, media_proof, harness)
@@ -54,6 +58,7 @@ fn run_vm_install_harness(
     disk: &str,
     media_proof: &Path,
     harness: &Path,
+    real_guest: bool,
 ) -> Result<bool, String> {
     let iso = systems_dir()
         .join("images")
@@ -78,7 +83,7 @@ fn run_vm_install_harness(
     let Some(report) = extract_guest_proof_report(&graphical_output) else {
         return Ok(false);
     };
-    write_runner_guest_proof(gen, system, disk, media_proof, harness, &report)?;
+    write_runner_guest_proof(gen, system, disk, media_proof, harness, &report, real_guest)?;
     Ok(true)
 }
 
@@ -197,11 +202,14 @@ fn write_runner_guest_proof(
     media_proof: &Path,
     harness: &Path,
     report: &str,
+    real_guest: bool,
 ) -> Result<(), String> {
     require_guest_report(report, system, gen)?;
     let guest = guest_proof_path(harness);
+    let proof_tier = if real_guest { "real-guest" } else { "plumbing" };
     let text = format!(
-        "{{\"state\":\"guest-passed\",\"host\":{},\"generation\":{},\"disk\":{},\"media_proof\":{},\"assertions\":[{}],\"tools\":[{}],\"serial_report\":{}}}\n",
+        "{{\"state\":\"guest-passed\",\"proof_tier\":{},\"host\":{},\"generation\":{},\"disk\":{},\"media_proof\":{},\"assertions\":[{}],\"tools\":[{}],\"serial_report\":{}}}\n",
+        JSON::quote(proof_tier),
         JSON::quote(&system.name),
         JSON::quote(&gen.name),
         JSON::quote(disk),
@@ -326,6 +334,52 @@ fn require_guest_assertions(text: &str) -> Result<(), String> {
     }
 }
 
+fn require_real_vm_tools() -> Result<(), String> {
+    let mut rejected = Vec::new();
+    for name in [
+        "qemu-system-x86_64",
+        "qemu-img",
+        "xorriso",
+        "limine",
+        "mkfs.ext4",
+        "mkfs.vfat",
+        "sfdisk",
+        "blockdev",
+        "mmd",
+        "mcopy",
+        "zstd",
+    ] {
+        let Some(path) = find_on_path(name) else {
+            rejected.push(format!("{name}: missing"));
+            continue;
+        };
+        let bytes = fs::read(&path).unwrap_or_default();
+        let is_script = bytes.starts_with(b"#!");
+        let has_fake_marker = bytes
+            .windows(4)
+            .any(|window| window.eq_ignore_ascii_case(b"fake"));
+        if is_script || has_fake_marker || bytes.is_empty() {
+            rejected.push(format!("{}: {}", name, path.display()));
+        }
+    }
+    if rejected.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "D-JOS-REALGUEST1=C forbids script/fake VM toolchains for replacement acceptance; rejected {}.",
+            rejected.join(", ")
+        ))
+    }
+}
+
+fn find_on_path(name: &str) -> Option<PathBuf> {
+    std::env::var_os("PATH").and_then(|paths| {
+        std::env::split_paths(&paths)
+            .map(|dir| dir.join(name))
+            .find(|path| path.is_file())
+    })
+}
+
 const GUEST_ASSERTIONS: [&str; 9] = [
     "current-generation-matches",
     "packages-present",
@@ -439,13 +493,19 @@ fn qemu_proof_commands(
                 "-m".to_string(),
                 "2048".to_string(),
                 "-display".to_string(),
-                "vnc=127.0.0.1:0,to=99".to_string(),
+                qemu_vnc_display().to_string(),
                 "-serial".to_string(),
                 "stdio".to_string(),
                 "-monitor".to_string(),
                 "none".to_string(),
                 "-vga".to_string(),
                 "std".to_string(),
+                "-device".to_string(),
+                "qemu-xhci,id=xhci".to_string(),
+                "-device".to_string(),
+                "usb-kbd,bus=xhci.0".to_string(),
+                "-device".to_string(),
+                "usb-tablet,bus=xhci.0".to_string(),
                 "-kernel".to_string(),
                 kernel,
                 "-initrd".to_string(),
@@ -494,7 +554,7 @@ fn qemu_interactive_run_command(
     } else {
         argv.extend([
             "-display".to_string(),
-            "vnc=127.0.0.1:0,to=99".to_string(),
+            qemu_vnc_display().to_string(),
             "-serial".to_string(),
             "none".to_string(),
         ]);
@@ -504,6 +564,12 @@ fn qemu_interactive_run_command(
         "none".to_string(),
         "-vga".to_string(),
         "std".to_string(),
+        "-device".to_string(),
+        "qemu-xhci,id=xhci".to_string(),
+        "-device".to_string(),
+        "usb-kbd,bus=xhci.0".to_string(),
+        "-device".to_string(),
+        "usb-tablet,bus=xhci.0".to_string(),
         "-kernel".to_string(),
         kernel,
         "-initrd".to_string(),
@@ -523,6 +589,14 @@ fn qemu_interactive_run_command(
         phase: "run-installed-disk",
         argv,
     }
+}
+
+fn qemu_vnc_display() -> &'static str {
+    "vnc=127.0.0.1:0"
+}
+
+fn qemu_vnc_endpoint() -> &'static str {
+    "127.0.0.1:5900"
 }
 
 fn qemu_has_local_display() -> bool {
@@ -585,9 +659,9 @@ fn run_vmtest(
         };
         let media = write_installer_media(&gen, &system, "guided-ext4")
             .map_err(|e| format!("writing installer media for `{}` failed: {e}", system.name))?;
-        let harness = write_vm_install_plan(&gen, &system, &host_disk, &media)
+        let harness = write_vm_install_plan(&gen, &system, &host_disk, &media, false)
             .map_err(|e| format!("writing VM proof plan for `{}` failed: {e}", system.name))?;
-        let final_path = prove_vm_guest(&gen, &system, &host_disk, &media, &harness)
+        let final_path = prove_vm_guest(&gen, &system, &host_disk, &media, &harness, false)
             .map_err(|e| format!("guest proof for `{}` failed: {e}", system.name))?
             .ok_or_else(|| format!("guest proof for `{}` was not recorded", system.name))?;
         host_facts.push(VmTestHostFact {

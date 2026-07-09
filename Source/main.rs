@@ -647,6 +647,7 @@ Packages
 
 jetos
   jet os plan <host>              show checked system plan
+  jet os import <flake-or-dir>    import NixOS/flake-parts/Home Manager facts
   jet os build <host>             build generation
   jet os vm test <name>           run VM scenario
 

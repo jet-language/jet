@@ -16,6 +16,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 include!("JetOS/types.rs");
 include!("JetOS/entry.rs");
+include!("JetOS/nixos_import.rs");
 include!("JetOS/commands.rs");
 include!("JetOS/vm_commands.rs");
 include!("JetOS/load_validate.rs");

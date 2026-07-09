@@ -1946,7 +1946,7 @@ push.
 ### jetos Runtime Slice
 
 **D-JPK-OSVERB1=A / D-JOS-PROOFAPI1=B**: the public CLI is `jet os
-check|init|plan|proof|build|switch|rollback|generations|lift|image`. `jet os
+check|init|plan|proof|build|switch|rollback|generations|lift|import|image`. `jet os
 plan` prints the canonical checked plan without building. `jet os proof` reads
 the latest generation's proof, provenance, health, boot, init, secrets, VM, and
 rollback artifacts. `jetpack` remains the engine process behind the dispatch
@@ -2057,6 +2057,43 @@ local UI cache ratified by D-JOS-STUDIO-STATE1.
   rollback-and-stop. Experts can choose batch/canary/dependency order, health
   timeout, and stage-only/continue flows through the same rollout object.
   All-at-once is explicit policy, never default.
+- **D-JOS-NIXIMPORT1=C**: `jet os import <flake-or-dir>` is a semantic
+  NixOS/flake-parts/Home Manager importer. Default import evaluates the module
+  graph into editable JetOS source, lock/provenance, and an omissions report.
+  Facts-only import is a fallback for constructs JetOS cannot represent yet;
+  every fallback is explicit and audited.
+- **D-JOS-REALGUEST1=C**: a JetOS replacement claim requires real installed
+  guest proof: QEMU boots installer media, installs to disk, reboots from that
+  disk, logs in, launches Studio/desktop paths, checks packages/services/network
+  and rollback, and records guest-bound artifacts. Fake-QEMU or host-only
+  harness artifacts may test plumbing, but may not close replacement acceptance.
+- **D-JOS-DESKTOPPROOF1=C**: desktop proof means a live guest display-manager
+  and session path, Studio/app presence, terminal fallback, and user-home facts.
+  File presence and launcher `--jetos-proof` checks are preflight only.
+- **D-JOS-IMAGEPROOF1=C**: image variants are `built` only when they are real,
+  bootable artifacts with format-specific smoke proof. Sparse marker or deferred
+  artifacts must report `staged`, not `built`.
+- **D-JOS-FIRSTBOOT1=D**: first boot opens Studio as the OS control center:
+  current host, generation, source, proof, update, rollback, and health are
+  visible. Canvas is a deep-link/source graph editor from Studio source spans,
+  not the first OS control surface.
+- **D-STUDIO-CHANGESET1=D**: every Studio mutation stages through one changeset
+  gate. Low-risk edits may use a compact review sheet, but widgets, alert fixes,
+  rollback, and source edits all produce a diff/impact/proof requirement before
+  apply.
+- **D-STUDIO-WIDGETS1=D**: Studio derives controls from typed JetOS option
+  shapes where safe. Unknown or expert-only constructs remain source-visible
+  with an explicit reason and exact source span, never hidden GUI state.
+- **D-STUDIO-SECRETS1=D**: Studio never renders plaintext secrets in DOM, JSON,
+  screenshots, or logs. Add/rekey/rotate flows use audited secret transactions
+  with recipient/proof diffs.
+- **D-STUDIO-FLEET1=C**: Studio is single-host quiet by default. Fleet strips,
+  staged rollout, and fleet proof controls appear only when the workspace
+  declares multiple systems or fleet targets.
+- **D-STUDIO-CANVASBRIDGE1=C**: Studio and Canvas are separate products sharing
+  protocol components, source spans, proof widgets, and source transactions.
+  Studio owns OS workflows; Canvas owns general source graph editing. Neither
+  stores semantic state outside Jet source/proof artifacts.
 
 ### CLI & tooling
 
@@ -2110,6 +2147,45 @@ typed pins, and distinct control/error/proof rails. V1 write scope is insert
 call, rewire, edit inline expression, add fallback rail, extract/collapse,
 rename binding, and create test. The graph protocol may stay internal for the
 read-only Reader, but must become public and versioned before write flows ship.
+
+**D-CANVAS-PARITY1=C**: Canvas coverage is enforced by an AST-derived semantic
+parity ratchet plus a manual UX matrix. Every shipped language form must have a
+specific projection/edit/support status and either tests for real behavior or a
+Jet diagnostic naming the unsupported boundary.
+
+**D-CANVAS-CORECATALOG1=C**: Canvas exposes a typed Core action catalog. Core
+functions and methods known to sema appear as compatible actions from pins and
+search, with docs, imports, effects, fallibility, authority, examples, and
+source-backed insertion.
+
+**D-CANVAS-ACTIONAUTH1=C**: Canvas command/action execution uses one authority
+model. Beginner intent cards expose Run/Check/Build and similar actions; expert
+drawers show exact command, grants, touched files, outputs, diagnostics, and
+diff/provenance before mutations.
+
+**D-CANVAS-CODELENS1=C**: Canvas Code view is read-only until the user enters
+explicit Edit Source mode. Edit Source uses the same source transaction,
+formatter, check, and reproject pipeline as graph edits; Canvas may not claim
+full edit parity without this path.
+
+**D-CANVAS-PROOFLENS1=C**: Canvas has an always-visible proof/debug rail with
+drilldown to diagnostics, commands, source revisions, build/run/proof state,
+provenance, and stale-proof reasons. Badges alone are insufficient.
+
+**D-VERIFY-SCHED1=C / D-VERIFY-CACHE1=C / D-VERIFY-TIER1=C**: `scripts/agent/verify-full.sh`
+is a repo scheduler, not plain `cargo test`: it emits timings, uses bounded
+parallelism/serial groups, uses `cargo-nextest` when available with a cargo
+fallback, and targets a 1-3 minute default full suite. Generated-Rust test
+artifacts may share a repo-local cache keyed by rustc version, generated source,
+flags, and linked inputs. Slow/real tiers are separate but binding for claims
+that require them; no card may close a real-VM or replacement claim on default
+full verification alone.
+
+**D-PRODUCT-SPLIT1=C**: canonical product ownership is split: `jet` owns the
+language/compiler/dev loop, `jetpack` owns packages/env/build substrate, and
+`jetos` owns OS workflows. Compatibility shims such as `jet os ...` may route
+to the owning binary with a clear teaching/provenance message until release
+policy retires them.
 
 **D-LSP1 / D-LSP2**: LSP v2 uses one incremental compiler-service query cache
 (`crates/jet-queries`) shared by editor requests, with full applicable LSP

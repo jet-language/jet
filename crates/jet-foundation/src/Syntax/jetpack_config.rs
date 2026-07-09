@@ -256,15 +256,29 @@ pub const OS_VERB_PROOF: &str = "proof";
 pub const OS_VERB_ROLLBACK: &str = "rollback";
 pub const OS_VERB_GENERATIONS: &str = "generations";
 pub const OS_VERB_LIFT: &str = "lift";
+/// D-JOS-NIXIMPORT1=C: import semantic NixOS/flake-parts/Home Manager facts.
+pub const OS_VERB_IMPORT: &str = "import";
 pub const OS_VERB_IMAGE: &str = "image";
 /// D-JOS-VMCOMMAND1=A: `jet os vm prove` runs installer/reboot proof.
 pub const OS_VERB_VM: &str = "vm";
+/// D-JOS-NIXIMPORT1=C: select the NixOS host to import.
+pub const OS_IMPORT_FLAG_HOST: &str = "--host";
+/// D-JOS-NIXIMPORT1=C: select Home Manager users to import. Repeatable.
+pub const OS_IMPORT_FLAG_USER: &str = "--user";
+/// D-JOS-NIXIMPORT1=C: write generated JetOS config/audit files.
+pub const OS_IMPORT_FLAG_WRITE: &str = "--write";
+/// D-JOS-NIXIMPORT1=C: write generated files to this directory or config path.
+pub const OS_IMPORT_FLAG_OUT: &str = "--out";
+/// D-JOS-NIXIMPORT1=C: force audited scan mode when no semantic facts exist.
+pub const OS_IMPORT_FLAG_FACTS_ONLY: &str = "--facts-only";
 /// D-JOS-VMCOMMAND1=A: non-interactive VM install/reboot proof action.
 pub const OS_VM_ACTION_PROVE: &str = "prove";
 /// D-JOS-VMRUN1=A: interactive launch of a proved installed VM disk.
 pub const OS_VM_ACTION_RUN: &str = "run";
 /// D-JOS-VMTEST1=A: run a declared VM scenario and write proof artifacts.
 pub const OS_VM_ACTION_TEST: &str = "test";
+/// D-JOS-REALGUEST1=C: require real VM tools for replacement acceptance.
+pub const OS_VM_FLAG_REAL: &str = "--real";
 /// D-JOS-STUDIO-LAUNCH1=A / D-JOS-STUDIO-HOST1=A: `jetos studio`.
 pub const STUDIO_SUBCOMMAND: &str = "studio";
 /// D-JOS-USERAPPLY1=A: standalone user-profile management entrypoint.
@@ -287,6 +301,7 @@ pub const OS_VERBS: &[&str] = &[
     OS_VERB_ROLLBACK,
     OS_VERB_GENERATIONS,
     OS_VERB_LIFT,
+    OS_VERB_IMPORT,
     OS_VERB_IMAGE,
     OS_VERB_VM,
     STUDIO_SUBCOMMAND,

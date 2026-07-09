@@ -18,6 +18,13 @@ fn cmd_vm(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 {
         );
         return 2;
     }
+    let real_guest = rest.iter().any(|arg| arg == Syntax::OS_VM_FLAG_REAL);
+    let action_args = rest
+        .iter()
+        .filter(|arg| arg.as_str() != Syntax::OS_VM_FLAG_REAL)
+        .cloned()
+        .collect::<Vec<_>>();
+    let rest = action_args.as_slice();
     if action == Syntax::OS_VM_ACTION_TEST {
         let Some(target) = parse_target_or_report(theme, rest.first().map(String::as_str)) else {
             return 2;
@@ -72,6 +79,17 @@ fn cmd_vm(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 {
         );
         return 2;
     }
+    if real_guest {
+        if let Err(e) = require_real_vm_tools() {
+            theme.error_coded(
+                "E1290",
+                "jetos real VM proof needs real tools",
+                &e,
+                "rerun without `--real` for plumbing tests, or put real QEMU/image/media tools on PATH before claiming replacement proof.",
+            );
+            return 2;
+        }
+    }
     let Some(gen) = build_generation(theme, &plan, &system, flags) else {
         return 2;
     };
@@ -100,8 +118,8 @@ fn cmd_vm(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 {
         );
         return 2;
     }
-    match write_vm_install_plan(&gen, &system, disk, &media) {
-        Ok(path) => match prove_vm_guest(&gen, &system, disk, &media, &path) {
+    match write_vm_install_plan(&gen, &system, disk, &media, real_guest) {
+        Ok(path) => match prove_vm_guest(&gen, &system, disk, &media, &path, real_guest) {
             Ok(Some(final_path)) => {
                 theme.ok(&format!(
                     "proved jetos VM install/reboot {}",
@@ -260,7 +278,10 @@ fn cmd_vm_run(theme: &Theme, system: &SystemPlan, disk: &str) -> i32 {
     if qemu_has_local_display() {
         theme.detail("graphical console is open in a local QEMU window");
     } else {
-        theme.detail("graphical console is exposed over VNC; serial output is attached here");
+        theme.detail(&format!(
+            "graphical console is exposed over VNC at {}; serial output is attached here",
+            qemu_vnc_endpoint()
+        ));
     }
     match run_interactive_vm_command(&command) {
         Ok(code) => code,

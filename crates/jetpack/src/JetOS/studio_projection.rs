@@ -32,6 +32,7 @@ fn write_studio_app_projection(dir: &Path, system: &SystemPlan) -> std::io::Resu
 }
 
 fn studio_data_json(system: &SystemPlan) -> String {
+    let pages = studio_pages_json();
     let packages = system
         .packages
         .iter()
@@ -69,6 +70,8 @@ fn studio_data_json(system: &SystemPlan) -> String {
         })
         .collect::<Vec<_>>()
         .join(",");
+    let enabled_services = system.services.iter().filter(|svc| svc.enable).count();
+    let disabled_services = system.services.len().saturating_sub(enabled_services);
     let options = system
         .options
         .iter()
@@ -76,16 +79,85 @@ fn studio_data_json(system: &SystemPlan) -> String {
         .collect::<Vec<_>>()
         .join(",");
     format!(
-        "{{\"kind\":\"jetos-studio-projection\",\"host\":{},\"target\":{},\"packages\":[{}],\"services\":[{}],\"options\":[{}],\"artifacts\":{{\"plan\":\"../plan.json\",\"proof\":\"../proof.txt\",\"provenance\":\"../provenance.json\",\"vm_proof\":\"../vm-proof.txt\"}}}}",
+        "{{\"kind\":\"jetos-studio-projection\",\"host\":{},\"target\":{},\"dashboard\":{{\"selected_host\":{},\"generation\":\"current\",\"service_health\":\"{enabled}/{total} enabled\",\"alerts\":{},\"last_run\":\"ready\",\"rollback_status\":\"available\"}},\"page_registry\":[{}],\"packages\":[{}],\"services\":[{}],\"options\":[{}],\"changeset\":{{\"state\":\"empty\",\"apply_gate\":\"single-source-transaction\",\"proof_required\":[\"check\",\"plan\",\"build\",\"proof\"]}},\"secret_policy\":{{\"plaintext_in_projection\":false,\"visible_fields\":[\"name\",\"source\",\"runtime_path\",\"provenance\"],\"transaction\":\"audited-secret-rekey\"}},\"fleet\":{{\"mode\":\"adaptive\",\"single_host_default\":true,\"rollout_gate\":\"proof-before-switch\"}},\"canvas_bridge\":{{\"mode\":\"separate-app-deeplink\",\"target\":\"/canvas\",\"shared_state\":\"source-only\"}},\"artifacts\":{{\"plan\":\"../plan.json\",\"proof\":\"../proof.txt\",\"provenance\":\"../provenance.json\",\"vm_proof\":\"../vm-proof.txt\"}}}}",
         JSON::quote(&system.name),
         JSON::quote(&system.target),
+        JSON::quote(&system.name),
+        if disabled_services == 0 {
+            "[]"
+        } else {
+            "[\"disabled-services\"]"
+        },
+        pages,
         packages,
         services,
-        options
+        options,
+        enabled = enabled_services,
+        total = system.services.len()
     )
 }
 
+fn studio_pages_json() -> String {
+    let pages = [
+        ("dashboard", "Dashboard", "operations", "dashboard,services,artifacts"),
+        ("settings", "Settings", "settings", "options,source"),
+        ("monitoring", "Monitoring", "operations", "services,artifacts"),
+        ("services", "Services", "operations", "services"),
+        ("packages", "Packages", "inventory", "packages"),
+        ("secrets", "Secrets", "settings", "options"),
+        ("fleet", "Fleet", "operations", "fleet,proof"),
+        ("generations", "Generations", "operations", "artifacts"),
+        ("changeset", "Changeset", "review", "source,diff,impact"),
+        (
+            "proof-provenance",
+            "Proof/Provenance",
+            "audit",
+            "artifacts,run",
+        ),
+    ];
+    pages
+        .iter()
+        .map(|(id, title, group, needs)| {
+            JSON::object_of(&[
+                ("id", id),
+                ("title", title),
+                ("group", group),
+                ("data_needs", needs),
+            ])
+        })
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
 fn studio_index_html(system: &SystemPlan) -> String {
+    let enabled_services = system.services.iter().filter(|svc| svc.enable).count();
+    let disabled_services = system.services.len().saturating_sub(enabled_services);
+    let alerts = if disabled_services == 0 {
+        "No active alerts".to_string()
+    } else {
+        format!("{disabled_services} disabled service review")
+    };
+    let nav = [
+        ("dashboard", "Dashboard"),
+        ("settings", "Settings"),
+        ("monitoring", "Monitoring"),
+        ("services", "Services"),
+        ("packages", "Packages"),
+        ("secrets", "Secrets"),
+        ("fleet", "Fleet"),
+        ("generations", "Generations"),
+        ("changeset", "Changeset"),
+        ("proof-provenance", "Proof/Provenance"),
+    ]
+    .iter()
+    .map(|(id, title)| {
+        format!(
+            "<a href=\"#{id}\" data-page=\"{id}\">{}</a>",
+            html_escape(title)
+        )
+    })
+    .collect::<Vec<_>>()
+    .join("");
     let packages = system
         .packages
         .iter()
@@ -137,6 +209,19 @@ fn studio_index_html(system: &SystemPlan) -> String {
         })
         .collect::<Vec<_>>()
         .join("");
+    let settings_controls = system
+        .options
+        .iter()
+        .map(|opt| {
+            format!(
+                "<label><span>{}</span><input data-setting-key=\"{}\" value=\"{}\"></label>",
+                html_escape(&opt.key),
+                html_escape(&opt.key),
+                html_escape(&opt.value)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("");
     format!(
         "<!doctype html>
 <html>
@@ -145,32 +230,42 @@ fn studio_index_html(system: &SystemPlan) -> String {
 <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">
 <title>jetos Studio - {host}</title>
 <style>
-:root {{ color-scheme: light dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; background: #101418; color: #edf2f7; }}
-body {{ margin: 0; min-height: 100vh; background: #101418; }}
-main {{ display: grid; grid-template-columns: 260px 1fr; min-height: 100vh; }}
-aside {{ border-right: 1px solid #2d3742; padding: 20px; background: #151b21; }}
+:root {{ color-scheme: light dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; background: #f5f7fa; color: #16202a; }}
+body {{ margin: 0; min-height: 100vh; background: #f5f7fa; }}
+main {{ display: grid; grid-template-columns: 248px 1fr; min-height: 100vh; }}
+aside {{ border-right: 1px solid #d8dee8; padding: 20px 16px; background: #ffffff; }}
 section {{ padding: 24px; }}
 h1, h2 {{ margin: 0; font-weight: 650; }}
 h1 {{ font-size: 22px; }}
 h2 {{ font-size: 15px; margin-bottom: 12px; }}
+.nav {{ display: grid; gap: 4px; margin-top: 24px; }}
+.nav a {{ color: #44515f; text-decoration: none; border-radius: 6px; padding: 8px 10px; font-size: 14px; }}
+.nav a:hover, .nav a.active {{ background: #e8eef5; color: #15202b; }}
 .host {{ display: grid; gap: 6px; margin-top: 20px; }}
-.pill {{ border: 1px solid #3b4652; border-radius: 999px; padding: 6px 10px; width: max-content; }}
+.pill {{ border: 1px solid #cbd5e1; border-radius: 999px; padding: 6px 10px; width: max-content; background: #ffffff; }}
 .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }}
-.panel {{ border: 1px solid #2d3742; border-radius: 8px; background: #151b21; overflow: hidden; }}
-.panel header {{ padding: 14px 16px; border-bottom: 1px solid #2d3742; }}
+.panel {{ border: 1px solid #d8dee8; border-radius: 8px; background: #ffffff; overflow: hidden; }}
+.panel header {{ padding: 14px 16px; border-bottom: 1px solid #d8dee8; }}
+.hero {{ display: grid; gap: 14px; margin-bottom: 18px; }}
+.metrics {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }}
+.metric {{ border: 1px solid #d8dee8; border-radius: 8px; background: #ffffff; padding: 14px; }}
+.metric strong {{ display: block; font-size: 22px; margin-top: 4px; }}
+.page {{ display: none; }}
+.page.active {{ display: block; }}
 table {{ width: 100%; border-collapse: collapse; font-size: 13px; }}
-td {{ padding: 10px 16px; border-top: 1px solid #202832; vertical-align: top; }}
-td:first-child {{ color: #9ccfd8; font-weight: 600; white-space: nowrap; }}
+td {{ padding: 10px 16px; border-top: 1px solid #e7ebf0; vertical-align: top; }}
+td:first-child {{ color: #245d7a; font-weight: 600; white-space: nowrap; }}
 .status {{ display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0 24px; }}
-.empty {{ color: #9aa7b2; padding: 16px; }}
+.empty {{ color: #647383; padding: 16px; }}
 .form {{ display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 16px; }}
-label {{ display: grid; gap: 6px; font-size: 12px; color: #9aa7b2; }}
-input {{ min-width: 0; border: 1px solid #3b4652; border-radius: 6px; padding: 9px 10px; background: #101418; color: #edf2f7; }}
+label {{ display: grid; gap: 6px; font-size: 12px; color: #647383; }}
+input {{ min-width: 0; border: 1px solid #cbd5e1; border-radius: 6px; padding: 9px 10px; background: #ffffff; color: #16202a; }}
 .actions {{ display: flex; flex-wrap: wrap; gap: 8px; padding: 0 16px 16px; }}
-button {{ border: 1px solid #3b4652; border-radius: 6px; padding: 8px 11px; background: #1d2730; color: #edf2f7; cursor: pointer; }}
-button:hover {{ border-color: #9ccfd8; }}
-pre {{ margin: 0; padding: 16px; min-height: 96px; max-height: 300px; overflow: auto; border-top: 1px solid #2d3742; color: #c9d1d9; background: #0c1014; font-size: 12px; }}
-@media (max-width: 720px) {{ main {{ grid-template-columns: 1fr; }} aside {{ border-right: 0; border-bottom: 1px solid #2d3742; }} }}
+button {{ border: 1px solid #b8c4d1; border-radius: 6px; padding: 8px 11px; background: #eef3f8; color: #16202a; cursor: pointer; }}
+button:hover {{ border-color: #245d7a; }}
+pre {{ margin: 0; padding: 16px; min-height: 96px; max-height: 300px; overflow: auto; border-top: 1px solid #d8dee8; color: #22313f; background: #f8fafc; font-size: 12px; }}
+.changeset-tray {{ position: sticky; bottom: 0; border-top: 1px solid #cbd5e1; background: #ffffff; padding: 12px 16px; display: flex; gap: 10px; align-items: center; justify-content: space-between; }}
+@media (max-width: 720px) {{ main {{ grid-template-columns: 1fr; }} aside {{ border-right: 0; border-bottom: 1px solid #d8dee8; }} .form {{ grid-template-columns: 1fr; }} }}
 </style>
 </head>
 <body>
@@ -181,13 +276,65 @@ pre {{ margin: 0; padding: 16px; min-height: 96px; max-height: 300px; overflow: 
 <span class=\"pill\">{host}</span>
 <span>{target}</span>
 </div>
+<nav class=\"nav\" data-page-registry=\"studio-pages\">{nav}</nav>
 </aside>
 <section>
+<div id=\"dashboard\" class=\"page active\" data-page-kind=\"dashboard\">
+<div class=\"hero\">
+<h2>Dashboard</h2>
 <div class=\"status\">
-<span class=\"pill\">Source</span>
-<span class=\"pill\">Proof</span>
-<span class=\"pill\">Local</span>
+<span class=\"pill\">selected host: {host}</span>
+<span class=\"pill\">generation: current</span>
+<span class=\"pill\">rollback: available</span>
 </div>
+<div class=\"metrics\">
+<div class=\"metric\">Services<strong>{enabled_services}/{service_total}</strong></div>
+<div class=\"metric\">Packages<strong>{package_total}</strong></div>
+<div class=\"metric\">Options<strong>{option_total}</strong></div>
+<div class=\"metric\">Alerts<strong>{alerts}</strong></div>
+</div>
+</div>
+<div class=\"grid\">
+<article class=\"panel\"><header><h2>Service Health</h2></header><table>{services}</table></article>
+<article class=\"panel\"><header><h2>Proof/rollback status</h2></header><pre>plan.json proof.txt provenance.json vm-proof.txt
+last run: ready
+proof required: check, plan, build, proof</pre></article>
+</div>
+</div>
+<div id=\"settings\" class=\"page\" data-page-kind=\"settings\">
+<div class=\"grid\">
+<article class=\"panel\"><header><h2>Settings</h2></header><div class=\"form\">{settings_controls}</div>
+<div class=\"actions\"><button data-stage-setting=\"network.hostName\">Stage host name</button></div></article>
+<article class=\"panel\"><header><h2>Exact Jet diff</h2></header><pre id=\"tx-output\"></pre></article>
+</div>
+</div>
+<div id=\"monitoring\" class=\"page\" data-page-kind=\"monitoring\"><div class=\"grid\"><article class=\"panel\"><header><h2>Monitoring</h2></header><table>{services}</table></article><article class=\"panel\"><header><h2>Artifacts</h2></header><pre>provenance: ../provenance.json
+proof: ../proof.txt
+vm proof: ../vm-proof.txt</pre></article></div></div>
+<div id=\"services\" class=\"page\" data-page-kind=\"services\"><article class=\"panel\"><header><h2>Services</h2></header><table>{services}</table></article></div>
+<div id=\"packages\" class=\"page\" data-page-kind=\"packages\"><article class=\"panel\"><header><h2>Packages</h2></header><table>{packages}</table></article></div>
+<div id=\"secrets\" class=\"page\" data-page-kind=\"secrets\" data-secret-policy=\"no-plaintext\"><article class=\"panel\"><header><h2>Secrets</h2></header><pre>plaintext: never projected
+runtime path: /run/jetos-secrets/*
+transactions: audited rekey/add only</pre><table>{options}</table></article></div>
+<div id=\"fleet\" class=\"page\" data-page-kind=\"fleet\" data-fleet-mode=\"adaptive\"><article class=\"panel\"><header><h2>Fleet</h2></header><pre>single host default: true
+rollout gate: proof-before-switch
+rollback on failed health window</pre></article></div>
+<div id=\"generations\" class=\"page\" data-page-kind=\"generations\"><article class=\"panel\"><header><h2>Generations</h2></header><pre>current generation: {host}
+rollback action stages an inverse changeset through the same apply gate.</pre></article></div>
+<div id=\"changeset\" class=\"page\" data-page-kind=\"changeset\" data-apply-gate=\"single-source-transaction\">
+<div class=\"grid\">
+<article class=\"panel\"><header><h2>Changeset</h2></header><pre id=\"changeset-diff\">No staged changes.</pre></article>
+<article class=\"panel\"><header><h2>Impact ledger</h2></header><pre id=\"changeset-impact\">generation delta: current -> candidate
+proof requirements: check, plan, build, proof
+source transaction: config.jet only</pre>
+<div class=\"actions\">
+<button data-run=\"build\">Build only</button>
+<button data-run=\"proof\">Build and proof</button>
+<button data-discard=\"changeset\">Discard</button>
+</div></article>
+</div>
+</div>
+<div id=\"proof-provenance\" class=\"page\" data-page-kind=\"proof-provenance\">
 <div class=\"grid\">
 <article class=\"panel\"><header><h2>Packages</h2></header><table>{packages}</table></article>
 <article class=\"panel\"><header><h2>Services</h2></header><table>{services}</table></article>
@@ -200,8 +347,9 @@ pre {{ margin: 0; padding: 16px; min-height: 96px; max-height: 300px; overflow: 
 <div class=\"actions\">
 <button data-tx=\"preview\">Preview</button>
 <button data-tx=\"write\">Save</button>
+<a href=\"/canvas\" data-open-canvas=\"source\">Open Canvas</a>
 </div>
-<pre id=\"tx-output\"></pre>
+<pre id=\"source-tx-output\"></pre>
 </article>
 <article class=\"panel\"><header><h2>Module</h2></header><pre id=\"source-output\"></pre></article>
 <article class=\"panel\"><header><h2>Proof</h2></header>
@@ -215,9 +363,24 @@ pre {{ margin: 0; padding: 16px; min-height: 96px; max-height: 300px; overflow: 
 <pre id=\"run-output\">plan.json proof.txt provenance.json vm-proof.txt</pre>
 </article>
 </div>
+</div>
+<div class=\"changeset-tray\" data-changeset-tray=\"true\"><span id=\"changeset-summary\">0 staged changes</span><button data-open-page=\"changeset\">Review Changeset</button></div>
 </section>
 </main>
 <script>
+function showPage(id) {{
+  for (const page of document.querySelectorAll('.page')) page.classList.toggle('active', page.id === id);
+  for (const link of document.querySelectorAll('[data-page]')) link.classList.toggle('active', link.dataset.page === id);
+}}
+for (const link of document.querySelectorAll('[data-page]')) {{
+  link.addEventListener('click', (event) => {{
+    event.preventDefault();
+    showPage(link.dataset.page);
+  }});
+}}
+for (const button of document.querySelectorAll('[data-open-page]')) {{
+  button.addEventListener('click', () => showPage(button.dataset.openPage));
+}}
 async function refreshSource() {{
   const res = await fetch('/studio/source');
   document.getElementById('source-output').textContent = await res.text();
@@ -236,7 +399,24 @@ for (const button of document.querySelectorAll('[data-tx]')) {{
       write
     }});
     document.getElementById('tx-output').textContent = result.diff || result.error || JSON.stringify(result, null, 2);
+    document.getElementById('changeset-diff').textContent = result.diff || 'No staged changes.';
+    document.getElementById('changeset-summary').textContent = result.changed ? '1 staged source transaction' : '0 staged changes';
     if (write && !result.error) await refreshSource();
+  }});
+}}
+for (const button of document.querySelectorAll('[data-stage-setting]')) {{
+  button.addEventListener('click', async () => {{
+    const input = document.querySelector('[data-setting-key=\"' + button.dataset.stageSetting + '\"]');
+    const result = await studioPost('/studio/transaction', {{
+      op: 'set-option',
+      key: button.dataset.stageSetting,
+      value: input ? input.value : '',
+      write: false
+    }});
+    document.getElementById('tx-output').textContent = result.diff || result.error || JSON.stringify(result, null, 2);
+    document.getElementById('changeset-diff').textContent = result.diff || 'No staged changes.';
+    document.getElementById('changeset-summary').textContent = result.changed ? '1 staged source transaction' : '0 staged changes';
+    showPage('changeset');
   }});
 }}
 for (const button of document.querySelectorAll('[data-run]')) {{
@@ -252,6 +432,17 @@ refreshSource();
 ",
         host = html_escape(&system.name),
         target = html_escape(&system.target),
+        nav = nav,
+        enabled_services = enabled_services,
+        service_total = system.services.len(),
+        package_total = system.packages.len(),
+        option_total = system.options.len(),
+        alerts = html_escape(&alerts),
+        settings_controls = if settings_controls.is_empty() {
+            "<div class=\"empty\">No settings projected.</div>".to_string()
+        } else {
+            settings_controls
+        },
         packages = if packages.is_empty() {
             "<tr><td>none</td><td></td></tr>".to_string()
         } else {

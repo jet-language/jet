@@ -8,7 +8,8 @@ pub fn main(theme: &Theme, verb: Option<&str>, args: &[String], flags: &OsFlags)
         Some(v) if v == Syntax::OS_VERB_ROLLBACK => cmd_rollback(theme, args),
         Some(v) if v == Syntax::OS_VERB_GENERATIONS => cmd_generations(args),
         Some(v) if v == Syntax::OS_VERB_INIT => cmd_init(theme, args, flags),
-        Some(v) if v == Syntax::OS_VERB_LIFT => cmd_lift(theme, args),
+        Some(v) if v == Syntax::OS_VERB_LIFT => cmd_lift(theme, args, flags),
+        Some(v) if v == Syntax::OS_VERB_IMPORT => cmd_import(theme, args, flags),
         Some(v) if v == Syntax::OS_VERB_IMAGE => cmd_image(theme, args, flags),
         Some(v) if v == Syntax::OS_VERB_VM => cmd_vm(theme, args, flags),
         Some("help" | "--help" | "-h") => {

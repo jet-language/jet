@@ -133,50 +133,55 @@ fn copy_generation_payload_deref(src: &Path, dst: &Path) -> std::io::Result<()> 
             copy_runtime_file_filtered(&path, &target)?;
         }
     }
+    deref_profile_bin_symlinks(dst)?;
+    Ok(())
+}
+
+fn deref_profile_bin_symlinks(system: &Path) -> std::io::Result<()> {
+    let bin = system.join("sw/bin");
+    let Ok(entries) = fs::read_dir(&bin) else {
+        return Ok(());
+    };
+    for entry in entries.filter_map(Result::ok) {
+        let path = entry.path();
+        let meta = fs::symlink_metadata(&path)?;
+        if !meta.file_type().is_symlink() {
+            continue;
+        }
+        let target = fs::read_link(&path)?;
+        if !target.starts_with("/nix/store") {
+            continue;
+        }
+        let _ = fs::remove_file(&path);
+        copy_runtime_file_filtered(&target, &path)?;
+    }
     Ok(())
 }
 
 fn copy_initrd_runtime_filtered(src: &Path, dst: &Path) -> std::io::Result<()> {
     let bytes = fs::read(src)?;
-    if installer_initrd_is_zstd_stream(&bytes) {
-        if let Some(zstd) = find_path_tool("zstd") {
-            let decompressed = Command::new(&zstd).args(["-d", "-q", "-c"]).arg(src).output()?;
-            if decompressed.status.success() {
-                let mut plain = decompressed.stdout;
-                if let Some(sanitized) = sanitize_runtime_branding_bytes(&plain) {
-                    plain = sanitized;
-                }
-                let mut child = Command::new(zstd)
-                    .args(["-q", "-c"])
-                    .stdin(Stdio::piped())
-                    .stdout(Stdio::piped())
-                    .spawn()?;
-                {
-                    use std::io::Write;
-                    let stdin = child.stdin.as_mut().ok_or_else(|| {
-                        std::io::Error::new(
-                            std::io::ErrorKind::BrokenPipe,
-                            "could not open zstd stdin",
-                        )
-                    })?;
-                    stdin.write_all(&plain)?;
-                }
-                let compressed = child.wait_with_output()?;
-                if compressed.status.success() {
-                    if let Some(parent) = dst.parent() {
-                        fs::create_dir_all(parent)?;
-                    }
-                    fs::write(dst, compressed.stdout)?;
-                    return Ok(());
-                }
-            }
+    if let (Some(offset), Some(zstd)) = (first_zstd_frame_offset(&bytes), find_path_tool("zstd")) {
+        if let Some(parent) = dst.parent() {
+            fs::create_dir_all(parent)?;
         }
+        let compressed_path = unique_initrd_temp_path(dst, "copy-main.zst");
+        fs::write(&compressed_path, &bytes[offset..])?;
+        let mut plain = zstd_decode_file(&zstd, &compressed_path)?;
+        let _ = fs::remove_file(&compressed_path);
+        if let Some(sanitized) = sanitize_runtime_branding_bytes(&plain) {
+            plain = sanitized;
+        }
+        let plain_path = unique_initrd_temp_path(dst, "copy-main.cpio");
+        fs::write(&plain_path, &plain)?;
+        let compressed = zstd_encode_file(&zstd, &plain_path)?;
+        let _ = fs::remove_file(&plain_path);
+        let mut out = Vec::with_capacity(offset + compressed.len());
+        out.extend_from_slice(&bytes[..offset]);
+        out.extend_from_slice(&compressed);
+        fs::write(dst, out)?;
+        return Ok(());
     }
     copy_runtime_file_filtered(src, dst)
-}
-
-fn installer_initrd_is_zstd_stream(bytes: &[u8]) -> bool {
-    bytes.starts_with(&[0x28, 0xb5, 0x2f, 0xfd])
 }
 
 fn write_image_variant_artifacts(
@@ -517,9 +522,9 @@ case "$cmdline" in
         exit 1
     fi
     desktop_path="$system/sw/bin:$PATH"
-    JETOS_SYSTEM_ROOT="$system" PATH="$desktop_path" /bin/sh "$system/sw/bin/jetos-display-manager" --jetos-proof
-    JETOS_SYSTEM_ROOT="$system" PATH="$desktop_path" /bin/sh "$system/sw/bin/jetos-desktop-session" --jetos-proof
-    JETOS_SYSTEM_ROOT="$system" PATH="$desktop_path" /bin/sh "$system/sw/bin/jetos-terminal-fallback" --jetos-proof
+    JETOS_SYSTEM_ROOT="$system" PATH="$desktop_path" /jetos/tools/bin/sh "$system/sw/bin/jetos-display-manager" --jetos-proof
+    JETOS_SYSTEM_ROOT="$system" PATH="$desktop_path" /jetos/tools/bin/sh "$system/sw/bin/jetos-desktop-session" --jetos-proof
+    JETOS_SYSTEM_ROOT="$system" PATH="$desktop_path" /jetos/tools/bin/sh "$system/sw/bin/jetos-terminal-fallback" --jetos-proof
     printf '{{"host":"{host}","generation":"{generation}","packages":"present","services":"present","network":"declared","rollback":"ledger-present","proof":"present","desktop":"gnome-wayland","display":"graphical","launcher":"proved"}}\n'
     printf 'JETOS_GUEST_PROOF: {{"state":"guest-passed","host":"{host}","generation":"{generation}","assertions":["current-generation-matches","packages-present","services-active","network-up","rollback-generation-bootable","terminal-login-ready","desktop-session-ready","graphical-console-ready","desktop-launchers-run"]}}\n'
     ;;

@@ -4,6 +4,8 @@ pub const DEBUG_SCHEMA_VERSION: u32 = 1;
 pub const QUERY_SCHEMA_VERSION: u32 = 1;
 pub const ACTION_SCHEMA_VERSION: u32 = 1;
 pub const PROJECT_SCHEMA_VERSION: u32 = 1;
+pub const CORE_CATALOG_SCHEMA_VERSION: u32 = 1;
+pub const PROOF_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone)]
 struct InlineExpr {
@@ -288,6 +290,7 @@ pub fn query_json_for_file(path: &Path, request: &str) -> Result<String, String>
             canvas_preview_rename(path, &src, &symbol, &to)
         }
         "actions" | "palette_entries" => canvas_actions(path, &src),
+        "core_catalog" | "corelib_catalog" => canvas_core_catalog_query(path, &src, request),
         _ => Err(query_error("unsupported", "unknown Canvas query operation")),
     }
 }
@@ -297,6 +300,14 @@ pub fn query_json_for_entry(entry: &Path, request: &str) -> Result<String, Strin
     let source_id = json_string_field(request, "source_id");
     let path = resolve_entry_source_path(entry, source_id.as_deref())?;
     query_json_for_file(&path, request)
+}
+
+/// Expose the canonical Core library catalog to Canvas without granting
+/// execution authority.
+pub fn core_catalog_json_for_entry(entry: &Path, query: &str) -> Result<String, String> {
+    let path = resolve_entry_source_path(entry, None)?;
+    let src = fs::read_to_string(&path).map_err(|e| query_error("io", &e.to_string()))?;
+    canvas_core_catalog(&path, &src, query)
 }
 
 /// Report Git text truth for Canvas source-control UI.
@@ -411,6 +422,187 @@ pub fn source_control_json_for_entry(path: &Path) -> String {
         history,
         files
     )
+}
+
+/// Report local proof truth for the selected source without pretending a run/build
+/// receipt exists.
+pub fn proof_json_for_entry(entry: &Path, source_id: Option<&str>) -> Result<String, String> {
+    proof_json_for_entry_with_receipt(entry, source_id, None)
+}
+
+pub fn proof_json_for_entry_with_receipt(
+    entry: &Path,
+    source_id: Option<&str>,
+    command_receipt: Option<&str>,
+) -> Result<String, String> {
+    let path = resolve_entry_source_path(entry, source_id)?;
+    let src = fs::read_to_string(&path).map_err(|e| query_error("io", &e.to_string()))?;
+    let revision = source_revision(&src);
+    let check = match project_file(&path) {
+        Ok(_) => {
+            "{\"state\":\"ok\",\"diagnostics_count\":0,\"message\":\"front end check passed\"}"
+                .to_string()
+        }
+        Err(diags) => {
+            let message = crate::render_diagnostics(&path.display().to_string(), &src, &diags);
+            format!(
+                "{{\"state\":\"diagnostic\",\"diagnostics_count\":{},\"message\":{}}}",
+                diags.len(),
+                json_str(&message)
+            )
+        }
+    };
+    let (git_available, git_dirty, git_status) = if let Some(root) = git_root(&path) {
+        let rel = git_relative_path(&root, &path);
+        let status = git_output(&root, &["status", "--porcelain", "--", &rel]).unwrap_or_default();
+        let tracked = git_output(&root, &["ls-files", "--error-unmatch", "--", &rel]).is_some();
+        let diff = if tracked {
+            git_output(&root, &["diff", "--", &rel]).unwrap_or_default()
+        } else if path.exists() {
+            untracked_diff(&rel, &src)
+        } else {
+            String::new()
+        };
+        (
+            "true",
+            if !status.trim().is_empty() || !diff.trim().is_empty() {
+                "true"
+            } else {
+                "false"
+            },
+            status.trim().to_string(),
+        )
+    } else {
+        ("false", "false", "not a Git worktree".to_string())
+    };
+    let source_label = source_id
+        .map(str::to_string)
+        .unwrap_or_else(|| path.display().to_string());
+    let receipt_current = command_receipt
+        .map(|receipt| receipt.contains(&format!("\"revision\":\"{revision}\"")))
+        .unwrap_or(false);
+    let command_receipts = if receipt_current {
+        format!(
+            "{{\"state\":\"current\",\"receipt\":{}}}",
+            command_receipt.unwrap_or("{}")
+        )
+    } else {
+        "{\"state\":\"missing\",\"reason\":\"no Canvas command authority receipt has run for this source revision\"}".to_string()
+    };
+    let proof = if receipt_current {
+        "{\"state\":\"current\",\"stale\":false,\"reasons\":[]}".to_string()
+    } else {
+        "{\"state\":\"missing\",\"stale\":true,\"reasons\":[\"no check/build/run receipt for this source revision\"]}".to_string()
+    };
+    Ok(format!(
+        "{{\"protocol\":\"jet.canvas.proof\",\"schema_version\":{},\"ok\":true,\"source_id\":{},\"source_path\":{},\"revision\":{},\"check\":{},\"source_control\":{{\"truth\":\"git-text\",\"available\":{},\"dirty\":{},\"status\":{}}},\"debug\":{{\"state\":\"local-only\",\"persistence\":\"local-source-span\"}},\"command_receipts\":{},\"proof\":{}}}",
+        PROOF_SCHEMA_VERSION,
+        json_str(&source_label),
+        json_str(&path.display().to_string()),
+        json_str(&revision),
+        check,
+        git_available,
+        git_dirty,
+        json_str(&git_status),
+        command_receipts,
+        proof
+    ))
+}
+
+pub fn command_receipt_json_for_entry(entry: &Path, request: &str) -> Result<String, String> {
+    let src = fs::read_to_string(entry).map_err(|e| query_error("io", &e.to_string()))?;
+    let revision = required_string(request, "revision")?;
+    if revision != source_revision(&src) {
+        return Err(query_error(
+            "conflict",
+            "source changed since this Canvas command was approved",
+        ));
+    }
+    let action_id = required_string(request, "action_id")?;
+    let source = entry
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("main.jet");
+    let (label, args, writes, requires_confirmation) = match action_id.as_str() {
+        "canvas.command:run" => ("Run program", vec!["run", source], "none", false),
+        "canvas.command:check" => ("Check project", vec!["check", source], "none", false),
+        "canvas.command:build" => ("Build project", vec!["build", source], "build_outputs", true),
+        _ => {
+            return Err(query_error(
+                "unsupported",
+                "Canvas command execution only supports run, check, and build receipts",
+            ))
+        }
+    };
+    if requires_confirmation && !json_bool_field(request, "confirmed").unwrap_or(false) {
+        return Err(query_error(
+            "confirmation_required",
+            "this Canvas command writes build outputs and needs confirmed:true",
+        ));
+    }
+    let started = std::time::Instant::now();
+    let (success, exit_code, stdout, stderr) = if action_id == "canvas.command:check" {
+        let (diags, _bundle, _facts) =
+            crate::Driver::check_file_with_effect_facts(&entry.display().to_string(), None, true);
+        let errors: Vec<Diagnostic> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .cloned()
+            .collect();
+        if errors.is_empty() {
+            (true, Some(0), String::new(), String::new())
+        } else {
+            (
+                false,
+                Some(1),
+                String::new(),
+                crate::render_diagnostics(&entry.display().to_string(), &src, &errors),
+            )
+        }
+    } else {
+        let output = run_jet_command(entry, &args)?;
+        (
+            output.status.success(),
+            output.status.code(),
+            String::from_utf8_lossy(&output.stdout).to_string(),
+            String::from_utf8_lossy(&output.stderr).to_string(),
+        )
+    };
+    let elapsed_ms = started.elapsed().as_millis();
+    let mut display = vec!["jet".to_string()];
+    display.extend(args.iter().map(|arg| arg.to_string()));
+    let command = display
+        .iter()
+        .map(|arg| json_str(arg))
+        .collect::<Vec<_>>()
+        .join(",");
+    Ok(format!(
+        "{{\"protocol\":\"jet.canvas.command_receipt\",\"schema_version\":1,\"ok\":true,\"action_id\":{},\"title\":{},\"revision\":{},\"command\":[{}],\"writes\":{},\"success\":{},\"exit_code\":{},\"elapsed_ms\":{},\"stdout\":{},\"stderr\":{}}}",
+        json_str(&action_id),
+        json_str(label),
+        json_str(&revision),
+        command,
+        json_str(writes),
+        if success { "true" } else { "false" },
+        exit_code.map(|c| c.to_string()).unwrap_or_else(|| "null".to_string()),
+        elapsed_ms,
+        json_str(&stdout),
+        json_str(&stderr)
+    ))
+}
+
+fn run_jet_command(entry: &Path, args: &[&str]) -> Result<std::process::Output, String> {
+    let cwd = entry.parent().unwrap_or_else(|| Path::new("."));
+    if let Ok(exe) = std::env::current_exe() {
+        if let Ok(output) = Command::new(&exe).args(args).current_dir(cwd).output() {
+            return Ok(output);
+        }
+    }
+    Command::new("jet")
+        .args(args)
+        .current_dir(cwd)
+        .output()
+        .map_err(|e| query_error("io", &e.to_string()))
 }
 
 /// Apply one versioned Canvas edit transaction and write ordinary Jet source.

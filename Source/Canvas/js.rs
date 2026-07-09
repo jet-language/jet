@@ -4,6 +4,7 @@ pub fn canvas_js() -> String {
   const ctx = canvas.getContext("2d");
   const stage = document.getElementById("stage");
   const sourceView = document.getElementById("source-view");
+  const sourceEditor = document.getElementById("source-editor");
   const viewToggle = document.getElementById("view-toggle");
   const lensButtons = Array.from(document.querySelectorAll("[data-view-mode]"));
   const detailToggleInputs = Array.from(document.querySelectorAll("[data-detail-toggle]"));
@@ -39,14 +40,20 @@ pub fn canvas_js() -> String {
   const sourceId = document.getElementById("source-id");
   const revision = document.getElementById("revision");
   const scmState = document.getElementById("scm-state");
+  const proofState = document.getElementById("proof-state");
+  const proofRail = document.getElementById("proof-rail");
   const toast = document.getElementById("toast");
   const sourceDiff = document.getElementById("source-diff");
+  const editSource = document.getElementById("edit-source");
+  const applySourceEdit = document.getElementById("apply-source-edit");
+  const cancelSourceEdit = document.getElementById("cancel-source-edit");
   const undoEdit = document.getElementById("undo-edit");
   const redoEdit = document.getElementById("redo-edit");
   const orgAlign = document.getElementById("org-align");
   const orgTidy = document.getElementById("org-tidy");
   const bookmarkAdd = document.getElementById("bookmark-add");
   const bookmarkJump = document.getElementById("bookmark-jump");
+  const coreCatalog = document.getElementById("core-catalog");
   const favoriteAction = document.getElementById("favorite-action");
   const runCurrent = document.getElementById("run-current");
   const runHud = document.getElementById("run-hud");
@@ -68,6 +75,7 @@ pub fn canvas_js() -> String {
   let debugState = { breakpoints: [], watches: [] };
   let searchState = { results: [], spans: [], active: -1, diff: null, impact: null };
   let scm = null;
+  let proofDoc = null;
   let undoStack = [];
   let redoStack = [];
   let editorState = { bookmarks: [], favorites: [], actionUse: {}, rerouteKnots: [], tourDismissed: false };
@@ -86,6 +94,7 @@ pub fn canvas_js() -> String {
   let pendingPin = null;
   let spaceDown = false;
   let viewMode = "graph";
+  let sourceEditMode = false;
   let detailToggles = { types: false, diagnostics: true, effects: false, debug: false, package: true };
   let developerMode = false;
   const layoutScale = { x: 1.08, y: 1.08 };
@@ -242,17 +251,51 @@ pub fn canvas_js() -> String {
   }
 
   function runCurrentGraph() {
-    runState = { running: true, last: "running " + (graphTitle(selectedGraphId) || "run") };
-    runHud.textContent = runState.last + " via source-backed dev tier";
+    const run = actionEntries.find((item) => item.action_id === "canvas.command:run")
+      || actionEntries.find((item) => item.action_id === "canvas.command:dev")
+      || null;
+    if (!run) {
+      runHud.textContent = "run authority loading";
+      loadCanvasActions();
+      return;
+    }
+    renderCommandAuthority(run);
+  }
+
+  function renderCommandAuthority(item) {
+    const command = (item.command || []).join(" ");
+    runState = { running: false, last: item.title + " authority ready" };
+    runHud.textContent = item.available ? runState.last : (item.denied_reason || "command unavailable");
+    runHud.classList.remove("is-running");
+    window.__jetCanvasRunLoop = { graph_id: selectedGraphId, state: "authority_required", action_id: item.action_id, command: item.command || [] };
+    details.innerHTML = `<h2>Command</h2><div class="signature-source"><code>${escapeHtml(command)}</code><span>${escapeHtml(item.writes || "none")} · ${item.requires_confirmation ? "confirmation required" : "read-only"}</span><button id="execute-command-authority">Run</button></div><div class="inline-row"><b>Authority</b><code>${escapeHtml((item.authority || []).join("\n"))}</code></div>`;
+    const execute = document.getElementById("execute-command-authority");
+    if (execute) execute.addEventListener("click", () => executeCommandAuthority(item));
+    showToast(item.available ? item.title + " authority ready" : item.denied_reason || "Command unavailable");
+    loadProofRail();
+  }
+
+  function executeCommandAuthority(item) {
+    if (!latestDoc || !item || !item.available) return;
+    const confirmed = !item.requires_confirmation || window.confirm(item.title + " writes " + (item.writes || "outputs") + ". Continue?");
+    if (!confirmed) return;
+    const body = { schema_version: 1, revision: latestDoc.revision, action_id: item.action_id, confirmed };
+    runHud.textContent = item.title + " running";
     runHud.classList.add("is-running");
-    window.__jetCanvasRunLoop = { graph_id: selectedGraphId, state: "running", watches: debugState.watches || [] };
-    runDebug(["c"]);
-    window.setTimeout(() => {
-      runState.running = false;
-      runState.last = "last run projected into debug overlay";
-      runHud.textContent = runState.last;
-      runHud.classList.remove("is-running");
-    }, 450);
+    fetch(commandUrl, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
+      .then((r) => r.json().then((json) => ({ ok: r.ok, json })))
+      .then((result) => {
+        runHud.classList.remove("is-running");
+        const doc = result.json || {};
+        runHud.textContent = doc.success ? item.title + " passed" : item.title + " failed";
+        details.innerHTML = `<h2>Receipt</h2><div class="signature-source"><code>${escapeHtml((doc.command || []).join(" "))}</code><span>${escapeHtml(doc.success ? "success" : "failed")} · ${escapeHtml(String(doc.exit_code ?? "?"))} · ${escapeHtml(String(doc.elapsed_ms || 0))}ms</span></div><div class="inline-row"><b>stdout</b><code>${escapeHtml(doc.stdout || "")}</code></div><div class="inline-row"><b>stderr</b><code>${escapeHtml(doc.stderr || "")}</code></div>`;
+        loadProofRail();
+      })
+      .catch((e) => {
+        runHud.classList.remove("is-running");
+        runHud.textContent = item.title + " failed";
+        showToast(String(e));
+      });
   }
 
   function setDeveloperMode(on) {
@@ -374,6 +417,7 @@ pub fn canvas_js() -> String {
 
   function setViewMode(mode) {
     viewMode = mode === "code" || mode === "split" ? mode : "graph";
+    if (viewMode === "graph") setSourceEditMode(false);
     stage.classList.toggle("is-code", viewMode === "code");
     stage.classList.toggle("is-split", viewMode === "split");
     viewToggle.textContent = viewMode === "graph" ? "Code" : "Graph";
@@ -382,8 +426,36 @@ pub fn canvas_js() -> String {
       button.classList.toggle("is-active", button.getAttribute("data-view-mode") === viewMode);
     }
     sourceView.textContent = latestDoc && latestDoc.source_text ? latestDoc.source_text : "";
+    if (sourceEditor && !sourceEditMode) sourceEditor.value = latestDoc && latestDoc.source_text ? latestDoc.source_text : "";
     window.__jetCanvasLensMode = viewMode;
     if (viewMode !== "code" && latestDoc) drawGraph(latestDoc);
+  }
+
+  function setSourceEditMode(active) {
+    sourceEditMode = !!active && !!latestDoc;
+    stage.classList.toggle("is-source-edit", sourceEditMode);
+    if (sourceEditMode) {
+      if (viewMode === "graph") viewMode = "split";
+      stage.classList.toggle("is-code", viewMode === "code");
+      stage.classList.toggle("is-split", viewMode === "split");
+      if (sourceEditor) {
+        sourceEditor.value = latestDoc.source_text || "";
+        sourceEditor.focus();
+      }
+    }
+    if (editSource) editSource.classList.toggle("is-active", sourceEditMode);
+    window.__jetCanvasSourceEditMode = sourceEditMode;
+  }
+
+  function applySourceEditBuffer() {
+    if (!latestDoc || !sourceEditor) return;
+    postTransaction({
+      schema_version: 1,
+      op: "replace_source",
+      revision: latestDoc.revision,
+      source: sourceEditor.value,
+      source_edit: true
+    });
   }
 
   function hexToRgba(hex, alpha) {
@@ -459,6 +531,42 @@ pub fn canvas_js() -> String {
       .catch(() => {
         scm = null;
         scmState.textContent = "git ?";
+      });
+  }
+
+  function proofRequestUrl(sourceId) {
+    if (!sourceId) return proofUrl;
+    return proofUrl + (proofUrl.includes("?") ? "&" : "?") + "source_id=" + encodeURIComponent(sourceId);
+  }
+
+  function loadProofRail() {
+    if (!proofRail) return Promise.resolve(null);
+    return fetch(proofRequestUrl(selectedSourceId), { cache: "no-store" })
+      .then((r) => r.json())
+      .then((doc) => {
+        proofDoc = doc;
+        const proof = doc.proof || {};
+        const check = doc.check || {};
+        const scmDoc = doc.source_control || {};
+        const rows = [
+          ["revision", doc.revision || "?"],
+          ["check", check.state || "unknown"],
+          ["git", scmDoc.available ? (scmDoc.dirty ? "dirty" : "clean") : "unavailable"],
+          ["receipt", (doc.command_receipts && (doc.command_receipts.reason || doc.command_receipts.state)) || "missing"],
+          ["proof", proof.state || "missing"]
+        ];
+        proofState.textContent = proof.state || "missing";
+        proofState.style.color = proof.state === "current" ? "#8fb2dc" : "#f8c76a";
+        proofRail.innerHTML = rows.map(([label, value]) => {
+          const cls = label === "receipt" || value === "missing" ? " is-missing" : "";
+          return `<div class="proof-row${cls}"><b>${escapeHtml(label)}</b><span>${escapeHtml(value)}</span></div>`;
+        }).join("");
+        return doc;
+      })
+      .catch(() => {
+        proofDoc = null;
+        proofState.textContent = "unknown";
+        proofRail.innerHTML = "<div class=\"proof-row is-missing\"><b>proof</b><span>unavailable</span></div>";
       });
   }
 
@@ -1030,6 +1138,22 @@ pub fn canvas_js() -> String {
 
   function openGraphActionPalette(x, y, query) {
     openActionPalette(x, y, "Graph actions", graphActionItems(), { context: "right-click built-ins, functions, source actions", query: query || "" });
+  }
+
+  function openCoreCatalogPalette(query = "") {
+    const actions = actionEntries
+      .filter((item) => item.kind === "canvas.core_catalog")
+      .slice(0, 96)
+      .map((item) => ({
+        title: item.title,
+        detail: item.detail,
+        group: "core",
+        run: () => {
+          showToast("Core catalog entry is read-only");
+          details.innerHTML = `<h2>Core</h2><div class="signature-source"><code>${escapeHtml(item.signature || item.title)}</code><span>${escapeHtml(item.summary || "docs/reference/core-library.md")}</span></div>`;
+        }
+      }));
+    openActionPalette(window.innerWidth / 2 - 210, 72, "Core catalog", actions, { context: "core.* modules and methods", query });
   }
 
   function currentGraph(doc) {
@@ -2445,6 +2569,9 @@ pub fn canvas_js() -> String {
   document.getElementById("reload").addEventListener("click", loadGraph);
   sourceDiff.addEventListener("click", showSourceDiff);
   viewToggle.addEventListener("click", () => setViewMode(viewMode === "graph" ? "code" : "graph"));
+  if (editSource) editSource.addEventListener("click", () => setSourceEditMode(true));
+  if (applySourceEdit) applySourceEdit.addEventListener("click", applySourceEditBuffer);
+  if (cancelSourceEdit) cancelSourceEdit.addEventListener("click", () => setSourceEditMode(false));
   for (const button of lensButtons) {
     button.addEventListener("click", () => setViewMode(button.getAttribute("data-view-mode") || "graph"));
   }
@@ -2626,10 +2753,13 @@ pub fn canvas_js() -> String {
   }
   function runPalette(item) {
     if (!latestDoc || !selectedGraphId) return;
-    if (item.op === "preview_canvas_action") {
+    if (item.kind === "canvas.core_catalog") {
+      showToast("Core catalog entry is read-only");
+      details.innerHTML = `<h2>Core</h2><div class="signature-source"><code>${escapeHtml(item.signature || item.title)}</code><span>${escapeHtml(item.summary || "")}</span></div>`;
+    } else if (item.op === "preview_canvas_action") {
       postTransaction({ schema_version: 1, op: "preview_canvas_action", revision: latestDoc.revision, graph_id: selectedGraphId, action_id: item.action_id, callee: item.callee, args: item.args || ["\"canvas\""] });
     } else if (item.op === "command_authority") {
-      showToast(item.available ? item.title + " requires command approval" : item.denied_reason || "Command unavailable");
+      renderCommandAuthority(item);
     } else if (item.op === "insert_print") {
       postTransaction({ schema_version: 1, op: "insert_call", revision: latestDoc.revision, graph_id: selectedGraphId, callee: "print", args: ["\"canvas\""] });
     } else if (item.op === "insert_call") {
@@ -2679,10 +2809,11 @@ pub fn canvas_js() -> String {
           showToast("Canvas action preview validated");
           return;
         }
-        if (result.json.changed && beforeSource && result.json.source_text && body.op !== "replace_source") {
+        if (result.json.changed && beforeSource && result.json.source_text && (body.op !== "replace_source" || body.source_edit)) {
           undoStack.push({ before: beforeSource, after: result.json.source_text });
           redoStack = [];
         }
+        if (body.op === "replace_source" && body.source_edit) setSourceEditMode(false);
         showToast(result.json.changed ? "Source updated" : "No change");
         loadSourceControl();
         loadProject();
@@ -2738,6 +2869,7 @@ pub fn canvas_js() -> String {
         setViewMode(viewMode);
         loadProject();
         loadSourceControl();
+        loadProofRail();
         loadCanvasActions();
         applySourceHash();
         if (firstLoad) fitGraph();
@@ -2765,10 +2897,17 @@ pub fn canvas_js() -> String {
         if (!doc || !doc.actions) return;
         actionEntries = doc.actions.map((action) => ({
           title: action.title || action.callee,
-          detail: action.command ? ((action.kind || "canvas.command") + " · " + (action.command || []).join(" ") + " · " + (action.writes || "none")) : ((action.kind || "canvas.action") + " · " + (action.engine || "checked-tir+jit") + " · " + (action.callee || "") + "(" + (action.pins || []).filter((p) => p.direction === "input").map((p) => p.type || "Value").join(", ") + ") -> " + (action.ret || "Void")),
+          detail: action.kind === "canvas.core_catalog" ? ((action.module_path || "core") + " · " + (action.signature || action.callee || "") + " · read-only") : (action.command ? ((action.kind || "canvas.command") + " · " + (action.command || []).join(" ") + " · " + (action.writes || "none")) : ((action.kind || "canvas.action") + " · " + (action.engine || "checked-tir+jit") + " · " + (action.callee || "") + "(" + (action.pins || []).filter((p) => p.direction === "input").map((p) => p.type || "Value").join(", ") + ") -> " + (action.ret || "Void"))),
+          kind: action.kind || "canvas.action",
           op: action.op || "preview_canvas_action",
           action_id: action.action_id,
           callee: action.callee,
+          signature: action.signature || "",
+          summary: action.summary || "",
+          command: action.command || [],
+          authority: action.authority || [],
+          writes: action.writes || "none",
+          requires_confirmation: !!action.requires_confirmation,
           available: action.available !== false,
           denied_reason: action.denied_reason || "",
           pins: action.pins || [],
@@ -2797,6 +2936,7 @@ pub fn canvas_js() -> String {
     graphiteDetailToggles: ["types", "diagnostics", "effects", "debug", "package"]
   };
   setDeveloperMode(storedFlag("jet.canvas.developerMode"));
+  if (coreCatalog) coreCatalog.addEventListener("click", () => openCoreCatalogPalette(""));
   syncDetailToggles();
   setViewMode("graph");
   details.innerHTML = "<h2>Details</h2><p>Select a node.</p>";
@@ -2808,7 +2948,11 @@ pub fn canvas_js() -> String {
   const base = window.__JET_CANVAS_BASE__ || "/canvas";
   const graphUrl = window.__JET_CANVAS_GRAPH__ || (base + "/graph");
   const queryUrl = window.__JET_CANVAS_QUERY__ || (base + "/query");
+  const coreCatalogUrl = window.__JET_CANVAS_CORE_CATALOG__ || (base + "/core-catalog");
   const sourceControlUrl = window.__JET_CANVAS_SCM__ || (base + "/source-control");
+  const proofUrl = window.__JET_CANVAS_PROOF__ || (base + "/proof");
+  const commandUrl = window.__JET_CANVAS_COMMAND__ || (base + "/command");
+  window.__jetCanvasProofRail = true;
   loadGraph();
 })();
 "###

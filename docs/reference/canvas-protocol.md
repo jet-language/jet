@@ -2,7 +2,8 @@
 
 Canvas is a source-backed projection protocol. The `.jet` file is the only
 semantic source of truth. Clients may cache viewport state locally, but graph
-facts and edits come from checked Jet source.
+facts and edits come from checked Jet source. Current AST coverage status is
+ratcheted in [`canvas-parity.md`](canvas-parity.md).
 
 ## Project Document V1
 
@@ -277,6 +278,7 @@ opened project. The `revision` must match that selected source file.
 | `source_to_graph` | `start`, `end` | Maps a source byte span to matching graph nodes/inline expressions. |
 | `preview_rename` | `symbol`, `to` | Returns the exact text diff for a rename without writing source. |
 | `actions` / `palette_entries` | none | Returns source-backed palette entries and ratified Canvas actions derived from checked semindex facts. |
+| `core_catalog` / `corelib_catalog` | optional `query` | Returns read-only `core.*` modules and members from the canonical Core library reference. |
 
 Successful response:
 
@@ -293,6 +295,10 @@ front end, executable TIR, and JIT preview path. Canvas does not get a separate
 runtime, compiler, or graph asset store. An action may return a source
 transaction or preview, but it never writes files directly.
 
+Core catalog entries are browse-only. They carry
+`authority:["canvas.catalog:core.read"]`, `writes:"none"`, the source document,
+module path, signature, and summary. They never claim that a Core call executed.
+
 Terms:
 
 | Term | Meaning |
@@ -305,7 +311,7 @@ Terms:
 Query actions:
 
 ```json
-{"protocol":"jet.canvas.query","schema_version":1,"ok":true,"op":"actions","revision":"sha256-...","results":[],"impact":null,"diff":null,"actions_schema_version":1,"actions":[{"action_id":"canvas.action:main.jet:square","kind":"canvas.action","title":"square","callee":"square","engine":"checked-tir+jit","authority":["canvas.source_edit:package"],"package_id":"app","version":"0.1.0","touched_files":["main.jet"],"writes":"source_transaction_only"},{"action_id":"canvas.command:build","kind":"canvas.command","title":"Build project","op":"command_authority","engine":"jet-cli","execution":"external_command","available":true,"command":["jet","build","main.jet"],"authority":["canvas.command:build","canvas.build_output:binary","canvas.source_edit:package"],"package_id":"app","version":"0.1.0","touched_files":["main.jet"],"writes":"build_outputs","requires_confirmation":true}]}
+{"protocol":"jet.canvas.query","schema_version":1,"ok":true,"op":"actions","revision":"sha256-...","results":[],"impact":null,"diff":null,"actions_schema_version":1,"actions":[{"action_id":"canvas.action:main.jet:square","kind":"canvas.action","title":"square","callee":"square","engine":"checked-tir+jit","authority":["canvas.source_edit:package"],"package_id":"app","version":"0.1.0","touched_files":["main.jet"],"writes":"source_transaction_only"},{"action_id":"canvas.command:run","kind":"canvas.command","title":"Run program","op":"command_authority","engine":"jet-cli","execution":"external_command","available":true,"command":["jet","run","main.jet"],"authority":["canvas.command:run","canvas.source_edit:package"],"package_id":"app","version":"0.1.0","touched_files":["main.jet"],"writes":"none","requires_confirmation":false},{"action_id":"canvas.command:build","kind":"canvas.command","title":"Build project","op":"command_authority","engine":"jet-cli","execution":"external_command","available":true,"command":["jet","build","main.jet"],"authority":["canvas.command:build","canvas.build_output:binary","canvas.source_edit:package"],"package_id":"app","version":"0.1.0","touched_files":["main.jet"],"writes":"build_outputs","requires_confirmation":true}]}
 ```
 
 Preview an action:
@@ -323,9 +329,30 @@ Successful response:
 The audit payload records package id/version/hash, touched files, diff, and
 diagnostics. Command actions do not execute through the source-preview endpoint:
 Canvas shows exact `command`, `authority`, `writes`, `available`, and
-`denied_reason`, then delegates to the existing Jet/Jetpack command surface only
-after user approval. A future external adapter must ask for extra authority
-before any tool, file, network, cache, or unsafe access.
+`denied_reason`; the Run button opens that authority card instead of simulating a
+run.
+
+Execute an approved command:
+
+```json
+{"schema_version":1,"action_id":"canvas.command:check","revision":"sha256-..."}
+```
+
+Endpoint: `POST /__jet_canvas/command` or `POST /canvas/command`.
+
+The endpoint accepts only whitelisted Canvas command actions (`run`, `check`,
+`build`). `build` writes build outputs and requires `confirmed:true`. The server
+does not accept arbitrary argv.
+
+Successful receipt:
+
+```json
+{"protocol":"jet.canvas.command_receipt","schema_version":1,"ok":true,"action_id":"canvas.command:check","title":"Check project","revision":"sha256-...","command":["jet","check","main.jet"],"writes":"none","success":true,"exit_code":0,"elapsed_ms":42,"stdout":"","stderr":""}
+```
+
+Execution receipts are missing until an approved command path runs the exact
+source revision. A future external adapter must ask for extra authority before
+any tool, file, network, cache, or unsafe access.
 
 ## Functions And Callback Views V1
 
@@ -367,4 +394,23 @@ Successful response:
 
 ```json
 {"protocol":"jet.canvas.source_control","schema_version":1,"ok":true,"revision":"sha256-...","project_revision":"sha256-...","project_root":"/repo","available":true,"dirty":true,"dirty_files":2,"status":"M packages/app/main.jet\n?? packages/app/helper.jet","diff":"","history":["abc123 initial"],"files":[{"path":"packages/app/main.jet","revision":"sha256-...","kind":"source","available":true,"dirty":true,"status":"M packages/app/main.jet","diff":"diff --git ..."}]}
+```
+
+## Proof V1
+
+Endpoint: `GET /__jet_canvas/proof` or `GET /canvas/proof`.
+
+Optional query: `source_id=<project-relative .jet path>`.
+
+Canvas proof reports what is known for the selected source revision: front-end
+check state, Git text state, debug persistence, and whether a command authority
+receipt exists. It does not manufacture build/run proof. Until a real Canvas
+command runs for the exact source revision, `command_receipts.state` and
+`proof.state` are `missing`. After a whitelisted command returns, the proof rail
+embeds the receipt and marks the revision current.
+
+Successful response:
+
+```json
+{"protocol":"jet.canvas.proof","schema_version":1,"ok":true,"source_id":"helper.jet","source_path":"/repo/helper.jet","revision":"sha256-...","check":{"state":"ok","diagnostics_count":0,"message":"front end check passed"},"source_control":{"truth":"git-text","available":true,"dirty":false,"status":""},"debug":{"state":"local-only","persistence":"local-source-span"},"command_receipts":{"state":"missing","reason":"no Canvas command authority receipt has run for this source revision"},"proof":{"state":"missing","stale":true,"reasons":["no check/build/run receipt for this source revision"]}}
 ```
