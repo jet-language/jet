@@ -674,6 +674,26 @@ Task keywords
     )
 }
 
+/// `jet ?` dispatch (D-FE-HELP1=D). Bare `jet ?` on a TTY opens the
+/// interactive hybrid help app; `jet ? <query>` and any non-TTY use are
+/// non-interactive — the static full palette (no args) or the best matches
+/// for `<query>` (args), printed once and exited.
+fn run_question_mark(args: &[String]) -> ! {
+    let is_tty = std::io::stdout().is_terminal() && std::io::stdin().is_terminal();
+    if !args.is_empty() {
+        let query = args.join(" ");
+        let color = is_tty && std::env::var("NO_COLOR").is_err();
+        print!("{}", jet::Help::run_query(&query, color));
+        exit(ExitCodes::OK);
+    }
+    if is_tty {
+        jet::Help::Interactive::run().ok();
+        exit(ExitCodes::OK);
+    }
+    print!("{}", question_mark_palette(false));
+    exit(ExitCodes::OK);
+}
+
 #[cfg(unix)]
 fn is_executable(p: &Path) -> bool {
     use std::os::unix::fs::PermissionsExt;
@@ -694,9 +714,8 @@ fn main() {
         run_repl(None);
         return;
     }
-    if raw.len() == 1 && raw[0] == "?" {
-        print!("{}", question_mark_palette(std::io::stdout().is_terminal()));
-        exit(ExitCodes::OK);
+    if raw[0] == "?" {
+        run_question_mark(&raw[1..]);
     }
 
     if raw.iter().any(|a| a == "--version") {

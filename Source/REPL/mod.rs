@@ -185,6 +185,9 @@ pub struct Session {
     pub func_defs: HashMap<String, Func>,
     /// Live interpreter scope: accumulated bindings (D-REPL7).
     pub scope: HashMap<String, CtValue>,
+    /// Names bound with `:=` (mutable). Everything else in `scope` was bound
+    /// with `::`. Drives the `name: Type := value` / `:: value` line shape.
+    pub mutable_names: HashSet<String>,
     /// Whether the teaching note for `print` (D-REPL-PRELOAD) has been shown.
     pub shown_preload_note: bool,
     /// Input counter — used in synthetic spans (diagnostics say `<repl:N>`).
@@ -245,6 +248,7 @@ impl Session {
             binding_srcs: Vec::new(),
             func_defs: HashMap::new(),
             scope: HashMap::new(),
+            mutable_names: HashSet::new(),
             shown_preload_note: false,
             step: 0,
             moved_names: HashSet::new(),
@@ -350,6 +354,11 @@ impl Session {
     /// Register a value binding for sema visibility after it was evaluated.
     /// `mutable` must match the original `::` / `:=` sigil (D-BIND4).
     pub fn record_binding(&mut self, name: &str, v: &CtValue, mutable: bool) {
+        if mutable {
+            self.mutable_names.insert(name.to_string());
+        } else {
+            self.mutable_names.remove(name);
+        }
         let sigil = if mutable {
             crate::Syntax::SIGIL_BIND_MUT
         } else {
