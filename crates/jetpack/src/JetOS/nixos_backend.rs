@@ -653,6 +653,9 @@ in
   system.stateVersion = "@@STATEVERSION@@";
   system.nixos.distroName = "jetos";
   system.nixos.distroId = "jetos";
+  # Imported package sets routinely include unfree software (steam, discord,
+  # editors); nixpkgs' license gate is a nixpkgs-ism, not a jetos policy.
+  nixpkgs.config.allowUnfree = true;
 
   boot.loader.timeout = 1;
   boot.growPartition = true;

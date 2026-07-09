@@ -167,8 +167,13 @@ fn probe_unresolvable_packages(
         .map(|n| JSON::quote(n))
         .collect::<Vec<_>>()
         .join(" ");
+    // Probe against the same pkgs the generated configuration will see:
+    // allowUnfree on, so unfree packages (steam, discord, …) don't read as
+    // "missing" when their license gate throws under tryEval.
     let expr = format!(
-        r#"pkgs: let
+        r#"let
+  flake = builtins.getFlake "{flake_ref}";
+  pkgs = import flake {{ system = "x86_64-linux"; config.allowUnfree = true; }};
   resolves = name: let
     underscored = builtins.replaceStrings ["-"] ["_"] name;
     extension = if builtins.substring 0 22 name == "gnome-shell-extension-"
@@ -179,9 +184,8 @@ fn probe_unresolvable_packages(
     || (ok (pkgs.gnomeExtensions or {{}}) extension);
 in builtins.filter (n: !(resolves n)) [ {name_list} ]"#
     );
-    let attr = format!("{flake_ref}#legacyPackages.x86_64-linux");
     let output = Command::new("nix")
-        .args(["eval", "--json", &attr, "--apply", &expr])
+        .args(["eval", "--json", "--expr", &expr])
         .output()
         .map_err(|e| format!("running the package resolvability probe failed: {e}"))?;
     if !output.status.success() {
