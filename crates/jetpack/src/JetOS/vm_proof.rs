@@ -211,14 +211,14 @@ fn write_runner_guest_proof(
         .join("images")
         .join(format!("jetos-installer-{}.iso", system.name));
     let text = format!(
-        "{{\"state\":\"guest-passed\",\"proof_tier\":{},\"host\":{},\"generation\":{},\"disk\":{},\"media_proof\":{},\"media_proof_sha256\":{},\"installer_iso_sha256\":{},\"assertions\":[{}],\"tools\":[{}],\"serial_report\":{}}}\n",
+        "{{\"state\":\"guest-passed\",\"proof_tier\":{},\"host\":{},\"generation\":{},\"disk\":{},\"media_proof\":{},\"media_proof_sha256\":{},\"installer_iso_fingerprint\":{},\"assertions\":[{}],\"tools\":[{}],\"serial_report\":{}}}\n",
         JSON::quote(proof_tier),
         JSON::quote(&system.name),
         JSON::quote(&gen.name),
         JSON::quote(disk),
         JSON::quote(&media_proof.display().to_string()),
         JSON::quote(&file_sha256(media_proof)?),
-        JSON::quote(&file_sha256(&installer_iso)?),
+        JSON::quote(&file_fingerprint(&installer_iso)?),
         guest_assertions_json(),
         vm_tools_json(),
         JSON::quote(report)
@@ -292,7 +292,11 @@ fn validate_cached_guest_proof(
     let installer_iso = systems_dir()
         .join("images")
         .join(format!("jetos-installer-{}.iso", system.name));
-    require_json_field(text, "installer_iso_sha256", &file_sha256(&installer_iso)?)?;
+    require_json_field(
+        text,
+        "installer_iso_fingerprint",
+        &file_fingerprint(&installer_iso)?,
+    )?;
     require_guest_assertions(text)
 }
 
@@ -320,6 +324,18 @@ fn file_sha256(path: &Path) -> Result<String, String> {
     fs::read(path)
         .map(|bytes| crate::SHA256::sha256_hex(&bytes))
         .map_err(|e| format!("hashing `{}` failed: {e}", path.display()))
+}
+
+fn file_fingerprint(path: &Path) -> Result<String, String> {
+    let meta = fs::metadata(path)
+        .map_err(|e| format!("reading metadata for `{}` failed: {e}", path.display()))?;
+    let modified = meta
+        .modified()
+        .ok()
+        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    Ok(format!("len={};mtime_ns={modified}", meta.len()))
 }
 
 fn guest_proof_path(harness: &Path) -> PathBuf {

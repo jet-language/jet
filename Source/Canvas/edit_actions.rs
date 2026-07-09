@@ -268,16 +268,16 @@ fn apply_insert_call(
     callee: &str,
     args: &[String],
     bind: Option<&str>,
+    wire_inline_expr_id: Option<&str>,
+    wire_expr: Option<&str>,
 ) -> Result<String, String> {
     let projection = project_file(path).map_err(|diags| diagnostics_error(path, src, &diags))?;
-    let Some(anchor) = projection
-        .graph_anchors
-        .iter()
-        .find(|a| a.graph_id == graph_id)
-    else {
-        return Err(edit_error("not_found", "Canvas graph no longer exists"));
+    let final_args = if args.is_empty() {
+        wire_expr.map(|expr| vec![expr.to_string()]).unwrap_or_default()
+    } else {
+        args.to_vec()
     };
-    let plan = insert_call_plan(src, callee, args);
+    let plan = insert_call_plan(src, callee, &final_args);
     let call = if plan.fallible {
         format!(
             "{}({}) ?? panic(\"canvas\")",
@@ -286,6 +286,28 @@ fn apply_insert_call(
         )
     } else {
         format!("{}({})", plan.callee, plan.args.join(", "))
+    };
+    if let Some(inline_id) = wire_inline_expr_id {
+        let Some(inline) = projection.inline_exprs.iter().find(|i| i.id == inline_id) else {
+            return Err(edit_error(
+                "not_found",
+                "Canvas inline expression no longer exists",
+            ));
+        };
+        let mut edits = vec![edit(inline.span, &call)];
+        if let Some(import) = plan.import {
+            edits.push(import);
+        }
+        let changed = FixEngine::apply_edits(src, &edits)
+            .map_err(|_| edit_error("overlap", "Canvas wired insert edit overlapped"))?;
+        return write_checked_formatted(path, src, &changed);
+    }
+    let Some(anchor) = projection
+        .graph_anchors
+        .iter()
+        .find(|a| a.graph_id == graph_id)
+    else {
+        return Err(edit_error("not_found", "Canvas graph no longer exists"));
     };
     let stmt = match bind {
         Some(name) => format!("    {name} :: {call}\n"),

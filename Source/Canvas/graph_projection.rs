@@ -980,8 +980,29 @@ fn project_value_node(
     x: i32,
     y: i32,
 ) -> Option<String> {
+    if let Expr::Ident(name, span) = expr {
+        if let Some(pin) = g.getter_pins.get(name).cloned() {
+            return Some(pin);
+        }
+        let ty = expr_type(g, index, expr);
+        let node_id = format!("{}:value:get:{}", g.graph_id, canvas_ident_fragment(name));
+        add_node(
+            g,
+            &node_id,
+            "variable_get",
+            "value",
+            name,
+            (*span).into(),
+            x,
+            y,
+            vec!["read"],
+            vec!["edit_inline_expr", "source_jump"],
+        );
+        let pin = add_pin(g, &node_id, name, "output", &ty, "", false);
+        g.getter_pins.insert(name.clone(), pin.clone());
+        return Some(pin);
+    }
     let (kind, title, badges) = match expr {
-        Expr::Ident(name, _) => ("variable_get", name.to_string(), vec!["read"]),
         Expr::Int(_, _, _)
         | Expr::Float(_, _, _)
         | Expr::Bool(_, _)
@@ -1017,6 +1038,12 @@ fn project_value_node(
         "",
         false,
     ))
+}
+
+fn canvas_ident_fragment(name: &str) -> String {
+    name.chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' })
+        .collect()
 }
 
 fn project_expr_node(

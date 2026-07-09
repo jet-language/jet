@@ -534,6 +534,70 @@ fn canvas_link_transactions_break_and_move_source_wires() {
 }
 
 #[test]
+fn canvas_projection_dedupes_variable_getters_with_fanout() {
+    let path = write_fixture(
+        "getter_fanout",
+        r#"fn run() {
+    x :: 1
+    print(x)
+    print(x)
+    print(x)
+}
+"#,
+    );
+    let graph = jet::Canvas::graph_json_for_file(&path).expect("canvas graph");
+    assert_eq!(
+        count_occurrences(&graph, "\"kind\":\"variable_get\""),
+        1,
+        "{graph}"
+    );
+    let getter_pin_chunk = graph
+        .split("\"pin_id\":\"")
+        .skip(1)
+        .find(|chunk| chunk.contains(":value:get:x:output:x"))
+        .expect("getter output pin");
+    let getter_pin = getter_pin_chunk[..getter_pin_chunk.find('"').unwrap()].to_string();
+    assert_eq!(
+        count_occurrences(&graph, &format!("\"from_pin\":\"{getter_pin}\"")),
+        3,
+        "{graph}"
+    );
+}
+
+#[test]
+fn canvas_wired_insert_transaction_writes_call_with_origin_value() {
+    let path = write_fixture(
+        "wired_insert",
+        r#"fn use_int(n: Int) {
+    print(n)
+}
+
+fn demo(x: Int) {
+}
+
+fn run() {
+    demo(1)
+}
+"#,
+    );
+    let src = fs::read_to_string(&path).unwrap();
+    let graph = jet::Canvas::graph_json_for_file(&path).expect("canvas graph");
+    let demo_graph_id = field_before(&graph, "\"title\":\"demo\"", "graph_id");
+    let revision = jet::Canvas::source_revision(&src);
+    let insert = format!(
+        "{{\"schema_version\":1,\"op\":\"insert_call\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"callee\":\"use_int\",\"args\":[],\"wire_origin_pin_id\":\"local:x\",\"wire_target_pin\":\"n\",\"wire_expr\":\"x\"}}",
+        revision, demo_graph_id
+    );
+    let out = jet::Canvas::apply_transaction_json(&path, &insert).expect("wired insert");
+    assert!(out.contains("\"changed\":true"), "{out}");
+    let changed = fs::read_to_string(&path).unwrap();
+    assert!(changed.contains("use_int(x)"), "{changed}");
+    let projected = jet::Canvas::graph_json_for_file(&path).expect("canvas graph after insert");
+    assert!(projected.contains("\"title\":\"use_int\""), "{projected}");
+    assert!(projected.contains("\"wire_kind\":\"data\""), "{projected}");
+}
+
+#[test]
 fn canvas_comment_regions_round_trip_through_source_comments() {
     let path = write_fixture("comment_region", CANVAS_COMMENT_FIXTURE);
     let src = fs::read_to_string(&path).unwrap();

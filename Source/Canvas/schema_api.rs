@@ -46,6 +46,7 @@ struct GraphBuilder {
     inline_exprs: Vec<InlineRec>,
     local_pins: HashMap<String, String>,
     local_types: HashMap<String, String>,
+    getter_pins: HashMap<String, String>,
     next_wire: usize,
 }
 
@@ -759,10 +760,24 @@ pub fn apply_transaction_json(path: &Path, request: &str) -> Result<String, Stri
             validate_qualified_name(&callee)?;
             let args = json_string_array(request, "args");
             let bind = json_string_field(request, "bind");
+            let wire_inline_expr_id = json_string_field(request, "wire_inline_expr_id");
+            let wire_expr = json_string_field(request, "wire_expr");
             if let Some(name) = &bind {
                 validate_ident(name)?;
             }
-            apply_insert_call(path, &src, &graph_id, &callee, &args, bind.as_deref())
+            if let Some(expr) = &wire_expr {
+                validate_qualified_name(expr)?;
+            }
+            apply_insert_call(
+                path,
+                &src,
+                &graph_id,
+                &callee,
+                &args,
+                bind.as_deref(),
+                wire_inline_expr_id.as_deref(),
+                wire_expr.as_deref(),
+            )
         }
         "create_trait_impl" => {
             let type_name = required_string(request, "type_name")?;

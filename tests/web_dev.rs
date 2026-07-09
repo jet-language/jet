@@ -666,6 +666,18 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(js.contains("default_args: member.default_args || [\"1\"]"));
     assert!(!js.contains("<span class=\"tag\">${escapeHtml(category)}</span>"));
     assert!(js.contains("function defaultArgsForAction"));
+    assert!(js.contains("function fuzzyScoreText"));
+    assert!(js.contains("__jetCanvasFuzzyScore"));
+    assert!(js.contains("actionFuzzyScore(action, query)"));
+    assert!(js.contains("function restoreNodePositions"));
+    assert!(js.contains("function rememberSelectedNodePositions"));
+    assert!(js.contains("if (hasSavedNodePositions(graph)) return"));
+    assert!(js.contains("if (drag && drag.mode === \"node\") return"));
+    assert!(js.contains("function hitWireEndpointAt"));
+    assert!(js.contains("wireEndpointHit.push"));
+    assert!(js.contains("wire_inline_expr_id"));
+    assert!(js.contains("wire_origin_pin_id"));
+    assert!(js.contains("wire_target_pin"));
     assert!(js.contains("const projectFunctions = (doc.project_functions || [])"));
     assert!(js.contains("project_function"));
     assert!(js.contains("action-category"));

@@ -69,6 +69,7 @@ pub fn canvas_js() -> String {
   let pinPoints = new Map();
   let pinHit = [];
   let pinEditorHit = [];
+  let wireEndpointHit = [];
   let connectedPinIds = new Set();
   let latestDoc = null;
   let latestProject = null;
@@ -80,7 +81,7 @@ pub fn canvas_js() -> String {
   let proofDoc = null;
   let undoStack = [];
   let redoStack = [];
-  let editorState = { bookmarks: [], favorites: [], actionUse: {}, rerouteKnots: [], tourDismissed: false };
+  let editorState = { bookmarks: [], favorites: [], actionUse: {}, rerouteKnots: [], nodePositions: {}, tourDismissed: false };
   let wireStyle = "bezier";
   let runState = { running: false, last: "idle" };
   let selectedGraphId = null;
@@ -113,6 +114,7 @@ pub fn canvas_js() -> String {
   let coreCatalogLoaded = false;
   let coreCatalogLoading = null;
   let contextMenuState = null;
+  let pendingInsertPlacement = null;
   const UI_FONT = '"Inter", "Segoe UI", Roboto, system-ui, sans-serif';
   const MONO_FONT = '"JetBrains Mono", ui-monospace, "SFMono-Regular", Consolas, monospace';
   const TYPE_COLOR_MAP = {
@@ -167,6 +169,7 @@ pub fn canvas_js() -> String {
     editorState.favorites ||= [];
     editorState.actionUse ||= {};
     editorState.rerouteKnots ||= [];
+    editorState.nodePositions ||= {};
     editorState.tourDismissed = !!editorState.tourDismissed;
     if (firstRunTour) firstRunTour.classList.toggle("is-open", !editorState.tourDismissed);
   }
@@ -208,6 +211,64 @@ pub fn canvas_js() -> String {
       x: x - node.layout.x * layoutScale.x,
       y: y - node.layout.y * layoutScale.y
     });
+    rememberNodePosition(currentGraphOrNull(), node);
+  }
+
+  function graphPositionStore(graph) {
+    if (!graph) return null;
+    editorState.nodePositions ||= {};
+    editorState.nodePositions[graph.graph_id] ||= {};
+    return editorState.nodePositions[graph.graph_id];
+  }
+
+  function hasSavedNodePositions(graph) {
+    const store = graph && editorState.nodePositions && editorState.nodePositions[graph.graph_id];
+    return !!store && Object.keys(store).length > 0;
+  }
+
+  function rememberNodePosition(graph, node) {
+    const store = graphPositionStore(graph);
+    if (!store || !node) return;
+    store[node.node_id] = { x: nodeX(node), y: nodeY(node) };
+  }
+
+  function rememberSelectedNodePositions(graph) {
+    if (!graph) return;
+    for (const node of graph.nodes || []) {
+      if (selectedNodeIds.has(node.node_id)) rememberNodePosition(graph, node);
+    }
+    saveEditorState();
+  }
+
+  function restoreNodePositions(graph) {
+    if (!graph || (drag && drag.mode === "node")) return;
+    const store = editorState.nodePositions && editorState.nodePositions[graph.graph_id];
+    if (!store) return;
+    for (const node of graph.nodes || []) {
+      const pos = store[node.node_id];
+      if (!pos || !Number.isFinite(pos.x) || !Number.isFinite(pos.y)) continue;
+      nodeOffsets.set(node.node_id, {
+        x: pos.x - node.layout.x * layoutScale.x,
+        y: pos.y - node.layout.y * layoutScale.y
+      });
+    }
+  }
+
+  function applyPendingInsertPlacement(doc) {
+    const pending = pendingInsertPlacement;
+    if (!pending || !doc || !pending.graph_id) return;
+    const graph = (doc.graphs || []).find((g) => g.graph_id === pending.graph_id);
+    if (!graph) return;
+    const wanted = String(pending.title || "").split(".").pop();
+    const candidates = (graph.nodes || []).filter((node) => {
+      if (graphPositionStore(graph) && graphPositionStore(graph)[node.node_id]) return false;
+      return node.title === wanted || node.title === pending.title || String(pending.title || "").endsWith("." + node.title);
+    });
+    const node = candidates.sort((a, b) => (b.source_span && b.source_span.start || 0) - (a.source_span && a.source_span.start || 0))[0];
+    if (!node) return;
+    setNodeViewPosition(node, pending.x, pending.y);
+    saveEditorState();
+    pendingInsertPlacement = null;
   }
 
   function alignSelectedNodes(axis) {
@@ -222,6 +283,7 @@ pub fn canvas_js() -> String {
       const y = axis === "y" ? target : nodeY(node);
       setNodeViewPosition(node, x, y);
     }
+    saveEditorState();
     showToast(axis === "y" ? "Aligned top" : "Aligned left");
     drawGraph(latestDoc);
   }
@@ -236,6 +298,7 @@ pub fn canvas_js() -> String {
     }
     autoNodeOffsets = new Map();
     wireStyle = "bezier";
+    saveEditorState();
     showToast("Graph tidied");
     drawGraph(latestDoc);
   }
@@ -735,12 +798,29 @@ pub fn canvas_js() -> String {
   }
 
   function drawPinLabel(pin, x, y, align) {
-    const label = pinName(pin);
+    const label = visiblePinLabel(pin);
+    if (!label) return;
     ctx.font = `${Math.max(9, 11 * view.zoom)}px ${UI_FONT}`;
     ctx.textAlign = align;
     ctx.fillStyle = isExecPin(pin) ? "rgba(242,244,248,.86)" : "rgba(234,242,255,.70)";
     ctx.fillText(clipText(label, 24), x, y);
     ctx.textAlign = "left";
+  }
+
+  function visiblePinLabel(pin) {
+    if (!pin) return "";
+    if (!isExecPin(pin)) return pinName(pin);
+    const graph = currentGraphOrNull();
+    const node = graph && (graph.nodes || []).find((n) => n.node_id === pin.node_id);
+    if (!node) return "";
+    return visiblePinLabelInGraph(graph, node, pin);
+  }
+
+  function visiblePinLabelInGraph(graph, node, pin) {
+    if (!pin) return "";
+    if (!isExecPin(pin)) return pinName(pin);
+    const count = pinsForNode(graph, node, pin.direction, true).length;
+    return count > 1 ? pinName(pin) : "";
   }
 
   function drawPinHoverTooltip(pin) {
@@ -777,7 +857,8 @@ pub fn canvas_js() -> String {
   function drawSocketRow(pin, x, y, w, dir, recordHit) {
     const execInset = isExecPin(pin) ? 5 * view.zoom : 0;
     const px = dir === "input" ? x + execInset : x + w - execInset;
-    const labelX = dir === "input" ? x + 22 * view.zoom : x + w - 22 * view.zoom;
+    const hasLabel = !!visiblePinLabel(pin);
+    const labelX = dir === "input" ? x + (hasLabel ? 22 : 8) * view.zoom : x + w - (hasLabel ? 22 : 8) * view.zoom;
     const labelAlign = dir === "input" ? "left" : "right";
     drawPin(pin, px, y, dir, recordHit);
     drawPinLabel(pin, labelX, y + 4 * view.zoom, labelAlign);
@@ -897,6 +978,9 @@ pub fn canvas_js() -> String {
     const targetType = pin.type || null;
     let entries = actionEntries.filter((entry) => {
       if (!targetType) return true;
+      if (isExecPin(pin)) return pin.direction === "output"
+        ? actionAcceptsExec(entry)
+        : actionProducesExec(entry);
       if (pin.direction === "output") {
         return (entry.pins || []).some((p) => p.direction === "input" && compatibleActionType(p.type, targetType));
       }
@@ -906,6 +990,17 @@ pub fn canvas_js() -> String {
     return entries;
   }
 
+  function actionAcceptsExec(entry) {
+    const op = entry.op || entry.insert_op || "";
+    if (["insert_branch", "insert_switch", "insert_loop", "insert_fallible_rail"].includes(op)) return true;
+    if (entry.pure) return false;
+    return entry.kind === "canvas.action" || entry.kind === "canvas.core_catalog" || entry.kind === "project_function" || op === "insert_call" || op === "insert_print";
+  }
+
+  function actionProducesExec(entry) {
+    return actionAcceptsExec(entry);
+  }
+
   function closeContextMenu() {
     contextMenu.classList.remove("is-open");
     contextMenu.innerHTML = "";
@@ -913,11 +1008,41 @@ pub fn canvas_js() -> String {
   }
 
   function actionMatchesQuery(action, query) {
-    if (!query) return true;
-    const q = query.toLowerCase();
-    return [action.title, action.detail, action.group, action.kind, action.signature, action.summary, action.module_path, action.callee, action.ret, action.type]
-      .some((value) => String(value || "").toLowerCase().includes(q));
+    return actionFuzzyScore(action, query) > -Infinity;
   }
+
+  function fuzzyScoreText(value, query) {
+    const text = String(value || "").toLowerCase();
+    const q = String(query || "").trim().toLowerCase();
+    if (!q) return 0;
+    if (!text) return -Infinity;
+    if (text === q) return 3000;
+    if (text.startsWith(q)) return 2200 - Math.min(400, text.length - q.length);
+    const idx = text.indexOf(q);
+    if (idx >= 0) return 1600 - idx;
+    let pos = -1;
+    let first = -1;
+    let last = -1;
+    let gaps = 0;
+    for (const ch of q) {
+      const next = text.indexOf(ch, pos + 1);
+      if (next < 0) return -Infinity;
+      if (first < 0) first = next;
+      if (pos >= 0) gaps += Math.max(0, next - pos - 1);
+      pos = next;
+      last = next;
+    }
+    const span = Math.max(1, last - first + 1);
+    const density = q.length / span;
+    return 900 + density * 500 - gaps * 4 - first;
+  }
+
+  function actionFuzzyScore(action, query) {
+    if (!query) return 0;
+    return Math.max(...[action.title, action.detail, action.group, action.kind, action.signature, action.summary, action.module_path, action.callee, action.ret, action.type]
+      .map((value) => fuzzyScoreText(value, query)));
+  }
+  window.__jetCanvasFuzzyScore = fuzzyScoreText;
 
   function paletteCategoryForAction(action) {
     const group = String(action.group || "").toLowerCase();
@@ -957,8 +1082,9 @@ pub fn canvas_js() -> String {
     if (!contextMenuState) return;
     const query = contextMenuState.query || "";
     const matches = contextMenuState.actions
-      .filter((action) => actionMatchesQuery(action, query))
-      .sort((a, b) => rankAction(b) - rankAction(a) || String(a.module_path || "").localeCompare(String(b.module_path || "")) || String(a.title).localeCompare(String(b.title)));
+      .map((action) => Object.assign({ __score: actionFuzzyScore(action, query) }, action))
+      .filter((action) => action.__score > -Infinity)
+      .sort((a, b) => b.__score - a.__score || rankAction(b) - rankAction(a) || String(a.module_path || "").localeCompare(String(b.module_path || "")) || String(a.title).localeCompare(String(b.title)));
     const context = contextMenuState.pin ? `${contextMenuState.pin.name}: ${contextMenuState.pin.type}` : `All nodes · ${matches.length}/${contextMenuState.actions.length}`;
     const port = contextMenuState.pin ? pinPortHtml(contextMenuState.pin.type || "Value") : "";
     const favorites = favoriteSet();
@@ -1034,7 +1160,8 @@ pub fn canvas_js() -> String {
       actions: (actions.length ? actions : [{ title: "No compatible actions", detail: "source-backed only", group: "empty", run: () => {} }]).map((action, index) => Object.assign({ index }, action)),
       pin: opts.pin || null,
       context: opts.context || "",
-      query: opts.query || ""
+      query: opts.query || "",
+      graphPoint: opts.graphPoint || null
     };
     renderActionPalette();
     contextMenu.style.left = Math.min(x, window.innerWidth - 430) + "px";
@@ -1048,7 +1175,7 @@ pub fn canvas_js() -> String {
     openActionPalette(x, y, title, actions, { context: "node actions" });
   }
 
-  function openPinMenu(pin, x, y) {
+  function openPinMenu(pin, x, y, graphPoint) {
     const entries = functionsForPin(pin);
     const actions = entries.map((entry) => ({
       title: entry.title,
@@ -1097,7 +1224,7 @@ pub fn canvas_js() -> String {
         }
       });
     }
-    openActionPalette(x, y, "Compatible actions", actions, { pin, context: "pin actions" });
+    openActionPalette(x, y, "Compatible actions", actions, { pin, context: "pin actions", graphPoint });
   }
 
   function richestGraph(doc) {
@@ -1640,6 +1767,8 @@ pub fn canvas_js() -> String {
   function reflowGraph(graph) {
     autoNodeOffsets = new Map();
     if (!graph || !graph.nodes || graph.nodes.length === 0) return;
+    if (drag && drag.mode === "node") return;
+    if (hasSavedNodePositions(graph)) return;
     const colGap = 40;
     const ranked = rankedGraphLayout(graph);
     for (const node of graph.nodes) {
@@ -1670,6 +1799,7 @@ pub fn canvas_js() -> String {
 
   function graphBounds(graph) {
     if (!graph || graph.nodes.length === 0) return { minX: 0, minY: 0, maxX: 600, maxY: 360 };
+    restoreNodePositions(graph);
     reflowGraph(graph);
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const n of graph.nodes) {
@@ -1825,7 +1955,7 @@ pub fn canvas_js() -> String {
     if (node.archetype === "entry") return { w: Math.max(174, 118 + String(node.title || "").length * 8, 148 + Math.max(inputData, outputData) * 16), h: 66 + Math.max(inputData, outputData) * 24 };
     if (isOperatorNode(node)) return { w: 88, h: Math.max(58, 28 + Math.max(inputData, outputData) * 22) };
     const titleW = 92 + String(node.title || "").length * 7.5;
-    const pinW = Math.max(inputData, outputData) ? 150 + Math.max(...(graph.pins || []).filter((p) => p.node_id === node.node_id).map((p) => String(p.name || "").length * 6 + String(p.type || "").length * 5), 0) : 0;
+    const pinW = Math.max(inputData, outputData, execIn, execOut) ? 150 + Math.max(...(graph.pins || []).filter((p) => p.node_id === node.node_id).map((p) => String(visiblePinLabelInGraph(graph, node, p) || "").length * 6 + (isExecPin(p) ? 0 : String(p.type || "").length * 5)), 0) : 0;
     const w = compact ? Math.max(150, titleW) : Math.max(150, node.kind === "branch" || node.kind === "dispatch" ? 296 : 232, titleW, pinW);
     const execRows = Math.max(execIn, execOut);
     const dataRows = Math.max(inputData, outputData);
@@ -1897,6 +2027,29 @@ pub fn canvas_js() -> String {
     ctx.stroke();
     ctx.shadowBlur = 0;
     if (control || selectedWire || activeWire) drawWireArrow(from, to, color, control);
+  }
+
+  function rememberWireEndpoint(wire, from, to) {
+    const r = Math.max(8, 10 * view.zoom);
+    wireEndpointHit.push({ x: from.x - r, y: from.y - r, w: r * 2, h: r * 2, cx: from.x, cy: from.y, wire, endpoint: "from", pin: from.pin, other: to.pin });
+    wireEndpointHit.push({ x: to.x - r, y: to.y - r, w: r * 2, h: r * 2, cx: to.x, cy: to.y, wire, endpoint: "to", pin: to.pin, other: from.pin });
+  }
+
+  function hitWireEndpointAt(x, y) {
+    let best = null;
+    let bestDistance = Infinity;
+    for (let i = wireEndpointHit.length - 1; i >= 0; i--) {
+      const h = wireEndpointHit[i];
+      if (x < h.x || x > h.x + h.w || y < h.y || y > h.y + h.h) continue;
+      const dx = x - h.cx;
+      const dy = y - h.cy;
+      const d = dx * dx + dy * dy;
+      if (d < bestDistance) {
+        best = h;
+        bestDistance = d;
+      }
+    }
+    return best;
   }
 
   function drawRerouteKnots(graph) {
@@ -2138,6 +2291,7 @@ pub fn canvas_js() -> String {
     pinPoints = new Map();
     pinHit = [];
     pinEditorHit = [];
+    wireEndpointHit = [];
     graphSelect.value = selectedGraphId;
     const pins = new Map(graph.pins.map((p) => [p.pin_id, p]));
     connectedPinIds = new Set((graph.wires || []).flatMap((wire) => [wire.from_pin, wire.to_pin]));
@@ -2147,6 +2301,7 @@ pub fn canvas_js() -> String {
       if (!inlineByNode.has(expr.node_id)) inlineByNode.set(expr.node_id, []);
       inlineByNode.get(expr.node_id).push(expr);
     }
+    restoreNodePositions(graph);
     reflowGraph(graph);
 
     drawCommentRegions(graph);
@@ -2164,6 +2319,7 @@ pub fn canvas_js() -> String {
       if (!visibleIds.has(from.pin.node_id) && !visibleIds.has(to.pin.node_id)) continue;
       const activeWire = debugOverlay && debugOverlay.active_wire_id === wire.wire_id;
       const selectedWire = selectedNodeIds.has(from.pin.node_id) || selectedNodeIds.has(to.pin.node_id);
+      rememberWireEndpoint(wire, from, to);
       drawWire(wire, from, to, activeWire, selectedWire);
       if (detailToggles.types && (activeWire || selectedWire || view.zoom >= 1.05)) drawWireTypeBadge(wire, from, to);
     }
@@ -2765,6 +2921,7 @@ pub fn canvas_js() -> String {
     const graph = latestDoc ? currentGraph(latestDoc) : null;
     const node = graph && (graph.nodes || []).find((n) => n.node_id === pin.node_id);
     if (node && /^[A-Za-z_][A-Za-z0-9_]*$/.test(node.title) && node.kind === "binding") return node.title;
+    if (node && /^[A-Za-z_][A-Za-z0-9_]*$/.test(node.title) && node.kind === "variable_get") return node.title;
     return null;
   }
 
@@ -2800,6 +2957,10 @@ pub fn canvas_js() -> String {
       const replacement = sourceExprForOutputPin(out);
       if (exactPinMatch(fromPin, target) && wire && replacement) {
         postTransaction({ schema_version: 1, op: "move_link", revision: latestDoc.revision, wire_id: wire.wire_id, replacement });
+      } else if (exactPinMatch(fromPin, target) && replacement) {
+        const expr = inlineForPin(graph, input);
+        if (expr) postTransaction({ schema_version: 1, op: "edit_inline_expr", revision: latestDoc.revision, inline_expr_id: expr.inline_expr_id, new_expr: replacement });
+        else showToast("Input has no source expression to replace");
       } else if (!exactPinMatch(fromPin, target)) {
         const expr = inlineForPin(graph, input);
         const callee = window.prompt("Visible conversion function", (input.type || "Value") + ".from");
@@ -2842,6 +3003,13 @@ pub fn canvas_js() -> String {
     const x = ev.clientX - rect.left;
     const y = ev.clientY - rect.top;
     if (hitPinDefaultEditorAt(x, y)) return;
+    const endpoint = hitWireEndpointAt(x, y);
+    if (endpoint && endpoint.other) {
+      hoverPin = endpoint.pin;
+      drag = { mode: "pin", pin: endpoint.other, rewire: endpoint, x, y, mx: x, my: y };
+      showToast("Rewire " + pinName(endpoint.other));
+      return;
+    }
     const pin = hitPinAt(x, y);
     if (pin) {
       hoverPin = pin;
@@ -2895,7 +3063,11 @@ pub fn canvas_js() -> String {
   });
 
   window.addEventListener("mouseup", function (ev) {
-    if (drag && drag.mode === "node") showToast("Moved " + selectedNodeIds.size + " node" + (selectedNodeIds.size === 1 ? "" : "s") + " locally");
+    if (drag && drag.mode === "node") {
+      const graph = latestDoc ? currentGraph(latestDoc) : null;
+      rememberSelectedNodePositions(graph);
+      showToast("Moved " + selectedNodeIds.size + " node" + (selectedNodeIds.size === 1 ? "" : "s") + " locally");
+    }
     if (drag && drag.mode === "pin") {
       const rect = canvas.getBoundingClientRect();
       const target = hitPinAt(ev.clientX - rect.left, ev.clientY - rect.top) || hoverPin;
@@ -2917,7 +3089,7 @@ pub fn canvas_js() -> String {
         completeConnection(drag.pin, target, graph);
       } else {
         setPendingPin(null);
-        openPinMenu(drag.pin, ev.clientX, ev.clientY);
+        openPinMenu(drag.pin, ev.clientX, ev.clientY, { x: wx(ev.clientX - rect.left), y: wy(ev.clientY - rect.top) });
       }
     }
     drag = null;
@@ -3024,7 +3196,17 @@ pub fn canvas_js() -> String {
 
   window.addEventListener("keydown", function (ev) {
     if (ev.key === " ") spaceDown = true;
-    if (ev.key === "Escape") closeContextMenu();
+    if (ev.key === "Escape") {
+      const hadTransient = !!drag || !!pendingPin || contextMenu.classList.contains("is-open");
+      drag = null;
+      setPendingPin(null);
+      closeContextMenu();
+      if (latestDoc) drawGraph(latestDoc);
+      if (hadTransient) {
+        ev.preventDefault();
+        return;
+      }
+    }
     if ((ev.ctrlKey || ev.metaKey) && ev.key === "`") {
       ev.preventDefault();
       setViewMode(viewMode === "graph" ? "code" : "graph");
@@ -3120,6 +3302,7 @@ pub fn canvas_js() -> String {
         const old = nodeOffsets.get(id) || { x: 0, y: 0 };
         nodeOffsets.set(id, { x: old.x + dx * step, y: old.y + dy * step });
       }
+      rememberSelectedNodePositions(currentGraphOrNull());
       if (latestDoc) drawGraph(latestDoc);
     }
   });
@@ -3173,24 +3356,75 @@ pub fn canvas_js() -> String {
     return existing.length ? existing : ["1"];
   }
 
+  function wiredArgsForAction(item, pin) {
+    const args = defaultArgsForAction(item, pin).slice();
+    if (!pin || pin.direction !== "output" || isExecPin(pin)) return args;
+    const expr = sourceExprForOutputPin(pin);
+    if (!expr) return args;
+    const inputs = (item.pins || []).filter((p) => p.direction === "input");
+    const index = inputs.findIndex((p) => compatibleActionType(p.type, pin.type));
+    if (index >= 0) {
+      while (args.length <= index) args.push(default_arg_for_pin_js(inputs[args.length]));
+      args[index] = expr;
+    }
+    return args;
+  }
+
+  function default_arg_for_pin_js(pin) {
+    const t = String(pin && pin.type || "Int");
+    if (t === "String" || t === "Char") return "\"\"";
+    if (t === "Bool") return "false";
+    if (t === "Float" || t === "F32" || t === "F64") return "0.0";
+    return "1";
+  }
+
   function callExpressionForAction(item, pin) {
     const callee = item.insert_callee || item.callee || item.title;
-    const args = defaultArgsForAction(item, pin);
+    const args = wiredArgsForAction(item, pin);
     return callee + "(" + args.join(", ") + ")";
+  }
+
+  function wireTargetForAction(item, pin) {
+    if (!pin) return null;
+    if (isExecPin(pin)) return { pin: pin.direction === "output" ? "exec" : "then", expr: null };
+    if (pin.direction === "output") {
+      const input = (item.pins || []).filter((p) => p.direction === "input").find((p) => compatibleActionType(p.type, pin.type));
+      return { pin: input && input.name || "arg1", expr: sourceExprForOutputPin(pin) };
+    }
+    const ret = actionReturnType(item) || item.ret || "Value";
+    if (compatibleActionType(pin.type, ret)) return { pin: "result", expr: null };
+    return null;
+  }
+
+  function transactionForPaletteInsert(item, pin, graphPoint) {
+    const callee = item.insert_callee || item.callee || (item.op === "insert_print" ? "print" : null);
+    if (!callee) return null;
+    const target = wireTargetForAction(item, pin);
+    const graph = currentGraph(latestDoc);
+    const body = { schema_version: 1, op: "insert_call", revision: latestDoc.revision, graph_id: selectedGraphId, callee, args: wiredArgsForAction(item, pin) };
+    if (pin && target) {
+      body.wire_origin_pin_id = pin.pin_id;
+      body.wire_target_pin = target.pin;
+      if (target.expr) body.wire_expr = target.expr;
+      if (pin.direction === "input") {
+        const inline = inlineForPin(graph, pin);
+        if (inline) body.wire_inline_expr_id = inline.inline_expr_id;
+      }
+    }
+    if (graphPoint) {
+      pendingInsertPlacement = { graph_id: selectedGraphId, title: callee, x: graphPoint.x, y: graphPoint.y };
+    }
+    return body;
   }
 
   function runPalette(item, pinContext) {
     if (!latestDoc || !selectedGraphId) return;
     const pin = pinContext || (contextMenuState && contextMenuState.pin) || null;
+    const graphPoint = contextMenuState && contextMenuState.graphPoint || null;
     if (item.kind === "canvas.core_catalog") {
-      postTransaction({ schema_version: 1, op: "insert_call", revision: latestDoc.revision, graph_id: selectedGraphId, callee: item.insert_callee || item.callee, args: defaultArgsForAction(item, pin) });
+      postTransaction(transactionForPaletteInsert(item, pin, graphPoint));
     } else if (item.kind === "project_function") {
-      if (pin && pin.direction === "input") {
-        const graph = currentGraph(latestDoc);
-        const expr = inlineForPin(graph, pin);
-        if (expr) return postTransaction({ schema_version: 1, op: "edit_inline_expr", revision: latestDoc.revision, inline_expr_id: expr.inline_expr_id, new_expr: callExpressionForAction(item, pin) });
-      }
-      postTransaction({ schema_version: 1, op: "insert_call", revision: latestDoc.revision, graph_id: selectedGraphId, callee: item.callee, args: defaultArgsForAction(item, pin) });
+      postTransaction(transactionForPaletteInsert(item, pin, graphPoint));
     } else if (item.op === "preview_canvas_action") {
       if (pin && pin.direction === "input") {
         const graph = currentGraph(latestDoc);
@@ -3201,10 +3435,10 @@ pub fn canvas_js() -> String {
     } else if (item.op === "command_authority") {
       renderCommandAuthority(item);
     } else if (item.op === "insert_print") {
-      postTransaction({ schema_version: 1, op: "insert_call", revision: latestDoc.revision, graph_id: selectedGraphId, callee: "print", args: ["\"canvas\""] });
+      postTransaction(transactionForPaletteInsert(Object.assign({}, item, { callee: "print" }), pin, graphPoint));
     } else if (item.op === "insert_call") {
       const callee = item.insert_callee || item.callee || window.prompt("Call function", "print");
-      if (callee) postTransaction({ schema_version: 1, op: "insert_call", revision: latestDoc.revision, graph_id: selectedGraphId, callee, args: defaultArgsForAction(item.insert_callee || item.callee ? item : { args: ["\"canvas\""] }, pin) });
+      if (callee) postTransaction(transactionForPaletteInsert(Object.assign({}, item.insert_callee || item.callee ? item : { args: ["\"canvas\""] }, { callee }), pin, graphPoint));
     } else if (["insert_branch", "insert_switch", "insert_loop", "insert_fallible_rail"].includes(item.op)) {
       postTransaction({ schema_version: 1, op: item.op, revision: latestDoc.revision, graph_id: selectedGraphId });
     } else if (item.op === "comment") {
@@ -3231,6 +3465,7 @@ pub fn canvas_js() -> String {
   }
 
   function postTransaction(body) {
+    if (!body) return showToast("Action needs a source transaction");
     const txUrl = window.__JET_CANVAS_TX__ || ((window.__JET_CANVAS_BASE__ || "/canvas") + "/transaction");
     const beforeSource = latestDoc && latestDoc.source_text;
     window.__jetCanvasLastTx = body;
@@ -3303,6 +3538,7 @@ pub fn canvas_js() -> String {
         latestDoc = doc;
         loadEditorState(doc);
         loadDetailToggles(doc);
+        applyPendingInsertPlacement(doc);
         sourceView.textContent = doc.source_text || "";
         const firstLoad = selectedGraphId === null;
         drawGraph(doc);
