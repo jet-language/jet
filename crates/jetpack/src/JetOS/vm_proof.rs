@@ -207,13 +207,18 @@ fn write_runner_guest_proof(
     require_guest_report(report, system, gen)?;
     let guest = guest_proof_path(harness);
     let proof_tier = if real_guest { "real-guest" } else { "plumbing" };
+    let installer_iso = systems_dir()
+        .join("images")
+        .join(format!("jetos-installer-{}.iso", system.name));
     let text = format!(
-        "{{\"state\":\"guest-passed\",\"proof_tier\":{},\"host\":{},\"generation\":{},\"disk\":{},\"media_proof\":{},\"assertions\":[{}],\"tools\":[{}],\"serial_report\":{}}}\n",
+        "{{\"state\":\"guest-passed\",\"proof_tier\":{},\"host\":{},\"generation\":{},\"disk\":{},\"media_proof\":{},\"media_proof_sha256\":{},\"installer_iso_sha256\":{},\"assertions\":[{}],\"tools\":[{}],\"serial_report\":{}}}\n",
         JSON::quote(proof_tier),
         JSON::quote(&system.name),
         JSON::quote(&gen.name),
         JSON::quote(disk),
         JSON::quote(&media_proof.display().to_string()),
+        JSON::quote(&file_sha256(media_proof)?),
+        JSON::quote(&file_sha256(&installer_iso)?),
         guest_assertions_json(),
         vm_tools_json(),
         JSON::quote(report)
@@ -243,12 +248,10 @@ fn finalize_vm_guest_proof(
     }
     let text = fs::read_to_string(&guest)
         .map_err(|e| format!("reading `{}` failed: {e}", guest.display()))?;
-    require_json_field(&text, "state", "guest-passed")?;
-    require_json_field(&text, "host", &system.name)?;
-    require_json_field(&text, "generation", &gen.name)?;
-    require_json_field(&text, "disk", disk)?;
-    require_json_field(&text, "media_proof", &media_proof.display().to_string())?;
-    require_guest_assertions(&text)?;
+    if validate_cached_guest_proof(&text, system, gen, disk, media_proof).is_err() {
+        let _ = fs::remove_file(&guest);
+        return Ok(None);
+    }
     for (name, _path, sha) in vm_tool_facts() {
         if !text.contains(&name) || !text.contains(&sha) {
             return Err(format!("missing tool proof for `{name}`"));
@@ -273,6 +276,26 @@ fn finalize_vm_guest_proof(
     Ok(Some(harness.to_path_buf()))
 }
 
+fn validate_cached_guest_proof(
+    text: &str,
+    system: &SystemPlan,
+    gen: &Generation,
+    disk: &str,
+    media_proof: &Path,
+) -> Result<(), String> {
+    require_json_field(text, "state", "guest-passed")?;
+    require_json_field(text, "host", &system.name)?;
+    require_json_field(text, "generation", &gen.name)?;
+    require_json_field(text, "disk", disk)?;
+    require_json_field(text, "media_proof", &media_proof.display().to_string())?;
+    require_json_field(text, "media_proof_sha256", &file_sha256(media_proof)?)?;
+    let installer_iso = systems_dir()
+        .join("images")
+        .join(format!("jetos-installer-{}.iso", system.name));
+    require_json_field(text, "installer_iso_sha256", &file_sha256(&installer_iso)?)?;
+    require_guest_assertions(text)
+}
+
 fn require_vm_run_proof(
     gen: &Generation,
     system: &SystemPlan,
@@ -291,6 +314,12 @@ fn require_vm_run_proof(
     require_json_field(&harness_text, "disk", disk)?;
     require_json_field(&harness_text, "media_proof", &media_proof.display().to_string())?;
     Ok(())
+}
+
+fn file_sha256(path: &Path) -> Result<String, String> {
+    fs::read(path)
+        .map(|bytes| crate::SHA256::sha256_hex(&bytes))
+        .map_err(|e| format!("hashing `{}` failed: {e}", path.display()))
 }
 
 fn guest_proof_path(harness: &Path) -> PathBuf {

@@ -131,7 +131,10 @@ fn copy_dir_recursive_deref(src: &Path, dst: &Path) -> std::io::Result<()> {
         let meta = match fs::metadata(&path) {
             Ok(meta) => meta,
             Err(_e) if entry.file_type()?.is_symlink() => {
-                copy_runtime_symlink(&path, &target)?;
+                let link_target = fs::read_link(&path)?;
+                if should_preserve_staged_symlink(&link_target) {
+                    copy_runtime_symlink(&path, &target)?;
+                }
                 continue;
             }
             Err(e) => {

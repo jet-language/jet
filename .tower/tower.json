@@ -3,8 +3,8 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 368,
-    "rev": 1936,
+    "nextNum": 369,
+    "rev": 1941,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -18727,6 +18727,30 @@
       "created": "2026-07-08T23:05:17.490Z",
       "updated": "2026-07-09",
       "workOrder": 367
+    },
+    {
+      "id": "c0xynn6m",
+      "num": 368,
+      "title": "Canvas Blueprint-experience overhaul v2 — interaction, shell, node states",
+      "body": "Owner punch list 2026-07-09: node visual precision (clipping, header fit, no control subtitles), plain-language UI, variables sidebar + property panel, universal wire drag with fuzzy filtered menu, free node placement, fan-out wires + rewiring, copy/paste/comment boxes, staged (canvas-only) nodes, sidebar cleanup (trust/sha/source-truth removal), icon toolbar, pattern-matching if UI. Disabled/debug-only node markers gated on D-CANVASSTATE1.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-09",
+          "by": "owner",
+          "text": "Activated into epoch e3 track"
+        }
+      ],
+      "created": "2026-07-09T12:25:21.682Z",
+      "updated": "2026-07-09"
     }
   ],
   "decisions": [
@@ -40893,6 +40917,65 @@
       "status": "ratified",
       "outcome": "C",
       "ratifiedAt": "2026-07-08"
+    },
+    {
+      "id": "D-CANVASSTATE1",
+      "cardId": "c0xynn6m",
+      "group": "syntax",
+      "title": "Canvas node states: how a disabled node and a debug-only node are spelled in source",
+      "gist": "What Jet source looks like when a Canvas node is switched off temporarily, and how a node can be marked to exist only in debug builds.",
+      "explainer": "One attribute family gives both Blueprint states with real syntax that survives fmt/refactors and stays type-checked (a comment marker silently rots when the code around it is renamed); #DebugOnly hides the comptime plumbing beginners should never need to see, while comptime if build.profile remains available to experts if C's value is also ratified later.",
+      "story": "Priya is wiring a pricing function in Canvas. A logging call keeps cluttering her test output, so she wants to switch that node off for a while without deleting it — same as unplugging a cable, not cutting it. Separately, she has a sanity-check node that should run in dev builds but must never ship in the release binary. Canvas is source-backed: both states must be spelled in the .jet file somehow, and today Jet has no spelling for either (only build.os exists as a comptime value, no debug/release distinction).",
+      "inWild": "fn checkout(cart: Cart) -> Receipt {\n    total = price(cart)\n    log(\"cart total\", total)      // <- Priya wants this node OFF for now\n    assert_balanced(cart, total)  // <- and this one only in debug builds\n    return charge(total)\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Comment marker for off, no debug-only yet",
+          "detail": "Disabled node = the statement commented out with a marker comment Canvas recognizes and can re-enable. Zero new language surface; code is genuinely inert because it is a comment. Debug-only nodes wait for a separate build-profile decision.",
+          "code": "fn checkout(cart: Cart) -> Receipt {\n    total = price(cart)\n    //[off] log(\"cart total\", total)\n    assert_balanced(cart, total)\n    return charge(total)\n}\n\n// Canvas shows the node greyed with an 'off' badge; clicking Enable\n// removes the //[off] prefix. jet build never sees the line."
+        },
+        {
+          "key": "B",
+          "name": "#Off attribute statement gate",
+          "detail": "A real attribute the compiler parses and skips (still type-checked, like Rust's #[cfg] siblings or C#'s [Conditional]). Survives formatting and refactors as real syntax; Canvas toggles it. Debug-only becomes #Off(\"release\") or a sibling attribute later.",
+          "code": "fn checkout(cart: Cart) -> Receipt {\n    total = price(cart)\n    #Off log(\"cart total\", total)\n    assert_balanced(cart, total)\n    return charge(total)\n}\n\n// jet build: statement parsed + type-checked, emits nothing.\n// jet fmt keeps it; rename refactors still touch it."
+        },
+        {
+          "key": "C",
+          "name": "build.profile comptime value + comptime if (debug-only), comment marker (off)",
+          "detail": "Adds build.profile (.Debug | .Release) beside build.os; debug-only nodes project as a comptime if rail Canvas renders as a badge, folded at compile time exactly like build.os dispatch. Temporary off stays the A-style comment marker since 'off' is a workspace state, not a program state.",
+          "code": "fn checkout(cart: Cart) -> Receipt {\n    total = price(cart)\n    //[off] log(\"cart total\", total)\n    comptime if build.profile == { .Debug -> assert_balanced(cart, total) }\n    return charge(total)\n}\n\n// jet build --release folds the comptime if to nothing;\n// jet dev / jet build (debug) keeps the assert. Canvas shows a\n// 'debug only' badge on the node instead of the comptime rail."
+        },
+        {
+          "key": "D",
+          "name": "Both as attributes: #Off and #DebugOnly",
+          "detail": "One attribute family for node states: #Off (skipped every build, still type-checked) and #DebugOnly (compiled only when the build profile is debug; requires the same build-profile machinery as C under the hood but the user never sees comptime if).",
+          "code": "fn checkout(cart: Cart) -> Receipt {\n    total = price(cart)\n    #Off log(\"cart total\", total)\n    #DebugOnly assert_balanced(cart, total)\n    return charge(total)\n}\n\n// Canvas: right-click node -> Disable / Debug only. Both badges\n// render on the node; release builds drop #DebugOnly statements."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "UE5 Blueprint",
+          "note": "Nodes have a Disabled state (greyed, skipped) and a Development Only mode (hazard-striped, compiled out of shipping builds) — the two states Priya expects.",
+          "code": "Right-click node -> Disable Node / Development Only"
+        },
+        {
+          "lang": "Rust",
+          "note": "cfg attributes gate code by build profile; debug_assert! is the idiomatic debug-only check that vanishes in release.",
+          "code": "#[cfg(debug_assertions)]\nfn sanity(cart: &Cart) { ... }\n\ndebug_assert!(balanced(cart, total));"
+        },
+        {
+          "lang": "C#",
+          "note": "[Conditional(\"DEBUG\")] methods compile to nothing in release while the call sites stay type-checked.",
+          "code": "[Conditional(\"DEBUG\")]\nstatic void AssertBalanced(Cart c, decimal t) { ... }"
+        }
+      ],
+      "rec": "D",
+      "status": "ratified",
+      "created": "2026-07-09T12:26:10.491Z",
+      "outcome": "D",
+      "ratifiedAt": "2026-07-09"
     }
   ],
   "questions": [
@@ -42157,6 +42240,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-09T12:27:55.526Z",
+      "by": "owner",
+      "action": "card.activate",
+      "ref": "c0xynn6m",
+      "note": ""
+    },
+    {
+      "at": "2026-07-09T12:27:53.505Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-CANVASSTATE1",
+      "note": "D"
+    },
+    {
+      "at": "2026-07-09T12:26:10.581Z",
+      "by": "claude",
+      "action": "message.send",
+      "ref": "msg5tenoww1",
+      "note": "→ owner: Ballot D-CANVASSTATE1 ready on #368 — node off/debug-only so"
+    },
+    {
+      "at": "2026-07-09T12:26:10.491Z",
+      "by": "claude",
+      "action": "decision.add",
+      "ref": "D-CANVASSTATE1",
+      "note": "Canvas node states: how a disabled node and a debug-only node are spelled in source"
+    },
+    {
+      "at": "2026-07-09T12:25:21.683Z",
+      "by": "claude",
+      "action": "card.add",
+      "ref": "c0xynn6m",
+      "note": "Canvas Blueprint-experience overhaul v2 — interaction, shell, node states"
+    },
     {
       "at": "2026-07-09T01:13:10.101Z",
       "by": "codex",
@@ -58059,6 +58177,17 @@
       "cardId": null,
       "file": null,
       "at": "2026-07-08T23:15:34.163Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg5tenoww1",
+      "from": "claude",
+      "to": "owner",
+      "text": "Ballot D-CANVASSTATE1 ready on #368 — node off/debug-only source spelling. Gates only the disable/debug-only Canvas features; everything else on #368 proceeds now.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-09T12:26:10.581Z",
       "deliveredAt": null,
       "readAt": null
     }

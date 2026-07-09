@@ -99,6 +99,9 @@ case "$cmdline" in
     if { [ -e "$system/sbin/init" ] || [ -L "$system/sbin/init" ]; } && command -v chroot >/dev/null 2>&1; then
         generation_target="/var/lib/jetos/generations/@JETOS_GENERATION@"
         mkdir -p /sysroot/run /sysroot/proc /sysroot/dev /sysroot/sys
+        mkdir -p /sysroot/var/lib/jetos
+        rm -f /sysroot/var/lib/jetos/current-system 2>/dev/null || true
+        ln -s "$generation_target" /sysroot/var/lib/jetos/current-system 2>/dev/null || true
         if [ -L /sysroot/run/current-system ]; then
             rm -f /sysroot/run/current-system 2>/dev/null || true
         elif [ -d /sysroot/run/current-system ]; then
@@ -127,7 +130,8 @@ case "$cmdline" in
         mount --move /dev /sysroot/dev 2>/dev/null || mount -t devtmpfs devtmpfs /sysroot/dev 2>/dev/null || true
         mount --move /sys /sysroot/sys 2>/dev/null || mount -t sysfs sysfs /sysroot/sys 2>/dev/null || true
         echo "jetos run: handing off to installed systemd"
-        export SYSTEMD_UNIT_PATH=/etc/systemd/system:/run/current-system/systemd/lib/systemd/system:/run/current-system/usr/lib/systemd/system:/run/current-system/lib/systemd/system
+        export JETOS_SYSTEM_ROOT=/var/lib/jetos/current-system
+        export SYSTEMD_UNIT_PATH=/etc/systemd/system:/var/lib/jetos/current-system/systemd/lib/systemd/system:/var/lib/jetos/current-system/usr/lib/systemd/system:/var/lib/jetos/current-system/lib/systemd/system
         exec chroot /sysroot /run/current-system/sbin/init systemd.unit=graphical.target
         echo "jetos run: systemd handoff failed; falling back to emergency console"
         mkdir -p /proc /dev /sys

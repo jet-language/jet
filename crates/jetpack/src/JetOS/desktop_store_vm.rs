@@ -224,11 +224,11 @@ fn write_desktop_facts(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
     let fallback_path = bin_dir.join("jetos-terminal-fallback");
     fs::write(&fallback_path, fallback)?;
     make_executable(&fallback_path)?;
-    let session_launcher = "#!/usr/bin/env sh\nset -eu\nroot=${JETOS_SYSTEM_ROOT:-/run/current-system}\nPATH=\"$root/sw/bin:$PATH\"\nexport PATH\nexport XDG_SESSION_TYPE=wayland\nexport XDG_CURRENT_DESKTOP=jetos:GNOME\nif [ \"${1:-}\" = \"--jetos-proof\" ]; then\n  if command -v gnome-session >/dev/null 2>&1; then\n    printf '%s\\n' 'jetos proof: desktop session command gnome-session'\n    exit 0\n  fi\n  if command -v gnome-shell >/dev/null 2>&1; then\n    printf '%s\\n' 'jetos proof: desktop session command gnome-shell --wayland'\n    exit 0\n  fi\n  exec \"$root/sw/bin/jetos-terminal-fallback\" --jetos-proof\nfi\nif command -v gnome-session >/dev/null 2>&1; then\n  exec gnome-session\nfi\nif command -v gnome-shell >/dev/null 2>&1; then\n  exec gnome-shell --wayland\nfi\nexec \"$root/sw/bin/jetos-terminal-fallback\"\n";
+    let session_launcher = "#!/usr/bin/env sh\nset -eu\nroot=${JETOS_SYSTEM_ROOT:-/var/lib/jetos/current-system}\nif [ ! -d \"$root\" ]; then root=/run/current-system; fi\nPATH=\"$root/sw/bin:$PATH\"\nexport PATH\nexport XDG_SESSION_TYPE=wayland\nexport XDG_CURRENT_DESKTOP=jetos:GNOME\nif [ \"${1:-}\" = \"--jetos-proof\" ]; then\n  if command -v gnome-session >/dev/null 2>&1; then\n    printf '%s\\n' 'jetos proof: desktop session command gnome-session'\n    exit 0\n  fi\n  if command -v gnome-shell >/dev/null 2>&1; then\n    printf '%s\\n' 'jetos proof: desktop session command gnome-shell --wayland'\n    exit 0\n  fi\n  exec \"$root/sw/bin/jetos-terminal-fallback\" --jetos-proof\nfi\nif command -v gnome-session >/dev/null 2>&1; then\n  exec gnome-session\nfi\nif command -v gnome-shell >/dev/null 2>&1; then\n  exec gnome-shell --wayland\nfi\nexec \"$root/sw/bin/jetos-terminal-fallback\"\n";
     let session_path = bin_dir.join("jetos-desktop-session");
     fs::write(&session_path, session_launcher)?;
     make_executable(&session_path)?;
-    let dm_launcher = "#!/usr/bin/env sh\nset -eu\nroot=${JETOS_SYSTEM_ROOT:-/run/current-system}\nPATH=\"$root/sw/bin:$PATH\"\nexport PATH\nif [ \"${1:-}\" = \"--jetos-proof\" ]; then\n  if command -v gdm >/dev/null 2>&1; then\n    printf '%s\\n' 'jetos proof: display manager command gdm'\n    exit 0\n  fi\n  exec \"$root/sw/bin/jetos-desktop-session\" --jetos-proof\nfi\nif command -v gdm >/dev/null 2>&1; then\n  exec gdm\nfi\nexec \"$root/sw/bin/jetos-desktop-session\"\n";
+    let dm_launcher = "#!/usr/bin/env sh\nset -eu\nroot=${JETOS_SYSTEM_ROOT:-/var/lib/jetos/current-system}\nif [ ! -d \"$root\" ]; then root=/run/current-system; fi\nPATH=\"$root/sw/bin:$PATH\"\nexport PATH\nif [ \"${1:-}\" = \"--jetos-proof\" ]; then\n  if command -v gdm >/dev/null 2>&1; then\n    printf '%s\\n' 'jetos proof: display manager command gdm'\n    exit 0\n  fi\n  exec \"$root/sw/bin/jetos-desktop-session\" --jetos-proof\nfi\nif command -v gdm >/dev/null 2>&1; then\n  exec gdm\nfi\nexec \"$root/sw/bin/jetos-desktop-session\"\n";
     let dm_path = bin_dir.join("jetos-display-manager");
     fs::write(&dm_path, dm_launcher)?;
     make_executable(&dm_path)?;
@@ -236,7 +236,7 @@ fn write_desktop_facts(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
     fs::create_dir_all(&unit_dir)?;
     fs::write(
         unit_dir.join("display-manager.service"),
-        "[Unit]\nDescription=jetos graphical login\nAfter=systemd-user-sessions.service plymouth-quit-wait.service\n\n[Service]\nExecStart=/run/current-system/sw/bin/jetos-display-manager\nRestart=always\n\n[Install]\nWantedBy=graphical.target\n",
+        "[Unit]\nDescription=jetos graphical login\nAfter=systemd-user-sessions.service plymouth-quit-wait.service\n\n[Service]\nEnvironment=JETOS_SYSTEM_ROOT=/var/lib/jetos/current-system\nExecStart=/var/lib/jetos/current-system/sw/bin/jetos-display-manager\nRestart=always\n\n[Install]\nWantedBy=graphical.target\n",
     )?;
     enable_unit(&unit_dir, "graphical.target", "display-manager.service")?;
     Ok(())
@@ -269,7 +269,7 @@ fn write_desktop_breadth(dir: &Path, system: &SystemPlan) -> std::io::Result<()>
         fs::write(pipewire_dir.join("jetos.conf"), "context.properties = {}\n")?;
         fs::write(
             unit_dir.join("pipewire.service"),
-            "[Unit]\nDescription=PipeWire audio graph\n\n[Service]\nExecStart=/run/current-system/sw/bin/pipewire\n\n[Install]\nWantedBy=graphical.target\n",
+            "[Unit]\nDescription=PipeWire audio graph\n\n[Service]\nExecStart=/var/lib/jetos/current-system/sw/bin/pipewire\n\n[Install]\nWantedBy=graphical.target\n",
         )?;
         enable_unit(&unit_dir, "graphical.target", "pipewire.service")?;
     }

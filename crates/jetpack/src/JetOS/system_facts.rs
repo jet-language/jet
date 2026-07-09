@@ -36,36 +36,67 @@ fn write_systemd_unit_library(
     entry: &Store::StoreEntry,
     default_target: &str,
 ) -> std::io::Result<()> {
-    let systemd_root = Path::new(&entry.out);
-    let unit_src = [
-        systemd_root.join("lib/systemd/system"),
-        systemd_root.join("example/systemd/system"),
-        systemd_root.join("share/systemd/system"),
-    ]
-    .into_iter()
-    .find(|path| path.join("basic.target").exists() && path.join("graphical.target").exists());
-
-    let Some(unit_src) = unit_src else {
-        return Ok(());
-    };
-
-    let usr_units = dir.join("usr/lib/systemd/system");
-    let lib_units = dir.join("lib/systemd/system");
-    let current_system_units = dir.join("systemd/lib/systemd/system");
-    let etc_units = dir.join("etc/systemd/system");
-    copy_dir_recursive(&unit_src, &usr_units)?;
-    copy_dir_recursive(&unit_src, &lib_units)?;
-    copy_dir_recursive(&unit_src, &current_system_units)?;
-    copy_dir_recursive(&unit_src, &etc_units)?;
+    let unit_roots = [
+        dir.join("etc/systemd/system"),
+        dir.join("usr/lib/systemd/system"),
+        dir.join("lib/systemd/system"),
+        dir.join("systemd/lib/systemd/system"),
+    ];
+    for root in &unit_roots {
+        write_minimal_systemd_units(root)?;
+    }
     if let Some(systemd_bin) = boot_artifact(entry, &["lib/systemd/systemd", "bin/systemd"]) {
         link_or_copy_file(&systemd_bin, &dir.join("systemd/lib/systemd/systemd"))?;
     }
 
-    fs::create_dir_all(&etc_units)?;
+    let etc_units = dir.join("etc/systemd/system");
     link_or_copy_unit(
-        &usr_units.join(default_target),
+        &etc_units.join(default_target),
         &etc_units.join("default.target"),
     )
+}
+
+fn write_minimal_systemd_units(unit_dir: &Path) -> std::io::Result<()> {
+    fs::create_dir_all(unit_dir)?;
+    for (name, body) in [
+        (
+            "graphical.target",
+            "[Unit]\nDescription=JetOS graphical interface\nRequires=multi-user.target\nWants=display-manager.service\nAfter=multi-user.target display-manager.service\nAllowIsolate=yes\n",
+        ),
+        (
+            "multi-user.target",
+            "[Unit]\nDescription=JetOS multi-user system\nRequires=basic.target\nAfter=basic.target\nAllowIsolate=yes\n",
+        ),
+        (
+            "basic.target",
+            "[Unit]\nDescription=JetOS basic system\nRequires=sysinit.target\nWants=sockets.target timers.target paths.target slices.target\nAfter=sysinit.target sockets.target paths.target slices.target\n",
+        ),
+        (
+            "sysinit.target",
+            "[Unit]\nDescription=JetOS system initialization\nWants=local-fs.target swap.target\nAfter=local-fs.target swap.target\n",
+        ),
+        (
+            "local-fs.target",
+            "[Unit]\nDescription=JetOS local filesystems\nDefaultDependencies=no\n",
+        ),
+        ("swap.target", "[Unit]\nDescription=JetOS swap\n"),
+        ("sockets.target", "[Unit]\nDescription=JetOS sockets\n"),
+        ("timers.target", "[Unit]\nDescription=JetOS timers\n"),
+        ("paths.target", "[Unit]\nDescription=JetOS paths\n"),
+        ("slices.target", "[Unit]\nDescription=JetOS slices\n"),
+        ("getty.target", "[Unit]\nDescription=JetOS login prompts\n"),
+        (
+            "rescue.target",
+            "[Unit]\nDescription=JetOS rescue mode\nRequires=sysinit.target\nAfter=sysinit.target\nAllowIsolate=yes\n",
+        ),
+        (
+            "emergency.target",
+            "[Unit]\nDescription=JetOS emergency mode\nAllowIsolate=yes\n",
+        ),
+    ] {
+        fs::write(unit_dir.join(name), body)?;
+    }
+    Ok(())
 }
 
 #[cfg(unix)]
