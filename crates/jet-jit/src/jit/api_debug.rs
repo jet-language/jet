@@ -150,6 +150,7 @@ fn collect_stmt_ops(stmts: &[TStmt], out: &mut Vec<String>) {
             | TStmt::Region(body)
             | TStmt::Unsafe(body)
             | TStmt::Inline(body)
+            | TStmt::DebugOnly(body)
             | TStmt::Live { body }
             | TStmt::ScopeMember { body, .. } => collect_stmt_ops(body, out),
             TStmt::While { cond, body, .. } => {

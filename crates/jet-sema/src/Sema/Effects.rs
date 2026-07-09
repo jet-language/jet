@@ -971,6 +971,7 @@ fn stmt_handle_escape(stmt: &crate::AST::Stmt, handle: &str) -> Option<Span> {
         | Stmt::Impure { body, .. }
         | Stmt::Reactive { body, .. }
         | Stmt::SuppressMustUse { body, .. }
+        | Stmt::DebugOnly { body, .. }
         | Stmt::Region { body, .. }
         | Stmt::TaskGroup { body, .. }
         | Stmt::Layout { body, .. }
@@ -980,6 +981,7 @@ fn stmt_handle_escape(stmt: &crate::AST::Stmt, handle: &str) -> Option<Span> {
         | Stmt::AssumeDet { body, .. }
         | Stmt::ScopeMember { body, .. }
         | Stmt::Live { body, .. } => block(body),
+        Stmt::Off { .. } => None,
         // D-CTMARKER1: comptime block erases; no handle can escape a build-time block.
         Stmt::ComptimeBlock { .. } => None,
         Stmt::ComptimeIf {

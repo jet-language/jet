@@ -116,6 +116,8 @@ pub const DIRECTIVE_MARKERS: &[&str] = &[
     KW_GRANT,
     KW_TRANSACT,
     ATTR_TRACK,
+    ATTR_OFF,
+    ATTR_DEBUG_ONLY,
     ATTR_TARGET,
     ATTR_WASM,
     ATTR_JS,
@@ -146,4 +148,3 @@ pub const DIRECTIVE_MARKERS: &[&str] = &[
     ATTR_TAG,
     ATTR_UNTAGGED,
 ];
-

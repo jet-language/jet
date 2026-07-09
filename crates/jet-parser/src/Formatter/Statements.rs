@@ -5,6 +5,18 @@ use crate::AST::{
 };
 
 impl<'a> Fmt<'a> {
+    fn fmt_statement_switch_attr(&mut self, marker: &str, body: &[Stmt]) {
+        if body.len() == 1 {
+            self.write(&format!("#{} ", marker));
+            self.fmt_stmt(&body[0]);
+            return;
+        }
+        self.write(&format!("#{} {{", marker));
+        self.newline();
+        self.with_indent(|f| f.fmt_block_stmts(body));
+        self.end_block();
+    }
+
     pub(super) fn fmt_block_stmts(&mut self, body: &[Stmt]) {
         for (i, stmt) in body.iter().enumerate() {
             if i > 0 {
@@ -184,6 +196,10 @@ impl<'a> Fmt<'a> {
                 self.newline();
                 self.with_indent(|f| f.fmt_block_stmts(body));
                 self.end_block();
+            }
+            Stmt::Off { body, .. } => self.fmt_statement_switch_attr(Syntax::ATTR_OFF, body),
+            Stmt::DebugOnly { body, .. } => {
+                self.fmt_statement_switch_attr(Syntax::ATTR_DEBUG_ONLY, body)
             }
             // D-REACTCORE1: `#Reactive { … }` round-trips verbatim.
             Stmt::Reactive { body, .. } => {

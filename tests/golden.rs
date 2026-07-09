@@ -38,6 +38,34 @@ fn gtk_loader_unavailable(stderr: &[u8]) -> bool {
 }
 
 #[test]
+fn statement_attributes_codegen_shape() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let path = root.join("examples/features/tooling/statement_attributes.jet");
+    let src = fs::read_to_string(&path).unwrap();
+    let out = jet::compile_with_path(&src, "examples/features/tooling/statement_attributes.jet")
+        .unwrap_or_else(|diags| {
+            panic!(
+                "statement attributes example failed front end:\n{}",
+                jet::render_diagnostics(
+                    "examples/features/tooling/statement_attributes.jet",
+                    &src,
+                    &diags
+                )
+            )
+        });
+    assert!(
+        !out.rust.contains("\"off\"") && !out.rust.contains("\"off block\""),
+        "`#Off` body must not appear in generated Rust:\n{}",
+        out.rust
+    );
+    assert!(
+        out.rust.contains("#[cfg(not(jet_release))]") && out.rust.contains("debug"),
+        "`#DebugOnly` body must be cfg-gated for release:\n{}",
+        out.rust
+    );
+}
+
+#[test]
 fn examples_compile_and_run() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let ex_dir = root.join("examples/features");

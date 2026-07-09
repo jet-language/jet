@@ -963,6 +963,8 @@ fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, ctx: &mut Wal
         | AST::Stmt::Unsafe { body, .. }
         | AST::Stmt::Impure { body, .. }
         | AST::Stmt::Reactive { body, .. }
+        | AST::Stmt::Off { body, .. }
+        | AST::Stmt::DebugOnly { body, .. }
         | AST::Stmt::Region { body, .. }
         | AST::Stmt::TaskGroup { body, .. }
         | AST::Stmt::Layout { body, .. }

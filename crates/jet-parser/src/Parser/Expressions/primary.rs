@@ -81,6 +81,27 @@ impl<'a> Parser<'a> {
                 TokKind::Hash
                     if matches!(
                         self.toks.get(self.pos + 1).map(|t| &t.kind),
+                        Some(TokKind::Ident(n))
+                            if n == Syntax::ATTR_OFF || n == Syntax::ATTR_DEBUG_ONLY
+                    ) =>
+                {
+                    let hash = self.bump().span;
+                    let name_tok = self.bump();
+                    let name = match &name_tok.kind {
+                        TokKind::Ident(n) => n.clone(),
+                        _ => String::new(),
+                    };
+                    return Err(Diagnostic::error(
+                        "E0343",
+                        format!("`#{}` does not produce a value", name),
+                        "statement switch attributes control a whole statement; expressions must still produce values in every build".to_string(),
+                        format!("put it before the statement: `#{} <statement>`", name),
+                        Some(Span::new(hash.start, name_tok.span.end)),
+                    ));
+                }
+                TokKind::Hash
+                    if matches!(
+                        self.toks.get(self.pos + 1).map(|t| &t.kind),
                         Some(TokKind::Ident(n)) if n == Syntax::KW_TODO
                     ) =>
                 {

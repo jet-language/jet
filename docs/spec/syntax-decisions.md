@@ -668,6 +668,14 @@ stay `#`: `Rename`, `Skip`, `Default`, `Flatten`, `RenameAll`,
 in-body config as a type body's first statements. `comptime` stays a prefix
 keyword. LSP surfaces applicable markers per item.
 
+**D-CANVASSTATE1=D — Statement switch attributes**: `#Off <stmt>` parses and
+type-checks the statement, then emits no code in every build. `#DebugOnly <stmt>`
+parses and type-checks the statement in every build, emits in debug/dev builds,
+and strips from release output. Both attach to statements only; item position is
+E0342, expression position is E0343, and doubled switch attributes are E0344.
+Names introduced inside the marker body do not escape. `build.profile` is not a
+user-typeable comptime value.
+
 **D-DOTSCOPE1 — Scope members**: inside a `#Marker { }` block body, a
 statement-position `.name { … }` / `.name(args) { … }` resolves against that
 marker's declared scope members (`#Test`: `.expect_fail`, `.setup`,
@@ -2250,7 +2258,6 @@ implementation milestone is pending.
 | ID  | Milestone | Enforcement today                                                | Code  |
 | --- | --------- | ---------------------------------------------------------------- | ----- |
 | S15 | M6        | default unwind in `Source/main.rs`; `--small` + `panic=abort` in M6 | —     |
-| D-CANVASSTATE1 = D (2026-07-09) | Epoch 6 (card #385) | `#Off stmt` (parsed + type-checked, emits nothing) and `#DebugOnly stmt` (compiled only in debug builds). Canvas node states write these. `build.profile` deliberately NOT exposed as a comptime value — future ballot if wanted. | — |
 | D-CANVASMETA1 = B (2026-07-09) | Epoch 6 (card #386) | `#Meta(category: "…", tunable)` attribute on bindings/functions, sema-checked fields (unknown field = teaching error), scoped to `category` + `tunable` for now; grows only by ballot. | — |
 
 

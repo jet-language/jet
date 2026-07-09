@@ -8,6 +8,10 @@ impl<'a> Checker<'a> {
         pub(crate) fn pop_scope(&mut self) {
             self.lint_unjoined_tasks_in_current_scope();
             self.check_single_use_consumed_in_current_scope();
+            self.drop_scope_no_obligation_checks();
+        }
+
+        pub(crate) fn drop_scope_no_obligation_checks(&mut self) {
             // D-ALLOC2: arena `view`s declared in the scope being popped leave their
             // region here — drop their bookkeeping so a same-named binding in an
             // outer scope isn't mistaken for the view. The arena binding itself

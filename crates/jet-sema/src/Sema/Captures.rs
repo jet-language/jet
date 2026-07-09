@@ -76,6 +76,8 @@ pub(crate) fn walk_stmts_for_const_refs(
             | Stmt::Impure { body: inner, .. }
             | Stmt::Reactive { body: inner, .. }
             | Stmt::SuppressMustUse { body: inner, .. }
+            | Stmt::Off { body: inner, .. }
+            | Stmt::DebugOnly { body: inner, .. }
             | Stmt::Region { body: inner, .. }
             | Stmt::TaskGroup { body: inner, .. }
             | Stmt::Layout { body: inner, .. }
@@ -471,6 +473,7 @@ pub(crate) fn stmt_refs_name(stmt: &Stmt, name: &str) -> bool {
         | Stmt::Impure { body, .. }
         | Stmt::Reactive { body, .. }
         | Stmt::SuppressMustUse { body, .. }
+        | Stmt::DebugOnly { body, .. }
         | Stmt::Region { body, .. }
         | Stmt::TaskGroup { body, .. }
         | Stmt::Layout { body, .. }
@@ -478,6 +481,7 @@ pub(crate) fn stmt_refs_name(stmt: &Stmt, name: &str) -> bool {
         | Stmt::Grant { body, .. }
         | Stmt::Transact { body, .. }
         | Stmt::AssumeDet { body, .. } => body.iter().any(|s| stmt_refs_name(s, name)),
+        Stmt::Off { .. } => false,
         Stmt::Break(_)
         | Stmt::Continue(_)
         | Stmt::BreakLabel(..)
@@ -853,6 +857,7 @@ pub(crate) fn stmt_collect_captures(
         | Stmt::Impure { body, .. }
         | Stmt::Reactive { body, .. }
         | Stmt::SuppressMustUse { body, .. }
+        | Stmt::DebugOnly { body, .. }
         | Stmt::Region { body, .. }
         | Stmt::TaskGroup { body, .. }
         | Stmt::Layout { body, .. }
@@ -863,6 +868,7 @@ pub(crate) fn stmt_collect_captures(
             let mut body_bound = bound.clone();
             block_collect_captures(body, &mut body_bound, read, mut_cap);
         }
+        Stmt::Off { .. } => {}
         Stmt::Break(_)
         | Stmt::Continue(_)
         | Stmt::BreakLabel(..)

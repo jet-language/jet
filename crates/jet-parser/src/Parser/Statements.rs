@@ -1,6 +1,58 @@
 use super::*;
 
 impl<'a> Parser<'a> {
+    fn at_statement_switch_stmt(&mut self, marker: &str) -> Result<Stmt, Diagnostic> {
+        let start = self.peek().span;
+        self.expect(TokKind::Hash, "expected `#`")?;
+        let name_tok = self.bump();
+        let attr_span = Span::new(start.start, name_tok.span.end);
+
+        if matches!(self.peek().kind, TokKind::Hash)
+            && matches!(
+                &self.peek2().kind,
+                TokKind::Ident(n) if n == Syntax::ATTR_OFF || n == Syntax::ATTR_DEBUG_ONLY
+            )
+        {
+            let second_start = self.peek().span;
+            let second_name = match &self.peek2().kind {
+                TokKind::Ident(n) => n.clone(),
+                _ => String::new(),
+            };
+            let second_end = self.peek2().span.end;
+            self.diags.push(Diagnostic::error(
+                "E0344",
+                "only one switch-off attribute can be written on a statement".to_string(),
+                format!(
+                    "`#{}` and `#{}` both control whether the same statement emits code",
+                    marker, second_name
+                ),
+                format!(
+                    "keep one marker: `#{} <statement>` or `#{} <statement>`",
+                    Syntax::ATTR_OFF,
+                    Syntax::ATTR_DEBUG_ONLY
+                ),
+                Some(Span::new(second_start.start, second_end)),
+            ));
+        }
+
+        let (body, end) = if matches!(self.peek().kind, TokKind::LBrace) {
+            self.bump();
+            let body = self.block_stmts();
+            let end = self.toks[self.pos - 1].span.end;
+            (body, end)
+        } else {
+            let stmt = self.stmt()?;
+            let end = stmt.span().end;
+            (vec![stmt], end)
+        };
+        let span = Span::new(attr_span.start, end);
+        if marker == Syntax::ATTR_OFF {
+            Ok(Stmt::Off { body, span })
+        } else {
+            Ok(Stmt::DebugOnly { body, span })
+        }
+    }
+
     /// D-UNSAFE2 (ratified 2026-06-22, opt B): parse `#Unsafe("reason") { … }`
     /// in statement position. The reason string is the argument of `#Unsafe`
     /// itself; the separate `#Audit` marker is retired (E0055 teaching error).
@@ -948,6 +1000,13 @@ impl<'a> Parser<'a> {
                 // D-IGNORERET2=A: `#Suppress(MustUse) { … }` — suppress E0402 in scope.
                 if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_SUPPRESS) {
                     return self.at_suppress_must_use_stmt();
+                }
+                // D-CANVASSTATE1=D: statement switch-off attributes.
+                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_OFF) {
+                    return self.at_statement_switch_stmt(Syntax::ATTR_OFF);
+                }
+                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_DEBUG_ONLY) {
+                    return self.at_statement_switch_stmt(Syntax::ATTR_DEBUG_ONLY);
                 }
                 // D-UNSAFE2: `#Unsafe("reason") { … }` (or retired `#Audit("…") #Unsafe`).
                 self.at_unsafe_stmt()

@@ -455,6 +455,12 @@ impl Circle {
   line before a declaration. Block markers use PascalCase and parenthesized
   arguments when arguments exist. `@Pure fn` is a prefix marker; `comptime`
   stays a prefix keyword.
+- **Statement switch attributes (D-CANVASSTATE1):** `#Off <stmt>` parses and
+  type-checks one statement, including block-shaped statements, then emits no
+  code in every build. `#DebugOnly <stmt>` parses and type-checks the statement
+  in every build, emits only in debug/dev builds, and strips from release output.
+  Names introduced inside either marker are scoped to that marker body.
+  `build.profile` is not a user-typeable comptime value.
 - **OS-target gating & dispatch (D-OSTARGET1/D-OSTARGET2):** `#Target(Os.Linux
   |Macos|Windows)` gates one `impl` block to a native OS; `jet build
   --target=<triple>` emits only the matching build's impls (host OS by default).

@@ -511,6 +511,10 @@ impl<'a> Interp<'a> {
             // D-IGNORERET2=A: `#Suppress(MustUse)` is a sema-only gate; it erases
             // at codegen and is transparent to the comptime interpreter.
             Stmt::SuppressMustUse { body, .. } => self.exec_block(body, scope),
+            // D-CANVASSTATE1=D: `#Off` is real checked code but never executes.
+            Stmt::Off { .. } => Ok(Flow::Normal),
+            // D-CANVASSTATE1=D: comptime execution is a dev/debug tier.
+            Stmt::DebugOnly { body, .. } => self.exec_block(body, scope),
             // D-REGION1: allocation regions are a runtime/codegen construct; the
             // comptime interpreter has no arenas, so a `region` block is declined.
             Stmt::Region { span, .. } => Err(unsupported("a `region` block", *span)),

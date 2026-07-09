@@ -942,6 +942,31 @@ impl<'a> Parser<'a> {
                     }
                     // D-METADERIVE1=A (amended 2026-07-01): `derive T.Trait { … }` — user-authored derive.
                     TokKind::KwDerive => self.user_derive_def().map(Item::UserDerive),
+                    TokKind::Hash
+                        if matches!(
+                            &self.peek2().kind,
+                            TokKind::Ident(n)
+                                if n == Syntax::ATTR_OFF || n == Syntax::ATTR_DEBUG_ONLY
+                        ) =>
+                    {
+                        let hash = self.bump().span;
+                        let name_tok = self.bump();
+                        let name = match &name_tok.kind {
+                            TokKind::Ident(n) => n.clone(),
+                            _ => String::new(),
+                        };
+                        self.diags.push(Diagnostic::error(
+                            "E0342",
+                            format!("`#{}` belongs before a statement", name),
+                            "statement switch attributes control code inside a function body, not top-level declarations".to_string(),
+                            format!(
+                                "move it inside a function, e.g. `#{} print(\"debug\")`, or remove it from the declaration",
+                                name
+                            ),
+                            Some(Span::new(hash.start, name_tok.span.end)),
+                        ));
+                        continue;
+                    }
                     TokKind::KwConst | TokKind::Hash => self.const_def().map(Item::Const),
                     // D-PERSIST1: `@Persist const NAME = expr;` — module-level
                     // binding that survives a `jet dev` hot reload.

@@ -47,6 +47,14 @@ pub const SIGIL_BIND_MUT: &str = ":=";
 /// `#Track name :: expr` / `#Track name := expr`.
 pub const ATTR_TRACK: &str = "Track";
 
+/// D-CANVASSTATE1=D (ratified 2026-07-09): statement switch-off attribute.
+/// `#Off <stmt>` parses and type-checks the statement, then emits no code.
+pub const ATTR_OFF: &str = "Off";
+
+/// D-CANVASSTATE1=D (ratified 2026-07-09): debug-only statement attribute.
+/// `#DebugOnly <stmt>` emits only in debug/dev builds; release builds strip it.
+pub const ATTR_DEBUG_ONLY: &str = "DebugOnly";
+
 /// S3 (ratified): block delimiters.
 pub const BLOCK_OPEN: &str = "{";
 pub const BLOCK_CLOSE: &str = "}";
@@ -456,4 +464,3 @@ pub const TYPE_BIGINT: &str = "BigInt";
 /// D-DECIMAL1 (ratified 2026-06-26): exact base-10 decimal. Construct with
 /// `Decimal("12.34")` or `core.numeric.decimal("12.34")`; no implicit `Float`.
 pub const TYPE_DECIMAL: &str = "Decimal";
-

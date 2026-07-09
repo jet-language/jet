@@ -539,6 +539,15 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
         TStmt::Inline(stmts) => {
             emit_tir_stmts(stmts, cx, out, indent);
         }
+        // D-CANVASSTATE1=D: stripped from release builds by an internal cfg.
+        // `jet run`/`jet dev`/default builds do not set `jet_release`, so debug
+        // bodies execute there without exposing `build.profile` to Jet code.
+        TStmt::DebugOnly(stmts) => {
+            out.push_str(&format!("{}#[cfg(not(jet_release))]\n", pad));
+            out.push_str(&format!("{}{{\n", pad));
+            emit_tir_stmts(stmts, cx, out, indent + 1);
+            out.push_str(&format!("{}}}\n", pad));
+        }
         // c109 Phase 18: an audited `#Unsafe { … }` region — `unsafe { … }`, byte-for-byte
         // `emit_stmts`'s `Stmt::Unsafe` arm (the `#Audit` annotation emits nothing). I1:
         // emitted ONLY for a source `#Unsafe` gate.

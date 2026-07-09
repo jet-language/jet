@@ -572,6 +572,9 @@ impl LowerCtx<'_, '_> {
             TStmt::Region(body) => {
                 self.lower_stmts_scoped(body)?;
             }
+            TStmt::DebugOnly(body) => {
+                self.lower_stmts_scoped(body)?;
+            }
             TStmt::StructDestructure { .. } => {
                 return Err("jit struct destructure unsupported".to_string());
             }
@@ -585,6 +588,7 @@ impl LowerCtx<'_, '_> {
                 return Err("jit math swizzle assign unsupported".to_string());
             }
             TStmt::RangeSwitch { .. } => return Err("jit range switch unsupported".to_string()),
+            TStmt::Inline(stmts) if stmts.is_empty() => {}
             TStmt::Inline(_) => return Err("jit inline comptime branch unsupported".to_string()),
             TStmt::Unsafe(_) => return Err("jit unsafe region unsupported".to_string()),
             TStmt::Reactive { .. } => return Err("jit reactive statement unsupported".to_string()),

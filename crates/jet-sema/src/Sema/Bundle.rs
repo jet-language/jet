@@ -488,6 +488,8 @@ pub(crate) fn rewrite_inline_calls_stmts(
             | Stmt::Impure { body: inner, .. }
             | Stmt::Reactive { body: inner, .. }
             | Stmt::SuppressMustUse { body: inner, .. }
+            | Stmt::Off { body: inner, .. }
+            | Stmt::DebugOnly { body: inner, .. }
             | Stmt::Region { body: inner, .. }
             | Stmt::TaskGroup { body: inner, .. }
             | Stmt::Layout { body: inner, .. }
@@ -2047,6 +2049,8 @@ pub(crate) fn collect_core_stmts(
             | Stmt::Unsafe { body, .. }
             | Stmt::Impure { body, .. }
             | Stmt::SuppressMustUse { body, .. }
+            | Stmt::Off { body, .. }
+            | Stmt::DebugOnly { body, .. }
             | Stmt::Region { body, .. }
             | Stmt::TaskGroup { body, .. }
             | Stmt::Layout { body, .. }

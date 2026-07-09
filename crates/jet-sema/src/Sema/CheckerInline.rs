@@ -213,6 +213,8 @@ impl<'a> InlineAlwaysScan<'a> {
             | Stmt::Impure { body, .. }
             | Stmt::Reactive { body, .. }
             | Stmt::SuppressMustUse { body, .. }
+            | Stmt::Off { body, .. }
+            | Stmt::DebugOnly { body, .. }
             | Stmt::Region { body, .. }
             | Stmt::TaskGroup { body, .. }
             | Stmt::Layout { body, .. }

@@ -266,6 +266,13 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
         Stmt::Reactive { body, .. } => body.iter().all(|s| stmt_in_subset(s, cx, locals)),
         // D-IGNORERET2=A: `#Suppress(MustUse)` erases to a plain block at codegen (I3).
         Stmt::SuppressMustUse { body, .. } => body.iter().all(|s| stmt_in_subset(s, cx, locals)),
+        // D-CANVASSTATE1=D: `#Off` erases; `#DebugOnly` lowers in a lexical
+        // debug-only block, so its local declarations do not extend `locals`.
+        Stmt::Off { .. } => true,
+        Stmt::DebugOnly { body, .. } => {
+            let mut scoped = locals.clone();
+            body.iter().all(|s| stmt_in_subset(s, cx, &mut scoped))
+        }
         // c109 Phase 19: an explicit `region r { … }` (D-REGION1) lowers to a plain Rust
         // block; the body's `let`s LEAK into the outer scope (the AST shares `&mut env`),
         // so the gate checks the body on the SAME `locals`.

@@ -51,6 +51,8 @@ contract; it does not mean every form has a bespoke graph gesture. Status values
 - [Stmt::ContinueLabel] status=graph control node with label in source detail.
 - [Stmt::Loop] status=graph loop rail.
 - [Stmt::CountedLoop] status=graph loop rail.
+- [Stmt::Off] status=readonly switched-off statement (D-CANVASSTATE1), node badge UI pending, source edits.
+- [Stmt::DebugOnly] status=readonly debug-build statement (D-CANVASSTATE1), node badge UI pending, source edits.
 - [Stmt::Unsafe] status=readonly expert gate, source edits.
 - [Stmt::Impure] status=readonly expert gate, source edits.
 - [Stmt::Reactive] status=readonly effect registration, source edits.

@@ -114,6 +114,19 @@ pub enum Stmt {
         body: Vec<Stmt>,
         span: Span,
     },
+    /// D-CANVASSTATE1=D (ratified 2026-07-09): `#Off <stmt>` / `#Off { … }`.
+    /// The body is parsed and checked, but never emitted or executed.
+    Off {
+        body: Vec<Stmt>,
+        span: Span,
+    },
+    /// D-CANVASSTATE1=D (ratified 2026-07-09): `#DebugOnly <stmt>` /
+    /// `#DebugOnly { … }`. The body runs in debug/dev builds and is stripped
+    /// from release output.
+    DebugOnly {
+        body: Vec<Stmt>,
+        span: Span,
+    },
     /// D-REGION1 (ratified 2026-06-21, opt B): explicit allocation region
     /// `region r { … }`. `name` names the region; arena `view`s allocated
     /// inside may not escape it (E0631). A lexical scope like `loop`/`#Unsafe`,
@@ -324,6 +337,8 @@ impl Stmt {
             | Stmt::Impure { span, .. }
             | Stmt::Reactive { span, .. }
             | Stmt::SuppressMustUse { span, .. }
+            | Stmt::Off { span, .. }
+            | Stmt::DebugOnly { span, .. }
             | Stmt::Region { span, .. }
             | Stmt::TaskGroup { span, .. }
             | Stmt::Layout { span, .. }
@@ -342,4 +357,3 @@ impl Stmt {
         }
     }
 }
-

@@ -176,6 +176,7 @@ fn collect_txn_mut_roots(body: &[Stmt], out: &mut Vec<String>) {
             | Stmt::Impure { body, .. }
             | Stmt::Reactive { body, .. }
             | Stmt::SuppressMustUse { body, .. }
+            | Stmt::DebugOnly { body, .. }
             | Stmt::Region { body, .. }
             | Stmt::TaskGroup { body, .. }
             | Stmt::Layout { body, .. }
@@ -184,6 +185,7 @@ fn collect_txn_mut_roots(body: &[Stmt], out: &mut Vec<String>) {
             | Stmt::ContextBlock { body, .. }
             | Stmt::Live { body, .. }
             | Stmt::AssumeDet { body, .. } => collect_txn_mut_roots(body, out),
+            Stmt::Off { .. } => {}
             Stmt::Switch {
                 arms, else_body, ..
             } => {

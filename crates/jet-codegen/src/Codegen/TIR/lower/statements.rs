@@ -679,6 +679,14 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
         // D-CTMARKER1 (ratified 2026-06-25, piece 2): `comptime { … }` runs at
         // build time and erases entirely — no runtime Rust is emitted (I3).
         Stmt::ComptimeBlock { .. } => TStmt::Inline(vec![]),
+        // D-CANVASSTATE1=D: `#Off` type-checks in sema but emits no runtime TIR.
+        Stmt::Off { .. } => TStmt::Inline(vec![]),
+        // D-CANVASSTATE1=D: `#DebugOnly` is a lexical debug-only region. Lower
+        // on a cloned env so declarations cannot be required by release code.
+        Stmt::DebugOnly { body, .. } => {
+            let mut scoped = clone_env(env);
+            TStmt::DebugOnly(lower_stmts(body, cx, &mut scoped))
+        }
         // c109 Phase 15: a resolved comptime-if (`Stmt::ComptimeIf`). Sema chose the
         // branch (`selected_then`); the AST `emit_stmts` emits ONLY that branch's
         // statements INLINE on the SAME `&mut env` at the SAME indent (no `if`, no

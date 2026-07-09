@@ -48,6 +48,32 @@ fn fmt_preserves_s61_call_labels() {
 }
 
 #[test]
+fn fmt_off_debug_only_statement_attributes_stability() {
+    let src = r#"fn run() {
+    #Off print("off")
+    #DebugOnly print("debug")
+    #Off if true {
+        print("off block")
+    }
+}
+"#;
+    let out = jet::format_source(src).expect("fmt should accept statement switch attributes");
+    for needle in [
+        "#Off print(\"off\")",
+        "#DebugOnly print(\"debug\")",
+        "#Off if true {",
+        "print(\"off block\")",
+    ] {
+        assert!(out.contains(needle), "fmt dropped `{needle}`, got:\n{out}");
+    }
+    let twice = jet::format_source(&out).expect("statement switch attributes should re-fmt");
+    assert_eq!(
+        out, twice,
+        "statement switch attribute formatting must be stable"
+    );
+}
+
+#[test]
 fn fmt_preserves_block_comments() {
     // S5: `/* … */` block comments, nesting allowed.
     let src = r#"/* a leading block comment */

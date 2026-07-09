@@ -651,6 +651,11 @@ pub enum TStmt {
     /// selected branch is `else` but there is no else-body (or sema didn't resolve),
     /// this holds an empty vec (emits nothing).
     Inline(Vec<TStmt>),
+    /// D-CANVASSTATE1=D: `#DebugOnly <stmt>` / `#DebugOnly { … }`.
+    /// AOT emission gates this behind `#[cfg(not(jet_release))]`; dev/JIT tiers
+    /// lower it as ordinary debug code. `#Off` has no TIR node: it lowers to an
+    /// empty `Inline`.
+    DebugOnly(Vec<TStmt>),
     /// c109 Phase 15: a MIXED comparison/Bool `when` switch (`emit_mixed_switch`,
     /// Source/Codegen/Statement.rs) — the general `if/else if … else` form used when the
     /// arms are NOT all-variant (that is shape A, a Rust `match`), NOT all-range (shape

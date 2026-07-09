@@ -48,6 +48,7 @@ fn cmd_os(theme: &Theme, parsed: &Parsed) -> i32 {
         json: parsed.flags.json,
         assume_yes: parsed.flags.assume_yes,
         real_tier: false,
+        host: parsed.flags.studio_host.clone(),
     };
     if verb == Some(Syntax::USER_SUBCOMMAND) {
         let user_verb = args.first().map(String::as_str);
@@ -79,6 +80,7 @@ fn cmd_user(theme: &Theme, parsed: &Parsed) -> i32 {
         json: parsed.flags.json,
         assume_yes: parsed.flags.assume_yes,
         real_tier: false,
+        host: parsed.flags.studio_host.clone(),
     };
     super::JetOS::user_main(theme, verb, args, &flags)
 }

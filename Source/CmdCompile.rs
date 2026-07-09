@@ -1469,6 +1469,9 @@ pub(crate) fn build(
     let ffi_present = ffi.is_some();
     let config = profile.config();
     config.apply_env(&mut cmd);
+    if matches!(profile, BuildProfile::Release) {
+        cmd.arg("--cfg").arg("jet_release");
+    }
     config.apply_rustc(&mut cmd, ffi_present);
     // Cache-integrity fix (Tower #85 §0): compile to a *private per-process*
     // path, never straight onto the shared `build/<stem>` display path. Two

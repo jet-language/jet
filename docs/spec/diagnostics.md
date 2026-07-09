@@ -248,6 +248,9 @@ before continuing.
 | E0339 | sema  | a computed field given in a struct literal or assigned to directly (D-FIELDPOL1) |
 | E0340 | sema  | teaching: `read_dir` is not a Jet API — use `Path.from(p).walk()` (D-PATHFS1) |
 | E0341 | sema  | *retired by D-CORENS-CANON1* (was: old first-party namespace teaching) |
+| E0342 | parse | `#Off` / `#DebugOnly` written on an item instead of a statement (D-CANVASSTATE1) |
+| E0343 | parse | `#Off` / `#DebugOnly` written in expression position (D-CANVASSTATE1) |
+| E0344 | parse | doubled statement switch-off attributes (D-CANVASSTATE1) |
 | E0350 | sema  | `Any` type requested, but Jet has no general top type (D-DYNAMIC-TYPE1) |
 | L0301 | sema  | unreachable dispatch pattern arm (lint)   |
 | E0401 | sema  | fallible value used where plain `T` expected |
@@ -1018,6 +1021,14 @@ already-freed arena), these track the views themselves.
 | Code | What | Why | Fix |
 |------|------|-----|-----|
 | E0350 | Jet does not have an `Any` type. | A value should keep a precise shape: use an enum for known variants, generics or traits for abstraction, `T?` for absence, and `Data` for parsed dynamic data. | Replace `Any` with the specific mechanism for this value. |
+
+## Statement switch attribute diagnostics (D-CANVASSTATE1)
+
+| Code | What | Why | Fix |
+|------|------|-----|-----|
+| E0342 | `#Off` / `#DebugOnly` belongs before a statement. | Statement switch attributes control code inside a function body, not top-level declarations. | Move it inside a function, or remove it from the declaration. |
+| E0343 | `#Off` / `#DebugOnly` does not produce a value. | Statement switch attributes control a whole statement; expressions must still produce values in every build. | Put the marker before the statement. |
+| E0344 | Only one switch-off attribute can be written on a statement. | `#Off` and `#DebugOnly` both control whether the same statement emits code. | Keep one marker: `#Off <statement>` or `#DebugOnly <statement>`. |
 
 ## Effect system diagnostics (D-EFF1, D-QUAL1)
 

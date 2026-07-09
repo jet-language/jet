@@ -1223,6 +1223,35 @@ impl<'a> Checker<'a> {
                     self.check_block(body, true);
                     self.suppress_must_use = prev;
                 }
+                Stmt::Off { body, .. } => {
+                    let moved = self.moved.clone();
+                    let uninit = self.uninit.clone();
+                    let fx_direct = self.fx_direct.clone();
+                    let fx_edges = self.fx_edges.clone();
+                    let fx_maximal = self.fx_maximal;
+                    let region_stack = self.region_stack.clone();
+                    let fx_regions = self.fx_regions.clone();
+                    let fx_callback_obligations = self.fx_callback_obligations.clone();
+                    let prev_suppress = self.suppress_must_use;
+                    self.suppress_must_use = true;
+                    self.push_scope();
+                    for stmt in body {
+                        self.check_stmt(stmt);
+                    }
+                    self.drop_scope_no_obligation_checks();
+                    self.suppress_must_use = prev_suppress;
+                    self.moved = moved;
+                    self.uninit = uninit;
+                    self.fx_direct = fx_direct;
+                    self.fx_edges = fx_edges;
+                    self.fx_maximal = fx_maximal;
+                    self.region_stack = region_stack;
+                    self.fx_regions = fx_regions;
+                    self.fx_callback_obligations = fx_callback_obligations;
+                }
+                Stmt::DebugOnly { body, .. } => {
+                    self.check_block(body, true);
+                }
                 // D-REGION1 (opt B): an explicit `region r { … }`. A fresh lexical
                 // scope: arena `view`s allocated inside cannot escape it (the
                 // E0631 escape rule is enforced against the scope floor, identical
