@@ -774,10 +774,26 @@ pub fn canvas_js() -> String {
   }
 
   function showToast(text) {
-    toast.textContent = text;
+    const message = String(text || "");
+    const isError = /^Error \[[A-Z0-9]+\]:/.test(message) || message.includes("\n Why:") || message.includes("\n Fix:");
+    toast.textContent = message;
+    toast.title = message;
+    toast.classList.toggle("is-error", isError);
+    toast.setAttribute("role", isError ? "alert" : "status");
     window.clearTimeout(showToast.timer);
-    showToast.timer = window.setTimeout(() => { toast.textContent = ""; }, 2200);
+    showToast.timer = window.setTimeout(() => {
+      toast.textContent = "";
+      toast.title = "";
+      toast.classList.remove("is-error");
+    }, isError ? 10000 : 2200);
   }
+
+  toast.addEventListener("click", () => {
+    window.clearTimeout(showToast.timer);
+    toast.textContent = "";
+    toast.title = "";
+    toast.classList.remove("is-error");
+  });
 
   function setPendingPin(pin) {
     pendingPin = pin;
@@ -2980,6 +2996,17 @@ pub fn canvas_js() -> String {
       pins: pinHit.map((h) => ({ pin_id: h.pin.pin_id, node_id: h.pin.node_id, name: h.pin.name, type: h.pin.type, direction: h.pin.direction, x: h.x, y: h.y, w: h.w, h: h.h, cx: h.cx, cy: h.cy }))
     };
     window.__jetCanvasHitMap = hitMap;
+    const rect = canvas.getBoundingClientRect();
+    window.__jetCanvasPinPoints = Object.fromEntries(Array.from(pinPoints.entries()).map(([pin_id, point]) => [pin_id, {
+      pin_id,
+      canvas_x: point.x,
+      canvas_y: point.y,
+      client_x: rect.left + point.x,
+      client_y: rect.top + point.y,
+      name: point.pin && point.pin.name,
+      type: point.pin && point.pin.type,
+      direction: point.pin && point.pin.direction
+    }]));
     canvas.dataset.hitMap = JSON.stringify(hitMap);
     updateGraphNav(graph);
     const rails = (graph.rails && graph.rails.kinds ? graph.rails.kinds.join(", ") : "data");
@@ -4222,12 +4249,13 @@ pub fn canvas_js() -> String {
   function defaultArgsForAction(item, pin) {
     const existing = (item.default_args || item.args || []).slice();
     if (!pin) return existing.length ? existing : ["\"canvas\""];
+    const inputs = (item.pins || []).filter((p) => p.direction === "input");
+    if (!inputs.length) return existing;
     const graph = currentGraph(latestDoc);
     if (pin.direction === "output") {
       const expr = sourceExprForOutputPin(pin);
       if (expr) {
-        const inputs = (item.pins || []).filter((p) => p.direction === "input");
-        if (!inputs.length || inputs.some((p) => compatibleActionType(p.type, pin.type))) return [expr].concat(existing.slice(1));
+        if (inputs.some((p) => compatibleActionType(p.type, pin.type))) return [expr].concat(existing.slice(1));
       }
     }
     return existing.length ? existing : ["1"];

@@ -3,8 +3,8 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 369,
-    "rev": 1955,
+    "nextNum": 387,
+    "rev": 2010,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -14,11 +14,10 @@
         "epoch:e8",
         "epoch:e9",
         "epoch:e7",
-        "epoch:e6",
         "epoch:e4"
       ]
     },
-    "digestCursor": "2026-07-09T13:56:41.107Z"
+    "digestCursor": "2026-07-09T14:18:30.332Z"
   },
   "epochs": [
     {
@@ -18760,6 +18759,11 @@
         {
           "at": "2026-07-09",
           "by": "claude",
+          "text": "D-CANVASSTATE1 ratified = D (#Off + #DebugOnly attribute family). Disable/debug-only UI unblocked pending syntax card #385. This card's remaining scope folds into epoch-6 cards #369-#386; closing as superseded once owner confirms."
+        },
+        {
+          "at": "2026-07-09",
+          "by": "claude",
           "text": "R4 done (in checkpoint commits 58ff3fb8/04b4ffd1 via concurrent agent sweep): copy/paste/duplicate, comment boxes (VERIFIED in browser: C-around-selection works), staged not-saved nodes, toast reworded, Apply-pins clip fixed. Demo golden .out synced (I5). Full suite: canvas 50/50, dev 42/42, golden ok; jetpack 3 failures = concurrent JetOS agent WIP (os_vm_prove_* E1285), not canvas. Follow-ups spotted: PROOF/REVISION panel + raw COMMAND rows visible outside developer mode; staged-node e2e + paste-clone need one interactive verification pass by owner or next agent. Exec-wire endpoint reorder still open (control wires lack source spans). Ballot D-CANVASSTATE1 pending."
         },
         {
@@ -18789,6 +18793,462 @@
         }
       ],
       "created": "2026-07-09T12:25:21.682Z",
+      "updated": "2026-07-09"
+    },
+    {
+      "id": "c0d7obyu",
+      "num": 369,
+      "title": "Canvas M0: interaction test harness — the epoch truth bar",
+      "body": "Headless-browser scenario harness driving the served Canvas with real mouse/keyboard events in CI. Dev-mode test hooks (pin positions, node bounds, staged registry). Matrix gains ratchet-class column; enforcement test requires interaction: ratchets for shipped; all 57 current rows reclassify to claimed. BLOCKED on ballot D-CANVASTEST1 (browser/driver strategy). Exit: 5 seed scenarios green headless in CI; deliberately-broken click handler fails suite. Plan: tools/Tower/docs/plans/epoch-6/canvas-blueprint-epoch.md M0.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e6",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": "canvas-blueprint-epoch",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-09",
+          "by": "claude",
+          "text": "Activated into epoch e6 track"
+        },
+        {
+          "at": "2026-07-09",
+          "by": "claude",
+          "text": "D-CANVASTEST1 ratified = A (dev-shell chromium + repo-owned zero-npm-dep CDP pipe driver). UNBLOCKED. window.__jetCanvasPinPoints dev hook already landed in audit session."
+        }
+      ],
+      "created": "2026-07-09T14:08:20.313Z",
+      "updated": "2026-07-09"
+    },
+    {
+      "id": "c0a1spbt",
+      "num": 370,
+      "title": "Canvas M0: matrix reclassification + shipped-bar enforcement",
+      "body": "Reclassify all 57 shipped matrix rows by ratchet class (interaction/protocol/projection/grep) per post-mortem research-postmortem.md; matrix vocabulary gains claimed; enforcement test (canvas_blueprint_parity_matrix_is_classified) upgraded: shipped requires an interaction: ratchet naming a scenario in the M0 harness. Exit: matrix scan test enforces new bar; zero rows falsely shipped.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e6",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": "canvas-blueprint-epoch",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-09",
+          "by": "claude",
+          "text": "Activated into epoch e6 track"
+        }
+      ],
+      "created": "2026-07-09T14:08:57.127Z",
+      "updated": "2026-07-09"
+    },
+    {
+      "id": "c0b9fayi",
+      "num": 371,
+      "title": "Canvas M1: every palette entry inserts valid source (P0 exec-drag class)",
+      "body": "Owner P0: drag-off-exec-pin insert fails for every function tried, unreadable 2s error. Root-cause fix + property-style scenario: iterate ENTIRE core catalog + project functions, insert each into scratch fn via wired-insert from exec and data origins, assert sema-clean source or palette exclusion with stated reason. Defect list from research-experience-audit.md (2026-07-09). Exit: full-catalog insert scenario green; owner can insert 10 random functions without one error.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e6",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": "canvas-blueprint-epoch",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-09",
+          "by": "claude",
+          "text": "Activated into epoch e6 track"
+        },
+        {
+          "at": "2026-07-09",
+          "by": "claude",
+          "text": "Audit 2026-07-09 defects for this card (research-experience-audit.md): P0 zero-arg synthetic-arg bug FIXED in-session (js.rs:4249, helper()→helper(1) E0104). Remaining: fallible-flow insert into non-fallible fn E0403 (edit_actions.rs:619); core catalog exposes nonexistent args.help (query_actions.rs:262); ad hoc missing-call E0102 dead-end (edit_actions.rs:264)."
+        }
+      ],
+      "created": "2026-07-09T14:08:57.200Z",
+      "updated": "2026-07-09"
+    },
+    {
+      "id": "c0cgvrdp",
+      "num": 372,
+      "title": "Canvas M1: error surfacing — persistent diagnostics, results panel, node bubbles",
+      "body": "Failed transactions show full Jet diagnostic (what/why/fix) in persistent panel (dismiss or >=10s, never 2s). Check button runs front-end diagnostics into Compiler-Results-style panel with jump-to-node. Nodes with diagnostics render error/warning bubbles with hover text. I4 voice throughout. Exit: scenarios for failed insert, failed check, bubble hover, jump-to-node.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e6",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": "canvas-blueprint-epoch",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-09",
+          "by": "claude",
+          "text": "Activated into epoch e6 track"
+        }
+      ],
+      "created": "2026-07-09T14:08:57.273Z",
+      "updated": "2026-07-09"
+    },
+    {
+      "id": "c0do8gm2",
+      "num": 373,
+      "title": "Canvas M1: core-loop scenario suite + undo/source-sync hardening",
+      "body": "~20 scenarios covering owner demo path: open, read, insert each category, wire data+exec, edit values, rename, undo depth 20 mixed ops, run, output. Random-op fuzz: 30 ops then projection==source check each step. Owner acceptance script 1 attached to card on completion. Exit: suite green + owner sign-off logged here.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e6",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": "canvas-blueprint-epoch",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-09",
+          "by": "claude",
+          "text": "Activated into epoch e6 track"
+        },
+        {
+          "at": "2026-07-09",
+          "by": "claude",
+          "text": "Audit 2026-07-09: undo/redo stack unbounded in-memory, no depth policy (js.rs:4400) — fold depth-20 policy + fuzz scenario here."
+        }
+      ],
+      "created": "2026-07-09T14:08:57.346Z",
+      "updated": "2026-07-09"
+    },
+    {
+      "id": "c0etlcoy",
+      "num": 374,
+      "title": "Canvas M2: exec-wire rewiring = statement reorder with source spans",
+      "body": "Control wires gain source spans; dragging an exec wire endpoint reorders statements with diff preview. Known gap from R1 (2026-07-09). Exit: reorder scenario incl. undo + formatter stability.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e6",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": "canvas-blueprint-epoch",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-09",
+          "by": "claude",
+          "text": "Activated into epoch e6 track"
+        },
+        {
+          "at": "2026-07-09",
+          "by": "claude",
+          "text": "Audit 2026-07-09: exec rewire endpoint ignores origin pin as source-span insert anchor (edit_actions.rs:305) — the concrete entry point for statement-span work."
+        }
+      ],
+      "created": "2026-07-09T14:08:57.415Z",
+      "updated": "2026-07-09"
+    },
+    {
+      "id": "c0fzoku6",
+      "num": 375,
+      "title": "Canvas M2: pattern-arm add/edit/remove + multi-input append transactions",
+      "body": "Jet '== Variant(x)' arms editable from branch node (+ arm affordance currently read-only); list-literal and fan-out f.[...] element append pins. Jet-advantage framing: BP has no pattern matching. Exit: scenarios add arm, edit pattern, remove arm, append element; sema-clean source each.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e6",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": "canvas-blueprint-epoch",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-09",
+          "by": "claude",
+          "text": "Activated into epoch e6 track"
+        }
+      ],
+      "created": "2026-07-09T14:08:57.486Z",
+      "updated": "2026-07-09"
+    },
+    {
+      "id": "c0h41rrl",
+      "num": 376,
+      "title": "Canvas M2: interactive verification sweep of claimed in-graph rows",
+      "body": "Promote-pin-to-variable, cast/conversion insertion, collapse/expand, math-expression inline editing, node docs hover, keyboard authoring, LOD/virtualization: each claimed row gets its scenario under the M0 bar; fix what the scenarios reveal. Exit: all in-graph matrix rows shipped under new bar + owner script 2.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e6",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": "canvas-blueprint-epoch",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-09",
+          "by": "claude",
+          "text": "Activated into epoch e6 track"
+        },
+        {
+          "at": "2026-07-09",
+          "by": "claude",
+          "text": "Audit 2026-07-09: data rewire to fn symbol produces fn-value-where-Int-expected (js.rs:3723); inline editors accept wrong-type input then sema rejects E0112 (js.rs:3599) — type-gate editors client-side. Both belong to this sweep."
+        }
+      ],
+      "created": "2026-07-09T14:08:57.554Z",
+      "updated": "2026-07-09"
+    },
+    {
+      "id": "c0stzzp4",
+      "num": 377,
+      "title": "Canvas M3: Details panel maturity — no dead controls",
+      "body": "Per-selection property editing: variable name/type/default/docs; function signature/pure/visibility; node values. Every field live or absent. Metadata surface (categories, tooltips, exposure flags) BLOCKED on ballot D-CANVASMETA1 for new attribute syntax; doc-comment-derived parts ungated. Exit: details scenarios per selection type.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e6",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": "canvas-blueprint-epoch",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-09",
+          "by": "claude",
+          "text": "Activated into epoch e6 track"
+        },
+        {
+          "at": "2026-07-09",
+          "by": "claude",
+          "text": "D-CANVASMETA1 ratified = B (#Meta typed attribute, scoped category+tunable). Metadata surface UNBLOCKED pending syntax card #386."
+        }
+      ],
+      "created": "2026-07-09T14:09:30.914Z",
+      "updated": "2026-07-09"
+    },
+    {
+      "id": "c0u0y3s6",
+      "num": 378,
+      "title": "Canvas M3: project-wide find/references/rename UX",
+      "body": "BP Find-in-Blueprints parity over semindex/LSP (engine exists). Project-wide search UI, find-refs from any node/variable, rename with preview. Exit: scenarios search across files, rename fn used in 3 files w/ diff preview.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e6",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": "canvas-blueprint-epoch",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-09",
+          "by": "claude",
+          "text": "Activated into epoch e6 track"
+        }
+      ],
+      "created": "2026-07-09T14:09:30.986Z",
+      "updated": "2026-07-09"
+    },
+    {
+      "id": "c0v5rsny",
+      "num": 379,
+      "title": "Canvas M3: review view — git diff panel with graph overlay",
+      "body": "Our answer to the BP Diff tool: text diff first (structural advantage — BP needs custom binary-asset UI), per-hunk graph highlight, revision compare. Exit: scenario edit-then-diff shows hunk + highlighted nodes; document the text-diff advantage in docs/reference.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e6",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": "canvas-blueprint-epoch",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-09",
+          "by": "claude",
+          "text": "Activated into epoch e6 track"
+        }
+      ],
+      "created": "2026-07-09T14:09:31.055Z",
+      "updated": "2026-07-09"
+    },
+    {
+      "id": "c0wbf3js",
+      "num": 380,
+      "title": "Canvas M3: traits, events, and library panels",
+      "body": "Surface shipped projections as ecosystem UI: traits panel (implemented/required, impl stub creation, #316), event dispatchers panel (core.event emit/subscribe facts, #311), module/package browser (jetpack deps + core modules with docs). BP parity: Interfaces panel, Event Dispatchers, Function Libraries. Exit: panel scenarios + owner script 3.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e6",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": "canvas-blueprint-epoch",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-09",
+          "by": "claude",
+          "text": "Activated into epoch e6 track"
+        }
+      ],
+      "created": "2026-07-09T14:09:31.125Z",
+      "updated": "2026-07-09"
+    },
+    {
+      "id": "c0xhxzyu",
+      "num": 381,
+      "title": "Canvas M4: multi-file project navigation + cross-file editing",
+      "body": "File switching, cross-file function graphs, cross-file insert (import synthesis exists), workspace-wide search scoping, palette scoping by module (BP-namespace equivalent). Exit: scenarios on a 3-file workspace incl. cross-file insert + rename.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e6",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": "canvas-blueprint-epoch",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-09",
+          "by": "claude",
+          "text": "Activated into epoch e6 track"
+        }
+      ],
+      "created": "2026-07-09T14:09:31.196Z",
+      "updated": "2026-07-09"
+    },
+    {
+      "id": "c0yl88cz",
+      "num": 382,
+      "title": "Canvas M4: interactive performance ratchet on generated big project",
+      "body": "Generate 300-function project; harness asserts frame-time budget during pan/zoom/select; virtualization+LOD rows re-verified under M0 bar. Exit: perf scenario in CI with budget; owner script 4 on the big project.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e6",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": "canvas-blueprint-epoch",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-09",
+          "by": "claude",
+          "text": "Activated into epoch e6 track"
+        }
+      ],
+      "created": "2026-07-09T14:09:31.262Z",
+      "updated": "2026-07-09"
+    },
+    {
+      "id": "c0zti5r8",
+      "num": 383,
+      "title": "Canvas M5: onboarding — tour project, docs hovers, cheat sheet",
+      "body": "canvas-tour example project (I5) opening with guided overlay (Content-Examples pattern); doc-comment tooltips everywhere; palette row docs; keyboard cheat-sheet overlay; teaching empty-states; one-command demo entry. Exit: new user goes jet-new to working two-function program without a text editor; owner runs it.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e6",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": "canvas-blueprint-epoch",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-09",
+          "by": "claude",
+          "text": "Activated into epoch e6 track"
+        }
+      ],
+      "created": "2026-07-09T14:09:31.337Z",
+      "updated": "2026-07-09"
+    },
+    {
+      "id": "c00zbmhz",
+      "num": 384,
+      "title": "Canvas M6: beyond-parity ergonomics (FROZEN until M5 owner-accepted)",
+      "body": "Jet-native advantages, deferred: pattern-matching authoring beyond BP, fallible/effect rail polish, fan-out operator visualization, live wire values during runs, text-review-first collaboration. Do not start before M1-M5 accepted.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e6",
+      "milestoneId": null,
+      "phase": "frozen",
+      "priority": "P2",
+      "plan": "canvas-blueprint-epoch",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "created": "2026-07-09T14:09:31.407Z",
+      "updated": "2026-07-09"
+    },
+    {
+      "id": "c0o2b83f",
+      "num": 385,
+      "title": "Syntax: #Off and #DebugOnly statement attributes (D-CANVASSTATE1=D)",
+      "body": "Ratified 2026-07-09: #Off stmt = parsed + type-checked, emits nothing, every build. #DebugOnly stmt = compiled only in debug builds (internal build-profile plumbing; build.profile NOT exposed as comptime value — future ballot). Full pipeline: Syntax.rs entries w/ decision ID, parser, sema, codegen, JIT/dev parity (R12), formatter emission + fmt STABILITY round-trip test, diagnostics w/ snapshots (I4), example (I5), jet devtools grammars regen. Canvas node-state UI (grey 'off' badge, hazard 'debug only' badge, right-click toggles) rides on top.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e6",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": "canvas-blueprint-epoch",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-09",
+          "by": "claude",
+          "text": "Activated into epoch e6 track"
+        }
+      ],
+      "created": "2026-07-09T14:16:54.689Z",
+      "updated": "2026-07-09"
+    },
+    {
+      "id": "c0p7h4ka",
+      "num": 386,
+      "title": "Syntax: #Meta attribute — category + tunable fields (D-CANVASMETA1=B)",
+      "body": "Ratified 2026-07-09: #Meta(category: \"Movement\", tunable) on bindings/functions. Sema-checked fields; unknown field = teaching error w/ did-you-mean (I4 snapshot). Scope: category, tunable ONLY; growth by ballot. Full pipeline as #385 (Syntax.rs, parser, sema, formatter round-trip, diagnostics, example, grammars). Canvas Details panel writes it; sidebar groups by category; tunable drives editor-exposure affordance (M3 #377).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e6",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": "canvas-blueprint-epoch",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-09",
+          "by": "claude",
+          "text": "Activated into epoch e6 track"
+        }
+      ],
+      "created": "2026-07-09T14:16:54.759Z",
       "updated": "2026-07-09"
     }
   ],
@@ -41015,6 +41475,102 @@
       "created": "2026-07-09T12:26:10.491Z",
       "outcome": "D",
       "ratifiedAt": "2026-07-09"
+    },
+    {
+      "id": "D-CANVASTEST1",
+      "cardId": "c0d7obyu",
+      "group": "tooling",
+      "title": "Canvas interaction tests: which browser + driver runs the scenario suite",
+      "gist": "How automated tests click, drag, and type inside the real Canvas editor so 'shipped' means a human-verifiable working feature.",
+      "explainer": "A keeps the invariant spirit (nothing external beyond a pinned Nix browser; the driver is ~400 repo-owned lines we fully control) and runs identically headless in CI; B is the fallback if the driver's cost in practice exceeds its independence value — switching later is cheap because scenarios are written against our own scenario API, not the driver.",
+      "story": "Four Canvas attempts went test-green while drag-to-create-node was broken for every function, because no test ever drove the real editor — they grepped the served JavaScript for function names. Marco, reviewing the next Canvas card, needs the test suite itself to catch a dead click handler before you ever open the app.",
+      "inWild": "# what passes today (tests/web_dev.rs):\nassert!(js.contains(\"function openPinMenu\"));   # exists != works\n\n# what M0 requires instead:\nscenario \"insert from exec pin\" {\n  drag from = entry.exec_out, to = (620, 400)\n  expect menu; type \"print\"; pick first\n  expect node \"print\" wired to entry.exec_out\n  expect source contains 'print(' and sema clean\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Dev-shell chromium + zero-dependency CDP pipe driver",
+          "detail": "Add chromium to the Nix dev shell (test-time only, hermetic, pinned). A small in-repo Node driver speaks Chrome DevTools Protocol over --remote-debugging-pipe: no npm packages, no network at test time, works headless in CI. We own ~400 lines of driver.",
+          "code": "# flake devshell gains: chromium\nnix develop -c cargo test --test canvas_scenarios\n# driver: scripts/canvas-test/driver.mjs (repo-owned, node stdlib only)\n# chromium --headless --remote-debugging-pipe … 3<pipe 4>pipe"
+        },
+        {
+          "key": "B",
+          "name": "playwright-core npm dev-dependency",
+          "detail": "Industry-standard driver API (used ad hoc during the 2026-07-09 sessions — it works against the system browser). Costs an npm package.json + lockfile in a tests/ workspace and pinning playwright's browser expectations to the Nix chromium; richer API (auto-wait, tracing) than a hand-rolled driver.",
+          "code": "tests/e2e/package.json: { \"devDependencies\": { \"playwright-core\": \"1.49\" } }\nconst b = await chromium.launch({ executablePath: nixChromium });\nawait page.mouse.down(); …"
+        },
+        {
+          "key": "C",
+          "name": "WebDriver BiDi with dev-shell firefox",
+          "detail": "W3C-standard protocol, no Chrome dependence, geckodriver ships in nixpkgs. BiDi tooling is younger; pixel/screenshot ergonomics and CDP-style pipe transport are weaker; Canvas users will overwhelmingly run Chromium-family browsers, so tests would run on the minority engine.",
+          "code": "nix devshell: firefox, geckodriver\nWebSocket session → browsingContext.navigate → input.performActions"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "UE Blueprint",
+          "note": "Epic tests the editor with in-process Slate automation driving real widgets — the suite fails when a button stops working, which is exactly the property Canvas lost.",
+          "code": "AutomationDriver->Click(CompileButton);"
+        },
+        {
+          "lang": "VS Code",
+          "note": "Ships Playwright-driven smoke tests against the real Electron/web build as the merge gate for UI work.",
+          "code": "await app.code.driver.click(selector);"
+        }
+      ],
+      "rec": "A",
+      "status": "ratified",
+      "created": "2026-07-09T14:10:45.018Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-09"
+    },
+    {
+      "id": "D-CANVASMETA1",
+      "cardId": "c0stzzp4",
+      "group": "syntax",
+      "title": "Variable and function metadata: how editor-facing facts (category, tooltip, exposure) are spelled in Jet source",
+      "gist": "Blueprint lets an author tag a variable with a category, tooltip, and 'designers may edit this' flag from the Details panel. Canvas needs a source spelling for the parts Jet doesn't already have.",
+      "explainer": "B keeps metadata honest (sema-checked, formatter-stable, diffable) and gives Canvas a trustworthy write target; A rots silently via typos, C forfeits the designer-tunable surface that makes Blueprint usable by non-programmers — the audience Jet's beginner facet exists for. If B feels heavy, ratify it scoped to the two fields Canvas needs now (category, tunable) and grow by future ballot.",
+      "story": "Ana builds a game-balance module her designer teammate tunes through Canvas. She wants `speed` grouped under 'Movement' with a hover explanation, editable from the editor; and `debug_seed` visible but locked. In Blueprint this is checkboxes on the variable. Canvas is source-backed, so whatever the checkbox writes must be honest Jet text the designer's git diff shows.",
+      "inWild": "// today: only a doc comment exists\n/// Base movement speed in m/s.\nspeed := 4.2\n\n// Ana wants: category grouping in the sidebar, tooltip (have: doc comment),\n// and an 'editor-tunable' marker Canvas can trust.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Doc comments only — structured keys inside ///",
+          "detail": "No new syntax. Canvas parses conventional keys from the doc comment (category:, tunable:). Zero language surface; the convention lives in Canvas docs. Risk: stringly-typed, unchecked by sema, typos silently ignored.",
+          "code": "/// Base movement speed in m/s.\n/// category: Movement\n/// tunable: yes\nspeed := 4.2"
+        },
+        {
+          "key": "B",
+          "name": "#Meta attribute with typed fields",
+          "detail": "One attribute, sema-checked fields, formatter-stable. Unknown keys are compile errors (E-code with what/why/fix). Canvas Details checkboxes write exactly this.",
+          "code": "/// Base movement speed in m/s.\n#Meta(category: \"Movement\", tunable)\nspeed := 4.2\n\n// unknown field:\n#Meta(caregory: \"Movement\")\n//   ^^^^ error[E0xxx]: unknown #Meta field `caregory`. Did you mean `category`?"
+        },
+        {
+          "key": "C",
+          "name": "Existing mechanisms only — no metadata this epoch",
+          "detail": "Category = module/file organization; tooltip = doc comment; tunable = a convention (e.g. a config struct with Codable). Defers the decision; Canvas ships M3 without grouping/exposure flags and revisits after real usage.",
+          "code": "// movement.jet groups movement values; docs are tooltips; nothing new."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "UE Blueprint",
+          "note": "UPROPERTY specifiers (Category, EditAnywhere, ExposeOnSpawn, ToolTip) surfaced as Details checkboxes — the mechanism Canvas designers will expect.",
+          "code": "UPROPERTY(EditAnywhere, Category=\"Movement\", meta=(ToolTip=\"m/s\"))\nfloat Speed = 4.2;"
+        },
+        {
+          "lang": "Rust",
+          "note": "Typed attributes with compile-checked contents; serde's #[serde(rename = …)] shows the one-attribute-many-typed-fields pattern of option B.",
+          "code": "#[serde(rename = \"speed\", default)]"
+        }
+      ],
+      "rec": "B",
+      "status": "ratified",
+      "created": "2026-07-09T14:10:45.093Z",
+      "outcome": "B",
+      "ratifiedAt": "2026-07-09"
     }
   ],
   "questions": [
@@ -42279,6 +42835,419 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-09T14:18:08.009Z",
+      "by": "claude",
+      "action": "card.update",
+      "ref": "c0p7h4ka",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-09T14:18:07.941Z",
+      "by": "claude",
+      "action": "card.update",
+      "ref": "c0o2b83f",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-09T14:18:07.870Z",
+      "by": "claude",
+      "action": "card.update",
+      "ref": "c0b9fayi",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-09T14:18:07.799Z",
+      "by": "claude",
+      "action": "card.update",
+      "ref": "c0d7obyu",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-09T14:17:44.795Z",
+      "by": "claude",
+      "action": "card.update",
+      "ref": "c00zbmhz",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-09T14:17:44.724Z",
+      "by": "claude",
+      "action": "card.activate",
+      "ref": "c0p7h4ka",
+      "note": ""
+    },
+    {
+      "at": "2026-07-09T14:17:44.653Z",
+      "by": "claude",
+      "action": "card.activate",
+      "ref": "c0o2b83f",
+      "note": ""
+    },
+    {
+      "at": "2026-07-09T14:17:44.578Z",
+      "by": "claude",
+      "action": "card.activate",
+      "ref": "c0zti5r8",
+      "note": ""
+    },
+    {
+      "at": "2026-07-09T14:17:44.506Z",
+      "by": "claude",
+      "action": "card.activate",
+      "ref": "c0yl88cz",
+      "note": ""
+    },
+    {
+      "at": "2026-07-09T14:17:44.441Z",
+      "by": "claude",
+      "action": "card.activate",
+      "ref": "c0xhxzyu",
+      "note": ""
+    },
+    {
+      "at": "2026-07-09T14:17:44.368Z",
+      "by": "claude",
+      "action": "card.activate",
+      "ref": "c0wbf3js",
+      "note": ""
+    },
+    {
+      "at": "2026-07-09T14:17:44.294Z",
+      "by": "claude",
+      "action": "card.activate",
+      "ref": "c0v5rsny",
+      "note": ""
+    },
+    {
+      "at": "2026-07-09T14:17:44.223Z",
+      "by": "claude",
+      "action": "card.activate",
+      "ref": "c0u0y3s6",
+      "note": ""
+    },
+    {
+      "at": "2026-07-09T14:17:44.150Z",
+      "by": "claude",
+      "action": "card.activate",
+      "ref": "c0stzzp4",
+      "note": ""
+    },
+    {
+      "at": "2026-07-09T14:17:44.080Z",
+      "by": "claude",
+      "action": "card.activate",
+      "ref": "c0h41rrl",
+      "note": ""
+    },
+    {
+      "at": "2026-07-09T14:17:44.009Z",
+      "by": "claude",
+      "action": "card.activate",
+      "ref": "c0fzoku6",
+      "note": ""
+    },
+    {
+      "at": "2026-07-09T14:17:43.939Z",
+      "by": "claude",
+      "action": "card.activate",
+      "ref": "c0etlcoy",
+      "note": ""
+    },
+    {
+      "at": "2026-07-09T14:17:43.866Z",
+      "by": "claude",
+      "action": "card.activate",
+      "ref": "c0do8gm2",
+      "note": ""
+    },
+    {
+      "at": "2026-07-09T14:17:43.802Z",
+      "by": "claude",
+      "action": "card.activate",
+      "ref": "c0cgvrdp",
+      "note": ""
+    },
+    {
+      "at": "2026-07-09T14:17:43.728Z",
+      "by": "claude",
+      "action": "card.activate",
+      "ref": "c0b9fayi",
+      "note": ""
+    },
+    {
+      "at": "2026-07-09T14:17:43.652Z",
+      "by": "claude",
+      "action": "card.activate",
+      "ref": "c0a1spbt",
+      "note": ""
+    },
+    {
+      "at": "2026-07-09T14:17:43.577Z",
+      "by": "claude",
+      "action": "card.activate",
+      "ref": "c0d7obyu",
+      "note": ""
+    },
+    {
+      "at": "2026-07-09T14:17:21.941Z",
+      "by": "claude",
+      "action": "card.update",
+      "ref": "c0xynn6m",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-09T14:17:21.869Z",
+      "by": "claude",
+      "action": "card.update",
+      "ref": "c0stzzp4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-09T14:17:21.800Z",
+      "by": "claude",
+      "action": "card.update",
+      "ref": "c0d7obyu",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-09T14:17:21.725Z",
+      "by": "claude",
+      "action": "card.update",
+      "ref": "c0h41rrl",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-09T14:17:21.650Z",
+      "by": "claude",
+      "action": "card.update",
+      "ref": "c0etlcoy",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-09T14:17:21.580Z",
+      "by": "claude",
+      "action": "card.update",
+      "ref": "c0do8gm2",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-09T14:17:21.508Z",
+      "by": "claude",
+      "action": "card.update",
+      "ref": "c0b9fayi",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-09T14:16:54.759Z",
+      "by": "claude",
+      "action": "card.add",
+      "ref": "c0p7h4ka",
+      "note": "Syntax: #Meta attribute — category + tunable fields (D-CANVASMETA1=B)"
+    },
+    {
+      "at": "2026-07-09T14:16:54.690Z",
+      "by": "claude",
+      "action": "card.add",
+      "ref": "c0o2b83f",
+      "note": "Syntax: #Off and #DebugOnly statement attributes (D-CANVASSTATE1=D)"
+    },
+    {
+      "at": "2026-07-09T14:14:01.697Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msg6973bqgg",
+      "note": "→ claude: [tower] 2 decisions ratified: D-CANVASTEST1→A · D-CANVASMETA"
+    },
+    {
+      "at": "2026-07-09T14:14:01.697Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msg6873bon2",
+      "note": "→ codex: [tower] 2 decisions ratified: D-CANVASTEST1→A · D-CANVASMETA"
+    },
+    {
+      "at": "2026-07-09T14:14:01.697Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msg6773bn0m",
+      "note": "→ jetos-agent: [tower] 2 decisions ratified: D-CANVASTEST1→A · D-CANVASMETA"
+    },
+    {
+      "at": "2026-07-09T14:14:01.697Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msg6673blaj",
+      "note": "→ codex-jetos: [tower] 2 decisions ratified: D-CANVASTEST1→A · D-CANVASMETA"
+    },
+    {
+      "at": "2026-07-09T14:14:01.697Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msg6573bjex",
+      "note": "→ codex-canvas: [tower] 2 decisions ratified: D-CANVASTEST1→A · D-CANVASMETA"
+    },
+    {
+      "at": "2026-07-09T14:14:01.697Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msg6473bhe0",
+      "note": "→ codex-main: [tower] 2 decisions ratified: D-CANVASTEST1→A · D-CANVASMETA"
+    },
+    {
+      "at": "2026-07-09T14:14:01.697Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msg6373bds1",
+      "note": "→ codex-1: [tower] 2 decisions ratified: D-CANVASTEST1→A · D-CANVASMETA"
+    },
+    {
+      "at": "2026-07-09T14:14:01.697Z",
+      "by": "tower",
+      "action": "message.send",
+      "ref": "msg6273a2ek",
+      "note": "→ claude-main: [tower] 2 decisions ratified: D-CANVASTEST1→A · D-CANVASMETA"
+    },
+    {
+      "at": "2026-07-09T14:12:31.649Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-CANVASMETA1",
+      "note": "B"
+    },
+    {
+      "at": "2026-07-09T14:12:12.741Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-CANVASTEST1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-09T14:10:45.093Z",
+      "by": "claude",
+      "action": "decision.add",
+      "ref": "D-CANVASMETA1",
+      "note": "Variable and function metadata: how editor-facing facts (category, tooltip, exposure) are spelled in Jet source"
+    },
+    {
+      "at": "2026-07-09T14:10:45.018Z",
+      "by": "claude",
+      "action": "decision.add",
+      "ref": "D-CANVASTEST1",
+      "note": "Canvas interaction tests: which browser + driver runs the scenario suite"
+    },
+    {
+      "at": "2026-07-09T14:09:31.407Z",
+      "by": "claude",
+      "action": "card.add",
+      "ref": "c00zbmhz",
+      "note": "Canvas M6: beyond-parity ergonomics (FROZEN until M5 owner-accepted)"
+    },
+    {
+      "at": "2026-07-09T14:09:31.337Z",
+      "by": "claude",
+      "action": "card.add",
+      "ref": "c0zti5r8",
+      "note": "Canvas M5: onboarding — tour project, docs hovers, cheat sheet"
+    },
+    {
+      "at": "2026-07-09T14:09:31.263Z",
+      "by": "claude",
+      "action": "card.add",
+      "ref": "c0yl88cz",
+      "note": "Canvas M4: interactive performance ratchet on generated big project"
+    },
+    {
+      "at": "2026-07-09T14:09:31.197Z",
+      "by": "claude",
+      "action": "card.add",
+      "ref": "c0xhxzyu",
+      "note": "Canvas M4: multi-file project navigation + cross-file editing"
+    },
+    {
+      "at": "2026-07-09T14:09:31.125Z",
+      "by": "claude",
+      "action": "card.add",
+      "ref": "c0wbf3js",
+      "note": "Canvas M3: traits, events, and library panels"
+    },
+    {
+      "at": "2026-07-09T14:09:31.055Z",
+      "by": "claude",
+      "action": "card.add",
+      "ref": "c0v5rsny",
+      "note": "Canvas M3: review view — git diff panel with graph overlay"
+    },
+    {
+      "at": "2026-07-09T14:09:30.987Z",
+      "by": "claude",
+      "action": "card.add",
+      "ref": "c0u0y3s6",
+      "note": "Canvas M3: project-wide find/references/rename UX"
+    },
+    {
+      "at": "2026-07-09T14:09:30.914Z",
+      "by": "claude",
+      "action": "card.add",
+      "ref": "c0stzzp4",
+      "note": "Canvas M3: Details panel maturity — no dead controls"
+    },
+    {
+      "at": "2026-07-09T14:08:57.554Z",
+      "by": "claude",
+      "action": "card.add",
+      "ref": "c0h41rrl",
+      "note": "Canvas M2: interactive verification sweep of claimed in-graph rows"
+    },
+    {
+      "at": "2026-07-09T14:08:57.486Z",
+      "by": "claude",
+      "action": "card.add",
+      "ref": "c0fzoku6",
+      "note": "Canvas M2: pattern-arm add/edit/remove + multi-input append transactions"
+    },
+    {
+      "at": "2026-07-09T14:08:57.415Z",
+      "by": "claude",
+      "action": "card.add",
+      "ref": "c0etlcoy",
+      "note": "Canvas M2: exec-wire rewiring = statement reorder with source spans"
+    },
+    {
+      "at": "2026-07-09T14:08:57.346Z",
+      "by": "claude",
+      "action": "card.add",
+      "ref": "c0do8gm2",
+      "note": "Canvas M1: core-loop scenario suite + undo/source-sync hardening"
+    },
+    {
+      "at": "2026-07-09T14:08:57.273Z",
+      "by": "claude",
+      "action": "card.add",
+      "ref": "c0cgvrdp",
+      "note": "Canvas M1: error surfacing — persistent diagnostics, results panel, node bubbles"
+    },
+    {
+      "at": "2026-07-09T14:08:57.200Z",
+      "by": "claude",
+      "action": "card.add",
+      "ref": "c0b9fayi",
+      "note": "Canvas M1: every palette entry inserts valid source (P0 exec-drag class)"
+    },
+    {
+      "at": "2026-07-09T14:08:57.127Z",
+      "by": "claude",
+      "action": "card.add",
+      "ref": "c0a1spbt",
+      "note": "Canvas M0: matrix reclassification + shipped-bar enforcement"
+    },
+    {
+      "at": "2026-07-09T14:08:20.314Z",
+      "by": "claude",
+      "action": "card.add",
+      "ref": "c0d7obyu",
+      "note": "Canvas M0: interaction test harness — the epoch truth bar"
+    },
     {
       "at": "2026-07-09T13:43:40.615Z",
       "by": "claude",
@@ -55865,188 +56834,6 @@
       "action": "card.add",
       "ref": "c0zi8xmw",
       "note": "U13 encrypted repo secrets"
-    },
-    {
-      "at": "2026-07-05T10:20:47.638Z",
-      "by": "codex",
-      "action": "card.add",
-      "ref": "c0ysn0xp",
-      "note": "U12 supervised dev services"
-    },
-    {
-      "at": "2026-07-05T10:20:47.593Z",
-      "by": "codex",
-      "action": "card.add",
-      "ref": "c0y1mo9y",
-      "note": "U11 inline script deps"
-    },
-    {
-      "at": "2026-07-05T09:52:58.138Z",
-      "by": "owner",
-      "action": "message.send",
-      "ref": "msg00be051",
-      "note": "→ codex-1: Test"
-    },
-    {
-      "at": "2026-07-04T22:42:22.798Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c9jetpackgates",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-04T21:34:25.474Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c9jetpackgates",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-04T20:51:37.022Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c2hizkhl",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-04T20:08:42.176Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "cmemgreenfield",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-04T20:02:06.889Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "cmemgreenfield",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-04T19:26:25.398Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "cmemgreenfield",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-04T18:24:30.581Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "cmemgreenfield",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-04T17:05:25.809Z",
-      "by": "owner",
-      "action": "message.send",
-      "ref": "msg2lbs986",
-      "note": "→ claude-main: Test"
-    },
-    {
-      "at": "2026-07-04T16:27:28.703Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "cv5syntaxdecrees",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-04T15:58:59.177Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c81",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-04T15:28:05.554Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-NOALLOC-SEM1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-04T15:27:08.904Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-POOLID-API1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-04T15:26:44.553Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-SHARED-API1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-04T15:26:17.418Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-FILES-APPEND1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-04T14:26:33.778Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "cmemgreenfield",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-04T14:26:33.728Z",
-      "by": "orchestrator",
-      "action": "decision.add",
-      "ref": "D-NOALLOC-SEM1",
-      "note": "policy no_alloc enforcement semantics — what counts as an allocation, local-only or interprocedural? (S7 blocker)"
-    },
-    {
-      "at": "2026-07-04T14:21:12.487Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "cmemgreenfield",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-04T14:20:00.734Z",
-      "by": "orchestrator",
-      "action": "decision.add",
-      "ref": "D-POOLID-API1",
-      "note": "Pool<T>/Id<T> construction + insert + access + stale-id API surface (S6 blocker)"
-    },
-    {
-      "at": "2026-07-04T14:20:00.692Z",
-      "by": "orchestrator",
-      "action": "decision.add",
-      "ref": "D-SHARED-API1",
-      "note": "Shared<T> construction + access API surface (S6 blocker)"
-    },
-    {
-      "at": "2026-07-04T14:15:08.381Z",
-      "by": "orchestrator",
-      "action": "decision.add",
-      "ref": "D-FILES-APPEND1",
-      "note": "core.fs/core.files merge: the `append` name collides"
-    },
-    {
-      "at": "2026-07-04T14:13:38.808Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c9jetpackgates",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-04T14:13:02.278Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "cmemgreenfield",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-04T13:34:56.500Z",
-      "by": "tower-migrator",
-      "action": "card.update",
-      "ref": "cmemgreenfield",
-      "note": "logEntry"
     }
   ],
   "messages": [
@@ -58434,6 +59221,94 @@
       "cardId": null,
       "file": null,
       "at": "2026-07-09T12:29:25.565Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg6273a2ek",
+      "from": "tower",
+      "to": "claude-main",
+      "text": "[tower] 2 decisions ratified: D-CANVASTEST1→A · D-CANVASMETA1→B. Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-09T14:14:01.697Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg6373bds1",
+      "from": "tower",
+      "to": "codex-1",
+      "text": "[tower] 2 decisions ratified: D-CANVASTEST1→A · D-CANVASMETA1→B. Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-09T14:14:01.697Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg6473bhe0",
+      "from": "tower",
+      "to": "codex-main",
+      "text": "[tower] 2 decisions ratified: D-CANVASTEST1→A · D-CANVASMETA1→B. Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-09T14:14:01.697Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg6573bjex",
+      "from": "tower",
+      "to": "codex-canvas",
+      "text": "[tower] 2 decisions ratified: D-CANVASTEST1→A · D-CANVASMETA1→B. Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-09T14:14:01.697Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg6673blaj",
+      "from": "tower",
+      "to": "codex-jetos",
+      "text": "[tower] 2 decisions ratified: D-CANVASTEST1→A · D-CANVASMETA1→B. Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-09T14:14:01.697Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg6773bn0m",
+      "from": "tower",
+      "to": "jetos-agent",
+      "text": "[tower] 2 decisions ratified: D-CANVASTEST1→A · D-CANVASMETA1→B. Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-09T14:14:01.697Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg6873bon2",
+      "from": "tower",
+      "to": "codex",
+      "text": "[tower] 2 decisions ratified: D-CANVASTEST1→A · D-CANVASMETA1→B. Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-09T14:14:01.697Z",
+      "deliveredAt": null,
+      "readAt": null
+    },
+    {
+      "id": "msg6973bqgg",
+      "from": "tower",
+      "to": "claude",
+      "text": "[tower] 2 decisions ratified: D-CANVASTEST1→A · D-CANVASMETA1→B. Board is current; pick up with `tower next`.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-09T14:14:01.697Z",
       "deliveredAt": null,
       "readAt": null
     }

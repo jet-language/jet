@@ -432,6 +432,7 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     let js = String::from_utf8_lossy(&js);
     assert!(js.contains("window.__jetCanvasNonblankPixels"));
     assert!(js.contains("window.__jetCanvasHitMap"));
+    assert!(js.contains("window.__jetCanvasPinPoints"));
     assert!(js.contains("ctx.fillRect"));
     assert!(js.contains("const graphUrl"));
     assert!(js.contains("fetch(graphRequestUrl"));
@@ -453,6 +454,10 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(js.contains("recordHit = true"));
     assert!(js.contains("drawNode(graph, node, inlineByNode, false)"));
     assert!(js.contains("function postTransaction"));
+    assert!(js.contains("isError ? 10000 : 2200"));
+    assert!(js.contains("toast.addEventListener(\"click\""));
+    assert!(html.contains("#toast.is-error"));
+    assert!(html.contains("white-space: pre-wrap"));
     assert!(js.contains("const queryUrl"));
     assert!(js.contains("sourceControlUrl"));
     assert!(js.contains("loadSourceControl"));
@@ -695,6 +700,7 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(js.contains("default_args: member.default_args || [\"1\"]"));
     assert!(!js.contains("<span class=\"tag\">${escapeHtml(category)}</span>"));
     assert!(js.contains("function defaultArgsForAction"));
+    assert!(js.contains("if (!inputs.length) return existing"));
     assert!(js.contains("function fuzzyScoreText"));
     assert!(js.contains("__jetCanvasFuzzyScore"));
     assert!(js.contains("actionFuzzyScore(action, query)"));

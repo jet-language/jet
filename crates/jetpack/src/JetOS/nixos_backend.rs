@@ -252,11 +252,15 @@ fn map_system_to_nixos(
             clean_bool_json(&v)
         ));
     }
-    if let Some(v) = resolved_option_value(system, "boot.kernel.params") {
-        body_lines.push(format!(
-            "  boot.kernelParams = {};",
-            nix_string_list(&parse_list_items(&v))
-        ));
+    {
+        // Serial console always rides along so the host can watch boot and
+        // the guest proof marker on ttyS0; tty0 keeps the graphical console.
+        let mut params = resolved_option_value(system, "boot.kernel.params")
+            .map(|v| parse_list_items(&v))
+            .unwrap_or_default();
+        params.push("console=ttyS0,115200".to_string());
+        params.push("console=tty0".to_string());
+        body_lines.push(format!("  boot.kernelParams = {};", nix_string_list(&params)));
     }
 
     let desktop_default = resolved_option_value(system, "services.desktop.profile")
@@ -439,9 +443,15 @@ fn render_flake_nix(host: &str, mapping: &NixosMapping) -> String {
 const CONFIGURATION_HEAD: &str = r#"{ config, pkgs, lib, ... }:
 {
   system.stateVersion = "@@STATEVERSION@@";
+  system.nixos.distroName = "jetos";
+  system.nixos.distroId = "jetos";
 
   boot.loader.timeout = 1;
   boot.growPartition = true;
+  boot.initrd.availableKernelModules = [
+    "virtio_pci" "virtio_blk" "virtio_scsi" "virtio_net"
+    "ahci" "xhci_pci" "nvme" "sd_mod" "sr_mod"
+  ];
 
   fileSystems."/" = {
     device = "/dev/disk/by-label/nixos";
@@ -465,7 +475,7 @@ const CONFIGURATION_PROOF_SERVICE: &str = r#"
       Type = "oneshot";
       RemainAfterExit = true;
     };
-    path = [ pkgs.systemd pkgs.procps pkgs.jq ];
+    path = [ pkgs.systemd pkgs.procps pkgs.jq pkgs.gawk pkgs.gnused pkgs.coreutils ];
     script = ''
       deadline=$((SECONDS + 300))
       while [ "$SECONDS" -lt "$deadline" ]; do

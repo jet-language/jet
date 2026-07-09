@@ -2250,6 +2250,8 @@ implementation milestone is pending.
 | ID  | Milestone | Enforcement today                                                | Code  |
 | --- | --------- | ---------------------------------------------------------------- | ----- |
 | S15 | M6        | default unwind in `Source/main.rs`; `--small` + `panic=abort` in M6 | —     |
+| D-CANVASSTATE1 = D (2026-07-09) | Epoch 6 (card #385) | `#Off stmt` (parsed + type-checked, emits nothing) and `#DebugOnly stmt` (compiled only in debug builds). Canvas node states write these. `build.profile` deliberately NOT exposed as a comptime value — future ballot if wanted. | — |
+| D-CANVASMETA1 = B (2026-07-09) | Epoch 6 (card #386) | `#Meta(category: "…", tunable)` attribute on bindings/functions, sema-checked fields (unknown field = teaching error), scoped to `category` + `tunable` for now; grows only by ballot. | — |
 
 
 ## Provisional — currently in the code

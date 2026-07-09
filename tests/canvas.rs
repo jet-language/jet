@@ -638,6 +638,32 @@ fn run() {
     let projected = jet::Canvas::graph_json_for_file(&path).expect("canvas graph after insert");
     assert!(projected.contains("\"title\":\"use_int\""), "{projected}");
     assert!(projected.contains("\"wire_kind\":\"data\""), "{projected}");
+
+    let no_arg_path = write_fixture(
+        "wired_insert_exec_no_arg",
+        r#"fn helper() {
+    print("ok")
+}
+
+fn run() {
+    print("start")
+}
+"#,
+    );
+    let no_arg_src = fs::read_to_string(&no_arg_path).unwrap();
+    let no_arg_graph = jet::Canvas::graph_json_for_file(&no_arg_path).expect("canvas graph");
+    let run_graph_id = field_before(&no_arg_graph, "\"title\":\"run\"", "graph_id");
+    let revision = jet::Canvas::source_revision(&no_arg_src);
+    let exec_insert = format!(
+        "{{\"schema_version\":1,\"op\":\"insert_call\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"callee\":\"helper\",\"args\":[],\"wire_origin_pin_id\":\"entry:output:then\",\"wire_target_pin\":\"exec\"}}",
+        revision, run_graph_id
+    );
+    let out = jet::Canvas::apply_transaction_json(&no_arg_path, &exec_insert)
+        .expect("exec-origin no-arg wired insert");
+    assert!(out.contains("\"changed\":true"), "{out}");
+    let changed = fs::read_to_string(&no_arg_path).unwrap();
+    assert!(changed.contains("helper()"), "{changed}");
+    assert!(!changed.contains("helper(1)"), "{changed}");
 }
 
 #[test]

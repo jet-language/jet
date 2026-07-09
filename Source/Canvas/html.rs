@@ -248,7 +248,9 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
   *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; scroll-behavior: auto !important; }
 }
 #statusbar { display: flex; align-items: center; gap: 14px; padding: 0 12px; border-top: 1px solid #23344a; background: #070b10; color: #8096b5; font: 11px ui-monospace, "SFMono-Regular", Consolas, monospace; }
-#toast { margin-left: auto; color: #a7f3d0; }
+#toast { position: fixed; right: 12px; bottom: 34px; z-index: 50; max-width: min(760px, calc(100vw - 24px)); max-height: min(50vh, 420px); overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: #a7f3d0; border: 1px solid #2b5948; background: rgba(7,16,22,.96); border-radius: 6px; padding: 8px 10px; box-shadow: 0 16px 44px rgba(0,0,0,.42); cursor: pointer; }
+#toast:empty { display: none; }
+#toast.is-error { color: #fecaca; border-color: #ef4444; background: rgba(31,9,12,.97); }
 @media (max-width: 1120px) {
   #workbench { grid-template-columns: minmax(142px, 18vw) minmax(0, 1fr) minmax(200px, 23vw); }
   #brand span { display: none; }
