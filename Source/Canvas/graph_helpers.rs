@@ -201,7 +201,7 @@ fn pure_leaf(expr: &Expr) -> bool {
         Expr::Unary(_, inner, _) | Expr::Paren(inner, _) | Expr::Copy(inner, _) => pure_leaf(inner),
         Expr::Binary(_, left, right, _) => pure_leaf(left) && pure_leaf(right),
         Expr::CompareChain { operands, .. } => operands.iter().all(pure_leaf),
-        Expr::ListLit(items, _) => items.iter().all(pure_leaf),
+        Expr::ListLit(_, _) => false,
         Expr::MapLit(items, _) => items.iter().all(|(k, v)| pure_leaf(k) && pure_leaf(v)),
         Expr::TupleLit(items, _, _) => items.iter().all(|(_, e)| pure_leaf(e)),
         Expr::Ok(inner, _) | Expr::Err(inner, _) | Expr::Present(inner, _) => pure_leaf(inner),

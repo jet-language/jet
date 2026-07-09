@@ -114,6 +114,7 @@ pub fn canvas_js() -> String {
   let coreCatalogLoaded = false;
   let coreCatalogLoading = null;
   let contextMenuState = null;
+  let contextMenuOpenedAt = 0;
   let pendingInsertPlacement = null;
   const UI_FONT = '"Inter", "Segoe UI", Roboto, system-ui, sans-serif';
   const MONO_FONT = '"JetBrains Mono", ui-monospace, "SFMono-Regular", Consolas, monospace';
@@ -138,12 +139,18 @@ pub fn canvas_js() -> String {
     unknown: "#8a8f98"
   };
   const NODE_ARCHETYPE_STYLES = {
-    entry: { accent: "#b83647", header: "#b83647", header2: "#6f1e2b", label: "Entry", glyph: "ƒ", subtitle: "entry" },
+    entry: { accent: "#b83647", header: "#b83647", header2: "#6f1e2b", label: "Entry", glyph: "ƒ", subtitle: "" },
     function_exec: { accent: "#4f83b6", header: "#315d84", header2: "#1f3e5b", label: "Function", glyph: "ƒ", subtitle: "" },
     function_pure: { accent: "#4f9e5a", header: "#357745", header2: "#234f31", label: "Pure function", glyph: "ƒ", subtitle: "" },
-    control: { accent: "#f2f4f8", header: "#2c333d", header2: "#151a21", label: "Control", glyph: "◇", subtitle: "control" },
-    value: { accent: "#8a8f98", header: "#252b34", header2: "#151a21", label: "Value", glyph: "•", subtitle: "value" }
+    control: { accent: "#f2f4f8", header: "#2c333d", header2: "#151a21", label: "Control", glyph: "◇", subtitle: "" },
+    value: { accent: "#8a8f98", header: "#252b34", header2: "#151a21", label: "Value", glyph: "•", subtitle: "" }
   };
+  const NODE_GRID = 8;
+  const NODE_HEADER_H = 26;
+  const NODE_ROW_H = 24;
+  const NODE_PAD = 8;
+  const PIN_DIAMETER = 11;
+  const PIN_STROKE = 1.8;
 
   function storedFlag(name) {
     try { return window.localStorage && window.localStorage.getItem(name) === "1"; }
@@ -743,7 +750,7 @@ pub fn canvas_js() -> String {
   function drawPin(pin, x, y, dir, recordHit = true) {
     const color = colorForType(pin.type || "unknown");
     const connected = connectedPinIds.has(pin.pin_id);
-    const r = isExecPin(pin) ? Math.max(6.5, 8 * view.zoom) : Math.max(5.2, 5.8 * view.zoom);
+    const r = isExecPin(pin) ? (PIN_DIAMETER * .62) * view.zoom : (PIN_DIAMETER / 2) * view.zoom;
     if (connected) {
       ctx.save();
       ctx.beginPath();
@@ -772,7 +779,7 @@ pub fn canvas_js() -> String {
       ctx.lineWidth = Math.max(1.3, 1.6 * view.zoom);
       ctx.stroke();
     }
-    ctx.lineWidth = Math.max(1.4, 1.8 * view.zoom);
+    ctx.lineWidth = Math.max(1, PIN_STROKE * view.zoom);
     ctx.strokeStyle = color;
     ctx.stroke();
     if (recordHit) {
@@ -797,6 +804,18 @@ pub fn canvas_js() -> String {
     return s.length > max ? s.slice(0, Math.max(1, max - 1)) + "…" : s;
   }
 
+  function ellipsizeText(text, maxWidth) {
+    const s = String(text || "");
+    if (ctx.measureText(s).width <= maxWidth) return s;
+    let lo = 0, hi = s.length;
+    while (lo < hi) {
+      const mid = Math.ceil((lo + hi) / 2);
+      if (ctx.measureText(s.slice(0, mid) + "…").width <= maxWidth) lo = mid;
+      else hi = mid - 1;
+    }
+    return s.slice(0, Math.max(1, lo)) + "…";
+  }
+
   function drawPinLabel(pin, x, y, align) {
     const label = visiblePinLabel(pin);
     if (!label) return;
@@ -819,6 +838,7 @@ pub fn canvas_js() -> String {
   function visiblePinLabelInGraph(graph, node, pin) {
     if (!pin) return "";
     if (!isExecPin(pin)) return pinName(pin);
+    if (pin.pattern_source) return pin.pattern_source;
     const count = pinsForNode(graph, node, pin.direction, true).length;
     return count > 1 ? pinName(pin) : "";
   }
@@ -854,6 +874,23 @@ pub fn canvas_js() -> String {
     return "source-backed Jet value";
   }
 
+  function drawSourceChip(text, color, x, y, maxW, recordHit, hitData) {
+    const boxW = Math.max(38 * view.zoom, Math.min(maxW, (ctx.measureText(text || "arm").width + 16 * view.zoom)));
+    const boxH = 18 * view.zoom;
+    roundRect(x, y - boxH / 2, boxW, boxH, 4 * view.zoom);
+    ctx.fillStyle = "rgba(7,12,19,.92)";
+    ctx.fill();
+    ctx.strokeStyle = hexToRgba(color, .78);
+    ctx.lineWidth = Math.max(1, view.zoom);
+    ctx.stroke();
+    ctx.fillStyle = "#dbeafe";
+    ctx.font = `${Math.max(8, 10 * view.zoom)}px ${MONO_FONT}`;
+    ctx.textAlign = "left";
+    ctx.fillText(ellipsizeText(text || "arm", boxW - 14 * view.zoom), x + 7 * view.zoom, y + 3.5 * view.zoom);
+    if (recordHit && hitData) pinEditorHit.push(Object.assign({ x, y: y - boxH / 2, w: boxW, h: boxH }, hitData));
+    return boxW;
+  }
+
   function drawSocketRow(pin, x, y, w, dir, recordHit) {
     const execInset = isExecPin(pin) ? 5 * view.zoom : 0;
     const px = dir === "input" ? x + execInset : x + w - execInset;
@@ -861,6 +898,14 @@ pub fn canvas_js() -> String {
     const labelX = dir === "input" ? x + (hasLabel ? 22 : 8) * view.zoom : x + w - (hasLabel ? 22 : 8) * view.zoom;
     const labelAlign = dir === "input" ? "left" : "right";
     drawPin(pin, px, y, dir, recordHit);
+    if (pin.pattern_source) {
+      const color = colorForType(pin.type || "exec");
+      const maxW = Math.max(42, w * .42);
+      const chipW = Math.min(maxW, (measureTextPx(`10px ${MONO_FONT}`, pin.pattern_source) + 16)) * view.zoom;
+      const chipX = dir === "input" ? x + 22 * view.zoom : x + w - 22 * view.zoom - chipW;
+      drawSourceChip(pin.pattern_source, color, chipX, y, chipW, false, null);
+      return;
+    }
     drawPinLabel(pin, labelX, y + 4 * view.zoom, labelAlign);
   }
 
@@ -893,11 +938,11 @@ pub fn canvas_js() -> String {
     return false;
   }
 
-  function drawInlineExprChip(pin, expr, x, y, recordHit) {
+  function drawInlineExprChip(pin, expr, x, y, recordHit, maxWorldW = 150) {
     const source = defaultEditorValue(expr);
     const color = colorForType(pin.type || "unknown");
     ctx.font = `${Math.max(8, 10 * view.zoom)}px ${MONO_FONT}`;
-    const boxW = Math.min(150, Math.max(58, ctx.measureText(source || "expr").width / view.zoom + 18)) * view.zoom;
+    const boxW = Math.min(maxWorldW, Math.max(58, ctx.measureText(source || "expr").width / view.zoom + 18)) * view.zoom;
     const boxH = 20 * view.zoom;
     const bx = x;
     const by = y - boxH / 2;
@@ -909,20 +954,20 @@ pub fn canvas_js() -> String {
     ctx.stroke();
     ctx.fillStyle = "#dbeafe";
     ctx.textAlign = "left";
-    ctx.fillText(clipText(source || "expr", 20), bx + 8 * view.zoom, y + 3.5 * view.zoom);
+    ctx.fillText(ellipsizeText(source || "expr", boxW - 16 * view.zoom), bx + 8 * view.zoom, y + 3.5 * view.zoom);
     if (recordHit) pinEditorHit.push({ x: bx, y: by, w: boxW, h: boxH, pin, expr, kind: "inline_expr" });
     window.__jetCanvasInlineExprChips = true;
     return boxW + 8 * view.zoom;
   }
 
-  function drawPinDefaultEditor(graph, pin, x, y, recordHit) {
+  function drawPinDefaultEditor(graph, pin, x, y, recordHit, maxWorldW = 96) {
     const kind = editablePinKind(pin);
     if (!kind || pin.direction !== "input" || connectedPinIds.has(pin.pin_id)) return 0;
     const expr = inlineDefaultForPin(graph, pin);
     const source = defaultEditorValue(expr);
-    if (expr && !isLiteralDefault(kind, source)) return drawInlineExprChip(pin, expr, x, y, recordHit);
+    if (expr && !isLiteralDefault(kind, source)) return drawInlineExprChip(pin, expr, x, y, recordHit, Math.min(150, maxWorldW));
     const color = colorForType(pin.type || "unknown");
-    const boxW = Math.min(96, kind === "bool" ? 24 : kind === "enum" ? 88 : 76) * view.zoom;
+    const boxW = Math.min(96, maxWorldW, kind === "bool" ? 24 : kind === "enum" ? 88 : 76) * view.zoom;
     const boxH = 20 * view.zoom;
     const bx = x;
     const by = y - boxH / 2;
@@ -947,7 +992,7 @@ pub fn canvas_js() -> String {
       ctx.font = `${Math.max(8, 10 * view.zoom)}px ${kind === "string" ? UI_FONT : MONO_FONT}`;
       ctx.fillStyle = expr ? "rgba(238,247,255,.82)" : "rgba(138,143,152,.72)";
       ctx.textAlign = "left";
-      ctx.fillText(clipText(source || "default", kind === "string" ? 12 : 10), bx + 7 * view.zoom, y + 3.5 * view.zoom);
+      ctx.fillText(ellipsizeText(source || "default", boxW - 18 * view.zoom), bx + 7 * view.zoom, y + 3.5 * view.zoom);
       if (kind === "enum") {
         ctx.fillStyle = color;
         ctx.fillText("▾", bx + boxW - 14 * view.zoom, y + 3.5 * view.zoom);
@@ -1167,6 +1212,7 @@ pub fn canvas_js() -> String {
     contextMenu.style.left = Math.min(x, window.innerWidth - 430) + "px";
     contextMenu.style.top = Math.min(y, window.innerHeight - 430) + "px";
     contextMenu.classList.add("is-open");
+    contextMenuOpenedAt = Date.now();
     const input = document.getElementById("action-palette-search");
     if (input) input.focus();
   }
@@ -1903,26 +1949,29 @@ pub fn canvas_js() -> String {
     const style = Object.assign({ fill: "rgba(29,33,41,.96)" }, NODE_ARCHETYPE_STYLES[archetype] || NODE_ARCHETYPE_STYLES.value);
     if (node.kind === "constant") {
       const out = pinsForNode(graph, node, "output", false)[0];
-      return Object.assign({}, style, { accent: colorForType(out && out.type || "unknown"), header: colorForType(out && out.type || "unknown"), label: "Literal", glyph: "•", subtitle: "literal" });
+      return Object.assign({}, style, { accent: colorForType(out && out.type || "unknown"), header: colorForType(out && out.type || "unknown"), label: "Literal", glyph: "•", subtitle: "" });
     }
     if (node.kind === "variable_get") {
       const out = pinsForNode(graph, node, "output", false)[0];
-      return Object.assign({}, style, { accent: colorForType(out && out.type || "unknown"), header: colorForType(out && out.type || "unknown"), label: "Value", glyph: "•", subtitle: "value" });
+      return Object.assign({}, style, { accent: colorForType(out && out.type || "unknown"), header: colorForType(out && out.type || "unknown"), label: "Value", glyph: "•", subtitle: "" });
     }
     if (node.kind === "binding" || node.kind === "assign") {
       const dataPin = pinsForNode(graph, node, "output", false)[0] || pinsForNode(graph, node, "input", false)[0] || {};
       const typeColor = colorForType(dataPin.type || "unknown");
       return Object.assign({}, NODE_ARCHETYPE_STYLES.control, { label: "Set variable", subtitle: "", glyph: "•", accent: typeColor, header: "#2c333d", header2: "#151a21" });
     }
-    if (node.kind === "branch") return Object.assign({}, NODE_ARCHETYPE_STYLES.control, { glyph: "◇", subtitle: "branch" });
-    if (node.kind === "dispatch") return Object.assign({}, NODE_ARCHETYPE_STYLES.control, { glyph: "⇉", subtitle: "switch" });
-    if (node.kind === "loop") return Object.assign({}, NODE_ARCHETYPE_STYLES.control, { glyph: "↻", subtitle: "loop" });
-    if (node.kind === "return") return Object.assign({}, NODE_ARCHETYPE_STYLES.control, { glyph: "⏎", subtitle: "return", accent: "#7dd3a6" });
+    if (node.kind === "branch") return Object.assign({}, NODE_ARCHETYPE_STYLES.control, { glyph: "◇", subtitle: "" });
+    if (node.kind === "dispatch") return Object.assign({}, NODE_ARCHETYPE_STYLES.control, { glyph: "⇉", subtitle: "" });
+    if (node.kind === "loop") return Object.assign({}, NODE_ARCHETYPE_STYLES.control, { glyph: "↻", subtitle: "" });
+    if (node.kind === "return") return Object.assign({}, NODE_ARCHETYPE_STYLES.control, { glyph: "⏎", subtitle: "", accent: "#7dd3a6" });
     return style;
   }
 
-  function nodeSubtitle(node) {
-    return nodeStyle(node, currentGraphOrNull()).subtitle || "";
+  function nodeSubtitle(node, graph) {
+    if (!node || node.archetype === "entry" || node.archetype === "control" || isGetterCapsule(node)) return "";
+    if (["branch", "return", "loop", "dispatch", "flow", "yield"].includes(node.kind || "")) return "";
+    const modulePath = node.module_path || node.module || "";
+    return modulePath && modulePath !== "builtin" ? modulePath : "";
   }
 
   function nodeKindLabel(node, graph) {
@@ -1946,21 +1995,76 @@ pub fn canvas_js() -> String {
     return /^[A-Za-z_][A-Za-z0-9_]*$/.test(s) || /^-?\d+(\.\d+)?$/.test(s) || /^"[^"]*"$/.test(s);
   }
 
-  function nodeSize(graph, node) {
-    const inputData = pinsForNode(graph, node, "input", false).length;
-    const outputData = pinsForNode(graph, node, "output", false).length;
-    const execIn = pinsForNode(graph, node, "input", true).length;
-    const execOut = pinsForNode(graph, node, "output", true).length;
+  function measureTextPx(font, text) {
+    ctx.save();
+    ctx.font = font;
+    const width = ctx.measureText(String(text || "")).width;
+    ctx.restore();
+    return width;
+  }
+
+  function pinEditorWidth(pin) {
+    if (!pin || pin.direction !== "input" || isExecPin(pin)) return 0;
+    const kind = editablePinKind(pin);
+    if (!kind) return 0;
+    return kind === "bool" ? 24 : kind === "enum" ? 88 : 76;
+  }
+
+  function pinContentWidth(graph, node, pin) {
+    const label = visiblePinLabelInGraph(graph, node, pin);
+    const labelW = label ? measureTextPx(`11px ${UI_FONT}`, label) : 0;
+    const chipW = !isExecPin(pin) && pin.direction === "output" ? Math.min(96, measureTextPx(`10px ${MONO_FONT}`, pin.type || "Value") + 16) : 0;
+    const editorW = pinEditorWidth(pin);
+    const patternW = pin.pattern_source ? Math.min(128, measureTextPx(`10px ${MONO_FONT}`, pin.pattern_source) + 16) : 0;
+    return PIN_DIAMETER / 2 + NODE_GRID + Math.max(labelW, patternW) + (chipW || editorW ? NODE_GRID + Math.max(chipW, editorW) : 0);
+  }
+
+  function measureNodeLayout(graph, node) {
+    const allPins = (graph.pins || []).filter((p) => p.node_id === node.node_id);
+    const inputPins = allPins.filter((p) => p.direction === "input");
+    const outputPins = allPins.filter((p) => p.direction === "output");
     const compact = isGetterCapsule(node) || isOperatorNode(node);
-    if (node.archetype === "entry") return { w: Math.max(174, 118 + String(node.title || "").length * 8, 148 + Math.max(inputData, outputData) * 16), h: 66 + Math.max(inputData, outputData) * 24 };
-    if (isOperatorNode(node)) return { w: 88, h: Math.max(58, 28 + Math.max(inputData, outputData) * 22) };
-    const titleW = 92 + String(node.title || "").length * 7.5;
-    const pinW = Math.max(inputData, outputData, execIn, execOut) ? 150 + Math.max(...(graph.pins || []).filter((p) => p.node_id === node.node_id).map((p) => String(visiblePinLabelInGraph(graph, node, p) || "").length * 6 + (isExecPin(p) ? 0 : String(p.type || "").length * 5)), 0) : 0;
-    const w = compact ? Math.max(150, titleW) : Math.max(150, node.kind === "branch" || node.kind === "dispatch" ? 296 : 232, titleW, pinW);
-    const execRows = Math.max(execIn, execOut);
-    const dataRows = Math.max(inputData, outputData);
-    const h = compact ? 40 : Math.max(64, 42 + Math.max(0, execRows) * 24 + Math.max(0, dataRows) * 24 + 16);
-    return { w, h };
+    if (isGetterCapsule(node)) {
+      const out = pinsForNode(graph, node, "output", false)[0] || {};
+      const titleW = measureTextPx(`13px ${UI_FONT}`, node.title || "");
+      const typeW = detailToggles.types ? measureTextPx(`10px ${MONO_FONT}`, out.type || "Value") : 0;
+      return { w: Math.max(150, Math.ceil(34 + Math.max(titleW, typeW) + PIN_DIAMETER)), h: detailToggles.types ? 48 : 40, rows: 1, dataTop: 0, execTop: 0 };
+    }
+    if (isOperatorNode(node)) {
+      const rowCount = Math.max(inputPins.length, outputPins.length, 1);
+      const glyphW = measureTextPx(`26px ${UI_FONT}`, node.title || "") + 34;
+      const leftW = Math.max(0, ...inputPins.map((p) => pinContentWidth(graph, node, p)));
+      const rightW = Math.max(0, ...outputPins.map((p) => pinContentWidth(graph, node, p)));
+      return { w: Math.max(88, Math.ceil(leftW + glyphW + rightW)), h: Math.max(58, NODE_PAD * 2 + rowCount * NODE_ROW_H), rows: rowCount, dataTop: NODE_PAD + NODE_ROW_H / 2, execTop: 0 };
+    }
+    const subtitle = nodeSubtitle(node, graph);
+    const titleW = measureTextPx(`600 13px ${UI_FONT}`, node.title || "");
+    const subtitleW = subtitle ? measureTextPx(`10px ${UI_FONT}`, subtitle) : 0;
+    const headerW = NODE_PAD + 14 + NODE_GRID + Math.max(titleW, subtitleW) + NODE_PAD;
+    const leftW = Math.max(0, ...inputPins.map((p) => pinContentWidth(graph, node, p)));
+    const rightW = Math.max(0, ...outputPins.map((p) => pinContentWidth(graph, node, p)));
+    const pinW = leftW + rightW + NODE_PAD * 4;
+    const badgeW = shouldDrawNodeBadge(node) ? Math.min(118, measureTextPx(`9.2px ${MONO_FONT}`, String(node.kind || "").toUpperCase()) + 14) + NODE_PAD * 2 : 0;
+    const multiInput = (node.edit_affordances || []).includes("add_input_readonly");
+    const armInput = (node.edit_affordances || []).includes("add_arm_readonly");
+    const footerText = multiInput ? `+ ${inputPins.filter((p) => !isExecPin(p)).length} inputs` : armInput ? "+ arm read-only" : "";
+    const footerW = footerText ? measureTextPx(`10px ${MONO_FONT}`, footerText) + NODE_PAD * 4 : 0;
+    const execRows = Math.max(pinsForNode(graph, node, "input", true).length, pinsForNode(graph, node, "output", true).length);
+    const dataRows = Math.max(pinsForNode(graph, node, "input", false).length, pinsForNode(graph, node, "output", false).length);
+    const rows = execRows + dataRows;
+    const execTop = NODE_HEADER_H + NODE_PAD + NODE_ROW_H / 2;
+    const dataTop = execTop + execRows * NODE_ROW_H + (execRows && dataRows ? NODE_GRID : 0);
+    const bodyRowsH = rows ? execRows * NODE_ROW_H + dataRows * NODE_ROW_H + (execRows && dataRows ? NODE_GRID : 0) : 0;
+    const inlineCount = Math.min(2, ((node && graph && graph.inline_exprs) || []).filter((e) => e.node_id === node.node_id).length);
+    const inlineH = inlineCount ? NODE_GRID + inlineCount * 22 : 0;
+    const footerH = footerText ? 22 : 0;
+    const h = node.archetype === "entry" && rows === 0 ? NODE_HEADER_H : NODE_HEADER_H + NODE_PAD * 2 + bodyRowsH + inlineH + footerH;
+    return { w: Math.ceil(Math.max(150, headerW, pinW, badgeW, footerW)), h: Math.ceil(Math.max(node.archetype === "entry" && rows === 0 ? NODE_HEADER_H : 64, h)), rows, execTop, dataTop, footerText };
+  }
+
+  function nodeSize(graph, node) {
+    window.__jetCanvasMeasuredNodeSizing = true;
+    return measureNodeLayout(graph, node);
   }
 
   function bezierPoint(from, to, t) {
@@ -2067,11 +2171,17 @@ pub fn canvas_js() -> String {
   }
 
   function drawArchetypeHeader(node, style, x, y, w, headerH) {
-    drawArchetypeHeader(node, style, x, y, w, headerH);
+    roundRect(x, y, w, headerH, 8 * view.zoom);
+    const headerGrad = ctx.createLinearGradient(x, y, x + w, y);
+    headerGrad.addColorStop(0, style.header || style.accent);
+    headerGrad.addColorStop(1, style.header2 || "#151a21");
+    ctx.fillStyle = headerGrad;
+    ctx.fill();
   }
 
   function drawNode(graph, node, inlineByNode, recordHit = true) {
     const size = nodeSize(graph, node);
+    const layout = measureNodeLayout(graph, node);
     const w = size.w * view.zoom, h = size.h * view.zoom;
     const x = sx(nodeX(node)), y = sy(nodeY(node));
     if (view.zoom < .38) {
@@ -2091,7 +2201,7 @@ pub fn canvas_js() -> String {
     const searchHit = (searchState.spans || []).some((span) => spansOverlap(node.source_span, span));
     const breakpoint = nodeBreakpoint(node);
     const style = nodeStyle(node, graph);
-    const headerH = Math.min(26, size.h) * view.zoom;
+    const headerH = Math.min(NODE_HEADER_H, size.h) * view.zoom;
 
     if (isGetterCapsule(node)) {
       const out = pinsForNode(graph, node, "output", false)[0] || {};
@@ -2110,12 +2220,12 @@ pub fn canvas_js() -> String {
       ctx.fillStyle = "#f8fbff";
       ctx.font = `${Math.max(11, 13 * view.zoom)}px ${UI_FONT}`;
       ctx.textAlign = "left";
-      ctx.fillText(clipText(node.title, 24), x + 16 * view.zoom, y + 25 * view.zoom);
+      ctx.fillText(ellipsizeText(node.title, w - 40 * view.zoom), x + 16 * view.zoom, y + 25 * view.zoom);
       if (out.pin_id) drawPin(out, x + w, y + h / 2, "output", recordHit);
       if (detailToggles.types) {
         ctx.fillStyle = color;
         ctx.font = `${Math.max(8, 9.5 * view.zoom)}px ${MONO_FONT}`;
-        ctx.fillText(clipText(out.type || "Value", 16), x + 16 * view.zoom, y + 36 * view.zoom);
+        ctx.fillText(ellipsizeText(out.type || "Value", w - 40 * view.zoom), x + 16 * view.zoom, y + 36 * view.zoom);
       }
       if (recordHit) hit.push({ x, y, w, h, node });
       window.__jetCanvasGetterCapsules = true;
@@ -2139,10 +2249,10 @@ pub fn canvas_js() -> String {
       ctx.fillStyle = "#f2f4f8";
       ctx.font = `${Math.max(19, 26 * view.zoom)}px ${UI_FONT}`;
       ctx.textAlign = "center";
-      ctx.fillText(clipText(node.title, 2), x + w / 2, y + h / 2 + 9 * view.zoom);
+      ctx.fillText(ellipsizeText(node.title, w - 28 * view.zoom), x + w / 2, y + h / 2 + 9 * view.zoom);
       ctx.textAlign = "left";
-      inputs.forEach((p, i) => drawSocketRow(p, x, y + (18 + i * 22) * view.zoom, w, "input", recordHit));
-      outputs.forEach((p, i) => drawSocketRow(p, x, y + (18 + i * 22) * view.zoom, w, "output", recordHit));
+      inputs.forEach((p, i) => drawSocketRow(p, x, y + (NODE_PAD + NODE_ROW_H / 2 + i * NODE_ROW_H) * view.zoom, w, "input", recordHit));
+      outputs.forEach((p, i) => drawSocketRow(p, x, y + (NODE_PAD + NODE_ROW_H / 2 + i * NODE_ROW_H) * view.zoom, w, "output", recordHit));
       if (recordHit) hit.push({ x, y, w, h, node });
       return;
     }
@@ -2183,16 +2293,16 @@ pub fn canvas_js() -> String {
     ctx.fillStyle = "rgba(255,255,255,.86)";
     ctx.font = `${Math.max(10, 14 * view.zoom)}px ${UI_FONT}`;
     ctx.textAlign = "center";
-    ctx.fillText(style.glyph || "ƒ", x + 16 * view.zoom, y + 18 * view.zoom);
+    ctx.fillText(style.glyph || "ƒ", x + 16 * view.zoom, y + 17.5 * view.zoom);
     ctx.textAlign = "left";
     ctx.fillStyle = "#f8fbff";
     ctx.font = `600 ${Math.max(10, 13 * view.zoom)}px ${UI_FONT}`;
-    ctx.fillText(clipText(node.title, 24), x + 30 * view.zoom, y + 17.5 * view.zoom);
-    const subtitle = nodeSubtitle(node);
-    if (subtitle && node.archetype !== "entry") {
+    ctx.fillText(ellipsizeText(node.title, w - 46 * view.zoom), x + 30 * view.zoom, y + 17.5 * view.zoom);
+    const subtitle = nodeSubtitle(node, graph);
+    if (subtitle) {
       ctx.fillStyle = "rgba(255,255,255,.65)";
       ctx.font = `${Math.max(8, 10 * view.zoom)}px ${UI_FONT}`;
-      ctx.fillText(clipText(subtitle, 28), x + 30 * view.zoom, y + 29.5 * view.zoom);
+      ctx.fillText(ellipsizeText(subtitle, w - 46 * view.zoom), x + 30 * view.zoom, y + 29.5 * view.zoom);
     }
 
     if (shouldDrawNodeBadge(node)) {
@@ -2221,25 +2331,26 @@ pub fn canvas_js() -> String {
 
     const execIn = pinsForNode(graph, node, "input", true);
     const execOut = pinsForNode(graph, node, "output", true);
-    const execTop = 42;
-    execIn.forEach((p, i) => drawSocketRow(p, x, y + (execTop + i * 28) * view.zoom, w, "input", recordHit));
-    execOut.forEach((p, i) => drawSocketRow(p, x, y + (execTop + i * 28) * view.zoom, w, "output", recordHit));
+    const execTop = layout.execTop;
+    execIn.forEach((p, i) => drawSocketRow(p, x, y + (execTop + i * NODE_ROW_H) * view.zoom, w, "input", recordHit));
+    execOut.forEach((p, i) => drawSocketRow(p, x, y + (execTop + i * NODE_ROW_H) * view.zoom, w, "output", recordHit));
 
     const inputs = pinsForNode(graph, node, "input", false);
     const outputs = pinsForNode(graph, node, "output", false);
     const execRows = Math.max(execIn.length, execOut.length);
-    const dataTop = Math.max(44, execTop + execRows * 24 + (execRows ? 10 : 0));
+    const dataTop = layout.dataTop || (NODE_HEADER_H + NODE_PAD + NODE_ROW_H / 2);
     inputs.forEach((p, i) => {
-      const rowY = y + (dataTop + i * 24) * view.zoom;
+      const rowY = y + (dataTop + i * NODE_ROW_H) * view.zoom;
       drawSocketRow(p, x, rowY, w, "input", recordHit);
-      const editorX = x + Math.min(w - 108 * view.zoom, 74 * view.zoom);
-      drawPinDefaultEditor(graph, p, editorX, rowY, recordHit);
+      const editorMax = Math.max(24, Math.min(96, size.w - 92));
+      const editorX = x + Math.min(w - (editorMax + NODE_PAD) * view.zoom, 74 * view.zoom);
+      drawPinDefaultEditor(graph, p, editorX, rowY, recordHit, editorMax);
     });
-    outputs.forEach((p, i) => drawSocketRow(p, x, y + (dataTop + i * 24) * view.zoom, w, "output", recordHit));
+    outputs.forEach((p, i) => drawSocketRow(p, x, y + (dataTop + i * NODE_ROW_H) * view.zoom, w, "output", recordHit));
 
     const inline = (selected || view.zoom >= .95 ? (inlineByNode.get(node.node_id) || []) : []).slice(0, 2);
     inline.forEach((expr, i) => {
-      const cy = y + (dataTop + Math.max(inputs.length, outputs.length) * 24 + 12 + i * 22) * view.zoom;
+      const cy = y + (dataTop + Math.max(inputs.length, outputs.length) * NODE_ROW_H + NODE_GRID + 9 + i * 22) * view.zoom;
       roundRect(x + 12 * view.zoom, cy - 13 * view.zoom, w - 24 * view.zoom, 18 * view.zoom, 5 * view.zoom);
       ctx.fillStyle = simpleEmbeddedValue(expr) ? "rgba(212,212,216,.16)" : "rgba(246,211,101,.11)";
       ctx.fill();
@@ -2248,9 +2359,28 @@ pub fn canvas_js() -> String {
       ctx.stroke();
       ctx.fillStyle = simpleEmbeddedValue(expr) ? "#e4e4e7" : "#f6d365";
       ctx.font = `${Math.max(9, 11 * view.zoom)}px ${MONO_FONT}`;
-      ctx.fillText(clipText(expr.source, 34), x + 19 * view.zoom, cy);
+      ctx.fillText(ellipsizeText(expr.source, w - 38 * view.zoom), x + 19 * view.zoom, cy);
       if (simpleEmbeddedValue(expr)) window.__jetCanvasEmbeddedVariables = true;
     });
+
+    if (layout.footerText) {
+      ctx.font = `${Math.max(8, 10 * view.zoom)}px ${MONO_FONT}`;
+      const badgeW = Math.min(w - 2 * NODE_PAD * view.zoom, ctx.measureText(layout.footerText).width + 16 * view.zoom);
+      const badgeH = 18 * view.zoom;
+      const bx = x + w - NODE_PAD * view.zoom - badgeW;
+      const by = y + h - NODE_PAD * view.zoom - badgeH;
+      roundRect(bx, by, badgeW, badgeH, 4 * view.zoom);
+      ctx.fillStyle = "rgba(7,12,19,.92)";
+      ctx.fill();
+      ctx.strokeStyle = "rgba(138,143,152,.58)";
+      ctx.lineWidth = Math.max(1, view.zoom);
+      ctx.stroke();
+      ctx.fillStyle = "#9db4d2";
+      ctx.textAlign = "center";
+      ctx.fillText(ellipsizeText(layout.footerText, badgeW - 12 * view.zoom), bx + badgeW / 2, by + 12.5 * view.zoom);
+      ctx.textAlign = "left";
+      window.__jetCanvasMultiInputReadOnly = true;
+    }
 
     if (recordHit) hit.push({ x, y, w, h, node });
   }
@@ -3004,10 +3134,10 @@ pub fn canvas_js() -> String {
     const y = ev.clientY - rect.top;
     if (hitPinDefaultEditorAt(x, y)) return;
     const endpoint = hitWireEndpointAt(x, y);
-    if (endpoint && endpoint.other) {
+    if (endpoint && endpoint.pin) {
       hoverPin = endpoint.pin;
-      drag = { mode: "pin", pin: endpoint.other, rewire: endpoint, x, y, mx: x, my: y };
-      showToast("Rewire " + pinName(endpoint.other));
+      drag = { mode: "pin", pin: endpoint.pin, rewire: endpoint, x, y, mx: x, my: y };
+      showToast("Rewire " + pinName(endpoint.pin));
       return;
     }
     const pin = hitPinAt(x, y);
@@ -3312,6 +3442,7 @@ pub fn canvas_js() -> String {
   });
 
   document.addEventListener("click", function (ev) {
+    if (Date.now() - contextMenuOpenedAt < 250) return;
     if (!contextMenu.contains(ev.target)) closeContextMenu();
   });
 

@@ -339,6 +339,8 @@ fn project_func(
             name: p.name.clone(),
             direction: "output".to_string(),
             ty,
+            role: None,
+            pattern_source: None,
             capability: p.convention.sigil().to_string(),
             fallible: false,
             effect_grant_need: None,
@@ -515,6 +517,10 @@ fn project_stmt(
         }
         Stmt::If(ifs) => {
             let node_id = format!("{}:stmt:{ordinal}:branch", g.graph_id);
+            let mut affordances = vec!["edit_inline_expr", "source_jump"];
+            if matches!(ifs.cond, Expr::PatternTest { .. }) {
+                affordances.push("add_arm_readonly");
+            }
             add_node(
                 g,
                 &node_id,
@@ -525,9 +531,12 @@ fn project_stmt(
                 x,
                 y,
                 vec!["control"],
-                vec!["edit_inline_expr", "source_jump"],
+                affordances,
             );
             let cond = add_pin(g, &node_id, "cond", "input", "Bool", "", false);
+            if matches!(ifs.cond, Expr::PatternTest { .. }) {
+                add_arm_pin(g, &node_id, "arm1", &pattern_pin_label(src, &ifs.cond));
+            }
             connect_expr_to_input(
                 g,
                 index,
@@ -573,7 +582,7 @@ fn project_stmt(
                 x,
                 y,
                 vec!["control"],
-                vec!["edit_inline_expr", "source_jump"],
+                vec!["add_arm_readonly", "edit_inline_expr", "source_jump"],
             );
             add_inline(g, &node_id, ordinal, "cond", src, cond.span());
             project_stmt_block(g, index, src, body, ordinal * 100 + 15, x + 230, y + 70);
@@ -689,6 +698,12 @@ fn project_stmt(
                 y,
             );
             for (i, arm) in arms.iter().enumerate() {
+                add_arm_pin(
+                    g,
+                    &node_id,
+                    &format!("arm{}", i + 1),
+                    &pattern_pin_label(src, &arm.cond),
+                );
                 add_inline(
                     g,
                     &node_id,
@@ -911,6 +926,28 @@ fn project_stmt(
             project_stmt_block(g, index, src, body, ordinal * 100 + 210, x + 230, y + 70);
         }
     }
+}
+
+fn pattern_pin_label(src: &str, expr: &Expr) -> String {
+    let raw = snippet(src, expr.span());
+    let balanced = balance_closing_parens(raw.trim());
+    if matches!(expr, Expr::PatternTest { .. }) {
+        if let Some(pos) = balanced.find("==") {
+            return balanced[pos..].trim().to_string();
+        }
+        return format!("== {}", balanced.trim());
+    }
+    balanced
+}
+
+fn balance_closing_parens(s: &str) -> String {
+    let mut out = s.to_string();
+    let opens = s.chars().filter(|c| *c == '(').count();
+    let closes = s.chars().filter(|c| *c == ')').count();
+    for _ in closes..opens {
+        out.push(')');
+    }
+    out
 }
 
 fn project_else_branch(
@@ -1226,7 +1263,122 @@ fn project_expr_node(
             }
             Some(add_pin(g, &node_id, "ok", "output", "unknown", "", false))
         }
-        Expr::OrFallback { value, .. } => project_expr_node(g, index, src, value, ordinal, x, y, exec_context),
+        Expr::OrFallback { value, .. } => {
+            project_expr_node(g, index, src, value, ordinal, x, y, exec_context)
+        }
+        Expr::ListLit(items, span) => {
+            let node_id = format!("{}:expr:{ordinal}:list", g.graph_id);
+            add_node(
+                g,
+                &node_id,
+                "expr",
+                "function_pure",
+                "list",
+                (*span).into(),
+                x,
+                y,
+                vec!["multi-input"],
+                vec!["add_input_readonly", "edit_inline_expr", "source_jump"],
+            );
+            for (i, item) in items.iter().enumerate() {
+                let ty = expr_type(g, index, item);
+                let input = add_pin(
+                    g,
+                    &node_id,
+                    &format!("item{}", i + 1),
+                    "input",
+                    &ty,
+                    "",
+                    false,
+                );
+                connect_expr_to_input(
+                    g,
+                    index,
+                    src,
+                    item,
+                    ordinal * 1000 + i + 1,
+                    &format!("item{}", i + 1),
+                    &node_id,
+                    &input,
+                    x - 220,
+                    y + i as i32 * 74,
+                );
+            }
+            Some(add_pin(
+                g,
+                &node_id,
+                "value",
+                "output",
+                &expr_type(g, index, expr),
+                "",
+                false,
+            ))
+        }
+        Expr::FanOut {
+            callee,
+            items,
+            span,
+        } => {
+            let node_id = format!("{}:expr:{ordinal}:fanout", g.graph_id);
+            add_node(
+                g,
+                &node_id,
+                "function",
+                "function_pure",
+                "fanout",
+                (*span).into(),
+                x,
+                y,
+                vec!["multi-input"],
+                vec!["add_input_readonly", "edit_inline_expr", "source_jump"],
+            );
+            let callee_pin = add_pin(g, &node_id, "callee", "input", "Fn", "", false);
+            connect_expr_to_input(
+                g,
+                index,
+                src,
+                callee,
+                ordinal * 1000,
+                "callee",
+                &node_id,
+                &callee_pin,
+                x - 220,
+                y,
+            );
+            for (i, item) in items.iter().enumerate() {
+                let ty = expr_type(g, index, item);
+                let input = add_pin(
+                    g,
+                    &node_id,
+                    &format!("item{}", i + 1),
+                    "input",
+                    &ty,
+                    "",
+                    false,
+                );
+                connect_expr_to_input(
+                    g,
+                    index,
+                    src,
+                    item,
+                    ordinal * 1000 + i + 1,
+                    &format!("item{}", i + 1),
+                    &node_id,
+                    &input,
+                    x - 220,
+                    y + (i as i32 + 1) * 74,
+                );
+            }
+            Some(add_pin(
+                g,
+                &node_id,
+                "value",
+                "output",
+                &expr_type(g, index, expr),
+                "",
+                false,
+            ))
+        }
         _ => {
             let node_id = format!("{}:expr:{ordinal}:expr", g.graph_id);
             let title = expr_title(expr);

@@ -45,11 +45,39 @@ fn add_pin(
         name: name.to_string(),
         direction: direction.to_string(),
         ty: ty.to_string(),
+        role: None,
+        pattern_source: None,
         capability: capability.to_string(),
         fallible,
         effect_grant_need: None,
         span,
     });
+    id
+}
+
+fn add_arm_pin(g: &mut GraphBuilder, node_id: &str, name: &str, pattern_source: &str) -> String {
+    let id = format!("{node_id}:output:{name}");
+    let span = g
+        .nodes
+        .iter()
+        .find(|n| n.id == node_id)
+        .map(|n| n.span)
+        .unwrap_or(SourceSpan { start: 0, end: 0 });
+    if !g.pins.iter().any(|pin| pin.id == id) {
+        g.pins.push(PinRec {
+            id: id.clone(),
+            node_id: node_id.to_string(),
+            name: name.to_string(),
+            direction: "output".to_string(),
+            ty: "exec".to_string(),
+            role: Some("arm".to_string()),
+            pattern_source: Some(pattern_source.to_string()),
+            capability: "control".to_string(),
+            fallible: false,
+            effect_grant_need: None,
+            span,
+        });
+    }
     id
 }
 
@@ -125,7 +153,9 @@ fn add_execution_overlay(g: &mut GraphBuilder) {
         if node.kind != "entry" {
             ensure_exec_pin(g, &node.id, "exec", "input", node.span);
         }
-        if node.kind == "branch" || (node.kind == "function" && node.archetype == "control") {
+        if node_has_arm_pins(g, &node.id) {
+            ensure_exec_pin(g, &node.id, "else", "output", node.span);
+        } else if node.kind == "branch" || (node.kind == "function" && node.archetype == "control") {
             ensure_exec_pin(g, &node.id, "then", "output", node.span);
             ensure_exec_pin(g, &node.id, "else", "output", node.span);
         } else if node.kind != "return" {
@@ -144,9 +174,30 @@ fn add_execution_overlay(g: &mut GraphBuilder) {
         previous_out = if node.kind == "return" {
             None
         } else {
-            Some(format!("{}:output:then", node.id))
+            Some(primary_exec_output(g, &node.id))
         };
     }
+}
+
+fn node_has_arm_pins(g: &GraphBuilder, node_id: &str) -> bool {
+    g.pins.iter().any(|pin| {
+        pin.node_id == node_id
+            && pin.direction == "output"
+            && pin.role.as_deref() == Some("arm")
+    })
+}
+
+fn primary_exec_output(g: &GraphBuilder, node_id: &str) -> String {
+    g.pins
+        .iter()
+        .find(|pin| {
+            pin.node_id == node_id
+                && pin.direction == "output"
+                && pin.ty == "exec"
+                && pin.role.as_deref() == Some("arm")
+        })
+        .map(|pin| pin.id.clone())
+        .unwrap_or_else(|| format!("{node_id}:output:then"))
 }
 
 fn execution_nodes_in_order(g: &GraphBuilder) -> Vec<NodeRec> {
@@ -262,6 +313,8 @@ fn ensure_exec_pin(
             name: name.to_string(),
             direction: direction.to_string(),
             ty: "exec".to_string(),
+            role: None,
+            pattern_source: None,
             capability: "control".to_string(),
             fallible: false,
             effect_grant_need: None,
@@ -606,13 +659,25 @@ fn pin_json(p: &PinRec) -> String {
         .as_ref()
         .map(|s| json_str(s))
         .unwrap_or_else(|| "null".to_string());
+    let role = p
+        .role
+        .as_ref()
+        .map(|s| json_str(s))
+        .unwrap_or_else(|| "null".to_string());
+    let pattern_source = p
+        .pattern_source
+        .as_ref()
+        .map(|s| json_str(s))
+        .unwrap_or_else(|| "null".to_string());
     format!(
-        "{{\"pin_id\":{},\"node_id\":{},\"name\":{},\"direction\":{},\"type\":{},\"capability\":{},\"fallible\":{},\"effect_grant_need\":{},\"source_span\":{}}}",
+        "{{\"pin_id\":{},\"node_id\":{},\"name\":{},\"direction\":{},\"type\":{},\"role\":{},\"pattern_source\":{},\"capability\":{},\"fallible\":{},\"effect_grant_need\":{},\"source_span\":{}}}",
         json_str(&p.id),
         json_str(&p.node_id),
         json_str(&p.name),
         json_str(&p.direction),
         json_str(&p.ty),
+        role,
+        pattern_source,
         json_str(&p.capability),
         if p.fallible { "true" } else { "false" },
         grant,

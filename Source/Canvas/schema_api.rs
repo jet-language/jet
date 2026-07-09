@@ -69,6 +69,8 @@ struct PinRec {
     name: String,
     direction: String,
     ty: String,
+    role: Option<String>,
+    pattern_source: Option<String>,
     capability: String,
     fallible: bool,
     effect_grant_need: Option<String>,

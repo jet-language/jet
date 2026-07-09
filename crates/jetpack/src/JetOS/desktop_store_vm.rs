@@ -236,7 +236,7 @@ fn write_desktop_facts(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
     fs::create_dir_all(&unit_dir)?;
     fs::write(
         unit_dir.join("display-manager.service"),
-        "[Unit]\nDescription=jetos graphical login\nAfter=systemd-user-sessions.service plymouth-quit-wait.service\n\n[Service]\nEnvironment=JETOS_SYSTEM_ROOT=/var/lib/jetos/current-system\nExecStart=/var/lib/jetos/current-system/sw/bin/sh /var/lib/jetos/current-system/sw/bin/jetos-display-manager\nRestart=always\n\n[Install]\nWantedBy=graphical.target\n",
+        "[Unit]\nDescription=jetos graphical login\nAfter=systemd-user-sessions.service plymouth-quit-wait.service\n\n[Service]\nEnvironment=JETOS_SYSTEM_ROOT=/var/lib/jetos/current-system\nExecStart=/var/lib/jetos/current-system/sw/bin/gdm\nRestart=always\n\n[Install]\nWantedBy=graphical.target\n",
     )?;
     enable_unit(&unit_dir, "graphical.target", "display-manager.service")?;
     Ok(())

@@ -145,10 +145,12 @@ Each node carries `node_id`, `kind`, `archetype`, `title`, `source_span`,
 dispatch-shaped calls all project as `kind:"function"`; enum construction stays
 `kind:"variant"`. Exec pins use `type:"exec"`.
 
-Each pin carries `pin_id`, `node_id`, `name`, `direction`, `type`,
-`capability`, `fallible`, `effect_grant_need`, and `source_span`. A v1 pin span
-is anchored to its owning source node when the compiler does not yet expose a
-narrower pin-specific span.
+Each pin carries `pin_id`, `node_id`, `name`, `direction`, `type`, optional
+`role`, optional `pattern_source`, `capability`, `fallible`,
+`effect_grant_need`, and `source_span`. Pattern-match branch and dispatch arm
+exec pins use `role:"arm"` plus `pattern_source` so Canvas can render one
+labeled output row per source arm. A v1 pin span is anchored to its owning
+source node when the compiler does not yet expose a narrower pin-specific span.
 
 Canvas comment boxes persist as ordinary source comments:
 

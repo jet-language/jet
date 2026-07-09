@@ -161,6 +161,25 @@ fn run() {
 }
 "#;
 
+const CANVAS_PATTERN_MULTI_FIXTURE: &str = r#"fn first_or_zero(x: Int?) -> Int {
+    if x == Val(n) {
+        return n
+    } else {
+        return 0
+    }
+}
+
+fn list_total() -> Int {
+    xs :: [1, 2, 3]
+    return xs[0]
+}
+
+fn run() {
+    print(first_or_zero(Val(4)))
+    print(list_total())
+}
+"#;
+
 const CANVAS_FUNCTION_EVENT_FIXTURE: &str = r#"/// Starts the scene.
 pub fn on_start(limit: Int = 1) -> Int {
     total := limit + 1
@@ -562,6 +581,30 @@ fn canvas_projection_dedupes_variable_getters_with_fanout() {
         3,
         "{graph}"
     );
+}
+
+#[test]
+fn canvas_projects_pattern_arm_and_multi_input_pin_metadata() {
+    let path = write_fixture("pattern_multi", CANVAS_PATTERN_MULTI_FIXTURE);
+    let graph = jet::Canvas::graph_json_for_file(&path).expect("canvas graph");
+
+    for field in [
+        "\"role\":\"arm\"",
+        "\"pattern_source\":\"== Val(n)\"",
+        "\"name\":\"arm1\"",
+        "\"name\":\"else\"",
+        "\"add_arm_readonly\"",
+        "\"title\":\"list\"",
+        "\"add_input_readonly\"",
+        "\"name\":\"item1\"",
+        "\"name\":\"item2\"",
+        "\"name\":\"item3\"",
+    ] {
+        assert!(
+            graph.contains(field),
+            "pattern/multi-input graph missing {field}: {graph}"
+        );
+    }
 }
 
 #[test]

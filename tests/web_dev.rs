@@ -628,9 +628,14 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(js.contains("function bezierControls"));
     assert!(js.contains("ctx.lineTo(x + r * 1.25, y)"));
     assert!(js.contains("selectedWire"));
-    assert!(js.contains("const execTop = 42"));
-    assert!(js.contains("const dataTop = Math.max(44, execTop + execRows * 24"));
-    assert!(js.contains("node.kind === \"branch\" || node.kind === \"dispatch\" ? 296 : 232"));
+    assert!(js.contains("const NODE_HEADER_H = 26"));
+    assert!(js.contains("function measureNodeLayout"));
+    assert!(js.contains("ctx.measureText"));
+    assert!(js.contains("__jetCanvasMeasuredNodeSizing"));
+    assert!(js.contains("pin.pattern_source"));
+    assert!(js.contains("contextMenuOpenedAt"));
+    assert!(js.contains("drag = { mode: \"pin\", pin: endpoint.pin"));
+    assert!(!js.contains("node.kind === \"branch\" || node.kind === \"dispatch\" ? 296 : 232"));
     assert!(js.contains("function graphForFunctionName"));
     assert!(js.contains("function openFunctionGraph"));
     assert!(js.contains("Open function graph"));
