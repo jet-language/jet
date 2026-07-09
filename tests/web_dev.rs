@@ -572,7 +572,7 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(js.contains("data-detail-toggle"));
     assert!(js.contains("data-view-mode"));
     assert!(js.contains("__jetCanvasLensMode"));
-    assert!(js.contains("Select destination socket"));
+    assert!(js.contains("Select destination pin"));
     assert!(js.contains("function drawCompatibleDropTargets"));
     assert!(js.contains("function drawConnectionBadge"));
     assert!(js.contains("function syncWireStatus"));
@@ -582,7 +582,7 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(js.contains("__jetCanvasLastConnectionPlan"));
     assert!(js.contains("const hitR = Math.max(12, 18 * view.zoom)"));
     assert!(js.contains("bestDistance"));
-    assert!(js.contains("Drop on an input socket"));
+    assert!(js.contains("Drop on an input pin"));
     assert!(js.contains("Type mismatch"));
     assert!(js.contains("compatibleActionType"));
     assert!(js.contains("const TYPE_COLOR_MAP"));
@@ -723,6 +723,8 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(js.contains("toolbarSearch.addEventListener"));
     assert!(js.contains("document.body.classList.toggle(\"is-debug-active\""));
     assert!(js.contains("Apply pins"));
+    assert!(html.contains("grid-template-rows: minmax(0, 1fr) auto"), "{html}");
+    assert!(html.contains("#details { min-height: 0; overflow: auto;"), "{html}");
     assert!(js.contains("Visible conversion function"));
     assert!(js.contains("Wire refused"));
     assert!(js.contains("promote_to_binding"));
@@ -739,6 +741,26 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(js.contains("preview_extract_inline_expr"));
     assert!(js.contains("extract_inline_expr"));
     assert!(js.contains("Extract function"));
+    assert!(js.contains("function createStagedNodeFromAction"));
+    assert!(js.contains("__jetCanvasStagedNodeVisuals"));
+    assert!(js.contains("not saved"));
+    assert!(js.contains("function materializeStagedConnection"));
+    assert!(js.contains("__jetCanvasStagedMaterialization = \"direct-staged-to-real\""));
+    assert!(js.contains("Connect staged nodes to a saved pin first"));
+    assert!(js.contains("function createCommentBox"));
+    assert!(js.contains("COMMENT_TINTS"));
+    assert!(js.contains("function graphCommentBoxes"));
+    assert!(js.contains("function copySelection"));
+    assert!(js.contains("function pasteSelection"));
+    assert!(js.contains("function duplicateSelection"));
+    assert!(js.contains("paste_clone"));
+    assert!(js.contains("source_edit: \"paste_clone\""));
+    assert!(js.contains("ev.key.toLowerCase() === \"c\""));
+    assert!(js.contains("ev.key.toLowerCase() === \"v\""));
+    assert!(js.contains("ev.key.toLowerCase() === \"d\""));
+    assert!(!js.contains("debug-only"));
+    assert!(!js.contains("dev-only marker"));
+    assert!(!html.contains("release a socket"));
 
     let (status, graph) = http_get(port, "/canvas/graph").expect("GET Canvas graph");
     assert_eq!(status, 200);

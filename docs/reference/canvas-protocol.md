@@ -40,7 +40,7 @@ Top-level fields:
 Example:
 
 ```json
-{"protocol":"jet.canvas.project","schema_version":1,"project_root":"/repo","project_revision":"sha256-...","entry":"packages/game/src/main.jet","mode":"workspace","workspace":{"path":"workspace.jet","members":[{"name":"game","path":"packages/game"}],"diagnostics":[]},"packages":[{"path":"packages/game","manifest":"packages/game/pkg.jet","name":"game","version":"0.1.0","target":"web","deps":[],"targets":[{"package":"game","target":"executable"}],"effects_enabled":false,"diagnostics":[]}],"targets":[{"package":"game","package_path":"packages/game","manifest":"packages/game/pkg.jet","target":"executable"}],"envs":[],"services":[],"files":[{"path":"workspace.jet","revision":"sha256-...","kind":"workspace"}],"locks":[],"diagnostics":[],"source_control":{"truth":"git-text"},"state_policy":{"semantic":"source","local":["tabs","viewport","selection","breakpoints","watches"],"shared_visual":"source-anchored-comments"}}
+{"protocol":"jet.canvas.project","schema_version":1,"project_root":"/repo","project_revision":"sha256-...","entry":"packages/game/src/main.jet","mode":"workspace","workspace":{"path":"workspace.jet","members":[{"name":"game","path":"packages/game"}],"diagnostics":[]},"packages":[{"path":"packages/game","manifest":"packages/game/pkg.jet","name":"game","version":"0.1.0","target":"web","deps":[],"targets":[{"package":"game","target":"executable"}],"effects_enabled":false,"diagnostics":[]}],"targets":[{"package":"game","package_path":"packages/game","manifest":"packages/game/pkg.jet","target":"executable"}],"envs":[],"services":[],"files":[{"path":"workspace.jet","revision":"sha256-...","kind":"workspace"}],"locks":[],"diagnostics":[],"source_control":{"truth":"git-text"},"state_policy":{"semantic":"source","local":["tabs","viewport","selection","breakpoints","watches","comment_boxes","staged_nodes"],"shared_visual":"source-anchored-comments"}}
 ```
 
 Project documents do not create a Canvas project asset. Package/workspace
@@ -135,7 +135,7 @@ Each graph contains source-backed records:
 | `nodes` | Structural source nodes. |
 | `pins` | Typed input/output pins derived from front-end facts. |
 | `wires` | Data/control/fallible/effect/proof/debug rails. |
-| `regions` | Source-backed regions/comments. Canvas comment boxes are ordinary Jet comments. |
+| `regions` | Source-backed regions/comments. V2 comment boxes are local editor view state unless explicitly converted to shared source hints. |
 | `inline_exprs` | Editable Jet expression source rendered inline. |
 | `rails` | Visual rail classes present in this graph: control, data, fallible, async, effect, proof, debug. |
 
@@ -162,7 +162,7 @@ exec pins use `role:"arm"` plus `pattern_source` so Canvas can render one
 labeled output row per source arm. A v1 pin span is anchored to its owning
 source node when the compiler does not yet expose a narrower pin-specific span.
 
-Canvas comment boxes persist as ordinary source comments:
+Shared Canvas comment hints persist as ordinary source comments:
 
 ```jet
 // canvas:comment span=120..260 title="damage path" color="#2f80ed" alpha=0.25 bounds=(10,20,320,140)
@@ -170,6 +170,10 @@ Canvas comment boxes persist as ordinary source comments:
 
 The `span` anchor is shared truth. `title`, `color`, `alpha`, and `bounds`
 carry visual intent only; stale anchors degrade to auto-layout/local view state.
+V2 free comment boxes, staged nodes, staged wires, and copy/paste clipboard
+state are private editor view state. They do not appear in graph JSON and do not
+write Jet source until a staged node is connected to a source-backed pin or a
+paste operation creates a valid source transaction.
 
 Collapsed graph views also persist as ordinary comments:
 

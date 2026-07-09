@@ -459,12 +459,46 @@ pub fn canvas_js() -> String {
     pasteSelection();
   }
 
+  function deleteLocalSelection() {
+    let changed = false;
+    for (const id of Array.from(selectedNodeIds)) {
+      if ((editorState.stagedNodes || []).some((node) => node.node_id === id)) {
+        removeStagedNode(id);
+        changed = true;
+      }
+      if ((editorState.commentBoxes || []).some((box) => box.comment_id === id)) {
+        editorState.commentBoxes = (editorState.commentBoxes || []).filter((box) => box.comment_id !== id);
+        changed = true;
+      }
+    }
+    if (!changed) return false;
+    saveEditorState();
+    selectedNodeIds = new Set();
+    selectedNodeId = null;
+    showToast("Removed local item");
+    if (latestDoc) drawGraph(latestDoc);
+    return true;
+  }
+
   function removeStagedNode(id) {
     editorState.stagedNodes = (editorState.stagedNodes || []).filter((node) => node.node_id !== id);
     editorState.stagedWires = (editorState.stagedWires || []).filter((wire) => wire.from_pin.indexOf(id + ":") !== 0 && wire.to_pin.indexOf(id + ":") !== 0);
     selectedNodeIds.delete(id);
     if (selectedNodeId === id) selectedNodeId = null;
     saveEditorState();
+  }
+
+  function persistStagedNodePositions(ids) {
+    let changed = false;
+    const allowed = ids ? new Set(ids) : selectedNodeIds;
+    for (const node of editorState.stagedNodes || []) {
+      if (!allowed.has(node.node_id)) continue;
+      node.layout = { x: nodeX(node) / layoutScale.x, y: nodeY(node) / layoutScale.y };
+      nodeOffsets.delete(node.node_id);
+      autoNodeOffsets.delete(node.node_id);
+      changed = true;
+    }
+    if (changed) saveEditorState();
   }
 
   function stagedNodeForPin(pin) {
@@ -483,6 +517,17 @@ pub fn canvas_js() -> String {
     if (!staged) return false;
     const realPin = fromStage ? toPin : fromPin;
     if (!realPin || stagedNodeForPin(realPin)) return false;
+    if (!compatiblePin(fromPin, toPin)) {
+      showToast(connectionPlan(graph, fromPin, toPin).label);
+      return true;
+    }
+    if (["insert_branch", "insert_switch", "insert_loop", "insert_fallible_rail"].includes(staged.action && staged.action.op)) {
+      pendingInsertPlacement = { graph_id: selectedGraphId, title: staged.title, x: nodeX(staged), y: nodeY(staged) };
+      removeStagedNode(staged.node_id);
+      postTransaction({ schema_version: 1, op: staged.action.op, revision: latestDoc.revision, graph_id: selectedGraphId });
+      window.__jetCanvasStagedMaterialization = "direct-staged-to-real";
+      return true;
+    }
     const tx = transactionForPaletteInsert(staged.action, realPin, { x: nodeX(staged), y: nodeY(staged) });
     if (!tx) {
       showToast("Staged node needs a saved insertion path");
@@ -524,6 +569,15 @@ pub fn canvas_js() -> String {
     if (!graph) return;
     for (const node of graph.nodes || []) {
       if (selectedNodeIds.has(node.node_id)) rememberNodePosition(graph, node);
+    }
+    saveEditorState();
+  }
+
+  function rememberNodePositionsById(graph, ids) {
+    if (!graph || !ids) return;
+    const wanted = new Set(ids);
+    for (const node of graphWithViewState(graph).nodes || []) {
+      if (wanted.has(node.node_id) && !node.staged) rememberNodePosition(graph, node);
     }
     saveEditorState();
   }
@@ -728,7 +782,7 @@ pub fn canvas_js() -> String {
   function setPendingPin(pin) {
     pendingPin = pin;
     window.__jetCanvasPendingPin = pin ? { pin_id: pin.pin_id, name: pin.name, type: pin.type, direction: pin.direction } : null;
-    syncWireStatus(pin ? { title: "Source socket", detail: pinName(pin) + " : " + exactPinType(pin), color: colorForType(pin.type || "Value") } : null);
+    syncWireStatus(pin ? { title: "Source pin", detail: pinName(pin) + " : " + exactPinType(pin), color: colorForType(pin.type || "Value") } : null);
   }
 
   function compactCanvasMode() {
@@ -1749,14 +1803,14 @@ pub fn canvas_js() -> String {
   function syncWireStatus(state) {
     if (!wireStatus) return;
     let title = "Ready";
-    let detail = "Drag from a socket or right-click the canvas";
+    let detail = "Drag from a pin or right-click the canvas";
     let color = "#7dd3fc";
     if (state) {
       title = state.title || title;
       detail = state.detail || detail;
       color = state.color || color;
     } else if (hoverPin) {
-      title = "Socket";
+      title = "Pin";
       detail = pinName(hoverPin) + " : " + exactPinType(hoverPin);
       color = colorForType(hoverPin.type || "Value");
     }
@@ -1854,10 +1908,14 @@ pub fn canvas_js() -> String {
 
   function nodeContextActions(graph, node) {
     const actions = [
+      { title: "Copy", detail: "selection", group: "edit", run: copySelection },
+      { title: "Duplicate", detail: "selection", group: "edit", run: duplicateSelection },
+      { title: "Add comment", detail: "around selection", group: "Comment", run: addCommentAroundSelection },
       { title: "Jump source", detail: "span", group: "source", run: () => { const s = node.source_span || { start: 0, end: 0 }; setSourceHash(s); setViewMode("code"); } },
       { title: "Find references", detail: "search index", group: "query", run: () => postQuery({ op: "references", symbol: node.title }) },
       { title: "Set breakpoint", detail: "local span", group: "debug", run: () => toggleBreakpoint(node) }
     ];
+    if (node.staged) actions.unshift({ title: "Delete staged node", detail: "local view", group: "edit", run: () => { removeStagedNode(node.node_id); drawGraph(latestDoc); } });
     if (graphForFunctionName(node.title)) actions.unshift({ title: "Open function", detail: "function", group: "graph", run: () => openFunctionGraph(node.title) });
     return actions;
   }
@@ -1892,6 +1950,9 @@ pub fn canvas_js() -> String {
         if (name) postTransaction({ schema_version: 1, op: "create_function", revision: latestDoc.revision, name, params: "", ret_type: "Int" });
       } },
       { title: "Show source", detail: "toggle", group: "Execution", run: () => setViewMode("code") },
+      { title: "Paste", detail: "selection", group: "Execution", run: pasteSelection },
+      { title: "Duplicate", detail: "selection", group: "Execution", run: duplicateSelection },
+      { title: "Add comment", detail: "local view", group: "Comment", run: addCommentAroundSelection },
       { title: "Align top", detail: "local view", group: "Execution", run: () => alignSelectedNodes("y") },
       { title: "Align left", detail: "local view", group: "Execution", run: () => alignSelectedNodes("x") },
       { title: "Auto tidy", detail: "local view", group: "Execution", run: tidyGraphLayout },
@@ -1907,8 +1968,8 @@ pub fn canvas_js() -> String {
     return actions;
   }
 
-  function openGraphActionPalette(x, y, query) {
-    openActionPalette(x, y, "Canvas actions", graphActionItems(), { context: "All nodes", query: query || "" });
+  function openGraphActionPalette(x, y, query, graphPoint) {
+    openActionPalette(x, y, "Canvas actions", graphActionItems(), { context: "All nodes", query: query || "", graphPoint: graphPoint || graphPointFromClient(x, y) });
   }
 
   function openCoreCatalogPalette(query = "") {
@@ -2196,6 +2257,12 @@ pub fn canvas_js() -> String {
       minY = Math.min(minY, nodeY(n));
       maxX = Math.max(maxX, nodeX(n) + size.w);
       maxY = Math.max(maxY, nodeY(n) + size.h);
+    }
+    for (const box of graphCommentBoxes(graph)) {
+      minX = Math.min(minX, box.x || 0);
+      minY = Math.min(minY, box.y || 0);
+      maxX = Math.max(maxX, (box.x || 0) + (box.w || 260));
+      maxY = Math.max(maxY, (box.y || 0) + (box.h || 160));
     }
     return { minX, minY, maxX, maxY };
   }
@@ -2536,6 +2603,31 @@ pub fn canvas_js() -> String {
     ctx.fill();
   }
 
+  function drawStagedOverlay(node, x, y, w, h) {
+    if (!node || !node.staged) return;
+    ctx.save();
+    roundRect(x - 3 * view.zoom, y - 3 * view.zoom, w + 6 * view.zoom, h + 6 * view.zoom, 9 * view.zoom);
+    ctx.strokeStyle = "rgba(246,211,101,.92)";
+    ctx.lineWidth = Math.max(1.5, 1.5 * view.zoom);
+    ctx.setLineDash([7 * view.zoom, 5 * view.zoom]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.font = `${Math.max(8, 9.5 * view.zoom)}px ${MONO_FONT}`;
+    const label = "not saved";
+    const tw = ctx.measureText(label).width + 14 * view.zoom;
+    roundRect(x + w - tw - 8 * view.zoom, y + 7 * view.zoom, tw, 18 * view.zoom, 4 * view.zoom);
+    ctx.fillStyle = "rgba(47,35,13,.94)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(246,211,101,.64)";
+    ctx.stroke();
+    ctx.fillStyle = "#fde68a";
+    ctx.textAlign = "center";
+    ctx.fillText(label, x + w - tw / 2 - 8 * view.zoom, y + 19.5 * view.zoom);
+    ctx.textAlign = "left";
+    ctx.restore();
+    window.__jetCanvasStagedNodeVisuals = "dashed-not-saved";
+  }
+
   function drawNode(graph, node, inlineByNode, recordHit = true) {
     const size = nodeSize(graph, node);
     const layout = measureNodeLayout(graph, node);
@@ -2574,6 +2666,7 @@ pub fn canvas_js() -> String {
       ctx.strokeStyle = selected ? "#f5a623" : color;
       ctx.lineWidth = selected ? 1.8 : 1;
       ctx.stroke();
+      drawStagedOverlay(node, x, y, w, h);
       ctx.fillStyle = "#f8fbff";
       ctx.font = `${Math.max(11, 13 * view.zoom)}px ${UI_FONT}`;
       ctx.textAlign = "left";
@@ -2603,6 +2696,7 @@ pub fn canvas_js() -> String {
       ctx.strokeStyle = selected ? "#f5a623" : hexToRgba(style.accent, .55);
       ctx.lineWidth = selected ? 1.8 : 1;
       ctx.stroke();
+      drawStagedOverlay(node, x, y, w, h);
       ctx.fillStyle = "#f2f4f8";
       ctx.font = `${Math.max(19, 26 * view.zoom)}px ${UI_FONT}`;
       ctx.textAlign = "center";
@@ -2625,6 +2719,7 @@ pub fn canvas_js() -> String {
     ctx.strokeStyle = active ? "#facc15" : selected ? "#f5a623" : searchHit ? "#c084fc" : "#0b0d11";
     ctx.lineWidth = active ? 2.2 : selected ? 1.5 : 1;
     ctx.stroke();
+    drawStagedOverlay(node, x, y, w, h);
     if (node.kind === "binding" || node.kind === "assign") {
       ctx.fillStyle = style.accent;
       ctx.fillRect(x, y + 7 * view.zoom, Math.max(3, 3 * view.zoom), h - 14 * view.zoom);
@@ -2761,13 +2856,14 @@ pub fn canvas_js() -> String {
   function drawGraph(doc) {
     latestDoc = doc;
     loadDebugState(doc);
-    const graph = currentGraph(doc);
-    if (!graph) return;
+    const sourceGraph = currentGraph(doc);
+    if (!sourceGraph) return;
+    const graph = graphWithViewState(sourceGraph);
     selectedGraphId = graph.graph_id;
     window.__jetCanvasSelectedGraphId = selectedGraphId;
-    if (!selectedNodeId || !graph.nodes.some((n) => n.node_id === selectedNodeId)) selectedNodeId = graph.entry_node;
+    if (!selectedNodeId || (!graph.nodes.some((n) => n.node_id === selectedNodeId) && !graphCommentBoxes(sourceGraph).some((b) => b.comment_id === selectedNodeId))) selectedNodeId = graph.entry_node;
     if (selectedNodeIds.size === 0 && selectedNodeId) selectedNodeIds.add(selectedNodeId);
-    selectedNodeIds = new Set([...selectedNodeIds].filter((id) => graph.nodes.some((n) => n.node_id === id)));
+    selectedNodeIds = new Set([...selectedNodeIds].filter((id) => graph.nodes.some((n) => n.node_id === id) || graphCommentBoxes(sourceGraph).some((b) => b.comment_id === id)));
     syncGraphPicker(doc);
     syncGraphList(doc);
     syncGraphStrip(doc);
@@ -2849,7 +2945,7 @@ pub fn canvas_js() -> String {
         ctx.setLineDash([8, 5]);
         ctx.stroke();
         ctx.setLineDash([]);
-        drawConnectionBadge({ ok: true, label: "Select destination socket", color: "#7dd3fc" }, from.x + 36 * view.zoom, from.y - 12 * view.zoom);
+        drawConnectionBadge({ ok: true, label: "Select destination pin", color: "#7dd3fc" }, from.x + 36 * view.zoom, from.y - 12 * view.zoom);
       }
     }
 
@@ -2904,6 +3000,10 @@ pub fn canvas_js() -> String {
     mini.fillRect(0, 0, minimap.width, minimap.height);
     const b = graphBounds(graph);
     const scale = Math.min((minimap.width - 20) / Math.max(1, b.maxX - b.minX), (minimap.height - 20) / Math.max(1, b.maxY - b.minY));
+    for (const box of graphCommentBoxes(graph)) {
+      mini.fillStyle = hexToRgba(box.color || COMMENT_TINTS[0], .58);
+      mini.fillRect(10 + ((box.x || 0) - b.minX) * scale, 10 + ((box.y || 0) - b.minY) * scale, Math.max(12, (box.w || 260) * scale), Math.max(8, (box.h || 160) * scale));
+    }
     for (const n of graph.nodes) {
       const size = nodeSize(graph, n);
       const style = nodeStyle(n, graph);
@@ -2933,6 +3033,33 @@ pub fn canvas_js() -> String {
   }
 
   function drawCommentRegions(graph) {
+    commentHit = [];
+    for (const box of graphCommentBoxes(graph)) {
+      const x = sx(box.x || 0), y = sy(box.y || 0), w = (box.w || 260) * view.zoom, h = (box.h || 160) * view.zoom;
+      const selected = selectedNodeIds.has(box.comment_id);
+      roundRect(x, y, w, h, 8 * view.zoom);
+      ctx.fillStyle = hexToRgba(box.color || COMMENT_TINTS[0], .16);
+      ctx.fill();
+      ctx.strokeStyle = selected ? "#f5a623" : hexToRgba(box.color || COMMENT_TINTS[0], .72);
+      ctx.lineWidth = selected ? 1.8 : 1.2;
+      ctx.setLineDash([9, 6]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = hexToRgba(box.color || COMMENT_TINTS[0], .28);
+      ctx.fillRect(x, y, w, Math.min(h, 28 * view.zoom));
+      ctx.fillStyle = "#eaf3ff";
+      ctx.font = `${Math.max(11, 13 * view.zoom)}px ${UI_FONT}`;
+      ctx.fillText(ellipsizeText(box.title || "Comment", w - 24 * view.zoom), x + 12 * view.zoom, y + 19 * view.zoom);
+      const grip = Math.max(12, 14 * view.zoom);
+      ctx.strokeStyle = hexToRgba(box.color || COMMENT_TINTS[0], .86);
+      ctx.beginPath();
+      ctx.moveTo(x + w - grip, y + h - 4 * view.zoom);
+      ctx.lineTo(x + w - 4 * view.zoom, y + h - grip);
+      ctx.stroke();
+      commentHit.push({ x, y, w, h, box, part: "body" });
+      commentHit.push({ x, y, w, h: Math.min(h, 30 * view.zoom), box, part: "title" });
+      commentHit.push({ x: x + w - grip - 4, y: y + h - grip - 4, w: grip + 8, h: grip + 8, box, part: "resize" });
+    }
     for (const region of (graph.regions || []).filter((r) => r.kind === "comment")) {
       const b = commentRegionBounds(graph, region);
       const x = sx(b.x), y = sy(b.y), w = b.w * view.zoom, h = b.h * view.zoom;
@@ -2948,6 +3075,77 @@ pub fn canvas_js() -> String {
       ctx.font = `${Math.max(11, 14 * view.zoom)}px "Segoe UI", system-ui, sans-serif`;
       ctx.fillText(region.title || "Comment", x + 12 * view.zoom, y + 23 * view.zoom);
     }
+  }
+
+  function createCommentBox(bounds, title = "Comment", color = COMMENT_TINTS[0], select = true) {
+    const graph = currentGraphOrNull();
+    if (!graph) return null;
+    const box = {
+      comment_id: newLocalId("comment"),
+      graph_id: graph.graph_id,
+      title,
+      color,
+      x: Math.round(bounds.x || 0),
+      y: Math.round(bounds.y || 0),
+      w: Math.max(160, Math.round(bounds.w || 300)),
+      h: Math.max(96, Math.round(bounds.h || 160))
+    };
+    editorState.commentBoxes = (editorState.commentBoxes || []).concat([box]);
+    saveEditorState();
+    if (select) {
+      selectedNodeIds = new Set([box.comment_id]);
+      selectedNodeId = box.comment_id;
+    }
+    window.__jetCanvasCommentBoxes = graphCommentBoxes(graph).length;
+    showToast("Comment added");
+    if (latestDoc) drawGraph(latestDoc);
+    return box;
+  }
+
+  function commentBoundsAroundSelection(graph) {
+    const nodes = selectedGraphNodes(graphWithViewState(graph));
+    if (!nodes.length) {
+      const point = lastPointer || viewportCenterGraphPoint();
+      return { x: point.x - 16, y: point.y - 16, w: 300, h: 160 };
+    }
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const node of nodes) {
+      const size = nodeSize(graphWithViewState(graph), node);
+      minX = Math.min(minX, nodeX(node));
+      minY = Math.min(minY, nodeY(node));
+      maxX = Math.max(maxX, nodeX(node) + size.w);
+      maxY = Math.max(maxY, nodeY(node) + size.h);
+    }
+    return { x: minX - 34, y: minY - 46, w: maxX - minX + 68, h: maxY - minY + 86 };
+  }
+
+  function addCommentAroundSelection() {
+    const graph = currentGraphOrNull();
+    if (!graph) return;
+    createCommentBox(commentBoundsAroundSelection(graph), "Comment", COMMENT_TINTS[0], true);
+  }
+
+  function hitCommentAt(x, y) {
+    for (let i = commentHit.length - 1; i >= 0; i--) {
+      const h = commentHit[i];
+      if (x >= h.x && x <= h.x + h.w && y >= h.y && y <= h.y + h.h) return h;
+    }
+    return null;
+  }
+
+  function nodesInsideComment(graph, box) {
+    return (graphWithViewState(graph).nodes || []).filter((node) => {
+      const size = nodeSize(graphWithViewState(graph), node);
+      const nx = nodeX(node);
+      const ny = nodeY(node);
+      return nx >= box.x && ny >= box.y && nx + size.w <= box.x + box.w && ny + size.h <= box.y + box.h;
+    }).map((node) => node.node_id);
+  }
+
+  function setCommentTint(box, color) {
+    box.color = color;
+    saveEditorState();
+    if (latestDoc) drawGraph(latestDoc);
   }
 
   function regionsForNode(graph, node) {
@@ -3415,9 +3613,9 @@ pub fn canvas_js() -> String {
   function connectionPlan(graph, fromPin, toPin) {
     if (!fromPin) return { ok: false, label: "No pin", color: "#fb7185" };
     if (!toPin) return { ok: true, label: "Release for actions", color: "#7dd3fc" };
-    if (fromPin.pin_id === toPin.pin_id) return { ok: false, label: "Same socket", color: "#fb7185" };
+    if (fromPin.pin_id === toPin.pin_id) return { ok: false, label: "Same pin", color: "#fb7185" };
     if (fromPin.direction === toPin.direction) {
-      const expected = fromPin.direction === "output" ? "Drop on an input socket" : "Drop on an output socket";
+      const expected = fromPin.direction === "output" ? "Drop on an input pin" : "Drop on an output pin";
       return { ok: false, label: expected, color: "#fb7185" };
     }
     const out = fromPin.direction === "output" ? fromPin : toPin;
@@ -3529,6 +3727,7 @@ pub fn canvas_js() -> String {
   }
 
   function completeConnection(fromPin, target, graph) {
+    if (materializeStagedConnection(fromPin, target, graph)) return true;
     const plan = connectionPlan(graph, fromPin, target);
     window.__jetCanvasLastConnectionPlan = plan;
     if (compatiblePin(fromPin, target)) {
@@ -3571,11 +3770,34 @@ pub fn canvas_js() -> String {
     }
     const found = hitNodeAt(x, y);
     if (found) selectNode(found.node, ev.ctrlKey || ev.metaKey ? "toggle" : ev.shiftKey ? "add" : "replace");
+    else {
+      const comment = hitCommentAt(x, y);
+      if (comment) {
+        selectedVariableName = null;
+        selectedNodeIds = new Set([comment.box.comment_id]);
+        selectedNodeId = comment.box.comment_id;
+        if (latestDoc) drawGraph(latestDoc);
+        ev.preventDefault();
+      }
+    }
   });
 
   canvas.addEventListener("dblclick", function (ev) {
     const rect = canvas.getBoundingClientRect();
-    const found = hitNodeAt(ev.clientX - rect.left, ev.clientY - rect.top);
+    const x = ev.clientX - rect.left;
+    const y = ev.clientY - rect.top;
+    const comment = hitCommentAt(x, y);
+    if (comment && comment.part === "title") {
+      const title = window.prompt("Comment title", comment.box.title || "Comment");
+      if (title !== null) {
+        comment.box.title = title || "Comment";
+        saveEditorState();
+        drawGraph(latestDoc);
+      }
+      ev.preventDefault();
+      return;
+    }
+    const found = hitNodeAt(x, y);
     if (found && openFunctionGraph(found.node.title)) ev.preventDefault();
   });
 
@@ -3605,6 +3827,16 @@ pub fn canvas_js() -> String {
       const starts = new Map();
       for (const id of selectedNodeIds) starts.set(id, nodeOffsets.get(id) || { x: 0, y: 0 });
       drag = { mode: "node", x, y, wx: wx(x), wy: wy(y), starts };
+    } else if (hitCommentAt(x, y)) {
+      const comment = hitCommentAt(x, y);
+      selectedVariableName = null;
+      selectedNodeIds = new Set([comment.box.comment_id]);
+      selectedNodeId = comment.box.comment_id;
+      const graph = currentGraphOrNull();
+      const contained = comment.part === "title" ? nodesInsideComment(graph, comment.box) : [];
+      const starts = new Map();
+      for (const id of contained) starts.set(id, nodeOffsets.get(id) || { x: 0, y: 0 });
+      drag = { mode: comment.part === "resize" ? "comment-resize" : "comment", x, y, wx: wx(x), wy: wy(y), box: comment.box, start: Object.assign({}, comment.box), starts };
     } else if (ev.button === 1 || ev.altKey || spaceDown) {
       drag = { mode: "pan", x, y, ox: view.x, oy: view.y };
     } else {
@@ -3614,6 +3846,7 @@ pub fn canvas_js() -> String {
 
   window.addEventListener("mousemove", function (ev) {
     const rect = canvas.getBoundingClientRect();
+    lastPointer = graphPointFromClient(ev.clientX, ev.clientY);
     if (!drag) {
       const nextHover = hitPinAt(ev.clientX - rect.left, ev.clientY - rect.top);
       if ((nextHover && !hoverPin) || (!nextHover && hoverPin) || (nextHover && hoverPin && nextHover.pin_id !== hoverPin.pin_id)) {
@@ -3639,6 +3872,17 @@ pub fn canvas_js() -> String {
       drag.mx = x;
       drag.my = y;
       hoverPin = hitPinAt(x, y);
+    } else if (drag.mode === "comment") {
+      const dx = wx(x) - drag.wx;
+      const dy = wy(y) - drag.wy;
+      drag.box.x = Math.round(drag.start.x + dx);
+      drag.box.y = Math.round(drag.start.y + dy);
+      for (const [id, start] of drag.starts.entries()) nodeOffsets.set(id, { x: start.x + dx, y: start.y + dy });
+    } else if (drag.mode === "comment-resize") {
+      const dx = wx(x) - drag.wx;
+      const dy = wy(y) - drag.wy;
+      drag.box.w = Math.max(160, Math.round(drag.start.w + dx));
+      drag.box.h = Math.max(96, Math.round(drag.start.h + dy));
     }
     if (latestDoc) drawGraph(latestDoc);
   });
@@ -3647,7 +3891,15 @@ pub fn canvas_js() -> String {
     if (drag && drag.mode === "node") {
       const graph = latestDoc ? currentGraph(latestDoc) : null;
       rememberSelectedNodePositions(graph);
+      persistStagedNodePositions();
       showToast("Moved " + selectedNodeIds.size + " node" + (selectedNodeIds.size === 1 ? "" : "s") + " locally");
+    }
+    if (drag && (drag.mode === "comment" || drag.mode === "comment-resize")) {
+      const movedIds = drag.starts ? Array.from(drag.starts.keys()) : [];
+      rememberNodePositionsById(currentGraphOrNull(), movedIds);
+      persistStagedNodePositions(movedIds);
+      saveEditorState();
+      showToast(drag.mode === "comment-resize" ? "Comment resized" : "Comment moved");
     }
     if (drag && drag.mode === "pin") {
       const rect = canvas.getBoundingClientRect();
@@ -3663,7 +3915,7 @@ pub fn canvas_js() -> String {
           showToast("Connection cancelled");
         } else {
           setPendingPin(drag.pin);
-          showToast("Select destination socket");
+          showToast("Select destination pin");
         }
       } else if (target) {
         setPendingPin(null);
@@ -3692,10 +3944,28 @@ pub fn canvas_js() -> String {
     if (found) {
       selectNode(found.node, "replace");
       const graph = latestDoc ? currentGraph(latestDoc) : null;
-      openContextMenu(ev.clientX, ev.clientY, found.node.title, nodeContextActions(graph, found.node));
-    } else {
-      openGraphActionPalette(ev.clientX, ev.clientY);
+      openContextMenu(ev.clientX, ev.clientY, found.node.title, nodeContextActions(graphWithViewState(graph), found.node));
+      return;
     }
+    const comment = hitCommentAt(x, y);
+    if (comment) {
+      selectedNodeIds = new Set([comment.box.comment_id]);
+      selectedNodeId = comment.box.comment_id;
+      const tintActions = COMMENT_TINTS.map((color) => ({ title: "Tint " + color, detail: "comment color", group: "Comment", run: () => setCommentTint(comment.box, color) }));
+      openContextMenu(ev.clientX, ev.clientY, comment.box.title || "Comment", [
+        { title: "Rename comment", detail: "local view", group: "Comment", run: () => {
+          const title = window.prompt("Comment title", comment.box.title || "Comment");
+          if (title !== null) { comment.box.title = title || "Comment"; saveEditorState(); drawGraph(latestDoc); }
+        } },
+        { title: "Delete comment", detail: "local view", group: "Comment", run: () => {
+          editorState.commentBoxes = (editorState.commentBoxes || []).filter((box) => box.comment_id !== comment.box.comment_id);
+          saveEditorState();
+          drawGraph(latestDoc);
+        } }
+      ].concat(tintActions));
+      return;
+    }
+    openGraphActionPalette(ev.clientX, ev.clientY, "", { x: wx(x), y: wy(y) });
   });
 
   canvas.addEventListener("wheel", function (ev) {
@@ -3776,6 +4046,7 @@ pub fn canvas_js() -> String {
   window.addEventListener("hashchange", applySourceHash);
 
   window.addEventListener("keydown", function (ev) {
+    const editingText = ev.target && ["INPUT", "TEXTAREA", "SELECT"].includes(ev.target.tagName);
     if (ev.key === " ") spaceDown = true;
     if (ev.key === "Escape") {
       const hadTransient = !!drag || !!pendingPin || contextMenu.classList.contains("is-open");
@@ -3812,6 +4083,21 @@ pub fn canvas_js() -> String {
       const rect = canvas.getBoundingClientRect();
       openGraphActionPalette(rect.left + Math.min(rect.width - 20, 220), rect.top + 90);
       showToast("Context actions");
+      return;
+    }
+    if (!editingText && (ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "c") {
+      ev.preventDefault();
+      copySelection();
+      return;
+    }
+    if (!editingText && (ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "v") {
+      ev.preventDefault();
+      pasteSelection();
+      return;
+    }
+    if (!editingText && (ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "d") {
+      ev.preventDefault();
+      duplicateSelection();
       return;
     }
     if (ev.altKey && ev.key.toLowerCase() === "a") {
@@ -3857,6 +4143,15 @@ pub fn canvas_js() -> String {
     if (ev.key === "/" && document.activeElement !== canvasSearch) {
       ev.preventDefault();
       canvasSearch.focus();
+      return;
+    }
+    if (!editingText && ev.key.toLowerCase() === "c" && selectedNodeIds.size > 0) {
+      ev.preventDefault();
+      addCommentAroundSelection();
+      return;
+    }
+    if (!editingText && (ev.key === "Delete" || ev.key === "Backspace") && deleteLocalSelection()) {
+      ev.preventDefault();
       return;
     }
     if (ev.key === "Escape") {
@@ -4003,6 +4298,14 @@ pub fn canvas_js() -> String {
     if (!latestDoc || !selectedGraphId) return;
     const pin = pinContext || (contextMenuState && contextMenuState.pin) || null;
     const graphPoint = contextMenuState && contextMenuState.graphPoint || null;
+    if (!pin && actionInsertsNode(item) && item.op !== "preview_canvas_action") {
+      if (item.op === "insert_call" && !item.insert_callee && !item.callee) {
+        const callee = window.prompt("Call function", "print");
+        if (!callee) return;
+        return createStagedNodeFromAction(Object.assign({}, item, { title: callee, callee, insert_callee: callee, args: ["\"canvas\""] }), graphPoint || viewportCenterGraphPoint());
+      }
+      return createStagedNodeFromAction(item, graphPoint || viewportCenterGraphPoint());
+    }
     if (item.kind === "canvas.core_catalog") {
       postTransaction(transactionForPaletteInsert(item, pin, graphPoint));
     } else if (item.kind === "project_function") {

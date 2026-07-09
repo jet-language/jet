@@ -203,7 +203,7 @@ pub fn project_json_for_entry(path: &Path) -> String {
     let locks_json = lock_project_json(&ctx.project_root);
     let env_projection = env_project_json(&ctx.project_root);
     format!(
-        "{{\"protocol\":\"jet.canvas.project\",\"schema_version\":{},\"project_root\":{},\"project_revision\":{},\"entry\":{},\"mode\":{},\"workspace\":{},\"packages\":[{}],\"targets\":[{}],\"envs\":[{}],\"services\":[{}],\"files\":[{}],\"locks\":[{}],\"diagnostics\":[{}],\"source_control\":{{\"truth\":\"git-text\"}},\"state_policy\":{{\"semantic\":\"source\",\"local\":[\"tabs\",\"viewport\",\"selection\",\"breakpoints\",\"watches\"],\"shared_visual\":\"source-anchored-comments\"}}}}",
+        "{{\"protocol\":\"jet.canvas.project\",\"schema_version\":{},\"project_root\":{},\"project_revision\":{},\"entry\":{},\"mode\":{},\"workspace\":{},\"packages\":[{}],\"targets\":[{}],\"envs\":[{}],\"services\":[{}],\"files\":[{}],\"locks\":[{}],\"diagnostics\":[{}],\"source_control\":{{\"truth\":\"git-text\"}},\"state_policy\":{{\"semantic\":\"source\",\"local\":[\"tabs\",\"viewport\",\"selection\",\"breakpoints\",\"watches\",\"comment_boxes\",\"staged_nodes\"],\"shared_visual\":\"source-anchored-comments\"}}}}",
         PROJECT_SCHEMA_VERSION,
         json_str(&ctx.project_root.display().to_string()),
         json_str(&ctx.project_revision),

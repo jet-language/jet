@@ -80,7 +80,7 @@ body.is-debug-active .debug-controls { display: flex; }
 .debug-controls button { min-width: 30px; padding: 0 7px; }
 #workbench { min-height: 0; min-width: 0; position: relative; display: grid; grid-template-columns: minmax(156px, 15vw) minmax(0, 1fr) minmax(238px, 20vw); background: #05070b; }
 .side { min-width: 0; overflow: hidden auto; background: #0b1017; border-right: 1px solid #23344a; box-shadow: inset -1px 0 0 rgba(255,255,255,.03); }
-.right { border-right: 0; border-left: 1px solid #23344a; box-shadow: inset 1px 0 0 rgba(255,255,255,.03); }
+.right { border-right: 0; border-left: 1px solid #23344a; box-shadow: inset 1px 0 0 rgba(255,255,255,.03); display: grid; grid-template-rows: minmax(0, 1fr) auto; overflow: hidden; }
 .panel { border-bottom: 1px solid #23344a; padding: clamp(9px, 1.2vw, 13px); }
 .panel h2 { margin: 0 0 10px; color: #eaf5ff; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; }
 .panel details { display: grid; gap: 8px; }
@@ -164,7 +164,7 @@ body:not(.is-dev-mode) #wire-status { display: none; }
 #hud { position: absolute; left: clamp(8px, 1.4vw, 16px); bottom: clamp(8px, 1.4vw, 16px); display: flex; gap: 8px; color: #9bb4d3; font: 12px ui-monospace, "SFMono-Regular", Consolas, monospace; max-width: calc(100% - 32px); flex-wrap: wrap; }
 #hud span { border: 1px solid #263b59; background: rgba(8,17,29,.88); padding: 5px 8px; border-radius: 4px; }
 body:not(.is-dev-mode) #graph-meta { display: none; }
-#details { height: 100%; overflow: auto; --node-accent: #35c2ff; }
+#details { min-height: 0; overflow: auto; --node-accent: #35c2ff; padding-bottom: 18px; }
 .details-empty { display: grid; gap: 8px; padding: 12px; border: 1px dashed #31445d; background: #0d1520; color: #90a5c4; border-radius: 4px; }
 .details-hero { position: relative; display: grid; gap: 10px; padding: 12px; border: 1px solid color-mix(in srgb, var(--node-accent) 56%, #21334a); background: linear-gradient(180deg, color-mix(in srgb, var(--node-accent) 18%, #101926), #09111a); border-radius: 6px; box-shadow: inset 4px 0 0 var(--node-accent), 0 14px 36px rgba(0,0,0,.26); }
 .details-titleline { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 9px; align-items: center; }
@@ -340,7 +340,7 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
     <section id="stage">
       <div id="canvas-dock" aria-label="Canvas panels"><button id="dock-graphs">Graphs</button><button id="dock-details">Inspector</button></div>
       <div id="graph-strip" aria-label="Graph tabs"></div>
-      <div id="wire-status" aria-live="polite"><span id="wire-status-dot"></span><b>Ready</b><span>Drag from a socket or right-click the canvas</span></div>
+      <div id="wire-status" aria-live="polite"><span id="wire-status-dot"></span><b>Ready</b><span>Drag from a pin or right-click the canvas</span></div>
       <div id="graph-overview" aria-label="Graph overview"></div>
       <div id="run-hud" aria-live="polite">run idle</div>
       <canvas id="jet-canvas-view" width="1400" height="900"></canvas>
@@ -359,7 +359,7 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
 <div id="context-menu" role="menu"></div>
 <div id="first-run-tour" role="dialog" aria-label="Canvas first run">
   <b>Canvas edits Jet source.</b>
-  <span>Use Code, Split, or Graph, then right-click or release a socket for edits.</span>
+  <span>Use Code, Split, or Graph, then right-click or drag from a pin and release on empty space.</span>
   <button id="tour-dismiss">Dismiss</button>
 </div>
 __JET_CANVAS_BOOTSTRAP__

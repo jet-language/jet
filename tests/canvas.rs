@@ -2018,6 +2018,8 @@ fn canvas_protocol_doc_matches_v1_graph_and_edit_shape() {
         "debug_overlay",
         "breakpoint_spans",
         "watches",
+        "comment_boxes",
+        "staged_nodes",
         "jet.canvas.query",
         "source_to_graph",
         "preview_rename",
