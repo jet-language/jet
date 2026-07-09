@@ -211,8 +211,15 @@ fn copy_profile_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
         return Ok(());
     }
     let meta = fs::symlink_metadata(src)?;
-    if meta.is_dir() {
-        fs::create_dir_all(dst)?;
+    // A symlink that resolves to a directory is treated as a directory:
+    // replicating it verbatim would alias a read-only /nix/store dir into
+    // the profile, and the next package merging into that subtree would
+    // write through the link into the store (EROFS).
+    let is_dir_like = meta.is_dir()
+        || (meta.file_type().is_symlink()
+            && fs::metadata(src).map(|m| m.is_dir()).unwrap_or(false));
+    if is_dir_like {
+        ensure_profile_dir(dst)?;
         let mut entries = fs::read_dir(src)?
             .filter_map(Result::ok)
             .collect::<Vec<_>>();
@@ -231,6 +238,28 @@ fn copy_profile_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
         }
     }
     Ok(())
+}
+
+/// Make `dst` a real, writable directory. If an earlier package left a
+/// directory symlink here, materialize its contents first so this package
+/// can merge alongside them.
+fn ensure_profile_dir(dst: &Path) -> std::io::Result<()> {
+    if let Ok(meta) = fs::symlink_metadata(dst) {
+        if meta.file_type().is_symlink() {
+            let target = fs::canonicalize(dst)?;
+            fs::remove_file(dst)?;
+            fs::create_dir_all(dst)?;
+            let mut entries = fs::read_dir(&target)?
+                .filter_map(Result::ok)
+                .collect::<Vec<_>>();
+            entries.sort_by_key(|entry| entry.file_name());
+            for entry in entries {
+                copy_profile_tree(&entry.path(), &dst.join(entry.file_name()))?;
+            }
+            return Ok(());
+        }
+    }
+    fs::create_dir_all(dst)
 }
 
 fn project_runtime_closure(

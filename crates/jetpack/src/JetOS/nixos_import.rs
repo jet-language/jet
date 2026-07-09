@@ -184,6 +184,12 @@ fn load_nixos_import_plan(args: &NixosImportArgs) -> Result<NixosImportPlan, Str
                 .map_err(|e| format!("reading `{}` failed: {e}", path.display()))?;
             return import_plan_from_json(args, &path, &text);
         }
+        // Live semantic tier (D-JOS-NIXIMPORT1=C): evaluate the flake's real
+        // option values. A non-flake source falls through to the audited
+        // scan draft; a broken flake is a hard error, never a silent scan.
+        if let Some(plan) = live_import_plan(args)? {
+            return Ok(plan);
+        }
     }
     import_plan_from_scan(args)
 }
