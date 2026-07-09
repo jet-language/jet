@@ -1,12 +1,14 @@
-//! Raw-mode terminal control for the interactive hybrid REPL (D-FE-REPL1=D).
+//! Raw-mode terminal control — shared by the interactive hybrid REPL
+//! (D-FE-REPL1=D) and the `jet ?` hybrid help app (D-FE-HELP1=D). One
+//! mechanism (I8): both raw-mode TTY apps in this compiler go through this
+//! module rather than each shelling out to `stty` on their own.
 //!
 //! I6: zero external crates — no `termios`/`crossterm`/`libc` crate. Raw mode
 //! is toggled by shelling out to the `stty` binary (present on every Unix the
 //! dev shell targets); key decoding is plain byte parsing over `std::io`.
 //! When stdin/stdout aren't both a TTY, or `stty` isn't available, `enable()`
-//! returns `None` and the caller falls back to the pre-redesign cooked
-//! line-buffered loop (`Source/REPL/mod.rs::run_cooked`) — non-TTY transcripts
-//! never touch this module.
+//! returns `None` and the caller falls back to its non-interactive floor
+//! (REPL: `Source/REPL/mod.rs::run_cooked`; help: the static/query palette).
 
 use std::io::{self, IsTerminal, Read};
 use std::process::{Command, Stdio};
@@ -84,6 +86,8 @@ pub enum Key {
     Down,
     Home,
     End,
+    /// F1 (SS3 form, `ESC O P` — the common raw/xterm encoding).
+    F1,
     CtrlB,
     CtrlP,
     CtrlF,
@@ -162,6 +166,7 @@ impl<R: Read> KeyReader<R> {
             b'D' => Key::Left,
             b'H' => Key::Home,
             b'F' => Key::End,
+            b'P' if b1 == b'O' => Key::F1,
             b'1' | b'7' => {
                 self.read_byte(); // trailing `~`
                 Key::Home
@@ -245,6 +250,12 @@ mod tests {
         assert_eq!(r.read_key(), Key::Down);
         assert_eq!(r.read_key(), Key::Right);
         assert_eq!(r.read_key(), Key::Left);
+    }
+
+    #[test]
+    fn decodes_f1_ss3_escape() {
+        let mut r = KeyReader::new(Cursor::new(b"\x1bOP".to_vec()));
+        assert_eq!(r.read_key(), Key::F1);
     }
 
     #[test]

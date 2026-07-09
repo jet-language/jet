@@ -57,12 +57,14 @@ pub mod ExitCodes;
 pub mod Explain;
 pub mod Fetch;
 pub mod FixEngine;
+pub mod Help;
 pub mod Interpreter;
 pub mod JitBackend;
 pub mod LSP;
 pub mod Publish;
 pub mod REPL;
 pub mod Store;
+pub mod Term;
 
 use Diagnostics::Diagnostic;
 

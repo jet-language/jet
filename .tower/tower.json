@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 392,
-    "rev": 2093,
+    "rev": 2106,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -18499,7 +18499,7 @@
       "body": "Owner asked whether JetOS can replace an entire NixOS flake/flake-parts/Home Manager config tomorrow. Audit verdict: no. Current JetOS has substantial generation/installer/VM proof plumbing, but no full semantic NixOS/HM importer and no real installed-guest acceptance proof for the owner config. This card owns the decisions and implementation gates to make that claim true.",
       "kind": "task",
       "track": "sidequest",
-      "epoch": null,
+      "epoch": "e7",
       "milestoneId": null,
       "phase": "building",
       "priority": "P0",
@@ -18780,7 +18780,7 @@
       "body": "Audit found process split but not crate/product split: root package still builds jetpack/jetos, jetos is a jetpack os wrapper, driver depends on jetpack, tests are mixed. This card prepares split boundaries without changing user semantics until owner decides visible ownership.",
       "kind": "task",
       "track": "sidequest",
-      "epoch": null,
+      "epoch": "e7",
       "milestoneId": null,
       "phase": "done",
       "priority": "P1",
@@ -41929,6 +41929,176 @@
       "created": "2026-07-09T14:10:45.093Z",
       "outcome": "B",
       "ratifiedAt": "2026-07-09"
+    },
+    {
+      "id": "D-JOS-NATIVE1",
+      "cardId": "c_audit_363_9n2bl3",
+      "group": "architecture",
+      "title": "jetos is a from-scratch standalone OS; NixOS module system is not a backend",
+      "gist": "jetos must be its own Linux system — jet, jetpack, and the hangar all the way down — functionally equivalent to NixOS. Building it by generating a NixOS configuration under the hood produces a reskinned NixOS and is forbidden.",
+      "explainer": "",
+      "story": "The first working graphical jetos VM was realized by compiling the jetos option tree into a generated NixOS flake. It booted GNOME, but the guest was visibly NixOS: NixOS wallpaper, release codename \"Yarara\", NixOS module semantics throughout. The owner rejected this outright: adapters may leverage the nixpkgs package ecosystem, but the operating system itself — module/option system, generations, activation, /etc rendering, service units, boot, desktop glue, identity — must be jetos-native.",
+      "inWild": "$ jet os vm run halcyon --disk ./halcyon.qcow2\nboots a system whose settings panel reads \"jetos\" because it IS jetos: hangar store, jetos-generated systemd units, jetos activation — with firefox/steam/plasma fetched from nixpkgs through the jetpack adapter.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "label": "Native jetos system, nixpkgs as package adapter only",
+          "detail": "jetos owns every OS-assembly concern natively; nixpkgs is reached through jetpack providers purely to obtain packages. Functional equivalence to NixOS is proven by behavior, not by sharing its implementation."
+        },
+        {
+          "key": "B",
+          "label": "Hidden NixOS realizer (rejected)",
+          "detail": "Compile jetos config to a generated NixOS system, rebrand the output. Fast to ship, but the product is a NixOS fork/reskin."
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "status": "ratified",
+      "created": "2026-07-09T17:57:14.572Z",
+      "outcome": "A",
+      "comment": "Decreed live 2026-07-09: no forked/reskinned NixOS; standalone jetos with nixpkgs adapters.",
+      "ratifiedAt": "2026-07-09"
+    },
+    {
+      "id": "D-JOS-STORE1",
+      "cardId": "c_audit_363_9n2bl3",
+      "group": "architecture",
+      "title": "On-disk package store inside a jetos system: hangar-native, staged",
+      "gist": "The jetpack hangar is THE store of a jetos system — its layout, GC, and generation roots. Stage 1 keeps nixpkgs-built closures under a hangar-managed compatibility root so unmodified binaries run; a later stage re-roots/rebuilds packages natively.",
+      "explainer": "",
+      "story": "Nixpkgs binaries hardcode /nix/store paths internally (ELF interpreters, dlopen paths, wrappers). Running them unmodified requires that path shape to exist on disk. Rather than adopting /nix/store as jetos's permanent format, the hangar owns the store from day one and treats the nix-shaped subtree as the adapter's compatibility root, with native re-rooting as the planned end state.",
+      "inWild": "/hangar/…            ← jetos store: metadata, GC roots, generations\n/hangar/compat/nix/store/…   ← stage-1 root for unmodified nixpkgs closures\nLater: packages rebuilt against hangar paths; compat root shrinks to nothing.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "label": "Hangar-native, staged compat root",
+          "detail": "Hangar owns everything; nix-shaped compat subtree is an adapter detail with a planned exit."
+        },
+        {
+          "key": "B",
+          "label": "Keep /nix/store layout permanently",
+          "detail": "Simplest compatibility, least ownership of the format."
+        },
+        {
+          "key": "C",
+          "label": "Hangar-native from day one",
+          "detail": "Rewrite/rebuild every package before anything ships; purest but gates all system work."
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "status": "ratified",
+      "created": "2026-07-09T17:57:14.689Z",
+      "outcome": "A",
+      "comment": "Chosen via session ballot 2026-07-09.",
+      "ratifiedAt": "2026-07-09"
+    },
+    {
+      "id": "D-JOS-NIXEVAL1",
+      "cardId": "c_audit_363_9n2bl3",
+      "group": "architecture",
+      "title": "No `nix` binary anywhere in the jetos product path — this epoch builds jetpack's own nixpkgs pipeline",
+      "gist": "jetos and jetpack must not shell out to the nix binary. Leveraging the nixpkgs ecosystem requires jetpack to evaluate, fetch, and build nixpkgs packages itself: a Nix-language evaluator (or equivalent artifact protocol), derivation hashing, the binary-cache substituter protocol, and a sandboxed builder — in scope for this epoch, not deferred.",
+      "explainer": "",
+      "story": "Today the jetpack nix provider runs `nix build nixpkgs#pkg`. That makes the nix binary a load-bearing dependency of every jetos system build. The owner chose the strongest form of independence: the adapter speaks nixpkgs' formats (Nix language, drv hashing, NAR/narinfo caches) through jetpack's own implementation, so no Nix-project executable is required to build or run a jetos system.",
+      "inWild": "$ jetpack fetch nixpkgs#firefox\n  evaluates nixpkgs with jetpack's evaluator, resolves the store hash,\n  substitutes the NAR from cache.nixos.org into the hangar compat root —\n  no /run/current-system/sw/bin/nix involved.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "label": "Staged: nix CLI now, native later",
+          "detail": "Ship on the CLI, replace it on a scoped later card."
+        },
+        {
+          "key": "B",
+          "label": "nix CLI permanently acceptable",
+          "detail": "Never build an evaluator."
+        },
+        {
+          "key": "C",
+          "label": "No nix binary at all this epoch",
+          "detail": "The epoch includes jetpack's own evaluation/fetch/build pipeline before jetos ships."
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "status": "ratified",
+      "created": "2026-07-09T17:57:14.811Z",
+      "outcome": "C",
+      "comment": "Chosen via session ballot 2026-07-09: no nix binary at all this epoch.",
+      "ratifiedAt": "2026-07-09"
+    },
+    {
+      "id": "D-JOS-PARITYBAR1",
+      "cardId": "c_audit_363_9n2bl3",
+      "group": "architecture",
+      "title": "Epoch-7 exit bar: NixOS-class architecture natively + prioritized breadth",
+      "gist": "The epoch exits when jetos natively delivers the full NixOS capability architecture (typed module/option system, generations, atomic activation, rollback, fully declarative system) PLUS: a terminal baseline, a graphical baseline, one-line desktop swaps (GNOME/KDE/Hyprland/niri; wayland/x11), and the owner's entire ~/nixos config running natively. Module breadth beyond that grows by demand through a defined process.",
+      "explainer": "",
+      "story": "NixOS has on the order of 20k options; literal total parity is a multi-year tail. Functional equivalence is an architecture property plus enough module breadth to cover real systems. Nothing is baked into jetos itself: the entire system is driven by the user's jet config files — defaults may exist (terminal and graphical baselines), but composition is wholly the user's, written by hand or through jetos Studio.",
+      "inWild": "desktop: .Gnome        →  desktop: .Kde        (one line)\nsession: .Wayland      →  session: .X11        (one line)\ndesktop: .Hyprland — same config file, nothing else changes.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "label": "Architecture + prioritized breadth",
+          "detail": "Exit = architecture + baselines + one-line desktop swaps + owner config native; breadth by demand after."
+        },
+        {
+          "key": "B",
+          "label": "Full module parity",
+          "detail": "Every NixOS option has a jetos equivalent before exit."
+        },
+        {
+          "key": "C",
+          "label": "Owner config only",
+          "detail": "Exit = owner's machine runs; everything else later."
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "status": "ratified",
+      "created": "2026-07-09T17:57:14.927Z",
+      "outcome": "A",
+      "comment": "Chosen via session ballot 2026-07-09.",
+      "ratifiedAt": "2026-07-09"
+    },
+    {
+      "id": "D-JOS-NIXBACKEND2",
+      "cardId": "c_audit_363_9n2bl3",
+      "group": "architecture",
+      "title": "Fate of the jet→NixOS realizer: demoted to a clearly-labeled migration tool",
+      "gist": "The generated-NixOS build path (formerly the `--real` tier realizer, D-JOS-NIXBACKEND1) is never a product path. It survives only as an explicit, clearly-labeled migration/transition tool for A/B-ing a config during a NixOS→jetos migration. The nixos→jet importer remains central and unaffected.",
+      "explainer": "",
+      "story": "The realizer exists and works — it built and booted a rebranded NixOS from a jet config. Under D-JOS-NATIVE1 that can never ship as jetos. Its remaining value is migration: while a user transitions, building their jet config both ways and comparing behavior gives confidence the conversion is faithful.",
+      "inWild": "$ jet os migrate compare halcyon\n  builds the config natively (jetos) and via the NixOS oracle, boots both,\n  diffs services/packages/session facts — labeled a migration aid, not jetos.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "label": "Internal test oracle only",
+          "detail": "Kept only inside the test suite as a differential oracle for parity proofs."
+        },
+        {
+          "key": "B",
+          "label": "Delete entirely",
+          "detail": "Parity verified against a plain NixOS guest built from the user's real flake instead."
+        },
+        {
+          "key": "C",
+          "label": "Keep as labeled migration tool",
+          "detail": "Exposed as an explicit transition command, separate from the native build path."
+        }
+      ],
+      "comparisons": [],
+      "rec": "C",
+      "status": "ratified",
+      "created": "2026-07-09T17:57:15.045Z",
+      "outcome": "C",
+      "comment": "Chosen via session ballot 2026-07-09: keep as clearly-labeled migration tool.",
+      "ratifiedAt": "2026-07-09"
     }
   ],
   "questions": [
@@ -43193,6 +43363,90 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-09T17:57:38.290Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-JOS-NIXBACKEND2",
+      "note": "C"
+    },
+    {
+      "at": "2026-07-09T17:57:38.218Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-JOS-PARITYBAR1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-09T17:57:38.147Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-JOS-NIXEVAL1",
+      "note": "C"
+    },
+    {
+      "at": "2026-07-09T17:57:38.077Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-JOS-STORE1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-09T17:57:38.004Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-JOS-NATIVE1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-09T17:57:15.045Z",
+      "by": "claude",
+      "action": "decision.add",
+      "ref": "D-JOS-NIXBACKEND2",
+      "note": "Fate of the jet→NixOS realizer: demoted to a clearly-labeled migration tool"
+    },
+    {
+      "at": "2026-07-09T17:57:14.927Z",
+      "by": "claude",
+      "action": "decision.add",
+      "ref": "D-JOS-PARITYBAR1",
+      "note": "Epoch-7 exit bar: NixOS-class architecture natively + prioritized breadth"
+    },
+    {
+      "at": "2026-07-09T17:57:14.811Z",
+      "by": "claude",
+      "action": "decision.add",
+      "ref": "D-JOS-NIXEVAL1",
+      "note": "No `nix` binary anywhere in the jetos product path — this epoch builds jetpack's own nixpkgs pipeline"
+    },
+    {
+      "at": "2026-07-09T17:57:14.689Z",
+      "by": "claude",
+      "action": "decision.add",
+      "ref": "D-JOS-STORE1",
+      "note": "On-disk package store inside a jetos system: hangar-native, staged"
+    },
+    {
+      "at": "2026-07-09T17:57:14.572Z",
+      "by": "claude",
+      "action": "decision.add",
+      "ref": "D-JOS-NATIVE1",
+      "note": "jetos is a from-scratch standalone OS; NixOS module system is not a backend"
+    },
+    {
+      "at": "2026-07-09T17:55:21.776Z",
+      "by": "claude",
+      "action": "card.update",
+      "ref": "c_audit_367_q80zrm",
+      "note": "epoch"
+    },
+    {
+      "at": "2026-07-09T17:55:21.704Z",
+      "by": "claude",
+      "action": "card.update",
+      "ref": "c_audit_363_9n2bl3",
+      "note": "epoch"
+    },
     {
       "at": "2026-07-09T17:46:16.609Z",
       "by": "claude-main",
@@ -57108,90 +57362,6 @@
       "action": "card.release",
       "ref": "c2hizkhl",
       "note": ""
-    },
-    {
-      "at": "2026-07-06T00:06:06.100Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c2hizkhl",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-06T00:02:09.670Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c2hizkhl",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-06T00:02:02.788Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c2hizkhl",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-05T23:48:43.834Z",
-      "by": "claude-main",
-      "action": "card.claim",
-      "ref": "c2hizkhl",
-      "note": ""
-    },
-    {
-      "at": "2026-07-05T23:48:37.772Z",
-      "by": "claude-main",
-      "action": "message.send",
-      "ref": "msg0vonkhe",
-      "note": "→ owner: Received old Test + board-change notices. Switched to new To"
-    },
-    {
-      "at": "2026-07-05T23:48:24.834Z",
-      "by": "claude-main",
-      "action": "question.answer",
-      "ref": "q-tower-moved-cmemgreenfield",
-      "note": ""
-    },
-    {
-      "at": "2026-07-05T23:48:24.789Z",
-      "by": "claude-main",
-      "action": "question.answer",
-      "ref": "q-tower-moved-cv5syntaxdecrees",
-      "note": ""
-    },
-    {
-      "at": "2026-07-05T12:09:39.233Z",
-      "by": "claude-main",
-      "action": "message.send",
-      "ref": "msgajfxs4t",
-      "note": "→ owner: Plans attached to #209-#213; all handoff-ready. #209 LSP eng"
-    },
-    {
-      "at": "2026-07-05T12:09:27.652Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0xz4xqx",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-05T12:09:27.601Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0x3v19y",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-05T12:09:27.546Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0wa2hf8",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-05T12:09:27.495Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0vg0lj7",
-      "note": "logEntry"
     }
   ],
   "messages": [
@@ -59701,7 +59871,7 @@
       "file": null,
       "at": "2026-07-09T17:41:21.331Z",
       "deliveredAt": null,
-      "readAt": null
+      "readAt": "2026-07-09T17:49:45.161Z"
     }
   ],
   "nextNum": 368,

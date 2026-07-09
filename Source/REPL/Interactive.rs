@@ -323,7 +323,8 @@ fn read_line<R: Read>(
             Key::Tab => {
                 apply_completion(&mut buf, &mut cursor, session, color);
             }
-            Key::Escape | Key::Unknown | Key::CtrlB | Key::CtrlP | Key::CtrlF | Key::CtrlR => {
+            Key::Escape | Key::Unknown | Key::F1 | Key::CtrlB | Key::CtrlP | Key::CtrlF
+            | Key::CtrlR => {
                 // Mid-edit control keys are reserved (see module docs); a
                 // bare Escape/unrecognized byte is swallowed rather than
                 // inserted as a literal character.

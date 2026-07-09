@@ -43,7 +43,10 @@ pub mod Docs;
 mod Interactive;
 pub mod Render;
 pub mod RerunPlan;
-mod Terminal;
+// `Terminal` moved to `crate::Term` (shared with `Help`, I8); alias keeps
+// every existing `Terminal::…` reference in this module + `Interactive.rs`
+// unchanged.
+use crate::Term as Terminal;
 
 /// Effect markers used to classify a Stmts turn as "effectful" for
 /// D-FE-REPL-RERUN1=A replay gating (`ReplTurn::had_effect`). Textual, not a
