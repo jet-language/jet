@@ -460,9 +460,9 @@ fn render_nixos_import_config(plan: &NixosImportPlan) -> String {
     out.push_str("// Review jetos-import-audit.json before switching this host.\n");
     out.push_str(&format!("module {} {{\n", import_ident_or_host(&plan.host)));
     out.push_str("    sources: {\n");
-    out.push_str(&format!("        nixpkgs: {}\n", plan.nixpkgs_ref));
+    out.push_str(&format!("        nixpkgs: {},\n", plan.nixpkgs_ref));
     for (name, source) in &plan.extra_sources {
-        out.push_str(&format!("        {}: {}\n", name, source));
+        out.push_str(&format!("        {}: {},\n", name, source));
     }
     out.push_str("    }\n");
     out.push_str(&format!(
