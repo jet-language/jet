@@ -314,6 +314,12 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(html.contains("id=\"project-panel\""));
     assert!(html.contains("id=\"project-rail\""));
     assert!(html.contains("id=\"project-mode\""));
+    assert!(html.contains("id=\"variables-panel\""));
+    assert!(html.contains("id=\"variables-list\""));
+    assert!(html.contains("id=\"variable-count\""));
+    assert!(html.contains("id=\"status-panel\""));
+    assert!(html.contains("id=\"status-summary\""));
+    assert!(html.contains("id=\"status-count\""));
     assert!(html.contains("id=\"package-summary\""));
     assert!(html.contains("id=\"dependency-summary\""));
     assert!(html.contains("id=\"dev-summary\""));
@@ -358,11 +364,17 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(html.contains("data-detail-toggle=\"debug\""));
     assert!(html.contains("data-detail-toggle=\"package\""));
     assert!(html.contains("id=\"developer-mode\""));
+    assert!(html.contains("id=\"toolbar-search\""));
+    assert!(html.contains("id=\"toolbar-zoom\""));
+    assert!(html.contains("class=\"toolbar-group\""));
+    assert!(html.contains("class=\"toolbar-menu\""));
+    assert!(html.contains("class=\"icon-button\""));
+    assert!(html.contains("<svg viewBox=\"0 0 24 24\""));
     assert!(html.contains("id=\"source-view\""));
     assert!(html.contains("id=\"source-editor\""));
     assert!(html.contains("id=\"context-menu\""));
     assert!(html.contains("grid-template-rows: auto minmax(0, 1fr) 28px"));
-    assert!(html.contains("flex-wrap: wrap"));
+    assert!(html.contains("flex-wrap: nowrap"));
     assert!(html
         .contains("grid-template-columns: minmax(156px, 15vw) minmax(0, 1fr) minmax(238px, 20vw)"));
     assert!(html.contains("@media (max-width: 900px)"));
@@ -373,15 +385,18 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(html.contains("body:not(.is-dev-mode) #graph-strip { display: none; }"));
     assert!(html.contains("body:not(.is-dev-mode) #wire-status { display: none; }"));
     assert!(html.contains("body:not(.is-dev-mode) .dev-only"));
-    assert!(html.contains("body:not(.is-dev-mode) .debug-controls { display: none; }"));
+    assert!(html.contains("body.is-debug-active .debug-controls { display: flex; }"));
     assert!(html.contains("body:not(.is-dev-mode) #jump { display: none; }"));
     assert!(html.contains("@media (prefers-reduced-motion: reduce)"));
     assert!(html.contains("#run-hud.is-running"));
     assert!(html.contains("#first-run-tour.is-open"));
     assert!(html.contains("id=\"graph-count\""));
     assert!(html.contains("<summary><span>Functions</span>"));
-    assert!(html.contains("<summary><span>Project files</span>"));
+    assert!(html.contains("<h2>My Canvas</h2>"));
+    assert!(html.contains("<summary><span>Files</span>"));
     assert!(html.contains(".project-section"));
+    assert!(html.contains(".variable-item"));
+    assert!(html.contains(".status-card"));
     assert!(html.contains(".lens-switch"));
     assert!(html.contains(".detail-toggles"));
     assert!(html.contains(".type-detail"));
@@ -408,6 +423,9 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(html.contains("id=\"proof-rail\""));
     assert!(html.contains("id=\"proof-state\""));
     assert!(html.contains("/canvas/app.js"));
+    assert!(!html.contains("source-truth"));
+    assert!(!html.contains("Source truth"));
+    assert!(!html.contains(">Trust<"));
 
     let (status, js) = http_get(port, "/canvas/app.js").expect("GET Canvas JS");
     assert_eq!(status, 200);
@@ -420,7 +438,11 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(js.contains("latestProject"));
     assert!(js.contains("function loadProject"));
     assert!(js.contains("function syncProjectRail"));
+    assert!(js.contains("function syncVariablesList"));
+    assert!(js.contains("function renderVariableDetails"));
+    assert!(js.contains("function signatureWithVariable"));
     assert!(js.contains("__jetCanvasProjectRail"));
+    assert!(js.contains("__jetCanvasVariablesSidebar"));
     assert!(js.contains("__jetCanvasWorkspacePanels"));
     assert!(js.contains("data-project-file"));
     assert!(js.contains("function graphRequestUrl"));
@@ -471,7 +493,7 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(js.contains("function syncReturnEditorPreview"));
     assert!(js.contains("function-return-type-chip"));
     assert!(js.contains("Output pin ready"));
-    assert!(js.contains("Callback views"));
+    assert!(js.contains("<h2>Events</h2>"));
     assert!(js.contains("undoStack"));
     assert!(js.contains("redoStack"));
     assert!(js.contains("editorState"));
@@ -517,7 +539,7 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(js.contains("contextmenu"));
     assert!(js.contains("function renderActionPalette"));
     assert!(js.contains("action-palette-search"));
-    assert!(js.contains("Graph actions"));
+    assert!(js.contains("Canvas actions"));
     assert!(js.contains("All nodes · ${matches.length}/${contextMenuState.actions.length}"));
     assert!(!js.contains("right-click built-ins, functions, source actions"));
     assert!(js.contains("ArrowRight"));
@@ -638,7 +660,7 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(!js.contains("node.kind === \"branch\" || node.kind === \"dispatch\" ? 296 : 232"));
     assert!(js.contains("function graphForFunctionName"));
     assert!(js.contains("function openFunctionGraph"));
-    assert!(js.contains("Open function graph"));
+    assert!(js.contains("Open function"));
     assert!(js.contains("open-callee-graph"));
     assert!(js.contains("variable_get"));
     assert!(js.contains("constant"));
@@ -650,8 +672,9 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(js.contains("function simpleEmbeddedValue"));
     assert!(js.contains("__jetCanvasGetterCapsules"));
     assert!(js.contains("__jetCanvasEmbeddedVariables"));
-    assert!(js.contains("Refused: E0204"));
+    assert!(!js.contains("Refused: E0204"));
     assert!(js.contains("functionsForPin"));
+    assert!(js.contains("function actionInsertsNode"));
     assert!(js.contains("openPinMenu"));
     assert!(js.contains("Create function accepting"));
     assert!(js.contains("function paletteCategoryForAction"));
@@ -666,6 +689,7 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(js.contains("module_path: action.module_path"));
     assert!(js.contains("kind: \"variable_get\""));
     assert!(js.contains("kind: \"variable_set\""));
+    assert!(js.contains("\"Add connected node\""));
     assert!(js.contains("op: \"insert_call\""));
     assert!(js.contains("const callee = String(module.path || \"core\") + \".\" + member.name"));
     assert!(js.contains("default_args: member.default_args || [\"1\"]"));
@@ -696,6 +720,8 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(js.contains("storedFlag(\"jet.canvas.developerMode\")"));
     assert!(js.contains("developerModeButton.addEventListener"));
     assert!(js.contains("document.body.classList.toggle(\"is-dev-mode\""));
+    assert!(js.contains("toolbarSearch.addEventListener"));
+    assert!(js.contains("document.body.classList.toggle(\"is-debug-active\""));
     assert!(js.contains("Apply pins"));
     assert!(js.contains("Visible conversion function"));
     assert!(js.contains("Wire refused"));

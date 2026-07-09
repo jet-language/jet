@@ -9,6 +9,7 @@ pub fn canvas_js() -> String {
   const lensButtons = Array.from(document.querySelectorAll("[data-view-mode]"));
   const detailToggleInputs = Array.from(document.querySelectorAll("[data-detail-toggle]"));
   const developerModeButton = document.getElementById("developer-mode");
+  const toolbarSearch = document.getElementById("toolbar-search");
   const contextMenu = document.getElementById("context-menu");
   const minimap = document.getElementById("minimap");
   const mini = minimap.getContext("2d");
@@ -32,10 +33,15 @@ pub fn canvas_js() -> String {
   const devSummary = document.getElementById("dev-summary");
   const diagnosticsSummary = document.getElementById("diagnostics-summary");
   const trustSummary = document.getElementById("trust-summary");
+  const statusSummary = document.getElementById("status-summary");
+  const statusCount = document.getElementById("status-count");
+  const variablesList = document.getElementById("variables-list");
+  const variableCount = document.getElementById("variable-count");
   const graphList = document.getElementById("graph-list");
   const canvasSearch = document.getElementById("canvas-search");
   const searchResults = document.getElementById("search-results");
   const zoomLabel = document.getElementById("zoom-label");
+  const toolbarZoom = document.getElementById("toolbar-zoom");
   const graphMeta = document.getElementById("graph-meta");
   const sourceId = document.getElementById("source-id");
   const revision = document.getElementById("revision");
@@ -85,6 +91,7 @@ pub fn canvas_js() -> String {
   let wireStyle = "bezier";
   let runState = { running: false, last: "idle" };
   let selectedGraphId = null;
+  let selectedVariableName = null;
   let graphBackStack = [];
   let graphForwardStack = [];
   let selectedNodeId = null;
@@ -104,11 +111,11 @@ pub fn canvas_js() -> String {
   const palette = [
     { title: "Print", detail: "Call print(\"canvas\")", op: "insert_print" },
     { title: "Branch", detail: "Insert if/else rails", op: "insert_branch" },
-    { title: "Switch", detail: "Insert dispatch rails", op: "insert_switch" },
+    { title: "Switch", detail: "Insert match branches", op: "insert_switch" },
     { title: "Loop", detail: "Insert loop rail", op: "insert_loop" },
     { title: "Fallible", detail: "Insert ? rail", op: "insert_fallible_rail" },
     { title: "Call", detail: "Insert call transaction", op: "insert_call" },
-    { title: "Comment", detail: "Source comment projection", op: "comment" }
+    { title: "Comment", detail: "Add comment box", op: "comment" }
   ];
   let actionEntries = [];
   let coreCatalogLoaded = false;
@@ -358,23 +365,27 @@ pub fn canvas_js() -> String {
       || actionEntries.find((item) => item.action_id === "canvas.command:dev")
       || null;
     if (!run) {
-      runHud.textContent = "run authority loading";
+      runHud.textContent = "run permission loading";
       loadCanvasActions();
       return;
     }
     renderCommandAuthority(run);
   }
 
+  function syncDebugActive() {
+    document.body.classList.toggle("is-debug-active", !!debugOverlay);
+  }
+
   function renderCommandAuthority(item) {
     const command = (item.command || []).join(" ");
-    runState = { running: false, last: item.title + " authority ready" };
+    runState = { running: false, last: item.title + " permission ready" };
     runHud.textContent = item.available ? runState.last : (item.denied_reason || "command unavailable");
     runHud.classList.remove("is-running");
     window.__jetCanvasRunLoop = { graph_id: selectedGraphId, state: "authority_required", action_id: item.action_id, command: item.command || [] };
-    details.innerHTML = `<h2>Command</h2><div class="signature-source"><code>${escapeHtml(command)}</code><span>${escapeHtml(item.writes || "none")} · ${item.requires_confirmation ? "confirmation required" : "read-only"}</span><button id="execute-command-authority">Run</button></div><div class="inline-row"><b>Authority</b><code>${escapeHtml((item.authority || []).join("\n"))}</code></div>`;
+    details.innerHTML = `<h2>Command</h2><div class="signature-source"><code>${escapeHtml(command)}</code><span>${escapeHtml(item.writes || "none")} · ${item.requires_confirmation ? "confirmation required" : "read-only"}</span><button id="execute-command-authority">Run</button></div><div class="inline-row dev-only"><b>Permissions</b><code>${escapeHtml((item.authority || []).join("\n"))}</code></div>`;
     const execute = document.getElementById("execute-command-authority");
     if (execute) execute.addEventListener("click", () => executeCommandAuthority(item));
-    showToast(item.available ? item.title + " authority ready" : item.denied_reason || "Command unavailable");
+    showToast(item.available ? item.title + " ready" : item.denied_reason || "Command unavailable");
     loadProofRail();
   }
 
@@ -870,7 +881,7 @@ pub fn canvas_js() -> String {
     if (type === "String") return "text value";
     if (type === "Int") return "whole number";
     if (String(type || "").includes("Task")) return "task handle";
-    if (String(type || "").includes("Event") || String(type || "").includes("Hook")) return "event dispatcher";
+    if (String(type || "").includes("Event") || String(type || "").includes("Hook")) return "event value";
     return "source-backed Jet value";
   }
 
@@ -1018,10 +1029,18 @@ pub fn canvas_js() -> String {
     return m ? m[1] : "";
   }
 
+  function actionInsertsNode(entry) {
+    const op = entry && (entry.op || entry.insert_op || "");
+    if (entry && (entry.kind === "project_function" || entry.kind === "canvas.core_catalog")) return true;
+    if (["insert_print", "insert_call", "insert_branch", "insert_switch", "insert_loop", "insert_fallible_rail"].includes(op)) return true;
+    if (entry && (entry.kind === "variable_get" || entry.kind === "variable_set")) return true;
+    return false;
+  }
+
   function functionsForPin(pin) {
-    if (!pin) return actionEntries;
+    if (!pin) return actionEntries.filter(actionInsertsNode);
     const targetType = pin.type || null;
-    let entries = actionEntries.filter((entry) => {
+    let entries = actionEntries.filter(actionInsertsNode).filter((entry) => {
       if (!targetType) return true;
       if (isExecPin(pin)) return pin.direction === "output"
         ? actionAcceptsExec(entry)
@@ -1031,7 +1050,7 @@ pub fn canvas_js() -> String {
       }
       return compatibleActionType(pin.type, actionReturnType(entry) || entry.ret || "Value");
     });
-    if (entries.length === 0) entries = actionEntries;
+    if (entries.length === 0) entries = actionEntries.filter(actionInsertsNode);
     return entries;
   }
 
@@ -1091,11 +1110,11 @@ pub fn canvas_js() -> String {
 
   function paletteCategoryForAction(action) {
     const group = String(action.group || "").toLowerCase();
-    if (group.includes("flow") || ["insert_branch", "insert_switch", "insert_loop", "insert_fallible_rail"].includes(action.op)) return "Flow";
+    if (group.includes("flow") || group.includes("execution") || ["insert_branch", "insert_switch", "insert_loop", "insert_fallible_rail"].includes(action.op)) return "Execution";
     if (action.kind === "variable_get" || action.kind === "variable_set" || group.includes("variable") || group.includes("binding") || action.op === "promote_to_binding") return "Variables";
     if (action.kind === "canvas.core_catalog" || group.includes("core")) return "Core";
     if (action.kind === "project_function" || group.includes("project") || action.kind === "canvas.action") return "Project";
-    return "Flow";
+    return "Execution";
   }
 
   function paletteActionGlyph(action) {
@@ -1105,7 +1124,7 @@ pub fn canvas_js() -> String {
     if (action.op === "insert_loop") return "↻";
     if (action.op === "insert_return" || String(action.title || "").toLowerCase().includes("return")) return "⏎";
     if (action.op === "insert_switch") return "⇉";
-    if (paletteCategoryForAction(action) === "Flow") return "◇";
+    if (paletteCategoryForAction(action) === "Execution") return "◇";
     return "•";
   }
 
@@ -1139,7 +1158,7 @@ pub fn canvas_js() -> String {
       const color = paletteActionColor(action);
       return `<button class="action-result${fav ? " is-favorite" : ""}" data-menu-action="${escapeAttr(action.index)}" style="--action-color:${escapeAttr(color)}"><span class="action-glyph">${escapeHtml(paletteActionGlyph(action))}</span><span>${fav ? "★ " : ""}${escapeHtml(action.title)}<small style="color:${escapeAttr(color)}">${escapeHtml(paletteTypeSummary(action))}</small></span></button>`;
     };
-    const categories = ["Flow", "Variables", "Project", "Core"].map((category) => {
+    const categories = ["Execution", "Variables", "Project", "Core", "Commands"].map((category) => {
       const limit = category === "Core" ? 1000 : category === "Project" ? 500 : category === "Variables" ? 200 : 64;
       const rows = matches.filter((action) => paletteCategoryForAction(action) === category).slice(0, limit);
       if (!rows.length && query) return "";
@@ -1222,7 +1241,7 @@ pub fn canvas_js() -> String {
   }
 
   function openPinMenu(pin, x, y, graphPoint) {
-    const entries = functionsForPin(pin);
+    const entries = functionsForPin(pin).concat(variableActionsForGraph(currentGraphOrNull()).filter(actionInsertsNode));
     const actions = entries.map((entry) => ({
       title: entry.title,
       detail: entry.detail,
@@ -1238,14 +1257,8 @@ pub fn canvas_js() -> String {
       callee: entry.callee,
       insert_callee: entry.insert_callee,
       args: entry.args,
-      run: () => runPalette(entry, pin)
+      run: entry.run ? () => entry.run() : () => runPalette(entry, pin)
     }));
-    actions.push({
-      title: "Use same value twice",
-      detail: "Refused: E0204. Fix: clone first or end the active change before reading it again.",
-      group: "refused",
-      run: () => showToast("E0204: clone first or end the active change")
-    });
     actions.unshift({
       title: "Create function accepting " + (pin.type || "Value"),
       detail: pin.name || "value",
@@ -1270,7 +1283,7 @@ pub fn canvas_js() -> String {
         }
       });
     }
-    openActionPalette(x, y, "Compatible actions", actions, { pin, context: "pin actions", graphPoint });
+    openActionPalette(x, y, "Add connected node", actions.filter(actionInsertsNode), { pin, context: "Insert node", graphPoint });
   }
 
   function richestGraph(doc) {
@@ -1304,6 +1317,54 @@ pub fn canvas_js() -> String {
       });
       graphList.appendChild(button);
     }
+  }
+
+  function graphVariables(graph) {
+    if (!graph) return [];
+    const vars = new Map();
+    const addVar = (name, type, source, editable, defaultSource, nodeId) => {
+      if (!name) return;
+      const prev = vars.get(name) || {};
+      vars.set(name, {
+        name,
+        type: type || prev.type || "Value",
+        source: source || prev.source || "local",
+        editable: editable || prev.editable || false,
+        defaultSource: defaultSource !== undefined ? defaultSource : prev.defaultSource || "",
+        nodeId: nodeId || prev.nodeId || ""
+      });
+    };
+    for (const param of (graph.function && graph.function.params) || []) {
+      addVar(param.name, param.type, "input", true, param.default_source || "", graph.entry_node);
+    }
+    const inlineByNode = new Map();
+    for (const expr of graph.inline_exprs || []) {
+      if (!inlineByNode.has(expr.node_id)) inlineByNode.set(expr.node_id, []);
+      inlineByNode.get(expr.node_id).push(expr);
+    }
+    for (const node of graph.nodes || []) {
+      const dataOut = (graph.pins || []).find((pin) => pin.node_id === node.node_id && pin.direction === "output" && !isExecPin(pin));
+      if (node.kind === "binding" || node.kind === "assign" || node.kind === "variable_get") {
+        const init = (inlineByNode.get(node.node_id) || []).find((expr) => expr.role === "init" || expr.role === "value");
+        addVar(node.title, (dataOut && dataOut.type) || "Value", node.kind === "variable_get" ? "read" : "local", node.kind === "binding", init ? init.source : "", node.node_id);
+      }
+    }
+    return Array.from(vars.values()).sort((a, b) => (a.source === "input" ? 0 : 1) - (b.source === "input" ? 0 : 1) || a.name.localeCompare(b.name));
+  }
+
+  function syncVariablesList(graph) {
+    if (!variablesList) return;
+    const vars = graphVariables(graph);
+    if (variableCount) variableCount.textContent = String(vars.length);
+    variablesList.innerHTML = vars.map((v) => {
+      const color = colorForType(v.type);
+      const active = selectedVariableName === v.name ? " is-active" : "";
+      return `<button class="variable-item${active}" type="button" data-variable-name="${escapeAttr(v.name)}"><span class="variable-dot" style="color:${escapeAttr(color)}"></span><span class="variable-name">${escapeHtml(v.name)}</span>${typeChipHtml(v.type)}</button>`;
+    }).join("") || "<div class=\"tag\">no variables</div>";
+    variablesList.querySelectorAll("[data-variable-name]").forEach((button) => {
+      button.addEventListener("click", () => selectVariable(button.getAttribute("data-variable-name")));
+    });
+    window.__jetCanvasVariablesSidebar = vars.length;
   }
 
   function projectMiniCard(title, small, code) {
@@ -1347,12 +1408,22 @@ pub fn canvas_js() -> String {
     const diagRows = collectProjectDiagnostics(project);
     const lockRows = (project.locks || []).map((lock) => projectMiniCard(lock.path || ".jet/lock", lock.kind || "lock", lock.revision || ""));
     const policy = project.state_policy || {};
-    lockRows.unshift(projectMiniCard("Source truth", project.source_control && project.source_control.truth || "git-text", `${policy.semantic || "source"} semantics · ${(policy.local || []).join(", ") || "local viewport"}`));
+    lockRows.unshift(projectMiniCard("Source files", project.source_control && project.source_control.truth || "git text", `${policy.semantic || "source"} model · ${(policy.local || []).join(", ") || "local viewport"}`));
     syncProjectPanel(packageSummary, "Packages", packageRows, "no packages");
     syncProjectPanel(dependencySummary, "Dependencies", depRows, "no dependencies");
     syncProjectPanel(devSummary, "Dev", devRows, "no env or services");
     syncProjectPanel(diagnosticsSummary, "Diagnostics", diagRows, "clean");
-    syncProjectPanel(trustSummary, "Trust", lockRows, "source-only");
+    syncProjectPanel(trustSummary, "Source internals", lockRows, "source files only");
+    if (statusSummary) {
+      const packageName = (project.packages || [])[0] && ((project.packages || [])[0].name || (project.packages || [])[0].path);
+      const sourceFiles = (project.files || []).filter((f) => f.kind === "source").length;
+      const diagCount = diagRows.length;
+      statusSummary.innerHTML = [
+        `<div class="status-card"><b>${escapeHtml(packageName || project.mode || "Single file")}</b><small>${escapeHtml(sourceFiles + " source file" + (sourceFiles === 1 ? "" : "s"))}</small></div>`,
+        `<div class="status-card"><b>${diagCount === 0 ? "Clean" : diagCount + " issue" + (diagCount === 1 ? "" : "s")}</b><small>${escapeHtml((project.mode || "file") + " mode")}</small></div>`
+      ].join("");
+      if (statusCount) statusCount.textContent = diagCount === 0 ? "clean" : String(diagCount);
+    }
     window.__jetCanvasWorkspacePanels = {
       packages: packageRows.length,
       dependencies: depRows.length,
@@ -1367,19 +1438,12 @@ pub fn canvas_js() -> String {
     latestProject = project;
     projectMode.textContent = project.mode || "file";
     const cards = [];
-    cards.push(`<div class="project-card"><b>${escapeHtml(project.entry || "entry")}</b><small>${escapeHtml(project.project_root || "")}</small><span class="tag">${escapeHtml(project.mode || "single_file")}</span></div>`);
-    for (const pkg of (project.packages || []).slice(0, 8)) {
-      const deps = (pkg.deps || []).map((d) => d.name).join(", ") || "no deps";
-      const targets = (pkg.targets || []).map((t) => t.target).join(", ") || (pkg.target || "native");
-      cards.push(`<div class="project-card" data-project-package="${escapeAttr(pkg.path || "")}"><b>${escapeHtml(pkg.name || pkg.path || "package")}</b><small>${escapeHtml(pkg.path || "")}</small><code>${escapeHtml(targets)} · ${escapeHtml(deps)}</code></div>`);
-    }
     const fileCount = (project.files || []).length;
-    const dirty = project.source_control && project.source_control.truth ? project.source_control.truth : "git-text";
-    cards.push(`<div class="project-card"><b>${fileCount} source-truth files</b><small>${escapeHtml(dirty)}</small><code>${escapeHtml((project.state_policy && project.state_policy.semantic) || "source")} semantics</code></div>`);
     for (const file of (project.files || []).filter((f) => f.kind === "source").slice(0, 12)) {
       const active = (selectedSourceId || project.entry) === file.path ? " is-active" : "";
-      cards.push(`<button class="project-card${active}" type="button" data-project-file="${escapeAttr(file.path || "")}"><b>${escapeHtml(file.path || "source")}</b><small>${escapeHtml(file.kind || "source")}</small><code>${escapeHtml(file.revision || "")}</code></button>`);
+      cards.push(`<button class="project-card${active}" type="button" data-project-file="${escapeAttr(file.path || "")}"><b>${escapeHtml(file.path || "source")}</b><small>${escapeHtml(active ? "open" : "click to open")}</small><code class="dev-only">${escapeHtml(file.revision || "")}</code></button>`);
     }
+    if (!cards.length) cards.push(`<button class="project-card is-active" type="button"><b>${escapeHtml(project.entry || "source")}</b><small>open</small></button>`);
     projectRail.innerHTML = cards.join("");
     syncProjectPanels(project);
     window.__jetCanvasProjectRail = { mode: project.mode, packages: (project.packages || []).length, files: fileCount, panels: window.__jetCanvasWorkspacePanels };
@@ -1517,10 +1581,10 @@ pub fn canvas_js() -> String {
   function nodeContextActions(graph, node) {
     const actions = [
       { title: "Jump source", detail: "span", group: "source", run: () => { const s = node.source_span || { start: 0, end: 0 }; setSourceHash(s); setViewMode("code"); } },
-      { title: "Find references", detail: "semindex", group: "query", run: () => postQuery({ op: "references", symbol: node.title }) },
+      { title: "Find references", detail: "search index", group: "query", run: () => postQuery({ op: "references", symbol: node.title }) },
       { title: "Set breakpoint", detail: "local span", group: "debug", run: () => toggleBreakpoint(node) }
     ];
-    if (graphForFunctionName(node.title)) actions.unshift({ title: "Open function graph", detail: "nested graph", group: "graph", run: () => openFunctionGraph(node.title) });
+    if (graphForFunctionName(node.title)) actions.unshift({ title: "Open function", detail: "function", group: "graph", run: () => openFunctionGraph(node.title) });
     return actions;
   }
 
@@ -1553,24 +1617,24 @@ pub fn canvas_js() -> String {
         const name = window.prompt("Function name", "helper");
         if (name) postTransaction({ schema_version: 1, op: "create_function", revision: latestDoc.revision, name, params: "", ret_type: "Int" });
       } },
-      { title: "Show source", detail: "toggle", group: "Flow", run: () => setViewMode("code") },
-      { title: "Align top", detail: "local view state", group: "Flow", run: () => alignSelectedNodes("y") },
-      { title: "Align left", detail: "local view state", group: "Flow", run: () => alignSelectedNodes("x") },
-      { title: "Auto tidy", detail: "local view state", group: "Flow", run: tidyGraphLayout },
-      { title: "Straighten wires", detail: "Bezier wires stay source-faithful", group: "Flow", run: () => { wireStyle = "bezier"; showToast("Wires use Blueprint curves"); drawGraph(latestDoc); } },
-      { title: "Add reroute knot", detail: "local view state", group: "Flow", run: addRerouteKnot },
+      { title: "Show source", detail: "toggle", group: "Execution", run: () => setViewMode("code") },
+      { title: "Align top", detail: "local view", group: "Execution", run: () => alignSelectedNodes("y") },
+      { title: "Align left", detail: "local view", group: "Execution", run: () => alignSelectedNodes("x") },
+      { title: "Auto tidy", detail: "local view", group: "Execution", run: tidyGraphLayout },
+      { title: "Straighten wires", detail: "Blueprint curves", group: "Execution", run: () => { wireStyle = "bezier"; showToast("Wires use Blueprint curves"); drawGraph(latestDoc); } },
+      { title: "Add reroute knot", detail: "local view", group: "Execution", run: addRerouteKnot },
       { title: "Bookmark graph", detail: "local editor state", group: "navigation", run: bookmarkCurrentGraph },
       { title: "Run graph", detail: "debug overlay", group: "run", run: runCurrentGraph }
     ];
     actions.push(...variableActionsForGraph(graph));
     for (const item of palette.concat(actionEntries)) {
-      actions.push({ title: item.title, detail: item.detail || "", group: item.group || (item.op === "preview_canvas_action" ? "Project" : "Flow"), kind: item.kind, module_path: item.module_path, signature: item.signature, summary: item.summary, pure: item.pure, pins: item.pins, ret: item.ret, type: item.type, op: item.op, action_id: item.action_id, callee: item.callee, insert_callee: item.insert_callee, args: item.args, run: () => runPalette(item) });
+      actions.push({ title: item.title, detail: item.detail || "", group: item.group || (item.op === "preview_canvas_action" ? "Project" : "Execution"), kind: item.kind, module_path: item.module_path, signature: item.signature, summary: item.summary, pure: item.pure, pins: item.pins, ret: item.ret, type: item.type, op: item.op, action_id: item.action_id, callee: item.callee, insert_callee: item.insert_callee, args: item.args, run: () => runPalette(item) });
     }
     return actions;
   }
 
   function openGraphActionPalette(x, y, query) {
-    openActionPalette(x, y, "Graph actions", graphActionItems(), { context: "All nodes", query: query || "" });
+    openActionPalette(x, y, "Canvas actions", graphActionItems(), { context: "All nodes", query: query || "" });
   }
 
   function openCoreCatalogPalette(query = "") {
@@ -1634,6 +1698,7 @@ pub fn canvas_js() -> String {
     }
     selectedGraphId = graphId;
     window.__jetCanvasSelectedGraphId = selectedGraphId;
+    selectedVariableName = null;
     selectedNodeId = opts.nodeId || graph.entry_node;
     selectedNodeIds = new Set([selectedNodeId]);
     setViewMode("graph");
@@ -1731,10 +1796,12 @@ pub fn canvas_js() -> String {
       .then((result) => {
         if (!result.ok) {
           debugOverlay = null;
+          syncDebugActive();
           showToast((result.json.message || "Debug rejected").split("\n")[0]);
           return;
         }
         debugOverlay = result.json.overlay || null;
+        syncDebugActive();
         if (debugOverlay && debugOverlay.active_graph_id) selectedGraphId = debugOverlay.active_graph_id;
         if (debugOverlay && debugOverlay.active_node_id) selectedNodeId = debugOverlay.active_node_id;
         showToast("Debug " + ((debugOverlay && debugOverlay.debug_overlay) || "updated"));
@@ -1745,6 +1812,7 @@ pub fn canvas_js() -> String {
 
   function stopDebug() {
     debugOverlay = null;
+    syncDebugActive();
     showToast("Debug overlay stopped");
     if (latestDoc) drawGraph(latestDoc);
   }
@@ -1976,6 +2044,21 @@ pub fn canvas_js() -> String {
 
   function nodeKindLabel(node, graph) {
     return nodeStyle(node, graph).label || node.kind || "Node";
+  }
+
+  function nodeDescription(node, graph) {
+    if (!node) return "";
+    if (node.kind === "entry") return "Starts this function.";
+    if (node.kind === "return") return "Returns a value from this function.";
+    if (node.kind === "branch") return "Chooses which path runs next.";
+    if (node.kind === "dispatch") return "Chooses a path by matching a value.";
+    if (node.kind === "loop") return "Repeats work.";
+    if (node.kind === "binding") return "Creates a local variable.";
+    if (node.kind === "assign") return "Changes a variable.";
+    if (node.kind === "variable_get") return "Reads a variable.";
+    if (node.kind === "constant") return "Uses a fixed value.";
+    const modulePath = node.module_path || node.module || "";
+    return modulePath && modulePath !== "builtin" ? "Function from " + modulePath + "." : "Calls a function.";
   }
 
   function shouldDrawNodeBadge(node) {
@@ -2414,6 +2497,7 @@ pub fn canvas_js() -> String {
     syncGraphPicker(doc);
     syncGraphList(doc);
     syncGraphStrip(doc);
+    syncVariablesList(graph);
     fit();
     const size = cssSize();
     drawGrid(size);
@@ -2512,7 +2596,11 @@ pub fn canvas_js() -> String {
     drawTypeLegend(size);
     if (!pendingPin && (!drag || drag.mode !== "pin")) syncWireStatus(null);
     const selectedNode = nodes.get(selectedNodeId);
-    updateDetails(graph, selectedNode, graph.pins.filter((p) => p.node_id === selectedNodeId), inlineByNode.get(selectedNodeId) || []);
+    if (selectedVariableName) {
+      renderVariableDetails(graph, selectedVariableName);
+    } else {
+      updateDetails(graph, selectedNode, graph.pins.filter((p) => p.node_id === selectedNodeId), inlineByNode.get(selectedNodeId) || []);
+    }
     syncGraphOverview(graph, selectedNode);
     window.__jetCanvasNonblankPixels = graph.nodes.length > 0 ? 1 : 0;
     window.__jetCanvasPendingPin = pendingPin ? { pin_id: pendingPin.pin_id, name: pendingPin.name, type: pendingPin.type, direction: pendingPin.direction } : null;
@@ -2527,6 +2615,7 @@ pub fn canvas_js() -> String {
     const rails = (graph.rails && graph.rails.kinds ? graph.rails.kinds.join(", ") : "data");
     graphMeta.textContent = graph.nodes.length + " nodes / " + graph.wires.length + " wires / " + rails;
     zoomLabel.textContent = Math.round(view.zoom * 100) + "%";
+    if (toolbarZoom) toolbarZoom.textContent = zoomLabel.textContent;
     sourceId.textContent = doc.source_id || "source";
     revision.textContent = (doc.revision || "").slice(0, 18);
   }
@@ -2649,6 +2738,88 @@ pub fn canvas_js() -> String {
     return `<div class="pin-editor-row"><div class="pin-editor-title"><span id="function-return-port" class="pin-port" style="color:${escapeAttr(color)}"></span><b>return</b><span id="function-return-type-chip" class="type-chip" style="color:${escapeAttr(color)}">${escapeHtml(outType)}</span></div><div id="function-return-meta" class="lane-meta">${outType === "Void" ? "no output value" : "output pin"}</div><div class="pin-tools output-pin-tools"><input id="function-return-type" aria-label="Return type" title="Return type" value="${escapeAttr(outType)}"><button id="set-function-output">Set</button><button id="remove-function-output">Void</button></div></div>`;
   }
 
+  function variableByName(graph, name) {
+    return graphVariables(graph).find((v) => v.name === name) || null;
+  }
+
+  function selectVariable(name) {
+    selectedVariableName = name;
+    selectedNodeId = null;
+    selectedNodeIds = new Set();
+    if (latestDoc) drawGraph(latestDoc);
+  }
+
+  function localInitExpr(graph, variable) {
+    if (!graph || !variable || !variable.nodeId) return null;
+    return (graph.inline_exprs || []).find((expr) => expr.node_id === variable.nodeId && (expr.role === "init" || expr.role === "value")) || null;
+  }
+
+  function signatureWithVariable(graph, variable, next) {
+    const fnMeta = graph && graph.function;
+    if (!fnMeta) return "";
+    const params = (fnMeta.params || []).map((param) => {
+      const name = param.name === variable.name ? (next.name || param.name) : param.name;
+      const type = param.name === variable.name ? (next.type || param.type || "Int") : (param.type || "Int");
+      const fallback = param.name === variable.name ? (next.defaultSource || "") : (param.default_source || "");
+      return name + ": " + type + (String(fallback).trim() ? " = " + String(fallback).trim() : "");
+    }).join(", ");
+    const ret = fnMeta.returns && fnMeta.returns !== "Void" ? " -> " + fnMeta.returns : "";
+    const visibility = fnMeta.visibility === "public" ? "pub " : fnMeta.visibility === "package" ? "pub(package) " : "";
+    const pure = fnMeta.pure ? "@Pure " : "";
+    return pure + visibility + "fn " + (fnMeta.name || graph.title || "function") + "(" + params + ")" + ret;
+  }
+
+  function renderVariableDetails(graph, name) {
+    const variable = variableByName(graph, name);
+    if (!variable) {
+      selectedVariableName = null;
+      updateDetails(graph, graph.nodes.find((n) => n.node_id === graph.entry_node), [], []);
+      return;
+    }
+    const color = colorForType(variable.type);
+    details.style.setProperty("--node-accent", color);
+    const isParam = variable.source === "input";
+    const initExpr = localInitExpr(graph, variable);
+    const defaultEditable = isParam || !!initExpr;
+    const typeEditable = isParam;
+    const nameEditable = isParam || variable.source === "local";
+    details.innerHTML = `
+      <div class="details-hero">
+        <div class="details-titleline"><span class="node-glyph">•</span><div class="details-title"><p class="title">${escapeHtml(variable.name)}</p><div class="kind">${escapeHtml(isParam ? "Input variable" : "Local variable")}</div></div></div>
+        <div class="details-chips"><span class="details-chip" style="color:${escapeAttr(color)}">${escapeHtml(variable.type)}</span><span class="details-chip">${escapeHtml(isParam ? "Function input" : "Inside this function")}</span></div>
+      </div>
+      <h2>Variable</h2>
+      <div class="signature-board">
+        <div class="edit-grid">
+          <label>Name<input id="variable-name-input" ${nameEditable ? "" : "readonly"} value="${escapeAttr(variable.name)}"></label>
+          <label>Type<input id="variable-type-input" ${typeEditable ? "" : "readonly"} value="${escapeAttr(variable.type)}"></label>
+          <label>Default value<input id="variable-default-input" ${defaultEditable ? "" : "readonly"} placeholder="${isParam ? "optional" : "not set"}" value="${escapeAttr(variable.defaultSource || "")}"></label>
+        </div>
+        <div class="signature-actions">${nameEditable || typeEditable || defaultEditable ? "<button id=\"apply-variable-details\" class=\"primary\">Apply</button>" : "<div class=\"pin-empty\">This variable is read-only here.</div>"}</div>
+      </div>`;
+    const apply = document.getElementById("apply-variable-details");
+    if (!apply) return;
+    apply.addEventListener("click", () => {
+      const nextName = document.getElementById("variable-name-input").value.trim();
+      const nextType = document.getElementById("variable-type-input").value.trim() || variable.type;
+      const nextDefault = document.getElementById("variable-default-input").value.trim();
+      if (isParam) {
+        const signature = signatureWithVariable(graph, variable, { name: nextName, type: nextType, defaultSource: nextDefault });
+        postTransaction({ schema_version: 1, op: "edit_function_signature", revision: latestDoc.revision, graph_id: graph.graph_id, signature });
+        selectedVariableName = nextName || variable.name;
+        return;
+      }
+      if (nextName && nextName !== variable.name) {
+        postTransaction({ schema_version: 1, op: "rename_binding", revision: latestDoc.revision, from: variable.name, to: nextName });
+        selectedVariableName = nextName;
+        return;
+      }
+      if (initExpr && nextDefault) {
+        postTransaction({ schema_version: 1, op: "edit_inline_expr", revision: latestDoc.revision, inline_expr_id: initExpr.inline_expr_id, new_expr: nextDefault });
+      }
+    });
+  }
+
   function syncReturnEditorPreview(type) {
     const outType = type && type.trim() ? type.trim() : "Void";
     const color = colorForType(outType);
@@ -2667,7 +2838,9 @@ pub fn canvas_js() -> String {
     const type = p.type || "Value";
     const color = colorForType(type);
     const rail = pinRail(p);
-    const flags = [p.direction, rail, p.fallible ? "fallible" : "", p.effect_grant_need ? "effect" : ""].filter(Boolean).join(" / ");
+    const railLabel = rail === "control" ? "Execution" : "Value";
+    const direction = p.direction === "input" ? "Input" : "Output";
+    const flags = [direction, railLabel, p.fallible ? "can fail" : "", p.effect_grant_need ? "needs effect" : ""].filter(Boolean).join(" / ");
     return `<div class="pin-card" style="--pin-color:${escapeAttr(color)}">${pinPortHtml(isExecPin(p) ? "exec" : type)}<div class="pin-card-title"><b>${escapeHtml(p.name)}</b><small>${escapeHtml(flags)}<span class="type-detail"> - ${escapeHtml(type)}</span></small></div><button data-pin-menu="${escapeAttr(p.pin_id)}">Actions</button></div>`;
   }
 
@@ -2688,8 +2861,10 @@ pub fn canvas_js() -> String {
     const fnReturnType = fnMeta ? (typeof fnMeta.returns === "string" ? fnMeta.returns : (fnMeta.returns && fnMeta.returns.type) || "Void") : "Void";
     const fnParams = fnMeta ? (fnMeta.params || []).map((p, i) => functionParamRow(p, i)).join("") : "";
     const fnReturnPanel = fnMeta ? functionReturnRow(fnReturnType) : "";
-    const fnEvents = fnMeta ? (graph.event_views || []).map((event) => `<div class="pin-row"><b>${escapeHtml(event.title || event.function)}</b><br><span class="tag">${escapeHtml(event.semantics || "ordinary_jet_function")}</span></div>`).join("") : "";
-    const fnPanel = fnMeta ? `<h2>Function</h2><div class="signature-board"><div class="signature-head"><div><span class="sig-eyebrow">function graph</span><b>${escapeHtml(fnMeta.visibility || "private")} ${escapeHtml(fnMeta.name || node.title)}</b><code>${escapeHtml(fnMeta.signature || "")}</code></div><button id="create-function" title="Create sibling function">New</button></div><div class="pin-lane"><div class="lane-head"><b>Inputs</b><span class="lane-meta">${(fnMeta.params || []).length} pins</span><button id="add-function-pin">+ Input</button></div><div class="pin-list" id="function-pin-list">${fnParams || "<div class=\"pin-empty\">No input pins</div>"}</div></div><div class="pin-lane"><div class="lane-head"><b>Output</b><span class="lane-meta">return type</span><button id="add-function-output">+ Output</button></div><div class="pin-list">${fnReturnPanel}</div></div><div class="signature-source"><span class="sig-eyebrow">source signature</span><code>${escapeHtml(fnMeta.signature || "")}</code><input id="function-signature" value="${escapeAttr(fnMeta.signature || "")}"><div class="rename-strip"><input id="function-rename-to" aria-label="Function name" title="Function name" value="${escapeAttr(fnMeta.name || node.title)}"><button id="rename-function">Rename</button></div></div><div class="signature-actions"><button id="edit-function-signature">Apply signature</button><button id="apply-function-pins" class="primary">Apply pins</button></div></div>${fnEvents ? `<h2>Callback views</h2><div class="pin-list">${fnEvents}</div>` : ""}` : "";
+    const fnEvents = fnMeta ? (graph.event_views || []).map((event) => `<div class="pin-row"><b>${escapeHtml(event.title || event.function)}</b><br><span class="tag">Function event</span></div>`).join("") : "";
+    const effectRows = fnMeta ? (fnMeta.effects || []).map((effect) => `<div class="pin-row"><b>${escapeHtml(effect)}</b><br><span class="tag">Effect</span></div>`).join("") : "";
+    const markerRows = fnMeta ? [fnMeta.pure ? "Pure" : "", fnMeta.unsafe ? "Unsafe" : ""].filter(Boolean).map((marker) => `<div class="pin-row"><b>${escapeHtml(marker)}</b><br><span class="tag">Marker</span></div>`).join("") : "";
+    const fnPanel = fnMeta ? `<h2>Function</h2><div class="signature-board"><div class="signature-head"><div><span class="sig-eyebrow">Function</span><b>${escapeHtml(fnMeta.visibility || "private")} ${escapeHtml(fnMeta.name || node.title)}</b><code>${escapeHtml(fnMeta.signature || "")}</code></div><button id="create-function" title="Create sibling function">New</button></div><div class="pin-lane"><div class="lane-head"><b>Inputs</b><span class="lane-meta">${(fnMeta.params || []).length}</span><button id="add-function-pin">+ Input</button></div><div class="pin-list" id="function-pin-list">${fnParams || "<div class=\"pin-empty\">No inputs</div>"}</div></div><div class="pin-lane"><div class="lane-head"><b>Output</b><span class="lane-meta">return type</span><button id="add-function-output">+ Output</button></div><div class="pin-list">${fnReturnPanel}</div></div><div class="signature-source"><span class="sig-eyebrow">Source signature</span><code>${escapeHtml(fnMeta.signature || "")}</code><input id="function-signature" value="${escapeAttr(fnMeta.signature || "")}"><div class="rename-strip"><input id="function-rename-to" aria-label="Function name" title="Function name" value="${escapeAttr(fnMeta.name || node.title)}"><button id="rename-function">Rename</button></div></div><div class="signature-actions"><button id="edit-function-signature">Apply signature</button><button id="apply-function-pins" class="primary">Apply pins</button></div></div>${effectRows || markerRows ? `<h2>Effects and markers</h2><div class="pin-list">${effectRows}${markerRows}</div>` : ""}${fnEvents ? `<h2>Events</h2><div class="pin-list">${fnEvents}</div>` : ""}` : "";
     const bpLabel = nodeBreakpoint(node) ? "Remove breakpoint" : "Set breakpoint";
     const locals = debugRows(debugOverlay && debugOverlay.locals);
     const watches = debugRows(debugOverlay && debugOverlay.watches);
@@ -2703,6 +2878,7 @@ pub fn canvas_js() -> String {
     details.innerHTML = `
       <div class="details-hero">
         <div class="details-titleline"><span class="node-glyph">${escapeHtml(style.glyph)}</span><div class="details-title"><p class="title">${escapeHtml(node.title)}</p><div class="kind">${escapeHtml(nodeKindLabel(node, graph))}</div></div></div>
+        <span>${escapeHtml(nodeDescription(node, graph))}</span>
         <div class="details-chips dev-only"><span class="details-chip">${escapeHtml(node.kind)}</span><span class="details-chip type-detail">${pins.length} pins</span>${affords}</div>
         <div class="quick-actions"><button id="source-jump">Jump source</button><button id="find-references">Find refs</button>${calleeOpen ? calleeOpen.replace("<button", "<button class=\"wide\"") : ""}</div>
         <dl class="dev-only">
@@ -2809,7 +2985,7 @@ pub fn canvas_js() -> String {
     if (sourceJump) {
       sourceJump.addEventListener("click", () => {
         setSourceHash(span);
-        showToast("Source span copied to URL");
+        showToast("Source location selected");
       });
     }
     const findReferences = document.getElementById("find-references");
@@ -2877,6 +3053,7 @@ pub fn canvas_js() -> String {
   }
 
   function selectNode(node, mode) {
+    selectedVariableName = null;
     if (mode === "toggle") {
       if (selectedNodeIds.has(node.node_id)) selectedNodeIds.delete(node.node_id);
       else selectedNodeIds.add(node.node_id);
@@ -3662,7 +3839,10 @@ pub fn canvas_js() -> String {
   }
 
   function loadGraph(sourceId) {
-    if (typeof sourceId === "string") selectedSourceId = sourceId || null;
+    if (typeof sourceId === "string") {
+      selectedSourceId = sourceId || null;
+      selectedVariableName = null;
+    }
     return fetch(graphRequestUrl(selectedSourceId), { cache: "no-store" })
       .then((r) => r.json())
       .then((doc) => {
@@ -3722,7 +3902,7 @@ pub fn canvas_js() -> String {
           title: action.title || action.callee,
           detail: action.kind === "canvas.core_catalog" ? ((action.module_path || "core") + " · " + (action.signature || action.callee || "") + " · read-only") : (action.command ? ((action.kind || "canvas.command") + " · " + (action.command || []).join(" ") + " · " + (action.writes || "none")) : ((action.kind || "canvas.action") + " · " + (action.engine || "checked-tir+jit") + " · " + (action.callee || "") + "(" + (action.pins || []).filter((p) => p.direction === "input").map((p) => p.type || "Value").join(", ") + ") -> " + (action.ret || "Void"))),
           kind: action.kind || "canvas.action",
-          group: action.kind === "canvas.core_catalog" ? "Core" : action.kind === "canvas.command" ? "Flow" : "Project",
+          group: action.kind === "canvas.core_catalog" ? "Core" : action.kind === "canvas.command" ? "Commands" : "Project",
           op: action.insert_op || action.op || (action.kind === "canvas.action" || action.kind === "canvas.core_catalog" ? "insert_call" : "preview_canvas_action"),
           action_id: action.action_id,
           callee: action.callee,
@@ -3818,6 +3998,13 @@ pub fn canvas_js() -> String {
   };
   setDeveloperMode(storedFlag("jet.canvas.developerMode"));
   if (coreCatalog) coreCatalog.addEventListener("click", () => openCoreCatalogPalette(""));
+  if (toolbarSearch) toolbarSearch.addEventListener("click", () => {
+    setDrawer("graphs");
+    const searchPanel = document.getElementById("search-panel");
+    const detailsEl = searchPanel && searchPanel.querySelector("details");
+    if (detailsEl) detailsEl.open = true;
+    if (canvasSearch) canvasSearch.focus();
+  });
   syncDetailToggles();
   setViewMode("graph");
   details.innerHTML = "<h2>Details</h2><p>Select a node.</p>";

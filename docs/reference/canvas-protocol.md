@@ -139,6 +139,16 @@ Each graph contains source-backed records:
 | `inline_exprs` | Editable Jet expression source rendered inline. |
 | `rails` | Visual rail classes present in this graph: control, data, fallible, async, effect, proof, debug. |
 
+The editor shell reads existing v1 fields; no schema bump is needed for the
+Blueprint-style sidebars. The left **Files** list comes from
+`jet.canvas.project.files` and opens graphs by passing that row's path as
+`source_id`. The **Functions** list comes from `graphs`. The **Variables** list
+for the open function comes from `graph.function.params` plus local
+binding/assignment/get nodes and their typed pins. The right **Details** panel
+uses `graph.function` for editable function inputs/output, `inline_exprs` for
+editable local initializer values, and existing rename/signature/inline-edit
+transactions for writes.
+
 Each node carries `node_id`, `kind`, `archetype`, `title`, `source_span`,
 `layout`, `badges`, and `edit_affordances`. `archetype` is one of `value`,
 `function_exec`, `function_pure`, `control`, or `entry`. Function, method, and

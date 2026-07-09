@@ -2099,6 +2099,37 @@ fn canvas_protocol_doc_matches_v1_graph_and_edit_shape() {
 }
 
 #[test]
+fn canvas_editor_shell_matches_round3_contract() {
+    let html = jet::Canvas::canvas_html();
+    let js = jet::Canvas::canvas_js();
+
+    assert!(html.contains("<h2>My Canvas</h2>"), "{html}");
+    assert!(html.contains("id=\"variables-list\""), "{html}");
+    assert!(html.contains("id=\"status-summary\""), "{html}");
+    assert!(html.contains("class=\"toolbar-group\""), "{html}");
+    assert!(html.contains("class=\"icon-button\""), "{html}");
+    assert!(html.contains("id=\"toolbar-search\""), "{html}");
+    assert!(html.contains("<svg viewBox=\"0 0 24 24\""), "{html}");
+    assert!(html.contains("id=\"trust-summary\""), "{html}");
+    assert!(html.contains("id=\"trust-summary\" class=\"project-section dev-only"), "{html}");
+    assert!(!html.contains("source-truth"), "{html}");
+    assert!(!html.contains("Source truth"), "{html}");
+    assert!(!html.contains(">Trust<"), "{html}");
+
+    assert!(js.contains("function syncVariablesList"), "{js}");
+    assert!(js.contains("function renderVariableDetails"), "{js}");
+    assert!(js.contains("data-project-file"), "{js}");
+    assert!(js.contains("function actionInsertsNode"), "{js}");
+    assert!(js.contains("toolbarSearch.addEventListener"), "{js}");
+    assert!(js.contains("Add connected node"), "{js}");
+    assert!(js.contains("Canvas actions"), "{js}");
+    assert!(!js.contains("Graph actions"), "{js}");
+    assert!(!js.contains("Refused: E0204"), "{js}");
+    assert!(!js.contains("Source truth"), "{js}");
+    assert!(!js.contains("source-truth"), "{js}");
+}
+
+#[test]
 fn canvas_debug_session_projects_runtime_overlay_to_source_spans() {
     let path = write_fixture("debug_overlay", CANVAS_DEBUG_FIXTURE);
     let src = fs::read_to_string(&path).unwrap();

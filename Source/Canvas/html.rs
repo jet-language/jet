@@ -40,10 +40,25 @@ input, select { color: #e7eefb; border: 1px solid #31445d; background: #0b1118; 
 input:focus-visible, select:focus-visible { border-color: #35c2ff; outline: none; box-shadow: 0 0 0 2px rgba(53,194,255,.18); }
 select { min-width: 180px; }
 #shell { height: 100%; display: grid; grid-template-rows: auto minmax(0, 1fr) 28px; min-width: 0; }
-#topbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; min-height: 54px; padding: 8px 10px; border-bottom: 1px solid #25364b; background: linear-gradient(#111923, #0c1119 62%, #080c12); box-shadow: 0 1px 0 rgba(255,255,255,.04) inset, 0 14px 40px rgba(0,0,0,.25); }
+#topbar { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; min-width: 0; min-height: 48px; padding: 8px 10px; border-bottom: 1px solid #25364b; background: linear-gradient(#111923, #0c1119 62%, #080c12); box-shadow: 0 1px 0 rgba(255,255,255,.04) inset, 0 14px 40px rgba(0,0,0,.25); }
 #brand { display: flex; flex-direction: column; gap: 1px; flex: 0 1 164px; min-width: 124px; padding-left: 8px; border-left: 3px solid #35c2ff; }
 #brand strong { font-size: 14px; letter-spacing: .08em; text-transform: uppercase; color: #f8fbff; }
-#brand span { color: #9db4d2; font: 11px ui-monospace, "SFMono-Regular", Consolas, monospace; }
+#brand span { color: #9db4d2; font-size: 11px; }
+.toolbar-group { display: flex; align-items: center; gap: 5px; padding: 0 7px; border-left: 1px solid #25364b; min-width: 0; flex: 0 0 auto; }
+.toolbar-group:first-of-type { border-left: 0; }
+.toolbar-spacer { flex: 1 1 auto; min-width: 10px; }
+.icon-button { width: 32px; min-width: 32px; padding: 0; display: inline-grid; place-items: center; }
+.icon-button svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.toolbar-menu { position: relative; flex: 0 0 auto; }
+.toolbar-menu summary { list-style: none; }
+.toolbar-menu summary::-webkit-details-marker { display: none; }
+.toolbar-menu summary.icon-button { color: #d7e4f7; border: 1px solid #31445d; background: linear-gradient(#18202b, #111821); min-height: 30px; cursor: pointer; border-radius: 4px; box-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 1px 0 rgba(0,0,0,.4); }
+.toolbar-menu summary.icon-button:hover, .toolbar-menu summary.icon-button:focus-visible { border-color: #35c2ff; background: #1d2b3a; outline: none; box-shadow: 0 0 0 2px rgba(53,194,255,.18); }
+.toolbar-menu[open] summary { border-color: #35c2ff; background: #1d2b3a; }
+.toolbar-popover { position: absolute; right: 0; top: calc(100% + 6px); z-index: 40; min-width: 220px; display: grid; gap: 6px; padding: 8px; border: 1px solid #344b68; background: #0b1118; border-radius: 6px; box-shadow: 0 18px 48px rgba(0,0,0,.55); }
+.toolbar-popover button { width: 100%; justify-content: start; text-align: left; }
+.toolbar-popover .detail-toggles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.zoom-readout { min-width: 44px; color: #9db4d2; font: 11px ui-monospace, "SFMono-Regular", Consolas, monospace; text-align: center; }
 #graph-select { display: none; border-color: #4b6685; background: #0c1420; color: #eaf5ff; }
 body.is-dev-mode #graph-select { display: block; }
 #topbar > select { flex: 1 1 190px; min-width: 140px; max-width: 360px; }
@@ -59,8 +74,8 @@ body.detail-types .type-detail, body.detail-diagnostics .diagnostic-detail, body
 body.detail-package .project-section.package-detail, body.detail-diagnostics .project-section.diagnostic-detail { display: grid !important; }
 #jump { flex: 1 1 150px; min-width: 94px; color: #9db4d2; font: 12px ui-monospace, "SFMono-Regular", Consolas, monospace; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 body:not(.is-dev-mode) #jump { display: none; }
-.debug-controls { margin-left: auto; display: flex; align-items: center; gap: 5px; flex: 1 1 380px; min-width: 0; justify-content: flex-end; flex-wrap: wrap; }
-body:not(.is-dev-mode) .debug-controls { display: none; }
+.debug-controls { display: none; align-items: center; gap: 5px; min-width: 0; justify-content: flex-end; flex-wrap: wrap; }
+body.is-debug-active .debug-controls { display: flex; }
 .debug-controls select { flex: 1 1 130px; min-width: 112px; max-width: 220px; }
 .debug-controls button { min-width: 30px; padding: 0 7px; }
 #workbench { min-height: 0; min-width: 0; position: relative; display: grid; grid-template-columns: minmax(156px, 15vw) minmax(0, 1fr) minmax(238px, 20vw); background: #05070b; }
@@ -75,9 +90,13 @@ body:not(.is-dev-mode) .debug-controls { display: none; }
 .panel details[open] summary::before { transform: rotate(90deg); }
 .panel summary .count { justify-self: end; }
 .panel details > :not(summary) { margin-top: 8px; }
-.graph-list, .search-results, .project-list { display: grid; gap: 6px; }
+.graph-list, .search-results, .project-list, .variable-list { display: grid; gap: 6px; }
 .project-section { display: grid; gap: 7px; margin-top: 10px; padding-top: 10px; border-top: 1px solid #22364d; }
 .project-section h3 { margin: 0; color: #8fb2dc; font: 10px ui-monospace, "SFMono-Regular", Consolas, monospace; letter-spacing: .09em; text-transform: uppercase; }
+.status-grid { display: grid; gap: 6px; }
+.status-card { border: 1px solid #263850; border-radius: 6px; background: #0d1520; padding: 8px; display: grid; gap: 4px; }
+.status-card b { color: #eef7ff; font-size: 12px; }
+.status-card small { color: #8fa7c6; font: 11px ui-monospace, "SFMono-Regular", Consolas, monospace; overflow-wrap: anywhere; }
 .proof-rail { display: grid; gap: 6px; }
 .proof-row { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 8px; padding: 7px 8px; border: 1px solid #21344b; background: rgba(7,13,22,.72); border-radius: 4px; }
 .proof-row b { color: #8fb2dc; font: 10px ui-monospace, "SFMono-Regular", Consolas, monospace; letter-spacing: .08em; text-transform: uppercase; }
@@ -85,6 +104,10 @@ body:not(.is-dev-mode) .debug-controls { display: none; }
 .proof-row.is-missing span { color: #f8c76a; }
 .graph-item { width: 100%; display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 8px; text-align: left; border-color: #283b52; background: #101821; min-height: 38px; }
 .graph-item.is-active { border-color: #35c2ff; background: #102437; box-shadow: inset 3px 0 0 #35c2ff; }
+.variable-item { width: 100%; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; text-align: left; border-color: #283b52; background: #101821; min-height: 34px; }
+.variable-item.is-active { border-color: #35c2ff; background: #102437; box-shadow: inset 3px 0 0 #35c2ff; }
+.variable-dot { width: 10px; height: 10px; border-radius: 50%; background: currentColor; box-shadow: 0 0 12px currentColor; }
+.variable-name { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .project-card { border: 1px solid #263850; border-radius: 6px; background: #0d1520; padding: 8px; display: grid; gap: 5px; }
 button.project-card { width: 100%; text-align: left; cursor: pointer; color: inherit; }
 .project-card.is-active { border-color: #35c2ff; background: #102437; box-shadow: inset 3px 0 0 #35c2ff; }
@@ -258,31 +281,23 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
 <body>
 <div id="shell">
   <header id="topbar">
-    <div id="brand"><strong>Jet Canvas</strong><span>source-backed workbench</span></div>
-    <button id="graph-back" title="Back graph">‹</button>
-    <button id="graph-forward" title="Forward graph">›</button>
-    <select id="graph-select" aria-label="Graph"></select>
-    <button id="fit">Fit</button>
-    <button id="reload">Reload</button>
-    <button id="source-diff">Diff</button>
-    <button id="edit-source">Edit Source</button>
-    <button id="apply-source-edit">Apply Source</button>
-    <button id="cancel-source-edit">Cancel</button>
-    <div id="lens-switch" class="lens-switch" role="group" aria-label="Canvas lens"><button id="view-code" data-view-mode="code">Code</button><button id="view-split" data-view-mode="split">Split</button><button id="view-graph" data-view-mode="graph">Graph</button></div>
-    <button id="view-toggle">Code</button>
-    <div id="detail-toggles" class="detail-toggles" aria-label="Detail toggles"><label class="detail-toggle"><input id="toggle-types" data-detail-toggle="types" type="checkbox">Types</label><label class="detail-toggle"><input id="toggle-diagnostics" data-detail-toggle="diagnostics" type="checkbox">Diagnostics</label><label class="detail-toggle"><input id="toggle-effects" data-detail-toggle="effects" type="checkbox">Effects</label><label class="detail-toggle"><input id="toggle-debug" data-detail-toggle="debug" type="checkbox">Debug</label><label class="detail-toggle"><input id="toggle-package" data-detail-toggle="package" type="checkbox">Package</label></div>
-    <button id="developer-mode" title="Show Canvas internals">Developer</button>
-    <button id="undo-edit">Undo</button>
-    <button id="redo-edit">Redo</button>
-    <button id="org-align" title="Align selected nodes">Align</button>
-    <button id="org-tidy" title="Tidy visible graph">Tidy</button>
-    <button id="bookmark-add" title="Bookmark graph">Mark</button>
-    <button id="bookmark-jump" title="Jump to bookmark">Go</button>
-    <button id="core-catalog" title="Browse Core library">Core</button>
-    <button id="favorite-action" title="Pin first compatible action">Fav</button>
-    <button id="run-current" title="Run current entry">Run</button>
-    <span id="jump">loading graph</span>
-    <div class="debug-controls">
+    <div id="brand"><strong>Jet Canvas</strong><span>Source-backed editor</span></div>
+    <div class="toolbar-group" aria-label="View controls">
+      <button id="graph-back" class="icon-button" title="Back" aria-label="Back"><svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg></button>
+      <button id="graph-forward" class="icon-button" title="Forward" aria-label="Forward"><svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button>
+      <button id="fit" class="icon-button" title="Fit graph" aria-label="Fit graph"><svg viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M16 3h3a2 2 0 0 1 2 2v3"/><path d="M8 21H5a2 2 0 0 1-2-2v-3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg></button>
+      <span class="zoom-readout" id="toolbar-zoom">100%</span>
+    </div>
+    <div id="lens-switch" class="lens-switch toolbar-group" role="group" aria-label="Canvas lens"><button id="view-code" data-view-mode="code">Code</button><button id="view-split" data-view-mode="split">Split</button><button id="view-graph" data-view-mode="graph">Graph</button></div>
+    <div class="toolbar-group" aria-label="Edit controls">
+      <button id="undo-edit" class="icon-button" title="Undo" aria-label="Undo"><svg viewBox="0 0 24 24"><path d="M9 14l-5-5 5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-2"/></svg></button>
+      <button id="redo-edit" class="icon-button" title="Redo" aria-label="Redo"><svg viewBox="0 0 24 24"><path d="M15 14l5-5-5-5"/><path d="M20 9H10a6 6 0 0 0 0 12h2"/></svg></button>
+      <button id="org-align" class="icon-button" title="Align selected nodes" aria-label="Align selected nodes"><svg viewBox="0 0 24 24"><path d="M6 4v16"/><path d="M10 7h8"/><path d="M10 12h6"/><path d="M10 17h10"/></svg></button>
+      <button id="org-tidy" class="icon-button" title="Tidy graph" aria-label="Tidy graph"><svg viewBox="0 0 24 24"><path d="M4 7h6v6H4z"/><path d="M14 4h6v6h-6z"/><path d="M14 14h6v6h-6z"/><path d="M10 10l4-3"/><path d="M10 13l4 4"/></svg></button>
+    </div>
+    <div class="toolbar-group" aria-label="Run controls">
+      <button id="run-current" class="primary" title="Run current entry" aria-label="Run current entry">Run</button>
+      <details id="debug-menu" class="toolbar-menu"><summary class="icon-button" title="Debug controls" aria-label="Debug controls"><svg viewBox="0 0 24 24"><path d="M8 2v4"/><path d="M16 2v4"/><path d="M7 10h10"/><path d="M12 6v14"/><path d="M5 14h14"/><path d="M8 22h8"/><path d="M4 18l4-4"/><path d="M20 18l-4-4"/></svg></summary><div class="toolbar-popover debug-controls">
       <select id="debug-session" aria-label="Debug session"><option>local debug</option></select>
       <button id="debug-break">Break</button>
       <button id="debug-watch">Watch</button>
@@ -290,12 +305,36 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
       <button id="debug-next">Next</button>
       <button id="debug-continue">Continue</button>
       <button id="debug-stop">Stop</button>
+      </div></details>
     </div>
+    <div class="toolbar-spacer"></div>
+    <div class="toolbar-group" aria-label="Source and navigation">
+      <details class="toolbar-menu"><summary class="icon-button" title="More tools" aria-label="More tools"><svg viewBox="0 0 24 24"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/></svg></summary><div class="toolbar-popover">
+        <select id="graph-select" aria-label="Graph"></select>
+        <button id="reload">Reload</button>
+        <button id="source-diff">Diff</button>
+        <button id="edit-source">Edit Source</button>
+        <button id="apply-source-edit">Apply Source</button>
+        <button id="cancel-source-edit">Cancel</button>
+        <button id="view-toggle">Code</button>
+        <button id="bookmark-add">Mark</button>
+        <button id="bookmark-jump">Go</button>
+        <button id="core-catalog">Core</button>
+        <button id="favorite-action">Fav</button>
+      </div></details>
+      <button id="toolbar-search" class="icon-button" title="Search" aria-label="Search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg></button>
+      <button id="developer-mode" class="icon-button" title="Developer details" aria-label="Developer details"><svg viewBox="0 0 24 24"><path d="M16 18l6-6-6-6"/><path d="M8 6l-6 6 6 6"/><path d="M14 4l-4 16"/></svg></button>
+      <details class="toolbar-menu dev-only"><summary class="icon-button" title="Detail filters" aria-label="Detail filters"><svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M7 12h10"/><path d="M10 17h4"/></svg></summary><div id="detail-toggles" class="detail-toggles toolbar-popover" aria-label="Detail toggles"><label class="detail-toggle"><input id="toggle-types" data-detail-toggle="types" type="checkbox">Types</label><label class="detail-toggle"><input id="toggle-diagnostics" data-detail-toggle="diagnostics" type="checkbox">Diagnostics</label><label class="detail-toggle"><input id="toggle-effects" data-detail-toggle="effects" type="checkbox">Effects</label><label class="detail-toggle"><input id="toggle-debug" data-detail-toggle="debug" type="checkbox">Debug</label><label class="detail-toggle"><input id="toggle-package" data-detail-toggle="package" type="checkbox">Package</label></div></details>
+    </div>
+    <span id="jump">loading graph</span>
   </header>
   <main id="workbench">
     <aside id="left-drawer" class="side">
-      <section id="project-panel" class="panel"><details open><summary><span>Project files</span><span id="project-mode" class="count">file</span></summary><div id="project-rail" class="project-list"></div><div id="package-summary" class="project-section package-detail"></div><div id="dependency-summary" class="project-section package-detail"></div><div id="dev-summary" class="project-section package-detail"></div><div id="diagnostics-summary" class="project-section diagnostic-detail"></div><div id="trust-summary" class="project-section package-detail"></div></details></section>
+      <section id="canvas-panel" class="panel"><h2>My Canvas</h2></section>
+      <section id="project-panel" class="panel"><details open><summary><span>Files</span><span id="project-mode" class="count">file</span></summary><div id="project-rail" class="project-list"></div></details></section>
       <section id="graphs-panel" class="panel"><details open><summary><span>Functions</span><span id="graph-count" class="count">0</span></summary><div id="graph-list" class="graph-list"></div></details></section>
+      <section id="variables-panel" class="panel"><details open><summary><span>Variables</span><span id="variable-count" class="count">0</span></summary><div id="variables-list" class="variable-list"></div></details></section>
+      <section id="status-panel" class="panel"><details><summary><span>Status</span><span id="status-count" class="count">clean</span></summary><div id="status-summary" class="status-grid"></div><div id="package-summary" class="project-section dev-only package-detail"></div><div id="dependency-summary" class="project-section dev-only package-detail"></div><div id="dev-summary" class="project-section dev-only package-detail"></div><div id="diagnostics-summary" class="project-section dev-only diagnostic-detail"></div><div id="trust-summary" class="project-section dev-only package-detail"></div></details></section>
       <section id="search-panel" class="panel"><details><summary><span>Search</span></summary><input id="canvas-search" class="search" placeholder="Find in graph"><div id="search-results" class="search-results"></div></details></section>
     </aside>
     <section id="stage">
@@ -319,8 +358,8 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
 </div>
 <div id="context-menu" role="menu"></div>
 <div id="first-run-tour" role="dialog" aria-label="Canvas first run">
-  <b>Canvas uses source as truth.</b>
-  <span>Use Code, Split, or Graph, then right-click or release a socket for source-backed actions.</span>
+  <b>Canvas edits Jet source.</b>
+  <span>Use Code, Split, or Graph, then right-click or release a socket for edits.</span>
   <button id="tour-dismiss">Dismiss</button>
 </div>
 __JET_CANVAS_BOOTSTRAP__
