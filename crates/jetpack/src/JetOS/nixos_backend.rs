@@ -630,9 +630,15 @@ let
   # attribute may live under a package group (KDE apps live in
   # `kdePackages.*`). A miss is a hard eval error, never a silent drop.
   jetosPkg = name:
+    let
+      # `gnome-shell-extension-user-themes` (pname) lives at
+      # `gnomeExtensions.user-themes`.
+      extension = lib.removePrefix "gnome-shell-extension-" name;
+    in
     if pkgs ? ${name} then pkgs.${name}
     else if pkgs.kdePackages ? ${name} then pkgs.kdePackages.${name}
-    else throw "jetos: package `${name}` is not in nixpkgs or kdePackages at the pinned revision";
+    else if pkgs.gnomeExtensions ? ${extension} then pkgs.gnomeExtensions.${extension}
+    else throw "jetos: package `${name}` is not in nixpkgs, kdePackages, or gnomeExtensions at the pinned revision";
 in
 {
   system.stateVersion = "@@STATEVERSION@@";

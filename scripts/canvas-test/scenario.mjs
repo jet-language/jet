@@ -181,6 +181,36 @@ export class CanvasScenario {
     return await this.driver.evaluate(`fetch("/canvas/graph", { cache: "no-store" }).then((r) => r.json())`);
   }
 
+  async problems() {
+    return await this.driver.evaluate(`(window.__jetCanvasTest && window.__jetCanvasTest.problems) || []`);
+  }
+
+  async diagnosticsByNode() {
+    return await this.driver.evaluate(`(window.__jetCanvasTest && window.__jetCanvasTest.diagnosticsByNode) || []`);
+  }
+
+  async expectProblem(code) {
+    await this.waitFor(async () => {
+      const problems = await this.problems();
+      return problems.some((p) => !code || p.code === code || String(p.rendered || "").includes(code));
+    }, `problem ${code || ""}`);
+    const problems = await this.problems();
+    return problems.find((p) => !code || p.code === code || String(p.rendered || "").includes(code));
+  }
+
+  async setSourceEditor(source) {
+    const ok = await this.driver.evaluate(`window.__jetCanvasTest.setSourceEditor(${JSON.stringify(source)})`);
+    if (!ok) throw new Error("source editor helper missing");
+  }
+
+  async checkCurrentSource() {
+    await this.driver.evaluate(`window.__jetCanvasTest.checkCurrentSource()`);
+  }
+
+  async jumpProblem(index = 0) {
+    return await this.driver.evaluate(`window.__jetCanvasTest.jumpProblem(${Number(index) || 0})`);
+  }
+
   async query(body) {
     return await this.driver.evaluate(`fetch("/canvas/query", { method: "POST", headers: { "content-type": "application/json" }, body: ${JSON.stringify(JSON.stringify(body))} }).then((r) => r.json())`);
   }
@@ -389,6 +419,32 @@ async function catalogSweep(ctx) {
   return summary;
 }
 
+async function scratchLimitInline(ctx) {
+  const doc = await ctx.graph();
+  const graph = (doc.graphs || []).find((g) => g.title === "scratch") || (doc.graphs || [])[0];
+  if (!graph) throw new Error("scratch graph missing");
+  const expr = (graph.inline_exprs || []).find((e) => e.source === "limit")
+    || (graph.inline_exprs || []).find((e) => String(e.source || "").includes("limit"));
+  if (!expr) throw new Error(`scratch limit inline expr missing: ${JSON.stringify(graph.inline_exprs || [])}`);
+  return { doc, graph, expr };
+}
+
+async function failScratchLimit(ctx) {
+  await ctx.openCanvas();
+  await ctx.switchGraph("scratch");
+  const { doc, expr } = await scratchLimitInline(ctx);
+  const result = await ctx.transaction({
+    schema_version: 1,
+    op: "edit_inline_expr",
+    revision: doc.revision,
+    inline_expr_id: expr.inline_expr_id,
+    new_expr: "missing_value"
+  });
+  if (result.ok) throw new Error(`diagnostic transaction unexpectedly passed: ${JSON.stringify(result.json)}`);
+  await ctx.expectProblem("E0107");
+  return result;
+}
+
 export const scenarios = {
   "open-and-render": async (ctx) => {
     await ctx.openCanvas();
@@ -491,6 +547,58 @@ export const scenarios = {
     if (/\bCall\b/.test(menu) || menu.includes("Insert call transaction")) {
       throw new Error(`ad hoc Call insert should not be offered:\n${menu}`);
     }
+  },
+
+  "failed-insert-shows-panel": async (ctx) => {
+    const result = await failScratchLimit(ctx);
+    const rendered = String(result.json && result.json.message || "");
+    if (!rendered.includes("Error [E0107]") || !rendered.includes("Why:") || !rendered.includes("Fix:")) {
+      throw new Error(`transaction did not return full Jet diagnostic: ${JSON.stringify(result.json)}`);
+    }
+    const before = await ctx.problems();
+    if (!before.length || !String(before[0].rendered || "").includes("Error [E0107]")) {
+      throw new Error(`problem panel missing rendered E-code: ${JSON.stringify(before)}`);
+    }
+    await sleep(5200);
+    const after = await ctx.problems();
+    if (!after.length || !String(after[0].rendered || "").includes("Error [E0107]")) {
+      throw new Error(`problem panel did not persist past toast: ${JSON.stringify(after)}`);
+    }
+  },
+
+  "check-button-populates-panel": async (ctx) => {
+    await ctx.openCanvas();
+    await ctx.switchGraph("scratch");
+    const source = await ctx.source();
+    await ctx.setSourceEditor(source.replace("print(limit)", "print(missing_value)"));
+    await ctx.checkCurrentSource();
+    const problem = await ctx.expectProblem("E0107");
+    if (!String(problem.rendered || "").includes("Why:") || !String(problem.rendered || "").includes("Fix:")) {
+      throw new Error(`check diagnostic missing full text: ${JSON.stringify(problem)}`);
+    }
+    const ok = await ctx.jumpProblem(0);
+    if (!ok) throw new Error("problem jump failed");
+    await ctx.waitFor(async () => {
+      const state = await ctx.state();
+      return state && state.selectedNodeId && (state.diagnosticsByNode || []).some((d) => d.node_id === state.selectedNodeId);
+    }, "diagnostic jump selected node");
+  },
+
+  "bubble-appears-and-clears": async (ctx) => {
+    await failScratchLimit(ctx);
+    await ctx.waitFor(async () => {
+      const bubbles = await ctx.diagnosticsByNode();
+      return bubbles.some((b) => b.severity === "error" && (b.codes || []).includes("E0107"));
+    }, "diagnostic bubble");
+    const bubbles = await ctx.diagnosticsByNode();
+    const first = bubbles.find((b) => (b.codes || []).includes("E0107"));
+    if (!first) throw new Error(`E0107 bubble missing: ${JSON.stringify(bubbles)}`);
+    const before = await ctx.source();
+    await ctx.replaceSource(before);
+    await ctx.waitFor(async () => {
+      const state = await ctx.state();
+      return state && (!state.problems || state.problems.length === 0) && (!state.diagnosticsByNode || state.diagnosticsByNode.length === 0);
+    }, "diagnostic bubble cleared");
   },
 
   "undo-restores-source": async (ctx) => {

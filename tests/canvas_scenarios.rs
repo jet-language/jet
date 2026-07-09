@@ -78,6 +78,21 @@ fn no_dead_end_ad_hoc_insert() {
 }
 
 #[test]
+fn failed_insert_shows_panel() {
+    run_canvas_scenario("failed-insert-shows-panel");
+}
+
+#[test]
+fn check_button_populates_panel() {
+    run_canvas_scenario("check-button-populates-panel");
+}
+
+#[test]
+fn bubble_appears_and_clears() {
+    run_canvas_scenario("bubble-appears-and-clears");
+}
+
+#[test]
 fn undo_restores_source() {
     run_canvas_scenario("undo-restores-source");
 }

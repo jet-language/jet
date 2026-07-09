@@ -547,22 +547,28 @@ pub fn command_receipt_json_for_entry(entry: &Path, request: &str) -> Result<Str
         ));
     }
     let started = std::time::Instant::now();
-    let (success, exit_code, stdout, stderr) = if action_id == "canvas.command:check" {
+    let source_override = json_string_field(request, "source_text");
+    let check_src = source_override.as_deref().unwrap_or(&src);
+    let check_revision = source_revision(check_src);
+    let (success, exit_code, stdout, stderr, diagnostics) = if action_id == "canvas.command:check" {
+        let abs = canonical_path(entry);
+        let overlay = source_override.as_deref().map(|text| (abs.as_path(), text));
         let (diags, _bundle, _facts) =
-            crate::Driver::check_file_with_effect_facts(&entry.display().to_string(), None, true);
+            crate::Driver::check_file_with_effect_facts(&entry.display().to_string(), overlay, true);
         let errors: Vec<Diagnostic> = diags
             .iter()
             .filter(|d| d.severity == Severity::Error)
             .cloned()
             .collect();
         if errors.is_empty() {
-            (true, Some(0), String::new(), String::new())
+            (true, Some(0), String::new(), String::new(), String::new())
         } else {
             (
                 false,
                 Some(1),
                 String::new(),
-                crate::render_diagnostics(&entry.display().to_string(), &src, &errors),
+                crate::render_diagnostics(&entry.display().to_string(), check_src, &errors),
+                diagnostics_json(entry, check_src, &errors),
             )
         }
     } else {
@@ -572,6 +578,7 @@ pub fn command_receipt_json_for_entry(entry: &Path, request: &str) -> Result<Str
             output.status.code(),
             String::from_utf8_lossy(&output.stdout).to_string(),
             String::from_utf8_lossy(&output.stderr).to_string(),
+            String::new(),
         )
     };
     let elapsed_ms = started.elapsed().as_millis();
@@ -583,17 +590,19 @@ pub fn command_receipt_json_for_entry(entry: &Path, request: &str) -> Result<Str
         .collect::<Vec<_>>()
         .join(",");
     Ok(format!(
-        "{{\"protocol\":\"jet.canvas.command_receipt\",\"schema_version\":1,\"ok\":true,\"action_id\":{},\"title\":{},\"revision\":{},\"command\":[{}],\"writes\":{},\"success\":{},\"exit_code\":{},\"elapsed_ms\":{},\"stdout\":{},\"stderr\":{}}}",
+        "{{\"protocol\":\"jet.canvas.command_receipt\",\"schema_version\":1,\"ok\":true,\"action_id\":{},\"title\":{},\"revision\":{},\"checked_revision\":{},\"command\":[{}],\"writes\":{},\"success\":{},\"exit_code\":{},\"elapsed_ms\":{},\"stdout\":{},\"stderr\":{},\"diagnostics\":[{}]}}",
         json_str(&action_id),
         json_str(label),
         json_str(&revision),
+        json_str(&check_revision),
         command,
         json_str(writes),
         if success { "true" } else { "false" },
         exit_code.map(|c| c.to_string()).unwrap_or_else(|| "null".to_string()),
         elapsed_ms,
         json_str(&stdout),
-        json_str(&stderr)
+        json_str(&stderr),
+        diagnostics
     ))
 }
 

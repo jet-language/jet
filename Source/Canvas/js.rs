@@ -35,6 +35,9 @@ pub fn canvas_js() -> String {
   const trustSummary = document.getElementById("trust-summary");
   const statusSummary = document.getElementById("status-summary");
   const statusCount = document.getElementById("status-count");
+  const problemsPanel = document.getElementById("problems-panel");
+  const problemsList = document.getElementById("problems-list");
+  const problemsCount = document.getElementById("problems-count");
   const variablesList = document.getElementById("variables-list");
   const variableCount = document.getElementById("variable-count");
   const graphList = document.getElementById("graph-list");
@@ -61,6 +64,7 @@ pub fn canvas_js() -> String {
   const bookmarkJump = document.getElementById("bookmark-jump");
   const coreCatalog = document.getElementById("core-catalog");
   const favoriteAction = document.getElementById("favorite-action");
+  const checkCurrent = document.getElementById("check-current");
   const runCurrent = document.getElementById("run-current");
   const runHud = document.getElementById("run-hud");
   const firstRunTour = document.getElementById("first-run-tour");
@@ -77,6 +81,7 @@ pub fn canvas_js() -> String {
   let pinHit = [];
   let pinEditorHit = [];
   let wireEndpointHit = [];
+  let diagnosticHit = [];
   let commentHit = [];
   let connectedPinIds = new Set();
   let latestDoc = null;
@@ -85,6 +90,7 @@ pub fn canvas_js() -> String {
   let debugOverlay = null;
   let debugState = { breakpoints: [], watches: [] };
   let searchState = { results: [], spans: [], active: -1, diff: null, impact: null };
+  let diagnosticsState = { baseRevision: null, diagnosticRevision: null, entries: [], dismissed: new Set() };
   let scm = null;
   let proofDoc = null;
   let undoStack = [];
@@ -105,6 +111,7 @@ pub fn canvas_js() -> String {
   let nodeOffsets = new Map();
   let autoNodeOffsets = new Map();
   let hoverPin = null;
+  let hoverDiagnostic = null;
   let pendingPin = null;
   let spaceDown = false;
   let viewMode = "graph";
@@ -723,6 +730,7 @@ pub fn canvas_js() -> String {
     const confirmed = !item.requires_confirmation || window.confirm(item.title + " writes " + (item.writes || "outputs") + ". Continue?");
     if (!confirmed) return;
     const body = { schema_version: 1, revision: latestDoc.revision, action_id: item.action_id, confirmed };
+    if (item.action_id === "canvas.command:check") body.source_text = sourceEditMode && sourceEditor ? sourceEditor.value : (latestDoc.source_text || "");
     runHud.textContent = item.title + " running";
     runHud.classList.add("is-running");
     fetch(commandUrl, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
@@ -732,6 +740,7 @@ pub fn canvas_js() -> String {
         const doc = result.json || {};
         runHud.textContent = doc.success ? item.title + " passed" : item.title + " failed";
         details.innerHTML = `<h2>Receipt</h2><div class="signature-source"><code>${escapeHtml((doc.command || []).join(" "))}</code><span>${escapeHtml(doc.success ? "success" : "failed")} · ${escapeHtml(String(doc.exit_code ?? "?"))} · ${escapeHtml(String(doc.elapsed_ms || 0))}ms</span></div><div class="inline-row"><b>stdout</b><code>${escapeHtml(doc.stdout || "")}</code></div><div class="inline-row"><b>stderr</b><code>${escapeHtml(doc.stderr || "")}</code></div>`;
+        if (doc.action_id === "canvas.command:check") acceptDiagnosticsPayload(doc, "Check");
         loadProofRail();
       })
       .catch((e) => {
@@ -739,6 +748,19 @@ pub fn canvas_js() -> String {
         runHud.textContent = item.title + " failed";
         showToast(String(e));
       });
+  }
+
+  function checkCurrentSource() {
+    if (!latestDoc) return;
+    const item = actionEntries.find((entry) => entry.action_id === "canvas.command:check") || {
+      action_id: "canvas.command:check",
+      title: "Check project",
+      command: ["jet", "check"],
+      writes: "none",
+      requires_confirmation: false,
+      available: true
+    };
+    executeCommandAuthority(item);
   }
 
   function setDeveloperMode(on) {
@@ -774,10 +796,14 @@ pub fn canvas_js() -> String {
     window.__jetCanvasDetailToggles = Object.assign({}, detailToggles);
   }
 
-  function showToast(text) {
+  function showToast(text, opts = {}) {
     const message = String(text || "");
-    const isError = /^Error \[[A-Z0-9]+\]:/.test(message) || message.includes("\n Why:") || message.includes("\n Fix:");
-    toast.textContent = message;
+    const isError = !!opts.isError || /^Error \[[A-Z0-9]+\]:/.test(message) || message.includes("\n Why:") || message.includes("\n Fix:");
+    if (opts.showDetails) {
+      toast.innerHTML = `<span>${escapeHtml(message)}</span><button type="button" data-show-problems>Show details</button>`;
+    } else {
+      toast.textContent = message;
+    }
     toast.title = message;
     toast.classList.toggle("is-error", isError);
     toast.setAttribute("role", isError ? "alert" : "status");
@@ -789,12 +815,162 @@ pub fn canvas_js() -> String {
     }, isError ? 10000 : 2200);
   }
 
-  toast.addEventListener("click", () => {
+  toast.addEventListener("click", (ev) => {
+    if (ev.target && ev.target.hasAttribute("data-show-problems")) {
+      ev.stopPropagation();
+      openProblemsPanel();
+      return;
+    }
     window.clearTimeout(showToast.timer);
     toast.textContent = "";
     toast.title = "";
     toast.classList.remove("is-error");
   });
+
+  function openProblemsPanel() {
+    if (!problemsPanel) return;
+    const detailsEl = problemsPanel.querySelector("details");
+    if (detailsEl) detailsEl.open = true;
+    setDrawer("details");
+    problemsPanel.scrollIntoView({ block: "nearest" });
+  }
+
+  function diagnosticFullText(entry) {
+    return entry.rendered || `Error [${entry.code || "diagnostic"}]: ${entry.what || entry.message || ""}\n Why: ${entry.why || ""}\n Fix: ${entry.fix || ""}`;
+  }
+
+  function diagnosticKey(diag, i, rev) {
+    const span = diag.source_span || {};
+    return [rev || "revision", diag.code || "diagnostic", span.start ?? "?", span.end ?? "?", i].join(":");
+  }
+
+  function normalizeDiagnostic(diag, i, payload, source) {
+    const diagnosticRevision = payload.checked_revision || payload.diagnostic_revision || payload.revision || (latestDoc && latestDoc.revision) || "unknown";
+    const baseRevision = payload.revision || (latestDoc && latestDoc.revision) || diagnosticRevision;
+    const span = diag.source_span || null;
+    const severity = diag.severity === "warning" || String(diag.code || "").startsWith("L") ? "warning" : "error";
+    return {
+      id: diagnosticKey(diag, i, diagnosticRevision),
+      source,
+      baseRevision,
+      diagnosticRevision,
+      severity,
+      code: diag.code || "diagnostic",
+      what: diag.what || diag.message || "Jet diagnostic",
+      why: diag.why || "",
+      fix: diag.fix || "",
+      rendered: diag.rendered || "",
+      source_span: span,
+      line: span && span.line,
+      column: span && span.column
+    };
+  }
+
+  function activeDiagnostics() {
+    return diagnosticsState.entries.filter((entry) => !diagnosticsState.dismissed.has(entry.id));
+  }
+
+  function acceptDiagnosticsPayload(payload, source) {
+    if (!payload) return false;
+    const raw = Array.isArray(payload.diagnostics) ? payload.diagnostics : [];
+    const isCheck = payload.protocol === "jet.canvas.command_receipt" && payload.action_id === "canvas.command:check";
+    if (!raw.length && !isCheck) return false;
+    const entries = raw.map((diag, i) => normalizeDiagnostic(diag, i, payload, source || "Canvas"));
+    diagnosticsState.baseRevision = payload.revision || (latestDoc && latestDoc.revision) || null;
+    diagnosticsState.diagnosticRevision = payload.checked_revision || payload.diagnostic_revision || payload.revision || null;
+    diagnosticsState.entries = entries;
+    diagnosticsState.dismissed = new Set();
+    renderProblemsPanel();
+    if (entries.length) {
+      const first = entries[0];
+      showToast(`${entries.length} ${entries.length === 1 ? "problem" : "problems"}: ${first.code} ${first.what}`, { isError: true, showDetails: true });
+    } else {
+      showToast("Check passed");
+    }
+    if (latestDoc) drawGraph(latestDoc);
+    return entries.length > 0;
+  }
+
+  function clearDiagnosticsForRevision(revision) {
+    if (!diagnosticsState.entries.length) return;
+    diagnosticsState.entries = [];
+    diagnosticsState.dismissed = new Set();
+    diagnosticsState.baseRevision = revision || null;
+    diagnosticsState.diagnosticRevision = revision || null;
+    renderProblemsPanel();
+    if (latestDoc) drawGraph(latestDoc);
+  }
+
+  function clearStaleDiagnostics(doc) {
+    if (!doc || !doc.revision || !diagnosticsState.entries.length) return;
+    if (diagnosticsState.baseRevision && diagnosticsState.baseRevision !== doc.revision) {
+      diagnosticsState.entries = [];
+      diagnosticsState.dismissed = new Set();
+      diagnosticsState.baseRevision = doc.revision;
+      diagnosticsState.diagnosticRevision = doc.revision;
+      renderProblemsPanel();
+    }
+  }
+
+  function nodeDiagnostics(node) {
+    if (!node || !node.source_span) return [];
+    return activeDiagnostics().filter((diag) => diag.source_span && spansOverlap(node.source_span, diag.source_span));
+  }
+
+  function worstDiagnosticSeverity(entries) {
+    return entries.some((entry) => entry.severity === "error") ? "error" : "warning";
+  }
+
+  function renderProblemsPanel() {
+    const entries = activeDiagnostics();
+    if (problemsCount) problemsCount.textContent = entries.length ? String(entries.length) : "0";
+    if (!problemsList) return;
+    if (!entries.length) {
+      problemsList.innerHTML = "<div class=\"problem-empty\">No problems</div>";
+      window.__jetCanvasProblems = [];
+      return;
+    }
+    problemsList.innerHTML = entries.map((entry, i) => {
+      const loc = entry.line ? `line ${entry.line}, column ${entry.column || 1}` : (entry.source || "source");
+      return `<div class="problem-row" data-problem-index="${i}" data-severity="${escapeAttr(entry.severity)}"><b>${escapeHtml(entry.code)}</b><button type="button" data-problem-jump="${i}">${escapeHtml(entry.what)}</button><button type="button" data-problem-dismiss="${i}">Dismiss</button><small>${escapeHtml(loc)} · ${escapeHtml(entry.fix || "")}</small><pre class="problem-detail">${escapeHtml(diagnosticFullText(entry))}</pre></div>`;
+    }).join("");
+    problemsList.querySelectorAll("[data-problem-jump]").forEach((button) => {
+      button.addEventListener("click", () => jumpToDiagnostic(entries[Number(button.getAttribute("data-problem-jump"))]));
+    });
+    problemsList.querySelectorAll("[data-problem-dismiss]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const entry = entries[Number(button.getAttribute("data-problem-dismiss"))];
+        if (entry) diagnosticsState.dismissed.add(entry.id);
+        renderProblemsPanel();
+        if (latestDoc) drawGraph(latestDoc);
+      });
+    });
+    window.__jetCanvasProblems = entries.map((entry) => ({ code: entry.code, what: entry.what, severity: entry.severity, source_span: entry.source_span, rendered: diagnosticFullText(entry) }));
+  }
+
+  function jumpToDiagnostic(entry) {
+    if (!entry) return;
+    const graph = latestDoc ? currentGraph(latestDoc) : null;
+    const node = graph && entry.source_span ? (graph.nodes || []).find((n) => n.source_span && spansOverlap(n.source_span, entry.source_span)) : null;
+    if (node) {
+      selectedGraphId = graph.graph_id;
+      selectedNodeId = node.node_id;
+      selectedNodeIds = new Set([node.node_id]);
+      centerNodeInView(graph, node);
+      setViewMode("graph");
+      if (latestDoc) drawGraph(latestDoc);
+    } else if (entry.source_span) {
+      setSourceHash(entry.source_span);
+      setViewMode("code");
+    }
+  }
+
+  function centerNodeInView(graph, node) {
+    const rect = canvas.getBoundingClientRect();
+    const size = nodeSize(graph, node);
+    view.x = rect.width / 2 - (nodeX(node) + size.w / 2) * view.zoom;
+    view.y = rect.height / 2 - (nodeY(node) + size.h / 2) * view.zoom;
+  }
 
   function setPendingPin(pin) {
     pendingPin = pin;
@@ -2683,12 +2859,41 @@ pub fn canvas_js() -> String {
     window.__jetCanvasStagedNodeVisuals = "dashed-not-saved";
   }
 
+  function drawDiagnosticBubble(node, x, y, w, entries, recordHit = true) {
+    if (!entries || !entries.length) return;
+    const severity = worstDiagnosticSeverity(entries);
+    const color = severity === "error" ? "#ef4444" : "#f59e0b";
+    const label = entries.length > 9 ? "9+" : String(entries.length);
+    const r = Math.max(8, 10 * view.zoom);
+    const cx = x + w - 11 * view.zoom;
+    const cy = y - 3 * view.zoom;
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.shadowColor = hexToRgba(color, .62);
+    ctx.shadowBlur = 12 * view.zoom;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = "#1f090c";
+    ctx.lineWidth = Math.max(1.5, 2 * view.zoom);
+    ctx.stroke();
+    ctx.fillStyle = "#fff7ed";
+    ctx.font = `700 ${Math.max(8, 10 * view.zoom)}px ${MONO_FONT}`;
+    ctx.textAlign = "center";
+    ctx.fillText(label, cx, cy + 3.5 * view.zoom);
+    ctx.restore();
+    if (recordHit) diagnosticHit.push({ x: cx - r, y: cy - r, w: r * 2, h: r * 2, node, entries });
+    window.__jetCanvasDiagnosticBubbles = true;
+  }
+
   function drawNode(graph, node, inlineByNode, recordHit = true) {
     const size = nodeSize(graph, node);
     const layout = measureNodeLayout(graph, node);
     const w = size.w * view.zoom, h = size.h * view.zoom;
     const x = sx(nodeX(node)), y = sy(nodeY(node));
     if (view.zoom < .38) {
+      const diagnostics = nodeDiagnostics(node);
       roundRect(x, y, Math.max(72, w), Math.max(18, 24 * view.zoom), 4 * view.zoom);
       ctx.fillStyle = selectedNodeIds.has(node.node_id) ? hexToRgba(nodeStyle(node, graph).accent, .28) : "rgba(29,33,41,.88)";
       ctx.fill();
@@ -2697,12 +2902,14 @@ pub fn canvas_js() -> String {
       ctx.fillStyle = "#dbeafe";
       ctx.font = `10px ${UI_FONT}`;
       ctx.fillText(clipText(node.title, 18), x + 8, y + 15);
+      drawDiagnosticBubble(node, x, y, Math.max(72, w), diagnostics, recordHit);
       if (recordHit) hit.push({ x, y, w: Math.max(72, w), h: Math.max(18, 24 * view.zoom), node });
       return;
     }
     const selected = selectedNodeIds.has(node.node_id);
     const active = debugOverlay && debugOverlay.active_node_id === node.node_id;
     const searchHit = (searchState.spans || []).some((span) => spansOverlap(node.source_span, span));
+    const diagnostics = nodeDiagnostics(node);
     const breakpoint = nodeBreakpoint(node);
     const style = nodeStyle(node, graph);
     const headerH = Math.min(NODE_HEADER_H, size.h) * view.zoom;
@@ -2732,6 +2939,7 @@ pub fn canvas_js() -> String {
         ctx.font = `${Math.max(8, 9.5 * view.zoom)}px ${MONO_FONT}`;
         ctx.fillText(ellipsizeText(out.type || "Value", w - 40 * view.zoom), x + 16 * view.zoom, y + 36 * view.zoom);
       }
+      drawDiagnosticBubble(node, x, y, w, diagnostics, recordHit);
       if (recordHit) hit.push({ x, y, w, h, node });
       window.__jetCanvasGetterCapsules = true;
       return;
@@ -2759,6 +2967,7 @@ pub fn canvas_js() -> String {
       ctx.textAlign = "left";
       inputs.forEach((p, i) => drawSocketRow(p, x, y + (NODE_PAD + NODE_ROW_H / 2 + i * NODE_ROW_H) * view.zoom, w, "input", recordHit));
       outputs.forEach((p, i) => drawSocketRow(p, x, y + (NODE_PAD + NODE_ROW_H / 2 + i * NODE_ROW_H) * view.zoom, w, "output", recordHit));
+      drawDiagnosticBubble(node, x, y, w, diagnostics, recordHit);
       if (recordHit) hit.push({ x, y, w, h, node });
       return;
     }
@@ -2889,6 +3098,7 @@ pub fn canvas_js() -> String {
       window.__jetCanvasMultiInputReadOnly = true;
     }
 
+    drawDiagnosticBubble(node, x, y, w, diagnostics, recordHit);
     if (recordHit) hit.push({ x, y, w, h, node });
   }
 
@@ -2932,6 +3142,7 @@ pub fn canvas_js() -> String {
     pinHit = [];
     pinEditorHit = [];
     wireEndpointHit = [];
+    diagnosticHit = [];
     graphSelect.value = selectedGraphId;
     const pins = new Map(graph.pins.map((p) => [p.pin_id, p]));
     connectedPinIds = new Set((graph.wires || []).flatMap((wire) => [wire.from_pin, wire.to_pin]));
@@ -3020,7 +3231,10 @@ pub fn canvas_js() -> String {
     if (hoverPin && (!drag || drag.mode !== "pin")) drawPinHoverTooltip(hoverPin);
     drawMinimap(graph);
     drawTypeLegend(size);
-    if (!pendingPin && (!drag || drag.mode !== "pin")) syncWireStatus(null);
+    if (hoverDiagnostic && hoverDiagnostic.entries && hoverDiagnostic.entries[0]) {
+      const entry = hoverDiagnostic.entries[0];
+      syncWireStatus({ title: entry.code, detail: diagnosticFullText(entry), color: entry.severity === "error" ? "#ef4444" : "#f59e0b" });
+    } else if (!pendingPin && (!drag || drag.mode !== "pin")) syncWireStatus(null);
     const selectedNode = nodes.get(selectedNodeId);
     if (selectedVariableName) {
       renderVariableDetails(graph, selectedVariableName);
@@ -3033,7 +3247,8 @@ pub fn canvas_js() -> String {
     const hitMap = {
       graph_id: graph.graph_id,
       nodes: hit.map((h) => ({ node_id: h.node.node_id, title: h.node.title, kind: h.node.kind, x: h.x, y: h.y, w: h.w, h: h.h })),
-      pins: pinHit.map((h) => ({ pin_id: h.pin.pin_id, node_id: h.pin.node_id, name: h.pin.name, type: h.pin.type, direction: h.pin.direction, x: h.x, y: h.y, w: h.w, h: h.h, cx: h.cx, cy: h.cy }))
+      pins: pinHit.map((h) => ({ pin_id: h.pin.pin_id, node_id: h.pin.node_id, name: h.pin.name, type: h.pin.type, direction: h.pin.direction, x: h.x, y: h.y, w: h.w, h: h.h, cx: h.cx, cy: h.cy })),
+      diagnostics: diagnosticHit.map((h) => ({ node_id: h.node.node_id, count: h.entries.length, severity: worstDiagnosticSeverity(h.entries), codes: h.entries.map((entry) => entry.code) }))
     };
     nodeBounds = new Map(hitMap.nodes.map((n) => [n.node_id, n]));
     window.__jetCanvasHitMap = hitMap;
@@ -3066,6 +3281,8 @@ pub fn canvas_js() -> String {
       selectedNodeTitle: selectedNode && selectedNode.title || "",
       view: { x: view.x, y: view.y, zoom: view.zoom },
       sourceText: doc.source_text || "",
+      problems: activeDiagnostics().map((entry) => ({ code: entry.code, what: entry.what, severity: entry.severity, rendered: diagnosticFullText(entry), source_span: entry.source_span })),
+      diagnosticsByNode: hitMap.diagnostics,
       nodeCount: graph.nodes.length,
       loadCoreCatalog: (query) => loadCoreCatalogActions(query || "").then(() => window.__jetCanvasCoreCatalogPalette || actionEntries.length),
       openCoreCatalogPalette: (query) => { openCoreCatalogPalette(query || ""); return true; },
@@ -3138,6 +3355,18 @@ pub fn canvas_js() -> String {
           actions,
           { pin }
         );
+        return true;
+      },
+      setSourceEditor: (text) => {
+        setSourceEditMode(true);
+        if (sourceEditor) sourceEditor.value = String(text || "");
+        return true;
+      },
+      checkCurrentSource,
+      jumpProblem: (index) => {
+        const entry = activeDiagnostics()[Number(index) || 0];
+        if (!entry) return false;
+        jumpToDiagnostic(entry);
         return true;
       }
     };
@@ -3709,6 +3938,14 @@ pub fn canvas_js() -> String {
     return null;
   }
 
+  function hitDiagnosticAt(x, y) {
+    for (let i = diagnosticHit.length - 1; i >= 0; i--) {
+      const h = diagnosticHit[i];
+      if (x >= h.x && x <= h.x + h.w && y >= h.y && y <= h.y + h.h) return h;
+    }
+    return null;
+  }
+
   function hitPinAt(x, y) {
     let best = null;
     let bestDistance = Infinity;
@@ -4011,8 +4248,12 @@ pub fn canvas_js() -> String {
     const rect = canvas.getBoundingClientRect();
     lastPointer = graphPointFromClient(ev.clientX, ev.clientY);
     if (!drag) {
-      const nextHover = hitPinAt(ev.clientX - rect.left, ev.clientY - rect.top);
-      if ((nextHover && !hoverPin) || (!nextHover && hoverPin) || (nextHover && hoverPin && nextHover.pin_id !== hoverPin.pin_id)) {
+      const x = ev.clientX - rect.left;
+      const y = ev.clientY - rect.top;
+      const nextDiagnostic = hitDiagnosticAt(x, y);
+      const nextHover = nextDiagnostic ? null : hitPinAt(x, y);
+      if (nextDiagnostic !== hoverDiagnostic || (nextHover && !hoverPin) || (!nextHover && hoverPin) || (nextHover && hoverPin && nextHover.pin_id !== hoverPin.pin_id)) {
+        hoverDiagnostic = nextDiagnostic;
         hoverPin = nextHover;
         if (latestDoc) drawGraph(latestDoc);
       }
@@ -4186,6 +4427,7 @@ pub fn canvas_js() -> String {
   bookmarkAdd.addEventListener("click", bookmarkCurrentGraph);
   bookmarkJump.addEventListener("click", jumpBookmark);
   favoriteAction.addEventListener("click", toggleFavoriteAction);
+  if (checkCurrent) checkCurrent.addEventListener("click", checkCurrentSource);
   runCurrent.addEventListener("click", runCurrentGraph);
   tourDismiss.addEventListener("click", () => {
     editorState.tourDismissed = true;
@@ -4526,7 +4768,10 @@ pub fn canvas_js() -> String {
       .then((r) => r.json().then((j) => ({ ok: r.ok, json: j })))
       .then((result) => {
         window.__jetCanvasLastTxResult = result.json;
-        if (!result.ok) { showToast(result.json.message || "Edit rejected"); return; }
+        if (!result.ok) {
+          if (!acceptDiagnosticsPayload(result.json, "Transaction")) showToast(result.json.message || "Edit rejected");
+          return;
+        }
         if (result.json.protocol === "jet.canvas.action") {
           searchState.results = [];
           searchState.spans = [];
@@ -4542,6 +4787,7 @@ pub fn canvas_js() -> String {
           redoStack = [];
         }
         if (body.op === "replace_source" && body.source_edit) setSourceEditMode(false);
+        clearDiagnosticsForRevision(result.json.revision);
         showToast(result.json.changed ? "Source updated" : "No change");
         loadSourceControl();
         loadProject();
@@ -4556,9 +4802,13 @@ pub fn canvas_js() -> String {
     fetch(txUrl, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ schema_version: 1, op: "replace_source", revision: latestDoc.revision, source }) })
       .then((r) => r.json().then((j) => ({ ok: r.ok, json: j })))
       .then((result) => {
-        if (!result.ok) { showToast(result.json.message || "Undo rejected"); return; }
+        if (!result.ok) {
+          if (!acceptDiagnosticsPayload(result.json, "Undo")) showToast(result.json.message || "Undo rejected");
+          return;
+        }
         if (redoEntry) redoStack.push(redoEntry);
         if (undoEntry) undoStack.push(undoEntry);
+        clearDiagnosticsForRevision(result.json.revision);
         showToast("Source restored");
         loadSourceControl();
         loadGraph();
@@ -4589,9 +4839,17 @@ pub fn canvas_js() -> String {
       selectedVariableName = null;
     }
     return fetch(graphRequestUrl(selectedSourceId), { cache: "no-store" })
-      .then((r) => r.json())
-      .then((doc) => {
+      .then((r) => r.json().then((doc) => ({ ok: r.ok, doc })))
+      .then((result) => {
+        if (!result.ok) {
+          acceptDiagnosticsPayload(result.doc, "Graph");
+          jump.textContent = "Canvas graph has problems";
+          details.textContent = result.doc && result.doc.message || "Graph check failed";
+          return;
+        }
+        const doc = result.doc;
         latestDoc = doc;
+        clearStaleDiagnostics(doc);
         loadEditorState(doc);
         loadDetailToggles(doc);
         applyPendingInsertPlacement(doc);

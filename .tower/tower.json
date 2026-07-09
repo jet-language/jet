@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 389,
-    "rev": 2045,
+    "rev": 2051,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -18154,12 +18154,17 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": null,
-      "phase": "done",
+      "phase": "ready",
       "priority": "P1",
       "plan": "# Plan: jetos Studio dashboard/sidebar UI\n\nRatified inputs:\n- D-FE-STUDIO1 outcome E with owner modifications.\n- D-JOS-STUDIO-HOST1: local projection/edit service plus browser fallback; no Canvas coupling.\n- #264 shipped source-backed Studio prototype; this card redesigns the actual Studio UI, not semantics.\n\nScope:\n- crates/jetpack/src/JetOS/studio_projection.rs for installed app projection.\n- crates/jetpack/src/CLI/bridge_os_studio.rs, crates/jetpack/src/CLI/studio_server.rs, crates/jetpack/src/CLI/studio_transactions.rs for served/edit flows if route data needs expansion.\n- tests/jetpack.rs and focused Studio tests/fixtures.\n\nImplementation steps:\n1. Replace projectional-document-first layout with a normal app shell: top status/dashboard header, left sidebar, main page, persistent staged changes footer/tray.\n2. Build dashboard landing page from real data.json/source/proof facts: hosts, selected host, generation ribbon, service health, alerts, monitoring summary, proof/rollback status, and last run status. Keep copy plain and operational.\n3. Build sidebar categories: Dashboard, Settings, Monitoring, Services, Packages, Secrets, Generations, Changeset, Proof/Provenance. Back categories with an internal page registry so future Studio pages register title/id/source/data needs without redesign.\n4. Move settings into category pages with ordinary controls. Each setting edit must stage a source transaction and show exact Jet diff before apply.\n5. Make Changeset a first-class page: unified diff, impact ledger, generation delta, proof requirements, per-hunk include where supported, Build only, Build and switch, Discard.\n6. Keep one apply path. Edits from settings, dashboard alerts, rollback actions, and changeset review all stage into the same changeset/apply gate.\n7. Preserve source-backed guarantees: no hidden GUI semantic state, exact config.jet diff, provenance/proof visibility, browser/headless fallback, and deterministic review output.\n\nAcceptance:\n- jetos studio --serve opens the redesigned dashboard/sidebar UI.\n- Dashboard is understandable at a glance; settings are in sidebar categories; Changeset is a sidebar page.\n- A settings edit previews exact Jet diff, stages in Changeset, saves through the existing transaction service, reprojects, and can run check/plan/build/proof.\n- Existing #264 tests still pass and new tests cover page registry, Changeset page, dashboard data rendering, and source transaction path.\n\nVerification:\n- nix develop -c cargo test --test jetpack <focused Studio tests>\n- nix develop -c cargo test --test jetpack\n- nix develop -c cargo build --bin jetos\n- Browser/headless proof for served Studio page.\n- Full nix develop -c cargo test before done unless unrelated blockers are logged and owner accepts scoped proof.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-09",
+          "by": "claude-main",
+          "text": "Phase corrected done→ready: no Studio implementation exists (mockups + plan only). Was mislabeled during 2026-07-08 mass close."
+        },
         {
           "at": "2026-07-08",
           "by": "codex",
@@ -18181,7 +18186,7 @@
         }
       ],
       "created": "2026-07-08T13:10:16.677Z",
-      "updated": "2026-07-08",
+      "updated": "2026-07-09",
       "workOrder": 4
     },
     {
@@ -18193,12 +18198,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "done",
+      "phase": "building",
       "priority": "P1",
       "plan": "# Plan: hybrid REPL with notebook controls\n\nRatified inputs:\n- D-FE-REPL1 outcome D, with explicit owner request for notebook-style rerun/fold/unfold/pin controls.\n\nBlocking decisions raised by this plan:\n- D-FE-REPL-DOCS1 chooses the ?name docs surface.\n- D-FE-REPL-RERUN1 chooses rerun/downstream semantics.\n\nScope after decisions clear:\n- Source/REPL.rs, tests/repl.rs, tests/repl/*.txt, tests/cli/no_args_repl_banner.txt if banner/prompt output changes.\n- No diagnostic wording changes unless a new diagnostic is separately registered and snapshotted.\n\nImplementation steps:\n1. Preserve current REPL semantics and transcript compatibility as the floor. Non-TTY and NO_COLOR keep plain line transcripts.\n2. Add turn ids to interactive TTY output. Each turn stores input, output summary, status, duration when available, folded state, pin state, and binding changes.\n3. Add controls: rerun, fold, unfold, pin/unpin. Controls must have keyboard commands and textual fallbacks, not icon-only behavior.\n4. Add pinned value/turn area that stays visible without changing evaluation semantics.\n5. Add folded output rendering for long values/errors and unfold in place.\n6. Implement docs and rerun behavior exactly per the ratified follow-up decisions.\n7. Keep diagnostics verbatim; frame/styling may change, words/codes may not.\n\nAcceptance:\n- Interactive REPL shows addressable turns with notebook controls.\n- Pin/fold/unfold/rerun work in TTY mode and degrade cleanly in plain transcripts.\n- Large output folds without losing data.\n- Bindings remain truthful after rerun according to the ratified rerun policy.\n\nVerification:\n- nix develop -c cargo test --test repl\n- nix develop -c cargo test --test diagnostic_snapshots ui_snapshots -- --exact if any diagnostic frame fixture changes\n- nix develop -c cargo test --test cli question_mark_help -- --exact if CLI startup/help paths are touched\n- Full nix develop -c cargo test before done.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-09",
+          "by": "claude-main",
+          "text": "Reopened: shipped slice does not match ratified D option mock (static/textual fallback only; missing interactive TTY surface). Gap audit 2026-07-09 by claude-main; implementing ratified design now."
+        },
         {
           "at": "2026-07-08",
           "by": "codex",
@@ -18239,7 +18249,7 @@
         }
       ],
       "created": "2026-07-08T13:10:16.819Z",
-      "updated": "2026-07-08",
+      "updated": "2026-07-09",
       "workOrder": 461
     },
     {
@@ -18251,12 +18261,17 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "done",
+      "phase": "building",
       "priority": "P1",
       "plan": "# Plan: jet env hybrid prompt\n\nRatified inputs:\n- D-FE-PROMPT1 outcome D with owner modification: show env name and partial path by default.\n\nBlocking decision raised by this plan:\n- D-FE-PROMPT-STRIP1 chooses the user-facing config surface for the optional always-on status strip.\n\nScope after decision clears:\n- crates/jetpack/src/Shell.rs for bash/zsh/fish rc generation.\n- crates/jetpack/src/CLI/run_enter_dev.rs and ModuleEval env config types only if prompt config schema changes.\n- tests/jetpack.rs, tests/env_dev_trust.rs, and focused shell rc tests.\n\nImplementation steps:\n1. Make default prompt include environment label and compact current path in bash, zsh, and fish. Keep current dev-shell branding unmistakable.\n2. Add adaptive receipt/status behavior where feasible in shell rc: transient command receipt, running marker for Jet-owned commands, failure next-action line without restating diagnostics.\n3. Implement ^G glance for build/test/env status if supported by the generated shell rc; unsupported shells get a documented no-op fallback rather than broken control sequences.\n4. Implement optional always-on strip exactly as the ratified D-FE-PROMPT-STRIP1 config says.\n5. Respect NO_COLOR/CLICOLOR and non-TTY shell startup. No powerline-only glyph dependency; words carry the state.\n6. Keep env source truth in env.jet/module eval; no hidden prompt database.\n\nAcceptance:\n- Entering jet env in bash/zsh/fish shows env name and partial path by default.\n- NO_COLOR renders readable words without ANSI reliance.\n- Optional strip can be enabled by the ratified config and shows the same status words as ^G.\n- Existing trust/env behavior and foreign flake fallback remain unchanged.\n\nVerification:\n- nix develop -c cargo test --test jetpack <focused env/shell tests>\n- nix develop -c cargo test --test env_dev_trust\n- nix develop -c cargo test --test jetpack\n- Manual spawned-shell smoke for generated bash/zsh/fish rc where available.\n- Full nix develop -c cargo test before done.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-09",
+          "by": "claude-main",
+          "text": "Reopened: shipped slice does not match ratified D option mock (static/textual fallback only; missing interactive TTY surface). Gap audit 2026-07-09 by claude-main; implementing ratified design now."
+        },
         {
           "at": "2026-07-08",
           "by": "codex",
@@ -18297,7 +18312,7 @@
         }
       ],
       "created": "2026-07-08T13:10:16.964Z",
-      "updated": "2026-07-08",
+      "updated": "2026-07-09",
       "workOrder": 506
     },
     {
@@ -18309,12 +18324,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "done",
+      "phase": "building",
       "priority": "P1",
       "plan": "# Plan: categorized jet ? help palette\n\nRatified inputs:\n- D-FE-HELP1 outcome D with owner modification: categorized command palette by default; no separate task-based search/home.\n\nScope:\n- Source/main.rs, Source/CLI.rs, command registry/help generation, tests/cli/question_mark_help.txt, any CLI transcript tests.\n- Reuse existing help/usage registry where possible; do not fork command metadata.\n\nImplementation steps:\n1. Make jet ? open a categorized command palette over the shell in TTY mode. Non-TTY and plain jet help keep deterministic text output.\n2. Build one command index from the existing command registry: command name, flags, examples, aliases, fuzzy keywords, error-code references, category, and see-also links.\n3. Remove task-home as a separate managed surface. Encode task/outcome phrases as fuzzy keywords on concrete command entries.\n4. Add browser-style grouping: Build and run, Project/env, Packages, jetos, Dev server, Reference, Error codes.\n5. Tab expands selected result inline to command detail; F1 opens the same index in full two-pane reference; Enter pre-fills shell line and never executes.\n6. Search must cover commands, flags, examples, aliases, task keywords, and E-codes. E-code pages render existing diagnostic/explain text verbatim.\n7. Respect NO_COLOR and restore shell cleanly on Esc/q/Enter.\n\nAcceptance:\n- jet ? starts in categorized command palette.\n- Typing task phrases like \"run on save\" finds explicit commands rather than separate recipes.\n- Enter prefills and does not run.\n- F1 and Tab expose full reference depth from the same index.\n\nVerification:\n- nix develop -c cargo test --test cli question_mark_help -- --exact\n- Add/update focused CLI transcript tests for palette search, F1/Tab fallback, E-code lookup, and non-TTY help.\n- nix develop -c cargo test --test diagnostics_coverage if explain/error index is touched.\n- Full nix develop -c cargo test before done.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-09",
+          "by": "claude-main",
+          "text": "Reopened: shipped slice does not match ratified D option mock (static/textual fallback only; missing interactive TTY surface). Gap audit 2026-07-09 by claude-main; implementing ratified design now."
+        },
         {
           "at": "2026-07-08",
           "by": "codex",
@@ -18346,7 +18366,7 @@
         }
       ],
       "created": "2026-07-08T13:10:17.096Z",
-      "updated": "2026-07-08",
+      "updated": "2026-07-09",
       "workOrder": 462
     },
     {
@@ -18358,12 +18378,17 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "done",
+      "phase": "building",
       "priority": "P1",
       "plan": "# Plan: jetpack/jetos hybrid CLI output\n\nRatified inputs:\n- D-FE-CLI1 outcome D with owner modifications: keep colored + - ~; both -y and --yes; add nh-style dependency chain/graph visualization for long builds/downloads.\n\nScope:\n- crates/jetpack/src/Output.rs, crates/jetpack/src/CLI/*.rs command call sites, crates/jetpack/src/JetOS/commands.rs and generation/proof call sites that already share Theme/Output.\n- tests/jetpack.rs, CLI usage tests, fixture stderr/stdout snapshots where output is pinned.\n\nImplementation steps:\n1. Extend the shared Theme/Output layer with consequence-scaled rendering: quiet ledger, pinned live region for long work, plan gate for mutations, deterministic plain fallback.\n2. Preserve colored +, -, ~ for plan diffs; NO_COLOR replaces color with stable text markers while keeping symbols readable.\n3. Normalize confirmation bypass so -y and --yes are accepted everywhere the mutation confirmation gate appears. Non-TTY mutation without yes prints plan and exits without applying.\n4. Add dependency-chain progress model for long realization/build phases: downloads, builds, cached/reused nodes, current edge, counts, size/elapsed where known. Render as a pinned graph/chain in TTY; append ledger lines in non-TTY.\n5. Wire jetpack add/build/env/gc and jetos plan/build/switch/proof through the same output primitives where they already share command execution paths.\n6. Erase live regions before diagnostics; diagnostics remain verbatim.\n7. Keep JSON output schemas untouched unless a separate schema version decision is raised.\n\nAcceptance:\n- Trivial commands stay quiet.\n- Long build/download commands show useful dependency-chain progress in TTY.\n- Mutations show a plan with + - ~ and require confirmation unless -y/--yes.\n- Non-TTY output is deterministic and non-interactive.\n\nVerification:\n- nix develop -c cargo test --test jetpack <focused CLI output tests>\n- nix develop -c cargo test --test jetpack\n- Add transcript/snapshot coverage for + - ~, -y, --yes, non-TTY no-hang, NO_COLOR, and dependency-chain fallback.\n- Full nix develop -c cargo test before done.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-09",
+          "by": "claude-main",
+          "text": "Reopened: shipped slice does not match ratified D option mock (static/textual fallback only; missing interactive TTY surface). Gap audit 2026-07-09 by claude-main; implementing ratified design now."
+        },
         {
           "at": "2026-07-08",
           "by": "codex",
@@ -18395,7 +18420,7 @@
         }
       ],
       "created": "2026-07-08T13:10:17.238Z",
-      "updated": "2026-07-08",
+      "updated": "2026-07-09",
       "workOrder": 507
     },
     {
@@ -18407,12 +18432,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "done",
+      "phase": "building",
       "priority": "P1",
       "plan": "# Plan: jet dev server pinned dashboard + overlay\n\nRatified inputs:\n- D-FE-DEVSRV1 outcome D with owner modification: keep a nicely formatted pinned terminal dashboard header.\n\nScope:\n- Source/CmdDevWeb.rs for dev web server output and injected browser overlay/status strip.\n- tests/web_dev.rs and any dev-server CLI transcript tests.\n\nImplementation steps:\n1. Add terminal dashboard header for TTY: status, URL/port, watched target, client count, last build time, current build/error state. Header remains pinned while logs scroll below.\n2. Keep one shared poll/status source for browser strip and terminal header so ready/building/error/offline/client count cannot drift.\n3. Browser corner strip mirrors status; on error it expands to full overlay with verbatim diagnostic frame over last-good build.\n4. Terminal verbose mode/request log prints under the same header. Errors erase/settle any live region before printing diagnostics.\n5. Non-TTY output degrades to append-only deterministic status lines. NO_COLOR uses words instead of color-only state.\n6. Preserve current dev server routes, last-good-build behavior, Canvas route, and reload/poll protocol.\n\nAcceptance:\n- jet dev <file> --target=web shows pinned dashboard header in TTY.\n- Browser strip and terminal header report identical state and client count.\n- Compile error shows full browser overlay and terminal diagnostic; clean rebuild clears both.\n- Request/rebuild logs appear below the header.\n\nVerification:\n- nix develop -c cargo test --test web_dev\n- Add/update focused tests for status payload, overlay injection, terminal formatting fallback, and non-TTY output.\n- Browser smoke: launch jet dev, load app and /canvas if relevant, trigger compile error, verify overlay clears after fix.\n- Full nix develop -c cargo test before done.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-09",
+          "by": "claude-main",
+          "text": "Reopened: shipped slice does not match ratified D option mock (static/textual fallback only; missing interactive TTY surface). Gap audit 2026-07-09 by claude-main; implementing ratified design now."
+        },
         {
           "at": "2026-07-08",
           "by": "codex",
@@ -18444,7 +18474,7 @@
         }
       ],
       "created": "2026-07-08T13:10:17.375Z",
-      "updated": "2026-07-08",
+      "updated": "2026-07-09",
       "workOrder": 463
     },
     {
@@ -42975,6 +43005,48 @@
   ],
   "events": [
     {
+      "at": "2026-07-09T16:23:49.173Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0e7rot4",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-09T16:23:37.315Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0prf2ws",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-09T16:23:35.429Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0nhjxh4",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-09T16:23:33.533Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0l5fmyy",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-09T16:23:31.637Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0iyfhaf",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-09T16:23:29.773Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0gk8k3t",
+      "note": "phase,logEntry"
+    },
+    {
       "at": "2026-07-09T16:16:14.337Z",
       "by": "claude",
       "action": "card.update",
@@ -56931,48 +57003,6 @@
       "action": "decision.add",
       "ref": "D-CI1",
       "note": "What a change must pass before it lands"
-    },
-    {
-      "at": "2026-07-05T11:39:57.296Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-HL1",
-      "note": "Highlighting source of truth"
-    },
-    {
-      "at": "2026-07-05T11:39:57.238Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-LSP2",
-      "note": "Editor capability bar"
-    },
-    {
-      "at": "2026-07-05T11:39:57.185Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-LSP1",
-      "note": "Editor engine architecture"
-    },
-    {
-      "at": "2026-07-05T11:35:53.295Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c4g593nd",
-      "note": "kind"
-    },
-    {
-      "at": "2026-07-05T11:35:49.403Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c4g593nd",
-      "note": "track"
-    },
-    {
-      "at": "2026-07-05T11:35:48.442Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c4g593nd",
-      "note": "epoch"
     }
   ],
   "messages": [

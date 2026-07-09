@@ -73,7 +73,7 @@ Ratchets use class prefixes: `interaction:`, `protocol:`, `projection:`,
 | Accessibility | Keyboard-only authoring | Keyboard commands cover search, action palette, alignment/tidy, bookmarks, run, undo/redo, graph/source toggle, and node nudge with focus-visible/reduced-motion support. | claimed | grep:#315, tests/web_dev.rs |
 | Learning | Node docs and first-run overlay | Source doc comments, type explanations, pin hover text, and a dismissible local first-run overlay guide Canvas without changing source. | claimed | grep:#318, tests/web_dev.rs |
 | Runtime | Live-run loop | Canvas exposes a run HUD and one-key run/re-run path through the debug overlay and local watches. | claimed | grep:#317, tests/web_dev.rs |
-| Source control | Dirty/stale/conflict markers | Graph transactions guard against stale source revisions. | claimed | projection:#265, tests/canvas.rs |
+| Source control | Dirty/stale/conflict markers | Graph transactions guard against stale source revisions; diagnostics are tagged to the checked revision so stale problem overlays clear on reproject. | shipped | projection:#265, tests/canvas.rs; interaction:tests/canvas_scenarios.rs::bubble_appears_and_clears |
 | Source control | Transaction diff preview | Canvas shows exact Jet text diffs and Git dirty state before/after source-backed writes. | claimed | grep:#283, tests/canvas.rs, tests/web_dev.rs |
 | Source control | Asset checkout/lock model | Asset-style graph checkout is not Canvas truth. | rejected-as-Blueprint-semantic-debt | #283, D-CANVAS-SCM1 |
 | Public protocol | Graph JSON schema | `jet.canvas.graph` v1 exposes source-backed graph facts. | claimed | protocol:#265, tests/canvas.rs |
@@ -81,7 +81,7 @@ Ratchets use class prefixes: `interaction:`, `protocol:`, `projection:`,
 | Public protocol | Forward compatibility | Unknown non-semantic fields are ignored by old clients and never carry semantics. | planned | #276 |
 | Extensibility | Function library projection | Packages expose ordinary Jet functions/types/docs as source-backed palette entries. | shipped | interaction:tests/canvas_scenarios.rs::palette_insert_catalog_sweep; interaction:tests/canvas_scenarios.rs::palette_insert_core_fn |
 | Extensibility | Behavior-producing third-party nodes | Ratified Canvas actions use checked TIR/JIT preview and return source transactions only. | claimed | projection:#284, D-CANVAS-EXT1, D-CANVAS-EXT2, tests/canvas.rs::canvas_actions_project_palette_entries_and_preview_jit_backed_source_transactions |
-| Validation | Check/compile button | Canvas invokes Jet front-end diagnostics, never raw rustc output. | planned | #278 |
+| Validation | Check/compile button | Canvas invokes Jet front-end diagnostics, never raw rustc output. | shipped | interaction:tests/canvas_scenarios.rs::check_button_populates_panel |
 | Validation | Formatter stability | Every write runs through formatter and reprojects from source. | claimed | projection:#265, tests/canvas.rs |
 | Tests | Projection JSON snapshots | Every supported Jet construct needs deterministic graph coverage. | claimed | projection:#285, tests/canvas.rs::canvas_hardening_projection_suite_covers_blueprint_backlog_constructs |
 | Tests | UI nonblank and interactions | Browser panel has nonblank, keyboard, pointer, search, palette, undo, diff, and debug ratchets. | shipped | interaction:tests/canvas_scenarios.rs::open_and_render |

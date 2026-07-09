@@ -436,12 +436,48 @@ fn edit_error(kind: &str, message: &str) -> String {
     )
 }
 
+fn edit_error_with_diagnostics(
+    kind: &str,
+    message: &str,
+    path: &Path,
+    src: &str,
+    diags: &[Diagnostic],
+) -> String {
+    format!(
+        "{{\"protocol\":\"jet.canvas.edit\",\"schema_version\":{},\"ok\":false,\"kind\":{},\"message\":{},\"revision\":{},\"diagnostic_revision\":{},\"diagnostics\":[{}]}}",
+        EDIT_SCHEMA_VERSION,
+        json_str(kind),
+        json_str(message),
+        json_str(&source_revision(src)),
+        json_str(&source_revision(src)),
+        diagnostics_json(path, src, diags)
+    )
+}
+
 fn query_error(kind: &str, message: &str) -> String {
     format!(
         "{{\"protocol\":\"jet.canvas.query\",\"schema_version\":{},\"ok\":false,\"kind\":{},\"message\":{}}}",
         QUERY_SCHEMA_VERSION,
         json_str(kind),
         json_str(message)
+    )
+}
+
+fn query_error_with_diagnostics(
+    kind: &str,
+    message: &str,
+    path: &Path,
+    src: &str,
+    diags: &[Diagnostic],
+) -> String {
+    format!(
+        "{{\"protocol\":\"jet.canvas.query\",\"schema_version\":{},\"ok\":false,\"kind\":{},\"message\":{},\"revision\":{},\"diagnostic_revision\":{},\"diagnostics\":[{}]}}",
+        QUERY_SCHEMA_VERSION,
+        json_str(kind),
+        json_str(message),
+        json_str(&source_revision(src)),
+        json_str(&source_revision(src)),
+        diagnostics_json(path, src, diags)
     )
 }
 
@@ -478,15 +514,59 @@ fn project_edit_error(kind: &str, message: &str) -> String {
 }
 
 fn diagnostics_error(path: &Path, src: &str, diags: &[Diagnostic]) -> String {
-    edit_error(
+    edit_error_with_diagnostics(
         "diagnostic",
         &crate::render_diagnostics(&path.display().to_string(), src, diags),
+        path,
+        src,
+        diags,
     )
 }
 
 fn query_diagnostics_error(path: &Path, src: &str, diags: &[Diagnostic]) -> String {
-    query_error(
+    query_error_with_diagnostics(
         "diagnostic",
         &crate::render_diagnostics(&path.display().to_string(), src, diags),
+        path,
+        src,
+        diags,
+    )
+}
+
+fn diagnostics_json(path: &Path, src: &str, diags: &[Diagnostic]) -> String {
+    diags
+        .iter()
+        .map(|d| diagnostic_payload_json(path, src, d))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn diagnostic_payload_json(path: &Path, src: &str, d: &Diagnostic) -> String {
+    let severity = match d.severity {
+        Severity::Error => "error",
+        Severity::Lint => "warning",
+    };
+    let span_json = match d.span {
+        Some(span) => {
+            let (line, column) = crate::Diagnostics::span_line_col(src, span.start);
+            format!(
+                "{{\"start\":{},\"end\":{},\"line\":{},\"column\":{}}}",
+                span.start, span.end, line, column
+            )
+        }
+        None => "null".to_string(),
+    };
+    let rendered = crate::render_diagnostics(&path.display().to_string(), src, std::slice::from_ref(d));
+    format!(
+        "{{\"code\":{},\"severity\":{},\"what\":{},\"why\":{},\"fix\":{},\"message\":{},\"rendered\":{},\"source_span\":{},\"source_path\":{}}}",
+        json_str(d.code),
+        json_str(severity),
+        json_str(&d.what),
+        json_str(&d.why),
+        json_str(&d.fix),
+        json_str(&d.what),
+        json_str(&rendered),
+        span_json,
+        json_str(&path.display().to_string())
     )
 }

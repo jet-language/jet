@@ -253,6 +253,16 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
 #toast { position: fixed; right: 12px; bottom: 34px; z-index: 50; max-width: min(760px, calc(100vw - 24px)); max-height: min(50vh, 420px); overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: #a7f3d0; border: 1px solid #2b5948; background: rgba(7,16,22,.96); border-radius: 6px; padding: 8px 10px; box-shadow: 0 16px 44px rgba(0,0,0,.42); cursor: pointer; }
 #toast:empty { display: none; }
 #toast.is-error { color: #fecaca; border-color: #ef4444; background: rgba(31,9,12,.97); }
+#toast button { margin-left: 10px; border-color: #ef4444; color: #fee2e2; }
+.problem-list { display: grid; gap: 8px; }
+.problem-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: start; padding: 8px; border: 1px solid #334155; border-radius: 6px; background: #10151e; text-align: left; color: #dbeafe; }
+.problem-row[data-severity="error"] { border-color: #ef4444; box-shadow: inset 3px 0 0 #ef4444; }
+.problem-row[data-severity="warning"] { border-color: #f59e0b; box-shadow: inset 3px 0 0 #f59e0b; }
+.problem-row b { color: #f8fbff; font-family: "JetBrains Mono", ui-monospace, "SFMono-Regular", Consolas, monospace; }
+.problem-row small { display: block; margin-top: 2px; color: #9fb9d8; overflow-wrap: anywhere; }
+.problem-row button { padding: 3px 7px; }
+.problem-detail { grid-column: 1 / 4; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; color: #fecaca; font: 10px "JetBrains Mono", ui-monospace, "SFMono-Regular", Consolas, monospace; }
+.problem-empty { color: #8fb2dc; border: 1px dashed #334155; border-radius: 6px; padding: 8px; font: 11px "JetBrains Mono", ui-monospace, "SFMono-Regular", Consolas, monospace; }
 @media (max-width: 1120px) {
   #workbench { grid-template-columns: minmax(142px, 18vw) minmax(0, 1fr) minmax(200px, 23vw); }
   #brand span { display: none; }
@@ -300,6 +310,7 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
       <button id="org-tidy" class="icon-button" title="Tidy graph" aria-label="Tidy graph"><svg viewBox="0 0 24 24"><path d="M4 7h6v6H4z"/><path d="M14 4h6v6h-6z"/><path d="M14 14h6v6h-6z"/><path d="M10 10l4-3"/><path d="M10 13l4 4"/></svg></button>
     </div>
     <div class="toolbar-group" aria-label="Run controls">
+      <button id="check-current" title="Check current source" aria-label="Check current source">Check</button>
       <button id="run-current" class="primary" title="Run current entry" aria-label="Run current entry">Run</button>
       <details id="debug-menu" class="toolbar-menu"><summary class="icon-button" title="Debug controls" aria-label="Debug controls"><svg viewBox="0 0 24 24"><path d="M8 2v4"/><path d="M16 2v4"/><path d="M7 10h10"/><path d="M12 6v14"/><path d="M5 14h14"/><path d="M8 22h8"/><path d="M4 18l4-4"/><path d="M20 18l-4-4"/></svg></summary><div class="toolbar-popover debug-controls">
       <select id="debug-session" aria-label="Debug session"><option>local debug</option></select>
@@ -354,6 +365,7 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
       <div id="hud"><span id="zoom-label">100%</span><span id="graph-meta">0 nodes</span></div>
     </section>
     <aside id="right-drawer" class="side right">
+      <section id="problems-panel" class="panel"><details open><summary><span>Problems</span><span id="problems-count" class="count">0</span></summary><div id="problems-list" class="problem-list"></div></details></section>
       <section id="details" class="panel"></section>
       <section id="proof-panel" class="panel"><details open><summary><span>Proof</span><span id="proof-state" class="count">unknown</span></summary><div id="proof-rail" class="proof-rail"></div></details></section>
     </aside>

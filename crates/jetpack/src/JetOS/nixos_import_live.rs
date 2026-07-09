@@ -146,6 +146,17 @@ fn dedup_preserving_order(values: Vec<String>) -> Vec<String> {
         .collect()
 }
 
+/// Home Manager's own plumbing derivations surface in `home.packages` but are
+/// implementation details, not configuration intent — importing them would
+/// only make the generated config unbuildable.
+fn is_hm_plumbing_package(name: &str) -> bool {
+    name == "?"
+        || name.starts_with("dummy-")
+        || name.starts_with("hm-session-vars")
+        || name.ends_with(".desktop")
+        || name.ends_with("-manpage")
+}
+
 fn render_live_number(n: f64) -> String {
     if n.fract() == 0.0 {
         format!("{}", n as i64)
@@ -371,8 +382,14 @@ fn plan_from_live_facts(
             let has_home_manager = hm_by_user.contains_key(&name);
             let (hm_packages, hm_omitted, hm_programs) =
                 hm_by_user.remove(&name).unwrap_or_default();
-            let hm_packages = dedup_preserving_order(hm_packages);
-            let hm_omitted = dedup_preserving_order(hm_omitted);
+            let hm_packages = dedup_preserving_order(hm_packages)
+                .into_iter()
+                .filter(|p| !is_hm_plumbing_package(p))
+                .collect::<Vec<_>>();
+            let hm_omitted = dedup_preserving_order(hm_omitted)
+                .into_iter()
+                .filter(|p| !is_hm_plumbing_package(p))
+                .collect::<Vec<_>>();
             for program in &hm_programs {
                 omissions.push(format!(
                     "Home Manager program `{program}` for user `{name}` needs manual conversion"
