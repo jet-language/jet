@@ -3043,7 +3043,30 @@ pub fn canvas_js() -> String {
         if (!pin) return false;
         const point = pinPoints.get(pin.pin_id);
         const r = canvas.getBoundingClientRect();
-        openPinMenu(pin, point ? r.left + point.x : r.left + 120, point ? r.top + point.y : r.top + 120);
+        const actions = functionsForPin(pin).map((entry) => ({
+          title: entry.title,
+          detail: entry.detail,
+          group: paletteCategoryForAction(entry),
+          kind: entry.kind,
+          module_path: entry.module_path,
+          signature: entry.signature,
+          summary: entry.summary,
+          pure: entry.pure,
+          pins: entry.pins,
+          ret: entry.ret,
+          action_id: entry.action_id,
+          callee: entry.callee,
+          insert_callee: entry.insert_callee,
+          args: entry.args,
+          run: entry.run ? () => entry.run() : () => runPalette(entry, pin)
+        }));
+        openActionPalette(
+          point ? r.left + point.x : r.left + 120,
+          point ? r.top + point.y : r.top + 120,
+          "Pin actions",
+          actions,
+          { pin }
+        );
         return true;
       }
     };
