@@ -369,6 +369,7 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(html.contains(".side.is-drawer-open"));
     assert!(html.contains("grid-template-columns: minmax(0, 1fr)"));
     assert!(html.contains("canvas_ui=blueprint23"));
+    assert!(html.contains("rel=\"icon\" href=\"data:image/svg+xml"));
     assert!(html.contains("body:not(.is-dev-mode) #graph-strip { display: none; }"));
     assert!(html.contains("body:not(.is-dev-mode) #wire-status { display: none; }"));
     assert!(html.contains("body:not(.is-dev-mode) .dev-only"));
@@ -611,8 +612,11 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(js.contains("drawPinHoverTooltip(hoverPin)"));
     assert!(js.contains("function drawSocketRow"));
     assert!(js.contains("function drawPinDefaultEditor"));
+    assert!(js.contains("function drawInlineExprChip"));
+    assert!(js.contains("function isLiteralDefault"));
     assert!(js.contains("function applyPinDefaultEditor"));
     assert!(js.contains("__jetCanvasPinDefaultEditors"));
+    assert!(js.contains("__jetCanvasInlineExprChips"));
     assert!(js.contains("op: \"edit_inline_expr\""));
     assert!(js.contains("connectedPinIds.has(pin.pin_id)"));
     assert!(!js.contains("function drawLaneTag"));
@@ -620,9 +624,10 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(js.contains("function drawWireArrow"));
     assert!(js.contains("function drawWire"));
     assert!(js.contains("function bezierPoint"));
+    assert!(js.contains("function bezierControls"));
     assert!(js.contains("ctx.lineTo(x + r * 1.25, y)"));
     assert!(js.contains("selectedWire"));
-    assert!(js.contains("const execTop = entryOnly ? 22 : 42"));
+    assert!(js.contains("const execTop = 42"));
     assert!(js.contains("const dataTop = Math.max(44, execTop + execRows * 24"));
     assert!(js.contains("node.kind === \"branch\" || node.kind === \"dispatch\" ? 296 : 232"));
     assert!(js.contains("function graphForFunctionName"));
@@ -632,6 +637,7 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(js.contains("variable_get"));
     assert!(js.contains("constant"));
     assert!(js.contains("Set variable"));
+    assert!(js.contains("__jetCanvasBindingTypeAccent"));
     assert!(js.contains("label: \"Value\""));
     assert!(js.contains("label: \"Literal\""));
     assert!(js.contains("function isGetterCapsule"));
@@ -644,6 +650,16 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(js.contains("Create function accepting"));
     assert!(js.contains("function paletteCategoryForAction"));
     assert!(js.contains("function paletteActionGlyph"));
+    assert!(js.contains("function variableActionsForGraph"));
+    assert!(js.contains("function loadCoreCatalogActions"));
+    assert!(js.contains("__jetCanvasVariablePalette"));
+    assert!(js.contains("__jetCanvasCoreCatalogPalette"));
+    assert!(js.contains("category === \"Core\" ? 1000"));
+    assert!(js.contains("module_path: action.module_path"));
+    assert!(js.contains("kind: \"variable_get\""));
+    assert!(js.contains("kind: \"variable_set\""));
+    assert!(js.contains("op: \"insert_call\""));
+    assert!(!js.contains("<span class=\"tag\">${escapeHtml(category)}</span>"));
     assert!(js.contains("function defaultArgsForAction"));
     assert!(js.contains("const projectFunctions = (doc.project_functions || [])"));
     assert!(js.contains("project_function"));

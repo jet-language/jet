@@ -110,6 +110,8 @@ pub fn canvas_js() -> String {
     { title: "Comment", detail: "Source comment projection", op: "comment" }
   ];
   let actionEntries = [];
+  let coreCatalogLoaded = false;
+  let coreCatalogLoading = null;
   let contextMenuState = null;
   const UI_FONT = '"Inter", "Segoe UI", Roboto, system-ui, sans-serif';
   const MONO_FONT = '"JetBrains Mono", ui-monospace, "SFMono-Regular", Consolas, monospace';
@@ -135,8 +137,8 @@ pub fn canvas_js() -> String {
   };
   const NODE_ARCHETYPE_STYLES = {
     entry: { accent: "#b83647", header: "#b83647", header2: "#6f1e2b", label: "Entry", glyph: "ƒ", subtitle: "entry" },
-    function_exec: { accent: "#4f83b6", header: "#315d84", header2: "#1f3e5b", label: "Function", glyph: "ƒ", subtitle: "function" },
-    function_pure: { accent: "#4f9e5a", header: "#357745", header2: "#234f31", label: "Pure function", glyph: "ƒ", subtitle: "pure" },
+    function_exec: { accent: "#4f83b6", header: "#315d84", header2: "#1f3e5b", label: "Function", glyph: "ƒ", subtitle: "" },
+    function_pure: { accent: "#4f9e5a", header: "#357745", header2: "#234f31", label: "Pure function", glyph: "ƒ", subtitle: "" },
     control: { accent: "#f2f4f8", header: "#2c333d", header2: "#151a21", label: "Control", glyph: "◇", subtitle: "control" },
     value: { accent: "#8a8f98", header: "#252b34", header2: "#151a21", label: "Value", glyph: "•", subtitle: "value" }
   };
@@ -227,23 +229,12 @@ pub fn canvas_js() -> String {
   function tidyGraphLayout() {
     const graph = currentGraphOrNull();
     if (!graph) return;
-    const cols = Math.max(2, Math.ceil(Math.sqrt(graph.nodes.length || 1)));
-    const columnWidths = new Array(cols).fill(0);
-    const rowHeights = [];
-    graph.nodes.forEach((node, i) => {
-      const col = i % cols;
-      const row = Math.floor(i / cols);
-      const size = nodeSize(graph, node);
-      columnWidths[col] = Math.max(columnWidths[col], size.w);
-      rowHeights[row] = Math.max(rowHeights[row] || 0, size.h);
-    });
-    const columnX = columnWidths.map((_, i) => 80 + columnWidths.slice(0, i).reduce((sum, width) => sum + width + 92, 0));
-    const rowY = rowHeights.map((_, i) => 70 + rowHeights.slice(0, i).reduce((sum, height) => sum + height + 74, 0));
-    graph.nodes.forEach((node, i) => {
-      const col = i % cols;
-      const row = Math.floor(i / cols);
-      setNodeViewPosition(node, columnX[col], rowY[row]);
-    });
+    const positions = rankedGraphLayout(graph);
+    for (const node of graph.nodes) {
+      const pos = positions.get(node.node_id);
+      if (pos) setNodeViewPosition(node, pos.x, pos.y);
+    }
+    autoNodeOffsets = new Map();
     wireStyle = "bezier";
     showToast("Graph tidied");
     drawGraph(latestDoc);
@@ -784,7 +775,8 @@ pub fn canvas_js() -> String {
   }
 
   function drawSocketRow(pin, x, y, w, dir, recordHit) {
-    const px = dir === "input" ? x : x + w;
+    const execInset = isExecPin(pin) ? 5 * view.zoom : 0;
+    const px = dir === "input" ? x + execInset : x + w - execInset;
     const labelX = dir === "input" ? x + 22 * view.zoom : x + w - 22 * view.zoom;
     const labelAlign = dir === "input" ? "left" : "right";
     drawPin(pin, px, y, dir, recordHit);
@@ -811,11 +803,43 @@ pub fn canvas_js() -> String {
     return String((expr && expr.source) || "").trim();
   }
 
+  function isLiteralDefault(kind, source) {
+    const s = String(source || "").trim();
+    if (kind === "bool") return s === "true" || s === "false";
+    if (kind === "number") return /^-?\d+(\.\d+)?$/.test(s);
+    if (kind === "string") return /^"([^"\\]|\\.)*"$/.test(s) || /^'([^'\\]|\\.)'$/.test(s);
+    if (kind === "enum") return /^\.?[A-Za-z_][A-Za-z0-9_.]*$/.test(s);
+    return false;
+  }
+
+  function drawInlineExprChip(pin, expr, x, y, recordHit) {
+    const source = defaultEditorValue(expr);
+    const color = colorForType(pin.type || "unknown");
+    ctx.font = `${Math.max(8, 10 * view.zoom)}px ${MONO_FONT}`;
+    const boxW = Math.min(150, Math.max(58, ctx.measureText(source || "expr").width / view.zoom + 18)) * view.zoom;
+    const boxH = 20 * view.zoom;
+    const bx = x;
+    const by = y - boxH / 2;
+    roundRect(bx, by, boxW, boxH, 4 * view.zoom);
+    ctx.fillStyle = "rgba(7,12,19,.92)";
+    ctx.fill();
+    ctx.strokeStyle = hexToRgba(color, .78);
+    ctx.lineWidth = Math.max(1, 1.2 * view.zoom);
+    ctx.stroke();
+    ctx.fillStyle = "#dbeafe";
+    ctx.textAlign = "left";
+    ctx.fillText(clipText(source || "expr", 20), bx + 8 * view.zoom, y + 3.5 * view.zoom);
+    if (recordHit) pinEditorHit.push({ x: bx, y: by, w: boxW, h: boxH, pin, expr, kind: "inline_expr" });
+    window.__jetCanvasInlineExprChips = true;
+    return boxW + 8 * view.zoom;
+  }
+
   function drawPinDefaultEditor(graph, pin, x, y, recordHit) {
     const kind = editablePinKind(pin);
     if (!kind || pin.direction !== "input" || connectedPinIds.has(pin.pin_id)) return 0;
     const expr = inlineDefaultForPin(graph, pin);
     const source = defaultEditorValue(expr);
+    if (expr && !isLiteralDefault(kind, source)) return drawInlineExprChip(pin, expr, x, y, recordHit);
     const color = colorForType(pin.type || "unknown");
     const boxW = Math.min(96, kind === "bool" ? 24 : kind === "enum" ? 88 : 76) * view.zoom;
     const boxH = 20 * view.zoom;
@@ -869,7 +893,7 @@ pub fn canvas_js() -> String {
   }
 
   function functionsForPin(pin) {
-    if (!pin) return actionEntries.slice(0, 96);
+    if (!pin) return actionEntries;
     const targetType = pin.type || null;
     let entries = actionEntries.filter((entry) => {
       if (!targetType) return true;
@@ -879,7 +903,7 @@ pub fn canvas_js() -> String {
       return compatibleActionType(pin.type, actionReturnType(entry) || entry.ret || "Value");
     });
     if (entries.length === 0) entries = actionEntries;
-    return entries.slice(0, 96);
+    return entries;
   }
 
   function closeContextMenu() {
@@ -891,19 +915,21 @@ pub fn canvas_js() -> String {
   function actionMatchesQuery(action, query) {
     if (!query) return true;
     const q = query.toLowerCase();
-    return String(action.title || "").toLowerCase().includes(q) || String(action.detail || "").toLowerCase().includes(q) || String(action.group || "").toLowerCase().includes(q);
+    return [action.title, action.detail, action.group, action.kind, action.signature, action.summary, action.module_path, action.callee, action.ret, action.type]
+      .some((value) => String(value || "").toLowerCase().includes(q));
   }
 
   function paletteCategoryForAction(action) {
     const group = String(action.group || "").toLowerCase();
     if (group.includes("flow") || ["insert_branch", "insert_switch", "insert_loop", "insert_fallible_rail"].includes(action.op)) return "Flow";
-    if (group.includes("variable") || group.includes("binding") || action.op === "promote_to_binding") return "Variables";
+    if (action.kind === "variable_get" || action.kind === "variable_set" || group.includes("variable") || group.includes("binding") || action.op === "promote_to_binding") return "Variables";
     if (action.kind === "canvas.core_catalog" || group.includes("core")) return "Core";
     if (action.kind === "project_function" || group.includes("project") || action.kind === "canvas.action") return "Project";
     return "Flow";
   }
 
   function paletteActionGlyph(action) {
+    if (action.kind === "variable_get" || action.kind === "variable_set") return action.type || action.ret || "•";
     if (action.kind === "canvas.core_catalog" || action.kind === "project_function" || action.kind === "canvas.action") return action.pure ? "ƒ" : "ƒ";
     if (action.op === "insert_branch") return "◇";
     if (action.op === "insert_loop") return "↻";
@@ -912,6 +938,7 @@ pub fn canvas_js() -> String {
   }
 
   function paletteActionColor(action) {
+    if (action.kind === "variable_get" || action.kind === "variable_set") return colorForType(action.type || action.ret || "unknown");
     if (action.kind === "canvas.core_catalog" || action.kind === "project_function" || action.kind === "canvas.action") return action.pure ? NODE_ARCHETYPE_STYLES.function_pure.accent : NODE_ARCHETYPE_STYLES.function_exec.accent;
     if (action.op === "insert_branch" || action.op === "insert_switch" || action.op === "insert_loop") return "#f2f4f8";
     return colorForType(action.ret || action.type || "unknown");
@@ -929,20 +956,36 @@ pub fn canvas_js() -> String {
     const query = contextMenuState.query || "";
     const matches = contextMenuState.actions
       .filter((action) => actionMatchesQuery(action, query))
-      .sort((a, b) => rankAction(b) - rankAction(a) || String(a.title).localeCompare(String(b.title)))
-      .slice(0, 80);
+      .sort((a, b) => rankAction(b) - rankAction(a) || String(a.module_path || "").localeCompare(String(b.module_path || "")) || String(a.title).localeCompare(String(b.title)));
     const context = contextMenuState.pin ? `${contextMenuState.pin.name}: ${contextMenuState.pin.type}` : (contextMenuState.context || "source-backed actions");
     const port = contextMenuState.pin ? pinPortHtml(contextMenuState.pin.type || "Value") : "";
     const favorites = favoriteSet();
+    const rowForAction = (action) => {
+      const id = action.action_id || action.callee || action.title;
+      const fav = favorites.has(id);
+      const color = paletteActionColor(action);
+      return `<button class="action-result${fav ? " is-favorite" : ""}" data-menu-action="${escapeAttr(action.index)}" style="--action-color:${escapeAttr(color)}"><span class="action-glyph">${escapeHtml(paletteActionGlyph(action))}</span><span>${fav ? "★ " : ""}${escapeHtml(action.title)}<small style="color:${escapeAttr(color)}">${escapeHtml(paletteTypeSummary(action))}</small></span></button>`;
+    };
     const categories = ["Flow", "Variables", "Project", "Core"].map((category) => {
-      const rows = matches.filter((action) => paletteCategoryForAction(action) === category).slice(0, category === "Core" ? 36 : 20);
+      const limit = category === "Core" ? 1000 : category === "Project" ? 500 : category === "Variables" ? 200 : 64;
+      const rows = matches.filter((action) => paletteCategoryForAction(action) === category).slice(0, limit);
       if (!rows.length && query) return "";
-      const body = rows.length ? rows.map((action) => {
-        const id = action.action_id || action.callee || action.title;
-        const fav = favorites.has(id);
-        const color = paletteActionColor(action);
-        return `<button class="action-result${fav ? " is-favorite" : ""}" data-menu-action="${escapeAttr(action.index)}" style="--action-color:${escapeAttr(color)}"><span class="action-glyph">${escapeHtml(paletteActionGlyph(action))}</span><span>${fav ? "★ " : ""}${escapeHtml(action.title)}<small>${escapeHtml(paletteTypeSummary(action))}</small></span><span class="tag">${escapeHtml(category)}</span></button>`;
-      }).join("") : "<div class=\"action-empty\">No actions</div>";
+      let body = "<div class=\"action-empty\">No actions</div>";
+      if (rows.length && category === "Core") {
+        const modules = [];
+        for (const action of rows) {
+          const module = action.module_path || "core";
+          let bucket = modules.find((item) => item.module === module);
+          if (!bucket) {
+            bucket = { module, rows: [] };
+            modules.push(bucket);
+          }
+          bucket.rows.push(action);
+        }
+        body = modules.map((bucket) => `<h4>${escapeHtml(bucket.module)}</h4>${bucket.rows.map(rowForAction).join("")}`).join("");
+      } else if (rows.length) {
+        body = rows.map(rowForAction).join("");
+      }
       return `<section class="action-category"><h3>${escapeHtml(category)}</h3>${body}</section>`;
     }).join("");
     contextMenu.innerHTML = `<div class="action-palette-head"><div class="menu-title">${escapeHtml(contextMenuState.title)}</div><div class="action-context">${port}<span>${escapeHtml(context)}</span><span class="tag">${matches.length}/${contextMenuState.actions.length}</span></div><input id="action-palette-search" placeholder="Search actions" value="${escapeAttr(query)}"></div><div class="action-results">${categories || "<div class=\"action-empty\">No matching actions</div>"}</div>`;
@@ -1009,10 +1052,16 @@ pub fn canvas_js() -> String {
       detail: entry.detail,
       group: paletteCategoryForAction(entry),
       kind: entry.kind,
+      module_path: entry.module_path,
       signature: entry.signature,
+      summary: entry.summary,
       pure: entry.pure,
       pins: entry.pins,
       ret: entry.ret,
+      action_id: entry.action_id,
+      callee: entry.callee,
+      insert_callee: entry.insert_callee,
+      args: entry.args,
       run: () => runPalette(entry, pin)
     }));
     actions.push({
@@ -1232,6 +1281,63 @@ pub fn canvas_js() -> String {
     };
   }
 
+  function variableActionsForGraph(graph) {
+    if (!graph) return [];
+    const vars = new Map();
+    const remember = (name, type) => {
+      const clean = String(name || "").replace(/^get\s+/, "");
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(clean)) return;
+      if (["result", "value", "exec", "then", "else", "return"].includes(clean)) return;
+      if (!vars.has(clean)) vars.set(clean, type || "Value");
+    };
+    for (const node of graph.nodes || []) {
+      if (node.kind === "binding" || node.kind === "assign") {
+        const out = (graph.pins || []).find((pin) => pin.node_id === node.node_id && pin.direction === "output" && !isExecPin(pin));
+        remember(node.title, out && out.type);
+      }
+      if (node.kind === "variable_get") {
+        const out = (graph.pins || []).find((pin) => pin.node_id === node.node_id && pin.direction === "output" && !isExecPin(pin));
+        remember(node.title, out && out.type);
+      }
+      if (node.kind === "entry") {
+        for (const pin of (graph.pins || []).filter((p) => p.node_id === node.node_id && p.direction === "output" && !isExecPin(p))) remember(pin.name, pin.type);
+      }
+    }
+    const actions = [];
+    for (const [name, type] of Array.from(vars.entries()).sort((a, b) => a[0].localeCompare(b[0]))) {
+      actions.push({
+        title: "get " + name,
+        detail: name + " : " + type,
+        group: "Variables",
+        kind: "variable_get",
+        type,
+        ret: type,
+        variable: name,
+        signature: name + " : " + type,
+        run: () => {
+          const pin = contextMenuState && contextMenuState.pin;
+          const graphNow = currentGraphOrNull();
+          const expr = pin && pin.direction === "input" && inlineForPin(graphNow, pin);
+          if (expr) postTransaction({ schema_version: 1, op: "edit_inline_expr", revision: latestDoc.revision, inline_expr_id: expr.inline_expr_id, new_expr: name });
+          else showToast("Drag from an input expression to use " + name);
+        }
+      });
+      actions.push({
+        title: "set " + name,
+        detail: name + " : " + type,
+        group: "Variables",
+        kind: "variable_set",
+        type,
+        ret: type,
+        variable: name,
+        signature: name + " = value",
+        run: () => showToast("Variable set needs source-backed assign insertion")
+      });
+    }
+    window.__jetCanvasVariablePalette = actions.length;
+    return actions;
+  }
+
   function nodeContextActions(graph, node) {
     const actions = [
       { title: "Jump source", detail: "span", group: "source", run: () => { const s = node.source_span || { start: 0, end: 0 }; setSourceHash(s); setViewMode("code"); } },
@@ -1264,6 +1370,7 @@ pub fn canvas_js() -> String {
   }
 
   function graphActionItems() {
+    const graph = currentGraphOrNull();
     const actions = [
       { title: "Fit graph", detail: "viewport", group: "view", run: fitGraph },
       { title: "New function", detail: "source", group: "function", run: () => {
@@ -1279,8 +1386,9 @@ pub fn canvas_js() -> String {
       { title: "Bookmark graph", detail: "local editor state", group: "navigation", run: bookmarkCurrentGraph },
       { title: "Run graph", detail: "debug overlay", group: "run", run: runCurrentGraph }
     ];
-    for (const item of palette.concat(actionEntries).slice(0, 36)) {
-      actions.push({ title: item.title, detail: item.detail || "", group: item.group || (item.op === "preview_canvas_action" ? "Project" : "Flow"), kind: item.kind, signature: item.signature, pure: item.pure, pins: item.pins, ret: item.ret, op: item.op, run: () => runPalette(item) });
+    actions.push(...variableActionsForGraph(graph));
+    for (const item of palette.concat(actionEntries)) {
+      actions.push({ title: item.title, detail: item.detail || "", group: item.group || (item.op === "preview_canvas_action" ? "Project" : "Flow"), kind: item.kind, module_path: item.module_path, signature: item.signature, summary: item.summary, pure: item.pure, pins: item.pins, ret: item.ret, type: item.type, op: item.op, action_id: item.action_id, callee: item.callee, insert_callee: item.insert_callee, args: item.args, run: () => runPalette(item) });
     }
     return actions;
   }
@@ -1290,16 +1398,30 @@ pub fn canvas_js() -> String {
   }
 
   function openCoreCatalogPalette(query = "") {
+    if (!coreCatalogLoaded && !coreCatalogLoading) {
+      loadCoreCatalogActions("").then(() => openCoreCatalogPalette(query));
+      return;
+    }
+    if (!coreCatalogLoaded && coreCatalogLoading) {
+      coreCatalogLoading.then(() => openCoreCatalogPalette(query));
+      return;
+    }
     const actions = actionEntries
       .filter((item) => item.kind === "canvas.core_catalog")
-      .slice(0, 96)
       .map((item) => ({
         title: item.title,
         detail: item.detail,
         group: "Core",
         kind: item.kind,
+        module_path: item.module_path,
         signature: item.signature,
         pure: item.pure,
+        pins: item.pins,
+        ret: item.ret,
+        action_id: item.action_id,
+        callee: item.callee,
+        insert_callee: item.insert_callee,
+        args: item.args,
         run: () => runPalette(item)
       }));
     openActionPalette(window.innerWidth / 2 - 210, 72, "Core catalog", actions, { context: "core.* modules and methods", query });
@@ -1451,29 +1573,75 @@ pub fn canvas_js() -> String {
     if (latestDoc) drawGraph(latestDoc);
   }
 
+  function rankedGraphLayout(graph) {
+    const nodes = graph.nodes || [];
+    const byId = new Map(nodes.map((node) => [node.node_id, node]));
+    const pinNode = new Map((graph.pins || []).map((pin) => [pin.pin_id, pin.node_id]));
+    const rank = new Map(nodes.map((node) => [node.node_id, node.node_id === graph.entry_node ? 0 : Math.max(0, Math.round(rawNodeX(node) / 220))]));
+    for (let pass = 0; pass < nodes.length + 3; pass++) {
+      let changed = false;
+      for (const wire of graph.wires || []) {
+        const from = pinNode.get(wire.from_pin);
+        const to = pinNode.get(wire.to_pin);
+        if (!from || !to || from === to) continue;
+        const next = Math.max(rank.get(to) || 0, (rank.get(from) || 0) + 1);
+        if (next !== (rank.get(to) || 0)) {
+          rank.set(to, next);
+          changed = true;
+        }
+      }
+      if (!changed) break;
+    }
+    const columns = new Map();
+    for (const node of nodes) {
+      const r = rank.get(node.node_id) || 0;
+      if (!columns.has(r)) columns.set(r, []);
+      columns.get(r).push(node);
+    }
+    const sortedRanks = Array.from(columns.keys()).sort((a, b) => a - b);
+    const colWidth = new Map();
+    for (const r of sortedRanks) {
+      colWidth.set(r, Math.max(...columns.get(r).map((node) => nodeSize(graph, node).w), 150));
+    }
+    const colX = new Map();
+    let x = 80;
+    for (const r of sortedRanks) {
+      colX.set(r, x);
+      x += (colWidth.get(r) || 150) + 56;
+    }
+    const positions = new Map();
+    for (const r of sortedRanks) {
+      const col = columns.get(r).slice().sort((a, b) => {
+        const family = (node) => node.node_id === graph.entry_node ? -2 : node.kind === "variable_get" || node.kind === "constant" ? -1 : node.kind === "return" ? 2 : node.kind === "branch" || node.archetype === "control" ? 1 : 0;
+        return family(a) - family(b) || rawNodeY(a) - rawNodeY(b) || rawNodeX(a) - rawNodeX(b);
+      });
+      let y = 70;
+      for (const node of col) {
+        const size = nodeSize(graph, node);
+        positions.set(node.node_id, { x: colX.get(r), y });
+        y += size.h + 44;
+      }
+    }
+    for (const wire of graph.wires || []) {
+      const from = byId.get(pinNode.get(wire.from_pin));
+      const to = byId.get(pinNode.get(wire.to_pin));
+      if (!from || !to || from === to) continue;
+      const fp = positions.get(from.node_id);
+      const tp = positions.get(to.node_id);
+      const fs = nodeSize(graph, from);
+      if (fp && tp && tp.x < fp.x + fs.w + 40) tp.x = fp.x + fs.w + 40;
+    }
+    return positions;
+  }
+
   function reflowGraph(graph) {
     autoNodeOffsets = new Map();
     if (!graph || !graph.nodes || graph.nodes.length === 0) return;
-    const rowGap = 74;
-    const colGap = 48;
-    const rows = [];
-    for (const node of graph.nodes.slice().sort((a, b) => rawNodeY(a) - rawNodeY(b) || rawNodeX(a) - rawNodeX(b))) {
-      let row = rows.find((candidate) => Math.abs(candidate.y - rawNodeY(node)) < rowGap);
-      if (!row) {
-        row = { y: rawNodeY(node), nodes: [] };
-        rows.push(row);
-      }
-      row.nodes.push(node);
-    }
-    for (const row of rows) {
-      let cursor = -Infinity;
-      for (const node of row.nodes.sort((a, b) => rawNodeX(a) - rawNodeX(b))) {
-        const x = rawNodeX(node);
-        const size = nodeSize(graph, node);
-        const shift = Math.max(0, cursor - x);
-        autoNodeOffsets.set(node.node_id, { x: shift, y: 0 });
-        cursor = x + shift + size.w + colGap;
-      }
+    const colGap = 40;
+    const ranked = rankedGraphLayout(graph);
+    for (const node of graph.nodes) {
+      const pos = ranked.get(node.node_id);
+      if (pos) autoNodeOffsets.set(node.node_id, { x: pos.x - rawNodeX(node), y: pos.y - rawNodeY(node) });
     }
     const placed = [];
     for (const node of graph.nodes.slice().sort((a, b) => nodeY(a) - nodeY(b) || nodeX(a) - nodeX(b))) {
@@ -1608,7 +1776,11 @@ pub fn canvas_js() -> String {
       const out = pinsForNode(graph, node, "output", false)[0];
       return Object.assign({}, style, { accent: colorForType(out && out.type || "unknown"), header: colorForType(out && out.type || "unknown"), label: "Value", glyph: "•", subtitle: "value" });
     }
-    if (node.kind === "binding" || node.kind === "assign") return Object.assign({}, NODE_ARCHETYPE_STYLES.function_exec, { label: "Set variable", subtitle: "write local binding", glyph: "ƒ", accent: "#4f9e5a", header: "#2f6f43", header2: "#1e4b31" });
+    if (node.kind === "binding" || node.kind === "assign") {
+      const dataPin = pinsForNode(graph, node, "output", false)[0] || pinsForNode(graph, node, "input", false)[0] || {};
+      const typeColor = colorForType(dataPin.type || "unknown");
+      return Object.assign({}, NODE_ARCHETYPE_STYLES.control, { label: "Set variable", subtitle: "", glyph: "•", accent: typeColor, header: "#2c333d", header2: "#151a21" });
+    }
     if (node.kind === "branch") return Object.assign({}, NODE_ARCHETYPE_STYLES.control, { glyph: "◇", subtitle: "branch" });
     if (node.kind === "dispatch") return Object.assign({}, NODE_ARCHETYPE_STYLES.control, { glyph: "⇉", subtitle: "switch" });
     if (node.kind === "loop") return Object.assign({}, NODE_ARCHETYPE_STYLES.control, { glyph: "↻", subtitle: "loop" });
@@ -1617,7 +1789,7 @@ pub fn canvas_js() -> String {
   }
 
   function nodeSubtitle(node) {
-    return nodeStyle(node, currentGraphOrNull()).subtitle || node.kind || "";
+    return nodeStyle(node, currentGraphOrNull()).subtitle || "";
   }
 
   function nodeKindLabel(node, graph) {
@@ -1647,7 +1819,7 @@ pub fn canvas_js() -> String {
     const execIn = pinsForNode(graph, node, "input", true).length;
     const execOut = pinsForNode(graph, node, "output", true).length;
     const compact = isGetterCapsule(node) || isOperatorNode(node);
-    if (node.archetype === "entry") return { w: Math.max(174, 118 + String(node.title || "").length * 8, 148 + Math.max(inputData, outputData) * 16), h: 46 + Math.max(inputData, outputData) * 24 };
+    if (node.archetype === "entry") return { w: Math.max(174, 118 + String(node.title || "").length * 8, 148 + Math.max(inputData, outputData) * 16), h: 66 + Math.max(inputData, outputData) * 24 };
     if (isOperatorNode(node)) return { w: 88, h: Math.max(58, 28 + Math.max(inputData, outputData) * 22) };
     const titleW = 92 + String(node.title || "").length * 7.5;
     const pinW = Math.max(inputData, outputData) ? 150 + Math.max(...(graph.pins || []).filter((p) => p.node_id === node.node_id).map((p) => String(p.name || "").length * 6 + String(p.type || "").length * 5), 0) : 0;
@@ -1659,12 +1831,22 @@ pub fn canvas_js() -> String {
   }
 
   function bezierPoint(from, to, t) {
-    const c1 = { x: from.x + 96 * view.zoom, y: from.y };
-    const c2 = { x: to.x - 96 * view.zoom, y: to.y };
+    const controls = bezierControls(from, to);
+    const c1 = controls.c1;
+    const c2 = controls.c2;
     const mt = 1 - t;
     return {
       x: mt * mt * mt * from.x + 3 * mt * mt * t * c1.x + 3 * mt * t * t * c2.x + t * t * t * to.x,
       y: mt * mt * mt * from.y + 3 * mt * mt * t * c1.y + 3 * mt * t * t * c2.y + t * t * t * to.y
+    };
+  }
+
+  function bezierControls(from, to) {
+    const dx = Math.abs(to.x - from.x);
+    const strength = Math.max(32 * view.zoom, Math.min(180 * view.zoom, dx * .48));
+    return {
+      c1: { x: from.x + strength, y: from.y },
+      c2: { x: to.x - strength, y: to.y }
     };
   }
 
@@ -1693,9 +1875,10 @@ pub fn canvas_js() -> String {
   function drawWire(wire, from, to, activeWire, selectedWire) {
     const control = wire.wire_kind === "control" || isExecPin(from.pin);
     const color = activeWire ? "#facc15" : wireColor(wire, from);
+    const controls = bezierControls(from, to);
     ctx.beginPath();
     ctx.moveTo(from.x, from.y);
-    ctx.bezierCurveTo(from.x + 96 * view.zoom, from.y, to.x - 96 * view.zoom, to.y, to.x, to.y);
+    ctx.bezierCurveTo(controls.c1.x, controls.c1.y, controls.c2.x, controls.c2.y, to.x, to.y);
     ctx.strokeStyle = "rgba(1,6,12,.86)";
     ctx.lineWidth = control ? Math.max(4.5, 5.4 * view.zoom) : Math.max(3.2, 4.2 * view.zoom);
     ctx.shadowBlur = 0;
@@ -1703,7 +1886,7 @@ pub fn canvas_js() -> String {
 
     ctx.beginPath();
     ctx.moveTo(from.x, from.y);
-    ctx.bezierCurveTo(from.x + 96 * view.zoom, from.y, to.x - 96 * view.zoom, to.y, to.x, to.y);
+    ctx.bezierCurveTo(controls.c1.x, controls.c1.y, controls.c2.x, controls.c2.y, to.x, to.y);
     ctx.strokeStyle = color;
     ctx.lineWidth = activeWire ? Math.max(3.2, (control ? 3.2 : 2.5) * view.zoom + .7) : control ? Math.max(2.5, 2.5 * view.zoom) : Math.max(1.8, 1.8 * view.zoom);
     ctx.shadowColor = activeWire ? "rgba(250,204,21,.72)" : hexToRgba(color, control || selectedWire ? .62 : .34);
@@ -1819,6 +2002,11 @@ pub fn canvas_js() -> String {
     ctx.strokeStyle = active ? "#facc15" : selected ? "#f5a623" : searchHit ? "#c084fc" : "#0b0d11";
     ctx.lineWidth = active ? 2.2 : selected ? 1.5 : 1;
     ctx.stroke();
+    if (node.kind === "binding" || node.kind === "assign") {
+      ctx.fillStyle = style.accent;
+      ctx.fillRect(x, y + 7 * view.zoom, Math.max(3, 3 * view.zoom), h - 14 * view.zoom);
+      window.__jetCanvasBindingTypeAccent = true;
+    }
     if (selected) {
       ctx.save();
       roundRect(x - 2 * view.zoom, y - 2 * view.zoom, w + 4 * view.zoom, h + 4 * view.zoom, 9 * view.zoom);
@@ -1877,8 +2065,7 @@ pub fn canvas_js() -> String {
 
     const execIn = pinsForNode(graph, node, "input", true);
     const execOut = pinsForNode(graph, node, "output", true);
-    const entryOnly = node.archetype === "entry";
-    const execTop = entryOnly ? 22 : 42;
+    const execTop = 42;
     execIn.forEach((p, i) => drawSocketRow(p, x, y + (execTop + i * 28) * view.zoom, w, "input", recordHit));
     execOut.forEach((p, i) => drawSocketRow(p, x, y + (execTop + i * 28) * view.zoom, w, "output", recordHit));
 
@@ -1988,11 +2175,12 @@ pub fn canvas_js() -> String {
       drawCompatibleDropTargets(graph, drag.pin);
       const from = pinPoints.get(drag.pin.pin_id);
       if (from) {
+        const controls = bezierControls(from, { x: drag.mx, y: drag.my });
         const plan = connectionPlan(graph, drag.pin, hoverPin);
         syncWireStatus({ title: plan.ok ? "Wire preview" : "Wire refused", detail: plan.label, color: plan.color });
         ctx.beginPath();
         ctx.moveTo(from.x, from.y);
-        ctx.bezierCurveTo(from.x + 90 * view.zoom, from.y, drag.mx - 90 * view.zoom, drag.my, drag.mx, drag.my);
+        ctx.bezierCurveTo(controls.c1.x, controls.c1.y, controls.c2.x, controls.c2.y, drag.mx, drag.my);
         ctx.strokeStyle = plan.color;
         ctx.lineWidth = Math.max(2.5, 4 * view.zoom);
         ctx.setLineDash(plan.ok ? [12, 6] : [4, 6]);
@@ -2454,7 +2642,9 @@ pub fn canvas_js() -> String {
       return true;
     }
     let next = defaultEditorValue(hit.expr);
-    if (hit.kind === "bool") {
+    if (hit.kind === "inline_expr") {
+      next = window.prompt("Expression", next);
+    } else if (hit.kind === "bool") {
       next = next === "true" ? "false" : "true";
     } else if (hit.kind === "number") {
       next = window.prompt("Default " + hit.pin.name, next || "0");
@@ -3010,8 +3200,8 @@ pub fn canvas_js() -> String {
     } else if (item.op === "insert_print") {
       postTransaction({ schema_version: 1, op: "insert_call", revision: latestDoc.revision, graph_id: selectedGraphId, callee: "print", args: ["\"canvas\""] });
     } else if (item.op === "insert_call") {
-      const callee = window.prompt("Call function", "print");
-      if (callee) postTransaction({ schema_version: 1, op: "insert_call", revision: latestDoc.revision, graph_id: selectedGraphId, callee, args: defaultArgsForAction({ args: ["\"canvas\""] }, pin) });
+      const callee = item.insert_callee || item.callee || window.prompt("Call function", "print");
+      if (callee) postTransaction({ schema_version: 1, op: "insert_call", revision: latestDoc.revision, graph_id: selectedGraphId, callee, args: defaultArgsForAction(item.insert_callee || item.callee ? item : { args: ["\"canvas\""] }, pin) });
     } else if (["insert_branch", "insert_switch", "insert_loop", "insert_fallible_rail"].includes(item.op)) {
       postTransaction({ schema_version: 1, op: item.op, revision: latestDoc.revision, graph_id: selectedGraphId });
     } else if (item.op === "comment") {
@@ -3150,6 +3340,8 @@ pub fn canvas_js() -> String {
           op: fn.insert_op || "insert_call",
           callee: fn.callee || fn.name,
           insert_callee: fn.insert_callee || fn.callee || fn.name,
+          module_path: fn.module_path || "project",
+          action_id: "project:" + (fn.callee || fn.name),
           signature: fn.signature || "",
           pure: !!fn.pure,
           pins: fn.pins || [],
@@ -3161,9 +3353,10 @@ pub fn canvas_js() -> String {
           detail: action.kind === "canvas.core_catalog" ? ((action.module_path || "core") + " · " + (action.signature || action.callee || "") + " · read-only") : (action.command ? ((action.kind || "canvas.command") + " · " + (action.command || []).join(" ") + " · " + (action.writes || "none")) : ((action.kind || "canvas.action") + " · " + (action.engine || "checked-tir+jit") + " · " + (action.callee || "") + "(" + (action.pins || []).filter((p) => p.direction === "input").map((p) => p.type || "Value").join(", ") + ") -> " + (action.ret || "Void"))),
           kind: action.kind || "canvas.action",
           group: action.kind === "canvas.core_catalog" ? "Core" : action.kind === "canvas.command" ? "Flow" : "Project",
-          op: action.op || "preview_canvas_action",
+          op: action.insert_op || action.op || (action.kind === "canvas.action" || action.kind === "canvas.core_catalog" ? "insert_call" : "preview_canvas_action"),
           action_id: action.action_id,
           callee: action.callee,
+          module_path: action.module_path || "",
           insert_callee: action.insert_callee || action.callee,
           signature: action.signature || "",
           summary: action.summary || "",
@@ -3179,8 +3372,59 @@ pub fn canvas_js() -> String {
           args: action.default_args || ["\"canvas\""]
         }));
         actionEntries = projectFunctions.concat(canvasActions);
+        if (canvasActions.some((action) => action.kind === "canvas.core_catalog")) coreCatalogLoaded = true;
       })
       .catch(() => {});
+  }
+
+  function mergeActionEntries(entries) {
+    const seen = new Set(actionEntries.map((entry) => entry.action_id || entry.kind + ":" + entry.title + ":" + entry.module_path));
+    for (const entry of entries) {
+      const id = entry.action_id || entry.kind + ":" + entry.title + ":" + entry.module_path;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      actionEntries.push(entry);
+    }
+  }
+
+  function loadCoreCatalogActions(query = "") {
+    if (coreCatalogLoaded && !query) return Promise.resolve(actionEntries);
+    if (coreCatalogLoading && !query) return coreCatalogLoading;
+    const url = coreCatalogUrl + "?query=" + encodeURIComponent(query || "");
+    coreCatalogLoading = fetch(url, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((doc) => {
+        const entries = [];
+        for (const module of doc.modules || []) {
+          for (const member of module.members || []) {
+            const callee = String(module.path || "core").replace(/^core\./, "") + "." + member.name;
+            entries.push({
+              title: member.name + " · " + (module.path || "core"),
+              detail: (module.path || "core") + " · " + (member.signature || member.name),
+              group: "Core",
+              kind: "canvas.core_catalog",
+              op: "insert_call",
+              action_id: "canvas.core_catalog:" + (module.path || "core") + ":" + member.name,
+              module_path: module.path || "core",
+              callee,
+              insert_callee: callee,
+              signature: member.signature || "",
+              summary: member.summary || module.summary || "",
+              pure: !!member.pure,
+              pins: [],
+              ret: actionReturnType(member) || "Value",
+              args: ["1"]
+            });
+          }
+        }
+        mergeActionEntries(entries);
+        if (!query) coreCatalogLoaded = true;
+        window.__jetCanvasCoreCatalogPalette = entries.length;
+        return actionEntries;
+      })
+      .catch(() => actionEntries)
+      .finally(() => { if (!query) coreCatalogLoading = null; });
+    return coreCatalogLoading;
   }
 
   function cssEscape(s) {

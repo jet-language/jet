@@ -24,6 +24,7 @@ fn canvas_html_document(bootstrap: &str) -> String {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%230b1017'/%3E%3Cpath d='M3 2h10v3H6v2h6v3H6v4H3z' fill='%2335c2ff'/%3E%3C/svg%3E">
 <title>Jet Canvas</title>
 <style>
 * { box-sizing: border-box; }
@@ -206,8 +207,10 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
 .action-results { display: grid; gap: 5px; max-height: min(360px, calc(100vh - 170px)); overflow: auto; padding: 2px; }
 .action-category { display: grid; gap: 4px; }
 .action-category h3 { margin: 8px 4px 2px; color: #8fb2dc; font: 10px ui-monospace, "SFMono-Regular", Consolas, monospace; letter-spacing: .12em; text-transform: uppercase; }
-.action-result { --action-color: #8a8f98; border-color: color-mix(in srgb, var(--action-color) 48%, #284866); background: #151922; min-height: 44px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 9px; align-items: center; }
+.action-category h4 { margin: 6px 4px 1px; color: #6f8fb3; font: 10px ui-monospace, "SFMono-Regular", Consolas, monospace; }
+.action-result { --action-color: #8a8f98; border-color: color-mix(in srgb, var(--action-color) 48%, #284866); background: #151922; min-height: 44px; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 9px; align-items: center; }
 .action-glyph { display: grid; place-items: center; width: 22px; height: 22px; color: var(--action-color); border: 1px solid color-mix(in srgb, var(--action-color) 62%, #162131); background: color-mix(in srgb, var(--action-color) 13%, #101318); border-radius: 4px; font-weight: 700; }
+.action-glyph { font: 700 10px ui-monospace, "SFMono-Regular", Consolas, monospace; overflow: hidden; }
 .action-result.is-favorite { border-color: #facc15; box-shadow: inset 3px 0 0 #facc15; }
 .action-result:hover, .action-result:focus-visible { border-color: var(--action-color); background: #1d2129; }
 .action-result small { color: #9aaecb; display: block; margin-top: 2px; overflow-wrap: anywhere; font-family: "JetBrains Mono", ui-monospace, "SFMono-Regular", Consolas, monospace; }

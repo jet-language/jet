@@ -14,6 +14,7 @@ fn write_bootable_root_projection(dir: &Path) -> std::io::Result<()> {
         "studio",
         "init",
         "nix",
+        "lib",
         "usr",
         "network",
         "hardware",
@@ -43,7 +44,9 @@ fn write_bootable_root_projection(dir: &Path) -> std::io::Result<()> {
         }
         copy_dir_recursive(&src, &root.join("run/current-system").join(top))?;
         match top {
-            "boot" | "etc" | "sbin" | "usr" | "home" => copy_dir_recursive(&src, &root.join(top))?,
+            "boot" | "etc" | "sbin" | "lib" | "usr" | "home" => {
+                copy_dir_recursive(&src, &root.join(top))?
+            }
             _ => {}
         }
     }

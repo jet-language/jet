@@ -2463,6 +2463,16 @@ fn os_switch_activates_and_sets_current() {
         "expected bootable /sbin/init projection"
     );
     assert!(
+        generation
+            .join("usr/lib/systemd/system/graphical.target")
+            .exists()
+            && generation
+                .join("usr/lib/systemd/system/rescue.target")
+                .exists()
+            && generation.join("etc/systemd/system/default.target").exists(),
+        "expected base systemd target units in bootable generation"
+    );
+    assert!(
         generation.join("root/etc/hostname").is_file(),
         "expected root-shaped /etc projection"
     );
@@ -5296,6 +5306,7 @@ fn os_image_writes_jetos_installer_media_proof() {
     );
     assert!(
         initrd.contains("exec chroot /sysroot /run/current-system/sbin/init")
+            && initrd.contains("for top in etc sbin sw share studio lib usr network")
             && initrd.contains("ln -s \"$generation_target/$top\" \"/sysroot/$top\""),
         "initrd run mode should hand off to installed current-system, not fallback shell: {initrd}"
     );

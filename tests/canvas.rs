@@ -835,6 +835,7 @@ fn canvas_actions_project_palette_entries_and_preview_jit_backed_source_transact
         "\"signature\":\"fn summarize(limit: Int) -> Int\"",
         "\"name\":\"run\"",
         "\"signature\":\"fn run()\"",
+        "\"name\":\"run\",\"signature\":\"fn run()\",\"callee\":\"run\"",
         "\"audit\":[\"package_id\",\"version\",\"hash\",\"authority\",\"touched_files\",\"diff\",\"diagnostics\"]",
         "\"callee\":\"square\"",
         "\"default_args\":[\"1\"]",
@@ -976,6 +977,7 @@ fn canvas_actions_project_palette_entries_and_preview_jit_backed_source_transact
     let core_actions =
         jet::Canvas::query_json_for_file(&core_path, &core_actions_req).expect("core actions");
     assert!(core_actions.contains("\"action_id\":\"canvas.core_catalog:core.math:abs\""), "{core_actions}");
+    assert!(core_actions.contains("\"title\":\"abs "), "{core_actions}");
     assert!(core_actions.contains("\"insert_callee\":\"math.abs\""), "{core_actions}");
     let core_graph = jet::Canvas::graph_json_for_file(&core_path).expect("core graph");
     let core_run_graph_id = field_before(&core_graph, "\"title\":\"run\"", "graph_id");

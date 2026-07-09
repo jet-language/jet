@@ -16,6 +16,7 @@ fn write_init_facts(
         let init_path = boot_artifact(entry, &["bin/systemd", "lib/systemd/systemd", "sbin/init"])
             .unwrap_or_else(|| Path::new(&entry.out).join("bin/systemd"));
         link_or_copy_file(&init_path, &sbin.join("init"))?;
+        write_systemd_unit_library(dir, entry, &default_target)?;
     }
     let init_package = init_entry
         .map(kernel_package_json)
@@ -28,6 +29,52 @@ fn write_init_facts(
             init_package
         ),
     )
+}
+
+fn write_systemd_unit_library(
+    dir: &Path,
+    entry: &Store::StoreEntry,
+    default_target: &str,
+) -> std::io::Result<()> {
+    let systemd_root = Path::new(&entry.out);
+    let unit_src = [
+        systemd_root.join("lib/systemd/system"),
+        systemd_root.join("example/systemd/system"),
+        systemd_root.join("share/systemd/system"),
+    ]
+    .into_iter()
+    .find(|path| path.join("basic.target").exists() && path.join("graphical.target").exists());
+
+    let Some(unit_src) = unit_src else {
+        return Ok(());
+    };
+
+    let usr_units = dir.join("usr/lib/systemd/system");
+    let lib_units = dir.join("lib/systemd/system");
+    copy_dir_recursive(&unit_src, &usr_units)?;
+    copy_dir_recursive(&unit_src, &lib_units)?;
+
+    let etc_units = dir.join("etc/systemd/system");
+    fs::create_dir_all(&etc_units)?;
+    link_or_copy_unit(
+        &usr_units.join(default_target),
+        &etc_units.join("default.target"),
+    )
+}
+
+#[cfg(unix)]
+fn link_or_copy_unit(src: &Path, dst: &Path) -> std::io::Result<()> {
+    let _ = fs::remove_file(dst);
+    match std::os::unix::fs::symlink(src, dst) {
+        Ok(()) => Ok(()),
+        Err(_) => fs::copy(src, dst).map(|_| ()),
+    }
+}
+
+#[cfg(not(unix))]
+fn link_or_copy_unit(src: &Path, dst: &Path) -> std::io::Result<()> {
+    let _ = fs::remove_file(dst);
+    fs::copy(src, dst).map(|_| ())
 }
 
 fn write_secret_manifest(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {

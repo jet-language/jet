@@ -98,7 +98,7 @@ case "$cmdline" in
         if [ -d "$system/nix" ] && [ ! -e /sysroot/nix ]; then
             ln -s "$generation_target/nix" /sysroot/nix
         fi
-        for top in etc sbin sw share studio usr network hardware users flatpak performance module-system storage workloads theme fleet options image-variants lifecycle service-manager apps acceptance desktop store compat terminal home; do
+    for top in etc sbin sw share studio lib usr network hardware users flatpak performance module-system storage workloads theme fleet options image-variants lifecycle service-manager apps acceptance desktop store compat terminal home; do
             if [ -e "$system/$top" ] && [ ! -e "/sysroot/$top" ]; then
                 ln -s "$generation_target/$top" "/sysroot/$top" 2>/dev/null || true
             fi
