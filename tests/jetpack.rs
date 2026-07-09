@@ -2139,12 +2139,143 @@ fn os_import_writes_semantic_nixos_facts_with_audit() {
     assert!(config.contains("nixpkgs: github@NixOS/nixpkgs/nixos-24.05"), "{config}");
     assert!(config.contains("packages: [nixpkgs.[git, ripgrep]]"), "{config}");
     assert!(config.contains("openssh: { enable: true"), "{config}");
-    assert!(config.contains("user.nate.packages: [nixpkgs.neovim, nixpkgs.ghostty]"), "{config}");
+    assert!(config.contains("user.nate.packages: [nixpkgs.[neovim, ghostty]]"), "{config}");
     assert!(config.contains("user.nate.homeManager: true"), "{config}");
     let audit = fs::read_to_string(out_dir.join("jetos-import-audit.json")).unwrap();
     assert!(audit.contains("\"mode\":\"semantic-facts\""), "{audit}");
     assert!(audit.contains("jetbrains.idea-ultimate"), "{audit}");
     assert!(audit.contains("programs.firefox.profiles"), "{audit}");
+}
+
+/// Stage a flake-root fixture plus a stub `nix` on PATH whose `eval` prints
+/// the canned live-extractor result (or fails when `output` is None).
+fn write_live_import_fixture(src: &Path, tools: &Path, output: Option<&str>) {
+    fs::write(
+        src.join("flake.nix"),
+        "{\n  outputs = { ... }: { nixosConfigurations.halcyon = { }; };\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        src.join("flake.lock"),
+        r#"{"nodes":{"nixpkgs":{"locked":{"owner":"NixOS","repo":"nixpkgs","rev":"fef9403a3e4d31b0a23f0bacebbec52c248fbb51"}}}}"#,
+    )
+    .unwrap();
+    fs::create_dir_all(tools).unwrap();
+    let body = match output {
+        Some(json) => format!(
+            "#!/bin/sh\ncase \" $* \" in\n  *' eval '*) printf '%s\\n' '{json}'; exit 0 ;;\nesac\nexit 0\n"
+        ),
+        None => "#!/bin/sh\necho 'error: attribute missing' >&2\nexit 1\n".to_string(),
+    };
+    write_executable(&tools.join("nix"), &body);
+}
+
+const LIVE_IMPORT_EVAL_JSON: &str = r#"{"host":"halcyon","stateVersion":"26.05","tz":"America/New_York","locale":"en_US.UTF-8","keyboard":"us","desktopGnome":false,"desktopPlasma":true,"dmGdm":false,"dmSddm":true,"loaderLimine":true,"loaderSystemdBoot":false,"efiTouch":false,"kernelName":"linux-cachyos","kernelParams":["quiet"],"sysctl":{"vm.swappiness":10},"firewallTcp":[22,443],"firewallUdp":[53317],"nameservers":["1.1.1.1"],"networkmanager":true,"zramEnable":true,"zramPercent":25,"svcOpenssh":true,"svcPipewire":true,"svcRtkit":true,"svcTailscale":true,"svcLibvirtd":true,"svcDocker":true,"svcFlatpak":false,"svcSteam":true,"svcGamemode":true,"svcPcscd":true,"svcBluetooth":false,"packages":["git","ripgrep","jetbrains.idea-ultimate"],"users":[{"name":"nate","home":"/home/nate","groups":["wheel","networkmanager"],"shell":"fish"}],"hm":[{"name":"nate","packages":["ghostty"],"programs":["git","starship"]}]}"#;
+
+#[test]
+fn os_import_live_semantic_eval_maps_real_options() {
+    let src = Scratch::new("os-import-live-src");
+    let tools = Scratch::new("os-import-live-tools");
+    write_live_import_fixture(&src.path, &tools.path, Some(LIVE_IMPORT_EVAL_JSON));
+    let out = jet()
+        .args([
+            "os",
+            "import",
+            src.path.to_str().unwrap(),
+            "--host",
+            "halcyon",
+            "--no-color",
+        ])
+        .env("PATH", &tools.path)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let config = String::from_utf8_lossy(&out.stdout);
+    assert!(config.contains("nixpkgs: github@NixOS/nixpkgs/fef9403a3e4d31b0a23f0bacebbec52c248fbb51"), "{config}");
+    assert!(config.contains("network.hostName: \"halcyon\""), "{config}");
+    assert!(config.contains("network.networkmanager.enable: true"), "{config}");
+    assert!(config.contains("network.firewall.allowedTcpPorts: [22, 443]"), "{config}");
+    assert!(config.contains("filesystem.timeZone: \"America/New_York\""), "{config}");
+    assert!(config.contains("boot.loader: .Limine"), "{config}");
+    assert!(config.contains("boot.kernel: .CachyOS"), "{config}");
+    assert!(config.contains("services.desktop.plasma.enable: true"), "{config}");
+    assert!(config.contains("services.displayManager: \"sddm\""), "{config}");
+    assert!(config.contains("services.audio.pipewire.enable: true"), "{config}");
+    assert!(config.contains("services.virtualization.libvirtd.enable: true"), "{config}");
+    assert!(config.contains("services.gaming.steam.enable: true"), "{config}");
+    assert!(config.contains("performance.sysctl.vm.swappiness: 10"), "{config}");
+    assert!(config.contains("performance.zram.memoryPercent: 25"), "{config}");
+    assert!(config.contains("users.nate.shell: nixpkgs.fish"), "{config}");
+    assert!(config.contains("user.nate.homeManager: true"), "{config}");
+    assert!(config.contains("packages: [nixpkgs.[git, ripgrep]]"), "{config}");
+    assert!(config.contains("openssh: { enable: true"), "{config}");
+    assert!(config.contains("tailscale: { enable: true"), "{config}");
+}
+
+#[test]
+fn os_import_live_semantic_eval_reports_omissions() {
+    let src = Scratch::new("os-import-live-audit-src");
+    let tools = Scratch::new("os-import-live-audit-tools");
+    write_live_import_fixture(&src.path, &tools.path, Some(LIVE_IMPORT_EVAL_JSON));
+    let out_dir = Scratch::new("os-import-live-audit-out");
+    let out = jet()
+        .args([
+            "os",
+            "import",
+            src.path.to_str().unwrap(),
+            "--host",
+            "halcyon",
+            "--write",
+            "--out",
+            out_dir.path.to_str().unwrap(),
+            "--no-color",
+        ])
+        .env("PATH", &tools.path)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let audit = fs::read_to_string(out_dir.join("jetos-import-audit.json")).unwrap();
+    assert!(audit.contains("\"mode\":\"semantic-eval\""), "{audit}");
+    assert!(audit.contains("jetbrains.idea-ultimate"), "{audit}");
+    assert!(audit.contains("virtualisation.docker.enable"), "{audit}");
+    assert!(audit.contains("allowedUDPPorts"), "{audit}");
+    assert!(audit.contains("CachyOS kernel mapping"), "{audit}");
+    assert!(
+        audit.contains("Home Manager program `starship`"),
+        "{audit}"
+    );
+}
+
+#[test]
+fn os_import_live_eval_failure_is_loud() {
+    let src = Scratch::new("os-import-live-fail-src");
+    let tools = Scratch::new("os-import-live-fail-tools");
+    write_live_import_fixture(&src.path, &tools.path, None);
+    let out = jet()
+        .args([
+            "os",
+            "import",
+            src.path.to_str().unwrap(),
+            "--host",
+            "halcyon",
+            "--no-color",
+        ])
+        .env("PATH", &tools.path)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("E1289"), "{stderr}");
+    assert!(stderr.contains("attribute missing"), "{stderr}");
+    assert!(stderr.contains("--facts-only"), "{stderr}");
 }
 
 #[test]

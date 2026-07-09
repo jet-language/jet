@@ -26,6 +26,9 @@ pub struct OsFlags {
     pub disk: Option<String>,
     pub json: bool,
     pub assume_yes: bool,
+    /// `--host <name>` — consumed by the global flag parser (shared with the
+    /// Studio surface), threaded here so `jet os import` can see it.
+    pub host: Option<String>,
     /// `--real` VM tier: the hidden system backend realizes kernel/init/
     /// desktop from the pinned package set, so the plumbing generation skips
     /// its first-party boot-package auto-requirements for defaulted options.

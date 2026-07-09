@@ -137,6 +137,14 @@ fn live_num_list(root: &std::collections::BTreeMap<String, JSON::Json>, key: &st
         .unwrap_or_default()
 }
 
+fn dedup_preserving_order(values: Vec<String>) -> Vec<String> {
+    let mut seen = BTreeSet::new();
+    values
+        .into_iter()
+        .filter(|value| seen.insert(value.clone()))
+        .collect()
+}
+
 fn render_live_number(n: f64) -> String {
     if n.fract() == 0.0 {
         format!("{}", n as i64)
@@ -155,15 +163,17 @@ fn render_live_int_list(values: &[i64]) -> String {
 }
 
 /// The nixpkgs pin from the source's `flake.lock`, in the `github@owner/repo/rev`
-/// source spelling the generated `config.jet` needs for the real tier.
+/// source spelling the generated `config.jet` needs for the real tier. A
+/// tarball-type lock (channels.nixos.org) still carries the github rev, so it
+/// pins to `NixOS/nixpkgs` at that rev.
 fn live_nixpkgs_ref(source: &Path) -> Option<String> {
     let text = fs::read_to_string(source.join("flake.lock")).ok()?;
     let lock = JSON::parse(&text).ok()?;
     let locked = lock.get("nodes").ok()?.get("nixpkgs").ok()?.get("locked").ok()?;
     let locked = locked.as_object().ok()?;
-    let owner = import_json_string(locked, "owner")?;
-    let repo = import_json_string(locked, "repo")?;
     let rev = import_json_string(locked, "rev")?;
+    let owner = import_json_string(locked, "owner").unwrap_or_else(|| "NixOS".to_string());
+    let repo = import_json_string(locked, "repo").unwrap_or_else(|| "nixpkgs".to_string());
     Some(format!("github@{owner}/{repo}/{rev}"))
 }
 
@@ -301,7 +311,10 @@ fn plan_from_live_facts(
         }
     }
 
-    let (packages, omitted_packages) = import_package_list(root, "packages");
+    let (packages, omitted_packages) = {
+        let (kept, omitted) = import_package_list(root, "packages");
+        (dedup_preserving_order(kept), dedup_preserving_order(omitted))
+    };
 
     let mut hm_by_user: std::collections::BTreeMap<String, (Vec<String>, Vec<String>, Vec<String>)> =
         std::collections::BTreeMap::new();
@@ -331,12 +344,18 @@ fn plan_from_live_facts(
             if !shell.is_empty() && import_is_ident(&shell) {
                 options.push((format!("users.{name}.shell"), format!("nixpkgs.{shell}")));
             }
+            let has_home_manager = hm_by_user.contains_key(&name);
             let (hm_packages, hm_omitted, hm_programs) =
                 hm_by_user.remove(&name).unwrap_or_default();
+            let hm_packages = dedup_preserving_order(hm_packages);
+            let hm_omitted = dedup_preserving_order(hm_omitted);
             for program in &hm_programs {
                 omissions.push(format!(
                     "Home Manager program `{program}` for user `{name}` needs manual conversion"
                 ));
+            }
+            if has_home_manager {
+                options.push((format!("user.{name}.homeManager"), "true".to_string()));
             }
             users.push(NixosImportUser {
                 name: name.clone(),
@@ -344,14 +363,8 @@ fn plan_from_live_facts(
                 groups: import_json_string_array(user, "groups"),
                 packages: hm_packages,
                 omitted_packages: hm_omitted,
-                home_manager: !hm_programs.is_empty() || live_bool(root, "hmPresent"),
+                home_manager: has_home_manager,
             });
-        }
-    }
-    for user in &mut users {
-        if hm_by_user.contains_key(&user.name) || user.home_manager {
-            options.push((format!("user.{}.homeManager", user.name), "true".to_string()));
-            user.home_manager = true;
         }
     }
 

@@ -642,7 +642,7 @@ fn write_real_tier_plan(
             vec![
                 "nix".to_string(),
                 "build".to_string(),
-                ".#disk".to_string(),
+                "path:.#disk".to_string(),
                 "--no-link".to_string(),
                 "--print-out-paths".to_string(),
             ],
@@ -652,7 +652,7 @@ fn write_real_tier_plan(
             vec![
                 "nix".to_string(),
                 "build".to_string(),
-                ".#firmware".to_string(),
+                "path:.#firmware".to_string(),
                 "--no-link".to_string(),
                 "--print-out-paths".to_string(),
             ],
@@ -832,11 +832,18 @@ fn run_real_tier_build_and_boot(
 }
 
 fn nix_build(dir: &Path, target: &str) -> Result<PathBuf, String> {
+    // `path:` keeps the generated flake usable when the backend dir sits
+    // inside a user git repo (a bare `.#` ref would demand git-tracked files).
     let out = Command::new("nix")
-        .args(["build", &format!(".#{target}"), "--no-link", "--print-out-paths"])
+        .args([
+            "build",
+            &format!("path:.#{target}"),
+            "--no-link",
+            "--print-out-paths",
+        ])
         .current_dir(dir)
         .output()
-        .map_err(|e| format!("starting `nix build .#{target}` failed: {e}"))?;
+        .map_err(|e| format!("starting `nix build path:.#{target}` failed: {e}"))?;
     let log = dir.join(format!("nix-build-{target}.log"));
     let _ = fs::write(
         &log,
@@ -1298,9 +1305,9 @@ mod tests {
         let path = write_real_tier_plan(&dir_root, &gen, &system, "halcyon.qcow2").unwrap();
         let text = fs::read_to_string(&path).unwrap();
         assert!(text.contains("\"phase\":\"nix-build-disk\""));
-        assert!(text.contains("\".#disk\""));
+        assert!(text.contains("\"path:.#disk\""));
         assert!(text.contains("\"phase\":\"nix-build-firmware\""));
-        assert!(text.contains("\".#firmware\""));
+        assert!(text.contains("\"path:.#firmware\""));
         assert!(text.contains("\"phase\":\"boot-real-guest\""));
         assert!(text.contains("\"-enable-kvm\""));
         assert!(text.contains("\"virtio-gpu-pci\""));

@@ -33,9 +33,15 @@ struct NixosImportUser {
 }
 
 fn cmd_import(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 {
-    let Some(import_args) = parse_nixos_import_args(theme, args) else {
+    let Some(mut import_args) = parse_nixos_import_args(theme, args) else {
         return 2;
     };
+    // The global flag parser consumes `--host <name>` (shared with the Studio
+    // surface) before subcommand args are sliced, so accept it from there.
+    if import_args.host.is_none() {
+        import_args.host = flags.host.clone();
+    }
+    let import_args = import_args;
     let plan = match load_nixos_import_plan(&import_args) {
         Ok(plan) => plan,
         Err(e) => {
@@ -356,13 +362,29 @@ fn import_package_list(
     let mut kept = Vec::new();
     let mut omitted = Vec::new();
     for package in import_json_string_array(root, key) {
-        if import_is_ident(&package) {
+        if import_is_package_name(&package) {
             kept.push(package);
         } else {
             omitted.push(package);
         }
     }
     (kept, omitted)
+}
+
+/// Package list entries accept interior hyphens (`xdg-utils`, `btrfs-progs`)
+/// — the ratified `source.[a, b]` grammar parses them — but stay conservative
+/// elsewhere: no leading/trailing dash, no dots or version suffixes, and no
+/// hyphen segment that lexes as a Jet keyword (`codex-…-use-…` would parse
+/// as the `use` keyword mid-list).
+fn import_is_package_name(value: &str) -> bool {
+    let mut chars = value.chars();
+    let head_ok = matches!(chars.next(), Some(c) if c == '_' || c.is_ascii_alphabetic());
+    head_ok
+        && !value.ends_with('-')
+        && chars.all(|c| c == '_' || c == '-' || c.is_ascii_alphanumeric())
+        && value
+            .split('-')
+            .all(|segment| !Syntax::JET_KEYWORD_LIST.contains(&segment))
 }
 
 fn import_json_option_object(
@@ -496,15 +518,9 @@ fn render_import_packages(packages: &[String]) -> String {
 }
 
 fn render_import_user_packages(packages: &[String]) -> String {
-    if packages.is_empty() {
-        return "[]".to_string();
-    }
-    let refs = packages
-        .iter()
-        .map(|pkg| format!("nixpkgs.{pkg}"))
-        .collect::<Vec<_>>()
-        .join(", ");
-    format!("[{refs}]")
+    // Bracket-group form: `nixpkgs.man-db` outside a group parses as
+    // subtraction, while `nixpkgs.[man-db, …]` accepts hyphenated names.
+    render_import_packages(packages)
 }
 
 fn render_nixos_import_audit(plan: &NixosImportPlan) -> String {
