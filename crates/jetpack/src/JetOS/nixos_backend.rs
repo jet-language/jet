@@ -490,8 +490,12 @@ fn map_system_to_nixos(
             let attrs = parse_package_ref_names(&v);
             if !attrs.is_empty() {
                 user_lines.push(format!(
-                    "    packages = with pkgs; [ {} ];",
-                    attrs.join(" ")
+                    "    packages = map jetosPkg [ {} ];",
+                    attrs
+                        .iter()
+                        .map(|p| nix_string(p))
+                        .collect::<Vec<_>>()
+                        .join(" ")
                 ));
             }
         }
@@ -621,6 +625,15 @@ fn render_flake_nix(host: &str, mapping: &NixosMapping) -> String {
 }
 
 const CONFIGURATION_HEAD: &str = r#"{ config, pkgs, lib, ... }:
+let
+  # jetos package resolver: names come from imported package sets whose
+  # attribute may live under a package group (KDE apps live in
+  # `kdePackages.*`). A miss is a hard eval error, never a silent drop.
+  jetosPkg = name:
+    if pkgs ? ${name} then pkgs.${name}
+    else if pkgs.kdePackages ? ${name} then pkgs.kdePackages.${name}
+    else throw "jetos: package `${name}` is not in nixpkgs or kdePackages at the pinned revision";
+in
 {
   system.stateVersion = "@@STATEVERSION@@";
   system.nixos.distroName = "jetos";
@@ -699,8 +712,13 @@ fn render_configuration_nix(system: &SystemPlan, mapping: &NixosMapping) -> Stri
     }
     out.push('\n');
     out.push_str(&format!(
-        "  environment.systemPackages = with pkgs; [ {} ];\n",
-        mapping.system_packages.join(" ")
+        "  environment.systemPackages = map jetosPkg [ {} ];\n",
+        mapping
+            .system_packages
+            .iter()
+            .map(|p| nix_string(p))
+            .collect::<Vec<_>>()
+            .join(" ")
     ));
     let proof_user = resolved_option_value(system, "services.desktop.autoLogin.user")
         .unwrap_or_else(|| {

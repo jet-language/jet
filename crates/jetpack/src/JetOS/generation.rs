@@ -35,6 +35,13 @@ fn build_generation(
                 return None;
             }
         };
+        // Real tier: the hidden system backend realizes the whole nixpkgs
+        // closure inside the disk build, so per-package realization here
+        // would only duplicate the work against the registry instead of the
+        // declared pin. First-party (path) packages still realize.
+        if flags.real_tier && is_nixpkgs_source(&spec.source, &plan.table) {
+            continue;
+        }
         let entry = match realize_ref(theme, &roots, flags, &plan.table, &spec, name_w) {
             Some(entry) => entry,
             None => return None,
