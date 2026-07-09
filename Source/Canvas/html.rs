@@ -27,7 +27,7 @@ fn canvas_html_document(bootstrap: &str) -> String {
 <title>Jet Canvas</title>
 <style>
 * { box-sizing: border-box; }
-html, body { margin: 0; height: 100%; overflow: hidden; background: #05070b; color: #d7e4f7; font: 13px "Inter", "Segoe UI", system-ui, sans-serif; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: #101318; color: #d7e4f7; font: 13px "Inter", "Segoe UI", Roboto, system-ui, sans-serif; }
 body:not(.is-dev-mode) .dev-only { display: none !important; }
 button, input, select { font: inherit; }
 button { color: #d7e4f7; border: 1px solid #31445d; background: linear-gradient(#18202b, #111821); min-height: 30px; padding: 0 10px; cursor: pointer; border-radius: 4px; box-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 1px 0 rgba(0,0,0,.4); white-space: nowrap; }
@@ -96,8 +96,8 @@ button.project-card { width: 100%; text-align: left; cursor: pointer; color: inh
 .count, .tag { color: #8fb2dc; font: 11px ui-monospace, "SFMono-Regular", Consolas, monospace; }
 .search { width: 100%; margin-bottom: 8px; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-#stage { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: #05070b; }
-#jet-canvas-view { width: 100%; height: 100%; display: block; background: #05070b; }
+#stage { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: #101318; }
+#jet-canvas-view { width: 100%; height: 100%; display: block; background: #101318; }
 #canvas-dock { position: absolute; left: 10px; top: 10px; z-index: 26; display: none; gap: 6px; padding: 5px; border: 1px solid #365a7f; background: rgba(8,17,29,.92); box-shadow: 0 12px 34px rgba(0,0,0,.42); border-radius: 6px; }
 #canvas-dock button { min-height: 28px; padding: 0 8px; font: 11px ui-monospace, "SFMono-Regular", Consolas, monospace; }
 #canvas-dock button.is-active { border-color: #35c2ff; color: #e7fbff; background: #102437; }
@@ -195,19 +195,22 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
 .pin-tools.output-pin-tools { grid-template-columns: minmax(0, 1fr) 68px 46px; }
 .pin-tools [data-param-default] { grid-column: 1 / 3; }
 .pin-tools input { min-width: 0; }
-#context-menu { position: fixed; z-index: 30; display: none; min-width: 320px; max-width: min(430px, calc(100vw - 20px)); border: 1px solid #3b5f89; background: #091525; box-shadow: 0 18px 48px rgba(0,0,0,.55); padding: 8px; border-radius: 6px; }
+#context-menu { position: fixed; z-index: 30; display: none; min-width: 340px; max-width: min(470px, calc(100vw - 20px)); border: 1px solid #344b68; background: #101318; box-shadow: 0 18px 48px rgba(0,0,0,.55); padding: 8px; border-radius: 6px; }
 #context-menu.is-open { display: grid; gap: 6px; }
-#context-menu button { width: 100%; text-align: left; display: grid; grid-template-columns: 1fr auto; gap: 10px; }
+#context-menu button { width: 100%; text-align: left; }
 #context-menu .menu-title { color: #dbeafe; font-size: 11px; letter-spacing: .1em; text-transform: uppercase; padding: 4px 6px; }
 .action-palette-head { display: grid; gap: 6px; padding: 4px; border-bottom: 1px solid #203954; }
 .action-palette-head input { width: 100%; border-color: #3b5f89; background: #07111f; }
 .action-context { color: #8fb2dc; font: 11px ui-monospace, "SFMono-Regular", Consolas, monospace; display: flex; gap: 7px; align-items: center; min-width: 0; }
 .action-context .pin-port { width: 9px; height: 9px; box-shadow: 0 0 0 2px rgba(255,255,255,.07), 0 0 12px currentColor; }
 .action-results { display: grid; gap: 5px; max-height: min(360px, calc(100vh - 170px)); overflow: auto; padding: 2px; }
-.action-result { border-color: #284866; background: #0d1826; min-height: 44px; }
+.action-category { display: grid; gap: 4px; }
+.action-category h3 { margin: 8px 4px 2px; color: #8fb2dc; font: 10px ui-monospace, "SFMono-Regular", Consolas, monospace; letter-spacing: .12em; text-transform: uppercase; }
+.action-result { --action-color: #8a8f98; border-color: color-mix(in srgb, var(--action-color) 48%, #284866); background: #151922; min-height: 44px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 9px; align-items: center; }
+.action-glyph { display: grid; place-items: center; width: 22px; height: 22px; color: var(--action-color); border: 1px solid color-mix(in srgb, var(--action-color) 62%, #162131); background: color-mix(in srgb, var(--action-color) 13%, #101318); border-radius: 4px; font-weight: 700; }
 .action-result.is-favorite { border-color: #facc15; box-shadow: inset 3px 0 0 #facc15; }
-.action-result:hover, .action-result:focus-visible { border-color: #35c2ff; background: #102942; }
-.action-result small { color: #9aaecb; display: block; margin-top: 2px; overflow-wrap: anywhere; }
+.action-result:hover, .action-result:focus-visible { border-color: var(--action-color); background: #1d2129; }
+.action-result small { color: #9aaecb; display: block; margin-top: 2px; overflow-wrap: anywhere; font-family: "JetBrains Mono", ui-monospace, "SFMono-Regular", Consolas, monospace; }
 .action-empty { color: #8da4c2; padding: 9px; border: 1px dashed #31445d; border-radius: 4px; font: 11px ui-monospace, "SFMono-Regular", Consolas, monospace; }
 #first-run-tour { position: fixed; inset: auto 18px 42px auto; z-index: 29; width: min(340px, calc(100vw - 36px)); display: none; gap: 10px; padding: 12px; border: 1px solid #365a7f; border-radius: 6px; background: rgba(7,16,28,.95); box-shadow: 0 22px 70px rgba(0,0,0,.5); color: #c9dcf2; }
 #first-run-tour.is-open { display: grid; }

@@ -90,7 +90,7 @@ case "$cmdline" in
         . "$system/etc/profile"
     fi
     use_system_nix "$system/nix"
-    if { [ -e "$system/sbin/init" ] || [ -L "$system/sbin/init" ]; } && command -v switch_root >/dev/null 2>&1; then
+    if { [ -e "$system/sbin/init" ] || [ -L "$system/sbin/init" ]; } && command -v chroot >/dev/null 2>&1; then
         generation_target="/var/lib/jetos/generations/@JETOS_GENERATION@"
         mkdir -p /sysroot/run /sysroot/proc /sysroot/dev /sysroot/sys
         rm -f /sysroot/run/current-system
@@ -107,8 +107,8 @@ case "$cmdline" in
         mount --move /dev /sysroot/dev 2>/dev/null || mount -t devtmpfs devtmpfs /sysroot/dev 2>/dev/null || true
         mount --move /sys /sysroot/sys 2>/dev/null || mount -t sysfs sysfs /sysroot/sys 2>/dev/null || true
         echo "jetos run: handing off to installed systemd"
-        exec switch_root /sysroot /run/current-system/sbin/init systemd.unit=graphical.target
-        echo "jetos run: switch_root failed; falling back to emergency console"
+        exec chroot /sysroot /run/current-system/sbin/init systemd.unit=graphical.target
+        echo "jetos run: systemd handoff failed; falling back to emergency console"
         mkdir -p /proc /dev /sys
         mount -t proc proc /proc 2>/dev/null || true
         mount -t devtmpfs devtmpfs /dev 2>/dev/null || true
@@ -352,6 +352,7 @@ fn installer_tool_overlay_entries() -> std::io::Result<Vec<OwnedCpioEntry>> {
         "poweroff",
         "halt",
         "setsid",
+        "chroot",
         "switch_root",
     ] {
         let tool_path = find_path_tool(tool).ok_or_else(|| {

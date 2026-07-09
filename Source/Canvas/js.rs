@@ -68,6 +68,8 @@ pub fn canvas_js() -> String {
   let hit = [];
   let pinPoints = new Map();
   let pinHit = [];
+  let pinEditorHit = [];
+  let connectedPinIds = new Set();
   let latestDoc = null;
   let latestProject = null;
   let selectedSourceId = null;
@@ -109,6 +111,35 @@ pub fn canvas_js() -> String {
   ];
   let actionEntries = [];
   let contextMenuState = null;
+  const UI_FONT = '"Inter", "Segoe UI", Roboto, system-ui, sans-serif';
+  const MONO_FONT = '"JetBrains Mono", ui-monospace, "SFMono-Regular", Consolas, monospace';
+  const TYPE_COLOR_MAP = {
+    exec: "#f2f4f8",
+    control: "#f2f4f8",
+    Bool: "#c0392b",
+    Int: "#2ec4b6",
+    I64: "#2ec4b6",
+    U64: "#2ec4b6",
+    Float: "#9acd32",
+    F32: "#9acd32",
+    F64: "#9acd32",
+    String: "#c678dd",
+    Char: "#e8a2c8",
+    Map: "#e5a03c",
+    Result: "#fb7185",
+    Struct: "#5b8dd9",
+    Enum: "#4f9e5a",
+    Fn: "#a78bfa",
+    Void: "#6b7280",
+    unknown: "#8a8f98"
+  };
+  const NODE_ARCHETYPE_STYLES = {
+    entry: { accent: "#b83647", header: "#b83647", header2: "#6f1e2b", label: "Entry", glyph: "ƒ", subtitle: "entry" },
+    function_exec: { accent: "#4f83b6", header: "#315d84", header2: "#1f3e5b", label: "Function", glyph: "ƒ", subtitle: "function" },
+    function_pure: { accent: "#4f9e5a", header: "#357745", header2: "#234f31", label: "Pure function", glyph: "ƒ", subtitle: "pure" },
+    control: { accent: "#f2f4f8", header: "#2c333d", header2: "#151a21", label: "Control", glyph: "◇", subtitle: "control" },
+    value: { accent: "#8a8f98", header: "#252b34", header2: "#151a21", label: "Value", glyph: "•", subtitle: "value" }
+  };
 
   function storedFlag(name) {
     try { return window.localStorage && window.localStorage.getItem(name) === "1"; }
@@ -197,12 +228,23 @@ pub fn canvas_js() -> String {
     const graph = currentGraphOrNull();
     if (!graph) return;
     const cols = Math.max(2, Math.ceil(Math.sqrt(graph.nodes.length || 1)));
+    const columnWidths = new Array(cols).fill(0);
+    const rowHeights = [];
     graph.nodes.forEach((node, i) => {
       const col = i % cols;
       const row = Math.floor(i / cols);
-      setNodeViewPosition(node, 80 + col * 360, 70 + row * 190);
+      const size = nodeSize(graph, node);
+      columnWidths[col] = Math.max(columnWidths[col], size.w);
+      rowHeights[row] = Math.max(rowHeights[row] || 0, size.h);
     });
-    wireStyle = "straight";
+    const columnX = columnWidths.map((_, i) => 80 + columnWidths.slice(0, i).reduce((sum, width) => sum + width + 92, 0));
+    const rowY = rowHeights.map((_, i) => 70 + rowHeights.slice(0, i).reduce((sum, height) => sum + height + 74, 0));
+    graph.nodes.forEach((node, i) => {
+      const col = i % cols;
+      const row = Math.floor(i / cols);
+      setNodeViewPosition(node, columnX[col], rowY[row]);
+    });
+    wireStyle = "bezier";
     showToast("Graph tidied");
     drawGraph(latestDoc);
   }
@@ -389,14 +431,17 @@ pub fn canvas_js() -> String {
   function nodeY(node) { const o = autoNodeOffset(node); return rawNodeY(node) + o.y; }
 
   function colorForType(type) {
-    if (type === "Bool") return "#ef4444";
-    if (type === "String") return "#22c55e";
-    if (type === "Int" || type === "I64" || type === "U64") return "#38bdf8";
-    if (type === "Float" || type === "F32" || type === "F64") return "#2dd4bf";
-    if (type === "Void" || type === "control" || type === "exec") return "#f8fafc";
-    if (String(type || "").endsWith("?")) return "#fb7185";
-    if (String(type || "").startsWith("[")) return "#f59e0b";
-    return "#a78bfa";
+    const t = String(type || "unknown").trim();
+    if (TYPE_COLOR_MAP[t]) return TYPE_COLOR_MAP[t];
+    if (t === "IntN" || /^U?\d+$/.test(t) || /^I\d+$/.test(t)) return TYPE_COLOR_MAP.Int;
+    if (t.startsWith("[")) return colorForType(t.slice(1, -1).trim() || "unknown");
+    if (t.endsWith("?")) return colorForType(t.slice(0, -1).trim() || "unknown");
+    if (/Result|Error|Fallible/.test(t)) return TYPE_COLOR_MAP.Result;
+    if (/Map|Dict/.test(t)) return TYPE_COLOR_MAP.Map;
+    if (/Enum|Variant/.test(t)) return TYPE_COLOR_MAP.Enum;
+    if (/Fn|fn\(|=>/.test(t)) return TYPE_COLOR_MAP.Fn;
+    if (/^[A-Z][A-Za-z0-9_]*(::[A-Z][A-Za-z0-9_]*)*$/.test(t)) return TYPE_COLOR_MAP.Struct;
+    return TYPE_COLOR_MAP.unknown;
   }
 
   function wireColor(wire, from) {
@@ -409,7 +454,7 @@ pub fn canvas_js() -> String {
 
   function pinRail(pin) {
     if (!pin) return "data";
-    if ((pin.type || "") === "Void" || pin.name === "exec" || pin.capability === "control") return "control";
+    if ((pin.type || "") === "exec" || pin.name === "exec" || pin.capability === "control") return "control";
     if (pin.fallible) return "fallible";
     if (pin.effect_grant_need) return "effect";
     return "data";
@@ -643,33 +688,41 @@ pub fn canvas_js() -> String {
 
   function drawPin(pin, x, y, dir, recordHit = true) {
     const color = colorForType(pin.type || "unknown");
-    const rail = pinRail(pin);
-    const r = isExecPin(pin) ? Math.max(7, 9 * view.zoom) : Math.max(5.5, 7 * view.zoom);
+    const connected = connectedPinIds.has(pin.pin_id);
+    const r = isExecPin(pin) ? Math.max(6.5, 8 * view.zoom) : Math.max(5.2, 5.8 * view.zoom);
+    if (connected) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(x, y, Math.max(8, 10 * view.zoom), 0, Math.PI * 2);
+      ctx.fillStyle = hexToRgba(color, .25);
+      ctx.shadowColor = hexToRgba(color, .45);
+      ctx.shadowBlur = 4 * view.zoom;
+      ctx.fill();
+      ctx.restore();
+    }
     ctx.beginPath();
-    if (rail === "control") {
+    if (isExecPin(pin)) {
       ctx.moveTo(x - r * .9, y - r);
       ctx.lineTo(x + r * 1.25, y);
       ctx.lineTo(x - r * .9, y + r);
       ctx.closePath();
-    } else if (rail === "fallible") {
-      ctx.moveTo(x, y - r); ctx.lineTo(x + r, y); ctx.lineTo(x, y + r); ctx.lineTo(x - r, y); ctx.closePath();
     } else {
-      ctx.arc(x, y, r * .86, 0, Math.PI * 2);
+      ctx.arc(x, y, r, 0, Math.PI * 2);
     }
-    ctx.fillStyle = color;
+    ctx.fillStyle = connected ? color : "rgba(8,12,18,.98)";
     ctx.fill();
     if (hoverPin && hoverPin.pin_id === pin.pin_id) {
       ctx.beginPath();
-      ctx.arc(x, y, 10, 0, Math.PI * 2);
+      ctx.arc(x, y, 11 * view.zoom, 0, Math.PI * 2);
       ctx.strokeStyle = "#fef08a";
-      ctx.lineWidth = 2;
+      ctx.lineWidth = Math.max(1.3, 1.6 * view.zoom);
       ctx.stroke();
     }
     ctx.lineWidth = Math.max(1.4, 1.8 * view.zoom);
-    ctx.strokeStyle = isExecPin(pin) ? "#02060a" : "rgba(2,6,10,.9)";
+    ctx.strokeStyle = color;
     ctx.stroke();
     if (recordHit) {
-      const hitR = Math.max(18, 23 * view.zoom);
+      const hitR = Math.max(12, 18 * view.zoom);
       pinPoints.set(pin.pin_id, { x, y, color, pin });
       pinHit.push({ x: x - hitR, y: y - hitR, w: hitR * 2, h: hitR * 2, cx: x, cy: y, pin });
     }
@@ -692,9 +745,9 @@ pub fn canvas_js() -> String {
 
   function drawPinLabel(pin, x, y, align) {
     const label = pinName(pin);
-    ctx.font = `${Math.max(9, 11.5 * view.zoom)}px ui-monospace, Consolas, monospace`;
+    ctx.font = `${Math.max(9, 11 * view.zoom)}px ${UI_FONT}`;
     ctx.textAlign = align;
-    ctx.fillStyle = isExecPin(pin) ? "#edf6ff" : colorForType(pin.type || "unknown");
+    ctx.fillStyle = isExecPin(pin) ? "rgba(242,244,248,.86)" : "rgba(234,242,255,.70)";
     ctx.fillText(clipText(label, 24), x, y);
     ctx.textAlign = "left";
   }
@@ -731,33 +784,73 @@ pub fn canvas_js() -> String {
   }
 
   function drawSocketRow(pin, x, y, w, dir, recordHit) {
-    const rowH = 24 * view.zoom;
     const px = dir === "input" ? x : x + w;
-    const inset = 12 * view.zoom;
-    const labelX = dir === "input" ? x + 28 * view.zoom : x + w - 28 * view.zoom;
+    const labelX = dir === "input" ? x + 22 * view.zoom : x + w - 22 * view.zoom;
     const labelAlign = dir === "input" ? "left" : "right";
-    if (isExecPin(pin)) {
-      const railStart = dir === "input" ? x + 10 * view.zoom : x + w - 126 * view.zoom;
-      const railEnd = dir === "input" ? x + 126 * view.zoom : x + w - 10 * view.zoom;
-      ctx.beginPath();
-      ctx.moveTo(railStart, y);
-      ctx.lineTo(railEnd, y);
-      ctx.strokeStyle = "rgba(248,250,252,.52)";
-      ctx.lineWidth = Math.max(1.8, 2.4 * view.zoom);
-      ctx.stroke();
-      drawPin(pin, px, y, dir, recordHit);
-      drawPinLabel(pin, labelX, y + 4 * view.zoom, labelAlign);
-      return;
-    }
-    ctx.beginPath();
-    roundRect(x + inset, y - rowH * .56, w - inset * 2, rowH, 4 * view.zoom);
-    ctx.fillStyle = hexToRgba(colorForType(pin.type), .10);
-    ctx.fill();
-    ctx.strokeStyle = hexToRgba(colorForType(pin.type), .28);
-    ctx.lineWidth = Math.max(.8, view.zoom);
-    ctx.stroke();
     drawPin(pin, px, y, dir, recordHit);
     drawPinLabel(pin, labelX, y + 4 * view.zoom, labelAlign);
+  }
+
+  function editablePinKind(pin) {
+    const t = String(pin && pin.type || "");
+    if (t === "Bool") return "bool";
+    if (["Int", "I64", "U64", "Float", "F32", "F64"].includes(t)) return "number";
+    if (t === "String" || t === "Char") return "string";
+    if (/Enum|Variant/.test(t)) return "enum";
+    return "";
+  }
+
+  function inlineDefaultForPin(graph, pin) {
+    if (!graph || !pin || pin.direction !== "input" || connectedPinIds.has(pin.pin_id)) return null;
+    const expr = inlineForPin(graph, pin);
+    if (!expr) return null;
+    return expr;
+  }
+
+  function defaultEditorValue(expr) {
+    return String((expr && expr.source) || "").trim();
+  }
+
+  function drawPinDefaultEditor(graph, pin, x, y, recordHit) {
+    const kind = editablePinKind(pin);
+    if (!kind || pin.direction !== "input" || connectedPinIds.has(pin.pin_id)) return 0;
+    const expr = inlineDefaultForPin(graph, pin);
+    const source = defaultEditorValue(expr);
+    const color = colorForType(pin.type || "unknown");
+    const boxW = Math.min(96, kind === "bool" ? 24 : kind === "enum" ? 88 : 76) * view.zoom;
+    const boxH = 20 * view.zoom;
+    const bx = x;
+    const by = y - boxH / 2;
+    roundRect(bx, by, boxW, boxH, 4 * view.zoom);
+    ctx.fillStyle = "rgba(7,12,19,.92)";
+    ctx.fill();
+    ctx.strokeStyle = expr ? hexToRgba(color, .62) : "rgba(107,114,128,.52)";
+    ctx.lineWidth = Math.max(.8, view.zoom);
+    ctx.stroke();
+    if (kind === "bool") {
+      ctx.strokeStyle = expr ? color : "rgba(138,143,152,.75)";
+      ctx.lineWidth = Math.max(1, 1.4 * view.zoom);
+      ctx.strokeRect(bx + 6 * view.zoom, by + 5 * view.zoom, 10 * view.zoom, 10 * view.zoom);
+      if (source === "true") {
+        ctx.beginPath();
+        ctx.moveTo(bx + 8 * view.zoom, by + 10 * view.zoom);
+        ctx.lineTo(bx + 11 * view.zoom, by + 13 * view.zoom);
+        ctx.lineTo(bx + 16 * view.zoom, by + 7 * view.zoom);
+        ctx.stroke();
+      }
+    } else {
+      ctx.font = `${Math.max(8, 10 * view.zoom)}px ${kind === "string" ? UI_FONT : MONO_FONT}`;
+      ctx.fillStyle = expr ? "rgba(238,247,255,.82)" : "rgba(138,143,152,.72)";
+      ctx.textAlign = "left";
+      ctx.fillText(clipText(source || "default", kind === "string" ? 12 : 10), bx + 7 * view.zoom, y + 3.5 * view.zoom);
+      if (kind === "enum") {
+        ctx.fillStyle = color;
+        ctx.fillText("▾", bx + boxW - 14 * view.zoom, y + 3.5 * view.zoom);
+      }
+    }
+    if (recordHit) pinEditorHit.push({ x: bx, y: by, w: boxW, h: boxH, pin, expr, kind });
+    window.__jetCanvasPinDefaultEditors = true;
+    return boxW + 8 * view.zoom;
   }
 
   function compatibleActionType(accepted, actual) {
@@ -768,15 +861,25 @@ pub fn canvas_js() -> String {
     return numericType(accepted) && numericType(actual);
   }
 
+  function actionReturnType(action) {
+    if (action.ret) return action.ret;
+    const signature = String(action.signature || "");
+    const m = signature.match(/->\s*([A-Za-z0-9_\[\]?:.]+)/);
+    return m ? m[1] : "";
+  }
+
   function functionsForPin(pin) {
-    if (!pin) return actionEntries.slice(0, 8);
+    if (!pin) return actionEntries.slice(0, 96);
     const targetType = pin.type || null;
     let entries = actionEntries.filter((entry) => {
       if (!targetType) return true;
-      return (entry.pins || []).some((p) => p.direction === "input" && compatibleActionType(p.type, targetType));
+      if (pin.direction === "output") {
+        return (entry.pins || []).some((p) => p.direction === "input" && compatibleActionType(p.type, targetType));
+      }
+      return compatibleActionType(pin.type, actionReturnType(entry) || entry.ret || "Value");
     });
     if (entries.length === 0) entries = actionEntries;
-    return entries.slice(0, 8);
+    return entries.slice(0, 96);
   }
 
   function closeContextMenu() {
@@ -791,17 +894,58 @@ pub fn canvas_js() -> String {
     return String(action.title || "").toLowerCase().includes(q) || String(action.detail || "").toLowerCase().includes(q) || String(action.group || "").toLowerCase().includes(q);
   }
 
+  function paletteCategoryForAction(action) {
+    const group = String(action.group || "").toLowerCase();
+    if (group.includes("flow") || ["insert_branch", "insert_switch", "insert_loop", "insert_fallible_rail"].includes(action.op)) return "Flow";
+    if (group.includes("variable") || group.includes("binding") || action.op === "promote_to_binding") return "Variables";
+    if (action.kind === "canvas.core_catalog" || group.includes("core")) return "Core";
+    if (action.kind === "project_function" || group.includes("project") || action.kind === "canvas.action") return "Project";
+    return "Flow";
+  }
+
+  function paletteActionGlyph(action) {
+    if (action.kind === "canvas.core_catalog" || action.kind === "project_function" || action.kind === "canvas.action") return action.pure ? "ƒ" : "ƒ";
+    if (action.op === "insert_branch") return "◇";
+    if (action.op === "insert_loop") return "↻";
+    if (action.op === "insert_switch") return "⇉";
+    return "•";
+  }
+
+  function paletteActionColor(action) {
+    if (action.kind === "canvas.core_catalog" || action.kind === "project_function" || action.kind === "canvas.action") return action.pure ? NODE_ARCHETYPE_STYLES.function_pure.accent : NODE_ARCHETYPE_STYLES.function_exec.accent;
+    if (action.op === "insert_branch" || action.op === "insert_switch" || action.op === "insert_loop") return "#f2f4f8";
+    return colorForType(action.ret || action.type || "unknown");
+  }
+
+  function paletteTypeSummary(action) {
+    const signature = action.signature || action.detail || "";
+    if (signature) return signature;
+    if ((action.pins || []).length) return (action.pins || []).filter((p) => p.direction === "input").map((p) => p.type || "Value").join(", ") + " -> " + (action.ret || "Void");
+    return action.detail || "";
+  }
+
   function renderActionPalette() {
     if (!contextMenuState) return;
     const query = contextMenuState.query || "";
     const matches = contextMenuState.actions
       .filter((action) => actionMatchesQuery(action, query))
       .sort((a, b) => rankAction(b) - rankAction(a) || String(a.title).localeCompare(String(b.title)))
-      .slice(0, 18);
+      .slice(0, 80);
     const context = contextMenuState.pin ? `${contextMenuState.pin.name}: ${contextMenuState.pin.type}` : (contextMenuState.context || "source-backed actions");
     const port = contextMenuState.pin ? pinPortHtml(contextMenuState.pin.type || "Value") : "";
     const favorites = favoriteSet();
-    contextMenu.innerHTML = `<div class="action-palette-head"><div class="menu-title">${escapeHtml(contextMenuState.title)}</div><div class="action-context">${port}<span>${escapeHtml(context)}</span><span class="tag">${matches.length}/${contextMenuState.actions.length}</span></div><input id="action-palette-search" placeholder="Search actions" value="${escapeAttr(query)}"></div><div class="action-results">${matches.length ? matches.map((action) => { const id = action.action_id || action.callee || action.title; const fav = favorites.has(id); return `<button class="action-result${fav ? " is-favorite" : ""}" data-menu-action="${escapeAttr(action.index)}"><span>${fav ? "★ " : ""}${escapeHtml(action.title)}<small>${escapeHtml(action.detail || "")}</small></span><span class="tag">${escapeHtml(action.group || "")}</span></button>`; }).join("") : "<div class=\"action-empty\">No matching actions</div>"}</div>`;
+    const categories = ["Flow", "Variables", "Project", "Core"].map((category) => {
+      const rows = matches.filter((action) => paletteCategoryForAction(action) === category).slice(0, category === "Core" ? 36 : 20);
+      if (!rows.length && query) return "";
+      const body = rows.length ? rows.map((action) => {
+        const id = action.action_id || action.callee || action.title;
+        const fav = favorites.has(id);
+        const color = paletteActionColor(action);
+        return `<button class="action-result${fav ? " is-favorite" : ""}" data-menu-action="${escapeAttr(action.index)}" style="--action-color:${escapeAttr(color)}"><span class="action-glyph">${escapeHtml(paletteActionGlyph(action))}</span><span>${fav ? "★ " : ""}${escapeHtml(action.title)}<small>${escapeHtml(paletteTypeSummary(action))}</small></span><span class="tag">${escapeHtml(category)}</span></button>`;
+      }).join("") : "<div class=\"action-empty\">No actions</div>";
+      return `<section class="action-category"><h3>${escapeHtml(category)}</h3>${body}</section>`;
+    }).join("");
+    contextMenu.innerHTML = `<div class="action-palette-head"><div class="menu-title">${escapeHtml(contextMenuState.title)}</div><div class="action-context">${port}<span>${escapeHtml(context)}</span><span class="tag">${matches.length}/${contextMenuState.actions.length}</span></div><input id="action-palette-search" placeholder="Search actions" value="${escapeAttr(query)}"></div><div class="action-results">${categories || "<div class=\"action-empty\">No matching actions</div>"}</div>`;
     const input = document.getElementById("action-palette-search");
     if (input) {
       input.addEventListener("input", () => {
@@ -863,8 +1007,13 @@ pub fn canvas_js() -> String {
     const actions = entries.map((entry) => ({
       title: entry.title,
       detail: entry.detail,
-      group: "call",
-      run: () => runPalette(entry)
+      group: paletteCategoryForAction(entry),
+      kind: entry.kind,
+      signature: entry.signature,
+      pure: entry.pure,
+      pins: entry.pins,
+      ret: entry.ret,
+      run: () => runPalette(entry, pin)
     }));
     actions.push({
       title: "Use same value twice",
@@ -1121,17 +1270,17 @@ pub fn canvas_js() -> String {
         const name = window.prompt("Function name", "helper");
         if (name) postTransaction({ schema_version: 1, op: "create_function", revision: latestDoc.revision, name, params: "", ret_type: "Int" });
       } },
-      { title: "Show source", detail: "toggle", group: "view", run: () => setViewMode("code") },
-      { title: "Align top", detail: "local view state", group: "layout", run: () => alignSelectedNodes("y") },
-      { title: "Align left", detail: "local view state", group: "layout", run: () => alignSelectedNodes("x") },
-      { title: "Auto tidy", detail: "local view state", group: "layout", run: tidyGraphLayout },
-      { title: "Straighten wires", detail: "local view state", group: "layout", run: () => { wireStyle = "straight"; showToast("Wires straightened"); drawGraph(latestDoc); } },
-      { title: "Add reroute knot", detail: "local view state", group: "layout", run: addRerouteKnot },
+      { title: "Show source", detail: "toggle", group: "Flow", run: () => setViewMode("code") },
+      { title: "Align top", detail: "local view state", group: "Flow", run: () => alignSelectedNodes("y") },
+      { title: "Align left", detail: "local view state", group: "Flow", run: () => alignSelectedNodes("x") },
+      { title: "Auto tidy", detail: "local view state", group: "Flow", run: tidyGraphLayout },
+      { title: "Straighten wires", detail: "Bezier wires stay source-faithful", group: "Flow", run: () => { wireStyle = "bezier"; showToast("Wires use Blueprint curves"); drawGraph(latestDoc); } },
+      { title: "Add reroute knot", detail: "local view state", group: "Flow", run: addRerouteKnot },
       { title: "Bookmark graph", detail: "local editor state", group: "navigation", run: bookmarkCurrentGraph },
       { title: "Run graph", detail: "debug overlay", group: "run", run: runCurrentGraph }
     ];
     for (const item of palette.concat(actionEntries).slice(0, 36)) {
-      actions.push({ title: item.title, detail: item.detail || "", group: item.op === "preview_canvas_action" ? "built-in" : "node", run: () => runPalette(item) });
+      actions.push({ title: item.title, detail: item.detail || "", group: item.group || (item.op === "preview_canvas_action" ? "Project" : "Flow"), kind: item.kind, signature: item.signature, pure: item.pure, pins: item.pins, ret: item.ret, op: item.op, run: () => runPalette(item) });
     }
     return actions;
   }
@@ -1147,11 +1296,11 @@ pub fn canvas_js() -> String {
       .map((item) => ({
         title: item.title,
         detail: item.detail,
-        group: "core",
-        run: () => {
-          showToast("Core catalog entry is read-only");
-          details.innerHTML = `<h2>Core</h2><div class="signature-source"><code>${escapeHtml(item.signature || item.title)}</code><span>${escapeHtml(item.summary || "docs/reference/core-library.md")}</span></div>`;
-        }
+        group: "Core",
+        kind: item.kind,
+        signature: item.signature,
+        pure: item.pure,
+        run: () => runPalette(item)
       }));
     openActionPalette(window.innerWidth / 2 - 210, 72, "Core catalog", actions, { context: "core.* modules and methods", query });
   }
@@ -1305,8 +1454,8 @@ pub fn canvas_js() -> String {
   function reflowGraph(graph) {
     autoNodeOffsets = new Map();
     if (!graph || !graph.nodes || graph.nodes.length === 0) return;
-    const rowGap = 88;
-    const colGap = 22;
+    const rowGap = 74;
+    const colGap = 48;
     const rows = [];
     for (const node of graph.nodes.slice().sort((a, b) => rawNodeY(a) - rawNodeY(b) || rawNodeX(a) - rawNodeX(b))) {
       let row = rows.find((candidate) => Math.abs(candidate.y - rawNodeY(node)) < rowGap);
@@ -1318,20 +1467,33 @@ pub fn canvas_js() -> String {
     }
     for (const row of rows) {
       let cursor = -Infinity;
-      let previous = null;
       for (const node of row.nodes.sort((a, b) => rawNodeX(a) - rawNodeX(b))) {
         const x = rawNodeX(node);
         const size = nodeSize(graph, node);
         const shift = Math.max(0, cursor - x);
-        if (previous && shift > 0 && previous.kind === node.kind) {
-          autoNodeOffsets.set(node.node_id, { x: 0, y: size.h + colGap });
-          cursor = Math.max(cursor, x + size.w + colGap);
-        } else {
-          autoNodeOffsets.set(node.node_id, { x: shift, y: 0 });
-          cursor = x + shift + size.w + colGap;
-          previous = node;
+        autoNodeOffsets.set(node.node_id, { x: shift, y: 0 });
+        cursor = x + shift + size.w + colGap;
+      }
+    }
+    const placed = [];
+    for (const node of graph.nodes.slice().sort((a, b) => nodeY(a) - nodeY(b) || nodeX(a) - nodeX(b))) {
+      const size = nodeSize(graph, node);
+      let offset = autoNodeOffset(node);
+      let box = { x: rawNodeX(node) + offset.x, y: rawNodeY(node) + offset.y, w: size.w, h: size.h };
+      let moved = true;
+      while (moved) {
+        moved = false;
+        for (const other of placed) {
+          const overlapX = box.x < other.x + other.w + colGap && box.x + box.w + colGap > other.x;
+          const overlapY = box.y < other.y + other.h + 28 && box.y + box.h + 28 > other.y;
+          if (overlapX && overlapY) {
+            box.y = other.y + other.h + 36;
+            moved = true;
+          }
         }
       }
+      autoNodeOffsets.set(node.node_id, { x: offset.x, y: box.y - rawNodeY(node) });
+      placed.push(box);
     }
   }
 
@@ -1367,18 +1529,14 @@ pub fn canvas_js() -> String {
   }
 
   function drawGrid(size) {
-    const grad = ctx.createRadialGradient(size.width * .5, size.height * .42, 40, size.width * .5, size.height * .42, Math.max(size.width, size.height));
-    grad.addColorStop(0, "#101a27");
-    grad.addColorStop(.48, "#08111c");
-    grad.addColorStop(1, "#05080d");
-    ctx.fillStyle = grad;
+    ctx.fillStyle = "#101318";
     ctx.fillRect(0, 0, size.width, size.height);
-    const major = 96 * view.zoom;
-    const minor = 24 * view.zoom;
+    const major = 128 * view.zoom;
+    const minor = 16 * view.zoom;
     ctx.lineWidth = 1;
     for (const step of [minor, major]) {
       if (step < 6) continue;
-      ctx.strokeStyle = step === major ? "rgba(56,82,110,.72)" : "rgba(32,43,57,.72)";
+      ctx.strokeStyle = step === major ? "#20262f" : "#161a21";
       ctx.beginPath();
       let ox = view.x % step;
       let oy = view.y % step;
@@ -1440,37 +1598,26 @@ pub fn canvas_js() -> String {
   }
 
   function nodeStyle(node, graph) {
-    const table = {
-      entry: { accent: "#35c2ff", header: "#123247", fill: "#101923", label: "Function", glyph: "FN" },
-      call: { accent: "#7c8cff", header: "#20245a", fill: "#111423", label: "Call", glyph: "CALL" },
-      method: { accent: "#b48cff", header: "#312052", fill: "#151020", label: "Method", glyph: "M" },
-      variant: { accent: "#d58cff", header: "#3a1d4a", fill: "#17101f", label: "Variant", glyph: "V" },
-      binding: { accent: "#5ee0a0", header: "#153f30", fill: "#0f1a17", label: "Set variable", glyph: "SET" },
-      assign: { accent: "#ffb454", header: "#4a3014", fill: "#1c160e", label: "Assign", glyph: "SET" },
-      variable_get: { accent: "#7ee787", header: "#193b24", fill: "#0d1711", label: "Get variable", glyph: "GET" },
-      constant: { accent: "#f6d365", header: "#4d3a12", fill: "#1a150a", label: "Constant", glyph: "LIT" },
-      branch: { accent: "#ff7b72", header: "#4b1f23", fill: "#1c1114", label: "Branch", glyph: "IF" },
-      dispatch: { accent: "#ff9f43", header: "#4b2d0d", fill: "#1b140a", label: "Dispatch", glyph: "==" },
-      loop: { accent: "#22d3ee", header: "#123d45", fill: "#0d181c", label: "Loop", glyph: "LOOP" },
-      return: { accent: "#6ee7b7", header: "#144335", fill: "#0c1915", label: "Return", glyph: "RET" },
-      fallible: { accent: "#fb7185", header: "#4c1722", fill: "#1c1014", label: "Fallible", glyph: "?" },
-      flow: { accent: "#f8fafc", header: "#2d3440", fill: "#11161d", label: "Flow", glyph: "GO" },
-      yield: { accent: "#67e8f9", header: "#134250", fill: "#0e1a1f", label: "Yield", glyph: "Y" }
-    };
-    const style = table[node.kind] || { accent: "#a78bfa", header: "#2b2141", fill: "#14111d", label: node.kind || "Node", glyph: "N" };
+    const archetype = node.archetype || (node.kind === "entry" ? "entry" : node.kind === "variable_get" || node.kind === "constant" ? "value" : "function_exec");
+    const style = Object.assign({ fill: "rgba(29,33,41,.96)" }, NODE_ARCHETYPE_STYLES[archetype] || NODE_ARCHETYPE_STYLES.value);
     if (node.kind === "constant") {
       const out = pinsForNode(graph, node, "output", false)[0];
-      return Object.assign({}, style, { accent: colorForType(out && out.type || "unknown") });
+      return Object.assign({}, style, { accent: colorForType(out && out.type || "unknown"), header: colorForType(out && out.type || "unknown"), label: "Literal", glyph: "•", subtitle: "literal" });
     }
+    if (node.kind === "variable_get") {
+      const out = pinsForNode(graph, node, "output", false)[0];
+      return Object.assign({}, style, { accent: colorForType(out && out.type || "unknown"), header: colorForType(out && out.type || "unknown"), label: "Value", glyph: "•", subtitle: "value" });
+    }
+    if (node.kind === "binding" || node.kind === "assign") return Object.assign({}, NODE_ARCHETYPE_STYLES.function_exec, { label: "Set variable", subtitle: "write local binding", glyph: "ƒ", accent: "#4f9e5a", header: "#2f6f43", header2: "#1e4b31" });
+    if (node.kind === "branch") return Object.assign({}, NODE_ARCHETYPE_STYLES.control, { glyph: "◇", subtitle: "branch" });
+    if (node.kind === "dispatch") return Object.assign({}, NODE_ARCHETYPE_STYLES.control, { glyph: "⇉", subtitle: "switch" });
+    if (node.kind === "loop") return Object.assign({}, NODE_ARCHETYPE_STYLES.control, { glyph: "↻", subtitle: "loop" });
+    if (node.kind === "return") return Object.assign({}, NODE_ARCHETYPE_STYLES.control, { glyph: "⏎", subtitle: "return", accent: "#7dd3a6" });
     return style;
   }
 
   function nodeSubtitle(node) {
-    if (node.kind === "variable_get") return "read from source";
-    if (node.kind === "binding") return "write local binding";
-    if (node.kind === "assign") return "mutate existing value";
-    if (node.kind === "constant") return "literal";
-    return node.kind;
+    return nodeStyle(node, currentGraphOrNull()).subtitle || node.kind || "";
   }
 
   function nodeKindLabel(node, graph) {
@@ -1478,11 +1625,15 @@ pub fn canvas_js() -> String {
   }
 
   function shouldDrawNodeBadge(node) {
-    return false;
+    return developerMode && !!node && !!node.kind;
   }
 
   function isGetterCapsule(node) {
     return node && (node.kind === "variable_get" || node.kind === "constant");
+  }
+
+  function isOperatorNode(node) {
+    return node && node.archetype === "function_pure" && /^[+\-*\/%=!<>&|^]+$/.test(node.title || "");
   }
 
   function simpleEmbeddedValue(expr) {
@@ -1495,11 +1646,15 @@ pub fn canvas_js() -> String {
     const outputData = pinsForNode(graph, node, "output", false).length;
     const execIn = pinsForNode(graph, node, "input", true).length;
     const execOut = pinsForNode(graph, node, "output", true).length;
-    const compact = isGetterCapsule(node);
-    const w = compact ? 216 : node.kind === "branch" || node.kind === "dispatch" ? 340 : 314;
+    const compact = isGetterCapsule(node) || isOperatorNode(node);
+    if (node.archetype === "entry") return { w: Math.max(174, 118 + String(node.title || "").length * 8, 148 + Math.max(inputData, outputData) * 16), h: 46 + Math.max(inputData, outputData) * 24 };
+    if (isOperatorNode(node)) return { w: 88, h: Math.max(58, 28 + Math.max(inputData, outputData) * 22) };
+    const titleW = 92 + String(node.title || "").length * 7.5;
+    const pinW = Math.max(inputData, outputData) ? 150 + Math.max(...(graph.pins || []).filter((p) => p.node_id === node.node_id).map((p) => String(p.name || "").length * 6 + String(p.type || "").length * 5), 0) : 0;
+    const w = compact ? Math.max(150, titleW) : Math.max(150, node.kind === "branch" || node.kind === "dispatch" ? 296 : 232, titleW, pinW);
     const execRows = Math.max(execIn, execOut);
     const dataRows = Math.max(inputData, outputData);
-    const h = compact ? 84 : Math.max(132, 70 + Math.max(1, execRows) * 28 + Math.max(1, dataRows) * 30);
+    const h = compact ? 40 : Math.max(64, 42 + Math.max(0, execRows) * 24 + Math.max(0, dataRows) * 24 + 16);
     return { w, h };
   }
 
@@ -1536,23 +1691,21 @@ pub fn canvas_js() -> String {
   }
 
   function drawWire(wire, from, to, activeWire, selectedWire) {
-    const control = wire.wire_kind === "control";
+    const control = wire.wire_kind === "control" || isExecPin(from.pin);
     const color = activeWire ? "#facc15" : wireColor(wire, from);
     ctx.beginPath();
     ctx.moveTo(from.x, from.y);
-    if (wireStyle === "straight") ctx.lineTo(to.x, to.y);
-    else ctx.bezierCurveTo(from.x + 96 * view.zoom, from.y, to.x - 96 * view.zoom, to.y, to.x, to.y);
+    ctx.bezierCurveTo(from.x + 96 * view.zoom, from.y, to.x - 96 * view.zoom, to.y, to.x, to.y);
     ctx.strokeStyle = "rgba(1,6,12,.86)";
-    ctx.lineWidth = control ? Math.max(7, 10 * view.zoom) : Math.max(5, 7 * view.zoom);
+    ctx.lineWidth = control ? Math.max(4.5, 5.4 * view.zoom) : Math.max(3.2, 4.2 * view.zoom);
     ctx.shadowBlur = 0;
     ctx.stroke();
 
     ctx.beginPath();
     ctx.moveTo(from.x, from.y);
-    if (wireStyle === "straight") ctx.lineTo(to.x, to.y);
-    else ctx.bezierCurveTo(from.x + 96 * view.zoom, from.y, to.x - 96 * view.zoom, to.y, to.x, to.y);
+    ctx.bezierCurveTo(from.x + 96 * view.zoom, from.y, to.x - 96 * view.zoom, to.y, to.x, to.y);
     ctx.strokeStyle = color;
-    ctx.lineWidth = activeWire ? Math.max(4, 7 * view.zoom) : control ? Math.max(3, 5 * view.zoom) : Math.max(2.4, 3.6 * view.zoom);
+    ctx.lineWidth = activeWire ? Math.max(3.2, (control ? 3.2 : 2.5) * view.zoom + .7) : control ? Math.max(2.5, 2.5 * view.zoom) : Math.max(1.8, 1.8 * view.zoom);
     ctx.shadowColor = activeWire ? "rgba(250,204,21,.72)" : hexToRgba(color, control || selectedWire ? .62 : .34);
     ctx.shadowBlur = activeWire ? 18 : control ? 13 : 8;
     ctx.stroke();
@@ -1574,18 +1727,22 @@ pub fn canvas_js() -> String {
     }
   }
 
+  function drawArchetypeHeader(node, style, x, y, w, headerH) {
+    drawArchetypeHeader(node, style, x, y, w, headerH);
+  }
+
   function drawNode(graph, node, inlineByNode, recordHit = true) {
     const size = nodeSize(graph, node);
     const w = size.w * view.zoom, h = size.h * view.zoom;
     const x = sx(nodeX(node)), y = sy(nodeY(node));
     if (view.zoom < .38) {
       roundRect(x, y, Math.max(72, w), Math.max(18, 24 * view.zoom), 4 * view.zoom);
-      ctx.fillStyle = selectedNodeIds.has(node.node_id) ? "#12324a" : "#101821";
+      ctx.fillStyle = selectedNodeIds.has(node.node_id) ? hexToRgba(nodeStyle(node, graph).accent, .28) : "rgba(29,33,41,.88)";
       ctx.fill();
-      ctx.strokeStyle = selectedNodeIds.has(node.node_id) ? "#35c2ff" : "#32445c";
+      ctx.strokeStyle = selectedNodeIds.has(node.node_id) ? "#f5a623" : hexToRgba(nodeStyle(node, graph).accent, .48);
       ctx.stroke();
       ctx.fillStyle = "#dbeafe";
-      ctx.font = "10px ui-monospace, Consolas, monospace";
+      ctx.font = `10px ${UI_FONT}`;
       ctx.fillText(clipText(node.title, 18), x + 8, y + 15);
       if (recordHit) hit.push({ x, y, w: Math.max(72, w), h: Math.max(18, 24 * view.zoom), node });
       return;
@@ -1595,89 +1752,110 @@ pub fn canvas_js() -> String {
     const searchHit = (searchState.spans || []).some((span) => spansOverlap(node.source_span, span));
     const breakpoint = nodeBreakpoint(node);
     const style = nodeStyle(node, graph);
-    const headerH = Math.min(48, size.h - 20) * view.zoom;
+    const headerH = Math.min(26, size.h) * view.zoom;
 
     if (isGetterCapsule(node)) {
       const out = pinsForNode(graph, node, "output", false)[0] || {};
       const color = colorForType(out.type || "Value");
-      ctx.shadowColor = selected ? hexToRgba(color, .42) : "rgba(0,0,0,.38)";
-      ctx.shadowBlur = selected ? 22 : 12;
-      ctx.shadowOffsetY = 8;
-      roundRect(x, y + 14 * view.zoom, w, 42 * view.zoom, 21 * view.zoom);
-      ctx.fillStyle = "rgba(18,23,30,.96)";
+      ctx.shadowColor = selected ? hexToRgba("#f5a623", .38) : "rgba(0,0,0,.45)";
+      ctx.shadowBlur = selected ? 18 : 12;
+      ctx.shadowOffsetY = 4;
+      roundRect(x, y, w, h, 20 * view.zoom);
+      ctx.fillStyle = hexToRgba(color, .12);
       ctx.fill();
       ctx.shadowBlur = 0;
       ctx.shadowOffsetY = 0;
-      ctx.strokeStyle = selected ? color : hexToRgba(color, .62);
-      ctx.lineWidth = selected ? 2.2 : 1.2;
+      ctx.strokeStyle = selected ? "#f5a623" : color;
+      ctx.lineWidth = selected ? 1.8 : 1;
       ctx.stroke();
-      ctx.fillStyle = hexToRgba(color, .16);
-      roundRect(x + 9 * view.zoom, y + 22 * view.zoom, 42 * view.zoom, 25 * view.zoom, 13 * view.zoom);
-      ctx.fill();
-      ctx.fillStyle = color;
-      ctx.font = `${Math.max(8, 10 * view.zoom)}px ui-monospace, Consolas, monospace`;
-      ctx.textAlign = "center";
-      ctx.fillText(node.kind === "constant" ? "LIT" : "GET", x + 30 * view.zoom, y + 38 * view.zoom);
-      ctx.textAlign = "left";
       ctx.fillStyle = "#f8fbff";
-      ctx.font = `${Math.max(12, 14 * view.zoom)}px "Segoe UI", system-ui, sans-serif`;
-      ctx.fillText(clipText(node.title, 22), x + 62 * view.zoom, y + 38 * view.zoom);
-      if (out.pin_id) drawPin(out, x + w, y + 35 * view.zoom, "output", recordHit);
+      ctx.font = `${Math.max(11, 13 * view.zoom)}px ${UI_FONT}`;
+      ctx.textAlign = "left";
+      ctx.fillText(clipText(node.title, 24), x + 16 * view.zoom, y + 25 * view.zoom);
+      if (out.pin_id) drawPin(out, x + w, y + h / 2, "output", recordHit);
       if (detailToggles.types) {
         ctx.fillStyle = color;
-        ctx.font = `${Math.max(9, 10 * view.zoom)}px ui-monospace, Consolas, monospace`;
-        ctx.fillText(clipText(out.type || "Value", 16), x + 62 * view.zoom, y + 52 * view.zoom);
+        ctx.font = `${Math.max(8, 9.5 * view.zoom)}px ${MONO_FONT}`;
+        ctx.fillText(clipText(out.type || "Value", 16), x + 16 * view.zoom, y + 36 * view.zoom);
       }
-      if (recordHit) hit.push({ x, y: y + 14 * view.zoom, w, h: 42 * view.zoom, node });
+      if (recordHit) hit.push({ x, y, w, h, node });
       window.__jetCanvasGetterCapsules = true;
       return;
     }
 
-    ctx.shadowColor = active ? "rgba(250,204,21,.58)" : selected ? hexToRgba(style.accent, .42) : searchHit ? "rgba(192,132,252,.42)" : "rgba(0,0,0,.45)";
-    ctx.shadowBlur = active ? 34 : selected ? 26 : searchHit ? 22 : 16;
-    ctx.shadowOffsetY = 12;
-    roundRect(x, y, w, h, 6 * view.zoom);
-    ctx.fillStyle = style.fill;
+    if (isOperatorNode(node)) {
+      const inputs = pinsForNode(graph, node, "input", false);
+      const outputs = pinsForNode(graph, node, "output", false);
+      ctx.shadowColor = selected ? "rgba(245,166,35,.34)" : "rgba(0,0,0,.42)";
+      ctx.shadowBlur = selected ? 18 : 10;
+      ctx.shadowOffsetY = 4;
+      roundRect(x, y, w, h, 8 * view.zoom);
+      ctx.fillStyle = "rgba(29,33,41,.96)";
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.shadowOffsetY = 0;
+      ctx.strokeStyle = selected ? "#f5a623" : hexToRgba(style.accent, .55);
+      ctx.lineWidth = selected ? 1.8 : 1;
+      ctx.stroke();
+      ctx.fillStyle = "#f2f4f8";
+      ctx.font = `${Math.max(19, 26 * view.zoom)}px ${UI_FONT}`;
+      ctx.textAlign = "center";
+      ctx.fillText(clipText(node.title, 2), x + w / 2, y + h / 2 + 9 * view.zoom);
+      ctx.textAlign = "left";
+      inputs.forEach((p, i) => drawSocketRow(p, x, y + (18 + i * 22) * view.zoom, w, "input", recordHit));
+      outputs.forEach((p, i) => drawSocketRow(p, x, y + (18 + i * 22) * view.zoom, w, "output", recordHit));
+      if (recordHit) hit.push({ x, y, w, h, node });
+      return;
+    }
+
+    ctx.shadowColor = active ? "rgba(250,204,21,.50)" : selected ? "rgba(245,166,35,.34)" : searchHit ? "rgba(192,132,252,.35)" : "rgba(0,0,0,.45)";
+    ctx.shadowBlur = active ? 28 : selected ? 22 : searchHit ? 18 : 12;
+    ctx.shadowOffsetY = 4;
+    roundRect(x, y, w, h, 8 * view.zoom);
+    ctx.fillStyle = "rgba(29,33,41,.96)";
     ctx.fill();
     ctx.shadowBlur = 0;
     ctx.shadowOffsetY = 0;
-    ctx.strokeStyle = active ? "#facc15" : selected ? style.accent : searchHit ? "#c084fc" : "#3b4657";
-    ctx.lineWidth = active ? 3 : selected ? 2.2 : 1.2;
+    ctx.strokeStyle = active ? "#facc15" : selected ? "#f5a623" : searchHit ? "#c084fc" : "#0b0d11";
+    ctx.lineWidth = active ? 2.2 : selected ? 1.5 : 1;
     ctx.stroke();
+    if (selected) {
+      ctx.save();
+      roundRect(x - 2 * view.zoom, y - 2 * view.zoom, w + 4 * view.zoom, h + 4 * view.zoom, 9 * view.zoom);
+      ctx.strokeStyle = "rgba(245,166,35,.62)";
+      ctx.shadowColor = "rgba(245,166,35,.32)";
+      ctx.shadowBlur = 10 * view.zoom;
+      ctx.lineWidth = 1.5 * view.zoom;
+      ctx.stroke();
+      ctx.restore();
+    }
 
-    roundRect(x, y, w, headerH, 6 * view.zoom);
+    roundRect(x, y, w, headerH, 8 * view.zoom);
     const headerGrad = ctx.createLinearGradient(x, y, x + w, y);
-    headerGrad.addColorStop(0, style.header);
-    headerGrad.addColorStop(.68, "#101722");
-    headerGrad.addColorStop(1, hexToRgba(style.accent, .20));
+    headerGrad.addColorStop(0, style.header || style.accent);
+    headerGrad.addColorStop(1, style.header2 || "#151a21");
     ctx.fillStyle = headerGrad;
     ctx.fill();
-    ctx.fillStyle = style.accent;
-    ctx.fillRect(x, y + headerH - 3 * view.zoom, w, 3 * view.zoom);
-    ctx.fillStyle = hexToRgba(style.accent, .28);
-    ctx.fillRect(x, y, 4 * view.zoom, h);
-
-    ctx.fillStyle = hexToRgba(style.accent, .18);
-    roundRect(x + 12 * view.zoom, y + 10 * view.zoom, 42 * view.zoom, 22 * view.zoom, 4 * view.zoom);
-    ctx.fill();
-    ctx.fillStyle = style.accent;
-    ctx.font = `${Math.max(8, 10.5 * view.zoom)}px ui-monospace, Consolas, monospace`;
+    ctx.fillStyle = "rgba(255,255,255,.86)";
+    ctx.font = `${Math.max(10, 14 * view.zoom)}px ${UI_FONT}`;
     ctx.textAlign = "center";
-    ctx.fillText(style.glyph, x + 33 * view.zoom, y + 25 * view.zoom);
+    ctx.fillText(style.glyph || "ƒ", x + 16 * view.zoom, y + 18 * view.zoom);
     ctx.textAlign = "left";
-
     ctx.fillStyle = "#f8fbff";
-    ctx.font = `${Math.max(12, 14.5 * view.zoom)}px "Segoe UI", system-ui, sans-serif`;
-    ctx.fillText(clipText(node.title, 24), x + 64 * view.zoom, y + 21 * view.zoom);
-    ctx.fillStyle = "#9ab0cd";
-    ctx.font = `${Math.max(9, 10.5 * view.zoom)}px ui-monospace, Consolas, monospace`;
-    ctx.fillText(clipText(nodeSubtitle(node), 25), x + 64 * view.zoom, y + 37 * view.zoom);
+    ctx.font = `600 ${Math.max(10, 13 * view.zoom)}px ${UI_FONT}`;
+    ctx.fillText(clipText(node.title, 24), x + 30 * view.zoom, y + 17.5 * view.zoom);
+    const subtitle = nodeSubtitle(node);
+    if (subtitle && node.archetype !== "entry") {
+      ctx.fillStyle = "rgba(255,255,255,.65)";
+      ctx.font = `${Math.max(8, 10 * view.zoom)}px ${UI_FONT}`;
+      ctx.fillText(clipText(subtitle, 28), x + 30 * view.zoom, y + 29.5 * view.zoom);
+    }
 
     if (shouldDrawNodeBadge(node)) {
-      const badgeText = nodeKindLabel(node, graph).toUpperCase();
-      ctx.font = `${Math.max(7.5, 9.2 * view.zoom)}px ui-monospace, Consolas, monospace`;
+      const badgeText = String(node.kind || "").toUpperCase();
+      ctx.font = `${Math.max(7.5, 9.2 * view.zoom)}px ${MONO_FONT}`;
       const badgeW = Math.min(118 * view.zoom, ctx.measureText(badgeText).width + 14 * view.zoom);
-      const badgeY = y + headerH + 9 * view.zoom;
+      const badgeY = y + headerH + 6 * view.zoom;
       roundRect(x + 14 * view.zoom, badgeY, badgeW, 20 * view.zoom, 4 * view.zoom);
       ctx.fillStyle = hexToRgba(style.accent, .14);
       ctx.fill();
@@ -1699,28 +1877,26 @@ pub fn canvas_js() -> String {
 
     const execIn = pinsForNode(graph, node, "input", true);
     const execOut = pinsForNode(graph, node, "output", true);
-    const execTop = Math.min(72, size.h - 58);
+    const entryOnly = node.archetype === "entry";
+    const execTop = entryOnly ? 22 : 42;
     execIn.forEach((p, i) => drawSocketRow(p, x, y + (execTop + i * 28) * view.zoom, w, "input", recordHit));
     execOut.forEach((p, i) => drawSocketRow(p, x, y + (execTop + i * 28) * view.zoom, w, "output", recordHit));
 
     const inputs = pinsForNode(graph, node, "input", false);
     const outputs = pinsForNode(graph, node, "output", false);
-    const execRows = Math.max(execIn.length, execOut.length, 1);
-    const dataTop = execTop + execRows * 28 + 20;
-    if (inputs.length || outputs.length) {
-      ctx.beginPath();
-      ctx.moveTo(x + 12 * view.zoom, y + (dataTop - 16) * view.zoom);
-      ctx.lineTo(x + w - 12 * view.zoom, y + (dataTop - 16) * view.zoom);
-      ctx.strokeStyle = "rgba(94,119,150,.28)";
-      ctx.lineWidth = Math.max(.8, view.zoom);
-      ctx.stroke();
-    }
-    inputs.forEach((p, i) => drawSocketRow(p, x, y + (dataTop + i * 30) * view.zoom, w, "input", recordHit));
-    outputs.forEach((p, i) => drawSocketRow(p, x, y + (dataTop + i * 30) * view.zoom, w, "output", recordHit));
+    const execRows = Math.max(execIn.length, execOut.length);
+    const dataTop = Math.max(44, execTop + execRows * 24 + (execRows ? 10 : 0));
+    inputs.forEach((p, i) => {
+      const rowY = y + (dataTop + i * 24) * view.zoom;
+      drawSocketRow(p, x, rowY, w, "input", recordHit);
+      const editorX = x + Math.min(w - 108 * view.zoom, 74 * view.zoom);
+      drawPinDefaultEditor(graph, p, editorX, rowY, recordHit);
+    });
+    outputs.forEach((p, i) => drawSocketRow(p, x, y + (dataTop + i * 24) * view.zoom, w, "output", recordHit));
 
     const inline = (selected || view.zoom >= .95 ? (inlineByNode.get(node.node_id) || []) : []).slice(0, 2);
     inline.forEach((expr, i) => {
-      const cy = y + (dataTop + Math.max(inputs.length, outputs.length) * 30 + 12 + i * 24) * view.zoom;
+      const cy = y + (dataTop + Math.max(inputs.length, outputs.length) * 24 + 12 + i * 22) * view.zoom;
       roundRect(x + 12 * view.zoom, cy - 13 * view.zoom, w - 24 * view.zoom, 18 * view.zoom, 5 * view.zoom);
       ctx.fillStyle = simpleEmbeddedValue(expr) ? "rgba(212,212,216,.16)" : "rgba(246,211,101,.11)";
       ctx.fill();
@@ -1728,7 +1904,7 @@ pub fn canvas_js() -> String {
       ctx.lineWidth = Math.max(.8, view.zoom);
       ctx.stroke();
       ctx.fillStyle = simpleEmbeddedValue(expr) ? "#e4e4e7" : "#f6d365";
-      ctx.font = `${Math.max(9, 11 * view.zoom)}px ui-monospace, Consolas, monospace`;
+      ctx.font = `${Math.max(9, 11 * view.zoom)}px ${MONO_FONT}`;
       ctx.fillText(clipText(expr.source, 34), x + 19 * view.zoom, cy);
       if (simpleEmbeddedValue(expr)) window.__jetCanvasEmbeddedVariables = true;
     });
@@ -1771,8 +1947,10 @@ pub fn canvas_js() -> String {
     hit = [];
     pinPoints = new Map();
     pinHit = [];
+    pinEditorHit = [];
     graphSelect.value = selectedGraphId;
     const pins = new Map(graph.pins.map((p) => [p.pin_id, p]));
+    connectedPinIds = new Set((graph.wires || []).flatMap((wire) => [wire.from_pin, wire.to_pin]));
     const nodes = new Map(graph.nodes.map((n) => [n.node_id, n]));
     const inlineByNode = new Map();
     for (const expr of graph.inline_exprs || []) {
@@ -1888,7 +2066,8 @@ pub fn canvas_js() -> String {
     const scale = Math.min((minimap.width - 20) / Math.max(1, b.maxX - b.minX), (minimap.height - 20) / Math.max(1, b.maxY - b.minY));
     for (const n of graph.nodes) {
       const size = nodeSize(graph, n);
-      mini.fillStyle = n.node_id === selectedNodeId ? "#38bdf8" : "#31557b";
+      const style = nodeStyle(n, graph);
+      mini.fillStyle = n.node_id === selectedNodeId ? "#f5a623" : style.accent;
       mini.fillRect(10 + (nodeX(n) - b.minX) * scale, 10 + (nodeY(n) - b.minY) * scale, Math.max(16, size.w * scale), Math.max(9, size.h * scale));
     }
   }
@@ -1971,7 +2150,7 @@ pub fn canvas_js() -> String {
 
   function pinPortHtml(type) {
     const t = type || "Value";
-    const cls = t === "exec" || t === "control" || t === "Void" ? " is-exec" : String(t).endsWith("?") ? " is-fallible" : "";
+    const cls = t === "exec" || t === "control" ? " is-exec" : String(t).endsWith("?") ? " is-fallible" : "";
     return `<span class="pin-port${cls}" style="color:${escapeAttr(colorForType(t))}"></span>`;
   }
 
@@ -2260,6 +2439,36 @@ pub fn canvas_js() -> String {
     return best;
   }
 
+  function hitPinDefaultEditorAt(x, y) {
+    for (let i = pinEditorHit.length - 1; i >= 0; i--) {
+      const h = pinEditorHit[i];
+      if (x >= h.x && x <= h.x + h.w && y >= h.y && y <= h.y + h.h) return h;
+    }
+    return null;
+  }
+
+  function applyPinDefaultEditor(hit) {
+    if (!hit || !hit.pin) return false;
+    if (!hit.expr) {
+      showToast("Default value is read-only");
+      return true;
+    }
+    let next = defaultEditorValue(hit.expr);
+    if (hit.kind === "bool") {
+      next = next === "true" ? "false" : "true";
+    } else if (hit.kind === "number") {
+      next = window.prompt("Default " + hit.pin.name, next || "0");
+    } else if (hit.kind === "string") {
+      const raw = window.prompt("Default " + hit.pin.name, next.replace(/^"|"$/g, ""));
+      next = raw === null ? null : JSON.stringify(raw);
+    } else if (hit.kind === "enum") {
+      next = window.prompt("Default " + hit.pin.name, next || "." + hit.pin.name);
+    }
+    if (next === null || next === undefined || next === "") return true;
+    postTransaction({ schema_version: 1, op: "edit_inline_expr", revision: latestDoc.revision, inline_expr_id: hit.expr.inline_expr_id, new_expr: next });
+    return true;
+  }
+
   function numericType(type) {
     return ["Int", "Float", "F32", "F64"].includes(type || "");
   }
@@ -2416,6 +2625,11 @@ pub fn canvas_js() -> String {
     const rect = canvas.getBoundingClientRect();
     const x = ev.clientX - rect.left;
     const y = ev.clientY - rect.top;
+    const pinEditor = hitPinDefaultEditorAt(x, y);
+    if (pinEditor && applyPinDefaultEditor(pinEditor)) {
+      ev.preventDefault();
+      return;
+    }
     if (hitPinAt(x, y)) {
       ev.preventDefault();
       return;
@@ -2434,6 +2648,7 @@ pub fn canvas_js() -> String {
     const rect = canvas.getBoundingClientRect();
     const x = ev.clientX - rect.left;
     const y = ev.clientY - rect.top;
+    if (hitPinDefaultEditorAt(x, y)) return;
     const pin = hitPinAt(x, y);
     if (pin) {
       hoverPin = pin;
@@ -2751,20 +2966,52 @@ pub fn canvas_js() -> String {
     }
     applyFunctionPins(graph, graph.function, graph.title, button.id === "remove-function-output" ? "Void" : undefined);
   }
-  function runPalette(item) {
+  function defaultArgsForAction(item, pin) {
+    const existing = (item.args || []).slice();
+    if (!pin) return existing.length ? existing : ["\"canvas\""];
+    const graph = currentGraph(latestDoc);
+    if (pin.direction === "output") {
+      const expr = sourceExprForOutputPin(pin);
+      if (expr) {
+        const inputs = (item.pins || []).filter((p) => p.direction === "input");
+        if (!inputs.length || inputs.some((p) => compatibleActionType(p.type, pin.type))) return [expr].concat(existing.slice(1));
+      }
+    }
+    return existing.length ? existing : ["1"];
+  }
+
+  function callExpressionForAction(item, pin) {
+    const callee = item.insert_callee || item.callee || item.title;
+    const args = defaultArgsForAction(item, pin);
+    return callee + "(" + args.join(", ") + ")";
+  }
+
+  function runPalette(item, pinContext) {
     if (!latestDoc || !selectedGraphId) return;
+    const pin = pinContext || (contextMenuState && contextMenuState.pin) || null;
     if (item.kind === "canvas.core_catalog") {
-      showToast("Core catalog entry is read-only");
-      details.innerHTML = `<h2>Core</h2><div class="signature-source"><code>${escapeHtml(item.signature || item.title)}</code><span>${escapeHtml(item.summary || "")}</span></div>`;
+      postTransaction({ schema_version: 1, op: "insert_call", revision: latestDoc.revision, graph_id: selectedGraphId, callee: item.insert_callee || item.callee, args: defaultArgsForAction(item, pin) });
+    } else if (item.kind === "project_function") {
+      if (pin && pin.direction === "input") {
+        const graph = currentGraph(latestDoc);
+        const expr = inlineForPin(graph, pin);
+        if (expr) return postTransaction({ schema_version: 1, op: "edit_inline_expr", revision: latestDoc.revision, inline_expr_id: expr.inline_expr_id, new_expr: callExpressionForAction(item, pin) });
+      }
+      postTransaction({ schema_version: 1, op: "insert_call", revision: latestDoc.revision, graph_id: selectedGraphId, callee: item.callee, args: defaultArgsForAction(item, pin) });
     } else if (item.op === "preview_canvas_action") {
-      postTransaction({ schema_version: 1, op: "preview_canvas_action", revision: latestDoc.revision, graph_id: selectedGraphId, action_id: item.action_id, callee: item.callee, args: item.args || ["\"canvas\""] });
+      if (pin && pin.direction === "input") {
+        const graph = currentGraph(latestDoc);
+        const expr = inlineForPin(graph, pin);
+        if (expr && item.callee) return postTransaction({ schema_version: 1, op: "edit_inline_expr", revision: latestDoc.revision, inline_expr_id: expr.inline_expr_id, new_expr: callExpressionForAction(item, pin) });
+      }
+      postTransaction({ schema_version: 1, op: "preview_canvas_action", revision: latestDoc.revision, graph_id: selectedGraphId, action_id: item.action_id, callee: item.callee, args: defaultArgsForAction(item, pin) });
     } else if (item.op === "command_authority") {
       renderCommandAuthority(item);
     } else if (item.op === "insert_print") {
       postTransaction({ schema_version: 1, op: "insert_call", revision: latestDoc.revision, graph_id: selectedGraphId, callee: "print", args: ["\"canvas\""] });
     } else if (item.op === "insert_call") {
       const callee = window.prompt("Call function", "print");
-      if (callee) postTransaction({ schema_version: 1, op: "insert_call", revision: latestDoc.revision, graph_id: selectedGraphId, callee, args: ["\"canvas\""] });
+      if (callee) postTransaction({ schema_version: 1, op: "insert_call", revision: latestDoc.revision, graph_id: selectedGraphId, callee, args: defaultArgsForAction({ args: ["\"canvas\""] }, pin) });
     } else if (["insert_branch", "insert_switch", "insert_loop", "insert_fallible_rail"].includes(item.op)) {
       postTransaction({ schema_version: 1, op: item.op, revision: latestDoc.revision, graph_id: selectedGraphId });
     } else if (item.op === "comment") {
@@ -2895,13 +3142,29 @@ pub fn canvas_js() -> String {
       .then((r) => r.json())
       .then((doc) => {
         if (!doc || !doc.actions) return;
-        actionEntries = doc.actions.map((action) => ({
+        const projectFunctions = (doc.project_functions || []).map((fn) => ({
+          title: fn.name || fn.callee,
+          detail: (fn.module_path || "project") + " · " + (fn.signature || fn.callee || ""),
+          kind: "project_function",
+          group: "Project",
+          op: fn.insert_op || "insert_call",
+          callee: fn.callee || fn.name,
+          insert_callee: fn.insert_callee || fn.callee || fn.name,
+          signature: fn.signature || "",
+          pure: !!fn.pure,
+          pins: fn.pins || [],
+          ret: actionReturnType(fn) || fn.ret || "Void",
+          args: fn.default_args || ["1"]
+        }));
+        const canvasActions = doc.actions.map((action) => ({
           title: action.title || action.callee,
           detail: action.kind === "canvas.core_catalog" ? ((action.module_path || "core") + " · " + (action.signature || action.callee || "") + " · read-only") : (action.command ? ((action.kind || "canvas.command") + " · " + (action.command || []).join(" ") + " · " + (action.writes || "none")) : ((action.kind || "canvas.action") + " · " + (action.engine || "checked-tir+jit") + " · " + (action.callee || "") + "(" + (action.pins || []).filter((p) => p.direction === "input").map((p) => p.type || "Value").join(", ") + ") -> " + (action.ret || "Void"))),
           kind: action.kind || "canvas.action",
+          group: action.kind === "canvas.core_catalog" ? "Core" : action.kind === "canvas.command" ? "Flow" : "Project",
           op: action.op || "preview_canvas_action",
           action_id: action.action_id,
           callee: action.callee,
+          insert_callee: action.insert_callee || action.callee,
           signature: action.signature || "",
           summary: action.summary || "",
           command: action.command || [],
@@ -2911,8 +3174,11 @@ pub fn canvas_js() -> String {
           available: action.available !== false,
           denied_reason: action.denied_reason || "",
           pins: action.pins || [],
+          pure: !!action.pure,
+          ret: action.ret || actionReturnType(action) || "Void",
           args: action.default_args || ["\"canvas\""]
         }));
+        actionEntries = projectFunctions.concat(canvasActions);
       })
       .catch(() => {});
   }

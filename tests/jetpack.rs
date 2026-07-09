@@ -5295,7 +5295,7 @@ fn os_image_writes_jetos_installer_media_proof() {
         "initrd should carry installer partition tools: {initrd}"
     );
     assert!(
-        initrd.contains("exec switch_root /sysroot /run/current-system/sbin/init")
+        initrd.contains("exec chroot /sysroot /run/current-system/sbin/init")
             && initrd.contains("ln -s \"$generation_target/$top\" \"/sysroot/$top\""),
         "initrd run mode should hand off to installed current-system, not fallback shell: {initrd}"
     );
