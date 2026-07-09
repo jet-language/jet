@@ -118,6 +118,7 @@ pub const DIRECTIVE_MARKERS: &[&str] = &[
     ATTR_TRACK,
     ATTR_OFF,
     ATTR_DEBUG_ONLY,
+    ATTR_META,
     ATTR_TARGET,
     ATTR_WASM,
     ATTR_JS,

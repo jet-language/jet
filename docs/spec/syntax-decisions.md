@@ -676,6 +676,15 @@ E0342, expression position is E0343, and doubled switch attributes are E0344.
 Names introduced inside the marker body do not escape. `build.profile` is not a
 user-typeable comptime value.
 
+**D-CANVASMETA1=B — Canvas metadata attribute**: `#Meta(category: "Movement",
+tunable)` attaches to bindings and functions; at top level it may also attach to
+`const`/`comptime` bindings. `category` is a non-empty plain string literal and
+`tunable` is a bare flag. Unknown fields are E0345 with did-you-mean help,
+duplicate fields are E0346, wrong `category` value type is E0347, empty category
+is E0348, and expression-position use is E0349. `#Meta` has no runtime
+semantics and emits no code; it is checked source data for Canvas/tooling only.
+New fields require a future ballot.
+
 **D-DOTSCOPE1 — Scope members**: inside a `#Marker { }` block body, a
 statement-position `.name { … }` / `.name(args) { … }` resolves against that
 marker's declared scope members (`#Test`: `.expect_fail`, `.setup`,
@@ -2258,7 +2267,6 @@ implementation milestone is pending.
 | ID  | Milestone | Enforcement today                                                | Code  |
 | --- | --------- | ---------------------------------------------------------------- | ----- |
 | S15 | M6        | default unwind in `Source/main.rs`; `--small` + `panic=abort` in M6 | —     |
-| D-CANVASMETA1 = B (2026-07-09) | Epoch 6 (card #386) | `#Meta(category: "…", tunable)` attribute on bindings/functions, sema-checked fields (unknown field = teaching error), scoped to `category` + `tunable` for now; grows only by ballot. | — |
 
 
 ## Provisional — currently in the code

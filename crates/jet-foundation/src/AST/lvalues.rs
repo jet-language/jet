@@ -57,6 +57,53 @@ pub enum IndexKind {
     Pool,
 }
 
+/// D-CANVASMETA1=B: one raw field inside `#Meta(...)`.
+#[derive(Debug, Clone)]
+pub enum MetaField {
+    Category { value: Expr, span: Span },
+    Tunable { span: Span },
+    Unknown { name: String, span: Span },
+}
+
+/// D-CANVASMETA1=B: tooling metadata attached to a binding, const, or function.
+/// Sema validates the raw fields; codegen ignores them.
+#[derive(Debug, Clone)]
+pub struct MetaAttr {
+    pub fields: Vec<MetaField>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MetaFacts {
+    pub category: Option<String>,
+    pub tunable: bool,
+}
+
+impl MetaAttr {
+    pub fn facts(&self) -> MetaFacts {
+        let mut out = MetaFacts {
+            category: None,
+            tunable: false,
+        };
+        for field in &self.fields {
+            match field {
+                MetaField::Category { value, .. } => {
+                    if let Expr::Str(parts, _) = value {
+                        if let [StrPart::Lit(s)] = parts.as_slice() {
+                            if !s.is_empty() {
+                                out.category = Some(s.clone());
+                            }
+                        }
+                    }
+                }
+                MetaField::Tunable { .. } => out.tunable = true,
+                MetaField::Unknown { .. } => {}
+            }
+        }
+        out
+    }
+}
+
 /// `for i in 1..10` vs `for x in xs` (M5).
 #[derive(Debug, Clone)]
 pub enum ForKind {
@@ -78,6 +125,8 @@ pub struct Binding {
     /// meaning in the later tracking slice.
     pub track: bool,
     pub track_span: Option<Span>,
+    /// D-CANVASMETA1=B: `#Meta(category: "…", tunable)` for Canvas/tooling.
+    pub meta: Option<MetaAttr>,
     pub name: String,
     pub name_span: Span,
     /// S74: when present, this binding destructures `init` instead of binding
@@ -113,4 +162,3 @@ pub struct Binding {
     /// helper; sema (E2307) forbids it escaping the owner's scope.
     pub string_view: bool,
 }
-

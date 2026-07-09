@@ -334,6 +334,7 @@ fn project_func(
             "edit_function_signature".to_string(),
             "create_function".to_string(),
         ],
+        meta_json: meta_attr_json(f.meta.as_ref()),
     });
     for (i, p) in f.params.iter().enumerate() {
         let pin_id = format!("{entry_id}:out:{}", p.name);
@@ -434,6 +435,9 @@ fn project_stmt(
                 vec!["local"],
                 vec!["rename_binding", "edit_inline_expr", "source_jump"],
             );
+            if let Some(node) = g.nodes.iter_mut().find(|node| node.id == node_id) {
+                node.meta_json = meta_attr_json(b.meta.as_ref());
+            }
             let input_pin = add_pin(g, &node_id, "value", "input", &ty, "", false);
             let output_pin = add_pin(g, &node_id, &b.name, "output", &ty, "", false);
             g.local_pins.insert(b.name.clone(), output_pin);

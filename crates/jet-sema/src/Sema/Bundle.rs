@@ -844,6 +844,9 @@ pub(crate) fn check_bundle_opts(
                     }
                 }
                 Item::Const(c) => {
+                    if let Some(meta) = &c.meta {
+                        diags.extend(CheckerCore::check_meta_attr_fields(meta));
+                    }
                     register_const(c, &mut st.consts, &mut diags, &st.funcs, &st.registry)
                 }
                 Item::Distinct(d) => {
@@ -2521,6 +2524,7 @@ pub(crate) fn check_module_bodies(
                     external_type: None,
                     name: format!("__test_{}", t.name),
                     name_span: t.name_span,
+                    meta: None,
                     type_params: Vec::new(),
                     params: t.params.clone(),
                     return_type: None,
@@ -2574,6 +2578,7 @@ pub(crate) fn check_module_bodies(
                     external_type: None,
                     name: format!("__bench_{}", b.name),
                     name_span: b.name_span,
+                    meta: None,
                     type_params: Vec::new(),
                     params: Vec::new(),
                     return_type: None,

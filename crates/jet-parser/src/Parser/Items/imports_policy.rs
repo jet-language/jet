@@ -588,6 +588,15 @@ impl<'a> Parser<'a> {
                     },
                     TokKind::KwExtern => self.extern_rust_block().map(Item::ExternRust),
                     TokKind::KwFn => self.func().map(Item::Func),
+                    TokKind::Hash if self.at_meta_attr() => {
+                        if matches!(self.meta_attr_next_kind(), Some(TokKind::KwConst)) {
+                            self.const_def().map(Item::Const)
+                        } else if matches!(self.meta_attr_next_kind(), Some(TokKind::KwComptime)) {
+                            self.comptime_def().map(Item::Const)
+                        } else {
+                            self.func().map(Item::Func)
+                        }
+                    }
                     // S60 (D-CASING1 follow-on) / D-MARKERMOVE2: `@Pure fn name(…)`
                     // purity modifier (old `@Pure` spelling is E0062, taught in `func()`).
                     // D-MATURITY1=B / D-MARKERMOVE1: `@Experimental`/`@Tested`/`@Hardened`
@@ -711,6 +720,7 @@ impl<'a> Parser<'a> {
                                         None,
                                         None,
                                         None,
+                                        None,
                                         false,
                                         None,
                                     )
@@ -749,6 +759,7 @@ impl<'a> Parser<'a> {
                                         None,
                                         false,
                                         false,
+                                        None,
                                         None,
                                         None,
                                         false,
@@ -1103,7 +1114,7 @@ impl<'a> Parser<'a> {
                             Some(t.span),
                         ));
                         self.func_after_fn(
-                            false, false, false, None, None, false, false, None, None, false, None,
+                            false, false, false, None, None, false, false, None, None, None, false, None,
                             false, None, false, false, None, false, None,
                         )
                         .map(Item::Func)

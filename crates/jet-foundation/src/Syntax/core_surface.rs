@@ -55,6 +55,16 @@ pub const ATTR_OFF: &str = "Off";
 /// `#DebugOnly <stmt>` emits only in debug/dev builds; release builds strip it.
 pub const ATTR_DEBUG_ONLY: &str = "DebugOnly";
 
+/// D-CANVASMETA1=B (ratified 2026-07-09): tooling metadata attribute for
+/// bindings, top-level consts, and functions.
+pub const ATTR_META: &str = "Meta";
+
+/// D-CANVASMETA1=B: `#Meta` category field name.
+pub const META_FIELD_CATEGORY: &str = "category";
+
+/// D-CANVASMETA1=B: `#Meta` tunable flag field name.
+pub const META_FIELD_TUNABLE: &str = "tunable";
+
 /// S3 (ratified): block delimiters.
 pub const BLOCK_OPEN: &str = "{";
 pub const BLOCK_CLOSE: &str = "}";

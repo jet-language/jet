@@ -14,10 +14,10 @@ use crate::AST::{
     AccessConvention, BinOp, BindName, BindPattern, Binding, Call, CallArg, CodeModule, ConstAttr,
     ConstDef, Contribution, ElseBranch, EnumDef, EnumLitArg, Expr, Field, ForKind, Func,
     GenericModuleDef, GenericModuleParam, IfStmt, ImplDef, Item, LValue, Lambda, LambdaBody,
-    LambdaMeta, LambdaParam, Marker, ModuleAliasDef, ModuleArg, ModuleDecl, Namespace, OrFallback,
-    Param, Pattern, Program, Stmt, StrMatchPart, StrPart, StructDef, SwitchArm, TagDef, TraitDef,
-    TraitImplBlock, TraitMethodSig, TryConvert, Type, TypeParam, UnOp, Variant, VariantField,
-    VariantPayload,
+    LambdaMeta, LambdaParam, Marker, MetaAttr, MetaField, ModuleAliasDef, ModuleArg, ModuleDecl,
+    Namespace, OrFallback, Param, Pattern, Program, Stmt, StrMatchPart, StrPart, StructDef,
+    SwitchArm, TagDef, TraitDef, TraitImplBlock, TraitMethodSig, TryConvert, Type, TypeParam, UnOp,
+    Variant, VariantField, VariantPayload,
 };
 
 mod Expressions;

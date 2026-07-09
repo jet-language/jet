@@ -20,6 +20,7 @@ fn add_node(
         y,
         badges: badges.into_iter().map(str::to_string).collect(),
         affordances: affordances.into_iter().map(str::to_string).collect(),
+        meta_json: None,
     });
 }
 
@@ -110,6 +111,24 @@ fn add_region(g: &mut GraphBuilder, ordinal: usize, kind: &str, title: &str, spa
         json_str(title),
         span_json(span.into())
     ));
+}
+
+fn meta_attr_json(meta: Option<&AST::MetaAttr>) -> Option<String> {
+    let meta = meta?;
+    let facts = meta.facts();
+    if facts.category.is_none() && !facts.tunable {
+        return None;
+    }
+    let category = facts
+        .category
+        .as_ref()
+        .map(|s| json_str(s))
+        .unwrap_or_else(|| "null".to_string());
+    Some(format!(
+        "{{\"category\":{},\"tunable\":{}}}",
+        category,
+        if facts.tunable { "true" } else { "false" }
+    ))
 }
 
 fn add_source_comment_regions(g: &mut GraphBuilder, src: &str, f: &AST::Func) {
@@ -493,7 +512,7 @@ fn function_metadata_json(src: &str, f: &AST::Func) -> String {
         })
         .unwrap_or_default();
     format!(
-        "{{\"name\":{},\"signature\":{},\"visibility\":{},\"docs\":{},\"pure\":{},\"unsafe\":{},\"effects\":[{}],\"returns\":{},\"params\":[{}],\"source_span\":{},\"edit_affordances\":[\"rename_function\",\"edit_function_signature\",\"create_function\",\"source_jump\"]}}",
+        "{{\"name\":{},\"signature\":{},\"visibility\":{},\"docs\":{},\"pure\":{},\"unsafe\":{},\"effects\":[{}],\"returns\":{},\"params\":[{}],\"meta\":{},\"source_span\":{},\"edit_affordances\":[\"rename_function\",\"edit_function_signature\",\"create_function\",\"source_jump\"]}}",
         json_str(&f.name),
         json_str(&function_signature_text(src, f)),
         json_str(function_visibility(f)),
@@ -503,6 +522,7 @@ fn function_metadata_json(src: &str, f: &AST::Func) -> String {
         effects,
         json_str(&ret),
         params,
+        meta_attr_json(f.meta.as_ref()).unwrap_or_else(|| "null".to_string()),
         span_json(func_source_span(f))
     )
 }
@@ -639,8 +659,13 @@ fn push_rail(kinds: &mut Vec<String>, kind: &str) {
 }
 
 fn node_json(n: &NodeRec) -> String {
+    let meta = n
+        .meta_json
+        .as_ref()
+        .cloned()
+        .unwrap_or_else(|| "null".to_string());
     format!(
-        "{{\"node_id\":{},\"kind\":{},\"archetype\":{},\"title\":{},\"source_span\":{},\"layout\":{{\"x\":{},\"y\":{}}},\"badges\":[{}],\"edit_affordances\":[{}]}}",
+        "{{\"node_id\":{},\"kind\":{},\"archetype\":{},\"title\":{},\"source_span\":{},\"layout\":{{\"x\":{},\"y\":{}}},\"badges\":[{}],\"edit_affordances\":[{}],\"meta\":{}}}",
         json_str(&n.id),
         json_str(&n.kind),
         json_str(&n.archetype),
@@ -649,7 +674,8 @@ fn node_json(n: &NodeRec) -> String {
         n.x,
         n.y,
         json_strs(&n.badges),
-        json_strs(&n.affordances)
+        json_strs(&n.affordances),
+        meta
     )
 }
 

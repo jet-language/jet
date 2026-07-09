@@ -81,6 +81,19 @@ impl<'a> Parser<'a> {
                 TokKind::Hash
                     if matches!(
                         self.toks.get(self.pos + 1).map(|t| &t.kind),
+                        Some(TokKind::Ident(n)) if n == Syntax::ATTR_META
+                    ) =>
+                {
+                    let hash = self.bump().span;
+                    let name_tok = self.bump();
+                    return Err(self.meta_attr_wrong_place_diag(
+                        Span::new(hash.start, name_tok.span.end),
+                        "binding, const, or function",
+                    ));
+                }
+                TokKind::Hash
+                    if matches!(
+                        self.toks.get(self.pos + 1).map(|t| &t.kind),
                         Some(TokKind::Ident(n))
                             if n == Syntax::ATTR_OFF || n == Syntax::ATTR_DEBUG_ONLY
                     ) =>

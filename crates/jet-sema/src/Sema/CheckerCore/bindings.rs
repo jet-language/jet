@@ -1,4 +1,89 @@
+pub(crate) fn check_meta_attr_fields(meta: &MetaAttr) -> Vec<Diagnostic> {
+    let mut diags = Vec::new();
+    let mut seen_category = false;
+    let mut seen_tunable = false;
+    for field in &meta.fields {
+        match field {
+            MetaField::Category { value, span } => {
+                if seen_category {
+                    diags.push(Diagnostic::error(
+                        "E0346",
+                        "`#Meta` repeats `category`".to_string(),
+                        "`category` has one value; writing it twice would make tooling choose between two labels".to_string(),
+                        "keep one `category: \"...\"` field".to_string(),
+                        Some(*span),
+                    ));
+                }
+                seen_category = true;
+                match value {
+                    Expr::Str(parts, _) => match parts.as_slice() {
+                        [StrPart::Lit(s)] if s.is_empty() => diags.push(Diagnostic::error(
+                            "E0348",
+                            "`#Meta` category cannot be empty".to_string(),
+                            "Canvas groups use this text as a visible label".to_string(),
+                            "write a non-empty category, e.g. `category: \"Movement\"`".to_string(),
+                            Some(value.span()),
+                        )),
+                        [StrPart::Lit(_)] => {}
+                        _ => diags.push(Diagnostic::error(
+                            "E0347",
+                            "`#Meta` category needs plain quoted text".to_string(),
+                            "`category` is compile-time tooling data, not a runtime string".to_string(),
+                            "write a string literal, e.g. `category: \"Movement\"`".to_string(),
+                            Some(value.span()),
+                        )),
+                    },
+                    _ => diags.push(Diagnostic::error(
+                        "E0347",
+                        "`#Meta` category needs plain quoted text".to_string(),
+                        "`category` is compile-time tooling data, not a runtime value".to_string(),
+                        "write a string literal, e.g. `category: \"Movement\"`".to_string(),
+                        Some(value.span()),
+                    )),
+                }
+            }
+            MetaField::Tunable { span } => {
+                if seen_tunable {
+                    diags.push(Diagnostic::error(
+                        "E0346",
+                        "`#Meta` repeats `tunable`".to_string(),
+                        "`tunable` is a flag; writing it twice does not add meaning".to_string(),
+                        "keep one `tunable` field".to_string(),
+                        Some(*span),
+                    ));
+                }
+                seen_tunable = true;
+            }
+            MetaField::Unknown { name, span } => {
+                let fix = if edit_distance(name, Syntax::META_FIELD_CATEGORY) <= 2 {
+                    format!("did you mean `{}`?", Syntax::META_FIELD_CATEGORY)
+                } else if edit_distance(name, Syntax::META_FIELD_TUNABLE) <= 2 {
+                    format!("did you mean `{}`?", Syntax::META_FIELD_TUNABLE)
+                } else {
+                    format!(
+                        "use `{}` or `{}`",
+                        Syntax::META_FIELD_CATEGORY,
+                        Syntax::META_FIELD_TUNABLE
+                    )
+                };
+                diags.push(Diagnostic::error(
+                    "E0345",
+                    format!("`#Meta` does not have a `{}` field", name),
+                    "`#Meta` is intentionally small today: one category label and one tunable flag".to_string(),
+                    fix,
+                    Some(*span),
+                ));
+            }
+        }
+    }
+    diags
+}
+
 impl<'a> Checker<'a> {
+        pub(crate) fn check_meta_attr(&mut self, meta: &MetaAttr) {
+            self.diags.extend(check_meta_attr_fields(meta));
+        }
+
         /// D-UNINIT-SENTINEL1: `name: Type := uninit` — gate on `use core.mem`,
         /// restrict to plain-data types (E0423), declare the binding, and record
         /// it as not-yet-written so the dataflow can prove write-before-read
@@ -80,6 +165,9 @@ impl<'a> Checker<'a> {
         }
     
         pub(crate) fn check_binding(&mut self, b: &mut Binding) {
+            if let Some(meta) = &b.meta {
+                self.check_meta_attr(meta);
+            }
             // D-DETACH1: record the binding name so report_unsendable can flag view-capturing tasks.
             let prev_binding_name = self.current_binding_name.take();
             self.current_binding_name = Some(b.name.clone());

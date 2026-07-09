@@ -74,6 +74,27 @@ fn fmt_off_debug_only_statement_attributes_stability() {
 }
 
 #[test]
+fn fmt_meta_attribute_stability() {
+    let src = r#"#Meta(category: "Movement", tunable)
+fn step_speed(speed: Int) -> Int {
+    #Meta(category: "Movement", tunable)
+    next :: speed + 1
+    return next
+}
+"#;
+    let out = jet::format_source(src).expect("fmt should accept #Meta attributes");
+    for needle in [
+        "#Meta(category: \"Movement\", tunable)",
+        "fn step_speed(speed: Int) -> Int {",
+        "next :: speed + 1",
+    ] {
+        assert!(out.contains(needle), "fmt dropped `{needle}`, got:\n{out}");
+    }
+    let twice = jet::format_source(&out).expect("#Meta output should re-fmt");
+    assert_eq!(out, twice, "#Meta formatting must be stable");
+}
+
+#[test]
 fn fmt_preserves_block_comments() {
     // S5: `/* … */` block comments, nesting allowed.
     let src = r#"/* a leading block comment */

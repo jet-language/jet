@@ -111,6 +111,7 @@ impl<'a> Parser<'a> {
                 None,
                 is_pure,
                 is_sanitizer,
+                None,
                 state_requires,
                 state_transition,
                 false,
@@ -163,6 +164,15 @@ impl<'a> Parser<'a> {
         }
     
         pub(super) fn const_def(&mut self) -> Result<ConstDef, Diagnostic> {
+            let meta = if self.at_meta_attr() {
+                let meta = self.parse_meta_attr()?;
+                while matches!(self.peek().kind, TokKind::Semi) {
+                    self.bump();
+                }
+                Some(meta)
+            } else {
+                None
+            };
             // D-PERSIST1: optional `@Persist` (retired `#Persist` teaches E0062).
             let (is_persist, persist_span) = if matches!(&self.peek().kind, TokKind::At | TokKind::Hash)
                 && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::CONTRACT_PERSIST)
@@ -206,6 +216,7 @@ impl<'a> Parser<'a> {
                 name,
                 name_span,
                 value,
+                meta,
                 attrs,
                 rust_kind: crate::AST::RustConstKind::Const,
                 is_comptime: false,
@@ -217,6 +228,15 @@ impl<'a> Parser<'a> {
     
         /// S57 (M9.5): `comptime NAME = expr;` — a compile-time constant binding.
         pub(super) fn comptime_def(&mut self) -> Result<ConstDef, Diagnostic> {
+            let meta = if self.at_meta_attr() {
+                let meta = self.parse_meta_attr()?;
+                while matches!(self.peek().kind, TokKind::Semi) {
+                    self.bump();
+                }
+                Some(meta)
+            } else {
+                None
+            };
             self.expect_kw(TokKind::KwComptime, "to start a comptime binding")?;
             let (name, name_span) = self.expect_ident("after `comptime`")?;
             self.expect(TokKind::Eq, "after the comptime name")?;
@@ -226,6 +246,7 @@ impl<'a> Parser<'a> {
                 name,
                 name_span,
                 value,
+                meta,
                 attrs: Vec::new(),
                 rust_kind: crate::AST::RustConstKind::Const,
                 is_comptime: true,

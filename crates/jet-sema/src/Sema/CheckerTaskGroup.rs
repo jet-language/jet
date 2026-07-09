@@ -146,6 +146,7 @@ impl<'a> Checker<'a> {
             mutable: false,
             track: false,
             track_span: None,
+            meta: None,
             name: synth.clone(),
             name_span: span,
             pattern: None,

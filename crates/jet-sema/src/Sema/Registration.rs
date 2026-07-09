@@ -1082,6 +1082,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                     external_type: None,
                     name: format!("__test_{}", t.name),
                     name_span: t.name_span,
+                    meta: None,
                     type_params: Vec::new(),
                     params: Vec::new(),
                     return_type: None,
@@ -2192,6 +2193,9 @@ pub(crate) fn check_func_body(
         in_taskgroup_spawn: false,
         inline_addr_taken: HashSet::new(),
     };
+    if let Some(meta) = &f.meta {
+        ck.check_meta_attr(meta);
+    }
     ck.check_params_and_body(f, owner_type);
     // S60 (E2-M16): purity enforcement for `pure fn` bodies.
     if f.is_pure {
@@ -2269,7 +2273,8 @@ pub(crate) fn check_error_conv_body(
             ec.to_ty.replace('.', "_")
         ),
         name_span: ec.from_span,
-        type_params: Vec::new(),
+        meta: None,
+                    type_params: Vec::new(),
         params: vec![Param {
             name: crate::Syntax::KW_SELF.to_string(),
             name_span: ec.from_span,
@@ -2604,7 +2609,8 @@ pub(crate) fn synthesize_delegation_method(
         external_type: None,
         name: sig.name.clone(),
         name_span: sig.name_span,
-        type_params: vec![],
+        meta: None,
+                    type_params: vec![],
         params,
         return_type: sig.return_type.clone(),
         is_unsafe: false,
@@ -2664,7 +2670,8 @@ pub(crate) fn synthesize_default_method(
         external_type: None,
         name: sig.name.clone(),
         name_span: sig.name_span,
-        type_params: vec![],
+        meta: None,
+                    type_params: vec![],
         params,
         return_type: sig.return_type.clone(),
         is_unsafe: false,

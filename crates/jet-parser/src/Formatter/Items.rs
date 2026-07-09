@@ -1,8 +1,8 @@
 use super::*;
 use crate::AST::{
     AccessConvention, ConstAttr, ConstDef, EnumDef, EnumGroup, ExternFn, ExternRustBlock, Field,
-    Func, ImplDef, ImportDecl, ImportKind, Item, Marker, Param, StructDef, StructLayout,
-    TraitImplBlock, TypeParam, Variant, VariantPayload,
+    Func, ImplDef, ImportDecl, ImportKind, Item, Marker, MetaAttr, MetaField, Param, StructDef,
+    StructLayout, TraitImplBlock, TypeParam, Variant, VariantPayload,
 };
 
 enum EnumFmtEntry<'b> {
@@ -11,6 +11,25 @@ enum EnumFmtEntry<'b> {
 }
 
 impl<'a> Fmt<'a> {
+    pub(super) fn fmt_meta_attr(&mut self, meta: &MetaAttr) {
+        self.write(&format!("#{}(", Syntax::ATTR_META));
+        for (idx, field) in meta.fields.iter().enumerate() {
+            if idx > 0 {
+                self.write(", ");
+            }
+            match field {
+                MetaField::Category { value, .. } => {
+                    self.write(Syntax::META_FIELD_CATEGORY);
+                    self.write(": ");
+                    self.fmt_expr(value, Prec::OrFallback);
+                }
+                MetaField::Tunable { .. } => self.write(Syntax::META_FIELD_TUNABLE),
+                MetaField::Unknown { name, .. } => self.write(name),
+            }
+        }
+        self.write(")");
+    }
+
     pub(super) fn fmt_item(&mut self, item: &Item) {
         match item {
             Item::Func(f) => self.fmt_func(f, true),
@@ -413,6 +432,10 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_func(&mut self, f: &Func, top_level: bool) {
+        if let Some(meta) = &f.meta {
+            self.fmt_meta_attr(meta);
+            self.newline();
+        }
         // S58 (E2-M13): `#Unsafe` whole-function contract sits on its own line.
         if f.is_unsafe {
             match &f.unsafe_reason {
@@ -870,6 +893,10 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_const(&mut self, c: &ConstDef) {
+        if let Some(meta) = &c.meta {
+            self.fmt_meta_attr(meta);
+            self.newline();
+        }
         if c.is_comptime {
             self.write(Syntax::KW_COMPTIME);
             self.write(" ");

@@ -1,6 +1,102 @@
 use super::*;
 
 impl<'a> Parser<'a> {
+    pub(super) fn at_meta_attr(&self) -> bool {
+        matches!(self.peek().kind, TokKind::Hash)
+            && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_META)
+            && matches!(self.peek3().kind, TokKind::LParen)
+    }
+
+    pub(super) fn meta_attr_next_kind(&self) -> Option<&TokKind> {
+        if !self.at_meta_attr() {
+            return None;
+        }
+        let mut depth = 0usize;
+        let mut i = self.pos + 2;
+        while let Some(tok) = self.toks.get(i) {
+            match tok.kind {
+                TokKind::LParen => depth += 1,
+                TokKind::RParen => {
+                    if depth == 0 {
+                        return None;
+                    }
+                    depth -= 1;
+                    if depth == 0 {
+                        i += 1;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+            i += 1;
+        }
+        while matches!(
+            self.toks.get(i).map(|t| &t.kind),
+            Some(TokKind::Semi)
+        ) {
+            i += 1;
+        }
+        self.toks.get(i).map(|t| &t.kind)
+    }
+
+    pub(super) fn parse_meta_attr(&mut self) -> Result<MetaAttr, Diagnostic> {
+        let start = self.peek().span;
+        self.expect(TokKind::Hash, "expected `#`")?;
+        let (_, name_span) = self.expect_ident(&format!("`#{}`", Syntax::ATTR_META))?;
+        self.expect(TokKind::LParen, &format!("after `#{}`", Syntax::ATTR_META))?;
+        let mut fields = Vec::new();
+        if !matches!(self.peek().kind, TokKind::RParen) {
+            loop {
+                let (name, field_span) = self.expect_ident("for a `#Meta` field")?;
+                if matches!(self.peek().kind, TokKind::Colon) {
+                    self.bump();
+                    let value = self.expr_no_struct_lit()?;
+                    let span = Span::new(field_span.start, value.span().end);
+                    if name == Syntax::META_FIELD_CATEGORY {
+                        fields.push(MetaField::Category { value, span });
+                    } else {
+                        fields.push(MetaField::Unknown {
+                            name,
+                            span: field_span,
+                        });
+                    }
+                } else if name == Syntax::META_FIELD_TUNABLE {
+                    fields.push(MetaField::Tunable { span: field_span });
+                } else {
+                    fields.push(MetaField::Unknown {
+                        name,
+                        span: field_span,
+                    });
+                }
+                if matches!(self.peek().kind, TokKind::Comma) {
+                    self.bump();
+                    if matches!(self.peek().kind, TokKind::RParen) {
+                        break;
+                    }
+                    continue;
+                }
+                break;
+            }
+        }
+        let end = self.peek().span.end;
+        self.expect(TokKind::RParen, &format!("to close `#{}`", Syntax::ATTR_META))?;
+        Ok(MetaAttr {
+            fields,
+            span: Span::new(start.start, end.max(name_span.end)),
+        })
+    }
+
+    pub(super) fn meta_attr_wrong_place_diag(&self, span: Span, target: &str) -> Diagnostic {
+        Diagnostic::error(
+            "E0349",
+            "`#Meta` attaches to a binding, const, or function".to_string(),
+            "`#Meta` is a tooling fact about a named source item; expressions do not carry it"
+                .to_string(),
+            format!("move `#Meta(...)` before a {target}, or remove it"),
+            Some(span),
+        )
+    }
+
     fn at_statement_switch_stmt(&mut self, marker: &str) -> Result<Stmt, Diagnostic> {
         let start = self.peek().span;
         self.expect(TokKind::Hash, "expected `#`")?;
@@ -913,6 +1009,19 @@ impl<'a> Parser<'a> {
                 let (label, lspan) = self.expect_ident("for the loop label")?;
                 self.bump(); // `@`
                 self.loop_stmt(Some((label, lspan)))
+            }
+            TokKind::Hash if self.at_meta_attr() => {
+                let meta = self.parse_meta_attr()?;
+                if matches!(self.peek().kind, TokKind::Semi) {
+                    self.bump();
+                }
+                if !self.looks_like_sigil_binding() {
+                    return Err(self.meta_attr_wrong_place_diag(meta.span, "binding"));
+                }
+                let mut binding = self.sigil_binding()?;
+                binding.meta = Some(meta);
+                self.finish_stmt()?;
+                Ok(Stmt::Val(binding))
             }
             TokKind::Hash if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_TRACK) =>
             {
@@ -2233,6 +2342,7 @@ impl<'a> Parser<'a> {
                 mutable,
                 track: false,
                 track_span: None,
+                meta: None,
                 name: String::new(),
                 name_span: pattern.span(),
                 pattern: Some(pattern),
@@ -2273,6 +2383,7 @@ impl<'a> Parser<'a> {
                 mutable: false,
                 track: false,
                 track_span: None,
+                meta: None,
                 name,
                 name_span,
                 pattern: None,
@@ -2304,6 +2415,7 @@ impl<'a> Parser<'a> {
                         mutable: false,
                         track: false,
                         track_span: None,
+                meta: None,
                         name,
                         name_span,
                         pattern: None,
@@ -2336,6 +2448,7 @@ impl<'a> Parser<'a> {
                             mutable: true,
                             track: false,
                             track_span: None,
+                meta: None,
                             name,
                             name_span,
                             pattern: None,
@@ -2356,6 +2469,7 @@ impl<'a> Parser<'a> {
                         mutable: true,
                         track: false,
                         track_span: None,
+                meta: None,
                         name,
                         name_span,
                         pattern: None,
@@ -2394,6 +2508,7 @@ impl<'a> Parser<'a> {
                         mutable: false,
                         track: false,
                         track_span: None,
+                meta: None,
                         name,
                         name_span,
                         pattern: None,
@@ -2432,6 +2547,7 @@ impl<'a> Parser<'a> {
                         mutable: true,
                         track: false,
                         track_span: None,
+                meta: None,
                         name,
                         name_span,
                         pattern: None,
@@ -2472,6 +2588,7 @@ impl<'a> Parser<'a> {
             mutable,
             track: false,
             track_span: None,
+                meta: None,
             name,
             name_span,
             pattern: None,
@@ -2869,6 +2986,7 @@ impl<'a> Parser<'a> {
             mutable: false,
             track: false,
             track_span: None,
+                meta: None,
             name,
             name_span,
             pattern: None,

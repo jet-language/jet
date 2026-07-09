@@ -620,6 +620,10 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_binding(&mut self, b: &Binding) {
+        if let Some(meta) = &b.meta {
+            self.fmt_meta_attr(meta);
+            self.write(" ");
+        }
         if b.track {
             self.write(&format!("#{} ", Syntax::ATTR_TRACK));
         }

@@ -113,6 +113,7 @@ impl<'a> Parser<'a> {
             let mut web_marker = None;
             let mut is_replayable = false;
             let mut replayable_span = None;
+            let mut meta = None;
             // D-PREPOST1: `@Pre(cond, "msg")` / `@Post(cond, "msg")` — repeatable,
             // any order, alongside the typestate/web markers above.
             let mut pre = Vec::new();
@@ -135,6 +136,8 @@ impl<'a> Parser<'a> {
                     let end = self.bump().span.end; // `Replayable`
                     is_replayable = true;
                     replayable_span = Some(Span::new(start, end));
+                } else if meta.is_none() && self.at_meta_attr() {
+                    meta = Some(self.parse_meta_attr()?);
                 } else if self.at_contract_clause_fn(Syntax::CONTRACT_PRE) {
                     pre.push(self.parse_contract_clause(Syntax::CONTRACT_PRE)?);
                 } else if self.at_contract_clause_fn(Syntax::CONTRACT_POST) {
@@ -165,6 +168,7 @@ impl<'a> Parser<'a> {
             let f = self.func_with_modifiers_full(
                 is_pure,
                 is_sanitizer,
+                meta,
                 state_requires,
                 state_transition,
                 web_marker,

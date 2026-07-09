@@ -391,8 +391,12 @@ any tool, file, network, cache, or unsafe access.
 Every function graph carries source-backed metadata:
 
 ```json
-{"function":{"name":"on_start","signature":"pub fn on_start(limit: Int = <default@31-32>) -> Int","visibility":"public","docs":"Starts the scene.","pure":false,"unsafe":false,"returns":"Int","params":[{"name":"limit","type":"Int","default":true,"default_source":"1"}],"edit_affordances":["rename_function","edit_function_signature","create_function","source_jump"]}}
+{"function":{"name":"on_start","signature":"pub fn on_start(limit: Int = <default@31-32>) -> Int","visibility":"public","docs":"Starts the scene.","pure":false,"unsafe":false,"returns":"Int","params":[{"name":"limit","type":"Int","default":true,"default_source":"1"}],"meta":{"category":"Movement","tunable":true},"edit_affordances":["rename_function","edit_function_signature","create_function","source_jump"]}}
 ```
+
+`#Meta(category: "...", tunable)` projects as `meta: {"category": <string|null>,
+"tunable": <bool>}` on annotated function metadata and binding nodes. Unannotated
+items use `meta: null`. The field is source-backed and read-only in v1.
 
 Function edits are ordinary source transactions:
 

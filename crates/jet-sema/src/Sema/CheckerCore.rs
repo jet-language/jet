@@ -6,7 +6,7 @@ use crate::Sema::CheckerOwnership::e0141_unconsumed_branch;
 use crate::Syntax;
 use crate::AST::{
     AccessConvention, BinOp, BindPattern, Binding, CallArg, ElseBranch, Expr, ForKind, IfStmt,
-    IncDecOp, IndexKind, LValue, Pattern, Stmt, StrPart, Type,
+    IncDecOp, IndexKind, LValue, MetaAttr, MetaField, Pattern, Stmt, StrPart, Type,
 };
 use std::collections::{HashMap, HashSet};
 

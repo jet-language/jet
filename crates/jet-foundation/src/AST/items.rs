@@ -678,6 +678,9 @@ pub struct Func {
     pub external_type: Option<(String, Span)>,
     pub name: String,
     pub name_span: Span,
+    /// D-CANVASMETA1=B: `#Meta(...)` facts for Canvas/tooling. Checked by sema;
+    /// ignored by codegen.
+    pub meta: Option<MetaAttr>,
     /// S45 (M9): `<T: Bound>` after the function name.
     pub type_params: Vec<TypeParam>,
     pub params: Vec<Param>,
@@ -1128,4 +1131,3 @@ pub struct Field {
     /// `Sema::CheckerFieldPolicy`). `None` for an ordinary stored field.
     pub computed: Option<Box<Expr>>,
 }
-

@@ -251,6 +251,11 @@ before continuing.
 | E0342 | parse | `#Off` / `#DebugOnly` written on an item instead of a statement (D-CANVASSTATE1) |
 | E0343 | parse | `#Off` / `#DebugOnly` written in expression position (D-CANVASSTATE1) |
 | E0344 | parse | doubled statement switch-off attributes (D-CANVASSTATE1) |
+| E0345 | sema  | `#Meta` unknown field (D-CANVASMETA1) |
+| E0346 | sema  | `#Meta` duplicate field (D-CANVASMETA1) |
+| E0347 | sema  | `#Meta` category is not plain quoted text (D-CANVASMETA1) |
+| E0348 | sema  | `#Meta` category is empty (D-CANVASMETA1) |
+| E0349 | parse | `#Meta` written outside binding/function/const position (D-CANVASMETA1) |
 | E0350 | sema  | `Any` type requested, but Jet has no general top type (D-DYNAMIC-TYPE1) |
 | L0301 | sema  | unreachable dispatch pattern arm (lint)   |
 | E0401 | sema  | fallible value used where plain `T` expected |

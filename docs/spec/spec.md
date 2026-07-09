@@ -461,6 +461,10 @@ impl Circle {
   in every build, emits only in debug/dev builds, and strips from release output.
   Names introduced inside either marker are scoped to that marker body.
   `build.profile` is not a user-typeable comptime value.
+- **Canvas metadata (D-CANVASMETA1):** `#Meta(category: "Movement", tunable)`
+  attaches checked tooling facts to bindings, top-level consts, and functions.
+  `category` must be a non-empty plain string literal; `tunable` is a bare flag.
+  The marker emits no code and changes no runtime behavior.
 - **OS-target gating & dispatch (D-OSTARGET1/D-OSTARGET2):** `#Target(Os.Linux
   |Macos|Windows)` gates one `impl` block to a native OS; `jet build
   --target=<triple>` emits only the matching build's impls (host OS by default).

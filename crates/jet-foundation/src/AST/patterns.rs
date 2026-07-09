@@ -231,6 +231,9 @@ pub struct ConstDef {
     pub name: String,
     pub name_span: Span,
     pub value: Expr,
+    /// D-CANVASMETA1=B: `#Meta(...)` facts for Canvas/tooling. Checked by sema;
+    /// ignored by codegen.
+    pub meta: Option<MetaAttr>,
     pub attrs: Vec<ConstAttr>,
     pub rust_kind: RustConstKind,
     /// S57 (M9.5): `comptime NAME = expr;` — evaluated at compile time.
@@ -250,4 +253,3 @@ pub enum RustConstKind {
     Const,
     Static,
 }
-

@@ -62,6 +62,7 @@ struct NodeRec {
     y: i32,
     badges: Vec<String>,
     affordances: Vec<String>,
+    meta_json: Option<String>,
 }
 
 struct PinRec {

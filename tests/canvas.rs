@@ -1274,6 +1274,29 @@ fn canvas_projects_function_metadata_and_callback_event_views() {
 }
 
 #[test]
+fn canvas_projects_meta_attribute_on_functions_and_bindings() {
+    let path = write_fixture(
+        "meta_attribute",
+        r#"#Meta(category: "Movement", tunable)
+fn run() {
+    #Meta(category: "Movement", tunable)
+    speed :: 3
+    print("{speed}")
+}
+"#,
+    );
+    let graph = jet::Canvas::graph_json_for_file(&path).expect("canvas graph");
+    for field in [
+        "\"function\":{\"name\":\"run\"",
+        "\"meta\":{\"category\":\"Movement\",\"tunable\":true}",
+        "\"kind\":\"binding\"",
+        "\"title\":\"speed\"",
+    ] {
+        assert!(graph.contains(field), "graph missing {field}: {graph}");
+    }
+}
+
+#[test]
 fn canvas_function_transactions_write_source_and_reproject_calls() {
     let path = write_fixture("function_transactions", CANVAS_FIXTURE);
     let graph = jet::Canvas::graph_json_for_file(&path).expect("canvas graph");
