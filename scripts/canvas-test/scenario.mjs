@@ -248,7 +248,7 @@ export const scenarios = {
   "palette-insert-core-fn": async (ctx) => {
     await ctx.openCanvas();
     await ctx.loadCoreCatalog();
-    await ctx.openPinActionMenu("total", "total");
+    await ctx.openPinActionMenu("limit", "limit");
     await ctx.expectMenu("Search actions");
     await ctx.type("abs");
     await ctx.expectMenu("abs");
@@ -262,7 +262,7 @@ export const scenarios = {
     await ctx.openCanvas();
     const before = await ctx.driver.evaluate(`fetch("/canvas/source", { cache: "no-store" }).then((r) => r.text())`);
     await ctx.loadCoreCatalog();
-    await ctx.openPinActionMenu("total", "total");
+    await ctx.openPinActionMenu("limit", "limit");
     await ctx.type("abs");
     await ctx.expectMenu("abs");
     await ctx.pickEntry("abs");
