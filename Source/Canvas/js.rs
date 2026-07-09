@@ -3362,6 +3362,11 @@ pub fn canvas_js() -> String {
         if (sourceEditor) sourceEditor.value = String(text || "");
         return true;
       },
+      postTransaction: (body) => {
+        window.__jetCanvasLastTxResult = null;
+        postTransaction(body);
+        return true;
+      },
       checkCurrentSource,
       jumpProblem: (index) => {
         const entry = activeDiagnostics()[Number(index) || 0];

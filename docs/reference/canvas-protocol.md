@@ -266,7 +266,8 @@ Current transactions:
 
 Unknown request fields are ignored by v1. Unknown operations fail with a
 `jet.canvas.edit` error. A stale `revision` fails with `kind:"conflict"` before
-any write.
+any write. Semantic failures return the exact rendered Jet diagnostic text and a
+structured `diagnostics` array for persistent panels and node bubbles.
 
 Pin-drag insertion is still source truth: the transaction writes either an
 ordinary call statement (`wire_expr` becomes a call argument) or an ordinary call
@@ -284,6 +285,12 @@ Failure response:
 
 ```json
 {"protocol":"jet.canvas.edit","schema_version":1,"ok":false,"kind":"conflict","message":"source changed since this Canvas graph was drawn"}
+```
+
+Diagnostic failure response:
+
+```json
+{"protocol":"jet.canvas.edit","schema_version":1,"ok":false,"kind":"diagnostic","message":"Error [E0107]: ...","revision":"sha256-...","diagnostic_revision":"sha256-...","diagnostics":[{"code":"E0107","severity":"error","what":"nothing named `x` exists here","why":"only names that have been defined can be used","fix":"define `x` before this line","message":"nothing named `x` exists here","rendered":"Error [E0107]: ...\n Why: ...\n Fix: ...\n","source_span":{"start":42,"end":43,"line":3,"column":11},"source_path":"/repo/main.jet"}]}
 ```
 
 Every successful write runs through `jet fmt`, re-checks through the front end,
@@ -367,7 +374,7 @@ run.
 Execute an approved command:
 
 ```json
-{"schema_version":1,"action_id":"canvas.command:check","revision":"sha256-..."}
+{"schema_version":1,"action_id":"canvas.command:check","revision":"sha256-...","source_text":"fn run() {\n    missing\n}\n"}
 ```
 
 Endpoint: `POST /__jet_canvas/command` or `POST /canvas/command`.
@@ -379,8 +386,13 @@ does not accept arbitrary argv.
 Successful receipt:
 
 ```json
-{"protocol":"jet.canvas.command_receipt","schema_version":1,"ok":true,"action_id":"canvas.command:check","title":"Check project","revision":"sha256-...","command":["jet","check","main.jet"],"writes":"none","success":true,"exit_code":0,"elapsed_ms":42,"stdout":"","stderr":""}
+{"protocol":"jet.canvas.command_receipt","schema_version":1,"ok":true,"action_id":"canvas.command:check","title":"Check project","revision":"sha256-...","checked_revision":"sha256-...","command":["jet","check","main.jet"],"writes":"none","success":false,"exit_code":1,"elapsed_ms":42,"stdout":"","stderr":"Error [E0107]: ...","diagnostics":[{"code":"E0107","severity":"error","what":"nothing named `missing` exists here","why":"only names that have been defined can be used","fix":"define `missing` before this line","message":"nothing named `missing` exists here","rendered":"Error [E0107]: ...\n Why: ...\n Fix: ...\n","source_span":{"start":15,"end":22,"line":2,"column":5},"source_path":"/repo/main.jet"}]}
 ```
+
+For Check, `source_text` is optional. When present, Canvas checks that open
+buffer text in memory through the same front-end machinery and does not write it
+to disk. `checked_revision` tags diagnostics so later rechecks and reprojects
+clear stale rows and node bubbles.
 
 Execution receipts are missing until an approved command path runs the exact
 source revision. A future external adapter must ask for extra authority before

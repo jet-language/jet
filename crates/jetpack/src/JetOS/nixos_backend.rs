@@ -634,8 +634,12 @@ let
       # `gnome-shell-extension-user-themes` (pname) lives at
       # `gnomeExtensions.user-themes`.
       extension = lib.removePrefix "gnome-shell-extension-" name;
+      # `dejavu-fonts` (pname) lives at `dejavu_fonts` — a common
+      # pname/attr convention split.
+      underscored = builtins.replaceStrings ["-"] ["_"] name;
     in
     if pkgs ? ${name} then pkgs.${name}
+    else if pkgs ? ${underscored} then pkgs.${underscored}
     else if pkgs.kdePackages ? ${name} then pkgs.kdePackages.${name}
     else if pkgs.gnomeExtensions ? ${extension} then pkgs.gnomeExtensions.${extension}
     else throw "jetos: package `${name}` is not in nixpkgs, kdePackages, or gnomeExtensions at the pinned revision";

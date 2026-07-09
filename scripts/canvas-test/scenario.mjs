@@ -219,6 +219,16 @@ export class CanvasScenario {
     return await this.driver.evaluate(`fetch("/canvas/transaction", { method: "POST", headers: { "content-type": "application/json" }, body: ${JSON.stringify(JSON.stringify(body))} }).then((r) => r.json().then((json) => ({ ok: r.ok, json })))`);
   }
 
+  async uiTransaction(body) {
+    const ok = await this.driver.evaluate(`window.__jetCanvasTest.postTransaction(${JSON.stringify(body)})`);
+    if (!ok) throw new Error("UI transaction helper missing");
+    await this.waitFor(async () => {
+      return await this.driver.evaluate(`window.__jetCanvasLastTxResult !== null && window.__jetCanvasLastTxResult !== undefined`);
+    }, "UI transaction result");
+    const json = await this.driver.evaluate(`window.__jetCanvasLastTxResult`);
+    return { ok: !(json && json.ok === false), json };
+  }
+
   async replaceSource(source) {
     const graph = await this.graph();
     const result = await this.transaction({ schema_version: 1, op: "replace_source", revision: graph.revision, source });
@@ -433,7 +443,7 @@ async function failScratchLimit(ctx) {
   await ctx.openCanvas();
   await ctx.switchGraph("scratch");
   const { doc, expr } = await scratchLimitInline(ctx);
-  const result = await ctx.transaction({
+  const result = await ctx.uiTransaction({
     schema_version: 1,
     op: "edit_inline_expr",
     revision: doc.revision,
@@ -593,8 +603,9 @@ export const scenarios = {
     const bubbles = await ctx.diagnosticsByNode();
     const first = bubbles.find((b) => (b.codes || []).includes("E0107"));
     if (!first) throw new Error(`E0107 bubble missing: ${JSON.stringify(bubbles)}`);
+    const graph = await ctx.graph();
     const before = await ctx.source();
-    await ctx.replaceSource(before);
+    await ctx.uiTransaction({ schema_version: 1, op: "replace_source", revision: graph.revision, source: before });
     await ctx.waitFor(async () => {
       const state = await ctx.state();
       return state && (!state.problems || state.problems.length === 0) && (!state.diagnosticsByNode || state.diagnosticsByNode.length === 0);
