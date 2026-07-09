@@ -26,6 +26,10 @@ pub struct OsFlags {
     pub disk: Option<String>,
     pub json: bool,
     pub assume_yes: bool,
+    /// `--real` VM tier: the hidden system backend realizes kernel/init/
+    /// desktop from the pinned package set, so the plumbing generation skips
+    /// its first-party boot-package auto-requirements for defaulted options.
+    pub real_tier: bool,
 }
 
 struct Target {

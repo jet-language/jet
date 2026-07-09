@@ -42,7 +42,14 @@ fn build_generation(
         realized.push(entry);
     }
     let boot = boot_profile(system);
+    // In the real tier the hidden system backend realizes the kernel from the
+    // pinned package set, so a *defaulted* kernel needs no first-party
+    // package here. An explicit `boot.kernel` still goes through the backend
+    // mapping, which rejects unsupported kernels loudly (E1291).
+    let kernel_defaulted =
+        option_value(system, &["boot.kernel", "kernel.package"]).is_none();
     if boot.kernel == "CachyOS"
+        && !(flags.real_tier && kernel_defaulted)
         && !realized
             .iter()
             .any(|entry| entry.name == CACHYOS_KERNEL_PACKAGE)

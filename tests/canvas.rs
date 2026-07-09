@@ -2536,6 +2536,7 @@ fn canvas_blueprint_parity_matrix_is_classified() {
     let matrix = fs::read_to_string(&path).expect("Canvas parity matrix");
     let allowed = [
         "shipped",
+        "claimed",
         "planned",
         "blocked-by-ballot",
         "rejected-as-Blueprint-semantic-debt",
@@ -2578,10 +2579,18 @@ fn canvas_blueprint_parity_matrix_is_classified() {
             "unknown Canvas parity status `{}` in row: {line}",
             cols[3]
         );
+        if cols[3] == "claimed" || cols[3] == "shipped" {
+            assert!(
+                ["interaction:", "protocol:", "projection:", "grep:"]
+                    .iter()
+                    .any(|prefix| cols[4].starts_with(prefix)),
+                "Canvas matrix row with implementation proof must carry a ratchet class: {line}"
+            );
+        }
         if cols[3] == "shipped" {
             assert!(
-                cols[4].contains("tests/") || cols[4].contains("#275"),
-                "shipped Canvas matrix row must name its test ratchet: {line}"
+                cols[4].starts_with("interaction:tests/canvas_scenarios.rs::"),
+                "shipped Canvas matrix row must cite an interaction scenario: {line}"
             );
         }
         rows += 1;

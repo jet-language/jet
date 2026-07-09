@@ -3029,7 +3029,23 @@ pub fn canvas_js() -> String {
       selectedNodeTitle: selectedNode && selectedNode.title || "",
       view: { x: view.x, y: view.y, zoom: view.zoom },
       sourceText: doc.source_text || "",
-      nodeCount: graph.nodes.length
+      nodeCount: graph.nodes.length,
+      loadCoreCatalog: (query) => loadCoreCatalogActions(query || "").then(() => window.__jetCanvasCoreCatalogPalette || actionEntries.length),
+      openPinMenu: (nodeTitle, pinName) => {
+        const g = currentGraphOrNull();
+        if (!g) return false;
+        const node = (g.nodes || []).find((n) => n.title === nodeTitle || String(n.title || "").includes(nodeTitle));
+        if (!node) return false;
+        const pins = (g.pins || []).filter((p) => p.node_id === node.node_id);
+        const pin = pins.find((p) => p.name === pinName || String(p.name || "").includes(pinName))
+          || pins.find((p) => p.direction === pinName)
+          || pins[0];
+        if (!pin) return false;
+        const point = pinPoints.get(pin.pin_id);
+        const r = canvas.getBoundingClientRect();
+        openPinMenu(pin, point ? r.left + point.x : r.left + 120, point ? r.top + point.y : r.top + 120);
+        return true;
+      }
     };
     canvas.dataset.hitMap = JSON.stringify(hitMap);
     updateGraphNav(graph);
@@ -3854,6 +3870,7 @@ pub fn canvas_js() -> String {
   });
 
   canvas.addEventListener("mousedown", function (ev) {
+    if (window.__jetCanvasNoopClick) return;
     const rect = canvas.getBoundingClientRect();
     const x = ev.clientX - rect.left;
     const y = ev.clientY - rect.top;

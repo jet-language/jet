@@ -50,19 +50,61 @@ export class CanvasScenario {
       || pins.find((p) => p.direction === pinName)
       || pins[0];
     if (!pin) throw new Error(`pin not found: ${nodeTitle}.${pinName}`);
-    return { x: pin.cx, y: pin.cy, pin };
+    const point = state.pinPoints && state.pinPoints[pin.pin_id];
+    if (point && Number.isFinite(point.client_x) && Number.isFinite(point.client_y)) {
+      return { x: point.client_x, y: point.client_y, pin };
+    }
+    const rect = await this.canvasRect();
+    return { x: rect.left + pin.cx, y: rect.top + pin.cy, pin };
   }
 
   async node(nodeTitle) {
     const state = await this.state();
     const node = Object.values(state.nodeBounds || {}).find((n) => n.title === nodeTitle || n.title.includes(nodeTitle));
     if (!node) throw new Error(`node not found: ${nodeTitle}`);
-    return { x: node.x + node.w / 2, y: node.y + node.h / 2, node };
+    const rect = await this.canvasRect();
+    return { x: rect.left + node.x + node.w / 2, y: rect.top + node.y + node.h / 2, node };
+  }
+
+  async canvasRect() {
+    return await this.driver.evaluate(`(() => {
+      const r = document.getElementById("jet-canvas-view").getBoundingClientRect();
+      return { left: r.left, top: r.top, width: r.width, height: r.height };
+    })()`);
   }
 
   async dragPin(nodeTitle, pinName, dx = 180, dy = 40) {
     const from = await this.pin(nodeTitle, pinName);
     await this.driver.drag({ x: from.x, y: from.y }, { x: from.x + dx, y: from.y + dy });
+    await sleep(120);
+  }
+
+  async openPinActionMenu(nodeTitle, pinName) {
+    await this.dragPin(nodeTitle, pinName, 190, 30);
+    if (await this.menuOpen()) return;
+    const p = await this.pin(nodeTitle, pinName);
+    await this.driver.rightClick(p.x, p.y);
+    await sleep(120);
+  }
+
+  async menuOpen() {
+    return await this.driver.evaluate(`(() => {
+      const menu = document.getElementById("context-menu");
+      return !!menu && menu.classList.contains("is-open");
+    })()`);
+  }
+
+  async loadCoreCatalog() {
+    await this.driver.evaluate(`(() => {
+      const b = document.getElementById("core-catalog");
+      if (!b) throw new Error("core catalog button missing");
+      b.click();
+      return true;
+    })()`);
+    await this.waitFor(async () => {
+      return await this.driver.evaluate("Number(window.__jetCanvasCoreCatalogPalette || 0) > 0");
+    }, "Core catalog palette");
+    await this.driver.press("Escape");
     await sleep(120);
   }
 
@@ -149,13 +191,18 @@ async function clickSelectDetails(ctx, options = {}) {
   if (options.noopClick) {
     await ctx.driver.evaluate("window.__jetCanvasNoopClick = true");
   }
-  await ctx.click("square");
+  const before = await ctx.state();
+  const current = before.selectedNodeId || "";
+  const target = (before.hitMap.nodes || []).find((n) => n.node_id !== current && ["total", "square", "summarize", "helper"].includes(n.title))
+    || (before.hitMap.nodes || []).find((n) => n.node_id !== current);
+  if (!target) throw new Error("no alternate node to select");
+  await ctx.click(target.title);
   await ctx.waitFor(async () => {
     const state = await ctx.state();
-    return state.selectedNodeTitle === "square";
-  }, "square selected", 1200);
+    return state.selectedNodeId === target.node_id;
+  }, `${target.title} selected`, 1200);
   const details = await ctx.driver.evaluate("document.getElementById('details').textContent");
-  if (!details.includes("square")) throw new Error("details did not show selected square node");
+  if (!details.includes(target.title)) throw new Error(`details did not show selected ${target.title} node`);
 }
 
 export const scenarios = {
@@ -175,10 +222,11 @@ export const scenarios = {
     await sleep(120);
     const changed = await ctx.state();
     if (changed.view.zoom <= before.view.zoom) throw new Error("wheel did not zoom Canvas");
-    await ctx.driver.click(...await ctx.driver.evaluate(`(() => {
+    const fitButton = await ctx.driver.evaluate(`(() => {
       const r = document.getElementById("fit").getBoundingClientRect();
       return [r.left + r.width / 2, r.top + r.height / 2];
-    })()`));
+    })()`);
+    await ctx.driver.click(fitButton[0], fitButton[1]);
     await sleep(120);
     const fit = await ctx.state();
     if (fit.view.zoom === changed.view.zoom && fit.view.x === changed.view.x && fit.view.y === changed.view.y) {
@@ -194,7 +242,8 @@ export const scenarios = {
 
   "palette-insert-core-fn": async (ctx) => {
     await ctx.openCanvas();
-    await ctx.dragPin("total", "output", 190, 30);
+    await ctx.loadCoreCatalog();
+    await ctx.openPinActionMenu("total", "output");
     await ctx.expectMenu("Search actions");
     await ctx.type("abs");
     await ctx.expectMenu("abs");
@@ -207,7 +256,8 @@ export const scenarios = {
   "undo-restores-source": async (ctx) => {
     await ctx.openCanvas();
     const before = await ctx.driver.evaluate(`fetch("/canvas/source", { cache: "no-store" }).then((r) => r.text())`);
-    await ctx.dragPin("total", "output", 190, 30);
+    await ctx.loadCoreCatalog();
+    await ctx.openPinActionMenu("total", "output");
     await ctx.type("abs");
     await ctx.pickEntry("abs");
     await ctx.expectSourceContains("math.abs");
@@ -236,4 +286,3 @@ export const scenarios = {
     if (!failed) throw new Error("click-select scenario still passed with click handler no-op");
   },
 };
-

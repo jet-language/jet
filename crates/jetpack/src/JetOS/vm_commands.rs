@@ -94,6 +94,9 @@ fn cmd_vm(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 {
             return 2;
         }
     }
+    let mut flags = flags.clone();
+    flags.real_tier = real_guest;
+    let flags = &flags;
     let Some(gen) = build_generation(theme, &plan, &system, flags) else {
         return 2;
     };
