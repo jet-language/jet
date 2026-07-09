@@ -3,8 +3,8 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 391,
-    "rev": 2077,
+    "nextNum": 392,
+    "rev": 2092,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -19003,6 +19003,11 @@
         {
           "at": "2026-07-09",
           "by": "claude",
+          "text": "[handoff note] DONE and verified, but M1 acceptance ballot was later pulled: owner hit P0s (#389) that the scenario suite missed. When #389 closes, RE-MINT the M1 acceptance ballot (owner input = ballots ALWAYS, never log verdicts — see memory owner-verdicts-are-ballots)."
+        },
+        {
+          "at": "2026-07-09",
+          "by": "claude",
           "text": "Parent verified: scenarios 13/13 (incl. failed_insert_shows_panel, check_button_populates_panel, bubble_appears_and_clears), canvas 52/52, web_dev 4/4. Problems panel + Check + bubbles live with revision-tagged clearing. DONE."
         },
         {
@@ -19119,12 +19124,17 @@
       "track": "epoch",
       "epoch": "e6",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "ready",
       "priority": "P2",
       "plan": "canvas-blueprint-epoch",
       "blockedBy": [],
-      "assignee": "codex-m2",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-07-09",
+          "by": "claude",
+          "text": "[handoff] codex agent KILLED mid-work by owner; partial edits REVERTED — canvas code is clean at HEAD (last verified: 25 scenarios green through #374). Scope unchanged: add_pattern_arm/edit_pattern_arm/remove_pattern_arm transactions + multi-input append (+ pin), UI affordances, scenarios pattern_arm_add_edit_remove / pattern_arm_invalid_refused / multi_input_append_remove. Reuse reorder_statements (#374) transaction patterns. OWNER CORRECTION 2026-07-09: multi-exec-pin support is a hard requirement — see new requirements card #391; coordinate designs."
+        },
         {
           "at": "2026-07-09",
           "by": "claude",
@@ -19132,8 +19142,7 @@
         }
       ],
       "created": "2026-07-09T14:08:57.486Z",
-      "updated": "2026-07-09",
-      "claimedAt": "2026-07-09T17:06:37.444Z"
+      "updated": "2026-07-09"
     },
     {
       "id": "c0h41rrl",
@@ -19150,6 +19159,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-09",
+          "by": "claude",
+          "text": "[handoff] Not started. Prior logs list audit defects (data-rewire fn-symbol js.rs:3723, wrong-type inline editors js.rs:3599) — still open. Sweep scope: every claimed matrix row gets an interaction scenario under the M0 bar."
+        },
         {
           "at": "2026-07-09",
           "by": "claude",
@@ -19187,6 +19201,11 @@
         {
           "at": "2026-07-09",
           "by": "claude",
+          "text": "[handoff] Not started. #Meta syntax SHIPPED (#386, commit 329bb6b3) — projection exposes meta:{category,tunable}; this card renders/edits it (sidebar grouping by category, Details fields) + kills PROOF/COMMAND dev-panel leakage + finishes no-dead-controls."
+        },
+        {
+          "at": "2026-07-09",
+          "by": "claude",
           "text": "From #368 R4 follow-ups: PROOF/REVISION panel and raw COMMAND rows (jet dev CLI text, dev_server confirmation) render outside developer mode — internals in default UI, fold into this card's no-dead-controls/plain-language scope."
         },
         {
@@ -19218,6 +19237,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-09",
+          "by": "claude",
+          "text": "[handoff] Not started. semindex/LSP engine exists; UX only."
+        },
         {
           "at": "2026-07-09",
           "by": "claude",
@@ -19341,6 +19365,11 @@
         {
           "at": "2026-07-09",
           "by": "claude",
+          "text": "[handoff] Not started. acceptance-m1.md pattern established for milestone acceptance; onboarding is M5, blocked on nothing technically but sequenced after M2-M4."
+        },
+        {
+          "at": "2026-07-09",
+          "by": "claude",
           "text": "Activated into epoch e6 track"
         }
       ],
@@ -19453,6 +19482,11 @@
         {
           "at": "2026-07-09",
           "by": "claude",
+          "text": "[handoff] Not started. #Off/#DebugOnly syntax SHIPPED (#385, commit 058ec43c) — this card is pure Canvas UI: badges + right-click toggles writing the attributes. Design spec: tools/Tower/docs/plans/epoch-6/canvas-design-spec.md (V2 node states section)."
+        },
+        {
+          "at": "2026-07-09",
+          "by": "claude",
           "text": "Activated into epoch e6 track"
         }
       ],
@@ -19477,6 +19511,11 @@
         {
           "at": "2026-07-09",
           "by": "claude",
+          "text": "[handoff] Not started. Reason-code data live: /canvas/core-catalog unavailable_reason_code distribution at last measure: 482 needs_canvas_defaults / 33 method_only (the target classes), rest legitimately excluded. Staged-node machinery from R4 is the foundation (js.rs staged registry + materialization path)."
+        },
+        {
+          "at": "2026-07-09",
+          "by": "claude",
           "text": "Activated into epoch e6 track"
         }
       ],
@@ -19487,17 +19526,22 @@
       "id": "c0y9w2ur",
       "num": 389,
       "title": "P0: menu ranking + builtin-action inserts wrong callee + branch-arm wiring",
-      "body": "Owner-hit defects (2026-07-09, browser-verified by orchestrator): (A) plain right-click menu for query print ranks Straighten-wires (Blueprint substring!), Run/Build commands above inserts; println·core.mem absent from top rows. Fix fuzzy scorer (word-boundary weighting, title>subtitle>keywords, inserts before commands ALWAYS for node-name queries) + visually separate Commands group at bottom. (B) clicking the top Print row (canvas.builtin action path) inserted canvas_value :: summarize(1) — wrong callee, no visible feedback, graph did not reproject. Root-cause the extensibility-action insert target resolution; every menu row click must produce a visible node or a visible diagnostic. (C) branch-arm exec pins: drag from else must create the picked node INSIDE the else block (wired-insert block context) and wiring else to an existing same-block node should move it into the arm (extend reorder_statements to arm-scoped moves) — else pins are currently useless. Scenarios for all three including the exact print query ranking assertion. M1 acceptance ballot pulled until this card is done.",
+      "body": "P0 defects, owner-hit 2026-07-09, orchestrator browser-verified. OWNER CORRECTIONS applied: Jet has NO println — only print; the catalog's 'println·core.mem' row is a PHANTOM from foreign/bridge symbol leakage (FOREIGN_PRINTLN in jet-foundation math_layout.rs) — purge foreign symbols from the core catalog and add a catalog-vs-real-exports cross-check test. Menu content rule (supersedes R3 command-group design): right-click, dragged-pin, and wire context menus show ONLY insertable FUNCTIONS and VARIABLES — zero commands, zero workbench actions; commands move entirely out of node menus (toolbar/command palette only). Defect A (ranking): query print surfaced 'Straighten wires' (substring of Blueprint!) + Run/Build commands; fix fuzzy scorer (word-boundary/prefix dominance, title>subtitle) — mostly moot for commands once they're removed from these menus, still needed for function ranking. Defect B (wrong callee): clicking top Print row inserted canvas_value :: summarize(1) — recursive wrong-callee via the canvas.builtin/extensibility action path, no feedback, no reproject; every activation must yield a visible node or visible diagnostic. Defect C (branch arms): drag from else must create INTO the else block (wired-insert arm context); wiring else to an existing statement moves it into the arm (arm-scoped reorder_statements extension). Scenarios required: menu_shows_only_functions_and_variables, menu_ranking_print (print top, zero command rows), builtin_print_row_inserts_print, else_pin_insert_into_arm, else_pin_move_existing_into_arm. M1 acceptance ballot stays pulled until done.",
       "kind": "task",
       "track": "epoch",
       "epoch": "e6",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P2",
       "plan": "canvas-blueprint-epoch",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-09",
+          "by": "claude",
+          "text": "[handoff] not started; body rewritten with owner corrections (functions+variables-only menus, no println, phantom-catalog purge). Highest priority after tree builds again (neighbor agent mid-refactor in Source/CmdDevWeb.rs at handoff time)."
+        },
         {
           "at": "2026-07-09",
           "by": "claude",
@@ -19525,10 +19569,39 @@
         {
           "at": "2026-07-09",
           "by": "claude",
+          "text": "[handoff] Not started. Owner browser at test time still unconfirmed (Zen=Gecko vs Brave=Chromium) — if Zen, raise this card's priority; all existing verification is Chromium-only via scripts/canvas-test/driver.mjs (CDP)."
+        },
+        {
+          "at": "2026-07-09",
+          "by": "claude",
           "text": "Activated into epoch e6 track"
         }
       ],
       "created": "2026-07-09T17:27:07.580Z",
+      "updated": "2026-07-09"
+    },
+    {
+      "id": "c0zpnwk9",
+      "num": 391,
+      "title": "Canvas requirement: multiple execution pins IN and OUT on nodes",
+      "body": "OWNER REQUIREMENT (2026-07-09, verbatim): 'multiple execution pins BOTH in and out SHOULD NOT be impossible, those are requirements for functional parity with blueprint.' Multi-exec-OUT partially exists (branch then/else, pattern arms); must generalize: any control construct with N outgoing paths projects N labeled exec outs (switch arms, loop body/done, early returns). Multi-exec-IN needs design: in Blueprint any node accepts multiple incoming exec wires (execution converges); in source-backed Jet a statement executes wherever control reaches it — N incoming exec wires = N call/reach sites of the same statement span, which today's projection renders as one exec-in accepting only one wire. Design task: projection + wiring transactions letting multiple exec sources target one node (shared continuation = e.g. moving the target into a helper fn Canvas auto-extracts, or a labeled block both paths jump to). If a canonical mechanism needs new syntax or an auto-extract convention, STOP and raise a ballot (I8: one mechanism). Deliverable: design note under tools/Tower/docs/plans/epoch-6/ + ballot if gated + implementation with interaction scenarios (wire two exec outs into one node, assert source + execution).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e6",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": "canvas-blueprint-epoch",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-09",
+          "by": "claude",
+          "text": "Activated into epoch e6 track"
+        }
+      ],
+      "created": "2026-07-09T17:40:53.264Z",
       "updated": "2026-07-09"
     }
   ],
@@ -43116,6 +43189,111 @@
   ],
   "events": [
     {
+      "at": "2026-07-09T17:41:21.331Z",
+      "by": "claude",
+      "action": "message.send",
+      "ref": "msg6cvvvsnp",
+      "note": "→ owner: Handoff ready. All subagents stopped; canvas code clean at H"
+    },
+    {
+      "at": "2026-07-09T17:41:21.233Z",
+      "by": "claude",
+      "action": "card.update",
+      "ref": "c0cgvrdp",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-09T17:41:21.162Z",
+      "by": "claude",
+      "action": "card.update",
+      "ref": "c0zti5r8",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-09T17:41:21.090Z",
+      "by": "claude",
+      "action": "card.update",
+      "ref": "c0u0y3s6",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-09T17:41:21.020Z",
+      "by": "claude",
+      "action": "card.update",
+      "ref": "c0stzzp4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-09T17:41:20.949Z",
+      "by": "claude",
+      "action": "card.update",
+      "ref": "c0h41rrl",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-09T17:40:53.562Z",
+      "by": "claude",
+      "action": "card.update",
+      "ref": "c0oeg3vh",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-09T17:40:53.491Z",
+      "by": "claude",
+      "action": "card.update",
+      "ref": "c0lc8k7l",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-09T17:40:53.421Z",
+      "by": "claude",
+      "action": "card.update",
+      "ref": "c0898o9k",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-09T17:40:53.349Z",
+      "by": "claude",
+      "action": "card.activate",
+      "ref": "c0zpnwk9",
+      "note": ""
+    },
+    {
+      "at": "2026-07-09T17:40:53.264Z",
+      "by": "claude",
+      "action": "card.add",
+      "ref": "c0zpnwk9",
+      "note": "Canvas requirement: multiple execution pins IN and OUT on nodes"
+    },
+    {
+      "at": "2026-07-09T17:40:21.662Z",
+      "by": "claude",
+      "action": "card.update",
+      "ref": "c0y9w2ur",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-09T17:40:21.588Z",
+      "by": "claude",
+      "action": "card.update",
+      "ref": "c0y9w2ur",
+      "note": "body"
+    },
+    {
+      "at": "2026-07-09T17:40:21.514Z",
+      "by": "claude",
+      "action": "card.update",
+      "ref": "c0fzoku6",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-09T17:40:21.435Z",
+      "by": "claude",
+      "action": "card.release",
+      "ref": "c0fzoku6",
+      "note": ""
+    },
+    {
       "at": "2026-07-09T17:27:07.650Z",
       "by": "claude",
       "action": "card.activate",
@@ -57009,111 +57187,6 @@
       "action": "card.update",
       "ref": "c0cevzhr",
       "note": "logEntry"
-    },
-    {
-      "at": "2026-07-05T12:09:27.385Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0xz4xqx",
-      "note": "phase"
-    },
-    {
-      "at": "2026-07-05T12:09:27.332Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0wa2hf8",
-      "note": "phase"
-    },
-    {
-      "at": "2026-07-05T12:09:27.277Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0vg0lj7",
-      "note": "phase"
-    },
-    {
-      "at": "2026-07-05T12:09:27.222Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0cevzhr",
-      "note": "phase"
-    },
-    {
-      "at": "2026-07-05T12:09:08.605Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-GAME2",
-      "note": "Name of the flagship game engine package"
-    },
-    {
-      "at": "2026-07-05T12:09:08.549Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0xz4xqx",
-      "note": "plan"
-    },
-    {
-      "at": "2026-07-05T12:09:08.495Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0x3v19y",
-      "note": "plan"
-    },
-    {
-      "at": "2026-07-05T12:09:08.442Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0wa2hf8",
-      "note": "plan"
-    },
-    {
-      "at": "2026-07-05T12:09:08.384Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0vg0lj7",
-      "note": "plan"
-    },
-    {
-      "at": "2026-07-05T12:09:08.330Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0cevzhr",
-      "note": "plan"
-    },
-    {
-      "at": "2026-07-05T12:04:59.002Z",
-      "by": "tower",
-      "action": "message.send",
-      "ref": "msg9sxb7u5",
-      "note": "→ codex-1: [tower] greenlit: #214 #215. Board is current; pick up with "
-    },
-    {
-      "at": "2026-07-05T12:04:59.002Z",
-      "by": "tower",
-      "action": "message.send",
-      "ref": "msg8sxaraa",
-      "note": "→ claude-main: [tower] greenlit: #214 #215. Board is current; pick up with "
-    },
-    {
-      "at": "2026-07-05T12:03:28.977Z",
-      "by": "owner",
-      "action": "card.activate",
-      "ref": "c4g593nd",
-      "note": ""
-    },
-    {
-      "at": "2026-07-05T12:03:26.656Z",
-      "by": "owner",
-      "action": "card.activate",
-      "ref": "c3gg6ghs",
-      "note": ""
-    },
-    {
-      "at": "2026-07-05T11:47:27.044Z",
-      "by": "owner",
-      "action": "card.activate",
-      "ref": "c0xz4xqx",
-      "note": ""
     }
   ],
   "messages": [
@@ -59613,6 +59686,17 @@
       "at": "2026-07-09T16:50:44.543Z",
       "deliveredAt": null,
       "readAt": "2026-07-09T17:06:28.282Z"
+    },
+    {
+      "id": "msg6cvvvsnp",
+      "from": "claude",
+      "to": "owner",
+      "text": "Handoff ready. All subagents stopped; canvas code clean at HEAD (verified through #374 + #385/#386 syntax). Working tree holds YOUR other agent's in-flight CmdDevWeb/JetOS refactor (build broken by it at handoff). Cards #375-#391 carry [handoff] state; #389 (your three P0s + functions-only menus + println phantom purge) is top priority; #391 tracks multi-exec-pins requirement. Design/research docs now in repo: tools/Tower/docs/plans/epoch-6/ (design spec, post-mortem, BP ecosystem, experience audit).",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-09T17:41:21.331Z",
+      "deliveredAt": null,
+      "readAt": null
     }
   ],
   "nextNum": 368,
