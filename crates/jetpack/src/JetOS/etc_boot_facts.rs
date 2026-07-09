@@ -152,6 +152,15 @@ fn write_boot_facts(
         "vfat.ko.xz",
         "nls_ascii.ko.xz",
         "nls_cp437.ko.xz",
+        "serio.ko.xz",
+        "i8042.ko.xz",
+        "libps2.ko.xz",
+        "atkbd.ko.xz",
+        "hid-generic.ko.xz",
+        "usbhid.ko.xz",
+        "uhci-hcd.ko.xz",
+        "ehci-hcd.ko.xz",
+        "xhci-hcd.ko.xz",
     ] {
         if let Some(module) = kernel_entry
             .and_then(|entry| boot_artifact(entry, &[&format!("boot/modules/{module_name}")]))

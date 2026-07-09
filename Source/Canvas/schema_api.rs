@@ -53,6 +53,7 @@ struct GraphBuilder {
 struct NodeRec {
     id: String,
     kind: String,
+    archetype: String,
     title: String,
     span: SourceSpan,
     x: i32,

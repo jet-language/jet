@@ -192,10 +192,17 @@ fn canvas_actions(path: &Path, src: &str) -> Result<String, String> {
     let (_projection, index) = open_query_context(path, src)?;
     let authority = canvas_authority_context(path);
     let mut entries = Vec::new();
+    let mut project_functions = Vec::new();
     for def in index.definitions() {
         let SymbolKind::Function { params, ret } = &def.kind else {
             continue;
         };
+        project_functions.push(project_function_catalog_json(
+            def,
+            params,
+            ret.as_deref(),
+            &index,
+        ));
         if def.name == "run" {
             continue;
         }
@@ -209,16 +216,18 @@ fn canvas_actions(path: &Path, src: &str) -> Result<String, String> {
         &["\"canvas\""],
         &authority,
     ));
-    entries.extend(canvas_core_catalog_action_jsons(&authority));
+    entries.extend(canvas_core_catalog_action_jsons(src, &authority));
     entries.extend(canvas_command_action_jsons(&authority));
     entries.sort();
+    project_functions.sort();
     Ok(query_ok(
         "actions",
         src,
         "[]",
         &format!(
-            "\"impact\":null,\"diff\":null,\"actions_schema_version\":{},\"actions\":[{}]",
+            "\"impact\":null,\"diff\":null,\"actions_schema_version\":{},\"project_functions\":[{}],\"actions\":[{}]",
             ACTION_SCHEMA_VERSION,
+            project_functions.join(","),
             entries.join(",")
         ),
     ))
@@ -250,37 +259,43 @@ fn canvas_core_catalog(_path: &Path, src: &str, query: &str) -> Result<String, S
     ))
 }
 
-fn canvas_core_catalog_action_jsons(authority: &CanvasAuthority) -> Vec<String> {
+fn canvas_core_catalog_action_jsons(src: &str, authority: &CanvasAuthority) -> Vec<String> {
     core_catalog_entries("")
         .into_iter()
         .flat_map(|module| {
             let module_path = module.path.clone();
+            let source_callee = core_source_callee(src, &module_path);
             module
                 .members
                 .into_iter()
-                .take(8)
-                .map(move |member| core_catalog_action_json(&module_path, &member, authority))
+                .map(move |member| {
+                    core_catalog_action_json(&module_path, &source_callee, &member, authority)
+                })
         })
         .collect()
 }
 
 fn core_catalog_action_json(
     module_path: &str,
+    source_callee_prefix: &str,
     member: &CoreCatalogMember,
     authority: &CanvasAuthority,
 ) -> String {
     let action_id = format!("canvas.core_catalog:{module_path}:{}", member.name);
+    let callee = format!("{source_callee_prefix}.{}", member.name);
     format!(
-        "{{\"action_id\":{},\"kind\":\"canvas.core_catalog\",\"title\":{},\"module_path\":{},\"callee\":{},\"engine\":\"core-catalog\",\"execution\":\"source_browse\",\"available\":true,\"authority\":[{}],\"package_id\":{},\"version\":{},\"touched_files\":[{}],\"writes\":\"none\",\"requires_confirmation\":false,\"audit\":[\"source\",\"module_path\",\"signature\"],\"signature\":{},\"summary\":{},\"source\":{}}}",
+        "{{\"action_id\":{},\"kind\":\"canvas.core_catalog\",\"title\":{},\"module_path\":{},\"callee\":{},\"insert_callee\":{},\"insert_op\":\"insert_call\",\"engine\":\"checked-tir+jit\",\"execution\":\"source_transaction\",\"available\":true,\"authority\":[{}],\"package_id\":{},\"version\":{},\"touched_files\":[{}],\"writes\":\"source_transaction_only\",\"requires_confirmation\":false,\"audit\":[\"source\",\"module_path\",\"signature\",\"diff\",\"diagnostics\"],\"signature\":{},\"pure\":{},\"summary\":{},\"source\":{}}}",
         json_str(&action_id),
         json_str(&format!("{} · {}", member.name, module_path)),
         json_str(module_path),
-        json_str(&format!("{}.{}", module_path, member.name)),
-        json_str("canvas.catalog:core.read"),
+        json_str(&callee),
+        json_str(&callee),
+        json_str(&authority.grant),
         json_str(&authority.package_id),
         json_str(&authority.version),
         json_str(&authority.touched_file),
         json_str(&member.signature),
+        if member.pure { "true" } else { "false" },
         json_str(&member.summary),
         json_str(&member.source)
     )
@@ -300,6 +315,7 @@ struct CoreCatalogMember {
     signature: String,
     summary: String,
     source: String,
+    pure: bool,
 }
 
 fn core_catalog_entries(query: &str) -> Vec<CoreCatalogModule> {
@@ -367,6 +383,7 @@ fn merge_sema_core_registry(modules: &mut Vec<CoreCatalogModule>, registry: &str
                 signature: format!("{path}.{name}"),
                 summary: "Compiler-known Core item from sema registry.".to_string(),
                 source: "crates/jet-sema/src/Sema/CheckerCoreLib/module_items.rs".to_string(),
+                pure: core_member_pure(&path, &name),
                 name,
             });
         }
@@ -562,7 +579,127 @@ fn core_catalog_member_from_line(line: &str) -> Option<CoreCatalogMember> {
         signature: signature.to_string(),
         summary,
         source: "docs/reference/core-library.md".to_string(),
+        pure: core_member_pure_for_signature(signature),
     })
+}
+
+fn core_source_callee(src: &str, module_path: &str) -> String {
+    if let Some(alias) = imported_core_alias(src, module_path) {
+        alias
+    } else {
+        module_path.to_string()
+    }
+}
+
+fn imported_core_alias(src: &str, module_path: &str) -> Option<String> {
+    let prefix = format!("use {module_path} as ");
+    for line in src.lines() {
+        let code = line.split("//").next().unwrap_or("").trim();
+        let Some(rest) = code.strip_prefix(&prefix) else {
+            continue;
+        };
+        let alias = rest
+            .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+            .next()
+            .unwrap_or("")
+            .trim();
+        if !alias.is_empty() {
+            return Some(alias.to_string());
+        }
+    }
+    None
+}
+
+fn core_member_pure_for_signature(signature: &str) -> bool {
+    let head = signature
+        .split('/')
+        .next()
+        .unwrap_or(signature)
+        .split('(')
+        .next()
+        .unwrap_or(signature)
+        .trim();
+    let parts = head.split('.').collect::<Vec<_>>();
+    if parts.len() >= 2 {
+        let name = parts.last().copied().unwrap_or(head);
+        let module = parts[..parts.len() - 1].join(".");
+        return core_member_pure(&format!("core.{module}"), name);
+    }
+    true
+}
+
+fn core_member_pure(module_path: &str, name: &str) -> bool {
+    if matches!(
+        module_path,
+        "core.math"
+            | "core.fmt"
+            | "core.text"
+            | "core.text.unicode"
+            | "core.encoding"
+            | "core.encoding.json"
+            | "core.encoding.jsonl"
+            | "core.encoding.csv"
+            | "core.encoding.toml"
+            | "core.encoding.yaml"
+            | "core.encoding.xml"
+            | "core.encoding.cbor"
+            | "core.encoding.hex"
+            | "core.encoding.base64"
+            | "core.encoding.base32"
+            | "core.url"
+            | "core.mime"
+            | "core.reflect"
+            | "core.solve"
+            | "core.data"
+    ) {
+        return true;
+    }
+    if module_path == "core.files" {
+        return matches!(name, "exists" | "is_dir" | "absolute");
+    }
+    if module_path == "core.env" {
+        return matches!(name, "get" | "current_dir" | "home_dir");
+    }
+    if module_path == "core.os" {
+        return name != "set_current_dir" && name != "on_interrupt";
+    }
+    if module_path == "core.time" {
+        return matches!(name, "ms" | "secs" | "seconds" | "minutes" | "hours" | "from_unix_ms" | "period" | "period_days" | "period_months" | "period_years" | "zone" | "utc" | "zoned");
+    }
+    false
+}
+
+fn project_function_catalog_json(
+    def: &jet_semindex::SymbolDef,
+    params: &[(String, String)],
+    ret: Option<&str>,
+    index: &SemIndex,
+) -> String {
+    format!(
+        "{{\"name\":{},\"signature\":{},\"callee\":{},\"module_path\":{},\"pure\":{},\"source_span\":{},\"insert_op\":\"insert_call\"}}",
+        json_str(&def.name),
+        json_str(&function_signature_from_parts(&def.name, params, ret)),
+        json_str(&def.name),
+        json_str(&def.module_path),
+        if call_has_effects(index, &def.name) { "false" } else { "true" },
+        span_json(def.def_span)
+    )
+}
+
+fn function_signature_from_parts(
+    name: &str,
+    params: &[(String, String)],
+    ret: Option<&str>,
+) -> String {
+    let params = params
+        .iter()
+        .map(|(name, ty)| format!("{name}: {ty}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let ret = ret
+        .map(|ty| format!(" -> {ty}"))
+        .unwrap_or_default();
+    format!("fn {name}({params}){ret}")
 }
 
 fn core_module_json(module: &CoreCatalogModule) -> String {
@@ -584,9 +721,10 @@ fn core_module_json(module: &CoreCatalogModule) -> String {
 
 fn core_member_json(member: &CoreCatalogMember) -> String {
     format!(
-        "{{\"name\":{},\"signature\":{},\"summary\":{},\"source\":{},\"writes\":\"none\"}}",
+        "{{\"name\":{},\"signature\":{},\"pure\":{},\"summary\":{},\"source\":{},\"writes\":\"none\"}}",
         json_str(&member.name),
         json_str(&member.signature),
+        if member.pure { "true" } else { "false" },
         json_str(&member.summary),
         json_str(&member.source)
     )

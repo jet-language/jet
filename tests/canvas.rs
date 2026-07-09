@@ -348,7 +348,12 @@ fn canvas_graph_json_is_stable_and_typed() {
     assert!(json.contains("\"graph_id\":\"fn:"));
     assert!(json.contains("\"title\":\"summarize\""));
     assert!(json.contains("\"kind\":\"branch\""));
-    assert!(json.contains("\"kind\":\"call\""));
+    assert!(json.contains("\"kind\":\"function\""));
+    assert!(json.contains("\"archetype\":\"entry\""));
+    assert!(json.contains("\"archetype\":\"control\""));
+    assert!(json.contains("\"archetype\":\"function_exec\""));
+    assert!(json.contains("\"archetype\":\"function_pure\""));
+    assert!(json.contains("\"archetype\":\"value\""));
     assert!(json.contains("\"kind\":\"variable_get\""));
     assert!(json.contains("\"kind\":\"constant\""));
     assert!(json.contains("\"type\":\"Int\""));
@@ -362,9 +367,13 @@ fn canvas_graph_json_is_stable_and_typed() {
     let binding = first_node_id_containing(&json, ":stmt:1:binding");
     assert!(
         json.contains(&format!(
-            "\"from_pin\":\"{square_call}:output:then\",\"to_pin\":\"{binding}:input:exec\",\"wire_kind\":\"control\""
+            "\"from_pin\":\"{square_call}:output:result\",\"to_pin\":\"{binding}:input:value\",\"wire_kind\":\"data\""
         )),
-        "execution rail should run data-producing calls before dependent bindings: {json}"
+        "pure function calls should feed data pins: {json}"
+    );
+    assert!(
+        !json.contains(&format!("\"pin_id\":\"{square_call}:input:exec\"")),
+        "pure expression call must not carry exec pin: {json}"
     );
 
     let again = jet::Canvas::graph_json_for_file(&path).expect("canvas graph again");
@@ -688,7 +697,7 @@ fn canvas_structural_writes_insert_control_and_fallible_rails_with_undo_source()
     let graph = jet::Canvas::graph_json_for_file(&path).expect("structural graph");
     for field in [
         "\"kind\":\"branch\"",
-        "\"kind\":\"dispatch\"",
+        "\"kind\":\"function\"",
         "\"kind\":\"loop\"",
         "\"kind\":\"fallible\"",
         "\"fallible\"",
@@ -819,6 +828,13 @@ fn canvas_actions_project_palette_entries_and_preview_jit_backed_source_transact
         "\"authority\":[\"canvas.source_edit:single_file\"]",
         "\"package_id\":\"single-file\"",
         "\"version\":\"unpackaged\"",
+        "\"project_functions\"",
+        "\"name\":\"square\"",
+        "\"signature\":\"fn square(n: Int) -> Int\"",
+        "\"name\":\"summarize\"",
+        "\"signature\":\"fn summarize(limit: Int) -> Int\"",
+        "\"name\":\"run\"",
+        "\"signature\":\"fn run()\"",
         "\"audit\":[\"package_id\",\"version\",\"hash\",\"authority\",\"touched_files\",\"diff\",\"diagnostics\"]",
         "\"callee\":\"square\"",
         "\"default_args\":[\"1\"]",
@@ -830,10 +846,12 @@ fn canvas_actions_project_palette_entries_and_preview_jit_backed_source_transact
         "\"pins\":[{\"name\":\"value\",\"direction\":\"input\",\"type\":\"Any\"}]",
         "\"default_args\":[\"\\\"canvas\\\"\"]",
         "\"kind\":\"canvas.core_catalog\"",
-        "\"engine\":\"core-catalog\"",
-        "\"execution\":\"source_browse\"",
-        "\"authority\":[\"canvas.catalog:core.read\"]",
-        "\"writes\":\"none\"",
+        "\"engine\":\"checked-tir+jit\"",
+        "\"execution\":\"source_transaction\"",
+        "\"writes\":\"source_transaction_only\"",
+        "\"insert_callee\"",
+        "\"insert_op\":\"insert_call\"",
+        "\"pure\"",
         "\"source\":\"docs/reference/core-library.md\"",
         "\"kind\":\"canvas.command\"",
         "\"op\":\"command_authority\"",
@@ -923,6 +941,55 @@ fn canvas_actions_project_palette_entries_and_preview_jit_backed_source_transact
         src,
         "Built-in Canvas action preview must not write source"
     );
+
+    let project_insert_path = write_fixture("actions_project_insert", CANVAS_FIXTURE);
+    let project_insert_src = fs::read_to_string(&project_insert_path).unwrap();
+    let project_insert_graph =
+        jet::Canvas::graph_json_for_file(&project_insert_path).expect("project insert graph");
+    let project_run_graph_id =
+        field_before(&project_insert_graph, "\"title\":\"run\"", "graph_id");
+    let project_insert = format!(
+        "{{\"schema_version\":1,\"op\":\"insert_call\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"callee\":\"square\",\"args\":[\"1\"]}}",
+        jet::Canvas::source_revision(&project_insert_src),
+        project_run_graph_id,
+    );
+    let project_insert_out = jet::Canvas::apply_transaction_json(&project_insert_path, &project_insert)
+        .expect("project function insert_call");
+    assert!(project_insert_out.contains("\"changed\":true"), "{project_insert_out}");
+    assert!(
+        fs::read_to_string(&project_insert_path)
+            .unwrap()
+            .contains("square(1)"),
+        "project function insert_call should write source"
+    );
+
+    let core_path = write_fixture(
+        "actions_core_insert",
+        "use core.math as math\n\nfn run() {\n    print(1)\n}\n",
+    );
+    let core_src = fs::read_to_string(&core_path).unwrap();
+    let core_revision = jet::Canvas::source_revision(&core_src);
+    let core_actions_req = format!(
+        "{{\"schema_version\":1,\"op\":\"actions\",\"revision\":\"{}\"}}",
+        core_revision
+    );
+    let core_actions =
+        jet::Canvas::query_json_for_file(&core_path, &core_actions_req).expect("core actions");
+    assert!(core_actions.contains("\"action_id\":\"canvas.core_catalog:core.math:abs\""), "{core_actions}");
+    assert!(core_actions.contains("\"insert_callee\":\"math.abs\""), "{core_actions}");
+    let core_graph = jet::Canvas::graph_json_for_file(&core_path).expect("core graph");
+    let core_run_graph_id = field_before(&core_graph, "\"title\":\"run\"", "graph_id");
+    let core_insert = format!(
+        "{{\"schema_version\":1,\"op\":\"insert_call\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"callee\":\"math.abs\",\"args\":[\"-3\"]}}",
+        core_revision, core_run_graph_id,
+    );
+    let core_out =
+        jet::Canvas::apply_transaction_json(&core_path, &core_insert).expect("core insert_call");
+    assert!(core_out.contains("\"changed\":true"), "{core_out}");
+    assert!(
+        fs::read_to_string(&core_path).unwrap().contains("math.abs(-3)"),
+        "Core catalog insert_call should write source"
+    );
 }
 
 #[test]
@@ -945,8 +1012,16 @@ fn canvas_core_catalog_browses_canonical_core_library_without_write_authority() 
         "\"source\":\"docs/reference/core-library.md\"",
         "\"path\":\"core.http\"",
         "\"path\":\"core.http.client\"",
+        "\"path\":\"core.files\"",
+        "\"path\":\"core.url\"",
+        "\"path\":\"core.mime\"",
+        "\"path\":\"core.crypto\"",
+        "\"path\":\"core.event\"",
+        "\"path\":\"core.web\"",
+        "\"path\":\"core.mem\"",
         "\"signature\":\"Client.request(method, url)\"",
         "\"name\":\"request\"",
+        "\"pure\"",
     ] {
         assert!(catalog.contains(field), "catalog missing {field}: {catalog}");
     }
@@ -1036,7 +1111,7 @@ fn canvas_function_transactions_write_source_and_reproject_calls() {
     let graph = jet::Canvas::graph_json_for_file(&path).expect("reproject graph");
     assert!(graph.contains("\"title\":\"area\""), "{graph}");
     assert!(
-        graph.contains("\"kind\":\"call\",\"title\":\"area\""),
+        graph.contains("\"kind\":\"function\",\"archetype\":\"function_pure\",\"title\":\"area\""),
         "{graph}"
     );
 
@@ -1947,7 +2022,8 @@ fn canvas_projects_nested_control_and_assignment_forms() {
         "\"kind\":\"branch\"",
         "\"kind\":\"assign\"",
         "\"kind\":\"flow\"",
-        "\"kind\":\"dispatch\"",
+        "\"kind\":\"function\"",
+        "\"title\":\"if ==\"",
         "\"title\":\"continue\"",
         "\"source\":\"i < limit\"",
         "\"source\":\"i == 2\"",
@@ -2106,7 +2182,7 @@ fn canvas_hardening_projection_suite_covers_blueprint_backlog_constructs() {
             [
                 "\"kind\":\"loop\"",
                 "\"kind\":\"branch\"",
-                "\"kind\":\"dispatch\"",
+                "\"kind\":\"function\"",
                 "\"kind\":\"assign\"",
                 "\"layout_hints\":{\"algorithm\":\"source-order-v1\"",
             ],

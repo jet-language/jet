@@ -311,6 +311,7 @@ fn project_func(
     g.nodes.push(NodeRec {
         id: entry_id.clone(),
         kind: "entry".to_string(),
+        archetype: "entry".to_string(),
         title: f.name.clone(),
         span: f.name_span.into(),
         x: 40,
@@ -416,6 +417,7 @@ fn project_stmt(
                 g,
                 &node_id,
                 "binding",
+                "function_exec",
                 &b.name,
                 b.name_span.into(),
                 x,
@@ -450,6 +452,7 @@ fn project_stmt(
                 g,
                 &node_id,
                 "assign",
+                "function_exec",
                 &title,
                 target.span().into(),
                 x,
@@ -477,7 +480,7 @@ fn project_stmt(
             }
         }
         Stmt::Expr(e) => {
-            let _ = project_expr_node(g, index, src, e, ordinal, x, y);
+            let _ = project_expr_node(g, index, src, e, ordinal, x, y, true);
         }
         Stmt::Return(expr, span) => {
             let node_id = format!("{}:stmt:{ordinal}:return", g.graph_id);
@@ -485,6 +488,7 @@ fn project_stmt(
                 g,
                 &node_id,
                 "return",
+                "control",
                 "return",
                 (*span).into(),
                 x,
@@ -515,6 +519,7 @@ fn project_stmt(
                 g,
                 &node_id,
                 "branch",
+                "control",
                 "if",
                 ifs.cond.span().into(),
                 x,
@@ -562,6 +567,7 @@ fn project_stmt(
                 g,
                 &node_id,
                 "loop",
+                "control",
                 "loop",
                 (*span).into(),
                 x,
@@ -578,6 +584,7 @@ fn project_stmt(
                 g,
                 &node_id,
                 "loop",
+                "control",
                 "loop",
                 (*span).into(),
                 x,
@@ -600,6 +607,7 @@ fn project_stmt(
                 g,
                 &node_id,
                 "loop",
+                "control",
                 "counted loop",
                 (*span).into(),
                 x,
@@ -624,6 +632,7 @@ fn project_stmt(
                 g,
                 &node_id,
                 "loop",
+                "control",
                 &format!("loop {var}"),
                 (*span).into(),
                 x,
@@ -656,7 +665,8 @@ fn project_stmt(
             add_node(
                 g,
                 &node_id,
-                "dispatch",
+                "function",
+                "control",
                 "if ==",
                 (*span).into(),
                 x,
@@ -711,6 +721,7 @@ fn project_stmt(
                 g,
                 &node_id,
                 "flow",
+                "control",
                 &title,
                 (*span).into(),
                 x,
@@ -805,6 +816,7 @@ fn project_stmt(
                 g,
                 &node_id,
                 "branch",
+                "control",
                 "comptime if",
                 (*span).into(),
                 x,
@@ -843,6 +855,7 @@ fn project_stmt(
                 g,
                 &node_id,
                 "yield",
+                "function_exec",
                 "yield",
                 (*span).into(),
                 x,
@@ -877,6 +890,7 @@ fn project_stmt(
                 g,
                 &node_id,
                 "scope_member",
+                "function_exec",
                 &format!(".{name}"),
                 (*span).into(),
                 x,
@@ -946,7 +960,7 @@ fn connect_expr_to_input(
     } else if pure_leaf(expr) {
         add_inline(g, owner_node_id, ordinal, role, src, expr.span());
         wire_ident_refs(g, expr, input_pin);
-    } else if let Some(out) = project_expr_node(g, index, src, expr, ordinal, x, y) {
+    } else if let Some(out) = project_expr_node(g, index, src, expr, ordinal, x, y, false) {
         add_wire_with_span(g, &out, input_pin, "data", Some(expr.span().into()));
     }
 }
@@ -981,6 +995,7 @@ fn project_value_node(
         g,
         &node_id,
         kind,
+        "value",
         &title,
         span,
         x,
@@ -1007,14 +1022,21 @@ fn project_expr_node(
     ordinal: usize,
     x: i32,
     y: i32,
+    exec_context: bool,
 ) -> Option<String> {
     match expr {
         Expr::Call(c) => {
             let node_id = format!("{}:expr:{ordinal}:call:{}", g.graph_id, c.name);
+            let archetype = if exec_context || call_has_effects(index, &c.name) {
+                "function_exec"
+            } else {
+                "function_pure"
+            };
             add_node(
                 g,
                 &node_id,
-                "call",
+                "function",
+                archetype,
                 &c.name,
                 c.name_span.into(),
                 x,
@@ -1067,7 +1089,14 @@ fn project_expr_node(
         } => {
             let node_id = format!("{}:expr:{ordinal}:method:{method}", g.graph_id);
             let variant_like = starts_uppercase(method);
-            let kind = if variant_like { "variant" } else { "method" };
+            let kind = if variant_like { "variant" } else { "function" };
+            let archetype = if variant_like {
+                "function_pure"
+            } else if exec_context || call_has_effects(index, method) {
+                "function_exec"
+            } else {
+                "function_pure"
+            };
             let title = if variant_like {
                 method.clone()
             } else {
@@ -1077,6 +1106,7 @@ fn project_expr_node(
                 g,
                 &node_id,
                 kind,
+                archetype,
                 &title,
                 (*method_span).into(),
                 x,
@@ -1142,6 +1172,7 @@ fn project_expr_node(
                 g,
                 &node_id,
                 "fallible",
+                "control",
                 "?",
                 (*span).into(),
                 x,
@@ -1158,7 +1189,7 @@ fn project_expr_node(
                 "",
                 true,
             );
-            if let Some(out) = project_expr_node(g, index, src, inner, ordinal, x - 180, y) {
+            if let Some(out) = project_expr_node(g, index, src, inner, ordinal, x - 180, y, false) {
                 add_wire(g, &out, &input, "fallible");
             }
             Some(add_pin(g, &node_id, "ok", "output", "unknown", "", false))
@@ -1170,6 +1201,7 @@ fn project_expr_node(
                 g,
                 &node_id,
                 "expr",
+                "function_pure",
                 title,
                 expr.span().into(),
                 x,

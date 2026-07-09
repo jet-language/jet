@@ -84,7 +84,7 @@ contract; it does not mean every form has a bespoke graph gesture. Status values
 - [Expr::Index] status=graph index node.
 - [Expr::Slice] status=graph slice node.
 - [Expr::Ident] status=graph reference node.
-- [Expr::Call] status=graph call node.
+- [Expr::Call] status=graph function node.
 - [Expr::Unary] status=graph operator node.
 - [Expr::Binary] status=graph operator node.
 - [Expr::CompareChain] status=graph operator node.
@@ -94,7 +94,7 @@ contract; it does not mean every form has a bespoke graph gesture. Status values
 - [Expr::Copy] status=graph copy expression.
 - [Expr::Field] status=graph field node.
 - [Expr::OptField] status=graph optional field node.
-- [Expr::MethodCall] status=graph method call node.
+- [Expr::MethodCall] status=graph function or variant node.
 - [Expr::StructLit] status=graph construction node.
 - [Expr::EnumLit] status=graph variant node.
 - [Expr::Tainted] status=readonly taint marker, source edits.

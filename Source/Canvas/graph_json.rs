@@ -2,6 +2,7 @@ fn add_node(
     g: &mut GraphBuilder,
     id: &str,
     kind: &str,
+    archetype: &str,
     title: &str,
     span: SourceSpan,
     x: i32,
@@ -12,6 +13,7 @@ fn add_node(
     g.nodes.push(NodeRec {
         id: id.to_string(),
         kind: kind.to_string(),
+        archetype: archetype.to_string(),
         title: title.to_string(),
         span,
         x,
@@ -123,7 +125,7 @@ fn add_execution_overlay(g: &mut GraphBuilder) {
         if node.kind != "entry" {
             ensure_exec_pin(g, &node.id, "exec", "input", node.span);
         }
-        if node.kind == "branch" || node.kind == "dispatch" {
+        if node.kind == "branch" || (node.kind == "function" && node.archetype == "control") {
             ensure_exec_pin(g, &node.id, "then", "output", node.span);
             ensure_exec_pin(g, &node.id, "else", "output", node.span);
         } else if node.kind != "return" {
@@ -242,21 +244,7 @@ fn execution_nodes_in_order(g: &GraphBuilder) -> Vec<NodeRec> {
 }
 
 fn node_wants_exec(node: &NodeRec) -> bool {
-    matches!(
-        node.kind.as_str(),
-        "entry"
-            | "binding"
-            | "assign"
-            | "return"
-            | "branch"
-            | "loop"
-            | "dispatch"
-            | "flow"
-            | "yield"
-            | "scope_member"
-            | "call"
-            | "fallible"
-    )
+    matches!(node.archetype.as_str(), "entry" | "function_exec" | "control")
 }
 
 fn ensure_exec_pin(
@@ -599,9 +587,10 @@ fn push_rail(kinds: &mut Vec<String>, kind: &str) {
 
 fn node_json(n: &NodeRec) -> String {
     format!(
-        "{{\"node_id\":{},\"kind\":{},\"title\":{},\"source_span\":{},\"layout\":{{\"x\":{},\"y\":{}}},\"badges\":[{}],\"edit_affordances\":[{}]}}",
+        "{{\"node_id\":{},\"kind\":{},\"archetype\":{},\"title\":{},\"source_span\":{},\"layout\":{{\"x\":{},\"y\":{}}},\"badges\":[{}],\"edit_affordances\":[{}]}}",
         json_str(&n.id),
         json_str(&n.kind),
+        json_str(&n.archetype),
         json_str(&n.title),
         span_json(n.span),
         n.x,

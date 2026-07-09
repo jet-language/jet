@@ -179,6 +179,13 @@ fn effect_badges(index: &SemIndex, function: &str) -> Vec<&'static str> {
     Vec::new()
 }
 
+fn call_has_effects(index: &SemIndex, function: &str) -> bool {
+    index
+        .effect_of(function)
+        .map(|effects| !effects.direct.is_empty() || !effects.inferred.is_empty())
+        .unwrap_or(false)
+}
+
 fn pure_leaf(expr: &Expr) -> bool {
     match expr {
         Expr::Str(_, _)

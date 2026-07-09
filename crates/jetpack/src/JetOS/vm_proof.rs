@@ -535,7 +535,7 @@ fn qemu_interactive_run_command(
     let initrd = boot_dir.join("initrd").display().to_string();
     let console = "tty0";
     let cmdline = format!(
-        "console={console} rdinit=/jetos/init init=/jetos/init jetos.mode=run jetos.host={host} jetos.generation={generation} root=LABEL=jetos-root rw"
+        "console={console} rdinit=/jetos/init init=/jetos/init jetos.mode=run jetos.host={host} jetos.generation={generation} root=LABEL=jetos-root rw systemd.unit=graphical.target"
     );
     let mut argv = vec![
         "qemu-system-x86_64".to_string(),

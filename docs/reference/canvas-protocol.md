@@ -139,6 +139,12 @@ Each graph contains source-backed records:
 | `inline_exprs` | Editable Jet expression source rendered inline. |
 | `rails` | Visual rail classes present in this graph: control, data, fallible, async, effect, proof, debug. |
 
+Each node carries `node_id`, `kind`, `archetype`, `title`, `source_span`,
+`layout`, `badges`, and `edit_affordances`. `archetype` is one of `value`,
+`function_exec`, `function_pure`, `control`, or `entry`. Function, method, and
+dispatch-shaped calls all project as `kind:"function"`; enum construction stays
+`kind:"variant"`. Exec pins use `type:"exec"`.
+
 Each pin carries `pin_id`, `node_id`, `name`, `direction`, `type`,
 `capability`, `fallible`, `effect_grant_need`, and `source_span`. A v1 pin span
 is anchored to its owning source node when the compiler does not yet expose a
@@ -277,7 +283,7 @@ opened project. The `revision` must match that selected source file.
 | `references` | `symbol` | Returns definition/reference sites plus impact facts. |
 | `source_to_graph` | `start`, `end` | Maps a source byte span to matching graph nodes/inline expressions. |
 | `preview_rename` | `symbol`, `to` | Returns the exact text diff for a rename without writing source. |
-| `actions` / `palette_entries` | none | Returns source-backed palette entries and ratified Canvas actions derived from checked semindex facts. |
+| `actions` / `palette_entries` | none | Returns source-backed palette entries, `project_functions`, and ratified Canvas actions derived from checked semindex facts. |
 | `core_catalog` / `corelib_catalog` | optional `query` | Returns read-only `core.*` modules and members from the canonical Core library reference. |
 
 Successful response:
@@ -295,9 +301,11 @@ front end, executable TIR, and JIT preview path. Canvas does not get a separate
 runtime, compiler, or graph asset store. An action may return a source
 transaction or preview, but it never writes files directly.
 
-Core catalog entries are browse-only. They carry
-`authority:["canvas.catalog:core.read"]`, `writes:"none"`, the source document,
-module path, signature, and summary. They never claim that a Core call executed.
+The `core_catalog` query is browse-only. Core entries in the actions palette are
+source-backed insert candidates: they carry module path, signature, `pure`,
+`insert_callee`, `insert_op:"insert_call"`, source document, ordinary source-edit authority, and
+`writes:"source_transaction_only"`. They still execute only after the existing
+`insert_call`/preview source transaction validates.
 
 Terms:
 
@@ -311,7 +319,7 @@ Terms:
 Query actions:
 
 ```json
-{"protocol":"jet.canvas.query","schema_version":1,"ok":true,"op":"actions","revision":"sha256-...","results":[],"impact":null,"diff":null,"actions_schema_version":1,"actions":[{"action_id":"canvas.action:main.jet:square","kind":"canvas.action","title":"square","callee":"square","engine":"checked-tir+jit","authority":["canvas.source_edit:package"],"package_id":"app","version":"0.1.0","touched_files":["main.jet"],"writes":"source_transaction_only"},{"action_id":"canvas.command:run","kind":"canvas.command","title":"Run program","op":"command_authority","engine":"jet-cli","execution":"external_command","available":true,"command":["jet","run","main.jet"],"authority":["canvas.command:run","canvas.source_edit:package"],"package_id":"app","version":"0.1.0","touched_files":["main.jet"],"writes":"none","requires_confirmation":false},{"action_id":"canvas.command:build","kind":"canvas.command","title":"Build project","op":"command_authority","engine":"jet-cli","execution":"external_command","available":true,"command":["jet","build","main.jet"],"authority":["canvas.command:build","canvas.build_output:binary","canvas.source_edit:package"],"package_id":"app","version":"0.1.0","touched_files":["main.jet"],"writes":"build_outputs","requires_confirmation":true}]}
+{"protocol":"jet.canvas.query","schema_version":1,"ok":true,"op":"actions","revision":"sha256-...","results":[],"impact":null,"diff":null,"actions_schema_version":1,"project_functions":[{"name":"square","signature":"fn square(n: Int) -> Int","callee":"square","module_path":"main.jet","pure":true,"insert_op":"insert_call"}],"actions":[{"action_id":"canvas.action:main.jet:square","kind":"canvas.action","title":"square","callee":"square","engine":"checked-tir+jit","authority":["canvas.source_edit:package"],"package_id":"app","version":"0.1.0","touched_files":["main.jet"],"writes":"source_transaction_only"},{"action_id":"canvas.core_catalog:core.math:abs","kind":"canvas.core_catalog","title":"abs · core.math","module_path":"core.math","callee":"math.abs","insert_callee":"math.abs","insert_op":"insert_call","engine":"checked-tir+jit","execution":"source_transaction","authority":["canvas.source_edit:package"],"writes":"source_transaction_only","signature":"abs(x)","pure":true,"source":"docs/reference/core-library.md"},{"action_id":"canvas.command:run","kind":"canvas.command","title":"Run program","op":"command_authority","engine":"jet-cli","execution":"external_command","available":true,"command":["jet","run","main.jet"],"authority":["canvas.command:run","canvas.source_edit:package"],"package_id":"app","version":"0.1.0","touched_files":["main.jet"],"writes":"none","requires_confirmation":false}]}
 ```
 
 Preview an action:

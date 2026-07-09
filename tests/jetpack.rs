@@ -5295,6 +5295,17 @@ fn os_image_writes_jetos_installer_media_proof() {
         "initrd should carry installer partition tools: {initrd}"
     );
     assert!(
+        initrd.contains("exec switch_root /sysroot /run/current-system/sbin/init")
+            && initrd.contains("ln -s \"$generation_target/$top\" \"/sysroot/$top\""),
+        "initrd run mode should hand off to installed current-system, not fallback shell: {initrd}"
+    );
+    assert!(
+        initrd.contains("jetos/modules/atkbd.ko.xz")
+            && initrd.contains("jetos/modules/usbhid.ko.xz")
+            && initrd.contains("jetos/modules/xhci-hcd.ko.xz"),
+        "initrd should carry keyboard and USB HID modules for VNC input: {initrd}"
+    );
+    assert!(
         initrd.contains("JETOS_GUEST_PROOF"),
         "initrd should carry guest proof reporter: {initrd}"
     );
