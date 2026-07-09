@@ -1480,7 +1480,7 @@ mod tests {
 
         let configuration = render_configuration_nix(&system, &mapping);
         assert!(configuration.contains("system.stateVersion = \"26.05\";"));
-        assert!(configuration.contains("environment.systemPackages = with pkgs; [ firefox btop ];"));
+        assert!(configuration.contains("environment.systemPackages = map jetosPkg [ \"firefox\" \"btop\" ];"));
         assert!(configuration.contains("systemd.services.jetos-proof = {"));
         assert!(configuration.contains("pgrep -u nate -f gnome-shell"));
         assert!(configuration.contains("JETOS_GUEST_PROOF:"));
