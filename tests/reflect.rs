@@ -61,6 +61,7 @@ fn method(name: &str, is_pub: bool) -> Func {
         is_inline: false,
         is_inline_always: false,
         inline_span: None,
+        meta: None,
         body: Vec::new(),
     }
 }
