@@ -55,8 +55,22 @@ fn build_generation(
     // mapping, which rejects unsupported kernels loudly (E1291).
     let kernel_defaulted =
         option_value(system, &["boot.kernel", "kernel.package"]).is_none();
+    // An explicit `.CachyOS` is satisfied in the real tier by a declared
+    // `nix-cachyos-kernel` flake source — the hidden backend realizes the
+    // kernel from that overlay, and rejects the option loudly otherwise.
+    let cachyos_source_declared = plan
+        .table
+        .declarations()
+        .into_iter()
+        .any(|(_, upstream, _)| {
+            upstream
+                .strip_prefix("github:")
+                .and_then(|rest| rest.split('/').nth(1))
+                .map(|repo| repo.eq_ignore_ascii_case("nix-cachyos-kernel"))
+                .unwrap_or(false)
+        });
     if boot.kernel == "CachyOS"
-        && !(flags.real_tier && kernel_defaulted)
+        && !(flags.real_tier && (kernel_defaulted || cachyos_source_declared))
         && !realized
             .iter()
             .any(|entry| entry.name == CACHYOS_KERNEL_PACKAGE)
