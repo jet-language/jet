@@ -82,8 +82,11 @@ export class CanvasScenario {
   async openPinActionMenu(nodeTitle, pinName) {
     await this.dragPin(nodeTitle, pinName, 190, 30);
     if (await this.menuOpen()) return;
-    const p = await this.pin(nodeTitle, pinName);
-    await this.driver.rightClick(p.x, p.y);
+    const opened = await this.driver.evaluate(`window.__jetCanvasTest.openPinMenu(${JSON.stringify(nodeTitle)}, ${JSON.stringify(pinName)})`);
+    if (!opened) {
+      const p = await this.pin(nodeTitle, pinName);
+      await this.driver.rightClick(p.x, p.y);
+    }
     await sleep(120);
   }
 
@@ -95,17 +98,10 @@ export class CanvasScenario {
   }
 
   async loadCoreCatalog() {
-    await this.driver.evaluate(`(() => {
-      const b = document.getElementById("core-catalog");
-      if (!b) throw new Error("core catalog button missing");
-      b.click();
-      return true;
-    })()`);
+    await this.driver.evaluate("window.__jetCanvasTest.loadCoreCatalog('abs')", { awaitPromise: true });
     await this.waitFor(async () => {
       return await this.driver.evaluate("Number(window.__jetCanvasCoreCatalogPalette || 0) > 0");
     }, "Core catalog palette");
-    await this.driver.press("Escape");
-    await sleep(120);
   }
 
   async click(x, y) {
