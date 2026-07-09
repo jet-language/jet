@@ -82,7 +82,13 @@ case "$cmdline" in
         exec /jetos/tools/bin/sh
     fi
     mkdir -p /run
-    rm -f /run/current-system
+    if [ -L /run/current-system ]; then
+        rm -f /run/current-system 2>/dev/null || true
+    elif [ -d /run/current-system ]; then
+        rmdir /run/current-system 2>/dev/null || true
+    else
+        rm -f /run/current-system 2>/dev/null || true
+    fi
     ln -s "$system" /run/current-system
     export JETOS_SYSTEM_ROOT="$system"
     export PATH="$system/sw/bin:$PATH"
@@ -93,12 +99,26 @@ case "$cmdline" in
     if { [ -e "$system/sbin/init" ] || [ -L "$system/sbin/init" ]; } && command -v chroot >/dev/null 2>&1; then
         generation_target="/var/lib/jetos/generations/@JETOS_GENERATION@"
         mkdir -p /sysroot/run /sysroot/proc /sysroot/dev /sysroot/sys
-        rm -f /sysroot/run/current-system
-        ln -s "$generation_target" /sysroot/run/current-system
-        if [ -d "$system/nix" ] && [ ! -e /sysroot/nix ]; then
-            ln -s "$generation_target/nix" /sysroot/nix
+        if [ -L /sysroot/run/current-system ]; then
+            rm -f /sysroot/run/current-system 2>/dev/null || true
+        elif [ -d /sysroot/run/current-system ]; then
+            rmdir /sysroot/run/current-system 2>/dev/null || true
+        else
+            rm -f /sysroot/run/current-system 2>/dev/null || true
         fi
-    for top in etc sbin sw share studio lib usr network hardware users flatpak performance module-system storage workloads theme fleet options image-variants lifecycle service-manager apps acceptance desktop store compat terminal home; do
+        ln -s "$generation_target" /sysroot/run/current-system
+        if [ -d "$system/nix" ]; then
+            if [ -L /sysroot/nix ]; then
+                rm -f /sysroot/nix 2>/dev/null || true
+            elif [ -d /sysroot/nix ]; then
+                rmdir /sysroot/nix 2>/dev/null || true
+            fi
+            [ -e /sysroot/nix ] || ln -s "$generation_target/nix" /sysroot/nix 2>/dev/null || true
+        fi
+        for top in etc sbin sw share studio init systemd lib usr network hardware users flatpak performance module-system storage workloads theme fleet options image-variants lifecycle service-manager apps acceptance desktop store compat terminal home; do
+            if [ -d "/sysroot/$top" ]; then
+                rmdir "/sysroot/$top" 2>/dev/null || true
+            fi
             if [ -e "$system/$top" ] && [ ! -e "/sysroot/$top" ]; then
                 ln -s "$generation_target/$top" "/sysroot/$top" 2>/dev/null || true
             fi
@@ -107,6 +127,7 @@ case "$cmdline" in
         mount --move /dev /sysroot/dev 2>/dev/null || mount -t devtmpfs devtmpfs /sysroot/dev 2>/dev/null || true
         mount --move /sys /sysroot/sys 2>/dev/null || mount -t sysfs sysfs /sysroot/sys 2>/dev/null || true
         echo "jetos run: handing off to installed systemd"
+        export SYSTEMD_UNIT_PATH=/etc/systemd/system:/run/current-system/systemd/lib/systemd/system:/run/current-system/usr/lib/systemd/system:/run/current-system/lib/systemd/system
         exec chroot /sysroot /run/current-system/sbin/init systemd.unit=graphical.target
         echo "jetos run: systemd handoff failed; falling back to emergency console"
         mkdir -p /proc /dev /sys

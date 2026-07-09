@@ -954,15 +954,20 @@ fn connect_expr_to_input(
     x: i32,
     y: i32,
 ) {
-    if let Some(out) = project_value_node(g, index, src, expr, ordinal, role, x, y) {
+    let provider_y = data_provider_y(y, ordinal);
+    if let Some(out) = project_value_node(g, index, src, expr, ordinal, role, x, provider_y) {
         add_inline(g, owner_node_id, ordinal, role, src, expr.span());
         add_wire_with_span(g, &out, input_pin, "data", Some(expr.span().into()));
     } else if pure_leaf(expr) {
         add_inline(g, owner_node_id, ordinal, role, src, expr.span());
         wire_ident_refs(g, expr, input_pin);
-    } else if let Some(out) = project_expr_node(g, index, src, expr, ordinal, x, y, false) {
+    } else if let Some(out) = project_expr_node(g, index, src, expr, ordinal, x, provider_y, false) {
         add_wire_with_span(g, &out, input_pin, "data", Some(expr.span().into()));
     }
+}
+
+fn data_provider_y(y: i32, ordinal: usize) -> i32 {
+    y + 96 + ((ordinal % 2) as i32 * 18)
 }
 
 fn project_value_node(
@@ -976,7 +981,7 @@ fn project_value_node(
     y: i32,
 ) -> Option<String> {
     let (kind, title, badges) = match expr {
-        Expr::Ident(name, _) => ("variable_get", format!("get {name}"), vec!["read"]),
+        Expr::Ident(name, _) => ("variable_get", name.to_string(), vec!["read"]),
         Expr::Int(_, _, _)
         | Expr::Float(_, _, _)
         | Expr::Bool(_, _)
@@ -1194,6 +1199,7 @@ fn project_expr_node(
             }
             Some(add_pin(g, &node_id, "ok", "output", "unknown", "", false))
         }
+        Expr::OrFallback { value, .. } => project_expr_node(g, index, src, value, ordinal, x, y, exec_context),
         _ => {
             let node_id = format!("{}:expr:{ordinal}:expr", g.graph_id);
             let title = expr_title(expr);

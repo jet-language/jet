@@ -933,7 +933,9 @@ pub fn canvas_js() -> String {
     if (action.kind === "canvas.core_catalog" || action.kind === "project_function" || action.kind === "canvas.action") return action.pure ? "ƒ" : "ƒ";
     if (action.op === "insert_branch") return "◇";
     if (action.op === "insert_loop") return "↻";
+    if (action.op === "insert_return" || String(action.title || "").toLowerCase().includes("return")) return "⏎";
     if (action.op === "insert_switch") return "⇉";
+    if (paletteCategoryForAction(action) === "Flow") return "◇";
     return "•";
   }
 
@@ -957,7 +959,7 @@ pub fn canvas_js() -> String {
     const matches = contextMenuState.actions
       .filter((action) => actionMatchesQuery(action, query))
       .sort((a, b) => rankAction(b) - rankAction(a) || String(a.module_path || "").localeCompare(String(b.module_path || "")) || String(a.title).localeCompare(String(b.title)));
-    const context = contextMenuState.pin ? `${contextMenuState.pin.name}: ${contextMenuState.pin.type}` : (contextMenuState.context || "source-backed actions");
+    const context = contextMenuState.pin ? `${contextMenuState.pin.name}: ${contextMenuState.pin.type}` : `All nodes · ${matches.length}/${contextMenuState.actions.length}`;
     const port = contextMenuState.pin ? pinPortHtml(contextMenuState.pin.type || "Value") : "";
     const favorites = favoriteSet();
     const rowForAction = (action) => {
@@ -988,7 +990,8 @@ pub fn canvas_js() -> String {
       }
       return `<section class="action-category"><h3>${escapeHtml(category)}</h3>${body}</section>`;
     }).join("");
-    contextMenu.innerHTML = `<div class="action-palette-head"><div class="menu-title">${escapeHtml(contextMenuState.title)}</div><div class="action-context">${port}<span>${escapeHtml(context)}</span><span class="tag">${matches.length}/${contextMenuState.actions.length}</span></div><input id="action-palette-search" placeholder="Search actions" value="${escapeAttr(query)}"></div><div class="action-results">${categories || "<div class=\"action-empty\">No matching actions</div>"}</div>`;
+    const countTag = contextMenuState.pin ? `<span class="tag">${matches.length}/${contextMenuState.actions.length}</span>` : "";
+    contextMenu.innerHTML = `<div class="action-palette-head"><div class="menu-title">${escapeHtml(contextMenuState.title)}</div><div class="action-context">${port}<span>${escapeHtml(context)}</span>${countTag}</div><input id="action-palette-search" placeholder="Search actions" value="${escapeAttr(query)}"></div><div class="action-results">${categories || "<div class=\"action-empty\">No matching actions</div>"}</div>`;
     const input = document.getElementById("action-palette-search");
     if (input) {
       input.addEventListener("input", () => {
@@ -1306,7 +1309,7 @@ pub fn canvas_js() -> String {
     const actions = [];
     for (const [name, type] of Array.from(vars.entries()).sort((a, b) => a[0].localeCompare(b[0]))) {
       actions.push({
-        title: "get " + name,
+        title: name,
         detail: name + " : " + type,
         group: "Variables",
         kind: "variable_get",
@@ -1394,7 +1397,7 @@ pub fn canvas_js() -> String {
   }
 
   function openGraphActionPalette(x, y, query) {
-    openActionPalette(x, y, "Graph actions", graphActionItems(), { context: "right-click built-ins, functions, source actions", query: query || "" });
+    openActionPalette(x, y, "Graph actions", graphActionItems(), { context: "All nodes", query: query || "" });
   }
 
   function openCoreCatalogPalette(query = "") {
@@ -3157,7 +3160,7 @@ pub fn canvas_js() -> String {
     applyFunctionPins(graph, graph.function, graph.title, button.id === "remove-function-output" ? "Void" : undefined);
   }
   function defaultArgsForAction(item, pin) {
-    const existing = (item.args || []).slice();
+    const existing = (item.default_args || item.args || []).slice();
     if (!pin) return existing.length ? existing : ["\"canvas\""];
     const graph = currentGraph(latestDoc);
     if (pin.direction === "output") {
@@ -3397,7 +3400,7 @@ pub fn canvas_js() -> String {
         const entries = [];
         for (const module of doc.modules || []) {
           for (const member of module.members || []) {
-            const callee = String(module.path || "core").replace(/^core\./, "") + "." + member.name;
+            const callee = String(module.path || "core") + "." + member.name;
             entries.push({
               title: member.name + " · " + (module.path || "core"),
               detail: (module.path || "core") + " · " + (member.signature || member.name),
@@ -3411,9 +3414,10 @@ pub fn canvas_js() -> String {
               signature: member.signature || "",
               summary: member.summary || module.summary || "",
               pure: !!member.pure,
-              pins: [],
+              pins: member.pins || [],
               ret: actionReturnType(member) || "Value",
-              args: ["1"]
+              args: member.default_args || ["1"],
+              default_args: member.default_args || ["1"]
             });
           }
         }

@@ -51,10 +51,16 @@ fn write_systemd_unit_library(
 
     let usr_units = dir.join("usr/lib/systemd/system");
     let lib_units = dir.join("lib/systemd/system");
+    let current_system_units = dir.join("systemd/lib/systemd/system");
+    let etc_units = dir.join("etc/systemd/system");
     copy_dir_recursive(&unit_src, &usr_units)?;
     copy_dir_recursive(&unit_src, &lib_units)?;
+    copy_dir_recursive(&unit_src, &current_system_units)?;
+    copy_dir_recursive(&unit_src, &etc_units)?;
+    if let Some(systemd_bin) = boot_artifact(entry, &["lib/systemd/systemd", "bin/systemd"]) {
+        link_or_copy_file(&systemd_bin, &dir.join("systemd/lib/systemd/systemd"))?;
+    }
 
-    let etc_units = dir.join("etc/systemd/system");
     fs::create_dir_all(&etc_units)?;
     link_or_copy_unit(
         &usr_units.join(default_target),

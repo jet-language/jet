@@ -992,6 +992,34 @@ fn canvas_actions_project_palette_entries_and_preview_jit_backed_source_transact
         fs::read_to_string(&core_path).unwrap().contains("math.abs(-3)"),
         "Core catalog insert_call should write source"
     );
+
+    let synth_path = write_fixture("actions_core_insert_synth_import", "fn run() {\n    print(1)\n}\n");
+    let synth_src = fs::read_to_string(&synth_path).unwrap();
+    let synth_revision = jet::Canvas::source_revision(&synth_src);
+    let synth_graph = jet::Canvas::graph_json_for_file(&synth_path).expect("synth core graph");
+    let synth_run_graph_id = field_before(&synth_graph, "\"title\":\"run\"", "graph_id");
+    let synth_insert = format!(
+        "{{\"schema_version\":1,\"op\":\"insert_call\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"callee\":\"core.encoding.decode\",\"args\":[\"\\\"canvas\\\"\"]}}",
+        synth_revision, synth_run_graph_id,
+    );
+    let synth_out = jet::Canvas::apply_transaction_json(&synth_path, &synth_insert)
+        .expect("core insert_call should synthesize import");
+    assert!(synth_out.contains("\"changed\":true"), "{synth_out}");
+    assert!(
+        synth_out.contains("use core.encoding.json as json"),
+        "transaction result should include synthesized Core import: {synth_out}"
+    );
+    let synth_after = fs::read_to_string(&synth_path).unwrap();
+    assert!(synth_after.contains("use core.encoding.json as json"), "{synth_after}");
+    assert!(
+        synth_after.contains("json.decode(\"canvas\") ?? panic(\"canvas\")"),
+        "{synth_after}"
+    );
+    let synth_reproject = jet::Canvas::graph_json_for_file(&synth_path).expect("synth reproject");
+    assert!(
+        synth_reproject.contains("\"title\":\".decode\""),
+        "reproject should show inserted Core function node: {synth_reproject}"
+    );
 }
 
 #[test]

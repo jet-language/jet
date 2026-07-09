@@ -518,7 +518,8 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(js.contains("function renderActionPalette"));
     assert!(js.contains("action-palette-search"));
     assert!(js.contains("Graph actions"));
-    assert!(js.contains("right-click built-ins, functions, source actions"));
+    assert!(js.contains("All nodes · ${matches.length}/${contextMenuState.actions.length}"));
+    assert!(!js.contains("right-click built-ins, functions, source actions"));
     assert!(js.contains("ArrowRight"));
     assert!(js.contains("function graphActionItems"));
     assert!(js.contains("function openGraphActionPalette"));
@@ -651,6 +652,8 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(js.contains("function paletteCategoryForAction"));
     assert!(js.contains("function paletteActionGlyph"));
     assert!(js.contains("function variableActionsForGraph"));
+    assert!(js.contains("title: name"));
+    assert!(!js.contains("title: \"get \" + name"));
     assert!(js.contains("function loadCoreCatalogActions"));
     assert!(js.contains("__jetCanvasVariablePalette"));
     assert!(js.contains("__jetCanvasCoreCatalogPalette"));
@@ -659,6 +662,8 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(js.contains("kind: \"variable_get\""));
     assert!(js.contains("kind: \"variable_set\""));
     assert!(js.contains("op: \"insert_call\""));
+    assert!(js.contains("const callee = String(module.path || \"core\") + \".\" + member.name"));
+    assert!(js.contains("default_args: member.default_args || [\"1\"]"));
     assert!(!js.contains("<span class=\"tag\">${escapeHtml(category)}</span>"));
     assert!(js.contains("function defaultArgsForAction"));
     assert!(js.contains("const projectFunctions = (doc.project_functions || [])"));

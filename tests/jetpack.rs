@@ -2467,6 +2467,12 @@ fn os_switch_activates_and_sets_current() {
             .join("usr/lib/systemd/system/graphical.target")
             .exists()
             && generation
+                .join("systemd/lib/systemd/system/graphical.target")
+                .exists()
+            && generation
+                .join("etc/systemd/system/graphical.target")
+                .exists()
+            && generation
                 .join("usr/lib/systemd/system/rescue.target")
                 .exists()
             && generation.join("etc/systemd/system/default.target").exists(),
@@ -5306,7 +5312,8 @@ fn os_image_writes_jetos_installer_media_proof() {
     );
     assert!(
         initrd.contains("exec chroot /sysroot /run/current-system/sbin/init")
-            && initrd.contains("for top in etc sbin sw share studio lib usr network")
+            && initrd.contains("SYSTEMD_UNIT_PATH=/etc/systemd/system")
+            && initrd.contains("for top in etc sbin sw share studio init systemd lib usr network")
             && initrd.contains("ln -s \"$generation_target/$top\" \"/sysroot/$top\""),
         "initrd run mode should hand off to installed current-system, not fallback shell: {initrd}"
     );

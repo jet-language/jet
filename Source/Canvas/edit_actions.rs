@@ -277,23 +277,237 @@ fn apply_insert_call(
     else {
         return Err(edit_error("not_found", "Canvas graph no longer exists"));
     };
-    let call = format!("{callee}({})", args.join(", "));
+    let plan = insert_call_plan(src, callee, args);
+    let call = if plan.fallible {
+        format!(
+            "{}({}) ?? panic(\"canvas\")",
+            plan.callee,
+            plan.args.join(", ")
+        )
+    } else {
+        format!("{}({})", plan.callee, plan.args.join(", "))
+    };
     let stmt = match bind {
         Some(name) => format!("    {name} :: {call}\n"),
         None => format!("    {call}\n"),
     };
+    let mut edits = vec![edit(
+        SourceSpan {
+            start: anchor.insert_offset,
+            end: anchor.insert_offset,
+        },
+        &stmt,
+    )];
+    if let Some(import) = plan.import {
+        edits.push(import);
+    }
     let changed = FixEngine::apply_edits(
         src,
-        &[edit(
-            SourceSpan {
-                start: anchor.insert_offset,
-                end: anchor.insert_offset,
-            },
-            &stmt,
-        )],
+        &edits,
     )
     .map_err(|_| edit_error("overlap", "Canvas insert edit overlapped"))?;
     write_checked_formatted(path, src, &changed)
+}
+
+struct InsertCallPlan {
+    callee: String,
+    args: Vec<String>,
+    fallible: bool,
+    import: Option<TextEdit>,
+}
+
+fn insert_call_plan(src: &str, callee: &str, args: &[String]) -> InsertCallPlan {
+    let Some(target) = core_target_for_callee(src, callee) else {
+        return InsertCallPlan {
+            callee: callee.to_string(),
+            args: args.to_vec(),
+            fallible: false,
+            import: None,
+        };
+    };
+    let module = normalize_core_module(&target.module, &target.member);
+    let (prefix, import) = core_call_prefix_and_import(src, &module);
+    let final_args = if args.is_empty() {
+        core_default_args(&module, &target.member)
+    } else {
+        args.to_vec()
+    };
+    InsertCallPlan {
+        callee: format!("{prefix}.{}", target.member),
+        args: final_args,
+        fallible: core_call_is_fallible(&module, &target.member),
+        import,
+    }
+}
+
+struct CoreCallTarget {
+    module: String,
+    member: String,
+}
+
+fn core_target_for_callee(src: &str, callee: &str) -> Option<CoreCallTarget> {
+    let parts = callee.split('.').collect::<Vec<_>>();
+    if parts.len() < 2 {
+        return None;
+    }
+    let member = parts.last()?.to_string();
+    if parts.first() == Some(&"core") && parts.len() >= 3 {
+        return Some(CoreCallTarget {
+            module: parts[..parts.len() - 1].join("."),
+            member,
+        });
+    }
+    for import in core_imports(src) {
+        if import.alias != parts[0] {
+            continue;
+        }
+        let suffix = if parts.len() > 2 {
+            format!(".{}", parts[1..parts.len() - 1].join("."))
+        } else {
+            String::new()
+        };
+        return Some(CoreCallTarget {
+            module: format!("{}{}", import.module, suffix),
+            member,
+        });
+    }
+    None
+}
+
+fn normalize_core_module(module: &str, member: &str) -> String {
+    if module == "core.encoding"
+        && matches!(
+            member,
+            "parse" | "decode" | "decode_traced" | "to_string" | "to_string_pretty"
+                | "canonical" | "events"
+        )
+    {
+        return "core.encoding.json".to_string();
+    }
+    module.to_string()
+}
+
+fn core_call_prefix_and_import(src: &str, module: &str) -> (String, Option<TextEdit>) {
+    if let Some(prefix) = imported_core_prefix(src, module) {
+        return (prefix, None);
+    }
+    let alias = default_core_alias(module);
+    let (offset, joins_use_block) = core_import_insert_point(src);
+    let suffix = if joins_use_block { "\n" } else { "\n\n" };
+    let import = edit(
+        SourceSpan {
+            start: offset,
+            end: offset,
+        },
+        &format!("use {module} as {alias}{suffix}"),
+    );
+    (alias, Some(import))
+}
+
+fn imported_core_prefix(src: &str, module: &str) -> Option<String> {
+    let mut best: Option<(usize, String)> = None;
+    for import in core_imports(src) {
+        if import.module == module {
+            return Some(import.alias);
+        }
+        let prefix = format!("{}.", import.module);
+        if module.starts_with(&prefix) {
+            let suffix = &module[prefix.len()..];
+            let candidate = format!("{}.{}", import.alias, suffix);
+            if best
+                .as_ref()
+                .map_or(true, |(len, _)| import.module.len() > *len)
+            {
+                best = Some((import.module.len(), candidate));
+            }
+        }
+    }
+    best.map(|(_, alias)| alias)
+}
+
+struct CoreImport {
+    module: String,
+    alias: String,
+}
+
+fn core_imports(src: &str) -> Vec<CoreImport> {
+    let mut imports = Vec::new();
+    for line in src.lines() {
+        let code = line.split("//").next().unwrap_or("").trim();
+        let Some(rest) = code.strip_prefix("use core.") else {
+            continue;
+        };
+        let full = format!("core.{rest}");
+        let (module, alias) = if let Some((module, alias)) = full.split_once(" as ") {
+            (module.trim(), ident_prefix(alias.trim()))
+        } else {
+            let module = full.trim();
+            (module, default_core_alias(module))
+        };
+        if !module.is_empty() && !alias.is_empty() {
+            imports.push(CoreImport {
+                module: module.to_string(),
+                alias,
+            });
+        }
+    }
+    imports
+}
+
+fn ident_prefix(text: &str) -> String {
+    text.chars()
+        .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+        .collect()
+}
+
+fn default_core_alias(module: &str) -> String {
+    module.rsplit('.').next().unwrap_or("core").to_string()
+}
+
+fn core_import_insert_point(src: &str) -> (usize, bool) {
+    let mut offset = 0usize;
+    let mut insert_at = 0usize;
+    let mut saw_use = false;
+    for line in src.split_inclusive('\n') {
+        let trimmed = line.trim();
+        if trimmed.starts_with("use ") {
+            saw_use = true;
+            insert_at = offset + line.len();
+        } else if saw_use {
+            break;
+        } else if trimmed.is_empty() || trimmed.starts_with("//") {
+            insert_at = offset + line.len();
+        } else {
+            break;
+        }
+        offset += line.len();
+    }
+    (insert_at, saw_use)
+}
+
+fn core_default_args(module: &str, member: &str) -> Vec<String> {
+    core_member_params(module, member, "").into_iter()
+        .map(|(_, ty)| default_arg_for_type(&ty))
+        .collect()
+}
+
+fn core_call_is_fallible(module: &str, member: &str) -> bool {
+    matches!(
+        (module, member),
+        (
+            "core.encoding.json"
+                | "core.encoding.jsonl"
+                | "core.encoding.csv"
+                | "core.encoding.toml"
+                | "core.encoding.yaml"
+                | "core.encoding.xml"
+                | "core.encoding.cbor"
+                | "core.encoding.hex"
+                | "core.encoding.base64"
+                | "core.encoding.base32",
+            "parse" | "decode" | "decode_traced" | "decode_url"
+        )
+    )
 }
 
 fn canvas_action_candidate(

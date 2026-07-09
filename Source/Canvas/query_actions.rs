@@ -283,8 +283,15 @@ fn core_catalog_action_json(
 ) -> String {
     let action_id = format!("canvas.core_catalog:{module_path}:{}", member.name);
     let callee = format!("{source_callee_prefix}.{}", member.name);
+    let params = core_member_params(module_path, &member.name, &member.signature);
+    let default_args = params
+        .iter()
+        .map(|(_, ty)| json_str(&default_arg_for_type(ty)))
+        .collect::<Vec<_>>()
+        .join(",");
+    let pins = core_member_pins_json(&params);
     format!(
-        "{{\"action_id\":{},\"kind\":\"canvas.core_catalog\",\"title\":{},\"module_path\":{},\"callee\":{},\"insert_callee\":{},\"insert_op\":\"insert_call\",\"engine\":\"checked-tir+jit\",\"execution\":\"source_transaction\",\"available\":true,\"authority\":[{}],\"package_id\":{},\"version\":{},\"touched_files\":[{}],\"writes\":\"source_transaction_only\",\"requires_confirmation\":false,\"audit\":[\"source\",\"module_path\",\"signature\",\"diff\",\"diagnostics\"],\"signature\":{},\"pure\":{},\"summary\":{},\"source\":{}}}",
+        "{{\"action_id\":{},\"kind\":\"canvas.core_catalog\",\"title\":{},\"module_path\":{},\"callee\":{},\"insert_callee\":{},\"insert_op\":\"insert_call\",\"engine\":\"checked-tir+jit\",\"execution\":\"source_transaction\",\"available\":true,\"authority\":[{}],\"package_id\":{},\"version\":{},\"touched_files\":[{}],\"writes\":\"source_transaction_only\",\"requires_confirmation\":false,\"audit\":[\"source\",\"module_path\",\"signature\",\"diff\",\"diagnostics\"],\"signature\":{},\"pure\":{},\"summary\":{},\"source\":{},\"pins\":[{}],\"default_args\":[{}]}}",
         json_str(&action_id),
         json_str(&format!("{} · {}", member.name, module_path)),
         json_str(module_path),
@@ -297,7 +304,9 @@ fn core_catalog_action_json(
         json_str(&member.signature),
         if member.pure { "true" } else { "false" },
         json_str(&member.summary),
-        json_str(&member.source)
+        json_str(&member.source),
+        pins,
+        default_args
     )
 }
 
@@ -706,7 +715,7 @@ fn core_module_json(module: &CoreCatalogModule) -> String {
     let members = module
         .members
         .iter()
-        .map(core_member_json)
+        .map(|member| core_member_json(&module.path, member))
         .collect::<Vec<_>>()
         .join(",");
     format!(
@@ -719,15 +728,38 @@ fn core_module_json(module: &CoreCatalogModule) -> String {
     )
 }
 
-fn core_member_json(member: &CoreCatalogMember) -> String {
+fn core_member_json(module_path: &str, member: &CoreCatalogMember) -> String {
+    let params = core_member_params(module_path, &member.name, &member.signature);
+    let default_args = params
+        .iter()
+        .map(|(_, ty)| json_str(&default_arg_for_type(ty)))
+        .collect::<Vec<_>>()
+        .join(",");
+    let pins = core_member_pins_json(&params);
     format!(
-        "{{\"name\":{},\"signature\":{},\"pure\":{},\"summary\":{},\"source\":{},\"writes\":\"none\"}}",
+        "{{\"name\":{},\"signature\":{},\"pure\":{},\"summary\":{},\"source\":{},\"writes\":\"none\",\"pins\":[{}],\"default_args\":[{}]}}",
         json_str(&member.name),
         json_str(&member.signature),
         if member.pure { "true" } else { "false" },
         json_str(&member.summary),
-        json_str(&member.source)
+        json_str(&member.source),
+        pins,
+        default_args
     )
+}
+
+fn core_member_pins_json(params: &[(String, String)]) -> String {
+    params
+        .iter()
+        .map(|(name, ty)| {
+            format!(
+                "{{\"name\":{},\"direction\":\"input\",\"type\":{}}}",
+                json_str(name),
+                json_str(ty)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 fn strip_markdown_heading(line: &str) -> String {
@@ -822,11 +854,101 @@ fn canvas_builtin_action_json(
     )
 }
 
+fn core_member_params(module_path: &str, member_name: &str, signature: &str) -> Vec<(String, String)> {
+    if let Some(params) = params_from_signature(signature) {
+        return params;
+    }
+    match (module_path, member_name) {
+        ("core.math", "abs" | "round" | "int_pow" | "gcd" | "lcm") => {
+            vec![("value".to_string(), "Int".to_string())]
+        }
+        ("core.math", "sqrt" | "floor" | "ceil" | "sin" | "cos" | "tan" | "asin" | "acos"
+        | "atan" | "sinh" | "cosh" | "tanh" | "exp" | "ln" | "log2" | "log10" | "trunc"
+        | "fract" | "sign" | "degrees" | "radians") => {
+            vec![("value".to_string(), "Float".to_string())]
+        }
+        ("core.math", "pow" | "atan2" | "hypot") => vec![
+            ("left".to_string(), "Float".to_string()),
+            ("right".to_string(), "Float".to_string()),
+        ],
+        ("core.math", "min" | "max") => vec![
+            ("left".to_string(), "Int".to_string()),
+            ("right".to_string(), "Int".to_string()),
+        ],
+        ("core.math", "clamp") => vec![
+            ("value".to_string(), "Int".to_string()),
+            ("min".to_string(), "Int".to_string()),
+            ("max".to_string(), "Int".to_string()),
+        ],
+        ("core.encoding.json" | "core.encoding.csv" | "core.encoding.toml" | "core.encoding.yaml", "parse" | "decode" | "decode_traced") => {
+            vec![("text".to_string(), "String".to_string())]
+        }
+        ("core.encoding.hex" | "core.encoding.base64" | "core.encoding.base32", "decode" | "decode_url") => {
+            vec![("text".to_string(), "String".to_string())]
+        }
+        _ => Vec::new(),
+    }
+}
+
+fn params_from_signature(signature: &str) -> Option<Vec<(String, String)>> {
+    let start = signature.find('(')?;
+    let end = signature[start + 1..].find(')')? + start + 1;
+    let body = signature[start + 1..end].trim();
+    if body.is_empty() {
+        return Some(Vec::new());
+    }
+    let mut params = Vec::new();
+    for (i, raw) in body.split(',').enumerate() {
+        let part = raw.trim();
+        if part.is_empty() {
+            continue;
+        }
+        let (name, ty) = if let Some((name, ty)) = part.split_once(':') {
+            (name.trim(), normalize_param_type(ty.trim()))
+        } else {
+            let name = part
+                .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+                .next()
+                .unwrap_or("")
+                .trim();
+            (name, type_for_param_name(name))
+        };
+        let name = if name.is_empty() {
+            format!("arg{}", i + 1)
+        } else {
+            name.to_string()
+        };
+        params.push((name, ty));
+    }
+    Some(params)
+}
+
+fn normalize_param_type(ty: &str) -> String {
+    ty.split('=')
+        .next()
+        .unwrap_or(ty)
+        .trim()
+        .trim_end_matches('?')
+        .trim()
+        .to_string()
+}
+
+fn type_for_param_name(name: &str) -> String {
+    match name {
+        "text" | "raw" | "body" | "path" | "name" | "url" | "host" | "scheme" | "query"
+        | "fragment" | "delim" | "method" => "String",
+        "ok" | "enabled" | "flag" => "Bool",
+        _ => "Int",
+    }
+    .to_string()
+}
+
 fn default_arg_for_type(ty: &str) -> String {
+    let ty = ty.trim().trim_end_matches('?').trim();
     match ty {
         "Bool" => "true".to_string(),
-        "String" => "\"canvas\"".to_string(),
-        "Float" | "F32" | "F64" => "1.0".to_string(),
+        "String" | "Path" | "Url" => "\"canvas\"".to_string(),
+        "Float" | "F32" | "F64" | "Decimal" => "1.0".to_string(),
         _ => "1".to_string(),
     }
 }
