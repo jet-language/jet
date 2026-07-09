@@ -236,6 +236,8 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
 .action-glyph { font: 700 10px ui-monospace, "SFMono-Regular", Consolas, monospace; overflow: hidden; }
 .action-result.is-favorite { border-color: #facc15; box-shadow: inset 3px 0 0 #facc15; }
 .action-result:hover, .action-result:focus-visible { border-color: var(--action-color); background: #1d2129; }
+.action-result.is-disabled { opacity: .58; filter: grayscale(.35); cursor: not-allowed; }
+.action-result.is-disabled:hover, .action-result.is-disabled:focus-visible { border-color: #3f4856; background: #151922; }
 .action-result small { color: #9aaecb; display: block; margin-top: 2px; overflow-wrap: anywhere; font-family: "JetBrains Mono", ui-monospace, "SFMono-Regular", Consolas, monospace; }
 .action-empty { color: #8da4c2; padding: 9px; border: 1px dashed #31445d; border-radius: 4px; font: 11px ui-monospace, "SFMono-Regular", Consolas, monospace; }
 #first-run-tour { position: fixed; inset: auto 18px 42px auto; z-index: 29; width: min(340px, calc(100vw - 36px)); display: none; gap: 10px; padding: 12px; border: 1px solid #365a7f; border-radius: 6px; background: rgba(7,16,28,.95); box-shadow: 0 22px 70px rgba(0,0,0,.5); color: #c9dcf2; }

@@ -17,6 +17,7 @@ struct InlineExpr {
 struct GraphEditAnchor {
     graph_id: String,
     insert_offset: usize,
+    fallible: bool,
 }
 
 #[derive(Debug, Clone)]

@@ -532,6 +532,7 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(js.contains("insert_loop"));
     assert!(js.contains("insert_fallible_rail"));
     assert!(js.contains("insert_call"));
+    assert!(!js.contains("Insert call transaction"));
     assert!(js.contains("selectedNodeIds"));
     assert!(js.contains("graphBackStack"));
     assert!(js.contains("graphForwardStack"));
@@ -543,6 +544,9 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(js.contains("mode: \"node\""));
     assert!(js.contains("contextmenu"));
     assert!(js.contains("function renderActionPalette"));
+    assert!(js.contains("data-unavailable-reason-code"));
+    assert!(js.contains("aria-disabled"));
+    assert!(js.contains("Needs a fallible function."));
     assert!(js.contains("action-palette-search"));
     assert!(js.contains("Canvas actions"));
     assert!(js.contains("All nodes · ${matches.length}/${contextMenuState.actions.length}"));

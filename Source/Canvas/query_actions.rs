@@ -290,13 +290,16 @@ fn core_catalog_action_json(
         .collect::<Vec<_>>()
         .join(",");
     let pins = core_member_pins_json(&params);
+    let unavailable = core_member_unavailable_json(member);
     format!(
-        "{{\"action_id\":{},\"kind\":\"canvas.core_catalog\",\"title\":{},\"module_path\":{},\"callee\":{},\"insert_callee\":{},\"insert_op\":\"insert_call\",\"engine\":\"checked-tir+jit\",\"execution\":\"source_transaction\",\"available\":true,\"authority\":[{}],\"package_id\":{},\"version\":{},\"touched_files\":[{}],\"writes\":\"source_transaction_only\",\"requires_confirmation\":false,\"audit\":[\"source\",\"module_path\",\"signature\",\"diff\",\"diagnostics\"],\"signature\":{},\"pure\":{},\"summary\":{},\"source\":{},\"pins\":[{}],\"default_args\":[{}]}}",
+        "{{\"action_id\":{},\"kind\":\"canvas.core_catalog\",\"title\":{},\"module_path\":{},\"callee\":{},\"insert_callee\":{},\"insert_op\":\"insert_call\",\"engine\":\"checked-tir+jit\",\"execution\":\"source_transaction\",\"available\":{},{}\"authority\":[{}],\"package_id\":{},\"version\":{},\"touched_files\":[{}],\"writes\":\"source_transaction_only\",\"requires_confirmation\":false,\"audit\":[\"source\",\"module_path\",\"signature\",\"diff\",\"diagnostics\"],\"signature\":{},\"pure\":{},\"summary\":{},\"source\":{},\"pins\":[{}],\"default_args\":[{}]}}",
         json_str(&action_id),
         json_str(&format!("{} · {}", member.name, module_path)),
         json_str(module_path),
         json_str(&callee),
         json_str(&callee),
+        if member.available { "true" } else { "false" },
+        unavailable,
         json_str(&authority.grant),
         json_str(&authority.package_id),
         json_str(&authority.version),
@@ -325,15 +328,22 @@ struct CoreCatalogMember {
     summary: String,
     source: String,
     pure: bool,
+    available: bool,
+    unavailable_reason_code: String,
+    unavailable_reason: String,
 }
 
 fn core_catalog_entries(query: &str) -> Vec<CoreCatalogModule> {
     let needle = query.trim();
     let mut modules = parse_core_catalog_markdown(include_str!("../../docs/reference/core-library.md"));
+    let exports = parse_sema_core_module_items(
+        include_str!("../../crates/jet-sema/src/Sema/CheckerCoreLib/module_items.rs"),
+    );
     merge_sema_core_registry(
         &mut modules,
         include_str!("../../crates/jet-sema/src/Sema/CheckerCoreLib/module_items.rs"),
     );
+    mark_core_catalog_availability(&mut modules, &exports);
     if !needle.is_empty() {
         modules = modules
             .into_iter()
@@ -394,9 +404,151 @@ fn merge_sema_core_registry(modules: &mut Vec<CoreCatalogModule>, registry: &str
                 source: "crates/jet-sema/src/Sema/CheckerCoreLib/module_items.rs".to_string(),
                 pure: core_member_pure(&path, &name),
                 name,
+                available: true,
+                unavailable_reason_code: String::new(),
+                unavailable_reason: String::new(),
             });
         }
     }
+}
+
+fn mark_core_catalog_availability(
+    modules: &mut [CoreCatalogModule],
+    exports: &[(String, Vec<String>)],
+) {
+    for module in modules {
+        for member in &mut module.members {
+            if core_export_resolves(exports, &module.path, &member.name) {
+                if let Some((code, reason)) = core_member_direct_exclusion(&module.path, member) {
+                    member.available = false;
+                    member.unavailable_reason_code = code.to_string();
+                    member.unavailable_reason = reason;
+                } else {
+                    member.available = true;
+                    member.unavailable_reason_code.clear();
+                    member.unavailable_reason.clear();
+                }
+            } else {
+                let (code, reason) = core_member_unavailable_reason(&module.path, member);
+                member.available = false;
+                member.unavailable_reason_code = code.to_string();
+                member.unavailable_reason = reason;
+            }
+        }
+    }
+}
+
+fn core_member_direct_exclusion(
+    module_path: &str,
+    member: &CoreCatalogMember,
+) -> Option<(&'static str, String)> {
+    if member
+        .name
+        .chars()
+        .next()
+        .map_or(false, |c| c.is_ascii_uppercase())
+    {
+        return Some((
+            "type_only",
+            "Use this as a type or constructor surface, not a direct call.".to_string(),
+        ));
+    }
+    if module_path == "core.crypto.expert" {
+        return Some((
+            "needs_unsafe_region",
+            "Needs an #Unsafe region before Canvas can insert it.".to_string(),
+        ));
+    }
+    if !core_module_has_canvas_defaults(module_path) {
+        return Some((
+            "needs_canvas_defaults",
+            "Needs Canvas argument defaults before this entry can be inserted.".to_string(),
+        ));
+    }
+    if module_path.starts_with("core.encoding.") && !core_encoding_member_has_canvas_defaults(module_path, &member.name) {
+        return Some((
+            "needs_canvas_defaults",
+            "Needs Canvas argument defaults before this entry can be inserted.".to_string(),
+        ));
+    }
+    let params = core_member_params(module_path, &member.name, &member.signature);
+    let generated_signature = member.signature == format!("{module_path}.{}", member.name);
+    if generated_signature && params.is_empty() {
+        return Some((
+            "needs_signature",
+            "Needs parameter details before Canvas can insert it.".to_string(),
+        ));
+    }
+    if !member.signature.contains('(') && params.is_empty() {
+        return Some((
+            "value_only",
+            "Use this as a value, not a direct call.".to_string(),
+        ));
+    }
+    None
+}
+
+fn core_module_has_canvas_defaults(module_path: &str) -> bool {
+    matches!(
+        module_path,
+        "core.math"
+            | "core.encoding.json"
+            | "core.encoding.jsonl"
+            | "core.encoding.csv"
+            | "core.encoding.toml"
+            | "core.encoding.yaml"
+            | "core.encoding.xml"
+            | "core.encoding.cbor"
+            | "core.encoding.hex"
+            | "core.encoding.base64"
+            | "core.encoding.base32"
+    )
+}
+
+fn core_encoding_member_has_canvas_defaults(module_path: &str, member: &str) -> bool {
+    matches!(
+        (module_path, member),
+        ("core.encoding.json", "parse" | "decode")
+            | (
+                "core.encoding.hex" | "core.encoding.base64" | "core.encoding.base32",
+                "decode" | "decode_url"
+            )
+    )
+}
+
+fn core_export_resolves(exports: &[(String, Vec<String>)], module_path: &str, member: &str) -> bool {
+    exports
+        .iter()
+        .any(|(path, names)| path == module_path && names.iter().any(|name| name == member))
+}
+
+fn core_member_unavailable_reason(
+    module_path: &str,
+    member: &CoreCatalogMember,
+) -> (&'static str, String) {
+    let sig = member.signature.trim();
+    if module_path == "core.args" && sig.starts_with('.') {
+        return (
+            "method_only",
+            "Use this as a method on an ArgsSpec value.".to_string(),
+        );
+    }
+    if sig.starts_with('.') || sig.contains(").") || sig.contains("::") {
+        return (
+            "method_only",
+            "Use this from the value shown in the signature.".to_string(),
+        );
+    }
+    if sig.contains('.') && !sig.starts_with(module_path) {
+        return (
+            "type_member",
+            "Use this from the type shown in the signature.".to_string(),
+        );
+    }
+    (
+        "not_direct_call",
+        "This Core entry is documentation only; it has no direct module call.".to_string(),
+    )
 }
 
 fn parse_sema_core_module_items(registry: &str) -> Vec<(String, Vec<String>)> {
@@ -410,9 +562,10 @@ fn parse_sema_core_module_items(registry: &str) -> Vec<(String, Vec<String>)> {
         let Some(path) = parse_quoted(trimmed) else {
             continue;
         };
-        if !(path == "core" || path.starts_with("core.")) {
+        if !(path == "core" || path.starts_with("core.") || path.starts_with("jet.")) {
             continue;
         }
+        let path = user_core_module_path(&path);
         let mut names = Vec::new();
         let after_array = trimmed
             .split_once("&[")
@@ -441,6 +594,14 @@ fn parse_sema_core_module_items(registry: &str) -> Vec<(String, Vec<String>)> {
         out.push((path, names));
     }
     out
+}
+
+fn user_core_module_path(path: &str) -> String {
+    if let Some(ring) = path.strip_prefix("jet.") {
+        format!("core.{ring}")
+    } else {
+        path.to_string()
+    }
 }
 
 fn quoted_strings(line: &str) -> Vec<String> {
@@ -589,6 +750,9 @@ fn core_catalog_member_from_line(line: &str) -> Option<CoreCatalogMember> {
         summary,
         source: "docs/reference/core-library.md".to_string(),
         pure: core_member_pure_for_signature(signature),
+        available: true,
+        unavailable_reason_code: String::new(),
+        unavailable_reason: String::new(),
     })
 }
 
@@ -684,13 +848,32 @@ fn project_function_catalog_json(
     ret: Option<&str>,
     index: &SemIndex,
 ) -> String {
+    let default_args = params
+        .iter()
+        .map(|(_, ty)| json_str(&default_arg_for_type(ty)))
+        .collect::<Vec<_>>()
+        .join(",");
+    let pins = params
+        .iter()
+        .map(|(name, ty)| {
+            format!(
+                "{{\"name\":{},\"direction\":\"input\",\"type\":{}}}",
+                json_str(name),
+                json_str(ty)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
     format!(
-        "{{\"name\":{},\"signature\":{},\"callee\":{},\"module_path\":{},\"pure\":{},\"source_span\":{},\"insert_op\":\"insert_call\"}}",
+        "{{\"name\":{},\"signature\":{},\"callee\":{},\"module_path\":{},\"pure\":{},\"ret\":{},\"pins\":[{}],\"default_args\":[{}],\"available\":true,\"source_span\":{},\"insert_op\":\"insert_call\"}}",
         json_str(&def.name),
         json_str(&function_signature_from_parts(&def.name, params, ret)),
         json_str(&def.name),
         json_str(&def.module_path),
         if call_has_effects(index, &def.name) { "false" } else { "true" },
+        json_str(ret.unwrap_or("Void")),
+        pins,
+        default_args,
         span_json(def.def_span)
     )
 }
@@ -736,16 +919,31 @@ fn core_member_json(module_path: &str, member: &CoreCatalogMember) -> String {
         .collect::<Vec<_>>()
         .join(",");
     let pins = core_member_pins_json(&params);
+    let unavailable = core_member_unavailable_json(member);
     format!(
-        "{{\"name\":{},\"signature\":{},\"pure\":{},\"summary\":{},\"source\":{},\"writes\":\"none\",\"pins\":[{}],\"default_args\":[{}]}}",
+        "{{\"name\":{},\"signature\":{},\"pure\":{},\"summary\":{},\"source\":{},\"writes\":\"none\",\"available\":{},{}\"pins\":[{}],\"default_args\":[{}]}}",
         json_str(&member.name),
         json_str(&member.signature),
         if member.pure { "true" } else { "false" },
         json_str(&member.summary),
         json_str(&member.source),
+        if member.available { "true" } else { "false" },
+        unavailable,
         pins,
         default_args
     )
+}
+
+fn core_member_unavailable_json(member: &CoreCatalogMember) -> String {
+    if member.available {
+        String::new()
+    } else {
+        format!(
+            "\"unavailable_reason_code\":{},\"denied_reason\":{},",
+            json_str(&member.unavailable_reason_code),
+            json_str(&member.unavailable_reason)
+        )
+    }
 }
 
 fn core_member_pins_json(params: &[(String, String)]) -> String {
@@ -859,14 +1057,21 @@ fn core_member_params(module_path: &str, member_name: &str, signature: &str) -> 
         return params;
     }
     match (module_path, member_name) {
-        ("core.math", "abs" | "round" | "int_pow" | "gcd" | "lcm") => {
+        ("core.math", "abs") => {
             vec![("value".to_string(), "Int".to_string())]
         }
-        ("core.math", "sqrt" | "floor" | "ceil" | "sin" | "cos" | "tan" | "asin" | "acos"
-        | "atan" | "sinh" | "cosh" | "tanh" | "exp" | "ln" | "log2" | "log10" | "trunc"
-        | "fract" | "sign" | "degrees" | "radians") => {
+        (
+            "core.math",
+            "sqrt" | "floor" | "ceil" | "round" | "sin" | "cos" | "tan" | "asin" | "acos"
+            | "atan" | "sinh" | "cosh" | "tanh" | "exp" | "ln" | "log2" | "log10"
+            | "trunc" | "fract" | "sign" | "degrees" | "radians",
+        ) => {
             vec![("value".to_string(), "Float".to_string())]
         }
+        ("core.math", "int_pow" | "gcd" | "lcm") => vec![
+            ("left".to_string(), "Int".to_string()),
+            ("right".to_string(), "Int".to_string()),
+        ],
         ("core.math", "pow" | "atan2" | "hypot") => vec![
             ("left".to_string(), "Float".to_string()),
             ("right".to_string(), "Float".to_string()),

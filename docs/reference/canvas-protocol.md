@@ -324,10 +324,12 @@ runtime, compiler, or graph asset store. An action may return a source
 transaction or preview, but it never writes files directly.
 
 The `core_catalog` query is browse-only. Core entries in the actions palette are
-source-backed insert candidates: they carry module path, signature, `pure`,
-`insert_callee`, `insert_op:"insert_call"`, source document, ordinary source-edit authority, and
-`writes:"source_transaction_only"`. They still execute only after the existing
-`insert_call`/preview source transaction validates.
+source-backed insert candidates when `available:true`: they carry module path,
+signature, `pure`, `insert_callee`, `insert_op:"insert_call"`, source document,
+ordinary source-edit authority, and `writes:"source_transaction_only"`. Rows with
+`available:false` stay visible and disabled; `unavailable_reason_code` is the
+machine-readable reason and `denied_reason` is the hover text. They still execute
+only after the existing `insert_call`/preview source transaction validates.
 
 Terms:
 
@@ -341,7 +343,7 @@ Terms:
 Query actions:
 
 ```json
-{"protocol":"jet.canvas.query","schema_version":1,"ok":true,"op":"actions","revision":"sha256-...","results":[],"impact":null,"diff":null,"actions_schema_version":1,"project_functions":[{"name":"square","signature":"fn square(n: Int) -> Int","callee":"square","module_path":"main.jet","pure":true,"insert_op":"insert_call"}],"actions":[{"action_id":"canvas.action:main.jet:square","kind":"canvas.action","title":"square","callee":"square","engine":"checked-tir+jit","authority":["canvas.source_edit:package"],"package_id":"app","version":"0.1.0","touched_files":["main.jet"],"writes":"source_transaction_only"},{"action_id":"canvas.core_catalog:core.math:abs","kind":"canvas.core_catalog","title":"abs · core.math","module_path":"core.math","callee":"math.abs","insert_callee":"math.abs","insert_op":"insert_call","engine":"checked-tir+jit","execution":"source_transaction","authority":["canvas.source_edit:package"],"writes":"source_transaction_only","signature":"abs(x)","pure":true,"source":"docs/reference/core-library.md"},{"action_id":"canvas.command:run","kind":"canvas.command","title":"Run program","op":"command_authority","engine":"jet-cli","execution":"external_command","available":true,"command":["jet","run","main.jet"],"authority":["canvas.command:run","canvas.source_edit:package"],"package_id":"app","version":"0.1.0","touched_files":["main.jet"],"writes":"none","requires_confirmation":false}]}
+{"protocol":"jet.canvas.query","schema_version":1,"ok":true,"op":"actions","revision":"sha256-...","results":[],"impact":null,"diff":null,"actions_schema_version":1,"project_functions":[{"name":"square","signature":"fn square(n: Int) -> Int","callee":"square","module_path":"main.jet","pure":true,"ret":"Int","pins":[{"name":"n","direction":"input","type":"Int"}],"default_args":["1"],"available":true,"insert_op":"insert_call"}],"actions":[{"action_id":"canvas.action:main.jet:square","kind":"canvas.action","title":"square","callee":"square","engine":"checked-tir+jit","authority":["canvas.source_edit:package"],"package_id":"app","version":"0.1.0","touched_files":["main.jet"],"writes":"source_transaction_only"},{"action_id":"canvas.core_catalog:core.math:abs","kind":"canvas.core_catalog","title":"abs · core.math","module_path":"core.math","callee":"math.abs","insert_callee":"math.abs","insert_op":"insert_call","engine":"checked-tir+jit","execution":"source_transaction","available":true,"authority":["canvas.source_edit:package"],"writes":"source_transaction_only","signature":"abs(x)","pure":true,"source":"docs/reference/core-library.md"},{"action_id":"canvas.core_catalog:core.args:help","kind":"canvas.core_catalog","title":"help · core.args","module_path":"core.args","available":false,"unavailable_reason_code":"method_only","denied_reason":"Use this as a method on an ArgsSpec value.","writes":"source_transaction_only"},{"action_id":"canvas.command:run","kind":"canvas.command","title":"Run program","op":"command_authority","engine":"jet-cli","execution":"external_command","available":true,"command":["jet","run","main.jet"],"authority":["canvas.command:run","canvas.source_edit:package"],"package_id":"app","version":"0.1.0","touched_files":["main.jet"],"writes":"none","requires_confirmation":false}]}
 ```
 
 Preview an action:

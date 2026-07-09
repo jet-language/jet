@@ -480,12 +480,15 @@ const CONFIGURATION_PROOF_SERVICE: &str = r#"
       deadline=$((SECONDS + 300))
       while [ "$SECONDS" -lt "$deadline" ]; do
         dm=$(systemctl is-active display-manager.service || true)
-        shell_pid=$(pgrep -u @@USER@@ -x gnome-shell || true)
+        # NixOS wraps gnome-shell (comm = ".gnome-shell-wr…"), so match the
+        # full command line rather than the truncated process name.
+        shell_pid=$(pgrep -u @@USER@@ -f gnome-shell | head -n1 || true)
         session=$(loginctl list-sessions --no-legend | awk '$3=="@@USER@@" {print $1; exit}')
         stype=""
         if [ -n "$session" ]; then
           stype=$(loginctl show-session "$session" -p Type --value || true)
         fi
+        echo "JETOS_PROOF_DEBUG dm=$dm shell=$shell_pid session=$session stype=$stype" > /dev/ttyS0 || true
         if [ "$dm" = "active" ] && [ -n "$shell_pid" ] && [ "$stype" = "wayland" ]; then
           jq -cn \
             --arg host "$(cat /proc/sys/kernel/hostname)" \
@@ -788,6 +791,9 @@ fn run_real_tier_build_and_boot(
                 .map_err(|e| format!("creating `{}` failed: {e}", parent.display()))?;
         }
     }
+    // A prior run's copy inherits the store's read-only mode — drop it first
+    // or the fresh copy is denied write access.
+    let _ = fs::remove_file(disk_path);
     fs::copy(&built_qcow2, disk_path).map_err(|e| {
         format!(
             "copying `{}` to `{}` failed: {e}",

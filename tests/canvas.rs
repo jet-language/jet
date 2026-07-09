@@ -855,6 +855,24 @@ fn canvas_structural_writes_insert_control_and_fallible_rails_with_undo_source()
 }
 
 #[test]
+fn canvas_fallible_rail_is_excluded_outside_fallible_function() {
+    let path = write_fixture("fallible_rail_nonfallible", "fn run() {\n    print(1)\n}\n");
+    let before = fs::read_to_string(&path).unwrap();
+    let graph = jet::Canvas::graph_json_for_file(&path).expect("canvas graph");
+    let graph_id = field_before(&graph, "\"title\":\"run\"", "graph_id");
+    let req = format!(
+        "{{\"schema_version\":1,\"op\":\"insert_fallible_rail\",\"revision\":\"{}\",\"graph_id\":\"{}\"}}",
+        jet::Canvas::source_revision(&before),
+        graph_id
+    );
+    let err = jet::Canvas::apply_transaction_json(&path, &req).unwrap_err();
+    assert!(err.contains("\"kind\":\"unavailable\""), "{err}");
+    assert!(err.contains("needs a fallible function"), "{err}");
+    assert!(!err.contains("E0403"), "{err}");
+    assert_eq!(fs::read_to_string(&path).unwrap(), before);
+}
+
+#[test]
 fn canvas_stale_transaction_conflicts_without_writing() {
     let path = write_fixture("stale", CANVAS_FIXTURE);
     let stale = "{\"schema_version\":1,\"op\":\"rename_binding\",\"revision\":\"sha256-stale\",\"from\":\"total\",\"to\":\"score\"}";
@@ -1210,6 +1228,24 @@ fn canvas_core_catalog_browses_canonical_core_library_without_write_authority() 
         fs::read_to_string(&path).unwrap(),
         src,
         "Core catalog browsing must not edit source"
+    );
+
+    let args_query = format!(
+        "{{\"schema_version\":1,\"op\":\"core_catalog\",\"revision\":\"{}\",\"query\":\"help\"}}",
+        revision
+    );
+    let args_catalog =
+        jet::Canvas::query_json_for_file(&path, &args_query).expect("Canvas args catalog query");
+    assert!(args_catalog.contains("\"path\":\"core.args\""), "{args_catalog}");
+    assert!(args_catalog.contains("\"name\":\"help\""), "{args_catalog}");
+    assert!(args_catalog.contains("\"available\":false"), "{args_catalog}");
+    assert!(
+        args_catalog.contains("\"unavailable_reason_code\":\"method_only\""),
+        "{args_catalog}"
+    );
+    assert!(
+        args_catalog.contains("Use this as a method on an ArgsSpec value."),
+        "{args_catalog}"
     );
 }
 

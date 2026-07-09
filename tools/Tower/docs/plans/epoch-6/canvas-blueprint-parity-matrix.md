@@ -19,8 +19,8 @@ Ratchets use class prefixes: `interaction:`, `protocol:`, `projection:`,
 | Area | UE 5.8 Blueprint capability | Canvas target | Status | Ratchet |
 |---|---|---|---|---|
 | Workbench | Right-click action menu | Context menu opens source-backed node actions from graph facts. | claimed | grep:#287, tests/web_dev.rs |
-| Workbench | Drag-off-pin action menu | Compatible action menu filtered by sema expected-type facts. | claimed | projection:#277, tests/canvas.rs |
-| Workbench | Built-in method search | Palette/context search includes source-checked built-ins and ordinary Jet functions with pin metadata. | claimed | projection:#287, tests/canvas.rs::canvas_actions_project_palette_entries_and_preview_jit_backed_source_transactions |
+| Workbench | Drag-off-pin action menu | Compatible action menu filtered by sema expected-type facts. | shipped | interaction:tests/canvas_scenarios.rs::palette_insert_core_fn; interaction:tests/canvas_scenarios.rs::fallible_context; interaction:tests/canvas_scenarios.rs::no_dead_end_ad_hoc_insert |
+| Workbench | Built-in method search | Palette/context search includes source-checked built-ins and ordinary Jet functions with pin metadata. | shipped | interaction:tests/canvas_scenarios.rs::palette_insert_catalog_sweep; interaction:tests/canvas_scenarios.rs::excluded_entry_rendering |
 | Workbench | Selection, shift-add, ctrl-toggle, marquee | Stable keyboard and pointer selection over projected nodes. | shipped | interaction:tests/canvas_scenarios.rs::click_select_details |
 | Workbench | Pan, zoom, zoom-to-fit | Browser panel supports pan, zoom, fit, and nonblank graph rendering. | shipped | interaction:tests/canvas_scenarios.rs::pan_zoom_fit |
 | Workbench | Child/parent graph navigation | Breadcrumbs and graph picker navigate function/test/lambda graphs. | claimed | grep:#287, tests/web_dev.rs |
@@ -32,14 +32,14 @@ Ratchets use class prefixes: `interaction:`, `protocol:`, `projection:`,
 | Hotkeys | Save, undo, redo, find, check | Blueprint-compatible command layer maps to source transactions and Jet checks. | planned | #271, #272, #282 |
 | Hotkeys | Undo/redo | Undo/redo restore exact validated Jet source through the edit protocol. | shipped | interaction:tests/canvas_scenarios.rs::undo_restores_source |
 | Hotkeys | Breakpoint and comment chords | Hotkeys target local debug anchors or source-backed comment regions. | planned | #273, #279 |
-| Node model | Function calls | Calls project as typed nodes with input/output pins. | claimed | projection:#265, tests/canvas.rs |
+| Node model | Function calls | Calls project as typed nodes with input/output pins. | shipped | interaction:tests/canvas_scenarios.rs::palette_insert_catalog_sweep |
 | Node model | Pure function calls | Pure leaves render inline by default and can expand. | planned | #274 |
 | Node model | Variables get/set | Bindings, reads, and reassignments project as source nodes. | claimed | projection:#274, #281, tests/canvas.rs |
 | Node model | Branch, switch, loops | Jet `if`, dispatch, and `loop` forms project and insert from palette without opaque fallbacks. | claimed | projection:#272/#274, tests/canvas.rs |
 | Node model | Sequence, gate, do-once, do-N | Blueprint scheduler nodes are rejected unless represented by ordinary Jet control/callback code. | rejected-as-Blueprint-semantic-debt | #278 |
 | Node model | Large graph virtualization and LOD | Canvas renders visible graph regions and low-zoom title-bar nodes for large projections. | claimed | grep:#314, tests/web_dev.rs |
 | Node model | Math Expression node | Expression text stays ordinary Jet expression source, not a separate formula language. | planned | #274 |
-| Pins and wires | Exec pins and data pins | Separate control/data rails over Jet semantics. | claimed | projection:#278, tests/canvas.rs |
+| Pins and wires | Exec pins and data pins | Separate control/data rails over Jet semantics. | shipped | interaction:tests/canvas_scenarios.rs::palette_insert_catalog_sweep |
 | Pins and wires | Typed colored wires | Pin type, capability, fallibility, effect facts, and source spans render distinctly. | claimed | projection:#274/#278, tests/canvas.rs |
 | Pins and wires | Incompatible refusal | Wrong wires are impossible or fail with Jet diagnostics. | claimed | projection:#277, tests/canvas.rs |
 | Pins and wires | Auto-cast insertion | Ratified visible conversion node/call writes source. | claimed | projection:#277, tests/canvas.rs, D-CANVAS-CONVERT1 |
@@ -79,7 +79,7 @@ Ratchets use class prefixes: `interaction:`, `protocol:`, `projection:`,
 | Public protocol | Graph JSON schema | `jet.canvas.graph` v1 exposes source-backed graph facts. | claimed | protocol:#265, tests/canvas.rs |
 | Public protocol | Edit transaction schema | `jet.canvas.edit` v1 supports initial source transactions. | claimed | protocol:#265, tests/canvas.rs |
 | Public protocol | Forward compatibility | Unknown non-semantic fields are ignored by old clients and never carry semantics. | planned | #276 |
-| Extensibility | Function library projection | Packages expose ordinary Jet functions/types/docs as source-backed palette entries. | shipped | interaction:tests/canvas_scenarios.rs::palette_insert_core_fn |
+| Extensibility | Function library projection | Packages expose ordinary Jet functions/types/docs as source-backed palette entries. | shipped | interaction:tests/canvas_scenarios.rs::palette_insert_catalog_sweep; interaction:tests/canvas_scenarios.rs::palette_insert_core_fn |
 | Extensibility | Behavior-producing third-party nodes | Ratified Canvas actions use checked TIR/JIT preview and return source transactions only. | claimed | projection:#284, D-CANVAS-EXT1, D-CANVAS-EXT2, tests/canvas.rs::canvas_actions_project_palette_entries_and_preview_jit_backed_source_transactions |
 | Validation | Check/compile button | Canvas invokes Jet front-end diagnostics, never raw rustc output. | planned | #278 |
 | Validation | Formatter stability | Every write runs through formatter and reprojects from source. | claimed | projection:#265, tests/canvas.rs |

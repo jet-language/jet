@@ -97,11 +97,22 @@ export class CanvasScenario {
     })()`);
   }
 
-  async loadCoreCatalog() {
-    await this.driver.evaluate("window.__jetCanvasTest.loadCoreCatalog('abs')", { awaitPromise: true });
+  async loadCoreCatalog(query = "abs") {
+    await this.driver.evaluate(`window.__jetCanvasTest.loadCoreCatalog(${JSON.stringify(query)})`, { awaitPromise: true });
     await this.waitFor(async () => {
       return await this.driver.evaluate("Number(window.__jetCanvasCoreCatalogPalette || 0) > 0");
     }, "Core catalog palette");
+  }
+
+  async openCoreCatalogPalette(query = "") {
+    await this.driver.evaluate(`window.__jetCanvasTest.openCoreCatalogPalette(${JSON.stringify(query)})`);
+    await sleep(120);
+  }
+
+  async switchGraph(title) {
+    const ok = await this.driver.evaluate(`window.__jetCanvasTest.switchGraphByTitle(${JSON.stringify(title)})`);
+    if (!ok) throw new Error(`graph not found: ${title}`);
+    await this.waitForCanvas();
   }
 
   async click(x, y) {
@@ -162,6 +173,30 @@ export class CanvasScenario {
     }
   }
 
+  async source() {
+    return await this.driver.evaluate(`fetch("/canvas/source", { cache: "no-store" }).then((r) => r.text())`);
+  }
+
+  async graph() {
+    return await this.driver.evaluate(`fetch("/canvas/graph", { cache: "no-store" }).then((r) => r.json())`);
+  }
+
+  async query(body) {
+    return await this.driver.evaluate(`fetch("/canvas/query", { method: "POST", headers: { "content-type": "application/json" }, body: ${JSON.stringify(JSON.stringify(body))} }).then((r) => r.json())`);
+  }
+
+  async transaction(body) {
+    return await this.driver.evaluate(`fetch("/canvas/transaction", { method: "POST", headers: { "content-type": "application/json" }, body: ${JSON.stringify(JSON.stringify(body))} }).then((r) => r.json().then((json) => ({ ok: r.ok, json })))`);
+  }
+
+  async replaceSource(source) {
+    const graph = await this.graph();
+    const result = await this.transaction({ schema_version: 1, op: "replace_source", revision: graph.revision, source });
+    if (!result.ok) throw new Error(`replace_source failed: ${JSON.stringify(result.json)}`);
+    await this.waitForCanvas();
+    return result.json;
+  }
+
   async screenshot(name) {
     const path = join(this.outDir, `${this.scenarioName}-${name}.png`);
     this.lastScreenshot = path;
@@ -210,6 +245,150 @@ async function clickSelectDetails(ctx, options = {}) {
   if (!details.includes(target.title)) throw new Error(`details did not show selected ${target.title} node`);
 }
 
+function actionReturnType(action) {
+  if (action.ret) return action.ret;
+  const m = String(action.signature || "").match(/->\s*([A-Za-z0-9_\[\]?:.]+)/);
+  return m ? m[1] : "Void";
+}
+
+function compatibleType(accepted, actual) {
+  if (!accepted || !actual) return true;
+  if (accepted === actual) return true;
+  if (accepted === "Any" || accepted === "Value") return true;
+  if (actual === "Any" || actual === "Value") return true;
+  const numeric = new Set(["Int", "Float", "F32", "F64", "Decimal"]);
+  return numeric.has(accepted) && numeric.has(actual);
+}
+
+function sourceForType(type) {
+  if (compatibleType(type, "Int")) return { name: "limit", type: "Int" };
+  if (compatibleType(type, "String")) return { name: "text", type: "String" };
+  if (compatibleType(type, "Bool")) return { name: "flag", type: "Bool" };
+  if (compatibleType(type, "Float")) return { name: "ratio", type: "Float" };
+  return null;
+}
+
+function defaultArgForType(type) {
+  if (type === "String" || type === "Path" || type === "Url") return "\"canvas\"";
+  if (type === "Bool") return "true";
+  if (type === "Float" || type === "F32" || type === "F64" || type === "Decimal") return "1.0";
+  return "1";
+}
+
+function argsForEntry(entry) {
+  const existing = entry.args || entry.default_args || [];
+  if (existing.length) return existing.slice();
+  const inputs = (entry.pins || []).filter((p) => p.direction === "input");
+  return inputs.map((p) => defaultArgForType(p.type || "Int"));
+}
+
+async function scratchGraph(ctx) {
+  const graph = await ctx.graph();
+  const scratch = (graph.graphs || []).find((g) => g.title === "scratch") || (graph.graphs || [])[0];
+  if (!scratch) throw new Error("scratch graph missing");
+  return { doc: graph, graph: scratch };
+}
+
+async function runInsertAttempt(ctx, baseSource, entry, origin) {
+  await ctx.replaceSource(baseSource);
+  const { doc, graph } = await scratchGraph(ctx);
+  if (entry.available === false) {
+    if (!entry.unavailable_reason_code || !entry.denied_reason) {
+      throw new Error(`excluded entry missing reason: ${entry.action_id || entry.callee || entry.title}`);
+    }
+    return { state: "excluded", id: entry.action_id || entry.callee || entry.title, reason: entry.unavailable_reason_code };
+  }
+  const callee = entry.insert_callee || entry.callee;
+  if (!callee) throw new Error(`entry missing callee: ${JSON.stringify(entry)}`);
+  const body = {
+    schema_version: 1,
+    op: "insert_call",
+    revision: doc.revision,
+    graph_id: graph.graph_id,
+    callee,
+    args: argsForEntry(entry),
+  };
+  if (origin === "exec") {
+    body.wire_origin_pin_id = `${graph.graph_id}:entry:output:then`;
+    body.wire_target_pin = "exec";
+    const ret = actionReturnType(entry);
+    if (ret && ret !== "Void") body.bind = "canvas_value";
+  } else {
+    const inputs = (entry.pins || []).filter((p) => p.direction === "input");
+    const input = inputs.find((p) => sourceForType(p.type));
+    if (!input) return { state: "no-compatible-data", id: entry.action_id || entry.callee || entry.title };
+    const source = sourceForType(input.type);
+    const pin = (graph.pins || []).find((p) => p.name === source.name && p.direction === "output");
+    if (!pin) throw new Error(`scratch pin missing: ${source.name}`);
+    body.wire_origin_pin_id = pin.pin_id;
+    body.wire_target_pin = input.name || "arg1";
+    body.wire_expr = source.name;
+  }
+  const result = await ctx.transaction(body);
+  const id = entry.action_id || entry.callee || entry.title;
+  if (!result.ok) {
+    return { state: "failed", id, diagnostic: result.json && (result.json.message || JSON.stringify(result.json)) };
+  }
+  return { state: "inserted", id };
+}
+
+async function catalogSweep(ctx) {
+  await ctx.openCanvas();
+  const baseSource = await ctx.source();
+  await ctx.switchGraph("scratch");
+  await ctx.openPinActionMenu("scratch", "limit");
+  await ctx.type("square");
+  await ctx.expectMenu("square");
+  await ctx.pickEntry("square");
+  await ctx.expectSourceContains("square(limit)");
+  await ctx.replaceSource(baseSource);
+  const actionDocGraph = await ctx.graph();
+  const actionDoc = await ctx.query({ schema_version: 1, op: "actions", revision: actionDocGraph.revision });
+  const projectEntries = (actionDoc.project_functions || []).map((fn) => ({
+    title: fn.name || fn.callee,
+    kind: "project_function",
+    action_id: `project:${fn.callee || fn.name}`,
+    callee: fn.callee || fn.name,
+    insert_callee: fn.insert_callee || fn.callee || fn.name,
+    module_path: fn.module_path || "project",
+    signature: fn.signature || "",
+    pure: !!fn.pure,
+    pins: fn.pins || [],
+    ret: fn.ret || actionReturnType(fn) || "Void",
+    args: fn.default_args || [],
+    available: fn.available !== false,
+    denied_reason: fn.denied_reason || "",
+    unavailable_reason_code: fn.unavailable_reason_code || "",
+  }));
+  const coreEntries = (actionDoc.actions || []).filter((entry) => entry.kind === "canvas.core_catalog");
+  const targets = projectEntries.concat(coreEntries);
+  const seen = new Set();
+  const unique = targets.filter((entry) => {
+    const id = entry.action_id || entry.callee || entry.title;
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+  const summary = { total: unique.length, inserted: 0, excluded: 0, dataInserted: 0, noDataOrigin: 0, failures: [] };
+  for (const entry of unique) {
+    const exec = await runInsertAttempt(ctx, baseSource, entry, "exec");
+    if (exec.state === "inserted") summary.inserted++;
+    else if (exec.state === "excluded") summary.excluded++;
+    else if (exec.state === "failed") summary.failures.push(exec);
+    if (exec.state === "excluded") continue;
+    const data = await runInsertAttempt(ctx, baseSource, entry, "data");
+    if (data.state === "inserted") summary.dataInserted++;
+    else if (data.state === "no-compatible-data") summary.noDataOrigin++;
+    else if (data.state === "failed") summary.failures.push(data);
+  }
+  await ctx.replaceSource(baseSource);
+  if (summary.failures.length) {
+    throw new Error(`catalog sweep failed ${JSON.stringify(summary.failures.slice(0, 12), null, 2)}\nsummary ${JSON.stringify(summary)}`);
+  }
+  console.log(`palette_insert_catalog_sweep total=${summary.total} inserted=${summary.inserted} data_inserted=${summary.dataInserted} excluded=${summary.excluded} no_data_origin=${summary.noDataOrigin}`);
+  return summary;
+}
+
 export const scenarios = {
   "open-and-render": async (ctx) => {
     await ctx.openCanvas();
@@ -256,6 +435,62 @@ export const scenarios = {
     await ctx.expectSourceContains("use core.math as math");
     await ctx.expectSourceContains("math.abs");
     await ctx.screenshot("core-abs-inserted");
+  },
+
+  "palette-insert-catalog-sweep": async (ctx) => {
+    await catalogSweep(ctx);
+  },
+
+  "fallible-context": async (ctx) => {
+    await ctx.openCanvas();
+    await ctx.switchGraph("scratch");
+    await ctx.driver.evaluate(`window.__jetCanvasTest.openGraphActionPalette("Fallible")`);
+    await ctx.expectMenu("Fallible");
+    const row = await ctx.driver.evaluate(`(() => {
+      const buttons = Array.from(document.querySelectorAll("#context-menu [data-menu-action]"));
+      const button = buttons.find((b) => b.textContent.includes("Fallible"));
+      if (!button) return null;
+      return { available: button.dataset.available, code: button.dataset.unavailableReasonCode, title: button.getAttribute("title"), text: button.textContent };
+    })()`);
+    if (!row || row.available !== "false" || row.code !== "needs_fallible_function" || !row.title.includes("fallible function")) {
+      throw new Error(`fallible row not excluded with reason: ${JSON.stringify(row)}`);
+    }
+    const before = await ctx.source();
+    const graph = await ctx.graph();
+    const scratch = (graph.graphs || []).find((g) => g.title === "scratch");
+    const result = await ctx.transaction({ schema_version: 1, op: "insert_fallible_rail", revision: graph.revision, graph_id: scratch.graph_id });
+    if (result.ok || !String(result.json && result.json.message || "").includes("needs a fallible function")) {
+      throw new Error(`fallible insert should reject before sema: ${JSON.stringify(result)}`);
+    }
+    const after = await ctx.source();
+    if (after !== before) throw new Error("rejected fallible insert changed source");
+  },
+
+  "excluded-entry-rendering": async (ctx) => {
+    await ctx.openCanvas();
+    await ctx.loadCoreCatalog("help");
+    await ctx.openCoreCatalogPalette("help");
+    await ctx.expectMenu("help");
+    const row = await ctx.driver.evaluate(`(() => {
+      const buttons = Array.from(document.querySelectorAll("#context-menu [data-menu-action]"));
+      const button = buttons.find((b) => b.textContent.includes("help"));
+      if (!button) return null;
+      return { available: button.dataset.available, code: button.dataset.unavailableReasonCode, title: button.getAttribute("title"), text: button.textContent };
+    })()`);
+    if (!row || row.available !== "false" || row.code !== "method_only" || !row.title.includes("ArgsSpec")) {
+      throw new Error(`excluded help row missing hover reason: ${JSON.stringify(row)}`);
+    }
+  },
+
+  "no-dead-end-ad-hoc-insert": async (ctx) => {
+    await ctx.openCanvas();
+    await ctx.switchGraph("scratch");
+    await ctx.driver.evaluate(`window.__jetCanvasTest.openPinMenu("scratch", "then")`);
+    await ctx.expectMenu("Search actions");
+    const menu = await ctx.driver.evaluate(`document.getElementById("context-menu").textContent`);
+    if (/\bCall\b/.test(menu) || menu.includes("Insert call transaction")) {
+      throw new Error(`ad hoc Call insert should not be offered:\n${menu}`);
+    }
   },
 
   "undo-restores-source": async (ctx) => {

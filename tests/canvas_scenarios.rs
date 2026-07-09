@@ -28,6 +28,10 @@ fn summarize(limit: Int) -> Int {
     }
 }
 
+fn scratch(limit: Int, text: String, flag: Bool, ratio: Float) {
+    print(limit)
+}
+
 fn run() {
     print(summarize(4))
 }
@@ -51,6 +55,26 @@ fn click_select_details() {
 #[test]
 fn palette_insert_core_fn() {
     run_canvas_scenario("palette-insert-core-fn");
+}
+
+#[test]
+fn palette_insert_catalog_sweep() {
+    run_canvas_scenario("palette-insert-catalog-sweep");
+}
+
+#[test]
+fn fallible_context() {
+    run_canvas_scenario("fallible-context");
+}
+
+#[test]
+fn excluded_entry_rendering() {
+    run_canvas_scenario("excluded-entry-rendering");
+}
+
+#[test]
+fn no_dead_end_ad_hoc_insert() {
+    run_canvas_scenario("no-dead-end-ad-hoc-insert");
 }
 
 #[test]
@@ -233,4 +257,3 @@ fn free_port() -> u16 {
         .expect("local addr")
         .port()
 }
-

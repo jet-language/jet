@@ -67,6 +67,7 @@ fn collect_item_graphs(
                 anchors.push(GraphEditAnchor {
                     graph_id: graph.graph_id.clone(),
                     insert_offset: insert_offset(entry_src, f),
+                    fallible: function_is_fallible(f),
                 });
                 collect_node_refs(&graph, node_refs);
                 out.push(graph_to_json(&graph, f, module_src));
@@ -81,6 +82,7 @@ fn collect_item_graphs(
                     anchors.push(GraphEditAnchor {
                         graph_id: graph.graph_id.clone(),
                         insert_offset: insert_offset(entry_src, method),
+                        fallible: function_is_fallible(method),
                     });
                     collect_node_refs(&graph, node_refs);
                     out.push(graph_to_json(&graph, method, module_src));
@@ -96,6 +98,7 @@ fn collect_item_graphs(
                     anchors.push(GraphEditAnchor {
                         graph_id: graph.graph_id.clone(),
                         insert_offset: insert_offset(entry_src, method),
+                        fallible: function_is_fallible(method),
                     });
                     collect_node_refs(&graph, node_refs);
                     out.push(graph_to_json(&graph, method, module_src));
@@ -121,6 +124,10 @@ fn collect_item_graphs(
         }
     }
     let _ = entry_path;
+}
+
+fn function_is_fallible(f: &AST::Func) -> bool {
+    matches!(f.return_type.as_ref(), Some(AST::Type::Result { .. }))
 }
 
 fn canvas_blueprint_facts_json(src: &str, bundle: &AST::ProgramBundle) -> String {

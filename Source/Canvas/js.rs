@@ -118,7 +118,6 @@ pub fn canvas_js() -> String {
     { title: "Switch", detail: "Insert match branches", op: "insert_switch" },
     { title: "Loop", detail: "Insert loop rail", op: "insert_loop" },
     { title: "Fallible", detail: "Insert ? rail", op: "insert_fallible_rail" },
-    { title: "Call", detail: "Insert call transaction", op: "insert_call" },
     { title: "Comment", detail: "Add comment box", op: "comment" }
   ];
   let actionEntries = [];
@@ -1378,9 +1377,24 @@ pub fn canvas_js() -> String {
   function actionInsertsNode(entry) {
     const op = entry && (entry.op || entry.insert_op || "");
     if (entry && (entry.kind === "project_function" || entry.kind === "canvas.core_catalog")) return true;
-    if (["insert_print", "insert_call", "insert_branch", "insert_switch", "insert_loop", "insert_fallible_rail"].includes(op)) return true;
+    if (["insert_print", "insert_branch", "insert_switch", "insert_loop", "insert_fallible_rail"].includes(op)) return true;
     if (entry && (entry.kind === "variable_get" || entry.kind === "variable_set")) return true;
     return false;
+  }
+
+  function graphIsFallible(graph) {
+    const returns = graph && graph.function && String(graph.function.returns || "");
+    return returns.includes("?");
+  }
+
+  function actionAvailability(action, graph = currentGraphOrNull()) {
+    if (action && action.available === false) {
+      return { available: false, code: action.unavailable_reason_code || "unavailable", reason: action.denied_reason || "This action is unavailable here." };
+    }
+    if (action && (action.op || action.insert_op) === "insert_fallible_rail" && !graphIsFallible(graph)) {
+      return { available: false, code: "needs_fallible_function", reason: "Needs a fallible function." };
+    }
+    return { available: true, code: "", reason: "" };
   }
 
   function functionsForPin(pin) {
@@ -1502,7 +1516,10 @@ pub fn canvas_js() -> String {
       const id = action.action_id || action.callee || action.title;
       const fav = favorites.has(id);
       const color = paletteActionColor(action);
-      return `<button class="action-result${fav ? " is-favorite" : ""}" data-menu-action="${escapeAttr(action.index)}" style="--action-color:${escapeAttr(color)}"><span class="action-glyph">${escapeHtml(paletteActionGlyph(action))}</span><span>${fav ? "★ " : ""}${escapeHtml(action.title)}<small style="color:${escapeAttr(color)}">${escapeHtml(paletteTypeSummary(action))}</small></span></button>`;
+      const availability = actionAvailability(action);
+      const disabled = !availability.available;
+      const reason = disabled ? availability.reason : "";
+      return `<button class="action-result${fav ? " is-favorite" : ""}${disabled ? " is-disabled" : ""}" data-menu-action="${escapeAttr(action.index)}" data-available="${disabled ? "false" : "true"}" data-unavailable-reason-code="${escapeAttr(availability.code)}" aria-disabled="${disabled ? "true" : "false"}" title="${escapeAttr(reason)}" style="--action-color:${escapeAttr(disabled ? "#6b7280" : color)}"><span class="action-glyph">${escapeHtml(paletteActionGlyph(action))}</span><span>${fav ? "★ " : ""}${escapeHtml(action.title)}<small style="color:${escapeAttr(disabled ? "#9ca3af" : color)}">${escapeHtml(disabled ? reason : paletteTypeSummary(action))}</small></span></button>`;
     };
     const categories = ["Execution", "Variables", "Project", "Core", "Commands"].map((category) => {
       const limit = category === "Core" ? 1000 : category === "Project" ? 500 : category === "Variables" ? 200 : 64;
@@ -1555,6 +1572,11 @@ pub fn canvas_js() -> String {
     contextMenu.querySelectorAll("[data-menu-action]").forEach((button) => {
       button.addEventListener("click", () => {
         const action = contextMenuState && contextMenuState.actions.find((item) => String(item.index) === button.getAttribute("data-menu-action"));
+        const availability = actionAvailability(action);
+        if (!availability.available) {
+          showToast(availability.reason);
+          return;
+        }
         closeContextMenu();
         if (action) {
           markActionUsed(action);
@@ -1603,6 +1625,9 @@ pub fn canvas_js() -> String {
       callee: entry.callee,
       insert_callee: entry.insert_callee,
       args: entry.args,
+      available: entry.available,
+      denied_reason: entry.denied_reason,
+      unavailable_reason_code: entry.unavailable_reason_code,
       run: entry.run ? () => entry.run() : () => runPalette(entry, pin)
     }));
     actions.unshift({
@@ -1981,7 +2006,7 @@ pub fn canvas_js() -> String {
     ];
     actions.push(...variableActionsForGraph(graph));
     for (const item of palette.concat(actionEntries)) {
-      actions.push({ title: item.title, detail: item.detail || "", group: item.group || (item.op === "preview_canvas_action" ? "Project" : "Execution"), kind: item.kind, module_path: item.module_path, signature: item.signature, summary: item.summary, pure: item.pure, pins: item.pins, ret: item.ret, type: item.type, op: item.op, action_id: item.action_id, callee: item.callee, insert_callee: item.insert_callee, args: item.args, run: () => runPalette(item) });
+      actions.push({ title: item.title, detail: item.detail || "", group: item.group || (item.op === "preview_canvas_action" ? "Project" : "Execution"), kind: item.kind, module_path: item.module_path, signature: item.signature, summary: item.summary, pure: item.pure, pins: item.pins, ret: item.ret, type: item.type, op: item.op, action_id: item.action_id, callee: item.callee, insert_callee: item.insert_callee, args: item.args, available: item.available, denied_reason: item.denied_reason, unavailable_reason_code: item.unavailable_reason_code, run: () => runPalette(item) });
     }
     return actions;
   }
@@ -1990,15 +2015,7 @@ pub fn canvas_js() -> String {
     openActionPalette(x, y, "Canvas actions", graphActionItems(), { context: "All nodes", query: query || "", graphPoint: graphPoint || graphPointFromClient(x, y) });
   }
 
-  function openCoreCatalogPalette(query = "") {
-    if (!coreCatalogLoaded && !coreCatalogLoading) {
-      loadCoreCatalogActions("").then(() => openCoreCatalogPalette(query));
-      return;
-    }
-    if (!coreCatalogLoaded && coreCatalogLoading) {
-      coreCatalogLoading.then(() => openCoreCatalogPalette(query));
-      return;
-    }
+  function renderCoreCatalogPalette(query = "") {
     const actions = actionEntries
       .filter((item) => item.kind === "canvas.core_catalog")
       .map((item) => ({
@@ -2015,9 +2032,29 @@ pub fn canvas_js() -> String {
         callee: item.callee,
         insert_callee: item.insert_callee,
         args: item.args,
+        available: item.available,
+        denied_reason: item.denied_reason,
+        unavailable_reason_code: item.unavailable_reason_code,
         run: () => runPalette(item)
       }));
     openActionPalette(window.innerWidth / 2 - 210, 72, "Core catalog", actions, { context: "core.* modules and methods", query });
+  }
+
+  function openCoreCatalogPalette(query = "") {
+    if (query) {
+      loadCoreCatalogActions(query).then(() => renderCoreCatalogPalette(query));
+      contextMenuState = null;
+      return;
+    }
+    if (!coreCatalogLoaded && !coreCatalogLoading) {
+      loadCoreCatalogActions("").then(() => openCoreCatalogPalette(query));
+      return;
+    }
+    if (!coreCatalogLoaded && coreCatalogLoading) {
+      coreCatalogLoading.then(() => openCoreCatalogPalette(query));
+      return;
+    }
+    renderCoreCatalogPalette(query);
   }
 
   function currentGraph(doc) {
@@ -3031,6 +3068,37 @@ pub fn canvas_js() -> String {
       sourceText: doc.source_text || "",
       nodeCount: graph.nodes.length,
       loadCoreCatalog: (query) => loadCoreCatalogActions(query || "").then(() => window.__jetCanvasCoreCatalogPalette || actionEntries.length),
+      openCoreCatalogPalette: (query) => { openCoreCatalogPalette(query || ""); return true; },
+      openGraphActionPalette: (query) => { openGraphActionPalette(window.innerWidth / 2 - 210, 72, query || "", viewportCenterGraphPoint()); return true; },
+      switchGraphByTitle: (title) => {
+        const target = (latestDoc && latestDoc.graphs || []).find((g) => g.title === title || String(g.title || "").includes(title));
+        if (!target) return false;
+        switchGraph(target.graph_id);
+        return true;
+      },
+      actionEntries: () => actionEntries.map((entry) => {
+        const availability = actionAvailability(entry, currentGraphOrNull());
+        return {
+          title: entry.title,
+          detail: entry.detail || "",
+          group: entry.group || "",
+          kind: entry.kind || "",
+          module_path: entry.module_path || "",
+          signature: entry.signature || "",
+          summary: entry.summary || "",
+          pure: !!entry.pure,
+          pins: entry.pins || [],
+          ret: entry.ret || "",
+          op: entry.op || "",
+          action_id: entry.action_id || "",
+          callee: entry.callee || "",
+          insert_callee: entry.insert_callee || entry.callee || "",
+          args: entry.args || entry.default_args || [],
+          available: availability.available,
+          denied_reason: availability.reason,
+          unavailable_reason_code: availability.code
+        };
+      }),
       openPinMenu: (nodeTitle, pinName) => {
         const g = currentGraphOrNull();
         if (!g) return false;
@@ -3058,6 +3126,9 @@ pub fn canvas_js() -> String {
           callee: entry.callee,
           insert_callee: entry.insert_callee,
           args: entry.args,
+          available: entry.available,
+          denied_reason: entry.denied_reason,
+          unavailable_reason_code: entry.unavailable_reason_code,
           run: entry.run ? () => entry.run() : () => runPalette(entry, pin)
         }));
         openActionPalette(
@@ -4372,6 +4443,8 @@ pub fn canvas_js() -> String {
     const target = wireTargetForAction(item, pin);
     const graph = currentGraph(latestDoc);
     const body = { schema_version: 1, op: "insert_call", revision: latestDoc.revision, graph_id: selectedGraphId, callee, args: wiredArgsForAction(item, pin) };
+    const ret = actionReturnType(item) || item.ret || "Void";
+    if ((!pin || isExecPin(pin)) && ret && ret !== "Void") body.bind = "canvas_value";
     if (pin && target) {
       body.wire_origin_pin_id = pin.pin_id;
       body.wire_target_pin = target.pin;
@@ -4389,6 +4462,8 @@ pub fn canvas_js() -> String {
 
   function runPalette(item, pinContext) {
     if (!latestDoc || !selectedGraphId) return;
+    const availability = actionAvailability(item);
+    if (!availability.available) return showToast(availability.reason);
     const pin = pinContext || (contextMenuState && contextMenuState.pin) || null;
     const graphPoint = contextMenuState && contextMenuState.graphPoint || null;
     if (!pin && actionInsertsNode(item) && item.op !== "preview_canvas_action") {
@@ -4566,7 +4641,10 @@ pub fn canvas_js() -> String {
           pure: !!fn.pure,
           pins: fn.pins || [],
           ret: actionReturnType(fn) || fn.ret || "Void",
-          args: fn.default_args || ["1"]
+          available: fn.available !== false,
+          denied_reason: fn.denied_reason || "",
+          unavailable_reason_code: fn.unavailable_reason_code || "",
+          args: fn.default_args || []
         }));
         const canvasActions = doc.actions.map((action) => ({
           title: action.title || action.callee,
@@ -4586,6 +4664,7 @@ pub fn canvas_js() -> String {
           requires_confirmation: !!action.requires_confirmation,
           available: action.available !== false,
           denied_reason: action.denied_reason || "",
+          unavailable_reason_code: action.unavailable_reason_code || "",
           pins: action.pins || [],
           pure: !!action.pure,
           ret: action.ret || actionReturnType(action) || "Void",
@@ -4630,6 +4709,9 @@ pub fn canvas_js() -> String {
               insert_callee: callee,
               signature: member.signature || "",
               summary: member.summary || module.summary || "",
+              available: member.available !== false,
+              denied_reason: member.denied_reason || "",
+              unavailable_reason_code: member.unavailable_reason_code || "",
               pure: !!member.pure,
               pins: member.pins || [],
               ret: actionReturnType(member) || "Value",

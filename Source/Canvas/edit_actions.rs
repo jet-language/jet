@@ -617,6 +617,9 @@ fn apply_insert_structural(
         }
         "insert_loop" => "    loop {\n        break\n    }\n".to_string(),
         "insert_fallible_rail" => {
+            if !anchor.fallible {
+                return Err(edit_error("unavailable", "needs a fallible function"));
+            }
             "    fallible_value: Int ? String :: ok(1)\n    unwrapped :: fallible_value?\n".to_string()
         }
         _ => return Err(edit_error("unsupported", "unknown Canvas structural operation")),
