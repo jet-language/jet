@@ -66,26 +66,30 @@ fn cmd_vm(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 {
     if action == Syntax::OS_VM_ACTION_RUN {
         return cmd_vm_run(theme, &system, disk);
     }
-    let missing = missing_vm_tools();
-    if !missing.is_empty() {
-        theme.error_coded(
-            "E1279",
-            "jetos VM proof tools are missing",
-            &format!(
-            "D-JOS-VMDEPS1=A requires pinned VM/media tools before installer proof can run; missing: {}.",
-                missing.join(", ")
-            ),
-            "realize or expose qemu-system-x86_64, qemu-img, xorriso, limine, sfdisk, blockdev, mkfs.ext4, mkfs.vfat, mmd, mcopy, and zstd, then rerun `jet os vm prove`.",
-        );
-        return 2;
-    }
     if real_guest {
+        // The real tier realizes the disk through the hidden system backend,
+        // so it needs a real QEMU and `nix` — not the installer-media
+        // toolchain the plumbing tier stages ISOs with.
         if let Err(e) = require_real_vm_tools() {
             theme.error_coded(
                 "E1290",
                 "jetos real VM proof needs real tools",
                 &e,
                 "rerun without `--real` for plumbing tests, or put real QEMU/image/media tools on PATH before claiming replacement proof.",
+            );
+            return 2;
+        }
+    } else {
+        let missing = missing_vm_tools();
+        if !missing.is_empty() {
+            theme.error_coded(
+                "E1279",
+                "jetos VM proof tools are missing",
+                &format!(
+                "D-JOS-VMDEPS1=A requires pinned VM/media tools before installer proof can run; missing: {}.",
+                    missing.join(", ")
+                ),
+                "realize or expose qemu-system-x86_64, qemu-img, xorriso, limine, sfdisk, blockdev, mkfs.ext4, mkfs.vfat, mmd, mcopy, and zstd, then rerun `jet os vm prove`.",
             );
             return 2;
         }

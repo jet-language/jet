@@ -381,29 +381,19 @@ fn require_guest_assertions(text: &str) -> Result<(), String> {
 
 fn require_real_vm_tools() -> Result<(), String> {
     let mut rejected = Vec::new();
-    for name in [
-        "qemu-system-x86_64",
-        "qemu-img",
-        "xorriso",
-        "limine",
-        "mkfs.ext4",
-        "mkfs.vfat",
-        "sfdisk",
-        "blockdev",
-        "mmd",
-        "mcopy",
-        "zstd",
-    ] {
+    // The real tier realizes the disk through the hidden system backend and
+    // boots it directly, so only QEMU and `nix` must be real. The installer
+    // media tools stay a plumbing-tier (E1279) concern.
+    for name in ["qemu-system-x86_64", "qemu-img", "nix"] {
         let Some(path) = find_on_path(name) else {
             rejected.push(format!("{name}: missing"));
             continue;
         };
+        // A real toolchain binary is a native executable. Scripts, empty
+        // stubs, and non-ELF stand-ins are harness fixtures, not proof tools.
         let bytes = fs::read(&path).unwrap_or_default();
-        let is_script = bytes.starts_with(b"#!");
-        let has_fake_marker = bytes
-            .windows(4)
-            .any(|window| window.eq_ignore_ascii_case(b"fake"));
-        if is_script || has_fake_marker || bytes.is_empty() {
+        let is_native_executable = bytes.starts_with(b"\x7fELF");
+        if !is_native_executable {
             rejected.push(format!("{}: {}", name, path.display()));
         }
     }
