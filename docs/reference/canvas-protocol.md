@@ -159,8 +159,11 @@ Each pin carries `pin_id`, `node_id`, `name`, `direction`, `type`, optional
 `role`, optional `pattern_source`, `capability`, `fallible`,
 `effect_grant_need`, and `source_span`. Pattern-match branch and dispatch arm
 exec pins use `role:"arm"` plus `pattern_source` so Canvas can render one
-labeled output row per source arm. A v1 pin span is anchored to its owning
-source node when the compiler does not yet expose a narrower pin-specific span.
+labeled output row per source arm; editable arms also carry
+`pattern_source_span`. List-literal and fan-out item pins carry narrow
+`source_span`, `append_op:"remove_multi_input_element"`, and `element_index`.
+A v1 pin span is anchored to its owning source node when the compiler does not
+yet expose a narrower pin-specific span.
 
 Shared Canvas comment hints persist as ordinary source comments:
 
@@ -246,6 +249,11 @@ Current transactions:
 | `insert_visible_conversion` | `inline_expr_id`, `callee` | Wraps an inline expression in an ordinary Jet conversion/function call. |
 | `insert_call` | `graph_id`, `callee`, `args`, optional `bind`, optional `wire_origin_pin_id`, `wire_target_pin`, `wire_expr`, `wire_inline_expr_id` | Inserts an ordinary Jet call in a graph's source body. When opened from a pin drag, `wire_origin_pin_id` names the origin pin, `wire_target_pin` names the new node pin chosen by the client, `wire_expr` supplies the origin value expression for output-pin fan-out, and `wire_inline_expr_id` replaces an input pin's inline source expression with the new call in the same transaction. |
 | `reorder_statements` | `graph_id`, `moved_start`, `moved_end`, `anchor_start`, `anchor_end`, optional `position` (`before`/`after`) | Moves one source statement within the same checked block, formats, rechecks, and reprojects. Canvas uses this for exec-wire endpoint rewiring. Cross-block moves fail with `can't move a step into a different branch yet`; semantic reorder failures return the normal Jet diagnostic payload. |
+| `add_pattern_arm` | `graph_id`, `node_start`, `node_end`, `pattern` | Appends a checked Jet pattern arm to a branch/dispatch node. `pattern` may be written with or without leading `==`; new arm bodies use a sema-safe default `return …` for value functions or `print("canvas arm")` for `Void` functions. |
+| `edit_pattern_arm` | `graph_id`, `pattern_start`, `pattern_end`, `pattern` | Replaces one arm pattern source, then formats, checks, and reprojects. Bad patterns return normal Jet diagnostics and leave source unchanged. |
+| `remove_pattern_arm` | `graph_id`, `pattern_start`, `pattern_end` | Deletes one pattern arm and its body. Removing the last remaining arm is refused in plain language before source would become invalid. |
+| `append_multi_input` | `node_start`, `node_end`, optional `element` | Appends an element to a list literal or fan-out `f.[...]` source node. Clients normally supply a type-derived default element and open inline edit after reproject. |
+| `remove_multi_input_element` | `node_start`, `node_end`, `element_start`, `element_end` | Removes one list/fan-out element, including the adjacent comma, then formats, checks, and reprojects. |
 | `create_trait_impl` | `type_name`, `trait_name` | Appends an ordinary `impl Type.Trait { ... }` block with source-checked member stubs. |
 | `break_link` | `wire_id` | Replaces the source expression behind a wire with `#Todo`, preserving Jet type checking. |
 | `move_link` | `wire_id`, `replacement` | Rewrites the source expression behind a wire to another visible Jet name/path. |

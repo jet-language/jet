@@ -84,6 +84,13 @@ fn validate_function_signature(signature: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn validate_single_line_fragment(fragment: &str, label: &str) -> Result<(), String> {
+    if fragment.trim().is_empty() || fragment.contains('\n') || fragment.contains('\r') {
+        return Err(edit_error("bad_request", label));
+    }
+    Ok(())
+}
+
 fn validate_comment_color(color: &str) -> Result<(), String> {
     let ok = color.len() == 7
         && color.starts_with('#')

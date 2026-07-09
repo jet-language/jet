@@ -336,8 +336,26 @@ fn parse_list_items(value: &str) -> Vec<String> {
         .strip_prefix('[')
         .and_then(|s| s.strip_suffix(']'))
         .unwrap_or(value);
-    inner
-        .split(',')
+    // Split on commas OUTSIDE quotes only — kernel params like
+    // `"lsm=landlock,yama,bpf"` are one item.
+    let mut items = Vec::new();
+    let mut current = String::new();
+    let mut in_quotes = false;
+    for ch in inner.chars() {
+        match ch {
+            '"' => {
+                in_quotes = !in_quotes;
+                current.push(ch);
+            }
+            ',' if !in_quotes => {
+                items.push(std::mem::take(&mut current));
+            }
+            _ => current.push(ch),
+        }
+    }
+    items.push(current);
+    items
+        .iter()
         .map(|item| clean_symbol(&clean_value(item)))
         .filter(|item| !item.is_empty())
         .collect()

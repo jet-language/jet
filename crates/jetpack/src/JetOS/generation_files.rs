@@ -26,6 +26,7 @@ fn write_generation_files(
         .map(|p| {
             JSON::object_of(&[
                 ("name", &p.name),
+                ("version", &p.version),
                 ("reference", &p.reference),
                 ("out", &p.out),
                 ("bin", &p.bin),
@@ -139,6 +140,7 @@ fn render_plan_json(
         .map(|p| {
             JSON::object_of(&[
                 ("name", &p.name),
+                ("version", &p.version),
                 ("reference", &p.reference),
                 ("out", &p.out),
                 ("bin", &p.bin),
@@ -157,6 +159,140 @@ fn render_plan_json(
         services_json,
         options_json
     )
+}
+
+/// One realized package as recorded in a generation's `plan.json` — the
+/// facts `jetos switch`'s tier-3 diff needs (D-FE-CLI1). `version` is empty
+/// for generations written before the field existed; those packages never
+/// produce a `~` change row (there is nothing honest to compare against),
+/// only `+`/`-` if the name itself appears or disappears.
+struct PackageSnapshot {
+    name: String,
+    version: String,
+    out: String,
+}
+
+/// Read the realized package set out of a generation directory's
+/// `plan.json`. Missing/unreadable/malformed files read as no packages
+/// (the diff then reads as "everything added", which is honest for a
+/// first-ever generation).
+fn read_generation_packages(dir: &Path) -> Vec<PackageSnapshot> {
+    let Ok(text) = fs::read_to_string(dir.join("plan.json")) else {
+        return Vec::new();
+    };
+    let Ok(root) = JSON::parse(&text) else {
+        return Vec::new();
+    };
+    let Ok(packages) = root.get("packages") else {
+        return Vec::new();
+    };
+    let Ok(packages) = packages.as_array() else {
+        return Vec::new();
+    };
+    packages
+        .iter()
+        .filter_map(|p| {
+            let obj = p.as_object().ok()?;
+            let name = obj.get("name")?.as_str().ok()?.to_string();
+            let version = obj
+                .get("version")
+                .and_then(|v| v.as_str().ok())
+                .unwrap_or("")
+                .to_string();
+            let out = obj
+                .get("out")
+                .and_then(|v| v.as_str().ok())
+                .unwrap_or("")
+                .to_string();
+            Some(PackageSnapshot { name, version, out })
+        })
+        .collect()
+}
+
+/// One row of a `jetos switch` plan: a package added, changed (version
+/// bump), or removed between the outgoing and incoming generation.
+struct PackageDiff {
+    name: String,
+    mark: super::Output::PlanMark,
+    from: String,
+    to: String,
+    /// The incoming store path, for `Download` size accounting. `None` for
+    /// removed packages (freeing space downloads nothing).
+    out: Option<String>,
+}
+
+/// Diff two generations' package snapshots by name. Sorted by name so the
+/// plan reads as a stable table run to run.
+fn diff_packages(old: &[PackageSnapshot], new: &[PackageSnapshot]) -> Vec<PackageDiff> {
+    let mut rows = Vec::new();
+    for pkg in new {
+        match old.iter().find(|o| o.name == pkg.name) {
+            None => rows.push(PackageDiff {
+                name: pkg.name.clone(),
+                mark: super::Output::PlanMark::Add,
+                from: "—".to_string(),
+                to: pkg.version.clone(),
+                out: Some(pkg.out.clone()),
+            }),
+            Some(old_pkg) if old_pkg.version != pkg.version => rows.push(PackageDiff {
+                name: pkg.name.clone(),
+                mark: super::Output::PlanMark::Change,
+                from: old_pkg.version.clone(),
+                to: pkg.version.clone(),
+                out: Some(pkg.out.clone()),
+            }),
+            _ => {}
+        }
+    }
+    for pkg in old {
+        if !new.iter().any(|n| n.name == pkg.name) {
+            rows.push(PackageDiff {
+                name: pkg.name.clone(),
+                mark: super::Output::PlanMark::Remove,
+                from: pkg.version.clone(),
+                to: "—".to_string(),
+                out: None,
+            });
+        }
+    }
+    rows.sort_by(|a, b| a.name.cmp(&b.name));
+    rows
+}
+
+/// How many generations already exist for `host` — the `N` in `jetos
+/// switch`'s `Plan  gen N → N+1` header (D-FE-CLI1). A real, derived count
+/// from the generation ledger, not a fabricated number; call before the new
+/// generation is built/recorded so it reads as the outgoing generation's
+/// ordinal.
+fn generation_ordinal(host: &str) -> usize {
+    read_generations()
+        .into_iter()
+        .filter(|g| g.host == host)
+        .count()
+}
+
+/// Recursive on-disk size of a store path, in bytes. Pure std (I6): no
+/// external `du`. Symlinks (a package's `out` is often one) are followed by
+/// re-measuring their target; ordinary files are summed directly.
+fn dir_size_bytes(path: &Path) -> u64 {
+    let Ok(meta) = fs::symlink_metadata(path) else {
+        return 0;
+    };
+    if meta.is_symlink() {
+        return fs::canonicalize(path)
+            .map(|p| dir_size_bytes(&p))
+            .unwrap_or(0);
+    }
+    if meta.is_file() {
+        return meta.len();
+    }
+    let Ok(entries) = fs::read_dir(path) else {
+        return 0;
+    };
+    entries
+        .flatten()
+        .map(|entry| dir_size_bytes(&entry.path()))
+        .sum()
 }
 
 fn write_root_closure(dir: &Path, realized: &[Store::StoreEntry]) -> std::io::Result<()> {

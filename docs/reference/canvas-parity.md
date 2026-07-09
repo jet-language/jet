@@ -145,13 +145,13 @@ contract; it does not mean every form has a bespoke graph gesture. Status values
 
 ## Patterns
 
-- [Pattern::Variant] status=graph switch/pattern detail.
+- [Pattern::Variant] status=shipped source-backed arm authoring.
 - [Pattern::Present] status=graph optional pattern detail.
 - [Pattern::Absent] status=graph optional pattern detail.
 - [Pattern::Ok] status=graph fallible pattern detail.
 - [Pattern::Err] status=graph fallible pattern detail.
-- [Pattern::Range] status=graph range pattern detail.
-- [Pattern::Or] status=graph or-pattern detail.
+- [Pattern::Range] status=graph source-backed range pattern detail.
+- [Pattern::Or] status=graph source-backed or-pattern detail.
 - [Pattern::Struct] status=graph struct pattern detail.
 - [Pattern::StrMatch] status=readonly string-match pattern, source edits.
 

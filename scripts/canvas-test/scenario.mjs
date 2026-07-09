@@ -819,6 +819,134 @@ fn run() {
     if (after !== before) throw new Error(`binding-order failed transaction changed source:\n${after}`);
   },
 
+  "pattern-arm-add-edit-remove": async (ctx) => {
+    await ctx.openCanvas();
+    await ctx.replaceSource(`enum Choice {
+    A(Int)
+    B(Int)
+    C(Int)
+}
+
+fn choose(x: Choice) -> Int {
+    if x == {
+        A(n) -> { return n }
+        else -> { return 0 }
+    }
+}
+
+fn run() {
+    print(choose(Choice.A(1)))
+}
+`);
+    await ctx.openCanvas();
+    let before = await ctx.source();
+    await ctx.driver.evaluate(`window.prompt = () => "== B(n)"`);
+    let pos = await ctx.node("if ==");
+    await ctx.driver.rightClick(pos.x, pos.y);
+    await ctx.expectMenu("Add pattern arm");
+    await ctx.pickEntry("Add pattern arm");
+    await ctx.waitFor(async () => (await ctx.source()).includes("B(n) ->"), "pattern arm add");
+    await assertSourceSync(ctx, ["pattern add"]);
+    await ctx.expectSourceContains("B(n) ->");
+
+    await ctx.driver.evaluate(`window.prompt = () => "== C(n)"`);
+    const pin = await ctx.pin("if ==", "arm2");
+    await ctx.driver.rightClick(pin.x, pin.y);
+    await ctx.expectMenu("Edit pattern");
+    await ctx.pickEntry("Edit pattern");
+    await ctx.waitFor(async () => (await ctx.source()).includes("C(n) ->") && !(await ctx.source()).includes("B(n) ->"), "pattern arm edit");
+    await assertSourceSync(ctx, ["pattern edit"]);
+
+    const edited = await ctx.source();
+    const removePin = await ctx.pin("if ==", "arm2");
+    await ctx.driver.rightClick(removePin.x, removePin.y);
+    await ctx.expectMenu("Remove arm");
+    await ctx.pickEntry("Remove arm");
+    await ctx.waitFor(async () => !(await ctx.source()).includes("C(n) ->"), "pattern arm remove");
+    await assertSourceSync(ctx, ["pattern remove"]);
+
+    const restored = await ctx.undo();
+    if (restored !== edited) throw new Error(`undo did not restore edited pattern arm\nexpected:\n${edited}\nactual:\n${restored}`);
+    if (before === restored) throw new Error("pattern add/edit/remove cycle did not change source before undo checkpoint");
+  },
+
+  "pattern-arm-invalid-refused": async (ctx) => {
+    await ctx.openCanvas();
+    await ctx.replaceSource(`enum Choice {
+    A(Int)
+    B(Int)
+}
+
+fn choose(x: Choice) -> Int {
+    if x == {
+        A(n) -> { return n }
+        else -> { return 0 }
+    }
+}
+
+fn run() {
+    print(choose(Choice.A(1)))
+}
+`);
+    await ctx.openCanvas();
+    const before = await ctx.source();
+    await ctx.driver.evaluate(`window.prompt = () => "== Missing(n)"`);
+    const pos = await ctx.node("if ==");
+    await ctx.driver.rightClick(pos.x, pos.y);
+    await ctx.expectMenu("Add pattern arm");
+    await ctx.pickEntry("Add pattern arm");
+    await ctx.expectProblem("E0305");
+    const after = await ctx.source();
+    if (after !== before) throw new Error(`bad pattern changed source:\n${after}`);
+  },
+
+  "multi-input-append-remove": async (ctx) => {
+    await ctx.openCanvas();
+    await ctx.replaceSource(`fn to_int(n: Int) -> Int {
+    return n
+}
+
+fn demo() -> Int {
+    xs :: [1, 2, 3]
+    ys :: to_int.[1, 2]
+    return xs[0] + ys[0]
+}
+
+fn run() {
+    print(demo())
+}
+`);
+    await ctx.openCanvas();
+    await ctx.driver.evaluate(`window.prompt = () => "4"`);
+    let list = await ctx.node("list");
+    await ctx.driver.rightClick(list.x, list.y);
+    await ctx.expectMenu("Append input");
+    await ctx.pickEntry("Append input");
+    await ctx.waitFor(async () => (await ctx.source()).includes("[1, 2, 3, 4]"), "list append");
+    await assertSourceSync(ctx, ["list append"]);
+
+    let item = await ctx.pin("list", "item4");
+    await ctx.driver.rightClick(item.x, item.y);
+    await ctx.expectMenu("Remove element");
+    await ctx.pickEntry("Remove element");
+    await ctx.waitFor(async () => (await ctx.source()).includes("[1, 2, 3]") && !(await ctx.source()).includes("[1, 2, 3, 4]"), "list remove");
+
+    await ctx.driver.evaluate(`window.prompt = () => "3"`);
+    let fanout = await ctx.node("fanout");
+    await ctx.driver.rightClick(fanout.x, fanout.y);
+    await ctx.expectMenu("Append input");
+    await ctx.pickEntry("Append input");
+    await ctx.waitFor(async () => (await ctx.source()).includes("to_int.[1, 2, 3]"), "fanout append");
+    await assertSourceSync(ctx, ["fanout append"]);
+
+    item = await ctx.pin("fanout", "item3");
+    await ctx.driver.rightClick(item.x, item.y);
+    await ctx.expectMenu("Remove element");
+    await ctx.pickEntry("Remove element");
+    await ctx.waitFor(async () => (await ctx.source()).includes("to_int.[1, 2]") && !(await ctx.source()).includes("to_int.[1, 2, 3]"), "fanout remove");
+    await assertSourceSync(ctx, ["fanout remove"]);
+  },
+
   "inline-edit-values": async (ctx) => {
     await ctx.openCanvas();
     await ctx.switchGraph("scratch");

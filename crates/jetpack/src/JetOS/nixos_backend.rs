@@ -632,16 +632,21 @@ let
   jetosPkg = name:
     let
       # `gnome-shell-extension-user-themes` (pname) lives at
-      # `gnomeExtensions.user-themes`.
+      # `gnomeExtensions.user-themes`; `dejavu-fonts` at `dejavu_fonts`.
       extension = lib.removePrefix "gnome-shell-extension-" name;
-      # `dejavu-fonts` (pname) lives at `dejavu_fonts` — a common
-      # pname/attr convention split.
       underscored = builtins.replaceStrings ["-"] ["_"] name;
+      # Removed-alias attrs exist but throw on access — tryEval skips them
+      # so lookup falls through to the real location (e.g. kdePackages).
+      tryAttr = attrs: n:
+        if attrs ? ${n} then
+          let r = builtins.tryEval attrs.${n}; in
+          if r.success then [ r.value ] else [ ]
+        else [ ];
+      found = (tryAttr pkgs name) ++ (tryAttr pkgs underscored)
+        ++ (tryAttr (pkgs.kdePackages or { }) name)
+        ++ (tryAttr (pkgs.gnomeExtensions or { }) extension);
     in
-    if pkgs ? ${name} then pkgs.${name}
-    else if pkgs ? ${underscored} then pkgs.${underscored}
-    else if pkgs.kdePackages ? ${name} then pkgs.kdePackages.${name}
-    else if pkgs.gnomeExtensions ? ${extension} then pkgs.gnomeExtensions.${extension}
+    if builtins.length found > 0 then builtins.head found
     else throw "jetos: package `${name}` is not in nixpkgs, kdePackages, or gnomeExtensions at the pinned revision";
 in
 {
@@ -825,7 +830,7 @@ fn real_qemu_prove_argv(
     ]
 }
 
-fn qemu_interactive_real_run_command(disk: &str) -> VmCommand {
+fn qemu_interactive_real_run_command(disk: &str, ovmf_code: &Path, ovmf_vars: &Path) -> VmCommand {
     VmCommand {
         phase: "run-real-installed-disk",
         argv: vec![
@@ -838,12 +843,125 @@ fn qemu_interactive_real_run_command(disk: &str) -> VmCommand {
             "-smp".to_string(),
             "4".to_string(),
             "-drive".to_string(),
+            format!(
+                "if=pflash,format=raw,readonly=on,file={}",
+                ovmf_code.display()
+            ),
+            "-drive".to_string(),
+            format!("if=pflash,format=raw,file={}", ovmf_vars.display()),
+            "-drive".to_string(),
             format!("file={disk},format=qcow2,if=virtio"),
             "-device".to_string(),
             "virtio-gpu-pci".to_string(),
             "-display".to_string(),
             "gtk,gl=off".to_string(),
         ],
+    }
+}
+
+/// `jet os vm run` — boot the host's disk, building it first when absent.
+/// Running a VM is never gated on a proof (owner decree, card #363,
+/// 2026-07-09): a disk that doesn't boot is its own answer. `prove` remains
+/// the formal acceptance gate.
+fn cmd_vm_run_or_build(
+    theme: &Theme,
+    table: &RefSpec::SourceTable,
+    system: &SystemPlan,
+    disk: &str,
+    _flags: &OsFlags,
+) -> i32 {
+    let mapping = match map_system_to_nixos(system, table) {
+        Ok(mapping) => mapping,
+        Err(unmapped) => {
+            theme.error_coded(
+                "E1291",
+                "jetos real tier could not map every system declaration to NixOS",
+                &format!(
+                    "D-JOS-NIXBACKEND1=C forbids silently dropping a declaration when generating the hidden NixOS backend; unmapped: {}.",
+                    unmapped.join("; ")
+                ),
+                "rename or drop the unmapped keys/packages/services, or map them to the nearest supported real-tier option listed in docs/spec/diagnostics.md (E1291).",
+            );
+            return 2;
+        }
+    };
+    let dir = nixos_backend_dir(&system.name);
+    if let Err(e) = write_nixos_backend(&dir, system, &mapping) {
+        theme.error(
+            "could not write the jetos NixOS backend",
+            &format!("writing `{}` failed: {e}.", dir.display()),
+            "check permissions on the Jetpack root, or set JETPACK_ROOT.",
+        );
+        return 2;
+    }
+    let disk_path = Path::new(disk);
+    if !disk_path.is_file() {
+        theme.status(&format!(
+            "building jetos disk for {} (first run)",
+            theme.bold(&system.name)
+        ));
+        let built = match nix_build(&dir, "disk").and_then(|out| find_qcow2(&out)) {
+            Ok(path) => path,
+            Err(e) => {
+                theme.error(
+                    "could not build the jetos disk",
+                    &format!("{e}."),
+                    "inspect the backend build log under the backend dir, fix the failure, then rerun `jet os vm run`.",
+                );
+                return 2;
+            }
+        };
+        if let Some(parent) = disk_path.parent().filter(|p| !p.as_os_str().is_empty()) {
+            let _ = fs::create_dir_all(parent);
+        }
+        let _ = fs::remove_file(disk_path);
+        if let Err(e) = fs::copy(&built, disk_path).map_err(|e| e.to_string()).and_then(|_| make_writable(disk_path)) {
+            theme.error(
+                "could not stage the jetos disk",
+                &format!("copying `{}` to `{disk}` failed: {e}.", built.display()),
+                "check permissions on the disk path, then rerun `jet os vm run`.",
+            );
+            return 2;
+        }
+    }
+    let (ovmf_code, ovmf_vars) = match nix_build(&dir, "firmware").and_then(|firmware| {
+        let code = firmware.join("FV/OVMF_CODE.fd");
+        let vars = dir.join("OVMF_VARS.fd");
+        if !vars.is_file() {
+            fs::copy(firmware.join("FV/OVMF_VARS.fd"), &vars)
+                .map_err(|e| format!("copying OVMF vars failed: {e}"))?;
+            make_writable(&vars)?;
+        }
+        Ok((code, vars))
+    }) {
+        Ok(paths) => paths,
+        Err(e) => {
+            theme.error(
+                "could not stage the jetos VM firmware",
+                &format!("{e}."),
+                "inspect the backend build log under the backend dir, then rerun `jet os vm run`.",
+            );
+            return 2;
+        }
+    };
+    let disk_abs = fs::canonicalize(disk_path)
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|_| disk.to_string());
+    let command = qemu_interactive_real_run_command(&disk_abs, &ovmf_code, &ovmf_vars);
+    theme.ok(&format!(
+        "booting jetos VM {}",
+        theme.bold(&system.name)
+    ));
+    match run_interactive_vm_command(&command) {
+        Ok(code) => code,
+        Err(e) => {
+            theme.error(
+                "could not run the jetos VM",
+                &format!("starting interactive QEMU failed: {e}"),
+                "check that a display is available (QEMU opens a window), then rerun `jet os vm run`.",
+            );
+            2
+        }
     }
 }
 
@@ -1297,67 +1415,6 @@ fn write_real_tier_proof(
     Ok(())
 }
 
-/// Real-tier `jet os vm run`: an interactive boot of a disk that carries a
-/// passing real-tier proof marker (written beside the disk by
-/// `write_real_tier_proof`). Plumbing-tier disks are unaffected — `cmd_vm_run`
-/// only takes this path when the marker file exists.
-fn cmd_vm_run_real(theme: &Theme, system: &SystemPlan, disk: &str, marker: &Path) -> i32 {
-    let text = match fs::read_to_string(marker) {
-        Ok(text) => text,
-        Err(e) => {
-            theme.error(
-                "could not read the jetos real VM proof",
-                &format!("reading `{}` failed: {e}.", marker.display()),
-                "rerun `jet os vm prove <host> --disk <disk> --real`.",
-            );
-            return 2;
-        }
-    };
-    if require_json_field(&text, "host", &system.name).is_err()
-        || require_json_field(&text, "disk", disk).is_err()
-    {
-        theme.error_coded(
-            "E1287",
-            "jetos VM run needs a proved installed disk",
-            "the real-tier proof marker beside this disk does not match this host/disk.",
-            "run `jet os vm prove <host> --disk <disk> --real` first, then rerun `jet os vm run`.",
-        );
-        return 2;
-    }
-    let missing = missing_vm_tools()
-        .into_iter()
-        .filter(|tool| tool == "qemu-system-x86_64")
-        .collect::<Vec<_>>();
-    if !missing.is_empty() {
-        theme.error_coded(
-            "E1279",
-            "jetos VM proof tools are missing",
-            &format!(
-                "D-JOS-VMDEPS1=A requires pinned VM/media tools before a VM can run; missing: {}.",
-                missing.join(", ")
-            ),
-            "realize or expose qemu-system-x86_64, then rerun `jet os vm run`.",
-        );
-        return 2;
-    }
-    let command = qemu_interactive_real_run_command(disk);
-    theme.ok(&format!(
-        "booting jetos real-guest VM {}",
-        theme.bold(&system.name)
-    ));
-    match run_interactive_vm_command(&command) {
-        Ok(code) => code,
-        Err(e) => {
-            theme.error(
-                "could not run the jetos VM",
-                &format!("starting interactive QEMU failed: {e}"),
-                "check the real VM proof artifacts and rerun `jet os vm prove --real` if the disk changed.",
-            );
-            2
-        }
-    }
-}
-
 // Unit-tested directly: the real-guest CLI path is gated by `require_real_vm_tools`
 // (E1290), which byte-scans every VM tool on PATH and rejects any file whose
 // bytes contain "fake" — several genuine dev-shell binaries (e.g. `zstd`,
@@ -1576,8 +1633,12 @@ mod tests {
     }
 
     #[test]
-    fn interactive_real_run_uses_gtk_and_kvm() {
-        let command = qemu_interactive_real_run_command("halcyon.qcow2");
+    fn interactive_real_run_uses_gtk_kvm_and_efi_firmware() {
+        let command = qemu_interactive_real_run_command(
+            "halcyon.qcow2",
+            Path::new("/fw/OVMF_CODE.fd"),
+            Path::new("/fw/OVMF_VARS.fd"),
+        );
         assert_eq!(command.phase, "run-real-installed-disk");
         assert!(command.argv.contains(&"-enable-kvm".to_string()));
         assert!(command.argv.contains(&"gtk,gl=off".to_string()));
@@ -1586,5 +1647,15 @@ mod tests {
             .argv
             .iter()
             .any(|a| a == "file=halcyon.qcow2,format=qcow2,if=virtio"));
+        // The disk is EFI-only: without OVMF pflash the guest sits at
+        // SeaBIOS "Booting from Hard Disk..." forever.
+        assert!(command
+            .argv
+            .iter()
+            .any(|a| a == "if=pflash,format=raw,readonly=on,file=/fw/OVMF_CODE.fd"));
+        assert!(command
+            .argv
+            .iter()
+            .any(|a| a == "if=pflash,format=raw,file=/fw/OVMF_VARS.fd"));
     }
 }

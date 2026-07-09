@@ -52,18 +52,21 @@ fn add_pin(
         fallible,
         effect_grant_need: None,
         span,
+        pattern_source_span: None,
+        append_op: None,
+        element_index: None,
     });
     id
 }
 
-fn add_arm_pin(g: &mut GraphBuilder, node_id: &str, name: &str, pattern_source: &str) -> String {
+fn add_arm_pin(
+    g: &mut GraphBuilder,
+    node_id: &str,
+    name: &str,
+    pattern_source: &str,
+    pattern_span: SourceSpan,
+) -> String {
     let id = format!("{node_id}:output:{name}");
-    let span = g
-        .nodes
-        .iter()
-        .find(|n| n.id == node_id)
-        .map(|n| n.span)
-        .unwrap_or(SourceSpan { start: 0, end: 0 });
     if !g.pins.iter().any(|pin| pin.id == id) {
         g.pins.push(PinRec {
             id: id.clone(),
@@ -76,10 +79,26 @@ fn add_arm_pin(g: &mut GraphBuilder, node_id: &str, name: &str, pattern_source: 
             capability: "control".to_string(),
             fallible: false,
             effect_grant_need: None,
-            span,
+            span: pattern_span,
+            pattern_source_span: Some(pattern_span),
+            append_op: Some("edit_pattern_arm".to_string()),
+            element_index: None,
         });
     }
     id
+}
+
+fn set_pin_source_span(g: &mut GraphBuilder, pin_id: &str, span: SourceSpan) {
+    if let Some(pin) = g.pins.iter_mut().find(|pin| pin.id == pin_id) {
+        pin.span = span;
+    }
+}
+
+fn set_pin_append(g: &mut GraphBuilder, pin_id: &str, op: &str, index: usize) {
+    if let Some(pin) = g.pins.iter_mut().find(|pin| pin.id == pin_id) {
+        pin.append_op = Some(op.to_string());
+        pin.element_index = Some(index);
+    }
 }
 
 fn add_wire(g: &mut GraphBuilder, from_pin: &str, to_pin: &str, kind: &str) {
@@ -359,6 +378,9 @@ fn ensure_exec_pin(
             fallible: false,
             effect_grant_need: None,
             span,
+            pattern_source_span: None,
+            append_op: None,
+            element_index: None,
         });
     }
     id
@@ -716,8 +738,21 @@ fn pin_json(p: &PinRec) -> String {
         .as_ref()
         .map(|s| json_str(s))
         .unwrap_or_else(|| "null".to_string());
+    let pattern_source_span = p
+        .pattern_source_span
+        .map(span_json)
+        .unwrap_or_else(|| "null".to_string());
+    let append_op = p
+        .append_op
+        .as_ref()
+        .map(|s| json_str(s))
+        .unwrap_or_else(|| "null".to_string());
+    let element_index = p
+        .element_index
+        .map(|n| n.to_string())
+        .unwrap_or_else(|| "null".to_string());
     format!(
-        "{{\"pin_id\":{},\"node_id\":{},\"name\":{},\"direction\":{},\"type\":{},\"role\":{},\"pattern_source\":{},\"capability\":{},\"fallible\":{},\"effect_grant_need\":{},\"source_span\":{}}}",
+        "{{\"pin_id\":{},\"node_id\":{},\"name\":{},\"direction\":{},\"type\":{},\"role\":{},\"pattern_source\":{},\"pattern_source_span\":{},\"append_op\":{},\"element_index\":{},\"capability\":{},\"fallible\":{},\"effect_grant_need\":{},\"source_span\":{}}}",
         json_str(&p.id),
         json_str(&p.node_id),
         json_str(&p.name),
@@ -725,6 +760,9 @@ fn pin_json(p: &PinRec) -> String {
         json_str(&p.ty),
         role,
         pattern_source,
+        pattern_source_span,
+        append_op,
+        element_index,
         json_str(&p.capability),
         if p.fallible { "true" } else { "false" },
         grant,

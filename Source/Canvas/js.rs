@@ -1476,7 +1476,7 @@ pub fn canvas_js() -> String {
       const maxW = Math.max(42, w * .42);
       const chipW = Math.min(maxW, (measureTextPx(`10px ${MONO_FONT}`, pin.pattern_source) + 16)) * view.zoom;
       const chipX = dir === "input" ? x + 22 * view.zoom : x + w - 22 * view.zoom - chipW;
-      drawSourceChip(pin.pattern_source, color, chipX, y, chipW, false, null);
+      drawSourceChip(pin.pattern_source, color, chipX, y, chipW, recordHit, { pin, kind: "pattern_arm" });
       return;
     }
     drawPinLabel(pin, labelX, y + 4 * view.zoom, labelAlign);
@@ -1826,6 +1826,19 @@ pub fn canvas_js() -> String {
   }
 
   function openPinMenu(pin, x, y, graphPoint) {
+    if (pin && pin.role === "arm") {
+      openActionPalette(x, y, "Pattern arm", [
+        { title: "Edit pattern", detail: pin.pattern_source || "pattern", group: "Patterns", run: () => editPatternArm(pin) },
+        { title: "Remove arm", detail: "delete source body", group: "Patterns", run: () => removePatternArm(pin) }
+      ], { pin, context: "Pattern arm" });
+      return;
+    }
+    if (pin && pin.append_op === "remove_multi_input_element") {
+      openActionPalette(x, y, "Input element", [
+        { title: "Remove element", detail: pin.name || "item", group: "Pins", run: () => removeMultiInputElement(pin) }
+      ], { pin, context: "Input element" });
+      return;
+    }
     const entries = functionsForPin(pin).concat(variableActionsForGraph(currentGraphOrNull()).filter(actionInsertsNode));
     const actions = entries.map((entry) => ({
       title: entry.title,
@@ -2166,6 +2179,103 @@ pub fn canvas_js() -> String {
     return actions;
   }
 
+  function spanStart(span) {
+    return span && Number.isFinite(span.start) ? span.start : 0;
+  }
+
+  function spanEnd(span) {
+    return span && Number.isFinite(span.end) ? span.end : spanStart(span);
+  }
+
+  function defaultElementForType(type) {
+    const t = String(type || "");
+    if (t === "String" || t === "Path" || t === "Url") return "\"canvas\"";
+    if (t === "Bool") return "true";
+    if (["Float", "F32", "F64", "Decimal"].includes(t)) return "1.0";
+    if (t.endsWith("?")) return "Absent";
+    return "1";
+  }
+
+  function firstDataInputForNode(graph, node) {
+    return (graph && graph.pins || []).find((p) => p.node_id === node.node_id && p.direction === "input" && !isExecPin(p));
+  }
+
+  function addPatternArm(node) {
+    if (!latestDoc || !node) return;
+    const pattern = window.prompt("Pattern arm", "== Variant(x)");
+    if (pattern === null || pattern.trim() === "") return;
+    postTransaction({
+      schema_version: 1,
+      op: "add_pattern_arm",
+      revision: latestDoc.revision,
+      graph_id: selectedGraphId,
+      node_start: spanStart(node.source_span),
+      node_end: spanEnd(node.source_span),
+      pattern
+    });
+  }
+
+  function editPatternArm(pin) {
+    if (!latestDoc || !pin) return;
+    const pattern = window.prompt("Pattern arm", pin.pattern_source || "== Variant(x)");
+    if (pattern === null || pattern.trim() === "") return;
+    const span = pin.pattern_source_span || pin.source_span || {};
+    postTransaction({
+      schema_version: 1,
+      op: "edit_pattern_arm",
+      revision: latestDoc.revision,
+      graph_id: selectedGraphId,
+      pattern_start: spanStart(span),
+      pattern_end: spanEnd(span),
+      pattern
+    });
+  }
+
+  function removePatternArm(pin) {
+    if (!latestDoc || !pin) return;
+    const span = pin.pattern_source_span || pin.source_span || {};
+    postTransaction({
+      schema_version: 1,
+      op: "remove_pattern_arm",
+      revision: latestDoc.revision,
+      graph_id: selectedGraphId,
+      pattern_start: spanStart(span),
+      pattern_end: spanEnd(span)
+    });
+  }
+
+  function appendMultiInput(node) {
+    if (!latestDoc || !node) return;
+    const graph = currentGraphOrNull();
+    const input = firstDataInputForNode(graph, node);
+    const element = window.prompt("Element", defaultElementForType(input && input.type));
+    if (element === null || element.trim() === "") return;
+    postTransaction({
+      schema_version: 1,
+      op: "append_multi_input",
+      revision: latestDoc.revision,
+      node_start: spanStart(node.source_span),
+      node_end: spanEnd(node.source_span),
+      element
+    });
+  }
+
+  function removeMultiInputElement(pin) {
+    if (!latestDoc || !pin) return;
+    const graph = currentGraphOrNull();
+    const node = graph && (graph.nodes || []).find((n) => n.node_id === pin.node_id);
+    if (!node) return showToast("Element source moved");
+    postTransaction({
+      schema_version: 1,
+      op: "remove_multi_input_element",
+      revision: latestDoc.revision,
+      node_start: spanStart(node.source_span),
+      node_end: spanEnd(node.source_span),
+      element_start: spanStart(pin.source_span),
+      element_end: spanEnd(pin.source_span)
+    });
+  }
+
   function nodeContextActions(graph, node) {
     const actions = [
       { title: "Copy", detail: "selection", group: "edit", run: copySelection },
@@ -2175,6 +2285,8 @@ pub fn canvas_js() -> String {
       { title: "Find references", detail: "search index", group: "query", run: () => postQuery({ op: "references", symbol: node.title }) },
       { title: "Set breakpoint", detail: "local span", group: "debug", run: () => toggleBreakpoint(node) }
     ];
+    if ((node.edit_affordances || []).includes("add_pattern_arm")) actions.unshift({ title: "Add pattern arm", detail: "source transaction", group: "Patterns", run: () => addPatternArm(node) });
+    if ((node.edit_affordances || []).includes("append_multi_input")) actions.unshift({ title: "Append input", detail: "source transaction", group: "Pins", run: () => appendMultiInput(node) });
     if (node.staged) actions.unshift({ title: "Delete staged node", detail: "local view", group: "edit", run: () => { removeStagedNode(node.node_id); drawGraph(latestDoc); } });
     if (graphForFunctionName(node.title)) actions.unshift({ title: "Open function", detail: "function", group: "graph", run: () => openFunctionGraph(node.title) });
     return actions;
@@ -2741,9 +2853,9 @@ pub fn canvas_js() -> String {
     const rightW = Math.max(0, ...outputPins.map((p) => pinContentWidth(graph, node, p)));
     const pinW = leftW + rightW + NODE_PAD * 4;
     const badgeW = shouldDrawNodeBadge(node) ? Math.min(118, measureTextPx(`9.2px ${MONO_FONT}`, String(node.kind || "").toUpperCase()) + 14) + NODE_PAD * 2 : 0;
-    const multiInput = (node.edit_affordances || []).includes("add_input_readonly");
-    const armInput = (node.edit_affordances || []).includes("add_arm_readonly");
-    const footerText = multiInput ? `+ ${inputPins.filter((p) => !isExecPin(p)).length} inputs` : armInput ? "+ arm read-only" : "";
+    const multiInput = (node.edit_affordances || []).includes("append_multi_input");
+    const armInput = (node.edit_affordances || []).includes("add_pattern_arm");
+    const footerText = multiInput ? `+ ${inputPins.filter((p) => !isExecPin(p)).length} inputs` : armInput ? "+ arm" : "";
     const footerW = footerText ? measureTextPx(`10px ${MONO_FONT}`, footerText) + NODE_PAD * 4 : 0;
     const execRows = Math.max(pinsForNode(graph, node, "input", true).length, pinsForNode(graph, node, "output", true).length);
     const dataRows = Math.max(pinsForNode(graph, node, "input", false).length, pinsForNode(graph, node, "output", false).length);
@@ -3136,7 +3248,8 @@ pub fn canvas_js() -> String {
       ctx.textAlign = "center";
       ctx.fillText(ellipsizeText(layout.footerText, badgeW - 12 * view.zoom), bx + badgeW / 2, by + 12.5 * view.zoom);
       ctx.textAlign = "left";
-      window.__jetCanvasMultiInputReadOnly = true;
+      if (recordHit) pinEditorHit.push({ x: bx, y: by, w: badgeW, h: badgeH, node, kind: layout.footerText.includes("arm") ? "add_pattern_arm" : "append_multi_input" });
+      window.__jetCanvasMultiInputAppend = true;
     }
 
     drawDiagnosticBubble(node, x, y, w, diagnostics, recordHit);
@@ -3288,7 +3401,7 @@ pub fn canvas_js() -> String {
     const hitMap = {
       graph_id: graph.graph_id,
       nodes: hit.map((h) => ({ node_id: h.node.node_id, title: h.node.title, kind: h.node.kind, x: h.x, y: h.y, w: h.w, h: h.h })),
-      pins: pinHit.map((h) => ({ pin_id: h.pin.pin_id, node_id: h.pin.node_id, name: h.pin.name, type: h.pin.type, direction: h.pin.direction, x: h.x, y: h.y, w: h.w, h: h.h, cx: h.cx, cy: h.cy })),
+      pins: pinHit.map((h) => ({ pin_id: h.pin.pin_id, node_id: h.pin.node_id, name: h.pin.name, type: h.pin.type, direction: h.pin.direction, role: h.pin.role || null, pattern_source: h.pin.pattern_source || null, append_op: h.pin.append_op || null, source_span: h.pin.source_span || null, pattern_source_span: h.pin.pattern_source_span || null, x: h.x, y: h.y, w: h.w, h: h.h, cx: h.cx, cy: h.cy })),
       diagnostics: diagnosticHit.map((h) => ({ node_id: h.node.node_id, count: h.entries.length, severity: worstDiagnosticSeverity(h.entries), codes: h.entries.map((entry) => entry.code) }))
     };
     nodeBounds = new Map(hitMap.nodes.map((n) => [n.node_id, n]));
@@ -3304,6 +3417,10 @@ pub fn canvas_js() -> String {
       name: point.pin && point.pin.name,
       type: point.pin && point.pin.type,
       direction: point.pin && point.pin.direction
+      , role: point.pin && point.pin.role || null,
+      append_op: point.pin && point.pin.append_op || null,
+      source_span: point.pin && point.pin.source_span || null,
+      pattern_source_span: point.pin && point.pin.pattern_source_span || null
     }]));
     window.__jetCanvasWireEndpoints = wireEndpointHit.map((h) => ({
       wire_id: h.wire && h.wire.wire_id,
@@ -4044,6 +4161,10 @@ pub fn canvas_js() -> String {
 
   function applyPinDefaultEditor(hit) {
     if (!hit || !hit.pin) return false;
+    if (hit.kind === "pattern_arm") {
+      editPatternArm(hit.pin);
+      return true;
+    }
     if (!hit.expr) {
       showToast("Default value is read-only");
       return true;
@@ -4064,6 +4185,19 @@ pub fn canvas_js() -> String {
     if (next === null || next === undefined || next === "") return true;
     postTransaction({ schema_version: 1, op: "edit_inline_expr", revision: latestDoc.revision, inline_expr_id: hit.expr.inline_expr_id, new_expr: next });
     return true;
+  }
+
+  function applyNodeAffordance(hit) {
+    if (!hit || !hit.node) return false;
+    if (hit.kind === "add_pattern_arm") {
+      addPatternArm(hit.node);
+      return true;
+    }
+    if (hit.kind === "append_multi_input") {
+      appendMultiInput(hit.node);
+      return true;
+    }
+    return false;
   }
 
   function numericType(type) {
@@ -4277,6 +4411,10 @@ pub fn canvas_js() -> String {
     const y = ev.clientY - rect.top;
     const pinEditor = hitPinDefaultEditorAt(x, y);
     if (pinEditor && applyPinDefaultEditor(pinEditor)) {
+      ev.preventDefault();
+      return;
+    }
+    if (pinEditor && applyNodeAffordance(pinEditor)) {
       ev.preventDefault();
       return;
     }

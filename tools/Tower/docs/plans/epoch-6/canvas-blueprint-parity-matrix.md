@@ -35,7 +35,7 @@ Ratchets use class prefixes: `interaction:`, `protocol:`, `projection:`,
 | Node model | Function calls | Calls project as typed nodes with input/output pins. | shipped | interaction:tests/canvas_scenarios.rs::palette_insert_catalog_sweep |
 | Node model | Pure function calls | Pure leaves render inline by default and can expand. | planned | #274 |
 | Node model | Variables get/set | Bindings, reads, and reassignments project as source nodes. | claimed | projection:#274, #281, tests/canvas.rs |
-| Node model | Branch, switch, loops | Jet `if`, dispatch, and `loop` forms project and insert from palette without opaque fallbacks. | claimed | projection:#272/#274, tests/canvas.rs |
+| Node model | Branch, switch, loops | Jet `if`, dispatch, and `loop` forms project and insert from palette without opaque fallbacks; pattern-arm rows are editable source transactions. | shipped | interaction:tests/canvas_scenarios.rs::palette_insert_flow_variable_project_core; interaction:tests/canvas_scenarios.rs::pattern_arm_add_edit_remove; interaction:tests/canvas_scenarios.rs::pattern_arm_invalid_refused; projection:#272/#274, tests/canvas.rs |
 | Node model | Sequence, gate, do-once, do-N | Blueprint scheduler nodes are rejected unless represented by ordinary Jet control/callback code. | rejected-as-Blueprint-semantic-debt | #278 |
 | Node model | Large graph virtualization and LOD | Canvas renders visible graph regions and low-zoom title-bar nodes for large projections. | claimed | grep:#314, tests/web_dev.rs |
 | Node model | Math Expression node | Expression text stays ordinary Jet expression source, not a separate formula language. | planned | #274 |
@@ -49,6 +49,9 @@ Ratchets use class prefixes: `interaction:`, `protocol:`, `projection:`,
 | Types | Primitive and user types | Pins display Bool, numeric, String, structs, enums, collections, options/results. | claimed | projection:#274, tests/canvas.rs |
 | Types | Object/reference handles | Handles render as Jet library/type facts, not Blueprint object semantics. | planned | #274 |
 | Types | Effect and unsafe markers | Async/effect/proof/unsafe rails are visual projections only. | claimed | projection:#278, tests/canvas.rs |
+| Patterns | Pattern arm authoring | Jet pattern arms are first-class rows: add, edit, remove, diagnose, undo, and reproject as ordinary source. | shipped | interaction:tests/canvas_scenarios.rs::pattern_arm_add_edit_remove; interaction:tests/canvas_scenarios.rs::pattern_arm_invalid_refused; protocol:tests/canvas.rs::canvas_pattern_arm_and_multi_input_transactions_write_source |
+| Patterns | Pattern forms | Variant patterns, or-patterns, ranges, options/results, structs, and string-match patterns are source-backed Jet pattern text validated by the front end. | shipped | interaction:tests/canvas_scenarios.rs::pattern_arm_add_edit_remove; projection:tests/canvas.rs::canvas_projects_pattern_arm_and_multi_input_pin_metadata |
+| Pins and wires | Multi-input pins | List literals and fan-out `f.[...]` nodes append and remove element pins through source transactions. | shipped | interaction:tests/canvas_scenarios.rs::multi_input_append_remove; protocol:tests/canvas.rs::canvas_pattern_arm_and_multi_input_transactions_write_source |
 | Comments | Node bubbles | Source-backed comment bubbles use ratified source-anchored hints. | claimed | projection:#279, D-CANVAS-LAYOUT1, tests/canvas.rs |
 | Comments | Comment boxes | Region boxes persist through ordinary Jet comments when shared; viewport state stays local. | claimed | projection:#279, D-CANVAS-LAYOUT1, tests/canvas.rs |
 | Comments | Free-floating editor notes | Notes with no source anchor stay local. | rejected-as-Blueprint-semantic-debt | #279 |

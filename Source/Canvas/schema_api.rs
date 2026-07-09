@@ -77,6 +77,9 @@ struct PinRec {
     fallible: bool,
     effect_grant_need: Option<String>,
     span: SourceSpan,
+    pattern_source_span: Option<SourceSpan>,
+    append_op: Option<String>,
+    element_index: Option<usize>,
 }
 
 struct WireRec {
@@ -714,6 +717,66 @@ pub fn apply_transaction_json(path: &Path, request: &str) -> Result<String, Stri
             };
             let position = json_string_field(request, "position").unwrap_or_else(|| "after".into());
             apply_reorder_statements(path, &src, &graph_id, moved, anchor, &position)
+        }
+        "add_pattern_arm" => {
+            let graph_id = required_string(request, "graph_id")?;
+            let pattern = required_string(request, "pattern")?;
+            validate_single_line_fragment(&pattern, "pattern arm text must stay on one line")?;
+            let node = SourceSpan {
+                start: json_usize_field(request, "node_start")
+                    .ok_or_else(|| edit_error("bad_request", "missing `node_start`"))?,
+                end: json_usize_field(request, "node_end")
+                    .ok_or_else(|| edit_error("bad_request", "missing `node_end`"))?,
+            };
+            apply_add_pattern_arm(path, &src, &graph_id, node, &pattern)
+        }
+        "edit_pattern_arm" => {
+            let graph_id = required_string(request, "graph_id")?;
+            let pattern = required_string(request, "pattern")?;
+            validate_single_line_fragment(&pattern, "pattern arm text must stay on one line")?;
+            let pattern_span = SourceSpan {
+                start: json_usize_field(request, "pattern_start")
+                    .ok_or_else(|| edit_error("bad_request", "missing `pattern_start`"))?,
+                end: json_usize_field(request, "pattern_end")
+                    .ok_or_else(|| edit_error("bad_request", "missing `pattern_end`"))?,
+            };
+            apply_edit_pattern_arm(path, &src, &graph_id, pattern_span, &pattern)
+        }
+        "remove_pattern_arm" => {
+            let graph_id = required_string(request, "graph_id")?;
+            let pattern_span = SourceSpan {
+                start: json_usize_field(request, "pattern_start")
+                    .ok_or_else(|| edit_error("bad_request", "missing `pattern_start`"))?,
+                end: json_usize_field(request, "pattern_end")
+                    .ok_or_else(|| edit_error("bad_request", "missing `pattern_end`"))?,
+            };
+            apply_remove_pattern_arm(path, &src, &graph_id, pattern_span)
+        }
+        "append_multi_input" => {
+            let element = json_string_field(request, "element").unwrap_or_else(|| "1".to_string());
+            validate_single_line_fragment(&element, "multi-input element must stay on one line")?;
+            let node = SourceSpan {
+                start: json_usize_field(request, "node_start")
+                    .ok_or_else(|| edit_error("bad_request", "missing `node_start`"))?,
+                end: json_usize_field(request, "node_end")
+                    .ok_or_else(|| edit_error("bad_request", "missing `node_end`"))?,
+            };
+            apply_append_multi_input(path, &src, node, &element)
+        }
+        "remove_multi_input_element" => {
+            let node = SourceSpan {
+                start: json_usize_field(request, "node_start")
+                    .ok_or_else(|| edit_error("bad_request", "missing `node_start`"))?,
+                end: json_usize_field(request, "node_end")
+                    .ok_or_else(|| edit_error("bad_request", "missing `node_end`"))?,
+            };
+            let element = SourceSpan {
+                start: json_usize_field(request, "element_start")
+                    .ok_or_else(|| edit_error("bad_request", "missing `element_start`"))?,
+                end: json_usize_field(request, "element_end")
+                    .ok_or_else(|| edit_error("bad_request", "missing `element_end`"))?,
+            };
+            apply_remove_multi_input_element(path, &src, node, element)
         }
         "replace_source" => {
             let source = required_string(request, "source")?;

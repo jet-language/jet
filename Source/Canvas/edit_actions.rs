@@ -979,6 +979,1089 @@ fn apply_reorder_statements(
     write_checked_formatted(path, src, &changed)
 }
 
+fn apply_add_pattern_arm(
+    path: &Path,
+    src: &str,
+    graph_id: &str,
+    node_span: SourceSpan,
+    pattern: &str,
+) -> Result<String, String> {
+    let func = checked_func_for_graph(path, src, graph_id)?;
+    let head = normalize_pattern_arm_head(pattern);
+    if head.is_empty() {
+        return Err(edit_error("bad_request", "pattern arm text is empty"));
+    }
+    let mut target = None;
+    find_pattern_target(&func.body, node_span, &mut target);
+    let Some(target) = target else {
+        return Err(edit_error(
+            "not_found",
+            "Canvas pattern node no longer exists",
+        ));
+    };
+    let body = fresh_arm_body(func);
+    let changed = match target {
+        PatternTarget::Branch(ifs) => add_arm_to_branch(src, ifs, &head, &body)?,
+        PatternTarget::Switch { arms, else_body, span, .. } => {
+            let insert = if let Some(else_body) = else_body {
+                line_start(src, first_stmt_start(else_body).unwrap_or(span.end))
+            } else if let Some(last) = arms.last() {
+                line_after(src, last.span.end)
+            } else {
+                dispatch_body_insert_offset(src, span)
+            };
+            let indent = indentation_at(src, insert);
+            let arm = format!("{indent}{head} -> {{\n{indent}    {body}\n{indent}}}\n");
+            FixEngine::apply_edits(
+                src,
+                &[edit(
+                    SourceSpan {
+                        start: insert,
+                        end: insert,
+                    },
+                    &arm,
+                )],
+            )
+            .map_err(|_| edit_error("overlap", "Canvas pattern arm insert overlapped"))?
+        }
+    };
+    write_checked_formatted(path, src, &changed)
+}
+
+fn apply_edit_pattern_arm(
+    path: &Path,
+    src: &str,
+    graph_id: &str,
+    pattern_span: SourceSpan,
+    pattern: &str,
+) -> Result<String, String> {
+    let func = checked_func_for_graph(path, src, graph_id)?;
+    let head = normalize_pattern_arm_head(pattern);
+    if head.is_empty() {
+        return Err(edit_error("bad_request", "pattern arm text is empty"));
+    }
+    if !pattern_span_belongs_to_graph(&func.body, pattern_span) {
+        return Err(edit_error(
+            "not_found",
+            "Canvas pattern arm no longer exists",
+        ));
+    }
+    let changed = FixEngine::apply_edits(src, &[edit(pattern_span, &head)])
+        .map_err(|_| edit_error("overlap", "Canvas pattern arm edit overlapped"))?;
+    write_checked_formatted(path, src, &changed)
+}
+
+fn apply_remove_pattern_arm(
+    path: &Path,
+    src: &str,
+    graph_id: &str,
+    pattern_span: SourceSpan,
+) -> Result<String, String> {
+    let func = checked_func_for_graph(path, src, graph_id)?;
+    let mut arm = None;
+    find_pattern_arm_remove_span(src, &func.body, pattern_span, &mut arm);
+    let Some(info) = arm else {
+        return Err(edit_error(
+            "not_found",
+            "Canvas pattern arm no longer exists",
+        ));
+    };
+    if info.only_arm_without_else {
+        return Err(edit_error(
+            "bad_request",
+            "can't remove the last pattern arm; the branch would have no path left",
+        ));
+    }
+    let changed = FixEngine::apply_edits(src, &[edit(info.remove_span, "")])
+        .map_err(|_| edit_error("overlap", "Canvas pattern arm delete overlapped"))?;
+    write_checked_formatted(path, src, &changed)
+}
+
+fn apply_append_multi_input(
+    path: &Path,
+    src: &str,
+    node_span: SourceSpan,
+    element: &str,
+) -> Result<String, String> {
+    let mut target = None;
+    let func = checked_func_containing_span(path, src, node_span)?;
+    find_multi_input_target(&func.body, node_span, &mut target);
+    let Some(target) = target else {
+        return Err(edit_error(
+            "not_found",
+            "Canvas multi-input node no longer exists",
+        ));
+    };
+    let (span, count) = match target {
+        MultiInputTarget::List { span, count } | MultiInputTarget::FanOut { span, count } => {
+            (span, count)
+        }
+    };
+    let insert = src
+        .get(span.start..span.end)
+        .and_then(|chunk| chunk.rfind(']').map(|idx| span.start + idx))
+        .ok_or_else(|| edit_error("bad_request", "Canvas multi-input source span is stale"))?;
+    let prefix = if count == 0 { "" } else { ", " };
+    let changed = FixEngine::apply_edits(
+        src,
+        &[edit(
+            SourceSpan {
+                start: insert,
+                end: insert,
+            },
+            &format!("{prefix}{element}"),
+        )],
+    )
+    .map_err(|_| edit_error("overlap", "Canvas multi-input append overlapped"))?;
+    write_checked_formatted(path, src, &changed)
+}
+
+fn apply_remove_multi_input_element(
+    path: &Path,
+    src: &str,
+    node_span: SourceSpan,
+    element_span: SourceSpan,
+) -> Result<String, String> {
+    let func = checked_func_containing_span(path, src, node_span)?;
+    if !multi_input_element_belongs_to_graph(&func.body, node_span, element_span) {
+        return Err(edit_error(
+            "not_found",
+            "Canvas multi-input element no longer exists",
+        ));
+    }
+    let remove = comma_separated_remove_span(src, node_span, element_span)?;
+    let changed = FixEngine::apply_edits(src, &[edit(remove, "")])
+        .map_err(|_| edit_error("overlap", "Canvas multi-input delete overlapped"))?;
+    write_checked_formatted(path, src, &changed)
+}
+
+fn checked_func_for_graph(
+    path: &Path,
+    src: &str,
+    graph_id: &str,
+) -> Result<&'static AST::Func, String> {
+    let Some(name_span) = graph_id_name_span(graph_id) else {
+        return Err(edit_error(
+            "bad_request",
+            "Canvas graph id is not a function graph",
+        ));
+    };
+    checked_func_by_name_span(path, src, name_span)
+}
+
+fn checked_func_containing_span(
+    path: &Path,
+    src: &str,
+    span: SourceSpan,
+) -> Result<&'static AST::Func, String> {
+    let bundle = checked_bundle(path, src)?;
+    let func = bundle
+        .modules
+        .iter()
+        .find_map(|module| find_func_containing_span(&module.items, span));
+    let Some(func) = func else {
+        return Err(edit_error(
+            "not_found",
+            "Canvas source node no longer belongs to a function",
+        ));
+    };
+    Ok(func)
+}
+
+fn checked_func_by_name_span(
+    path: &Path,
+    src: &str,
+    name_span: SourceSpan,
+) -> Result<&'static AST::Func, String> {
+    let bundle = checked_bundle(path, src)?;
+    let Some(func) = find_func_by_name_span(&bundle, name_span) else {
+        return Err(edit_error("not_found", "Canvas graph no longer exists"));
+    };
+    Ok(func)
+}
+
+fn checked_bundle(path: &Path, src: &str) -> Result<&'static AST::ProgramBundle, String> {
+    let path_str = path.to_string_lossy();
+    let (diags, bundle) = crate::Driver::check_file(&path_str, None, true);
+    let errors = diags
+        .iter()
+        .filter(|d| d.severity == Severity::Error)
+        .cloned()
+        .collect::<Vec<_>>();
+    if !errors.is_empty() {
+        return Err(diagnostics_error(path, src, &errors));
+    }
+    let Some(bundle) = bundle else {
+        return Err(edit_error(
+            "check",
+            "Canvas could not read checked pattern facts",
+        ));
+    };
+    Ok(Box::leak(Box::new(bundle)))
+}
+
+enum PatternTarget<'a> {
+    Branch(&'a AST::IfStmt),
+    Switch {
+        arms: &'a [AST::SwitchArm],
+        else_body: Option<&'a Vec<Stmt>>,
+        span: SourceSpan,
+    },
+}
+
+fn find_pattern_target<'a>(
+    stmts: &'a [Stmt],
+    node_span: SourceSpan,
+    out: &mut Option<PatternTarget<'a>>,
+) {
+    if out.is_some() {
+        return;
+    }
+    for stmt in stmts {
+        match stmt {
+            Stmt::If(ifs) => {
+                if same_span(ifs.cond.span().into(), node_span)
+                    && matches!(ifs.cond, Expr::PatternTest { .. })
+                {
+                    *out = Some(PatternTarget::Branch(ifs));
+                    return;
+                }
+                find_pattern_target(&ifs.then_body, node_span, out);
+                if let Some(branch) = &ifs.else_branch {
+                    match branch {
+                        AST::ElseBranch::Else(body) => find_pattern_target(body, node_span, out),
+                        AST::ElseBranch::ElseIf(next) => {
+                            find_pattern_target_in_if(next, node_span, out)
+                        }
+                    }
+                }
+            }
+            Stmt::Switch {
+                arms,
+                else_body,
+                span,
+                ..
+            }
+            | Stmt::ComptimeSwitch {
+                arms,
+                else_body,
+                span,
+                ..
+            } => {
+                if same_span((*span).into(), node_span) {
+                    *out = Some(PatternTarget::Switch {
+                        arms,
+                        else_body: else_body.as_ref(),
+                        span: (*span).into(),
+                    });
+                    return;
+                }
+                for arm in arms {
+                    find_pattern_target(&arm.body, node_span, out);
+                }
+                if let Some(body) = else_body {
+                    find_pattern_target(body, node_span, out);
+                }
+            }
+            _ => find_pattern_target_in_children(stmt, node_span, out),
+        }
+    }
+}
+
+fn find_pattern_target_in_if<'a>(
+    ifs: &'a AST::IfStmt,
+    node_span: SourceSpan,
+    out: &mut Option<PatternTarget<'a>>,
+) {
+    if same_span(ifs.cond.span().into(), node_span) && matches!(ifs.cond, Expr::PatternTest { .. })
+    {
+        *out = Some(PatternTarget::Branch(ifs));
+        return;
+    }
+    find_pattern_target(&ifs.then_body, node_span, out);
+    if let Some(branch) = &ifs.else_branch {
+        match branch {
+            AST::ElseBranch::Else(body) => find_pattern_target(body, node_span, out),
+            AST::ElseBranch::ElseIf(next) => find_pattern_target_in_if(next, node_span, out),
+        }
+    }
+}
+
+fn find_pattern_target_in_children<'a>(
+    stmt: &'a Stmt,
+    node_span: SourceSpan,
+    out: &mut Option<PatternTarget<'a>>,
+) {
+    match stmt {
+        Stmt::While { body, .. }
+        | Stmt::For { body, .. }
+        | Stmt::Loop { body, .. }
+        | Stmt::CountedLoop { body, .. }
+        | Stmt::Unsafe { body, .. }
+        | Stmt::Impure { body, .. }
+        | Stmt::Reactive { body, .. }
+        | Stmt::SuppressMustUse { body, .. }
+        | Stmt::Off { body, .. }
+        | Stmt::DebugOnly { body, .. }
+        | Stmt::Region { body, .. }
+        | Stmt::TaskGroup { body, .. }
+        | Stmt::Layout { body, .. }
+        | Stmt::Caps { body, .. }
+        | Stmt::Grant { body, .. }
+        | Stmt::ComptimeBlock { body, .. }
+        | Stmt::ContextBlock { body, .. }
+        | Stmt::Live { body, .. }
+        | Stmt::AssumeDet { body, .. }
+        | Stmt::Transact { body, .. }
+        | Stmt::ScopeMember { body, .. } => find_pattern_target(body, node_span, out),
+        Stmt::ComptimeIf {
+            then_body,
+            else_body,
+            ..
+        } => {
+            find_pattern_target(then_body, node_span, out);
+            if let Some(body) = else_body {
+                find_pattern_target(body, node_span, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+struct RemoveArmInfo {
+    remove_span: SourceSpan,
+    only_arm_without_else: bool,
+}
+
+fn find_pattern_arm_remove_span(
+    src: &str,
+    stmts: &[Stmt],
+    pattern_span: SourceSpan,
+    out: &mut Option<RemoveArmInfo>,
+) {
+    if out.is_some() {
+        return;
+    }
+    for stmt in stmts {
+        match stmt {
+            Stmt::If(ifs) => {
+                if let Expr::PatternTest { pattern, .. } = &ifs.cond {
+                    if same_span(pattern.span().into(), pattern_span) {
+                        *out = Some(RemoveArmInfo {
+                            remove_span: stmt_text_span(src, stmt),
+                            only_arm_without_else: true,
+                        });
+                        return;
+                    }
+                }
+                find_pattern_arm_remove_span(src, &ifs.then_body, pattern_span, out);
+                if let Some(branch) = &ifs.else_branch {
+                    match branch {
+                        AST::ElseBranch::Else(body) => {
+                            find_pattern_arm_remove_span(src, body, pattern_span, out)
+                        }
+                        AST::ElseBranch::ElseIf(next) => {
+                            find_pattern_arm_remove_span_in_if(src, next, pattern_span, out)
+                        }
+                    }
+                }
+            }
+            Stmt::Switch {
+                arms, else_body, ..
+            }
+            | Stmt::ComptimeSwitch {
+                arms, else_body, ..
+            } => {
+                for arm in arms {
+                    if same_span(arm.cond.span().into(), pattern_span) {
+                        *out = Some(RemoveArmInfo {
+                            remove_span: stmt_arm_text_span(src, arm),
+                            only_arm_without_else: arms.len() == 1 && else_body.is_none(),
+                        });
+                        return;
+                    }
+                    find_pattern_arm_remove_span(src, &arm.body, pattern_span, out);
+                }
+                if let Some(body) = else_body {
+                    find_pattern_arm_remove_span(src, body, pattern_span, out);
+                }
+            }
+            _ => find_pattern_arm_remove_span_in_children(src, stmt, pattern_span, out),
+        }
+    }
+}
+
+fn find_pattern_arm_remove_span_in_if(
+    src: &str,
+    ifs: &AST::IfStmt,
+    pattern_span: SourceSpan,
+    out: &mut Option<RemoveArmInfo>,
+) {
+    if let Expr::PatternTest { pattern, .. } = &ifs.cond {
+        if same_span(pattern.span().into(), pattern_span) {
+            *out = Some(RemoveArmInfo {
+                remove_span: SourceSpan {
+                    start: line_start(src, ifs.span.start),
+                    end: line_after(src, ifs.span.end),
+                },
+                only_arm_without_else: true,
+            });
+            return;
+        }
+    }
+    find_pattern_arm_remove_span(src, &ifs.then_body, pattern_span, out);
+    if let Some(branch) = &ifs.else_branch {
+        match branch {
+            AST::ElseBranch::Else(body) => {
+                find_pattern_arm_remove_span(src, body, pattern_span, out)
+            }
+            AST::ElseBranch::ElseIf(next) => {
+                find_pattern_arm_remove_span_in_if(src, next, pattern_span, out)
+            }
+        }
+    }
+}
+
+fn find_pattern_arm_remove_span_in_children(
+    src: &str,
+    stmt: &Stmt,
+    pattern_span: SourceSpan,
+    out: &mut Option<RemoveArmInfo>,
+) {
+    match stmt {
+        Stmt::While { body, .. }
+        | Stmt::For { body, .. }
+        | Stmt::Loop { body, .. }
+        | Stmt::CountedLoop { body, .. }
+        | Stmt::Unsafe { body, .. }
+        | Stmt::Impure { body, .. }
+        | Stmt::Reactive { body, .. }
+        | Stmt::SuppressMustUse { body, .. }
+        | Stmt::Off { body, .. }
+        | Stmt::DebugOnly { body, .. }
+        | Stmt::Region { body, .. }
+        | Stmt::TaskGroup { body, .. }
+        | Stmt::Layout { body, .. }
+        | Stmt::Caps { body, .. }
+        | Stmt::Grant { body, .. }
+        | Stmt::ComptimeBlock { body, .. }
+        | Stmt::ContextBlock { body, .. }
+        | Stmt::Live { body, .. }
+        | Stmt::AssumeDet { body, .. }
+        | Stmt::Transact { body, .. }
+        | Stmt::ScopeMember { body, .. } => {
+            find_pattern_arm_remove_span(src, body, pattern_span, out)
+        }
+        Stmt::ComptimeIf {
+            then_body,
+            else_body,
+            ..
+        } => {
+            find_pattern_arm_remove_span(src, then_body, pattern_span, out);
+            if let Some(body) = else_body {
+                find_pattern_arm_remove_span(src, body, pattern_span, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn pattern_span_belongs_to_graph(stmts: &[Stmt], pattern_span: SourceSpan) -> bool {
+    let mut found = false;
+    find_pattern_span(stmts, pattern_span, &mut found);
+    found
+}
+
+fn find_pattern_span(stmts: &[Stmt], pattern_span: SourceSpan, found: &mut bool) {
+    if *found {
+        return;
+    }
+    for stmt in stmts {
+        match stmt {
+            Stmt::If(ifs) => {
+                if let Expr::PatternTest { pattern, .. } = &ifs.cond {
+                    if same_span(pattern.span().into(), pattern_span) {
+                        *found = true;
+                        return;
+                    }
+                }
+                find_pattern_span(&ifs.then_body, pattern_span, found);
+                if let Some(branch) = &ifs.else_branch {
+                    match branch {
+                        AST::ElseBranch::Else(body) => find_pattern_span(body, pattern_span, found),
+                        AST::ElseBranch::ElseIf(next) => {
+                            find_pattern_span_in_if(next, pattern_span, found)
+                        }
+                    }
+                }
+            }
+            Stmt::Switch {
+                arms, else_body, ..
+            }
+            | Stmt::ComptimeSwitch {
+                arms, else_body, ..
+            } => {
+                for arm in arms {
+                    if same_span(arm.cond.span().into(), pattern_span) {
+                        *found = true;
+                        return;
+                    }
+                    find_pattern_span(&arm.body, pattern_span, found);
+                }
+                if let Some(body) = else_body {
+                    find_pattern_span(body, pattern_span, found);
+                }
+            }
+            _ => find_pattern_span_in_children(stmt, pattern_span, found),
+        }
+    }
+}
+
+fn find_pattern_span_in_if(ifs: &AST::IfStmt, pattern_span: SourceSpan, found: &mut bool) {
+    if let Expr::PatternTest { pattern, .. } = &ifs.cond {
+        if same_span(pattern.span().into(), pattern_span) {
+            *found = true;
+            return;
+        }
+    }
+    find_pattern_span(&ifs.then_body, pattern_span, found);
+    if let Some(branch) = &ifs.else_branch {
+        match branch {
+            AST::ElseBranch::Else(body) => find_pattern_span(body, pattern_span, found),
+            AST::ElseBranch::ElseIf(next) => find_pattern_span_in_if(next, pattern_span, found),
+        }
+    }
+}
+
+fn find_pattern_span_in_children(stmt: &Stmt, pattern_span: SourceSpan, found: &mut bool) {
+    match stmt {
+        Stmt::While { body, .. }
+        | Stmt::For { body, .. }
+        | Stmt::Loop { body, .. }
+        | Stmt::CountedLoop { body, .. }
+        | Stmt::Unsafe { body, .. }
+        | Stmt::Impure { body, .. }
+        | Stmt::Reactive { body, .. }
+        | Stmt::SuppressMustUse { body, .. }
+        | Stmt::Off { body, .. }
+        | Stmt::DebugOnly { body, .. }
+        | Stmt::Region { body, .. }
+        | Stmt::TaskGroup { body, .. }
+        | Stmt::Layout { body, .. }
+        | Stmt::Caps { body, .. }
+        | Stmt::Grant { body, .. }
+        | Stmt::ComptimeBlock { body, .. }
+        | Stmt::ContextBlock { body, .. }
+        | Stmt::Live { body, .. }
+        | Stmt::AssumeDet { body, .. }
+        | Stmt::Transact { body, .. }
+        | Stmt::ScopeMember { body, .. } => find_pattern_span(body, pattern_span, found),
+        Stmt::ComptimeIf {
+            then_body,
+            else_body,
+            ..
+        } => {
+            find_pattern_span(then_body, pattern_span, found);
+            if let Some(body) = else_body {
+                find_pattern_span(body, pattern_span, found);
+            }
+        }
+        _ => {}
+    }
+}
+
+enum MultiInputTarget {
+    List { span: SourceSpan, count: usize },
+    FanOut { span: SourceSpan, count: usize },
+}
+
+fn find_multi_input_target(
+    stmts: &[Stmt],
+    node_span: SourceSpan,
+    out: &mut Option<MultiInputTarget>,
+) {
+    if out.is_some() {
+        return;
+    }
+    for stmt in stmts {
+        find_multi_input_in_stmt(stmt, node_span, out);
+    }
+}
+
+fn find_multi_input_in_stmt(stmt: &Stmt, node_span: SourceSpan, out: &mut Option<MultiInputTarget>) {
+    if out.is_some() {
+        return;
+    }
+    match stmt {
+        Stmt::Val(b) => find_multi_input_in_expr(&b.init, node_span, out),
+        Stmt::Assign { target, value, .. } => {
+            find_multi_input_in_lvalue(target, node_span, out);
+            find_multi_input_in_expr(value, node_span, out);
+        }
+        Stmt::Expr(e) => find_multi_input_in_expr(e, node_span, out),
+        Stmt::Return(Some(e), _) => find_multi_input_in_expr(e, node_span, out),
+        Stmt::Yield(e, _) => find_multi_input_in_expr(e, node_span, out),
+        Stmt::If(ifs) => {
+            find_multi_input_in_expr(&ifs.cond, node_span, out);
+            find_multi_input_target(&ifs.then_body, node_span, out);
+            if let Some(branch) = &ifs.else_branch {
+                match branch {
+                    AST::ElseBranch::Else(body) => find_multi_input_target(body, node_span, out),
+                    AST::ElseBranch::ElseIf(next) => {
+                        find_multi_input_in_stmt(&Stmt::If((**next).clone()), node_span, out)
+                    }
+                }
+            }
+        }
+        Stmt::Switch {
+            subject,
+            arms,
+            else_body,
+            ..
+        }
+        | Stmt::ComptimeSwitch {
+            subject,
+            arms,
+            else_body,
+            ..
+        } => {
+            find_multi_input_in_expr(subject, node_span, out);
+            for arm in arms {
+                find_multi_input_in_expr(&arm.cond, node_span, out);
+                find_multi_input_target(&arm.body, node_span, out);
+            }
+            if let Some(body) = else_body {
+                find_multi_input_target(body, node_span, out);
+            }
+        }
+        Stmt::While { cond, body, .. } => {
+            find_multi_input_in_expr(cond, node_span, out);
+            find_multi_input_target(body, node_span, out);
+        }
+        Stmt::For { body, .. }
+        | Stmt::Loop { body, .. }
+        | Stmt::CountedLoop { body, .. }
+        | Stmt::Unsafe { body, .. }
+        | Stmt::Impure { body, .. }
+        | Stmt::Reactive { body, .. }
+        | Stmt::SuppressMustUse { body, .. }
+        | Stmt::Off { body, .. }
+        | Stmt::DebugOnly { body, .. }
+        | Stmt::Region { body, .. }
+        | Stmt::TaskGroup { body, .. }
+        | Stmt::Layout { body, .. }
+        | Stmt::Caps { body, .. }
+        | Stmt::Grant { body, .. }
+        | Stmt::ComptimeBlock { body, .. }
+        | Stmt::ContextBlock { body, .. }
+        | Stmt::Live { body, .. }
+        | Stmt::AssumeDet { body, .. }
+        | Stmt::Transact { body, .. }
+        | Stmt::ScopeMember { body, .. } => find_multi_input_target(body, node_span, out),
+        Stmt::ComptimeIf {
+            then_body,
+            else_body,
+            ..
+        } => {
+            find_multi_input_target(then_body, node_span, out);
+            if let Some(body) = else_body {
+                find_multi_input_target(body, node_span, out);
+            }
+        }
+        Stmt::Return(None, _)
+        | Stmt::Break(_)
+        | Stmt::Continue(_)
+        | Stmt::BreakLabel(_, _)
+        | Stmt::ContinueLabel(_, _) => {}
+    }
+}
+
+fn find_multi_input_in_lvalue(
+    target: &AST::LValue,
+    node_span: SourceSpan,
+    out: &mut Option<MultiInputTarget>,
+) {
+    match target {
+        AST::LValue::Index { base, index, .. } => {
+            find_multi_input_in_expr(base, node_span, out);
+            find_multi_input_in_expr(index, node_span, out);
+        }
+        AST::LValue::Field { base, .. } => find_multi_input_in_expr(base, node_span, out),
+        _ => {}
+    }
+}
+
+fn find_multi_input_in_expr(
+    expr: &Expr,
+    node_span: SourceSpan,
+    out: &mut Option<MultiInputTarget>,
+) {
+    if out.is_some() {
+        return;
+    }
+    match expr {
+        Expr::ListLit(items, span) if same_span((*span).into(), node_span) => {
+            *out = Some(MultiInputTarget::List {
+                span: (*span).into(),
+                count: items.len(),
+            });
+        }
+        Expr::FanOut { items, span, .. } if same_span((*span).into(), node_span) => {
+            *out = Some(MultiInputTarget::FanOut {
+                span: (*span).into(),
+                count: items.len(),
+            });
+        }
+        _ => walk_expr_children_for_multi_input(expr, node_span, out),
+    }
+}
+
+fn walk_expr_children_for_multi_input(
+    expr: &Expr,
+    node_span: SourceSpan,
+    out: &mut Option<MultiInputTarget>,
+) {
+    match expr {
+        Expr::Call(c) => {
+            for arg in &c.args {
+                find_multi_input_in_expr(&arg.expr, node_span, out);
+            }
+        }
+        Expr::MethodCall { receiver, args, .. } => {
+            find_multi_input_in_expr(receiver, node_span, out);
+            for arg in args {
+                find_multi_input_in_expr(&arg.expr, node_span, out);
+            }
+        }
+        Expr::FanOut { callee, items, .. } => {
+            find_multi_input_in_expr(callee, node_span, out);
+            for item in items {
+                find_multi_input_in_expr(item, node_span, out);
+            }
+        }
+        Expr::ListLit(items, _) => {
+            for item in items {
+                find_multi_input_in_expr(item, node_span, out);
+            }
+        }
+        Expr::Index { base, index, .. } => {
+            find_multi_input_in_expr(base, node_span, out);
+            find_multi_input_in_expr(index, node_span, out);
+        }
+        Expr::Slice {
+            base, start, end, ..
+        } => {
+            find_multi_input_in_expr(base, node_span, out);
+            find_multi_input_in_expr(start, node_span, out);
+            find_multi_input_in_expr(end, node_span, out);
+        }
+        Expr::MapLit(items, _) => {
+            for (key, value) in items {
+                find_multi_input_in_expr(key, node_span, out);
+                find_multi_input_in_expr(value, node_span, out);
+            }
+        }
+        Expr::Binary(_, left, right, _) => {
+            find_multi_input_in_expr(left, node_span, out);
+            find_multi_input_in_expr(right, node_span, out);
+        }
+        Expr::Unary(_, expr, _)
+        | Expr::Try(expr, ..)
+        | Expr::Present(expr, _)
+        | Expr::Ok(expr, _)
+        | Expr::Err(expr, _)
+        | Expr::Paren(expr, _)
+        | Expr::Copy(expr, _)
+        | Expr::Field(expr, _, _)
+        | Expr::RawOf(expr, _)
+        | Expr::Tainted(expr, _) => find_multi_input_in_expr(expr, node_span, out),
+        Expr::PatternTest { subject, .. } => find_multi_input_in_expr(subject, node_span, out),
+        Expr::If {
+            cond,
+            then_body,
+            then_value,
+            else_body,
+            else_value,
+            ..
+        } => {
+            find_multi_input_in_expr(cond, node_span, out);
+            find_multi_input_target(then_body, node_span, out);
+            find_multi_input_in_expr(then_value, node_span, out);
+            find_multi_input_target(else_body, node_span, out);
+            find_multi_input_in_expr(else_value, node_span, out);
+        }
+        Expr::TupleLit(items, _, _) => {
+            for (_, item) in items {
+                find_multi_input_in_expr(item, node_span, out);
+            }
+        }
+        Expr::StructLit { fields, .. } => {
+            for (_, _, value) in fields {
+                find_multi_input_in_expr(value, node_span, out);
+            }
+        }
+        Expr::EnumLit { args, .. } => {
+            for arg in args {
+                match arg {
+                    AST::EnumLitArg::Positional(expr) => {
+                        find_multi_input_in_expr(expr, node_span, out)
+                    }
+                    AST::EnumLitArg::Named { expr, .. } => {
+                        find_multi_input_in_expr(expr, node_span, out)
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn multi_input_element_belongs_to_graph(
+    stmts: &[Stmt],
+    node_span: SourceSpan,
+    element_span: SourceSpan,
+) -> bool {
+    let mut found = false;
+    find_multi_input_element(stmts, node_span, element_span, &mut found);
+    found
+}
+
+fn find_multi_input_element(
+    stmts: &[Stmt],
+    node_span: SourceSpan,
+    element_span: SourceSpan,
+    found: &mut bool,
+) {
+    if *found {
+        return;
+    }
+    let mut target = None;
+    find_multi_input_target(stmts, node_span, &mut target);
+    let _ = target;
+    for stmt in stmts {
+        find_multi_input_element_in_stmt(stmt, node_span, element_span, found);
+    }
+}
+
+fn find_multi_input_element_in_stmt(
+    stmt: &Stmt,
+    node_span: SourceSpan,
+    element_span: SourceSpan,
+    found: &mut bool,
+) {
+    match stmt {
+        Stmt::Val(b) => find_multi_input_element_in_expr(&b.init, node_span, element_span, found),
+        Stmt::Expr(e) | Stmt::Return(Some(e), _) | Stmt::Yield(e, _) => {
+            find_multi_input_element_in_expr(e, node_span, element_span, found)
+        }
+        Stmt::Assign { value, .. } => {
+            find_multi_input_element_in_expr(value, node_span, element_span, found)
+        }
+        Stmt::If(ifs) => {
+            find_multi_input_element_in_expr(&ifs.cond, node_span, element_span, found);
+            find_multi_input_element(&ifs.then_body, node_span, element_span, found);
+            if let Some(AST::ElseBranch::Else(body)) = &ifs.else_branch {
+                find_multi_input_element(body, node_span, element_span, found);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn find_multi_input_element_in_expr(
+    expr: &Expr,
+    node_span: SourceSpan,
+    element_span: SourceSpan,
+    found: &mut bool,
+) {
+    if *found {
+        return;
+    }
+    match expr {
+        Expr::ListLit(items, span) | Expr::FanOut { items, span, .. }
+            if same_span((*span).into(), node_span) =>
+        {
+            *found = items
+                .iter()
+                .any(|item| same_span(item.span().into(), element_span));
+        }
+        _ => {
+            let mut nested = None;
+            walk_expr_children_for_multi_input(expr, node_span, &mut nested);
+            if nested.is_some() {
+                *found = true;
+            }
+        }
+    }
+}
+
+fn normalize_pattern_arm_head(pattern: &str) -> String {
+    let trimmed = pattern.trim();
+    trimmed
+        .strip_prefix("==")
+        .map(str::trim)
+        .unwrap_or(trimmed)
+        .trim_end_matches("->")
+        .trim()
+        .to_string()
+}
+
+fn fresh_arm_body(func: &AST::Func) -> String {
+    match func.return_type.as_ref().map(AST::Type::name) {
+        Some(ret) if ret != "Void" => format!("return {}", default_arg_for_type(&ret)),
+        _ => "print(\"canvas arm\")".to_string(),
+    }
+}
+
+fn add_arm_to_branch(
+    src: &str,
+    ifs: &AST::IfStmt,
+    new_head: &str,
+    fresh_body: &str,
+) -> Result<String, String> {
+    let Expr::PatternTest {
+        subject, pattern, ..
+    } = &ifs.cond
+    else {
+        return Err(edit_error(
+            "bad_request",
+            "Canvas branch is not a pattern branch",
+        ));
+    };
+    let subject_src = snippet(src, subject.span());
+    let head = snippet(src, pattern.span());
+    let then_body = block_body_source(src, &ifs.then_body, 2);
+    let else_body = if let Some(AST::ElseBranch::Else(body)) = &ifs.else_branch {
+        let body = block_body_source(src, body, 2);
+        format!("    else -> {{\n{body}    }}\n")
+    } else {
+        String::new()
+    };
+    let replacement = format!(
+        "if {subject_src} == {{\n    {head} -> {{\n{then_body}    }}\n    {new_head} -> {{\n        {fresh_body}\n    }}\n{else_body}}}"
+    );
+    FixEngine::apply_edits(src, &[edit(ifs.span.into(), &replacement)])
+        .map_err(|_| edit_error("overlap", "Canvas pattern branch conversion overlapped"))
+}
+
+fn block_body_source(src: &str, stmts: &[Stmt], levels: usize) -> String {
+    if stmts.is_empty() {
+        return String::new();
+    }
+    let mut out = String::new();
+    let indent = "    ".repeat(levels);
+    for stmt in stmts {
+        let span = stmt_text_span(src, stmt);
+        let text = src
+            .get(span.start..span.end)
+            .unwrap_or("")
+            .trim_matches('\n')
+            .trim();
+        for line in text.lines() {
+            out.push_str(&indent);
+            out.push_str(line.trim());
+            out.push('\n');
+        }
+    }
+    out
+}
+
+fn first_stmt_start(stmts: &[Stmt]) -> Option<usize> {
+    stmts.first().map(|stmt| stmt.span().start)
+}
+
+fn dispatch_body_insert_offset(src: &str, span: SourceSpan) -> usize {
+    src.get(span.start..span.end)
+        .and_then(|chunk| chunk.find('{').map(|idx| line_after(src, span.start + idx)))
+        .unwrap_or(span.end)
+}
+
+fn stmt_arm_text_span(src: &str, arm: &AST::SwitchArm) -> SourceSpan {
+    SourceSpan {
+        start: line_start(src, arm.span.start),
+        end: line_after(src, arm.span.end),
+    }
+}
+
+fn comma_separated_remove_span(
+    src: &str,
+    container: SourceSpan,
+    element: SourceSpan,
+) -> Result<SourceSpan, String> {
+    let Some(container_text) = src.get(container.start..container.end) else {
+        return Err(edit_error("bad_request", "Canvas multi-input span is stale"));
+    };
+    let rel_start = element.start.saturating_sub(container.start);
+    let rel_end = element.end.saturating_sub(container.start);
+    let before = &container_text[..rel_start.min(container_text.len())];
+    let after = &container_text[rel_end.min(container_text.len())..];
+    if let Some(pos) = after.find(',') {
+        let end = element.end + pos + 1;
+        return Ok(SourceSpan {
+            start: element.start,
+            end: consume_trailing_space(src, end, container.end),
+        });
+    }
+    if let Some(pos) = before.rfind(',') {
+        let start = container.start + consume_leading_space_back(before, pos);
+        return Ok(SourceSpan {
+            start,
+            end: element.end,
+        });
+    }
+    Ok(element)
+}
+
+fn consume_trailing_space(src: &str, mut offset: usize, limit: usize) -> usize {
+    while offset < limit && src.as_bytes().get(offset).is_some_and(u8::is_ascii_whitespace) {
+        offset += 1;
+    }
+    offset
+}
+
+fn consume_leading_space_back(before: &str, comma: usize) -> usize {
+    let mut start = comma;
+    while start > 0 && before.as_bytes()[start - 1].is_ascii_whitespace() {
+        start -= 1;
+    }
+    start
+}
+
+fn find_func_containing_span<'a>(items: &'a [Item], span: SourceSpan) -> Option<&'a AST::Func> {
+    for item in items {
+        match item {
+            Item::Func(f) if span_within(span, func_source_span(f)) => return Some(f),
+            Item::Struct(s) => {
+                for method in &s.methods {
+                    if span_within(span, func_source_span(method)) {
+                        return Some(method);
+                    }
+                }
+            }
+            Item::Impl(i) => {
+                for method in &i.methods {
+                    if span_within(span, func_source_span(method)) {
+                        return Some(method);
+                    }
+                }
+            }
+            Item::CodeModule(m) => {
+                if let Some(body) = &m.body {
+                    if let Some(found) = find_func_containing_span(body, span) {
+                        return Some(found);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn span_within(inner: SourceSpan, outer: SourceSpan) -> bool {
+    inner.start >= outer.start && inner.end <= outer.end
+}
+
 fn find_func_by_name_span<'a>(
     bundle: &'a AST::ProgramBundle,
     name_span: SourceSpan,

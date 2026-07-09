@@ -84,6 +84,18 @@ fn cmd_build(theme: &Theme, args: &[String], flags: &OsFlags, activate: bool) ->
     let Some((plan, system)) = load_target(theme, &target) else {
         return 2;
     };
+    // Tier 3 (D-FE-CLI1): `switch` is the mutation — it diffs the outgoing
+    // generation against the one this build produces and gates on Apply?
+    // before activating. `jetos build` never activates, so it never touches
+    // the running system and needs no gate (and no diff work).
+    let outgoing_ordinal = generation_ordinal(&system.name);
+    let outgoing_packages = if activate {
+        latest_generation_for(&system.name)
+            .map(|g| read_generation_packages(&g.path))
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
     match build_generation(theme, &plan, &system, flags) {
         Some(gen) => {
             theme.ok(&format!(
@@ -95,6 +107,35 @@ fn cmd_build(theme: &Theme, args: &[String], flags: &OsFlags, activate: bool) ->
             if activate {
                 if !prove_activation(theme, &gen, &system) {
                     return 2;
+                }
+                let diff = diff_packages(&outgoing_packages, &read_generation_packages(&gen.path));
+                if !diff.is_empty() {
+                    let incoming_ordinal = outgoing_ordinal + 1;
+                    theme.plan_gen_header(outgoing_ordinal, incoming_ordinal);
+                    let name_w = diff.iter().map(|d| d.name.len()).max().unwrap_or(0).max(8);
+                    for row in &diff {
+                        theme.plan_row(row.mark, &row.name, name_w, &row.from, &row.to);
+                    }
+                    let download_bytes: u64 = diff
+                        .iter()
+                        .filter_map(|d| d.out.as_deref())
+                        .map(|out| dir_size_bytes(Path::new(out)))
+                        .sum();
+                    if download_bytes > 0 {
+                        theme.download_line(download_bytes);
+                    }
+                    if !theme.confirm_apply(flags.assume_yes) {
+                        // Plan-only: the generation stays built and recorded
+                        // (rollback-visible via `jet os generations`), but
+                        // the running system is untouched.
+                        return 0;
+                    }
+                    theme.applied_header(incoming_ordinal);
+                    for row in &diff {
+                        if !matches!(row.mark, super::Output::PlanMark::Remove) {
+                            theme.ready_row(&row.name, name_w, &row.to);
+                        }
+                    }
                 }
                 match activate_generation(&gen) {
                     Ok(()) => theme.ok(&format!(

@@ -154,26 +154,13 @@ fn compose_env(theme: &Theme, roots: &Roots, flags: &Flags, plan: &RunPlan) -> R
     let mut holes = Vec::new();
     let mut failed = false;
     let name_w = name_column_width(&plan.refs);
-    if plan.refs.len() > 1 {
-        theme.status(&format!(
-            "composing {} — {} packages",
-            theme.bold(&plan.label),
-            plan.refs.len()
-        ));
-    }
-    let (mut built, mut cached, mut substituted) = (0usize, 0usize, 0usize);
+    // Tier 1 (D-FE-CLI1): `jet env`/`run`/`dev` composing a project's
+    // packages is the trivial-op case — one `✓ name version` row per
+    // package, no state/duration column.
     let total_steps = plan.refs.len() + plan.adapters.len();
-    for (idx, spec) in plan.refs.iter().enumerate() {
-        if total_steps > 1 {
-            theme.progress_chain("realize", idx + 1, total_steps, &spec.raw, "provider");
-        }
-        match realize_ref_outcome(theme, roots, flags, &plan.table, spec, name_w) {
-            RefOutcome::Realized(entry, state) => {
-                match state {
-                    Provider::SourceState::Built => built += 1,
-                    Provider::SourceState::Cached => cached += 1,
-                    Provider::SourceState::Substituted => substituted += 1,
-                }
+    for spec in plan.refs.iter() {
+        match realize_ref_outcome(theme, roots, flags, &plan.table, spec, name_w, RowStyle::Ready, None) {
+            RefOutcome::Realized(entry, _state, _line) => {
                 // A `library` package realizes with an empty `bin` (U10) — it
                 // stages source for import and contributes nothing to PATH.
                 if !entry.bin.is_empty() {
@@ -212,12 +199,9 @@ fn compose_env(theme: &Theme, roots: &Roots, flags: &Flags, plan: &RunPlan) -> R
     if failed {
         return Err(1);
     }
-    if plan.refs.len() > 1 {
-        theme.status(&format!(
-            "env ready — {}",
-            state_summary(built, cached, substituted)
-        ));
-    }
+    // Tier 1 (D-FE-CLI1): the per-package `✓` rows above are the whole
+    // report — `jet env`/`run`/`dev` hand off straight to the shell
+    // threshold rule (`Shell::enter`) instead of a redundant summary line.
     Ok(Env {
         bin_dirs,
         refs: realized_refs,
@@ -235,21 +219,6 @@ fn name_column_width(refs: &[RefSpec::RefSpec]) -> usize {
         .max()
         .unwrap_or(0)
         .max(8)
-}
-
-/// `2 built, 1 cached` — non-zero source-state counts, joined.
-fn state_summary(built: usize, cached: usize, substituted: usize) -> String {
-    let mut parts = Vec::new();
-    if built > 0 {
-        parts.push(format!("{built} built"));
-    }
-    if cached > 0 {
-        parts.push(format!("{cached} cached"));
-    }
-    if substituted > 0 {
-        parts.push(format!("{substituted} substituted"));
-    }
-    parts.join(", ")
 }
 
 /// `jetpack build [<ref>]` — realize without entering a shell.
@@ -358,12 +327,41 @@ fn cmd_build(theme: &Theme, parsed: &Parsed) -> i32 {
     let mut holes = Vec::new();
     let name_w = name_column_width(&plan.refs);
     let total_steps = plan.refs.len() + plan.adapters.len();
+    // Tier 2 (D-FE-CLI1): a multi-package build gets the live region —
+    // finished rows promote up out of a pinned `building K/N` + progress bar
+    // status, which collapses to `build ready ✓` on success. A single
+    // package stays the plain quiet ledger row (nothing to promote out of).
+    let live_mode = total_steps > 1;
+    let mut live = theme.live_region();
     for (idx, spec) in plan.refs.iter().enumerate() {
-        if total_steps > 1 {
-            theme.progress_chain("realize", idx + 1, total_steps, &spec.raw, "provider");
-        }
-        match realize_ref_outcome(theme, &roots, &parsed.flags, &plan.table, spec, name_w) {
-            RefOutcome::Realized(entry, state) => {
+        let style = if live_mode {
+            live.set_status(&[
+                theme.render_live_header("building", idx + 1, total_steps, &spec.raw),
+                format!(
+                    "{}  {}",
+                    Theme::render_progress_bar(idx, total_steps, 14),
+                    theme.gray("resolving"),
+                ),
+            ]);
+            RowStyle::Silent
+        } else {
+            RowStyle::Ledger
+        };
+        let live_arg = if live_mode { Some(&mut live) } else { None };
+        match realize_ref_outcome(
+            theme,
+            &roots,
+            &parsed.flags,
+            &plan.table,
+            spec,
+            name_w,
+            style,
+            live_arg,
+        ) {
+            RefOutcome::Realized(entry, state, line) => {
+                if live_mode {
+                    live.finish(&line);
+                }
                 realized_refs.push(entry.reference);
                 match state {
                     Provider::SourceState::Built => built += 1,
@@ -402,6 +400,11 @@ fn cmd_build(theme: &Theme, parsed: &Parsed) -> i32 {
         return 2;
     }
     if ok {
+        // Tier 2 (D-FE-CLI1): collapse the live region to its one-line close
+        // before the T4 source-state summary.
+        if live_mode {
+            live.collapse(&format!("build ready {}", theme.green("✓")));
+        }
         // T4: per-run source-state summary (mirrors the D-JPK-CACHE1 example).
         theme.status(&format!(
             "built {} package(s): {} built, {} cached, {} substituted",

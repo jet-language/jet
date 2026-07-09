@@ -64,7 +64,7 @@ fn cmd_vm(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 {
         return 2;
     };
     if action == Syntax::OS_VM_ACTION_RUN {
-        return cmd_vm_run(theme, &system, disk);
+        return cmd_vm_run(theme, &plan, &system, disk, flags);
     }
     if real_guest {
         // The real tier realizes the disk through the hidden system backend,
@@ -223,10 +223,15 @@ fn cmd_vm_test(theme: &Theme, target: &Target, disk: &str, flags: &OsFlags) -> i
     }
 }
 
-fn cmd_vm_run(theme: &Theme, system: &SystemPlan, disk: &str) -> i32 {
+fn cmd_vm_run(theme: &Theme, plan: &EnvPlan, system: &SystemPlan, disk: &str, flags: &OsFlags) -> i32 {
+    // Running a VM is never gated on a proof (owner decree, card #363,
+    // 2026-07-09): a missing disk is built by the hidden backend, an existing
+    // real-tier disk just boots. Only legacy plumbing disks (no backend
+    // artifacts, no real marker) keep the old harness contract below.
     let real_marker = real_tier_proof_marker_path(disk);
-    if real_marker.is_file() {
-        return cmd_vm_run_real(theme, system, disk, &real_marker);
+    let backend_flake = nixos_backend_dir(&system.name).join("flake.nix");
+    if !Path::new(disk).is_file() || real_marker.is_file() || backend_flake.is_file() {
+        return cmd_vm_run_or_build(theme, &plan.table, system, disk, flags);
     }
     let missing = missing_vm_tools();
     let missing = missing

@@ -353,6 +353,9 @@ fn project_func(
             fallible: false,
             effect_grant_need: None,
             span: p.name_span.into(),
+            pattern_source_span: None,
+            append_op: None,
+            element_index: None,
         });
         let _ = i;
     }
@@ -530,7 +533,7 @@ fn project_stmt(
             let node_id = format!("{}:stmt:{ordinal}:branch", g.graph_id);
             let mut affordances = vec!["edit_inline_expr", "source_jump"];
             if matches!(ifs.cond, Expr::PatternTest { .. }) {
-                affordances.push("add_arm_readonly");
+                affordances.push("add_pattern_arm");
             }
             add_node(
                 g,
@@ -546,7 +549,14 @@ fn project_stmt(
             );
             let cond = add_pin(g, &node_id, "cond", "input", "Bool", "", false);
             if matches!(ifs.cond, Expr::PatternTest { .. }) {
-                add_arm_pin(g, &node_id, "arm1", &pattern_pin_label(src, &ifs.cond));
+                let span = pattern_arm_edit_span(&ifs.cond);
+                add_arm_pin(
+                    g,
+                    &node_id,
+                    "arm1",
+                    &pattern_pin_label(src, &ifs.cond),
+                    span,
+                );
             }
             connect_expr_to_input(
                 g,
@@ -593,7 +603,7 @@ fn project_stmt(
                 x,
                 y,
                 vec!["control"],
-                vec!["add_arm_readonly", "edit_inline_expr", "source_jump"],
+                vec!["edit_inline_expr", "source_jump"],
             );
             add_inline(g, &node_id, ordinal, "cond", src, cond.span());
             project_stmt_block(g, index, src, body, ordinal * 100 + 15, x + 230, y + 70);
@@ -633,7 +643,7 @@ fn project_stmt(
                 x,
                 y,
                 vec!["control"],
-                vec!["edit_inline_expr", "source_jump"],
+                vec!["add_pattern_arm", "edit_inline_expr", "source_jump"],
             );
             add_inline(g, &node_id, ordinal, "init", src, init.name_span);
             add_inline(g, &node_id, ordinal, "cond", src, cond.span());
@@ -714,6 +724,7 @@ fn project_stmt(
                     &node_id,
                     &format!("arm{}", i + 1),
                     &pattern_pin_label(src, &arm.cond),
+                    arm.cond.span().into(),
                 );
                 add_inline(
                     g,
@@ -952,6 +963,13 @@ fn pattern_pin_label(src: &str, expr: &Expr) -> String {
         return format!("== {}", balanced.trim());
     }
     balanced
+}
+
+fn pattern_arm_edit_span(expr: &Expr) -> SourceSpan {
+    match expr {
+        Expr::PatternTest { pattern, .. } => pattern.span().into(),
+        _ => expr.span().into(),
+    }
 }
 
 fn balance_closing_parens(s: &str) -> String {
@@ -1292,7 +1310,7 @@ fn project_expr_node(
                 x,
                 y,
                 vec!["multi-input"],
-                vec!["add_input_readonly", "edit_inline_expr", "source_jump"],
+                vec!["append_multi_input", "edit_inline_expr", "source_jump"],
             );
             for (i, item) in items.iter().enumerate() {
                 let ty = expr_type(g, index, item);
@@ -1305,6 +1323,8 @@ fn project_expr_node(
                     "",
                     false,
                 );
+                set_pin_source_span(g, &input, item.span().into());
+                set_pin_append(g, &input, "remove_multi_input_element", i);
                 connect_expr_to_input(
                     g,
                     index,
@@ -1344,7 +1364,7 @@ fn project_expr_node(
                 x,
                 y,
                 vec!["multi-input"],
-                vec!["add_input_readonly", "edit_inline_expr", "source_jump"],
+                vec!["append_multi_input", "edit_inline_expr", "source_jump"],
             );
             let callee_pin = add_pin(g, &node_id, "callee", "input", "Fn", "", false);
             connect_expr_to_input(
@@ -1370,6 +1390,8 @@ fn project_expr_node(
                     "",
                     false,
                 );
+                set_pin_source_span(g, &input, item.span().into());
+                set_pin_append(g, &input, "remove_multi_input_element", i);
                 connect_expr_to_input(
                     g,
                     index,

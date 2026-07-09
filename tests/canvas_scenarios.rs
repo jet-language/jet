@@ -93,6 +93,21 @@ fn exec_rewire_binding_order_diagnostic() {
 }
 
 #[test]
+fn pattern_arm_add_edit_remove() {
+    run_canvas_scenario("pattern-arm-add-edit-remove");
+}
+
+#[test]
+fn pattern_arm_invalid_refused() {
+    run_canvas_scenario("pattern-arm-invalid-refused");
+}
+
+#[test]
+fn multi_input_append_remove() {
+    run_canvas_scenario("multi-input-append-remove");
+}
+
+#[test]
 fn inline_edit_values() {
     run_canvas_scenario("inline-edit-values");
 }

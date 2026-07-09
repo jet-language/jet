@@ -146,6 +146,65 @@ fn dedup_preserving_order(values: Vec<String>) -> Vec<String> {
         .collect()
 }
 
+/// Which of `names` the real-tier backend cannot resolve against the pinned
+/// nixpkgs (same fallback chain as the generated `jetosPkg` resolver:
+/// direct, underscored, kdePackages, gnomeExtensions). Packages from other
+/// flake inputs land here — they become explicit audit omissions instead of
+/// entries that break the build.
+fn probe_unresolvable_packages(
+    nixpkgs_ref: &str,
+    names: &[String],
+) -> Result<Vec<String>, String> {
+    if names.is_empty() {
+        return Ok(Vec::new());
+    }
+    let flake_ref = nixpkgs_ref
+        .strip_prefix("github@")
+        .map(|rest| format!("github:{rest}"))
+        .ok_or_else(|| format!("nixpkgs ref `{nixpkgs_ref}` is not a github pin"))?;
+    let name_list = names
+        .iter()
+        .map(|n| JSON::quote(n))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let expr = format!(
+        r#"pkgs: let
+  resolves = name: let
+    underscored = builtins.replaceStrings ["-"] ["_"] name;
+    extension = if builtins.substring 0 22 name == "gnome-shell-extension-"
+      then builtins.substring 22 (builtins.stringLength name) name else name;
+    ok = attrs: n: (attrs ? ${{n}}) && (builtins.tryEval attrs.${{n}}).success;
+  in (ok pkgs name) || (ok pkgs underscored)
+    || (ok (pkgs.kdePackages or {{}}) name)
+    || (ok (pkgs.gnomeExtensions or {{}}) extension);
+in builtins.filter (n: !(resolves n)) [ {name_list} ]"#
+    );
+    let attr = format!("{flake_ref}#legacyPackages.x86_64-linux");
+    let output = Command::new("nix")
+        .args(["eval", "--json", &attr, "--apply", &expr])
+        .output()
+        .map_err(|e| format!("running the package resolvability probe failed: {e}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let line = stderr
+            .lines()
+            .rev()
+            .map(str::trim)
+            .find(|l| !l.is_empty())
+            .unwrap_or("no diagnostic output");
+        let excerpt: String = line.chars().take(240).collect();
+        return Err(format!("package resolvability probe failed: {excerpt}"));
+    }
+    let json = JSON::parse(&String::from_utf8_lossy(&output.stdout))
+        .map_err(|e| format!("parsing probe output failed: {e}"))?;
+    Ok(json
+        .as_array()
+        .map_err(|e| format!("probe output: {e}"))?
+        .iter()
+        .filter_map(|v| v.as_str().ok().map(str::to_string))
+        .collect())
+}
+
 /// Home Manager's own plumbing derivations surface in `home.packages` but are
 /// implementation details, not configuration intent — importing them would
 /// only make the generated config unbuildable.
@@ -425,6 +484,38 @@ fn plan_from_live_facts(
 
     let nixpkgs_ref = live_nixpkgs_ref(&args.source)
         .unwrap_or_else(|| "nixpkgs@nixpkgs-unstable".to_string());
+
+    // Packages that only exist in the source's other flake inputs would break
+    // the real-tier build; keep them out of the config and name each one in
+    // the audit (package-provenance import is the slice that recovers them).
+    let mut probe_names: Vec<String> = packages.clone();
+    for user in &users {
+        probe_names.extend(user.packages.iter().cloned());
+    }
+    probe_names = dedup_preserving_order(probe_names);
+    let mut packages = packages;
+    let mut users = users;
+    match probe_unresolvable_packages(&nixpkgs_ref, &probe_names) {
+        Ok(unresolvable) if !unresolvable.is_empty() => {
+            let external: BTreeSet<String> = unresolvable.into_iter().collect();
+            packages.retain(|p| !external.contains(p));
+            for user in &mut users {
+                user.packages.retain(|p| !external.contains(p));
+            }
+            for name in &external {
+                omissions.push(format!(
+                    "package `{name}` comes from another flake input (not the pinned nixpkgs); \
+                     package-provenance import will recover it"
+                ));
+            }
+        }
+        Ok(_) => {}
+        Err(e) => {
+            omissions.push(format!(
+                "package resolvability probe failed ({e}); non-nixpkgs packages may break the real-tier build"
+            ));
+        }
+    }
 
     Ok(NixosImportPlan {
         source: args.source.clone(),

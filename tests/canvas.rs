@@ -211,7 +211,12 @@ const CANVAS_PATTERN_MULTI_FIXTURE: &str = r#"fn first_or_zero(x: Int?) -> Int {
 
 fn list_total() -> Int {
     xs :: [1, 2, 3]
-    return xs[0]
+    ys :: to_int.[1, 2]
+    return xs[0] + ys[0]
+}
+
+fn to_int(n: Int) -> Int {
+    return n
 }
 
 fn run() {
@@ -393,6 +398,26 @@ fn json_field(haystack: &str, field: &str) -> String {
     let start = haystack.find(&key).expect("json field") + key.len();
     let rest = &haystack[start..];
     rest[..rest.find('"').expect("json field terminator")].to_string()
+}
+
+fn source_span_near(haystack: &str, marker: &str) -> (usize, usize) {
+    let pos = haystack.find(marker).expect("marker near source span");
+    let rest = &haystack[pos..];
+    let key = "\"source_span\":{\"start\":";
+    let start_pos = rest.find(key).expect("source span after marker") + key.len();
+    let rest = &rest[start_pos..];
+    let start = rest[..rest.find(',').expect("span comma")]
+        .parse::<usize>()
+        .expect("span start");
+    let end_key = "\"end\":";
+    let end_pos = rest.find(end_key).expect("span end") + end_key.len();
+    let rest = &rest[end_pos..];
+    let end_text = rest
+        .chars()
+        .take_while(|c| c.is_ascii_digit())
+        .collect::<String>();
+    let end = end_text.parse::<usize>().expect("span end number");
+    (start, end)
 }
 
 fn graph_id_for_title(graph: &str, title: &str) -> String {
@@ -723,11 +748,14 @@ fn canvas_projects_pattern_arm_and_multi_input_pin_metadata() {
     for field in [
         "\"role\":\"arm\"",
         "\"pattern_source\":\"== Val(n)\"",
+        "\"pattern_source_span\":",
         "\"name\":\"arm1\"",
         "\"name\":\"else\"",
-        "\"add_arm_readonly\"",
+        "\"add_pattern_arm\"",
         "\"title\":\"list\"",
-        "\"add_input_readonly\"",
+        "\"title\":\"fanout\"",
+        "\"append_multi_input\"",
+        "\"append_op\":\"remove_multi_input_element\"",
         "\"name\":\"item1\"",
         "\"name\":\"item2\"",
         "\"name\":\"item3\"",
@@ -737,6 +765,151 @@ fn canvas_projects_pattern_arm_and_multi_input_pin_metadata() {
             "pattern/multi-input graph missing {field}: {graph}"
         );
     }
+}
+
+#[test]
+fn canvas_pattern_arm_and_multi_input_transactions_write_source() {
+    let path = write_fixture(
+        "pattern_arm_tx",
+        r#"enum Choice {
+    A(Int)
+    B(Int)
+    C(Int)
+}
+
+fn choose(x: Choice) -> Int {
+    if x == {
+        A(n) -> { return n }
+        else -> { return 0 }
+    }
+}
+
+fn run() {
+    print(choose(Choice.A(1)))
+}
+"#,
+    );
+    let graph = jet::Canvas::graph_json_for_file(&path).expect("canvas graph");
+    let graph_id = graph_id_for_title(&graph, "choose");
+    let (node_start, node_end) = source_span_near(&graph, "\"title\":\"if ==\"");
+    let revision = jet::Canvas::source_revision(&fs::read_to_string(&path).unwrap());
+    let add = format!(
+        "{{\"schema_version\":1,\"op\":\"add_pattern_arm\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"node_start\":{},\"node_end\":{},\"pattern\":\"== B(n)\"}}",
+        revision, graph_id, node_start, node_end
+    );
+    let out = jet::Canvas::apply_transaction_json(&path, &add).expect("add arm");
+    assert!(out.contains("\"changed\":true"), "{out}");
+    let added = fs::read_to_string(&path).unwrap();
+    assert!(added.contains("B(n) ->"), "{added}");
+    assert!(
+        added.contains("return 1"),
+        "fresh arm uses sema-safe default return body: {added}"
+    );
+
+    let graph = jet::Canvas::graph_json_for_file(&path).expect("graph after add");
+    let (pat_start, pat_end) = source_span_near(&graph, "\"pattern_source\":\"B(n)\"");
+    let revision = jet::Canvas::source_revision(&added);
+    let edit = format!(
+        "{{\"schema_version\":1,\"op\":\"edit_pattern_arm\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"pattern_start\":{},\"pattern_end\":{},\"pattern\":\"== C(n)\"}}",
+        revision, graph_id, pat_start, pat_end
+    );
+    jet::Canvas::apply_transaction_json(&path, &edit).expect("edit arm");
+    let edited = fs::read_to_string(&path).unwrap();
+    assert!(edited.contains("C(n) ->"), "{edited}");
+    assert!(!edited.contains("B(n) ->"), "{edited}");
+
+    let graph = jet::Canvas::graph_json_for_file(&path).expect("graph after edit");
+    let (pat_start, pat_end) = source_span_near(&graph, "\"pattern_source\":\"C(n)\"");
+    let revision = jet::Canvas::source_revision(&edited);
+    let remove = format!(
+        "{{\"schema_version\":1,\"op\":\"remove_pattern_arm\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"pattern_start\":{},\"pattern_end\":{}}}",
+        revision, graph_id, pat_start, pat_end
+    );
+    jet::Canvas::apply_transaction_json(&path, &remove).expect("remove arm");
+    let removed = fs::read_to_string(&path).unwrap();
+    assert!(!removed.contains("C(n) ->"), "{removed}");
+
+    let invalid_path = write_fixture(
+        "pattern_arm_invalid_tx",
+        r#"enum Choice {
+    A(Int)
+}
+
+fn choose(x: Choice) -> Int {
+    if x == {
+        A(n) -> { return n }
+    }
+}
+
+fn run() {
+    print(choose(Choice.A(1)))
+}
+"#,
+    );
+    let graph = jet::Canvas::graph_json_for_file(&invalid_path).expect("invalid graph");
+    let graph_id = graph_id_for_title(&graph, "choose");
+    let (pat_start, pat_end) = source_span_near(&graph, "\"pattern_source\":\"A(n)\"");
+    let before = fs::read_to_string(&invalid_path).unwrap();
+    let revision = jet::Canvas::source_revision(&before);
+    let remove_last = format!(
+        "{{\"schema_version\":1,\"op\":\"remove_pattern_arm\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"pattern_start\":{},\"pattern_end\":{}}}",
+        revision, graph_id, pat_start, pat_end
+    );
+    let err = jet::Canvas::apply_transaction_json(&invalid_path, &remove_last).unwrap_err();
+    assert!(err.contains("can't remove the last pattern arm"), "{err}");
+    assert_eq!(fs::read_to_string(&invalid_path).unwrap(), before);
+
+    let multi_path = write_fixture(
+        "multi_input_tx",
+        r#"fn to_int(n: Int) -> Int {
+    return n
+}
+
+fn demo() -> Int {
+    xs :: [1, 2, 3]
+    ys :: to_int.[1, 2]
+    return xs[0] + ys[0]
+}
+
+fn run() {
+    print(demo())
+}
+"#,
+    );
+    let graph = jet::Canvas::graph_json_for_file(&multi_path).expect("multi graph");
+    let (list_start, list_end) = source_span_near(&graph, "\"title\":\"list\"");
+    let revision = jet::Canvas::source_revision(&fs::read_to_string(&multi_path).unwrap());
+    let append = format!(
+        "{{\"schema_version\":1,\"op\":\"append_multi_input\",\"revision\":\"{}\",\"node_start\":{},\"node_end\":{},\"element\":\"4\"}}",
+        revision, list_start, list_end
+    );
+    jet::Canvas::apply_transaction_json(&multi_path, &append).expect("append list");
+    let appended = fs::read_to_string(&multi_path).unwrap();
+    assert!(appended.contains("[1, 2, 3, 4]"), "{appended}");
+
+    let graph = jet::Canvas::graph_json_for_file(&multi_path).expect("multi graph after append");
+    let (list_start, list_end) = source_span_near(&graph, "\"title\":\"list\"");
+    let (item_start, item_end) = source_span_near(&graph, "\"name\":\"item4\"");
+    let revision = jet::Canvas::source_revision(&appended);
+    let remove = format!(
+        "{{\"schema_version\":1,\"op\":\"remove_multi_input_element\",\"revision\":\"{}\",\"node_start\":{},\"node_end\":{},\"element_start\":{},\"element_end\":{}}}",
+        revision, list_start, list_end, item_start, item_end
+    );
+    jet::Canvas::apply_transaction_json(&multi_path, &remove).expect("remove list item");
+    let removed = fs::read_to_string(&multi_path).unwrap();
+    assert!(removed.contains("[1, 2, 3]"), "{removed}");
+    assert!(!removed.contains("[1, 2, 3, 4]"), "{removed}");
+
+    let graph = jet::Canvas::graph_json_for_file(&multi_path).expect("fanout graph");
+    let (fan_start, fan_end) = source_span_near(&graph, "\"title\":\"fanout\"");
+    let revision = jet::Canvas::source_revision(&removed);
+    let append = format!(
+        "{{\"schema_version\":1,\"op\":\"append_multi_input\",\"revision\":\"{}\",\"node_start\":{},\"node_end\":{},\"element\":\"3\"}}",
+        revision, fan_start, fan_end
+    );
+    jet::Canvas::apply_transaction_json(&multi_path, &append).expect("append fanout");
+    let fanout = fs::read_to_string(&multi_path).unwrap();
+    assert!(fanout.contains("to_int.[1, 2, 3]"), "{fanout}");
 }
 
 #[test]

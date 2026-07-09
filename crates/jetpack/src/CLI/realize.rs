@@ -19,8 +19,8 @@ fn realize_ref(
     spec: &RefSpec::RefSpec,
     name_w: usize,
 ) -> Option<(Store::StoreEntry, Provider::SourceState)> {
-    match realize_ref_outcome(theme, roots, flags, table, spec, name_w) {
-        RefOutcome::Realized(entry, state) => Some((entry, state)),
+    match realize_ref_outcome(theme, roots, flags, table, spec, name_w, RowStyle::Ledger, None) {
+        RefOutcome::Realized(entry, state, _line) => Some((entry, state)),
         RefOutcome::NeedsNix(need) => {
             report_nix_bridge_required(theme, flags, &[need], &[]);
             None
@@ -29,8 +29,27 @@ fn realize_ref(
     }
 }
 
+/// How `realize_ref_outcome` reports a successful realization (D-FE-CLI1).
+/// `Ledger`/`Ready` print internally, matching every call site before this
+/// card; `Silent` prints nothing and hands the caller the row text instead,
+/// so a tier-2 live region (`Theme::live_region`) can promote it in place of
+/// a plain `eprintln!`.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RowStyle {
+    /// The state-column ledger row (`✓ name version state`) — D-JPK-CACHE1.
+    Ledger,
+    /// The tier-1 trivial-op row (`✓ name version`, no state/detail).
+    Ready,
+    /// No internal print; `RefOutcome::Realized`'s third field carries the
+    /// same text `Ledger` would have printed, for the caller to promote.
+    Silent,
+}
+
 enum RefOutcome {
-    Realized(Store::StoreEntry, Provider::SourceState),
+    /// The realized entry, its source state, and the row text `Ledger`
+    /// style would print (computed regardless of style, since it's cheap
+    /// and `Silent` callers need it).
+    Realized(Store::StoreEntry, Provider::SourceState, String),
     NeedsNix(Provider::NixBridgeNeed),
     Failed,
 }
@@ -42,10 +61,24 @@ fn realize_ref_outcome(
     table: &RefSpec::SourceTable,
     spec: &RefSpec::RefSpec,
     name_w: usize,
+    style: RowStyle,
+    mut live: Option<&mut Output::LiveRegion>,
 ) -> RefOutcome {
+    // Tier 2 (D-FE-CLI1 acceptance: "erase live regions before diagnostics").
+    // The caller draws the live region's status lines (`building K/N …`) once
+    // per item, before calling this function; nothing else redraws them
+    // during the call, so clearing once up front is enough to guarantee any
+    // print this call makes — a promoted row or a diagnostic — lands on a
+    // clean line instead of over stale progress-bar text.
+    if let Some(l) = live.as_deref_mut() {
+        l.clear();
+    }
     // A TTY gets a live spinner that the final ledger row replaces; without
     // one (piped output, NO_COLOR) the plain status line stands instead.
-    let spinner = if theme.color {
+    // `Silent` (tier-2 live region) draws its own status instead.
+    let spinner = if style == RowStyle::Silent {
+        None
+    } else if theme.color {
         Some(theme.spinner(&format!("resolving {} …", spec.raw)))
     } else {
         theme.status(&format!("resolving {} …", theme.bold(&spec.raw)));
@@ -57,9 +90,16 @@ fn realize_ref_outcome(
     let store_dir = roots.hangar_dir();
     if let Some(entry) = Store::find_by_reference(roots, &spec.raw) {
         drop(spinner);
-        theme.ok(&format!("{} {}", theme.bold(&entry.name), "cached"));
-        theme.detail(&theme.gray(&entry.out));
-        return RefOutcome::Realized(entry, Provider::SourceState::Cached);
+        let line = theme.render_row(&entry.name, name_w, &entry.version, "cached");
+        match style {
+            RowStyle::Ledger => {
+                theme.ok(&format!("{} {}", theme.bold(&entry.name), "cached"));
+                theme.detail(&theme.gray(&entry.out));
+            }
+            RowStyle::Ready => theme.ready_row(&entry.name, name_w, &entry.version),
+            RowStyle::Silent => {}
+        }
+        return RefOutcome::Realized(entry, Provider::SourceState::Cached, line);
     }
     if flags.offline
         && Provider::uses_nix_provider(spec, table, flags.offline, &store_dir)
@@ -131,8 +171,15 @@ fn realize_ref_outcome(
             } else {
                 r.version.clone()
             };
-            theme.row(&r.name, name_w, &version, &state);
-            theme.detail(&theme.gray(&r.out));
+            let line = theme.render_row(&r.name, name_w, &version, &state);
+            match style {
+                RowStyle::Ledger => {
+                    theme.row(&r.name, name_w, &version, &state);
+                    theme.detail(&theme.gray(&r.out));
+                }
+                RowStyle::Ready => theme.ready_row(&r.name, name_w, &version),
+                RowStyle::Silent => {}
+            }
             let state = r.source_state;
             match Store::record(
                 roots,
@@ -155,7 +202,7 @@ fn realize_ref_outcome(
                 }
             }
             .map_or(RefOutcome::Failed, |(entry, state)| {
-                RefOutcome::Realized(entry, state)
+                RefOutcome::Realized(entry, state, line)
             })
         }
         Err(e) => {
