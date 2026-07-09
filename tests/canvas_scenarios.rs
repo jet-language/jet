@@ -78,6 +78,21 @@ fn wire_data_and_exec() {
 }
 
 #[test]
+fn exec_rewire_reorders_statements() {
+    run_canvas_scenario("exec-rewire-reorders-statements");
+}
+
+#[test]
+fn exec_rewire_refuses_cross_block() {
+    run_canvas_scenario("exec-rewire-refuses-cross-block");
+}
+
+#[test]
+fn exec_rewire_binding_order_diagnostic() {
+    run_canvas_scenario("exec-rewire-binding-order-diagnostic");
+}
+
+#[test]
 fn inline_edit_values() {
     run_canvas_scenario("inline-edit-values");
 }

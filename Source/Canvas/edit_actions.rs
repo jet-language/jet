@@ -883,6 +883,291 @@ fn inline_helper_candidate(
         .map_err(|_| edit_error("overlap", "Canvas inline helper edit overlapped"))
 }
 
+#[derive(Clone)]
+struct StatementLoc {
+    anchor: SourceSpan,
+    full: SourceSpan,
+    block: Vec<usize>,
+    index: usize,
+}
+
+fn apply_reorder_statements(
+    path: &Path,
+    src: &str,
+    graph_id: &str,
+    moved: SourceSpan,
+    anchor: SourceSpan,
+    position: &str,
+) -> Result<String, String> {
+    let Some(name_span) = graph_id_name_span(graph_id) else {
+        return Err(edit_error(
+            "bad_request",
+            "Canvas graph id is not a function graph",
+        ));
+    };
+    let path_str = path.to_string_lossy();
+    let (diags, bundle) = crate::Driver::check_file(&path_str, None, true);
+    let errors = diags
+        .iter()
+        .filter(|d| d.severity == Severity::Error)
+        .cloned()
+        .collect::<Vec<_>>();
+    if !errors.is_empty() {
+        return Err(diagnostics_error(path, src, &errors));
+    }
+    let Some(bundle) = bundle else {
+        return Err(edit_error(
+            "check",
+            "Canvas could not read checked statement facts",
+        ));
+    };
+    let Some(func) = find_func_by_name_span(&bundle, name_span) else {
+        return Err(edit_error("not_found", "Canvas graph no longer exists"));
+    };
+    let mut locs = Vec::new();
+    collect_statement_locs(src, &func.body, &mut Vec::new(), &mut locs);
+    let Some(moved_loc) = locs.iter().find(|loc| same_span(loc.anchor, moved)).cloned() else {
+        return Err(edit_error(
+            "not_found",
+            "Canvas step to move no longer exists",
+        ));
+    };
+    let Some(anchor_loc) = locs.iter().find(|loc| same_span(loc.anchor, anchor)).cloned() else {
+        return Err(edit_error(
+            "not_found",
+            "Canvas anchor step no longer exists",
+        ));
+    };
+    if moved_loc.block != anchor_loc.block {
+        return Err(edit_error(
+            "bad_request",
+            "can't move a step into a different branch yet",
+        ));
+    }
+    if moved_loc.index == anchor_loc.index {
+        return Ok(edit_ok(false, path));
+    }
+    if moved_loc.full.start <= anchor_loc.full.start && anchor_loc.full.start < moved_loc.full.end {
+        return Err(edit_error(
+            "bad_request",
+            "can't anchor a step inside the moved source yet",
+        ));
+    }
+    let insert = match position {
+        "before" => anchor_loc.full.start,
+        "after" => anchor_loc.full.end,
+        _ => {
+            return Err(edit_error(
+                "bad_request",
+                "Canvas reorder position must be before or after",
+            ))
+        }
+    };
+    let chunk = src
+        .get(moved_loc.full.start..moved_loc.full.end)
+        .ok_or_else(|| edit_error("bad_request", "Canvas moved source span is stale"))?
+        .to_string();
+    let mut changed = String::with_capacity(src.len());
+    changed.push_str(&src[..moved_loc.full.start]);
+    changed.push_str(&src[moved_loc.full.end..]);
+    let mut insert_at = insert;
+    if insert_at > moved_loc.full.start {
+        insert_at = insert_at.saturating_sub(moved_loc.full.end - moved_loc.full.start);
+    }
+    insert_at = insert_at.min(changed.len());
+    changed.insert_str(insert_at, &chunk);
+    write_checked_formatted(path, src, &changed)
+}
+
+fn find_func_by_name_span<'a>(
+    bundle: &'a AST::ProgramBundle,
+    name_span: SourceSpan,
+) -> Option<&'a AST::Func> {
+    fn find_in_items<'a>(items: &'a [Item], name_span: SourceSpan) -> Option<&'a AST::Func> {
+        for item in items {
+            match item {
+                Item::Func(f) if same_span(f.name_span.into(), name_span) => return Some(f),
+                Item::Struct(s) => {
+                    for method in &s.methods {
+                        if same_span(method.name_span.into(), name_span) {
+                            return Some(method);
+                        }
+                    }
+                }
+                Item::Impl(i) => {
+                    for method in &i.methods {
+                        if same_span(method.name_span.into(), name_span) {
+                            return Some(method);
+                        }
+                    }
+                }
+                Item::CodeModule(m) => {
+                    if let Some(body) = &m.body {
+                        if let Some(found) = find_in_items(body, name_span) {
+                            return Some(found);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+    for module in &bundle.modules {
+        if let Some(found) = find_in_items(&module.items, name_span) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+fn collect_statement_locs(
+    src: &str,
+    stmts: &[Stmt],
+    block: &mut Vec<usize>,
+    out: &mut Vec<StatementLoc>,
+) {
+    for (index, stmt) in stmts.iter().enumerate() {
+        out.push(StatementLoc {
+            anchor: stmt_canvas_anchor(stmt).into(),
+            full: stmt_text_span(src, stmt),
+            block: block.clone(),
+            index,
+        });
+        block.push(index);
+        collect_child_statement_locs(src, stmt, block, out);
+        block.pop();
+    }
+}
+
+fn collect_child_statement_locs(
+    src: &str,
+    stmt: &Stmt,
+    block: &mut Vec<usize>,
+    out: &mut Vec<StatementLoc>,
+) {
+    match stmt {
+        Stmt::If(ifs) => {
+            block.push(0);
+            collect_statement_locs(src, &ifs.then_body, block, out);
+            block.pop();
+            match &ifs.else_branch {
+                Some(AST::ElseBranch::Else(body)) => {
+                    block.push(1);
+                    collect_statement_locs(src, body, block, out);
+                    block.pop();
+                }
+                Some(AST::ElseBranch::ElseIf(next)) => {
+                    block.push(1);
+                    collect_child_statement_locs(src, &Stmt::If((**next).clone()), block, out);
+                    block.pop();
+                }
+                None => {}
+            }
+        }
+        Stmt::While { body, .. }
+        | Stmt::For { body, .. }
+        | Stmt::Loop { body, .. }
+        | Stmt::CountedLoop { body, .. }
+        | Stmt::Unsafe { body, .. }
+        | Stmt::Impure { body, .. }
+        | Stmt::Reactive { body, .. }
+        | Stmt::SuppressMustUse { body, .. }
+        | Stmt::Off { body, .. }
+        | Stmt::DebugOnly { body, .. }
+        | Stmt::Region { body, .. }
+        | Stmt::TaskGroup { body, .. }
+        | Stmt::Layout { body, .. }
+        | Stmt::Caps { body, .. }
+        | Stmt::Grant { body, .. }
+        | Stmt::ComptimeBlock { body, .. }
+        | Stmt::ContextBlock { body, .. }
+        | Stmt::Live { body, .. }
+        | Stmt::AssumeDet { body, .. }
+        | Stmt::Transact { body, .. }
+        | Stmt::ScopeMember { body, .. } => {
+            block.push(0);
+            collect_statement_locs(src, body, block, out);
+            block.pop();
+        }
+        Stmt::Switch {
+            arms, else_body, ..
+        }
+        | Stmt::ComptimeSwitch {
+            arms, else_body, ..
+        } => {
+            for (i, arm) in arms.iter().enumerate() {
+                block.push(i);
+                collect_statement_locs(src, &arm.body, block, out);
+                block.pop();
+            }
+            if let Some(body) = else_body {
+                block.push(arms.len());
+                collect_statement_locs(src, body, block, out);
+                block.pop();
+            }
+        }
+        Stmt::ComptimeIf {
+            then_body,
+            else_body,
+            ..
+        } => {
+            block.push(0);
+            collect_statement_locs(src, then_body, block, out);
+            block.pop();
+            if let Some(body) = else_body {
+                block.push(1);
+                collect_statement_locs(src, body, block, out);
+                block.pop();
+            }
+        }
+        _ => {}
+    }
+}
+
+fn stmt_canvas_anchor(stmt: &Stmt) -> Span {
+    match stmt {
+        Stmt::If(ifs) => ifs.cond.span(),
+        Stmt::Val(b) => b.name_span,
+        Stmt::Assign { target, .. } => target.span(),
+        Stmt::Expr(e) => e.span(),
+        Stmt::Return(_, span)
+        | Stmt::Break(span)
+        | Stmt::Continue(span)
+        | Stmt::BreakLabel(_, span)
+        | Stmt::ContinueLabel(_, span) => *span,
+        _ => stmt.span(),
+    }
+}
+
+fn stmt_text_span(src: &str, stmt: &Stmt) -> SourceSpan {
+    let span = match stmt {
+        Stmt::Val(b) => SourceSpan {
+            start: b.name_span.start,
+            end: b.init.span().end,
+        },
+        Stmt::Assign { target, value, .. } => SourceSpan {
+            start: target.span().start,
+            end: value.span().end,
+        },
+        Stmt::Expr(e) => e.span().into(),
+        Stmt::Return(Some(e), span) => SourceSpan {
+            start: span.start,
+            end: e.span().end,
+        },
+        Stmt::If(ifs) => ifs.span.into(),
+        _ => stmt.span().into(),
+    };
+    SourceSpan {
+        start: line_start(src, span.start),
+        end: line_after(src, span.end),
+    }
+}
+
+fn same_span(a: SourceSpan, b: SourceSpan) -> bool {
+    a.start == b.start && a.end == b.end
+}
+
 fn write_checked_formatted(path: &Path, before: &str, candidate: &str) -> Result<String, String> {
     let formatted = crate::format_source(candidate)
         .map_err(|diags| diagnostics_error(path, candidate, &diags))?;

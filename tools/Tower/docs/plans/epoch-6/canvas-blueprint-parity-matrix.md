@@ -39,13 +39,13 @@ Ratchets use class prefixes: `interaction:`, `protocol:`, `projection:`,
 | Node model | Sequence, gate, do-once, do-N | Blueprint scheduler nodes are rejected unless represented by ordinary Jet control/callback code. | rejected-as-Blueprint-semantic-debt | #278 |
 | Node model | Large graph virtualization and LOD | Canvas renders visible graph regions and low-zoom title-bar nodes for large projections. | claimed | grep:#314, tests/web_dev.rs |
 | Node model | Math Expression node | Expression text stays ordinary Jet expression source, not a separate formula language. | planned | #274 |
-| Pins and wires | Exec pins and data pins | Separate control/data rails over Jet semantics. | shipped | interaction:tests/canvas_scenarios.rs::palette_insert_catalog_sweep |
-| Pins and wires | Typed colored wires | Pin type, capability, fallibility, effect facts, and source spans render distinctly. | claimed | projection:#274/#278, tests/canvas.rs |
-| Pins and wires | Incompatible refusal | Wrong wires are impossible or fail with Jet diagnostics. | claimed | projection:#277, tests/canvas.rs |
+| Pins and wires | Exec pins and data pins | Separate control/data rails over Jet semantics. | shipped | interaction:tests/canvas_scenarios.rs::palette_insert_catalog_sweep; interaction:tests/canvas_scenarios.rs::exec_rewire_reorders_statements |
+| Pins and wires | Typed colored wires | Pin type, capability, fallibility, effect facts, and source spans render distinctly. | shipped | interaction:tests/canvas_scenarios.rs::exec_rewire_reorders_statements; projection:#274/#278, tests/canvas.rs |
+| Pins and wires | Incompatible refusal | Wrong wires are impossible or fail with Jet diagnostics. | shipped | interaction:tests/canvas_scenarios.rs::exec_rewire_refuses_cross_block; interaction:tests/canvas_scenarios.rs::exec_rewire_binding_order_diagnostic |
 | Pins and wires | Auto-cast insertion | Ratified visible conversion node/call writes source. | claimed | projection:#277, tests/canvas.rs, D-CANVAS-CONVERT1 |
 | Pins and wires | Promote pin to variable | Promotion creates an ordinary Jet binding. | claimed | projection:#277, tests/canvas.rs |
-| Pins and wires | Break/move links | Rewire transactions rewrite ordinary Jet call/argument source. | claimed | projection:#277, tests/canvas.rs |
-| Pins and wires | Drag-drop rewiring | Pin drag applies source-backed move/conversion transactions when Canvas can prove the source anchor, otherwise opens compatible action menus. | claimed | grep:#287, tests/web_dev.rs |
+| Pins and wires | Break/move links | Rewire transactions rewrite ordinary Jet call/argument source. | shipped | interaction:tests/canvas_scenarios.rs::exec_rewire_reorders_statements; projection:#277, tests/canvas.rs |
+| Pins and wires | Drag-drop rewiring | Pin drag applies source-backed move/conversion transactions when Canvas can prove the source anchor, otherwise opens compatible action menus. | shipped | interaction:tests/canvas_scenarios.rs::exec_rewire_reorders_statements; interaction:tests/canvas_scenarios.rs::exec_rewire_refuses_cross_block |
 | Types | Primitive and user types | Pins display Bool, numeric, String, structs, enums, collections, options/results. | claimed | projection:#274, tests/canvas.rs |
 | Types | Object/reference handles | Handles render as Jet library/type facts, not Blueprint object semantics. | planned | #274 |
 | Types | Effect and unsafe markers | Async/effect/proof/unsafe rails are visual projections only. | claimed | projection:#278, tests/canvas.rs |

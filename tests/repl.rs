@@ -676,3 +676,165 @@ fn repl_immut_binding_rejects_reassign() {
         out
     );
 }
+
+// ── D-FE-REPL1=D: hybrid REPL — turn gutter, fold, pin rail, docs, rerun ───
+//
+// The raw-mode TTY event loop (`Source/REPL/Interactive.rs`) isn't
+// exercised here (no real pty in the test harness — see
+// `Source/REPL/Terminal.rs` for the raw-mode guard/key-decoder unit tests
+// instead). What IS tested here, against the same `pub` API the interactive
+// loop calls, is every decision that shapes the interactive UX: the turn
+// gutter, the auto-fold threshold, the pin rail, `?name` docs, and the
+// rerun replay plan (D-FE-REPL-RERUN1=A) — plus the bare `?name` transcript
+// path (D-FE-REPL-DOCS1=B), which runs in every mode including this one.
+
+use jet::REPL::{Docs, Render, RerunPlan, ReplTurn, ReplTurnStatus, Session};
+
+#[test]
+fn banner_wording_matches_hybrid_ratification() {
+    // D-FE-REPL1=D ratified banner text (tests/cli/no_args_repl_banner.txt
+    // pins the same wording end-to-end through the real `jet` binary).
+    let banner = Render::render_banner("1.0.0", false);
+    assert_eq!(banner, "Jet 1.0.0 — interactive REPL  (:quit, :help, ^B bindings)");
+}
+
+#[test]
+fn interactive_prompt_carries_a_turn_gutter() {
+    // `1 user> `, `2 user> `, … — the dim one-character-cost gutter that
+    // distinguishes the interactive TTY prompt from the plain `user> ` the
+    // non-TTY floor keeps (see `no_args_repl_banner_golden` in tests/cli.rs).
+    assert_eq!(Render::render_prompt(1, false), "1 user> ");
+    assert_eq!(Render::render_prompt(2, false), "2 user> ");
+    assert_ne!(Render::render_prompt(1, false), "user> ");
+}
+
+#[test]
+fn long_list_folds_past_threshold_short_list_does_not() {
+    let short = jet::AST::CtValue::List((0..5).map(jet::AST::CtValue::Int).collect());
+    assert!(
+        Render::fold_decision_for_value(&short).is_none(),
+        "a short list must print plainly, not fold"
+    );
+
+    let long = jet::AST::CtValue::List((0..42).map(jet::AST::CtValue::Int).collect());
+    let (count, elem_ty) = Render::fold_decision_for_value(&long).expect("long list should fold");
+    assert_eq!(count, 42);
+    let marker = Render::render_fold_marker(count, &elem_ty, false);
+    assert_eq!(marker, "⋯ 42 rows folded · [Int] · unfold ⏎");
+}
+
+#[test]
+fn pin_rail_renders_binding_name_type_value_and_unpin_hint() {
+    let rail = Render::render_pin_rail("total : Int = 15", 3, 62, false);
+    let head = rail.lines().next().unwrap();
+    assert!(head.contains("total : Int = 15"), "got: {head:?}");
+    assert!(head.contains("turn 3"), "got: {head:?}");
+    assert!(head.contains("unpin"), "got: {head:?}");
+    assert!(head.contains("^P"), "got: {head:?}");
+}
+
+#[test]
+fn docs_lookup_builtin_list_filter_matches_ratified_mock() {
+    // D-FE-REPL-DOCS1=B ratified example: `?List.filter`.
+    let session = Session::new();
+    let doc = Docs::lookup(&session, "List.filter").expect("List.filter has builtin docs");
+    assert!(
+        doc.starts_with("List.filter(f: fn(T) -> Bool) -> List<T>"),
+        "got: {doc:?}"
+    );
+    assert!(doc.contains("Keeps items where f(item) is true."), "got: {doc:?}");
+    assert!(doc.contains("Source:"), "got: {doc:?}");
+}
+
+#[test]
+fn docs_lookup_local_binding_shows_live_value() {
+    let mut session = Session::new();
+    session.scope.insert("answer".to_string(), jet::AST::CtValue::Int(42));
+    let doc = Docs::lookup(&session, "answer").expect("bound name should resolve");
+    assert_eq!(doc, "answer : Int = 42\n");
+}
+
+#[test]
+fn bare_question_name_is_the_primary_docs_spelling() {
+    // D-FE-REPL-DOCS1=B: bare `?name` (no colon) is the primary spelling;
+    // `:? name` stays an accepted alias to the same lookup.
+    let bare = run_transcript(&["answer :: 42", "?answer"], None);
+    let colon = run_transcript(&["answer :: 42", ":? answer"], None);
+    assert!(bare.contains("answer : Int"), "got: {bare:?}");
+    assert!(colon.contains("answer : Int"), "got: {colon:?}");
+}
+
+#[test]
+fn bare_question_mark_alone_shows_help_like_colon_form() {
+    let out = run_transcript(&["?"], None);
+    assert!(out.contains("REPL meta-commands"), "got: {out:?}");
+}
+
+fn fixture_turn(id: usize, input: &str, had_effect: bool, bound_name: Option<&str>) -> ReplTurn {
+    ReplTurn {
+        id,
+        input: input.to_string(),
+        summary: String::new(),
+        status: ReplTurnStatus::Ok,
+        folded: false,
+        pinned: false,
+        had_effect,
+        bound_name: bound_name.map(str::to_string),
+        pending_unfold: None,
+    }
+}
+
+#[test]
+fn rerun_plan_gates_effectful_turns_and_lets_pure_turns_auto_replay() {
+    // D-FE-REPL-RERUN1=A ratified shape: editing turn 1 replays turn 1 and
+    // every turn after it; pure/binding turns replay automatically, a turn
+    // that had an effect the first time needs a `y`/`N` confirmation.
+    let turns = vec![
+        fixture_turn(1, "rate :: 0.07", false, Some("rate")),
+        fixture_turn(
+            2,
+            "invoice_total :: subtotal * (1.0 + rate)",
+            false,
+            Some("invoice_total"),
+        ),
+        fixture_turn(3, "write_file(\"out.txt\", invoice_total)", true, None),
+    ];
+
+    let plan = RerunPlan::build_replay_plan(&turns, 1, Some("rate :: 0.08")).expect("plan");
+    assert_eq!(plan.steps.len(), 3);
+    assert_eq!(plan.steps[0].input, "rate :: 0.08", "edited turn's text is substituted");
+    assert!(RerunPlan::plan_needs_confirmation(&plan), "the write_file step needs confirmation");
+
+    let rendered = RerunPlan::render_replay_plan(&plan, false);
+    assert!(rendered.starts_with("Replay plan:\n"), "got: {rendered:?}");
+    assert!(rendered.contains("auto"), "got: {rendered:?}");
+    assert!(rendered.contains("confirm effect"), "got: {rendered:?}");
+    assert!(rendered.trim_end().ends_with("Apply? [y/N]"), "got: {rendered:?}");
+
+    // A plan with no effectful steps needs no confirmation at all.
+    let pure_only = RerunPlan::build_replay_plan(&turns, 1, None).map(|mut p| {
+        p.steps.truncate(2);
+        p
+    });
+    assert!(!RerunPlan::plan_needs_confirmation(&pure_only.unwrap()));
+}
+
+#[test]
+fn rerun_plan_rejects_unknown_turn_id() {
+    let turns = vec![fixture_turn(1, "x :: 1", false, Some("x"))];
+    assert!(RerunPlan::build_replay_plan(&turns, 99, None).is_err());
+}
+
+#[test]
+fn textual_rerun_fallback_still_previews_a_turn() {
+    // `run_transcript` is the non-TTY floor — it keeps the pre-redesign
+    // `:rerun <id>` preview shape byte-for-byte (same assertion
+    // `repl_notebook_turn_controls` already pins for `:turns`/`:pin`/`:fold`).
+    // The plan-based replay (`Replay plan: … Apply? [y/N]`) is the cooked/
+    // interactive-loop behavior (`Source/REPL/mod.rs::handle_meta`, exercised
+    // by `RerunPlan`'s own unit/integration tests above) — `run_transcript`
+    // doesn't route through it, by design (I6/floor: no pty in this harness).
+    let out = run_transcript(&["1 + 2", ":rerun 1"], None);
+    assert!(out.contains("rerun #1: 1 + 2"), "got: {out:?}");
+    assert!(out.matches("3 : Int").count() >= 2, "got: {out:?}");
+}

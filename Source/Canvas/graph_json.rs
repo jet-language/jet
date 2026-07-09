@@ -100,6 +100,27 @@ fn add_wire_with_span(
         to_pin: to_pin.to_string(),
         kind: kind.to_string(),
         span,
+        from_span: None,
+        to_span: None,
+    });
+}
+
+fn add_control_wire(
+    g: &mut GraphBuilder,
+    from_pin: &str,
+    to_pin: &str,
+    from_span: SourceSpan,
+    to_span: SourceSpan,
+) {
+    g.next_wire += 1;
+    g.wires.push(WireRec {
+        id: format!("{}:wire:{}", g.graph_id, g.next_wire),
+        from_pin: from_pin.to_string(),
+        to_pin: to_pin.to_string(),
+        kind: "control".to_string(),
+        span: Some(to_span),
+        from_span: Some(from_span),
+        to_span: Some(to_span),
     });
 }
 
@@ -182,18 +203,18 @@ fn add_execution_overlay(g: &mut GraphBuilder) {
         }
     }
 
-    let mut previous_out: Option<String> = None;
+    let mut previous_out: Option<(String, SourceSpan)> = None;
     for node in &exec_nodes {
         let input = format!("{}:input:exec", node.id);
-        if let Some(from) = previous_out.take() {
+        if let Some((from, from_span)) = previous_out.take() {
             if node.kind != "entry" {
-                add_wire(g, &from, &input, "control");
+                add_control_wire(g, &from, &input, from_span, node.span);
             }
         }
         previous_out = if node.kind == "return" {
             None
         } else {
-            Some(primary_exec_output(g, &node.id))
+            Some((primary_exec_output(g, &node.id), node.span))
         };
     }
 }
@@ -713,13 +734,23 @@ fn pin_json(p: &PinRec) -> String {
 
 fn wire_json(w: &WireRec) -> String {
     let source_span = w.span.map(span_json).unwrap_or_else(|| "null".to_string());
+    let from_span = w
+        .from_span
+        .map(span_json)
+        .unwrap_or_else(|| "null".to_string());
+    let to_span = w
+        .to_span
+        .map(span_json)
+        .unwrap_or_else(|| "null".to_string());
     format!(
-        "{{\"wire_id\":{},\"from_pin\":{},\"to_pin\":{},\"wire_kind\":{},\"source_span\":{}}}",
+        "{{\"wire_id\":{},\"from_pin\":{},\"to_pin\":{},\"wire_kind\":{},\"source_span\":{},\"from_source_span\":{},\"to_source_span\":{}}}",
         json_str(&w.id),
         json_str(&w.from_pin),
         json_str(&w.to_pin),
         json_str(&w.kind),
-        source_span
+        source_span,
+        from_span,
+        to_span
     )
 }
 

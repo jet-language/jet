@@ -245,6 +245,7 @@ Current transactions:
 | `promote_to_binding` | `inline_expr_id`, `name` | Inserts an ordinary Jet binding before the owning source line and replaces the inline expression with that name. |
 | `insert_visible_conversion` | `inline_expr_id`, `callee` | Wraps an inline expression in an ordinary Jet conversion/function call. |
 | `insert_call` | `graph_id`, `callee`, `args`, optional `bind`, optional `wire_origin_pin_id`, `wire_target_pin`, `wire_expr`, `wire_inline_expr_id` | Inserts an ordinary Jet call in a graph's source body. When opened from a pin drag, `wire_origin_pin_id` names the origin pin, `wire_target_pin` names the new node pin chosen by the client, `wire_expr` supplies the origin value expression for output-pin fan-out, and `wire_inline_expr_id` replaces an input pin's inline source expression with the new call in the same transaction. |
+| `reorder_statements` | `graph_id`, `moved_start`, `moved_end`, `anchor_start`, `anchor_end`, optional `position` (`before`/`after`) | Moves one source statement within the same checked block, formats, rechecks, and reprojects. Canvas uses this for exec-wire endpoint rewiring. Cross-block moves fail with `can't move a step into a different branch yet`; semantic reorder failures return the normal Jet diagnostic payload. |
 | `create_trait_impl` | `type_name`, `trait_name` | Appends an ordinary `impl Type.Trait { ... }` block with source-checked member stubs. |
 | `break_link` | `wire_id` | Replaces the source expression behind a wire with `#Todo`, preserving Jet type checking. |
 | `move_link` | `wire_id`, `replacement` | Rewrites the source expression behind a wire to another visible Jet name/path. |
@@ -274,6 +275,11 @@ ordinary call statement (`wire_expr` becomes a call argument) or an ordinary cal
 expression in the target input (`wire_inline_expr_id`). The returned graph then
 projects the real wire from source; Canvas does not persist semantic edges in a
 side graph asset.
+
+Control wires are source-anchored. Each wire still has `source_span`; control
+wires also carry `from_source_span` and `to_source_span`, the source spans of
+the statements connected by the exec rail. Dragging a control-wire endpoint to a
+compatible exec pin sends `reorder_statements` with those statement spans.
 
 Successful response:
 

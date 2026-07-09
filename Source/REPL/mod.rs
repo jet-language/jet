@@ -18,6 +18,18 @@
 //! Error codes (E18xx):
 //!   E1801  fuel cap hit — snippet ran too long
 //!   E1802  hard-reject: feature not available in the REPL interpreter
+//!
+//! D-FE-REPL1=D (2026-07-08): hybrid REPL — the line REPL's mental model with
+//! notebook/workspace layers one keystroke away. `mod.rs` keeps the session
+//! model, input classification, sema plumbing, and the non-TTY floor
+//! (`run_transcript`/`run_cooked`) byte-identical to the pre-redesign REPL.
+//! The interactive-TTY rendering lives in sibling modules so its pieces are
+//! unit-testable without a real pty:
+//!   `Render`      — pure turn-gutter/pin-rail/fold-marker/bindings-pane text
+//!   `RerunPlan`   — D-FE-REPL-RERUN1=A replay-plan semantics
+//!   `Docs`        — D-FE-REPL-DOCS1=B `?name` lookup over the shared docs index
+//!   `Terminal`    — raw-mode guard (`stty` shell-out, I6) + key decoding
+//!   `Interactive` — the raw-mode event loop wiring the above together
 
 use std::collections::{HashMap, HashSet};
 use std::io::{self, BufRead, Write};
@@ -26,6 +38,30 @@ use std::path::Path;
 use crate::Comptime::{CtValue, DevSink, REPL_FUEL_BUDGET};
 use crate::Diagnostics::Diagnostic;
 use crate::AST::{AccessConvention, CallArg, Expr, Func, Item, Stmt};
+
+pub mod Docs;
+mod Interactive;
+pub mod Render;
+pub mod RerunPlan;
+mod Terminal;
+
+/// Effect markers used to classify a Stmts turn as "effectful" for
+/// D-FE-REPL-RERUN1=A replay gating (`ReplTurn::had_effect`). Textual, not a
+/// full purity analysis — deliberately conservative (a false positive just
+/// asks for one extra confirmation; a false negative would silently replay
+/// a side effect, which the ratified design forbids).
+const EFFECT_MARKERS: &[&str] = &[
+    "print(", "eprint(", "input(", ".write(", ".append(", ".delete(", ".remove_file(",
+    "fs.write", "fs.append", "fs.delete", "fs.remove", "io.print", "io.eprint",
+    "io.read_line", "io.write", ".send(", ".emit(", ".emit_async(",
+];
+
+/// D-FE-REPL-RERUN1=A: whether `input` looks like it produced (or would
+/// produce) an observable side effect, so a rerun of it must pause for
+/// confirmation instead of auto-replaying.
+pub(crate) fn looks_effectful(input: &str) -> bool {
+    EFFECT_MARKERS.iter().any(|m| input.contains(m))
+}
 
 const TERMINAL_SHIFT_IN: &str = "\x0f";
 
@@ -57,7 +93,7 @@ pub fn color_on() -> bool {
     io::stdout().is_terminal()
 }
 
-fn bold(s: &str, color: bool) -> String {
+pub(crate) fn bold(s: &str, color: bool) -> String {
     if color {
         format!("\x1b[1m{}\x1b[0m", s)
     } else {
@@ -65,7 +101,7 @@ fn bold(s: &str, color: bool) -> String {
     }
 }
 
-fn dim(s: &str, color: bool) -> String {
+pub(crate) fn dim(s: &str, color: bool) -> String {
     if color {
         format!("\x1b[2m{}\x1b[0m", s)
     } else {
@@ -173,6 +209,17 @@ pub struct ReplTurn {
     pub status: ReplTurnStatus,
     pub folded: bool,
     pub pinned: bool,
+    /// D-FE-REPL-RERUN1=A: whether this turn produced an observable side
+    /// effect (print/write/…) — gates replay-plan auto vs confirm-effect.
+    pub had_effect: bool,
+    /// If this turn introduced exactly one new session binding, its name —
+    /// used by the pin rail (`📌 name : Type = value`) to show the binding's
+    /// live current value rather than a frozen turn summary.
+    pub bound_name: Option<String>,
+    /// D-FE-REPL1=D: the full echoed text an interactive auto-fold elided
+    /// (`⋯ N rows folded …`), if any — `:unfold`/`^F`/Enter-on-the-marker
+    /// print this rather than leaving unfold a no-op.
+    pub pending_unfold: Option<String>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -219,6 +266,19 @@ impl Session {
     }
 
     fn record_turn(&mut self, input: &str, status: ReplTurnStatus, summary: String) {
+        self.record_turn_ex(input, status, summary, false, None);
+    }
+
+    /// Full turn recorder: also stamps `had_effect` (D-FE-REPL-RERUN1=A replay
+    /// gating) and `bound_name` (pin-rail live-value lookup) when known.
+    fn record_turn_ex(
+        &mut self,
+        input: &str,
+        status: ReplTurnStatus,
+        summary: String,
+        had_effect: bool,
+        bound_name: Option<String>,
+    ) {
         let id = self.turns.len() + 1;
         self.turns.push(ReplTurn {
             id,
@@ -227,18 +287,21 @@ impl Session {
             status,
             folded: summary.lines().count() > 6 || summary.len() > 240,
             pinned: false,
+            had_effect,
+            bound_name,
+            pending_unfold: None,
         });
     }
 
     /// Build the accumulated item declarations source text (functions, structs…).
     /// This is inserted at program top-level, so value bindings are NOT here.
-    fn accumulated_src(&self) -> String {
+    pub(crate) fn accumulated_src(&self) -> String {
         self.item_srcs.join("\n")
     }
 
     /// Accumulated `use …;` import lines, one per line, with a trailing newline
     /// when non-empty so they sit cleanly above the items in a synthetic program.
-    fn import_src(&self) -> String {
+    pub(crate) fn import_src(&self) -> String {
         if self.import_srcs.is_empty() {
             String::new()
         } else {
@@ -396,6 +459,18 @@ fn render_turns_text(session: &Session) -> String {
     out
 }
 
+/// Unfold turn `id`: clears its folded flag and returns any full text an
+/// interactive auto-fold elided (`ReplTurn::pending_unfold`), if present.
+/// Shared by `handle_meta`'s `:unfold` arm and `Interactive`'s `^F`/Enter
+/// handling so both paths show the same stashed content.
+pub(crate) fn unfold_turn(session: &mut Session, id: usize) -> Result<Option<String>, String> {
+    let Some(turn) = session.turns.iter_mut().find(|t| t.id == id) else {
+        return Err(format!("turn #{id} does not exist"));
+    };
+    turn.folded = false;
+    Ok(turn.pending_unfold.take())
+}
+
 fn set_turn_flag(session: &mut Session, id: usize, flag: &str, value: bool) -> Result<(), String> {
     let Some(turn) = session.turns.iter_mut().find(|t| t.id == id) else {
         return Err(format!("turn #{id} does not exist"));
@@ -539,7 +614,7 @@ fn collect_moved_in_callarg(
 
 /// A process-and-counter-unique temp file name so concurrent REPL sessions
 /// (e.g. parallel transcript tests) don't clobber each other's temp files.
-fn unique_temp_name(tag: &str) -> String {
+pub(crate) fn unique_temp_name(tag: &str) -> String {
     use std::sync::atomic::{AtomicU64, Ordering};
     static N: AtomicU64 = AtomicU64::new(0);
     let n = N.fetch_add(1, Ordering::Relaxed);
@@ -921,6 +996,20 @@ fn classify(text: &str, step: usize) -> Result<InputKind, Vec<Diagnostic>> {
         return Ok(InputKind::Meta(cmd, arg));
     }
 
+    // D-FE-REPL-DOCS1=B: bare `?name` is the primary REPL docs spelling —
+    // parsed here, never reaches the Jet lexer/parser as source (no new
+    // user-typeable syntax). `:?` (above) stays the colon-command alias;
+    // both route to the same `"?"` meta-command handler.
+    if let Some(rest) = trimmed.strip_prefix('?') {
+        let name = rest.trim();
+        let arg = if name.is_empty() {
+            None
+        } else {
+            Some(name.to_string())
+        };
+        return Ok(InputKind::Meta("?".to_string(), arg));
+    }
+
     // Hard rejects (D-REPL6=A) — these fire before imports so e.g.
     // `use core.files as fs` reports E1802 (the module needs the real compiler).
     if let Some(feature) = reject_feature(trimmed) {
@@ -1173,7 +1262,7 @@ fn rebuild_funcs(session: &mut Session) {
 
 // ── value display (D-REPL16=B) ─────────────────────────────────────────────
 
-fn display_value(v: &CtValue) -> String {
+pub(crate) fn display_value(v: &CtValue) -> String {
     let val_str = v.jet_show();
     let ty = type_name(v);
     if matches!(v, CtValue::Str(_)) {
@@ -1183,7 +1272,7 @@ fn display_value(v: &CtValue) -> String {
     }
 }
 
-fn type_name(v: &CtValue) -> &'static str {
+pub(crate) fn type_name(v: &CtValue) -> &'static str {
     match v {
         CtValue::Int(_) => "Int",
         CtValue::Float(_) => "Float",
@@ -1296,23 +1385,36 @@ fn render_diags(file: &str, src: &str, diags: &[Diagnostic], color: bool) {
 // ── main REPL loop ─────────────────────────────────────────────────────────
 
 /// Run an interactive REPL session.
+/// `jet repl` entry point. Prints the D-FE-REPL1=D banner unconditionally
+/// (TTY and non-TTY alike — only its wording changed from the pre-redesign
+/// banner), then hands off to the interactive raw-mode loop when stdin/stdout
+/// are both a real terminal and `stty` is available, or the cooked
+/// line-buffered loop otherwise (I6: `stty` shell-out, no line-editing
+/// crate). The cooked loop is also the exact non-TTY floor `run_transcript`
+/// mirrors — piped/redirected sessions keep the pre-redesign plain output.
 pub fn run(project_dir: Option<&str>) -> i32 {
     let color = color_on();
+    println!("{}", Render::render_banner(env!("CARGO_PKG_VERSION"), color));
+    println!();
+
+    match Terminal::RawGuard::enable() {
+        Some(guard) => Interactive::run_interactive(project_dir, color, guard),
+        None => run_cooked(project_dir, color),
+    }
+}
+
+/// Pre-redesign line-buffered loop: `read_line` per input, plain `user> `
+/// prompt (no turn gutter — that's an interactive-only affordance), full
+/// unfolded echoes. This is the non-TTY fallback and stays byte-identical to
+/// the REPL's prior behavior (tests/cli's `no_args_repl_banner_golden` and
+/// every `tests/repl.rs` transcript floor depend on it).
+fn run_cooked(project_dir: Option<&str>, color: bool) -> i32 {
     let base_dir: std::path::PathBuf =
         project_dir
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|| {
                 std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
             });
-
-    // D-REPL-BANNER=A
-    println!(
-        "Jet {} — interactive REPL  (type {} to exit, {} for commands)",
-        env!("CARGO_PKG_VERSION"),
-        bold(":quit", color),
-        bold(":help", color)
-    );
-    println!();
 
     let mut session = Session::new();
 
@@ -1340,209 +1442,303 @@ pub fn run(project_dir: Option<&str>) -> i32 {
             continue;
         }
 
-        session.step += 1;
-        let step_src = format!("<repl:{}>", session.step);
-
-        // D-REPL-PRELOAD teaching note: on first use of print/eprint/input.
-        if !session.shown_preload_note
-            && (trimmed.contains("print(")
-                || trimmed.contains("eprint(")
-                || trimmed.contains("input("))
-        {
-            println!(
-                "{}",
-                dim(
-                    "note: `print` is from `use core.io` — imported automatically in the REPL",
-                    color
-                )
-            );
-            session.shown_preload_note = true;
-        }
-
-        let kind = match classify(trimmed, session.step) {
-            Ok(k) => k,
-            Err(ds) => {
-                render_diags(&step_src, trimmed, &ds, color);
-                session.record_turn(
-                    trimmed,
-                    ReplTurnStatus::Error,
-                    ds.iter()
-                        .map(|d| format!("{}: {}", d.code, d.what))
-                        .collect::<Vec<_>>()
-                        .join("; "),
-                );
-                continue;
-            }
-        };
-
-        match kind {
-            InputKind::Empty => {}
-
-            InputKind::Meta(cmd, arg) => {
-                handle_meta(&cmd, arg.as_deref(), &mut session, &base_dir, color);
-            }
-
-            InputKind::Reject(feature) => {
-                let d = e1802(&feature);
-                render_diags(&step_src, trimmed, &[d], color);
-                session.record_turn(trimmed, ReplTurnStatus::Error, "E1802".to_string());
-            }
-
-            InputKind::Item(src) => {
-                let errors = type_check_item(&session, &src);
-                if !errors.is_empty() {
-                    render_diags(&step_src, trimmed, &errors, color);
-                    session.record_turn(
-                        trimmed,
-                        ReplTurnStatus::Error,
-                        errors
-                            .iter()
-                            .map(|d| format!("{}: {}", d.code, d.what))
-                            .collect::<Vec<_>>()
-                            .join("; "),
-                    );
-                    continue;
-                }
-                session.item_srcs.push(src);
-                rebuild_funcs(&mut session);
-                println!("{}", green("ok", color));
-                session.record_turn(trimmed, ReplTurnStatus::Ok, "ok".to_string());
-            }
-
-            InputKind::Import(src) => {
-                // Try it against the accumulated session so a bad import
-                // (unknown core module, etc.) reports before being kept.
-                session.import_srcs.push(src.clone());
-                let errors = type_check_item(&session, "");
-                if !errors.is_empty() {
-                    session.import_srcs.pop();
-                    render_diags(&step_src, trimmed, &errors, color);
-                    session.record_turn(
-                        trimmed,
-                        ReplTurnStatus::Error,
-                        errors
-                            .iter()
-                            .map(|d| format!("{}: {}", d.code, d.what))
-                            .collect::<Vec<_>>()
-                            .join("; "),
-                    );
-                    continue;
-                }
-                // D-CTCORE1: register any core alias → module path so the
-                // comptime interpreter can execute whitelisted pure Core calls.
-                update_core_imports(&src, &mut session.core_imports);
-                println!("{}", green("ok", color));
-                session.record_turn(trimmed, ReplTurnStatus::Ok, "ok".to_string());
-            }
-
-            InputKind::Stmts(stmts, suppress, check_src) => {
-                let errors = type_check_stmts(&session, &check_src, session.step);
-                if !errors.is_empty() {
-                    render_diags(&step_src, trimmed, &errors, color);
-                    session.record_turn(
-                        trimmed,
-                        ReplTurnStatus::Error,
-                        errors
-                            .iter()
-                            .map(|d| format!("{}: {}", d.code, d.what))
-                            .collect::<Vec<_>>()
-                            .join("; "),
-                    );
-                    continue;
-                }
-
-                // D-REPL8=A: detect which session bindings are moved by this input.
-                let session_binding_names: HashSet<String> =
-                    session.scope.keys().cloned().collect();
-                let newly_moved =
-                    collect_moved_names(&stmts, &session_binding_names, &session.scope);
-
-                // Snapshot keys before execution to detect new bindings.
-                let before_keys: HashSet<String> = session.scope.keys().cloned().collect();
-
-                let funcs: HashMap<String, &Func> = session
-                    .func_defs
-                    .iter()
-                    .map(|(k, v)| (k.clone(), v))
-                    .collect();
-                let mut sink = DevSink::new();
-                match crate::Comptime::run_repl_step(
-                    &stmts,
-                    &funcs,
-                    &base_dir,
-                    &mut sink,
-                    &mut session.scope,
-                    REPL_FUEL_BUDGET,
-                    suppress,
-                    &session.core_imports,
-                ) {
-                    Ok(echo_val) => {
-                        let mut summary = String::new();
-                        // Track moves: bindings consumed in this input are gone.
-                        session.moved_names.extend(newly_moved);
-                        // Record stmt source for :run materialization.
-                        let raw = trimmed.trim_end_matches(';').trim().to_string();
-                        if !raw.is_empty() && !raw.starts_with("__repl_echo__") {
-                            session.stmt_srcs.push(format!("{};", raw));
-                        }
-                        // Register any new bindings for sema visibility.
-                        let new_names: Vec<String> = session
-                            .scope
-                            .keys()
-                            .filter(|k| !before_keys.contains(*k) && *k != "__repl_echo__")
-                            .cloned()
-                            .collect();
-                        for name in &new_names {
-                            if let Some(v) = session.scope.get(name) {
-                                let v = v.clone();
-                                let mutable = val_binding_mutable(&stmts, name);
-                                session.record_binding(name, &v, mutable);
-                            }
-                        }
-                        if !sink.stdout.is_empty() {
-                            print!("{}", sink.stdout);
-                            summary.push_str(&sink.stdout);
-                        }
-                        if !sink.stderr.is_empty() {
-                            eprint!("{}", sink.stderr);
-                            summary.push_str(&sink.stderr);
-                        }
-                        if let Some(v) = echo_val {
-                            if !matches!(v, CtValue::Unit) {
-                                let shown = display_value(&v);
-                                println!("{}", shown);
-                                summary.push_str(&shown);
-                            }
-                        }
-                        session.record_turn(trimmed, ReplTurnStatus::Ok, summary);
-                    }
-                    Err(d) => {
-                        let d = if d.code == "E2202" {
-                            e1801(REPL_FUEL_BUDGET)
-                        } else {
-                            d
-                        };
-                        render_diags(&step_src, trimmed, std::slice::from_ref(&d), color);
-                        session.record_turn(
-                            trimmed,
-                            ReplTurnStatus::Error,
-                            format!("{}: {}", d.code, d.what),
-                        );
-                    }
-                }
-            }
+        if execute_line(trimmed, &mut session, &base_dir, color, false, false) {
+            break;
         }
     }
 
     0
 }
 
-/// Handle a `:command` meta-command (D-REPL15=B).
-fn handle_meta(cmd: &str, arg: Option<&str>, session: &mut Session, base_dir: &Path, color: bool) {
+/// Classify + execute one already-trimmed input line, printing results to
+/// stdout/stderr and recording the turn. Shared by `run_cooked` and
+/// `Interactive::run_interactive` — the two live-terminal loops (the
+/// transcript-buffer path, `run_transcript`, stays independent below so its
+/// pinned floor output can never be perturbed by this shared path).
+///
+/// `fold_long_output` gates D-FE-REPL1=D auto-fold (`⋯ N rows folded …`) for
+/// long `List` echoes — off for the cooked/plain floor, on in the
+/// interactive TTY loop. `quiet` suppresses all printing while still
+/// classifying/executing/recording the turn — used by
+/// `apply_replay_plan` to silently rebuild session state for turns before
+/// the one actually being rerun (D-FE-REPL-RERUN1=A).
+///
+/// Returns `true` when `:quit`/`:q`/`:exit` was requested.
+pub(crate) fn execute_line(
+    trimmed: &str,
+    session: &mut Session,
+    base_dir: &Path,
+    color: bool,
+    fold_long_output: bool,
+    quiet: bool,
+) -> bool {
+    session.step += 1;
+    let step_src = format!("<repl:{}>", session.step);
+
+    macro_rules! qprintln {
+        ($($arg:tt)*) => {
+            if !quiet { println!($($arg)*); }
+        };
+    }
+    macro_rules! qprint {
+        ($($arg:tt)*) => {
+            if !quiet { print!($($arg)*); }
+        };
+    }
+    macro_rules! qeprint {
+        ($($arg:tt)*) => {
+            if !quiet { eprint!($($arg)*); }
+        };
+    }
+
+    // D-REPL-PRELOAD teaching note: on first use of print/eprint/input.
+    if !session.shown_preload_note
+        && (trimmed.contains("print(") || trimmed.contains("eprint(") || trimmed.contains("input("))
+    {
+        qprintln!(
+            "{}",
+            dim(
+                "note: `print` is from `use core.io` — imported automatically in the REPL",
+                color
+            )
+        );
+        session.shown_preload_note = true;
+    }
+
+    let kind = match classify(trimmed, session.step) {
+        Ok(k) => k,
+        Err(ds) => {
+            if !quiet {
+                render_diags(&step_src, trimmed, &ds, color);
+            }
+            session.record_turn(
+                trimmed,
+                ReplTurnStatus::Error,
+                ds.iter()
+                    .map(|d| format!("{}: {}", d.code, d.what))
+                    .collect::<Vec<_>>()
+                    .join("; "),
+            );
+            return false;
+        }
+    };
+
+    match kind {
+        InputKind::Empty => {}
+
+        InputKind::Meta(cmd, arg) => {
+            if quiet {
+                // Meta-commands don't create turns and aren't part of a
+                // replay plan's own steps — a quiet prior-state replay never
+                // reaches one (only Item/Import/Reject/Stmts turns are ever
+                // recorded), but guard defensively rather than print anyway.
+                return false;
+            }
+            return handle_meta(&cmd, arg.as_deref(), session, base_dir, color);
+        }
+
+        InputKind::Reject(feature) => {
+            let d = e1802(&feature);
+            if !quiet {
+                render_diags(&step_src, trimmed, &[d], color);
+            }
+            session.record_turn(trimmed, ReplTurnStatus::Error, "E1802".to_string());
+        }
+
+        InputKind::Item(src) => {
+            let errors = type_check_item(session, &src);
+            if !errors.is_empty() {
+                if !quiet {
+                    render_diags(&step_src, trimmed, &errors, color);
+                }
+                session.record_turn(
+                    trimmed,
+                    ReplTurnStatus::Error,
+                    errors
+                        .iter()
+                        .map(|d| format!("{}: {}", d.code, d.what))
+                        .collect::<Vec<_>>()
+                        .join("; "),
+                );
+                return false;
+            }
+            session.item_srcs.push(src);
+            rebuild_funcs(session);
+            qprintln!("{}", green("ok", color));
+            session.record_turn(trimmed, ReplTurnStatus::Ok, "ok".to_string());
+        }
+
+        InputKind::Import(src) => {
+            // Try it against the accumulated session so a bad import
+            // (unknown core module, etc.) reports before being kept.
+            session.import_srcs.push(src.clone());
+            let errors = type_check_item(session, "");
+            if !errors.is_empty() {
+                session.import_srcs.pop();
+                if !quiet {
+                    render_diags(&step_src, trimmed, &errors, color);
+                }
+                session.record_turn(
+                    trimmed,
+                    ReplTurnStatus::Error,
+                    errors
+                        .iter()
+                        .map(|d| format!("{}: {}", d.code, d.what))
+                        .collect::<Vec<_>>()
+                        .join("; "),
+                );
+                return false;
+            }
+            // D-CTCORE1: register any core alias → module path so the
+            // comptime interpreter can execute whitelisted pure Core calls.
+            update_core_imports(&src, &mut session.core_imports);
+            qprintln!("{}", green("ok", color));
+            session.record_turn(trimmed, ReplTurnStatus::Ok, "ok".to_string());
+        }
+
+        InputKind::Stmts(stmts, suppress, check_src) => {
+            let errors = type_check_stmts(session, &check_src, session.step);
+            if !errors.is_empty() {
+                if !quiet {
+                    render_diags(&step_src, trimmed, &errors, color);
+                }
+                session.record_turn(
+                    trimmed,
+                    ReplTurnStatus::Error,
+                    errors
+                        .iter()
+                        .map(|d| format!("{}: {}", d.code, d.what))
+                        .collect::<Vec<_>>()
+                        .join("; "),
+                );
+                return false;
+            }
+
+            // D-REPL8=A: detect which session bindings are moved by this input.
+            let session_binding_names: HashSet<String> = session.scope.keys().cloned().collect();
+            let newly_moved = collect_moved_names(&stmts, &session_binding_names, &session.scope);
+
+            // Snapshot keys before execution to detect new bindings.
+            let before_keys: HashSet<String> = session.scope.keys().cloned().collect();
+
+            let funcs: HashMap<String, &Func> = session
+                .func_defs
+                .iter()
+                .map(|(k, v)| (k.clone(), v))
+                .collect();
+            let mut sink = DevSink::new();
+            match crate::Comptime::run_repl_step(
+                &stmts,
+                &funcs,
+                base_dir,
+                &mut sink,
+                &mut session.scope,
+                REPL_FUEL_BUDGET,
+                suppress,
+                &session.core_imports,
+            ) {
+                Ok(echo_val) => {
+                    let mut summary = String::new();
+                    // Track moves: bindings consumed in this input are gone.
+                    session.moved_names.extend(newly_moved);
+                    // Record stmt source for :run materialization.
+                    let raw = trimmed.trim_end_matches(';').trim().to_string();
+                    if !raw.is_empty() && !raw.starts_with("__repl_echo__") {
+                        session.stmt_srcs.push(format!("{};", raw));
+                    }
+                    // Register any new bindings for sema visibility.
+                    let new_names: Vec<String> = session
+                        .scope
+                        .keys()
+                        .filter(|k| !before_keys.contains(*k) && *k != "__repl_echo__")
+                        .cloned()
+                        .collect();
+                    for name in &new_names {
+                        if let Some(v) = session.scope.get(name) {
+                            let v = v.clone();
+                            let mutable = val_binding_mutable(&stmts, name);
+                            session.record_binding(name, &v, mutable);
+                        }
+                    }
+                    if !sink.stdout.is_empty() {
+                        qprint!("{}", sink.stdout);
+                        summary.push_str(&sink.stdout);
+                    }
+                    if !sink.stderr.is_empty() {
+                        qeprint!("{}", sink.stderr);
+                        summary.push_str(&sink.stderr);
+                    }
+                    // D-FE-REPL1=D: long List echoes auto-fold in the
+                    // interactive loop (`fold_long_output`); the cooked/plain
+                    // floor and quiet replays always print the full value.
+                    let mut pending_unfold: Option<String> = None;
+                    if let Some(v) = echo_val {
+                        if !matches!(v, CtValue::Unit) {
+                            let shown = display_value(&v);
+                            let fold = fold_long_output.then(|| Render::fold_decision_for_value(&v)).flatten();
+                            match fold {
+                                Some((count, elem_ty)) => {
+                                    let marker = Render::render_fold_marker(count, &elem_ty, color);
+                                    qprintln!("{}", marker);
+                                    summary.push_str(&Render::render_fold_marker(count, &elem_ty, false));
+                                    pending_unfold = Some(shown);
+                                }
+                                None => {
+                                    qprintln!("{}", shown);
+                                    summary.push_str(&shown);
+                                }
+                            }
+                        }
+                    }
+                    let had_effect = looks_effectful(trimmed)
+                        || !sink.stdout.is_empty()
+                        || !sink.stderr.is_empty();
+                    let bound_name = match new_names.as_slice() {
+                        [only] => Some(only.clone()),
+                        _ => None,
+                    };
+                    session.record_turn_ex(trimmed, ReplTurnStatus::Ok, summary, had_effect, bound_name);
+                    if let Some(full) = pending_unfold {
+                        if let Some(t) = session.turns.last_mut() {
+                            t.pending_unfold = Some(full);
+                        }
+                    }
+                }
+                Err(d) => {
+                    let d = if d.code == "E2202" { e1801(REPL_FUEL_BUDGET) } else { d };
+                    if !quiet {
+                        render_diags(&step_src, trimmed, std::slice::from_ref(&d), color);
+                    }
+                    session.record_turn(
+                        trimmed,
+                        ReplTurnStatus::Error,
+                        format!("{}: {}", d.code, d.what),
+                    );
+                }
+            }
+        }
+    }
+
+    false
+}
+
+/// Handle a `:command` meta-command (D-REPL15=B). Returns `true` when
+/// `:quit`/`:q`/`:exit` was requested — the caller breaks its own loop and
+/// returns normally instead of this function calling `std::process::exit`
+/// directly, so a live `Terminal::RawGuard` (interactive TTY path) gets to
+/// run its `Drop` and restore cooked terminal mode before the process exits
+/// (`std::process::exit` skips destructors).
+fn handle_meta(
+    cmd: &str,
+    arg: Option<&str>,
+    session: &mut Session,
+    base_dir: &Path,
+    color: bool,
+) -> bool {
     match cmd {
         "quit" | "q" | "exit" => {
             println!("bye");
-            std::process::exit(0);
+            return true;
         }
         "reset" => {
             session.reset();
@@ -1553,7 +1749,7 @@ fn handle_meta(cmd: &str, arg: Option<&str>, session: &mut Session, base_dir: &P
                 Some(p) => p,
                 None => {
                     eprintln!("usage: :load <file.jet>");
-                    return;
+                    return false;
                 }
             };
             let mut stdout = io::stdout();
@@ -1564,7 +1760,7 @@ fn handle_meta(cmd: &str, arg: Option<&str>, session: &mut Session, base_dir: &P
                 Some(n) => n,
                 None => {
                     eprintln!("usage: :type <name>");
-                    return;
+                    return false;
                 }
             };
             cmd_type(name, session, color);
@@ -1580,12 +1776,18 @@ fn handle_meta(cmd: &str, arg: Option<&str>, session: &mut Session, base_dir: &P
             Ok(()) => println!("turn folded"),
             Err(msg) => eprintln!("{msg}"),
         },
-        "unfold" => {
-            match parse_turn_id(arg).and_then(|id| set_turn_flag(session, id, "folded", false)) {
-                Ok(()) => println!("turn unfolded"),
-                Err(msg) => eprintln!("{msg}"),
+        "unfold" => match parse_turn_id(arg).and_then(|id| unfold_turn(session, id)) {
+            Ok(full) => {
+                println!("turn unfolded");
+                // D-FE-REPL1=D: a turn folded by the interactive auto-fold
+                // (a long List echo) carries the full text it elided — show
+                // it now rather than leaving `:unfold` a no-op note.
+                if let Some(full) = full {
+                    println!("{}", full);
+                }
             }
-        }
+            Err(msg) => eprintln!("{msg}"),
+        },
         "pin" => match parse_turn_id(arg).and_then(|id| set_turn_flag(session, id, "pinned", true))
         {
             Ok(()) => println!("turn pinned"),
@@ -1599,23 +1801,40 @@ fn handle_meta(cmd: &str, arg: Option<&str>, session: &mut Session, base_dir: &P
         }
         "rerun" => match parse_turn_id(arg) {
             Ok(id) => {
-                if let Some(input) = session.turns.iter().find(|t| t.id == id).map(|t| t.input.clone()) {
-                    println!("{}", dim(&format!("rerun #{id}: {input}"), color));
-                    let preview = run_transcript(&[input.as_str()], None);
-                    print!("{preview}");
-                } else {
-                    eprintln!("turn #{id} does not exist");
+                // D-FE-REPL-RERUN1=A: build + show the replay plan; unedited
+                // `:rerun <id>` textual fallback applies it immediately when
+                // no step needs a side-effect confirmation, mirroring `^R`'s
+                // interactive flow without a prompt to answer in a script.
+                match RerunPlan::build_replay_plan(&session.turns, id, None) {
+                    Ok(plan) => {
+                        if RerunPlan::plan_needs_confirmation(&plan) {
+                            // Shows the `Apply? [y/N]` shape (D-FE-REPL-RERUN1=A)
+                            // but this textual fallback has no key to read a
+                            // reply from — point at `^R`, which does.
+                            println!("{}", RerunPlan::render_replay_plan(&plan, color));
+                            println!(
+                                "note: this plan includes effectful turns — use the interactive `^R` to confirm/skip them"
+                            );
+                        } else {
+                            apply_replay_plan(session, &plan, base_dir, color);
+                        }
+                    }
+                    Err(msg) => eprintln!("{msg}"),
                 }
             }
             Err(msg) => eprintln!("{msg}"),
         },
-        "?" => {
-            if let Some(name) = arg {
-                cmd_type(name, session, color);
-            } else {
-                print_help(color);
-            }
-        }
+        "?" => match arg {
+            Some(name) => match Docs::lookup(session, name) {
+                Some(text) => print!("{}", text),
+                None => println!(
+                    "{}: `{}` isn't defined in this session",
+                    yellow("note", color),
+                    name
+                ),
+            },
+            None => print_help(color),
+        },
         "help" => print_help(color),
         _ => {
             eprintln!(
@@ -1624,6 +1843,35 @@ fn handle_meta(cmd: &str, arg: Option<&str>, session: &mut Session, base_dir: &P
                 bold(":help", color)
             );
         }
+    }
+    false
+}
+
+/// D-FE-REPL-RERUN1=A: apply an already-built replay plan whose steps are all
+/// `Auto` (or whose `ConfirmEffect` steps the caller already confirmed).
+/// Rebuilds session state by clearing the session and replaying every turn
+/// from turn 1 through the plan's last step in order — turns before
+/// `plan.from_id` are known-good (their input/output already matched once)
+/// so they replay silently; only the plan's own steps print.
+fn apply_replay_plan(session: &mut Session, plan: &RerunPlan::ReplayPlan, base_dir: &Path, color: bool) {
+    let prior: Vec<String> = session
+        .turns
+        .iter()
+        .filter(|t| t.id < plan.from_id)
+        .map(|t| t.input.clone())
+        .collect();
+    session.reset();
+    // Turns before the edited one already matched once — replay them quietly
+    // to rebuild state, so only the plan's own steps print.
+    for input in &prior {
+        execute_line(input, session, base_dir, color, false, true);
+    }
+    for step in &plan.steps {
+        println!(
+            "{}",
+            dim(&format!("rerun #{}: {}", step.turn_id, step.input), color)
+        );
+        execute_line(&step.input, session, base_dir, color, false, false);
     }
 }
 
@@ -1828,16 +2076,16 @@ pub fn run_transcript(inputs: &[&str], project_dir: Option<&str>) -> String {
                         Err(msg) => out.push_str(&format!("{msg}\n")),
                     },
                     "?" => {
+                        // D-FE-REPL-DOCS1=B: same shared-docs-index lookup the
+                        // cooked/interactive loops use (`Docs::lookup`), so
+                        // `?name`/`:? name` behave identically everywhere.
                         if let Some(name) = arg.as_deref() {
-                            if let Some(v) = session.scope.get(name) {
-                                out.push_str(&format!("{} : {}\n", name, type_name(v)));
-                            } else if session.func_defs.contains_key(name) {
-                                out.push_str(&format!("{} : fn\n", name));
-                            } else {
-                                out.push_str(&format!(
+                            match Docs::lookup(&session, name) {
+                                Some(text) => out.push_str(&text),
+                                None => out.push_str(&format!(
                                     "note: `{}` isn't defined in this session\n",
                                     name
-                                ));
+                                )),
                             }
                         } else {
                             out.push_str("REPL meta-commands\n");
@@ -1983,7 +2231,19 @@ pub fn run_transcript(inputs: &[&str], project_dir: Option<&str>) -> String {
                                 summary.push_str(&shown);
                             }
                         }
-                        session.record_turn(trimmed, ReplTurnStatus::Ok, summary);
+                        let had_effect =
+                            looks_effectful(trimmed) || !sink.stdout.is_empty() || !sink.stderr.is_empty();
+                        let bound_name = match new_names.as_slice() {
+                            [only] => Some(only.clone()),
+                            _ => None,
+                        };
+                        session.record_turn_ex(
+                            trimmed,
+                            ReplTurnStatus::Ok,
+                            summary,
+                            had_effect,
+                            bound_name,
+                        );
                     }
                     Err(d) => {
                         let d = if d.code == "E2202" {

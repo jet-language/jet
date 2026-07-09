@@ -1,9 +1,18 @@
 # REPL frontend archetypes — notes
 
-Three genuinely distinct core loops for `jet repl`. Shared TUI palette + copy
-rules from `../DESIGN-BRIEF.md`. Feature truth: `Source/REPL.rs` (banner,
-`user>` prompt, `... ` continuation, `value : Type` echo D-REPL16=B,
-`:help/:quit/:reset/:load/:type`, NO_COLOR). Diagnostic verbatim from
+Three genuinely distinct core loops for `jet repl`, explored below as the
+ballot options for D-FE-REPL1. The owner ratified **D — Hybrid** (2026-07-08);
+its follow-up gates D-FE-REPL-DOCS1 (`?name` docs, =B) and D-FE-REPL-RERUN1
+(replay semantics, =A) are ratified too. Feature truth is now
+`Source/REPL/mod.rs` + its siblings (`Render.rs` turn-gutter/pin-rail/fold-
+marker rendering, `RerunPlan.rs` replay-plan semantics, `Docs.rs` `?name`
+lookup, `Terminal.rs` raw-mode + key decoding, `Interactive.rs` the TTY event
+loop) — banner, `N user> ` prompt (interactive TTY) / `user> ` (non-TTY
+floor), `... ` continuation, `value : Type` echo (D-REPL16=B),
+`:help/:quit/:reset/:load/:type` plus the notebook/workspace layer commands
+(`:turns/:pin/:fold/:unfold/:rerun`, `^P/^F/^R/^B`), NO_COLOR. This file stays
+as the archetype-comparison record; it does not track hybrid's exact rendered
+shape line-for-line post-implementation. Diagnostic verbatim from
 `tests/ui/arg_type_mismatch.stderr` (E0112).
 
 Core-loop test (one sentence each; none match):

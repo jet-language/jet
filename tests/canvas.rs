@@ -161,6 +161,46 @@ fn run() {
 }
 "#;
 
+const CANVAS_REORDER_FIXTURE: &str = r#"fn order() {
+    a :: 1
+    b :: 2
+    c :: 3
+    print(a + b + c)
+}
+
+fn run() {
+    order()
+}
+"#;
+
+const CANVAS_REORDER_BINDING_FIXTURE: &str = r#"fn order() {
+    a :: 1
+    b :: 2
+    c :: a + b
+    print(c)
+}
+
+fn run() {
+    order()
+}
+"#;
+
+const CANVAS_REORDER_CROSS_BLOCK_FIXTURE: &str = r#"fn order() {
+    a :: 1
+    if true {
+        c :: 3
+    } else {
+        print(a)
+    }
+    b :: 2
+    print(a + b)
+}
+
+fn run() {
+    order()
+}
+"#;
+
 const CANVAS_PATTERN_MULTI_FIXTURE: &str = r#"fn first_or_zero(x: Int?) -> Int {
     if x == Val(n) {
         return n
@@ -355,6 +395,22 @@ fn json_field(haystack: &str, field: &str) -> String {
     rest[..rest.find('"').expect("json field terminator")].to_string()
 }
 
+fn graph_id_for_title(graph: &str, title: &str) -> String {
+    field_before(graph, &format!("\"title\":\"{title}\""), "graph_id")
+}
+
+fn name_span(src: &str, name: &str) -> (usize, usize) {
+    let start = src.find(&format!("{name} ::")).expect("binding name span");
+    (start, start + name.len())
+}
+
+fn source_order(src: &str, names: &[&str]) -> Vec<usize> {
+    names
+        .iter()
+        .map(|name| src.find(&format!("{name} ::")).expect("source name"))
+        .collect()
+}
+
 #[test]
 fn canvas_graph_json_is_stable_and_typed() {
     let path = write_fixture("graph", CANVAS_FIXTURE);
@@ -378,6 +434,8 @@ fn canvas_graph_json_is_stable_and_typed() {
     assert!(json.contains("\"type\":\"Int\""));
     assert!(json.contains("\"wire_kind\":\"data\""));
     assert!(json.contains("\"wire_kind\":\"control\""));
+    assert!(json.contains("\"from_source_span\":"));
+    assert!(json.contains("\"to_source_span\":"));
     assert!(json.contains("\"type\":\"exec\""));
     assert!(json.contains("\"capability\":\"control\""));
     assert!(json.contains("\"inline_exprs\""));
@@ -550,6 +608,80 @@ fn canvas_link_transactions_break_and_move_source_wires() {
     assert!(err.contains("\"kind\":\"diagnostic\""), "{err}");
     assert!(err.contains("Error [E0107]"), "{err}");
     assert_eq!(fs::read_to_string(&wrong_path).unwrap(), before);
+}
+
+#[test]
+fn canvas_exec_rewire_reorders_statements_and_guards_scope_and_dataflow() {
+    let path = write_fixture("reorder_exec", CANVAS_REORDER_FIXTURE);
+    let graph = jet::Canvas::graph_json_for_file(&path).expect("canvas graph");
+    let graph_id = graph_id_for_title(&graph, "order");
+    assert!(
+        graph.contains("\"wire_kind\":\"control\"")
+            && graph.contains("\"from_source_span\":{\"start\":")
+            && graph.contains("\"to_source_span\":{\"start\":"),
+        "control wires must carry endpoint statement spans: {graph}"
+    );
+    let src = fs::read_to_string(&path).unwrap();
+    let (moved_start, moved_end) = name_span(&src, "c");
+    let (anchor_start, anchor_end) = name_span(&src, "a");
+    let req = format!(
+        "{{\"schema_version\":1,\"op\":\"reorder_statements\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"moved_start\":{},\"moved_end\":{},\"anchor_start\":{},\"anchor_end\":{},\"position\":\"after\"}}",
+        jet::Canvas::source_revision(&src),
+        graph_id,
+        moved_start,
+        moved_end,
+        anchor_start,
+        anchor_end
+    );
+    jet::Canvas::apply_transaction_json(&path, &req).expect("reorder statements");
+    let after = fs::read_to_string(&path).unwrap();
+    let order = source_order(&after, &["a", "c", "b"]);
+    assert!(order[0] < order[1] && order[1] < order[2], "{after}");
+    let formatted = jet::format_source(&after).expect("format reordered source");
+    assert_eq!(after, formatted, "reorder must be formatter-stable");
+
+    let cross = write_fixture("reorder_cross_block", CANVAS_REORDER_CROSS_BLOCK_FIXTURE);
+    let graph = jet::Canvas::graph_json_for_file(&cross).expect("cross graph");
+    let graph_id = graph_id_for_title(&graph, "order");
+    let src = fs::read_to_string(&cross).unwrap();
+    let (moved_start, moved_end) = name_span(&src, "c");
+    let (anchor_start, anchor_end) = name_span(&src, "a");
+    let req = format!(
+        "{{\"schema_version\":1,\"op\":\"reorder_statements\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"moved_start\":{},\"moved_end\":{},\"anchor_start\":{},\"anchor_end\":{},\"position\":\"after\"}}",
+        jet::Canvas::source_revision(&src),
+        graph_id,
+        moved_start,
+        moved_end,
+        anchor_start,
+        anchor_end
+    );
+    let err = jet::Canvas::apply_transaction_json(&cross, &req).unwrap_err();
+    assert!(
+        err.contains("can't move a step into a different branch yet"),
+        "{err}"
+    );
+    assert_eq!(fs::read_to_string(&cross).unwrap(), src);
+
+    let binding = write_fixture("reorder_binding_order", CANVAS_REORDER_BINDING_FIXTURE);
+    let graph = jet::Canvas::graph_json_for_file(&binding).expect("binding graph");
+    let graph_id = graph_id_for_title(&graph, "order");
+    let src = fs::read_to_string(&binding).unwrap();
+    let (moved_start, moved_end) = name_span(&src, "c");
+    let (anchor_start, anchor_end) = name_span(&src, "a");
+    let req = format!(
+        "{{\"schema_version\":1,\"op\":\"reorder_statements\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"moved_start\":{},\"moved_end\":{},\"anchor_start\":{},\"anchor_end\":{},\"position\":\"after\"}}",
+        jet::Canvas::source_revision(&src),
+        graph_id,
+        moved_start,
+        moved_end,
+        anchor_start,
+        anchor_end
+    );
+    let err = jet::Canvas::apply_transaction_json(&binding, &req).unwrap_err();
+    assert!(err.contains("\"kind\":\"diagnostic\""), "{err}");
+    assert!(err.contains("E0107"), "{err}");
+    assert!(err.contains("`b`"), "{err}");
+    assert_eq!(fs::read_to_string(&binding).unwrap(), src);
 }
 
 #[test]

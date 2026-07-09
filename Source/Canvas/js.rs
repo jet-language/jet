@@ -191,6 +191,7 @@ pub fn canvas_js() -> String {
     if (!body) return "edit";
     if (body.op === "insert_call") return "insert " + shortCalleeName(body.callee);
     if (body.op === "edit_inline_expr") return "inline edit";
+    if (body.op === "reorder_statements") return "reorder steps";
     if (body.op === "move_link") return "rewire";
     if (body.op === "break_link") return "break wire";
     if (body.op === "rename_binding") return "rename " + (body.from || "binding");
@@ -3304,6 +3305,17 @@ pub fn canvas_js() -> String {
       type: point.pin && point.pin.type,
       direction: point.pin && point.pin.direction
     }]));
+    window.__jetCanvasWireEndpoints = wireEndpointHit.map((h) => ({
+      wire_id: h.wire && h.wire.wire_id,
+      wire_kind: h.wire && h.wire.wire_kind,
+      endpoint: h.endpoint,
+      pin_id: h.pin && h.pin.pin_id,
+      other_pin_id: h.other && h.other.pin_id,
+      client_x: rect.left + h.cx,
+      client_y: rect.top + h.cy,
+      from_source_span: h.wire && h.wire.from_source_span,
+      to_source_span: h.wire && h.wire.to_source_span
+    }));
     window.__jetCanvasStagedRegistry = (editorState.stagedNodes || []).map((node) => ({
       node_id: node.node_id,
       title: node.title,
@@ -3315,6 +3327,7 @@ pub fn canvas_js() -> String {
       hitMap,
       nodeBounds: window.__jetCanvasNodeBounds,
       pinPoints: window.__jetCanvasPinPoints,
+      wireEndpoints: window.__jetCanvasWireEndpoints,
       stagedRegistry: window.__jetCanvasStagedRegistry,
       graphId: selectedGraphId,
       selectedNodeId,
@@ -4077,6 +4090,7 @@ pub fn canvas_js() -> String {
     const out = fromPin.direction === "output" ? fromPin : toPin;
     const input = fromPin.direction === "input" ? fromPin : toPin;
     if (!compatiblePin(fromPin, toPin)) return { ok: false, label: "Type mismatch " + (out.type || "?") + " -> " + (input.type || "?"), color: "#fb7185" };
+    if (isExecPin(out) && isExecPin(input)) return { ok: true, label: "Reorder steps", color: "#a7f3d0" };
     if (!exactPinMatch(fromPin, toPin)) return { ok: true, label: "Insert visible conversion", color: "#f59e0b" };
     const wire = wireIntoPin(graph, input);
     const replacement = sourceExprForOutputPin(out);
@@ -4184,6 +4198,9 @@ pub fn canvas_js() -> String {
 
   function completeConnection(fromPin, target, graph) {
     if (materializeStagedConnection(fromPin, target, graph)) return true;
+    if (drag && drag.rewire && target && drag.rewire.wire && drag.rewire.wire.wire_kind === "control" && isExecPin(target)) {
+      return completeExecRewire(drag.rewire, target, graph);
+    }
     const plan = connectionPlan(graph, fromPin, target);
     window.__jetCanvasLastConnectionPlan = plan;
     if (compatiblePin(fromPin, target)) {
@@ -4209,6 +4226,48 @@ pub fn canvas_js() -> String {
     }
     if (target) showToast("Wire refused: " + plan.label);
     return false;
+  }
+
+  function nodeForPin(graph, pin) {
+    if (!graph || !pin) return null;
+    return (graph.nodes || []).find((node) => node.node_id === pin.node_id) || null;
+  }
+
+  function completeExecRewire(rewire, target, graph) {
+    if (!rewire || !rewire.wire || !target || !graph) return false;
+    const targetNode = nodeForPin(graph, target);
+    if (!targetNode || !targetNode.source_span) {
+      showToast("Wire refused: target step has no source span");
+      return true;
+    }
+    const wire = rewire.wire;
+    let moved = targetNode.source_span;
+    let anchor = null;
+    if (target.direction === "input") {
+      anchor = wire.from_source_span;
+    } else {
+      const oldTarget = (graph.pins || []).find((pin) => pin.pin_id === wire.to_pin);
+      const oldNode = nodeForPin(graph, oldTarget);
+      moved = oldNode && oldNode.source_span;
+      anchor = targetNode.source_span;
+    }
+    if (!moved || !anchor) {
+      showToast("Wire refused: exec wire has no source anchor");
+      return true;
+    }
+    postTransaction({
+      schema_version: 1,
+      op: "reorder_statements",
+      revision: latestDoc.revision,
+      graph_id: graph.graph_id,
+      moved_start: moved.start,
+      moved_end: moved.end,
+      anchor_start: anchor.start,
+      anchor_end: anchor.end,
+      position: "after",
+      wire_id: wire.wire_id
+    });
+    return true;
   }
 
   canvas.addEventListener("click", function (ev) {
@@ -4841,7 +4900,11 @@ pub fn canvas_js() -> String {
           showToast("Canvas action preview validated");
           return;
         }
-        if (result.json.changed && beforeSource && result.json.source_text) recordUndoEntry(body, beforeSource, result.json.source_text);
+        if (result.json.changed && beforeSource && result.json.source_text) {
+          recordUndoEntry(body, beforeSource, result.json.source_text);
+          searchState.diff = { text: "source changed by " + transactionUndoLabel(body) };
+          renderSearchResults();
+        }
         if (body.op === "replace_source" && body.source_edit) setSourceEditMode(false);
         clearDiagnosticsForRevision(result.json.revision);
         showToast(result.json.changed ? "Source updated" : "No change");

@@ -85,6 +85,8 @@ struct WireRec {
     to_pin: String,
     kind: String,
     span: Option<SourceSpan>,
+    from_span: Option<SourceSpan>,
+    to_span: Option<SourceSpan>,
 }
 
 struct InlineRec {
@@ -693,6 +695,25 @@ pub fn apply_transaction_json(path: &Path, request: &str) -> Result<String, Stri
             let replacement = required_string(request, "replacement")?;
             validate_qualified_name(&replacement)?;
             apply_move_link(path, &src, &wire_id, &replacement)
+        }
+        "reorder_statements" => {
+            let graph_id = required_string(request, "graph_id")?;
+            let moved = SourceSpan {
+                start: json_usize_field(request, "moved_start").ok_or_else(|| {
+                    edit_error("bad_request", "missing `moved_start`")
+                })?,
+                end: json_usize_field(request, "moved_end")
+                    .ok_or_else(|| edit_error("bad_request", "missing `moved_end`"))?,
+            };
+            let anchor = SourceSpan {
+                start: json_usize_field(request, "anchor_start").ok_or_else(|| {
+                    edit_error("bad_request", "missing `anchor_start`")
+                })?,
+                end: json_usize_field(request, "anchor_end")
+                    .ok_or_else(|| edit_error("bad_request", "missing `anchor_end`"))?,
+            };
+            let position = json_string_field(request, "position").unwrap_or_else(|| "after".into());
+            apply_reorder_statements(path, &src, &graph_id, moved, anchor, &position)
         }
         "replace_source" => {
             let source = required_string(request, "source")?;

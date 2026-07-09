@@ -523,6 +523,51 @@ function graphByTitle(doc, title) {
   return graph;
 }
 
+function nodeByTitle(graph, title) {
+  const node = (graph.nodes || []).find((n) => n.title === title || String(n.title || "").includes(title));
+  if (!node) throw new Error(`node missing: ${title}`);
+  return node;
+}
+
+function pinForNode(graph, title, direction, type = "exec") {
+  const node = nodeByTitle(graph, title);
+  const pin = (graph.pins || []).find((p) => p.node_id === node.node_id && p.direction === direction && p.type === type);
+  if (!pin) throw new Error(`pin missing: ${title}.${direction}.${type}`);
+  return pin;
+}
+
+function controlWireExists(graph, fromTitle, toTitle) {
+  const from = nodeByTitle(graph, fromTitle);
+  const to = nodeByTitle(graph, toTitle);
+  const fromPins = new Set((graph.pins || []).filter((p) => p.node_id === from.node_id).map((p) => p.pin_id));
+  const toPins = new Set((graph.pins || []).filter((p) => p.node_id === to.node_id).map((p) => p.pin_id));
+  return (graph.wires || []).some((w) => w.wire_kind === "control" && fromPins.has(w.from_pin) && toPins.has(w.to_pin));
+}
+
+async function dragExecEndpoint(ctx, graphTitle, oldTargetTitle, newTargetTitle) {
+  await ctx.switchGraph(graphTitle);
+  await ctx.waitForCanvas();
+  const state = await ctx.state();
+  const targetPin = pinForNode(graphByTitle(await ctx.graph(), graphTitle), newTargetTitle, "input", "exec");
+  const targetPoint = state.pinPoints[targetPin.pin_id];
+  if (!targetPoint) throw new Error(`target pin point missing: ${targetPin.pin_id}`);
+  const oldNode = Object.values(state.nodeBounds || {}).find((node) => node.title === oldTargetTitle || String(node.title || "").includes(oldTargetTitle));
+  if (!oldNode) throw new Error(`old target node missing: ${oldTargetTitle}`);
+  const oldPins = (state.hitMap.pins || []).filter((pin) => pin.node_id === oldNode.node_id).map((pin) => pin.pin_id);
+  const endpoint = (state.wireEndpoints || []).find((e) => e.wire_kind === "control" && e.endpoint === "to" && oldPins.includes(e.pin_id));
+  if (!endpoint) throw new Error(`exec wire endpoint missing for ${oldTargetTitle}: ${JSON.stringify(state.wireEndpoints || [])}`);
+  await ctx.driver.drag(
+    { x: endpoint.client_x, y: endpoint.client_y },
+    { x: targetPoint.client_x, y: targetPoint.client_y },
+    16
+  );
+  await sleep(500);
+}
+
+function sourceNameOrder(src, names) {
+  return names.map((name) => src.indexOf(`${name} ::`));
+}
+
 function firstInline(graph, predicate, label) {
   const expr = (graph.inline_exprs || []).find(predicate);
   if (!expr) throw new Error(`inline expr missing: ${label}\n${JSON.stringify(graph.inline_exprs || [])}`);
@@ -691,6 +736,87 @@ export const scenarios = {
       wire_expr: "limit",
     }, "data wire insert");
     await ctx.expectSourceContains("wired_value :: square(limit)");
+  },
+
+  "exec-rewire-reorders-statements": async (ctx) => {
+    await ctx.openCanvas();
+    await ctx.replaceSource(`fn order() {
+    a :: 1
+    b :: 2
+    c :: 3
+    print(a + b + c)
+}
+
+fn run() {
+    order()
+}
+`);
+    await ctx.openCanvas();
+    const before = await ctx.source();
+    await dragExecEndpoint(ctx, "order", "b", "c");
+    await ctx.waitFor(async () => {
+      const order = sourceNameOrder(await ctx.source(), ["a", "c", "b"]);
+      return order.every((n) => n >= 0) && order[0] < order[1] && order[1] < order[2];
+    }, "exec rewire source reorder");
+    const after = await ctx.source();
+    const order = sourceNameOrder(after, ["a", "c", "b"]);
+    if (!(order[0] < order[1] && order[1] < order[2])) throw new Error(`source order did not change to A,C,B:\n${after}`);
+    const graphDoc = await ctx.graph();
+    const graph = graphByTitle(graphDoc, "order");
+    if (!controlWireExists(graph, "a", "c")) throw new Error(`graph does not show A -> C control wire: ${JSON.stringify(graph.wires)}`);
+    const restored = await ctx.undo();
+    if (restored !== before) throw new Error(`undo did not restore exact source\nbefore:\n${before}\nafter:\n${restored}`);
+  },
+
+  "exec-rewire-refuses-cross-block": async (ctx) => {
+    await ctx.openCanvas();
+    await ctx.replaceSource(`fn order() {
+    a :: 1
+    if true {
+        c :: 3
+    } else {
+        print(a)
+    }
+    b :: 2
+    print(a + b)
+}
+
+fn run() {
+    order()
+}
+`);
+    await ctx.openCanvas();
+    const before = await ctx.source();
+    await dragExecEndpoint(ctx, "order", "if", "c");
+    await ctx.waitFor(async () => {
+      const state = await ctx.state();
+      const tx = await ctx.driver.evaluate(`JSON.stringify(window.__jetCanvasLastTxResult || {})`);
+      return String(state.lastToast || "").includes("different branch") || tx.includes("different branch");
+    }, "cross-block refusal");
+    const after = await ctx.source();
+    if (after !== before) throw new Error(`cross-block rewire changed source:\n${after}`);
+  },
+
+  "exec-rewire-binding-order-diagnostic": async (ctx) => {
+    await ctx.openCanvas();
+    await ctx.replaceSource(`fn order() {
+    a :: 1
+    b :: 2
+    c :: a + b
+    print(c)
+}
+
+fn run() {
+    order()
+}
+`);
+    await ctx.openCanvas();
+    const before = await ctx.source();
+    await dragExecEndpoint(ctx, "order", "b", "c");
+    const problem = await ctx.expectProblem("E0107");
+    if (!String(problem.rendered || "").includes("`b`")) throw new Error(`binding-order diagnostic did not name b: ${JSON.stringify(problem)}`);
+    const after = await ctx.source();
+    if (after !== before) throw new Error(`binding-order failed transaction changed source:\n${after}`);
   },
 
   "inline-edit-values": async (ctx) => {
