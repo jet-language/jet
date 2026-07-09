@@ -210,7 +210,10 @@ pub fn lookup(session: &Session, name: &str) -> Option<String> {
         }
     }
     if let Some(v) = session.scope.get(name) {
-        return Some(format!("{}\n", super::Render::format_binding(name, v)));
+        return Some(format!(
+            "{}\n",
+            super::Render::format_binding(name, v, session.mutable_names.contains(name))
+        ));
     }
     session_item_lookup(session, name)
 }

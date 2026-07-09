@@ -41,10 +41,13 @@ pub fn render_prompt(turn_no: usize, color: bool) -> String {
     format!("{} user> ", dim(&turn_no.to_string(), color))
 }
 
-/// `name : Type = value` — the one shared line shape used by both the pin
-/// rail and the `^B` bindings pane (D-FE-REPL1=D "workspace" layer).
-pub fn format_binding(name: &str, v: &CtValue) -> String {
-    format!("{} : {} = {}", name, type_name(v), v.jet_show())
+/// `name: Type :: value` (immutable) / `name: Type := value` (mutable) —
+/// the one shared line shape used by both the pin rail and the `^B`
+/// bindings pane (D-FE-REPL1=D "workspace" layer). The sigil matches the
+/// binding's original spelling so the pane reads as valid Jet.
+pub fn format_binding(name: &str, v: &CtValue, mutable: bool) -> String {
+    let sigil = if mutable { ":=" } else { "::" };
+    format!("{}: {} {} {}", name, type_name(v), sigil, v.jet_show())
 }
 
 /// The element type name shown inside a fold marker (`[Row]`, `[Int]`, …).
@@ -113,7 +116,7 @@ pub fn render_bindings_pane(session: &Session, changed: &HashSet<String>) -> Vec
         .into_iter()
         .map(|name| {
             let v = &session.scope[name];
-            let mut line = format_binding(name, v);
+            let mut line = format_binding(name, v, session.mutable_names.contains(name));
             if changed.contains(name) {
                 line.push_str(" ◂ new this step");
             }
@@ -141,7 +144,7 @@ pub fn render_workspace_row(left: &str, right: &str, split_col: usize, color: bo
 pub fn pin_label(session: &Session, turn: &ReplTurn) -> String {
     if let Some(name) = &turn.bound_name {
         if let Some(v) = session.scope.get(name) {
-            return format_binding(name, v);
+            return format_binding(name, v, session.mutable_names.contains(name));
         }
     }
     if turn.summary.is_empty() {
@@ -204,10 +207,10 @@ mod tests {
 
     #[test]
     fn pin_rail_shows_label_and_unpin_hint() {
-        let s = render_pin_rail("total : Int = 15", 3, 62, false);
+        let s = render_pin_rail("total: Int :: 15", 3, 62, false);
         let mut lines = s.lines();
         let head = lines.next().unwrap();
-        assert!(head.starts_with("📌 total : Int = 15"));
+        assert!(head.starts_with("📌 total: Int :: 15"));
         assert!(head.ends_with("turn 3 · unpin ^P"));
         let sep = lines.next().unwrap();
         assert!(sep.chars().all(|c| c == '─'));
@@ -215,6 +218,7 @@ mod tests {
 
     #[test]
     fn format_binding_matches_workspace_shape() {
-        assert_eq!(format_binding("total", &CtValue::Int(15)), "total : Int = 15");
+        assert_eq!(format_binding("total", &CtValue::Int(15), false), "total: Int :: 15");
+        assert_eq!(format_binding("total", &CtValue::Int(15), true), "total: Int := 15");
     }
 }
