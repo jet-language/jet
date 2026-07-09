@@ -501,6 +501,10 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(js.contains("<h2>Events</h2>"));
     assert!(js.contains("undoStack"));
     assert!(js.contains("redoStack"));
+    assert!(js.contains("const UNDO_DEPTH = 50"));
+    assert!(js.contains("function recordUndoEntry"));
+    assert!(js.contains("restoreSource(entry.before, entry, null, \"Undo\")"));
+    assert!(js.contains("restoreSource(entry.after, null, entry, \"Redo\")"));
     assert!(js.contains("editorState"));
     assert!(js.contains("jet.canvas.editor:"));
     assert!(js.contains("function alignSelectedNodes"));

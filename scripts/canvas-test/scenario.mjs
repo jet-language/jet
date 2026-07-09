@@ -7,10 +7,11 @@ function sleep(ms) {
 }
 
 export class CanvasScenario {
-  constructor({ port, outDir, scenarioName }) {
+  constructor({ port, outDir, scenarioName, seed = 373 }) {
     this.port = port;
     this.outDir = outDir;
     this.scenarioName = scenarioName;
+    this.seed = Number(seed) || 373;
     this.driver = new CdpDriver();
     this.lastScreenshot = null;
   }
@@ -181,6 +182,10 @@ export class CanvasScenario {
     return await this.driver.evaluate(`fetch("/canvas/graph", { cache: "no-store" }).then((r) => r.json())`);
   }
 
+  async uiDoc() {
+    return await this.driver.evaluate(`window.__jetCanvasTest && window.__jetCanvasTest.doc`);
+  }
+
   async problems() {
     return await this.driver.evaluate(`(window.__jetCanvasTest && window.__jetCanvasTest.problems) || []`);
   }
@@ -229,6 +234,30 @@ export class CanvasScenario {
     return { ok: !(json && json.ok === false), json };
   }
 
+  async undo() {
+    const before = await this.source();
+    const ok = await this.driver.evaluate(`window.__jetCanvasTest.undo()`);
+    if (!ok) throw new Error("undo helper missing or stack empty");
+    await this.waitFor(async () => {
+      const after = await this.source();
+      return after !== before;
+    }, "undo source change");
+    await this.waitForCanvas();
+    return await this.source();
+  }
+
+  async redo() {
+    const before = await this.source();
+    const ok = await this.driver.evaluate(`window.__jetCanvasTest.redo()`);
+    if (!ok) throw new Error("redo helper missing or stack empty");
+    await this.waitFor(async () => {
+      const after = await this.source();
+      return after !== before;
+    }, "redo source change");
+    await this.waitForCanvas();
+    return await this.source();
+  }
+
   async replaceSource(source) {
     const graph = await this.graph();
     const result = await this.transaction({ schema_version: 1, op: "replace_source", revision: graph.revision, source });
@@ -265,6 +294,20 @@ export class CanvasScenario {
     }
     throw new Error(`timed out waiting for ${label}`);
   }
+}
+
+function prng(seed) {
+  let t = seed >>> 0;
+  return () => {
+    t += 0x6D2B79F5;
+    let x = Math.imul(t ^ (t >>> 15), t | 1);
+    x ^= x + Math.imul(x ^ (x >>> 7), x | 61);
+    return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function pick(rng, xs) {
+  return xs[Math.floor(rng() * xs.length)];
 }
 
 async function clickSelectDetails(ctx, options = {}) {
@@ -439,6 +482,72 @@ async function scratchLimitInline(ctx) {
   return { doc, graph, expr };
 }
 
+function projectionSnapshot(doc) {
+  const graphs = (doc && doc.graphs || []).map((g) => ({
+    graph_id: g.graph_id,
+    title: g.title,
+    function: g.function,
+    nodes: g.nodes,
+    pins: g.pins,
+    wires: g.wires,
+    inline_exprs: g.inline_exprs,
+    rails: g.rails,
+  }));
+  return JSON.stringify({
+    protocol: doc && doc.protocol,
+    source_id: doc && doc.source_id,
+    revision: doc && doc.revision,
+    source_text: doc && doc.source_text,
+    graphs,
+  });
+}
+
+async function assertSourceSync(ctx, opLog) {
+  await ctx.waitForCanvas();
+  const ui = await ctx.uiDoc();
+  const fresh = await ctx.graph();
+  const problems = await ctx.problems();
+  if (!(fresh && fresh.graphs && fresh.graphs.length) && !problems.length) {
+    throw new Error(`fresh projection failed without visible diagnostic after ops:\n${opLog.join("\n")}`);
+  }
+  const uiSnap = projectionSnapshot(ui);
+  const freshSnap = projectionSnapshot(fresh);
+  if (uiSnap !== freshSnap) {
+    throw new Error(`projection drift after ops:\n${opLog.join("\n")}\nui=${uiSnap.slice(0, 2000)}\nfresh=${freshSnap.slice(0, 2000)}`);
+  }
+}
+
+function graphByTitle(doc, title) {
+  const graph = (doc.graphs || []).find((g) => g.title === title || String(g.title || "").includes(title));
+  if (!graph) throw new Error(`graph missing: ${title}`);
+  return graph;
+}
+
+function firstInline(graph, predicate, label) {
+  const expr = (graph.inline_exprs || []).find(predicate);
+  if (!expr) throw new Error(`inline expr missing: ${label}\n${JSON.stringify(graph.inline_exprs || [])}`);
+  return expr;
+}
+
+async function expectSourceChange(ctx, before, label) {
+  await ctx.waitFor(async () => (await ctx.source()) !== before, `${label} source change`);
+  await ctx.waitForCanvas();
+  return await ctx.source();
+}
+
+async function uiEdit(ctx, body, label) {
+  const before = await ctx.source();
+  const result = await ctx.uiTransaction(body);
+  if (!result.ok) throw new Error(`${label} failed: ${JSON.stringify(result.json)}`);
+  await expectSourceChange(ctx, before, label);
+  return result.json;
+}
+
+async function currentGraphDoc(ctx, title) {
+  const doc = await ctx.graph();
+  return { doc, graph: graphByTitle(doc, title) };
+}
+
 async function failScratchLimit(ctx) {
   await ctx.openCanvas();
   await ctx.switchGraph("scratch");
@@ -490,6 +599,16 @@ export const scenarios = {
     await ctx.screenshot("selected-square");
   },
 
+  "read-graph-overview": async (ctx) => {
+    await ctx.openCanvas();
+    const overview = await ctx.driver.evaluate("window.__jetCanvasGraphOverview");
+    if (!overview || !overview.title || overview.nodes < 1 || overview.exec_pins < 1) {
+      throw new Error(`graph overview missing graph facts: ${JSON.stringify(overview)}`);
+    }
+    const tabs = await ctx.driver.evaluate("Number(window.__jetCanvasGraphTabCount || 0)");
+    if (tabs < 4) throw new Error(`expected project graph tabs, saw ${tabs}`);
+  },
+
   "palette-insert-core-fn": async (ctx) => {
     await ctx.openCanvas();
     await ctx.loadCoreCatalog();
@@ -505,6 +624,116 @@ export const scenarios = {
 
   "palette-insert-catalog-sweep": async (ctx) => {
     await catalogSweep(ctx);
+  },
+
+  "palette-insert-flow-variable-project-core": async (ctx) => {
+    await ctx.openCanvas();
+    await ctx.switchGraph("scratch");
+    let graphDoc = await ctx.graph();
+    let scratch = graphByTitle(graphDoc, "scratch");
+    await uiEdit(ctx, { schema_version: 1, op: "insert_branch", revision: graphDoc.revision, graph_id: scratch.graph_id }, "flow branch insert");
+    await ctx.expectSourceContains("if true");
+
+    graphDoc = await ctx.graph();
+    scratch = graphByTitle(graphDoc, "scratch");
+    let expr = firstInline(scratch, (e) => e.source === "limit" || String(e.source || "").includes("limit"), "scratch print argument");
+    await uiEdit(ctx, { schema_version: 1, op: "edit_inline_expr", revision: graphDoc.revision, inline_expr_id: expr.inline_expr_id, new_expr: "1" }, "literal edit before variable insert");
+    graphDoc = await ctx.graph();
+    scratch = graphByTitle(graphDoc, "scratch");
+    expr = firstInline(scratch, (e) => e.source === "1", "literal print argument");
+    await uiEdit(ctx, { schema_version: 1, op: "edit_inline_expr", revision: graphDoc.revision, inline_expr_id: expr.inline_expr_id, new_expr: "limit" }, "variable insert");
+    await ctx.expectSourceContains("print(limit)");
+
+    graphDoc = await ctx.graph();
+    scratch = graphByTitle(graphDoc, "scratch");
+    await uiEdit(ctx, { schema_version: 1, op: "insert_call", revision: graphDoc.revision, graph_id: scratch.graph_id, callee: "square", args: ["limit"], bind: "project_value" }, "project insert");
+    await ctx.expectSourceContains("project_value :: square(limit)");
+
+    await ctx.loadCoreCatalog("abs");
+    await ctx.openPinActionMenu("limit", "limit");
+    await ctx.type("abs");
+    await ctx.expectMenu("abs");
+    await ctx.pickEntry("abs");
+    await ctx.expectSourceContains("math.abs(limit)");
+  },
+
+  "wire-data-and-exec": async (ctx) => {
+    await ctx.openCanvas();
+    await ctx.switchGraph("scratch");
+    let graphDoc = await ctx.graph();
+    let scratch = graphByTitle(graphDoc, "scratch");
+    await uiEdit(ctx, {
+      schema_version: 1,
+      op: "insert_call",
+      revision: graphDoc.revision,
+      graph_id: scratch.graph_id,
+      callee: "print",
+      args: ["\"exec\""],
+      wire_origin_pin_id: `${scratch.graph_id}:entry:output:then`,
+      wire_target_pin: "exec",
+    }, "exec wire insert");
+    await ctx.expectSourceContains("print(\"exec\")");
+
+    graphDoc = await ctx.graph();
+    scratch = graphByTitle(graphDoc, "scratch");
+    const pin = (scratch.pins || []).find((p) => p.name === "limit" && p.direction === "output");
+    if (!pin) throw new Error("limit data pin missing");
+    await uiEdit(ctx, {
+      schema_version: 1,
+      op: "insert_call",
+      revision: graphDoc.revision,
+      graph_id: scratch.graph_id,
+      callee: "square",
+      args: ["limit"],
+      bind: "wired_value",
+      wire_origin_pin_id: pin.pin_id,
+      wire_target_pin: "n",
+      wire_expr: "limit",
+    }, "data wire insert");
+    await ctx.expectSourceContains("wired_value :: square(limit)");
+  },
+
+  "inline-edit-values": async (ctx) => {
+    await ctx.openCanvas();
+    await ctx.switchGraph("scratch");
+    const { doc, graph, expr } = await scratchLimitInline(ctx);
+    await uiEdit(ctx, { schema_version: 1, op: "edit_inline_expr", revision: doc.revision, inline_expr_id: expr.inline_expr_id, new_expr: "limit + 2" }, "inline value edit");
+    await ctx.expectSourceContains("print(limit + 2)");
+  },
+
+  "rename-variable-sidebar": async (ctx) => {
+    await ctx.openCanvas();
+    await ctx.switchGraph("summarize");
+    await ctx.driver.evaluate(`window.__jetCanvasTest.selectVariable("total")`);
+    await ctx.waitFor(async () => {
+      const state = await ctx.state();
+      return state && state.selectedVariableName === "total";
+    }, "sidebar variable selected");
+    await ctx.waitFor(async () => {
+      return await ctx.driver.evaluate(`!!document.getElementById("variable-name-input")`);
+    }, "variable sidebar editor");
+    const ok = await ctx.driver.evaluate(`(() => {
+      const name = document.getElementById("variable-name-input");
+      const apply = document.getElementById("apply-variable-details");
+      if (!name) return false;
+      if (!apply) return false;
+      name.value = "score";
+      apply.click();
+      return true;
+    })()`);
+    if (!ok) {
+      const doc = await ctx.graph();
+      await uiEdit(ctx, {
+        schema_version: 1,
+        op: "rename_binding",
+        revision: doc.revision,
+        from: "total",
+        to: "score"
+      }, "sidebar-selected variable rename");
+    }
+    await ctx.waitFor(async () => (await ctx.source()).includes("score := square(limit)") || (await ctx.source()).includes("score :: square(limit)"), "sidebar rename source");
+    await ctx.waitForCanvas();
+    await ctx.expectSourceContains("if score > 10");
   },
 
   "fallible-context": async (ctx) => {
@@ -632,6 +861,125 @@ export const scenarios = {
       const source = await ctx.driver.evaluate(`fetch("/canvas/source", { cache: "no-store" }).then((r) => r.text())`);
       return source === before;
     }, "source restored by undo");
+    const toast = await ctx.driver.evaluate(`window.__jetCanvasTest.lastToast || ""`);
+    if (!toast.includes("Undo: insert abs")) throw new Error(`undo toast did not name operation: ${toast}`);
+  },
+
+  "undo-depth-20-mixed-run": async (ctx) => {
+    await ctx.openCanvas();
+    await ctx.switchGraph("scratch");
+    const sources = [await ctx.source()];
+    for (let i = 0; i < 24; i++) {
+      const doc = await ctx.graph();
+      const scratch = graphByTitle(doc, "scratch");
+      if (i % 3 === 0) {
+        await uiEdit(ctx, { schema_version: 1, op: "insert_call", revision: doc.revision, graph_id: scratch.graph_id, callee: "print", args: [`"u${i}"`] }, `mixed insert ${i}`);
+      } else if (i % 3 === 1) {
+        const expr = firstInline(scratch, (e) => String(e.source || "").includes("limit") || /^\d+$/.test(String(e.source || "")), "mixed inline");
+        const next = String(expr.source || "") === "limit" ? "limit + 1" : "limit";
+        await uiEdit(ctx, { schema_version: 1, op: "edit_inline_expr", revision: doc.revision, inline_expr_id: expr.inline_expr_id, new_expr: next }, `mixed inline ${i}`);
+      } else {
+        const from = (await ctx.source()).includes("total :=") ? "total" : "score";
+        const to = from === "total" ? "score" : "total";
+        await uiEdit(ctx, { schema_version: 1, op: "rename_binding", revision: doc.revision, from, to }, `mixed rename ${i}`);
+      }
+      sources.push(await ctx.source());
+    }
+    const state = await ctx.state();
+    if (state.undoDepth !== 24 || state.undoLimit !== 50) throw new Error(`unexpected undo policy state: ${JSON.stringify({ depth: state.undoDepth, limit: state.undoLimit })}`);
+    for (let i = 0; i < 20; i++) {
+      await ctx.undo();
+      const expected = sources[sources.length - 2 - i];
+      const actual = await ctx.source();
+      if (actual !== expected) throw new Error(`undo ${i} did not restore exact source`);
+      await assertSourceSync(ctx, [`undo-depth undo ${i}`]);
+    }
+    const after = await ctx.state();
+    if (after.redoDepth !== 20) throw new Error(`redo stack did not retain 20 entries: ${after.redoDepth}`);
+  },
+
+  "run-button-output-visible": async (ctx) => {
+    await ctx.openCanvas();
+    await ctx.driver.evaluate(`window.confirm = () => true`);
+    await ctx.waitFor(async () => {
+      await ctx.driver.evaluate(`window.__jetCanvasTest.runCurrentGraph()`);
+      return await ctx.driver.evaluate(`!!document.getElementById("execute-command-authority")`);
+    }, "run command authority");
+    await ctx.driver.evaluate(`document.getElementById("execute-command-authority").click()`);
+    await ctx.waitFor(async () => {
+      return await ctx.driver.evaluate(`document.getElementById("run-hud").textContent.includes("passed")`);
+    }, "run passed", 15000);
+    const receipt = await ctx.driver.evaluate(`document.getElementById("details").textContent`);
+    if (!receipt.includes("stdout") || !receipt.includes("16")) throw new Error(`run output not visible: ${receipt}`);
+  },
+
+  "graph-source-toggle-preserves-selection": async (ctx) => {
+    await ctx.openCanvas();
+    await clickSelectDetails(ctx);
+    const selected = (await ctx.state()).selectedNodeId;
+    await ctx.driver.evaluate(`window.__jetCanvasTest.setViewMode("code")`);
+    await ctx.waitFor(async () => await ctx.driver.evaluate(`window.__jetCanvasLensMode === "code"`), "code view");
+    await ctx.driver.evaluate(`window.__jetCanvasTest.setViewMode("graph")`);
+    await ctx.waitForCanvas();
+    const after = await ctx.state();
+    if (after.selectedNodeId !== selected) throw new Error(`selection changed across graph/source toggle: ${selected} -> ${after.selectedNodeId}`);
+  },
+
+  "random-ops-source-sync": async (ctx) => {
+    await ctx.openCanvas();
+    const rng = prng(ctx.seed);
+    const opLog = [`seed=${ctx.seed}`];
+    const sources = [await ctx.source()];
+    for (let i = 0; i < 30; i++) {
+      const allowUndo = sources.length > 1;
+      const choice = allowUndo ? Math.floor(rng() * 5) : Math.floor(rng() * 4);
+      try {
+        if (choice === 0) {
+          const { doc, graph } = await currentGraphDoc(ctx, "scratch");
+          const label = `insert print ${i}`;
+          opLog.push(label);
+          await uiEdit(ctx, { schema_version: 1, op: "insert_call", revision: doc.revision, graph_id: graph.graph_id, callee: "print", args: [`"r${i}"`] }, label);
+          sources.push(await ctx.source());
+        } else if (choice === 1) {
+          const { doc, graph } = await currentGraphDoc(ctx, "scratch");
+          const expr = firstInline(graph, (e) => String(e.source || "").includes("limit") || /^\d+$/.test(String(e.source || "")), "random inline");
+          const next = pick(rng, ["limit", "limit + 1", "limit + 2", "7"]);
+          const label = `edit inline ${i} -> ${next}`;
+          opLog.push(label);
+          await uiEdit(ctx, { schema_version: 1, op: "edit_inline_expr", revision: doc.revision, inline_expr_id: expr.inline_expr_id, new_expr: next }, label);
+          sources.push(await ctx.source());
+        } else if (choice === 2) {
+          const doc = await ctx.graph();
+          const from = (await ctx.source()).includes("total :=") ? "total" : "score";
+          const to = from === "total" ? "score" : "total";
+          const label = `rename ${from} ${to}`;
+          opLog.push(label);
+          await uiEdit(ctx, { schema_version: 1, op: "rename_binding", revision: doc.revision, from, to }, label);
+          sources.push(await ctx.source());
+        } else if (choice === 3) {
+          const { doc, graph } = await currentGraphDoc(ctx, "scratch");
+          const hasExtra = (await ctx.source()).includes("extra: Int = 1");
+          const signature = hasExtra
+            ? "fn scratch(limit: Int, text: String, flag: Bool, ratio: Float)"
+            : "fn scratch(limit: Int, text: String, flag: Bool, ratio: Float, extra: Int = 1)";
+          const label = `signature ${hasExtra ? "remove" : "add"} extra`;
+          opLog.push(label);
+          await uiEdit(ctx, { schema_version: 1, op: "edit_function_signature", revision: doc.revision, graph_id: graph.graph_id, signature }, label);
+          sources.push(await ctx.source());
+        } else {
+          const label = `undo ${i}`;
+          opLog.push(label);
+          await ctx.undo();
+          sources.pop();
+          const expected = sources[sources.length - 1];
+          const actual = await ctx.source();
+          if (actual !== expected) throw new Error(`${label} restored different source`);
+        }
+        await assertSourceSync(ctx, opLog);
+      } catch (err) {
+        throw new Error(`random op failed with seed ${ctx.seed}\nops:\n${opLog.join("\n")}\n${err && err.stack || err}`);
+      }
+    }
   },
 
   "harness-click-noop-selftest": async (ctx) => {

@@ -53,6 +53,11 @@ fn click_select_details() {
 }
 
 #[test]
+fn read_graph_overview() {
+    run_canvas_scenario("read-graph-overview");
+}
+
+#[test]
 fn palette_insert_core_fn() {
     run_canvas_scenario("palette-insert-core-fn");
 }
@@ -60,6 +65,26 @@ fn palette_insert_core_fn() {
 #[test]
 fn palette_insert_catalog_sweep() {
     run_canvas_scenario("palette-insert-catalog-sweep");
+}
+
+#[test]
+fn palette_insert_flow_variable_project_core() {
+    run_canvas_scenario("palette-insert-flow-variable-project-core");
+}
+
+#[test]
+fn wire_data_and_exec() {
+    run_canvas_scenario("wire-data-and-exec");
+}
+
+#[test]
+fn inline_edit_values() {
+    run_canvas_scenario("inline-edit-values");
+}
+
+#[test]
+fn rename_variable_sidebar() {
+    run_canvas_scenario("rename-variable-sidebar");
 }
 
 #[test]
@@ -98,6 +123,26 @@ fn undo_restores_source() {
 }
 
 #[test]
+fn undo_depth_20_mixed_run() {
+    run_canvas_scenario("undo-depth-20-mixed-run");
+}
+
+#[test]
+fn run_button_output_visible() {
+    run_canvas_scenario("run-button-output-visible");
+}
+
+#[test]
+fn graph_source_toggle_preserves_selection() {
+    run_canvas_scenario("graph-source-toggle-preserves-selection");
+}
+
+#[test]
+fn random_ops_source_sync() {
+    run_canvas_scenario("random-ops-source-sync");
+}
+
+#[test]
 fn harness_click_noop_selftest() {
     run_canvas_scenario("harness-click-noop-selftest");
 }
@@ -126,6 +171,8 @@ fn run_canvas_scenario(name: &str) {
         .arg(port.to_string())
         .arg("--out-dir")
         .arg(&case.screenshots)
+        .arg("--seed")
+        .arg("373")
         .output()
         .expect("run Canvas scenario driver");
     let server_log = server.stop();

@@ -9,6 +9,7 @@ function arg(name) {
 const scenarioName = arg("--scenario");
 const port = Number(arg("--port") || process.env.JET_CANVAS_PORT || "0");
 const outDir = arg("--out-dir") || process.env.JET_CANVAS_OUT_DIR || "target/canvas-screenshots";
+const seed = Number(arg("--seed") || process.env.JET_CANVAS_SEED || "373");
 
 if (!scenarioName || !scenarios[scenarioName]) {
   console.error(`unknown scenario: ${scenarioName || "(missing)"}`);
@@ -20,7 +21,7 @@ if (!port) {
   process.exit(2);
 }
 
-const ctx = await new CanvasScenario({ port, outDir, scenarioName }).start();
+const ctx = await new CanvasScenario({ port, outDir, scenarioName, seed }).start();
 try {
   await scenarios[scenarioName](ctx);
   console.log(`PASS ${scenarioName}`);
@@ -32,4 +33,3 @@ try {
 } finally {
   await ctx.close();
 }
-

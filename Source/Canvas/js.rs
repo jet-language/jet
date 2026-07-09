@@ -93,6 +93,7 @@ pub fn canvas_js() -> String {
   let diagnosticsState = { baseRevision: null, diagnosticRevision: null, entries: [], dismissed: new Set() };
   let scm = null;
   let proofDoc = null;
+  const UNDO_DEPTH = 50;
   let undoStack = [];
   let redoStack = [];
   let editorState = { bookmarks: [], favorites: [], actionUse: {}, rerouteKnots: [], nodePositions: {}, commentBoxes: [], stagedNodes: [], stagedWires: [], tourDismissed: false };
@@ -179,6 +180,45 @@ pub fn canvas_js() -> String {
   function storeFlag(name, value) {
     try { if (window.localStorage) window.localStorage.setItem(name, value ? "1" : "0"); }
     catch (_) {}
+  }
+
+  function shortCalleeName(callee) {
+    const parts = String(callee || "").split(".");
+    return parts[parts.length - 1] || "edit";
+  }
+
+  function transactionUndoLabel(body) {
+    if (!body) return "edit";
+    if (body.op === "insert_call") return "insert " + shortCalleeName(body.callee);
+    if (body.op === "edit_inline_expr") return "inline edit";
+    if (body.op === "move_link") return "rewire";
+    if (body.op === "break_link") return "break wire";
+    if (body.op === "rename_binding") return "rename " + (body.from || "binding");
+    if (body.op === "rename_function") return "rename " + (body.from || "function");
+    if (body.op === "edit_function_signature") return "signature";
+    if (body.op === "create_function") return "create " + (body.name || "function");
+    if (body.op === "replace_source" && body.source_edit === "paste_clone") return "paste";
+    if (body.op === "replace_source") return body.source_edit ? "source edit" : "source restore";
+    if (body.op === "insert_branch") return "insert branch";
+    if (body.op === "insert_switch") return "insert dispatch";
+    if (body.op === "insert_loop") return "insert loop";
+    if (body.op === "insert_fallible_rail") return "insert fallible rail";
+    if (body.op === "create_comment_region") return "comment";
+    if (body.op === "promote_to_binding") return "promote variable";
+    if (body.op === "insert_visible_conversion") return "conversion";
+    if (body.op === "extract_inline_expr") return "extract function";
+    return String(body.op || "edit").replace(/_/g, " ");
+  }
+
+  function pushHistory(stack, entry) {
+    stack.push(entry);
+    while (stack.length > UNDO_DEPTH) stack.shift();
+  }
+
+  function recordUndoEntry(body, before, after) {
+    if (!before || !after || before === after) return;
+    pushHistory(undoStack, { before, after, label: transactionUndoLabel(body), op: body && body.op || "edit" });
+    redoStack = [];
   }
 
   function projectStateKey(doc) {
@@ -3279,11 +3319,17 @@ pub fn canvas_js() -> String {
       graphId: selectedGraphId,
       selectedNodeId,
       selectedNodeTitle: selectedNode && selectedNode.title || "",
+      selectedVariableName,
       view: { x: view.x, y: view.y, zoom: view.zoom },
       sourceText: doc.source_text || "",
+      doc: latestDoc,
       problems: activeDiagnostics().map((entry) => ({ code: entry.code, what: entry.what, severity: entry.severity, rendered: diagnosticFullText(entry), source_span: entry.source_span })),
       diagnosticsByNode: hitMap.diagnostics,
       nodeCount: graph.nodes.length,
+      undoDepth: undoStack.length,
+      redoDepth: redoStack.length,
+      undoLimit: UNDO_DEPTH,
+      lastToast: toast ? toast.textContent : "",
       loadCoreCatalog: (query) => loadCoreCatalogActions(query || "").then(() => window.__jetCanvasCoreCatalogPalette || actionEntries.length),
       openCoreCatalogPalette: (query) => { openCoreCatalogPalette(query || ""); return true; },
       openGraphActionPalette: (query) => { openGraphActionPalette(window.innerWidth / 2 - 210, 72, query || "", viewportCenterGraphPoint()); return true; },
@@ -3367,6 +3413,13 @@ pub fn canvas_js() -> String {
         postTransaction(body);
         return true;
       },
+      undo: () => !!undoTransaction(),
+      redo: () => !!redoTransaction(),
+      setViewMode: (mode) => { setViewMode(mode); return viewMode; },
+      runCurrentGraph: () => { runCurrentGraph(); return true; },
+      selectVariable: (name) => { selectVariable(name); return true; },
+      copySelection: () => { copySelection(); return true; },
+      pasteSelection: () => { pasteSelection(); return true; },
       checkCurrentSource,
       jumpProblem: (index) => {
         const entry = activeDiagnostics()[Number(index) || 0];
@@ -4769,7 +4822,8 @@ pub fn canvas_js() -> String {
     const txUrl = window.__JET_CANVAS_TX__ || ((window.__JET_CANVAS_BASE__ || "/canvas") + "/transaction");
     const beforeSource = latestDoc && latestDoc.source_text;
     window.__jetCanvasLastTx = body;
-    fetch(txUrl, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
+    window.__jetCanvasLastTxResult = null;
+    return fetch(txUrl, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
       .then((r) => r.json().then((j) => ({ ok: r.ok, json: j })))
       .then((result) => {
         window.__jetCanvasLastTxResult = result.json;
@@ -4787,10 +4841,7 @@ pub fn canvas_js() -> String {
           showToast("Canvas action preview validated");
           return;
         }
-        if (result.json.changed && beforeSource && result.json.source_text && (body.op !== "replace_source" || body.source_edit)) {
-          undoStack.push({ before: beforeSource, after: result.json.source_text });
-          redoStack = [];
-        }
+        if (result.json.changed && beforeSource && result.json.source_text) recordUndoEntry(body, beforeSource, result.json.source_text);
         if (body.op === "replace_source" && body.source_edit) setSourceEditMode(false);
         clearDiagnosticsForRevision(result.json.revision);
         showToast(result.json.changed ? "Source updated" : "No change");
@@ -4801,22 +4852,25 @@ pub fn canvas_js() -> String {
       .catch((e) => showToast(String(e)));
   }
 
-  function restoreSource(source, redoEntry, undoEntry) {
+  function restoreSource(source, redoEntry, undoEntry, action) {
     if (!latestDoc || !source) return;
     const txUrl = window.__JET_CANVAS_TX__ || ((window.__JET_CANVAS_BASE__ || "/canvas") + "/transaction");
-    fetch(txUrl, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ schema_version: 1, op: "replace_source", revision: latestDoc.revision, source }) })
+    window.__jetCanvasLastTx = { schema_version: 1, op: "replace_source", revision: latestDoc.revision, source, undo_restore: action || "restore" };
+    window.__jetCanvasLastTxResult = null;
+    return fetch(txUrl, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ schema_version: 1, op: "replace_source", revision: latestDoc.revision, source }) })
       .then((r) => r.json().then((j) => ({ ok: r.ok, json: j })))
       .then((result) => {
+        window.__jetCanvasLastTxResult = result.json;
         if (!result.ok) {
           if (!acceptDiagnosticsPayload(result.json, "Undo")) showToast(result.json.message || "Undo rejected");
           return;
         }
-        if (redoEntry) redoStack.push(redoEntry);
-        if (undoEntry) undoStack.push(undoEntry);
+        if (redoEntry) pushHistory(redoStack, redoEntry);
+        if (undoEntry) pushHistory(undoStack, undoEntry);
         clearDiagnosticsForRevision(result.json.revision);
-        showToast("Source restored");
+        showToast((action || "Restore") + ": " + ((redoEntry || undoEntry || {}).label || "source"));
         loadSourceControl();
-        loadGraph();
+        return loadGraph();
       })
       .catch((e) => showToast(String(e)));
   }
@@ -4824,13 +4878,13 @@ pub fn canvas_js() -> String {
   function undoTransaction() {
     const entry = undoStack.pop();
     if (!entry) return showToast("Nothing to undo");
-    restoreSource(entry.before, entry);
+    return restoreSource(entry.before, entry, null, "Undo");
   }
 
   function redoTransaction() {
     const entry = redoStack.pop();
     if (!entry) return showToast("Nothing to redo");
-    restoreSource(entry.after, null, entry);
+    return restoreSource(entry.after, null, entry, "Redo");
   }
 
   function graphRequestUrl(sourceId) {

@@ -18,7 +18,7 @@ Ratchets use class prefixes: `interaction:`, `protocol:`, `projection:`,
 
 | Area | UE 5.8 Blueprint capability | Canvas target | Status | Ratchet |
 |---|---|---|---|---|
-| Workbench | Right-click action menu | Context menu opens source-backed node actions from graph facts. | claimed | grep:#287, tests/web_dev.rs |
+| Workbench | Right-click action menu | Context menu opens source-backed node actions from graph facts. | shipped | interaction:tests/canvas_scenarios.rs::palette_insert_flow_variable_project_core; interaction:tests/canvas_scenarios.rs::no_dead_end_ad_hoc_insert |
 | Workbench | Drag-off-pin action menu | Compatible action menu filtered by sema expected-type facts. | shipped | interaction:tests/canvas_scenarios.rs::palette_insert_core_fn; interaction:tests/canvas_scenarios.rs::fallible_context; interaction:tests/canvas_scenarios.rs::no_dead_end_ad_hoc_insert |
 | Workbench | Built-in method search | Palette/context search includes source-checked built-ins and ordinary Jet functions with pin metadata. | shipped | interaction:tests/canvas_scenarios.rs::palette_insert_catalog_sweep; interaction:tests/canvas_scenarios.rs::excluded_entry_rendering |
 | Workbench | Selection, shift-add, ctrl-toggle, marquee | Stable keyboard and pointer selection over projected nodes. | shipped | interaction:tests/canvas_scenarios.rs::click_select_details |
@@ -28,9 +28,9 @@ Ratchets use class prefixes: `interaction:`, `protocol:`, `projection:`,
 | Workbench | Align, distribute, reroute, tidy | Graph organization commands persist only local view/editor state; source stays truth. | claimed | grep:#312, tests/web_dev.rs |
 | Workbench | Bookmarks and favorite actions | Graph bookmarks, palette pins, and recency/frequency ranking are local editor state. | claimed | grep:#313, tests/web_dev.rs |
 | Workbench | Cut/copy/paste/duplicate | Source transactions duplicate or move source-backed selections. | planned | #272 |
-| Workbench | Inspector/details panel | Inspector shows node kind, pins, source span, and edit affordances. | claimed | grep:#265, tests/web_dev.rs |
+| Workbench | Inspector/details panel | Inspector shows node kind, pins, source span, and edit affordances. | shipped | interaction:tests/canvas_scenarios.rs::click_select_details; interaction:tests/canvas_scenarios.rs::rename_variable_sidebar |
 | Hotkeys | Save, undo, redo, find, check | Blueprint-compatible command layer maps to source transactions and Jet checks. | planned | #271, #272, #282 |
-| Hotkeys | Undo/redo | Undo/redo restore exact validated Jet source through the edit protocol. | shipped | interaction:tests/canvas_scenarios.rs::undo_restores_source |
+| Hotkeys | Undo/redo | Undo/redo restore exact validated Jet source through the edit protocol. | shipped | interaction:tests/canvas_scenarios.rs::undo_restores_source; interaction:tests/canvas_scenarios.rs::undo_depth_20_mixed_run; interaction:tests/canvas_scenarios.rs::random_ops_source_sync |
 | Hotkeys | Breakpoint and comment chords | Hotkeys target local debug anchors or source-backed comment regions. | planned | #273, #279 |
 | Node model | Function calls | Calls project as typed nodes with input/output pins. | shipped | interaction:tests/canvas_scenarios.rs::palette_insert_catalog_sweep |
 | Node model | Pure function calls | Pure leaves render inline by default and can expand. | planned | #274 |
@@ -69,10 +69,10 @@ Ratchets use class prefixes: `interaction:`, `protocol:`, `projection:`,
 | Search/refactor | Find in graph/project | Shared LSP/semindex query engine drives graph search. | claimed | projection:#282, tests/canvas.rs |
 | Search/refactor | Find references/rename | Refactors preview and write source through existing codemod paths. | claimed | projection:#282, tests/canvas.rs |
 | Search/refactor | Source-to-graph jump | Source span selects matching graph node/pin/inline expression. | claimed | projection:#282, tests/canvas.rs |
-| Search/refactor | Toggle graph/source view | Canvas and source code toggle over the same file, preserving source as truth. | claimed | grep:#287, tests/web_dev.rs |
+| Search/refactor | Toggle graph/source view | Canvas and source code toggle over the same file, preserving source as truth. | shipped | interaction:tests/canvas_scenarios.rs::graph_source_toggle_preserves_selection |
 | Accessibility | Keyboard-only authoring | Keyboard commands cover search, action palette, alignment/tidy, bookmarks, run, undo/redo, graph/source toggle, and node nudge with focus-visible/reduced-motion support. | claimed | grep:#315, tests/web_dev.rs |
 | Learning | Node docs and first-run overlay | Source doc comments, type explanations, pin hover text, and a dismissible local first-run overlay guide Canvas without changing source. | claimed | grep:#318, tests/web_dev.rs |
-| Runtime | Live-run loop | Canvas exposes a run HUD and one-key run/re-run path through the debug overlay and local watches. | claimed | grep:#317, tests/web_dev.rs |
+| Runtime | Live-run loop | Canvas exposes a run HUD and one-key run/re-run path through the debug overlay and local watches. | shipped | interaction:tests/canvas_scenarios.rs::run_button_output_visible |
 | Source control | Dirty/stale/conflict markers | Graph transactions guard against stale source revisions; diagnostics are tagged to the checked revision so stale problem overlays clear on reproject. | shipped | interaction:tests/canvas_scenarios.rs::bubble_appears_and_clears; projection:#265, tests/canvas.rs |
 | Source control | Transaction diff preview | Canvas shows exact Jet text diffs and Git dirty state before/after source-backed writes. | claimed | grep:#283, tests/canvas.rs, tests/web_dev.rs |
 | Source control | Asset checkout/lock model | Asset-style graph checkout is not Canvas truth. | rejected-as-Blueprint-semantic-debt | #283, D-CANVAS-SCM1 |
@@ -82,7 +82,7 @@ Ratchets use class prefixes: `interaction:`, `protocol:`, `projection:`,
 | Extensibility | Function library projection | Packages expose ordinary Jet functions/types/docs as source-backed palette entries. | shipped | interaction:tests/canvas_scenarios.rs::palette_insert_catalog_sweep; interaction:tests/canvas_scenarios.rs::palette_insert_core_fn |
 | Extensibility | Behavior-producing third-party nodes | Ratified Canvas actions use checked TIR/JIT preview and return source transactions only. | claimed | projection:#284, D-CANVAS-EXT1, D-CANVAS-EXT2, tests/canvas.rs::canvas_actions_project_palette_entries_and_preview_jit_backed_source_transactions |
 | Validation | Check/compile button | Canvas invokes Jet front-end diagnostics, never raw rustc output. | shipped | interaction:tests/canvas_scenarios.rs::check_button_populates_panel |
-| Validation | Formatter stability | Every write runs through formatter and reprojects from source. | claimed | projection:#265, tests/canvas.rs |
+| Validation | Formatter stability | Every write runs through formatter and reprojects from source. | shipped | interaction:tests/canvas_scenarios.rs::random_ops_source_sync; projection:#265, tests/canvas.rs |
 | Tests | Projection JSON snapshots | Every supported Jet construct needs deterministic graph coverage. | claimed | projection:#285, tests/canvas.rs::canvas_hardening_projection_suite_covers_blueprint_backlog_constructs |
 | Tests | UI nonblank and interactions | Browser panel has nonblank, keyboard, pointer, search, palette, undo, diff, and debug ratchets. | shipped | interaction:tests/canvas_scenarios.rs::open_and_render |
 | Tests | Unsupported-feature diagnostics | Unsupported and invalid Canvas actions fail through Canvas/Jet diagnostics, never raw rustc. | claimed | projection:#285, tests/canvas.rs::canvas_unsupported_and_invalid_actions_return_canvas_errors_without_rustc |
