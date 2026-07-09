@@ -2246,8 +2246,10 @@ fn os_import_live_semantic_eval_reports_omissions() {
     assert!(audit.contains("\"mode\":\"semantic-eval\""), "{audit}");
     assert!(audit.contains("jetbrains.idea-ultimate"), "{audit}");
     assert!(audit.contains("virtualisation.docker.enable"), "{audit}");
-    assert!(audit.contains("allowedUDPPorts"), "{audit}");
-    assert!(audit.contains("CachyOS kernel mapping"), "{audit}");
+    assert!(
+        audit.contains("no `nix-cachyos-kernel` pin"),
+        "{audit}"
+    );
     assert!(
         audit.contains("Home Manager program `starship`"),
         "{audit}"

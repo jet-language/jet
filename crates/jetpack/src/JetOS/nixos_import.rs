@@ -13,6 +13,9 @@ struct NixosImportPlan {
     host: String,
     target: String,
     nixpkgs_ref: String,
+    /// Additional named sources beyond nixpkgs (label, `github@…` ref) —
+    /// e.g. the `nix-cachyos-kernel` pin a `.CachyOS` kernel needs.
+    extra_sources: Vec<(String, String)>,
     packages: Vec<String>,
     omitted_packages: Vec<String>,
     services: Vec<String>,
@@ -264,6 +267,7 @@ fn import_plan_from_json(
         host,
         target,
         nixpkgs_ref,
+        extra_sources: Vec::new(),
         packages,
         omitted_packages,
         services,
@@ -320,6 +324,7 @@ fn import_plan_from_scan(args: &NixosImportArgs) -> Result<NixosImportPlan, Stri
         host,
         target: "linux.x64".to_string(),
         nixpkgs_ref: "nixpkgs@nixpkgs-unstable".to_string(),
+        extra_sources: Vec::new(),
         packages: Vec::new(),
         omitted_packages: Vec::new(),
         services: Vec::new(),
@@ -456,6 +461,9 @@ fn render_nixos_import_config(plan: &NixosImportPlan) -> String {
     out.push_str(&format!("module {} {{\n", import_ident_or_host(&plan.host)));
     out.push_str("    sources: {\n");
     out.push_str(&format!("        nixpkgs: {}\n", plan.nixpkgs_ref));
+    for (name, source) in &plan.extra_sources {
+        out.push_str(&format!("        {}: {}\n", name, source));
+    }
     out.push_str("    }\n");
     out.push_str(&format!(
         "    system.{}: {{\n",

@@ -22,6 +22,11 @@ struct NixosMapping {
     nixpkgs_rev: String,
     body_lines: Vec<String>,
     system_packages: Vec<String>,
+    /// `boot.kernel: .CachyOS` — the declared `nix-cachyos-kernel` flake
+    /// source `(owner, repo, rev-or-ref)` whose overlay provides the kernel.
+    kernel_input: Option<(String, String, String)>,
+    /// Which desktop shell process the guest proof must find alive.
+    desktop_shell_process: String,
 }
 
 fn nixos_backend_dir(host: &str) -> PathBuf {
@@ -130,24 +135,45 @@ fn is_known_option_key(key: &str) -> bool {
         }
         return false;
     }
+    if let Some(rest) = key.strip_prefix("user.") {
+        if let Some((_, field)) = rest.split_once('.') {
+            return matches!(field, "packages" | "homeManager");
+        }
+        return false;
+    }
+    if let Some(rest) = key.strip_prefix("groups.") {
+        return rest.split_once('.').map(|(_, f)| f == "members").unwrap_or(false);
+    }
+    if key.strip_prefix("performance.sysctl.").is_some() {
+        return true;
+    }
     matches!(
         key,
         "network.hostName"
             | "network.networkmanager.enable"
             | "network.firewall.allowedTcpPorts"
+            | "network.firewall.allowedUdpPorts"
             | "network.dns"
             | "filesystem.timeZone"
             | "services.localization.locale"
             | "services.localization.keyboardLayout"
             | "boot.loader"
             | "boot.loader.efi.canTouchVariables"
+            | "boot.kernel"
+            | "boot.kernel.profile"
             | "boot.kernel.params"
             | "init.defaultTarget"
+            | "performance.zram.memoryPercent"
             | "services.desktop.profile"
+            | "services.desktop.plasma.enable"
             | "services.displayManager"
             | "services.desktop.autoLogin.user"
             | "services.audio.pipewire.enable"
             | "services.audio.rtkit.enable"
+            | "services.virtualization.libvirtd.enable"
+            | "services.gaming.steam.enable"
+            | "services.gaming.gamemode.enable"
+            | "services.smartcard.pcscd.enable"
     )
 }
 
@@ -157,6 +183,25 @@ fn shell_package_attr(value: &str) -> String {
         .next()
         .unwrap_or(value)
         .to_string()
+}
+
+/// Package names out of a rendered ref list: `[nixpkgs.[a, b-c], nixpkgs.d]`
+/// -> `["a", "b-c", "d"]`. Group brackets and source qualifiers are noise
+/// here — the backend resolves every name against the pinned nixpkgs.
+fn parse_package_ref_names(value: &str) -> Vec<String> {
+    value
+        .split(|c: char| c == '[' || c == ']' || c == ',')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            part.rsplit('.')
+                .next()
+                .unwrap_or(part)
+                .trim()
+                .to_string()
+        })
+        .filter(|name| !name.is_empty() && name != "nixpkgs")
+        .collect()
 }
 
 /// Map a `SystemPlan` to a NixOS `configuration.nix` body + package list, or
@@ -263,6 +308,106 @@ fn map_system_to_nixos(
         body_lines.push(format!("  boot.kernelParams = {};", nix_string_list(&params)));
     }
 
+    // Kernel: `.CachyOS` rides on a declared `nix-cachyos-kernel` flake
+    // source whose overlay provides `pkgs.cachyosKernels.*`.
+    let mut kernel_input = None;
+    if let Some(v) = resolved_option_value(system, "boot.kernel") {
+        match clean_symbol(&v).as_str() {
+            "CachyOS" => {
+                let declared = table.declarations().into_iter().find_map(|(_, upstream, _)| {
+                    let rest = upstream.strip_prefix("github:")?;
+                    let mut parts = rest.splitn(3, '/');
+                    let owner = parts.next()?.to_string();
+                    let repo = parts.next()?.to_string();
+                    let rev = parts.next().unwrap_or("release").to_string();
+                    repo.eq_ignore_ascii_case("nix-cachyos-kernel")
+                        .then_some((owner, repo, rev))
+                });
+                match declared {
+                    Some(input) => {
+                        let attr = match resolved_option_value(system, "boot.kernel.profile")
+                            .map(|p| clean_symbol(&p))
+                            .as_deref()
+                        {
+                            Some("CachyOSLts") => "linuxPackages-cachyos-lts",
+                            _ => "linuxPackages-cachyos-latest",
+                        };
+                        body_lines.push(format!(
+                            "  boot.kernelPackages = pkgs.cachyosKernels.{attr};"
+                        ));
+                        kernel_input = Some(input);
+                    }
+                    None => unmapped.push(
+                        "option `boot.kernel` `.CachyOS` needs a declared `github@<owner>/nix-cachyos-kernel/<rev>` source for the kernel overlay"
+                            .to_string(),
+                    ),
+                }
+            }
+            other => unmapped.push(format!(
+                "option `boot.kernel` value `.{other}` has no NixOS mapping (supported: .CachyOS)"
+            )),
+        }
+    }
+    if let Some(v) = resolved_option_value(system, "network.firewall.allowedUdpPorts") {
+        body_lines.push(format!(
+            "  networking.firewall.allowedUDPPorts = {};",
+            nix_int_list(&parse_int_list(&v))
+        ));
+    }
+    let sysctl_entries: Vec<(String, String)> = system
+        .options
+        .iter()
+        .filter_map(|option| {
+            option
+                .key
+                .strip_prefix("performance.sysctl.")
+                .map(|rest| (rest.to_string(), option.value.clone()))
+        })
+        .collect();
+    if !sysctl_entries.is_empty() {
+        body_lines.push("  boot.kernel.sysctl = {".to_string());
+        for (key, value) in sysctl_entries {
+            let cleaned = clean_value(&value);
+            let rendered = if cleaned == "true" || cleaned == "false" {
+                cleaned.clone()
+            } else if cleaned.parse::<f64>().is_ok() {
+                cleaned.clone()
+            } else {
+                nix_string(&cleaned)
+            };
+            body_lines.push(format!("    \"{key}\" = {rendered};"));
+        }
+        body_lines.push("  };".to_string());
+    }
+    if let Some(v) = resolved_option_value(system, "performance.zram.memoryPercent") {
+        body_lines.push("  zramSwap = {".to_string());
+        body_lines.push("    enable = true;".to_string());
+        body_lines.push(format!("    memoryPercent = {};", clean_value(&v)));
+        body_lines.push("  };".to_string());
+    }
+    for (key, nixos) in [
+        ("services.virtualization.libvirtd.enable", "virtualisation.libvirtd.enable"),
+        ("services.gaming.steam.enable", "programs.steam.enable"),
+        ("services.gaming.gamemode.enable", "programs.gamemode.enable"),
+        ("services.smartcard.pcscd.enable", "services.pcscd.enable"),
+    ] {
+        if let Some(v) = resolved_option_value(system, key) {
+            body_lines.push(format!("  {nixos} = {};", clean_bool_json(&v)));
+        }
+    }
+    for group in collect_names(system, "groups") {
+        if let Some(v) = resolved_option_value(system, &format!("groups.{group}.members")) {
+            let members: Vec<String> = parse_list_items(&v)
+                .iter()
+                .map(|m| m.strip_prefix("users.").unwrap_or(m).to_string())
+                .collect();
+            body_lines.push(format!(
+                "  users.groups.{group}.members = {};",
+                nix_string_list(&members)
+            ));
+        }
+    }
+
     let desktop_default = resolved_option_value(system, "services.desktop.profile")
         .map(|v| clean_symbol(&v) == "Default")
         .unwrap_or(false);
@@ -274,11 +419,18 @@ fn map_system_to_nixos(
             ));
         }
     }
+    let plasma_enabled = resolved_option_value(system, "services.desktop.plasma.enable")
+        .map(|v| clean_bool_json(&v) == "true")
+        .unwrap_or(false);
     let display_manager = resolved_option_value(system, "services.displayManager")
         .map(|v| clean_value(&v))
-        .or_else(|| desktop_default.then(|| "gdm".to_string()));
+        .or_else(|| desktop_default.then(|| "gdm".to_string()))
+        .or_else(|| plasma_enabled.then(|| "sddm".to_string()));
     if desktop_default {
         body_lines.push("  services.desktopManager.gnome.enable = true;".to_string());
+    }
+    if plasma_enabled {
+        body_lines.push("  services.desktopManager.plasma6.enable = true;".to_string());
     }
     match display_manager.as_deref() {
         Some("gdm") => body_lines.push("  services.displayManager.gdm.enable = true;".to_string()),
@@ -330,6 +482,17 @@ fn map_system_to_nixos(
             user_lines.push(format!("    shell = pkgs.{attr};"));
             if attr == "fish" {
                 fish_enabled = true;
+            }
+        }
+        // `user.<name>.packages` (per-user scope) — bracket-group refs like
+        // `[nixpkgs.[a, b]]` or single `source.name` refs.
+        if let Some(v) = resolved_option_value(system, &format!("user.{name}.packages")) {
+            let attrs = parse_package_ref_names(&v);
+            if !attrs.is_empty() {
+                user_lines.push(format!(
+                    "    packages = with pkgs; [ {} ];",
+                    attrs.join(" ")
+                ));
             }
         }
         body_lines.push(format!("  users.users.{name} = {{"));
@@ -398,6 +561,12 @@ fn map_system_to_nixos(
         nixpkgs_rev,
         body_lines,
         system_packages,
+        kernel_input,
+        desktop_shell_process: if plasma_enabled {
+            "plasmashell".to_string()
+        } else {
+            "gnome-shell".to_string()
+        },
     })
 }
 
@@ -405,8 +574,8 @@ const FLAKE_TEMPLATE: &str = r#"{
   description = "jetos backend for @@HOST@@ (generated by `jet os vm prove --real`; do not hand-edit)";
 
   inputs.nixpkgs.url = "github:@@OWNER@@/@@REPO@@/@@REV@@";
-
-  outputs = { self, nixpkgs }:
+@@EXTRA_INPUTS@@
+  outputs = { self, nixpkgs, ... }@inputs:
     let
       system = "x86_64-linux";
       pkgs = nixpkgs.legacyPackages.${system};
@@ -414,7 +583,7 @@ const FLAKE_TEMPLATE: &str = r#"{
     in {
       nixosConfigurations.@@HOST@@ = lib.nixosSystem {
         inherit system;
-        modules = [ ./configuration.nix ];
+        modules = [ ./configuration.nix@@EXTRA_MODULES@@ ];
       };
 
       packages.${system} = {
@@ -433,11 +602,22 @@ const FLAKE_TEMPLATE: &str = r#"{
 "#;
 
 fn render_flake_nix(host: &str, mapping: &NixosMapping) -> String {
+    let (extra_inputs, extra_modules) = match &mapping.kernel_input {
+        Some((owner, repo, rev)) => (
+            format!(
+                "  inputs.cachyos.url = \"github:{owner}/{repo}/{rev}\";\n  inputs.cachyos.inputs.nixpkgs.follows = \"nixpkgs\";\n"
+            ),
+            " { nixpkgs.overlays = [ inputs.cachyos.overlays.default ]; }".to_string(),
+        ),
+        None => (String::new(), String::new()),
+    };
     FLAKE_TEMPLATE
         .replace("@@HOST@@", host)
         .replace("@@OWNER@@", &mapping.nixpkgs_owner)
         .replace("@@REPO@@", &mapping.nixpkgs_repo)
         .replace("@@REV@@", &mapping.nixpkgs_rev)
+        .replace("@@EXTRA_INPUTS@@", &extra_inputs)
+        .replace("@@EXTRA_MODULES@@", &extra_modules)
 }
 
 const CONFIGURATION_HEAD: &str = r#"{ config, pkgs, lib, ... }:
@@ -482,7 +662,7 @@ const CONFIGURATION_PROOF_SERVICE: &str = r#"
         dm=$(systemctl is-active display-manager.service || true)
         # NixOS wraps gnome-shell (comm = ".gnome-shell-wr…"), so match the
         # full command line rather than the truncated process name.
-        shell_pid=$(pgrep -u @@USER@@ -f gnome-shell | head -n1 || true)
+        shell_pid=$(pgrep -u @@USER@@ -f @@DESKTOP_SHELL_PROCESS@@ | head -n1 || true)
         session=$(loginctl list-sessions --no-legend | awk '$3=="@@USER@@" {print $1; exit}')
         stype=""
         if [ -n "$session" ]; then
@@ -497,7 +677,7 @@ const CONFIGURATION_PROOF_SERVICE: &str = r#"
             --arg session_type "$stype" \
             --arg shell_pid "$shell_pid" \
             --arg user "@@USER@@" \
-            '{host:$host,kernel:$kernel,display_manager:$dm,session_type:$session_type,gnome_shell_pid:$shell_pid,user:$user,desktop:"gnome",proof:"live-desktop"}' \
+            '{host:$host,kernel:$kernel,display_manager:$dm,session_type:$session_type,shell_pid:$shell_pid,user:$user,desktop:"@@DESKTOP_NAME@@",proof:"live-desktop"}' \
             | sed 's/^/JETOS_GUEST_PROOF:/' > /dev/ttyS0
           exit 0
         fi
@@ -529,7 +709,20 @@ fn render_configuration_nix(system: &SystemPlan, mapping: &NixosMapping) -> Stri
                 .next()
                 .unwrap_or_else(|| "root".to_string())
         });
-    out.push_str(&CONFIGURATION_PROOF_SERVICE.replace("@@USER@@", &proof_user));
+    let desktop_name = if mapping.desktop_shell_process == "plasmashell" {
+        "plasma"
+    } else {
+        "gnome"
+    };
+    out.push_str(
+        &CONFIGURATION_PROOF_SERVICE
+            .replace("@@USER@@", &proof_user)
+            .replace(
+                "@@DESKTOP_SHELL_PROCESS@@",
+                &mapping.desktop_shell_process,
+            )
+            .replace("@@DESKTOP_NAME@@", desktop_name),
+    );
     out
 }
 
@@ -1271,7 +1464,7 @@ mod tests {
         assert!(configuration.contains("system.stateVersion = \"26.05\";"));
         assert!(configuration.contains("environment.systemPackages = with pkgs; [ firefox btop ];"));
         assert!(configuration.contains("systemd.services.jetos-proof = {"));
-        assert!(configuration.contains("pgrep -u nate -x gnome-shell"));
+        assert!(configuration.contains("pgrep -u nate -f gnome-shell"));
         assert!(configuration.contains("JETOS_GUEST_PROOF:"));
     }
 

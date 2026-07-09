@@ -40,6 +40,7 @@ const NIXOS_LIVE_EXTRACTOR: &str = r#"c: {
   svcGamemode = c.programs.gamemode.enable or false;
   svcPcscd = c.services.pcscd.enable or false;
   svcBluetooth = c.hardware.bluetooth.enable or false;
+  stylix = c.stylix.enable or false;
   packages = map (p: p.pname or p.name or "?") c.environment.systemPackages;
   users = map (n: {
     name = n;
@@ -177,6 +178,19 @@ fn live_nixpkgs_ref(source: &Path) -> Option<String> {
     Some(format!("github@{owner}/{repo}/{rev}"))
 }
 
+/// A locked github input's `github@owner/repo/rev` ref from the source's
+/// `flake.lock`, looked up by node name.
+fn live_locked_github_ref(source: &Path, node: &str) -> Option<String> {
+    let text = fs::read_to_string(source.join("flake.lock")).ok()?;
+    let lock = JSON::parse(&text).ok()?;
+    let locked = lock.get("nodes").ok()?.get(node).ok()?.get("locked").ok()?;
+    let locked = locked.as_object().ok()?;
+    let owner = import_json_string(locked, "owner")?;
+    let repo = import_json_string(locked, "repo")?;
+    let rev = import_json_string(locked, "rev")?;
+    Some(format!("github@{owner}/{repo}/{rev}"))
+}
+
 fn plan_from_live_facts(
     args: &NixosImportArgs,
     host: &str,
@@ -200,9 +214,9 @@ fn plan_from_live_facts(
     }
     let udp = live_num_list(root, "firewallUdp");
     if !udp.is_empty() {
-        omissions.push(format!(
-            "networking.firewall.allowedUDPPorts {:?} has no jetos option yet",
-            udp
+        options.push((
+            "network.firewall.allowedUdpPorts".to_string(),
+            render_live_int_list(&udp),
         ));
     }
     let dns = import_json_string_array(root, "nameservers");
@@ -234,11 +248,21 @@ fn plan_from_live_facts(
         options.push(("boot.kernel.params".to_string(), import_json_array(&params)));
     }
     let kernel = live_str(root, "kernelName");
+    let mut extra_sources: Vec<(String, String)> = Vec::new();
     if kernel.to_ascii_lowercase().contains("cachyos") {
         options.push(("boot.kernel".to_string(), ".CachyOS".to_string()));
+        match live_locked_github_ref(&args.source, "nix-cachyos-kernel") {
+            Some(pin) => extra_sources.push(("cachyos".to_string(), pin)),
+            None => omissions.push(
+                "boot.kernel .CachyOS: the source flake.lock has no `nix-cachyos-kernel` pin; \
+                 declare a `github@<owner>/nix-cachyos-kernel/<rev>` source before the real tier can build"
+                    .to_string(),
+            ),
+        }
+    }
+    if live_bool(root, "stylix") {
         omissions.push(
-            "boot.kernel .CachyOS: the real-tier backend has no CachyOS kernel mapping yet; \
-             the plumbing tier needs a first-party `cachyos-kernel` package"
+            "stylix theming is enabled upstream and has no jetos realization yet (theme.* options are declarative only)"
                 .to_string(),
         );
     }
@@ -391,6 +415,7 @@ fn plan_from_live_facts(
         host: host.to_string(),
         target: "linux.x64".to_string(),
         nixpkgs_ref,
+        extra_sources,
         packages,
         omitted_packages,
         services,
