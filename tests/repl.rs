@@ -195,7 +195,7 @@ fn repl_notebook_turn_controls() {
 #[test]
 fn repl_question_name_shows_type() {
     let out = run_transcript(&["answer :: 42", ":? answer"], None);
-    assert!(out.contains("answer : Int"), "got: {out:?}");
+    assert!(out.contains("answer: Int :: 42"), "got: {out:?}");
 }
 
 #[test]
@@ -725,9 +725,9 @@ fn long_list_folds_past_threshold_short_list_does_not() {
 
 #[test]
 fn pin_rail_renders_binding_name_type_value_and_unpin_hint() {
-    let rail = Render::render_pin_rail("total : Int = 15", 3, 62, false);
+    let rail = Render::render_pin_rail("total: Int :: 15", 3, 62, false);
     let head = rail.lines().next().unwrap();
-    assert!(head.contains("total : Int = 15"), "got: {head:?}");
+    assert!(head.contains("total: Int :: 15"), "got: {head:?}");
     assert!(head.contains("turn 3"), "got: {head:?}");
     assert!(head.contains("unpin"), "got: {head:?}");
     assert!(head.contains("^P"), "got: {head:?}");
@@ -751,7 +751,10 @@ fn docs_lookup_local_binding_shows_live_value() {
     let mut session = Session::new();
     session.scope.insert("answer".to_string(), jet::AST::CtValue::Int(42));
     let doc = Docs::lookup(&session, "answer").expect("bound name should resolve");
-    assert_eq!(doc, "answer : Int = 42\n");
+    assert_eq!(doc, "answer: Int :: 42\n");
+    session.mutable_names.insert("answer".to_string());
+    let doc = Docs::lookup(&session, "answer").expect("bound name should resolve");
+    assert_eq!(doc, "answer: Int := 42\n");
 }
 
 #[test]
@@ -760,8 +763,8 @@ fn bare_question_name_is_the_primary_docs_spelling() {
     // `:? name` stays an accepted alias to the same lookup.
     let bare = run_transcript(&["answer :: 42", "?answer"], None);
     let colon = run_transcript(&["answer :: 42", ":? answer"], None);
-    assert!(bare.contains("answer : Int"), "got: {bare:?}");
-    assert!(colon.contains("answer : Int"), "got: {colon:?}");
+    assert!(bare.contains("answer: Int :: 42"), "got: {bare:?}");
+    assert!(colon.contains("answer: Int :: 42"), "got: {colon:?}");
 }
 
 #[test]

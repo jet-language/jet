@@ -362,6 +362,59 @@ fn question_mark_is_help_golden() {
     check_snapshot("question_mark_help.txt", &stdout);
 }
 
+/// D-FE-HELP1=D: `jet ? <query>` (piped, i.e. non-TTY) is the non-interactive
+/// floor — best matches for the query, printed once, no raw mode.
+#[test]
+fn question_mark_query_prints_matches_non_interactively() {
+    let out = Command::new(jet())
+        .args(["?", "run"])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0), "`jet ? run` should exit 0");
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(stdout.contains("jet run"), "expected a `run` match, got:\n{}", stdout);
+}
+
+/// A query that looks like a diagnostic code renders the verbatim I4 essay —
+/// byte-identical to `jet explain <CODE>`, since both go through
+/// `jet::Explain::render` over the same registry (single source of truth).
+#[test]
+fn question_mark_code_query_matches_explain_verbatim() {
+    let via_help = Command::new(jet())
+        .args(["?", "E0102"])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let via_explain = Command::new(jet())
+        .args(["explain", "E0102"])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(via_help.status.code(), Some(0));
+    assert_eq!(via_explain.status.code(), Some(0));
+    assert_eq!(
+        String::from_utf8_lossy(&via_help.stdout),
+        String::from_utf8_lossy(&via_explain.stdout),
+        "`jet ? E0102` must render the same verbatim essay as `jet explain E0102` (I4)"
+    );
+}
+
+/// A multi-word task/outcome phrase still resolves to a real command line —
+/// the owner-modified default (2026-07-08): keywords are aliases on command
+/// entries, never a separate goal menu, but they must still be findable.
+#[test]
+fn question_mark_task_phrase_resolves_to_a_real_command() {
+    let out = Command::new(jet())
+        .args(["?", "add", "a", "dependency"])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(stdout.contains("jet add"), "expected `add` to surface, got:\n{}", stdout);
+}
+
 #[test]
 fn file_sugar_runs_without_run_subcommand() {
     let stem = std::env::temp_dir().join("jet_cli_file_sugar");

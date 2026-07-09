@@ -242,6 +242,6 @@ mod tests {
             .scope
             .insert("answer".to_string(), crate::AST::CtValue::Int(42));
         let doc = lookup(&session, "answer").expect("binding should resolve");
-        assert_eq!(doc, "answer : Int = 42\n");
+        assert_eq!(doc, "answer: Int :: 42\n");
     }
 }
