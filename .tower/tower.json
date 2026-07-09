@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 389,
-    "rev": 2066,
+    "rev": 2070,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -19109,11 +19109,11 @@
       "track": "epoch",
       "epoch": "e6",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "building",
       "priority": "P2",
       "plan": "canvas-blueprint-epoch",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "codex-m2",
       "log": [
         {
           "at": "2026-07-09",
@@ -19122,7 +19122,8 @@
         }
       ],
       "created": "2026-07-09T14:08:57.486Z",
-      "updated": "2026-07-09"
+      "updated": "2026-07-09",
+      "claimedAt": "2026-07-09T17:06:37.444Z"
     },
     {
       "id": "c0h41rrl",
@@ -41792,6 +41793,35 @@
       "created": "2026-07-09T14:10:45.093Z",
       "outcome": "B",
       "ratifiedAt": "2026-07-09"
+    },
+    {
+      "id": "D-CANVASM1ACCEPT",
+      "cardId": "c0do8gm2",
+      "group": "web-ui",
+      "title": "Accept milestone M1 — the Canvas core loop",
+      "gist": "Does the core editing loop — open, insert, wire, edit, undo, run — now work well enough on your machine to call M1 done?",
+      "explainer": "Recommendation assumes the script passes on your machine as it does under the harness; if anything feels off mid-script, B with notes is the more valuable outcome — that is the feedback loop the first four attempts never had.",
+      "story": "You open Canvas on the demo project and build a small change entirely with the mouse: pull a function from the palette, wire it in, tweak a value, undo a mistake, hit Run. Four earlier attempts claimed this worked while the tests never touched a browser. M1 exists to make this exact loop trustworthy; only you can say whether it feels that way in your hands.",
+      "inWild": "The click-through script (10-15 steps, one expected observation per step):\ntools/Tower/docs/plans/epoch-6/acceptance-m1.md\n\nStart it with:\n  nix develop -c jet dev examples/features/tooling/canvas_blueprint_demo.jet --target=web\n  open http://localhost:8080/canvas\n\nBehind it: 25 interaction scenarios green in CI (real chromium, real mouse events), cards #369-#373 done.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Accept — M1 done",
+          "detail": "The loop held up through the script. M2 (in-graph authoring completion) becomes the active milestone; M6 stays frozen until M5.",
+          "code": "M1 closes. Matrix rows keep their interaction: ratchets; any later regression fails CI, not your patience."
+        },
+        {
+          "key": "B",
+          "name": "Reject — punch list attached",
+          "detail": "Something failed or felt broken during the script. Ratify with your notes (step number + what you saw); each item becomes a defect card at the top of M1's workOrder and M1 re-enters building. M2 work pauses until the punch list clears.",
+          "code": "Ratify B with a comment like:\n  step 7: menu opened at wrong position\n  step 11: undo left a ghost node\nEach line -> defect card, fixed, re-scenario'd, then this ballot re-opens."
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "status": "open",
+      "created": "2026-07-09T17:11:59.534Z"
     }
   ],
   "questions": [
@@ -43056,6 +43086,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-09T17:11:59.534Z",
+      "by": "claude",
+      "action": "decision.add",
+      "ref": "D-CANVASM1ACCEPT",
+      "note": "Accept milestone M1 — the Canvas core loop"
+    },
+    {
+      "at": "2026-07-09T17:06:37.521Z",
+      "by": "claude",
+      "action": "card.update",
+      "ref": "c0fzoku6",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-09T17:06:37.445Z",
+      "by": "codex-m2",
+      "action": "card.claim",
+      "ref": "c0fzoku6",
+      "note": ""
+    },
     {
       "at": "2026-07-09T17:06:01.342Z",
       "by": "claude",
@@ -57034,27 +57085,6 @@
       "action": "decision.ratify",
       "ref": "D-CI2",
       "note": "A"
-    },
-    {
-      "at": "2026-07-05T11:47:06.641Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-CI1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-05T11:47:06.584Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-HL1",
-      "note": "D"
-    },
-    {
-      "at": "2026-07-05T11:47:06.528Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-LSP2",
-      "note": "A"
     }
   ],
   "messages": [
@@ -59553,7 +59583,7 @@
       "file": null,
       "at": "2026-07-09T16:50:44.543Z",
       "deliveredAt": null,
-      "readAt": null
+      "readAt": "2026-07-09T17:06:28.282Z"
     }
   ],
   "nextNum": 368,

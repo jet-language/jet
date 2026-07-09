@@ -180,7 +180,9 @@ D-CANVAS-SCM1, D-CANVAS-EXT1/2.
   plus the full suite.
 - No matrix row moves to `shipped` without an `interaction:` ratchet.
 - Owner acceptance scripts are part of milestone exit — a milestone is not
-  done because tests pass; it is done when the owner has clicked through the
-  script and said so on the card.
+  done because tests pass; it is done when the owner ratifies that milestone's
+  acceptance **ballot** (options: accept / reject with punch list). The owner
+  never answers through card logs or messages; every owner input is a decision
+  ballot.
 - Defects found by any audit become cards immediately (no fix-in-place during
   planning) so nothing lives only in a report.
