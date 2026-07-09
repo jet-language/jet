@@ -3,8 +3,8 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 392,
-    "rev": 2106,
+    "nextNum": 393,
+    "rev": 2113,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -18207,6 +18207,11 @@
         {
           "at": "2026-07-09",
           "by": "claude-main",
+          "text": "[handoff] Sigil fix landed 490eafef per owner: binding lines now name: Type :: value (immutable) / := value (mutable) across pin rail, ^B pane, ?name docs; Session.mutable_names tracks := names. 56/56 repl green. Card complete pending full-suite verify."
+        },
+        {
+          "at": "2026-07-09",
+          "by": "claude-main",
           "text": "Real D implementation landed: turn gutter, pin rail, auto-fold, ^P/^F/^R/^B, ghost autosuggest, ?name docs (DOCS1=B), replay plans (RERUN1=A). 56/56 repl + 51/51 cli targeted green; parent runs full suite before done."
         },
         {
@@ -18275,6 +18280,11 @@
         {
           "at": "2026-07-09",
           "by": "claude-main",
+          "text": "[handoff] NOT STARTED this session. Implement ratified D-FE-PROMPT1=D + D-FE-PROMPT-STRIP1=B: chevron prompt, live spinner collapsing to receipts (✓ 12/12 · 0.3s), failure action line (-> rerun hint), ^G glance, opt-in strip via Prompt.{label,path,strip} in env.jet. Existing partial work: jetpack rc rendering (crates/jetpack/src/CLI/run_enter_dev.rs, Prompt config in jet-foundation Syntax/jetpack_config.rs) — verify shipped slice vs live ballot text first; prior codex claim of done was a thin slice. NO_COLOR: spinner stays, -> degrades, receipts words."
+        },
+        {
+          "at": "2026-07-09",
+          "by": "claude-main",
           "text": "Reopened: shipped slice does not match ratified D option mock (static/textual fallback only; missing interactive TTY surface). Gap audit 2026-07-09 by claude-main; implementing ratified design now."
         },
         {
@@ -18338,6 +18348,11 @@
         {
           "at": "2026-07-09",
           "by": "claude-main",
+          "text": "[handoff] jet-impl agent IN FLIGHT implementing ratified D interactive palette (alt-screen, fuzzy over one index, Tab man-depth, E-code verbatim pages, Enter prefill via stdout, F1 two-pane; reuses Source/REPL/Terminal.rs raw-mode infra). If parent session died: its work may sit UNCOMMITTED in tree (Source/ help files) — check git status, re-run cargo test --test cli + its new unit tests, verify vs live D-FE-HELP1=D text before commit. Non-TTY static palette is the floor."
+        },
+        {
+          "at": "2026-07-09",
+          "by": "claude-main",
           "text": "Reopened: shipped slice does not match ratified D option mock (static/textual fallback only; missing interactive TTY surface). Gap audit 2026-07-09 by claude-main; implementing ratified design now."
         },
         {
@@ -18389,6 +18404,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-09",
+          "by": "claude-main",
+          "text": "[handoff] Remaining slices: (1) jetpack add resolved-version ✓ rows (mock shows them; add currently manifest-edit only — needs realize step), (2) jetos build/switch per-package loop through tier-2 LiveRegion, (3) Download size for update/remove when computable, (4) re-run cargo test --test jetpack (build/remove/update/os) — was blocked by concurrent JetOS refactor, now compiles. Landed: tiers 1-3 renderers in Output.rs, switch plan gate (was ungated), 391 lib tests green (commit be128eaf)."
+        },
         {
           "at": "2026-07-09",
           "by": "claude-main",
@@ -18451,6 +18471,11 @@
         {
           "at": "2026-07-09",
           "by": "claude-main",
+          "text": "[handoff] Implementation complete (0e40fa3c), targeted suites green (13 unit + 4 web_dev, re-run by parent). Pending: full-suite verify before done. Named gap for possible follow-up ballot: live 'v' verbose toggle mid-session (ratified --verbose launch flag shipped as the ratified alternative)."
+        },
+        {
+          "at": "2026-07-09",
+          "by": "claude-main",
           "text": "Real D implementation landed (0e40fa3c): pinned parity strip w/ in-place redraw, framed verbatim error block, --verbose pinned-header request log (DECSTBM), browser pill→overlay w/ auto-collapse. 13 unit + 4 web_dev green, re-run by parent. Named gap: live 'v' toggle needs raw-mode wiring (ratified --verbose alternative shipped)."
         },
         {
@@ -18507,6 +18532,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-09",
+          "by": "claude",
+          "text": "[handoff] OWNER DECREE recorded + ratified as D-JOS-NATIVE1 (native standalone jetos; NixOS-backend was a reskin — rejected), with D-JOS-STORE1=A (hangar-native store, staged compat root), D-JOS-NIXEVAL1=C (NO nix binary this epoch — jetpack builds its own nixpkgs eval/fetch/build pipeline), D-JOS-PARITYBAR1=A (architecture + baselines + one-line desktop swaps + owner config native), D-JOS-NIXBACKEND2=C (backend → labeled migration tool only). NO further implementation until epoch-7 planning done. 4 audit agents running: NixOS assembly anatomy, desktop glue matrix, no-nix pipeline scope, repo+card honesty audit. Next: epoch-7 plan doc + complete card set + ballots; every existing jetos card gets an honest verdict update."
+        },
         {
           "at": "2026-07-09",
           "by": "claude",
@@ -19607,6 +19637,24 @@
         }
       ],
       "created": "2026-07-09T17:40:53.264Z",
+      "updated": "2026-07-09"
+    },
+    {
+      "id": "c0rb4k1d",
+      "num": 392,
+      "title": "R12 parity: comptime/REPL tier-0 missing BigInt (E0956) — audit full builtin surface",
+      "body": "Owner hit this live (2026-07-09): `big :: BigInt(100)` in jet repl fails with E0956 \"calling BigInt can't run at compile time yet\", while examples/features/text/bigint.jet (D-BIGINT1=A, golden) runs fine AOT. The REPL executes through the comptime interpreter (tier-0), so every builtin the AOT backend supports but comptime doesn't is a user-visible parity break — R12 requires JIT/dev/REPL parity through the same executable TIR.\n\nScope:\n1. Implement BigInt construction + arithmetic + to_string in the comptime interpreter (crates/jet-comptime; CtValue may need a BigInt variant — check how AOT lowers it first).\n2. Audit: enumerate every builtin/Core call AOT supports vs the comptime whitelist; produce the parity matrix as a test (ui or dedicated tests/parity.rs) so new builtins can't ship AOT-only. E0956 sites are the search key.\n3. Each fixed gap needs a repl transcript test; keep E0956 wording for genuinely impossible-at-comptime effects only.\n\nRepro: printf 'big :: BigInt(100)\\n:quit\\n' | target/debug/jet repl",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "triage",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "created": "2026-07-09T18:04:14.604Z",
       "updated": "2026-07-09"
     }
   ],
@@ -43364,6 +43412,55 @@
   ],
   "events": [
     {
+      "at": "2026-07-09T18:04:57.205Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0prf2ws",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-09T18:04:45.327Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0nhjxh4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-09T18:04:43.416Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0iyfhaf",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-09T18:04:29.777Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0l5fmyy",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-09T18:04:27.905Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0gk8k3t",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-09T18:04:14.604Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0rb4k1d",
+      "note": "R12 parity: comptime/REPL tier-0 missing BigInt (E0956) — audit full builtin surface"
+    },
+    {
+      "at": "2026-07-09T18:03:03.811Z",
+      "by": "claude",
+      "action": "card.update",
+      "ref": "c_audit_363_9n2bl3",
+      "note": "logEntry"
+    },
+    {
       "at": "2026-07-09T17:57:38.290Z",
       "by": "owner",
       "action": "decision.ratify",
@@ -57312,55 +57409,6 @@
       "by": "codex-highlight",
       "action": "card.claim",
       "ref": "c0vg0lj7",
-      "note": ""
-    },
-    {
-      "at": "2026-07-06T10:15:53.808Z",
-      "by": "tower",
-      "action": "message.send",
-      "ref": "msgclf2lqn",
-      "note": "→ codex-1: [tower] 1 decision ratified: D-GAME2→A. Board is current; pi"
-    },
-    {
-      "at": "2026-07-06T10:15:53.808Z",
-      "by": "tower",
-      "action": "message.send",
-      "ref": "msgblf24xm",
-      "note": "→ claude-main: [tower] 1 decision ratified: D-GAME2→A. Board is current; pi"
-    },
-    {
-      "at": "2026-07-06T10:14:23.783Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-GAME2",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-06T00:33:46.966Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c2hizkhl",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-06T00:25:39.087Z",
-      "by": "claude-main",
-      "action": "card.claim",
-      "ref": "c2hizkhl",
-      "note": ""
-    },
-    {
-      "at": "2026-07-06T00:07:50.811Z",
-      "by": "claude-main",
-      "action": "message.send",
-      "ref": "msg0lg2316",
-      "note": "→ owner: Pushed a5a793c0 for #125: JIT now covers labeled loop break/"
-    },
-    {
-      "at": "2026-07-06T00:07:50.754Z",
-      "by": "claude-main",
-      "action": "card.release",
-      "ref": "c2hizkhl",
       "note": ""
     }
   ],
