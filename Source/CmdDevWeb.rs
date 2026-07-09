@@ -603,6 +603,30 @@ fn handle_connection(
             ),
         };
     }
+    if path == "/__jet_canvas/source" || path == "/canvas/source" || path == "/panel/source" {
+        if method != "GET" {
+            return method_not_allowed(&mut stream);
+        }
+        let source_id = query_param(target, "source_id");
+        let source_path = source_id
+            .as_deref()
+            .and_then(|id| jet::Canvas::project_path_for_source_id(Path::new(canvas_file), id))
+            .unwrap_or_else(|| PathBuf::from(canvas_file));
+        return match fs::read(&source_path) {
+            Ok(body) => write_response(
+                &mut stream,
+                "200 OK",
+                "text/plain; charset=utf-8",
+                &body,
+            ),
+            Err(e) => write_response(
+                &mut stream,
+                "404 Not Found",
+                "text/plain; charset=utf-8",
+                format!("could not read Canvas source: {e}").as_bytes(),
+            ),
+        };
+    }
     if path == "/__jet_canvas/command" || path == "/canvas/command" || path == "/panel/command" {
         if method != "POST" {
             return method_not_allowed(&mut stream);

@@ -73,6 +73,7 @@ pub fn canvas_js() -> String {
   const debugWatch = document.getElementById("debug-watch");
   let hit = [];
   let pinPoints = new Map();
+  let nodeBounds = new Map();
   let pinHit = [];
   let pinEditorHit = [];
   let wireEndpointHit = [];
@@ -126,6 +127,7 @@ pub fn canvas_js() -> String {
   let contextMenuState = null;
   let contextMenuOpenedAt = 0;
   let pendingInsertPlacement = null;
+  window.__jetCanvasTest = window.__jetCanvasTest || {};
   const UI_FONT = '"Inter", "Segoe UI", Roboto, system-ui, sans-serif';
   const MONO_FONT = '"JetBrains Mono", ui-monospace, "SFMono-Regular", Consolas, monospace';
   const TYPE_COLOR_MAP = {
@@ -2889,6 +2891,7 @@ pub fn canvas_js() -> String {
     drawGrid(size);
     hit = [];
     pinPoints = new Map();
+    nodeBounds = new Map();
     pinHit = [];
     pinEditorHit = [];
     wireEndpointHit = [];
@@ -2995,7 +2998,9 @@ pub fn canvas_js() -> String {
       nodes: hit.map((h) => ({ node_id: h.node.node_id, title: h.node.title, kind: h.node.kind, x: h.x, y: h.y, w: h.w, h: h.h })),
       pins: pinHit.map((h) => ({ pin_id: h.pin.pin_id, node_id: h.pin.node_id, name: h.pin.name, type: h.pin.type, direction: h.pin.direction, x: h.x, y: h.y, w: h.w, h: h.h, cx: h.cx, cy: h.cy }))
     };
+    nodeBounds = new Map(hitMap.nodes.map((n) => [n.node_id, n]));
     window.__jetCanvasHitMap = hitMap;
+    window.__jetCanvasNodeBounds = Object.fromEntries(nodeBounds.entries());
     const rect = canvas.getBoundingClientRect();
     window.__jetCanvasPinPoints = Object.fromEntries(Array.from(pinPoints.entries()).map(([pin_id, point]) => [pin_id, {
       pin_id,
@@ -3007,6 +3012,25 @@ pub fn canvas_js() -> String {
       type: point.pin && point.pin.type,
       direction: point.pin && point.pin.direction
     }]));
+    window.__jetCanvasStagedRegistry = (editorState.stagedNodes || []).map((node) => ({
+      node_id: node.node_id,
+      title: node.title,
+      kind: node.kind,
+      graph_id: node.graph_id,
+      pins: node.pins || []
+    }));
+    window.__jetCanvasTest = {
+      hitMap,
+      nodeBounds: window.__jetCanvasNodeBounds,
+      pinPoints: window.__jetCanvasPinPoints,
+      stagedRegistry: window.__jetCanvasStagedRegistry,
+      graphId: selectedGraphId,
+      selectedNodeId,
+      selectedNodeTitle: selectedNode && selectedNode.title || "",
+      view: { x: view.x, y: view.y, zoom: view.zoom },
+      sourceText: doc.source_text || "",
+      nodeCount: graph.nodes.length
+    };
     canvas.dataset.hitMap = JSON.stringify(hitMap);
     updateGraphNav(graph);
     const rails = (graph.rails && graph.rails.kinds ? graph.rails.kinds.join(", ") : "data");
@@ -3783,6 +3807,7 @@ pub fn canvas_js() -> String {
   }
 
   canvas.addEventListener("click", function (ev) {
+    if (window.__jetCanvasNoopClick) return;
     const rect = canvas.getBoundingClientRect();
     const x = ev.clientX - rect.left;
     const y = ev.clientY - rect.top;

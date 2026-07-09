@@ -116,6 +116,9 @@
             dosfstools
             mtools
             nodejs_22
+            # D-CANVASTEST1=A: Canvas interaction tests drive dev-shell
+            # Chromium through a repo-owned stdlib-only CDP pipe driver.
+            chromium
             nixfmt
             ripgrep
             # D-DEP-WASM1=A (c81): `jet build --target=plugin` lifts the

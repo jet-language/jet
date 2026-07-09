@@ -3,6 +3,7 @@
 Status vocabulary:
 
 - `shipped`
+- `claimed`
 - `planned`
 - `blocked-by-ballot`
 - `rejected-as-Blueprint-semantic-debt`
