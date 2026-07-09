@@ -249,6 +249,14 @@ fn read_line<R: Read>(
                 // A stray Ctrl-D mid-line: ignore rather than truncate input.
             }
             Key::CtrlC => {
+                // Ctrl-C exits the REPL (owner directive 2026-07-09). With
+                // text mid-line the first ^C clears it so a typo never
+                // forces an exit; ^C at an empty prompt quits.
+                if buf.is_empty() {
+                    print!("^C\r\n");
+                    io::stdout().flush().ok();
+                    return LineOutcome::Eof;
+                }
                 buf.clear();
                 cursor = 0;
                 print!("^C\r\n");
