@@ -123,7 +123,7 @@ export class CanvasScenario {
     await this.waitFor(async () => {
       return await this.driver.evaluate(`(() => {
         const menu = document.getElementById("context-menu");
-        return !!menu && menu.classList.contains("is-open") && menu.textContent.includes(${JSON.stringify(text)});
+        return !!menu && menu.classList.contains("is-open") && (menu.textContent.includes(${JSON.stringify(text)}) || menu.innerHTML.includes(${JSON.stringify(text)}));
       })()`);
     }, `menu containing ${text}`);
   }
@@ -136,7 +136,13 @@ export class CanvasScenario {
       button.click();
       return true;
     })()`);
-    if (!ok) throw new Error(`menu entry not found: ${text}`);
+    if (!ok) {
+      const menu = await this.driver.evaluate(`(() => {
+        const el = document.getElementById("context-menu");
+        return el ? el.textContent : "";
+      })()`);
+      throw new Error(`menu entry not found: ${text}\nmenu: ${menu}`);
+    }
     await sleep(500);
     await this.waitForCanvas();
   }
@@ -150,7 +156,10 @@ export class CanvasScenario {
 
   async expectSourceContains(text) {
     const body = await this.driver.evaluate(`fetch("/canvas/source", { cache: "no-store" }).then((r) => r.text())`);
-    if (!body.includes(text)) throw new Error(`source missing ${JSON.stringify(text)}\n${body}`);
+    if (!body.includes(text)) {
+      const tx = await this.driver.evaluate(`JSON.stringify({ tx: window.__jetCanvasLastTx || null, result: window.__jetCanvasLastTxResult || null })`);
+      throw new Error(`source missing ${JSON.stringify(text)}\n${body}\nlast: ${tx}`);
+    }
   }
 
   async screenshot(name) {
@@ -239,7 +248,7 @@ export const scenarios = {
   "palette-insert-core-fn": async (ctx) => {
     await ctx.openCanvas();
     await ctx.loadCoreCatalog();
-    await ctx.openPinActionMenu("total", "output");
+    await ctx.openPinActionMenu("total", "total");
     await ctx.expectMenu("Search actions");
     await ctx.type("abs");
     await ctx.expectMenu("abs");
@@ -253,8 +262,9 @@ export const scenarios = {
     await ctx.openCanvas();
     const before = await ctx.driver.evaluate(`fetch("/canvas/source", { cache: "no-store" }).then((r) => r.text())`);
     await ctx.loadCoreCatalog();
-    await ctx.openPinActionMenu("total", "output");
+    await ctx.openPinActionMenu("total", "total");
     await ctx.type("abs");
+    await ctx.expectMenu("abs");
     await ctx.pickEntry("abs");
     await ctx.expectSourceContains("math.abs");
     const undo = await ctx.driver.evaluate(`(() => {
