@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 465,
-    "rev": 2512,
+    "rev": 2523,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -1440,11 +1440,16 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "done",
+      "phase": "ready",
       "priority": "P3",
       "plan": "Canonical static-guarantees implementation plan. Build one sema facts/policy engine, then layer features on it. No duplicate proof engines.\n\nBuild order:\n1. Facts core: represent refinements as named predicate-backed types; collect comparison/range/require facts; branch narrowing; loop facts; fixed-list length facts; call pre/postcondition facts.\n2. Contracts: require/ensure syntax and runtime/test checks where ratified; jet test harvests contracts as property/property-test seeds; diagnostics point at the violated contract and caller path.\n3. Bounds proof: default runtime bounds checks stay; elide or expert-escape only where facts prove in-range. Add explicit unsafe/proof escape only if ratified; no silent unchecked indexing.\n4. Information-flow/compliance: security-label lattice as sema policy over values; declassify is explicit and audited; labels propagate through calls, collections, serialization, and task boundaries.\n5. Budgets: #Budget/profile markers feed the same call graph/facts layer; enforce forbidden effects, bounded loops, and budget diagnostics without a second effect system.\n6. Replay soundness: reuse effect/inverse-propagation walk; raise/attach D-REPLAY2 if marker spelling is still missing before parser work; reject reachable Time/Rand/Net/Io unless mockable under replay.\n7. Solver/proof integration: formal proof hooks consume the same facts and contracts; generated obligations must report Jet diagnostics, never prover internals.\n\nAcceptance: ui snapshots for missing refinement proof, failed contract, unsafe/unknown bounds proof, IFC leak, invalid declassify, budget violation, replay-unsound call path; examples/goldens for PositiveInt, safe index, PII declassify, render-frame budget, replayable pure handler, formal proof stub; docs/spec/diagnostics.md codes for each user-facing diagnostic.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-10",
+          "by": "codex-orchestrator",
+          "text": "UL0 truth audit reopens this card: partial. Canonical static-guarantees plan exists, but no executable facts engine proves advertised refinements/contracts/IFC/budgets/bounds/replay behavior. Returned to ready; implementation must satisfy original acceptance, not plan text."
+        },
         {
           "at": "2026-06-30",
           "by": "agent",
@@ -1488,7 +1493,7 @@
         }
       ],
       "created": "2026-06-26T18:50:54.973Z",
-      "updated": "2026-06-30",
+      "updated": "2026-07-10",
       "workOrder": 270
     },
     {
@@ -1964,11 +1969,16 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "done",
+      "phase": "ready",
       "priority": "P2",
       "plan": "D-IGNORERET2=A implementation plan: (1) register `#Suppress(MustUse)` marker and `.drop(\"reason\")` terminal method in Syntax.rs; (2) parser accepts marker on block/fn and method-chain terminal call; (3) sema recognizes `.drop` only on `#MustUse`/fallible values, requires non-empty string literal reason, and emits a lint rather than hard error; (4) `#Suppress(MustUse)` suppresses within lexical body and records an audit warning; (5) codegen erases discarded value after evaluating side effects; (6) diagnostics + ui snapshots for missing reason, unsupported receiver, and accidental ignore; (7) examples/goldens.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-10",
+          "by": "codex-orchestrator",
+          "text": "UL0 truth audit reopens this card: reserved. Ratified discard surface had plan-only closure; parser, sema, codegen, diagnostics, snapshots, and examples remain required. Returned to ready."
+        },
         {
           "at": "2026-06-28",
           "text": "Implementation-ready plan added from decision sweep."
@@ -2012,7 +2022,7 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-28",
+      "updated": "2026-07-10",
       "workOrder": 4
     },
     {
@@ -2997,11 +3007,16 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "done",
+      "phase": "ready",
       "priority": "P3",
       "plan": "D-PRELUDEX1=A: implement prelude opt-out only. Steps: add file/package opt-out surface per ratified marker; parser/Syntax.rs entry; loader/sema skips ambient prelude when opted out; diagnostics teach explicit imports; no library prelude injection; examples + ui snapshots.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-10",
+          "by": "codex-orchestrator",
+          "text": "UL0 truth audit reopens this card: reserved. Prelude opt-out was closed from plan text without executable loader/sema behavior, teaching diagnostics, snapshots, or examples. Returned to ready."
+        },
         {
           "at": "2026-06-28",
           "text": "D-PRELUDEX1=A recorded and implementation plan attached. Advanced to ready."
@@ -3016,7 +3031,7 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-28",
+      "updated": "2026-07-10",
       "workOrder": 53
     },
     {
@@ -3660,11 +3675,16 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "done",
+      "phase": "ready",
       "priority": "P3",
       "plan": "D-MATURITY1=B: document maturity tags as a non-semantic convention now. Steps: add docs/reference guidance for #Experimental/#Tested/#Hardened comments/metadata if existing marker syntax permits; do not add sema propagation; file follow-up only if semantic propagation is later ratified.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-10",
+          "by": "codex-orchestrator",
+          "text": "UL0 truth audit reopens this card: reserved. Maturity convention card advanced without completion proof. Returned to ready for exact ratified docs/convention acceptance and checked consistency evidence."
+        },
         {
           "at": "2026-06-28",
           "text": "D-MATURITY1=B recorded as docs-only work. Advanced to ready for documentation pass."
@@ -3688,7 +3708,7 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-06-28",
+      "updated": "2026-07-10",
       "workOrder": 59
     },
     {
@@ -6843,11 +6863,16 @@
       "kind": "idea",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "done",
+      "phase": "ready",
       "priority": "P3",
       "plan": "Durable plan: docs/plans/epoch-3/adaptive-runtime.md",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-10",
+          "by": "codex-orchestrator",
+          "text": "UL0 truth audit reopens this card: reserved. Adaptive runtime has durable plan and ratified decisions but no real runtime implementation/proof. Returned to ready."
+        },
         {
           "at": "2026-07-06",
           "text": "All decisions ratified; advanced out of deciding."
@@ -6895,7 +6920,7 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-07-06",
+      "updated": "2026-07-10",
       "workOrder": 760,
       "claimedAt": "2026-07-06T20:26:15.331Z"
     },
@@ -7093,11 +7118,16 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "done",
+      "phase": "ready",
       "priority": "P3",
       "plan": "Durable plan: docs/plans/epoch-3/logic-programming-subset.md",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-10",
+          "by": "codex-orchestrator",
+          "text": "UL0 truth audit reopens this card: reserved. Logic-programming subset has durable plan only; multi-answer/failure-driven behavior is unimplemented. Returned to ready."
+        },
         {
           "at": "2026-07-06",
           "text": "All decisions ratified; advanced out of deciding."
@@ -7145,7 +7175,7 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-07-06",
+      "updated": "2026-07-10",
       "workOrder": 770,
       "claimedAt": "2026-07-06T20:26:15.440Z"
     },
@@ -7159,11 +7189,16 @@
       "kind": "idea",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "done",
+      "phase": "ready",
       "priority": "P3",
       "plan": "Durable plan: docs/plans/epoch-3/structural-merge.md",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-10",
+          "by": "codex-orchestrator",
+          "text": "UL0 truth audit reopens this card: reserved. Structural merge has durable plan only; semantic identity merge, conflicts, VCS integration, and proofs are unimplemented. Returned to ready."
+        },
         {
           "at": "2026-07-06",
           "text": "All decisions ratified; advanced out of deciding."
@@ -7219,7 +7254,7 @@
         }
       ],
       "created": "2026-06-26T21:10:13.903Z",
-      "updated": "2026-07-06",
+      "updated": "2026-07-10",
       "workOrder": 780,
       "claimedAt": "2026-07-06T20:26:15.543Z"
     },
@@ -12653,13 +12688,18 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "done",
+      "phase": "ready",
       "priority": "P1",
       "plan": "Plan seed from D-WD12:\n1. Re-read the ratified ballot and current spec/Tower plans for overlap.\n2. Split into vertical slices if the feature spans compiler, Core, Jetpack, GUI, and OS surfaces.\n3. Queue exact-syntax/subsurface ballots before parser, manifest, CLI, or API surface changes.\n4. Implement the first ungated vertical slice end to end with executable examples and diagnostics.\n5. Prove beginner default UX and expert audit/control UX with tests or transcripts.",
       "blockedBy": [],
       "workOrder": 621,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-10",
+          "by": "codex-orchestrator",
+          "text": "UL0 truth audit reopens this card: reserved. Progressive prove/replay closure was plan-only. Returned to ready for real command/runtime behavior, diagnostics, and replay proof."
+        },
         {
           "at": "2026-07-07",
           "by": "codex-main",
@@ -12672,7 +12712,7 @@
         }
       ],
       "created": "2026-07-06T19:15:48.960Z",
-      "updated": "2026-07-07"
+      "updated": "2026-07-10"
     },
     {
       "id": "ccq07pav",
@@ -12683,13 +12723,18 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "done",
+      "phase": "ready",
       "priority": "P2",
       "plan": "Plan seed from D-WD14:\n1. Re-read the ratified ballot and current spec/Tower plans for overlap.\n2. Split into vertical slices if the feature spans compiler, Core, Jetpack, GUI, and OS surfaces.\n3. Queue exact-syntax/subsurface ballots before parser, manifest, CLI, or API surface changes.\n4. Implement the first ungated vertical slice end to end with executable examples and diagnostics.\n5. Prove beginner default UX and expert audit/control UX with tests or transcripts.",
       "blockedBy": [],
       "workOrder": 622,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-10",
+          "by": "codex-orchestrator",
+          "text": "UL0 truth audit reopens this card: reserved. Typed performance budgets closure was plan-only. Returned to ready for enforced budgets, diagnostics, examples, and measurements."
+        },
         {
           "at": "2026-07-07",
           "by": "codex-main",
@@ -12702,7 +12747,7 @@
         }
       ],
       "created": "2026-07-06T19:15:48.960Z",
-      "updated": "2026-07-07"
+      "updated": "2026-07-10"
     },
     {
       "id": "cdq08h16",
@@ -18070,7 +18115,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "done",
+      "phase": "ready",
       "priority": "P1",
       "plan": "Plan built 2026-07-07 by codex-main.\n\nFocus: Capstone: JetPlay 2D game and source-backed editor\n\nCurrent law: JetPlay capstone: playable 2D game plus source-backed editor/workbench.\n\nBuild order: After #344, build playable game, editor workflow that modifies shipped game, deterministic replay, assets/audio/input/rendering/export, package proof.\n\nAcceptance: Playable run path plus editor test; replay deterministic; UI/headless proof; LOC/perf comparison against Godot/Bevy/Love2D/raylib examples.\n\nDependencies/collisions: Blocked by #344 proof ratchet and Canvas/game/runtime cards as needed.\n\nOwner gates: No gate now; raise if new syntax/API/deps appear.",
       "blockedBy": [
@@ -18079,6 +18124,11 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-10",
+          "by": "codex-orchestrator",
+          "text": "UL0 truth audit reopens this card: facade. Headless transcript/workbench slice did not satisfy promised playable game, source-backed editor, assets/audio/input/render/export, deterministic replay, and comparative evidence. Returned to ready; existing blockers remain binding."
+        },
         {
           "at": "2026-07-08",
           "by": "codex",
@@ -18111,7 +18161,7 @@
         }
       ],
       "created": "2026-07-07T18:49:01.818Z",
-      "updated": "2026-07-08"
+      "updated": "2026-07-10"
     },
     {
       "id": "c0mrjc6k",
@@ -21258,6 +21308,11 @@
       "workOrder": 464,
       "assignee": "sol-435",
       "log": [
+        {
+          "at": "2026-07-10",
+          "by": "codex-orchestrator",
+          "text": "UL0 audit action applied live: reopened false-done #25 partial; #37, #63, #79, #136, #142, #143, #240, #241 reserved; #346 facade. Each returned to ready with exact missing acceptance evidence. Checker re-run against current board pending; no card will re-close without executable proof."
+        },
         {
           "at": "2026-07-10",
           "by": "codex-orchestrator",
@@ -48423,6 +48478,83 @@
   ],
   "events": [
     {
+      "at": "2026-07-10T10:52:37.185Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c088jf0z",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-10T10:52:25.233Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c00uhxes",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-10T10:52:25.105Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "ccq07pav",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-10T10:52:24.970Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "cbq06v8j",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-10T10:52:24.829Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c2zj0p7p",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-10T10:52:24.694Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c2yj0nk5",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-10T10:52:24.563Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c2sj0bd9",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-10T10:52:24.424Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c17iww33",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-10T10:52:24.289Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "crivuqa",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-10T10:52:24.154Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c1iqde7",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-10T10:52:24.018Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c73xs2f",
+      "note": "phase,logEntry"
+    },
+    {
       "at": "2026-07-10T10:50:24.865Z",
       "by": "codex-orchestrator",
       "action": "card.update",
@@ -62344,83 +62476,6 @@
       "action": "decision.ratify",
       "ref": "D-JPK-CATALOG1",
       "note": "A"
-    },
-    {
-      "at": "2026-07-06T20:53:50.260Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-JPK-GRANTSCHEMA1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-06T20:53:33.128Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c2giziub",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-06T20:53:29.858Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-JPK-GRANTCMD1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-06T20:53:27.733Z",
-      "by": "codex-main",
-      "action": "card.claim",
-      "ref": "c2giziub",
-      "note": ""
-    },
-    {
-      "at": "2026-07-06T20:53:22.159Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c0q9le33",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-06T20:53:22.103Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c0p8ieer",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-06T20:53:22.049Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "caffiunify",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-06T20:52:59.726Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c2zj0p7p",
-      "note": "phase,plan,logEntry"
-    },
-    {
-      "at": "2026-07-06T20:52:59.672Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c2yj0nk5",
-      "note": "phase,plan,logEntry"
-    },
-    {
-      "at": "2026-07-06T20:52:59.617Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c2sj0bd9",
-      "note": "phase,plan,logEntry"
-    },
-    {
-      "at": "2026-07-06T20:52:59.560Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "caq065h8",
-      "note": "phase,plan,logEntry"
     }
   ],
   "nextNum": 368,
