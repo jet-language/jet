@@ -103,6 +103,22 @@ fn studio_json_string(response: &str, key: &str) -> String {
         .unwrap_or_else(|| panic!("missing Studio JSON string `{key}`: {response}"))
 }
 
+fn studio_json(response: &str) -> jet::Jetpack::JSON::Json {
+    let body = response
+        .split_once("\r\n\r\n")
+        .map(|(_, body)| body)
+        .unwrap_or(response);
+    jet::Jetpack::JSON::parse(body.trim())
+        .unwrap_or_else(|error| panic!("invalid Studio JSON response: {error}: {response}"))
+}
+
+fn json_string(json: &jet::Jetpack::JSON::Json, key: &str) -> String {
+    json.get(key)
+        .and_then(jet::Jetpack::JSON::Json::as_str)
+        .unwrap_or_else(|error| panic!("invalid JSON string `{key}`: {error}: {json:?}"))
+        .to_string()
+}
+
 #[derive(Clone)]
 struct StudioTestOwner {
     session_id: String,
@@ -4505,7 +4521,24 @@ fn jetos_studio_transaction_previews_and_writes_source() {
     assert!(proof.contains("\"source_revision\":"), "proof: {proof}");
     assert!(proof.contains("source_proof"), "proof: {proof}");
     assert!(proof.contains("input_plan_sha256"), "proof: {proof}");
-    let proof_revision = studio_json_string(&proof, "source_revision");
+    let proof_response = studio_json(&proof);
+    assert_eq!(
+        proof_response.get("success").unwrap(),
+        &jet::Jetpack::JSON::Json::Bool(true),
+        "proof: {proof}"
+    );
+    let proof_revision = json_string(&proof_response, "source_revision");
+    let proof_stdout = json_string(&proof_response, "stdout");
+    let proof_artifact = jet::Jetpack::JSON::parse(proof_stdout.trim())
+        .unwrap_or_else(|error| panic!("invalid Studio proof artifact: {error}: {proof_stdout}"));
+    let proof_generation = json_string(&proof_artifact, "generation");
+    let proof_source = proof_artifact
+        .get("source_proof")
+        .unwrap_or_else(|error| panic!("missing proof source binding: {error}: {proof_artifact:?}"));
+    let proof_source_sha256 = json_string(proof_source, "source_sha256");
+    let proof_input_plan_sha256 = json_string(proof_source, "input_plan_sha256");
+    let proof_plan_sha256 = json_string(proof_source, "plan_sha256");
+    assert_eq!(proof_source_sha256, proof_revision);
     let proved_projection = studio_http(addr, "GET", "/studio/data.json", "");
     assert!(proved_projection.contains("\"state\":\"proved\""), "proved badge: {proved_projection}");
     assert!(proved_projection.contains(&proof_revision), "proved revision: {proved_projection}");
@@ -4523,17 +4556,27 @@ fn jetos_studio_transaction_previews_and_writes_source() {
     let current_after_race = fs::read_link(root.join("systems/current")).unwrap();
     assert_eq!(current_after_race.file_name().unwrap(), "studio-edit");
     fs::write(&config_path, &proved_source).unwrap();
-    let proved_generation = fs::read_dir(root.join("systems/generations"))
-        .unwrap()
-        .filter_map(Result::ok)
-        .map(|entry| entry.file_name().to_string_lossy().into_owned())
-        .find(|name| name.starts_with("zz-studio-proof-"))
-        .expect("proved Studio generation");
     let candidate_plan_before = fs::read(root.join("systems/generations/zz-studio-candidate/plan.json")).unwrap();
     let switched = studio_http(addr, "POST", "/studio/run", "{\"action\":\"switch\"}");
     assert!(switched.contains("\"success\":true"), "switch: {switched}");
     let current = fs::read_link(root.join("systems/current")).unwrap();
-    assert_eq!(current.file_name().unwrap(), proved_generation.as_str());
+    assert_eq!(current.file_name().unwrap(), proof_generation.as_str());
+    let current_source_proof =
+        fs::read_to_string(root.join("systems/current/source-proof.json")).unwrap();
+    let current_source_proof = jet::Jetpack::JSON::parse(&current_source_proof)
+        .unwrap_or_else(|error| panic!("invalid current generation source proof: {error}"));
+    assert_eq!(
+        json_string(&current_source_proof, "source_sha256"),
+        proof_source_sha256
+    );
+    assert_eq!(
+        json_string(&current_source_proof, "input_plan_sha256"),
+        proof_input_plan_sha256
+    );
+    assert_eq!(
+        json_string(&current_source_proof, "plan_sha256"),
+        proof_plan_sha256
+    );
     assert_eq!(
         fs::read(root.join("systems/generations/zz-studio-candidate/plan.json")).unwrap(),
         candidate_plan_before,
