@@ -26,8 +26,10 @@ node Tower/tower.mjs serve --open        # board at http://localhost:7878
 ```
 
 `init` creates `.tower/` in the host project: `tower.json` (all state),
-`config.json` (terminology + taxonomies), `backups/` (rolling, automatic).
-Commit `.tower/` to share the board with the team; `backups/` is gitignored.
+`config.json` (public terminology + taxonomies), `backups/` (rolling,
+automatic), and ignore rules for `secrets.json` plus crash-residue
+`.secrets.json.tmp-*` files. Commit `.tower/` to share the board with the
+team; backups and both secret-file forms are gitignored.
 
 Migrating from a v3-era board: `node Tower/tower.mjs import old-tower.json --name "My Project"`.
 
@@ -89,7 +91,8 @@ write; `--expect-rev N` gives optimistic concurrency (exit 2 on conflict).
 
 - **SSE** — the UI updates over `/api/stream` the instant anything changes;
   passive updates never disturb reading, typing, or an open ballot.
-- **Auth (opt-in)** — set `"auth": {"token": "…"}` in `.tower/config.json` to
+- **Auth (opt-in)** — set `"auth": {"token": "…"}` in the untracked
+  `.tower/secrets.json` to
   require a key from non-localhost devices (`/?key=<token>` once per device;
   localhost always exempt). Without it the board is open to your LAN/tailnet.
 - **PWA + push** — installable app; the ◍ notify button subscribes the
@@ -133,6 +136,19 @@ write; `--expect-rev N` gives optimistic concurrency (exit 2 on conflict).
 Everything is optional; the UI and validation follow whatever you set.
 `retireAfterDays` is the walk-back buffer before a done card / ratified
 decision moves to `.tower/history.json`.
+
+Runtime credentials belong only in ignored `.tower/secrets.json`:
+
+```json
+{
+  "auth": { "token": "replace-with-a-random-access-key" }
+}
+```
+
+First `tower serve` adds push credentials and subscriptions to that file.
+If an older tracked `config.json` contains `auth` or `push`, Tower refuses to
+start: remove those fields, rotate exposed credentials, then put only the new
+values in `secrets.json`. Tower never migrates committed credentials forward.
 
 ## UI
 

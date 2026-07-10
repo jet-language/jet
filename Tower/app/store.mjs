@@ -14,7 +14,7 @@
 // and `activate`. Everything else is an agent's, inert, or done.
 import { dataFile, historyFile, readJSON, writeJSON, backup, newId, today, now } from './paths.mjs';
 import { withLock } from './lock.mjs';
-import { loadConfig } from './config.mjs';
+import { loadConfig, publicConfig } from './config.mjs';
 
 export const VERSION = 4;
 
@@ -410,7 +410,7 @@ export function project(s, config = null) {
     ideas: s.ideas.filter(b => b.status !== 'tagged').length,
     openQuestions: s.questions.filter(q => q.status === 'open').length,
   };
-  return { meta: s.meta, config: config || undefined, epochs: s.epochs, milestones, phases: PHASES, lanes: LANES,
+  return { meta: s.meta, config: publicConfig(config) || undefined, epochs: s.epochs, milestones, phases: PHASES, lanes: LANES,
     cards, decisions: s.decisions, questions: s.questions, ideas: s.ideas,
     events: s.events.slice(0, 300), counts, recentlyDecided, radar: radarData(s) };
 }

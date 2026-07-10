@@ -14,8 +14,10 @@ node ${CLAUDE_PLUGIN_ROOT}/tower.mjs init --name "<Project>"
 node ${CLAUDE_PLUGIN_ROOT}/tower.mjs serve --open      # board at :7878
 ```
 
-`init` creates `.tower/tower.json` (all state), `.tower/config.json`, and a
-`.gitignore` for `backups/`. Commit `.tower/` so the team shares the board —
+`init` creates `.tower/tower.json` (all state), public `.tower/config.json`,
+and a `.gitignore` for `backups/`, `secrets.json`, and crash-residue
+`.secrets.json.tmp-*` files. Commit `.tower/` so the
+team shares the board —
 including `.tower/history.json` once it appears (retired cards/decisions,
 see below); it's board history, not a cache, and is NOT gitignored.
 Migrating an older board: `tower import <old-tower.json> --name "<Project>"`
@@ -48,10 +50,14 @@ Migrating an older board: `tower import <old-tower.json> --name "<Project>"`
 
 ## Remote access, push, git linking
 
-- First `tower serve` generates VAPID push keys; the owner enables push
-  per-device with **◍ notify**. Auth is OPT-IN: set `"auth": {"token": "…"}`
-  in config.json to require a key from non-localhost devices (unlock screen
+- First `tower serve` generates VAPID push keys in ignored
+  `.tower/secrets.json`; the owner enables push per-device with **◍ notify**.
+  Auth is OPT-IN: set `"auth": {"token": "…"}` in `secrets.json` to require
+  a key from non-localhost devices (unlock screen
   asks once per device; localhost always exempt).
+- Never put `auth` or `push` in tracked `config.json`. Tower rejects that
+  legacy layout with migration guidance. Remove those fields, rotate any
+  committed credentials, then write only replacements to `secrets.json`.
 - `tower githook` installs a post-commit hook so commits mentioning `#12`
   append to that card's log — install it once per repo.
 

@@ -65,8 +65,8 @@ advance it, a `tower question answer` when the owner asked something. The
 board (and its push notifications) is how the owner finds out — there is no
 side channel.
 
-Auth note: localhost is exempt; remote CLIs read `auth.token` from
-`.tower/config.json` automatically.
+Auth note: localhost is exempt. Remote access reads `auth.token` from the
+untracked `.tower/secrets.json`; never put credentials in `config.json`.
 
 Each card has a computed `lane`: `decide`/`activate` (owner), `plan`/
 `implement`/`building`/`verify` (agent), `blocked`/`frozen`/`done` (inert).

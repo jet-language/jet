@@ -4,11 +4,12 @@ import { mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { openStore, empty } from '../app/store.mjs';
-import { writeJSON } from '../app/paths.mjs';
+import { configFile, readJSON, secretsFile, writeJSON } from '../app/paths.mjs';
 import { serve } from '../app/server.mjs';
 
 const dir = mkdtempSync(join(tmpdir(), 'tower-srv-'));
 writeJSON(join(dir, 'tower.json'), empty('Srv'));
+writeJSON(configFile(dir), { project: 'Srv' });
 const store = openStore(dir);
 const PORT = 7955;
 const server = serve(store, PORT, false);
@@ -25,6 +26,12 @@ test('server round-trip: add, state, validation, conflict, next', async () => {
   assert.equal(add.status, 200);
   assert.equal(add.json.result.num, 1);
   assert.ok(add.json.state.cards.length === 1);
+  assert.equal(Object.hasOwn(add.json.state.config, 'auth'), false);
+  assert.equal(Object.hasOwn(add.json.state.config, 'push'), false);
+  assert.equal(Object.hasOwn(readJSON(configFile(dir), {}), 'push'), false);
+  const secretShape = readJSON(secretsFile(dir), {});
+  assert.equal(typeof secretShape.push?.privateJwk, 'object');
+  assert.equal(Array.isArray(secretShape.push?.subscriptions), true);
 
   const state = await (await fetch(url('/api/state'))).json();
   assert.equal(state.meta.project, 'Srv');

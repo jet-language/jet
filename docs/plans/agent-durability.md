@@ -167,9 +167,12 @@ Contradictions and stale text a weak model will follow off a cliff:
 
 ## Immediate security item
 
-`.tower/config.json` is git-tracked and contains a private JWK (`d` key) and
-live push-subscription endpoints/secrets. Rotate the key, move secrets out of
-the tracked file, and untrack it. (Owner-owned file — flagged, not touched.)
+Resolved in Tower: `.tower/config.json` remains tracked as public project
+configuration, while auth, VAPID private material, and push subscriptions live
+only in ignored `.tower/secrets.json`. Tower rejects legacy secret fields in
+the public file and never migrates exposed credentials forward. Owner follow-up
+remains open: rotate previously committed credentials, renew device
+subscriptions, and decide whether repository-history remediation is required.
 
 ## Do-first order
 
