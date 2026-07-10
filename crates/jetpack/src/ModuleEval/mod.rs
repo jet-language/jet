@@ -54,6 +54,7 @@ mod tests {
     }
 
     fn check_diagnostic_snapshot(code: &str, rendered: &str) {
+        let rendered = normalize_diagnostic_paths(code, rendered);
         assert!(rendered.starts_with(&format!("Error [{code}]:")));
         assert!(rendered.contains("\n Why: "));
         assert!(rendered.contains("\n Fix: "));
@@ -62,11 +63,37 @@ mod tests {
             .join(format!("{code}.stderr"));
         if std::env::var_os("UPDATE_EXPECT").is_some() {
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-            std::fs::write(&path, rendered).unwrap();
+            std::fs::write(&path, &rendered).unwrap();
         }
         let expected = std::fs::read_to_string(&path)
             .unwrap_or_else(|_| panic!("missing diagnostic snapshot {}", path.display()));
         assert_eq!(rendered, expected, "snapshot mismatch for {code}");
+    }
+
+    fn normalize_diagnostic_paths(code: &str, rendered: &str) -> String {
+        let tag = match code {
+            "E0970" => "find-missing",
+            "E0971" => "find-liftability",
+            _ => return rendered.to_string(),
+        };
+        let marker = format!("modeval-{tag}-");
+        let Some(marker_at) = rendered.find(&marker) else {
+            return rendered.to_string();
+        };
+        let prefix_at = rendered[..marker_at]
+            .rfind('`')
+            .map(|idx| idx + 1)
+            .unwrap_or(marker_at);
+        let digits_at = marker_at + marker.len();
+        let Some(rest_slash) = rendered[digits_at..].find('/') else {
+            return rendered.to_string();
+        };
+        let suffix_at = digits_at + rest_slash;
+        format!(
+            "{}<TMP>/modeval-{tag}{}",
+            &rendered[..prefix_at],
+            &rendered[suffix_at..]
+        )
     }
 
     #[test]

@@ -284,6 +284,7 @@ fn rendered_snapshot_texts() -> Vec<(PathBuf, String)> {
         root().join("tests/ui"),
         root().join("tests/ui_lint"),
         root().join("tests/fixtures/jetpack-diagnostics"),
+        root().join("tests/fixtures/module-eval-diagnostics"),
     ] {
         let Ok(entries) = fs::read_dir(&dir) else {
             continue;
@@ -303,7 +304,40 @@ fn rendered_snapshot_texts() -> Vec<(PathBuf, String)> {
             }
         }
     }
+    for name in [
+        "bind_missing_e3208.txt",
+        "doctor_l2101.txt",
+        "fetch_no_git_e1203.txt",
+        "repl_e1801.txt",
+        "unknown_target_e3302.txt",
+    ] {
+        let path = root().join("tests/cli").join(name);
+        if path.is_file() {
+            out.push((path.clone(), read(&path)));
+        }
+    }
     out
+}
+
+#[test]
+fn diagnostic_voice_scope_includes_owned_runtime_artifacts() {
+    let paths: BTreeSet<String> = rendered_snapshot_texts()
+        .into_iter()
+        .filter_map(|(path, _)| {
+            path.strip_prefix(root())
+                .ok()
+                .map(|p| p.display().to_string())
+        })
+        .collect();
+    for expected in [
+        "tests/fixtures/module-eval-diagnostics/E0970.stderr",
+        "tests/fixtures/module-eval-diagnostics/E0971.stderr",
+        "tests/cli/doctor_l2101.txt",
+        "tests/cli/fetch_no_git_e1203.txt",
+        "tests/cli/repl_e1801.txt",
+    ] {
+        assert!(paths.contains(expected), "voice ratchet omitted {expected}");
+    }
 }
 
 /// Extract codes from Rust test assertions like `.contains("E1234")` or
