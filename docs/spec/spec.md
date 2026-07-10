@@ -2258,6 +2258,70 @@ diagnostics: E1257 (interface changed incompatibly), E1258 (capability
 denied), E1259 (wasm build/toolchain failure), E1260 (unsupported export
 shape) — see docs/spec/diagnostics.md.
 
+## Programmable builds as Jet (D-BUILDENTRY1 and build-graph decisions)
+
+`jet build` checks the root program, then runs one optional root
+`fn build(b: BuildContext) -> BuildPlan ?` through the same interpreter used by
+comptime. Imported `fn build` declarations are checked but never run. With no
+root entry, the existing zero-configuration pipeline is unchanged.
+
+Build code registers ordinary typed values. Targets are declared once with
+`b.add_executable`, `b.add_library`, `b.add_test`, `b.add_bench`,
+`b.add_asset_bundle`, `b.add_doc`, `b.add_install`, `b.add_package`, or
+`b.add_publish`; each returns a `BuildTarget`. `b.action(name, inputs, outputs,
+argv, caps)` returns a `BuildAction`. `b.plan()` or `b.plan(default)` hands the
+same canonical graph to scheduling, caching, execution, query tools, and the
+LSP. Expert actions may additionally pass a typed `BuildToolchain` and a list
+of typed `BuildProbe` handles as arguments six and seven. `b.toolchain(name,
+target_triple)` records the target identity; `b.probe(name, kind, value)`
+supports `find_program`, `pkg_config`, and `header` probe kinds.
+
+```jet
+fn build(b: BuildContext) #(Exec, Fs) -> BuildPlan ? {
+    shell :: b.probe("shell", "find_program", "sh")?
+    native :: b.toolchain("native", "x86_64-linux")?
+    stamp :: b.action(
+        "stamp",
+        ["assets/version.txt"],
+        ["build/version.txt"],
+        ["sh", "-c", "cp assets/version.txt build/version.txt"],
+        ["Exec", "Fs"],
+        native,
+        [shell]
+    )?
+    app :: b.add_executable("app", ["main.jet"], [stamp])?
+    return b.plan(app)
+}
+
+fn run() { print("hello") }
+```
+
+Action dependencies come from target dependencies and declared file
+producer/consumer edges. Ready nodes run concurrently in deterministic stages;
+`linker`, `console`, `gpu`, and named resource pools serialize. Cached actions
+key declared input content, argv, environment, capabilities, toolchain, probes,
+resource pools, plugins, and generated-source hashes. Cache hits restore only
+declared outputs from the local CAS.
+
+Execution has no ambient fallback. On Linux each action runs under bubblewrap
+with private mount, PID, IPC, UTS, and network namespaces. Only declared inputs
+enter its writable work tree; only declared outputs return. Network remains
+unshared unless both source and policy grant `Net`. A missing sandbox is E3505,
+not an unsandboxed run. Single-file authority uses the ratified per-effect
+flags (`--allow-exec`, `--allow-fs`, `--allow-net`, and the remaining D-EFF4
+names). Package/workspace policy can grant or cap the same capability set.
+
+`b.generate(name, source)` materializes `.jet/generated/<package>/<name>.jet`.
+Action outputs ending in `.jet` follow the same path. Both re-enter lexer,
+parser, and sema before runtime codegen; malformed generated source is a Jet
+diagnostic with generator provenance. The build-only entry and imported build
+entries are removed before codegen, so rustc never sees build handles.
+
+`jet graph <file> --json` and `jet query build <file> --json` return the same
+typed graph without executing actions. `jet explain-build <target|action|file>
+<file>` reports graph and cache provenance. LSP checking uses the same selected
+root signature validation, including E3501.
+
 ## Deliberately absent
 
 See non-goals in docs/spec/philosophy.md. The parser should produce staged

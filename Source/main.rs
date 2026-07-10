@@ -31,7 +31,7 @@ mod EngineDispatch;
 
 use CmdCodemod::run_codemod;
 use CmdCompile::{
-    run_compile_cmd, run_debug_native, run_dev_entry, run_fix, run_fmt, run_new, run_test,
+    run_build_query, run_compile_cmd, run_debug_native, run_dev_entry, run_fix, run_fmt, run_new, run_test,
     run_test_cov,
 };
 use CmdDevTools::{
@@ -747,6 +747,11 @@ fn main() {
     let small = jet_argv.iter().any(|a| a == "--small");
     let freestanding = jet_argv.iter().any(|a| a == "--freestanding");
     let allow_impure = jet_argv.iter().any(|a| a == "--allow-impure");
+    let build_grants: Vec<String> = ["exec", "fs", "net", "env", "io", "db", "time", "rand", "log", "gpu"]
+        .into_iter()
+        .filter(|effect| jet_argv.iter().any(|arg| arg == &format!("--allow-{effect}")))
+        .map(str::to_string)
+        .collect();
     let locked = jet_argv.iter().any(|a| a == "--locked");
     let annotated = jet_argv.iter().any(|a| a == "--annotated");
     let verbose = jet_argv.iter().any(|a| a == "--verbose" || a == "-v");
@@ -844,6 +849,7 @@ fn main() {
                 small,
                 freestanding,
                 allow_impure,
+                &build_grants,
                 cross_target.as_deref(),
                 explain_partition,
                 verbose,
@@ -1045,6 +1051,11 @@ fn main() {
             // D-IMPACT1: blast-radius queries over the semantic index.
             let impact_args: Vec<String> = raw.iter().skip(1).cloned().collect();
             run_impact(&impact_args, mode.json);
+            return;
+        }
+        "graph" | "query" | "explain-build" => {
+            let query_args: Vec<&String> = args.iter().skip(1).copied().collect();
+            run_build_query(cmd, &query_args, mode);
             return;
         }
         "codemod" => {
@@ -1438,6 +1449,7 @@ fn main() {
                                     small,
                                     freestanding,
                                     allow_impure,
+                                    &build_grants,
                                     effective.as_deref(),
                                     explain_partition,
                                     verbose,
@@ -1566,6 +1578,7 @@ fn main() {
                 small,
                 freestanding,
                 allow_impure,
+                &build_grants,
                 effective.as_deref(),
                 explain_partition,
                 verbose,

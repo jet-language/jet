@@ -112,7 +112,20 @@ fn ui_snapshots() {
         // D-WEBTIR1=A: files marked `// @web_target` compile through the web
         // preflight so web-only executable-body diagnostics get UI snapshots.
         let web_target = src.lines().any(|l| l.trim() == "// @web_target");
-        let actual = if all_diags {
+        // D-BUILDENTRY1: selected-root build diagnostics need programmable
+        // staging, not ordinary runtime compilation.
+        let programmable_build = src.lines().any(|l| l.trim() == "// @programmable_build");
+        let build_grants = src
+            .lines()
+            .find_map(|line| line.trim().strip_prefix("// @build_grants "))
+            .map(|list| list.split(',').map(|item| item.trim().to_string()).collect::<Vec<_>>())
+            .unwrap_or_default();
+        let actual = if programmable_build {
+            match jet::compile_programmable_build(&file_arg, &build_grants) {
+                Err(diags) => jet::render_diagnostics(&shown_path, &src, &diags),
+                Ok(_) => "(no errors)\n".to_string(),
+            }
+        } else if all_diags {
             let diags = jet::check_with_path(&file_arg);
             if diags.is_empty() {
                 "(no errors)\n".to_string()

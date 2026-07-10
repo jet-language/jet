@@ -53,6 +53,8 @@ pub enum BuildError {
         actual: String,
     },
     EmptyGeneratedModuleField(String),
+    DuplicateGeneratedModuleName(String),
+    DuplicateGeneratedModulePath(String),
     TargetDependencyCycle,
     ActionDependencyCycle,
 }
@@ -88,6 +90,27 @@ fn canonical_action_key(
     }
     w.str("cache");
     encode_action_cache(&mut w, action.cache);
+    w.str("compiler-version");
+    w.str(env!("CARGO_PKG_VERSION"));
+    w.str("generated-modules");
+    let mut generated = plan.generated_modules.iter().collect::<Vec<_>>();
+    generated.sort_by(|a, b| a.path.cmp(&b.path));
+    for module in generated {
+        w.str(module.path.as_str());
+        w.str(module.source_digest.as_str());
+    }
+    w.str("target");
+    if let Some(target) = plan
+        .action_targets()
+        .get(&action.id)
+        .and_then(|id| plan.targets.get(id.0))
+    {
+        w.bool(true);
+        w.str(&target.name);
+        w.str(&format!("{:?}", target.kind));
+    } else {
+        w.bool(false);
+    }
     w.str("toolchain");
     encode_toolchain(&mut w, &plan.toolchains[action.toolchain.id.0]);
     w.str("probes");

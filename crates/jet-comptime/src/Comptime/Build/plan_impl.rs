@@ -192,6 +192,11 @@ impl BuildPlan {
         })
     }
 
+    pub fn explain_target_named(&self, name: &str) -> Option<BuildExplanation> {
+        let target = self.targets.iter().find(|target| target.name == name)?;
+        self.explain_target(TargetRef { id: target.id, context: self.context })
+    }
+
     pub fn explain_action(&self, action: ActionHandle) -> Option<BuildExplanation> {
         let action = self.action(action)?;
         let mut provenance = vec![
@@ -211,6 +216,11 @@ impl BuildPlan {
             label: action.name.clone(),
             provenance,
         })
+    }
+
+    pub fn explain_action_named(&self, name: &str) -> Option<BuildExplanation> {
+        let action = self.actions.iter().find(|action| action.name == name)?;
+        self.explain_action(ActionHandle { id: action.id, context: self.context })
     }
 
     pub fn explain_file(&self, path: impl AsRef<str>) -> BuildExplanation {

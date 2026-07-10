@@ -200,7 +200,15 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
     }
 
     let _ffi_lock = uses_ffi_bridge.then(FfiBridgeLock::acquire);
-    let compiled = match jet::compile_with_path(&src, &entry.shown) {
+    let compiled_result = if src.contains("fn build(") {
+        jet::compile_programmable_build(
+            entry.path.to_str().expect("example path is utf8"),
+            &[],
+        )
+    } else {
+        jet::compile_with_path(&src, &entry.shown)
+    };
+    let compiled = match compiled_result {
         Ok(c) => c,
         Err(diags) => panic!(
             "example {} failed the front end:\n{}",

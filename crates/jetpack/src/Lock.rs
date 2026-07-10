@@ -736,6 +736,36 @@ pub fn record_toolchain(project_root: &Path, tc: LockedToolchain) {
     let _ = std::fs::write(lock_path, write(&lock));
 }
 
+/// D-BUILDGEN1: record generated-module output hashes in the unified lock.
+/// Upserts by managed path so a rebuild replaces drift instead of appending.
+pub fn record_generated_inputs(project_root: &Path, generated: &[ComptimeInput]) {
+    let lock_path = project_root.join(Syntax::UNIFIED_LOCK_FILE);
+    let mut lock = std::fs::read_to_string(&lock_path)
+        .ok()
+        .and_then(|raw| parse(&raw).ok())
+        .unwrap_or_else(|| LockFile {
+            version: LOCK_VERSION,
+            packages: Vec::new(),
+            root_dependencies: Vec::new(),
+            workspace_members: Vec::new(),
+            comptime_inputs: Vec::new(),
+            toolchains: Vec::new(),
+            source_channels: Vec::new(),
+        });
+    for input in generated {
+        if let Some(existing) = lock.comptime_inputs.iter_mut().find(|old| old.path == input.path) {
+            *existing = input.clone();
+        } else {
+            lock.comptime_inputs.push(input.clone());
+        }
+    }
+    lock.comptime_inputs.sort_by(|a, b| a.path.cmp(&b.path));
+    if let Some(parent) = lock_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(lock_path, write(&lock));
+}
+
 /// D-JPK-CHANNEL1=A: read one named source channel lock.
 pub fn locked_source_channel(project_root: &Path, name: &str) -> Option<LockedSourceChannel> {
     load(project_root)?

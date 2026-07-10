@@ -462,6 +462,15 @@ pub(super) fn apply_method(
         (CtValue::Struct { type_name, .. }, "reflect") if type_name == "TypeInfo" => {
             Ok(recv.clone())
         }
+        (CtValue::Struct { type_name, fields }, "types")
+            if type_name == crate::Syntax::TYPE_PROGRAM_INFO =>
+        {
+            Ok(fields
+                .iter()
+                .find(|(name, _)| name == "types")
+                .map(|(_, value)| value.clone())
+                .unwrap_or_else(|| CtValue::List(Vec::new())))
+        }
         // D-METAREFLECT1 / D-REFLECT1: `.has_marker(name)` on reflected member handles.
         (CtValue::Struct { type_name, fields }, "has_marker")
             if matches!(type_name.as_str(), "FieldInfo" | "MethodInfo" | "TypeInfo") =>

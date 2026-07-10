@@ -494,7 +494,7 @@ impl<'a> Interp<'a> {
     /// debugger bookkeeping and `?`/`?? return` sentinel handling `eval_call`
     /// always has. Shared by plain calls, instance-method dispatch, and
     /// code-module namespaced calls.
-    fn call_func(
+    pub(super) fn call_func(
         &mut self,
         name: &str,
         func: &Func,
@@ -1317,6 +1317,13 @@ impl<'a> Interp<'a> {
         let mut argv = Vec::new();
         for a in args {
             argv.push(self.eval(&a.expr, scope)?);
+        }
+        // D-BUILDENTRY1: selected-root `BuildContext` is interpreter-owned.
+        // Driver removes `fn build` before runtime codegen.
+        if let Some(result) =
+            super::Build::eval_program_build_method(&recv, method, argv.clone(), span)
+        {
+            return result;
         }
         apply_method(&recv, method, argv, span)
     }

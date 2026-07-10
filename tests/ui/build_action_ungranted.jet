@@ -1,0 +1,7 @@
+// @programmable_build
+fn build(b: BuildContext) #(Exec) -> BuildPlan ? {
+    action :: b.action("stamp", [], ["stamp"], ["sh", "-c", "printf ok > stamp"], ["Exec"])?
+    app :: b.add_executable("app", ["build_action_ungranted.jet"], [action])?
+    return b.plan(app)
+}
+fn run() {}

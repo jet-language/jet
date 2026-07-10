@@ -129,6 +129,34 @@ pub fn compile_allow_impure(file: &str) -> Result<CompileOutput, Vec<Diagnostic>
     compile_bundle_path_opts(file, Sema::CompileMode::Run, false, true, false, None)
 }
 
+/// D-BUILDENTRY1: native `jet build` path. No root `fn build` keeps existing
+/// zero-config pipeline; selected root entry evaluates and executes first.
+pub fn compile_programmable_build(
+    file: &str,
+    grants: &[String],
+) -> Result<CompileOutput, Vec<Diagnostic>> {
+    let grants = grants
+        .iter()
+        .map(|grant| match grant.as_str() {
+            "fs" => Comptime::Build::BuildCapability::Fs,
+            "exec" => Comptime::Build::BuildCapability::Exec,
+            "net" => Comptime::Build::BuildCapability::Net,
+            "env" => Comptime::Build::BuildCapability::Env,
+            "toolchain" => Comptime::Build::BuildCapability::Toolchain,
+            "cache" => Comptime::Build::BuildCapability::Cache,
+            other => Comptime::Build::BuildCapability::Custom(other.to_string()),
+        })
+        .collect();
+    Driver::compile_bundle_path_build(
+        file,
+        Driver::BuildRunOptions {
+            grants,
+            execute: true,
+        },
+    )
+    .map(|output| output.compile)
+}
+
 fn compile_bundle_path_opts(
     file: &str,
     mode: Sema::CompileMode,

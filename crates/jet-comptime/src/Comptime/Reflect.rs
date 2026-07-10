@@ -130,11 +130,43 @@ pub fn build_struct_type_info(s: &StructDef) -> CtValue {
         "TypeInfo",
         &[
             ("name", ct_str(s.name.clone())),
+            (
+                "span",
+                ct_struct(
+                    crate::Syntax::TYPE_SOURCE_SPAN,
+                    &[
+                        ("start", CtValue::Int(s.name_span.start as i64)),
+                        ("end", CtValue::Int(s.name_span.end as i64)),
+                    ],
+                ),
+            ),
             ("fields", ct_list(fields_info)),
             ("methods", ct_list(methods_info)),
             ("type_params", ct_list(type_params_info)),
             ("markers", ct_list(type_level_markers(s))),
         ],
+    )
+}
+
+/// D-METADEPTH2: read-only, post-sema whole-program snapshot handed only to
+/// selected root `fn build`. Existing TypeInfo builders remain canonical.
+pub fn build_program_info(bundle: &crate::AST::ProgramBundle) -> CtValue {
+    let mut types = Vec::new();
+    let mut functions = Vec::new();
+    for module in &bundle.modules {
+        for item in &module.items {
+            match item {
+                crate::AST::Item::Struct(def) => types.push(build_struct_type_info(def)),
+                crate::AST::Item::Func(func) if func.name != "build" => {
+                    functions.push(build_method_info(func));
+                }
+                _ => {}
+            }
+        }
+    }
+    ct_struct(
+        crate::Syntax::TYPE_PROGRAM_INFO,
+        &[("types", ct_list(types)), ("functions", ct_list(functions))],
     )
 }
 

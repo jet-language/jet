@@ -474,3 +474,16 @@ pub const TYPE_BIGINT: &str = "BigInt";
 /// D-DECIMAL1 (ratified 2026-06-26): exact base-10 decimal. Construct with
 /// `Decimal("12.34")` or `core.numeric.decimal("12.34")`; no implicit `Float`.
 pub const TYPE_DECIMAL: &str = "Decimal";
+
+/// D-BUILDENTRY1/D-BUILDTARGET1/D-BUILDACTION1: typed build-program values.
+/// These names are compiler-known only while the selected root `fn build`
+/// runs; build entry is removed before runtime codegen.
+pub const TYPE_BUILD_CONTEXT: &str = "BuildContext";
+pub const TYPE_BUILD_PLAN: &str = "BuildPlan";
+pub const TYPE_BUILD_ACTION: &str = "BuildAction";
+pub const TYPE_BUILD_TARGET: &str = "BuildTarget";
+pub const TYPE_BUILD_TOOLCHAIN: &str = "BuildToolchain";
+pub const TYPE_BUILD_PROBE: &str = "BuildProbe";
+pub const TYPE_PROGRAM_INFO: &str = "ProgramInfo";
+pub const TYPE_TYPE_INFO: &str = "TypeInfo";
+pub const TYPE_SOURCE_SPAN: &str = "SourceSpan";

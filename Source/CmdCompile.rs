@@ -9,6 +9,83 @@ use jet::ExitCodes;
 
 use crate::{report_problems, usage, BuildProfile, OutputMode, ProfileConfig};
 
+pub(crate) fn run_build_query(command: &str, args: &[&String], mode: OutputMode) {
+    let (subject, file) = match command {
+        "graph" => (None, args.first().map(|s| s.as_str())),
+        "query" if args.first().map(|s| s.as_str()) == Some("build") => {
+            (None, args.get(1).map(|s| s.as_str()))
+        }
+        "explain-build" => (
+            args.first().map(|s| s.as_str()),
+            args.get(1).map(|s| s.as_str()),
+        ),
+        _ => (None, None),
+    };
+    let Some(file) = file else {
+        eprintln!("usage: jet {command} {}<file.jet>", if command == "explain-build" { "<target|action|file> " } else { "" });
+        exit(ExitCodes::USAGE);
+    };
+    let src = fs::read_to_string(file).unwrap_or_default();
+    let output = match jet::Driver::compile_bundle_path_build(
+        file,
+        jet::Driver::BuildRunOptions {
+            grants: Default::default(),
+            execute: false,
+        },
+    ) {
+        Ok(output) => output,
+        Err(diags) => {
+            report_problems(mode, file, &src, &diags);
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
+    let Some(build) = output.build else {
+        if mode.json { println!("{{\"schema_version\":1,\"build\":null}}"); }
+        else { println!("default pipeline: no root fn build"); }
+        return;
+    };
+    if let Some(subject) = subject {
+        if let Some(explanation) = build.plan.explain_target_named(subject) {
+            print_build_explanation(&explanation, mode.json);
+            return;
+        }
+        if let Some(explanation) = build.plan.explain_action_named(subject) {
+            print_build_explanation(&explanation, mode.json);
+            return;
+        }
+        print_build_explanation(&build.plan.explain_file(subject), mode.json);
+        return;
+    }
+    let graph = build.plan.graph();
+    if mode.json {
+        println!("{{\"schema_version\":1,\"targets\":[{}],\"actions\":[{}],\"files\":[{}]}}",
+            graph.targets.iter().map(|target| format!("{{\"id\":{},\"name\":\"{}\",\"kind\":\"{:?}\"}}", target.id.0, json_escape(&target.name), target.kind)).collect::<Vec<_>>().join(","),
+            graph.actions.iter().map(|action| format!("{{\"id\":{},\"name\":\"{}\",\"inputs\":{},\"outputs\":{}}}", action.id.0, json_escape(&action.name), json_strings(&action.inputs), json_strings(&action.outputs))).collect::<Vec<_>>().join(","),
+            graph.files.iter().map(|file| format!("{{\"path\":\"{}\",\"owner\":{}}}", json_escape(&file.path), file.owner.map(|id| id.0.to_string()).unwrap_or_else(|| "null".to_string()))).collect::<Vec<_>>().join(",")
+        );
+    } else {
+        for target in graph.targets { println!("target\t{}\t{:?}", target.name, target.kind); }
+        for action in graph.actions { println!("action\t{}\t{}", action.name, action.outputs.join(",")); }
+    }
+}
+
+fn print_build_explanation(explanation: &jet::Comptime::Build::BuildExplanation, json: bool) {
+    if json {
+        println!("{{\"schema_version\":1,\"label\":\"{}\",\"provenance\":{}}}", json_escape(&explanation.label), json_strings(&explanation.provenance));
+    } else {
+        println!("{}", explanation.label);
+        for fact in &explanation.provenance { println!("  {fact}"); }
+    }
+}
+
+fn json_strings(values: &[String]) -> String {
+    format!("[{}]", values.iter().map(|value| format!("\"{}\"", json_escape(value))).collect::<Vec<_>>().join(","))
+}
+
+fn json_escape(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n")
+}
+
 /// D-BUILDPROFILE1: load `pkg.jet` build profiles from the project root of `source_file`.
 fn load_pkg_profiles(
     source_file: &str,
@@ -64,6 +141,7 @@ pub(crate) fn run_compile_cmd(
     small: bool,
     freestanding: bool,
     allow_impure: bool,
+    build_grants: &[String],
     cross_target: Option<&str>,
     explain_partition: bool,
     verbose: bool,
@@ -186,7 +264,9 @@ pub(crate) fn run_compile_cmd(
         }
     }
 
-    let compile_result = if is_web {
+    let compile_result = if cmd == "build" && !is_web && !is_plugin && !freestanding && cross_target.is_none() {
+        jet::compile_programmable_build(file, build_grants)
+    } else if is_web {
         jet::compile_web(file)
     } else if is_plugin {
         jet::compile_plugin(file)

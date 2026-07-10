@@ -151,6 +151,9 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // (generic, see `is_core_generic` in CheckerCore.rs) and its plain
         // `MigrationStatus` field both need the bare-name gate here too.
         | "DecodeResult" | "MigrationStatus"
+        // D-BUILD*: selected-root build-program handles. No runtime values.
+        | "BuildContext" | "BuildPlan" | "BuildAction" | "BuildTarget"
+        | "BuildToolchain" | "BuildProbe" | "ProgramInfo" | "TypeInfo" | "SourceSpan"
     ) || is_json_type_name(name)
         || is_json_error_type_name(name)
         || is_io_error_type_name(name)
@@ -158,6 +161,23 @@ pub(crate) fn core_type_known(name: &str) -> bool {
 }
 
 pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
+    if type_name == Syntax::TYPE_BUILD_CONTEXT && field == "program" {
+        return Some(Type::Named(Syntax::TYPE_PROGRAM_INFO.to_string()));
+    }
+    if type_name == Syntax::TYPE_TYPE_INFO {
+        return match field {
+            "name" => Some(Type::String),
+            "fields" | "methods" | "markers" => Some(Type::List(Box::new(Type::String))),
+            "span" => Some(Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string())),
+            _ => None,
+        };
+    }
+    if type_name == Syntax::TYPE_SOURCE_SPAN {
+        return match field {
+            "start" | "end" => Some(Type::Int),
+            _ => None,
+        };
+    }
     if is_json_error_type_name(type_name) {
         return match field {
             "line" => Some(Type::Int),

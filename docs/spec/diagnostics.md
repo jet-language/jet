@@ -379,6 +379,10 @@ before continuing.
 | E3412 | sema  | `core.net.{method}()` is not available at comptime (only `fetch` is Tier-1) |
 | E3413 | sema  | comptime `fetch` sha256 mismatch — content hash doesn't match the `sha256:` pin (D-CTEFFECT1 / D-NETDEP1=A) |
 | E3414 | sema  | comptime `fetch` failed — bad URL, unsupported scheme, network error, or non-UTF-8 content (D-CTEFFECT1 / D-NETDEP1=A) |
+| E3501 | build | selected root `fn build` has wrong `BuildContext -> BuildPlan ?` signature (D-BUILDENTRY1) |
+| E3502 | build | programmable build evaluation, graph validation, or generated-source materialization failed |
+| E3504 | build | build action requested authority not granted by CLI/package/workspace policy (D-BUILDPOLICY1) |
+| E3505 | build | typed probe or sandboxed action execution failed (D-BUILDACTION1/D-BUILDPROBE1) |
 | E4201 | sema  | HTTPS client TLS handshake failed before any response was received (D-TLS1) |
 | E4202 | sema  | HTTPS client certificate could not be trusted (D-TLS1) |
 | E4203 | sema  | HTTPS client could not find usable system certificate roots (D-TLS1) |
@@ -1368,6 +1372,15 @@ snapshots in `tests/jetpack.rs` (the `tests/ui/` harness only renders front-end
 | L0203 | `use {name}#{selector};` isn't pinned to an exact version. | An inline script dependency (U11) has no lockfile until `jet lock` runs; a loose selector (`1.4` rather than `1.4.2`) can resolve to a different version on a fresh clone (D-JPK-SCRIPTDEP1). | Write the exact version Jet resolved (`use {name}#<major.minor.patch>;`), or run `jet lock` to pin it in `<script>.lock`. |
 | L0204 | `{field}` in `{file}` has no `env.*` equivalent yet. | `jet bridge flake` (U16) is a best-effort translator; some `flake.nix`/`devenv.nix` fields (`shellHook`, multiple named devShells, `buildInputs` vs `nativeBuildInputs`) have no ratified `env.*` spelling. | Review the generated shim and add `{field}`'s effect by hand if you need it — the shim is a starting point, not a full translation. |
 | L0205 | Build sandboxing is unavailable; adapter builds will run unsandboxed. | D-JPK-NODAEMON1 forbids privileged helpers and daemons. When the platform cannot offer an unprivileged sandbox, Jetpack must say so instead of silently downgrading. | Run `jetpack config sandbox require` to refuse fallback. |
+
+## Programmable-build diagnostics (D-BUILDENTRY1 and D-BUILDACTION1)
+
+| Code | What | Why | Fix |
+|---|---|---|---|
+| E3501 | `fn build` must take one `BuildContext` and return `BuildPlan ?`. | Build authority and graph handoff are one typed contract. A different signature cannot be selected by `jet build` or modeled by the LSP. | Write `fn build(b: BuildContext) -> BuildPlan ?`. |
+| E3502 | Build plan is invalid, build evaluation returned an error, or generated source could not materialize. | One selected root entry owns one deterministic graph. Handles cannot cross build sessions, outputs need one owner, and generated Jet must become a real file before checking. | Fix the named graph node or generated module; inspect it with `jet graph` and `jet explain-build`. |
+| E3504 | Build action `{action}` asks for ungranted `{capability}` authority. | Source declaration makes authority auditable but does not grant it. Invocation, package, and workspace policy cap ambient effects independently. | Pass the named `--allow-<effect>` flag for a one-file build, or grant the effect in package/workspace policy. |
+| E3505 | Typed build probe or sandboxed action execution failed. | Actions run only after graph validation, in a bubblewrap sandbox with declared inputs, outputs, tools, environment, capabilities, and probes. Jet does not fall back to ambient execution. | Fix the named command, probe, toolchain, input/output declaration, or enable a supported sandbox. |
 
 ## Machine-readable diagnostics (`--json`)
 
