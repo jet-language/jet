@@ -41,7 +41,7 @@ test('server round-trip: add, state, validation, conflict, next', async () => {
   assert.equal(stale.status, 409);
   assert.equal(stale.json.error, 'E_CONFLICT');
 
-  await post('card/activate', { id: '#1' });
+  await post('card/activate', { id: '#1', by: 'owner' });
   const next = await (await fetch(url('/api/next?limit=3'))).json();
   assert.equal(next.length, 1);
 
@@ -50,7 +50,9 @@ test('server round-trip: add, state, validation, conflict, next', async () => {
 });
 
 test('server ratify flow advances the card', async () => {
-  await post('decision/add', { cardId: '#1', id: 'D-S1', title: 'pick', options: [{ key: 'A', name: 'a' }] });
+  await post('decision/add', { cardId: '#1', id: 'D-S1', title: 'pick',
+    gist: 'g', story: 's', inWild: 'w', rec: 'A',
+    options: [{ key: 'A', name: 'a', code: 'a()' }, { key: 'B', name: 'b', code: 'b()' }] });
   let state = await (await fetch(url('/api/state'))).json();
   assert.equal(state.cards[0].lane.lane, 'decide');
   const r = await post('clearance', { decisionId: 'D-S1', outcome: 'A', by: 'owner' });

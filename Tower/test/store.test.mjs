@@ -25,11 +25,13 @@ test('card add defaults: #1, triage, activate lane', () => {
 test('lane derivation follows phases and decisions', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
-  st.mutate((s, cfg) => db.activate(s, '#1', {}, cfg));
+  st.mutate((s, cfg) => db.activate(s, '#1', { by: 'owner' }, cfg));
   let s = st.load();
   assert.equal(db.laneOf(db.findCard(s, '#1'), s.decisions, s.cards).lane, 'plan');
 
-  st.mutate((s2) => db.addDecision(s2, { cardId: '#1', id: 'D-T1', title: 'Pick one', options: [{ key: 'A', name: 'a' }] }));
+  st.mutate((s2) => db.addDecision(s2, { cardId: '#1', id: 'D-T1', title: 'Pick one',
+    gist: 'g', story: 's', inWild: 'w', rec: 'A',
+    options: [{ key: 'A', name: 'a', code: 'a()' }, { key: 'B', name: 'b', code: 'b()' }] }));
   s = st.load();
   assert.equal(db.laneOf(db.findCard(s, '#1'), s.decisions, s.cards).lane, 'decide');
 
@@ -46,7 +48,9 @@ test('lane derivation follows phases and decisions', () => {
 test('deciding card auto-advances when last decision ratifies', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'A', phase: 'deciding', plan: 'plan' }, cfg));
-  st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-X', title: 't' }));
+  st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-X', title: 't',
+    gist: 'g', story: 's', inWild: 'w', rec: 'B',
+    options: [{ key: 'A', name: 'a', code: 'a()' }, { key: 'B', name: 'b', code: 'b()' }] }));
   st.mutate((s) => db.ratify(s, 'D-X', 'B', null, 'owner'));
   const s = st.load();
   assert.equal(db.findCard(s, '#1').phase, 'ready');
@@ -153,7 +157,7 @@ test('deleteCard cascades decisions/questions and clears blockedBy refs', () => 
   st.mutate((s, cfg) => {
     const a = db.addCard(s, { title: 'A' }, cfg);
     db.addCard(s, { title: 'B', blockedBy: [a.id] }, cfg);
-    db.addDecision(s, { cardId: a.id, title: 'd' });
+    db.addDecision(s, { cardId: a.id, title: 'd', draft: true });
     db.addQuestion(s, { cardId: a.id, text: 'q?' });
   });
   st.mutate((s) => db.deleteCard(s, '#1', { by: 'owner' }));

@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 466,
-    "rev": 2625,
+    "rev": 2633,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -4657,11 +4657,21 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e5",
-      "phase": "building",
+      "phase": "verify",
       "priority": "P1",
       "plan": "docs/plans/epoch-5/metaprogramming.md",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-10",
+          "by": "codex-orchestrator",
+          "text": "Fourth repair commit 59996623 ready for independent closure review. Fail-closed policy precedence, selected-only generation, qualified complete semantic/evaluator facts, descriptor-anchored CAS reads/writes, and secure concurrent restore temps delivered. Focused build_entry 22/22, build_graph 23/23, jet-comptime 4/4, policy 1/1, snapshots 1/1 green. No merge/full suite yet."
+        },
+        {
+          "at": "2026-07-10",
+          "by": "codex-orchestrator",
+          "text": "Fourth repair about 75%: qualified sema summaries/solved keys captured per module with qualified import edges; evaluator funcs/structs/enums/methods qualified with globally unique short aliases only; dotted calls normalize. Reflection hostile duplicate inferred Net+panic vs pure duplicate added. CAS blob/action-record reads descriptor-anchored no-follow regular-file checked; record writes atomic; restore temp uses 128-bit urandom plus O_EXCL and atomic rename; host symlink/concurrent same-size hostiles added. Remaining: malformed/precedence policy tests, compile repair, selected-generated fixtures, focused matrix, commit."
+        },
         {
           "at": "2026-07-10",
           "by": "codex-orchestrator",
@@ -19414,12 +19424,22 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "verify",
       "priority": "P1",
       "plan": "# Plan: jetos Studio dashboard/sidebar UI\n\nRatified inputs:\n- D-FE-STUDIO1 outcome E with owner modifications.\n- D-JOS-STUDIO-HOST1: local projection/edit service plus browser fallback; no Canvas coupling.\n- #264 shipped source-backed Studio prototype; this card redesigns the actual Studio UI, not semantics.\n\nScope:\n- crates/jetpack/src/JetOS/studio_projection.rs for installed app projection.\n- crates/jetpack/src/CLI/bridge_os_studio.rs, crates/jetpack/src/CLI/studio_server.rs, crates/jetpack/src/CLI/studio_transactions.rs for served/edit flows if route data needs expansion.\n- tests/jetpack.rs and focused Studio tests/fixtures.\n\nImplementation steps:\n1. Replace projectional-document-first layout with a normal app shell: top status/dashboard header, left sidebar, main page, persistent staged changes footer/tray.\n2. Build dashboard landing page from real data.json/source/proof facts: hosts, selected host, generation ribbon, service health, alerts, monitoring summary, proof/rollback status, and last run status. Keep copy plain and operational.\n3. Build sidebar categories: Dashboard, Settings, Monitoring, Services, Packages, Secrets, Generations, Changeset, Proof/Provenance. Back categories with an internal page registry so future Studio pages register title/id/source/data needs without redesign.\n4. Move settings into category pages with ordinary controls. Each setting edit must stage a source transaction and show exact Jet diff before apply.\n5. Make Changeset a first-class page: unified diff, impact ledger, generation delta, proof requirements, per-hunk include where supported, Build only, Build and switch, Discard.\n6. Keep one apply path. Edits from settings, dashboard alerts, rollback actions, and changeset review all stage into the same changeset/apply gate.\n7. Preserve source-backed guarantees: no hidden GUI semantic state, exact config.jet diff, provenance/proof visibility, browser/headless fallback, and deterministic review output.\n\nAcceptance:\n- jetos studio --serve opens the redesigned dashboard/sidebar UI.\n- Dashboard is understandable at a glance; settings are in sidebar categories; Changeset is a sidebar page.\n- A settings edit previews exact Jet diff, stages in Changeset, saves through the existing transaction service, reprojects, and can run check/plan/build/proof.\n- Existing #264 tests still pass and new tests cover page registry, Changeset page, dashboard data rendering, and source transaction path.\n\nVerification:\n- nix develop -c cargo test --test jetpack <focused Studio tests>\n- nix develop -c cargo test --test jetpack\n- nix develop -c cargo build --bin jetos\n- Browser/headless proof for served Studio page.\n- Full nix develop -c cargo test before done unless unrelated blockers are logged and owner accepts scoped proof.",
       "blockedBy": [],
       "assignee": "terra-357",
       "log": [
+        {
+          "at": "2026-07-10",
+          "by": "codex-orchestrator",
+          "text": "Fourth repair commit 21e5a1f6 ready for independent closure review. Exact proved-generation activation, canonical race rollback, cross-process CAS/receipt, sealed memfd proof input, session-bound tokens, and source+plan binding delivered. Hostile exact 77.51s, switch 13.09s, projection 12.80s, headless 12.62s, targeted build and diff check green. No merge/full suite yet."
+        },
+        {
+          "at": "2026-07-10",
+          "by": "codex-orchestrator",
+          "text": "Fourth hostile exact Studio gate green in 76.52s. Covers sealed memfd hostile access denial, separate-process compliant flock race and CAS preservation, foreign issued-session stolen-token rejection, proof-generation binding, switch-race failure with canonical rollback, and clean switch activating exact proved generation without candidate rebuild. Remaining exact projection/headless/switch/build/diff gates and commit."
+        },
         {
           "at": "2026-07-10",
           "by": "codex-orchestrator",
@@ -21814,6 +21834,11 @@
         {
           "at": "2026-07-10",
           "by": "codex-orchestrator",
+          "text": "Seventh repair implementation checkpoint: read-only private tmpfs PATH wrapper mount created in isolated user+mount namespace, pinned by inherited directory FD after namespace keeper exits; lookup uses proc-fd with no mutable filesystem name. Wrapper content validated and executables opened as exact FDs. Existing hostile nested-shell test passes with nonzero exact filter. Adding explicit chmod/replace/bin-symlink assertions, then JetOS original-provenance full closure copy."
+        },
+        {
+          "at": "2026-07-10",
+          "by": "codex-orchestrator",
           "text": "Seventh repair investigation: mutable PATH wrappers, unopened bin symlinks, and Nix closure query against lease snapshot confirmed. Implementing fail-closed read-only namespace wrapper path plus exact target FDs, and preserved original output/reference provenance driving full closure copy and absolute symlink rewrite. No focused tests yet."
         },
         {
@@ -22957,12 +22982,17 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P1",
       "plan": "D-DEVTOOLS1=A ratified — everything under the existing hidden `jet devtools` namespace (pattern: devtools grammars). Steps:\n1. jet devtools reduce <file.jet> [--code EXXXX]: delta-debug minimizer; oracle = front-end accepts + rustc rejects (I2 repro) or diagnostic code match.\n2. jet devtools ice-report <file.jet>: bundle source + generated Rust + rustc stderr + jet/rustc versions into one attachable file.\n3. jet devtools new-example <topic>/<name> and new-ui <name>: scaffold example + expected/ pair, ui fixture + snapshot stub — matching golden/ui harness layout exactly.\n4. jet devtools check-fixture-paths: validate path-embedding fixtures against real files (the examples-move trap).\n5. jet devtools bless: wrapper over snapshot re-bless.\n6. All hidden from top-level jet help (same as grammars); registered in Source/CLI.rs COMMANDS.\n7. Tests per tool; reduce must demonstrably shrink a real ice_regressions case; verify skill gains one doc line per tool.\nExit: each tool tested + documented; reduce proven on a real ICE case; suite green.",
       "blockedBy": [],
       "assignee": "claude-450",
       "log": [
+        {
+          "at": "2026-07-10",
+          "by": "claude-main",
+          "text": "verified by orchestrator: cargo test --test devtools 8/8 (independent rerun), fresh-binary smoke of reduce/ice-report/check-fixture-paths all correct. Bonus: fixed devtools argv subflag-eating bug in main.rs. Closing."
+        },
         {
           "at": "2026-07-10",
           "by": "claude-450",
@@ -23138,7 +23168,7 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P1",
       "plan": "D-TWRGUARD1=C ratified — agent-hard, owner-soft. Criteria/checklist data model + done-gate + acceptance ballots are OWNED BY #463 (D-TWR-CRIT1=C); this card builds the rest of the guard family on top. All gates apply only when --by ≠ owner; owner writes bypass everything; every bypassing owner-quote is event-logged. Steps:\n1. store.mjs guard layer (single chokepoint in mutate path): (a) ballot-ready validation on decision add — gist/story/inWild/options[].code/rec required, --draft flag exempts and keeps it out of the owner queue; (b) ratify/activate rejected for agents unless --quote \"owner's words\" given (recorded in event log); (c) no agent writes to frozen or owner-lane cards; (d) release of a building card requires --handoff note; (e) card delete refuses to cascade away ratified decisions (they retire to history instead once #461 lands; until then delete is refused outright); (f) ratify outcome must match an option key; (g) blockedBy accepts decision ids.\n2. tower verdict '#N' --outcome \"...\" --by owner — mints an owner verdict as a ratified decision on the card and flips the card, so verdicts stop landing in logs (owner rule).\n3. Ratify hook: ratifying a syntax-group decision auto-appends the standard chores (Syntax.rs, syntax-decisions.md log, jet devtools grammars, re-bless) to the card's criteria (#463 model).\n4. Errors: E_GATE_* family, each with an actionable message naming the missing thing.\n5. Tests: one refusal + one acceptance test per gate; owner-bypass test per gate; migration clean on live-shaped fixture.\n6. Docs: Tower/AGENTS.md gate table; tower + tower-ballot skills.\nExit: every gate has paired refusal/acceptance tests; live board migrates clean; skills updated; suite green.",
       "blockedBy": [
@@ -23146,6 +23176,11 @@
       ],
       "assignee": "claude-main",
       "log": [
+        {
+          "at": "2026-07-10",
+          "by": "claude-main",
+          "text": "verified by orchestrator: Tower suite 67/67 (independent rerun) + live scratch-board smoke of all 8 gates (E_BALLOT/draft, E_OWNER_ONLY/quote, verdict, E_HANDOFF, draft-not-decide-lane) — all exact per spec. Closing."
+        },
         {
           "at": "2026-07-10",
           "by": "claude-main",
@@ -23213,12 +23248,17 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "building",
       "priority": "P1",
       "plan": "D-TWR-ARCHIVE1=B ratified (auto-retire split live/history) MODIFIED by owner comment: keep a walk-back buffer before anything retires, and done must be strictly tested (that half lands via #463/#458). Steps:\n1. store.mjs — .tower/history.json append-only ledger {decisions[], cards[], events[], each with retiredAt}. Written under the same cross-process lock; committed to git.\n2. Retire policy WITH BUFFER (owner comment): on every write, retire (a) decisions status=ratified whose ratifiedAt is older than config retireAfterDays (default 3) — inside the window they stay in tower.json, show in the UI 'recently decided' strip, and tower decision reopen works one-step; (b) cards phase=done older than the same buffer AND passing the #463 done-gate rules; their questions ride along; (c) events beyond the newest 500.\n3. Walk-back UX: Now view gets a collapsed 'Recently decided (N) — reversible for X days' strip listing buffered ratifications with one-tap Reopen. Reopen pulls it back to open and reverts the card advance.\n4. Merged reads: findCard/decision show/card show fall through to history transparently; tower archive restore <id> moves an item back to live (reopen for ratified decisions). Board Done counts read a per-epoch summary; full done lists lazy-load via GET /api/history?epoch=.\n5. CLI: tower archive status|show <id>|restore <id>. First write after upgrade migrates the existing 496 ratified decisions + 305 done cards (all outside any buffer) → tower.json ~0.5MB.\n6. Tests: buffer respected (nothing retires early), reopen-from-buffer, retire-after-buffer, merged reads, restore, migration on a live-shaped fixture, backups shrink.\n7. Docs: Tower README/AGENTS.md + tower-setup skill (retireAfterDays).\nExit: tower.json ≤ ~0.6MB after migration; every retired item still reachable by id; a ratification can be walked back within the buffer from phone UI; suite green.",
       "blockedBy": [],
       "assignee": "claude-main",
       "log": [
+        {
+          "at": "2026-07-10",
+          "by": "claude-main",
+          "text": "Tower chain 3/6 start — history store + retire buffer"
+        },
         {
           "at": "2026-07-10",
           "by": "claude-main",
@@ -23426,7 +23466,8 @@
       "bestCurrent": "Zig: Zig uses `.field = value` inside struct literals, enabling dot-completion and distinguishing member names from locals.",
       "recommendation": "Keep `field: value`: Jet already uses `:` for named association across fields, args, maps, and types. Zig wins completion, but Jet wins one-path consistency; LSP can still complete from expected type.",
       "outcome": "A",
-      "ratifiedAt": "2026-06-28"
+      "ratifiedAt": "2026-06-28",
+      "draft": false
     },
     {
       "id": "D-PENDING1",
@@ -23472,7 +23513,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "B",
-      "ratifiedAt": "2026-06-27"
+      "ratifiedAt": "2026-06-27",
+      "draft": false
     },
     {
       "id": "D-STDRUBRIC1",
@@ -23541,7 +23583,8 @@
       ],
       "outcome": "A",
       "comment": "Please defer to epoch 6 though. I want option A, I just want to settle the main churn first, then implement option A",
-      "ratifiedAt": "2026-06-28"
+      "ratifiedAt": "2026-06-28",
+      "draft": false
     },
     {
       "id": "D-FMTPARENS1",
@@ -23595,7 +23638,8 @@
       "bestCurrent": "Prettier: Prettier removes subjective formatting but preserves parentheses when they change parsing or remove real ambiguity.",
       "recommendation": "Preserve non-obvious grouping parens only. Jet keeps fmt deterministic like Prettier while preserving author intent where it materially improves scanability.",
       "outcome": "A",
-      "ratifiedAt": "2026-06-28"
+      "ratifiedAt": "2026-06-28",
+      "draft": false
     },
     {
       "id": "D-DUPLINT1",
@@ -23641,7 +23685,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "C",
-      "ratifiedAt": "2026-06-27"
+      "ratifiedAt": "2026-06-27",
+      "draft": false
     },
     {
       "id": "D-RANDSPLIT1",
@@ -23695,7 +23740,8 @@
       "bestCurrent": "Rust: Rust separates seeded PRNGs from OS entropy and uses typed RNG traits, making deterministic and cryptographic randomness visibly different.",
       "recommendation": "Split PRNG/CSPRNG structurally and lint misuse. Jet can make the safe choice clearer than Rust by putting deterministic tests and crypto APIs behind different names and return types.",
       "outcome": "A",
-      "ratifiedAt": "2026-06-28"
+      "ratifiedAt": "2026-06-28",
+      "draft": false
     },
     {
       "id": "D-FORMALCORE1",
@@ -23763,7 +23809,8 @@
         }
       ],
       "outcome": "C",
-      "ratifiedAt": "2026-06-28"
+      "ratifiedAt": "2026-06-28",
+      "draft": false
     },
     {
       "id": "D-TTLVAL1",
@@ -23831,7 +23878,8 @@
         }
       ],
       "outcome": "A",
-      "ratifiedAt": "2026-06-28"
+      "ratifiedAt": "2026-06-28",
+      "draft": false
     },
     {
       "id": "D-RAYLIB1",
@@ -23878,7 +23926,8 @@
       "status": "ratified",
       "group": "web-ui",
       "outcome": "A",
-      "ratifiedAt": "2026-06-27"
+      "ratifiedAt": "2026-06-27",
+      "draft": false
     },
     {
       "id": "D-PRELUDEX1",
@@ -23932,7 +23981,8 @@
       "bestCurrent": "Rust: Rust offers `#![no_implicit_prelude]` for expert files while preventing dependencies from injecting names into every scope.",
       "recommendation": "Add opt-out only. This matches the best expert escape hatch while preserving Jet’s curated beginner prelude and blocking package namespace pollution.",
       "outcome": "A",
-      "ratifiedAt": "2026-06-28"
+      "ratifiedAt": "2026-06-28",
+      "draft": false
     },
     {
       "id": "D-BIGINT1",
@@ -23991,7 +24041,8 @@
       "bestCurrent": "Java: Java `BigInteger` is standard, explicit, and never changes fixed-int overflow semantics by surprise.",
       "recommendation": "Add explicit core `BigInt`, no auto-promotion. Jet gets exact integers without making `Int + Int` value-dependent.",
       "outcome": "A",
-      "ratifiedAt": "2026-06-28"
+      "ratifiedAt": "2026-06-28",
+      "draft": false
     },
     {
       "id": "D-GRAPHEME1",
@@ -24043,7 +24094,8 @@
       "status": "ratified",
       "group": "stdlib",
       "outcome": "B",
-      "ratifiedAt": "2026-06-27"
+      "ratifiedAt": "2026-06-27",
+      "draft": false
     },
     {
       "id": "D-CODECS1",
@@ -24090,7 +24142,8 @@
       "status": "ratified",
       "group": "stdlib",
       "outcome": "A",
-      "ratifiedAt": "2026-06-27"
+      "ratifiedAt": "2026-06-27",
+      "draft": false
     },
     {
       "id": "D-PQCRYPTO1",
@@ -24145,7 +24198,8 @@
       "recommendation": "Design the agility envelope now, add PQ algorithms later. Jet should hide algorithm churn behind `seal/open` and `sign/verify`, avoiding per-call crypto menus.",
       "outcome": "A",
       "comment": "Why would you use a hash marker instead of just an enum for this??? Unless you have a good reason just do enum",
-      "ratifiedAt": "2026-06-28"
+      "ratifiedAt": "2026-06-28",
+      "draft": false
     },
     {
       "id": "D-GLOBIMPORT1",
@@ -24199,7 +24253,8 @@
       "bestCurrent": "Rust: Rust allows glob imports but idiom and lints discourage them because they obscure name provenance.",
       "recommendation": "Keep rejecting globs. Selective imports give most convenience with stronger readability than Rust’s permissive model.",
       "outcome": "A",
-      "ratifiedAt": "2026-06-28"
+      "ratifiedAt": "2026-06-28",
+      "draft": false
     },
     {
       "id": "D-PUBPKG1",
@@ -24246,7 +24301,8 @@
       "status": "ratified",
       "group": "syntax",
       "outcome": "A",
-      "ratifiedAt": "2026-06-27"
+      "ratifiedAt": "2026-06-27",
+      "draft": false
     },
     {
       "id": "D-TYPEALIAS1",
@@ -24300,7 +24356,8 @@
       "bestCurrent": "Rust: Rust has fully transparent `type Alias = T`, useful for long generic signatures but not a safety boundary.",
       "recommendation": "Allow aliases only for generic/type-expression shortcuts. Jet gets the real ergonomic win while preserving distinct types for safety.",
       "outcome": "B",
-      "ratifiedAt": "2026-06-28"
+      "ratifiedAt": "2026-06-28",
+      "draft": false
     },
     {
       "id": "D-MATURITY1",
@@ -24354,7 +24411,8 @@
       "bestCurrent": "Kotlin: Kotlin `@RequiresOptIn` makes experimental APIs visible and can require caller opt-in.",
       "recommendation": "Start doc-visible, propagate later. Jet should not wire a new propagation lattice until machinery is ready, but docs/IDE maturity markers can beat comment-only stability now.",
       "outcome": "B",
-      "ratifiedAt": "2026-06-28"
+      "ratifiedAt": "2026-06-28",
+      "draft": false
     },
     {
       "id": "D-SWIZZLE1",
@@ -24411,7 +24469,8 @@
       "rec": "B",
       "status": "ratified",
       "outcome": "A",
-      "ratifiedAt": "2026-06-27"
+      "ratifiedAt": "2026-06-27",
+      "draft": false
     },
     {
       "id": "D-BUILDNORM1",
@@ -24465,7 +24524,8 @@
       "bestCurrent": "Nix: Nix content addressing normalizes derivation inputs so identical builds share cache entries predictably.",
       "recommendation": "Specify the AST-level, rename-sensitive contract. Jet should make cache identity explicit enough for agents and humans, not hidden in implementation details.",
       "outcome": "A",
-      "ratifiedAt": "2026-06-28"
+      "ratifiedAt": "2026-06-28",
+      "draft": false
     },
     {
       "id": "D-JETDOC1",
@@ -24533,7 +24593,8 @@
         }
       ],
       "outcome": "B",
-      "ratifiedAt": "2026-06-28"
+      "ratifiedAt": "2026-06-28",
+      "draft": false
     },
     {
       "id": "D-DOSSIER1",
@@ -24587,7 +24648,8 @@
       "bestCurrent": "Smalltalk: Smalltalk browsers organize behavior by class/protocol rather than file, making scattered methods coherent.",
       "recommendation": "Defer until the semantic index is stable. Jet should match Smalltalk’s navigability, but only once cross-file member identity is complete.",
       "outcome": "B",
-      "ratifiedAt": "2026-06-28"
+      "ratifiedAt": "2026-06-28",
+      "draft": false
     },
     {
       "id": "D-BREADCRUMB1",
@@ -24641,7 +24703,8 @@
       "bestCurrent": "JetBrains IDEs: JetBrains IDEs expose declarations away from the current file through structure views, inlays, and navigation markers.",
       "recommendation": "Defer with dossier work. Phantom stubs need the same semantic identity graph, so they should not precede the index.",
       "outcome": "B",
-      "ratifiedAt": "2026-06-28"
+      "ratifiedAt": "2026-06-28",
+      "draft": false
     },
     {
       "id": "D-WORKSPACE1",
@@ -24688,7 +24751,8 @@
       "status": "ratified",
       "outcome": "B",
       "comment": "Reconciled 2026-06-27: canonical D-WORKSPACE1 in docs/spec/syntax-decisions.md is B — fully computable workspace.jet. This Tower card's option labels predate the owner-modified ratification; follow D-WORKSPACE1/D-WORKSPACE2 in syntax-decisions.md.",
-      "ratifiedAt": "2026-06-25"
+      "ratifiedAt": "2026-06-25",
+      "draft": false
     },
     {
       "id": "D-GENMOD1",
@@ -24735,7 +24799,8 @@
       "status": "ratified",
       "group": "research",
       "outcome": "A",
-      "ratifiedAt": "2026-06-27"
+      "ratifiedAt": "2026-06-27",
+      "draft": false
     },
     {
       "id": "D-GENMOD2",
@@ -24808,7 +24873,8 @@
         }
       ],
       "outcome": "A",
-      "ratifiedAt": "2026-06-28"
+      "ratifiedAt": "2026-06-28",
+      "draft": false
     },
     {
       "id": "D-VARIADIC1",
@@ -24861,7 +24927,8 @@
       "status": "ratified",
       "group": "syntax",
       "outcome": "A",
-      "ratifiedAt": "2026-06-27"
+      "ratifiedAt": "2026-06-27",
+      "draft": false
     },
     {
       "id": "D-SEMINDEX1",
@@ -24907,7 +24974,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "A",
-      "ratifiedAt": "2026-06-27"
+      "ratifiedAt": "2026-06-27",
+      "draft": false
     },
     {
       "id": "D-IMPACT1",
@@ -24961,7 +25029,8 @@
       "bestCurrent": "Pharo Smalltalk: Pharo-style senders/implementors and refactoring browsers show impact from semantic links, not grep.",
       "recommendation": "Build it on the semantic-index API. Jet can exceed best IDEs by including effects, packages, tests, and generated code in the graph.",
       "outcome": "A",
-      "ratifiedAt": "2026-06-28"
+      "ratifiedAt": "2026-06-28",
+      "draft": false
     },
     {
       "id": "D-CODEMOD1",
@@ -25015,7 +25084,8 @@
       "bestCurrent": "Rust: Rustfix applies machine-readable compiler suggestions; most codemods are text/AST scripts without semantic replay.",
       "recommendation": "Model codemods as named semantic refactors. Jet can beat rustfix by making refactors shippable, reversible, and validated against the index.",
       "outcome": "A",
-      "ratifiedAt": "2026-06-28"
+      "ratifiedAt": "2026-06-28",
+      "draft": false
     },
     {
       "id": "D-REFRELOOK1",
@@ -25085,7 +25155,8 @@
         }
       ],
       "outcome": "E",
-      "ratifiedAt": "2026-06-28"
+      "ratifiedAt": "2026-06-28",
+      "draft": false
     },
     {
       "id": "D-COROUTINE1",
@@ -25153,7 +25224,8 @@
         }
       ],
       "outcome": "A",
-      "ratifiedAt": "2026-06-28"
+      "ratifiedAt": "2026-06-28",
+      "draft": false
     },
     {
       "id": "D-NURSERY1",
@@ -25212,7 +25284,8 @@
       "bestCurrent": "Trio proves lexical task lifetime; Swift TaskGroup proves mainstream naming; Go proves why unstructured goroutines need better lifetime ownership.",
       "recommendation": "Adopt scoped task groups as canonical spawn. Jet can keep Go-like simplicity while making task leaks, dropped errors, and forgotten joins structurally impossible.",
       "outcome": "A",
-      "ratifiedAt": "2026-06-28"
+      "ratifiedAt": "2026-06-28",
+      "draft": false
     },
     {
       "id": "D-RACEWIN1",
@@ -25258,7 +25331,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "A",
-      "ratifiedAt": "2026-06-27"
+      "ratifiedAt": "2026-06-27",
+      "draft": false
     },
     {
       "id": "D-UNDOKW1",
@@ -25306,7 +25380,8 @@
       "bestCurrent": "Database transactions: Production systems use explicit transaction scopes for rollback rather than a generic language undo operator.",
       "recommendation": "Keep `#Transact` as the only reversal mechanism. A bare `undo` keyword is less precise and creates a second rollback path.",
       "outcome": "A",
-      "ratifiedAt": "2026-06-28"
+      "ratifiedAt": "2026-06-28",
+      "draft": false
     },
     {
       "id": "D-SELFVER1",
@@ -25374,7 +25449,8 @@
         }
       ],
       "outcome": "A",
-      "ratifiedAt": "2026-06-28"
+      "ratifiedAt": "2026-06-28",
+      "draft": false
     },
     {
       "id": "D-OOBPROOF1",
@@ -25428,7 +25504,8 @@
       "bestCurrent": "SPARK Ada: SPARK can prove array index safety statically and remove checks under proof obligations.",
       "recommendation": "Gate proof elision on refinement/proof machinery. Jet should not expose unchecked indexing as normal syntax; elision must be front-end-proven.",
       "outcome": "A",
-      "ratifiedAt": "2026-06-28"
+      "ratifiedAt": "2026-06-28",
+      "draft": false
     },
     {
       "id": "D-UNCERTAIN1",
@@ -25482,7 +25559,8 @@
       "bestCurrent": "F#: F# units of measure track one numeric dimension at compile time; uncertainty/freshness usually stay domain-specific.",
       "recommendation": "Defer the general framework. Jet should ship focused types first, then generalize only if repeated axes prove one mechanism.",
       "outcome": "A",
-      "ratifiedAt": "2026-06-28"
+      "ratifiedAt": "2026-06-28",
+      "draft": false
     },
     {
       "id": "D-FAILCOMP1",
@@ -25528,7 +25606,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "A",
-      "ratifiedAt": "2026-06-27"
+      "ratifiedAt": "2026-06-27",
+      "draft": false
     },
     {
       "id": "D-HOLE1",
@@ -25600,7 +25679,8 @@
         }
       ],
       "outcome": "A",
-      "ratifiedAt": "2026-06-28"
+      "ratifiedAt": "2026-06-28",
+      "draft": false
     },
     {
       "id": "D-PROVENANCE1",
@@ -25669,7 +25749,8 @@
       ],
       "outcome": "B",
       "comment": "Syntax is very outdated, update appropriately and implement",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-TIMETRAVEL1",
@@ -25737,7 +25818,8 @@
         }
       ],
       "outcome": "C",
-      "ratifiedAt": "2026-06-28"
+      "ratifiedAt": "2026-06-28",
+      "draft": false
     },
     {
       "id": "D-DEADLINE1",
@@ -25791,7 +25873,8 @@
       "bestCurrent": "Kotlin withTimeout inherits through coroutine scope; Go context proves the value of deadline propagation but makes every call thread ctx manually.",
       "recommendation": "Put deadlines on Jet #Context and enforce them at I/O/wait points. Jet improves on Go by making propagation part of structured concurrency instead of another parameter to forget.",
       "outcome": "A",
-      "ratifiedAt": "2026-06-28"
+      "ratifiedAt": "2026-06-28",
+      "draft": false
     },
     {
       "id": "D-APPROX1",
@@ -25837,7 +25920,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "A",
-      "ratifiedAt": "2026-06-27"
+      "ratifiedAt": "2026-06-27",
+      "draft": false
     },
     {
       "id": "D-AUTOPAR1",
@@ -25883,7 +25967,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "A",
-      "ratifiedAt": "2026-06-27"
+      "ratifiedAt": "2026-06-27",
+      "draft": false
     },
     {
       "id": "D-CADEFS1",
@@ -25929,7 +26014,8 @@
       "rec": "C",
       "status": "ratified",
       "outcome": "C",
-      "ratifiedAt": "2026-06-27"
+      "ratifiedAt": "2026-06-27",
+      "draft": false
     },
     {
       "id": "D-DBDRIVER1",
@@ -25976,7 +26062,8 @@
       "status": "ratified",
       "group": "stdlib",
       "outcome": "A",
-      "ratifiedAt": "2026-06-27"
+      "ratifiedAt": "2026-06-27",
+      "draft": false
     },
     {
       "id": "D-RINGLAYER1",
@@ -26049,7 +26136,8 @@
         }
       ],
       "outcome": "A",
-      "ratifiedAt": "2026-06-28"
+      "ratifiedAt": "2026-06-28",
+      "draft": false
     },
     {
       "id": "D-TYPEDSTYLE1",
@@ -26104,7 +26192,8 @@
       "recommendation": "Sequence typed styles inside the reactive UI stack. Jet should match Elm’s safety while sharing one component/layout model.",
       "outcome": "A",
       "comment": "I want this also ratified: How Jet can be decisively better than all of them: (A) UNIT POSTFIX from #Unit system: `14.px`, `1.5.rem`, `16.ms`, `100.pct` — more ergonomic than elm-css's `px 14`, safer than CSS strings. Every length is a typed value. (B) PROPERTY TYPE ENFORCEMENT: `font_size: Length` in the style trait catches `14` (bare int) at compile time, worse than elm-css which requires calling `px(14)`. Jet catches it without ceremony. (C) THEME TOKENS AS ENUM TYPES: `Color.Primary`, `Spacing.SM` — symbols, not CSS-variable strings. Autocomplete + compile-time checking. (D) RESPONSIVE AS PATTERN MATCH: `#Responsive { .mobile → style_a, .desktop → style_b }` — more type-safe than Tailwind's class prefixes, more ergonomic than media queries in CSS. (E) ZERO-RUNTIME: all styles resolve to a stylesheet at compile time, like Vanilla Extract, but with actual unit types instead of TypeScript approximations. (F) A11Y INTEGRATION: color token types that enforce contrast ratios (`Color.Fg` must contrast on `Color.Bg`), flagged at compile time. No other system does this. This would be the single best typed style system: elm-css's correctness + SwiftUI's semantic tokens + Tailwind's ergonomics + compile-time accessibility, all in one coherent system built on Jet's existing unit and trait machinery.",
-      "ratifiedAt": "2026-06-28"
+      "ratifiedAt": "2026-06-28",
+      "draft": false
     },
     {
       "id": "D-A11Y1",
@@ -26151,7 +26240,8 @@
       "status": "ratified",
       "outcome": "A",
       "comment": "But we should support some kind of magical default that allows us to do some level of automatic fill in for defaults so it doesnt piss off jet users by requiring tiny fixes to every little thing they do",
-      "ratifiedAt": "2026-06-27"
+      "ratifiedAt": "2026-06-27",
+      "draft": false
     },
     {
       "id": "D-NATIVEUI1",
@@ -26197,7 +26287,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "A",
-      "ratifiedAt": "2026-06-27"
+      "ratifiedAt": "2026-06-27",
+      "draft": false
     },
     {
       "id": "D-WEBBACKEND1",
@@ -26249,7 +26340,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "A",
-      "ratifiedAt": "2026-06-27"
+      "ratifiedAt": "2026-06-27",
+      "draft": false
     },
     {
       "id": "D-JSWIFTFFI1",
@@ -26295,7 +26387,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "A",
-      "ratifiedAt": "2026-06-27"
+      "ratifiedAt": "2026-06-27",
+      "draft": false
     },
     {
       "id": "D-ASYNCRT1",
@@ -26346,7 +26439,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "A",
-      "ratifiedAt": "2026-06-27"
+      "ratifiedAt": "2026-06-27",
+      "draft": false
     },
     {
       "id": "D-VISDEFAULT1",
@@ -26393,7 +26487,8 @@
       "status": "ratified",
       "outcome": "C",
       "comment": "We will keep private by default, per item pub, BUT allow public/private scope markers. I want a new decision open to compare syntax options for the marker though",
-      "ratifiedAt": "2026-06-27"
+      "ratifiedAt": "2026-06-27",
+      "draft": false
     },
     {
       "id": "D-USERDERIVE1",
@@ -26439,7 +26534,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "A",
-      "ratifiedAt": "2026-06-27"
+      "ratifiedAt": "2026-06-27",
+      "draft": false
     },
     {
       "id": "D-METAREFLECT1",
@@ -26485,7 +26581,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "C",
-      "ratifiedAt": "2026-06-27"
+      "ratifiedAt": "2026-06-27",
+      "draft": false
     },
     {
       "id": "D-METADERIVE1",
@@ -26532,7 +26629,8 @@
       "status": "ratified",
       "outcome": "A",
       "comment": "Reconciled 2026-06-27 from docs/spec/syntax-decisions.md and decision-ballots.md: derive Trait for T + Jet source-fragment re-entry via $ splice.",
-      "ratifiedAt": "2026-06-25"
+      "ratifiedAt": "2026-06-25",
+      "draft": false
     },
     {
       "id": "D-REACTCORE1",
@@ -26584,7 +26682,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "D",
-      "ratifiedAt": "2026-06-27"
+      "ratifiedAt": "2026-06-27",
+      "draft": false
     },
     {
       "id": "D-RENDERTGT1",
@@ -26630,7 +26729,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "A",
-      "ratifiedAt": "2026-06-27"
+      "ratifiedAt": "2026-06-27",
+      "draft": false
     },
     {
       "id": "D-REACTUI1",
@@ -26676,7 +26776,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "A",
-      "ratifiedAt": "2026-06-27"
+      "ratifiedAt": "2026-06-27",
+      "draft": false
     },
     {
       "id": "D-MOTION1",
@@ -26744,7 +26845,8 @@
         }
       ],
       "outcome": "A",
-      "ratifiedAt": "2026-06-28"
+      "ratifiedAt": "2026-06-28",
+      "draft": false
     },
     {
       "id": "D-ADAPTRT1",
@@ -26790,7 +26892,8 @@
       "rec": "C",
       "status": "ratified",
       "outcome": "C",
-      "ratifiedAt": "2026-06-27"
+      "ratifiedAt": "2026-06-27",
+      "draft": false
     },
     {
       "id": "D-ADAPTFID1",
@@ -26831,7 +26934,8 @@
       "rec": "C",
       "status": "ratified",
       "outcome": "A",
-      "ratifiedAt": "2026-06-27"
+      "ratifiedAt": "2026-06-27",
+      "draft": false
     },
     {
       "id": "D-CARBON1",
@@ -26885,7 +26989,8 @@
       "bestCurrent": "Browser / mobile APIs: Platforms expose battery/performance hints; carbon intensity is usually app/service-provided.",
       "recommendation": "Fold into adaptive runtime later. Jet should not standardize environmental signals before the runtime policy surface exists.",
       "outcome": "C",
-      "ratifiedAt": "2026-06-28"
+      "ratifiedAt": "2026-06-28",
+      "draft": false
     },
     {
       "id": "D-CASTORE1",
@@ -26932,7 +27037,8 @@
       "status": "ratified",
       "outcome": "A",
       "comment": "I already ratified a different structure for the install path though, <name>-<version>-<hash>, not has prefix. Ensure we use mine",
-      "ratifiedAt": "2026-06-27"
+      "ratifiedAt": "2026-06-27",
+      "draft": false
     },
     {
       "id": "D-PROCMACRO1",
@@ -26978,7 +27084,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "C",
-      "ratifiedAt": "2026-06-27"
+      "ratifiedAt": "2026-06-27",
+      "draft": false
     },
     {
       "id": "D-READERMACRO1",
@@ -27024,7 +27131,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "A",
-      "ratifiedAt": "2026-06-27"
+      "ratifiedAt": "2026-06-27",
+      "draft": false
     },
     {
       "id": "D-LOGICPROG1",
@@ -27070,7 +27178,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "C",
-      "ratifiedAt": "2026-06-27"
+      "ratifiedAt": "2026-06-27",
+      "draft": false
     },
     {
       "id": "D-STRUCTMERGE1",
@@ -27116,7 +27225,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "A",
-      "ratifiedAt": "2026-06-27"
+      "ratifiedAt": "2026-06-27",
+      "draft": false
     },
     {
       "id": "D-STRUCTMERGE2",
@@ -27151,7 +27261,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "A",
-      "ratifiedAt": "2026-06-27"
+      "ratifiedAt": "2026-06-27",
+      "draft": false
     },
     {
       "id": "D-PROP2",
@@ -27198,7 +27309,8 @@
       "status": "ratified",
       "group": "safety",
       "outcome": "A",
-      "ratifiedAt": "2026-06-27"
+      "ratifiedAt": "2026-06-27",
+      "draft": false
     },
     {
       "id": "D-PROTO2",
@@ -27245,7 +27357,8 @@
       "status": "ratified",
       "group": "safety",
       "outcome": "A",
-      "ratifiedAt": "2026-06-27"
+      "ratifiedAt": "2026-06-27",
+      "draft": false
     },
     {
       "id": "D-MATCHARM2",
@@ -27289,7 +27402,8 @@
       "bestCurrent": "Rust: Rust gives `|` in patterns its own grammar and requires guards after `if`, avoiding ambiguous boolean/pattern mixtures.",
       "recommendation": "Require parens on mixed heads. Jet keeps compact alternation while making mixed boolean logic impossible to misread.",
       "outcome": "B",
-      "ratifiedAt": "2026-06-28"
+      "ratifiedAt": "2026-06-28",
+      "draft": false
     },
     {
       "id": "D-IGNORERET2",
@@ -27362,7 +27476,8 @@
         }
       ],
       "outcome": "A",
-      "ratifiedAt": "2026-06-28"
+      "ratifiedAt": "2026-06-28",
+      "draft": false
     },
     {
       "id": "D-DISPLAYDBG2",
@@ -27429,7 +27544,8 @@
       ],
       "outcome": "A",
       "comment": "use @Debug suffix on the variable instead of :Debug",
-      "ratifiedAt": "2026-06-28"
+      "ratifiedAt": "2026-06-28",
+      "draft": false
     },
     {
       "id": "D-REPLAY2",
@@ -27473,7 +27589,8 @@
       "bestCurrent": "Workflow engines: Temporal-style workflow engines use replayability as the contract for deterministic reruns.",
       "recommendation": "Use `#Replayable`. It names the user goal directly: this function is safe to record and replay.",
       "outcome": "A",
-      "ratifiedAt": "2026-06-28"
+      "ratifiedAt": "2026-06-28",
+      "draft": false
     },
     {
       "id": "D-DEP-GC1",
@@ -27517,7 +27634,8 @@
       "bestCurrent": "Go: Go has a production tracing GC integrated into the runtime, but it is always part of the language cost model.",
       "recommendation": "Hand-roll an opt-in pure-Rust mark-sweep library. Jet preserves ownership by default and pays GC cost only where cyclic graphs need it.",
       "outcome": "A",
-      "ratifiedAt": "2026-06-28"
+      "ratifiedAt": "2026-06-28",
+      "draft": false
     },
     {
       "id": "D-DEP-CRYPTO1",
@@ -27561,7 +27679,8 @@
       "bestCurrent": "RustCrypto: RustCrypto offers pure-Rust AEADs, hashes, signatures, and traits with broad audit attention and no C toolchain.",
       "recommendation": "Use RustCrypto behind Jet’s misuse-resistant envelope. Jet can expose fewer knobs than Rust while keeping pure-Rust portability.",
       "outcome": "A",
-      "ratifiedAt": "2026-06-28"
+      "ratifiedAt": "2026-06-28",
+      "draft": false
     },
     {
       "id": "D-ENUMDOT2",
@@ -27605,7 +27724,8 @@
       "bestCurrent": "Swift: Swift allows `.case` when the enum type is known, making assignments and calls concise without losing type context.",
       "recommendation": "Extend dot to value position. Jet already chose dot for inferred enum patterns; value-position parity gives Swift’s ergonomics with one inferred-member rule.",
       "outcome": "A",
-      "ratifiedAt": "2026-06-28"
+      "ratifiedAt": "2026-06-28",
+      "draft": false
     },
     {
       "id": "D-REFINE1",
@@ -27683,7 +27803,8 @@
         }
       ],
       "outcome": "A",
-      "ratifiedAt": "2026-06-28"
+      "ratifiedAt": "2026-06-28",
+      "draft": false
     },
     {
       "id": "D-VERIFY1",
@@ -27761,7 +27882,8 @@
         }
       ],
       "outcome": "A",
-      "ratifiedAt": "2026-06-28"
+      "ratifiedAt": "2026-06-28",
+      "draft": false
     },
     {
       "id": "D-BUDGET1",
@@ -27815,7 +27937,8 @@
       "bestCurrent": "RTSJ / Ada: Real-time systems express priorities/deadlines; full static cost inference is rare and niche.",
       "recommendation": "Use a foundational `#Budget` marker, not full cost inference. Jet can connect budgets to effects/deadlines now and leave exact proofs to research.",
       "outcome": "B",
-      "ratifiedAt": "2026-06-28"
+      "ratifiedAt": "2026-06-28",
+      "draft": false
     },
     {
       "id": "D-REVERSE1",
@@ -27861,7 +27984,8 @@
       "rec": "B",
       "status": "ratified",
       "outcome": "B",
-      "ratifiedAt": "2026-06-27"
+      "ratifiedAt": "2026-06-27",
+      "draft": false
     },
     {
       "id": "D-IFC1",
@@ -27929,7 +28053,8 @@
         }
       ],
       "outcome": "A",
-      "ratifiedAt": "2026-06-28"
+      "ratifiedAt": "2026-06-28",
+      "draft": false
     },
     {
       "id": "D-VISDEFAULT2",
@@ -27991,7 +28116,8 @@
       "bestCurrent": "Swift: Swift supports file-scoped access and explicit public API boundaries.",
       "recommendation": "Use `#PubFile` with `priv` exceptions. Jet keeps private-by-default globally while giving API-heavy files a clear opt-in.",
       "outcome": "A",
-      "ratifiedAt": "2026-06-28"
+      "ratifiedAt": "2026-06-28",
+      "draft": false
     },
     {
       "id": "D-LAYOUT1",
@@ -28053,7 +28179,8 @@
         }
       ],
       "outcome": "A",
-      "ratifiedAt": "2026-06-28"
+      "ratifiedAt": "2026-06-28",
+      "draft": false
     },
     {
       "id": "D-RENDERTGT2",
@@ -28099,7 +28226,8 @@
       "bestCurrent": "Flutter: Flutter separates layout, paint, and hit testing through renderer objects.",
       "recommendation": "Use a three-phase measure-layout-paint trait. Jet gets Flutter-grade backend portability while keeping layout decisions explicit and testable.",
       "outcome": "A",
-      "ratifiedAt": "2026-06-28"
+      "ratifiedAt": "2026-06-28",
+      "draft": false
     },
     {
       "id": "D-NATIVEUI2",
@@ -28135,7 +28263,8 @@
       "raisedBy": "agent",
       "raisedAt": "2026-06-26",
       "outcome": "B",
-      "ratifiedAt": "2026-06-27"
+      "ratifiedAt": "2026-06-27",
+      "draft": false
     },
     {
       "id": "D-WASM1",
@@ -28201,7 +28330,8 @@
         }
       ],
       "outcome": "A",
-      "ratifiedAt": "2026-06-28"
+      "ratifiedAt": "2026-06-28",
+      "draft": false
     },
     {
       "id": "D-REFLECT1",
@@ -28248,7 +28378,8 @@
       "bestCurrent": "Swift: Swift exposes reflection through `Mirror`, a single value describing children/labels/types.",
       "recommendation": "Return one typed `TypeInfo` handle. Jet can make Swift-style reflection compile-time-only and strongly typed for derives.",
       "outcome": "A",
-      "ratifiedAt": "2026-06-28"
+      "ratifiedAt": "2026-06-28",
+      "draft": false
     },
     {
       "id": "D-SIGNAL1",
@@ -28295,7 +28426,8 @@
       "bestCurrent": "SolidJS: SolidJS has primitive signals, memos, and effects with fine-grained dependency tracking.",
       "recommendation": "Use `Signal<T>`, `Computed<T>`, and `Effect`. Jet should adopt the clearest fine-grained reactive triad and let `#Reactive` wire capture.",
       "outcome": "A",
-      "ratifiedAt": "2026-06-28"
+      "ratifiedAt": "2026-06-28",
+      "draft": false
     },
     {
       "id": "D-MNIO1",
@@ -28342,7 +28474,8 @@
       "bestCurrent": "Go: Go parks goroutines on epoll/kqueue/IOCP through platform-native netpollers, enabling high concurrency.",
       "recommendation": "Build own platform-native backends. Jet needs Go-class scaling as the floor and a higher ceiling through native pollers, structured cancellation, deadlines, and runtime metrics.",
       "outcome": "A",
-      "ratifiedAt": "2026-06-28"
+      "ratifiedAt": "2026-06-28",
+      "draft": false
     },
     {
       "id": "D-CONCSELECT1",
@@ -28413,7 +28546,8 @@
         }
       ],
       "outcome": "A",
-      "ratifiedAt": "2026-06-28"
+      "ratifiedAt": "2026-06-28",
+      "draft": false
     },
     {
       "id": "D-TASKSCOPE1",
@@ -28482,7 +28616,8 @@
       "raisedBy": "agent",
       "raisedAt": "2026-06-28",
       "outcome": "A",
-      "ratifiedAt": "2026-06-28"
+      "ratifiedAt": "2026-06-28",
+      "draft": false
     },
     {
       "detail": "",
@@ -28540,7 +28675,8 @@
         }
       ],
       "outcome": "A",
-      "ratifiedAt": "2026-06-28"
+      "ratifiedAt": "2026-06-28",
+      "draft": false
     },
     {
       "detail": "",
@@ -28607,7 +28743,8 @@
       ],
       "outcome": "B",
       "comment": "Use syntax `#Ref(Label)` instead of `ref[label]`; no import gate.",
-      "ratifiedAt": "2026-06-28"
+      "ratifiedAt": "2026-06-28",
+      "draft": false
     },
     {
       "detail": "",
@@ -28665,7 +28802,8 @@
       ],
       "outcome": "A",
       "comment": "update to use #Extern instead of @extern",
-      "ratifiedAt": "2026-06-28"
+      "ratifiedAt": "2026-06-28",
+      "draft": false
     },
     {
       "detail": "",
@@ -28733,7 +28871,8 @@
         }
       ],
       "outcome": "B",
-      "ratifiedAt": "2026-06-28"
+      "ratifiedAt": "2026-06-28",
+      "draft": false
     },
     {
       "detail": "",
@@ -28786,7 +28925,8 @@
         }
       ],
       "outcome": "A",
-      "ratifiedAt": "2026-06-28"
+      "ratifiedAt": "2026-06-28",
+      "draft": false
     },
     {
       "detail": "",
@@ -28868,7 +29008,8 @@
         }
       ],
       "outcome": "A",
-      "ratifiedAt": "2026-06-30"
+      "ratifiedAt": "2026-06-30",
+      "draft": false
     },
     {
       "detail": "",
@@ -28936,7 +29077,8 @@
         }
       ],
       "outcome": "B",
-      "ratifiedAt": "2026-06-28"
+      "ratifiedAt": "2026-06-28",
+      "draft": false
     },
     {
       "detail": "",
@@ -28988,7 +29130,8 @@
       ],
       "rec": "A",
       "outcome": "A",
-      "ratifiedAt": "2026-06-28"
+      "ratifiedAt": "2026-06-28",
+      "draft": false
     },
     {
       "detail": "",
@@ -29040,7 +29183,8 @@
       ],
       "rec": "A",
       "outcome": "A",
-      "ratifiedAt": "2026-06-29"
+      "ratifiedAt": "2026-06-29",
+      "draft": false
     },
     {
       "detail": "",
@@ -29092,7 +29236,8 @@
       ],
       "rec": "A",
       "outcome": "A",
-      "ratifiedAt": "2026-06-29"
+      "ratifiedAt": "2026-06-29",
+      "draft": false
     },
     {
       "detail": "",
@@ -29144,7 +29289,8 @@
       ],
       "rec": "A",
       "outcome": "A",
-      "ratifiedAt": "2026-06-29"
+      "ratifiedAt": "2026-06-29",
+      "draft": false
     },
     {
       "detail": "",
@@ -29205,7 +29351,8 @@
       "rec": "A",
       "explainer": "A11y-by-default should combine beginner magic with expert control: built-in components infer roles automatically, custom interactive components must declare or derive a typed role, and experts can override deliberately.",
       "outcome": "A",
-      "ratifiedAt": "2026-06-29"
+      "ratifiedAt": "2026-06-29",
+      "draft": false
     },
     {
       "id": "D-S14-PAUSE",
@@ -29257,7 +29404,8 @@
       ],
       "outcome": "A",
       "comment": "NO RETIRED SPELLINGS either, delete those too",
-      "ratifiedAt": "2026-06-29"
+      "ratifiedAt": "2026-06-29",
+      "draft": false
     },
     {
       "id": "D-RECONCILE-SCOPE1",
@@ -29308,7 +29456,8 @@
         }
       ],
       "outcome": "A",
-      "ratifiedAt": "2026-06-29"
+      "ratifiedAt": "2026-06-29",
+      "draft": false
     },
     {
       "id": "D-CANON-SOURCE1",
@@ -29360,7 +29509,8 @@
       ],
       "outcome": "A",
       "comment": "We want clean slate, you can setup ci but i dont want any traces of old syntax",
-      "ratifiedAt": "2026-06-29"
+      "ratifiedAt": "2026-06-29",
+      "draft": false
     },
     {
       "id": "D-BIND-CANON1",
@@ -29411,7 +29561,8 @@
         }
       ],
       "outcome": "A",
-      "ratifiedAt": "2026-06-29"
+      "ratifiedAt": "2026-06-29",
+      "draft": false
     },
     {
       "id": "D-MARKER-CANON1",
@@ -29462,7 +29613,8 @@
         }
       ],
       "outcome": "A",
-      "ratifiedAt": "2026-06-29"
+      "ratifiedAt": "2026-06-29",
+      "draft": false
     },
     {
       "id": "D-CFFI-CANON1",
@@ -29513,7 +29665,8 @@
         }
       ],
       "outcome": "A",
-      "ratifiedAt": "2026-06-29"
+      "ratifiedAt": "2026-06-29",
+      "draft": false
     },
     {
       "id": "D-RESULT-OPTION-CANON1",
@@ -29564,7 +29717,8 @@
         }
       ],
       "outcome": "B",
-      "ratifiedAt": "2026-06-29"
+      "ratifiedAt": "2026-06-29",
+      "draft": false
     },
     {
       "id": "D-ORRETURN-CANON1",
@@ -29615,7 +29769,8 @@
         }
       ],
       "outcome": "A",
-      "ratifiedAt": "2026-06-29"
+      "ratifiedAt": "2026-06-29",
+      "draft": false
     },
     {
       "id": "D-LOOP-SEMICOLON1",
@@ -29671,7 +29826,8 @@
       ],
       "outcome": "A",
       "ratifiedAt": "2026-06-29",
-      "comment": "Owner reversed outcome C to A: keep semicolons in counted-loop headers, confirming D-LOOP-SURFACE-REOPEN=B."
+      "comment": "Owner reversed outcome C to A: keep semicolons in counted-loop headers, confirming D-LOOP-SURFACE-REOPEN=B.",
+      "draft": false
     },
     {
       "id": "D-S25-RETIRE1",
@@ -29744,7 +29900,8 @@
           "at": "2026-06-29",
           "text": "Raised from owner request for latest syntax guidance before reconciliation."
         }
-      ]
+      ],
+      "draft": false
     },
     {
       "id": "D-TYPE-ALIAS-CANON1",
@@ -29795,7 +29952,8 @@
         }
       ],
       "outcome": "A",
-      "ratifiedAt": "2026-06-29"
+      "ratifiedAt": "2026-06-29",
+      "draft": false
     },
     {
       "id": "D-CORENS-CANON1",
@@ -29846,7 +30004,8 @@
         }
       ],
       "outcome": "A",
-      "ratifiedAt": "2026-06-29"
+      "ratifiedAt": "2026-06-29",
+      "draft": false
     },
     {
       "id": "D-ACRONYM-CANON1",
@@ -29897,7 +30056,8 @@
         }
       ],
       "outcome": "A",
-      "ratifiedAt": "2026-06-29"
+      "ratifiedAt": "2026-06-29",
+      "draft": false
     },
     {
       "id": "D-SERDE-CANON1",
@@ -29948,7 +30108,8 @@
         }
       ],
       "outcome": "A",
-      "ratifiedAt": "2026-06-29"
+      "ratifiedAt": "2026-06-29",
+      "draft": false
     },
     {
       "id": "D-LOOP-COUNTED1",
@@ -30013,7 +30174,8 @@
       ],
       "outcome": "superseded",
       "comment": "Superseded: D-LOOP-SEMICOLON1 reversed to A — semicolons stay. No separator redesign needed.",
-      "ratifiedAt": "2026-06-29"
+      "ratifiedAt": "2026-06-29",
+      "draft": false
     },
     {
       "id": "D-LAYOUT-GATES1",
@@ -30061,7 +30223,8 @@
         }
       ],
       "outcome": "A",
-      "ratifiedAt": "2026-06-29"
+      "ratifiedAt": "2026-06-29",
+      "draft": false
     },
     {
       "id": "D-EXTMETH1",
@@ -30100,7 +30263,8 @@
       "rec": "B",
       "outcome": "B",
       "ratifiedAt": "2026-06-30",
-      "comparisons": "Rust:       impl Point { fn dist(&self, o: &Point) -> f64 { ... } }\nSwift:      extension Point { func dist(_ o: Point) -> Double { ... } }\nKotlin:     fun Point.dist(o: Point): Double { ... }          // dot in fn name\nC#:         static class PointExt { static double Dist(this Point self, Point o) {} }\nTypeScript: Point.prototype.dist = function(o) { ... }       // prototype patch"
+      "comparisons": "Rust:       impl Point { fn dist(&self, o: &Point) -> f64 { ... } }\nSwift:      extension Point { func dist(_ o: Point) -> Double { ... } }\nKotlin:     fun Point.dist(o: Point): Double { ... }          // dot in fn name\nC#:         static class PointExt { static double Dist(this Point self, Point o) {} }\nTypeScript: Point.prototype.dist = function(o) { ... }       // prototype patch",
+      "draft": false
     },
     {
       "id": "D-CTBLOCKEXPOSE1",
@@ -30133,7 +30297,8 @@
       "rec": "A",
       "outcome": "A",
       "ratifiedAt": "2026-06-30",
-      "comparisons": "Zig:       comptime { const N = 64; }  // comptime vars always accessible in enclosing scope\nRust:      const N: usize = 64;          // top-level const, no block scoping\nC++:       constexpr int N = 64;         // same — top-level\nNim:       const N {.compileTime.} = 64  // pragma-gated but still top-level\nD:         enum N = 64;                  // compile-time constant, no block"
+      "comparisons": "Zig:       comptime { const N = 64; }  // comptime vars always accessible in enclosing scope\nRust:      const N: usize = 64;          // top-level const, no block scoping\nC++:       constexpr int N = 64;         // same — top-level\nNim:       const N {.compileTime.} = 64  // pragma-gated but still top-level\nD:         enum N = 64;                  // compile-time constant, no block",
+      "draft": false
     },
     {
       "id": "D-UITREE1",
@@ -30160,7 +30325,8 @@
       "rec": "A",
       "outcome": "A",
       "ratifiedAt": "2026-06-30",
-      "comparisons": "SwiftUI:      Text(\"hello\") / VStack { ... } / Button(\"ok\") {}  — typed constructors, each is a distinct type\nFlutter:      Text(\"hello\") / Column(children:[...]) / ElevatedButton(...)  — same pattern\nReact JSX:    <Text>hello</Text> / <View> / <Pressable>  — tagged strings compiled to typed calls\nHTML:         <div> / <span> / <button>  — string tags, no compile-time kind checking\nAndroid XML:  android:layout_width=\"match_parent\"  — string attributes"
+      "comparisons": "SwiftUI:      Text(\"hello\") / VStack { ... } / Button(\"ok\") {}  — typed constructors, each is a distinct type\nFlutter:      Text(\"hello\") / Column(children:[...]) / ElevatedButton(...)  — same pattern\nReact JSX:    <Text>hello</Text> / <View> / <Pressable>  — tagged strings compiled to typed calls\nHTML:         <div> / <span> / <button>  — string tags, no compile-time kind checking\nAndroid XML:  android:layout_width=\"match_parent\"  — string attributes",
+      "draft": false
     },
     {
       "id": "D-STYLESHAPE1",
@@ -30187,7 +30353,8 @@
       "rec": "A",
       "outcome": "A",
       "ratifiedAt": "2026-06-30",
-      "comparisons": "SwiftUI:     Text(\"hi\").foregroundColor(.red).frame(width: 80)  — builder chain on the node, not style\nFlutter:     TextStyle(color: Colors.red, fontSize: 16)              — flat struct\nCSS:         { background: red; width: 80px; padding: 12px }        — flat key-value\nTailwind:    \"bg-red-500 text-white p-3 w-20\"                       — string class list\nReact:       {{ backgroundColor: 'red', width: 80, padding: 12 }}   — plain object\nSwiftUI (StyleSheet): not idiomatic — styles via modifiers on views"
+      "comparisons": "SwiftUI:     Text(\"hi\").foregroundColor(.red).frame(width: 80)  — builder chain on the node, not style\nFlutter:     TextStyle(color: Colors.red, fontSize: 16)              — flat struct\nCSS:         { background: red; width: 80px; padding: 12px }        — flat key-value\nTailwind:    \"bg-red-500 text-white p-3 w-20\"                       — string class list\nReact:       {{ backgroundColor: 'red', width: 80, padding: 12 }}   — plain object\nSwiftUI (StyleSheet): not idiomatic — styles via modifiers on views",
+      "draft": false
     },
     {
       "id": "D-MOTIONTIME1",
@@ -30214,7 +30381,8 @@
       "rec": "A",
       "outcome": "A",
       "ratifiedAt": "2026-06-30",
-      "comparisons": "React Spring:   useSpring({ from: {x:0}, to: {x:1} })          — global RAF/time; not testable without mocking\nFramer Motion:  useAnimate(), animate(el, {x:1}, {duration:0.3}) — global time; testing needs jest fake timers\nSwiftUI:        withAnimation(.spring()) { state = 1 }           — global CADisplayLink; XCTest uses waitFor\nGSAP:           gsap.to(el, {x:1, ease:\"elastic.out\"})          — global ticker; test with gsap.ticker.tick()\nFlutter:        AnimationController(vsync: this, duration: ...)  — vsync injected via TickerProvider (close to option A)"
+      "comparisons": "React Spring:   useSpring({ from: {x:0}, to: {x:1} })          — global RAF/time; not testable without mocking\nFramer Motion:  useAnimate(), animate(el, {x:1}, {duration:0.3}) — global time; testing needs jest fake timers\nSwiftUI:        withAnimation(.spring()) { state = 1 }           — global CADisplayLink; XCTest uses waitFor\nGSAP:           gsap.to(el, {x:1, ease:\"elastic.out\"})          — global ticker; test with gsap.ticker.tick()\nFlutter:        AnimationController(vsync: this, duration: ...)  — vsync injected via TickerProvider (close to option A)",
+      "draft": false
     },
     {
       "id": "D-A11YGATE1",
@@ -30247,7 +30415,8 @@
       "rec": "B",
       "outcome": "B",
       "ratifiedAt": "2026-06-30",
-      "comparisons": "ESLint a11y:    eslint --rule jsx-a11y/...  explicit plugin; CI adds --rule flags\naxe-core:       separate npm run a11y  — entirely separate tool run\nLighthouse:     CI step: lighthouse --only-categories=accessibility\nSwiftUI:        XCUIAccessibilityAudit  — explicit test call in test suite\nAndroid:        AccessibilityScanner    — separate IDE plugin, not build-time"
+      "comparisons": "ESLint a11y:    eslint --rule jsx-a11y/...  explicit plugin; CI adds --rule flags\naxe-core:       separate npm run a11y  — entirely separate tool run\nLighthouse:     CI step: lighthouse --only-categories=accessibility\nSwiftUI:        XCUIAccessibilityAudit  — explicit test call in test suite\nAndroid:        AccessibilityScanner    — separate IDE plugin, not build-time",
+      "draft": false
     },
     {
       "id": "D-DISPLAY-SHAPE",
@@ -30280,7 +30449,8 @@
       "outcome": "A",
       "ratifiedAt": "2026-06-30",
       "inWild": "struct Color { r: Int; g: Int; b: Int; }\n\nimpl Color.Display {\n    fn ???(self) -> String {\n        return \"rgb({self.r}, {self.g}, {self.b})\"\n    }\n}\n\npalette :: Color.{ r: 255, g: 0, b: 128 }\nprint(\"Selected: {palette}\")   // calls ???",
-      "comparisons": "Rust:       impl fmt::Display for Color { fn fmt(&self, f: &mut Formatter) -> fmt::Result }\nSwift:      var description: String { \"rgb(...)\" }   // CustomStringConvertible\nPython:     def __str__(self) -> str\nJava:       public String toString()\nKotlin:     override fun toString(): String\nGo:         func (c Color) String() string"
+      "comparisons": "Rust:       impl fmt::Display for Color { fn fmt(&self, f: &mut Formatter) -> fmt::Result }\nSwift:      var description: String { \"rgb(...)\" }   // CustomStringConvertible\nPython:     def __str__(self) -> str\nJava:       public String toString()\nKotlin:     override fun toString(): String\nGo:         func (c Color) String() string",
+      "draft": false
     },
     {
       "id": "D-DEBUG-REDACT",
@@ -30313,7 +30483,8 @@
       "outcome": "A",
       "ratifiedAt": "2026-06-30",
       "inWild": "struct User {\n    id:            Int\n    email:         String\n    password_hash: String  // should NEVER appear in {user@Debug}\n    stripe_token:  String  // same\n}\n\n// Without protection:\nprint(\"{user@Debug}\")\n// User { id: 42, email: \"w@example.com\", password_hash: \"$2b$12$abc...\", stripe_token: \"sk_live_xyz\" }\n// ^^^ leaked to logs — bad",
-      "comparisons": "Rust:           #[allow(dead_code)]  — doesn't hide from Debug\n                derive(Debug) with manual impl — only way to hide\n                serde:          #[serde(skip)] / #[serde(skip_serializing)]\nPython:         override __repr__ manually — no field-level annotation\nSwift:          no field-level skip; override debugDescription manually\nJava:           @JsonIgnore (Jackson) — serialization only, not debug\nGo:             omitempty tag — JSON only"
+      "comparisons": "Rust:           #[allow(dead_code)]  — doesn't hide from Debug\n                derive(Debug) with manual impl — only way to hide\n                serde:          #[serde(skip)] / #[serde(skip_serializing)]\nPython:         override __repr__ manually — no field-level annotation\nSwift:          no field-level skip; override debugDescription manually\nJava:           @JsonIgnore (Jackson) — serialization only, not debug\nGo:             omitempty tag — JSON only",
+      "draft": false
     },
     {
       "id": "D-ITER-HOOK",
@@ -30347,7 +30518,8 @@
       "inWild": "bt :: BTree.new()\nbt.insert(30); bt.insert(10); bt.insert(20)\n\n// Betty starts here:\nbt.each(fn(val) { print(val) })          // 10, 20, 30\n\n// Later, zero-copy:\nfor val in bt { print(val) }             // after impl Iterable",
       "comparisons": "Rust:       IntoIterator + Iterator — two traits; beginners use .iter()/.into_iter()\nPython:     __iter__ + __next__ — experts implement; beginners use list()\nSwift:      Sequence + IteratorProtocol — same split\nKotlin:     Iterable + Iterator — for-in requires Iterable\nJet (A):    .each/.to_list() without protocol; for-in with Iterable opt-in",
       "outcome": "A",
-      "ratifiedAt": "2026-06-30"
+      "ratifiedAt": "2026-06-30",
+      "draft": false
     },
     {
       "id": "D-INDEX-HOOK",
@@ -30381,7 +30553,8 @@
       "inWild": "m :: SparseMatrix.new(1000, 1000)\nm.set(3, 7, 99.0)\n\n// Earl starts:\nval :: m.get(3, 7)\n\n// Later:\nval :: m[(3, 7)]   // after impl Index",
       "comparisons": "Rust:       Index/IndexMut traits — opt-in for user types; Vec has built-in []\nPython:     __getitem__/__setitem__ — always protocol-based\nSwift:      subscript — explicit on each type\nKotlin:     operator get/set — opt-in\nJet (A):    built-in [] for List/Map; .get/.set default; Index opt-in for experts",
       "outcome": "A",
-      "ratifiedAt": "2026-06-30"
+      "ratifiedAt": "2026-06-30",
+      "draft": false
     },
     {
       "id": "D-LITSUFFIX-SCOPE",
@@ -30415,7 +30588,8 @@
       "inWild": "fn panel() -> ui.View {\n    return ui.box(style: Style {\n        width:  px.{320},\n        height: px.{48},\n        gap:    px.{8},\n    }, children: [])\n}",
       "comparisons": "Jet structs:  Point.{x: 3.0, y: 4.0}  — same dot-constructor family\nJet enums:    Color.Red / .Variant     — leading dot\nCSS:          width: 100px            — rejected suffix grammar\nKotlin:       100.px                   — extension property, not constructor\nRust:         Px::new(100)             — function, not dot-constructor",
       "outcome": "A",
-      "ratifiedAt": "2026-06-30"
+      "ratifiedAt": "2026-06-30",
+      "draft": false
     },
     {
       "id": "D-INCR1",
@@ -30488,7 +30662,8 @@
         }
       ],
       "outcome": "A",
-      "ratifiedAt": "2026-06-30"
+      "ratifiedAt": "2026-06-30",
+      "draft": false
     },
     {
       "id": "D-METHODMACRO1",
@@ -30534,7 +30709,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "A",
-      "ratifiedAt": "2026-07-01"
+      "ratifiedAt": "2026-07-01",
+      "draft": false
     },
     {
       "id": "D-MARKER-FAMILY1",
@@ -30585,7 +30761,8 @@
       "rec": "B",
       "status": "ratified",
       "outcome": "B",
-      "ratifiedAt": "2026-07-01"
+      "ratifiedAt": "2026-07-01",
+      "draft": false
     },
     {
       "id": "D-CLIFLAG1",
@@ -30631,7 +30808,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "A",
-      "ratifiedAt": "2026-07-01"
+      "ratifiedAt": "2026-07-01",
+      "draft": false
     },
     {
       "id": "D-ANY-JAI1",
@@ -30678,7 +30856,8 @@
       "status": "ratified",
       "outcome": "A",
       "comment": "Can we do A & B? also for A, we should be able to bind groups of traits, right? So we can require a specific set, not just one?",
-      "ratifiedAt": "2026-07-01"
+      "ratifiedAt": "2026-07-01",
+      "draft": false
     },
     {
       "id": "D-DYNARRAY1",
@@ -30724,7 +30903,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "A",
-      "ratifiedAt": "2026-07-01"
+      "ratifiedAt": "2026-07-01",
+      "draft": false
     },
     {
       "id": "D-SHIFT1",
@@ -30770,7 +30950,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "A",
-      "ratifiedAt": "2026-07-01"
+      "ratifiedAt": "2026-07-01",
+      "draft": false
     },
     {
       "id": "D-POINTERCHAIN1",
@@ -30816,7 +30997,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "A",
-      "ratifiedAt": "2026-07-01"
+      "ratifiedAt": "2026-07-01",
+      "draft": false
     },
     {
       "id": "D-UNINIT-SENTINEL1",
@@ -30873,7 +31055,8 @@
       "rec": "D",
       "status": "ratified",
       "outcome": "D",
-      "ratifiedAt": "2026-07-01"
+      "ratifiedAt": "2026-07-01",
+      "draft": false
     },
     {
       "id": "D-REF-SHORTHAND1",
@@ -30925,7 +31108,8 @@
       "rec": "D",
       "status": "ratified",
       "outcome": "D",
-      "ratifiedAt": "2026-07-01"
+      "ratifiedAt": "2026-07-01",
+      "draft": false
     },
     {
       "id": "D-BUILDENTRY1",
@@ -30982,7 +31166,8 @@
       "rec": "B",
       "status": "ratified",
       "outcome": "B",
-      "ratifiedAt": "2026-07-01"
+      "ratifiedAt": "2026-07-01",
+      "draft": false
     },
     {
       "id": "D-BUILDPOLICY1",
@@ -31039,7 +31224,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "A",
-      "ratifiedAt": "2026-07-01"
+      "ratifiedAt": "2026-07-01",
+      "draft": false
     },
     {
       "id": "D-OSTARGET1",
@@ -31074,7 +31260,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "A",
-      "ratifiedAt": "2026-07-01"
+      "ratifiedAt": "2026-07-01",
+      "draft": false
     },
     {
       "id": "D-WEBDEFAULT1",
@@ -31097,7 +31284,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "A",
-      "ratifiedAt": "2026-07-01"
+      "ratifiedAt": "2026-07-01",
+      "draft": false
     },
     {
       "id": "D-HTMLPAIR1",
@@ -31126,7 +31314,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "A",
-      "ratifiedAt": "2026-07-01"
+      "ratifiedAt": "2026-07-01",
+      "draft": false
     },
     {
       "id": "D-PARSESTR1",
@@ -31177,7 +31366,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "A",
-      "ratifiedAt": "2026-07-01"
+      "ratifiedAt": "2026-07-01",
+      "draft": false
     },
     {
       "id": "D-UNITLIT1",
@@ -31228,7 +31418,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "A",
-      "ratifiedAt": "2026-07-01"
+      "ratifiedAt": "2026-07-01",
+      "draft": false
     },
     {
       "id": "D-COPYUPDATE1",
@@ -31279,7 +31470,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "A",
-      "ratifiedAt": "2026-07-01"
+      "ratifiedAt": "2026-07-01",
+      "draft": false
     },
     {
       "id": "D-LAMBDAINFER1",
@@ -31330,7 +31522,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "A",
-      "ratifiedAt": "2026-07-01"
+      "ratifiedAt": "2026-07-01",
+      "draft": false
     },
     {
       "id": "D-TRAILBLOCK1",
@@ -31381,7 +31574,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "A",
-      "ratifiedAt": "2026-07-01"
+      "ratifiedAt": "2026-07-01",
+      "draft": false
     },
     {
       "id": "D-PREPOST1",
@@ -31432,7 +31626,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "A",
-      "ratifiedAt": "2026-07-01"
+      "ratifiedAt": "2026-07-01",
+      "draft": false
     },
     {
       "id": "D-EFFBUDGET1",
@@ -31489,7 +31684,8 @@
       "rec": "D",
       "status": "ratified",
       "outcome": "D",
-      "ratifiedAt": "2026-07-01"
+      "ratifiedAt": "2026-07-01",
+      "draft": false
     },
     {
       "id": "D-PERSIST1",
@@ -31540,7 +31736,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "A",
-      "ratifiedAt": "2026-07-01"
+      "ratifiedAt": "2026-07-01",
+      "draft": false
     },
     {
       "id": "D-UFCS1",
@@ -31591,7 +31788,8 @@
       "rec": "B",
       "status": "ratified",
       "outcome": "B",
-      "ratifiedAt": "2026-07-01"
+      "ratifiedAt": "2026-07-01",
+      "draft": false
     },
     {
       "id": "D-DESTRUCT1",
@@ -31642,7 +31840,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "A",
-      "ratifiedAt": "2026-07-01"
+      "ratifiedAt": "2026-07-01",
+      "draft": false
     },
     {
       "id": "D-RANGETYPE1",
@@ -31693,7 +31892,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "A",
-      "ratifiedAt": "2026-07-01"
+      "ratifiedAt": "2026-07-01",
+      "draft": false
     },
     {
       "id": "D-TYPEDTEXT1",
@@ -31750,7 +31950,8 @@
       "rec": "D",
       "status": "ratified",
       "outcome": "D",
-      "ratifiedAt": "2026-07-01"
+      "ratifiedAt": "2026-07-01",
+      "draft": false
     },
     {
       "id": "D-CHAINCMP1",
@@ -31795,7 +31996,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "A",
-      "ratifiedAt": "2026-07-01"
+      "ratifiedAt": "2026-07-01",
+      "draft": false
     },
     {
       "id": "D-CAPBUNDLE1",
@@ -31846,7 +32048,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "A",
-      "ratifiedAt": "2026-07-01"
+      "ratifiedAt": "2026-07-01",
+      "draft": false
     },
     {
       "id": "D-ERRCTX1",
@@ -31903,7 +32106,8 @@
       "rec": "D",
       "status": "ratified",
       "outcome": "D",
-      "ratifiedAt": "2026-07-01"
+      "ratifiedAt": "2026-07-01",
+      "draft": false
     },
     {
       "id": "D-STREAMYIELD1",
@@ -31954,7 +32158,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "A",
-      "ratifiedAt": "2026-07-01"
+      "ratifiedAt": "2026-07-01",
+      "draft": false
     },
     {
       "cardId": "c0y1mo9y",
@@ -32005,7 +32210,8 @@
       ],
       "rec": "A",
       "outcome": "A",
-      "ratifiedAt": "2026-07-01"
+      "ratifiedAt": "2026-07-01",
+      "draft": false
     },
     {
       "cardId": "c0ysn0xp",
@@ -32056,7 +32262,8 @@
       ],
       "rec": "A",
       "outcome": "A",
-      "ratifiedAt": "2026-07-01"
+      "ratifiedAt": "2026-07-01",
+      "draft": false
     },
     {
       "cardId": "c0zi8xmw",
@@ -32107,7 +32314,8 @@
       ],
       "rec": "A",
       "outcome": "A",
-      "ratifiedAt": "2026-07-01"
+      "ratifiedAt": "2026-07-01",
+      "draft": false
     },
     {
       "cardId": "c00atgaf",
@@ -32158,7 +32366,8 @@
       ],
       "rec": "A",
       "outcome": "A",
-      "ratifiedAt": "2026-07-01"
+      "ratifiedAt": "2026-07-01",
+      "draft": false
     },
     {
       "cardId": "c012t21i",
@@ -32209,7 +32418,8 @@
       ],
       "rec": "A",
       "outcome": "A",
-      "ratifiedAt": "2026-07-01"
+      "ratifiedAt": "2026-07-01",
+      "draft": false
     },
     {
       "cardId": "c01tga40",
@@ -32260,7 +32470,8 @@
       ],
       "rec": "A",
       "outcome": "A",
-      "ratifiedAt": "2026-07-01"
+      "ratifiedAt": "2026-07-01",
+      "draft": false
     },
     {
       "cardId": "c02l536w",
@@ -32301,7 +32512,8 @@
       ],
       "rec": "B",
       "outcome": "A",
-      "ratifiedAt": "2026-07-02"
+      "ratifiedAt": "2026-07-02",
+      "draft": false
     },
     {
       "cardId": "c03cwakt",
@@ -32353,7 +32565,8 @@
       "rec": "A",
       "outcome": "A",
       "ratifiedAt": "2026-07-01",
-      "ratificationNote": "Owner amendment folded in: only pack.jet is a reserved filename; every role module (env.*, system.*, fleet.*, build) may live in any file the user chooses (e.g. build.jet) and is discovered by declaration via find(), never by filename. Implementation plans must carry this as an acceptance test."
+      "ratificationNote": "Owner amendment folded in: only pack.jet is a reserved filename; every role module (env.*, system.*, fleet.*, build) may live in any file the user chooses (e.g. build.jet) and is discovered by declaration via find(), never by filename. Implementation plans must carry this as an acceptance test.",
+      "draft": false
     },
     {
       "cardId": "c0464lvy",
@@ -32410,7 +32623,8 @@
       ],
       "rec": "D",
       "outcome": "D",
-      "ratifiedAt": "2026-07-01"
+      "ratifiedAt": "2026-07-01",
+      "draft": false
     },
     {
       "id": "D-BUILDSCOPE1",
@@ -32472,7 +32686,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "A",
-      "ratifiedAt": "2026-07-01"
+      "ratifiedAt": "2026-07-01",
+      "draft": false
     },
     {
       "id": "D-BUILDGEN1",
@@ -32529,7 +32744,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "A",
-      "ratifiedAt": "2026-07-01"
+      "ratifiedAt": "2026-07-01",
+      "draft": false
     },
     {
       "id": "D-METADEPTH2",
@@ -32585,7 +32801,8 @@
       "rec": "B",
       "status": "ratified",
       "outcome": "B",
-      "ratifiedAt": "2026-07-01"
+      "ratifiedAt": "2026-07-01",
+      "draft": false
     },
     {
       "id": "D-REPO-EXAMPLES1",
@@ -32633,7 +32850,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "A",
-      "ratifiedAt": "2026-07-01"
+      "ratifiedAt": "2026-07-01",
+      "draft": false
     },
     {
       "id": "D-CONTRACTCASE1",
@@ -32668,7 +32886,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "A",
-      "ratifiedAt": "2026-07-01"
+      "ratifiedAt": "2026-07-01",
+      "draft": false
     },
     {
       "id": "D-MARKERMOVE1",
@@ -32703,7 +32922,8 @@
       "rec": "B",
       "status": "ratified",
       "outcome": "B",
-      "ratifiedAt": "2026-07-01"
+      "ratifiedAt": "2026-07-01",
+      "draft": false
     },
     {
       "id": "D-MARKERMOVE2",
@@ -32738,7 +32958,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "B",
-      "ratifiedAt": "2026-07-02"
+      "ratifiedAt": "2026-07-02",
+      "draft": false
     },
     {
       "id": "D-MARKERMOVE3",
@@ -32774,7 +32995,8 @@
       "status": "ratified",
       "outcome": "B",
       "comment": "ALL derive markers INCLUDING USER DERIVES use @ - separation is ridiculous and defeats the purpose of separating anything at all. Use @ for all derive markers",
-      "ratifiedAt": "2026-07-02"
+      "ratifiedAt": "2026-07-02",
+      "draft": false
     },
     {
       "id": "D-JPK-SECRETCRYPTO1",
@@ -32825,7 +33047,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "A",
-      "ratifiedAt": "2026-07-02"
+      "ratifiedAt": "2026-07-02",
+      "draft": false
     },
     {
       "id": "D-JPK-OCITOOL1",
@@ -32876,7 +33099,8 @@
       "rec": "C",
       "status": "ratified",
       "outcome": "C",
-      "ratifiedAt": "2026-07-02"
+      "ratifiedAt": "2026-07-02",
+      "draft": false
     },
     {
       "id": "D-JPK-FILENAME2",
@@ -32916,7 +33140,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "B",
-      "ratifiedAt": "2026-07-02"
+      "ratifiedAt": "2026-07-02",
+      "draft": false
     },
     {
       "id": "D-JPK-MODBODY1",
@@ -32967,7 +33192,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "A",
-      "ratifiedAt": "2026-07-02"
+      "ratifiedAt": "2026-07-02",
+      "draft": false
     },
     {
       "id": "D-JPK-DISPATCH1",
@@ -33012,7 +33238,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "B",
-      "ratifiedAt": "2026-07-02"
+      "ratifiedAt": "2026-07-02",
+      "draft": false
     },
     {
       "id": "D-PARSESTR2",
@@ -33063,7 +33290,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "A",
-      "ratifiedAt": "2026-07-02"
+      "ratifiedAt": "2026-07-02",
+      "draft": false
     },
     {
       "id": "D-TYPEDTEXT2",
@@ -33114,7 +33342,8 @@
       "rec": "B",
       "status": "ratified",
       "outcome": "B",
-      "ratifiedAt": "2026-07-02"
+      "ratifiedAt": "2026-07-02",
+      "draft": false
     },
     {
       "id": "D-VARARGBOUND1",
@@ -33150,7 +33379,8 @@
       "status": "ratified",
       "outcome": "A",
       "comment": "I want this to be a consistent list form everywhere, the + adds new syntax that users wont expect. The other places where users cocmbine traits should all be settled to [Trait1, Trait2]",
-      "ratifiedAt": "2026-07-02"
+      "ratifiedAt": "2026-07-02",
+      "draft": false
     },
     {
       "id": "D-CASTPTR1",
@@ -33185,7 +33415,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "A",
-      "ratifiedAt": "2026-07-02"
+      "ratifiedAt": "2026-07-02",
+      "draft": false
     },
     {
       "id": "D-MIGRATE3",
@@ -33226,7 +33457,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "A",
-      "ratifiedAt": "2026-07-02"
+      "ratifiedAt": "2026-07-02",
+      "draft": false
     },
     {
       "id": "D-E4EXIT1",
@@ -33261,7 +33493,8 @@
       "rec": "C",
       "status": "ratified",
       "outcome": "C",
-      "ratifiedAt": "2026-07-02"
+      "ratifiedAt": "2026-07-02",
+      "draft": false
     },
     {
       "id": "D-BUILDFLAGS1",
@@ -33302,7 +33535,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "A",
-      "ratifiedAt": "2026-07-02"
+      "ratifiedAt": "2026-07-02",
+      "draft": false
     },
     {
       "id": "D-REF-SHORTHAND2",
@@ -33330,7 +33564,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "A",
-      "ratifiedAt": "2026-07-02"
+      "ratifiedAt": "2026-07-02",
+      "draft": false
     },
     {
       "id": "D-JPK-ADAPTER1",
@@ -33382,7 +33617,8 @@
       "status": "ratified",
       "outcome": "A",
       "ratifiedAt": "2026-07-02",
-      "comment": "Owner ratified 2026-07-02 (in-session, recommended outcome)."
+      "comment": "Owner ratified 2026-07-02 (in-session, recommended outcome).",
+      "draft": false
     },
     {
       "id": "D-JPK-CHANNEL1",
@@ -33440,7 +33676,8 @@
       "status": "ratified",
       "outcome": "A",
       "comment": "Owner ratified 2026-07-02 (in-session, recommended outcome).",
-      "ratifiedAt": "2026-07-02"
+      "ratifiedAt": "2026-07-02",
+      "draft": false
     },
     {
       "id": "D-JPK-GC1",
@@ -33492,7 +33729,8 @@
       "status": "ratified",
       "outcome": "B",
       "comment": "Owner ratified 2026-07-02 (in-session, recommended outcome). AMENDED by owner 2026-07-03: (1) the verb is `jet clean`, not `jet gc` — one command that both garbage-collects AND optimizes the hangar (hardlink/dedup, `nix store optimise` equivalent); (2) default stale_after is 30 days, not 14. Auto-sweep behavior (opportunistic, no daemon, reachable-never-collected) unchanged.",
-      "ratifiedAt": "2026-07-02"
+      "ratifiedAt": "2026-07-02",
+      "draft": false
     },
     {
       "id": "D-JPK-NONIX1",
@@ -33544,7 +33782,8 @@
       "status": "ratified",
       "outcome": "A",
       "ratifiedAt": "2026-07-02",
-      "comment": "Owner ratified 2026-07-02 (in-session, recommended outcome)."
+      "comment": "Owner ratified 2026-07-02 (in-session, recommended outcome).",
+      "draft": false
     },
     {
       "id": "D-JPK-CACHE1",
@@ -33602,7 +33841,8 @@
       "status": "ratified",
       "outcome": "A",
       "ratifiedAt": "2026-07-02",
-      "comment": "Owner ratified 2026-07-02 (in-session, recommended outcome)."
+      "comment": "Owner ratified 2026-07-02 (in-session, recommended outcome).",
+      "draft": false
     },
     {
       "id": "D-JPK-PLATFORM1",
@@ -33654,7 +33894,8 @@
       "status": "ratified",
       "outcome": "A",
       "ratifiedAt": "2026-07-02",
-      "comment": "Owner ratified 2026-07-02 (in-session, recommended outcome)."
+      "comment": "Owner ratified 2026-07-02 (in-session, recommended outcome).",
+      "draft": false
     },
     {
       "id": "D-JPK-DISCOVER1",
@@ -33706,7 +33947,8 @@
       "status": "ratified",
       "outcome": "A",
       "ratifiedAt": "2026-07-02",
-      "comment": "Owner ratified 2026-07-02 (in-session, recommended outcome)."
+      "comment": "Owner ratified 2026-07-02 (in-session, recommended outcome).",
+      "draft": false
     },
     {
       "id": "D-JPK-BUILDDBG1",
@@ -33758,7 +34000,8 @@
       "status": "ratified",
       "outcome": "A",
       "ratifiedAt": "2026-07-02",
-      "comment": "Owner ratified 2026-07-02 (in-session, recommended outcome)."
+      "comment": "Owner ratified 2026-07-02 (in-session, recommended outcome).",
+      "draft": false
     },
     {
       "id": "D-JPK-NODAEMON1",
@@ -33810,7 +34053,8 @@
       "status": "ratified",
       "outcome": "A",
       "ratifiedAt": "2026-07-02",
-      "comment": "Owner ratified 2026-07-02 (in-session, recommended outcome)."
+      "comment": "Owner ratified 2026-07-02 (in-session, recommended outcome).",
+      "draft": false
     },
     {
       "id": "D-JPK-OFFLINE1",
@@ -33862,7 +34106,8 @@
       "status": "ratified",
       "outcome": "A",
       "ratifiedAt": "2026-07-02",
-      "comment": "Owner ratified 2026-07-02 (in-session, recommended outcome)."
+      "comment": "Owner ratified 2026-07-02 (in-session, recommended outcome).",
+      "draft": false
     },
     {
       "id": "D-DOTSCOPE1",
@@ -33924,7 +34169,8 @@
       "rec": "B",
       "status": "ratified",
       "outcome": "B",
-      "ratifiedAt": "2026-07-02"
+      "ratifiedAt": "2026-07-02",
+      "draft": false
     },
     {
       "id": "D-JPK-TOOLCHAIN1",
@@ -33986,7 +34232,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "A",
-      "ratifiedAt": "2026-07-02"
+      "ratifiedAt": "2026-07-02",
+      "draft": false
     },
     {
       "id": "D-FFI-UNIFY1",
@@ -34053,7 +34300,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "A",
-      "ratifiedAt": "2026-07-02"
+      "ratifiedAt": "2026-07-02",
+      "draft": false
     },
     {
       "id": "D-TAG1",
@@ -34115,7 +34363,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "A",
-      "ratifiedAt": "2026-07-03"
+      "ratifiedAt": "2026-07-03",
+      "draft": false
     },
     {
       "id": "D-PATCH1",
@@ -34177,7 +34426,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "A",
-      "ratifiedAt": "2026-07-03"
+      "ratifiedAt": "2026-07-03",
+      "draft": false
     },
     {
       "id": "D-FIELDPOL1",
@@ -34239,7 +34489,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "A",
-      "ratifiedAt": "2026-07-03"
+      "ratifiedAt": "2026-07-03",
+      "draft": false
     },
     {
       "id": "D-EFFTREE1",
@@ -34301,7 +34552,8 @@
       "rec": "A",
       "status": "ratified",
       "outcome": "A",
-      "ratifiedAt": "2026-07-03"
+      "ratifiedAt": "2026-07-03",
+      "draft": false
     },
     {
       "id": "D-FLAGSHIP1",
@@ -34351,7 +34603,8 @@
       "bestCurrent": "",
       "recommendation": "A — the grep head-to-head is the strongest single proof a language is fast and pleasant for CLI work, and the heritage jetgrep already GA'd once, so the slice measures polish, not feasibility.",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-FLAGSHIP2",
@@ -34401,7 +34654,8 @@
       "bestCurrent": "",
       "recommendation": "A — CRUD + persistence + expiry covers the widest honest surface (db, serde, time, routes, logs, shutdown) while every proof stays curl-observable and golden-testable.",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-FLAGSHIP3",
@@ -34445,7 +34699,8 @@
       "bestCurrent": "",
       "recommendation": "A — the whole value of the web slice is comparison, and TodoMVC is the only app the rest of the web world has already implemented for us to be compared against.",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-FLAGSHIP4",
@@ -34495,7 +34750,8 @@
       "bestCurrent": "",
       "recommendation": "A — widest bridge coverage (rotation, audio, collision, entity spawning) in a game that is on-brand, recognizable, and cleanly replay-testable.",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-STYLEUNIT1",
@@ -34545,7 +34801,8 @@
       "bestCurrent": "",
       "recommendation": "A — reuses the one ratified unit mechanism (D-QUAL3 + D-UNITLIT1), so `320px` is compile-checked with zero ceremony and no second style-only unit system (I8).",
       "outcome": "A",
-      "ratifiedAt": "2026-07-03"
+      "ratifiedAt": "2026-07-03",
+      "draft": false
     },
     {
       "id": "D-UIDEVSHELL1",
@@ -34594,7 +34851,8 @@
       "bestCurrent": "",
       "recommendation": "A — matches the ratified native-deps guidance (nixpkgs stopgap while jetpack matures); unblocks Phase 8 for the primary dev host without new invariant pressure.",
       "outcome": "A",
-      "ratifiedAt": "2026-07-03"
+      "ratifiedAt": "2026-07-03",
+      "draft": false
     },
     {
       "id": "D-OSTARGET2",
@@ -34648,7 +34906,8 @@
       "bestCurrent": "",
       "recommendation": "A — smallest ratified-shape extension (same marker, fns instead of impls), proven pattern in Rust/Go, keeps one dispatch idiom (I8).",
       "outcome": "B",
-      "ratifiedAt": "2026-07-03"
+      "ratifiedAt": "2026-07-03",
+      "draft": false
     },
     {
       "id": "D-EXPANDCLI1",
@@ -34704,7 +34963,8 @@
       "bestCurrent": "",
       "recommendation": "A — the only shape that honors all three ratified decisions verbatim (no amendment churn), and bare `jet expand` showing every lens is the right magic default: the beginner who doesn't know lens names still gets the answer, the expert narrows with --facts.",
       "outcome": "A",
-      "ratifiedAt": "2026-07-03"
+      "ratifiedAt": "2026-07-03",
+      "draft": false
     },
     {
       "id": "D-MIGRATE4",
@@ -34758,7 +35018,8 @@
       "bestCurrent": "",
       "recommendation": "A — the authoring surface (migration verbs) and the transparency surface (decode_traced) are both ratified and shipped; A is the semantics both were designed around, keeps one decode verb (I8), and costs nothing for unversioned types.",
       "outcome": "A",
-      "ratifiedAt": "2026-07-03"
+      "ratifiedAt": "2026-07-03",
+      "draft": false
     },
     {
       "id": "D-JPK-RINGSHIP1",
@@ -34818,7 +35079,8 @@
       "bestCurrent": "",
       "recommendation": "C — a beginner's first offline run of any repo using the stdlib succeeds with no toolchain and no network; stdlib version is coherent with the pinned compiler by construction; one realization path; the embedded fallback keeps dev builds friction-free.",
       "outcome": "C",
-      "ratifiedAt": "2026-07-03"
+      "ratifiedAt": "2026-07-03",
+      "draft": false
     },
     {
       "id": "D-JPK-BUILDTOOL1",
@@ -34872,7 +35134,8 @@
       "bestCurrent": "",
       "recommendation": "A — cache correctness (D-JPK-CACHE1) is meaningless without a reproducible output hash, and that requires a pinned build toolchain; it also removes host-toolchain leakage and gives a clean D-JPK-NONIX1 error path.",
       "outcome": "A",
-      "ratifiedAt": "2026-07-03"
+      "ratifiedAt": "2026-07-03",
+      "draft": false
     },
     {
       "id": "D-JPK-ADAPTNAME1",
@@ -34932,7 +35195,8 @@
       "bestCurrent": "",
       "recommendation": "A — Pkg.adapt reads as the action a user takes, anchors editor completion under Pkg./Recipe., stays consistent with core.* dot paths, and matches the ratified vision so no fixtures need re-spelling; the Recipe.* family names each build strategy as a verb the way Nix/Bazel builders do.",
       "outcome": "A",
-      "ratifiedAt": "2026-07-03"
+      "ratifiedAt": "2026-07-03",
+      "draft": false
     },
     {
       "id": "D-FFI-PY1",
@@ -34998,7 +35262,8 @@
       "bestCurrent": "",
       "recommendation": "A",
       "outcome": "A",
-      "ratifiedAt": "2026-07-03"
+      "ratifiedAt": "2026-07-03",
+      "draft": false
     },
     {
       "id": "D-FFI-JS1",
@@ -35058,7 +35323,8 @@
       "bestCurrent": "",
       "recommendation": "A",
       "outcome": "A",
-      "ratifiedAt": "2026-07-03"
+      "ratifiedAt": "2026-07-03",
+      "draft": false
     },
     {
       "id": "D-FFI-SWIFT1",
@@ -35118,7 +35384,8 @@
       "bestCurrent": "",
       "recommendation": "A",
       "outcome": "A",
-      "ratifiedAt": "2026-07-03"
+      "ratifiedAt": "2026-07-03",
+      "draft": false
     },
     {
       "id": "D-DEP-PY1",
@@ -35167,7 +35434,8 @@
       "bestCurrent": "",
       "recommendation": "A",
       "outcome": "A",
-      "ratifiedAt": "2026-07-03"
+      "ratifiedAt": "2026-07-03",
+      "draft": false
     },
     {
       "id": "D-JPK-EXTPROV1",
@@ -35216,7 +35484,8 @@
       "bestCurrent": "",
       "recommendation": "A",
       "outcome": "A",
-      "ratifiedAt": "2026-07-03"
+      "ratifiedAt": "2026-07-03",
+      "draft": false
     },
     {
       "id": "D-PLUGIN-EXPORT1",
@@ -35265,7 +35534,8 @@
       "bestCurrent": "",
       "recommendation": "A",
       "outcome": "A",
-      "ratifiedAt": "2026-07-03"
+      "ratifiedAt": "2026-07-03",
+      "draft": false
     },
     {
       "id": "D-PLUGIN-VERSION1",
@@ -35314,7 +35584,8 @@
       "bestCurrent": "",
       "recommendation": "A",
       "outcome": "A",
-      "ratifiedAt": "2026-07-03"
+      "ratifiedAt": "2026-07-03",
+      "draft": false
     },
     {
       "id": "D-MEM1",
@@ -35355,7 +35626,8 @@
       "status": "ratified",
       "group": "ownership",
       "outcome": "A",
-      "ratifiedAt": "2026-07-03"
+      "ratifiedAt": "2026-07-03",
+      "draft": false
     },
     {
       "id": "D-EMPTYLIT1",
@@ -35378,7 +35650,8 @@
       "status": "ratified",
       "outcome": "A",
       "ratifiedAt": "2026-07-03",
-      "group": "syntax"
+      "group": "syntax",
+      "draft": false
     },
     {
       "id": "D-OPT-SPELL1",
@@ -35401,7 +35674,8 @@
       "status": "ratified",
       "outcome": "A",
       "ratifiedAt": "2026-07-03",
-      "group": "syntax"
+      "group": "syntax",
+      "draft": false
     },
     {
       "id": "D-LAMBDA-INFER1",
@@ -35424,7 +35698,8 @@
       "status": "ratified",
       "outcome": "A",
       "ratifiedAt": "2026-07-03",
-      "group": "syntax"
+      "group": "syntax",
+      "draft": false
     },
     {
       "id": "D-TUPLE-DESTRUCT1",
@@ -35447,7 +35722,8 @@
       "status": "ratified",
       "outcome": "A",
       "ratifiedAt": "2026-07-03",
-      "group": "syntax"
+      "group": "syntax",
+      "draft": false
     },
     {
       "id": "D-FILES-WRITE1",
@@ -35470,7 +35746,8 @@
       "status": "ratified",
       "outcome": "A",
       "ratifiedAt": "2026-07-03",
-      "group": "syntax"
+      "group": "syntax",
+      "draft": false
     },
     {
       "id": "D-STR-AFTER1",
@@ -35493,7 +35770,8 @@
       "status": "ratified",
       "outcome": "A",
       "ratifiedAt": "2026-07-03",
-      "group": "syntax"
+      "group": "syntax",
+      "draft": false
     },
     {
       "id": "D-FILES-APPEND1",
@@ -35546,7 +35824,8 @@
       "status": "ratified",
       "created": "2026-07-04T14:15:08.381Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-04"
+      "ratifiedAt": "2026-07-04",
+      "draft": false
     },
     {
       "id": "D-SHARED-API1",
@@ -35599,7 +35878,8 @@
       "status": "ratified",
       "created": "2026-07-04T14:20:00.692Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-04"
+      "ratifiedAt": "2026-07-04",
+      "draft": false
     },
     {
       "id": "D-POOLID-API1",
@@ -35652,7 +35932,8 @@
       "status": "ratified",
       "created": "2026-07-04T14:20:00.734Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-04"
+      "ratifiedAt": "2026-07-04",
+      "draft": false
     },
     {
       "id": "D-NOALLOC-SEM1",
@@ -35705,7 +35986,8 @@
       "status": "ratified",
       "created": "2026-07-04T14:26:33.728Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-04"
+      "ratifiedAt": "2026-07-04",
+      "draft": false
     },
     {
       "id": "D-LSP1",
@@ -35758,7 +36040,8 @@
       "status": "ratified",
       "created": "2026-07-05T11:39:57.185Z",
       "outcome": "C",
-      "ratifiedAt": "2026-07-05"
+      "ratifiedAt": "2026-07-05",
+      "draft": false
     },
     {
       "id": "D-LSP2",
@@ -35806,7 +36089,8 @@
       "status": "ratified",
       "created": "2026-07-05T11:39:57.237Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-05"
+      "ratifiedAt": "2026-07-05",
+      "draft": false
     },
     {
       "id": "D-HL1",
@@ -35865,7 +36149,8 @@
       "status": "ratified",
       "created": "2026-07-05T11:39:57.295Z",
       "outcome": "D",
-      "ratifiedAt": "2026-07-05"
+      "ratifiedAt": "2026-07-05",
+      "draft": false
     },
     {
       "id": "D-CI1",
@@ -35913,7 +36198,8 @@
       "status": "ratified",
       "created": "2026-07-05T11:39:57.349Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-05"
+      "ratifiedAt": "2026-07-05",
+      "draft": false
     },
     {
       "id": "D-CI2",
@@ -35961,7 +36247,8 @@
       "status": "ratified",
       "created": "2026-07-05T11:39:57.407Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-05"
+      "ratifiedAt": "2026-07-05",
+      "draft": false
     },
     {
       "id": "D-GAME1",
@@ -36025,7 +36312,8 @@
       "status": "ratified",
       "created": "2026-07-05T11:39:57.460Z",
       "outcome": "B",
-      "ratifiedAt": "2026-07-05"
+      "ratifiedAt": "2026-07-05",
+      "draft": false
     },
     {
       "id": "D-TLS1",
@@ -36078,7 +36366,8 @@
       "status": "ratified",
       "created": "2026-07-05T11:39:57.512Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-05"
+      "ratifiedAt": "2026-07-05",
+      "draft": false
     },
     {
       "id": "D-GAME2",
@@ -36138,7 +36427,8 @@
       "status": "ratified",
       "created": "2026-07-05T12:09:08.605Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-GAME3",
@@ -36202,7 +36492,8 @@
       "status": "ratified",
       "created": "2026-07-06T11:27:43.303Z",
       "outcome": "C",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-TLSSERVE1",
@@ -36255,7 +36546,8 @@
       "status": "ratified",
       "created": "2026-07-06T11:47:05.264Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-BUILDTARGET1",
@@ -36314,7 +36606,8 @@
       "status": "ratified",
       "created": "2026-07-06T17:16:20.110Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-BUILDACTION1",
@@ -36373,7 +36666,8 @@
       "status": "ratified",
       "created": "2026-07-06T17:16:20.165Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-BUILDTOOLCHAIN1",
@@ -36432,7 +36726,8 @@
       "status": "ratified",
       "created": "2026-07-06T17:16:20.222Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-BUILDPROBE1",
@@ -36491,7 +36786,8 @@
       "status": "ratified",
       "created": "2026-07-06T17:16:20.274Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-BUILDCACHE1",
@@ -36550,7 +36846,8 @@
       "status": "ratified",
       "created": "2026-07-06T17:16:20.330Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-BUILDSCHED1",
@@ -36609,7 +36906,8 @@
       "status": "ratified",
       "created": "2026-07-06T17:16:20.388Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-BUILDQUERY1",
@@ -36668,7 +36966,8 @@
       "status": "ratified",
       "created": "2026-07-06T17:16:20.443Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-BUILDLEGACY1",
@@ -36727,7 +37026,8 @@
       "status": "ratified",
       "created": "2026-07-06T17:16:20.501Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-BUILDPLUGIN1",
@@ -36786,7 +37086,8 @@
       "status": "ratified",
       "created": "2026-07-06T17:16:20.556Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-FRONTENDAPI1",
@@ -36845,7 +37146,8 @@
       "status": "ratified",
       "created": "2026-07-06T17:16:20.613Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-BUILDREMOTE1",
@@ -36904,7 +37206,8 @@
       "status": "ratified",
       "created": "2026-07-06T17:16:20.669Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-DSLBLOCK1",
@@ -36963,7 +37266,8 @@
       "status": "ratified",
       "created": "2026-07-06T17:16:20.727Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-METAMUTATE1",
@@ -37022,7 +37326,8 @@
       "status": "ratified",
       "created": "2026-07-06T17:16:20.782Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-WD1",
@@ -37075,7 +37380,8 @@
       "status": "ratified",
       "created": "2026-07-06T19:06:52.352Z",
       "outcome": "B",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-WD2",
@@ -37128,7 +37434,8 @@
       "status": "ratified",
       "created": "2026-07-06T19:06:52.370Z",
       "outcome": "B",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-WD3",
@@ -37181,7 +37488,8 @@
       "status": "ratified",
       "created": "2026-07-06T19:06:52.388Z",
       "outcome": "B",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-WD4",
@@ -37234,7 +37542,8 @@
       "status": "ratified",
       "created": "2026-07-06T19:06:52.405Z",
       "outcome": "B",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-WD5",
@@ -37287,7 +37596,8 @@
       "status": "ratified",
       "created": "2026-07-06T19:06:52.421Z",
       "outcome": "B",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-WD6",
@@ -37340,7 +37650,8 @@
       "status": "ratified",
       "created": "2026-07-06T19:06:52.439Z",
       "outcome": "B",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-WD7",
@@ -37393,7 +37704,8 @@
       "status": "ratified",
       "created": "2026-07-06T19:06:52.456Z",
       "outcome": "B",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-WD8",
@@ -37446,7 +37758,8 @@
       "status": "ratified",
       "created": "2026-07-06T19:06:52.473Z",
       "outcome": "B",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-WD9",
@@ -37499,7 +37812,8 @@
       "status": "ratified",
       "created": "2026-07-06T19:06:52.488Z",
       "outcome": "B",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-WD10",
@@ -37552,7 +37866,8 @@
       "status": "ratified",
       "created": "2026-07-06T19:06:52.504Z",
       "outcome": "B",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-WD11",
@@ -37605,7 +37920,8 @@
       "status": "ratified",
       "created": "2026-07-06T19:06:52.520Z",
       "outcome": "B",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-WD12",
@@ -37658,7 +37974,8 @@
       "status": "ratified",
       "created": "2026-07-06T19:06:52.539Z",
       "outcome": "B",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-WD14",
@@ -37711,7 +38028,8 @@
       "status": "ratified",
       "created": "2026-07-06T19:06:52.555Z",
       "outcome": "B",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-WD15",
@@ -37764,7 +38082,8 @@
       "status": "ratified",
       "created": "2026-07-06T19:06:52.578Z",
       "outcome": "B",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-S80-RUN1",
@@ -37813,7 +38132,8 @@
       "created": "2026-07-06T19:40:23.207Z",
       "outcome": "A",
       "comment": "But instead of \"Unit\" use Void",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-WEBTIR1",
@@ -37861,7 +38181,8 @@
       "status": "ratified",
       "created": "2026-07-06T19:40:23.314Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-COMPTIME-REGEX1",
@@ -37909,7 +38230,8 @@
       "status": "ratified",
       "created": "2026-07-06T19:40:23.419Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-JETOS-FREEZE1",
@@ -37957,7 +38279,8 @@
       "status": "ratified",
       "created": "2026-07-06T19:40:23.528Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-UNSAFE-REASON1",
@@ -38005,7 +38328,8 @@
       "status": "ratified",
       "created": "2026-07-06T19:40:23.635Z",
       "outcome": "B",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-LISTMAP-CANON1",
@@ -38064,7 +38388,8 @@
       "status": "ratified",
       "created": "2026-07-06T19:40:23.744Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-BENCH-MARKER1",
@@ -38112,7 +38437,8 @@
       "status": "ratified",
       "created": "2026-07-06T19:40:23.858Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-RING-LAYER1",
@@ -38165,7 +38491,8 @@
       "status": "ratified",
       "created": "2026-07-06T19:40:23.967Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-JPK-GRANTCMD1",
@@ -38208,7 +38535,8 @@
       "status": "ratified",
       "created": "2026-07-06T20:50:00.846Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-JPK-GRANTSCHEMA1",
@@ -38251,7 +38579,8 @@
       "status": "ratified",
       "created": "2026-07-06T20:50:00.898Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-JPK-CATALOG1",
@@ -38294,7 +38623,8 @@
       "status": "ratified",
       "created": "2026-07-06T20:50:00.953Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-JPK-STRICTVIS1",
@@ -38337,7 +38667,8 @@
       "status": "ratified",
       "created": "2026-07-06T20:50:01.007Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-JPK-IMPORTCMD1",
@@ -38380,7 +38711,8 @@
       "status": "ratified",
       "created": "2026-07-06T20:50:01.060Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-JPK-IMPORTTODO1",
@@ -38423,7 +38755,8 @@
       "status": "ratified",
       "created": "2026-07-06T20:50:01.113Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-JPK-PROVIDERAUTH1",
@@ -38466,7 +38799,8 @@
       "status": "ratified",
       "created": "2026-07-06T20:50:01.167Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-JPK-REPLACEPOLICY1",
@@ -38509,7 +38843,8 @@
       "status": "ratified",
       "created": "2026-07-06T20:50:01.221Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-JPK-REPLACEPROOF1",
@@ -38552,7 +38887,8 @@
       "status": "ratified",
       "created": "2026-07-06T20:50:01.276Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-FIDELITY-API1",
@@ -38595,7 +38931,8 @@
       "status": "ratified",
       "created": "2026-07-06T20:50:01.330Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-ADAPT-PROVIDER1",
@@ -38638,7 +38975,8 @@
       "status": "ratified",
       "created": "2026-07-06T20:50:01.383Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-SOLVER-LIB1",
@@ -38681,7 +39019,8 @@
       "status": "ratified",
       "created": "2026-07-06T20:50:01.438Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-MERGE-CMD1",
@@ -38724,7 +39063,8 @@
       "status": "ratified",
       "created": "2026-07-06T20:50:01.490Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-MERGE-ID1",
@@ -38767,7 +39107,8 @@
       "status": "ratified",
       "created": "2026-07-06T20:50:01.544Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-MERGE-CONFLICT1",
@@ -38810,7 +39151,8 @@
       "status": "ratified",
       "created": "2026-07-06T20:50:01.597Z",
       "outcome": "C",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-MERGE-VCS1",
@@ -38853,7 +39195,8 @@
       "status": "ratified",
       "created": "2026-07-06T20:50:01.649Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-DATA-SURFACE1",
@@ -38896,7 +39239,8 @@
       "status": "ratified",
       "created": "2026-07-06T20:50:01.701Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-DATA-BRIDGE1",
@@ -38939,7 +39283,8 @@
       "status": "ratified",
       "created": "2026-07-06T20:50:01.755Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-DATA-STATUS1",
@@ -38982,7 +39327,8 @@
       "status": "ratified",
       "created": "2026-07-06T20:50:01.809Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-DATA-PLOT1",
@@ -39025,7 +39371,8 @@
       "status": "ratified",
       "created": "2026-07-06T20:50:01.864Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-GAME-ASSET1",
@@ -39068,7 +39415,8 @@
       "status": "ratified",
       "created": "2026-07-06T20:50:01.917Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-GAME-ECS1",
@@ -39111,7 +39459,8 @@
       "status": "ratified",
       "created": "2026-07-06T20:50:01.971Z",
       "outcome": "B",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-GAME-INPUT1",
@@ -39155,7 +39504,8 @@
       "created": "2026-07-06T20:50:02.025Z",
       "outcome": "A",
       "comment": "Both A & C",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-GAME-REPLAY1",
@@ -39198,7 +39548,8 @@
       "status": "ratified",
       "created": "2026-07-06T20:50:02.079Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-GAME-BACKEND1",
@@ -39241,7 +39592,8 @@
       "status": "ratified",
       "created": "2026-07-06T20:50:02.130Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-GAME-BUDGET1",
@@ -39285,7 +39637,8 @@
       "created": "2026-07-06T20:50:02.183Z",
       "outcome": "A",
       "comment": "Both A & C",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-TARGET-SURFACE1",
@@ -39328,7 +39681,8 @@
       "status": "ratified",
       "created": "2026-07-06T20:50:02.234Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-TARGET-MEMORY1",
@@ -39371,7 +39725,8 @@
       "status": "ratified",
       "created": "2026-07-06T20:50:02.286Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-TARGET-LINKER1",
@@ -39414,7 +39769,8 @@
       "status": "ratified",
       "created": "2026-07-06T20:50:02.340Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-TARGET-ALLOC1",
@@ -39457,7 +39813,8 @@
       "status": "ratified",
       "created": "2026-07-06T20:50:02.396Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "id": "D-TARGET-AUDIT1",
@@ -39500,7 +39857,8 @@
       "status": "ratified",
       "created": "2026-07-06T20:50:02.447Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-06"
+      "ratifiedAt": "2026-07-06",
+      "draft": false
     },
     {
       "status": "ratified",
@@ -39543,7 +39901,8 @@
       ],
       "rec": "A",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "status": "ratified",
@@ -39591,7 +39950,8 @@
       ],
       "rec": "A",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "status": "ratified",
@@ -39634,7 +39994,8 @@
       ],
       "rec": "C",
       "outcome": "C",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "status": "ratified",
@@ -39677,7 +40038,8 @@
       ],
       "rec": "C",
       "outcome": "C",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "status": "ratified",
@@ -39726,7 +40088,8 @@
       ],
       "rec": "A",
       "outcome": "B",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "status": "ratified",
@@ -39769,7 +40132,8 @@
       ],
       "rec": "A",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "status": "ratified",
@@ -39812,7 +40176,8 @@
       ],
       "rec": "A",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "status": "ratified",
@@ -39855,7 +40220,8 @@
       ],
       "rec": "A",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "status": "ratified",
@@ -39898,7 +40264,8 @@
       ],
       "rec": "C",
       "outcome": "C",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "status": "ratified",
@@ -39941,7 +40308,8 @@
       ],
       "rec": "C",
       "outcome": "C",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-DOC-GEN1",
@@ -39995,7 +40363,8 @@
       "status": "ratified",
       "created": "2026-07-07T00:39:50.597Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-PROVE-REPLAY1",
@@ -40049,7 +40418,8 @@
       "status": "ratified",
       "created": "2026-07-07T00:40:08.026Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-PERFBUDGET-SURFACE1",
@@ -40103,7 +40473,8 @@
       "status": "ratified",
       "created": "2026-07-07T00:40:08.115Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-PERFBUDGET-BASELINE1",
@@ -40151,7 +40522,8 @@
       "status": "ratified",
       "created": "2026-07-07T00:40:08.200Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-BPE-NAME1",
@@ -40200,7 +40572,8 @@
       "status": "ratified",
       "created": "2026-07-07T00:40:08.287Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-BPE-HOST1",
@@ -40249,7 +40622,8 @@
       "status": "ratified",
       "created": "2026-07-07T00:40:08.377Z",
       "outcome": "B",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-BPE-LAYOUT1",
@@ -40292,7 +40666,8 @@
       "status": "ratified",
       "created": "2026-07-07T00:40:08.463Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-BPE-ALTITUDE1",
@@ -40335,7 +40710,8 @@
       "status": "ratified",
       "created": "2026-07-07T00:40:08.546Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-BPE-TAXONOMY1",
@@ -40378,7 +40754,8 @@
       "status": "ratified",
       "created": "2026-07-07T00:40:08.627Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-BPE-EDITSCOPE1",
@@ -40421,7 +40798,8 @@
       "status": "ratified",
       "created": "2026-07-07T00:40:08.709Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-BPE-PROTOCOL1",
@@ -40464,7 +40842,8 @@
       "status": "ratified",
       "created": "2026-07-07T00:40:08.794Z",
       "outcome": "C",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-JOS-STUDIO-LAUNCH1",
@@ -40507,7 +40886,8 @@
       "status": "ratified",
       "created": "2026-07-07T00:40:08.877Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-JOS-STUDIO-VIEW1",
@@ -40550,7 +40930,8 @@
       "status": "ratified",
       "created": "2026-07-07T00:40:08.967Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-JOS-STUDIO-STATE1",
@@ -40593,7 +40974,8 @@
       "status": "ratified",
       "created": "2026-07-07T00:40:09.057Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-JOS-STUDIO-PROOFGATE1",
@@ -40636,7 +41018,8 @@
       "status": "ratified",
       "created": "2026-07-07T00:40:09.142Z",
       "outcome": "B",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-JOS-STUDIO-PROTOCOL1",
@@ -40679,7 +41062,8 @@
       "status": "ratified",
       "created": "2026-07-07T00:40:09.229Z",
       "outcome": "C",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-FLAGSHIP-WEBAPI1",
@@ -40739,7 +41123,8 @@
       "created": "2026-07-07T01:52:53.881Z",
       "outcome": "A",
       "comment": "Components also should have events, like react and typescript",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-FLAGSHIP-MMIO1",
@@ -40793,7 +41178,8 @@
       "status": "ratified",
       "created": "2026-07-07T01:52:53.932Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-FLAGSHIP-RAYLIB1",
@@ -40848,7 +41234,8 @@
       "created": "2026-07-07T01:52:53.981Z",
       "outcome": "A",
       "comment": "I don’t want flagship slices to be included in CI. They should be checked and functional but not run every time we push",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-JOS-BOOTKERNEL1",
@@ -40897,7 +41284,8 @@
       "created": "2026-07-07T10:32:27.924Z",
       "outcome": "A",
       "comment": "I want to use the limine boot loader and cachyos kernel",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-JOS-PROOFAPI1",
@@ -40945,7 +41333,8 @@
       "status": "ratified",
       "created": "2026-07-07T10:32:27.924Z",
       "outcome": "B",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-JOS-INSTALLUX1",
@@ -40993,7 +41382,8 @@
       "status": "ratified",
       "created": "2026-07-07T10:32:27.924Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-JOS-INSTALLMEDIA1",
@@ -41041,7 +41431,8 @@
       "status": "ratified",
       "created": "2026-07-07T10:32:27.924Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-JOS-VMCOMMAND1",
@@ -41089,7 +41480,8 @@
       "status": "ratified",
       "created": "2026-07-07T10:32:27.924Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-JOS-VMDEPS1",
@@ -41137,7 +41529,8 @@
       "status": "ratified",
       "created": "2026-07-07T10:32:27.924Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-JOS-SYSTEMTREE1",
@@ -41185,7 +41578,8 @@
       "status": "ratified",
       "created": "2026-07-07T10:33:32.491Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-JOS-KERNELSRC1",
@@ -41233,7 +41627,8 @@
       "status": "ratified",
       "created": "2026-07-07T11:04:15.533Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-CANVAS-LAYOUT1",
@@ -41276,7 +41671,8 @@
       "status": "ratified",
       "created": "2026-07-07T11:44:18.491Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-CANVAS-CONVERT1",
@@ -41319,7 +41715,8 @@
       "status": "ratified",
       "created": "2026-07-07T11:44:18.491Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-CANVAS-COLLAPSE1",
@@ -41362,7 +41759,8 @@
       "status": "ratified",
       "created": "2026-07-07T11:44:18.491Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-CANVAS-EVENT1",
@@ -41411,7 +41809,8 @@
       "status": "ratified",
       "created": "2026-07-07T11:44:18.491Z",
       "outcome": "D",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-CANVAS-DEBUGSTATE1",
@@ -41454,7 +41853,8 @@
       "status": "ratified",
       "created": "2026-07-07T11:44:18.491Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-CANVAS-SCM1",
@@ -41497,7 +41897,8 @@
       "status": "ratified",
       "created": "2026-07-07T11:44:18.491Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-CANVAS-EXT1",
@@ -41540,7 +41941,8 @@
       "status": "ratified",
       "created": "2026-07-07T11:44:18.491Z",
       "outcome": "B",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-EVENT1",
@@ -41604,7 +42006,8 @@
       "status": "ratified",
       "created": "2026-07-07T12:03:26.279Z",
       "outcome": "D",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-JOS-STUDIO-HOST1",
@@ -41663,7 +42066,8 @@
       "status": "ratified",
       "created": "2026-07-07T12:23:13.859Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-JOS-KERNELBOOTSTRAP1",
@@ -41711,7 +42115,8 @@
       "status": "ratified",
       "created": "2026-07-07T12:49:50.363Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-CANVAS-EXT2",
@@ -41769,7 +42174,8 @@
       "status": "ratified",
       "created": "2026-07-07T14:09:22.157Z",
       "outcome": "B",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-JOS-VMRUN1",
@@ -41823,7 +42229,8 @@
       "status": "ratified",
       "created": "2026-07-07T16:14:21.894Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-JOS-DESKTOP1",
@@ -41883,7 +42290,8 @@
       "created": "2026-07-07T16:49:11.695Z",
       "outcome": "A",
       "comment": "We should prefer wayland, but we will have gnome de by default, with terminal version as the secondary option/fallback. This way beginners get something easy & experts can get exactly what they want",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-URL1",
@@ -41942,7 +42350,8 @@
       "status": "ratified",
       "created": "2026-07-07T17:38:00.090Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-ENCBIN1",
@@ -42001,7 +42410,8 @@
       "status": "ratified",
       "created": "2026-07-07T17:38:00.156Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-FSWATCH1",
@@ -42050,7 +42460,8 @@
       "created": "2026-07-07T17:38:00.224Z",
       "outcome": "A",
       "comment": "also include processes and ports now, not later",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-WS1",
@@ -42103,7 +42514,8 @@
       "status": "ratified",
       "created": "2026-07-07T17:38:00.287Z",
       "outcome": "B",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-OSFACTS1",
@@ -42156,7 +42568,8 @@
       "status": "ratified",
       "created": "2026-07-07T17:38:00.354Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-HUMANFMT1",
@@ -42216,7 +42629,8 @@
       "created": "2026-07-07T17:38:00.422Z",
       "outcome": "A",
       "comment": "full go-style humanize support in the fmt module/lib.",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-PWHASH1",
@@ -42269,7 +42683,8 @@
       "status": "ratified",
       "created": "2026-07-07T17:38:00.484Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-FSOPS1",
@@ -42328,7 +42743,8 @@
       "status": "ratified",
       "created": "2026-07-07T18:38:12.985Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-WATCH-SCOPE1",
@@ -42388,7 +42804,8 @@
       "created": "2026-07-07T18:38:37.748Z",
       "outcome": "A",
       "comment": "a & b - instead of putting file watcher in file module/lib, put all watcher methods in a core.watcher lib. ALSO, support callback/event triggers with our new event system",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-PROCESS1",
@@ -42447,7 +42864,8 @@
       "status": "ratified",
       "created": "2026-07-07T18:40:01.620Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-TEACHING-LAYER1",
@@ -42497,7 +42915,8 @@
       "status": "ratified",
       "created": "2026-07-07T18:48:05.912Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-JOS-VMTEST1",
@@ -42551,7 +42970,8 @@
       "status": "ratified",
       "created": "2026-07-07T19:12:31.030Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-JOS-VMASSERT1",
@@ -42610,7 +43030,8 @@
       "status": "ratified",
       "created": "2026-07-07T19:13:00.468Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-JOS-USERENV1",
@@ -42664,7 +43085,8 @@
       "status": "ratified",
       "created": "2026-07-07T19:14:12.876Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-JOS-USERAPPLY1",
@@ -42718,7 +43140,8 @@
       "status": "ratified",
       "created": "2026-07-07T19:14:32.505Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-COREIO1",
@@ -42766,7 +43189,8 @@
       "status": "ratified",
       "created": "2026-07-07T19:15:31.547Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-COREARGS1",
@@ -42814,7 +43238,8 @@
       "status": "ratified",
       "created": "2026-07-07T19:15:31.609Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-MATHLIB2",
@@ -42862,7 +43287,8 @@
       "status": "ratified",
       "created": "2026-07-07T19:15:31.664Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-RANDOMDIST1",
@@ -42910,7 +43336,8 @@
       "status": "ratified",
       "created": "2026-07-07T19:15:31.715Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-TIME-CALENDAR1",
@@ -42958,7 +43385,8 @@
       "status": "ratified",
       "created": "2026-07-07T19:15:31.777Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-ENCSTREAM1",
@@ -43006,7 +43434,8 @@
       "status": "ratified",
       "created": "2026-07-07T19:15:31.833Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-TEXTUNICODE1",
@@ -43054,7 +43483,8 @@
       "status": "ratified",
       "created": "2026-07-07T19:15:31.893Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-REGEXENGINE1",
@@ -43102,7 +43532,8 @@
       "status": "ratified",
       "created": "2026-07-07T19:15:31.951Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-NETSOCKET1",
@@ -43150,7 +43581,8 @@
       "status": "ratified",
       "created": "2026-07-07T19:15:32.007Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-HTTPDEPTH1",
@@ -43198,7 +43630,8 @@
       "status": "ratified",
       "created": "2026-07-07T19:15:32.065Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-CRYPTO-SUITE1",
@@ -43246,7 +43679,8 @@
       "status": "ratified",
       "created": "2026-07-07T19:15:32.123Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-DBMIGRATE1",
@@ -43294,7 +43728,8 @@
       "status": "ratified",
       "created": "2026-07-07T19:15:32.185Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-LOGTRACE1",
@@ -43342,7 +43777,8 @@
       "status": "ratified",
       "created": "2026-07-07T19:15:32.245Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-ITERTOOLS1",
@@ -43390,7 +43826,8 @@
       "status": "ratified",
       "created": "2026-07-07T19:15:32.297Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-TASKRUNTIME1",
@@ -43438,7 +43875,8 @@
       "status": "ratified",
       "created": "2026-07-07T19:15:32.353Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-DATAFRAME1",
@@ -43486,7 +43924,8 @@
       "status": "ratified",
       "created": "2026-07-07T19:15:32.411Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-TESTKIT1",
@@ -43534,7 +43973,8 @@
       "status": "ratified",
       "created": "2026-07-07T19:15:32.469Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-STDLIBLEDGER1",
@@ -43582,7 +44022,8 @@
       "status": "ratified",
       "created": "2026-07-07T19:15:32.524Z",
       "outcome": "C",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-JPK-OVERLAY1",
@@ -43630,7 +44071,8 @@
       "status": "ratified",
       "created": "2026-07-07T19:15:33.145Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-JOS-CONTAINER1",
@@ -43673,7 +44115,8 @@
       "status": "ratified",
       "created": "2026-07-07T19:15:34.183Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-JOS-HARDWARE1",
@@ -43716,7 +44159,8 @@
       "status": "ratified",
       "created": "2026-07-07T19:15:34.243Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-JOS-DISK1",
@@ -43759,7 +44203,8 @@
       "status": "ratified",
       "created": "2026-07-07T19:15:34.299Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-JOS-PRIORITY1",
@@ -43802,7 +44247,8 @@
       "status": "ratified",
       "created": "2026-07-07T19:15:34.353Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-JOS-THEME1",
@@ -43845,7 +44291,8 @@
       "status": "ratified",
       "created": "2026-07-07T19:15:34.411Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-JOS-FLATPAK1",
@@ -43888,7 +44335,8 @@
       "status": "ratified",
       "created": "2026-07-07T19:15:34.464Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-JOS-KERNELTUNE1",
@@ -43931,7 +44379,8 @@
       "status": "ratified",
       "created": "2026-07-07T19:15:34.525Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-JOS-FLEETTARGET1",
@@ -43985,7 +44434,8 @@
       "status": "ratified",
       "created": "2026-07-07T19:15:55.143Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-JOS-FLEETROLLOUT1",
@@ -44044,7 +44494,8 @@
       "status": "ratified",
       "created": "2026-07-07T19:16:16.530Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-07"
+      "ratifiedAt": "2026-07-07",
+      "draft": false
     },
     {
       "id": "D-CANVAS-WORKSPACE1",
@@ -44097,7 +44548,8 @@
       "status": "ratified",
       "created": "2026-07-08T10:25:03.219Z",
       "outcome": "B",
-      "ratifiedAt": "2026-07-08"
+      "ratifiedAt": "2026-07-08",
+      "draft": false
     },
     {
       "id": "D-CANVAS-WORKSPACE-STATE1",
@@ -44145,7 +44597,8 @@
       "status": "ratified",
       "created": "2026-07-08T10:25:06.581Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-08"
+      "ratifiedAt": "2026-07-08",
+      "draft": false
     },
     {
       "id": "D-CANVAS-WORKSPACE-AUTH1",
@@ -44193,7 +44646,8 @@
       "status": "ratified",
       "created": "2026-07-08T10:25:10.027Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-08"
+      "ratifiedAt": "2026-07-08",
+      "draft": false
     },
     {
       "id": "D-CANVAS-WORKSPACE-NAV1",
@@ -44241,7 +44695,8 @@
       "status": "ratified",
       "created": "2026-07-08T10:25:13.811Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-08"
+      "ratifiedAt": "2026-07-08",
+      "draft": false
     },
     {
       "id": "D-FE-CANVAS1",
@@ -44307,7 +44762,8 @@
       "created": "2026-07-08T13:10:16.606Z",
       "comment": "Hybrid Canvas with Workbench project/file viewer; commands in context menus/Ctrl+K/drag-pin; UE5-style pin shape/color semantics; types hover-only; compact getter capsules; embeddable variables; graphite streamlined UI.",
       "outcome": "E",
-      "ratifiedAt": "2026-07-08"
+      "ratifiedAt": "2026-07-08",
+      "draft": false
     },
     {
       "id": "D-FE-STUDIO1",
@@ -44373,7 +44829,8 @@
       "created": "2026-07-08T13:10:16.749Z",
       "comment": "Hybrid Studio modified: normal clean opsboard-style dashboard landing, settings sidebar categories, extensible pages, changeset as sidebar page for diffs, one apply gate, no projectional primary UI.",
       "outcome": "E",
-      "ratifiedAt": "2026-07-08"
+      "ratifiedAt": "2026-07-08",
+      "draft": false
     },
     {
       "id": "D-FE-REPL1",
@@ -44433,7 +44890,8 @@
       "created": "2026-07-08T13:10:16.894Z",
       "outcome": "D",
       "comment": "Hybrid REPL, with notebook-style rerun/fold/unfold/pin controls on addressable turns.",
-      "ratifiedAt": "2026-07-08"
+      "ratifiedAt": "2026-07-08",
+      "draft": false
     },
     {
       "id": "D-FE-PROMPT1",
@@ -44488,7 +44946,8 @@
       "created": "2026-07-08T13:10:17.032Z",
       "outcome": "D",
       "comment": "Hybrid prompt, but env name and partial path visible by default for navigation.",
-      "ratifiedAt": "2026-07-08"
+      "ratifiedAt": "2026-07-08",
+      "draft": false
     },
     {
       "id": "D-FE-HELP1",
@@ -44548,7 +45007,8 @@
       "created": "2026-07-08T13:10:17.169Z",
       "outcome": "D",
       "comment": "Hybrid help, but default is categorized command palette; no separate task search/home. Task phrases become fuzzy keywords on command entries.",
-      "ratifiedAt": "2026-07-08"
+      "ratifiedAt": "2026-07-08",
+      "draft": false
     },
     {
       "id": "D-FE-CLI1",
@@ -44608,7 +45068,8 @@
       "created": "2026-07-08T13:10:17.309Z",
       "outcome": "D",
       "comment": "Hybrid CLI; keep colored + - ~; support both -y and --yes; add nh-style dependency chain/graph visualization for long downloads/builds where it fits.",
-      "ratifiedAt": "2026-07-08"
+      "ratifiedAt": "2026-07-08",
+      "draft": false
     },
     {
       "id": "D-FE-DEVSRV1",
@@ -44663,7 +45124,8 @@
       "created": "2026-07-08T13:10:17.448Z",
       "outcome": "D",
       "comment": "Hybrid devserver, with nicely formatted pinned dashboard header kept as required terminal anchor.",
-      "ratifiedAt": "2026-07-08"
+      "ratifiedAt": "2026-07-08",
+      "draft": false
     },
     {
       "id": "D-FE-REPL-DOCS1",
@@ -44716,7 +45178,8 @@
       "status": "ratified",
       "created": "2026-07-08T15:43:37.222Z",
       "outcome": "B",
-      "ratifiedAt": "2026-07-08"
+      "ratifiedAt": "2026-07-08",
+      "draft": false
     },
     {
       "id": "D-FE-REPL-RERUN1",
@@ -44769,7 +45232,8 @@
       "status": "ratified",
       "created": "2026-07-08T15:43:37.222Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-08"
+      "ratifiedAt": "2026-07-08",
+      "draft": false
     },
     {
       "id": "D-FE-PROMPT-STRIP1",
@@ -44822,7 +45286,8 @@
       "status": "ratified",
       "created": "2026-07-08T15:43:37.222Z",
       "outcome": "B",
-      "ratifiedAt": "2026-07-08"
+      "ratifiedAt": "2026-07-08",
+      "draft": false
     },
     {
       "id": "D-JOS-NIXIMPORT1",
@@ -44864,7 +45329,8 @@
       "rec": "C",
       "status": "ratified",
       "outcome": "C",
-      "ratifiedAt": "2026-07-08"
+      "ratifiedAt": "2026-07-08",
+      "draft": false
     },
     {
       "id": "D-JOS-REALGUEST1",
@@ -44900,7 +45366,8 @@
       "rec": "C",
       "status": "ratified",
       "outcome": "C",
-      "ratifiedAt": "2026-07-08"
+      "ratifiedAt": "2026-07-08",
+      "draft": false
     },
     {
       "id": "D-JOS-DESKTOPPROOF1",
@@ -44936,7 +45403,8 @@
       "rec": "C",
       "status": "ratified",
       "outcome": "C",
-      "ratifiedAt": "2026-07-08"
+      "ratifiedAt": "2026-07-08",
+      "draft": false
     },
     {
       "id": "D-JOS-IMAGEPROOF1",
@@ -44972,7 +45440,8 @@
       "rec": "C",
       "status": "ratified",
       "outcome": "C",
-      "ratifiedAt": "2026-07-08"
+      "ratifiedAt": "2026-07-08",
+      "draft": false
     },
     {
       "id": "D-JOS-FIRSTBOOT1",
@@ -45014,7 +45483,8 @@
       "rec": "D",
       "status": "ratified",
       "outcome": "D",
-      "ratifiedAt": "2026-07-08"
+      "ratifiedAt": "2026-07-08",
+      "draft": false
     },
     {
       "id": "D-CANVAS-PARITY1",
@@ -45050,7 +45520,8 @@
       "rec": "C",
       "status": "ratified",
       "outcome": "C",
-      "ratifiedAt": "2026-07-08"
+      "ratifiedAt": "2026-07-08",
+      "draft": false
     },
     {
       "id": "D-CANVAS-CORECATALOG1",
@@ -45086,7 +45557,8 @@
       "rec": "C",
       "status": "ratified",
       "outcome": "C",
-      "ratifiedAt": "2026-07-08"
+      "ratifiedAt": "2026-07-08",
+      "draft": false
     },
     {
       "id": "D-CANVAS-ACTIONAUTH1",
@@ -45122,7 +45594,8 @@
       "rec": "C",
       "status": "ratified",
       "outcome": "C",
-      "ratifiedAt": "2026-07-08"
+      "ratifiedAt": "2026-07-08",
+      "draft": false
     },
     {
       "id": "D-CANVAS-CODELENS1",
@@ -45158,7 +45631,8 @@
       "rec": "C",
       "status": "ratified",
       "outcome": "C",
-      "ratifiedAt": "2026-07-08"
+      "ratifiedAt": "2026-07-08",
+      "draft": false
     },
     {
       "id": "D-CANVAS-PROOFLENS1",
@@ -45194,7 +45668,8 @@
       "rec": "C",
       "status": "ratified",
       "outcome": "C",
-      "ratifiedAt": "2026-07-08"
+      "ratifiedAt": "2026-07-08",
+      "draft": false
     },
     {
       "id": "D-STUDIO-CHANGESET1",
@@ -45236,7 +45711,8 @@
       "rec": "D",
       "status": "ratified",
       "outcome": "D",
-      "ratifiedAt": "2026-07-08"
+      "ratifiedAt": "2026-07-08",
+      "draft": false
     },
     {
       "id": "D-STUDIO-WIDGETS1",
@@ -45278,7 +45754,8 @@
       "rec": "D",
       "status": "ratified",
       "outcome": "D",
-      "ratifiedAt": "2026-07-08"
+      "ratifiedAt": "2026-07-08",
+      "draft": false
     },
     {
       "id": "D-STUDIO-SECRETS1",
@@ -45320,7 +45797,8 @@
       "rec": "D",
       "status": "ratified",
       "outcome": "D",
-      "ratifiedAt": "2026-07-08"
+      "ratifiedAt": "2026-07-08",
+      "draft": false
     },
     {
       "id": "D-STUDIO-FLEET1",
@@ -45356,7 +45834,8 @@
       "rec": "C",
       "status": "ratified",
       "outcome": "C",
-      "ratifiedAt": "2026-07-08"
+      "ratifiedAt": "2026-07-08",
+      "draft": false
     },
     {
       "id": "D-STUDIO-CANVASBRIDGE1",
@@ -45392,7 +45871,8 @@
       "rec": "C",
       "status": "ratified",
       "outcome": "C",
-      "ratifiedAt": "2026-07-08"
+      "ratifiedAt": "2026-07-08",
+      "draft": false
     },
     {
       "id": "D-VERIFY-SCHED1",
@@ -45428,7 +45908,8 @@
       "rec": "C",
       "status": "ratified",
       "outcome": "C",
-      "ratifiedAt": "2026-07-08"
+      "ratifiedAt": "2026-07-08",
+      "draft": false
     },
     {
       "id": "D-VERIFY-CACHE1",
@@ -45464,7 +45945,8 @@
       "rec": "C",
       "status": "ratified",
       "outcome": "C",
-      "ratifiedAt": "2026-07-08"
+      "ratifiedAt": "2026-07-08",
+      "draft": false
     },
     {
       "id": "D-VERIFY-TIER1",
@@ -45500,7 +45982,8 @@
       "rec": "C",
       "status": "ratified",
       "outcome": "C",
-      "ratifiedAt": "2026-07-08"
+      "ratifiedAt": "2026-07-08",
+      "draft": false
     },
     {
       "id": "D-PRODUCT-SPLIT1",
@@ -45536,7 +46019,8 @@
       "rec": "C",
       "status": "ratified",
       "outcome": "C",
-      "ratifiedAt": "2026-07-08"
+      "ratifiedAt": "2026-07-08",
+      "draft": false
     },
     {
       "id": "D-CANVASSTATE1",
@@ -45595,7 +46079,8 @@
       "status": "ratified",
       "created": "2026-07-09T12:26:10.491Z",
       "outcome": "D",
-      "ratifiedAt": "2026-07-09"
+      "ratifiedAt": "2026-07-09",
+      "draft": false
     },
     {
       "id": "D-CANVASTEST1",
@@ -45643,7 +46128,8 @@
       "status": "ratified",
       "created": "2026-07-09T14:10:45.018Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-09"
+      "ratifiedAt": "2026-07-09",
+      "draft": false
     },
     {
       "id": "D-CANVASMETA1",
@@ -45691,7 +46177,8 @@
       "status": "ratified",
       "created": "2026-07-09T14:10:45.093Z",
       "outcome": "B",
-      "ratifiedAt": "2026-07-09"
+      "ratifiedAt": "2026-07-09",
+      "draft": false
     },
     {
       "id": "D-JOS-NATIVE1",
@@ -45721,7 +46208,8 @@
       "created": "2026-07-09T17:57:14.572Z",
       "outcome": "A",
       "comment": "Decreed live 2026-07-09: no forked/reskinned NixOS; standalone jetos with nixpkgs adapters.",
-      "ratifiedAt": "2026-07-09"
+      "ratifiedAt": "2026-07-09",
+      "draft": false
     },
     {
       "id": "D-JOS-STORE1",
@@ -45756,7 +46244,8 @@
       "created": "2026-07-09T17:57:14.689Z",
       "outcome": "A",
       "comment": "Chosen via session ballot 2026-07-09.",
-      "ratifiedAt": "2026-07-09"
+      "ratifiedAt": "2026-07-09",
+      "draft": false
     },
     {
       "id": "D-JOS-NIXEVAL1",
@@ -45791,7 +46280,8 @@
       "created": "2026-07-09T17:57:14.811Z",
       "outcome": "C",
       "comment": "Chosen via session ballot 2026-07-09: no nix binary at all this epoch.",
-      "ratifiedAt": "2026-07-09"
+      "ratifiedAt": "2026-07-09",
+      "draft": false
     },
     {
       "id": "D-JOS-PARITYBAR1",
@@ -45826,7 +46316,8 @@
       "created": "2026-07-09T17:57:14.927Z",
       "outcome": "A",
       "comment": "Chosen via session ballot 2026-07-09.",
-      "ratifiedAt": "2026-07-09"
+      "ratifiedAt": "2026-07-09",
+      "draft": false
     },
     {
       "id": "D-JOS-NIXBACKEND2",
@@ -45861,7 +46352,8 @@
       "created": "2026-07-09T17:57:15.045Z",
       "outcome": "C",
       "comment": "Chosen via session ballot 2026-07-09: keep as clearly-labeled migration tool.",
-      "ratifiedAt": "2026-07-09"
+      "ratifiedAt": "2026-07-09",
+      "draft": false
     },
     {
       "id": "B-E7-DESKTOPNS1",
@@ -45906,7 +46398,8 @@
       "status": "ratified",
       "created": "2026-07-09T18:17:22.999Z",
       "outcome": "E",
-      "ratifiedAt": "2026-07-10"
+      "ratifiedAt": "2026-07-10",
+      "draft": false
     },
     {
       "id": "B-E7-BASELINE1",
@@ -45970,7 +46463,8 @@
       "status": "ratified",
       "created": "2026-07-09T18:17:23.147Z",
       "outcome": "D",
-      "ratifiedAt": "2026-07-10"
+      "ratifiedAt": "2026-07-10",
+      "draft": false
     },
     {
       "id": "B-E7-IDENTITY1",
@@ -46015,7 +46509,8 @@
       "status": "ratified",
       "created": "2026-07-09T18:17:23.215Z",
       "outcome": "E",
-      "ratifiedAt": "2026-07-10"
+      "ratifiedAt": "2026-07-10",
+      "draft": false
     },
     {
       "id": "D-JPK-NIXENGINE1",
@@ -46069,7 +46564,8 @@
       "status": "ratified",
       "created": "2026-07-09T20:54:50.351Z",
       "outcome": "D",
-      "ratifiedAt": "2026-07-10"
+      "ratifiedAt": "2026-07-10",
+      "draft": false
     },
     {
       "id": "D-JPK-SANDBOX2",
@@ -46123,7 +46619,8 @@
       "status": "ratified",
       "created": "2026-07-09T20:54:50.430Z",
       "outcome": "D",
-      "ratifiedAt": "2026-07-10"
+      "ratifiedAt": "2026-07-10",
+      "draft": false
     },
     {
       "id": "D-JPK-MULTIUSER1",
@@ -46177,7 +46674,8 @@
       "status": "ratified",
       "created": "2026-07-09T20:54:50.504Z",
       "outcome": "D",
-      "ratifiedAt": "2026-07-10"
+      "ratifiedAt": "2026-07-10",
+      "draft": false
     },
     {
       "id": "D-JPK-DYNAMICPLAN1",
@@ -46231,7 +46729,8 @@
       "status": "ratified",
       "created": "2026-07-09T20:54:50.576Z",
       "outcome": "D",
-      "ratifiedAt": "2026-07-10"
+      "ratifiedAt": "2026-07-10",
+      "draft": false
     },
     {
       "id": "D-JPK-PROFILE1",
@@ -46285,7 +46784,8 @@
       "status": "ratified",
       "created": "2026-07-09T20:54:50.648Z",
       "outcome": "D",
-      "ratifiedAt": "2026-07-10"
+      "ratifiedAt": "2026-07-10",
+      "draft": false
     },
     {
       "id": "D-JPK-TRUSTROOT1",
@@ -46339,7 +46839,8 @@
       "status": "ratified",
       "created": "2026-07-09T20:54:50.723Z",
       "outcome": "D",
-      "ratifiedAt": "2026-07-10"
+      "ratifiedAt": "2026-07-10",
+      "draft": false
     },
     {
       "id": "D-JPK-CACHEAUTH1",
@@ -46393,7 +46894,8 @@
       "status": "ratified",
       "created": "2026-07-09T20:54:50.805Z",
       "outcome": "D",
-      "ratifiedAt": "2026-07-10"
+      "ratifiedAt": "2026-07-10",
+      "draft": false
     },
     {
       "id": "D-JPK-RESOLUTIONDOMAIN1",
@@ -46447,7 +46949,8 @@
       "status": "ratified",
       "created": "2026-07-09T20:54:50.883Z",
       "outcome": "D",
-      "ratifiedAt": "2026-07-10"
+      "ratifiedAt": "2026-07-10",
+      "draft": false
     },
     {
       "id": "D-JPK-VARIANT1",
@@ -46501,7 +47004,8 @@
       "status": "ratified",
       "created": "2026-07-09T20:54:50.957Z",
       "outcome": "D",
-      "ratifiedAt": "2026-07-10"
+      "ratifiedAt": "2026-07-10",
+      "draft": false
     },
     {
       "id": "D-JPK-FRESHNESS1",
@@ -46556,7 +47060,8 @@
       "created": "2026-07-09T20:54:51.030Z",
       "outcome": "D",
       "comment": "the version specifier is package#version, not package@version",
-      "ratifiedAt": "2026-07-10"
+      "ratifiedAt": "2026-07-10",
+      "draft": false
     },
     {
       "id": "D-JPK-BUILDSCRIPT1",
@@ -46610,7 +47115,8 @@
       "status": "ratified",
       "created": "2026-07-09T20:54:51.118Z",
       "outcome": "D",
-      "ratifiedAt": "2026-07-10"
+      "ratifiedAt": "2026-07-10",
+      "draft": false
     },
     {
       "id": "D-JPK-NIXBASELINE1",
@@ -46659,7 +47165,8 @@
       "status": "ratified",
       "created": "2026-07-09T20:54:51.197Z",
       "outcome": "D",
-      "ratifiedAt": "2026-07-10"
+      "ratifiedAt": "2026-07-10",
+      "draft": false
     },
     {
       "id": "D-JPK-NIXSTORE1",
@@ -46713,7 +47220,8 @@
       "status": "ratified",
       "created": "2026-07-09T20:54:51.275Z",
       "outcome": "D",
-      "ratifiedAt": "2026-07-10"
+      "ratifiedAt": "2026-07-10",
+      "draft": false
     },
     {
       "id": "D-JPK-REMOTE1",
@@ -46767,7 +47275,8 @@
       "status": "ratified",
       "created": "2026-07-09T20:54:51.349Z",
       "outcome": "D",
-      "ratifiedAt": "2026-07-10"
+      "ratifiedAt": "2026-07-10",
+      "draft": false
     },
     {
       "id": "D-JPK-STORECLI1",
@@ -46821,7 +47330,8 @@
       "status": "ratified",
       "created": "2026-07-09T20:54:51.420Z",
       "outcome": "D",
-      "ratifiedAt": "2026-07-10"
+      "ratifiedAt": "2026-07-10",
+      "draft": false
     },
     {
       "id": "D-JPK-PROVIDERS2",
@@ -46875,7 +47385,8 @@
       "status": "ratified",
       "created": "2026-07-09T20:54:51.505Z",
       "outcome": "D",
-      "ratifiedAt": "2026-07-10"
+      "ratifiedAt": "2026-07-10",
+      "draft": false
     },
     {
       "id": "D-JPK-REGISTRY1",
@@ -46929,7 +47440,8 @@
       "status": "ratified",
       "created": "2026-07-09T20:54:51.586Z",
       "outcome": "D",
-      "ratifiedAt": "2026-07-10"
+      "ratifiedAt": "2026-07-10",
+      "draft": false
     },
     {
       "id": "D-JPK-POLICYSURFACE1",
@@ -46983,7 +47495,8 @@
       "status": "ratified",
       "created": "2026-07-09T20:54:51.661Z",
       "outcome": "D",
-      "ratifiedAt": "2026-07-10"
+      "ratifiedAt": "2026-07-10",
+      "draft": false
     },
     {
       "id": "D-JPK-CACHECONFIG1",
@@ -47037,7 +47550,8 @@
       "status": "ratified",
       "created": "2026-07-09T20:54:51.739Z",
       "outcome": "D",
-      "ratifiedAt": "2026-07-10"
+      "ratifiedAt": "2026-07-10",
+      "draft": false
     },
     {
       "id": "D-JPK-STOREBACKEND1",
@@ -47091,7 +47605,8 @@
       "status": "ratified",
       "created": "2026-07-09T20:54:51.813Z",
       "outcome": "D",
-      "ratifiedAt": "2026-07-10"
+      "ratifiedAt": "2026-07-10",
+      "draft": false
     },
     {
       "id": "D-JPK-RESOLVEMODE1",
@@ -47145,7 +47660,8 @@
       "status": "ratified",
       "created": "2026-07-09T20:54:51.889Z",
       "outcome": "D",
-      "ratifiedAt": "2026-07-10"
+      "ratifiedAt": "2026-07-10",
+      "draft": false
     },
     {
       "id": "D-JPK-REPROCACHE1",
@@ -47199,7 +47715,8 @@
       "status": "ratified",
       "created": "2026-07-09T20:54:51.964Z",
       "outcome": "D",
-      "ratifiedAt": "2026-07-10"
+      "ratifiedAt": "2026-07-10",
+      "draft": false
     },
     {
       "id": "D-WEBAPP1",
@@ -47253,7 +47770,8 @@
       "status": "ratified",
       "created": "2026-07-09T23:45:20.322Z",
       "outcome": "D",
-      "ratifiedAt": "2026-07-10"
+      "ratifiedAt": "2026-07-10",
+      "draft": false
     },
     {
       "id": "D-WEBAUTHOR1",
@@ -47307,7 +47825,8 @@
       "status": "ratified",
       "created": "2026-07-09T23:45:20.466Z",
       "outcome": "D",
-      "ratifiedAt": "2026-07-10"
+      "ratifiedAt": "2026-07-10",
+      "draft": false
     },
     {
       "id": "D-COMPUTE1",
@@ -47361,7 +47880,8 @@
       "status": "ratified",
       "created": "2026-07-09T23:45:20.616Z",
       "outcome": "D",
-      "ratifiedAt": "2026-07-10"
+      "ratifiedAt": "2026-07-10",
+      "draft": false
     },
     {
       "id": "D-COMPUTE-TYPE1",
@@ -47415,7 +47935,8 @@
       "status": "ratified",
       "created": "2026-07-09T23:45:20.802Z",
       "outcome": "D",
-      "ratifiedAt": "2026-07-10"
+      "ratifiedAt": "2026-07-10",
+      "draft": false
     },
     {
       "id": "D-COMPUTE-PLACE1",
@@ -47469,7 +47990,8 @@
       "status": "ratified",
       "created": "2026-07-09T23:45:20.946Z",
       "outcome": "D",
-      "ratifiedAt": "2026-07-10"
+      "ratifiedAt": "2026-07-10",
+      "draft": false
     },
     {
       "id": "D-COMPUTE-KERNEL1",
@@ -47523,7 +48045,8 @@
       "status": "ratified",
       "created": "2026-07-09T23:45:21.085Z",
       "outcome": "D",
-      "ratifiedAt": "2026-07-10"
+      "ratifiedAt": "2026-07-10",
+      "draft": false
     },
     {
       "id": "D-COMPUTE-AUTODIFF1",
@@ -47577,7 +48100,8 @@
       "status": "ratified",
       "created": "2026-07-09T23:45:21.222Z",
       "outcome": "D",
-      "ratifiedAt": "2026-07-10"
+      "ratifiedAt": "2026-07-10",
+      "draft": false
     },
     {
       "id": "D-COMPUTE-BACKEND1",
@@ -47631,7 +48155,8 @@
       "status": "ratified",
       "created": "2026-07-09T23:45:21.356Z",
       "outcome": "D",
-      "ratifiedAt": "2026-07-10"
+      "ratifiedAt": "2026-07-10",
+      "draft": false
     },
     {
       "id": "D-SERVICE1",
@@ -47685,7 +48210,8 @@
       "status": "ratified",
       "created": "2026-07-09T23:45:21.501Z",
       "outcome": "D",
-      "ratifiedAt": "2026-07-10"
+      "ratifiedAt": "2026-07-10",
+      "draft": false
     },
     {
       "id": "D-SERVICE-DELIVERY1",
@@ -47739,7 +48265,8 @@
       "status": "ratified",
       "created": "2026-07-09T23:45:21.691Z",
       "outcome": "D",
-      "ratifiedAt": "2026-07-10"
+      "ratifiedAt": "2026-07-10",
+      "draft": false
     },
     {
       "id": "D-SERVICE-STATE1",
@@ -47793,7 +48320,8 @@
       "status": "ratified",
       "created": "2026-07-09T23:45:21.843Z",
       "outcome": "D",
-      "ratifiedAt": "2026-07-10"
+      "ratifiedAt": "2026-07-10",
+      "draft": false
     },
     {
       "id": "D-SERVICE-WORKFLOW1",
@@ -47847,7 +48375,8 @@
       "status": "ratified",
       "created": "2026-07-09T23:45:21.983Z",
       "outcome": "D",
-      "ratifiedAt": "2026-07-10"
+      "ratifiedAt": "2026-07-10",
+      "draft": false
     },
     {
       "id": "D-SERVICE-IDENTITY1",
@@ -47901,7 +48430,8 @@
       "status": "ratified",
       "created": "2026-07-09T23:45:22.125Z",
       "outcome": "D",
-      "ratifiedAt": "2026-07-10"
+      "ratifiedAt": "2026-07-10",
+      "draft": false
     },
     {
       "id": "D-SERVICE-UPGRADE1",
@@ -47955,7 +48485,8 @@
       "status": "ratified",
       "created": "2026-07-09T23:45:22.263Z",
       "outcome": "D",
-      "ratifiedAt": "2026-07-10"
+      "ratifiedAt": "2026-07-10",
+      "draft": false
     },
     {
       "id": "D-FMTPROJECT1",
@@ -48009,7 +48540,8 @@
       "status": "ratified",
       "created": "2026-07-09T23:45:22.397Z",
       "outcome": "D",
-      "ratifiedAt": "2026-07-10"
+      "ratifiedAt": "2026-07-10",
+      "draft": false
     },
     {
       "id": "D-PERFSESSION1",
@@ -48063,7 +48595,8 @@
       "status": "ratified",
       "created": "2026-07-09T23:45:22.546Z",
       "outcome": "D",
-      "ratifiedAt": "2026-07-10"
+      "ratifiedAt": "2026-07-10",
+      "draft": false
     },
     {
       "id": "D-NOTEBOOK-SURFACE1",
@@ -48117,7 +48650,8 @@
       "status": "ratified",
       "created": "2026-07-09T23:45:22.709Z",
       "outcome": "D",
-      "ratifiedAt": "2026-07-10"
+      "ratifiedAt": "2026-07-10",
+      "draft": false
     },
     {
       "id": "D-NOTEBOOK-DOC1",
@@ -48171,7 +48705,8 @@
       "status": "ratified",
       "created": "2026-07-09T23:45:22.872Z",
       "outcome": "D",
-      "ratifiedAt": "2026-07-10"
+      "ratifiedAt": "2026-07-10",
+      "draft": false
     },
     {
       "id": "D-NOTEBOOK-TRUST1",
@@ -48225,7 +48760,8 @@
       "status": "ratified",
       "created": "2026-07-09T23:45:23.025Z",
       "outcome": "D",
-      "ratifiedAt": "2026-07-10"
+      "ratifiedAt": "2026-07-10",
+      "draft": false
     },
     {
       "id": "D-CI3",
@@ -48273,7 +48809,8 @@
       "status": "ratified",
       "created": "2026-07-10T10:49:07.941Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-10"
+      "ratifiedAt": "2026-07-10",
+      "draft": false
     },
     {
       "id": "D-DEVTOOLS1",
@@ -48326,7 +48863,8 @@
       "status": "ratified",
       "created": "2026-07-10T10:49:08.018Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-10"
+      "ratifiedAt": "2026-07-10",
+      "draft": false
     },
     {
       "id": "D-TWRGUARD1",
@@ -48379,7 +48917,8 @@
       "status": "ratified",
       "created": "2026-07-10T10:49:08.093Z",
       "outcome": "C",
-      "ratifiedAt": "2026-07-10"
+      "ratifiedAt": "2026-07-10",
+      "draft": false
     },
     {
       "id": "D-TWR-ARCHIVE1",
@@ -48428,7 +48967,8 @@
       "created": "2026-07-10T10:50:10.528Z",
       "outcome": "B",
       "comment": "But enforce stricter \"done\" testing & keep a buffer of decisions made pre ratification so I can walk them back before ratification if needed",
-      "ratifiedAt": "2026-07-10"
+      "ratifiedAt": "2026-07-10",
+      "draft": false
     },
     {
       "id": "D-TWR-BRIEF1",
@@ -48471,7 +49011,8 @@
       "status": "ratified",
       "created": "2026-07-10T10:50:10.686Z",
       "outcome": "A",
-      "ratifiedAt": "2026-07-10"
+      "ratifiedAt": "2026-07-10",
+      "draft": false
     },
     {
       "id": "D-TWR-CRIT1",
@@ -48514,7 +49055,8 @@
       "status": "ratified",
       "created": "2026-07-10T10:50:10.842Z",
       "outcome": "C",
-      "ratifiedAt": "2026-07-10"
+      "ratifiedAt": "2026-07-10",
+      "draft": false
     },
     {
       "id": "D-TWR-BOARD1",
@@ -48563,7 +49105,8 @@
       "created": "2026-07-10T10:50:11.000Z",
       "outcome": "A",
       "comment": "YOU may add a NEW page showing me a prototype hybrid of A & B. DO NOT replace the current board, overall I like it how it is but im open to your idea with combining a and b",
-      "ratifiedAt": "2026-07-10"
+      "ratifiedAt": "2026-07-10",
+      "draft": false
     }
   ],
   "questions": [
@@ -49852,6 +50395,62 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-10T13:06:23.523Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c04mnkv0",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-10T13:06:23.434Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0as0asq",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-10T12:59:55.871Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c1nixrpd",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-10T12:59:55.734Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0e7rot4",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-10T12:53:46.649Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0e7rot4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-10T12:52:32.892Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c009yxqf",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-10T12:51:06.763Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c1nixrpd",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-10T12:51:06.629Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0wetgi3",
+      "note": "logEntry"
+    },
     {
       "at": "2026-07-10T12:47:27.242Z",
       "by": "codex-orchestrator",
@@ -63795,62 +64394,6 @@
       "action": "decision.add",
       "ref": "D-JOS-STUDIO-LAUNCH1",
       "note": "jetos Studio launch command"
-    },
-    {
-      "at": "2026-07-07T00:40:08.794Z",
-      "by": "codex-main",
-      "action": "decision.add",
-      "ref": "D-BPE-PROTOCOL1",
-      "note": "Visual editor graph protocol stability"
-    },
-    {
-      "at": "2026-07-07T00:40:08.709Z",
-      "by": "codex-main",
-      "action": "decision.add",
-      "ref": "D-BPE-EDITSCOPE1",
-      "note": "Visual editor v1 edit vocabulary"
-    },
-    {
-      "at": "2026-07-07T00:40:08.628Z",
-      "by": "codex-main",
-      "action": "decision.add",
-      "ref": "D-BPE-TAXONOMY1",
-      "note": "Visual editor node taxonomy"
-    },
-    {
-      "at": "2026-07-07T00:40:08.547Z",
-      "by": "codex-main",
-      "action": "decision.add",
-      "ref": "D-BPE-ALTITUDE1",
-      "note": "Visual editor expression altitude"
-    },
-    {
-      "at": "2026-07-07T00:40:08.464Z",
-      "by": "codex-main",
-      "action": "decision.add",
-      "ref": "D-BPE-LAYOUT1",
-      "note": "Visual editor graph layout persistence"
-    },
-    {
-      "at": "2026-07-07T00:40:08.378Z",
-      "by": "codex-main",
-      "action": "decision.add",
-      "ref": "D-BPE-HOST1",
-      "note": "Visual editor first host"
-    },
-    {
-      "at": "2026-07-07T00:40:08.287Z",
-      "by": "codex-main",
-      "action": "decision.add",
-      "ref": "D-BPE-NAME1",
-      "note": "Visual editor product name"
-    },
-    {
-      "at": "2026-07-07T00:40:08.200Z",
-      "by": "codex-main",
-      "action": "decision.add",
-      "ref": "D-PERFBUDGET-BASELINE1",
-      "note": "Statistical baseline policy"
     }
   ],
   "nextNum": 368,

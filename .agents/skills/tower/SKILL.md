@@ -55,7 +55,10 @@ spelling to bypass a ratification gate. Exit criterion: both sections empty.
    ballot-ready decision NOW (tower-ballot skill / `jet-ballot` agent); gated
    card → `deciding`. Only then implement the ungated remainder — or move to
    the next card. A gate left as prose in a plan or log never reaches the
-   owner; it MUST be a ballot.
+   owner; it MUST be a ballot. `decision add` refuses an incomplete ballot
+   (`E_BALLOT` — missing gist/story/inWild/options[].code/rec); save an
+   unfinished one with `--draft`, finish later with `decision update <id>
+   --ready`.
 4. Do the work per AGENTS.md: failing test first → spec → parser → sema →
    codegen → targeted tests while iterating → full suite green at the end →
    docs. Invariants I1–I8 hold. Delegate with the project agents (`jet-impl`
@@ -76,6 +79,8 @@ spelling to bypass a ratification gate. Exit criterion: both sections empty.
    not a bug, don't force it to `done`.
 6. Release or leave a `[handoff]` log entry if you stop mid-card — cards are
    the handoff source of truth; harness task lists don't survive resets.
+   `card release` on a `building` card requires `--handoff "…"` (`E_HANDOFF`
+   otherwise) so the next session doesn't restart from zero.
 7. Report on the board itself: log entries on advanced cards, ballots/
    questions for anything newly blocked on him — that's what he sees (and
    gets push notifications for).
@@ -114,6 +119,26 @@ worked options / comparisons / rec) and add via
    board decision is already `ratified` with its `outcome`.
 3. Reconcile the card: nothing else gates it → `building`, build now.
 4. Implement end to end (standard above). When green, `done`.
+
+Ratifying a `group: "syntax"` decision auto-appends the standard
+post-ratification chores to the card's `criteria[]` (Syntax.rs entry,
+syntax-decisions.md log, `jet devtools grammars`, re-bless) — meet/verify
+them like any other exit criterion.
+
+## Guards — agent-hard, owner-soft
+
+`decision ratify` and `card activate` are owner-only (`E_OWNER_ONLY`) for any
+`--by` other than `owner` — pass `--quote "owner's words"` only for a genuine
+on-behalf-of action (recorded in the event log). Frozen cards and a triage
+card's phase are owner-only writes (`E_OWNER_LANE`; body/plan/log edits on a
+triage card are still fine). `card delete` refuses when a ratified decision
+is attached (`E_HAS_RATIFIED`). `decision ratify --outcome` must match one of
+the decision's option keys. `--by owner` bypasses every guard here (bypass
+event-logged) — full table in Tower/AGENTS.md.
+
+Record an owner ruling with `tower verdict '#N' --outcome "..." [--title
+"…"] --by owner` — it mints an already-ratified decision on the card instead
+of a log note, so a verdict is never lost across a context reset.
 
 ## Rules
 

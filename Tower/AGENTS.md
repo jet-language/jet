@@ -64,9 +64,10 @@ tower card claim '#12' --by me                # soft lock vs other agents
 tower card update '#12' --phase building --log "started X" --by me
 tower card update '#12' --plan "1. ... 2. ..." --by me
 tower question answer <qid> --text "..." --by me
-tower decision add --file ballot.json --by me # or --file - for stdin
+tower decision add --file ballot.json --by me # or --file - for stdin, --draft if unfinished
 tower card update '#12' --phase verify --log "claiming done: tests green" --by me
 tower card release '#12' --by me              # if you stop without finishing
+tower card release '#12' --by me --handoff "parser done, sema left, watch X"  # required if the card is `building`
 ```
 
 Phase honesty: `verify → done` only after real verification, by a different
@@ -111,6 +112,34 @@ person, why this exists), `inWild` (realistic code where the choice bites),
 `comparisons[]` when relevant, `rec` + why. The owner decides from the ballot
 alone — if they'd need to ask you something to decide, it isn't ready.
 
+## Guards (agent-hard, owner-soft)
+
+Every guard below binds writes where `--by` is not `owner`; `--by owner`
+always bypasses (bypass event-logged). D-TWRGUARD1=C.
+
+| Guard | Trigger | Error | Escape |
+|---|---|---|---|
+| Ballot-ready | `decision add` missing gist/story/inWild/options[].code/rec | `E_BALLOT` | `--draft`, then `decision update <id> --ready` once complete |
+| Owner-only ratify | `decision ratify` by a non-owner | `E_OWNER_ONLY` | `--quote "owner's words"` |
+| Owner-only activate | `card activate` by a non-owner | `E_OWNER_ONLY` | `--quote "owner's words"` |
+| Frozen lane | any write to a `frozen` card | `E_OWNER_LANE` | none — `tower card activate` first |
+| Triage phase-lock | `card update --phase <x>` on a `triage` card (`x != done`) | `E_OWNER_LANE` | `tower card activate` (body/plan/log edits stay open) |
+| Ratified-decision delete | `card delete` on a card with a ratified decision | `E_HAS_RATIFIED` | detach/archive the decision first (applies to owner too, for now) |
+| Outcome/option match | `decision ratify --outcome K` not one of the decision's option keys | `E_INVALID` | pass a real option key |
+| Building-release handoff | `card release` on a `building` card | `E_HANDOFF` | `--handoff "what's done, what's left, gotchas"` |
+
+`tower verdict '#N' --outcome "..." [--title "…"] --by owner` records an
+owner ruling as an already-ratified decision (never a mere log note) and is
+owner-only with no `--quote` escape — it IS the owner speaking.
+
+Ratifying a `group: "syntax"` decision auto-appends the standard
+post-ratification chores to the card's `criteria[]`: Syntax.rs entry
+updated, syntax-decisions.md log entry, `jet devtools grammars`
+regenerated, snapshots re-blessed.
+
+`blockedBy` accepts a card ref or a decision id; an unratified decision id
+blocks the same as an unfinished card.
+
 ## Concurrency
 
 - Writes are serialized by a lock and applied atomically; concurrent agents
@@ -126,10 +155,11 @@ alone — if they'd need to ask you something to decide, it isn't ready.
 GET  /api/state                     full projected state
 GET  /api/next?agent=me&limit=5     canonical work picker
 GET  /api/events?limit=50           audit trail
-POST /api/card/add|update|activate|claim|release|delete
+POST /api/card/add|update|activate|claim|release|delete   (release: {handoff}; activate: {quote})
 POST /api/card/criteria-add {id,text}  criteria-meet {id,n,evidence}  criteria-verify {id,n,evidence}
-POST /api/decision/add|update|delete
-POST /api/clearance {decisionId,outcome,comment}       (owner ratify)
+POST /api/decision/add|update|delete   (add: {draft}; update: {ready})
+POST /api/clearance {decisionId,outcome,comment,quote}  (owner ratify; quote = on-behalf-of)
+POST /api/verdict {id,outcome,title}                    (owner-only; mints a ratified decision)
 POST /api/question/add|answer|delete
 POST /api/idea/add|update|delete|promote
 POST /api/epoch/add|update|current

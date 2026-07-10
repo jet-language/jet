@@ -72,7 +72,7 @@ const routes = {
   'card/update':     (s, p, cfg) => db.updateCard(s, p.id, p, cfg),
   'card/activate':   (s, p, cfg) => db.activate(s, p.id, p, cfg),
   'card/claim':      (s, p) => db.claimCard(s, p.id, p.by),
-  'card/release':    (s, p) => db.releaseCard(s, p.id, p.by),
+  'card/release':    (s, p) => db.releaseCard(s, p.id, p.by, p.handoff),
   'card/delete':     (s, p) => db.deleteCard(s, p.id, p),
   'card/criteria-add':    (s, p) => db.addCriterion(s, p.id, p.text, p.by),
   'card/criteria-meet':   (s, p) => db.meetCriterion(s, p.id, p.n, { evidence: p.evidence, by: p.by }),
@@ -80,9 +80,10 @@ const routes = {
   'decision/add':    (s, p) => db.addDecision(s, p),
   'decision/update': (s, p) => db.updateDecision(s, p.id, p, p.by),
   'decision/delete': (s, p) => db.deleteDecision(s, p.id, p.by),
-  'clearance':       (s, p) => db.ratify(s, p.decisionId, p.outcome, p.comment, p.by),
-  'clearance/batch': (s, p) => (p.decisions || []).map(d => db.ratify(s, d.decisionId, d.outcome, d.comment, p.by)),
+  'clearance':       (s, p) => db.ratify(s, p.decisionId, p.outcome, p.comment, p.by, p.quote),
+  'clearance/batch': (s, p) => (p.decisions || []).map(d => db.ratify(s, d.decisionId, d.outcome, d.comment, p.by, d.quote || p.quote)),
   'clearance/reopen': (s, p) => db.reopenDecision(s, p.decisionId, p.by),
+  'verdict':         (s, p) => db.mintVerdict(s, p.id, p.outcome, p.title, p.by),
   'question/add':    (s, p) => db.addQuestion(s, p),
   'question/answer': (s, p) => db.answerQuestion(s, p.id, p.answer, p.by),
   'question/delete': (s, p) => db.deleteQuestion(s, p.id, p.by),
@@ -100,7 +101,8 @@ const routes = {
   'digest/seen':     (s) => db.setDigestCursor(s),
 };
 
-const STATUS = { E_NOT_FOUND: 404, E_INVALID: 400, E_USAGE: 400, E_CONFLICT: 409, E_CLAIMED: 409, E_NO_DATA: 500, E_CRITERIA: 409, E_CRITERIA_SELF: 400 };
+const STATUS = { E_NOT_FOUND: 404, E_INVALID: 400, E_USAGE: 400, E_CONFLICT: 409, E_CLAIMED: 409, E_NO_DATA: 500, E_CRITERIA: 409, E_CRITERIA_SELF: 400,
+  E_BALLOT: 400, E_OWNER_ONLY: 403, E_OWNER_LANE: 403, E_HAS_RATIFIED: 409, E_HANDOFF: 400 };
 
 // ---- auth ----------------------------------------------------------------------
 const PUBLIC = new Set(['/manifest.webmanifest', '/sw.js', '/icon.svg']);

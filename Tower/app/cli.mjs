@@ -152,7 +152,7 @@ function cmdCard(store, { pos, flags }) {
     case 'activate': {
       const { result } = store.mutate((s, cfg) => db.activate(s, ref, {
         track: flags.track, epoch: flags.epoch, milestoneId: flags.milestone,
-        phase: flags.phase, workOrder: flags.workOrder, by,
+        phase: flags.phase, workOrder: flags.workOrder, by, quote: flags.quote,
       }, cfg));
       return out(flags, `activated card #${result.num} → ${result.phase}`, result);
     }
@@ -161,7 +161,7 @@ function cmdCard(store, { pos, flags }) {
       return out(flags, `card #${result.num} claimed by ${by}`, result);
     }
     case 'release': {
-      const { result } = store.mutate((s) => db.releaseCard(s, ref, by));
+      const { result } = store.mutate((s) => db.releaseCard(s, ref, by, flags.handoff));
       return out(flags, `card #${result.num} released`, result);
     }
     case 'delete': {
@@ -197,18 +197,20 @@ function cmdDecision(store, { pos, flags }) {
       for (const f of ['id', 'cardId', 'title', 'gist', 'story', 'explainer', 'inWild', 'detail', 'rec', 'group'])
         if (flags[f] !== undefined) payload[f] = flags[f];
       if (flags.card !== undefined) payload.cardId = flags.card;
+      if (flags.draft !== undefined) payload.draft = flags.draft === true || flags.draft === 'true';
       const { result } = store.mutate((s) => db.addDecision(s, payload));
-      return out(flags, `added decision ${result.id} on card ${result.cardId}`, result);
+      return out(flags, `added decision ${result.id} on card ${result.cardId}${result.draft ? ' (draft)' : ''}`, result);
     }
     case 'update': {
       const p = readPayload(flags) || {};
       for (const f of ['title', 'gist', 'story', 'explainer', 'inWild', 'detail', 'rec', 'group'])
         if (flags[f] !== undefined) p[f] = flags[f];
+      if (flags.ready !== undefined) p.ready = flags.ready === true || flags.ready === 'true';
       const { result } = store.mutate((s) => db.updateDecision(s, id, p, by));
-      return out(flags, `updated decision ${result.id}`, result);
+      return out(flags, `updated decision ${result.id}${p.ready ? ' — ballot-ready' : ''}`, result);
     }
     case 'ratify': {
-      const { result } = store.mutate((s) => db.ratify(s, id, flags.outcome, flags.comment, by), { expectRev: flags.expectRev });
+      const { result } = store.mutate((s) => db.ratify(s, id, flags.outcome, flags.comment, by, flags.quote), { expectRev: flags.expectRev });
       return out(flags, `ratified ${result.id} → ${result.outcome}`, result);
     }
     case 'reopen': {
@@ -349,6 +351,16 @@ function cmdNext(store, { flags }) {
   for (const c of rich) console.log(` · ${cardLine(c)}`);
 }
 
+// tower verdict '#N' --outcome "..." [--title "…"] --by owner — mints an
+// ALREADY-ratified decision recording an owner verdict, so it can never be
+// mis-filed as a mere log note (D-TWRGUARD1=C #458). Owner-only, no --quote
+// escape: this command IS the owner speaking.
+function cmdVerdict(store, { pos, flags }) {
+  const [ref] = pos;
+  const { result } = store.mutate((s) => db.mintVerdict(s, ref, flags.outcome, flags.title, flags.by));
+  return out(flags, `verdict ${result.id} recorded on card #${result.cardNum} → ${result.outcome}`, result);
+}
+
 function cmdEvents(store, { flags }) {
   const s = store.load();
   const es = s.events.slice(0, Number(flags.limit || 30));
@@ -443,7 +455,14 @@ const HELP = `tower — file-backed project board for an owner + AI agents
                             --meet n --evidence "…" --by X    builder: mark met
                             --verify n --evidence "…" --by Y  verifier ≠ builder: mark verified
                             --list                            show the checklist
+  tower card activate <ref> [--quote "owner's words"]     agents need --quote; owner needs nothing
+  tower card release <ref> --by X [--handoff "…"]         --handoff required if the card is building
   tower decision list|show|add|update|ratify|reopen|delete
+  tower decision add --draft                              save a work-in-progress ballot, skip validation
+  tower decision update <id> --ready                       validate + clear draft
+  tower decision ratify <id> --outcome K [--quote "…"]     agents need --quote; owner needs nothing
+  tower verdict '#N' --outcome "..." [--title "…"] --by owner
+                                            record an owner ruling as a ratified decision (not a log note)
   tower question list|ask|answer|delete
   tower idea     list|add|promote|delete
   tower epoch    list|add|update|current
@@ -459,6 +478,11 @@ const HELP = `tower — file-backed project board for an owner + AI agents
   Writers should pass --by <agent-name>; owner ops use --by owner.
   Optimistic concurrency: --expect-rev N (exit 2 on conflict).
   Phases: ${PHASE_IDS.join(' ')}
+
+  Guards (agent-hard, owner-soft — --by owner bypasses; see Tower/AGENTS.md):
+    ballot validation (E_BALLOT), owner-only ratify/activate (E_OWNER_ONLY),
+    frozen/triage write guard (E_OWNER_LANE), ratified-decision delete guard
+    (E_HAS_RATIFIED), building-release handoff (E_HANDOFF).
 `;
 
 // ---- dispatch ----------------------------------------------------------------
@@ -491,6 +515,7 @@ export async function run(argv) {
       case 'epoch':     return cmdEpoch(store, sub);
       case 'milestone': return cmdMilestone(store, sub);
       case 'next':      return cmdNext(store, sub);
+      case 'verdict':   return cmdVerdict(store, sub);
       case 'events':    return cmdEvents(store, sub);
       case 'undo':      return cmdUndo(store, sub);
       case 'githook':

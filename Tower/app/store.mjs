@@ -99,13 +99,18 @@ export function normalize(s) {
   for (const k of ['epochs', 'milestones', 'cards', 'decisions', 'questions', 'ideas', 'events']) s[k] ||= [];
   delete s.messages;   // messaging was removed; drop the legacy key on next write
   for (const c of s.cards) { c.blockedBy ||= []; c.log ||= []; c.criteria ||= []; c.needsAcceptance = !!c.needsAcceptance; }
+  for (const d of s.decisions) d.draft = !!d.draft;
   return s;
 }
 
 // ---- derivation: clearance + lane (the ONE place this is decided) ---------
 
+// A draft decision (card #458, D-TWRGUARD1=C) is a scratch ballot still being
+// written — it never blocks a card and never shows in the owner's queue.
+const isBlocking = (d) => d.status !== 'ratified' && !d.draft;
+
 export function clearanceOf(card, decisions) {
-  const linked = decisions.filter(d => d.cardId === card.id);
+  const linked = decisions.filter(d => d.cardId === card.id && !d.draft);
   if (!linked.length) return { state: 'none', open: [], total: 0, ratified: 0 };
   const open = linked.filter(d => d.status !== 'ratified');
   return { state: open.length ? 'pending' : 'cleared', open: open.map(d => d.id), total: linked.length, ratified: linked.length - open.length };
@@ -114,10 +119,16 @@ export function clearanceOf(card, decisions) {
 export function laneOf(card, decisions, cards) {
   if (card.phase === 'done')   return { lane: 'done', who: null, label: 'Done' };
   if (card.phase === 'frozen') return { lane: 'frozen', who: 'owner', label: 'Frozen — activate to work it' };
-  const open = decisions.filter(d => d.cardId === card.id && d.status !== 'ratified');
+  const open = decisions.filter(d => d.cardId === card.id && isBlocking(d));
   if (open.length) return { lane: 'decide', who: 'owner', label: `${open.length} decision${open.length > 1 ? 's' : ''} to make`, decisions: open.map(d => d.id) };
   if (card.phase === 'triage') return { lane: 'activate', who: 'owner', label: 'Greenlight to start' };
-  const blockers = (card.blockedBy || []).filter(id => { const b = cards.find(c => c.id === id); return b && b.phase !== 'done'; });
+  const blockers = (card.blockedBy || []).filter(id => {
+    const b = cards.find(c => c.id === id);
+    if (b) return b.phase !== 'done';
+    const d = decisions.find(x => x.id === id);
+    if (d) return d.status !== 'ratified';
+    return false; // dangling ref — don't block on it
+  });
   if (blockers.length) return { lane: 'blocked', who: null, label: `Blocked by ${blockers.join(', ')}`, blockers };
   if (card.phase === 'deciding') return card.plan
     ? { lane: 'implement', who: 'agent', label: 'Ready to implement' }
@@ -145,7 +156,7 @@ export function project(s, config = null) {
   });
   const milestones = s.milestones.map(m => ({ ...m, progress: milestoneProgress(m, s.cards) }));
   const inLane = (l) => cards.filter(c => c.lane.lane === l);
-  const openDecisions = s.decisions.filter(d => d.status !== 'ratified');
+  const openDecisions = s.decisions.filter(isBlocking);
   const counts = {
     byPhase: Object.fromEntries(PHASE_IDS.map(p => [p, cards.filter(c => c.phase === p).length])),
     forYou: openDecisions.length + inLane('activate').length,
@@ -290,15 +301,36 @@ function mintAcceptance(s, c) {
   c.log.unshift({ at: today(), text: `Requested acceptance — minted ${id}.` });
 }
 
+// D-TWRGUARD1=C (#458): frozen cards are owner-only for any write; triage
+// cards are owner-only for a phase change (greenlight is `activate`'s job) —
+// except the phase-'done' exit, which the done-gate above already governs.
+// Body/plan/log edits on a triage card stay open to agents (normal prep).
+// Agent-hard, owner-soft: by === 'owner' bypasses both checks outright.
+function assertOwnerLane(c, patch, by) {
+  if (by === 'owner') return;
+  if (c.phase === 'frozen')
+    fail('E_OWNER_LANE', `card #${c.num} is frozen — owner-only until it's activated (\`tower card activate\`)`);
+  if (c.phase === 'triage' && 'phase' in patch && patch.phase !== 'done')
+    fail('E_OWNER_LANE', `card #${c.num} is in triage — only the owner greenlights it out of triage (\`tower card activate\`); body/plan/log edits are fine`);
+}
+
 export function updateCard(s, ref, patch, config) {
   const c = mustCard(s, ref);
+  // Basic shape validation runs before the owner-lane authorization check, so
+  // a malformed request always reports E_INVALID/E_NOT_FOUND regardless of
+  // who sent it or what lane the card is in.
   checkEnum(patch.kind, config.kinds, 'kind');
   checkEnum(patch.track, config.tracks, 'track');
   checkEnum(patch.priority, config.priorities, 'priority');
   checkEnum(patch.phase, PHASE_IDS, 'phase');
   if ('epoch' in patch) checkEpoch(s, patch.epoch);
   if ('milestoneId' in patch) checkMilestone(s, patch.milestoneId);
-  if ('blockedBy' in patch) for (const id of patch.blockedBy || []) mustCard(s, id);
+  // blockedBy accepts a card ref OR a decision id (D-TWRGUARD1=C #458).
+  if ('blockedBy' in patch) for (const id of patch.blockedBy || []) {
+    if (!findCard(s, id) && !s.decisions.find(d => d.id === id))
+      fail('E_NOT_FOUND', `blockedBy: no card or decision ${id}`);
+  }
+  assertOwnerLane(c, patch, patch.by);
   const phaseOverride = 'phase' in patch ? applyDoneGate(s, c, patch.phase, patch.by) : null;
   for (const k of CARD_FIELDS) {
     if (k in patch) {
@@ -363,8 +395,14 @@ export function verifyCriterion(s, ref, n, { evidence, by } = {}) {
   return { ...item, cardId: c.id, cardNum: c.num };
 }
 
+// D-TWRGUARD1=C (#458): a card with any ratified decision refuses delete for
+// everyone, owner included, for now — it retires to a history store instead
+// once #461 lands. Detach/archive it first.
 export function deleteCard(s, ref, p = {}) {
   const c = mustCard(s, ref);
+  const ratified = s.decisions.filter(d => d.cardId === c.id && d.status === 'ratified');
+  if (ratified.length)
+    fail('E_HAS_RATIFIED', `card #${c.num} has ${ratified.length} ratified decision${ratified.length > 1 ? 's' : ''} (${ratified.map(d => d.id).join(', ')}) — detach or archive them first`);
   s.cards = s.cards.filter(x => x.id !== c.id);
   s.decisions = s.decisions.filter(d => d.cardId !== c.id);
   s.questions = s.questions.filter(q => q.cardId !== c.id);
@@ -373,9 +411,19 @@ export function deleteCard(s, ref, p = {}) {
   return { ok: true, id: c.id };
 }
 
-// Activate a triaged/frozen card into a working track.
-export function activate(s, ref, { track, epoch, milestoneId, phase, workOrder, by } = {}, config) {
+// Owner-only gate shared by activate/ratify (D-TWRGUARD1=C #458). An agent
+// may act "on behalf of" the owner by quoting his words verbatim — recorded
+// in the event log note — otherwise refused.
+function assertOwnerOr(by, quote, code, what) {
+  if (by === 'owner') return null;
+  if (!quote || !String(quote).trim()) fail(code, `${what} is owner-only — pass --quote "owner's words" if this is on his behalf`);
+  return `by ${by}, quoting owner: "${quote}"`;
+}
+
+// Activate a triaged/frozen card into a working track. Owner-only (greenlight).
+export function activate(s, ref, { track, epoch, milestoneId, phase, workOrder, by, quote } = {}, config) {
   const c = mustCard(s, ref);
+  const quoteNote = assertOwnerOr(by, quote, 'E_OWNER_ONLY', 'activate');
   checkEnum(track, config.tracks, 'track');
   checkEnum(phase, PHASE_IDS, 'phase');
   if (epoch !== undefined) checkEpoch(s, epoch);
@@ -384,12 +432,12 @@ export function activate(s, ref, { track, epoch, milestoneId, phase, workOrder, 
   if (epoch !== undefined) c.epoch = epoch;
   if (milestoneId !== undefined) c.milestoneId = milestoneId;
   if (workOrder != null) c.workOrder = Number(workOrder);
-  const hasOpen = s.decisions.some(d => d.cardId === c.id && d.status !== 'ratified');
+  const hasOpen = s.decisions.some(d => d.cardId === c.id && isBlocking(d));
   const requestedPhase = phase || (hasOpen ? 'deciding' : 'planning');
   c.phase = applyDoneGate(s, c, requestedPhase, by) || requestedPhase;
   c.updated = today();
-  c.log.unshift({ at: today(), by: by || 'owner', text: `Activated into ${c.track === 'epoch' ? 'epoch ' + (c.epoch || '?') : c.track} track` });
-  logEvent(s, { by, action: 'card.activate', ref: c.id });
+  c.log.unshift({ at: today(), by: by || 'owner', text: `Activated into ${c.track === 'epoch' ? 'epoch ' + (c.epoch || '?') : c.track} track${quoteNote ? ` (${quoteNote})` : ''}` });
+  logEvent(s, { by, action: 'card.activate', ref: c.id, note: quoteNote || '' });
   return c;
 }
 
@@ -397,56 +445,102 @@ export function activate(s, ref, { track, epoch, milestoneId, phase, workOrder, 
 export function claimCard(s, ref, by) {
   const c = mustCard(s, ref);
   if (!by) fail('E_INVALID', 'claim needs --by <agent>');
+  if (by !== 'owner' && c.phase === 'frozen')
+    fail('E_OWNER_LANE', `card #${c.num} is frozen — owner-only until it's activated (\`tower card activate\`)`);
   if (c.assignee && c.assignee !== by) fail('E_CLAIMED', `card #${c.num} already claimed by ${c.assignee} — pick another or release it first`);
   c.assignee = by; c.claimedAt = now(); c.updated = today();
   logEvent(s, { by, action: 'card.claim', ref: c.id });
   return c;
 }
-export function releaseCard(s, ref, by) {
+// D-TWRGUARD1=C (#458): releasing a card mid-`building` without a handoff
+// note leaves the next agent to restart from zero — require one from agents.
+export function releaseCard(s, ref, by, handoff) {
   const c = mustCard(s, ref);
+  if (by !== 'owner' && c.phase === 'building') {
+    if (!handoff || !String(handoff).trim())
+      fail('E_HANDOFF', `releasing #${c.num} while building needs --handoff "what's done, what's left, gotchas" so the next agent doesn't restart from zero`);
+    c.log.unshift({ at: today(), by, text: `[handoff] ${handoff}` });
+  }
   c.assignee = null; delete c.claimedAt; c.updated = today();
-  logEvent(s, { by, action: 'card.release', ref: c.id });
+  logEvent(s, { by, action: 'card.release', ref: c.id, note: handoff ? '[handoff] logged' : '' });
   return c;
 }
 
 // ---- mutations: decisions --------------------------------------------------
 
+// D-TWRGUARD1=C (#458): the ballot-ready standard (tower-ballot skill) —
+// gist/story/inWild/options[].code/rec — enforced at write time. Acceptance
+// ballots (`mintAcceptance` above) are a fixed system-generated evidence
+// format, not a narrative ballot, and are exempt.
+function ballotGaps(p) {
+  const missing = [];
+  if (!p.gist || !String(p.gist).trim()) missing.push('gist');
+  if (!p.story || !String(p.story).trim()) missing.push('story');
+  if (!p.inWild || !String(p.inWild).trim()) missing.push('inWild');
+  const opts = Array.isArray(p.options) ? p.options : [];
+  if (opts.length < 2) missing.push('options (need at least 2)');
+  else {
+    const noCode = opts.filter(o => !o || !o.code || !String(o.code).trim());
+    if (noCode.length) missing.push(`options[].code (missing on ${noCode.map((o, i) => (o && o.key) || `#${i + 1}`).join(', ')})`);
+  }
+  if (!p.rec || !String(p.rec).trim()) missing.push('rec');
+  return missing;
+}
+
 export function addDecision(s, p) {
   const card = mustCard(s, p.cardId);
   if (!p.title || !String(p.title).trim()) fail('E_INVALID', 'decision needs a title');
   if (p.id && s.decisions.find(d => d.id === p.id)) fail('E_INVALID', `decision id ${p.id} already exists`);
+  const draft = !!p.draft;
+  if (!draft && p.group !== 'acceptance') {
+    const gaps = ballotGaps(p);
+    if (gaps.length) fail('E_BALLOT', `ballot not ready — missing: ${gaps.join(', ')} (pass --draft to save a work-in-progress ballot)`);
+  }
   const d = { id: p.id || newId('D-'), cardId: card.id, group: p.group || 'other',
     title: String(p.title).trim(), gist: p.gist || '', explainer: p.explainer || '', story: p.story || '',
     inWild: p.inWild || '', detail: p.detail || '', options: p.options || [], comparisons: p.comparisons || [],
-    rec: p.rec || null, status: 'open', created: now() };
+    rec: p.rec || null, draft, status: 'open', created: now() };
   s.decisions.push(d);
-  logEvent(s, { by: p.by, action: 'decision.add', ref: d.id, note: d.title });
+  logEvent(s, { by: p.by, action: 'decision.add', ref: d.id, note: draft ? `${d.title} (draft)` : d.title });
   return d;
 }
 
-export function ratify(s, decisionId, outcome, comment, by) {
+const SYNTAX_RATIFY_CHORES = ['Syntax.rs entry updated', 'syntax-decisions.md log entry', 'jet devtools grammars regenerated', 'snapshots re-blessed'];
+
+// D-TWRGUARD1=C (#458): ratifying a syntax-group decision auto-appends the
+// standard post-ratification chores to the card's exit-criteria checklist
+// (#463 model), skipping any that already exist.
+function appendSyntaxChores(s, c, by) {
+  if (!c) return;
+  const have = new Set((c.criteria || []).map(i => i.text));
+  for (const text of SYNTAX_RATIFY_CHORES) if (!have.has(text)) addCriterion(s, c.id, text, by || 'agent');
+}
+
+export function ratify(s, decisionId, outcome, comment, by, quote) {
   const d = s.decisions.find(x => x.id === decisionId) || fail('E_NOT_FOUND', `no decision ${decisionId}`);
   if (!outcome) fail('E_INVALID', 'ratify needs an outcome (option key)');
+  if (Array.isArray(d.options) && d.options.length && !d.options.some(o => o.key === outcome))
+    fail('E_INVALID', `outcome "${outcome}" is not one of this decision's option keys: ${d.options.map(o => o.key).join(', ')}`);
+  const quoteNote = assertOwnerOr(by, quote, 'E_OWNER_ONLY', 'ratify');
   d.status = 'ratified'; d.outcome = outcome;
   if (comment != null) d.comment = comment;
   d.ratifiedAt = today();
+  const c = s.cards.find(x => x.id === d.cardId);
   // Acceptance ballots (D-ACCEPT-<num>, minted by the done-gate) resolve the
   // card directly: accept closes it, bounce sends it back to building.
-  if (d.id.startsWith('D-ACCEPT-')) {
-    const c = s.cards.find(x => x.id === d.cardId);
-    if (c) {
-      if (outcome === 'accept') {
-        c.phase = 'done';
-        c.log.unshift({ at: today(), by: by || 'owner', text: `Accepted — ${d.id} ratified accept.` });
-      } else if (outcome === 'bounce') {
-        c.phase = 'building';
-        c.log.unshift({ at: today(), by: by || 'owner', text: `Bounced back to building: ${comment || '(no comment)'}` });
-      }
-      c.updated = today();
+  if (d.id.startsWith('D-ACCEPT-') && c) {
+    if (outcome === 'accept') {
+      c.phase = 'done';
+      c.log.unshift({ at: today(), by: by || 'owner', text: `Accepted — ${d.id} ratified accept.` });
+    } else if (outcome === 'bounce') {
+      c.phase = 'building';
+      c.log.unshift({ at: today(), by: by || 'owner', text: `Bounced back to building: ${comment || '(no comment)'}` });
     }
+    c.updated = today();
   }
+  if (d.group === 'syntax') appendSyntaxChores(s, c, by);
   advanceClearedCard(s, d.cardId);
-  logEvent(s, { by: by || 'owner', action: 'decision.ratify', ref: d.id, note: outcome });
+  logEvent(s, { by: by || 'owner', action: 'decision.ratify', ref: d.id, note: quoteNote ? `${outcome} (${quoteNote})` : outcome });
   return d;
 }
 
@@ -461,8 +555,38 @@ export function updateDecision(s, id, patch, by) {
   const d = s.decisions.find(x => x.id === id) || fail('E_NOT_FOUND', `no decision ${id}`);
   for (const k of ['title', 'gist', 'explainer', 'story', 'inWild', 'detail', 'options', 'comparisons', 'rec', 'group'])
     if (k in patch) d[k] = patch[k];
-  logEvent(s, { by, action: 'decision.update', ref: d.id });
+  // --ready clears draft, but only once the ballot standard is actually met.
+  if (patch.ready) {
+    if (d.group !== 'acceptance') {
+      const gaps = ballotGaps(d);
+      if (gaps.length) fail('E_BALLOT', `ballot not ready — missing: ${gaps.join(', ')}`);
+    }
+    d.draft = false;
+  }
+  logEvent(s, { by, action: 'decision.update', ref: d.id, note: patch.ready ? 'marked ready' : '' });
   return d;
+}
+
+// D-TWRGUARD1=C (#458): tower verdict — an owner ruling recorded as an
+// already-ratified decision (never a log note) so it's durable + auditable.
+// Owner-only, no quote exception (this IS the owner speaking).
+export function mintVerdict(s, ref, outcome, title, by) {
+  const c = mustCard(s, ref);
+  if (by !== 'owner') fail('E_OWNER_ONLY', 'tower verdict is owner-only');
+  if (!outcome || !String(outcome).trim()) fail('E_INVALID', 'verdict needs an outcome');
+  let k = 1;
+  while (s.decisions.find(x => x.id === `D-VERDICT-${c.num}-${k}`)) k++;
+  const id = `D-VERDICT-${c.num}-${k}`;
+  const d = { id, cardId: c.id, group: 'verdict',
+    title: title || `Verdict on #${c.num} — ${c.title}`,
+    gist: '', explainer: '', story: '', inWild: '', detail: '', options: [], comparisons: [],
+    rec: null, draft: false, status: 'ratified', outcome, comment: outcome,
+    created: now(), ratifiedAt: today() };
+  s.decisions.push(d);
+  c.log.unshift({ at: today(), by, text: `Verdict recorded (${id}): ${outcome}` });
+  c.updated = today();
+  logEvent(s, { by, action: 'decision.verdict', ref: id, note: outcome });
+  return { ...d, cardNum: c.num };
 }
 
 export function deleteDecision(s, id, by) {
@@ -475,7 +599,7 @@ export function deleteDecision(s, id, by) {
 function advanceClearedCard(s, cardId) {
   const c = s.cards.find(x => x.id === cardId);
   if (!c || c.phase !== 'deciding') return;
-  const stillOpen = s.decisions.some(d => d.cardId === cardId && d.status !== 'ratified');
+  const stillOpen = s.decisions.some(d => d.cardId === cardId && isBlocking(d));
   if (stillOpen) return;
   c.phase = c.plan ? 'ready' : 'planning';
   c.updated = today();

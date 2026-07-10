@@ -48,7 +48,9 @@ everything as JSON; `tower status` is the human summary.
    verify > implement > plan. Respect `blockedBy`; never route around a gate.
 3. Claim before working when other agents may be active:
    `tower card claim <#> --by <me>` (already claimed → pick another).
-   Release with `tower card release <#> --by <me>` if you stop.
+   Release with `tower card release <#> --by <me>` if you stop — releasing a
+   card that's `building` needs `--handoff "what's done, what's left,
+   gotchas"` (`E_HANDOFF` otherwise) so the next agent isn't starting cold.
 4. Do the work per the host repo's own conventions (its CLAUDE.md/AGENTS.md
    rule the *how*; Tower rules the *what/when*).
 5. Advance with attribution:
@@ -66,6 +68,23 @@ everything as JSON; `tower status` is the human summary.
 6. Report through the board itself: a `--log` entry on each card you advanced
    and a question/ballot for anything newly blocked on the owner — those are
    what the owner sees (and gets push notifications for).
+
+## Guards (agent-hard, owner-soft)
+
+Writes with `--by` other than `owner` are gated; `--by owner` bypasses
+everything (bypass event-logged). Full table in Tower/AGENTS.md; headlines:
+
+- `decision add` needs a full ballot (gist/story/inWild/options[].code/rec)
+  or `E_BALLOT` — save unfinished work with `--draft`, finish later with
+  `decision update <id> --ready`.
+- `decision ratify` / `card activate` are owner-only (`E_OWNER_ONLY`) unless
+  you pass `--quote "owner's words"` for an on-behalf-of action.
+- Frozen and triage-phase-change writes are owner-only (`E_OWNER_LANE`);
+  body/plan/log edits on a triage card are still fine.
+- `card delete` refuses when a ratified decision is attached (`E_HAS_RATIFIED`).
+- `decision ratify --outcome` must match one of the decision's option keys.
+- Own an owner ruling with `tower verdict '#N' --outcome "..." --by owner` —
+  it mints a durable ratified decision instead of a log note that gets lost.
 
 ## Non-negotiables
 
