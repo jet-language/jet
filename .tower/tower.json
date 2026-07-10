@@ -3,8 +3,8 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 481,
-    "rev": 3036,
+    "nextNum": 482,
+    "rev": 3064,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -5170,12 +5170,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-universal-product-parity",
-      "phase": "ready",
+      "phase": "verify",
       "priority": "P1",
       "plan": "No owner gate: D-OSFACTS1=A fixes core.os.on_interrupt. Failing tests first. Replace one-thread-per-registration and non-Windows no-op with one process-lifetime dispatcher: additive ordered handlers, platform callback only increments an atomic counter, dispatcher drains events and invokes all handlers outside locks; registration acknowledged before return and one handler panic cannot kill later handlers. Unix keeps vetted signal FFI; Windows uses SetConsoleCtrlHandler for CTRL_C_EVENT under a vetted generated-runtime boundary. Unsupported targets fail honestly, never silently discard. Generated interrupt machinery strips entirely when unused. Add structural emission/stripping tests, real multi-handler lifecycle proof, native Windows console proof in CI, and process-lifetime docs. No external deps. Parent full suite.",
       "blockedBy": [],
-      "assignee": "terra-292-builder",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-07-10",
+          "by": "codex-main",
+          "text": "Implementation independently reviewed with no findings. Linux runtime proves additive ordering, registration liveness, panic isolation, atomic callback, unsupported branch, and stripping; focused core_os 3/3, exact scheduler boundary 1/1, jet-codegen check green. Native Windows runtime test is wired into windows-latest but has not run locally; criteria 1 and 6 remain open pending green Windows CI. Separate discovered closed-channel select hang tracked as #481."
+        },
         {
           "at": "2026-07-10",
           "by": "codex-orchestrator",
@@ -5223,38 +5228,38 @@
         {
           "n": 2,
           "text": "Two or more registrations run additively in registration order for every observed interrupt; no event is stolen or handler lost, and registration is live when on_interrupt returns.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-10T20:44:20.614Z"
+          "status": "verified",
+          "metBy": "terra-292-builder",
+          "verifiedBy": "sol-292-review",
+          "evidence": "Independent Sol review confirmed additive ordering, ack-before-return, panic-first/later-handler runtime proof; core_os focused test passes.",
+          "at": "2026-07-10T21:26:34.967Z"
         },
         {
           "n": 3,
           "text": "OS callbacks perform only async-safe atomic notification; handler execution occurs on the dispatcher and one panicking handler cannot kill later handlers.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-10T20:44:20.761Z"
+          "status": "verified",
+          "metBy": "terra-292-builder",
+          "verifiedBy": "sol-292-review",
+          "evidence": "Independent Sol audit found no remaining generated-runtime exit-70 bypass; RAII cleanup and panic continuation verified by runtime and exact scheduler test.",
+          "at": "2026-07-10T21:26:35.280Z"
         },
         {
           "n": 4,
           "text": "Unsupported targets fail honestly; process-lifetime registration semantics are documented; data-only core.os facts remain portable.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-10T20:44:20.917Z"
+          "status": "verified",
+          "metBy": "terra-292-builder",
+          "verifiedBy": "sol-292-review",
+          "evidence": "Independent review confirmed explicit unsupported branch and accurate process-lifetime documentation; no silent no-op.",
+          "at": "2026-07-10T21:26:35.574Z"
         },
         {
           "n": 5,
           "text": "Programs not calling on_interrupt contain no interrupt FFI or unsafe runtime machinery; compiler dependencies remain unchanged.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-10T20:44:21.073Z"
+          "status": "verified",
+          "metBy": "terra-292-builder",
+          "verifiedBy": "sol-292-review",
+          "evidence": "Independent stripping/dependency review and focused core_os structural test pass.",
+          "at": "2026-07-10T21:26:35.880Z"
         },
         {
           "n": 6,
@@ -5267,8 +5272,7 @@
         }
       ],
       "needsAcceptance": false,
-      "refs": [],
-      "claimedAt": "2026-07-10T21:05:07.632Z"
+      "refs": []
     },
     {
       "id": "c0rmuc30",
@@ -6332,7 +6336,7 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "deciding",
       "priority": "P1",
       "plan": "Plan built 2026-07-07 by codex-main.\n\nFocus: jetos: options reference + search (search.nixos.org parity, typed)\n\nCurrent law: Ratified law: D-JPK-DISCOVER1 covers search/info/LSP; D-JPK-OSNS1/D-JOS-SYSTEMTREE1 define option namespaces.\n\nBuild order: Generate typed option index from declarations; expose search/info/LSP/Studio projections; include provenance, defaults, examples, and deprecation facts.\n\nAcceptance: Search returns exact option docs and source; tests ratchet index generation and query ranking; no hand-maintained stale index.\n\nDependencies/collisions: Depends on #262 module schema and #331 priority semantics for explain output.\n\nOwner gates: No gate if reusing `jet search`/`jet info`; ballot if adding a new public verb.",
       "blockedBy": [],
@@ -6820,7 +6824,7 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "deciding",
       "priority": "P1",
       "plan": "Plan refreshed 2026-07-07 by codex-main.\n\nRatified decisions:\n- D-JPK-OVERLAY1=A: Hybrid: workspace policy plus reusable overlay modules and CLI drafting. workspace.jet owns reviewed policy and named overlay sets. Per-package overlay modules can package reusable override logic, but they must materialize as typed workspace policy facts. CLI commands are allowed only as drafting tools that write source patches/policy, not hidden state.\n\nReady state: Owner gates clear; card is ready for implementation.\n\nPlan built 2026-07-07 by codex-main.\n\nFocus: jetpack: package overlays, per-package overrides, and source patches (nixpkgs overlay parity)\n\nCurrent law: Jetpack law: D-JPK provider/catalog/lock/replacement decisions are ratified, but overlay/override source syntax is not.\n\nBuild order: extend workspace/pkg parsing for typed override records; merge with provider authority graph; apply patches in sandboxed source realization; record explain facts for every override; add lock/provenance tests.\n\nAcceptance: Overlays/patches/channel overrides/unfree policy have tests, docs, examples, and `jet explain` output. No untyped fixpoint; no network outside ratified fetch phases.\n\nDependencies/collisions: Coordinates with #234 providers, #242 native replacements, #231 strict graph/catalogs, and #337 jetos fixture.",
       "blockedBy": [
@@ -6876,7 +6880,44 @@
       ],
       "created": "2026-07-07T17:37:59.565Z",
       "updated": "2026-07-10",
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Syntax.rs entry updated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T21:23:39.409Z"
+        },
+        {
+          "n": 2,
+          "text": "syntax-decisions.md log entry",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T21:23:39.409Z"
+        },
+        {
+          "n": 3,
+          "text": "jet devtools grammars regenerated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T21:23:39.409Z"
+        },
+        {
+          "n": 4,
+          "text": "snapshots re-blessed",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T21:23:39.409Z"
+        }
+      ],
       "needsAcceptance": false,
       "refs": [],
       "workOrder": 88
@@ -6890,12 +6931,16 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P1",
       "plan": "Plan built 2026-07-07 by codex-main.\n\nFocus: jetos: app config module library — programs.* parity breadth\n\nCurrent law: Ratified law: per-user environment may become #321; package/provider law exists.\n\nBuild order: After #321, build app-module template and first app modules: git, ssh, fish, starship, ghostty, helix, yazi, btop, bat, eza, fzf, zoxide, ripgrep, tealdeer, VS Code/Cursor, browsers, Discord/spicetify where providers exist.\n\nAcceptance: Every listed app has module, test fixture, or gap card; generated files/services are proven in VM/home fixture.\n\nDependencies/collisions: Blocked by #321 user-env surface and #330 overlays/provider policy for extensions/patching.\n\nOwner gates: No separate gate for library breadth; ballot only new module declaration syntax.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-10",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
         {
           "at": "2026-07-10",
           "by": "claude-main",
@@ -6939,7 +6984,44 @@
       ],
       "created": "2026-07-07T17:37:59.693Z",
       "updated": "2026-07-10",
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Syntax.rs entry updated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T21:25:06.965Z"
+        },
+        {
+          "n": 2,
+          "text": "syntax-decisions.md log entry",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T21:25:06.965Z"
+        },
+        {
+          "n": 3,
+          "text": "jet devtools grammars regenerated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T21:25:06.965Z"
+        },
+        {
+          "n": 4,
+          "text": "snapshots re-blessed",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T21:25:06.965Z"
+        }
+      ],
       "needsAcceptance": false,
       "refs": [],
       "workOrder": 118
@@ -12902,7 +12984,7 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "deciding",
       "priority": "P1",
       "plan": null,
       "blockedBy": [],
@@ -12998,13 +13080,50 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "deciding",
       "priority": "P1",
       "plan": null,
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Syntax.rs entry updated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T21:24:07.758Z"
+        },
+        {
+          "n": 2,
+          "text": "syntax-decisions.md log entry",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T21:24:07.758Z"
+        },
+        {
+          "n": 3,
+          "text": "jet devtools grammars regenerated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T21:24:07.758Z"
+        },
+        {
+          "n": 4,
+          "text": "snapshots re-blessed",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T21:24:07.758Z"
+        }
+      ],
       "refs": [],
       "needsAcceptance": false,
       "created": "2026-07-10T21:03:54.158Z",
@@ -13024,7 +13143,12 @@
       "plan": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-10",
+          "text": "All decisions ratified; advanced out of deciding."
+        }
+      ],
       "criteria": [],
       "refs": [],
       "needsAcceptance": false,
@@ -13061,7 +13185,7 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "deciding",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
@@ -13119,7 +13243,7 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "deciding",
       "priority": "P1",
       "plan": null,
       "blockedBy": [],
@@ -13177,7 +13301,7 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "deciding",
       "priority": "P1",
       "plan": null,
       "blockedBy": [],
@@ -13198,7 +13322,7 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "deciding",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
@@ -13240,7 +13364,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-universal-product-parity",
-      "phase": "planning",
+      "phase": "deciding",
       "priority": "P1",
       "plan": null,
       "blockedBy": [],
@@ -13250,6 +13374,29 @@
       "refs": [],
       "needsAcceptance": false,
       "created": "2026-07-10T21:04:57.727Z",
+      "updated": "2026-07-10"
+    },
+    {
+      "id": "c068vbs2",
+      "num": 481,
+      "title": "scheduler select hangs when every channel arm closes",
+      "body": "A real JetSchedulerChannel select wakes on close but never rechecks whether all arms are closed and empty, so it parks forever instead of returning JetSelectOutcome::Closed. Found while proving #292 interrupt panic isolation. Reproduction: closed-select runtime test hung until terminated. Fix scheduler select to check all channel arms before parking and again after wake; preserve cancellation and timer semantics.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": "Add deterministic closed-channel select regression first. Update jet_scheduler_select to return Closed when every channel arm is closed and empty, both before initial park and after wake. Cover one closed receiver, multiple all-closed arms, mixed closed plus pending timer, cancellation precedence, and no busy-loop. Run focused jet-codegen scheduler tests and affected task/select integration tests; independent review required.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "crates/jet-codegen/src/Prelude/Scheduler.rs"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-10T21:25:06.415Z",
       "updated": "2026-07-10"
     }
   ],
@@ -22885,8 +23032,10 @@
       ],
       "rec": "B",
       "draft": false,
-      "status": "open",
-      "created": "2026-07-10T21:18:02.121Z"
+      "status": "ratified",
+      "created": "2026-07-10T21:18:02.121Z",
+      "outcome": "B",
+      "ratifiedAt": "2026-07-10"
     },
     {
       "id": "D-JOS-OPTIONSVERB1",
@@ -22937,8 +23086,10 @@
       ],
       "rec": "B",
       "draft": false,
-      "status": "open",
-      "created": "2026-07-10T21:18:02.201Z"
+      "status": "ratified",
+      "created": "2026-07-10T21:18:02.201Z",
+      "outcome": "B",
+      "ratifiedAt": "2026-07-10"
     },
     {
       "id": "D-JOS-NETWORK1",
@@ -22995,8 +23146,10 @@
       ],
       "rec": "B",
       "draft": false,
-      "status": "open",
-      "created": "2026-07-10T21:18:02.284Z"
+      "status": "ratified",
+      "created": "2026-07-10T21:18:02.284Z",
+      "outcome": "B",
+      "ratifiedAt": "2026-07-10"
     },
     {
       "id": "D-JOS-APPSTORE1",
@@ -23053,8 +23206,10 @@
       ],
       "rec": "D",
       "draft": false,
-      "status": "open",
-      "created": "2026-07-10T21:19:01.899Z"
+      "status": "ratified",
+      "created": "2026-07-10T21:19:01.899Z",
+      "outcome": "D",
+      "ratifiedAt": "2026-07-10"
     },
     {
       "id": "D-JOS-APPMODULE1",
@@ -23106,8 +23261,78 @@
       ],
       "rec": "B",
       "draft": false,
+      "status": "ratified",
+      "created": "2026-07-10T21:22:30.810Z",
+      "outcome": "B",
+      "ratifiedAt": "2026-07-10"
+    },
+    {
+      "id": "D-NATIVEUI3",
+      "cardId": "c0wqwqaq",
+      "group": "architecture",
+      "title": "Mobile (iOS/Android): compile target scope and who owns signing + store submission",
+      "gist": "Whether Jet compiles real iOS and Android apps as first-class targets, and whether signing and app-store submission are first-party Jet commands or someone else's tools.",
+      "explainer": "Glossary first. **Code signing**: Apple and Google refuse to run an app unless its binary is cryptographically signed with a developer key; unsigned apps do not install on a phone, period. **Provisioning profile**: an Apple file that says which developer, which app id, and which devices a signed iOS build may run on. **Keystore**: the Android equivalent — a local file holding the signing key; lose it and you can never update your app again. **App Store Connect / Play Console**: Apple's and Google's web services where builds are uploaded, reviewed, and released; both expose official REST APIs. **Notarization**: Apple's malware scan for apps distributed *outside* the Mac App Store (macOS-side; iOS App Store review replaces it). **NDK**: Google's toolkit for putting native (non-Java) code in an Android app. **.ipa / .aab**: the upload file formats for the App Store and Play Store.\n\nScope of this ballot: card #480 gates G1 (target scope) and G2 (signing/store ownership), which are coupled — a compile target you cannot sign is a demo, not a product. G3 (the Android/Kotlin widget-interop transport, the JNI parallel to ratified D-FFI-SWIFT1) and G4 (native hot-reload/preview) are **explicitly deferred to follow-up ballots on this card**; every option below is compatible with any G3/G4 outcome. iOS widget access needs no new gate: D-FFI-SWIFT1 (=A) already ratifies the Swift bridge for macOS/iOS.\n\nRatified frame this must extend: D-NATIVEUI1=A (thin core library over platform widget APIs via FFI, own renderer later), D-NATIVEUI2=B (all platforms simultaneously, one Backend seam), #134's shipped GTK4 backend (same reactive/view/style/component model on every backend — I8), and D-BUILDTOOLCHAIN1=A (toolchains, SDKs, and signing identities are typed jetpack-provisioned handles). Options A and B continue that family; option C knowingly diverges from it and says so.\n\nOne hard external fact shapes everything: Apple licenses the iOS SDK for use on Apple hardware only, so *linking* an iOS app requires a Mac with the Xcode SDK present no matter who owns the rest of the pipeline. Every option below handles that with an honest gated error on other hosts (the D-FFI-SWIFT1 precedent). Android has no such wall: the NDK, the .aab bundler, APK signing, and the Play upload API are all fully driveable first-party from any OS.\n\nTrust-boundary note (this is the real long-term cost, and it is a safety question, not an effort question): Apple and Google change store policy and API details continuously. Whatever owns the pipeline inherits that churn forever. In options A and B the churn is contained in jetpack — a separately versioned tool — so the Jet language, compiler, and runtime never change to satisfy a store policy. In option C the churn lands on the user, inside Xcode and Android Studio projects Jet does not see.",
+      "story": "Priya built a notes app in Jet. It runs on her Linux desktop today through the GTK4 backend from the same reactive code, and `jet build --target=web` gives her a web version. Her users keep asking for it on their phones. In Swift she would open Xcode, sign in with her Apple account, let Xcode manage certificates, and press Archive → Distribute. In Jet, right now, there is nothing — `--target=ios` does not exist. She wants to know: can she stay in Jet from `notes.jet` all the way to a build her mother can install from the App Store, or does Jet hand her off to Xcode and Android Studio at the finish line? Where that handoff happens (never / at signing / at the whole UI layer / this epoch at all) is exactly this decision.",
+      "inWild": "// notes.jet — one reactive UI model, every backend (D-NATIVEUI2=B, #134)\n#Reactive\nfn NotesView() -> View {\n    notes :: Signal.new([\"buy oat milk\"])\n    .Column.{\n        children: [\n            .TextField.{ placeholder: \"New note\", on_submit: fn(t) { notes.set(notes.get() + [t]) } },\n            .List.{ items: notes.get() },\n        ],\n    }\n}\n// Today this renders via GTK4 on Linux, DOM on web, TUI in a terminal.\n// This ballot decides whether the same file becomes Notes.app on an iPhone\n// and notes.aab on the Play Store — and what Priya types to get there.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Tier-1 mobile targets; Jet owns signing and store submission end to end",
+          "detail": "Core loop: `jet build --target=ios|android` compiles the same reactive app natively, and one first-party command signs it with locally held keys and uploads it to the store — no Apple or Google tool is ever run. iOS/Android become real compile targets through the existing rustc backend (aarch64-apple-ios, aarch64-linux-android via a jetpack-pinned NDK), rendering native widgets per D-NATIVEUI1=A — UIKit via the ratified D-FFI-SWIFT1 bridge, Android views via the G3 follow-up ballot. Signing is implemented first-party (the Ed25519 signing tier D-PKGSIGN1 set this precedent; pure-Rust Apple codesigning is proven ground — see the rcodesign comparison). Submission talks directly to the App Store Connect API and Play Developer API. Users type `jet ship`; jetpack is the engine behind the seam, same dispatch shape as `jet os` — so store-API churn lives in a separately updateable tool, never in the compiler, and signing keys never leave the user's machine (contrast Expo, which holds them in the cloud). Honest gate: iOS builds still require a Mac with the Xcode SDK installed (Apple's license), but Xcode is never opened; Android works from any OS, fully offline until upload. This is the only option under which \"no reason to reach for another language\" is literally true for mobile.",
+          "code": "$ jet build --target=android\n   toolchain  android-ndk r27 (jetpack, pinned)\n   compiled   notes.jet -> aarch64-linux-android\n   built      target/android/notes.aab\n\n$ jet ship android\n   no signing key found -> created ./release.keystore (BACK THIS FILE UP:\n   Google will not let you update the app without it)\n   signed     notes.aab\n   uploaded   Play Console -> internal testing track (build 1)\n\n$ jet ship ios            # on her Mac\n   signed in to App Store Connect (team: Priya Rao)\n   created signing certificate + provisioning profile (stored locally;\n   keys never leave this machine)\n   signed     Notes.ipa (Apple Distribution: Priya Rao)\n   uploaded   App Store Connect -> TestFlight build 1\n\n$ jet build --target=ios  # on her Linux desktop\nerror: building for iOS requires the Apple SDK, which Apple licenses\n       only on Apple hardware\n  what: the iOS target links against Apple's UIKit frameworks\n  fix:  run this on a Mac (or a macOS CI runner) with Xcode installed —\n        Jet uses its SDK, you never open it. `--target=android` works here."
+        },
+        {
+          "key": "B",
+          "name": "Tier-1 mobile targets; jetpack orchestrates Apple/Google tools for signing and submission",
+          "detail": "Core loop: Jet compiles natively exactly as in A, but `jet ship` drives Apple's and Google's own command-line tools (codesign, Transporter, apksigner, bundletool) under the hood instead of reimplementing them — the fastlane/Tauri shape. The user types the same commands as A and jetpack provisions and hash-pins the vendor tools as toolchain deps (D-BUILDTOOLCHAIN1=A), laundering their errors into Jet diagnostics in the I2 spirit — raw xcodebuild output never reaches the user. What changes versus A is the trust and failure surface: the pipeline is only as correct, as offline-capable, and as scriptable as Apple's and Google's tools of the week; a vendor tool update can break `jet ship` in ways Jet can report but not fix, and iOS signing additionally requires the full Xcode command-line surface installed, not just the SDK. Keys still stay local. The compile-target half of this option is identical to A, so a later verdict could move B→A signing without touching the language.",
+          "code": "$ jet build --target=android\n   built      target/android/notes.aab      # identical to option A\n\n$ jet ship android\n   tool       apksigner 35.0 (jetpack, pinned)\n   signed     notes.aab (./release.keystore)\n   uploaded   Play Console -> internal testing track (build 1)\n\n$ jet ship ios\n   tool       Xcode command line tools 17.2\n   signed     Notes.ipa (via codesign)\n   uploaded   App Store Connect (via Transporter)\n\n$ jet ship ios            # Xcode CLT missing\nerror: shipping to the App Store needs Apple's command-line tools,\n       which Apple does not allow Jet to bundle\n  what: signing and upload run Apple's codesign and Transporter\n  fix:  xcode-select --install, then rerun `jet ship ios`"
+        },
+        {
+          "key": "C",
+          "name": "Jet compiles the logic core; UI shells are hand-written in Xcode / Android Studio",
+          "detail": "Core loop: `jet build --lib --target=ios|android` emits the app's state and logic as a static library with generated Swift and Kotlin bindings (the D-FFI-SWIFT1 bridge run in reverse), and the developer writes the screens twice — SwiftUI in Xcode, Compose in Android Studio — with Apple and Google owning signing and submission entirely. This is Kotlin Multiplatform's shape. Be clear about what it breaks: the one reactive/view/style/component model that D-NATIVEUI2=B and #134 built — the same `NotesView` that renders on GTK4, web, and TUI would NOT render on phones; only the data layer crosses. Two UI codebases per app, drifting independently, reviewed in tools Jet does not check — a permanent I8 exception on the two platforms with the most users. KMP itself is the cautionary tale: JetBrains spent years building Compose Multiplatform to escape exactly this split. Included because it is the honest industry-standard fallback shape, not because it fits Jet's frame.",
+          "code": "$ jet build --lib --target=ios\n   built      target/ios/NotesCore.xcframework\n   generated  bindings/swift/NotesCore/   (Swift package)\n\n// ContentView.swift — written by hand, in Xcode, per platform\nimport NotesCore\nstruct ContentView: View {\n    @State var notes = NotesCore.list()\n    var body: some View {\n        List(notes, id: \\.self) { Text($0) }   // GTK/web NotesView: unused here\n    }\n}\n// Signing + submission: Xcode -> Product -> Archive -> Distribute App\n// Android: same again — AAR + hand-written Compose UI in Android Studio"
+        },
+        {
+          "key": "D",
+          "name": "Ratify deferral: mobile lands in Epoch 4, desktop/web/TUI finish first",
+          "detail": "Core loop: this epoch ships no mobile target, and that becomes a recorded decree with a named landing slot instead of a silent gap. Grounding is sequencing, not effort: the universal-language plan's own dependency order says UL9 native/mobile comes after UL2 + UL3 + UL6, #134's macOS/Windows desktop backends are still open, and native hot-reload (G4) is web-only — mobile shipped now would be the first backend without a complete dev loop behind it. The decree pins three things so the gap cannot silently rot: (1) `--target=ios|android` produce an honest error naming this decision and the epoch, not a parse error; (2) mobile, when it lands, follows D-NATIVEUI1/2 (same widget-FFI pattern, same one UI model — option A or B of this ballot re-raised then); (3) no interim semi-official path (no option-C shells) that would create a second way to mean it before the first exists. Cost: for at least an epoch, \"Jet replaces Swift\" is claimably false, and the two largest consumer platforms stay dark while Flutter and RN keep shipping there.",
+          "code": "$ jet build --target=ios\nerror: iOS is not a supported target in this epoch\n  what: mobile targets are scheduled for Epoch 4 (decision D-NATIVEUI3=D,\n        after the desktop backends and native hot-reload land)\n  fix:  `--target=web` produces an installable PWA your phone can run today\n\n# Board effect: #480 closes as decreed-deferred; #134 proceeds with\n# macOS/Windows desktop + native hot-reload unblocked and unsplit."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Flutter",
+          "note": "Proves the option-A compile half: Dart AOT-compiles to real arm64 on both platforms, no interpreter. But it never owned the ship half — `flutter build ipa` wraps xcodebuild, signing stays Xcode-managed, and submission is delegated to fastlane or Xcode. That seam is where Flutter's one-language story ends and users file toolchain bugs.",
+          "code": "$ flutter build ipa            # wraps xcodebuild under the hood\n$ open build/ios/archive/Runner.xcarchive   # ...and you're in Xcode anyway\n$ fastlane pilot upload        # third-party tool for the last mile"
+        },
+        {
+          "lang": "React Native + Expo EAS",
+          "note": "Shows the demand for one-command shipping — and the trust cost of renting it. Bare RN hands you Xcode/Android Studio projects (option C's ergonomics). Expo's answer, `eas build` / `eas submit`, is one command, but builds run on Expo's servers and Expo can hold your signing credentials in its cloud. Option A is that ergonomic loop with keys kept local.",
+          "code": "$ eas build --platform ios     # builds on Expo's servers\n$ eas submit --platform ios    # Expo-managed credentials, cloud-side"
+        },
+        {
+          "lang": "Kotlin Multiplatform",
+          "note": "Option C's shape, from its strongest proponent: shared Kotlin logic core, UI written twice in SwiftUI and Compose, Apple/Google tools own everything past the library boundary. JetBrains' own trajectory — years building Compose Multiplatform to render one UI on iOS too — is the evidence that the split-UI compromise does not hold.",
+          "code": "// shared/src/commonMain — logic crosses, UI does not\nclass NotesStore { fun add(note: String) { ... } }\n// iosApp/ContentView.swift and androidApp/MainActivity.kt: written twice"
+        },
+        {
+          "lang": "fastlane + rcodesign",
+          "note": "The feasibility evidence for option A's ship half: fastlane drives the App Store Connect and Play upload APIs from plain Ruby with no Xcode GUI, and rcodesign (pure Rust, no Apple code) signs and notarizes Mach-O binaries from Linux. First-party signing and submission is proven ground, not speculation — what no language toolchain has done is make it a built-in.",
+          "code": "$ rcodesign sign --p12-file dist.p12 Notes.app    # pure Rust, runs on Linux\n$ fastlane deliver                                # App Store Connect API, no Xcode GUI"
+        },
+        {
+          "lang": "Tauri 2",
+          "note": "Option B's shape in the wild: `tauri ios build` / `tauri android build` orchestrate xcodebuild and gradle under one CLI. Works, but users must install and maintain both vendor toolchains, and Tauri's issue tracker absorbs every xcodebuild/gradle regression as its own bug — the orchestrator owns the churn without owning the fix.",
+          "code": "$ npm run tauri ios build      # requires full Xcode installed\n$ npm run tauri android build  # requires Android Studio SDK + gradle"
+        }
+      ],
+      "rec": "A",
+      "draft": false,
       "status": "open",
-      "created": "2026-07-10T21:22:30.810Z"
+      "created": "2026-07-10T21:23:07.945Z"
     }
   ],
   "questions": [
@@ -23910,6 +24135,286 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-10T21:26:50.590Z",
+      "by": "terra-292-builder",
+      "action": "card.release",
+      "ref": "c0qi7dc2",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-10T21:26:50.517Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0qi7dc2",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-10T21:26:35.880Z",
+      "by": "sol-292-review",
+      "action": "card.criteria-verify",
+      "ref": "c0qi7dc2",
+      "note": "#5"
+    },
+    {
+      "at": "2026-07-10T21:26:35.727Z",
+      "by": "terra-292-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0qi7dc2",
+      "note": "#5"
+    },
+    {
+      "at": "2026-07-10T21:26:35.574Z",
+      "by": "sol-292-review",
+      "action": "card.criteria-verify",
+      "ref": "c0qi7dc2",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-10T21:26:35.428Z",
+      "by": "terra-292-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0qi7dc2",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-10T21:26:35.281Z",
+      "by": "sol-292-review",
+      "action": "card.criteria-verify",
+      "ref": "c0qi7dc2",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-10T21:26:35.127Z",
+      "by": "terra-292-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0qi7dc2",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-10T21:26:34.968Z",
+      "by": "sol-292-review",
+      "action": "card.criteria-verify",
+      "ref": "c0qi7dc2",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-10T21:26:34.810Z",
+      "by": "terra-292-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0qi7dc2",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-10T21:25:06.965Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-JOS-APPMODULE1",
+      "note": "B"
+    },
+    {
+      "at": "2026-07-10T21:25:06.965Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c013gf7s",
+      "note": "#4 snapshots re-blessed"
+    },
+    {
+      "at": "2026-07-10T21:25:06.965Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c013gf7s",
+      "note": "#3 jet devtools grammars regenerated"
+    },
+    {
+      "at": "2026-07-10T21:25:06.965Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c013gf7s",
+      "note": "#2 syntax-decisions.md log entry"
+    },
+    {
+      "at": "2026-07-10T21:25:06.965Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c013gf7s",
+      "note": "#1 Syntax.rs entry updated"
+    },
+    {
+      "at": "2026-07-10T21:25:06.416Z",
+      "by": "codex-main",
+      "action": "card.add",
+      "ref": "c068vbs2",
+      "note": "scheduler select hangs when every channel arm closes"
+    },
+    {
+      "at": "2026-07-10T21:24:34.214Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-JOS-APPSTORE1",
+      "note": "D"
+    },
+    {
+      "at": "2026-07-10T21:24:31.669Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0wqwqaq",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-10T21:24:29.806Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0om2gxe",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-10T21:24:27.927Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c013gf7s",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-10T21:24:26.034Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0yzg1yu",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-10T21:24:24.163Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0rfeel3",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-10T21:24:22.272Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0fchu51",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-10T21:24:20.351Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0qwckht",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-10T21:24:18.447Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0i0ho3h",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-10T21:24:16.579Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0qqwe62",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-10T21:24:14.737Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0pfsrnc",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-10T21:24:12.860Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0vntq8c",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-10T21:24:07.758Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-JOS-NETWORK1",
+      "note": "B"
+    },
+    {
+      "at": "2026-07-10T21:24:07.758Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0pfsrnc",
+      "note": "#4 snapshots re-blessed"
+    },
+    {
+      "at": "2026-07-10T21:24:07.758Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0pfsrnc",
+      "note": "#3 jet devtools grammars regenerated"
+    },
+    {
+      "at": "2026-07-10T21:24:07.758Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0pfsrnc",
+      "note": "#2 syntax-decisions.md log entry"
+    },
+    {
+      "at": "2026-07-10T21:24:07.758Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0pfsrnc",
+      "note": "#1 Syntax.rs entry updated"
+    },
+    {
+      "at": "2026-07-10T21:23:53.752Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-JOS-OPTIONSVERB1",
+      "note": "B"
+    },
+    {
+      "at": "2026-07-10T21:23:39.409Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-JPK-PKGOVERRIDE1",
+      "note": "B"
+    },
+    {
+      "at": "2026-07-10T21:23:39.409Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0yzg1yu",
+      "note": "#4 snapshots re-blessed"
+    },
+    {
+      "at": "2026-07-10T21:23:39.409Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0yzg1yu",
+      "note": "#3 jet devtools grammars regenerated"
+    },
+    {
+      "at": "2026-07-10T21:23:39.409Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0yzg1yu",
+      "note": "#2 syntax-decisions.md log entry"
+    },
+    {
+      "at": "2026-07-10T21:23:39.409Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0yzg1yu",
+      "note": "#1 Syntax.rs entry updated"
+    },
+    {
+      "at": "2026-07-10T21:23:07.945Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-NATIVEUI3",
+      "note": "Mobile (iOS/Android): compile target scope and who owns signing + store submission"
+    },
     {
       "at": "2026-07-10T21:23:03.560Z",
       "by": "owner",
@@ -27129,286 +27634,6 @@
       "action": "card.criteria-verify",
       "ref": "c17iww33",
       "note": "#3"
-    },
-    {
-      "at": "2026-07-10T14:48:41.456Z",
-      "by": "jet-verify",
-      "action": "card.criteria-verify",
-      "ref": "c17iww33",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-10T14:48:34.226Z",
-      "by": "jet-verify",
-      "action": "card.criteria-verify",
-      "ref": "c17iww33",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-10T14:44:05.591Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c17iww33",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T14:44:05.520Z",
-      "by": "claude-main",
-      "action": "card.criteria-meet",
-      "ref": "c17iww33",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-10T14:44:05.453Z",
-      "by": "claude-main",
-      "action": "card.criteria-meet",
-      "ref": "c17iww33",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-10T14:44:05.379Z",
-      "by": "claude-main",
-      "action": "card.criteria-meet",
-      "ref": "c17iww33",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-10T14:43:58.878Z",
-      "by": "claude-main",
-      "action": "card.criteria-add",
-      "ref": "c17iww33",
-      "note": "#3 I5 example examples/features/syntax/maturity_tags.jet + expe"
-    },
-    {
-      "at": "2026-07-10T14:43:58.807Z",
-      "by": "claude-main",
-      "action": "card.criteria-add",
-      "ref": "c17iww33",
-      "note": "#2 E0062 UI snapshots for retired #Experimental/#Tested/#Harden"
-    },
-    {
-      "at": "2026-07-10T14:43:58.744Z",
-      "by": "claude-main",
-      "action": "card.criteria-add",
-      "ref": "c17iww33",
-      "note": "#1 @Experimental/@Tested/@Hardened parse onto Func.maturity; fm"
-    },
-    {
-      "at": "2026-07-10T14:43:58.673Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c17iww33",
-      "note": "phase,logEntry,refs"
-    },
-    {
-      "at": "2026-07-10T14:33:51.050Z",
-      "by": "claude-main",
-      "action": "card.claim",
-      "ref": "c17iww33",
-      "note": ""
-    },
-    {
-      "at": "2026-07-10T14:32:36.595Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "crivuqa",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T14:32:36.526Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "crivuqa",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T14:23:23.416Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-ACCEPT-464",
-      "note": "accept"
-    },
-    {
-      "at": "2026-07-10T14:22:21.802Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "crivuqa",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T14:22:21.728Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c1iqde7",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-10T14:21:16.324Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c02kdm7a",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-10T14:21:12.587Z",
-      "by": "claude-main",
-      "action": "card.claim",
-      "ref": "crivuqa",
-      "note": ""
-    },
-    {
-      "at": "2026-07-10T14:21:04.582Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0ceo8wd",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T14:21:04.504Z",
-      "by": "claude-main",
-      "action": "card.criteria-verify",
-      "ref": "c0ceo8wd",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-10T14:21:04.424Z",
-      "by": "claude-radar",
-      "action": "card.criteria-meet",
-      "ref": "c0ceo8wd",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-10T14:21:04.351Z",
-      "by": "claude-radar",
-      "action": "card.criteria-add",
-      "ref": "c0ceo8wd",
-      "note": "#4 Bounce round 1: sidequests + frozen are standalone sections,"
-    },
-    {
-      "at": "2026-07-10T14:20:58.077Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c1iqde7",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T14:20:58.004Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c1iqde7",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T14:20:57.934Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c1iqde7",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T14:17:52.892Z",
-      "by": "claude-main",
-      "action": "card.claim",
-      "ref": "c1iqde7",
-      "note": ""
-    },
-    {
-      "at": "2026-07-10T14:16:38.646Z",
-      "by": "cursor-main",
-      "action": "card.release",
-      "ref": "c1iqde7",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-10T14:16:19.437Z",
-      "by": "cursor-357",
-      "action": "card.update",
-      "ref": "c0e7rot4",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T14:16:19.369Z",
-      "by": "cursor-418",
-      "action": "card.update",
-      "ref": "c0wetgi3",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T14:16:19.298Z",
-      "by": "cursor-95",
-      "action": "card.update",
-      "ref": "c1nixrpd",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T14:15:50.966Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-ACCEPT-464",
-      "note": "bounce"
-    },
-    {
-      "at": "2026-07-10T14:08:58.223Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0uvxow5",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T14:08:37.186Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0ceo8wd",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T14:08:37.186Z",
-      "by": "agent",
-      "action": "decision.add",
-      "ref": "D-ACCEPT-464",
-      "note": "Accept #464 — Tower: Board view for 434 cards"
-    },
-    {
-      "at": "2026-07-10T14:08:37.108Z",
-      "by": "claude-main",
-      "action": "card.criteria-verify",
-      "ref": "c0ceo8wd",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-10T14:08:37.026Z",
-      "by": "claude-main",
-      "action": "card.criteria-verify",
-      "ref": "c0ceo8wd",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-10T14:08:36.945Z",
-      "by": "claude-main",
-      "action": "card.criteria-verify",
-      "ref": "c0ceo8wd",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-10T14:08:36.865Z",
-      "by": "claude-radar",
-      "action": "card.criteria-meet",
-      "ref": "c0ceo8wd",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-10T14:08:36.786Z",
-      "by": "claude-radar",
-      "action": "card.criteria-meet",
-      "ref": "c0ceo8wd",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-10T14:08:36.707Z",
-      "by": "claude-radar",
-      "action": "card.criteria-meet",
-      "ref": "c0ceo8wd",
-      "note": "#1"
     }
   ],
   "nextNum": 368,
