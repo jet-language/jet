@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 468,
-    "rev": 2917,
+    "rev": 2922,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -27,7 +27,7 @@
         "radar:e7"
       ]
     },
-    "digestCursor": "2026-07-10T16:28:20.702Z"
+    "digestCursor": "2026-07-10T19:07:30.188Z"
   },
   "epochs": [
     {
@@ -12418,6 +12418,11 @@
         {
           "at": "2026-07-10",
           "by": "claude-main",
+          "text": "Ballot D-JPK-OFFLINE2 minted on this card (earlier log said OFFLINE1 — typo; OFFLINE1 is a distinct ratified decision). Terra-reviewed pre-owner: refs verified, one ambiguity fixed (B's lock match = committed .jet/lock read only, zero live Nix calls). Blocked test offline_build_and_run_use_hangar_cache_with_network_denied now #[ignore] naming the gate; un-ignore or rewrite on ratification. jetpack_offline: 2 pass / 1 ignored."
+        },
+        {
+          "at": "2026-07-10",
+          "by": "claude-main",
           "text": "jetpack-jail cluster: 4/5 fixed, all test-side after root-cause review — (A) 3 tests used committed fixture with phantom /nix/store out path; #418 fail-closed leasing correctly refuses non-existent outputs; tests now write real scratch fixtures. (B) parent_env_unchanged_after_run asserted literal fixture path; leases mandatory + sealed FD-pinned wrapper dir leads PATH since #418; assertion now checks functional contract. Sol re-ran: env_dev_trust 13/13, jetpack 108/108, jetpack_offline 2/3. (C) BLOCKED = owner gate: 90252e7b removed ALL offline hangar reuse for nixpkgs refs (spelling-hash trust rejected in #418 review) which contradicts U29 offline promise; ballot D-JPK-OFFLINE1 being authored. Side find filed as card #467: non-Linux create_exec_wrappers returns Err whenever lease has executables — macOS/Windows runtime gap."
         },
         {
@@ -12495,12 +12500,18 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "triage",
+      "phase": "planning",
       "priority": "P1",
       "plan": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-10",
+          "by": "owner",
+          "text": "Activated into sidequest track"
+        }
+      ],
       "criteria": [],
       "refs": [],
       "needsAcceptance": false,
@@ -21689,6 +21700,49 @@
       "created": "2026-07-10T14:08:37.185Z",
       "outcome": "accept",
       "ratifiedAt": "2026-07-10"
+    },
+    {
+      "id": "D-JPK-OFFLINE2",
+      "cardId": "c02kdm7a",
+      "group": "safety",
+      "title": "Offline reuse of nixpkgs-sourced packages after a first build",
+      "gist": "After you build a nixpkgs-sourced package once, may an offline rebuild reuse the copy already in your hangar, and if so, what must Jetpack re-check before it trusts that copy?",
+      "explainer": "Ranked by the project priorities (safety first, then beginner experience). Both options are safe — A by never reusing a Nix build offline, B by reusing only a lock-matched, content-re-verified closure — so safety does not separate them, and the #418 race stays closed under both (B resolves the lock before any reuse and re-hashes the bytes, so no spelling-hash trust returns). The deciding axis is beginner experience against the ratified U29 promise. A forfeits \"realize once, works offline forever\" for every project with even one native dependency: Priya's offline train start becomes impossible and the spec gains a carve-out contradicting U29's plain text (docs/spec/spec.md:1351). B keeps that promise and, per I8, makes the nixpkgs path reuse through the same proof gate the core path already uses (Store.rs verify_cache_entry) rather than inventing a second, Nix-only trust model — one canonical mechanism, ergonomic default for the beginner, full audit surface (`jetpack explain --lens cache`) for the expert. A scoped variant (\"reuse only when a project lockfile is present\") was considered and folded into B rather than offered as a third option: B's reuse already fires only against a recorded *locked* identity, so lockfile-presence is a property of the ledger entry, not a distinct UX. Implementation effort was not weighed. Recommend B.",
+      "story": "Priya adds one native dependency to her Jet project: `nixpkgs:openssl`. At home, on the wifi, `jetpack build` resolves it, runs the Nix build, and stores the finished library plus its whole dependency closure in her hangar (Jetpack's on-disk cache). The next morning she opens her laptop on a train with no signal and runs `jetpack run`. Nothing about her project changed and the exact bytes she needs are already sitting in the hangar. She expects it to just start — that is the whole promise of \"realize once, works offline forever\" that Jet advertises (ratified guarantee U29). Today it does not: Jetpack refuses, because a recent security fix (card #418) removed the early cache-hit path for anything sourced from Nix. The reason was real — the old path trusted a *spelling* hash (a hash of the text `nixpkgs:openssl`, not of any locked, verified source), and a spelling hash can collide with or outlive a source that has since changed underneath it, letting a stale or mismatched build be served silently. So the question is not \"safety or convenience\" — it is whether we can give Priya her offline start back *without* reopening that trust hole.",
+      "inWild": "A typical project mixes a pure-Jet dependency and a native one:\n\n  # pkg.jet\n  package: myapp\n  dependencies: {\n    http:     jet:std/http        # pure Jet, cached fine offline today\n    openssl:  nixpkgs:openssl     # native C lib via Nix — the case in question\n  }\n\nThe hangar already re-verifies pure-Jet (`core:`) reuse today: it independently re-derives the source fingerprint, recipe fingerprint, platform, policy, and re-hashes the on-disk output before trusting a cache entry (crates/jetpack/src/Store.rs `verify_cache_entry`). The `nixpkgs:` line is the only one with no offline reuse at all: `Provider::cache_expectation` (crates/jetpack/src/Provider.rs:114-153) hard-returns None for Nix refs, and `--offline` without `--fixtures` then always errors E1276 (crates/jetpack/src/CLI/realize.rs:96-109) even when the finished closure is right there on disk.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Accept the carve-out: nixpkgs packages need network (or fixtures) every realize",
+          "detail": "Formalize today's behavior as the contract. A nixpkgs-sourced package has no offline hangar reuse; every `--offline` realize of one is a loud, well-explained refusal that names the security reason and the escape hatches (go online once, or supply `--fixtures`). U29's spec text gains an explicit exception for Nix-sourced refs, and the failing test is rewritten to assert this refusal (with its message) instead of success. Safety is trivially preserved because nothing is ever reused without a fresh, network-backed Nix realization. The cost lands squarely on the beginner: Priya's train scenario is impossible, and the advertised \"realize once, works offline forever\" line stops being true for any project with a single native dependency.",
+          "code": "# At home, online — first build succeeds and fills the hangar:\n$ jetpack build nixpkgs:openssl\n  resolving nixpkgs:openssl …\n  built  nixpkgs:openssl        3.2.1   (nix, 41 store paths)\n\n# On the train, offline — the exact bytes are already in the hangar,\n# but Option A refuses on principle:\n$ jetpack run nixpkgs:openssl -- myapp\n  resolving nixpkgs:openssl …\nerror[E1276]: --offline cannot reuse a Nix-sourced package\n  nixpkgs:openssl is in your hangar, but Jetpack cannot re-verify that this\n  cached copy still matches its upstream source without contacting Nix.\n  A cached Nix build is trusted only against a live source check, so an\n  offline reuse is refused rather than risk serving a stale or mismatched\n  build.\n  fix: run once with a network connection, or pass\n       --fixtures <dir> to build from a pinned local source set.\n\n# The rewritten test asserts exactly this refusal:\n#   offline_build_of_nix_ref_without_fixtures_refuses_with_E1276"
+        },
+        {
+          "key": "B",
+          "name": "Verified offline reuse: record locked identity + closure digest, re-verify on reuse",
+          "detail": "Close the gap the safe way. At the end of a successful Nix build, record in the hangar ledger not the spelling but the *locked* source identity (the resolved pin/digest Nix actually built from) together with the content digest of the produced output closure. An offline realize may then reuse a ledger entry only when (1) its recorded locked identity matches the project's committed `.jet/lock` entry — a plain file read, zero live Nix or network calls, exactly how core and git reuse already match — and (2) the on-disk closure re-hashes to the recorded digest — the same proof gate `verify_cache_entry` already applies to pure-Jet reuse (output_digest + source + recipe + platform + policy + closure all must pass). This never revives spelling-trust: reuse happens strictly after lock resolution and only against bytes that re-verify, so the #418 race stays closed. If the recorded lock does not match, Jetpack treats it as a miss and (offline) reports E1276; if the closure fails to re-hash — tampering, partial GC, bit-rot — it refuses loudly and names which artifact failed, never silently falls back to the stale copy. Priya's train start works; an expert can see exactly what was reused. This makes the nixpkgs path behave like the core path already does, honoring U29 and I8 (one canonical reuse mechanism, not a second Nix-only trust model).",
+          "code": "# At home, online — first build records the locked identity + closure digest:\n$ jetpack build nixpkgs:openssl\n  resolving nixpkgs:openssl …\n  built  nixpkgs:openssl        3.2.1   (nix, 41 store paths)\n         locked source  nixpkgs@a1b2c3d…/openssl-3.2.1\n         closure digest  sha256:9f4e…c0  (recorded in hangar ledger)\n\n# On the train, offline — reuse only after the lock matches and the\n# on-disk closure re-verifies:\n$ jetpack run nixpkgs:openssl -- myapp\n  resolving nixpkgs:openssl …\n  cached nixpkgs:openssl        3.2.1   (nix, verified 41/41 store paths)\n         reused  locked nixpkgs@a1b2c3d…/openssl-3.2.1\n         closure sha256:9f4e…c0  re-verified\nhello from myapp (openssl 3.2.1)\n\n# Auditability for the expert — one line names exactly what was trusted:\n$ jetpack explain nixpkgs:openssl --lens cache\n  reuse  eligible\n  lock   nixpkgs@a1b2c3d…/openssl-3.2.1   (matches project lock)\n  output /…/hangar/store/openssl-3.2.1-9f4ec0\n  proof  output_digest ✓  source ✓  recipe ✓  platform ✓  policy ✓  closure ✓\n\n# Tamper case — a corrupted or GC-truncated closure refuses, never serves stale:\n$ jetpack run nixpkgs:openssl -- myapp   # store path deleted underfoot\n  resolving nixpkgs:openssl …\nerror[E1276]: cached nixpkgs:openssl failed re-verification offline\n  closure digest mismatch: /…/hangar/store/openssl-3.2.1-9f4ec0\n    expected sha256:9f4e…c0\n    on disk  sha256:0a17…44  (2 of 41 store paths missing)\n  the cached copy is refused because it no longer matches what was built.\n  fix: run once with a network connection to rebuild, or `jetpack gc --repair`.\n\n# The existing test passes unchanged: offline reuse after a first build\n# prints \"cached\", not \"fixture\", and the program runs."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Nix",
+          "note": "Nix itself, offline, will happily reuse a store path already realized on disk — its trust unit is the store path hash (a content-addressed output identity), not the input spelling. Option B adopts that principle at the Jetpack layer: trust the recorded locked identity + re-hashed output, never the text of the ref. Option A declines to trust even a re-hashed local closure, which is stricter than Nix's own offline behavior.",
+          "code": "# Nix, no network, reuses the realized path by its content hash:\n$ nix build nixpkgs#openssl --offline\n/nix/store/…-openssl-3.2.1   # served from store, no fetch\n\n# Option B mirrors this: reuse keyed on recorded closure digest,\n# gated by a lock match, re-hashed before trust."
+        },
+        {
+          "lang": "Cargo",
+          "note": "Cargo's `--offline` reuses anything already in its local registry/cache and only errors when a *needed* artifact is genuinely absent — matching a user's intuition that a second offline build of an unchanged project just works. Option A breaks that intuition specifically for native deps; Option B restores it while adding a re-hash step Cargo does not bother with.",
+          "code": "$ cargo build --offline   # unchanged project, prior build → reuses cache, no error"
+        }
+      ],
+      "rec": "B",
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-07-10T19:06:06.978Z",
+      "outcome": "B",
+      "ratifiedAt": "2026-07-10"
     }
   ],
   "questions": [
@@ -22491,6 +22545,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-10T19:07:28.386Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-JPK-OFFLINE2",
+      "note": "B"
+    },
+    {
+      "at": "2026-07-10T19:06:55.607Z",
+      "by": "owner",
+      "action": "card.activate",
+      "ref": "c0t4root",
+      "note": ""
+    },
+    {
+      "at": "2026-07-10T19:06:55.194Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c02kdm7a",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-10T19:06:06.979Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-JPK-OFFLINE2",
+      "note": "Offline reuse of nixpkgs-sourced packages after a first build"
+    },
     {
       "at": "2026-07-10T18:58:29.326Z",
       "by": "claude-main",
@@ -25962,34 +26044,6 @@
       "action": "card.update",
       "ref": "c1nixrpd",
       "note": "logEntry"
-    },
-    {
-      "at": "2026-07-10T11:05:32.793Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0wetgi3",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-10T11:01:36.550Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0e7rot4",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T11:00:52.796Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c1nixrpd",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-10T11:00:19.766Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c088jf0z",
-      "note": "phase,logEntry"
     }
   ],
   "nextNum": 368,

@@ -53,6 +53,14 @@
 
   canvas.addEventListener("mousedown", function (ev) {
     if (window.__jetCanvasNoopClick) return;
+    // Right-click only opens the context menu (handled by the separate
+    // "contextmenu" listener below, which does its own hit-testing). Letting
+    // it fall through used to start a zero-movement "node" drag whose
+    // mouseup unconditionally remembers the clicked node's on-screen
+    // position — a single remembered position is enough to permanently
+    // disable this graph's auto-layout reflow (see hasSavedNodePositions),
+    // stranding every other node at raw unreflowed backend coordinates.
+    if (ev.button === 2) return;
     const rect = canvas.getBoundingClientRect();
     const x = ev.clientX - rect.left;
     const y = ev.clientY - rect.top;

@@ -54,6 +54,9 @@ fn write_runnable_fixture(fixtures: &Path, out_dir: &Path) {
 }
 
 #[test]
+#[ignore = "blocked on unratified D-JPK-OFFLINE2 (card #465): 90252e7b removed all \
+offline hangar reuse for nixpkgs refs; owner picks accept-carve-out vs verified reuse. \
+Un-ignore (option B) or rewrite to assert the refusal contract (option A) on ratification."]
 fn offline_build_and_run_use_hangar_cache_with_network_denied() {
     let project = Scratch::new("project");
     let root = Scratch::new("root");
