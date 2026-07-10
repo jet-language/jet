@@ -1,0 +1,291 @@
+{
+  "schemaVersion": 2,
+  "reviewedAt": "2026-07-10",
+  "reviewStandard": "docs/plans/epoch-3/universal-language-core.md",
+  "classes": ["reserved", "facade", "partial", "implemented", "proven"],
+  "claims": [
+    {
+      "id": "claim.syntax-law",
+      "owner": { "cardId": "c09h9vd4", "num": 339 },
+      "class": "proven",
+      "disposition": "shipped",
+      "reviewerRationale": "Every current unbuilt syntax note has a checked matrix row and the reconciliation test fails when coverage disappears.",
+      "acceptanceLanes": [{
+        "id": "syntax-matrix",
+        "why": "Directly checks canonical syntax-law coverage rather than compiler success in general.",
+        "command": ["cargo", "test", "--test", "syntax_reconciliation", "syntax_status_matrix_covers_unbuilt_notes", "--", "--exact"],
+        "artifacts": [
+          { "role": "proof", "kind": "file", "path": "tests/syntax_reconciliation.rs", "anchor": "CAPABILITY_CLAIM: claim.syntax-law / syntax-matrix", "why": "Dedicated executable ratchet." },
+          { "role": "proof", "kind": "file", "path": "docs/plans/epoch-3/syntax-law-source-status-matrix-2026-07-07.md", "anchor": "# Syntax-law/source status matrix — 2026-07-07", "why": "Reviewed row inventory consumed by the ratchet." }
+        ]
+      }]
+    },
+    {
+      "id": "claim.examples-spec",
+      "owner": { "cardId": "c123", "num": 9 },
+      "class": "proven",
+      "disposition": "shipped",
+      "reviewerRationale": "Feature examples are mechanically paired with expected output; broader flagship product claims remain separate open cards.",
+      "acceptanceLanes": [{
+        "id": "expected-output-pairs",
+        "why": "Checks executable-spec artifact pairing without claiming every example proves production depth.",
+        "command": ["cargo", "test", "--test", "truthfulness", "every_feature_example_has_expected_output", "--", "--exact"],
+        "artifacts": [{ "role": "proof", "kind": "file", "path": "tests/truthfulness.rs", "anchor": "CAPABILITY_CLAIM: claim.examples-spec / expected-output-pairs", "why": "Dedicated expected-output inventory test." }]
+      }]
+    },
+    {
+      "id": "claim.native-language",
+      "owner": { "cardId": "c0ewbiud", "num": 353 },
+      "class": "partial",
+      "disposition": "open",
+      "reviewerRationale": "Native AOT is real, but accepts-invalid and silent-corruption paths remain under the sema audit.",
+      "acceptanceLanes": [{ "id": "adversarial-sema", "why": "Must prove rejected unsafe/invalid programs never reach codegen.", "command": ["cargo", "test", "--test", "capability_acceptance", "native_language_adversarial", "--", "--exact"], "artifacts": [{ "role": "gap", "kind": "file", "path": "docs/plans/epoch-3/universal-language-core.md", "anchor": "Confirmed accepts-invalid, unsupported-lowering, generic-module, and rustc-leak risks", "why": "Current audited stop-line for the broad native-language claim." }] }]
+    },
+    {
+      "id": "claim.tier-parity",
+      "owner": { "cardId": "c2hizkhl", "num": 125 },
+      "class": "facade",
+      "disposition": "open",
+      "reviewerRationale": "A whitelist and recorded gaps contradict universal AOT/dev parity.",
+      "acceptanceLanes": [{ "id": "all-aot-programs", "why": "Directly compares every AOT-runnable program across executable tiers.", "command": ["cargo", "test", "--test", "dev", "dev_default_matches_compiled_binary", "--", "--exact"], "artifacts": [{ "role": "gap", "kind": "file", "path": "tests/jit_gaps.txt", "anchor": "# Covered/gap movement is intentional only", "why": "Current explicit gap whitelist prevents a proven classification." }] }]
+    },
+    {
+      "id": "claim.static-guarantees",
+      "owner": { "cardId": "c73xs2f", "num": 25 },
+      "class": "partial",
+      "disposition": "open",
+      "reviewerRationale": "Individual checks exist, but the promised shared facts/policy engine is still a plan.",
+      "acceptanceLanes": [{ "id": "shared-facts-engine", "why": "Exercises refinements, contracts, IFC, budgets, bounds, and replay through one fact graph.", "command": ["cargo", "test", "--test", "capability_acceptance", "static_guarantees_shared_engine", "--", "--exact"], "artifacts": [{ "role": "gap", "kind": "tower", "field": "plan", "anchor": "Build one sema facts/policy engine", "why": "Owner card still describes unimplemented canonical architecture." }] }]
+    },
+    {
+      "id": "claim.discard-control",
+      "owner": { "cardId": "c1iqde7", "num": 37 },
+      "class": "reserved",
+      "disposition": "open",
+      "reviewerRationale": "Surface is ratified but no parser, sema, diagnostic, or executable example exists.",
+      "acceptanceLanes": [{ "id": "audited-discard", "why": "Must prove evaluation, reason capture, must-use checking, and codegen erasure together.", "command": ["cargo", "test", "--test", "capability_acceptance", "audited_discard", "--", "--exact"], "artifacts": [{ "role": "gap", "kind": "tower", "field": "plan", "anchor": "implementation plan", "why": "Only planned behavior exists." }] }]
+    },
+    {
+      "id": "claim.prelude-control",
+      "owner": { "cardId": "crivuqa", "num": 63 },
+      "class": "reserved",
+      "disposition": "open",
+      "reviewerRationale": "Opt-out is ratified but loader and sema behavior remain unimplemented.",
+      "acceptanceLanes": [{ "id": "prelude-opt-out", "why": "Must prove implicit beginner imports and explicit expert opt-out use the same loader path.", "command": ["cargo", "test", "--test", "capability_acceptance", "prelude_opt_out", "--", "--exact"], "artifacts": [{ "role": "gap", "kind": "tower", "field": "plan", "anchor": "implement prelude opt-out only", "why": "Current artifact is implementation plan only." }] }]
+    },
+    {
+      "id": "claim.maturity-tags",
+      "owner": { "cardId": "c17iww33", "num": 79 },
+      "class": "reserved",
+      "disposition": "open",
+      "reviewerRationale": "Ratification chose a non-semantic documentation convention; completion evidence is not recorded.",
+      "acceptanceLanes": [{ "id": "maturity-convention", "why": "Must prove docs expose a non-semantic convention without parser or sema claims.", "command": ["cargo", "test", "--test", "capability_acceptance", "maturity_convention", "--", "--exact"], "artifacts": [{ "role": "gap", "kind": "tower", "field": "plan", "anchor": "document maturity tags as a non-semantic convention", "why": "Owner card remains at planned documentation work." }] }]
+    },
+    {
+      "id": "claim.generic-modules",
+      "owner": { "cardId": "c1jixkit", "num": 91 },
+      "class": "partial",
+      "disposition": "open",
+      "reviewerRationale": "Function signatures substitute, while value parameters, bodies, structs, enums, bounds, and cycles remain incomplete.",
+      "acceptanceLanes": [{ "id": "complete-instantiation", "why": "Directly exercises every declared module item and parameter kind.", "command": ["cargo", "test", "--test", "generics", "generic_modules_complete_instantiation", "--", "--exact"], "artifacts": [{ "role": "gap", "kind": "file", "path": "crates/jet-sema/src/Sema/Bundle.rs", "anchor": "value params are left as-is for now", "why": "Decisive source limitation." }] }]
+    },
+    {
+      "id": "claim.metaprogramming",
+      "owner": { "cardId": "c2nizvzp", "num": 131 },
+      "class": "partial",
+      "disposition": "open",
+      "reviewerRationale": "Some generated behavior bypasses Jet-source re-entry and changes default expressions.",
+      "acceptanceLanes": [{ "id": "source-reentry", "why": "Must compare generated Jet source semantics before and after re-entry.", "command": ["cargo", "test", "--test", "capability_acceptance", "derive_source_reentry", "--", "--exact"], "artifacts": [{ "role": "gap", "kind": "file", "path": "crates/jet-codegen/src/Codegen/Items.rs", "anchor": "_ => \"Default::default()\".to_string()", "why": "Current lowering silently changes non-primitive default expressions." }] }]
+    },
+    {
+      "id": "claim.tooling-cli",
+      "owner": { "cardId": "c0l5fmyy", "num": 360 },
+      "class": "partial",
+      "disposition": "open",
+      "reviewerRationale": "Command registry is real, while help discovery and owner-terminal behavior remain under active acceptance.",
+      "acceptanceLanes": [{ "id": "cli-terminal-matrix", "why": "Checks TTY, non-TTY, color, width, discoverability, and safe prefill behavior.", "command": ["cargo", "test", "--test", "capability_acceptance", "cli_terminal_matrix", "--", "--exact"], "artifacts": [{ "role": "gap", "kind": "tower", "field": "log", "anchor": "owner-environment palette behavior", "why": "Live owner acceptance remains open." }] }]
+    },
+    {
+      "id": "claim.ide-debug",
+      "owner": { "cardId": "c0cevzhr", "num": 209 },
+      "class": "partial",
+      "disposition": "open",
+      "reviewerRationale": "LSP breadth exists, but shared item-granular incremental semantics and full editor DAP proof do not.",
+      "acceptanceLanes": [{ "id": "shared-query-editor", "why": "Measures item-level recomputation through real LSP and DAP clients.", "command": ["cargo", "test", "--test", "capability_acceptance", "shared_query_editor", "--", "--exact"], "artifacts": [{ "role": "gap", "kind": "file", "path": "docs/plans/epoch-3/universal-language-core.md", "anchor": "remains LSP-only and whole-document", "why": "Audited query-engine boundary contradicts the broad claim." }] }]
+    },
+    {
+      "id": "claim.format-test",
+      "owner": { "cardId": "c0k81v26", "num": 440 },
+      "class": "partial",
+      "disposition": "open",
+      "reviewerRationale": "Single-file formatting and tests run, but project workflow and snapshot-update semantics remain incomplete.",
+      "acceptanceLanes": [{ "id": "project-format-test", "why": "Checks recursive formatting, atomicity, editor parity, and actual snapshot updates.", "command": ["cargo", "test", "--test", "capability_acceptance", "project_format_and_test", "--", "--exact"], "artifacts": [{ "role": "gap", "kind": "file", "path": "Source/CmdCompile.rs", "anchor": "_update_snapshots: bool", "why": "Public snapshot-update input is ignored." }] }]
+    },
+    {
+      "id": "claim.package-build",
+      "owner": { "cardId": "c1nixrpd", "num": 95 },
+      "class": "partial",
+      "disposition": "open",
+      "reviewerRationale": "Package/build surfaces execute subsets; the public Jet build graph and canonical product split remain incomplete.",
+      "acceptanceLanes": [{ "id": "public-build-product", "why": "Runs a public fn build graph with provenance, cache, sandbox, and product dispatch.", "command": ["cargo", "test", "--test", "capability_acceptance", "public_build_product", "--", "--exact"], "artifacts": [{ "role": "gap", "kind": "file", "path": "docs/plans/epoch-3/universal-language-core.md", "anchor": "public build graph, query, explanation, provenance,", "why": "Master audit names the missing public build product." }] }]
+    },
+    {
+      "id": "claim.core-foundation",
+      "owner": { "cardId": "c0ddul2b", "num": 437 },
+      "class": "partial",
+      "disposition": "open",
+      "reviewerRationale": "Core APIs execute, but compiler-template breadth and whole-prelude emission violate the source/reachability contract.",
+      "acceptanceLanes": [{ "id": "source-reachable-core", "why": "Builds Core from ordinary Jet source and proves only reachable packages emit.", "command": ["cargo", "test", "--test", "capability_acceptance", "source_reachable_core", "--", "--exact"], "artifacts": [{ "role": "gap", "kind": "file", "path": "crates/jet-codegen/src/Codegen/mod.rs", "anchor": "const CORELIB_PRELUDE_PARTS", "why": "Hand-maintained compiler template breadth remains authoritative." }] }]
+    },
+    {
+      "id": "claim.core-concurrency",
+      "owner": { "cardId": "c2iizmyx", "num": 126 },
+      "class": "partial",
+      "disposition": "open",
+      "reviewerRationale": "Task vocabulary exists, but pause/cancel, native pollers, Windows IOCP, and scale closure are not proven.",
+      "acceptanceLanes": [{ "id": "runtime-hostile-scale", "why": "Exercises cancellation races, one-winner select, real pollers, and non-ignored scale.", "command": ["cargo", "test", "--test", "capability_acceptance", "runtime_hostile_scale", "--", "--exact"], "artifacts": [{ "role": "gap", "kind": "file", "path": "docs/plans/epoch-3/universal-language-core.md", "anchor": "Pause/cancel controls, blocking server execution, stream-select gaps", "why": "Audited runtime gaps block a proven claim." }] }]
+    },
+    {
+      "id": "claim.core-files-data",
+      "owner": { "cardId": "c29iz43a", "num": 117 },
+      "class": "partial",
+      "disposition": "open",
+      "reviewerRationale": "Broad APIs exist, while durable replacement, typed paths, and several production contracts remain subsets.",
+      "acceptanceLanes": [{ "id": "files-data-hostile", "why": "Covers power loss, replacement collision, path platforms, archives, compression, and live DBs.", "command": ["cargo", "test", "--test", "capability_acceptance", "files_data_hostile", "--", "--exact"], "artifacts": [{ "role": "gap", "kind": "file", "path": "docs/plans/epoch-3/universal-language-core.md", "anchor": "durable atomic file replacement and typed paths", "why": "Master acceptance identifies missing production proof." }] }]
+    },
+    {
+      "id": "claim.core-encoding-text",
+      "owner": { "cardId": "c29iz43a", "num": 117 },
+      "class": "partial",
+      "disposition": "open",
+      "reviewerRationale": "Codec and text APIs run named subsets; XML and Unicode standards conformance is incomplete.",
+      "acceptanceLanes": [{ "id": "standards-corpora", "why": "Runs versioned XML and Unicode conformance corpora with resource limits.", "command": ["cargo", "test", "--test", "capability_acceptance", "encoding_text_standards", "--", "--exact"], "artifacts": [{ "role": "gap", "kind": "file", "path": "docs/plans/epoch-3/universal-language-core.md", "anchor": "versioned Unicode conformance data", "why": "Required standards corpus is not yet the implementation source." }] }]
+    },
+    {
+      "id": "claim.core-network-http",
+      "owner": { "cardId": "c0075iyb", "num": 301 },
+      "class": "partial",
+      "disposition": "open",
+      "reviewerRationale": "Socket/HTTP paths execute, but DNS validation, bounded streaming, protocol depth, and abuse recovery remain incomplete.",
+      "acceptanceLanes": [{ "id": "independent-network-hosts", "why": "Uses independent DNS and HTTP implementations over hostile real transports.", "command": ["cargo", "test", "--test", "capability_acceptance", "network_http_independent", "--", "--exact"], "artifacts": [{ "role": "gap", "kind": "file", "path": "docs/plans/epoch-3/universal-language-core.md", "anchor": "fixed transaction ID, or unvalidated", "why": "Audited DNS behavior invalidates production networking." }] }]
+    },
+    {
+      "id": "claim.core-security",
+      "owner": { "cardId": "c0184j6s", "num": 302 },
+      "class": "facade",
+      "disposition": "open",
+      "reviewerRationale": "Predictable entropy fallback makes security-shaped success unsafe.",
+      "acceptanceLanes": [{ "id": "fail-closed-entropy", "why": "Proves supported OS CSPRNGs and explicit failure on unavailable entropy.", "command": ["cargo", "test", "--test", "capability_acceptance", "crypto_fail_closed_entropy", "--", "--exact"], "artifacts": [{ "role": "gap", "kind": "file", "path": "crates/jetpack/src/Prelude/Crypto.rs", "anchor": "let mut state: u64 = 0x4d595df4d0f33173", "why": "Deterministic fallback is decisive security evidence." }] }]
+    },
+    {
+      "id": "claim.core-data-compute",
+      "owner": { "cardId": "c8q043mt", "num": 237 },
+      "class": "facade",
+      "disposition": "open",
+      "reviewerRationale": "Lazy operations execute eagerly and joins do not return typed joined rows.",
+      "acceptanceLanes": [{ "id": "typed-lazy-data", "why": "Compares typed lazy plans, joins, Arrow/Parquet, streaming, and accelerators against reference results.", "command": ["cargo", "test", "--test", "capability_acceptance", "typed_lazy_data", "--", "--exact"], "artifacts": [{ "role": "gap", "kind": "file", "path": "docs/plans/epoch-3/universal-language-core.md", "anchor": "joins return grouped counts", "why": "Current implementation changes advertised semantics." }] }]
+    },
+    {
+      "id": "claim.core-ui-web",
+      "owner": { "cardId": "c2qj06uq", "num": 134 },
+      "class": "facade",
+      "disposition": "open",
+      "reviewerRationale": "A narrow web/GTK slice exists; fake DOM proof and missing platform backends do not establish universal UI.",
+      "acceptanceLanes": [{ "id": "real-ui-platforms", "why": "Runs real browser and native accessibility/input/render tests across declared targets.", "command": ["cargo", "test", "--test", "capability_acceptance", "real_ui_platforms", "--", "--exact"], "artifacts": [{ "role": "gap", "kind": "file", "path": "docs/plans/epoch-3/universal-language-core.md", "anchor": "fake DOM/headless fixtures remain supporting tests only", "why": "Fixture-only browser proof blocks the advertised claim." }] }]
+    },
+    {
+      "id": "claim.game-product",
+      "owner": { "cardId": "c00uhxes", "num": 346 },
+      "class": "facade",
+      "disposition": "open",
+      "reviewerRationale": "Current proof is a headless transcript/workbench slice, not the promised playable game/runtime/editor product.",
+      "acceptanceLanes": [{ "id": "playable-game-editor", "why": "Requires live renderer, audio, input, assets, editor mutation, packaging, and replay proof.", "command": ["cargo", "test", "--test", "capability_acceptance", "playable_game_editor", "--", "--exact"], "artifacts": [{ "role": "gap", "kind": "file", "path": "crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs", "anchor": "if path.contains(\"missing\")", "why": "Asset behavior is filename-driven facade logic." }] }]
+    },
+    {
+      "id": "claim.plugin-ffi",
+      "owner": { "cardId": "caffiunify", "num": 180 },
+      "class": "facade",
+      "disposition": "open",
+      "reviewerRationale": "Some C paths work, while accepted unsupported shapes silently emit unit and the multi-language structure is incomplete.",
+      "acceptanceLanes": [{ "id": "typed-live-interop", "why": "Runs representative upstream libraries with ownership, callback, error, async, ABI, unload, and debugger cases.", "command": ["cargo", "test", "--test", "capability_acceptance", "typed_live_interop", "--", "--exact"], "artifacts": [{ "role": "gap", "kind": "file", "path": "crates/jet-codegen/src/Codegen/CModule.rs", "anchor": "format!(\"/* unsupported: {} */ ()\"", "why": "Silent unsupported lowering is decisive facade evidence." }] }]
+    },
+    {
+      "id": "claim.embedded",
+      "owner": { "cardId": "caq065h8", "num": 239 },
+      "class": "facade",
+      "disposition": "open",
+      "reviewerRationale": "Typed profile data exists without complete linker/startup/interrupt/DMA/flash artifacts on QEMU and boards.",
+      "acceptanceLanes": [{ "id": "firmware-board-matrix", "why": "Builds, boots, debugs, and flashes real artifacts for each declared embedded tier.", "command": ["cargo", "test", "--test", "capability_acceptance", "firmware_board_matrix", "--", "--exact"], "artifacts": [{ "role": "gap", "kind": "file", "path": "docs/plans/epoch-3/universal-language-core.md", "anchor": "typed target-profile data into real firmware/kernel builds", "why": "Master audit distinguishes schema from executable toolchain." }] }]
+    },
+    {
+      "id": "claim.adaptive-runtime",
+      "owner": { "cardId": "c2sj0bd9", "num": 136 },
+      "class": "reserved",
+      "disposition": "open",
+      "reviewerRationale": "Ratified design has no environment providers or runtime policy implementation.",
+      "acceptanceLanes": [{ "id": "measured-adaptation", "why": "Injects measured facts and verifies deterministic policy, override, recovery, and audit output.", "command": ["cargo", "test", "--test", "capability_acceptance", "measured_adaptation", "--", "--exact"], "artifacts": [{ "role": "gap", "kind": "tower", "field": "log", "anchor": "plan complete", "why": "Tower evidence records planning, not execution." }] }]
+    },
+    {
+      "id": "claim.logic-programming",
+      "owner": { "cardId": "c2yj0nk5", "num": 142 },
+      "class": "reserved",
+      "disposition": "open",
+      "reviewerRationale": "Ratified bounded logic subset remains a plan without executable multi-answer semantics.",
+      "acceptanceLanes": [{ "id": "bounded-logic", "why": "Runs multi-answer and failure-driven behavior through the ratified bounded semantics.", "command": ["cargo", "test", "--test", "capability_acceptance", "bounded_logic", "--", "--exact"], "artifacts": [{ "role": "gap", "kind": "tower", "field": "log", "anchor": "plan complete", "why": "Only planning evidence exists." }] }]
+    },
+    {
+      "id": "claim.structural-merge",
+      "owner": { "cardId": "c2zj0p7p", "num": 143 },
+      "class": "reserved",
+      "disposition": "open",
+      "reviewerRationale": "Semantic identity and conflict policy are ratified but not implemented.",
+      "acceptanceLanes": [{ "id": "semantic-merge", "why": "Merges independently edited real programs and validates semantic identity/conflicts.", "command": ["cargo", "test", "--test", "capability_acceptance", "semantic_merge", "--", "--exact"], "artifacts": [{ "role": "gap", "kind": "tower", "field": "log", "anchor": "plan complete", "why": "Only planning evidence exists." }] }]
+    },
+    {
+      "id": "claim.proof-replay",
+      "owner": { "cardId": "cbq06v8j", "num": 240 },
+      "class": "reserved",
+      "disposition": "open",
+      "reviewerRationale": "`jet prove` commands and typed proof/replay artifacts are specified but absent.",
+      "acceptanceLanes": [{ "id": "prove-replay-product", "why": "Runs beginner tests/replay and expert lenses against the same proof facts.", "command": ["cargo", "test", "--test", "capability_acceptance", "prove_replay_product", "--", "--exact"], "artifacts": [{ "role": "gap", "kind": "tower", "field": "plan", "anchor": "Implement the first ungated vertical slice", "why": "Owner card is still a plan seed." }] }]
+    },
+    {
+      "id": "claim.performance-budgets",
+      "owner": { "cardId": "ccq07pav", "num": 241 },
+      "class": "reserved",
+      "disposition": "open",
+      "reviewerRationale": "Typed budget surfaces and baseline enforcement are specified but absent.",
+      "acceptanceLanes": [{ "id": "budget-enforcement", "why": "Checks deterministic hard gates and statistical pinned-baseline policy end to end.", "command": ["cargo", "test", "--test", "capability_acceptance", "budget_enforcement", "--", "--exact"], "artifacts": [{ "role": "gap", "kind": "tower", "field": "plan", "anchor": "Implement the first ungated vertical slice", "why": "Owner card is still a plan seed." }] }]
+    },
+    {
+      "id": "claim.product-boundaries",
+      "owner": { "cardId": "c_audit_367_q80zrm", "num": 367 },
+      "class": "facade",
+      "disposition": "open",
+      "reviewerRationale": "Ratchets exist, but root still owns jetpack/jetos binaries and driver imports the Jetpack engine.",
+      "acceptanceLanes": [{ "id": "canonical-product-split", "why": "Proves binary/crate ownership and protocol-only cross-product dispatch.", "command": ["cargo", "test", "--test", "workspace_crates", "product_ownership_is_split", "--", "--exact"], "artifacts": [{ "role": "gap", "kind": "file", "path": "Cargo.toml", "anchor": "name = \"jetos\"", "why": "Root package still declares the JetOS binary." }] }]
+    }
+  ],
+  "cliOwnership": {
+    "run": "claim.native-language", "check": "claim.native-language", "emit": "claim.native-language",
+    "dev": "claim.tier-parity", "repl": "claim.tier-parity", "eval": "claim.tier-parity",
+    "expand": "claim.metaprogramming", "codemod": "claim.metaprogramming",
+    "devtools": "claim.tooling-cli", "serve": "claim.tooling-cli", "new": "claim.tooling-cli", "explain": "claim.tooling-cli", "doctor": "claim.tooling-cli", "completions": "claim.tooling-cli", "man": "claim.tooling-cli", "version": "claim.tooling-cli", "upgrade": "claim.tooling-cli", "help": "claim.tooling-cli",
+    "debug": "claim.ide-debug", "semindex": "claim.ide-debug", "dossier": "claim.ide-debug", "impact": "claim.ide-debug", "lsp": "claim.ide-debug",
+    "test": "claim.format-test", "fmt": "claim.format-test", "fix": "claim.format-test", "lint": "claim.format-test",
+    "build": "claim.package-build", "env": "claim.package-build", "push": "claim.package-build", "trust": "claim.package-build", "services": "claim.package-build", "image": "claim.package-build", "os": "claim.package-build", "add": "claim.package-build", "remove": "claim.package-build", "fetch": "claim.package-build", "update": "claim.package-build", "toolchain": "claim.package-build", "init": "claim.package-build", "lock": "claim.package-build", "store": "claim.package-build", "config": "claim.package-build", "gc": "claim.package-build", "outdated": "claim.package-build", "search": "claim.package-build", "info": "claim.package-build", "logs": "claim.package-build", "clean": "claim.package-build", "publish": "claim.package-build", "yank": "claim.package-build", "keygen": "claim.package-build", "key": "claim.package-build", "schema": "claim.package-build", "vendor": "claim.package-build", "audit": "claim.package-build", "sbom": "claim.package-build",
+    "bridge": "claim.plugin-ffi", "bind": "claim.plugin-ffi", "bench": "claim.performance-budgets"
+  },
+  "coreOwnership": {
+    "core": "claim.core-foundation", "core.io": "claim.core-foundation", "core.env": "claim.core-foundation", "core.os": "claim.core-foundation", "core.process": "claim.core-foundation", "core.math": "claim.core-foundation", "core.random": "claim.core-foundation", "core.time": "claim.core-foundation", "core.mem": "claim.core-foundation", "core.mem.alloc": "claim.core-foundation", "core.gc": "claim.core-foundation", "core.solve": "claim.core-foundation", "core.scope": "claim.core-foundation", "core.args": "claim.core-foundation", "core.term": "claim.core-foundation", "core.reflect": "claim.core-foundation", "core.binary": "claim.core-foundation", "core.fmt": "claim.core-foundation", "core.uuid": "claim.core-foundation", "core.log": "claim.core-foundation", "core.numeric": "claim.core-foundation", "core.perf": "claim.core-foundation", "core.time.date": "claim.core-foundation", "core.time.datetime": "claim.core-foundation", "core.time.expiring": "claim.core-foundation",
+    "core.tasks": "claim.core-concurrency", "core.event": "claim.core-concurrency", "core.async.loadable": "claim.core-concurrency",
+    "core.testing": "claim.format-test",
+    "core.files": "claim.core-files-data", "core.path": "claim.core-files-data", "core.url": "claim.core-files-data", "core.mime": "claim.core-files-data", "core.watcher": "claim.core-files-data", "core.archive": "claim.core-files-data", "core.compress.gzip": "claim.core-files-data", "core.compress.zstd": "claim.core-files-data", "core.db": "claim.core-files-data",
+    "core.encoding": "claim.core-encoding-text", "core.encoding.json": "claim.core-encoding-text", "core.encoding.jsonl": "claim.core-encoding-text", "core.encoding.csv": "claim.core-encoding-text", "core.encoding.toml": "claim.core-encoding-text", "core.encoding.yaml": "claim.core-encoding-text", "core.encoding.xml": "claim.core-encoding-text", "core.encoding.cbor": "claim.core-encoding-text", "core.encoding.hex": "claim.core-encoding-text", "core.encoding.base64": "claim.core-encoding-text", "core.encoding.base32": "claim.core-encoding-text", "core.text": "claim.core-encoding-text", "core.text.unicode": "claim.core-encoding-text", "core.regex": "claim.core-encoding-text",
+    "core.net": "claim.core-network-http", "core.http": "claim.core-network-http", "core.http.client": "claim.core-network-http", "core.http.server": "claim.core-network-http", "core.devserver": "claim.core-network-http",
+    "core.crypto": "claim.core-security", "core.crypto.random": "claim.core-security", "core.crypto.expert": "claim.core-security", "core.secrets": "claim.core-security", "core.vault": "claim.core-security",
+    "core.data": "claim.core-data-compute", "core.science.measurement": "claim.core-data-compute", "core.sketch.hll": "claim.core-data-compute", "core.sketch.tdigest": "claim.core-data-compute", "core.sketch.reservoir": "claim.core-data-compute", "core.sketch.cms": "claim.core-data-compute",
+    "core.reactive": "claim.core-ui-web", "core.ui": "claim.core-ui-web", "core.web": "claim.core-ui-web", "core.web.storage": "claim.core-ui-web", "core.web.storage.local": "claim.core-ui-web", "core.web.storage.session": "claim.core-ui-web",
+    "core.raylib": "claim.game-product", "core.game": "claim.game-product", "core.plugin": "claim.plugin-ffi"
+  }
+}

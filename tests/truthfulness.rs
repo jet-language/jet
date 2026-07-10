@@ -205,6 +205,7 @@ fn readme_subcommands_exist_in_cli() {
 // Check 5: Every examples/features/<topic>/*.jet has a matching expected
 // output. `expected/` mirrors the <topic>/ tree (D-REPO-EXAMPLES1=A).
 // ---------------------------------------------------------------------------
+// CAPABILITY_CLAIM: claim.examples-spec / expected-output-pairs
 #[test]
 fn every_feature_example_has_expected_output() {
     let root = root();
@@ -394,7 +395,7 @@ fn compiler_seam_crates_have_only_path_dependencies() {
 // Check 9: E3 capability claims stay bound to executable proof
 // ---------------------------------------------------------------------------
 #[test]
-fn epoch3_capability_ledger_is_current_and_proof_bound() {
+fn epoch3_capability_manifest_is_current_and_owned() {
     let root = root();
     let output = Command::new("node")
         .arg("scripts/agent/check-capability-ledger.mjs")
@@ -412,18 +413,18 @@ fn epoch3_capability_ledger_is_current_and_proof_bound() {
 }
 
 #[test]
-fn epoch3_capability_ledger_rejects_deleted_or_tampered_proof() {
+fn epoch3_capability_manifest_rejects_hostile_real_card_fixtures() {
     let root = root();
     let output = Command::new("node")
         .arg("scripts/agent/check-capability-ledger.mjs")
-        .arg("--self-test")
+        .arg("--hostile-fixtures")
         .current_dir(&root)
         .output()
-        .expect("node must run the capability-ledger self-test");
+        .expect("node must run the capability-claim hostile fixtures");
 
     assert!(
         output.status.success(),
-        "capability-ledger tamper test failed:\nstdout:\n{}\nstderr:\n{}",
+        "capability-claim hostile fixtures failed:\nstdout:\n{}\nstderr:\n{}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
