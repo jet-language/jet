@@ -62,6 +62,7 @@ pub struct JetTaskControl {
     pub paused: AtomicBool,
     pub cancelled: AtomicBool,
     park: Arc<ParkSlot>,
+    cancel_waiters: Mutex<Vec<std::sync::Weak<ParkSlot>>>,
 }
 
 impl JetTaskControl {
@@ -70,6 +71,7 @@ impl JetTaskControl {
             paused: AtomicBool::new(false),
             cancelled: AtomicBool::new(false),
             park: ParkSlot::new(),
+            cancel_waiters: Mutex::new(Vec::new()),
         })
     }
 
@@ -85,6 +87,28 @@ impl JetTaskControl {
     pub fn cancel(&self) {
         self.cancelled.store(true, Ordering::Relaxed);
         self.park.wake();
+        for waiter in self.cancel_waiters.lock().unwrap().drain(..) {
+            if let Some(waiter) = waiter.upgrade() {
+                waiter.wake();
+            }
+        }
+    }
+
+    fn register_cancel_waiter(&self, slot: &Arc<ParkSlot>) {
+        let mut waiters = self.cancel_waiters.lock().unwrap();
+        if self.cancelled.load(Ordering::Relaxed) {
+            slot.wake();
+        } else {
+            waiters.push(Arc::downgrade(slot));
+        }
+    }
+
+    fn remove_cancel_waiter(&self, slot: &ParkSlot) {
+        self.cancel_waiters.lock().unwrap().retain(|waiter| {
+            waiter
+                .upgrade()
+                .is_some_and(|waiter| !std::ptr::eq(Arc::as_ptr(&waiter), std::ptr::from_ref(slot)))
+        });
     }
 
     fn wait_while_paused(&self) {
@@ -889,12 +913,54 @@ impl<T> ChannelInner<T> {
         self.state.lock().unwrap().recv_waiters.push(slot);
     }
 
+    fn is_closed_and_empty(&self) -> bool {
+        let state = self.state.lock().unwrap();
+        state.closed && state.queue.is_empty()
+    }
+
     fn remove_waiter(&self, slot: &ParkSlot) {
         self.state
             .lock()
             .unwrap()
             .recv_waiters
             .retain(|w| !std::ptr::eq(Arc::as_ptr(w), std::ptr::from_ref(slot)));
+    }
+}
+
+struct SelectRegistration<T> {
+    recvs: Vec<Arc<ChannelInner<T>>>,
+    master: Arc<ParkSlot>,
+    cancel_control: Option<Arc<JetTaskControl>>,
+}
+
+impl<T> SelectRegistration<T> {
+    fn new(
+        recvs: &[Arc<ChannelInner<T>>],
+        master: Arc<ParkSlot>,
+        cancel_control: Option<Arc<JetTaskControl>>,
+    ) -> Self {
+        for channel in recvs {
+            channel.register_select_waiter(master.clone());
+        }
+        if let Some(control) = &cancel_control {
+            control.register_cancel_waiter(&master);
+        }
+        Self {
+            recvs: recvs.to_vec(),
+            master,
+            cancel_control,
+        }
+    }
+}
+
+impl<T> Drop for SelectRegistration<T> {
+    fn drop(&mut self) {
+        for channel in &self.recvs {
+            channel.remove_waiter(&self.master);
+        }
+        if let Some(control) = &self.cancel_control {
+            control.remove_cancel_waiter(&self.master);
+        }
     }
 }
 
@@ -916,11 +982,25 @@ pub(crate) fn jet_scheduler_select<T: Send>(
     if let Some((i, _)) = after_ms.iter().enumerate().find(|(_, ms)| **ms == 0) {
         return JetSelectOutcome::After { arm: i };
     }
+    if after_ms.is_empty()
+        && !recvs.is_empty()
+        && recvs.iter().all(|ch| ch.is_closed_and_empty())
+    {
+        return JetSelectOutcome::Closed;
+    }
 
     let master = ParkSlot::new();
+    let cancel_control = current_task_control();
     let started = Instant::now();
-    for ch in &recvs {
-        ch.register_select_waiter(master.clone());
+    let _registration =
+        SelectRegistration::new(&recvs, master.clone(), cancel_control.clone());
+    // Close can race the first check and happen before waiter registration.
+    // Recheck after registration so a lost close wake cannot park forever.
+    if after_ms.is_empty()
+        && !recvs.is_empty()
+        && recvs.iter().all(|ch| ch.is_closed_and_empty())
+    {
+        return JetSelectOutcome::Closed;
     }
     for ms in &after_ms {
         timer_wheel().schedule(Instant::now() + Duration::from_millis(*ms), master.clone());
@@ -928,7 +1008,6 @@ pub(crate) fn jet_scheduler_select<T: Send>(
 
     loop {
         if jet_scheduler_task_cancelled() {
-            cleanup_select_waiters(&recvs, &master);
             return JetSelectOutcome::Closed;
         }
         METRIC_PARKED.fetch_add(1, Ordering::Relaxed);
@@ -936,7 +1015,6 @@ pub(crate) fn jet_scheduler_select<T: Send>(
         METRIC_PARKED.fetch_sub(1, Ordering::Relaxed);
         for (i, ch) in recvs.iter().enumerate() {
             if let Some(v) = ch.try_pop() {
-                cleanup_select_waiters(&recvs, &master);
                 return JetSelectOutcome::Recv { arm: i, value: v };
             }
         }
@@ -945,17 +1023,14 @@ pub(crate) fn jet_scheduler_select<T: Send>(
             .enumerate()
             .find(|(_, ms)| started.elapsed() >= Duration::from_millis(**ms))
         {
-            cleanup_select_waiters(&recvs, &master);
             return JetSelectOutcome::After { arm: i };
         }
-    }
-}
-
-#[allow(dead_code)]
-#[allow(dead_code)]
-fn cleanup_select_waiters<T>(recvs: &[Arc<ChannelInner<T>>], master: &ParkSlot) {
-    for ch in recvs {
-        ch.remove_waiter(master);
+        if after_ms.is_empty()
+            && !recvs.is_empty()
+            && recvs.iter().all(|ch| ch.is_closed_and_empty())
+        {
+            return JetSelectOutcome::Closed;
+        }
     }
 }
 
@@ -1368,11 +1443,155 @@ pub fn jet_scheduler_drain() {
 mod interrupt_boundary_tests {
     use super::*;
 
+    fn select_with_timeout(
+        channels: Vec<JetSchedulerChannel<i64>>,
+        timers: Vec<u64>,
+    ) -> JetSelectOutcome<i64> {
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        std::thread::spawn(move || {
+            let inners = channels.into_iter().map(|ch| ch.select_inner()).collect();
+            let _ = tx.send(jet_scheduler_select(inners, timers));
+        });
+        rx.recv_timeout(Duration::from_millis(250))
+            .expect("select did not wake after every channel closed")
+    }
+
     #[test]
     fn closed_select_failure_unwinds_inside_runtime_boundary() {
         jet_scheduler_task_panic_enter();
         let result = std::panic::catch_unwind(|| jet_scheduler_fatal("select closed"));
         jet_scheduler_task_panic_leave();
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn select_returns_closed_when_one_channel_is_closed_and_empty() {
+        let channel = JetSchedulerChannel::<i64>::new();
+        channel.close();
+        assert!(matches!(
+            select_with_timeout(vec![channel], Vec::new()),
+            JetSelectOutcome::Closed
+        ));
+    }
+
+    #[test]
+    fn select_returns_closed_only_when_all_channels_are_closed_and_empty() {
+        let first = JetSchedulerChannel::<i64>::new();
+        let second = JetSchedulerChannel::<i64>::new();
+        first.close();
+        second.close();
+        assert!(matches!(
+            select_with_timeout(vec![first, second], Vec::new()),
+            JetSelectOutcome::Closed
+        ));
+    }
+
+    #[test]
+    fn select_wakes_when_last_open_channel_closes_after_park() {
+        let channel = JetSchedulerChannel::<i64>::new();
+        let closer = channel.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(10));
+            closer.close();
+        });
+        assert!(matches!(
+            select_with_timeout(vec![channel], Vec::new()),
+            JetSelectOutcome::Closed
+        ));
+    }
+
+    #[test]
+    fn select_ready_value_and_timer_keep_precedence_over_closed() {
+        let valued = JetSchedulerChannel::<i64>::new();
+        let sender = valued.sender();
+        assert!(sender.send(7));
+        drop(sender);
+        assert!(matches!(
+            select_with_timeout(vec![valued], Vec::new()),
+            JetSelectOutcome::Recv { value: 7, .. }
+        ));
+
+        let closed = JetSchedulerChannel::<i64>::new();
+        closed.close();
+        assert!(matches!(
+            select_with_timeout(vec![closed], vec![0]),
+            JetSelectOutcome::After { arm: 0 }
+        ));
+
+        let closed = JetSchedulerChannel::<i64>::new();
+        closed.close();
+        assert!(matches!(
+            select_with_timeout(vec![closed], vec![10]),
+            JetSelectOutcome::After { arm: 0 }
+        ));
+    }
+
+    #[test]
+    fn select_cancellation_keeps_precedence_over_waiting() {
+        let control = JetTaskControl::new();
+        control.cancel();
+        jet_scheduler_set_task_control(Some(control));
+        let channel = JetSchedulerChannel::<i64>::new();
+        let outcome = jet_scheduler_select(vec![channel.select_inner()], Vec::new());
+        jet_scheduler_set_task_control(None);
+        assert!(matches!(outcome, JetSelectOutcome::Closed));
+    }
+
+    #[test]
+    fn select_cancellation_after_park_wakes_and_cleans_waiters() {
+        let control = JetTaskControl::new();
+        let channel = JetSchedulerChannel::<i64>::new();
+        let inner = channel.select_inner();
+        let selected_inner = inner.clone();
+        let selected_control = control.clone();
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        std::thread::spawn(move || {
+            jet_scheduler_set_task_control(Some(selected_control));
+            let outcome = jet_scheduler_select(vec![selected_inner], Vec::new());
+            jet_scheduler_set_task_control(None);
+            let _ = tx.send(outcome);
+        });
+
+        let deadline = Instant::now() + Duration::from_millis(250);
+        loop {
+            let channel_registered = !inner.state.lock().unwrap().recv_waiters.is_empty();
+            let cancel_registered = !control.cancel_waiters.lock().unwrap().is_empty();
+            if channel_registered && cancel_registered {
+                break;
+            }
+            assert!(Instant::now() < deadline, "select did not park");
+            std::thread::yield_now();
+        }
+
+        control.cancel();
+        assert!(matches!(
+            rx.recv_timeout(Duration::from_millis(250))
+                .expect("cancelled select did not wake"),
+            JetSelectOutcome::Closed
+        ));
+        assert!(inner.state.lock().unwrap().recv_waiters.is_empty());
+        assert!(control.cancel_waiters.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn select_deadline_unwind_cleans_all_waiters() {
+        let control = JetTaskControl::new();
+        let channel = JetSchedulerChannel::<i64>::new();
+        let inner = channel.select_inner();
+        jet_scheduler_set_task_control(Some(control.clone()));
+        jet_scheduler_task_panic_enter();
+        let result = {
+            TEST_DEADLINE_EXCEEDED.with(|deadline| deadline.set(true));
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                jet_scheduler_select(vec![inner.clone()], Vec::new())
+            }))
+        };
+        TEST_DEADLINE_EXCEEDED.with(|deadline| deadline.set(false));
+        jet_scheduler_task_panic_leave();
+        jet_scheduler_set_task_control(None);
+
+        assert!(result.is_err());
+        assert!(inner.state.lock().unwrap().recv_waiters.is_empty());
+        assert!(control.cancel_waiters.lock().unwrap().is_empty());
     }
 }

@@ -2779,6 +2779,27 @@ fn run() {
     assert_eq!(stdout, "12\n30\n");
 }
 
+#[test]
+fn taskgroup_select_receives_from_real_channel() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+use core.tasks as tasks
+fn run() {
+    taskgroup g {
+        (sender, receiver) :: tasks.channel<Int>()
+        sender.send(42)
+        value :: g.select().recv(receiver).wait()
+        print(value)
+    }
+}
+";
+    let (code, stdout) = build_and_run("tir_taskgroup_select", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "42\n");
+}
+
 /// c109 Phase 22: method-call-collection iteration — `loop c in s.chars()` (char
 /// iteration) and `loop w in s.split(sep)` (the `.iter().cloned()` default), both
 /// reproduced from `emit_for_in`'s `Expr::MethodCall` branches.
