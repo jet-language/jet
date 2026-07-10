@@ -3,8 +3,8 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 485,
-    "rev": 3114,
+    "nextNum": 486,
+    "rev": 3118,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -13678,6 +13678,50 @@
       "created": "2026-07-10T22:16:42.372Z",
       "updated": "2026-07-10",
       "claimedAt": "2026-07-10T22:16:50.353Z"
+    },
+    {
+      "id": "c0mg4tf8",
+      "num": 485,
+      "title": "verify-full TMPDIR breaks provider visibility fixture",
+      "body": "verify-full uses repo-local TMPDIR. tests/provider_visibility.rs creates a standalone Cargo package under std::env::temp_dir(), so Cargo sees the checkout's parent workspace and rejects the package before compiling the intended private-provider imports. Targeted default-/tmp run passes. Make the generated fixture an explicit standalone workspace so the test reaches its actual privacy assertions under repo-local TMPDIR.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": "Add an empty [workspace] table to the generated scratch Cargo.toml, isolating it from any ancestor workspace. Prove fail-before/pass-after with repo-local TMPDIR, exact target, and full provider_visibility target. No production change.",
+      "blockedBy": [],
+      "assignee": "terra-485-builder",
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Provider visibility fixture reaches private-symbol compiler diagnostics under repo-local TMPDIR instead of ancestor-workspace rejection.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T22:40:14.457Z"
+        },
+        {
+          "n": 2,
+          "text": "Exact/full provider_visibility and repository full-suite gates pass with no production change.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T22:40:14.613Z"
+        }
+      ],
+      "refs": [
+        "tests/provider_visibility.rs",
+        "scripts/agent/verify-full.sh"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-10T22:40:06.804Z",
+      "updated": "2026-07-10",
+      "claimedAt": "2026-07-10T22:40:14.767Z"
     }
   ],
   "decisions": [
@@ -24416,6 +24460,34 @@
   ],
   "events": [
     {
+      "at": "2026-07-10T22:40:14.768Z",
+      "by": "terra-485-builder",
+      "action": "card.claim",
+      "ref": "c0mg4tf8",
+      "note": ""
+    },
+    {
+      "at": "2026-07-10T22:40:14.613Z",
+      "by": "codex-main",
+      "action": "card.criteria-add",
+      "ref": "c0mg4tf8",
+      "note": "#2 Exact/full provider_visibility and repository full-suite gat"
+    },
+    {
+      "at": "2026-07-10T22:40:14.457Z",
+      "by": "codex-main",
+      "action": "card.criteria-add",
+      "ref": "c0mg4tf8",
+      "note": "#1 Provider visibility fixture reaches private-symbol compiler "
+    },
+    {
+      "at": "2026-07-10T22:40:06.804Z",
+      "by": "codex-main",
+      "action": "card.add",
+      "ref": "c0mg4tf8",
+      "note": "verify-full TMPDIR breaks provider visibility fixture"
+    },
+    {
       "at": "2026-07-10T22:32:49.098Z",
       "by": "codex-main",
       "action": "card.update",
@@ -27886,34 +27958,6 @@
       "action": "card.criteria-verify",
       "ref": "c0k81v26",
       "note": "#2"
-    },
-    {
-      "at": "2026-07-10T15:50:28.453Z",
-      "by": "grok-main",
-      "action": "card.criteria-verify",
-      "ref": "c0k81v26",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-10T15:43:20.063Z",
-      "by": "cursor-verify",
-      "action": "card.add",
-      "ref": "c0onpgah",
-      "note": "durability: close JET_REQUIRE_RUSTC self-skip holes + widen pre-push (W1 follow-up)"
-    },
-    {
-      "at": "2026-07-10T15:43:02.240Z",
-      "by": "grok-main",
-      "action": "card.update",
-      "ref": "c73xs2f",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T15:43:02.142Z",
-      "by": "grok-main",
-      "action": "card.update",
-      "ref": "c73xs2f",
-      "note": "plan,logEntry"
     }
   ],
   "nextNum": 368,
