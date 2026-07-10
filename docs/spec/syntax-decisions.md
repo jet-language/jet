@@ -2566,6 +2566,86 @@ intent cards summarize; expert drawers show exact cell hashes/origins/messages.
 Imported ipynb output is quarantined, grants stay local, and any relevant change
 revokes to safe text fallback.
 
+### Ratified product and runtime architecture — 2026-07-10 (batch 2)
+
+**D-CLI-SURFACE1=B — frequency-ringed jet command surface**: the ~20 daily
+dev-loop verbs (`run`, `build`, `test`, `check`, `fix`, `new`, `init`, `add`,
+`remove`, `update`, `fmt`, `lint`, `dev`, `serve`, `repl`, `debug`, `bench`,
+`eval`, `emit`, `explain`, `help`, `version`) stay flat and top-level. The
+long tail moves under four groups on the jet binary: `jet registry`
+(publish, yank, keygen, key backup, vendor), `jet inspect` (graph, query,
+explain-build, impact, dossier, semindex, expand, schema, codemod, audit,
+sbom, bind), `jet store` (existing verify/rollback/generations, plus gc,
+fetch, lock), `jet self` (toolchain, upgrade, doctor, completions, man,
+devtools). The bare ungrouped spelling of a moved verb is a teaching error
+naming the grouped form, never a silent alias (I8).
+
+**D-JPK-TASKRUN1=A — tasks are `#Task fn`**: a task is an ordinary Jet
+function marked `#Task`, living beside `fn run()`. Reuses typed-argument CLI
+parsing (D-CLIFLAG1) and `?` fallibility; a cross-task dependency is a plain
+function call, no separate DAG syntax. Invoked `jetpack run <name>`. `run`,
+`dev`, `build`, `test` remain reserved lifecycle verb names a task cannot
+reuse.
+
+**D-JPK-TOOLRUN1=A — unified `jetpack tool` noun**: `jetpack tool run <ref>`
+executes a package binary ephemerally across all providers (generalizing the
+nix-only `jetpack run nixpkgs:pkg` bridge); `jetpack tool install <ref>`
+adds it to the user's default profile (D-JPK-PROFILE1) and projects its
+bins onto PATH as its own generation; `jetpack tool list`/`uninstall`
+manage them. A name collision with a project-local task (D-JPK-TASKRUN1)
+is a checked error naming both.
+
+**D-JPK-PKGOVERRIDE1=B — keyed override record inside `overlay`**: a
+package's version/flags/env/patch overrides live under one
+`overrides: { <pkg>: .{ … } }` typed record per overlay (D-JPK-OVERLAY1),
+using the standard `.{ }` construction. Patches are file references
+(`patch("...")`), never inline diffs. Conflicting overlays resolve through
+the same named-tier/`Priority(n)` mechanism ratified for jetos
+(D-JOS-PRIORITY1) — one conflict model shared by jetpack and jetos.
+
+**D-JPK-SELECTOR1=C — explicit + computed workspace selection, no pattern
+DSL**: `jet build/test/run -p <member>` (repeatable, exact name, cargo-style)
+selects workspace members explicitly; `--affected[-since <ref>]` computes
+the changed-member set (plus dependents, always included) from the action
+cache's existing input-hash keys (D-BUILDCACHE1). No glob/dependency-modifier
+pattern language.
+
+**D-JOS-NETWORK1=B — inline `net.*` in `system.<host>`, reusable named
+tunnels/printers**: host-bound network state (`net.hostname`, `net.wifi`,
+`net.firewall`, `net.bluetooth`) stays inline in `system.<host>`, matching
+existing convention. Portable pieces are name-referenced modules —
+`vpn.<name>`, `printing.<name>` — reused across hosts, matching the
+`user.<name>`/`theme.<name>` convention. `net.firewall` accepts a typed
+`Firewall.nftables` family for expert rule sets. Zero-declaration default:
+NM+DHCP, deny-inbound firewall, CUPS+Avahi discovery, bluetooth on.
+
+**D-JOS-OPTIONSVERB1=B — reuse `jet search`/`jet info`, no new verb**:
+jetos option search/browse (search.nixos.org parity) rides the existing
+ratified `jet search`/`jet info` discovery verbs (D-JPK-DISCOVER1) rather
+than minting a dedicated `jet os options` verb.
+
+**D-JOS-BACKUP1=C — backup as a `workload.<name>` backend**: user-data
+backup/snapshot reuses the `workload.<name>` mechanism ratified for
+Container/MicroVM (D-JOS-CONTAINER1); the backend enum gains `.Snapshot`
+and `.EncryptedRemote`. Restore goes through the existing `jet os rollback`
+verb — no new CLI surface. Shares mounts/secrets/health/resources/proof
+fields with every other workload kind.
+
+**D-JOS-APPSTORE1=D — hybrid storefront inside the one Studio shell**: the
+beginner app-store view is a first-class Apps view inside Studio (not a
+second GUI app, not Studio-external): full storefront browse (featured,
+categories, screenshots), one-click Install writes the declarative
+`user.<name>.packages` diff and applies through the profile engine
+(D-JOS-USERAPPLY1) — never an imperative side-channel — with the exact
+generated source diff visible on demand ("View source"), never forced.
+
+**D-JOS-APPMODULE1=B — one `apps` record, one field per app**: `user.<name>`
+carries a single `apps: .{ … }` record; each known app gets one lowercase
+field, its config type inferred from the field (`.{ }`, D-DOTCTOR2) — the
+type name never appears. Every app's config supports standard `package:`,
+`extraConfig:` (verbatim passthrough), and `files:` fields. Presence in the
+record means installed and configured; no `enable:` ceremony.
+
 ### Superseded & deferred IDs (tombstones)
 
 **S6 — semicolons**: superseded by S6-R (see Formatting).
