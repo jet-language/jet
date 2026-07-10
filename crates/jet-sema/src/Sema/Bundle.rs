@@ -2466,6 +2466,7 @@ pub(crate) fn check_module_bodies(
     // D-MEM1/S7 (D-NOALLOC-SEM1=A): captured once — every function body check
     // below for this module gets the same file-scoped `policy no_alloc` state.
     let no_alloc = module.no_alloc_policy.is_some();
+    let no_prelude = module.no_prelude;
     let (ct_funcs, ct_externs, ct_globals) = comptime_context_from_items(&module.items);
     let ct_base_dir = module
         .path
@@ -2490,6 +2491,7 @@ pub(crate) fn check_module_bodies(
                     embed_inputs_out,
                     global_addr_taken,
                     no_alloc,
+                no_prelude,
                 ));
             }
             Item::Struct(s) => {
@@ -2509,6 +2511,7 @@ pub(crate) fn check_module_bodies(
                         embed_inputs_out,
                         global_addr_taken,
                         no_alloc,
+                    no_prelude,
                     ));
                 }
             }
@@ -2529,6 +2532,7 @@ pub(crate) fn check_module_bodies(
                         embed_inputs_out,
                         global_addr_taken,
                         no_alloc,
+                    no_prelude,
                     ));
                 }
             }
@@ -2549,6 +2553,7 @@ pub(crate) fn check_module_bodies(
                         embed_inputs_out,
                         global_addr_taken,
                         no_alloc,
+                    no_prelude,
                     ));
                 }
             }
@@ -2581,6 +2586,8 @@ pub(crate) fn check_module_bodies(
                     replayable_span: None,
                     is_must_use: false,
                     must_use_span: None,
+                    maturity: None,
+                    maturity_span: None,
                     is_inline: false,
                     is_inline_always: false,
                     inline_span: None,
@@ -2609,6 +2616,7 @@ pub(crate) fn check_module_bodies(
                     embed_inputs_out,
                     global_addr_taken,
                     no_alloc,
+                no_prelude,
                 ));
                 t.body = synthetic.body;
             }
@@ -2635,6 +2643,8 @@ pub(crate) fn check_module_bodies(
                     replayable_span: None,
                     is_must_use: false,
                     must_use_span: None,
+                    maturity: None,
+                    maturity_span: None,
                     is_inline: false,
                     is_inline_always: false,
                     inline_span: None,
@@ -2663,6 +2673,7 @@ pub(crate) fn check_module_bodies(
                     embed_inputs_out,
                     global_addr_taken,
                     no_alloc,
+                no_prelude,
                 ));
                 b.body = synthetic.body;
             }
@@ -2688,6 +2699,7 @@ pub(crate) fn check_module_bodies(
                                 embed_inputs_out,
                                 global_addr_taken,
                                 no_alloc,
+                            no_prelude,
                             ));
                         }
                     }
@@ -2708,6 +2720,7 @@ pub(crate) fn check_module_bodies(
                     &ct_base_dir,
                     &ct_globals,
                     no_alloc,
+                    no_prelude,
                 ));
             }
             _ => {}
@@ -2733,6 +2746,8 @@ pub(crate) fn check_func_body_bundle(
     global_addr_taken: &mut HashSet<String>,
     // D-MEM1/S7 (D-NOALLOC-SEM1=A): this module's `policy no_alloc` state.
     no_alloc: bool,
+    // D-PRELUDEX1=A: this file's `#NoPrelude` state.
+    no_prelude: bool,
 ) -> Vec<Diagnostic> {
     let st = &states[module_idx];
     let mut ck = Checker {
@@ -2771,6 +2786,7 @@ pub(crate) fn check_func_body_bundle(
         suppress_must_use: false,
         in_pure: f.is_pure,
         no_alloc,
+        no_prelude,
         in_pre_clause: false,
         in_comptime: false,
         ret: f.return_type.clone(),

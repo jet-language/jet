@@ -305,6 +305,7 @@ pub fn assemble(bundle: &mut ProgramBundle) -> Result<CFfi, Vec<Diagnostic>> {
             items: vec![Item::CModule(merged_module)],
             web_target_ceiling: None,
             pub_file: false,
+            no_prelude: false,
             html_path: None,
             no_alloc_policy: None,
         });
@@ -367,6 +368,7 @@ pub fn assemble(bundle: &mut ProgramBundle) -> Result<CFfi, Vec<Diagnostic>> {
                         })],
                         web_target_ceiling: None,
                         pub_file: false,
+                        no_prelude: false,
                         html_path: None,
                         no_alloc_policy: None,
                     });
@@ -577,6 +579,7 @@ fn load_cache_source(
         items: std::mem::take(&mut prog.items),
         web_target_ceiling: prog.web_target_ceiling,
         pub_file: prog.pub_file,
+        no_prelude: prog.no_prelude,
         html_path: prog.html_path.clone(),
         no_alloc_policy: prog.no_alloc_policy,
     });

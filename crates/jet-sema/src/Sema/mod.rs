@@ -689,6 +689,9 @@ pub(crate) struct Checker<'a> {
     /// another function — a callee's own allocations are its own module's
     /// concern (E0921 only fires on shapes written directly in THIS body).
     no_alloc: bool,
+    /// D-PRELUDEX1=A: true when the enclosing file declared `#NoPrelude`.
+    /// Disables ambient `print`/`input` resolution for this body.
+    no_prelude: bool,
     /// D-PREPOST1: true while type-checking a `@Pre` clause's condition —
     /// `result` isn't bound yet at function entry, so a reference to it here
     /// is E0144 instead of the normal "undefined name" error.

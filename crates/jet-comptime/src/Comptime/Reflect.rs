@@ -386,6 +386,8 @@ mod tests {
             post: Vec::new(),
             is_must_use: false,
             must_use_span: None,
+            maturity: None,
+            maturity_span: None,
             is_inline: false,
             is_inline_always: false,
             is_replayable: false,

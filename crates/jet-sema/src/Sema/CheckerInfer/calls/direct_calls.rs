@@ -154,6 +154,32 @@ impl<'a> Checker<'a> {
             }
     
             if call.name == Syntax::BUILTIN_PRINT {
+                if self.no_prelude {
+                    self.diags.push(Diagnostic::error(
+                        "E0429",
+                        format!(
+                            "`{}` is not ambient here — this file opted out with `#{}`",
+                            Syntax::BUILTIN_PRINT,
+                            Syntax::MARKER_NO_PRELUDE
+                        ),
+                        format!(
+                            "`#{}` disables the curated prelude auto-imports (`{}` / `{}`)",
+                            Syntax::MARKER_NO_PRELUDE,
+                            Syntax::BUILTIN_PRINT,
+                            Syntax::BUILTIN_INPUT
+                        ),
+                        format!(
+                            "write `use core.io as io` and call `io.{}(…)`, or remove `#{}`",
+                            Syntax::BUILTIN_PRINT,
+                            Syntax::MARKER_NO_PRELUDE
+                        ),
+                        Some(call.name_span),
+                    ));
+                    for arg in call.args.iter_mut() {
+                        self.infer(&mut arg.expr);
+                    }
+                    return Some(None);
+                }
                 if call.args.len() != 1 {
                     self.diags.push(Diagnostic::error(
                         "E0103",
@@ -193,10 +219,37 @@ impl<'a> Checker<'a> {
             // D-PRELUDE1 = B: `input` is ambient — no `use core.io` needed.
             // Resolves to the same semantics as `io.input`: optional String prompt,
             // returns Result(String, IoError). Shadowed by any user-defined `input`.
+            // D-PRELUDEX1=A: `#NoPrelude` turns the ambient off.
             if call.name == Syntax::BUILTIN_INPUT
                 && self.funcs.get(Syntax::BUILTIN_INPUT).is_none()
                 && self.lookup(Syntax::BUILTIN_INPUT).is_none()
             {
+                if self.no_prelude {
+                    self.diags.push(Diagnostic::error(
+                        "E0429",
+                        format!(
+                            "`{}` is not ambient here — this file opted out with `#{}`",
+                            Syntax::BUILTIN_INPUT,
+                            Syntax::MARKER_NO_PRELUDE
+                        ),
+                        format!(
+                            "`#{}` disables the curated prelude auto-imports (`{}` / `{}`)",
+                            Syntax::MARKER_NO_PRELUDE,
+                            Syntax::BUILTIN_PRINT,
+                            Syntax::BUILTIN_INPUT
+                        ),
+                        format!(
+                            "write `use core.io as io` and call `io.{}(…)`, or remove `#{}`",
+                            Syntax::BUILTIN_INPUT,
+                            Syntax::MARKER_NO_PRELUDE
+                        ),
+                        Some(call.name_span),
+                    ));
+                    for arg in call.args.iter_mut() {
+                        self.infer(&mut arg.expr);
+                    }
+                    return Some(None);
+                }
                 if call.args.len() > 1 {
                     self.diags.push(wrong_core_arity(
                         Syntax::BUILTIN_INPUT,
@@ -603,11 +656,16 @@ impl<'a> Checker<'a> {
                     call.name
                 );
                 let mut best: Option<(&str, usize)> = None;
+                let prelude_cands: &[&str] = if self.no_prelude {
+                    &[]
+                } else {
+                    Syntax::PRELUDE_IDENTS
+                };
                 for cand in self
                     .funcs
                     .keys()
                     .map(|s| s.as_str())
-                    .chain(Syntax::PRELUDE_IDENTS.iter().copied())
+                    .chain(prelude_cands.iter().copied())
                 {
                     let d = edit_distance(&call.name, cand);
                     if d <= 2 && best.map_or(true, |(_, bd)| d < bd) {

@@ -1264,10 +1264,10 @@ impl<'a> Checker<'a> {
     ) -> Option<Type> {
         let callee_span = callee.span();
 
-        // `print` is a builtin that doesn't live in scope as an ident — special-case it so
-        // `print.[a, b, c]` works without triggering E0107.
+                // `print` is a builtin that doesn't live in scope as an ident — special-case it so
+        // `print.[a, b, c]` works without triggering E0107. D-PRELUDEX1=A: skipped under `#NoPrelude`.
         if let Expr::Ident(name, _) = callee.as_ref() {
-            if name == Syntax::BUILTIN_PRINT {
+            if name == Syntax::BUILTIN_PRINT && !self.no_prelude {
                 self.borrow_ctx = true;
                 for item in items.iter_mut() {
                     if let Some(t) = self.infer(item) {

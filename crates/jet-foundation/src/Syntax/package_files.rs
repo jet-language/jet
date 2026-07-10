@@ -480,7 +480,7 @@ pub const BUILD_OPTIMIZE_FULL: &str = "full"; // D-BUILDPROFILE1
 /// Used by Sema/Purity and Comptime/Purity to detect I/O calls inside
 /// `pure fn` or comptime contexts. Both consumers must agree on this set;
 /// having it here prevents silent divergence.
-pub const IMPURE_BUILTINS: &[&str] = &[BUILTIN_PRINT, "eprint", BUILTIN_INPUT, "read_all_input"];
+pub const IMPURE_BUILTINS: &[&str] = &[BUILTIN_PRINT, "eprint", "print", BUILTIN_INPUT, "read_all_input"];
 
 // ── Marker family + syntax wave (ratified 2026-07-01, D-MARKERMOVE2/3 2026-07-02) ──
 //

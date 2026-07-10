@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 466,
-    "rev": 2686,
+    "rev": 2707,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -16,10 +16,12 @@
         "epoch:e6",
         "board-sidequests",
         "epoch:e4",
-        "epoch:e5"
+        "epoch:e5",
+        "radar-sq",
+        "radar-cards"
       ]
     },
-    "digestCursor": "2026-07-10T12:24:15.202Z"
+    "digestCursor": "2026-07-10T14:23:24.902Z"
   },
   "epochs": [
     {
@@ -539,6 +541,11 @@
         {
           "at": "2026-07-10",
           "by": "claude-main",
+          "text": "Correction: full golden suite has unrelated red on ui/ui_tui_reactive (output order). Card-scoped discard examples + diagnostic_snapshots remain green; that UI golden is out of #37 scope."
+        },
+        {
+          "at": "2026-07-10",
+          "by": "claude-main",
           "text": "Closed after self-verify. Evidence: cargo test --test diagnostic_snapshots (ok); cargo test --test golden (ok); jet run examples/features/errors/discard_fallible.jet + must_use.jet. Out-of-scope red ignored: diagnostics_coverage E9999/E1291/E3504 (not this card)."
         },
         {
@@ -608,7 +615,7 @@
     },
     {
       "milestoneId": null,
-      "assignee": null,
+      "assignee": "claude-main",
       "id": "crivuqa",
       "num": 63,
       "title": "Prelude opt-out + `#builtin`-style no-prefix library escape",
@@ -616,11 +623,26 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
       "plan": "D-PRELUDEX1=A: implement prelude opt-out only. Steps: add file/package opt-out surface per ratified marker; parser/Syntax.rs entry; loader/sema skips ambient prelude when opted out; diagnostics teach explicit imports; no library prelude injection; examples + ui snapshots.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-10",
+          "by": "claude-main",
+          "text": "D-PRELUDEX1=A shipped: #NoPrelude file marker; ambient print/input gated; io.print qualified twin; E0429+E0428; example+snapshots+docs. Out-of-scope red ignored: diagnostics_coverage E9999/E1291/E3504; golden ui/ui_tui_reactive."
+        },
+        {
+          "at": "2026-07-10",
+          "by": "claude-main",
+          "text": "Card-scoped verify: diagnostic_snapshots ok; syntax_reconciliation ok; jet run examples/features/io/no_prelude.jet → no-prelude: io.print works; E0429/E0428 ui fixtures; grammars regenerated."
+        },
+        {
+          "at": "2026-07-10",
+          "by": "claude-main",
+          "text": "Implementing D-PRELUDEX1=A: #NoPrelude file marker; skip ambient print/input; teaching diag + ui/example."
+        },
         {
           "at": "2026-07-10",
           "by": "codex-orchestrator",
@@ -644,7 +666,8 @@
       "workOrder": 53,
       "criteria": [],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [],
+      "claimedAt": "2026-07-10T14:21:12.586Z"
     },
     {
       "milestoneId": "e3-universal-product-parity",
@@ -718,7 +741,7 @@
     },
     {
       "milestoneId": null,
-      "assignee": null,
+      "assignee": "claude-main",
       "id": "c17iww33",
       "num": 79,
       "title": "Maturity tags (`#Experimental` / `#Tested` / `#Hardened`)",
@@ -726,11 +749,21 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "verify",
       "priority": "P3",
       "plan": "D-MATURITY1=B: document maturity tags as a non-semantic convention now. Steps: add docs/reference guidance for #Experimental/#Tested/#Hardened comments/metadata if existing marker syntax permits; do not add sema propagation; file follow-up only if semantic propagation is later ratified.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-10",
+          "by": "claude-main",
+          "text": "Criteria met. Hand off to jet-verify for independent check + close."
+        },
+        {
+          "at": "2026-07-10",
+          "by": "claude-main",
+          "text": "D-MATURITY1=B: store MaturityTag on Func (fmt/docs visible, zero sema); E0062 for # spelling; example syntax/maturity_tags + fmt STABILITY; docs/reference/maturity-tags.md + core-library cross-link; marker matrix updated."
+        },
         {
           "at": "2026-07-10",
           "by": "codex-orchestrator",
@@ -761,9 +794,42 @@
       "created": "2026-06-26T21:10:13.903Z",
       "updated": "2026-07-10",
       "workOrder": 59,
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "@Experimental/@Tested/@Hardened parse onto Func.maturity; fmt preserves; zero sema",
+          "status": "met",
+          "metBy": "claude-main",
+          "verifiedBy": null,
+          "evidence": "MaturityTag on Func; bump_maturity_marker; Formatter/Items emits @tag; fmt_preserves_maturity_tags + next_line pass; no sema reads of maturity",
+          "at": "2026-07-10T14:44:05.379Z"
+        },
+        {
+          "n": 2,
+          "text": "E0062 UI snapshots for retired #Experimental/#Tested/#Hardened",
+          "status": "met",
+          "metBy": "claude-main",
+          "verifiedBy": null,
+          "evidence": "diagnostic_snapshots ui_snapshots green for marker_experimental_hash/tested/hardened (E0062 full-span)",
+          "at": "2026-07-10T14:44:05.452Z"
+        },
+        {
+          "n": 3,
+          "text": "I5 example examples/features/syntax/maturity_tags.jet + expected out; docs/reference/maturity-tags.md",
+          "status": "met",
+          "metBy": "claude-main",
+          "verifiedBy": null,
+          "evidence": "examples/features/syntax/maturity_tags.jet runs exp/tested/hard; docs/reference/maturity-tags.md + core-library link; syntax-decisions D-MATURITY1 wording updated",
+          "at": "2026-07-10T14:44:05.520Z"
+        }
+      ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [
+        "docs/reference/maturity-tags.md",
+        "examples/features/syntax/maturity_tags.jet",
+        "crates/jet-foundation/src/AST/items.rs"
+      ],
+      "claimedAt": "2026-07-10T14:33:51.050Z"
     },
     {
       "milestoneId": "e3-universal-product-parity",
@@ -11551,12 +11617,17 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "verify",
+      "phase": "done",
       "priority": "P2",
       "plan": "D-TWR-BOARD1=A ratified with comment: ADD a NEW page prototyping a hybrid of A (roadmap ledger) & B (ops table); DO NOT replace or change the current Board. Steps:\n1. New third tab 'Radar' (Now · Board · Radar; keyboard 3, ⌘K entry). Board view code untouched — zero diffs to viewBoard.\n2. Radar layout per epoch (active epochs only, current first): header row = name + progress bar + 30-day burndown sparkline (computed from events: card.update transitions to done, bucketed per day) + active/done counts; milestone bars with met/total and a stall badge when no progress event for 5+ days.\n3. Under each epoch header: the B half — dense sortable table of that epoch's ACTIVE cards (num, title, lane, priority, order, assignee, updated-age). Column-header sort; type-to-filter box; inline edits for lane-safe fields (priority, workOrder, assignee) via existing card/update API; row click opens the normal card modal.\n4. Done/frozen never render on Radar; per-epoch 'ledger' link shows done list (from tower.json now; switches to GET /api/history when #461 lands — soft dependency, not blocking).\n5. Server: burndown series computed in project() (store-side helper + unit test) so the client stays dumb.\n6. Tests: burndown/stall helper unit tests in Tower/test; existing suite green.\n7. Acceptance (owner comment = this is a prototype he wants to SEE): card flagged for owner acceptance — demo on his phone + desktop, he compares against untouched Board, then decides keep/iterate/drop via the acceptance ballot. Frontend acceptance = feature-by-feature vs this plan in his real browser, not pty tests.\nExit: Radar renders live board data with burndown + table hybrid; Board byte-identical in behavior; owner acceptance ballot answered.",
       "blockedBy": [],
       "assignee": "claude-main",
       "log": [
+        {
+          "at": "2026-07-10",
+          "by": "owner",
+          "text": "Accepted — D-ACCEPT-464 ratified accept."
+        },
         {
           "at": "2026-07-10",
           "by": "claude-main",
@@ -11663,6 +11734,11 @@
       "log": [
         {
           "at": "2026-07-10",
+          "by": "claude-main",
+          "text": "delta vs original list: os_switch_activates_and_sets_current now PASSES; NEW failures (reproduce in isolation, jetpack-jail stream, not the tower wave): env_dev_trust dev_pattern_trust_preauthorizes + dev_trust_flag_bypasses (L0205 jail warning in stderr assertions), jetpack_offline offline_build_and_run_use_hangar_cache_with_network_denied, jetpack parent_env_unchanged_after_run + run_with_project_env_file_resolves_declared_packages (child PATH gains /proc/self/fd/3 head). Capability-manifest test drifts with every board write — regenerate report before commits."
+        },
+        {
+          "at": "2026-07-10",
           "by": "owner",
           "text": "Activated into sidequest track"
         }
@@ -11675,61 +11751,6 @@
     }
   ],
   "decisions": [
-    {
-      "id": "D-PRELUDEX1",
-      "cardId": "crivuqa",
-      "title": "Should Jet add a prelude opt-out directive, and/or let libraries mark names as prelude-injectable?",
-      "gist": "The prelude auto-imports `print`, `input`, and a curated set. Two new ideas: (1) a user directive to opt out of the prelude, and (2) a library marker that puts names into scope without a prefix (`#builtin`-style). These can ship independently. This card decides both.",
-      "explainer": "Opt-out lets expert users who want explicit imports take full control — a clean I1-compatible escape hatch. Library no-prefix injection is the riskier half: it lets any package pollute the default namespace, violates I8 (arbitrary second paths to a name), and defeats the prelude's curation. A library using this would look like Jet's own prelude to a beginner who can't tell the difference. Interactions: prelude `print`/`input` are ratified; this doesn't touch them. The `#builtin` marker is unratified scratch.",
-      "story": "I'm writing a CLI tool with explicit imports everywhere for clarity. I want to put `#NoPrelude` at the top of my file and have zero implicit names — then import exactly what I use.",
-      "inWild": "// opt-out (proposed)\n#NoPrelude\nimport core.io.print\nimport core.io.input\n\nfn main() {\n    print(\"hello\")\n}",
-      "detail": "",
-      "options": [
-        {
-          "key": "A",
-          "name": "Opt-out directive only — no library injection",
-          "detail": "Add a `#NoPrelude` file-level marker that disables auto-imports. Library no-prefix injection is declined (I8 violation — lets packages create arbitrary implicit paths). This is the minimal, safe escape hatch.",
-          "code": "#NoPrelude\nimport core.io.print\n\nfn main() {\n    print(\"explicit is fine\")\n}"
-        },
-        {
-          "key": "B",
-          "name": "Both opt-out and library injection",
-          "detail": "Libraries can mark exports with a `#Prelude`-style marker to inject names into callers' scope. Powerful but breaks I8 and the namespace contract — any dep can now shadow prelude names.",
-          "code": "// in some library:\n#[Prelude] pub fn log(msg: str) { ... }\n\n// caller — no import needed, `log` just appears\nfn main() { log(\"injected\") }"
-        },
-        {
-          "key": "C",
-          "name": "Neither — no changes",
-          "detail": "Keep the current curated prelude with no opt-out. Expert users import on top of the prelude; the prelude names are always present. Simplest surface, least flexible.",
-          "code": "// no directive — prelude always active\nfn main() {\n    print(\"prelude always here\")\n}"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Best current",
-          "note": "Rust offers `#![no_implicit_prelude]` for expert files while preventing dependencies from injecting names into every scope.",
-          "code": "#![no_implicit_prelude]"
-        },
-        {
-          "lang": "Rust",
-          "note": "`#![no_std]` and `#![no_implicit_prelude]` opt out of std and prelude respectively. Expert escape hatch, not the default.",
-          "code": "#![no_implicit_prelude]\nextern crate std;\nuse std::println;"
-        },
-        {
-          "lang": "Haskell",
-          "note": "`{-# LANGUAGE NoImplicitPrelude #-}` disables the Prelude import per-file. Libraries then re-export curated sets (Protolude, Relude).",
-          "code": "{-# LANGUAGE NoImplicitPrelude #-}\nimport Protolude"
-        }
-      ],
-      "rec": "A",
-      "status": "ratified",
-      "group": "stdlib",
-      "bestCurrent": "Rust: Rust offers `#![no_implicit_prelude]` for expert files while preventing dependencies from injecting names into every scope.",
-      "recommendation": "Add opt-out only. This matches the best expert escape hatch while preserving Jet’s curated beginner prelude and blocking package namespace pollution.",
-      "outcome": "A",
-      "ratifiedAt": "2026-06-28",
-      "draft": false
-    },
     {
       "id": "D-MATURITY1",
       "cardId": "c17iww33",
@@ -21040,8 +21061,10 @@
       "comparisons": [],
       "rec": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-07-10T14:08:37.185Z"
+      "status": "ratified",
+      "created": "2026-07-10T14:08:37.185Z",
+      "outcome": "accept",
+      "ratifiedAt": "2026-07-10"
     }
   ],
   "questions": [
@@ -21844,6 +21867,118 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-10T14:44:05.591Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c17iww33",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-10T14:44:05.520Z",
+      "by": "claude-main",
+      "action": "card.criteria-meet",
+      "ref": "c17iww33",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-10T14:44:05.453Z",
+      "by": "claude-main",
+      "action": "card.criteria-meet",
+      "ref": "c17iww33",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-10T14:44:05.379Z",
+      "by": "claude-main",
+      "action": "card.criteria-meet",
+      "ref": "c17iww33",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-10T14:43:58.878Z",
+      "by": "claude-main",
+      "action": "card.criteria-add",
+      "ref": "c17iww33",
+      "note": "#3 I5 example examples/features/syntax/maturity_tags.jet + expe"
+    },
+    {
+      "at": "2026-07-10T14:43:58.807Z",
+      "by": "claude-main",
+      "action": "card.criteria-add",
+      "ref": "c17iww33",
+      "note": "#2 E0062 UI snapshots for retired #Experimental/#Tested/#Harden"
+    },
+    {
+      "at": "2026-07-10T14:43:58.744Z",
+      "by": "claude-main",
+      "action": "card.criteria-add",
+      "ref": "c17iww33",
+      "note": "#1 @Experimental/@Tested/@Hardened parse onto Func.maturity; fm"
+    },
+    {
+      "at": "2026-07-10T14:43:58.673Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c17iww33",
+      "note": "phase,logEntry,refs"
+    },
+    {
+      "at": "2026-07-10T14:33:51.050Z",
+      "by": "claude-main",
+      "action": "card.claim",
+      "ref": "c17iww33",
+      "note": ""
+    },
+    {
+      "at": "2026-07-10T14:32:36.595Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "crivuqa",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-10T14:32:36.526Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "crivuqa",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-10T14:23:23.416Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-ACCEPT-464",
+      "note": "accept"
+    },
+    {
+      "at": "2026-07-10T14:22:21.802Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "crivuqa",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-10T14:22:21.728Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c1iqde7",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-10T14:21:16.324Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c02kdm7a",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-10T14:21:12.587Z",
+      "by": "claude-main",
+      "action": "card.claim",
+      "ref": "crivuqa",
+      "note": ""
+    },
     {
       "at": "2026-07-10T14:21:04.582Z",
       "by": "claude-main",
@@ -25231,118 +25366,6 @@
       "action": "card.update",
       "ref": "c0hgr4pk",
       "note": "phase,workOrder,blockedBy"
-    },
-    {
-      "at": "2026-07-09T20:43:23.308Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c041flkr",
-      "note": "title,phase,workOrder,blockedBy"
-    },
-    {
-      "at": "2026-07-09T20:43:23.148Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c0yxdqju",
-      "note": "phase,workOrder,blockedBy"
-    },
-    {
-      "at": "2026-07-09T20:43:22.988Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c0to4gms",
-      "note": "phase,workOrder,blockedBy"
-    },
-    {
-      "at": "2026-07-09T20:43:22.797Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c0wetgi3",
-      "note": "title,phase,workOrder,blockedBy"
-    },
-    {
-      "at": "2026-07-09T20:42:55.815Z",
-      "by": "codex-main",
-      "action": "card.add",
-      "ref": "c0v0y46r",
-      "note": "E4-JP6B Trust integration and compromise resistance"
-    },
-    {
-      "at": "2026-07-09T20:38:08.821Z",
-      "by": "codex-main",
-      "action": "card.add",
-      "ref": "c00lqj9d",
-      "note": "E4-JP22 World-class live, hostile, scale, and dogfood gate"
-    },
-    {
-      "at": "2026-07-09T20:38:08.641Z",
-      "by": "codex-main",
-      "action": "card.add",
-      "ref": "c0xm7b14",
-      "note": "E4-JP21 Explicit finite staged build planning"
-    },
-    {
-      "at": "2026-07-09T20:38:08.478Z",
-      "by": "codex-main",
-      "action": "card.add",
-      "ref": "c0ux5rmy",
-      "note": "E4-JP20 Advisory, license, SBOM, provenance, freshness policy"
-    },
-    {
-      "at": "2026-07-09T20:38:08.318Z",
-      "by": "codex-main",
-      "action": "card.add",
-      "ref": "c0sa3d63",
-      "note": "E4-JP19 Explain and store-operation parity-plus"
-    },
-    {
-      "at": "2026-07-09T20:38:08.159Z",
-      "by": "codex-main",
-      "action": "card.add",
-      "ref": "c0pn8z35",
-      "note": "E4-JP18 Independent reproducibility certification"
-    },
-    {
-      "at": "2026-07-09T20:38:07.994Z",
-      "by": "codex-main",
-      "action": "card.add",
-      "ref": "c0mwowfx",
-      "note": "E4-JP17 Provider conformance and lossless migration"
-    },
-    {
-      "at": "2026-07-09T20:38:07.835Z",
-      "by": "codex-main",
-      "action": "card.add",
-      "ref": "c0kalcyg",
-      "note": "E4-JP16 Install/build authority and upstream hooks"
-    },
-    {
-      "at": "2026-07-09T20:38:07.664Z",
-      "by": "codex-main",
-      "action": "card.add",
-      "ref": "c0hgr4pk",
-      "note": "E4-JP15 Typed variants and full cross compilation"
-    },
-    {
-      "at": "2026-07-09T20:38:07.503Z",
-      "by": "codex-main",
-      "action": "card.add",
-      "ref": "c0esko6c",
-      "note": "E4-JP14 Source-backed package profiles and generations"
-    },
-    {
-      "at": "2026-07-09T20:38:07.346Z",
-      "by": "codex-main",
-      "action": "card.add",
-      "ref": "c0c7d9qt",
-      "note": "E4-JP13 One semantic lock, catalogs, overlays, source maps"
-    },
-    {
-      "at": "2026-07-09T20:38:07.184Z",
-      "by": "codex-main",
-      "action": "card.add",
-      "ref": "c09itznu",
-      "note": "E4-JP12 Live registry, resolver proof, and package delivery"
     }
   ],
   "nextNum": 368,

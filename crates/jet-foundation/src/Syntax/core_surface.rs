@@ -20,6 +20,11 @@ pub const KW_PRIV: &str = "priv";
 /// public-by-default for following top-level items (D-VISDEFAULT1=C).
 pub const MARKER_PUB_FILE: &str = "PubFile";
 
+/// D-PRELUDEX1=A (ratified 2026-06-28): file-scope marker that disables ambient
+/// prelude auto-imports (`print` / `input`). Expert escape hatch only — no
+/// library may inject into the no-prefix surface.
+pub const MARKER_NO_PRELUDE: &str = "NoPrelude";
+
 /// D-VISDEFAULT2 option B (rejected): retired spelling for the private exception
 /// keyword — recognized only for E0412 teaching diagnostics.
 pub const FOREIGN_PRIVATE: &str = "private";

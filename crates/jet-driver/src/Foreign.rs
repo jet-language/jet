@@ -257,6 +257,7 @@ fn materialize_namespace(
                 items: std::mem::take(&mut program.items),
                 web_target_ceiling: program.web_target_ceiling,
                 pub_file: program.pub_file,
+                no_prelude: program.no_prelude,
                 html_path: program.html_path.clone(),
                 no_alloc_policy: program.no_alloc_policy,
             });
@@ -273,6 +274,7 @@ fn materialize_namespace(
         items: Vec::new(),
         web_target_ceiling: None,
         pub_file: false,
+        no_prelude: false,
         html_path: None,
         no_alloc_policy: None,
     });

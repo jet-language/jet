@@ -713,6 +713,28 @@ impl<'a> Checker<'a> {
                     let _ = alias_span;
                     return Some(Type::Int);
                 }
+                ("core.io", "print") => {
+                    // D-PRELUDEX1=A: qualified twin of ambient `print` for `#NoPrelude` files.
+                    if args.len() != 1 {
+                        self.diags.push(wrong_core_arity(name, 1, args.len(), span));
+                    }
+                    if let Some(arg) = args.get_mut(0) {
+                        self.borrow_ctx = true;
+                        if let Some(ty) = self.infer(&mut arg.expr) {
+                            if !is_printable(&ty, self.registry) {
+                                self.diags.push(Diagnostic::error(
+                                    "E0112",
+                                    format!("{} can't be printed yet", ty.show()),
+                                    "`io.print` prints the same values as ambient `print`"
+                                        .to_string(),
+                                    "print one of its fields, or make it a printable type".to_string(),
+                                    Some(arg.expr.span()),
+                                ));
+                            }
+                        }
+                    }
+                    return None;
+                }
                 ("core.io", "eprint") => {
                     if args.len() != 1 {
                         self.diags.push(wrong_core_arity(name, 1, args.len(), span));

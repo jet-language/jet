@@ -92,6 +92,7 @@ const MARKER_PLANE_ROWS: &[(&str, &[&str])] = &[
         "file-target-directives",
         &[
             "#PubFile",
+            "#NoPrelude",
             "#Target(Web)",
             "#Html",
             "#Js",

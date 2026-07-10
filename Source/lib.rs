@@ -298,6 +298,7 @@ pub fn compile_web_with_path(src: &str, file: &str) -> Result<CompileOutput, Vec
             source: src.to_string(),
             web_target_ceiling: prog.web_target_ceiling,
             pub_file: prog.pub_file,
+            no_prelude: prog.no_prelude,
             html_path: prog.html_path.clone(),
             no_alloc_policy: prog.no_alloc_policy,
         }],

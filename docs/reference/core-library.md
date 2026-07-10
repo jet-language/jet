@@ -2163,5 +2163,8 @@ the package system fully stabilizes.
 | `examples/features/serde/json_typed.jet` | Nested struct + list + optional round-trip with `#[RenameAll(camel)]` |
 | `examples/features/serde/decode_traced.jet` | `decode_traced<T>` → `DecodeResult<T>`/`MigrationStatus`, incl. a real v1→v2 migration at decode time |
 | `examples/features/reflection/reflect-value.jet` | `reflect.of(x)` — `.type_name()`/`.display()`/`.fields()` |
+| `examples/features/syntax/maturity_tags.jet` | `@Experimental` / `@Tested` / `@Hardened` doc-only API tags (D-MATURITY1=B) |
 
 Run the full battery: `nix develop -c cargo test --test golden` and `nix develop -c cargo test --test corelib`.
+
+See also: [Maturity tags](maturity-tags.md).

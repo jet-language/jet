@@ -667,6 +667,25 @@ pub struct BenchDef {
     pub body: Vec<Stmt>,
 }
 
+/// D-MATURITY1=B: doc-only API stability tag on a function. Parsed and
+/// formatter-preserved; zero sema/codegen effect (no call-site propagation).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MaturityTag {
+    Experimental,
+    Tested,
+    Hardened,
+}
+
+impl MaturityTag {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            MaturityTag::Experimental => crate::Syntax::ATTR_EXPERIMENTAL,
+            MaturityTag::Tested => crate::Syntax::ATTR_TESTED,
+            MaturityTag::Hardened => crate::Syntax::ATTR_HARDENED,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Func {
     pub is_pub: bool,
@@ -733,6 +752,10 @@ pub struct Func {
     /// drop the return value as a bare expression statement (E0419).
     pub is_must_use: bool,
     pub must_use_span: Option<Span>,
+    /// D-MATURITY1=B: `@Experimental` / `@Tested` / `@Hardened` — documentation
+    /// stability tag. Stored for fmt/docs/IDE; erased for sema and codegen.
+    pub maturity: Option<MaturityTag>,
+    pub maturity_span: Option<Span>,
     /// D-METHODMACRO1=A: `@Inline fn` / method — a soft hint (`#[inline]` in
     /// codegen); never rejected by sema.
     pub is_inline: bool,

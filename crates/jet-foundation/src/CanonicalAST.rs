@@ -57,6 +57,8 @@ pub fn canonical_bytes(bundle: &ProgramBundle) -> Vec<u8> {
         // part of the program's meaning. All are small deterministic values.
         let _ = write!(s, "{:?}", m.pub_file);
         s.push('\u{1}');
+        let _ = write!(s, "{:?}", m.no_prelude);
+        s.push('\u{1}');
         let _ = write!(s, "{:?}", m.web_target_ceiling);
         s.push('\u{1}');
         let _ = write!(s, "{:?}", m.html_path);

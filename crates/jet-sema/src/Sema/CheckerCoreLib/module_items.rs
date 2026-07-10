@@ -7,6 +7,7 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
             "args",
             "input",
             "read_all_input",
+            "print",
             "eprint",
             "stdin",
             "stdout",

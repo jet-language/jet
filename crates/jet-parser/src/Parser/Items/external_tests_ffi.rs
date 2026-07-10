@@ -26,6 +26,12 @@ impl<'a> Parser<'a> {
             matches!(self.peek().kind, TokKind::Hash)
                 && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_PUB_FILE)
         }
+
+        /// D-PRELUDEX1=A: is the cursor at `#NoPrelude`?
+        fn at_no_prelude(&self) -> bool {
+            matches!(self.peek().kind, TokKind::Hash)
+                && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_NO_PRELUDE)
+        }
     
         /// S43 (D-CASING1 follow-on): true when the cursor is at the `#Test` marker.
         pub(super) fn at_test_def(&self) -> bool {

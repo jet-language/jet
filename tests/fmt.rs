@@ -2042,3 +2042,52 @@ fn fmt_preserves_inline_dep_version() {
     let out = jet::format_source(with_semi).expect("fmt should accept a trailing `;`");
     assert_eq!(out, src, "fmt should canonicalize away the optional `;`");
 }
+
+#[test]
+fn fmt_preserves_maturity_tags() {
+    // D-MATURITY1=B: `@Experimental`/`@Tested`/`@Hardened` are doc-only but
+    // must round-trip (fmt STABILITY — not just accept-without-crash).
+    let src = "\
+@Experimental fn experimental_label() -> String {
+    return \"exp\"
+}
+
+@Tested fn tested_label() -> String {
+    return \"tested\"
+}
+
+@Hardened fn hardened_label() -> String {
+    return \"hard\"
+}
+
+fn run() {
+    print(experimental_label())
+    print(tested_label())
+    print(hardened_label())
+}
+";
+    assert_fmt_stable(src, "maturity tags (D-MATURITY1=B)");
+}
+
+#[test]
+fn fmt_preserves_maturity_tags_next_line() {
+    // Next-line form parses; fmt canonicalizes to the same-line marker slot
+    // used by `@MustUse`/`@Pure` (one marker-placement rule).
+    let src = "\
+@Experimental
+fn experimental_label() -> String {
+    return \"exp\"
+}
+
+fn run() {
+    print(experimental_label())
+}
+";
+    let out = jet::format_source(src).expect("next-line maturity should parse");
+    assert!(
+        out.contains("@Experimental"),
+        "fmt must not drop @Experimental; got:\n{out}"
+    );
+    let twice = jet::format_source(&out).expect("re-fmt");
+    assert_eq!(out, twice, "maturity next-line canonicalize must be idempotent");
+}

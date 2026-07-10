@@ -354,6 +354,7 @@ impl<'a> Parser<'a> {
             let mut default_target: Option<String> = None;
             let mut html_path: Option<String> = None;
             let mut pub_file = false;
+            let mut no_prelude = false;
             let mut no_alloc_policy: Option<Span> = None;
             loop {
                 let r = match &self.peek().kind {
@@ -448,6 +449,27 @@ impl<'a> Parser<'a> {
                         self.bump(); // `PubFile`
                         pub_file = true;
                         self.pub_file_default = true;
+                        continue;
+                    }
+                    TokKind::Hash if self.at_no_prelude() => {
+                        if no_prelude {
+                            let span = self.peek().span;
+                            self.diags.push(Diagnostic::error(
+                                "E0428",
+                                "only one `#NoPrelude` marker is allowed per file".to_string(),
+                                "a file may opt out of the ambient prelude at most once"
+                                    .to_string(),
+                                "remove the duplicate `#NoPrelude` marker".to_string(),
+                                Some(span),
+                            ));
+                            self.bump();
+                            self.bump();
+                            self.sync_top();
+                            continue;
+                        }
+                        self.bump(); // `#`
+                        self.bump(); // `NoPrelude`
+                        no_prelude = true;
                         continue;
                     }
                     TokKind::Hash if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_PUBLIC_FILE) =>
@@ -597,26 +619,14 @@ impl<'a> Parser<'a> {
                             self.func().map(Item::Func)
                         }
                     }
-                    // S60 (D-CASING1 follow-on) / D-MARKERMOVE2: `@Pure fn name(…)`
-                    // purity modifier (old `@Pure` spelling is E0062, taught in `func()`).
                     // D-MATURITY1=B / D-MARKERMOVE1: `@Experimental`/`@Tested`/`@Hardened`
-                    // before fn/pub fn — consumed and silently ignored
-                    // (docs/reference/maturity-tags.md). Old `#` spelling is E0062.
+                    // before fn/pub fn — stored on Func for fmt/docs (zero sema).
+                    // Old `#` spelling is E0062 (taught inside `func()`).
                     TokKind::Hash | TokKind::At if self.at_maturity_fn() => {
-                        let sigil = self.bump(); // `#` or `@`
-                        let tag_tok = self.bump(); // tag name — erase, no AST field
-                        if matches!(sigil.kind, TokKind::Hash) {
-                            let tag_name = match &tag_tok.kind {
-                                TokKind::Ident(n) => n.clone(),
-                                _ => String::new(),
-                            };
-                            self.diags.push(Self::e0062_contract_on_hash(
-                                &tag_name,
-                                Span::new(sigil.span.start, tag_tok.span.end),
-                            ));
-                        }
-                        continue; // re-enter item loop; next token is `fn` or `pub`
+                        self.func().map(Item::Func)
                     }
+                    // S60 (D-CASING1 follow-on) / D-MARKERMOVE2: `@Pure fn name(…)`
+                    // purity modifier (old `#Pure` spelling is E0062, taught in `func()`).
                     TokKind::Hash | TokKind::At if self.at_pure_fn() => self.func().map(Item::Func),
                     // D-TAINT1: `#Sanitizer fn name(…)` taint-strip modifier.
                     TokKind::Hash if self.at_sanitizer_fn() => self.func().map(Item::Func),
@@ -723,6 +733,8 @@ impl<'a> Parser<'a> {
                                         None,
                                         false,
                                         None,
+                                        None,
+                                        None,
                                     )
                                     .map(Item::Func),
                                 TokKind::KwModule if self.is_code_module_at(1) => {
@@ -765,6 +777,8 @@ impl<'a> Parser<'a> {
                                         false,
                                         None,
                                         false,
+                                        None,
+                                        None,
                                         None,
                                         false,
                                         false,
@@ -1115,7 +1129,7 @@ impl<'a> Parser<'a> {
                         ));
                         self.func_after_fn(
                             false, false, false, None, None, false, false, None, None, None, false, None,
-                            false, None, false, false, None, false, None,
+                            false, None, None, None, false, false, None, false, None,
                         )
                         .map(Item::Func)
                     }
@@ -1186,6 +1200,7 @@ impl<'a> Parser<'a> {
                 items,
                 web_target_ceiling,
                 pub_file,
+                no_prelude,
                 default_target,
                 html_path,
                 no_alloc_policy,

@@ -132,6 +132,9 @@ expr     = precedence climbing over:
   any Jet file with no `use` line. `eprint`, `args`, and `read_all_input`
   stay qualified behind `use core.io`. A user-defined function named `print`
   or `input` shadows the prelude one in that scope (prelude is lowest-priority).
+  **`#NoPrelude` (D-PRELUDEX1=A)** opts a file out of those ambient names —
+  call `io.print` / `io.input` after `use core.io as io`, or remove the marker.
+  Libraries cannot inject into the no-prefix surface.
 - `print(x)` is built in (S9); takes exactly one printable argument
   (E0103, E0112) and writes it with a trailing newline. `Float` always
   prints a decimal part (S21): `-5.0`, not `-5`.

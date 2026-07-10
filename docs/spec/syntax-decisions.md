@@ -594,9 +594,9 @@ inside `module name { … }`, never file top-level.
 type/value; instantiation yields a specialized normal module (E0850–E0854).
 
 **U17 — Library packages**: consumed with ordinary `use <pkg>`; executables
-go on PATH, never `use`. **D-PRELUDEX1**: prelude opt-out exists; no library
-may inject into the no-prefix surface. **Declined**: `namespace { }` keyword
-(D-NAMESPACE1).
+go on PATH, never `use`. **D-PRELUDEX1**: `#NoPrelude` opts a file out of
+ambient `print`/`input`; no library may inject into the no-prefix surface.
+**Declined**: `namespace { }` keyword (D-NAMESPACE1).
 
 ### Traits, generics & derives
 
@@ -716,7 +716,8 @@ tag where dispatch expected E0731. **D-QUAL4**: type-position value tags are
 prefix — `#Tainted String`.
 
 **D-MATURITY1**: `@Experimental` / `@Tested` / `@Hardened` are doc-only
-markers before `fn` — parsed, erased, zero semantic effect.
+markers before `fn` — parsed onto `Func.maturity`, formatter-preserved, zero
+sema/codegen effect (no call-site propagation). Retired `#` spelling is E0062.
 
 **D-PATCH1 — Typed patches** *(ratified 2026-07-03, card #181)*: `@[Patchable]`
 on a struct `T` synthesizes `T.Patch` — every field wrapped `T?` (Option),

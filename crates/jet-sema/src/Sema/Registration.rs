@@ -970,6 +970,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
     // D-MEM1/S7 (D-NOALLOC-SEM1=A): captured once — every function body check
     // below for this file gets the same file-scoped `policy no_alloc` state.
     let no_alloc = prog.no_alloc_policy.is_some();
+    let no_prelude = prog.no_prelude;
     for item in &mut prog.items {
         match item {
             Item::Func(f) => {
@@ -989,6 +990,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                     &mut effect_summaries,
                     &mut global_addr_taken,
                     no_alloc,
+                no_prelude,
                 ));
             }
             Item::Impl(i) => {
@@ -1009,6 +1011,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                         &mut effect_summaries,
                         &mut global_addr_taken,
                         no_alloc,
+                    no_prelude,
                     ));
                 }
             }
@@ -1030,6 +1033,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                         &mut effect_summaries,
                         &mut global_addr_taken,
                         no_alloc,
+                    no_prelude,
                     ));
                 }
                 for block in &mut s.trait_impls {
@@ -1050,6 +1054,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                             &mut effect_summaries,
                             &mut global_addr_taken,
                             no_alloc,
+                        no_prelude,
                         ));
                     }
                 }
@@ -1072,6 +1077,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                         &mut effect_summaries,
                         &mut global_addr_taken,
                         no_alloc,
+                    no_prelude,
                     ));
                 }
             }
@@ -1103,6 +1109,8 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
             post: Vec::new(),
             is_must_use: false,
             must_use_span: None,
+            maturity: None,
+            maturity_span: None,
             is_inline: false,
             is_inline_always: false,
             inline_span: None,
@@ -1124,6 +1132,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                     &mut effect_summaries,
                     &mut global_addr_taken,
                     no_alloc,
+                no_prelude,
                 ));
                 t.body = synthetic.body;
             }
@@ -1141,6 +1150,7 @@ pub fn check_with_mode(prog: &mut Program, mode: CompileMode) -> Vec<Diagnostic>
                     ct_base_dir,
                     &ct_globals,
                     no_alloc,
+                    no_prelude,
                 ));
             }
             Item::Const(_)
@@ -2109,6 +2119,8 @@ pub(crate) fn check_func_body(
     global_addr_taken: &mut HashSet<String>,
     // D-MEM1/S7 (D-NOALLOC-SEM1=A): this module's `policy no_alloc` state.
     no_alloc: bool,
+    // D-PRELUDEX1=A: this file's `#NoPrelude` state.
+    no_prelude: bool,
 ) -> Vec<Diagnostic> {
     let empty_imports = HashMap::new();
     let empty_core_imports = HashMap::new();
@@ -2153,6 +2165,7 @@ pub(crate) fn check_func_body(
         suppress_must_use: false,
         in_pure: f.is_pure,
         no_alloc,
+        no_prelude,
         in_pre_clause: false,
         in_comptime: false,
         ret: f.return_type.clone(),
@@ -2261,6 +2274,8 @@ pub(crate) fn check_error_conv_body(
     ct_globals: &HashMap<String, crate::Comptime::CtValue>,
     // D-MEM1/S7 (D-NOALLOC-SEM1=A): this module's `policy no_alloc` state.
     no_alloc: bool,
+    // D-PRELUDEX1=A: this file's `#NoPrelude` state.
+    no_prelude: bool,
 ) -> Vec<Diagnostic> {
     // Synthesise a pseudo-function to reuse check_func_body.
     let mut synthetic = Func {
@@ -2295,6 +2310,8 @@ pub(crate) fn check_error_conv_body(
         replayable_span: None,
         is_must_use: false,
         must_use_span: None,
+        maturity: None,
+        maturity_span: None,
         is_inline: false,
         is_inline_always: false,
         inline_span: None,
@@ -2324,6 +2341,7 @@ pub(crate) fn check_error_conv_body(
         &mut HashMap::new(),
         &mut HashSet::new(),
         no_alloc,
+        no_prelude,
     );
     ec.body = synthetic.body;
     d
@@ -2622,6 +2640,8 @@ pub(crate) fn synthesize_delegation_method(
         replayable_span: None,
         is_must_use: false,
         must_use_span: None,
+        maturity: None,
+        maturity_span: None,
         is_inline: false,
         is_inline_always: false,
         inline_span: None,
@@ -2683,6 +2703,8 @@ pub(crate) fn synthesize_default_method(
         replayable_span: None,
         is_must_use: false,
         must_use_span: None,
+        maturity: None,
+        maturity_span: None,
         is_inline: false,
         is_inline_always: false,
         inline_span: None,

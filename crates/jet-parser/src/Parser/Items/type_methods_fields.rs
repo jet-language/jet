@@ -118,6 +118,8 @@ impl<'a> Parser<'a> {
                 None,
                 is_must_use,
                 must_use_span,
+                None,
+                None,
                 is_inline,
                 is_inline_always,
                 inline_span,

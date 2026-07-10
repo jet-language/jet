@@ -474,6 +474,12 @@ impl<'a> Fmt<'a> {
         if f.is_replayable {
             self.write(&format!("#{} ", Syntax::ATTR_REPLAYABLE));
         }
+        // D-MATURITY1=B: `@Experimental`/`@Tested`/`@Hardened` — doc-only,
+        // formatter-preserved (zero sema). Emitted before `@MustUse` to match
+        // the parser's consumption order.
+        if let Some(tag) = f.maturity {
+            self.write(&format!("@{} ", tag.as_str()));
+        }
         // D-MUSTUSE1 (c18iwxqx): `@MustUse fn` / method precedes `pub`/`fn`.
         if f.is_must_use {
             self.write(&format!("@{} ", Syntax::ATTR_MUST_USE));

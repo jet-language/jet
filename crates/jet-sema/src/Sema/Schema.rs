@@ -348,6 +348,8 @@ mod tests {
             single_use_span: None,
             is_must_use: false,
             must_use_span: None,
+            maturity: None,
+            maturity_span: None,
             layout: None,
             layout_span: None,
             serde_markers: Vec::new(),

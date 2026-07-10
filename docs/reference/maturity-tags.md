@@ -25,3 +25,6 @@ Current contract (D-MATURITY1):
 Use them in API docs, examples, package READMEs, and generated documentation. Do
 not rely on them for access control, effect ceilings, dependency policy, or
 release gating.
+
+See also: [Core library](core-library.md),
+`examples/features/syntax/maturity_tags.jet`.

@@ -73,6 +73,16 @@ pub fn format_program(prog: &Program, src: &str, comment_toks: &[Token]) -> Stri
         f.write(&format!("#{}", Syntax::MARKER_PUB_FILE));
         f.newline();
     }
+    // D-PRELUDEX1=A: `#NoPrelude` is a file-level directive; emit before imports
+    // so fmt round-trips the opt-out at the top of the file.
+    if prog.no_prelude {
+        if !first {
+            f.newline();
+        }
+        first = false;
+        f.write(&format!("#{}", Syntax::MARKER_NO_PRELUDE));
+        f.newline();
+    }
     for imp in &prog.imports {
         if !first {
             f.blank_line_between_items();
