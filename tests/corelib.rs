@@ -223,6 +223,7 @@ fn run() {
     print("ready")
     loop { }
 }
+
 "#;
     let out = compile_temp("os_interrupt_runtime.jet", src);
     let rs = dir.join("main.rs");
@@ -250,6 +251,19 @@ fn run() {
     stdout.read_to_string(&mut rest).unwrap();
     assert!(status.success(), "interrupt child failed: {status}");
     assert_eq!(rest, "second\n");
+}
+
+#[test]
+fn core_os_interrupt_runtime_failures_use_the_boundary_aware_helpers() {
+    let task_mem = include_str!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs");
+    let time = include_str!("../crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs");
+    let scheduler = include_str!("../crates/jet-codegen/src/Prelude/Scheduler.rs");
+    assert!(!task_mem.contains("process::exit(70)"));
+    assert!(!time.contains("process::exit(70)"));
+    assert_eq!(scheduler.matches("process::exit(70)").count(), 1);
+    assert!(task_mem.contains("super::jet_panic(\"<core.tasks>\""));
+    assert!(time.contains("jet_runtime_diagnostic(format!"));
+    assert!(scheduler.contains("fn jet_scheduler_fatal(msg: &str) -> !"));
 }
 
 fn build_and_run(

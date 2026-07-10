@@ -23,6 +23,9 @@ pub mod scheduler {
     pub fn jet_scheduler_task_panic_leave() {
         JET_IN_SCHEDULER_TASK.with(|c| c.set(false));
     }
+    fn jet_scheduler_panic_should_unwind() -> bool {
+        JET_IN_SCHEDULER_TASK.with(|c| c.get())
+    }
     include!("Prelude/Scheduler.rs");
 }
 // Prelude/ contains include_str-embedded text files, not Rust modules.

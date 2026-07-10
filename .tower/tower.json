@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 481,
-    "rev": 3029,
+    "rev": 3033,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -13088,7 +13088,44 @@
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Syntax.rs entry updated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T21:19:39.731Z"
+        },
+        {
+          "n": 2,
+          "text": "syntax-decisions.md log entry",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T21:19:39.731Z"
+        },
+        {
+          "n": 3,
+          "text": "jet devtools grammars regenerated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T21:19:39.731Z"
+        },
+        {
+          "n": 4,
+          "text": "snapshots re-blessed",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T21:19:39.731Z"
+        }
+      ],
       "refs": [],
       "needsAcceptance": false,
       "created": "2026-07-10T21:04:24.721Z",
@@ -22588,8 +22625,10 @@
       ],
       "rec": "A",
       "draft": false,
-      "status": "open",
-      "created": "2026-07-10T21:14:28.965Z"
+      "status": "ratified",
+      "created": "2026-07-10T21:14:28.965Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-10"
     },
     {
       "id": "D-JPK-TOOLRUN1",
@@ -22646,8 +22685,10 @@
       ],
       "rec": "A",
       "draft": false,
-      "status": "open",
-      "created": "2026-07-10T21:18:01.877Z"
+      "status": "ratified",
+      "created": "2026-07-10T21:18:01.877Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-10"
     },
     {
       "id": "D-JOS-BACKUP1",
@@ -22915,6 +22956,64 @@
       "draft": false,
       "status": "open",
       "created": "2026-07-10T21:18:02.284Z"
+    },
+    {
+      "id": "D-JOS-APPSTORE1",
+      "cardId": "c0qqwe62",
+      "group": "web-ui",
+      "title": "jetos beginner app store — pick the UX archetype",
+      "gist": "How a beginner browses and installs software on jetos with zero syntax knowledge: an Apps tab inside Studio, a standalone storefront app, a keyboard-first search overlay, or a rich storefront view built into the one Studio shell.",
+      "explainer": "D gives the zero-syntax beginner Mint's browse-by-looking discovery (storefront depth, screenshots, categories) without splitting jetos into two GUIs to learn, and makes the reproducibility model legible on demand rather than forcing a diff-review that would undercut the one-click promise — the same rich-default-with-depth-one-key-away resolution the owner already ratified for jet ? (D-FE-HELP1=D). Ranked on beginner discovery and preserved reproducibility, not effort.",
+      "story": "Terms used below — declarative source: your machine's config.jet, the single file that defines what is installed; reproducible: rebuilding from that file always yields the same machine, so a GUI must write the file, never secretly change live state; user profile: the user.<name> block in config.jet that lists a person's apps; generation: one built, switch-in-able version of the system you can roll back to; provider/source: where a package comes from (a local core repo, or nixpkgs).\n\nPriya installed jetos an hour ago. On Linux Mint she opened Software Manager, searched \"inkscape\", saw a screenshot, clicked Install, and drew. She does not know jetos config exists and should not have to. Today four genuinely different apps could give her that moment: an Apps tab bolted into Studio (the config editor she'll eventually meet), a separate storefront window dedicated to browsing, a keyboard-first search overlay she summons and types into, or a rich storefront that lives as a first-class view inside Studio's one shell. All four must, underneath, add one line to her user.priya profile and rebuild — that is the non-negotiable reproducibility constraint, identical across every option. What differs is only how Priya experiences finding and installing Inkscape.",
+      "inWild": "Priya's ./config.jet before, and the identical edit every archetype below produces when she installs Inkscape -- this diff is the reproducibility guarantee, the same no matter which UX wins:\n\n  module halcyon {\n      sources: {\n          core: path@./jet-pkgs,\n+         apps: nixpkgs@stable,\n      }\n      system.halcyon: {\n          target: linux.x64,\n          options: [\n-             user.priya.packages: [core.hello],\n+             user.priya.packages: [core.hello, apps.inkscape],\n          ],\n      }\n  }\n\nThen the profile engine runs `jetos user switch priya` (D-JOS-USERAPPLY1): builds a new generation, switches it in, rollback available. Uninstall deletes the apps.inkscape token. Live state is never touched directly -- the file is always the truth.",
+      "detail": "HARD CONSTRAINT on all four options: 'Install' writes the declarative-source diff above and rebuilds through the profile/generation engine (D-JOS-USERENV1, D-JOS-USERAPPLY1). No option may mutate live state imperatively -- that would break jetos's reproducibility guarantee. The options differ ONLY in discovery UX, not in what installing does to the machine. This is a new Studio-adjacent view, so it needs a ballot per the D-WD7 guardrail (new view = new ballot) and the DESIGN-BRIEF UX-archetype-first rule. Shared visual system per DESIGN-BRIEF (near-black ground, one accent, system fonts); no theming, mascots, or invented jargon. Non-Nix machines that lack the nixpkgs provider must show the D-JPK-NONIX1 clear-message path on Install; that wiring is an implementation detail identical across all four archetypes.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Apps tab inside Studio — install lands in the config you already edit",
+          "detail": "Core loop: open Studio, switch to the Apps section, browse a category grid with screenshots, click Install, and the app appears in the same user profile Studio is already editing. One GUI surface: Studio gains an Apps section beside Network/Users/Services/Theme; the install shows up in Studio's existing 'Review changes' diff-and-apply flow, so 'what did I install and why' is answerable in one place. Weakness: Studio is fundamentally a settings/config editor, and browse-to-discover is a different mental mode; a storefront squeezed into a settings sidebar can feel cramped versus Mint's full-window shelf. Reproducibility (constant): Install stages the user.priya.packages diff and applies via Studio's normal switch.",
+          "code": "jetos Studio                                   halcyon . priya\n+ Sections ---------+- Apps -----------------------------------+\n|  Network          | [ search apps           ]   Graphics v  |\n|  Users            | +----------+ +----------+ +----------+  |\n|  Services         | | Inkscape | |  GIMP    | |  Krita   |  |\n| >Apps             | |[screensh]| |[screensh]| |[screensh]|  |\n|  Theme            | | Install  | | Install  | | Install  |  |\n|  Review changes . | +----------+ +----------+ +----------+  |\n+-------------------+--------------------------------------+\nclick Install on Inkscape -> Review changes (1):\n   user.priya.packages  + apps.inkscape\n   [ Apply ]  builds a generation, switches on confirm"
+        },
+        {
+          "key": "B",
+          "name": "Standalone storefront app — a dedicated Software-Manager window",
+          "detail": "Core loop: launch a separate 'Apps' application (not Studio), browse a rich storefront — featured, categories, big screenshots, ratings — and one-click Install/Remove. This is the straight GNOME-Software / Mint Software Manager transplant: mouse-first, full-window, image-heavy, built purely for discovery. Strength: the best pure browse-by-looking beginner experience, unconstrained by a settings tool's layout. Weakness: jetos now has TWO GUI surfaces (Studio for config, Apps for software); a beginner must learn which window changes what, and both front-ends sit over the same core, so behavior must stay perfectly consistent. Reproducibility (constant): Install writes user.priya.packages and runs the profile switch; the storefront is a view over the profile engine, not an installer of its own.",
+          "code": "Apps                                           halcyon . priya\n+---------------------------------------------------------------+\n| Featured  Graphics  Office  Games  Developer  Installed       |\n+---------------------------------------------------------------+\n| +- Inkscape ------------------------------+  * 4.7            |\n| |         large screenshot                 |  Vector          |\n| |                                          |  drawing         |\n| |                                          |  [ Install ]     |\n| +------------------------------------------+                 |\n+-----------------------------------------------------------------+\nclick Install -> writes source, runs `jetos user switch priya`\n   [ok] Inkscape installed . generation 8 . Undo\n(a separate window from Studio)"
+        },
+        {
+          "key": "C",
+          "name": "Package palette overlay — keyboard-first, extends jet ?",
+          "detail": "Core loop: summon a search overlay (Super+Space, or `jet apps`), type the app name, Enter to stage the install. Reuses the ratified D-FE-HELP1 hybrid-palette pattern extended from commands to packages: empty state offers Featured/categories as a goal list; typing fuzzy-finds across configured providers (#323's data); Tab peeks a screenshot/details inline; Enter follows the palette's prefill-never-run discipline — it shows the exact one-line diff and asks to confirm before anything builds. Strength: instant, keyboard-first, consistent with jet ?, no second heavy GUI. Weakness: weakest for the true zero-knowledge beginner who wants to browse by looking — a finder assumes you can roughly name what you want, so discovery-by-eye (screenshots, wandering a category) is thin. Reproducibility (constant): Enter stages the user.priya.packages diff, applied by the profile engine.",
+          "code": "halcyon > jet apps        (or Super+Space -> Apps)\n+- find an app -----------------------------  Graphics ------+\n| > inksc                                          3 shown  |\n+-------------------------------------------------------------+\n> Inkscape        vector drawing               apps:inkscape\n|  Inkscape-dev    development build                        |\n|  Inklevel        printer ink monitor                       |\n+-------------------------------------------------------------+\n|  enter stage install . tab screenshot/details . Esc close  |\n+-------------------------------------------------------------+\nEnter -> shows the exact edit, confirm to apply:\n   + user.priya.packages: [core.hello, apps.inkscape]\n   [y] apply -> builds + switches a generation"
+        },
+        {
+          "key": "D",
+          "name": "Hybrid — rich storefront as a first-class view in the one Studio shell",
+          "detail": "Core loop: open Studio's Apps view — a full storefront with featured rows, categories, and screenshot galleries (B's discovery depth) — housed in Studio's single product shell (A's one-surface answer); one-click Install builds and switches the generation, and the exact staged source edit is one click away for anyone who wants it, never forced (D-FE-HELP1's own resolution: rich default, depth one key away). Takes: storefront's mouse-first browse-by-looking as the default, Studio's one shell so there is never a second GUI to learn, and the auditable diff surfaced on demand so the reproducibility model is legible without gating a beginner behind it. Left out: a separate storefront window (rejected — two surfaces), and forcing a diff-review on every install (rejected — undercuts the zero-syntax promise). Reproducibility (constant): one-click Install still stages and applies the user.priya.packages diff through the profile engine; 'View source' just reveals what already happened.",
+          "code": "jetos Studio > Apps                            halcyon . priya\n+ Browse --------------------------------------------------------+\n| Featured . Graphics . Office . Games . Installed   [ search ] |\n| +- Inkscape -------------+  vector drawing          * 4.7     |\n| | [  screenshot gallery ]|  [ Install ]   < source >          |\n| +-------------------------+                                   |\n+-------------------------------------------------------------------+\none-click Install -> app installs (generation builds + switches)\n   quiet toast:  Added to user.priya . Undo . View source\nclick < source > (optional, never forced) -> the exact edit:\n   + user.priya.packages: [core.hello, apps.inkscape]\nBrowse depth of a storefront . install is one click .\nthe diff is one click away for anyone who wants it . one shell."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Linux Mint — Software Manager",
+          "note": "The gap this closes: full-window browse by category with screenshots and one-click Install/Remove, zero syntax knowledge. It mutates live state directly; jetos must deliver the same feel while writing declarative source instead (the hard constraint).",
+          "code": "search \"inkscape\" -> screenshot -> Install -> done (imperative)"
+        },
+        {
+          "lang": "GNOME Software / Pop!_Shop",
+          "note": "B's model: a dedicated storefront app separate from system settings — rich discovery, but a second GUI surface beside the settings tool.",
+          "code": "Apps window (browse/install)  .  Settings window (configure)"
+        },
+        {
+          "lang": "NixOS",
+          "note": "Today's declarative baseline with NO beginner store: you search search.nixos.org in a browser, then hand-edit configuration.nix and rebuild. D keeps that reproducibility but replaces the hand-edit with a storefront click, source visible on demand.",
+          "code": "web search -> edit configuration.nix by hand -> nixos-rebuild switch"
+        }
+      ],
+      "rec": "D",
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-10T21:19:01.899Z"
     }
   ],
   "questions": [
@@ -23717,6 +23816,62 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-10T21:20:51.195Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-JPK-TOOLRUN1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-10T21:19:39.731Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-JPK-TASKRUN1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-10T21:19:39.731Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0qwckht",
+      "note": "#4 snapshots re-blessed"
+    },
+    {
+      "at": "2026-07-10T21:19:39.731Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0qwckht",
+      "note": "#3 jet devtools grammars regenerated"
+    },
+    {
+      "at": "2026-07-10T21:19:39.731Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0qwckht",
+      "note": "#2 syntax-decisions.md log entry"
+    },
+    {
+      "at": "2026-07-10T21:19:39.731Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0qwckht",
+      "note": "#1 Syntax.rs entry updated"
+    },
+    {
+      "at": "2026-07-10T21:19:07.574Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0esko6c",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-10T21:19:01.899Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-JOS-APPSTORE1",
+      "note": "jetos beginner app store — pick the UX archetype"
+    },
     {
       "at": "2026-07-10T21:18:02.284Z",
       "by": "claude-main",
@@ -27160,62 +27315,6 @@
       "action": "card.update",
       "ref": "c0ceo8wd",
       "note": "logEntry,needsAcceptance"
-    },
-    {
-      "at": "2026-07-10T13:57:44.528Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0ceo8wd",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T13:57:44.447Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c09ffy3w",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T13:53:20.166Z",
-      "by": "cursor-95",
-      "action": "card.claim",
-      "ref": "c1nixrpd",
-      "note": ""
-    },
-    {
-      "at": "2026-07-10T13:53:20.094Z",
-      "by": "sol-95",
-      "action": "card.release",
-      "ref": "c1nixrpd",
-      "note": ""
-    },
-    {
-      "at": "2026-07-10T13:53:20.028Z",
-      "by": "cursor-357",
-      "action": "card.claim",
-      "ref": "c0e7rot4",
-      "note": ""
-    },
-    {
-      "at": "2026-07-10T13:53:19.957Z",
-      "by": "terra-357",
-      "action": "card.release",
-      "ref": "c0e7rot4",
-      "note": ""
-    },
-    {
-      "at": "2026-07-10T13:53:19.883Z",
-      "by": "cursor-418",
-      "action": "card.update",
-      "ref": "c0wetgi3",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T13:51:02.011Z",
-      "by": "cursor-418",
-      "action": "card.update",
-      "ref": "c0wetgi3",
-      "note": "phase,logEntry"
     }
   ],
   "nextNum": 368,

@@ -11,6 +11,14 @@ use std::time::{Duration, Instant};
 
 type Job = Box<dyn FnOnce() + Send>;
 
+fn jet_scheduler_fatal(msg: &str) -> ! {
+    if jet_scheduler_panic_should_unwind() {
+        panic!("{}", msg);
+    }
+    eprintln!("panic: {}", msg);
+    std::process::exit(70);
+}
+
 // ── M2: park/wake handles ─────────────────────────────────────────────────────
 
 pub struct ParkSlot {
@@ -1116,10 +1124,10 @@ impl<T> JetSchedulerJoin<T> {
         match self.rx.recv() {
             Ok(JetSchedulerResult::Value(v)) => v,
             Ok(JetSchedulerResult::Panicked) | Err(_) => {
-                jet_panic("<core.tasks>", 0, "a task panicked");
+                jet_scheduler_fatal("a task panicked");
             }
             Ok(JetSchedulerResult::Cancelled) => {
-                jet_panic("<core.tasks>", 0, "a task was cancelled");
+                jet_scheduler_fatal("a task was cancelled");
             }
         }
     }
@@ -1175,7 +1183,7 @@ pub fn jet_scheduler_all<T: Send + 'static>(
                         join.drain();
                     }
                     jet_scheduler_drain();
-                    jet_panic("<core.tasks>", 0, "a task panicked");
+                    jet_scheduler_fatal("a task panicked");
                 }
                 JetSchedulerResult::Cancelled => {
                     for (_, ctrl) in &entries {
@@ -1185,7 +1193,7 @@ pub fn jet_scheduler_all<T: Send + 'static>(
                         join.drain();
                     }
                     jet_scheduler_drain();
-                    jet_panic("<core.tasks>", 0, "a task was cancelled");
+                    jet_scheduler_fatal("a task was cancelled");
                 }
             }
         }
@@ -1235,7 +1243,7 @@ pub fn jet_scheduler_race<T: Send + 'static>(
             }
         }
         if settled_count == n {
-            jet_panic("<core.tasks>", 0, "a task panicked");
+            jet_scheduler_fatal("a task panicked");
         }
         thread::sleep(Duration::from_micros(50));
     }
@@ -1269,7 +1277,7 @@ pub fn jet_scheduler_any<T: Send + 'static>(
             return match res {
                 JetSchedulerResult::Value(v) => v,
                 JetSchedulerResult::Panicked | JetSchedulerResult::Cancelled => {
-                    jet_panic("<core.tasks>", 0, "a task panicked");
+                    jet_scheduler_fatal("a task panicked");
                 }
             };
         }
@@ -1286,10 +1294,10 @@ pub fn jet_scheduler_select_int_channels(
     match jet_scheduler_select(inners, after_ms) {
         JetSelectOutcome::Recv { value, .. } => value,
         JetSelectOutcome::After { .. } => {
-            jet_panic("<core.tasks>", 0, "select timer arm has no receive value");
+            jet_scheduler_fatal("select timer arm has no receive value");
         }
         JetSelectOutcome::Closed => {
-            jet_panic("<core.tasks>", 0, "select closed");
+            jet_scheduler_fatal("select closed");
         }
     }
 }
@@ -1353,5 +1361,18 @@ pub fn jet_scheduler_drain() {
             }
         }
         thread::sleep(Duration::from_millis(1));
+    }
+}
+
+#[cfg(test)]
+mod interrupt_boundary_tests {
+    use super::*;
+
+    #[test]
+    fn closed_select_failure_unwinds_inside_runtime_boundary() {
+        jet_scheduler_task_panic_enter();
+        let result = std::panic::catch_unwind(|| jet_scheduler_fatal("select closed"));
+        jet_scheduler_task_panic_leave();
+        assert!(result.is_err());
     }
 }

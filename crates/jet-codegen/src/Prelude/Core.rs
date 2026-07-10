@@ -1448,6 +1448,10 @@ fn jet_scheduler_in_task() -> bool {
     JET_IN_SCHEDULER_TASK.with(|c| c.get())
 }
 
+fn jet_scheduler_panic_should_unwind() -> bool {
+    jet_scheduler_in_task()
+}
+
 fn jet_panic(file: &str, line: u32, msg: &str) -> ! {
     if jet_scheduler_in_task() {
         panic!("{} (at {}:{})", msg, file, line);
