@@ -3,8 +3,8 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 483,
-    "rev": 3090,
+    "nextNum": 484,
+    "rev": 3100,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -5175,12 +5175,19 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-universal-product-parity",
-      "phase": "verify",
+      "phase": "building",
       "priority": "P1",
       "plan": "No owner gate: D-OSFACTS1=A fixes core.os.on_interrupt. Failing tests first. Replace one-thread-per-registration and non-Windows no-op with one process-lifetime dispatcher: additive ordered handlers, platform callback only increments an atomic counter, dispatcher drains events and invokes all handlers outside locks; registration acknowledged before return and one handler panic cannot kill later handlers. Unix keeps vetted signal FFI; Windows uses SetConsoleCtrlHandler for CTRL_C_EVENT under a vetted generated-runtime boundary. Unsupported targets fail honestly, never silently discard. Generated interrupt machinery strips entirely when unused. Add structural emission/stripping tests, real multi-handler lifecycle proof, native Windows console proof in CI, and process-lifetime docs. No external deps. Parent full suite.",
-      "blockedBy": [],
+      "blockedBy": [
+        "c0av6fpb"
+      ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-10",
+          "by": "codex-main",
+          "text": "Full-suite golden exposed boundary regression: concurrency/deadline_context expected E3003 but got generic task panic. #483 tracks required distinct interrupt-vs-scheduler boundary; #292 cannot close until fixed and reverified."
+        },
         {
           "at": "2026-07-10",
           "by": "codex-main",
@@ -13503,21 +13510,32 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "verify",
       "priority": "P0",
       "plan": "Set a test-local Git ceiling/environment boundary on the child command so parent repository discovery is impossible even when TMPDIR is repo-local. Add/retain exact diagnostic assertions. Prove targeted with a repo-local TMPDIR matching verify-full, then run fmt_project and parent full suite. No production formatter change.",
       "blockedBy": [],
       "assignee": "terra-482-builder",
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-10",
+          "by": "codex-main",
+          "text": "Parent verify-full passed fmt_project 18/18, then exposed unrelated #483 deadline diagnostic regression in later golden target. Criterion 2 product/fmt portion green; card remains verify until global gate."
+        },
+        {
+          "at": "2026-07-10",
+          "by": "codex-main",
+          "text": "Commit ca52bda9 independently reviewed with no findings. Full fmt_project 18/18 under repo-local TMPDIR. Awaiting parent verify-full for criterion 2."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "changed_outside_git_exits_2 exits 2 and mentions git when TMPDIR is inside the repository.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-10T21:54:34.542Z"
+          "status": "verified",
+          "metBy": "terra-482-builder",
+          "verifiedBy": "sol-482-review",
+          "evidence": "Independent Sol review reproduced pre-fix exit 0 without ceiling and post-fix exit 2 with ceiling; cross-platform semantics confirmed.",
+          "at": "2026-07-10T21:58:13.699Z"
         },
         {
           "n": 2,
@@ -13537,6 +13555,63 @@
       "created": "2026-07-10T21:54:29.256Z",
       "updated": "2026-07-10",
       "claimedAt": "2026-07-10T21:54:34.846Z"
+    },
+    {
+      "id": "c0av6fpb",
+      "num": 483,
+      "title": "interrupt panic boundary erases scheduler E3003 diagnostic",
+      "body": "#292 panic isolation reused JET_IN_SCHEDULER_TASK as the interrupt-handler unwind boundary. Runtime diagnostic helpers now unwind inside ordinary scheduler tasks, so concurrency/deadline_context no longer emits its exact E3003 What/Why/Fix diagnostic; the scheduler catches it and prints generic panic: a task panicked. Separate interrupt-handler unwind state from scheduler-task state. Preserve exact scheduler deadline diagnostics and process-fatal behavior outside interrupt handlers while still letting an interrupt handler panic without killing later handlers.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": "Add failing exact golden/targeted proof first. Introduce a distinct RAII interrupt-handler panic boundary visible to central runtime fatal helpers; do not use scheduler-task TLS as its proxy. Central helpers unwind for interrupt boundary where later handlers must continue, but preserve existing scheduler deadline E3003 and ordinary process-fatal laws. Re-run #292 panic-first/later-handler, scheduler fatal-boundary, deadline_context exact golden, stripping/source ratchets, full suite.",
+      "blockedBy": [],
+      "assignee": "terra-483-builder",
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "deadline_context emits exact E3003 What/Why/Fix golden under scheduler task execution.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T22:02:27.144Z"
+        },
+        {
+          "n": 2,
+          "text": "Interrupt handler Jet/runtime panic unwinds only that handler and later handlers still run; scheduler-task and outside-boundary fatal laws remain unchanged.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T22:02:27.303Z"
+        },
+        {
+          "n": 3,
+          "text": "Focused core_os, scheduler, deadline golden, stripping, and full-suite gates pass.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T22:02:27.450Z"
+        }
+      ],
+      "refs": [
+        "crates/jet-codegen/src/Prelude/Core.rs",
+        "crates/jet-codegen/src/Prelude/CoreLib/Top/FsIoEnvOsTesting.rs",
+        "crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs",
+        "crates/jet-codegen/src/Prelude/Scheduler.rs",
+        "tests/corelib.rs",
+        "tests/golden.rs"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-10T22:02:17.897Z",
+      "updated": "2026-07-10",
+      "claimedAt": "2026-07-10T22:02:27.606Z"
     }
   ],
   "decisions": [
@@ -24275,6 +24350,76 @@
   ],
   "events": [
     {
+      "at": "2026-07-10T22:02:27.902Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c00er6jr",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-10T22:02:27.756Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0qi7dc2",
+      "note": "phase,logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-10T22:02:27.606Z",
+      "by": "terra-483-builder",
+      "action": "card.claim",
+      "ref": "c0av6fpb",
+      "note": ""
+    },
+    {
+      "at": "2026-07-10T22:02:27.450Z",
+      "by": "codex-main",
+      "action": "card.criteria-add",
+      "ref": "c0av6fpb",
+      "note": "#3 Focused core_os, scheduler, deadline golden, stripping, and "
+    },
+    {
+      "at": "2026-07-10T22:02:27.304Z",
+      "by": "codex-main",
+      "action": "card.criteria-add",
+      "ref": "c0av6fpb",
+      "note": "#2 Interrupt handler Jet/runtime panic unwinds only that handle"
+    },
+    {
+      "at": "2026-07-10T22:02:27.144Z",
+      "by": "codex-main",
+      "action": "card.criteria-add",
+      "ref": "c0av6fpb",
+      "note": "#1 deadline_context emits exact E3003 What/Why/Fix golden under"
+    },
+    {
+      "at": "2026-07-10T22:02:17.897Z",
+      "by": "codex-main",
+      "action": "card.add",
+      "ref": "c0av6fpb",
+      "note": "interrupt panic boundary erases scheduler E3003 diagnostic"
+    },
+    {
+      "at": "2026-07-10T21:58:13.852Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c00er6jr",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-10T21:58:13.699Z",
+      "by": "sol-482-review",
+      "action": "card.criteria-verify",
+      "ref": "c00er6jr",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-10T21:58:13.534Z",
+      "by": "terra-482-builder",
+      "action": "card.criteria-meet",
+      "ref": "c00er6jr",
+      "note": "#1"
+    },
+    {
       "at": "2026-07-10T21:54:34.846Z",
       "by": "terra-482-builder",
       "action": "card.claim",
@@ -27703,76 +27848,6 @@
       "action": "card.release",
       "ref": "c1nixrpd",
       "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-10T15:27:59.154Z",
-      "by": "cursor-verify",
-      "action": "card.update",
-      "ref": "c0wetgi3",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-10T15:27:34.532Z",
-      "by": "cursor-verify",
-      "action": "card.update",
-      "ref": "c088jf0z",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T15:27:09.832Z",
-      "by": "cursor-verify",
-      "action": "card.update",
-      "ref": "c088jf0z",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-10T15:27:09.762Z",
-      "by": "cursor-verify",
-      "action": "card.release",
-      "ref": "c088jf0z",
-      "note": ""
-    },
-    {
-      "at": "2026-07-10T15:26:55.583Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c1nixrpd",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-10T15:26:55.517Z",
-      "by": "jet-verify",
-      "action": "card.update",
-      "ref": "c17iww33",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T15:26:55.452Z",
-      "by": "jet-verify",
-      "action": "card.update",
-      "ref": "crivuqa",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T15:26:55.386Z",
-      "by": "jet-verify",
-      "action": "card.update",
-      "ref": "c1iqde7",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T15:26:55.284Z",
-      "by": "jet-verify",
-      "action": "card.criteria-verify",
-      "ref": "crivuqa",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-10T15:26:55.215Z",
-      "by": "jet-verify",
-      "action": "card.criteria-verify",
-      "ref": "c1iqde7",
-      "note": "#1"
     }
   ],
   "nextNum": 368,
