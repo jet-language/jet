@@ -86,9 +86,9 @@ fn write_generation_files(
     write_desktop_facts(dir, system)?;
     write_store_cache_facts(dir, realized)?;
     write_compat_escape_hatches(dir, system)?;
-    write_studio_app_projection(dir, system)?;
     write_provenance(dir, system, realized)?;
     write_vm_proof(dir, system, &plan_text)?;
+    write_studio_app_projection(dir, system)?;
     write_secret_manifest(dir, system)?;
     write_bootable_root_projection(dir)?;
     Ok(())

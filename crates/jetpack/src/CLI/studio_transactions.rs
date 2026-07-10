@@ -1,3 +1,14 @@
+struct StudioChangeSet {
+    base_source: String,
+    next_source: String,
+    changes: Vec<StudioChange>,
+}
+
+struct StudioChange {
+    key: String,
+    value: String,
+}
+
 fn handle_studio_transaction(
     body: &str,
     context: Option<&StudioContext>,
@@ -9,6 +20,15 @@ fn handle_studio_transaction(
         );
     };
     let op = json_string_field(body, "op").unwrap_or_default();
+    if op == "status" {
+        return studio_changeset_status(context);
+    }
+    if op == "discard" {
+        return studio_changeset_discard(context);
+    }
+    if op == "apply" {
+        return studio_changeset_apply(context);
+    }
     if op != "set-option" {
         return (
             "400 Bad Request",
@@ -38,7 +58,28 @@ fn handle_studio_transaction(
             )
         }
     };
-    let (next, changed) = match apply_option_transaction(&source, &key, &value) {
+    let mut changeset = match context.changeset.lock() {
+        Ok(changeset) => changeset,
+        Err(_) => {
+            return (
+                "500 Internal Server Error",
+                "{\"error\":\"Studio changeset state is unavailable\"}".to_string(),
+            )
+        }
+    };
+    if let Some(staged) = changeset.as_ref() {
+        if staged.base_source != source {
+            return (
+                "409 Conflict",
+                "{\"error\":\"config.jet changed after this Changeset was staged\",\"fix\":\"discard or review the Changeset against current source\"}".to_string(),
+            );
+        }
+    }
+    let transaction_source = changeset
+        .as_ref()
+        .map(|staged| staged.next_source.as_str())
+        .unwrap_or(&source);
+    let (next, changed) = match apply_option_transaction(transaction_source, &key, &value) {
         Ok(result) => result,
         Err(e) => {
             return (
@@ -47,32 +88,198 @@ fn handle_studio_transaction(
             )
         }
     };
-    if write && changed {
-        if let Err(e) = std::fs::write(&context.config, &next) {
+    if changed {
+        let staged = changeset.get_or_insert_with(|| StudioChangeSet {
+            base_source: source.clone(),
+            next_source: source.clone(),
+            changes: Vec::new(),
+        });
+        staged.next_source = next;
+        staged.changes.push(StudioChange {
+            key: key.clone(),
+            value: value.clone(),
+        });
+    }
+    if write {
+        let Some(staged) = changeset.as_ref() else {
+            return (
+                "200 OK",
+                studio_changeset_response(context, "empty", true, false, None),
+            );
+        };
+        if let Err(e) = atomic_write_studio_source(&context.config, &staged.next_source) {
             return (
                 "500 Internal Server Error",
                 format!(
                     "{{\"error\":{},\"path\":{}}}",
-                    JSON::quote(&format!("writing config failed: {e}")),
+                    JSON::quote(&format!("applying Changeset failed: {e}")),
                     JSON::quote(&context.config.display().to_string())
                 ),
             );
         }
+        let response =
+            studio_changeset_response(context, "applied", true, true, changeset.as_ref());
+        *changeset = None;
+        return ("200 OK", response);
     }
-    let diff = source_diff(&context.config, &source, &next);
-    (
-        "200 OK",
-        format!(
-            "{{\"host\":{},\"path\":{},\"op\":\"set-option\",\"key\":{},\"value\":{},\"write\":{},\"changed\":{},\"diff\":{}}}",
-            JSON::quote(&context.host),
-            JSON::quote(&context.config.display().to_string()),
-            JSON::quote(&key),
-            JSON::quote(&value),
-            if write { "true" } else { "false" },
-            if changed { "true" } else { "false" },
-            JSON::quote(&diff)
+    let response = studio_changeset_response(
+        context,
+        if changeset.is_some() { "staged" } else { "empty" },
+        false,
+        changed,
+        changeset.as_ref(),
+    );
+    ("200 OK", response)
+}
+
+fn studio_changeset_status(context: &StudioContext) -> (&'static str, String) {
+    match context.changeset.lock() {
+        Ok(changeset) => (
+            "200 OK",
+            studio_changeset_response(
+                context,
+                if changeset.is_some() { "staged" } else { "empty" },
+                false,
+                changeset.is_some(),
+                changeset.as_ref(),
+            ),
         ),
+        Err(_) => (
+            "500 Internal Server Error",
+            "{\"error\":\"Studio changeset state is unavailable\"}".to_string(),
+        ),
+    }
+}
+
+fn studio_changeset_discard(context: &StudioContext) -> (&'static str, String) {
+    match context.changeset.lock() {
+        Ok(mut changeset) => {
+            let changed = changeset.is_some();
+            *changeset = None;
+            (
+                "200 OK",
+                studio_changeset_response(context, "discarded", false, changed, None),
+            )
+        }
+        Err(_) => (
+            "500 Internal Server Error",
+            "{\"error\":\"Studio changeset state is unavailable\"}".to_string(),
+        ),
+    }
+}
+
+fn studio_changeset_apply(context: &StudioContext) -> (&'static str, String) {
+    let mut changeset = match context.changeset.lock() {
+        Ok(changeset) => changeset,
+        Err(_) => {
+            return (
+                "500 Internal Server Error",
+                "{\"error\":\"Studio changeset state is unavailable\"}".to_string(),
+            )
+        }
+    };
+    let Some(staged) = changeset.as_ref() else {
+        return (
+            "409 Conflict",
+            "{\"error\":\"no staged Changeset to apply\"}".to_string(),
+        );
+    };
+    let current = match std::fs::read_to_string(&context.config) {
+        Ok(current) => current,
+        Err(e) => {
+            return (
+                "500 Internal Server Error",
+                format!(
+                    "{{\"error\":{}}}",
+                    JSON::quote(&format!("reading config failed: {e}"))
+                ),
+            )
+        }
+    };
+    if current != staged.base_source {
+        return (
+            "409 Conflict",
+            "{\"error\":\"config.jet changed after this Changeset was staged\",\"fix\":\"discard or review the Changeset against current source\"}".to_string(),
+        );
+    }
+    if let Err(e) = atomic_write_studio_source(&context.config, &staged.next_source) {
+        return (
+            "500 Internal Server Error",
+            format!(
+                "{{\"error\":{}}}",
+                JSON::quote(&format!("applying Changeset failed: {e}"))
+            ),
+        );
+    }
+    let response =
+        studio_changeset_response(context, "applied", true, true, changeset.as_ref());
+    *changeset = None;
+    ("200 OK", response)
+}
+
+fn studio_changeset_response(
+    context: &StudioContext,
+    state: &str,
+    write: bool,
+    changed: bool,
+    changeset: Option<&StudioChangeSet>,
+) -> String {
+    let (count, diff, source, edits) = match changeset {
+        Some(staged) => {
+            let edits = staged
+                .changes
+                .iter()
+                .map(|change| {
+                    format!(
+                        "{{\"op\":\"set-option\",\"key\":{},\"value\":{}}}",
+                        JSON::quote(&change.key),
+                        JSON::quote(&change.value)
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(",");
+            (
+                staged.changes.len(),
+                source_diff(&context.config, &staged.base_source, &staged.next_source),
+                staged.next_source.clone(),
+                edits,
+            )
+        }
+        None => (0, String::new(), String::new(), String::new()),
+    };
+    format!(
+        "{{\"host\":{},\"path\":{},\"state\":{},\"write\":{},\"changed\":{},\"staged_count\":{},\"reprojected\":{},\"diff\":{},\"source\":{},\"edits\":[{}]}}",
+        JSON::quote(&context.host),
+        JSON::quote(&context.config.display().to_string()),
+        JSON::quote(state),
+        if write { "true" } else { "false" },
+        if changed { "true" } else { "false" },
+        if state == "applied" { 0 } else { count },
+        if state == "applied" { "true" } else { "false" },
+        JSON::quote(&diff),
+        JSON::quote(&source),
+        edits,
     )
+}
+
+fn atomic_write_studio_source(path: &Path, source: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("config.jet");
+    let temp = parent.join(format!(".{name}.studio-{}.tmp", std::process::id()));
+    let result = (|| {
+        let mut file = std::fs::File::create(&temp)?;
+        file.write_all(source.as_bytes())?;
+        file.sync_all()?;
+        std::fs::rename(&temp, path)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temp);
+    }
+    result
 }
 
 fn handle_studio_run(body: &str, context: Option<&StudioContext>) -> (&'static str, String) {

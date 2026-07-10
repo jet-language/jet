@@ -3663,7 +3663,7 @@ fn os_switch_activates_and_sets_current() {
     );
     assert!(
         studio_html.contains("data-page-kind=\"dashboard\"")
-            && studio_html.contains("Service Health")
+            && studio_html.contains("Service configuration")
             && studio_html.contains("Proof/rollback status"),
         "studio: {studio_html}"
     );
@@ -3675,6 +3675,8 @@ fn os_switch_activates_and_sets_current() {
     assert!(
         studio_html.contains("data-page-kind=\"changeset\"")
             && studio_html.contains("data-apply-gate=\"single-source-transaction\"")
+            && studio_html.contains("data-changeset-action=\"apply\"")
+            && studio_html.contains("data-changeset-action=\"discard\"")
             && studio_html.contains("Impact ledger")
             && studio_html.contains("Build only"),
         "studio: {studio_html}"
@@ -3789,6 +3791,33 @@ fn jetos_studio_headless_opens_installed_app_projection() {
         stdout.contains("studio/index.html"),
         "stdout should print app path: {stdout}"
     );
+
+    let open_bin = root.path.join("open-bin");
+    fs::create_dir_all(&open_bin).unwrap();
+    write_executable(&open_bin.join("xdg-open"), "#!/bin/sh\nexit 0\n");
+    let mut child = jetos()
+        .args(["studio", "--no-color"])
+        .env("JETOS_STUDIO_ROOT", &generation)
+        .env("PATH", &open_bin)
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let stdout = child.stdout.take().unwrap();
+    let mut reader = std::io::BufReader::new(stdout);
+    let mut line = String::new();
+    {
+        use std::io::BufRead;
+        reader.read_line(&mut line).unwrap();
+    }
+    let addr = line
+        .trim()
+        .strip_prefix("http://")
+        .and_then(|s| s.strip_suffix("/studio/"))
+        .expect("default Studio launch must open its local projection service");
+    let page = studio_http(addr, "GET", "/studio/", "");
+    assert!(page.contains("data-page-kind=\"dashboard\""), "page: {page}");
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 #[test]
@@ -3845,14 +3874,27 @@ fn jetos_studio_serve_exposes_projection_json() {
         use std::io::Read;
         stream.read_to_string(&mut response).unwrap();
     }
-    let _ = child.kill();
-    let _ = child.wait();
     assert!(response.contains("200 OK"), "response: {response}");
     assert!(
         response.contains("jetos-studio-projection"),
         "response: {response}"
     );
     assert!(response.contains("openssh"), "response: {response}");
+    let page = studio_http(addr, "GET", "/studio/", "");
+    assert!(page.contains("200 OK"), "page: {page}");
+    assert!(
+        page.contains("data-page-kind=\"dashboard\"")
+            && page.contains("data-page-registry=\"studio-pages\"")
+            && page.contains("data-page-kind=\"changeset\""),
+        "served Studio must be dashboard/sidebar/Changeset app: {page}"
+    );
+    assert!(
+        page.contains("data-changeset-action=\"apply\"")
+            && page.contains("data-changeset-action=\"discard\""),
+        "served Studio must expose one Changeset apply path: {page}"
+    );
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 #[test]
@@ -3917,6 +3959,8 @@ fn jetos_studio_transaction_previews_and_writes_source() {
     );
     assert!(preview.contains("200 OK"), "preview: {preview}");
     assert!(preview.contains("\"write\":false"), "preview: {preview}");
+    assert!(preview.contains("\"state\":\"staged\""), "preview: {preview}");
+    assert!(preview.contains("\"staged_count\":1"), "preview: {preview}");
     assert!(
         preview.contains("-            network.hostName: halcyon,"),
         "preview: {preview}"
@@ -3935,14 +3979,37 @@ fn jetos_studio_transaction_previews_and_writes_source() {
         source.contains("network.hostName: halcyon"),
         "source: {source}"
     );
-    let write = studio_http(
+    let staged = studio_http(
         addr,
         "POST",
         "/studio/transaction",
-        "{\"op\":\"set-option\",\"key\":\"network.hostName\",\"value\":\"aurora\",\"write\":true}",
+        "{\"op\":\"status\"}",
     );
+    assert!(staged.contains("200 OK"), "staged: {staged}");
+    assert!(staged.contains("\"state\":\"staged\""), "staged: {staged}");
+    assert!(staged.contains("\"staged_count\":1"), "staged: {staged}");
+    assert!(staged.contains("network.hostName"), "staged: {staged}");
+    let discarded = studio_http(
+        addr,
+        "POST",
+        "/studio/transaction",
+        "{\"op\":\"discard\"}",
+    );
+    assert!(discarded.contains("\"state\":\"discarded\""), "discarded: {discarded}");
+    let empty = studio_http(addr, "POST", "/studio/transaction", "{\"op\":\"status\"}");
+    assert!(empty.contains("\"state\":\"empty\""), "empty: {empty}");
+    let preview = studio_http(
+        addr,
+        "POST",
+        "/studio/transaction",
+        "{\"op\":\"set-option\",\"key\":\"network.hostName\",\"value\":\"aurora\",\"write\":false}",
+    );
+    assert!(preview.contains("\"state\":\"staged\""), "preview: {preview}");
+    let write = studio_http(addr, "POST", "/studio/transaction", "{\"op\":\"apply\"}");
     assert!(write.contains("200 OK"), "write: {write}");
-    assert!(write.contains("\"write\":true"), "write: {write}");
+    assert!(write.contains("\"state\":\"applied\""), "write: {write}");
+    assert!(write.contains("\"reprojected\":true"), "write: {write}");
+    assert!(write.contains("\"staged_count\":0"), "write: {write}");
     let config = fs::read_to_string(project.join("config.jet")).unwrap();
     assert!(
         config.contains("network.hostName: aurora"),
@@ -3969,6 +4036,9 @@ fn jetos_studio_transaction_previews_and_writes_source() {
     assert!(stdout.contains("aurora"), "plan: {stdout}");
     let check = studio_http(addr, "POST", "/studio/run", "{\"action\":\"check\"}");
     assert!(check.contains("\"success\":true"), "check: {check}");
+    let plan = studio_http(addr, "POST", "/studio/run", "{\"action\":\"plan\"}");
+    assert!(plan.contains("\"success\":true"), "plan: {plan}");
+    assert!(plan.contains("aurora"), "plan: {plan}");
     let build = studio_http(addr, "POST", "/studio/run", "{\"action\":\"build\"}");
     assert!(build.contains("\"success\":true"), "build: {build}");
     let proof = studio_http(addr, "POST", "/studio/run", "{\"action\":\"proof\"}");

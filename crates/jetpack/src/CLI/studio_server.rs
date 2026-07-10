@@ -2,6 +2,7 @@ struct StudioContext {
     config: PathBuf,
     host: String,
     offline: bool,
+    changeset: std::sync::Mutex<Option<StudioChangeSet>>,
 }
 
 fn studio_host(parsed: &Parsed) -> Option<String> {
@@ -26,6 +27,7 @@ fn studio_context(parsed: &Parsed) -> Option<StudioContext> {
         config,
         host,
         offline,
+        changeset: std::sync::Mutex::new(None),
     })
 }
 
@@ -36,6 +38,7 @@ fn serve_studio(
     meta: &Path,
     data: &Path,
     context: Option<&StudioContext>,
+    open_browser: bool,
 ) -> i32 {
     let listener = match std::net::TcpListener::bind(addr) {
         Ok(listener) => listener,
@@ -52,8 +55,17 @@ fn serve_studio(
         .local_addr()
         .map(|addr| addr.to_string())
         .unwrap_or_else(|_| addr.to_string());
-    println!("http://{local}/studio/");
+    let url = format!("http://{local}/studio/");
+    println!("{url}");
     theme.ok("jetos Studio service listening");
+    if open_browser {
+        match std::process::Command::new("xdg-open").arg(&url).spawn() {
+            Ok(_) => theme.ok("opened jetos Studio"),
+            Err(_) => {
+                theme.detail("open the printed Studio URL in a browser.");
+            }
+        }
+    }
     for stream in listener.incoming() {
         match stream {
             Ok(mut stream) => {

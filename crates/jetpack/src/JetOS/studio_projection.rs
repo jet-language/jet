@@ -12,13 +12,13 @@ fn write_studio_app_projection(dir: &Path, system: &SystemPlan) -> std::io::Resu
         ("runtime", "jetos-system-app"),
         ("protocol", "local-projection-service"),
         ("source_truth", "jet-source-transactions"),
-        ("semantic_state", "none"),
+        ("semantic_state", "jet-source-only"),
         ("browser_fallback", "true"),
         ("canvas_coupled", "false"),
     ]);
     fs::write(studio_dir.join("app.json"), app)?;
-    fs::write(studio_dir.join("data.json"), studio_data_json(system))?;
-    fs::write(studio_dir.join("index.html"), studio_index_html(system))?;
+    fs::write(studio_dir.join("data.json"), studio_data_json(dir, system))?;
+    fs::write(studio_dir.join("index.html"), studio_index_html(dir, system))?;
 
     let launcher = "#!/usr/bin/env sh\nset -eu\nroot=${JETOS_STUDIO_ROOT:-/run/current-system}\npage=\"$root/studio/index.html\"\nif command -v jetos >/dev/null 2>&1; then\n  exec jetos studio \"$@\"\nfi\nif command -v xdg-open >/dev/null 2>&1; then\n  exec xdg-open \"$page\"\nfi\nprintf '%s\\n' \"$page\"\n";
     let launcher_path = bin_dir.join("jetos-studio");
@@ -31,7 +31,25 @@ fn write_studio_app_projection(dir: &Path, system: &SystemPlan) -> std::io::Resu
     )
 }
 
-fn studio_data_json(system: &SystemPlan) -> String {
+const STUDIO_PAGES: &[(&str, &str, &str, &str)] = &[
+    ("dashboard", "Dashboard", "operations", "dashboard,services,artifacts"),
+    ("settings", "Settings", "settings", "options,source"),
+    ("monitoring", "Monitoring", "operations", "services,artifacts"),
+    ("services", "Services", "operations", "services"),
+    ("packages", "Packages", "inventory", "packages"),
+    ("secrets", "Secrets", "settings", "options"),
+    ("fleet", "Fleet", "operations", "fleet,proof"),
+    ("generations", "Generations", "operations", "artifacts"),
+    ("changeset", "Changeset", "review", "source,diff,impact"),
+    (
+        "proof-provenance",
+        "Proof/Provenance",
+        "audit",
+        "artifacts,run",
+    ),
+];
+
+fn studio_data_json(dir: &Path, system: &SystemPlan) -> String {
     let pages = studio_pages_json();
     let packages = system
         .packages
@@ -71,7 +89,6 @@ fn studio_data_json(system: &SystemPlan) -> String {
         .collect::<Vec<_>>()
         .join(",");
     let enabled_services = system.services.iter().filter(|svc| svc.enable).count();
-    let disabled_services = system.services.len().saturating_sub(enabled_services);
     let options = system
         .options
         .iter()
@@ -79,43 +96,38 @@ fn studio_data_json(system: &SystemPlan) -> String {
         .collect::<Vec<_>>()
         .join(",");
     format!(
-        "{{\"kind\":\"jetos-studio-projection\",\"host\":{},\"target\":{},\"dashboard\":{{\"selected_host\":{},\"generation\":\"current\",\"service_health\":\"{enabled}/{total} enabled\",\"alerts\":{},\"last_run\":\"ready\",\"rollback_status\":\"available\"}},\"page_registry\":[{}],\"packages\":[{}],\"services\":[{}],\"options\":[{}],\"changeset\":{{\"state\":\"empty\",\"apply_gate\":\"single-source-transaction\",\"proof_required\":[\"check\",\"plan\",\"build\",\"proof\"]}},\"secret_policy\":{{\"plaintext_in_projection\":false,\"visible_fields\":[\"name\",\"source\",\"runtime_path\",\"provenance\"],\"transaction\":\"audited-secret-rekey\"}},\"fleet\":{{\"mode\":\"adaptive\",\"single_host_default\":true,\"rollout_gate\":\"proof-before-switch\"}},\"canvas_bridge\":{{\"mode\":\"separate-app-deeplink\",\"target\":\"/canvas\",\"shared_state\":\"source-only\"}},\"artifacts\":{{\"plan\":\"../plan.json\",\"proof\":\"../proof.txt\",\"provenance\":\"../provenance.json\",\"vm_proof\":\"../vm-proof.txt\"}}}}",
+        "{{\"kind\":\"jetos-studio-projection\",\"host\":{},\"target\":{},\"dashboard\":{{\"selected_host\":{},\"generation\":{},\"service_configuration\":\"{enabled}/{total} enabled\",\"runtime_health\":\"not-projected\",\"alerts\":[],\"last_run\":\"generation-built\",\"rollback_status\":\"not-evaluated\"}},\"page_registry\":[{}],\"packages\":[{}],\"services\":[{}],\"options\":[{}],\"changeset\":{{\"state\":\"empty\",\"apply_gate\":\"single-source-transaction\",\"proof_required\":[\"check\",\"plan\",\"build\",\"proof\"]}},\"secret_policy\":{{\"plaintext_in_projection\":false,\"visible_fields\":[\"name\",\"source\",\"runtime_path\",\"provenance\"],\"transaction\":\"audited-secret-rekey\"}},\"fleet\":{{\"mode\":\"adaptive\",\"single_host_default\":true,\"rollout_gate\":\"proof-before-switch\"}},\"canvas_bridge\":{{\"mode\":\"separate-app-deeplink\",\"target\":\"/canvas\",\"shared_state\":\"source-only\"}},\"artifacts\":{{\"plan\":{},\"proof\":{},\"provenance\":{},\"vm_proof\":{}}}}}",
         JSON::quote(&system.name),
         JSON::quote(&system.target),
         JSON::quote(&system.name),
-        if disabled_services == 0 {
-            "[]"
-        } else {
-            "[\"disabled-services\"]"
-        },
+        JSON::quote(
+            dir.file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("unrecorded")
+        ),
         pages,
         packages,
         services,
         options,
+        studio_artifact_json(dir, "plan.json"),
+        studio_artifact_json(dir, "proof.txt"),
+        studio_artifact_json(dir, "provenance.json"),
+        studio_artifact_json(dir, "vm-proof.txt"),
         enabled = enabled_services,
         total = system.services.len()
     )
 }
 
+fn studio_artifact_json(dir: &Path, name: &str) -> String {
+    format!(
+        "{{\"path\":{},\"present\":{}}}",
+        JSON::quote(&format!("../{name}")),
+        if dir.join(name).is_file() { "true" } else { "false" }
+    )
+}
+
 fn studio_pages_json() -> String {
-    let pages = [
-        ("dashboard", "Dashboard", "operations", "dashboard,services,artifacts"),
-        ("settings", "Settings", "settings", "options,source"),
-        ("monitoring", "Monitoring", "operations", "services,artifacts"),
-        ("services", "Services", "operations", "services"),
-        ("packages", "Packages", "inventory", "packages"),
-        ("secrets", "Secrets", "settings", "options"),
-        ("fleet", "Fleet", "operations", "fleet,proof"),
-        ("generations", "Generations", "operations", "artifacts"),
-        ("changeset", "Changeset", "review", "source,diff,impact"),
-        (
-            "proof-provenance",
-            "Proof/Provenance",
-            "audit",
-            "artifacts,run",
-        ),
-    ];
-    pages
+    STUDIO_PAGES
         .iter()
         .map(|(id, title, group, needs)| {
             JSON::object_of(&[
@@ -129,28 +141,18 @@ fn studio_pages_json() -> String {
         .join(",")
 }
 
-fn studio_index_html(system: &SystemPlan) -> String {
+fn studio_index_html(dir: &Path, system: &SystemPlan) -> String {
     let enabled_services = system.services.iter().filter(|svc| svc.enable).count();
-    let disabled_services = system.services.len().saturating_sub(enabled_services);
-    let alerts = if disabled_services == 0 {
-        "No active alerts".to_string()
+    let generation = dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("unrecorded");
+    let proof_status = if dir.join("proof.txt").is_file() {
+        "proof artifact present"
     } else {
-        format!("{disabled_services} disabled service review")
+        "proof not run"
     };
-    let nav = [
-        ("dashboard", "Dashboard"),
-        ("settings", "Settings"),
-        ("monitoring", "Monitoring"),
-        ("services", "Services"),
-        ("packages", "Packages"),
-        ("secrets", "Secrets"),
-        ("fleet", "Fleet"),
-        ("generations", "Generations"),
-        ("changeset", "Changeset"),
-        ("proof-provenance", "Proof/Provenance"),
-    ]
-    .iter()
-    .map(|(id, title)| {
+    let nav = STUDIO_PAGES.iter().map(|(id, title, _, _)| {
         format!(
             "<a href=\"#{id}\" data-page=\"{id}\">{}</a>",
             html_escape(title)
@@ -214,10 +216,11 @@ fn studio_index_html(system: &SystemPlan) -> String {
         .iter()
         .map(|opt| {
             format!(
-                "<label><span>{}</span><input data-setting-key=\"{}\" value=\"{}\"></label>",
+                "<div class=\"setting-control\"><label><span>{}</span><input data-setting-key=\"{}\" value=\"{}\"></label><button type=\"button\" data-stage-setting=\"{}\">Stage change</button></div>",
                 html_escape(&opt.key),
                 html_escape(&opt.key),
-                html_escape(&opt.value)
+                html_escape(&opt.value),
+                html_escape(&opt.key),
             )
         })
         .collect::<Vec<_>>()
@@ -230,42 +233,50 @@ fn studio_index_html(system: &SystemPlan) -> String {
 <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">
 <title>jetos Studio - {host}</title>
 <style>
-:root {{ color-scheme: light dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; background: #f5f7fa; color: #16202a; }}
-body {{ margin: 0; min-height: 100vh; background: #f5f7fa; }}
+:root {{ --paper: #eef3f6; --panel: #fbfdfe; --ink: #142430; --muted: #607482; --nav: #132b3a; --accent: #32769a; --ok: #1b7f70; --warn: #b56f1c; --line: #c8d4dc; font-family: \"IBM Plex Sans\", Inter, ui-sans-serif, system-ui, sans-serif; background: var(--paper); color: var(--ink); }}
+body {{ margin: 0; min-height: 100vh; background: var(--paper); }}
 main {{ display: grid; grid-template-columns: 248px 1fr; min-height: 100vh; }}
-aside {{ border-right: 1px solid #d8dee8; padding: 20px 16px; background: #ffffff; }}
-section {{ padding: 24px; }}
+aside {{ border-right: 1px solid #0d202b; padding: 22px 16px; background: var(--nav); color: #f3f8fa; }}
+section {{ padding: 28px; }}
 h1, h2 {{ margin: 0; font-weight: 650; }}
-h1 {{ font-size: 22px; }}
+h1 {{ font-size: 22px; letter-spacing: -0.025em; }}
 h2 {{ font-size: 15px; margin-bottom: 12px; }}
 .nav {{ display: grid; gap: 4px; margin-top: 24px; }}
-.nav a {{ color: #44515f; text-decoration: none; border-radius: 6px; padding: 8px 10px; font-size: 14px; }}
-.nav a:hover, .nav a.active {{ background: #e8eef5; color: #15202b; }}
+.nav a {{ color: #b9cbd4; text-decoration: none; border-left: 2px solid transparent; border-radius: 3px; padding: 8px 10px; font-size: 14px; }}
+.nav a:hover, .nav a.active {{ background: #1d3b4d; border-left-color: #67b6d5; color: #ffffff; }}
 .host {{ display: grid; gap: 6px; margin-top: 20px; }}
-.pill {{ border: 1px solid #cbd5e1; border-radius: 999px; padding: 6px 10px; width: max-content; background: #ffffff; }}
+.host .pill {{ border-color: #466374; background: #193748; color: #ffffff; }}
+.host > span:last-child {{ color: #a9bec9; font: 12px \"JetBrains Mono\", ui-monospace, monospace; }}
+.pill {{ border: 1px solid var(--line); border-radius: 999px; padding: 6px 10px; width: max-content; background: var(--panel); }}
 .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }}
-.panel {{ border: 1px solid #d8dee8; border-radius: 8px; background: #ffffff; overflow: hidden; }}
-.panel header {{ padding: 14px 16px; border-bottom: 1px solid #d8dee8; }}
+.panel {{ border: 1px solid var(--line); border-radius: 7px; background: var(--panel); overflow: hidden; box-shadow: 0 5px 18px rgba(20, 36, 48, .05); }}
+.panel header {{ padding: 14px 16px; border-bottom: 1px solid var(--line); }}
 .hero {{ display: grid; gap: 14px; margin-bottom: 18px; }}
 .metrics {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }}
-.metric {{ border: 1px solid #d8dee8; border-radius: 8px; background: #ffffff; padding: 14px; }}
+.metric {{ border: 1px solid var(--line); border-radius: 7px; background: var(--panel); padding: 14px; color: var(--muted); }}
 .metric strong {{ display: block; font-size: 22px; margin-top: 4px; }}
+.lineage {{ display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid var(--line); border-radius: 7px; background: #dfe9ee; overflow: hidden; }}
+.lineage span {{ position: relative; padding: 11px 14px; color: #294554; font: 12px \"JetBrains Mono\", ui-monospace, monospace; }}
+.lineage span + span {{ border-left: 1px solid #b5c7d1; }}
+.lineage small {{ display: block; margin-bottom: 3px; color: var(--accent); font: 600 10px \"IBM Plex Sans\", ui-sans-serif, sans-serif; letter-spacing: .09em; text-transform: uppercase; }}
 .page {{ display: none; }}
 .page.active {{ display: block; }}
 table {{ width: 100%; border-collapse: collapse; font-size: 13px; }}
 td {{ padding: 10px 16px; border-top: 1px solid #e7ebf0; vertical-align: top; }}
 td:first-child {{ color: #245d7a; font-weight: 600; white-space: nowrap; }}
 .status {{ display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0 24px; }}
-.empty {{ color: #647383; padding: 16px; }}
+.empty {{ color: var(--muted); padding: 16px; }}
 .form {{ display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 16px; }}
-label {{ display: grid; gap: 6px; font-size: 12px; color: #647383; }}
-input {{ min-width: 0; border: 1px solid #cbd5e1; border-radius: 6px; padding: 9px 10px; background: #ffffff; color: #16202a; }}
+.setting-control {{ display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: end; }}
+label {{ display: grid; gap: 6px; font-size: 12px; color: var(--muted); }}
+input {{ min-width: 0; border: 1px solid var(--line); border-radius: 5px; padding: 9px 10px; background: #ffffff; color: var(--ink); }}
 .actions {{ display: flex; flex-wrap: wrap; gap: 8px; padding: 0 16px 16px; }}
-button {{ border: 1px solid #b8c4d1; border-radius: 6px; padding: 8px 11px; background: #eef3f8; color: #16202a; cursor: pointer; }}
-button:hover {{ border-color: #245d7a; }}
-pre {{ margin: 0; padding: 16px; min-height: 96px; max-height: 300px; overflow: auto; border-top: 1px solid #d8dee8; color: #22313f; background: #f8fafc; font-size: 12px; }}
-.changeset-tray {{ position: sticky; bottom: 0; border-top: 1px solid #cbd5e1; background: #ffffff; padding: 12px 16px; display: flex; gap: 10px; align-items: center; justify-content: space-between; }}
-@media (max-width: 720px) {{ main {{ grid-template-columns: 1fr; }} aside {{ border-right: 0; border-bottom: 1px solid #d8dee8; }} .form {{ grid-template-columns: 1fr; }} }}
+button {{ border: 1px solid #9eb1bc; border-radius: 5px; padding: 8px 11px; background: #e6eef2; color: var(--ink); cursor: pointer; }}
+button:hover {{ border-color: var(--accent); background: #dce9ef; }}
+a:focus-visible, button:focus-visible, input:focus-visible {{ outline: 3px solid rgba(50, 118, 154, .32); outline-offset: 2px; }}
+pre {{ margin: 0; padding: 16px; min-height: 96px; max-height: 300px; overflow: auto; border-top: 1px solid var(--line); color: #22313f; background: #f4f8fa; font: 12px/1.5 \"JetBrains Mono\", ui-monospace, monospace; }}
+.changeset-tray {{ position: sticky; bottom: 0; z-index: 2; border-top: 1px solid #91aab7; background: #f8fbfc; padding: 12px 16px; display: flex; gap: 10px; align-items: center; justify-content: space-between; box-shadow: 0 -8px 24px rgba(20, 36, 48, .08); }}
+@media (max-width: 720px) {{ main {{ grid-template-columns: 1fr; }} aside {{ border-right: 0; border-bottom: 1px solid #0d202b; }} section {{ padding: 18px; }} .form, .lineage {{ grid-template-columns: 1fr; }} .lineage span + span {{ border-left: 0; border-top: 1px solid #b5c7d1; }} }}
 </style>
 </head>
 <body>
@@ -282,29 +293,36 @@ pre {{ margin: 0; padding: 16px; min-height: 96px; max-height: 300px; overflow: 
 <div id=\"dashboard\" class=\"page active\" data-page-kind=\"dashboard\">
 <div class=\"hero\">
 <h2>Dashboard</h2>
+<div class=\"lineage\" aria-label=\"Source to built generation\">
+<span><small>Source</small>config.jet</span>
+<span><small>Plan</small>plan.json</span>
+<span><small>Proof</small>proof.txt</span>
+<span><small>Generation</small>{generation}</span>
+</div>
 <div class=\"status\">
 <span class=\"pill\">selected host: {host}</span>
-<span class=\"pill\">generation: current</span>
-<span class=\"pill\">rollback: available</span>
+<span class=\"pill\">generation: {generation}</span>
+<span class=\"pill\">rollback: not evaluated</span>
 </div>
 <div class=\"metrics\">
-<div class=\"metric\">Services<strong>{enabled_services}/{service_total}</strong></div>
+<div class=\"metric\">Services configured<strong>{enabled_services}/{service_total}</strong></div>
 <div class=\"metric\">Packages<strong>{package_total}</strong></div>
 <div class=\"metric\">Options<strong>{option_total}</strong></div>
-<div class=\"metric\">Alerts<strong>{alerts}</strong></div>
+<div class=\"metric\">Projection alerts<strong>0</strong></div>
 </div>
 </div>
 <div class=\"grid\">
-<article class=\"panel\"><header><h2>Service Health</h2></header><table>{services}</table></article>
+<article class=\"panel\"><header><h2>Service configuration</h2></header><div class=\"empty\">Runtime health is not projected yet.</div><table>{services}</table></article>
 <article class=\"panel\"><header><h2>Proof/rollback status</h2></header><pre>plan.json proof.txt provenance.json vm-proof.txt
-last run: ready
+last run: generation built
+status: {proof_status}
+rollback: not evaluated
 proof required: check, plan, build, proof</pre></article>
 </div>
 </div>
 <div id=\"settings\" class=\"page\" data-page-kind=\"settings\">
 <div class=\"grid\">
-<article class=\"panel\"><header><h2>Settings</h2></header><div class=\"form\">{settings_controls}</div>
-<div class=\"actions\"><button data-stage-setting=\"network.hostName\">Stage host name</button></div></article>
+<article class=\"panel\"><header><h2>Settings</h2></header><div class=\"form\">{settings_controls}</div></article>
 <article class=\"panel\"><header><h2>Exact Jet diff</h2></header><pre id=\"tx-output\"></pre></article>
 </div>
 </div>
@@ -328,9 +346,10 @@ rollback action stages an inverse changeset through the same apply gate.</pre></
 proof requirements: check, plan, build, proof
 source transaction: config.jet only</pre>
 <div class=\"actions\">
+<button data-changeset-action=\"apply\">Apply to config.jet</button>
 <button data-run=\"build\">Build only</button>
-<button data-run=\"proof\">Build and proof</button>
-<button data-discard=\"changeset\">Discard</button>
+<button data-run=\"proof\">Run proof</button>
+<button data-changeset-action=\"discard\">Discard</button>
 </div></article>
 </div>
 </div>
@@ -389,6 +408,20 @@ async function studioPost(path, payload) {{
   const res = await fetch(path, {{ method: 'POST', headers: {{ 'Content-Type': 'application/json' }}, body: JSON.stringify(payload) }});
   return await res.json();
 }}
+let studioChangesetState = 'empty';
+function renderChangeset(result) {{
+  studioChangesetState = result.state || studioChangesetState;
+  const diff = result.diff || result.error || 'No staged changes.';
+  document.getElementById('tx-output').textContent = diff;
+  document.getElementById('changeset-diff').textContent = diff;
+  const count = result.staged_count || 0;
+  document.getElementById('changeset-summary').textContent = count === 1 ? '1 staged source transaction' : `${{count}} staged source transactions`;
+}}
+async function runStudioAction(action) {{
+  const result = await studioPost('/studio/run', {{ action }});
+  document.getElementById('run-output').textContent = result.stdout || result.stderr || result.error || JSON.stringify(result, null, 2);
+  return result;
+}}
 for (const button of document.querySelectorAll('[data-tx]')) {{
   button.addEventListener('click', async () => {{
     const write = button.dataset.tx === 'write';
@@ -398,9 +431,7 @@ for (const button of document.querySelectorAll('[data-tx]')) {{
       value: document.getElementById('tx-value').value,
       write
     }});
-    document.getElementById('tx-output').textContent = result.diff || result.error || JSON.stringify(result, null, 2);
-    document.getElementById('changeset-diff').textContent = result.diff || 'No staged changes.';
-    document.getElementById('changeset-summary').textContent = result.changed ? '1 staged source transaction' : '0 staged changes';
+    renderChangeset(result);
     if (write && !result.error) await refreshSource();
   }});
 }}
@@ -413,31 +444,49 @@ for (const button of document.querySelectorAll('[data-stage-setting]')) {{
       value: input ? input.value : '',
       write: false
     }});
-    document.getElementById('tx-output').textContent = result.diff || result.error || JSON.stringify(result, null, 2);
-    document.getElementById('changeset-diff').textContent = result.diff || 'No staged changes.';
-    document.getElementById('changeset-summary').textContent = result.changed ? '1 staged source transaction' : '0 staged changes';
+    renderChangeset(result);
     showPage('changeset');
+  }});
+}}
+for (const button of document.querySelectorAll('[data-changeset-action]')) {{
+  button.addEventListener('click', async () => {{
+    const action = button.dataset.changesetAction;
+    const result = await studioPost('/studio/transaction', {{ op: action }});
+    renderChangeset(result);
+    if (action === 'apply' && !result.error) {{
+      await refreshSource();
+      const check = await runStudioAction('check');
+      if (check.success) await runStudioAction('plan');
+    }}
   }});
 }}
 for (const button of document.querySelectorAll('[data-run]')) {{
   button.addEventListener('click', async () => {{
-    const result = await studioPost('/studio/run', {{ action: button.dataset.run }});
-    document.getElementById('run-output').textContent = result.stdout || result.stderr || result.error || JSON.stringify(result, null, 2);
+    if (studioChangesetState === 'staged' && (button.dataset.run === 'build' || button.dataset.run === 'proof')) {{
+      document.getElementById('run-output').textContent = 'Apply Changeset before building or proving this source.';
+      showPage('changeset');
+      return;
+    }}
+    await runStudioAction(button.dataset.run);
   }});
 }}
-refreshSource();
+Promise.all([
+  refreshSource(),
+  studioPost('/studio/transaction', {{ op: 'status' }}).then(renderChangeset)
+]);
 </script>
 </body>
 </html>
 ",
         host = html_escape(&system.name),
         target = html_escape(&system.target),
+        generation = html_escape(generation),
         nav = nav,
         enabled_services = enabled_services,
         service_total = system.services.len(),
         package_total = system.packages.len(),
         option_total = system.options.len(),
-        alerts = html_escape(&alerts),
+        proof_status = html_escape(proof_status),
         settings_controls = if settings_controls.is_empty() {
             "<div class=\"empty\">No settings projected.</div>".to_string()
         } else {
