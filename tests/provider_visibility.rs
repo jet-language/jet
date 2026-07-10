@@ -13,7 +13,7 @@ fn raw_provider_backends_are_not_external_api() {
     fs::write(
         scratch.join("Cargo.toml"),
         format!(
-            "[package]\nname = \"provider-visibility\"\nversion = \"0.0.0\"\nedition = \"2021\"\n\n[dependencies]\njetpack = {{ path = {:?} }}\n",
+            "[package]\nname = \"provider-visibility\"\nversion = \"0.0.0\"\nedition = \"2021\"\n\n[workspace]\n\n[dependencies]\njetpack = {{ path = {:?} }}\n",
             root.join("crates/jetpack")
         ),
     )
