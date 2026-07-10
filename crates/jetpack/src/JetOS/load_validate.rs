@@ -114,7 +114,10 @@ fn load_plan(theme: &Theme, target: &Target) -> Option<EnvPlan> {
             return None;
         }
     };
-    let base = target.config.parent().unwrap_or_else(|| Path::new("."));
+    let source_base = std::env::var_os("JETOS_STUDIO_SOURCE_BASE").map(PathBuf::from);
+    let base = source_base
+        .as_deref()
+        .unwrap_or_else(|| target.config.parent().unwrap_or_else(|| Path::new(".")));
     let plan = match ModuleEval::evaluate_env(&src, base) {
         Ok(plan) => plan,
         Err(d) => {

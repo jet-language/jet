@@ -95,6 +95,73 @@ fn studio_http(addr: &str, method: &str, path: &str, body: &str) -> String {
     response
 }
 
+fn studio_json_string(response: &str, key: &str) -> String {
+    let needle = format!("\"{key}\":\"");
+    response
+        .split_once(&needle)
+        .and_then(|(_, rest)| rest.split_once('\"').map(|(value, _)| value.to_string()))
+        .unwrap_or_else(|| panic!("missing Studio JSON string `{key}`: {response}"))
+}
+
+fn studio_changeset_owner(response: &str) -> (String, String) {
+    (
+        studio_json_string(response, "token"),
+        studio_json_string(response, "base_revision"),
+    )
+}
+
+fn studio_owned_transaction(addr: &str, op: &str, owner: &(String, String)) -> String {
+    studio_http(
+        addr,
+        "POST",
+        "/studio/transaction",
+        &format!(
+            "{{\"op\":\"{op}\",\"token\":\"{}\",\"base_revision\":\"{}\"}}",
+            owner.0, owner.1
+        ),
+    )
+}
+
+fn studio_attack_snapshot(project: PathBuf, replace: bool) -> std::thread::JoinHandle<()> {
+    std::thread::spawn(move || {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            let snapshot = fs::read_dir(&project)
+                .into_iter()
+                .flatten()
+                .filter_map(Result::ok)
+                .find(|entry| {
+                    entry
+                        .file_name()
+                        .to_string_lossy()
+                        .starts_with(".jetos-studio-snapshot-")
+                })
+                .map(|entry| entry.path().join("config.jet"));
+            if let Some(path) = snapshot.filter(|path| path.is_file()) {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let dir_mode = fs::metadata(path.parent().unwrap())
+                        .unwrap()
+                        .permissions()
+                        .mode()
+                        & 0o777;
+                    let file_mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+                    assert_eq!(dir_mode, 0o700, "snapshot directory mode");
+                    assert_eq!(file_mode, 0o600, "snapshot file mode");
+                }
+                if replace {
+                    fs::remove_file(&path).unwrap();
+                }
+                fs::write(path, "// hostile snapshot mutation\n").unwrap();
+                return;
+            }
+            assert!(std::time::Instant::now() < deadline, "Studio snapshot never appeared");
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+    })
+}
+
 /// A throwaway directory under the system temp dir, removed on drop.
 struct Scratch {
     path: PathBuf,
@@ -3616,8 +3683,14 @@ fn os_switch_activates_and_sets_current() {
         "studio data: {studio_data}"
     );
     assert!(
-        studio_data.contains("\"page_registry\"") && studio_data.contains("\"id\": \"changeset\""),
+        studio_data.contains("\"page_registry\"") && studio_data.contains("\"id\":\"changeset\""),
         "studio data: {studio_data}"
+    );
+    assert!(
+        studio_data.contains("\"controller\":\"studio-actions\"")
+            && studio_data.contains("\"model_contract\":")
+            && studio_data.contains("\"read_only\":"),
+        "Studio page registry must own render and action contracts: {studio_data}"
     );
     assert!(
         studio_data.contains("\"apply_gate\":\"single-source-transaction\""),
@@ -3710,6 +3783,13 @@ fn os_switch_activates_and_sets_current() {
     assert!(
         studio_html.contains("data-run=\"proof\""),
         "studio: {studio_html}"
+    );
+    assert!(
+        studio_html.contains("const PAGE_CONTROLLERS")
+            && studio_html.contains("synthetic-registered-page")
+            && studio_html.contains("resolvePageBinding")
+            && !studio_html.contains("renderMissing"),
+        "synthetic registry entry must resolve renderer, controller, and model contract: {studio_html}"
     );
     assert!(
         studio_html.contains("data-open-canvas=\"source\"")
@@ -3975,7 +4055,8 @@ fn jetos_studio_transaction_previews_and_writes_source() {
     );
     assert!(inserted.contains("@@ -1,"), "inserted: {inserted}");
     assert!(inserted.contains("+            network.mtu: 1500,"), "inserted: {inserted}");
-    let _ = studio_http(addr, "POST", "/studio/transaction", "{\"op\":\"discard\"}");
+    let inserted_owner = studio_changeset_owner(&inserted);
+    let _ = studio_owned_transaction(addr, "discard", &inserted_owner);
     let preview = studio_http(
         addr,
         "POST",
@@ -3986,6 +4067,7 @@ fn jetos_studio_transaction_previews_and_writes_source() {
     assert!(preview.contains("\"write\":false"), "preview: {preview}");
     assert!(preview.contains("\"state\":\"staged\""), "preview: {preview}");
     assert!(preview.contains("\"staged_count\":1"), "preview: {preview}");
+    let preview_owner = studio_changeset_owner(&preview);
     assert!(
         preview.contains("-            network.hostName: halcyon,"),
         "preview: {preview}"
@@ -4004,22 +4086,16 @@ fn jetos_studio_transaction_previews_and_writes_source() {
         source.contains("network.hostName: halcyon"),
         "source: {source}"
     );
-    let staged = studio_http(
-        addr,
-        "POST",
-        "/studio/transaction",
-        "{\"op\":\"status\"}",
-    );
+    let stolen_discard = studio_http(addr, "POST", "/studio/transaction", "{\"op\":\"discard\",\"token\":\"other-client\",\"base_revision\":\"stale\"}");
+    assert!(stolen_discard.contains("409 Conflict"), "stolen discard: {stolen_discard}");
+    let stolen_apply = studio_http(addr, "POST", "/studio/transaction", "{\"op\":\"apply\",\"token\":\"other-client\",\"base_revision\":\"stale\"}");
+    assert!(stolen_apply.contains("409 Conflict"), "stolen apply: {stolen_apply}");
+    let staged = studio_owned_transaction(addr, "status", &preview_owner);
     assert!(staged.contains("200 OK"), "staged: {staged}");
     assert!(staged.contains("\"state\":\"staged\""), "staged: {staged}");
     assert!(staged.contains("\"staged_count\":1"), "staged: {staged}");
     assert!(staged.contains("network.hostName"), "staged: {staged}");
-    let discarded = studio_http(
-        addr,
-        "POST",
-        "/studio/transaction",
-        "{\"op\":\"discard\"}",
-    );
+    let discarded = studio_owned_transaction(addr, "discard", &preview_owner);
     assert!(discarded.contains("\"state\":\"discarded\""), "discarded: {discarded}");
     let empty = studio_http(addr, "POST", "/studio/transaction", "{\"op\":\"status\"}");
     assert!(empty.contains("\"state\":\"empty\""), "empty: {empty}");
@@ -4030,9 +4106,10 @@ fn jetos_studio_transaction_previews_and_writes_source() {
         "{\"op\":\"set-option\",\"key\":\"network.hostName\",\"value\":\"aurora\",\"write\":false}",
     );
     assert!(preview.contains("\"state\":\"staged\""), "preview: {preview}");
+    let preview_owner = studio_changeset_owner(&preview);
     let original = fs::read_to_string(project.join("config.jet")).unwrap();
     fs::write(project.join("config.jet"), format!("{original}// external edit\n")).unwrap();
-    let stale = studio_http(addr, "POST", "/studio/transaction", "{\"op\":\"apply\"}");
+    let stale = studio_owned_transaction(addr, "apply", &preview_owner);
     assert!(stale.contains("409 Conflict"), "stale: {stale}");
     assert!(stale.contains("changed after this Changeset"), "stale: {stale}");
     fs::write(project.join("config.jet"), &original).unwrap();
@@ -4041,12 +4118,12 @@ fn jetos_studio_transaction_previews_and_writes_source() {
         use std::os::unix::fs::PermissionsExt;
         let original_mode = fs::metadata(&project.path).unwrap().permissions().mode();
         fs::set_permissions(&project.path, fs::Permissions::from_mode(0o555)).unwrap();
-        let failed = studio_http(addr, "POST", "/studio/transaction", "{\"op\":\"apply\"}");
+        let failed = studio_owned_transaction(addr, "apply", &preview_owner);
         fs::set_permissions(&project.path, fs::Permissions::from_mode(original_mode)).unwrap();
         assert!(failed.contains("500 Internal Server Error"), "failed: {failed}");
         assert!(failed.contains("\"reprojected\":false"), "failed: {failed}");
     }
-    let write = studio_http(addr, "POST", "/studio/transaction", "{\"op\":\"apply\"}");
+    let write = studio_owned_transaction(addr, "apply", &preview_owner);
     assert!(write.contains("200 OK"), "write: {write}");
     assert!(write.contains("\"state\":\"applied\""), "write: {write}");
     assert!(write.contains("\"reprojected\":true"), "write: {write}");
@@ -4064,7 +4141,7 @@ fn jetos_studio_transaction_previews_and_writes_source() {
     let live_data = studio_http(addr, "GET", "/studio/data.json", "");
     assert!(live_data.contains("live-checked-plan"), "data: {live_data}");
     assert!(live_data.contains("aurora"), "data: {live_data}");
-    assert!(live_data.contains("\"renderer\": \"dashboard\""), "data: {live_data}");
+    assert!(live_data.contains("\"renderer\":\"dashboard\""), "data: {live_data}");
     let plan = jet()
         .args(["os", "plan", "halcyon", "--json", "--no-color", "--offline"])
         .current_dir(&project.path)
@@ -4101,11 +4178,38 @@ fn jetos_studio_transaction_previews_and_writes_source() {
     assert!(raced_proof.contains("\"source_revision\":"), "proof race: {raced_proof}");
     let raced_switch = studio_http(addr, "POST", "/studio/run", "{\"action\":\"switch\"}");
     assert!(raced_switch.contains("409 Conflict"), "proof race switch: {raced_switch}");
+    let failed_proof_state = studio_http(addr, "GET", "/studio/data.json", "");
+    assert!(failed_proof_state.contains("\"state\":\"unproved\""), "failed proof badge: {failed_proof_state}");
+    fs::write(&config_path, &proved_source).unwrap();
+    let snapshot_mutation = studio_attack_snapshot(project.path.clone(), false);
+    let mutated_proof = studio_http(addr, "POST", "/studio/run", "{\"action\":\"proof\"}");
+    snapshot_mutation.join().unwrap();
+    assert!(mutated_proof.contains("500 Internal Server Error"), "mutated snapshot: {mutated_proof}");
+    assert!(mutated_proof.contains("protected Studio source"), "mutated snapshot: {mutated_proof}");
+    let snapshot_replacement = studio_attack_snapshot(project.path.clone(), true);
+    let replaced_proof = studio_http(addr, "POST", "/studio/run", "{\"action\":\"proof\"}");
+    snapshot_replacement.join().unwrap();
+    assert!(replaced_proof.contains("500 Internal Server Error"), "replaced snapshot: {replaced_proof}");
+    assert!(replaced_proof.contains("protected Studio source"), "replaced snapshot: {replaced_proof}");
+    assert!(
+        fs::read_dir(&project.path)
+            .unwrap()
+            .filter_map(Result::ok)
+            .all(|entry| !entry.file_name().to_string_lossy().starts_with(".jetos-studio-snapshot-")),
+        "protected snapshots must be cleaned"
+    );
+    let proved_source = format!("{proved_source}// unbuilt proof-only revision\n");
     fs::write(&config_path, &proved_source).unwrap();
     let proof = studio_http(addr, "POST", "/studio/run", "{\"action\":\"proof\"}");
     assert!(proof.contains("\"success\":true"), "proof: {proof}");
     assert!(proof.contains("aurora"), "proof: {proof}");
     assert!(proof.contains("\"source_revision\":"), "proof: {proof}");
+    assert!(proof.contains("source_proof"), "proof: {proof}");
+    assert!(proof.contains("input_plan_sha256"), "proof: {proof}");
+    let proof_revision = studio_json_string(&proof, "source_revision");
+    let proved_projection = studio_http(addr, "GET", "/studio/data.json", "");
+    assert!(proved_projection.contains("\"state\":\"proved\""), "proved badge: {proved_projection}");
+    assert!(proved_projection.contains(&proof_revision), "proved revision: {proved_projection}");
     let switch_race_path = config_path.clone();
     let switch_raced_source = proved_source.replace("network.hostName: aurora", "network.hostName: unproved");
     let switch_race = std::thread::spawn(move || {
@@ -4125,6 +4229,8 @@ fn jetos_studio_transaction_previews_and_writes_source() {
         generations.contains("zz-studio-candidate"),
         "generations: {generations}"
     );
+    let applied_source = proved_source.replace("// unbuilt proof-only revision\n", "");
+    fs::write(&config_path, applied_source).unwrap();
     let rollback = studio_http(
         addr,
         "POST",
@@ -4132,9 +4238,10 @@ fn jetos_studio_transaction_previews_and_writes_source() {
         "{\"op\":\"stage-rollback\"}",
     );
     assert!(rollback.contains("\"state\":\"staged\""), "rollback: {rollback}");
+    let rollback_owner = studio_changeset_owner(&rollback);
     assert!(rollback.contains("-            network.hostName: aurora,"), "rollback: {rollback}");
     assert!(rollback.contains("+            network.hostName: halcyon,"), "rollback: {rollback}");
-    let rollback_apply = studio_http(addr, "POST", "/studio/transaction", "{\"op\":\"apply\"}");
+    let rollback_apply = studio_owned_transaction(addr, "apply", &rollback_owner);
     assert!(rollback_apply.contains("\"reprojected\":true"), "rollback: {rollback_apply}");
     let restored = studio_http(addr, "GET", "/studio/data.json", "");
     assert!(restored.contains("halcyon"), "restored: {restored}");
@@ -4149,7 +4256,8 @@ fn jetos_studio_transaction_previews_and_writes_source() {
         ),
     );
     assert!(escaped.contains("café"), "escaped: {escaped}");
-    let escaped_apply = studio_http(addr, "POST", "/studio/transaction", "{\"op\":\"apply\"}");
+    let escaped_owner = studio_changeset_owner(&escaped);
+    let escaped_apply = studio_owned_transaction(addr, "apply", &escaped_owner);
     assert!(escaped_apply.contains("\"reprojected\":true"), "escaped: {escaped_apply}");
     let escaped_source = fs::read_to_string(&config_path).unwrap();
     assert!(

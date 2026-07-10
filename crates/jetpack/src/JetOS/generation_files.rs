@@ -94,6 +94,19 @@ fn write_generation_files(
     Ok(())
 }
 
+fn write_generation_source_proof(dir: &Path, target: &Target) -> std::io::Result<()> {
+    let source = fs::read(&target.config)?;
+    let plan = fs::read(dir.join("plan.json"))?;
+    let input_plan = std::env::var("JETOS_STUDIO_INPUT_PLAN_SHA256").unwrap_or_default();
+    let proof = format!(
+        "{{\"kind\":\"jetos.generation-source-proof\",\"source_sha256\":{},\"input_plan_sha256\":{},\"plan_sha256\":{}}}",
+        JSON::quote(&crate::SHA256::sha256_hex(&source)),
+        JSON::quote(&input_plan),
+        JSON::quote(&crate::SHA256::sha256_hex(&plan)),
+    );
+    fs::write(dir.join("source-proof.json"), proof)
+}
+
 fn render_plan_json(
     system: &SystemPlan,
     realized: &[Store::StoreEntry],

@@ -186,6 +186,14 @@ fn latest_generation_for(host: &str) -> Option<Generation> {
     gens.into_iter().next()
 }
 
+fn generation_named(host: &str, name: &str) -> Option<Generation> {
+    read_generations()
+        .into_iter()
+        .find(|generation| {
+            generation.host == host && generation.name == name && generation.path.is_dir()
+        })
+}
+
 fn render_generation_proof_json(gen: &Generation) -> std::io::Result<String> {
     let plan = fs::read_to_string(gen.path.join("plan.json"))?;
     let proof = fs::read_to_string(gen.path.join("proof.txt"))?;
@@ -196,12 +204,14 @@ fn render_generation_proof_json(gen: &Generation) -> std::io::Result<String> {
     let init = fs::read_to_string(gen.path.join("init/systemd.json"))?;
     let secrets = fs::read_to_string(gen.path.join("secrets.tmpfs.manifest"))?;
     let vm_proof = fs::read_to_string(gen.path.join("vm-proof.txt")).unwrap_or_default();
+    let source_proof = fs::read_to_string(gen.path.join("source-proof.json"))?;
     Ok(format!(
-        "{{\"host\":{},\"generation\":{},\"path\":{},\"created_at\":{},\"plan\":{},\"proof\":{},\"activation_diff\":{},\"health\":{},\"provenance\":{},\"boot\":{},\"init\":{},\"secrets\":{},\"vm_proof\":{}}}",
+        "{{\"host\":{},\"generation\":{},\"path\":{},\"created_at\":{},\"source_proof\":{},\"plan\":{},\"proof\":{},\"activation_diff\":{},\"health\":{},\"provenance\":{},\"boot\":{},\"init\":{},\"secrets\":{},\"vm_proof\":{}}}",
         JSON::quote(&gen.host),
         JSON::quote(&gen.name),
         JSON::quote(&gen.path.display().to_string()),
         gen.created_at,
+        source_proof,
         JSON::quote(&plan),
         JSON::quote(&proof),
         JSON::quote(&activation_diff),

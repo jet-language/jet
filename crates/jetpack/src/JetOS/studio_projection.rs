@@ -31,21 +31,24 @@ fn write_studio_app_projection(dir: &Path, system: &SystemPlan) -> std::io::Resu
     )
 }
 
-const STUDIO_PAGES: &[(&str, &str, &str, &str)] = &[
-    ("dashboard", "Dashboard", "operations", "dashboard,services,artifacts"),
-    ("settings", "Settings", "settings", "options,source"),
-    ("monitoring", "Monitoring", "operations", "services,artifacts"),
-    ("services", "Services", "operations", "services"),
-    ("packages", "Packages", "inventory", "packages"),
-    ("secrets", "Secrets", "settings", "options"),
-    ("fleet", "Fleet", "operations", "fleet,proof"),
-    ("generations", "Generations", "operations", "artifacts"),
-    ("changeset", "Changeset", "review", "source,diff,impact"),
+const STUDIO_PAGES: &[(&str, &str, &str, &str, &str, &str, bool)] = &[
+    ("dashboard", "Dashboard", "operations", "dashboard,services,artifacts", "read-only", "system_plan,proof_state", true),
+    ("settings", "Settings", "settings", "options,source", "studio-actions", "system_plan.options,changeset", false),
+    ("monitoring", "Monitoring", "operations", "services,artifacts", "read-only", "system_plan.services,proof_state", true),
+    ("services", "Services", "operations", "services", "read-only", "system_plan.services", true),
+    ("packages", "Packages", "inventory", "packages", "read-only", "system_plan.packages", true),
+    ("secrets", "Secrets", "settings", "options", "read-only", "system_plan.options", true),
+    ("fleet", "Fleet", "operations", "fleet,proof", "read-only", "proof_state", true),
+    ("generations", "Generations", "operations", "artifacts", "studio-actions", "generations,changeset", false),
+    ("changeset", "Changeset", "review", "source,diff,impact", "studio-actions", "changeset", false),
     (
         "proof-provenance",
         "Proof/Provenance",
         "audit",
         "artifacts,run",
+        "studio-actions",
+        "system_plan,proof_state,generations",
+        false,
     ),
 ];
 
@@ -129,14 +132,17 @@ fn studio_artifact_json(dir: &Path, name: &str) -> String {
 pub(crate) fn studio_pages_json() -> String {
     STUDIO_PAGES
         .iter()
-        .map(|(id, title, group, needs)| {
-            JSON::object_of(&[
-                ("id", id),
-                ("title", title),
-                ("group", group),
-                ("renderer", id),
-                ("data_needs", needs),
-            ])
+        .map(|(id, title, group, needs, controller, contract, read_only)| {
+            format!("{{\"id\":{},\"title\":{},\"group\":{},\"renderer\":{},\"controller\":{},\"model_contract\":{},\"read_only\":{},\"data_needs\":{}}}",
+                JSON::quote(id),
+                JSON::quote(title),
+                JSON::quote(group),
+                JSON::quote(id),
+                JSON::quote(controller),
+                JSON::quote(contract),
+                if *read_only { "true" } else { "false" },
+                JSON::quote(needs),
+            )
         })
         .collect::<Vec<_>>()
         .join(",")
@@ -153,7 +159,7 @@ fn studio_index_html(dir: &Path, system: &SystemPlan) -> String {
     } else {
         "proof not run"
     };
-    let nav = STUDIO_PAGES.iter().map(|(id, title, _, _)| {
+    let nav = STUDIO_PAGES.iter().map(|(id, title, _, _, _, _, _)| {
         format!(
             "<a href=\"#{id}\" data-page=\"{id}\">{}</a>",
             html_escape(title)
@@ -441,8 +447,9 @@ function installPageRegistry(registry, projection) {{
     link.textContent = entry.title;
     wirePageLink(link);
     nav.append(link);
-    const renderer = PAGE_RENDERERS[entry.renderer];
-    (renderer || renderMissing)(page, projection, entry);
+    const binding = resolvePageBinding(entry);
+    binding.renderer(page, projection, entry);
+    binding.controller(page, projection, entry);
   }}
 }}
 function replaceRows(selector, rows, fields) {{
@@ -525,12 +532,8 @@ function renderBound(page, projection, entry) {{
   page.dataset.modelRevision = projection.proof_state?.source_revision || 'live';
   page.dataset.dataNeeds = entry.data_needs || '';
 }}
-function renderMissing(page, projection, entry) {{
-  renderBound(page, projection, entry);
-  const detail = page.querySelector('.empty');
-  if (detail) detail.textContent = `No renderer registered for ${{entry.renderer}}.`;
-}}
 const PAGE_RENDERERS = {{
+  bound: renderBound,
   dashboard: (page, model, entry) => {{ renderBound(page, model, entry); renderDashboard(page, model); renderServices(page, model); renderProof(page, model); }},
   settings: (page, model, entry) => {{ renderBound(page, model, entry); renderSettings(page, model); }},
   monitoring: (page, model, entry) => {{ renderBound(page, model, entry); renderServices(page, model); renderProof(page, model); }},
@@ -542,13 +545,98 @@ const PAGE_RENDERERS = {{
   changeset: renderBound,
   'proof-provenance': (page, model, entry) => {{ renderBound(page, model, entry); renderComposite(page, model); renderGenerations(page, model); }}
 }};
+function wireOnce(control, key, handler) {{
+  const marker = `studio${{key}}Wired`;
+  if (control.dataset[marker]) return;
+  control.dataset[marker] = 'true';
+  control.addEventListener('click', handler);
+}}
+function controllerReadOnly(page, _projection, entry) {{
+  page.dataset.controller = 'read-only';
+  page.dataset.modelContract = entry.model_contract;
+}}
+function controllerStudioActions(page, _projection, entry) {{
+  page.dataset.controller = 'studio-actions';
+  page.dataset.modelContract = entry.model_contract;
+  for (const button of page.querySelectorAll('[data-stage-source]')) {{
+    wireOnce(button, 'stageSource', async () => {{
+      await stageSetting(document.getElementById('tx-key').value, document.getElementById('tx-value').value);
+    }});
+  }}
+  for (const button of page.querySelectorAll('[data-stage-setting]')) {{
+    wireOnce(button, 'stageSetting', async () => {{
+      const input = page.querySelector('[data-setting-key=\"' + button.dataset.stageSetting + '\"]');
+      await stageSetting(button.dataset.stageSetting, input ? input.value : '');
+    }});
+  }}
+  for (const button of page.querySelectorAll('[data-changeset-action]')) {{
+    wireOnce(button, 'changeset', async () => {{
+      const action = button.dataset.changesetAction;
+      const result = await studioPost('/studio/transaction', {{ op: action, token: studioChangesetToken, base_revision: studioChangesetBaseRevision }});
+      renderChangeset(result);
+      if (action === 'apply' && !result.error) {{
+        await refreshSource();
+        await refreshProjection();
+      }} else if (action === 'stage-rollback' && !result.error) {{
+        showPage('changeset');
+      }}
+    }});
+  }}
+  for (const button of page.querySelectorAll('[data-run]')) {{
+    wireOnce(button, 'run', async () => {{
+      if (studioChangesetState === 'staged' && (button.dataset.run === 'build' || button.dataset.run === 'proof')) {{
+        document.getElementById('run-output').textContent = 'Apply Changeset before building or proving this source.';
+        showPage('changeset');
+        return;
+      }}
+      await runStudioAction(button.dataset.run);
+      await refreshProjection();
+    }});
+  }}
+  for (const button of page.querySelectorAll('[data-pipeline=\"build-switch\"]')) {{
+    wireOnce(button, 'pipeline', async () => {{
+      if (studioChangesetState === 'staged') return;
+      const build = await runStudioAction('build');
+      if (!build.success) return;
+      const proof = await runStudioAction('proof');
+      if (!proof.success) return;
+      await runStudioAction('switch');
+      await refreshProjection();
+    }});
+  }}
+}}
+const PAGE_CONTROLLERS = {{
+  'read-only': controllerReadOnly,
+  'studio-actions': controllerStudioActions
+}};
+function resolvePageBinding(entry) {{
+  if (!entry.model_contract) throw new Error(`Studio page ${{entry.id}} has no model contract`);
+  const renderer = PAGE_RENDERERS[entry.renderer];
+  if (!renderer) throw new Error(`Studio page ${{entry.id}} has no registered renderer ${{entry.renderer}}`);
+  const controllerName = entry.controller || (entry.read_only === true ? 'read-only' : '');
+  const controller = PAGE_CONTROLLERS[controllerName];
+  if (!controller) throw new Error(`Studio page ${{entry.id}} has no registered controller`);
+  if (entry.read_only !== true && controllerName === 'read-only') throw new Error(`Interactive Studio page ${{entry.id}} cannot use read-only controller`);
+  return {{ renderer, controller }};
+}}
+const STUDIO_REGISTRY_CONTRACT_PROBE = resolvePageBinding({{
+  id: 'synthetic-registered-page',
+  renderer: 'bound',
+  controller: 'read-only',
+  read_only: true,
+  model_contract: 'system_plan'
+}});
 async function studioPost(path, payload) {{
   const res = await fetch(path, {{ method: 'POST', headers: {{ 'Content-Type': 'application/json' }}, body: JSON.stringify(payload) }});
   return await res.json();
 }}
 let studioChangesetState = 'empty';
+let studioChangesetToken = null;
+let studioChangesetBaseRevision = null;
 function renderChangeset(result) {{
   studioChangesetState = result.state || studioChangesetState;
+  if (Object.prototype.hasOwnProperty.call(result, 'token')) studioChangesetToken = result.token;
+  if (Object.prototype.hasOwnProperty.call(result, 'base_revision')) studioChangesetBaseRevision = result.base_revision;
   const diff = result.diff || result.error || 'No staged changes.';
   document.getElementById('tx-output').textContent = diff;
   document.getElementById('changeset-diff').textContent = diff;
@@ -561,54 +649,10 @@ async function runStudioAction(action) {{
   return result;
 }}
 async function stageSetting(key, value) {{
-  const result = await studioPost('/studio/transaction', {{ op: 'set-option', key, value }});
+  const result = await studioPost('/studio/transaction', {{ op: 'set-option', key, value, token: studioChangesetToken, base_revision: studioChangesetBaseRevision }});
   renderChangeset(result);
   showPage('changeset');
   return result;
-}}
-for (const button of document.querySelectorAll('[data-stage-source]')) {{
-  button.addEventListener('click', async () => {{
-    await stageSetting(document.getElementById('tx-key').value, document.getElementById('tx-value').value);
-  }});
-}}
-for (const button of document.querySelectorAll('[data-stage-setting]')) {{
-  button.addEventListener('click', async () => {{
-    const input = document.querySelector('[data-setting-key=\"' + button.dataset.stageSetting + '\"]');
-    await stageSetting(button.dataset.stageSetting, input ? input.value : '');
-  }});
-}}
-for (const button of document.querySelectorAll('[data-changeset-action]')) {{
-  button.addEventListener('click', async () => {{
-    const action = button.dataset.changesetAction;
-    const result = await studioPost('/studio/transaction', {{ op: action }});
-    renderChangeset(result);
-    if (action === 'apply' && !result.error) {{
-      await refreshSource();
-      await refreshProjection();
-    }} else if (action === 'stage-rollback' && !result.error) {{
-      showPage('changeset');
-    }}
-  }});
-}}
-for (const button of document.querySelectorAll('[data-run]')) {{
-  button.addEventListener('click', async () => {{
-    if (studioChangesetState === 'staged' && (button.dataset.run === 'build' || button.dataset.run === 'proof')) {{
-      document.getElementById('run-output').textContent = 'Apply Changeset before building or proving this source.';
-      showPage('changeset');
-      return;
-    }}
-    await runStudioAction(button.dataset.run);
-  }});
-}}
-for (const button of document.querySelectorAll('[data-pipeline=\"build-switch\"]')) {{
-  button.addEventListener('click', async () => {{
-    if (studioChangesetState === 'staged') return;
-    const build = await runStudioAction('build');
-    if (!build.success) return;
-    const proof = await runStudioAction('proof');
-    if (!proof.success) return;
-    await runStudioAction('switch');
-  }});
 }}
 Promise.all([
   refreshSource(),
