@@ -68,7 +68,7 @@ fn windows_console_ctrl_c_runs_all_handlers_in_order() {
     let mut stdout = std::io::BufReader::new(child.stdout.take().unwrap());
     let mut ready = String::new();
     stdout.read_line(&mut ready).unwrap();
-    assert_eq!(ready, "ready\r\n");
+    assert_eq!(ready.replace("\r\n", "\n"), "ready\n");
     assert_ne!(unsafe { GenerateConsoleCtrlEvent(CTRL_C_EVENT, 0) }, 0);
 
     let status = child.wait().unwrap();
