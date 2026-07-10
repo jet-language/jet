@@ -173,6 +173,11 @@ fn run() {
             && !facts_only.rust.contains("jet_std_os_on_interrupt"),
         "ordinary core.os facts should not inherit signal FFI"
     );
+    assert!(
+        facts_only.rust.contains("JET_INTERRUPT_HANDLER_DEPTH")
+            && facts_only.rust.contains("fn jet_runtime_should_unwind()"),
+        "safe central panic-boundary state must remain available without signal FFI"
+    );
 
     let with_interrupt = compile_temp(
         "os_interrupt.jet",
@@ -230,7 +235,13 @@ fn run() {
     let bin = dir.join("interrupt-runtime");
     fs::write(&rs, out.rust).unwrap();
     let rustc = Command::new("rustc")
-        .args(["--edition", "2021", rs.to_str().unwrap(), "-o", bin.to_str().unwrap()])
+        .args([
+            "--edition",
+            "2021",
+            rs.to_str().unwrap(),
+            "-o",
+            bin.to_str().unwrap(),
+        ])
         .output()
         .unwrap();
     assert!(rustc.status.success(), "rustc failed:\n{}", String::from_utf8_lossy(&rustc.stderr));
@@ -253,6 +264,83 @@ fn run() {
     assert_eq!(rest, "second\n");
 }
 
+#[cfg(unix)]
+#[test]
+fn core_os_interrupt_deadline_diagnostic_unwinds_inside_handler_boundary() {
+    use std::io::{BufRead, Read};
+    use std::process::Stdio;
+
+    let dir = std::env::temp_dir().join(format!(
+        "jet_corelib_interrupt_deadline_{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&dir).unwrap();
+    let src = r#"
+use core.os as os
+use core.process as process
+use core.time as time
+
+fn run() {
+    os.on_interrupt(() => {
+        #Context(deadline: time.now()) {
+            time.sleep(5)
+        }
+    })
+    os.on_interrupt(() => {
+        print("second")
+        process.exit(0)
+    })
+    print("ready")
+    loop { }
+}
+"#;
+    let out = compile_temp("os_interrupt_deadline.jet", src);
+    assert!(
+        out.rust.contains("jet_interrupt_handler_panic_enter")
+            && out.rust.contains("jet_interrupt_handler_panic_leave"),
+        "interrupt handlers need a boundary distinct from scheduler-task identity"
+    );
+    let rs = dir.join("main.rs");
+    let bin = dir.join("interrupt-deadline");
+    fs::write(&rs, out.rust).unwrap();
+    let rustc = Command::new("rustc")
+        .args(["--edition", "2021", rs.to_str().unwrap(), "-o", bin.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        rustc.status.success(),
+        "rustc failed:\n{}",
+        String::from_utf8_lossy(&rustc.stderr)
+    );
+
+    let mut child = Command::new(&bin)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdout = std::io::BufReader::new(child.stdout.take().unwrap());
+    let mut ready = String::new();
+    stdout.read_line(&mut ready).unwrap();
+    assert_eq!(ready, "ready\n");
+    unsafe extern "C" {
+        fn kill(pid: i32, signal: i32) -> i32;
+    }
+    assert_eq!(unsafe { kill(child.id() as i32, 2) }, 0);
+    let output = child.wait_with_output().unwrap();
+    let mut rest = String::new();
+    stdout.read_to_string(&mut rest).unwrap();
+    assert!(
+        output.status.success(),
+        "interrupt child failed: {}",
+        output.status
+    );
+    assert_eq!(rest, "second\n");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Error [E3003]: deadline exceeded while waiting in time sleep"));
+    assert!(stderr.contains("Why: this wait point observed the task context deadline"));
+    assert!(stderr.contains("Fix: raise the deadline budget or shorten the work"));
+}
+
 #[test]
 fn core_os_interrupt_runtime_failures_use_the_boundary_aware_helpers() {
     let task_mem = include_str!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs");
@@ -264,6 +352,11 @@ fn core_os_interrupt_runtime_failures_use_the_boundary_aware_helpers() {
     assert!(task_mem.contains("super::jet_panic(\"<core.tasks>\""));
     assert!(time.contains("jet_runtime_diagnostic(format!"));
     assert!(scheduler.contains("fn jet_scheduler_fatal(msg: &str) -> !"));
+    let core = include_str!("../crates/jet-codegen/src/Prelude/Core.rs");
+    assert!(core.contains("fn jet_runtime_should_unwind() -> bool"));
+    assert!(core.contains("jet_scheduler_in_task() || jet_interrupt_handler_should_unwind()"));
+    assert!(core.contains("if jet_runtime_should_unwind()"));
+    assert!(core.contains("if jet_interrupt_handler_should_unwind()"));
 }
 
 fn build_and_run(

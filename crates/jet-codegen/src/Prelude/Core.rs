@@ -1434,6 +1434,7 @@ impl JetShow for JetReservoirSampler {
 
 thread_local! {
     static JET_IN_SCHEDULER_TASK: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static JET_INTERRUPT_HANDLER_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
 }
 
 pub fn jet_scheduler_task_panic_enter() {
@@ -1448,12 +1449,28 @@ fn jet_scheduler_in_task() -> bool {
     JET_IN_SCHEDULER_TASK.with(|c| c.get())
 }
 
+pub fn jet_interrupt_handler_panic_enter() {
+    JET_INTERRUPT_HANDLER_DEPTH.with(|depth| depth.set(depth.get().saturating_add(1)));
+}
+
+pub fn jet_interrupt_handler_panic_leave() {
+    JET_INTERRUPT_HANDLER_DEPTH.with(|depth| depth.set(depth.get().saturating_sub(1)));
+}
+
+fn jet_runtime_should_unwind() -> bool {
+    jet_scheduler_in_task() || jet_interrupt_handler_should_unwind()
+}
+
+fn jet_interrupt_handler_should_unwind() -> bool {
+    JET_INTERRUPT_HANDLER_DEPTH.with(|depth| depth.get() != 0)
+}
+
 fn jet_scheduler_panic_should_unwind() -> bool {
-    jet_scheduler_in_task()
+    jet_runtime_should_unwind()
 }
 
 fn jet_panic(file: &str, line: u32, msg: &str) -> ! {
-    if jet_scheduler_in_task() {
+    if jet_runtime_should_unwind() {
         panic!("{} (at {}:{})", msg, file, line);
     }
     eprintln!("panic: {}", msg);
@@ -1462,7 +1479,7 @@ fn jet_panic(file: &str, line: u32, msg: &str) -> ! {
 }
 
 fn jet_runtime_diagnostic(rendered: String) -> ! {
-    if jet_scheduler_in_task() {
+    if jet_interrupt_handler_should_unwind() {
         panic!("{}", rendered);
     }
     eprintln!("{}", rendered);
@@ -1473,7 +1490,7 @@ fn jet_runtime_diagnostic(rendered: String) -> ! {
 /// (the second argument to `@Pre(cond, "msg")`/`@Post(cond, "msg")`).
 #[allow(dead_code)] // only called from generated code that has a @Pre/@Post
 fn jet_contract_fail(file: &str, line: u32, clause_kw: &str, msg: &str) -> ! {
-    if jet_scheduler_in_task() {
+    if jet_runtime_should_unwind() {
         panic!(
             "@{} contract failed: {} (at {}:{})",
             clause_kw, msg, file, line
@@ -1565,7 +1582,7 @@ fn jet_panic_rich(
     if !locals.is_empty() {
         eprintln!("locals: {}", locals);
     }
-    if jet_scheduler_in_task() {
+    if jet_runtime_should_unwind() {
         panic!("{} (at {}:{})", msg, file, line);
     }
     std::process::exit(70);

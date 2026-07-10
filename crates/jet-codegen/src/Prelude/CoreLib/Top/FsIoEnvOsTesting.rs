@@ -529,14 +529,14 @@ mod jet_os_interrupt {
 
     impl PanicBoundary {
         fn enter() -> Self {
-            super::jet_scheduler_task_panic_enter();
+            super::jet_interrupt_handler_panic_enter();
             Self
         }
     }
 
     impl Drop for PanicBoundary {
         fn drop(&mut self) {
-            super::jet_scheduler_task_panic_leave();
+            super::jet_interrupt_handler_panic_leave();
         }
     }
 
