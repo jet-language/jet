@@ -3,8 +3,8 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 484,
-    "rev": 3100,
+    "nextNum": 485,
+    "rev": 3110,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -13565,30 +13565,41 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "verify",
       "priority": "P0",
       "plan": "Add failing exact golden/targeted proof first. Introduce a distinct RAII interrupt-handler panic boundary visible to central runtime fatal helpers; do not use scheduler-task TLS as its proxy. Central helpers unwind for interrupt boundary where later handlers must continue, but preserve existing scheduler deadline E3003 and ordinary process-fatal laws. Re-run #292 panic-first/later-handler, scheduler fatal-boundary, deadline_context exact golden, stripping/source ratchets, full suite.",
       "blockedBy": [],
       "assignee": "terra-483-builder",
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-10",
+          "by": "codex-main",
+          "text": "Parent full suite now passes restored deadline golden and proceeds through later targets. Remaining failure is unrelated flaky JetOS Studio test arbitrary proof-generation selection, tracked #484. #483 focused criteria remain green; global criterion waits #484."
+        },
+        {
+          "at": "2026-07-10",
+          "by": "codex-main",
+          "text": "Commit 8ef88c6a independently reviewed with no findings. Criteria 1-2 verified; focused core_os 5/5, scheduler 8/8, exact deadline golden and stripping green. Awaiting parent full-suite criterion 3."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "deadline_context emits exact E3003 What/Why/Fix golden under scheduler task execution.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-10T22:02:27.144Z"
+          "status": "verified",
+          "metBy": "terra-483-builder",
+          "verifiedBy": "sol-483-review",
+          "evidence": "Independent Sol reran exact golden and confirmed distinct scheduler-vs-interrupt predicate behavior.",
+          "at": "2026-07-10T22:08:37.089Z"
         },
         {
           "n": 2,
           "text": "Interrupt handler Jet/runtime panic unwinds only that handler and later handlers still run; scheduler-task and outside-boundary fatal laws remain unchanged.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-10T22:02:27.303Z"
+          "status": "verified",
+          "metBy": "terra-483-builder",
+          "verifiedBy": "sol-483-review",
+          "evidence": "Independent audit found no boundary leakage; nested depth, Drop cleanup, central predicates, and process-fatal defaults correct.",
+          "at": "2026-07-10T22:08:37.402Z"
         },
         {
           "n": 3,
@@ -13612,6 +13623,50 @@
       "created": "2026-07-10T22:02:17.897Z",
       "updated": "2026-07-10",
       "claimedAt": "2026-07-10T22:02:27.606Z"
+    },
+    {
+      "id": "c0fprfjw",
+      "num": 484,
+      "title": "JetOS Studio test chooses arbitrary proof generation",
+      "body": "Full parallel jetpack suite intermittently fails jetos_studio_transaction_previews_and_writes_source: the test enumerates systems/generations and picks the first zz-studio-proof-* entry, but the scenario intentionally creates several proof generations. Filesystem iteration order is unspecified, so expected name may be an older proof while Studio correctly switches to the latest bound proof. Targeted rerun passes coincidentally. Assert the switched generation's source-proof binding against the captured proof revision instead of arbitrary directory order.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": "Replace arbitrary read_dir().find proof selection with post-switch validation: current target is a zz-studio-proof generation and its source-proof.json is bound to the exact captured source_revision/plan proof. Reproduce full-test-order mismatch if possible; run exact test repeatedly and full jetpack target. No production change unless product binding fails.",
+      "blockedBy": [],
+      "assignee": "terra-484-builder",
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Studio switch assertion identifies the exact proved source revision and never depends on read_dir iteration order.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T22:16:50.045Z"
+        },
+        {
+          "n": 2,
+          "text": "Exact Studio transaction test and full jetpack target pass; production Studio behavior remains unchanged.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T22:16:50.202Z"
+        }
+      ],
+      "refs": [
+        "tests/jetpack.rs",
+        "crates/jetpack/src/CLI/studio_transactions.rs"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-10T22:16:42.372Z",
+      "updated": "2026-07-10",
+      "claimedAt": "2026-07-10T22:16:50.353Z"
     }
   ],
   "decisions": [
@@ -24350,6 +24405,76 @@
   ],
   "events": [
     {
+      "at": "2026-07-10T22:16:50.511Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0av6fpb",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-10T22:16:50.353Z",
+      "by": "terra-484-builder",
+      "action": "card.claim",
+      "ref": "c0fprfjw",
+      "note": ""
+    },
+    {
+      "at": "2026-07-10T22:16:50.202Z",
+      "by": "codex-main",
+      "action": "card.criteria-add",
+      "ref": "c0fprfjw",
+      "note": "#2 Exact Studio transaction test and full jetpack target pass; "
+    },
+    {
+      "at": "2026-07-10T22:16:50.045Z",
+      "by": "codex-main",
+      "action": "card.criteria-add",
+      "ref": "c0fprfjw",
+      "note": "#1 Studio switch assertion identifies the exact proved source r"
+    },
+    {
+      "at": "2026-07-10T22:16:42.373Z",
+      "by": "codex-main",
+      "action": "card.add",
+      "ref": "c0fprfjw",
+      "note": "JetOS Studio test chooses arbitrary proof generation"
+    },
+    {
+      "at": "2026-07-10T22:08:37.550Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0av6fpb",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-10T22:08:37.402Z",
+      "by": "sol-483-review",
+      "action": "card.criteria-verify",
+      "ref": "c0av6fpb",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-10T22:08:37.247Z",
+      "by": "terra-483-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0av6fpb",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-10T22:08:37.089Z",
+      "by": "sol-483-review",
+      "action": "card.criteria-verify",
+      "ref": "c0av6fpb",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-10T22:08:36.933Z",
+      "by": "terra-483-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0av6fpb",
+      "note": "#1"
+    },
+    {
       "at": "2026-07-10T22:02:27.902Z",
       "by": "codex-main",
       "action": "card.update",
@@ -27778,76 +27903,6 @@
       "action": "card.update",
       "ref": "c3q000dw",
       "note": "logEntry"
-    },
-    {
-      "at": "2026-07-10T15:41:36.761Z",
-      "by": "cursor-verify",
-      "action": "card.update",
-      "ref": "c2pzz3qb",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-10T15:40:36.529Z",
-      "by": "grok-main",
-      "action": "card.update",
-      "ref": "c73xs2f",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T15:39:08.861Z",
-      "by": "grok-main",
-      "action": "card.claim",
-      "ref": "c73xs2f",
-      "note": ""
-    },
-    {
-      "at": "2026-07-10T15:38:29.986Z",
-      "by": "grok-main",
-      "action": "card.update",
-      "ref": "c1nixrpd",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T15:33:55.822Z",
-      "by": "grok-main",
-      "action": "card.claim",
-      "ref": "c1nixrpd",
-      "note": ""
-    },
-    {
-      "at": "2026-07-10T15:33:46.727Z",
-      "by": "grok-main",
-      "action": "card.claim",
-      "ref": "c1nixrpd",
-      "note": ""
-    },
-    {
-      "at": "2026-07-10T15:33:46.652Z",
-      "by": "claude-main",
-      "action": "card.release",
-      "ref": "c1nixrpd",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-10T15:31:06.595Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c1nixrpd",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T15:30:36.232Z",
-      "by": "claude-main",
-      "action": "card.claim",
-      "ref": "c1nixrpd",
-      "note": ""
-    },
-    {
-      "at": "2026-07-10T15:30:16.902Z",
-      "by": "cursor-95",
-      "action": "card.release",
-      "ref": "c1nixrpd",
-      "note": "[handoff] logged"
     }
   ],
   "nextNum": 368,
