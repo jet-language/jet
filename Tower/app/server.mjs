@@ -18,6 +18,7 @@ import { saveConfig } from './config.mjs';
 import { generateVapid, pushTo } from './webpush.mjs';
 import * as db from './store.mjs';
 import { TowerError } from './store.mjs';
+import { lint } from './lint.mjs';
 
 const MIME = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json' };
 
@@ -195,6 +196,14 @@ export function serve(store, port = 7878, open = false) {
       if (req.method === 'GET' && url.pathname === '/api/next') {
         const q = url.searchParams;
         return send(res, 200, db.nextCards(store.load(), { epoch: q.get('epoch') || undefined, track: q.get('track') || undefined, agent: q.get('agent') || undefined, limit: Number(q.get('limit') || 5) }));
+      }
+      // #457 — durability sweeper, same rules as `tower lint`.
+      if (req.method === 'GET' && url.pathname === '/api/lint') {
+        const q = url.searchParams;
+        const s = store.load();
+        const history = store.loadHistory();
+        const docsRoot = join(dirname(store.dataDir), 'docs');
+        return send(res, 200, lint(s, history, { docs: q.get('docs') === '1', docsRoot }));
       }
       // #462 — one-shot agent work packet. ?card=&agent=&claim=0|1 (claim
       // only takes effect when both an agent AND claim=1 are given).

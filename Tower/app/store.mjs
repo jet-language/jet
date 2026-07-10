@@ -649,7 +649,7 @@ export function releaseCard(s, ref, by, handoff) {
 // gist/story/inWild/options[].code/rec — enforced at write time. Acceptance
 // ballots (`mintAcceptance` above) are a fixed system-generated evidence
 // format, not a narrative ballot, and are exempt.
-function ballotGaps(p) {
+export function ballotGaps(p) {
   const missing = [];
   if (!p.gist || !String(p.gist).trim()) missing.push('gist');
   if (!p.story || !String(p.story).trim()) missing.push('story');
@@ -894,13 +894,21 @@ export function deleteMilestone(s, id, by) {
 
 const LANE_PREF = { building: 0, verify: 1, implement: 2, plan: 3 };
 
-export function nextCards(s, { epoch, track, agent, limit = 5 } = {}) {
+// #457 — `scope: 'burndown'` narrows the pool to exactly the current
+// epoch's epoch-track cards plus all sidequests (agent lanes only) — the
+// tower skill's "burndown loop" scope, made a real filter instead of
+// something an agent has to hand-derive from meta.currentEpoch each time.
+export function nextCards(s, { epoch, track, agent, limit = 5, scope } = {}) {
   const proj = project(s);
   const pool = proj.cards.filter(c => {
     if (!(c.lane.lane in LANE_PREF)) return false;
     if (epoch && c.epoch !== epoch) return false;
     if (track && c.track !== track) return false;
     if (c.assignee && agent && c.assignee !== agent) return false;
+    if (scope === 'burndown') {
+      const inEpoch = c.track === 'epoch' && c.epoch === s.meta.currentEpoch;
+      if (!inEpoch && c.track !== 'sidequest') return false;
+    }
     return true;
   });
   pool.sort((a, b) =>

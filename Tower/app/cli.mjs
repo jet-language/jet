@@ -11,6 +11,7 @@ import { openStore, TowerError, PHASE_IDS } from './store.mjs';
 import { findDataDir, readJSON, writeJSON, historyFile } from './paths.mjs';
 import { DEFAULTS } from './config.mjs';
 import { migrate } from './migrate.mjs';
+import { lint } from './lint.mjs';
 
 // ---- arg parsing (zero-dep) ------------------------------------------------
 
@@ -350,13 +351,32 @@ function cmdMilestone(store, { pos, flags }) {
 
 function cmdNext(store, { flags }) {
   const s = store.load();
-  const picks = db.nextCards(s, { epoch: flags.epoch, track: flags.track, agent: flags.agent, limit: Number(flags.limit || 5) });
+  const scope = flags.burndown ? 'burndown' : undefined;
+  const picks = db.nextCards(s, { epoch: flags.epoch, track: flags.track, agent: flags.agent, limit: Number(flags.limit || 5), scope });
   const proj = db.project(s);
   const rich = picks.map(p => proj.cards.find(c => c.id === p.id));
   if (flags.json) return out(flags, null, rich);
   if (!rich.length) return console.log('(nothing agent-workable — board is either empty, blocked on the owner, or done)');
-  console.log('next up (workOrder → building > verify > implement > plan):');
+  console.log(scope === 'burndown' ? 'next up — burndown scope (current epoch + sidequests):' : 'next up (workOrder → building > verify > implement > plan):');
   for (const c of rich) console.log(` · ${cardLine(c)}`);
+}
+
+// #457 — durability sweeper: rule-based lint over the live board, optionally
+// extended with a docs/ballots/ scan (--docs). Read-only; exit 1 on any
+// finding so it's CI/pre-flight friendly, 0 clean.
+function cmdLint(store, { flags }) {
+  const s = store.load();
+  const history = store.loadHistory();
+  const docsRoot = flags.docsRoot || join(dirname(store.dataDir), 'docs');
+  const findings = lint(s, history, { docs: !!flags.docs, docsRoot });
+  if (flags.json) {
+    console.log(JSON.stringify(findings, null, 2));
+    process.exitCode = findings.length ? 1 : 0;
+    return;
+  }
+  for (const f of findings) console.log(`${f.rule}  ${f.ref}  ${f.msg}`);
+  if (!findings.length) console.log('(clean)');
+  process.exitCode = findings.length ? 1 : 0;
 }
 
 // #462 — tower brief: one-shot agent work packet. No ref → pick the top
@@ -560,8 +580,20 @@ const HELP = `tower — file-backed project board for an owner + AI agents
   tower serve [--port ${DEFAULTS.port}] [--open]          board UI + HTTP API
   tower status [--json]                     terminal snapshot
   tower state                               full projected state (JSON)
-  tower next [--epoch E] [--track T] [--agent A] [--limit N]
-                                            what an agent should pick up next
+  tower next [--epoch E] [--track T] [--agent A] [--limit N] [--burndown]
+                                            what an agent should pick up next;
+                                            --burndown narrows to current
+                                            epoch (meta.currentEpoch) + all
+                                            sidequests, agent lanes only
+  tower lint [--json] [--docs] [--docs-root DIR]
+                                            durability sweeper over the live
+                                            board (done-without-evidence,
+                                            claimed-idle, missing-attribution,
+                                            ballot-gaps, stale-draft, orphan-
+                                            blockers); --docs also flags a
+                                            ratified decision id still listed
+                                            in docs/ballots/*.md; exit 1 on
+                                            any finding, 0 clean
   tower brief [ref] [--agent me] [--json] [--no-claim]
                                             one-shot work packet: card, blockers,
                                             criteria, decisions VERBATIM, questions,
@@ -641,6 +673,7 @@ export async function run(argv) {
       case 'milestone': return cmdMilestone(store, sub);
       case 'next':      return cmdNext(store, sub);
       case 'brief':     return cmdBrief(store, sub);
+      case 'lint':      return cmdLint(store, sub);
       case 'verdict':   return cmdVerdict(store, sub);
       case 'archive':   return cmdArchive(store, sub);
       case 'events':    return cmdEvents(store, sub);
