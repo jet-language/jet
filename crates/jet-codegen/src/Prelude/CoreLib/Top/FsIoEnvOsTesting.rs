@@ -525,6 +525,21 @@ mod jet_os_interrupt {
         Register(Box<dyn Fn() + Send + 'static>, mpsc::SyncSender<()>),
     }
 
+    struct PanicBoundary;
+
+    impl PanicBoundary {
+        fn enter() -> Self {
+            super::jet_scheduler_task_panic_enter();
+            Self
+        }
+    }
+
+    impl Drop for PanicBoundary {
+        fn drop(&mut self) {
+            super::jet_scheduler_task_panic_leave();
+        }
+    }
+
     fn note_interrupt() {
         // OS callbacks do no allocation, locking, or user work.
         PENDING.fetch_add(1, Ordering::Relaxed);
@@ -604,7 +619,7 @@ mod jet_os_interrupt {
                             for handler in &handlers {
                                 let _ = std::panic::catch_unwind(
                                     std::panic::AssertUnwindSafe(|| {
-                                        let _boundary = super::jet_panic_boundary_enter();
+                                        let _boundary = PanicBoundary::enter();
                                         handler();
                                     }),
                                 );

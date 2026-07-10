@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 481,
-    "rev": 3022,
+    "rev": 3023,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -22527,6 +22527,69 @@
       "created": "2026-07-10T20:54:00.830Z",
       "outcome": "B",
       "ratifiedAt": "2026-07-10"
+    },
+    {
+      "id": "D-JPK-TASKRUN1",
+      "cardId": "c0qwckht",
+      "group": "syntax",
+      "title": "How a project declares and invokes named tasks",
+      "gist": "Pick how a Jet project declares its own named commands (lint, migrate, seed, deploy) and how you run them, without adding a second way to mean \"run something.\"",
+      "explainer": "Option A ranks first on the priorities that decide: one-path (I8) — a task is the existing `fn run()`/`fn build()` entry-point mechanism given a user-chosen name, not a second command language, so Jet never has two unrelated ways to 'run something'; safety/beginner — `#Task` is an explicit opt-in (no accidental exposure like D), and a beginner writes one ordinary function and types `jetpack run lint`; expert composability and anti-repetition — typed arguments come free from D-CLIFLAG1, and a cross-task dependency is just a function call, so turbo/just's headline feature (ordered dependencies) needs no DAG DSL and nothing is ever restated (B's failure). C is the strongest runner-up if the owner wants a declarative, greppable graph in `pkg.jet`, and could layer on top of A later (a `tasks:` block whose `run:` references a `#Task fn`) — but on its own it reintroduces untyped shell strings for the common case. Two sub-picks ride on A and need the owner's word: (1) the marker word — `#Task` overloads Jet's concurrency `Task<T>`/task groups (D-TASKRUNTIME1); aviation-family alternatives that avoid the clash: `#Command`, `#Verb`, `#Chore`, `#Recipe`, `#Runbook`, `#Checklist`, `#Preflight`, `#Taxi`, `#Sortie`, `#Waypoint`. (2) the invocation verb — recommend `jetpack run <name>` (reuses the existing `run` verb; `jetpack lint` as unambiguous-name sugar) over a new `jetpack do <name>`.",
+      "story": "Priya clones a teammate's Jet web service, `orbit`. She wants to lint it, apply the pending database migrations, seed dev fixtures, and deploy. Today Jet only recognizes the four fixed lifecycle entry points `fn run()`, `fn dev()`, `fn build()`, `fn test()`; anything else the project needs lives in a README as a copy-paste shell incantation. Every rival she has used solves this: `npm run lint`, `cargo xtask`, `pnpm deploy`, `just migrate`, `uv run seed`. Priya wants to type `jetpack <tab>` and see the project's own verbs, run one, and have a wrong name tell her what the real names are — not grep a README. The choice: what does the project author write to declare `lint`/`migrate`/`seed`/`deploy`, and does declaring them fight Jet's existing `fn run()` mechanism or reuse it.",
+      "inWild": "The `orbit` package needs four project commands. `lint` shells out to a formatter. `migrate` applies DB migrations and takes a `--to` version. `seed` must run `migrate` first, then load `fixtures/dev.jet`. `deploy` must run `build` and `test` first, then push, with `STAGE=prod` set. A first-class task surface has to cover: a name, an action, typed arguments, environment/working-dir, and one task depending on another — while colliding cleanly when someone names a task `build` (a reserved lifecycle verb) or runs a task that doesn't exist.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Tasks are functions (`#Task fn`)",
+          "detail": "A task is an ordinary Jet function marked `#Task`, living beside `fn run()` in the package's definition file (same home as `fn build(b)` today). It reuses everything functions already have: types, `?` fallibility, typed-argument CLI parsing (D-CLIFLAG1: `fn migrate(args: MigrateArgs)` derives `--to`), and `@[Doc(\"...\")]` help. A cross-task dependency is just a function call — no separate dependency DSL, nothing restated. `#Task` is an explicit opt-in, so only marked functions become verbs (no accidental exposure). This is the one-path (I8) answer: a task is not a new kind of thing, it is the `fn run()` mechanism generalized to a user-chosen name.",
+          "code": "// orbit.jet — beside fn run()\n#Task\nfn lint() -> Void ? {\n    shell(\"ruff check .\")?\n}\n\n#Task(\"apply pending migrations\")\nfn migrate(args: MigrateArgs) -> Void ? {\n    db.migrate(to: args.to)?\n}\n\n#Task\nfn seed() -> Void ? {\n    migrate(MigrateArgs.{ to: \"latest\" })?   // dependency = a plain call\n    db.seed(\"fixtures/dev.jet\")?\n}\n\n----- run it -----\n$ jetpack run seed\nmigrate: 3 applied\nseed: loaded fixtures/dev.jet\n\n$ jetpack run migrate --to 004\nmigrate: 1 applied (now at 004)\n\n$ jetpack run migrate --help\nmigrate — apply pending migrations\n  --to <version>   target migration (default: latest)\n\n----- undeclared task -----\n$ jetpack run deploy\nerror[E1234]: no task named `deploy`\n --> orbit.jet\n  = declared tasks: lint, migrate, seed\n  help: mark a function `#Task` to make it runnable\n\n----- collision with a reserved lifecycle verb -----\n#Task\nfn build() { ... }\nerror[E1235]: `build` is a built-in lifecycle verb, not a task name\n --> orbit.jet:12\n  = reserved: run, dev, build, test\n  help: rename it, e.g. `#Task fn build_assets()`"
+        },
+        {
+          "key": "B",
+          "name": "Shell-string map (`tasks:` in pkg.jet)",
+          "detail": "A `tasks:` field in `pkg.jet` maps a name to a shell-command string, exactly like npm `scripts` or a bare `just` recipe. Zero Jet code, instantly familiar. But: the value is an opaque string (no types, no `--flag` parsing, typos surface only at runtime), it shells out for everything, and it is a SECOND way to \"run something\" alongside `fn run()` — the project now has two unrelated command surfaces. Dependencies aren't expressible except by re-typing a command inside another, which is exactly the repetition the owner cuts.",
+          "code": "// pkg.jet\ntasks: {\n    lint:    \"ruff check .\",\n    migrate: \"orbit-db migrate --to latest\",\n    seed:    \"orbit-db migrate --to latest && orbit-db seed fixtures/dev.jet\",\n}\n\n----- run it -----\n$ jetpack run seed\n+ orbit-db migrate --to latest\n+ orbit-db seed fixtures/dev.jet\n\n----- the repetition problem -----\n// `seed` restates the whole `migrate` command because a string\n// can't say \"needs: migrate\". Change migrate's flags and you must\n// remember to edit seed too. A typo like `orbti-db` is caught only\n// when the task runs.\n\n----- undeclared task -----\n$ jetpack run deploy\nerror[E1234]: no task `deploy` in pkg.jet\n  = tasks: lint, migrate, seed"
+        },
+        {
+          "key": "C",
+          "name": "Structured recipe entries with `needs:` (just/turbo style)",
+          "detail": "A `tasks:` field in `pkg.jet` maps a name to a typed struct — the same manifest-data shape as `deps:`/`targets:` — carrying `run:`, a declared `needs:` dependency list, plus optional `env:`/`cwd:`. `run:` is a shell string (or a reference to a `#Task fn`). This gives a real, ordered dependency DAG the runner can print and parallelize, and keeps command config declarative and greppable. Cost: it is still a data-DSL distinct from `fn run()` (a second command surface), and `run:` as a string reintroduces the untyped/no-flag-parsing limits of B for the common case.",
+          "code": "// pkg.jet\ntasks: {\n    lint:    { run: \"ruff check .\" },\n    migrate: { run: \"orbit-db migrate --to latest\" },\n    seed:    { run: \"orbit-db seed fixtures/dev.jet\", needs: [migrate] },\n    deploy:  { run: \"orbit-db deploy\",\n               needs: [build, test],\n               env:  { STAGE: \"prod\" } },\n}\n\n----- run it (DAG is shown) -----\n$ jetpack run seed\n» migrate   (needed by seed)\n» seed\n\n----- unknown dependency -----\n$ jetpack run seed\nerror[E1236]: task `seed` needs `migrat`, which isn't a task\n --> pkg.jet\n  help: did you mean `migrate`?\n\n----- collision with a reserved lifecycle verb -----\ntasks: { build: { run: \"...\" } }\nerror[E1235]: `build` is a built-in lifecycle verb, not a task name"
+        },
+        {
+          "key": "D",
+          "name": "Convention dispatch (any `pub fn` is a verb)",
+          "detail": "No marker and no manifest field: any top-level `pub fn` in the package's definition file automatically becomes an invokable verb; private functions stay internal; dependencies are plain calls. Maximum ceremony-free — write a function, make it `pub`, run it. But visibility now does double duty: a helper you export for code reuse silently becomes a CLI command, renaming a `pub fn` is a breaking CLI change, and `pub fn run` collides with the entry point. It makes the footgun the default (I8/kill-criteria) — exposure is implicit, the opposite of a safe opt-in.",
+          "code": "// orbit.jet\npub fn lint() -> Void ? { shell(\"ruff check .\")? }\npub fn seed() -> Void ? { migrate()?; db.seed(\"fixtures/dev.jet\")? }\nfn migrate() -> Void ? { db.migrate(to: \"latest\")? }   // private → not a verb\n\n----- run it -----\n$ jetpack run lint\nlint: ok\n\n----- the footgun -----\n// You export a helper for another module to reuse:\npub fn format_report(r: Report) -> Text { ... }\n// It is now also a CLI verb `jetpack run format_report` that takes a\n// Report it can't build from argv. Visibility and \"is a command\" are\n// fused, so you can't have one without the other."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "npm scripts",
+          "note": "String map in package.json; the familiar baseline (option B). No types, no arg parsing, dependencies via `&&`/`pre`/`post` string chaining.",
+          "code": "\"scripts\": { \"lint\": \"eslint .\", \"seed\": \"npm run migrate && node seed.js\" }"
+        },
+        {
+          "lang": "just",
+          "note": "Dedicated recipe file with first-class dependencies (informs option C's `needs:`). Recipes are shell by default; deps are named, not restated.",
+          "code": "seed: migrate\n\tnode seed.js"
+        },
+        {
+          "lang": "cargo xtask",
+          "note": "The Rust ecosystem's answer to 'tasks should be real typed code, not shell strings' — a normal binary with typed args (informs option A). No bespoke DSL; automation is just the language.",
+          "code": "cargo xtask deploy --stage prod"
+        },
+        {
+          "lang": "turbo",
+          "note": "Declares a task dependency graph (`dependsOn`) and runs it in order/parallel — the value option C/A's dependency modeling captures.",
+          "code": "\"deploy\": { \"dependsOn\": [\"build\", \"test\"] }"
+        }
+      ],
+      "rec": "A",
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-10T21:14:28.965Z"
     }
   ],
   "questions": [
@@ -23329,6 +23392,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-10T21:14:28.965Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-JPK-TASKRUN1",
+      "note": "How a project declares and invokes named tasks"
+    },
     {
       "at": "2026-07-10T21:06:32.939Z",
       "by": "claude-main",
@@ -26819,13 +26889,6 @@
       "at": "2026-07-10T13:42:42.077Z",
       "by": "claude-main",
       "action": "milestone.delete",
-      "ref": "m0fvnpsr",
-      "note": "Board v2"
-    },
-    {
-      "at": "2026-07-10T13:40:33.300Z",
-      "by": "agent",
-      "action": "milestone.add",
       "ref": "m0fvnpsr",
       "note": "Board v2"
     }

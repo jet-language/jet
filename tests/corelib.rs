@@ -192,6 +192,10 @@ fn run() {
             && with_interrupt.rust.contains("CTRL_C_EVENT")
             && with_interrupt.rust.contains("AtomicUsize")
             && with_interrupt.rust.contains("catch_unwind")
+            && with_interrupt.rust.contains("struct PanicBoundary")
+            && with_interrupt.rust.contains("impl Drop for PanicBoundary")
+            && with_interrupt.rust.contains("#[cfg(not(any(unix, windows)))]")
+            && with_interrupt.rust.contains("interrupt handling is unavailable on this target")
             && with_interrupt.rust.contains("jet_std_os_on_interrupt")
             && !with_interrupt.rust.contains("let _ = handler"),
         "on_interrupt should keep its Unix/Windows dispatcher and no silent no-op"
