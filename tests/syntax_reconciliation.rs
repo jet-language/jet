@@ -174,7 +174,7 @@ const MARKER_PLANE_ROWS: &[(&str, &[&str])] = &[
     ),
     (
         "maturity-markers",
-        &["#Experimental", "#Tested", "#Hardened"],
+        &["@Experimental", "@Tested", "@Hardened"],
     ),
     (
         "retired-paused-marker-spellings",
