@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 482,
-    "rev": 3064,
+    "rev": 3068,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -13389,15 +13389,44 @@
       "priority": "P0",
       "plan": "Add deterministic closed-channel select regression first. Update jet_scheduler_select to return Closed when every channel arm is closed and empty, both before initial park and after wake. Cover one closed receiver, multiple all-closed arms, mixed closed plus pending timer, cancellation precedence, and no busy-loop. Run focused jet-codegen scheduler tests and affected task/select integration tests; independent review required.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "terra-481-builder",
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A select over one closed empty channel returns JetSelectOutcome::Closed without parking.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T21:27:58.982Z"
+        },
+        {
+          "n": 2,
+          "text": "Multiple all-closed empty channel arms return Closed; mixed timer/cancellation semantics retain documented precedence and do not busy-loop.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T21:27:59.140Z"
+        },
+        {
+          "n": 3,
+          "text": "Focused scheduler runtime and affected Jet task/select integration tests pass, including a deterministic timeout-bounded regression.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T21:27:59.291Z"
+        }
+      ],
       "refs": [
         "crates/jet-codegen/src/Prelude/Scheduler.rs"
       ],
       "needsAcceptance": false,
       "created": "2026-07-10T21:25:06.415Z",
-      "updated": "2026-07-10"
+      "updated": "2026-07-10",
+      "claimedAt": "2026-07-10T21:27:59.437Z"
     }
   ],
   "decisions": [
@@ -24136,6 +24165,34 @@
   ],
   "events": [
     {
+      "at": "2026-07-10T21:27:59.437Z",
+      "by": "terra-481-builder",
+      "action": "card.claim",
+      "ref": "c068vbs2",
+      "note": ""
+    },
+    {
+      "at": "2026-07-10T21:27:59.291Z",
+      "by": "codex-main",
+      "action": "card.criteria-add",
+      "ref": "c068vbs2",
+      "note": "#3 Focused scheduler runtime and affected Jet task/select integ"
+    },
+    {
+      "at": "2026-07-10T21:27:59.140Z",
+      "by": "codex-main",
+      "action": "card.criteria-add",
+      "ref": "c068vbs2",
+      "note": "#2 Multiple all-closed empty channel arms return Closed; mixed "
+    },
+    {
+      "at": "2026-07-10T21:27:58.982Z",
+      "by": "codex-main",
+      "action": "card.criteria-add",
+      "ref": "c068vbs2",
+      "note": "#1 A select over one closed empty channel returns JetSelectOutc"
+    },
+    {
       "at": "2026-07-10T21:26:50.590Z",
       "by": "terra-292-builder",
       "action": "card.release",
@@ -27606,34 +27663,6 @@
       "action": "card.claim",
       "ref": "c0k81v26",
       "note": ""
-    },
-    {
-      "at": "2026-07-10T14:50:21.539Z",
-      "by": "claude-main",
-      "action": "card.release",
-      "ref": "c73xs2f",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-10T14:49:44.600Z",
-      "by": "claude-main",
-      "action": "card.claim",
-      "ref": "c73xs2f",
-      "note": ""
-    },
-    {
-      "at": "2026-07-10T14:49:16.502Z",
-      "by": "jet-verify",
-      "action": "card.update",
-      "ref": "c17iww33",
-      "note": "phase"
-    },
-    {
-      "at": "2026-07-10T14:48:49.473Z",
-      "by": "jet-verify",
-      "action": "card.criteria-verify",
-      "ref": "c17iww33",
-      "note": "#3"
     }
   ],
   "nextNum": 368,
