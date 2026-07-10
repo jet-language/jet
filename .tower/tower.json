@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 466,
-    "rev": 2729,
+    "rev": 2745,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -535,11 +535,21 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "D-IGNORERET2=A implementation plan: (1) register `#Suppress(MustUse)` marker and `.drop(\"reason\")` terminal method in Syntax.rs; (2) parser accepts marker on block/fn and method-chain terminal call; (3) sema recognizes `.drop` only on `#MustUse`/fallible values, requires non-empty string literal reason, and emits a lint rather than hard error; (4) `#Suppress(MustUse)` suppresses within lexical body and records an audit warning; (5) codegen erases discarded value after evaluating side effects; (6) diagnostics + ui snapshots for missing reason, unsupported receiver, and accidental ignore; (7) examples/goldens.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-10",
+          "by": "jet-verify",
+          "text": "Closed with claim.discard-control proven/shipped (not fake-green)."
+        },
+        {
+          "at": "2026-07-10",
+          "by": "claude-main",
+          "text": "Ready for independent verify+done after claim.discard-control proven."
+        },
         {
           "at": "2026-07-10",
           "by": "sync-fix",
@@ -615,7 +625,17 @@
       "created": "2026-06-26T21:10:13.903Z",
       "updated": "2026-07-10",
       "workOrder": 4,
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Capability claim proven: cargo test --test capability_acceptance -- --exact",
+          "status": "verified",
+          "metBy": "claude-main",
+          "verifiedBy": "jet-verify",
+          "evidence": "Re-ran capability_acceptance audited_discard; proof artifacts anchored; digests match.",
+          "at": "2026-07-10T15:26:55.214Z"
+        }
+      ],
       "needsAcceptance": false,
       "refs": [],
       "claimedAt": "2026-07-10T14:17:52.892Z"
@@ -630,11 +650,21 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
       "plan": "D-PRELUDEX1=A: implement prelude opt-out only. Steps: add file/package opt-out surface per ratified marker; parser/Syntax.rs entry; loader/sema skips ambient prelude when opted out; diagnostics teach explicit imports; no library prelude injection; examples + ui snapshots.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-10",
+          "by": "jet-verify",
+          "text": "Closed with claim.prelude-control proven/shipped (not fake-green)."
+        },
+        {
+          "at": "2026-07-10",
+          "by": "claude-main",
+          "text": "Ready for independent verify+done after claim.prelude-control proven."
+        },
         {
           "at": "2026-07-10",
           "by": "sync-fix",
@@ -676,7 +706,17 @@
       "created": "2026-06-26T21:10:13.903Z",
       "updated": "2026-07-10",
       "workOrder": 53,
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Capability claim proven: cargo test --test capability_acceptance -- --exact",
+          "status": "verified",
+          "metBy": "claude-main",
+          "verifiedBy": "jet-verify",
+          "evidence": "Re-ran capability_acceptance prelude_opt_out; proof artifacts anchored; digests match.",
+          "at": "2026-07-10T15:26:55.284Z"
+        }
+      ],
       "needsAcceptance": false,
       "refs": [],
       "claimedAt": "2026-07-10T14:21:12.586Z"
@@ -761,11 +801,21 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
       "plan": "D-MATURITY1=B: document maturity tags as a non-semantic convention now. Steps: add docs/reference guidance for #Experimental/#Tested/#Hardened comments/metadata if existing marker syntax permits; do not add sema propagation; file follow-up only if semantic propagation is later ratified.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-10",
+          "by": "jet-verify",
+          "text": "Closed with claim.maturity-tags proven/shipped (not fake-green)."
+        },
+        {
+          "at": "2026-07-10",
+          "by": "claude-main",
+          "text": "Ready for independent verify+done after claim.maturity-tags proven."
+        },
         {
           "at": "2026-07-10",
           "by": "sync-fix",
@@ -1173,6 +1223,11 @@
       "plan": "docs/plans/epoch-5/metaprogramming.md",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-10",
+          "by": "claude-main",
+          "text": "Claim.package-build stays partial/open: universal-language-core still names missing public build graph/query/explanation/provenance. build_entry/build_graph exist as subset — not enough to prove claim. Leave ready."
+        },
         {
           "at": "2026-07-10",
           "by": "sync-fix",
@@ -10661,8 +10716,13 @@
       "plan": "docs/plans/epoch-3/universal-language-core.md#ul0--truth-ledger-and-claim-stop-line",
       "blockedBy": [],
       "workOrder": 464,
-      "assignee": "sol-435",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-07-10",
+          "by": "cursor-verify",
+          "text": "Independent verification (cursor-verify, not the builder): checker --check green on committed tree (post-1ae5f61a digest sync); hostile fixtures 11/11 rejected; truthfulness epoch3_capability_manifest_rejects_hostile_real_card_fixtures ok (--exact). Found+fixed one latent defect in the shipped machinery: hostileFixtures() read raw tower.json, so owner cards retiring into .tower/history.json (D-TWR-ARCHIVE1, landed after this card merged) broke real-card fixtures once #339 archived — dd1173f8 makes lookup archive-aware via loadBoardCards with per-fixture re-read. Enforcement is live end-to-end: pre-push hook (#446) + truthfulness suite + CI full-suite lane. manifest-current lane transiently red in working tree only under claude-main's in-flight proven-flip for #37/#63/#79 (goes green when those close; hook enforces). Orchestrator's full-suite gate: master red is tracked+owned by #465 with named clusters (CI run 29102351080 evidence logged there); this card owns classification+enforcement, not those fixes."
+        },
         {
           "at": "2026-07-10",
           "by": "codex-orchestrator",
@@ -11798,6 +11858,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-10",
+          "by": "cursor-verify",
+          "text": "CI evidence (run 29102351080, master@1ae5f61a): two clusters beyond the tracked 10. (a) jetpack lib fails to COMPILE on windows/macos under #![deny(warnings)] — E0277 ?-in-closure crates/jetpack/src/Store.rs:605 + unused imports/vars in Store.rs, CLI/studio_transactions.rs, JetOS/generation_files.rs (from #418/#357 merges; platform lane was green 2026-07-08 run 28908500137). (b) tests/build_entry.rs 6 failures on GitHub runners: bwrap loopback RTM_NEWADDR EPERM — sandbox env limitation, needs --unshare-net or CI-capability detection (from #95 build executor). Local 10:16 log also shows env_dev_trust 2 + jetpack env 2 + jetpack_offline 1 failures not in the tracked list."
+        },
         {
           "at": "2026-07-10",
           "by": "claude-main",
@@ -21879,6 +21944,118 @@
   ],
   "events": [
     {
+      "at": "2026-07-10T15:27:09.832Z",
+      "by": "cursor-verify",
+      "action": "card.update",
+      "ref": "c088jf0z",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-10T15:27:09.762Z",
+      "by": "cursor-verify",
+      "action": "card.release",
+      "ref": "c088jf0z",
+      "note": ""
+    },
+    {
+      "at": "2026-07-10T15:26:55.583Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c1nixrpd",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-10T15:26:55.517Z",
+      "by": "jet-verify",
+      "action": "card.update",
+      "ref": "c17iww33",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-10T15:26:55.452Z",
+      "by": "jet-verify",
+      "action": "card.update",
+      "ref": "crivuqa",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-10T15:26:55.386Z",
+      "by": "jet-verify",
+      "action": "card.update",
+      "ref": "c1iqde7",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-10T15:26:55.284Z",
+      "by": "jet-verify",
+      "action": "card.criteria-verify",
+      "ref": "crivuqa",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-10T15:26:55.215Z",
+      "by": "jet-verify",
+      "action": "card.criteria-verify",
+      "ref": "c1iqde7",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-10T15:26:55.146Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c17iww33",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-10T15:26:55.074Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "crivuqa",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-10T15:26:55.006Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c1iqde7",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-10T15:26:54.937Z",
+      "by": "claude-main",
+      "action": "card.criteria-meet",
+      "ref": "crivuqa",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-10T15:26:54.860Z",
+      "by": "claude-main",
+      "action": "card.criteria-add",
+      "ref": "crivuqa",
+      "note": "#1 Capability claim proven: cargo test --test capability_accept"
+    },
+    {
+      "at": "2026-07-10T15:26:54.781Z",
+      "by": "claude-main",
+      "action": "card.criteria-meet",
+      "ref": "c1iqde7",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-10T15:26:54.707Z",
+      "by": "claude-main",
+      "action": "card.criteria-add",
+      "ref": "c1iqde7",
+      "note": "#1 Capability claim proven: cargo test --test capability_accept"
+    },
+    {
+      "at": "2026-07-10T15:26:20.735Z",
+      "by": "cursor-verify",
+      "action": "card.update",
+      "ref": "c02kdm7a",
+      "note": "logEntry"
+    },
+    {
       "at": "2026-07-10T15:03:48.460Z",
       "by": "sync-fix",
       "action": "card.update",
@@ -25264,118 +25441,6 @@
       "by": "codex-main",
       "action": "card.update",
       "ref": "c5q01s7b",
-      "note": "title,body,logEntry"
-    },
-    {
-      "at": "2026-07-09T20:43:52.199Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c4q00utv",
-      "note": "title,body,logEntry"
-    },
-    {
-      "at": "2026-07-09T20:43:52.031Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c3q000dw",
-      "note": "title,body,logEntry"
-    },
-    {
-      "at": "2026-07-09T20:43:51.852Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c2pzz3qb",
-      "note": "title,body,logEntry"
-    },
-    {
-      "at": "2026-07-09T20:43:51.662Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c0pzvvjc",
-      "note": "title,body,logEntry"
-    },
-    {
-      "at": "2026-07-09T20:43:51.482Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c0bnxdui",
-      "note": "title,body,logEntry"
-    },
-    {
-      "at": "2026-07-09T20:43:51.294Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c0ay489t",
-      "note": "title,body,logEntry"
-    },
-    {
-      "at": "2026-07-09T20:43:51.121Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c08no70r",
-      "note": "title,body,logEntry"
-    },
-    {
-      "at": "2026-07-09T20:43:50.959Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c07x6jt9",
-      "note": "title,body,logEntry"
-    },
-    {
-      "at": "2026-07-09T20:43:50.790Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c06fudbe",
-      "note": "title,body,logEntry"
-    },
-    {
-      "at": "2026-07-09T20:43:50.608Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c2vj0hg0",
-      "note": "title,body,logEntry"
-    },
-    {
-      "at": "2026-07-09T20:43:50.441Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c1rixz5d",
-      "note": "title,body,logEntry"
-    },
-    {
-      "at": "2026-07-09T20:43:50.280Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c1oixt2m",
-      "note": "title,body,logEntry"
-    },
-    {
-      "at": "2026-07-09T20:43:50.144Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c1iixish",
-      "note": "title,body,logEntry"
-    },
-    {
-      "at": "2026-07-09T20:43:49.959Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c1dix8nw",
-      "note": "title,body,logEntry"
-    },
-    {
-      "at": "2026-07-09T20:43:49.801Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c146",
-      "note": "title,body,logEntry"
-    },
-    {
-      "at": "2026-07-09T20:43:49.642Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c56",
       "note": "title,body,logEntry"
     }
   ],

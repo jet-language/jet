@@ -199,13 +199,13 @@
         "cardId": "c1iqde7",
         "num": 37
       },
-      "class": "reserved",
-      "disposition": "open",
-      "reviewerRationale": "Surface is ratified but no parser, sema, diagnostic, or executable example exists.",
+      "class": "proven",
+      "disposition": "shipped",
+      "reviewerRationale": "D-IGNORERET2=A ships `.drop(\"reason\")` and `#Suppress(MustUse)` with E0407, UI snapshots, and an executable discard example; codegen erases after side effects.",
       "acceptanceLanes": [
         {
           "id": "audited-discard",
-          "why": "Must prove evaluation, reason capture, must-use checking, and codegen erasure together.",
+          "why": "Acceptance runs the discard example golden and pins Syntax + E0407 teaching for empty reasons.",
           "command": [
             "cargo",
             "test",
@@ -217,12 +217,28 @@
           ],
           "artifacts": [
             {
-              "role": "gap",
-              "kind": "tower",
-              "field": "plan",
-              "anchor": "implementation plan",
-              "why": "Only planned behavior exists.",
-              "contentDigest": "4cd26e4dd1305efc63819e1c1bf10a7dfcfb411705e4f24971b51504d8ca0b6e"
+              "role": "proof",
+              "kind": "file",
+              "path": "tests/capability_acceptance.rs",
+              "anchor": "CAPABILITY_CLAIM: claim.discard-control / audited-discard",
+              "why": "Dedicated executable acceptance lane for audited discard.",
+              "contentDigest": "8322c1a080b5b37d8b6597fff9b64de52d758f20d8aa6a1e9925aebbade309ec"
+            },
+            {
+              "role": "proof",
+              "kind": "file",
+              "path": "examples/features/errors/discard_fallible.jet",
+              "anchor": ".drop(\"best-effort write, not critical\")",
+              "why": "I5 example exercises both discard channels.",
+              "contentDigest": "8baab723a9b0cf7ada99dc52656d11261fb62bb5c45915ae4ff8d55277fe8ddc"
+            },
+            {
+              "role": "proof",
+              "kind": "file",
+              "path": "tests/ui/drop_method_empty_reason.stderr",
+              "anchor": "Error [E0407]: `.drop()` reason must not be empty",
+              "why": "Empty discard reason is rejected with a stable diagnostic.",
+              "contentDigest": "ead755168e3f9221bbbf58427d491cabb44812d9e8945f381d567e6e5e2bb08d"
             }
           ]
         }
@@ -234,13 +250,13 @@
         "cardId": "crivuqa",
         "num": 63
       },
-      "class": "reserved",
-      "disposition": "open",
-      "reviewerRationale": "Opt-out is ratified but loader and sema behavior remain unimplemented.",
+      "class": "proven",
+      "disposition": "shipped",
+      "reviewerRationale": "D-PRELUDEX1=A ships `#NoPrelude` file opt-out: ambient print/input gated, E0429 teaching, qualified core.io path, example + UI snapshots.",
       "acceptanceLanes": [
         {
           "id": "prelude-opt-out",
-          "why": "Must prove implicit beginner imports and explicit expert opt-out use the same loader path.",
+          "why": "Acceptance proves beginner ambient prelude and expert `#NoPrelude` share one loader/sema path.",
           "command": [
             "cargo",
             "test",
@@ -252,12 +268,28 @@
           ],
           "artifacts": [
             {
-              "role": "gap",
-              "kind": "tower",
-              "field": "plan",
-              "anchor": "implement prelude opt-out only",
-              "why": "Current artifact is implementation plan only.",
-              "contentDigest": "80192a2427defb84fb77b39251f390950314056e584b5af2b778b2efafffd603"
+              "role": "proof",
+              "kind": "file",
+              "path": "tests/capability_acceptance.rs",
+              "anchor": "CAPABILITY_CLAIM: claim.prelude-control / prelude-opt-out",
+              "why": "Dedicated executable acceptance lane for prelude opt-out.",
+              "contentDigest": "8322c1a080b5b37d8b6597fff9b64de52d758f20d8aa6a1e9925aebbade309ec"
+            },
+            {
+              "role": "proof",
+              "kind": "file",
+              "path": "examples/features/io/no_prelude.jet",
+              "anchor": "#NoPrelude",
+              "why": "I5 example opts out and uses explicit core.io.",
+              "contentDigest": "f572323fa162ef4098e86359b8688787ae26f9eb0674ad9b1b61ce7300009250"
+            },
+            {
+              "role": "proof",
+              "kind": "file",
+              "path": "tests/ui/no_prelude_print.stderr",
+              "anchor": "Error [E0429]: `print` is not ambient here — this file opted out with `#NoPrelude`",
+              "why": "Bare print under opt-out is a stable teaching diagnostic.",
+              "contentDigest": "a789d5e6971668ae67e01a8372fa65512e3c005b9374f85c8148a0c440be83fd"
             }
           ]
         }
@@ -269,13 +301,13 @@
         "cardId": "c17iww33",
         "num": 79
       },
-      "class": "reserved",
-      "disposition": "open",
-      "reviewerRationale": "Ratification chose a non-semantic documentation convention; completion evidence is not recorded.",
+      "class": "proven",
+      "disposition": "shipped",
+      "reviewerRationale": "D-MATURITY1=B ships `@Experimental`/`@Tested`/`@Hardened` as doc/fmt-visible markers with zero sema/codegen effect; retired `#` spelling is E0062.",
       "acceptanceLanes": [
         {
           "id": "maturity-convention",
-          "why": "Must prove docs expose a non-semantic convention without parser or sema claims.",
+          "why": "Acceptance proves the non-semantic maturity convention via docs, I5 example, and zero-sema ratchet.",
           "command": [
             "cargo",
             "test",
@@ -287,12 +319,28 @@
           ],
           "artifacts": [
             {
-              "role": "gap",
-              "kind": "tower",
-              "field": "plan",
-              "anchor": "document maturity tags as a non-semantic convention",
-              "why": "Owner card remains at planned documentation work.",
-              "contentDigest": "c71de822928230fc7a6fba678a876434382abbcb6f85a0ea0f3464dec79bb7d8"
+              "role": "proof",
+              "kind": "file",
+              "path": "tests/capability_acceptance.rs",
+              "anchor": "CAPABILITY_CLAIM: claim.maturity-tags / maturity-convention",
+              "why": "Dedicated executable acceptance lane for maturity tags.",
+              "contentDigest": "8322c1a080b5b37d8b6597fff9b64de52d758f20d8aa6a1e9925aebbade309ec"
+            },
+            {
+              "role": "proof",
+              "kind": "file",
+              "path": "docs/reference/maturity-tags.md",
+              "anchor": "without changing compiler behavior",
+              "why": "Reference docs state the non-semantic contract.",
+              "contentDigest": "ea8aaa440f9c38bd1656632d17b042d97dc5860a83799d2afe73fb8a36a0419c"
+            },
+            {
+              "role": "proof",
+              "kind": "file",
+              "path": "examples/features/syntax/maturity_tags.jet",
+              "anchor": "@Experimental",
+              "why": "I5 example uses maturity tags without runtime effect.",
+              "contentDigest": "31956368789002010114d13b98576a8e68e042d52dfd4b0f5b43fd5700419916"
             }
           ]
         }
