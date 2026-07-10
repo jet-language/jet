@@ -116,6 +116,7 @@ function cmdCard(store, { pos, flags }) {
         track: flags.track ?? p.track, epoch: flags.epoch ?? p.epoch, milestoneId: flags.milestone ?? p.milestoneId,
         phase: flags.phase ?? p.phase, priority: flags.priority ?? p.priority, plan: flags.plan ?? p.plan,
         blockedBy: flags.blockedBy ? String(flags.blockedBy).split(',') : p.blockedBy,
+        refs: flags.refs ? String(flags.refs).split(',').map(x => x.trim()).filter(Boolean) : p.refs,
         workOrder: flags.workOrder ?? p.workOrder, by,
       }, cfg));
       return out(flags, `added card #${result.num} (${result.id})`, result);
@@ -128,6 +129,7 @@ function cmdCard(store, { pos, flags }) {
         ['workOrder', 'workOrder'], ['assignee', 'assignee'], ['log', 'logEntry'], ['needsAcceptance', 'needsAcceptance']])
         if (flags[f] !== undefined) patch[k] = flags[f];
       if (flags.blockedBy !== undefined) patch.blockedBy = flags.blockedBy === '' ? [] : String(flags.blockedBy).split(',');
+      if (flags.refs !== undefined) patch.refs = flags.refs === '' ? [] : String(flags.refs).split(',').map(x => x.trim()).filter(Boolean);
       const { result, state } = store.mutate((s, cfg) => db.updateCard(s, ref, patch, cfg), { expectRev: flags.expectRev });
       return out(flags, `updated card #${result.num} → ${db.laneOf(result, state.decisions, state.cards).lane}`, result);
     }
@@ -357,6 +359,82 @@ function cmdNext(store, { flags }) {
   for (const c of rich) console.log(` · ${cardLine(c)}`);
 }
 
+// #462 — tower brief: one-shot agent work packet. No ref → pick the top
+// card via the canonical nextCards() picker. --agent + not --no-claim →
+// claim it (E_CLAIMED if someone else already holds it; a no-op if the same
+// agent already does). No --agent → read-only, never claims.
+function cmdBrief(store, { pos, flags }) {
+  const [ref] = pos;
+  let s = store.load();
+  let card;
+  if (ref) {
+    card = db.findCard(s, ref);
+    if (!card) throw new TowerError('E_NOT_FOUND', `no card ${ref}`);
+  } else {
+    const picks = db.nextCards(s, { agent: flags.agent, limit: 1 });
+    if (!picks.length) throw new TowerError('E_NOT_FOUND', 'nothing agent-workable — board is either empty, blocked on the owner, or done');
+    card = db.findCard(s, picks[0].id);
+  }
+  if (flags.agent && !flags.noClaim) {
+    const { state } = store.mutate((s2) => db.claimCard(s2, card.id, flags.agent));
+    s = state;
+    card = db.findCard(s, card.id);
+  }
+  const packet = db.buildBrief(s, card.id);
+  if (flags.json) return out(flags, null, packet);
+  console.log(renderBrief(packet));
+}
+
+// Compact, one-screen-target human render — sections omitted when empty.
+function renderBrief(p) {
+  const c = p.card;
+  const L = [];
+  L.push(`#${c.num} ${c.title}`);
+  L.push(`  ${c.phase}${c.priority ? ` · ${c.priority}` : ''}${c.track ? ` · ${c.track}` : ''}${c.workOrder != null ? ` · workOrder ${c.workOrder}` : ''}${c.assignee ? ` · claimed by ${c.assignee}` : ''}`);
+  if (c.epoch) L.push(`  epoch ${c.epoch.id}${c.epoch.name ? ` — ${c.epoch.name}` : ''}${c.epoch.goal ? `: ${c.epoch.goal}` : ''}`);
+  if (c.milestone) L.push(`  milestone ${c.milestone.title}${c.milestone.goal ? ` — ${c.milestone.goal}` : ''}${c.milestone.criteria ? `  criteria: ${c.milestone.criteria}` : ''}`);
+  if (c.body) { L.push('', 'BODY', c.body); }
+  if (c.plan) { L.push('', 'PLAN', c.plan); }
+  if (p.blockers.length) {
+    L.push('', 'BLOCKED BY');
+    for (const b of p.blockers) L.push(`  ${b.done ? '✓' : '✗'} ${b.id} (${b.kind}) ${b.title || ''}${b.kind === 'card' ? ` [${b.phase}]` : b.kind === 'decision' ? ` [${b.status}]` : ''}`);
+  }
+  const items = p.criteria.items;
+  if (items.length) {
+    L.push('', `CRITERIA${p.criteria.needsAcceptance ? '  (needsAcceptance — owner ballot on close)' : ''}`);
+    for (const it of items) L.push(`  #${it.n} [${it.status}] ${it.text}${it.metBy ? `  met:${it.metBy}` : ''}${it.verifiedBy ? `  verified:${it.verifiedBy}` : ''}${it.evidence ? `  — ${it.evidence}` : ''}`);
+  } else if (p.criteria.needsAcceptance) {
+    L.push('', 'CRITERIA  (none — needsAcceptance: owner ballot on close)');
+  }
+  if (p.decisions.length) {
+    L.push('', 'DECISIONS');
+    for (const d of p.decisions) {
+      L.push(`  ${d.id} [${d.status}${d.draft ? ' draft' : ''}] ${d.title}`);
+      if (d.gist) L.push(`    ${d.gist}`);
+      if (d.status === 'ratified') {
+        L.push(`    → ${d.outcome}${d.comment ? `  — ${d.comment}` : ''}`);
+      } else {
+        if (d.story) L.push(`    story: ${d.story}`);
+        if (d.inWild) L.push(`    in the wild: ${d.inWild}`);
+        if (d.rec) L.push(`    rec: ${d.rec}`);
+        for (const o of d.options || []) L.push(`    [${o.key}] ${o.name}${o.detail ? ` — ${o.detail}` : ''}${o.code ? `\n      ${String(o.code).split('\n').join('\n      ')}` : ''}`);
+      }
+    }
+  }
+  if (p.questions.length) {
+    L.push('', 'OPEN QUESTIONS');
+    for (const q of p.questions) L.push(`  ${q.id} [${q.by}] ${q.text}`);
+  }
+  if (p.refs.length) L.push('', 'REFS', `  ${p.refs.join(', ')}`);
+  if (p.log.length) {
+    L.push('', 'RECENT LOG');
+    for (const l of p.log) L.push(`  ${l.at}  ${l.by ? `[${l.by}] ` : ''}${l.text}`);
+  }
+  L.push('', 'RULES');
+  for (const r of p.rules) L.push(`  · ${r}`);
+  return L.join('\n');
+}
+
 // tower verdict '#N' --outcome "..." [--title "…"] --by owner — mints an
 // ALREADY-ratified decision recording an owner verdict, so it can never be
 // mis-filed as a mere log note (D-TWRGUARD1=C #458). Owner-only, no --quote
@@ -484,9 +562,17 @@ const HELP = `tower — file-backed project board for an owner + AI agents
   tower state                               full projected state (JSON)
   tower next [--epoch E] [--track T] [--agent A] [--limit N]
                                             what an agent should pick up next
+  tower brief [ref] [--agent me] [--json] [--no-claim]
+                                            one-shot work packet: card, blockers,
+                                            criteria, decisions VERBATIM, questions,
+                                            refs, recent log, rules — zero other reads
+                                            needed to start. No ref → picks the top
+                                            card via next's picker. --agent claims it
+                                            unless --no-claim; no --agent → read-only.
 
   tower card     list|show|add|update|activate|claim|release|delete
   tower card update <ref> --needs-acceptance true|false   flag for owner accept ballot on close
+  tower card update <ref> --refs "docs/a.md,examples/b.jet"   explicit doc-path pointers
   tower card criteria <ref> --add "text" --by X           add an exit criterion
                             --meet n --evidence "…" --by X    builder: mark met
                             --verify n --evidence "…" --by Y  verifier ≠ builder: mark verified
@@ -554,6 +640,7 @@ export async function run(argv) {
       case 'epoch':     return cmdEpoch(store, sub);
       case 'milestone': return cmdMilestone(store, sub);
       case 'next':      return cmdNext(store, sub);
+      case 'brief':     return cmdBrief(store, sub);
       case 'verdict':   return cmdVerdict(store, sub);
       case 'archive':   return cmdArchive(store, sub);
       case 'events':    return cmdEvents(store, sub);

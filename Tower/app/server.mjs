@@ -196,6 +196,28 @@ export function serve(store, port = 7878, open = false) {
         const q = url.searchParams;
         return send(res, 200, db.nextCards(store.load(), { epoch: q.get('epoch') || undefined, track: q.get('track') || undefined, agent: q.get('agent') || undefined, limit: Number(q.get('limit') || 5) }));
       }
+      // #462 — one-shot agent work packet. ?card=&agent=&claim=0|1 (claim
+      // only takes effect when both an agent AND claim=1 are given).
+      if (req.method === 'GET' && url.pathname === '/api/brief') {
+        const q = url.searchParams;
+        const agent = q.get('agent') || undefined;
+        const cardRef = q.get('card') || undefined;
+        let s = store.load();
+        let card = cardRef ? db.findCard(s, cardRef) : null;
+        if (cardRef && !card) return send(res, 404, { error: 'E_NOT_FOUND', message: `no card ${cardRef}` });
+        if (!card) {
+          const picks = db.nextCards(s, { agent, limit: 1 });
+          card = picks[0] && db.findCard(s, picks[0].id);
+          if (!card) return send(res, 404, { error: 'E_NOT_FOUND', message: 'nothing agent-workable — board is either empty, blocked on the owner, or done' });
+        }
+        if (agent && q.get('claim') === '1') {
+          const { state } = store.mutate((s2) => db.claimCard(s2, card.id, agent));
+          s = state;
+          card = db.findCard(s, card.id);
+          broadcast(store);
+        }
+        return send(res, 200, db.buildBrief(s, card.id));
+      }
       // ---- writes ----
       if (req.method === 'POST' && url.pathname === '/api/push/subscribe') {
         const p = await jsonBody(req);

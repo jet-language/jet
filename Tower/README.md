@@ -38,7 +38,8 @@ Migrating from a v3-era board: `node Tower/tower.mjs import old-tower.json --nam
   progress is computed from their done-ratio (`milestone add/update`).
 - **Cards** — the work. Stages: triage → deciding → planning → ready →
   building → verify → done (+ frozen). Fields include `workOrder` (canonical
-  pick order), `blockedBy`, `assignee` (claims), `plan`, `log`.
+  pick order), `blockedBy`, `assignee` (claims), `plan`, `log`, `refs`
+  (explicit doc-path pointers, merged with auto-harvested ones in `tower brief`).
 - **Exit criteria** — a card's `criteria[]` checklist (open → met → verified)
   gates `--phase done` for anyone but the owner, and the verifier must differ
   from whoever met it. Flag a card `needsAcceptance` to also require an owner
@@ -62,6 +63,7 @@ Migrating from a v3-era board: `node Tower/tower.mjs import old-tower.json --nam
 
 ```
 tower status | state | next | events
+tower brief [ref] [--agent me] [--json] [--no-claim]
 tower card      list|show|add|update|activate|claim|release|delete
 tower decision  list|show|add|update|ratify|reopen|delete
 tower question  list|ask|answer|delete
@@ -71,6 +73,13 @@ tower milestone list|add|update|delete
 tower archive   status | show <id> | restore <id>
 tower init | serve | import
 ```
+
+`tower brief` is the one-shot agent work packet (#462): card, live blocker
+state, exit criteria, every linked decision copied verbatim, open questions,
+`refs` (explicit + harvested from body/plan), recent log, and the standing
+rules footer — everything needed to start a card with no other reads. No
+`ref` → picks the top card the same way `next` would. `--agent` claims the
+card (unless `--no-claim`); without `--agent` it's read-only.
 
 `--json` everywhere for machine output; `--file x.json` / `--file -` (stdin)
 for rich payloads; cards accept `#num` or id; `--by <name>` attributes every

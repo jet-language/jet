@@ -46,9 +46,15 @@ spelling to bypass a ratification gate. Exit criterion: both sections empty.
 
 ## Session loop
 
-1. `tower status` · answer `tower question list --open` first.
-2. `tower next` → claim it: `tower card claim '#N' --by claude-main` (claimed
-   by someone else → pick another).
+1. `tower status` for the overview, then answer any open questions first
+   (`tower question list --open`).
+2. `tower brief --agent claude-main` — one call replaces reading
+   `status`/`next`/`card show`/`decision show`/`question list` separately:
+   picks the top card (or `tower brief '#N' --agent claude-main` for a
+   specific one) and claims it in the same step (claimed by someone else →
+   `E_CLAIMED`, pick another). The packet is everything needed to start:
+   card, live blockers, criteria, every linked decision verbatim, open
+   questions, refs, recent log, rules — no other reads needed.
 3. **BALLOT FIRST — before any code on the card.** Enumerate every owner-gate
    it contains: new user-facing syntax, a new stdlib external dep (I6), an
    invariant carve-out, any owner-only approval. Queue EVERY gate as a

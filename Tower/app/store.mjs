@@ -257,7 +257,7 @@ export function normalize(s) {
   s.meta.ui = { toggled: [], ...(s.meta.ui || {}) };
   for (const k of ['epochs', 'milestones', 'cards', 'decisions', 'questions', 'ideas', 'events']) s[k] ||= [];
   delete s.messages;   // messaging was removed; drop the legacy key on next write
-  for (const c of s.cards) { c.blockedBy ||= []; c.log ||= []; c.criteria ||= []; c.needsAcceptance = !!c.needsAcceptance; }
+  for (const c of s.cards) { c.blockedBy ||= []; c.log ||= []; c.criteria ||= []; c.refs ||= []; c.needsAcceptance = !!c.needsAcceptance; }
   for (const d of s.decisions) d.draft = !!d.draft;
   return s;
 }
@@ -356,6 +356,12 @@ const checkEnum = (val, list, what) => {
 };
 const checkEpoch = (s, id) => { if (id != null && !s.epochs.find(e => e.id === id)) fail('E_NOT_FOUND', `no epoch ${id}`); };
 const checkMilestone = (s, id) => { if (id != null && !s.milestones.find(m => m.id === id)) fail('E_NOT_FOUND', `no milestone ${id}`); };
+// #462: refs — free-form doc-path pointers a card carries explicitly (in
+// addition to whatever `tower brief` harvests out of body/plan).
+const checkRefs = (val) => {
+  if (val !== undefined && !(Array.isArray(val) && val.every(x => typeof x === 'string')))
+    fail('E_INVALID', 'refs must be an array of strings');
+};
 
 export function logEvent(s, { by = 'agent', action, ref = null, note = '' }) {
   s.events.unshift({ at: now(), by, action, ref, note });
@@ -385,6 +391,7 @@ export function addCard(s, p, config) {
   checkEnum(p.priority, config.priorities, 'priority');
   checkEnum(p.phase, PHASE_IDS, 'phase');
   checkEpoch(s, p.epoch); checkMilestone(s, p.milestoneId);
+  checkRefs(p.refs);
   const card = {
     id: p.id || newId('c'),
     num: p.num || s.meta.nextNum++,
@@ -402,6 +409,7 @@ export function addCard(s, p, config) {
     assignee: p.assignee || null,
     log: p.log || [],
     criteria: Array.isArray(p.criteria) ? p.criteria.map((it, i) => normalizeCriterion(it, i)) : [],
+    refs: Array.isArray(p.refs) ? p.refs : [],
     needsAcceptance: !!p.needsAcceptance,
     created: now(), updated: today(),
   };
@@ -410,7 +418,7 @@ export function addCard(s, p, config) {
   return card;
 }
 
-const CARD_FIELDS = ['title', 'body', 'kind', 'track', 'epoch', 'milestoneId', 'phase', 'priority', 'plan', 'blockedBy', 'workOrder', 'assignee', 'criteria', 'needsAcceptance'];
+const CARD_FIELDS = ['title', 'body', 'kind', 'track', 'epoch', 'milestoneId', 'phase', 'priority', 'plan', 'blockedBy', 'workOrder', 'assignee', 'criteria', 'needsAcceptance', 'refs'];
 
 // D-TWR-CRIT1=C / D-TWRGUARD1=C: gate --phase done. Agent-hard, owner-soft —
 // a write with by !== 'owner' is refused while any criterion is unverified;
@@ -495,6 +503,7 @@ export function updateCard(s, ref, patch, config) {
     if (!findCard(s, id) && !s.decisions.find(d => d.id === id))
       fail('E_NOT_FOUND', `blockedBy: no card or decision ${id}`);
   }
+  if ('refs' in patch) checkRefs(patch.refs);
   assertOwnerLane(c, patch, patch.by);
   const phaseOverride = 'phase' in patch ? applyDoneGate(s, c, patch.phase, patch.by) : null;
   for (const k of CARD_FIELDS) {
@@ -900,6 +909,75 @@ export function nextCards(s, { epoch, track, agent, limit = 5 } = {}) {
     || (a.priority || '').localeCompare(b.priority || '')
     || a.num - b.num);
   return pool.slice(0, limit);
+}
+
+// ---- brief: one-shot agent work packet (#462, D-TWR-BRIEF1=A) -------------
+// Goal: an agent that reads ONE `tower brief` needs zero other reads to
+// start the card. Decisions are copied VERBATIM off the live store — never
+// paraphrased, that's how stale-ballot bugs happen (#458's ballot-ready
+// standard: the owner decides from the ballot text alone, so the agent
+// briefing off it must see the same text).
+
+// Path-looking tokens auto-harvested out of body/plan text. Trailing
+// sentence punctuation (. , ; : ) ] " ') never becomes part of the match —
+// the final captured char is always a path char ([\w/]), so a greedy match
+// backtracks off any trailing punctuation.
+const REF_RE = /\b(?:docs|examples|Source|crates|tests|Tower)\/[\w./-]*[\w/]/g;
+function harvestRefs(text) {
+  return text ? [...String(text).matchAll(REF_RE)].map(m => m[0]) : [];
+}
+
+const BRIEF_RULES = [
+  'Log advances with --by.',
+  'Phase honesty: building → verify → done.',
+  'Criteria: meet as you finish; verifier must differ (E_CRITERIA_SELF).',
+  'verify → done only after real verification; needsAcceptance cards wait for owner ballot.',
+  'Release mid-card needs --handoff.',
+];
+
+// Ratified decisions surface the owner's ratification comment IN FULL (never
+// truncated/paraphrased); open/draft ones surface the whole ballot — options
+// included — since that's what the owner would need to decide from.
+function decisionForBrief(d) {
+  const base = { id: d.id, cardId: d.cardId, group: d.group, status: d.status, draft: !!d.draft,
+    title: d.title, gist: d.gist, outcome: d.outcome ?? null, comment: d.comment ?? '', ratifiedAt: d.ratifiedAt ?? null };
+  if (d.status === 'ratified') return base;
+  return { ...base, story: d.story, explainer: d.explainer, inWild: d.inWild, detail: d.detail, rec: d.rec,
+    options: d.options || [], comparisons: d.comparisons || [] };
+}
+
+// blockedBy accepts a card ref OR a decision id (#458) — resolve each to its
+// live done/ratified state so the packet never needs a second lookup.
+function blockerState(s, id) {
+  const bc = findCard(s, id);
+  if (bc) return { id, kind: 'card', num: bc.num, title: bc.title, phase: bc.phase, done: bc.phase === 'done' };
+  const bd = s.decisions.find(x => x.id === id);
+  if (bd) return { id, kind: 'decision', title: bd.title, status: bd.status, done: bd.status === 'ratified' };
+  return { id, kind: 'unknown', done: false };   // dangling ref — same as laneOf's treatment
+}
+
+export function buildBrief(s, ref) {
+  const card = mustCard(s, ref);
+  const epoch = card.epoch ? s.epochs.find(e => e.id === card.epoch) : null;
+  const milestone = card.milestoneId ? s.milestones.find(m => m.id === card.milestoneId) : null;
+  const explicitRefs = Array.isArray(card.refs) ? card.refs : [];
+  const harvested = [...harvestRefs(card.body), ...harvestRefs(card.plan)];
+  return {
+    card: {
+      id: card.id, num: card.num, title: card.title, body: card.body, plan: card.plan,
+      phase: card.phase, priority: card.priority, workOrder: card.workOrder ?? null,
+      assignee: card.assignee ?? null, track: card.track,
+      epoch: card.epoch ? { id: card.epoch, name: epoch?.name ?? null, goal: epoch?.goal ?? null } : null,
+      milestone: milestone ? { id: milestone.id, title: milestone.title, goal: milestone.goal, criteria: milestone.criteria } : null,
+    },
+    blockers: (card.blockedBy || []).map(id => blockerState(s, id)),
+    criteria: { items: card.criteria || [], needsAcceptance: !!card.needsAcceptance },
+    decisions: s.decisions.filter(d => d.cardId === card.id).map(decisionForBrief),
+    questions: s.questions.filter(q => q.cardId === card.id && q.status === 'open').map(q => ({ id: q.id, by: q.by, text: q.text })),
+    refs: [...new Set([...explicitRefs, ...harvested])],
+    log: (card.log || []).slice(0, 5),
+    rules: BRIEF_RULES,
+  };
 }
 
 // Digest cursor: everything in events[] after this instant is "since you

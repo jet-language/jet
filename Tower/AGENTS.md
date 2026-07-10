@@ -34,12 +34,25 @@ node <tower-dir>/tower.mjs help        # full command surface
 
 ```
 tower status                 # human summary
+tower brief --agent me       # ONE call: card, blockers, criteria, decisions
+                              # (verbatim), open questions, refs, log, rules —
+                              # everything needed to start, no other reads;
+                              # claims the card unless --no-claim (--json for
+                              # machine output; a #ref picks a specific card)
 tower state                  # full projected state as JSON
 tower next [--agent me]      # what to pick up, in canonical order
 tower question list --open   # owner questions — answer these before building
 tower card show '#12'        # one card, with computed lane + decisions
 tower events --limit 20      # who did what, when
 ```
+
+`tower brief` is the one-shot work packet (#462): it replaces reading
+`status`/`next`/`card show`/`decision show`/`question list` separately to
+start a card. No `[ref]` → picks the top card via the same picker as
+`next`. `--agent me` claims it (E_CLAIMED if someone else holds it; a no-op
+if you already do); omit `--agent`, or pass `--no-claim`, to read without
+claiming. Decisions in the packet are copied verbatim off the live store —
+never paraphrased.
 
 Report completions and blockers on the card itself: a `--log` entry when you
 advance it, a `tower question answer` when the owner asked something. The
@@ -63,6 +76,7 @@ Always pass `--by <your-agent-name>`.
 tower card claim '#12' --by me                # soft lock vs other agents
 tower card update '#12' --phase building --log "started X" --by me
 tower card update '#12' --plan "1. ... 2. ..." --by me
+tower card update '#12' --refs "docs/spec/foo.md,examples/features/bar.jet"  # explicit doc pointers (also auto-harvested from body/plan into `tower brief`)
 tower question answer <qid> --text "..." --by me
 tower decision add --file ballot.json --by me # or --file - for stdin, --draft if unfinished
 tower card update '#12' --phase verify --log "claiming done: tests green" --by me
@@ -176,6 +190,10 @@ blocks the same as an unfinished card.
 ```
 GET  /api/state                     full projected state
 GET  /api/next?agent=me&limit=5     canonical work picker
+GET  /api/brief?card=&agent=&claim=0|1   one-shot work packet (#462); no
+                                     card= → picks the top card via next's
+                                     picker; claims only when agent= AND
+                                     claim=1 are both given
 GET  /api/events?limit=50           audit trail
 POST /api/card/add|update|activate|claim|release|delete   (release: {handoff}; activate: {quote})
 POST /api/card/criteria-add {id,text}  criteria-meet {id,n,evidence}  criteria-verify {id,n,evidence}

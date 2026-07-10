@@ -43,17 +43,24 @@ everything as JSON; `tower status` is the human summary.
 
 ## Session loop
 
-1. `tower status` · `tower question list --open` — answer questions first.
-2. `tower next` — canonical picker: lowest `workOrder`, then building >
-   verify > implement > plan. Respect `blockedBy`; never route around a gate.
-3. Claim before working when other agents may be active:
-   `tower card claim <#> --by <me>` (already claimed → pick another).
+1. `tower status` for the overview, then answer questions first
+   (`tower question list --open`).
+2. `tower brief --agent <me>` — one call replaces reading
+   `status`/`next`/`card show`/`decision show`/`question list` separately:
+   picks the top card by the canonical order (lowest `workOrder`, then
+   building > verify > implement > plan; respects `blockedBy` — never route
+   around a gate) and claims it in the same step (already claimed by someone
+   else → `E_CLAIMED`, pick another with `tower brief '#N' --agent <me>`).
+   The packet returned is everything needed to start: card, live blockers,
+   full criteria checklist, every linked decision copied verbatim, open
+   questions, refs, recent log, and the rules footer — no other reads
+   needed. Omit `--agent`, or add `--no-claim`, to read without claiming.
    Release with `tower card release <#> --by <me>` if you stop — releasing a
    card that's `building` needs `--handoff "what's done, what's left,
    gotchas"` (`E_HANDOFF` otherwise) so the next agent isn't starting cold.
-4. Do the work per the host repo's own conventions (its CLAUDE.md/AGENTS.md
+3. Do the work per the host repo's own conventions (its CLAUDE.md/AGENTS.md
    rule the *how*; Tower rules the *what/when*).
-5. Advance with attribution:
+4. Advance with attribution:
    `tower card update <#> --phase building --log "started: X" --by <me>`.
    Phase honesty: `planning`→(`deciding` if decisions raised, else `ready`);
    `ready`→`building`; `building`→`verify` on claimed done; `verify`→`done`
@@ -65,7 +72,7 @@ everything as JSON; `tower status` is the human summary.
    who is also the builder (`E_CRITERIA_SELF`). Cards flagged
    `needsAcceptance` mint an owner accept/bounce ballot once the checklist is
    clean; the card waits in `verify` for that ratification, not `done`.
-6. Report through the board itself: a `--log` entry on each card you advanced
+5. Report through the board itself: a `--log` entry on each card you advanced
    and a question/ballot for anything newly blocked on the owner — those are
    what the owner sees (and gets push notifications for).
 

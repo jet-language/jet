@@ -60,3 +60,20 @@ test('server ratify flow advances the card', async () => {
   state = await (await fetch(url('/api/state'))).json();
   assert.equal(state.cards[0].lane.lane, 'plan');
 });
+
+// #462 — GET /api/brief
+test('GET /api/brief returns the packet and only claims when agent+claim=1', async () => {
+  const readOnly = await (await fetch(url('/api/brief?card=1'))).json();
+  assert.deepEqual(new Set(Object.keys(readOnly)), new Set(['card', 'blockers', 'criteria', 'decisions', 'questions', 'refs', 'log', 'rules']));
+  assert.equal(readOnly.card.assignee, null, 'no agent+claim → never assigns');
+  assert.ok(readOnly.decisions.find(d => d.id === 'D-S1' && d.status === 'ratified' && d.outcome === 'A'));
+
+  const noClaimYet = await (await fetch(url('/api/brief?card=1&agent=srv-agent'))).json();
+  assert.equal(noClaimYet.card.assignee, null, 'agent without claim=1 does not claim');
+
+  const claimed = await (await fetch(url('/api/brief?card=1&agent=srv-agent&claim=1'))).json();
+  assert.equal(claimed.card.assignee, 'srv-agent');
+
+  const missing = await fetch(url('/api/brief?card=999'));
+  assert.equal(missing.status, 404);
+});

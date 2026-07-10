@@ -221,7 +221,21 @@ test('migration on a copy of the real board: retire pass shrinks tower.json, int
   const liveState = st.load();
   const h = st.loadHistory();
 
-  assert.ok(postSize < preSize, `tower.json must shrink (${preSize} -> ${postSize})`);
+  // Isolate the retire pass's own effect from one-time schema-migration
+  // growth (e.g. #462 adding a new `refs: []` default to every card the
+  // first time normalize() sees it) — reserialize the pre-migration state
+  // through normalize() alone (no retire) and compare against THAT, not the
+  // raw on-disk preSize, so a legitimate new default field never falsely
+  // fails this test.
+  const migratedOnlySize = Buffer.byteLength(JSON.stringify(normalize(JSON.parse(JSON.stringify(preRaw))), null, 2) + '\n');
+  // The real board may currently have nothing old enough to retire (e.g.
+  // every done card is fresher than the buffer window right now) — in that
+  // case retiring is correctly a no-op and sizes match; only demand a
+  // strict shrink when something was actually predicted to retire.
+  if (expectRetiredCardIds.size || expectRetiredDecisionIds.size)
+    assert.ok(postSize < migratedOnlySize, `retire pass must shrink from the migrated-but-unretired size (${migratedOnlySize} -> ${postSize})`);
+  else
+    assert.equal(postSize, migratedOnlySize, 'nothing predicted to retire — size should only reflect the schema migration');
   assert.equal(liveState.cards.length, preRaw.cards.length - expectRetiredCardIds.size, 'live card count matches the predicted retire set');
   assert.equal(h.cards.length, expectRetiredCardIds.size, 'history card count matches the predicted retire set');
   for (const id of expectRetiredCardIds) {
