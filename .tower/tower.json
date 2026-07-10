@@ -3,8 +3,8 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 482,
-    "rev": 3086,
+    "nextNum": 483,
+    "rev": 3090,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -13493,6 +13493,50 @@
       "created": "2026-07-10T21:25:06.415Z",
       "updated": "2026-07-10",
       "claimedAt": "2026-07-10T21:27:59.437Z"
+    },
+    {
+      "id": "c00er6jr",
+      "num": 482,
+      "title": "verify-full TMPDIR breaks fmt outside-git regression",
+      "body": "scripts/agent/verify-full.sh intentionally sets repo-local TMPDIR. tests/fmt_project.rs::changed_outside_git_exits_2 uses std::env::temp_dir(), so under the full gate its fixture sits inside the repository and git walks to the parent .git, returning exit 0. Targeted default-/tmp execution passes. Isolate Git discovery explicitly in the test without weakening product behavior.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": "Set a test-local Git ceiling/environment boundary on the child command so parent repository discovery is impossible even when TMPDIR is repo-local. Add/retain exact diagnostic assertions. Prove targeted with a repo-local TMPDIR matching verify-full, then run fmt_project and parent full suite. No production formatter change.",
+      "blockedBy": [],
+      "assignee": "terra-482-builder",
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "changed_outside_git_exits_2 exits 2 and mentions git when TMPDIR is inside the repository.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T21:54:34.542Z"
+        },
+        {
+          "n": 2,
+          "text": "Full fmt_project target and verify-full gate pass without changing production formatter behavior.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T21:54:34.693Z"
+        }
+      ],
+      "refs": [
+        "tests/fmt_project.rs",
+        "scripts/agent/verify-full.sh"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-10T21:54:29.256Z",
+      "updated": "2026-07-10",
+      "claimedAt": "2026-07-10T21:54:34.846Z"
     }
   ],
   "decisions": [
@@ -24231,6 +24275,34 @@
   ],
   "events": [
     {
+      "at": "2026-07-10T21:54:34.846Z",
+      "by": "terra-482-builder",
+      "action": "card.claim",
+      "ref": "c00er6jr",
+      "note": ""
+    },
+    {
+      "at": "2026-07-10T21:54:34.694Z",
+      "by": "codex-main",
+      "action": "card.criteria-add",
+      "ref": "c00er6jr",
+      "note": "#2 Full fmt_project target and verify-full gate pass without ch"
+    },
+    {
+      "at": "2026-07-10T21:54:34.543Z",
+      "by": "codex-main",
+      "action": "card.criteria-add",
+      "ref": "c00er6jr",
+      "note": "#1 changed_outside_git_exits_2 exits 2 and mentions git when TM"
+    },
+    {
+      "at": "2026-07-10T21:54:29.256Z",
+      "by": "codex-main",
+      "action": "card.add",
+      "ref": "c00er6jr",
+      "note": "verify-full TMPDIR breaks fmt outside-git regression"
+    },
+    {
       "at": "2026-07-10T21:45:13.695Z",
       "by": "codex-main",
       "action": "card.update",
@@ -27700,34 +27772,6 @@
       "by": "jet-verify",
       "action": "card.criteria-verify",
       "ref": "c1iqde7",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-10T15:26:55.146Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c17iww33",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T15:26:55.074Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "crivuqa",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T15:26:55.006Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c1iqde7",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T15:26:54.937Z",
-      "by": "claude-main",
-      "action": "card.criteria-meet",
-      "ref": "crivuqa",
       "note": "#1"
     }
   ],
