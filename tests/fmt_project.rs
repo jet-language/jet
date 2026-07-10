@@ -227,6 +227,14 @@ fn changed_outside_git_exits_2() {
         .arg("fmt")
         .arg("--changed")
         .current_dir(&dir)
+        // verify-full puts TMPDIR under the checkout. Without a ceiling, git
+        // walks through target/test-tmp and discovers the checkout's .git.
+        // A single native path is portable: no platform-specific path-list
+        // separator is needed.
+        .env(
+            "GIT_CEILING_DIRECTORIES",
+            dir.parent().expect("isolated temp directory has a parent"),
+        )
         .output()
         .unwrap();
     assert_eq!(
