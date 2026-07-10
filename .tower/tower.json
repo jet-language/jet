@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 488,
-    "rev": 3166,
+    "rev": 3167,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -23800,6 +23800,64 @@
       "created": "2026-07-10T21:23:07.945Z",
       "outcome": "A",
       "ratifiedAt": "2026-07-10"
+    },
+    {
+      "id": "D-TEXTWIDTH1",
+      "cardId": "c0wx96s2",
+      "group": "stdlib",
+      "title": "Terminal display-width policy",
+      "gist": "Define how Unicode text maps to terminal columns when standards and terminals disagree.",
+      "explainer": "Recommendation B keeps the beginner call deterministic and portable, while one explicit policy value gives terminal authors control over ambiguous-width and control-character handling without creating a second width algorithm.",
+      "story": "Mei aligns names and status icons in a Jet terminal dashboard. ASCII works, but CJK punctuation, emoji flags, family ZWJ sequences, variation selectors, and control characters disagree across terminals. A scalar-count heuristic shifts columns and can place later text over earlier cells. Jet must define one predictable default and decide whether terminal authors can match a known terminal profile explicitly.",
+      "inWild": "use core.text as text\n\nname :: \"A·界👨‍👩‍👧‍👦\"\ncolumns :: text.display_width(name)\nprint(\"{(name)}{(\" \".repeat(20 - columns))}ready\")",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "One portable fixed policy",
+          "detail": "display_width measures extended grapheme clusters using Jet's pinned Unicode release. East Asian Wide/Fullwidth and emoji-presentation clusters occupy 2 columns; Ambiguous occupies 1; combining/default-ignorable characters occupy 0 inside a cluster; controls occupy 0. Flags, keycaps, and valid emoji ZWJ sequences count once. The result is deterministic on every host, but applications targeting a CJK terminal cannot request Ambiguous=2.",
+          "code": "cols :: text.display_width(\"·界👨‍👩‍👧‍👦\")\nprint(cols) // 5 everywhere: 1 + 2 + 2"
+        },
+        {
+          "key": "B",
+          "name": "Portable default plus explicit policy",
+          "detail": "The one-argument call uses the same portable policy as A. An optional TextWidth policy changes only disputed terminal choices: Ambiguous narrow/wide and controls zero/reject. Unicode segmentation and property lookup remain the same canonical algorithm. Experts can match a known terminal contract; defaults never inspect locale or environment.",
+          "code": "plain :: text.display_width(label)\n\ncjk :: TextWidth.{ ambiguous: .Wide, controls: .Reject }\ncols :: text.display_width(label, policy: cjk)\n// Invalid control input returns IOError-style TextError instead of silently aligning it."
+        },
+        {
+          "key": "C",
+          "name": "Follow host locale and terminal",
+          "detail": "The default infers Ambiguous width and emoji behavior from locale, environment variables, and terminal hints. Output may visually match more local terminals without configuration, but the same Jet program returns different widths across CI, redirected output, SSH, and user machines.",
+          "code": "cols :: text.display_width(\"·\")\n// 1 under en_US, 2 under ja_JP; redirected and CI results may differ."
+        },
+        {
+          "key": "D",
+          "name": "Unicode East Asian Width only",
+          "detail": "Sum Unicode East_Asian_Width properties per scalar and ignore grapheme/emoji presentation rules. Small specification, but family emoji, flags, keycaps, combining sequences, and variation selectors can be overcounted or split, so it does not meet the terminal-alignment purpose.",
+          "code": "print(text.display_width(\"👨‍👩‍👧‍👦\"))\n// Scalar sum can exceed the 2 columns used by terminals."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Unicode UAX #11",
+          "note": "Defines East Asian Width properties but leaves terminal-cell policy, especially Ambiguous characters, to higher-level protocols.",
+          "code": "W/F -> wide; A -> context-dependent"
+        },
+        {
+          "lang": "Python wcwidth",
+          "note": "Uses versioned Unicode tables and terminal-oriented width rules, but applications still need policy around ambiguous width and emoji sequences.",
+          "code": "wcswidth(text)"
+        },
+        {
+          "lang": "Rust unicode-width",
+          "note": "Exposes normal and CJK width modes, demonstrating the practical need for a deterministic default plus explicit ambiguous-width control.",
+          "code": "UnicodeWidthStr::width(s); UnicodeWidthStr::width_cjk(s)"
+        }
+      ],
+      "rec": "B",
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-10T23:35:05.629Z"
     }
   ],
   "questions": [
@@ -24602,6 +24660,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-10T23:35:05.630Z",
+      "by": "codex-main",
+      "action": "decision.add",
+      "ref": "D-TEXTWIDTH1",
+      "note": "Terminal display-width policy"
+    },
     {
       "at": "2026-07-10T23:27:28.872Z",
       "by": "terra-288-builder",
@@ -28093,13 +28158,6 @@
       "by": "codex-orchestrator",
       "action": "card.update",
       "ref": "c02wa1dn",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.048Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c01lj8gw",
       "note": "workOrder"
     }
   ],
