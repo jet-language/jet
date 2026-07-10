@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 466,
-    "rev": 2707,
+    "rev": 2725,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -18,7 +18,9 @@
         "epoch:e4",
         "epoch:e5",
         "radar-sq",
-        "radar-cards"
+        "radar-cards",
+        "radar:e9",
+        "radar:e8"
       ]
     },
     "digestCursor": "2026-07-10T14:23:24.902Z"
@@ -749,7 +751,7 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "verify",
+      "phase": "done",
       "priority": "P3",
       "plan": "D-MATURITY1=B: document maturity tags as a non-semantic convention now. Steps: add docs/reference guidance for #Experimental/#Tested/#Hardened comments/metadata if existing marker syntax permits; do not add sema propagation; file follow-up only if semantic propagation is later ratified.",
       "blockedBy": [],
@@ -798,29 +800,29 @@
         {
           "n": 1,
           "text": "@Experimental/@Tested/@Hardened parse onto Func.maturity; fmt preserves; zero sema",
-          "status": "met",
+          "status": "verified",
           "metBy": "claude-main",
-          "verifiedBy": null,
-          "evidence": "MaturityTag on Func; bump_maturity_marker; Formatter/Items emits @tag; fmt_preserves_maturity_tags + next_line pass; no sema reads of maturity",
-          "at": "2026-07-10T14:44:05.379Z"
+          "verifiedBy": "jet-verify",
+          "evidence": "cargo test --test fmt fmt_preserves_maturity: 2/2 ok (fmt_preserves_maturity_tags + next_line). grep .maturity + MaturityTag in jet-sema/src/: zero hits. Confirmed.",
+          "at": "2026-07-10T14:48:34.226Z"
         },
         {
           "n": 2,
           "text": "E0062 UI snapshots for retired #Experimental/#Tested/#Hardened",
-          "status": "met",
+          "status": "verified",
           "metBy": "claude-main",
-          "verifiedBy": null,
-          "evidence": "diagnostic_snapshots ui_snapshots green for marker_experimental_hash/tested/hardened (E0062 full-span)",
-          "at": "2026-07-10T14:44:05.452Z"
+          "verifiedBy": "jet-verify",
+          "evidence": "cargo test --test diagnostic_snapshots: 2/2 ok. tests/ui/marker_experimental_hash.stderr + marker_hardened_hash.stderr confirmed E0062 full-span content.",
+          "at": "2026-07-10T14:48:41.456Z"
         },
         {
           "n": 3,
           "text": "I5 example examples/features/syntax/maturity_tags.jet + expected out; docs/reference/maturity-tags.md",
-          "status": "met",
+          "status": "verified",
           "metBy": "claude-main",
-          "verifiedBy": null,
-          "evidence": "examples/features/syntax/maturity_tags.jet runs exp/tested/hard; docs/reference/maturity-tags.md + core-library link; syntax-decisions D-MATURITY1 wording updated",
-          "at": "2026-07-10T14:44:05.520Z"
+          "verifiedBy": "jet-verify",
+          "evidence": "./target/debug/jet run examples/features/syntax/maturity_tags.jet → exp/tested/hard. Golden out matches examples/features/expected/syntax/maturity_tags.out. interpreter_matches_expected_golden: ok. docs/reference/maturity-tags.md exists.",
+          "at": "2026-07-10T14:48:49.472Z"
         }
       ],
       "needsAcceptance": false,
@@ -10851,13 +10853,28 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-universal-product-parity",
-      "phase": "ready",
+      "phase": "verify",
       "priority": "P1",
       "plan": "docs/plans/epoch-3/universal-language-core.md#ul7--formatter-test-docs-debug-ide-and-profiling-product",
       "blockedBy": [],
       "workOrder": 475,
-      "assignee": null,
+      "assignee": "claude-main",
       "log": [
+        {
+          "at": "2026-07-10",
+          "by": "claude-main",
+          "text": "Criteria met by claude-main after independent parent re-run of fmt_project+cli. Hand to jet-verify."
+        },
+        {
+          "at": "2026-07-10",
+          "by": "jet-impl",
+          "text": "D-FMTPROJECT1=D implemented: run_fmt rewritten in Source/CmdCompile.rs (walk_jet_files, discover_project_files, collect_explicit_files, collect_changed_files, run_fmt_stdin, preflight zero-write, --check/--diff/--changed/--json/--stdin-path). Source/main.rs: fmt early-dispatch block with full flag parsing. Source/CLI.rs: --diff, --changed, --stdin-path flags registered. tests/fmt_project.rs: 18 tests all green. CLI snapshots re-blessed (54 CLI tests green)."
+        },
+        {
+          "at": "2026-07-10",
+          "by": "claude-main",
+          "text": "Implementing D-FMTPROJECT1=D: project fmt discovery, --check/--diff/--changed/--json exit contract, stdin --stdin-path, preflight zero-write."
+        },
         {
           "at": "2026-07-10",
           "text": "All decisions ratified; advanced out of deciding."
@@ -10870,9 +10887,38 @@
       ],
       "created": "2026-07-09T23:22:09.197Z",
       "updated": "2026-07-10",
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "D-FMTPROJECT1=D: discovery, --check/--diff/--changed/--json, stdin --stdin-path, exit 0/1/2",
+          "status": "met",
+          "metBy": "claude-main",
+          "verifiedBy": null,
+          "evidence": "run_fmt in CmdCompile.rs; parent re-ran fmt_project 18/18 + cli 54/54; smoke check_exit=0 + stdin format",
+          "at": "2026-07-10T15:02:51.833Z"
+        },
+        {
+          "n": 2,
+          "text": "Preflight zero-write on parse failure; ignore vendor/target/build/.git",
+          "status": "met",
+          "metBy": "claude-main",
+          "verifiedBy": null,
+          "evidence": "fmt_project covers preflight + ignore; code skips vendor/target/build/.git/node_modules/.jet",
+          "at": "2026-07-10T15:02:51.907Z"
+        },
+        {
+          "n": 3,
+          "text": "tests/fmt_project.rs + CLI completions/help green",
+          "status": "met",
+          "metBy": "claude-main",
+          "verifiedBy": null,
+          "evidence": "cargo test --test fmt_project 18 ok; cargo test --test cli 54 ok (parent re-run)",
+          "at": "2026-07-10T15:02:51.980Z"
+        }
+      ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [],
+      "claimedAt": "2026-07-10T14:50:21.620Z"
     },
     {
       "id": "c0md55xu",
@@ -11751,61 +11797,6 @@
     }
   ],
   "decisions": [
-    {
-      "id": "D-MATURITY1",
-      "cardId": "c17iww33",
-      "title": "Add maturity markers (`#Experimental` / `#Tested` / `#Hardened`) that propagate like effects?",
-      "gist": "A maturity lattice lets library authors tag APIs with their stability level, and the compiler warns (or errors) when stable code calls experimental code without an explicit acknowledgment. New; no decision exists. The machinery would ride existing marker and effect-ceiling infrastructure.",
-      "explainer": "Propagation rule: calling an `#Experimental` item taints the caller unless the caller also carries `#Experimental` or explicitly acknowledges with a suppressor (e.g. `#[allow(Experimental)]`). The lattice is `#Experimental < #Tested < #Hardened`; unmarked items default to some level (TBD — a separate question). Blast radius: sema (propagation pass), effect ceilings, doc output. Prerequisite: effect ceiling machinery needs to exist or be extended. This interacts with the effect-ceilings card. If the marker propagation model isn't yet shipped, a doc-only convention (Option B) costs nothing and covers 80% of the use-case until the machinery is ready. I1: no safety impact — this is purely about API stability signaling. I8: maturity signaling is a new job; no existing mechanism covers it.",
-      "story": "I publish a library. `parse_v2` is solid; `parse_experimental` is still in flux. I tag it `#Experimental` and anyone who calls it without opting in gets a warning at their call site — not buried in a changelog.",
-      "inWild": "// library:\n#Experimental\npub fn parse_v2_streaming(src: Stream) -> Doc ? ParseError { … }\n\n// caller (no tag → warning):\nfn ingest(s: Stream) -> Doc ? ParseError {\n    parse_v2_streaming(s)  // warning W0420: calling #Experimental API\n                           //   add #Experimental to this fn or #[allow(Experimental)]\n}",
-      "detail": "",
-      "options": [
-        {
-          "key": "A",
-          "name": "Full propagating marker family",
-          "detail": "Add `#Experimental`, `#Tested`, `#Hardened` as propagating markers riding existing effect machinery. Compile-time enforcement; IDE surfaces stability at call sites. Sequences after effect-ceiling machinery.",
-          "code": "#Experimental\npub fn new_parser(s: str) -> Ast ? ParseError { … }\n\n// caller without tag:\nfn process(s: str) {\n    new_parser(s)  // error E0420: #Experimental call requires opt-in\n                   //   mark this fn #Experimental or use #[allow(Experimental)]\n}"
-        },
-        {
-          "key": "B",
-          "name": "Doc-only convention now, propagation later",
-          "detail": "Define `#Experimental`, `#Tested`, `#Hardened` as documentation-visible markers today (no compiler propagation). When effect-ceiling machinery ships, wire propagation. Low cost; covers the doc/tooling case immediately.",
-          "code": "#Experimental\npub fn new_parser(s: str) -> Ast ? ParseError { … }\n// shows as 'Experimental' in docs and IDE hover;\n// no compile-time warning yet"
-        },
-        {
-          "key": "C",
-          "name": "Defer",
-          "detail": "Don't decide until effect-ceiling machinery is finalized. Avoids designing the propagation model twice.",
-          "code": "// no change; stability is communicated via doc comments only"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Best current",
-          "note": "Kotlin `@RequiresOptIn` makes experimental APIs visible and can require caller opt-in.",
-          "code": "@RequiresOptIn annotation class ExperimentalApi"
-        },
-        {
-          "lang": "Rust",
-          "note": "`#[unstable]` is a compiler-enforced gate in the standard library (nightly only); third-party crates use `#[deprecated]` or doc comments. No lattice propagation.",
-          "code": "#[unstable(feature = \"new_parser\", issue = \"12345\")]\npub fn new_parser(s: &str) -> Ast {}"
-        },
-        {
-          "lang": "Kotlin",
-          "note": "`@RequiresOptIn` / `@OptIn` is a propagating annotation lattice — callers must opt in or the compiler warns. Very close to what Option A proposes.",
-          "code": "@RequiresOptIn(message = \"Experimental API\")\nannotation class ExperimentalParser\n\n@ExperimentalParser\nfun newParser(s: String): Ast = …"
-        }
-      ],
-      "rec": "B",
-      "status": "ratified",
-      "group": "safety",
-      "bestCurrent": "Kotlin: Kotlin `@RequiresOptIn` makes experimental APIs visible and can require caller opt-in.",
-      "recommendation": "Start doc-visible, propagate later. Jet should not wire a new propagation lattice until machinery is ready, but docs/IDE maturity markers can beat comment-only stability now.",
-      "outcome": "B",
-      "ratifiedAt": "2026-06-28",
-      "draft": false
-    },
     {
       "id": "D-JETDOC1",
       "cardId": "c1eixac0",
@@ -21868,6 +21859,118 @@
   ],
   "events": [
     {
+      "at": "2026-07-10T15:02:52.055Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0k81v26",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-10T15:02:51.980Z",
+      "by": "claude-main",
+      "action": "card.criteria-meet",
+      "ref": "c0k81v26",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-10T15:02:51.907Z",
+      "by": "claude-main",
+      "action": "card.criteria-meet",
+      "ref": "c0k81v26",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-10T15:02:51.833Z",
+      "by": "claude-main",
+      "action": "card.criteria-meet",
+      "ref": "c0k81v26",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-10T15:02:51.758Z",
+      "by": "claude-main",
+      "action": "card.criteria-add",
+      "ref": "c0k81v26",
+      "note": "#3 tests/fmt_project.rs + CLI completions/help green"
+    },
+    {
+      "at": "2026-07-10T15:02:51.686Z",
+      "by": "claude-main",
+      "action": "card.criteria-add",
+      "ref": "c0k81v26",
+      "note": "#2 Preflight zero-write on parse failure; ignore vendor/target/"
+    },
+    {
+      "at": "2026-07-10T15:02:51.618Z",
+      "by": "claude-main",
+      "action": "card.criteria-add",
+      "ref": "c0k81v26",
+      "note": "#1 D-FMTPROJECT1=D: discovery, --check/--diff/--changed/--json,"
+    },
+    {
+      "at": "2026-07-10T15:01:51.676Z",
+      "by": "jet-impl",
+      "action": "card.update",
+      "ref": "c0k81v26",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-10T14:51:07.687Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0k81v26",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-10T14:50:21.620Z",
+      "by": "claude-main",
+      "action": "card.claim",
+      "ref": "c0k81v26",
+      "note": ""
+    },
+    {
+      "at": "2026-07-10T14:50:21.539Z",
+      "by": "claude-main",
+      "action": "card.release",
+      "ref": "c73xs2f",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-10T14:49:44.600Z",
+      "by": "claude-main",
+      "action": "card.claim",
+      "ref": "c73xs2f",
+      "note": ""
+    },
+    {
+      "at": "2026-07-10T14:49:16.502Z",
+      "by": "jet-verify",
+      "action": "card.update",
+      "ref": "c17iww33",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-10T14:48:49.473Z",
+      "by": "jet-verify",
+      "action": "card.criteria-verify",
+      "ref": "c17iww33",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-10T14:48:41.456Z",
+      "by": "jet-verify",
+      "action": "card.criteria-verify",
+      "ref": "c17iww33",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-10T14:48:34.226Z",
+      "by": "jet-verify",
+      "action": "card.criteria-verify",
+      "ref": "c17iww33",
+      "note": "#1"
+    },
+    {
       "at": "2026-07-10T14:44:05.591Z",
       "by": "claude-main",
       "action": "card.update",
@@ -25253,118 +25356,6 @@
       "by": "codex-main",
       "action": "card.update",
       "ref": "c0ux5rmy",
-      "note": "phase,workOrder,blockedBy"
-    },
-    {
-      "at": "2026-07-09T20:43:25.954Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c0pn8z35",
-      "note": "phase,workOrder,blockedBy"
-    },
-    {
-      "at": "2026-07-09T20:43:25.800Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c0mwowfx",
-      "note": "phase,workOrder,blockedBy"
-    },
-    {
-      "at": "2026-07-09T20:43:25.634Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c0esko6c",
-      "note": "phase,workOrder,blockedBy"
-    },
-    {
-      "at": "2026-07-09T20:43:25.477Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c00wjjmo",
-      "note": "phase,workOrder,blockedBy"
-    },
-    {
-      "at": "2026-07-09T20:43:25.313Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c0yl347q",
-      "note": "phase,workOrder,blockedBy"
-    },
-    {
-      "at": "2026-07-09T20:43:25.147Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c0xe5g33",
-      "note": "phase,workOrder,blockedBy"
-    },
-    {
-      "at": "2026-07-09T20:43:24.987Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c06re5ow",
-      "note": "phase,workOrder,blockedBy"
-    },
-    {
-      "at": "2026-07-09T20:43:24.816Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c0v0y46r",
-      "note": "phase,workOrder,blockedBy"
-    },
-    {
-      "at": "2026-07-09T20:43:24.651Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c09itznu",
-      "note": "phase,workOrder,blockedBy"
-    },
-    {
-      "at": "2026-07-09T20:43:24.478Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c0kalcyg",
-      "note": "phase,workOrder,blockedBy"
-    },
-    {
-      "at": "2026-07-09T20:43:24.312Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c0w7297z",
-      "note": "phase,workOrder,blockedBy"
-    },
-    {
-      "at": "2026-07-09T20:43:24.152Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c01fj815",
-      "note": "phase,workOrder,blockedBy"
-    },
-    {
-      "at": "2026-07-09T20:43:23.984Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c0c7d9qt",
-      "note": "phase,workOrder,blockedBy"
-    },
-    {
-      "at": "2026-07-09T20:43:23.817Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c0uxofls",
-      "note": "phase,workOrder,blockedBy"
-    },
-    {
-      "at": "2026-07-09T20:43:23.652Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c0zqnb18",
-      "note": "phase,workOrder,blockedBy"
-    },
-    {
-      "at": "2026-07-09T20:43:23.510Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c0hgr4pk",
       "note": "phase,workOrder,blockedBy"
     }
   ],

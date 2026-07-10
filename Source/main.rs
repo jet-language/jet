@@ -31,8 +31,8 @@ mod EngineDispatch;
 
 use CmdCodemod::run_codemod;
 use CmdCompile::{
-    run_build_query, run_compile_cmd, run_debug_native, run_dev_entry, run_fix, run_fmt, run_new, run_test,
-    run_test_cov,
+    run_build_query, run_compile_cmd, run_debug_native, run_dev_entry, run_fix, run_fmt, run_new,
+    run_test, run_test_cov,
 };
 use CmdDevTools::{
     run_bench, run_bind, run_completions, run_dev, run_devtools, run_doctor, run_emit_rust,
@@ -355,7 +355,12 @@ usage:
   {bin} repl                         start an interactive session (E2-M18)
   {bin} repl  --project <dir>        same, with access to a project's imports
   {bin} eval  <file.{ext}> --pure   evaluate a pure program to stable JSON (S60)
-  {bin} fmt   <file.{ext}>          rewrite file to canonical style (S44)
+  {bin} fmt                         rewrite all .jet files in the project to canonical style
+  {bin} fmt   <file|dir>...         rewrite specific files or directories (recurse)
+  {bin} fmt   -                     read from stdin, write formatted source to stdout
+  {bin} fmt   --check               exit 1 if any file would change; list paths (CI gate)
+  {bin} fmt   --check --diff        same, also print unified diffs
+  {bin} fmt   --changed             format only VCS-changed .jet files (requires git)
   {bin} fix   <file.{ext}>          apply all auto-fixable diagnostics in place
   {bin} fix   <file.{ext}> --dry-run   show the fixes as a diff, write nothing
   {bin} doctor                      diagnose the toolchain and offer fixes
@@ -955,6 +960,30 @@ fn main() {
             }
             return;
         }
+        "fmt" => {
+            // D-FMTPROJECT1=D: project-level formatter. No positional target
+            // required — defaults to discovering the workspace/project root.
+            let path_args: Vec<String> =
+                args[1..].iter().map(|s| s.as_str().to_string()).collect();
+            let stdin_mode = path_args.iter().any(|p| p == "-");
+            let stdin_path: Option<String> = jet_argv
+                .iter()
+                .find_map(|a| a.strip_prefix("--stdin-path=").map(str::to_string));
+            let show_diff = jet_argv.iter().any(|a| a == "--diff");
+            let changed_only = jet_argv.iter().any(|a| a == "--changed");
+            let explicit_paths: Vec<String> =
+                path_args.into_iter().filter(|p| p != "-").collect();
+            run_fmt(
+                &explicit_paths,
+                stdin_mode,
+                stdin_path.as_deref(),
+                fmt_check,
+                show_diff,
+                changed_only,
+                mode,
+            );
+            return;
+        }
         "fetch" => {
             run_fetch(locked);
             return;
@@ -1495,7 +1524,6 @@ fn main() {
     };
 
     match cmd {
-        "fmt" => run_fmt(target, fmt_check),
         "fix" => run_fix(target, jet_argv.iter().any(|a| a == "--dry-run")),
         "new" => run_new(target, annotated),
         "test" => {

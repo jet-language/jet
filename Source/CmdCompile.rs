@@ -957,32 +957,361 @@ fn report_coverage(file: &str, cov_out: &Path) {
     println!("  {}/{} functions covered ({:.0}%)", covered, total, pct);
 }
 
-pub(crate) fn run_fmt(file: &str, check_only: bool) {
-    let src = match fs::read_to_string(file) {
-        Ok(s) => s,
-        Err(_) => {
-            eprintln!("error: can't find the file `{}`", file);
-            exit(ExitCodes::USER_ERROR);
+// ─── D-FMTPROJECT1=D: project-level formatter ───────────────────────────────
+
+/// Directories skipped during recursive discovery. Explicit file paths and
+/// stdin are NEVER subject to these ignore rules.
+const IGNORED_DIRS: &[&str] = &[
+    "vendor", "target", "build", ".git", "node_modules", ".jet",
+];
+
+/// Recursively collect `.jet` files under `dir`, skipping IGNORED_DIRS.
+/// Entries are sorted deterministically.
+fn walk_jet_files(dir: &Path, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = fs::read_dir(dir) else { return };
+    let mut entries: Vec<_> = entries.flatten().collect();
+    entries.sort_by_key(|e| e.path());
+    for entry in entries {
+        let path = entry.path();
+        if path.is_dir() {
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if !IGNORED_DIRS.contains(&name) {
+                walk_jet_files(&path, out);
+            }
+        } else if path.extension().and_then(|e| e.to_str()) == Some(jet::Syntax::FILE_EXT) {
+            out.push(path);
         }
-    };
-    let formatted = match jet::format_source(&src) {
-        Ok(s) => s,
+    }
+}
+
+/// Discover the project/workspace root via `pkg.jet` and collect all `.jet`
+/// files under it. Falls back to cwd when no manifest is found above.
+fn discover_project_files() -> Vec<PathBuf> {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let root = jet::Loader::find_manifest_root(&cwd).unwrap_or(cwd);
+    let mut files = Vec::new();
+    walk_jet_files(&root, &mut files);
+    files
+}
+
+/// Collect `.jet` files from an explicit list of paths. Directories are walked
+/// recursively (IGNORED_DIRS still apply to directory traversal); individual
+/// file paths are included as-is (no ignore — explicit path = intentional).
+/// Non-existent paths are pushed so the read phase produces a proper I/O
+/// error that gets collected by the preflight loop.
+fn collect_explicit_files(paths: &[String]) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    for raw in paths {
+        let p = PathBuf::from(raw);
+        if p.is_dir() {
+            walk_jet_files(&p, &mut files);
+        } else {
+            files.push(p);
+        }
+    }
+    files.sort();
+    files.dedup();
+    files
+}
+
+/// Collect VCS-changed `.jet` files using git. Exits with USAGE (exit 2) when
+/// not inside a git repository, with a diagnostic naming the fix.
+fn collect_changed_files() -> Vec<PathBuf> {
+    let is_git = Command::new("git")
+        .args(["rev-parse", "--is-inside-work-tree"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if !is_git {
+        eprintln!("error: `--changed` requires a git repository");
+        eprintln!(" why: `jet fmt --changed` uses git to find modified .jet files");
+        eprintln!(" fix: run from inside a git repository, or format specific files with `jet fmt <path>`");
+        exit(ExitCodes::USAGE);
+    }
+
+    let ext = jet::Syntax::FILE_EXT;
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let mut seen: std::collections::BTreeSet<PathBuf> = std::collections::BTreeSet::new();
+
+    // Modified tracked files vs HEAD (covers staged + unstaged changes to tracked files).
+    // Also grab staged-only diffs (new files added to index but not yet committed).
+    for git_args in [
+        &["diff", "--name-only", "HEAD"][..],
+        &["diff", "--name-only", "--cached"][..],
+    ] {
+        if let Ok(out) = Command::new("git").args(git_args).output() {
+            if out.status.success() {
+                for line in String::from_utf8_lossy(&out.stdout).lines() {
+                    if line.ends_with(&format!(".{}", ext)) {
+                        let p = cwd.join(line);
+                        if p.is_file() {
+                            seen.insert(p);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    seen.into_iter().collect()
+}
+
+/// JSON-escape a string (backslash, double-quote, newlines).
+/// `json_escape` at line 87 covers the same set — this reuses that function.
+
+/// Emit a JSON "ok" result for `--json --check` or successful format with no changes.
+fn fmt_json_ok() -> String {
+    "{\"schema_version\":1,\"command\":\"fmt\",\"status\":\"ok\"}".to_string()
+}
+
+/// Emit a JSON "dirty" result (--check found changes, no --diff).
+fn fmt_json_dirty_paths(paths: &[&str]) -> String {
+    let list: String = paths
+        .iter()
+        .map(|p| format!("\"{}\"", json_escape(p)))
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{{\"schema_version\":1,\"command\":\"fmt\",\"status\":\"dirty\",\"files\":[{}]}}",
+        list
+    )
+}
+
+/// Emit a JSON "dirty" result with unified diffs (--check --diff).
+fn fmt_json_dirty_diffs(entries: &[(&str, &str)]) -> String {
+    let list: String = entries
+        .iter()
+        .map(|(p, d)| {
+            format!(
+                "{{\"path\":\"{}\",\"diff\":\"{}\"}}",
+                json_escape(p),
+                json_escape(d)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{{\"schema_version\":1,\"command\":\"fmt\",\"status\":\"dirty\",\"files\":[{}]}}",
+        list
+    )
+}
+
+/// `jet fmt - [--stdin-path=<label>]`: read from stdin, format, write to stdout.
+/// Ignore rules do NOT apply. Exit 2 on parse error.
+fn run_fmt_stdin(stdin_path: Option<&str>, mode: OutputMode) {
+    use std::io::Read;
+    let mut src = String::new();
+    if std::io::stdin().read_to_string(&mut src).is_err() {
+        eprintln!("error: failed to read from stdin");
+        exit(ExitCodes::USAGE);
+    }
+    let label = stdin_path.unwrap_or("<stdin>");
+    match jet::format_source(&src) {
+        Ok(formatted) => {
+            print!("{}", formatted);
+        }
         Err(diags) => {
-            eprint!("{}", jet::render_diagnostics(file, &src, &diags));
-            exit(ExitCodes::USER_ERROR);
+            if mode.json {
+                eprint!("{}", jet::render_all_json(label, &src, &diags));
+            } else {
+                eprint!("{}", jet::render_diagnostics(label, &src, &diags));
+            }
+            exit(ExitCodes::USAGE);
         }
-    };
-    if formatted == src {
+    }
+}
+
+/// D-FMTPROJECT1=D: the full project formatter.
+///
+/// `explicit_paths` — zero or more file/directory paths given on the CLI.
+/// `stdin_mode`     — true when `-` was among the path arguments.
+/// `stdin_path`     — optional `--stdin-path=<label>` for diagnostics.
+/// `check_only`     — `--check`: exit 1 if any file would change, list paths.
+/// `show_diff`      — `--diff`: with `--check`, also print unified diffs.
+/// `changed_only`   — `--changed`: limit to VCS-changed `.jet` files (git).
+/// `mode`           — output mode (`--json`, color).
+pub(crate) fn run_fmt(
+    explicit_paths: &[String],
+    stdin_mode: bool,
+    stdin_path: Option<&str>,
+    check_only: bool,
+    show_diff: bool,
+    changed_only: bool,
+    mode: OutputMode,
+) {
+    if stdin_mode {
+        run_fmt_stdin(stdin_path, mode);
         return;
     }
-    if check_only {
-        print!("{}", jet::Formatter::unified_diff(file, &src, &formatted));
-        exit(ExitCodes::USER_ERROR);
+
+    // Collect the set of files to operate on.
+    let files: Vec<PathBuf> = if changed_only {
+        collect_changed_files()
+    } else if explicit_paths.is_empty() {
+        discover_project_files()
+    } else {
+        collect_explicit_files(explicit_paths)
+    };
+
+    if files.is_empty() {
+        if mode.json {
+            println!("{}", fmt_json_ok());
+        }
+        return;
     }
-    fs::write(file, &formatted).unwrap_or_else(|e| {
-        eprintln!("error: couldn't write {}: {}", file, e);
-        exit(ExitCodes::USER_ERROR);
-    });
+
+    // Preflight: format ALL files before writing ANY. Collect results so that
+    // a single parse or I/O failure aborts the whole batch with no writes.
+    struct FileResult {
+        path: PathBuf,
+        original: String,
+        formatted: String,
+        changed: bool,
+        io_error: Option<String>,
+        parse_diags: Vec<jet::Diagnostics::Diagnostic>,
+    }
+
+    let mut results: Vec<FileResult> = Vec::with_capacity(files.len());
+    for path in &files {
+        let src = match fs::read_to_string(path) {
+            Ok(s) => s,
+            Err(e) => {
+                results.push(FileResult {
+                    path: path.clone(),
+                    original: String::new(),
+                    formatted: String::new(),
+                    changed: false,
+                    io_error: Some(format!("can't read `{}`: {}", path.display(), e)),
+                    parse_diags: Vec::new(),
+                });
+                continue;
+            }
+        };
+        match jet::format_source(&src) {
+            Ok(formatted) => {
+                let changed = formatted != src;
+                results.push(FileResult {
+                    path: path.clone(),
+                    original: src,
+                    formatted,
+                    changed,
+                    io_error: None,
+                    parse_diags: Vec::new(),
+                });
+            }
+            Err(diags) => {
+                results.push(FileResult {
+                    path: path.clone(),
+                    original: src,
+                    formatted: String::new(),
+                    changed: false,
+                    io_error: None,
+                    parse_diags: diags,
+                });
+            }
+        }
+    }
+
+    // If ANY file failed, report every failure and exit 2 — nothing is written.
+    let has_errors = results
+        .iter()
+        .any(|r| r.io_error.is_some() || !r.parse_diags.is_empty());
+    if has_errors {
+        for r in &results {
+            if let Some(ref io_err) = r.io_error {
+                if mode.json {
+                    let path_s = r.path.to_str().unwrap_or("?");
+                    eprintln!(
+                        "{{\"schema_version\":1,\"command\":\"fmt\",\"status\":\"error\",\"errors\":[{{\"path\":\"{}\",\"message\":\"{}\"}}]}}",
+                        json_escape(path_s),
+                        json_escape(io_err)
+                    );
+                } else {
+                    eprintln!("error: {}", io_err);
+                }
+            }
+            if !r.parse_diags.is_empty() {
+                let path_s = r.path.to_str().unwrap_or("?");
+                if mode.json {
+                    eprint!(
+                        "{}",
+                        jet::render_all_json(path_s, &r.original, &r.parse_diags)
+                    );
+                } else {
+                    eprint!(
+                        "{}",
+                        jet::render_diagnostics(path_s, &r.original, &r.parse_diags)
+                    );
+                }
+            }
+        }
+        exit(ExitCodes::USAGE);
+    }
+
+    // Root for root-relative path display in --check output.
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let display_root = jet::Loader::find_manifest_root(&cwd).unwrap_or_else(|| cwd.clone());
+    let make_rel = |p: &Path| -> String {
+        p.strip_prefix(&display_root)
+            .map(|r| r.display().to_string())
+            .unwrap_or_else(|_| p.display().to_string())
+    };
+
+    if check_only {
+        // --check: report which files would change (sorted root-relative), exit 1 if any.
+        let mut dirty: Vec<&FileResult> = results.iter().filter(|r| r.changed).collect();
+        dirty.sort_by(|a, b| make_rel(&a.path).cmp(&make_rel(&b.path)));
+
+        if dirty.is_empty() {
+            if mode.json {
+                println!("{}", fmt_json_ok());
+            }
+            return; // exit 0
+        }
+
+        if mode.json {
+            if show_diff {
+                let entries: Vec<(String, String)> = dirty
+                    .iter()
+                    .map(|r| {
+                        let rel = make_rel(&r.path);
+                        let diff =
+                            jet::Formatter::unified_diff(&rel, &r.original, &r.formatted);
+                        (rel, diff)
+                    })
+                    .collect();
+                let refs: Vec<(&str, &str)> =
+                    entries.iter().map(|(p, d)| (p.as_str(), d.as_str())).collect();
+                println!("{}", fmt_json_dirty_diffs(&refs));
+            } else {
+                let paths: Vec<&str> =
+                    dirty.iter().map(|r| r.path.to_str().unwrap_or("?")).collect();
+                println!("{}", fmt_json_dirty_paths(&paths));
+            }
+        } else {
+            for r in &dirty {
+                println!("{}", make_rel(&r.path));
+                if show_diff {
+                    let rel = make_rel(&r.path);
+                    print!(
+                        "{}",
+                        jet::Formatter::unified_diff(&rel, &r.original, &r.formatted)
+                    );
+                }
+            }
+        }
+        exit(ExitCodes::USER_ERROR); // exit 1 — --check found changes
+    }
+
+    // Format mode: write all changed files (preflight passed, so all are valid).
+    for r in results.iter().filter(|r| r.changed) {
+        if let Err(e) = fs::write(&r.path, &r.formatted) {
+            eprintln!("error: couldn't write `{}`: {}", r.path.display(), e);
+            exit(ExitCodes::USAGE);
+        }
+    }
+    // exit 0 implicitly
 }
 
 pub(crate) fn stem(file: &str) -> String {

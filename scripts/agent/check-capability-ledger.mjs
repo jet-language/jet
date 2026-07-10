@@ -12,8 +12,29 @@ const REGISTRY_PATH = join(ROOT, "docs/reference/capability-claims.md");
 const REPORT_PATH = join(ROOT, "docs/plans/epoch-3/capability-ledger-report.json");
 const FIXTURES_PATH = join(ROOT, "tests/fixtures/capability-claims/hostile-cases.json");
 const DEFAULT_TOWER_PATH = join(ROOT, ".tower/tower.json");
+const DEFAULT_HISTORY_PATH = join(ROOT, ".tower/history.json");
 const EXPECTED_CLASSES = ["reserved", "facade", "partial", "implemented", "proven"];
 const PUBLIC_DECLARATION_FILES = ["README.md", "docs/reference/core-library.md", "Source/CLI.rs"];
+
+/** Live board cards plus archived history (D-TWR-ARCHIVE1) for owner lookup. */
+function loadBoardCards(towerPath) {
+  const board = readJson(towerPath);
+  const historyPath = join(dirname(towerPath), "history.json");
+  const byId = new Map();
+  if (existsSync(historyPath)) {
+    for (const card of readJson(historyPath).cards ?? []) {
+      byId.set(card.id, card);
+    }
+  }
+  for (const card of board.cards ?? []) {
+    byId.set(card.id, card);
+  }
+  return { board, cards: [...byId.values()] };
+}
+
+function findOwnerCard(cards, owner) {
+  return cards.find((card) => card.id === owner?.cardId && card.num === owner?.num);
+}
 
 function readJson(path) {
   return JSON.parse(readFileSync(path, "utf8"));
@@ -201,6 +222,7 @@ function validateCommand(command, proven, claimId, laneId) {
 function validateManifest(manifest, board, options = {}) {
   const errors = [];
   const fail = (claimId, message) => errors.push(`${claimId}: ${message}`);
+  const cards = options.cards ?? board.cards ?? [];
   if (manifest.schemaVersion !== 2) errors.push(`manifest: unsupported schemaVersion ${manifest.schemaVersion}`);
   if (!sameSet(manifest.classes ?? [], EXPECTED_CLASSES)) errors.push("manifest: evidence classes drifted");
 
@@ -238,7 +260,7 @@ function validateManifest(manifest, board, options = {}) {
     }
     if (!EXPECTED_CLASSES.includes(claim.class)) fail(claim.id, `invalid class ${claim.class}`);
     if (!claim.reviewerRationale || claim.reviewerRationale.length < 40) fail(claim.id, "reviewer rationale is not decision-complete");
-    const ownerCard = board.cards.find((card) => card.id === claim.owner?.cardId && card.num === claim.owner?.num);
+    const ownerCard = findOwnerCard(cards, claim.owner);
     if (!ownerCard) {
       fail(claim.id, `owner card #${claim.owner?.num} not found`);
       continue;
@@ -286,7 +308,7 @@ function reportFor(manifest, board) {
       coreModules: coreModules().length,
     },
     claims: manifest.claims.map((claim) => {
-      const owner = board.cards.find((card) => card.id === claim.owner.cardId);
+      const owner = findOwnerCard(board.cards, claim.owner) ?? board.cards.find((card) => card.id === claim.owner.cardId);
       return {
         id: claim.id,
         class: claim.class,
@@ -309,9 +331,9 @@ function reportFor(manifest, board) {
 
 function refreshDigests(towerPath) {
   const manifest = readJson(MANIFEST_PATH);
-  const board = readJson(towerPath);
+  const { cards } = loadBoardCards(towerPath);
   for (const claim of manifest.claims) {
-    const owner = board.cards.find((card) => card.id === claim.owner.cardId && card.num === claim.owner.num);
+    const owner = findOwnerCard(cards, claim.owner);
     if (!owner) throw new Error(`${claim.id}: owner card missing while refreshing digests`);
     for (const lane of claim.acceptanceLanes) {
       for (const artifact of lane.artifacts) {
@@ -329,9 +351,10 @@ function refreshDigests(towerPath) {
 
 function validateCurrent(towerPath, writeReport = false) {
   const manifest = readJson(MANIFEST_PATH);
-  const board = readJson(towerPath);
-  validateManifest(manifest, board);
-  const report = reportFor(manifest, board);
+  const { board, cards } = loadBoardCards(towerPath);
+  const boardView = { ...board, cards };
+  validateManifest(manifest, boardView, { cards });
+  const report = reportFor(manifest, boardView);
   if (writeReport) {
     writeFileSync(REPORT_PATH, `${JSON.stringify(report, null, 2)}\n`);
   } else {

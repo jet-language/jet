@@ -16722,6 +16722,62 @@
       "ratifiedAt": "2026-06-28",
       "draft": false,
       "retiredAt": "2026-07-10T14:32:36.605Z"
+    },
+    {
+      "id": "D-MATURITY1",
+      "cardId": "c17iww33",
+      "title": "Add maturity markers (`#Experimental` / `#Tested` / `#Hardened`) that propagate like effects?",
+      "gist": "A maturity lattice lets library authors tag APIs with their stability level, and the compiler warns (or errors) when stable code calls experimental code without an explicit acknowledgment. New; no decision exists. The machinery would ride existing marker and effect-ceiling infrastructure.",
+      "explainer": "Propagation rule: calling an `#Experimental` item taints the caller unless the caller also carries `#Experimental` or explicitly acknowledges with a suppressor (e.g. `#[allow(Experimental)]`). The lattice is `#Experimental < #Tested < #Hardened`; unmarked items default to some level (TBD — a separate question). Blast radius: sema (propagation pass), effect ceilings, doc output. Prerequisite: effect ceiling machinery needs to exist or be extended. This interacts with the effect-ceilings card. If the marker propagation model isn't yet shipped, a doc-only convention (Option B) costs nothing and covers 80% of the use-case until the machinery is ready. I1: no safety impact — this is purely about API stability signaling. I8: maturity signaling is a new job; no existing mechanism covers it.",
+      "story": "I publish a library. `parse_v2` is solid; `parse_experimental` is still in flux. I tag it `#Experimental` and anyone who calls it without opting in gets a warning at their call site — not buried in a changelog.",
+      "inWild": "// library:\n#Experimental\npub fn parse_v2_streaming(src: Stream) -> Doc ? ParseError { … }\n\n// caller (no tag → warning):\nfn ingest(s: Stream) -> Doc ? ParseError {\n    parse_v2_streaming(s)  // warning W0420: calling #Experimental API\n                           //   add #Experimental to this fn or #[allow(Experimental)]\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Full propagating marker family",
+          "detail": "Add `#Experimental`, `#Tested`, `#Hardened` as propagating markers riding existing effect machinery. Compile-time enforcement; IDE surfaces stability at call sites. Sequences after effect-ceiling machinery.",
+          "code": "#Experimental\npub fn new_parser(s: str) -> Ast ? ParseError { … }\n\n// caller without tag:\nfn process(s: str) {\n    new_parser(s)  // error E0420: #Experimental call requires opt-in\n                   //   mark this fn #Experimental or use #[allow(Experimental)]\n}"
+        },
+        {
+          "key": "B",
+          "name": "Doc-only convention now, propagation later",
+          "detail": "Define `#Experimental`, `#Tested`, `#Hardened` as documentation-visible markers today (no compiler propagation). When effect-ceiling machinery ships, wire propagation. Low cost; covers the doc/tooling case immediately.",
+          "code": "#Experimental\npub fn new_parser(s: str) -> Ast ? ParseError { … }\n// shows as 'Experimental' in docs and IDE hover;\n// no compile-time warning yet"
+        },
+        {
+          "key": "C",
+          "name": "Defer",
+          "detail": "Don't decide until effect-ceiling machinery is finalized. Avoids designing the propagation model twice.",
+          "code": "// no change; stability is communicated via doc comments only"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Best current",
+          "note": "Kotlin `@RequiresOptIn` makes experimental APIs visible and can require caller opt-in.",
+          "code": "@RequiresOptIn annotation class ExperimentalApi"
+        },
+        {
+          "lang": "Rust",
+          "note": "`#[unstable]` is a compiler-enforced gate in the standard library (nightly only); third-party crates use `#[deprecated]` or doc comments. No lattice propagation.",
+          "code": "#[unstable(feature = \"new_parser\", issue = \"12345\")]\npub fn new_parser(s: &str) -> Ast {}"
+        },
+        {
+          "lang": "Kotlin",
+          "note": "`@RequiresOptIn` / `@OptIn` is a propagating annotation lattice — callers must opt in or the compiler warns. Very close to what Option A proposes.",
+          "code": "@RequiresOptIn(message = \"Experimental API\")\nannotation class ExperimentalParser\n\n@ExperimentalParser\nfun newParser(s: String): Ast = …"
+        }
+      ],
+      "rec": "B",
+      "status": "ratified",
+      "group": "safety",
+      "bestCurrent": "Kotlin: Kotlin `@RequiresOptIn` makes experimental APIs visible and can require caller opt-in.",
+      "recommendation": "Start doc-visible, propagate later. Jet should not wire a new propagation lattice until machinery is ready, but docs/IDE maturity markers can beat comment-only stability now.",
+      "outcome": "B",
+      "ratifiedAt": "2026-06-28",
+      "draft": false,
+      "retiredAt": "2026-07-10T14:49:16.516Z"
     }
   ],
   "cards": [
@@ -40774,6 +40830,118 @@
       "action": "card.update",
       "ref": "c041flkr",
       "note": "title,phase,workOrder,blockedBy"
+    },
+    {
+      "at": "2026-07-09T20:43:23.510Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0hgr4pk",
+      "note": "phase,workOrder,blockedBy"
+    },
+    {
+      "at": "2026-07-09T20:43:23.652Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0zqnb18",
+      "note": "phase,workOrder,blockedBy"
+    },
+    {
+      "at": "2026-07-09T20:43:23.817Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0uxofls",
+      "note": "phase,workOrder,blockedBy"
+    },
+    {
+      "at": "2026-07-09T20:43:23.984Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0c7d9qt",
+      "note": "phase,workOrder,blockedBy"
+    },
+    {
+      "at": "2026-07-09T20:43:24.152Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c01fj815",
+      "note": "phase,workOrder,blockedBy"
+    },
+    {
+      "at": "2026-07-09T20:43:24.312Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0w7297z",
+      "note": "phase,workOrder,blockedBy"
+    },
+    {
+      "at": "2026-07-09T20:43:24.478Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0kalcyg",
+      "note": "phase,workOrder,blockedBy"
+    },
+    {
+      "at": "2026-07-09T20:43:24.651Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c09itznu",
+      "note": "phase,workOrder,blockedBy"
+    },
+    {
+      "at": "2026-07-09T20:43:24.816Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0v0y46r",
+      "note": "phase,workOrder,blockedBy"
+    },
+    {
+      "at": "2026-07-09T20:43:24.987Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c06re5ow",
+      "note": "phase,workOrder,blockedBy"
+    },
+    {
+      "at": "2026-07-09T20:43:25.147Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0xe5g33",
+      "note": "phase,workOrder,blockedBy"
+    },
+    {
+      "at": "2026-07-09T20:43:25.313Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0yl347q",
+      "note": "phase,workOrder,blockedBy"
+    },
+    {
+      "at": "2026-07-09T20:43:25.477Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c00wjjmo",
+      "note": "phase,workOrder,blockedBy"
+    },
+    {
+      "at": "2026-07-09T20:43:25.634Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0esko6c",
+      "note": "phase,workOrder,blockedBy"
+    },
+    {
+      "at": "2026-07-09T20:43:25.800Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0mwowfx",
+      "note": "phase,workOrder,blockedBy"
+    },
+    {
+      "at": "2026-07-09T20:43:25.954Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0pn8z35",
+      "note": "phase,workOrder,blockedBy"
     }
   ]
 }
