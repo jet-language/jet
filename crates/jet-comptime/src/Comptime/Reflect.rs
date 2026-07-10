@@ -3,7 +3,7 @@
 //! `T.reflect()` in a derive body receives a `TypeInfo` value whose `.fields`,
 //! `.methods`, `.type_params`, and `.markers` expose the target type's shape.
 
-use crate::AST::{Field, Func, Marker, StructDef, TypeParam};
+use crate::AST::{EnumDef, Field, Func, Marker, StructDef, TypeParam, VariantPayload};
 
 use super::Value::CtValue;
 
@@ -11,6 +11,10 @@ use super::Value::CtValue;
 pub struct ProgramSemanticFacts {
     pub effects: std::collections::HashMap<String, Vec<String>>,
     pub reaches_panic: std::collections::BTreeSet<String>,
+}
+
+fn identity(module: &str, symbol: &str) -> String {
+    format!("{module}::{symbol}")
 }
 
 fn ct_str(s: impl Into<String>) -> CtValue {
@@ -163,21 +167,68 @@ pub fn build_struct_type_info(s: &StructDef) -> CtValue {
     )
 }
 
+fn qualify_info(mut info: CtValue, module: &str, symbol: &str, kind: &str) -> CtValue {
+    if let CtValue::Struct { fields, .. } = &mut info {
+        fields.push(("module".to_string(), ct_str(module)));
+        fields.push(("identity".to_string(), ct_str(identity(module, symbol))));
+        fields.push(("kind".to_string(), ct_str(kind)));
+    }
+    info
+}
+
+fn qualified_method_info(method: &Func, module: &str, owner: &str) -> CtValue {
+    let mut info = build_method_info(method);
+    if let CtValue::Struct { fields, .. } = &mut info {
+        fields.push(("module".to_string(), ct_str(module)));
+        fields.push(("identity".to_string(), ct_str(format!("{module}::{owner}.{}", method.name))));
+    }
+    info
+}
+
+fn build_enum_type_info(def: &EnumDef, module: &str) -> CtValue {
+    let variants = def.variants.iter().map(|variant| {
+        let ty = match &variant.payload {
+            VariantPayload::Unit => "Unit".to_string(),
+            VariantPayload::Single(ty, _) => ty.name(),
+            VariantPayload::Named(fields) => format!("{{{}}}", fields.iter().map(|field| format!("{}: {}", field.name, field.ty.name())).collect::<Vec<_>>().join(", ")),
+        };
+        ct_struct("FieldInfo", &[
+            ("name", ct_str(variant.name.clone())),
+            ("ty", ct_str(ty)),
+            ("markers", ct_list(marker_names(&variant.serde_markers))),
+            ("is_pub", ct_bool(def.is_pub)),
+        ])
+    }).collect();
+    let methods = def.methods.iter().map(|method| qualified_method_info(method, module, &def.name)).collect();
+    let params = def.type_params.iter().map(build_type_param_info).collect();
+    let mut markers = def.type_markers.iter().chain(def.serde_markers.iter()).map(|marker| ct_str(marker.name.clone())).collect::<Vec<_>>();
+    markers.extend(def.derives.iter().map(|(name, _)| ct_str(name.clone())));
+    qualify_info(ct_struct("TypeInfo", &[
+        ("name", ct_str(def.name.clone())),
+        ("span", ct_struct(crate::Syntax::TYPE_SOURCE_SPAN, &[("start", CtValue::Int(def.name_span.start as i64)), ("end", CtValue::Int(def.name_span.end as i64))])),
+        ("fields", ct_list(variants)),
+        ("methods", ct_list(methods)),
+        ("type_params", ct_list(params)),
+        ("markers", ct_list(markers)),
+        ("implements", ct_list(def.trait_impls.iter().map(|implementation| ct_str(implementation.trait_name.clone())).collect())),
+    ]), module, &def.name, "enum")
+}
+
 /// D-METADEPTH2: read-only, post-sema whole-program snapshot handed only to
 /// selected root `fn build`. Existing TypeInfo builders remain canonical.
 pub fn build_program_info(
     bundle: &crate::AST::ProgramBundle,
     facts: &ProgramSemanticFacts,
 ) -> CtValue {
-    let mut external_impls = std::collections::HashMap::<String, (Vec<String>, Vec<CtValue>)>::new();
+    let mut external_impls = std::collections::HashMap::<(String, String), (Vec<String>, Vec<CtValue>)>::new();
     for module in &bundle.modules {
         for item in &module.items {
             if let crate::AST::Item::Impl(implementation) = item {
-                let entry = external_impls.entry(implementation.type_name.clone()).or_default();
+                let entry = external_impls.entry((module.alias.clone(), implementation.type_name.clone())).or_default();
                 if let Some(trait_name) = &implementation.trait_name {
                     entry.0.push(trait_name.clone());
                 }
-                entry.1.extend(implementation.methods.iter().map(build_method_info));
+                entry.1.extend(implementation.methods.iter().map(|method| qualified_method_info(method, &module.alias, &implementation.type_name)));
             }
         }
     }
@@ -190,8 +241,13 @@ pub fn build_program_info(
         for item in &module.items {
             match item {
                 crate::AST::Item::Struct(def) => {
-                    let mut info = build_struct_type_info(def);
-                    if let Some((traits, methods)) = external_impls.get(&def.name) {
+                    let mut info = qualify_info(build_struct_type_info(def), &module.alias, &def.name, "struct");
+                    if let CtValue::Struct { fields, .. } = &mut info {
+                        if let Some((_, CtValue::List(methods))) = fields.iter_mut().find(|(name, _)| name == "methods") {
+                            *methods = def.methods.iter().map(|method| qualified_method_info(method, &module.alias, &def.name)).collect();
+                        }
+                    }
+                    if let Some((traits, methods)) = external_impls.get(&(module.alias.clone(), def.name.clone())) {
                         if let CtValue::Struct { fields, .. } = &mut info {
                             if let Some((_, CtValue::List(values))) = fields.iter_mut().find(|(name, _)| name == "implements") {
                                 values.extend(traits.iter().cloned().map(ct_str));
@@ -204,8 +260,19 @@ pub fn build_program_info(
                     types.push(info.clone());
                     package_types.push(info);
                 }
+                crate::AST::Item::Enum(def) => {
+                    let mut info = build_enum_type_info(def, &module.alias);
+                    if let Some((traits, methods)) = external_impls.get(&(module.alias.clone(), def.name.clone())) {
+                        if let CtValue::Struct { fields, .. } = &mut info {
+                            if let Some((_, CtValue::List(values))) = fields.iter_mut().find(|(name, _)| name == "implements") { values.extend(traits.iter().cloned().map(ct_str)); }
+                            if let Some((_, CtValue::List(values))) = fields.iter_mut().find(|(name, _)| name == "methods") { values.extend(methods.iter().cloned()); }
+                        }
+                    }
+                    types.push(info.clone());
+                    package_types.push(info);
+                }
                 crate::AST::Item::Func(func) if func.name != "build" => {
-                    let info = build_function_info(func, facts);
+                    let info = build_function_info(func, &module.alias, facts);
                     functions.push(info.clone());
                     package_functions.push(info);
                 }
@@ -216,6 +283,7 @@ pub fn build_program_info(
             "PackageInfo",
             &[
                 ("name", ct_str(module.alias.clone())),
+                ("identity", ct_str(module.alias.clone())),
                 ("types", ct_list(package_types)),
                 ("functions", ct_list(package_functions)),
             ],
@@ -231,12 +299,15 @@ pub fn build_program_info(
     )
 }
 
-fn build_function_info(func: &Func, facts: &ProgramSemanticFacts) -> CtValue {
-    let effects = facts.effects.get(&func.name).cloned().unwrap_or_default();
+fn build_function_info(func: &Func, module: &str, facts: &ProgramSemanticFacts) -> CtValue {
+    let qualified = identity(module, &func.name);
+    let effects = facts.effects.get(&qualified).cloned().unwrap_or_default();
     ct_struct(
         "FunctionInfo",
         &[
             ("name", ct_str(func.name.clone())),
+            ("module", ct_str(module)),
+            ("identity", ct_str(qualified.clone())),
             (
                 "params",
                 ct_list(func.params.iter().map(|param| ct_str(param.name.clone())).collect()),
@@ -260,7 +331,7 @@ fn build_function_info(func: &Func, facts: &ProgramSemanticFacts) -> CtValue {
             ),
             (
                 "reaches_panic",
-                ct_bool(facts.reaches_panic.contains(&func.name)),
+                ct_bool(facts.reaches_panic.contains(&qualified)),
             ),
         ],
     )

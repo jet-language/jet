@@ -67,13 +67,13 @@ impl BuildPlan {
                 return Err(BuildError::TargetDependencyCycle);
             }
             let target = plan.targets.get(id.0).ok_or(BuildError::UnknownTarget(id))?;
-            for dep in &target.deps {
-                collect(plan, dep.id, visiting, seen, out)?;
-            }
             for source in &target.sources {
                 if seen.insert(source.as_str().to_string()) {
                     out.push(source.clone());
                 }
+            }
+            for dep in &target.deps {
+                collect(plan, dep.id, visiting, seen, out)?;
             }
             visiting.remove(&id);
             Ok(())

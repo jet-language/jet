@@ -408,6 +408,33 @@ pub fn parse_build(body: &str) -> Result<Vec<BuildProfileDef>, ManifestError> {
     Ok(profiles)
 }
 
+/// D-CTEFFECT1: typed parser for `build: { allow: #(Fs, Exec) }`.
+pub(super) fn parse_build_allow(body: &str) -> Result<Vec<String>, ManifestError> {
+    let mut allow = Vec::new();
+    for (name, value) in key_value_entries(body) {
+        if name != Syntax::BUILD_FIELD_ALLOW {
+            continue;
+        }
+        let value = value.trim();
+        let inner = value
+            .strip_prefix("#(")
+            .and_then(|value| value.strip_suffix(')'))
+            .ok_or_else(|| ManifestError::BadEffectsBlock {
+                detail: "`build.allow:` must be an effect tuple like `#(Fs, Exec)`".to_string(),
+            })?;
+        for effect in top_level_commas(inner) {
+            let effect = unquote(effect.trim());
+            if crate::Sema::Effect::parse(crate::Sema::effect_root(&effect)).is_none() {
+                return Err(ManifestError::BadEffectsBlock {
+                    detail: format!("`{effect}` isn't a known build effect"),
+                });
+            }
+            allow.push(effect);
+        }
+    }
+    Ok(allow)
+}
+
 /// D-EFFBUDGET1: parse the `effects: { allow: […], deny: […] }` body. Either
 /// field may be omitted; an unknown field or an effect name outside the
 /// closed D-EFF4 vocabulary is E1221 (`ManifestError::BadEffectsBlock`).

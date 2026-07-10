@@ -167,7 +167,7 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
     }
     if type_name == Syntax::TYPE_TYPE_INFO {
         return match field {
-            "name" => Some(Type::String),
+            "name" | "module" | "identity" | "kind" => Some(Type::String),
             "fields" => Some(Type::List(Box::new(Type::Named("FieldInfo".to_string())))),
             "methods" => Some(Type::List(Box::new(Type::Named("MethodInfo".to_string())))),
             "markers" | "implements" => Some(Type::List(Box::new(Type::String))),
@@ -177,7 +177,7 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
     }
     if type_name == "FunctionInfo" {
         return match field {
-            "name" => Some(Type::String),
+            "name" | "module" | "identity" => Some(Type::String),
             "params" => Some(Type::List(Box::new(Type::String))),
             "span" => Some(Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string())),
             "effects" => Some(Type::Named("EffectInfo".to_string())),
@@ -187,7 +187,7 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
     }
     if type_name == "PackageInfo" {
         return match field {
-            "name" => Some(Type::String),
+            "name" | "identity" => Some(Type::String),
             "types" => Some(Type::List(Box::new(Type::Named(Syntax::TYPE_TYPE_INFO.to_string())))),
             "functions" => Some(Type::List(Box::new(Type::Named("FunctionInfo".to_string())))),
             _ => None,
@@ -195,6 +195,22 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
     }
     if type_name == "EffectInfo" && field == "values" {
         return Some(Type::List(Box::new(Type::String)));
+    }
+    if type_name == "MethodInfo" {
+        return match field {
+            "name" | "module" | "identity" | "return_type" | "signature" => Some(Type::String),
+            "params" | "markers" => Some(Type::List(Box::new(Type::String))),
+            "is_pub" => Some(Type::Bool),
+            _ => None,
+        };
+    }
+    if type_name == "FieldInfo" {
+        return match field {
+            "name" | "ty" => Some(Type::String),
+            "markers" => Some(Type::List(Box::new(Type::String))),
+            "is_pub" => Some(Type::Bool),
+            _ => None,
+        };
     }
     if type_name == Syntax::TYPE_SOURCE_SPAN {
         return match field {

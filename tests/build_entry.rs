@@ -122,6 +122,8 @@ fn run() {}
     assert!(!errors.is_empty());
     assert!(errors.iter().all(|d| d.code != "ICE"));
     assert!(errors.iter().any(|d| d.what.contains("generated")));
+    assert!(!root.join(".jet/generated/main/broken.jet").exists());
+    assert!(!root.join(".jet/lock").exists());
 }
 
 #[test]
@@ -200,6 +202,7 @@ fn run() {}
     );
     let errors = compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap_err();
     assert!(errors.iter().any(|diag| diag.what.contains("generated action `bad-gen`")));
+    assert!(!root.join(".jet/generated/main/bad.jet").exists());
 }
 
 #[test]
@@ -276,6 +279,91 @@ fn run() {}
     write(&entry, "fn build() -> Int { return 1 }\nfn run() {}\n");
     let (diags, _) = jet::Driver::check_file(entry.to_str().unwrap(), None, true);
     assert!(diags.iter().any(|diag| diag.code == "E3501"));
+}
+
+#[test]
+fn graph_overlay_uses_unsaved_text_and_canonical_cli_facts() {
+    let root = project("query-overlay");
+    let entry = root.join("main.jet");
+    write(&entry, "fn build(b: BuildContext) -> BuildPlan ? { app :: b.add_executable(\"disk\", [\"main.jet\"], [])?\n return b.plan(app) }\nfn run() {}\n");
+    let unsaved = "fn build(b: BuildContext) -> BuildPlan ? { app :: b.add_executable(\"unsaved\", [\"main.jet\"], [])?\n return b.plan(app) }\nfn run() {}\n";
+    let disk = jet::Driver::query_build_plan(entry.to_str().unwrap()).unwrap().unwrap();
+    let overlay = jet::Driver::query_build_plan_with_overlay(entry.to_str().unwrap(), unsaved).unwrap().unwrap();
+    assert_eq!(disk.targets()[0].name, "disk");
+    assert_eq!(overlay.targets()[0].name, "unsaved");
+    let json = jet::Driver::build_plan_json(&overlay);
+    assert!(json.contains("\"files\"") && json.contains("\"toolchains\"") && json.contains("\"generated\""));
+}
+
+#[test]
+fn unselected_action_output_never_runs_checks_or_leaks() {
+    let root = project("selected-closure");
+    let entry = root.join("main.jet");
+    write(&entry, r#"
+fn build(b: BuildContext) #(Exec, Fs) -> BuildPlan ? {
+    #Impure("declare selected closure") {
+    bad :: b.action("unselected", [], ["missing-generated.jet"], ["sh", "-c", "exit 77"], ["Exec", "Fs"])?
+    ignored :: b.add_executable("ignored", ["missing-generated.jet"], [bad])?
+    app :: b.add_executable("app", ["main.jet"], [])?
+    return b.plan(app)
+    }
+    return b.plan()
+}
+fn run() {}
+"#);
+    let output = compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap();
+    assert_eq!(output.build.unwrap().execution.metrics.actions_total, 0);
+    assert!(!root.join("missing-generated.jet").exists());
+}
+
+#[test]
+fn runtime_reload_error_rolls_back_action_outputs_and_lock() {
+    let root = project("reload-rollback");
+    let entry = root.join("main.jet");
+    write(&entry, r#"
+fn build(b: BuildContext) #(Exec, Fs) -> BuildPlan ? {
+    #Impure("rollback after runtime reload") {
+    stamp :: b.action("stamp", [], ["stamp"], ["sh", "-c", "printf changed > stamp"], ["Exec", "Fs"])?
+    app :: b.add_executable("app", ["main.jet", "missing.jet"], [stamp])?
+    return b.plan(app)
+    }
+    return b.plan()
+}
+fn run() {}
+"#);
+    assert!(compile_bundle_path_build(entry.to_str().unwrap(), opts()).is_err());
+    assert!(!root.join("stamp").exists());
+    assert!(!root.join(".jet/lock").exists());
+}
+
+#[test]
+fn program_info_uses_qualified_collision_free_type_function_and_method_identities() {
+    let root = project("program-identities");
+    write(&root.join("left.jet"), "pub enum Choice { A }\npub fn same() #(Net) {}\n");
+    write(&root.join("right.jet"), "pub struct Choice { value: Int }\nimpl Choice { pub fn inspect(self) {} }\npub fn same() {}\n");
+    let entry = root.join("main.jet");
+    write(&entry, r#"
+use "./left" as left
+use "./right" as right
+fn build(b: BuildContext) -> BuildPlan ? {
+    loop ty in b.program.types() {
+        if ty.identity == "left::Choice" { b.error(ty.span, "ENUM", "enum", "identity", "ok") }
+        loop method in ty.methods {
+            if method.identity == "right::Choice.inspect" { b.error(ty.span, "METHOD", "method", "identity", "ok") }
+        }
+    }
+    loop f in b.program.functions() {
+        if f.identity == "left::same" && f.effects.has("Net") { b.error(f.span, "LEFT", "left", "effect", "ok") }
+        if f.identity == "right::same" && f.effects.has("Net") { b.error(f.span, "BAD", "collision", "effect", "fix") }
+    }
+    return b.plan()
+}
+fn run() { left.same(); right.same() }
+"#);
+    let errors = compile_bundle_path_build(entry.to_str().unwrap(), BuildRunOptions::default()).unwrap_err();
+    let codes = errors.iter().map(|diag| diag.code.as_str()).collect::<BTreeSet<_>>();
+    assert!(codes.contains("ENUM") && codes.contains("METHOD") && codes.contains("LEFT"), "{errors:#?}");
+    assert!(!codes.contains("BAD"), "{errors:#?}");
 }
 
 #[test]

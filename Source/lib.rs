@@ -173,22 +173,19 @@ fn resolve_build_grants(file: &str, cli: &[String]) -> Vec<String> {
     let mut allowed = cli.iter().cloned().collect::<std::collections::BTreeSet<_>>();
     let mut directory = std::path::Path::new(file).parent();
     while let Some(dir) = directory {
-        let package = dir.join(Syntax::PAYLOAD_FILE);
-        if let Ok(source) = std::fs::read_to_string(&package) {
-            if let Some(build) = source.split("build:").nth(1) {
-                for effect in Comptime::Build::BuildCapability::ALL {
-                    if build.split('}').next().is_some_and(|body| body.contains(effect.name())) {
-                        allowed.insert(effect.flag().to_string());
-                    }
+        if let Some(Ok(package)) = Jetpack::PackageManifest::PackManifest::load(dir) {
+            for effect in package.build_allow {
+                if let Some(capability) = Comptime::Build::BuildCapability::parse(&effect) {
+                    allowed.insert(capability.flag().to_string());
                 }
             }
         }
         let workspace = dir.join(Syntax::WORKSPACE_FILE);
         if let Ok(source) = std::fs::read_to_string(&workspace) {
-            if let Some(policy) = source.split("policy:").nth(1).and_then(|rest| rest.split('}').next()) {
-                if let Some(denied) = policy.split("deny:").nth(1) {
-                    for effect in Comptime::Build::BuildCapability::ALL {
-                        if denied.contains(effect.name()) { allowed.remove(effect.flag()); }
+            if let Ok(policy) = Jetpack::Overlay::parse_workspace_policy(&source) {
+                for effect in policy.build_deny {
+                    if let Some(capability) = Comptime::Build::BuildCapability::parse(&effect) {
+                        allowed.remove(capability.flag());
                     }
                 }
             }

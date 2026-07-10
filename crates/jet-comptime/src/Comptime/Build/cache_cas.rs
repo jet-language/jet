@@ -157,16 +157,28 @@ impl LocalCas {
     pub fn put_blob(&self, bytes: &[u8]) -> io::Result<ContentDigest> {
         let digest = ContentDigest::from_bytes(bytes);
         let path = self.blob_path(&digest)?;
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        if path.exists() {
-            let existing = fs::read(&path)?;
-            if ContentDigest::from_bytes(&existing) != digest {
-                fs::write(path, bytes)?;
+        if let Ok(metadata) = fs::symlink_metadata(&self.root) {
+            if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                return Err(io::Error::new(io::ErrorKind::PermissionDenied, "CAS root is not a real directory"));
             }
         } else {
-            fs::write(path, bytes)?;
+            if let Some(parent) = self.root.parent() {
+                if fs::symlink_metadata(parent).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
+                    return Err(io::Error::new(io::ErrorKind::PermissionDenied, "CAS parent is a symlink"));
+                }
+            }
+            fs::create_dir_all(&self.root)?;
+        }
+        if let Ok(metadata) = fs::symlink_metadata(&path) {
+            if metadata.file_type().is_symlink() || !metadata.is_file() {
+                return Err(io::Error::new(io::ErrorKind::PermissionDenied, "CAS blob is not a real file"));
+            }
+            let existing = fs::read(&path)?;
+            if ContentDigest::from_bytes(&existing) != digest {
+                atomic_restore_file(&self.root, &path, bytes, bytes.len() as u64)?;
+            }
+        } else {
+            atomic_restore_file(&self.root, &path, bytes, bytes.len() as u64)?;
         }
         Ok(digest)
     }
@@ -269,6 +281,36 @@ impl LocalCas {
             .join("sha256")
             .join(prefix)
             .join(rest))
+    }
+}
+
+#[cfg(all(test, unix))]
+mod hostile_tests {
+    use super::*;
+    use std::os::unix::fs::symlink;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    fn temp(name: &str) -> PathBuf {
+        let path = std::env::temp_dir().join(format!("jet-cas-{name}-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
+        let _ = fs::remove_dir_all(&path);
+        fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    #[test]
+    fn put_blob_rejects_cache_root_and_blob_tree_symlinks() {
+        let outside = temp("outside");
+        let root_parent = temp("root-link");
+        symlink(&outside, root_parent.join("cache")).unwrap();
+        assert!(LocalCas::new(root_parent.join("cache")).put_blob(b"secret").is_err());
+        assert_eq!(fs::read_dir(&outside).unwrap().count(), 0);
+
+        let root = temp("blob-link");
+        let cas = root.join("cache");
+        fs::create_dir_all(&cas).unwrap();
+        symlink(&outside, cas.join("blobs")).unwrap();
+        assert!(LocalCas::new(&cas).put_blob(b"secret").is_err());
+        assert_eq!(fs::read_dir(&outside).unwrap().count(), 0);
     }
 }
 

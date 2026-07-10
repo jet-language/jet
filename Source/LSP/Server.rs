@@ -313,34 +313,12 @@ fn build_graph_response(
         .and_then(|document| json_get(document, "uri"))
         .and_then(json_str)?;
     let document = server.docs.get(uri)?;
-    let plan = match crate::Driver::query_build_plan(&document.path) {
+    let plan = match crate::Driver::query_build_plan_with_overlay(&document.path, &document.text) {
         Ok(Some(plan)) => plan,
         Ok(None) => return Some(response(id, "null")),
         Err(_) => return Some(response(id, "null")),
     };
-    let graph = plan.graph();
-    let targets = graph.targets.iter().map(|target| format!(
-        "{{\"id\":{},\"name\":\"{}\",\"deps\":[{}],\"actions\":[{}]}}",
-        target.id.0,
-        json_escape(&target.name),
-        target.deps.iter().map(|id| id.0.to_string()).collect::<Vec<_>>().join(","),
-        target.actions.iter().map(|id| id.0.to_string()).collect::<Vec<_>>().join(","),
-    )).collect::<Vec<_>>().join(",");
-    let actions = graph.actions.iter().map(|action| format!(
-        "{{\"id\":{},\"name\":\"{}\",\"caps\":[{}],\"pools\":[{}],\"inputs\":[{}],\"outputs\":[{}]}}",
-        action.id.0,
-        json_escape(&action.name),
-        action.caps.iter().map(|cap| format!("\"{}\"", cap.name())).collect::<Vec<_>>().join(","),
-        action.pools.iter().map(|pool| format!("\"{}\"", json_escape(pool.as_str()))).collect::<Vec<_>>().join(","),
-        action.inputs.iter().map(|path| format!("\"{}\"", json_escape(path))).collect::<Vec<_>>().join(","),
-        action.outputs.iter().map(|path| format!("\"{}\"", json_escape(path))).collect::<Vec<_>>().join(","),
-    )).collect::<Vec<_>>().join(",");
-    Some(response(id, &format!(
-        "{{\"schema_version\":1,\"default\":{},\"targets\":[{}],\"actions\":[{}]}}",
-        plan.default_target().map(|target| target.id().0.to_string()).unwrap_or_else(|| "null".to_string()),
-        targets,
-        actions,
-    )))
+    Some(response(id, &crate::Driver::build_plan_json(&plan)))
 }
 
 /// c121 Step 5: append one `{"method":…,"us":…}` JSON line to

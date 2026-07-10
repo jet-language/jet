@@ -516,6 +516,40 @@ pub struct BuildCompileOutput {
     pub build: Option<BuildRun>,
 }
 
+struct BuildFilesystemTransaction {
+    files: Vec<(std::path::PathBuf, Option<Vec<u8>>)>,
+    committed: bool,
+}
+
+impl BuildFilesystemTransaction {
+    fn new(paths: impl IntoIterator<Item = std::path::PathBuf>) -> std::io::Result<Self> {
+        let mut seen = std::collections::BTreeSet::new();
+        let mut files = Vec::new();
+        for path in paths.into_iter().filter(|path| seen.insert(path.clone())) {
+            let before = match std::fs::read(&path) {
+                Ok(bytes) => Some(bytes),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+                Err(error) => return Err(error),
+            };
+            files.push((path, before));
+        }
+        Ok(Self { files, committed: false })
+    }
+    fn commit(&mut self) { self.committed = true; }
+}
+
+impl Drop for BuildFilesystemTransaction {
+    fn drop(&mut self) {
+        if self.committed { return; }
+        for (path, before) in self.files.iter().rev() {
+            match before {
+                Some(bytes) => { if let Some(parent) = path.parent() { let _ = std::fs::create_dir_all(parent); } let _ = std::fs::write(path, bytes); }
+                None => { let _ = std::fs::remove_file(path); }
+            }
+        }
+    }
+}
+
 /// Static graph facts for CLI and LSP consumers. Build evaluation is pure and
 /// generated files/actions are not materialized or executed.
 pub fn query_build_plan(
@@ -532,6 +566,43 @@ pub fn query_build_plan(
     .map(|output| output.build.map(|build| build.plan))
 }
 
+/// LSP variant: the open document is authoritative even before save.
+pub fn query_build_plan_with_overlay(
+    file: &str,
+    source: &str,
+) -> Result<Option<crate::Comptime::Build::BuildPlan>, Vec<Diagnostic>> {
+    compile_bundle_path_build_inner(
+        file,
+        BuildRunOptions {
+            execute: false,
+            locked: false,
+            ..BuildRunOptions::default()
+        },
+        Some((std::path::Path::new(file), source)),
+    )
+    .map(|output| output.build.map(|build| build.plan))
+}
+
+/// One canonical graph representation shared by CLI and LSP.
+pub fn build_plan_json(plan: &crate::Comptime::Build::BuildPlan) -> String {
+    fn escape(value: &str) -> String {
+        value.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n")
+    }
+    fn strings(values: &[String]) -> String {
+        format!("[{}]", values.iter().map(|value| format!("\"{}\"", escape(value))).collect::<Vec<_>>().join(","))
+    }
+    let graph = plan.graph();
+    format!("{{\"schema_version\":1,\"default\":{},\"targets\":[{}],\"actions\":[{}],\"files\":[{}],\"toolchains\":[{}],\"probes\":[{}],\"generated\":[{}]}}",
+        plan.default_target().map(|target| target.id().0.to_string()).unwrap_or_else(|| "null".to_string()),
+        graph.targets.iter().map(|target| format!("{{\"id\":{},\"name\":\"{}\",\"kind\":\"{:?}\",\"deps\":[{}],\"actions\":[{}],\"files\":{}}}", target.id.0, escape(&target.name), target.kind, target.deps.iter().map(|id| id.0.to_string()).collect::<Vec<_>>().join(","), target.actions.iter().map(|id| id.0.to_string()).collect::<Vec<_>>().join(","), strings(&target.files))).collect::<Vec<_>>().join(","),
+        graph.actions.iter().map(|action| { let real = &plan.actions()[action.id.0]; format!("{{\"id\":{},\"name\":\"{}\",\"inputs\":{},\"outputs\":{},\"caps\":{},\"pools\":{},\"toolchain\":\"{}\",\"probes\":{},\"cache\":\"{:?}\",\"provenance\":{}}}", action.id.0, escape(&action.name), strings(&action.inputs), strings(&action.outputs), strings(&action.caps.iter().map(|cap| cap.name().to_string()).collect::<Vec<_>>()), strings(&action.pools.iter().map(|pool| pool.as_str().to_string()).collect::<Vec<_>>()), escape(&plan.toolchains()[real.toolchain.id().0].name), strings(&real.probes.iter().map(|probe| plan.probes()[probe.id().0].name.clone()).collect::<Vec<_>>()), real.cache, strings(&plan.explain_action_named(&action.name).map(|fact| fact.provenance).unwrap_or_default())) }).collect::<Vec<_>>().join(","),
+        graph.files.iter().map(|file| format!("{{\"path\":\"{}\",\"owner\":{},\"consumers\":[{}],\"targets\":[{}]}}", escape(&file.path), file.owner.map(|id| id.0.to_string()).unwrap_or_else(|| "null".to_string()), file.consumers.iter().map(|id| id.0.to_string()).collect::<Vec<_>>().join(","), file.targets.iter().map(|id| id.0.to_string()).collect::<Vec<_>>().join(","))).collect::<Vec<_>>().join(","),
+        plan.toolchains().iter().map(|tool| format!("{{\"name\":\"{}\",\"target\":\"{}\"}}", escape(&tool.name), escape(&tool.target_triple))).collect::<Vec<_>>().join(","),
+        plan.probes().iter().map(|probe| format!("{{\"name\":\"{}\",\"kind\":\"{:?}\",\"reproducibility\":\"{:?}\"}}", escape(&probe.name), probe.kind, probe.reproducibility)).collect::<Vec<_>>().join(","),
+        plan.generated_modules().iter().map(|module| format!("{{\"name\":\"{}\",\"path\":\"{}\",\"digest\":\"{}\"}}", escape(&module.name), escape(module.path.as_str()), module.source_digest.as_str())).collect::<Vec<_>>().join(",")
+    )
+}
+
 /// D-BUILDENTRY1 complete driver staging: check root bundle, evaluate selected
 /// root `fn build`, materialize/re-check generated Jet, execute canonical graph,
 /// remove build-only entry, then codegen runtime program.
@@ -539,7 +610,15 @@ pub fn compile_bundle_path_build(
     file: &str,
     options: BuildRunOptions,
 ) -> Result<BuildCompileOutput, Vec<Diagnostic>> {
-    let mut bundle = crate::Loader::load_entry_with_overlay(file, None, false)?;
+    compile_bundle_path_build_inner(file, options, None)
+}
+
+fn compile_bundle_path_build_inner(
+    file: &str,
+    options: BuildRunOptions,
+    overlay: Option<(&std::path::Path, &str)>,
+) -> Result<BuildCompileOutput, Vec<Diagnostic>> {
+    let mut bundle = crate::Loader::load_entry_with_overlay(file, overlay, false)?;
     let active_os = crate::Syntax::OsTarget::active(options.cross_target.as_deref());
     let compile_mode = if options.plugin_target {
         crate::Sema::CompileMode::Check
@@ -582,6 +661,7 @@ pub fn compile_bundle_path_build(
     }
 
     let mut build_run = None;
+    let mut filesystem_transaction = None;
     if let Some(index) = build_index {
         let build = match &bundle.modules[bundle.entry].items[index] {
             crate::AST::Item::Func(func) => func,
@@ -600,11 +680,22 @@ pub fn compile_bundle_path_build(
         let mut structs = std::collections::HashMap::new();
         let computed_fields = std::collections::HashMap::new();
         let distinct_ranges = std::collections::HashMap::new();
+        let mut function_name_counts = std::collections::HashMap::<String, usize>::new();
+        for module in &bundle.modules {
+            for item in &module.items {
+                if let crate::AST::Item::Func(func) = item {
+                    *function_name_counts.entry(func.name.clone()).or_default() += 1;
+                }
+            }
+        }
         for module in &bundle.modules {
             for item in &module.items {
                 match item {
                     crate::AST::Item::Func(func) => {
-                        funcs.entry(func.name.clone()).or_insert(func);
+                        funcs.insert(format!("{}::{}", module.alias, func.name), func);
+                        if function_name_counts.get(&func.name) == Some(&1) {
+                            funcs.insert(func.name.clone(), func);
+                        }
                     }
                     crate::AST::Item::Struct(def) => {
                         structs.insert(def.name.clone(), def);
@@ -631,7 +722,7 @@ pub fn compile_bundle_path_build(
             distinct_ranges,
             core_imports,
         };
-        let semantic_facts = program_semantic_facts(&effect_facts);
+        let semantic_facts = program_semantic_facts(&bundle, &effect_facts);
         let program_value = crate::Comptime::build_program_info(&bundle, &semantic_facts);
         let base_dir = std::path::Path::new(file).parent().unwrap_or(std::path::Path::new("."));
         let package = std::path::Path::new(file)
@@ -661,6 +752,14 @@ pub fn compile_bundle_path_build(
             build.name_span,
         )?;
 
+        let selected_actions = evaluated.plan.selected_action_ids().map_err(|error| vec![build_plan_diagnostic(&error)])?;
+        let transaction_paths = evaluated.plan.generated_modules().iter()
+            .map(|module| bundle.project_root.join(module.path.as_str()))
+            .chain(evaluated.plan.actions().iter().filter(|action| selected_actions.contains(&action.id)).flat_map(|action| action.outputs.iter().map(|output| bundle.project_root.join(output.as_str()))))
+            .chain(std::iter::once(bundle.project_root.join(".jet/lock")))
+            .collect::<Vec<_>>();
+        filesystem_transaction = Some(BuildFilesystemTransaction::new(transaction_paths)
+            .map_err(|error| vec![generated_io_diag("build filesystem transaction", &error)])?);
         if options.locked {
             let planned_generated = evaluated.plan.generated_modules().iter().map(|module| crate::AST::ComptimeInput {
                 path: module.path.as_str().to_string(),
@@ -678,17 +777,6 @@ pub fn compile_bundle_path_build(
                 digest: module.source_digest.clone(),
             }).collect()
         };
-        let selected_actions = evaluated.plan.selected_action_ids().map_err(|error| vec![build_plan_diagnostic(&error)])?;
-        let output_rollback = if options.locked {
-            evaluated.plan.actions().iter().filter(|action| selected_actions.contains(&action.id))
-                .flat_map(|action| action.outputs.iter())
-                .map(|output| {
-                    let path = bundle.project_root.join(output.as_str());
-                    let before = std::fs::read(&path).ok();
-                    (path, before)
-                })
-                .collect::<Vec<_>>()
-        } else { Vec::new() };
         let executed = if options.execute {
             crate::Comptime::Build::execute_build_plan(
                 &evaluated.plan,
@@ -742,12 +830,6 @@ pub fn compile_bundle_path_build(
                 &locked_provenance,
                 options.locked,
             ) {
-                for (path, before) in output_rollback {
-                    match before {
-                        Some(bytes) => { let _ = std::fs::write(path, bytes); }
-                        None => { let _ = std::fs::remove_file(path); }
-                    }
-                }
                 return Err(vec![diagnostic]);
             }
         }
@@ -844,6 +926,7 @@ pub fn compile_bundle_path_build(
         inferred_layer: bundle.inferred_layer,
         layer_ceiling: bundle.layer_ceiling,
     };
+    if let Some(transaction) = filesystem_transaction.as_mut() { transaction.commit(); }
     Ok(BuildCompileOutput { compile, build: build_run })
 }
 
@@ -905,7 +988,8 @@ fn check_action_generated_sources(
         .map(|module| module.path.as_str())
         .collect::<std::collections::HashSet<_>>();
     let mut out = Vec::new();
-    for action in plan.actions() {
+    let selected = plan.selected_action_ids().map_err(|error| vec![build_plan_diagnostic(&error)])?;
+    for action in plan.actions().iter().filter(|action| selected.contains(&action.id)) {
         for output in &action.outputs {
             if !output.as_str().ends_with(".jet") || registered.contains(output.as_str()) {
                 continue;
@@ -1007,6 +1091,7 @@ fn validate_build_authority(
 }
 
 fn program_semantic_facts(
+    bundle: &crate::AST::ProgramBundle,
     checked: &crate::Sema::SemIndexEffectFacts,
 ) -> crate::Comptime::ProgramSemanticFacts {
     fn reaches_panic(
@@ -1024,17 +1109,38 @@ fn program_semantic_facts(
         visiting.remove(name);
         reached
     }
-    let effects = checked
-        .solved
-        .iter()
-        .map(|(name, effects)| (name.clone(), effects.iter().cloned().collect()))
-        .collect();
-    let reaches_panic = checked
-        .summaries
-        .keys()
-        .filter(|name| reaches_panic(name, &checked.summaries, &mut std::collections::BTreeSet::new()))
-        .cloned()
-        .collect();
+    let mut counts = std::collections::HashMap::<String, usize>::new();
+    for module in &bundle.modules {
+        for item in &module.items {
+            if let crate::AST::Item::Func(func) = item {
+                *counts.entry(func.name.clone()).or_default() += 1;
+            }
+        }
+    }
+    let mut effects = std::collections::HashMap::new();
+    let mut panic_facts = std::collections::BTreeSet::new();
+    for module in &bundle.modules {
+        for item in &module.items {
+            let crate::AST::Item::Func(func) = item else { continue };
+            let qualified = format!("{}::{}", module.alias, func.name);
+            let values = if counts.get(&func.name) == Some(&1) {
+                checked.solved.get(&func.name).map(|set| set.iter().cloned().collect()).unwrap_or_default()
+            } else {
+                // Duplicate short names cannot share the checker's legacy flat key.
+                // Their checked declarations remain exact and collision-free.
+                func.declared_effects.as_ref().into_iter().flatten()
+                    .filter(|(name, _)| !name.starts_with('!'))
+                    .map(|(name, _)| name.clone()).collect()
+            };
+            effects.insert(qualified.clone(), values);
+            if counts.get(&func.name) == Some(&1)
+                && reaches_panic(&func.name, &checked.summaries, &mut std::collections::BTreeSet::new())
+            {
+                panic_facts.insert(qualified);
+            }
+        }
+    }
+    let reaches_panic = panic_facts;
     crate::Comptime::ProgramSemanticFacts { effects, reaches_panic }
 }
 

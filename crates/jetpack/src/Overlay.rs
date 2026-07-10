@@ -12,11 +12,13 @@ use std::path::Path;
 pub struct OverlayPolicy {
     pub overlays: Vec<OverlaySet>,
     pub allow_unfree: Vec<String>,
+    /// D-CTEFFECT1 workspace ceiling for programmable builds.
+    pub build_deny: Vec<String>,
 }
 
 impl OverlayPolicy {
     pub fn is_empty(&self) -> bool {
-        self.overlays.is_empty() && self.allow_unfree.is_empty()
+        self.overlays.is_empty() && self.allow_unfree.is_empty() && self.build_deny.is_empty()
     }
 
     pub fn overlay(&self, name: &str) -> Option<&OverlaySet> {
@@ -126,6 +128,7 @@ pub fn parse_workspace_policy(src: &str) -> Result<OverlayPolicy, OverlayError> 
     };
     let mut policy = OverlayPolicy::default();
     policy.allow_unfree = parse_allow_unfree(&body)?;
+    policy.build_deny = parse_build_deny(&body)?;
     let mut pos = 0;
     while let Some(rel) = body[pos..].find(Syntax::WORKSPACE_OVERLAY) {
         let at = pos + rel;
@@ -293,6 +296,64 @@ fn parse_allow_unfree(body: &str) -> Result<Vec<String>, OverlayError> {
         ));
     };
     parse_string_list(value.lines().next().unwrap_or(value))
+}
+
+fn parse_build_deny(body: &str) -> Result<Vec<String>, OverlayError> {
+    let Some(policy_body) = named_block(body, Syntax::MANIFEST_BLOCK_POLICY) else {
+        return Ok(Vec::new());
+    };
+    let Some(raw) = exact_field_value(&policy_body, Syntax::EFFECTS_FIELD_DENY) else {
+        return Ok(Vec::new());
+    };
+    let inner = raw
+        .trim()
+        .strip_prefix("#(")
+        .and_then(|value| value.strip_suffix(')'))
+        .ok_or_else(|| OverlayError::Malformed(
+            "`policy.deny:` must be an effect tuple like `#(Net, Exec)`".to_string(),
+        ))?;
+    Ok(top_level_commas(inner)
+        .into_iter()
+        .map(|value| unquote(value.trim()))
+        .collect())
+}
+
+fn named_block(body: &str, name: &str) -> Option<String> {
+    let mut pos = 0;
+    while let Some(rel) = body[pos..].find(name) {
+        let at = pos + rel;
+        let after = at + name.len();
+        let before_ok = word_boundary_before(body, at);
+        let after_ok = !body[after..]
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphanumeric() || c == '_');
+        if before_ok && after_ok {
+            let rest = body[after..].trim_start();
+            if let Some(rest) = rest.strip_prefix(':') {
+                let rest = rest.trim_start();
+                if let Some(rest) = rest.strip_prefix('.') {
+                    if let Some(inner) = rest.trim_start().strip_prefix('{') {
+                        return Some(balanced_with_len(inner, '{', '}').0);
+                    }
+                }
+            }
+        }
+        pos = after;
+    }
+    None
+}
+
+fn exact_field_value(body: &str, field: &str) -> Option<String> {
+    for entry in top_level_commas(body) {
+        let entry = entry.trim();
+        if let Some((name, value)) = entry.split_once(':') {
+            if name.trim() == field {
+                return Some(value.trim().to_string());
+            }
+        }
+    }
+    None
 }
 
 fn merge_package_override(packages: &mut Vec<PackageOverride>, incoming: PackageOverride) {
@@ -708,6 +769,17 @@ fn unquote(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn build_deny_uses_exact_balanced_policy_fields() {
+        let policy = parse_workspace_policy(r#"
+module workspace {
+    policy_note: .{ deny: #(Exec) }
+    policy: .{ trust: .{ note: "deny: #(Fs)" }, Deny: #(Net), deny: #(Exec, Fs) }
+}
+"#).unwrap();
+        assert_eq!(policy.build_deny, vec!["Exec", "Fs"]);
+    }
 
     #[test]
     fn parses_workspace_overlay_policy() {
