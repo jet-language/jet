@@ -159,10 +159,9 @@ fn validate_web_func_tir(
             web_stmts_supported(&tir.body)
                 && (tir.ret.is_none() || tir.body.iter().any(|s| matches!(s, TIR::TStmt::Return(Some(_)))))
         } else {
-            web_wasm_stmts_supported(&tir.body)
+            web_wasm_stmts_supported(&tir.body, bundle)
                 && (tir.ret.is_none() || tir.body.iter().any(|s| matches!(s, TIR::TStmt::Return(Some(_)))))
-                && (!matches!(f.web_marker, Some(WebPartitionMarker::WasmExport))
-                    || web_wasm_abi_supported(bundle, f))
+                && web_wasm_abi_supported(bundle, f)
         };
         if supported {
             cx.current_type_params.borrow_mut().clear();
@@ -184,22 +183,54 @@ fn web_wasm_abi_supported(bundle: &ProgramBundle, f: &Func) -> bool {
         && f.return_type.as_ref().map(|ty| wasm_ty(ty).is_some()).unwrap_or(true)
 }
 
-fn web_wasm_stmts_supported(stmts: &[TIR::TStmt]) -> bool {
+fn web_wasm_stmts_supported(stmts: &[TIR::TStmt], bundle: &ProgramBundle) -> bool {
     stmts.iter().all(|stmt| match stmt {
         TIR::TStmt::LineMarker(_) | TIR::TStmt::Return(None) => true,
-        TIR::TStmt::Let { init, .. } | TIR::TStmt::ExprStmt(init) | TIR::TStmt::Return(Some(init)) => web_wasm_expr_supported(init),
-        TIR::TStmt::Assign { value, .. } => web_wasm_expr_supported(value),
+        TIR::TStmt::Let { init, .. } | TIR::TStmt::ExprStmt(init) | TIR::TStmt::Return(Some(init)) => web_wasm_expr_supported(init, bundle),
+        TIR::TStmt::Assign { value, .. } => web_wasm_expr_supported(value, bundle),
         _ => false,
     })
 }
 
-fn web_wasm_expr_supported(expr: &TIR::TExpr) -> bool {
+fn web_wasm_expr_supported(expr: &TIR::TExpr, bundle: &ProgramBundle) -> bool {
     match &expr.kind {
         TIR::TExprKind::IntLit(..) | TIR::TExprKind::FloatLit(_) | TIR::TExprKind::BoolLit(_) | TIR::TExprKind::Local(_) => true,
-        TIR::TExprKind::Binary { lhs, rhs, .. } => web_wasm_expr_supported(lhs) && web_wasm_expr_supported(rhs),
-        TIR::TExprKind::Unary { operand, .. } | TIR::TExprKind::Clone(operand) => web_wasm_expr_supported(operand),
-        TIR::TExprKind::Call { args, .. } => args.iter().all(|a| web_wasm_expr_supported(&a.value)),
+        TIR::TExprKind::Binary { lhs, rhs, .. } => web_wasm_expr_supported(lhs, bundle) && web_wasm_expr_supported(rhs, bundle),
+        TIR::TExprKind::Unary { operand, .. } | TIR::TExprKind::Clone(operand) => web_wasm_expr_supported(operand, bundle),
+        TIR::TExprKind::Call { name, args } => wasm_callee_bucket(bundle, web_name(name)) == Some(WebBucket::Wasm)
+            && args.iter().all(|a| web_wasm_expr_supported(&a.value, bundle)),
         _ => false,
+    }
+}
+
+fn wasm_callee_bucket(bundle: &ProgramBundle, name: &str) -> Option<WebBucket> {
+    let mut matches = Vec::new();
+    for module in &bundle.modules {
+        collect_named_web_buckets(&module.items, None, bundle, name, &mut matches);
+    }
+    if matches.len() == 1 { matches.pop() } else { None }
+}
+
+fn collect_named_web_buckets(
+    items: &[Item],
+    prefix: Option<&str>,
+    bundle: &ProgramBundle,
+    wanted: &str,
+    out: &mut Vec<WebBucket>,
+) {
+    for item in items {
+        match item {
+            Item::Func(f) if f.name == wanted => {
+                let key = prefix.map(|p| format!("{p}__{}", f.name)).unwrap_or_else(|| f.name.clone());
+                out.push(bundle.web_partitions.get(&key).copied().unwrap_or(WebBucket::Wasm));
+            }
+            Item::CodeModule(cm) => {
+                if let Some(body) = &cm.body {
+                    collect_named_web_buckets(body, Some(&cm.name), bundle, wanted, out);
+                }
+            }
+            _ => {}
+        }
     }
 }
 
@@ -614,7 +645,11 @@ fn wasm_emit_expr(expr: &TIR::TExpr, funcs: &[FuncWeb]) -> Result<String, ()> {
         TIR::TExprKind::Clone(inner) => wasm_emit_expr(inner, funcs)?,
         TIR::TExprKind::Call { name, args } => {
             let source = web_name(name);
-            let callee = funcs.iter().find(|f| f.name == source && f.bucket == WebBucket::Wasm).ok_or(())?;
+            let mut callees = funcs.iter().filter(|f| f.name == source && f.bucket == WebBucket::Wasm);
+            let callee = callees.next().ok_or(())?;
+            if callees.next().is_some() {
+                return Err(());
+            }
             let symbol = if callee.marker == Some(WebPartitionMarker::WasmExport) { wasm_export_symbol(source) } else { format!("jet_wasm_{source}") };
             format!("{symbol}({})", args.iter().map(|a| wasm_emit_expr(&a.value, funcs)).collect::<Result<Vec<_>, _>>()?.join(", "))
         }

@@ -622,6 +622,22 @@ fn wasm_unsupported_export_abi_is_a_preflight_diagnostic() {
 }
 
 #[test]
+fn wasm_unsupported_internal_abi_is_a_preflight_diagnostic() {
+    let src = "#Target(Web)\nfn helper(s: ^String) -> String { return s }\nfn run() {}\n";
+    let diags = jet::compile_web_with_path(src, "tests/fixtures/web_bad_internal_wasm_abi.jet")
+        .expect_err("unsupported internal Wasm ABI must be rejected before emission");
+    assert!(diags.iter().any(|d| d.code == "E-WEB-TIR-UNSUPPORTED"), "{diags:?}");
+}
+
+#[test]
+fn wasm_cross_bucket_call_is_a_normal_preflight_diagnostic() {
+    let src = "#Target(Web)\n#Js\nfn browser_value() -> Int { return 1 }\n#WasmExport\nfn compute() -> Int { return browser_value() }\nfn run() {}\n";
+    let diags = jet::compile_web_with_path(src, "tests/fixtures/web_cross_bucket_call.jet")
+        .expect_err("Wasm must not call a JS-bucket function directly");
+    assert!(diags.iter().any(|d| d.code == "E-WEB-CROSS-PARTITION"), "{diags:?}");
+}
+
+#[test]
 fn web_hello_dom_shim_roundtrip() {
     if !have_tool("rustc") || !have_tool("node") {
         eprintln!("note: skipping web_build hello (need rustc + node)");
