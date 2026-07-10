@@ -9,6 +9,7 @@
 use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
+use std::process::Command;
 
 fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -390,7 +391,46 @@ fn compiler_seam_crates_have_only_path_dependencies() {
 }
 
 // ---------------------------------------------------------------------------
-// Check 9: Core spec files referenced by D-STDRUBRIC1 exist (c44)
+// Check 9: E3 capability claims stay bound to executable proof
+// ---------------------------------------------------------------------------
+#[test]
+fn epoch3_capability_ledger_is_current_and_proof_bound() {
+    let root = root();
+    let output = Command::new("node")
+        .arg("scripts/agent/check-capability-ledger.mjs")
+        .arg("--check")
+        .current_dir(&root)
+        .output()
+        .expect("node must run the capability-ledger checker");
+
+    assert!(
+        output.status.success(),
+        "capability ledger rejected:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn epoch3_capability_ledger_rejects_deleted_or_tampered_proof() {
+    let root = root();
+    let output = Command::new("node")
+        .arg("scripts/agent/check-capability-ledger.mjs")
+        .arg("--self-test")
+        .current_dir(&root)
+        .output()
+        .expect("node must run the capability-ledger self-test");
+
+    assert!(
+        output.status.success(),
+        "capability-ledger tamper test failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Check 10: Core spec files referenced by D-STDRUBRIC1 exist (c44)
 // ---------------------------------------------------------------------------
 #[test]
 fn stdlib_api_laws_doc_exists() {
