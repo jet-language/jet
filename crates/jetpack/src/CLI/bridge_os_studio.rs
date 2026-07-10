@@ -122,22 +122,21 @@ fn cmd_studio(theme: &Theme, parsed: &Parsed) -> i32 {
     }
     if let Some(addr) = parsed.flags.studio_serve.as_deref() {
         let context = studio_context(parsed);
-        return serve_studio(theme, addr, &app, &meta, &data, context.as_ref());
+        return serve_studio(theme, addr, &app, &meta, &data, context.as_ref(), false);
     }
-    println!("{}", app.display());
     if headless {
+        println!("{}", app.display());
         theme.ok("jetos Studio app ready");
         return 0;
     }
-    match std::process::Command::new("xdg-open").arg(&app).spawn() {
-        Ok(_) => {
-            theme.ok("opened jetos Studio");
-            0
-        }
-        Err(_) => {
-            theme.ok("jetos Studio browser fallback ready");
-            theme.detail("open the printed path in a browser.");
-            0
-        }
-    }
+    let context = studio_context(parsed);
+    serve_studio(
+        theme,
+        "127.0.0.1:0",
+        &app,
+        &meta,
+        &data,
+        context.as_ref(),
+        true,
+    )
 }

@@ -2,6 +2,12 @@ struct StudioContext {
     config: PathBuf,
     host: String,
     offline: bool,
+    source_write: std::sync::Mutex<()>,
+    sessions: std::sync::Mutex<std::collections::BTreeSet<String>>,
+    changeset: std::sync::Mutex<Option<StudioChangeSet>>,
+    last_applied: std::sync::Mutex<Option<StudioAppliedChange>>,
+    live_projection: std::sync::Mutex<Option<String>>,
+    proved_source: std::sync::Mutex<Option<StudioProvedSource>>,
 }
 
 fn studio_host(parsed: &Parsed) -> Option<String> {
@@ -26,6 +32,12 @@ fn studio_context(parsed: &Parsed) -> Option<StudioContext> {
         config,
         host,
         offline,
+        source_write: std::sync::Mutex::new(()),
+        sessions: std::sync::Mutex::new(std::collections::BTreeSet::new()),
+        changeset: std::sync::Mutex::new(None),
+        last_applied: std::sync::Mutex::new(None),
+        live_projection: std::sync::Mutex::new(None),
+        proved_source: std::sync::Mutex::new(None),
     })
 }
 
@@ -36,6 +48,7 @@ fn serve_studio(
     meta: &Path,
     data: &Path,
     context: Option<&StudioContext>,
+    open_browser: bool,
 ) -> i32 {
     let listener = match std::net::TcpListener::bind(addr) {
         Ok(listener) => listener,
@@ -52,8 +65,17 @@ fn serve_studio(
         .local_addr()
         .map(|addr| addr.to_string())
         .unwrap_or_else(|_| addr.to_string());
-    println!("http://{local}/studio/");
+    let url = format!("http://{local}/studio/");
+    println!("{url}");
     theme.ok("jetos Studio service listening");
+    if open_browser {
+        match std::process::Command::new("xdg-open").arg(&url).spawn() {
+            Ok(_) => theme.ok("opened jetos Studio"),
+            Err(_) => {
+                theme.detail("open the printed Studio URL in a browser.");
+            }
+        }
+    }
     for stream in listener.incoming() {
         match stream {
             Ok(mut stream) => {
@@ -117,7 +139,13 @@ fn handle_studio_request(
             ("200 OK", "text/html; charset=utf-8", fs_read_for_http(app))
         }
         "/studio/app.json" => ("200 OK", "application/json", fs_read_for_http(meta)),
-        "/studio/data.json" => ("200 OK", "application/json", fs_read_for_http(data)),
+        "/studio/data.json" => match context {
+            Some(context) => match studio_live_projection(context, data) {
+                Ok(body) => ("200 OK", "application/json", body.into_bytes()),
+                Err(body) => ("500 Internal Server Error", "application/json", body.into_bytes()),
+            },
+            None => ("200 OK", "application/json", fs_read_for_http(data)),
+        },
         "/studio/source" => match context {
             Some(context) => (
                 "200 OK",

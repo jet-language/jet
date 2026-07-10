@@ -39,7 +39,18 @@ fn cmd_proof(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 {
     if load_target(theme, &target).is_none() {
         return 2;
     }
-    let Some(gen) = latest_generation_for(&target.host) else {
+    let generation = flags
+        .name
+        .as_deref()
+        .and_then(|name| generation_named(&target.host, name))
+        .or_else(|| {
+            if flags.name.is_none() {
+                latest_generation_for(&target.host)
+            } else {
+                None
+            }
+        });
+    let Some(gen) = generation else {
         theme.error_coded(
             "E1278",
             "jetos proof is missing",
@@ -47,7 +58,7 @@ fn cmd_proof(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 {
                 "no built generation exists for `{}`; proof is read from generation artifacts.",
                 target.host
             ),
-            "run `jet os build <host>` first.",
+                "run `jet os build <host>` first, using the same `--name` when selecting an exact generation.",
         );
         return 2;
     };
@@ -84,6 +95,34 @@ fn cmd_build(theme: &Theme, args: &[String], flags: &OsFlags, activate: bool) ->
     let Some((plan, system)) = load_target(theme, &target) else {
         return 2;
     };
+    if activate {
+        if let Some(existing) = flags
+            .name
+            .as_deref()
+            .and_then(|name| generation_named(&system.name, name))
+        {
+            if !prove_activation(theme, &existing, &system) {
+                return 2;
+            }
+            return match activate_generation(&existing) {
+                Ok(()) => {
+                    theme.ok(&format!(
+                        "jetos generation {} activated",
+                        theme.bold(&existing.name)
+                    ));
+                    0
+                }
+                Err(error) => {
+                    theme.error(
+                        "could not activate the generation",
+                        &format!("updating the current/default pointers failed: {error}"),
+                        "check permissions on the Jetpack root, or set JETPACK_ROOT.",
+                    );
+                    2
+                }
+            };
+        }
+    }
     // Tier 3 (D-FE-CLI1): `switch` is the mutation — it diffs the outgoing
     // generation against the one this build produces and gates on Apply?
     // before activating. `jetos build` never activates, so it never touches
@@ -98,6 +137,15 @@ fn cmd_build(theme: &Theme, args: &[String], flags: &OsFlags, activate: bool) ->
     };
     match build_generation(theme, &plan, &system, flags) {
         Some(gen) => {
+            if let Err(error) = write_generation_source_proof(&gen.path, &target) {
+                theme.error_coded(
+                    "E1278",
+                    "jetos generation source proof is incomplete",
+                    &format!("binding source and plan hashes failed: {error}"),
+                    "check generation storage permissions, then rebuild the generation.",
+                );
+                return 2;
+            }
             theme.ok(&format!(
                 "jetos generation {} built for {}",
                 theme.bold(&gen.name),
