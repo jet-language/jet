@@ -9,7 +9,9 @@ One home per kind of document. Start here.
 | Read embedded / freestanding builds | [reference/embedded.md](reference/embedded.md) |
 | Read the versioning / release policy | [reference/versioning.md](reference/versioning.md) |
 | Know the authoritative rules | [spec/](spec/) — see below |
-| See what's planned or in progress | [docs/plans/](../docs/plans/) — or run the dashboard (below) |
+| See what's planned or in progress | [plans/](plans/) — or run the dashboard (below) |
+| Review product/front-end designs | [design/](design/) |
+| Read point-in-time engineering reviews | [reviews/](reviews/) |
 
 ## spec/ — the authoritative surface
 
@@ -21,22 +23,24 @@ These are binding. When they disagree with anything else, they win.
   the **only** home for ratified syntax decisions. Syntax facts (what's ratified,
   what's retired, what's provisional) live here and nowhere else.
 - [architecture.md](spec/architecture.md) — pipeline (lex → parse → sema →
-  codegen) + rules R1–R7.
+  codegen) + rules R1–R12.
 - [diagnostics.md](spec/diagnostics.md) — error voice + exact render format;
   snapshot-pinned.
 - [roadmap.md](spec/roadmap.md) — what's active / not yet verified, plus Epoch 1 & 2 development highlights (completed work).
-- [decision-ballots.md](../docs/ballots/decision-ballots.md) — the owner's open decision
+- [decision-ballots.md](ballots/decision-ballots.md) — the owner's open decision
   queue (ratified items live in syntax-decisions.md).
 
 ## plans/ — implementation plans
 
-Plans live in [`docs/plans/`](../docs/plans/):
-active epoch plan ([epoch-3/](../docs/plans/epoch-3/)), the
-[jetpack](../docs/plans/epoch-4/README.md) track
+Plans live in [`plans/`](plans/):
+active epoch plan ([epoch-3/](plans/epoch-3/)), the
+[jetpack](plans/epoch-4/README.md) track
 (package manager + environments), jetos/visual-configuration cards in Tower
-Epoch 7, and sidequests (one reviewed plan per in-flight task,
-deleted once shipped). Epoch 1 & 2 highlights are in
-[roadmap.md](spec/roadmap.md). See [plans/README.md](../docs/plans/README.md) for the
+Epoch 7, and [sidequests/](sidequests/) (one reviewed plan per in-flight task,
+deleted once shipped). Historical proposals live in
+[proposals/](proposals/); open owner choices live in [ballots/](ballots/).
+Epoch 1 & 2 highlights are in
+[roadmap.md](spec/roadmap.md). See [plans/README.md](plans/README.md) for the
 implementing-agent protocol.
 
 ## The dashboard — tasks, decisions, bugs, scratch

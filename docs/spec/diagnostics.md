@@ -13,6 +13,26 @@ Every diagnostic has four parts:
 - **why** — the rule behind the error, so the user learns the model.
 - **fix** — a concrete next step, copy-pasteable when possible.
 
+## Adding a diagnostic
+
+1. Prove the rejection belongs in the Jet front end, not rustc or codegen, and
+   reuse an existing code when it is the same rule. New semantics or syntax must
+   already be ratified.
+2. Reserve a unique `E`/`L` code in the registry below. Write what/why/fix in the
+   product voice here before implementing it; never ship a generic fallback for
+   a known case.
+3. Add the failing `tests/ui` source and exact `.stderr` snapshot first. The
+   diagnostic points at the user's actionable token, reports alongside other
+   recoverable errors, and includes no raw rustc text.
+4. Emit it from lexer, parser, or sema—the layer that knows the violated rule.
+   Codegen must receive only approved facts (I3).
+5. Run the focused snapshot test without update mode, review the diff, then use
+   the blessing procedure in `.claude/skills/verify/SKILL.md`. Re-run without
+   update mode.
+6. Add `jet explain` coverage and regenerate `docs/reference/errors/` when the
+   code is part of that generated representative set. Update relevant spec/docs,
+   then run diagnostics coverage and the feature's focused test.
+
 ## Exact render format (pinned by snapshots)
 
 Sentence capitalization throughout — `Error` / `Why:` / `Fix:` (owner,

@@ -6,50 +6,58 @@ description: Author a ballot-ready decision on a Tower card — the standard for
 # Tower — raise a ballot-ready decision
 
 Any owner-facing choice becomes a `decision` on its card. The owner decides
-from the ballot alone, in the board's focus mode — if they would have to ask
-you something to decide, it is not ready. A plan-writer **proposes**; the
-owner **picks**; never pre-empt the pick.
+from the ballot alone in focus mode; if he must ask what an option does, the
+ballot is not ready. A plan-writer proposes; the owner picks.
 
-## The fields (fill them all)
+## Required fields
 
-- **`gist`** — one very short plain-language sentence: what is being chosen.
-  No jargon.
-- **`story`** — a short paragraph naming a real person and what they're
-  doing, so the owner knows *why this decision exists* before any detail.
-- **`inWild`** — realistic code/usage from a plausible real project where
-  the choice actually bites (renders syntax-highlighted). Not a toy.
-- **`options[]`** — `{key, name, detail, code}` for **every** option. Each
-  carries its own worked `code` example showing exactly what the person
-  types and sees — including the error they hit, when that's the point. No
-  option described only abstractly. Rich menu of genuine alternatives, never
-  2–3 derivative spellings of one idea.
-- **`comparisons[]`** — `{lang, note, code}`: how other languages/tools/
-  products spell the same thing, when a comparison genuinely informs.
-- **`rec`** — the recommended option key; put the one-line *why* in `detail`
-  or `explainer`.
-- **`group`** — one of the project's `decisionGroups` (see `.tower/config.json`)
-  so the queue stays organized.
+- **`gist`** — one short plain-language sentence naming the choice.
+- **`story`** — a real person doing real work, showing why the choice exists.
+- **`inWild`** — plausible project code/usage where the choice matters.
+- **`options[]`** — `{key, name, detail, code}` for every genuine option.
+  Each option shows exactly what the person types and sees, including errors.
+- **`comparisons[]`** — `{lang, note, code}` when another product materially
+  informs the choice.
+- **`rec`** — recommended option key, with its one-line reason in
+  `detail` or `explainer`.
+- **`group`** — a configured `decisionGroups` value from
+  `.tower/config.json`.
 
 ## Required review pass
 
-Before adding or updating a ballot, run this pass and reflect it in the
-recommendation/options:
+- **Beginner:** ceremony-free defaults; expert policy stays hidden until needed.
+- **Expert:** explicit control over graph, authority, generated code, toolchain,
+  cache, scheduler, and audit behavior.
+- **Hybrid:** prefer one canonical semantic mechanism with ergonomic entrypoints
+  over siloed beginner/expert systems (I8).
+- **Kill criteria:** reject any option that hollows out the useful default,
+  dictates a file/project structure, or carves around a safety/invariant
+  guarantee. Fix the option before it reaches the owner.
+- **Effort:** implementation difficulty never affects a ranking or recommendation.
 
-- **Beginner:** a first-time Jet user should get magic out of the box. The
-  recommended path must keep defaults ceremony-free and hide expert knobs until
-  they are needed.
-- **Expert:** an experienced user must be able to control the exact graph,
-  authority, generated code, toolchain, cache, scheduler, and audit behavior
-  behind explicit opt-in surfaces.
-- **Hybrid:** do not force siloed options when the best design is one
-  canonical mechanism with multiple ergonomic entrypoints. Prefer hybrids that
-  preserve I8: one semantic operation, flexible arrangement/writing style,
-  project policy can enforce a preferred style.
+## Owner design profile
+
+- Concrete over abstract: show terminal output, file contents, exact errors, and
+  complete workflows. Define unavoidable jargon.
+- Naming ballots need many high-quality original candidates in Jet's aviation
+  family. Do not echo the owner's suggestion or offer derivative variants.
+- Cut repetition. Drive every option from the same full real-world example.
+- “Take inspiration from X” means transplant useful mechanics into worked Jet
+  usage, not write a survey of X.
+- Design options vary **UX**: information architecture, interaction model, and
+  primary loop. Palette-only variants are one option repeated.
+- UI copy and visuals use no metaphor theming, mascots, cockpit decoration, or
+  invented product jargon. Product names are fine; controls name their action.
+- Frontend acceptance requires the complete mock matrix in the owner's real
+  terminal: every archetype, relevant viewport/state, keyboard/focus behavior,
+  ANSI/NO_COLOR behavior for terminals, and real rendered review—not a textual
+  claim or one cherry-picked screenshot.
+- Re-read the live ballot immediately before briefing any agent. Ballots can be
+  edited after minting; never delegate from a remembered paraphrase.
 
 ## Mechanics
 
-```
-cat > /tmp/ballot.json <<'EOF'
+```json
 {
   "cardId": "#12",
   "id": "D-CACHE1",
@@ -62,29 +70,37 @@ cat > /tmp/ballot.json <<'EOF'
     { "key": "A", "name": "TTL per entry", "detail": "...", "code": "..." },
     { "key": "B", "name": "Event-driven purge", "detail": "...", "code": "..." }
   ],
-  "comparisons": [ { "lang": "Rails", "note": "...", "code": "..." } ],
+  "comparisons": [
+    { "lang": "Rails", "note": "...", "code": "..." }
+  ],
   "rec": "B"
 }
-EOF
-tower decision add --file /tmp/ballot.json --by <me>
 ```
 
-The card's lane flips to `decide` automatically; leave it there. Nudge the
-owner if it's urgent (new ballots already trigger a push notification).
+Write the JSON to a temporary file, then:
+
+```
+tower decision add --file /tmp/ballot.json --by <agent>
+```
+
+The card moves to `decide`; leave it there. An unfinished ballot uses
+`--draft` and must become ready before owner review.
+
+An owner ruling is also a ballot record, never a log note:
+
+```
+tower verdict '#N' --outcome "owner's ruling" --title "Short title" --by owner
+```
 
 ## Rules
 
-- Decision `id` must be unique and stable (`D-…`); check existing ids first
-  (`tower decision list --json`).
-- Never invent choices that contradict an already-ratified decision — read
-  the project's ratified record first.
-- Do not make beginner ease and expert control separate mutually exclusive
-  choices unless they truly require different semantics. First look for a
-  single mechanism that gives both: safe defaults, explicit control, and
-  auditability.
-- Implementation difficulty must never appear in a tradeoff, ranking, or
-  recommendation. Rank on the project's actual priorities.
-- When the owner ratifies with a comment, **honor every word** — a question
-  inside a ratification is not a clean pick; address it before building.
-- Owner asks for changes via a question → edit the ballot
-  (`tower decision update <id> --file …`), then reply.
+- Decision IDs are unique and stable; check Tower and
+  `docs/spec/syntax-decisions.md` before minting.
+- Never offer a choice contradicting a ratified decision.
+- Every option is independently understandable and worked. Do not split
+  beginner ease and expert control unless semantics truly conflict.
+- Honor every word in a ratification. A question/comment inside it must be
+  addressed before implementation.
+- Owner asks for changes via a question: edit the live decision, then reply.
+- Once ratified, remove it from open-ballot docs; history stays in Tower and the
+  ratified record.

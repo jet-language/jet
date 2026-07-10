@@ -151,22 +151,7 @@ M0–M14, v1.0 arc, verified 2026-06-14.
 
 ---
 
-## Active / not yet verified
-
-### Epoch 2 — production platform
-
-**Epoch 2 GA is complete** (owner, 2026-06-18): all 18 milestones landed on
-`master`, and the last in-scope language gaps closed this session — the Jet
-**module system** (D-MOD1–4) and a functional **`jet bind`** (native std-only
-backend). Moved to Epoch 3: DAP step-through debugging, adoption documentation,
-**package build-from-source + M9 wave-2**, and **M11 property testing / doctests
-/ coverage** (syntax-gated ergonomics).
-
-**Deferred registry ops (D-PKGS1):** `jet publish` runs the pre-publish gate
-(build + tests + API diff) but registry upload is not implemented — use
-git-based dependencies. Jetpack hangar cleanup uses `jet clean`. The built-in HTTP
-client (`core.http`) supports default HTTPS through the D-TLS1 rustls bridge;
-registry push remains a separate protocol/tooling follow-up.
+## Active / not yet verified — Epoch 3 and promoted tracks
 
 ### Jetpack and jetos
 
@@ -230,8 +215,9 @@ rollout stays future Epoch 7 work.
 ### Epoch 1 tail
 
 **M12.2** — registry, semver resolver, `jet publish` / `vendor` / `audit`
-(architecture: [`jetpack-jetos/README.md`](../../docs/plans/epoch-4/README.md)). M12.1 verified
-2026-06-13.
+(architecture: [`epoch-4/README.md`](../../docs/plans/epoch-4/README.md)). M12.1 verified
+2026-06-13. `jet publish` runs the pre-publish gate, but registry upload is not
+implemented; use git-based dependencies. Jetpack hangar cleanup uses `jet clean`.
 
 ---
 

@@ -16,8 +16,8 @@ move the call behind a generated bridge, colocate both functions in the same buc
 
 ## Example
 
-Failing program: [`tests/ui/web_cross_partition.jet`](../../tests/ui/web_cross_partition.jet)
+Failing program: [`tests/ui/web_cross_partition.jet`](../../../tests/ui/web_cross_partition.jet)
 
 ---
 
-[Back to diagnostics registry](../admin/04-diagnostics.md)
+[Back to diagnostics registry](../../spec/diagnostics.md)

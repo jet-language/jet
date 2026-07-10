@@ -16,8 +16,8 @@ use a scalar, `String`, a `List`/`Map` of ABI-safe values, or a `@[Codable]` str
 
 ## Example
 
-Failing program: [`tests/ui/web_abi_type.jet`](../../tests/ui/web_abi_type.jet)
+Failing program: [`tests/ui/web_abi_type.jet`](../../../tests/ui/web_abi_type.jet)
 
 ---
 
-[Back to diagnostics registry](../admin/04-diagnostics.md)
+[Back to diagnostics registry](../../spec/diagnostics.md)

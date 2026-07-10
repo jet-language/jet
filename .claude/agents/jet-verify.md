@@ -9,7 +9,8 @@ You verify claimed-done work. Trust nothing you did not run yourself.
 - Invoke Skill `caveman:caveman` (full) NOW. All output caveman-terse.
 - Check `df -h /tmp` first; if ≥80% full, `rm -rf /tmp/nix-shell.*` before
   trusting any failure (phantom ENOSPC).
-- Run the FULL suite: `nix develop -c cargo test`. Paste the summary line.
+- Run the FULL suite: `nix develop -c scripts/agent/verify-full.sh`. Paste the
+  summary line.
 - For each claimed feature/diagnostic:
   - I4: diagnostic code exists in docs/spec/diagnostics.md AND a tests/ui
     snapshot exists.

@@ -1,7 +1,6 @@
 //! Generate docs/reference/errors/E####.md from ui snapshots (M14 workstream 3).
 //!
-//! Run: `UPDATE_DOCS=1 cargo test gen_error_pages -- --nocapture`
-//! Or:  `./scripts/gen_errors.sh`
+//! Run: `UPDATE_DOCS=1 cargo test --test gen_errors gen_error_pages -- --nocapture`
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -122,7 +121,7 @@ fn render_page(code: &str, jet_rel: &str, diag: &ParsedDiag, has_fixed: bool) ->
     let title = format!("{code}: {}", diag.what);
     let fixed = if has_fixed {
         let fixed_rel = jet_rel.replace(".jet", ".fixed.jet");
-        format!("\n## Fixed program\n\nSee [`{fixed_rel}`](../../{fixed_rel}).\n")
+        format!("\n## Fixed program\n\nSee [`{fixed_rel}`](../../../{fixed_rel}).\n")
     } else {
         String::new()
     };
@@ -136,10 +135,10 @@ fn render_page(code: &str, jet_rel: &str, diag: &ParsedDiag, has_fixed: bool) ->
          ## Fix\n\n\
          {fix}\n\n\
          ## Example\n\n\
-         Failing program: [`{jet_rel}`](../../{jet_rel})\n\
+         Failing program: [`{jet_rel}`](../../../{jet_rel})\n\
          {fixed}\n\
          ---\n\n\
-         [Back to diagnostics registry](../admin/04-diagnostics.md)\n",
+         [Back to diagnostics registry](../../spec/diagnostics.md)\n",
         title = title,
         code = code,
         what = diag.what,
@@ -153,7 +152,11 @@ fn render_page(code: &str, jet_rel: &str, diag: &ParsedDiag, has_fixed: bool) ->
 /// Representative error codes always generated (M14 subset).
 const REPRESENTATIVE: &[&str] = &[
     "E0101", "E0102", "E0103", "E0104", "E0105", "E0107", "E0108", "E0109", "E0110", "E0111",
-    "E0119", "E0120",
+    "E0119",
+    "E0120",
+    "E-WEB-ABI-TYPE",
+    "E-WEB-CROSS-PARTITION",
+    "E-WEB-TARGET-BROWSER",
 ];
 
 /// Canonical ui fixture per code (walk order is nondeterministic).
@@ -224,7 +227,7 @@ fn gen_error_pages() {
             let on_disk = fs::read_to_string(&out_path).unwrap();
             assert_eq!(
                 on_disk, page,
-                "{code}.md is stale — run: UPDATE_DOCS=1 cargo test gen_error_pages"
+                "{code}.md is stale — run: nix develop -c env UPDATE_DOCS=1 cargo test --test gen_errors gen_error_pages -- --nocapture"
             );
         }
     }

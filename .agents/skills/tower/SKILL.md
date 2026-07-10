@@ -1,6 +1,6 @@
 ---
 name: tower
-description: Act on what the owner just recorded in Tower — implement ratified decisions, answer open card questions, advance agent-lane cards (plan / implement / verify), and raise new decisions in ballot-ready form. When burndown is the goal, work only Epoch 3 + sidequest cards in workOrder until both sections are empty. Use after the owner records decisions or leaves notes in Tower, or when asked to "process tower", "act on my decisions", "do the tower work", "work the board", "sweep the board". The owner only ever does two things (decide, greenlight); this skill does everything that follows.
+description: Act on what the owner just recorded in Tower — implement ratified decisions, answer open card questions, advance agent-lane cards (plan / implement / verify), and raise new decisions in ballot-ready form. When burndown is the goal, work only the board's current epoch + sidequest cards in workOrder until both sections are empty. Use after the owner records decisions or leaves notes in Tower, or when asked to "process tower", "act on my decisions", "do the tower work", "work the board", "sweep the board". The owner only ever does two things (decide, greenlight); this skill does everything that follows.
 ---
 
 # Tower — act on the board
@@ -32,14 +32,15 @@ decisions), `implement`, `building`, `verify` (verify 100%, then close).
 Epochs group the work; **milestones** are goals within an epoch (link cards
 with `--milestone`). `tower state` = full JSON; `tower status` = summary.
 
-## Scope & work order — Epoch 3 burndown
+## Scope & work order — current-epoch burndown
 
-When the owner asks to work the board / burn down Epoch 3, stay inside:
+When the owner asks to work the board or burn down the current epoch, read
+`meta.currentEpoch` from Tower and stay inside:
 
-1. **Epoch 3** — `track:"epoch"` + `epoch:"e3"` + agent lane.
+1. **Current epoch** — `track:"epoch"` + `epoch:meta.currentEpoch` + agent lane.
 2. **Sidequests** — `track:"sidequest"` + agent lane.
 
-Do not wander into e4+, frozen, or owner lanes unless he redirects. Pick with
+Do not wander into another epoch, frozen, or owner lanes unless he redirects. Pick with
 `tower next --burndown` (workOrder ascending, then building > verify >
 implement > plan) — the canonical burndown loop: scopes to `meta.currentEpoch`
 epoch-track cards plus every sidequest, agent lanes only, in one filter
@@ -106,7 +107,7 @@ surfaces, don't silence it.
 parser→sema→codegen wired and reachable from real `.jet` source; every new
 diagnostic has a code in `docs/spec/diagnostics.md` **and** a `tests/ui`
 snapshot (I4); runnable example with golden output where user-visible (I5);
-`nix develop -c cargo test` fully green; docs match behavior. A ratified
+`nix develop -c scripts/agent/verify-full.sh` fully green; docs match behavior. A ratified
 decision may sit unbuilt **only** while gated on an unratified upstream
 decision — the owner's answer on an unblocked decision IS the "go".
 

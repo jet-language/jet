@@ -27,7 +27,7 @@ the same Rust, C toolchain, Node, Jet wrapper, and repo utilities:
 nix develop -c cargo build
 nix develop -c cargo test
 nix develop -c jet run examples/features/basics/hello.jet
-nix develop -c rg "pattern" docs Source tests
+nix develop -c rg "pattern" docs Source crates tests
 ```
 
 Do not rely on host-installed `cargo`, `rustc`, `jet`, `node`, or search
@@ -65,17 +65,22 @@ as skills, every other agent reads them as files:
   gated by user-written audited regions. Generated Rust `unsafe` may appear only
   inside those gate regions or vetted std/mem internals.
 - **I2** rustc never speaks to users. rustc rejecting generated code is an
-  internal compiler error (exit 101, banner in Source/main.rs) and a P0 bug.
+  internal compiler error (exit 101, banner owned by `Source/CmdCompile.rs`)
+  and a P0 bug.
 - **I3** Codegen is dumb. All checking lives in sema. Never "try rustc and
   see" as a checking strategy.
 - **I4** Every diagnostic has a code in docs/spec/diagnostics.md, what/why/fix, and a
   tests/ui snapshot. No snapshot → the diagnostic doesn't exist.
 - **I5** Examples are the executable spec. Every feature ships with an
   example + expected output that golden tests enforce.
-- **I6** Zero external crates in the compiler (`Source/`), ever. Stdlib sub-libraries
-  and modules may use external crates to bootstrap until end of Epoch 3; after
-  that, all external deps must be replaced with native Jet/Rust implementations.
-  Any new stdlib external dep requires owner approval.
+- **I6** Zero external crates in the compiler, ever. This covers the root
+  `Source/` crate and compiler seam crates listed by
+  `tests/truthfulness.rs::compiler_seam_crates_have_only_path_dependencies`;
+  runtime/tool siblings with separately ratified dependencies are not a way to
+  smuggle dependencies into those seams. Stdlib sub-libraries and modules may
+  use external crates to bootstrap until the end of Epoch 3; after that, all
+  external deps must be replaced with native Jet/Rust implementations. Any new
+  stdlib external dep requires owner approval.
 - **I7** Every user-typeable keyword/sigil lives in
   `crates/jet-foundation/src/Syntax.rs` with a decision ID.
 - **I8** One way to mean it, many ways to write it. There is exactly one
@@ -167,8 +172,9 @@ Rules:
 - Every sub-agent brief starts with the caveman invocation (see
   Communication) and states: goal, relevant file paths, invariants that
   apply, and "targeted tests only — parent runs the full suite".
+- Prefer the baked project agents in `.claude/agents/`: `jet-impl` for builds,
+  `jet-verify` for independent verification, and `jet-ballot` for decisions.
 - One layer deep — sub-agents never spawn sub-agents.
-- Prefer `pipeline()` over `parallel()` in workflows unless you genuinely need all results before proceeding.
 - Never spawn a sub-agent just to run a single shell command — use Bash directly.
 - Sub-agents must still follow all invariants (I1–I8) and the Nix command environment.
 

@@ -6,16 +6,16 @@
  Jet source (.jet)
         │
         ▼
-   lexer.rs ──► tokens (every token has a byte Span)
+ jet-lexer ──► tokens (every token has a byte Span)
         │
         ▼
-  parser.rs ──► AST                     ┐
+jet-parser ──► AST                      ┐
         │                               │  the FRONT END owns all
         ▼                               │  semantics and every
-   sema.rs ──► checked AST              │  user-facing diagnostic
+  jet-sema ──► checked AST              │  user-facing diagnostic
         │      (M2: + ownership check)  ┘
         ▼
- codegen.rs ──► boring Rust source
+jet-codegen ──► boring Rust source
         │
         ▼
      rustc  ──► native binary      (verifier + optimizer; never
@@ -52,8 +52,8 @@ D-COMPILERSEAMS1/2 split the compiler into workspace seam crates. The root
 | `jet-comptime` | comptime values and interpreter support | no user-facing surface by itself |
 | `jet-sema` | all semantic checks, collects all front-end diagnostics | yes (E01xx+) |
 | `jet-codegen` | checked program to Rust text; TIR is internal here | **never** |
-| `jetpack` | package manager, JetOS engine, package manifest/lock, FFI bridge runtime assets | package/JetOS/FFI diagnostics |
-| `jet-driver` | compile/build orchestration, rustc invocation, ICE policy | only I/O + ICE |
+| `jetpack` | package manager, JetOS engine, package manifest/lock, hidden FFI bridge construction | package/JetOS/FFI diagnostics |
+| `jet-driver` | front-end orchestration and compile outputs; calls jetpack FFI preparation | front-end diagnostics only |
 | `jet-queries` | std-only demand cache for incremental inputs and derived query values | no |
 | `jet-semindex` | stable semantic index over checked programs for tooling | no new diagnostics |
 | `jet-impact` | blast-radius reports over `jet-semindex` | no |
@@ -61,10 +61,11 @@ D-COMPILERSEAMS1/2 split the compiler into workspace seam crates. The root
 | `jet-jit` | dev/JIT execution tier over codegen/TIR facts | internal fallback only |
 | `jet-net` | runtime/comptime fetch helper with TLS diagnostics | yes, for fetch failures |
 
-I6 is machine-checked by `tests/truthfulness.rs`: the compiler seam crates may
-depend only on each other through path dependencies. Runtime-side crates such as
-`jet-jit` and `jet-net` are separate workspace members with their own
-owner-approved dependency posture.
+I6 is machine-checked by `tests/truthfulness.rs`: the root compiler and named
+compiler seams may use only workspace path dependencies. Runtime/tool siblings
+such as `jet-jit` and `jet-net` are separate workspace members with their own
+owner-approved dependency posture; that does not permit an external dependency
+to leak into a checked compiler manifest.
 
 `tests/workspace_crates.rs` pins the current path-dependency direction. Compiler
 front-end crates may not grow back-edges into driver/codegen clients. Tooling and
@@ -72,6 +73,37 @@ runtime crates stay outside the compiler seam unless their dependency row is
 changed here and in the test. Jetpack/JetOS live in `crates/jetpack`; `jet-driver`
 depends on that crate for package manifest/lock and FFI bridge seams, then
 re-exports the legacy module names so existing API callers keep compiling.
+The root binary still owns native build execution: `Source/CmdCompile.rs`
+invokes rustc, classifies linker/tool failures, renders the I2 ICE banner, and
+links any prepared FFI artifact. Do not move that responsibility into a seam
+crate in documentation until the code moves with it.
+
+### Adding an FFI bridge
+
+Foreign dependencies stay behind the existing runtime boundary; they never
+become dependencies of the compiler workspace crates.
+
+1. Start from a ratified interop surface and dependency approval. Do not add a
+   new user spelling, ABI policy, or external stdlib dependency from code alone.
+2. Parse and type-check the Jet declaration in the normal front end. Unsupported
+   declaration types, unsafe signatures, and invalid boundary conversions need
+   Jet diagnostics before codegen (I2/I3/I4). Tool and library availability is
+   not a source-level fact; classify it later at bridge build/native link time.
+3. Extend `crates/jetpack/src/FFI.rs` (or `CFFI.rs` for C) to prepare the bridge.
+   The Rust bridge is a generated, content-addressed crate under Jet's cache: its
+   generated `Cargo.toml` owns foreign dependencies, `cargo build` produces an
+   rlib, and `FfiLink` records the crate name, rlib, and dependency directory.
+   Do not put the dependency in the root or compiler-seam `Cargo.toml` files.
+4. Thread the prepared `FfiLink` through `crates/jet-driver/src/Driver/mod.rs` and
+   `CompileOutput`. `Source/CmdCompile.rs::build` is the real native link edge: it
+   passes `--extern`/`-L dependency` to rustc and keeps missing-tool/library
+   failures out of the ICE path by reporting build/link diagnostics there.
+5. Keep generated wrappers minimal and audited. Safe Jet cannot acquire an
+   ungated unsafe operation through a bridge; boundary ownership, error, and
+   layout conversions must be explicit.
+6. Add focused tests for front-end rejection, generated wrapper/link arguments,
+   cache reuse, and a real end-to-end bridge call. Add the diagnostic snapshot
+   and docs for every new error, then run the project verification workflow.
 
 ### Incremental Compiler Service
 
@@ -104,21 +136,27 @@ must not advertise speculative features.
 - **R2 — Sema is the gatekeeper.** Any program that passes sema must
   produce Rust that compiles. New language features land as: spec →
   parser → sema checks → codegen → tests, in that order.
-- **R3 — Single surface.** User-typeable strings live in Source/Syntax.rs
-  only. Renaming a keyword is a one-file change plus snapshot re-bless.
+- **R3 — Single surface.** User-typeable strings live in
+  `crates/jet-foundation/src/Syntax.rs` only. Renaming a keyword starts there;
+  parser/formatter tests, generated grammars, snapshots, and docs must move with
+  it.
 - **R4 — Spans everywhere.** Any AST node an error might point at carries
   its span. Adding a node without a span is a review-blocker.
 - **R5 — ICE policy.** rustc failing on generated code prints the
-  internal-compiler-error banner (Source/main.rs), exits 101, and is treated
-  as a P0 bug. rustc's stderr is shown only inside that banner.
+  internal-compiler-error banner owned by `Source/CmdCompile.rs`, exits 101,
+  and is treated as a P0 bug. rustc's stderr is shown only inside that banner.
+  Missing rustc, linker, or C library is a tool/user diagnostic, not an ICE.
 - **R6 — Name mangling.** User identifiers are emitted as `user_<name>`
   (`main` excepted) so user code can never collide with Rust keywords,
   macros, or std items.
-- **R7 — Backend is swappable.** Nothing outside codegen.rs and the
-  driver may know Rust is the target. Post-v1, a Cranelift or LLVM
-  backend replaces codegen.rs without touching the front end.
-- **R8 — Small, self-contained binaries.** The driver calls `rustc`
-  directly with `strip=symbols` and thin LTO, so the linker keeps only
+- **R7 — Backend is swappable.** Rust emission stays in
+  `crates/jet-codegen/src/`; native rustc invocation and ICE classification
+  stay in `Source/CmdCompile.rs`. The lexer, parser, and sema crates do not
+  depend on either responsibility. Another backend replaces the codegen and
+  binary-build edges without changing the front end.
+- **R8 — Small, self-contained binaries.** The root binary build path in
+  `Source/CmdCompile.rs` calls `rustc` directly with `strip=symbols` and thin LTO,
+  so the linker keeps only
   what the program uses ("only link what's needed"). Output is one
   self-contained native binary. Floor: Rust's std links a baseline
   (low-hundreds-of-KB), accepted as the cost of a beginner-friendly

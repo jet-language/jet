@@ -1,68 +1,32 @@
 # Implementation plans
 
-How work is organized, and the protocol an implementing agent follows. The plans
-are the *how*; `docs/spec/` remains the *what* and *why* and always wins on conflict.
+Plans describe sequencing and proof for work not yet represented by shipped
+behavior. `docs/spec/` remains authoritative for language behavior and design;
+Tower owns live status, claims, decisions, and blockers.
 
-## Where work lives
+## Where plans live
 
-- **Active epochs** — [`epoch-3/`](epoch-3/README.md) for future pillars. Epoch 2 is complete; development highlights are in `docs/spec/roadmap.md`.
-- **Epoch 7 planning** — [`epoch-7/`](epoch-7/README.md) for frozen jetos Studio,
-  proof, and visual-editor plans that need fresh ballots before implementation.
-- **Sidequests** — [`sidequests/`](sidequests/): one agent-reviewed plan per
-  in-flight task. A sidequest is deleted the moment its feature ships (behavior
-  then lives in `docs/spec/spec.md` + golden examples). Plans are scaffolding,
-  not trophies, and cite code by **symbol**, never by `file.rs:NNNN`.
-- **Product tracks** — [`jetpack-jetos/`](jetpack-jetos/README.md): the package
-  manager + OS. Design-of-record is
-  [`unified-ecosystem.md`](jetpack-jetos/unified-ecosystem.md); live status is
-  [`IMPLEMENTATION-STATUS.md`](jetpack-jetos/IMPLEMENTATION-STATUS.md).
+- [`epoch-3/`](epoch-3/) — current compiler/language epoch.
+- [`epoch-4/`](epoch-4/) — jetpack package-manager and environment substrate.
+- [`epoch-5/`](epoch-5/) and [`epoch-6/`](epoch-6/) — later ratified arcs.
+- [`epoch-7/`](epoch-7/) — jetos and Studio plans, including frozen work.
+- [`../sidequests/`](../sidequests/) — reviewed cross-epoch work. Delete a
+  sidequest plan after its behavior moves into the spec, examples, and tests.
 
-Tasks, their live pipeline stage, every open decision, and bugs are managed in the
-dashboard (`node Tower/tower.mjs serve`), not in a checked-in to-do file.
+The live queue is not duplicated here. Run:
 
-## Protocol for the implementing agent (read this first, every time)
+```
+nix develop -c node Tower/tower.mjs serve --open
+```
 
-1. Read, in order: docs/spec/philosophy.md, docs/spec/syntax-decisions.md,
-   docs/spec/architecture.md, docs/spec/diagnostics.md, then your plan file.
-2. **Syntax gate.** Your plan lists the decision IDs it depends on. Check
-   docs/spec/syntax-decisions.md: every listed ID must be **Ratified** (or
-   Provisional and explicitly allowed by the plan). If one is still open, STOP and
-   report to the owner — do not invent syntax, do not pick an option yourself
-   (invariant I7, CLAUDE.md protocol). Plans show example code using the
-   *recommended* option from docs/spec/decision-ballots.md; if the owner ratified a
-   different option, substitute it everywhere mechanically.
-3. Work test-first: for each feature, write the failing ui fixture or example
-   before the code. Snapshot text must follow docs/spec/diagnostics.md voice rules
-   exactly.
-4. Build in pipeline order: syntax.rs → lexer → parser → sema → codegen, never
-   skipping sema into codegen (rules R1/R2).
-5. Error codes: claim them in docs/spec/diagnostics.md's registry as you go; lints
-   take L-prefixed codes.
-6. Definition of done: all exit criteria pass as tests; `cargo test` fully green;
-   every new diagnostic has a snapshot; every new feature has an example with
-   expected output; docs/spec/spec.md + diagnostics registry + roadmap updated; no
-   invariant bent; zero new external crates in the compiler (I6 — tooling-binary
-   exceptions must be pre-approved by the owner).
-7. Commit at the end; do not start the next milestone in the same run.
+## Implementing-agent protocol
 
-## Example numbering (reserved)
+Follow the repository root [`AGENTS.md`](../../AGENTS.md). It is the canonical
+read order, syntax-gate protocol, test-first workflow, completion standard,
+verification command, delegation policy, and invariant list. A plan adds only
+card-specific sequencing, ratified decision IDs, affected seams, and executable
+exit criteria; it must not weaken or copy a stale variant of that protocol.
 
-Sequential `examples/NN_*.jet` slots — do not reuse or skip when adding an
-example. Multi-file demos use a directory (`examples/features/21_imports/`).
-
-| # | Milestone | File(s) |
-|---|-----------|---------|
-| 01–09 | M0–M2 | hello, functions, values, branches, fizzbuzz, compound, switch, ownership, ref_field |
-| 10–13 | M3–M4 | structs, enums, option, errors |
-| 14 | M4 | panic |
-| 15–18 | M5 | lists, wordcount, strings, list_bounds |
-| 19 | M5 | map_key (error demo) |
-| 20 | M6 | tests |
-| 21 | M6 | imports/ |
-| 22 | M7 | ffi |
-| 23–24 | M8 | closures, callbacks |
-| 25–26 | M9 | traits, generic_types |
-| 27–28 | M9.5 | comptime_table, embed |
-| 29–31 | M10 | files, json, cli |
-| 32 | M12 | packages/ |
-| 33–34 | M11 | tasks, pipeline |
+Examples live under `examples/features/<topic>/` with matching output under
+`examples/features/expected/<topic>/`. There is no reserved numbered-example
+table.

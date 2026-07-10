@@ -22,6 +22,64 @@ description: Verify a Jet compiler/stdlib change end-to-end in THIS repo — the
 - Do not use global `-- --test-threads=1` for completion proof. Use it only for
   a targeted race reproduction after a parallel failure.
 
+## Blessing snapshots and generated docs
+
+Blessing accepts a reviewed behavior change; it is never a way to make red
+tests disappear.
+
+1. Run the focused test without an update variable and read the complete diff.
+   Confirm every changed byte follows the ratified behavior and diagnostic voice.
+2. Build a fresh binary before using devtools: `nix develop -c cargo build`.
+3. Preview supported snapshot targets with
+   `nix develop -c jet devtools bless <target> --dry-run`. Then update only the
+   named target with `nix develop -c jet devtools bless <target>`.
+   For generated error pages, use
+   `nix develop -c env UPDATE_DOCS=1 cargo test --test gen_errors gen_error_pages -- --nocapture`.
+4. Inspect `git diff` immediately. Revert unrelated churn; never bulk-accept a
+   diagnostic code, wording, path, span, or generated grammar you cannot explain.
+5. Re-run the same focused test with no update variable. Snapshot output and
+   generated files must now be clean and stable.
+
+## Adding syntax end to end
+
+1. Confirm the exact spelling and semantics are ratified in
+   `docs/spec/syntax-decisions.md`; otherwise ballot first and stop the gated work.
+2. Add every user-typeable spelling to
+   `crates/jet-foundation/src/Syntax.rs` with its decision ID. Do not scatter a
+   literal into lexer/parser code.
+3. Add a failing parser/UI fixture first, then implement parser → sema → TIR/codegen
+   in that order. New rejection paths need a registered diagnostic and snapshot;
+   user-visible behavior needs an example and golden output.
+4. Extend formatter coverage with a **STABILITY** assertion that formatting once
+   preserves every new token and formatting twice is byte-identical. Idempotence
+   alone can bless a formatter that dropped the syntax on its first pass.
+5. Run `nix develop -c cargo build`, then
+   `nix develop -c jet devtools grammars`; inspect every generated editor section.
+6. Update `docs/spec/spec.md` and the implementation/log entry in
+   `syntax-decisions.md`. Run focused parser, formatter, UI, golden, and grammar
+   tests before final project verification.
+
+## ICE triage
+
+1. Check `/tmp`, build a fresh compiler, and reproduce through
+   `./target/debug/jet`. Record source, command, exit 101, generated Rust path,
+   and complete banner. A missing rustc/linker/library is a tool or user
+   diagnostic; only generated-code rejection or an impossible compiler state is
+   an ICE.
+2. Minimize while preserving the same oracle:
+   `nix develop -c jet devtools reduce <file.jet>` (or `--code EXXXX` for a
+   diagnostic regression). Re-run the minimized file to confirm it still fails.
+3. Bundle durable evidence with
+   `nix develop -c jet devtools ice-report <minimized.jet>`. Keep the original
+   source when minimization removes context needed to understand the bug.
+4. Find the first broken invariant: front-end acceptance (sema), TIR lowering,
+   Rust emission, or build/ICE classification. Fix the owning layer; never teach
+   codegen to use rustc as a semantic checker and never expose raw rustc output as
+   a user diagnostic.
+5. Add the smallest regression fixture proving the former ICE is now either
+   accepted end to end or rejected by a Jet diagnostic. Run its focused test plus
+   the relevant rustc-agreement/golden target, then final verification once.
+
 ## Runtime smoke test (always, for compiler changes)
 
 1. `nix develop -c cargo build` — the dev-shell `jet` execs

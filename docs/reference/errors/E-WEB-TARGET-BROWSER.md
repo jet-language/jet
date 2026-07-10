@@ -16,8 +16,8 @@ remove the `#Wasm` / `#Target` pin, move browser work into a `#Js` function, or 
 
 ## Example
 
-Failing program: [`tests/ui/web_target_browser.jet`](../../tests/ui/web_target_browser.jet)
+Failing program: [`tests/ui/web_target_browser.jet`](../../../tests/ui/web_target_browser.jet)
 
 ---
 
-[Back to diagnostics registry](../admin/04-diagnostics.md)
+[Back to diagnostics registry](../../spec/diagnostics.md)

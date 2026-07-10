@@ -1,7 +1,11 @@
 # Error index
 
-Stable diagnostic codes with examples from `tests/ui/`. Pages are generated —
-run `./scripts/gen_errors.sh` after changing snapshots.
+Stable diagnostic codes with examples from `tests/ui/`. Pages are generated.
+After reviewing the snapshot change, regenerate with:
+
+```
+nix develop -c env UPDATE_DOCS=1 cargo test --test gen_errors gen_error_pages -- --nocapture
+```
 
 | Code | Topic |
 |------|-------|
@@ -18,4 +22,4 @@ run `./scripts/gen_errors.sh` after changing snapshots.
 | [E0119](E0119.md) | unknown type |
 | [E0120](E0120.md) | returning a borrowed value |
 
-Full registry: [04-diagnostics](../admin/04-diagnostics.md).
+Full registry: [diagnostics.md](../../spec/diagnostics.md).
