@@ -2403,6 +2403,7 @@ fn os_switch_activates_and_sets_current() {
             "--name",
             "known-good",
             "--no-color",
+            "--yes",
             "--offline",
         ])
         .current_dir(config_example_dir())
@@ -3955,6 +3956,9 @@ fn jetos_studio_transaction_previews_and_writes_source() {
     let initial_data = studio_http(addr, "GET", "/studio/data.json", "");
     assert!(initial_data.contains("live-checked-plan"), "data: {initial_data}");
     assert!(initial_data.contains("network.hostName"), "data: {initial_data}");
+    for field in ["page_registry", "renderer", "system_plan", "services", "packages", "options", "proof_state", "generations"] {
+        assert!(initial_data.contains(field), "missing live model `{field}`: {initial_data}");
+    }
     let bypass = studio_http(
         addr,
         "POST",
@@ -4060,6 +4064,7 @@ fn jetos_studio_transaction_previews_and_writes_source() {
     let live_data = studio_http(addr, "GET", "/studio/data.json", "");
     assert!(live_data.contains("live-checked-plan"), "data: {live_data}");
     assert!(live_data.contains("aurora"), "data: {live_data}");
+    assert!(live_data.contains("\"renderer\": \"dashboard\""), "data: {live_data}");
     let plan = jet()
         .args(["os", "plan", "halcyon", "--json", "--no-color", "--offline"])
         .current_dir(&project.path)
@@ -4083,11 +4088,38 @@ fn jetos_studio_transaction_previews_and_writes_source() {
     assert!(build.contains("\"success\":true"), "build: {build}");
     let unproved_switch = studio_http(addr, "POST", "/studio/run", "{\"action\":\"switch\"}");
     assert!(unproved_switch.contains("409 Conflict"), "switch: {unproved_switch}");
+    let config_path = project.join("config.jet");
+    let proved_source = fs::read_to_string(&config_path).unwrap();
+    let raced_source = proved_source.replace("network.hostName: aurora", "network.hostName: intruder");
+    let race_path = config_path.clone();
+    let race = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(25));
+        fs::write(race_path, raced_source).unwrap();
+    });
+    let raced_proof = studio_http(addr, "POST", "/studio/run", "{\"action\":\"proof\"}");
+    race.join().unwrap();
+    assert!(raced_proof.contains("\"source_revision\":"), "proof race: {raced_proof}");
+    let raced_switch = studio_http(addr, "POST", "/studio/run", "{\"action\":\"switch\"}");
+    assert!(raced_switch.contains("409 Conflict"), "proof race switch: {raced_switch}");
+    fs::write(&config_path, &proved_source).unwrap();
     let proof = studio_http(addr, "POST", "/studio/run", "{\"action\":\"proof\"}");
     assert!(proof.contains("\"success\":true"), "proof: {proof}");
     assert!(proof.contains("aurora"), "proof: {proof}");
+    assert!(proof.contains("\"source_revision\":"), "proof: {proof}");
+    let switch_race_path = config_path.clone();
+    let switch_raced_source = proved_source.replace("network.hostName: aurora", "network.hostName: unproved");
+    let switch_race = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(25));
+        fs::write(switch_race_path, switch_raced_source).unwrap();
+    });
     let switched = studio_http(addr, "POST", "/studio/run", "{\"action\":\"switch\"}");
+    switch_race.join().unwrap();
     assert!(switched.contains("\"success\":true"), "switch: {switched}");
+    assert!(switched.contains("\"source_changed_after\":true"), "switch: {switched}");
+    let switched_plan = fs::read_to_string(root.join("systems/generations/zz-studio-candidate/plan.json")).unwrap();
+    assert!(switched_plan.contains("aurora"), "switch must use proved snapshot: {switched_plan}");
+    assert!(!switched_plan.contains("unproved"), "switch used concurrent edit: {switched_plan}");
+    fs::write(&config_path, &proved_source).unwrap();
     let generations = studio_http(addr, "POST", "/studio/run", "{\"action\":\"generations\"}");
     assert!(
         generations.contains("zz-studio-candidate"),
@@ -4106,6 +4138,24 @@ fn jetos_studio_transaction_previews_and_writes_source() {
     assert!(rollback_apply.contains("\"reprojected\":true"), "rollback: {rollback_apply}");
     let restored = studio_http(addr, "GET", "/studio/data.json", "");
     assert!(restored.contains("halcyon"), "restored: {restored}");
+    let literal = "\"café \\\"lab\\\" \\\\share\"";
+    let escaped = studio_http(
+        addr,
+        "POST",
+        "/studio/transaction",
+        &format!(
+            "{{\"op\":\"set-option\",\"key\":\"network.interface\",\"value\":\"{}\"}}",
+            test_json_escape(literal)
+        ),
+    );
+    assert!(escaped.contains("café"), "escaped: {escaped}");
+    let escaped_apply = studio_http(addr, "POST", "/studio/transaction", "{\"op\":\"apply\"}");
+    assert!(escaped_apply.contains("\"reprojected\":true"), "escaped: {escaped_apply}");
+    let escaped_source = fs::read_to_string(&config_path).unwrap();
+    assert!(
+        escaped_source.contains(&format!("network.interface: {literal},")),
+        "escaped source: {escaped_source}"
+    );
     let _ = child.kill();
     let _ = child.wait();
 }

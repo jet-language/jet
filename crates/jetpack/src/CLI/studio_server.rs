@@ -5,7 +5,7 @@ struct StudioContext {
     changeset: std::sync::Mutex<Option<StudioChangeSet>>,
     last_applied: std::sync::Mutex<Option<StudioAppliedChange>>,
     live_projection: std::sync::Mutex<Option<String>>,
-    proved_source: std::sync::Mutex<Option<String>>,
+    proved_source: std::sync::Mutex<Option<StudioProvedSource>>,
 }
 
 fn studio_host(parsed: &Parsed) -> Option<String> {

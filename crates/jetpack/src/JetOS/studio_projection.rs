@@ -134,6 +134,7 @@ pub(crate) fn studio_pages_json() -> String {
                 ("id", id),
                 ("title", title),
                 ("group", group),
+                ("renderer", id),
                 ("data_needs", needs),
             ])
         })
@@ -305,15 +306,15 @@ pre {{ margin: 0; padding: 16px; min-height: 96px; max-height: 300px; overflow: 
 <span class=\"pill\">rollback: not evaluated</span>
 </div>
 <div class=\"metrics\">
-<div class=\"metric\">Services configured<strong>{enabled_services}/{service_total}</strong></div>
-<div class=\"metric\">Packages<strong>{package_total}</strong></div>
-<div class=\"metric\">Options<strong>{option_total}</strong></div>
+<div class=\"metric\">Services configured<strong data-live-count=\"services\">{enabled_services}/{service_total}</strong></div>
+<div class=\"metric\">Packages<strong data-live-count=\"packages\">{package_total}</strong></div>
+<div class=\"metric\">Options<strong data-live-count=\"options\">{option_total}</strong></div>
 <div class=\"metric\">Projection alerts<strong>0</strong></div>
 </div>
 </div>
 <div class=\"grid\">
-<article class=\"panel\"><header><h2>Service configuration</h2></header><div class=\"empty\">Runtime health is not projected yet.</div><table>{services}</table></article>
-<article class=\"panel\"><header><h2>Proof/rollback status</h2></header><pre>plan.json proof.txt provenance.json vm-proof.txt
+<article class=\"panel\"><header><h2>Service configuration</h2></header><div class=\"empty\">Runtime health is not projected yet.</div><table data-live-services>{services}</table></article>
+<article class=\"panel\"><header><h2>Proof/rollback status</h2></header><pre data-live-proof>plan.json proof.txt provenance.json vm-proof.txt
 last run: generation built
 status: {proof_status}
 rollback: not evaluated
@@ -326,18 +327,18 @@ proof required: check, plan, build, proof</pre></article>
 <article class=\"panel\"><header><h2>Exact Jet diff</h2></header><pre id=\"tx-output\"></pre></article>
 </div>
 </div>
-<div id=\"monitoring\" class=\"page\" data-page-kind=\"monitoring\"><div class=\"grid\"><article class=\"panel\"><header><h2>Monitoring</h2></header><table>{services}</table></article><article class=\"panel\"><header><h2>Artifacts</h2></header><pre>provenance: ../provenance.json
+<div id=\"monitoring\" class=\"page\" data-page-kind=\"monitoring\"><div class=\"grid\"><article class=\"panel\"><header><h2>Monitoring</h2></header><table data-live-services>{services}</table></article><article class=\"panel\"><header><h2>Artifacts</h2></header><pre data-live-proof>provenance: ../provenance.json
 proof: ../proof.txt
 vm proof: ../vm-proof.txt</pre></article></div></div>
-<div id=\"services\" class=\"page\" data-page-kind=\"services\"><article class=\"panel\"><header><h2>Services</h2></header><table>{services}</table></article></div>
-<div id=\"packages\" class=\"page\" data-page-kind=\"packages\"><article class=\"panel\"><header><h2>Packages</h2></header><table>{packages}</table></article></div>
+<div id=\"services\" class=\"page\" data-page-kind=\"services\"><article class=\"panel\"><header><h2>Services</h2></header><table data-live-services>{services}</table></article></div>
+<div id=\"packages\" class=\"page\" data-page-kind=\"packages\"><article class=\"panel\"><header><h2>Packages</h2></header><table data-live-packages>{packages}</table></article></div>
 <div id=\"secrets\" class=\"page\" data-page-kind=\"secrets\" data-secret-policy=\"no-plaintext\"><article class=\"panel\"><header><h2>Secrets</h2></header><pre>plaintext: never projected
 runtime path: /run/jetos-secrets/*
 transactions: audited rekey/add only</pre><table>{options}</table></article></div>
 <div id=\"fleet\" class=\"page\" data-page-kind=\"fleet\" data-fleet-mode=\"adaptive\"><article class=\"panel\"><header><h2>Fleet</h2></header><pre>single host default: true
 rollout gate: proof-before-switch
 rollback on failed health window</pre></article></div>
-<div id=\"generations\" class=\"page\" data-page-kind=\"generations\"><article class=\"panel\"><header><h2>Generations</h2></header><pre>current generation: {generation}
+<div id=\"generations\" class=\"page\" data-page-kind=\"generations\"><article class=\"panel\"><header><h2>Generations</h2></header><pre data-live-generations>current generation: {generation}
 Rollback restores source through the same Changeset review and Apply gate.</pre><div class=\"actions\"><button data-changeset-action=\"stage-rollback\">Stage last source rollback</button><button data-run=\"generations\">List generations</button></div></article></div>
 <div id=\"changeset\" class=\"page\" data-page-kind=\"changeset\" data-apply-gate=\"single-source-transaction\">
 <div class=\"grid\">
@@ -355,9 +356,9 @@ source transaction: config.jet only</pre>
 </div>
 <div id=\"proof-provenance\" class=\"page\" data-page-kind=\"proof-provenance\">
 <div class=\"grid\">
-<article class=\"panel\"><header><h2>Packages</h2></header><table>{packages}</table></article>
-<article class=\"panel\"><header><h2>Services</h2></header><table>{services}</table></article>
-<article class=\"panel\"><header><h2>Options</h2></header><table>{options}</table></article>
+<article class=\"panel\"><header><h2>Packages</h2></header><table data-live-packages>{packages}</table></article>
+<article class=\"panel\"><header><h2>Services</h2></header><table data-live-services>{services}</table></article>
+<article class=\"panel\"><header><h2>Options</h2></header><table data-live-options>{options}</table></article>
 <article class=\"panel\"><header><h2>Source</h2></header>
 <div class=\"form\">
 <label>Option<input id=\"tx-key\" value=\"network.hostName\"></label>
@@ -408,11 +409,10 @@ async function refreshProjection() {{
   const res = await fetch('/studio/data.json');
   const projection = await res.json();
   if (!res.ok) throw new Error(projection.error || 'Studio projection failed');
-  installPageRegistry(projection.page_registry || []);
-  renderProjection(projection.system_plan || projection);
+  installPageRegistry(projection.page_registry || [], projection);
   return projection;
 }}
-function installPageRegistry(registry) {{
+function installPageRegistry(registry, projection) {{
   const nav = document.querySelector('[data-page-registry=\"studio-pages\"]');
   nav.replaceChildren();
   for (const entry of registry) {{
@@ -441,9 +441,37 @@ function installPageRegistry(registry) {{
     link.textContent = entry.title;
     wirePageLink(link);
     nav.append(link);
+    const renderer = PAGE_RENDERERS[entry.renderer];
+    (renderer || renderMissing)(page, projection, entry);
   }}
 }}
-function renderProjection(plan) {{
+function replaceRows(selector, rows, fields) {{
+  for (const table of document.querySelectorAll(selector)) {{
+    table.replaceChildren();
+    for (const row of rows) {{
+      const tr = document.createElement('tr');
+      for (const field of fields) {{
+        const td = document.createElement('td');
+        td.textContent = String(field(row) ?? '');
+        tr.append(td);
+      }}
+      table.append(tr);
+    }}
+  }}
+}}
+function renderDashboard(_page, projection) {{
+  const plan = projection.system_plan || projection;
+  const services = plan.services || [];
+  const enabled = services.filter(service => service.enable === true || service.enable === 'true').length;
+  const serviceCount = document.querySelector('[data-live-count=services]');
+  const packageCount = document.querySelector('[data-live-count=packages]');
+  const optionCount = document.querySelector('[data-live-count=options]');
+  if (serviceCount) serviceCount.textContent = `${{enabled}}/${{services.length}}`;
+  if (packageCount) packageCount.textContent = String((plan.packages || []).length);
+  if (optionCount) optionCount.textContent = String((plan.options || []).length);
+}}
+function renderSettings(_page, projection) {{
+  const plan = projection.system_plan || projection;
   const controls = document.getElementById('settings-controls');
   controls.replaceChildren();
   for (const option of plan.options || []) {{
@@ -465,6 +493,55 @@ function renderProjection(plan) {{
     controls.append(row);
   }}
 }}
+function renderServices(_page, projection) {{
+  const plan = projection.system_plan || projection;
+  replaceRows('[data-live-services]', plan.services || [], [row => row.name, row => row.enable, row => row.fields || '']);
+}}
+function renderPackages(_page, projection) {{
+  const plan = projection.system_plan || projection;
+  replaceRows('[data-live-packages]', plan.packages || [], [row => row.name, row => row.version || row.source || row.ref]);
+}}
+function renderOptions(_page, projection) {{
+  const plan = projection.system_plan || projection;
+  replaceRows('[data-live-options]', plan.options || [], [row => row.key, row => row.value]);
+}}
+function renderProof(_page, projection) {{
+  for (const output of document.querySelectorAll('[data-live-proof]')) {{
+    const state = projection.proof_state || {{ state: 'unproved', source_revision: null }};
+    output.textContent = `proof: ${{state.state}}\nsource revision: ${{state.source_revision || 'none'}}`;
+  }}
+}}
+function renderGenerations(_page, projection) {{
+  const output = document.querySelector('[data-live-generations]');
+  if (output) output.textContent = projection.generations || 'No generations recorded.';
+}}
+function renderComposite(page, projection) {{
+  renderPackages(page, projection);
+  renderServices(page, projection);
+  renderOptions(page, projection);
+  renderProof(page, projection);
+}}
+function renderBound(page, projection, entry) {{
+  page.dataset.modelRevision = projection.proof_state?.source_revision || 'live';
+  page.dataset.dataNeeds = entry.data_needs || '';
+}}
+function renderMissing(page, projection, entry) {{
+  renderBound(page, projection, entry);
+  const detail = page.querySelector('.empty');
+  if (detail) detail.textContent = `No renderer registered for ${{entry.renderer}}.`;
+}}
+const PAGE_RENDERERS = {{
+  dashboard: (page, model, entry) => {{ renderBound(page, model, entry); renderDashboard(page, model); renderServices(page, model); renderProof(page, model); }},
+  settings: (page, model, entry) => {{ renderBound(page, model, entry); renderSettings(page, model); }},
+  monitoring: (page, model, entry) => {{ renderBound(page, model, entry); renderServices(page, model); renderProof(page, model); }},
+  services: (page, model, entry) => {{ renderBound(page, model, entry); renderServices(page, model); }},
+  packages: (page, model, entry) => {{ renderBound(page, model, entry); renderPackages(page, model); }},
+  secrets: (page, model, entry) => {{ renderBound(page, model, entry); renderOptions(page, model); }},
+  fleet: renderBound,
+  generations: (page, model, entry) => {{ renderBound(page, model, entry); renderGenerations(page, model); }},
+  changeset: renderBound,
+  'proof-provenance': (page, model, entry) => {{ renderBound(page, model, entry); renderComposite(page, model); renderGenerations(page, model); }}
+}};
 async function studioPost(path, payload) {{
   const res = await fetch(path, {{ method: 'POST', headers: {{ 'Content-Type': 'application/json' }}, body: JSON.stringify(payload) }});
   return await res.json();

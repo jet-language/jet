@@ -15,12 +15,20 @@ struct StudioAppliedChange {
     after_source: String,
 }
 
+#[derive(Clone)]
+struct StudioProvedSource {
+    source: String,
+    revision: String,
+}
+
 struct StudioCommandResult {
     action: String,
     status: i32,
     success: bool,
     stdout: String,
     stderr: String,
+    source_revision: Option<String>,
+    source_changed_after: bool,
 }
 
 fn handle_studio_transaction(
@@ -33,7 +41,16 @@ fn handle_studio_transaction(
             "{\"error\":\"missing Studio project context\"}".to_string(),
         );
     };
-    let op = json_string_field(body, "op").unwrap_or_default();
+    let request = match studio_request(body) {
+        Ok(request) => request,
+        Err(error) => {
+            return (
+                "400 Bad Request",
+                format!("{{\"error\":{}}}", JSON::quote(&error)),
+            )
+        }
+    };
+    let op = studio_request_string(&request, "op").unwrap_or_default();
     if op == "status" {
         return studio_changeset_status(context);
     }
@@ -52,16 +69,16 @@ fn handle_studio_transaction(
             "{\"error\":\"unsupported Studio transaction\"}".to_string(),
         );
     }
-    let Some(key) = json_string_field(body, "key") else {
+    let Some(key) = studio_request_string(&request, "key") else {
         return ("400 Bad Request", "{\"error\":\"missing key\"}".to_string());
     };
-    let Some(value) = json_string_field(body, "value") else {
+    let Some(value) = studio_request_string(&request, "value") else {
         return (
             "400 Bad Request",
             "{\"error\":\"missing value\"}".to_string(),
         );
     };
-    if json_bool_field(body, "write") {
+    if studio_request_bool(&request, "write") {
         return (
             "400 Bad Request",
             "{\"error\":\"direct Studio writes are disabled\",\"fix\":\"stage the edit, review the exact diff, then Apply the Changeset\"}".to_string(),
@@ -371,7 +388,16 @@ fn handle_studio_run(body: &str, context: Option<&StudioContext>) -> (&'static s
             "{\"error\":\"missing Studio project context\"}".to_string(),
         );
     };
-    let Some(action) = json_string_field(body, "action") else {
+    let request = match studio_request(body) {
+        Ok(request) => request,
+        Err(error) => {
+            return (
+                "400 Bad Request",
+                format!("{{\"error\":{}}}", JSON::quote(&error)),
+            )
+        }
+    };
+    let Some(action) = studio_request_string(&request, "action") else {
         return (
             "400 Bad Request",
             "{\"error\":\"missing action\"}".to_string(),
@@ -397,43 +423,127 @@ fn handle_studio_run(body: &str, context: Option<&StudioContext>) -> (&'static s
             "{\"error\":\"apply or discard the staged Changeset before build, proof, or switch\"}".to_string(),
         );
     }
-    if action == "switch" {
-        let source = std::fs::read_to_string(&context.config).unwrap_or_default();
-        let proved = context
-            .proved_source
-            .lock()
-            .map(|proved| proved.as_deref() == Some(source.as_str()))
+    let result = if action == "proof" {
+        let captured = match std::fs::read_to_string(&context.config) {
+            Ok(source) => source,
+            Err(error) => {
+                return (
+                    "500 Internal Server Error",
+                    format!("{{\"error\":{}}}", JSON::quote(&format!("reading config failed: {error}"))),
+                )
+            }
+        };
+        let revision = crate::SHA256::sha256_hex(captured.as_bytes());
+        let mut result = match run_studio_command_snapshot(context, "proof", &captured) {
+            Ok(result) => result,
+            Err(error) => {
+                return (
+                    "500 Internal Server Error",
+                    format!("{{\"error\":{}}}", JSON::quote(&error)),
+                )
+            }
+        };
+        let unchanged = std::fs::read_to_string(&context.config)
+            .map(|source| source == captured)
             .unwrap_or(false);
-        if !proved {
+        result.source_revision = Some(revision.clone());
+        result.source_changed_after = !unchanged;
+        if result.success && unchanged {
+            if let Ok(mut proved) = context.proved_source.lock() {
+                *proved = Some(StudioProvedSource {
+                    source: captured,
+                    revision,
+                });
+            }
+            invalidate_studio_projection(context);
+        } else if !unchanged {
+            result.success = false;
+            result.status = 3;
+            result.stderr = "config.jet changed while proof was running; proof was not bound".to_string();
+        }
+        result
+    } else if action == "switch" {
+        let current = std::fs::read_to_string(&context.config).unwrap_or_default();
+        let proved = context.proved_source.lock().ok().and_then(|proved| proved.clone());
+        let Some(proved) = proved else {
+            return (
+                "409 Conflict",
+                "{\"error\":\"current config.jet has no matching successful proof\",\"fix\":\"build and prove this exact source before switching\"}".to_string(),
+            );
+        };
+        if current != proved.source
+            || crate::SHA256::sha256_hex(current.as_bytes()) != proved.revision
+        {
             return (
                 "409 Conflict",
                 "{\"error\":\"current config.jet has no matching successful proof\",\"fix\":\"build and prove this exact source before switching\"}".to_string(),
             );
         }
-    }
-    let result = match run_studio_command(context, &action) {
-        Ok(result) => result,
-        Err(error) => {
-            return (
-                "500 Internal Server Error",
-                format!("{{\"error\":{}}}", JSON::quote(&error)),
-            )
+        let mut result = match run_studio_command_snapshot(context, "switch", &proved.source) {
+            Ok(result) => result,
+            Err(error) => {
+                return (
+                    "500 Internal Server Error",
+                    format!("{{\"error\":{}}}", JSON::quote(&error)),
+                )
+            }
+        };
+        result.source_revision = Some(proved.revision);
+        result.source_changed_after = std::fs::read_to_string(&context.config)
+            .map(|source| source != proved.source)
+            .unwrap_or(true);
+        invalidate_studio_projection(context);
+        result
+    } else {
+        match run_studio_command(context, &action) {
+            Ok(result) => result,
+            Err(error) => {
+                return (
+                    "500 Internal Server Error",
+                    format!("{{\"error\":{}}}", JSON::quote(&error)),
+                )
+            }
         }
     };
-    if action == "proof" && result.success {
-        if let (Ok(source), Ok(mut proved)) = (
-            std::fs::read_to_string(&context.config),
-            context.proved_source.lock(),
-        ) {
-            *proved = Some(source);
-        }
-    }
     ("200 OK", studio_command_json(context, &result))
+}
+
+fn invalidate_studio_projection(context: &StudioContext) {
+    if let Ok(mut projection) = context.live_projection.lock() {
+        *projection = None;
+    }
 }
 
 fn run_studio_command(
     context: &StudioContext,
     action: &str,
+) -> Result<StudioCommandResult, String> {
+    run_studio_command_target(context, action, &context.host)
+}
+
+fn run_studio_command_snapshot(
+    context: &StudioContext,
+    action: &str,
+    source: &str,
+) -> Result<StudioCommandResult, String> {
+    let parent = context.config.parent().unwrap_or_else(|| Path::new("."));
+    let snapshot = parent.join(format!(
+        ".jetos-studio-{action}-{}-{}.jet",
+        std::process::id(),
+        crate::SHA256::sha256_hex(source.as_bytes())
+    ));
+    atomic_write_studio_source(&snapshot, source)
+        .map_err(|error| format!("writing immutable Studio source snapshot failed: {error}"))?;
+    let target = format!("{}@{}", snapshot.display(), context.host);
+    let result = run_studio_command_target(context, action, &target);
+    let _ = std::fs::remove_file(snapshot);
+    result
+}
+
+fn run_studio_command_target(
+    context: &StudioContext,
+    action: &str,
+    target: &str,
 ) -> Result<StudioCommandResult, String> {
     let Some(jet) = sibling_binary("jet") else {
         return Err("could not find sibling jet binary".to_string());
@@ -446,7 +556,7 @@ fn run_studio_command(
     let mut cmd = std::process::Command::new(jet);
     cmd.arg("os")
         .arg(&action)
-        .arg(&context.host)
+        .arg(target)
         .arg("--no-color");
     if action == "plan" || action == "proof" {
         cmd.arg("--json");
@@ -470,16 +580,24 @@ fn run_studio_command(
         success: output.status.success(),
         stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
         stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        source_revision: None,
+        source_changed_after: false,
     })
 }
 
 fn studio_command_json(context: &StudioContext, result: &StudioCommandResult) -> String {
     format!(
-        "{{\"host\":{},\"action\":{},\"status\":{},\"success\":{},\"stdout\":{},\"stderr\":{}}}",
+        "{{\"host\":{},\"action\":{},\"status\":{},\"success\":{},\"source_revision\":{},\"source_changed_after\":{},\"stdout\":{},\"stderr\":{}}}",
         JSON::quote(&context.host),
         JSON::quote(&result.action),
         result.status,
         if result.success { "true" } else { "false" },
+        result
+            .source_revision
+            .as_deref()
+            .map(JSON::quote)
+            .unwrap_or_else(|| "null".to_string()),
+        if result.source_changed_after { "true" } else { "false" },
         JSON::quote(&result.stdout),
         JSON::quote(&result.stderr)
     )
@@ -489,11 +607,6 @@ fn studio_live_projection(context: &StudioContext, generation_data: &Path) -> Re
     if !context.config.is_file() {
         return std::fs::read_to_string(generation_data)
             .map_err(|e| format!("reading installed Studio projection failed: {e}"));
-    }
-    if let Ok(projection) = context.live_projection.lock() {
-        if let Some(projection) = projection.as_ref() {
-            return Ok(projection.clone());
-        }
     }
     rebuild_studio_projection_from(context, generation_data)
 }
@@ -519,11 +632,31 @@ fn rebuild_studio_projection_from(
     }
     let generation = std::fs::read_to_string(generation_data)
         .unwrap_or_else(|_| "null".to_string());
+    let generations = run_studio_command(context, "generations")
+        .map(|result| if result.success { result.stdout } else { result.stderr })
+        .unwrap_or_default();
+    let current_source = std::fs::read_to_string(&context.config).unwrap_or_default();
+    let proof_revision = context
+        .proved_source
+        .lock()
+        .ok()
+        .and_then(|proved| proved.clone())
+        .filter(|proved| {
+            proved.source == current_source
+                && proved.revision == crate::SHA256::sha256_hex(current_source.as_bytes())
+        })
+        .map(|proved| proved.revision);
     let projection = format!(
-        "{{\"kind\":\"jetos-studio-projection\",\"source_truth\":\"live-checked-plan\",\"host\":{},\"page_registry\":[{}],\"system_plan\":{},\"generation_projection\":{}}}",
+        "{{\"kind\":\"jetos-studio-projection\",\"source_truth\":\"live-checked-plan\",\"host\":{},\"page_registry\":[{}],\"system_plan\":{},\"proof_state\":{{\"state\":{},\"source_revision\":{}}},\"generations\":{},\"generation_projection\":{}}}",
         JSON::quote(&context.host),
         super::JetOS::studio_pages_json(),
         plan.stdout.trim(),
+        JSON::quote(if proof_revision.is_some() { "proved" } else { "unproved" }),
+        proof_revision
+            .as_deref()
+            .map(JSON::quote)
+            .unwrap_or_else(|| "null".to_string()),
+        JSON::quote(&generations),
         generation.trim(),
     );
     let mut live = context
@@ -647,22 +780,29 @@ fn source_diff(path: &Path, before: &str, after: &str) -> String {
     diff
 }
 
-fn json_string_field(body: &str, key: &str) -> Option<String> {
-    let needle = format!("\"{key}\"");
-    let rest = body.split_once(&needle)?.1;
-    let rest = rest.split_once(':')?.1.trim_start();
-    let rest = rest.strip_prefix('"')?;
-    let end = rest.find('"')?;
-    Some(rest[..end].replace("\\\"", "\"").replace("\\\\", "\\"))
+fn studio_request(
+    body: &str,
+) -> Result<std::collections::BTreeMap<String, JSON::Json>, String> {
+    let parsed = JSON::parse(body).map_err(|error| format!("invalid Studio JSON request: {error}"))?;
+    match parsed {
+        JSON::Json::Object(object) => Ok(object),
+        _ => Err("Studio request must be a JSON object".to_string()),
+    }
 }
 
-fn json_bool_field(body: &str, key: &str) -> bool {
-    let needle = format!("\"{key}\"");
-    let Some(rest) = body.split_once(&needle).map(|(_, rest)| rest) else {
-        return false;
-    };
-    let Some(rest) = rest.split_once(':').map(|(_, rest)| rest.trim_start()) else {
-        return false;
-    };
-    rest.starts_with("true")
+fn studio_request_string(
+    request: &std::collections::BTreeMap<String, JSON::Json>,
+    key: &str,
+) -> Option<String> {
+    match request.get(key) {
+        Some(JSON::Json::Str(value)) => Some(value.clone()),
+        _ => None,
+    }
+}
+
+fn studio_request_bool(
+    request: &std::collections::BTreeMap<String, JSON::Json>,
+    key: &str,
+) -> bool {
+    matches!(request.get(key), Some(JSON::Json::Bool(true)))
 }
