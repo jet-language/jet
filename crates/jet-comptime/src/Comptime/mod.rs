@@ -29,7 +29,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use crate::Diagnostics::Diagnostic;
-use crate::AST::{Expr, Func, StructDef};
+use crate::AST::{EnumDef, Expr, Func, StructDef};
 
 pub use Interpreter::{DebugHook, DevSink, REPL_FUEL_BUDGET};
 pub use Purity::walk_calls;
@@ -293,6 +293,7 @@ pub struct ProgramInfo<'a> {
     pub globals: HashMap<String, CtValue>,
     pub methods: HashMap<(String, String), &'a Func>,
     pub structs: HashMap<String, &'a StructDef>,
+    pub enums: HashMap<String, &'a EnumDef>,
     pub computed_fields: HashMap<(String, String), &'a Expr>,
     pub distinct_ranges: HashMap<String, Option<(i64, i64)>>,
     pub core_imports: HashMap<String, String>,
@@ -304,6 +305,7 @@ impl<'a> ProgramInfo<'a> {
             globals: HashMap::new(),
             methods: HashMap::new(),
             structs: HashMap::new(),
+            enums: HashMap::new(),
             computed_fields: HashMap::new(),
             distinct_ranges: HashMap::new(),
             core_imports: HashMap::new(),

@@ -678,13 +678,18 @@ fn compile_bundle_path_build_inner(
         let mut funcs = std::collections::HashMap::new();
         let mut methods = std::collections::HashMap::new();
         let mut structs = std::collections::HashMap::new();
+        let mut enums = std::collections::HashMap::new();
         let computed_fields = std::collections::HashMap::new();
         let distinct_ranges = std::collections::HashMap::new();
         let mut function_name_counts = std::collections::HashMap::<String, usize>::new();
+        let mut type_name_counts = std::collections::HashMap::<String, usize>::new();
         for module in &bundle.modules {
             for item in &module.items {
-                if let crate::AST::Item::Func(func) = item {
-                    *function_name_counts.entry(func.name.clone()).or_default() += 1;
+                match item {
+                    crate::AST::Item::Func(func) => *function_name_counts.entry(func.name.clone()).or_default() += 1,
+                    crate::AST::Item::Struct(def) => *type_name_counts.entry(def.name.clone()).or_default() += 1,
+                    crate::AST::Item::Enum(def) => *type_name_counts.entry(def.name.clone()).or_default() += 1,
+                    _ => {}
                 }
             }
         }
@@ -698,14 +703,28 @@ fn compile_bundle_path_build_inner(
                         }
                     }
                     crate::AST::Item::Struct(def) => {
-                        structs.insert(def.name.clone(), def);
+                        let owner = format!("{}::{}", module.alias, def.name);
+                        structs.insert(owner.clone(), def);
+                        if type_name_counts.get(&def.name) == Some(&1) { structs.insert(def.name.clone(), def); }
                         for method in &def.methods {
-                            methods.insert((def.name.clone(), method.name.clone()), method);
+                            methods.insert((owner.clone(), method.name.clone()), method);
+                            if type_name_counts.get(&def.name) == Some(&1) { methods.insert((def.name.clone(), method.name.clone()), method); }
+                        }
+                    }
+                    crate::AST::Item::Enum(def) => {
+                        let owner = format!("{}::{}", module.alias, def.name);
+                        enums.insert(owner.clone(), def);
+                        if type_name_counts.get(&def.name) == Some(&1) { enums.insert(def.name.clone(), def); }
+                        for method in &def.methods {
+                            methods.insert((owner.clone(), method.name.clone()), method);
+                            if type_name_counts.get(&def.name) == Some(&1) { methods.insert((def.name.clone(), method.name.clone()), method); }
                         }
                     }
                     crate::AST::Item::Impl(imp) => {
+                        let owner = format!("{}::{}", module.alias, imp.type_name);
                         for method in &imp.methods {
-                            methods.insert((imp.type_name.clone(), method.name.clone()), method);
+                            methods.insert((owner.clone(), method.name.clone()), method);
+                            if type_name_counts.get(&imp.type_name) == Some(&1) { methods.insert((imp.type_name.clone(), method.name.clone()), method); }
                         }
                     }
                     _ => {}
@@ -718,6 +737,7 @@ fn compile_bundle_path_build_inner(
             globals,
             methods,
             structs,
+            enums,
             computed_fields,
             distinct_ranges,
             core_imports,
@@ -753,7 +773,8 @@ fn compile_bundle_path_build_inner(
         )?;
 
         let selected_actions = evaluated.plan.selected_action_ids().map_err(|error| vec![build_plan_diagnostic(&error)])?;
-        let transaction_paths = evaluated.plan.generated_modules().iter()
+        let selected_generated = evaluated.plan.selected_generated_modules().map_err(|error| vec![build_plan_diagnostic(&error)])?;
+        let transaction_paths = selected_generated.iter()
             .map(|module| bundle.project_root.join(module.path.as_str()))
             .chain(evaluated.plan.actions().iter().filter(|action| selected_actions.contains(&action.id)).flat_map(|action| action.outputs.iter().map(|output| bundle.project_root.join(output.as_str()))))
             .chain(std::iter::once(bundle.project_root.join(".jet/lock")))
@@ -761,7 +782,7 @@ fn compile_bundle_path_build_inner(
         filesystem_transaction = Some(BuildFilesystemTransaction::new(transaction_paths)
             .map_err(|error| vec![generated_io_diag("build filesystem transaction", &error)])?);
         if options.locked {
-            let planned_generated = evaluated.plan.generated_modules().iter().map(|module| crate::AST::ComptimeInput {
+            let planned_generated = selected_generated.iter().map(|module| crate::AST::ComptimeInput {
                 path: module.path.as_str().to_string(),
                 hash: module.source_digest.as_str().to_string(),
             }).collect::<Vec<_>>();
@@ -769,9 +790,9 @@ fn compile_bundle_path_build_inner(
                 .map_err(|diagnostic| vec![diagnostic])?;
         }
         let mut generated = if options.execute {
-            materialize_and_check_generated(&evaluated.plan, &bundle.project_root)?
+            materialize_and_check_generated(&selected_generated, &bundle.project_root)?
         } else {
-            evaluated.plan.generated_modules().iter().map(|module| GeneratedSourceProvenance {
+            selected_generated.iter().map(|module| GeneratedSourceProvenance {
                 name: module.name.clone(),
                 path: bundle.project_root.join(module.path.as_str()),
                 digest: module.source_digest.clone(),
@@ -1109,33 +1130,16 @@ fn program_semantic_facts(
         visiting.remove(name);
         reached
     }
-    let mut counts = std::collections::HashMap::<String, usize>::new();
-    for module in &bundle.modules {
-        for item in &module.items {
-            if let crate::AST::Item::Func(func) = item {
-                *counts.entry(func.name.clone()).or_default() += 1;
-            }
-        }
-    }
     let mut effects = std::collections::HashMap::new();
     let mut panic_facts = std::collections::BTreeSet::new();
     for module in &bundle.modules {
         for item in &module.items {
             let crate::AST::Item::Func(func) = item else { continue };
             let qualified = format!("{}::{}", module.alias, func.name);
-            let values = if counts.get(&func.name) == Some(&1) {
-                checked.solved.get(&func.name).map(|set| set.iter().cloned().collect()).unwrap_or_default()
-            } else {
-                // Duplicate short names cannot share the checker's legacy flat key.
-                // Their checked declarations remain exact and collision-free.
-                func.declared_effects.as_ref().into_iter().flatten()
-                    .filter(|(name, _)| !name.starts_with('!'))
-                    .map(|(name, _)| name.clone()).collect()
-            };
+            let values = checked.solved.get(&qualified)
+                .map(|set| set.iter().cloned().collect()).unwrap_or_default();
             effects.insert(qualified.clone(), values);
-            if counts.get(&func.name) == Some(&1)
-                && reaches_panic(&func.name, &checked.summaries, &mut std::collections::BTreeSet::new())
-            {
+            if reaches_panic(&qualified, &checked.summaries, &mut std::collections::BTreeSet::new()) {
                 panic_facts.insert(qualified);
             }
         }
@@ -1155,11 +1159,11 @@ fn bad_build_signature(span: crate::Diagnostics::Span) -> Diagnostic {
 }
 
 fn materialize_and_check_generated(
-    plan: &crate::Comptime::Build::BuildPlan,
+    modules: &[&crate::Comptime::Build::BuildGeneratedModule],
     root: &std::path::Path,
 ) -> Result<Vec<GeneratedSourceProvenance>, Vec<Diagnostic>> {
     let mut provenance = Vec::new();
-    for module in plan.generated_modules() {
+    for module in modules {
         let path = root.join(module.path.as_str());
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|error| vec![generated_io_diag(&module.name, &error)])?;

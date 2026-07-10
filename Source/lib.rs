@@ -148,7 +148,7 @@ pub fn compile_programmable_build_opts(
     plugin_target: bool,
     cross_target: Option<&str>,
 ) -> Result<CompileOutput, Vec<Diagnostic>> {
-    let grants = resolve_build_grants(file, grants);
+    let grants = resolve_build_grants(file, grants)?;
     let grants = grants
         .iter()
         .filter_map(|grant| Comptime::Build::BuildCapability::parse(grant))
@@ -169,30 +169,55 @@ pub fn compile_programmable_build_opts(
     .map(|output| output.compile)
 }
 
-fn resolve_build_grants(file: &str, cli: &[String]) -> Vec<String> {
+fn resolve_build_grants(file: &str, cli: &[String]) -> Result<Vec<String>, Vec<Diagnostic>> {
     let mut allowed = cli.iter().cloned().collect::<std::collections::BTreeSet<_>>();
+    let mut workspace_denies = std::collections::BTreeSet::new();
     let mut directory = std::path::Path::new(file).parent();
     while let Some(dir) = directory {
-        if let Some(Ok(package)) = Jetpack::PackageManifest::PackManifest::load(dir) {
-            for effect in package.build_allow {
-                if let Some(capability) = Comptime::Build::BuildCapability::parse(&effect) {
-                    allowed.insert(capability.flag().to_string());
+        let package_path = dir.join(Syntax::PAYLOAD_FILE);
+        if let Ok(source) = std::fs::read_to_string(&package_path) {
+            match Jetpack::PackageManifest::parse(&source) {
+                Ok(package) => {
+                    for effect in package.build_allow {
+                        if let Some(capability) = Comptime::Build::BuildCapability::parse(&effect) {
+                            allowed.insert(capability.flag().to_string());
+                        }
+                    }
+                }
+                Err(error) => {
+                    let diagnostic = Jetpack::Manifest::parse(&package_path, &source).err()
+                        .unwrap_or_else(|| Diagnostic::error(
+                            "E3503",
+                            format!("build policy in `{}` is malformed", package_path.display()),
+                            format!("typed package policy parser rejected it: {error:?}"),
+                            "fix the `build: { allow: #(…) }` block before running build code".to_string(),
+                            None,
+                        ));
+                    return Err(vec![diagnostic]);
                 }
             }
         }
         let workspace = dir.join(Syntax::WORKSPACE_FILE);
         if let Ok(source) = std::fs::read_to_string(&workspace) {
-            if let Ok(policy) = Jetpack::Overlay::parse_workspace_policy(&source) {
-                for effect in policy.build_deny {
+            match Jetpack::Overlay::parse_workspace_policy(&source) {
+                Ok(policy) => for effect in policy.build_deny {
                     if let Some(capability) = Comptime::Build::BuildCapability::parse(&effect) {
-                        allowed.remove(capability.flag());
+                        workspace_denies.insert(capability.flag().to_string());
                     }
-                }
+                },
+                Err(error) => return Err(vec![Diagnostic::error(
+                    "E3503",
+                    format!("build policy in `{}` is malformed", workspace.display()),
+                    error.message().to_string(),
+                    "fix the typed `policy: .{ deny: #(…) }` block before running build code".to_string(),
+                    None,
+                )]),
             }
         }
         directory = dir.parent();
     }
-    allowed.into_iter().collect()
+    for denied in workspace_denies { allowed.remove(&denied); }
+    Ok(allowed.into_iter().collect())
 }
 
 fn compile_bundle_path_opts(

@@ -299,10 +299,10 @@ fn parse_allow_unfree(body: &str) -> Result<Vec<String>, OverlayError> {
 }
 
 fn parse_build_deny(body: &str) -> Result<Vec<String>, OverlayError> {
-    let Some(policy_body) = named_block(body, Syntax::MANIFEST_BLOCK_POLICY) else {
+    let Some(policy_body) = named_block(body, Syntax::MANIFEST_BLOCK_POLICY)? else {
         return Ok(Vec::new());
     };
-    let Some(raw) = exact_field_value(&policy_body, Syntax::EFFECTS_FIELD_DENY) else {
+    let Some(raw) = exact_field_value(&policy_body, Syntax::EFFECTS_FIELD_DENY)? else {
         return Ok(Vec::new());
     };
     let inner = raw
@@ -318,7 +318,7 @@ fn parse_build_deny(body: &str) -> Result<Vec<String>, OverlayError> {
         .collect())
 }
 
-fn named_block(body: &str, name: &str) -> Option<String> {
+fn named_block(body: &str, name: &str) -> Result<Option<String>, OverlayError> {
     let mut pos = 0;
     while let Some(rel) = body[pos..].find(name) {
         let at = pos + rel;
@@ -328,32 +328,89 @@ fn named_block(body: &str, name: &str) -> Option<String> {
             .chars()
             .next()
             .is_some_and(|c| c.is_ascii_alphanumeric() || c == '_');
-        if before_ok && after_ok {
+        if before_ok && after_ok && code_depth_at(body, at) == Some(0) {
             let rest = body[after..].trim_start();
             if let Some(rest) = rest.strip_prefix(':') {
                 let rest = rest.trim_start();
                 if let Some(rest) = rest.strip_prefix('.') {
                     if let Some(inner) = rest.trim_start().strip_prefix('{') {
-                        return Some(balanced_with_len(inner, '{', '}').0);
+                        return balanced_policy_body(inner).map(Some);
                     }
                 }
             }
         }
         pos = after;
     }
-    None
+    Ok(None)
 }
 
-fn exact_field_value(body: &str, field: &str) -> Option<String> {
+fn code_depth_at(source: &str, stop: usize) -> Option<i32> {
+    let mut depth = 0;
+    let mut quoted = false;
+    let mut escaped = false;
+    let mut comment = false;
+    let mut chars = source.char_indices().peekable();
+    while let Some((index, ch)) = chars.next() {
+        if index >= stop { break; }
+        if comment {
+            if ch == '\n' { comment = false; }
+            continue;
+        }
+        if quoted {
+            if escaped { escaped = false; }
+            else if ch == '\\' { escaped = true; }
+            else if ch == '"' { quoted = false; }
+            continue;
+        }
+        if ch == '/' && chars.peek().is_some_and(|(_, next)| *next == '/') {
+            comment = true;
+        } else if ch == '"' { quoted = true; }
+        else if matches!(ch, '(' | '[' | '{') { depth += 1; }
+        else if matches!(ch, ')' | ']' | '}') { depth -= 1; }
+    }
+    (!quoted && !comment).then_some(depth)
+}
+
+fn balanced_policy_body(source: &str) -> Result<String, OverlayError> {
+    let mut depth = 1i32;
+    let mut quoted = false;
+    let mut escaped = false;
+    let mut comment = false;
+    let mut chars = source.char_indices().peekable();
+    while let Some((index, ch)) = chars.next() {
+        if comment {
+            if ch == '\n' { comment = false; }
+            continue;
+        }
+        if quoted {
+            if escaped { escaped = false; }
+            else if ch == '\\' { escaped = true; }
+            else if ch == '"' { quoted = false; }
+            continue;
+        }
+        if ch == '/' && chars.peek().is_some_and(|(_, next)| *next == '/') { comment = true; }
+        else if ch == '"' { quoted = true; }
+        else if ch == '{' { depth += 1; }
+        else if ch == '}' {
+            depth -= 1;
+            if depth == 0 { return Ok(source[..index].to_string()); }
+        }
+    }
+    Err(OverlayError::Malformed("unclosed `policy: .{ … }` block".to_string()))
+}
+
+fn exact_field_value(body: &str, field: &str) -> Result<Option<String>, OverlayError> {
     for entry in top_level_commas(body) {
         let entry = entry.trim();
         if let Some((name, value)) = entry.split_once(':') {
             if name.trim() == field {
-                return Some(value.trim().to_string());
+                return Ok(Some(value.trim().to_string()));
             }
+        } else if entry.split_whitespace().next() == Some(field) {
+            return Err(OverlayError::Malformed(format!("`policy.{field}` needs `:`")));
         }
     }
-    None
+    Ok(None)
 }
 
 fn merge_package_override(packages: &mut Vec<PackageOverride>, incoming: PackageOverride) {

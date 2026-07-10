@@ -155,7 +155,7 @@ fn execute_one_action(
     ).map_err(BuildExecutionError::InvalidGraph)?;
     let record_path = records.join(key.as_str().trim_start_matches("act-sha256:"));
     if action.cache == ActionCache::Cached {
-        if let Some(record) = read_action_record(&record_path, key.clone()) {
+        if let Some(record) = read_action_record(records, &record_path, key.clone()) {
             if cas.restore_action_outputs(project_root, action, &record).is_ok() {
                 return Ok(ActionOutcome::RestoredFromCache);
             }
@@ -298,11 +298,12 @@ fn write_action_record(path: &Path, record: &ActionResultRecord) -> io::Result<(
     for output in &record.outputs {
         text.push_str(&format!("{}\t{}\t{}\n", output.path.as_str(), output.digest.as_str(), output.byte_len));
     }
-    fs::write(path, text)
+    let root = path.parent().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "action record has no cache directory"))?;
+    atomic_restore_file(root, path, text.as_bytes())
 }
 
-fn read_action_record(path: &Path, key: ActionKey) -> Option<ActionResultRecord> {
-    let text = fs::read_to_string(path).ok()?;
+fn read_action_record(root: &Path, path: &Path, key: ActionKey) -> Option<ActionResultRecord> {
+    let text = String::from_utf8(secure_read_file(root, path).ok()?).ok()?;
     let mut lines = text.lines();
     if lines.next()? != key.as_str() { return None; }
     let mut outputs = Vec::new();

@@ -436,7 +436,8 @@ impl<'a> Interp<'a> {
             return self.call_closure(&f, vals, span);
         }
         // A user function: bind params, run the body in a fresh frame.
-        let func = match self.funcs.get(name).copied() {
+        let qualified = name.split_once('.').map(|(module, symbol)| format!("{module}::{symbol}"));
+        let func = match self.funcs.get(name).copied().or_else(|| qualified.as_ref().and_then(|name| self.funcs.get(name).copied())) {
             Some(f) => f,
             None => {
                 // c139 JIT/interpreter-parity: `Name(expr)` where `Name` isn't a
@@ -1121,6 +1122,17 @@ impl<'a> Interp<'a> {
                             frame.insert(p.name.clone(), v);
                         }
                         return self.call_func(&format!("{}.{}", name, method), f, frame);
+                    }
+                }
+                let qualified = format!("{name}::{method}");
+                if let Some(f) = self.funcs.get(qualified.as_str()).copied() {
+                    if f.params.len() == args.len() {
+                        let mut frame = HashMap::new();
+                        for (p, a) in f.params.iter().zip(args) {
+                            let v = self.eval(&a.expr, scope)?;
+                            frame.insert(p.name.clone(), v);
+                        }
+                        return self.call_func(&qualified, f, frame);
                     }
                 }
                 let mangled = format!("{}__{}", name, method);

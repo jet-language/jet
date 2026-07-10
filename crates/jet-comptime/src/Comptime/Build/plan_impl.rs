@@ -31,6 +31,22 @@ impl BuildPlan {
         &self.generated_modules
     }
 
+    /// Generated modules reachable from the selected target's explicit source
+    /// list or selected action outputs. Merely registering `b.generate` does
+    /// not make an unselected module part of the runtime program.
+    pub fn selected_generated_modules(&self) -> Result<Vec<&BuildGeneratedModule>, BuildError> {
+        let mut paths = self.selected_sources()?.into_iter()
+            .map(|path| path.as_str().to_string())
+            .collect::<BTreeSet<_>>();
+        let actions = self.selected_action_ids()?;
+        for action in self.actions.iter().filter(|action| actions.contains(&action.id)) {
+            paths.extend(action.outputs.iter().map(|path| path.as_str().to_string()));
+        }
+        Ok(self.generated_modules.iter()
+            .filter(|module| paths.contains(module.path.as_str()))
+            .collect())
+    }
+
     /// Actions reachable from the selected default target. A plan without a
     /// default intentionally selects every registered target.
     pub fn selected_action_ids(&self) -> Result<BTreeSet<ActionId>, BuildError> {

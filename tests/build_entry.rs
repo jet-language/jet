@@ -55,7 +55,7 @@ fn build(b: BuildContext) #(Exec, Fs) -> BuildPlan ? {
         ["sh", "-c", "printf stamped > .jet/generated/app/stamp.txt"],
         ["Exec", "Fs"]
     )?
-    app :: b.add_executable("app", ["main.jet"], [stamp])?
+    app :: b.add_executable("app", ["main.jet", ".jet/generated/main/generated_message.jet"], [stamp])?
     return b.plan(app)
     }
     return b.plan()
@@ -111,7 +111,7 @@ fn malformed_generated_source_is_a_jet_diagnostic_before_codegen() {
         r#"
 fn build(b: BuildContext) -> BuildPlan ? {
     b.generate("broken", "fn nope(")?
-    app :: b.add_executable("app", ["main.jet"], [])?
+    app :: b.add_executable("app", ["main.jet", ".jet/generated/main/broken.jet"], [])?
     return b.plan(app)
 }
 fn run() {}
@@ -317,6 +317,22 @@ fn run() {}
 }
 
 #[test]
+fn unselected_malformed_generate_is_never_materialized_or_checked() {
+    let root = project("unselected-generate");
+    let entry = root.join("main.jet");
+    write(&entry, r#"
+fn build(b: BuildContext) -> BuildPlan ? {
+    b.generate("ignored", "fn broken(")?
+    app :: b.add_executable("app", ["main.jet"], [])?
+    return b.plan(app)
+}
+fn run() {}
+"#);
+    compile_bundle_path_build(entry.to_str().unwrap(), BuildRunOptions::default()).unwrap();
+    assert!(!root.join(".jet/generated/main/ignored.jet").exists());
+}
+
+#[test]
 fn runtime_reload_error_rolls_back_action_outputs_and_lock() {
     let root = project("reload-rollback");
     let entry = root.join("main.jet");
@@ -339,13 +355,15 @@ fn run() {}
 #[test]
 fn program_info_uses_qualified_collision_free_type_function_and_method_identities() {
     let root = project("program-identities");
-    write(&root.join("left.jet"), "pub enum Choice { A }\npub fn same() #(Net) {}\n");
-    write(&root.join("right.jet"), "pub struct Choice { value: Int }\nimpl Choice { pub fn inspect(self) {} }\npub fn same() {}\n");
+    write(&root.join("left.jet"), "pub enum Choice { A }\nfn helper() #(Net) {}\npub fn same() { helper(); panic(\"left\") }\npub fn answer() -> Int { return 7 }\n");
+    write(&root.join("right.jet"), "pub struct Choice { value: Int }\nimpl Choice { pub fn inspect(self) {} }\nfn helper() {}\npub fn same() { helper() }\n");
     let entry = root.join("main.jet");
     write(&entry, r#"
 use "./left" as left
 use "./right" as right
 fn build(b: BuildContext) -> BuildPlan ? {
+    answer :: left.answer()
+    if answer == 7 { b.error(b.program.functions()[0].span, "CALL", "qualified", "evaluator", "ok") }
     loop ty in b.program.types() {
         if ty.identity == "left::Choice" { b.error(ty.span, "ENUM", "enum", "identity", "ok") }
         loop method in ty.methods {
@@ -353,16 +371,22 @@ fn build(b: BuildContext) -> BuildPlan ? {
         }
     }
     loop f in b.program.functions() {
-        if f.identity == "left::same" && f.effects.has("Net") { b.error(f.span, "LEFT", "left", "effect", "ok") }
-        if f.identity == "right::same" && f.effects.has("Net") { b.error(f.span, "BAD", "collision", "effect", "fix") }
+        if f.identity == "left::same" && f.effects.has("Net") && f.reaches_panic() { b.error(f.span, "LEFT", "left", "effect", "ok") }
+        if f.identity == "right::same" && (f.effects.has("Net") || f.reaches_panic()) { b.error(f.span, "BAD", "collision", "effect", "fix") }
     }
     return b.plan()
 }
 fn run() { left.same(); right.same() }
 "#);
+    let (check_diags, _, facts) = jet::Driver::check_file_with_effect_facts(entry.to_str().unwrap(), None, false);
+    assert!(!check_diags.iter().any(|diag| diag.severity == jet::Diagnostics::Severity::Error), "{check_diags:#?}");
+    assert!(facts.solved.contains_key("left::same") && facts.solved.contains_key("right::same"));
+    assert!(!facts.solved.contains_key("same"), "duplicate short aliases must not exist");
+    assert!(facts.solved["left::same"].contains("Net"));
+    assert!(!facts.solved["right::same"].contains("Net"));
     let errors = compile_bundle_path_build(entry.to_str().unwrap(), BuildRunOptions::default()).unwrap_err();
     let codes = errors.iter().map(|diag| diag.code.as_str()).collect::<BTreeSet<_>>();
-    assert!(codes.contains("ENUM") && codes.contains("METHOD") && codes.contains("LEFT"), "{errors:#?}");
+    assert!(codes.contains("CALL") && codes.contains("ENUM") && codes.contains("METHOD") && codes.contains("LEFT"), "{errors:#?}");
     assert!(!codes.contains("BAD"), "{errors:#?}");
 }
 
@@ -478,7 +502,7 @@ fn locked_generated_drift_fails_before_materialization() {
     let source = |value: &str| format!(r#"
 fn build(b: BuildContext) -> BuildPlan ? {{
     b.generate("value", "fn generated_value() -> String {{{{ return \"{value}\" }}}}")?
-    app :: b.add_executable("app", ["main.jet"], [])?
+    app :: b.add_executable("app", ["main.jet", ".jet/generated/main/value.jet"], [])?
     return b.plan(app)
 }}
 fn run() {{ print(generated_value()) }}
@@ -514,7 +538,6 @@ fn build(b: BuildContext) #(Exec) -> BuildPlan ? {
     }
     return b.plan()
 }
-
 fn run() {}
 "#,
     );
@@ -535,6 +558,57 @@ fn run() {}
     ).unwrap_err();
     assert!(errors.iter().any(|diagnostic| diagnostic.code == "E3503"));
     assert!(!root.join("stamp").exists());
+}
+
+#[test]
+fn malformed_package_and_workspace_build_policy_fail_closed() {
+    let root = project("malformed-policy");
+    let entry = root.join("main.jet");
+    write(&entry, r#"
+fn build(b: BuildContext) #(Exec) -> BuildPlan ? {
+    #Impure("must never run under malformed policy") {
+    action :: b.action("stamp", [], ["stamp"], ["sh", "-c", "printf bad > stamp"], ["Exec"])?
+    app :: b.add_executable("app", ["main.jet"], [action])?
+    return b.plan(app)
+    }
+    return b.plan()
+}
+fn run() {}
+"#);
+    write(&root.join("pkg.jet"), "payload: { name: \"bad\", version: \"0.1.0\" }\nbuild: { allow: Exec }\n");
+    let errors = jet::compile_programmable_build_opts(entry.to_str().unwrap(), &[], false, true, false, false, false, None).unwrap_err();
+    assert!(errors.iter().any(|diagnostic| diagnostic.code == "E1221"), "{errors:#?}");
+    assert!(!root.join("stamp").exists());
+
+    write(&root.join("pkg.jet"), "payload: { name: \"bad\", version: \"0.1.0\" }\nbuild: { allow: #(Exec) }\n");
+    write(&root.join("workspace.jet"), "module workspace { policy: .{ trust: .{ note: \"nested } text\" }, deny: #(Exec) }\n");
+    let errors = jet::compile_programmable_build_opts(entry.to_str().unwrap(), &[], false, true, false, false, false, None).unwrap_err();
+    assert!(errors.iter().any(|diagnostic| diagnostic.code == "E3503" && diagnostic.what.contains("malformed")), "{errors:#?}");
+    assert!(!root.join("stamp").exists());
+}
+
+#[test]
+fn outer_package_grant_cannot_override_inner_workspace_deny() {
+    let root = project("policy-precedence");
+    let child = root.join("child");
+    fs::create_dir_all(&child).unwrap();
+    write(&root.join("pkg.jet"), "payload: { name: \"parent\", version: \"0.1.0\" }\nbuild: { allow: #(Exec) }\n");
+    write(&child.join("workspace.jet"), "module workspace { policy_note: .{ deny: #(Fs) }, policy: .{ trust: .{ nested: .{ deny: #(Fs) } }, deny: #(Exec) } }\n");
+    let entry = child.join("main.jet");
+    write(&entry, r#"
+fn build(b: BuildContext) #(Exec) -> BuildPlan ? {
+    #Impure("workspace ceiling wins last") {
+    action :: b.action("stamp", [], ["stamp"], ["sh", "-c", "printf bad > stamp"], ["Exec"])?
+    app :: b.add_executable("app", ["main.jet"], [action])?
+    return b.plan(app)
+    }
+    return b.plan()
+}
+fn run() {}
+"#);
+    let errors = jet::compile_programmable_build_opts(entry.to_str().unwrap(), &[], false, true, false, false, false, None).unwrap_err();
+    assert!(errors.iter().any(|diagnostic| diagnostic.code == "E3503"), "{errors:#?}");
+    assert!(!child.join("stamp").exists());
 }
 
 #[test]
@@ -618,7 +692,7 @@ fn build(b: BuildContext) -> BuildPlan ? {
     files :: b.find("assets/*.txt")
     message :: b.embed(files[0])
     b.generate("asset", "fn generated_asset() -> String {{ return \"hello\" }}")?
-    app :: b.add_executable("app", ["main.jet"], [])?
+    app :: b.add_executable("app", ["main.jet", ".jet/generated/main/asset.jet"], [])?
     return b.plan(app)
 }
 fn run() { print(generated_asset()) }
