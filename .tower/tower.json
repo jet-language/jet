@@ -3,8 +3,8 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 466,
-    "rev": 2763,
+    "nextNum": 467,
+    "rev": 2768,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -10994,13 +10994,18 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-universal-product-parity",
-      "phase": "verify",
+      "phase": "done",
       "priority": "P1",
       "plan": "docs/plans/epoch-3/universal-language-core.md#ul7--formatter-test-docs-debug-ide-and-profiling-product",
       "blockedBy": [],
       "workOrder": 475,
       "assignee": "claude-main",
       "log": [
+        {
+          "at": "2026-07-10",
+          "by": "grok-main",
+          "text": "[verify] claim.format-test proven: D-TOOL4 --update-snapshots/-u wired (JET_UPDATE_SNAPSHOTS), expect().snapshot() TIR cover, testing.snap update, project_format_and_test acceptance green; D-FMTPROJECT1 criteria re-verified. Ledger owner close."
+        },
         {
           "at": "2026-07-10",
           "by": "claude-main",
@@ -11032,29 +11037,29 @@
         {
           "n": 1,
           "text": "D-FMTPROJECT1=D: discovery, --check/--diff/--changed/--json, stdin --stdin-path, exit 0/1/2",
-          "status": "met",
+          "status": "verified",
           "metBy": "claude-main",
-          "verifiedBy": null,
-          "evidence": "run_fmt in CmdCompile.rs; parent re-ran fmt_project 18/18 + cli 54/54; smoke check_exit=0 + stdin format",
-          "at": "2026-07-10T15:02:51.833Z"
+          "verifiedBy": "grok-main",
+          "evidence": "independent grok-main: fmt_project 18/18; cli 54/54; run_fmt + short-flag positional filter; claim.format-test project_format_and_test green (fmt --check + expect/testing.snap -u)",
+          "at": "2026-07-10T15:50:28.453Z"
         },
         {
           "n": 2,
           "text": "Preflight zero-write on parse failure; ignore vendor/target/build/.git",
-          "status": "met",
+          "status": "verified",
           "metBy": "claude-main",
-          "verifiedBy": null,
-          "evidence": "fmt_project covers preflight + ignore; code skips vendor/target/build/.git/node_modules/.jet",
-          "at": "2026-07-10T15:02:51.907Z"
+          "verifiedBy": "grok-main",
+          "evidence": "independent grok-main: fmt_project preflight_zero_write + ignore_vendor/generated dirs still green",
+          "at": "2026-07-10T15:50:28.521Z"
         },
         {
           "n": 3,
           "text": "tests/fmt_project.rs + CLI completions/help green",
-          "status": "met",
+          "status": "verified",
           "metBy": "claude-main",
-          "verifiedBy": null,
-          "evidence": "cargo test --test fmt_project 18 ok; cargo test --test cli 54 ok (parent re-run)",
-          "at": "2026-07-10T15:02:51.980Z"
+          "verifiedBy": "grok-main",
+          "evidence": "independent grok-main: cargo test --test fmt_project 18 ok; cargo test --test cli 54 ok",
+          "at": "2026-07-10T15:50:28.593Z"
         }
       ],
       "needsAcceptance": false,
@@ -11945,6 +11950,32 @@
       "criteria": [],
       "needsAcceptance": false,
       "refs": []
+    },
+    {
+      "id": "c0onpgah",
+      "num": 466,
+      "title": "durability: close JET_REQUIRE_RUSTC self-skip holes + widen pre-push (W1 follow-up)",
+      "body": "Independent verification of #446 found two W1 items that did not fully land. (1) Eight test suites still probe for rustc with inline Command::new(\"rustc\") checks instead of common::have_rustc(), so JET_REQUIRE_RUSTC=1 cannot force them loud when rustc is missing — they silently self-skip in CI. Files: tests/golden.rs:73 (the ~340-example golden suite the W1 spec explicitly named at golden.rs:83,197,263), tests/release_gates.rs:25, tests/dev.rs:757, tests/archive.rs:16, tests/regex.rs:65, tests/ice_regressions.rs:43, tests/comptime_diff.rs:67,263, tests/jet_test.rs:18,161,416. Fix: adopt common::have_rustc() (panics under JET_REQUIRE_RUSTC=1) in each. (2) scripts/githooks/pre-push runs only check-capability-ledger.mjs --check; docs/plans/agent-durability.md:37 specified it also run the truthfulness/decisions/diagnostics_coverage fast tests. Either widen the hook or amend the plan doc to match reality — pick one and make doc and hook agree.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "triage",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "tests/golden.rs",
+        "tests/common/mod.rs",
+        "scripts/githooks/pre-push",
+        "docs/plans/agent-durability.md"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-10T15:43:20.062Z",
+      "updated": "2026-07-10"
     }
   ],
   "decisions": [
@@ -21931,6 +21962,41 @@
   ],
   "events": [
     {
+      "at": "2026-07-10T15:50:28.658Z",
+      "by": "grok-main",
+      "action": "card.update",
+      "ref": "c0k81v26",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-10T15:50:28.593Z",
+      "by": "grok-main",
+      "action": "card.criteria-verify",
+      "ref": "c0k81v26",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-10T15:50:28.521Z",
+      "by": "grok-main",
+      "action": "card.criteria-verify",
+      "ref": "c0k81v26",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-10T15:50:28.453Z",
+      "by": "grok-main",
+      "action": "card.criteria-verify",
+      "ref": "c0k81v26",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-10T15:43:20.063Z",
+      "by": "cursor-verify",
+      "action": "card.add",
+      "ref": "c0onpgah",
+      "note": "durability: close JET_REQUIRE_RUSTC self-skip holes + widen pre-push (W1 follow-up)"
+    },
+    {
       "at": "2026-07-10T15:43:02.240Z",
       "by": "grok-main",
       "action": "card.update",
@@ -25394,41 +25460,6 @@
       "action": "decision.add",
       "ref": "D-JPK-STOREBACKEND1",
       "note": "Store endpoint interoperability scope"
-    },
-    {
-      "at": "2026-07-09T20:54:51.739Z",
-      "by": "codex-main",
-      "action": "decision.add",
-      "ref": "D-JPK-CACHECONFIG1",
-      "note": "Binary-cache and mirror configuration surface"
-    },
-    {
-      "at": "2026-07-09T20:54:51.662Z",
-      "by": "codex-main",
-      "action": "decision.add",
-      "ref": "D-JPK-POLICYSURFACE1",
-      "note": "Package policy and exception source surface"
-    },
-    {
-      "at": "2026-07-09T20:54:51.587Z",
-      "by": "codex-main",
-      "action": "decision.add",
-      "ref": "D-JPK-REGISTRY1",
-      "note": "Immutable registry transport and governance"
-    },
-    {
-      "at": "2026-07-09T20:54:51.506Z",
-      "by": "codex-main",
-      "action": "decision.add",
-      "ref": "D-JPK-PROVIDERS2",
-      "note": "Provider reference spellings for external ecosystems"
-    },
-    {
-      "at": "2026-07-09T20:54:51.421Z",
-      "by": "codex-main",
-      "action": "decision.add",
-      "ref": "D-JPK-STORECLI1",
-      "note": "Store operation command family"
     }
   ],
   "nextNum": 368,

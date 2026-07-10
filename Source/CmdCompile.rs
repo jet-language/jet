@@ -702,7 +702,7 @@ pub(crate) fn run_test(path: &str, update_snapshots: bool, mode: OutputMode) {
 /// `jet test [--coverage]`. With `coverage`, the harness is built with line/
 /// function probes (D-COV1) and a per-function coverage report prints after the
 /// test results.
-pub(crate) fn run_test_cov(path: &str, _update_snapshots: bool, coverage: bool, mode: OutputMode) {
+pub(crate) fn run_test_cov(path: &str, update_snapshots: bool, coverage: bool, mode: OutputMode) {
     let p = Path::new(path);
     if !p.exists() {
         eprintln!("error: can't find `{}`", path);
@@ -725,7 +725,7 @@ pub(crate) fn run_test_cov(path: &str, _update_snapshots: bool, coverage: bool, 
         }
         let mut any_fail = false;
         for f in files {
-            if !run_test_file(&f, coverage, mode) {
+            if !run_test_file(&f, update_snapshots, coverage, mode) {
                 any_fail = true;
             }
         }
@@ -735,14 +735,14 @@ pub(crate) fn run_test_cov(path: &str, _update_snapshots: bool, coverage: bool, 
             ExitCodes::OK
         });
     }
-    exit(if run_test_file(p, coverage, mode) {
+    exit(if run_test_file(p, update_snapshots, coverage, mode) {
         ExitCodes::OK
     } else {
         ExitCodes::USER_ERROR
     });
 }
 
-fn run_test_file(path: &Path, coverage: bool, mode: OutputMode) -> bool {
+fn run_test_file(path: &Path, update_snapshots: bool, coverage: bool, mode: OutputMode) -> bool {
     let shown = path.to_string_lossy();
     let src = match fs::read_to_string(path) {
         Ok(s) => s,
@@ -754,7 +754,7 @@ fn run_test_file(path: &Path, coverage: bool, mode: OutputMode) -> bool {
     // D-TEST4: discover and run any `///` doctest examples first. They are
     // independent of `#Test` blocks, so a file with only doctests is testable.
     let has_doctests = !jet::Doctest::discover(&src).is_empty();
-    let doctests_ok = run_doctests(&shown, &src, mode);
+    let doctests_ok = run_doctests(path, &shown, &src, update_snapshots, mode);
 
     // A file with doctests but no `#Test` blocks is testable on its doctests
     // alone — skip the test harness (which would otherwise error E0601 "no #Test
@@ -800,6 +800,11 @@ fn run_test_file(path: &Path, coverage: bool, mode: OutputMode) -> bool {
         None
     };
     let mut cmd = Command::new(&bin);
+    // D-TOOL4: `-u`/`--update-snapshots` must reach the harness. Both
+    // `expect(…).snapshot()` (any value) and `testing.snap` (`=1`) honor this.
+    if update_snapshots {
+        cmd.env("JET_UPDATE_SNAPSHOTS", "1");
+    }
     if let Some(co) = &cov_out {
         let _ = fs::remove_file(co);
         cmd.env("JET_COV_OUT", co);
@@ -820,15 +825,23 @@ fn run_test_file(path: &Path, coverage: bool, mode: OutputMode) -> bool {
 
 /// D-TEST4: compile and run each ```` ```jet ```` doctest block found in the file's
 /// `///` doc comments, comparing each `// =>` line to the produced value. A
-/// mismatch fires E2901; a block that fails to compile is reported with its own
-/// diagnostics. Returns true when every block (if any) passed. A file with no
-/// doctests passes trivially and prints nothing.
-fn run_doctests(shown: &str, src: &str, mode: OutputMode) -> bool {
+/// mismatch fires E2901 (or rewrites the claimed output when `update_snapshots`).
+/// Returns true when every block (if any) passed. A file with no doctests passes
+/// trivially and prints nothing.
+fn run_doctests(
+    path: &Path,
+    shown: &str,
+    src: &str,
+    update_snapshots: bool,
+    mode: OutputMode,
+) -> bool {
     let blocks = jet::Doctest::discover(src);
     if blocks.is_empty() {
         return true;
     }
     let mut all_ok = true;
+    let mut rewritten = src.to_string();
+    let mut did_rewrite = false;
     for (n, block) in blocks.iter().enumerate() {
         let label = format!("doctest at {}:{}", shown, block.fence_line);
         let program = jet::Doctest::synth_program(block);
@@ -892,19 +905,102 @@ fn run_doctests(shown: &str, src: &str, mode: OutputMode) -> bool {
         let mut block_ok = true;
         for (i, e) in block.expects.iter().enumerate() {
             let actual = produced.get(i).copied().unwrap_or("");
-            if actual != e.expected {
-                block_ok = false;
-                all_ok = false;
-                let span = doc_line_span(src, e.line);
-                let diag = jet::Doctest::mismatch_diag(shown, e, actual, span);
-                // Render against the original file so the line points at the doc
-                // comment's producing line.
-                eprint!("{}", jet::render_diagnostics(shown, src, &[diag]));
+            if actual == e.expected {
+                continue;
             }
+            if update_snapshots {
+                // D-TOOL4 / E2901 fix: rewrite the claimed `// =>` value in place.
+                if rewrite_doctest_expect(&mut rewritten, e.line, actual) {
+                    did_rewrite = true;
+                    continue;
+                }
+            }
+            block_ok = false;
+            all_ok = false;
+            let span = doc_line_span(src, e.line);
+            let diag = jet::Doctest::mismatch_diag(shown, e, actual, span);
+            // Render against the original file so the line points at the doc
+            // comment's producing line.
+            eprint!("{}", jet::render_diagnostics(shown, src, &[diag]));
         }
         println!("{}: {}", label, if block_ok { "pass" } else { "FAIL" });
     }
+    if did_rewrite {
+        if let Err(e) = fs::write(path, &rewritten) {
+            eprintln!("error: couldn't update doctest snapshots in `{}`: {}", shown, e);
+            return false;
+        }
+    }
     all_ok
+}
+
+/// Replace the `// => …` claim on 1-based `line` with `actual`. Returns false when
+/// the line has no expect marker (caller falls through to E2901).
+fn rewrite_doctest_expect(src: &mut String, line: usize, actual: &str) -> bool {
+    let mut out = String::with_capacity(src.len() + actual.len());
+    let mut found = false;
+    for (i, l) in src.split_inclusive('\n').enumerate() {
+        if i + 1 != line {
+            out.push_str(l);
+            continue;
+        }
+        let (nl, body) = if let Some(b) = l.strip_suffix('\n') {
+            ("\n", b)
+        } else {
+            ("", l)
+        };
+        let body = body.strip_suffix('\r').unwrap_or(body);
+        let trimmed = body.trim_start();
+        if !trimmed.starts_with("///") {
+            out.push_str(l);
+            continue;
+        }
+        let indent_len = body.len() - trimmed.len();
+        let indent = &body[..indent_len];
+        let after_slashes = &trimmed[3..];
+        let doc_space = if after_slashes.starts_with(' ') { " " } else { "" };
+        let inner = after_slashes.strip_prefix(' ').unwrap_or(after_slashes);
+        let Some(idx) = find_doctest_expect_marker(inner) else {
+            out.push_str(l);
+            continue;
+        };
+        let expr = inner[..idx].trim_end();
+        out.push_str(indent);
+        out.push_str("///");
+        out.push_str(doc_space);
+        out.push_str(expr);
+        if !expr.is_empty() {
+            out.push(' ');
+        }
+        out.push_str("// => ");
+        out.push_str(actual);
+        out.push_str(nl);
+        found = true;
+    }
+    if found {
+        *src = out;
+    }
+    found
+}
+
+/// Same marker scan as `Doctest::find_expect_marker` — keep local so CmdCompile
+/// does not depend on a private helper.
+fn find_doctest_expect_marker(s: &str) -> Option<usize> {
+    const MARKER: &str = "// =>";
+    let bytes = s.as_bytes();
+    let mut in_str = false;
+    let mut i = 0;
+    while i + MARKER.len() <= bytes.len() {
+        let c = bytes[i];
+        if c == b'"' && (i == 0 || bytes[i - 1] != b'\\') {
+            in_str = !in_str;
+        }
+        if !in_str && &s[i..i + MARKER.len()] == MARKER {
+            return Some(i);
+        }
+        i += 1;
+    }
+    None
 }
 
 /// D-TEST4: the byte span of the (1-based) `line` in `src`, for an E2901 report.

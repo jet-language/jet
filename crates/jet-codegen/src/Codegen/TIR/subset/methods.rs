@@ -14,6 +14,22 @@ pub(crate) fn method_call_in_subset(
     if method == "clone" {
         return args.is_empty() && expr_in_subset(receiver, cx, locals);
     }
+    // D-TOOL4: `expect(x).snapshot()` — snapshot assertion. Receiver is a Call to
+    // the ambient `expect` builtin (not a user fn / local). Zero method args; the
+    // wrapped value must itself be in-subset. Lowers to `jet_expect(…).snapshot(…)?`.
+    // Other `.snapshot()` shapes (user methods, Rollback) fall through below.
+    if method == Syntax::BUILTIN_SNAPSHOT {
+        if let Expr::Call(call) = receiver {
+            if call.name == Syntax::BUILTIN_EXPECT
+                && !cx.sigs.contains_key(&call.name)
+                && !locals.contains(&call.name)
+                && call.args.len() == 1
+                && args.is_empty()
+            {
+                return expr_in_subset(&call.args[0].expr, cx, locals);
+            }
+        }
+    }
     // c109 Phase 23: `.raw()` on a distinct type (D-DIST3). The AST `emit_method_call`
     // special-cases `method == "raw"` BEFORE any user dispatch, unconditionally emitting
     // `({recv}).0`. Sema (CheckerInfer ~L2039) admits `.raw()` ONLY on a distinct-type

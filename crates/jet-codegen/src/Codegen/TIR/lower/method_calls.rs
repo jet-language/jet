@@ -22,6 +22,29 @@ pub(crate) fn lower_method_call(
             _ => unit_type(),
         }
     }
+    // D-TOOL4: `expect(x).snapshot()` — render the harness snapshot call. Test
+    // bodies are `Result<(), String>`, so the trailing `?` propagates mismatch.
+    if method == Syntax::BUILTIN_SNAPSHOT {
+        if let Expr::Call(call) = receiver {
+            if call.name == Syntax::BUILTIN_EXPECT && call.args.len() == 1 {
+                let val = lower_expr(&call.args[0].expr, cx, env);
+                let line = crate::Diagnostics::span_line_col(&cx.src, method_span.start).0;
+                let snap_path = format!(
+                    "snapshots/{}_{}.snap",
+                    cx.file.replace(['/', '\\', '.'], "_"),
+                    line
+                );
+                let rendered = format!(
+                    "jet_expect(format!(\"{{}}\", ({}).jet_show())).snapshot({snap_path:?})?",
+                    emit_tir_expr(&val, cx)
+                );
+                return TExpr {
+                    ty: unit_type(),
+                    kind: TExprKind::RequireStop(rendered),
+                };
+            }
+        }
+    }
     // D-ERRCTX1=D: `<fallible>.context("…")` — lazily-evaluated (only formatted
     // if the error actually propagates): wrap the message in a zero-arg closure
     // and let `jet_context` call it only on the `Err` branch.

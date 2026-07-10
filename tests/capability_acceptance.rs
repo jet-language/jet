@@ -440,3 +440,163 @@ fn run() {
         "shared PolicyFactGraph must own claim.static-guarantees"
     );
 }
+
+/// claim.format-test / project-format-test — D-FMTPROJECT1 + D-TOOL4.
+#[test]
+fn project_format_and_test() {
+    // CAPABILITY_CLAIM: claim.format-test / project-format-test
+    let cmd = read("Source/CmdCompile.rs");
+    assert!(
+        cmd.contains("JET_UPDATE_SNAPSHOTS")
+            && cmd.contains("if update_snapshots")
+            && !cmd.contains("_update_snapshots: bool"),
+        "run_test_cov must honor update_snapshots (no ignored _update_snapshots)"
+    );
+    assert!(
+        read("tests/fmt_project.rs").contains("D-FMTPROJECT1"),
+        "project formatter workflow must have dedicated tests"
+    );
+
+    let dir = std::env::temp_dir().join(format!(
+        "jet_cap_format_test_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(dir.join("src")).expect("mkdir");
+    // Unformatted project file — `jet fmt` must rewrite it.
+    let unformatted = "fn run()  {\n  print( \"hi\" )\n}\n";
+    let main = dir.join("src/main.jet");
+    fs::write(&main, unformatted).expect("write main");
+    let fmt = Command::new(jet_bin())
+        .args(["fmt", "src"])
+        .current_dir(&dir)
+        .output()
+        .expect("jet fmt");
+    assert!(
+        fmt.status.success(),
+        "jet fmt project failed:\n{}",
+        String::from_utf8_lossy(&fmt.stderr)
+    );
+    let formatted = fs::read_to_string(&main).expect("read formatted");
+    assert_ne!(formatted, unformatted, "project fmt must rewrite dirty files");
+    let check = Command::new(jet_bin())
+        .args(["fmt", "--check", "src"])
+        .current_dir(&dir)
+        .output()
+        .expect("jet fmt --check");
+    assert_eq!(
+        check.status.code(),
+        Some(0),
+        "fmt --check must be clean after format:\n{}",
+        String::from_utf8_lossy(&check.stderr)
+    );
+
+    // D-TOOL4: seed a stale snap, prove `-u` rewrites it via expect().snapshot().
+    let test_src = r#"
+fn run() {}
+
+#Test("snapshot updates") {
+    expect("fresh-value").snapshot()
+}
+"#;
+    let test_file = dir.join("snap.jet");
+    fs::write(&test_file, test_src).expect("write snap.jet");
+    // First run with -u creates the golden.
+    let create = Command::new(jet_bin())
+        .args(["test", "--update-snapshots", "snap.jet"])
+        .current_dir(&dir)
+        .output()
+        .expect("jet test -u create");
+    assert!(
+        create.status.success(),
+        "jet test -u create failed:\nstdout:{}\nstderr:{}",
+        String::from_utf8_lossy(&create.stdout),
+        String::from_utf8_lossy(&create.stderr)
+    );
+    let snap_dir = dir.join("snapshots");
+    let snaps: Vec<_> = fs::read_dir(&snap_dir)
+        .expect("snapshots dir after -u")
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("snap"))
+        .collect();
+    assert_eq!(snaps.len(), 1, "expected one .snap under {snap_dir:?}");
+    let snap_path = &snaps[0];
+    assert_eq!(
+        fs::read_to_string(snap_path).unwrap().trim(),
+        "fresh-value",
+        "created snap must hold the expected value"
+    );
+
+    // Stale golden without -u must fail.
+    fs::write(snap_path, "stale-value").expect("seed stale");
+    let stale = Command::new(jet_bin())
+        .args(["test", "snap.jet"])
+        .current_dir(&dir)
+        .output()
+        .expect("jet test stale");
+    assert!(
+        !stale.status.success(),
+        "stale snapshot must fail without -u:\n{}",
+        String::from_utf8_lossy(&stale.stdout)
+    );
+
+    // -u must rewrite the golden and pass.
+    let update = Command::new(jet_bin())
+        .args(["test", "-u", "snap.jet"])
+        .current_dir(&dir)
+        .output()
+        .expect("jet test -u");
+    assert!(
+        update.status.success(),
+        "jet test -u must pass:\nstdout:{}\nstderr:{}",
+        String::from_utf8_lossy(&update.stdout),
+        String::from_utf8_lossy(&update.stderr)
+    );
+    assert_eq!(
+        fs::read_to_string(snap_path).unwrap().trim(),
+        "fresh-value",
+        "-u must rewrite the stale snapshot"
+    );
+
+    // testing.snap also honors JET_UPDATE_SNAPSHOTS=1 via the same flag.
+    let helper = r#"
+use core.testing as testing
+
+fn run() {}
+
+#Test("testing.snap updates") {
+    require(testing.snap("helper-case", "helper-fresh"))
+}
+"#;
+    fs::write(dir.join("helper.jet"), helper).expect("write helper");
+    fs::create_dir_all(dir.join("__snapshots__")).expect("mkdir __snapshots__");
+    fs::write(dir.join("__snapshots__/helper-case.snap"), "helper-stale").expect("seed helper");
+    let helper_stale = Command::new(jet_bin())
+        .args(["test", "helper.jet"])
+        .current_dir(&dir)
+        .output()
+        .expect("helper stale");
+    assert!(
+        !helper_stale.status.success(),
+        "testing.snap stale must fail without -u"
+    );
+    let helper_update = Command::new(jet_bin())
+        .args(["test", "--update-snapshots", "helper.jet"])
+        .current_dir(&dir)
+        .output()
+        .expect("helper -u");
+    assert!(
+        helper_update.status.success(),
+        "testing.snap -u must pass:\n{}",
+        String::from_utf8_lossy(&helper_update.stderr)
+    );
+    assert_eq!(
+        fs::read_to_string(dir.join("__snapshots__/helper-case.snap"))
+            .unwrap()
+            .trim(),
+        "helper-fresh"
+    );
+
+    let _ = fs::remove_dir_all(&dir);
+}

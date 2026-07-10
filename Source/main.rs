@@ -800,7 +800,13 @@ fn main() {
         json,
         color: parse_color(jet_argv),
     };
-    let args: Vec<&String> = jet_argv.iter().filter(|a| !a.starts_with("--")).collect();
+    // Positional args only. Keep bare `-` (stdin for `jet fmt -`); drop every
+    // other dash-flag including short forms like `-u` / `-v` so they never become
+    // the file target (D-TOOL4).
+    let args: Vec<&String> = jet_argv
+        .iter()
+        .filter(|a| *a == "-" || !a.starts_with('-'))
+        .collect();
 
     if args.first().map(|s| s.as_str()) == Some("lsp") {
         let sub = args.get(1).map(|s| s.as_str());
