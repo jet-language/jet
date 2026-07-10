@@ -43,12 +43,6 @@ Migrating from a v3-era board: `node Tower/tower.mjs import old-tower.json --nam
   ratifies. A card with an open decision surfaces as **Decide** no matter its
   stage.
 - **Questions** — owner ⇄ agent threads on a card.
-- **Messages** — direct owner ⇄ agent chat. Agents stay reachable with
-  `tower agent listen --name <me>` (long-poll when the server is up, file
-  polling otherwise); the owner writes from the board's Agents view. With
-  `config.commands` set (opt-in), an offline agent gets a **Send + run**
-  button that starts a headless turn (`claude -p` / `codex exec`) and posts
-  its output back into the thread.
 - **Ideas** — capture bay; promote to a card when real.
 - **Events** — append-only audit trail of every mutation, with `--by` attribution.
 
@@ -62,9 +56,6 @@ tower question  list|ask|answer|delete
 tower idea      list|add|promote|delete
 tower epoch     list|add|update|current
 tower milestone list|add|update|delete
-tower message   send|list|read
-tower agents                     # roster + live presence
-tower agent listen --name <me>   # long-lived message feed for an agent
 tower init | serve | import
 ```
 
@@ -80,17 +71,12 @@ write; `--expect-rev N` gives optimistic concurrency (exit 2 on conflict).
   require a key from non-localhost devices (`/?key=<token>` once per device;
   localhost always exempt). Without it the board is open to your LAN/tailnet.
 - **PWA + push** — installable app; the ◍ notify button subscribes the
-  device to payload-less web push (new ballot / agent message / verify).
-- **Batched agent wake** — ratifications and greenlights within
-  `notifyBatchSeconds` (default 90) collapse into ONE `[tower]` message per
-  listening agent, so a ballot session doesn't spin up an agent per decision.
+  device to payload-less web push (new ballot / new question).
 - **Undo** — every owner action shows an Undo toast (`tower undo` in the
   CLI); rev-guarded so it can never revert another agent's interleaved write.
-- **Attachments** — 📎 in the composer (or `tower message send --attach x.png`);
-  images render inline.
 - **Git linking** — `tower githook` installs a post-commit hook: commits
   mentioning `#12` append themselves to that card's log.
-- **⌘K** — jump to any card, ballot, or agent; `j/k` walk the Now queue.
+- **⌘K** — jump to any card, ballot, or view; `j/k` walk the Now queue.
 - **Digest** — "since you were away" summary at the top of Now with a
   Caught-up button.
 
@@ -125,14 +111,11 @@ Everything is optional; the UI and validation follow whatever you set.
 Black & red, pure dark, phone-friendly. Red is reserved for what needs the
 **owner**; agent work reads calm, resolved goes green, done disappears. The
 **beacon** on the left edge carries one lit segment per owner-blocking item
-and goes dark as you clear them. Three views:
+and goes dark as you clear them. Two views:
 
-- **Now** — everything blocked on you in one queue: agent messages (inline
-  reply), decisions (opens focus mode: ←/→ move, 1–9 pick, Enter record),
-  greenlights. Empty state = tower clear.
-- **Agents** — roster with live presence (listening / running / offline) and
-  a chat thread per agent; offline agents queue messages, launchable ones
-  get **Send + run**.
+- **Now** — everything blocked on you in one queue: decisions (opens focus
+  mode: ←/→ move, 1–9 pick, Enter record) and greenlights. Empty state =
+  tower clear.
 - **Board** — idea capture, sidequests, epochs → milestones → cards, frozen
   bay; card modal for editing, decisions, questions, log.
 
@@ -140,7 +123,7 @@ Durable collapse state, no localStorage, no framework, mobile bottom tabs.
 
 ## Plugin skills
 
-Three focused skills ship with the plugin: **tower** (the work loop +
-staying reachable), **tower-ballot** (authoring decisions the owner can
-decide from the ballot alone), **tower-setup** (init, import, config,
-server). Non-Claude agents use `AGENTS.md` — same protocol, plain shell.
+Three focused skills ship with the plugin: **tower** (the work loop),
+**tower-ballot** (authoring decisions the owner can decide from the ballot
+alone), **tower-setup** (init, import, config, server). Non-Claude agents
+use `AGENTS.md` — same protocol, plain shell.

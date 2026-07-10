@@ -53,7 +53,7 @@ as skills, every other agent reads them as files:
   traps (stale binaries, snapshot/golden/formatter gotchas). Read before
   claiming anything done.
 - `.claude/skills/tower/SKILL.md` — the board workflow (cards, lanes,
-  messaging the owner).
+  ballots, questions).
 - `.claude/skills/tower-ballot/SKILL.md` — ballot standard + how the owner
   decides. Read before raising any owner-facing choice.
 

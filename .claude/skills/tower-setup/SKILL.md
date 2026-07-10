@@ -1,6 +1,6 @@
 ---
 name: tower-setup
-description: Set up or configure Tower in a project — init the .tower/ data dir, import an older tower.json, tune config.json (terminology, priorities, decision groups, agent roster, launch commands), and start the board server. Use for "set up tower", "add tower to this project", "import my old board", "configure tower", or first-run problems (no Tower data found).
+description: Set up or configure Tower in a project — init the .tower/ data dir, import an older tower.json, tune config.json (terminology, priorities, decision groups), and start the board server. Use for "set up tower", "add tower to this project", "import my old board", "configure tower", or first-run problems (no Tower data found).
 ---
 
 # Tower — set up in a project
@@ -30,40 +30,22 @@ Migrating an older board: `tower import <old-tower.json> --name "<Project>"`
   "priorities": ["P0", "P1", "P2", "P3"],
   "decisionGroups": ["design", "architecture", "api", "ui", "tooling"],
   "port": 7878,
-  "backups": 20,
-  "agents": [
-    { "name": "claude-main", "kind": "claude" },
-    { "name": "codex-1", "kind": "codex" }
-  ],
-  "commands": {
-    "claude": "claude -p",
-    "codex": "codex exec"
-  }
+  "backups": 20
 }
 ```
 
-- **`agents`** — the roster shown in the board's Agents view. Listeners also
-  self-announce, so this is just the stable, always-visible set.
-- **`commands`** — the launch bridge, **opt-in**. When an agent of that kind
-  is offline, the owner's "Send + run" button starts a headless turn:
-  Tower runs the command from the project root with the message in
-  `$TOWER_PROMPT` (appended as one quoted argument); stdout becomes the
-  agent's reply in the thread. Only add commands the owner is happy to have
-  the local board server execute. The server binds localhost-style on the
-  configured port — treat the port as trusted-network-only (LAN/tailnet).
 - **`port`** — CLI and UI both use it; if a different tool already owns
-  7878, set another port here so `tower message`/`tower agents` reach the
-  right server.
+  7878, set another port here. The server binds on the configured port —
+  treat it as trusted-network-only (LAN/tailnet).
 
 ## Remote access, push, git linking
 
-- First `tower serve` generates `auth.token` (non-localhost requests need it:
-  open `http://<host>:<port>/?key=<token>` once per device) and VAPID push
-  keys. The owner enables push per-device with the **◍ notify** button.
+- First `tower serve` generates VAPID push keys; the owner enables push
+  per-device with **◍ notify**. Auth is OPT-IN: set `"auth": {"token": "…"}`
+  in config.json to require a key from non-localhost devices (unlock screen
+  asks once per device; localhost always exempt).
 - `tower githook` installs a post-commit hook so commits mentioning `#12`
   append to that card's log — install it once per repo.
-- `notifyBatchSeconds` (default 90) controls how ratification/greenlight
-  notifications batch before waking listening agents.
 
 ## First work session
 
@@ -74,6 +56,3 @@ Migrating an older board: `tower import <old-tower.json> --name "<Project>"`
 3. Add a line to the host repo's CLAUDE.md / AGENTS.md pointing agents at
    the **tower** skill (or `Tower/AGENTS.md` for non-Claude agents) so every
    session knows the board is the source of truth.
-4. Each working agent starts a listener: `tower agent listen --name <me>`
-   (under Claude Code, inside the Monitor tool) so the owner can reach it
-   from the board.

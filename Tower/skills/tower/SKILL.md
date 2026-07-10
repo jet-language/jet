@@ -1,11 +1,11 @@
 ---
 name: tower
-description: Work the Tower project board — pick up agent-lane cards (plan / implement / verify), act on ratified decisions, answer the owner's questions and messages, and keep the board honest. Use when asked to "process tower", "work the board", "act on my decisions", "sweep the board", or when a task says to track work in Tower. The owner only ever does two things (decide, greenlight); this skill does everything that follows.
+description: Work the Tower project board — pick up agent-lane cards (plan / implement / verify), act on ratified decisions, answer the owner's questions, and keep the board honest. Use when asked to "process tower", "work the board", "act on my decisions", "sweep the board", or when a task says to track work in Tower. The owner only ever does two things (decide, greenlight); this skill does everything that follows.
 ---
 
 # Tower — work the board
 
-Tower is the project's board plus a message line to the owner. All state lives
+Tower is the project's board. All state lives
 in `.tower/tower.json` in the project root, but you **never edit that file by
 hand** — every operation goes through the Tower CLI (or the HTTP API of a
 running `tower serve`).
@@ -41,33 +41,9 @@ lanes, **never touch**: `decide`, `activate`, plus `frozen` cards. Your lanes:
 (cards link via `milestoneId`; progress is computed). `tower state` returns
 everything as JSON; `tower status` is the human summary.
 
-## Stay reachable — the message line
-
-The owner messages you from the board's Agents view (often from a phone).
-Pick a stable agent name (e.g. `claude-main`) and, at the start of a board
-session, arm a listener in the background so each owner message wakes you:
-
-- Under Claude Code: run `tower agent listen --name <me> --kind claude`
-  inside the **Monitor** tool (persistent). Each incoming message arrives as
-  a `[owner] …` line.
-- Reply with `tower message send --to owner --text "…" --by <me>`
-  (add `--card '#12'` when it concerns a card).
-
-Treat owner messages like interrupts: answer or act, then resume. When you
-finish a work item, a one-line report to the owner
-(`tower message send --to owner …`) is how progress reaches their phone
-(`--attach shot.png` for screenshots — images render inline).
-
-Also: keep `tower agent status --name <me> --text "building #12 — tests
-green"` fresh when you switch tasks (shows live in the owner's roster), and
-treat a `[tower]` system message ("N decisions ratified … greenlit: …") as
-one signal that the board changed — run `tower next` once, don't fan out
-per item.
-
 ## Session loop
 
-1. `tower status` · `tower question list --open` — answer questions first;
-   `tower message list --unread --for <me>` — catch anything sent while away.
+1. `tower status` · `tower question list --open` — answer questions first.
 2. `tower next` — canonical picker: lowest `workOrder`, then building >
    verify > implement > plan. Respect `blockedBy`; never route around a gate.
 3. Claim before working when other agents may be active:
@@ -80,7 +56,9 @@ per item.
    Phase honesty: `planning`→(`deciding` if decisions raised, else `ready`);
    `ready`→`building`; `building`→`verify` on claimed done; `verify`→`done`
    only after real verification. Never close what you haven't verified.
-6. Report: message the owner what advanced and what's newly blocked on them.
+6. Report through the board itself: a `--log` entry on each card you advanced
+   and a question/ballot for anything newly blocked on the owner — those are
+   what the owner sees (and gets push notifications for).
 
 ## Non-negotiables
 

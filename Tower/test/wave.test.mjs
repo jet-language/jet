@@ -3,15 +3,14 @@ import assert from 'node:assert/strict';
 import { mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import * as db from '../app/store.mjs';
 import { openStore, empty } from '../app/store.mjs';
 import { writeJSON } from '../app/paths.mjs';
 import { serve } from '../app/server.mjs';
 
 const dir = mkdtempSync(join(tmpdir(), 'tower-wave-'));
 writeJSON(join(dir, 'tower.json'), empty('Wave'));
-// fast batch window + a declared agent + opt-in auth token
-writeJSON(join(dir, 'config.json'), { project: 'Wave', notifyBatchSeconds: 0.15, agents: [{ name: 'a1', kind: 'claude' }], auth: { token: 'test-token-123456' } });
+// opt-in auth token
+writeJSON(join(dir, 'config.json'), { project: 'Wave', auth: { token: 'test-token-123456' } });
 const store = openStore(dir);
 const PORT = 7957;
 const server = serve(store, PORT, false);
@@ -47,35 +46,24 @@ test('undo: revert last write, conflict-guarded', async () => {
   assert.equal(after2.meta.rev, mid.meta.rev + 1);
 });
 
-test('file upload + download round-trip', async () => {
-  const r = await fetch(url('/api/file?name=shot.png&type=image/png'), { method: 'POST', body: Buffer.from([1, 2, 3, 4]) });
-  const j = await r.json();
-  assert.ok(j.ok && j.file.id);
-  const got = await fetch(url('/files/' + j.file.id));
-  assert.equal(got.headers.get('content-type'), 'image/png');
-  assert.equal((await got.arrayBuffer()).byteLength, 4);
+test('retired routes are gone: files, agents, messages', async () => {
+  const r1 = await fetch(url('/api/agents'));
+  assert.equal(r1.status, 404);
+  const r2 = await post('/api/message/send', { from: 'owner', to: 'a1', text: 'hi' });
+  assert.equal(r2.status, 404);
+  const r3 = await fetch(url('/api/file?name=x.png'), { method: 'POST', body: Buffer.from([1]) });
+  assert.equal(r3.status, 404);
 });
 
-test('agent status shows in roster', async () => {
-  await post('/api/agent/status', { name: 'a1', kind: 'claude', text: 'building #3 — tests green' });
-  const roster = await (await fetch(url('/api/agents'))).json();
-  const a1 = roster.find(a => a.name === 'a1');
-  assert.ok(a1.online);
-  assert.equal(a1.statusText, 'building #3 — tests green');
-});
-
-test('batched notify: several ratifications → ONE tower message per agent', async () => {
+test('clearance batch ratifies without agent notifications', async () => {
   const { json: cardR } = await post('/api/card/add', { title: 'ballot host' });
   const cid = cardR.result.id;
   for (const n of [1, 2, 3]) await post('/api/decision/add', { cardId: cid, id: 'D-W' + n, title: 'w' + n, options: [{ key: 'A', name: 'a' }] });
   await post('/api/clearance', { decisionId: 'D-W1', outcome: 'A', by: 'owner' });
   await post('/api/clearance/batch', { by: 'owner', decisions: [{ decisionId: 'D-W2', outcome: 'A' }, { decisionId: 'D-W3', outcome: 'A' }] });
-  await new Promise(r => setTimeout(r, 500));   // > batch window
   const s = store.load();
-  const towerMsgs = s.messages.filter(m => m.from === 'tower' && m.to === 'a1');
-  assert.equal(towerMsgs.length, 1, 'exactly one batched notification');
-  assert.match(towerMsgs[0].text, /3 decisions ratified/);
-  assert.match(towerMsgs[0].text, /D-W1→A/);
+  assert.equal(s.decisions.filter(d => d.status === 'ratified').length, 3);
+  assert.equal(s.messages, undefined, 'no messages key survives');
 });
 
 test('SSE stream delivers state on mutation', async () => {

@@ -1,12 +1,10 @@
 // Tower client. Vanilla JS, no framework, no build.
-// Three views: Now (everything blocked on the owner), Agents (talk to your
-// agents), Board (epochs → milestones → cards). The beacon on the left edge
-// carries one lit segment per owner-blocking item; clearing them darkens it.
+// Two views: Now (everything blocked on the owner) and Board (epochs →
+// milestones → cards). The beacon on the left edge carries one lit segment
+// per owner-blocking item; clearing them darkens it.
 
 let S = null;                 // projected state from /api/state
-let ROSTER = [];              // /api/agents presence
 let VIEW = 'now';
-let THREAD = null;            // selected agent name in Agents view
 let openCard = null;
 let focusIds = null, focusIdx = 0, focusFacet = null, askOpen = false, focusCompare = false;
 const pick = {};              // decisionId -> tentative option key
@@ -39,12 +37,6 @@ function hl(src) {
   return out;
 }
 const codeBlock = (s) => `<pre class="code">${hl(s || '')}</pre>`;
-
-function listenCmd(name, kind) {
-  const prefix = S?.cli || 'node Tower/tower.mjs';
-  const kindPart = kind && kind !== 'agent' ? ` --kind ${kind}` : '';
-  return `${prefix} agent listen --name ${name}${kindPart}`;
-}
 
 // ---- api ------------------------------------------------------------------
 let toastTimer = null;
@@ -144,12 +136,8 @@ document.addEventListener('selectionchange', () => { const s = window.getSelecti
 
 function renderPreservingScroll() {
   const y = window.scrollY;
-  const log = $('.thread__log');
-  const atBottom = log ? log.scrollHeight - log.scrollTop - log.clientHeight < 60 : false;
   render();
   window.scrollTo(0, y);
-  const log2 = $('.thread__log');
-  if (log2 && atBottom) log2.scrollTop = log2.scrollHeight;
 }
 
 function connectStream() {
@@ -173,9 +161,6 @@ async function refresh() {
     applyState(await r.json());
   } catch { /* offline */ }
 }
-async function refreshRoster() {
-  try { ROSTER = await (await fetch('/api/agents')).json(); } catch { ROSTER = []; }
-}
 
 // ---- derived --------------------------------------------------------------
 const cardById = (id) => S.cards.find(c => c.id === id);
@@ -185,18 +170,6 @@ const TERM = (k, fb) => ((CFG().terms || {})[k] || fb);
 const epochTag = (e) => e ? (e.num != null ? `${TERM('epoch', 'Epoch')} ${e.num}` : e.id) : '';
 const openDecisions = () => S.decisions.filter(d => d.status !== 'ratified');
 const toActivate = () => S.cards.filter(c => c.lane.lane === 'activate');
-const threadsOf = () => {
-  const map = new Map();
-  for (const m of S.messages) {
-    const k = m.from === 'owner' ? m.to : m.from;
-    if (!map.has(k)) map.set(k, { agent: k, messages: [], unread: 0 });
-    const t = map.get(k);
-    t.messages.push(m);
-    if (m.to === 'owner' && !m.readAt) t.unread++;
-  }
-  return map;
-};
-const unreadThreads = () => [...threadsOf().values()].filter(t => t.unread > 0);
 
 // waiting-time chip: shown once something has sat for 6+ hours
 function ageChip(iso) {
@@ -206,13 +179,11 @@ function ageChip(iso) {
   const label = h < 48 ? Math.round(h) + 'h' : Math.round(h / 24) + 'd';
   return `<span class="agechip ${h > 72 ? 'agechip--hot' : ''}" title="waiting ${label}">${label}</span>`;
 }
-const ageOf = (it) => it.type === 'msg' ? it.thread.messages.filter(m => m.to === 'owner' && !m.readAt)[0]?.at
-  : it.type === 'decision' ? it.decision.created : it.card.created;
+const ageOf = (it) => it.type === 'decision' ? it.decision.created : it.card.created;
 
 // Every owner-blocking item, in the order the beacon + Now view show them.
 function duties() {
   const out = [];
-  for (const t of unreadThreads()) out.push({ type: 'msg', id: 'msg:' + t.agent, thread: t });
   for (const d of openDecisions()) out.push({ type: 'decision', id: d.id, decision: d });
   for (const c of toActivate()) out.push({ type: 'activate', id: c.id, card: c });
   return out;
@@ -226,21 +197,19 @@ function renderBeacon() {
   b.classList.toggle('beacon--clear', !items.length);
   for (const it of items.slice(0, 40)) {
     const h = (Date.now() - new Date(ageOf(it) || Date.now()).getTime()) / 3.6e6;
-    const seg = el(`<button class="beacon__seg" style="opacity:${Math.min(1, .55 + h / 96).toFixed(2)}" title="${esc(it.type === 'msg' ? `message from ${it.thread.agent}` : it.type === 'decision' ? it.decision.title : 'greenlight: ' + it.card.title)}"></button>`);
+    const seg = el(`<button class="beacon__seg" style="opacity:${Math.min(1, .55 + h / 96).toFixed(2)}" title="${esc(it.type === 'decision' ? it.decision.title : 'greenlight: ' + it.card.title)}"></button>`);
     seg.addEventListener('click', () => jumpTo(it));
     b.appendChild(seg);
   }
 }
 function jumpTo(it) {
-  if (it.type === 'msg') { THREAD = it.thread.agent; go('agents'); }
-  else if (it.type === 'decision') focusAll(it.decision.id);
+  if (it.type === 'decision') focusAll(it.decision.id);
   else { go('now'); }
 }
 
 // ---- chrome ------------------------------------------------------------------
 const VIEWS = [
   { id: 'now', name: 'Now', count: () => duties().length, alert: true },
-  { id: 'agents', name: 'Agents', count: () => S.counts.unreadForOwner, alert: true },
   { id: 'board', name: 'Board', count: () => S.cards.filter(c => c.phase !== 'done' && c.phase !== 'frozen').length },
 ];
 function renderChrome() {
@@ -293,16 +262,12 @@ function viewNow() {
     v.appendChild(el(`<div class="nowclear">
       <div class="nowclear__mark">▲</div>
       <div class="nowclear__t">Tower clear — nothing is blocked on you.</div>
-      <div class="nowclear__sub">${S.counts.agentReady} cards agent-ready · agents report here when they need you</div>
+      <div class="nowclear__sub">${S.counts.agentReady} cards agent-ready · new ballots and greenlights land here</div>
     </div>`));
     return;
   }
 
   const section = (title) => v.appendChild(el(`<div class="nowsection"><span class="nowsection__t">${title}</span><span class="nowsection__rule"></span></div>`));
-
-  const msgs = items.filter(i => i.type === 'msg');
-  if (msgs.length) section('Messages from agents');
-  for (const it of msgs) v.appendChild(dutyMessage(it.thread));
 
   const decs = items.filter(i => i.type === 'decision');
   if (decs.length) section('Decisions');
@@ -336,8 +301,6 @@ function digestBlock() {
   if (nd) bits.push(`<b>${nd}</b> new ballot${nd > 1 ? 's' : ''}`);
   const qa = count('question.answer');
   if (qa) bits.push(`<b>${qa}</b> question${qa > 1 ? 's' : ''} answered`);
-  const nm = count('message.send');
-  if (nm) bits.push(`<b>${nm}</b> message${nm > 1 ? 's' : ''}`);
   const who = [...new Set(evs.map(e => e.by).filter(b => b && b !== 'agent' && b !== 'tower'))];
   const since = new Date(cursor).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' });
   const node = el(`<div class="digest">
@@ -367,31 +330,6 @@ function nowActivate() {
   const node = cards[nowSel];
   if (node?.__primary) node.__primary();
   else node?.click?.();
-}
-
-function dutyMessage(t) {
-  const last = t.messages.filter(m => m.to === 'owner' && !m.readAt).at(-1);
-  const node = el(`<div class="duty duty--msg">
-      <div class="duty__top"><span class="duty__kind">Message</span>
-        <span class="duty__meta">${esc(t.agent)} · ${t.unread > 1 ? t.unread + ' unread' : new Date(last.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>${ageChip(last.at)}</div>
-      <div class="duty__peek">${esc(last.text.slice(0, 600))}${last.text.length > 600 ? '…' : ''}</div>
-      <div class="duty__reply"><input placeholder="Reply to ${esc(t.agent)}…"><button class="btn btn--red btn--sm">Send</button></div>
-      <div class="duty__actions"><button class="btn btn--ghost btn--sm" data-open>Open thread</button>
-        <button class="btn btn--ghost btn--sm" data-read>Mark read</button></div>
-    </div>`);
-  const input = $('input', node);
-  const send = async () => {
-    const text = input.value.trim(); if (!text) return;
-    await markThreadRead(t.agent, false);
-    await api('message/send', { from: 'owner', to: t.agent, text });
-    toast(`sent to ${t.agent}`);
-  };
-  $('button.btn--red', node).addEventListener('click', send);
-  input.addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
-  $('[data-open]', node).addEventListener('click', () => { THREAD = t.agent; go('agents'); });
-  $('[data-read]', node).addEventListener('click', () => markThreadRead(t.agent));
-  node.__primary = () => { THREAD = t.agent; go('agents'); };
-  return node;
 }
 
 function dutyDecision(d) {
@@ -425,138 +363,6 @@ function dutyActivate(c) {
   $('[data-open]', node).addEventListener('click', () => showDetail(c.id));
   node.__primary = () => api('card/activate', { id: c.id, by: 'owner' });
   return node;
-}
-
-async function markThreadRead(agent, rerender = true) {
-  const ids = S.messages.filter(m => m.to === 'owner' && !m.readAt && (m.from === agent)).map(m => m.id);
-  if (!ids.length) return;
-  await api('message/mark', { ids, field: 'readAt' });
-  if (rerender) render();
-}
-
-// ---- AGENTS ---------------------------------------------------------------------
-function viewAgents() {
-  const v = $('#view');
-  const ts = threadsOf();
-  const names = new Set([...ROSTER.map(a => a.name), ...ts.keys()]);
-  if (THREAD) names.add(THREAD);
-  const list = [...names].map(name => ({
-    name,
-    roster: ROSTER.find(a => a.name === name) || null,
-    thread: ts.get(name) || { agent: name, messages: [], unread: 0 },
-  })).sort((a, b) => b.thread.unread - a.thread.unread || (b.roster?.online ? 1 : 0) - (a.roster?.online ? 1 : 0) || a.name.localeCompare(b.name));
-
-  if (!THREAD && list.length) THREAD = (list.find(x => x.thread.unread) || list[0]).name;
-
-  v.innerHTML = `<div class="viewhead"><h1 class="h1">Agents</h1>
-    <span class="viewhead__sub">talk to any agent from here — replies land in <b>Now</b></span></div>
-    <div class="comms"><div class="roster" id="roster"></div><div id="thread-slot"></div></div>`;
-
-  const roster = $('#roster');
-  for (const a of list) {
-    const on = a.roster?.online;
-    const state = on ? (a.roster.state === 'running' ? 'running' : 'listening') : 'offline';
-    const row = el(`<button class="agentrow" aria-current="${THREAD === a.name}">
-        <span class="presence ${on ? (a.roster.state === 'running' ? 'running' : 'online') : ''}"></span>
-        <span><span class="agentrow__name">${esc(a.name)}</span><br>
-          <span class="agentrow__sub">${esc(a.roster?.kind || 'agent')} · ${state}${a.roster?.statusText ? ` — ${esc(a.roster.statusText.slice(0, 46))}` : ''}</span></span>
-        ${a.thread.unread ? `<span class="agentrow__unread">${a.thread.unread}</span>` : ''}
-      </button>`);
-    row.addEventListener('click', () => { THREAD = a.name; render(); });
-    roster.appendChild(row);
-  }
-  const add = el(`<div class="roster__add"><input placeholder="agent name…" aria-label="New agent name"><button class="btn btn--sm">Add</button></div>`);
-  const fire = () => { const i = $('input', add); const n = i.value.trim(); if (!n) return; i.value = ''; THREAD = n; render(); };
-  $('button', add).addEventListener('click', fire);
-  $('input', add).addEventListener('keydown', e => { if (e.key === 'Enter') fire(); });
-  roster.appendChild(add);
-
-  if (!list.length && !THREAD) {
-    $('#thread-slot').appendChild(el(`<div class="empty"><div class="empty__glyph">▸</div>
-      <div>No agents yet. An agent appears when it runs<br><code style="font-family:var(--mono);font-size:12px">${esc(listenCmd('<name>'))}</code><br>or when you add one and send the first message.</div></div>`));
-    return;
-  }
-  $('#thread-slot').appendChild(threadPane(THREAD, ts.get(THREAD)));
-  markThreadRead(THREAD, false).then(() => renderBeacon() + renderChrome());
-}
-
-function threadPane(name, thread) {
-  const a = ROSTER.find(x => x.name === name);
-  const on = a?.online;
-  const stateTxt = on
-    ? (a.state === 'running' ? 'running a turn…' : (a.statusText ? a.statusText : 'online — listening'))
-    : (a?.lastSeen ? `offline · last seen ${new Date(a.lastSeen).toLocaleString()}` : 'offline — never connected');
-  const pane = el(`<section class="thread">
-      <div class="thread__head"><span class="presence ${on ? (a.state === 'running' ? 'running' : 'online') : ''}"></span>
-        <span class="thread__name">${esc(name)}</span>
-        <span class="chip chip--${esc(a?.kind || 'agent')}">${esc(a?.kind || 'agent')}</span>
-        <span class="thread__state">${esc(stateTxt)}</span></div>
-      <div class="thread__log" id="log"></div>
-      ${!on ? `<div class="invite">
-        <div class="invite__t">This agent isn't listening. Messages queue — or connect it:</div>
-        <code class="invite__cmd">${esc(listenCmd(name, a?.kind))}</code>
-        <button class="btn btn--sm" data-copy>Copy</button>
-      </div>` : ''}
-      <div class="composer">
-        <label class="composer__attach" title="Attach a file"><input type="file" hidden>📎</label>
-        <textarea rows="1" placeholder="Message ${esc(name)}… (Enter to send, Shift+Enter for newline)"></textarea>
-        <button class="btn btn--red" data-send>Send</button>
-        ${!on && a?.launchable ? `<button class="btn" data-launch title="Starts a headless ${esc(a.kind)} turn in the project with this message">Send + run</button>` : ''}
-      </div>
-      ${!on && a?.launchable ? `<div class="composer__hint"><b>offline:</b> Send queues it; Send + run starts a headless ${esc(a?.kind || '')} turn now</div>` : ''}
-    </section>`);
-  $('[data-copy]', pane)?.addEventListener('click', () => {
-    navigator.clipboard?.writeText($('.invite__cmd', pane).textContent).then(() => toast('copied'));
-  });
-  $('.composer__attach input', pane)?.addEventListener('change', async (e) => {
-    const fl = e.target.files[0]; if (!fl) return;
-    if (fl.size > 10_000_000) return toast('file too large (10MB max)', true);
-    const r = await fetch(`/api/file?name=${encodeURIComponent(fl.name)}&type=${encodeURIComponent(fl.type || 'application/octet-stream')}`, { method: 'POST', body: fl });
-    const j = await r.json();
-    if (!j.ok) return toast(j.message || 'upload failed', true);
-    const caption = $('textarea', pane).value.trim();
-    $('textarea', pane).value = '';
-    await api('message/send', { from: 'owner', to: name, text: caption || fl.name, file: { id: j.file.id, name: j.file.name, type: j.file.type } });
-  });
-  const log = $('#log', pane);
-  const msgs = thread?.messages || [];
-  if (!msgs.length) log.appendChild(el(`<div class="empty" style="padding:30px"><div>No messages yet — say something.</div></div>`));
-  for (const m of msgs) {
-    const mine = m.from === 'owner';
-    log.appendChild(el(`<div class="msg ${mine ? 'msg--owner' : ''} ${mine && !m.deliveredAt ? 'msg--queued' : ''}">
-        <div class="msg__meta"><div class="msg__from">${esc(m.from)}</div>
-          <div class="msg__at">${new Date(m.at).toLocaleDateString([], { month: 'short', day: 'numeric' })} ${new Date(m.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div></div>
-        <div class="msg__body">${esc(m.text)}${m.file ? (
-          /^image\//.test(m.file.type)
-            ? `<a href="/files/${esc(m.file.id)}" target="_blank"><img class="msg__img" src="/files/${esc(m.file.id)}" alt="${esc(m.file.name)}" loading="lazy"></a>`
-            : `<a class="msg__file" href="/files/${esc(m.file.id)}" target="_blank" download="${esc(m.file.name)}">📄 ${esc(m.file.name)}</a>`
-        ) : ''}${m.cardId && cardById(m.cardId) ? `<a class="msg__card" href="#" data-card="${esc(m.cardId)}">card ${ticket(cardById(m.cardId))}</a>` : ''}</div>
-      </div>`));
-  }
-  log.querySelectorAll('[data-card]').forEach(x => x.addEventListener('click', (e) => { e.preventDefault(); showDetail(x.dataset.card); }));
-  queueMicrotask(() => { log.scrollTop = log.scrollHeight; });
-
-  const ta = $('textarea', pane);
-  const send = async (launch = false) => {
-    const text = ta.value.trim(); if (!text) return;
-    ta.value = '';
-    try {
-      if (launch) { await api('agent/launch', { agent: name, text }); toast(`started ${name} — reply lands in this thread`); }
-      else { await api('message/send', { from: 'owner', to: name, text }); }
-    } catch (e) {
-      // never eat the owner's words: restore the draft + show it in-thread
-      ta.value = text;
-      const log = $('.thread__log', pane);
-      log?.appendChild(el(`<div class="thread__fail">✕ not sent — ${esc(e.message || 'failed')}. Your draft is back in the box.</div>`));
-      if (log) log.scrollTop = log.scrollHeight;
-    }
-  };
-  $('[data-send]', pane).addEventListener('click', () => send(false));
-  $('[data-launch]', pane)?.addEventListener('click', () => send(true));
-  ta.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(false); }
-  });
-  return pane;
 }
 
 // ---- BOARD ---------------------------------------------------------------------
@@ -949,7 +755,7 @@ async function recordBatch() {
 }
 
 // ---- render + routing -----------------------------------------------------------
-const RENDER = { now: viewNow, agents: viewAgents, board: viewBoard };
+const RENDER = { now: viewNow, board: viewBoard };
 function render() {
   if (!S) return;
   renderBeacon();
@@ -988,7 +794,7 @@ document.addEventListener('keydown', (e) => {
     if (e.key === 'k' || e.key === 'ArrowUp') { e.preventDefault(); return nowMove(-1); }
     if (e.key === 'Enter' && nowSel >= 0) { e.preventDefault(); return nowActivate(); }
   }
-  const i = ['1', '2', '3'].indexOf(e.key);
+  const i = ['1', '2'].indexOf(e.key);
   if (i >= 0) go(VIEWS[i].id);
 });
 
@@ -999,7 +805,6 @@ function paletteItems(q) {
   const hit = (s) => s.toLowerCase().includes(needle);
   const items = [];
   for (const v of VIEWS) if (!q || hit(v.name)) items.push({ label: `view · ${v.name}`, act: () => go(v.id) });
-  for (const a of ROSTER) if (!q || hit(a.name)) items.push({ label: `agent · ${a.name} (${a.online ? 'online' : 'offline'})`, act: () => { THREAD = a.name; go('agents'); } });
   for (const d of openDecisions()) if (!q || hit(d.id + ' ' + d.title)) items.push({ label: `decide · ${d.id} — ${d.title.slice(0, 60)}`, act: () => focusAll(d.id) });
   for (const c of S.cards) {
     if (c.phase === 'done' && q.length < 2) continue;
@@ -1040,13 +845,8 @@ function openPalette() {
 $('#scrim').addEventListener('click', closeDetail);
 window.addEventListener('hashchange', () => { const h = location.hash.slice(1); if (RENDER[h]) { VIEW = h; render(); } });
 
-// live updates: SSE stream (fallback: slow poll); roster refresh only while
-// on Agents and only when it won't disturb the owner
+// live updates: SSE stream (fallback: slow poll)
 connectStream();
-setInterval(async () => {
-  if (VIEW !== 'agents' || uiBusy() || document.hidden) return;
-  await refreshRoster(); renderPreservingScroll();
-}, 15000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) { refresh(); } });
 
 // PWA: service worker + push
@@ -1076,8 +876,7 @@ window.__towerEnablePush = enablePush;
 })();
 
 if (RENDER[location.hash.slice(1)]) VIEW = location.hash.slice(1);
-// top-level awaits: the window load event waits for the first full render
-await refreshRoster();
+// top-level await: the window load event waits for the first full render
 await refresh();
 // deep links: ?focus=<decisionId> opens focus mode, ?open=<cardId|#n> a card
 const qs = new URLSearchParams(location.search);

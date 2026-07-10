@@ -54,7 +54,7 @@ tower decision add --file /tmp/ballot.json --by <me>
 ```
 
 The card's lane flips to `decide` automatically; leave it there. Nudge the
-owner if it's urgent: `tower message send --to owner --text "ballot D-CACHE1 ready on #12" --by <me>`.
+owner if it's urgent (new ballots already trigger a push notification).
 
 ## Rules
 
@@ -66,5 +66,5 @@ owner if it's urgent: `tower message send --to owner --text "ballot D-CACHE1 rea
   recommendation. Rank on the project's actual priorities.
 - When the owner ratifies with a comment, **honor every word** — a question
   inside a ratification is not a clean pick; address it before building.
-- Owner asks for changes via a question or message → edit the ballot
+- Owner asks for changes via a question → edit the ballot
   (`tower decision update <id> --file …`), then reply.

@@ -1,6 +1,6 @@
 ---
 name: tower
-description: Act on what the owner just recorded in Tower — implement ratified decisions, answer open card questions and messages, advance agent-lane cards (plan / implement / verify), and raise new decisions in ballot-ready form. When burndown is the goal, work only Epoch 3 + sidequest cards in workOrder until both sections are empty. Use after the owner records decisions or leaves notes in Tower, or when asked to "process tower", "act on my decisions", "do the tower work", "work the board", "sweep the board". The owner only ever does two things (decide, greenlight); this skill does everything that follows.
+description: Act on what the owner just recorded in Tower — implement ratified decisions, answer open card questions, advance agent-lane cards (plan / implement / verify), and raise new decisions in ballot-ready form. When burndown is the goal, work only Epoch 3 + sidequest cards in workOrder until both sections are empty. Use after the owner records decisions or leaves notes in Tower, or when asked to "process tower", "act on my decisions", "do the tower work", "work the board", "sweep the board". The owner only ever does two things (decide, greenlight); this skill does everything that follows.
 ---
 
 # Tower — act on the board
@@ -14,8 +14,9 @@ alias tower='node /home/nate/Projects/Github/jet/Tower/tower.mjs'
 tower help
 ```
 
-The old `tools/Tower/` is retired; its board was imported losslessly. If you
-find yourself reading `.tower/tower.json`, stop — it is frozen legacy.
+The old `tools/Tower/` tree was deleted (2026-07-10); its board had been
+imported losslessly into `.tower/tower.json`, and its PM docs now live under
+`docs/{plans,proposals,sidequests,ballots}/`.
 
 ## The one rule that governs everything
 
@@ -31,26 +32,6 @@ decisions), `implement`, `building`, `verify` (verify 100%, then close).
 Epochs group the work; **milestones** are goals within an epoch (link cards
 with `--milestone`). `tower state` = full JSON; `tower status` = summary.
 
-## Stay reachable — the message line
-
-The owner messages agents from the board (often from his phone). At session
-start, arm a listener in the background via the Monitor tool:
-
-```
-tower agent listen --name claude-main --kind claude
-```
-
-Each owner message arrives as a `[owner] …` line and should be treated as an
-interrupt: answer or act (`tower message send --to owner --text "…" --by
-claude-main`), then resume. Report completions the same way — that's what
-reaches his phone (`--attach shot.png` for screenshots). Catch up after
-gaps: `tower message list --unread --for claude-main`.
-
-Keep `tower agent status --name claude-main --text "building #187 — tests
-green"` fresh when switching tasks (shows live in his roster). A `[tower]`
-system message ("N decisions ratified … greenlit: …") is ONE signal that the
-board changed — run `tower next` once; do not fan out an agent per item.
-
 ## Scope & work order — Epoch 3 burndown
 
 When the owner asks to work the board / burn down Epoch 3, stay inside:
@@ -65,7 +46,7 @@ spelling to bypass a ratification gate. Exit criterion: both sections empty.
 
 ## Session loop
 
-1. `tower status` · answer `tower question list --open` first · check unread messages.
+1. `tower status` · answer `tower question list --open` first.
 2. `tower next` → claim it: `tower card claim '#N' --by claude-main` (claimed
    by someone else → pick another).
 3. **BALLOT FIRST — before any code on the card.** Enumerate every owner-gate
@@ -87,7 +68,9 @@ spelling to bypass a ratification gate. Exit criterion: both sections empty.
    criterion before touching the next card; "step N done" ≠ card done.
 6. Release or leave a `[handoff]` log entry if you stop mid-card — cards are
    the handoff source of truth; harness task lists don't survive resets.
-7. Report: message the owner what advanced + anything newly blocked on him.
+7. Report on the board itself: log entries on advanced cards, ballots/
+   questions for anything newly blocked on him — that's what he sees (and
+   gets push notifications for).
 
 ## Implementation standard — non-negotiable
 

@@ -41,31 +41,10 @@ tower card show '#12'        # one card, with computed lane + decisions
 tower events --limit 20      # who did what, when
 ```
 
-## The message line (owner ⇄ you)
-
-The owner messages agents from the board's Agents view. Stay reachable:
-
-```
-tower agent listen --name <me> --kind <claude|codex|agent>
-```
-
-Long-lived process; each owner message prints as one `[owner] …` line on
-stdout (run it under whatever wakes your harness on output — for Claude
-Code, the Monitor tool). Works via the server's long-poll when `tower serve`
-is up, else falls back to polling the data file every 3s.
-
-```
-tower message send --to owner --text "verify pass green on #12" --by <me>
-tower message send --to owner --attach shot.png --by <me>   # images render inline
-tower message list --unread --for <me>     # catch up after being away
-tower agent status --name <me> --text "building #12 — tests green"
-```
-
-Report completions and blockers with a message — that's what reaches the
-owner's phone. Update `agent status` when you switch tasks; it shows live in
-the roster. Watch for `[tower]` system messages: ratifications and
-greenlights arrive batched there — treat one as "the board changed, run
-`tower next`", not as N separate work orders.
+Report completions and blockers on the card itself: a `--log` entry when you
+advance it, a `tower question answer` when the owner asked something. The
+board (and its push notifications) is how the owner finds out — there is no
+side channel.
 
 Auth note: localhost is exempt; remote CLIs read `auth.token` from
 `.tower/config.json` automatically.
@@ -122,11 +101,6 @@ POST /api/question/add|answer|delete
 POST /api/idea/add|update|delete|promote
 POST /api/epoch/add|update|current
 POST /api/milestone/add|update|delete
-POST /api/message/send {from,to,text,cardId?}
-POST /api/message/mark {ids,field:"readAt"|"deliveredAt"}
-GET  /api/agents                    roster + live presence
-GET  /api/messages/wait?for=me      long-poll (≤25s) for your messages
-POST /api/agent/launch {agent,text} headless turn (config.commands opt-in)
 ```
 
 POST bodies are JSON; include `by`, optionally `expectRev`. Errors are
