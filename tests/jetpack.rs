@@ -142,6 +142,24 @@ fn make_tree_writable(path: &Path) {
     }
 }
 
+fn assert_no_ephemeral_links(path: &Path) {
+    let Ok(meta) = fs::symlink_metadata(path) else {
+        return;
+    };
+    if meta.file_type().is_symlink() {
+        let target = fs::read_link(path).unwrap();
+        let text = target.to_string_lossy();
+        assert!(!text.contains("/proc/self/fd/"), "ephemeral FD link: {} -> {text}", path.display());
+        assert!(!text.contains("/leases/"), "ephemeral lease link: {} -> {text}", path.display());
+        return;
+    }
+    if meta.is_dir() {
+        for entry in fs::read_dir(path).unwrap().flatten() {
+            assert_no_ephemeral_links(&entry.path());
+        }
+    }
+}
+
 #[cfg(not(unix))]
 fn make_tree_writable(path: &Path) {
     let Ok(meta) = fs::metadata(path) else {
@@ -2455,6 +2473,13 @@ fn os_build_realizes_selected_system_offline() {
     assert!(
         initrd.contains("fixture-built cachyos initrd"),
         "initrd should come from source/build.sh: {initrd}"
+    );
+    assert_no_ephemeral_links(&generation);
+    let hello = Command::new(generation.join("sw/bin/hello")).output().unwrap();
+    assert!(hello.status.success());
+    assert!(
+        String::from_utf8_lossy(&hello.stdout).contains("hello"),
+        "generation-owned executable must survive lease close and FD reuse"
     );
 }
 
@@ -5902,6 +5927,72 @@ fn jet_build_rejects_cache_after_manifest_semantics_change() {
         stderr.contains("recipe identity verification"),
         "stderr: {stderr}"
     );
+}
+
+#[test]
+fn two_process_reverse_package_order_does_not_deadlock() {
+    let base = Scratch::new("reverse-order-leases");
+    let repo = base.join("repo");
+    let root = base.join("root");
+    for name in ["a", "b"] {
+        let package = repo.join(format!("pkgs/{name}"));
+        fs::create_dir_all(package.join("bin")).unwrap();
+        fs::write(package.join(format!("{name}.jet")), format!("module {name} {{ }}\n"))
+            .unwrap();
+        let tool = package.join(format!("bin/{name}"));
+        fs::write(&tool, format!("#!/bin/sh\necho {name}\n")).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            fs::set_permissions(tool, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+    }
+    fs::write(
+        repo.join("pkg.jet"),
+        "payload: { name: \"pair\", version: \"1.0.0\" }\npackages: { a: executable, b: executable }\n",
+    )
+    .unwrap();
+    let write_project = |name: &str, packages: &[&str]| {
+        let project = base.join(name);
+        fs::create_dir_all(&project).unwrap();
+        fs::write(
+            project.join("env.jet"),
+            format!(
+                "use jetpack as pkg;\npub fn shell() -> [JSON] {{\n return [pkg.source(\"mine\", \"path:{}\", \"core\"); pkg.packages([{}]);];\n}}\n",
+                repo.display(),
+                packages
+                    .iter()
+                    .map(|package| format!("\"mine:{package}\""))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        )
+        .unwrap();
+        project
+    };
+    let ab = write_project("ab", &["a", "b"]);
+    let ba = write_project("ba", &["b", "a"]);
+    let seeded = jetpack()
+        .args(["build", "--no-color"])
+        .current_dir(&ab)
+        .env("JETPACK_ROOT", &root)
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert!(seeded.status.success(), "stderr: {}", String::from_utf8_lossy(&seeded.stderr));
+    let spawn = |project: &Path| {
+        jetpack()
+            .args(["enter", "--no-color", "--trust", "--", "/bin/sh", "-c", "true"])
+            .current_dir(project)
+            .env("JETPACK_ROOT", &root)
+            .env("PATH", "/usr/bin:/bin")
+            .spawn()
+            .unwrap()
+    };
+    let first = spawn(&ab);
+    let second = spawn(&ba);
+    assert!(first.wait_with_output().unwrap().status.success());
+    assert!(second.wait_with_output().unwrap().status.success());
 }
 
 #[test]

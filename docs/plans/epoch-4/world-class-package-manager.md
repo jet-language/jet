@@ -51,10 +51,12 @@ JP0 stop-line now enforces three truth boundaries:
   directories, and complete hardlink identity; reject outside aliases, escapes,
   cycles, concurrent mutation, and special files. Directory snapshots bind
   child names, types, metadata, and ctime before and after traversal. Local
-  outputs are sealed read-only; Linux consumers execute and copy through a
-  lease-owned inherited directory descriptor, so a same-UID rename/symlink
-  swap cannot redirect the path. JetOS retains those leases through kernel
-  validation, private generation-scratch builds, and closure copy. Sandbox
+  outputs are copied into per-realization sealed private snapshots. Executable
+  files use lease-owned inherited file descriptors, so nested replacement or a
+  same-UID rename/symlink swap cannot redirect execution. Leases hold no object
+  lock. JetOS retains each snapshot through kernel validation and copies every
+  needed byte into generation-owned paths before lease drop; no `/proc/self/fd`
+  or lease path enters the durable generation. Sandbox
   capability detection stays fallback until a child actually enters a jail.
 
 Production blockers after that stop-line:

@@ -97,7 +97,13 @@ pub fn run_command(env: &Env, cmd_args: &[String]) -> i32 {
     let Some((program, rest)) = cmd_args.split_first() else {
         return 0;
     };
-    let mut cmd = Command::new(program);
+    let stable_program = env
+        .cache_leases
+        .iter()
+        .find_map(|lease| lease.executable(program));
+    let mut cmd = stable_program
+        .as_ref()
+        .map_or_else(|| Command::new(program), Command::new);
     cmd.args(rest);
     env.apply(&mut cmd);
     let code = match cmd.status() {

@@ -20,7 +20,7 @@ fn write_init_facts(
                     .unwrap_or_else(|_| PathBuf::from(&entry.out))
                     .join("bin/systemd")
             });
-        link_or_copy_file(&init_path, &sbin.join("init"))?;
+        copy_file_replace(&init_path, &sbin.join("init"))?;
         write_systemd_unit_library(dir, entry, &default_target)?;
     }
     let init_package = init_entry
@@ -51,7 +51,7 @@ fn write_systemd_unit_library(
         write_minimal_systemd_units(root)?;
     }
     if let Some(systemd_bin) = boot_artifact(entry, &["lib/systemd/systemd", "bin/systemd"]) {
-        link_or_copy_file(&systemd_bin, &dir.join("systemd/lib/systemd/systemd"))?;
+        copy_file_replace(&systemd_bin, &dir.join("systemd/lib/systemd/systemd"))?;
     }
 
     let etc_units = dir.join("etc/systemd/system");

@@ -119,7 +119,7 @@ fn write_boot_facts(
         ),
     )?;
     if kernel_path.is_file() {
-        link_or_copy_file(&kernel_path, &boot_dir.join("kernel"))?;
+        copy_file_replace(&kernel_path, &boot_dir.join("kernel"))?;
         sanitize_runtime_branding_file(&boot_dir.join("kernel"))?;
     } else {
         fs::write(
@@ -129,7 +129,7 @@ fn write_boot_facts(
     }
     match initrd_path {
         Some(path) if path.is_file() => {
-            link_or_copy_file(&path, &boot_dir.join("initrd"))?;
+            copy_file_replace(&path, &boot_dir.join("initrd"))?;
             sanitize_runtime_branding_file(&boot_dir.join("initrd"))?;
         }
         Some(path) => fs::write(
@@ -166,7 +166,7 @@ fn write_boot_facts(
             .and_then(|entry| boot_artifact(entry, &[&format!("boot/modules/{module_name}")]))
         {
             fs::create_dir_all(boot_dir.join("modules"))?;
-            link_or_copy_file(&module, &boot_dir.join("modules").join(module_name))?;
+            copy_file_replace(&module, &boot_dir.join("modules").join(module_name))?;
         }
     }
     fs::write(

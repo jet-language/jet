@@ -326,9 +326,7 @@ pub fn nix_on_path() -> bool {
 
 /// A backend that realizes a ref into bytes + a `bin` dir. Both the first-party
 /// `core` provider and the `nix` compatibility provider implement this.
-pub trait Provider {
-    /// Short stable name, used in diagnostics/listings (`core`, `nix`).
-    fn name(&self) -> &'static str;
+pub(crate) trait Provider {
     /// Realize `spec`. `table` resolves named sources; `ctx` carries the
     /// offline fixtures dir and the store dir to materialize into.
     fn realize(
@@ -342,12 +340,9 @@ pub trait Provider {
 /// The Nix compatibility provider: translates a ref to a flake ref and shells
 /// out to `nix build --no-link --json` (R3 will remove the installed-`nix`
 /// requirement; the boundary here does not change).
-pub struct NixProvider;
+pub(crate) struct NixProvider;
 
 impl Provider for NixProvider {
-    fn name(&self) -> &'static str {
-        "nix"
-    }
     fn realize(
         &self,
         spec: &RefSpec,
@@ -383,12 +378,9 @@ impl Provider for NixProvider {
 /// kind (Chunk 4), and materializes that source tree into the Jetpack store —
 /// staging a `bin/` for an `executable`, source-only for a `library`. R2
 /// supports local and git-backed remote source repos.
-pub struct CoreProvider;
+pub(crate) struct CoreProvider;
 
 impl Provider for CoreProvider {
-    fn name(&self) -> &'static str {
-        "core"
-    }
     fn realize(
         &self,
         spec: &RefSpec,
@@ -1245,7 +1237,7 @@ fn copy_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
 
 /// Pick the provider for an already-resolved kind. `Core` → the first-party
 /// builder; everything else → the Nix compatibility provider.
-pub fn provider_for(kind: ProviderKind) -> Box<dyn Provider> {
+pub(crate) fn provider_for(kind: ProviderKind) -> Box<dyn Provider> {
     match kind {
         ProviderKind::Core => Box::new(CoreProvider),
         _ => Box::new(NixProvider),
@@ -1854,7 +1846,6 @@ mod tests {
             resolve_kind(&spec, &table, false, &store),
             ProviderKind::Core
         );
-        assert_eq!(provider_for(ProviderKind::Core).name(), "core");
         let r = realize(&spec, &table, &ctx).unwrap();
         assert_eq!(r.name, "hello");
         assert!(std::path::Path::new(&r.bin).join("hello").is_file());

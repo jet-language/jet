@@ -295,10 +295,6 @@ pub fn record_verified(
 ) -> std::io::Result<StoreEntry> {
     super::RuntimePolicy::with_lock(&roots.root, "hangar", || {
         let id = entry_id(name, version, reference, out);
-        let _object = super::RuntimePolicy::acquire_lock(
-            &roots.root,
-            &format!("hangar-object-{id}"),
-        )?;
         let dir = roots.hangar_dir().join(&id);
         let now = now_secs();
         let realized_at = read_meta(&dir).and_then(|m| m.realized_at).unwrap_or(now);
@@ -518,17 +514,40 @@ pub struct VerifiedCacheHit {
 }
 
 pub struct CacheLease {
-    _guard: super::RuntimePolicy::FileLock,
-    _root_handle: fs::File,
-    _handles: Vec<fs::File>,
+    files: Vec<(PathBuf, fs::File)>,
     out: PathBuf,
-    view_root: PathBuf,
+    snapshot_root: PathBuf,
+    bin_relative: Option<PathBuf>,
     expected_digest: String,
     package: String,
     version: String,
 }
 
 impl CacheLease {
+    pub fn executable(&self, name: &str) -> Option<PathBuf> {
+        if name.contains(std::path::MAIN_SEPARATOR) {
+            return None;
+        }
+        let bin = self.bin_relative.as_ref()?;
+        self.files
+            .iter()
+            .find(|(member, _)| {
+                member.parent() == Some(bin.as_path())
+                    && member.file_name().and_then(|part| part.to_str()) == Some(name)
+            })
+            .map(|(_, file)| {
+                #[cfg(target_os = "linux")]
+                {
+                    use std::os::fd::AsRawFd as _;
+                    PathBuf::from(format!("/proc/self/fd/{}", file.as_raw_fd()))
+                }
+                #[cfg(not(target_os = "linux"))]
+                {
+                    self.snapshot_root.join(bin).join(name)
+                }
+            })
+    }
+
     pub fn stable_path(&self, path: &str) -> std::io::Result<PathBuf> {
         let relative = Path::new(path).strip_prefix(&self.out).map_err(|_| {
             std::io::Error::other(format!(
@@ -542,13 +561,25 @@ impl CacheLease {
         {
             return Err(std::io::Error::other("leased consumer path contains parent traversal"));
         }
-        Ok(self.view_root.join(relative))
+        if let Some((_, file)) = self.files.iter().find(|(member, _)| member == relative) {
+            #[cfg(target_os = "linux")]
+            {
+                use std::os::fd::AsRawFd as _;
+                return Ok(PathBuf::from(format!("/proc/self/fd/{}", file.as_raw_fd())));
+            }
+        }
+        Ok(self.snapshot_root.join(relative))
     }
 
     /// Revalidate immediately before handing paths to a child consumer. The
     /// archive reader uses no-follow handles and rejects concurrent mutation.
     pub fn validate(&self) -> std::io::Result<()> {
-        let actual = super::Envelope::try_output_hash_of(&self.out.to_string_lossy())
+        if self.expected_digest.is_empty() {
+            return Err(std::io::Error::other(
+                "realization has no canonical consumable output",
+            ));
+        }
+        let actual = super::Envelope::try_output_hash_of(&self.snapshot_root.to_string_lossy())
             .map_err(std::io::Error::other)?;
         if actual != self.expected_digest {
             return Err(std::io::Error::other(format!(
@@ -574,12 +605,19 @@ impl CacheLease {
     }
 }
 
+impl Drop for CacheLease {
+    fn drop(&mut self) {
+        let _ = make_tree_writable_for_removal(&self.snapshot_root);
+        let _ = fs::remove_dir_all(&self.snapshot_root);
+    }
+}
+
 pub fn find_verified_by_reference(
     roots: &Roots,
     reference: &str,
     expectation: &CacheExpectation,
 ) -> std::io::Result<Option<VerifiedCacheHit>> {
-    let global = super::RuntimePolicy::acquire_lock(&roots.root, "hangar")?;
+    let _global = super::RuntimePolicy::acquire_lock(&roots.root, "hangar")?;
     let entry = list(roots)
         .into_iter()
         .filter(|entry| entry.reference == reference)
@@ -588,100 +626,168 @@ pub fn find_verified_by_reference(
     let Some(entry) = entry else {
         return Ok(None);
     };
-    let object_guard = super::RuntimePolicy::acquire_lock(
-        &roots.root,
-        &format!("hangar-object-{}", entry.id),
-    )?;
-    let handles = open_cache_handles(Path::new(&entry.out))?;
-    let canonical_out = fs::canonicalize(&entry.out)?;
-    let (root_handle, view_root) = open_stable_root(&canonical_out)?;
-    drop(global);
-    Ok(Some({
-        let out = PathBuf::from(&entry.out);
-        let expected_digest = entry.envelope.output_hash.clone();
-        let package = entry.name.clone();
-        let version = entry.version.clone();
-        VerifiedCacheHit {
-            entry,
-            lease: CacheLease {
-                _guard: object_guard,
-                _root_handle: root_handle,
-                _handles: handles,
-                out,
-                view_root,
-                expected_digest,
-                package,
-                version,
-            },
+    let lease = snapshot_lease(roots, &entry)?;
+    Ok(Some(VerifiedCacheHit { entry, lease }))
+}
+
+fn snapshot_lease(roots: &Roots, entry: &StoreEntry) -> std::io::Result<CacheLease> {
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    use std::sync::atomic::Ordering;
+
+    let leases = roots.root.join("leases");
+    fs::create_dir_all(&leases)?;
+    let snapshot_root = leases.join(format!(
+        "{}-{}-{}",
+        std::process::id(),
+        SEQ.fetch_add(1, Ordering::Relaxed),
+        entry.id
+    ));
+    if snapshot_root.exists() {
+        make_tree_writable_for_removal(&snapshot_root)?;
+        fs::remove_dir_all(&snapshot_root)?;
+    }
+    if !Path::new(&entry.out).exists() {
+        fs::create_dir_all(&snapshot_root)?;
+        return Ok(CacheLease {
+            files: Vec::new(),
+            out: PathBuf::from(&entry.out),
+            snapshot_root,
+            bin_relative: None,
+            expected_digest: String::new(),
+            package: entry.name.clone(),
+            version: entry.version.clone(),
+        });
+    }
+    let mut hardlinks = BTreeMap::new();
+    copy_snapshot_node(Path::new(&entry.out), &snapshot_root, &mut hardlinks)?;
+    let digest = super::Envelope::try_output_hash_of(&snapshot_root.to_string_lossy())
+        .map_err(std::io::Error::other)?;
+    if digest != entry.envelope.output_hash {
+        make_tree_writable_for_removal(&snapshot_root)?;
+        fs::remove_dir_all(&snapshot_root)?;
+        return Err(std::io::Error::other(format!(
+            "private lease snapshot mismatch: expected {}, got {digest}",
+            entry.envelope.output_hash
+        )));
+    }
+    seal_local_output(&snapshot_root)?;
+    let sealed_digest = super::Envelope::try_output_hash_of(&snapshot_root.to_string_lossy())
+        .map_err(std::io::Error::other)?;
+    let mut files = Vec::new();
+    open_snapshot_files(&snapshot_root, &snapshot_root, &mut files)?;
+    Ok(CacheLease {
+        files,
+        out: PathBuf::from(&entry.out),
+        snapshot_root,
+        bin_relative: (!entry.bin.is_empty())
+            .then(|| Path::new(&entry.bin).strip_prefix(&entry.out).ok().map(PathBuf::from))
+            .flatten(),
+        expected_digest: sealed_digest,
+        package: entry.name.clone(),
+        version: entry.version.clone(),
+    })
+}
+
+fn copy_snapshot_node(
+    src: &Path,
+    dst: &Path,
+    hardlinks: &mut BTreeMap<(u64, u64), PathBuf>,
+) -> std::io::Result<()> {
+    let meta = fs::symlink_metadata(src)?;
+    if meta.is_dir() {
+        fs::create_dir_all(dst)?;
+        let mut entries = fs::read_dir(src)?.collect::<Result<Vec<_>, _>>()?;
+        entries.sort_by_key(|entry| entry.file_name());
+        for entry in entries {
+            copy_snapshot_node(&entry.path(), &dst.join(entry.file_name()), hardlinks)?;
         }
-    }))
-}
-
-#[cfg(target_os = "linux")]
-fn open_stable_root(root: &Path) -> std::io::Result<(fs::File, PathBuf)> {
-    use std::os::fd::AsRawFd as _;
-
-    let handle = fs::File::open(root)?;
-    let fd = handle.as_raw_fd();
-    const F_SETFD: i32 = 2;
-    unsafe extern "C" {
-        fn fcntl(fd: i32, command: i32, argument: i32) -> i32;
+        fs::set_permissions(dst, meta.permissions())?;
+    } else if meta.is_file() {
+        if let Some(key) = snapshot_file_identity(&meta) {
+            if let Some(first) = hardlinks.get(&key) {
+                fs::hard_link(first, dst)?;
+            } else {
+                fs::copy(src, dst)?;
+                hardlinks.insert(key, dst.to_path_buf());
+            }
+        } else {
+            fs::copy(src, dst)?;
+        }
+        fs::set_permissions(dst, meta.permissions())?;
+    } else if meta.file_type().is_symlink() {
+        let target = fs::read_link(src)?;
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(target, dst)?;
+        #[cfg(not(unix))]
+        return Err(std::io::Error::other("cache symlink snapshots need platform support"));
+    } else {
+        return Err(std::io::Error::other("special file in cache snapshot"));
     }
-    if unsafe { fcntl(fd, F_SETFD, 0) } == -1 {
-        return Err(std::io::Error::last_os_error());
-    }
-    let view = PathBuf::from(format!("/proc/self/fd/{fd}"));
-    if fs::canonicalize(&view)? != root {
-        return Err(std::io::Error::other("stable cache descriptor changed"));
-    }
-    Ok((handle, view))
+    Ok(())
 }
 
-#[cfg(not(target_os = "linux"))]
-fn open_stable_root(_root: &Path) -> std::io::Result<(fs::File, PathBuf)> {
-    Err(std::io::Error::other(
-        "race-safe cache consumption needs a stable directory descriptor on this platform",
-    ))
+#[cfg(unix)]
+fn snapshot_file_identity(meta: &fs::Metadata) -> Option<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt as _;
+    (meta.nlink() > 1).then(|| (meta.dev(), meta.ino()))
 }
 
-fn open_cache_handles(root: &Path) -> std::io::Result<Vec<fs::File>> {
-    let mut handles = Vec::new();
-    open_cache_node(root, &mut handles)?;
-    Ok(handles)
+#[cfg(not(unix))]
+fn snapshot_file_identity(_meta: &fs::Metadata) -> Option<(u64, u64)> {
+    None
 }
 
-fn open_cache_node(path: &Path, handles: &mut Vec<fs::File>) -> std::io::Result<()> {
+fn open_snapshot_files(
+    root: &Path,
+    path: &Path,
+    files: &mut Vec<(PathBuf, fs::File)>,
+) -> std::io::Result<()> {
     let meta = fs::symlink_metadata(path)?;
     if meta.file_type().is_symlink() {
         return Ok(());
     }
     if meta.is_dir() {
         for entry in fs::read_dir(path)? {
-            open_cache_node(&entry?.path(), handles)?;
+            open_snapshot_files(root, &entry?.path(), files)?;
         }
         return Ok(());
     }
-    let mut options = fs::OpenOptions::new();
-    options.read(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt as _;
-        const O_NOFOLLOW: i32 = 0x20000;
-        options.custom_flags(O_NOFOLLOW);
+    let file = fs::File::open(path)?;
+    clear_close_on_exec(&file)?;
+    files.push((path.strip_prefix(root).unwrap().to_path_buf(), file));
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn clear_close_on_exec(file: &fs::File) -> std::io::Result<()> {
+    use std::os::fd::AsRawFd as _;
+    const F_SETFD: i32 = 2;
+    unsafe extern "C" {
+        fn fcntl(fd: i32, command: i32, argument: i32) -> i32;
     }
-    let file = options.open(path)?;
-    let opened = file.metadata()?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt as _;
-        if (meta.dev(), meta.ino()) != (opened.dev(), opened.ino()) {
-            return Err(std::io::Error::other(format!(
-                "cache file changed while opening `{}`",
-                path.display()
-            )));
+    if unsafe { fcntl(file.as_raw_fd(), F_SETFD, 0) } == -1 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn clear_close_on_exec(_file: &fs::File) -> std::io::Result<()> {
+    Ok(())
+}
+
+fn make_tree_writable_for_removal(path: &Path) -> std::io::Result<()> {
+    let Ok(meta) = fs::symlink_metadata(path) else {
+        return Ok(());
+    };
+    if meta.is_dir() {
+        let mut permissions = meta.permissions();
+        permissions.set_readonly(false);
+        fs::set_permissions(path, permissions)?;
+        for entry in fs::read_dir(path)? {
+            make_tree_writable_for_removal(&entry?.path())?;
         }
     }
-    handles.push(file);
     Ok(())
 }
 
@@ -751,10 +857,11 @@ pub fn realize_verified(
         &realized.cache_identity,
     )
     .map_err(RealizeError::Store)?;
+    let lease = snapshot_lease(roots, &entry).map_err(RealizeError::Store)?;
     Ok(VerifiedRealization {
         entry,
         source_state: realized.source_state,
-        lease: None,
+        lease: Some(lease),
     })
 }
 
@@ -917,10 +1024,6 @@ pub fn quarantine_invalid_entry(
         if entry.id != expected_id || Path::new(&entry.id).components().count() != 1 {
             return Err(std::io::Error::other("invalid cache record identity"));
         }
-        let _object = super::RuntimePolicy::acquire_lock(
-            &roots.root,
-            &format!("hangar-object-{}", entry.id),
-        )?;
         let hangar = roots.hangar_dir();
         let quarantine = hangar.join("quarantine");
         fs::create_dir_all(&quarantine)?;
@@ -1081,10 +1184,6 @@ fn clean_unlocked(roots: &Roots) -> std::io::Result<CleanReport> {
             continue;
         }
         let bytes = dir_size(&path);
-        let _object = super::RuntimePolicy::acquire_lock(
-            &roots.root,
-            &format!("hangar-object-{id}"),
-        )?;
         fs::remove_dir_all(&path)?;
         report.removed_objects += 1;
         report.removed_bytes += bytes;
@@ -1724,7 +1823,7 @@ mod tests {
     }
 
     #[test]
-    fn cache_lease_blocks_hangar_mutation_until_consumer_drop() {
+    fn cache_lease_is_private_snapshot_without_long_object_lock() {
         let (roots, _g) = temp_roots();
         let out = roots.root.join("leased-output");
         fs::create_dir_all(&out).unwrap();
@@ -1753,23 +1852,13 @@ mod tests {
         )
         .unwrap()
         .unwrap();
-        let object_scope = format!("hangar-object-{}", hit.entry.id);
-        let root = roots.root.clone();
-        let marker = root.join("mutated");
-        let marker_thread = marker.clone();
-        let handle = std::thread::spawn(move || {
-            let _guard =
-                super::super::RuntimePolicy::acquire_lock(&root, &object_scope).unwrap();
-            fs::write(marker_thread, "after lease").unwrap();
-        });
-        std::thread::sleep(Duration::from_millis(60));
-        assert!(!marker.exists());
         fs::write(out.join("payload"), "mutated outside cooperative lock").unwrap();
-        let failure = hit.lease.integrity_failure().unwrap();
-        assert_eq!(failure.reason, "race-safe pre-consumer revalidation");
-        drop(hit);
-        handle.join().unwrap();
-        assert!(marker.exists());
+        assert!(hit.lease.validate().is_ok());
+        let stable = hit
+            .lease
+            .stable_path(&out.join("payload").to_string_lossy())
+            .unwrap();
+        assert_eq!(fs::read_to_string(stable).unwrap(), "trusted");
     }
 
     #[cfg(target_os = "linux")]
@@ -1820,6 +1909,13 @@ mod tests {
         )
         .unwrap();
         symlink(&attacker, &out).unwrap();
+
+        assert!(hit.lease.validate().is_ok());
+        make_tree_writable_for_removal(&hit.lease.snapshot_root).unwrap();
+        let snapshot_tool = hit.lease.snapshot_root.join("bin/tool");
+        fs::remove_file(&snapshot_tool).unwrap();
+        fs::write(&snapshot_tool, "#!/bin/sh\nprintf snapshot-attacker").unwrap();
+        fs::set_permissions(&snapshot_tool, fs::Permissions::from_mode(0o755)).unwrap();
 
         let output = Command::new(&stable_tool).output().unwrap();
         assert!(output.status.success());

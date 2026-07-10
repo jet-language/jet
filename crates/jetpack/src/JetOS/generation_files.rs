@@ -320,7 +320,7 @@ fn write_root_closure(dir: &Path, realized: &[RealizedPackage]) -> std::io::Resu
                 continue;
             }
             let dst = sw_bin.join(entry.file_name());
-            link_or_copy_file(&src, &dst)?;
+            copy_file_replace(&src, &dst)?;
         }
     }
     write_jetos_toolchain(dir, &sw_bin, &mut manifest)?;
@@ -370,7 +370,7 @@ fn copy_profile_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
         if meta.file_type().is_symlink() {
             copy_runtime_symlink(src, dst)?;
         } else if meta.is_file() {
-            link_or_copy_file(src, dst)?;
+            copy_file_replace(src, dst)?;
         }
     }
     Ok(())
