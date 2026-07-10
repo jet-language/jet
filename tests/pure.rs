@@ -57,7 +57,7 @@ fn run() {
     assert!(
         diags.iter().any(|d| d.code == "E3401"),
         "expected E3401, got: {:?}",
-        diags.iter().map(|d| d.code).collect::<Vec<_>>()
+        diags.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
     );
 }
 
@@ -119,7 +119,7 @@ fn run() {
     assert!(
         diags.iter().any(|d| d.code == "E3401"),
         "expected E3401, got: {:?}",
-        diags.iter().map(|d| d.code).collect::<Vec<_>>()
+        diags.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
     );
 }
 
@@ -472,10 +472,10 @@ fn eval_type_error_gives_precise_diagnostic_not_e0956() {
     assert!(
         diags.iter().all(|d| d.code != "E0956"),
         "must not see E0956 for a type error; got: {:?}",
-        diags.iter().map(|d| d.code).collect::<Vec<_>>()
+        diags.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
     );
     // Should be a type-mismatch / operator error, not a comptime limitation.
-    let codes: Vec<_> = diags.iter().map(|d| d.code).collect();
+    let codes: Vec<_> = diags.iter().map(|d| d.code.as_str()).collect();
     assert!(
         codes.iter().any(|c| *c != "E0956"),
         "expected a type/operator error code, got: {:?}",

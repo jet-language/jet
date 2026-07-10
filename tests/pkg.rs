@@ -37,7 +37,7 @@ fn write(dir: &Path, rel: &str, content: &str) {
 }
 
 fn first_diag_code(diags: &[jet::Diagnostics::Diagnostic]) -> &str {
-    diags.first().map(|d| d.code).unwrap_or("")
+    diags.first().map(|d| d.code.as_str()).unwrap_or("")
 }
 
 fn jet_bin() -> PathBuf {

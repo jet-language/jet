@@ -2484,7 +2484,7 @@ fn run() {
     assert!(
         diags.iter().any(|d| d.code == "E0202"),
         "expected E0202, got: {:?}",
-        diags.iter().map(|d| d.code).collect::<Vec<_>>()
+        diags.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
     );
 }
 
@@ -2499,7 +2499,7 @@ fn run() {}
     assert!(
         diags.iter().any(|d| d.code == "E0106"),
         "expected E0106, got: {:?}",
-        diags.iter().map(|d| d.code).collect::<Vec<_>>()
+        diags.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
     );
 }
 
@@ -2534,7 +2534,7 @@ fn run() {
     assert!(
         diags.iter().any(|d| d.code == "E0202"),
         "expected E0202, got: {:?}",
-        diags.iter().map(|d| d.code).collect::<Vec<_>>()
+        diags.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
     );
 }
 
@@ -2551,7 +2551,7 @@ fn run() {
     assert!(
         diags.iter().any(|d| d.code == "E0202"),
         "expected E0202, got: {:?}",
-        diags.iter().map(|d| d.code).collect::<Vec<_>>()
+        diags.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
     );
 }
 
@@ -2571,7 +2571,7 @@ fn run() {
     assert!(
         diags.iter().any(|d| d.code == "E0125"),
         "expected E0125, got: {:?}",
-        diags.iter().map(|d| d.code).collect::<Vec<_>>()
+        diags.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
     );
 }
 

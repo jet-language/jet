@@ -509,7 +509,7 @@ impl DevBatteryStats {
 }
 
 fn is_named_dev_boundary(stem: &str, diags: &[jet::Diagnostics::Diagnostic]) -> bool {
-    diags.iter().any(|d| BOUNDARY_CODES.contains(&d.code))
+    diags.iter().any(|d| BOUNDARY_CODES.contains(&d.code.as_str()))
         // D-DBDRIVER1/D-DBMIGRATE1: the checked-SQL DB example is an AOT-backed
         // core.db surface today; the dev default tier stops before execution.
         || (stem == "io/db_checked_sql" && diags.iter().all(|d| d.code == "E1004"))
@@ -541,7 +541,7 @@ fn check_dev_default_stem(
         RunOutcome::Problems(diags) => {
             eprintln!(
                 "default boundary: {stem}: {}",
-                diags.iter().map(|d| d.code).collect::<Vec<_>>().join(",")
+                diags.iter().map(|d| d.code.as_str()).collect::<Vec<_>>().join(",")
             );
             assert!(
                 is_named_dev_boundary(stem, &diags),
@@ -549,7 +549,7 @@ fn check_dev_default_stem(
                  jet dev backend; codes were {:?}",
                 stem,
                 BOUNDARY_CODES,
-                diags.iter().map(|d| d.code).collect::<Vec<_>>()
+                diags.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
             );
             return DevBatteryStats {
                 boundary: 1,
@@ -659,7 +659,7 @@ fn check_interpreter_stem(
                 "`{}` neither ran nor stopped at a named boundary {:?}; codes were {:?}",
                 stem,
                 BOUNDARY_CODES,
-                diags.iter().map(|d| d.code).collect::<Vec<_>>()
+                diags.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
             );
             return DevBatteryStats {
                 boundary: 1,
@@ -861,7 +861,7 @@ fn interpreter_matches_expected_golden() {
                     is_named_dev_boundary(&stem, &diags),
                     "`{}` neither ran nor stopped at a named boundary; codes were {:?}",
                     stem,
-                    diags.iter().map(|d| d.code).collect::<Vec<_>>()
+                    diags.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
                 );
             }
         }
@@ -1241,7 +1241,7 @@ fn assert_cranelift_three_way(file: &str, stem: &str) {
 
     let interpreted = match dev_iteration(file, false, true) {
         RunOutcome::Ran { stdout, .. } => stdout,
-        RunOutcome::Problems(ds) if ds.iter().any(|d| BOUNDARY_CODES.contains(&d.code)) => {
+        RunOutcome::Problems(ds) if ds.iter().any(|d| BOUNDARY_CODES.contains(&d.code.as_str())) => {
             golden_stdout(stem)
         }
         RunOutcome::Problems(ds) => {
@@ -1723,7 +1723,7 @@ fn cranelift_trap_then_hot_swap_continues() {
             assert!(
                 diags.iter().any(|d| d.code == "E0953"),
                 "expected E0953 for list index OOB, got {:?}",
-                diags.iter().map(|d| d.code).collect::<Vec<_>>()
+                diags.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
             );
         }
         RunOutcome::Ran { stdout, .. } => {

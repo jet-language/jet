@@ -2,10 +2,10 @@
 //! `#Sanitizer fn` taint-strip contract, and the tainted→sink error E0721. Taint
 //! is a compile-time proof, erased in codegen (I3).
 
-fn codes(src: &str) -> Vec<&'static str> {
+fn codes(src: &str) -> Vec<String> {
     match jet::compile(src) {
         Ok(_) => Vec::new(),
-        Err(diags) => diags.iter().map(|d| d.code).collect(),
+        Err(diags) => diags.iter().map(|d| d.code.clone()).collect(),
     }
 }
 
@@ -20,7 +20,7 @@ fn run() {
 }
 "#;
     assert!(
-        codes(src).contains(&"E0721"),
+        codes(src).iter().any(|c| c == "E0721"),
         "direct tainted→sink must be E0721"
     );
 }
@@ -58,7 +58,7 @@ fn run() {
 }
 "#;
     assert!(
-        codes(src).contains(&"E0721"),
+        codes(src).iter().any(|c| c == "E0721"),
         "taint must propagate through a binding"
     );
 }
@@ -76,7 +76,7 @@ fn run() {
 }
 "#;
     assert!(
-        codes(src).contains(&"E0721"),
+        codes(src).iter().any(|c| c == "E0721"),
         "taint must propagate through interpolation"
     );
 }
@@ -126,7 +126,7 @@ fn run() {
 }
 "#;
     assert!(
-        !codes(src).contains(&"E0721"),
+        !codes(src).iter().any(|c| c == "E0721"),
         "a non-sink call is not a taint sink"
     );
 }
@@ -185,7 +185,7 @@ fn run() {
 }
 "#;
     assert!(
-        codes(src).contains(&"E0059"),
+        codes(src).iter().any(|c| c == "E0059"),
         "bare `sanitizer fn` must teach E0059: {:?}",
         codes(src)
     );
@@ -202,7 +202,7 @@ fn run() {
 }
 "#;
     assert!(
-        codes(src).contains(&"E0059"),
+        codes(src).iter().any(|c| c == "E0059"),
         "bare `sanitizer pub fn` must teach E0059: {:?}",
         codes(src)
     );

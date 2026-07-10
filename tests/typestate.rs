@@ -4,16 +4,16 @@
 //! and the unknown-state error E0151. State is a compile-time fact threaded by the
 //! checker and erased in codegen (I3).
 
-fn codes(src: &str) -> Vec<&'static str> {
+fn codes(src: &str) -> Vec<String> {
     match jet::compile(src) {
         Ok(_) => Vec::new(),
-        Err(diags) => diags.iter().map(|d| d.code).collect(),
+        Err(diags) => diags.iter().map(|d| d.code.clone()).collect(),
     }
 }
 
-fn lint_codes(src: &str) -> Vec<&'static str> {
+fn lint_codes(src: &str) -> Vec<String> {
     match jet::compile(src) {
-        Ok(out) => out.lints.iter().map(|d| d.code).collect(),
+        Ok(out) => out.lints.iter().map(|d| d.code.clone()).collect(),
         Err(_) => Vec::new(),
     }
 }
@@ -61,7 +61,7 @@ fn transition_in_wrong_state_is_error() {
     let src =
         format!("{DECL}\nfn run() {{\n  r := Reservation.book(\"a\")\n  r = r.check_in()\n}}\n");
     assert!(
-        codes(&src).contains(&"E0150"),
+        codes(&src).iter().any(|c| c == "E0150"),
         "skipping pay() must be E0150: {:?}",
         codes(&src)
     );
@@ -74,7 +74,7 @@ fn guarded_read_in_wrong_state_is_error() {
         "{DECL}\nfn run() {{\n  r := Reservation.book(\"a\")\n  r = r.pay()\n  print(r.room_key())\n}}\n"
     );
     assert!(
-        codes(&src).contains(&"E0150"),
+        codes(&src).iter().any(|c| c == "E0150"),
         "room_key before check_in must be E0150: {:?}",
         codes(&src)
     );
@@ -87,7 +87,7 @@ fn guarded_read_after_full_lifecycle_ok() {
         "{DECL}\nfn run() {{\n  r := Reservation.book(\"a\")\n  r = r.pay()\n  r = r.check_in()\n  print(r.room_key())\n}}\n"
     );
     assert!(
-        !codes(&src).contains(&"E0150"),
+        !codes(&src).iter().any(|c| c == "E0150"),
         "full lifecycle then read must be clean: {:?}",
         codes(&src)
     );
@@ -107,7 +107,7 @@ fn run() {
 }
 "#;
     assert!(
-        !codes(src).contains(&"E0150"),
+        !codes(src).iter().any(|c| c == "E0150"),
         "no typestate → no E0150: {:?}",
         codes(src)
     );
@@ -136,7 +136,7 @@ fn run() {
 }
 "#;
     assert!(
-        codes(src).contains(&"E0151"),
+        codes(src).iter().any(|c| c == "E0151"),
         "unknown state must be E0151: {:?}",
         codes(src)
     );
@@ -159,7 +159,7 @@ impl Crate {
 fn run() { }
 "#;
     assert!(
-        codes(src).contains(&"E0151"),
+        codes(src).iter().any(|c| c == "E0151"),
         "undeclared to-state in Transition must be E0151: {:?}",
         codes(src)
     );
@@ -176,7 +176,7 @@ fn dead_end_state_is_l0151() {
         "{DECL}\nfn run() {{\n  r := Reservation.book(\"a\")\n  r = r.pay()\n  r = r.check_in()\n  print(r.room_key())\n}}\n"
     );
     assert!(
-        lint_codes(&src).contains(&"L0151"),
+        lint_codes(&src).iter().any(|c| c == "L0151"),
         "dead-end CheckedIn must be L0151: {:?}",
         lint_codes(&src)
     );
@@ -209,7 +209,7 @@ fn run() {
         codes(src)
     );
     assert!(
-        !lint_codes(src).contains(&"L0151"),
+        !lint_codes(src).iter().any(|c| c == "L0151"),
         "no dead-end → no L0151: {:?}",
         lint_codes(src)
     );

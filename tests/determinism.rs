@@ -88,7 +88,7 @@ fn run() { print("{bad()}") }
     assert!(
         diags.iter().any(|d| d.code == "E3403"),
         "expected E3403, got: {:?}",
-        diags.iter().map(|d| d.code).collect::<Vec<_>>()
+        diags.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
     );
 }
 
@@ -108,7 +108,7 @@ fn run() { print("{bad()}") }
     assert!(
         diags.iter().any(|d| d.code == "E3403"),
         "expected E3403, got: {:?}",
-        diags.iter().map(|d| d.code).collect::<Vec<_>>()
+        diags.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
     );
 }
 
@@ -178,7 +178,7 @@ fn run() { print("{risky()}") }
     assert!(
         diags.iter().any(|d| d.code == "E3403"),
         "expected E3403 for the call outside the block, got: {:?}",
-        diags.iter().map(|d| d.code).collect::<Vec<_>>()
+        diags.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
     );
 }
 
@@ -272,7 +272,7 @@ fn run() {
     assert!(
         diags.iter().any(|d| d.code == "E0202"),
         "expected E0202, got: {:?}",
-        diags.iter().map(|d| d.code).collect::<Vec<_>>()
+        diags.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
     );
 }
 
@@ -297,7 +297,7 @@ fn run() {
     assert!(
         diags.iter().any(|d| d.code == "E0202"),
         "expected E0202, got: {:?}",
-        diags.iter().map(|d| d.code).collect::<Vec<_>>()
+        diags.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
     );
 }
 
@@ -341,7 +341,7 @@ fn run() {
     assert!(
         diags.iter().any(|d| d.code == "E0202"),
         "expected E0202, got: {:?}",
-        diags.iter().map(|d| d.code).collect::<Vec<_>>()
+        diags.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
     );
 }
 

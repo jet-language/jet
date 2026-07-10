@@ -1,10 +1,10 @@
 //! Effect system tests (D-EFF1, D-QUAL1): per-function effect inference over the
 //! call graph, the `#(…)` boundary check (E0740), and `@Pure` reconciliation.
 
-fn codes(src: &str) -> Vec<&'static str> {
+fn codes(src: &str) -> Vec<String> {
     match jet::compile(src) {
         Ok(_) => Vec::new(),
-        Err(diags) => diags.iter().map(|d| d.code).collect(),
+        Err(diags) => diags.iter().map(|d| d.code.clone()).collect(),
     }
 }
 
@@ -97,7 +97,7 @@ fn load(path: String) #(Net) -> String {
 fn run() { print(load("x")); }
 "#;
     assert!(
-        codes(src).contains(&"E0740"),
+        codes(src).iter().any(|c| c == "E0740"),
         "expected E0740, got {:?}",
         codes(src)
     );
@@ -114,7 +114,7 @@ fn load(path: String) #(Net) -> String { return helper(path); }
 fn run() { print(load("x")); }
 "#;
     assert!(
-        codes(src).contains(&"E0740"),
+        codes(src).iter().any(|c| c == "E0740"),
         "transitive Fs should trip E0740: {:?}",
         codes(src)
     );
@@ -160,7 +160,7 @@ fn load(path: String) -> String { return fs.read(path) ?? ""; }
 fn run() { print(load("x")); }
 "#;
     assert!(
-        !codes(src).contains(&"E0740"),
+        !codes(src).iter().any(|c| c == "E0740"),
         "unannotated fn must not trip E0740: {:?}",
         codes(src)
     );
@@ -174,7 +174,7 @@ fn pure_with_effects_is_e0745() {
 fn run() { print(calc()); }
 "#;
     assert!(
-        codes(src).contains(&"E0745"),
+        codes(src).iter().any(|c| c == "E0745"),
         "expected E0745, got {:?}",
         codes(src)
     );
@@ -193,7 +193,7 @@ impl Doc.Hasher {
 fn run() { d :: Doc.{ path: "x" }; print(d.hash()); }
 "#;
     assert!(
-        codes(src).contains(&"E0742"),
+        codes(src).iter().any(|c| c == "E0742"),
         "impl exceeding @Pure bound should be E0742: {:?}",
         codes(src)
     );
@@ -229,7 +229,7 @@ fn caller() #(Net) -> String { return apply(readit); }
 fn run() { print(caller()); }
 "#;
     assert!(
-        codes(src).contains(&"E0740"),
+        codes(src).iter().any(|c| c == "E0740"),
         "callback Fs should flow to caller: {:?}",
         codes(src)
     );
@@ -250,7 +250,7 @@ fn run() {
 }
 "#;
     assert!(
-        codes(src).contains(&"E0741"),
+        codes(src).iter().any(|c| c == "E0741"),
         "lambda Fs should surface in region: {:?}",
         codes(src)
     );
@@ -283,7 +283,7 @@ use core.files as fs
 fn run() { print(readit("x")); }
 "#;
     assert!(
-        codes(src).contains(&"E3401"),
+        codes(src).iter().any(|c| c == "E3401"),
         "Fs in @Pure fn should be E3401: {:?}",
         codes(src)
     );
@@ -320,7 +320,7 @@ fn run() {
 }
 "#;
     assert!(
-        codes(src).contains(&"E0741"),
+        codes(src).iter().any(|c| c == "E0741"),
         "expected E0741, got {:?}",
         codes(src)
     );
@@ -341,7 +341,7 @@ fn run() {
 }
 "#;
     assert!(
-        codes(src).contains(&"E0741"),
+        codes(src).iter().any(|c| c == "E0741"),
         "transitive Fs should trip E0741: {:?}",
         codes(src)
     );
@@ -355,9 +355,9 @@ fn work() #(Bogus) { print("hi"); }
 fn run() { work(); }
 "#;
     let c = codes(src);
-    assert!(c.contains(&"E0119"), "expected E0119, got {:?}", c);
+    assert!(c.iter().any(|c| c == "E0119"), "expected E0119, got {:?}", c);
     assert!(
-        !c.contains(&"E0740"),
+        !c.iter().any(|c| c == "E0740"),
         "unknown name should suppress E0740: {:?}",
         c
     );
@@ -399,7 +399,7 @@ fn run() {
 }
 "#;
     assert!(
-        codes(src).contains(&"E0712"),
+        codes(src).iter().any(|c| c == "E0712"),
         "expected E0712, got {:?}",
         codes(src)
     );
@@ -420,7 +420,7 @@ fn run() {
 }
 "#;
     assert!(
-        codes(src).contains(&"E0712"),
+        codes(src).iter().any(|c| c == "E0712"),
         "transitive Fs should trip E0712: {:?}",
         codes(src)
     );
@@ -439,7 +439,7 @@ fn run() {
 }
 "#;
     assert!(
-        codes(src).contains(&"E0711"),
+        codes(src).iter().any(|c| c == "E0711"),
         "aliasing the handle should be E0711: {:?}",
         codes(src)
     );
@@ -475,9 +475,9 @@ fn run() {
 }
 "#;
     let c = codes(src);
-    assert!(c.contains(&"E0119"), "expected E0119, got {:?}", c);
+    assert!(c.iter().any(|c| c == "E0119"), "expected E0119, got {:?}", c);
     assert!(
-        !c.contains(&"E0712"),
+        !c.iter().any(|c| c == "E0712"),
         "unknown name should suppress E0712: {:?}",
         c
     );
@@ -565,7 +565,7 @@ fn run() {
 }
 "#;
     assert!(
-        codes(src).contains(&"E0746"),
+        codes(src).iter().any(|c| c == "E0746"),
         "Fs in #Transact should be E0746: {:?}",
         codes(src)
     );
@@ -584,7 +584,7 @@ fn run() {
 }
 "#;
     assert!(
-        codes(src).contains(&"E0746"),
+        codes(src).iter().any(|c| c == "E0746"),
         "Net in #Transact should be E0746: {:?}",
         codes(src)
     );
@@ -641,7 +641,7 @@ fn run() {
 }
 "#;
     assert!(
-        codes(src).contains(&"E0104"),
+        codes(src).iter().any(|c| c == "E0104"),
         "on_commit with a param should be E0104: {:?}",
         codes(src)
     );
@@ -716,7 +716,7 @@ fn run() {
 }
 "#;
     assert!(
-        codes(src).contains(&"E0104"),
+        codes(src).iter().any(|c| c == "E0104"),
         "on_rollback with a param should be E0104: {:?}",
         codes(src)
     );

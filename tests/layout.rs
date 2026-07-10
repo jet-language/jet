@@ -43,7 +43,7 @@ fn build_and_run(name: &str, src: &str) -> Option<String> {
     let out = jet::compile_with_path(src, &fpath.to_string_lossy()).unwrap_or_else(|d| {
         panic!(
             "front end rejected a should-compile layout fixture: {:?}",
-            d.iter().map(|x| x.code).collect::<Vec<_>>()
+            d.iter().map(|x| x.code.as_str()).collect::<Vec<_>>()
         )
     });
     assert!(
@@ -209,7 +209,7 @@ fn run() {
     assert!(
         out.lints.iter().any(|d| d.code == "E2934"),
         "expected an E2934 lint, got: {:?}",
-        out.lints.iter().map(|d| d.code).collect::<Vec<_>>()
+        out.lints.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
     );
 }
 

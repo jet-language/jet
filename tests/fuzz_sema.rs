@@ -199,7 +199,7 @@ fn mutate_source(rng: &mut Rng, src: &str, variant: usize) -> String {
 }
 
 fn is_jet_diagnostic(d: &jet::Diagnostics::Diagnostic) -> bool {
-    let c = d.code;
+    let c = d.code.as_str();
     c.starts_with('E') || c.starts_with('L') || c.starts_with('W')
 }
 

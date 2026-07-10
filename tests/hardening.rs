@@ -13,7 +13,7 @@ fn expect_error(src: &str, code: &str) {
         "expected {code}, got: {:?}",
         diags
             .iter()
-            .map(|d| (d.code, d.what.clone()))
+            .map(|d| (d.code.clone(), d.what.clone()))
             .collect::<Vec<_>>()
     );
 }

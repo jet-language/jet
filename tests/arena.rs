@@ -41,7 +41,7 @@ fn build_and_run(name: &str, src: &str) -> Option<String> {
     let out = jet::compile_with_path(src, &fpath.to_string_lossy()).unwrap_or_else(|d| {
         panic!(
             "front end rejected a should-compile fixture: {:?}",
-            d.iter().map(|x| x.code).collect::<Vec<_>>()
+            d.iter().map(|x| x.code.as_str()).collect::<Vec<_>>()
         )
     });
     // No `unsafe` may leak outside the vetted prelude helpers (I1 / D-LL1).
