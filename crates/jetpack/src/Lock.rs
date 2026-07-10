@@ -738,7 +738,11 @@ pub fn record_toolchain(project_root: &Path, tc: LockedToolchain) {
 
 /// D-BUILDGEN1: record generated-module output hashes in the unified lock.
 /// Upserts by managed path so a rebuild replaces drift instead of appending.
-pub fn record_generated_inputs(project_root: &Path, generated: &[ComptimeInput]) {
+pub fn record_generated_inputs(
+    project_root: &Path,
+    generated: &[ComptimeInput],
+    locked: bool,
+) -> Result<(), Diagnostic> {
     let lock_path = project_root.join(Syntax::UNIFIED_LOCK_FILE);
     let mut lock = std::fs::read_to_string(&lock_path)
         .ok()
@@ -752,6 +756,21 @@ pub fn record_generated_inputs(project_root: &Path, generated: &[ComptimeInput])
             toolchains: Vec::new(),
             source_channels: Vec::new(),
         });
+    if locked {
+        for input in generated {
+            let matches = lock.comptime_inputs.iter().any(|old| old == input);
+            if !matches {
+                return Err(Diagnostic::error(
+                    "E3512",
+                    format!("locked generated input `{}` drifted", input.path),
+                    "`--locked` requires generated input and output hashes to match the unified lock exactly".to_string(),
+                    "rerun without `--locked` to review and record the new generated provenance".to_string(),
+                    None,
+                ));
+            }
+        }
+        return Ok(());
+    }
     for input in generated {
         if let Some(existing) = lock.comptime_inputs.iter_mut().find(|old| old.path == input.path) {
             *existing = input.clone();
@@ -761,9 +780,26 @@ pub fn record_generated_inputs(project_root: &Path, generated: &[ComptimeInput])
     }
     lock.comptime_inputs.sort_by(|a, b| a.path.cmp(&b.path));
     if let Some(parent) = lock_path.parent() {
-        let _ = std::fs::create_dir_all(parent);
+        std::fs::create_dir_all(parent).map_err(|error| lock_write_error(&lock_path, error))?;
     }
-    let _ = std::fs::write(lock_path, write(&lock));
+    let temp = lock_path.with_extension(format!("lock.tmp.{}", std::process::id()));
+    let mut file = std::fs::OpenOptions::new().create(true).truncate(true).write(true).open(&temp)
+        .map_err(|error| lock_write_error(&lock_path, error))?;
+    use std::io::Write;
+    file.write_all(write(&lock).as_bytes()).map_err(|error| lock_write_error(&lock_path, error))?;
+    file.sync_all().map_err(|error| lock_write_error(&lock_path, error))?;
+    std::fs::rename(&temp, &lock_path).map_err(|error| lock_write_error(&lock_path, error))?;
+    Ok(())
+}
+
+fn lock_write_error(path: &Path, error: std::io::Error) -> Diagnostic {
+    Diagnostic::error(
+        "E3502",
+        format!("generated provenance could not update `{}`", path.display()),
+        format!("the unified lock update is transactional and the filesystem rejected it: {error}"),
+        "make the project lock directory writable and rerun the build".to_string(),
+        None,
+    )
 }
 
 /// D-JPK-CHANNEL1=A: read one named source channel lock.

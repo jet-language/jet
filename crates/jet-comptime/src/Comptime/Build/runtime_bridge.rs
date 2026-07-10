@@ -6,6 +6,7 @@ use std::cell::RefCell;
 struct ProgramBuildSession {
     context: BuildContext,
     package: String,
+    diagnostics: Vec<Diagnostic>,
 }
 
 thread_local! {
@@ -24,6 +25,7 @@ pub fn begin_program_build(package: impl Into<String>, program: CtValue) -> CtVa
             ProgramBuildSession {
                 context,
                 package: package.into(),
+                diagnostics: Vec::new(),
             },
         );
     });
@@ -44,13 +46,13 @@ pub fn abort_program_build(context: &CtValue) {
     }
 }
 
-pub fn finish_program_build(context: &CtValue, returned: &CtValue) -> Result<BuildPlan, Diagnostic> {
+pub fn finish_program_build(context: &CtValue, returned: &CtValue) -> Result<(BuildPlan, Vec<Diagnostic>), Diagnostic> {
     let id = build_session_id(context).ok_or_else(|| build_diag("lost build context", Span::new(0, 0)))?;
     let default = returned_handle(returned, crate::Syntax::TYPE_BUILD_PLAN)
         .and_then(|(_, target)| (target >= 0).then_some(target as usize));
     let session = PROGRAM_BUILD_SESSIONS.with(|sessions| sessions.borrow_mut().remove(&id));
     let session = session.ok_or_else(|| build_diag("build context expired", Span::new(0, 0)))?;
-    match default {
+    let plan = match default {
         Some(target) => session
             .context
             .plan_with_default(TargetRef {
@@ -62,7 +64,8 @@ pub fn finish_program_build(context: &CtValue, returned: &CtValue) -> Result<Bui
             .context
             .plan()
             .map_err(|e| build_error_diag(&e, Span::new(0, 0))),
-    }
+    }?;
+    Ok((plan, session.diagnostics))
 }
 
 pub(crate) fn eval_program_build_method(
@@ -70,6 +73,7 @@ pub(crate) fn eval_program_build_method(
     method: &str,
     args: Vec<CtValue>,
     span: Span,
+    in_impure_gate: bool,
 ) -> Option<Result<CtValue, Diagnostic>> {
     let id = build_session_id(receiver)?;
     Some(PROGRAM_BUILD_SESSIONS.with(|sessions| {
@@ -77,7 +81,7 @@ pub(crate) fn eval_program_build_method(
         let session = sessions
             .get_mut(&id)
             .ok_or_else(|| build_diag("build context expired", span))?;
-        eval_session_method(id, session, method, args, span)
+        eval_session_method(id, session, method, args, span, in_impure_gate)
     }))
 }
 
@@ -87,7 +91,19 @@ fn eval_session_method(
     method: &str,
     args: Vec<CtValue>,
     span: Span,
+    in_impure_gate: bool,
 ) -> Result<CtValue, Diagnostic> {
+    let action_has_effects = method == "action"
+        && matches!(args.get(4), Some(CtValue::List(values)) if !values.is_empty());
+    if (method == "probe" || action_has_effects) && !in_impure_gate {
+        return Err(Diagnostic::error(
+            "E3502",
+            format!("`b.{method}` touches the ambient world and must be inside `#Impure(\"reason\")`"),
+            "build effects must be declared exactly where an auditor can see them".to_string(),
+            format!("wrap the `b.{method}` call in `#Impure(\"why it is needed\")`"),
+            Some(span),
+        ));
+    }
     let result = match method {
         "generate" => {
             let name = string_arg(&args, 0, span)?;
@@ -103,7 +119,7 @@ fn eval_session_method(
             let caps = string_list_arg(&args, 4, span)?;
             let mut spec = ActionSpec::cached(argv).with_inputs(inputs).with_outputs(outputs);
             for cap in caps {
-                spec = spec.with_cap(parse_capability(&cap));
+                spec = spec.with_cap(parse_capability(&cap, span)?);
             }
             if args.len() == 7 {
                 let toolchain = handle_arg(
@@ -196,8 +212,21 @@ fn eval_session_method(
             let what = string_arg(&args, 2, span)?;
             let why = string_arg(&args, 3, span)?;
             let fix = string_arg(&args, 4, span)?;
-            let code: &'static str = Box::leak(code.into_boxed_str());
-            return Err(Diagnostic::error(code, what, why, fix, Some(diagnostic_span)));
+            let reserved = code.len() > 1
+                && matches!(code.as_bytes()[0], b'E' | b'W')
+                && code.as_bytes()[1..].iter().all(u8::is_ascii_digit);
+            if reserved {
+                session.diagnostics.push(Diagnostic::error(
+                    "E3530",
+                    format!("build rule code `{code}` is reserved"),
+                    "codes beginning with E or W followed only by digits belong to the compiler".to_string(),
+                    "use a project prefix such as `ORG01`".to_string(),
+                    Some(diagnostic_span),
+                ));
+            } else {
+                session.diagnostics.push(Diagnostic::error(code, what, why, fix, Some(diagnostic_span)));
+            }
+            return Ok(CtValue::Unit);
         }
         "plan" => {
             let default = if args.is_empty() {
@@ -301,16 +330,13 @@ fn string_list_arg(args: &[CtValue], index: usize, span: Span) -> Result<Vec<Str
     }).collect()
 }
 
-fn parse_capability(name: &str) -> BuildCapability {
-    match name.to_ascii_lowercase().as_str() {
-        "fs" => BuildCapability::Fs,
-        "exec" => BuildCapability::Exec,
-        "net" => BuildCapability::Net,
-        "env" => BuildCapability::Env,
-        "toolchain" => BuildCapability::Toolchain,
-        "cache" => BuildCapability::Cache,
-        _ => BuildCapability::Custom(name.to_string()),
-    }
+fn parse_capability(name: &str, span: Span) -> Result<BuildCapability, Diagnostic> {
+    BuildCapability::parse(name).ok_or_else(|| {
+        build_diag(
+            &format!("unknown build effect `{name}`; use one of the ten declared effects"),
+            span,
+        )
+    })
 }
 
 fn safe_name(name: &str) -> String {

@@ -32,7 +32,25 @@ pub fn execute_build_plan(
     project_root: &Path,
     grants: &BTreeSet<BuildCapability>,
 ) -> Result<BuildExecutionResult, BuildExecutionError> {
-    let probes = execute_probes(plan)?;
+    let selected_actions = plan.selected_action_ids().map_err(BuildExecutionError::InvalidGraph)?;
+    for action in plan.actions.iter().filter(|action| selected_actions.contains(&action.id)) {
+        for cap in &action.caps {
+            if !grants.contains(cap) {
+                return Err(BuildExecutionError::MissingGrant {
+                    action: action.name.clone(), capability: *cap
+                });
+            }
+        }
+    }
+    let selected_probes = plan.selected_probe_ids().map_err(BuildExecutionError::InvalidGraph)?;
+    if !selected_probes.is_empty() && !grants.contains(&BuildCapability::Exec) {
+        let probe = &plan.probes[selected_probes.iter().next().unwrap().0];
+        return Err(BuildExecutionError::MissingGrant {
+            action: format!("probe {}", probe.name),
+            capability: BuildCapability::Exec,
+        });
+    }
+    let probes = execute_probes(plan, &selected_probes)?;
     let model = plan.execution_model().map_err(BuildExecutionError::InvalidGraph)?;
     let cas = LocalCas::new(project_root.join(".jet/build-cache/cas"));
     let records = project_root.join(".jet/build-cache/actions");
@@ -55,13 +73,14 @@ pub fn execute_build_plan(
             let mut completed = std::thread::scope(|scope| {
                 let cas = &cas;
                 let records = &records;
+                let probe_facts = &probes;
                 let jobs = batch
                     .iter()
                     .map(|action_id| {
                         let action = &plan.actions[action_id.0];
                         let handle = ActionHandle { id: action.id, context: plan.context };
                         (handle, scope.spawn(move || {
-                            execute_one_action(plan, action, handle, project_root, cas, records, grants)
+                            execute_one_action(plan, action, handle, project_root, cas, records, grants, probe_facts)
                         }))
                     })
                     .collect::<Vec<_>>();
@@ -116,13 +135,28 @@ fn execute_one_action(
     cas: &LocalCas,
     records: &Path,
     grants: &BTreeSet<BuildCapability>,
+    probe_facts: &[BuildProbeFact],
 ) -> Result<ActionOutcome, BuildExecutionError> {
     let snapshots = cas.snapshot_declared_inputs(project_root, action).map_err(|e| io_action(action, e))?;
-    let key = plan.action_key_with_inputs(handle, &snapshots).map_err(BuildExecutionError::InvalidGraph)?;
+    let executable = find_program_path(&action.argv[0]).ok_or_else(|| BuildExecutionError::Io {
+        action: action.name.clone(), detail: format!("tool `{}` was not found", action.argv[0])
+    })?;
+    let executable_bytes = fs::read(&executable).map_err(|e| io_action(action, e))?;
+    let executable_digest = ContentDigest::from_bytes(&executable_bytes);
+    let action_probe_names = action.probes.iter().map(|probe| plan.probes[probe.id.0].name.as_str()).collect::<BTreeSet<_>>();
+    let effective_probe_facts = probe_facts.iter().filter(|fact| action_probe_names.contains(fact.name.as_str())).cloned().collect::<Vec<_>>();
+    let key = plan.effective_action_key(
+        handle,
+        &snapshots,
+        grants,
+        &executable,
+        &executable_digest,
+        &effective_probe_facts,
+    ).map_err(BuildExecutionError::InvalidGraph)?;
     let record_path = records.join(key.as_str().trim_start_matches("act-sha256:"));
     if action.cache == ActionCache::Cached {
         if let Some(record) = read_action_record(&record_path, key.clone()) {
-            if cas.restore_declared_outputs(project_root, &record).is_ok() {
+            if cas.restore_action_outputs(project_root, action, &record).is_ok() {
                 return Ok(ActionOutcome::RestoredFromCache);
             }
         }
@@ -145,9 +179,6 @@ fn execute_one_action(
     }
 
     let bwrap = find_program_path("bwrap").ok_or(BuildExecutionError::SandboxUnavailable)?;
-    let executable = find_program_path(&action.argv[0]).ok_or_else(|| BuildExecutionError::Io {
-        action: action.name.clone(), detail: format!("tool `{}` was not found", action.argv[0])
-    })?;
     let mut command = Command::new(bwrap);
     command
         .arg("--die-with-parent").arg("--new-session").arg("--unshare-all")
@@ -222,9 +253,12 @@ fn prepare_output_destination(root: &Path, output: &Path) -> io::Result<()> {
     Ok(())
 }
 
-fn execute_probes(plan: &BuildPlan) -> Result<Vec<BuildProbeFact>, BuildExecutionError> {
+fn execute_probes(
+    plan: &BuildPlan,
+    selected: &BTreeSet<ProbeId>,
+) -> Result<Vec<BuildProbeFact>, BuildExecutionError> {
     let mut facts = Vec::new();
-    for probe in &plan.probes {
+    for probe in plan.probes.iter().filter(|probe| selected.contains(&probe.id)) {
         let (success, detail) = match &probe.kind {
             ProbeKind::FindProgram { program } => match find_program_path(program) {
                 Some(path) => (true, path.display().to_string()),
@@ -275,7 +309,7 @@ fn read_action_record(path: &Path, key: ActionKey) -> Option<ActionResultRecord>
     for line in lines {
         let mut parts = line.split('\t');
         let path = BuildPath::new(parts.next()?).ok()?;
-        let digest = ContentDigest(parts.next()?.to_string());
+        let digest = ContentDigest::parse(parts.next()?).ok()?;
         let byte_len = parts.next()?.parse().ok()?;
         outputs.push(ActionOutputRecord { path, digest, byte_len });
     }

@@ -2278,6 +2278,7 @@ supports `find_program`, `pkg_config`, and `header` probe kinds.
 
 ```jet
 fn build(b: BuildContext) #(Exec, Fs) -> BuildPlan ? {
+    #Impure("run declared toolchain probe and action") {
     shell :: b.probe("shell", "find_program", "sh")?
     native :: b.toolchain("native", "x86_64-linux")?
     stamp :: b.action(
@@ -2291,6 +2292,8 @@ fn build(b: BuildContext) #(Exec, Fs) -> BuildPlan ? {
     )?
     app :: b.add_executable("app", ["main.jet"], [stamp])?
     return b.plan(app)
+    }
+    return b.plan()
 }
 
 fn run() { print("hello") }
@@ -2310,17 +2313,26 @@ unshared unless both source and policy grant `Net`. A missing sandbox is E3505,
 not an unsandboxed run. Single-file authority uses the ratified per-effect
 flags (`--allow-exec`, `--allow-fs`, `--allow-net`, and the remaining D-EFF4
 names). Package/workspace policy can grant or cap the same capability set.
+The vocabulary is one closed typed ten-effect enum shared by sema, policy,
+CLI, graph, cache, and executor. Every effectful `b.action`/`b.probe` call must
+be inside its active `#Impure("reason")` region. Signature declaration and
+effective grant are checked before any probe or process runs.
 
 `b.generate(name, source)` materializes `.jet/generated/<package>/<name>.jet`.
 Action outputs ending in `.jet` follow the same path. Both re-enter lexer,
 parser, and sema before runtime codegen; malformed generated source is a Jet
 diagnostic with generator provenance. The build-only entry and imported build
 entries are removed before codegen, so rustc never sees build handles.
+The selected target source/dependency closure plus generated modules becomes a
+fresh runtime bundle. Native, cross, web, plugin, and freestanding lowering all
+consume that same checked bundle. `--locked` compares generated input/output
+hashes before committing provenance; drift is E3512 and action outputs roll
+back.
 
 `jet graph <file> --json` and `jet query build <file> --json` return the same
 typed graph without executing actions. `jet explain-build <target|action|file>
 <file>` reports graph and cache provenance. LSP checking uses the same selected
-root signature validation, including E3501.
+root signature validation and the same static graph facts, including E3501.
 
 ## Deliberately absent
 

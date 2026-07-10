@@ -123,7 +123,7 @@ pub struct TextEdit {
 #[derive(Debug, Clone)]
 pub struct Diagnostic {
     pub severity: Severity,
-    pub code: &'static str,
+    pub code: String,
     pub what: String,
     pub why: String,
     pub fix: String,
@@ -167,7 +167,7 @@ impl Diagnostic {
 
 impl Diagnostic {
     pub fn error(
-        code: &'static str,
+        code: impl Into<String>,
         what: String,
         why: String,
         fix: String,
@@ -175,7 +175,7 @@ impl Diagnostic {
     ) -> Self {
         let mut d = Diagnostic {
             severity: Severity::Error,
-            code,
+            code: code.into(),
             what,
             why,
             fix,
@@ -188,7 +188,7 @@ impl Diagnostic {
     }
 
     pub fn lint(
-        code: &'static str,
+        code: impl Into<String>,
         what: String,
         why: String,
         fix: String,
@@ -196,7 +196,7 @@ impl Diagnostic {
     ) -> Self {
         Diagnostic {
             severity: Severity::Lint,
-            code,
+            code: code.into(),
             what,
             why,
             fix,
@@ -317,7 +317,7 @@ impl Diagnostic {
     pub fn to_json(&self, file: &str, src: &str) -> String {
         let mut o = String::from("{");
         o.push_str(&format!("\"schema_version\":{}", JSON_SCHEMA_VERSION));
-        o.push_str(&format!(",\"code\":{}", json_str(self.code)));
+        o.push_str(&format!(",\"code\":{}", json_str(&self.code)));
         let sev = match self.severity {
             Severity::Error => "error",
             Severity::Lint => "warning",

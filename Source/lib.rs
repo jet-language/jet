@@ -135,26 +135,67 @@ pub fn compile_programmable_build(
     file: &str,
     grants: &[String],
 ) -> Result<CompileOutput, Vec<Diagnostic>> {
+    compile_programmable_build_opts(file, grants, false, true, false, false, false, None)
+}
+
+pub fn compile_programmable_build_opts(
+    file: &str,
+    grants: &[String],
+    freestanding: bool,
+    allow_impure: bool,
+    locked: bool,
+    web_target: bool,
+    plugin_target: bool,
+    cross_target: Option<&str>,
+) -> Result<CompileOutput, Vec<Diagnostic>> {
+    let grants = resolve_build_grants(file, grants);
     let grants = grants
         .iter()
-        .map(|grant| match grant.as_str() {
-            "fs" => Comptime::Build::BuildCapability::Fs,
-            "exec" => Comptime::Build::BuildCapability::Exec,
-            "net" => Comptime::Build::BuildCapability::Net,
-            "env" => Comptime::Build::BuildCapability::Env,
-            "toolchain" => Comptime::Build::BuildCapability::Toolchain,
-            "cache" => Comptime::Build::BuildCapability::Cache,
-            other => Comptime::Build::BuildCapability::Custom(other.to_string()),
-        })
+        .filter_map(|grant| Comptime::Build::BuildCapability::parse(grant))
         .collect();
     Driver::compile_bundle_path_build(
         file,
         Driver::BuildRunOptions {
             grants,
             execute: true,
+            allow_impure,
+            locked,
+            freestanding,
+            web_target,
+            plugin_target,
+            cross_target: cross_target.map(str::to_string),
         },
     )
     .map(|output| output.compile)
+}
+
+fn resolve_build_grants(file: &str, cli: &[String]) -> Vec<String> {
+    let mut allowed = cli.iter().cloned().collect::<std::collections::BTreeSet<_>>();
+    let mut directory = std::path::Path::new(file).parent();
+    while let Some(dir) = directory {
+        let package = dir.join(Syntax::PAYLOAD_FILE);
+        if let Ok(source) = std::fs::read_to_string(&package) {
+            if let Some(build) = source.split("build:").nth(1) {
+                for effect in Comptime::Build::BuildCapability::ALL {
+                    if build.split('}').next().is_some_and(|body| body.contains(effect.name())) {
+                        allowed.insert(effect.flag().to_string());
+                    }
+                }
+            }
+        }
+        let workspace = dir.join(Syntax::WORKSPACE_FILE);
+        if let Ok(source) = std::fs::read_to_string(&workspace) {
+            if let Some(policy) = source.split("policy:").nth(1).and_then(|rest| rest.split('}').next()) {
+                if let Some(denied) = policy.split("deny:").nth(1) {
+                    for effect in Comptime::Build::BuildCapability::ALL {
+                        if denied.contains(effect.name()) { allowed.remove(effect.flag()); }
+                    }
+                }
+            }
+        }
+        directory = dir.parent();
+    }
+    allowed.into_iter().collect()
 }
 
 fn compile_bundle_path_opts(

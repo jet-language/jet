@@ -120,6 +120,24 @@ pub fn builtin_method_return(
             ("types", 0) => Some(Some(Type::List(Box::new(Type::Named(
                 Syntax::TYPE_TYPE_INFO.to_string(),
             ))))),
+            ("functions", 0) => Some(Some(Type::List(Box::new(Type::Named(
+                "FunctionInfo".to_string(),
+            ))))),
+            ("packages", 0) => Some(Some(Type::List(Box::new(Type::Named(
+                "PackageInfo".to_string(),
+            ))))),
+            _ => None,
+        },
+        Type::Named(n) if n == Syntax::TYPE_TYPE_INFO => match (method, arg_count) {
+            ("implements" | "has_method", 1) => Some(Some(Type::Bool)),
+            _ => None,
+        },
+        Type::Named(n) if n == "FunctionInfo" => match (method, arg_count) {
+            ("reaches_panic", 0) => Some(Some(Type::Bool)),
+            _ => None,
+        },
+        Type::Named(n) if n == "EffectInfo" => match (method, arg_count) {
+            ("has", 1) => Some(Some(Type::Bool)),
             _ => None,
         },
         Type::Apply { name, args } if name == "Task" => task_method_return(args, method, arg_count),
@@ -225,6 +243,12 @@ fn build_context_method_return(method: &str, arg_count: usize) -> Option<Option<
     match (method, arg_count) {
         ("generate", 2) => Some(Some(Type::Result {
             ok: Box::new(Type::Named(Syntax::TYPE_VOID.to_string())),
+            err: Box::new(Type::Named(Syntax::TYPE_ERROR.to_string())),
+        })),
+        ("find", 1) => Some(Some(Type::List(Box::new(Type::String)))),
+        ("embed", 1) => Some(Some(Type::String)),
+        ("fetch", 2) => Some(Some(Type::Result {
+            ok: Box::new(Type::String),
             err: Box::new(Type::Named(Syntax::TYPE_ERROR.to_string())),
         })),
         ("action", 5 | 7) => build_result(Syntax::TYPE_BUILD_ACTION),
@@ -1029,6 +1053,8 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
     match recv_ty {
         Type::Named(n) if n == Syntax::TYPE_BUILD_CONTEXT => match method {
             "generate" => Some(vec![Type::String, Type::String]),
+            "find" | "embed" => Some(vec![Type::String]),
+            "fetch" => Some(vec![Type::String, Type::String]),
             "action" => Some(vec![
                 Type::String,
                 Type::List(Box::new(Type::String)),
@@ -1058,6 +1084,9 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             _ => None,
         },
         Type::Named(n) if n == Syntax::TYPE_PROGRAM_INFO => Some(vec![]),
+        Type::Named(n) if n == Syntax::TYPE_TYPE_INFO && matches!(method, "implements" | "has_method") => Some(vec![Type::String]),
+        Type::Named(n) if n == "FunctionInfo" && method == "reaches_panic" => Some(vec![]),
+        Type::Named(n) if n == "EffectInfo" && method == "has" => Some(vec![Type::String]),
         Type::List(inner) => match method {
             "push" | "contains" => Some(vec![(**inner).clone()]),
             "insert" => Some(vec![Type::Int, (**inner).clone()]),

@@ -298,6 +298,9 @@ pub fn parse_build(body: &str) -> Result<Vec<BuildProfileDef>, ManifestError> {
     let mut profiles = Vec::new();
     let mut seen = HashSet::new();
     for (name, value) in key_value_entries(body) {
+        if name == Syntax::BUILD_FIELD_ALLOW {
+            continue;
+        }
         if !seen.insert(name.clone()) {
             return Err(ManifestError::BadBuildProfile {
                 name: name.clone(),

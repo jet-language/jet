@@ -872,7 +872,7 @@ pub use Bundle::{
     check_bundle, check_bundle_allow_impure, check_bundle_freestanding,
     check_bundle_with_effect_facts,
 };
-pub use Effects::SemIndexEffectFacts;
+pub use Effects::{EffectSummary, SemIndexEffectFacts};
 // D-EFFBUDGET1: the closed effect vocabulary, exposed so jet-driver can
 // validate `pkg.jet` `effects:`/`grants:` manifest keys against it.
 // D-EFFTREE1: also export the tree helpers — jet-driver's EffectBudget and

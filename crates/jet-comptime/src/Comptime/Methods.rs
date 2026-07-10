@@ -1314,14 +1314,72 @@ impl<'a> Interp<'a> {
                 }
             }
         }
+        let is_build_context = matches!(
+            &recv,
+            CtValue::Struct { type_name, .. }
+                if type_name == crate::Syntax::TYPE_BUILD_CONTEXT
+        );
+        if is_build_context {
+            match method {
+                "find" => return self.eval_find(args, span),
+                _ => {}
+            }
+        }
         let mut argv = Vec::new();
         for a in args {
             argv.push(self.eval(&a.expr, scope)?);
         }
+        if is_build_context && method == "fetch" {
+            return self
+                .eval_net_fetch(argv, span)
+                .map(|value| CtValue::ResOk(Box::new(value)));
+        }
+        if is_build_context && method == "embed" {
+            let rel = match argv.first() {
+                Some(CtValue::Str(path)) => path,
+                _ => return Err(unsupported("`b.embed` requires a path string", span)),
+            };
+            let path = std::path::Path::new(rel);
+            if path.is_absolute()
+                || path.components().any(|component| matches!(component, std::path::Component::ParentDir))
+            {
+                return Err(Diagnostic::error(
+                    "E0957",
+                    format!("`b.embed` path `{rel}` escapes the build root"),
+                    "locked build inputs must stay beneath the selected source directory".to_string(),
+                    "use a relative path returned by `b.find`, without `..`".to_string(),
+                    Some(span),
+                ));
+            }
+            let bytes = std::fs::read(self.base_dir.join(path)).map_err(|error| Diagnostic::error(
+                "E0955",
+                format!("`b.embed` cannot open `{rel}`"),
+                error.to_string(),
+                "check the locked relative path".to_string(),
+                Some(span),
+            ))?;
+            self.embed_inputs.push(crate::AST::ComptimeInput {
+                path: rel.clone(),
+                hash: crate::SHA256::sha256_hex(&bytes),
+            });
+            return String::from_utf8(bytes).map(CtValue::Str).map_err(|_| Diagnostic::error(
+                "E0955",
+                format!("`b.embed` cannot decode `{rel}` as text"),
+                "the embedded file is not valid UTF-8".to_string(),
+                "embed a UTF-8 text file".to_string(),
+                Some(span),
+            ));
+        }
         // D-BUILDENTRY1: selected-root `BuildContext` is interpreter-owned.
         // Driver removes `fn build` before runtime codegen.
         if let Some(result) =
-            super::Build::eval_program_build_method(&recv, method, argv.clone(), span)
+            super::Build::eval_program_build_method(
+                &recv,
+                method,
+                argv.clone(),
+                span,
+                self.impure_depth > 0,
+            )
         {
             return result;
         }

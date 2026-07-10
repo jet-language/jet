@@ -850,6 +850,7 @@ fn main() {
                 freestanding,
                 allow_impure,
                 &build_grants,
+                locked,
                 cross_target.as_deref(),
                 explain_partition,
                 verbose,
@@ -1450,6 +1451,7 @@ fn main() {
                                     freestanding,
                                     allow_impure,
                                     &build_grants,
+                                    locked,
                                     effective.as_deref(),
                                     explain_partition,
                                     verbose,
@@ -1579,6 +1581,7 @@ fn main() {
                 freestanding,
                 allow_impure,
                 &build_grants,
+                locked,
                 effective.as_deref(),
                 explain_partition,
                 verbose,
@@ -1763,7 +1766,7 @@ pub(crate) fn report_problems(
     if let Some(first) = diags.first() {
         eprintln!(
             "{}",
-            jet::Explain::pointer_line(first.code, mode.color_stderr())
+            jet::Explain::pointer_line(&first.code, mode.color_stderr())
         );
     }
 }

@@ -212,6 +212,9 @@ impl<'a> Checker<'a> {
             }
     
             if call.name == Syntax::BUILTIN_PANIC {
+                // D-METADEPTH2: retain panic reachability in the checked call
+                // graph consumed by ProgramInfo; this sentinel is not an effect.
+                self.fx_edges.insert("__jet_panic__".to_string());
                 self.check_panic_call(call);
                 return Some(None);
             }

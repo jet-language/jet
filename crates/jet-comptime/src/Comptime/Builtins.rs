@@ -471,6 +471,30 @@ pub(super) fn apply_method(
                 .map(|(_, value)| value.clone())
                 .unwrap_or_else(|| CtValue::List(Vec::new())))
         }
+        (CtValue::Struct { type_name, fields }, method)
+            if type_name == crate::Syntax::TYPE_PROGRAM_INFO
+                && matches!(method, "functions" | "packages") =>
+        {
+            Ok(fields.iter().find(|(name, _)| name == method).map(|(_, value)| value.clone()).unwrap_or_else(|| CtValue::List(Vec::new())))
+        }
+        (CtValue::Struct { type_name, fields }, "has_method") if type_name == "TypeInfo" => {
+            let needle = match args.first() { Some(CtValue::Str(value)) => value, _ => return Err(unsupported("`has_method` requires a string", span)) };
+            let found = fields.iter().find(|(name, _)| name == "methods").and_then(|(_, value)| match value { CtValue::List(values) => Some(values), _ => None }).is_some_and(|values| values.iter().any(|value| matches!(value, CtValue::Struct { fields, .. } if fields.iter().any(|(name, value)| name == "name" && matches!(value, CtValue::Str(actual) if actual == needle)))));
+            Ok(CtValue::Bool(found))
+        }
+        (CtValue::Struct { type_name, fields }, "implements") if type_name == "TypeInfo" => {
+            let needle = match args.first() { Some(CtValue::Str(value)) => value, _ => return Err(unsupported("`implements` requires a string", span)) };
+            let found = fields.iter().find(|(name, _)| name == "implements").and_then(|(_, value)| match value { CtValue::List(values) => Some(values), _ => None }).is_some_and(|values| values.iter().any(|value| matches!(value, CtValue::Str(actual) if actual == needle)));
+            Ok(CtValue::Bool(found))
+        }
+        (CtValue::Struct { type_name, fields }, "reaches_panic") if type_name == "FunctionInfo" => {
+            Ok(fields.iter().find(|(name, _)| name == "reaches_panic").map(|(_, value)| value.clone()).unwrap_or(CtValue::Bool(false)))
+        }
+        (CtValue::Struct { type_name, fields }, "has") if type_name == "EffectInfo" => {
+            let needle = match args.first() { Some(CtValue::Str(value)) => value, _ => return Err(unsupported("`has` requires a string", span)) };
+            let found = fields.iter().find(|(name, _)| name == "values").and_then(|(_, value)| match value { CtValue::List(values) => Some(values), _ => None }).is_some_and(|values| values.iter().any(|value| matches!(value, CtValue::Str(actual) if actual == needle)));
+            Ok(CtValue::Bool(found))
+        }
         // D-METAREFLECT1 / D-REFLECT1: `.has_marker(name)` on reflected member handles.
         (CtValue::Struct { type_name, fields }, "has_marker")
             if matches!(type_name.as_str(), "FieldInfo" | "MethodInfo" | "TypeInfo") =>

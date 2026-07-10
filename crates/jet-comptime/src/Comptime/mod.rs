@@ -33,7 +33,7 @@ use crate::AST::{Expr, Func, StructDef};
 
 pub use Interpreter::{DebugHook, DevSink, REPL_FUEL_BUDGET};
 pub use Purity::walk_calls;
-pub use Reflect::{build_program_info, build_struct_type_info};
+pub use Reflect::{build_program_info, build_struct_type_info, ProgramSemanticFacts};
 pub use Value::CtValue;
 
 use Interpreter::{Interp, DEV_FUEL_BUDGET, FUEL_BUDGET};
@@ -43,6 +43,7 @@ use Purity::check_purity;
 pub struct ProgramBuildEvaluation {
     pub plan: Build::BuildPlan,
     pub comptime_inputs: Vec<crate::AST::ComptimeInput>,
+    pub diagnostics: Vec<Diagnostic>,
 }
 
 /// Run selected root `fn build` through same interpreter used by comptime and
@@ -99,10 +100,11 @@ pub fn run_build_entry(
             Some(build.name_span),
         ));
     }
-    let plan = Build::finish_program_build(&context, &returned)?;
+    let (plan, diagnostics) = Build::finish_program_build(&context, &returned)?;
     Ok(ProgramBuildEvaluation {
         plan,
         comptime_inputs: interp.embed_inputs,
+        diagnostics,
     })
 }
 

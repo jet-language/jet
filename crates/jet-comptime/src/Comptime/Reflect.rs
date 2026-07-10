@@ -7,6 +7,12 @@ use crate::AST::{Field, Func, Marker, StructDef, TypeParam};
 
 use super::Value::CtValue;
 
+#[derive(Debug, Clone, Default)]
+pub struct ProgramSemanticFacts {
+    pub effects: std::collections::HashMap<String, Vec<String>>,
+    pub reaches_panic: std::collections::BTreeSet<String>,
+}
+
 fn ct_str(s: impl Into<String>) -> CtValue {
     CtValue::Str(s.into())
 }
@@ -144,29 +150,119 @@ pub fn build_struct_type_info(s: &StructDef) -> CtValue {
             ("methods", ct_list(methods_info)),
             ("type_params", ct_list(type_params_info)),
             ("markers", ct_list(type_level_markers(s))),
+            (
+                "implements",
+                ct_list(
+                    s.trait_impls
+                        .iter()
+                        .map(|implementation| ct_str(implementation.trait_name.clone()))
+                        .collect(),
+                ),
+            ),
         ],
     )
 }
 
 /// D-METADEPTH2: read-only, post-sema whole-program snapshot handed only to
 /// selected root `fn build`. Existing TypeInfo builders remain canonical.
-pub fn build_program_info(bundle: &crate::AST::ProgramBundle) -> CtValue {
-    let mut types = Vec::new();
-    let mut functions = Vec::new();
+pub fn build_program_info(
+    bundle: &crate::AST::ProgramBundle,
+    facts: &ProgramSemanticFacts,
+) -> CtValue {
+    let mut external_impls = std::collections::HashMap::<String, (Vec<String>, Vec<CtValue>)>::new();
     for module in &bundle.modules {
         for item in &module.items {
+            if let crate::AST::Item::Impl(implementation) = item {
+                let entry = external_impls.entry(implementation.type_name.clone()).or_default();
+                if let Some(trait_name) = &implementation.trait_name {
+                    entry.0.push(trait_name.clone());
+                }
+                entry.1.extend(implementation.methods.iter().map(build_method_info));
+            }
+        }
+    }
+    let mut types = Vec::new();
+    let mut functions = Vec::new();
+    let mut packages = Vec::new();
+    for module in &bundle.modules {
+        let mut package_types = Vec::new();
+        let mut package_functions = Vec::new();
+        for item in &module.items {
             match item {
-                crate::AST::Item::Struct(def) => types.push(build_struct_type_info(def)),
+                crate::AST::Item::Struct(def) => {
+                    let mut info = build_struct_type_info(def);
+                    if let Some((traits, methods)) = external_impls.get(&def.name) {
+                        if let CtValue::Struct { fields, .. } = &mut info {
+                            if let Some((_, CtValue::List(values))) = fields.iter_mut().find(|(name, _)| name == "implements") {
+                                values.extend(traits.iter().cloned().map(ct_str));
+                            }
+                            if let Some((_, CtValue::List(values))) = fields.iter_mut().find(|(name, _)| name == "methods") {
+                                values.extend(methods.iter().cloned());
+                            }
+                        }
+                    }
+                    types.push(info.clone());
+                    package_types.push(info);
+                }
                 crate::AST::Item::Func(func) if func.name != "build" => {
-                    functions.push(build_method_info(func));
+                    let info = build_function_info(func, facts);
+                    functions.push(info.clone());
+                    package_functions.push(info);
                 }
                 _ => {}
             }
         }
+        packages.push(ct_struct(
+            "PackageInfo",
+            &[
+                ("name", ct_str(module.alias.clone())),
+                ("types", ct_list(package_types)),
+                ("functions", ct_list(package_functions)),
+            ],
+        ));
     }
     ct_struct(
         crate::Syntax::TYPE_PROGRAM_INFO,
-        &[("types", ct_list(types)), ("functions", ct_list(functions))],
+        &[
+            ("packages", ct_list(packages)),
+            ("types", ct_list(types)),
+            ("functions", ct_list(functions)),
+        ],
+    )
+}
+
+fn build_function_info(func: &Func, facts: &ProgramSemanticFacts) -> CtValue {
+    let effects = facts.effects.get(&func.name).cloned().unwrap_or_default();
+    ct_struct(
+        "FunctionInfo",
+        &[
+            ("name", ct_str(func.name.clone())),
+            (
+                "params",
+                ct_list(func.params.iter().map(|param| ct_str(param.name.clone())).collect()),
+            ),
+            (
+                "span",
+                ct_struct(
+                    crate::Syntax::TYPE_SOURCE_SPAN,
+                    &[
+                        ("start", CtValue::Int(func.name_span.start as i64)),
+                        ("end", CtValue::Int(func.name_span.end as i64)),
+                    ],
+                ),
+            ),
+            (
+                "effects",
+                ct_struct(
+                    "EffectInfo",
+                    &[("values", ct_list(effects.into_iter().map(ct_str).collect()))],
+                ),
+            ),
+            (
+                "reaches_panic",
+                ct_bool(facts.reaches_panic.contains(&func.name)),
+            ),
+        ],
     )
 }
 
@@ -198,6 +294,7 @@ mod tests {
             is_pub,
             is_package_pub: false,
             external_type: None,
+            meta: None,
             name: name.to_string(),
             name_span: span(),
             type_params: Vec::new(),

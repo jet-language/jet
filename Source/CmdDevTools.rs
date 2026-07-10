@@ -800,7 +800,7 @@ pub(crate) fn visible_lints(
 ) -> Vec<jet::Diagnostics::Diagnostic> {
     lints
         .iter()
-        .filter(|d| !A11Y_LINT_CODES.contains(&d.code))
+        .filter(|d| !A11Y_LINT_CODES.contains(&d.code.as_str()))
         .cloned()
         .collect()
 }
@@ -868,7 +868,7 @@ pub(crate) fn run_lint_a11y(file: &str, mode: OutputMode) {
     }
     let a11y_lints: Vec<jet::Diagnostics::Diagnostic> = diags
         .into_iter()
-        .filter(|d| A11Y_LINT_CODES.contains(&d.code))
+        .filter(|d| A11Y_LINT_CODES.contains(&d.code.as_str()))
         .collect();
     if a11y_lints.is_empty() {
         if mode.json {

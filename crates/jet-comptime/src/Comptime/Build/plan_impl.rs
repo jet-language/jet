@@ -31,6 +31,93 @@ impl BuildPlan {
         &self.generated_modules
     }
 
+    /// Actions reachable from the selected default target. A plan without a
+    /// default intentionally selects every registered target.
+    pub fn selected_action_ids(&self) -> Result<BTreeSet<ActionId>, BuildError> {
+        let mut selected = BTreeSet::new();
+        if let Some(default) = self.default {
+            collect_target_actions(self, default.id, &mut BTreeSet::new(), &mut selected)?;
+        } else {
+            for target in &self.targets {
+                collect_target_actions(self, target.id, &mut BTreeSet::new(), &mut selected)?;
+            }
+        }
+        let prereqs = self.action_prereqs()?;
+        let mut pending = selected.iter().copied().collect::<Vec<_>>();
+        while let Some(action) = pending.pop() {
+            for dependency in prereqs.get(&action).into_iter().flatten() {
+                if selected.insert(*dependency) {
+                    pending.push(*dependency);
+                }
+            }
+        }
+        Ok(selected)
+    }
+
+    /// Source closure compiled for the selected target, including target deps.
+    pub fn selected_sources(&self) -> Result<Vec<BuildPath>, BuildError> {
+        fn collect(
+            plan: &BuildPlan,
+            id: TargetId,
+            visiting: &mut BTreeSet<TargetId>,
+            seen: &mut BTreeSet<String>,
+            out: &mut Vec<BuildPath>,
+        ) -> Result<(), BuildError> {
+            if !visiting.insert(id) {
+                return Err(BuildError::TargetDependencyCycle);
+            }
+            let target = plan.targets.get(id.0).ok_or(BuildError::UnknownTarget(id))?;
+            for dep in &target.deps {
+                collect(plan, dep.id, visiting, seen, out)?;
+            }
+            for source in &target.sources {
+                if seen.insert(source.as_str().to_string()) {
+                    out.push(source.clone());
+                }
+            }
+            visiting.remove(&id);
+            Ok(())
+        }
+        let mut out = Vec::new();
+        let mut seen = BTreeSet::new();
+        if let Some(default) = self.default {
+            collect(self, default.id, &mut BTreeSet::new(), &mut seen, &mut out)?;
+        } else {
+            for target in &self.targets {
+                collect(self, target.id, &mut BTreeSet::new(), &mut seen, &mut out)?;
+            }
+        }
+        Ok(out)
+    }
+
+    pub fn selected_probe_ids(&self) -> Result<BTreeSet<ProbeId>, BuildError> {
+        let actions = self.selected_action_ids()?;
+        let mut probes = self
+            .actions
+            .iter()
+            .filter(|action| actions.contains(&action.id))
+            .flat_map(|action| action.probes.iter().map(|probe| probe.id))
+            .collect::<BTreeSet<_>>();
+        let selected_targets = if let Some(default) = self.default {
+            let mut targets = BTreeSet::new();
+            fn visit(plan: &BuildPlan, id: TargetId, out: &mut BTreeSet<TargetId>) {
+                if out.insert(id) {
+                    if let Some(target) = plan.targets.get(id.0) {
+                        for dep in &target.deps { visit(plan, dep.id, out); }
+                    }
+                }
+            }
+            visit(self, default.id, &mut targets);
+            targets
+        } else {
+            self.targets.iter().map(|target| target.id).collect()
+        };
+        for target in self.targets.iter().filter(|target| selected_targets.contains(&target.id)) {
+            probes.extend(target.probes.iter().map(|probe| probe.id));
+        }
+        Ok(probes)
+    }
+
     pub fn default_host_toolchain(&self) -> &BuildToolchain {
         &self.toolchains[0]
     }
@@ -67,6 +154,27 @@ impl BuildPlan {
             .get(action.id.0)
             .ok_or(BuildError::UnknownAction(action.id))?;
         Ok(canonical_action_key(self, action, inputs))
+    }
+
+    pub fn effective_action_key(
+        &self,
+        action: ActionHandle,
+        inputs: &[ActionInputSnapshot],
+        grants: &BTreeSet<BuildCapability>,
+        executable: &Path,
+        executable_digest: &ContentDigest,
+        probe_facts: &[BuildProbeFact],
+    ) -> Result<ActionKey, BuildError> {
+        let action_ref = self.action(action).ok_or(BuildError::UnknownAction(action.id))?;
+        Ok(canonical_effective_action_key(
+            self,
+            action_ref,
+            inputs,
+            grants,
+            executable,
+            executable_digest,
+            probe_facts,
+        ))
     }
 
     pub fn toolchain(&self, toolchain: ToolchainHandle) -> Option<&BuildToolchain> {
@@ -257,12 +365,14 @@ impl BuildPlan {
     }
 
     pub fn execution_model(&self) -> Result<BuildExecutionModel, BuildError> {
-        let prereqs = self.action_prereqs()?;
+        let selected = self.selected_action_ids()?;
+        let prereqs = self.action_prereqs_for(&selected)?;
         let stages = execution_stages(&prereqs)?;
         let action_targets = self.action_targets();
         let nodes = self
             .actions
             .iter()
+            .filter(|action| selected.contains(&action.id))
             .map(|action| BuildExecutionNode {
                 action: action.id,
                 name: action.name.clone(),
@@ -283,13 +393,14 @@ impl BuildPlan {
                     })
             })
             .collect();
-        let metrics = execution_metrics(&self.actions, &stages);
+        let selected_actions = self.actions.iter().filter(|action| selected.contains(&action.id)).cloned().collect::<Vec<_>>();
+        let metrics = execution_metrics(&selected_actions, &stages);
         Ok(BuildExecutionModel {
             pools: self.resource_pools(),
             nodes,
             stages,
             events,
-            console_order: self.actions.iter().map(|action| action.id).collect(),
+            console_order: self.actions.iter().filter(|action| selected.contains(&action.id)).map(|action| action.id).collect(),
             metrics,
         })
     }
@@ -298,7 +409,8 @@ impl BuildPlan {
         &self,
         outcomes: &[(ActionHandle, ActionOutcome)],
     ) -> Result<BuildExecutionReport, BuildError> {
-        let prereqs = self.action_prereqs()?;
+        let selected = self.selected_action_ids()?;
+        let prereqs = self.action_prereqs_for(&selected)?;
         let stages = execution_stages(&prereqs)?;
         let mut supplied = BTreeMap::new();
         for (action, outcome) in outcomes {
@@ -311,7 +423,8 @@ impl BuildPlan {
         let mut failed = BTreeSet::new();
         let mut finished = BTreeSet::new();
         let mut events = Vec::new();
-        let mut metrics = execution_metrics(&self.actions, &stages);
+        let selected_actions = self.actions.iter().filter(|action| selected.contains(&action.id)).cloned().collect::<Vec<_>>();
+        let mut metrics = execution_metrics(&selected_actions, &stages);
         for stage in &stages {
             for action in &stage.actions {
                 if let Some(failed_prereq) = prereqs
@@ -466,6 +579,20 @@ impl BuildPlan {
         Ok(out
             .into_iter()
             .map(|(action, deps)| (action, deps.into_iter().collect()))
+            .collect())
+    }
+
+    fn action_prereqs_for(
+        &self,
+        selected: &BTreeSet<ActionId>,
+    ) -> Result<BTreeMap<ActionId, Vec<ActionId>>, BuildError> {
+        Ok(self
+            .action_prereqs()?
+            .into_iter()
+            .filter(|(action, _)| selected.contains(action))
+            .map(|(action, deps)| {
+                (action, deps.into_iter().filter(|dep| selected.contains(dep)).collect())
+            })
             .collect())
     }
 }

@@ -25,6 +25,12 @@ fn opts() -> BuildRunOptions {
     BuildRunOptions {
         grants: BTreeSet::from([BuildCapability::Exec, BuildCapability::Fs]),
         execute: true,
+        allow_impure: true,
+        locked: false,
+        freestanding: false,
+        web_target: false,
+        plugin_target: false,
+        cross_target: None,
     }
 }
 
@@ -41,6 +47,7 @@ fn root_fn_build_executes_graph_materializes_and_frontend_checks_generated_sourc
         r#"
 fn build(b: BuildContext) #(Exec, Fs) -> BuildPlan ? {
     b.generate("generated_message", "fn generated_message() -> String {{ return \"built\" }}")?
+    #Impure("write declared build output") {
     stamp :: b.action(
         "stamp",
         [],
@@ -50,6 +57,8 @@ fn build(b: BuildContext) #(Exec, Fs) -> BuildPlan ? {
     )?
     app :: b.add_executable("app", ["main.jet"], [stamp])?
     return b.plan(app)
+    }
+    return b.plan()
 }
 
 fn run() { print("ok") }
@@ -80,6 +89,7 @@ fn run() { print("ok") }
     assert!(lock.contains(".jet/generated/main/generated_message.jet"));
     assert!(lock.contains(generated.digest.as_str()));
     assert!(first.compile.rust.contains("fn main"));
+    assert!(first.compile.rust.contains("generated_message"));
 
     let second = compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap();
     let build = second.build.unwrap();
@@ -148,16 +158,19 @@ fn ungranted_action_fails_before_process_spawn() {
         &entry,
         r#"
 fn build(b: BuildContext) #(Exec, Fs) -> BuildPlan ? {
+    #Impure("exercise denied authority") {
     action :: b.action("escape", [], ["out"], ["sh", "-c", "printf bad > out"], ["Exec"])?
     app :: b.add_executable("app", ["main.jet"], [action])?
     return b.plan(app)
+    }
+    return b.plan()
 }
 fn run() {}
 "#,
     );
     let errors = compile_bundle_path_build(entry.to_str().unwrap(), BuildRunOptions::default())
         .unwrap_err();
-    assert!(errors.iter().any(|d| d.code == "E3504"));
+    assert!(errors.iter().any(|d| d.code == "E3503"));
     assert!(!root.join("out").exists());
 }
 
@@ -169,6 +182,7 @@ fn action_generated_jet_reenters_frontend_before_runtime_codegen() {
         &entry,
         r#"
 fn build(b: BuildContext) #(Exec, Fs) -> BuildPlan ? {
+    #Impure("generate declared source") {
     action :: b.action(
         "bad-gen",
         [],
@@ -178,6 +192,8 @@ fn build(b: BuildContext) #(Exec, Fs) -> BuildPlan ? {
     )?
     app :: b.add_executable("app", ["main.jet", ".jet/generated/main/bad.jet"], [action])?
     return b.plan(app)
+    }
+    return b.plan()
 }
 fn run() {}
 "#,
@@ -194,6 +210,7 @@ fn jet_build_command_runs_selected_build_entry() {
         &entry,
         r#"
 fn build(b: BuildContext) #(Exec, Fs) -> BuildPlan ? {
+    #Impure("write CLI test output") {
     action :: b.action(
         "stamp",
         [],
@@ -203,6 +220,8 @@ fn build(b: BuildContext) #(Exec, Fs) -> BuildPlan ? {
     )?
     app :: b.add_executable("app", ["main.jet"], [action])?
     return b.plan(app)
+    }
+    return b.plan()
 }
 fn run() { print("ok") }
 "#,
@@ -250,6 +269,9 @@ fn run() {}
     assert!(json.contains("\"name\":\"app\""));
     assert!(json.contains("\"name\":\"never-run\""));
     assert!(!root.join("out").exists(), "graph query must never execute actions");
+    let lsp_plan = jet::Driver::query_build_plan(entry.to_str().unwrap()).unwrap().unwrap();
+    assert_eq!(lsp_plan.graph().targets[0].name, "app");
+    assert_eq!(lsp_plan.graph().actions[0].name, "never-run");
 
     write(&entry, "fn build() -> Int { return 1 }\nfn run() {}\n");
     let (diags, _) = jet::Driver::check_file(entry.to_str().unwrap(), None, true);
@@ -264,6 +286,7 @@ fn typed_toolchain_and_probe_flow_into_executed_action() {
         &entry,
         r#"
 fn build(b: BuildContext) #(Exec, Fs) -> BuildPlan ? {
+    #Impure("probe selected toolchain") {
     tc :: b.toolchain("native", "x86_64-linux")?
     shell :: b.probe("shell", "find_program", "sh")?
     action :: b.action(
@@ -277,6 +300,8 @@ fn build(b: BuildContext) #(Exec, Fs) -> BuildPlan ? {
     )?
     app :: b.add_executable("app", ["main.jet"], [action])?
     return b.plan(app)
+    }
+    return b.plan()
 }
 fn run() {}
 "#,
@@ -303,6 +328,7 @@ fn sandbox_refuses_output_parent_symlink_escape() {
         &entry,
         r#"
 fn build(b: BuildContext) #(Exec, Fs) -> BuildPlan ? {
+    #Impure("exercise hostile output path") {
     action :: b.action(
         "escape",
         [],
@@ -312,6 +338,8 @@ fn build(b: BuildContext) #(Exec, Fs) -> BuildPlan ? {
     )?
     app :: b.add_executable("app", ["main.jet"], [action])?
     return b.plan(app)
+    }
+    return b.plan()
 }
 fn run() {}
 "#,
@@ -353,4 +381,163 @@ fn run() {}
     assert_eq!(diagnostic.why, "company policy requires archival");
     assert_eq!(diagnostic.fix, "add an archive method");
     assert!(diagnostic.span.is_some());
+}
+
+#[test]
+fn locked_generated_drift_fails_before_materialization() {
+    let root = project("locked-drift");
+    let entry = root.join("main.jet");
+    let source = |value: &str| format!(r#"
+fn build(b: BuildContext) -> BuildPlan ? {{
+    b.generate("value", "fn generated_value() -> String {{{{ return \"{value}\" }}}}")?
+    app :: b.add_executable("app", ["main.jet"], [])?
+    return b.plan(app)
+}}
+fn run() {{ print(generated_value()) }}
+"#);
+    write(&entry, &source("one"));
+    compile_bundle_path_build(entry.to_str().unwrap(), BuildRunOptions::default()).unwrap();
+    let generated = root.join(".jet/generated/main/value.jet");
+    let before = fs::read_to_string(&generated).unwrap();
+    write(&entry, &source("two"));
+    let mut locked = BuildRunOptions::default();
+    locked.locked = true;
+    let errors = compile_bundle_path_build(entry.to_str().unwrap(), locked).unwrap_err();
+    assert!(errors.iter().any(|diagnostic| diagnostic.code == "E3512"));
+    assert_eq!(fs::read_to_string(generated).unwrap(), before);
+}
+
+#[test]
+fn package_grant_and_workspace_ceiling_resolve_before_execution() {
+    let root = project("policy-chain");
+    let entry = root.join("main.jet");
+    write(
+        &root.join("pkg.jet"),
+        "payload: { name: \"policy-chain\", version: \"0.1.0\" }\nbuild: { allow: #(Exec) }\n",
+    );
+    write(
+        &entry,
+        r#"
+fn build(b: BuildContext) #(Exec) -> BuildPlan ? {
+    #Impure("policy chain test") {
+    action :: b.action("stamp", [], ["stamp"], ["sh", "-c", "printf ok > stamp"], ["Exec"])?
+    app :: b.add_executable("app", ["main.jet"], [action])?
+    return b.plan(app)
+    }
+    return b.plan()
+}
+
+fn run() {}
+"#,
+    );
+    jet::compile_programmable_build_opts(entry.to_str().unwrap(), &[], false, true, false, false, false, None).unwrap();
+    assert_eq!(fs::read_to_string(root.join("stamp")).unwrap(), "ok");
+
+    fs::remove_file(root.join("stamp")).unwrap();
+    write(&root.join("workspace.jet"), "module workspace { policy: .{ deny: #(Exec) } }\n");
+    let errors = jet::compile_programmable_build_opts(
+        entry.to_str().unwrap(),
+        &["exec".to_string()],
+        false,
+        true,
+        false,
+        false,
+        false,
+        None,
+    ).unwrap_err();
+    assert!(errors.iter().any(|diagnostic| diagnostic.code == "E3503"));
+    assert!(!root.join("stamp").exists());
+}
+
+#[test]
+fn programmable_staging_preserves_web_cross_freestanding_and_plugin_modes() {
+    let root = project("target-modes");
+    let entry = root.join("main.jet");
+    write(
+        &entry,
+        r#"
+fn build(b: BuildContext) -> BuildPlan ? {
+    app :: b.add_executable("app", ["main.jet"], [])?
+    return b.plan(app)
+}
+fn run() {}
+"#,
+    );
+    let mut web = BuildRunOptions::default();
+    web.web_target = true;
+    assert!(compile_bundle_path_build(entry.to_str().unwrap(), web).unwrap().compile.web.is_some());
+
+    let mut cross = BuildRunOptions::default();
+    cross.cross_target = Some("x86_64-unknown-linux-gnu".to_string());
+    assert!(compile_bundle_path_build(entry.to_str().unwrap(), cross).unwrap().compile.rust.contains("fn main"));
+
+    let mut freestanding = BuildRunOptions::default();
+    freestanding.freestanding = true;
+    let freestanding_result = compile_bundle_path_build(entry.to_str().unwrap(), freestanding);
+    assert!(freestanding_result.is_ok(), "{:#?}", freestanding_result.err());
+
+    write(
+        &entry,
+        r#"
+fn build(b: BuildContext) -> BuildPlan ? {
+    plugin :: b.add_library("plugin", ["main.jet"], [])?
+    return b.plan(plugin)
+}
+pub fn transform(value: Int) -> Int { return value + 1 }
+"#,
+    );
+    let mut plugin = BuildRunOptions::default();
+    plugin.plugin_target = true;
+    assert!(compile_bundle_path_build(entry.to_str().unwrap(), plugin).unwrap().compile.plugin.is_some());
+}
+
+#[test]
+fn locked_action_output_drift_rolls_back_filesystem() {
+    let root = project("locked-action-output");
+    let entry = root.join("main.jet");
+    let source = |value: &str| format!(r#"
+fn build(b: BuildContext) #(Exec) -> BuildPlan ? {{
+    #Impure("locked action output") {{
+    action :: b.action("emit", [], ["artifact"], ["sh", "-c", "printf {value} > artifact"], ["Exec"])?
+    app :: b.add_executable("app", ["main.jet"], [action])?
+    return b.plan(app)
+    }}
+    return b.plan()
+}}
+fn run() {{}}
+"#);
+    write(&entry, &source("one"));
+    compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap();
+    assert_eq!(fs::read_to_string(root.join("artifact")).unwrap(), "one");
+    write(&entry, &source("two"));
+    let mut locked = opts();
+    locked.locked = true;
+    let errors = compile_bundle_path_build(entry.to_str().unwrap(), locked).unwrap_err();
+    assert!(errors.iter().any(|diagnostic| diagnostic.code == "E3512"));
+    assert_eq!(fs::read_to_string(root.join("artifact")).unwrap(), "one");
+}
+
+#[test]
+fn build_context_find_and_embed_are_locked_tier_one_inputs() {
+    let root = project("find-embed");
+    fs::create_dir_all(root.join("assets")).unwrap();
+    write(&root.join("assets/message.txt"), "hello");
+    let entry = root.join("main.jet");
+    write(
+        &entry,
+        r#"
+fn build(b: BuildContext) -> BuildPlan ? {
+    files :: b.find("assets/*.txt")
+    message :: b.embed(files[0])
+    b.generate("asset", "fn generated_asset() -> String {{ return \"hello\" }}")?
+    app :: b.add_executable("app", ["main.jet"], [])?
+    return b.plan(app)
+}
+fn run() { print(generated_asset()) }
+"#,
+    );
+    let output = compile_bundle_path_build(entry.to_str().unwrap(), BuildRunOptions::default()).unwrap();
+    assert!(output.compile.comptime_inputs.iter().any(|input| input.path == "assets/message.txt"));
+    let lock = fs::read_to_string(root.join(".jet/lock")).unwrap();
+    assert!(lock.contains("assets/message.txt"));
 }

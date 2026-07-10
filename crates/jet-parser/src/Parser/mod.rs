@@ -57,7 +57,7 @@ pub fn parse_for_check(toks: &[Token]) -> Result<(Program, Vec<Diagnostic>), Vec
     let prog = p.program();
     if p.diags.is_empty() {
         Ok((prog, Vec::new()))
-    } else if p.diags.iter().all(|d| is_teaching_parse_diag(d.code)) {
+    } else if p.diags.iter().all(|d| is_teaching_parse_diag(&d.code)) {
         Ok((prog, p.diags))
     } else {
         Err(p.diags)
@@ -84,7 +84,7 @@ fn parse_inner(toks: &[Token], for_fmt: bool) -> Result<Program, Vec<Diagnostic>
     if p.diags.is_empty() {
         return Ok(prog);
     }
-    if for_fmt && p.diags.iter().all(|d| is_teaching_parse_diag(d.code)) {
+    if for_fmt && p.diags.iter().all(|d| is_teaching_parse_diag(&d.code)) {
         Ok(prog)
     } else {
         Err(p.diags)

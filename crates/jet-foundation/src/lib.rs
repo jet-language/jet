@@ -1,6 +1,7 @@
 #![allow(non_snake_case)]
 #![deny(warnings)]
 pub mod AST;
+mod BuildEffects;
 pub mod CanonicalAST;
 pub mod Collections;
 pub mod Diagnostics;
@@ -14,3 +15,4 @@ pub mod Syntax;
 pub mod TargetProfile;
 pub mod Traits;
 pub mod WebPartition;
+pub use BuildEffects::BuildEffect;

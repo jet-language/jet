@@ -1,7 +1,7 @@
 use jet::Comptime::Build::{
     ActionCache, ActionCacheProvenance, ActionCacheStatus, ActionOutcome, ActionSpec,
     BuildCapability, BuildContext, BuildError, BuildExecutionEvent, BuildGraphSubject, BuildPolicy,
-    BuildProvenance, BuildResourcePool, CacheHitReason, CacheMissReason, GeneratedModuleSpec,
+    BuildProvenance, BuildResourcePool, CacheHitReason, CacheMissReason, ContentDigest, GeneratedModuleSpec,
     LegacyWrapperKind, LegacyWrapperSpec, LinkerIdentity, LocalCas, LockRecord, PluginContribution,
     ProbeKind, ProbeSpec, ProvenanceSource, RemoteActionRequest, RemoteCachePolicy,
     RemoteDeniedReason, ReproducibilityClass, SdkIdentity, SigningIdentitySpec, TargetKind,
@@ -69,6 +69,32 @@ fn registers_typed_targets_and_default_plan() {
         plan.action(gen).unwrap().outputs[0].as_str(),
         ".jet/generated/assets.jet"
     );
+}
+
+#[test]
+fn selected_default_executes_only_its_target_dependency_closure() {
+    let mut b = BuildContext::new();
+    let selected_action = b.action(
+        "selected",
+        ActionSpec::cached(["tool"]).with_outputs(["selected.out"]),
+    ).unwrap();
+    let unrelated_action = b.action(
+        "unrelated",
+        ActionSpec::cached(["tool"]).with_outputs(["unrelated.out"]),
+    ).unwrap();
+    let selected = b.add_executable(
+        "selected",
+        TargetSpec::new().with_source("main.jet").with_action(selected_action),
+    ).unwrap();
+    b.add_test(
+        "unrelated",
+        TargetSpec::new().with_source("other.jet").with_action(unrelated_action),
+    ).unwrap();
+    let plan = b.plan_with_default(selected).unwrap();
+    let model = plan.execution_model().unwrap();
+    assert_eq!(model.nodes.len(), 1);
+    assert_eq!(model.nodes[0].name, "selected");
+    assert_eq!(plan.selected_sources().unwrap()[0].as_str(), "main.jet");
 }
 
 #[test]
@@ -698,7 +724,7 @@ fn local_cas_round_trips_blobs_and_restores_declared_outputs() {
         .unwrap();
     fs::write(root.join("work/build/out.txt"), "stale").unwrap();
 
-    cas.restore_declared_outputs(&root.join("work"), &record)
+    cas.restore_action_outputs(&root.join("work"), plan.action(action).unwrap(), &record)
         .unwrap();
     assert_eq!(
         fs::read_to_string(root.join("work/build/out.txt")).unwrap(),
@@ -718,6 +744,40 @@ fn local_cas_round_trips_blobs_and_restores_declared_outputs() {
     assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
     cas.put_blob(b"hello cache").unwrap();
     assert_eq!(cas.read_blob(&digest).unwrap(), b"hello cache");
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn cas_rejects_malformed_digests_without_panicking() {
+    for malformed in ["", "sha256:", "sha256:abc", "md5:0000", &format!("sha256:{}", "g".repeat(64))] {
+        assert!(ContentDigest::parse(malformed).is_err());
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn cache_restore_rejects_symlinked_parent_without_outside_write() {
+    use std::os::unix::fs::symlink;
+    let root = std::env::temp_dir().join(format!("jet_build_cache_{}_parent_symlink", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(root.join("work/real")).unwrap();
+    fs::create_dir_all(root.join("outside")).unwrap();
+    let cas = LocalCas::new(root.join("cache"));
+    let mut b = BuildContext::new();
+    let action = b.action("emit", ActionSpec::cached(["jetc"]).with_outputs(["real/out.txt"])).unwrap();
+    let plan = b.plan().unwrap();
+    fs::write(root.join("work/real/out.txt"), "safe").unwrap();
+    let record = cas.capture_declared_outputs(
+        &root.join("work"),
+        plan.action(action).unwrap(),
+        plan.action_key(action).unwrap(),
+        ActionOutcome::Succeeded { exit_code: 0 },
+        ActionCacheProvenance::miss(CacheMissReason::NoLocalActionRecord),
+    ).unwrap();
+    fs::remove_dir_all(root.join("work/real")).unwrap();
+    symlink(root.join("outside"), root.join("work/real")).unwrap();
+    assert!(cas.restore_action_outputs(&root.join("work"), plan.action(action).unwrap(), &record).is_err());
+    assert!(!root.join("outside/out.txt").exists());
     let _ = fs::remove_dir_all(&root);
 }
 

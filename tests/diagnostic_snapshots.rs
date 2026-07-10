@@ -120,8 +120,23 @@ fn ui_snapshots() {
             .find_map(|line| line.trim().strip_prefix("// @build_grants "))
             .map(|list| list.split(',').map(|item| item.trim().to_string()).collect::<Vec<_>>())
             .unwrap_or_default();
+        let build_locked = src.lines().any(|line| line.trim() == "// @build_locked");
         let actual = if programmable_build {
-            match jet::compile_programmable_build(&file_arg, &build_grants) {
+            let result = if build_locked {
+                jet::compile_programmable_build_opts(
+                    &file_arg,
+                    &build_grants,
+                    false,
+                    true,
+                    true,
+                    false,
+                    false,
+                    None,
+                )
+            } else {
+                jet::compile_programmable_build(&file_arg, &build_grants)
+            };
+            match result {
                 Err(diags) => jet::render_diagnostics(&shown_path, &src, &diags),
                 Ok(_) => "(no errors)\n".to_string(),
             }

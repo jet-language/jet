@@ -31,6 +31,12 @@ pub(crate) fn run_build_query(command: &str, args: &[&String], mode: OutputMode)
         jet::Driver::BuildRunOptions {
             grants: Default::default(),
             execute: false,
+            allow_impure: false,
+            locked: false,
+            freestanding: false,
+            web_target: false,
+            plugin_target: false,
+            cross_target: None,
         },
     ) {
         Ok(output) => output,
@@ -58,10 +64,14 @@ pub(crate) fn run_build_query(command: &str, args: &[&String], mode: OutputMode)
     }
     let graph = build.plan.graph();
     if mode.json {
-        println!("{{\"schema_version\":1,\"targets\":[{}],\"actions\":[{}],\"files\":[{}]}}",
-            graph.targets.iter().map(|target| format!("{{\"id\":{},\"name\":\"{}\",\"kind\":\"{:?}\"}}", target.id.0, json_escape(&target.name), target.kind)).collect::<Vec<_>>().join(","),
-            graph.actions.iter().map(|action| format!("{{\"id\":{},\"name\":\"{}\",\"inputs\":{},\"outputs\":{}}}", action.id.0, json_escape(&action.name), json_strings(&action.inputs), json_strings(&action.outputs))).collect::<Vec<_>>().join(","),
-            graph.files.iter().map(|file| format!("{{\"path\":\"{}\",\"owner\":{}}}", json_escape(&file.path), file.owner.map(|id| id.0.to_string()).unwrap_or_else(|| "null".to_string()))).collect::<Vec<_>>().join(",")
+        println!("{{\"schema_version\":1,\"default\":{},\"targets\":[{}],\"actions\":[{}],\"files\":[{}],\"toolchains\":[{}],\"probes\":[{}],\"generated\":[{}]}}",
+            build.plan.default_target().map(|target| target.id().0.to_string()).unwrap_or_else(|| "null".to_string()),
+            graph.targets.iter().map(|target| format!("{{\"id\":{},\"name\":\"{}\",\"kind\":\"{:?}\",\"deps\":[{}],\"actions\":[{}],\"files\":{}}}", target.id.0, json_escape(&target.name), target.kind, target.deps.iter().map(|id| id.0.to_string()).collect::<Vec<_>>().join(","), target.actions.iter().map(|id| id.0.to_string()).collect::<Vec<_>>().join(","), json_strings(&target.files))).collect::<Vec<_>>().join(","),
+            graph.actions.iter().map(|action| { let real = &build.plan.actions()[action.id.0]; format!("{{\"id\":{},\"name\":\"{}\",\"inputs\":{},\"outputs\":{},\"caps\":{},\"pools\":{},\"toolchain\":\"{}\",\"probes\":{},\"cache\":\"{:?}\",\"provenance\":{}}}", action.id.0, json_escape(&action.name), json_strings(&action.inputs), json_strings(&action.outputs), json_strings(&action.caps.iter().map(|cap| cap.name().to_string()).collect::<Vec<_>>()), json_strings(&action.pools.iter().map(|pool| pool.as_str().to_string()).collect::<Vec<_>>()), json_escape(&build.plan.toolchains()[real.toolchain.id().0].name), json_strings(&real.probes.iter().map(|probe| build.plan.probes()[probe.id().0].name.clone()).collect::<Vec<_>>()), real.cache, json_strings(&build.plan.explain_action_named(&action.name).map(|fact| fact.provenance).unwrap_or_default())) }).collect::<Vec<_>>().join(","),
+            graph.files.iter().map(|file| format!("{{\"path\":\"{}\",\"owner\":{},\"consumers\":[{}],\"targets\":[{}]}}", json_escape(&file.path), file.owner.map(|id| id.0.to_string()).unwrap_or_else(|| "null".to_string()), file.consumers.iter().map(|id| id.0.to_string()).collect::<Vec<_>>().join(","), file.targets.iter().map(|id| id.0.to_string()).collect::<Vec<_>>().join(","))).collect::<Vec<_>>().join(","),
+            build.plan.toolchains().iter().map(|tool| format!("{{\"name\":\"{}\",\"target\":\"{}\"}}", json_escape(&tool.name), json_escape(&tool.target_triple))).collect::<Vec<_>>().join(","),
+            build.plan.probes().iter().map(|probe| format!("{{\"name\":\"{}\",\"kind\":\"{:?}\",\"reproducibility\":\"{:?}\"}}", json_escape(&probe.name), probe.kind, probe.reproducibility)).collect::<Vec<_>>().join(","),
+            build.plan.generated_modules().iter().map(|module| format!("{{\"name\":\"{}\",\"path\":\"{}\",\"digest\":\"{}\"}}", json_escape(&module.name), json_escape(module.path.as_str()), module.source_digest.as_str())).collect::<Vec<_>>().join(",")
         );
     } else {
         for target in graph.targets { println!("target\t{}\t{:?}", target.name, target.kind); }
@@ -142,6 +152,7 @@ pub(crate) fn run_compile_cmd(
     freestanding: bool,
     allow_impure: bool,
     build_grants: &[String],
+    locked: bool,
     cross_target: Option<&str>,
     explain_partition: bool,
     verbose: bool,
@@ -264,8 +275,17 @@ pub(crate) fn run_compile_cmd(
         }
     }
 
-    let compile_result = if cmd == "build" && !is_web && !is_plugin && !freestanding && cross_target.is_none() {
-        jet::compile_programmable_build(file, build_grants)
+    let compile_result = if cmd == "build" {
+        jet::compile_programmable_build_opts(
+            file,
+            build_grants,
+            freestanding,
+            allow_impure || !build_grants.is_empty(),
+            locked,
+            is_web,
+            is_plugin,
+            cross_target,
+        )
     } else if is_web {
         jet::compile_web(file)
     } else if is_plugin {
