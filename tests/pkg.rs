@@ -1900,6 +1900,39 @@ fn fetch_locked_rejects_missing_lock() {
     let _ = fs::remove_dir_all(&tmp);
 }
 
+#[test]
+fn registry_dependency_is_e1207_until_registry_gate_lands() {
+    let tmp = tmp_dir("registry_dep_staged");
+    let store = tmp.join("store");
+    fs::create_dir_all(&store).unwrap();
+    let raw = manifest_with_deps("app", "0.1.0", "    textkit: \"1.2.0\",");
+    write(&tmp, "pkg.jet", &raw);
+    let mf = jet::Manifest::parse(&tmp.join("pkg.jet"), &raw).unwrap();
+    let opts = jet::Fetch::FetchOptions {
+        locked: false,
+        update: false,
+        update_dep: None,
+    };
+    let diags = with_store(&store, || jet::Fetch::fetch(&tmp, &mf, None, &opts))
+        .expect_err("registry dependency must report its staged feature diagnostic");
+    assert_eq!(first_diag_code(&diags), "E1207");
+    let rendered = jet::Diagnostics::render_all(
+        &tmp.join("pkg.jet").to_string_lossy(),
+        &raw,
+        &diags,
+    );
+    assert!(rendered.contains("Error [E1207]:"), "unexpected diagnostic:\n{rendered}");
+    assert!(rendered.contains("Why:"), "missing E1207 reason:\n{rendered}");
+    assert!(rendered.contains("Fix:"), "missing E1207 fix:\n{rendered}");
+    let snapshot = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/jetpack-diagnostics/E1207.stderr");
+    if std::env::var_os("UPDATE_EXPECT").is_some() {
+        fs::write(&snapshot, &rendered).unwrap();
+    }
+    assert_eq!(rendered, fs::read_to_string(snapshot).unwrap());
+    let _ = fs::remove_dir_all(&tmp);
+}
+
 // ─────────────────────────────────────────────
 // Git dep (local bare repo — no network needed; skip if no git)
 // ─────────────────────────────────────────────

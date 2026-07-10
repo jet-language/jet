@@ -53,6 +53,22 @@ mod tests {
         std::env::temp_dir()
     }
 
+    fn check_diagnostic_snapshot(code: &str, rendered: &str) {
+        assert!(rendered.starts_with(&format!("Error [{code}]:")));
+        assert!(rendered.contains("\n Why: "));
+        assert!(rendered.contains("\n Fix: "));
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/module-eval-diagnostics")
+            .join(format!("{code}.stderr"));
+        if std::env::var_os("UPDATE_EXPECT").is_some() {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, rendered).unwrap();
+        }
+        let expected = std::fs::read_to_string(&path)
+            .unwrap_or_else(|_| panic!("missing diagnostic snapshot {}", path.display()));
+        assert_eq!(rendered, expected, "snapshot mismatch for {code}");
+    }
+
     #[test]
     fn evaluates_plain_scalar_and_packages() {
         let src = r#"
@@ -124,6 +140,7 @@ module _gaming {
             rendered,
             "Error [E0966]: expected a `Env` literal here, found `System`\n  --> env.jet:3:14\n    |\n  3 |     env.dev: System.{\n    |              ^^^^^^^^\n Why: a contribution to this namespace must use the matching type `Env`\n Fix: change `System.{…}` to `Env.{…}`\n"
         );
+        check_diagnostic_snapshot("E0966", &rendered);
     }
 
     #[test]
@@ -138,6 +155,7 @@ module _gaming {
         );
         assert!(rendered
             .contains("package builds run with ambient I/O and network access disabled (D-PURE2)"));
+        check_diagnostic_snapshot("E3402", &rendered);
     }
 
     /// A fresh, empty directory under the system temp dir, unique per call.
@@ -325,6 +343,7 @@ module dev {
             rendered,
             "Error [E0968]: `nixos-24.05` isn't a `provider@target` source ref\n  --> env.jet:3:25\n    |\n  3 |     sources: { default: nixos-24.05 }\n    |                         ^^^^^^^^^^^\n Why: a named source resolves to an upstream written as `provider@target` (U6) — `github@owner/repo/rev`, `path@../local`, `nixpkgs@channel`\n Fix: write the ref as `provider@target`, e.g. `github@NixOS/nixpkgs/nixos-24.05`\n"
         );
+        check_diagnostic_snapshot("E0968", &rendered);
     }
 
     #[test]
@@ -392,6 +411,7 @@ module b {
             rendered,
             "Error [E0967]: `prompt` got conflicting values: one, two\n Why: scalar settings merge to one value; without a priority marker, modules contributing different values can't be reconciled\n Fix: make every module agree on this value, or remove the conflicting contribution\n"
         );
+        check_diagnostic_snapshot("E0967", &rendered);
     }
 
     #[test]
@@ -429,6 +449,7 @@ module b {
             rendered.contains("3 |     imports: find(\"./nope\")"),
             "{rendered}"
         );
+        check_diagnostic_snapshot("E0970", &rendered);
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -442,6 +463,7 @@ module b {
             rendered,
             "Error [E0969]: an `imports:` directive must be `find(\"<dir>\")`\n  --> env.jet:3:14\n    |\n  3 |     imports: gather(\"./modules\")\n    |              ^^^^^^\n Why: imports auto-discover a directory of modules (U4); the only directive is `find` with a single string-literal path, e.g. `find(\"./modules\")`\n Fix: write `imports: find(\"./modules\")`\n"
         );
+        check_diagnostic_snapshot("E0969", &rendered);
     }
 
     // ── gap #5: System / Service / Image (U11–U14, U18) ──────────────────
@@ -606,6 +628,7 @@ module m {
             rendered,
             "Error [E0972]: `gpu` isn't a field of `System`\n  --> config.jet:1:43\n    |\n  1 | module m { system.s: { target: linux.x64, gpu: true } }\n    |                                           ^^^\n Why: a `System` has a fixed set of fields: `target`, `packages`, `services`, `options`\n Fix: remove `gpu`, or use one of `target`, `packages`, `services`, `options`\n"
         );
+        check_diagnostic_snapshot("E0972", &rendered);
     }
 
     #[test]
@@ -619,6 +642,7 @@ module m {
             rendered.contains("`windows.x64` isn't a platform"),
             "{rendered}"
         );
+        check_diagnostic_snapshot("E0973", &rendered);
     }
 
     #[test]
@@ -626,6 +650,9 @@ module m {
         let src = "module m { system.s: { packages: [default.fd] } }";
         let err = evaluate_env(src, &base_dir()).unwrap_err();
         assert_eq!(err.code, "E0974");
+        let rendered =
+            crate::Diagnostics::render_all("config.jet", src, std::slice::from_ref(&err));
+        check_diagnostic_snapshot("E0974", &rendered);
     }
 
     #[test]
@@ -637,6 +664,7 @@ module m {
         let rendered =
             crate::Diagnostics::render_all("config.jet", src, std::slice::from_ref(&err));
         assert!(rendered.contains("`ssh` has no `enable`"), "{rendered}");
+        check_diagnostic_snapshot("E0975", &rendered);
     }
 
     #[test]
@@ -658,6 +686,7 @@ module m {
             rendered.contains("`dmg` isn't a disk-image format"),
             "{rendered}"
         );
+        check_diagnostic_snapshot("E0976", &rendered);
     }
 
     #[test]
@@ -665,6 +694,9 @@ module m {
         let src = "module m { image.i: { format: iso } }";
         let err = evaluate_env(src, &base_dir()).unwrap_err();
         assert_eq!(err.code, "E0977");
+        let rendered =
+            crate::Diagnostics::render_all("config.jet", src, std::slice::from_ref(&err));
+        check_diagnostic_snapshot("E0977", &rendered);
     }
 
     #[test]
@@ -695,6 +727,7 @@ module m {
         let rendered =
             crate::Diagnostics::render_all("config.jet", src, std::slice::from_ref(&err));
         assert!(rendered.contains("unknown system `nope`"), "{rendered}");
+        check_diagnostic_snapshot("E0978", &rendered);
     }
 
     // ── U14/D-JPK-IMAGE1: `.Oci` container images ────────────────────────
@@ -1052,6 +1085,7 @@ module system.box {
         let rendered = crate::Diagnostics::render_all("env.jet", src, std::slice::from_ref(&err));
         assert!(rendered.contains("Error [E0971]:"), "{rendered}");
         assert!(rendered.contains("liftability law"), "{rendered}");
+        check_diagnostic_snapshot("E0971", &rendered);
         std::fs::remove_dir_all(&dir).ok();
     }
 }

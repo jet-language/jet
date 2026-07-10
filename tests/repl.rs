@@ -484,6 +484,12 @@ fn repl_infinite_loop_hits_e1801_fuel_cap() {
     assert!(out.contains("Error [E1801]:"), "missing REPL fuel diagnostic:\n{out}");
     assert!(out.contains("Why:"), "missing E1801 reason:\n{out}");
     assert!(out.contains("Fix:"), "missing E1801 fix:\n{out}");
+    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/cli/repl_e1801.txt");
+    if std::env::var_os("UPDATE_EXPECT").is_some() {
+        std::fs::write(&path, &out).unwrap();
+    }
+    assert_eq!(out, std::fs::read_to_string(path).unwrap());
 }
 
 #[test]

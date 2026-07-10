@@ -243,18 +243,18 @@ fn snapshot_codes() -> BTreeSet<String> {
         }
     }
 
-    // Also scan test/*.rs files for .contains("ENNNNN") / d.code == "ENNNNN" patterns.
-    // These cover codes verified by assertion in cffi.rs, pkg.rs, repl.rs, dev.rs, etc.
-    // Skip diagnostics_coverage.rs itself — its constant arrays would create false positives.
+    // Legacy runtime assertions outside this card remain accepted until their
+    // owning cards migrate them. #343 coverage below uses committed artifacts;
+    // none of E0966-E0978/E1203/E1207/E1801/E3208/E3302/E3402/L2101 depends
+    // on this compatibility scan.
     let tests_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests");
     if let Ok(entries) = fs::read_dir(&tests_dir) {
-        for e in entries.flatten() {
-            let p = e.path();
-            if p.extension().and_then(|x| x.to_str()) == Some("rs") {
-                if p.file_name().and_then(|n| n.to_str()) == Some("diagnostics_coverage.rs") {
-                    continue; // skip self — our constant arrays would be false positives
-                }
-                if let Ok(content) = fs::read_to_string(&p) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|x| x.to_str()) == Some("rs")
+                && path.file_name().and_then(|x| x.to_str()) != Some("diagnostics_coverage.rs")
+            {
+                if let Ok(content) = fs::read_to_string(path) {
                     for code in extract_assert_codes(&content) {
                         out.insert(code);
                     }
@@ -263,51 +263,18 @@ fn snapshot_codes() -> BTreeSet<String> {
         }
     }
 
-    out
-}
+    let module_eval = root.join("tests/fixtures/module-eval-diagnostics");
+    if let Ok(entries) = fs::read_dir(&module_eval) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|x| x.to_str()) == Some("stderr") {
+                for code in extract_snapshot_codes(&read(&path)) {
+                    out.insert(code);
+                }
+            }
+        }
+    }
 
-/// Diagnostic codes exercised by runtime diagnostic fixtures embedded in Rust
-/// tests. These are not `.jet` front-end snapshots: ModuleEval is reached via
-/// `env.jet`/`system.jet` evaluation and its tests call the production
-/// evaluator, then pin the returned code (and, for representative cases, the
-/// complete rendered diagnostic). Keep this parser deliberately narrow so an
-/// unrelated source mention cannot masquerade as coverage.
-fn runtime_fixture_codes() -> BTreeSet<String> {
-    let source = read(&root().join("crates/jetpack/src/ModuleEval/mod.rs"));
-    let mut out = BTreeSet::new();
-    for line in source.lines() {
-        let trimmed = line.trim();
-        let Some(tail) = trimmed
-            .strip_prefix("assert_eq!(err.code, \"")
-            .or_else(|| trimmed.strip_prefix("assert_eq!(diag.code, \""))
-        else {
-            continue;
-        };
-        let Some((code, suffix)) = tail.split_once('"') else {
-            continue;
-        };
-        if suffix.starts_with(");")
-            && code.len() == 5
-            && code.starts_with(['E', 'L'])
-            && code[1..].chars().all(|c| c.is_ascii_digit())
-        {
-            out.insert(code.to_string());
-        }
-    }
-    // REPL transcript tests execute the production interpreter. Count only
-    // explicit assertions for a fully rendered diagnostic header.
-    let repl = read(&root().join("tests/repl.rs"));
-    for code in extract_snapshot_codes(&repl) {
-        if repl.contains(&format!("contains(\"Error [{code}]:\")")) {
-            out.insert(code);
-        }
-    }
-    let cli = read(&root().join("tests/cli.rs"));
-    for code in extract_snapshot_codes(&cli) {
-        if cli.contains(&format!("contains(\"Error [{code}]:\")")) {
-            out.insert(code);
-        }
-    }
     out
 }
 
@@ -439,11 +406,6 @@ const UNTESTABLE_VIA_SNAPSHOT: &[&str] = &[
 /// The test still PASSES with these codes listed here, but a separate test
 /// (`acknowledged_coverage_gaps_are_expected`) verifies the list doesn't GROW silently.
 const ACKNOWLEDGED_COVERAGE_GAPS: &[&str] = &[
-    // Environment-specific: require git-not-installed or a specific store condition.
-    // These are integration-test scenarios that need CI matrix variations.
-    "E1203", // git not installed (requires git to be absent from PATH)
-    // Feature-staged: registered and spec'd, but the feature isn't wired up yet.
-    "E1207", // registry dep not supported (registry resolver not yet implemented)
     // E0916 is reserved for Debug auto-derive limits and documented as
     // "defined, not yet emitted"; the helper lives in Generics.rs before the
     // feature path is wired. Remove this once auto-derived Debug can actually
@@ -451,10 +413,6 @@ const ACKNOWLEDGED_COVERAGE_GAPS: &[&str] = &[
     "E0916",
     // E2202 (dev interpreter step budget) is covered by tests/dev.rs
     // (`infinite_loop_hits_e2202_fuel_stop` + the c77 battery boundary set).
-    // Doctor advisory: L2101 is in tests/cli/doctor_ok.txt but not in [L2101] format.
-    // The doctor output renders it as "L2101: ..." not as "[L2101]".
-    // TODO: update doctor output format to use [L2101] brackets, or add assertion in cli.rs.
-    "L2101",
     // E0153: protocol expansion parse failure — internal compiler error path only
     // (D-PROTO1); no user-writable fixture triggers a failed fragment re-parse.
     "E0153",
@@ -685,7 +643,6 @@ fn diagnostics_registry_has_no_duplicate_code_rows() {
 fn every_emitted_code_has_snapshot() {
     let emitted = emitted_codes();
     let snaps = snapshot_codes();
-    let runtime = runtime_fixture_codes();
     let exclusions = all_exclusions();
     let diag_md = read(&root().join("docs/spec/diagnostics.md"));
     let acknowledged: BTreeSet<String> = ACKNOWLEDGED_COVERAGE_GAPS
@@ -698,7 +655,6 @@ fn every_emitted_code_has_snapshot() {
         .filter(|c| !exclusions.contains(*c))
         .filter(|c| !acknowledged.contains(*c))
         .filter(|c| !snaps.contains(*c))
-        .filter(|c| !runtime.contains(*c))
         .filter(|c| !is_retired(c, &diag_md))
         .cloned()
         .collect();
@@ -723,15 +679,13 @@ fn every_emitted_code_has_snapshot() {
 #[test]
 fn acknowledged_gaps_are_still_unresolved() {
     let snaps = snapshot_codes();
-    let runtime = runtime_fixture_codes();
     let diag_md = read(&root().join("docs/spec/diagnostics.md"));
 
     // Codes in the acknowledged list that now have snapshot coverage — time to remove them.
     let mut now_covered: Vec<String> = ACKNOWLEDGED_COVERAGE_GAPS
         .iter()
         .filter(|c| {
-            (snaps.contains(&c.to_string()) || runtime.contains(&c.to_string()))
-                && !is_retired(c, &diag_md)
+            snaps.contains(&c.to_string()) && !is_retired(c, &diag_md)
         })
         .map(|s| s.to_string())
         .collect();

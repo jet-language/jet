@@ -529,6 +529,42 @@ fn doctor_ok_golden() {
 }
 
 #[test]
+fn doctor_failure_is_l2101_snapshot() {
+    let out = Command::new(jet())
+        .arg("doctor")
+        .env("PATH", "")
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let start = stdout.find("Warning [L2101]:").expect("L2101 diagnostic");
+    check_snapshot("doctor_l2101.txt", &stdout[start..]);
+}
+
+#[test]
+fn fetch_without_git_is_e1203_snapshot() {
+    let dir = isolated_cwd("fetch_no_git");
+    fs::write(
+        dir.join("pkg.jet"),
+        "payload: { name: \"app\", version: \"0.1.0\", jet: \">=0.1.0\", description: \"\", license: \"MIT\" }\npackages: { app: executable }\ndeps: { tool: { git: \"https://example.invalid/tool.git\", tag: \"v1\" } }\n",
+    )
+    .unwrap();
+    let out = Command::new(jet())
+        .arg("fetch")
+        .current_dir(&dir)
+        .env("PATH", "")
+        .env("HOME", &dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(1), "unexpected stderr:\n{stderr}");
+    let start = stderr.find("Error [E1203]:").expect("E1203 diagnostic");
+    check_snapshot("fetch_no_git_e1203.txt", &stderr[start..]);
+}
+
+#[test]
 fn bind_missing_header_is_e3208() {
     let missing = std::env::temp_dir().join("jet_missing_bind_header.h");
     let _ = fs::remove_file(&missing);
@@ -543,6 +579,7 @@ fn bind_missing_header_is_e3208() {
     assert!(stderr.contains("Error [E3208]:"), "missing bind diagnostic:\n{stderr}");
     assert!(stderr.contains("Why:"), "missing E3208 reason:\n{stderr}");
     assert!(stderr.contains("Fix:"), "missing E3208 fix:\n{stderr}");
+    check_snapshot("bind_missing_e3208.txt", &scrub(&stderr, &missing));
 }
 
 #[test]
@@ -561,6 +598,7 @@ fn unknown_cross_target_is_e3302() {
     assert!(stderr.contains("Error [E3302]:"), "missing target diagnostic:\n{stderr}");
     assert!(stderr.contains("Why:"), "missing E3302 reason:\n{stderr}");
     assert!(stderr.contains("Fix:"), "missing E3302 fix:\n{stderr}");
+    check_snapshot("unknown_target_e3302.txt", &stderr);
 }
 
 #[test]

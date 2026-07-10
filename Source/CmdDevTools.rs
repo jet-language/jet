@@ -1179,11 +1179,10 @@ pub(crate) fn run_doctor(online: bool, apply: bool, mode: OutputMode) {
     }
     println!();
     if jet::Doctor::has_problem(&checks) {
-        // Advisory L2101 pointer, without making the report noisy.
-        println!(
-            "some checks need attention. {}",
-            jet::Explain::pointer_line("L2101", color)
-        );
+        println!("Warning [L2101]: toolchain checks need attention");
+        println!(" Why: one or more required tools or paths are unavailable");
+        println!(" Fix: follow the fixes above, then run `jet doctor` again");
+        println!(" {}", jet::Explain::pointer_line("L2101", color));
         exit(ExitCodes::USER_ERROR);
     } else {
         println!("everything looks good.");

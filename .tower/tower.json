@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 469,
-    "rev": 2981,
+    "rev": 2983,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -20,7 +20,6 @@
         "radar:e9",
         "radar:e8",
         "radar-sq",
-        "radar:e3",
         "radar:e4",
         "radar:e5",
         "radar:e6",
@@ -22124,6 +22123,74 @@
       "created": "2026-07-10T20:38:19.591Z",
       "outcome": "A",
       "ratifiedAt": "2026-07-10"
+    },
+    {
+      "id": "D-CLI-SURFACE1",
+      "cardId": "c0vntq8c",
+      "group": "tooling",
+      "title": "jet CLI surface: flat, frequency rings, object grammar, or product surfaces",
+      "gist": "How jet's ~45 top-level commands are organized: keep them all flat, group the rare ones, adopt a noun-then-verb grammar, or move shipping/registry commands to jetpack.",
+      "explainer": "D wins on beginner experience (jet's surface is only the dev loop — the name jetpack already tells a learner where shipping lives), on one-path (each verb has exactly one home decided by ratified product ownership, dissolving the audit/vendor/explain same-name collisions that A-C leave in place), and on long-term correctness (the registry/supply surface grows on jetpack without ever re-widening jet). B is the runner-up if the owner wants everything reachable from one binary.",
+      "story": "Terms used below — top-level verb: a command typed directly after `jet` (like `jet test`); noun group: a category word between `jet` and the action (like `jet store verify` today); teaching error: an error that names the exact replacement command; dev loop: the write-run-test-fix cycle.\n\nMaya maintains `warp`, a parsing package. Most days she types five commands: `jet run`, `jet test`, `jet check`, `jet fmt`, `jet dev`. Today is release day, so she also needs the commands she uses twice a year: create a signing key, publish v1.2.0, then — after a bug report — yank it and investigate what her fix touches before republishing. Twice-a-year commands are the problem: she doesn't remember whether publishing is `jet publish` or `jetpack publish` (both binaries exist on her machine and both have `audit`, `vendor`, and `explain` verbs that do *different things*). `jet ?` will find her the command every time (ratified D-FE-HELP1) — but a finder over 60 flat names doesn't answer which binary a verb belongs to, why two same-named verbs differ, or how many mutually-distinct names the docs must teach. This ballot decides the shape of the surface itself; how it is browsed (#360) and how output renders (#361) are decided and untouched.",
+      "inWild": "Today's real surface. jet has ~45 native top-level verbs (Source/main.rs): the dev loop (run, build, test, check, fix, fmt, lint, dev, serve, repl, debug, bench, eval, emit, new, init, add, remove, update, explain, doctor, help, version), registry/signing (publish, keygen, key backup, yank, vendor — Source/CmdSupply.rs), introspection (semindex, dossier, impact, graph/query/explain-build, codemod, expand, audit, sbom, schema, bind), and self/store management (toolchain, upgrade, fetch, lock, gc, store verify/rollback/generations, completions, man, devtools). Another ~14 verbs pure-forward to jetpack (env, push, trust, bridge, os, config, …). jetpack's own CLI has ~18 verbs, and three names collide with different meanings: `jet audit` scans a security advisory database while `jetpack audit` lists hangar contents; `jet vendor` and `jetpack vendor`, `jet explain` (diagnostic codes) and `jetpack explain` (builds) also differ. git ships 78 porcelain commands and studies find ~17 in daily use — the rest is memorization tax. That is the trajectory a flat surface is on.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Flat surface",
+          "detail": "Core loop: every command is one word after `jet`, and the palette is the map. Keep all ~45 verbs top-level; `jet ?` (ratified hybrid palette) carries discovery and `jet help` prints them in categories, but every verb is typed flat. Nothing moves, nothing renames. The cost compounds: every new feature adds a top-level name that must stay mutually distinct from ~60 others across two binaries, the audit/vendor/explain same-name collisions stay unresolved, and docs must teach one undifferentiated list where publishing a package and diffing a build graph sit beside `run`.",
+          "code": "$ jet test\n   PASS  18 tests, 0 failures\n$ jet keygen\n   created signing key for registry `default` (~/.jet/keys)\n$ jet publish\n   signed and published warp 1.2.0\n$ jet yank 1.2.0 --message \"broken decode on empty input\"\n   yanked warp 1.2.0\n$ jet impact src/decode.jet\n   3 public functions affected · 2 dependent packages\n\n$ jet pubilsh\nerror: unknown command `pubilsh` — did you mean `publish`?"
+        },
+        {
+          "key": "B",
+          "name": "Frequency rings",
+          "detail": "Core loop: daily work is one word; anything rarer is an area word plus a verb, all on the jet binary. The daily ring stays flat (~20: run, build, test, check, fix, new, init, add, remove, update, fmt, lint, dev, serve, repl, debug, bench, eval, emit, explain, help, version). The long tail moves under four plain area groups: `jet registry` (publish, yank, keygen, key backup, vendor), `jet inspect` (graph, query, explain-build, impact, dossier, semindex, expand, schema, codemod, audit, sbom, bind), `jet store` (existing verify/rollback/generations, plus gc, fetch, lock), `jet self` (toolchain, upgrade, doctor, completions, man, devtools). Grouped spelling is the only spelling — the old bare verb is a teaching error, not an alias (I8). This is git's porcelain/plumbing lesson applied at the moment of typing: `jet help` fits on one screen, and each group's help lists only its own verbs. The audit/vendor/explain collisions with jetpack remain, though `jet inspect audit` vs `jetpack audit` at least reads differently.",
+          "code": "$ jet test\n   PASS  18 tests, 0 failures\n$ jet registry keygen\n   created signing key for registry `default` (~/.jet/keys)\n$ jet registry publish\n   signed and published warp 1.2.0\n$ jet registry yank 1.2.0 --message \"broken decode on empty input\"\n   yanked warp 1.2.0\n$ jet inspect impact src/decode.jet\n   3 public functions affected · 2 dependent packages\n\n$ jet publish\nerror: `publish` lives in the registry group.\n  run: jet registry publish\n  the registry group holds publishing, signing, and yanking — see `jet registry help`"
+        },
+        {
+          "key": "C",
+          "name": "Object grammar",
+          "detail": "Core loop: name the thing, then the action — every command reads object-then-verb, except the run/build/test front door. Commands are organized by what they act on, docker/kubectl style, and renamed to fit one grammar: `jet key generate` and `jet key backup` (was keygen/key backup), `jet package publish / yank / vendor / add / remove / update` (package lifecycle in one place, including today's flat add/remove), `jet graph show / query / why` (was graph/query/explain-build), `jet report impact / dossier / sbom / audit`, `jet code expand / codemod / bind`, `jet store verify / rollback / generations / gc`, `jet toolchain show / pin / upgrade`. Only the front door stays flat: run, build, test, check, fix, fmt, lint, dev, serve, repl, debug, bench, eval, new, init, help, version. One grammar means every object answers `jet <object> help` with its full lifecycle, and new verbs slot into an existing object instead of minting a top-level name. The honest cost: hot-path package commands gain a word (`jet package add textkit` where beginners type `jet add textkit` today), and the grammar is alien next to `run <file>` muscle memory. Old spellings are teaching errors, not aliases — docker's permanent dual spellings (`docker run` and `docker container run` forever) are exactly the I8 trap this option must not copy.",
+          "code": "$ jet test\n   PASS  18 tests, 0 failures\n$ jet key generate\n   created signing key for registry `default` (~/.jet/keys)\n$ jet package publish\n   signed and published warp 1.2.0\n$ jet package yank 1.2.0 --message \"broken decode on empty input\"\n   yanked warp 1.2.0\n$ jet report impact src/decode.jet\n   3 public functions affected · 2 dependent packages\n\n$ jet keygen\nerror: keys are managed under `jet key`.\n  run: jet key generate\n  `jet key help` lists the key lifecycle: generate, backup"
+        },
+        {
+          "key": "D",
+          "name": "Product surfaces",
+          "detail": "Core loop: jet is what you type while writing code; jetpack is what you type to ship and manage packages. Finish D-PRODUCT-SPLIT1 at the verb level: supply-chain verbs (publish, keygen, key backup, yank, vendor, audit, sbom) move canonically to jetpack, joining its existing push/trust/hangar surface — the advisory scan, hangar audit, and vendoring become one supply-chain story on the binary that owns packages, dissolving the audit/vendor same-name collisions. Compiler-owned introspection can't leave jet, so it folds under one group: `jet inspect` (graph, query, explain-build, impact, dossier, semindex, expand, schema, codemod, bind). jet's top level becomes the dev loop plus self/store management (~25 incl. existing forwards): run, build, test, check, fix, new, init, add, remove, update, fmt, lint, dev, serve, repl, debug, bench, eval, emit, explain, doctor, toolchain, upgrade, store, gc — the beginner never meets a verb that isn't about writing and running code. Moved verbs on jet become teaching errors naming the jetpack command (the ratified SPLIT1=C shim pattern, with the same until-deprecation lifecycle). `jet add textkit` stays exactly as it is — manifest editing already forwards to the engine, and the front door doesn't change.",
+          "code": "$ jet test\n   PASS  18 tests, 0 failures\n$ jetpack keygen\n   created signing key for registry `default` (~/.jet/keys)\n$ jetpack publish\n   signed and published warp 1.2.0\n$ jetpack yank 1.2.0 --message \"broken decode on empty input\"\n   yanked warp 1.2.0\n$ jet inspect impact src/decode.jet\n   3 public functions affected · 2 dependent packages\n\n$ jet publish\nerror: publishing belongs to jetpack — jet builds and runs code; jetpack ships it.\n  run: jetpack publish\n  same flags; your signing key and registry settings carry over"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "git",
+          "note": "Ships 78 porcelain + 68 plumbing commands; a widely-cited usage study found only ~17 in daily use. The porcelain/plumbing boundary keeps the common path small — but git drew it in the docs, not the command line, so all 78 still compete for top-level names.",
+          "code": "$ git commit -m \"fix decode\"        # daily\n$ git cat-file -p HEAD^{tree}       # plumbing, same flat namespace"
+        },
+        {
+          "lang": "uv (Astral)",
+          "note": "Replaced pip + pipx + virtualenv + pip-tools with one binary and one mental model — the 2024-2026 direction (uv, bun, deno) is consolidation, but the consolidated binary keeps its common path to a dozen verbs.",
+          "code": "$ uv add requests\n$ uv run main.py\n$ uv publish"
+        },
+        {
+          "lang": "kubectl",
+          "note": "One verb-noun grammar for everything (`kubectl get pods`, `kubectl delete deployment web`). Maximal consistency; alien next to a compiler's `run <file>` hot path.",
+          "code": "$ kubectl get pods\n$ kubectl describe deployment web"
+        },
+        {
+          "lang": "cargo",
+          "note": "Flat extensible subcommands, closest to jet today — and criticized for sprawl once plugins are counted; every extension mints another top-level name.",
+          "code": "$ cargo build\n$ cargo clippy      # plugin, same flat namespace\n$ cargo audit       # plugin, same flat namespace"
+        },
+        {
+          "lang": "docker",
+          "note": "Grouped nouns (`docker image ls`, `docker container run`) layered under permanent flat legacy aliases (`docker run` still works, a decade on). Proof the grouped model works — and a warning: dual spellings never retire on their own. Options B-D avoid this by making old spellings teaching errors with a deprecation lifecycle, not aliases.",
+          "code": "$ docker image ls\n$ docker ps          # legacy alias of `docker container ls`, still shipped"
+        }
+      ],
+      "rec": "D",
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-10T20:54:00.830Z"
     }
   ],
   "questions": [
@@ -22926,6 +22993,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-10T20:54:00.830Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-CLI-SURFACE1",
+      "note": "jet CLI surface: flat, frequency rings, object grammar, or product surfaces"
+    },
     {
       "at": "2026-07-10T20:44:47.406Z",
       "by": "owner",
@@ -26418,13 +26492,6 @@
       "action": "card.update",
       "ref": "c0wetgi3",
       "note": "logEntry"
-    },
-    {
-      "at": "2026-07-10T12:22:39.581Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c1nixrpd",
-      "note": "phase,logEntry"
     }
   ],
   "nextNum": 368,
