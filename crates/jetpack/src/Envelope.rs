@@ -59,13 +59,24 @@ pub fn host_platform() -> String {
 /// For a real local directory this is the full-tree content hash (every file's
 /// relative path, length, and bytes) — not the compiler's `.jet`-only
 /// `tree_hash`, since a realized output is `bin/`, `.rlib`, and arbitrary files.
-/// For a non-directory (a `/nix/store/…` path in a fixture run, or a bare
-/// output string) the store path is already content-addressed, so its text is
-/// the identity.
+/// Existing files and symlinks are hashed from their bytes/target. Missing
+/// paths retain the legacy text identity only so old fixture records remain
+/// readable; cache verification rejects a missing output before trusting it.
 pub fn output_hash_of(out: &str) -> String {
     let p = Path::new(out);
     if p.is_dir() {
         format!("sha256-{}", tree_content_hash(p))
+    } else if p.is_symlink() {
+        let target = std::fs::read_link(p).unwrap_or_default();
+        let mut input = b"symlink\0".to_vec();
+        input.extend_from_slice(target.to_string_lossy().as_bytes());
+        format!("sha256-{}", SHA256::sha256_hex(&input))
+    } else if p.is_file() {
+        let bytes = std::fs::read(p).unwrap_or_default();
+        let mut input = b"file\0".to_vec();
+        input.extend_from_slice(&(bytes.len() as u64).to_be_bytes());
+        input.extend_from_slice(&bytes);
+        format!("sha256-{}", SHA256::sha256_hex(&input))
     } else {
         format!("sha256-{}", SHA256::sha256_hex(out.as_bytes()))
     }
@@ -135,6 +146,23 @@ mod tests {
         assert!(ha.starts_with("sha256-"));
         assert_ne!(ha, hb, "different contents must hash differently");
         std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn output_hash_of_file_reflects_bytes_not_path_text() {
+        let base = std::env::temp_dir().join(format!(
+            "env-file-hash-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::write(&base, "one").unwrap();
+        let before = output_hash_of(&base.to_string_lossy());
+        std::fs::write(&base, "two").unwrap();
+        let after = output_hash_of(&base.to_string_lossy());
+        assert_ne!(before, after, "file bytes, not path text, are identity");
+        std::fs::remove_file(&base).ok();
     }
 
     #[test]

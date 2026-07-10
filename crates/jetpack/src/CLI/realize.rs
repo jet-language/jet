@@ -88,18 +88,32 @@ fn realize_ref_outcome(
     // store dir also seeds the U9 remote probe's source-cache lookup, so it is
     // resolved before the fixtures decision below.
     let store_dir = roots.hangar_dir();
-    if let Some(entry) = Store::find_by_reference(roots, &spec.raw) {
-        drop(spinner);
-        let line = theme.render_row(&entry.name, name_w, &entry.version, "cached");
-        match style {
-            RowStyle::Ledger => {
-                theme.ok(&format!("{} {}", theme.bold(&entry.name), "cached"));
-                theme.detail(&theme.gray(&entry.out));
+    if let Some(candidate) = Store::find_by_reference(roots, &spec.raw) {
+        if let Some(entry) = Store::find_verified_by_reference(roots, &spec.raw) {
+            drop(spinner);
+            let line = theme.render_row(&entry.name, name_w, &entry.version, "cached");
+            match style {
+                RowStyle::Ledger => {
+                    theme.ok(&format!("{} {}", theme.bold(&entry.name), "cached"));
+                    theme.detail(&theme.gray(&entry.out));
+                }
+                RowStyle::Ready => theme.ready_row(&entry.name, name_w, &entry.version),
+                RowStyle::Silent => {}
             }
-            RowStyle::Ready => theme.ready_row(&entry.name, name_w, &entry.version),
-            RowStyle::Silent => {}
+            return RefOutcome::Realized(entry, Provider::SourceState::Cached, line);
         }
-        return RefOutcome::Realized(entry, Provider::SourceState::Cached, line);
+        if let Err(error) = Store::discard_invalid_entry(roots, &candidate) {
+            drop(spinner);
+            theme.error_coded(
+                "E2604",
+                &format!("integrity check failed for cached package `{}`", candidate.name),
+                &format!(
+                    "the cached output is invalid and Jetpack could not remove it safely: {error}"
+                ),
+                "fix permissions on the hangar, run `jet clean`, then rebuild the package.",
+            );
+            return RefOutcome::Failed;
+        }
     }
     if flags.offline
         && Provider::uses_nix_provider(spec, table, flags.offline, &store_dir)

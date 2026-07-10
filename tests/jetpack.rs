@@ -5802,6 +5802,66 @@ fn jet_build_reports_source_states() {
 }
 
 #[test]
+fn jet_build_never_reports_deleted_output_as_cached() {
+    let (_base, proj, root) = core_hello_project("truth-deleted-cache");
+    let run = || {
+        jetpack()
+            .args(["build", "--no-color"])
+            .current_dir(&proj)
+            .env("JETPACK_ROOT", &root)
+            .env("PATH", "/usr/bin:/bin")
+            .output()
+            .unwrap()
+    };
+    assert!(run().status.success());
+    let roots = jetpack::Store::Roots {
+        root: root.clone(),
+        dev_mode: false,
+    };
+    let entry = jetpack::Store::find_by_reference(&roots, "mine:hello").unwrap();
+    fs::remove_dir_all(&entry.out).unwrap();
+
+    let rebuilt = run();
+    assert!(rebuilt.status.success());
+    let stderr = String::from_utf8_lossy(&rebuilt.stderr);
+    assert!(stderr.contains("built"), "deleted output must rebuild: {stderr}");
+    assert!(
+        !stderr.contains("1 cached"),
+        "deleted output must never count as cache hit: {stderr}"
+    );
+}
+
+#[test]
+fn jet_build_never_reports_tampered_output_as_cached() {
+    let (_base, proj, root) = core_hello_project("truth-tampered-cache");
+    let run = || {
+        jetpack()
+            .args(["build", "--no-color"])
+            .current_dir(&proj)
+            .env("JETPACK_ROOT", &root)
+            .env("PATH", "/usr/bin:/bin")
+            .output()
+            .unwrap()
+    };
+    assert!(run().status.success());
+    let roots = jetpack::Store::Roots {
+        root: root.clone(),
+        dev_mode: false,
+    };
+    let entry = jetpack::Store::find_by_reference(&roots, "mine:hello").unwrap();
+    fs::write(Path::new(&entry.out).join("bin/hello"), "tampered").unwrap();
+
+    let rebuilt = run();
+    assert!(rebuilt.status.success());
+    let stderr = String::from_utf8_lossy(&rebuilt.stderr);
+    assert!(stderr.contains("built"), "tampered output must rebuild: {stderr}");
+    assert!(
+        !stderr.contains("1 cached"),
+        "tampered output must never count as cache hit: {stderr}"
+    );
+}
+
+#[test]
 fn jet_vendor_writes_pinned_sources() {
     // T4 / D-BFS1: `jetpack vendor` copies each source-built package and writes a
     // `<name>.sha256` pin (the A4 output hash) so a later build is reproducible.

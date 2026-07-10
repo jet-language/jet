@@ -20,6 +20,7 @@ use crate::SHA256;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// The subdir of the resolved root that holds the content-addressed store.
@@ -174,9 +175,49 @@ pub fn record(
             last_used_at: now,
         };
         fs::create_dir_all(&dir)?;
+        pin_nix_gc_root(&dir, out)?;
         fs::write(dir.join("meta.json"), entry.meta_json())?;
         Ok(entry)
     })
+}
+
+const NIX_GC_ROOT: &str = "nix-gc-root";
+
+/// Keep every live Nix compatibility output reachable until JP11 imports its
+/// closure into Hangar. A root on the top-level output protects its transitive
+/// Nix closure. Missing fixture paths are not roots and remain readable only as
+/// metadata.
+fn pin_nix_gc_root(entry_dir: &Path, out: &str) -> std::io::Result<()> {
+    let out_path = Path::new(out);
+    if !out_path.starts_with("/nix/store") || !out_path.exists() {
+        return Ok(());
+    }
+    pin_nix_gc_root_with(entry_dir, out_path, Path::new("nix-store"))
+}
+
+fn pin_nix_gc_root_with(entry_dir: &Path, out: &Path, nix_store: &Path) -> std::io::Result<()> {
+    let root = entry_dir.join(NIX_GC_ROOT);
+    let output = Command::new(nix_store)
+        .arg("--add-root")
+        .arg(&root)
+        .arg("--indirect")
+        .arg("--realise")
+        .arg(out)
+        .output()?;
+    if !output.status.success() {
+        return Err(std::io::Error::other(format!(
+            "could not create durable Nix GC root for `{}`: {}",
+            out.display(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        )));
+    }
+    if !root.exists() {
+        return Err(std::io::Error::other(format!(
+            "nix-store reported success but did not create GC root `{}`",
+            root.display()
+        )));
+    }
+    Ok(())
 }
 
 /// Read all recorded store entries (skipping malformed ones quietly).
@@ -218,6 +259,100 @@ pub fn find_by_reference(roots: &Roots, reference: &str) -> Option<StoreEntry> {
         .into_iter()
         .filter(|e| e.reference == reference)
         .max_by_key(|e| e.last_used_at)
+}
+
+/// Proof attached to a cache reuse decision. Every field must pass; callers
+/// must treat a partial proof as a miss. Package signing is opt-in under
+/// D-PKGSIGN1, so an unsigned local artifact satisfies current signature
+/// policy. A non-empty signature is refused here until the cache trust layer
+/// can verify it against an approved key instead of trusting text in metadata.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CacheVerification {
+    pub output_exists: bool,
+    pub output_digest: bool,
+    pub platform: bool,
+    pub policy: bool,
+    pub signature: bool,
+    pub closure: bool,
+}
+
+impl CacheVerification {
+    pub fn trusted(self) -> bool {
+        self.output_exists
+            && self.output_digest
+            && self.platform
+            && self.policy
+            && self.signature
+            && self.closure
+    }
+}
+
+pub fn verify_cache_entry(
+    roots: &Roots,
+    entry: &StoreEntry,
+    expected_reference: &str,
+) -> CacheVerification {
+    let out = Path::new(&entry.out);
+    let output_exists = out.exists();
+    let output_digest = output_exists
+        && !entry.envelope.output_hash.is_empty()
+        && super::Envelope::output_hash_of(&entry.out) == entry.envelope.output_hash;
+    let platform = entry.envelope.platform == super::Envelope::host_platform();
+    let policy = entry.reference == expected_reference && !entry.envelope.provenance.is_empty();
+    let signature = entry.envelope.signature.is_empty();
+    let closure = output_exists && closure_is_reachable(roots, entry);
+    CacheVerification {
+        output_exists,
+        output_digest,
+        platform,
+        policy,
+        signature,
+        closure,
+    }
+}
+
+pub fn find_verified_by_reference(roots: &Roots, reference: &str) -> Option<StoreEntry> {
+    list(roots)
+        .into_iter()
+        .filter(|entry| entry.reference == reference)
+        .filter(|entry| verify_cache_entry(roots, entry, reference).trusted())
+        .max_by_key(|entry| entry.last_used_at)
+}
+
+fn closure_is_reachable(roots: &Roots, entry: &StoreEntry) -> bool {
+    let out = Path::new(&entry.out);
+    if out.starts_with("/nix/store") {
+        let root = roots.hangar_dir().join(&entry.id).join(NIX_GC_ROOT);
+        return root.exists()
+            && fs::canonicalize(&root).ok() == fs::canonicalize(out).ok();
+    }
+    [&entry.bin, &entry.rlib].into_iter().all(|member| {
+        if member.is_empty() {
+            return true;
+        }
+        let member = Path::new(member);
+        member.exists() && member.starts_with(out)
+    })
+}
+
+/// Remove an invalid local cache candidate so provider realization cannot
+/// mistake the same tampered directory for a fresh hit. Never removes external
+/// outputs such as `/nix/store`; their provider must realize them again.
+pub fn discard_invalid_entry(roots: &Roots, entry: &StoreEntry) -> std::io::Result<()> {
+    let hangar = roots.hangar_dir();
+    let out = Path::new(&entry.out);
+    if out.starts_with(&hangar) && out != hangar.join(&entry.id) {
+        if out.is_dir() {
+            fs::remove_dir_all(out)?;
+        } else if out.exists() {
+            fs::remove_file(out)?;
+        }
+    }
+    let record = hangar.join(&entry.id);
+    if record.is_dir() {
+        fs::remove_dir_all(record)?;
+    }
+    Ok(())
 }
 
 /// One line of `jet hangar du` output: a realized object, its on-disk size, and
@@ -715,6 +850,127 @@ mod tests {
         let id = entry_id("x", "", "nixpkgs:x", "/o");
         assert!(id.starts_with("x-"));
         assert!(!id.starts_with("x--"));
+    }
+
+    #[test]
+    fn verified_cache_rejects_deleted_and_tampered_outputs() {
+        let (roots, _g) = temp_roots();
+        let out = roots.root.join("owned-output");
+        fs::create_dir_all(&out).unwrap();
+        fs::write(out.join("payload"), "trusted").unwrap();
+        let envelope = super::super::Envelope::Envelope::for_output(
+            &out.to_string_lossy(),
+            "mine:demo",
+            "core-source",
+        );
+        record(
+            &roots,
+            "demo",
+            "1.0",
+            "mine:demo",
+            &out.to_string_lossy(),
+            "",
+            "",
+            &envelope,
+        )
+        .unwrap();
+        assert!(find_verified_by_reference(&roots, "mine:demo").is_some());
+
+        fs::write(out.join("payload"), "tampered").unwrap();
+        assert!(find_verified_by_reference(&roots, "mine:demo").is_none());
+
+        fs::remove_dir_all(&out).unwrap();
+        assert!(find_verified_by_reference(&roots, "mine:demo").is_none());
+    }
+
+    #[test]
+    fn verified_cache_rejects_wrong_platform_and_incomplete_proof() {
+        let (roots, _g) = temp_roots();
+        let out = roots.root.join("owned-output");
+        fs::create_dir_all(&out).unwrap();
+        fs::write(out.join("payload"), "trusted").unwrap();
+        let mut envelope = super::super::Envelope::Envelope::for_output(
+            &out.to_string_lossy(),
+            "mine:demo",
+            "core-source",
+        );
+        envelope.platform = "not-this-host".to_string();
+        record(
+            &roots,
+            "demo",
+            "1.0",
+            "mine:demo",
+            &out.to_string_lossy(),
+            "",
+            "",
+            &envelope,
+        )
+        .unwrap();
+        assert!(find_verified_by_reference(&roots, "mine:demo").is_none());
+
+        envelope.platform = super::super::Envelope::host_platform();
+        envelope.provenance.clear();
+        record(
+            &roots,
+            "demo",
+            "1.0",
+            "mine:demo",
+            &out.to_string_lossy(),
+            "",
+            "",
+            &envelope,
+        )
+        .unwrap();
+        assert!(find_verified_by_reference(&roots, "mine:demo").is_none());
+
+        envelope.provenance = "mine:demo via core-source".to_string();
+        envelope.signature = "unverified-signature-text".to_string();
+        record(
+            &roots,
+            "demo",
+            "1.0",
+            "mine:demo",
+            &out.to_string_lossy(),
+            "",
+            "",
+            &envelope,
+        )
+        .unwrap();
+        assert!(find_verified_by_reference(&roots, "mine:demo").is_none());
+
+        envelope.signature.clear();
+        record(
+            &roots,
+            "demo",
+            "1.0",
+            "mine:demo",
+            &out.to_string_lossy(),
+            &out.join("missing-bin").to_string_lossy(),
+            "",
+            &envelope,
+        )
+        .unwrap();
+        assert!(find_verified_by_reference(&roots, "mine:demo").is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn nix_compat_output_gets_durable_gc_root() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let (roots, _g) = temp_roots();
+        let entry = roots.root.join("entry");
+        let out = roots.root.join("fake-nix-output");
+        let helper = roots.root.join("fake-nix-store");
+        fs::create_dir_all(&entry).unwrap();
+        fs::create_dir_all(&out).unwrap();
+        fs::write(&helper, "#!/bin/sh\nln -s \"$5\" \"$2\"\n").unwrap();
+        let mut perms = fs::metadata(&helper).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&helper, perms).unwrap();
+
+        pin_nix_gc_root_with(&entry, &out, &helper).unwrap();
+        assert_eq!(fs::read_link(entry.join(NIX_GC_ROOT)).unwrap(), out);
     }
 }
 
