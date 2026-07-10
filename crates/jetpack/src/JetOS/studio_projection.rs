@@ -572,7 +572,7 @@ function controllerStudioActions(page, _projection, entry) {{
   for (const button of page.querySelectorAll('[data-changeset-action]')) {{
     wireOnce(button, 'changeset', async () => {{
       const action = button.dataset.changesetAction;
-      const result = await studioPost('/studio/transaction', {{ op: action, token: studioChangesetToken, base_revision: studioChangesetBaseRevision }});
+      const result = await studioPost('/studio/transaction', {{ op: action, session_id: studioSessionId, token: studioChangesetToken, base_revision: studioChangesetBaseRevision }});
       renderChangeset(result);
       if (action === 'apply' && !result.error) {{
         await refreshSource();
@@ -631,6 +631,7 @@ async function studioPost(path, payload) {{
   return await res.json();
 }}
 let studioChangesetState = 'empty';
+let studioSessionId = null;
 let studioChangesetToken = null;
 let studioChangesetBaseRevision = null;
 function renderChangeset(result) {{
@@ -649,16 +650,19 @@ async function runStudioAction(action) {{
   return result;
 }}
 async function stageSetting(key, value) {{
-  const result = await studioPost('/studio/transaction', {{ op: 'set-option', key, value, token: studioChangesetToken, base_revision: studioChangesetBaseRevision }});
+  const result = await studioPost('/studio/transaction', {{ op: 'set-option', key, value, session_id: studioSessionId, token: studioChangesetToken, base_revision: studioChangesetBaseRevision }});
   renderChangeset(result);
   showPage('changeset');
   return result;
 }}
-Promise.all([
-  refreshSource(),
-  refreshProjection(),
-  studioPost('/studio/transaction', {{ op: 'status' }}).then(renderChangeset)
-]);
+studioPost('/studio/transaction', {{ op: 'session' }}).then(session => {{
+  studioSessionId = session.session_id;
+  return Promise.all([
+    refreshSource(),
+    refreshProjection(),
+    studioPost('/studio/transaction', {{ op: 'status', session_id: studioSessionId }}).then(renderChangeset)
+  ]);
+}});
 </script>
 </body>
 </html>

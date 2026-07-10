@@ -1,4 +1,5 @@
 struct StudioChangeSet {
+    session_id: String,
     token: String,
     base_revision: String,
     base_source: String,
@@ -22,6 +23,9 @@ struct StudioProvedSource {
     source: String,
     revision: String,
     plan_revision: String,
+    artifact_plan_revision: String,
+    generation: String,
+    generation_path: PathBuf,
 }
 
 struct StudioCommandResult {
@@ -35,10 +39,26 @@ struct StudioCommandResult {
 }
 
 struct StudioSourceSnapshot {
-    dir: PathBuf,
+    file: std::fs::File,
     path: PathBuf,
+    cleanup_dir: Option<PathBuf>,
     source_revision: String,
     identity: StudioSnapshotIdentity,
+}
+
+struct StudioSourceFileLock {
+    _file: std::fs::File,
+}
+
+struct StudioSourceWriteReceipt {
+    identity: StudioSnapshotIdentity,
+    revision: String,
+}
+
+struct StudioProofArtifact {
+    generation: String,
+    path: PathBuf,
+    plan_revision: String,
 }
 
 #[cfg(unix)]
@@ -78,6 +98,39 @@ fn handle_studio_transaction(
         }
     };
     let op = studio_request_string(&request, "op").unwrap_or_default();
+    if op == "session" {
+        let session_id = studio_changeset_token("studio-session", &studio_unique_id());
+        return match context.sessions.lock() {
+            Ok(mut sessions) => {
+                sessions.insert(session_id.clone());
+                (
+                    "200 OK",
+                    format!("{{\"session_id\":{}}}", JSON::quote(&session_id)),
+                )
+            }
+            Err(_) => (
+                "500 Internal Server Error",
+                "{\"error\":\"Studio session state is unavailable\"}".to_string(),
+            ),
+        };
+    }
+    let Some(session_id) = studio_request_string(&request, "session_id") else {
+        return (
+            "401 Unauthorized",
+            "{\"error\":\"Studio transaction requires a server-issued session\"}".to_string(),
+        );
+    };
+    let valid_session = context
+        .sessions
+        .lock()
+        .map(|sessions| sessions.contains(&session_id))
+        .unwrap_or(false);
+    if !valid_session {
+        return (
+            "401 Unauthorized",
+            "{\"error\":\"Studio session is not valid\"}".to_string(),
+        );
+    }
     if op == "status" {
         return studio_changeset_status(context, &request);
     }
@@ -88,7 +141,7 @@ fn handle_studio_transaction(
         return studio_changeset_apply(context, &request);
     }
     if op == "stage-rollback" {
-        return studio_changeset_stage_rollback(context);
+        return studio_changeset_stage_rollback(context, &request);
     }
     if op != "set-option" {
         return (
@@ -117,6 +170,15 @@ fn handle_studio_transaction(
             return (
                 "500 Internal Server Error",
                 "{\"error\":\"Studio source lock is unavailable\"}".to_string(),
+            )
+        }
+    };
+    let _source_file_lock = match acquire_studio_source_file_lock(&context.config) {
+        Ok(lock) => lock,
+        Err(error) => {
+            return (
+                "500 Internal Server Error",
+                format!("{{\"error\":{}}}", JSON::quote(&error)),
             )
         }
     };
@@ -168,7 +230,8 @@ fn handle_studio_transaction(
     };
     if changed {
         let staged = changeset.get_or_insert_with(|| StudioChangeSet {
-            token: studio_changeset_token(&source),
+            session_id: session_id.clone(),
+            token: studio_changeset_token(&source, &session_id),
             base_revision: studio_source_revision(&source),
             base_source: source.clone(),
             next_source: source.clone(),
@@ -258,6 +321,15 @@ fn studio_changeset_apply(
             )
         }
     };
+    let _source_file_lock = match acquire_studio_source_file_lock(&context.config) {
+        Ok(lock) => lock,
+        Err(error) => {
+            return (
+                "500 Internal Server Error",
+                format!("{{\"error\":{}}}", JSON::quote(&error)),
+            )
+        }
+    };
     let mut changeset = match context.changeset.lock() {
         Ok(changeset) => changeset,
         Err(_) => {
@@ -294,30 +366,38 @@ fn studio_changeset_apply(
             "{\"error\":\"config.jet changed after this Changeset was staged\",\"fix\":\"discard or review the Changeset against current source\"}".to_string(),
         );
     }
-    if let Err(e) = atomic_write_studio_source_if_revision(
+    let receipt = match atomic_write_studio_source_if_revision(
         &context.config,
         &staged.next_source,
         &staged.base_revision,
     ) {
-        let status = if e.starts_with("source revision changed") {
-            "409 Conflict"
-        } else {
-            "500 Internal Server Error"
-        };
-        return (
-            status,
-            format!(
-                "{{\"error\":{},\"reprojected\":false}}",
-                JSON::quote(&format!("applying Changeset failed: {e}"))
-            ),
-        );
-    }
+        Ok(receipt) => receipt,
+        Err(e) => {
+            let status = if e.starts_with("source revision changed") {
+                "409 Conflict"
+            } else {
+                "500 Internal Server Error"
+            };
+            return (
+                status,
+                format!(
+                    "{{\"error\":{},\"reprojected\":false}}",
+                    JSON::quote(&format!("applying Changeset failed: {e}"))
+                ),
+            );
+        }
+    };
     if let Err(error) = rebuild_studio_projection(context) {
-        let restore = atomic_write_studio_source_if_revision(
-            &context.config,
-            &staged.base_source,
-            &studio_source_revision(&staged.next_source),
-        );
+        let restore = if receipt.matches(&context.config) {
+            atomic_write_studio_source_if_revision(
+                &context.config,
+                &staged.base_source,
+                &receipt.revision,
+            )
+            .map(|_| ())
+        } else {
+            Err("source changed after Studio rename; external content preserved".to_string())
+        };
         let _ = rebuild_studio_projection(context);
         return (
             "422 Unprocessable Entity",
@@ -326,6 +406,15 @@ fn studio_changeset_apply(
                 JSON::quote(&error),
                 if restore.is_ok() { "true" } else { "false" }
             ),
+        );
+    }
+    if receipt.matches(&context.config) {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    if !receipt.matches(&context.config) {
+        return (
+            "409 Conflict",
+            "{\"error\":\"config.jet changed during Apply; external content was preserved\",\"reprojected\":false}".to_string(),
         );
     }
     if let Ok(mut applied) = context.last_applied.lock() {
@@ -342,7 +431,10 @@ fn studio_changeset_apply(
     ("200 OK", response)
 }
 
-fn studio_changeset_stage_rollback(context: &StudioContext) -> (&'static str, String) {
+fn studio_changeset_stage_rollback(
+    context: &StudioContext,
+    request: &std::collections::BTreeMap<String, JSON::Json>,
+) -> (&'static str, String) {
     let _source_write = match context.source_write.lock() {
         Ok(lock) => lock,
         Err(_) => {
@@ -397,8 +489,10 @@ fn studio_changeset_stage_rollback(context: &StudioContext) -> (&'static str, St
             "{\"error\":\"discard or apply the current Changeset before staging rollback\"}".to_string(),
         );
     }
+    let session_id = studio_request_string(request, "session_id").unwrap_or_default();
     *changeset = Some(StudioChangeSet {
-        token: studio_changeset_token(&current),
+        session_id: session_id.clone(),
+        token: studio_changeset_token(&current, &session_id),
         base_revision: studio_source_revision(&current),
         base_source: current,
         next_source: applied.before_source.clone(),
@@ -474,7 +568,7 @@ fn atomic_write_studio_source_if_revision(
     path: &Path,
     source: &str,
     expected_revision: &str,
-) -> Result<(), String> {
+) -> Result<StudioSourceWriteReceipt, String> {
     use std::io::Write;
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let name = path
@@ -506,7 +600,11 @@ fn atomic_write_studio_source_if_revision(
         if let Ok(parent_dir) = std::fs::File::open(parent) {
             let _ = parent_dir.sync_all();
         }
-        Ok(())
+        let metadata = std::fs::metadata(path).map_err(|error| error.to_string())?;
+        Ok(StudioSourceWriteReceipt {
+            identity: studio_snapshot_identity(&metadata),
+            revision: studio_source_revision(source),
+        })
     })();
     if result.is_err() {
         let _ = std::fs::remove_file(&temp);
@@ -580,6 +678,11 @@ fn handle_studio_run(body: &str, context: Option<&StudioContext>) -> (&'static s
 }
 
 fn run_studio_proof_action(context: &StudioContext) -> Result<StudioCommandResult, String> {
+    let _source_write = context
+        .source_write
+        .lock()
+        .map_err(|_| "Studio source lock is unavailable".to_string())?;
+    let _source_file_lock = acquire_studio_source_file_lock(&context.config)?;
     if let Ok(mut proved) = context.proved_source.lock() {
         *proved = None;
     }
@@ -618,13 +721,13 @@ fn run_studio_proof_action(context: &StudioContext) -> Result<StudioCommandResul
         None,
     )?;
     result.source_revision = Some(source_revision.clone());
-    let artifact_plan_revision = if result.success {
+    let artifact = if result.success {
         match validate_studio_proof_artifact(
             &result.stdout,
             &source_revision,
             &input_plan_revision,
         ) {
-            Ok(revision) => Some(revision),
+            Ok(artifact) => Some(artifact),
             Err(error) => {
                 result.success = false;
                 result.status = 3;
@@ -640,13 +743,16 @@ fn run_studio_proof_action(context: &StudioContext) -> Result<StudioCommandResul
         .unwrap_or(false);
     result.source_changed_after = !unchanged;
     if result.success && unchanged {
-        if let (Some(_artifact_plan_revision), Ok(mut proved)) =
-            (artifact_plan_revision, context.proved_source.lock())
+        if let (Some(artifact), Ok(mut proved)) =
+            (artifact, context.proved_source.lock())
         {
             *proved = Some(StudioProvedSource {
                 source: captured,
                 revision: source_revision,
                 plan_revision: input_plan_revision,
+                artifact_plan_revision: artifact.plan_revision,
+                generation: artifact.generation,
+                generation_path: artifact.path,
             });
         }
     } else if !unchanged {
@@ -659,7 +765,15 @@ fn run_studio_proof_action(context: &StudioContext) -> Result<StudioCommandResul
 }
 
 fn run_studio_switch_action(context: &StudioContext) -> Result<StudioCommandResult, String> {
+    let _source_write = context
+        .source_write
+        .lock()
+        .map_err(|_| "Studio source lock is unavailable".to_string())?;
+    let _source_file_lock = acquire_studio_source_file_lock(&context.config)?;
     let current = std::fs::read_to_string(&context.config).unwrap_or_default();
+    let current_identity = std::fs::metadata(&context.config)
+        .map(|metadata| studio_snapshot_identity(&metadata))
+        .map_err(|error| format!("reading config.jet metadata failed: {error}"))?;
     let proved = context
         .proved_source
         .lock()
@@ -673,6 +787,7 @@ fn run_studio_switch_action(context: &StudioContext) -> Result<StudioCommandResu
             "current config.jet has no matching successful proof; build and prove this exact source before switching".to_string(),
         );
     }
+    validate_studio_generation_binding(&proved)?;
     let snapshot = create_studio_source_snapshot(context, &proved.source)?;
     let plan = run_studio_snapshot_command(context, &snapshot, "plan", None, None)?;
     if !plan.success || studio_source_revision(plan.stdout.trim()) != proved.plan_revision {
@@ -680,13 +795,68 @@ fn run_studio_switch_action(context: &StudioContext) -> Result<StudioCommandResu
             "current config.jet plan no longer matches its successful proof; prove again before switching".to_string(),
         );
     }
-    let mut result =
-        run_studio_snapshot_command(context, &snapshot, "switch", None, None)?;
+    let previous_generation = studio_current_generation_name();
+    let mut result = run_studio_snapshot_command(
+        context,
+        &snapshot,
+        "switch",
+        Some(&proved.generation),
+        None,
+    )?;
     result.source_revision = Some(proved.revision);
-    result.source_changed_after = std::fs::read_to_string(&context.config)
-        .map(|source| source != proved.source)
-        .unwrap_or(true);
+    let source_unchanged = std::fs::read_to_string(&context.config)
+        .map(|source| source == proved.source)
+        .unwrap_or(false)
+        && std::fs::metadata(&context.config)
+            .map(|metadata| studio_snapshot_identity(&metadata) == current_identity)
+            .unwrap_or(false);
+    result.source_changed_after = !source_unchanged;
+    if !source_unchanged {
+        let rollback = previous_generation
+            .as_deref()
+            .map(|name| run_studio_generation_rollback(context, name))
+            .transpose();
+        result.success = false;
+        result.status = 3;
+        result.stderr = match rollback {
+            Ok(Some(rollback)) if rollback.success => {
+                "config.jet changed during switch; proved generation activation was rolled back".to_string()
+            }
+            Ok(Some(rollback)) => format!(
+                "config.jet changed during switch; rollback failed: {}",
+                rollback.stderr.trim()
+            ),
+            Ok(None) => "config.jet changed during switch; no previous generation was available for rollback".to_string(),
+            Err(error) => format!("config.jet changed during switch; rollback failed: {error}"),
+        };
+    }
     Ok(result)
+}
+
+fn validate_studio_generation_binding(proved: &StudioProvedSource) -> Result<(), String> {
+    let source_proof = std::fs::read_to_string(proved.generation_path.join("source-proof.json"))
+        .map_err(|error| format!("reading proved generation source proof failed: {error}"))?;
+    let parsed = JSON::parse(&source_proof)
+        .map_err(|error| format!("proved generation source proof is invalid: {error}"))?;
+    let JSON::Json::Object(fields) = parsed else {
+        return Err("proved generation source proof is not an object".to_string());
+    };
+    let string = |name: &str| match fields.get(name) {
+        Some(JSON::Json::Str(value)) => Some(value.as_str()),
+        _ => None,
+    };
+    let plan = std::fs::read(proved.generation_path.join("plan.json"))
+        .map_err(|error| format!("reading proved generation plan failed: {error}"))?;
+    if string("source_sha256") != Some(proved.revision.as_str())
+        || string("input_plan_sha256") != Some(proved.plan_revision.as_str())
+        || string("plan_sha256") != Some(proved.artifact_plan_revision.as_str())
+        || crate::SHA256::sha256_hex(&plan) != proved.artifact_plan_revision
+        || proved.generation_path.file_name().and_then(|name| name.to_str())
+            != Some(proved.generation.as_str())
+    {
+        return Err("proved generation source or plan binding changed".to_string());
+    }
+    Ok(())
 }
 
 fn invalidate_studio_projection(context: &StudioContext) {
@@ -704,7 +874,7 @@ fn validate_studio_proof_artifact(
     proof: &str,
     source_revision: &str,
     input_plan_revision: &str,
-) -> Result<String, String> {
+) -> Result<StudioProofArtifact, String> {
     let parsed = JSON::parse(proof.trim())
         .map_err(|error| format!("generation proof JSON is invalid: {error}"))?;
     let JSON::Json::Object(root) = parsed else {
@@ -730,7 +900,19 @@ fn validate_studio_proof_artifact(
     if field("plan_sha256") != Some(artifact_plan_revision.as_str()) {
         return Err("generation proof plan hash does not match its plan artifact".to_string());
     }
-    Ok(artifact_plan_revision)
+    let generation = match root.get("generation") {
+        Some(JSON::Json::Str(value)) => value.clone(),
+        _ => return Err("generation proof is missing its generation ID".to_string()),
+    };
+    let path = match root.get("path") {
+        Some(JSON::Json::Str(value)) => PathBuf::from(value),
+        _ => return Err("generation proof is missing its generation path".to_string()),
+    };
+    Ok(StudioProofArtifact {
+        generation,
+        path,
+        plan_revision: artifact_plan_revision,
+    })
 }
 
 fn run_studio_command(
@@ -740,7 +922,114 @@ fn run_studio_command(
     run_studio_command_target(context, action, &context.host, None, None, None)
 }
 
+fn studio_current_generation_name() -> Option<String> {
+    let root = std::env::var_os("JETPACK_ROOT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            std::env::var_os("HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join(".jetpack")
+        });
+    let current = root.join("systems/current");
+    #[cfg(unix)]
+    let target = std::fs::read_link(current).ok()?;
+    #[cfg(not(unix))]
+    let target = PathBuf::from(std::fs::read_to_string(current).ok()?.trim());
+    target
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(str::to_string)
+}
+
+fn run_studio_generation_rollback(
+    context: &StudioContext,
+    generation: &str,
+) -> Result<StudioCommandResult, String> {
+    let Some(jet) = sibling_binary("jet") else {
+        return Err("could not find sibling jet binary".to_string());
+    };
+    let output = std::process::Command::new(jet)
+        .arg("os")
+        .arg("rollback")
+        .arg(&context.host)
+        .arg(generation)
+        .arg("--no-color")
+        .current_dir(context.config.parent().unwrap_or_else(|| Path::new(".")))
+        .output()
+        .map_err(|error| format!("running jet rollback failed: {error}"))?;
+    Ok(StudioCommandResult {
+        action: "rollback".to_string(),
+        status: output.status.code().unwrap_or(1),
+        success: output.status.success(),
+        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        source_revision: None,
+        source_changed_after: false,
+    })
+}
+
 fn create_studio_source_snapshot(
+    context: &StudioContext,
+    source: &str,
+) -> Result<StudioSourceSnapshot, String> {
+    create_studio_source_snapshot_platform(context, source)
+}
+
+#[cfg(target_os = "linux")]
+fn create_studio_source_snapshot_platform(
+    _context: &StudioContext,
+    source: &str,
+) -> Result<StudioSourceSnapshot, String> {
+    use std::io::Write;
+    use std::os::fd::{AsRawFd, FromRawFd};
+    use std::os::unix::fs::PermissionsExt;
+    use std::ffi::CString;
+    const MFD_ALLOW_SEALING: u32 = 0x0002;
+    const F_ADD_SEALS: i32 = 1033;
+    const REQUIRED_SEALS: i32 = 0x0001 | 0x0002 | 0x0004 | 0x0008;
+    extern "C" {
+        fn memfd_create(name: *const std::ffi::c_char, flags: u32) -> i32;
+        fn fcntl(fd: i32, command: i32, ...) -> i32;
+    }
+    let name = CString::new(format!("jetos-studio-source-{}", studio_unique_id()))
+        .map_err(|_| "creating sealed Studio source name failed".to_string())?;
+    let descriptor = unsafe { memfd_create(name.as_ptr(), MFD_ALLOW_SEALING) };
+    if descriptor < 0 {
+        return Err(format!(
+            "creating sealed Studio source failed: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    let mut file = unsafe { std::fs::File::from_raw_fd(descriptor) };
+    file.write_all(source.as_bytes())
+        .map_err(|error| format!("writing sealed Studio source failed: {error}"))?;
+    file.sync_all()
+        .map_err(|error| format!("syncing sealed Studio source failed: {error}"))?;
+    file.set_permissions(std::fs::Permissions::from_mode(0o400))
+        .map_err(|error| format!("protecting sealed Studio source failed: {error}"))?;
+    if unsafe { fcntl(file.as_raw_fd(), F_ADD_SEALS, REQUIRED_SEALS) } != 0 {
+        return Err(format!(
+            "sealing Studio source failed: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    let metadata = file
+        .metadata()
+        .map_err(|error| format!("reading sealed Studio source metadata failed: {error}"))?;
+    let snapshot = StudioSourceSnapshot {
+        path: PathBuf::from(format!("/proc/self/fd/{}", file.as_raw_fd())),
+        file,
+        cleanup_dir: None,
+        source_revision: studio_source_revision(source),
+        identity: studio_snapshot_identity(&metadata),
+    };
+    snapshot.validate()?;
+    Ok(snapshot)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn create_studio_source_snapshot_platform(
     context: &StudioContext,
     source: &str,
 ) -> Result<StudioSourceSnapshot, String> {
@@ -775,8 +1064,9 @@ fn create_studio_source_snapshot(
         let metadata = std::fs::metadata(&path)
             .map_err(|error| format!("reading protected Studio source metadata failed: {error}"))?;
         let snapshot = StudioSourceSnapshot {
-            dir: dir.clone(),
+            file,
             path,
+            cleanup_dir: Some(dir.clone()),
             source_revision: studio_source_revision(source),
             identity: studio_snapshot_identity(&metadata),
         };
@@ -1107,31 +1397,42 @@ fn studio_unique_id() -> String {
 
 impl StudioSourceSnapshot {
     fn validate(&self) -> Result<(), String> {
-        let dir_metadata = std::fs::symlink_metadata(&self.dir)
-            .map_err(|error| format!("protected Studio snapshot directory changed: {error}"))?;
-        if !dir_metadata.file_type().is_dir() {
-            return Err("protected Studio snapshot directory was replaced".to_string());
-        }
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            if dir_metadata.permissions().mode() & 0o777 != 0o700 {
-                return Err("protected Studio snapshot directory permissions changed".to_string());
-            }
-        }
-        let metadata = std::fs::symlink_metadata(&self.path)
+        use std::io::{Read, Seek};
+        let metadata = self
+            .file
+            .metadata()
             .map_err(|error| format!("protected Studio source changed: {error}"))?;
         if !metadata.file_type().is_file() || studio_snapshot_identity(&metadata) != self.identity {
             return Err("protected Studio source was mutated or replaced".to_string());
         }
-        #[cfg(unix)]
+        #[cfg(target_os = "linux")]
         {
+            use std::os::fd::AsRawFd;
             use std::os::unix::fs::PermissionsExt;
-            if metadata.permissions().mode() & 0o777 != 0o600 {
+            const F_GET_SEALS: i32 = 1034;
+            const REQUIRED_SEALS: i32 = 0x0001 | 0x0002 | 0x0004 | 0x0008;
+            extern "C" {
+                fn fcntl(fd: i32, command: i32, ...) -> i32;
+            }
+            if metadata.permissions().mode() & 0o777 != 0o400 {
                 return Err("protected Studio source permissions changed".to_string());
             }
+            if unsafe { fcntl(self.file.as_raw_fd(), F_GET_SEALS) } & REQUIRED_SEALS
+                != REQUIRED_SEALS
+            {
+                return Err("sealed Studio source lost write seals".to_string());
+            }
         }
-        let source = std::fs::read(&self.path)
+        let mut source_file = self
+            .file
+            .try_clone()
+            .map_err(|error| format!("cloning protected Studio source failed: {error}"))?;
+        source_file
+            .rewind()
+            .map_err(|error| format!("seeking protected Studio source failed: {error}"))?;
+        let mut source = Vec::new();
+        source_file
+            .read_to_end(&mut source)
             .map_err(|error| format!("reading protected Studio source failed: {error}"))?;
         if crate::SHA256::sha256_hex(&source) != self.source_revision {
             return Err("protected Studio source content changed".to_string());
@@ -1142,9 +1443,68 @@ impl StudioSourceSnapshot {
 
 impl Drop for StudioSourceSnapshot {
     fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.path);
-        let _ = std::fs::remove_dir(&self.dir);
+        if let Some(dir) = self.cleanup_dir.as_ref() {
+            let _ = std::fs::remove_file(&self.path);
+            let _ = std::fs::remove_dir(dir);
+        }
     }
+}
+
+impl StudioSourceWriteReceipt {
+    fn matches(&self, path: &Path) -> bool {
+        let Ok(metadata) = std::fs::metadata(path) else {
+            return false;
+        };
+        if studio_snapshot_identity(&metadata) != self.identity {
+            return false;
+        }
+        std::fs::read(path)
+            .map(|source| crate::SHA256::sha256_hex(&source) == self.revision)
+            .unwrap_or(false)
+    }
+}
+
+#[cfg(unix)]
+fn acquire_studio_source_file_lock(path: &Path) -> Result<StudioSourceFileLock, String> {
+    use std::os::fd::AsRawFd;
+    use std::os::unix::fs::OpenOptionsExt;
+    const O_NOFOLLOW: i32 = 0x20000;
+    const LOCK_EX: i32 = 2;
+    extern "C" {
+        fn flock(fd: i32, operation: i32) -> i32;
+    }
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("config.jet");
+    let lock_path = parent.join(format!(".{name}.studio.lock"));
+    if std::fs::symlink_metadata(&lock_path)
+        .map(|metadata| metadata.file_type().is_symlink())
+        .unwrap_or(false)
+    {
+        return Err("Studio source lock path is a symlink".to_string());
+    }
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .mode(0o600)
+        .custom_flags(O_NOFOLLOW)
+        .open(&lock_path)
+        .map_err(|error| format!("opening Studio source lock failed: {error}"))?;
+    if unsafe { flock(file.as_raw_fd(), LOCK_EX) } != 0 {
+        return Err(format!(
+            "locking Studio source failed: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    Ok(StudioSourceFileLock { _file: file })
+}
+
+#[cfg(not(unix))]
+fn acquire_studio_source_file_lock(_path: &Path) -> Result<StudioSourceFileLock, String> {
+    Err("cross-process Studio source locks require Unix".to_string())
 }
 
 #[cfg(unix)]
@@ -1167,9 +1527,14 @@ fn studio_snapshot_identity(metadata: &std::fs::Metadata) -> StudioSnapshotIdent
     }
 }
 
-fn studio_changeset_token(source: &str) -> String {
+fn studio_changeset_token(source: &str, session_id: &str) -> String {
     crate::SHA256::sha256_hex(
-        format!("{}:{}", studio_source_revision(source), studio_unique_id()).as_bytes(),
+        format!(
+            "{}:{session_id}:{}",
+            studio_source_revision(source),
+            studio_unique_id()
+        )
+        .as_bytes(),
     )
 }
 
@@ -1177,7 +1542,9 @@ fn studio_request_owns_changeset(
     request: &std::collections::BTreeMap<String, JSON::Json>,
     changeset: &StudioChangeSet,
 ) -> bool {
-    studio_request_string(request, "token").as_deref() == Some(changeset.token.as_str())
+    studio_request_string(request, "session_id").as_deref()
+        == Some(changeset.session_id.as_str())
+        && studio_request_string(request, "token").as_deref() == Some(changeset.token.as_str())
         && studio_request_string(request, "base_revision").as_deref()
             == Some(changeset.base_revision.as_str())
 }
