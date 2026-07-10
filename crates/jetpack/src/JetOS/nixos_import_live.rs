@@ -265,6 +265,131 @@ fn live_locked_github_ref(source: &Path, node: &str) -> Option<String> {
     Some(format!("github@{owner}/{repo}/{rev}"))
 }
 
+/// Locked github flake inputs other than `nixpkgs` / `root`, as
+/// `(jet_source_label, github@owner/repo/rev)`. Labels are sanitized to Jet
+/// idents so they can appear in `sources:` and `label.[pkg, …]` groups.
+fn live_external_github_inputs(source: &Path) -> Vec<(String, String)> {
+    let Ok(text) = fs::read_to_string(source.join("flake.lock")) else {
+        return Vec::new();
+    };
+    let Ok(lock) = JSON::parse(&text) else {
+        return Vec::new();
+    };
+    let Ok(nodes_json) = lock.get("nodes") else {
+        return Vec::new();
+    };
+    let Ok(nodes) = nodes_json.as_object() else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    let mut seen_labels = BTreeSet::new();
+    for (node, value) in nodes {
+        if node == "root" || node == "nixpkgs" {
+            continue;
+        }
+        let Ok(obj) = value.as_object() else {
+            continue;
+        };
+        let Some(locked) = obj.get("locked").and_then(|v| v.as_object().ok()) else {
+            continue;
+        };
+        let Some(owner) = import_json_string(locked, "owner") else {
+            continue;
+        };
+        let Some(repo) = import_json_string(locked, "repo") else {
+            continue;
+        };
+        let Some(rev) = import_json_string(locked, "rev") else {
+            continue;
+        };
+        let label = sanitize_source_label(node);
+        if !seen_labels.insert(label.clone()) {
+            continue;
+        }
+        out.push((label, format!("github@{owner}/{repo}/{rev}")));
+    }
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out
+}
+
+fn sanitize_source_label(raw: &str) -> String {
+    let mut out = String::new();
+    for ch in raw.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '_' {
+            out.push(ch);
+        } else if ch == '-' {
+            out.push('_');
+        }
+    }
+    if out.is_empty() || out.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+        format!("src_{out}")
+    } else {
+        out
+    }
+}
+
+/// Probe each non-nixpkgs flake input for packages the nixpkgs probe rejected.
+/// Returns `(recovered_by_source, still_missing)`.
+fn recover_package_provenance(
+    source: &Path,
+    missing: &[String],
+) -> Result<(Vec<(String, Vec<String>)>, Vec<String>), String> {
+    if missing.is_empty() {
+        return Ok((Vec::new(), Vec::new()));
+    }
+    let inputs = live_external_github_inputs(source);
+    if inputs.is_empty() {
+        return Ok((Vec::new(), missing.to_vec()));
+    }
+    let mut remaining: BTreeSet<String> = missing.iter().cloned().collect();
+    let mut recovered: Vec<(String, Vec<String>)> = Vec::new();
+    for (label, github_ref) in inputs {
+        if remaining.is_empty() {
+            break;
+        }
+        let candidates: Vec<String> = remaining.iter().cloned().collect();
+        // Reuse the nixpkgs probe against this input's package set.
+        match probe_unresolvable_packages(&github_ref, &candidates) {
+            Ok(still_bad) => {
+                let still_bad: BTreeSet<String> = still_bad.into_iter().collect();
+                let found: Vec<String> = candidates
+                    .into_iter()
+                    .filter(|n| !still_bad.contains(n))
+                    .collect();
+                if !found.is_empty() {
+                    for name in &found {
+                        remaining.remove(name);
+                    }
+                    recovered.push((label, found));
+                }
+            }
+            Err(_) => {
+                // A single input probe failure is not fatal — keep trying others.
+                continue;
+            }
+        }
+    }
+    let still: Vec<String> = remaining.into_iter().collect();
+    Ok((recovered, still))
+}
+
+fn merge_sourced_packages(
+    existing: &mut Vec<(String, Vec<String>)>,
+    incoming: Vec<(String, Vec<String>)>,
+) {
+    for (label, pkgs) in incoming {
+        if let Some((_, slot)) = existing.iter_mut().find(|(l, _)| l == &label) {
+            for p in pkgs {
+                if !slot.contains(&p) {
+                    slot.push(p);
+                }
+            }
+        } else {
+            existing.push((label, pkgs));
+        }
+    }
+}
+
 fn plan_from_live_facts(
     args: &NixosImportArgs,
     host: &str,
@@ -473,6 +598,7 @@ fn plan_from_live_facts(
                 home: import_json_string(user, "home"),
                 groups: import_json_string_array(user, "groups"),
                 packages: hm_packages,
+                sourced_packages: Vec::new(),
                 omitted_packages: hm_omitted,
                 home_manager: has_home_manager,
             });
@@ -496,9 +622,17 @@ fn plan_from_live_facts(
     let nixpkgs_ref = live_nixpkgs_ref(&args.source)
         .unwrap_or_else(|| "nixpkgs@nixpkgs-unstable".to_string());
 
+    // Snapshot ownership before the nixpkgs probe strips external packages.
+    let system_before: BTreeSet<String> = packages.iter().cloned().collect();
+    let user_before: Vec<(String, BTreeSet<String>)> = users
+        .iter()
+        .map(|u| (u.name.clone(), u.packages.iter().cloned().collect()))
+        .collect();
+
     // Packages that only exist in the source's other flake inputs would break
-    // the real-tier build; keep them out of the config and name each one in
-    // the audit (package-provenance import is the slice that recovers them).
+    // the real-tier build against nixpkgs alone. Recover them via package-
+    // provenance import (map each name to the providing flake input); anything
+    // still unresolvable stays an explicit audit omission.
     let mut probe_names: Vec<String> = packages.clone();
     for user in &users {
         probe_names.extend(user.packages.iter().cloned());
@@ -506,6 +640,7 @@ fn plan_from_live_facts(
     probe_names = dedup_preserving_order(probe_names);
     let mut packages = packages;
     let mut users = users;
+    let mut sourced_packages: Vec<(String, Vec<String>)> = Vec::new();
     match probe_unresolvable_packages(&nixpkgs_ref, &probe_names) {
         Ok(unresolvable) if !unresolvable.is_empty() => {
             let external: BTreeSet<String> = unresolvable.into_iter().collect();
@@ -513,11 +648,56 @@ fn plan_from_live_facts(
             for user in &mut users {
                 user.packages.retain(|p| !external.contains(p));
             }
-            for name in &external {
-                omissions.push(format!(
-                    "package `{name}` comes from another flake input (not the pinned nixpkgs); \
-                     package-provenance import will recover it"
-                ));
+            let missing: Vec<String> = external.into_iter().collect();
+            let input_pins = live_external_github_inputs(&args.source);
+            match recover_package_provenance(&args.source, &missing) {
+                Ok((recovered, still_missing)) => {
+                    for (label, pkgs) in recovered {
+                        if let Some((_, pin)) = input_pins.iter().find(|(l, _)| l == &label) {
+                            if !extra_sources.iter().any(|(n, _)| n == &label) {
+                                extra_sources.push((label.clone(), pin.clone()));
+                            }
+                        }
+                        let mut system_pkgs = Vec::new();
+                        for pkg in &pkgs {
+                            if system_before.contains(pkg) {
+                                system_pkgs.push(pkg.clone());
+                            }
+                            for (uname, upkgs) in &user_before {
+                                if upkgs.contains(pkg) {
+                                    if let Some(user) =
+                                        users.iter_mut().find(|u| u.name == *uname)
+                                    {
+                                        merge_sourced_packages(
+                                            &mut user.sourced_packages,
+                                            vec![(label.clone(), vec![pkg.clone()])],
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                        if !system_pkgs.is_empty() {
+                            merge_sourced_packages(
+                                &mut sourced_packages,
+                                vec![(label, system_pkgs)],
+                            );
+                        }
+                    }
+                    for name in still_missing {
+                        omissions.push(format!(
+                            "package `{name}` comes from another flake input (not the pinned nixpkgs) \
+                             and no locked github input resolves it"
+                        ));
+                    }
+                }
+                Err(e) => {
+                    for name in missing {
+                        omissions.push(format!(
+                            "package `{name}` comes from another flake input (not the pinned nixpkgs); \
+                             provenance recovery failed ({e})"
+                        ));
+                    }
+                }
             }
         }
         Ok(_) => {}
@@ -536,6 +716,7 @@ fn plan_from_live_facts(
         nixpkgs_ref,
         extra_sources,
         packages,
+        sourced_packages,
         omitted_packages,
         services,
         options,

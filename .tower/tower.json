@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 467,
-    "rev": 2768,
+    "rev": 2776,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -8183,8 +8183,13 @@
       "priority": "P0",
       "plan": "# Plan: JetOS real NixOS replacement gate\n\nRatified inputs:\n- D-JOS-NIXIMPORT1=C semantic NixOS/flake-parts/Home Manager importer with audited facts-only fallback.\n- D-JOS-REALGUEST1=C real installed-guest proof required for replacement claims; fake QEMU only tests plumbing.\n- D-JOS-DESKTOPPROOF1=C live desktop/session/app/user-home proof, not file presence.\n- D-JOS-IMAGEPROOF1=C image variants are built only when bootable and smoke-proved; placeholders are staged.\n- D-JOS-FIRSTBOOT1=D Studio first-boot control center with Canvas deep-link.\n\nImplementation slices:\n1. Add NixOS import IR and CLI: jet os import <flake-or-dir> --host <name> [--user <name>] [--write] [--facts-only]. Parse/evaluate available Nix facts through structured JSON, not text scraping. Generate JetOS modules for system, users, packages, services, files, secrets, overlays, specialisations, Home Manager; emit exact omissions.\n2. Add fixture coverage for flake.nix, flake-parts, nixosModules, home-manager.users, overlays, mkDefault/mkForce, disabledModules, specialisations, secrets, system packages, user packages.\n3. Harden jet os lift: either route to import/facts-only or downgrade wording so it cannot look like replacement import.\n4. Add real-QEMU proof tier distinct from fake-tool unit tests. Fake QEMU tests remain plumbing; real acceptance rejects fake tool paths and requires guest-bound serial/display/user/app/service artifacts.\n5. Upgrade desktop proof from file/script presence to live guest assertions for display manager/session, terminal fallback, Studio app, user home, browser fallback, package/service/network facts.\n6. Upgrade image variants: no sparse marker says built; raw/sd/qcow only built after real artifact + smoke proof.\n7. First boot: generated system launches Studio control center and proves source/proof/rollback/update health path; Canvas opens from source spans only.\n8. Update docs/spec/roadmap and tests so replacement claims require import+real guest tier.\n\nAcceptance:\n- Owner-style NixOS flake/flake-parts/Home Manager fixture imports to JetOS source with zero silent omissions.\n- Generated JetOS config builds offline where fixtures provide packages, and omissions are explicit otherwise.\n- Real VM tier command installs, reboots, logs in, opens Studio, proves desktop/services/packages/network/home/rollback from installed disk.\n- Fake-QEMU tests cannot close #363 acceptance.\n\nVerification:\n- nix develop -c cargo test --test jetpack os_import\n- nix develop -c cargo test --test jetpack os_vm_prove\n- nix develop -c scripts/agent/verify-real-jetos.sh when real tier exists\n- nix develop -c scripts/agent/verify-full.sh before done.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "grok-main",
       "log": [
+        {
+          "at": "2026-07-10",
+          "by": "grok-main",
+          "text": "[building] package-provenance import slice landed: non-nixpkgs flake.lock github inputs probed; recovered pkgs emit as sources:<label> + label.[pkg]; still-missing stay loud omissions. os_import 6/6. No capability-claim ledger owner for #363 (not a UL claim card). NEXT: HM program configs, stylix/docker/flatpak/bluetooth options, real-guest re-prove, criteria 2-5."
+        },
         {
           "at": "2026-07-09",
           "by": "claude",
@@ -8281,11 +8286,58 @@
         }
       ],
       "created": "2026-07-08T23:05:17.490Z",
-      "updated": "2026-07-09",
+      "updated": "2026-07-10",
       "workOrder": 363,
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Package-provenance import: non-nixpkgs flake-input packages recover into sources: + sourced package groups; unresolved stay explicit omissions",
+          "status": "met",
+          "metBy": "grok-main",
+          "verifiedBy": null,
+          "evidence": "recover_package_provenance + sourced_packages render; os_import_live_recovers_package_provenance_from_flake_inputs green; os_import 6/6",
+          "at": "2026-07-10T16:00:04.294Z"
+        },
+        {
+          "n": 2,
+          "text": "Owner-style NixOS/flake-parts/HM fixture imports with zero silent omissions (audit lists every gap)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T16:00:03.995Z"
+        },
+        {
+          "n": 3,
+          "text": "Real VM tier: install/reboot/login/Studio/desktop/services proof; fake-QEMU cannot close acceptance",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T16:00:04.068Z"
+        },
+        {
+          "n": 4,
+          "text": "Image variants only marked built after bootable smoke proof; placeholders staged",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T16:00:04.144Z"
+        },
+        {
+          "n": 5,
+          "text": "First-boot Studio control center + Canvas deep-link (D-JOS-FIRSTBOOT1=D)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T16:00:04.220Z"
+        }
+      ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [],
+      "claimedAt": "2026-07-10T15:51:03.753Z"
     },
     {
       "id": "c_audit_364_jkk162",
@@ -21962,6 +22014,62 @@
   ],
   "events": [
     {
+      "at": "2026-07-10T16:00:04.370Z",
+      "by": "grok-main",
+      "action": "card.update",
+      "ref": "c_audit_363_9n2bl3",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-10T16:00:04.294Z",
+      "by": "grok-main",
+      "action": "card.criteria-meet",
+      "ref": "c_audit_363_9n2bl3",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-10T16:00:04.220Z",
+      "by": "grok-main",
+      "action": "card.criteria-add",
+      "ref": "c_audit_363_9n2bl3",
+      "note": "#5 First-boot Studio control center + Canvas deep-link (D-JOS-F"
+    },
+    {
+      "at": "2026-07-10T16:00:04.144Z",
+      "by": "grok-main",
+      "action": "card.criteria-add",
+      "ref": "c_audit_363_9n2bl3",
+      "note": "#4 Image variants only marked built after bootable smoke proof;"
+    },
+    {
+      "at": "2026-07-10T16:00:04.068Z",
+      "by": "grok-main",
+      "action": "card.criteria-add",
+      "ref": "c_audit_363_9n2bl3",
+      "note": "#3 Real VM tier: install/reboot/login/Studio/desktop/services p"
+    },
+    {
+      "at": "2026-07-10T16:00:03.995Z",
+      "by": "grok-main",
+      "action": "card.criteria-add",
+      "ref": "c_audit_363_9n2bl3",
+      "note": "#2 Owner-style NixOS/flake-parts/HM fixture imports with zero s"
+    },
+    {
+      "at": "2026-07-10T16:00:03.920Z",
+      "by": "grok-main",
+      "action": "card.criteria-add",
+      "ref": "c_audit_363_9n2bl3",
+      "note": "#1 Package-provenance import: non-nixpkgs flake-input packages "
+    },
+    {
+      "at": "2026-07-10T15:51:03.753Z",
+      "by": "grok-main",
+      "action": "card.claim",
+      "ref": "c_audit_363_9n2bl3",
+      "note": ""
+    },
+    {
       "at": "2026-07-10T15:50:28.658Z",
       "by": "grok-main",
       "action": "card.update",
@@ -25404,62 +25512,6 @@
       "action": "card.add",
       "ref": "c0ddul2b",
       "note": "E3-UL3 Core source architecture, reachable emission, and conformance"
-    },
-    {
-      "at": "2026-07-09T23:22:08.610Z",
-      "by": "codex-main",
-      "action": "card.add",
-      "ref": "c0ai04g0",
-      "note": "E3-UL1 C ABI correctness stop-line — no accepted unsupported lowering"
-    },
-    {
-      "at": "2026-07-09T23:22:08.474Z",
-      "by": "codex-main",
-      "action": "card.add",
-      "ref": "c088jf0z",
-      "note": "E3-UL0 Truth ledger and capability-claim stop-line"
-    },
-    {
-      "at": "2026-07-09T23:20:52.471Z",
-      "by": "codex-main",
-      "action": "milestone.add",
-      "ref": "e3-universal-product-parity",
-      "note": "Universal language, Core, and developer-product parity"
-    },
-    {
-      "at": "2026-07-09T20:55:52.055Z",
-      "by": "codex-main",
-      "action": "message.send",
-      "ref": "msg0fncwph",
-      "note": "→ owner: Jetpack production audit complete. Added E4 world-class mile"
-    },
-    {
-      "at": "2026-07-09T20:55:51.856Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c0v0y46r",
-      "note": "phase"
-    },
-    {
-      "at": "2026-07-09T20:54:51.965Z",
-      "by": "codex-main",
-      "action": "decision.add",
-      "ref": "D-JPK-REPROCACHE1",
-      "note": "Cache policy for unreproducible outputs"
-    },
-    {
-      "at": "2026-07-09T20:54:51.890Z",
-      "by": "codex-main",
-      "action": "decision.add",
-      "ref": "D-JPK-RESOLVEMODE1",
-      "note": "Dependency update and verification modes"
-    },
-    {
-      "at": "2026-07-09T20:54:51.813Z",
-      "by": "codex-main",
-      "action": "decision.add",
-      "ref": "D-JPK-STOREBACKEND1",
-      "note": "Store endpoint interoperability scope"
     }
   ],
   "nextNum": 368,

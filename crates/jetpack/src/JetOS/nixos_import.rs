@@ -14,9 +14,12 @@ struct NixosImportPlan {
     target: String,
     nixpkgs_ref: String,
     /// Additional named sources beyond nixpkgs (label, `github@…` ref) —
-    /// e.g. the `nix-cachyos-kernel` pin a `.CachyOS` kernel needs.
+    /// e.g. the `nix-cachyos-kernel` pin a `.CachyOS` kernel needs, or a
+    /// flake input recovered by package-provenance import.
     extra_sources: Vec<(String, String)>,
     packages: Vec<String>,
+    /// Packages recovered from non-nixpkgs flake inputs: `(source_label, pkgs)`.
+    sourced_packages: Vec<(String, Vec<String>)>,
     omitted_packages: Vec<String>,
     services: Vec<String>,
     options: Vec<(String, String)>,
@@ -31,6 +34,8 @@ struct NixosImportUser {
     home: Option<String>,
     groups: Vec<String>,
     packages: Vec<String>,
+    /// User packages recovered from non-nixpkgs flake inputs.
+    sourced_packages: Vec<(String, Vec<String>)>,
     omitted_packages: Vec<String>,
     home_manager: bool,
 }
@@ -269,6 +274,7 @@ fn import_plan_from_json(
         nixpkgs_ref,
         extra_sources: Vec::new(),
         packages,
+        sourced_packages: Vec::new(),
         omitted_packages,
         services,
         options,
@@ -314,6 +320,7 @@ fn import_plan_from_scan(args: &NixosImportArgs) -> Result<NixosImportPlan, Stri
             home: Some(format!("/home/{name}")),
             groups: Vec::new(),
             packages: Vec::new(),
+            sourced_packages: Vec::new(),
             omitted_packages: Vec::new(),
             home_manager: text.contains(name) && (text.contains("home-manager") || text.contains("homeManager")),
         })
@@ -326,6 +333,7 @@ fn import_plan_from_scan(args: &NixosImportArgs) -> Result<NixosImportPlan, Stri
         nixpkgs_ref: "nixpkgs@nixpkgs-unstable".to_string(),
         extra_sources: Vec::new(),
         packages: Vec::new(),
+        sourced_packages: Vec::new(),
         omitted_packages: Vec::new(),
         services: Vec::new(),
         options: vec![("network.hostName".to_string(), import_render_string("host"))],
@@ -425,6 +433,7 @@ fn import_json_users(
             home: import_json_string(user, "home"),
             groups: import_json_string_array(user, "groups"),
             packages,
+            sourced_packages: Vec::new(),
             omitted_packages,
             home_manager: matches!(user.get("homeManager"), Some(JSON::Json::Bool(true))),
         });
@@ -471,7 +480,10 @@ fn render_nixos_import_config(plan: &NixosImportPlan) -> String {
     ));
     out.push_str(&format!("        target: {},\n", plan.target));
     out.push_str("        packages: ");
-    out.push_str(&render_import_packages(&plan.packages));
+    out.push_str(&render_import_package_groups(
+        &plan.packages,
+        &plan.sourced_packages,
+    ));
     out.push_str(",\n");
     out.push_str("        services: {\n");
     for service in &plan.services {
@@ -503,11 +515,11 @@ fn render_nixos_import_config(plan: &NixosImportPlan) -> String {
                 ));
             }
         }
-        if !user.packages.is_empty() {
+        if !user.packages.is_empty() || !user.sourced_packages.is_empty() {
             out.push_str(&format!(
                 "            user.{}.packages: {},\n",
                 user.name,
-                render_import_user_packages(&user.packages)
+                render_import_package_groups(&user.packages, &user.sourced_packages)
             ));
         }
     }
@@ -517,27 +529,44 @@ fn render_nixos_import_config(plan: &NixosImportPlan) -> String {
     out
 }
 
-fn render_import_packages(packages: &[String]) -> String {
-    if packages.is_empty() {
+fn render_import_package_groups(
+    nixpkgs: &[String],
+    sourced: &[(String, Vec<String>)],
+) -> String {
+    let mut groups = Vec::new();
+    if !nixpkgs.is_empty() {
+        groups.push(format!("nixpkgs.[{}]", nixpkgs.join(", ")));
+    }
+    for (source, packages) in sourced {
+        if packages.is_empty() {
+            continue;
+        }
+        groups.push(format!("{source}.[{}]", packages.join(", ")));
+    }
+    if groups.is_empty() {
         "[]".to_string()
     } else {
-        format!("[nixpkgs.[{}]]", packages.join(", "))
+        format!("[{}]", groups.join(", "))
     }
 }
 
-fn render_import_user_packages(packages: &[String]) -> String {
-    // Bracket-group form: `nixpkgs.man-db` outside a group parses as
-    // subtraction, while `nixpkgs.[man-db, …]` accepts hyphenated names.
-    render_import_packages(packages)
-}
-
 fn render_nixos_import_audit(plan: &NixosImportPlan) -> String {
+    let mut all_packages = plan.packages.clone();
+    for (_, pkgs) in &plan.sourced_packages {
+        all_packages.extend(pkgs.iter().cloned());
+    }
+    let sourced_labels: Vec<String> = plan
+        .sourced_packages
+        .iter()
+        .map(|(label, _)| label.clone())
+        .collect();
     format!(
-        "{{\n  \"kind\":\"jetos.import.audit\",\n  \"mode\":{},\n  \"source\":{},\n  \"host\":{},\n  \"packages\":{},\n  \"omitted_packages\":{},\n  \"services\":{},\n  \"users\":{},\n  \"flake_parts_modules\":{},\n  \"home_manager_modules\":{},\n  \"omissions\":{}\n}}\n",
+        "{{\n  \"kind\":\"jetos.import.audit\",\n  \"mode\":{},\n  \"source\":{},\n  \"host\":{},\n  \"packages\":{},\n  \"sourced_package_inputs\":{},\n  \"omitted_packages\":{},\n  \"services\":{},\n  \"users\":{},\n  \"flake_parts_modules\":{},\n  \"home_manager_modules\":{},\n  \"omissions\":{}\n}}\n",
         JSON::quote(plan.mode),
         JSON::quote(&plan.source.display().to_string()),
         JSON::quote(&plan.host),
-        import_json_array(&plan.packages),
+        import_json_array(&all_packages),
+        import_json_array(&sourced_labels),
         import_json_array(&plan.omitted_packages),
         import_json_array(&plan.services),
         import_json_array(

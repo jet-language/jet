@@ -2347,6 +2347,83 @@ fn write_live_import_fixture(src: &Path, tools: &Path, output: Option<&str>) {
 const LIVE_IMPORT_EVAL_JSON: &str = r#"{"host":"halcyon","stateVersion":"26.05","tz":"America/New_York","locale":"en_US.UTF-8","keyboard":"us","desktopGnome":false,"desktopPlasma":true,"dmGdm":false,"dmSddm":true,"loaderLimine":true,"loaderSystemdBoot":false,"efiTouch":false,"kernelName":"linux-cachyos","kernelParams":["quiet"],"sysctl":{"vm.swappiness":10},"firewallTcp":[22,443],"firewallUdp":[53317],"nameservers":["1.1.1.1"],"networkmanager":true,"zramEnable":true,"zramPercent":25,"svcOpenssh":true,"svcPipewire":true,"svcRtkit":true,"svcTailscale":true,"svcLibvirtd":true,"svcDocker":true,"svcFlatpak":false,"svcSteam":true,"svcGamemode":true,"svcPcscd":true,"svcBluetooth":false,"packages":["git","ripgrep","jetbrains.idea-ultimate"],"users":[{"name":"nate","home":"/home/nate","groups":["wheel","networkmanager"],"shell":"fish"}],"hm":[{"name":"nate","packages":["ghostty"],"programs":["git","starship"]}]}"#;
 
 #[test]
+fn os_import_live_recovers_package_provenance_from_flake_inputs() {
+    let src = Scratch::new("os-import-provenance-src");
+    let tools = Scratch::new("os-import-provenance-tools");
+    fs::write(
+        src.join("flake.nix"),
+        "{\n  outputs = { ... }: { nixosConfigurations.halcyon = { }; };\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        src.join("flake.lock"),
+        r#"{
+  "nodes": {
+    "nixpkgs": {"locked": {"owner": "NixOS", "repo": "nixpkgs", "rev": "fef9403a3e4d31b0a23f0bacebbec52c248fbb51"}},
+    "zen-beta": {"locked": {"owner": "0xc000022070", "repo": "zen-browser-flake", "rev": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}
+  }
+}"#,
+    )
+    .unwrap();
+    // Live extractor returns an external package; nixpkgs probe reports it
+    // unresolvable; zen-beta probe reports it resolved (empty unresolvable list).
+    let live = r#"{"host":"halcyon","stateVersion":"26.05","tz":"UTC","locale":"en_US.UTF-8","keyboard":"us","desktopGnome":false,"desktopPlasma":false,"dmGdm":false,"dmSddm":false,"loaderLimine":true,"loaderSystemdBoot":false,"efiTouch":false,"kernelName":"linux","kernelParams":[],"sysctl":{},"firewallTcp":[],"firewallUdp":[],"nameservers":[],"networkmanager":false,"zramEnable":false,"zramPercent":0,"svcOpenssh":false,"svcPipewire":false,"svcRtkit":false,"svcTailscale":false,"svcLibvirtd":false,"svcDocker":false,"svcFlatpak":false,"svcSteam":false,"svcGamemode":false,"svcPcscd":false,"svcBluetooth":false,"packages":["git","zen-browser"],"users":[],"hm":[]}"#;
+    let stub = format!(
+        r#"#!/bin/sh
+# Package resolvability probe uses getFlake + resolves; live extractor uses --apply.
+case " $* " in
+  *'getFlake'*'0xc000022070'*|*'getFlake'*'zen-browser-flake'*)
+    printf '%s\n' '[]'
+    exit 0
+    ;;
+  *'getFlake'*)
+    printf '%s\n' '["zen-browser"]'
+    exit 0
+    ;;
+  *'--apply'*)
+    printf '%s\n' '{live}'
+    exit 0
+    ;;
+esac
+exit 0
+"#
+    );
+    fs::create_dir_all(&tools.path).unwrap();
+    write_executable(&tools.join("nix"), &stub);
+    let out = jet()
+        .args([
+            "os",
+            "import",
+            src.path.to_str().unwrap(),
+            "--host",
+            "halcyon",
+            "--no-color",
+        ])
+        .env("PATH", &tools.path)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let config = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        config.contains("zen_beta: github@0xc000022070/zen-browser-flake/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+        "extra source must be pinned from flake.lock:\n{config}"
+    );
+    assert!(
+        config.contains("zen_beta.[zen-browser]")
+            || config.contains("packages: [nixpkgs.[git], zen_beta.[zen-browser]]"),
+        "recovered package must be sourced from zen_beta:\n{config}"
+    );
+    assert!(
+        !config.contains("package-provenance import will recover it"),
+        "recovered packages must not stay as deferred omissions:\n{config}"
+    );
+}
+
+#[test]
 fn os_import_live_semantic_eval_maps_real_options() {
     let src = Scratch::new("os-import-live-src");
     let tools = Scratch::new("os-import-live-tools");
