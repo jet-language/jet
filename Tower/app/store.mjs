@@ -12,7 +12,7 @@
 // Lane state is DERIVED on every read (never stored), so a card and its
 // decisions can never desync. Only two lanes ever block the owner: `decide`
 // and `activate`. Everything else is an agent's, inert, or done.
-import { dataFile, readJSON, writeJSON, backup, newId, today, now } from './paths.mjs';
+import { dataFile, historyFile, readJSON, writeJSON, backup, newId, today, now } from './paths.mjs';
 import { withLock } from './lock.mjs';
 import { loadConfig } from './config.mjs';
 
@@ -62,6 +62,12 @@ export function openStore(dataDir) {
 
   const load = () => normalize(readJSON(file, empty(config.project)));
 
+  // #461: loadHistory() is lazy + cached per store handle — read once, reuse
+  // across calls in the same process, invalidated after any write that could
+  // have touched history.json (mutate/restoreArchived).
+  let historyCache = null;
+  const loadHistory = () => (historyCache ||= loadHistoryRaw(dataDir));
+
   // Read-modify-write under the cross-process lock; rev bumps on every write.
   // `expectRev` (optional) enables optimistic concurrency for API callers.
   const mutate = (fn, { expectRev } = {}) => withLock(file, () => {
@@ -69,6 +75,10 @@ export function openStore(dataDir) {
     if (expectRev != null && Number(expectRev) !== s.meta.rev)
       fail('E_CONFLICT', `stale rev: expected ${expectRev}, store is at ${s.meta.rev} — re-read state and retry`);
     const result = fn(s, config);
+    // #461: single chokepoint — every write gets a chance to retire aged-out
+    // cards/decisions/events to history.json before tower.json is persisted.
+    retire(s, config, dataDir);
+    historyCache = null;
     s.meta.rev += 1;
     backup(file, config.backups);
     writeJSON(file, s);
@@ -76,7 +86,9 @@ export function openStore(dataDir) {
   });
 
   // Replace the whole state (undo). Guarded by expectRev so an interleaved
-  // write from another agent can never be silently reverted.
+  // write from another agent can never be silently reverted. Undo touches
+  // ONLY tower.json — history.json is append-only and never rolled back
+  // (see Tower/test/history.test.mjs for the duplicate-tolerance this buys).
   const restore = (prevState, { expectRev } = {}) => withLock(file, () => {
     const cur = load();
     if (expectRev != null && Number(expectRev) !== cur.meta.rev)
@@ -88,7 +100,154 @@ export function openStore(dataDir) {
     return { result: { restored: true }, state: s };
   });
 
-  return { file, dataDir, config, load, mutate, restore, project: () => project(load(), config) };
+  // Bring a single archived card or decision back to the live board
+  // (D-TWR-ARCHIVE1=B). Resets its clock (updated/ratifiedAt = today) so it
+  // doesn't immediately re-retire on the next write.
+  const restoreArchived = (ref, by) => withLock(file, () => {
+    const s = load();
+    const h = loadHistoryRaw(dataDir);
+    const result = restoreFromHistory(s, h, ref, by);
+    s.meta.rev += 1;
+    backup(file, config.backups);
+    writeJSON(file, s);
+    writeJSON(historyFile(dataDir), h);
+    historyCache = null;
+    return { result, state: s };
+  });
+
+  return { file, dataDir, config, load, mutate, restore, restoreArchived, loadHistory, project: () => project(load(), config) };
+}
+
+// ---- history: split live/archive store (#461) ------------------------------
+// D-TWR-ARCHIVE1=B MODIFIED by owner comment: nothing retires immediately —
+// a buffer window (config.retireAfterDays, default 3) lets the owner walk
+// back a fresh ratification before it's out of easy reach. Append-only
+// ledger at <dataDir>/history.json, written under the SAME lock as
+// tower.json (see `mutate`/`restoreArchived` above), committed to git.
+export const emptyHistory = () => ({ version: 1, decisions: [], cards: [], events: [] });
+
+function loadHistoryRaw(dataDir) {
+  return { ...emptyHistory(), ...(readJSON(historyFile(dataDir), null) || {}) };
+}
+
+// Treat a 'YYYY-MM-DD' stamp as UTC midnight; "older than N days" = more
+// than N*86400000ms have elapsed since then.
+function isOlderThanDays(dateStr, days) {
+  if (!dateStr) return false;
+  const t = Date.parse(`${dateStr}T00:00:00Z`);
+  if (Number.isNaN(t)) return false;
+  return (Date.now() - t) > days * 86_400_000;
+}
+
+const LIVE_EVENTS = 500;
+
+// The one retirement chokepoint (called only from `mutate`, right after the
+// caller's fn() runs, before the write). Idempotent: an id already present
+// in history.json is removed from live without a duplicate append — undo
+// can reintroduce a stale live copy of something already retired (history is
+// never rolled back), and this is how that self-heals on the next write.
+function retire(s, config, dataDir) {
+  const days = config.retireAfterDays ?? 3;
+  const h = loadHistoryRaw(dataDir);
+  const hasCard = (id) => h.cards.some(x => x.id === id);
+  const hasDecision = (id) => h.decisions.some(x => x.id === id);
+  let dirty = false;
+
+  // (b) done cards aged out: card + ALL its live decisions + questions
+  // retire together, regardless of the decisions' own ratifiedAt.
+  const retireCardIds = new Set(s.cards.filter(c => c.phase === 'done' && isOlderThanDays(c.updated, days)).map(c => c.id));
+  if (retireCardIds.size) {
+    for (const c of s.cards) {
+      if (!retireCardIds.has(c.id)) continue;
+      const questions = s.questions.filter(q => q.cardId === c.id);
+      if (!hasCard(c.id)) { h.cards.push({ ...c, questions, retiredAt: now() }); dirty = true; }
+      for (const d of s.decisions.filter(x => x.cardId === c.id)) {
+        if (!hasDecision(d.id)) { h.decisions.push({ ...d, retiredAt: now() }); dirty = true; }
+      }
+    }
+    s.cards = s.cards.filter(c => !retireCardIds.has(c.id));
+    s.decisions = s.decisions.filter(d => !retireCardIds.has(d.cardId));
+    s.questions = s.questions.filter(q => !retireCardIds.has(q.cardId));
+  }
+
+  // (a) standalone ratified decisions aged out on their own — only once
+  // their card is done (or gone); a still-active card keeps its decisions
+  // live no matter how old, so the card's own view stays whole.
+  const liveCardById = new Map(s.cards.map(c => [c.id, c]));
+  const standaloneIds = new Set(s.decisions.filter(d => {
+    if (d.status !== 'ratified' || !isOlderThanDays(d.ratifiedAt, days)) return false;
+    const c = liveCardById.get(d.cardId);
+    return !c || c.phase === 'done';
+  }).map(d => d.id));
+  if (standaloneIds.size) {
+    for (const d of s.decisions) {
+      if (standaloneIds.has(d.id) && !hasDecision(d.id)) { h.decisions.push({ ...d, retiredAt: now() }); dirty = true; }
+    }
+    s.decisions = s.decisions.filter(d => !standaloneIds.has(d.id));
+  }
+
+  // (c) events: keep the newest 500 live; archive the overflow (oldest-first
+  // within the archived batch, appended to the tail of the ledger).
+  if (s.events.length > LIVE_EVENTS) {
+    const overflow = s.events.slice(LIVE_EVENTS).reverse();
+    h.events.push(...overflow);
+    s.events = s.events.slice(0, LIVE_EVENTS);
+    dirty = true;
+  }
+
+  if (dirty) writeJSON(historyFile(dataDir), h);
+}
+
+// Accept a card by id or tracking number in a history{cards} bag.
+export function findInHistory(history, ref) {
+  if (ref == null) return null;
+  const str = String(ref);
+  const byId = history.cards.find(c => c.id === str);
+  if (byId) return byId;
+  const num = Number(str.replace(/^#/, ''));
+  return Number.isInteger(num) ? history.cards.find(c => c.num === num) : null;
+}
+
+// Bring one archived card (+ its decisions + its embedded questions) or one
+// archived decision back to the live state `s`, removing it from history
+// bag `h` in place. Mutates both; returns a small summary.
+export function restoreFromHistory(s, h, ref, by) {
+  const str = String(ref);
+  const num = Number(str.replace(/^#/, ''));
+  const cardIdx = h.cards.findIndex(c => c.id === str || (Number.isInteger(num) && c.num === num));
+  if (cardIdx >= 0) {
+    const archived = h.cards[cardIdx];
+    const decs = h.decisions.filter(d => d.cardId === archived.id);
+    const questions = archived.questions || [];
+    const card = { ...archived };
+    delete card.retiredAt; delete card.questions;
+    card.updated = today();
+    card.log = [{ at: today(), by: by || 'owner', text: 'Restored from archive.' }, ...(card.log || [])];
+    s.cards.push(card);
+    // Reset each decision's clock too — otherwise a still-'done' card's
+    // stale ratifiedAt would make the very next write's retire() pass
+    // standalone-retire it right back out from under the card we just
+    // brought back whole.
+    for (const d of decs) { const rd = { ...d }; delete rd.retiredAt; if (rd.status === 'ratified') rd.ratifiedAt = today(); s.decisions.push(rd); }
+    for (const q of questions) s.questions.push(q);
+    h.cards.splice(cardIdx, 1);
+    h.decisions = h.decisions.filter(d => d.cardId !== archived.id);
+    logEvent(s, { by, action: 'archive.restore', ref: card.id, note: `card #${card.num}` });
+    return { kind: 'card', id: card.id, num: card.num };
+  }
+  const decIdx = h.decisions.findIndex(d => d.id === str);
+  if (decIdx >= 0) {
+    const archived = h.decisions[decIdx];
+    const liveCard = s.cards.find(c => c.id === archived.cardId);
+    if (!liveCard) fail('E_NOT_FOUND', `${str}'s card is archived too — restore the card (its id or #num), not just the decision`);
+    const d = { ...archived };
+    delete d.retiredAt; d.ratifiedAt = today();
+    s.decisions.push(d);
+    h.decisions.splice(decIdx, 1);
+    logEvent(s, { by, action: 'archive.restore', ref: d.id, note: 'decision' });
+    return { kind: 'decision', id: d.id };
+  }
+  fail('E_NOT_FOUND', `no archived card or decision ${ref}`);
 }
 
 export function normalize(s) {
@@ -157,6 +316,12 @@ export function project(s, config = null) {
   const milestones = s.milestones.map(m => ({ ...m, progress: milestoneProgress(m, s.cards) }));
   const inLane = (l) => cards.filter(c => c.lane.lane === l);
   const openDecisions = s.decisions.filter(isBlocking);
+  // #461 walk-back buffer: every ratified decision still on the live board —
+  // i.e. not yet retired to history — surfaces here so the owner can reopen
+  // it in one tap while it's fresh.
+  const recentlyDecided = s.decisions.filter(d => d.status === 'ratified' && !d.draft)
+    .map(d => ({ id: d.id, title: d.title, outcome: d.outcome, comment: d.comment || '', ratifiedAt: d.ratifiedAt, cardId: d.cardId }))
+    .sort((a, b) => (b.ratifiedAt || '').localeCompare(a.ratifiedAt || ''));
   const counts = {
     byPhase: Object.fromEntries(PHASE_IDS.map(p => [p, cards.filter(c => c.phase === p).length])),
     forYou: openDecisions.length + inLane('activate').length,
@@ -170,7 +335,7 @@ export function project(s, config = null) {
   };
   return { meta: s.meta, config: config || undefined, epochs: s.epochs, milestones, phases: PHASES, lanes: LANES,
     cards, decisions: s.decisions, questions: s.questions, ideas: s.ideas,
-    events: s.events.slice(0, 300), counts };
+    events: s.events.slice(0, 300), counts, recentlyDecided };
 }
 
 // ---- resolution helpers ----------------------------------------------------
@@ -396,13 +561,16 @@ export function verifyCriterion(s, ref, n, { evidence, by } = {}) {
 }
 
 // D-TWRGUARD1=C (#458): a card with any ratified decision refuses delete for
-// everyone, owner included, for now — it retires to a history store instead
-// once #461 lands. Detach/archive it first.
+// everyone, owner included — a ratified decision is durable record, never a
+// casualty of tidying up. #461 gives it a real way out: the decisions retire
+// to history.json on their own (`tower archive status`) once their buffer
+// window passes, or bring one back early with `tower archive restore <id>`;
+// either way, delete only once none are live on the card.
 export function deleteCard(s, ref, p = {}) {
   const c = mustCard(s, ref);
   const ratified = s.decisions.filter(d => d.cardId === c.id && d.status === 'ratified');
   if (ratified.length)
-    fail('E_HAS_RATIFIED', `card #${c.num} has ${ratified.length} ratified decision${ratified.length > 1 ? 's' : ''} (${ratified.map(d => d.id).join(', ')}) — detach or archive them first`);
+    fail('E_HAS_RATIFIED', `card #${c.num} has ${ratified.length} ratified decision${ratified.length > 1 ? 's' : ''} (${ratified.map(d => d.id).join(', ')}) — they retire to \`tower archive\` on their own once the buffer window passes; delete once none are live on the card`);
   s.cards = s.cards.filter(x => x.id !== c.id);
   s.decisions = s.decisions.filter(d => d.cardId !== c.id);
   s.questions = s.questions.filter(q => q.cardId !== c.id);

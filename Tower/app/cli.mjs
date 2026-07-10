@@ -4,11 +4,11 @@
 //   tower <noun> <verb> [args] [--flags]     e.g. tower card update 12 --phase building
 //   --json on any command → machine-readable output
 //   complex payloads (decisions) → --file payload.json or `-` for stdin
-import { readFileSync, mkdirSync, existsSync, writeFileSync, readdirSync, chmodSync } from 'node:fs';
+import { readFileSync, mkdirSync, existsSync, writeFileSync, readdirSync, chmodSync, statSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import * as db from './store.mjs';
 import { openStore, TowerError, PHASE_IDS } from './store.mjs';
-import { findDataDir, readJSON, writeJSON } from './paths.mjs';
+import { findDataDir, readJSON, writeJSON, historyFile } from './paths.mjs';
 import { DEFAULTS } from './config.mjs';
 import { migrate } from './migrate.mjs';
 
@@ -103,9 +103,11 @@ function cmdCard(store, { pos, flags }) {
     case 'show': {
       const s = store.project();
       const c = db.findCard({ cards: s.cards }, ref);
-      if (!c) throw new TowerError('E_NOT_FOUND', `no card ${ref}`);
-      const full = s.cards.find(x => x.id === c.id);
-      return out(flags, null, full);
+      if (c) return out(flags, null, s.cards.find(x => x.id === c.id));
+      // #461: fall through to history once it's not live any more.
+      const arch = db.findInHistory(store.loadHistory(), ref);
+      if (arch) return out(flags, null, { ...arch, archived: true });
+      throw new TowerError('E_NOT_FOUND', `no card ${ref}`);
     }
     case 'add': {
       const p = readPayload(flags) || {};
@@ -188,8 +190,12 @@ function cmdDecision(store, { pos, flags }) {
     }
     case 'show': {
       const s = store.load();
-      const d = s.decisions.find(x => x.id === id) || (() => { throw new TowerError('E_NOT_FOUND', `no decision ${id}`); })();
-      return out(flags, null, d);
+      const d = s.decisions.find(x => x.id === id);
+      if (d) return out(flags, null, d);
+      // #461: fall through to history once it's not live any more.
+      const arch = store.loadHistory().decisions.find(x => x.id === id);
+      if (arch) return out(flags, null, { ...arch, archived: true });
+      throw new TowerError('E_NOT_FOUND', `no decision ${id}`);
     }
     case 'add': {
       const p = readPayload(flags) || {};
@@ -361,6 +367,36 @@ function cmdVerdict(store, { pos, flags }) {
   return out(flags, `verdict ${result.id} recorded on card #${result.cardNum} → ${result.outcome}`, result);
 }
 
+// #461 — tower archive status|show|restore. Cards/decisions retire to
+// history.json on their own (store.mutate's chokepoint); this surface reads
+// it back and lets the owner walk one back.
+function cmdArchive(store, { pos, flags }) {
+  const [verb, ref] = pos;
+  switch (verb) {
+    case 'status': {
+      const h = store.loadHistory();
+      const hf = historyFile(store.dataDir);
+      const historyBytes = existsSync(hf) ? statSync(hf).size : 0;
+      const liveBytes = existsSync(store.file) ? statSync(store.file).size : 0;
+      const info = { cards: h.cards.length, decisions: h.decisions.length, events: h.events.length, historyBytes, liveBytes };
+      return out(flags, `history: ${info.cards} cards, ${info.decisions} decisions, ${info.events} events — ${(historyBytes / 1024).toFixed(1)} KB (live tower.json ${(liveBytes / 1024).toFixed(1)} KB)`, info);
+    }
+    case 'show': {
+      const h = store.loadHistory();
+      const c = db.findInHistory(h, ref);
+      if (c) return out(flags, null, { ...c, archived: true });
+      const d = h.decisions.find(x => x.id === ref);
+      if (d) return out(flags, null, { ...d, archived: true });
+      throw new TowerError('E_NOT_FOUND', `no archived card or decision ${ref}`);
+    }
+    case 'restore': {
+      const { result } = store.restoreArchived(ref, flags.by);
+      return out(flags, `restored ${result.kind} ${result.id}${result.num ? ` (#${result.num})` : ''} from archive`, result);
+    }
+    default: throw new TowerError('E_USAGE', `unknown archive verb "${verb}" — status/show/restore`);
+  }
+}
+
 function cmdEvents(store, { flags }) {
   const s = store.load();
   const es = s.events.slice(0, Number(flags.limit || 30));
@@ -463,6 +499,9 @@ const HELP = `tower — file-backed project board for an owner + AI agents
   tower decision ratify <id> --outcome K [--quote "…"]     agents need --quote; owner needs nothing
   tower verdict '#N' --outcome "..." [--title "…"] --by owner
                                             record an owner ruling as a ratified decision (not a log note)
+  tower archive  status|show <id>|restore <id> --by owner
+                                            done cards + ratified decisions retire here on their own
+                                            after config.retireAfterDays (default 3); restore brings one back
   tower question list|ask|answer|delete
   tower idea     list|add|promote|delete
   tower epoch    list|add|update|current
@@ -516,6 +555,7 @@ export async function run(argv) {
       case 'milestone': return cmdMilestone(store, sub);
       case 'next':      return cmdNext(store, sub);
       case 'verdict':   return cmdVerdict(store, sub);
+      case 'archive':   return cmdArchive(store, sub);
       case 'events':    return cmdEvents(store, sub);
       case 'undo':      return cmdUndo(store, sub);
       case 'githook':

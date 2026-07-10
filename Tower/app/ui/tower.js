@@ -258,6 +258,9 @@ function viewNow() {
   const dig = digestBlock();
   if (dig) v.appendChild(dig);
 
+  const rec = recentlyDecidedBlock();
+  if (rec) v.appendChild(rec);
+
   if (!items.length) {
     v.appendChild(el(`<div class="nowclear">
       <div class="nowclear__mark">▲</div>
@@ -310,6 +313,26 @@ function digestBlock() {
     </div>`);
   $('[data-seen]', node).addEventListener('click', () => api('digest/seen', {}));
   return node;
+}
+
+// ---- #461 walk-back buffer: collapsed, quiet strip of ratified-but-still- --
+// live decisions, so a fresh ratification is a one-tap Reopen away.
+function recentlyDecidedBlock() {
+  const items = S.recentlyDecided || [];
+  if (!items.length) return null;
+  const days = (S.config || {}).retireAfterDays ?? 3;
+  return collapsible('now-recent', false,
+    `<span class="epoch__tag" style="color:var(--frost)">Recently decided</span><span class="epoch__name">reversible for ${days} days</span><span class="epoch__count">${items.length}</span>`,
+    'epoch--off', (body) => {
+      for (const r of items) {
+        const c = cardById(r.cardId);
+        const row = el(`<div class="idea"><span class="idea__t">${esc(r.title)}
+            <span class="idea__note">→ ${esc(r.outcome)}${c ? ' · ' + ticket(c) : ''}${r.comment ? ' — ' + esc(r.comment) : ''}</span></span>
+            <button class="btn btn--ghost btn--sm" data-reopen>Reopen</button></div>`);
+        $('[data-reopen]', row).addEventListener('click', () => api('clearance/reopen', { decisionId: r.id, by: 'owner' }));
+        body.appendChild(row);
+      }
+    });
 }
 
 // ---- j/k keyboard selection on the Now queue --------------------------------
@@ -403,6 +426,18 @@ function collapsible(key, def, headHTML, extraClass, buildBody) {
   $('.epoch__head', sec).addEventListener('click', () => api('ui/toggle', { key }));
   if (open) buildBody($('.epoch__body', sec));
   return sec;
+}
+
+// #461: archived count per epoch, fetched lazily (once the done subgroup is
+// opened) and cached in memory — cheap, no localStorage, refetches on reload.
+const archivedCountCache = {};
+async function archivedCountFor(epochId) {
+  if (archivedCountCache[epochId] != null) return archivedCountCache[epochId];
+  try {
+    const j = await (await fetch(`/api/history?epoch=${encodeURIComponent(epochId)}`)).json();
+    archivedCountCache[epochId] = j.count || 0;
+  } catch { archivedCountCache[epochId] = 0; }
+  return archivedCountCache[epochId];
 }
 
 function subgroup(key, name, n, buildBody) {
@@ -504,7 +539,12 @@ function viewBoard() {
         if (ms.length) body.appendChild(milestoneStrip(ms));
         if (active.length) body.appendChild(grid(active));
         else body.appendChild(el(`<p class="epoch__goal">no active cards</p>`));
-        if (doneCards.length) body.appendChild(subgroup('done:' + e.id, 'Done', doneCards.length, (b) => b.appendChild(grid(doneCards))));
+        if (doneCards.length) body.appendChild(subgroup('done:' + e.id, 'Done', doneCards.length, (b) => {
+          b.appendChild(grid(doneCards));
+          const archLine = el(`<p class="epoch__goal" style="opacity:.6"></p>`);
+          b.appendChild(archLine);
+          archivedCountFor(e.id).then(n => { if (n) archLine.textContent = `${n} archived`; });
+        }));
       }));
   }
 

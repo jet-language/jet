@@ -112,6 +112,28 @@ person, why this exists), `inWild` (realistic code where the choice bites),
 `comparisons[]` when relevant, `rec` + why. The owner decides from the ballot
 alone — if they'd need to ask you something to decide, it isn't ready.
 
+### Archive (#461) — history is separate from live
+
+A done card, or a ratified decision, sits live for `config.retireAfterDays`
+(default 3) — a walk-back buffer — before it retires into
+`.tower/history.json`. A card's own decisions and questions stay live with
+it until the card itself retires, so no card view is ever half-archived; a
+still-active (non-`done`) card keeps its ratified decisions live no matter
+how old. Nothing about this needs an explicit command — it happens inside
+every write (`store.mutate`'s retire pass).
+
+```
+tower archive status                # counts + sizes of history.json
+tower archive show <id>             # an archived card or decision
+tower archive restore <id> --by owner   # bring one back to the live board
+```
+
+`card show '#N'` / `decision show <id>` fall through to history
+automatically once something isn't live any more (the result carries
+`archived: true`). `card delete` still refuses while a ratified decision is
+LIVE on the card (`E_HAS_RATIFIED`) — let it retire on its own, or
+`tower archive restore` then re-detach, then delete.
+
 ## Guards (agent-hard, owner-soft)
 
 Every guard below binds writes where `--by` is not `owner`; `--by owner`
@@ -124,7 +146,7 @@ always bypasses (bypass event-logged). D-TWRGUARD1=C.
 | Owner-only activate | `card activate` by a non-owner | `E_OWNER_ONLY` | `--quote "owner's words"` |
 | Frozen lane | any write to a `frozen` card | `E_OWNER_LANE` | none — `tower card activate` first |
 | Triage phase-lock | `card update --phase <x>` on a `triage` card (`x != done`) | `E_OWNER_LANE` | `tower card activate` (body/plan/log edits stay open) |
-| Ratified-decision delete | `card delete` on a card with a ratified decision | `E_HAS_RATIFIED` | detach/archive the decision first (applies to owner too, for now) |
+| Ratified-decision delete | `card delete` on a card with a ratified decision | `E_HAS_RATIFIED` | let it retire (`tower archive status`) or `tower archive restore` then re-detach — applies to owner too |
 | Outcome/option match | `decision ratify --outcome K` not one of the decision's option keys | `E_INVALID` | pass a real option key |
 | Building-release handoff | `card release` on a `building` card | `E_HANDOFF` | `--handoff "what's done, what's left, gotchas"` |
 

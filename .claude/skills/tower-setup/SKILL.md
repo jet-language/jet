@@ -15,7 +15,9 @@ node ${CLAUDE_PLUGIN_ROOT}/tower.mjs serve --open      # board at :7878
 ```
 
 `init` creates `.tower/tower.json` (all state), `.tower/config.json`, and a
-`.gitignore` for `backups/`. Commit `.tower/` so the team shares the board.
+`.gitignore` for `backups/`. Commit `.tower/` so the team shares the board —
+including `.tower/history.json` once it appears (retired cards/decisions,
+see below); it's board history, not a cache, and is NOT gitignored.
 Migrating an older board: `tower import <old-tower.json> --name "<Project>"`
 (v3-era files: `binder` → ideas, epochs/cards carried losslessly).
 
@@ -30,13 +32,19 @@ Migrating an older board: `tower import <old-tower.json> --name "<Project>"`
   "priorities": ["P0", "P1", "P2", "P3"],
   "decisionGroups": ["design", "architecture", "api", "ui", "tooling"],
   "port": 7878,
-  "backups": 20
+  "backups": 20,
+  "retireAfterDays": 3
 }
 ```
 
 - **`port`** — CLI and UI both use it; if a different tool already owns
   7878, set another port here. The server binds on the configured port —
   treat it as trusted-network-only (LAN/tailnet).
+- **`retireAfterDays`** — the walk-back buffer: how long a done card, or a
+  ratified decision, sits live before it retires into `.tower/history.json`
+  (`tower archive status|show|restore` reads it back). Nothing retires the
+  instant it's ratified — the owner sees it on Now's "Recently decided"
+  strip and can reopen it in one tap while it's fresh.
 
 ## Remote access, push, git linking
 

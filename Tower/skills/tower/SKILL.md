@@ -81,10 +81,22 @@ everything (bypass event-logged). Full table in Tower/AGENTS.md; headlines:
   you pass `--quote "owner's words"` for an on-behalf-of action.
 - Frozen and triage-phase-change writes are owner-only (`E_OWNER_LANE`);
   body/plan/log edits on a triage card are still fine.
-- `card delete` refuses when a ratified decision is attached (`E_HAS_RATIFIED`).
+- `card delete` refuses when a ratified decision is attached (`E_HAS_RATIFIED`)
+  — it's a live decision, not a stub; let it retire (below) or restore+detach.
 - `decision ratify --outcome` must match one of the decision's option keys.
 - Own an owner ruling with `tower verdict '#N' --outcome "..." --by owner` —
   it mints a durable ratified decision instead of a log note that gets lost.
+
+## Archive — history is separate from live
+
+A done card, or a ratified decision, sits live for a walk-back buffer
+(`config.retireAfterDays`, default 3 days) before it retires into
+`.tower/history.json` — the owner sees it on Now's collapsed **Recently
+decided** strip in the meantime and can reopen it in one tap. A card's own
+decisions/questions stay live with it until the card retires, so no card
+view is ever half-archived. `tower archive status|show <id>|restore <id>`
+reads it back; `card show`/`decision show` fall through to history
+automatically once something isn't live any more.
 
 ## Non-negotiables
 

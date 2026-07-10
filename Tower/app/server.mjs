@@ -184,6 +184,14 @@ export function serve(store, port = 7878, open = false) {
         req.on('close', () => { clearInterval(ping); sseClients.delete(res); });
         return;
       }
+      if (req.method === 'GET' && url.pathname === '/api/history') {
+        // #461: archived (retired) cards, optionally filtered by epoch —
+        // the Board UI's done-subgroup uses this for a lazy archived count.
+        const epoch = url.searchParams.get('epoch');
+        const h = store.loadHistory();
+        const cards = epoch ? h.cards.filter(c => c.epoch === epoch) : h.cards;
+        return send(res, 200, { cards, count: cards.length });
+      }
       if (req.method === 'GET' && url.pathname === '/api/next') {
         const q = url.searchParams;
         return send(res, 200, db.nextCards(store.load(), { epoch: q.get('epoch') || undefined, track: q.get('track') || undefined, agent: q.get('agent') || undefined, limit: Number(q.get('limit') || 5) }));

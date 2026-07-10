@@ -34,6 +34,9 @@ export function dataFile(dir = findDataDir()) {
   return join(dir, 'tower.json');
 }
 export const configFile = (dir) => (dir ? join(dir, 'config.json') : null);
+// Append-only archive (#461): retired cards/decisions/events, same dir as
+// tower.json, committed to git (NOT gitignored — it's board history).
+export const historyFile = (dir) => (dir ? join(dir, 'history.json') : null);
 
 export const readJSON = (p, fallback) =>
   p && existsSync(p) ? JSON.parse(readFileSync(p, 'utf8')) : fallback;

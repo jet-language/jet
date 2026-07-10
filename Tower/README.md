@@ -49,6 +49,14 @@ Migrating from a v3-era board: `node Tower/tower.mjs import old-tower.json --nam
 - **Questions** — owner ⇄ agent threads on a card.
 - **Ideas** — capture bay; promote to a card when real.
 - **Events** — append-only audit trail of every mutation, with `--by` attribution.
+- **History** — a done card, or a ratified decision, sits live for
+  `config.retireAfterDays` (default 3) before it retires into
+  `.tower/history.json` — the walk-back buffer. A card's own decisions and
+  questions stay live with it until the card itself retires, so no card view
+  is ever half-archived. `tower archive status|show <id>|restore <id>` reads
+  the archive back and, if needed, brings something back to the live board.
+  `card show`/`decision show` fall through to history automatically once
+  something isn't live any more (marked `archived: true`).
 
 ## CLI
 
@@ -60,6 +68,7 @@ tower question  list|ask|answer|delete
 tower idea      list|add|promote|delete
 tower epoch     list|add|update|current
 tower milestone list|add|update|delete
+tower archive   status | show <id> | restore <id>
 tower init | serve | import
 ```
 
@@ -83,6 +92,9 @@ write; `--expect-rev N` gives optimistic concurrency (exit 2 on conflict).
 - **⌘K** — jump to any card, ballot, or view; `j/k` walk the Now queue.
 - **Digest** — "since you were away" summary at the top of Now with a
   Caught-up button.
+- **Recently decided** — a quiet, collapsed strip on Now lists every ratified
+  decision still on the live board ("reversible for N days") with a one-tap
+  Reopen — the walk-back buffer, surfaced.
 
 ## Reliability
 
@@ -104,11 +116,14 @@ write; `--expect-rev N` gives optimistic concurrency (exit 2 on conflict).
   "priorities": ["P0", "P1", "P2", "P3"],
   "decisionGroups": ["design", "api", "ui", "tooling"],
   "port": 7878,
-  "backups": 20
+  "backups": 20,
+  "retireAfterDays": 3
 }
 ```
 
 Everything is optional; the UI and validation follow whatever you set.
+`retireAfterDays` is the walk-back buffer before a done card / ratified
+decision moves to `.tower/history.json`.
 
 ## UI
 

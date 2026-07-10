@@ -140,6 +140,19 @@ Record an owner ruling with `tower verdict '#N' --outcome "..." [--title
 "…"] --by owner` — it mints an already-ratified decision on the card instead
 of a log note, so a verdict is never lost across a context reset.
 
+## Archive — history is separate from live (#461)
+
+A done card, or a ratified decision, sits live for a walk-back buffer
+(`config.retireAfterDays`, default 3 days) before it retires into
+`.tower/history.json` — he sees it on Now's collapsed **Recently decided**
+strip meanwhile and can reopen it in one tap. A card's own decisions/
+questions stay live with it until the card retires, so no card view is ever
+half-archived. `tower archive status|show <id>|restore <id>` reads it back;
+`card show`/`decision show` fall through to history once something isn't
+live any more. `card delete`'s `E_HAS_RATIFIED` refusal doesn't need a
+manual detach any more — let the decision retire on its own, or
+`tower archive restore` it first if you need it back sooner.
+
 ## Rules
 
 - Parallelise independent in-scope cards with sub-agents (`jet-impl` /

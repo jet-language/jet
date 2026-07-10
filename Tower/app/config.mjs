@@ -13,6 +13,10 @@ export const DEFAULTS = {
   codeLanguage: '',                   // hint for ballot code blocks (highlighting)
   port: 7878,
   backups: 20,
+  // #461: days a done card / ratified decision stays live before the retire
+  // pass moves it to history.json. Buffer, not a deadline — lets the owner
+  // walk back a fresh ratification before it's out of easy reach.
+  retireAfterDays: 3,
   // Auth token for non-localhost requests (LAN/tailnet). Auto-generated on
   // first `tower serve`; localhost is always exempt so local CLIs just work.
   auth: null,                         // { token: "…" }
