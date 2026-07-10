@@ -28,6 +28,11 @@ fn root() -> PathBuf {
 // ---------------------------------------------------------------------------
 // Check 1: Every example *.jet file referenced in docs/ actually exists
 // ---------------------------------------------------------------------------
+// Applies to the durable docs only. The PM history trees (plans/, proposals/,
+// sidequests/, ballots/ — moved from tools/Tower/docs on 2026-07-10) are
+// point-in-time records and keep example names from older repo layouts.
+const PM_HISTORY_DIRS: [&str; 4] = ["plans", "proposals", "sidequests", "ballots"];
+
 #[test]
 fn docs_referenced_examples_exist() {
     let root = root();
@@ -38,7 +43,25 @@ fn docs_referenced_examples_exist() {
     if let Ok(s) = fs::read_to_string(&readme) {
         doc_content.push_str(&s);
     }
-    walk_md(&docs_dir, &mut |s| doc_content.push_str(s));
+    let Ok(entries) = fs::read_dir(&docs_dir) else {
+        panic!("docs/ missing");
+    };
+    let mut entries: Vec<_> = entries.flatten().collect();
+    entries.sort_by_key(|e| e.path());
+    for entry in entries {
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if path.is_dir() {
+            if PM_HISTORY_DIRS.contains(&name.as_str()) {
+                continue;
+            }
+            walk_md(&path, &mut |s| doc_content.push_str(s));
+        } else if path.extension().and_then(|e| e.to_str()) == Some("md") {
+            if let Ok(s) = fs::read_to_string(&path) {
+                doc_content.push_str(&s);
+            }
+        }
+    }
 
     let mut missing: Vec<String> = Vec::new();
     for cap in extract_example_paths(&doc_content) {
