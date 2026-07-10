@@ -24,7 +24,13 @@ impl<'a> Fmt<'a> {
                     self.fmt_expr(value, Prec::OrFallback);
                 }
                 MetaField::Tunable { .. } => self.write(Syntax::META_FIELD_TUNABLE),
-                MetaField::Unknown { name, .. } => self.write(name),
+                MetaField::Unknown { name, value, .. } => {
+                    self.write(name);
+                    if let Some(value) = value {
+                        self.write(": ");
+                        self.fmt_expr(value, Prec::OrFallback);
+                    }
+                }
             }
         }
         self.write(")");
@@ -274,10 +280,11 @@ impl<'a> Fmt<'a> {
 
     fn fmt_bench(&mut self, b: &crate::AST::BenchDef) {
         self.write(&format!("#{}", Syntax::KW_BENCH));
-        self.write(" ");
-        self.write("\"");
+        // D-BENCH-MARKER1=A: benchmark blocks use the same parenthesized
+        // marker-argument shape as `#Test("name")`.
+        self.write("(\"");
         self.write(&b.name.replace('\\', "\\\\").replace('"', "\\\""));
-        self.write("\"");
+        self.write("\")");
         self.write(" ");
         self.write(Syntax::BLOCK_OPEN);
         self.newline();
@@ -425,6 +432,7 @@ impl<'a> Fmt<'a> {
                     f.newline();
                     f.newline();
                 }
+                f.emit_leading(m.name_span.start);
                 f.fmt_func(m, false);
             }
         });
@@ -631,7 +639,15 @@ impl<'a> Fmt<'a> {
             self.write(&format!("@{} ", Syntax::ATTR_MUST_USE));
         }
         // D-MIGRATE1: `@PublishedSchema` precedes `pub`/`struct`, on the same line.
-        if s.is_published_schema {
+        // A bracket marker list keeps PublishedSchema in `type_markers` while
+        // also setting the semantic flag. Emit the dedicated inline spelling
+        // only for the standalone `@PublishedSchema struct` parse path.
+        if s.is_published_schema
+            && !s
+                .type_markers
+                .iter()
+                .any(|marker| marker.name == Syntax::ATTR_PUBLISHED_SCHEMA)
+        {
             self.write(&format!("@{} ", Syntax::ATTR_PUBLISHED_SCHEMA));
         }
         // D-REPRC1/D-SOA1: `#layout(…)` sits on its own line before the struct.
@@ -652,6 +668,7 @@ impl<'a> Fmt<'a> {
                 if i > 0 {
                     f.newline();
                 }
+                f.emit_leading(field.name_span.start);
                 f.fmt_field(field);
             }
             for (i, trait_name) in body_derives.iter().enumerate() {
@@ -676,6 +693,7 @@ impl<'a> Fmt<'a> {
                     f.newline();
                     f.newline();
                 }
+                f.emit_leading(m.name_span.start);
                 f.fmt_func(m, false);
             }
         });
@@ -736,6 +754,7 @@ impl<'a> Fmt<'a> {
                     f.newline();
                     f.newline();
                 }
+                f.emit_leading(m.name_span.start);
                 f.fmt_func(m, false);
             }
         });
@@ -892,6 +911,7 @@ impl<'a> Fmt<'a> {
                     f.newline();
                     f.newline();
                 }
+                f.emit_leading(m.name_span.start);
                 f.fmt_func(m, false);
             }
         });
@@ -1055,5 +1075,11 @@ impl<'a> Fmt<'a> {
             self.write(" => ");
             self.fmt_expr(expr, Prec::OrFallback.add_rhs());
         }
+        let end = field
+            .computed
+            .as_deref()
+            .map(|expr| expr.span().end)
+            .unwrap_or(field.ty_span.end);
+        self.emit_trailing(end);
     }
 }

@@ -57,6 +57,7 @@ impl<'a> Parser<'a> {
                     } else {
                         fields.push(MetaField::Unknown {
                             name,
+                            value: Some(value),
                             span: field_span,
                         });
                     }
@@ -65,6 +66,7 @@ impl<'a> Parser<'a> {
                 } else {
                     fields.push(MetaField::Unknown {
                         name,
+                        value: None,
                         span: field_span,
                     });
                 }

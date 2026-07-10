@@ -273,8 +273,8 @@ impl<'a> Parser<'a> {
                 self.bump();
             }
             match &self.peek().kind {
-                TokKind::KwStruct => self.struct_def(false).map(Item::Struct),
-                TokKind::KwEnum => self.enum_def(false).map(Item::Enum),
+                TokKind::KwStruct => self.struct_def_after_pub(is_pub).map(Item::Struct),
+                TokKind::KwEnum => self.enum_def_after_pub(is_pub, false).map(Item::Enum),
                 TokKind::Hash
                     if matches!(
                         &self.peek2().kind,

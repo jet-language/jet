@@ -54,7 +54,7 @@ pub(crate) fn check_meta_attr_fields(meta: &MetaAttr) -> Vec<Diagnostic> {
                 }
                 seen_tunable = true;
             }
-            MetaField::Unknown { name, span } => {
+            MetaField::Unknown { name, span, .. } => {
                 let fix = if edit_distance(name, Syntax::META_FIELD_CATEGORY) <= 2 {
                     format!("did you mean `{}`?", Syntax::META_FIELD_CATEGORY)
                 } else if edit_distance(name, Syntax::META_FIELD_TUNABLE) <= 2 {
