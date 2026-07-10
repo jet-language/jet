@@ -2,9 +2,11 @@ fn write_studio_app_projection(dir: &Path, system: &SystemPlan) -> std::io::Resu
     let studio_dir = dir.join("studio");
     let bin_dir = dir.join("sw/bin");
     let desktop_dir = dir.join("share/applications");
+    let autostart_dir = dir.join("share/xdg/autostart");
     fs::create_dir_all(&studio_dir)?;
     fs::create_dir_all(&bin_dir)?;
     fs::create_dir_all(&desktop_dir)?;
+    fs::create_dir_all(&autostart_dir)?;
 
     let app = JSON::object_of(&[
         ("kind", "jetos-studio-app"),
@@ -15,19 +17,52 @@ fn write_studio_app_projection(dir: &Path, system: &SystemPlan) -> std::io::Resu
         ("semantic_state", "jet-source-only"),
         ("browser_fallback", "true"),
         ("canvas_coupled", "false"),
+        ("first_boot_role", "os-control-center"),
     ]);
     fs::write(studio_dir.join("app.json"), app)?;
     fs::write(studio_dir.join("data.json"), studio_data_json(dir, system))?;
     fs::write(studio_dir.join("index.html"), studio_index_html(dir, system))?;
+    fs::write(
+        studio_dir.join("first-boot.json"),
+        studio_first_boot_json(dir, system),
+    )?;
+    fs::write(studio_dir.join("first-boot.pending"), "1\n")?;
 
     let launcher = "#!/usr/bin/env sh\nset -eu\nroot=${JETOS_STUDIO_ROOT:-/run/current-system}\npage=\"$root/studio/index.html\"\nif command -v jetos >/dev/null 2>&1; then\n  exec jetos studio \"$@\"\nfi\nif command -v xdg-open >/dev/null 2>&1; then\n  exec xdg-open \"$page\"\nfi\nprintf '%s\\n' \"$page\"\n";
     let launcher_path = bin_dir.join("jetos-studio");
     fs::write(&launcher_path, launcher)?;
     make_executable(&launcher_path)?;
 
+    // D-JOS-FIRSTBOOT1=D: first graphical session opens Studio as the OS
+    // control center. Canvas stays a deep-link from source spans only.
+    let first_boot = "#!/usr/bin/env sh\nset -eu\nroot=${JETOS_STUDIO_ROOT:-/run/current-system}\nmarker=${JETOS_FIRST_BOOT_MARKER:-$root/studio/first-boot.pending}\nif [ ! -f \"$marker\" ]; then\n  exit 0\nfi\nif command -v jetos-studio >/dev/null 2>&1; then\n  jetos-studio --first-boot || true\nelif [ -x \"$root/sw/bin/jetos-studio\" ]; then\n  \"$root/sw/bin/jetos-studio\" --first-boot || true\nfi\nrm -f \"$marker\"\n";
+    let first_boot_path = bin_dir.join("jetos-studio-first-boot");
+    fs::write(&first_boot_path, first_boot)?;
+    make_executable(&first_boot_path)?;
+
     fs::write(
         desktop_dir.join("jetos-studio.desktop"),
         "[Desktop Entry]\nName=jetos Studio\nComment=Edit jetos system source\nExec=/run/current-system/sw/bin/jetos-studio\nType=Application\nCategories=System;Settings;\n",
+    )?;
+    fs::write(
+        autostart_dir.join("jetos-studio-first-boot.desktop"),
+        "[Desktop Entry]\nName=jetos Studio First Boot\nComment=Open the jetos control center on first boot\nExec=/run/current-system/sw/bin/jetos-studio-first-boot\nType=Application\nX-GNOME-Autostart-enabled=true\nX-KDE-autostart-condition=true\nOnlyShowIn=GNOME;KDE;XFCE;Hyprland;niri;\n",
+    )
+}
+
+fn studio_first_boot_json(dir: &Path, system: &SystemPlan) -> String {
+    let generation = dir
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("unknown");
+    let proof_present = dir.join("proof.txt").is_file();
+    let health_present = dir.join("health").exists() || dir.join("acceptance").exists();
+    format!(
+        "{{\"kind\":\"jetos.studio.first-boot\",\"role\":\"os-control-center\",\"host\":{},\"generation\":{},\"surfaces\":[\"host\",\"generation\",\"source\",\"proof\",\"update\",\"rollback\",\"health\"],\"source_truth\":\"jet-source-only\",\"proof_visible\":{},\"health_visible\":{},\"update_path\":\"jet os switch\",\"rollback_path\":\"jet os rollback\",\"canvas\":{{\"mode\":\"separate-app-deeplink\",\"path\":\"/canvas\",\"from\":\"source-spans-only\",\"first_surface\":false}},\"autostart\":\"share/xdg/autostart/jetos-studio-first-boot.desktop\",\"proof\":\"first-boot-control-center-ready\"}}",
+        JSON::quote(&system.name),
+        JSON::quote(generation),
+        if proof_present { "true" } else { "false" },
+        if health_present { "true" } else { "false" }
     )
 }
 
@@ -99,7 +134,7 @@ fn studio_data_json(dir: &Path, system: &SystemPlan) -> String {
         .collect::<Vec<_>>()
         .join(",");
     format!(
-        "{{\"kind\":\"jetos-studio-projection\",\"host\":{},\"target\":{},\"dashboard\":{{\"selected_host\":{},\"generation\":{},\"service_configuration\":\"{enabled}/{total} enabled\",\"runtime_health\":\"not-projected\",\"alerts\":[],\"last_run\":\"generation-built\",\"rollback_status\":\"not-evaluated\"}},\"page_registry\":[{}],\"packages\":[{}],\"services\":[{}],\"options\":[{}],\"changeset\":{{\"state\":\"empty\",\"apply_gate\":\"single-source-transaction\",\"proof_required\":[\"check\",\"plan\",\"build\",\"proof\"]}},\"secret_policy\":{{\"plaintext_in_projection\":false,\"visible_fields\":[\"name\",\"source\",\"runtime_path\",\"provenance\"],\"transaction\":\"audited-secret-rekey\"}},\"fleet\":{{\"mode\":\"adaptive\",\"single_host_default\":true,\"rollout_gate\":\"proof-before-switch\"}},\"canvas_bridge\":{{\"mode\":\"separate-app-deeplink\",\"target\":\"/canvas\",\"shared_state\":\"source-only\"}},\"artifacts\":{{\"plan\":{},\"proof\":{},\"provenance\":{},\"vm_proof\":{}}}}}",
+        "{{\"kind\":\"jetos-studio-projection\",\"host\":{},\"target\":{},\"dashboard\":{{\"selected_host\":{},\"generation\":{},\"service_configuration\":\"{enabled}/{total} enabled\",\"runtime_health\":\"not-projected\",\"alerts\":[],\"last_run\":\"generation-built\",\"rollback_status\":\"not-evaluated\"}},\"page_registry\":[{}],\"packages\":[{}],\"services\":[{}],\"options\":[{}],\"changeset\":{{\"state\":\"empty\",\"apply_gate\":\"single-source-transaction\",\"proof_required\":[\"check\",\"plan\",\"build\",\"proof\"]}},\"secret_policy\":{{\"plaintext_in_projection\":false,\"visible_fields\":[\"name\",\"source\",\"runtime_path\",\"provenance\"],\"transaction\":\"audited-secret-rekey\"}},\"fleet\":{{\"mode\":\"adaptive\",\"single_host_default\":true,\"rollout_gate\":\"proof-before-switch\"}},\"first_boot\":{{\"role\":\"os-control-center\",\"autostart\":true,\"surfaces\":[\"host\",\"generation\",\"source\",\"proof\",\"update\",\"rollback\",\"health\"],\"canvas_first_surface\":false}},\"canvas_bridge\":{{\"mode\":\"separate-app-deeplink\",\"target\":\"/canvas\",\"shared_state\":\"source-only\",\"from\":\"source-spans-only\"}},\"artifacts\":{{\"plan\":{},\"proof\":{},\"provenance\":{},\"vm_proof\":{}}}}}",
         JSON::quote(&system.name),
         JSON::quote(&system.target),
         JSON::quote(&system.name),

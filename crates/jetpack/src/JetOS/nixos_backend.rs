@@ -141,6 +141,10 @@ fn is_known_option_key(key: &str) -> bool {
         }
         return false;
     }
+    if let Some(rest) = key.strip_prefix("apps.program.") {
+        // apps.program.<module>.<field>
+        return rest.split('.').count() >= 2;
+    }
     if let Some(rest) = key.strip_prefix("groups.") {
         return rest.split_once('.').map(|(_, f)| f == "members").unwrap_or(false);
     }
@@ -171,9 +175,12 @@ fn is_known_option_key(key: &str) -> bool {
             | "services.audio.pipewire.enable"
             | "services.audio.rtkit.enable"
             | "services.virtualization.libvirtd.enable"
+            | "services.virtualization.docker.enable"
             | "services.gaming.steam.enable"
             | "services.gaming.gamemode.enable"
             | "services.smartcard.pcscd.enable"
+            | "hardware.bluetooth.enable"
+            | "apps.flatpak.enable"
     )
 }
 
@@ -389,9 +396,12 @@ fn map_system_to_nixos(
     }
     for (key, nixos) in [
         ("services.virtualization.libvirtd.enable", "virtualisation.libvirtd.enable"),
+        ("services.virtualization.docker.enable", "virtualisation.docker.enable"),
         ("services.gaming.steam.enable", "programs.steam.enable"),
         ("services.gaming.gamemode.enable", "programs.gamemode.enable"),
         ("services.smartcard.pcscd.enable", "services.pcscd.enable"),
+        ("hardware.bluetooth.enable", "hardware.bluetooth.enable"),
+        ("apps.flatpak.enable", "services.flatpak.enable"),
     ] {
         if let Some(v) = resolved_option_value(system, key) {
             body_lines.push(format!("  {nixos} = {};", clean_bool_json(&v)));
@@ -504,6 +514,33 @@ fn map_system_to_nixos(
         body_lines.push(format!("  users.users.{name} = {{"));
         body_lines.extend(user_lines);
         body_lines.push("  };".to_string());
+    }
+    for option in &system.options {
+        let Some(rest) = option.key.strip_prefix("apps.program.") else {
+            continue;
+        };
+        let Some((module, field)) = rest.split_once('.') else {
+            continue;
+        };
+        if field != "enable" || clean_bool_json(&option.value) != "true" {
+            continue;
+        }
+        match module {
+            "git" => body_lines.push("  programs.git.enable = true;".to_string()),
+            "fish" => {
+                fish_enabled = true;
+            }
+            "starship" | "helix" | "ghostty" | "vscode" | "yazi" | "btop" | "bat" | "eza"
+            | "fzf" | "zoxide" | "ripgrep" | "tealdeer" | "fastfetch" | "cursor" | "discord"
+            | "spicetify" | "browser" | "ssh" => {
+                if !system_packages.iter().any(|p| p == module) {
+                    system_packages.push(module.to_string());
+                }
+            }
+            other => unmapped.push(format!(
+                "option `apps.program.{other}.enable` has no NixOS mapping yet"
+            )),
+        }
     }
     if fish_enabled {
         body_lines.push("  programs.fish.enable = true;".to_string());

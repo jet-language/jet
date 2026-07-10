@@ -2344,7 +2344,7 @@ fn write_live_import_fixture(src: &Path, tools: &Path, output: Option<&str>) {
     write_executable(&tools.join("nix"), &body);
 }
 
-const LIVE_IMPORT_EVAL_JSON: &str = r#"{"host":"halcyon","stateVersion":"26.05","tz":"America/New_York","locale":"en_US.UTF-8","keyboard":"us","desktopGnome":false,"desktopPlasma":true,"dmGdm":false,"dmSddm":true,"loaderLimine":true,"loaderSystemdBoot":false,"efiTouch":false,"kernelName":"linux-cachyos","kernelParams":["quiet"],"sysctl":{"vm.swappiness":10},"firewallTcp":[22,443],"firewallUdp":[53317],"nameservers":["1.1.1.1"],"networkmanager":true,"zramEnable":true,"zramPercent":25,"svcOpenssh":true,"svcPipewire":true,"svcRtkit":true,"svcTailscale":true,"svcLibvirtd":true,"svcDocker":true,"svcFlatpak":false,"svcSteam":true,"svcGamemode":true,"svcPcscd":true,"svcBluetooth":false,"packages":["git","ripgrep","jetbrains.idea-ultimate"],"users":[{"name":"nate","home":"/home/nate","groups":["wheel","networkmanager"],"shell":"fish"}],"hm":[{"name":"nate","packages":["ghostty"],"programs":["git","starship"]}]}"#;
+const LIVE_IMPORT_EVAL_JSON: &str = r#"{"host":"halcyon","stateVersion":"26.05","tz":"America/New_York","locale":"en_US.UTF-8","keyboard":"us","desktopGnome":false,"desktopPlasma":true,"dmGdm":false,"dmSddm":true,"loaderLimine":true,"loaderSystemdBoot":false,"efiTouch":false,"kernelName":"linux-cachyos","kernelParams":["quiet"],"sysctl":{"vm.swappiness":10},"firewallTcp":[22,443],"firewallUdp":[53317],"nameservers":["1.1.1.1"],"networkmanager":true,"zramEnable":true,"zramPercent":25,"svcOpenssh":true,"svcPipewire":true,"svcRtkit":true,"svcTailscale":true,"svcLibvirtd":true,"svcDocker":true,"svcFlatpak":false,"svcSteam":true,"svcGamemode":true,"svcPcscd":true,"svcBluetooth":false,"stylix":true,"packages":["git","ripgrep","jetbrains.idea-ultimate"],"users":[{"name":"nate","home":"/home/nate","groups":["wheel","networkmanager"],"shell":"fish"}],"hm":[{"name":"nate","packages":["ghostty"],"programs":["git","starship"]}]}"#;
 
 #[test]
 fn os_import_live_recovers_package_provenance_from_flake_inputs() {
@@ -2462,6 +2462,12 @@ fn os_import_live_semantic_eval_maps_real_options() {
     assert!(config.contains("performance.zram.memoryPercent: 25"), "{config}");
     assert!(config.contains("users.nate.shell: nixpkgs.fish"), "{config}");
     assert!(config.contains("user.nate.homeManager: true"), "{config}");
+    assert!(config.contains("apps.program.git.enable: true"), "{config}");
+    assert!(config.contains("apps.program.starship.enable: true"), "{config}");
+    assert!(
+        config.contains("services.virtualization.docker.enable: true"),
+        "{config}"
+    );
     assert!(config.contains("packages: [nixpkgs.[git, ripgrep]]"), "{config}");
     assert!(config.contains("openssh: { enable: true"), "{config}");
     assert!(config.contains("tailscale: { enable: true"), "{config}");
@@ -2496,14 +2502,21 @@ fn os_import_live_semantic_eval_reports_omissions() {
     let audit = fs::read_to_string(out_dir.join("jetos-import-audit.json")).unwrap();
     assert!(audit.contains("\"mode\":\"semantic-eval\""), "{audit}");
     assert!(audit.contains("jetbrains.idea-ultimate"), "{audit}");
-    assert!(audit.contains("virtualisation.docker.enable"), "{audit}");
     assert!(
         audit.contains("no `nix-cachyos-kernel` pin"),
         "{audit}"
     );
     assert!(
-        audit.contains("Home Manager program `starship`"),
+        audit.contains("stylix theming is enabled upstream"),
         "{audit}"
+    );
+    assert!(
+        !audit.contains("virtualisation.docker.enable has no jetos option"),
+        "docker must map to services.virtualization.docker.enable, not omit: {audit}"
+    );
+    assert!(
+        !audit.contains("Home Manager program `starship`"),
+        "known HM programs must map to apps.program.*, not omit: {audit}"
     );
 }
 
@@ -3916,8 +3929,41 @@ fn os_switch_activates_and_sets_current() {
         "studio data: {studio_data}"
     );
     assert!(
+        studio_data.contains("\"first_boot\"")
+            && studio_data.contains("\"role\":\"os-control-center\"")
+            && studio_data.contains("\"canvas_first_surface\":false"),
+        "first-boot control center must own Studio, not Canvas: {studio_data}"
+    );
+    assert!(
         studio_data.contains("\"openssh\""),
         "studio data: {studio_data}"
+    );
+    assert!(
+        generation
+            .join("studio/first-boot.json")
+            .is_file(),
+        "expected Studio first-boot control-center projection"
+    );
+    let first_boot = fs::read_to_string(generation.join("studio/first-boot.json")).unwrap();
+    assert!(
+        first_boot.contains("\"role\":\"os-control-center\"")
+            && first_boot.contains("\"proof\":\"first-boot-control-center-ready\"")
+            && first_boot.contains("\"first_surface\":false"),
+        "first-boot: {first_boot}"
+    );
+    assert!(
+        generation
+            .join("share/xdg/autostart/jetos-studio-first-boot.desktop")
+            .is_file(),
+        "expected first-boot Studio autostart desktop entry"
+    );
+    assert!(
+        generation.join("sw/bin/jetos-studio-first-boot").is_file(),
+        "expected first-boot Studio launcher"
+    );
+    assert!(
+        generation.join("studio/first-boot.pending").is_file(),
+        "expected first-boot pending marker"
     );
     assert!(
         generation
@@ -5824,11 +5870,26 @@ fn os_image_writes_jetos_installer_media_proof() {
     let variants = fs::read_to_string(&variant_proof).unwrap();
     assert!(
         variants.contains("\"kind\":\"jetos.image-variants\"")
-            && variants.contains("\"proof\":\"qcow2-sd-netboot-built\"")
+            && (variants.contains("\"proof\":\"image-variants-smoke-proved\"")
+                || variants.contains("\"proof\":\"image-variants-staged\""))
             && variants.contains("\"kind\": \"qcow2\"")
             && variants.contains("\"kind\": \"sd\"")
             && variants.contains("\"kind\": \"netboot-ipxe\""),
         "variants: {variants}"
+    );
+    // D-JOS-IMAGEPROOF1=C: sparse raw/sd markers must never claim built.
+    assert!(
+        variants.contains("\"kind\": \"raw\"") && variants.contains("\"state\": \"staged\""),
+        "raw sparse marker must be staged: {variants}"
+    );
+    assert!(
+        variants.contains("\"kind\": \"sd\"")
+            && variants
+                .split("\"kind\": \"sd\"")
+                .nth(1)
+                .map(|rest| rest.contains("\"state\": \"staged\""))
+                .unwrap_or(false),
+        "sd sparse marker must be staged: {variants}"
     );
     for artifact in [
         "jetos-halcyon.qcow2",

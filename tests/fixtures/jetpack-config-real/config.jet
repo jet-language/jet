@@ -2,10 +2,11 @@
 // package here maps to a NixOS setting the hidden backend understands, so
 // `jet os vm prove halcyon-gnome --disk <path> --real` can generate
 // flake.nix/configuration.nix without hitting the unmapped-declaration gate
-// (E1291). `mine.*` packages satisfy the plumbing-tier boot/init/desktop
-// first-party requirements (E1280/E1281/E1288) via the same fixture pkg tree
-// jetpack-config uses; `default.*` packages are the nixpkgs-sourced real-tier
-// user packages.
+// (E1291). `mine` stays declared so generation auto-pull can satisfy
+// first-party boot/init/desktop scaffolding (E1280/E1281/E1288) for the
+// jetos generation side; those packages must NOT appear in `packages:` or
+// the real-tier NixOS mapper rejects them as non-nixpkgs. `default.*`
+// packages are the nixpkgs-sourced real-tier user packages.
 module halcyon-gnome {
     sources: {
         default: github@NixOS/nixpkgs/fef9403a3e4d31b0a23f0bacebbec52c248fbb51,
@@ -15,7 +16,6 @@ module halcyon-gnome {
         target: linux.x64,
         packages: [
             default.[firefox, ghostty, ripgrep, git, btop],
-            mine.[cachyos-kernel, systemd, gdm, gnome-session, gnome-shell],
         ],
         services: {
             openssh: { enable: true, ports: [22] },
@@ -32,7 +32,7 @@ module halcyon-gnome {
             users.nate.home: "/home/nate",
             users.nate.groups: ["wheel", "networkmanager"],
             users.nate.initialPassword: "jetos",
-            users.nate.shell: mine.hello,
+            users.nate.shell: default.bash,
             boot.loader: .SystemdBoot,
             boot.loader.efi.canTouchVariables: false,
             boot.kernel.params: ["quiet"],

@@ -531,14 +531,17 @@ fn plan_from_live_facts(
             services.push(service.to_string());
         }
     }
-    for (fact, nixos_path) in [
-        ("svcDocker", "virtualisation.docker.enable"),
-        ("svcFlatpak", "services.flatpak.enable"),
-        ("svcBluetooth", "hardware.bluetooth.enable"),
-    ] {
-        if live_bool(root, fact) {
-            omissions.push(format!("{nixos_path} has no jetos option yet"));
-        }
+    if live_bool(root, "svcDocker") {
+        options.push((
+            "services.virtualization.docker.enable".to_string(),
+            "true".to_string(),
+        ));
+    }
+    if live_bool(root, "svcFlatpak") {
+        options.push(("apps.flatpak.enable".to_string(), "true".to_string()));
+    }
+    if live_bool(root, "svcBluetooth") {
+        options.push(("hardware.bluetooth.enable".to_string(), "true".to_string()));
     }
 
     let (packages, omitted_packages) = {
@@ -586,9 +589,12 @@ fn plan_from_live_facts(
                 .filter(|p| !is_hm_plumbing_package(p))
                 .collect::<Vec<_>>();
             for program in &hm_programs {
-                omissions.push(format!(
-                    "Home Manager program `{program}` for user `{name}` needs manual conversion"
-                ));
+                match importable_hm_program(program) {
+                    Some(key) => options.push((key, "true".to_string())),
+                    None => omissions.push(format!(
+                        "Home Manager program `{program}` for user `{name}` needs manual conversion"
+                    )),
+                }
             }
             if has_home_manager {
                 options.push((format!("user.{name}.homeManager"), "true".to_string()));
@@ -725,4 +731,16 @@ fn plan_from_live_facts(
         home_modules: Vec::new(),
         omissions,
     })
+}
+
+/// HM `programs.<name>.enable` values that jetos already owns as
+/// `apps.program.<name>.enable` (see `write_app_module_facts`). Anything
+/// outside this set stays a loud audit omission — never a silent drop.
+fn importable_hm_program(program: &str) -> Option<String> {
+    match program {
+        "git" | "fish" | "starship" | "helix" | "ghostty" | "vscode" => {
+            Some(format!("apps.program.{program}.enable"))
+        }
+        _ => None,
+    }
 }

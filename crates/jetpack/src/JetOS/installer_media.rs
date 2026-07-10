@@ -197,32 +197,24 @@ fn write_image_variant_artifacts(
     let netboot = image_dir.join(format!("jetos-{host}-netboot"));
     fs::create_dir_all(&netboot)?;
 
-    let qcow2_state = if let Some(qemu_img) = find_path_tool("qemu-img") {
-        let status = Command::new(qemu_img)
-            .args(["create", "-f", "qcow2"])
-            .arg(&qcow2)
-            .arg("4G")
-            .status();
-        match status {
-            Ok(s) if s.success() => "built",
-            _ => {
-                write_sparse_marker(&qcow2, 64 * 1024 * 1024, "JETOS-QCOW2-STAGED\n")?;
-                "staged"
-            }
+    // D-JOS-IMAGEPROOF1=C: sparse markers / deferred artifacts report `staged`.
+    // `built` requires a real format artifact plus format-specific smoke proof.
+    let qcow2_state = match smoke_prove_qcow2(&qcow2) {
+        Ok(()) => "built",
+        Err(_) => {
+            write_sparse_marker(&qcow2, 64 * 1024 * 1024, "JETOS-QCOW2-STAGED\n")?;
+            "staged"
         }
-    } else {
-        write_sparse_marker(&qcow2, 64 * 1024 * 1024, "JETOS-QCOW2-STAGED\n")?;
-        "staged"
     };
     write_sparse_marker(
         &raw,
         128 * 1024 * 1024,
-        &format!("JETOS-RAW\nhost={host}\ngeneration={}\n", gen.name),
+        &format!("JETOS-RAW-STAGED\nhost={host}\ngeneration={}\n", gen.name),
     )?;
     write_sparse_marker(
         &sd,
         128 * 1024 * 1024,
-        &format!("JETOS-SD\nhost={host}\ngeneration={}\n", gen.name),
+        &format!("JETOS-SD-STAGED\nhost={host}\ngeneration={}\n", gen.name),
     )?;
     copy_runtime_file_filtered(&gen.path.join("boot/kernel"), &netboot.join("vmlinuz"))?;
     copy_initrd_runtime_filtered(&gen.path.join("boot/initrd"), &netboot.join("initrd"))?;
@@ -242,14 +234,36 @@ fn write_image_variant_artifacts(
         ),
     )?;
 
+    let kernel_state = if smoke_prove_kernel_image(&netboot.join("vmlinuz")) {
+        "built"
+    } else {
+        "staged"
+    };
+    let initrd_state = if smoke_prove_initrd_image(&netboot.join("initrd")) {
+        "built"
+    } else {
+        "staged"
+    };
+    let ipxe_state = if netboot.join("ipxe.conf").is_file() {
+        "built"
+    } else {
+        "staged"
+    };
+
     let artifacts = [
         ("qcow2", qcow2_state, qcow2.clone()),
-        ("raw", "built", raw.clone()),
-        ("sd", "built", sd.clone()),
-        ("netboot-kernel", "built", netboot.join("vmlinuz")),
-        ("netboot-initrd", "built", netboot.join("initrd")),
-        ("netboot-ipxe", "built", netboot.join("ipxe.conf")),
+        ("raw", "staged", raw.clone()),
+        ("sd", "staged", sd.clone()),
+        ("netboot-kernel", kernel_state, netboot.join("vmlinuz")),
+        ("netboot-initrd", initrd_state, netboot.join("initrd")),
+        ("netboot-ipxe", ipxe_state, netboot.join("ipxe.conf")),
     ];
+    let any_built = artifacts.iter().any(|(_, state, _)| *state == "built");
+    let proof_label = if any_built {
+        "image-variants-smoke-proved"
+    } else {
+        "image-variants-staged"
+    };
     let rows = artifacts
         .iter()
         .map(|(kind, state, path)| {
@@ -266,14 +280,60 @@ fn write_image_variant_artifacts(
     fs::write(
         &proof,
         format!(
-            "{{\"kind\":\"jetos.image-variants\",\"host\":{},\"generation\":{},\"source_generation\":{},\"artifacts\":[{}],\"proof\":\"qcow2-sd-netboot-built\"}}",
+            "{{\"kind\":\"jetos.image-variants\",\"host\":{},\"generation\":{},\"source_generation\":{},\"artifacts\":[{}],\"proof\":{}}}",
             JSON::quote(host),
             JSON::quote(&gen.name),
             JSON::quote(&gen.path.display().to_string()),
-            rows
+            rows,
+            JSON::quote(proof_label)
         ),
     )?;
     Ok(proof)
+}
+
+/// Create a qcow2 (when qemu-img exists) and smoke-prove it via `qemu-img info`.
+fn smoke_prove_qcow2(path: &Path) -> Result<(), String> {
+    let qemu_img = find_path_tool("qemu-img").ok_or_else(|| "qemu-img missing".to_string())?;
+    let status = Command::new(&qemu_img)
+        .args(["create", "-f", "qcow2"])
+        .arg(path)
+        .arg("4G")
+        .status()
+        .map_err(|e| e.to_string())?;
+    if !status.success() {
+        return Err("qemu-img create failed".to_string());
+    }
+    let output = Command::new(&qemu_img)
+        .args(["info", "--output=json"])
+        .arg(path)
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !output.status.success() {
+        return Err("qemu-img info failed".to_string());
+    }
+    let info = String::from_utf8_lossy(&output.stdout);
+    if !info.contains("\"format\": \"qcow2\"") && !info.contains("\"format\":\"qcow2\"") {
+        return Err(format!("qcow2 smoke failed: {info}"));
+    }
+    Ok(())
+}
+
+fn smoke_prove_kernel_image(path: &Path) -> bool {
+    let Ok(bytes) = fs::read(path) else {
+        return false;
+    };
+    bytes.starts_with(b"\x7fELF")
+        || (bytes.starts_with(b"MZ") && bytes.windows(4).any(|w| w == b"HdrS"))
+}
+
+fn smoke_prove_initrd_image(path: &Path) -> bool {
+    let Ok(bytes) = fs::read(path) else {
+        return false;
+    };
+    bytes.starts_with(&[0x1f, 0x8b])
+        || bytes.starts_with(b"070701")
+        || bytes.starts_with(b"070702")
+        || bytes.windows(4).any(|w| w == [0x28, 0xb5, 0x2f, 0xfd])
 }
 
 fn write_sparse_marker(path: &Path, size: u64, marker: &str) -> std::io::Result<()> {

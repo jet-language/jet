@@ -113,6 +113,7 @@ fn build_generation(
         realized.push(entry);
     }
     if boot.init == "/sbin/init"
+        && !flags.real_tier
         && !realized
             .iter()
             .any(|entry| entry.name == SYSTEMD_INIT_PACKAGE)
@@ -156,36 +157,15 @@ fn build_generation(
         };
         realized.push(entry);
     }
-    for package in desktop_default_required_packages(system) {
-        if realized.iter().any(|entry| entry.name == *package) {
-            continue;
-        }
-        let Some(raw) = jetos_runtime_package_ref(&plan.table, package, flags.offline) else {
-            theme.error_coded(
-                "E1288",
-                "jetos GNOME desktop package is missing",
-                "D-JOS-DESKTOP1=A: the default jetos desktop profile needs first-party GNOME session packages in the system closure.",
-                "declare first-party packages for gdm, gnome-session, and gnome-shell, or select a ratified non-GNOME desktop profile.",
-            );
-            return None;
-        };
-        let spec = match RefSpec::classify_in(&raw, &plan.table) {
-            Ok(spec) => spec,
-            Err(err) => {
-                super::Output::ref_error(theme, &err);
-                return None;
+    // Real tier: the hidden NixOS backend realizes display-manager/session
+    // packages from nixpkgs via mapped desktop options. Skip first-party
+    // GNOME scaffolding here (same rule as the CachyOS kernel skip above).
+    if !flags.real_tier {
+        for package in desktop_default_required_packages(system) {
+            if realized.iter().any(|entry| entry.name == *package) {
+                continue;
             }
-        };
-        let entry = match try_realize_ref(
-            theme,
-            &roots,
-            flags,
-            &plan.table,
-            &spec,
-            name_w.max(package.len()),
-        ) {
-            Ok(entry) => entry,
-            Err(_) => {
+            let Some(raw) = jetos_runtime_package_ref(&plan.table, package, flags.offline) else {
                 theme.error_coded(
                     "E1288",
                     "jetos GNOME desktop package is missing",
@@ -193,9 +173,35 @@ fn build_generation(
                     "declare first-party packages for gdm, gnome-session, and gnome-shell, or select a ratified non-GNOME desktop profile.",
                 );
                 return None;
-            }
-        };
-        realized.push(entry);
+            };
+            let spec = match RefSpec::classify_in(&raw, &plan.table) {
+                Ok(spec) => spec,
+                Err(err) => {
+                    super::Output::ref_error(theme, &err);
+                    return None;
+                }
+            };
+            let entry = match try_realize_ref(
+                theme,
+                &roots,
+                flags,
+                &plan.table,
+                &spec,
+                name_w.max(package.len()),
+            ) {
+                Ok(entry) => entry,
+                Err(_) => {
+                    theme.error_coded(
+                        "E1288",
+                        "jetos GNOME desktop package is missing",
+                        "D-JOS-DESKTOP1=A: the default jetos desktop profile needs first-party GNOME session packages in the system closure.",
+                        "declare first-party packages for gdm, gnome-session, and gnome-shell, or select a ratified non-GNOME desktop profile.",
+                    );
+                    return None;
+                }
+            };
+            realized.push(entry);
+        }
     }
     if !run_kernel_bootstrap_builder(theme, &boot, &mut realized, !flags.offline, &dir) {
         return None;

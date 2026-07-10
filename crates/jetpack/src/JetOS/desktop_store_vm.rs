@@ -317,6 +317,28 @@ fn write_desktop_breadth(dir: &Path, system: &SystemPlan) -> std::io::Result<()>
             enable_unit(&unit_dir, "multi-user.target", unit)?;
         }
     }
+    if clean_bool_json(
+        &option_value(system, &["services.virtualization.docker.enable"])
+            .unwrap_or_else(|| "false".to_string()),
+    ) == "true"
+    {
+        fs::write(
+            unit_dir.join("docker.service"),
+            "[Unit]\nDescription=Docker Application Container Engine\n\n[Service]\nExecStart=/run/current-system/sw/bin/dockerd\n\n[Install]\nWantedBy=multi-user.target\n",
+        )?;
+        enable_unit(&unit_dir, "multi-user.target", "docker.service")?;
+    }
+    if clean_bool_json(
+        &option_value(system, &["hardware.bluetooth.enable"])
+            .unwrap_or_else(|| "false".to_string()),
+    ) == "true"
+    {
+        fs::write(
+            unit_dir.join("bluetooth.service"),
+            "[Unit]\nDescription=Bluetooth service\n\n[Service]\nExecStart=/run/current-system/sw/bin/bluetoothd\n\n[Install]\nWantedBy=multi-user.target\n",
+        )?;
+        enable_unit(&unit_dir, "multi-user.target", "bluetooth.service")?;
+    }
     let gaming = prefixed_options(system, "services.gaming.");
     if !gaming.is_empty() {
         fs::write(

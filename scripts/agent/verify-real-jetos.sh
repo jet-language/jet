@@ -6,8 +6,9 @@ usage() {
 usage: verify-real-jetos.sh --host <name> --disk <path> [--config <path>] [--dry-run]
 
 Runs the real JetOS replacement gate:
-  jet os vm prove <host> --disk <path> --real
+  jet os vm prove <path@host> --disk <path> --real
 
+When --config is set, the host argument becomes `<config>@<host>` (D-JPK-OSHOST1).
 This script does not create fake tools, does not accept harness-only proof, and
 does not mark replacement acceptance. It exits non-zero unless the real guest
 proof command succeeds. --dry-run only prints the command; it is not proof.
@@ -55,10 +56,12 @@ if [[ -z "$host" || -z "$disk" ]]; then
   exit 2
 fi
 
-cmd=(jet os vm prove "$host" --disk "$disk" --real)
+target="$host"
 if [[ -n "$config" ]]; then
-  cmd+=(--config "$config")
+  target="${config}@${host}"
 fi
+
+cmd=(jet os vm prove "$target" --disk "$disk" --real)
 
 printf 'real JetOS proof command:'
 printf ' %q' "${cmd[@]}"
