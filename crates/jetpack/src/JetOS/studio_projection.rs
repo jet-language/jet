@@ -126,7 +126,7 @@ fn studio_artifact_json(dir: &Path, name: &str) -> String {
     )
 }
 
-fn studio_pages_json() -> String {
+pub(crate) fn studio_pages_json() -> String {
     STUDIO_PAGES
         .iter()
         .map(|(id, title, group, needs)| {
@@ -322,7 +322,7 @@ proof required: check, plan, build, proof</pre></article>
 </div>
 <div id=\"settings\" class=\"page\" data-page-kind=\"settings\">
 <div class=\"grid\">
-<article class=\"panel\"><header><h2>Settings</h2></header><div class=\"form\">{settings_controls}</div></article>
+<article class=\"panel\"><header><h2>Settings</h2></header><div id=\"settings-controls\" class=\"form\">{settings_controls}</div></article>
 <article class=\"panel\"><header><h2>Exact Jet diff</h2></header><pre id=\"tx-output\"></pre></article>
 </div>
 </div>
@@ -337,8 +337,8 @@ transactions: audited rekey/add only</pre><table>{options}</table></article></di
 <div id=\"fleet\" class=\"page\" data-page-kind=\"fleet\" data-fleet-mode=\"adaptive\"><article class=\"panel\"><header><h2>Fleet</h2></header><pre>single host default: true
 rollout gate: proof-before-switch
 rollback on failed health window</pre></article></div>
-<div id=\"generations\" class=\"page\" data-page-kind=\"generations\"><article class=\"panel\"><header><h2>Generations</h2></header><pre>current generation: {host}
-rollback action stages an inverse changeset through the same apply gate.</pre></article></div>
+<div id=\"generations\" class=\"page\" data-page-kind=\"generations\"><article class=\"panel\"><header><h2>Generations</h2></header><pre>current generation: {generation}
+Rollback restores source through the same Changeset review and Apply gate.</pre><div class=\"actions\"><button data-changeset-action=\"stage-rollback\">Stage last source rollback</button><button data-run=\"generations\">List generations</button></div></article></div>
 <div id=\"changeset\" class=\"page\" data-page-kind=\"changeset\" data-apply-gate=\"single-source-transaction\">
 <div class=\"grid\">
 <article class=\"panel\"><header><h2>Changeset</h2></header><pre id=\"changeset-diff\">No staged changes.</pre></article>
@@ -348,7 +348,7 @@ source transaction: config.jet only</pre>
 <div class=\"actions\">
 <button data-changeset-action=\"apply\">Apply to config.jet</button>
 <button data-run=\"build\">Build only</button>
-<button data-run=\"proof\">Run proof</button>
+<button data-pipeline=\"build-switch\">Build and switch</button>
 <button data-changeset-action=\"discard\">Discard</button>
 </div></article>
 </div>
@@ -364,8 +364,7 @@ source transaction: config.jet only</pre>
 <label>Value<input id=\"tx-value\" value=\"{host}\"></label>
 </div>
 <div class=\"actions\">
-<button data-tx=\"preview\">Preview</button>
-<button data-tx=\"write\">Save</button>
+<button data-stage-source=\"true\">Stage edit</button>
 <a href=\"/canvas\" data-open-canvas=\"source\">Open Canvas</a>
 </div>
 <pre id=\"source-tx-output\"></pre>
@@ -377,7 +376,7 @@ source transaction: config.jet only</pre>
 <button data-run=\"plan\">Plan</button>
 <button data-run=\"build\">Build</button>
 <button data-run=\"proof\">Proof</button>
-<button data-run=\"generations\">Rollback</button>
+<button data-run=\"generations\">List generations</button>
 </div>
 <pre id=\"run-output\">plan.json proof.txt provenance.json vm-proof.txt</pre>
 </article>
@@ -391,18 +390,80 @@ function showPage(id) {{
   for (const page of document.querySelectorAll('.page')) page.classList.toggle('active', page.id === id);
   for (const link of document.querySelectorAll('[data-page]')) link.classList.toggle('active', link.dataset.page === id);
 }}
-for (const link of document.querySelectorAll('[data-page]')) {{
+function wirePageLink(link) {{
   link.addEventListener('click', (event) => {{
     event.preventDefault();
     showPage(link.dataset.page);
   }});
 }}
+for (const link of document.querySelectorAll('[data-page]')) wirePageLink(link);
 for (const button of document.querySelectorAll('[data-open-page]')) {{
   button.addEventListener('click', () => showPage(button.dataset.openPage));
 }}
 async function refreshSource() {{
   const res = await fetch('/studio/source');
   document.getElementById('source-output').textContent = await res.text();
+}}
+async function refreshProjection() {{
+  const res = await fetch('/studio/data.json');
+  const projection = await res.json();
+  if (!res.ok) throw new Error(projection.error || 'Studio projection failed');
+  installPageRegistry(projection.page_registry || []);
+  renderProjection(projection.system_plan || projection);
+  return projection;
+}}
+function installPageRegistry(registry) {{
+  const nav = document.querySelector('[data-page-registry=\"studio-pages\"]');
+  nav.replaceChildren();
+  for (const entry of registry) {{
+    let page = document.getElementById(entry.id);
+    if (!page) {{
+      page = document.createElement('div');
+      page.id = entry.id;
+      page.className = 'page';
+      page.dataset.pageKind = entry.id;
+      const panel = document.createElement('article');
+      panel.className = 'panel';
+      const header = document.createElement('header');
+      const title = document.createElement('h2');
+      title.textContent = entry.title;
+      header.append(title);
+      const detail = document.createElement('div');
+      detail.className = 'empty';
+      detail.textContent = `Live data: ${{entry.data_needs || 'none'}}`;
+      panel.append(header, detail);
+      page.append(panel);
+      document.querySelector('section').insertBefore(page, document.querySelector('.changeset-tray'));
+    }}
+    const link = document.createElement('a');
+    link.href = `#${{entry.id}}`;
+    link.dataset.page = entry.id;
+    link.textContent = entry.title;
+    wirePageLink(link);
+    nav.append(link);
+  }}
+}}
+function renderProjection(plan) {{
+  const controls = document.getElementById('settings-controls');
+  controls.replaceChildren();
+  for (const option of plan.options || []) {{
+    const row = document.createElement('div');
+    row.className = 'setting-control';
+    const label = document.createElement('label');
+    const name = document.createElement('span');
+    name.textContent = option.key;
+    const input = document.createElement('input');
+    input.dataset.settingKey = option.key;
+    input.value = option.value;
+    label.append(name, input);
+    const stage = document.createElement('button');
+    stage.type = 'button';
+    stage.textContent = 'Stage change';
+    stage.dataset.stageSetting = option.key;
+    stage.addEventListener('click', () => stageSetting(option.key, input.value));
+    row.append(label, stage);
+    controls.append(row);
+  }}
 }}
 async function studioPost(path, payload) {{
   const res = await fetch(path, {{ method: 'POST', headers: {{ 'Content-Type': 'application/json' }}, body: JSON.stringify(payload) }});
@@ -422,30 +483,21 @@ async function runStudioAction(action) {{
   document.getElementById('run-output').textContent = result.stdout || result.stderr || result.error || JSON.stringify(result, null, 2);
   return result;
 }}
-for (const button of document.querySelectorAll('[data-tx]')) {{
+async function stageSetting(key, value) {{
+  const result = await studioPost('/studio/transaction', {{ op: 'set-option', key, value }});
+  renderChangeset(result);
+  showPage('changeset');
+  return result;
+}}
+for (const button of document.querySelectorAll('[data-stage-source]')) {{
   button.addEventListener('click', async () => {{
-    const write = button.dataset.tx === 'write';
-    const result = await studioPost('/studio/transaction', {{
-      op: 'set-option',
-      key: document.getElementById('tx-key').value,
-      value: document.getElementById('tx-value').value,
-      write
-    }});
-    renderChangeset(result);
-    if (write && !result.error) await refreshSource();
+    await stageSetting(document.getElementById('tx-key').value, document.getElementById('tx-value').value);
   }});
 }}
 for (const button of document.querySelectorAll('[data-stage-setting]')) {{
   button.addEventListener('click', async () => {{
     const input = document.querySelector('[data-setting-key=\"' + button.dataset.stageSetting + '\"]');
-    const result = await studioPost('/studio/transaction', {{
-      op: 'set-option',
-      key: button.dataset.stageSetting,
-      value: input ? input.value : '',
-      write: false
-    }});
-    renderChangeset(result);
-    showPage('changeset');
+    await stageSetting(button.dataset.stageSetting, input ? input.value : '');
   }});
 }}
 for (const button of document.querySelectorAll('[data-changeset-action]')) {{
@@ -455,8 +507,9 @@ for (const button of document.querySelectorAll('[data-changeset-action]')) {{
     renderChangeset(result);
     if (action === 'apply' && !result.error) {{
       await refreshSource();
-      const check = await runStudioAction('check');
-      if (check.success) await runStudioAction('plan');
+      await refreshProjection();
+    }} else if (action === 'stage-rollback' && !result.error) {{
+      showPage('changeset');
     }}
   }});
 }}
@@ -470,8 +523,19 @@ for (const button of document.querySelectorAll('[data-run]')) {{
     await runStudioAction(button.dataset.run);
   }});
 }}
+for (const button of document.querySelectorAll('[data-pipeline=\"build-switch\"]')) {{
+  button.addEventListener('click', async () => {{
+    if (studioChangesetState === 'staged') return;
+    const build = await runStudioAction('build');
+    if (!build.success) return;
+    const proof = await runStudioAction('proof');
+    if (!proof.success) return;
+    await runStudioAction('switch');
+  }});
+}}
 Promise.all([
   refreshSource(),
+  refreshProjection(),
   studioPost('/studio/transaction', {{ op: 'status' }}).then(renderChangeset)
 ]);
 </script>

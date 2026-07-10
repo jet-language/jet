@@ -3,6 +3,9 @@ struct StudioContext {
     host: String,
     offline: bool,
     changeset: std::sync::Mutex<Option<StudioChangeSet>>,
+    last_applied: std::sync::Mutex<Option<StudioAppliedChange>>,
+    live_projection: std::sync::Mutex<Option<String>>,
+    proved_source: std::sync::Mutex<Option<String>>,
 }
 
 fn studio_host(parsed: &Parsed) -> Option<String> {
@@ -28,6 +31,9 @@ fn studio_context(parsed: &Parsed) -> Option<StudioContext> {
         host,
         offline,
         changeset: std::sync::Mutex::new(None),
+        last_applied: std::sync::Mutex::new(None),
+        live_projection: std::sync::Mutex::new(None),
+        proved_source: std::sync::Mutex::new(None),
     })
 }
 
@@ -129,7 +135,13 @@ fn handle_studio_request(
             ("200 OK", "text/html; charset=utf-8", fs_read_for_http(app))
         }
         "/studio/app.json" => ("200 OK", "application/json", fs_read_for_http(meta)),
-        "/studio/data.json" => ("200 OK", "application/json", fs_read_for_http(data)),
+        "/studio/data.json" => match context {
+            Some(context) => match studio_live_projection(context, data) {
+                Ok(body) => ("200 OK", "application/json", body.into_bytes()),
+                Err(body) => ("500 Internal Server Error", "application/json", body.into_bytes()),
+            },
+            None => ("200 OK", "application/json", fs_read_for_http(data)),
+        },
         "/studio/source" => match context {
             Some(context) => (
                 "200 OK",

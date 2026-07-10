@@ -5,8 +5,22 @@ struct StudioChangeSet {
 }
 
 struct StudioChange {
+    op: String,
     key: String,
     value: String,
+}
+
+struct StudioAppliedChange {
+    before_source: String,
+    after_source: String,
+}
+
+struct StudioCommandResult {
+    action: String,
+    status: i32,
+    success: bool,
+    stdout: String,
+    stderr: String,
 }
 
 fn handle_studio_transaction(
@@ -29,6 +43,9 @@ fn handle_studio_transaction(
     if op == "apply" {
         return studio_changeset_apply(context);
     }
+    if op == "stage-rollback" {
+        return studio_changeset_stage_rollback(context);
+    }
     if op != "set-option" {
         return (
             "400 Bad Request",
@@ -44,7 +61,12 @@ fn handle_studio_transaction(
             "{\"error\":\"missing value\"}".to_string(),
         );
     };
-    let write = json_bool_field(body, "write");
+    if json_bool_field(body, "write") {
+        return (
+            "400 Bad Request",
+            "{\"error\":\"direct Studio writes are disabled\",\"fix\":\"stage the edit, review the exact diff, then Apply the Changeset\"}".to_string(),
+        );
+    }
     let source = match std::fs::read_to_string(&context.config) {
         Ok(source) => source,
         Err(e) => {
@@ -96,37 +118,16 @@ fn handle_studio_transaction(
         });
         staged.next_source = next;
         staged.changes.push(StudioChange {
+            op: "set-option".to_string(),
             key: key.clone(),
             value: value.clone(),
         });
     }
-    if write {
-        let Some(staged) = changeset.as_ref() else {
-            return (
-                "200 OK",
-                studio_changeset_response(context, "empty", true, false, None),
-            );
-        };
-        if let Err(e) = atomic_write_studio_source(&context.config, &staged.next_source) {
-            return (
-                "500 Internal Server Error",
-                format!(
-                    "{{\"error\":{},\"path\":{}}}",
-                    JSON::quote(&format!("applying Changeset failed: {e}")),
-                    JSON::quote(&context.config.display().to_string())
-                ),
-            );
-        }
-        let response =
-            studio_changeset_response(context, "applied", true, true, changeset.as_ref());
-        *changeset = None;
-        return ("200 OK", response);
-    }
     let response = studio_changeset_response(
         context,
         if changeset.is_some() { "staged" } else { "empty" },
-        false,
         changed,
+        false,
         changeset.as_ref(),
     );
     ("200 OK", response)
@@ -139,8 +140,8 @@ fn studio_changeset_status(context: &StudioContext) -> (&'static str, String) {
             studio_changeset_response(
                 context,
                 if changeset.is_some() { "staged" } else { "empty" },
-                false,
                 changeset.is_some(),
+                false,
                 changeset.as_ref(),
             ),
         ),
@@ -158,7 +159,7 @@ fn studio_changeset_discard(context: &StudioContext) -> (&'static str, String) {
             *changeset = None;
             (
                 "200 OK",
-                studio_changeset_response(context, "discarded", false, changed, None),
+                studio_changeset_response(context, "discarded", changed, false, None),
             )
         }
         Err(_) => (
@@ -206,22 +207,103 @@ fn studio_changeset_apply(context: &StudioContext) -> (&'static str, String) {
         return (
             "500 Internal Server Error",
             format!(
-                "{{\"error\":{}}}",
+                "{{\"error\":{},\"reprojected\":false}}",
                 JSON::quote(&format!("applying Changeset failed: {e}"))
             ),
         );
     }
-    let response =
-        studio_changeset_response(context, "applied", true, true, changeset.as_ref());
+    if let Err(error) = rebuild_studio_projection(context) {
+        let restore = atomic_write_studio_source(&context.config, &staged.base_source);
+        let _ = rebuild_studio_projection(context);
+        return (
+            "422 Unprocessable Entity",
+            format!(
+                "{{\"error\":{},\"restored\":{},\"reprojected\":false}}",
+                JSON::quote(&error),
+                if restore.is_ok() { "true" } else { "false" }
+            ),
+        );
+    }
+    if let Ok(mut applied) = context.last_applied.lock() {
+        *applied = Some(StudioAppliedChange {
+            before_source: staged.base_source.clone(),
+            after_source: staged.next_source.clone(),
+        });
+    }
+    if let Ok(mut proved) = context.proved_source.lock() {
+        *proved = None;
+    }
+    let response = studio_changeset_response(context, "applied", true, true, changeset.as_ref());
     *changeset = None;
     ("200 OK", response)
+}
+
+fn studio_changeset_stage_rollback(context: &StudioContext) -> (&'static str, String) {
+    let applied = match context.last_applied.lock() {
+        Ok(applied) => applied,
+        Err(_) => {
+            return (
+                "500 Internal Server Error",
+                "{\"error\":\"Studio rollback state is unavailable\"}".to_string(),
+            )
+        }
+    };
+    let Some(applied) = applied.as_ref() else {
+        return (
+            "409 Conflict",
+            "{\"error\":\"no applied source Changeset is available to roll back\"}".to_string(),
+        );
+    };
+    let current = match std::fs::read_to_string(&context.config) {
+        Ok(source) => source,
+        Err(e) => {
+            return (
+                "500 Internal Server Error",
+                format!("{{\"error\":{}}}", JSON::quote(&format!("reading config failed: {e}"))),
+            )
+        }
+    };
+    if current != applied.after_source {
+        return (
+            "409 Conflict",
+            "{\"error\":\"config.jet changed after the last applied Changeset\",\"fix\":\"review current source before staging a rollback\"}".to_string(),
+        );
+    }
+    let mut changeset = match context.changeset.lock() {
+        Ok(changeset) => changeset,
+        Err(_) => {
+            return (
+                "500 Internal Server Error",
+                "{\"error\":\"Studio changeset state is unavailable\"}".to_string(),
+            )
+        }
+    };
+    if changeset.is_some() {
+        return (
+            "409 Conflict",
+            "{\"error\":\"discard or apply the current Changeset before staging rollback\"}".to_string(),
+        );
+    }
+    *changeset = Some(StudioChangeSet {
+        base_source: current,
+        next_source: applied.before_source.clone(),
+        changes: vec![StudioChange {
+            op: "restore-source".to_string(),
+            key: "config.jet".to_string(),
+            value: "previous applied source".to_string(),
+        }],
+    });
+    (
+        "200 OK",
+        studio_changeset_response(context, "staged", true, false, changeset.as_ref()),
+    )
 }
 
 fn studio_changeset_response(
     context: &StudioContext,
     state: &str,
-    write: bool,
     changed: bool,
+    reprojected: bool,
     changeset: Option<&StudioChangeSet>,
 ) -> String {
     let (count, diff, source, edits) = match changeset {
@@ -231,7 +313,8 @@ fn studio_changeset_response(
                 .iter()
                 .map(|change| {
                     format!(
-                        "{{\"op\":\"set-option\",\"key\":{},\"value\":{}}}",
+                        "{{\"op\":{},\"key\":{},\"value\":{}}}",
+                        JSON::quote(&change.op),
                         JSON::quote(&change.key),
                         JSON::quote(&change.value)
                     )
@@ -248,14 +331,13 @@ fn studio_changeset_response(
         None => (0, String::new(), String::new(), String::new()),
     };
     format!(
-        "{{\"host\":{},\"path\":{},\"state\":{},\"write\":{},\"changed\":{},\"staged_count\":{},\"reprojected\":{},\"diff\":{},\"source\":{},\"edits\":[{}]}}",
+        "{{\"host\":{},\"path\":{},\"state\":{},\"write\":false,\"changed\":{},\"staged_count\":{},\"reprojected\":{},\"diff\":{},\"source\":{},\"edits\":[{}]}}",
         JSON::quote(&context.host),
         JSON::quote(&context.config.display().to_string()),
         JSON::quote(state),
-        if write { "true" } else { "false" },
         if changed { "true" } else { "false" },
         if state == "applied" { 0 } else { count },
-        if state == "applied" { "true" } else { "false" },
+        if reprojected { "true" } else { "false" },
         JSON::quote(&diff),
         JSON::quote(&source),
         edits,
@@ -295,17 +377,66 @@ fn handle_studio_run(body: &str, context: Option<&StudioContext>) -> (&'static s
             "{\"error\":\"missing action\"}".to_string(),
         );
     };
-    if !["check", "plan", "build", "proof", "generations"].contains(&action.as_str()) {
+    if !["check", "plan", "build", "proof", "switch", "generations"]
+        .contains(&action.as_str())
+    {
         return (
             "400 Bad Request",
             "{\"error\":\"unsupported Studio run action\"}".to_string(),
         );
     }
-    let Some(jet) = sibling_binary("jet") else {
+    if ["build", "proof", "switch"].contains(&action.as_str())
+        && context
+            .changeset
+            .lock()
+            .map(|changeset| changeset.is_some())
+            .unwrap_or(true)
+    {
         return (
-            "500 Internal Server Error",
-            "{\"error\":\"could not find sibling jet binary\"}".to_string(),
+            "409 Conflict",
+            "{\"error\":\"apply or discard the staged Changeset before build, proof, or switch\"}".to_string(),
         );
+    }
+    if action == "switch" {
+        let source = std::fs::read_to_string(&context.config).unwrap_or_default();
+        let proved = context
+            .proved_source
+            .lock()
+            .map(|proved| proved.as_deref() == Some(source.as_str()))
+            .unwrap_or(false);
+        if !proved {
+            return (
+                "409 Conflict",
+                "{\"error\":\"current config.jet has no matching successful proof\",\"fix\":\"build and prove this exact source before switching\"}".to_string(),
+            );
+        }
+    }
+    let result = match run_studio_command(context, &action) {
+        Ok(result) => result,
+        Err(error) => {
+            return (
+                "500 Internal Server Error",
+                format!("{{\"error\":{}}}", JSON::quote(&error)),
+            )
+        }
+    };
+    if action == "proof" && result.success {
+        if let (Ok(source), Ok(mut proved)) = (
+            std::fs::read_to_string(&context.config),
+            context.proved_source.lock(),
+        ) {
+            *proved = Some(source);
+        }
+    }
+    ("200 OK", studio_command_json(context, &result))
+}
+
+fn run_studio_command(
+    context: &StudioContext,
+    action: &str,
+) -> Result<StudioCommandResult, String> {
+    let Some(jet) = sibling_binary("jet") else {
+        return Err("could not find sibling jet binary".to_string());
     };
     let cwd = context
         .config
@@ -323,33 +454,84 @@ fn handle_studio_run(body: &str, context: Option<&StudioContext>) -> (&'static s
     if context.offline {
         cmd.arg("--offline");
     }
-    if action == "build" {
+    if action == "build" || action == "switch" {
         cmd.arg("--name").arg("zz-studio-candidate");
     }
-    let output = match cmd.current_dir(&cwd).output() {
-        Ok(output) => output,
-        Err(e) => {
-            return (
-                "500 Internal Server Error",
-                format!(
-                    "{{\"error\":{}}}",
-                    JSON::quote(&format!("running jet failed: {e}"))
-                ),
-            )
-        }
-    };
-    (
-        "200 OK",
-        format!(
-            "{{\"host\":{},\"action\":{},\"status\":{},\"success\":{},\"stdout\":{},\"stderr\":{}}}",
-            JSON::quote(&context.host),
-            JSON::quote(&action),
-            output.status.code().unwrap_or(1),
-            if output.status.success() { "true" } else { "false" },
-            JSON::quote(&String::from_utf8_lossy(&output.stdout)),
-            JSON::quote(&String::from_utf8_lossy(&output.stderr))
-        ),
+    if action == "switch" {
+        cmd.arg("--yes");
+    }
+    let output = cmd
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("running jet failed: {e}"))?;
+    Ok(StudioCommandResult {
+        action: action.to_string(),
+        status: output.status.code().unwrap_or(1),
+        success: output.status.success(),
+        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+    })
+}
+
+fn studio_command_json(context: &StudioContext, result: &StudioCommandResult) -> String {
+    format!(
+        "{{\"host\":{},\"action\":{},\"status\":{},\"success\":{},\"stdout\":{},\"stderr\":{}}}",
+        JSON::quote(&context.host),
+        JSON::quote(&result.action),
+        result.status,
+        if result.success { "true" } else { "false" },
+        JSON::quote(&result.stdout),
+        JSON::quote(&result.stderr)
     )
+}
+
+fn studio_live_projection(context: &StudioContext, generation_data: &Path) -> Result<String, String> {
+    if !context.config.is_file() {
+        return std::fs::read_to_string(generation_data)
+            .map_err(|e| format!("reading installed Studio projection failed: {e}"));
+    }
+    if let Ok(projection) = context.live_projection.lock() {
+        if let Some(projection) = projection.as_ref() {
+            return Ok(projection.clone());
+        }
+    }
+    rebuild_studio_projection_from(context, generation_data)
+}
+
+fn rebuild_studio_projection(context: &StudioContext) -> Result<String, String> {
+    let root = std::env::var_os("JETOS_STUDIO_ROOT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/run/current-system"));
+    rebuild_studio_projection_from(context, &root.join("studio/data.json"))
+}
+
+fn rebuild_studio_projection_from(
+    context: &StudioContext,
+    generation_data: &Path,
+) -> Result<String, String> {
+    let check = run_studio_command(context, "check")?;
+    if !check.success {
+        return Err(format!("jet os check failed: {}", check.stderr.trim()));
+    }
+    let plan = run_studio_command(context, "plan")?;
+    if !plan.success {
+        return Err(format!("jet os plan failed: {}", plan.stderr.trim()));
+    }
+    let generation = std::fs::read_to_string(generation_data)
+        .unwrap_or_else(|_| "null".to_string());
+    let projection = format!(
+        "{{\"kind\":\"jetos-studio-projection\",\"source_truth\":\"live-checked-plan\",\"host\":{},\"page_registry\":[{}],\"system_plan\":{},\"generation_projection\":{}}}",
+        JSON::quote(&context.host),
+        super::JetOS::studio_pages_json(),
+        plan.stdout.trim(),
+        generation.trim(),
+    );
+    let mut live = context
+        .live_projection
+        .lock()
+        .map_err(|_| "Studio live projection state is unavailable".to_string())?;
+    *live = Some(projection.clone());
+    Ok(projection)
 }
 
 fn sibling_binary(name: &str) -> Option<PathBuf> {
@@ -420,21 +602,46 @@ fn source_diff(path: &Path, before: &str, after: &str) -> String {
     if before == after {
         return format!("diff -- {}\n(no changes)\n", path.display());
     }
-    let mut diff = format!("diff -- {}\n", path.display());
+    let mut diff = format!(
+        "diff --git a/{0} b/{0}\n--- a/{0}\n+++ b/{0}\n",
+        path.display()
+    );
     let before_lines = before.lines().collect::<Vec<_>>();
     let after_lines = after.lines().collect::<Vec<_>>();
-    let max = before_lines.len().max(after_lines.len());
-    for idx in 0..max {
-        let old = before_lines.get(idx).copied();
-        let new = after_lines.get(idx).copied();
-        if old == new {
-            continue;
+    let width = after_lines.len() + 1;
+    let mut lcs = vec![0_usize; (before_lines.len() + 1) * width];
+    for old in (0..before_lines.len()).rev() {
+        for new in (0..after_lines.len()).rev() {
+            lcs[old * width + new] = if before_lines[old] == after_lines[new] {
+                1 + lcs[(old + 1) * width + new + 1]
+            } else {
+                lcs[(old + 1) * width + new].max(lcs[old * width + new + 1])
+            };
         }
-        if let Some(old) = old {
-            diff.push_str(&format!("-{old}\n"));
-        }
-        if let Some(new) = new {
-            diff.push_str(&format!("+{new}\n"));
+    }
+    diff.push_str(&format!(
+        "@@ -1,{} +1,{} @@\n",
+        before_lines.len(),
+        after_lines.len()
+    ));
+    let (mut old, mut new) = (0, 0);
+    while old < before_lines.len() || new < after_lines.len() {
+        if old < before_lines.len()
+            && new < after_lines.len()
+            && before_lines[old] == after_lines[new]
+        {
+            diff.push_str(&format!(" {}\n", before_lines[old]));
+            old += 1;
+            new += 1;
+        } else if new < after_lines.len()
+            && (old == before_lines.len()
+                || lcs[old * width + new + 1] >= lcs[(old + 1) * width + new])
+        {
+            diff.push_str(&format!("+{}\n", after_lines[new]));
+            new += 1;
+        } else {
+            diff.push_str(&format!("-{}\n", before_lines[old]));
+            old += 1;
         }
     }
     diff

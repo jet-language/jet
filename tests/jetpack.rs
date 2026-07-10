@@ -3702,7 +3702,8 @@ fn os_switch_activates_and_sets_current() {
         "studio: {studio_html}"
     );
     assert!(
-        studio_html.contains("data-tx=\"preview\""),
+        studio_html.contains("data-stage-source=\"true\"")
+            && studio_html.contains("data-pipeline=\"build-switch\""),
         "studio: {studio_html}"
     );
     assert!(
@@ -3951,6 +3952,26 @@ fn jetos_studio_transaction_previews_and_writes_source() {
         .strip_prefix("http://")
         .and_then(|s| s.strip_suffix("/studio/"))
         .expect("service url");
+    let initial_data = studio_http(addr, "GET", "/studio/data.json", "");
+    assert!(initial_data.contains("live-checked-plan"), "data: {initial_data}");
+    assert!(initial_data.contains("network.hostName"), "data: {initial_data}");
+    let bypass = studio_http(
+        addr,
+        "POST",
+        "/studio/transaction",
+        "{\"op\":\"set-option\",\"key\":\"network.hostName\",\"value\":\"bypass\",\"write\":true}",
+    );
+    assert!(bypass.contains("400 Bad Request"), "bypass: {bypass}");
+    assert!(bypass.contains("direct Studio writes are disabled"), "bypass: {bypass}");
+    let inserted = studio_http(
+        addr,
+        "POST",
+        "/studio/transaction",
+        "{\"op\":\"set-option\",\"key\":\"network.mtu\",\"value\":\"1500\"}",
+    );
+    assert!(inserted.contains("@@ -1,"), "inserted: {inserted}");
+    assert!(inserted.contains("+            network.mtu: 1500,"), "inserted: {inserted}");
+    let _ = studio_http(addr, "POST", "/studio/transaction", "{\"op\":\"discard\"}");
     let preview = studio_http(
         addr,
         "POST",
@@ -4005,6 +4026,22 @@ fn jetos_studio_transaction_previews_and_writes_source() {
         "{\"op\":\"set-option\",\"key\":\"network.hostName\",\"value\":\"aurora\",\"write\":false}",
     );
     assert!(preview.contains("\"state\":\"staged\""), "preview: {preview}");
+    let original = fs::read_to_string(project.join("config.jet")).unwrap();
+    fs::write(project.join("config.jet"), format!("{original}// external edit\n")).unwrap();
+    let stale = studio_http(addr, "POST", "/studio/transaction", "{\"op\":\"apply\"}");
+    assert!(stale.contains("409 Conflict"), "stale: {stale}");
+    assert!(stale.contains("changed after this Changeset"), "stale: {stale}");
+    fs::write(project.join("config.jet"), &original).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let original_mode = fs::metadata(&project.path).unwrap().permissions().mode();
+        fs::set_permissions(&project.path, fs::Permissions::from_mode(0o555)).unwrap();
+        let failed = studio_http(addr, "POST", "/studio/transaction", "{\"op\":\"apply\"}");
+        fs::set_permissions(&project.path, fs::Permissions::from_mode(original_mode)).unwrap();
+        assert!(failed.contains("500 Internal Server Error"), "failed: {failed}");
+        assert!(failed.contains("\"reprojected\":false"), "failed: {failed}");
+    }
     let write = studio_http(addr, "POST", "/studio/transaction", "{\"op\":\"apply\"}");
     assert!(write.contains("200 OK"), "write: {write}");
     assert!(write.contains("\"state\":\"applied\""), "write: {write}");
@@ -4020,6 +4057,9 @@ fn jetos_studio_transaction_previews_and_writes_source() {
         source.contains("network.hostName: aurora"),
         "source: {source}"
     );
+    let live_data = studio_http(addr, "GET", "/studio/data.json", "");
+    assert!(live_data.contains("live-checked-plan"), "data: {live_data}");
+    assert!(live_data.contains("aurora"), "data: {live_data}");
     let plan = jet()
         .args(["os", "plan", "halcyon", "--json", "--no-color", "--offline"])
         .current_dir(&project.path)
@@ -4041,14 +4081,31 @@ fn jetos_studio_transaction_previews_and_writes_source() {
     assert!(plan.contains("aurora"), "plan: {plan}");
     let build = studio_http(addr, "POST", "/studio/run", "{\"action\":\"build\"}");
     assert!(build.contains("\"success\":true"), "build: {build}");
+    let unproved_switch = studio_http(addr, "POST", "/studio/run", "{\"action\":\"switch\"}");
+    assert!(unproved_switch.contains("409 Conflict"), "switch: {unproved_switch}");
     let proof = studio_http(addr, "POST", "/studio/run", "{\"action\":\"proof\"}");
     assert!(proof.contains("\"success\":true"), "proof: {proof}");
     assert!(proof.contains("aurora"), "proof: {proof}");
+    let switched = studio_http(addr, "POST", "/studio/run", "{\"action\":\"switch\"}");
+    assert!(switched.contains("\"success\":true"), "switch: {switched}");
     let generations = studio_http(addr, "POST", "/studio/run", "{\"action\":\"generations\"}");
     assert!(
         generations.contains("zz-studio-candidate"),
         "generations: {generations}"
     );
+    let rollback = studio_http(
+        addr,
+        "POST",
+        "/studio/transaction",
+        "{\"op\":\"stage-rollback\"}",
+    );
+    assert!(rollback.contains("\"state\":\"staged\""), "rollback: {rollback}");
+    assert!(rollback.contains("-            network.hostName: aurora,"), "rollback: {rollback}");
+    assert!(rollback.contains("+            network.hostName: halcyon,"), "rollback: {rollback}");
+    let rollback_apply = studio_http(addr, "POST", "/studio/transaction", "{\"op\":\"apply\"}");
+    assert!(rollback_apply.contains("\"reprojected\":true"), "rollback: {rollback_apply}");
+    let restored = studio_http(addr, "GET", "/studio/data.json", "");
+    assert!(restored.contains("halcyon"), "restored: {restored}");
     let _ = child.kill();
     let _ = child.wait();
 }
