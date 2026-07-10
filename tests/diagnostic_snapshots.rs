@@ -6,7 +6,10 @@
 //! rendered output; each tests/ui_lint/NAME.jet has a sibling NAME.warn.
 //! To update after an INTENTIONAL wording change:
 //!
-//!     UPDATE_EXPECT=1 cargo test --test diagnostic_snapshots
+//!     JET_UI_FILTER=tests/ui/NAME.jet UPDATE_EXPECT=tests/ui/NAME.jet \
+//!       cargo test --test diagnostic_snapshots ui_snapshots
+//!
+//! `UPDATE_EXPECT=1` remains the explicit bless-all mode for a reviewed sweep.
 //!
 //! Never bless a snapshot you haven't read against docs/spec/diagnostics.md.
 //! These files are the product: the error messages ARE the language's UX.
@@ -14,6 +17,9 @@
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
+
+mod common;
+use common::{fixture_filter, fixture_matches, normalize_fixture_selector, unified_diff};
 
 // ============================================================================
 // Section: error snapshots, tests/ui/*.stderr (was tests/ui.rs)
@@ -46,7 +52,18 @@ fn ui_snapshots() {
     }
     entries.sort_by(|a, b| a.1.cmp(&b.1));
 
+    let filter = fixture_filter("JET_UI_FILTER");
+    entries.retain(|(_, shown)| fixture_matches(filter.as_deref(), shown));
+    assert!(
+        !entries.is_empty(),
+        "JET_UI_FILTER matched no error fixtures: {}",
+        filter.as_deref().unwrap_or("<unfiltered>")
+    );
+    let update = update_selector();
+    validate_scoped_update(&update, entries.iter().map(|(_, shown)| shown.as_str()));
+
     let mut checked = 0;
+    let mut failures = Vec::new();
     for (path, shown_path) in entries {
         if shown_path.contains("ffi_bad_path") && !have_cargo {
             eprintln!(
@@ -180,20 +197,31 @@ fn ui_snapshots() {
         } else {
             path.with_extension("stderr")
         };
-        if std::env::var("UPDATE_EXPECT").is_ok() {
+        if should_update(&update, &shown_path) {
             fs::write(&expect_path, &actual).unwrap();
         } else {
             let expected = fs::read_to_string(&expect_path).unwrap_or_default();
-            assert_eq!(
-                actual, expected,
-                "\nui snapshot mismatch for {}\n(if the new output is intentional and matches docs/spec/diagnostics.md, run: UPDATE_EXPECT=1 cargo test)\n",
-                shown_path
-            );
+            if actual != expected {
+                failures.push(format!(
+                    "ui snapshot mismatch for {shown_path}\n{}",
+                    unified_diff(
+                        &expect_path.to_string_lossy(),
+                        &format!("{shown_path} (actual)"),
+                        &expected,
+                        &actual,
+                    )
+                ));
+            }
         }
         checked += 1;
     }
     assert!(
-        checked >= 7,
+        failures.is_empty(),
+        "snapshot mismatches:\n\n{}\n\nTo update one reviewed fixture, use UPDATE_EXPECT=<canonical-relative-name> with JET_UI_FILTER=<same-name>.",
+        failures.join("\n\n")
+    );
+    assert!(
+        filter.is_some() || checked >= 7,
         "expected the ui suite to contain tests, found {}",
         checked
     );
@@ -243,7 +271,33 @@ fn lint_snapshots() {
         .collect();
     entries.sort();
 
+    let filter = fixture_filter("JET_UI_FILTER");
+    entries.retain(|path| {
+        let shown = format!(
+            "tests/ui_lint/{}",
+            path.file_name().unwrap().to_string_lossy()
+        );
+        fixture_matches(filter.as_deref(), &shown)
+    });
+    assert!(
+        !entries.is_empty(),
+        "JET_UI_FILTER matched no lint fixtures: {}",
+        filter.as_deref().unwrap_or("<unfiltered>")
+    );
+    let update = update_selector();
+    let shown_entries: Vec<String> = entries
+        .iter()
+        .map(|path| {
+            format!(
+                "tests/ui_lint/{}",
+                path.file_name().unwrap().to_string_lossy()
+            )
+        })
+        .collect();
+    validate_scoped_update(&update, shown_entries.iter().map(String::as_str));
+
     let mut checked = 0;
+    let mut failures = Vec::new();
     for path in entries {
         let name = path.file_name().unwrap().to_string_lossy().into_owned();
         let src = fs::read_to_string(&path).unwrap();
@@ -264,17 +318,67 @@ fn lint_snapshots() {
 
         let actual = jet::render_diagnostics(&shown_path, &src, &out.lints);
         let expect_path = path.with_extension("warn");
-        if std::env::var("UPDATE_EXPECT").is_ok() {
+        if should_update(&update, &shown_path) {
             fs::write(&expect_path, &actual).unwrap();
         } else {
             let expected = fs::read_to_string(&expect_path).unwrap_or_default();
-            assert_eq!(
-                actual, expected,
-                "\nlint snapshot mismatch for {}\n(run: UPDATE_EXPECT=1 cargo test --test diagnostic_snapshots)\n",
-                name
-            );
+            if actual != expected {
+                failures.push(format!(
+                    "lint snapshot mismatch for {shown_path}\n{}",
+                    unified_diff(
+                        &expect_path.to_string_lossy(),
+                        &format!("{shown_path} (actual)"),
+                        &expected,
+                        &actual,
+                    )
+                ));
+            }
         }
         checked += 1;
     }
-    assert!(checked >= 2, "expected lint fixtures, found {}", checked);
+    assert!(
+        failures.is_empty(),
+        "snapshot mismatches:\n\n{}\n\nTo update one reviewed fixture, use UPDATE_EXPECT=<canonical-relative-name> with JET_UI_FILTER=<same-name>.",
+        failures.join("\n\n")
+    );
+    assert!(
+        filter.is_some() || checked >= 2,
+        "expected lint fixtures, found {}",
+        checked
+    );
+}
+
+#[derive(Clone)]
+enum UpdateSelector {
+    None,
+    All,
+    One(String),
+}
+
+fn update_selector() -> UpdateSelector {
+    match std::env::var("UPDATE_EXPECT") {
+        Err(_) => UpdateSelector::None,
+        Ok(value) if value == "1" => UpdateSelector::All,
+        Ok(value) => UpdateSelector::One(normalize_fixture_selector("UPDATE_EXPECT", &value)),
+    }
+}
+
+fn validate_scoped_update<'a>(update: &UpdateSelector, paths: impl Iterator<Item = &'a str>) {
+    let UpdateSelector::One(selector) = update else {
+        return;
+    };
+    let matches: Vec<&str> = paths.filter(|path| path.contains(selector)).collect();
+    assert_eq!(
+        matches.len(),
+        1,
+        "UPDATE_EXPECT={selector} must match exactly one fixture; matched: {matches:?}"
+    );
+}
+
+fn should_update(update: &UpdateSelector, shown_path: &str) -> bool {
+    match update {
+        UpdateSelector::None => false,
+        UpdateSelector::All => true,
+        UpdateSelector::One(selector) => shown_path.contains(selector),
+    }
 }
