@@ -427,7 +427,7 @@ fn stmt_row_step(stmt: &Stmt) -> i32 {
         Stmt::Assign { value, .. } => multi_input_item_count(value),
         _ => 0,
     };
-    130 + (items.saturating_sub(2) as i32) * 28
+    130 + (items.saturating_sub(2) as i32) * 55
 }
 
 fn multi_input_item_count(expr: &Expr) -> usize {
