@@ -367,13 +367,9 @@
                 .into_iter()
                 .nth(arm)
                 .map(|(_, value)| value)
-                .unwrap_or_else(|| {
-                    eprintln!("panic: select timer arm missing value");
-                    std::process::exit(70);
-                }),
+                .unwrap_or_else(|| super::jet_panic("<core.tasks>", 0, "select timer arm missing value")),
             super::JetSelectOutcome::Closed => {
-                eprintln!("panic: select closed");
-                std::process::exit(70);
+                super::jet_panic("<core.tasks>", 0, "select closed");
             }
         }
     }
@@ -711,4 +707,3 @@
             JetPoolSlot::Vacant(_) => unreachable!("just checked Occupied above"),
         }
     }
-

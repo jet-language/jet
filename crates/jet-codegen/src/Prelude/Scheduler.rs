@@ -1116,12 +1116,10 @@ impl<T> JetSchedulerJoin<T> {
         match self.rx.recv() {
             Ok(JetSchedulerResult::Value(v)) => v,
             Ok(JetSchedulerResult::Panicked) | Err(_) => {
-                eprintln!("panic: a task panicked");
-                std::process::exit(70);
+                jet_panic("<core.tasks>", 0, "a task panicked");
             }
             Ok(JetSchedulerResult::Cancelled) => {
-                eprintln!("panic: a task was cancelled");
-                std::process::exit(70);
+                jet_panic("<core.tasks>", 0, "a task was cancelled");
             }
         }
     }
@@ -1177,8 +1175,7 @@ pub fn jet_scheduler_all<T: Send + 'static>(
                         join.drain();
                     }
                     jet_scheduler_drain();
-                    eprintln!("panic: a task panicked");
-                    std::process::exit(70);
+                    jet_panic("<core.tasks>", 0, "a task panicked");
                 }
                 JetSchedulerResult::Cancelled => {
                     for (_, ctrl) in &entries {
@@ -1188,8 +1185,7 @@ pub fn jet_scheduler_all<T: Send + 'static>(
                         join.drain();
                     }
                     jet_scheduler_drain();
-                    eprintln!("panic: a task was cancelled");
-                    std::process::exit(70);
+                    jet_panic("<core.tasks>", 0, "a task was cancelled");
                 }
             }
         }
@@ -1239,8 +1235,7 @@ pub fn jet_scheduler_race<T: Send + 'static>(
             }
         }
         if settled_count == n {
-            eprintln!("panic: a task panicked");
-            std::process::exit(70);
+            jet_panic("<core.tasks>", 0, "a task panicked");
         }
         thread::sleep(Duration::from_micros(50));
     }
@@ -1274,8 +1269,7 @@ pub fn jet_scheduler_any<T: Send + 'static>(
             return match res {
                 JetSchedulerResult::Value(v) => v,
                 JetSchedulerResult::Panicked | JetSchedulerResult::Cancelled => {
-                    eprintln!("panic: a task panicked");
-                    std::process::exit(70);
+                    jet_panic("<core.tasks>", 0, "a task panicked");
                 }
             };
         }
@@ -1292,12 +1286,10 @@ pub fn jet_scheduler_select_int_channels(
     match jet_scheduler_select(inners, after_ms) {
         JetSelectOutcome::Recv { value, .. } => value,
         JetSelectOutcome::After { .. } => {
-            eprintln!("panic: select timer arm has no receive value");
-            std::process::exit(70);
+            jet_panic("<core.tasks>", 0, "select timer arm has no receive value");
         }
         JetSelectOutcome::Closed => {
-            eprintln!("panic: select closed");
-            std::process::exit(70);
+            jet_panic("<core.tasks>", 0, "select closed");
         }
     }
 }

@@ -40,12 +40,11 @@ fn jet_deadline_remaining_ms() -> Option<i64> {
 }
 
 fn jet_deadline_exceeded(wait_kind: &str) -> ! {
-    eprintln!("Error [E3003]: deadline exceeded while waiting in {wait_kind}");
-    eprintln!(
-        "Why: this wait point observed the task context deadline from `#Context(deadline: …)`"
-    );
-    eprintln!("Fix: raise the deadline budget or shorten the work before this wait point");
-    std::process::exit(70);
+    jet_runtime_diagnostic(format!(
+        "Error [E3003]: deadline exceeded while waiting in {wait_kind}\n\
+Why: this wait point observed the task context deadline from `#Context(deadline: …)`\n\
+Fix: raise the deadline budget or shorten the work before this wait point"
+    ));
 }
 
 fn jet_deadline_check(wait_kind: &str) {
@@ -619,4 +618,3 @@ fn jet_int_to_u8(n: i64) -> Result<u8, String> {
 fn jet_stopwatch_elapsed_millis(sw: &jet_std::Stopwatch) -> i64 {
     sw.start.elapsed().as_millis() as i64
 }
-

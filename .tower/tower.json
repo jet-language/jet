@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 481,
-    "rev": 3023,
+    "rev": 3029,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -22590,6 +22590,331 @@
       "draft": false,
       "status": "open",
       "created": "2026-07-10T21:14:28.965Z"
+    },
+    {
+      "id": "D-JPK-TOOLRUN1",
+      "cardId": "c0fchu51",
+      "group": "tooling",
+      "title": "On-demand tool execution: ephemeral run + persistent global install surface",
+      "gist": "How a user runs a package's binary without adding it as a project dependency — one-off (npx/uvx-style) and installed-globally-on-PATH (pipx/cargo-install/uv-tool-style) — and what verb surface both live under.",
+      "explainer": "Option A - a unified jetpack tool run|install|list|uninstall noun. It gives the beginner one discoverable place (jetpack tool <tab> reveals both surfaces, so nobody has to know the npx-vs-pipx-vs-cargo-install split), and it gives the expert a hard isolation guarantee for free by making install an ergonomic entrypoint over the ratified profile engine (D-JPK-PROFILE1): every installed tool is its own atomic generation with rollback and an exact environment, never a host-PATH overlay and never a second store. It is one canonical path (I8) and it disentangles the jetpack run overload instead of deepening it (which is B's and especially D's cost); C leaves the filed beginner hole open. The choice is grounded in discoverability and isolation, not in how much work each surface is.",
+      "story": "Priya clones a Jet repo on a fresh machine. She wants to format it with prettier once, without polluting the project's manifest — the npx reflex. She also wants ripgrep and ruff on PATH on every machine she touches, the pipx/cargo-install reflex. Coming from npm/pip she expects one obvious command for each, and she expects jetpack <tab> to show her the way rather than reading docs to learn which of four bespoke tools (npx? pipx? brew? cargo install?) applies. Nothing in jetpack answers her today beyond the nix-only one-shot.",
+      "inWild": "# inside a Jet project that already declares tasks in pkg.jet (#476):\n#   tasks: { fmt: \"...\", serve: \"...\" }\n#\n# Priya wants three things, none of which should touch pkg.jet:\n#   1. run prettier once over src/\n#   2. put ripgrep + ruff on PATH for good\n#   3. NOT accidentally clobber the project's own `serve` task with a global tool named serve",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Unified `jetpack tool` noun: run / install / list / uninstall (uv-style)",
+          "detail": "One noun groups both surfaces. jetpack tool run <ref> executes a package's binary ephemerally across ALL providers (generalizing today's nix-only jetpack run); jetpack tool install <ref> adds the package to the user's default profile (D-JPK-PROFILE1) and projects its bins onto PATH as its own generation; jetpack tool list / uninstall manage them. One mental model replaces npx+pipx+cargo-install+brew. It also cleanly separates the two meanings that jetpack run overloads today: jetpack run = run THIS project, jetpack tool run = run an external tool. Fits the grouped-surface direction raised on #468 (D-CLI-SURFACE1). Naming sub-menu for the noun if 'tool' is not preferred (aviation family, all keep the same run/install/list verbs): tool (plain, uv parity) | kit | sortie (a single mission — evocative for the ephemeral half) | taxi | apron. Short ephemeral alias optional: jetpack tool run could also answer to jetpack x as a documented shorthand without adding a second concept.",
+          "code": "# 1. ephemeral - nothing installed, runs once, then gone\n$ jetpack tool run npm:prettier -- --write src/\nprettier 3.3.0  (ephemeral; cached in hangar, not on PATH)\nsrc/app.jet  41ms\n\n# 2. persistent global - isolated, on PATH, its own generation\n$ jetpack tool install cargo:ripgrep\ninstalled ripgrep 14.1.0  ->  ~/.jet/bin/rg   (profile \"tools\", generation 7)\n$ jetpack tool install pypi:ruff\ninstalled ruff 0.5.0  ->  ~/.jet/bin/ruff     (profile \"tools\", generation 8)\n\n$ rg --version\nripgrep 14.1.0\n\n$ jetpack tool list\nTOOL     VERSION  SOURCE  BIN\nripgrep  14.1.0   cargo   rg\nruff     0.5.0    pypi    ruff\n\n# 3. error - a global tool's bin would shadow this project's task (#476)\n$ jetpack tool install npm:serve\nerror[JPK-TOOL-COLLIDE]: 'serve' is already a task in ./pkg.jet\n  the project task wins in this directory, so the global tool would be shadowed here\n  fix: install under a different bin name  ->  jetpack tool install npm:serve --as gserve\n     or just run it once                  ->  jetpack tool run npm:serve\n\n# rollback is free because install rode the ratified profile engine:\n$ jet profile rollback tools\nreverted profile \"tools\" to generation 7  (ruff removed from PATH)"
+        },
+        {
+          "key": "B",
+          "name": "Two flat verbs: `jetpack x <ref>` (ephemeral) + `jetpack global add/rm/list` (persistent)",
+          "detail": "Two separate top-level verbs, each matching a specific reflex. jetpack x is the short npx/bunx muscle-memory verb for one-off runs; jetpack global is the pipx/cargo-install verb for on-PATH installs. Persistent installs still ride the ratified profile engine underneath (default profile), so rollback/isolation are identical to A - only the surface differs. Wins on the shortest possible ephemeral keystroke (jetpack x prettier). Costs: two unrelated verbs for one concept (on-demand external tools), which pushes AGAINST the #468 grouped-surface direction, and x is opaque to a reader who does not already know npx.",
+          "code": "# ephemeral - shortest keystroke\n$ jetpack x npm:prettier -- --write src/\nprettier 3.3.0  (ephemeral)  41ms\n\n# persistent global\n$ jetpack global add cargo:ripgrep\ninstalled ripgrep 14.1.0  ->  ~/.jet/bin/rg   (profile \"tools\", generation 7)\n$ jetpack global add pypi:ruff\ninstalled ruff 0.5.0  ->  ~/.jet/bin/ruff\n\n$ jetpack global list\nripgrep  14.1.0  cargo\nruff     0.5.0   pypi\n\n# same collision, but the answer is split across two unrelated verbs\n$ jetpack global add npm:serve\nerror[JPK-TOOL-COLLIDE]: 'serve' is already a task in ./pkg.jet\n  fix: jetpack global add npm:serve --as gserve\n     or run once: jetpack x npm:serve\n\n$ jetpack global rm ruff\nremoved ruff  (profile \"tools\", generation 9)"
+        },
+        {
+          "key": "C",
+          "name": "Ephemeral now; defer global install to the existing profile engine",
+          "detail": "Ship only the ephemeral half now (jetpack tool run <ref>, all providers), and give NO new install verb - 'install a tool globally' is served by the already-ratified profile engine directly: the user declares a profile.tools and switches to it. A defensible 'ship half now' because global install genuinely already has a home (D-JPK-PROFILE1). Cost: the beginner reflex 'just install this one tool on PATH' has no one-liner - Priya must learn to author a profile block and run jet profile switch, which is real ceremony for a one-tool need and exactly the discoverability hole this card was filed to close. A follow-up ballot could add the install ergonomic later.",
+          "code": "# ephemeral half ships now, all providers\n$ jetpack tool run npm:prettier -- --write src/\nprettier 3.3.0  (ephemeral)  41ms\n\n# global install? no verb - use the ratified engine by hand:\n$ cat >> env.jet <<'EOF'\nprofile.tools {\n    packages: { ripgrep: cargo:ripgrep, ruff: pypi:ruff }\n}\nEOF\n$ jet profile switch tools\nbuilt profile \"tools\" generation 7  ->  ~/.jet/bin/{rg,ruff}\n\n$ rg --version\nripgrep 14.1.0\n\n# there is no `jetpack tool install one-tool` shortcut in this option"
+        },
+        {
+          "key": "D",
+          "name": "Fold both into the existing `jetpack run <source>:<pkg>` bridge with a persistence flag",
+          "detail": "No new noun or verb at all. Generalize today's jetpack run nixpkgs:fastfetch to every provider (ephemeral by default) and add a flag - --global (or --keep) - to make a run persist on PATH via the profile engine. Smallest possible surface: one verb, one flag. Cost: a run that silently leaves something installed is a surprising overload of the word 'run', and it collides head-on with the OTHER meaning of jetpack run (run this project / a task from #476). Listing and removing installed tools then have no natural home under a run verb, so --list/--uninstall bolt awkwardly onto a run command.",
+          "code": "# ephemeral (default), now all providers\n$ jetpack run cargo:ripgrep -- --version\nripgrep 14.1.0  (ephemeral)\n\n# persistent via a flag on the same verb\n$ jetpack run cargo:ripgrep --global\ninstalled ripgrep 14.1.0  ->  ~/.jet/bin/rg   (profile \"tools\", generation 7)\n\n# overload problem: which `run` is this in a project dir?\n$ jetpack run serve\n#   the project's `serve` task, or an external package named serve? ambiguous\n\n# managing installs has no clean verb:\n$ jetpack run --list-global\nripgrep  14.1.0  cargo"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "uv (Python)",
+          "note": "One noun, two verbs, one mental model: uv tool run (a.k.a. uvx) for ephemeral, uv tool install for persistent, each installed tool isolated in its own environment. Directly the shape of Option A; its uvx shorthand is the optional jetpack x alias.",
+          "code": "uv tool run ruff check .\nuv tool install ruff\nuv tool list"
+        },
+        {
+          "lang": "npm / pnpm / bun",
+          "note": "Ephemeral-only, each a separate bespoke command (npx, pnpm dlx, bunx) with no unified persistent-install sibling - the fragmentation Priya is escaping. There is no 'npm global tool' story that isolates cleanly; global npm installs share one flat prefix and collide.",
+          "code": "npx prettier --write src/\nbunx prettier --write src/"
+        },
+        {
+          "lang": "pipx / cargo-install / brew",
+          "note": "Persistent-only, each isolated-ish but a different tool per ecosystem, and none has a first-class ephemeral sibling (pipx run is the exception, mirroring uv). Reinforces that the beginner today must know which of four tools applies - the discoverability hole Option A closes with one noun.",
+          "code": "pipx install ruff\ncargo install ripgrep\nbrew install ripgrep"
+        }
+      ],
+      "rec": "A",
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-10T21:18:01.877Z"
+    },
+    {
+      "id": "D-JOS-BACKUP1",
+      "cardId": "c0i0ho3h",
+      "group": "syntax",
+      "title": "jetos user-data backup and snapshot declaration",
+      "gist": "How a jetos system declares backup/snapshot coverage for /home and other user data — generations (#327) only cover the system store, so there's no restore path for a user's own files today.",
+      "explainer": "",
+      "story": "Glossary: a generation is an atomic, versioned record of a full system build/switch (jet os generations, jet os rollback). A snapshot is a captured copy of file data at one point in time. A workload (D-JOS-CONTAINER1) is jetos's existing managed-thing mechanism: pick a backend, get shared image/mounts/secrets/health/resources/proof/rollback fields. Retention is how long old backups are kept before they're pruned.\n\nAlex is editing ~/Documents/report.docx, fat-fingers a find-replace, saves over the good version, and closes the laptop. Ten minutes later Alex wants yesterday's copy back — no git repo, no cloud sync, just \"give me my file from before.\" Priya, on the same jetos machine, wants more: her whole home directory backed up weekly to an offsite bucket, encrypted, in case the laptop is stolen or the disk dies — borgbackup-class protection she already runs on her old distro. Today jetos has no declaration surface for either need.",
+      "inWild": "system.laptop {\n  packages: [...]\n  network { ... }\n  # nothing here can protect ~/Documents -- generations don't reach user data\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Fold backup into the existing generation/rollback engine",
+          "detail": "Backup becomes a scoped extension of the system-generation source: a backup { ... } block inside system.<host> or user.<name>, walked by the same jet os generations / jet os rollback engine already ratified in D-JPK-OSGEN1/D-JOS-USERAPPLY1. No new CLI verb. Rejected: generations were designed for atomic whole-system state transitions triggered by jet os build/switch; backups are periodic captures of mutable data on their own clock. Mixing the two in one history list means a system-config rollback and a file-restore look like the same operation when they aren't — a real safety and long-term-correctness problem, not just an ergonomic one: jet os rollback on a mixed timeline risks reverting unrelated system state when the user only meant to recover a file.",
+          "code": "# config.jet\nsystem.laptop {\n  backup {\n    hourly: paths([\"~/Documents\"])\n    weekly_offsite: paths([\"~\"], encrypted: true, remote: \"s3://alex-backup/home\")\n  }\n}\n\n$ jet os build && jet os switch\nswitched to generation 42 (system, 2026-07-10 14:00)\nbackup scope armed: hourly(~/Documents), weekly_offsite(~, encrypted)\n\n$ jet os generations\n  42  2026-07-10 14:00  system   switch (kernel bump)\n  41  2026-07-10 13:00  backup   hourly snapshot (~/Documents)\n  40  2026-07-10 12:00  backup   hourly snapshot (~/Documents)\n  39  2026-07-09 09:00  backup   weekly_offsite snapshot (~, encrypted)\n  ...\n\n$ jet os rollback --path ~/Documents/report.docx --at \"3 days ago\"\nrestored ~/Documents/report.docx from generation 17 (2026-07-07 14:00)"
+        },
+        {
+          "key": "B",
+          "name": "Standalone top-level `backup.<name>` mechanism",
+          "detail": "A new declaration kind, independent of generations and of workload: backup.<name> { source, schedule, backend } with its own backend enum (.LocalSnapshot / .EncryptedRemote) and its own CLI surface (jet os backup snapshot|restore|list|verify|prune). Clean separation of concerns, but it duplicates the exact field spine — secrets, health, proof, rollback, resources — that D-JOS-CONTAINER1 already built for workload. That's a second mechanism doing a job (\"declared thing with a backend enum, health checks, and a rollback path\") the platform already has one mechanism for, which is the I8 violation the workload precedent exists to prevent: the next managed-thing need after this one faces the same fork (extend workload, or mint backup.<name>-style #3), fragmenting the surface further over time.",
+          "code": "# config.jet\nbackup.documents {\n  source: paths([\"~/Documents\"])\n  schedule: .Hourly\n  backend: .LocalSnapshot\n}\n\nbackup.home_offsite {\n  source: paths([\"~\"])\n  schedule: .Weekly\n  backend: .EncryptedRemote {\n    remote: \"s3://alex-backup/home\"\n    encryption: .AgeKey(secrets.backup_key)\n  }\n}\n\n$ jet os backup list documents\n  2026-07-10 14:00  snapshot 118\n  2026-07-10 13:00  snapshot 117\n  2026-07-09 14:03  snapshot  94\n  ...\n\n$ jet os backup restore documents --file ~/Documents/report.docx --at \"3 days ago\"\nrestored ~/Documents/report.docx from snapshot 94 (2026-07-07 14:03)"
+        },
+        {
+          "key": "C",
+          "name": "`workload.<name>`-style backend enum, backup as a managed workload",
+          "detail": "Reuses the exact mechanism D-JOS-CONTAINER1 ratified for Container/MicroVM: one workload.<name> declaration, a backend enum that now also includes .Snapshot and .EncryptedRemote, and the same shared fields — mounts (what to capture), secrets (encryption key), health (did the last capture/restore succeed), resources, proof, and rollback. Restore goes through jet os rollback, the exact verb users already know from generations and other workloads — no new CLI surface to learn, and the proof/health machinery already gating container and microVM workloads (partial-write detection, post-action health check) applies to backups automatically instead of needing its own copy. One declaration shape covers 'run a container,' 'run a microVM,' and 'protect this data' — genuinely the same underlying question (what backend manages this, and how do I roll it back) asked three ways.",
+          "code": "# config.jet\nworkload.documents_backup {\n  backend: .Snapshot\n  source: paths([\"~/Documents\"])\n  schedule: .Hourly\n  rollback: .Enabled\n}\n\nworkload.home_offsite {\n  backend: .EncryptedRemote\n  source: paths([\"~\"])\n  schedule: .Weekly\n  secrets: [secrets.backup_key]\n  remote: \"s3://alex-backup/home\"\n}\n\n$ jet os build && jet os switch\nswitched to generation 42\nworkload documents_backup: healthy (last capture 14:00, 118 snapshots, 3d retention)\nworkload home_offsite: healthy (last capture 2026-07-09 09:00, encrypted, verified)\n\n$ jet os rollback --workload documents_backup --path ~/Documents/report.docx --at \"3 days ago\"\nrestored ~/Documents/report.docx from workload documents_backup capture 94 (2026-07-07 14:03)"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Mint Timeshift",
+          "note": "Scheduled local snapshots (rsync/btrfs) with a GUI restore browser — the beginner story this ballot must match: no config, click a date, get the file back.",
+          "code": "# Timeshift: cron-scheduled snapshot, restore via GUI file picker\n# jetos target: workload.documents_backup { backend: .Snapshot, schedule: .Hourly }\n# restore: jet os rollback --workload documents_backup --path <file> --at <when>"
+        },
+        {
+          "lang": "borgbackup",
+          "note": "Encrypted, deduplicated, retention-pruned remote backups — the expert story: borg init --encryption=repokey, borg create, cron schedule, borg prune --keep-weekly=4.",
+          "code": "# borgbackup: borg create repo::'{hostname}-{now}' ~ ; borg prune --keep-weekly=4\n# jetos target: workload.home_offsite { backend: .EncryptedRemote, schedule: .Weekly, secrets: [...] }"
+        }
+      ],
+      "rec": "C",
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-10T21:18:01.960Z"
+    },
+    {
+      "id": "D-JPK-SELECTOR1",
+      "cardId": "c0rfeel3",
+      "group": "tooling",
+      "title": "Monorepo package selection flag for jet build / jet test / jet run",
+      "gist": "How does a workspace command (`jet build`, `jet test`, `jet run`) let a user scope the run to a subset of workspace members instead of every member every time?",
+      "explainer": "Glossary: a **workspace member** is one package listed in `workspace.jet`'s `members:` list, addressed by bare name, path, or `source.package` dot form (D-MONOREF1, already ratified). The **action cache** is the automatic local build cache (D-BUILDCACHE1) — it already keys every build/test action on its input file hashes, so it always knows which files fed which member. A **dependent** is a member that depends on the member you changed; testing it too is how you catch a break you caused somewhere else.",
+      "story": "Dana works in a 5-member workspace: api, web, auth, billing, shared (billing depends on shared). She only touched services/billing and libs/shared on her branch. A bare `jet test` recompiles and retests all 5 members — api, web, and auth included — costing her minutes she doesn't have before standup, for members she knows she didn't touch.",
+      "inWild": "workspace.jet:\nmodule workspace\nmembers: [\"api\", \"web\", \"auth\", \"billing\", \"shared\"]\n\n// billing/pkg.jet\ndeps: { shared: path@../shared }\n\n// Dana's branch touched:\n//   services/billing/src/charge.jet\n//   libs/shared/src/validate.jet",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "`-p <member>` only — cargo-style exact name, repeatable",
+          "detail": "One flag, repeatable, exact workspace-member names only (reuses the already-ratified bare/path/dot addressing from D-MONOREF1). No pattern language, no automatic dependent inclusion — the user names every member they want, every time. Simplest possible surface, but Dana must know and type both names herself; if billing had a dependent (say, invoicing) she'd have to remember to add `-p invoicing` too or silently under-test.",
+          "code": "$ jet test -p billing -p shared\n   Compiling billing (2 files)\n   Compiling shared (1 file)\nrunning 2 members: billing, shared\ntest billing::charge_card ... ok\ntest billing::refund ... ok\ntest shared::validate_amount ... ok\n\ntest result: ok. 3 passed; 0 failed\n\n# Error case — typo'd member name:\n$ jet test -p biling\nerror[E1231]: unknown workspace member `biling`\n  --> workspace.jet\nmember `biling` is not defined in `members:`\ndid you mean `billing`?"
+        },
+        {
+          "key": "B",
+          "name": "`--filter <pattern>` — pnpm-style glob + dependency-direction modifiers",
+          "detail": "One flag, a pattern DSL: plain names, glob wildcards (`ser*`), and dependency-direction modifiers — `...name` pulls in name's dependencies, `name...` pulls in name's dependents. Most powerful: one filter can express \"billing and everything it needs\" without typing `shared` by hand. Cost: it's a syntax the user has to learn and get right — a beginner who forgets the `...` prefix silently gets only `billing`, not `shared`, and the tool has no way to tell a legitimately-empty match from a typo.",
+          "code": "$ jet test --filter '...billing'\n   Compiling billing (2 files)\n   Compiling shared (1 file)\nrunning 2 members: billing, shared   (shared included: it's a dependency of billing)\ntest billing::charge_card ... ok\ntest billing::refund ... ok\ntest shared::validate_amount ... ok\n\ntest result: ok. 3 passed; 0 failed\n\n# Error case — pattern matches nothing:\n$ jet test --filter 'biling'\nerror: filter `biling` matched no workspace members\n  members: api, web, auth, billing, shared\n  (no typo suggestion: a pattern is allowed to legitimately match zero members)"
+        },
+        {
+          "key": "C",
+          "name": "`-p <member>` (exact, repeatable) + `--affected[-since <ref>]` (computed) — no pattern language",
+          "detail": "Two additive flags, no glob or dependency-modifier syntax anywhere. `-p` is identical to option A for explicit, by-hand selection — zero new syntax, same E1231 typo diagnostic. `--affected[-since <ref>]` is new: it diffs the working tree (or the given git ref) against the action cache's existing input-hash keys (D-BUILDCACHE1) to compute which members actually changed, and always includes their dependents automatically — never opt-in, so a forgotten modifier can't silently under-test a consumer. Covers Dana's exact scenario with zero pattern language to learn, and covers the CI \"only test what this branch touched\" case the same way turbo's affected-only mode does, without folding ref-diffing into a pattern DSL.",
+          "code": "$ jet test -p billing -p shared\n   Compiling billing (2 files)\n   Compiling shared (1 file)\nrunning 2 members: billing, shared\ntest billing::charge_card ... ok\ntest billing::refund ... ok\ntest shared::validate_amount ... ok\n\ntest result: ok. 3 passed; 0 failed\n\n$ jet test --affected-since main\n   Compiling billing (2 files)\n   Compiling shared (1 file)\nrunning 2 members (changed since `main`, plus dependents): billing, shared\ntest billing::charge_card ... ok\ntest billing::refund ... ok\ntest shared::validate_amount ... ok\n\ntest result: ok. 3 passed; 0 failed\n\n# Error case — bad ref:\n$ jet test --affected-since orgin/main\nerror: git ref `orgin/main` not found\n  did you mean `origin/main`?\n\n# Error case — typo'd member name (same as -p in option A):\n$ jet test -p biling\nerror[E1231]: unknown workspace member `biling`\n  --> workspace.jet\nmember `biling` is not defined in `members:`\ndid you mean `billing`?"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "cargo",
+          "note": "`-p <name>`, repeatable, exact package name — no glob, no dependency modifiers. Basis for the `-p` flag shared by options A and C.",
+          "code": "cargo test -p billing -p shared"
+        },
+        {
+          "lang": "pnpm",
+          "note": "`--filter <pattern>` with `...name` (deps) / `name...` (dependents) / glob support — basis for option B's pattern DSL.",
+          "code": "pnpm --filter ...billing test"
+        },
+        {
+          "lang": "turbo",
+          "note": "`--filter=...[HEAD^1]` folds affected-since-ref detection into the same pattern-DSL flag pnpm uses — basis for option C's choice to instead give ref-diffing its own dedicated flag rather than a third pattern-language feature.",
+          "code": "turbo test --filter=...[HEAD^1]"
+        }
+      ],
+      "rec": "C",
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-10T21:18:02.038Z"
+    },
+    {
+      "id": "D-JPK-PKGOVERRIDE1",
+      "cardId": "c0yzg1yu",
+      "group": "syntax",
+      "title": "Per-package override record inside an overlay block",
+      "gist": "How one package's version pin, build flags, env, and patches are spelled inside a ratified `overlay <name> { }` block, and how two overlays touching the same package resolve.",
+      "explainer": "D-JPK-OVERLAY1 ratified the `overlay` block, `provider:` swap, `policy.allowUnfree`, and CLI drafting, illustrating patches as `package(\"foo\").patches += [patch(...)]`. That per-package field spelling was never itself ratified. This decision fixes the full override record (version / flags / env / patches), the patch-source form, and the conflict rule when overlays stack.",
+      "story": "Terms up front. overlay: a named set of package overrides in workspace.jet. provider/channel: which upstream tree and which branch a package comes from (nixpkgs, plasma-beta). override record: the per-package changes an overlay applies. build flag: a compile-time toggle on a package (mpv +vapoursynth). patch: a source diff applied before build. priority tier: who wins when two overlays set the same field (ordinary / Force / Priority(n), already ratified for jetos as D-JOS-PRIORITY1). fixpoint: nixpkgs' untyped self/super overlay chain nobody can explain.\n\nNate's ~/nixos has an overlays/ dir. His halcyon-plasma-beta host builds the same module set against a plasma-beta nixpkgs input, pins mpv to 0.38.0, turns on the vapoursynth build flag, and applies patches/mpv-osc.patch. Today in Nix that is a lambda `final: prev: { mpv = prev.mpv.overrideAttrs (old: { ... }); }` and when the version that ships differs from what he expected, there is no typed answer to 'why 0.38.0 and not the channel default'. jetos cannot recreate his config without this surface, and the whole point of Beat-Nix is that `jetpack explain` names exactly what each override changed and why the rebuild happened.",
+      "inWild": "module workspace\n\noverlay halcyon-plasma-beta {\n    provider: Provider.nixpkgs(channel: \"plasma-beta\")\n\n    // pin mpv to 0.38.0, enable the vapoursynth build flag,\n    // apply one source patch -- exact spelling is this decision\n}\n\n// Resolved build the owner should be able to inspect:\n//   $ jetpack explain package-overlay:halcyon-plasma-beta:mpv\n//   package  mpv\n//     provider  nixpkgs @ plasma-beta   (overlay halcyon-plasma-beta)\n//     version   0.38.0                  (overlay halcyon-plasma-beta, ordinary)\n//               <- channel default 0.37.0\n//     flags     +vapoursynth            (overlay halcyon-plasma-beta, ordinary)\n//     patches   patches/mpv-osc.patch   (overlay halcyon-plasma-beta)\n//     rebuild   version + flags + 1 patch changed -> source rebuild\n//     update    jetpack override draft mpv --version <v>",
+      "detail": "Shared across every option (not itself a choice): (1) Patch source form. A patch is always a file reference in a list -- `patch(\"patches/mpv-osc.patch\")` -- kept as reviewable diffs on disk, matching the D-JPK-OVERLAY1 illustration. Inline heredoc diffs are rejected: they bloat the manifest, evade code review, and break formatter round-trip (memory: formatter-roundtrip-required). A `patches` list composes across overlays by append. (2) Conflict + composition. When two overlays set the same field, resolution REUSES D-JOS-PRIORITY1 rather than inventing a second vocabulary: overlays apply in declared order, within a tier the later overlay wins, `Force(...)` outranks ordinary, and `Priority(n)` gives explicit expert weights. `jetpack explain` lists ALL contenders and names the winner and why -- identical to jetos option-priority explain output. Reuse (not divergence) because it is literally the same semantic job (two facts set one value; who wins + show contenders), and I8 says one mechanism, one mental model across jetos and jetpack. The options below differ only in how the per-package record is spelled and how a field carries its tier.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Imperative mutation statements (incumbent illustration, made total)",
+          "detail": "Extend exactly what the D-JPK-OVERLAY1 record shows: each override is a dotted statement on `package(\"id\")`. Scalars assign, lists use `+=`. Priority is a method call `.force(...)`. Cost: the package handle `package(\"mpv\")` is repeated on every line -- the repetition the owner cuts elsewhere (U14/U18). Reading 'what does this overlay do to mpv' means scanning scattered statements.",
+          "code": "overlay halcyon-plasma-beta {\n    provider: Provider.nixpkgs(channel: \"plasma-beta\")\n\n    package(\"mpv\").version = \"0.38.0\"\n    package(\"mpv\").flags   += [flag(\"vapoursynth\", true)]\n    package(\"mpv\").patches += [patch(\"patches/mpv-osc.patch\")]\n}\n\n// conflict: a second overlay forces a version\noverlay hi-fi {\n    package(\"mpv\").version.force(\"0.39.0\")\n}\n// explain: 0.39.0 (hi-fi, Force) <- winner; 0.38.0 (halcyon-plasma-beta, ordinary)"
+        },
+        {
+          "key": "B",
+          "name": "Keyed override map of typed records (recommended)",
+          "detail": "Name the package once; put every change in one typed dot-construction record (`.{ }`, the only struct-literal spelling). All packages live under one `overrides:` map so an overlay's effect on a package is one readable block. Priority rides on the field: `version: Force(\"...\")`, or a bare value for ordinary, reusing D-JOS-PRIORITY1's `Force`/`Priority(n)`. Anti-repetition, house-style, and the conflict tier is visible at the field. Beginners write a two-line record; experts add `Force`/`Priority(n)` only when stacking overlays.",
+          "code": "overlay halcyon-plasma-beta {\n    provider: Provider.nixpkgs(channel: \"plasma-beta\")\n\n    overrides: {\n        mpv: .{\n            version: \"0.38.0\",\n            flags:   .{ vapoursynth: true },\n            patches: [patch(\"patches/mpv-osc.patch\")],\n        },\n    }\n}\n\n// conflict: second overlay wins only by declaring a stronger tier\noverlay hi-fi {\n    overrides: { mpv: .{ version: Force(\"0.39.0\") } }\n}\n//   $ jetpack explain package-overlay:*:mpv\n//   version  0.39.0  (hi-fi, Force)                 <- winner\n//            0.38.0  (halcyon-plasma-beta, ordinary)\n//            0.37.0  channel default (plasma-beta)\n//     why: Force outranks ordinary (D-JOS-PRIORITY1)"
+        },
+        {
+          "key": "C",
+          "name": "Reusable override modules referenced by overlays",
+          "detail": "Make the D-JPK-OVERLAY1 'reusable overlay modules' clause the primary surface: the override record lives in a named `override module` and hosts reference it, so mpv-with-vapoursynth is authored once and shared across halcyon and the plasma-beta variant. Same typed fields as B inside the module; the overlay is mostly references plus host-local tweaks. Strong for a many-host tree; for a one-repo override it is an extra indirection and less first-run discoverable (you follow a reference to see what changed).",
+          "code": "override module mpv-vapoursynth {\n    package: \"mpv\"\n    version: \"0.38.0\"\n    flags:   .{ vapoursynth: true }\n    patches: [patch(\"patches/mpv-osc.patch\")]\n}\n\noverlay halcyon-plasma-beta {\n    provider: Provider.nixpkgs(channel: \"plasma-beta\")\n    use mpv-vapoursynth\n}\n\noverlay halcyon-stable {\n    use mpv-vapoursynth              // same record, reused\n}\n// explain still names the winning override module + tier per field"
+        },
+        {
+          "key": "D",
+          "name": "Escalating verb fast-path (pin / enable / patch), record only when needed",
+          "detail": "Flat verbs for the common single-change case: `pin(\"mpv\", \"0.38.0\")`, `enable(\"mpv\", \"vapoursynth\")`, `patch(\"mpv\", \"patches/mpv-osc.patch\")`. A package needing several changes escalates to the B record. Beginner one-liners are the draw. Risk: two ways to pin a version (`pin(...)` vs `version:`), an I8 smell -- defensible only if the compiler desugars verbs into the same override facts (ergonomic entrypoint over one mechanism), and even then the default surface grows a second vocabulary the owner would have to learn to read someone else's overlay.",
+          "code": "overlay halcyon-plasma-beta {\n    provider: Provider.nixpkgs(channel: \"plasma-beta\")\n\n    pin(\"mpv\", \"0.38.0\")\n    enable(\"mpv\", \"vapoursynth\")\n    patch(\"mpv\", \"patches/mpv-osc.patch\")\n}\n\n// three changes to one package already reads like scattered A;\n// escalate to a B record. force via pin(\"mpv\", \"0.39.0\", Force)"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Nixpkgs overlay",
+          "note": "The parity bar. Untyped fixpoint lambda: any attr, no schema, no per-field explain, conflicts resolved by opaque list order. Jet keeps the reach (version/flags/env/patches) as typed fields so `jetpack explain` can name what changed and which tier won.",
+          "code": "final: prev: {\n  mpv = prev.mpv.overrideAttrs (old: {\n    version = \"0.38.0\";\n    configureFlags = old.configureFlags ++ [ \"--enable-vapoursynth\" ];\n    patches = old.patches ++ [ ./mpv-osc.patch ];\n  });\n}"
+        },
+        {
+          "lang": "Cargo [patch]",
+          "note": "Reviewable source policy in a manifest table, but narrow: it only redirects a dependency's source, no version-pin/flags/env/priority in the same place. Option B is the typed-record superset with an explain view.",
+          "code": "[patch.crates-io]\nmpv = { path = \"../mpv-fork\" }"
+        },
+        {
+          "lang": "jetos option priority (D-JOS-PRIORITY1)",
+          "note": "The precedent this decision reuses rather than diverges from. Named tiers Default/ordinary/Force plus expert Priority(n), explain shows all contenders. Same conflict machinery so a user learns 'why did this win' once for both jetos and jetpack.",
+          "code": "// jetos:   services.foo.enable: Force(true)\n// jetpack: overrides: { mpv: .{ version: Force(\"0.39.0\") } }"
+        }
+      ],
+      "rec": "B",
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-10T21:18:02.121Z"
+    },
+    {
+      "id": "D-JOS-OPTIONSVERB1",
+      "cardId": "c0om2gxe",
+      "group": "tooling",
+      "title": "jetos options search: dedicated verb, extend jet search/info, or Studio-only",
+      "gist": "Whether searching/browsing jetos's typed system.* options (search.nixos.org parity) is a new `jet os options <query>` verb, a type-aware extension of the already-ratified `jet search`/`jet info` verbs, or a GUI-only feature in jetos Studio with no CLI at all.",
+      "explainer": "B wins on discoverability (a beginner reaches for the one front door they already learned from package search, D-JPK-DISCOVER1, instead of remembering a second jetos-specific command) and on I8 (options become another typed, tagged result kind in the one 'find a named thing' index rather than a second search implementation to keep in sync). A is the runner-up if the owner wants option results to never carry a type tag. C is ruled out by the kill criteria: it strips a working default (option discovery) from every headless/terminal-baseline host, which is jetos's own first-class target.",
+      "story": "Terms used below — typed option: a `system.*` config field jetos already knows the type, default, and doc string for from the schema itself, not scraped from doc comments like NixOS's option pages; provenance: which `config.jet` line last set a value, and why it won over other declarations that touch the same option; offline index: a precomputed local search index, no network needed; front door: the command a user types first when they don't know the exact name yet.\n\nPriya inherits a coworker's jetos laptop. The login screen shows Gdm; she expected Sddm, because she remembers the previous owner picking KDE. She doesn't know jetos's dotted option names. A NixOS veteran in her position would open search.nixos.org in a browser tab — jetos ships no such site, and card #323 exists to close exactly that gap. She wants to type a rough guess of the setting she's after, see the typed option it resolves to (key, type, default, one-line doc), then jump to why it currently resolves the way it does on this host. That second step, `jet os explain <key>`, already shipped (ratified B-E7-DESKTOPNS1) and prints the derivation and winning priority once she has the exact key. This decision is only about how she finds that key in the first place — it must not re-solve provenance, `jet os explain` already owns that job (I8).",
+      "inWild": "$ jet os explain displayManager\nerror: unknown option `displayManager`\n  did you mean `services.desktop.displayManager`?\n  jetos ships ~200 system.* options across desktop, network, boot, users, and\n  services trees — nobody memorizes exact dotted paths.\n\n(there is currently no command that finds the exact key from a guess)",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Dedicated verb under jet os",
+          "detail": "A new `options` leaf under the already-ratified `jet os` group (D-JPK-OSVERB1's check|init|plan|proof|build|switch|rollback|generations|lift|import|image list gains one member). It searches only the typed system.* tree, so every result is an option — no result ever needs a tag distinguishing 'package' from 'option'. This is the same shape D-CLI-SURFACE1 (frequency rings, ratified outcome B) already uses elsewhere: a new leaf nested under an existing area word, not a new top-level name.",
+          "code": "$ jet os options displayManager\n2 matches for \"displayManager\":\n\n  system.services.desktop.displayManager\n    type:    .Auto | .Gdm | .Sddm | .Greetd\n    default: .Auto  (derived: Gnome->Gdm, Kde->Sddm, Hyprland/Niri->Greetd)\n    doc:     \"Which login/session manager starts the graphical session.\"\n\n  system.services.desktop.displayManagerTheme\n    type:    string\n    default: \"adwaita\"\n    doc:     \"GTK theme applied to the login screen.\"\n\nrun `jet os explain <key>` for why an option resolved the way it did on this host\n\n$ jet os options gdm\n0 matches for \"gdm\" in the options tree — did you mean a package?\n  run `jet search gdm` to search installable packages instead"
+        },
+        {
+          "key": "B",
+          "name": "Extend jet search / jet info",
+          "detail": "Extends the already-ratified discovery surface (D-JPK-DISCOVER1: `jet search`/`jet info` + LSP completions) instead of minting a new verb. One query hits the option index and the package index together; each result is tagged `[option]` or `[package]`. `--options`/`--packages` narrow an ambiguous query. D-JPK-DISCOVER1's own LSP completions already span 'package names and typed option fields' through one mechanism — this option extends that same discovery surface to the terminal instead of splitting it.",
+          "code": "$ jet search displayManager\nsystem.services.desktop.displayManager   [option]\n  type:    .Auto | .Gdm | .Sddm | .Greetd\n  default: .Auto  (derived: Gnome->Gdm, Kde->Sddm, Hyprland/Niri->Greetd)\n  doc:     \"Which login/session manager starts the graphical session.\"\n\nsystem.services.desktop.displayManagerTheme  [option]\n  type: string · default: \"adwaita\"\n\nrun `jet os explain <key>` for why an option resolved the way it did on this host\n\n$ jet search gdm\ngdm  [package]  v46.0 — GNOME display manager daemon\nsystem.services.desktop.displayManager = .Gdm   [option]\n\n2 results (1 package, 1 option) — narrow with --packages or --options\n\n$ jet info system.services.desktop.displayManager\nsystem.services.desktop.displayManager  [option]\n  type:    .Auto | .Gdm | .Sddm | .Greetd\n  default: .Auto\n  doc:     \"Which login/session manager starts the graphical session.\"\n  set by:  config.jet:42 — run `jet os explain system.services.desktop.displayManager`"
+        },
+        {
+          "key": "C",
+          "name": "Studio-only, no CLI verb",
+          "detail": "Options search lives only in jetos Studio's browser view (#264 prototype, under D-JOS-FIRSTBOOT1's control-center surface). No `jet os options` and no `jet search --options` exist; a terminal user gets a teaching error pointing at Studio. This is the closest match to search.nixos.org's own shape — a browsable site, not a shell command — but jetos explicitly targets headless/server hosts elsewhere in the spec, and B-E7-BASELINE1's terminal baseline installs no GUI at all. A terminal-baseline host has no path to discover an option name short of reading source.",
+          "code": "$ jet os options displayManager\nerror: unknown command `options` under `jet os`\n  jetos option search is a Studio feature — run: jetos studio\n  (Studio -> Options tab -> type \"displayManager\")\n\n$ jet search displayManager --options\nerror: unrecognized flag `--options` — jet search covers installable packages only\n  for jetos option search, run: jetos studio\n\n# on a terminal-baseline host (B-E7-BASELINE1, no GUI installed):\n$ jetos studio\nerror: jetos Studio is not installed on this host (terminal baseline ships no GUI)\n  no CLI fallback exists for option search on this host"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "NixOS",
+          "note": "search.nixos.org is a website; nixpkgs itself ships no CLI equivalent for module options (community `nix search` covers packages only). This is the exact parity gap card #323 names — the comparison rules out 'do nothing' but doesn't settle A vs B vs C.",
+          "code": "$ nix search nixpkgs firefox\n* legacyPackages.x86_64-linux.firefox (140.0)\n# NixOS module options have no official CLI search — users open search.nixos.org"
+        },
+        {
+          "lang": "Homebrew",
+          "note": "brew search/brew info cover formulae and casks through the same two verbs, tagging results by kind. Direct precedent for option B's one-surface, tagged-result shape.",
+          "code": "$ brew search git\n==> Formulae\ngit ✔\ngit-lfs\n==> Casks\ngitup\n$ brew info git\ngit: stable 2.45.1"
+        },
+        {
+          "lang": "kubectl",
+          "note": "kubectl explain <type>.<field> is a dedicated verb for typed schema fields, separate from kubectl get/describe. Precedent for option A's dedicated leaf under an existing area word.",
+          "code": "$ kubectl explain pod.spec.containers.image\nKIND: Pod\nFIELD: image <string>\n  Docker image name."
+        }
+      ],
+      "rec": "B",
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-10T21:18:02.201Z"
+    },
+    {
+      "id": "D-JOS-NETWORK1",
+      "cardId": "c0pfsrnc",
+      "group": "syntax",
+      "title": "JetOS declarative networking surface (wifi / firewall / VPN / printing / bluetooth)",
+      "gist": "Where and how a JetOS host declares its network — wifi, firewall, VPN, printing, bluetooth — so beginners get zero-config day one and experts get reproducible nftables-class control.",
+      "explainer": "B keeps one canonical mechanism (I8) and matches every ratified precedent: net.hostname/net.firewall already live inline in system.<name>, and reusable portable pieces already use the name-referenced module convention (user.<name>, theme.<name>, deploy.target). Beginners get the full zero-config day-one experience from an empty net surface — Default-tier NM+DHCP, deny-inbound firewall, CUPS+Avahi discovery, bluetooth all on. Experts get full nftables-class control by dropping the same net.firewall field to a typed Firewall.nftables family and full WireGuard control via reusable vpn.<name> modules — every piece stays typed, merged, proof-rendered, and rollback-able. A is rejected only because it splits a host's identity across two host-keyed roots; D fragments one host's network across four places to look; C is the weakest on the ranked priorities: its raw-passthrough blobs are unverified, unmerged, and unrollback-able, reintroducing the silent-omission hole D-JOS-NIXIMPORT1 and D-JOS-NIXBACKEND1 exist to close.",
+      "story": "Priya installs JetOS on a new laptop. Day one she wants exactly what Linux Mint gave her: click the network icon, pick her home wifi \"orchard\", type the password once, and the shared hall printer prints — no file edited, nothing declared. Six months later she runs a homelab. Now she wants her laptop's whole network state reproducible in source, so a fresh reinstall restores it byte-for-byte: a static-keyed WireGuard tunnel back to her home gateway, a locked-down firewall that only opens SSH, and that same hall printer pinned to a driver. The magic of the first day and the reproducibility of the second have to come from one coherent surface. This ballot decides what she types for the reproducible half without losing the zero-config half — every option below runs the exact same scenario: host `halcyon`, wifi `orchard`, one WireGuard tunnel to `home-gw`, one shared network printer.",
+      "inWild": "A homelab laptop repo:\n\n  system.halcyon.jet     # the host\n  modules/net.jet        # portable, reusable network pieces\n  nm/  nft/              # (only if a raw-passthrough model is chosen)\n\nPriya runs `jet os switch halcyon` after each edit and expects the report to prove exactly what the firewall, tunnel, and print queue became — with a one-command rollback if it is wrong.\n\nGlossary (terms used below):\n  - NetworkManager (NM): the Linux daemon that manages wifi/ethernet connections; what a desktop's network icon drives.\n  - nftables: the modern Linux firewall/packet-filter ruleset engine (successor to iptables).\n  - WireGuard: a simple, fast VPN; a tunnel is defined by a keypair, an endpoint, and allowed IP ranges.\n  - CUPS + Avahi: the Linux printing service and the mDNS discovery that finds shared printers on the LAN automatically.\n  - Default tier: JetOS's ratified priority level (D-JOS-PRIORITY1) for a safe out-of-box value an expert may override.\n\nBeginner baseline shared by every option: with NOTHING network declared, the Default tier turns NM on with DHCP, brings up a firewall that denies unsolicited inbound, runs CUPS+Avahi so `HP-LaserJet` in the hall auto-appears, and enables bluetooth. Priya joins `orchard` in the desktop portal and it persists. Declaring things is only for reproducibility and expert control.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "One typed net.<host> block (mirror hardware.<host>)",
+          "detail": "A dedicated host-keyed root, sibling to system.<host>, holds ALL network state in typed sub-fields (wifi/firewall/vpn/printers/bluetooth). The system module imports it. One place to read a host's whole network; matches the hardware.<host> shape exactly. Cost: two host-keyed roots exist for one host — network config lives in net.halcyon, everything else in system.halcyon, so \"where is the host configured\" has two answers.",
+          "code": "// modules/net.jet\nmodule net.halcyon {\n    hostname: \"halcyon\"\n    wifi:     [ Wifi.{ ssid: \"orchard\", key: secret.wifi_orchard } ]\n    firewall: Firewall.{ policy: .DenyInbound, open: [22] }\n    vpn:      [ Wireguard.{ name: \"home\", endpoint: \"home-gw.example.net:51820\",\n                           address: \"10.7.0.2/24\", key: secret.wg_home,\n                           peers: [ Peer.{ pubkey: \"kZ3…=\", allowed: [\"10.7.0.0/24\"] } ] } ]\n    printers: [ Printer.{ name: \"hall\", uri: \"ipp://hall-hp.local/ipp/print\", driver: .DriverlessIpp } ]\n    bluetooth: .On\n}\n\n// system.halcyon.jet\nmodule system.halcyon {\n    imports: find(\"./modules\")   // picks up net.halcyon\n}\n\n$ jet os switch halcyon\n  net.halcyon\n    hostname   halcyon\n    wifi       orchard        NM connection · key ← secret.wifi_orchard\n    firewall   deny inbound · open 22/tcp          [Default policy + 1 rule]\n    vpn        home           wg0 → home-gw.example.net:51820  10.7.0.2/24\n    printers   hall           ipp://hall-hp.local  (driverless)\n    bluetooth  on             [Default]\n  proof: nftables ruleset rendered · wg0 staged · cups queue present\n  switch complete · generation 42 · rollback: jet os rollback"
+        },
+        {
+          "key": "B",
+          "name": "Inline net.* in system.<host> + reusable named tunnels/printers",
+          "detail": "No new host-keyed root. Host-bound network stays where net.hostname/net.firewall already live today — as net.* options inside system.<host>. Portable, reusable pieces (a tunnel, a printer profile) become name-referenced modules (vpn.<name>, printing.<name>), exactly the convention already ratified for user.<name>/theme.<name>/deploy.target, and referenced by bare name from the host. One mechanism, one host root; a tunnel defined once is reused across laptops. Beginner: an empty net surface = every Default-tier service on.",
+          "code": "// system.halcyon.jet\nmodule system.halcyon {\n    net.hostname: \"halcyon\"\n    net.wifi:     [ Wifi.{ ssid: \"orchard\", key: secret.wifi_orchard } ]\n    net.firewall: Firewall.{ policy: .DenyInbound, open: [22] }   // or expert nftables family below\n    net.vpn:      [home]          // ← reusable module vpn.home\n    net.printers: [hall_laser]    // ← reusable module printing.hall_laser\n}\n\n// modules/net.jet — portable, reusable across every host\nmodule vpn.home {\n    endpoint: \"home-gw.example.net:51820\"\n    address:  \"10.7.0.2/24\"\n    key:      secret.wg_home\n    peers: [ Peer.{ pubkey: \"kZ3…=\", allowed: [\"10.7.0.0/24\"] } ]\n}\nmodule printing.hall_laser {\n    uri:    \"ipp://hall-hp.local/ipp/print\"\n    driver: .DriverlessIpp\n}\n\n// expert firewall: drop to a typed nftables family in the SAME field\n//   net.firewall: Firewall.nftables { chains: [ Chain.{ hook: .Input, policy: .Drop,\n//       rules: [ Rule.accept(port: 22, proto: .Tcp), Rule.accept(iface: \"wg0\") ] } ] }\n\n$ jet os switch halcyon\n  net.hostname   halcyon\n  net.wifi       orchard        NM connection · key ← secret.wifi_orchard\n  net.firewall   deny inbound · open 22/tcp        [Default policy + 1 rule]\n  net.vpn        home           wg0 → home-gw.example.net:51820  10.7.0.2/24\n  net.printers   hall_laser     ipp://hall-hp.local  (driverless)\n  net.bluetooth  on             [Default]\n  proof: nftables ruleset rendered · wg0 staged · cups queue present\n  switch complete · generation 42 · rollback: jet os rollback"
+        },
+        {
+          "key": "C",
+          "name": "NetworkManager-delegation + raw passthrough escape hatch",
+          "detail": "JetOS owns only the common typed knobs (NM engine, wifi list) and, for anything it does not model, accepts raw NetworkManager keyfiles and raw nftables files as passthrough sources. Smaller JetOS-owned surface. Cost: raw passthrough files are opaque — JetOS cannot diff, merge, prove, or roll them back the way it does every typed option, so the WireGuard tunnel and any custom rules become unverified blobs in an otherwise typed/proof-checked host. This reintroduces exactly the silent-omission risk D-JOS-NIXIMPORT1/D-JOS-NIXBACKEND1 forbid.",
+          "code": "// system.halcyon.jet\nmodule system.halcyon {\n    net.manager: .NetworkManager\n    net.wifi:    [ Wifi.{ ssid: \"orchard\", key: secret.wifi_orchard } ]\n\n    // anything JetOS does not model → raw passthrough, opaque to the checker\n    net.raw.nm:       [ NmConnection.file(\"./nm/home-wg.nmconnection\") ]\n    net.raw.nftables: File(\"./nft/rules.nft\")\n}\n\n$ jet os switch halcyon\n  net.wifi          orchard        NM connection\n  net.raw.nm        home-wg.nmconnection    PASSTHROUGH · not merged/proven\n  net.raw.nftables  rules.nft               PASSTHROUGH · not merged/proven\n  warning: 2 raw passthrough sources — no diff/impact/rollback proof for these\n  switch complete · generation 42 · rollback: jet os rollback (NM/nft blobs restored as-is)"
+        },
+        {
+          "key": "D",
+          "name": "Split typed declarations (firewall.<host> / vpn.<name> / printing.<host> / bluetooth.<host>)",
+          "detail": "Each concern is its own typed module, workload.<name>-style, composed onto a host. Portable concerns (vpn.<name>) are name-keyed and reused across hosts; host-bound concerns (firewall.<host>, printing.<host>, bluetooth.<host>) are host-keyed. Strong separation and reuse. Cost: a single host's network is now spread across three host-keyed modules plus inline wifi — four places to look to answer \"what is halcyon's network,\" and three new top-level namespaces to learn.",
+          "code": "// modules/net.jet\nmodule firewall.halcyon  { policy: .DenyInbound; open: [22] }\nmodule printing.halcyon  { queues: [ Printer.{ name: \"hall\", uri: \"ipp://hall-hp.local/ipp/print\", driver: .DriverlessIpp } ] }\nmodule bluetooth.halcyon { enable: true }\nmodule vpn.home {            // portable, reusable across hosts\n    endpoint: \"home-gw.example.net:51820\"\n    address:  \"10.7.0.2/24\"\n    key:      secret.wg_home\n    peers: [ Peer.{ pubkey: \"kZ3…=\", allowed: [\"10.7.0.0/24\"] } ]\n}\n\n// system.halcyon.jet\nmodule system.halcyon {\n    imports: find(\"./modules\")   // composes firewall/printing/bluetooth.halcyon + vpn.home\n    net.wifi: [ Wifi.{ ssid: \"orchard\", key: secret.wifi_orchard } ]\n    net.vpn:  [home]\n}\n\n$ jet os switch halcyon\n  firewall.halcyon   deny inbound · open 22/tcp     [Default policy + 1 rule]\n  printing.halcyon   hall           ipp://hall-hp.local  (driverless)\n  bluetooth.halcyon  on\n  vpn.home           wg0 → home-gw.example.net:51820  10.7.0.2/24\n  net.wifi           orchard        NM connection · key ← secret.wifi_orchard\n  proof: nftables ruleset rendered · wg0 staged · cups queue present\n  switch complete · generation 42 · rollback: jet os rollback"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "NixOS",
+          "note": "The surface JetOS is matching. Everything lives inline under one config attrset; there is no first-class reusable tunnel object, so a WireGuard peer shared across machines is copied or hand-factored with lib functions. Motivates the name-referenced vpn.<name>/printing.<name> module in options B and D.",
+          "code": "networking.firewall.allowedTCPPorts = [ 22 ];\nnetworking.wireguard.interfaces.wg0 = {\n  ips = [ \"10.7.0.2/24\" ];\n  privateKeyFile = \"/run/secrets/wg_home\";\n  peers = [ { publicKey = \"kZ3…=\"; endpoint = \"home-gw.example.net:51820\";\n              allowedIPs = [ \"10.7.0.0/24\" ]; } ];\n};\nservices.printing.enable = true;   # CUPS; Avahi auto-discovers the hall printer"
+        },
+        {
+          "lang": "NetworkManager (raw keyfile)",
+          "note": "What option C passes through verbatim. A .nmconnection is an opaque INI blob NM reads directly; JetOS delegating to it cannot type-check, merge, or prove the contents — the tradeoff C accepts.",
+          "code": "[wireguard]\nprivate-key=<secret>\n[wireguard-peer.kZ3…=]\nendpoint=home-gw.example.net:51820\nallowed-ips=10.7.0.0/24;"
+        },
+        {
+          "lang": "Home Manager",
+          "note": "Precedent JetOS already ratified for reusable, name-referenced profiles (user.<name>, theme.<name>). Options B and D extend that same convention to portable network pieces rather than inventing a new reuse mechanism.",
+          "code": "# a module defined once, referenced by name from many hosts — the shape vpn.<name> copies"
+        }
+      ],
+      "rec": "B",
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-10T21:18:02.284Z"
     }
   ],
   "questions": [
@@ -23392,6 +23717,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-10T21:18:02.284Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-JOS-NETWORK1",
+      "note": "JetOS declarative networking surface (wifi / firewall / VPN / printing / bluetooth)"
+    },
+    {
+      "at": "2026-07-10T21:18:02.202Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-JOS-OPTIONSVERB1",
+      "note": "jetos options search: dedicated verb, extend jet search/info, or Studio-only"
+    },
+    {
+      "at": "2026-07-10T21:18:02.121Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-JPK-PKGOVERRIDE1",
+      "note": "Per-package override record inside an overlay block"
+    },
+    {
+      "at": "2026-07-10T21:18:02.039Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-JPK-SELECTOR1",
+      "note": "Monorepo package selection flag for jet build / jet test / jet run"
+    },
+    {
+      "at": "2026-07-10T21:18:01.960Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-JOS-BACKUP1",
+      "note": "jetos user-data backup and snapshot declaration"
+    },
+    {
+      "at": "2026-07-10T21:18:01.877Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-JPK-TOOLRUN1",
+      "note": "On-demand tool execution: ephemeral run + persistent global install surface"
+    },
     {
       "at": "2026-07-10T21:14:28.965Z",
       "by": "claude-main",
@@ -26849,48 +27216,6 @@
       "action": "card.update",
       "ref": "c0wetgi3",
       "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T13:51:01.944Z",
-      "by": "cursor-418",
-      "action": "card.claim",
-      "ref": "c0wetgi3",
-      "note": ""
-    },
-    {
-      "at": "2026-07-10T13:51:01.868Z",
-      "by": "sol-418",
-      "action": "card.release",
-      "ref": "c0wetgi3",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-10T13:47:05.381Z",
-      "by": "cursor-main",
-      "action": "card.claim",
-      "ref": "c1iqde7",
-      "note": ""
-    },
-    {
-      "at": "2026-07-10T13:44:45.765Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c09ffy3w",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T13:44:45.682Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c077a4nu",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T13:42:42.077Z",
-      "by": "claude-main",
-      "action": "milestone.delete",
-      "ref": "m0fvnpsr",
-      "note": "Board v2"
     }
   ],
   "nextNum": 368,

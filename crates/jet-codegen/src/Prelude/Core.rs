@@ -1456,6 +1456,14 @@ fn jet_panic(file: &str, line: u32, msg: &str) -> ! {
     eprintln!("  --> {}:{}", file, line);
     std::process::exit(70);
 }
+
+fn jet_runtime_diagnostic(rendered: String) -> ! {
+    if jet_scheduler_in_task() {
+        panic!("{}", rendered);
+    }
+    eprintln!("{}", rendered);
+    std::process::exit(70);
+}
 /// E3005 (D-PREPOST1): a `@Pre`/`@Post` contract clause failed at runtime.
 /// `clause_kw` is `"Pre"`/`"Post"`; `msg` is the clause's own message text
 /// (the second argument to `@Pre(cond, "msg")`/`@Post(cond, "msg")`).
