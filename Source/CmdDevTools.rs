@@ -443,7 +443,17 @@ pub(crate) fn run_devtools_reduce(args: &[&String]) {
         exit(ExitCodes::USER_ERROR);
     });
 
-    let interesting = |text: &str| reduce_oracle(text, code_filter.as_deref());
+    // `compile_with_path` reads its *file* argument straight off disk (its
+    // `src` parameter is display-only), so every candidate has to actually
+    // exist on disk under the same extension before we can ask the oracle
+    // about it. One scratch path, rewritten each try.
+    let ext = Path::new(file)
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or(jet::Syntax::FILE_EXT);
+    let scratch =
+        std::env::temp_dir().join(format!("jet_devtools_reduce_{}.{}", std::process::id(), ext));
+    let interesting = |text: &str| reduce_oracle(&scratch, text, code_filter.as_deref());
 
     if !interesting(&src) {
         eprintln!("error: `{}` doesn't reproduce the target oracle as given", file);
@@ -471,14 +481,20 @@ pub(crate) fn run_devtools_reduce(args: &[&String]) {
         eprintln!("error: couldn't write `{}`: {}", out_path.display(), e);
         exit(ExitCodes::USER_ERROR);
     });
+    let _ = fs::remove_file(&scratch);
     println!("wrote {}", out_path.display());
 }
 
 /// Whether `src` still triggers the target oracle. `code`: `None` = default
 /// I2 oracle (front end accepts, rustc rejects); `Some(code)` = the front end
-/// emits that diagnostic code (error or lint).
-fn reduce_oracle(src: &str, code: Option<&str>) -> bool {
-    match jet::compile_with_path(src, "reduce_candidate.jet") {
+/// emits that diagnostic code (error or lint). Writes `src` to `scratch`
+/// first since `compile_with_path` reads its file argument off disk.
+fn reduce_oracle(scratch: &Path, src: &str, code: Option<&str>) -> bool {
+    if fs::write(scratch, src).is_err() {
+        return false;
+    }
+    let shown = scratch.to_string_lossy().into_owned();
+    match jet::compile_with_path(src, &shown) {
         Ok(out) => match code {
             Some(c) => out.lints.iter().any(|d| d.code == c),
             None => rustc_rejects(&out.rust),
