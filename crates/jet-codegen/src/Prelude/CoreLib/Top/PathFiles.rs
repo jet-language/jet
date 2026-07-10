@@ -29,7 +29,167 @@ fn jet_path_extension(p: &JetPath) -> Option<String> {
 fn jet_path_stem(p: &JetPath) -> Option<String> {
     p.inner.file_stem().map(|s| s.to_string_lossy().to_string())
 }
+
+static JET_ATOMIC_TEMP_COUNTER: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
+struct JetAtomicTemp {
+    path: std::path::PathBuf,
+    file: Option<std::fs::File>,
+    committed: bool,
+}
+
+impl JetAtomicTemp {
+    fn create(dir: &std::path::Path) -> std::io::Result<Self> {
+        for _ in 0..128 {
+            let sequence = JET_ATOMIC_TEMP_COUNTER
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let path = dir.join(format!(
+                ".jet_tmp_{}_{}",
+                std::process::id(),
+                sequence
+            ));
+            match std::fs::OpenOptions::new()
+                .create_new(true)
+                .write(true)
+                .open(&path)
+            {
+                Ok(file) => {
+                    return Ok(Self {
+                        path,
+                        file: Some(file),
+                        committed: false,
+                    });
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => return Err(error),
+            }
+        }
+        Err(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            "could not reserve an atomic-write temporary file",
+        ))
+    }
+
+    fn file_mut(&mut self) -> &mut std::fs::File {
+        self.file.as_mut().expect("atomic temp file must be open")
+    }
+
+    fn close(&mut self) {
+        self.file.take();
+    }
+
+    fn commit(&mut self) {
+        self.committed = true;
+    }
+}
+
+impl Drop for JetAtomicTemp {
+    fn drop(&mut self) {
+        self.close();
+        if !self.committed {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+}
+
+#[cfg(windows)]
+mod jet_atomic_windows {
+    use std::os::windows::ffi::OsStrExt;
+
+    const MOVEFILE_REPLACE_EXISTING: u32 = 0x1;
+    const MOVEFILE_WRITE_THROUGH: u32 = 0x8;
+    const ERROR_FILE_NOT_FOUND: i32 = 2;
+    const ERROR_PATH_NOT_FOUND: i32 = 3;
+
+    extern "system" {
+        fn MoveFileExW(existing: *const u16, replacement: *const u16, flags: u32) -> i32;
+        fn ReplaceFileW(
+            replaced: *const u16,
+            replacement: *const u16,
+            backup: *const u16,
+            flags: u32,
+            exclude: *mut std::ffi::c_void,
+            reserved: *mut std::ffi::c_void,
+        ) -> i32;
+    }
+
+    fn wide(path: &std::path::Path) -> std::io::Result<Vec<u16>> {
+        let mut encoded: Vec<u16> = path.as_os_str().encode_wide().collect();
+        if encoded.contains(&0) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "Windows path contains an embedded NUL",
+            ));
+        }
+        encoded.push(0);
+        Ok(encoded)
+    }
+
+    pub fn replace(temp: &std::path::Path, target: &std::path::Path) -> std::io::Result<()> {
+        let target_exists = target.exists();
+        let temp = wide(temp)?;
+        let target = wide(target)?;
+        if target_exists {
+            let replaced = unsafe {
+                ReplaceFileW(
+                    target.as_ptr(),
+                    temp.as_ptr(),
+                    std::ptr::null(),
+                    0,
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                )
+            };
+            if replaced != 0 {
+                return Ok(());
+            }
+            let error = std::io::Error::last_os_error();
+            if !matches!(
+                error.raw_os_error(),
+                Some(ERROR_FILE_NOT_FOUND) | Some(ERROR_PATH_NOT_FOUND)
+            ) {
+                return Err(error);
+            }
+        }
+        let moved = unsafe {
+            MoveFileExW(
+                temp.as_ptr(),
+                target.as_ptr(),
+                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+            )
+        };
+        if moved == 0 {
+            Err(std::io::Error::last_os_error())
+        } else {
+            Ok(())
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn jet_atomic_replace(temp: &std::path::Path, target: &std::path::Path) -> std::io::Result<()> {
+    std::fs::rename(temp, target)
+}
+
+#[cfg(windows)]
+fn jet_atomic_replace(temp: &std::path::Path, target: &std::path::Path) -> std::io::Result<()> {
+    jet_atomic_windows::replace(temp, target)
+}
+
+#[cfg(unix)]
+fn jet_atomic_sync_parent(dir: &std::path::Path) -> std::io::Result<()> {
+    std::fs::File::open(dir)?.sync_all()
+}
+
+#[cfg(not(unix))]
+fn jet_atomic_sync_parent(_dir: &std::path::Path) -> std::io::Result<()> {
+    Ok(())
+}
+
 fn jet_path_write_atomic(p: &JetPath, content: &Vec<u8>) -> Result<(), jet_std::IoError> {
+    use std::io::Write;
+
     let path_s = p.inner.to_string_lossy();
     let dir = p.inner.parent().ok_or_else(|| {
         jet_std::io_error(
@@ -40,14 +200,26 @@ fn jet_path_write_atomic(p: &JetPath, content: &Vec<u8>) -> Result<(), jet_std::
             ),
         )
     })?;
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.subsec_nanos())
-        .unwrap_or(0);
-    let tmp = dir.join(format!(".jet_tmp_{}", nanos));
-    std::fs::write(&tmp, content)
-        .map_err(|e| jet_std::io_error(tmp.to_string_lossy().as_ref(), e))?;
-    std::fs::rename(&tmp, &p.inner).map_err(|e| jet_std::io_error(&path_s, e))
+    let existing_permissions = std::fs::metadata(&p.inner)
+        .ok()
+        .map(|metadata| metadata.permissions());
+    let mut temp = JetAtomicTemp::create(dir)
+        .map_err(|error| jet_std::io_error(dir.to_string_lossy().as_ref(), error))?;
+    temp.file_mut()
+        .write_all(content)
+        .map_err(|error| jet_std::io_error(temp.path.to_string_lossy().as_ref(), error))?;
+    if let Some(permissions) = existing_permissions {
+        temp.file_mut()
+            .set_permissions(permissions)
+            .map_err(|error| jet_std::io_error(temp.path.to_string_lossy().as_ref(), error))?;
+    }
+    temp.file_mut()
+        .sync_all()
+        .map_err(|error| jet_std::io_error(temp.path.to_string_lossy().as_ref(), error))?;
+    temp.close();
+    jet_atomic_replace(&temp.path, &p.inner).map_err(|error| jet_std::io_error(&path_s, error))?;
+    temp.commit();
+    jet_atomic_sync_parent(dir).map_err(|error| jet_std::io_error(&path_s, error))
 }
 fn jet_path_walk(p: &JetPath) -> Vec<JetPath> {
     let mut result = Vec::new();
@@ -135,4 +307,3 @@ fn jet_std_file_writer_flush(w: &mut JetFileWriter) -> Result<(), jet_std::IoErr
     use std::io::Write;
     w.inner.flush().map_err(|e| jet_std::io_error(&w.path, e))
 }
-

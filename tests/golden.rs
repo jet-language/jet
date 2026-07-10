@@ -468,6 +468,7 @@ fn strip_vetted_prelude_modules(rust_code: &str) -> String {
     let s = strip_mod(&s, "jet_term_unix");
     let s = strip_mod(&s, "jet_term_windows");
     let s = strip_mod(&s, "jet_os_unix");
+    let s = strip_mod(&s, "jet_atomic_windows");
     let mut s = strip_mod(&s, "jet_gtk");
     while s.contains("mod user___c_") {
         let before = s.clone();
