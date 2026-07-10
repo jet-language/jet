@@ -621,13 +621,27 @@ mod jet_os_interrupt {
     where
         F: Fn() + Send + 'static,
     {
-        let tx = dispatcher().unwrap_or_else(|message| panic!("core.os.on_interrupt: {message}"));
+        let tx = dispatcher().unwrap_or_else(|message| {
+            super::jet_panic("<core.os>", 0, &format!("core.os.on_interrupt: {message}"))
+        });
         let (ready_tx, ready_rx) = mpsc::sync_channel(0);
         tx.send(Command::Register(Box::new(handler), ready_tx))
-            .unwrap_or_else(|_| panic!("core.os.on_interrupt: interrupt dispatcher stopped"));
+            .unwrap_or_else(|_| {
+                super::jet_panic(
+                    "<core.os>",
+                    0,
+                    "core.os.on_interrupt: interrupt dispatcher stopped",
+                )
+            });
         ready_rx
             .recv()
-            .unwrap_or_else(|_| panic!("core.os.on_interrupt: interrupt dispatcher stopped"));
+            .unwrap_or_else(|_| {
+                super::jet_panic(
+                    "<core.os>",
+                    0,
+                    "core.os.on_interrupt: interrupt dispatcher stopped",
+                )
+            });
     }
 }
 

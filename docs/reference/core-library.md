@@ -719,7 +719,14 @@ this process and machine.
 | `hostname()` | `String` | Hostname, falling back to `localhost` |
 | `username()` | `String` | Current username, or empty if unavailable |
 | `set_current_dir(path)` | `Void ? IOError` | Change process working directory |
-| `on_interrupt(handler)` | `Void` | Run `handler` after Ctrl-C / SIGINT on supported platforms |
+| `on_interrupt(handler)` | `Void` | Register a process-lifetime handler for Ctrl-C / SIGINT on Unix and Windows |
+
+Interrupt handlers are additive. Each Ctrl-C runs every registered handler in
+registration order on Jet's interrupt dispatcher, never inside the operating
+system callback. Registration is active before `on_interrupt` returns. The
+`Void` return means registrations live until the process exits; there is no
+unregister/drop handle. Calling `on_interrupt` on a target without process
+interrupts fails explicitly instead of silently discarding the handler.
 
 Example: `examples/features/io/os_facts.jet`.
 
