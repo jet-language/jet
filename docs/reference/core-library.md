@@ -6,6 +6,7 @@ enough to write real command-line tools. Every fallible call returns a
 `T ? E` value; nothing in Core panics on its own.
 
 <!-- Stable IDs bind these public Core declarations to reviewed capability depth. -->
+<!-- CAPABILITY_CLAIMS:BEGIN -->
 <!-- CAPABILITY_CLAIM: claim.core-foundation | Core foundations are reachable Jet software. -->
 <!-- CAPABILITY_CLAIM: claim.core-concurrency | Tasks and events share one runtime. -->
 <!-- CAPABILITY_CLAIM: claim.core-files-data | Files, paths, archives, compression, and DB APIs are production claims. -->
@@ -16,6 +17,7 @@ enough to write real command-line tools. Every fallible call returns a
 <!-- CAPABILITY_CLAIM: claim.core-ui-web | UI and web share one typed component model. -->
 <!-- CAPABILITY_CLAIM: claim.game-product | Game claims require a playable runtime and editor. -->
 <!-- CAPABILITY_CLAIM: claim.plugin-ffi | Plugins and FFI use one typed interop structure. -->
+<!-- CAPABILITY_CLAIMS:END -->
 
 **How it works today:** Core modules are built into the compiler. Use them by
 name; the compiler type-checks your calls and generates only the helpers you

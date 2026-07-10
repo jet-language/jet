@@ -44,11 +44,27 @@ function registryClaims() {
   return claims;
 }
 
-function declarationClaims() {
+function declarationClaims(overrides) {
   const found = [];
   for (const path of PUBLIC_DECLARATION_FILES) {
-    const text = readFileSync(join(ROOT, path), "utf8");
-    for (const match of text.matchAll(/CAPABILITY_CLAIM:\s*(claim\.[a-z0-9-]+)/g)) {
+    const text = fileText(path, overrides);
+    const begin = "CAPABILITY_CLAIMS:BEGIN";
+    const end = "CAPABILITY_CLAIMS:END";
+    const beginAt = text.indexOf(begin);
+    const endAt = text.indexOf(end);
+    if (beginAt < 0 || endAt < 0 || beginAt >= endAt || text.indexOf(begin, beginAt + begin.length) >= 0 || text.indexOf(end, endAt + end.length) >= 0) {
+      throw new Error(`public claim declaration block is missing or ambiguous in ${path}`);
+    }
+    const blockStart = text.indexOf("\n", beginAt);
+    const blockEnd = text.lastIndexOf("\n", endAt);
+    if (blockStart < 0 || blockEnd < blockStart) throw new Error(`public claim declaration block has no line body in ${path}`);
+    const block = text.slice(blockStart + 1, blockEnd + 1);
+    for (const line of block.split(/\r?\n/)) {
+      if (!line.trim()) continue;
+      const match = line.match(/CAPABILITY_CLAIM:\s*(claim\.[a-z0-9-]+)\s*\|\s*([^<\n]+?)(?:\s*-->|\s*$)/);
+      if (!match || !match[2].trim().endsWith(".")) {
+        throw new Error(`unmarked broad claim declaration in ${path}: ${line.trim()}`);
+      }
       found.push(match[1]);
     }
   }
@@ -84,13 +100,13 @@ function fileText(path, overrides) {
   return readFileSync(absolute, "utf8");
 }
 
-function decisiveContent(text, anchor) {
-  const matches = text
-    .split(/\r?\n/)
-    .filter((line) => line.includes(anchor))
-    .map((line) => line.trim().replace(/\s+/g, " "));
-  if (matches.length === 0) throw new Error("decisive anchor selected no normalized content");
-  return matches.join("\n");
+function normalizedArtifact(text) {
+  return text
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .map((line) => line.trim().replace(/\s+/g, " "))
+    .join("\n")
+    .trim();
 }
 
 function validateArtifact(artifact, ownerCard, overrides) {
@@ -113,11 +129,55 @@ function validateArtifact(artifact, ownerCard, overrides) {
     const where = artifact.kind === "file" ? artifact.path : `Tower #${ownerCard.num}.${artifact.field}`;
     throw new Error(`missing decisive anchor in ${where}: ${artifact.anchor}`);
   }
-  const digest = sha256(decisiveContent(text, artifact.anchor));
-  if (!artifact.contentDigest) throw new Error("artifact lacks normalized decisive content digest");
+  const digest = sha256(normalizedArtifact(text));
+  if (!artifact.contentDigest) throw new Error("artifact lacks normalized full-artifact content digest");
   if (digest !== artifact.contentDigest) {
-    throw new Error(`decisive content digest mismatch: expected ${artifact.contentDigest}, got ${digest}`);
+    throw new Error(`normalized artifact digest mismatch: expected ${artifact.contentDigest}, got ${digest}`);
   }
+}
+
+function rustTestBody(text, testName) {
+  const escaped = testName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const matches = [...text.matchAll(new RegExp(`\\bfn\\s+${escaped}\\s*\\([^)]*\\)\\s*\\{`, "g"))];
+  if (matches.length !== 1) throw new Error(`exact Rust test function ${testName} is missing or ambiguous`);
+  const fnAt = matches[0].index;
+  const prefix = text.slice(Math.max(0, fnAt - 300), fnAt);
+  const testAttribute = prefix.lastIndexOf("#[test]");
+  if (testAttribute < 0 || /\bfn\s+[A-Za-z_]/.test(prefix.slice(testAttribute + 7))) {
+    throw new Error(`exact Rust function ${testName} is not a #[test]`);
+  }
+  const open = text.indexOf("{", fnAt);
+  let depth = 0;
+  let state = "code";
+  let blockDepth = 0;
+  for (let index = open; index < text.length; index += 1) {
+    const char = text[index];
+    const next = text[index + 1];
+    if (state === "line") {
+      if (char === "\n") state = "code";
+      continue;
+    }
+    if (state === "block") {
+      if (char === "/" && next === "*") { blockDepth += 1; index += 1; }
+      else if (char === "*" && next === "/") { blockDepth -= 1; index += 1; if (blockDepth === 0) state = "code"; }
+      continue;
+    }
+    if (state === "string" || state === "char") {
+      if (char === "\\") { index += 1; continue; }
+      if ((state === "string" && char === '"') || (state === "char" && char === "'")) state = "code";
+      continue;
+    }
+    if (char === "/" && next === "/") { state = "line"; index += 1; continue; }
+    if (char === "/" && next === "*") { state = "block"; blockDepth = 1; index += 1; continue; }
+    if (char === '"') { state = "string"; continue; }
+    if (char === "'" && next && !/[A-Za-z_]/.test(next)) { state = "char"; continue; }
+    if (char === "{") depth += 1;
+    if (char === "}") {
+      depth -= 1;
+      if (depth === 0) return text.slice(open + 1, index);
+    }
+  }
+  throw new Error(`exact Rust test function ${testName} has no complete body`);
 }
 
 function validateCommand(command, proven, claimId, laneId) {
@@ -131,8 +191,9 @@ function validateCommand(command, proven, claimId, laneId) {
     const testPath = join(ROOT, "tests", `${command[3]}.rs`);
     if (!existsSync(testPath)) throw new Error(`proven acceptance test does not exist: ${relative(ROOT, testPath)}`);
     const marker = `CAPABILITY_CLAIM: ${claimId} / ${laneId}`;
-    if (!readFileSync(testPath, "utf8").includes(marker)) {
-      throw new Error(`acceptance command target lacks lane marker ${marker}`);
+    const body = rustTestBody(readFileSync(testPath, "utf8"), command[4]);
+    if (!body.includes(marker)) {
+      throw new Error(`exact acceptance test body lacks lane marker ${marker}`);
     }
   }
 }
@@ -152,7 +213,7 @@ function validateManifest(manifest, board, options = {}) {
   if (!sameSet([...claims.keys()], docsClaims)) {
     errors.push(`manifest: docs registry drift; manifest=${[...claims.keys()].sort().join(",")} docs=${docsClaims.sort().join(",")}`);
   }
-  const declaredClaims = declarationClaims();
+  const declaredClaims = declarationClaims(options.fileOverrides);
   if (!sameSet([...claims.keys()], [...new Set(declaredClaims)])) {
     errors.push(`manifest: designated public declarations have unowned or missing claim IDs; declarations=${[...new Set(declaredClaims)].sort().join(",")}`);
   }
@@ -256,7 +317,7 @@ function refreshDigests(towerPath) {
       for (const artifact of lane.artifacts) {
         try {
           const text = artifact.kind === "file" ? fileText(artifact.path) : towerText(owner, artifact.field);
-          artifact.contentDigest = sha256(decisiveContent(text, artifact.anchor));
+          artifact.contentDigest = sha256(normalizedArtifact(text));
         } catch (error) {
           throw new Error(`${claim.id}/${lane.id}: ${error.message}`);
         }
@@ -317,6 +378,9 @@ function hostileFixtures(towerPath) {
       case "command-swap":
         claim.acceptanceLanes[0].command = ["cargo", "test", "--test", "truthfulness", "every_feature_example_has_expected_output", "--", "--exact"];
         break;
+      case "same-file-command-swap":
+        claim.acceptanceLanes[0].command[4] = "live_surface_has_no_retired_spellings";
+        break;
       case "deferred-as-proven":
         claim.class = "proven";
         claim.disposition = "shipped";
@@ -345,7 +409,13 @@ function hostileFixtures(towerPath) {
       case "corrupt-preserving-anchor": {
         const artifact = claim.acceptanceLanes[0].artifacts[0];
         const text = fileText(artifact.path);
-        overrides.set(artifact.path, text.replace(artifact.anchor, `${artifact.anchor} SEMANTICS_CORRUPTED`));
+        overrides.set(artifact.path, `${text}\n// NON_ANCHOR_SEMANTICS_CORRUPTED\n`);
+        break;
+      }
+      case "unmarked-broad-claim": {
+        const path = "README.md";
+        const text = fileText(path);
+        overrides.set(path, text.replace("<!-- CAPABILITY_CLAIMS:END -->", "<!-- Jet replaces every database without limits. -->\n<!-- CAPABILITY_CLAIMS:END -->"));
         break;
       }
       default:

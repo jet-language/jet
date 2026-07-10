@@ -235,9 +235,9 @@ fn old_binding_migration_paths_stay_removed() {
     );
 }
 
-// CAPABILITY_CLAIM: claim.syntax-law / syntax-matrix
 #[test]
 fn syntax_status_matrix_covers_unbuilt_notes() {
+    // CAPABILITY_CLAIM: claim.syntax-law / syntax-matrix
     let spec = fs::read_to_string("docs/spec/syntax-decisions.md").expect("read syntax decisions");
     let matrix = fs::read_to_string(SYNTAX_STATUS_MATRIX).expect("read syntax status matrix");
 

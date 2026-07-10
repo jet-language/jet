@@ -205,9 +205,9 @@ fn readme_subcommands_exist_in_cli() {
 // Check 5: Every examples/features/<topic>/*.jet has a matching expected
 // output. `expected/` mirrors the <topic>/ tree (D-REPO-EXAMPLES1=A).
 // ---------------------------------------------------------------------------
-// CAPABILITY_CLAIM: claim.examples-spec / expected-output-pairs
 #[test]
 fn every_feature_example_has_expected_output() {
+    // CAPABILITY_CLAIM: claim.examples-spec / expected-output-pairs
     let root = root();
     let ex_dir = root.join("examples/features");
     let expected_dir = ex_dir.join("expected");

@@ -10,6 +10,7 @@ everything in plain language, then generates Rust for speed. No hidden `unsafe`,
 no exceptions, no hidden control flow.
 
 <!-- Stable IDs bind advertised claims to docs/spec/capability-claim-manifest.json. -->
+<!-- CAPABILITY_CLAIMS:BEGIN -->
 <!-- CAPABILITY_CLAIM: claim.syntax-law | Unbuilt syntax notes are machine inventoried. -->
 <!-- CAPABILITY_CLAIM: claim.examples-spec | Feature examples declare expected output artifacts. -->
 <!-- CAPABILITY_CLAIM: claim.native-language | Jet compiles safe source to native programs. -->
@@ -27,6 +28,7 @@ no exceptions, no hidden control flow.
 <!-- CAPABILITY_CLAIM: claim.proof-replay | Proof and replay share typed facts. -->
 <!-- CAPABILITY_CLAIM: claim.performance-budgets | Budgets enforce pinned expectations. -->
 <!-- CAPABILITY_CLAIM: claim.product-boundaries | jet, jetpack, and jetos have canonical owners. -->
+<!-- CAPABILITY_CLAIMS:END -->
 
 **Current status: Epoch 3** (Epoch 1 v1.0 + Epoch 2 GA are complete — see [roadmap](docs/spec/roadmap.md)).
 
