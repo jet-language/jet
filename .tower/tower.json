@@ -3,8 +3,8 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 446,
-    "rev": 2483,
+    "nextNum": 465,
+    "rev": 2512,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -18572,6 +18572,11 @@
         {
           "at": "2026-07-10",
           "by": "codex-orchestrator",
+          "text": "Checkpoint: one Rust page registry now drives JSON and sidebar. Projected settings expose Stage change; served app has Dashboard, Settings, Monitoring, Services, Packages, Secrets, Fleet, Generations, Changeset, and Proof. Apply/Discard use durable server session; Apply refreshes source then runs canonical check→plan; build/proof stay explicit canonical actions. Headless HTTP serve assertions and transaction stage/status/discard/apply plus check/plan/build/proof focused tests pass. Real artifact facts/default launch polish and targeted build remain."
+        },
+        {
+          "at": "2026-07-10",
+          "by": "codex-orchestrator",
           "text": "Durable Terra checkpoint: test-first source transaction slice green. One in-memory Changeset over canonical config.jet now supports status/apply/discard, stale-source conflict detection, atomic apply, exact diff, and reprojected source. Focused exact test jetos_studio_transaction_previews_and_writes_source passed 1/1. UI page registry and browser/headless proof continue."
         },
         {
@@ -20771,6 +20776,11 @@
         {
           "at": "2026-07-10",
           "by": "codex-orchestrator",
+          "text": "Checkpoint: code and hostile focused paths green. Cache/file/root/sandbox unit tests pass; CLI deletion/tamper rebuild 2/2, valid reuse 1/1, capability-only child refusal 1/1. Added dynamic truth matrix for all 40 projected E4 done cards: 15 live, 25 compatibility/model/schema/fixture rows naming active completion owners. Likely reclassification evidence: #6 completion owned by #423; #330 by #424/#428; remaining partials already labeled legacy substrate or scoped. Matrix test, focused no-daemon/jetpack filters, formatting, diff audit, commit remain."
+        },
+        {
+          "at": "2026-07-10",
+          "by": "codex-orchestrator",
           "text": "Durable Sol slice green: fail-closed Store::find_verified_by_reference now checks output existence, canonical byte hash, host platform, exact reference/provenance policy, signature policy, closure containment, and Nix root before reuse; invalid Jet candidates fall through to provider. File envelope hashes bytes. Capability detection no longer claims Strong sandbox before jail entry. Focused results: verified_cache 2/2, file hash 1/1, sandbox truth 1/1, fake Nix GC-root creation 1/1."
         },
         {
@@ -21605,6 +21615,348 @@
       ],
       "created": "2026-07-09T23:22:09.910Z",
       "updated": "2026-07-09"
+    },
+    {
+      "id": "c0uvxow5",
+      "num": 446,
+      "title": "durability: CI runs the full suite (W1)",
+      "body": "Plan: docs/plans/agent-durability.md W1. CI currently runs 6 of ~90 test targets; golden/fuzz self-skip when rustc is missing, so a green run can be vacuous; one step still calls the retired tools/Tower path.\n\nScope: ci.yml runs scripts/agent/verify-full.sh (depth per D-CI3); JET_REQUIRE_RUSTC=1 turns environment self-skips into failures; fix/delete stale Tower status step; wire tools/perf/ci-perf-check.sh; add release.yml (versioning.md already references it); nightly lane with rotating-seed fuzz_sema (N>=1000) + ungated-unsafe grep on fuzz programs; versioned scripts/githooks/ + core.hooksPath via flake shellHook, pre-push fast doc-sync tier.\n\nExit: CI red iff verify-full.sh red (per ratified tiering); no self-skip can pass silently in CI; nightly lane live; fresh clone gets hooks via dev shell.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "Gated by D-CI3 (suite depth/tiering). Ungated remainder: stale Tower path fix, JET_REQUIRE_RUSTC, perf wiring, release.yml.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "created": "2026-07-10T10:49:06.734Z",
+      "updated": "2026-07-10"
+    },
+    {
+      "id": "c0w6wa07",
+      "num": 447,
+      "title": "durability: invariant machine pins I1/I3/I6/I7 (W2)",
+      "body": "Plan: docs/plans/agent-durability.md W2. Four invariants rely on discipline or have holes.\n\nScope: I3 truthfulness check — zero Diagnostic:: calls in jet-codegen; I6 — enumerate crates/ dir instead of the hardcoded 9-crate allowlist (tests/truthfulness.rs:333-367), every exemption carries a decision ID cross-checked against the ratified record; I7 — tests/decisions.rs fails on any pub const KW_*/sigil lacking an adjacent ratified-decision comment (close the :264 continue escape); I1 — ungated-unsafe grep applied to fuzz_sema-generated programs, not just the examples corpus; diagnostics registry per-entry what/why/fix format validator; count-ratchets on ACKNOWLEDGED_GAPS and the other exclusion lists.\n\nExit: each pin has a failing-case test proving it trips; full suite green.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "created": "2026-07-10T10:49:06.813Z",
+      "updated": "2026-07-10"
+    },
+    {
+      "id": "c0xkikie",
+      "num": 448,
+      "title": "durability: formatter lossless corpus test (W2)",
+      "body": "Plan: docs/plans/agent-durability.md W2. Idempotence testing provably misses dropped tokens — the exact failure mode that let jet fmt silently corrupt serde markers/turbofish for months (tests/fmt.rs:1435 admits it). Only ~3 of 94 fmt tests are byte-stability.\n\nScope: corpus-wide lossless check — parse(fmt(src)) token-stream-equal parse(src) for every example and every tests/ui fixture. One test closes the class; new syntax is covered automatically with no per-feature test to remember.\n\nExit: test in tests/fmt.rs, runs in full suite; seeded mutation check (delete a token in emission, test goes red) demonstrated in the card log.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "created": "2026-07-10T10:49:06.896Z",
+      "updated": "2026-07-10"
+    },
+    {
+      "id": "c0yw55x3",
+      "num": 449,
+      "title": "durability: single-fixture filters + golden bless + diffs (W3)",
+      "body": "Plan: docs/plans/agent-durability.md W3. One #[test] loops 516 ui fixtures (first mismatch hides the rest); one loops 339 golden examples; expected/*.out has no update path — agents hand-copy from panic text; mismatches print assert blob dumps.\n\nScope: JET_UI_FILTER / JET_GOLDEN_FILTER substring filters; collect-all-failures in ui_snapshots; unified diffs on mismatch in both harnesses; JET_UPDATE_GOLDEN=1 write path; UPDATE_EXPECT=<name> scoped blessing (blind bless-all no longer the only option).\n\nExit: one fixture runnable in seconds; bless flow documented in verify skill; diffs readable.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "created": "2026-07-10T10:49:06.976Z",
+      "updated": "2026-07-10"
+    },
+    {
+      "id": "c009yxqf",
+      "num": 450,
+      "title": "durability: maintainer devtools subcommands (W3)",
+      "body": "Plan: docs/plans/agent-durability.md W3. No reducer, no ICE triage bundle, no fixture scaffolders — ICE hand-reduction is frontier-level work that must become mechanical.\n\nScope (surface per D-DEVTOOLS1): reduce <file.jet> (delta-debug; oracle = front-end accepts + rustc rejects, or matches a given diagnostic code); ice-report <file.jet> (bundle source + generated Rust + rustc stderr + versions); new-example <topic>/<name>; new-ui <name>; check-fixture-paths (validates path-embedding fixtures against real files); bless wrapper.\n\nExit: each tool has tests + a doc line in the verify skill; reduce demonstrably shrinks a real ice_regressions case.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "Gated by D-DEVTOOLS1 (where the maintainer surface lives). No code before ratification.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "created": "2026-07-10T10:49:07.060Z",
+      "updated": "2026-07-10"
+    },
+    {
+      "id": "c01lj8gw",
+      "num": 451,
+      "title": "durability: batch codemod + dev-shell tools (W3)",
+      "body": "Plan: docs/plans/agent-durability.md W3. jet codemod rejects everything but single renames (Source/CmdCodemod.rs:76-77) while memory-v5 S1-S9 mass migrations are ahead; dev shell lacks jq/gh/fd; the /tmp/nix-shell.* cleanup exists only as a Claude-Code hook, other harnesses hit phantom ENOSPC.\n\nScope: batch pattern-rewrite codemod over examples/ + tests/ui/; jq, gh, fd pinned in flake devShell; /tmp cleanup + df check moved into flake shellHook and verify-full.sh preamble (harness-universal).\n\nExit: a real multi-file migration executed via codemod in tests; shellHook cleanup verified from a non-Claude shell.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "created": "2026-07-10T10:49:07.140Z",
+      "updated": "2026-07-10"
+    },
+    {
+      "id": "c02wa1dn",
+      "num": 452,
+      "title": "durability: include!-splice to real modules (W4)",
+      "body": "Plan: docs/plans/agent-durability.md W4. ~180 files compose via include! (e.g. jet-codegen TIR subset.rs:14-23): spliced fragments share one invisible scope, rust-analyzer/goto degrade, and an agent edits one fragment blind to its siblings.\n\nScope: mechanical conversion to real mod + pub(crate) re-exports across all include! sites in compiler crates and Source/. Behavior-neutral; no logic changes ride along.\n\nExit: zero include! of sibling .rs fragments in compiler code (grep test to pin it); full suite green; binary behavior unchanged (golden green).",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "created": "2026-07-10T10:49:07.218Z",
+      "updated": "2026-07-10"
+    },
+    {
+      "id": "c047jzdr",
+      "num": 453,
+      "title": "durability: ice! macro + sema assert layer (W4)",
+      "body": "Plan: docs/plans/agent-durability.md W4. 11 debug_assert! workspace-wide, zero in sema; a wrong sema edit surfaces as a late codegen ICE at best or a silent miscompile at worst (ice_regressions b5-b7 are this class). ICE panics are hand-written convention with no central macro; nothing stops a bare panic!(\"bad\").\n\nScope: ice!(span, ...) macro in jet-foundation stamping the I2 banner + exit 101; grep test banning bare panic! in compiler crates; debug_assert layer at the sema-to-TIR handoff (types resolved, no Unknown defaults leaking — the b5 bug class); jetpack unwrap hotspots covered by card on unwrap sweep.\n\nExit: macro adopted at existing panic sites; ban test red on a seeded bare panic!; handoff asserts catch a seeded Unknown-leak in a test.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "created": "2026-07-10T10:49:07.298Z",
+      "updated": "2026-07-10"
+    },
+    {
+      "id": "c05hfl27",
+      "num": 454,
+      "title": "durability: extract Canvas JS from js.rs (W4)",
+      "body": "Plan: docs/plans/agent-durability.md W4. Source/Canvas/js.rs is 5298 lines of JavaScript inside one Rust raw string — no syntax checking, no comments, no tests on the JS itself; worst context-window trap in the repo.\n\nScope: split into real .js asset files embedded via include_str!; JS-side smoke tests through the existing playwright/canvas harness (brave binary per repo notes); section comments.\n\nExit: js.rs reduced to embedding glue; canvas golden/scenario tests green; JS files individually lintable.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "created": "2026-07-10T10:49:07.375Z",
+      "updated": "2026-07-10"
+    },
+    {
+      "id": "c06tccyz",
+      "num": 455,
+      "title": "durability: JIT lowering doc pass + TIR exhaustive dispatch (W4)",
+      "body": "Plan: docs/plans/agent-durability.md W4. jet-jit lower_ctx.rs has 22 comment lines per 1866 (hairiest logic, pure reverse-engineering); the TIR quadruple (subset gate / emit / lower / interpreter) is memory-coupled — a missed arm is a runtime ICE, and wildcard _ arms hide gaps.\n\nScope: doc-comment pass mapping each lowering region to its TIR variant and the R12 parity contract; restructure the four TIR consumers to exhaustive match on the TIR enum so a new variant breaks the build in every consumer; distinguish honest named-unsupported fallthroughs from lazy wildcards.\n\nExit: no bare _ arms over TIR variants in the four consumers (pinned by grep test or enum exhaustiveness); adding a dummy variant breaks all four compilations (demonstrated, then reverted).",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "created": "2026-07-10T10:49:07.455Z",
+      "updated": "2026-07-10"
+    },
+    {
+      "id": "c083j754",
+      "num": 456,
+      "title": "durability: jetpack unwrap-to-diagnostic sweep (W4)",
+      "body": "Plan: docs/plans/agent-durability.md W4. 443 unwraps in jetpack (Provider.rs 82, PackageManifest 49, ModuleEval 44) — a user-facing tool where a wrong edit or unexpected input becomes a raw Rust panic instead of a diagnostic.\n\nScope: sweep unwrap/expect on user-reachable paths to proper diagnostics with codes (I4: registry + ui snapshot each); keep unwraps only where invariants make them provable, with a comment.\n\nExit: unwrap count ratchet test (may only decrease); new diagnostics snapshot-pinned; full suite green.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "created": "2026-07-10T10:49:07.533Z",
+      "updated": "2026-07-10"
+    },
+    {
+      "id": "c09ffy3w",
+      "num": 457,
+      "title": "durability: tower brief + tower lint (W5 assists)",
+      "body": "Plan: docs/plans/agent-durability.md W5. Weak models must not reconstruct card context by hand, and hygiene rules need a sweeper. Additive commands — no workflow strictness change (that is D-TWRGUARD1 on its own card).\n\nScope: tower brief '#N' --for <agent> --json emitting one blob: card + checklist (once it exists) + LIVE linked decision text (kills the paraphrase-stale-ballot failure) + blockers + milestone/epoch criteria + new card refs[] field (doc pointers) + the agent's unread messages + open questions. tower lint: done cards without evidence, claimed-idle cards, missing --by attribution, ballot-field gaps; --docs mode fails when a ratified decision ID still appears in open-ballot docs. tower next --burndown encoding the two-section scope so it is not memorized prose.\n\nExit: brief output sufficient to work a card with no other reads (validated on a real card); lint runs clean on the live board or lists true findings; Tower/test coverage for both.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "created": "2026-07-10T10:49:07.613Z",
+      "updated": "2026-07-10"
+    },
+    {
+      "id": "c0as0asq",
+      "num": 458,
+      "title": "durability: tower enforcement gates (W5)",
+      "body": "Plan: docs/plans/agent-durability.md W5. Today any phase jump is legal (store.mjs:224-243, triage-to-done included), decision add validates only the title, ratify outcome is unchecked against option keys, agents can write frozen/owner-lane cards, card delete cascades away ratified decisions, verdicts get mis-filed as log notes.\n\nScope (strictness per D-TWRGUARD1): card.checklist[] + done-gate; card.gates field required before leaving planning (BALLOT FIRST becomes structural); ballot-ready validation on decision add with --draft escape; tower verdict command minting an owner verdict as a ratified decision + card flip; ratify outcome must match an option key; owner-attribution rules for ratify/activate; non-assignee write guard; frozen/owner-lane write guard; no cascade-delete of ratified decisions; blockedBy accepts decision ids; release of a building card requires --handoff; ratify hook auto-appends syntax-decision chores (Syntax.rs, syntax-decisions.md log, jet devtools grammars, re-bless) to the card checklist.\n\nExit: each guard has a Tower test proving refusal/acceptance; existing board data migrates clean; skills docs updated to match.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "Gated by D-TWRGUARD1 (hard gates vs lint-only vs agent-hard/owner-soft). No code before ratification.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "created": "2026-07-10T10:49:07.695Z",
+      "updated": "2026-07-10"
+    },
+    {
+      "id": "c0c39p53",
+      "num": 459,
+      "title": "durability: docs repair, runbooks, memory-to-repo migration (W6)",
+      "body": "Plan: docs/plans/agent-durability.md W6. Live contradictions a weak model will follow off a cliff, plus tribal knowledge that exists only in one assistant's local memory.\n\nScope: fix jet-verify.md:12 + tower SKILL.md:98 full-suite command to scripts/agent/verify-full.sh; de-hardcode Epoch 3 from the tower skill; architecture.md R3/R5/R7 paths to crate paths; AGENTS.md — I6 wording covers crates/*, rg hint includes crates, remove dead pipeline()/parallel() reference, cross-reference baked project agents; docs/README.md dashboard command + R1-R12 + missing dirs; rewrite or fold docs/plans/README.md implementing-agent protocol (retired numbered-examples table); docs/reference/errors/README.md real regen command; roadmap current-epoch header + completed-E2 placement. Runbooks in canonical homes: bless procedure + ICE triage + add-syntax end-to-end (verify skill), add-a-diagnostic (diagnostics.md head), FFI bridge pattern (architecture.md). Migrate owner-profile rules into repo docs (tower-ballot skill): design kill criteria, options vary UX not palette, no metaphor theming, frontend acceptance = full mock matrix in the owner's real terminal, verdicts are ballots.\n\nExit: every stale reference from the 2026-07-10 audit fixed or deleted; runbooks exist at the named homes; no new standalone doc files.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "created": "2026-07-10T10:49:07.774Z",
+      "updated": "2026-07-10"
+    },
+    {
+      "id": "c0df169q",
+      "num": 460,
+      "title": "security: rotate + untrack .tower/config.json secrets",
+      "body": "Found during the 2026-07-10 durability audit: .tower/config.json is git-tracked and contains a private JWK (d key) and live web-push subscription endpoints/auth secrets.\n\nScope: rotate the VAPID/JWK keypair; move secrets to an untracked file (e.g. .tower/secrets.json, gitignored) or env; keep tracked config.json non-secret; scrub or accept history exposure (owner call — repo visibility dependent). Owner-owned file: agent prepares the split + Tower code change reading the new location; owner rotates.\n\nExit: no private key material tracked; push notifications still work after rotation.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "created": "2026-07-10T10:49:07.855Z",
+      "updated": "2026-07-10"
+    },
+    {
+      "id": "c04mnkv0",
+      "num": 461,
+      "title": "Tower: archive finished board history",
+      "body": "tower.json is 4.2MB; 68% is closed history (496 ratified decisions = 1.7MB, 305 done cards = 1.1MB). Every write rewrites + backs up the full file (backups/ 82MB), streams it to the phone, and lands it in git (356 versions). Ballot D-TWR-ARCHIVE1 decides where finished history lives. Messages data (103KB) already removed with the messaging feature.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "triage",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "created": "2026-07-10T10:50:10.450Z",
+      "updated": "2026-07-10"
+    },
+    {
+      "id": "c077a4nu",
+      "num": 462,
+      "title": "Tower: one-shot agent work packet",
+      "body": "Starting a card today takes 5 CLI reads and still misses ratification comments / open questions buried in JSON — the top cause of bounced cards. Ballot D-TWR-BRIEF1 decides the agent-facing surface: brief command vs rendered brief file vs MCP tools.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "triage",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "created": "2026-07-10T10:50:10.606Z",
+      "updated": "2026-07-10"
+    },
+    {
+      "id": "c09rh9pt",
+      "num": 463,
+      "title": "Tower: exit criteria that gate done",
+      "body": "Cards have bounced (e.g. #360 twice) because done was claimable by assertion: exit criteria live in prose and nothing mechanical checks them, and owner acceptance verdicts ended up in card logs. Ballot D-TWR-CRIT1 decides the enforcement model (machine-checked criteria / acceptance ballots / hybrid flag).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "triage",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "created": "2026-07-10T10:50:10.760Z",
+      "updated": "2026-07-10"
+    },
+    {
+      "id": "c0ceo8wd",
+      "num": 464,
+      "title": "Tower: Board view for 434 cards",
+      "body": "With Agents removed the UI is Now + Board. Board is an accordion wall that answers neither burndown-at-a-glance nor find-fast on phone. Ballot D-TWR-BOARD1 picks the Board archetype (roadmap ledger / ops table / spotlight search). Follow-up candidate once decided: in-app viewer for docs/plans+proposals (the old tools/Tower app had one).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "triage",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "created": "2026-07-10T10:50:10.920Z",
+      "updated": "2026-07-10"
     }
   ],
   "decisions": [
@@ -46460,6 +46812,328 @@
       "created": "2026-07-09T23:45:23.025Z",
       "outcome": "D",
       "ratifiedAt": "2026-07-10"
+    },
+    {
+      "id": "D-CI3",
+      "cardId": "c0uvxow5",
+      "group": "tooling",
+      "title": "How much of the test suite CI runs, and when",
+      "gist": "Pick what a green CI checkmark actually proves.",
+      "explainer": "Work here lands directly on master, so push and merge are the same event — B's fast lane would gate nothing by itself. A makes the checkmark mean exactly one thing, which is the whole point once no strong reviewer stands behind it.",
+      "story": "Priya lands a small formatter tweak late in the evening. CI goes green, she moves on. The formatter stability tests never ran — CI only executes 6 of the ~90 test targets — so the tweak silently drops a token when reprinting code, and the corruption ships. This exact failure lived in the repo for months once before. When the strongest reviewer is gone, the checkmark is the only reviewer left; this ballot decides what it means.",
+      "inWild": "$ git push\n# GitHub Actions: ✓ CI passed (6 of ~90 test targets ran)\n\n$ nix develop -c scripts/agent/verify-full.sh\ntest fmt_stability_serde_markers ... FAILED\n  expected: `name: text #[key]`\n  emitted:  `name: text`        <- marker dropped, file corrupted on save\n\n# Both of the above are true at the same time today.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Full suite on every push",
+          "detail": "One lane, one meaning: CI runs verify-full.sh (all ~90 targets) on every push, with JET_REQUIRE_RUSTC=1 so environment self-skips fail loudly. A nightly lane adds rotating-seed fuzzing (N>=1000) and the perf ratchet. Green means the same thing as a local full-suite pass. Runs take tens of minutes; pushes are not blocked, only flagged.",
+          "code": "# .github/workflows/ci.yml\n- name: Full suite\n  run: nix develop -c scripts/agent/verify-full.sh\n  env: { JET_REQUIRE_RUSTC: 1 }\n\n# nightly.yml (03:00)\n- run: FUZZ_SEED=${{ github.run_id }} FUZZ_N=1000 nix develop -c cargo test --test fuzz_sema\n- run: nix develop -c tools/perf/ci-perf-check.sh\n\n$ git push   # ~25-40 min later:\n✗ CI failed — fmt: fmt_stability_serde_markers"
+        },
+        {
+          "key": "B",
+          "name": "Fast push lane + full merge/nightly lane",
+          "detail": "Every push runs a ~3-minute doc-sync tier (lib tests, truthfulness, decisions, diagnostics_coverage, snapshots). The full suite runs on master merges and nightly. Quick signal per push; the deep signal arrives within a day. Risk: with direct-to-master work, push and merge are the same event, so in practice the fast lane alone gates nothing.",
+          "code": "# push lane (~3 min)\n- run: nix develop -c cargo test --lib --test truthfulness --test decisions \\\n        --test diagnostics_coverage --test diagnostic_snapshots\n# master + nightly lane\n- run: nix develop -c scripts/agent/verify-full.sh\n\n$ git push        # ✓ fast lane green in 3 min\n# 03:00 nightly:  ✗ fmt stability failed — found the next morning"
+        },
+        {
+          "key": "C",
+          "name": "Keep the cherry-pick, fix the rot only",
+          "detail": "Keep today's 6-target selection; repair the stale Tower step, add JET_REQUIRE_RUSTC, wire the perf check. The ~80 uncovered targets (fmt, ownership, repl, lsp, jetpack, ...) stay covered only by agents remembering to run verify-full.sh locally — the discipline dependency this epoch is trying to retire.",
+          "code": "# ci.yml unchanged in shape:\n- run: nix develop -c cargo test --test truthfulness\n- run: nix develop -c cargo test --test diagnostic_snapshots\n- run: nix develop -c cargo test --test golden\n# fmt/ownership/repl/lsp/... : still never run in CI\n\n$ git push   # ✓ green — proves 6/90 targets"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "rustc",
+          "note": "PR CI runs a subset; nothing merges except through bors, which runs the full battery — merge green is total green.",
+          "code": "@bors r+   # queues full-suite gate before merge"
+        },
+        {
+          "lang": "LLVM",
+          "note": "Fast premerge checks plus deep buildbots after landing; breakage found post-land is reverted by policy.",
+          "code": "premerge: check-clang (fast)\nbuildbot: full stage2 + sanitizers (hours later)"
+        }
+      ],
+      "rec": "A",
+      "status": "open",
+      "created": "2026-07-10T10:49:07.941Z"
+    },
+    {
+      "id": "D-DEVTOOLS1",
+      "cardId": "c009yxqf",
+      "group": "tooling",
+      "title": "Where maintainer helper commands live",
+      "gist": "Pick the home for repo-maintainer tools: reduce, ice-report, snapshot bless, fixture scaffolds, fixture-path check.",
+      "explainer": "Follows the ratified precedent (`jet devtools grammars`), keeps discovery in one --help screen, and adds no second binary. Beginner surface unaffected — devtools is already the maintainer shelf.",
+      "story": "Sam is a maintainer (human or mid-tier agent) whose 400-line test program just crashed the compiler with the internal-error banner. Today the next step is hand-deleting statements one at a time to shrink the crash, then hand-copying expected output out of panic text to update fixtures — the two jobs where a weaker maintainer burns hours or gives up. These helpers make both mechanical; the ballot picks where they live. Whatever the spelling, none of it appears in beginner-facing help.",
+      "inWild": "$ jet run inventory.jet\ninternal compiler error: generated Rust rejected (I2)\nthis is a bug in jet — please report it\n\n# Sam, today: open a 400-line file and start deleting lines by hand.\n# Sam, after this card: one command produces a 10-line repro + report bundle.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "jet devtools subcommands",
+          "detail": "Extend the existing maintainer namespace that already holds `jet devtools grammars`: reduce, ice-report, bless, new-example, new-ui, check-fixture-paths. Discoverable in one place, ships with the compiler an agent already built, hidden from top-level `jet help` just like grammars is today.",
+          "code": "$ jet devtools reduce inventory.jet\nreduced: 412 lines -> 11 lines (ICE preserved)  -> inventory.min.jet\n\n$ jet devtools ice-report inventory.min.jet\nwrote ice-report/: source, generated.rs, rustc.stderr, versions.txt\n\n$ jet devtools new-ui move_out_of_view\ncreated tests/ui/move_out_of_view.jet + .stderr (blessed)\nreminder: add E-code row to docs/spec/diagnostics.md"
+        },
+        {
+          "key": "B",
+          "name": "Env vars + repo scripts only",
+          "detail": "No new CLI surface: blessing via env vars on cargo test (UPDATE_EXPECT / JET_UPDATE_GOLDEN), reducer and scaffolds as scripts under scripts/dev/. Compiler binary untouched; tools only work from a repo checkout and are found by reading docs rather than --help.",
+          "code": "$ JET_UPDATE_GOLDEN=1 nix develop -c cargo test --test golden\n$ nix develop -c scripts/dev/reduce.sh inventory.jet\n$ nix develop -c scripts/dev/new-ui.sh move_out_of_view\n\n# discovery: ls scripts/dev/ + a docs table (no --help integration)"
+        },
+        {
+          "key": "C",
+          "name": "Separate jet-dev binary",
+          "detail": "A second binary (cargo run -p jet-devtools or an installed jet-dev) holding all maintainer commands. Hard wall between user CLI and maintainer CLI — `jet help` can never leak a maintainer command — at the cost of a second entry point to version, build, and document.",
+          "code": "$ nix develop -c jet-dev reduce inventory.jet\n$ nix develop -c jet-dev bless --ui move_out_of_view\n$ nix develop -c jet-dev ice-report inventory.min.jet\n\n# jet --help: unchanged, no devtools entry at all"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "rustc",
+          "note": "Maintainer tooling lives behind one entry point (x.py / bootstrap) plus cargo-bisect-rustc for reduction-style triage.",
+          "code": "./x.py test tests/ui --bless\ncargo bisect-rustc --start 2026-01-01"
+        },
+        {
+          "lang": "Go",
+          "note": "Maintainer commands ship inside the main tool under a namespace users never touch.",
+          "code": "go tool dist test"
+        },
+        {
+          "lang": "C (creduce)",
+          "note": "Standalone reducer proves the mechanical-reduction pattern this adopts.",
+          "code": "creduce ./ice-oracle.sh crash.c"
+        }
+      ],
+      "rec": "A",
+      "status": "open",
+      "created": "2026-07-10T10:49:08.018Z"
+    },
+    {
+      "id": "D-TWRGUARD1",
+      "cardId": "c0as0asq",
+      "group": "tooling",
+      "title": "Does the board refuse rule-breaking writes, or only report them?",
+      "gist": "Pick how hard Tower enforces the working rules (done-gates, ballot completeness, owner-only actions).",
+      "explainer": "The repeat offenders are agents, not you. C binds them at write time — prose rules become mechanical — while your phone workflow stays one tap. A ties your hands; B is today with extra steps.",
+      "story": "An agent finishes step 2 of 5 on a card, marks it done, and moves on — the remaining steps evaporate until someone notices weeks later. Another agent files your acceptance verdict as a log note where you never see it again. Today every one of these writes succeeds, because the rules live in prose the agent may never have loaded. You have had to repeat these rules angrily more than once; this ballot decides whether the board itself starts saying no.",
+      "inWild": "$ tower card update '#412' --phase done --by helper-agent\nupdated card #412 -> done        # 3 of 5 checklist items still open\n\n$ tower decision add --title 'Cache strategy' --by helper-agent\nadded decision D-CACHE1          # no gist, no story, no options — reaches your queue empty\n\n$ tower card activate '#413' --by helper-agent\nactivated #413                   # an owner-only action, performed by an agent",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Hard gates for everyone",
+          "detail": "The store refuses rule-breaking writes no matter who writes: done requires a complete checklist, ballots must be ballot-ready to enter the queue, ratify/activate demand owner attribution, frozen cards are read-only. Maximum consistency — but it also stops you: closing a card from your phone means ticking every box first, and there is no override when you just want something gone.",
+          "code": "$ tower card update '#412' --phase done --by owner\nE_GATE: 3 checklist items unchecked — no done until complete (no override)"
+        },
+        {
+          "key": "B",
+          "name": "Lint-only, never refuse",
+          "detail": "All writes keep succeeding; a `tower lint` sweep (run by agents, shown on the board) reports violations: done-with-open-checklist, empty ballots, mis-attributed ratifies. Zero friction — and zero protection at the moment of the write. A weak model that never runs lint recreates today exactly.",
+          "code": "$ tower card update '#412' --phase done --by helper-agent\nupdated card #412 -> done\n$ tower lint\nWARN #412 done with 3 unchecked items (by helper-agent)\nWARN D-CACHE1 not ballot-ready: gist/story/options empty"
+        },
+        {
+          "key": "C",
+          "name": "Agent-hard, owner-soft",
+          "detail": "Writes with --by other than owner hit hard gates: done-gate on checklists, ballot-ready validation (a --draft flag keeps drafts out of your queue), owner-only ratify/activate unless the agent quotes you explicitly (recorded in the event log), no writes to frozen/owner-lane cards, release of a building card requires a handoff note. Your own writes bypass everything. The rules bind exactly the population that keeps breaking them.",
+          "code": "$ tower card update '#412' --phase done --by helper-agent\nE_GATE: 3 checklist items unchecked — complete them or --release --handoff \"...\"\n\n$ tower decision ratify D-CACHE1 --outcome B --by helper-agent\nE_OWNER: ratify is owner-only — use --on-behalf-of-owner \"<owner's words>\"\n\n$ tower card update '#412' --phase done --by owner\nupdated card #412 -> done        # owner bypass, no ceremony"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "GitHub",
+          "note": "Branch protection blocks contributors while admins may bypass — the standard shape for solo-owner + helpers.",
+          "code": "Require status checks: on\nInclude administrators: off"
+        },
+        {
+          "lang": "git",
+          "note": "Hooks enforce by default with an explicit, visible escape.",
+          "code": "git commit --no-verify   # loud, deliberate bypass"
+        },
+        {
+          "lang": "Rust",
+          "note": "The compiler refuses at the moment of the mistake instead of reporting it later — the reason the invariant holds in practice.",
+          "code": "error[E0382]: borrow of moved value"
+        }
+      ],
+      "rec": "C",
+      "status": "open",
+      "created": "2026-07-10T10:49:08.093Z"
+    },
+    {
+      "id": "D-TWR-ARCHIVE1",
+      "cardId": "c04mnkv0",
+      "group": "tooling",
+      "title": "Where ratified decisions and done cards go to rest",
+      "gist": "Whether finished board history stays inside tower.json or moves to a separate archive file, and what triggers the move.",
+      "explainer": "A keeps you in control of when history moves (matching how you already close out epochs), keeps one mental model (tower.json = the board), and shrinks writes, backups, git churn, and phone payload all at once. B is the same end-state but moves things the instant they close — done cards vanish from the Board's Done lists into a second file mid-session. C treats the symptom (transport) and leaves the file growing forever.",
+      "story": "Nate opens Tower on his phone after a ballot session. The board file is 4.2 MB, and 68% of it is history: 496 already-ratified decisions (1.7 MB) and 305 done cards (1.1 MB). Every single write — even a one-line log entry — rewrites all 4.2 MB, snapshots another 4.2 MB backup (backups/ is at 82 MB), pushes the full state over the live stream to his phone, and lands another multi-megabyte version of tower.json in git (356 versions and counting). The live working set he actually looks at is about 0.4 MB.",
+      "inWild": "$ du -h .tower/tower.json\n4.2M    .tower/tower.json\n\n$ tower state | jq '.decisions | length'\n496        # every one already ratified — zero open\n\n$ tower state | jq '[.cards[] | select(.phase==\"done\")] | length'\n305        # of 434 cards total\n\n$ du -h .tower/backups\n82M     .tower/backups    # 20 rolling copies of the full file\n\n$ git log --oneline -- .tower/tower.json | wc -l\n356        # full-file versions in repo history",
+      "detail": "Q: Does archiving lose anything?  A: No — archived items stay on disk in .tower/, stay in git, and stay greppable; they just leave the hot file. Q: Can an archived decision be reopened?  A: Yes, via an explicit restore that moves it back into tower.json first. Q: What about the docs? Ballot text for ratified syntax already lives durably in docs/spec/syntax-decisions.md; the archive is the raw record.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Explicit archive command, epoch-aligned",
+          "detail": "New `tower archive` verb moves ratified decisions, done cards (with their questions), and events older than 30 days into .tower/archive/<epoch>.json — one file per epoch, append-only, committed to git. Run it by hand or let closing an epoch run it automatically. `tower archive list/show/restore <id>` reads it back; `tower card show` on an archived card still works (reads the archive transparently). The owner decides when history moves; nothing disappears on its own.",
+          "code": "$ tower archive run --by owner\narchived: 496 decisions, 291 done cards, 1712 events → .tower/archive/e1.json … e6.json\ntower.json: 4.2M → 0.5M\n\n$ tower archive show D-MEM1\nD-MEM1  ratified 2026-07-03 → A  (archive/e5.json)\n\n$ tower archive restore '#188' --by owner\nrestored card #188 (+2 decisions) into the live board"
+        },
+        {
+          "key": "B",
+          "name": "Auto-retire on close (split live/history files)",
+          "detail": "No command to remember: the moment a decision is ratified or a card verified done, the store writes it to .tower/history.json (append-only ledger) and drops it from tower.json on the next write. tower.json permanently contains only live work. The Board's 'Done' subgroups render from the ledger lazily. Reopen = automatic restore. History is never more than one write behind; the hot file never grows again.",
+          "code": "$ tower decision ratify D-X1 --outcome A --by owner\nratified D-X1 → A   (retired to history.json)\n\n$ du -h .tower/tower.json .tower/history.json\n0.4M    .tower/tower.json     # only live work, forever\n5.8M    .tower/history.json   # append-only, grows cold\n\n$ tower card show '#42'        # a done card\n#42  done  (from history)  …full card, log intact…"
+        },
+        {
+          "key": "C",
+          "name": "Keep one file; slim what moves",
+          "detail": "tower.json stays the single complete record. Instead, stop moving the whole file around: SSE frames send only diffs, backups are gzipped (4.2 MB → ~0.4 MB each), and the UI loads done cards/ratified decisions on demand. Git history still carries the full file, and every write still rewrites 4.2 MB locally, but network, phone, and backup weight drop to near-live-set size.",
+          "code": "$ du -h .tower/backups\n8.1M    .tower/backups        # 20 gzipped snapshots\n\n# SSE frame after a log entry (diff, not full state):\ndata: {\"rev\":2482,\"patch\":[{\"op\":\"add\",\"path\":\"/cards/12/log/0\",\n       \"value\":{\"at\":\"2026-07-10\",\"by\":\"claude-main\",\"text\":\"started\"}}]}\n\n$ du -h .tower/tower.json\n4.2M    .tower/tower.json     # unchanged, keeps growing"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Linear",
+          "note": "Completed issues auto-archive after a configurable window; they leave every view but stay searchable and restorable. Nobody scrolls past them again.",
+          "code": "Settings → Projects → Auto-archive completed issues: after 1 month"
+        },
+        {
+          "lang": "git",
+          "note": "Same shape as loose objects vs packfiles: the hot working set stays small, history compacts into cold files that are still fully readable.",
+          "code": "git gc   # loose objects → .git/objects/pack/pack-*.pack"
+        }
+      ],
+      "rec": "A",
+      "status": "open",
+      "created": "2026-07-10T10:50:10.528Z"
+    },
+    {
+      "id": "D-TWR-BRIEF1",
+      "cardId": "c077a4nu",
+      "group": "tooling",
+      "title": "How an agent gets its marching orders from Tower",
+      "gist": "Whether starting work on a card takes one command that returns everything, a generated brief file, or native harness tools.",
+      "explainer": "A collapses the error-prone five-step ritual into one call that cannot omit the ratification comment or an open question, and it works identically for Claude, codex, and bare scripts. B helps only harnesses with auto-load; C is a strong later layer on top of A (same packet, typed transport).",
+      "story": "A fresh Claude session is told 'work the board'. Today it runs five commands (status, next, card show, decision list, question list), re-reads the skill doc to remember the phase rules, and only then starts. Every extra step is a place a sub-agent skips something — the cards that bounced usually bounced because the agent never saw a ratification comment or an open question sitting right on the card.",
+      "inWild": "# today: five reads before any work happens\n$ tower status\n$ tower next --epoch e3\n$ tower card show '#412'\n$ tower decision list --card '#412' --json\n$ tower question list --open\n# …and the ratification comment on D-X1 is 40 lines deep in JSON\n# the agent never printed",
+      "detail": "Q: Does this change what the owner does? A: No — pure agent surface. Q: Does it replace the skill doc? A: The rules footer travels with the packet, so a sub-agent that only ever sees the packet still knows the phase-honesty rules.",
+      "options": [
+        {
+          "key": "A",
+          "name": "One-shot work packet: `tower brief`",
+          "detail": "One command claims the next card (or a named one) and prints the complete packet: card body + plan, every linked decision with outcome AND the owner's ratification comment, open questions, blockers, related doc paths found in the body, and a 5-line rules footer (phase honesty, --by, expect-rev). --json for machines. A sub-agent brief becomes literally `tower brief '#412' --agent jet-impl-1`.",
+          "code": "$ tower brief --agent claude-main\n━ #412 P1 building — Computed module fields (e3, m-comptime)\n  plan: 1. parser field-expr 2. sema eval gate 3. golden\n  decisions:\n    D-CTMARKER1 = C  «comptime { } block + $ splice»\n    owner comment: \"C, but the block must nest — see my note\"\n  open questions: q88 [owner] \"does this break pack.jet imports?\"\n  blocked by: —\n  docs: docs/plans/epoch-5/unified-ecosystem.md\n  rules: log every advance --by claude-main · verify≠builder ·\n         done only after full suite green"
+        },
+        {
+          "key": "B",
+          "name": "Rendered brief file the harness auto-loads",
+          "detail": "`tower serve` (or a githook) keeps .tower/BRIEF.md rendered with the current agent-lane queue and per-card packets. Harnesses that auto-load context files (CLAUDE.md include, AGENTS.md pointer) pull it in for free — zero commands at session start. The file is a read-only view; writes still go through the CLI.",
+          "code": "$ head .tower/BRIEF.md\n# Tower brief — rev 2481 (auto-generated, read-only)\n## Next up\n1. #412 building — Computed module fields\n   decisions: D-CTMARKER1=C (\"C, but the block must nest…\")\n   open: q88 \"does this break pack.jet imports?\"\n2. #405 verify — REPL Ctrl-C exit\n\n# CLAUDE.md gains one line:\n@.tower/BRIEF.md"
+        },
+        {
+          "key": "C",
+          "name": "Native tools: Tower as an MCP server",
+          "detail": "`tower serve --mcp` exposes tower_next / tower_brief / tower_update / tower_ballot as typed tools. Claude and other MCP harnesses call the board without shelling out (no nix wrapper, no JSON quoting), and every write is schema-validated at the tool boundary. Shell CLI remains for humans and scripts.",
+          "code": "// agent-side tool call, no shell involved\ntower_brief({ agent: \"claude-main\" })\n→ { card: \"#412\", phase: \"building\",\n    decisions: [{ id: \"D-CTMARKER1\", outcome: \"C\",\n                  comment: \"C, but the block must nest — see my note\" }],\n    questions: [{ id: \"q88\", text: \"does this break pack.jet imports?\" }],\n    rules: [\"log advances --by\", \"verify≠builder\", \"suite green before done\"] }"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "gh CLI",
+          "note": "`gh issue view` prints the issue, labels, comments, and linked PRs in one call — the packet pattern, and the reason agents drive GitHub well.",
+          "code": "$ gh issue view 412 --comments"
+        }
+      ],
+      "rec": "A",
+      "status": "open",
+      "created": "2026-07-10T10:50:10.686Z"
+    },
+    {
+      "id": "D-TWR-CRIT1",
+      "cardId": "c09rh9pt",
+      "group": "tooling",
+      "title": "Exit criteria live on the card and gate 'done'",
+      "gist": "How a card proves it is finished: a checklist the CLI enforces, an acceptance ballot for you, or both for flagged cards.",
+      "explainer": "C gives every card a mechanical floor (no more done-by-assertion) and reserves your time for the cards where your eye is the acceptance test — which is exactly where the bounces have happened. A alone leaves your verdicts informal; B alone makes you the bottleneck on all 400+ cards.",
+      "story": "The frontend cards bounced twice because 'done' was claimed from the builder's own summary — no feature-by-feature evidence against the full mock, no independent check, and your acceptance verdict ended up in a card log where no process saw it. Today a card's exit criteria live in prose (body, plan, or nowhere), so nothing mechanical stops verify→done while half the list is unmet.",
+      "inWild": "# card #360, bounce round 2 — the criteria existed only as prose:\n$ tower card show '#360' | jq -r .body | tail -3\nDone requires feature-by-feature matrix vs FULL hybrid.html\nwith owner comments, verified in the owner's real terminal.\n\n$ tower card update '#360' --phase done --by builder-agent\nupdated card #360 → done      # nothing checked any of that",
+      "detail": "Q: Who writes the criteria? A: The planning agent, when the plan is written; you can add/edit items from the card modal. Q: Does this add owner work? A: Only where you opt a card in — everything else is agent-side enforcement.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Machine-checked criteria list",
+          "detail": "Cards get a criteria[] field: numbered items, each open → met (builder) → verified (a different agent, recorded). `--phase done` is rejected while any item is unverified, and the verifier must differ from the assignee. The card modal shows the checklist with per-item state.",
+          "code": "$ tower card criteria '#360' --add \"matrix vs full hybrid.html, per feature\" --by planner\n$ tower card update '#360' --phase done --by builder-agent\ntower: E_CRITERIA — 2 of 5 criteria unverified (3,5); verifier must not be the builder\n\n$ tower card verify '#360' --meet 3 --evidence \"pty run + screenshot, all 14 features\" --by jet-verify\n$ tower card update '#360' --phase done --by jet-verify\nupdated card #360 → done"
+        },
+        {
+          "key": "B",
+          "name": "Acceptance ballot on every close",
+          "detail": "Closing any card auto-mints a one-option-per-verdict acceptance ballot for you (accept / bounce with comment), with the evidence summary as the ballot body. Done = you ratify. Your verdicts become durable decisions instead of log lines — but every card now waits on you.",
+          "code": "$ tower card update '#360' --phase verify --by jet-verify\nminted D-ACCEPT-360: \"Accept #360?\"  → your Now queue\n\n# your phone, focus mode:\nD-ACCEPT-360  Accept #360 — frontend matrix\n  evidence: 14/14 features vs hybrid.html, terminal transcript attached\n  [A] Accept   [B] Bounce (comment required)"
+        },
+        {
+          "key": "C",
+          "name": "A + acceptance ballot only where flagged",
+          "detail": "Criteria list enforced everywhere (option A), and cards you flag with needs-acceptance additionally mint the acceptance ballot on close — owner-facing surfaces get your verdict as a ballot, plumbing cards close on verified criteria alone. Matches how you already ruled that sign-off verdicts must be ballots, without putting all 400 cards through your queue.",
+          "code": "$ tower card update '#360' --needs-acceptance --by owner   # once, at greenlight\n…builder meets criteria, verifier verifies…\n$ tower card update '#360' --phase done --by jet-verify\nminted D-ACCEPT-360 → your Now queue    # flagged card\n\n$ tower card update '#405' --phase done --by jet-verify\nupdated card #405 → done                # unflagged: criteria were enough"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "GitHub",
+          "note": "Required reviews + status checks: merges are blocked mechanically, and review-by-author is impossible. The branch protection model, applied to cards.",
+          "code": "Settings → Branches → Require review from someone other than the author"
+        }
+      ],
+      "rec": "C",
+      "status": "open",
+      "created": "2026-07-10T10:50:10.842Z"
+    },
+    {
+      "id": "D-TWR-BOARD1",
+      "cardId": "c0ceo8wd",
+      "group": "web-ui",
+      "title": "Board view rebuilt for a 434-card project",
+      "gist": "What the Board tab becomes now that Agents is gone: a progress roadmap, a dense worklist table, or a search-first spotlight.",
+      "explainer": "Your two Board jobs are progress-scan and planning passes; A makes the first instant (burndown per epoch/milestone, computed from the event log Tower already keeps) and keeps active cards one glance deep. B optimizes bulk re-ordering you do rarely; C optimizes find, which ⌘K already covers.",
+      "story": "Nate opens Board to answer one question — 'where is epoch 3 actually at, and what is moving?' — and gets a wall of collapsible accordions: 8 epochs, hundreds of tiles, Done subgroups he has to expand one by one. On the phone it is minutes of scrolling. The two things he does here (scan progress, find one card) are both slow, and neither shows burndown over time.",
+      "inWild": "# what the board holds today\n$ tower status\n  TOWER · Jet · epoch e3 · rev 2481\n  cards: 434 total — 129 active, 305 done\n  epochs: 8, milestones: 2\n\n# owner's actual questions, unanswered by the current view:\n#  - is e3 burning down or stalled this week?\n#  - which milestone is at risk?\n#  - what did agents move today?",
+      "detail": "Q: Does Now change? A: No — Now stays the decide/greenlight queue; this ballot is only the Board tab. Q: Do card modals change? A: No. All three options keep ⌘K and the card modal exactly as they are.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Roadmap ledger — progress is the page",
+          "detail": "Board becomes a vertical roadmap: one row per epoch with a burndown sparkline (done/total over the last 30 days, computed from events), milestone bars underneath, and only ACTIVE cards shown inline, grouped by lane. Done and frozen live on a per-epoch 'ledger' page one tap away. The page answers 'how is it going' before you scroll.",
+          "code": "BOARD\n  E3 syntax core          ████████████░░░  118/141 · ▂▃▅▆▇ this week +9\n    m: memory-v5 ▓▓▓▓▓▓▓░ 7/9      m: comptime ▓▓░░ 2/6 ⚠ stalled 6d\n    building(3)  #412 computed modules [claude-main]  …\n    verify(2)    #405 repl ctrl-c  …\n    → ledger: 118 done, 4 frozen\n  E7 native-jetos         ██░░░░░░░░░░░░░  12/63 · ▁▁▂▃▃ +3"
+        },
+        {
+          "key": "B",
+          "name": "Ops table — the board as a worklist",
+          "detail": "Board becomes one dense sortable table: every active card is a row (num, title, lane, priority, order, assignee, epoch, updated), click a header to sort, type to filter, inline-edit lane/priority/order without opening the modal. The fastest way to re-order work and spot stale rows; progress lives in a slim header strip.",
+          "code": "  #    title                     lane      pri  ord  who          upd\n  412  computed module fields    building  P1   1    claude-main  today\n  405  repl ctrl-c exits         verify    P1   2    jet-verify   today\n  399  fan-out namespace axis    plan      P2   —    —            6d ⚠\n  [filter: e3 · sort: order ↑ · 129 rows]"
+        },
+        {
+          "key": "C",
+          "name": "Spotlight board — search-first, no scroll",
+          "detail": "Board opens as a full-page search/filter box with saved views as chips (My queue · E3 active · Stalled >5d · Recently done). No accordion tree at all: you type or tap a chip and get exactly that slice as cards. The board is a query surface; nothing renders until asked, which also makes it the fastest view on a phone.",
+          "code": "┌──────────────────────────────────────────────┐\n│  ▸ find: \"comptime\"                          │\n└──────────────────────────────────────────────┘\n [My queue] [E3 active] [Stalled >5d] [Done this week]\n\n  #412 computed module fields   building  P1  claude-main\n  #155 comptime block           done      P1\n  2 matches · 12ms"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Linear",
+          "note": "Cycle view leads with a burndown graph and only in-cycle issues; archive is elsewhere. Closest to option A.",
+          "code": "Cycle 14 ▁▂▃▅▆ 71% · 9 issues left"
+        },
+        {
+          "lang": "beorg/taskwarrior",
+          "note": "Terminal ops-table archetype of option B: one sortable table, inline edits, no navigation.",
+          "code": "$ task list project:e3 +ACTIVE"
+        }
+      ],
+      "rec": "A",
+      "status": "open",
+      "created": "2026-07-10T10:50:11.000Z"
     }
   ],
   "questions": [
@@ -47482,6 +48156,17 @@
       "created": "2026-07-10T10:12:54.419Z",
       "answeredAt": "2026-07-10",
       "answeredBy": "codex-main"
+    },
+    {
+      "id": "q0q92or4",
+      "cardId": "c0df169q",
+      "decisionId": null,
+      "by": "claude-main",
+      "kind": "question",
+      "text": "Security: .tower/config.json is git-tracked with a private JWK (d key) + live push-subscription secrets. Card #460 has the rotate+untrack plan — OK to proceed, and is a history scrub needed (depends on repo visibility)?",
+      "status": "open",
+      "answer": "",
+      "created": "2026-07-10T10:49:58.697Z"
     }
   ],
   "ideas": [
@@ -47737,6 +48422,209 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-10T10:50:24.865Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0e7rot4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-10T10:50:11.000Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-TWR-BOARD1",
+      "note": "Board view rebuilt for a 434-card project"
+    },
+    {
+      "at": "2026-07-10T10:50:10.920Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0ceo8wd",
+      "note": "Tower: Board view for 434 cards"
+    },
+    {
+      "at": "2026-07-10T10:50:10.842Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-TWR-CRIT1",
+      "note": "Exit criteria live on the card and gate 'done'"
+    },
+    {
+      "at": "2026-07-10T10:50:10.761Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c09rh9pt",
+      "note": "Tower: exit criteria that gate done"
+    },
+    {
+      "at": "2026-07-10T10:50:10.686Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-TWR-BRIEF1",
+      "note": "How an agent gets its marching orders from Tower"
+    },
+    {
+      "at": "2026-07-10T10:50:10.606Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c077a4nu",
+      "note": "Tower: one-shot agent work packet"
+    },
+    {
+      "at": "2026-07-10T10:50:10.528Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-TWR-ARCHIVE1",
+      "note": "Where ratified decisions and done cards go to rest"
+    },
+    {
+      "at": "2026-07-10T10:50:10.450Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c04mnkv0",
+      "note": "Tower: archive finished board history"
+    },
+    {
+      "at": "2026-07-10T10:49:58.697Z",
+      "by": "claude-main",
+      "action": "question.add",
+      "ref": "q0q92or4",
+      "note": ""
+    },
+    {
+      "at": "2026-07-10T10:49:40.702Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0wetgi3",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-10T10:49:08.093Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-TWRGUARD1",
+      "note": "Does the board refuse rule-breaking writes, or only report them?"
+    },
+    {
+      "at": "2026-07-10T10:49:08.018Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-DEVTOOLS1",
+      "note": "Where maintainer helper commands live"
+    },
+    {
+      "at": "2026-07-10T10:49:07.941Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-CI3",
+      "note": "How much of the test suite CI runs, and when"
+    },
+    {
+      "at": "2026-07-10T10:49:07.855Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0df169q",
+      "note": "security: rotate + untrack .tower/config.json secrets"
+    },
+    {
+      "at": "2026-07-10T10:49:07.775Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0c39p53",
+      "note": "durability: docs repair, runbooks, memory-to-repo migration (W6)"
+    },
+    {
+      "at": "2026-07-10T10:49:07.695Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0as0asq",
+      "note": "durability: tower enforcement gates (W5)"
+    },
+    {
+      "at": "2026-07-10T10:49:07.614Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c09ffy3w",
+      "note": "durability: tower brief + tower lint (W5 assists)"
+    },
+    {
+      "at": "2026-07-10T10:49:07.533Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c083j754",
+      "note": "durability: jetpack unwrap-to-diagnostic sweep (W4)"
+    },
+    {
+      "at": "2026-07-10T10:49:07.456Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c06tccyz",
+      "note": "durability: JIT lowering doc pass + TIR exhaustive dispatch (W4)"
+    },
+    {
+      "at": "2026-07-10T10:49:07.375Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c05hfl27",
+      "note": "durability: extract Canvas JS from js.rs (W4)"
+    },
+    {
+      "at": "2026-07-10T10:49:07.298Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c047jzdr",
+      "note": "durability: ice! macro + sema assert layer (W4)"
+    },
+    {
+      "at": "2026-07-10T10:49:07.219Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c02wa1dn",
+      "note": "durability: include!-splice to real modules (W4)"
+    },
+    {
+      "at": "2026-07-10T10:49:07.140Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c01lj8gw",
+      "note": "durability: batch codemod + dev-shell tools (W3)"
+    },
+    {
+      "at": "2026-07-10T10:49:07.060Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c009yxqf",
+      "note": "durability: maintainer devtools subcommands (W3)"
+    },
+    {
+      "at": "2026-07-10T10:49:06.977Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0yw55x3",
+      "note": "durability: single-fixture filters + golden bless + diffs (W3)"
+    },
+    {
+      "at": "2026-07-10T10:49:06.897Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0xkikie",
+      "note": "durability: formatter lossless corpus test (W2)"
+    },
+    {
+      "at": "2026-07-10T10:49:06.813Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0w6wa07",
+      "note": "durability: invariant machine pins I1/I3/I6/I7 (W2)"
+    },
+    {
+      "at": "2026-07-10T10:49:06.734Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0uvxow5",
+      "note": "durability: CI runs the full suite (W1)"
+    },
     {
       "at": "2026-07-10T10:46:32.931Z",
       "by": "codex-orchestrator",
@@ -61533,209 +62421,6 @@
       "action": "card.update",
       "ref": "caq065h8",
       "note": "phase,plan,logEntry"
-    },
-    {
-      "at": "2026-07-06T20:52:59.510Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c9q0534j",
-      "note": "phase,plan,logEntry"
-    },
-    {
-      "at": "2026-07-06T20:52:59.457Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c8q043mt",
-      "note": "phase,plan,logEntry"
-    },
-    {
-      "at": "2026-07-06T20:52:59.404Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "cdq08h16",
-      "note": "phase,plan,logEntry"
-    },
-    {
-      "at": "2026-07-06T20:52:59.350Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c5q01s7b",
-      "note": "phase,plan,logEntry"
-    },
-    {
-      "at": "2026-07-06T20:52:59.297Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c4q00utv",
-      "note": "phase,plan,logEntry"
-    },
-    {
-      "at": "2026-07-06T20:52:59.241Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c3q000dw",
-      "note": "phase,plan,logEntry"
-    },
-    {
-      "at": "2026-07-06T20:52:59.187Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c2pzz3qb",
-      "note": "phase,plan,logEntry"
-    },
-    {
-      "at": "2026-07-06T20:52:59.131Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c0pzvvjc",
-      "note": "phase,plan,logEntry"
-    },
-    {
-      "at": "2026-07-06T20:52:32.504Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "caq065h8",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-06T20:52:32.453Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c9q0534j",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-06T20:52:32.399Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c8q043mt",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-06T20:52:32.346Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c2zj0p7p",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-06T20:52:32.292Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c2yj0nk5",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-06T20:52:32.239Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c2sj0bd9",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-06T20:52:32.186Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "cdq08h16",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-06T20:52:32.135Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c5q01s7b",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-06T20:52:32.080Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c4q00utv",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-06T20:52:32.024Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c2pzz3qb",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-06T20:52:31.971Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c0pzvvjc",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-06T20:51:33.869Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c0wzd1dn",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-06T20:51:28.189Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c0ravub0",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-06T20:51:22.696Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c0yfycf0",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-06T20:51:18.082Z",
-      "by": "codex-main",
-      "action": "card.claim",
-      "ref": "c0wzd1dn",
-      "note": ""
-    },
-    {
-      "at": "2026-07-06T20:51:11.477Z",
-      "by": "codex-main",
-      "action": "card.claim",
-      "ref": "c0ravub0",
-      "note": ""
-    },
-    {
-      "at": "2026-07-06T20:51:07.356Z",
-      "by": "codex-main",
-      "action": "card.claim",
-      "ref": "c0yfycf0",
-      "note": ""
-    },
-    {
-      "at": "2026-07-06T20:50:02.448Z",
-      "by": "codex-main",
-      "action": "decision.add",
-      "ref": "D-TARGET-AUDIT1",
-      "note": "Target audit report"
-    },
-    {
-      "at": "2026-07-06T20:50:02.396Z",
-      "by": "codex-main",
-      "action": "decision.add",
-      "ref": "D-TARGET-ALLOC1",
-      "note": "Allocator and panic policy"
-    },
-    {
-      "at": "2026-07-06T20:50:02.340Z",
-      "by": "codex-main",
-      "action": "decision.add",
-      "ref": "D-TARGET-LINKER1",
-      "note": "Linker provenance"
-    },
-    {
-      "at": "2026-07-06T20:50:02.286Z",
-      "by": "codex-main",
-      "action": "decision.add",
-      "ref": "D-TARGET-MEMORY1",
-      "note": "Target memory regions"
     }
   ],
   "nextNum": 368,

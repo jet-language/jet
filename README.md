@@ -89,7 +89,7 @@ package; the built-in HTTP client is plain HTTP only.
 | [docs/spec/](docs/spec/) | Authoritative: philosophy, syntax decisions, diagnostics, roadmap |
 | [docs/reference/](docs/reference/) | Stdlib, versioning, generated error pages |
 | [docs/research/](docs/research/) | Exploratory notes & cross-language idea banks |
-| [docs/](docs/) | Project management: milestone plans, ballots, epoch tracking |
+| [docs/plans/](docs/plans/) | Project management: epoch plans, proposals, sidequests, ballots |
 | [examples/features/](examples/features/) | Executable spec — golden-tested feature programs |
 | [examples/canon.jet](examples/canon.jet) | Compiling syntax showcase (golden-tested) |
 | [examples/features/](examples/features/) | Milestone feature programs (golden-tested) |
