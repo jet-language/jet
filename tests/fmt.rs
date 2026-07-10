@@ -3,6 +3,9 @@
 use std::fs;
 use std::path::PathBuf;
 
+#[path = "support/fmt_lossless.rs"]
+mod fmt_lossless;
+
 fn collect_jet_files(dir: &PathBuf) -> Vec<PathBuf> {
     let mut out = Vec::new();
     for entry in fs::read_dir(dir).unwrap() {

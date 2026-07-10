@@ -133,15 +133,17 @@ pub fn format_program(prog: &Program, src: &str, comment_toks: &[Token]) -> Stri
     // D-MEM1/S7 (D-NOALLOC-SEM1=A): `policy no_alloc;` — fixed post-import
     // position, same single-instance-marker treatment as `#PubFile`/
     // `#Target(…)`/`#Html(…)` above (no span to preserve original placement).
-    if prog.no_alloc_policy.is_some() {
+    if let Some(policy_span) = prog.no_alloc_policy {
         if !first {
             f.blank_line_between_items();
         }
         first = false;
+        f.emit_leading(policy_span.start);
         f.write(Syntax::KW_POLICY);
         f.write(" ");
         f.write(Syntax::POLICY_NO_ALLOC);
         f.newline();
+        f.emit_trailing(policy_span.end);
     }
     for item in &prog.items {
         if !first {

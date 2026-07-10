@@ -206,7 +206,28 @@ impl<'a> Fmt<'a> {
                 // D-FMT1: the whole if-expression chain shares one line shape —
                 // inline only when every branch is inline-eligible.
                 let inline = self.if_expr_chain_inlineable(expr);
-                self.fmt_if_expr(expr, inline);
+                if inline {
+                    let saved_out = self.out.len();
+                    let saved_col = self.col;
+                    let saved_line_start = self.at_line_start;
+                    let saved_pending_blank = self.pending_blank;
+                    let saved_comment_i = self.comment_i;
+                    self.fmt_if_expr(expr, true);
+                    // A later branch can cross MAX_WIDTH even when every
+                    // source branch was authored inline. Never leave a mixed
+                    // inline/expanded chain: roll back and expand all branches
+                    // so the first pass is already byte-stable.
+                    if self.out[saved_out..].contains('\n') {
+                        self.out.truncate(saved_out);
+                        self.col = saved_col;
+                        self.at_line_start = saved_line_start;
+                        self.pending_blank = saved_pending_blank;
+                        self.comment_i = saved_comment_i;
+                        self.fmt_if_expr(expr, false);
+                    }
+                } else {
+                    self.fmt_if_expr(expr, false);
+                }
             }
             Expr::Str(parts, span) => {
                 // S70 (D-SG5): re-derive the triple-quoted shape from the source.

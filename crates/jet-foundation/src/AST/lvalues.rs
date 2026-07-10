@@ -62,7 +62,11 @@ pub enum IndexKind {
 pub enum MetaField {
     Category { value: Expr, span: Span },
     Tunable { span: Span },
-    Unknown { name: String, span: Span },
+    Unknown {
+        name: String,
+        value: Option<Expr>,
+        span: Span,
+    },
 }
 
 /// D-CANVASMETA1=B: tooling metadata attached to a binding, const, or function.
