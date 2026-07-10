@@ -16212,6 +16212,460 @@
       "ratifiedAt": "2026-07-07",
       "draft": false,
       "retiredAt": "2026-07-10T13:27:58.528Z"
+    },
+    {
+      "id": "D-BUILDENTRY1",
+      "cardId": "c1nixrpd",
+      "title": "What is Jet’s compile-time build entrypoint?",
+      "gist": "Give Jet a build-time main: one explicit `#Build fn build(ctx) -> BuildPlan ?`, selected by the build surface.",
+      "explainer": "Jai’s `#run` is powerful because build code is just language code. Jet should import that power through a single auditable entrypoint instead of hidden module-level execution. Local `comptime {}` remains for value computation; the build entrypoint owns graph construction: targets, generated source, assets, toolchains, profiles, and package/workspace integration. Generated source still re-enters lexer -> parser -> sema (R11).",
+      "story": "Marcus is building a game. He wants to pack textures, generate an enum from asset names, compile shaders, and then build the game binary with one command. His studio security team wants the same build to explain exactly what ran and what files/network endpoints it touched.",
+      "inWild": "build: Build.{ entry: build }\n\n#Build(\"generate assets and schema\")\nfn build(ctx: BuildContext) #(Fs, Net) -> BuildPlan ? {\n    sprites :: ctx.find(\"assets/**/*.png\")\n    schema :: ctx.fetch(\"https://example.com/schema.json\", sha256: \"...\")?\n\n    source :: generate_schema_module(schema)\n    ctx.generate(\"generated/schema.jet\", source)?\n\n    return ctx.plan(\n        sources: [\"src/main.jet\", \"generated/schema.jet\"],\n        assets: sprites,\n    )\n}",
+      "detail": "Adversarial pass: a build-time main can become Cargo build.rs with better syntax: dependency code executes before users inspect it. Patch: one selected root entrypoint, BuildContext authority only, D-CTEFFECT1 tiers, dependency Tier 2 denied by default, generated-source re-check, lock/provenance, and jet explain-build. Do not let every imported module have hidden build hooks. STATUS CORRECTION 2026-07-01: an earlier edit claimed the lifecycle-verbs law (jet <verb> -> fn <verb>(); syntax-comparison-proposal.md §36A) was ratified — it is NOT; it is an open proposal, related open ballot D-JPK-DEVCOMPOSE1 (jet dev). Option B stands on its own merits and the owner direction recorded 2026-07-01 (a fn-main-equivalent build entry that maps cleanly to jet build); if the verb law later ratifies, B becomes one instance of it. D-BUILDPOLICY1 governs authority either way. Scope ladder (single file / package / workspace) is D-BUILDSCOPE1; generated-source home is D-BUILDGEN1.",
+      "options": [
+        {
+          "key": "A",
+          "name": "`Build.entry` selects `#Build fn build(ctx) -> BuildPlan ?`",
+          "detail": "One explicit build-time main. The marker makes the authority boundary visible; `Build.entry` makes selection explicit for tools and CI. Local `comptime {}` remains separate.",
+          "code": "build: Build.{ entry: build }\n\n#Build(\"pack assets\")\nfn build(ctx: BuildContext) -> BuildPlan ? {\n    return ctx.plan(sources: [\"src/main.jet\"])\n}"
+        },
+        {
+          "key": "B",
+          "name": "fn build(b: BuildContext) via the lifecycle verb map (recommended)",
+          "detail": "Not name magic and not dependent on any unratified law: jet build runs fn build(BuildContext) when the root defines one, else the batteries default pipeline runs. The typed BuildContext parameter is the visible authority boundary. Aligns with the OPEN lifecycle-verbs proposal (jet run -> fn run(), jet dev -> fn dev()) without depending on it.",
+          "code": "fn build(b: BuildContext) -> BuildPlan ? {\n    sprites :: b.find(\"assets/**/*.png\")\n    b.generate(\"generated/schema.jet\", gen_schema(b)?)?\n    return b.plan(sources: [\"src/run.jet\", \"generated/schema.jet\"], assets: sprites)\n}\n// $ jet build        (fn build if defined, else default pipeline)"
+        },
+        {
+          "key": "C",
+          "name": "`comptime main` in any module",
+          "detail": "Maximal #run feel. Rejected unless owner accepts hidden import-time execution risk.",
+          "code": "comptime fn main(ctx: BuildContext) -> BuildPlan ? { ... }"
+        },
+        {
+          "key": "D",
+          "name": "No build entrypoint; only declarative `Build.{}` plus local `comptime {}`",
+          "detail": "Safest and easiest to audit, but cannot replace Jai/Zig/Make-class orchestration.",
+          "code": "build: Build.{ sources: [\"src/main.jet\"] }"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Jai",
+          "note": "`#run` can execute arbitrary compile-time code and participate in build orchestration. It is fun and direct, but authority is broad by default.",
+          "code": "Texture_Info :: #run build_texture_table();\n#run { build_game(); }"
+        },
+        {
+          "lang": "Zig",
+          "note": "`build.zig` is a programmatic build file with explicit steps. Strong model, but separate from ordinary source entrypoints.",
+          "code": "pub fn build(b: *std.Build) void {\n    const exe = b.addExecutable(.{ .name = \"game\" });\n}"
+        },
+        {
+          "lang": "Rust",
+          "note": "`build.rs` runs before compilation and communicates through files/env instructions. Powerful but stringly and historically easy to abuse.",
+          "code": "fn main() { println!(\"cargo:rerun-if-changed=schema.json\"); }"
+        }
+      ],
+      "rec": "B",
+      "status": "ratified",
+      "outcome": "B",
+      "ratifiedAt": "2026-07-01",
+      "draft": false,
+      "retiredAt": "2026-07-10T14:16:19.311Z"
+    },
+    {
+      "id": "D-BUILDPOLICY1",
+      "cardId": "c1nixrpd",
+      "title": "What authority does build-time code get by default?",
+      "gist": "Build code gets pure and locked reproducible inputs by default; ambient effects require source audit plus policy.",
+      "explainer": "Build metaprogramming is supply-chain code execution. Jet needs a policy model that is fun locally but enforceable in CI and enterprises. D-CTEFFECT1 gives the effect tiers; this decision fixes the build-system default: root builds may request authority, dependencies are denied ambient authority unless project/org policy grants it, and every granted capability is recorded in lock/provenance.",
+      "story": "Alicia maintains a fintech service. She is fine with a root build script reading `schema/*.sql`, but she cannot allow a transitive dependency to read CI secrets or hit the network during build.",
+      "inWild": "#Build(\"generate DB client\")\nfn build(ctx: BuildContext) #(Fs) -> BuildPlan ? {\n    migrations :: ctx.find(\"schema/*.sql\")\n    ctx.generate(\"generated/db.jet\", gen_db(migrations))?\n    return ctx.plan(sources: [\"src/main.jet\", \"generated/db.jet\"])\n}\n\n#Impure(\"probe local openssl for legacy C package\") {\n    ctx.exec([\"pkg-config\", \"--libs\", \"openssl\"])?\n}",
+      "detail": "Adversarial pass: too much policy can make game-dev builds feel bureaucratic. Too little policy loses enterprise adoption. The compromise is profile-sensitive: developer default allows pure + locked Tier 1 and prompts for Tier 2; CI strict/offline deny drift; enterprise can allowlist roots/domains/tools. The model must not rely on wrapper scripts.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Tiered policy with `BuildContext` authority only (recommended)",
+          "detail": "Pure + locked Tier 1 by default. Tier 2 needs `#Impure(\"reason\")`, CLI/project/org permission, and provenance. Dependencies get no Tier 2 unless explicitly granted.",
+          "code": "jet build --profile=ci --locked --deny-impure\njet audit-effects"
+        },
+        {
+          "key": "B",
+          "name": "Warn-only policy for impure build effects",
+          "detail": "Fast and friendly, but CI can accidentally ship non-reproducible builds.",
+          "code": "Warning [L3102]: build reads `$HOME/.token`"
+        },
+        {
+          "key": "C",
+          "name": "Pure-only build code",
+          "detail": "Maximum reproducibility, but blocks shader compilation, bindgen, asset packing, and real-world package builds.",
+          "code": "// ctx.exec, env, unpinned network: always errors"
+        },
+        {
+          "key": "D",
+          "name": "Jai-style unrestricted build execution",
+          "detail": "Most fun and powerful locally; unacceptable supply-chain default for Jet.",
+          "code": "#run { run_process(\"curl https://...\") }"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Nix",
+          "note": "Builds are sandboxed and inputs are explicit; reproducibility is excellent but general programming ergonomics are specialized.",
+          "code": "derivation { src = ./src; buildInputs = [ openssl ]; }"
+        },
+        {
+          "lang": "Bazel",
+          "note": "Actions declare inputs/outputs and remote cache keys. Strong enterprise model; BUILD language is separate from app language.",
+          "code": "genrule(name = \"schema\", srcs = [\"schema.sql\"], outs = [\"db.rs\"], cmd = \"...\")"
+        },
+        {
+          "lang": "Cargo",
+          "note": "Build scripts are easy but broad; policy/audit is mostly convention and sandboxing is external.",
+          "code": "fn main() { std::process::Command::new(\"cc\").spawn().unwrap(); }"
+        }
+      ],
+      "rec": "A",
+      "status": "ratified",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-01",
+      "draft": false,
+      "retiredAt": "2026-07-10T14:16:19.311Z"
+    },
+    {
+      "id": "D-BUILDSCOPE1",
+      "cardId": "c1nixrpd",
+      "title": "Where does fn build live at each scale, and how do workspace builds compose?",
+      "gist": "One build-entry model from a single file to a monorepo: where the entry lives at each rung, and who grants its authority.",
+      "explainer": "D-BUILDENTRY1 picks the entry spelling; this decision fixes its home per scale and the grant chain. Owner direction (2026-07-01): effect/capability declaration must travel with the code so a lone .jet file works with no manifest; pkg.jet is where a project grants standing permission; the workspace is where an org caps everything. Composition: a workspace build runs member builds in dependency order; whether it may only observe/cap members or also contribute targets is part of this choice. Declaration stays one mechanism (code-site #Impure/effect tags, D-CTEFFECT1); permission and policy are the two layers above it — nothing is declared twice (I8).",
+      "story": "Earl writes a one-file jam game that bakes a sprite atlas at build time. It grows into a package, then his studio pulls it into their 40-package monorepo. Earl's build fn should survive each move unchanged, and the studio's security lead needs one file that caps what every member build may touch in CI.",
+      "inWild": "// day 1 — jam.jet, no manifest\nfn build(b: BuildContext) #(Fs) -> BuildPlan ? {\n    b.generate(\"generated/atlas.jet\", pack_sprites(b.find(\"art/*.png\")))?\n    return b.plan(sources: [\"jam.jet\", \"generated/atlas.jet\"])\n}\nfn main() { ... }\n// $ jet build jam.jet          — fn build runs, grant via flag/prompt\n\n// month 2 — same fn, now a package; pkg.jet grants #(Fs) permanently\n// year 1 — studio monorepo; workspace policy caps every member: no Net, no Exec",
+      "detail": "Grant chain at a glance: single file = per-invocation grant (flag or interactive prompt); package = standing grant recorded in pkg.jet; workspace = ceiling that member grants cannot exceed. Each rung caps the rung below; jet audit reads all three without executing anything.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Entry lives in the unit's existing definition file at every rung",
+          "detail": "Single file: fn build beside fn main. Package: fn build inside pkg.jet. Workspace: fn build inside workspace.jet. Zero new filenames; the grant chain (flag -> pkg.jet build: block -> workspace policy block) mirrors containment. Workspace fn build may add workspace-level targets and cap members, never mutate a member's plan.",
+          "code": "// pkg.jet\npayload: .{ name: \"atlasgen\", version: \"1.2.0\" }\npackages: .{ atlasgen: library }\nbuild: .{ allow: #(Fs) }            // standing grant for this package's fn build\n\nfn build(b: BuildContext) #(Fs) -> BuildPlan ? { ... }\n\n// workspace.jet\nmodule workspace {\n    members: find(\"./packages\")\n    policy: .{ deny: #(Net, Exec) }  // ceiling for every member build\n}"
+        },
+        {
+          "key": "B",
+          "name": "Dedicated build.jet beside the manifest",
+          "detail": "Package and workspace each get a build.jet next to pkg.jet / workspace.jet; single file keeps fn build in-file. Manifests stay purely declarative; build logic gets its own home. Cost: a fourth special filename (env.jet, pkg.jet, workspace.jet, build.jet) and a two-file story for small packages.",
+          "code": "// pkg.jet — declarative only\npayload: .{ name: \"atlasgen\", version: \"1.2.0\" }\nbuild: .{ allow: #(Fs) }\n\n// build.jet — imperative\nfn build(b: BuildContext) #(Fs) -> BuildPlan ? { ... }"
+        },
+        {
+          "key": "C",
+          "name": "Any source file, selected by an explicit pointer",
+          "detail": "pkg.jet points at the entry: build: .{ entry: tools.release_build }. Most flexible layout; auditors must follow the pointer instead of grepping one location, and two packages can spell the same thing two ways.",
+          "code": "// pkg.jet\nbuild: .{ entry: tools.release_build, allow: #(Fs) }\n\n// tools/release.jet\nfn release_build(b: BuildContext) #(Fs) -> BuildPlan ? { ... }"
+        },
+        {
+          "key": "D",
+          "name": "Package scope only (no single-file, no workspace entry)",
+          "detail": "The Cargo build.rs shape: only packages get a build entry. A lone script cannot use build-time generation without first creating a package, and an org has no first-class ceiling — policy lives in external CI scripts.",
+          "code": "// jam.jet\nfn build(b: BuildContext) ... // error: build entry requires a package manifest"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Cargo",
+          "note": "build.rs is package-only, ambient-authority, and has no workspace-level build or policy file; orgs bolt policy on with external tooling.",
+          "code": "// build.rs — full process authority, no grant chain"
+        },
+        {
+          "lang": "Zig",
+          "note": "build.zig is a dedicated per-package build program (option B shape); no capability layer, no workspace ceiling.",
+          "code": "pub fn build(b: *std.Build) void { ... }"
+        },
+        {
+          "lang": "Bazel",
+          "note": "BUILD per package + WORKSPACE/MODULE at root — the two-rung shape of option A/B, but in a separate dialect from the app language.",
+          "code": "cc_binary(name = \"game\", srcs = [\"main.cc\"])"
+        },
+        {
+          "lang": "Nix",
+          "note": "One flake.nix serves every scale and evaluation is pure by default — the closest existing grant-chain model, in a specialized language.",
+          "code": "outputs = { self }: { packages.default = ...; };"
+        }
+      ],
+      "rec": "A",
+      "status": "ratified",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-01",
+      "draft": false,
+      "retiredAt": "2026-07-10T14:16:19.311Z"
+    },
+    {
+      "id": "D-BUILDGEN1",
+      "cardId": "c1nixrpd",
+      "title": "Where does build-generated Jet source live, and how is it addressed?",
+      "gist": "Build code emits real Jet modules (D-CTCODEGEN1). Decide the on-disk home, lock hashing, staging, and the additive-only rule.",
+      "explainer": "D-CTCODEGEN1 already ratified the pipeline law: generated code re-enters lexer -> parser -> sema like hand-written source. This decision fixes the user-visible surface on top of it: where generated files land, whether they are committed, how b.generate() addresses them, whether a later generation round may observe an earlier round's output (bounded staging vs single round), and the additive-only law — generation may ADD modules but never mutate or shadow user-written source, so reading a file always tells the truth. That last rule is the deliberate break from Jai's #insert, whose output never exists anywhere a person or an LSP can open.",
+      "story": "Doris generates a typed API client from openapi.json. She wants to open the generated file, set a breakpoint in it, and point a teammate at line 214 in review; her CI must prove the artifact byte-matches the spec hash recorded in the lock.",
+      "inWild": "fn build(b: BuildContext) -> BuildPlan ? {\n    spec :: b.embed(\"api/openapi.json\")\n    b.generate(\"api_client\", client_source(spec))?\n    return b.plan(sources: [\"src/main.jet\"], generated: [\"api_client\"])\n}\n\n// $ jet build\n//    generated  api_client.jet (312 lines) <- api/openapi.json  sha256:9f2c...\n//    compiled   shopfront 0.4.1",
+      "detail": "All options share the ratified floor: re-entry through the front end, hash recorded in .jet/lock, diagnostics pinned to the trigger site with the generated fragment as optional context. Staging recommendation carried in each option: generation runs in bounded, deterministically ordered rounds; a cycle is a compile error naming the chain — no Jai-style loop-until-quiescent.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Derived state under .jet/generated/, never committed",
+          "detail": "Generated modules are build products, addressed by module name and materialized under .jet/generated/<package>/. Real files: LSP go-to-def lands in them, debugger steps through them, jet explain-build diffs them. Lock records source-input and output hashes, so CI verifies without committing. Source tree stays clean; no drift class of bugs.",
+          "code": "b.generate(\"api_client\", src)?\n// -> .jet/generated/shopfront/api_client.jet   (hash in .jet/lock)\n// $ jet build --emit-generated   copies them somewhere visible on demand"
+        },
+        {
+          "key": "B",
+          "name": "In-tree build/generated/, committing optional",
+          "detail": "Files land inside the project at build/generated/; each project decides whether to commit them. Visible without any flag, but the committed/uncommitted split means two ecosystems and --locked must handle both.",
+          "code": "b.generate(\"api_client\", src)?\n// -> build/generated/api_client.jet   (gitignore or commit — project choice)"
+        },
+        {
+          "key": "C",
+          "name": "Checked-in generated/ required",
+          "detail": "Go-generate model: generated source is always committed, reviewed in every diff. Maximum review visibility; the cost is a standing drift hazard (artifact vs input) that CI must re-verify anyway, plus generated noise in every review.",
+          "code": "b.generate(\"api_client\", src)?\n// -> generated/api_client.jet   committed; CI fails if regeneration differs"
+        },
+        {
+          "key": "D",
+          "name": "Virtual only — no files, dump on demand",
+          "detail": "Generated modules exist only inside the compilation; a flag dumps them for forensics. This is the Jai/#insert and Rust-proc-macro feel: nothing to open, breakpoint, or review. Listed to reject.",
+          "code": "// nothing on disk; jet build --emit-generated is the only window"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "OUT_DIR + include! hides generated code; cargo-expand exists because nobody can otherwise read what a proc-macro produced.",
+          "code": "include!(concat!(env!(\"OUT_DIR\"), \"/bindings.rs\"));"
+        },
+        {
+          "lang": "Go",
+          "note": "go generate commits artifacts (option C): perfectly visible, drifts unless CI regenerates and compares.",
+          "code": "//go:generate protoc --go_out=. api.proto"
+        },
+        {
+          "lang": "Bazel",
+          "note": "Generated files are derived outputs under bazel-out/, addressable as labels — the option A shape with strong caching.",
+          "code": "genrule(outs = [\"client.go\"], ...)"
+        }
+      ],
+      "rec": "A",
+      "status": "ratified",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-01",
+      "draft": false,
+      "retiredAt": "2026-07-10T14:16:19.311Z"
+    },
+    {
+      "id": "D-METADEPTH2",
+      "cardId": "c1nixrpd",
+      "title": "May build code read the whole checked program and enforce custom rules (ladder rung B)?",
+      "gist": "Rung B of the D-METADEPTH1 ladder: read-only whole-program reflection plus first-class custom diagnostics, from the build entry only. No mutation, no macros — rung C stays frozen (c154).",
+      "explainer": "D-METADEPTH1=A ratified that rung B (a read-only lint-style rejection pass) rises 'only by a future vote'. This ballot is that vote, scoped to the fn build arc. Grant if ratified: the build entry receives a post-sema, read-only snapshot of the whole program through the existing D-METAREFLECT1 TypeInfo surface scaled up (program -> packages -> types/functions), and a diagnostic-emission API whose signature structurally requires code + what/why/fix, so I4 quality holds by construction. Runs only at the selected build entry (D-BUILDENTRY1) — never at module import time, so no hidden execution and no action at a distance. Rung C (mutation, message loop, user macros) is untouched and stays frozen on c154 (e7).",
+      "story": "Walter runs the platform team at a 40-team company on one Jet monorepo. Org rules — 'no panic reachable from a net handler', 'every Entity type has archive()' for GDPR export — live on a wiki and die in code review. He wants the build itself to enforce them with compiler-grade errors no team can miss, without granting anyone the power to rewrite code invisibly.",
+      "inWild": "fn build(b: BuildContext) -> BuildPlan ? {\n    for ty in b.program.types() {\n        if ty.implements(\"Entity\") and not ty.has_method(\"archive\") {\n            b.error(ty.span, code: \"ORG01\",\n                what: \"entity type {ty.name} has no archive method\",\n                why:  \"company policy: every entity must be archivable for GDPR export\",\n                fix:  \"add `fn archive(self) -> Archived` to {ty.name}\")\n        }\n    }\n    return b.plan(sources: [\"src/main.jet\"])\n}",
+      "detail": "Why this is the safe rung: reading the checked program cannot change what any file means — local reasoning survives, the LSP model survives, and generated diagnostics are the only output. The enterprise value is policy-as-code with the compiler's own error quality, in the language the team already writes. The adversarial cost to weigh: a build entry that fails builds on custom rules is a new way for a dependency to be annoying — mitigated because only the ROOT's build entry runs rules (dependencies' rules do not run for you) and D-BUILDPOLICY1 authority applies.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Stay at D-METADEPTH1=A (reflection + derives only)",
+          "detail": "Status quo. Org rules remain external linters with their own parsers that drift from the language; the wiki stays the enforcement mechanism.",
+          "code": "// jet has no answer; Walter writes a tree-sitter script that re-parses Jet\n// and breaks on every syntax release"
+        },
+        {
+          "key": "B",
+          "name": "Read-only program snapshot + structured diagnostics from the build entry",
+          "detail": "The Roslyn-analyzer shape: typed read-only API, structured diagnostics, zero mutation. Scoped to the root build entry; dependency build code gets no rule execution in your build.",
+          "code": "for f in b.program.functions() {\n    if f.effects.has(\"Net\") and f.reaches_panic() {\n        b.error(f.span, code: \"ORG02\",\n            what: \"net handler {f.name} can panic\",\n            why:  \"panics across the connection boundary drop requests\",\n            fix:  \"return a typed error instead\")\n    }\n}"
+        },
+        {
+          "key": "C",
+          "name": "Full message loop / mutation (Jai rung)",
+          "detail": "Build code observes AND rewrites every declaration. Maximal power; reading a file no longer tells you what it means, and the LSP cannot model the program without running the metaprogram. Stays frozen on c154 — listed so the ladder is explicit.",
+          "code": "while msg :: compiler.wait_message() {\n    if msg.kind == .TypeChecked { compiler.replace(msg.decl, rewrite(msg.decl)) }\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "C# / Roslyn",
+          "note": "Analyzers are the industry success story of rung B: typed read-only compilation API + structured diagnostics, shipped as packages, beloved in enterprise.",
+          "code": "context.RegisterSymbolAction(AnalyzeType, SymbolKind.NamedType);"
+        },
+        {
+          "lang": "Rust",
+          "note": "Custom lints require unstable compiler internals (clippy is in-tree); third parties are locked out — the gap Jet can close.",
+          "code": "// no stable custom-lint API exists"
+        },
+        {
+          "lang": "ESLint",
+          "note": "Userland custom rules over a stable AST — massive adoption, but stringly typed and per-file only; no whole-program view.",
+          "code": "module.exports = { create(ctx) { ... } }"
+        },
+        {
+          "lang": "Jai",
+          "note": "The message loop grants observe + rewrite together; there is no read-only tier to adopt without the mutation cost.",
+          "code": "while true { msg := compiler_wait_for_message(); ... }"
+        }
+      ],
+      "rec": "B",
+      "status": "ratified",
+      "outcome": "B",
+      "ratifiedAt": "2026-07-01",
+      "draft": false,
+      "retiredAt": "2026-07-10T14:16:19.311Z"
+    },
+    {
+      "id": "D-E4EXIT1",
+      "cardId": "c1nixrpd",
+      "title": "Epoch 4 exit bar: how much of the build-graph vision ships before e4 is done?",
+      "gist": "Pick the finish line for Epoch 4 (metaprogramming): the ratified fn-build MVP, that plus typed targets/actions, or full CMake/Bazel-class build-graph parity.",
+      "explainer": "The five fn-build ballots are ratified (D-BUILDENTRY1=B, D-BUILDGEN1=A, D-BUILDPOLICY1=A, D-BUILDSCOPE1=A, D-METADEPTH2=B) with an executable plan (metaprogramming.md §15). The vision doc also holds back six build-graph decision bundles (§12: targets, actions, toolchains, cache, probes, lock) that were deliberately frozen \"until the foundation ballots land.\" They have landed. This decision sets what \"Epoch 4 done\" means, and therefore which of those six bundles agents must develop into ballots for you now versus later.",
+      "story": "Hank maintains a game studio's engine repo: Jet code, shader assets, a test suite, and a handful of C tools. He wants to delete the Makefile. The ratified MVP lets his fn build generate bindings and pick sources — but a test target, an asset-cook step with declared inputs/outputs, and \"only rebuild what changed\" are exactly the parts of Make he still needs. Where Epoch 4 stops decides whether Hank deletes the Makefile at e4 or waits.",
+      "inWild": "fn build(b: BuildContext) #(Fs) -> BuildPlan ? {\n    shaders :: b.find(\"assets/*.glsl\")\n    b.generate(\"shader_registry\", gen_registry(shaders))?\n    // MVP ceiling: BuildPlan is sources/generated/assets lists.\n    // No test target. No cook-textures action with declared\n    // inputs/outputs. Hank shells out under #Impure — the exact\n    // Make-shaped hole the vision says must close.\n    return b.plan(sources: [\"src/engine.jet\"], generated: [\"shader_registry\"])\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "MVP bar — ship §15 as ratified, all six §12 bundles wait for e5",
+          "detail": "Epoch 4 exits when the five ratified ballots are implemented end-to-end (entry, generate, policy, scope, enforce) plus the explain-build/audit surfaces. BuildPlan stays the three lists. The six §12 bundles get balloted in Epoch 5 beside jetpack. Cleanest scope; but e4's own charter is Jai parity, and Jai ships targets — Hank keeps his Makefile another epoch, and every real project's asset/test steps live in Tier-2 `#Impure` shell-outs in the meantime, which trains exactly the habit the capability model exists to prevent.",
+          "code": "// e4-exit build file (option A ceiling):\nfn build(b: BuildContext) #(Fs) -> BuildPlan ? {\n    b.generate(\"api\", gen_api(b.find(\"schema/*.sql\"))?)?\n    return b.plan(sources: [\"src/main.jet\"], generated: [\"api\"])\n}\n// tests/assets: still `jet test` convention + #Impure exec steps"
+        },
+        {
+          "key": "B",
+          "name": "Full parity bar — all six §12 bundles designed, ratified, shipped in e4",
+          "detail": "Epoch 4 exits at CMake/Bazel-class parity: typed targets, declared-I/O actions, toolchain pinning, content-addressed action cache, typed probes, lock/provenance for all of it. \"Never reach for Make\" is true at e4 exit. The cost is decision-load and design risk, not effort: toolchain registries, remote-cache trust, and probe vocabularies are ecosystem decisions that will be better informed by jetpack's provider model (e5) — ratifying them first risks re-opening them, which is the one thing the ratification process is supposed to prevent.",
+          "code": "// e4-exit build file (option B ceiling):\nfn build(b: BuildContext) #(Fs) -> BuildPlan ? {\n    ssl  :: b.probe.pkg_config(\"openssl\")            // typed probe, no shell\n    b.toolchain(target: \"aarch64-linux\", digest: \"sha256:9f2c…\")  // pinned\n    cook :: b.action(\"cook-textures\",\n        inputs: b.find(\"assets/*.png\"), outputs: [\"cooked/atlas.bin\"],\n        run: [\"texc\", \"--pack\"])                     // cached by content hash\n    lib  :: b.library(\"engine\", sources: [\"src/engine.jet\"], deps: [cook])\n    return b.plan(targets: [lib, b.test(\"engine_tests\", deps: [lib])])\n}"
+        },
+        {
+          "key": "C",
+          "name": "MVP + targets/actions — Jai-parity bar; toolchains/cache/probes ride e5 (recommended)",
+          "detail": "Epoch 4 exits on §15 plus two of the six bundles: D-BUILDTARGET1 (executable/library/test/bench/asset targets in BuildPlan) and D-BUILDACTION1 (declared inputs/outputs/argv actions — a step with no declared outputs is not a build step). That is the Jai benchmark e4 is named for, and it is what deletes Hank's Makefile: tests and asset cooks become graph nodes instead of #Impure shell-outs, so the capability story stays honest. Toolchains, cache, and probes are jetpack-shaped ecosystem bundles; they ballot in e5 where the provider model informs them — until then `jet build` is correct-if-slower (no action cache) and probes stay Tier-2 #Impure. Agents develop the two bundles into full ballots immediately; the other four are named and parked, not lost.",
+          "code": "// e4-exit build file (option C ceiling):\nfn build(b: BuildContext) #(Fs) -> BuildPlan ? {\n    cook :: b.action(\"cook-textures\",\n        inputs: b.find(\"assets/*.png\"), outputs: [\"cooked/atlas.bin\"],\n        run: [\"texc\", \"--pack\"])\n    lib  :: b.library(\"engine\", sources: [\"src/engine.jet\"], deps: [cook])\n    return b.plan(targets: [lib, b.test(\"engine_tests\", deps: [lib])])\n}\n// no b.toolchain / b.probe / action cache yet — those ballot in e5;\n// rebuilds are correct but re-run actions until the cache bundle lands"
+        }
+      ],
+      "comparisons": "Jai: builds-as-programs with targets and compile options — the e4 charter's benchmark.\nCMake/Bazel/Ninja: typed targets + declared-I/O actions + caching; nobody's v1 shipped remote caching.\nCargo: build.rs (ambient, no graph) — the anti-model Jet already rejected.\nnob.h (binder idea): C build-as-program; covered by targets+actions, not by the MVP lists.",
+      "rec": "C",
+      "status": "ratified",
+      "outcome": "C",
+      "ratifiedAt": "2026-07-02",
+      "draft": false,
+      "retiredAt": "2026-07-10T14:16:19.311Z"
+    },
+    {
+      "id": "D-BUILDFLAGS1",
+      "cardId": "c1nixrpd",
+      "title": "Single-file Tier-2 build grants: what does the user type to say yes?",
+      "gist": "A lone script's fn build wants an ambient effect (exec, env, ...). Pick the CLI spelling that grants it for one run.",
+      "explainer": "D-BUILDPOLICY1=A ratified the mechanics: Tier-2 build effects need BOTH a `#Impure(\"reason\")` gate in source AND permission at run time — \"a flag or an interactive prompt\" for a manifest-less single file. The flag spelling was left open. There is already one ratified grant flag: D-CTEFFECT1's blanket `--allow-impure` (comptime Tier-2, diagnostic E3411 names it). This ballot decides whether that blanket stays the one grant path or is refined into per-effect grants — whichever wins becomes THE spelling (I8: one grant system, E3411's fix text updated to match). Effect names come from the ratified ten-effect vocabulary (D-EFF4: Net, Fs, Io, Db, Time, Rand, Env, Exec, Log, Gpu) — nothing new is minted.",
+      "story": "Walter has a 60-line `tool.jet` — no pkg.jet, just a script whose fn build probes pkg-config for a legacy C library before compiling. The probe is `exec`, a Tier-2 effect. His build fn already declares it and gates it with #Impure. Now he runs `jet build tool.jet` on his laptop (interactive) and in CI (no TTY, hermetic by default). What does he type?",
+      "inWild": "// tool.jet — no manifest anywhere\nfn build(b: BuildContext) #(Exec) -> BuildPlan ? {\n    #Impure(\"probe local openssl for the legacy C bridge\") {\n        flags :: b.exec([\"pkg-config\", \"--libs\", \"openssl\"])?\n    }\n    return b.plan(sources: [\"tool.jet\"])\n}\n\nfn main() { ... }",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Per-effect `--allow-<effect>` + TTY prompt fallback — supersedes the blanket (recommended)",
+          "detail": "One flag per D-EFF4 effect, lowercase: `--allow-exec`, `--allow-env`, `--allow-net`, `--allow-fs`, ... Grants exactly what is named, for this invocation only, recorded in lock/provenance. No flag + TTY: one prompt listing the declared effects and the #Impure reason. No flag + no TTY (CI): fail, naming the flag to add (the §15.4 not-granted diagnostic). This REPLACES the blanket `--allow-impure` — E3411's fix text is rewritten to name the specific missing effect flag, so there is exactly one grant system (I8), and granting exec never smuggles in env. The honest cost: ten flags are more surface than one, and a build declaring three effects needs three flags in the CI line (or the pkg.jet rung). Tab-completable, greppable, reads instantly to anyone who knows Deno.",
+          "code": "$ jet build tool.jet --allow-exec\n   impure   exec: \"probe local openssl for the legacy C bridge\"\n   compiled tool 0.1.0\n\n$ jet build tool.jet          # interactive, no flag\n  fn build declares #(Exec) — \"probe local openssl for the legacy C bridge\"\n  allow exec for this run? [y/N] y\n\n$ jet build tool.jet          # CI, no TTY: hermetic by default\nError: this build asks for `Exec`, which nothing has granted\n  Fix: pass --allow-exec, or add a pkg.jet with a build: grant"
+        },
+        {
+          "key": "B",
+          "name": "Keep the ratified blanket `--allow-impure` as the only grant",
+          "detail": "Status quo extended to build entries: one flag opens every effect the build fn declares. Nothing to ratify beyond scope; E3411 already teaches it; shortest to type. But coarse: Walter wants exec, and the same flag also opens env/net/fs if the script (or a future edit to it) declares them — the grant never names what it grants, so reviewing a CI line tells you nothing about what was opened. Provenance still records what ran, but the human said \"whatever it wants.\"",
+          "code": "$ jet build tool.jet --allow-impure\n   impure   exec: \"probe local openssl for the legacy C bridge\"\n   compiled tool 0.1.0\n# next month someone adds b.env(\"TOKEN\") to fn build —\n# the same CI line silently grants that too."
+        },
+        {
+          "key": "C",
+          "name": "One list flag `--grant exec,env` — supersedes the blanket",
+          "detail": "Single flag, comma-separated effect list; replaces `--allow-impure` the same way A does. Same granularity as A in fewer characters; but it is a second spelling grammar (list parsing, ordering) instead of plain flags, doesn't tab-complete per effect, and diverges from the Deno convention users will pattern-match against. Everything else behaves like A (prompt fallback, CI failure naming the fix).",
+          "code": "$ jet build tool.jet --grant exec\n   impure   exec: \"probe local openssl for the legacy C bridge\"\n   compiled tool 0.1.0\n\n$ jet build tool.jet --grant exec,env,net   # grows into a mini-language"
+        },
+        {
+          "key": "D",
+          "name": "Prompt-only; no grant flags exist",
+          "detail": "Interactive prompt is the only single-file grant path; CI must create a pkg.jet with a build: block (and `--allow-impure` is retired entirely). Maximally deliberate, but it breaks the ratified single-file story (\"a lone script works with no manifest at every rung\") the moment that script runs in CI — the exact place hermetic-by-default matters most would force manifest ceremony.",
+          "code": "$ jet build tool.jet            # laptop: prompt works\n  allow exec for this run? [y/N] y\n\n$ jet build tool.jet            # CI: dead end\nError: this build asks for `Exec`, which nothing has granted\n  Fix: create pkg.jet with `build: .{ allow: #(Exec) }`   # manifest ceremony"
+        }
+      ],
+      "comparisons": "Deno: `--allow-net`, `--allow-read=./data`, `--allow-env` — per-capability flags, the direct precedent; prompts interactively when a flag is missing.\nCargo: nothing — build.rs gets ambient everything, the anti-model.\nNix: sandbox on/off; no per-effect grants.\nJet today: blanket `--allow-impure` (D-CTEFFECT1/E3411) opens ALL declared Tier-2 comptime effects for a run; builds are hermetic unless it is passed.",
+      "rec": "A",
+      "status": "ratified",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-02",
+      "draft": false,
+      "retiredAt": "2026-07-10T14:16:19.311Z"
+    },
+    {
+      "id": "D-IGNORERET2",
+      "cardId": "c1iqde7",
+      "title": "What visible spelling deliberately discards a #MustUse / fallible result?",
+      "gist": "D-IGNORERET1=B requires visible discard. This decides the per-call spelling and the method-chain spelling; scoped suppression is `#Suppress`, not `@suppress`.",
+      "explainer": "Owner question answered: the ballot now offers more than three spellings and separates terse sigils from audit-readable words. Adversarial pass on `.ignore(\"reason\")`: method syntax can look like an ordinary user method and reasons can become boilerplate. Patch: sema treats it as a blessed escape only for `#MustUse`/fallible values, requires a non-empty literal reason, emits a lint naming the dropped type, and rejects user-defined `.ignore` from silently intercepting must-use semantics.",
+      "story": "Nora writes a telemetry sink. Individual best-effort calls need an audit reason, but long chains should keep reading left-to-right without hiding the discarded result.",
+      "inWild": "send(event).drop(\"telemetry best effort\")\n\n#Suppress(MustUse) {\n    logger.write(event)\n    metrics.send(event)\n}",
+      "detail": "Owner Q: Give me other syntax options that read a little better; potentially ok with A but want multiple options.\nAgent answer: Updated with six options. Best revised rec: .ignore(\"reason\") — attached to the value being dropped, creates an audit trail, sema treats it as a blessed escape requiring a non-empty literal reason.\n\nAdversarial pass (2026-06-28): D-LIN1-DROP=A COHESION: that ratified decision rejected both `x.abandon(\"reason\")` (method+reason, the shape of Option D) and `discard(x,\"reason\")` (vocabulary of Option E) for #SingleUse discard. This ballot proposes both rejected patterns. The design must either unify under `drop(expr,\"reason\")` (Option H) or explicitly document why fallible-result discard warrants a different form than linear-type discard — without that, I8 is bent. POSTFIX !: `!` is currently OP_NOT (prefix unary only); Options A and B introduce it as postfix for the first time — two meanings, opposite positions, same glyph. MISSING EXPERT TIER: per-call annotation is unworkable for fire-and-forget subsystems; Option I (scope-level suppression) belongs in this ballot alongside the per-call spelling.\n\nSprint-readiness sweep: story and inWild filled so the ballot is complete for owner decision.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Method `.drop(\"reason\")` + `#Suppress` scope (recommended)",
+          "detail": "Keep the ratified visible-discard rule, but make the chain spelling a method-like terminal operator: `expr.drop(\"reason\")`. It reads left-to-right in chains and reuses the existing `drop` vocabulary from D-LIN1-DROP. The scoped form is `#Suppress(MustUse) { ... }` or `#Suppress(MustUse) fn ...`, matching Jet marker casing and the owner correction; no `@suppress` attribute exists.",
+          "code": "send(event)\n    .retry(2)\n    .drop(\"telemetry best effort\")\n\n#Suppress(MustUse) {\n    write_log(event)\n    send_metric(event)\n}"
+        },
+        {
+          "key": "B",
+          "name": "Pipe discard `.then(drop(\"reason\"))`",
+          "detail": "Keep `drop` as the vocabulary but make chaining go through an explicit pipeline/combinator step. This is clear that discard is a terminal action, but it introduces a callback-like wrapper for a common review signal and is noisier than `.drop(...)`.",
+          "code": "send(event)\n    .retry(2)\n    .then(drop(\"telemetry best effort\"))"
+        },
+        {
+          "key": "C",
+          "name": "Postfix bang method `.!drop(\"reason\")`",
+          "detail": "Use a visually loud method operator for discards only. Reviewers cannot miss it, and it keeps chaining shape. Downside: `!` already means logical not in Jet; spending it inside method syntax creates another punctuation rule.",
+          "code": "send(event)\n    .retry(2)\n    .!drop(\"telemetry best effort\")"
+        },
+        {
+          "key": "D",
+          "name": "Arrow method operator `-> drop(\"reason\")`",
+          "detail": "A terminal arrow makes the discard look like control flow at the end of a chain. It is visually distinct from ordinary methods, but `->` already carries return/arm meaning; using it in expression chains risks overloading a high-value token.",
+          "code": "send(event)\n    .retry(2)\n    -> drop(\"telemetry best effort\")"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Uses `let _ = expr` or `drop(expr)`; no required reason string.",
+          "code": "let _ = write_log(event);"
+        },
+        {
+          "lang": "Jet proposed",
+          "note": "Discard is an audited terminal method or an explicit marker-scoped suppression.",
+          "code": "write_log(event).drop(\"best effort\")\n#Suppress(MustUse) { write_log(event) }"
+        }
+      ],
+      "rec": "A",
+      "status": "ratified",
+      "group": "syntax",
+      "bestCurrent": "Rust: Rust uses `let _ = expr` to make ignored `must_use` results explicit.",
+      "recommendation": "Use `.drop(\"reason\")` plus `#Suppress(MustUse)` (Option A): one discard vocabulary, method-chain friendly, and marker casing matches Jet.",
+      "log": [
+        {
+          "at": "2026-06-28",
+          "text": "Owner corrected scoped spelling to `#Suppress` and requested method-chain variants; ballot rebuilt around method discard syntax."
+        },
+        {
+          "at": "2026-06-28",
+          "text": "Ballot cleanup: rec key fixed, detail deduplicated, naming corrected."
+        },
+        {
+          "at": "2026-06-28",
+          "text": "Adversarial pass complete: options hardened, challenges documented in detail field."
+        },
+        {
+          "at": "2026-06-28",
+          "text": "Ballot tightened: collapsed to 3 options, Option A is the unified optimal recommendation (adversarial pass + recommendation fused), rec moved to A."
+        }
+      ],
+      "outcome": "A",
+      "ratifiedAt": "2026-06-28",
+      "draft": false,
+      "retiredAt": "2026-07-10T14:20:58.089Z"
     }
   ],
   "cards": [
@@ -40061,6 +40515,97 @@
       "action": "decision.delete",
       "ref": "B-E7-UNFREE1",
       "note": "Unfree package policy — what jetos does when a declared package is unfree"
+    },
+    {
+      "at": "2026-07-09T20:37:22.781Z",
+      "by": "codex-main",
+      "action": "decision.delete",
+      "ref": "B-E7-PRIORART1",
+      "note": "No-nix pipeline: reuse proven Rust prior art (tvix crates) or build from scratch?"
+    },
+    {
+      "at": "2026-07-09T20:37:22.946Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0to4gms",
+      "note": "title,epoch,milestoneId,phase,priority,plan,workOrder,logEntry"
+    },
+    {
+      "at": "2026-07-09T20:37:23.113Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0uxofls",
+      "note": "title,epoch,milestoneId,phase,priority,plan,workOrder,logEntry"
+    },
+    {
+      "at": "2026-07-09T20:37:23.271Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0w7297z",
+      "note": "title,body,epoch,milestoneId,phase,priority,plan,workOrder,logEntry"
+    },
+    {
+      "at": "2026-07-09T20:37:23.427Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0xe5g33",
+      "note": "title,body,epoch,milestoneId,phase,priority,plan,workOrder,logEntry"
+    },
+    {
+      "at": "2026-07-09T20:37:23.588Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0yl347q",
+      "note": "title,epoch,milestoneId,phase,priority,plan,workOrder,logEntry"
+    },
+    {
+      "at": "2026-07-09T20:37:23.756Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c0zqnb18",
+      "note": "title,body,epoch,milestoneId,phase,priority,plan,workOrder,logEntry"
+    },
+    {
+      "at": "2026-07-09T20:37:23.921Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c00wjjmo",
+      "note": "title,epoch,milestoneId,phase,priority,plan,workOrder,logEntry"
+    },
+    {
+      "at": "2026-07-09T20:38:06.392Z",
+      "by": "codex-main",
+      "action": "card.add",
+      "ref": "c0wetgi3",
+      "note": "E4-JP0 Truth and integrity stop-line"
+    },
+    {
+      "at": "2026-07-09T20:38:06.543Z",
+      "by": "codex-main",
+      "action": "card.add",
+      "ref": "c0yxdqju",
+      "note": "E4-JP2 One derivation/action IR + complete CAS identity"
+    },
+    {
+      "at": "2026-07-09T20:38:06.695Z",
+      "by": "codex-main",
+      "action": "card.add",
+      "ref": "c01fj815",
+      "note": "E4-JP4 Closure DB, roots, leases, GC, verify, repair"
+    },
+    {
+      "at": "2026-07-09T20:38:06.853Z",
+      "by": "codex-main",
+      "action": "card.add",
+      "ref": "c041flkr",
+      "note": "E4-JP6 Supply-chain trust v2 — TUF, publisher identity, provenance"
+    },
+    {
+      "at": "2026-07-09T20:38:07.017Z",
+      "by": "codex-main",
+      "action": "card.add",
+      "ref": "c06re5ow",
+      "note": "E4-JP7 Remote builders and verified execution"
     }
   ]
 }

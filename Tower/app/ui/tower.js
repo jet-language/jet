@@ -573,13 +573,19 @@ function radarMatches(c, needle) {
 
 function viewRadar() {
   const v = $('#view');
+  const cardsMode = isOpen('radar-cards', false);
   v.innerHTML = `<div class="viewhead"><h1 class="h1">Radar</h1>
-      <span class="viewhead__sub">roadmap ledger × ops table — prototype, owner-acceptance pending</span></div>
+      <span class="viewhead__sub">roadmap ledger × ops table — prototype, owner-acceptance pending</span>
+      <div class="viewhead__actions"><button class="btn btn--ghost" id="radar-mode" title="Switch between table rows and card tiles">${cardsMode ? '☰ Table view' : '⊞ Card view'}</button></div></div>
     <div class="capture"><input id="radar-filter" placeholder="Filter by #, title, assignee…" value="${esc(radarFilterText)}"></div>
     <div id="radar-body"></div>`;
+  $('#radar-mode').addEventListener('click', () => api('ui/toggle', { key: 'radar-cards' }));
   $('#radar-filter').addEventListener('input', (e) => { radarFilterText = e.target.value; renderRadarBody(); });
   renderRadarBody();
 }
+
+// One body per section, honoring the card/table mode toggle.
+const radarList = (key, cards, cardsMode) => cardsMode ? grid(cards) : opsTable(key, cards);
 
 function renderRadarBody() {
   const body = $('#radar-body');
@@ -587,16 +593,35 @@ function renderRadarBody() {
   const focused = document.activeElement === $('#radar-filter');
   body.innerHTML = '';
   const needle = radarFilterText.trim().toLowerCase();
+  const cardsMode = isOpen('radar-cards', false);
   const radar = S.radar || [];
-  if (!radar.length) {
+
+  // Sidequests: their own section — off-plan work, not part of any epoch.
+  const sq = S.cards.filter(c => c.track === 'sidequest' && !['done', 'frozen'].includes(c.phase));
+  if (sq.length) body.appendChild(radarListSection('radar-sq', TERM('sidequest', 'Sidequests'), 'off-plan work', sq.filter(c => radarMatches(c, needle)), sq.length, cardsMode, true));
+
+  if (!radar.length && !sq.length) {
     body.appendChild(el(`<div class="empty"><div class="empty__glyph">—</div><div>no active epochs</div></div>`));
     return;
   }
-  for (const r of radar) body.appendChild(radarEpochSection(r, needle));
+  for (const r of radar) body.appendChild(radarEpochSection(r, needle, cardsMode));
+
+  // Frozen: parked on purpose, any track — its own section, collapsed by default.
+  const fz = S.cards.filter(c => c.phase === 'frozen');
+  if (fz.length) body.appendChild(radarListSection('radar-frozen', 'Frozen', 'parked on purpose', fz.filter(c => radarMatches(c, needle)), fz.length, cardsMode, false));
+
   if (focused) $('#radar-filter')?.focus();
 }
 
-function radarEpochSection(r, needle) {
+function radarListSection(key, name, sub, shown, total, cardsMode, defOpen) {
+  return collapsible(key, defOpen,
+    `<span class="epoch__tag" style="color:var(--frost)">${esc(name)}</span><span class="epoch__name">${esc(sub)}</span><span class="epoch__count">${total}</span>`,
+    'epoch--off', (body) => {
+      body.appendChild(shown.length ? radarList(key, shown, cardsMode) : el(`<p class="epoch__goal">no match</p>`));
+    });
+}
+
+function radarEpochSection(r, needle, cardsMode) {
   const e = S.epochs.find(x => x.id === r.id);
   return collapsible('radar:' + r.id, true,
     `<span class="epoch__tag">${esc(e ? epochTag(e) : r.id)}</span><span class="epoch__name">${esc(r.name)}</span>
@@ -610,17 +635,10 @@ function radarEpochSection(r, needle) {
       body.appendChild(ledgerLine);
       archivedCountFor(r.id).then(n => { if (n) ledgerLine.textContent = `ledger: ${r.done} done live · ${n} archived`; });
 
-      const sq = S.cards.filter(c => c.track === 'sidequest' && c.epoch === r.id && !['done', 'frozen'].includes(c.phase));
-      const sqShown = sq.filter(c => radarMatches(c, needle));
-      if (sq.length) {
-        body.appendChild(el(`<div class="radar__subhead">${esc(TERM('sidequest', 'Sidequests'))}</div>`));
-        body.appendChild(sqShown.length ? opsTable('sq:' + r.id, sqShown) : el(`<p class="epoch__goal">no match</p>`));
-      }
-
       const active = S.cards.filter(c => c.epoch === r.id && c.track !== 'sidequest' && !['done', 'frozen'].includes(c.phase));
       const activeShown = active.filter(c => radarMatches(c, needle));
       body.appendChild(el(`<div class="radar__subhead">Active</div>`));
-      body.appendChild(activeShown.length ? opsTable(r.id, activeShown) : el(`<p class="epoch__goal">${active.length ? 'no match' : 'no active cards'}</p>`));
+      body.appendChild(activeShown.length ? radarList(r.id, activeShown, cardsMode) : el(`<p class="epoch__goal">${active.length ? 'no match' : 'no active cards'}</p>`));
     });
 }
 
