@@ -153,6 +153,7 @@ fn compose_env(theme: &Theme, roots: &Roots, flags: &Flags, plan: &RunPlan) -> R
     let mut realized_refs = Vec::new();
     let mut holes = Vec::new();
     let mut failed = false;
+    let mut cache_leases = Vec::new();
     let name_w = name_column_width(&plan.refs);
     // Tier 1 (D-FE-CLI1): `jet env`/`run`/`dev` composing a project's
     // packages is the trivial-op case — one `✓ name version` row per
@@ -160,13 +161,14 @@ fn compose_env(theme: &Theme, roots: &Roots, flags: &Flags, plan: &RunPlan) -> R
     let total_steps = plan.refs.len() + plan.adapters.len();
     for spec in plan.refs.iter() {
         match realize_ref_outcome(theme, roots, flags, &plan.table, spec, name_w, RowStyle::Ready, None) {
-            RefOutcome::Realized(entry, _state, _line) => {
+            RefOutcome::Realized(entry, _state, _line, lease) => {
                 // A `library` package realizes with an empty `bin` (U10) — it
                 // stages source for import and contributes nothing to PATH.
                 if !entry.bin.is_empty() {
                     bin_dirs.push(entry.bin);
                 }
                 realized_refs.push(entry.reference);
+                cache_leases.push(lease);
             }
             RefOutcome::NeedsNix(need) => holes.push(need),
             RefOutcome::Failed => failed = true,
@@ -182,12 +184,13 @@ fn compose_env(theme: &Theme, roots: &Roots, flags: &Flags, plan: &RunPlan) -> R
                 "adapter",
             );
         }
-        match realize_adapter(theme, roots, flags, adapter) {
-            Some((entry, _state)) => {
+        match realize_adapter(theme, roots, flags, adapter, true) {
+            Some((entry, _state, lease)) => {
                 if !entry.bin.is_empty() {
                     bin_dirs.push(entry.bin);
                 }
                 realized_refs.push(entry.reference);
+                cache_leases.push(lease);
             }
             None => failed = true,
         }
@@ -208,6 +211,7 @@ fn compose_env(theme: &Theme, roots: &Roots, flags: &Flags, plan: &RunPlan) -> R
         label: plan.label.clone(),
         prompt_path: plan.prompt_path,
         prompt_strip: plan.prompt_strip,
+        cache_leases,
     })
 }
 
@@ -358,7 +362,7 @@ fn cmd_build(theme: &Theme, parsed: &Parsed) -> i32 {
             style,
             live_arg,
         ) {
-            RefOutcome::Realized(entry, state, line) => {
+            RefOutcome::Realized(entry, state, line, _lease) => {
                 if live_mode {
                     live.finish(&line);
                 }
@@ -383,8 +387,8 @@ fn cmd_build(theme: &Theme, parsed: &Parsed) -> i32 {
                 "adapter",
             );
         }
-        match realize_adapter(theme, &roots, &parsed.flags, adapter) {
-            Some((entry, state)) => {
+        match realize_adapter(theme, &roots, &parsed.flags, adapter, false) {
+            Some((entry, state, _lease)) => {
                 realized_refs.push(entry.reference);
                 match state {
                     Provider::SourceState::Built => built += 1,

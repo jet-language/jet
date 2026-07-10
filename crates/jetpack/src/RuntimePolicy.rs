@@ -160,13 +160,29 @@ pub fn write_sandbox_policy(policy: SandboxPolicy) -> io::Result<PathBuf> {
     Ok(path)
 }
 
+/// Identity of artifact-producing policy JP0 can currently enforce. Invocation
+/// transport (`--offline`) is deliberately excluded: consuming identical local
+/// bytes offline must not invalidate them. Policy changes make prior records
+/// miss instead of silently crossing an authority boundary.
+pub fn cache_policy_fingerprint(_offline: bool) -> String {
+    let sandbox = match read_sandbox_policy() {
+        SandboxPolicy::AllowFallback => "sandbox=fallback",
+        SandboxPolicy::Require => "sandbox=require",
+    };
+    crate::SHA256::sha256_hex(format!("jp0-policy-v1\n{sandbox}\n").as_bytes())
+}
+
 pub fn detect_sandbox() -> SandboxStatus {
     match std::env::var("JETPACK_FAKE_SANDBOX").ok().as_deref() {
         Some("available") => {
             return SandboxStatus {
-                level: SandboxLevel::Strong,
-                mechanism: "fake-userns".to_string(),
-                reason: "test override reports sandbox support".to_string(),
+                level: SandboxLevel::Fallback,
+                mechanism: "fake-userns-available".to_string(),
+                reason: concat!(
+                    "test override reports sandbox support, but the build child ",
+                    "has not entered a jail"
+                )
+                .to_string(),
             };
         }
         Some("unavailable") => {
@@ -186,9 +202,13 @@ pub fn detect_sandbox() -> SandboxStatus {
             .unwrap_or(true);
         if userns {
             return SandboxStatus {
-                level: SandboxLevel::Strong,
-                mechanism: "linux-userns".to_string(),
-                reason: "unprivileged user namespaces are available".to_string(),
+                level: SandboxLevel::Fallback,
+                mechanism: "linux-userns-available".to_string(),
+                reason: concat!(
+                    "unprivileged user namespaces are available, but the build ",
+                    "child has not entered a Jetpack jail"
+                )
+                .to_string(),
             };
         }
         return SandboxStatus {
@@ -331,5 +351,13 @@ mod tests {
         let os_switch = verb_policy(Syntax::OS_SUBCOMMAND, &["switch"]);
         assert!(os_switch.transient_sudo);
         assert!(!os_switch.requires_root);
+    }
+
+    #[test]
+    fn capability_detection_never_claims_an_entered_sandbox() {
+        let status = detect_sandbox();
+        assert_eq!(status.level, SandboxLevel::Fallback);
+        assert_ne!(status.mechanism, "linux-userns");
+        assert!(status.reason.contains("not entered"));
     }
 }

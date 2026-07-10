@@ -1,7 +1,7 @@
 fn write_activation_diff(
     dir: &Path,
     system: &SystemPlan,
-    realized: &[Store::StoreEntry],
+    realized: &[RealizedPackage],
 ) -> std::io::Result<()> {
     let previous = current_generation_path()
         .map(|p| p.display().to_string())
@@ -48,7 +48,7 @@ fn write_health_checks(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
 fn write_provenance(
     dir: &Path,
     system: &SystemPlan,
-    realized: &[Store::StoreEntry],
+    realized: &[RealizedPackage],
 ) -> std::io::Result<()> {
     let packages = realized
         .iter()

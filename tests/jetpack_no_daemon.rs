@@ -140,6 +140,36 @@ fn sandbox_fallback_warns_and_require_mode_errors() {
 }
 
 #[test]
+fn available_userns_never_labels_unsandboxed_child_strong() {
+    let cwd = Scratch::new("capability-only-cwd");
+    let home = Scratch::new("capability-only-home");
+    let root = Scratch::new("capability-only-root");
+
+    let require = jetpack()
+        .args(["config", "sandbox", "require", "--no-color"])
+        .current_dir(&cwd.path)
+        .env("HOME", &home.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert!(require.status.success());
+
+    let child = jetpack()
+        .args(["build", "--no-color"])
+        .current_dir(&cwd.path)
+        .env("HOME", &home.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("JETPACK_FAKE_SANDBOX", "available")
+        .output()
+        .unwrap();
+    assert_eq!(child.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&child.stderr);
+    assert!(stderr.contains("E1275"), "stderr: {stderr}");
+    assert!(stderr.contains("has not entered a jail"), "stderr: {stderr}");
+    assert!(!stderr.contains("strong"), "stderr: {stderr}");
+}
+
+#[test]
 fn jetpack_runtime_code_has_no_privileged_helper_tokens() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("crates/jet-driver/src/Jetpack");
     let forbidden = [

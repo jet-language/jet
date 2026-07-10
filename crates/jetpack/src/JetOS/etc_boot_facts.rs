@@ -100,7 +100,7 @@ fn write_pam_files(etc: &Path) -> std::io::Result<()> {
 fn write_boot_facts(
     dir: &Path,
     system: &SystemPlan,
-    realized: &[Store::StoreEntry],
+    realized: &[RealizedPackage],
 ) -> std::io::Result<()> {
     let boot = boot_profile(system);
     let boot_dir = dir.join("boot");
@@ -119,7 +119,7 @@ fn write_boot_facts(
         ),
     )?;
     if kernel_path.is_file() {
-        link_or_copy_file(&kernel_path, &boot_dir.join("kernel"))?;
+        copy_file_replace(&kernel_path, &boot_dir.join("kernel"))?;
         sanitize_runtime_branding_file(&boot_dir.join("kernel"))?;
     } else {
         fs::write(
@@ -129,7 +129,7 @@ fn write_boot_facts(
     }
     match initrd_path {
         Some(path) if path.is_file() => {
-            link_or_copy_file(&path, &boot_dir.join("initrd"))?;
+            copy_file_replace(&path, &boot_dir.join("initrd"))?;
             sanitize_runtime_branding_file(&boot_dir.join("initrd"))?;
         }
         Some(path) => fs::write(
@@ -166,7 +166,7 @@ fn write_boot_facts(
             .and_then(|entry| boot_artifact(entry, &[&format!("boot/modules/{module_name}")]))
         {
             fs::create_dir_all(boot_dir.join("modules"))?;
-            link_or_copy_file(&module, &boot_dir.join("modules").join(module_name))?;
+            copy_file_replace(&module, &boot_dir.join("modules").join(module_name))?;
         }
     }
     fs::write(
@@ -175,14 +175,14 @@ fn write_boot_facts(
     )
 }
 
-fn cachyos_kernel_entry(realized: &[Store::StoreEntry]) -> Option<&Store::StoreEntry> {
+fn cachyos_kernel_entry(realized: &[RealizedPackage]) -> Option<&RealizedPackage> {
     realized
         .iter()
         .find(|entry| entry.name == CACHYOS_KERNEL_PACKAGE)
 }
 
-fn boot_artifact(entry: &Store::StoreEntry, candidates: &[&str]) -> Option<PathBuf> {
-    let out = Path::new(&entry.out);
+fn boot_artifact(entry: &RealizedPackage, candidates: &[&str]) -> Option<PathBuf> {
+    let out = entry.consumption_path(&entry.out).ok()?;
     candidates
         .iter()
         .map(|rel| out.join(rel))
@@ -204,8 +204,8 @@ fn is_initrd_image(path: &Path) -> bool {
     bytes.starts_with(&[0x1f, 0x8b]) || bytes.starts_with(b"070701") || bytes.starts_with(b"070702")
 }
 
-fn missing_kernel_source_files(entry: &Store::StoreEntry) -> Option<&'static str> {
-    let out = Path::new(&entry.out);
+fn missing_kernel_source_files(entry: &RealizedPackage) -> Option<&'static str> {
+    let out = entry.consumption_path(&entry.out).ok()?;
     [
         "source/recipe.jet",
         "source/build.sh",
@@ -217,7 +217,7 @@ fn missing_kernel_source_files(entry: &Store::StoreEntry) -> Option<&'static str
     .find(|rel| !out.join(rel).is_file())
 }
 
-fn render_boot_facts(system: &SystemPlan, realized: &[Store::StoreEntry]) -> String {
+fn render_boot_facts(system: &SystemPlan, realized: &[RealizedPackage]) -> String {
     let boot = boot_profile(system);
     let kernel_package = cachyos_kernel_entry(realized)
         .map(kernel_package_json)
@@ -238,7 +238,7 @@ fn render_boot_facts(system: &SystemPlan, realized: &[Store::StoreEntry]) -> Str
     )
 }
 
-fn kernel_package_json(entry: &Store::StoreEntry) -> String {
+fn kernel_package_json(entry: &RealizedPackage) -> String {
     let source = kernel_source_json(entry);
     format!(
         "{{\"name\":{},\"reference\":{},\"out\":{},\"output_hash\":{},\"provenance\":{},\"bootstrap\":\"source-built\",\"source_recipe\":{}}}",
@@ -251,8 +251,10 @@ fn kernel_package_json(entry: &Store::StoreEntry) -> String {
     )
 }
 
-fn kernel_source_json(entry: &Store::StoreEntry) -> String {
-    let out = Path::new(&entry.out);
+fn kernel_source_json(entry: &RealizedPackage) -> String {
+    let out = entry
+        .consumption_path(&entry.out)
+        .unwrap_or_else(|_| PathBuf::from(&entry.out));
     let facts = [
         ("recipe", "source/recipe.jet"),
         ("builder", "source/build.sh"),

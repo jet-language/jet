@@ -47,6 +47,8 @@ pub struct Env {
     pub label: String,
     pub prompt_path: PromptPathMode,
     pub prompt_strip: PromptStripMode,
+    /// Cache verification leases stay live through child process handoff.
+    pub cache_leases: Vec<super::Store::CacheLease>,
 }
 
 impl Env {
@@ -54,6 +56,16 @@ impl Env {
     pub fn composed_path(&self, base_path: &str) -> String {
         let mut seen = std::collections::BTreeSet::new();
         let mut parts: Vec<&str> = Vec::new();
+        for dir in self
+            .cache_leases
+            .iter()
+            .filter_map(|lease| lease.wrapper_dir())
+            .filter_map(|path| path.to_str())
+        {
+            if seen.insert(dir) {
+                parts.push(dir);
+            }
+        }
         for dir in &self.bin_dirs {
             if seen.insert(dir.as_str()) {
                 parts.push(dir);
@@ -74,18 +86,37 @@ impl Env {
         cmd.env(Syntax::JETPACK_ENV_MARKER, "1");
         cmd.env("JETPACK_REF", self.refs.join(" "));
     }
+
+    fn validate_cache(&self, theme: &Theme) -> bool {
+        for lease in &self.cache_leases {
+            if let Some(failure) = lease.integrity_failure() {
+                super::Store::report_integrity(theme, &failure);
+                return false;
+            }
+        }
+        true
+    }
 }
 
 /// Run `cmd_args` inside the composed env and return its exit code. The parent
 /// process env is untouched (we mutate only the child's `Command`).
 pub fn run_command(env: &Env, cmd_args: &[String]) -> i32 {
+    if !env.validate_cache(&Theme::resolve(true)) {
+        return 126;
+    }
     let Some((program, rest)) = cmd_args.split_first() else {
         return 0;
     };
-    let mut cmd = Command::new(program);
+    let stable_program = env
+        .cache_leases
+        .iter()
+        .find_map(|lease| lease.executable(program));
+    let mut cmd = stable_program
+        .as_ref()
+        .map_or_else(|| Command::new(program), Command::new);
     cmd.args(rest);
     env.apply(&mut cmd);
-    match cmd.status() {
+    let code = match cmd.status() {
         Ok(status) => status
             .code()
             .unwrap_or(if status.success() { 0 } else { 1 }),
@@ -93,11 +124,18 @@ pub fn run_command(env: &Env, cmd_args: &[String]) -> i32 {
             eprintln!("jetpack: could not run `{program}`: {e}");
             127
         }
+    };
+    if !env.validate_cache(&Theme::resolve(true)) {
+        return 126;
     }
+    code
 }
 
 /// Enter an interactive temporary shell. Returns the child's exit code.
 pub fn enter(theme: &Theme, env: &Env, kind: ShellKind) -> i32 {
+    if !env.validate_cache(theme) {
+        return 126;
+    }
     // The threshold rule — the signature moment of `jet env`. One quiet line
     // in, one mirrored line out, so the temporary shell reads as a room you
     // walked into and back out of, not a mode you might be stuck in.
@@ -143,6 +181,9 @@ pub fn enter(theme: &Theme, env: &Env, kind: ShellKind) -> i32 {
             127
         }
     };
+    if !env.validate_cache(theme) {
+        return 126;
+    }
     let left = format!("left {}", env.label);
     theme.rule(&[left.as_str(), "your machine is unchanged"]);
     code
@@ -352,6 +393,7 @@ mod tests {
             label: Syntax::JETPACK_PROMPT_LABEL.to_string(),
             prompt_path: PromptPathMode::Short,
             prompt_strip: PromptStripMode::Off,
+            cache_leases: Vec::new(),
         }
     }
 

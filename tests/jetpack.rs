@@ -120,8 +120,54 @@ impl Scratch {
 
 impl Drop for Scratch {
     fn drop(&mut self) {
+        make_tree_writable(&self.path);
         let _ = fs::remove_dir_all(&self.path);
     }
+}
+
+#[cfg(unix)]
+fn make_tree_writable(path: &Path) {
+    use std::os::unix::fs::PermissionsExt as _;
+    let Ok(meta) = fs::symlink_metadata(path) else {
+        return;
+    };
+    if meta.is_dir() {
+        for entry in fs::read_dir(path).unwrap() {
+            make_tree_writable(&entry.unwrap().path());
+        }
+    }
+    if !meta.file_type().is_symlink() {
+        let mode = if meta.is_dir() { 0o755 } else { meta.permissions().mode() | 0o600 };
+        fs::set_permissions(path, fs::Permissions::from_mode(mode)).unwrap();
+    }
+}
+
+fn assert_no_ephemeral_links(path: &Path) {
+    let Ok(meta) = fs::symlink_metadata(path) else {
+        return;
+    };
+    if meta.file_type().is_symlink() {
+        let target = fs::read_link(path).unwrap();
+        let text = target.to_string_lossy();
+        assert!(!text.contains("/proc/self/fd/"), "ephemeral FD link: {} -> {text}", path.display());
+        assert!(!text.contains("/leases/"), "ephemeral lease link: {} -> {text}", path.display());
+        return;
+    }
+    if meta.is_dir() {
+        for entry in fs::read_dir(path).unwrap().flatten() {
+            assert_no_ephemeral_links(&entry.path());
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn make_tree_writable(path: &Path) {
+    let Ok(meta) = fs::metadata(path) else {
+        return;
+    };
+    let mut permissions = meta.permissions();
+    permissions.set_readonly(false);
+    fs::set_permissions(path, permissions).unwrap();
 }
 
 fn example_fixtures() -> PathBuf {
@@ -338,16 +384,27 @@ fn override_draft_writes_reviewed_workspace_policy_and_explains_it() {
 #[test]
 fn build_resolves_fixture_ref() {
     let root = Scratch::new("root");
-    let out = jetpack()
-        .args(["build", "nixpkgs:fastfetch", "--no-color", "--offline"])
-        .env("JETPACK_ROOT", &root.path)
-        .env("JETPACK_FIXTURES", example_fixtures())
-        .output()
-        .unwrap();
+    let run = || {
+        jetpack()
+            .args(["build", "nixpkgs:fastfetch", "--no-color", "--offline"])
+            .env("JETPACK_ROOT", &root.path)
+            .env("JETPACK_FIXTURES", example_fixtures())
+            .output()
+            .unwrap()
+    };
+    let out = run();
     assert!(out.status.success());
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("fastfetch"), "stderr: {stderr}");
     assert!(stderr.contains("/nix/store/"), "stderr: {stderr}");
+    let repeated = run();
+    assert!(repeated.status.success());
+    let repeated_stderr = String::from_utf8_lossy(&repeated.stderr);
+    assert!(!repeated_stderr.contains("E2604"), "stderr: {repeated_stderr}");
+    assert!(
+        repeated_stderr.contains("substituted"),
+        "Nix fixture must re-enter its provider, not claim a Jetpack cache hit: {repeated_stderr}"
+    );
 }
 
 #[test]
@@ -825,6 +882,22 @@ module dev {
             |p| fs::read_to_string(p.join("share/readme.txt")).unwrap_or_default() == "adapted\n"
         ),
         "adapter output missing copied file: {entries:?}"
+    );
+    let cached = jetpack()
+        .args(["build", "--no-color"])
+        .current_dir(&proj.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert!(
+        cached.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&cached.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&cached.stderr).contains("1 cached"),
+        "stderr: {}",
+        String::from_utf8_lossy(&cached.stderr)
     );
 }
 
@@ -2345,21 +2418,24 @@ fn os_build_realizes_selected_system_offline() {
     // fully offline (the packages come from a first-party `core` source repo, so
     // no nix). The store lives under a scratch JETPACK_ROOT.
     let root = Scratch::new("os-build-root");
-    let out = jet()
-        .args([
-            "os",
-            "build",
-            "halcyon",
-            "--name",
-            "fixture-source-built",
-            "--no-color",
-            "--offline",
-        ])
-        .current_dir(config_example_dir())
-        .env("JETPACK_ROOT", &root.path)
-        .env("PATH", "/usr/bin:/bin") // no nix on PATH
-        .output()
-        .unwrap();
+    let run = || {
+        jet()
+            .args([
+                "os",
+                "build",
+                "halcyon",
+                "--name",
+                "fixture-source-built",
+                "--no-color",
+                "--offline",
+            ])
+            .current_dir(config_example_dir())
+            .env("JETPACK_ROOT", &root.path)
+            .env("PATH", "/usr/bin:/bin") // no nix on PATH
+            .output()
+            .unwrap()
+    };
+    let out = run();
     assert!(
         out.status.success(),
         "stderr: {}",
@@ -2371,6 +2447,17 @@ fn os_build_realizes_selected_system_offline() {
     }
     assert!(stderr.contains("halcyon"), "stderr: {stderr}");
     assert!(stderr.contains("generation"), "stderr: {stderr}");
+    let cached = run();
+    assert!(
+        cached.status.success(),
+        "cached generation stderr: {}",
+        String::from_utf8_lossy(&cached.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&cached.stderr).contains("cached"),
+        "second generation must exercise leased cache paths: {}",
+        String::from_utf8_lossy(&cached.stderr)
+    );
     // A generation directory was assembled under the managed system store.
     assert!(
         root.join("systems").is_dir(),
@@ -2386,6 +2473,13 @@ fn os_build_realizes_selected_system_offline() {
     assert!(
         initrd.contains("fixture-built cachyos initrd"),
         "initrd should come from source/build.sh: {initrd}"
+    );
+    assert_no_ephemeral_links(&generation);
+    let hello = Command::new(generation.join("sw/bin/hello")).output().unwrap();
+    assert!(hello.status.success());
+    assert!(
+        String::from_utf8_lossy(&hello.stdout).contains("hello"),
+        "generation-owned executable must survive lease close and FD reuse"
     );
 }
 
@@ -5798,6 +5892,176 @@ fn jet_build_reports_source_states() {
     assert!(
         out2.contains("1 cached"),
         "summary must count the cache hit: {out2}"
+    );
+}
+
+#[test]
+fn jet_build_rejects_cache_after_manifest_semantics_change() {
+    let (base, proj, root) = core_hello_project("truth-manifest-identity");
+    let manifest = base.join("jet-pkgs/pkg.jet");
+    fs::write(
+        &manifest,
+        "payload: { name: \"demo\", version: \"1.0.0\" }\npackages: { hello: executable }\n",
+    )
+    .unwrap();
+    let run = || {
+        jetpack()
+            .args(["build", "--no-color"])
+            .current_dir(&proj)
+            .env("JETPACK_ROOT", &root)
+            .env("PATH", "/usr/bin:/bin")
+            .output()
+            .unwrap()
+    };
+    assert!(run().status.success());
+    fs::write(
+        &manifest,
+        "payload: { name: \"demo\", version: \"2.0.0\" }\npackages: { hello: executable }\n",
+    )
+    .unwrap();
+    let rejected = run();
+    assert!(!rejected.status.success());
+    let stderr = String::from_utf8_lossy(&rejected.stderr);
+    assert!(stderr.contains("E2604"), "stderr: {stderr}");
+    assert!(
+        stderr.contains("recipe identity verification"),
+        "stderr: {stderr}"
+    );
+}
+
+#[test]
+fn two_process_reverse_package_order_does_not_deadlock() {
+    let base = Scratch::new("reverse-order-leases");
+    let repo = base.join("repo");
+    let root = base.join("root");
+    for name in ["a", "b"] {
+        let package = repo.join(format!("pkgs/{name}"));
+        fs::create_dir_all(package.join("bin")).unwrap();
+        fs::write(package.join(format!("{name}.jet")), format!("module {name} {{ }}\n"))
+            .unwrap();
+        let tool = package.join(format!("bin/{name}"));
+        fs::write(&tool, format!("#!/bin/sh\necho {name}\n")).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            fs::set_permissions(tool, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+    }
+    fs::write(
+        repo.join("pkg.jet"),
+        "payload: { name: \"pair\", version: \"1.0.0\" }\npackages: { a: executable, b: executable }\n",
+    )
+    .unwrap();
+    let write_project = |name: &str, packages: &[&str]| {
+        let project = base.join(name);
+        fs::create_dir_all(&project).unwrap();
+        fs::write(
+            project.join("env.jet"),
+            format!(
+                "use jetpack as pkg;\npub fn shell() -> [JSON] {{\n return [pkg.source(\"mine\", \"path:{}\", \"core\"); pkg.packages([{}]);];\n}}\n",
+                repo.display(),
+                packages
+                    .iter()
+                    .map(|package| format!("\"mine:{package}\""))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        )
+        .unwrap();
+        project
+    };
+    let ab = write_project("ab", &["a", "b"]);
+    let ba = write_project("ba", &["b", "a"]);
+    let seeded = jetpack()
+        .args(["build", "--no-color"])
+        .current_dir(&ab)
+        .env("JETPACK_ROOT", &root)
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert!(seeded.status.success(), "stderr: {}", String::from_utf8_lossy(&seeded.stderr));
+    let spawn = |project: &Path| {
+        jetpack()
+            .args(["enter", "--no-color", "--trust", "--", "/bin/sh", "-c", "true"])
+            .current_dir(project)
+            .env("JETPACK_ROOT", &root)
+            .env("PATH", "/usr/bin:/bin")
+            .spawn()
+            .unwrap()
+    };
+    let first = spawn(&ab);
+    let second = spawn(&ba);
+    assert!(first.wait_with_output().unwrap().status.success());
+    assert!(second.wait_with_output().unwrap().status.success());
+}
+
+#[test]
+fn jet_build_never_reports_deleted_output_as_cached() {
+    let (_base, proj, root) = core_hello_project("truth-deleted-cache");
+    let run = || {
+        jetpack()
+            .args(["build", "--no-color"])
+            .current_dir(&proj)
+            .env("JETPACK_ROOT", &root)
+            .env("PATH", "/usr/bin:/bin")
+            .output()
+            .unwrap()
+    };
+    assert!(run().status.success());
+    let roots = jetpack::Store::Roots {
+        root: root.clone(),
+        dev_mode: false,
+    };
+    let entry = jetpack::Store::find_by_reference(&roots, "mine:hello").unwrap();
+    make_tree_writable(Path::new(&entry.out));
+    fs::remove_dir_all(&entry.out).unwrap();
+
+    let rejected = run();
+    assert!(!rejected.status.success());
+    let rejected_stderr = String::from_utf8_lossy(&rejected.stderr);
+    assert!(rejected_stderr.contains("E2604"), "stderr: {rejected_stderr}");
+    let rebuilt = run();
+    assert!(rebuilt.status.success());
+    let stderr = String::from_utf8_lossy(&rebuilt.stderr);
+    assert!(stderr.contains("built"), "deleted output must rebuild: {stderr}");
+    assert!(
+        !stderr.contains("1 cached"),
+        "deleted output must never count as cache hit: {stderr}"
+    );
+}
+
+#[test]
+fn jet_build_never_reports_tampered_output_as_cached() {
+    let (_base, proj, root) = core_hello_project("truth-tampered-cache");
+    let run = || {
+        jetpack()
+            .args(["build", "--no-color"])
+            .current_dir(&proj)
+            .env("JETPACK_ROOT", &root)
+            .env("PATH", "/usr/bin:/bin")
+            .output()
+            .unwrap()
+    };
+    assert!(run().status.success());
+    let roots = jetpack::Store::Roots {
+        root: root.clone(),
+        dev_mode: false,
+    };
+    let entry = jetpack::Store::find_by_reference(&roots, "mine:hello").unwrap();
+    make_tree_writable(Path::new(&entry.out));
+    fs::write(Path::new(&entry.out).join("bin/hello"), "tampered").unwrap();
+
+    let rejected = run();
+    assert!(!rejected.status.success());
+    let rejected_stderr = String::from_utf8_lossy(&rejected.stderr);
+    assert!(rejected_stderr.contains("E2604"), "stderr: {rejected_stderr}");
+    let rebuilt = run();
+    assert!(rebuilt.status.success());
+    let stderr = String::from_utf8_lossy(&rebuilt.stderr);
+    assert!(stderr.contains("built"), "tampered output must rebuild: {stderr}");
+    assert!(
+        !stderr.contains("1 cached"),
+        "tampered output must never count as cache hit: {stderr}"
     );
 }
 

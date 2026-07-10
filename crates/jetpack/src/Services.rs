@@ -401,6 +401,7 @@ mod tests {
             label: "jetpack".to_string(),
             prompt_path: PromptPathMode::Short,
             prompt_strip: PromptStripMode::Off,
+            cache_leases: Vec::new(),
         }
     }
 

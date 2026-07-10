@@ -10,7 +10,7 @@
 //! the way a user would, with `JETPACK_ROOT` pointed at a throwaway hangar so
 //! the compiler's loader finds the staged source.
 
-use jet::Jetpack::Provider::{self, Ctx};
+use jet::Jetpack::Provider::Ctx;
 use jet::Jetpack::RefSpec::{classify_in, ProviderKind, SourceTable};
 use jet::Jetpack::Store::{self, Roots};
 use std::fs;
@@ -59,7 +59,11 @@ fn write(path: &Path, body: &str) {
 
 /// Realize a `core` package from a local `path:` source repo into `hangar`,
 /// recording it in the store exactly as `jetpack build` would. Offline; no Nix.
-fn realize_into_hangar(roots: &Roots, repo: &Path, pkg: &str) -> Store::StoreEntry {
+fn realize_into_hangar(
+    roots: &Roots,
+    repo: &Path,
+    pkg: &str,
+) -> Store::VerifiedRealization {
     let store_dir = roots.hangar_dir();
     fs::create_dir_all(&store_dir).unwrap();
     let upstream = format!("path:{}", repo.to_string_lossy());
@@ -70,18 +74,15 @@ fn realize_into_hangar(roots: &Roots, repo: &Path, pkg: &str) -> Store::StoreEnt
         store_dir: &store_dir,
         offline: true,
     };
-    let r = Provider::realize(&spec, &table, &ctx).expect("library realizes offline");
-    Store::record(
+    Store::realize_verified(
         roots,
-        &r.name,
-        &r.version,
-        &r.reference,
-        &r.out,
-        &r.bin,
-        &r.rlib,
-        &r.envelope,
+        &ctx,
+        Store::RealizeRequest::Package {
+            spec: &spec,
+            table: &table,
+        },
     )
-    .expect("records into hangar")
+    .expect("library realizes and records offline")
 }
 
 /// `use jsonutil;` resolves a realized library and `jsonutil.parse(...)` works.
@@ -108,7 +109,8 @@ fn realized_library_is_consumed_with_use() {
         "module jsonutil { }\npub fn parse(raw: String) -> Int {\n    return 42;\n}\n",
     );
 
-    let entry = realize_into_hangar(&roots, &producer, "jsonutil");
+    let realized = realize_into_hangar(&roots, &producer, "jsonutil");
+    let entry = realized.metadata();
     assert!(
         entry.bin.is_empty(),
         "a library stages no PATH bin: {entry:?}"
@@ -164,7 +166,8 @@ fn executable_is_not_importable() {
     write(&producer.join("deploy.jet"), "module deploy { }\n");
     write(&producer.join("bin/deploy"), "#!/bin/sh\necho deploying\n");
 
-    let entry = realize_into_hangar(&roots, &producer, "deploy");
+    let realized = realize_into_hangar(&roots, &producer, "deploy");
+    let entry = realized.metadata();
     assert!(
         !entry.bin.is_empty(),
         "an executable stages a PATH bin: {entry:?}"

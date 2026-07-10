@@ -20,7 +20,7 @@ fn realize_ref(
     name_w: usize,
 ) -> Option<(Store::StoreEntry, Provider::SourceState)> {
     match realize_ref_outcome(theme, roots, flags, table, spec, name_w, RowStyle::Ledger, None) {
-        RefOutcome::Realized(entry, state, _line) => Some((entry, state)),
+        RefOutcome::Realized(entry, state, _line, _lease) => Some((entry, state)),
         RefOutcome::NeedsNix(need) => {
             report_nix_bridge_required(theme, flags, &[need], &[]);
             None
@@ -49,7 +49,12 @@ enum RefOutcome {
     /// The realized entry, its source state, and the row text `Ledger`
     /// style would print (computed regardless of style, since it's cheap
     /// and `Silent` callers need it).
-    Realized(Store::StoreEntry, Provider::SourceState, String),
+    Realized(
+        Store::StoreEntry,
+        Provider::SourceState,
+        String,
+        Store::CacheLease,
+    ),
     NeedsNix(Provider::NixBridgeNeed),
     Failed,
 }
@@ -88,19 +93,6 @@ fn realize_ref_outcome(
     // store dir also seeds the U9 remote probe's source-cache lookup, so it is
     // resolved before the fixtures decision below.
     let store_dir = roots.hangar_dir();
-    if let Some(entry) = Store::find_by_reference(roots, &spec.raw) {
-        drop(spinner);
-        let line = theme.render_row(&entry.name, name_w, &entry.version, "cached");
-        match style {
-            RowStyle::Ledger => {
-                theme.ok(&format!("{} {}", theme.bold(&entry.name), "cached"));
-                theme.detail(&theme.gray(&entry.out));
-            }
-            RowStyle::Ready => theme.ready_row(&entry.name, name_w, &entry.version),
-            RowStyle::Silent => {}
-        }
-        return RefOutcome::Realized(entry, Provider::SourceState::Cached, line);
-    }
     if flags.offline
         && Provider::uses_nix_provider(spec, table, flags.offline, &store_dir)
         && fixtures_for(flags).is_none()
@@ -151,61 +143,72 @@ fn realize_ref_outcome(
         offline: flags.offline,
     };
     let started = std::time::Instant::now();
-    let result = Provider::realize(spec, table, &ctx);
+    let result = Store::realize_verified(
+        roots,
+        &ctx,
+        Store::RealizeRequest::Package { spec, table },
+    );
     drop(spinner);
     match result {
-        Ok(r) => {
+        Ok(realized) => {
+            let (mut entry, source_state, lease) = realized.into_parts();
+            if style == RowStyle::Ready {
+                if !entry.bin.is_empty() {
+                    let path = match lease.stable_path(&entry.bin) {
+                        Ok(path) => path,
+                        Err(error) => {
+                            let failure = lease.consumption_failure(&error);
+                            Store::report_integrity(theme, &failure);
+                            return RefOutcome::Failed;
+                        }
+                    };
+                    entry.bin = path.to_string_lossy().into_owned();
+                }
+                if !entry.rlib.is_empty() {
+                    let path = match lease.stable_path(&entry.rlib) {
+                        Ok(path) => path,
+                        Err(error) => {
+                            let failure = lease.consumption_failure(&error);
+                            Store::report_integrity(theme, &failure);
+                            return RefOutcome::Failed;
+                        }
+                    };
+                    entry.rlib = path.to_string_lossy().into_owned();
+                }
+            }
             // T4 (D-JPK-CACHE1): one ledger row per package — how it was
             // satisfied, and how long a from-source build took.
             let elapsed = started.elapsed();
-            let state = if r.source_state == Provider::SourceState::Built && elapsed.as_secs() >= 1
-            {
+            let state = if source_state == Provider::SourceState::Built
+                && elapsed.as_secs() >= 1 {
                 format!("built {}", Output::human_duration(elapsed))
             } else {
-                r.source_state.label().to_string()
+                source_state.label().to_string()
             };
             // Nix-provided packages often carry no version of their own; the
             // store path's `<hash>-<name>-<version>` basename usually does.
-            let version = if r.version.is_empty() {
-                version_from_out(&r.name, &r.out).unwrap_or_default()
+            let version = if entry.version.is_empty() {
+                version_from_out(&entry.name, &entry.out).unwrap_or_default()
             } else {
-                r.version.clone()
+                entry.version.clone()
             };
-            let line = theme.render_row(&r.name, name_w, &version, &state);
+            let line = theme.render_row(&entry.name, name_w, &version, &state);
             match style {
                 RowStyle::Ledger => {
-                    theme.row(&r.name, name_w, &version, &state);
-                    theme.detail(&theme.gray(&r.out));
+                    theme.row(&entry.name, name_w, &version, &state);
+                    theme.detail(&theme.gray(&entry.out));
                 }
-                RowStyle::Ready => theme.ready_row(&r.name, name_w, &version),
+                RowStyle::Ready => theme.ready_row(&entry.name, name_w, &version),
                 RowStyle::Silent => {}
             }
-            let state = r.source_state;
-            match Store::record(
-                roots,
-                &r.name,
-                &r.version,
-                &r.reference,
-                &r.out,
-                &r.bin,
-                &r.rlib,
-                &r.envelope,
-            ) {
-                Ok(entry) => Some((entry, state)),
-                Err(e) => {
-                    theme.error(
-                        "could not record the package",
-                        &format!("writing to the Jetpack store failed: {e}"),
-                        "check permissions on the store root, or set JETPACK_ROOT.",
-                    );
-                    return RefOutcome::Failed;
-                }
-            }
-            .map_or(RefOutcome::Failed, |(entry, state)| {
-                RefOutcome::Realized(entry, state, line)
-            })
+            RefOutcome::Realized(
+                entry,
+                source_state,
+                line,
+                lease,
+            )
         }
-        Err(e) => {
+        Err(Store::RealizeError::Provider(e)) => {
             if matches!(e, ProviderError::NixMissing) {
                 if let Some(need) =
                     Provider::needs_nix_bridge(spec, table, flags.offline, &store_dir)
@@ -214,6 +217,10 @@ fn realize_ref_outcome(
                 }
             }
             report_provider_error(theme, &e);
+            RefOutcome::Failed
+        }
+        Err(error) => {
+            report_realize_error(theme, &error);
             RefOutcome::Failed
         }
     }
@@ -282,7 +289,12 @@ fn realize_adapter(
     roots: &Roots,
     flags: &Flags,
     plan: &ModuleEval::AdapterPlan,
-) -> Option<(Store::StoreEntry, Provider::SourceState)> {
+    consume: bool,
+) -> Option<(
+    Store::StoreEntry,
+    Provider::SourceState,
+    Store::CacheLease,
+)> {
     theme.status(&format!("adapting {} …", theme.bold(&plan.name)));
     let store_dir = roots.hangar_dir();
     let ctx = Provider::Ctx {
@@ -290,43 +302,53 @@ fn realize_adapter(
         store_dir: &store_dir,
         offline: flags.offline,
     };
-    match Provider::realize_adapter(plan, &ctx) {
-        Ok(r) => {
-            theme.ok(&format!(
-                "{} {}",
-                theme.bold(&r.name),
-                r.source_state.label()
-            ));
-            theme.detail(&theme.gray(&r.out));
-            let state = r.source_state;
-            match Store::record(
-                roots,
-                &r.name,
-                &r.version,
-                &r.reference,
-                &r.out,
-                &r.bin,
-                &r.rlib,
-                &r.envelope,
-            ) {
-                Ok(entry) => Some((entry, state)),
-                Err(e) => {
-                    theme.error(
-                        "could not record the adapted package",
-                        &format!("writing to the Jetpack store failed: {e}"),
-                        "check permissions on the store root, or set JETPACK_ROOT.",
-                    );
-                    None
+    match Store::realize_verified(roots, &ctx, Store::RealizeRequest::Adapter(plan)) {
+        Ok(realized) => {
+            let (mut entry, source_state, lease) = realized.into_parts();
+            if consume {
+                if !entry.bin.is_empty() {
+                    let path = match lease.stable_path(&entry.bin) {
+                        Ok(path) => path,
+                        Err(error) => {
+                            let failure = lease.consumption_failure(&error);
+                            Store::report_integrity(theme, &failure);
+                            return None;
+                        }
+                    };
+                    entry.bin = path.to_string_lossy().into_owned();
                 }
             }
+            theme.ok(&format!(
+                "{} {}",
+                theme.bold(&entry.name),
+                source_state.label()
+            ));
+            theme.detail(&theme.gray(&entry.out));
+            Some((entry, source_state, lease))
         }
-        Err(e) => {
-            report_provider_error(theme, &e);
+        Err(Store::RealizeError::Provider(error)) => {
+            report_provider_error(theme, &error);
             if flags.shell_on_fail {
                 shell_on_failed_build(theme, roots, &plan.name);
             }
             None
         }
+        Err(error) => {
+            report_realize_error(theme, &error);
+            None
+        }
+    }
+}
+
+fn report_realize_error(theme: &Theme, error: &Store::RealizeError) {
+    match error {
+        Store::RealizeError::Integrity(failure) => Store::report_integrity(theme, failure),
+        Store::RealizeError::Store(error) => theme.error(
+            "could not update the Jetpack store",
+            &format!("the verified realization transaction failed: {error}"),
+            "check permissions on the store root, or set JETPACK_ROOT.",
+        ),
+        Store::RealizeError::Provider(error) => report_provider_error(theme, error),
     }
 }
 

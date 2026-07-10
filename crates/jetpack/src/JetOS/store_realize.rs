@@ -1,3 +1,56 @@
+struct RealizedPackage {
+    entry: Store::StoreEntry,
+    lease: Store::CacheLease,
+    original_out: PathBuf,
+    original_reference: String,
+    consumption_override: Option<PathBuf>,
+}
+
+impl std::ops::Deref for RealizedPackage {
+    type Target = Store::StoreEntry;
+
+    fn deref(&self) -> &Self::Target {
+        &self.entry
+    }
+}
+
+impl RealizedPackage {
+    fn from_verified(realized: Store::VerifiedRealization) -> Self {
+        let original_out = realized.original_output().to_path_buf();
+        let original_reference = realized.original_reference().to_string();
+        let (entry, _source_state, lease) = realized.into_parts();
+        Self {
+            entry,
+            lease,
+            original_out,
+            original_reference,
+            consumption_override: None,
+        }
+    }
+
+    fn consumption_path(&self, path: &str) -> std::io::Result<PathBuf> {
+        if let Some(root) = &self.consumption_override {
+            let relative = Path::new(path).strip_prefix(&self.entry.out).map_err(|_| {
+                std::io::Error::other("package member escapes realized output")
+            })?;
+            return Ok(root.join(relative));
+        }
+        self.lease.stable_path(path)
+    }
+
+    fn set_consumption_override(&mut self, path: PathBuf) {
+        self.consumption_override = Some(path);
+    }
+
+    fn original_output(&self) -> &Path {
+        &self.original_out
+    }
+
+    fn original_reference(&self) -> &str {
+        &self.original_reference
+    }
+}
+
 fn first_party_package_ref(table: &RefSpec::SourceTable, package: &str) -> Option<String> {
     table
         .declarations()
@@ -48,7 +101,7 @@ fn realize_ref(
     table: &RefSpec::SourceTable,
     spec: &RefSpec::RefSpec,
     name_w: usize,
-) -> Option<Store::StoreEntry> {
+) -> Option<RealizedPackage> {
     theme.status(&format!("resolving {} ...", theme.bold(&spec.raw)));
     let store_dir = roots.hangar_dir();
     let fixtures =
@@ -62,30 +115,25 @@ fn realize_ref(
         store_dir: &store_dir,
         offline: flags.offline,
     };
-    match Provider::realize(spec, table, &ctx) {
-        Ok(r) => {
-            theme.row(&r.name, name_w, &r.version, r.source_state.label());
-            theme.detail(&theme.gray(&r.out));
-            match Store::record(
-                roots,
-                &r.name,
-                &r.version,
-                &r.reference,
-                &r.out,
-                &r.bin,
-                &r.rlib,
-                &r.envelope,
-            ) {
-                Ok(entry) => Some(entry),
-                Err(e) => {
-                    theme.error(
-                        "could not record the package",
-                        &format!("writing to the Jetpack store failed: {e}"),
-                        "check permissions on the store root, or set JETPACK_ROOT.",
-                    );
-                    None
-                }
-            }
+    match Store::realize_verified(
+        roots,
+        &ctx,
+        Store::RealizeRequest::Package { spec, table },
+    ) {
+        Ok(realized) => {
+            let entry = realized.metadata();
+            theme.row(
+                &entry.name,
+                name_w,
+                &entry.version,
+                realized.source_state().label(),
+            );
+            theme.detail(&theme.gray(&entry.out));
+            Some(RealizedPackage::from_verified(realized))
+        }
+        Err(Store::RealizeError::Integrity(failure)) => {
+            Store::report_integrity(theme, &failure);
+            None
         }
         Err(e) => {
             theme.error(
@@ -105,7 +153,7 @@ fn try_realize_ref(
     table: &RefSpec::SourceTable,
     spec: &RefSpec::RefSpec,
     name_w: usize,
-) -> Result<Store::StoreEntry, String> {
+) -> Result<RealizedPackage, String> {
     theme.status(&format!("resolving {} ...", theme.bold(&spec.raw)));
     let store_dir = roots.hangar_dir();
     let fixtures =
@@ -119,19 +167,19 @@ fn try_realize_ref(
         store_dir: &store_dir,
         offline: flags.offline,
     };
-    let r = Provider::realize(spec, table, &ctx)
-        .map_err(|e| format!("provider failed for `{}`: {e:?}", spec.raw))?;
-    theme.row(&r.name, name_w, &r.version, r.source_state.label());
-    theme.detail(&theme.gray(&r.out));
-    Store::record(
+    let realized = Store::realize_verified(
         roots,
-        &r.name,
-        &r.version,
-        &r.reference,
-        &r.out,
-        &r.bin,
-        &r.rlib,
-        &r.envelope,
+        &ctx,
+        Store::RealizeRequest::Package { spec, table },
     )
-    .map_err(|e| format!("writing to the Jetpack store failed: {e}"))
+    .map_err(|e| format!("verified realization failed for `{}`: {e:?}", spec.raw))?;
+    let entry = realized.metadata();
+    theme.row(
+        &entry.name,
+        name_w,
+        &entry.version,
+        realized.source_state().label(),
+    );
+    theme.detail(&theme.gray(&entry.out));
+    Ok(RealizedPackage::from_verified(realized))
 }

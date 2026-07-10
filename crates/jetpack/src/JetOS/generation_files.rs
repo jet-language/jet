@@ -17,7 +17,7 @@ fn generations_log() -> PathBuf {
 fn write_generation_files(
     dir: &Path,
     system: &SystemPlan,
-    realized: &[Store::StoreEntry],
+    realized: &[RealizedPackage],
     plan: &EnvPlan,
 ) -> std::io::Result<()> {
     fs::create_dir_all(dir)?;
@@ -96,7 +96,7 @@ fn write_generation_files(
 
 fn render_plan_json(
     system: &SystemPlan,
-    realized: &[Store::StoreEntry],
+    realized: &[RealizedPackage],
     prebuilt: Option<(&str, &str, &str)>,
 ) -> String {
     let (packages_json, services_json, options_json) = match prebuilt {
@@ -295,7 +295,7 @@ fn dir_size_bytes(path: &Path) -> u64 {
         .sum()
 }
 
-fn write_root_closure(dir: &Path, realized: &[Store::StoreEntry]) -> std::io::Result<()> {
+fn write_root_closure(dir: &Path, realized: &[RealizedPackage]) -> std::io::Result<()> {
     let sw_bin = dir.join("sw/bin");
     fs::create_dir_all(&sw_bin)?;
     let mut manifest = String::new();
@@ -308,7 +308,7 @@ fn write_root_closure(dir: &Path, realized: &[Store::StoreEntry]) -> std::io::Re
         if pkg.bin.is_empty() {
             continue;
         }
-        let bin = Path::new(&pkg.bin);
+        let bin = pkg.consumption_path(&pkg.bin)?;
         let Ok(entries) = fs::read_dir(bin) else {
             continue;
         };
@@ -320,15 +320,16 @@ fn write_root_closure(dir: &Path, realized: &[Store::StoreEntry]) -> std::io::Re
                 continue;
             }
             let dst = sw_bin.join(entry.file_name());
-            link_or_copy_file(&src, &dst)?;
+            copy_file_replace(&src, &dst)?;
         }
     }
     write_jetos_toolchain(dir, &sw_bin, &mut manifest)?;
+    rewrite_generation_store_symlinks(dir, dir)?;
     fs::write(dir.join("sw/closure.txt"), manifest)
 }
 
-fn project_profile_dirs(dir: &Path, pkg: &Store::StoreEntry) -> std::io::Result<()> {
-    let out = Path::new(&pkg.out);
+fn project_profile_dirs(dir: &Path, pkg: &RealizedPackage) -> std::io::Result<()> {
+    let out = pkg.consumption_path(&pkg.out)?;
     if !out.is_dir() {
         return Ok(());
     }
@@ -370,7 +371,7 @@ fn copy_profile_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
         if meta.file_type().is_symlink() {
             copy_runtime_symlink(src, dst)?;
         } else if meta.is_file() {
-            link_or_copy_file(src, dst)?;
+            copy_file_replace(src, dst)?;
         }
     }
     Ok(())
@@ -400,20 +401,21 @@ fn ensure_profile_dir(dst: &Path) -> std::io::Result<()> {
 
 fn project_runtime_closure(
     dir: &Path,
-    pkg: &Store::StoreEntry,
+    pkg: &RealizedPackage,
     manifest: &mut String,
     projected_runtime: &mut BTreeSet<String>,
 ) -> std::io::Result<()> {
-    let out = Path::new(&pkg.out);
-    if !out.starts_with("/nix/store") {
+    let out = pkg.original_output();
+    if !out.starts_with("/nix/store") && !pkg.original_reference().starts_with("nix") {
         return Ok(());
     }
-    for path in nix_store_closure_paths(out)? {
+    for path in nix_store_closure_paths(&out)? {
         if !path.starts_with("/nix/store") {
-            continue;
-        }
-        if skip_runtime_store_path(&path) {
-            continue;
+            return Err(std::io::Error::other(format!(
+                "nix-store -qR returned non-store path `{}` for `{}`",
+                path.display(),
+                out.display()
+            )));
         }
         let key = path.to_string_lossy().into_owned();
         if !projected_runtime.insert(key.clone()) {
@@ -425,15 +427,12 @@ fn project_runtime_closure(
     Ok(())
 }
 
-fn skip_runtime_store_path(path: &Path) -> bool {
-    path.file_name()
-        .and_then(|part| part.to_str())
-        .map(|name| has_foreign_os_bytes(name.as_bytes()) && name.contains("icons"))
-        .unwrap_or(false)
+fn nix_store_closure_paths(out: &Path) -> std::io::Result<Vec<PathBuf>> {
+    nix_store_closure_paths_with(Path::new("nix-store"), out)
 }
 
-fn nix_store_closure_paths(out: &Path) -> std::io::Result<Vec<PathBuf>> {
-    let output = Command::new("nix-store").args(["-qR"]).arg(out).output();
+fn nix_store_closure_paths_with(command: &Path, out: &Path) -> std::io::Result<Vec<PathBuf>> {
+    let output = Command::new(command).args(["-qR"]).arg(out).output();
     let output = match output {
         Ok(output) => output,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(vec![out.to_path_buf()]),
@@ -454,7 +453,7 @@ fn nix_store_closure_paths(out: &Path) -> std::io::Result<Vec<PathBuf>> {
         .map(|line| PathBuf::from(line.trim()))
         .filter(|path| !path.as_os_str().is_empty())
         .collect::<Vec<_>>();
-    if paths.is_empty() {
+    if !paths.iter().any(|path| path == out) {
         paths.push(out.to_path_buf());
     }
     paths.sort();
@@ -469,13 +468,10 @@ fn copy_nix_store_path(dir: &Path, src: &Path) -> std::io::Result<()> {
             format!("nix closure path is not absolute: `{}`", src.display()),
         )
     })?;
-    copy_runtime_tree_filtered(src, &dir.join(rel))
+    copy_nix_closure_tree(src, &dir.join(rel))
 }
 
-fn copy_runtime_tree_filtered(src: &Path, dst: &Path) -> std::io::Result<()> {
-    if skip_runtime_payload(src) {
-        return Ok(());
-    }
+fn copy_nix_closure_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
     let meta = fs::symlink_metadata(src)?;
     if meta.is_dir() {
         fs::create_dir_all(dst)?;
@@ -484,7 +480,7 @@ fn copy_runtime_tree_filtered(src: &Path, dst: &Path) -> std::io::Result<()> {
             .collect::<Vec<_>>();
         entries.sort_by_key(|entry| entry.file_name());
         for entry in entries {
-            copy_runtime_tree_filtered(&entry.path(), &dst.join(entry.file_name()))?;
+            copy_nix_closure_tree(&entry.path(), &dst.join(entry.file_name()))?;
         }
     } else if meta.file_type().is_symlink() {
         copy_runtime_symlink(src, dst)?;
@@ -492,7 +488,7 @@ fn copy_runtime_tree_filtered(src: &Path, dst: &Path) -> std::io::Result<()> {
         if let Some(parent) = dst.parent() {
             fs::create_dir_all(parent)?;
         }
-        copy_runtime_file_filtered(src, dst)?;
+        copy_file_replace(src, dst)?;
     }
     Ok(())
 }
@@ -521,6 +517,59 @@ fn copy_runtime_file_filtered(src: &Path, dst: &Path) -> std::io::Result<()> {
         return Ok(());
     }
     copy_file_replace(src, dst)
+}
+
+fn rewrite_generation_store_symlinks(root: &Path, path: &Path) -> std::io::Result<()> {
+    rewrite_store_symlinks(root, path, Path::new("/nix/store"))
+}
+
+fn rewrite_store_symlinks(root: &Path, path: &Path, store: &Path) -> std::io::Result<()> {
+    let meta = fs::symlink_metadata(path)?;
+    if meta.file_type().is_symlink() {
+        let target = fs::read_link(path)?;
+        if target.starts_with(store) {
+            let owned = root.join(target.strip_prefix("/").expect("absolute store target"));
+            let parent = path
+                .parent()
+                .ok_or_else(|| std::io::Error::other("generation symlink has no parent"))?;
+            let rewritten = relative_path(parent, &owned)?;
+            fs::remove_file(path)?;
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(rewritten, path)?;
+            #[cfg(not(unix))]
+            return Err(std::io::Error::other("store symlink rewriting needs Unix symlinks"));
+        }
+        return Ok(());
+    }
+    if meta.is_dir() {
+        let mut entries = fs::read_dir(path)?.collect::<Result<Vec<_>, _>>()?;
+        entries.sort_by_key(|entry| entry.file_name());
+        for entry in entries {
+            rewrite_store_symlinks(root, &entry.path(), store)?;
+        }
+    }
+    Ok(())
+}
+
+fn relative_path(from: &Path, to: &Path) -> std::io::Result<PathBuf> {
+    let from = from.components().collect::<Vec<_>>();
+    let to = to.components().collect::<Vec<_>>();
+    let common = from
+        .iter()
+        .zip(&to)
+        .take_while(|(left, right)| left == right)
+        .count();
+    if common == 0 {
+        return Err(std::io::Error::other("cannot relativize generation store path"));
+    }
+    let mut path = PathBuf::new();
+    for _ in common..from.len() {
+        path.push("..");
+    }
+    for component in &to[common..] {
+        path.push(component.as_os_str());
+    }
+    Ok(path)
 }
 
 fn sanitize_runtime_branding_file(path: &Path) -> std::io::Result<()> {
@@ -703,4 +752,118 @@ fn copy_absolute_runtime_file(dir: &Path, src: &Path) -> std::io::Result<()> {
             ),
         )
     })
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod generation_closure_tests {
+    use super::*;
+    use std::os::unix::fs::{symlink, PermissionsExt as _};
+
+    struct Scratch(PathBuf);
+
+    impl Scratch {
+        fn new() -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "jetos-owned-closure-{}-{}",
+                std::process::id(),
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+            fs::create_dir_all(&path).unwrap();
+            Self(path)
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn generation_owns_full_closure_after_original_and_lease_are_removed() {
+        let guard = Scratch::new();
+        let store = guard.0.join("fake-nix/store");
+        let package = store.join("aaaa-package");
+        let dependency = store.join("bbbb-dependency");
+        fs::create_dir_all(package.join("bin")).unwrap();
+        fs::create_dir_all(dependency.join("bin")).unwrap();
+        let package_tool = package.join("bin/tool-real");
+        fs::write(&package_tool, "#!/bin/sh\nprintf closure-owned").unwrap();
+        fs::set_permissions(&package_tool, fs::Permissions::from_mode(0o555)).unwrap();
+        fs::write(dependency.join("bin/dependency-data"), "required closure member").unwrap();
+
+        let helper = guard.0.join("nix-store");
+        fs::write(
+            &helper,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' '{}' '{}'\n",
+                package.display(),
+                dependency.display()
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&helper, fs::Permissions::from_mode(0o555)).unwrap();
+        let closure = nix_store_closure_paths_with(&helper, &package).unwrap();
+        assert_eq!(closure, vec![package.clone(), dependency.clone()]);
+
+        let roots = Store::Roots {
+            root: guard.0.join("jetpack-root"),
+            dev_mode: true,
+        };
+        let envelope = super::super::Envelope::Envelope::for_output(
+            &package.to_string_lossy(),
+            "nixpkgs:package",
+            "nix",
+        );
+        let identity = Store::CacheIdentity {
+            source_fingerprint: "source".to_string(),
+            recipe_fingerprint: "recipe".to_string(),
+            policy_fingerprint: "policy".to_string(),
+            platform: super::super::Envelope::host_platform(),
+        };
+        let entry = Store::record_verified(
+            &roots,
+            "package",
+            "1",
+            "nixpkgs:package",
+            &package.to_string_lossy(),
+            "",
+            "",
+            &envelope,
+            &identity,
+        )
+        .unwrap();
+        let expectation = Store::CacheExpectation {
+            identity,
+            owned_output: Some(package.clone()),
+            allow_unsigned_local: true,
+        };
+        let proof = Store::verify_cache_entry(&roots, &entry, "nixpkgs:package", &expectation);
+        assert!(proof.trusted(), "{proof:?}");
+        let lease = Store::find_verified_by_reference(&roots, "nixpkgs:package", &expectation)
+            .unwrap()
+            .unwrap();
+        symlink(&package_tool, package.join("bin/tool")).unwrap();
+
+        let generation = guard.0.join("generation");
+        for member in &closure {
+            let destination = generation.join(member.strip_prefix("/").unwrap());
+            copy_nix_closure_tree(member, &destination).unwrap();
+        }
+        rewrite_store_symlinks(&generation, &generation, &store).unwrap();
+        drop(lease);
+        fs::remove_dir_all(&store).unwrap();
+
+        let owned_tool = generation.join(package.strip_prefix("/").unwrap()).join("bin/tool");
+        assert!(generation
+            .join(dependency.strip_prefix("/").unwrap())
+            .join("bin/dependency-data")
+            .is_file());
+        let output = Command::new(owned_tool).output().unwrap();
+        assert!(output.status.success());
+        assert_eq!(String::from_utf8(output.stdout).unwrap(), "closure-owned");
+    }
 }

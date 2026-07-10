@@ -197,7 +197,7 @@ fn build_generation(
         };
         realized.push(entry);
     }
-    if !run_kernel_bootstrap_builder(theme, &boot, &realized, !flags.offline) {
+    if !run_kernel_bootstrap_builder(theme, &boot, &mut realized, !flags.offline, &dir) {
         return None;
     }
     if !validate_boot_payloads(theme, &boot, &realized) {

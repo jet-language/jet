@@ -35,17 +35,42 @@ Strong foundations already exist:
 - hangar metadata, basic GC/optimization, build logs, shell-on-fail;
 - one-shot rootless default and Linux/macOS/Windows product intent.
 
-Production blockers:
+JP0 stop-line now enforces three truth boundaries:
 
-- cache reuse finds metadata by ref and does not prove the output still exists
-  or matches its recorded digest;
-- a Nix-provider hangar entry points into `/nix/store` without creating a GC
-  root or importing the closure;
-- non-directory envelope hashing hashes path text, not object contents;
-- directory hashing omits executable bits, symlink targets, empty directories,
-  hardlink identity, extended attributes, and special-file policy;
-- sandbox detection can report “strong” while recipes execute as ordinary host
-  processes; macOS and Windows are explicitly unsandboxed;
+- cache reuse verifies output existence, current canonical digest, platform,
+  exact normalized source/manifest/recipe/toolchain policy, signature policy,
+  and canonical closure reachability through one realization boundary used by
+  CLI and JetOS. Invalid Jet-owned candidates are quarantined and E2604 stops
+  the command; repair is never silent. Unsigned reuse is limited to an exact
+  Hangar-owned local output. Signed imports fail closed until an immutable
+  in-process verifier ships. Nix compatibility outputs always re-enter Nix;
+  Jetpack does not claim an early cache hit from spelling-only identity;
+- every existing Nix compatibility output recorded in Hangar gets a durable
+  `nix-store --add-root --indirect` root protecting its transitive closure;
+- canonical output archives hash node type, mode, bytes, symlink target, empty
+  directories, and complete hardlink identity; reject outside aliases, escapes,
+  cycles, concurrent mutation, and special files. Directory snapshots bind
+  child names, types, metadata, and ctime before and after traversal. Local
+  outputs are copied into per-realization sealed private snapshots. Executable
+  files and executable symlink targets use lease-owned inherited file
+  descriptors. Lease-owned `PATH` wrappers live on a read-only private mount
+  pinned by an inherited directory descriptor and are revalidated before
+  handoff. Nested shell execution resolves to exact executable descriptors, so
+  wrapper chmod/replacement or a same-UID rename/symlink swap cannot redirect
+  execution. Every realization
+  carries a mandatory typed lease: missing outputs are explicitly
+  non-consumable and cannot fall back to raw paths. Leases hold no object lock.
+  JetOS retains original provider/output provenance alongside the snapshot,
+  queries the original Nix output's full `nix-store -qR` closure, copies every
+  member into generation-owned paths, and rewrites absolute store symlinks
+  before lease drop; no `/proc/self/fd`, lease path, or source-store dependency
+  enters the durable generation. Sandbox
+  capability detection stays fallback until a child actually enters a jail.
+
+Production blockers after that stop-line:
+
+- recipes still execute as ordinary host processes; every platform reports
+  fallback/unsandboxed until JP3 supplies an enforced jail;
 - native HTTP substitution/push, NAR/narinfo, mirrors, repair, remote builders,
   and remote execution do not exist;
 - registry dependencies still stop at E1207; package authoring/publish metadata

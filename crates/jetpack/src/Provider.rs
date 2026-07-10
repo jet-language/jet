@@ -36,8 +36,156 @@ pub struct Realized {
     /// D-JPK-CACHE1=A: the A4 envelope for this realized output — output hash,
     /// platform, signature slot, provenance. Makes the object cache-substitutable.
     pub envelope: super::Envelope::Envelope,
+    pub cache_identity: super::Store::CacheIdentity,
     /// D-JPK-CACHE1 reporting (T4): how this realization was satisfied.
     pub source_state: SourceState,
+}
+
+fn cache_identity(source: &str, recipe: &str, ctx: &Ctx) -> super::Store::CacheIdentity {
+    super::Store::CacheIdentity {
+        source_fingerprint: source.to_string(),
+        recipe_fingerprint: SHA256::sha256_hex(recipe.as_bytes()),
+        policy_fingerprint: super::RuntimePolicy::cache_policy_fingerprint(ctx.offline),
+        platform: super::Envelope::host_platform(),
+    }
+}
+
+fn core_recipe_identity(
+    src_dir: &Path,
+    package: &str,
+    manifest: Option<&PackageManifest::PackManifest>,
+    kind: PackageManifest::PackageKind,
+) -> String {
+    let toolchain = super::Toolchain::Toolchain::resolve();
+    let artifact = if kind == PackageManifest::PackageKind::Library
+        && src_dir.join("Cargo.toml").is_file()
+    {
+        "cargo-rlib"
+    } else if kind == PackageManifest::PackageKind::Library {
+        "jet-library-source"
+    } else {
+        "executable-tree"
+    };
+    let version = manifest.map_or("", |manifest| manifest.package.version.as_str());
+    let semantics = normalized_manifest_semantics(manifest);
+    format!(
+        "core-provider-recipe-v2\npackage={package}\nversion={version}\nkind={kind:?}\nartifact={artifact}\nmanifest={}\ntoolchain={}:{}:{}\n",
+        SHA256::sha256_hex(semantics.as_bytes()),
+        toolchain.as_ref().map_or("missing", |tc| tc.id.as_str()),
+        toolchain.as_ref().map_or("", |tc| tc.version.as_str()),
+        toolchain
+            .as_ref()
+            .map_or_else(String::new, |tc| tc.cargo.to_string_lossy().into_owned()),
+    )
+}
+
+fn normalized_manifest_semantics(
+    manifest: Option<&PackageManifest::PackManifest>,
+) -> String {
+    let Some(manifest) = manifest else {
+        return "manifest=absent".to_string();
+    };
+    let mut manifest = manifest.clone();
+    manifest.deps.sort_by(|a, b| a.name.cmp(&b.name));
+    manifest.packages.sort_by(|a, b| a.name.cmp(&b.name));
+    for package in &mut manifest.packages {
+        package.targets.sort_by_key(|target| format!("{target:?}"));
+    }
+    manifest.build_profiles.sort_by(|a, b| a.name.cmp(&b.name));
+    manifest.grants.sort_by(|a, b| a.0.cmp(&b.0));
+    for (_, effects) in &mut manifest.grants {
+        effects.sort();
+    }
+    if let Some(effects) = &mut manifest.effects_allow {
+        effects.sort();
+    }
+    if let Some(effects) = &mut manifest.effects_deny {
+        effects.sort();
+    }
+    if let Some(policy) = &mut manifest.trust_policy {
+        policy.services.sort_by(|a, b| a.0.cmp(&b.0));
+    }
+    format!("{manifest:?}")
+}
+
+/// Independently derive every fact required to trust an existing cache record.
+/// A provider that cannot derive exact current source/recipe identity gets no
+/// early cache path.
+pub fn cache_expectation(
+    spec: &RefSpec,
+    table: &SourceTable,
+    ctx: &Ctx,
+) -> Option<super::Store::CacheExpectation> {
+    match resolve_kind(spec, table, ctx.offline, ctx.store_dir) {
+        ProviderKind::Core => {
+            let upstream = table.upstream(spec.source.label())?;
+            let repo = source_repo(upstream, &spec.package, ctx).ok()?;
+            let src_dir = PackageManifest::discover_module_in(&repo, &spec.package).ok()?;
+            let source_fingerprint =
+                super::Envelope::try_output_hash_of(&src_dir.to_string_lossy()).ok()?;
+            let manifest = PackageManifest::PackManifest::load(&repo).and_then(Result::ok);
+            let kind = manifest
+                .as_ref()
+                .and_then(|manifest| manifest.package_kind(&spec.package))
+                .unwrap_or_else(|| infer_package_kind(&src_dir));
+            let recipe = core_recipe_identity(
+                &src_dir,
+                &spec.package,
+                manifest.as_ref(),
+                kind,
+            );
+            let fp = tree_fingerprint(&src_dir);
+            Some(super::Store::CacheExpectation {
+                identity: cache_identity(&source_fingerprint, &recipe, ctx),
+                owned_output: Some(
+                    ctx.store_dir
+                        .join(format!("{}-{}", spec.package, &fp[..12])),
+                ),
+                allow_unsigned_local: true,
+            })
+        }
+        // A spelling hash is not a locked source identity and Jetpack cannot
+        // independently re-verify Nix substituter trust evidence yet. Nix may
+        // realize from its own store, but Jetpack never reports that as an
+        // early cache hit.
+        ProviderKind::Nix | ProviderKind::Infer => None,
+    }
+}
+
+/// Derive the adapter cache identity without trusting an existing output.
+/// Staging reads the declared source; the output path follows only from those
+/// bytes plus the normalized recipe.
+pub fn adapter_cache_expectation(
+    plan: &AdapterPlan,
+    ctx: &Ctx,
+) -> Result<super::Store::CacheExpectation, ProviderError> {
+    let source_ref = super::RefSpec::classify_provider_ref(&plan.source).map_err(|_| {
+        ProviderError::Adapter(format!(
+            "adapter source `{}` is not a provider ref",
+            plan.source
+        ))
+    })?;
+    let staged = stage_adapter_source(&source_ref, ctx)?;
+    let recipe_hash = adapter_recipe_to_build(&plan.recipe).recipe_hash();
+    let source_hash = tree_fingerprint(&staged);
+    let id_input = format!(
+        "u20-adapter-v1\nname={}\nsource={}\nsource_hash={}\nrecipe={}\n",
+        plan.name, plan.source, source_hash, recipe_hash
+    );
+    let fp = SHA256::sha256_hex(id_input.as_bytes());
+    Ok(super::Store::CacheExpectation {
+        identity: cache_identity(
+            &super::Envelope::try_output_hash_of(&staged.to_string_lossy())
+                .map_err(ProviderError::Adapter)?,
+            &format!("adapter-v1:{recipe_hash}"),
+            ctx,
+        ),
+        owned_output: Some(
+            ctx.store_dir
+                .join(format!("{}-adapter-{}", plan.name, &fp[..12])),
+        ),
+        allow_unsigned_local: true,
+    })
 }
 
 /// How a dependency was realized, for the `jet build` per-package report
@@ -178,9 +326,7 @@ pub fn nix_on_path() -> bool {
 
 /// A backend that realizes a ref into bytes + a `bin` dir. Both the first-party
 /// `core` provider and the `nix` compatibility provider implement this.
-pub trait Provider {
-    /// Short stable name, used in diagnostics/listings (`core`, `nix`).
-    fn name(&self) -> &'static str;
+pub(crate) trait Provider {
     /// Realize `spec`. `table` resolves named sources; `ctx` carries the
     /// offline fixtures dir and the store dir to materialize into.
     fn realize(
@@ -194,12 +340,9 @@ pub trait Provider {
 /// The Nix compatibility provider: translates a ref to a flake ref and shells
 /// out to `nix build --no-link --json` (R3 will remove the installed-`nix`
 /// requirement; the boundary here does not change).
-pub struct NixProvider;
+pub(crate) struct NixProvider;
 
 impl Provider for NixProvider {
-    fn name(&self) -> &'static str {
-        "nix"
-    }
     fn realize(
         &self,
         spec: &RefSpec,
@@ -219,7 +362,13 @@ impl Provider for NixProvider {
             }
             None => run_nix(spec, table)?,
         };
-        parse_realization(spec, &stdout)
+        let mut realized = parse_realization(spec, &stdout)?;
+        realized.cache_identity = cache_identity(
+            &SHA256::sha256_hex(spec.raw.as_bytes()),
+            "nix-compat-v1",
+            ctx,
+        );
+        Ok(realized)
     }
 }
 
@@ -229,12 +378,9 @@ impl Provider for NixProvider {
 /// kind (Chunk 4), and materializes that source tree into the Jetpack store —
 /// staging a `bin/` for an `executable`, source-only for a `library`. R2
 /// supports local and git-backed remote source repos.
-pub struct CoreProvider;
+pub(crate) struct CoreProvider;
 
 impl Provider for CoreProvider {
-    fn name(&self) -> &'static str {
-        "core"
-    }
     fn realize(
         &self,
         spec: &RefSpec,
@@ -279,13 +425,16 @@ impl Provider for CoreProvider {
         let out_dir = ctx
             .store_dir
             .join(format!("{}-{}", spec.package, &fp[..12]));
-        // A pre-existing content-addressed object means this realize is a cache
-        // hit — no source is re-copied and no rlib is rebuilt (T4 reporting).
-        let cache_hit = out_dir.exists();
-        if !cache_hit {
-            copy_tree(&src_dir, &out_dir)
-                .map_err(|e| ProviderError::CoreBuild(format!("could not place package: {e}")))?;
+        // Reuse is owned by Store verification. Reaching the provider with an
+        // existing object means no verified record leased it.
+        if out_dir.exists() {
+            return Err(ProviderError::CoreBuild(format!(
+                "unverified existing output {}; run `jet clean` before rebuilding",
+                out_dir.display()
+            )));
         }
+        copy_tree(&src_dir, &out_dir)
+            .map_err(|e| ProviderError::CoreBuild(format!("could not place package: {e}")))?;
         // U10 Chunk 4: the repo's `pkg.jet` `packages:` index decides what
         // goes on PATH. `executable` stages the prebuilt `bin/` (the devshell
         // case); `library` stages module source for import and contributes no
@@ -336,13 +485,19 @@ impl Provider for CoreProvider {
                 }
             }
         };
+        super::Store::seal_local_output(&out_dir).map_err(|error| {
+            ProviderError::CoreBuild(format!("could not seal package output: {error}"))
+        })?;
         let out = out_dir.to_string_lossy().into_owned();
         let envelope = super::Envelope::Envelope::for_output(&out, &spec.raw, recipe_id);
-        let source_state = if cache_hit {
-            SourceState::Cached
-        } else {
-            SourceState::Built
-        };
+        let source_fingerprint = super::Envelope::try_output_hash_of(&src_dir.to_string_lossy())
+            .map_err(ProviderError::CoreBuild)?;
+        let recipe_identity = core_recipe_identity(
+            &src_dir,
+            &spec.package,
+            manifest.as_ref(),
+            kind,
+        );
         Ok(Realized {
             name: spec.package.clone(),
             version,
@@ -351,7 +506,8 @@ impl Provider for CoreProvider {
             bin,
             rlib,
             envelope,
-            source_state,
+            cache_identity: cache_identity(&source_fingerprint, &recipe_identity, ctx),
+            source_state: SourceState::Built,
         })
     }
 }
@@ -1081,7 +1237,7 @@ fn copy_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
 
 /// Pick the provider for an already-resolved kind. `Core` → the first-party
 /// builder; everything else → the Nix compatibility provider.
-pub fn provider_for(kind: ProviderKind) -> Box<dyn Provider> {
+pub(crate) fn provider_for(kind: ProviderKind) -> Box<dyn Provider> {
     match kind {
         ProviderKind::Core => Box::new(CoreProvider),
         _ => Box::new(NixProvider),
@@ -1149,14 +1305,21 @@ pub fn needs_nix_bridge(
 
 /// Realize a ref through its provider. The resolver entry point: it never knows
 /// or cares which backend runs — that is the whole point of the boundary.
-pub fn realize(spec: &RefSpec, table: &SourceTable, ctx: &Ctx) -> Result<Realized, ProviderError> {
+pub(crate) fn realize(
+    spec: &RefSpec,
+    table: &SourceTable,
+    ctx: &Ctx,
+) -> Result<Realized, ProviderError> {
     let kind = resolve_kind(spec, table, ctx.offline, ctx.store_dir);
     provider_for(kind).realize(spec, table, ctx)
 }
 
 /// U20: realize an inline `Pkg.adapt(...)` plan into the same `Realized`
 /// boundary as provider-backed packages.
-pub fn realize_adapter(plan: &AdapterPlan, ctx: &Ctx) -> Result<Realized, ProviderError> {
+pub(crate) fn realize_adapter(
+    plan: &AdapterPlan,
+    ctx: &Ctx,
+) -> Result<Realized, ProviderError> {
     let source_ref = super::RefSpec::classify_provider_ref(&plan.source).map_err(|_| {
         ProviderError::Adapter(format!(
             "adapter source `{}` is not a provider ref",
@@ -1175,27 +1338,31 @@ pub fn realize_adapter(plan: &AdapterPlan, ctx: &Ctx) -> Result<Realized, Provid
     let out_dir = ctx
         .store_dir
         .join(format!("{}-adapter-{}", plan.name, &fp[..12]));
-    let cache_hit = out_dir.exists();
-    if !cache_hit {
-        let fetch_cache = ctx.store_dir.join("fetch-cache");
-        let build_ctx = BuildContext {
-            source_dir: &staged,
-            output_root: &out_dir,
-            tools: std::collections::HashMap::new(),
-            fetch_cache: &fetch_cache,
-            offline: ctx.offline,
-        };
-        let mut attempt = super::BuildDebug::Attempt::new(
-            &plan.name,
-            &format!("adapt:{}:{}", plan.name, plan.source),
-            "adapter",
-            &recipe_hash,
-            &source_hash,
-        );
-        if let Err(d) = Recipe::run_logged(&recipe, &build_ctx, None, &mut attempt) {
-            attempt.preserve_scratch(ctx.store_dir, &staged, &out_dir);
-            let _ = attempt.persist(ctx.store_dir);
-            return Err(ProviderError::BuildDebug(format!(
+    if out_dir.exists() {
+        return Err(ProviderError::Adapter(format!(
+            "unverified existing output {}; run `jet clean` before rebuilding",
+            out_dir.display()
+        )));
+    }
+    let fetch_cache = ctx.store_dir.join("fetch-cache");
+    let build_ctx = BuildContext {
+        source_dir: &staged,
+        output_root: &out_dir,
+        tools: std::collections::HashMap::new(),
+        fetch_cache: &fetch_cache,
+        offline: ctx.offline,
+    };
+    let mut attempt = super::BuildDebug::Attempt::new(
+        &plan.name,
+        &format!("adapt:{}:{}", plan.name, plan.source),
+        "adapter",
+        &recipe_hash,
+        &source_hash,
+    );
+    if let Err(d) = Recipe::run_logged(&recipe, &build_ctx, None, &mut attempt) {
+        attempt.preserve_scratch(ctx.store_dir, &staged, &out_dir);
+        let _ = attempt.persist(ctx.store_dir);
+        return Err(ProviderError::BuildDebug(format!(
                 "adapter `{}` failed at step {} of {}: {} — full log: `jet logs {}`; rerun with `--shell-on-fail` to debug inside {}",
                 plan.name,
                 attempt.failed_step,
@@ -1204,9 +1371,10 @@ pub fn realize_adapter(plan: &AdapterPlan, ctx: &Ctx) -> Result<Realized, Provid
                 plan.name,
                 attempt.scratch_dir
             )));
-        }
-        let _ = attempt.persist(ctx.store_dir);
     }
+    let _ = attempt.persist(ctx.store_dir);
+    super::Store::seal_local_output(&out_dir)
+        .map_err(|error| ProviderError::Adapter(format!("could not seal adapter output: {error}")))?;
     let out = out_dir.to_string_lossy().into_owned();
     let bin_dir = out_dir.join("bin");
     let bin = if bin_dir.is_dir() {
@@ -1219,6 +1387,8 @@ pub fn realize_adapter(plan: &AdapterPlan, ctx: &Ctx) -> Result<Realized, Provid
         &format!("adapt:{}:{}", plan.name, plan.source),
         &format!("adapter:{recipe_hash}"),
     );
+    let source_fingerprint = super::Envelope::try_output_hash_of(&staged.to_string_lossy())
+        .map_err(ProviderError::Adapter)?;
     Ok(Realized {
         name: plan.name.clone(),
         version: String::new(),
@@ -1227,11 +1397,12 @@ pub fn realize_adapter(plan: &AdapterPlan, ctx: &Ctx) -> Result<Realized, Provid
         bin,
         rlib: String::new(),
         envelope,
-        source_state: if cache_hit {
-            SourceState::Cached
-        } else {
-            SourceState::Built
-        },
+        cache_identity: cache_identity(
+            &source_fingerprint,
+            &format!("adapter-v1:{recipe_hash}"),
+            ctx,
+        ),
+        source_state: SourceState::Built,
     })
 }
 
@@ -1461,6 +1632,7 @@ fn parse_realization(spec: &RefSpec, stdout: &str) -> Result<Realized, ProviderE
         bin,
         rlib: String::new(),
         envelope,
+        cache_identity: super::Store::CacheIdentity::default(),
         source_state: SourceState::Substituted,
     })
 }
@@ -1674,7 +1846,6 @@ mod tests {
             resolve_kind(&spec, &table, false, &store),
             ProviderKind::Core
         );
-        assert_eq!(provider_for(ProviderKind::Core).name(), "core");
         let r = realize(&spec, &table, &ctx).unwrap();
         assert_eq!(r.name, "hello");
         assert!(std::path::Path::new(&r.bin).join("hello").is_file());
@@ -2186,7 +2357,7 @@ mod tests {
             root: base.clone(),
             dev_mode: true,
         };
-        let entry = Store::record(
+        let entry = Store::record_verified(
             &roots,
             &r.name,
             &r.version,
@@ -2195,6 +2366,7 @@ mod tests {
             &r.bin,
             &r.rlib,
             &r.envelope,
+            &r.cache_identity,
         )
         .unwrap();
         assert_eq!(entry.envelope, r.envelope);
