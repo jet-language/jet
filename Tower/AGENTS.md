@@ -73,6 +73,38 @@ Phase honesty: `verify → done` only after real verification, by a different
 session/agent than the one that claimed done when possible. If the board and
 reality disagree, fix the board.
 
+### Exit criteria gate `done`
+
+A card can carry a `criteria[]` checklist (each item `open` → `met` → `verified`).
+Add and progress it:
+
+```
+tower card criteria '#12' --add "matrix vs full spec, per feature" --by planner
+tower card criteria '#12' --meet 1 --evidence "ran the matrix, 9/9" --by builder
+tower card criteria '#12' --verify 1 --evidence "re-ran independently" --by verifier
+tower card criteria '#12' --list
+```
+
+`--phase done` on any `--by` other than `owner` is refused (`E_CRITERIA`) while
+a card has criteria and any item isn't `verified`. The verifier must differ
+from whoever met it (`E_CRITERIA_SELF`) — one agent cannot sign off its own
+work. Cards with no criteria are unaffected (legacy behavior). `--by owner`
+always bypasses both the checklist gate and the acceptance step below.
+
+Flag a card `needsAcceptance` when you want the owner's own verdict, not just
+a green checklist:
+
+```
+tower card update '#12' --needs-acceptance true --by owner
+```
+
+Once its criteria are all verified, an agent's `--phase done` attempt mints a
+`D-ACCEPT-<num>` decision (accept / bounce) instead of closing — the card
+sits in `verify` until the owner ratifies. Accept closes the card; bounce
+reopens it to `building` with the owner's comment logged. A second done
+attempt while one acceptance ballot is still open is a no-op, not a duplicate
+mint.
+
 Ballot-ready decisions carry: `gist` (one plain sentence), `story` (a named
 person, why this exists), `inWild` (realistic code where the choice bites),
 `options[]` each with `{key,name,detail,code}` worked examples,
@@ -95,6 +127,7 @@ GET  /api/state                     full projected state
 GET  /api/next?agent=me&limit=5     canonical work picker
 GET  /api/events?limit=50           audit trail
 POST /api/card/add|update|activate|claim|release|delete
+POST /api/card/criteria-add {id,text}  criteria-meet {id,n,evidence}  criteria-verify {id,n,evidence}
 POST /api/decision/add|update|delete
 POST /api/clearance {decisionId,outcome,comment}       (owner ratify)
 POST /api/question/add|answer|delete

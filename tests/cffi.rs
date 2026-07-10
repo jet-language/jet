@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 mod common;
-use common::FfiBridgeLock;
+use common::{have_rustc, FfiBridgeLock};
 
 #[test]
 fn unified_foreign_binder_registry_routes_active_and_planned_languages() {
@@ -256,8 +256,7 @@ const char *jetc_greeting(void) { return "hi from C"; }
 /// `#Bindgen` cache that compiles, links against the C library, and runs.
 #[test]
 fn jet_bind_native_backend_end_to_end() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
-    if !have_rustc {
+    if !have_rustc() {
         eprintln!("note: skipping jet_bind_native_backend (need rustc)");
         return;
     }
@@ -342,8 +341,7 @@ fn run() {
 
 #[test]
 fn cffi_end_to_end_links_and_runs() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
-    if !have_rustc {
+    if !have_rustc() {
         eprintln!("note: skipping cffi_end_to_end (need rustc)");
         return;
     }

@@ -552,6 +552,8 @@ function showDetail(id) {
       <div class="fld" style="margin-bottom:16px"><div class="fld__k">Plan</div><input data-fld="plan" value="${esc(c.plan || '')}" placeholder="— (agents fill this in the plan lane)"></div>
       <div class="modal__h">Description</div>
       <div class="prose" contenteditable="plaintext-only" data-fld="body">${md(c.body)}</div>
+      <div class="modal__h">Exit criteria <label class="crit__flag"><input type="checkbox" id="needs-acceptance" ${c.needsAcceptance ? 'checked' : ''}> needs owner acceptance</label></div>
+      <div id="m-criteria"></div>
       <div class="modal__h">Decisions</div><div id="m-decisions"></div>
       <div class="modal__h">Notes &amp; questions</div><div id="m-q"></div>
       <div class="modal__h">Log</div>
@@ -576,6 +578,24 @@ function showDetail(id) {
     box.querySelectorAll('[data-opt]').forEach(b => b.addEventListener('click', () => api('clearance', { decisionId: de.id, outcome: b.dataset.opt, by: 'owner' })));
     dd.appendChild(box);
   }
+
+  const cb = $('#m-criteria', m);
+  if (!(c.criteria || []).length) cb.appendChild(el(`<p class="prose">No exit criteria yet.</p>`));
+  for (const it of (c.criteria || [])) {
+    cb.appendChild(el(`<div class="critrow">
+        <div class="critrow__head"><span class="critrow__n">#${it.n}</span>
+          <span class="critrow__badge critrow__badge--${it.status}">${esc(it.status)}</span></div>
+        <div class="critrow__text">${esc(it.text)}</div>
+        ${it.evidence ? `<div class="critrow__ev">${esc(it.evidence)}</div>` : ''}
+        ${it.metBy || it.verifiedBy ? `<div class="critrow__by">${it.metBy ? `met: ${esc(it.metBy)}` : ''}${it.verifiedBy ? `  verified: ${esc(it.verifiedBy)}` : ''}</div>` : ''}
+      </div>`));
+  }
+  const critAdd = el(`<div class="qadd"><input placeholder="Add exit criterion…"><button class="btn btn--red btn--sm">Add</button></div>`);
+  const postCrit = async () => { const i = $('input', critAdd); const t = i.value.trim(); if (!t) return; i.value = ''; await api('card/criteria-add', { id, text: t, by: 'owner' }); };
+  $('button', critAdd).addEventListener('click', postCrit);
+  $('input', critAdd).addEventListener('keydown', e => { if (e.key === 'Enter') postCrit(); });
+  cb.appendChild(critAdd);
+  $('#needs-acceptance', m).addEventListener('change', (e) => api('card/update', { id, needsAcceptance: e.target.checked, by: 'owner' }));
 
   const qb = $('#m-q', m);
   for (const q of c.questions) {

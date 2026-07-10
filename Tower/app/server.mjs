@@ -74,6 +74,9 @@ const routes = {
   'card/claim':      (s, p) => db.claimCard(s, p.id, p.by),
   'card/release':    (s, p) => db.releaseCard(s, p.id, p.by),
   'card/delete':     (s, p) => db.deleteCard(s, p.id, p),
+  'card/criteria-add':    (s, p) => db.addCriterion(s, p.id, p.text, p.by),
+  'card/criteria-meet':   (s, p) => db.meetCriterion(s, p.id, p.n, { evidence: p.evidence, by: p.by }),
+  'card/criteria-verify': (s, p) => db.verifyCriterion(s, p.id, p.n, { evidence: p.evidence, by: p.by }),
   'decision/add':    (s, p) => db.addDecision(s, p),
   'decision/update': (s, p) => db.updateDecision(s, p.id, p, p.by),
   'decision/delete': (s, p) => db.deleteDecision(s, p.id, p.by),
@@ -97,7 +100,7 @@ const routes = {
   'digest/seen':     (s) => db.setDigestCursor(s),
 };
 
-const STATUS = { E_NOT_FOUND: 404, E_INVALID: 400, E_USAGE: 400, E_CONFLICT: 409, E_CLAIMED: 409, E_NO_DATA: 500 };
+const STATUS = { E_NOT_FOUND: 404, E_INVALID: 400, E_USAGE: 400, E_CONFLICT: 409, E_CLAIMED: 409, E_NO_DATA: 500, E_CRITERIA: 409, E_CRITERIA_SELF: 400 };
 
 // ---- auth ----------------------------------------------------------------------
 const PUBLIC = new Set(['/manifest.webmanifest', '/sw.js', '/icon.svg']);

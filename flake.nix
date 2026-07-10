@@ -137,6 +137,15 @@
             export TZDIR="${jetTzdb}"
             export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath [ pkgs.raylib ]}:''${LD_LIBRARY_PATH:-}"
 
+            # D-CI3: wire the fast pre-push doc-sync hook, idempotent, only
+            # when inside a git repo (worktrees/CI checkouts included).
+            if git rev-parse --git-dir >/dev/null 2>&1; then
+              current_hooks_path="$(git config --get core.hooksPath || true)"
+              if [ "$current_hooks_path" != "scripts/githooks" ]; then
+                git config core.hooksPath scripts/githooks
+              fi
+            fi
+
             # banner on stderr: `nix develop -c <cmd>` stdout stays clean for
             # grepping/capture (agents misread results otherwise)
             {

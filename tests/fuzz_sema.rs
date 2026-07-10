@@ -1,5 +1,7 @@
 //! M14 soundness fuzz: sema-checked programs must compile with rustc (I2).
-//! Short CI run (N=50); use FUZZ_SEED for reproducibility.
+//! Short CI run (N=50 default); use FUZZ_SEED for reproducibility and
+//! FUZZ_VARIANTS to raise N (D-CI3: nightly lane runs N>=1000 with a
+//! rotating seed).
 
 use std::fs;
 use std::path::PathBuf;
@@ -7,9 +9,17 @@ use std::process::Command;
 use std::sync::{Arc, Mutex};
 
 mod common;
-use common::{panic_message, test_worker_count};
+use common::{have_rustc, panic_message, test_worker_count};
 
-const VARIANTS: usize = 50;
+const DEFAULT_VARIANTS: usize = 50;
+
+fn fuzz_variants() -> usize {
+    std::env::var("FUZZ_VARIANTS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or(DEFAULT_VARIANTS)
+}
 
 struct Rng {
     state: u64,
@@ -217,8 +227,7 @@ fn rustc_accepts(stem: &str, rust_code: &str) -> Result<(), String> {
 #[test]
 fn fuzz_sema_rustc_agreement() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
-    if !have_rustc {
+    if !have_rustc() {
         eprintln!("note: rustc not found; skipping fuzz_sema");
         return;
     }
@@ -237,7 +246,7 @@ fn fuzz_sema_rustc_agreement() {
     fs::create_dir_all(&fuzz_dir).unwrap();
 
     let mut variants = Vec::new();
-    for i in 0..VARIANTS {
+    for i in 0..fuzz_variants() {
         let (shown, src) = rng.pick(&seeds).clone();
         let mutated = mutate_source(&mut rng, &src, i);
         let file = fuzz_dir.join(format!("variant_{i}.jet"));

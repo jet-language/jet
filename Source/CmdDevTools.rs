@@ -354,7 +354,13 @@ pub(crate) fn run_completions(shell: Option<&str>) {
     print!("{}", out);
 }
 
+/// Every `jet devtools` subcommand name, for the usage line and typo errors.
+const DEVTOOLS_SUBCOMMANDS: &str =
+    "grammars | reduce | ice-report | new-example | new-ui | check-fixture-paths | bless";
+
 /// `jet devtools grammars` — D-HL1 generated lexical base for editor grammars.
+/// c450 (D-DEVTOOLS1=A): extended with maintainer-facing minimizer/scaffolding
+/// tools, all under this same hidden namespace (never top-level commands).
 pub(crate) fn run_devtools(args: &[&String]) {
     match args.first().map(|s| s.as_str()) {
         Some("grammars") => {
@@ -372,16 +378,669 @@ pub(crate) fn run_devtools(args: &[&String]) {
             );
             println!("regenerated editor grammar sections");
         }
+        Some("reduce") => run_devtools_reduce(&args[1..]),
+        Some("ice-report") => run_devtools_ice_report(&args[1..]),
+        Some("new-example") => run_devtools_new_example(&args[1..]),
+        Some("new-ui") => run_devtools_new_ui(&args[1..]),
+        Some("check-fixture-paths") => run_devtools_check_fixture_paths(),
+        Some("bless") => run_devtools_bless(&args[1..]),
         Some(other) => {
             eprintln!("error: unknown `devtools` subcommand `{}`", other);
-            eprintln!("usage: {} devtools grammars", jet::Syntax::BINARY_NAME);
+            eprintln!("usage: {} devtools <{}>", jet::Syntax::BINARY_NAME, DEVTOOLS_SUBCOMMANDS);
             exit(ExitCodes::USAGE);
         }
         None => {
-            eprintln!("usage: {} devtools grammars", jet::Syntax::BINARY_NAME);
+            eprintln!("usage: {} devtools <{}>", jet::Syntax::BINARY_NAME, DEVTOOLS_SUBCOMMANDS);
             exit(ExitCodes::USAGE);
         }
     }
+}
+
+// ──────────────────────────────────────────────
+// c450: `jet devtools reduce` — delta-debugging minimizer.
+// ──────────────────────────────────────────────
+
+/// `jet devtools reduce <file.jet> [--code EXXXX]`.
+///
+/// Oracle (what makes a candidate "still interesting"):
+///   - default: the front end accepts the file AND rustc rejects the
+///     generated Rust (an I2 repro — invariant I2 says this must never
+///     happen in a shipped compiler, so a minimal repro is worth having);
+///   - `--code EXXXX`: the front end emits diagnostic `EXXXX` (from either
+///     an error result or a lint on a successful compile).
+///
+/// Shrinks by removing line-chunks (a simplified Zeller ddmin: try removing
+/// progressively smaller contiguous chunks, re-trying the whole file at a
+/// finer granularity whenever a whole pass makes no progress) and writes the
+/// smallest failing case to `<file>.reduced.<ext>`.
+pub(crate) fn run_devtools_reduce(args: &[&String]) {
+    if args.is_empty() {
+        eprintln!(
+            "usage: {} devtools reduce <file.{}> [--code EXXXX]",
+            jet::Syntax::BINARY_NAME,
+            jet::Syntax::FILE_EXT
+        );
+        exit(ExitCodes::USAGE);
+    }
+    let file = args[0].as_str();
+    let mut code_filter: Option<String> = None;
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--code" => {
+                code_filter = args.get(i + 1).map(|s| s.to_string());
+                i += 2;
+            }
+            other => {
+                eprintln!("error: unknown `reduce` flag `{}`", other);
+                exit(ExitCodes::USAGE);
+            }
+        }
+    }
+
+    let src = fs::read_to_string(file).unwrap_or_else(|e| {
+        eprintln!("error: couldn't read `{}`: {}", file, e);
+        exit(ExitCodes::USER_ERROR);
+    });
+
+    let interesting = |text: &str| reduce_oracle(text, code_filter.as_deref());
+
+    if !interesting(&src) {
+        eprintln!("error: `{}` doesn't reproduce the target oracle as given", file);
+        match &code_filter {
+            Some(c) => eprintln!(" why: the front end never emits `{}` for this file", c),
+            None => eprintln!(
+                " why: either the front end already rejects it, or rustc accepts the generated Rust"
+            ),
+        }
+        eprintln!(" fix: confirm the case fails the way you expect, then reduce it");
+        exit(ExitCodes::USER_ERROR);
+    }
+
+    let lines: Vec<String> = src.lines().map(|s| s.to_string()).collect();
+    println!("reduce: starting at {} line(s)", lines.len());
+    let reduced = ddmin(lines, &interesting);
+    println!("reduce: finished at {} line(s)", reduced.len());
+
+    let mut out_text = reduced.join("\n");
+    if !out_text.is_empty() {
+        out_text.push('\n');
+    }
+    let out_path = reduced_path(file);
+    fs::write(&out_path, &out_text).unwrap_or_else(|e| {
+        eprintln!("error: couldn't write `{}`: {}", out_path.display(), e);
+        exit(ExitCodes::USER_ERROR);
+    });
+    println!("wrote {}", out_path.display());
+}
+
+/// Whether `src` still triggers the target oracle. `code`: `None` = default
+/// I2 oracle (front end accepts, rustc rejects); `Some(code)` = the front end
+/// emits that diagnostic code (error or lint).
+fn reduce_oracle(src: &str, code: Option<&str>) -> bool {
+    match jet::compile_with_path(src, "reduce_candidate.jet") {
+        Ok(out) => match code {
+            Some(c) => out.lints.iter().any(|d| d.code == c),
+            None => rustc_rejects(&out.rust),
+        },
+        Err(diags) => match code {
+            Some(c) => diags.iter().any(|d| d.code == c),
+            None => false, // default oracle needs the front end to accept
+        },
+    }
+}
+
+/// Simplified Zeller ddmin over line-chunks: repeatedly try removing a
+/// contiguous chunk of the current granularity; on any removal that keeps the
+/// oracle interesting, keep the shrunk version and tighten the granularity;
+/// on a full pass with no progress, double the chunk count (finer chunks)
+/// until we're at single-line granularity, then stop.
+fn ddmin(lines: Vec<String>, interesting: &dyn Fn(&str) -> bool) -> Vec<String> {
+    let mut current = lines;
+    let mut n: usize = 2;
+    loop {
+        if current.len() < 2 {
+            break;
+        }
+        let chunk_size = (current.len() + n - 1) / n;
+        if chunk_size == 0 {
+            break;
+        }
+        let mut made_progress = false;
+        let mut start = 0;
+        while start < current.len() {
+            let end = (start + chunk_size).min(current.len());
+            let mut candidate = current.clone();
+            candidate.drain(start..end);
+            if !candidate.is_empty() && interesting(&candidate.join("\n")) {
+                println!(
+                    "reduce: dropped lines {}..{} -> {} line(s) left",
+                    start + 1,
+                    end,
+                    candidate.len()
+                );
+                current = candidate;
+                n = if n > 2 { n - 1 } else { 2 };
+                made_progress = true;
+                break;
+            }
+            start = end;
+        }
+        if !made_progress {
+            if n >= current.len() {
+                break;
+            }
+            n = (n * 2).min(current.len());
+        }
+    }
+    current
+}
+
+/// `<file>.reduced.<ext>` sibling path for the reducer's output.
+fn reduced_path(file: &str) -> PathBuf {
+    let p = Path::new(file);
+    let stem_name = p
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("reduced");
+    let ext = p
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or(jet::Syntax::FILE_EXT);
+    let name = format!("{}.reduced.{}", stem_name, ext);
+    match p.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent.join(name),
+        _ => PathBuf::from(name),
+    }
+}
+
+/// Run rustc over generated Rust source with no linking (`--emit=metadata`,
+/// I2's oracle only cares whether rustc accepts the code, not whether it
+/// links). Returns `(accepted, stderr)`; a rustc that can't even be invoked
+/// counts as "accepted" so a missing toolchain never manufactures a false
+/// I2 repro.
+fn rustc_probe(rust_code: &str) -> (bool, String) {
+    let tmp_dir = std::env::temp_dir().join(format!("jet_devtools_rustc_{}", std::process::id()));
+    if fs::create_dir_all(&tmp_dir).is_err() {
+        return (true, String::new());
+    }
+    let rs_path = tmp_dir.join("check.rs");
+    if fs::write(&rs_path, rust_code).is_err() {
+        let _ = fs::remove_dir_all(&tmp_dir);
+        return (true, String::new());
+    }
+    let meta_path = tmp_dir.join("check.rmeta");
+    let result = Command::new("rustc")
+        .arg("--edition")
+        .arg("2021")
+        .arg("--crate-name")
+        .arg("jet_devtools_check")
+        .arg("--emit=metadata")
+        .arg(&rs_path)
+        .arg("-o")
+        .arg(&meta_path)
+        .output();
+    let outcome = match result {
+        Ok(o) => (
+            o.status.success(),
+            String::from_utf8_lossy(&o.stderr).into_owned(),
+        ),
+        Err(_) => (true, String::new()),
+    };
+    let _ = fs::remove_dir_all(&tmp_dir);
+    outcome
+}
+
+fn rustc_rejects(rust_code: &str) -> bool {
+    !rustc_probe(rust_code).0
+}
+
+// ──────────────────────────────────────────────
+// c450: `jet devtools ice-report` — bundle an I2 repro for a bug report.
+// ──────────────────────────────────────────────
+
+/// `jet devtools ice-report <file.jet>` — bundles the source, generated Rust,
+/// rustc's stderr, and both tool versions into one directory under
+/// `.jet/ice-report/<stem>-<unix-time>/` so a bug report has everything
+/// attached in one place. Prints the bundle path.
+pub(crate) fn run_devtools_ice_report(args: &[&String]) {
+    if args.is_empty() {
+        eprintln!(
+            "usage: {} devtools ice-report <file.{}>",
+            jet::Syntax::BINARY_NAME,
+            jet::Syntax::FILE_EXT
+        );
+        exit(ExitCodes::USAGE);
+    }
+    let file = args[0].as_str();
+    let src = fs::read_to_string(file).unwrap_or_else(|e| {
+        eprintln!("error: couldn't read `{}`: {}", file, e);
+        exit(ExitCodes::USER_ERROR);
+    });
+
+    let out = match jet::compile_with_path(&src, file) {
+        Ok(o) => o,
+        Err(diags) => {
+            eprintln!(
+                "error: `{}` doesn't reach codegen — the front end already rejects it",
+                file
+            );
+            eprintln!(" why: ice-report bundles a case that compiles to Rust (an I2 repro)");
+            eprintln!(
+                " fix: fix the front-end errors first, or use `{} devtools reduce --code <CODE>` \
+                 to shrink a front-end diagnostic instead",
+                jet::Syntax::BINARY_NAME
+            );
+            eprint!("{}", jet::render_diagnostics(file, &src, &diags));
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
+
+    let (accepted, rustc_stderr) = rustc_probe(&out.rust);
+    if accepted {
+        println!(
+            "note: rustc accepted the generated Rust for `{}` — bundling anyway, but this isn't an I2 repro",
+            file
+        );
+    }
+
+    let rustc_version = Command::new("rustc")
+        .arg("--version")
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_else(|_| "rustc: not found".to_string());
+    let jet_version = env!("CARGO_PKG_VERSION");
+
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let bundle_dir = PathBuf::from(".jet")
+        .join("ice-report")
+        .join(format!("{}-{}", stem(file), ts));
+    fs::create_dir_all(&bundle_dir).unwrap_or_else(|e| {
+        eprintln!("error: couldn't create `{}`: {}", bundle_dir.display(), e);
+        exit(ExitCodes::USER_ERROR);
+    });
+
+    let write = |name: &str, content: &str| {
+        fs::write(bundle_dir.join(name), content).unwrap_or_else(|e| {
+            eprintln!("error: couldn't write `{}`: {}", name, e);
+            exit(ExitCodes::USER_ERROR);
+        });
+    };
+    write(&format!("source.{}", jet::Syntax::FILE_EXT), &src);
+    write("generated.rs", &out.rust);
+    write("rustc.stderr", &rustc_stderr);
+    write(
+        "versions.txt",
+        &format!("jet {}\n{}\n", jet_version, rustc_version),
+    );
+
+    println!("wrote ICE report bundle to {}", bundle_dir.display());
+}
+
+// ──────────────────────────────────────────────
+// c450: `jet devtools new-example` / `new-ui` — scaffold I5/I4 fixtures.
+// ──────────────────────────────────────────────
+
+/// `jet devtools new-example <topic>/<name>` — scaffolds
+/// `examples/features/<topic>/<name>.jet` and
+/// `examples/features/expected/<topic>/<name>.out`, matching the layout
+/// `tests/golden.rs` walks exactly. The stub is a real, passing example (I5:
+/// no example ships broken) that the author edits to demonstrate the feature.
+pub(crate) fn run_devtools_new_example(args: &[&String]) {
+    if args.is_empty() {
+        eprintln!(
+            "usage: {} devtools new-example <topic>/<name>",
+            jet::Syntax::BINARY_NAME
+        );
+        exit(ExitCodes::USAGE);
+    }
+    let spec = args[0].as_str();
+    let (topic, name) = match spec.split_once('/') {
+        Some((t, n)) if !t.is_empty() && !n.is_empty() => (t, n),
+        _ => {
+            eprintln!("error: expected `<topic>/<name>`, got `{}`", spec);
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
+
+    let ext = jet::Syntax::FILE_EXT;
+    let example_dir = PathBuf::from("examples/features").join(topic);
+    let expected_dir = PathBuf::from("examples/features/expected").join(topic);
+    let example_path = example_dir.join(format!("{}.{}", name, ext));
+    let expected_path = expected_dir.join(format!("{}.out", name));
+
+    if example_path.exists() {
+        eprintln!("error: `{}` already exists", example_path.display());
+        exit(ExitCodes::USER_ERROR);
+    }
+
+    fs::create_dir_all(&example_dir).unwrap_or_else(|e| {
+        eprintln!("error: couldn't create `{}`: {}", example_dir.display(), e);
+        exit(ExitCodes::USER_ERROR);
+    });
+    fs::create_dir_all(&expected_dir).unwrap_or_else(|e| {
+        eprintln!("error: couldn't create `{}`: {}", expected_dir.display(), e);
+        exit(ExitCodes::USER_ERROR);
+    });
+
+    let greeting = format!("scaffold: {}/{}", topic, name);
+    let src = format!(
+        "// TODO: describe examples/features/{}/{}.{}\nfn run() {{\n    print(\"{}\")\n}}\n",
+        topic, name, ext, greeting
+    );
+    fs::write(&example_path, &src).unwrap_or_else(|e| {
+        eprintln!("error: couldn't write `{}`: {}", example_path.display(), e);
+        exit(ExitCodes::USER_ERROR);
+    });
+    fs::write(&expected_path, format!("{}\n", greeting)).unwrap_or_else(|e| {
+        eprintln!("error: couldn't write `{}`: {}", expected_path.display(), e);
+        exit(ExitCodes::USER_ERROR);
+    });
+
+    println!("wrote {}", example_path.display());
+    println!("wrote {}", expected_path.display());
+}
+
+/// `jet devtools new-ui <name>` — scaffolds `tests/ui/<name>.jet` and its
+/// `<name>.stderr` snapshot, matching the layout `tests/diagnostic_snapshots.rs`
+/// walks exactly. The stub triggers a real (if generic) diagnostic and its
+/// `.stderr` is computed with the SAME calls the harness uses, so the pair is
+/// valid the moment it's written — edit the `.jet` to demonstrate the real
+/// diagnostic, then re-bless with `jet devtools bless diagnostic_snapshots`.
+pub(crate) fn run_devtools_new_ui(args: &[&String]) {
+    if args.is_empty() {
+        eprintln!("usage: {} devtools new-ui <name>", jet::Syntax::BINARY_NAME);
+        exit(ExitCodes::USAGE);
+    }
+    let name = args[0].as_str();
+    if name.is_empty() || name.contains('/') || name.contains('.') {
+        eprintln!(
+            "error: `new-ui` takes a bare fixture name, no path or extension: got `{}`",
+            name
+        );
+        exit(ExitCodes::USER_ERROR);
+    }
+
+    let ext = jet::Syntax::FILE_EXT;
+    let dir = PathBuf::from("tests/ui");
+    let jet_path = dir.join(format!("{}.{}", name, ext));
+    let stderr_path = dir.join(format!("{}.stderr", name));
+
+    if jet_path.exists() {
+        eprintln!("error: `{}` already exists", jet_path.display());
+        exit(ExitCodes::USER_ERROR);
+    }
+    fs::create_dir_all(&dir).unwrap_or_else(|e| {
+        eprintln!("error: couldn't create `{}`: {}", dir.display(), e);
+        exit(ExitCodes::USER_ERROR);
+    });
+
+    let src = "// TODO: describe what this diagnostic demonstrates.\n\
+fn run() {\n    print(definitely_undefined_scaffold_symbol)\n}\n"
+        .to_string();
+    fs::write(&jet_path, &src).unwrap_or_else(|e| {
+        eprintln!("error: couldn't write `{}`: {}", jet_path.display(), e);
+        exit(ExitCodes::USER_ERROR);
+    });
+
+    // Mirror `tests/diagnostic_snapshots.rs`'s `ui_snapshots` exactly, so the
+    // pair this writes is already a valid harness fixture.
+    let shown_path = format!("tests/ui/{}.{}", name, ext);
+    let actual = match jet::compile_with_path(&src, &shown_path) {
+        Err(diags) => jet::render_diagnostics(&shown_path, &src, &diags),
+        Ok(_) => "(no errors)\n".to_string(),
+    };
+    fs::write(&stderr_path, &actual).unwrap_or_else(|e| {
+        eprintln!("error: couldn't write `{}`: {}", stderr_path.display(), e);
+        exit(ExitCodes::USER_ERROR);
+    });
+
+    println!("wrote {}", jet_path.display());
+    println!("wrote {}", stderr_path.display());
+    if actual == "(no errors)\n" {
+        println!(
+            "note: scaffold compiled cleanly — edit `{}` to trigger the diagnostic you want, \
+             then `{} devtools bless diagnostic_snapshots`",
+            jet_path.display(),
+            jet::Syntax::BINARY_NAME
+        );
+    }
+}
+
+// ──────────────────────────────────────────────
+// c450: `jet devtools check-fixture-paths` — validate hardcoded path fixtures.
+// ──────────────────────────────────────────────
+
+/// `jet devtools check-fixture-paths` — greps every `tests/**/*.rs` file for
+/// hardcoded fixture path literals (`examples/features/...`, `docs/spec/...`,
+/// `tests/ui/...`, etc.) and confirms each one exists on disk relative to the
+/// current directory (run from the repo root). Path-embedding fixtures rot
+/// silently when an example moves; this is the check that catches it.
+pub(crate) fn run_devtools_check_fixture_paths() {
+    let tests_dir = PathBuf::from("tests");
+    if !tests_dir.is_dir() {
+        eprintln!("error: no `tests/` directory here");
+        eprintln!(" fix: run from the repo root");
+        exit(ExitCodes::USER_ERROR);
+    }
+
+    let mut rs_files = Vec::new();
+    collect_rs_files(&tests_dir, &mut rs_files);
+
+    let mut checked = 0usize;
+    let mut missing: Vec<(PathBuf, String)> = Vec::new();
+    for rs in &rs_files {
+        let text = fs::read_to_string(rs).unwrap_or_default();
+        for candidate in extract_hardcoded_paths(&text) {
+            checked += 1;
+            if !Path::new(&candidate).exists() {
+                missing.push((rs.clone(), candidate));
+            }
+        }
+    }
+
+    if missing.is_empty() {
+        println!(
+            "check-fixture-paths: {} embedded path(s) across {} file(s), all present",
+            checked,
+            rs_files.len()
+        );
+    } else {
+        eprintln!("check-fixture-paths: {} missing path(s):", missing.len());
+        for (file, path) in &missing {
+            eprintln!("  {} -> `{}` does not exist", file.display(), path);
+        }
+        exit(ExitCodes::USER_ERROR);
+    }
+}
+
+fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for e in entries.flatten() {
+        let p = e.path();
+        if p.is_dir() {
+            collect_rs_files(&p, out);
+        } else if p.extension().and_then(|s| s.to_str()) == Some("rs") {
+            out.push(p);
+        }
+    }
+}
+
+/// Pull out string-literal path fixtures from Rust source text. Deliberately
+/// conservative: only whole quoted literals (never `format!` templates with a
+/// `{`) whose prefix marks them as a fixture path and whose suffix is a known
+/// fixture extension, so dynamically-joined paths (already covered by their
+/// own `read_to_string`/`unwrap_or_else` panics at test time) are left alone.
+fn extract_hardcoded_paths(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let bytes = text.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'"' {
+            let start = i + 1;
+            let mut j = start;
+            while j < bytes.len() && bytes[j] != b'"' {
+                if bytes[j] == b'\\' {
+                    j += 1;
+                }
+                j += 1;
+            }
+            if j <= text.len() {
+                let lit = &text[start..j.min(text.len())];
+                // `render_diagnostics`/`render_all_*` take a "shown" display
+                // label as their file-name argument, not a path that must
+                // exist (tests/net_tls.rs feeds one a made-up name purely so
+                // the rendered banner looks like a real fixture path).
+                let mut before_start = start.saturating_sub(40);
+                while before_start < i && !text.is_char_boundary(before_start) {
+                    before_start += 1;
+                }
+                let before = &text[before_start..i];
+                let is_display_label = before.contains("render_diagnostics(")
+                    || before.contains("render_all_colored(")
+                    || before.contains("render_all_json(");
+                if !is_display_label && is_hardcoded_fixture_path(lit) {
+                    out.push(lit.to_string());
+                }
+            }
+            i = j + 1;
+        } else {
+            i += 1;
+        }
+    }
+    out
+}
+
+fn is_hardcoded_fixture_path(lit: &str) -> bool {
+    let known_prefix = lit.starts_with("examples/features/")
+        || lit.starts_with("docs/spec/")
+        || lit.starts_with("tests/ui/")
+        || lit.starts_with("tests/ui_lint/")
+        || lit.starts_with("tests/cli/")
+        || lit.starts_with("tests/release/");
+    if !known_prefix || lit.contains('{') || lit.contains('}') {
+        return false;
+    }
+    let ext = format!(".{}", jet::Syntax::FILE_EXT);
+    lit.ends_with(&ext)
+        || lit.ends_with(".md")
+        || lit.ends_with(".out")
+        || lit.ends_with(".stderr")
+        || lit.ends_with(".warn")
+        || lit.ends_with(".txt")
+        || lit.ends_with(".snapshot")
+}
+
+// ──────────────────────────────────────────────
+// c450: `jet devtools bless` — wrapper over the UPDATE_EXPECT re-bless convention.
+// ──────────────────────────────────────────────
+
+/// Every test binary that owns `UPDATE_EXPECT`-blessable snapshots (I4). Kept
+/// as one list so `bless` never drifts from what actually re-blesses on
+/// `UPDATE_EXPECT=1`.
+pub(crate) const BLESS_TARGETS: &[&str] = &[
+    "cli",
+    "cross",
+    "diagnostic_snapshots",
+    "diagnostics_coverage",
+    "release_gates",
+];
+
+/// `jet devtools bless [target...] [--dry-run]` — runs
+/// `UPDATE_EXPECT=1 cargo test --test <target>` for each named target (all of
+/// `BLESS_TARGETS` when none is given). This is the one re-bless mechanism in
+/// the repo (see each test file's own "bless with UPDATE_EXPECT=1" doc
+/// comment) — `bless` just names and runs it so nobody has to remember the
+/// env var or the target list. `--dry-run` prints the commands without
+/// running them (never mutates a snapshot file).
+pub(crate) fn run_devtools_bless(args: &[&String]) {
+    let mut dry_run = false;
+    let mut requested: Vec<String> = Vec::new();
+    for a in args {
+        if a.as_str() == "--dry-run" {
+            dry_run = true;
+        } else {
+            requested.push(a.to_string());
+        }
+    }
+
+    let targets = match resolve_bless_targets(&requested) {
+        Ok(t) => t,
+        Err(unknown) => {
+            eprintln!("error: unknown bless target(s): {}", unknown);
+            eprintln!(
+                "usage: {} devtools bless [target...] [--dry-run]",
+                jet::Syntax::BINARY_NAME
+            );
+            eprintln!("known targets: {}", BLESS_TARGETS.join(", "));
+            exit(ExitCodes::USAGE);
+        }
+    };
+
+    if dry_run {
+        for t in &targets {
+            println!("would run: UPDATE_EXPECT=1 cargo test --test {}", t);
+        }
+        return;
+    }
+
+    let mut any_failed = false;
+    for t in &targets {
+        println!("bless: UPDATE_EXPECT=1 cargo test --test {}", t);
+        match bless_command(t).status() {
+            Ok(s) if s.success() => {}
+            Ok(s) => {
+                any_failed = true;
+                eprintln!("bless: `{}` exited with {}", t, s);
+            }
+            Err(e) => {
+                any_failed = true;
+                eprintln!("bless: couldn't run `cargo test --test {}`: {}", t, e);
+            }
+        }
+    }
+    if any_failed {
+        exit(ExitCodes::USER_ERROR);
+    }
+    println!(
+        "bless: done ({} target{})",
+        targets.len(),
+        if targets.len() == 1 { "" } else { "s" }
+    );
+}
+
+/// Resolve requested target names against `BLESS_TARGETS`; empty `requested`
+/// means "all of them". `Err` carries the comma-joined unknown names.
+pub(crate) fn resolve_bless_targets(requested: &[String]) -> Result<Vec<&'static str>, String> {
+    if requested.is_empty() {
+        return Ok(BLESS_TARGETS.to_vec());
+    }
+    let mut out = Vec::new();
+    let mut unknown = Vec::new();
+    for r in requested {
+        match BLESS_TARGETS.iter().find(|k| **k == r.as_str()) {
+            Some(t) => out.push(*t),
+            None => unknown.push(r.clone()),
+        }
+    }
+    if !unknown.is_empty() {
+        return Err(unknown.join(", "));
+    }
+    Ok(out)
+}
+
+/// Build (never spawns) the `UPDATE_EXPECT=1 cargo test --test <target>`
+/// command for one bless target.
+pub(crate) fn bless_command(target: &str) -> Command {
+    let mut cmd = Command::new("cargo");
+    cmd.env("UPDATE_EXPECT", "1");
+    cmd.args(["test", "--test", target]);
+    cmd
 }
 
 fn write_generated_section(path: &str, fresh: &str) {

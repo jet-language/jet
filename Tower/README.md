@@ -39,6 +39,10 @@ Migrating from a v3-era board: `node Tower/tower.mjs import old-tower.json --nam
 - **Cards** — the work. Stages: triage → deciding → planning → ready →
   building → verify → done (+ frozen). Fields include `workOrder` (canonical
   pick order), `blockedBy`, `assignee` (claims), `plan`, `log`.
+- **Exit criteria** — a card's `criteria[]` checklist (open → met → verified)
+  gates `--phase done` for anyone but the owner, and the verifier must differ
+  from whoever met it. Flag a card `needsAcceptance` to also require an owner
+  accept/bounce ballot (auto-minted) once its checklist is clean.
 - **Decisions** — ballot-ready choices attached to a card; only the owner
   ratifies. A card with an open decision surfaces as **Decide** no matter its
   stage.

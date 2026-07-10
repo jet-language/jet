@@ -66,6 +66,14 @@ spelling to bypass a ratification gate. Exit criterion: both sections empty.
    `verify`→`done` only after real verification (verify skill; never trust a
    sub-agent's green — re-run the suite yourself). Finish EVERY exit
    criterion before touching the next card; "step N done" ≠ card done.
+   Cards with a machine-checked `criteria[]` list: meet each item as you land
+   it (`tower card criteria '#N' --meet n --evidence "…" --by claude-main`),
+   then get a *different* agent/session to verify (`--verify n`) —
+   `--phase done` is refused (`E_CRITERIA`) while any item is unverified, and
+   refused (`E_CRITERIA_SELF`) if the verifier is also the builder. A card
+   flagged `needsAcceptance` mints an owner accept/bounce ballot once its
+   checklist is clean; it sits in `verify` until the owner ratifies — that's
+   not a bug, don't force it to `done`.
 6. Release or leave a `[handoff]` log entry if you stop mid-card — cards are
    the handoff source of truth; harness task lists don't survive resets.
 7. Report on the board itself: log entries on advanced cards, ballots/

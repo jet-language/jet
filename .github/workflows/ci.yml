@@ -1,15 +1,19 @@
 name: CI
 
+# D-CI3=A: full suite on every push (flags red, never blocks — no branch
+# protection changes here). Nightly lane adds rotating-seed fuzzing
+# (N>=1000) and the perf ratchet.
 on:
-  pull_request:
   push:
-    branches:
-      - main
-      - master
+  pull_request:
+  schedule:
+    # Nightly fuzz + perf ratchet lane, 03:00 UTC.
+    - cron: "0 3 * * *"
 
 jobs:
   jetpack-platform:
     name: Jetpack platform audit (${{ matrix.os }})
+    if: github.event_name != 'schedule'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     strategy:
@@ -26,10 +30,11 @@ jobs:
       - name: Platform audit
         run: cargo test --test jetpack_platform
 
-  nix:
-    name: Nix toolchain
+  verify:
+    name: Full verify suite
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -40,29 +45,16 @@ jobs:
           extra_nix_config: |
             experimental-features = nix-command flakes
 
-      - name: Show Tower status
-        run: nix develop -c node tools/Tower/Tower.mjs status
-
       - name: Check flake
         run: nix flake check
 
       - name: Cargo check
         run: nix develop -c cargo check
 
-      - name: Unit tests
-        run: nix develop -c cargo test --lib
-
-      - name: Truthfulness checks
-        run: nix develop -c cargo test --test truthfulness
-
-      - name: Diagnostic snapshots
-        run: nix develop -c cargo test --test diagnostic_snapshots
-
-      - name: Golden examples
-        run: nix develop -c cargo test --test golden
-
-      - name: Freestanding / cross-target tests
-        run: nix develop -c cargo test --test cross
+      - name: Full verify suite (D-CI3)
+        env:
+          JET_REQUIRE_RUSTC: "1"
+        run: nix develop -c scripts/agent/verify-full.sh
 
       - name: Install aarch64 cross tools
         run: |
@@ -72,3 +64,30 @@ jobs:
 
       - name: aarch64 freestanding QEMU smoke
         run: nix develop -c bash tools/ci/aarch64-qemu-freestanding.sh
+
+  nightly-fuzz:
+    name: Nightly rotating-seed fuzz + perf ratchet
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Rotating-seed sema fuzz (N=1000)
+        env:
+          JET_REQUIRE_RUSTC: "1"
+          FUZZ_VARIANTS: "1000"
+        run: |
+          seed="$(date -u +%Y%m%d)"
+          echo "nightly fuzz seed: $seed"
+          FUZZ_SEED="$seed" nix develop -c cargo test --release --test fuzz_sema -- --nocapture
+
+      - name: Perf ratchet
+        run: nix develop -c sh tools/perf/ci-perf-check.sh

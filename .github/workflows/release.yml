@@ -1,0 +1,72 @@
+name: Release
+
+# Tagged releases (v*.*.*) publish prebuilt `jet`/`jetpack` binaries for
+# common platforms, per docs/reference/versioning.md. `meta.platforms` on
+# the `jet` flake package is `unix`, so this covers Linux + macOS only —
+# no Windows artifact until that platform is supported by the nix build.
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: jet-linux-x86_64
+          - os: macos-latest
+            artifact: jet-macos-x86_64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Build jet
+        run: nix build .#jet
+
+      - name: Package artifact
+        run: |
+          mkdir -p dist
+          tar -C result/bin -czf "dist/${{ matrix.artifact }}.tar.gz" jet jetpack
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/${{ matrix.artifact }}.tar.gz
+
+  release:
+    name: Publish GitHub release
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Attach artifacts to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" dist/*/*.tar.gz \
+            --title "${{ github.ref_name }}" \
+            --generate-notes \
+            --repo "${{ github.repository }}"

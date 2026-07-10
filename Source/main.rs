@@ -915,7 +915,11 @@ fn main() {
             return;
         }
         "devtools" => {
-            let devtool_args: Vec<&String> = args.iter().skip(1).copied().collect();
+            // Use the unfiltered argv: several devtools subcommands take their
+            // own `--flags` (reduce's `--code`, bless's `--dry-run`) that the
+            // global `args` filter would otherwise strip (same reason `bind`
+            // reads from `raw` below).
+            let devtool_args: Vec<&String> = raw.iter().skip(1).collect();
             run_devtools(&devtool_args);
             return;
         }

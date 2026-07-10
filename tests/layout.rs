@@ -10,6 +10,9 @@
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+mod common;
+use common::have_rustc;
+
 static SEQ: AtomicU64 = AtomicU64::new(0);
 fn unique_tmp() -> std::path::PathBuf {
     let n = SEQ.fetch_add(1, Ordering::Relaxed);
@@ -47,7 +50,7 @@ fn build_and_run(name: &str, src: &str) -> Option<String> {
         !out.rust.contains("unsafe"),
         "`unsafe` leaked from the layout solver prelude (I1) — jet_layout must stay plain safe Rust"
     );
-    if Command::new("rustc").arg("--version").output().is_err() {
+    if !have_rustc() {
         eprintln!("note: rustc not found; compiled front end only");
         return None;
     }
@@ -261,7 +264,7 @@ fn run() {
     let fpath = dir0.join("fixture.jet");
     std::fs::write(&fpath, src).unwrap();
     let out = jet::compile_with_path(src, &fpath.to_string_lossy()).unwrap();
-    if Command::new("rustc").arg("--version").output().is_err() {
+    if !have_rustc() {
         eprintln!("note: rustc not found; compiled front end only");
         return;
     }

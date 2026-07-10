@@ -19,8 +19,19 @@ pub fn unique_tmp(prefix: &str) -> PathBuf {
     std::env::temp_dir().join(format!("{prefix}_{}_{}", std::process::id(), n))
 }
 
+/// Whether `rustc` is on PATH. Honors `JET_REQUIRE_RUSTC=1` (D-CI3): CI sets
+/// this so a missing rustc is a loud failure — never a quiet self-skip that
+/// silently drops I2 (rustc-must-accept) coverage.
 pub fn have_rustc() -> bool {
-    Command::new("rustc").arg("--version").output().is_ok()
+    let present = Command::new("rustc").arg("--version").output().is_ok();
+    if !present && std::env::var("JET_REQUIRE_RUSTC").as_deref() == Ok("1") {
+        panic!(
+            "JET_REQUIRE_RUSTC=1 but rustc not found on PATH — refusing to \
+             silently skip I2 (rustc-must-accept) coverage. Fix the CI \
+             environment; do not unset JET_REQUIRE_RUSTC to paper over this."
+        );
+    }
+    present
 }
 
 pub fn test_worker_count(cap: usize) -> usize {

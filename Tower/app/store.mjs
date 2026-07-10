@@ -98,7 +98,7 @@ export function normalize(s) {
   s.meta.ui = { toggled: [], ...(s.meta.ui || {}) };
   for (const k of ['epochs', 'milestones', 'cards', 'decisions', 'questions', 'ideas', 'events']) s[k] ||= [];
   delete s.messages;   // messaging was removed; drop the legacy key on next write
-  for (const c of s.cards) { c.blockedBy ||= []; c.log ||= []; }
+  for (const c of s.cards) { c.blockedBy ||= []; c.log ||= []; c.criteria ||= []; c.needsAcceptance = !!c.needsAcceptance; }
   return s;
 }
 
@@ -188,6 +188,20 @@ export function logEvent(s, { by = 'agent', action, ref = null, note = '' }) {
 
 // ---- mutations: cards ------------------------------------------------------
 
+// One exit-criteria item: 1-based stable n, open -> met (builder) -> verified
+// (a different agent). Card-embedded, no own id — addressed by (card, n).
+function normalizeCriterion(it, i) {
+  return {
+    n: it.n ?? (i + 1),
+    text: String(it.text || '').trim(),
+    status: ['open', 'met', 'verified'].includes(it.status) ? it.status : 'open',
+    metBy: it.metBy ?? null,
+    verifiedBy: it.verifiedBy ?? null,
+    evidence: it.evidence || '',
+    at: it.at || now(),
+  };
+}
+
 export function addCard(s, p, config) {
   if (!p.title || !String(p.title).trim()) fail('E_INVALID', 'card needs a title');
   checkEnum(p.kind, config.kinds, 'kind');
@@ -211,6 +225,8 @@ export function addCard(s, p, config) {
     workOrder: p.workOrder != null ? Number(p.workOrder) : undefined,
     assignee: p.assignee || null,
     log: p.log || [],
+    criteria: Array.isArray(p.criteria) ? p.criteria.map((it, i) => normalizeCriterion(it, i)) : [],
+    needsAcceptance: !!p.needsAcceptance,
     created: now(), updated: today(),
   };
   s.cards.push(card);
@@ -218,7 +234,61 @@ export function addCard(s, p, config) {
   return card;
 }
 
-const CARD_FIELDS = ['title', 'body', 'kind', 'track', 'epoch', 'milestoneId', 'phase', 'priority', 'plan', 'blockedBy', 'workOrder', 'assignee'];
+const CARD_FIELDS = ['title', 'body', 'kind', 'track', 'epoch', 'milestoneId', 'phase', 'priority', 'plan', 'blockedBy', 'workOrder', 'assignee', 'criteria', 'needsAcceptance'];
+
+// D-TWR-CRIT1=C / D-TWRGUARD1=C: gate --phase done. Agent-hard, owner-soft —
+// a write with by !== 'owner' is refused while any criterion is unverified;
+// by === 'owner' always passes (bypass logged). Once the gate clears, a card
+// flagged needsAcceptance mints an owner accept/bounce ballot instead of
+// closing outright (again: owner writes go straight to done). Returns a
+// phase override ('verify') when acceptance was minted, else null.
+function applyDoneGate(s, c, targetPhase, by) {
+  if (targetPhase !== 'done') return null;
+  const items = c.criteria || [];
+  const unverified = items.filter(i => i.status !== 'verified');
+  const gated = items.length > 0 && unverified.length > 0;
+  if (gated && by !== 'owner') {
+    fail('E_CRITERIA', `${unverified.length} of ${items.length} criteria unverified (${unverified.map(i => i.n).join(',')}); verifier must not be the builder`);
+  }
+  if (gated && by === 'owner') {
+    logEvent(s, { by, action: 'card.criteria-bypass', ref: c.id, note: 'owner bypass' });
+    return null;
+  }
+  if (c.needsAcceptance && by !== 'owner') {
+    mintAcceptance(s, c);
+    return 'verify';
+  }
+  return null;
+}
+
+function mintAcceptance(s, c) {
+  const id = `D-ACCEPT-${c.num}`;
+  const existing = s.decisions.find(d => d.id === id);
+  if (existing && existing.status !== 'ratified') return; // already awaiting owner — no duplicate mint
+  const items = c.criteria || [];
+  const evidence = items.length
+    ? items.map(i => `${i.n}. ${i.text} — ${i.status}${i.evidence ? ` (${i.evidence})` : ''}${i.verifiedBy ? ` [verified by ${i.verifiedBy}]` : ''}`).join('\n')
+    : '(no exit criteria on this card — direct acceptance request)';
+  if (existing) {
+    // a prior round was bounced; re-open the same ballot id for round 2
+    existing.status = 'open';
+    existing.detail = evidence;
+    delete existing.outcome; delete existing.comment; delete existing.ratifiedAt;
+  } else {
+    addDecision(s, {
+      id, cardId: c.id, group: 'acceptance',
+      title: `Accept #${c.num} — ${c.title}`,
+      gist: `Close #${c.num}, or bounce it back to building.`,
+      detail: evidence,
+      options: [
+        { key: 'accept', name: 'Accept — close the card' },
+        { key: 'bounce', name: 'Bounce — back to building (comment why)' },
+      ],
+      by: 'agent',
+    });
+  }
+  c.log.unshift({ at: today(), text: `Requested acceptance — minted ${id}.` });
+}
 
 export function updateCard(s, ref, patch, config) {
   const c = mustCard(s, ref);
@@ -229,9 +299,13 @@ export function updateCard(s, ref, patch, config) {
   if ('epoch' in patch) checkEpoch(s, patch.epoch);
   if ('milestoneId' in patch) checkMilestone(s, patch.milestoneId);
   if ('blockedBy' in patch) for (const id of patch.blockedBy || []) mustCard(s, id);
+  const phaseOverride = 'phase' in patch ? applyDoneGate(s, c, patch.phase, patch.by) : null;
   for (const k of CARD_FIELDS) {
     if (k in patch) {
-      if (k === 'workOrder') c[k] = patch[k] == null || patch[k] === '' ? undefined : Number(patch[k]);
+      if (k === 'phase') c.phase = phaseOverride || patch.phase;
+      else if (k === 'workOrder') c[k] = patch[k] == null || patch[k] === '' ? undefined : Number(patch[k]);
+      else if (k === 'needsAcceptance') c.needsAcceptance = patch.needsAcceptance === true || patch.needsAcceptance === 'true';
+      else if (k === 'criteria') c.criteria = Array.isArray(patch.criteria) ? patch.criteria.map((it, i) => normalizeCriterion(it, i)) : c.criteria;
       else c[k] = patch[k];
     }
   }
@@ -239,6 +313,54 @@ export function updateCard(s, ref, patch, config) {
   c.updated = today();
   logEvent(s, { by: patch.by, action: 'card.update', ref: c.id, note: Object.keys(patch).filter(k => k !== 'id' && k !== 'by').join(',') });
   return c;
+}
+
+// ---- mutations: exit criteria ----------------------------------------------
+
+export function addCriterion(s, ref, text, by) {
+  const c = mustCard(s, ref);
+  if (!text || !String(text).trim()) fail('E_INVALID', 'criterion needs text');
+  c.criteria ||= [];
+  const n = (c.criteria.length ? Math.max(...c.criteria.map(i => i.n)) : 0) + 1;
+  const item = { n, text: String(text).trim(), status: 'open', metBy: null, verifiedBy: null, evidence: '', at: now() };
+  c.criteria.push(item);
+  c.updated = today();
+  logEvent(s, { by, action: 'card.criteria-add', ref: c.id, note: `#${n} ${item.text.slice(0, 60)}` });
+  return { ...item, cardId: c.id, cardNum: c.num };
+}
+
+function mustCriterion(c, n) {
+  const item = (c.criteria || []).find(i => i.n === Number(n));
+  if (!item) fail('E_NOT_FOUND', `no criterion #${n} on card #${c.num}`);
+  return item;
+}
+
+export function meetCriterion(s, ref, n, { evidence, by } = {}) {
+  const c = mustCard(s, ref);
+  const item = mustCriterion(c, n);
+  if (!by) fail('E_INVALID', 'meet needs --by <agent>');
+  item.status = 'met';
+  item.metBy = by;
+  if (evidence != null) item.evidence = evidence;
+  item.at = now();
+  c.updated = today();
+  logEvent(s, { by, action: 'card.criteria-meet', ref: c.id, note: `#${item.n}` });
+  return { ...item, cardId: c.id, cardNum: c.num };
+}
+
+export function verifyCriterion(s, ref, n, { evidence, by } = {}) {
+  const c = mustCard(s, ref);
+  const item = mustCriterion(c, n);
+  if (!by) fail('E_INVALID', 'verify needs --by <agent>');
+  if (item.status === 'open') fail('E_INVALID', `criterion #${n} not met yet — meet it before verifying`);
+  if (by === item.metBy) fail('E_CRITERIA_SELF', `criterion #${n} verifier must not be the builder (${by})`);
+  item.status = 'verified';
+  item.verifiedBy = by;
+  if (evidence != null) item.evidence = evidence;
+  item.at = now();
+  c.updated = today();
+  logEvent(s, { by, action: 'card.criteria-verify', ref: c.id, note: `#${item.n}` });
+  return { ...item, cardId: c.id, cardNum: c.num };
 }
 
 export function deleteCard(s, ref, p = {}) {
@@ -263,7 +385,8 @@ export function activate(s, ref, { track, epoch, milestoneId, phase, workOrder, 
   if (milestoneId !== undefined) c.milestoneId = milestoneId;
   if (workOrder != null) c.workOrder = Number(workOrder);
   const hasOpen = s.decisions.some(d => d.cardId === c.id && d.status !== 'ratified');
-  c.phase = phase || (hasOpen ? 'deciding' : 'planning');
+  const requestedPhase = phase || (hasOpen ? 'deciding' : 'planning');
+  c.phase = applyDoneGate(s, c, requestedPhase, by) || requestedPhase;
   c.updated = today();
   c.log.unshift({ at: today(), by: by || 'owner', text: `Activated into ${c.track === 'epoch' ? 'epoch ' + (c.epoch || '?') : c.track} track` });
   logEvent(s, { by, action: 'card.activate', ref: c.id });
@@ -307,6 +430,21 @@ export function ratify(s, decisionId, outcome, comment, by) {
   d.status = 'ratified'; d.outcome = outcome;
   if (comment != null) d.comment = comment;
   d.ratifiedAt = today();
+  // Acceptance ballots (D-ACCEPT-<num>, minted by the done-gate) resolve the
+  // card directly: accept closes it, bounce sends it back to building.
+  if (d.id.startsWith('D-ACCEPT-')) {
+    const c = s.cards.find(x => x.id === d.cardId);
+    if (c) {
+      if (outcome === 'accept') {
+        c.phase = 'done';
+        c.log.unshift({ at: today(), by: by || 'owner', text: `Accepted — ${d.id} ratified accept.` });
+      } else if (outcome === 'bounce') {
+        c.phase = 'building';
+        c.log.unshift({ at: today(), by: by || 'owner', text: `Bounced back to building: ${comment || '(no comment)'}` });
+      }
+      c.updated = today();
+    }
+  }
   advanceClearedCard(s, d.cardId);
   logEvent(s, { by: by || 'owner', action: 'decision.ratify', ref: d.id, note: outcome });
   return d;

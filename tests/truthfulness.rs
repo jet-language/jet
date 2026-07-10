@@ -19,9 +19,6 @@ fn root() -> PathBuf {
 // ACKNOWLEDGED gaps (pre-existing doc debt, not regressions)
 // ---------------------------------------------------------------------------
 //
-// GAP-1: docs/reference/versioning.md references `.github/workflows/release.yml`
-//        but no release workflow exists yet (tracked in c113 / release-ci-hygiene).
-//
 // GAP-2: `examples/features/expected/test.out` exists with no corresponding
 //        `examples/features/test.jet` or `examples/features/test/main.jet`.
 //        The file appears to be an orphan leftover.

@@ -123,11 +123,31 @@ function cmdCard(store, { pos, flags }) {
       const patch = { ...p, by };
       for (const [f, k] of [['title', 'title'], ['body', 'body'], ['kind', 'kind'], ['track', 'track'], ['epoch', 'epoch'],
         ['milestone', 'milestoneId'], ['phase', 'phase'], ['priority', 'priority'], ['plan', 'plan'],
-        ['workOrder', 'workOrder'], ['assignee', 'assignee'], ['log', 'logEntry']])
+        ['workOrder', 'workOrder'], ['assignee', 'assignee'], ['log', 'logEntry'], ['needsAcceptance', 'needsAcceptance']])
         if (flags[f] !== undefined) patch[k] = flags[f];
       if (flags.blockedBy !== undefined) patch.blockedBy = flags.blockedBy === '' ? [] : String(flags.blockedBy).split(',');
       const { result, state } = store.mutate((s, cfg) => db.updateCard(s, ref, patch, cfg), { expectRev: flags.expectRev });
       return out(flags, `updated card #${result.num} → ${db.laneOf(result, state.decisions, state.cards).lane}`, result);
+    }
+    case 'criteria': {
+      if (flags.add !== undefined) {
+        const { result } = store.mutate((s) => db.addCriterion(s, ref, flags.add, by));
+        return out(flags, `added criterion #${result.n} to card #${result.cardNum}`, result);
+      }
+      if (flags.meet !== undefined) {
+        const { result } = store.mutate((s) => db.meetCriterion(s, ref, flags.meet, { evidence: flags.evidence, by }));
+        return out(flags, `criterion #${result.n} met on card #${result.cardNum}`, result);
+      }
+      if (flags.verify !== undefined) {
+        const { result } = store.mutate((s) => db.verifyCriterion(s, ref, flags.verify, { evidence: flags.evidence, by }));
+        return out(flags, `criterion #${result.n} verified on card #${result.cardNum}`, result);
+      }
+      const s = store.load();
+      const found = db.findCard(s, ref) || (() => { throw new TowerError('E_NOT_FOUND', `no card ${ref}`); })();
+      if (flags.json) return out(flags, null, found.criteria || []);
+      for (const it of found.criteria || []) console.log(`#${it.n} [${it.status}] ${it.text}${it.metBy ? `  met:${it.metBy}` : ''}${it.verifiedBy ? `  verified:${it.verifiedBy}` : ''}${it.evidence ? `  — ${it.evidence}` : ''}`);
+      if (!(found.criteria || []).length) console.log('(no criteria)');
+      return;
     }
     case 'activate': {
       const { result } = store.mutate((s, cfg) => db.activate(s, ref, {
@@ -148,7 +168,7 @@ function cmdCard(store, { pos, flags }) {
       const { result } = store.mutate((s) => db.deleteCard(s, ref, { by }));
       return out(flags, `deleted card ${result.id}`, result);
     }
-    default: throw new TowerError('E_USAGE', `unknown card verb "${verb}" — list/show/add/update/activate/claim/release/delete`);
+    default: throw new TowerError('E_USAGE', `unknown card verb "${verb}" — list/show/add/update/activate/claim/release/delete/criteria`);
   }
 }
 
@@ -418,6 +438,11 @@ const HELP = `tower — file-backed project board for an owner + AI agents
                                             what an agent should pick up next
 
   tower card     list|show|add|update|activate|claim|release|delete
+  tower card update <ref> --needs-acceptance true|false   flag for owner accept ballot on close
+  tower card criteria <ref> --add "text" --by X           add an exit criterion
+                            --meet n --evidence "…" --by X    builder: mark met
+                            --verify n --evidence "…" --by Y  verifier ≠ builder: mark verified
+                            --list                            show the checklist
   tower decision list|show|add|update|ratify|reopen|delete
   tower question list|ask|answer|delete
   tower idea     list|add|promote|delete
