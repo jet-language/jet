@@ -9,12 +9,13 @@
 //! reuses the *mtime-poll watch pattern* (and the `file_mtime` helper itself)
 //! from `run_dev`, not any of its interpreter/JIT machinery.
 
+use std::collections::HashMap;
 use std::fs;
 use std::io::{BufRead, BufReader, IsTerminal, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::exit;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -36,6 +37,7 @@ const PORT_RANGE: std::ops::RangeInclusive<u16> = 8080..=8089;
 /// (judgment call — 400ms is fast enough to feel instant after a save,
 /// without hammering the dev server on every open tab).
 const LIVE_RELOAD_POLL_MS: u64 = 400;
+const CLIENT_TTL_MS: u64 = LIVE_RELOAD_POLL_MS * 4;
 
 /// D-FE-DEVSRV1 outcome D (hybrid, owner-modified 2026-07-08: pinned parity
 /// header required as the terminal anchor): a one-line terminal status and a
@@ -55,7 +57,7 @@ struct DevStatusSnapshot {
 
 struct DevStatus {
     version: AtomicU64,
-    clients: AtomicU64,
+    clients: Mutex<HashMap<String, Instant>>,
     state: Mutex<DevStatusSnapshot>,
     command_receipt: Mutex<Option<String>>,
     /// The file `jet dev` is watching — used in the `building` parity line
@@ -65,7 +67,8 @@ struct DevStatus {
     port: AtomicU64,
     /// `--verbose`/`-v`: opt-in request/rebuild log under the parity header
     /// (dashboard's depth, D-FE-DEVSRV1=D "on-demand depth").
-    verbose: bool,
+    verbose: AtomicBool,
+    active: AtomicBool,
     /// Redraw the parity line in place instead of appending a new one each
     /// time. Only when stderr is a real TTY *and* color is on — `NO_COLOR`
     /// degrades straight to the CI floor (plain, append-only, unpinned), same
@@ -80,7 +83,8 @@ struct DevStatus {
     /// (parity line, or parity line + framed diagnostic).
     last_block_lines: Mutex<usize>,
     /// Whether the verbose pinned header's scroll region has been set up yet
-    /// (`\x1b[2r`, cursor parked in the scrolling log area below row 1).
+    /// (`\x1b[3r`, cursor parked in the scrolling log area below two pinned
+    /// dashboard rows).
     header_started: Mutex<bool>,
 }
 
@@ -93,7 +97,7 @@ impl DevStatus {
         let color = ColorChoice::Auto.resolve(is_tty);
         DevStatus {
             version: AtomicU64::new(1),
-            clients: AtomicU64::new(0),
+            clients: Mutex::new(HashMap::new()),
             state: Mutex::new(DevStatusSnapshot {
                 state: "ready".to_string(),
                 code: String::new(),
@@ -103,7 +107,8 @@ impl DevStatus {
             command_receipt: Mutex::new(None),
             watched_file: file.to_string(),
             port: AtomicU64::new(0),
-            verbose,
+            verbose: AtomicBool::new(verbose),
+            active: AtomicBool::new(false),
             pin: is_tty && color,
             term_lock: Mutex::new(()),
             last_block_lines: Mutex::new(0),
@@ -125,7 +130,7 @@ impl DevStatus {
             &self.watched_file,
             &snap.code,
             self.port(),
-            self.clients.load(Ordering::SeqCst),
+            self.client_count(),
             snap.last_build_ms,
         )
     }
@@ -138,15 +143,26 @@ impl DevStatus {
         }
     }
 
+    fn dashboard_detail_line(&self) -> String {
+        format!(
+            "         watching {} · Canvas http://localhost:{}/canvas · v verbose",
+            self.watched_file,
+            self.port()
+        )
+    }
+
     /// Recompute the parity words from current state and redraw the
     /// terminal's live region (single source shared with `json()`'s
     /// `message` field — the browser strip renders that exact string).
     fn refresh(&self) {
+        if !self.active.load(Ordering::SeqCst) {
+            return;
+        }
         let snap = self.state.lock().unwrap().clone();
         let (word, rest) = self.header_text_for(&snap);
         let line = self.format_line(&word, &rest);
 
-        if self.verbose {
+        if self.verbose() {
             if self.pin {
                 self.write_header_verbose(&line);
             } else {
@@ -159,7 +175,7 @@ impl DevStatus {
         }
 
         if self.pin {
-            let mut lines = vec![line];
+            let mut lines = vec![line, self.dashboard_detail_line()];
             if snap.state == "error" {
                 lines.extend(frame_lines(&snap.code, &snap.diagnostic));
             }
@@ -197,21 +213,27 @@ impl DevStatus {
         *prev = lines.len();
     }
 
-    /// Pin the parity header to terminal row 1 via a DECSTBM scroll region
-    /// (`\x1b[2r`) so `log_line` can print request/rebuild lines below it
-    /// forever without ever touching row 1. Std ANSI only (I6) — no terminal-
+    /// Pin the two-row dashboard to terminal rows 1–2 via a DECSTBM scroll
+    /// region (`\x1b[3r`) so `log_line` can print request/rebuild lines below
+    /// it forever without touching the shared parity row or watched-target
+    /// row. Std ANSI only (I6) — no terminal-
     /// size query, which is why the region's bottom is left at the display
     /// default instead of being computed.
     fn write_header_verbose(&self, line: &str) {
         let _g = self.term_lock.lock().unwrap();
         let mut out = std::io::stderr();
         let mut started = self.header_started.lock().unwrap();
+        let detail = self.dashboard_detail_line();
         if !*started {
-            let _ = write!(out, "\x1b[2J\x1b[H{}\n\x1b[2r\x1b[2;1H", line);
+            let _ = write!(out, "\x1b[2J\x1b[H{}\n{}\n\x1b[3r\x1b[3;1H", line, detail);
             *started = true;
         } else {
             // DECSC/DECRC save+restore the log cursor across the jump to row 1.
-            let _ = write!(out, "\x1b7\x1b[1;1H\x1b[2K{}\x1b8", line);
+            let _ = write!(
+                out,
+                "\x1b7\x1b[1;1H\x1b[2K{}\n\x1b[2K{}\x1b8",
+                line, detail
+            );
         }
         let _ = out.flush();
     }
@@ -219,7 +241,7 @@ impl DevStatus {
     /// One line in the verbose request/rebuild log, printed under the pinned
     /// header. No-op unless `--verbose`/`-v` was passed.
     fn log_line(&self, text: &str) {
-        if !self.verbose {
+        if !self.active.load(Ordering::SeqCst) || !self.verbose() {
             return;
         }
         let _g = self.term_lock.lock().unwrap();
@@ -254,6 +276,69 @@ impl DevStatus {
         ));
     }
 
+    fn log_diagnostic(&self, code: &str, diagnostic: &str) {
+        if !self.active.load(Ordering::SeqCst) || !self.verbose() {
+            return;
+        }
+        let _g = self.term_lock.lock().unwrap();
+        let mut out = std::io::stderr();
+        if self.pin {
+            for line in frame_lines(code, diagnostic) {
+                let _ = write!(out, "{}\r\n", line);
+            }
+        } else {
+            let _ = writeln!(out, "{}", diagnostic);
+        }
+        let _ = out.flush();
+    }
+
+    fn verbose(&self) -> bool {
+        self.verbose.load(Ordering::SeqCst)
+    }
+
+    /// Toggle terminal depth without changing shared parity state. Transition
+    /// between redraw strategies explicitly so stale pinned blocks/scroll
+    /// regions never survive a `v` keypress.
+    fn toggle_verbose(&self) {
+        let verbose = !self.verbose.fetch_xor(true, Ordering::SeqCst);
+        if self.pin {
+            let _g = self.term_lock.lock().unwrap();
+            let mut out = std::io::stderr();
+            if verbose {
+                let mut prev = self.last_block_lines.lock().unwrap();
+                if *prev > 1 {
+                    let _ = write!(out, "\x1b[{}A", *prev - 1);
+                }
+                let _ = write!(out, "\r\x1b[0J");
+                *prev = 0;
+            } else {
+                let _ = write!(out, "\x1b[r\x1b[2J\x1b[H");
+                *self.header_started.lock().unwrap() = false;
+            }
+            let _ = out.flush();
+        }
+        self.refresh();
+        self.log_line(if verbose {
+            "verbose request/rebuild log enabled · press v to collapse"
+        } else {
+            ""
+        });
+    }
+
+    fn restore_terminal(&self) {
+        if !self.pin {
+            return;
+        }
+        let _g = self.term_lock.lock().unwrap();
+        let mut out = std::io::stderr();
+        if *self.header_started.lock().unwrap() {
+            let _ = write!(out, "\x1b[r\x1b[999;1H\r\n");
+        } else {
+            let _ = writeln!(out);
+        }
+        let _ = out.flush();
+    }
+
     fn mark_building(&self) {
         *self.state.lock().unwrap() = DevStatusSnapshot {
             state: "building".to_string(),
@@ -281,6 +366,7 @@ impl DevStatus {
     }
 
     fn mark_error(&self, code: String, diagnostic: String, is_rebuild: bool) {
+        let diagnostic_for_log = diagnostic.clone();
         *self.state.lock().unwrap() = DevStatusSnapshot {
             state: "error".to_string(),
             code: code.clone(),
@@ -290,6 +376,7 @@ impl DevStatus {
         self.refresh();
         if is_rebuild {
             self.log_rebuild(false, &code);
+            self.log_diagnostic(&code, &diagnostic_for_log);
         }
     }
 
@@ -298,15 +385,50 @@ impl DevStatus {
         let (word, rest) = self.header_text_for(&snap);
         let message = format!("{} · {}", word, rest);
         format!(
-            "{{\"version\":{},\"state\":\"{}\",\"message\":\"{}\",\"code\":\"{}\",\"diagnostic\":\"{}\",\"clients\":{},\"last_build_ms\":{}}}",
+            "{{\"version\":{},\"state\":\"{}\",\"message\":\"{}\",\"file\":\"{}\",\"code\":\"{}\",\"diagnostic\":\"{}\",\"clients\":{},\"last_build_ms\":{}}}",
             self.version.load(Ordering::SeqCst),
             json_escape(&word),
             json_escape(&message),
+            json_escape(&self.watched_file),
             json_escape(&snap.code),
             json_escape(&snap.diagnostic),
-            self.clients.load(Ordering::SeqCst),
+            self.client_count(),
             snap.last_build_ms
         )
+    }
+
+    fn activate(&self) {
+        self.active.store(true, Ordering::SeqCst);
+        self.refresh();
+    }
+
+    fn client_count(&self) -> u64 {
+        self.clients.lock().unwrap().len() as u64
+    }
+
+    fn note_client(&self, id: &str) {
+        if id.is_empty() || id.len() > 128 {
+            return;
+        }
+        let mut clients = self.clients.lock().unwrap();
+        let changed = clients.insert(id.to_string(), Instant::now()).is_none();
+        drop(clients);
+        if changed {
+            self.refresh();
+        }
+    }
+
+    fn expire_clients(&self) {
+        let cutoff = Duration::from_millis(CLIENT_TTL_MS);
+        let now = Instant::now();
+        let mut clients = self.clients.lock().unwrap();
+        let before = clients.len();
+        clients.retain(|_, seen| now.saturating_duration_since(*seen) <= cutoff);
+        let changed = clients.len() != before;
+        drop(clients);
+        if changed {
+            self.refresh();
+        }
     }
 
     fn record_command_receipt(&self, receipt: String) {
@@ -316,6 +438,34 @@ impl DevStatus {
     fn command_receipt(&self) -> Option<String> {
         self.command_receipt.lock().unwrap().clone()
     }
+}
+
+fn start_terminal_controls(status: Arc<DevStatus>) {
+    if !status.pin {
+        return;
+    }
+    let Some(raw) = jet::Term::RawGuard::enable() else {
+        return;
+    };
+    thread::spawn(move || {
+        let mut keys = jet::Term::KeyReader::new(std::io::stdin());
+        loop {
+            match keys.read_key() {
+                jet::Term::Key::Char('v' | 'V') => status.toggle_verbose(),
+                jet::Term::Key::CtrlC => {
+                    status.restore_terminal();
+                    drop(raw);
+                    exit(130);
+                }
+                jet::Term::Key::Eof => {
+                    status.restore_terminal();
+                    drop(raw);
+                    return;
+                }
+                _ => {}
+            }
+        }
+    });
 }
 
 /// Pure — the parity words shared verbatim by the terminal line and the
@@ -452,11 +602,23 @@ pub(crate) fn run_dev_web(file: &str, mode: OutputMode, verbose: bool, port: Opt
         thread::spawn(move || serve_forever(listener, status, canvas_file));
     }
 
-    println!(
-        "serving http://localhost:{} — watching {} … (Ctrl-C to stop)",
-        port, file
-    );
-    println!("Canvas: http://localhost:{}/canvas", port);
+    {
+        let status = Arc::clone(&status);
+        thread::spawn(move || loop {
+            thread::sleep(Duration::from_millis(LIVE_RELOAD_POLL_MS));
+            status.expire_clients();
+        });
+    }
+
+    if !status.pin {
+        println!(
+            "serving http://localhost:{} — watching {} … (Ctrl-C to stop)",
+            port, file
+        );
+        println!("Canvas: http://localhost:{}/canvas", port);
+    }
+    status.activate();
+    start_terminal_controls(Arc::clone(&status));
 
     // Same mtime-poll/debounce shape as `run_dev` (Source/CmdDevTools.rs),
     // reusing `file_mtime` verbatim (I6: no filesystem-notification crate).
@@ -657,9 +819,7 @@ fn serve_forever(listener: TcpListener, status: Arc<DevStatus>, canvas_file: Str
             let status = Arc::clone(&status);
             let canvas_file = canvas_file.clone();
             thread::spawn(move || {
-                status.clients.fetch_add(1, Ordering::SeqCst);
                 let _ = handle_connection(stream, &status, &canvas_file);
-                status.clients.fetch_sub(1, Ordering::SeqCst);
             });
         }
     }
@@ -1042,6 +1202,9 @@ fn handle_connection(
         if method != "GET" {
             return method_not_allowed(&mut stream);
         }
+        if let Some(client) = query_param(target, "client") {
+            status.note_client(&client);
+        }
         let body = status.json();
         return write_response(
             &mut stream,
@@ -1177,19 +1340,29 @@ fn live_reload_script() -> String {
     format!(
         r##"<script>
 (function () {{
-  var jetDevVersion = null;
-  var pill = null, overlay = null, overlayTitle = null, overlayBody = null, overlayFooter = null;
+  var jetDevVersion = null, reconnectAttempt = 0;
+  var jetDevClient = null;
+  try {{ jetDevClient = sessionStorage.getItem("jet-dev-client"); }} catch (_) {{}}
+  if (!jetDevClient) {{
+    jetDevClient = (self.crypto && crypto.randomUUID) ? crypto.randomUUID() :
+      String(Date.now()) + "-" + Math.random().toString(16).slice(2);
+    try {{ sessionStorage.setItem("jet-dev-client", jetDevClient); }} catch (_) {{}}
+  }}
+  var pill = null, shade = null, overlay = null, overlayTitle = null, overlayBody = null, overlayFooter = null;
+  var dismissedDiagnostic = null;
   function ensureUi() {{
     if (pill) return;
     var style = document.createElement("style");
     style.textContent =
-      "#jet-dev-pill{{position:fixed;right:12px;bottom:12px;z-index:2147483647;" +
+      "#jet-dev-pill{{position:fixed;left:12px;bottom:12px;z-index:2147483647;" +
       "font:12px ui-monospace,SFMono-Regular,Consolas,monospace;background:#101820;" +
       "color:#d6e7ff;border:1px solid #3b5675;border-radius:999px;padding:4px 10px;" +
       "box-shadow:0 4px 16px rgba(0,0,0,.35)}}" +
       "#jet-dev-pill .dot{{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}}" +
+      "#jet-dev-shade{{position:fixed;inset:0;z-index:2147483645;display:none;pointer-events:none;" +
+      "background:rgba(11,17,25,.18);backdrop-filter:grayscale(.4) opacity(.72)}}" +
       "#jet-dev-overlay{{position:fixed;inset:0;z-index:2147483646;background:rgba(6,10,16,.82);" +
-      "display:none;align-items:center;justify-content:center;padding:24px}}" +
+      "display:none;align-items:flex-start;justify-content:center;padding:24px}}" +
       "#jet-dev-overlay .box{{max-width:min(760px,92vw);max-height:82vh;overflow:auto;" +
       "background:#101820;color:#f2f6fb;border:1px solid #3b5675;border-radius:8px;" +
       "box-shadow:0 24px 64px rgba(0,0,0,.5)}}" +
@@ -1204,6 +1377,9 @@ fn live_reload_script() -> String {
     pill.id = "jet-dev-pill";
     pill.innerHTML = "<span class=\"dot\"></span><span class=\"label\"></span>";
     document.body.appendChild(pill);
+    shade = document.createElement("div");
+    shade.id = "jet-dev-shade";
+    document.body.appendChild(shade);
     overlay = document.createElement("div");
     overlay.id = "jet-dev-overlay";
     overlay.innerHTML = "<div class=\"box\"><h3>Build failed</h3><pre></pre><footer></footer></div>";
@@ -1211,10 +1387,16 @@ fn live_reload_script() -> String {
     overlayTitle = overlay.querySelector("h3");
     overlayBody = overlay.querySelector("pre");
     overlayFooter = overlay.querySelector("footer");
+    document.addEventListener("keydown", function (event) {{
+      if (event.key === "Escape" && overlay.style.display !== "none") {{
+        dismissedDiagnostic = overlayBody.textContent;
+        overlay.style.display = "none";
+      }}
+    }});
   }}
   function dotColor(state) {{
     if (state === "error") return "#FF5C5C";
-    if (state === "building") return "#FFB454";
+    if (state === "building" || state === "reconnecting") return "#FFB454";
     return "#58D68D";
   }}
   function renderStatus(s) {{
@@ -1224,22 +1406,26 @@ fn live_reload_script() -> String {
     // `.textContent` — never re-escape or reword the shared parity string
     // (I8: one status mechanism, two entrypoints reading the same words).
     pill.querySelector(".label").textContent = s.message || state;
+    shade.style.display = (state === "building" || state === "reconnecting") ? "block" : "none";
     if (state === "error") {{
       // The overlay's own translucent backdrop (rgba(6,10,16,.82)) is what
       // reads as "app, dimmed" — it sits over the still-live last-good page.
-      overlay.style.display = "flex";
+      overlay.style.display = dismissedDiagnostic === (s.diagnostic || "") ? "none" : "flex";
       // Verbatim diagnostic (I4): exactly what the terminal's framed box
       // and `render_diagnostics` produced, byte-for-byte via `textContent`.
       overlayBody.textContent = s.diagnostic || "";
+      overlayTitle.textContent = "Build failed — " + (s.file || "Jet source");
       overlayFooter.textContent = (s.message || state) + " — clears on the next clean build";
     }} else {{
       overlay.style.display = "none";
+      dismissedDiagnostic = null;
     }}
   }}
   setInterval(function () {{
-    fetch("/__jet_dev_status", {{ cache: "no-store" }})
+    fetch("/__jet_dev_status?client=" + encodeURIComponent(jetDevClient), {{ cache: "no-store" }})
       .then(function (r) {{ return r.json(); }})
       .then(function (s) {{
+        reconnectAttempt = 0;
         renderStatus(s);
         var v = String(s.version || "");
         if (jetDevVersion === null) {{ jetDevVersion = v; return; }}
@@ -1248,7 +1434,10 @@ fn live_reload_script() -> String {
         // which is also what auto-collapses the overlay above.
         if (v !== jetDevVersion) {{ jetDevVersion = v; location.reload(); }}
       }})
-      .catch(function () {{}});
+      .catch(function () {{
+        reconnectAttempt += 1;
+        renderStatus({{ state: "reconnecting", message: "reconnecting · retry " + reconnectAttempt }});
+      }});
   }}, {poll_ms});
 }})();
 </script>
@@ -1296,7 +1485,7 @@ fn write_response(
 mod tests {
     use super::{
         format_build_time, format_line_colored, format_line_plain, frame_lines, header_words,
-        inject_live_reload,
+        inject_live_reload, DevStatus,
     };
 
     #[test]
@@ -1326,6 +1515,49 @@ mod tests {
         assert!(out.contains("__jet_dev_status"));
         assert!(out.contains("overlayBody.textContent = s.diagnostic"));
         assert!(out.contains("pill.querySelector(\".label\").textContent = s.message"));
+        assert!(out.contains("state === \"building\" || state === \"reconnecting\""));
+        assert!(out.contains("event.key === \"Escape\""));
+        assert!(out.contains("dismissedDiagnostic === (s.diagnostic || \"\")"));
+        assert!(out.contains("location.reload()"));
+        assert!(out.contains("reconnecting · retry "));
+        assert!(out.contains("position:fixed;left:12px;bottom:12px"));
+        assert!(out.contains("display:none;align-items:flex-start"));
+    }
+
+    #[test]
+    fn live_verbose_toggle_changes_depth_without_changing_status() {
+        let status = DevStatus::new("app.jet", false);
+        assert!(!status.verbose());
+        let before = status.json();
+        status.toggle_verbose();
+        assert!(status.verbose());
+        assert_eq!(status.json(), before);
+        status.toggle_verbose();
+        assert!(!status.verbose());
+        assert_eq!(status.json(), before);
+    }
+
+    #[test]
+    fn dashboard_detail_keeps_watched_target_and_canvas_route_pinned() {
+        let status = DevStatus::new("app.jet", false);
+        status.set_port(8123);
+        assert_eq!(
+            status.dashboard_detail_line(),
+            "         watching app.jet · Canvas http://localhost:8123/canvas · v verbose"
+        );
+    }
+
+    #[test]
+    fn browser_client_registry_counts_tabs_not_poll_connections() {
+        let status = DevStatus::new("app.jet", false);
+        status.note_client("tab-a");
+        status.note_client("tab-a");
+        assert_eq!(status.client_count(), 1);
+        status.note_client("tab-b");
+        assert_eq!(status.client_count(), 2);
+        status.note_client("");
+        status.note_client(&"x".repeat(129));
+        assert_eq!(status.client_count(), 2);
     }
 
     // --- D-FE-DEVSRV1=D: parity words shared verbatim by terminal + browser ---

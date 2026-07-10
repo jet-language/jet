@@ -119,6 +119,23 @@ fn wait_for_version_change(port: u16, baseline: &str, timeout: Duration) -> Stri
     }
 }
 
+fn wait_for_status(port: u16, client: &str, state: &str, timeout: Duration) -> String {
+    let start = Instant::now();
+    let path = format!("/__jet_dev_status?client={client}");
+    loop {
+        if let Some((200, body)) = http_get(port, &path) {
+            let body = String::from_utf8_lossy(&body).into_owned();
+            if body.contains(&format!("\"state\":\"{state}\"")) {
+                return body;
+            }
+        }
+        if start.elapsed() > timeout {
+            panic!("dev status never reached {state:?} within {timeout:?}");
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
 // ============================================================================
 // Section: `--target=web` entry mode (was tests/web_dev.rs)
 // ============================================================================
@@ -269,6 +286,207 @@ fn jet_dev_web_serves_and_rebuilds_on_save() {
     );
 
     // `guard`'s `Drop` kills and reaps the child process on scope exit.
+    drop(guard);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn jet_dev_web_error_overlay_status_last_good_and_recovery_stay_in_lockstep() {
+    if !have_tool("rustc") {
+        eprintln!(
+            "note: skipping jet_dev_web_error_overlay_status_last_good_and_recovery_stay_in_lockstep (need rustc)"
+        );
+        return;
+    }
+
+    let dir = std::env::temp_dir().join(format!("jet_dev_hybrid_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let src_path = dir.join("app.jet");
+    fs::write(&src_path, FIXTURE_SRC).unwrap();
+
+    let mut child = Command::new(jet_bin())
+        .args(["dev", "app.jet", "--target=web", "--verbose"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to start hybrid `jet dev --target=web`");
+
+    struct KillOnDrop(std::process::Child);
+    impl Drop for KillOnDrop {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
+    let stdout = child.stdout.take().unwrap();
+    let stderr = child.stderr.take().unwrap();
+    let (stderr_tx, stderr_rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let mut stderr = stderr;
+        let mut bytes = Vec::new();
+        let _ = stderr.read_to_end(&mut bytes);
+        let _ = stderr_tx.send(String::from_utf8_lossy(&bytes).into_owned());
+    });
+    let guard = KillOnDrop(child);
+    let port = wait_for_port(stdout);
+
+    let ready = wait_for_status(port, "tab-a", "ready", Duration::from_secs(10));
+    assert!(ready.contains("\"clients\":1"), "{ready}");
+    assert!(
+        ready.contains(&format!("ready · localhost:{port} · 1 client")),
+        "{ready}"
+    );
+    let second_tab = wait_for_status(port, "tab-b", "ready", Duration::from_secs(2));
+    assert!(second_tab.contains("\"clients\":2"), "{second_tab}");
+
+    let (_, baseline_body) = http_get(port, "/__jet_dev_version").expect("baseline version");
+    let baseline_version = String::from_utf8_lossy(&baseline_body).trim().to_string();
+    let (_, initial_js) = http_get(port, "/app.js").expect("initial last-good app.js");
+
+    let broken = FIXTURE_SRC.replace("print(size.height)", "missing_hybrid_symbol()");
+    fs::write(&src_path, broken).unwrap();
+    let error = wait_for_status(port, "tab-a", "error", Duration::from_secs(10));
+    assert!(error.contains("\"code\":\"E0102\""), "{error}");
+    assert!(error.contains("Error [E0102]"), "{error}");
+    assert!(error.contains("missing_hybrid_symbol"), "{error}");
+    assert!(error.contains("error · E0102 · "), "{error}");
+
+    let (_, error_version_body) =
+        http_get(port, "/__jet_dev_version").expect("version during error");
+    assert_eq!(
+        String::from_utf8_lossy(&error_version_body).trim(),
+        baseline_version,
+        "error build must not trigger reload"
+    );
+    let (_, last_good_js) = http_get(port, "/app.js").expect("last-good app.js during error");
+    assert_eq!(
+        last_good_js, initial_js,
+        "error build replaced last-good output"
+    );
+
+    let (_, html) = http_get(port, "/").expect("injected browser shell");
+    let html = String::from_utf8_lossy(&html);
+    for marker in [
+        "overlayBody.textContent = s.diagnostic",
+        "dismissedDiagnostic",
+        "state === \"building\" || state === \"reconnecting\"",
+        "location.reload()",
+    ] {
+        assert!(
+            html.contains(marker),
+            "browser hybrid control missing {marker}"
+        );
+    }
+
+    fs::write(&src_path, FIXTURE_SRC_EDITED).unwrap();
+    let recovered_version =
+        wait_for_version_change(port, &baseline_version, Duration::from_secs(15));
+    assert_ne!(recovered_version, baseline_version);
+    let recovered = wait_for_status(port, "tab-a", "ready", Duration::from_secs(5));
+    assert!(recovered.contains("\"diagnostic\":\"\""), "{recovered}");
+    assert!(recovered.contains("\"code\":\"\""), "{recovered}");
+    let expected_edited = jet::compile_web_with_path(FIXTURE_SRC_EDITED, "app.jet")
+        .expect("front end rejected recovered fixture")
+        .web
+        .expect("web output after recovery")
+        .js_app;
+    let (_, recovered_js) = http_get(port, "/app.js").expect("recovered app.js");
+    assert_eq!(String::from_utf8_lossy(&recovered_js), expected_edited);
+
+    drop(guard);
+    let terminal = stderr_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("collect append-only terminal transcript");
+    assert!(
+        !terminal.contains('\x1b'),
+        "NO_COLOR transcript carried ANSI: {terminal}"
+    );
+    for marker in [
+        "jet dev  [ready]",
+        "jet dev  [building]",
+        "jet dev  [error] E0102",
+        "Error [E0102]",
+        "missing_hybrid_symbol",
+        "save app.jet  →  error E0102",
+        "save app.jet  →  rebuilt",
+        "GET  /app.js",
+    ] {
+        assert!(
+            terminal.contains(marker),
+            "terminal hybrid transcript missing {marker}:\n{terminal}"
+        );
+    }
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn jet_dev_web_browser_runs_hybrid_status_overlay_and_recovery_matrix() {
+    if !have_tool("rustc") || !have_tool("node") || !have_tool("chromium") {
+        eprintln!(
+            "note: skipping jet_dev_web_browser_runs_hybrid_status_overlay_and_recovery_matrix (need rustc + node + chromium)"
+        );
+        return;
+    }
+
+    let dir =
+        std::env::temp_dir().join(format!("jet_dev_hybrid_browser_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let src_path = dir.join("app.jet");
+    fs::write(&src_path, FIXTURE_SRC).unwrap();
+    let port = unused_local_port();
+
+    let child = Command::new(jet_bin())
+        .args([
+            "dev",
+            "app.jet",
+            "--target=web",
+            &format!("--port={port}"),
+        ])
+        .current_dir(&dir)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("failed to start browser-matrix dev server");
+
+    struct KillOnDrop(std::process::Child);
+    impl Drop for KillOnDrop {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let guard = KillOnDrop(child);
+    wait_for_server_up(port, Duration::from_secs(20));
+
+    let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let output = Command::new("node")
+        .arg(repo.join("scripts/web-dev-test/hybrid.mjs"))
+        .arg("--port")
+        .arg(port.to_string())
+        .arg("--source")
+        .arg(&src_path)
+        .current_dir(&repo)
+        .output()
+        .expect("run hybrid browser matrix");
+    assert!(
+        output.status.success(),
+        "hybrid browser matrix failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout)
+            .contains("PASS hybrid dev-server browser matrix"),
+        "browser matrix did not report completion"
+    );
+    assert_eq!(fs::read_to_string(&src_path).unwrap(), FIXTURE_SRC_EDITED);
+
     drop(guard);
     let _ = fs::remove_dir_all(&dir);
 }
