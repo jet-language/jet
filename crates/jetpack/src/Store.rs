@@ -1006,8 +1006,9 @@ fn open_snapshot_files(
 fn clear_close_on_exec(file: &fs::File) -> std::io::Result<()> {
     use std::os::fd::AsRawFd as _;
     const F_SETFD: i32 = 2;
+    // Must match studio_transactions.rs: variadic fcntl (clashing_extern_declarations).
     unsafe extern "C" {
-        fn fcntl(fd: i32, command: i32, argument: i32) -> i32;
+        fn fcntl(fd: i32, command: i32, ...) -> i32;
     }
     if unsafe { fcntl(file.as_raw_fd(), F_SETFD, 0) } == -1 {
         return Err(std::io::Error::last_os_error());
