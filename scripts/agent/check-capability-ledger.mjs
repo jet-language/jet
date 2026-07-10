@@ -381,13 +381,14 @@ function verifyFocused(towerPath) {
 
 function hostileFixtures(towerPath) {
   const baseManifest = readJson(MANIFEST_PATH);
-  const baseBoard = readJson(towerPath);
   const fixtures = readJson(FIXTURES_PATH);
   for (const fixture of fixtures.cases) {
     const manifest = structuredClone(baseManifest);
-    const board = structuredClone(baseBoard);
+    // Fresh archive-aware read per fixture (D-TWR-ARCHIVE1): owner cards may
+    // have retired into history.json, and mutations must not leak across cases.
+    const { board, cards } = loadBoardCards(towerPath);
     const claim = manifest.claims.find((item) => item.id === fixture.claimId);
-    const card = board.cards.find((item) => item.num === fixture.cardNum);
+    const card = cards.find((item) => item.num === fixture.cardNum);
     const overrides = new Map();
     if (!claim || !card) throw new Error(`${fixture.id}: real claim/card fixture missing`);
     switch (fixture.mutation) {
@@ -445,7 +446,7 @@ function hostileFixtures(towerPath) {
         throw new Error(`${fixture.id}: unknown mutation ${fixture.mutation}`);
     }
     let failure = "";
-    try { validateManifest(manifest, board, { fileOverrides: overrides }); } catch (error) { failure = error.message; }
+    try { validateManifest(manifest, board, { fileOverrides: overrides, cards }); } catch (error) { failure = error.message; }
     if (!failure.includes(fixture.expectedError)) {
       throw new Error(`${fixture.id}: expected ${fixture.expectedError}, got ${failure || "success"}`);
     }
