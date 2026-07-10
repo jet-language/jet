@@ -514,49 +514,125 @@ fn jet_std_os_set_current_dir(path: &String) -> Result<(), jet_std::IoError> {
     })
 }
 
-#[cfg(unix)]
-mod jet_os_unix {
-    static HIT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+mod jet_os_interrupt {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{mpsc, OnceLock};
 
-    extern "C" fn mark(_: i32) {
-        HIT.store(true, std::sync::atomic::Ordering::SeqCst);
+    static PENDING: AtomicUsize = AtomicUsize::new(0);
+    static DISPATCH: OnceLock<Result<mpsc::Sender<Command>, String>> = OnceLock::new();
+
+    enum Command {
+        Register(Box<dyn Fn() + Send + 'static>, mpsc::SyncSender<()>),
     }
 
-    extern "C" {
-        fn signal(sig: i32, handler: extern "C" fn(i32)) -> usize;
+    fn note_interrupt() {
+        // OS callbacks do no allocation, locking, or user work.
+        PENDING.fetch_add(1, Ordering::Relaxed);
+    }
+
+    #[cfg(unix)]
+    extern "C" fn unix_mark(_: i32) {
+        note_interrupt();
+    }
+
+    #[cfg(unix)]
+    fn install_platform_handler() -> Result<(), String> {
+        extern "C" {
+            fn signal(sig: i32, handler: extern "C" fn(i32)) -> usize;
+        }
+        const SIGINT: i32 = 2;
+        let previous = unsafe { signal(SIGINT, unix_mark) };
+        if previous == usize::MAX {
+            Err("could not install the SIGINT handler".to_string())
+        } else {
+            Ok(())
+        }
+    }
+
+    #[cfg(windows)]
+    unsafe extern "system" fn windows_mark(kind: u32) -> i32 {
+        const CTRL_C_EVENT: u32 = 0;
+        if kind == CTRL_C_EVENT {
+            note_interrupt();
+            1
+        } else {
+            0
+        }
+    }
+
+    #[cfg(windows)]
+    fn install_platform_handler() -> Result<(), String> {
+        type Handler = Option<unsafe extern "system" fn(u32) -> i32>;
+        extern "system" {
+            fn SetConsoleCtrlHandler(handler: Handler, add: i32) -> i32;
+        }
+        let installed = unsafe { SetConsoleCtrlHandler(Some(windows_mark), 1) };
+        if installed == 0 {
+            Err("could not install the Windows console Ctrl-C handler".to_string())
+        } else {
+            Ok(())
+        }
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    fn install_platform_handler() -> Result<(), String> {
+        Err("interrupt handling is unavailable on this target".to_string())
+    }
+
+    fn dispatcher() -> Result<&'static mpsc::Sender<Command>, String> {
+        match DISPATCH.get_or_init(|| {
+            install_platform_handler()?;
+            let (tx, rx) = mpsc::channel::<Command>();
+            std::thread::Builder::new()
+                .name("jet-interrupt".to_string())
+                .spawn(move || {
+                    let mut handlers: Vec<Box<dyn Fn() + Send + 'static>> = Vec::new();
+                    loop {
+                        match rx.recv_timeout(std::time::Duration::from_millis(10)) {
+                            Ok(Command::Register(handler, ready)) => {
+                                handlers.push(handler);
+                                let _ = ready.send(());
+                            }
+                            Err(mpsc::RecvTimeoutError::Disconnected) => return,
+                            Err(mpsc::RecvTimeoutError::Timeout) => {}
+                        }
+                        let count = PENDING.swap(0, Ordering::Acquire);
+                        for _ in 0..count {
+                            for handler in &handlers {
+                                let _ = std::panic::catch_unwind(
+                                    std::panic::AssertUnwindSafe(|| handler()),
+                                );
+                            }
+                        }
+                    }
+                })
+                .map_err(|e| format!("could not start interrupt dispatcher: {e}"))?;
+            Ok(tx)
+        }) {
+            Ok(tx) => Ok(tx),
+            Err(message) => Err(message.clone()),
+        }
     }
 
     pub fn on_interrupt<F>(handler: F)
     where
         F: Fn() + Send + 'static,
     {
-        const SIGINT: i32 = 2;
-        unsafe {
-            signal(SIGINT, mark);
-        }
-        std::thread::spawn(move || loop {
-            if HIT.swap(false, std::sync::atomic::Ordering::SeqCst) {
-                handler();
-            }
-            std::thread::sleep(std::time::Duration::from_millis(25));
-        });
+        let tx = dispatcher().unwrap_or_else(|message| panic!("core.os.on_interrupt: {message}"));
+        let (ready_tx, ready_rx) = mpsc::sync_channel(0);
+        tx.send(Command::Register(Box::new(handler), ready_tx))
+            .unwrap_or_else(|_| panic!("core.os.on_interrupt: interrupt dispatcher stopped"));
+        ready_rx
+            .recv()
+            .unwrap_or_else(|_| panic!("core.os.on_interrupt: interrupt dispatcher stopped"));
     }
 }
 
-#[cfg(unix)]
 fn jet_std_os_on_interrupt<F>(handler: F)
 where
     F: Fn() + Send + 'static,
 {
-    jet_os_unix::on_interrupt(handler);
-}
-
-#[cfg(not(unix))]
-fn jet_std_os_on_interrupt<F>(handler: F)
-where
-    F: Fn() + Send + 'static,
-{
-    let _ = handler;
+    jet_os_interrupt::on_interrupt(handler);
 }
 
 fn jet_testing_snap(name: &String, actual: &String) -> bool {

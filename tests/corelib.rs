@@ -168,7 +168,8 @@ fn run() {
 "#,
     );
     assert!(
-        !facts_only.rust.contains("mod jet_os_unix")
+        !facts_only.rust.contains("mod jet_os_interrupt")
+            && !facts_only.rust.contains("SetConsoleCtrlHandler")
             && !facts_only.rust.contains("jet_std_os_on_interrupt"),
         "ordinary core.os facts should not inherit signal FFI"
     );
@@ -186,9 +187,14 @@ fn run() {
 "#,
     );
     assert!(
-        with_interrupt.rust.contains("mod jet_os_unix")
-            && with_interrupt.rust.contains("jet_std_os_on_interrupt"),
-        "on_interrupt should keep its vetted signal helper"
+        with_interrupt.rust.contains("mod jet_os_interrupt")
+            && with_interrupt.rust.contains("SetConsoleCtrlHandler")
+            && with_interrupt.rust.contains("CTRL_C_EVENT")
+            && with_interrupt.rust.contains("AtomicUsize")
+            && with_interrupt.rust.contains("catch_unwind")
+            && with_interrupt.rust.contains("jet_std_os_on_interrupt")
+            && !with_interrupt.rust.contains("let _ = handler"),
+        "on_interrupt should keep its Unix/Windows dispatcher and no silent no-op"
     );
 }
 
