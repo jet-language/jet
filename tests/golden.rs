@@ -13,7 +13,9 @@ use std::process::Command;
 use std::sync::{Arc, Mutex};
 
 mod common;
-use common::{panic_message, test_worker_count, FfiBridgeLock};
+use common::{
+    fixture_filter, fixture_matches, panic_message, test_worker_count, unified_diff, FfiBridgeLock,
+};
 
 #[derive(Clone)]
 struct GoldenEntry {
@@ -28,6 +30,7 @@ struct GoldenEnv {
     have_rustc: bool,
     have_cargo: bool,
     have_gtk: bool,
+    update_expected: bool,
 }
 
 fn gtk_loader_unavailable(stderr: &[u8]) -> bool {
@@ -127,12 +130,31 @@ fn examples_compile_and_run() {
         }
     }
     entries.sort_by(|a, b| a.stem.cmp(&b.stem));
+    let filter = fixture_filter("JET_GOLDEN_FILTER");
+    entries.retain(|entry| fixture_matches(filter.as_deref(), &entry.shown));
+    assert!(
+        !entries.is_empty(),
+        "JET_GOLDEN_FILTER matched no examples: {}",
+        filter.as_deref().unwrap_or("<unfiltered>")
+    );
+    let update_expected = match std::env::var("JET_UPDATE_GOLDEN") {
+        Err(_) => false,
+        Ok(value) if value == "1" => {
+            assert!(
+                filter.is_some(),
+                "JET_UPDATE_GOLDEN=1 requires JET_GOLDEN_FILTER so updates stay scoped"
+            );
+            true
+        }
+        Ok(value) => panic!("JET_UPDATE_GOLDEN must be exactly 1, got {value:?}"),
+    };
     let env = Arc::new(GoldenEnv {
         ex_dir,
         ext,
         have_rustc,
         have_cargo,
         have_gtk,
+        update_expected,
     });
     let jobs = Arc::new(Mutex::new(std::collections::VecDeque::from(entries)));
     let failures = Arc::new(Mutex::new(Vec::<String>::new()));
@@ -171,7 +193,7 @@ fn examples_compile_and_run() {
     );
     let checked = *checked.lock().unwrap();
     assert!(
-        checked >= 2,
+        filter.is_some() || checked >= 2,
         "expected at least 2 examples, found {}",
         checked
     );
@@ -330,20 +352,30 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
         .join("expected")
         .join(format!("{}.stderr.out", stem));
     if err_path.exists() {
-        let expected_err = fs::read_to_string(&err_path)
-            .unwrap_or_else(|_| panic!("missing examples/features/expected/{}.err.out", stem));
         assert_eq!(
             run.status.code(),
             Some(70),
             "exit code mismatch for example {}",
             stem
         );
-        assert_eq!(
-            String::from_utf8_lossy(&run.stderr),
-            expected_err,
-            "stderr mismatch for example {}",
-            stem
-        );
+        let actual_err = String::from_utf8_lossy(&run.stderr);
+        if env.update_expected {
+            fs::write(&err_path, actual_err.as_bytes()).unwrap();
+        } else {
+            let expected_err = fs::read_to_string(&err_path)
+                .unwrap_or_else(|_| panic!("missing examples/features/expected/{}.err.out", stem));
+            if actual_err != expected_err {
+                panic!(
+                    "stderr mismatch for example {stem}:\n{}",
+                    unified_diff(
+                        &format!("examples/features/expected/{stem}.err.out"),
+                        &format!("examples/features/{stem} stderr (actual)"),
+                        &expected_err,
+                        &actual_err,
+                    )
+                );
+            }
+        }
     } else {
         assert!(
             run.status.success(),
@@ -352,24 +384,48 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
             String::from_utf8_lossy(&run.stdout),
             String::from_utf8_lossy(&run.stderr)
         );
-        let expected = fs::read_to_string(env.ex_dir.join("expected").join(format!("{}.out", stem)))
-            .unwrap_or_else(|_| panic!("missing examples/features/expected/{}.out", stem));
-        assert_eq!(
-            String::from_utf8_lossy(&run.stdout),
-            expected,
-            "output mismatch for example {}",
-            stem
+        let out_path = env.ex_dir.join("expected").join(format!("{}.out", stem));
+        assert!(
+            out_path.is_file(),
+            "missing examples/features/expected/{stem}.out; update mode never creates a new channel"
         );
+        let actual = String::from_utf8_lossy(&run.stdout);
+        if env.update_expected {
+            fs::write(&out_path, actual.as_bytes()).unwrap();
+        } else {
+            let expected = fs::read_to_string(&out_path).unwrap();
+            if actual != expected {
+                panic!(
+                    "output mismatch for example {stem}:\n{}",
+                    unified_diff(
+                        &format!("examples/features/expected/{stem}.out"),
+                        &format!("examples/features/{stem} stdout (actual)"),
+                        &expected,
+                        &actual,
+                    )
+                );
+            }
+        }
         if success_err_path.exists() {
-            let expected_err = fs::read_to_string(&success_err_path).unwrap_or_else(|_| {
-                panic!("missing examples/features/expected/{}.stderr.out", stem)
-            });
-            assert_eq!(
-                String::from_utf8_lossy(&run.stderr),
-                expected_err,
-                "stderr mismatch for example {}",
-                stem
-            );
+            let actual_err = String::from_utf8_lossy(&run.stderr);
+            if env.update_expected {
+                fs::write(&success_err_path, actual_err.as_bytes()).unwrap();
+            } else {
+                let expected_err = fs::read_to_string(&success_err_path).unwrap_or_else(|_| {
+                    panic!("missing examples/features/expected/{}.stderr.out", stem)
+                });
+                if actual_err != expected_err {
+                    panic!(
+                        "stderr mismatch for example {stem}:\n{}",
+                        unified_diff(
+                            &format!("examples/features/expected/{stem}.stderr.out"),
+                            &format!("examples/features/{stem} stderr (actual)"),
+                            &expected_err,
+                            &actual_err,
+                        )
+                    );
+                }
+            }
         }
     }
 }

@@ -6,7 +6,7 @@
 #![allow(dead_code)]
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -52,6 +52,222 @@ pub fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
         (*s).to_string()
     } else {
         "panic with non-string payload".to_string()
+    }
+}
+
+/// Read a fixture substring filter and normalize it to a repository-relative,
+/// forward-slash path. Absolute paths and parent traversal are rejected so a
+/// copied CI command behaves the same from every checkout.
+pub fn fixture_filter(var: &str) -> Option<String> {
+    let raw = std::env::var(var).ok()?;
+    Some(normalize_fixture_selector(var, &raw))
+}
+
+pub fn normalize_fixture_selector(var: &str, raw: &str) -> String {
+    let normalized_separators = raw.trim().replace('\\', "/");
+    let raw = normalized_separators.as_str();
+    assert!(!raw.is_empty(), "{var} must not be empty");
+    let path = Path::new(raw);
+    assert!(!path.is_absolute(), "{var} must be repository-relative: {raw}");
+    let mut parts = Vec::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::Normal(part) => parts.push(part.to_string_lossy().into_owned()),
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                panic!("{var} must not escape the repository: {raw}")
+            }
+        }
+    }
+    assert!(!parts.is_empty(), "{var} must name a fixture");
+    parts.join("/")
+}
+
+pub fn fixture_matches(filter: Option<&str>, canonical_relative: &str) -> bool {
+    filter.map_or(true, |needle| canonical_relative.contains(needle))
+}
+
+pub const UNIFIED_DIFF_MAX_INPUT_BYTES: usize = 64 * 1024;
+pub const UNIFIED_DIFF_MAX_INPUT_LINES: usize = 256;
+pub const UNIFIED_DIFF_MAX_OUTPUT_BYTES: usize = 32 * 1024;
+
+const DIFF_OUTPUT_TRUNCATED: &str =
+    "\n... diff output truncated; remaining compared edits omitted ...\n";
+
+/// Small std-only line diff for fixture failures. Hostile compiler output is
+/// bounded before the dynamic-programming LCS and while rendering, keeping
+/// memory and failure-message size fixed. Every discarded input or edit is
+/// named explicitly in the output.
+pub fn unified_diff(
+    expected_name: &str,
+    actual_name: &str,
+    expected: &str,
+    actual: &str,
+) -> String {
+    let expected_lines = bounded_diff_lines(expected);
+    let actual_lines = bounded_diff_lines(actual);
+    let columns = actual_lines.lines.len() + 1;
+    let mut lcs = vec![0usize; (expected_lines.lines.len() + 1) * columns];
+    for i in (0..expected_lines.len()).rev() {
+        for j in (0..actual_lines.lines.len()).rev() {
+            let here = i * columns + j;
+            lcs[here] = if expected_lines.lines[i] == actual_lines.lines[j] {
+                lcs[(i + 1) * columns + j + 1] + 1
+            } else {
+                lcs[(i + 1) * columns + j].max(lcs[i * columns + j + 1])
+            };
+        }
+    }
+
+    let mut out = BoundedDiffOutput::new();
+    out.push(&format!("--- {expected_name}\n+++ {actual_name}\n"));
+    push_input_truncation(&mut out, "expected", expected, &expected_lines);
+    push_input_truncation(&mut out, "actual", actual, &actual_lines);
+    out.push(&format!(
+        "@@ -1,{} +1,{} @@\n",
+        expected_lines.lines.len(),
+        actual_lines.lines.len()
+    ));
+    let (mut i, mut j) = (0, 0);
+    while i < expected_lines.lines.len() || j < actual_lines.lines.len() {
+        if i < expected_lines.lines.len()
+            && j < actual_lines.lines.len()
+            && expected_lines.lines[i] == actual_lines.lines[j]
+        {
+            push_diff_line(
+                &mut out,
+                ' ',
+                expected_lines.lines[i],
+                expected_lines.cut_mid_line && i + 1 == expected_lines.lines.len(),
+            );
+            i += 1;
+            j += 1;
+        } else if j < actual_lines.lines.len()
+            && (i == expected_lines.lines.len()
+                || lcs[i * columns + j + 1] >= lcs[(i + 1) * columns + j])
+        {
+            push_diff_line(
+                &mut out,
+                '+',
+                actual_lines.lines[j],
+                actual_lines.cut_mid_line && j + 1 == actual_lines.lines.len(),
+            );
+            j += 1;
+        } else {
+            push_diff_line(
+                &mut out,
+                '-',
+                expected_lines.lines[i],
+                expected_lines.cut_mid_line && i + 1 == expected_lines.lines.len(),
+            );
+            i += 1;
+        }
+    }
+    out.finish()
+}
+
+struct BoundedDiffLines<'a> {
+    lines: Vec<&'a str>,
+    compared_bytes: usize,
+    cut_mid_line: bool,
+}
+
+impl BoundedDiffLines<'_> {
+    fn len(&self) -> usize {
+        self.lines.len()
+    }
+}
+
+fn bounded_diff_lines(input: &str) -> BoundedDiffLines<'_> {
+    let mut byte_end = input.len().min(UNIFIED_DIFF_MAX_INPUT_BYTES);
+    while !input.is_char_boundary(byte_end) {
+        byte_end -= 1;
+    }
+    let prefix = &input[..byte_end];
+    let mut lines = Vec::new();
+    let mut compared_bytes = 0;
+    for line in prefix.split_inclusive('\n').take(UNIFIED_DIFF_MAX_INPUT_LINES) {
+        compared_bytes += line.len();
+        lines.push(line);
+    }
+    BoundedDiffLines {
+        lines,
+        compared_bytes,
+        cut_mid_line: compared_bytes < input.len()
+            && compared_bytes > 0
+            && input.as_bytes()[compared_bytes - 1] != b'\n',
+    }
+}
+
+fn push_input_truncation(
+    out: &mut BoundedDiffOutput,
+    side: &str,
+    input: &str,
+    bounded: &BoundedDiffLines<'_>,
+) {
+    if bounded.compared_bytes < input.len() {
+        out.push(&format!(
+            "# diff input truncated: {side} compares first {} of {} bytes across {} lines; limits are {} bytes/{} lines\n",
+            bounded.compared_bytes,
+            input.len(),
+            bounded.lines.len(),
+            UNIFIED_DIFF_MAX_INPUT_BYTES,
+            UNIFIED_DIFF_MAX_INPUT_LINES,
+        ));
+    }
+}
+
+struct BoundedDiffOutput {
+    text: String,
+    truncated: bool,
+}
+
+impl BoundedDiffOutput {
+    fn new() -> Self {
+        Self {
+            text: String::new(),
+            truncated: false,
+        }
+    }
+
+    fn push(&mut self, text: &str) {
+        if self.truncated {
+            return;
+        }
+        let content_limit = UNIFIED_DIFF_MAX_OUTPUT_BYTES - DIFF_OUTPUT_TRUNCATED.len();
+        let remaining = content_limit.saturating_sub(self.text.len());
+        if text.len() <= remaining {
+            self.text.push_str(text);
+            return;
+        }
+        let mut take = remaining.min(text.len());
+        while !text.is_char_boundary(take) {
+            take -= 1;
+        }
+        self.text.push_str(&text[..take]);
+        self.truncated = true;
+    }
+
+    fn finish(mut self) -> String {
+        if self.truncated {
+            self.text.push_str(DIFF_OUTPUT_TRUNCATED);
+        }
+        debug_assert!(self.text.len() <= UNIFIED_DIFF_MAX_OUTPUT_BYTES);
+        self.text
+    }
+}
+
+fn push_diff_line(
+    out: &mut BoundedDiffOutput,
+    marker: char,
+    line: &str,
+    cut_mid_line: bool,
+) {
+    let mut marker_bytes = [0; 4];
+    out.push(marker.encode_utf8(&mut marker_bytes));
+    out.push(line);
+    if !line.ends_with('\n') && !cut_mid_line {
+        out.push("\n\\ No newline at end of file\n");
     }
 }
 

@@ -40,6 +40,40 @@ tests disappear.
 5. Re-run the same focused test with no update variable. Snapshot output and
    generated files must now be clean and stable.
 
+### Run and update one fixture
+
+Filters are repository-relative substring matches and fail when they match
+nothing. Keep the test name in the command so an error-fixture selector does not
+also invoke the lint-fixture test, or vice versa.
+
+```sh
+nix develop -c env JET_UI_FILTER=tests/ui/arg_type_mismatch.jet \
+  cargo test --test diagnostic_snapshots ui_snapshots -- --nocapture
+nix develop -c env JET_UI_FILTER=tests/ui/arg_type_mismatch.jet \
+  UPDATE_EXPECT=tests/ui/arg_type_mismatch.jet \
+  cargo test --test diagnostic_snapshots ui_snapshots -- --nocapture
+```
+
+`UPDATE_EXPECT=<name>` must match exactly one selected fixture.
+`UPDATE_EXPECT=1` is the explicit bless-all mode; use it only after reviewing
+every printed diff. Lint snapshots use the same workflow with a
+`tests/ui_lint/...` filter and the `lint_snapshots` test.
+
+Golden examples use their own filter and update switch:
+
+```sh
+nix develop -c env JET_GOLDEN_FILTER=examples/features/basics/hello.jet \
+  cargo test --test golden examples_compile_and_run -- --nocapture
+nix develop -c env JET_GOLDEN_FILTER=examples/features/basics/hello.jet \
+  JET_UPDATE_GOLDEN=1 \
+  cargo test --test golden examples_compile_and_run -- --nocapture
+```
+
+Golden update mode requires a filter. It classifies the process exit first,
+then updates only the matching output channel that already exists: `.out` for
+successful stdout, `.stderr.out` for successful stderr, or `.err.out` for an
+expected runtime failure. It never creates a new expectation channel.
+
 ## Adding syntax end to end
 
 1. Confirm the exact spelling and semantics are ratified in
