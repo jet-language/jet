@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 481,
-    "rev": 3033,
+    "rev": 3036,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -13067,7 +13067,44 @@
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Syntax.rs entry updated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T21:22:44.109Z"
+        },
+        {
+          "n": 2,
+          "text": "syntax-decisions.md log entry",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T21:22:44.109Z"
+        },
+        {
+          "n": 3,
+          "text": "jet devtools grammars regenerated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T21:22:44.109Z"
+        },
+        {
+          "n": 4,
+          "text": "snapshots re-blessed",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T21:22:44.109Z"
+        }
+      ],
       "refs": [],
       "needsAcceptance": false,
       "created": "2026-07-10T21:04:15.477Z",
@@ -22734,8 +22771,10 @@
       ],
       "rec": "C",
       "draft": false,
-      "status": "open",
-      "created": "2026-07-10T21:18:01.960Z"
+      "status": "ratified",
+      "created": "2026-07-10T21:18:01.960Z",
+      "outcome": "C",
+      "ratifiedAt": "2026-07-10"
     },
     {
       "id": "D-JPK-SELECTOR1",
@@ -22786,8 +22825,10 @@
       ],
       "rec": "C",
       "draft": false,
-      "status": "open",
-      "created": "2026-07-10T21:18:02.038Z"
+      "status": "ratified",
+      "created": "2026-07-10T21:18:02.038Z",
+      "outcome": "C",
+      "ratifiedAt": "2026-07-10"
     },
     {
       "id": "D-JPK-PKGOVERRIDE1",
@@ -23014,6 +23055,59 @@
       "draft": false,
       "status": "open",
       "created": "2026-07-10T21:19:01.899Z"
+    },
+    {
+      "id": "D-JOS-APPMODULE1",
+      "cardId": "c013gf7s",
+      "group": "syntax",
+      "title": "Per-app configuration syntax inside user.<name>",
+      "gist": "How a user declares \"install and configure app X this way\" inside a user.<name> profile — the pattern all ~30 app modules (git, fish, VS Code, ghostty, ...) will follow.",
+      "explainer": "One record, one lowercase name per app, types inferred: completion in a single place lists every app, every field of every app is typed and suggested (nothing hidden behind strings), typos reuse the existing construction errors, and all thirty modules are forced into one identical shape (I8). Option C's sharing is not lost — a named apps.* module holding the same record composes on top of B through ordinary module reference whenever a second machine appears, without making profiles mandatory for the single-machine beginner.",
+      "story": "Terms used below: an \"app module\" is the typed schema plus file projection jetos ships for one application (it knows git's fields and that they land in ~/.config/git/config); \"passthrough\" is raw config text jetos copies verbatim into the app's generated config file for anything the typed fields don't cover yet.\n\nNate is moving his home-manager setup to jetos. His config has thirty-odd apps: git with a signing key, fish with aliases, starship, ghostty, helix, VS Code with pinned extensions and settings, browsers with policies, Discord. In NixOS each app is a pile of repeated lines — programs.git.enable = true; programs.git.userName = \"Nate\"; programs.git.signingKey = \"...\" — and every community module names things differently (extraConfig vs settings vs config). He wants to type an app's name once, get completion for every field that app supports, and have his work laptop share the same app set as his desktop with one host-specific difference: the signing key only exists on the work machine. Whatever shape this ballot picks is the shape every future app module copies, so consistency across all thirty is the whole game.",
+      "inWild": "Today the owner's parity-import fixture spells this as flat option keys -- a placeholder:\n\n    options: [\n        apps.program.git.userName: \"Nate\",\n        apps.program.git.signingKey: \"ABC123\",\n        apps.program.vscode.extensions: [\"rust-lang.rust-analyzer\", \"jet.jet\"],\n    ]\n\nEvery option below replaces this with a typed declaration inside `module user.nate { ... }` (D-JOS-USERENV1). All options share the same uniform conventions, so they apply no matter which shape wins:\n\n- Presence means installed and configured. No `enable: true` ceremony; removing the declaration removes the app.\n- Every app's config value supports the same three standard fields: `package:` (override which package provides the app; defaults to the module's first-party mapping), `extraConfig:` (passthrough text merged verbatim into the generated config file), and `files:` (extra whole files keyed by path).\n- `jetos user plan nate` (D-JOS-USERAPPLY1) shows the result before anything is written:\n\n    $ jetos user plan nate\n    user nate -- 4 apps\n      git      install git  write ~/.config/git/config          (identity, signing)\n      fish     install fish write ~/.config/fish/config.fish    (2 aliases)\n      vscode   install code write settings.json, keybindings.json; 2 extensions pinned\n      ghostty  install ghostty write ~/.config/ghostty/config   (1 passthrough line)",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Typed app list — the type is the app",
+          "detail": "apps: is a list of typed values; each app module ships a type (Git, Fish, VSCode) and listing a value of that type installs and configures the app. The type name is the app's identity, so nothing is written twice. Community app modules are ordinary types from jetpack packages — publishing one requires no central schema change. Tradeoffs: discoverability starts from type names, so a beginner must guess capitalization (VSCode? VsCode?) before completion helps; the list needs a common app-value kind behind the scenes, and \"is git configured?\" means scanning a list rather than looking up one field. Duplicate listing is a checked error.",
+          "code": "module user.nate {\n    apps: [\n        Git.{\n            name: \"Nate\",\n            email: \"nate@example.test\",\n            signingKey: \"ABC123\",\n            signCommits: true,\n        },\n        Fish.{ aliases: { ll: \"eza -la\", gs: \"git status\" } },\n        VSCode.{\n            extensions: [\"rust-lang.rust-analyzer\", \"jet.jet\"],\n            settings: .{ fontFamily: \"Inter\", fontSize: 13 },\n        },\n        Ghostty.{ extraConfig: \"font-thicken = true\" },\n    ]\n}\n\n// Typing `apps: [ G` completes: Ghostty, Git, Gimp, ...\n// Listing Git twice:\n//   error: `Git` appears twice in `apps`\n//   fix: merge the two declarations into one Git.{ ... } value"
+        },
+        {
+          "key": "B",
+          "name": "One apps record — a named field per app",
+          "detail": "apps: is a single typed record with one optional lowercase field per known app; setting the field installs and configures the app. The app's everyday name is the key, the config type is inferred from the field (.{ }, D-DOTCTOR2), so the type name never appears. This is the one obvious place to look: completion inside apps: .{ lists every app available in the environment, and \"is git configured?\" is one field lookup. Field typos and duplicates fall out of the existing every-field-exactly-once construction rule — no new checking machinery, same errors as any struct. Installing an app-module package from jetpack adds its field to the record; an unknown name is a normal error with a suggestion. Tradeoff: the record's field set is assembled from installed app modules rather than being one fixed type, which the LSP and sema must treat as environment-dependent.",
+          "code": "module user.nate {\n    apps: .{\n        git: .{\n            name: \"Nate\",\n            email: \"nate@example.test\",\n            signingKey: \"ABC123\",\n            signCommits: true,\n        },\n        fish: .{ aliases: { ll: \"eza -la\", gs: \"git status\" } },\n        vscode: .{\n            extensions: [\"rust-lang.rust-analyzer\", \"jet.jet\"],\n            settings: .{ fontFamily: \"Inter\", fontSize: 13 },\n        },\n        ghostty: .{ extraConfig: \"font-thicken = true\" },\n    }\n}\n\n// Typing `apps: .{ ` completes: bat, btop, discord, eza, fish, fzf, ghostty, git, ...\n// Typo in a field:\n//   error: `git` app config has no field `signingkey`\n//   did you mean `signingKey`?\n// Unknown app:\n//   error: no app module named `spotify` in this environment\n//   fix: `jetpack search spotify`, or check the spelling"
+        },
+        {
+          "key": "C",
+          "name": "Reusable app profiles — declare once, attach per user",
+          "detail": "The canonical unit is a named apps.<name> module — a set of app configs declared once, outside any user — and user.<name> attaches profiles by reference, exactly the theme shape (D-JOS-THEME1: reusable profile, inline override where it's composed). Sharing across users and hosts is the default posture: the desktop and the work laptop attach the same apps.dev, and the work host overrides one field inline. Inside a profile, apps are declared with the named-field shape from option B. Tradeoffs: a single-machine beginner must still name a profile before configuring anything — one extra hop between \"I want git\" and typing git's fields — and a value's origin can be two files away from where it applies. Overrides layer by the ratified priority tiers (D-JOS-PRIORITY1).",
+          "code": "// tools.jet -- shared by every machine\nmodule apps.dev {\n    git: .{ name: \"Nate\", email: \"nate@example.test\", signCommits: true },\n    fish: .{ aliases: { ll: \"eza -la\", gs: \"git status\" } },\n    vscode: .{ extensions: [\"rust-lang.rust-analyzer\", \"jet.jet\"] },\n}\n\n// config.jet on the personal desktop\nmodule user.nate {\n    apps: [apps.dev]\n}\n\n// config.jet on the work laptop -- same profile, one override\nmodule user.nate {\n    apps: [apps.dev.{ git.signingKey: \"ABC123\" }]\n}\n\n// $ jetos user plan nate        (work laptop)\n// user nate -- 3 apps (profile apps.dev, 1 override)\n//   git   ~/.config/git/config   signingKey from inline override"
+        },
+        {
+          "key": "D",
+          "name": "Role groups — shell, editor, terminal as the top level",
+          "detail": "The user profile is organized by what the app is for: shell:, editors:, terminal:, vcs:, tools: groups, each holding the apps that fill that role. A newcomer who doesn't know app names can start from the role (\"I want a shell prompt\") and discover starship inside shell:. Tradeoffs: thirty real apps don't categorize cleanly — is fzf a shell tool or a search tool, is Logseq an editor? — so every app needs an assigned home the user must learn, misfiled guesses become errors, and two plausible homes for one app is exactly the two-ways-to-say-it problem I8 exists to prevent. Role words are also a vocabulary the user must absorb before their first app.",
+          "code": "module user.nate {\n    vcs: .{\n        git: .{ name: \"Nate\", email: \"nate@example.test\", signingKey: \"ABC123\" },\n    }\n    shell: .{\n        fish: .{ aliases: { ll: \"eza -la\", gs: \"git status\" } },\n        prompt: .{ starship: .{} },\n    }\n    editors: .{\n        vscode: .{ extensions: [\"rust-lang.rust-analyzer\", \"jet.jet\"] },\n    }\n    terminal: .{ ghostty: .{ extraConfig: \"font-thicken = true\" } }\n}\n\n// Misfiled app:\n//   error: `tools` group has no app `ghostty`\n//   note: ghostty belongs to the `terminal` group"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "NixOS / home-manager",
+          "note": "The bar to beat. Flat programs.* namespace, enable flag required per app, one line per field, and field names that drifted across thousands of community modules (extraConfig vs settings vs config). Powerful, but repetitive to write and inconsistent to learn.",
+          "code": "programs.git.enable = true;\nprograms.git.userName = \"Nate\";\nprograms.git.userEmail = \"nate@example.test\";\nprograms.git.signing.key = \"ABC123\";\nprograms.git.signing.signByDefault = true;\nprograms.fish.enable = true;\nprograms.fish.shellAliases = { ll = \"eza -la\"; };"
+        },
+        {
+          "lang": "Homebrew Brewfile",
+          "note": "The opposite extreme: a pure install list with no configuration at all. Trivially discoverable, but every app's actual config still lives in hand-managed dotfiles — the gap the app modules close.",
+          "code": "brew \"git\"\nbrew \"fish\"\ncask \"visual-studio-code\""
+        }
+      ],
+      "rec": "B",
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-10T21:22:30.810Z"
     }
   ],
   "questions": [
@@ -23816,6 +23910,55 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-10T21:23:03.560Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-JPK-SELECTOR1",
+      "note": "C"
+    },
+    {
+      "at": "2026-07-10T21:22:44.109Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-JOS-BACKUP1",
+      "note": "C"
+    },
+    {
+      "at": "2026-07-10T21:22:44.109Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0i0ho3h",
+      "note": "#4 snapshots re-blessed"
+    },
+    {
+      "at": "2026-07-10T21:22:44.109Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0i0ho3h",
+      "note": "#3 jet devtools grammars regenerated"
+    },
+    {
+      "at": "2026-07-10T21:22:44.109Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0i0ho3h",
+      "note": "#2 syntax-decisions.md log entry"
+    },
+    {
+      "at": "2026-07-10T21:22:44.109Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0i0ho3h",
+      "note": "#1 Syntax.rs entry updated"
+    },
+    {
+      "at": "2026-07-10T21:22:30.810Z",
+      "by": "claude-main",
+      "action": "decision.add",
+      "ref": "D-JOS-APPMODULE1",
+      "note": "Per-app configuration syntax inside user.<name>"
+    },
     {
       "at": "2026-07-10T21:20:51.195Z",
       "by": "owner",
@@ -27266,55 +27409,6 @@
       "action": "card.criteria-meet",
       "ref": "c0ceo8wd",
       "note": "#1"
-    },
-    {
-      "at": "2026-07-10T14:08:36.626Z",
-      "by": "claude-radar",
-      "action": "card.criteria-add",
-      "ref": "c0ceo8wd",
-      "note": "#3 Tower suite green including radar unit tests"
-    },
-    {
-      "at": "2026-07-10T14:08:36.548Z",
-      "by": "claude-radar",
-      "action": "card.criteria-add",
-      "ref": "c0ceo8wd",
-      "note": "#2 Current Board + Now views byte-identical in behavior (zero d"
-    },
-    {
-      "at": "2026-07-10T14:08:36.469Z",
-      "by": "claude-radar",
-      "action": "card.criteria-add",
-      "ref": "c0ceo8wd",
-      "note": "#1 Radar tab renders live board data: burndown + milestones + o"
-    },
-    {
-      "at": "2026-07-10T14:08:26.794Z",
-      "by": "cursor-357",
-      "action": "card.update",
-      "ref": "c0e7rot4",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-10T14:08:26.721Z",
-      "by": "cursor-418",
-      "action": "card.update",
-      "ref": "c0wetgi3",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-10T14:08:26.651Z",
-      "by": "cursor-95",
-      "action": "card.update",
-      "ref": "c1nixrpd",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-10T13:57:44.608Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0ceo8wd",
-      "note": "logEntry,needsAcceptance"
     }
   ],
   "nextNum": 368,
