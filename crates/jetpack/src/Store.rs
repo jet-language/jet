@@ -20,7 +20,7 @@ use crate::SHA256;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Child, Command, Stdio};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// The subdir of the resolved root that holds the content-addressed store.
@@ -207,6 +207,14 @@ impl VerifiedRealization {
 
     pub fn consumption_status(&self) -> &ConsumptionStatus {
         self.lease.status()
+    }
+
+    pub fn original_output(&self) -> &Path {
+        self.lease.original_output()
+    }
+
+    pub fn original_reference(&self) -> &str {
+        self.lease.original_reference()
     }
 
     pub(crate) fn into_parts(self) -> (StoreEntry, super::Provider::SourceState, CacheLease) {
@@ -533,14 +541,17 @@ pub struct VerifiedCacheHit {
 
 pub struct CacheLease {
     files: Vec<(PathBuf, fs::File)>,
+    executables: Vec<(std::ffi::OsString, fs::File)>,
     out: PathBuf,
     snapshot_root: PathBuf,
     bin_relative: Option<PathBuf>,
     expected_digest: String,
     package: String,
     version: String,
+    reference: String,
     status: ConsumptionStatus,
     wrapper_root: Option<PathBuf>,
+    _wrapper_dir_handle: Option<fs::File>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -558,6 +569,14 @@ impl CacheLease {
         self.wrapper_root.as_deref()
     }
 
+    pub fn original_output(&self) -> &Path {
+        &self.out
+    }
+
+    pub fn original_reference(&self) -> &str {
+        &self.reference
+    }
+
     fn require_consumable(&self) -> std::io::Result<()> {
         match &self.status {
             ConsumptionStatus::Consumable => Ok(()),
@@ -572,13 +591,9 @@ impl CacheLease {
         if name.contains(std::path::MAIN_SEPARATOR) {
             return None;
         }
-        let bin = self.bin_relative.as_ref()?;
-        self.files
+        self.executables
             .iter()
-            .find(|(member, _)| {
-                member.parent() == Some(bin.as_path())
-                    && member.file_name().and_then(|part| part.to_str()) == Some(name)
-            })
+            .find(|(member, _)| member == name)
             .map(|(_, file)| {
                 #[cfg(target_os = "linux")]
                 {
@@ -587,6 +602,7 @@ impl CacheLease {
                 }
                 #[cfg(not(target_os = "linux"))]
                 {
+                    let bin = self.bin_relative.as_ref()?;
                     self.snapshot_root.join(bin).join(name)
                 }
             })
@@ -613,6 +629,19 @@ impl CacheLease {
                 return Ok(PathBuf::from(format!("/proc/self/fd/{}", file.as_raw_fd())));
             }
         }
+        if relative.parent() == self.bin_relative.as_deref() {
+            if let Some((_, file)) = self
+                .executables
+                .iter()
+                .find(|(name, _)| Some(name.as_os_str()) == relative.file_name())
+            {
+                #[cfg(target_os = "linux")]
+                {
+                    use std::os::fd::AsRawFd as _;
+                    return Ok(PathBuf::from(format!("/proc/self/fd/{}", file.as_raw_fd())));
+                }
+            }
+        }
         Ok(self.snapshot_root.join(relative))
     }
 
@@ -627,6 +656,30 @@ impl CacheLease {
                 "leased output changed: expected {}, got {actual}",
                 self.expected_digest
             )));
+        }
+        #[cfg(target_os = "linux")]
+        if let Some(wrapper) = &self.wrapper_root {
+            let mut actual = fs::read_dir(wrapper)?
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .map(|entry| {
+                    let target = fs::read_link(entry.path())?;
+                    Ok((entry.file_name(), target))
+                })
+                .collect::<std::io::Result<Vec<_>>>()?;
+            actual.sort_by(|left, right| left.0.cmp(&right.0));
+            let mut expected = self
+                .executables
+                .iter()
+                .map(|(name, file)| {
+                    use std::os::fd::AsRawFd as _;
+                    (name.clone(), PathBuf::from(format!("/proc/self/fd/{}", file.as_raw_fd())))
+                })
+                .collect::<Vec<_>>();
+            expected.sort_by(|left, right| left.0.cmp(&right.0));
+            if actual != expected {
+                return Err(std::io::Error::other("lease executable wrappers changed"));
+            }
         }
         Ok(())
     }
@@ -656,10 +709,6 @@ impl Drop for CacheLease {
     fn drop(&mut self) {
         let _ = make_tree_writable_for_removal(&self.snapshot_root);
         let _ = fs::remove_dir_all(&self.snapshot_root);
-        if let Some(wrapper) = &self.wrapper_root {
-            let _ = make_tree_writable_for_removal(wrapper);
-            let _ = fs::remove_dir_all(wrapper);
-        }
     }
 }
 
@@ -701,16 +750,19 @@ fn snapshot_lease(roots: &Roots, entry: &StoreEntry) -> std::io::Result<CacheLea
         fs::create_dir_all(&snapshot_root)?;
         return Ok(CacheLease {
             files: Vec::new(),
+            executables: Vec::new(),
             out: PathBuf::from(&entry.out),
             snapshot_root,
             bin_relative: None,
             expected_digest: String::new(),
             package: entry.name.clone(),
             version: entry.version.clone(),
+            reference: entry.reference.clone(),
             status: ConsumptionStatus::NonConsumable {
                 reason: "realization has no canonical consumable output".to_string(),
             },
             wrapper_root: None,
+            _wrapper_dir_handle: None,
         });
     }
     let mut hardlinks = BTreeMap::new();
@@ -733,47 +785,151 @@ fn snapshot_lease(roots: &Roots, entry: &StoreEntry) -> std::io::Result<CacheLea
     let bin_relative = (!entry.bin.is_empty())
         .then(|| Path::new(&entry.bin).strip_prefix(&entry.out).ok().map(PathBuf::from))
         .flatten();
-    let wrapper_root = create_exec_wrappers(&snapshot_root, bin_relative.as_deref(), &files)?;
+    let executables = open_snapshot_executables(&snapshot_root, bin_relative.as_deref())?;
+    let wrappers = create_exec_wrappers(&snapshot_root, &executables)?;
     Ok(CacheLease {
         files,
+        executables,
         out: PathBuf::from(&entry.out),
         snapshot_root,
         bin_relative,
         expected_digest: sealed_digest,
         package: entry.name.clone(),
         version: entry.version.clone(),
+        reference: entry.reference.clone(),
         status: ConsumptionStatus::Consumable,
-        wrapper_root,
+        wrapper_root: wrappers.as_ref().map(|wrapper| wrapper.root.clone()),
+        _wrapper_dir_handle: wrappers.map(|wrapper| wrapper.directory),
     })
 }
 
-fn create_exec_wrappers(
+struct ExecWrappers {
+    root: PathBuf,
+    directory: fs::File,
+}
+
+fn open_snapshot_executables(
     snapshot_root: &Path,
     bin: Option<&Path>,
-    files: &[(PathBuf, fs::File)],
-) -> std::io::Result<Option<PathBuf>> {
+) -> std::io::Result<Vec<(std::ffi::OsString, fs::File)>> {
     let Some(bin) = bin else {
-        return Ok(None);
+        return Ok(Vec::new());
     };
-    let wrapper = snapshot_root.with_extension("exec");
-    fs::create_dir_all(&wrapper)?;
-    for (member, file) in files.iter().filter(|(member, _)| member.parent() == Some(bin)) {
-        let Some(name) = member.file_name() else { continue };
-        #[cfg(target_os = "linux")]
-        {
-            use std::os::fd::AsRawFd as _;
-            std::os::unix::fs::symlink(
-                format!("/proc/self/fd/{}", file.as_raw_fd()),
-                wrapper.join(name),
-            )?;
-        }
-        #[cfg(not(target_os = "linux"))]
-        fs::copy(snapshot_root.join(member), wrapper.join(name))?;
+    let path = snapshot_root.join(bin);
+    let mut out = Vec::new();
+    if !path.is_dir() {
+        return Ok(out);
     }
-    let mut permissions = fs::metadata(&wrapper)?.permissions();
-    permissions.set_readonly(true);
-    fs::set_permissions(&wrapper, permissions)?;
-    Ok(Some(wrapper))
+    let mut entries = fs::read_dir(path)?.collect::<Result<Vec<_>, _>>()?;
+    entries.sort_by_key(|entry| entry.file_name());
+    for entry in entries {
+        let file = fs::File::open(entry.path())?;
+        if !file.metadata()?.is_file() {
+            continue;
+        }
+        clear_close_on_exec(&file)?;
+        out.push((entry.file_name(), file));
+    }
+    Ok(out)
+}
+
+#[cfg(target_os = "linux")]
+fn create_exec_wrappers(
+    snapshot_root: &Path,
+    executables: &[(std::ffi::OsString, fs::File)],
+) -> std::io::Result<Option<ExecWrappers>> {
+    use std::io::{BufRead as _, Write as _};
+    use std::os::fd::AsRawFd as _;
+
+    if executables.is_empty() {
+        return Ok(None);
+    }
+    let mountpoint = snapshot_root.with_extension("exec-mount");
+    fs::create_dir_all(&mountpoint)?;
+    let unshare = find_system_tool("unshare")?;
+    let mount = find_system_tool("mount")?;
+    let shell = find_system_tool("sh")?;
+    let script = r#"set -eu
+"$1" -t tmpfs -o size=1m,mode=0755 jetpack-exec "$2"
+printf 'ready\n'
+IFS= read -r _
+"$1" -o remount,bind,ro "$2"
+printf 'sealed\n'
+IFS= read -r _ || true
+"#;
+    let mut child = Command::new(unshare)
+        .args(["--user", "--map-root-user", "--mount", "--propagation", "private"])
+        .arg(shell)
+        .args(["-c", script, "jetpack-lease-keeper"])
+        .arg(mount)
+        .arg(&mountpoint)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    let mut input = child.stdin.take().expect("piped lease keeper stdin");
+    let output = child.stdout.take().expect("piped lease keeper stdout");
+    let mut output = std::io::BufReader::new(output);
+    let mut line = String::new();
+    output.read_line(&mut line)?;
+    if line.trim() != "ready" {
+        return Err(wrapper_keeper_error(child, "creating private executable mount"));
+    }
+    let root = PathBuf::from(format!("/proc/{}/root{}", child.id(), mountpoint.display()));
+    for (name, file) in executables {
+        std::os::unix::fs::symlink(
+            format!("/proc/self/fd/{}", file.as_raw_fd()),
+            root.join(name),
+        )?;
+    }
+    input.write_all(b"seal\n")?;
+    input.flush()?;
+    line.clear();
+    output.read_line(&mut line)?;
+    if line.trim() != "sealed" {
+        return Err(wrapper_keeper_error(child, "sealing private executable mount"));
+    }
+    let directory = fs::File::open(&root)?;
+    clear_close_on_exec(&directory)?;
+    let root = PathBuf::from(format!("/proc/self/fd/{}", directory.as_raw_fd()));
+    drop(input);
+    let status = child.wait()?;
+    if !status.success() {
+        return Err(std::io::Error::other("private executable mount keeper failed"));
+    }
+    fs::remove_dir(&mountpoint)?;
+    Ok(Some(ExecWrappers { root, directory }))
+}
+
+#[cfg(target_os = "linux")]
+fn find_system_tool(name: &str) -> std::io::Result<PathBuf> {
+    ["/run/current-system/sw/bin", "/usr/bin", "/bin"]
+        .into_iter()
+        .map(PathBuf::from)
+        .map(|dir| dir.join(name))
+        .find(|path| path.is_file())
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, format!("required system tool `{name}` not found")))
+}
+
+#[cfg(target_os = "linux")]
+fn wrapper_keeper_error(mut child: Child, action: &str) -> std::io::Error {
+    use std::io::Read as _;
+    let mut stderr = String::new();
+    if let Some(mut pipe) = child.stderr.take() {
+        let _ = pipe.read_to_string(&mut stderr);
+    }
+    let _ = child.wait();
+    std::io::Error::other(format!("{action} failed: {}", stderr.trim()))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn create_exec_wrappers(
+    _snapshot_root: &Path,
+    _executables: &[(std::ffi::OsString, fs::File)],
+) -> std::io::Result<Option<ExecWrappers>> {
+    Err(std::io::Error::other(
+        "immutable executable PATH handoff is unavailable on this platform",
+    ))
 }
 
 fn copy_snapshot_node(
@@ -1941,7 +2097,7 @@ mod tests {
         .unwrap()
         .unwrap();
         fs::write(out.join("payload"), "mutated outside cooperative lock").unwrap();
-        assert!(hit.lease.validate().is_ok());
+        hit.lease.validate().unwrap();
         let stable = hit
             .lease
             .stable_path(&out.join("payload").to_string_lossy())
@@ -2029,8 +2185,13 @@ mod tests {
         let out = roots.root.join("fd-view-output");
         let tool = out.join("bin/tool");
         fs::create_dir_all(tool.parent().unwrap()).unwrap();
-        fs::write(&tool, "#!/bin/sh\nprintf trusted").unwrap();
-        fs::set_permissions(&tool, fs::Permissions::from_mode(0o555)).unwrap();
+        fs::write(out.join("bin/tool-real"), "#!/bin/sh\nprintf trusted").unwrap();
+        fs::set_permissions(
+            out.join("bin/tool-real"),
+            fs::Permissions::from_mode(0o555),
+        )
+        .unwrap();
+        symlink("tool-real", &tool).unwrap();
         let envelope = super::super::Envelope::Envelope::for_output(
             &out.to_string_lossy(),
             "mine:fd-view",
@@ -2069,7 +2230,11 @@ mod tests {
         .unwrap();
         symlink(&attacker, &out).unwrap();
 
-        assert!(hit.lease.validate().is_ok());
+        hit.lease.validate().unwrap();
+        let wrapper = hit.lease.wrapper_dir().unwrap();
+        assert!(fs::set_permissions(wrapper, fs::Permissions::from_mode(0o755)).is_err());
+        assert!(fs::remove_file(wrapper.join("tool")).is_err());
+        hit.lease.validate().unwrap();
         make_tree_writable_for_removal(&hit.lease.snapshot_root).unwrap();
         let snapshot_tool = hit.lease.snapshot_root.join("bin/tool");
         fs::remove_file(&snapshot_tool).unwrap();

@@ -52,14 +52,19 @@ JP0 stop-line now enforces three truth boundaries:
   cycles, concurrent mutation, and special files. Directory snapshots bind
   child names, types, metadata, and ctime before and after traversal. Local
   outputs are copied into per-realization sealed private snapshots. Executable
-  files use lease-owned inherited file descriptors. Lease-owned `PATH` wrappers
-  resolve nested shell execution to those exact descriptors, so replacement or
-  a same-UID rename/symlink swap cannot redirect execution. Every realization
+  files and executable symlink targets use lease-owned inherited file
+  descriptors. Lease-owned `PATH` wrappers live on a read-only private mount
+  pinned by an inherited directory descriptor and are revalidated before
+  handoff. Nested shell execution resolves to exact executable descriptors, so
+  wrapper chmod/replacement or a same-UID rename/symlink swap cannot redirect
+  execution. Every realization
   carries a mandatory typed lease: missing outputs are explicitly
   non-consumable and cannot fall back to raw paths. Leases hold no object lock.
-  JetOS retains each snapshot through kernel validation and copies every
-  needed byte into generation-owned paths before lease drop; no `/proc/self/fd`
-  or lease path enters the durable generation. Sandbox
+  JetOS retains original provider/output provenance alongside the snapshot,
+  queries the original Nix output's full `nix-store -qR` closure, copies every
+  member into generation-owned paths, and rewrites absolute store symlinks
+  before lease drop; no `/proc/self/fd`, lease path, or source-store dependency
+  enters the durable generation. Sandbox
   capability detection stays fallback until a child actually enters a jail.
 
 Production blockers after that stop-line:

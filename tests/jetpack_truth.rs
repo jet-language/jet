@@ -151,36 +151,71 @@ struct CardState {
 }
 
 fn tower_cards(root: &Path) -> BTreeMap<u64, CardState> {
-    let output = Command::new("node")
+    // #461: done cards retire into `.tower/history.json` after the walk-back
+    // buffer. JP0's audited set includes those retired cards, so the truth
+    // stop-line must read live + history — `card list` alone is live-only.
+    let mut cards = BTreeMap::new();
+    let live = Command::new("node")
         .args(["Tower/tower.mjs", "card", "list", "--json"])
         .current_dir(root)
         .output()
         .unwrap();
     assert!(
-        output.status.success(),
+        live.status.success(),
         "Tower projection failed: {}",
-        String::from_utf8_lossy(&output.stderr)
+        String::from_utf8_lossy(&live.stderr)
     );
-    let json = jet::Jetpack::JSON::parse(&String::from_utf8(output.stdout).unwrap()).unwrap();
-    json.as_array()
-        .unwrap()
-        .iter()
-        .map(|card| {
-            let num = match card.get("num").unwrap() {
-                jet::Jetpack::JSON::Json::Num(num) => *num as u64,
-                other => panic!("card num is not numeric: {other:?}"),
-            };
-            let log_empty = card.get("log").unwrap().as_array().unwrap().is_empty();
-            (
-                num,
-                CardState {
-                    epoch: card.get("epoch").unwrap().as_str().unwrap_or("").to_string(),
-                    phase: card.get("phase").unwrap().as_str().unwrap().to_string(),
-                    log_empty,
-                },
-            )
-        })
-        .collect()
+    let live_json = jet::Jetpack::JSON::parse(&String::from_utf8(live.stdout).unwrap()).unwrap();
+    for card in live_json.as_array().unwrap() {
+        ingest_tower_card(&mut cards, card, /*prefer_existing=*/ false);
+    }
+    if let Ok(raw) = std::fs::read_to_string(root.join(".tower/history.json")) {
+        let hist = jet::Jetpack::JSON::parse(&raw).unwrap();
+        if let Ok(arr) = hist.get("cards").and_then(|v| v.as_array()) {
+            for card in arr {
+                ingest_tower_card(&mut cards, card, /*prefer_existing=*/ true);
+            }
+        }
+    }
+    cards
+}
+
+fn ingest_tower_card(
+    cards: &mut BTreeMap<u64, CardState>,
+    card: &jet::Jetpack::JSON::Json,
+    prefer_existing: bool,
+) {
+    let num = match card.get("num").unwrap() {
+        jet::Jetpack::JSON::Json::Num(num) => *num as u64,
+        other => panic!("card num is not numeric: {other:?}"),
+    };
+    if prefer_existing && cards.contains_key(&num) {
+        return;
+    }
+    let log_empty = match card.get("log") {
+        Ok(log) => log.as_array().map(|a| a.is_empty()).unwrap_or(true),
+        Err(_) => true,
+    };
+    let epoch = card
+        .get("epoch")
+        .ok()
+        .and_then(|v| v.as_str().ok())
+        .unwrap_or("")
+        .to_string();
+    let phase = card
+        .get("phase")
+        .ok()
+        .and_then(|v| v.as_str().ok())
+        .unwrap_or("")
+        .to_string();
+    cards.insert(
+        num,
+        CardState {
+            epoch,
+            phase,
+            log_empty,
+        },
+    );
 }
 
 fn card_refs(text: &str) -> Vec<u64> {

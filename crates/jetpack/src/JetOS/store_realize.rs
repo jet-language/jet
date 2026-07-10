@@ -1,6 +1,8 @@
 struct RealizedPackage {
     entry: Store::StoreEntry,
     lease: Store::CacheLease,
+    original_out: PathBuf,
+    original_reference: String,
     consumption_override: Option<PathBuf>,
 }
 
@@ -14,10 +16,14 @@ impl std::ops::Deref for RealizedPackage {
 
 impl RealizedPackage {
     fn from_verified(realized: Store::VerifiedRealization) -> Self {
+        let original_out = realized.original_output().to_path_buf();
+        let original_reference = realized.original_reference().to_string();
         let (entry, _source_state, lease) = realized.into_parts();
         Self {
             entry,
             lease,
+            original_out,
+            original_reference,
             consumption_override: None,
         }
     }
@@ -34,6 +40,14 @@ impl RealizedPackage {
 
     fn set_consumption_override(&mut self, path: PathBuf) {
         self.consumption_override = Some(path);
+    }
+
+    fn original_output(&self) -> &Path {
+        &self.original_out
+    }
+
+    fn original_reference(&self) -> &str {
+        &self.original_reference
     }
 }
 
