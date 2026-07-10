@@ -168,7 +168,7 @@ pub fn nix_on_path() -> bool {
 }
 
 // ──────────────────────────────────────────────
-// Provider boundary (R0; see tools/Tower/docs/plans/epoch-5/unified-ecosystem.md).
+// Provider boundary (R0; see docs/plans/epoch-5/unified-ecosystem.md).
 //
 // The first-party core resolver owns realization; providers are extensions
 // behind one trait. `core` realizes first-party Jet packages (no Nix); `nix`

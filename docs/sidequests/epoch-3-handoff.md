@@ -29,7 +29,7 @@
 - c69 opt-in GC waits on D-DEP-GC1.
 - c102 structured concurrency is the top-level concurrency surface gate. D-ASYNCRT1=A
   already chooses M:N green threads under tasks/channels; c36 and c103 fold into nursery
-  combinators. See `tools/Tower/docs/plans/epoch-3/concurrency-vision.md`.
+  combinators. See `docs/plans/epoch-3/concurrency-vision.md`.
 - UI stack cards wait on D-SIGNAL1 and D-RENDERTGT2 before backend/component work.
 
 ## Agent Order

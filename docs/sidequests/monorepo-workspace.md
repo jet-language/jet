@@ -52,7 +52,7 @@ One grammar for the whole project. Replace the root `jetpack.toml` monorepo inde
 - **D-WORKSPACE1=B** (`docs/spec/syntax-decisions.md:2947`): retire the root `jetpack.toml` monorepo index for a fully-computable `module workspace` in `workspace.jet`; `members:` may run arbitrary `comptime` (e.g. `find("./packages") + comptime gen()`). Trade accepted: external tools must evaluate Jet — mitigated by a resolver-emitted generated lock for the common case. Keyword/filename confirmed at build (Owner Q4).
 - **D-MONOREF1=A** (`docs/spec/syntax-decisions.md:2943`): address a named-source member as `source.package` (dot, `mono.ranker`); an in-repo sibling as path-style `infra/logging` with bare `logging` as sugar when unambiguous. Resolution index-first: fetch the source's manifest only, then sparse-fetch just that package's subtree + transitive in-repo deps; full-clone fallback when the provider lacks sparse checkout.
 
-Card: `tools/Tower/board.json:526-539`.
+Card: `.tower/tower.json:526-539`.
 
 ## Implementation (staged)
 
@@ -107,7 +107,7 @@ accepted.
 
 ## Sequencing / gates
 
-1. **Hard gate — comptime execution block.** D-WORKSPACE1=B's "arbitrary comptime in `members:`" requires evaluating general expressions inside a module field. Today comptime is bindings + `comptime if` only; there is no `comptime { … }` block and no field-expression evaluation. That capability is **D-CTMARKER1=C** (`$` splice + `comptime { }` block — ratified, not implemented, `tools/Tower/board.json:624-629`, downstream of c155), plus the effect boundary **D-CTEFFECT1=A** (`find`/`fetch`/`@embed` as Tier-1 hashed-reproducible effects, `board.json:545-549`). **Build c155/D-CTMARKER1 + D-CTEFFECT1 first.**
+1. **Hard gate — comptime execution block.** D-WORKSPACE1=B's "arbitrary comptime in `members:`" requires evaluating general expressions inside a module field. Today comptime is bindings + `comptime if` only; there is no `comptime { … }` block and no field-expression evaluation. That capability is **D-CTMARKER1=C** (`$` splice + `comptime { }` block — ratified, not implemented, `.tower/tower.json:624-629`, downstream of c155), plus the effect boundary **D-CTEFFECT1=A** (`find`/`fetch`/`@embed` as Tier-1 hashed-reproducible effects, `board.json:545-549`). **Build c155/D-CTMARKER1 + D-CTEFFECT1 first.**
 2. **Soft path — ship the restricted common case early.** `members: find("./packages")` needs only the existing U4 `find()` directive + Stages 2-4, no comptime block. If the gate slips, Stages 1-5 can land for the `find()`-only common case and accept arbitrary-comptime members once the block lands. (Do not advertise this as the final surface; it is the same syntax with a narrower evaluator.)
 3. **Keyword/filename is resolved.** D-WORKSPACE2=A chose `module workspace`
    and `workspace.jet`.

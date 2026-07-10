@@ -9,7 +9,7 @@ One home per kind of document. Start here.
 | Read embedded / freestanding builds | [reference/embedded.md](reference/embedded.md) |
 | Read the versioning / release policy | [reference/versioning.md](reference/versioning.md) |
 | Know the authoritative rules | [spec/](spec/) — see below |
-| See what's planned or in progress | [tools/Tower/docs/plans/](../tools/Tower/docs/plans/) — or run the dashboard (below) |
+| See what's planned or in progress | [docs/plans/](../docs/plans/) — or run the dashboard (below) |
 
 ## spec/ — the authoritative surface
 
@@ -25,18 +25,18 @@ These are binding. When they disagree with anything else, they win.
 - [diagnostics.md](spec/diagnostics.md) — error voice + exact render format;
   snapshot-pinned.
 - [roadmap.md](spec/roadmap.md) — what's active / not yet verified, plus Epoch 1 & 2 development highlights (completed work).
-- [decision-ballots.md](../tools/Tower/docs/ballots/decision-ballots.md) — the owner's open decision
+- [decision-ballots.md](../docs/ballots/decision-ballots.md) — the owner's open decision
   queue (ratified items live in syntax-decisions.md).
 
 ## plans/ — implementation plans
 
-Plans live in [`tools/Tower/docs/plans/`](../tools/Tower/docs/plans/):
-active epoch plan ([epoch-3/](../tools/Tower/docs/plans/epoch-3/)), the
-[jetpack](../tools/Tower/docs/plans/epoch-4/README.md) track
+Plans live in [`docs/plans/`](../docs/plans/):
+active epoch plan ([epoch-3/](../docs/plans/epoch-3/)), the
+[jetpack](../docs/plans/epoch-4/README.md) track
 (package manager + environments), jetos/visual-configuration cards in Tower
 Epoch 7, and sidequests (one reviewed plan per in-flight task,
 deleted once shipped). Epoch 1 & 2 highlights are in
-[roadmap.md](spec/roadmap.md). See [plans/README.md](../tools/Tower/docs/plans/README.md) for the
+[roadmap.md](spec/roadmap.md). See [plans/README.md](../docs/plans/README.md) for the
 implementing-agent protocol.
 
 ## The dashboard — tasks, decisions, bugs, scratch
@@ -45,5 +45,5 @@ The single management surface: tasks with live pipeline status, every open
 decision (grouped so nothing's hidden), bugs, and a scratch pad.
 
 ```
-nix develop -c node tools/Tower/Tower.mjs serve --open
+nix develop -c node Tower/tower.mjs serve --open
 ```

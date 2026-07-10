@@ -25,5 +25,5 @@ drafted to that bar belong on their Tower cards, not here.
 
 ## Open decisions
 
-None. `node tools/Tower/Tower.mjs status` reported **0 decisions · 0 to
+None. `node Tower/tower.mjs status` reported **0 decisions · 0 to
 activate** on 2026-07-06.

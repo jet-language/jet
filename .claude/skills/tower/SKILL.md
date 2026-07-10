@@ -15,7 +15,7 @@ tower help
 ```
 
 The old `tools/Tower/` is retired; its board was imported losslessly. If you
-find yourself reading `tools/Tower/tower.json`, stop — it is frozen legacy.
+find yourself reading `.tower/tower.json`, stop — it is frozen legacy.
 
 ## The one rule that governs everything
 

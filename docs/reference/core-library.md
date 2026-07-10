@@ -1476,7 +1476,7 @@ non-codable type argument fails at the use site (E2411), not the definition.
 
 > The expert hand-impl path (`impl T: Encode { fn encode … }` over the `DataTree`
 > tree, D-SERDE2) is a future increment; see
-> `tools/Tower/docs/sidequests/serde-model.md`.
+> `docs/sidequests/serde-model.md`.
 
 ---
 

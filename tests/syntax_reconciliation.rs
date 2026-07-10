@@ -69,9 +69,9 @@ const FORBIDDEN: &[&str] = &[
 const OLD_BINDING_CODES: &[&str] = &["E0009", "E0010", "E0985"];
 const OLD_BINDING_WORDS: &[&str] = &["let", "val", "var", "set"];
 const SYNTAX_STATUS_MATRIX: &str =
-    "tools/Tower/docs/plans/epoch-3/syntax-law-source-status-matrix-2026-07-07.md";
+    "docs/plans/epoch-3/syntax-law-source-status-matrix-2026-07-07.md";
 const MARKER_PLANE_MATRIX: &str =
-    "tools/Tower/docs/plans/epoch-3/marker-plane-source-of-truth-matrix-2026-07-07.md";
+    "docs/plans/epoch-3/marker-plane-source-of-truth-matrix-2026-07-07.md";
 const MATRIX_UNBUILT_MARKERS: &[&str] = &[
     "S74-D-DESTRUCT1-ARM",
     "D-IGNORERET1",

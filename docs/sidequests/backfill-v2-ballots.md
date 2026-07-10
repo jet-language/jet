@@ -21,7 +21,7 @@ Each full decision card should have:
 
 ## Implementation Steps
 
-1. Parse the current open decisions list with `node tools/Tower/Tower.mjs status`.
+1. Parse the current open decisions list with `node Tower/tower.mjs status`.
 2. For each v1-shaped card, add the missing facets.
 3. Preserve existing recommendation and option semantics.
 4. Keep owner Q&A in `Owner Q` blocks so Focus Mode routes it separately.
@@ -29,5 +29,5 @@ Each full decision card should have:
 
 ## Verification
 
-- `node tools/Tower/Tower.mjs status`
+- `node Tower/tower.mjs status`
 - Manual Focus Mode spot-check for a representative card.

@@ -5,7 +5,7 @@ description: "Act on what the owner just recorded in Tower - implement ratified 
 
 # Tower — act on the board
 
-Tower (`tools/Tower/`) holds the whole board in `tools/Tower/tower.json`. The
+Tower (`tools/Tower/`) holds the whole board in `.tower/tower.json`. The
 owner just recorded decisions and/or left notes. Your job is to do the work those
 unblock — and nothing that is still his.
 
@@ -18,7 +18,7 @@ and in parallel; he only picks.
 
 ## The model (read this first)
 
-Every card has a computed **lane** (see `tools/Tower/app/store.mjs` → `laneOf`).
+Every card has a computed **lane** (see `Tower/app/store.mjs` → `laneOf`).
 Only two lanes are the owner's: `decide` and `activate` (greenlight). **Never
 touch those, and never touch `frozen`.** Your lanes are:
 
@@ -69,7 +69,7 @@ parked; do not freeze to avoid finishing work).
 ### How to pick the next card
 
 Sort the in-scope agent queue by **`workOrder` ascending** (lowest number first).
-Tower UI uses the same sort (`tools/Tower/app/ui/tower.js` → `orderOf` /
+Tower UI uses the same sort (`Tower/app/ui/tower.js` → `orderOf` /
 `byOrderThenPhaseThenPrio`).
 Within the same `workOrder`, prefer lane **`building`** (continue in-flight) over
 **`verify`** (close claimed work) over **`implement`** (start ready work) over
@@ -82,8 +82,8 @@ agent-owned card so the board stays honest. Do not activate owner-owned cards.
 
 ### Session loop
 
-1. From repo root, run `node tools/Tower/Tower.mjs status` (or read
-   `tools/Tower/tower.json`) — count active
+1. From repo root, run `node Tower/tower.mjs status` (or read
+   `.tower/tower.json`) — count active
    **e3** + **sidequest** agent cards.
 2. Pick the lowest `workOrder` unblocked card; finish a vertical slice; log it;
    move phase forward only on real verification.
@@ -91,7 +91,7 @@ agent-owned card so the board stays honest. Do not activate owner-owned cards.
    anything still in owner lanes (`decide`, `activate`) or blocked on ratification.
 
 
-1. **Read** `tools/Tower/tower.json` (or run `node tools/Tower/Tower.mjs status`
+1. **Read** `.tower/tower.json` (or run `node Tower/tower.mjs status`
    from repo root and read the AGENT sections). Build work-lists **scoped to
    Epoch 3 + sidequests** (see above). Within that scope:
    - Ratified decisions (`status:"ratified"`) whose card is in lane
@@ -119,12 +119,12 @@ agent-owned card so the board stays honest. Do not activate owner-owned cards.
    it.
 
 5. **Write back.** Prefer the running server's API (start it if needed:
-   `node tools/Tower/Tower.mjs serve` from repo root), e.g.
+   `node Tower/tower.mjs serve` from repo root), e.g.
    `POST /api/card/update` `{id, phase, logEntry}`,
    `POST /api/question/answer` `{id, answer}`, `POST /api/decision/add` for new
    ballots, and `POST /api/clearance` only if the owner explicitly delegated a
    decision (normally you do NOT decide). If no server, edit `tower.json` directly
-   using the shapes in `tools/Tower/app/store.mjs` and keep it valid JSON.
+   using the shapes in `Tower/app/store.mjs` and keep it valid JSON.
 
 6. **Report** a short summary: what you implemented, what you answered, which cards
    advanced, and anything newly blocked on the owner (new decisions raised, or a

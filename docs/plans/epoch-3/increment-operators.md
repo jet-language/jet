@@ -31,7 +31,7 @@ Rank tradeoffs only on: safety, beginner experience, one-path, long-term correct
 
 ## 3. DECISION BALLOT — D-INCR1
 
-See `tools/Tower/tower.json` decision **D-INCR1** for the owner-facing ballot (gist, story, inWild, comparisons, worked options, recommendation).
+See `.tower/tower.json` decision **D-INCR1** for the owner-facing ballot (gist, story, inWild, comparisons, worked options, recommendation).
 
 ### Option summary
 

@@ -1824,7 +1824,7 @@ fn run_toolchain() -> ! {
 /// `jet init [<script.jet>]` — U11 (D-JPK-SCRIPTDEP1=A): when a manifest-less
 /// script is named, its inline `use pkg#version;` refs are lifted into the
 /// freshly written `pkg.jet`'s `deps: {}` block (rung 0 → rung 1, per
-/// tools/Tower/docs/plans/epoch-4/vision.md). Lifting is best-effort: a lex/
+/// docs/plans/epoch-4/vision.md). Lifting is best-effort: a lex/
 /// parse problem in the script is silently skipped here (`jet check`/`jet
 /// run` on the script itself is where that's diagnosed) so `jet init` never
 /// fails just because the *lift* half had nothing to do.

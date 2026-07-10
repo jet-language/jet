@@ -5,16 +5,15 @@
 // agents just work. Static PWA plumbing (manifest, sw.js) is public.
 //
 // Live: every mutation broadcasts the projected state over /api/stream
-// (SSE). Ratifications + greenlights collapse into ONE batched notification
-// to listening agents after a quiet period (config.notifyBatchSeconds).
-// New messages to the owner also fan out as payload-less web pushes.
+// (SSE). New ballots and questions fan out as payload-less web pushes to
+// the owner's subscribed devices.
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
-import { readFileSync, writeFileSync, readdirSync, mkdirSync, existsSync, statSync } from 'node:fs';
+import { readdirSync, existsSync } from 'node:fs';
 import { join, extname, normalize, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes } from 'node:crypto';
-import { UI, newId, readJSON } from './paths.mjs';
+import { UI, readJSON } from './paths.mjs';
 import { saveConfig } from './config.mjs';
 import { generateVapid, pushTo } from './webpush.mjs';
 import * as db from './store.mjs';
@@ -35,41 +34,6 @@ const jsonBody = async (req) => {
   catch { throw new TowerError('E_INVALID', 'body is not valid JSON'); }
 };
 const send = (res, code, obj) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(obj)); };
-
-// ---- agent presence + message wakeups (server memory; messages persist) ----
-const presence = new Map();  // name → { kind, lastSeen, state, statusText }
-const waiters = new Map();   // name → [res] long-poll responses to flush on send
-export const touch = (name, kind, state, statusText) => {
-  if (!name) return;
-  const p = presence.get(name) || {};
-  presence.set(name, {
-    kind: kind || p.kind || 'agent', lastSeen: Date.now(),
-    state: state === undefined ? (p.state ?? null) : state,
-    statusText: statusText === undefined ? (p.statusText ?? null) : statusText,
-  });
-};
-function flushWaiters(name) {
-  for (const res of waiters.get(name) || []) { try { res.__flush(); } catch { /* gone */ } }
-  waiters.set(name, []);
-}
-function agentRoster(store) {
-  const s = store.load();
-  const names = new Set([
-    ...(store.config.agents || []).map(a => a.name),
-    ...presence.keys(),
-    ...s.messages.map(m => (m.from === 'owner' ? m.to : m.from)),
-  ]);
-  names.delete('owner'); names.delete('tower');
-  return [...names].map(name => {
-    const cfg = (store.config.agents || []).find(a => a.name === name) || {};
-    const live = presence.get(name);
-    const online = !!live && Date.now() - live.lastSeen < 45_000;
-    return { name, kind: live?.kind || cfg.kind || 'agent',
-      online, state: online ? live.state : null, statusText: online ? live.statusText : null,
-      lastSeen: live ? new Date(live.lastSeen).toISOString() : null,
-      launchable: !!(store.config.commands || {})[cfg.kind || live?.kind || name] };
-  });
-}
 
 // ---- SSE live stream --------------------------------------------------------
 // BOOT identifies this server process; clients reload (when idle) if it
@@ -102,64 +66,6 @@ async function pushOwner(store, reason) {
   }
 }
 
-// ---- batched agent notifications ---------------------------------------------
-// Ratifying a stack of ballots (or greenlighting several cards) produces ONE
-// "[tower] …" message per listening agent after the owner goes quiet.
-const batch = { decisions: [], cards: [], timer: null };
-function queueNotify(store, kind, entry) {
-  batch[kind].push(entry);
-  clearTimeout(batch.timer);
-  batch.timer = setTimeout(() => flushNotify(store), (store.config.notifyBatchSeconds ?? 90) * 1000);
-  if (batch.timer.unref) batch.timer.unref();
-}
-function flushNotify(store) {
-  const dec = batch.decisions.splice(0);
-  const cards = batch.cards.splice(0);
-  clearTimeout(batch.timer); batch.timer = null;
-  if (!dec.length && !cards.length) return;
-  const bits = [];
-  if (dec.length) bits.push(`${dec.length} decision${dec.length > 1 ? 's' : ''} ratified: ${dec.map(d => `${d.id}→${d.outcome}${d.comment ? ' ("' + d.comment.slice(0, 80) + '")' : ''}`).join(' · ')}`);
-  if (cards.length) bits.push(`greenlit: ${cards.map(c => '#' + c.num).join(' ')}`);
-  const text = `[tower] ${bits.join(' — ')}. Board is current; pick up with \`tower next\`.`;
-  const roster = agentRoster(store);
-  const online = roster.filter(a => a.online);
-  const targets = (online.length ? online : roster).map(a => a.name);
-  if (!targets.length) return;
-  store.mutate((s) => { for (const t of targets) db.sendMessage(s, { from: 'tower', to: t, text }); });
-  for (const t of targets) flushWaiters(t);
-  broadcast(store);
-}
-
-// ---- launch bridge (streams output into a live message) -----------------------
-function launch(store, agent, kind, cmd, text) {
-  Promise.all([import('node:child_process')]).then(([{ spawn }]) => {
-    touch(agent, kind, 'running');
-    const { result: live } = store.mutate((s) => db.sendMessage(s, { from: agent, to: 'owner', text: '⟳ running…' }));
-    broadcast(store);
-    const child = spawn('/bin/sh', ['-c', `${cmd} "$TOWER_PROMPT"`], {
-      cwd: dirname(store.dataDir),
-      env: { ...process.env, TOWER_PROMPT: text },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    let out = '', dirty = false;
-    const eat = (c) => { out += c; if (out.length > 100_000) out = out.slice(-100_000); dirty = true; };
-    child.stdout.on('data', eat); child.stderr.on('data', eat);
-    const tick = setInterval(() => {
-      if (!dirty) return; dirty = false;
-      store.mutate((s) => db.updateMessageText(s, live.id, '⟳ running…\n\n' + out.trim()));
-      broadcast(store);
-    }, 1200);
-    const timer = setTimeout(() => child.kill('SIGTERM'), 15 * 60_000);
-    child.on('close', (code) => {
-      clearTimeout(timer); clearInterval(tick);
-      touch(agent, kind, null);
-      const final = (out.trim() || `(no output — exit ${code})`).slice(0, 20_000);
-      store.mutate((s) => db.updateMessageText(s, live.id, final));
-      broadcast(store); pushOwner(store, 'launch-done');
-    });
-  });
-}
-
 // route → (state, payload, config) mutation. Same verbs as the CLI.
 const routes = {
   'card/add':        (s, p, cfg) => db.addCard(s, p, cfg),
@@ -189,8 +95,6 @@ const routes = {
   'milestone/delete': (s, p) => db.deleteMilestone(s, p.id, p.by),
   'ui/toggle':       (s, p) => db.toggleOpen(s, p.key),
   'digest/seen':     (s) => db.setDigestCursor(s),
-  'message/send':    (s, p) => db.sendMessage(s, p),
-  'message/mark':    (s, p) => db.markMessages(s, p.ids || [], p.field || 'readAt'),
 };
 
 const STATUS = { E_NOT_FOUND: 404, E_INVALID: 400, E_USAGE: 400, E_CONFLICT: 409, E_CLAIMED: 409, E_NO_DATA: 500 };
@@ -254,7 +158,6 @@ export function serve(store, port = 7878, open = false) {
     saveConfig(store.dataDir, { push: store.config.push });
   }
   const token = store.config.auth?.token || null;
-  const filesDir = join(store.dataDir, 'files');
 
   const server = createServer(async (req, res) => {
     try {
@@ -264,7 +167,6 @@ export function serve(store, port = 7878, open = false) {
 
       // ---- reads ----
       if (req.method === 'GET' && url.pathname === '/api/state') return send(res, 200, projected(store));
-      if (req.method === 'GET' && url.pathname === '/api/agents') return send(res, 200, agentRoster(store));
       if (req.method === 'GET' && url.pathname === '/api/push/key') return send(res, 200, { key: store.config.push.publicKey, subscribed: store.config.push.subscriptions.length });
       if (req.method === 'GET' && url.pathname === '/api/events') {
         return send(res, 200, store.load().events.slice(0, Number(url.searchParams.get('limit') || 50)));
@@ -281,45 +183,7 @@ export function serve(store, port = 7878, open = false) {
         const q = url.searchParams;
         return send(res, 200, db.nextCards(store.load(), { epoch: q.get('epoch') || undefined, track: q.get('track') || undefined, agent: q.get('agent') || undefined, limit: Number(q.get('limit') || 5) }));
       }
-      if (req.method === 'GET' && url.pathname === '/api/messages/wait') {
-        const name = url.searchParams.get('for');
-        if (!name) return send(res, 400, { error: 'E_INVALID', message: 'messages/wait needs ?for=<name>' });
-        touch(name, url.searchParams.get('kind'), 'listening');
-        const deliver = () => {
-          const pending = db.pendingFor(store.load(), name);
-          if (!pending.length) return false;
-          store.mutate((s) => db.markMessages(s, pending.map(m => m.id), 'deliveredAt'));
-          send(res, 200, pending);
-          return true;
-        };
-        if (deliver()) return;
-        const timer = setTimeout(() => { unhook(); send(res, 200, []); }, 25_000);
-        const unhook = () => { clearTimeout(timer); waiters.set(name, (waiters.get(name) || []).filter(r => r !== res)); };
-        res.__flush = () => { unhook(); touch(name); if (!deliver()) send(res, 200, []); };
-        waiters.set(name, [...(waiters.get(name) || []), res]);
-        req.on('close', unhook);
-        return;
-      }
-      if (req.method === 'GET' && url.pathname.startsWith('/files/')) {
-        const id = url.pathname.slice(7).replace(/[^A-Za-z0-9._-]/g, '');
-        const meta = readJSON(join(filesDir, id + '.json'), null);
-        if (!meta) { res.writeHead(404); return res.end(); }
-        const data = readFileSync(join(filesDir, id));
-        res.writeHead(200, { 'content-type': meta.type || 'application/octet-stream', 'cache-control': 'max-age=86400' });
-        return res.end(data);
-      }
-
       // ---- writes ----
-      if (req.method === 'POST' && url.pathname === '/api/file') {
-        const buf = await body(req, 12_000_000);
-        if (!buf.length) return send(res, 400, { error: 'E_INVALID', message: 'empty file' });
-        const id = newId('f');
-        mkdirSync(filesDir, { recursive: true });
-        writeFileSync(join(filesDir, id), buf);
-        const meta = { id, name: (url.searchParams.get('name') || 'file').slice(0, 120), type: (url.searchParams.get('type') || 'application/octet-stream').slice(0, 80), size: buf.length, at: new Date().toISOString() };
-        writeFileSync(join(filesDir, id + '.json'), JSON.stringify(meta));
-        return send(res, 200, { ok: true, file: meta });
-      }
       if (req.method === 'POST' && url.pathname === '/api/push/subscribe') {
         const p = await jsonBody(req);
         if (!p.subscription?.endpoint) return send(res, 400, { error: 'E_INVALID', message: 'missing subscription' });
@@ -331,24 +195,6 @@ export function serve(store, port = 7878, open = false) {
       if (req.method === 'POST' && url.pathname === '/api/push/test') {
         lastPushAt = 0; await pushOwner(store, 'test');
         return send(res, 200, { ok: true, sent: store.config.push.subscriptions.length });
-      }
-      if (req.method === 'POST' && url.pathname === '/api/agent/status') {
-        const p = await jsonBody(req);
-        touch(p.name, p.kind, 'listening', (p.text || '').slice(0, 140));
-        return send(res, 200, { ok: true });
-      }
-      if (req.method === 'POST' && url.pathname === '/api/agent/launch') {
-        const p = await jsonBody(req);
-        const roster = agentRoster(store);
-        const a = roster.find(x => x.name === p.agent);
-        const kind = a?.kind || p.agent;
-        const cmd = (store.config.commands || {})[kind];
-        if (!cmd) return send(res, 400, { error: 'E_INVALID', message: `no launch command configured for "${kind}" — add config.commands.${kind}` });
-        if (!p.text || !String(p.text).trim()) return send(res, 400, { error: 'E_INVALID', message: 'launch needs text' });
-        store.mutate((s) => db.sendMessage(s, { from: 'owner', to: p.agent, text: p.text, cardId: p.cardId }));
-        launch(store, p.agent, kind, cmd, String(p.text));
-        broadcast(store);
-        return send(res, 200, { ok: true, state: projected(store) });
       }
       if (req.method === 'POST' && url.pathname === '/api/undo') {
         const p = await jsonBody(req);
@@ -367,14 +213,7 @@ export function serve(store, port = 7878, open = false) {
         if (!fn) return send(res, 404, { error: 'E_USAGE', message: `unknown route ${name}` });
         const p = await jsonBody(req);
         const { result } = store.mutate((s, cfg) => fn(s, p, cfg), { expectRev: p.expectRev });
-        // side effects: wake listeners, batch agent notifications, push owner
-        if (name === 'message/send' && result?.to) {
-          flushWaiters(result.to);
-          if (result.to === 'owner' && result.from !== 'tower') pushOwner(store, 'message');
-        }
-        if (name === 'clearance') queueNotify(store, 'decisions', { id: result.id, outcome: result.outcome, comment: result.comment });
-        if (name === 'clearance/batch') for (const d of result) queueNotify(store, 'decisions', { id: d.id, outcome: d.outcome, comment: d.comment });
-        if (name === 'card/activate') queueNotify(store, 'cards', { num: result.num });
+        // side effect: new ballots/questions push to the owner's devices
         if (name === 'decision/add' || name === 'question/add') pushOwner(store, name);
         broadcast(store);
         return send(res, 200, { ok: true, result, state: projected(store) });

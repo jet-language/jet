@@ -42,7 +42,7 @@ leaking expert concepts into beginner onboarding.
    `@Experimental`, `@Tested`, `@Hardened` on public functions; embedded profile
    audit JSON excerpt once surface slice lands.
 6. Cross-link from `docs/reference/core-library.md`, `docs/spec/roadmap.md`,
-   and `tools/Tower/docs/plans/epoch-3/typed-target-profiles.md`.
+   and `docs/plans/epoch-3/typed-target-profiles.md`.
 7. If docs generator lands, make maturity tags render as badges with no
    compiler behavior implied.
 

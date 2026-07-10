@@ -68,7 +68,7 @@ pub const PACK_DIRECTIVE_PROMPT: &str = "pkg.prompt";
 
 // ──────────────────────────────────────────────
 // Unified ecosystem (jet + jetpack + jetos) — user-typeable surface (I7).
-// Owner-ratified design-of-record: tools/Tower/docs/plans/epoch-5/unified-ecosystem.md
+// Owner-ratified design-of-record: docs/plans/epoch-5/unified-ecosystem.md
 // (U1–U7, ratified 2026-06-16). These IDs start with `U`, enforced by
 // tests/decisions.rs alongside the S/N decisions. Tokens are recorded here;
 // behavior lands in the Jetpack/Jetos implementation chunks (no syntax beyond

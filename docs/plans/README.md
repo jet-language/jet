@@ -18,7 +18,7 @@ are the *how*; `docs/spec/` remains the *what* and *why* and always wins on conf
   [`IMPLEMENTATION-STATUS.md`](jetpack-jetos/IMPLEMENTATION-STATUS.md).
 
 Tasks, their live pipeline stage, every open decision, and bugs are managed in the
-dashboard (`node tools/Tower/Tower.mjs serve`), not in a checked-in to-do file.
+dashboard (`node Tower/tower.mjs serve`), not in a checked-in to-do file.
 
 ## Protocol for the implementing agent (read this first, every time)
 

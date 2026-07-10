@@ -2197,7 +2197,7 @@ safe by default, **no `#Unsafe` gate anywhere in the story** (I1): the
 sandbox is the safety boundary, by construction. This is a general
 application-plugin substrate, distinct from the deferred Epoch-3
 compiler-extension plugin API (custom lints/sema hooks,
-`tools/Tower/docs/plans/epoch-3/plugin-api.md`) — don't conflate them (I8).
+`docs/plans/epoch-3/plugin-api.md`) — don't conflate them (I8).
 
 ```jet
 // pkg.jet

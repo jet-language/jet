@@ -11,7 +11,7 @@ whoever next has write access to reconcile.
 ## Where this actually lives
 
 Ignore the corrupted plan field; the real design lives in
-`tools/Tower/docs/plans/epoch-4/vision.md` and `README.md`, already sketched
+`docs/plans/epoch-4/vision.md` and `README.md`, already sketched
 under "jetos":
 
 ```jet
@@ -38,7 +38,7 @@ is a UX refinement on top of OS2's base switch/rollback mechanism, not a
 separate mechanism — same one-canonical-path spirit as I8.
 
 `jetos` generations/rollback genuinely is e4 scope: it's inside the "jetos
-Phase 2 ISO" exit criterion for epoch e4 in `tools/Tower/tower.json`
+Phase 2 ISO" exit criterion for epoch e4 in `.tower/tower.json`
 (`epochs[3].exitCriteria`). It is not out-of-scope work being smuggled into
 e4 — it's just very late in e4's own sequencing.
 

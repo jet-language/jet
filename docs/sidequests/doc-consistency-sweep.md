@@ -33,7 +33,7 @@ R10 pay-for-what-you-call). (CLAUDE.md is owner-owned — flag.)
   `../admin/04-diagnostics.md` (nonexistent). Should be `../../spec/diagnostics.md`.
 - `docs/spec/roadmap.md:24` and `docs/spec/syntax-decisions.md:888` link
   `decision-ballots.md` at a wrong relative path; ballots live at
-  `tools/Tower/docs/ballots/decision-ballots.md`.
+  `docs/ballots/decision-ballots.md`.
 
 ## 4. Stale `src/` → `Source/` path comments
 - `Source/CLI.rs:9` (`src/syntax.rs` → `Source/Syntax.rs`)

@@ -50,7 +50,7 @@ const fail = (code, msg) => { throw new TowerError(code, msg); };
 
 export const empty = (project = 'Project') => ({
   meta: { version: VERSION, project, currentEpoch: null, nextNum: 1, rev: 0, ui: { toggled: [] } },
-  epochs: [], milestones: [], cards: [], decisions: [], questions: [], ideas: [], events: [], messages: [],
+  epochs: [], milestones: [], cards: [], decisions: [], questions: [], ideas: [], events: [],
 });
 
 // ---- store handle ---------------------------------------------------------
@@ -96,7 +96,8 @@ export function normalize(s) {
   s.meta = { version: VERSION, project: 'Project', currentEpoch: null, nextNum: 1, rev: 0, ...(s.meta || {}) };
   s.meta.version = VERSION;
   s.meta.ui = { toggled: [], ...(s.meta.ui || {}) };
-  for (const k of ['epochs', 'milestones', 'cards', 'decisions', 'questions', 'ideas', 'events', 'messages']) s[k] ||= [];
+  for (const k of ['epochs', 'milestones', 'cards', 'decisions', 'questions', 'ideas', 'events']) s[k] ||= [];
+  delete s.messages;   // messaging was removed; drop the legacy key on next write
   for (const c of s.cards) { c.blockedBy ||= []; c.log ||= []; }
   return s;
 }
@@ -145,11 +146,9 @@ export function project(s, config = null) {
   const milestones = s.milestones.map(m => ({ ...m, progress: milestoneProgress(m, s.cards) }));
   const inLane = (l) => cards.filter(c => c.lane.lane === l);
   const openDecisions = s.decisions.filter(d => d.status !== 'ratified');
-  const unreadForOwner = s.messages.filter(m => m.to === 'owner' && !m.readAt).length;
   const counts = {
     byPhase: Object.fromEntries(PHASE_IDS.map(p => [p, cards.filter(c => c.phase === p).length])),
-    forYou: openDecisions.length + inLane('activate').length + unreadForOwner,
-    unreadForOwner,
+    forYou: openDecisions.length + inLane('activate').length,
     decide: openDecisions.length,
     activate: inLane('activate').length,
     agentReady: inLane('plan').length + inLane('implement').length + inLane('building').length + inLane('verify').length,
@@ -159,7 +158,7 @@ export function project(s, config = null) {
     openQuestions: s.questions.filter(q => q.status === 'open').length,
   };
   return { meta: s.meta, config: config || undefined, epochs: s.epochs, milestones, phases: PHASES, lanes: LANES,
-    cards, decisions: s.decisions, questions: s.questions, ideas: s.ideas, messages: s.messages,
+    cards, decisions: s.decisions, questions: s.questions, ideas: s.ideas,
     events: s.events.slice(0, 300), counts };
 }
 
@@ -471,61 +470,6 @@ export function nextCards(s, { epoch, track, agent, limit = 5 } = {}) {
     || (a.priority || '').localeCompare(b.priority || '')
     || a.num - b.num);
   return pool.slice(0, limit);
-}
-
-// ---- messages: owner ⇄ agent threads ----------------------------------------
-// A message names its `from` and `to` ('owner' or an agent name). The thread
-// key is whichever side isn't the owner. `deliveredAt` flips when a listening
-// agent (or the owner's UI) pulls it; unread-for-owner = to:'owner' && !readAt.
-
-export function sendMessage(s, p) {
-  if (!p.text || !String(p.text).trim()) fail('E_INVALID', 'message needs text');
-  const from = p.from || p.by || 'owner';
-  const to = p.to || (from === 'owner' ? fail('E_INVALID', 'message needs --to <agent>') : 'owner');
-  if (p.cardId) mustCard(s, p.cardId);
-  const m = { id: newId('msg'), from, to, text: String(p.text).trim(),
-    cardId: p.cardId ? findCard(s, p.cardId).id : null,
-    file: p.file || null,    // { id, name, type } — stored in <dataDir>/files/
-    at: now(), deliveredAt: null, readAt: null };
-  s.messages.push(m);
-  if (s.messages.length > 5000) s.messages.splice(0, s.messages.length - 5000);
-  logEvent(s, { by: from, action: 'message.send', ref: m.id, note: `→ ${to}: ${m.text.slice(0, 60)}` });
-  return m;
-}
-
-// Rewrite a message's text in place — the launch bridge streams live output
-// into one message this way.
-export function updateMessageText(s, id, text) {
-  const m = s.messages.find(x => x.id === id) || fail('E_NOT_FOUND', `no message ${id}`);
-  m.text = String(text).slice(0, 100_000);
-  return m;
-}
-
-export function markMessages(s, ids, field) {
-  if (!['deliveredAt', 'readAt'].includes(field)) fail('E_INVALID', 'bad mark field');
-  const at = now();
-  const hit = [];
-  for (const m of s.messages) if (ids.includes(m.id) && !m[field]) { m[field] = at; hit.push(m.id); }
-  return { marked: hit };
-}
-
-export function pendingFor(s, name, { undeliveredOnly = true } = {}) {
-  return s.messages.filter(m => m.to === name && (!undeliveredOnly || !m.deliveredAt));
-}
-
-export function threadKey(m) { return m.from === 'owner' ? m.to : m.from; }
-
-export function threads(s) {
-  const byKey = new Map();
-  for (const m of s.messages) {
-    const k = threadKey(m);
-    if (!byKey.has(k)) byKey.set(k, { agent: k, messages: [], unreadForOwner: 0, lastAt: null });
-    const t = byKey.get(k);
-    t.messages.push(m);
-    if (m.to === 'owner' && !m.readAt) t.unreadForOwner++;
-    t.lastAt = m.at;
-  }
-  return [...byKey.values()].sort((a, b) => (b.lastAt || '').localeCompare(a.lastAt || ''));
 }
 
 // Digest cursor: everything in events[] after this instant is "since you

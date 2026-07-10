@@ -2,7 +2,7 @@
 
 Eight ballots, eight cards, one sitting: c7methodmacro, c7dynarray, c7cliflag,
 c7shift, c7pointerchain, c7jaiany, c7uninitsentinel, c7refshorthand. All
-ratified 2026-07-01; full ballot text lives in `tools/Tower/tower.json`
+ratified 2026-07-01; full ballot text lives in `.tower/tower.json`
 `decisions[]` under the matching `D-*` id — this doc extracts the executable
 parts, it does not restate the story/comparisons.
 
@@ -19,7 +19,7 @@ TokKind::At => {
 
 `CONTRACT_PREFIX = "@"` is registered (`crates/jet-foundation/src/Syntax.rs:1847`)
 but unconsumed. The plane build-out plan now exists —
-`tools/Tower/docs/plans/epoch-3/marker-family.md` (gates resolved 2026-07-02:
+`docs/plans/epoch-3/marker-family.md` (gates resolved 2026-07-02:
 D-MARKERMOVE2=B, D-MARKERMOVE3=B) — and must execute before §1 (`@Inline`),
 §3 (`@[Cli]`/`@Doc`), and §8 (`@Ref`) can land their surface syntax. Sema/codegen
 groundwork for those three cards can proceed against the CURRENT `#`-spelled
@@ -670,7 +670,7 @@ formatter emission + fmt STABILITY test (own-memory rule).
 ## Cross-card notes
 
 - **Sequencing:** §1/§3/§8 all need the `@` contract plane. Author and land
-  `tools/Tower/docs/plans/epoch-3/marker-family.md` (does not exist yet) or
+  `docs/plans/epoch-3/marker-family.md` (does not exist yet) or
   get an explicit owner call to implement these three provisionally under
   `#` and mechanically re-sigil later. Either way, say which you're doing in
   the card log — don't leave it implicit.

@@ -13,22 +13,11 @@ export const DEFAULTS = {
   codeLanguage: '',                   // hint for ballot code blocks (highlighting)
   port: 7878,
   backups: 20,
-  // Known agents for the Agents view roster (listeners also self-announce).
-  agents: [],                         // [{ name: "claude-main", kind: "claude" }]
-  // Launch bridge (OPT-IN): lets the board UI start a headless agent turn when
-  // nothing is listening. Value is a shell command; the message is appended as
-  // one quoted argument. Example:
-  //   "commands": { "claude": "claude -p", "codex": "codex exec" }
-  commands: {},
   // Auth token for non-localhost requests (LAN/tailnet). Auto-generated on
   // first `tower serve`; localhost is always exempt so local CLIs just work.
   auth: null,                         // { token: "…" }
   // Web push (auto-generated VAPID keys) + subscriptions live here too.
   push: null,                         // { publicKey, privateKey, subscriptions: [] }
-  // Ratifications/greenlights within this window collapse into ONE
-  // notification to listening agents (owner works through a ballot batch
-  // without spinning up an agent per decision).
-  notifyBatchSeconds: 90,
 };
 
 // Persist a partial update into the user's config.json (creates it if absent).

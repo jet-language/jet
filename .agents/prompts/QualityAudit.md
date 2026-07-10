@@ -17,7 +17,7 @@ First, read and obey:
 9. `.claude/skills/tower/SKILL.md`
 10. `.claude/skills/tower-ballot/SKILL.md`
 
-Use live Tower only through `Tower/tower.mjs` and `.tower/tower.json`. Treat old `tools/Tower/tower.json` as historical unless current evidence proves otherwise. Log intent, progress, blockers, decisions, and verification in Tower so another agent can resume from the board alone.
+Use live Tower only through `Tower/tower.mjs` and `.tower/tower.json`. Treat old `.tower/tower.json` as historical unless current evidence proves otherwise. Log intent, progress, blockers, decisions, and verification in Tower so another agent can resume from the board alone.
 
 Hard gates:
 

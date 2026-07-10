@@ -3,7 +3,7 @@
 //! `pkg.jet`. `jet run` resolves + locks by file-content hash, `jet lock`
 //! writes a `<script>.lock` sidecar, and `jet init` lifts the inline refs
 //! into a generated `pkg.jet`. See
-//! tools/Tower/docs/plans/epoch-4/{vision,implementation}.md.
+//! docs/plans/epoch-4/{vision,implementation}.md.
 //!
 //! Resolution today: the Jet package registry has no source-fetch path yet —
 //! `jet publish` writes only the sparse index line (`Publish/Index.rs`),

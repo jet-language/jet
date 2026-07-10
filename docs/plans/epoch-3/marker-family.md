@@ -8,7 +8,7 @@ Binding record (read these, do not re-derive design):
   (ratified 2026-07-01)" (lines ~2539–2663) **and** the Ratified table rows dated
   2026-07-01 for D-MARKER-FAMILY1 / D-CAPBUNDLE1 / D-PREPOST1 / D-PERSIST1. These
   rows are the law; this plan is the execution of them.
-- `tools/Tower/tower.json` decisions `D-MARKER-FAMILY1`, `D-CONTRACTCASE1`,
+- `.tower/tower.json` decisions `D-MARKER-FAMILY1`, `D-CONTRACTCASE1`,
   `D-MARKERMOVE1` (all `outcome`/`status` = ratified). **Never edit tower.json.**
 
 Invariants in play: **I7** (every user-typeable sigil lives in `Syntax.rs` with a
@@ -315,7 +315,7 @@ syntax-surface.jet}`.
   leave the ballot queue; keep only the durable spec/log rows.)
 - `diagnostics.md`: E0062/E0063 rows + any moved-marker mentions in existing entries
   (E0742/E0745/E0747 reference `#Pure` as a bound — apply the G1 decision consistently).
-- **Do not touch** `tools/Tower/tower.json` (owner-owned) or `editors/**` grammar-repo
+- **Do not touch** `.tower/tower.json` (owner-owned) or `editors/**` grammar-repo
   build artifacts. `editors/tree-sitter/*` + `editors/vscode`/`editors/zed` highlight
   files may be updated for the new `@` plane as a **secondary, optional** follow-up — note
   it, don't gate on it.
@@ -337,7 +337,7 @@ seam check). Re-run yourself; never trust a subagent "green" (memory). Confirm
 - Formatter emits `@` for moved markers; a fmt round-trip (not just idempotence) STABILITY
   test covers an `@`-marked declaration.
 - Prelude rebuilt; no moved marker survives as `#` in prelude/examples/tests/docs
-  (grep-clean, excluding `tools/Tower/**` and `editors/**` artifacts).
+  (grep-clean, excluding `Tower/**` and `editors/**` artifacts).
 - G1 settled (owner-confirmed or ballot-recorded); G2/G3/G4 defaults implemented and
   logged on the card.
 - `nix develop -c cargo test` fully green, hello-world runs, docs match behavior.

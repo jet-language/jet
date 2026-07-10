@@ -3,7 +3,7 @@
 Continuation review, not a fresh design. Verifies what card #90 claims is
 done, re-checks the "capstone linker ICE in logbook" note from the
 2026-06-29 log, and scopes exactly what's left. Cross-reference:
-`tools/Tower/docs/sidequests/monorepo-workspace.md` (older, staged plan —
+`docs/sidequests/monorepo-workspace.md` (older, staged plan —
 partly stale, see "Sidequest doc drift" below).
 
 ## Verified shipped (read-only test run, 2026-07-03)
@@ -52,7 +52,7 @@ verification, or it was in a showcase since retired. Not reproducible from
 the current tree; not blocking this card. If it resurfaces, it is a P0 (I2)
 regardless of workspace scope and gets its own card.
 
-## Sidequest doc drift (tools/Tower/docs/sidequests/monorepo-workspace.md)
+## Sidequest doc drift (docs/sidequests/monorepo-workspace.md)
 
 Not editable under this task's write scope (plans/epoch-4/ only), flagging
 for whoever next touches it:

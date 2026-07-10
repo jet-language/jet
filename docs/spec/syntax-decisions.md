@@ -774,7 +774,7 @@ E1216) — see D-MEM1 below.
 
 **D-MEM1 — Memory model v5, "the borrow checker, humanized"** *(ratified
 2026-07-03, migration in progress — card #187; plan
-tools/Tower/docs/plans/memory-v5-migration.md)*: supersedes the D-CAP7
+docs/plans/memory-v5-migration.md)*: supersedes the D-CAP7
 spelling assignments and D-CAP8 when the migration lands. Three sigils:
 unmarked = read (enforced — no elevation, no freeze; no `api:` manifest field),
 `&T` = exclusive write, `^T` = take; `&`/`^` mirrored at call sites;
@@ -2615,15 +2615,15 @@ implementation milestone is pending.
 
 ## Open decisions — owner input needed
 
-> New decisions are ballot cards in Tower (tools/Tower/tower.json); this table
+> New decisions are ballot cards in Tower (.tower/tower.json); this table
 > is the registry of open language-surface questions.
 
-### Registered for M3–M14 (see tools/Tower/docs/ballots/decision-ballots.md for options)
+### Registered for M3–M14 (see docs/ballots/decision-ballots.md for options)
 
 
 | ID   | Question                                   | Needed by |
 | ---- | ------------------------------------------ | --------- |
-| S56  | typed reflection / user derives | **Epoch 3** — [`tools/Tower/docs/plans/epoch-3/user-derives-reflection.md`](../../tools/Tower/docs/plans/epoch-3/user-derives-reflection.md) |
+| S56  | typed reflection / user derives | **Epoch 3** — [`docs/plans/epoch-3/user-derives-reflection.md`](../../docs/plans/epoch-3/user-derives-reflection.md) |
 
 
 ## Decision log

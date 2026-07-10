@@ -2896,7 +2896,7 @@ fn canvas_unsupported_and_invalid_actions_return_canvas_errors_without_rustc() {
 #[test]
 fn canvas_blueprint_parity_matrix_is_classified() {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tools/Tower/docs/plans/epoch-6/canvas-blueprint-parity-matrix.md");
+        .join("docs/plans/epoch-6/canvas-blueprint-parity-matrix.md");
     let matrix = fs::read_to_string(&path).expect("Canvas parity matrix");
     let allowed = [
         "shipped",

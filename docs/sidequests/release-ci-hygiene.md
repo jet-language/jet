@@ -39,7 +39,7 @@ This is credibility work, not language design.
   - `nix develop -c cargo check`
   - `nix develop -c cargo test --lib`
   - focused integration suites that are stable in the Nix shell
-  - `node tools/Tower/Tower.mjs status`
+  - `node Tower/tower.mjs status`
 - Keep any known long-tail or flaky suites explicit rather than silently skipped.
 
 ### 3. Warnings policy
@@ -68,7 +68,7 @@ This is credibility work, not language design.
 
 ## Verification
 
-- `node tools/Tower/Tower.mjs status`
+- `node Tower/tower.mjs status`
 - `nix flake check`
 - `nix develop -c cargo check`
 - `nix develop -c cargo test --lib`

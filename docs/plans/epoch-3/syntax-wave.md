@@ -14,7 +14,7 @@ R2 sema gatekeeper, R4 spans, R7 TIR seam, R11 generated code re-enters),
 `docs/spec/diagnostics.md` (the `Error [E####]` / `Why:` / `Fix:` voice —
 banned words: *token, expression, parse, syntax error, lifetime, borrow*).
 
-Ratified option text lives in `tools/Tower/tower.json` (`decisions[]` where
+Ratified option text lives in `.tower/tower.json` (`decisions[]` where
 `cardId=="c8syntaxwave"`) and in `docs/spec/syntax-decisions.md` (rows dated
 2026-07-01, and the narrative block "Marker family, CLI flags, syntax wave").
 The Syntax.rs constants for this wave are **already registered** (lowercase,

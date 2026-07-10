@@ -1,6 +1,6 @@
 # Canvas/Blueprint parity postmortem
 
-Source: tools/Tower/docs/plans/epoch-6/canvas-blueprint-parity-matrix.md (57 rows total,
+Source: docs/plans/epoch-6/canvas-blueprint-parity-matrix.md (57 rows total,
 enforced >=50 by tests/canvas.rs::canvas_blueprint_parity_matrix_is_classified),
 tests/canvas.rs (2574 lines), tests/web_dev.rs (1117 lines), git log, .tower/tower.json.
 

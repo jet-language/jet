@@ -3,7 +3,7 @@
 **Current epoch: Epoch 3.** (owner, 2026-06-19) Epoch 1 (v1.0) and Epoch 2 (GA)
 are complete — their development highlights are below under "Completed"; nothing
 in the Epoch 2 GA scope remained open. Active work is now Epoch 3
-([`tools/Tower/docs/plans/epoch-3/`](../../tools/Tower/docs/plans/epoch-3/)); its remaining-from-E2 loose ends are
+([`docs/plans/epoch-3/`](../../docs/plans/epoch-3/)); its remaining-from-E2 loose ends are
 tracked as cards in the Tower dashboard board.
 
 Each milestone is done when its exit criteria pass as tests. Examples are the
@@ -27,13 +27,13 @@ executable spec: a milestone ships with new `examples/` programs and new
 |---|---|
 | Ratified syntax & owner decisions | [`syntax-decisions.md`](syntax-decisions.md) |
 | Language behavior today | [`spec.md`](spec.md) |
-| Open owner ballots | [`decision-ballots.md`](../../tools/Tower/docs/ballots/decision-ballots.md) |
+| Open owner ballots | [`decision-ballots.md`](../../docs/ballots/decision-ballots.md) |
 | Epoch 1 highlights (done) | See "Epoch 1 — development highlights" below |
 | Epoch 2 highlights (done) | See "Epoch 2 — development highlights" below |
-| Epoch 5 metaprogramming plan | [`tools/Tower/docs/plans/epoch-5/`](../../tools/Tower/docs/plans/epoch-5/) → [`metaprogramming.md`](../../tools/Tower/docs/plans/epoch-5/metaprogramming.md) |
-| Jetpack sequencing + live status | [`tools/Tower/docs/plans/epoch-4/`](../../tools/Tower/docs/plans/epoch-4/) |
+| Epoch 5 metaprogramming plan | [`docs/plans/epoch-5/`](../../docs/plans/epoch-5/) → [`metaprogramming.md`](../../docs/plans/epoch-5/metaprogramming.md) |
+| Jetpack sequencing + live status | [`docs/plans/epoch-4/`](../../docs/plans/epoch-4/) |
 | jetos + visual configuration | Epoch 7; first runtime slice ratified in `syntax-decisions.md` (`jet os`, host selection, generations, init/image proof) |
-| Implementing-agent protocol | [`tools/Tower/docs/plans/README.md`](../../tools/Tower/docs/plans/README.md) |
+| Implementing-agent protocol | [`docs/plans/README.md`](../../docs/plans/README.md) |
 
 Plans are gated on ratified decisions in `syntax-decisions.md` (see
 `decision-ballots.md` for what is still open).
@@ -98,7 +98,7 @@ engine as `jet dev`/`jet repl`) — `(jet)` prompt, lldb-familiar
 `step`/`next`/`continue`/`finish`, `break`/`print`/`locals`/`backtrace`, `<- here`
 caret, all in Jet terms (I2). It declines unsteppable native features with E2203,
 pointing at the real build. Step 2 — the native DAP/lldb backend for the full
-native feature set + editor wiring — remains (see `tools/Tower/docs/sidequests/dap-debugger.md`).
+native feature set + editor wiring — remains (see `docs/sidequests/dap-debugger.md`).
 
 **E2-M18 — REPL** verified 2026-06-17. `jet repl` interactive
 session; 16 transcript tests green.
@@ -177,7 +177,7 @@ The 2026-07-09 production audit found that several earlier “done” cards deli
 useful schemas or fixture-backed models without the live store, sandbox, cache,
 registry, or provider behavior required for a package-manager completion claim.
 The binding parity/acceptance plan is
-[`world-class-package-manager.md`](../../tools/Tower/docs/plans/epoch-4/world-class-package-manager.md):
+[`world-class-package-manager.md`](../../docs/plans/epoch-4/world-class-package-manager.md):
 full pinned Nix package-manager compatibility plus the best compatible features
 from other ecosystems, closed only by live, hostile, cross-platform evidence.
 
@@ -230,7 +230,7 @@ rollout stays future Epoch 7 work.
 ### Epoch 1 tail
 
 **M12.2** — registry, semver resolver, `jet publish` / `vendor` / `audit`
-(architecture: [`jetpack-jetos/README.md`](../../tools/Tower/docs/plans/epoch-4/README.md)). M12.1 verified
+(architecture: [`jetpack-jetos/README.md`](../../docs/plans/epoch-4/README.md)). M12.1 verified
 2026-06-13.
 
 ---
@@ -240,7 +240,7 @@ rollout stays future Epoch 7 work.
 Items with Epoch 2/3 plans are tracked in those plan directories — not
 duplicated here:
 
-- Async/await, Go-scale networking → [`tools/Tower/docs/plans/epoch-3/`](../../tools/Tower/docs/plans/epoch-3/)
+- Async/await, Go-scale networking → [`docs/plans/epoch-3/`](../../docs/plans/epoch-3/)
 - DAP step-through / full source-level debugger → Epoch 3 (owner, 2026-06-18)
 - Full adoption documentation (migration, services, debugging guides) → Epoch 3
   (owner, 2026-06-18); per-milestone docs stay as written

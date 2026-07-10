@@ -7,7 +7,7 @@
 //! `operand_is_integer` to re-decide which operator traps on overflow. That is
 //! exactly the "codegen re-derives / falls back" smell that invariant I3 ("codegen
 //! is dumb") forbids, and it is the bug class that produced the I2 holes the
-//! checked-IR effort (`tools/Tower/docs/sidequests/checked-ir-design.md`) is
+//! checked-IR effort (`docs/sidequests/checked-ir-design.md`) is
 //! built to kill.
 //!
 //! The TIR is the fix. It is a distinct, post-sema representation whose defining

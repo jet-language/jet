@@ -5,7 +5,7 @@ card to a clean state so I can burn them down later — **do not start any
 implementation.**
 
 When you're done, every card outside the **frozen** section must be exactly one of:
-- **ready** — vetted plan in `tools/Tower/docs/sidequests/<slug>.md`, no open owner
+- **ready** — vetted plan in `docs/sidequests/<slug>.md`, no open owner
   decision (implement on my "go"), or
 - **deciding** — blocked on a house-format ballot card sitting in my queue.
 
