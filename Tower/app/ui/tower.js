@@ -211,6 +211,7 @@ function jumpTo(it) {
 const VIEWS = [
   { id: 'now', name: 'Now', count: () => duties().length, alert: true },
   { id: 'board', name: 'Board', count: () => S.cards.filter(c => c.phase !== 'done' && c.phase !== 'frozen').length },
+  { id: 'radar', name: 'Radar', count: () => S.cards.filter(c => c.phase !== 'done' && c.phase !== 'frozen').length },
 ];
 function renderChrome() {
   document.title = `Tower · ${S.meta.project || 'project'}`;
@@ -557,6 +558,190 @@ function viewBoard() {
   }
 }
 
+// ---- RADAR (#464, D-TWR-BOARD1=A) ------------------------------------------------
+// Prototype — NEW page only, zero behavior change to Board/Now. Roadmap
+// ledger (per-epoch burndown + milestone stalls) fused with an ops table of
+// active cards, sortable + inline-editable + filterable. Owner-acceptance
+// pending; see Tower/README.md.
+let radarFilterText = '';
+const radarSort = {}; // table key -> { col, dir }
+
+function radarMatches(c, needle) {
+  if (!needle) return true;
+  return ('#' + c.num).includes(needle) || c.title.toLowerCase().includes(needle) || (c.assignee || '').toLowerCase().includes(needle);
+}
+
+function viewRadar() {
+  const v = $('#view');
+  v.innerHTML = `<div class="viewhead"><h1 class="h1">Radar</h1>
+      <span class="viewhead__sub">roadmap ledger × ops table — prototype, owner-acceptance pending</span></div>
+    <div class="capture"><input id="radar-filter" placeholder="Filter by #, title, assignee…" value="${esc(radarFilterText)}"></div>
+    <div id="radar-body"></div>`;
+  $('#radar-filter').addEventListener('input', (e) => { radarFilterText = e.target.value; renderRadarBody(); });
+  renderRadarBody();
+}
+
+function renderRadarBody() {
+  const body = $('#radar-body');
+  if (!body) return;
+  const focused = document.activeElement === $('#radar-filter');
+  body.innerHTML = '';
+  const needle = radarFilterText.trim().toLowerCase();
+  const radar = S.radar || [];
+  if (!radar.length) {
+    body.appendChild(el(`<div class="empty"><div class="empty__glyph">—</div><div>no active epochs</div></div>`));
+    return;
+  }
+  for (const r of radar) body.appendChild(radarEpochSection(r, needle));
+  if (focused) $('#radar-filter')?.focus();
+}
+
+function radarEpochSection(r, needle) {
+  const e = S.epochs.find(x => x.id === r.id);
+  return collapsible('radar:' + r.id, true,
+    `<span class="epoch__tag">${esc(e ? epochTag(e) : r.id)}</span><span class="epoch__name">${esc(r.name)}</span>
+     <span class="epoch__count">${r.done}/${r.done + r.active} done · ${r.pct}%</span>`,
+    '', (body) => {
+      if (r.goal) body.appendChild(el(`<p class="epoch__goal">${esc(r.goal)}</p>`));
+      body.appendChild(radarHead(r));
+      if (r.milestones.length) body.appendChild(radarMilestones(r.milestones));
+
+      const ledgerLine = el(`<p class="epoch__goal" style="opacity:.6">ledger: ${r.done} done live</p>`);
+      body.appendChild(ledgerLine);
+      archivedCountFor(r.id).then(n => { if (n) ledgerLine.textContent = `ledger: ${r.done} done live · ${n} archived`; });
+
+      const sq = S.cards.filter(c => c.track === 'sidequest' && c.epoch === r.id && !['done', 'frozen'].includes(c.phase));
+      const sqShown = sq.filter(c => radarMatches(c, needle));
+      if (sq.length) {
+        body.appendChild(el(`<div class="radar__subhead">${esc(TERM('sidequest', 'Sidequests'))}</div>`));
+        body.appendChild(sqShown.length ? opsTable('sq:' + r.id, sqShown) : el(`<p class="epoch__goal">no match</p>`));
+      }
+
+      const active = S.cards.filter(c => c.epoch === r.id && c.track !== 'sidequest' && !['done', 'frozen'].includes(c.phase));
+      const activeShown = active.filter(c => radarMatches(c, needle));
+      body.appendChild(el(`<div class="radar__subhead">Active</div>`));
+      body.appendChild(activeShown.length ? opsTable(r.id, activeShown) : el(`<p class="epoch__goal">${active.length ? 'no match' : 'no active cards'}</p>`));
+    });
+}
+
+function radarHead(r) {
+  const wrap = el(`<div class="radar__head"></div>`);
+  wrap.appendChild(el(`<div class="epoch__prog"><div class="epoch__bar"><i style="width:${r.pct}%"></i></div><span class="epoch__pct">${r.active} active · ${r.pct}%</span></div>`));
+  wrap.appendChild(radarSparkline(r.burndown));
+  return wrap;
+}
+
+function radarSparkline(days) {
+  const max = Math.max(1, ...days.map(d => d.n));
+  const todayKey = new Date().toISOString().slice(0, 10);
+  const bars = days.map(d => {
+    const h = d.n ? Math.max(3, Math.round((d.n / max) * 22)) : 2;
+    const cls = 'spark__bar' + (d.day === todayKey ? ' spark__bar--today' : '');
+    return `<i class="${cls}" style="height:${h}px" title="${esc(d.day)}: ${d.n} done"></i>`;
+  }).join('');
+  return el(`<div class="spark" aria-label="30-day burndown">${bars}</div>`);
+}
+
+function radarMilestones(ms) {
+  const wrap = el(`<div class="miles"><div class="miles__h">${esc(TERM('milestones', 'Milestones'))}</div></div>`);
+  for (const m of ms) {
+    const pct = m.total ? Math.round(m.done / m.total * 100) : 0;
+    const stalled = m.stalledDays != null && m.stalledDays > 5;
+    const row = el(`<div class="mile ${m.met ? 'mile--met' : ''}" title="${esc(m.goal || '')}">
+        <span class="mile__dot">${m.met ? '✓' : '◇'}</span>
+        <span class="mile__t">${esc(m.title)}</span>
+        <span class="mile__bar"><i style="width:${m.met ? 100 : pct}%"></i></span>
+        <span class="mile__n">${m.met ? 'met' : `${m.done}/${m.total}`}</span>
+        ${stalled ? `<span class="agechip agechip--hot" title="no activity in ${m.stalledDays}d">⚠ stalled ${m.stalledDays}d</span>` : ''}
+      </div>`);
+    wrap.appendChild(row);
+  }
+  return wrap;
+}
+
+const OPS_COLS = [
+  { k: 'num', label: '#' },
+  { k: 'title', label: 'Title' },
+  { k: 'lane', label: 'Lane' },
+  { k: 'priority', label: 'Priority' },
+  { k: 'workOrder', label: 'Order' },
+  { k: 'assignee', label: 'Assignee' },
+  { k: 'updated', label: 'Updated' },
+];
+const opsSortVal = (c, col) => {
+  if (col === 'workOrder') return c.workOrder == null ? Infinity : c.workOrder;
+  if (col === 'num') return c.num ?? 0;
+  if (col === 'priority') return PR[c.priority] ?? 9;
+  if (col === 'updated') return c.updated || '';
+  if (col === 'lane') return c.lane?.label || '';
+  return String(c[col] || '').toLowerCase();
+};
+function sortOpsRows(key, cards) {
+  const st = radarSort[key] || { col: 'workOrder', dir: 'asc' };
+  const dir = st.dir === 'asc' ? 1 : -1;
+  return [...cards].sort((a, b) => {
+    const av = opsSortVal(a, st.col), bv = opsSortVal(b, st.col);
+    if (av < bv) return -1 * dir;
+    if (av > bv) return 1 * dir;
+    return (a.num ?? 0) - (b.num ?? 0);
+  });
+}
+function ageAgo(dateStr) {
+  if (!dateStr) return '—';
+  const days = Math.floor((Date.now() - new Date(dateStr + 'T00:00:00Z').getTime()) / 86_400_000);
+  if (days <= 0) return 'today';
+  return `${days}d`;
+}
+
+function opsTable(key, cards) {
+  const st = radarSort[key] || { col: 'workOrder', dir: 'asc' };
+  const sorted = sortOpsRows(key, cards);
+  const wrap = el(`<div class="opswrap"><table class="ops"><thead><tr>
+      ${OPS_COLS.map(c => `<th data-col="${c.k}">${esc(c.label)}${st.col === c.k ? (st.dir === 'asc' ? ' ▲' : ' ▼') : ''}</th>`).join('')}
+    </tr></thead><tbody></tbody></table></div>`);
+  wrap.querySelectorAll('th').forEach(th => th.addEventListener('click', () => {
+    const col = th.dataset.col;
+    const cur = radarSort[key] || { col: 'workOrder', dir: 'asc' };
+    radarSort[key] = cur.col === col ? { col, dir: cur.dir === 'asc' ? 'desc' : 'asc' } : { col, dir: 'asc' };
+    renderRadarBody();
+  }));
+  const tbody = $('tbody', wrap);
+  for (const c of sorted) tbody.appendChild(opsRow(c));
+  return wrap;
+}
+
+function opsRow(c) {
+  const title = c.title.length > 46 ? c.title.slice(0, 45) + '…' : c.title;
+  const who = c.lane.who === 'owner' ? 'lane-owner' : c.lane.who === 'agent' ? 'lane-agent' : 'lane-none';
+  const tr = el(`<tr>
+      <td class="num">${ticket(c)}</td>
+      <td class="ops__title" title="${esc(c.title)}">${esc(title)}</td>
+      <td><span class="card__lane ${who}"><span class="pip"></span>${esc(c.lane.label)}</span></td>
+      <td class="ops__prio"></td>
+      <td class="ops__wo"></td>
+      <td class="ops__as"></td>
+      <td class="num">${ageAgo(c.updated)}</td>
+    </tr>`);
+
+  const prioSel = el(`<select data-fld="priority">${(CFG().priorities || ['P0', 'P1', 'P2', 'P3']).map(p => `<option value="${esc(p)}" ${p === c.priority ? 'selected' : ''}>${esc(p)}</option>`).join('')}</select>`);
+  prioSel.addEventListener('click', (ev) => ev.stopPropagation());
+  prioSel.addEventListener('change', () => api('card/update', { id: c.id, priority: prioSel.value, by: 'owner' }));
+  $('.ops__prio', tr).appendChild(prioSel);
+
+  const woIn = el(`<input data-fld="workOrder" type="number" min="1" value="${c.workOrder ?? ''}" placeholder="—">`);
+  woIn.addEventListener('click', (ev) => ev.stopPropagation());
+  woIn.addEventListener('change', () => api('card/update', { id: c.id, workOrder: woIn.value === '' ? null : Number(woIn.value), by: 'owner' }));
+  $('.ops__wo', tr).appendChild(woIn);
+
+  const asIn = el(`<input data-fld="assignee" value="${esc(c.assignee || '')}" placeholder="—">`);
+  asIn.addEventListener('click', (ev) => ev.stopPropagation());
+  asIn.addEventListener('change', () => api('card/update', { id: c.id, assignee: asIn.value.trim() === '' ? null : asIn.value.trim(), by: 'owner' }));
+  $('.ops__as', tr).appendChild(asIn);
+
+  tr.addEventListener('click', (ev) => { if (!/INPUT|SELECT/.test(ev.target.tagName)) showDetail(c.id); });
+  return tr;
+}
+
 // ---- card modal ------------------------------------------------------------------
 function showDetail(id) {
   openCard = id;
@@ -815,7 +1000,7 @@ async function recordBatch() {
 }
 
 // ---- render + routing -----------------------------------------------------------
-const RENDER = { now: viewNow, board: viewBoard };
+const RENDER = { now: viewNow, board: viewBoard, radar: viewRadar };
 function render() {
   if (!S) return;
   renderBeacon();
@@ -854,7 +1039,7 @@ document.addEventListener('keydown', (e) => {
     if (e.key === 'k' || e.key === 'ArrowUp') { e.preventDefault(); return nowMove(-1); }
     if (e.key === 'Enter' && nowSel >= 0) { e.preventDefault(); return nowActivate(); }
   }
-  const i = ['1', '2'].indexOf(e.key);
+  const i = ['1', '2', '3'].indexOf(e.key);
   if (i >= 0) go(VIEWS[i].id);
 });
 

@@ -305,6 +305,81 @@ export function milestoneProgress(m, cards) {
   return { total: linked.length, done, met: m.status === 'met' };
 }
 
+// ---- radar: roadmap-ledger + ops-table hybrid (#464, D-TWR-BOARD1=A) ------
+// NEW page only — never touches Board/Now. Per active epoch (status not
+// arrived/done), current epoch first then epoch order: burndown sparkline,
+// milestone stall badges, done/active counts. Ops-table rows (the actual
+// active cards) are NOT embedded here — the UI reads S.cards directly per
+// epoch, same source Board already uses, so radarData stays a light,
+// always-on computation (measured: 212 live cards × 500 events, cheap).
+
+const RADAR_DAYS = 30;
+const DAY_MS = 86_400_000;
+const dayKey = (iso) => (iso ? String(iso).slice(0, 10) : null);
+
+// Burndown is an approximation, not an audit trail: it buckets LIVE events
+// (capped at 500 by retire(), see LIVE_EVENTS above) where a card.update
+// touched `phase` and that card is CURRENTLY done, by the day the event
+// fired. Two known undercounts, both accepted for a burndown sparkline: (1)
+// once the 500-event window rolls past a day, that day's true count is lost
+// (archived history isn't walked here — keeps this cheap on every read);
+// (2) a card closed via an acceptance ballot (D-ACCEPT-*) flips phase inside
+// `ratify()`, which logs a `decision.ratify` event, not `card.update`, so
+// that closure doesn't register a burndown tick. Good enough for "is this
+// epoch moving", not for a certified done-count (that's `doneArchivedHint`
+// + the ledger line, fetched from history.json).
+function burndown30(s, epochId) {
+  const doneIds = new Set(s.cards.filter(c => c.epoch === epochId && c.phase === 'done' && c.track !== 'sidequest').map(c => c.id));
+  const days = [];
+  const base = Date.parse(`${today()}T00:00:00Z`);
+  for (let i = RADAR_DAYS - 1; i >= 0; i--) days.push(new Date(base - i * DAY_MS).toISOString().slice(0, 10));
+  const counts = Object.fromEntries(days.map(d => [d, 0]));
+  for (const e of s.events) {
+    if (e.action !== 'card.update' || !doneIds.has(e.ref)) continue;
+    if (!String(e.note || '').split(',').includes('phase')) continue;
+    const k = dayKey(e.at);
+    if (k && k in counts) counts[k]++;
+  }
+  return days.map(day => ({ day, n: counts[day] }));
+}
+
+// Days since any event touched a card linked to this milestone (any phase —
+// "stalled" means the milestone itself went quiet, not just its open cards).
+// null when never touched.
+function milestoneStallDays(m, cards, events) {
+  const linkedIds = new Set(cards.filter(c => c.milestoneId === m.id).map(c => c.id));
+  if (!linkedIds.size) return null;
+  const hit = events.find(e => linkedIds.has(e.ref)); // events are newest-first
+  if (!hit) return null;
+  return Math.floor((Date.now() - new Date(hit.at).getTime()) / DAY_MS);
+}
+
+export function radarData(s) {
+  const activeEpochs = s.epochs.filter(e => !['arrived', 'done'].includes(e.status));
+  const sorted = [...activeEpochs].sort((a, b) => {
+    const aCur = a.id === s.meta.currentEpoch, bCur = b.id === s.meta.currentEpoch;
+    if (aCur !== bCur) return aCur ? -1 : 1;
+    return (a.order ?? a.num ?? 999) - (b.order ?? b.num ?? 999);
+  });
+  return sorted.map(e => {
+    const all = s.cards.filter(c => c.epoch === e.id && c.track !== 'sidequest');
+    const active = all.filter(c => !['done', 'frozen'].includes(c.phase));
+    const done = all.filter(c => c.phase === 'done');
+    const pct = all.length ? Math.round(done.length / all.length * 100) : 0;
+    const milestones = s.milestones.filter(m => m.epochId === e.id).map(m => {
+      const linked = s.cards.filter(c => c.milestoneId === m.id);
+      const doneLinked = linked.filter(c => c.phase === 'done').length;
+      return { id: m.id, title: m.title, goal: m.goal, met: m.status === 'met',
+        done: doneLinked, total: linked.length, stalledDays: milestoneStallDays(m, s.cards, s.events) };
+    });
+    return {
+      id: e.id, name: e.name, goal: e.goal,
+      active: active.length, done: done.length, doneArchivedHint: null,
+      pct, burndown: burndown30(s, e.id), milestones,
+    };
+  });
+}
+
 export function project(s, config = null) {
   const cards = s.cards.map(c => {
     const clearance = clearanceOf(c, s.decisions);
@@ -316,10 +391,12 @@ export function project(s, config = null) {
   const milestones = s.milestones.map(m => ({ ...m, progress: milestoneProgress(m, s.cards) }));
   const inLane = (l) => cards.filter(c => c.lane.lane === l);
   const openDecisions = s.decisions.filter(isBlocking);
-  // #461 walk-back buffer: every ratified decision still on the live board —
-  // i.e. not yet retired to history — surfaces here so the owner can reopen
-  // it in one tap while it's fresh.
-  const recentlyDecided = s.decisions.filter(d => d.status === 'ratified' && !d.draft)
+  // #461 walk-back buffer: ratifications still inside the retire window —
+  // reopenable in one tap while fresh. Older ratified decisions can stay
+  // live because their card is active; they aren't "recent" and would bury
+  // the strip.
+  const bufferDays = (config && config.retireAfterDays) ?? 3;
+  const recentlyDecided = s.decisions.filter(d => d.status === 'ratified' && !d.draft && !isOlderThanDays(d.ratifiedAt, bufferDays))
     .map(d => ({ id: d.id, title: d.title, outcome: d.outcome, comment: d.comment || '', ratifiedAt: d.ratifiedAt, cardId: d.cardId }))
     .sort((a, b) => (b.ratifiedAt || '').localeCompare(a.ratifiedAt || ''));
   const counts = {
@@ -335,7 +412,7 @@ export function project(s, config = null) {
   };
   return { meta: s.meta, config: config || undefined, epochs: s.epochs, milestones, phases: PHASES, lanes: LANES,
     cards, decisions: s.decisions, questions: s.questions, ideas: s.ideas,
-    events: s.events.slice(0, 300), counts, recentlyDecided };
+    events: s.events.slice(0, 300), counts, recentlyDecided, radar: radarData(s) };
 }
 
 // ---- resolution helpers ----------------------------------------------------

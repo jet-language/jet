@@ -146,6 +146,11 @@ and goes dark as you clear them. Two views:
   tower clear.
 - **Board** — idea capture, sidequests, epochs → milestones → cards, frozen
   bay; card modal for editing, decisions, questions, log.
+- **Radar** *(prototype, owner-acceptance pending)* — roadmap ledger ×
+  ops-table hybrid: per active epoch, a 30-day burndown sparkline, milestone
+  progress with stall badges, and a sortable/filterable/inline-editable
+  table of that epoch's active cards (+ its sidequests). Adds to Board/Now,
+  changes neither.
 
 Durable collapse state, no localStorage, no framework, mobile bottom tabs.
 

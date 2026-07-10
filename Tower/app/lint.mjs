@@ -127,6 +127,9 @@ export function ruleBallotDocGaps(s, history, { docsRoot } = {}) {
   for (const f of readdirSync(dir)) {
     if (!f.endsWith('.md')) continue;
     const text = readFileSync(join(dir, f), 'utf8');
+    // A doc that declares itself decided history isn't an open queue.
+    const head = text.split('\n').slice(0, 10).join('\n');
+    if (/status:\s*(ratified|historical|archived)/i.test(head)) continue;
     const seen = new Set();
     for (const m of text.matchAll(DECISION_ID_RE)) {
       const id = m[0];

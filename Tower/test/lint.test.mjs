@@ -190,6 +190,12 @@ test('ruleBallotDocGaps: flags a ratified decision id still listed in docs/ballo
   assert.equal(findings.length, 1);
   assert.equal(findings[0].rule, 'ratified-in-open-ballot-doc');
   assert.equal(findings[0].ref, 'D-XYZ1');
+
+  // A doc that declares itself decided history is skipped entirely.
+  writeFileSync(join(docsRoot, 'ballots', 'review.md'),
+    '# Review\n\nStatus: ratified 2026-07-06.\n\n- D-XYZ1 chosen option B\n');
+  const again = ruleBallotDocGaps(st.load(), { decisions: [] }, { docsRoot });
+  assert.equal(again.length, 1, 'historical doc adds no findings');
 });
 
 test('ruleBallotDocGaps: clean when the doc only mentions an unratified id', () => {
