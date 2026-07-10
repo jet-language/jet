@@ -586,6 +586,42 @@ fn web_executable_emission_is_structurally_tir_only() {
 }
 
 #[test]
+fn wasm_void_body_and_internal_helper_are_emitted_from_tir() {
+    let src = r#"#Target(Web)
+fn tick() {}
+#WasmExport
+fn ping() { tick() }
+fn twice(n: Int) -> Int { return n * 2 }
+#WasmExport
+fn compute(n: Int) -> Int { return twice(n) }
+fn run() {}
+"#;
+    let out = jet::compile_web_with_path(src, "tests/fixtures/web_wasm_helpers.jet")
+        .expect("supported Wasm helpers should compile");
+    let wasm = &out.web.expect("web artifacts").wasm_rust;
+    assert!(wasm.contains("fn jet_wasm_tick()"));
+    assert!(wasm.contains("jet_wasm_tick();"), "void body side effect was dropped:\n{wasm}");
+    assert!(wasm.contains("fn jet_wasm_twice(user_n: i64) -> i64"));
+    assert!(wasm.contains("jet_wasm_twice(user_n)"), "export did not call internal helper:\n{wasm}");
+}
+
+#[test]
+fn web_missing_return_is_a_preflight_diagnostic() {
+    let src = "#Target(Web)\n#Js\nfn missing() -> Int { n :: 1 }\nfn run() {}\n";
+    let diags = jet::compile_web_with_path(src, "tests/fixtures/web_missing_return.jet")
+        .expect_err("non-void JS function without return must be rejected");
+    assert!(diags.iter().any(|d| d.code == "E0114"), "{diags:?}");
+}
+
+#[test]
+fn wasm_unsupported_export_abi_is_a_preflight_diagnostic() {
+    let src = "#Target(Web)\n#WasmExport\nfn echo(s: ^String) -> String { return s }\nfn run() {}\n";
+    let diags = jet::compile_web_with_path(src, "tests/fixtures/web_bad_wasm_abi.jet")
+        .expect_err("unsupported Wasm ABI must be rejected before emission");
+    assert!(diags.iter().any(|d| d.code == "E-WEB-TIR-UNSUPPORTED"), "{diags:?}");
+}
+
+#[test]
 fn web_hello_dom_shim_roundtrip() {
     if !have_tool("rustc") || !have_tool("node") {
         eprintln!("note: skipping web_build hello (need rustc + node)");
