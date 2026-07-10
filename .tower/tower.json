@@ -4,19 +4,19 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 466,
-    "rev": 2640,
+    "rev": 2657,
     "ui": {
       "toggled": [
         "dec-group:syntax",
         "dec-group:runtime",
         "dec-group:other",
-        "epoch:e5",
         "epoch:e8",
         "epoch:e9",
         "epoch:e7",
-        "epoch:e4",
         "epoch:e6",
-        "epoch:e3"
+        "board-sidequests",
+        "epoch:e4",
+        "epoch:e5"
       ]
     },
     "digestCursor": "2026-07-10T12:24:15.202Z"
@@ -1062,7 +1062,7 @@
     },
     {
       "milestoneId": "e3-universal-product-parity",
-      "assignee": "sol-95",
+      "assignee": "cursor-95",
       "id": "c1nixrpd",
       "num": 95,
       "title": "Jai/Zig-style programmable build system (builds as Jet)",
@@ -1258,7 +1258,8 @@
       "workOrder": 495,
       "criteria": [],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [],
+      "claimedAt": "2026-07-10T13:53:20.166Z"
     },
     {
       "milestoneId": null,
@@ -7417,7 +7418,7 @@
       "priority": "P1",
       "plan": "# Plan: jetos Studio dashboard/sidebar UI\n\nRatified inputs:\n- D-FE-STUDIO1 outcome E with owner modifications.\n- D-JOS-STUDIO-HOST1: local projection/edit service plus browser fallback; no Canvas coupling.\n- #264 shipped source-backed Studio prototype; this card redesigns the actual Studio UI, not semantics.\n\nScope:\n- crates/jetpack/src/JetOS/studio_projection.rs for installed app projection.\n- crates/jetpack/src/CLI/bridge_os_studio.rs, crates/jetpack/src/CLI/studio_server.rs, crates/jetpack/src/CLI/studio_transactions.rs for served/edit flows if route data needs expansion.\n- tests/jetpack.rs and focused Studio tests/fixtures.\n\nImplementation steps:\n1. Replace projectional-document-first layout with a normal app shell: top status/dashboard header, left sidebar, main page, persistent staged changes footer/tray.\n2. Build dashboard landing page from real data.json/source/proof facts: hosts, selected host, generation ribbon, service health, alerts, monitoring summary, proof/rollback status, and last run status. Keep copy plain and operational.\n3. Build sidebar categories: Dashboard, Settings, Monitoring, Services, Packages, Secrets, Generations, Changeset, Proof/Provenance. Back categories with an internal page registry so future Studio pages register title/id/source/data needs without redesign.\n4. Move settings into category pages with ordinary controls. Each setting edit must stage a source transaction and show exact Jet diff before apply.\n5. Make Changeset a first-class page: unified diff, impact ledger, generation delta, proof requirements, per-hunk include where supported, Build only, Build and switch, Discard.\n6. Keep one apply path. Edits from settings, dashboard alerts, rollback actions, and changeset review all stage into the same changeset/apply gate.\n7. Preserve source-backed guarantees: no hidden GUI semantic state, exact config.jet diff, provenance/proof visibility, browser/headless fallback, and deterministic review output.\n\nAcceptance:\n- jetos studio --serve opens the redesigned dashboard/sidebar UI.\n- Dashboard is understandable at a glance; settings are in sidebar categories; Changeset is a sidebar page.\n- A settings edit previews exact Jet diff, stages in Changeset, saves through the existing transaction service, reprojects, and can run check/plan/build/proof.\n- Existing #264 tests still pass and new tests cover page registry, Changeset page, dashboard data rendering, and source transaction path.\n\nVerification:\n- nix develop -c cargo test --test jetpack <focused Studio tests>\n- nix develop -c cargo test --test jetpack\n- nix develop -c cargo build --bin jetos\n- Browser/headless proof for served Studio page.\n- Full nix develop -c cargo test before done unless unrelated blockers are logged and owner accepts scoped proof.",
       "blockedBy": [],
-      "assignee": "terra-357",
+      "assignee": "cursor-357",
       "log": [
         {
           "at": "2026-07-10",
@@ -7539,7 +7540,8 @@
       "workOrder": 4,
       "criteria": [],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [],
+      "claimedAt": "2026-07-10T13:53:20.028Z"
     },
     {
       "id": "c0gk8k3t",
@@ -9874,13 +9876,28 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": "e4-jetpack-world-class",
-      "phase": "building",
+      "phase": "verify",
       "priority": "P0",
       "plan": "docs/plans/epoch-4/world-class-package-manager.md#e4-jp0--truth-and-integrity-stop-line",
       "blockedBy": [],
       "workOrder": 600,
-      "assignee": "sol-418",
+      "assignee": "cursor-418",
       "log": [
+        {
+          "at": "2026-07-10",
+          "by": "cursor-418",
+          "text": "Seventh repair committed 4745d77b: immutable tmpfs PATH wrappers + FD executables + original-provenance Nix closure + truth history read. Focused Store 16/16, generation_owns 1/1, jetpack_truth 2/2, provider_visibility 1/1, jetpack_no_daemon 3/3 green. Awaiting independent full-suite after merge."
+        },
+        {
+          "at": "2026-07-10",
+          "by": "cursor-418",
+          "text": "cursor-418: finishing seventh repair (immutable tmpfs PATH wrappers + original-provenance closure copy)"
+        },
+        {
+          "at": "2026-07-10",
+          "by": "sol-418",
+          "text": "[handoff] cursor-418 taking over seventh PATH-wrapper repair"
+        },
         {
           "at": "2026-07-10",
           "by": "codex-orchestrator",
@@ -10001,7 +10018,8 @@
       "updated": "2026-07-10",
       "criteria": [],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [],
+      "claimedAt": "2026-07-10T13:51:01.944Z"
     },
     {
       "id": "c0yxdqju",
@@ -11229,12 +11247,17 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P1",
       "plan": "1. store/cli: tower lint (rules above, --json), each rule its own function + test fixture. 2. --docs mode: scan docs/ballots + docs/plans for ratified decision ids (source: live store) and fail listing hits. 3. tower next --burndown: filter = (epoch e3 track epoch) + (track sidequest), agent lanes, workOrder order. 4. Tests per rule (clean fixture + seeded-violation fixture). 5. Doc lines in tower skill + AGENTS.md.",
       "blockedBy": [],
       "assignee": "claude-main",
       "log": [
+        {
+          "at": "2026-07-10",
+          "by": "claude-main",
+          "text": "verified by orchestrator: suite 125/125 (independent rerun); live lint smoke — 4 true done-without-evidence findings (#231-234) + 14 ratified D-WD* ids flagged in docs/ballots/world-domination doc (docs-mode); burndown scope correct. Doc cleanup queued as hygiene follow-up. Closing."
+        },
         {
           "at": "2026-07-10",
           "by": "claude-main",
@@ -11478,12 +11501,22 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "building",
       "priority": "P2",
       "plan": "D-TWR-BOARD1=A ratified with comment: ADD a NEW page prototyping a hybrid of A (roadmap ledger) & B (ops table); DO NOT replace or change the current Board. Steps:\n1. New third tab 'Radar' (Now · Board · Radar; keyboard 3, ⌘K entry). Board view code untouched — zero diffs to viewBoard.\n2. Radar layout per epoch (active epochs only, current first): header row = name + progress bar + 30-day burndown sparkline (computed from events: card.update transitions to done, bucketed per day) + active/done counts; milestone bars with met/total and a stall badge when no progress event for 5+ days.\n3. Under each epoch header: the B half — dense sortable table of that epoch's ACTIVE cards (num, title, lane, priority, order, assignee, updated-age). Column-header sort; type-to-filter box; inline edits for lane-safe fields (priority, workOrder, assignee) via existing card/update API; row click opens the normal card modal.\n4. Done/frozen never render on Radar; per-epoch 'ledger' link shows done list (from tower.json now; switches to GET /api/history when #461 lands — soft dependency, not blocking).\n5. Server: burndown series computed in project() (store-side helper + unit test) so the client stays dumb.\n6. Tests: burndown/stall helper unit tests in Tower/test; existing suite green.\n7. Acceptance (owner comment = this is a prototype he wants to SEE): card flagged for owner acceptance — demo on his phone + desktop, he compares against untouched Board, then decides keep/iterate/drop via the acceptance ballot. Frontend acceptance = feature-by-feature vs this plan in his real browser, not pty tests.\nExit: Radar renders live board data with burndown + table hybrid; Board byte-identical in behavior; owner acceptance ballot answered.",
       "blockedBy": [],
       "assignee": "claude-main",
       "log": [
+        {
+          "at": "2026-07-10",
+          "by": "owner",
+          "text": "needsAcceptance set per D-TWR-BOARD1 comment (owner reviews prototype)"
+        },
+        {
+          "at": "2026-07-10",
+          "by": "claude-main",
+          "text": "Tower chain 6/6 start — Radar prototype tab; will flag needsAcceptance so it ends in your queue, not done"
+        },
         {
           "at": "2026-07-10",
           "by": "claude-main",
@@ -11500,7 +11533,7 @@
       "workOrder": 17,
       "claimedAt": "2026-07-10T12:33:21.093Z",
       "criteria": [],
-      "needsAcceptance": false,
+      "needsAcceptance": true,
       "refs": []
     },
     {
@@ -22122,6 +22155,83 @@
   ],
   "events": [
     {
+      "at": "2026-07-10T13:57:44.608Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c0ceo8wd",
+      "note": "logEntry,needsAcceptance"
+    },
+    {
+      "at": "2026-07-10T13:57:44.528Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0ceo8wd",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-10T13:57:44.447Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c09ffy3w",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-10T13:53:20.166Z",
+      "by": "cursor-95",
+      "action": "card.claim",
+      "ref": "c1nixrpd",
+      "note": ""
+    },
+    {
+      "at": "2026-07-10T13:53:20.094Z",
+      "by": "sol-95",
+      "action": "card.release",
+      "ref": "c1nixrpd",
+      "note": ""
+    },
+    {
+      "at": "2026-07-10T13:53:20.028Z",
+      "by": "cursor-357",
+      "action": "card.claim",
+      "ref": "c0e7rot4",
+      "note": ""
+    },
+    {
+      "at": "2026-07-10T13:53:19.957Z",
+      "by": "terra-357",
+      "action": "card.release",
+      "ref": "c0e7rot4",
+      "note": ""
+    },
+    {
+      "at": "2026-07-10T13:53:19.883Z",
+      "by": "cursor-418",
+      "action": "card.update",
+      "ref": "c0wetgi3",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-10T13:51:02.011Z",
+      "by": "cursor-418",
+      "action": "card.update",
+      "ref": "c0wetgi3",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-10T13:51:01.944Z",
+      "by": "cursor-418",
+      "action": "card.claim",
+      "ref": "c0wetgi3",
+      "note": ""
+    },
+    {
+      "at": "2026-07-10T13:51:01.868Z",
+      "by": "sol-418",
+      "action": "card.release",
+      "ref": "c0wetgi3",
+      "note": "[handoff] logged"
+    },
+    {
       "at": "2026-07-10T13:47:05.381Z",
       "by": "cursor-main",
       "action": "card.claim",
@@ -25543,83 +25653,6 @@
       "action": "card.update",
       "ref": "c06lb4p5",
       "note": "logEntry"
-    },
-    {
-      "at": "2026-07-09T18:16:42.151Z",
-      "by": "claude",
-      "action": "card.update",
-      "ref": "c08hp4wc",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-09T18:16:42.080Z",
-      "by": "claude",
-      "action": "card.update",
-      "ref": "c05hqpe6",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-09T18:16:42.014Z",
-      "by": "claude",
-      "action": "card.update",
-      "ref": "c04du0jb",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-09T18:16:41.946Z",
-      "by": "claude",
-      "action": "card.update",
-      "ref": "c038yftr",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-09T18:16:41.876Z",
-      "by": "claude",
-      "action": "card.update",
-      "ref": "c0254elb",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-09T18:16:41.806Z",
-      "by": "claude",
-      "action": "card.update",
-      "ref": "c013gf7s",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-09T18:16:41.738Z",
-      "by": "claude",
-      "action": "card.update",
-      "ref": "c0uzefny",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-09T18:16:41.668Z",
-      "by": "claude",
-      "action": "card.update",
-      "ref": "c0txfavt",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-09T18:16:41.598Z",
-      "by": "claude",
-      "action": "card.update",
-      "ref": "c0svh6c4",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-09T18:16:41.526Z",
-      "by": "claude",
-      "action": "card.update",
-      "ref": "c0rvu7rz",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-09T18:16:41.451Z",
-      "by": "claude",
-      "action": "card.update",
-      "ref": "c0qs8j6u",
-      "note": "phase,logEntry"
     }
   ],
   "nextNum": 368,

@@ -76,6 +76,22 @@ everything as JSON; `tower status` is the human summary.
    and a question/ballot for anything newly blocked on the owner — those are
    what the owner sees (and gets push notifications for).
 
+## Burndown scope + durability sweep (#457)
+
+When the goal is burndown (work the board's current epoch to empty), scope
+picks with `tower next --burndown` instead of hand-filtering by epoch: it
+narrows the pool to `track:"epoch"` cards in `meta.currentEpoch` plus every
+`track:"sidequest"` card, agent lanes only, same `workOrder` order as plain
+`tower next`. Exit when that pool is empty.
+
+Run `tower lint` before or after a sweep to catch durability rot the guards
+don't: cards marked `done` with no verification evidence in the log, cards
+claimed and idle 3+ days, events missing `by`, decisions that would fail the
+ballot-ready gate, stale drafts, and dangling `blockedBy` refs. `--docs` also
+flags a ratified decision id still sitting in `docs/ballots/*.md`. Exit code
+1 means findings exist — fix them or raise a ballot, don't just clear the
+board and move on.
+
 ## Guards (agent-hard, owner-soft)
 
 Writes with `--by` other than `owner` are gated; `--by owner` bypasses

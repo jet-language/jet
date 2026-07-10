@@ -40,9 +40,18 @@ When the owner asks to work the board / burn down Epoch 3, stay inside:
 2. **Sidequests** — `track:"sidequest"` + agent lane.
 
 Do not wander into e4+, frozen, or owner lanes unless he redirects. Pick with
-`tower next --epoch e3` / `--track sidequest` (workOrder ascending, then
-building > verify > implement > plan). Respect `blockedBy`; never invent a
-spelling to bypass a ratification gate. Exit criterion: both sections empty.
+`tower next --burndown` (workOrder ascending, then building > verify >
+implement > plan) — the canonical burndown loop: scopes to `meta.currentEpoch`
+epoch-track cards plus every sidequest, agent lanes only, in one filter
+(#457). Respect `blockedBy`; never invent a spelling to bypass a
+ratification gate. Exit criterion: both sections empty.
+
+Sweep for durability rot with `tower lint` before/after a burndown pass
+(#457): done cards with no verification evidence, claimed-idle cards,
+unattributed events, ballot-gap decisions, stale drafts, orphan `blockedBy`
+refs. `--docs` also flags a ratified decision id still listed in
+`docs/ballots/*.md`. Exit 1 on any finding, 0 clean — fix or ballot what it
+surfaces, don't silence it.
 
 ## Session loop
 

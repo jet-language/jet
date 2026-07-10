@@ -41,6 +41,12 @@ tower brief --agent me       # ONE call: card, blockers, criteria, decisions
                               # machine output; a #ref picks a specific card)
 tower state                  # full projected state as JSON
 tower next [--agent me]      # what to pick up, in canonical order
+tower next --burndown        # burndown loop scope: meta.currentEpoch's
+                              # epoch-track cards + every sidequest, agent
+                              # lanes only (#457)
+tower lint [--json] [--docs] # durability sweeper over the live board (+
+                              # docs/ballots/*.md scan with --docs); exit 1
+                              # on any finding, 0 clean
 tower question list --open   # owner questions — answer these before building
 tower card show '#12'        # one card, with computed lane + decisions
 tower events --limit 20      # who did what, when
@@ -148,6 +154,32 @@ automatically once something isn't live any more (the result carries
 LIVE on the card (`E_HAS_RATIFIED`) — let it retire on its own, or
 `tower archive restore` then re-detach, then delete.
 
+### Lint (#457) — durability sweeper
+
+`tower lint` is a read-only, rule-based sweep over the live board (each rule
+its own function, returning `{rule, ref, msg}` findings):
+
+| Rule | Flags |
+|---|---|
+| `done-without-evidence` | a `done` card whose log never mentions verif/green/tests/evidence AND whose criteria are empty or not all `verified` |
+| `claimed-idle` | assignee set, phase `building`/`ready`, `updated` more than 3 days old |
+| `missing-attribution` | an event (newest 500, live) with an empty/missing `by` |
+| `ballot-gaps` | an OPEN, non-draft, non-`acceptance` decision that would fail `addDecision`'s own ballot-ready gate today |
+| `stale-draft` | a draft decision more than 7 days old |
+| `orphan-blockers` | a `blockedBy` ref that resolves to no live card, history card, or live decision |
+
+`--docs` adds `ratified-in-open-ballot-doc`: a decision id ratified in the
+live store (or history) but still listed in a `docs/ballots/*.md` file
+(deliberately scoped to `docs/ballots/` only — `docs/plans/` may legitimately
+reference a ratified id long after the fact).
+
+```
+tower lint                 # human output: one line per finding, exit 1/0
+tower lint --json          # machine output
+tower lint --docs          # also scan docs/ballots/*.md
+tower lint --docs-root DIR # override the docs root (default: <project>/docs)
+```
+
 ## Guards (agent-hard, owner-soft)
 
 Every guard below binds writes where `--by` is not `owner`; `--by owner`
@@ -190,6 +222,7 @@ blocks the same as an unfinished card.
 ```
 GET  /api/state                     full projected state
 GET  /api/next?agent=me&limit=5     canonical work picker
+GET  /api/lint?docs=0|1             durability sweeper findings (#457)
 GET  /api/brief?card=&agent=&claim=0|1   one-shot work packet (#462); no
                                      card= → picks the top card via next's
                                      picker; claims only when agent= AND
