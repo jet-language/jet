@@ -4,13 +4,15 @@ import { mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { openStore, empty } from '../app/store.mjs';
-import { writeJSON } from '../app/paths.mjs';
-import { serve } from '../app/server.mjs';
+import { saveSecrets } from '../app/config.mjs';
+import { configFile, readJSON, secretsFile, writeJSON } from '../app/paths.mjs';
+import { serve, removeDeadSubscriptions } from '../app/server.mjs';
 
 const dir = mkdtempSync(join(tmpdir(), 'tower-wave-'));
 writeJSON(join(dir, 'tower.json'), empty('Wave'));
 // opt-in auth token
-writeJSON(join(dir, 'config.json'), { project: 'Wave', auth: { token: 'test-token-123456' } });
+writeJSON(configFile(dir), { project: 'Wave' });
+saveSecrets(dir, { auth: { token: 'test-token-123456' } });
 const store = openStore(dir);
 const PORT = 7957;
 const server = serve(store, PORT, false);
@@ -25,6 +27,24 @@ const post = async (p, b, raw = false) => {
 test('provisioning: vapid keys generated; auth stays opt-in (no auto token)', () => {
   assert.ok(store.config.push?.publicKey?.length > 40);
   assert.equal(store.config.auth.token, 'test-token-123456', 'configured token respected, none invented');
+  assert.deepEqual(Object.keys(readJSON(configFile(dir), {})), ['project']);
+  const secrets = readJSON(secretsFile(dir), {});
+  assert.equal(typeof secrets.push?.privateJwk, 'object');
+  assert.equal(Array.isArray(secrets.push?.subscriptions), true);
+  const projected = store.project();
+  assert.equal(Object.hasOwn(projected.config, 'auth'), false);
+  assert.equal(Object.hasOwn(projected.config, 'push'), false);
+});
+
+test('subscription writes and dead-endpoint cleanup touch secrets only', async () => {
+  const endpoint = 'https://example.invalid/dead';
+  const added = await post('/api/push/subscribe', { subscription: { endpoint, keys: { p256dh: 'shape', auth: 'shape' } } });
+  assert.equal(added.status, 200);
+  assert.equal(Object.hasOwn(readJSON(configFile(dir), {}), 'push'), false);
+  assert.equal(readJSON(secretsFile(dir), {}).push.subscriptions.length, 1);
+  removeDeadSubscriptions(store, [endpoint]);
+  assert.equal(readJSON(secretsFile(dir), {}).push.subscriptions.length, 0);
+  assert.equal(Object.hasOwn(readJSON(configFile(dir), {}), 'push'), false);
 });
 
 test('undo: revert last write, conflict-guarded', async () => {
@@ -75,6 +95,9 @@ test('SSE stream delivers state on mutation', async () => {
   let buf = '';
   // initial frame
   while (!buf.includes('\n\n')) buf += dec.decode((await reader.read()).value);
+  const initial = JSON.parse(buf.split('data: ')[1].split('\n\n')[0]);
+  assert.equal(Object.hasOwn(initial.config, 'auth'), false);
+  assert.equal(Object.hasOwn(initial.config, 'push'), false);
   buf = '';
   await post('/api/card/add', { title: 'sse check' });
   const deadline = Date.now() + 3000;
@@ -102,6 +125,8 @@ test('auth: remote requests 401 without key, unlock page for browsers, boot in s
   assert.equal(r3.status, 200);
   const s = await r3.json();
   assert.ok(s.boot?.length > 4, 'boot id present');
+  assert.equal(Object.hasOwn(s.config, 'auth'), false);
+  assert.equal(Object.hasOwn(s.config, 'push'), false);
   const r4 = await fetch(`${base}/?key=${store.config.auth.token}`, { redirect: 'manual' });
   assert.equal(r4.status, 302);
   assert.match(r4.headers.get('set-cookie') || '', /tower=/);

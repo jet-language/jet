@@ -75,7 +75,7 @@ function showUnlock() {
   const box = el(`<div class="unlock" role="dialog" aria-label="Unlock">
       <div class="unlock__card">
         <div class="unlock__mark">TOWER<b>.</b></div>
-        <div class="unlock__t">This device isn't unlocked — actions are being rejected.<br>Paste the access key (<code>auth.token</code> in <code>.tower/config.json</code>).</div>
+        <div class="unlock__t">This device isn't unlocked — actions are being rejected.<br>Paste the access key (<code>auth.token</code> in <code>.tower/secrets.json</code>).</div>
         <input class="unlock__in" placeholder="access key" autocomplete="off">
         <button class="btn btn--red" id="unlock-go">Unlock</button>
       </div></div>`);

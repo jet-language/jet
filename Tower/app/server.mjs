@@ -14,7 +14,7 @@ import { join, extname, normalize, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes } from 'node:crypto';
 import { UI, readJSON } from './paths.mjs';
-import { saveConfig } from './config.mjs';
+import { saveSecrets } from './config.mjs';
 import { generateVapid, pushTo } from './webpush.mjs';
 import * as db from './store.mjs';
 import { TowerError } from './store.mjs';
@@ -51,6 +51,21 @@ function broadcast(store) {
 
 // ---- web push ----------------------------------------------------------------
 let lastPushAt = 0;
+function persistPush(store, push) {
+  store.config.push = push;
+  saveSecrets(store.dataDir, { push });
+  return push;
+}
+
+export function removeDeadSubscriptions(store, deadEndpoints) {
+  if (!deadEndpoints.length || !store.config.push) return;
+  const dead = new Set(deadEndpoints);
+  persistPush(store, {
+    ...store.config.push,
+    subscriptions: (store.config.push.subscriptions || []).filter(sub => !dead.has(sub.endpoint)),
+  });
+}
+
 async function pushOwner(store, reason) {
   const push = store.config.push;
   if (!push?.subscriptions?.length) return;
@@ -61,10 +76,7 @@ async function pushOwner(store, reason) {
     const r = await pushTo(sub, { privateJwk: push.privateJwk, publicKey: push.publicKey });
     if (r.gone) dead.push(sub.endpoint);
   }));
-  if (dead.length) {
-    push.subscriptions = push.subscriptions.filter(s => !dead.includes(s.endpoint));
-    saveConfig(store.dataDir, { push });
-  }
+  removeDeadSubscriptions(store, dead);
 }
 
 // route → (state, payload, config) mutation. Same verbs as the CLI.
@@ -117,7 +129,7 @@ const UNLOCK_HTML = `<!doctype html><meta charset="utf-8"><meta name="viewport" 
 <title>Tower — unlock</title><body style="margin:0;min-height:100vh;display:grid;place-items:center;background:#060608;color:#f4f3f5;font:15px/1.5 system-ui">
 <form method="GET" action="/" style="display:grid;gap:12px;width:min(340px,90vw);text-align:center">
 <div style="font:700 22px/1 sans-serif;letter-spacing:.06em">TOWER<span style="color:#ff2e4d">.</span></div>
-<div style="color:#9d9ca8;font-size:13px">This device isn't unlocked. Paste the access key<br>(<code>auth.token</code> in <code>.tower/config.json</code>).</div>
+<div style="color:#9d9ca8;font-size:13px">This device isn't unlocked. Paste the access key<br>(<code>auth.token</code> in <code>.tower/secrets.json</code>).</div>
 <input name="key" autofocus placeholder="access key" style="padding:11px;border-radius:8px;border:1px solid #343444;background:#0e0e12;color:#f4f3f5;text-align:center">
 <button style="padding:11px;border-radius:8px;border:0;background:#b3122d;color:#fff;font-weight:600;cursor:pointer">Unlock</button>
 </form></body>`;
@@ -138,7 +150,7 @@ function authed(req, res, token, url) {
     res.end(UNLOCK_HTML);
     return false;
   }
-  send(res, 401, { error: 'E_AUTH', message: 'unauthorized — unlock this device with the access key (auth.token in .tower/config.json)' });
+  send(res, 401, { error: 'E_AUTH', message: 'unauthorized — unlock this device with the access key (auth.token in .tower/secrets.json)' });
   return false;
 }
 
@@ -157,11 +169,10 @@ async function serveStatic(req, res) {
 export function serve(store, port = 7878, open = false) {
   // one-time provisioning: VAPID push keys. Auth is OPT-IN: set
   //   "auth": { "token": "…" }
-  // in config.json to require a key from non-localhost devices.
+  // in untracked secrets.json to require a key from non-localhost devices.
   if (!store.config.push?.publicKey) {
     const v = generateVapid();
-    store.config.push = { publicKey: v.publicKey, privateJwk: v.privateJwk, subscriptions: store.config.push?.subscriptions || [] };
-    saveConfig(store.dataDir, { push: store.config.push });
+    persistPush(store, { publicKey: v.publicKey, privateJwk: v.privateJwk, subscriptions: store.config.push?.subscriptions || [] });
   }
   const token = store.config.auth?.token || null;
 
@@ -231,9 +242,10 @@ export function serve(store, port = 7878, open = false) {
       if (req.method === 'POST' && url.pathname === '/api/push/subscribe') {
         const p = await jsonBody(req);
         if (!p.subscription?.endpoint) return send(res, 400, { error: 'E_INVALID', message: 'missing subscription' });
-        const push = store.config.push;
-        push.subscriptions = [...push.subscriptions.filter(s => s.endpoint !== p.subscription.endpoint), { ...p.subscription, ua: (req.headers['user-agent'] || '').slice(0, 80), created: new Date().toISOString() }];
-        saveConfig(store.dataDir, { push });
+        const push = { ...store.config.push,
+          subscriptions: [...store.config.push.subscriptions.filter(s => s.endpoint !== p.subscription.endpoint),
+            { ...p.subscription, ua: (req.headers['user-agent'] || '').slice(0, 80), created: new Date().toISOString() }] };
+        persistPush(store, push);
         return send(res, 200, { ok: true, subscribed: push.subscriptions.length });
       }
       if (req.method === 'POST' && url.pathname === '/api/push/test') {
@@ -279,7 +291,7 @@ export function serve(store, port = 7878, open = false) {
   });
   server.listen(port, () => {
     const url = `http://localhost:${port}`;
-    console.log(`\n  ▲ Tower — ${store.config.project} — ${url}\n    data: ${store.file}${token ? `\n    remote access: http://<host>:${port}/?key=${token}` : ''}\n`);
+    console.log(`\n  ▲ Tower — ${store.config.project} — ${url}\n    data: ${store.file}${token ? `\n    remote access enabled; unlock key is in .tower/secrets.json` : ''}\n`);
     if (open) import('node:child_process').then(({ spawn }) => {
       const cmd = process.platform === 'darwin' ? 'open' : 'xdg-open';
       spawn(cmd, [url], { stdio: 'ignore', detached: true }).unref();

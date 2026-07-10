@@ -9,7 +9,7 @@ import { join, resolve, dirname } from 'node:path';
 import * as db from './store.mjs';
 import { openStore, TowerError, PHASE_IDS } from './store.mjs';
 import { findDataDir, readJSON, writeJSON, historyFile } from './paths.mjs';
-import { DEFAULTS } from './config.mjs';
+import { ConfigError, DEFAULTS } from './config.mjs';
 import { migrate } from './migrate.mjs';
 import { lint } from './lint.mjs';
 
@@ -45,6 +45,17 @@ const cardLine = (c) => `#${String(c.num).padEnd(4)} ${(c.priority || '').padEnd
 
 // ---- commands ----------------------------------------------------------------
 
+const DATA_IGNORES = ['backups/', '*.lock/', 'files/', 'server.log', 'secrets.json', '.secrets.json.tmp-*'];
+function ensureDataIgnores(dir) {
+  const file = join(dir, '.gitignore');
+  const current = existsSync(file) ? readFileSync(file, 'utf8') : '';
+  const lines = new Set(current.split(/\r?\n/));
+  const missing = DATA_IGNORES.filter(entry => !lines.has(entry));
+  if (!missing.length) return;
+  const prefix = current && !current.endsWith('\n') ? '\n' : '';
+  writeFileSync(file, current + prefix + missing.join('\n') + '\n');
+}
+
 function cmdInit({ flags }) {
   const dir = resolve(flags.dir || '.', '.tower');
   const file = join(dir, 'tower.json');
@@ -54,8 +65,7 @@ function cmdInit({ flags }) {
   writeJSON(file, db.empty(name));
   const cfg = { project: name };
   if (!existsSync(join(dir, 'config.json'))) writeJSON(join(dir, 'config.json'), cfg);
-  const gi = join(dir, '.gitignore');
-  if (!existsSync(gi)) writeFileSync(gi, 'backups/\n*.lock/\nfiles/\nserver.log\n');
+  ensureDataIgnores(dir);
   console.log(`initialized Tower for "${name}" at ${dir}`);
   console.log('next: tower epoch add e1 --name "First epoch" && tower serve --open');
 }
@@ -515,7 +525,7 @@ function cmdImport({ pos, flags }) {
   const s = migrate(old, { project: flags.name || 'Project' });
   writeJSON(file, s);
   if (!existsSync(join(dir, 'config.json'))) writeJSON(join(dir, 'config.json'), { project: s.meta.project });
-  if (!existsSync(join(dir, '.gitignore'))) writeFileSync(join(dir, '.gitignore'), 'backups/\n*.lock/\nfiles/\nserver.log\n');
+  ensureDataIgnores(dir);
   console.log(`imported ${s.cards.length} cards, ${s.decisions.length} decisions, ${s.questions.length} questions, ${s.ideas.length} ideas → ${file}`);
 }
 
@@ -684,7 +694,7 @@ export async function run(argv) {
       default: throw new TowerError('E_USAGE', `unknown command "${cmd}" — run \`tower help\``);
     }
   } catch (e) {
-    if (e instanceof TowerError) {
+    if (e instanceof TowerError || e instanceof ConfigError) {
       console.error(`tower: ${e.message}`);
       process.exitCode = e.code === 'E_CONFLICT' ? 2 : 1;
       if (flags.json) console.log(JSON.stringify({ error: e.code, message: e.message }));
