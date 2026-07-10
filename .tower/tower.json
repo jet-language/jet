@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 446,
-    "rev": 2467,
+    "rev": 2472,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -17,7 +17,7 @@
         "epoch:e4"
       ]
     },
-    "digestCursor": "2026-07-10T09:25:23.252Z"
+    "digestCursor": "2026-07-10T10:28:01.568Z"
   },
   "epochs": [
     {
@@ -44705,8 +44705,8 @@
         {
           "key": "D",
           "name": "24h default, policy-tunable per source, advisory-aware exact exceptions (hybrid)",
-          "detail": "New direct and transitive third-party versions wait 24 hours from first immutable inclusion in trusted monotonic signed registry/transparency metadata — never publisher, mirror, or local timestamps; existing exact locks and realized environments are untouched (D-JPK-OFFLINE1). Workspace policy may raise or lower the window per registry or source class; first-party and workspace-internal sources default to zero. When a held version fixes a published advisory affecting the currently selected version, `jet update` says so and offers the audited exception; every exception binds exactly one package@version plus its inclusion/evidence identity, reviewer, and expiry in `policy.trust`. CI evaluates the same policy deterministically, and held versions print with age and the one-line fix.",
-          "code": "$ jet update http\nheld: http 4.8.1 (published 37m ago; matures in 23h)\nselected: 4.8.0\nnote: 4.8.1 fixes advisory JSA-2026-114 affecting 4.8.0\nFix: jet trust grant release-exception:http@4.8.1 --expires 7d"
+          "detail": "New direct and transitive third-party versions wait 24 hours from first immutable inclusion in trusted monotonic signed registry/transparency metadata — never publisher, mirror, or local timestamps; existing exact locks and realized environments are untouched (D-JPK-OFFLINE1). Workspace policy may raise or lower the window per registry or source class; first-party and workspace-internal sources default to zero. When a held version fixes a published advisory affecting the currently selected version, `jet update` says so and offers the audited exception; every exception binds exactly one package#version plus its inclusion/evidence identity, reviewer, and expiry in `policy.trust`. CI evaluates the same policy deterministically, and held versions print with age and the one-line fix.",
+          "code": "$ jet update http\nheld: http 4.8.1 (published 37m ago; matures in 23h)\nselected: 4.8.0\nnote: 4.8.1 fixes advisory JSA-2026-114 affecting 4.8.0\nFix: jet trust grant release-exception:http#4.8.1 --expires 7d"
         }
       ],
       "comparisons": [
@@ -44736,7 +44736,7 @@
       "gist": "Choose when third-party package scripts may execute.",
       "explainer": "Fable hybrid review: Option A converts sandbox containment into authorization and auto-runs third-party code; option B's name-scoped approval that survives script changes is the classic worm vector and leaves CI undefined. Option C has the right binding law but a cold policy error on `jet add` is beginner-hostile, and it never states that approval keeps the sandbox, nor grant revocation or transitive review aids. The hybrid keeps C's exact digest+capability binding, adds a guided interactive path and diff-on-change, mandates sandbox-after-approval, and allows only digest-bound curated allowlists.",
       "story": "Hank adds an npm tool whose transitive package has a postinstall script. The metadata can be read safely, but executing code needs an authority decision bound to what will run.",
-      "inWild": "$ jet add npm:sharp\nblocked hook: sharp@0.34 install\nrequests: exec, filesystem write\n$ jet trust grant package-hook:sharp@0.34\ngrant binds script digest + capabilities",
+      "inWild": "$ jet add npm:sharp\nblocked hook: sharp#0.34 install\nrequests: exec, filesystem write\n$ jet trust grant package-hook:sharp#0.34\ngrant binds script digest + capabilities",
       "detail": "One approval mechanism covers providers and keeps both beginners and CI safe.",
       "options": [
         {
@@ -44755,13 +44755,13 @@
           "key": "C",
           "name": "Deny unreviewed; exact intent approval",
           "detail": "Hooks never run during metadata probing. Approval binds package identity, script/recipe digest, provider/source, and capability set in source policy. Any change re-prompts. CI fails with the exact source fix.",
-          "code": "Error: unreviewed hook\nFix: `jet trust grant package-hook:sharp@0.34` drafts policy.trust"
+          "code": "Error: unreviewed hook\nFix: `jet trust grant package-hook:sharp#0.34` drafts policy.trust"
         },
         {
           "key": "D",
           "name": "Deny unreviewed; guided exact grants, always sandboxed, CI fix line (hybrid)",
           "detail": "Metadata probing never executes upstream code; unreviewed hooks are held, not run. Interactive `jet add` shows package identity, provider/source, script digest, and requested capabilities, and one confirmation drafts an exact `policy.trust` grant binding all four; any digest or capability change re-prompts with a diff of what changed. Approval authorizes execution but never removes containment — approved hooks still run inside the strong sandbox with only their granted capabilities, under D-BUILDPOLICY1 tier rules. CI never prompts: it fails with the exact `jet trust grant package-hook:...` source fix, and grants are listable and revocable via `jet trust`. A workspace may pin a signed curated allowlist feed as pre-review evidence; feed entries are digest-bound, never name wildcards.",
-          "code": "$ jet add npm:sharp\nheld hook: sharp@0.34 install (digest sha256:4c11)\nrequests: exec, write $out\napprove and record in policy.trust? [y/N] y\n~ runs sandboxed with granted caps only\nCI: Error [E12xx] unreviewed hook — Fix: jet trust grant package-hook:sharp@0.34"
+          "code": "$ jet add npm:sharp\nheld hook: sharp#0.34 install (digest sha256:4c11)\nrequests: exec, write $out\napprove and record in policy.trust? [y/N] y\n~ runs sandboxed with granted caps only\nCI: Error [E12xx] unreviewed hook — Fix: jet trust grant package-hook:sharp#0.34"
         }
       ],
       "comparisons": [
@@ -47673,6 +47673,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-10T10:27:34.046Z",
+      "by": "codex-main",
+      "action": "message.send",
+      "ref": "msg006ri3k",
+      "note": "→ owner: Ratification propagation complete: 44 decisions across 27 ca"
+    },
+    {
+      "at": "2026-07-10T10:26:51.599Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-JPK-BUILDSCRIPT1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-10T10:26:45.850Z",
+      "by": "codex-main",
+      "action": "decision.update",
+      "ref": "D-JPK-FRESHNESS1",
+      "note": ""
+    },
     {
       "at": "2026-07-10T10:22:50.966Z",
       "by": "tower",
@@ -61651,27 +61672,6 @@
       "action": "decision.add",
       "ref": "D-DATA-BRIDGE1",
       "note": "Data bridge providers"
-    },
-    {
-      "at": "2026-07-06T20:50:01.701Z",
-      "by": "codex-main",
-      "action": "decision.add",
-      "ref": "D-DATA-SURFACE1",
-      "note": "Core data surface"
-    },
-    {
-      "at": "2026-07-06T20:50:01.649Z",
-      "by": "codex-main",
-      "action": "decision.add",
-      "ref": "D-MERGE-VCS1",
-      "note": "Git and VCS integration policy"
-    },
-    {
-      "at": "2026-07-06T20:50:01.597Z",
-      "by": "codex-main",
-      "action": "decision.add",
-      "ref": "D-MERGE-CONFLICT1",
-      "note": "Structural conflict report shape"
     }
   ],
   "messages": [
@@ -64522,7 +64522,7 @@
       "file": null,
       "at": "2026-07-10T10:18:34.936Z",
       "deliveredAt": null,
-      "readAt": null
+      "readAt": "2026-07-10T10:28:00.118Z"
     },
     {
       "id": "msgsyk9g5e",
@@ -64622,6 +64622,17 @@
       "at": "2026-07-10T10:22:50.966Z",
       "deliveredAt": null,
       "readAt": null
+    },
+    {
+      "id": "msg006ri3k",
+      "from": "codex-main",
+      "to": "owner",
+      "text": "Ratification propagation complete: 44 decisions across 27 cards recorded in docs/spec/syntax-decisions.md; Epoch 3, Epoch 4, and Epoch 7 plans updated from open gates to ratified outcomes; package#version amendment applied to live Freshness and BuildScript ballots. Tower now has 0 open decisions, 0 open questions, 0 unreconciled deciding cards. decisions test green.",
+      "cardId": null,
+      "file": null,
+      "at": "2026-07-10T10:27:34.046Z",
+      "deliveredAt": null,
+      "readAt": "2026-07-10T10:28:00.118Z"
     }
   ],
   "nextNum": 368,

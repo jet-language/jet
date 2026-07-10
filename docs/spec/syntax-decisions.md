@@ -2229,6 +2229,342 @@ colored as live syntax.
 repo-wide purge of stale spellings; canonical truth is `Syntax.rs` + this
 file, CI-checked.
 
+### Ratified product and runtime architecture — 2026-07-10
+
+These decisions freeze the implementation contracts for their Tower cards.
+They do not waive I1–I8, create unlisted syntax, or lower any card's proof bar.
+
+#### jetos baselines, desktop, and identity
+
+**B-E7-DESKTOPNS1=E — one-line desktop swaps**: desktop selection lives under
+the ratified full-word tree. `services.desktop.environment` accepts
+`.Gnome/.Kde/.Hyprland/.Niri`; `services.desktop.session` accepts
+`.Auto/.Wayland/.X11`; `services.desktop.displayManager` accepts
+`.Auto/.Gdm/.Sddm/.Greetd`. Session and display manager default to `.Auto`.
+The derived display manager is Gnome→Gdm, Kde→Sddm, and Hyprland/Niri→Greetd;
+`jet os explain` shows the derivation and winning priority. Invalid combinations
+are typed assertions naming both source lines. Combinatorial DE/session enum
+names are rejected; every fact keeps one option home.
+
+**B-E7-BASELINE1=D — two fully materialized baselines**: init and the installer
+write either a terminal or graphical source template directly into `config.jet`.
+There is no hidden baseline import, installed default, or silent reinsertion.
+Terminal declares the complete boot/kernel/init/filesystem/user/logging/time/
+locale/certificate/network/firewall/package substrate, compatibility utilities,
+Fish, Helix, Git, OpenSSH client, curl, rsync, ripgrep, fd, bat, eza, fzf,
+zoxide, jq, and btop; no remote server is enabled by default. Graphical adds
+GNOME Wayland/GDM, NetworkManager UI, PipeWire/WirePlumber, Bluetooth,
+printing/scanning, firmware and power management, portals, polkit, keyring,
+fonts/input/automount/notifications, jetos Studio, Firefox, Nautilus, and one
+maintained GNOME app for terminal, text, documents, images, media, archives,
+calculator, calendar, clocks, disks, screenshots, settings, and Jetpack-backed
+software management. Flatpak and alternate stores are opt-in. Every realized
+package/unit traces to a `config.jet` source span. Expert removal or replacement
+is authoritative: jetos reports obligations and proof failure but never heals
+the source behind the user's back.
+
+**B-E7-IDENTITY1=E — calver plus ordered navigation codenames**: jetos releases
+use `YY.MM` and an alphabetically ordered aviation-navigation codename, vetted
+against existing software names and recorded in a committed canon. First entry:
+`26.10 "Apex"`; later names advance alphabetically. `os-release` identifies
+only jetos (`NAME=jetos`, `ID=jetos`, `VERSION_ID=26.10`,
+`VERSION_CODENAME=apex`, `PRETTY_NAME="jetos 26.10 (Apex)"`); prereleases append
+`-pre`. CI forbids upstream NixOS identity strings in `os-release`, boot menus,
+and welcome surfaces.
+
+#### Jetpack package-manager law
+
+**D-JPK-NIXENGINE1=D — native compatibility engine**: Jetpack implements Nix
+formats and reference behavior natively and ships no Tvix code. Reference Nix
+and Tvix are dev/CI differential oracles only. Product paths verify computed
+`drvPath`, `outPath`, and `NarHash` against cache metadata and fail closed on
+divergence. No evaluator stage reaches a provider path before the pinned corpus
+is bit-exact.
+
+**D-JPK-SANDBOX2=D — sandbox or substitute**: non-executing copy and prebuilt
+verification may proceed directly. Fetched/transitive executable actions require
+the strong sandbox; unavailable backends try a trusted substitute or approved
+remote builder, then fail. A first-party local action may receive an exact,
+digest/capability/reviewer/expiry-bound `jet trust` grant; its outputs remain
+private and untrusted and never enter shared publication. CI denies by default.
+
+**D-JPK-MULTIUSER1=D — optional verifying shared-store broker**: per-user,
+rootless operation remains the default. `jetpack shared-store install` opts an
+administrator into a socket-activated transient broker. The broker re-verifies
+digest, signature, and provenance in its own privilege domain, never evaluates
+user source, builds under ephemeral sandboxed identities, and promotes objects
+only under cache-writer law. Missing broker means transparent per-user operation.
+
+**D-JPK-DYNAMICPLAN1=D — finite staged planning**: a sandboxed plan action may
+emit a typed `BuildPlan` fragment only within a declared finite stage bound.
+Each fragment is sema-checked, authority-checked, acyclic, canonically hashed,
+and locked with its exact inputs for deterministic offline replay. Build steps
+cannot read the store or invoke resolution. Imported Nix IFD stays isolated in
+the compatibility engine under the same limits.
+
+**D-JPK-PROFILE1=D — one profile generation engine**: `profile.<name>` is the
+single package-profile declaration; `user.<name>` composes profiles by reference.
+`jet profile plan/build/switch/rollback/generations` and `jetos user` share one
+identity, atomic-switch, history, collision, and GC-root engine. Composed profiles
+have one history across both product views; non-jetos platforms retain parity.
+
+**D-JPK-TRUSTROOT1=D — TUF root plus hybrid publisher identity**: registry
+authority uses a toolchain-pinned TUF root with offline threshold keys,
+delegations, snapshot/timestamp freshness, consistent snapshots, monotonic
+versions, and fail-closed expiry/rollback/bad-clock handling. Public releases
+accept a Sigstore identity bundle against a pinned transparency checkpoint or an
+offline Ed25519/KMS/HSM publisher signature. Cache builders and executors hold
+separate identities with digest-bound SLSA provenance; algorithms use the
+crypto-agility seam.
+
+**D-JPK-CACHEAUTH1=D — provenance-bound cache writers**: developers write only
+private namespaces with short-lived write credentials. Shared namespaces accept
+source-allowlisted builders and signed provenance binding action, output,
+platform, sandbox, and policy digests. Consumers verify on every read. Revocation
+quarantines objects signed by that builder; promotion requires an approved
+rebuild, never relocation or relabeling.
+
+**D-JPK-RESOLUTIONDOMAIN1=D — typed version domains**: package identity is
+provider + namespace + name. One version unifies inside each typed domain;
+automatic duplication requires a proven build/host/target, platform, runtime,
+linkage, or ABI boundary. Distinct majors may coexist only when no type/value
+crosses versions. Otherwise E1201 carries the causal proof and smallest fix.
+Expert duplication is named, reasoned source policy and appears in lock/audit.
+
+**D-JPK-VARIANT1=D — closed, total variant axes**: native variants use only
+role, OS, architecture, runtime/libc, linkage, ABI, artifact kind, and feature
+set. Every axis has a context-derived default; matching is exact-then-compatible
+under one total order. Ambiguity is an error naming the first distinguishing
+axis. Provider facts affect selection only through explicit source mappings;
+new native axes require another decision.
+
+**D-JPK-FRESHNESS1=D — 24-hour maturity default**: new third-party versions wait
+24 hours from first immutable inclusion in trusted monotonic signed metadata.
+Existing exact locks and realized environments do not move. Policy may change
+the window per source class; first-party/workspace sources default to zero.
+Advisory fixes may receive an audited exact exception bound to
+`package#version`, evidence, reviewer, and expiry. The owner's amendment is
+absolute: Jet package versions use `package#version`, never `package@version`.
+
+**D-JPK-BUILDSCRIPT1=D — reviewed hooks, always contained**: metadata probing
+never executes upstream code. An upstream hook is held until an exact grant binds
+package identity, provider/source, script digest, and capabilities; any change
+re-prompts with a diff. Approval never removes sandboxing. CI fails with the
+exact source-policy fix. Curated feeds are signed and digest-bound, never name
+wildcards.
+
+**D-JPK-NIXBASELINE1=D — pinned parity baseline**: Nix 2.34 plus one nixpkgs
+commit is the sole oracle. Stable language/store/protocol, flakes, nix-command,
+and content-addressed derivations require bit parity. IFD and dynamic/recursive
+derivations lower only through finite typed staging. Impure evaluation requires
+an explicit capability grant and yields private, non-promotable outputs. Re-pins
+require a green differential corpus and decision amendment.
+
+**D-JPK-NIXSTORE1=D — canonical Nix paths without installed Nix**: Hangar owns
+bytes/references while Linux projects `/nix/store` through rootless namespaces.
+Fallback order is verified read-only host store, audited userspace translation
+with degraded non-promotable provenance, then fail closed. macOS uses the narrow
+approved helper/broker or fails; Windows uses declared WSL2/VM/remote execution.
+Jetpack never creates a root-owned host store. Relocation creates a new identity.
+
+**D-JPK-REMOTE1=D — source grants, host bindings**: reviewable `build.remote`
+declares requested maximum capability, trust domain, and fallback; stricter
+user/org policy can only narrow it. `jet remote bind/list/remove` owns host
+endpoint and typed credential-provider mappings. Repositories and flags cannot
+introduce endpoints, keys, or trust roots. `--builder` selects only a previously
+bound and granted name; absent bindings mean silent local operation.
+
+**D-JPK-STORECLI1=D — physical verbs under Hangar**: `jet hangar` owns verify,
+repair, copy, import, export, dump/restore, and sign. Causal questions stay
+`jet explain`/`jet dossier`; `jet clean` remains the sole GC+optimize intent.
+Mutations use plan-before-apply and stable JSON. Imports are verified and
+quarantined before registration.
+
+**D-JPK-PROVIDERS2=D — direct ecosystem roots**: external ecosystems use
+readable direct roots under the one dependency/action/lock model. Selectors
+retain version/revision/baseline/features/digest/platform facts; mutable
+unhashed refs are rejected. `#version=` is canonical and bare `#2.0.17` is its
+shorthand. Each root binds source authority in `policy.providers`; workspaces
+may remap roots without changing dependency spellings. Locks record the fully
+qualified ref and resolved source.
+
+**D-JPK-REGISTRY1=D — TUF sparse registry and witnessed log**: per-package
+sparse signed metadata points to content-addressed blobs. Publish is
+transactional with one immutable winner; versions are never reused; signed
+yanks stop new selection while exact locks remain resolvable. An append-only
+transparency log covers publish, yank, ownership/recovery, and checkpoints.
+Clients verify online inclusion, pin offline checkpoints, and reject forks.
+
+**D-JPK-POLICYSURFACE1=D — one source policy namespace**: sources, licenses,
+advisories, maturity, hooks, cache roles, trust, providers, replacements, and
+exceptions live under the one workspace `policy:` namespace. Safe defaults
+apply when absent. Effective policy is the intersection with stronger host/org
+policy, which can never be weakened by source. Exceptions require id, exact
+package-edge scope, reason, and expiry. `jet policy draft` writes reviewable
+source diffs only.
+
+**D-JPK-CACHECONFIG1=D — role-bound cache configuration**: workspace policy
+requests cache roles/trust, while `jet cache bind` maps roles to ordered host
+mirrors and typed credential providers. Repositories, flags, and environment
+cannot introduce endpoints or secrets. The first verifying digest/signature hit
+wins; misses build from source; offline mode wins over all. Writes remain a
+separate grant.
+
+**D-JPK-STOREBACKEND1=D — native and Nix endpoint adapters**: supported
+endpoints are local Hangar, native HTTP, SSH, file, S3-compatible, and Nix
+daemon/SSH/file/HTTP. Each declares read/write/remote-execute/trust/credential
+capabilities. All transfers lower to verified Jetpack object APIs; Nix crossings
+record Jetpack digest plus NarHash/signed fingerprint. Nix URI spellings are
+endpoint addresses, not canonical Jetpack vocabulary.
+
+**D-JPK-RESOLVEMODE1=D — one resolution strategy vocabulary**: resolver modes
+are `conservative`, `latest`, `lowest`, and `lowest-direct`; named source
+profiles may bundle these with platform matrices. `jet update <pkg>` defaults
+conservative, moves only the named subtree, and records rationale. Realize verbs
+never resolve. `jet prove --lens dependencies` emits non-mutating `.jproof`
+matrix artifacts; unrelated lock records remain byte-identical.
+
+**D-JPK-REPROCACHE1=D — preserve divergence as untrusted evidence**: trusted
+shared caches accept only policy-reproducible outputs. Divergent bytes,
+provenance, and first-difference facts live in `private/unreproducible` and never
+satisfy trusted policy. Explicit consumption taints every downstream result.
+Promotion requires fresh independent agreeing rebuilds after the fix, never
+relabeling stored bytes.
+
+#### Full-stack web, compute, and services
+
+**D-WEBAPP1=D — one sema-known application graph**: sema evaluates the
+statically evaluable `fn app()` builder chain into one typed graph. Runtime
+registration outside a declared typed `.mount` is a compile diagnostic. Mounts
+keep prefix, effects, and security policy static. Browser/server partition,
+hydration mismatch, executable TIR, and generated-source re-entry laws apply;
+`jet expand --facts web` and `jet explain --web-graph` expose stable JSON facts.
+
+**D-WEBAUTHOR1=D — explicit builder with opt-in conventions**: the builder is
+always canonical and one file remains complete. File routing activates only
+through `.routes(from: "routes")` written in that builder. Every file under the
+root maps once, is excluded by leading `_`, or is diagnosed. Explicit and
+convention routes collide loudly with both spans. Scaffolds write the opt-in line
+up front; directory presence never changes behavior.
+
+**D-COMPUTE1=D — one Core compute family**: `core.compute` owns eager,
+fusion, differentiation, placement, and expert device/buffer/stream/kernel work
+under one operation family. Graph/kernel forms are internal executable-TIR
+stages. External accelerator providers are explicit bridges and must
+differentially match Core semantics.
+
+**D-COMPUTE-TYPE1=D — Tensor owner, unified View**: `Tensor<T>` owns ranked
+multidimensional storage; sema checks static shapes and runtime shapes use typed
+fallible operations. Existing `View<T>` is the sole borrowed strided projection
+for host/device memory. `Vec<N>` and `Matrix<M,N>` share the substrate and cross
+zero-copy. Differentiability is a transform property, not a second type;
+relational tables convert explicitly through audited `to_tensor`.
+
+**D-COMPUTE-PLACE1=D — automatic placement with receipts**: `.Auto` is the
+beginner default and carries `Gpu` because an accelerator may be selected.
+Experts pin device, memory, precision, and transfer policy. Project/deployment
+policy may only narrow call-site authority. Transfers, excess allocations, and
+fallbacks emit stable receipts; fallback must be named and cannot change
+precision, effects, failure shape, or observable results.
+
+**D-COMPUTE-KERNEL1=D — proved safe kernels plus audited raw tier**: sema proves
+bounds, alias/race freedom, captures, barrier uniformity, and control flow before
+an ordinary Jet function becomes a kernel. Failure names the unmet obligation;
+there is no unproved fallback. Atomics/reorderable reductions require recorded
+policy. Raw device code is confined to `#Unsafe("reason")` with typed boundary
+contracts and differential-test requirements.
+
+**D-COMPUTE-AUTODIFF1=D — reverse default, composable transforms**:
+`compute.grad`/`value_and_grad` are scalar-loss defaults; `jvp`/`vjp` compose for
+mixed and higher-order work. Unsupported mutation/control flow fails at its
+source span. Custom derivatives live once at the operation definition, are
+type/shape/effect checked, and may carry numerical validation evidence.
+Gradient execution inherits primal placement and determinism.
+
+**D-COMPUTE-BACKEND1=D — portable profiles and CPU oracle**: default compute
+policy is F32Strict + Reproducible. Fast math, reassociation, and nondeterministic
+reductions require named recorded profiles. Typed capability negotiation fails
+before launch. Every tier backend differentially conforms to the CPU oracle;
+dev and AOT use the same backend, policy, and cache identity.
+
+**D-SERVICE1=D — sema-known structured service tree**: typed builders promote
+ordinary functions into named workers/groups; sema validates topology, endpoint
+types, effects, cycles, and lifetimes. Each group is a supervisor-owned child
+taskgroup. Beginner default is bounded OneForOne restart with parent escalation.
+Deployment may place/scale the declared graph but never invent children.
+
+**D-SERVICE-DELIVERY1=D — at-most-once default, proved durable retry**: live
+calls are at-most-once with per-sender FIFO. Full mailboxes wait under deadline
+or return `Full`; timeout after send returns `Ambiguous`, never retries silently.
+DurableAtLeastOnce requires typed idempotency key, dedup/transaction contract,
+retention, typed receipt, and handled dead-letter endpoint. Exactly-once is never
+claimed.
+
+**D-SERVICE-STATE1=D — explicit state adapters and one commit point**: services
+restart empty unless they declare `.Snapshot` or `.EventLog`; both reuse schema
+migrations and decode provenance. Durability occurs only at explicit snapshot
+commit or event append. Corrupt/newer state refuses start with recovery guidance;
+restart-empty is explicit policy only. Storage authority is injected.
+
+**D-SERVICE-WORKFLOW1=D — effect-checked deterministic workflows**: workflow
+bodies reject ambient time, randomness, I/O, channels, and free task spawn and
+name recorded equivalents. Activities own effects, idempotency, and retry.
+Histories are workflow id + run id and bounded through explicit continuation.
+Version markers gate branch changes; incompatible deployment is refused against
+the affected live histories.
+
+**D-SERVICE-IDENTITY1=D — signed generational directories**: callers receive
+typed endpoint capabilities from signed, generation-versioned directory
+snapshots projected from source trust policy. Resolution carries generation and
+staleness bounds; partitions, revocation, and expiry are typed results with no
+ambient DNS fallback. Rotation overlaps generations. Explicit outside-graph
+`service.connect` requires an audited trust grant.
+
+**D-SERVICE-UPGRADE1=D — shard-scoped proved handoff**: deployment starts and
+checks the new generation, drains, and switches atomically per routing shard;
+global convergence is observed, not called atomic. Migrations are
+Reversible/DualWrite/ForwardOnly with explicit rollback facts. Drain overruns use
+declared PinShard or Cancel policy. Partitioned shards retain their last allowed
+generation and reconcile through the proof-gated rollout object.
+
+#### Formatter, profiler, and notebooks
+
+**D-FMTPROJECT1=D — project formatter contract**: `jet fmt` discovers
+workspace/package/cwd scope, accepts explicit paths, `--check --diff`,
+`--changed`, and stdin. Exit 0 means clean/formatted, 1 means check differences,
+and 2 means usage/parse/I/O failure. Preflight finds all failures before a
+zero-write abort. `jet fmt - --stdin-path=...` gives editor-equivalent stdin
+diagnostics. CLI, LSP, Canvas, and CI output is one byte-identical fixpoint.
+
+**D-PERFSESSION1=D — one `.jtrace` truth**: `jet perf run/test/bench` preserves
+the exact base-command argument surface and driver path; `attach/view/compare/
+export` complete the family. `.jtrace` embeds schema/toolchain/source/source-map
+identity and capture policy. Compare enforces hardware/toolchain baseline
+identity. pprof/OTel/Chrome and profile maps are projections only; generated
+Rust frames stay hidden unless explicitly requested.
+
+**D-NOTEBOOK-SURFACE1=D — one first-party client plus enforcing Jupyter
+adapter**: `jet notebook PATH` is loopback-only with fragment bearer token;
+non-loopback needs explicit bind/auth. Shared Canvas/Studio renderer, sandbox,
+receipt, and proof components back the client, and Canvas notebook view opens
+the same session. Jupyter projection recomputes stale turns, confirms effects,
+and never displays output the first-party client would reject.
+
+**D-NOTEBOOK-DOC1=D — mergeable `.jetnb` source truth**: v1 stores environment
+identity, CSPRNG cell IDs, merge-by-ID facts, and an output cache keyed by cell
+source + environment + transitive dependency closure. Upstream edits invalidate
+all downstream outputs. Paste/duplicate mints IDs; ipynb 4.5+ IDs round-trip
+deterministically with exact loss reports. Git merge/textconv is opt-in;
+`.jet` export is a stated-loss projection.
+
+**D-NOTEBOOK-TRUST1=D — passive-equivalent sandbox plus unified trust**:
+sanitized output and zero-capability opaque-origin widgets render without a
+prompt. Capability widgets bind grants to source, payload, renderer, locked
+environment, and policy version in the unified `jet trust` graph. Beginner
+intent cards summarize; expert drawers show exact cell hashes/origins/messages.
+Imported ipynb output is quarantined, grants stay local, and any relevant change
+revokes to safe text fallback.
+
 ### Superseded & deferred IDs (tombstones)
 
 **S6 — semicolons**: superseded by S6-R (see Formatting).

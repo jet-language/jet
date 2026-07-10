@@ -487,9 +487,10 @@ Each implementation card follows test/reproducer first, parser/sema/TIR/runtime
 as applicable, diagnostics, example, docs, targeted tests, independent review,
 then `nix develop -c scripts/agent/verify-full.sh`. Sol reruns the final proof.
 
-## Owner gates
+## Ratified owner decisions (2026-07-10)
 
-Ballot-ready decisions live on their implementation cards in Tower:
+All gates below are ratified as their hybrid option D and their implementation
+cards are ready:
 
 - `D-WEBAPP1` and `D-WEBAUTHOR1`: application-model ownership and explicit
   builder/optional convention authoring.
@@ -506,6 +507,7 @@ Ballot-ready decisions live on their implementation cards in Tower:
   `D-NOTEBOOK-TRUST1`: clients/protocol, document truth, and active-output
   authority.
 
-All existing ratifications remain law. New syntax, Core external dependencies,
-diagnostic codes, manifest fields, provider roots, and command spellings found
-during implementation require a reviewed follow-up ballot before that slice.
+Full current law lives in `docs/spec/syntax-decisions.md`. New syntax, Core
+external dependencies, diagnostic codes, manifest fields, provider roots, and
+command spellings found during implementation require a reviewed follow-up
+ballot before that slice.

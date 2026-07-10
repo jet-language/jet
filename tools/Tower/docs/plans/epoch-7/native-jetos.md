@@ -104,10 +104,16 @@ in QEMU with zero nix binary involvement**; second: **the GNOME baseline
 via substitution only**; third: **one-line swap matrix green**; fourth:
 **owner config native**.
 
-## Open owner ballots
+## Ratified owner decisions (2026-07-10)
 
-B-E7-PRIORART1 (external crate reuse for the pipeline — schedule lever
-16–24 wk vs 100+ wk, gated by I6 + license), B-E7-DESKTOPNS1 (desktop
-option spellings — user-typeable syntax), B-E7-UNFREE1 (unfree package
-policy), B-E7-BASELINE1 (baseline contents), B-E7-IDENTITY1 (jetos
-release identity/versioning/codenames — its own, never NixOS's).
+- B-E7-DESKTOPNS1=E: `services.desktop.*` with `.Auto` derivation and typed
+  invalid-combination assertions.
+- B-E7-BASELINE1=D: terminal and graphical baselines materialize every choice
+  directly into `config.jet`; terminal is lean-modern, graphical is complete
+  without requiring a command line, and expert edits are never silently healed.
+- B-E7-IDENTITY1=E: `YY.MM` releases plus alphabetically ordered
+  aviation-navigation codenames; first release is `26.10 "Apex"`.
+
+No owner ballot remains open for this plan. New syntax, dependencies, or policy
+exceptions discovered during implementation still require the normal ballot
+protocol.

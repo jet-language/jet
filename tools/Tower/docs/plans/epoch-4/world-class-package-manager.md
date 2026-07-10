@@ -520,9 +520,10 @@ JP9 follows JP8; JP10 follows JP9; JP11 follows JP3–JP5 + JP8–JP10 + JP13.
 21. **R9 lane:** `jet run file.jet` remains rootless and manifest/profile/
     registry/daemon-free; inline dependencies are the only package opt-in.
 
-## Owner ballots
+## Ratified owner decisions (2026-07-10)
 
-Ballots live on their implementation cards in Tower. Required gates:
+All package-manager gates below are ratified as their hybrid option D and their
+implementation cards are ready:
 
 - `D-JPK-NIXENGINE1`: native implementation versus external Nix compatibility
   engine dependency (I6).
@@ -534,7 +535,8 @@ Ballots live on their implementation cards in Tower. Required gates:
 - `D-JPK-RESOLUTIONDOMAIN1`: global, unrestricted duplicate, or typed-domain
   version multiplicity.
 - `D-JPK-VARIANT1`: variant vocabulary.
-- `D-JPK-FRESHNESS1`: release maturity default.
+- `D-JPK-FRESHNESS1`: 24-hour release maturity default with exact audited
+  exceptions spelled `package#version`, never `package@version`.
 - `D-JPK-BUILDSCRIPT1`: upstream hook approval law.
 - `D-JPK-CACHEAUTH1`: shared-cache writer authority.
 - `D-JPK-NIXBASELINE1`: pinned Nix version and experimental-feature parity set.
@@ -549,5 +551,6 @@ Ballots live on their implementation cards in Tower. Required gates:
 - `D-JPK-RESOLVEMODE1`: conservative/latest/lowest/platform verification surface.
 - `D-JPK-REPROCACHE1`: treatment of unreproducible outputs.
 
-Beginner/expert/hybrid pass applies to all: recommended options preserve an
-automatic safe beginner path and exact expert control through one mechanism.
+The full current law is recorded in `docs/spec/syntax-decisions.md`. New syntax,
+provider roots, dependencies, or invariant amendments discovered during
+implementation still require the normal ballot protocol.
