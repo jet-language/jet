@@ -3,8 +3,8 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 467,
-    "rev": 2914,
+    "nextNum": 468,
+    "rev": 2916,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -12418,6 +12418,11 @@
         {
           "at": "2026-07-10",
           "by": "claude-main",
+          "text": "Clusters 2+3 closed. (2) TUI: NOT runtime bug — commit 490eafef drifted examples/features/ui/ui_tui_reactive.jet (hi/yo swap); example reverted, golden was right, ui_backend 2/2 + golden green. (3) I4: E9999 was a test sentinel in Source/Help/mod.rs tripping the literal scanner — built at runtime now, no fake docs entry; E1291 got real fixture test os_vm_run_real_tier_requires_nixpkgs_pin + golden stderr; E3504 traced UNREACHABLE today (driver validate_build_authority E3502/E3503 superset precedes executor re-check, single call path) and reserved by epoch-5 metaprogramming §15.4 dependency-policy ceiling — added to ACKNOWLEDGED_COVERAGE_GAPS with why+when (E1207 precedent), snapshot due when E5 wires the reachable path. diagnostics_coverage 9/9 green. Canvas + jetpack-jail agents still running."
+        },
+        {
+          "at": "2026-07-10",
+          "by": "claude-main",
           "text": "Baseline on master@162c6031: 12 failing tests in 4 clusters. (1) canvas.rs:404 'marker near source span' + canvas_scenarios pattern_arm_add_edit_remove/pattern_arm_invalid_refused/multi_input_append_remove. (2) ui_backend.rs:81 render order 1,yo,2,hi vs 1,hi,2,yo. (3) diagnostics_coverage: E9999 no diagnostics.md entry; E1291+E3504 no tests/ui snapshot. (4) jetpack-jail: env_dev_trust dev_pattern_trust_preauthorizes+dev_trust_flag_bypasses, jetpack_offline offline_build_and_run_use_hangar_cache_with_network_denied, jetpack parent_env_unchanged_after_run+run_with_project_env_file_resolves_declared_packages. fuzz_sema_rustc_agreement and os_switch_activates_and_sets_current now PASS. Delegating 4 terra fixes in parallel; Sol integrates + runs verify-full at end."
         },
         {
@@ -12474,6 +12479,27 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-10T15:43:20.062Z",
+      "updated": "2026-07-10"
+    },
+    {
+      "id": "c0t4root",
+      "num": 467,
+      "title": "jetpack: leases with executables unusable on macOS/Windows — create_exec_wrappers returns Err on non-Linux",
+      "body": "Found during #465 burndown (jetpack-jail cluster). crates/jetpack/src/Store.rs:931-939: the #[cfg(not(target_os = \"linux\"))] create_exec_wrappers unconditionally returns Err whenever a lease contains executables, so snapshot_lease — mandatory for every consumer since #418 — fails at runtime on macOS/Windows for any package with a bin/. Distinct from the platform-lane COMPILE failures already tracked on #465 (deny(warnings) unused imports + E0277 in Store.rs:605): this is a runtime gap that survives the compile fix. Needs a real non-Linux exec-wrapper strategy (or explicitly documented platform contract), plus platform-lane test coverage. Also note tests/jetpack.rs parent_env_unchanged_after_run now asserts the Linux /proc/self/fd wrapper head — gate or branch that assertion when non-Linux wrappers land.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "triage",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "needsAcceptance": false,
+      "created": "2026-07-10T18:57:34.825Z",
       "updated": "2026-07-10"
     }
   ],
@@ -22461,6 +22487,20 @@
   ],
   "events": [
     {
+      "at": "2026-07-10T18:57:34.826Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0t4root",
+      "note": "jetpack: leases with executables unusable on macOS/Windows — create_exec_wrappers returns Err on non-Linux"
+    },
+    {
+      "at": "2026-07-10T18:52:14.177Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c02kdm7a",
+      "note": "logEntry"
+    },
+    {
       "at": "2026-07-10T18:39:37.948Z",
       "by": "claude-main",
       "action": "card.update",
@@ -25944,20 +25984,6 @@
       "by": "codex-orchestrator",
       "action": "card.update",
       "ref": "c0wetgi3",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T10:58:54.433Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c1nixrpd",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-10T10:58:47.523Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0e7rot4",
       "note": "phase,logEntry"
     }
   ],

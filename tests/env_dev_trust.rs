@@ -48,8 +48,29 @@ fn jet() -> Command {
     Command::new(env!("CARGO_BIN_EXE_jet"))
 }
 
-fn example_fixtures() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/jetpack-project/fixtures")
+/// Write a `nixpkgs:fastfetch` fixture whose `out` points at a real directory
+/// we control. The committed `example_fixtures()` set uses placeholder
+/// `/nix/store/...` paths that never exist on disk — fine for tests that only
+/// check `jetpack build`'s ledger output, but Store's post-#418 fail-closed
+/// leasing (`snapshot_lease`) refuses to hand a consumer any path whose `out`
+/// doesn't exist, so any test that actually enters the composed env (`dev`,
+/// `run` with no explicit command) needs a real backing tree.
+fn write_fastfetch_fixture(fixtures: &std::path::Path, out_dir: &std::path::Path) {
+    fs::create_dir_all(fixtures).unwrap();
+    let bin = out_dir.join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    let fastfetch = bin.join("fastfetch");
+    fs::write(&fastfetch, "#!/bin/sh\necho fastfetch stub\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&fastfetch, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let json = format!(
+        "[{{\"outputs\":{{\"out\":{:?}}}}}]",
+        out_dir.to_string_lossy()
+    );
+    fs::write(fixtures.join("nixpkgs-fastfetch.json"), json).unwrap();
 }
 
 /// A project with no declared packages — never trust-sensitive, so these
@@ -276,13 +297,16 @@ fn dev_trust_flag_bypasses() {
     let proj = Scratch::new("dev-trust-flag");
     let root = Scratch::new("dev-trust-flag-root");
     let home = Scratch::new("dev-trust-flag-home");
+    let fixtures = Scratch::new("dev-trust-flag-fixtures");
+    let fastfetch_out = Scratch::new("dev-trust-flag-fastfetch-out");
     write_package_project(&proj.path, "fn dev() { print(\"DEV-RAN\"); }\n");
+    write_fastfetch_fixture(&fixtures.path, &fastfetch_out.path);
     let out = jetpack()
         .args(["dev", "--no-color", "--offline", "--trust"])
         .current_dir(&proj.path)
         .env("JETPACK_ROOT", &root.path)
         .env("HOME", &home.path)
-        .env("JETPACK_FIXTURES", example_fixtures())
+        .env("JETPACK_FIXTURES", &fixtures.path)
         .output()
         .unwrap();
     assert!(
@@ -304,7 +328,10 @@ fn dev_pattern_trust_preauthorizes() {
     let proj = Scratch::new("dev-pattern-trust");
     let root = Scratch::new("dev-pattern-trust-root");
     let home = Scratch::new("dev-pattern-trust-home");
+    let fixtures = Scratch::new("dev-pattern-trust-fixtures");
+    let fastfetch_out = Scratch::new("dev-pattern-trust-fastfetch-out");
     write_package_project(&proj.path, "fn dev() { print(\"DEV-RAN\"); }\n");
+    write_fastfetch_fixture(&fixtures.path, &fastfetch_out.path);
 
     let pattern = format!("{}*", proj.path.display());
     let add_out = jetpack()
@@ -323,7 +350,7 @@ fn dev_pattern_trust_preauthorizes() {
         .current_dir(&proj.path)
         .env("JETPACK_ROOT", &root.path)
         .env("HOME", &home.path)
-        .env("JETPACK_FIXTURES", example_fixtures())
+        .env("JETPACK_FIXTURES", &fixtures.path)
         .output()
         .unwrap();
     assert!(

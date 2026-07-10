@@ -300,6 +300,32 @@ fn write_runnable_fixture(fixtures: &Path, out_dir: &Path) {
     fs::write(fixtures.join("nixpkgs-greet.json"), json).unwrap();
 }
 
+/// Write a `nixpkgs:fastfetch` fixture whose `out` points at a real directory
+/// we control (see `write_runnable_fixture`). The committed
+/// `tests/fixtures/jetpack-project/fixtures` set uses placeholder
+/// `/nix/store/...` paths that never exist on disk — fine for tests that only
+/// check `jetpack build`'s ledger output, but Store's fail-closed leasing
+/// (`snapshot_lease`) refuses to hand a consumer any path whose `out` doesn't
+/// exist, so a test that enters the composed env (`run`/`dev` with no
+/// explicit command consuming the package) needs a real backing tree.
+fn write_fastfetch_fixture(fixtures: &Path, out_dir: &Path) {
+    fs::create_dir_all(fixtures).unwrap();
+    let bin = out_dir.join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    let fastfetch = bin.join("fastfetch");
+    fs::write(&fastfetch, "#!/bin/sh\necho fastfetch stub\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&fastfetch, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let json = format!(
+        "[{{\"outputs\":{{\"out\":{:?}}}}}]",
+        out_dir.to_string_lossy()
+    );
+    fs::write(fixtures.join("nixpkgs-fastfetch.json"), json).unwrap();
+}
+
 fn write_channel_fixture(fixtures: &Path, base: &str, channel: &str, exact: &str) {
     fs::create_dir_all(fixtures).unwrap();
     fs::write(
@@ -810,8 +836,15 @@ fn run_dash_dash_propagates_failure_status() {
 #[test]
 fn parent_env_unchanged_after_run() {
     // The composed PATH only reaches the child. Ask the child to echo PATH and
-    // confirm our bin dir leads; the test process's own PATH is unaffected
+    // confirm our bin dirs lead; the test process's own PATH is unaffected
     // because we never mutate it.
+    //
+    // Realization leases are mandatory (card #418): the consumer never sees
+    // the raw fixture `out_dir` directly, only a sealed, hardlinked snapshot
+    // copy under the hangar's `leases/` dir. The sealed, FD-pinned
+    // exec-wrapper dir (`/proc/self/fd/N` on Linux, immutable and race-safe
+    // against parent rename/symlink swaps) leads PATH ahead of that snapshot
+    // bin dir.
     let root = Scratch::new("root");
     let fixtures = Scratch::new("fx");
     let out_dir = Scratch::new("out");
@@ -834,8 +867,17 @@ fn parent_env_unchanged_after_run() {
         .output()
         .unwrap();
     let child_path = String::from_utf8_lossy(&output.stdout);
-    let want = format!("{}/bin", out_dir.path.to_string_lossy());
-    assert!(child_path.starts_with(&want), "child PATH was {child_path}");
+    let mut entries = child_path.split(':');
+    let wrapper = entries.next().unwrap_or_default();
+    assert!(
+        wrapper.starts_with("/proc/self/fd/"),
+        "expected the sealed FD-pinned exec-wrapper dir first, got: {child_path}"
+    );
+    let bin = entries.next().unwrap_or_default();
+    assert!(
+        bin.starts_with(&root.path.to_string_lossy().into_owned()) && bin.ends_with("/bin"),
+        "expected the leased snapshot bin dir (under JETPACK_ROOT) second, got: {child_path}"
+    );
     assert_eq!(std::env::var("PATH").unwrap_or_default(), before);
 }
 
@@ -916,6 +958,9 @@ fn remove_without_yes_prints_plan_and_keeps_env_file_in_non_tty() {
 fn run_with_project_env_file_resolves_declared_packages() {
     let proj = Scratch::new("proj");
     let root = Scratch::new("root");
+    let fixtures = Scratch::new("fixtures");
+    let fastfetch_out = Scratch::new("fastfetch-out");
+    write_fastfetch_fixture(&fixtures.path, &fastfetch_out.path);
     // Declare one package, then run with no ref → it resolves from env.jet.
     fs::write(
         proj.join("env.jet"),
@@ -926,7 +971,7 @@ fn run_with_project_env_file_resolves_declared_packages() {
         .args(["run", "--no-color", "--offline", "--", "true"])
         .current_dir(&proj.path)
         .env("JETPACK_ROOT", &root.path)
-        .env("JETPACK_FIXTURES", example_fixtures())
+        .env("JETPACK_FIXTURES", &fixtures.path)
         .output()
         .unwrap();
     assert!(
@@ -5184,6 +5229,35 @@ fn os_generations_are_newest_first_and_rollback_activates_prior() {
         stderr.contains("no generation is available"),
         "stderr: {stderr}"
     );
+}
+
+#[test]
+fn os_vm_run_real_tier_requires_nixpkgs_pin() {
+    // E1291 (D-JOS-NIXBACKEND1=C): the hidden real-tier NixOS backend
+    // refuses to generate when it can't map every declaration — here
+    // there is no `sources:` entry that resolves to a nixpkgs pin, so
+    // `map_system_to_nixos` reports it as unmapped instead of silently
+    // dropping it. `jet os vm run` hits this before any tool/media check
+    // because a fresh disk always routes through `cmd_vm_run_or_build`.
+    let proj = Scratch::new("os-vm-real-no-nixpkgs-pin");
+    let root = Scratch::new("os-vm-real-no-nixpkgs-pin-root");
+    fs::write(
+        proj.join("config.jet"),
+        "module halcyon {\n    sources: {}\n    system.halcyon: {\n        target: linux.x64,\n        packages: [],\n        services: {},\n        options: [\n            network.hostName: halcyon,\n        ],\n    }\n}\n",
+    )
+    .unwrap();
+    let out = jet()
+        .args([
+            "os", "vm", "run", "halcyon", "--disk", "halcyon.qcow2", "--no-color", "--offline",
+        ])
+        .current_dir(&proj.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_jetos_stderr_snapshot("real_tier_no_nixpkgs_pin", &stderr);
 }
 
 #[test]

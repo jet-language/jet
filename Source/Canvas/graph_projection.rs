@@ -408,8 +408,33 @@ fn project_stmt_block(
     x: i32,
     y: i32,
 ) {
+    let mut cursor_y = y;
     for (i, stmt) in stmts.iter().enumerate() {
-        project_stmt(g, index, src, stmt, base + i + 1, x, y + i as i32 * 130);
+        project_stmt(g, index, src, stmt, base + i + 1, x, cursor_y);
+        cursor_y += stmt_row_step(stmt);
+    }
+}
+
+/// Vertical spacing before the next sibling statement. The default slot
+/// (130px) has room for a couple of data-provider rows below a binding; a
+/// list/fan-out initializer with more items renders taller than that, so
+/// widen the gap or its node body collides with the next statement's own
+/// data-provider node (multi-input node body height grows with item count,
+/// e.g. after `append_multi_input`).
+fn stmt_row_step(stmt: &Stmt) -> i32 {
+    let items = match stmt {
+        Stmt::Val(b) => multi_input_item_count(&b.init),
+        Stmt::Assign { value, .. } => multi_input_item_count(value),
+        _ => 0,
+    };
+    130 + (items.saturating_sub(2) as i32) * 28
+}
+
+fn multi_input_item_count(expr: &Expr) -> usize {
+    match expr {
+        Expr::ListLit(items, _) => items.len(),
+        Expr::FanOut { items, .. } => items.len(),
+        _ => 0,
     }
 }
 
@@ -532,15 +557,17 @@ fn project_stmt(
         Stmt::If(ifs) => {
             let node_id = format!("{}:stmt:{ordinal}:branch", g.graph_id);
             let mut affordances = vec!["edit_inline_expr", "source_jump"];
-            if matches!(ifs.cond, Expr::PatternTest { .. }) {
+            let is_pattern_test = matches!(ifs.cond, Expr::PatternTest { .. });
+            if is_pattern_test {
                 affordances.push("add_pattern_arm");
             }
+            let title = if is_pattern_test { "if ==" } else { "if" };
             add_node(
                 g,
                 &node_id,
                 "branch",
                 "control",
-                "if",
+                title,
                 ifs.cond.span().into(),
                 x,
                 y,
@@ -702,7 +729,7 @@ fn project_stmt(
                 x,
                 y,
                 vec!["control"],
-                vec!["edit_inline_expr", "source_jump"],
+                vec!["add_pattern_arm", "edit_inline_expr", "source_jump"],
             );
             let ty = expr_type(g, index, subject);
             let subject_pin = add_pin(g, &node_id, "subject", "input", &ty, "", false);
@@ -723,7 +750,7 @@ fn project_stmt(
                     g,
                     &node_id,
                     &format!("arm{}", i + 1),
-                    &pattern_pin_label(src, &arm.cond),
+                    &dispatch_arm_pattern_label(src, &arm.cond),
                     arm.cond.span().into(),
                 );
                 add_inline(
@@ -963,6 +990,21 @@ fn pattern_pin_label(src: &str, expr: &Expr) -> String {
         return format!("== {}", balanced.trim());
     }
     balanced
+}
+
+/// Label for a dispatch-form (`if subject == { ... }`) arm pattern. Unlike
+/// `pattern_pin_label`, dispatch arms never carry their own `==` (the
+/// operator belongs to the dispatch header, not the arm line) and the
+/// leading dot on enum-variant patterns (D-ENUMDOT1) is a source spelling
+/// detail, not part of the arm's identity — so both are stripped for the
+/// Canvas label.
+fn dispatch_arm_pattern_label(src: &str, expr: &Expr) -> String {
+    let raw = snippet(src, expr.span());
+    let mut balanced = balance_closing_parens(raw.trim());
+    if let Some(pos) = balanced.find("==") {
+        balanced = balanced[pos + 2..].trim().to_string();
+    }
+    balanced.strip_prefix('.').unwrap_or(&balanced).to_string()
 }
 
 fn pattern_arm_edit_span(expr: &Expr) -> SourceSpan {

@@ -434,6 +434,13 @@ const ACKNOWLEDGED_COVERAGE_GAPS: &[&str] = &[
     // E0902: orphan trait impl — needs a multi-module ui fixture once external
     // `impl Module.Type.Trait` spelling is snapshot-tested end-to-end.
     "E0902",
+    // E3504: runtime grant re-check in execute_build_plan. Unreachable today —
+    // the driver's single call path runs validate_build_authority (E3502/E3503)
+    // over the same plan and grants first, and its required set is a superset of
+    // what the executor re-checks. The reachable enforcement point is the
+    // Epoch-5 dependency-build policy ceiling (docs/plans/epoch-5/
+    // metaprogramming.md §15.4); add the ui snapshot when that path is wired.
+    "E3504",
 ];
 
 /// All exclusions combined.

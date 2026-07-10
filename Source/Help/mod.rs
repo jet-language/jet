@@ -384,10 +384,14 @@ mod tests {
     fn unknown_code_shape_falls_back_to_fuzzy() {
         let index = build_index();
         // Looks code-shaped but isn't registered — Explain::lookup misses,
-        // so search must not return an empty result silently.
-        let hits = search(&index, "E9999");
-        // No fuzzy command matches "E9999" either — empty is correct here,
-        // but it must not panic and must not fabricate a code page.
+        // so search must not return an empty result silently. Built at
+        // runtime (not a string literal) so this sentinel doesn't read as
+        // a real registered diagnostic code to the I4 coverage scanner,
+        // which greps Source/ for quoted `"Ennnn"` literals.
+        let unregistered_code = format!("E{}", 9999);
+        let hits = search(&index, &unregistered_code);
+        // No fuzzy command matches this code either — empty is correct
+        // here, but it must not panic and must not fabricate a code page.
         assert!(hits.iter().all(|h| !matches!(h, Hit::Code(_))));
     }
 

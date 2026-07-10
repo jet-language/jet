@@ -1003,10 +1003,14 @@ fn apply_add_pattern_arm(
     let changed = match target {
         PatternTarget::Branch(ifs) => add_arm_to_branch(src, ifs, &head, &body)?,
         PatternTarget::Switch { arms, else_body, span, .. } => {
-            let insert = if let Some(else_body) = else_body {
-                line_start(src, first_stmt_start(else_body).unwrap_or(span.end))
-            } else if let Some(last) = arms.last() {
+            // Insert right after the last existing arm so the new arm never
+            // lands inside the else body's block (its first-statement
+            // offset sits *inside* `else -> { ... }`, not before it — that
+            // splice used to tear a multi-line else block in half).
+            let insert = if let Some(last) = arms.last() {
                 line_after(src, last.span.end)
+            } else if let Some(else_body) = else_body {
+                line_start(src, first_stmt_start(else_body).unwrap_or(span.end))
             } else {
                 dispatch_body_insert_offset(src, span)
             };
