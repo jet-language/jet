@@ -211,7 +211,7 @@ use core.os as os
 use core.process as process
 
 fn run() {
-    os.on_interrupt(() => { print("first") })
+    os.on_interrupt(() => { panic("first handler failed") })
     os.on_interrupt(() => {
         print("second")
         process.exit(0)
@@ -245,7 +245,7 @@ fn run() {
     let mut rest = String::new();
     stdout.read_to_string(&mut rest).unwrap();
     assert!(status.success(), "interrupt child failed: {status}");
-    assert_eq!(rest, "first\nsecond\n");
+    assert_eq!(rest, "second\n");
 }
 
 fn build_and_run(

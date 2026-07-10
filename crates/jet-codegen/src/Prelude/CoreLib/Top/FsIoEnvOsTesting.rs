@@ -603,7 +603,10 @@ mod jet_os_interrupt {
                         for _ in 0..count {
                             for handler in &handlers {
                                 let _ = std::panic::catch_unwind(
-                                    std::panic::AssertUnwindSafe(|| handler()),
+                                    std::panic::AssertUnwindSafe(|| {
+                                        let _boundary = super::jet_panic_boundary_enter();
+                                        handler();
+                                    }),
                                 );
                             }
                         }

@@ -1434,6 +1434,24 @@ impl JetShow for JetReservoirSampler {
 
 thread_local! {
     static JET_IN_SCHEDULER_TASK: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static JET_PANIC_BOUNDARY_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+struct JetPanicBoundaryGuard;
+
+fn jet_panic_boundary_enter() -> JetPanicBoundaryGuard {
+    JET_PANIC_BOUNDARY_DEPTH.with(|depth| depth.set(depth.get().saturating_add(1)));
+    JetPanicBoundaryGuard
+}
+
+impl Drop for JetPanicBoundaryGuard {
+    fn drop(&mut self) {
+        JET_PANIC_BOUNDARY_DEPTH.with(|depth| depth.set(depth.get().saturating_sub(1)));
+    }
+}
+
+fn jet_in_panic_boundary() -> bool {
+    JET_PANIC_BOUNDARY_DEPTH.with(|depth| depth.get() != 0)
 }
 
 pub fn jet_scheduler_task_panic_enter() {
@@ -1449,7 +1467,7 @@ fn jet_scheduler_in_task() -> bool {
 }
 
 fn jet_panic(file: &str, line: u32, msg: &str) -> ! {
-    if jet_scheduler_in_task() {
+    if jet_scheduler_in_task() || jet_in_panic_boundary() {
         panic!("{} (at {}:{})", msg, file, line);
     }
     eprintln!("panic: {}", msg);

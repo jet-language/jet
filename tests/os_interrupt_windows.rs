@@ -18,7 +18,7 @@ use core.os as os
 use core.process as process
 
 fn run() {
-    os.on_interrupt(() => { print("first") })
+    os.on_interrupt(() => { panic("first handler failed") })
     os.on_interrupt(() => {
         print("second")
         process.exit(0)
@@ -75,5 +75,5 @@ fn windows_console_ctrl_c_runs_all_handlers_in_order() {
     let mut rest = String::new();
     stdout.read_to_string(&mut rest).unwrap();
     assert!(status.success(), "generated child failed: {status}");
-    assert_eq!(rest.replace("\r\n", "\n"), "first\nsecond\n");
+    assert_eq!(rest.replace("\r\n", "\n"), "second\n");
 }
