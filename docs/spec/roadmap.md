@@ -173,6 +173,13 @@ registry push remains a separate protocol/tooling follow-up.
 **Jetpack** is Epoch 4. It owns the package-manager and environment substrate:
 providers, strict package graphs, catalogs, explainable locks, migration
 importers, hangar/cache, signing, build-from-source, and no-Nix behavior.
+The 2026-07-09 production audit found that several earlier “done” cards delivered
+useful schemas or fixture-backed models without the live store, sandbox, cache,
+registry, or provider behavior required for a package-manager completion claim.
+The binding parity/acceptance plan is
+[`world-class-package-manager.md`](../../tools/Tower/docs/plans/epoch-4/world-class-package-manager.md):
+full pinned Nix package-manager compatibility plus the best compatible features
+from other ecosystems, closed only by live, hostile, cross-platform evidence.
 
 **jetos** is Epoch 7. It builds on jetpack and owns declarative OS activation,
 proof-before-switch, generations, installable images, source-backed Studio, and

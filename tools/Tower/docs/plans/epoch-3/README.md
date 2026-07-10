@@ -10,6 +10,11 @@ Epoch 2 GA (E2-M17) is complete; development highlights are in `docs/spec/roadma
 
 ## Pillars
 
+The binding truth-repair and universal product-parity program is
+[`universal-language-core.md`](universal-language-core.md). It supersedes any
+older “done” claim that was closed by a subset, facade, fixture, fallback,
+schema, or plan rather than the original executable acceptance criteria.
+
 ## Canonical Active Pushes
 
 As of 2026-06-30, Tower groups related Epoch 3 work into these canonical parent

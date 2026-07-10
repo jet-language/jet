@@ -1,8 +1,18 @@
 # Epoch 4 — jetpack tracking file
 
-**Status:** active jetpack plan, refreshed 2026-07-06 after jetos moved to
-Epoch 7. This folder owns the package-manager/environment substrate that jetos
-will later consume. It has three tracked files:
+**Status:** active Jetpack plan. The 2026-07-09 production audit found the
+existing implementation useful but below Nix package-manager parity; schema,
+fixture, and policy-model completion no longer count as shipped capability.
+This folder owns the package-manager/environment substrate that JetOS later
+consumes.
+
+The executable master plan is
+[`world-class-package-manager.md`](world-class-package-manager.md). It defines
+the Nix parity matrix, best cross-ecosystem transplants, ordered card program,
+owner ballots, and binding live/hostile acceptance lanes. It supersedes stale
+sequencing or “later protocol” claims below while preserving ratified law.
+
+Historical tracking remains in three files:
 
 - [`README.md`](README.md) — current decisions, status, and sequencing.
 - [`vision.md`](vision.md) — product / UX target.

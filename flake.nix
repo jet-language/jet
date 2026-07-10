@@ -79,14 +79,12 @@
           '';
         jetDev = mkJetDevBin "jet";
         jetpackDev = mkJetDevBin "jetpack";
-        jetosDev = mkJetDevBin "jetos";
       in
       {
         packages = {
           default = jet;
           inherit jet;
           jetpack = jet;
-          jetos = jet;
         };
 
         apps.default = {
@@ -97,57 +95,46 @@
           type = "app";
           program = "${jet}/bin/jetpack";
         };
-        apps.jetos = {
-          type = "app";
-          program = "${jet}/bin/jetos";
-        };
 
         devShells.default = pkgs.mkShell {
-          packages = with pkgs; [
-            cargo
-            rustc
-            gcc
-            lld
-            qemu
-            xorriso
-            limine
-            util-linux
-            e2fsprogs
-            dosfstools
-            mtools
-            nodejs_22
-            # D-CANVASTEST1=A: Canvas interaction tests drive dev-shell
-            # Chromium through a repo-owned stdlib-only CDP pipe driver.
-            chromium
-            nixfmt
-            ripgrep
+          packages = [
+            pkgs.cargo
+            pkgs.rustc
+            pkgs.gcc
+            pkgs.lld
+            # Compiler freestanding smoke tests execute aarch64 output under
+            # qemu-aarch64. OS image and VM tooling does not belong here.
+            pkgs.qemu
+            pkgs.nodejs_22
+            pkgs.nixfmt
+            pkgs.ripgrep
             # D-DEP-WASM1=A (c81): `jet build --target=plugin` lifts the
             # rustc-built wasm32-unknown-unknown core module into a WASM
             # Component using `wasm-tools component embed`/`new` — an external
             # CLI tool (I6: shelled out to, like cargo/rustc, never linked
             # into the compiler).
-            wasm-tools
-            tree-sitter
-            emscripten
-            lldb
-            OVMF.fd
+            pkgs.wasm-tools
+            pkgs.tree-sitter
+            pkgs.emscripten
+            pkgs.lldb
             jetDev
             jetpackDev
-            jetosDev
-            # D-UIDEVSHELL1=A (ratified 2026-07-03, c134 Phase 8): native Linux
-            # UI backend links libgtk-4 via the S59 C-FFI path (`use c.gtk4` →
-            # `pkg-config gtk4`). pkg-config + gtk4 dev headers enter the dev
-            # shell under the standing nixpkgs native-deps stopgap. Linux first;
-            # a non-Nix user gets E3201 naming the fix at build time.
-            pkg-config
-            gtk4
-            raylib
+            pkgs.pkg-config
+            pkgs.raylib
+          ]
+          ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
+            # D-CANVASTEST1=A: Canvas interaction tests drive Chromium through
+            # the repo-owned stdlib-only CDP pipe driver. nixpkgs Chromium is
+            # Linux-only, so it must not make macOS dev shells unevaluable.
+            pkgs.chromium
+            # The native GTK backend is Linux-first (D-UIDEVSHELL1=A); keep its
+            # headers off platforms where that backend is not supported.
+            pkgs.gtk4
           ];
 
           shellHook = ''
             export JET_ROOT="$PWD"
             export TZDIR="${jetTzdb}"
-            export JETOS_OVMF_CODE="${pkgs.OVMF.fd}/FV/OVMF_CODE.fd"
             export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath [ pkgs.raylib ]}:''${LD_LIBRARY_PATH:-}"
 
             # banner on stderr: `nix develop -c <cmd>` stdout stays clean for
