@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 467,
-    "rev": 2828,
+    "rev": 2914,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -17,9 +17,14 @@
         "board-sidequests",
         "epoch:e4",
         "epoch:e5",
-        "radar-cards",
         "radar:e9",
-        "radar:e8"
+        "radar:e8",
+        "radar-sq",
+        "radar:e3",
+        "radar:e4",
+        "radar:e5",
+        "radar:e6",
+        "radar:e7"
       ]
     },
     "digestCursor": "2026-07-10T16:28:20.702Z"
@@ -8123,7 +8128,7 @@
       "priority": "P1",
       "plan": "# Plan: jet dev server pinned dashboard + overlay\n\nRatified inputs:\n- D-FE-DEVSRV1 outcome D with owner modification: keep a nicely formatted pinned terminal dashboard header.\n\nScope:\n- Source/CmdDevWeb.rs for dev web server output and injected browser overlay/status strip.\n- tests/web_dev.rs and any dev-server CLI transcript tests.\n\nImplementation steps:\n1. Add terminal dashboard header for TTY: status, URL/port, watched target, client count, last build time, current build/error state. Header remains pinned while logs scroll below.\n2. Keep one shared poll/status source for browser strip and terminal header so ready/building/error/offline/client count cannot drift.\n3. Browser corner strip mirrors status; on error it expands to full overlay with verbatim diagnostic frame over last-good build.\n4. Terminal verbose mode/request log prints under the same header. Errors erase/settle any live region before printing diagnostics.\n5. Non-TTY output degrades to append-only deterministic status lines. NO_COLOR uses words instead of color-only state.\n6. Preserve current dev server routes, last-good-build behavior, Canvas route, and reload/poll protocol.\n\nAcceptance:\n- jet dev <file> --target=web shows pinned dashboard header in TTY.\n- Browser strip and terminal header report identical state and client count.\n- Compile error shows full browser overlay and terminal diagnostic; clean rebuild clears both.\n- Request/rebuild logs appear below the header.\n\nVerification:\n- nix develop -c cargo test --test web_dev\n- Add/update focused tests for status payload, overlay injection, terminal formatting fallback, and non-TTY output.\n- Browser smoke: launch jet dev, load app and /canvas if relevant, trigger compile error, verify overlay clears after fix.\n- Full nix develop -c cargo test before done.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "terra-362-builder",
       "log": [
         {
           "at": "2026-07-09",
@@ -8183,9 +8188,56 @@
       "created": "2026-07-08T13:10:17.375Z",
       "updated": "2026-07-10",
       "workOrder": 14,
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A feature matrix covers every row in the hybrid devserver mock, full ratified option D, and owner modification; no row remains unevidenced.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T17:49:32.948Z"
+        },
+        {
+          "n": 2,
+          "text": "Real TTY host-wrapper smoke proves the pinned dashboard shows shared status, URL/port, watch target, client count, build timing/state above scrolling logs.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T17:49:33.097Z"
+        },
+        {
+          "n": 3,
+          "text": "Browser smoke proves collapsed strip parity, full verbatim error overlay over last-good build, and automatic clear after clean rebuild.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T17:49:33.242Z"
+        },
+        {
+          "n": 4,
+          "text": "Verbose request/rebuild logs remain below the header; non-TTY and NO_COLOR output are deterministic and word-labeled.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T17:49:33.386Z"
+        },
+        {
+          "n": 5,
+          "text": "Focused web_dev/unit/CLI tests and owner-environment error-to-recovery matrix pass without relying on full-suite evidence.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T17:49:33.536Z"
+        }
+      ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [],
+      "claimedAt": "2026-07-10T17:49:33.676Z"
     },
     {
       "id": "c_audit_363_9n2bl3",
@@ -8955,7 +9007,7 @@
       "priority": "P2",
       "plan": "canvas-blueprint-epoch",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "terra-375-builder",
       "log": [
         {
           "at": "2026-07-09",
@@ -8970,10 +9022,48 @@
       ],
       "created": "2026-07-09T14:08:57.486Z",
       "updated": "2026-07-10",
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Canvas projection identifies pattern-test branches with the same stable title/metadata consumed by shipped transactions and scenarios.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T17:56:14.059Z"
+        },
+        {
+          "n": 2,
+          "text": "Pattern-arm add, edit, and remove transactions produce sema-clean source; invalid references are rejected with exact rollback.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T17:56:14.211Z"
+        },
+        {
+          "n": 3,
+          "text": "List/fan-out multi-input append and remove transactions preserve pin/order/source semantics, including required multi-exec behavior.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T17:56:14.356Z"
+        },
+        {
+          "n": 4,
+          "text": "Focused Canvas projection, transaction, and five named browser scenarios pass with no static facade.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T17:56:14.503Z"
+        }
+      ],
       "needsAcceptance": false,
       "refs": [],
-      "workOrder": 19
+      "workOrder": 19,
+      "claimedAt": "2026-07-10T17:56:14.645Z"
     },
     {
       "id": "c0h41rrl",
@@ -11456,50 +11546,56 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P0",
       "plan": null,
       "blockedBy": [],
       "assignee": "terra-448-builder",
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-10",
+          "by": "terra-448-builder",
+          "text": "Seeded deletion proof on final ordered oracle: temporarily changed fmt_bench to emit only '#'. Focused corpus test failed on examples/features/basics/string_view.jet at ordered token 80: before Ident(\"Bench\"), after LParen. Mutation fully reverted; nix develop -c cargo test --test fmt then passed 98/98. Commit state clean."
+        }
+      ],
       "created": "2026-07-10T10:49:06.896Z",
       "updated": "2026-07-10",
       "criteria": [
         {
           "n": 1,
           "text": "One corpus test recursively covers every Jet example and tests/ui fixture using supported source extensions.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-10T16:45:53.356Z"
+          "status": "verified",
+          "metBy": "terra-448-builder",
+          "verifiedBy": "sol-448-review",
+          "evidence": "Sol verified complete exact manifest/accounting and recursive corpus enumeration.",
+          "at": "2026-07-10T17:41:28.239Z"
         },
         {
           "n": 2,
           "text": "The test compares original and formatted parsed token streams and fails on any dropped or semantically changed token while tolerating formatting-only trivia.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-10T16:45:53.504Z"
+          "status": "verified",
+          "metBy": "terra-448-builder",
+          "verifiedBy": "sol-448-review",
+          "evidence": "Sol verified ordered comparator, narrow grammar-aware normalizers, and paired negative tests; NO FINDINGS.",
+          "at": "2026-07-10T17:41:28.389Z"
         },
         {
           "n": 3,
           "text": "A seeded formatter token-deletion mutation is demonstrated to make the corpus test fail, then fully reverted.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-10T16:45:53.651Z"
+          "status": "verified",
+          "metBy": "terra-448-builder",
+          "verifiedBy": "sol-448-review",
+          "evidence": "Sol accepted durable mutation proof and confirmed production mutation fully absent from final commit.",
+          "at": "2026-07-10T17:41:28.533Z"
         },
         {
           "n": 4,
           "text": "Focused formatter test passes without weakening existing byte-stability or idempotence coverage.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-10T16:45:53.800Z"
+          "status": "verified",
+          "metBy": "terra-448-builder",
+          "verifiedBy": "sol-448-review",
+          "evidence": "Sol reran focused rule/corpus tests: 2/2 green; production fixes mapped and sound.",
+          "at": "2026-07-10T17:41:28.677Z"
         }
       ],
       "needsAcceptance": false,
@@ -11516,18 +11612,65 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "terra-449-builder",
       "log": [],
       "created": "2026-07-10T10:49:06.976Z",
       "updated": "2026-07-10",
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "JET_UI_FILTER and JET_GOLDEN_FILTER select canonical relative fixture names; zero matches fail loudly.",
+          "status": "verified",
+          "metBy": "terra-449-builder",
+          "verifiedBy": "terra-449-review",
+          "evidence": "Independent reviewer confirmed canonical filters, exact-one scoped updates, and non-vacuous failure.",
+          "at": "2026-07-10T17:51:16.814Z"
+        },
+        {
+          "n": 2,
+          "text": "UI snapshot runs collect all mismatches and UI/golden failures render readable unified diffs.",
+          "status": "verified",
+          "metBy": "terra-449-builder",
+          "verifiedBy": "terra-449-review",
+          "evidence": "Independent reviewer confirmed collect-all and bounded useful unified diffs; large-output regression 3/3 passes.",
+          "at": "2026-07-10T17:51:16.958Z"
+        },
+        {
+          "n": 3,
+          "text": "UPDATE_EXPECT=1 retains bless-all while UPDATE_EXPECT=<name> updates only the matching UI or lint snapshot.",
+          "status": "verified",
+          "metBy": "terra-449-builder",
+          "verifiedBy": "terra-449-review",
+          "evidence": "Independent reviewer exercised scoped UI/lint updates and ambiguous/missing filters; no residue.",
+          "at": "2026-07-10T17:51:17.108Z"
+        },
+        {
+          "n": 4,
+          "text": "JET_UPDATE_GOLDEN=1 updates only matching existing stdout/stderr golden channels after valid exit classification; rerun passes.",
+          "status": "verified",
+          "metBy": "terra-449-builder",
+          "verifiedBy": "terra-449-review",
+          "evidence": "Independent reviewer exercised scoped golden update and exit-channel safeguards; worktree clean.",
+          "at": "2026-07-10T17:51:17.257Z"
+        },
+        {
+          "n": 5,
+          "text": "Verify skill documents safe filtered preview, scoped bless, diff inspection, and mandatory clean rerun commands.",
+          "status": "verified",
+          "metBy": "terra-449-builder",
+          "verifiedBy": "terra-449-review",
+          "evidence": "Independent review confirmed docs match commands and safe workflow.",
+          "at": "2026-07-10T17:51:17.402Z"
+        }
+      ],
       "needsAcceptance": false,
       "refs": [],
-      "workOrder": 5
+      "workOrder": 5,
+      "claimedAt": "2026-07-10T17:31:53.542Z"
     },
     {
       "id": "c009yxqf",
@@ -11643,18 +11786,56 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "terra-454-builder",
       "log": [],
       "created": "2026-07-10T10:49:07.375Z",
       "updated": "2026-07-10",
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Canvas runtime JavaScript is split into logically named real .js assets; Source/Canvas/js.rs contains embedding/assembly glue only.",
+          "status": "verified",
+          "metBy": "terra-454-builder",
+          "verifiedBy": "terra-454-review",
+          "evidence": "Independent reviewer confirmed thin glue and exact directory asset set.",
+          "at": "2026-07-10T17:44:56.547Z"
+        },
+        {
+          "n": 2,
+          "text": "Extraction preserves assembled runtime behavior and ordering exactly; no Canvas capability is stubbed, omitted, or replaced by a facade.",
+          "status": "verified",
+          "metBy": "terra-454-builder",
+          "verifiedBy": "terra-454-review",
+          "evidence": "Independent reviewer confirmed exact original byte stream/functions/order and no facade/capability loss.",
+          "at": "2026-07-10T17:44:56.695Z"
+        },
+        {
+          "n": 3,
+          "text": "Every extracted JavaScript asset is individually syntax-checkable and has useful section/module comments.",
+          "status": "verified",
+          "metBy": "terra-454-builder",
+          "verifiedBy": "terra-454-review",
+          "evidence": "Independent reviewer confirmed syntax checks, meaningful comments, whitespace-clean boundaries.",
+          "at": "2026-07-10T17:44:56.837Z"
+        },
+        {
+          "n": 4,
+          "text": "Focused Canvas golden and browser/scenario smoke tests pass through the existing harness.",
+          "status": "verified",
+          "metBy": "terra-454-builder",
+          "verifiedBy": "terra-454-review",
+          "evidence": "Independent reviewer reran asset test and browser scenarios; reproduced unrelated unchanged transaction failure.",
+          "at": "2026-07-10T17:44:56.979Z"
+        }
+      ],
       "needsAcceptance": false,
       "refs": [],
-      "workOrder": 6
+      "workOrder": 6,
+      "claimedAt": "2026-07-10T17:30:58.379Z"
     },
     {
       "id": "c06tccyz",
@@ -11889,14 +12070,94 @@
       "priority": "P0",
       "plan": null,
       "blockedBy": [],
-      "assignee": null,
-      "log": [],
+      "assignee": "terra-460-builder",
+      "log": [
+        {
+          "at": "2026-07-10",
+          "by": "codex-orchestrator",
+          "text": "Local containment merged and independently verified. OWNER REMAINS: rotate exposed VAPID credentials, resubscribe devices, prove real push delivery, then answer history-scrub question after confirming repo visibility. Card intentionally stays building with criteria 7-8 open."
+        }
+      ],
       "created": "2026-07-10T10:49:07.855Z",
       "updated": "2026-07-10",
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Tracked .tower/config.json contains no auth, private JWK, push endpoint, auth token, or subscription key data.",
+          "status": "verified",
+          "metBy": "terra-460-builder",
+          "verifiedBy": "sol-460-review",
+          "evidence": "Sol confirmed tracked public config contains no secret objects/material.",
+          "at": "2026-07-10T18:23:01.737Z"
+        },
+        {
+          "n": 2,
+          "text": ".tower/secrets.json is ignored and tower init creates the ignore rule.",
+          "status": "verified",
+          "metBy": "terra-460-builder",
+          "verifiedBy": "sol-460-review",
+          "evidence": "Sol confirmed final/temp ignores and forced-crash Git-add proof; public config stays trackable.",
+          "at": "2026-07-10T18:23:01.888Z"
+        },
+        {
+          "n": 3,
+          "text": "Server provisioning, subscription updates, and dead-endpoint cleanup write only the untracked secrets file.",
+          "status": "verified",
+          "metBy": "terra-460-builder",
+          "verifiedBy": "sol-460-review",
+          "evidence": "Sol threat-modeled all server secret write paths and found no alternate config write.",
+          "at": "2026-07-10T18:23:02.031Z"
+        },
+        {
+          "n": 4,
+          "text": "store.project, API state, SSE, and mutation responses never expose auth or push secret objects.",
+          "status": "verified",
+          "metBy": "terra-460-builder",
+          "verifiedBy": "sol-460-review",
+          "evidence": "Sol confirmed projection/API/SSE/mutation redaction without breaking internal secret use.",
+          "at": "2026-07-10T18:23:02.188Z"
+        },
+        {
+          "n": 5,
+          "text": "Legacy tracked auth/push secrets fail with actionable migration guidance; no silent compatibility leak.",
+          "status": "verified",
+          "metBy": "terra-460-builder",
+          "verifiedBy": "sol-460-review",
+          "evidence": "Sol confirmed legacy rejection and no value echo.",
+          "at": "2026-07-10T18:23:02.339Z"
+        },
+        {
+          "n": 6,
+          "text": "Fresh temporary Tower generates untracked VAPID secrets while tracked config remains secret-free; focused tests pass without printing values.",
+          "status": "verified",
+          "metBy": "terra-460-builder",
+          "verifiedBy": "sol-460-review",
+          "evidence": "Sol confirmed hardened read/write race, mode, owner, symlink, fsync, cleanup tests; 19/19 focused pass.",
+          "at": "2026-07-10T18:23:02.494Z"
+        },
+        {
+          "n": 7,
+          "text": "Owner rotates VAPID credentials, resubscribes devices, and proves real push delivery with the new keypair.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T17:45:48.615Z"
+        },
+        {
+          "n": 8,
+          "text": "Owner records whether exposed Git history will be scrubbed after confirming repository visibility.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T17:45:48.764Z"
+        }
+      ],
       "needsAcceptance": false,
       "refs": [],
-      "workOrder": 7
+      "workOrder": 7,
+      "claimedAt": "2026-07-10T17:45:48.911Z"
     },
     {
       "id": "c04mnkv0",
@@ -12148,12 +12409,17 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "building",
       "priority": "P0",
       "plan": null,
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "claude-main",
       "log": [
+        {
+          "at": "2026-07-10",
+          "by": "claude-main",
+          "text": "Baseline on master@162c6031: 12 failing tests in 4 clusters. (1) canvas.rs:404 'marker near source span' + canvas_scenarios pattern_arm_add_edit_remove/pattern_arm_invalid_refused/multi_input_append_remove. (2) ui_backend.rs:81 render order 1,yo,2,hi vs 1,hi,2,yo. (3) diagnostics_coverage: E9999 no diagnostics.md entry; E1291+E3504 no tests/ui snapshot. (4) jetpack-jail: env_dev_trust dev_pattern_trust_preauthorizes+dev_trust_flag_bypasses, jetpack_offline offline_build_and_run_use_hangar_cache_with_network_denied, jetpack parent_env_unchanged_after_run+run_with_project_env_file_resolves_declared_packages. fuzz_sema_rustc_agreement and os_switch_activates_and_sets_current now PASS. Delegating 4 terra fixes in parallel; Sol integrates + runs verify-full at end."
+        },
         {
           "at": "2026-07-10",
           "by": "cursor-verify",
@@ -12175,7 +12441,8 @@
       "criteria": [],
       "needsAcceptance": false,
       "refs": [],
-      "workOrder": 16
+      "workOrder": 16,
+      "claimedAt": "2026-07-10T18:35:08.489Z"
     },
     {
       "id": "c0onpgah",
@@ -22194,6 +22461,559 @@
   ],
   "events": [
     {
+      "at": "2026-07-10T18:39:37.948Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c02kdm7a",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-10T18:35:08.489Z",
+      "by": "claude-main",
+      "action": "card.claim",
+      "ref": "c02kdm7a",
+      "note": ""
+    },
+    {
+      "at": "2026-07-10T18:23:02.638Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0df169q",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-10T18:23:02.494Z",
+      "by": "sol-460-review",
+      "action": "card.criteria-verify",
+      "ref": "c0df169q",
+      "note": "#6"
+    },
+    {
+      "at": "2026-07-10T18:23:02.339Z",
+      "by": "sol-460-review",
+      "action": "card.criteria-verify",
+      "ref": "c0df169q",
+      "note": "#5"
+    },
+    {
+      "at": "2026-07-10T18:23:02.189Z",
+      "by": "sol-460-review",
+      "action": "card.criteria-verify",
+      "ref": "c0df169q",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-10T18:23:02.032Z",
+      "by": "sol-460-review",
+      "action": "card.criteria-verify",
+      "ref": "c0df169q",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-10T18:23:01.889Z",
+      "by": "sol-460-review",
+      "action": "card.criteria-verify",
+      "ref": "c0df169q",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-10T18:23:01.738Z",
+      "by": "sol-460-review",
+      "action": "card.criteria-verify",
+      "ref": "c0df169q",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-10T18:23:01.594Z",
+      "by": "terra-460-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0df169q",
+      "note": "#6"
+    },
+    {
+      "at": "2026-07-10T18:23:01.450Z",
+      "by": "terra-460-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0df169q",
+      "note": "#5"
+    },
+    {
+      "at": "2026-07-10T18:23:01.301Z",
+      "by": "terra-460-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0df169q",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-10T18:23:01.155Z",
+      "by": "terra-460-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0df169q",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-10T18:23:00.996Z",
+      "by": "terra-460-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0df169q",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-10T18:23:00.836Z",
+      "by": "terra-460-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0df169q",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-10T17:56:14.645Z",
+      "by": "terra-375-builder",
+      "action": "card.claim",
+      "ref": "c0fzoku6",
+      "note": ""
+    },
+    {
+      "at": "2026-07-10T17:56:14.503Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0fzoku6",
+      "note": "#4 Focused Canvas projection, transaction, and five named brows"
+    },
+    {
+      "at": "2026-07-10T17:56:14.356Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0fzoku6",
+      "note": "#3 List/fan-out multi-input append and remove transactions pres"
+    },
+    {
+      "at": "2026-07-10T17:56:14.211Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0fzoku6",
+      "note": "#2 Pattern-arm add, edit, and remove transactions produce sema-"
+    },
+    {
+      "at": "2026-07-10T17:56:14.059Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0fzoku6",
+      "note": "#1 Canvas projection identifies pattern-test branches with the "
+    },
+    {
+      "at": "2026-07-10T17:51:17.550Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0yw55x3",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-10T17:51:17.402Z",
+      "by": "terra-449-review",
+      "action": "card.criteria-verify",
+      "ref": "c0yw55x3",
+      "note": "#5"
+    },
+    {
+      "at": "2026-07-10T17:51:17.257Z",
+      "by": "terra-449-review",
+      "action": "card.criteria-verify",
+      "ref": "c0yw55x3",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-10T17:51:17.109Z",
+      "by": "terra-449-review",
+      "action": "card.criteria-verify",
+      "ref": "c0yw55x3",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-10T17:51:16.958Z",
+      "by": "terra-449-review",
+      "action": "card.criteria-verify",
+      "ref": "c0yw55x3",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-10T17:51:16.814Z",
+      "by": "terra-449-review",
+      "action": "card.criteria-verify",
+      "ref": "c0yw55x3",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-10T17:51:16.673Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0yw55x3",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-10T17:51:16.534Z",
+      "by": "terra-449-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0yw55x3",
+      "note": "#5"
+    },
+    {
+      "at": "2026-07-10T17:51:16.388Z",
+      "by": "terra-449-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0yw55x3",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-10T17:51:16.243Z",
+      "by": "terra-449-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0yw55x3",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-10T17:51:16.104Z",
+      "by": "terra-449-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0yw55x3",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-10T17:51:15.958Z",
+      "by": "terra-449-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0yw55x3",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-10T17:49:33.676Z",
+      "by": "terra-362-builder",
+      "action": "card.claim",
+      "ref": "c0prf2ws",
+      "note": ""
+    },
+    {
+      "at": "2026-07-10T17:49:33.536Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0prf2ws",
+      "note": "#5 Focused web_dev/unit/CLI tests and owner-environment error-t"
+    },
+    {
+      "at": "2026-07-10T17:49:33.387Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0prf2ws",
+      "note": "#4 Verbose request/rebuild logs remain below the header; non-TT"
+    },
+    {
+      "at": "2026-07-10T17:49:33.242Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0prf2ws",
+      "note": "#3 Browser smoke proves collapsed strip parity, full verbatim e"
+    },
+    {
+      "at": "2026-07-10T17:49:33.097Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0prf2ws",
+      "note": "#2 Real TTY host-wrapper smoke proves the pinned dashboard show"
+    },
+    {
+      "at": "2026-07-10T17:49:32.948Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0prf2ws",
+      "note": "#1 A feature matrix covers every row in the hybrid devserver mo"
+    },
+    {
+      "at": "2026-07-10T17:45:48.912Z",
+      "by": "terra-460-builder",
+      "action": "card.claim",
+      "ref": "c0df169q",
+      "note": ""
+    },
+    {
+      "at": "2026-07-10T17:45:48.764Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0df169q",
+      "note": "#8 Owner records whether exposed Git history will be scrubbed a"
+    },
+    {
+      "at": "2026-07-10T17:45:48.615Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0df169q",
+      "note": "#7 Owner rotates VAPID credentials, resubscribes devices, and p"
+    },
+    {
+      "at": "2026-07-10T17:45:48.469Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0df169q",
+      "note": "#6 Fresh temporary Tower generates untracked VAPID secrets whil"
+    },
+    {
+      "at": "2026-07-10T17:45:48.327Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0df169q",
+      "note": "#5 Legacy tracked auth/push secrets fail with actionable migrat"
+    },
+    {
+      "at": "2026-07-10T17:45:48.179Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0df169q",
+      "note": "#4 store.project, API state, SSE, and mutation responses never "
+    },
+    {
+      "at": "2026-07-10T17:45:48.031Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0df169q",
+      "note": "#3 Server provisioning, subscription updates, and dead-endpoint"
+    },
+    {
+      "at": "2026-07-10T17:45:47.879Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0df169q",
+      "note": "#2 .tower/secrets.json is ignored and tower init creates the ig"
+    },
+    {
+      "at": "2026-07-10T17:45:47.717Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0df169q",
+      "note": "#1 Tracked .tower/config.json contains no auth, private JWK, pu"
+    },
+    {
+      "at": "2026-07-10T17:44:57.124Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c05hfl27",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-10T17:44:56.979Z",
+      "by": "terra-454-review",
+      "action": "card.criteria-verify",
+      "ref": "c05hfl27",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-10T17:44:56.837Z",
+      "by": "terra-454-review",
+      "action": "card.criteria-verify",
+      "ref": "c05hfl27",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-10T17:44:56.695Z",
+      "by": "terra-454-review",
+      "action": "card.criteria-verify",
+      "ref": "c05hfl27",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-10T17:44:56.548Z",
+      "by": "terra-454-review",
+      "action": "card.criteria-verify",
+      "ref": "c05hfl27",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-10T17:44:56.405Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c05hfl27",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-10T17:44:56.255Z",
+      "by": "terra-454-builder",
+      "action": "card.criteria-meet",
+      "ref": "c05hfl27",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-10T17:44:56.100Z",
+      "by": "terra-454-builder",
+      "action": "card.criteria-meet",
+      "ref": "c05hfl27",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-10T17:44:55.947Z",
+      "by": "terra-454-builder",
+      "action": "card.criteria-meet",
+      "ref": "c05hfl27",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-10T17:44:55.795Z",
+      "by": "terra-454-builder",
+      "action": "card.criteria-meet",
+      "ref": "c05hfl27",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-10T17:41:28.825Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0xkikie",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-10T17:41:28.677Z",
+      "by": "sol-448-review",
+      "action": "card.criteria-verify",
+      "ref": "c0xkikie",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-10T17:41:28.534Z",
+      "by": "sol-448-review",
+      "action": "card.criteria-verify",
+      "ref": "c0xkikie",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-10T17:41:28.389Z",
+      "by": "sol-448-review",
+      "action": "card.criteria-verify",
+      "ref": "c0xkikie",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-10T17:41:28.239Z",
+      "by": "sol-448-review",
+      "action": "card.criteria-verify",
+      "ref": "c0xkikie",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-10T17:41:28.095Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0xkikie",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-10T17:41:27.949Z",
+      "by": "terra-448-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0xkikie",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-10T17:41:27.806Z",
+      "by": "terra-448-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0xkikie",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-10T17:41:27.663Z",
+      "by": "terra-448-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0xkikie",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-10T17:41:27.516Z",
+      "by": "terra-448-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0xkikie",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-10T17:36:45.473Z",
+      "by": "terra-448-builder",
+      "action": "card.update",
+      "ref": "c0xkikie",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-10T17:31:53.542Z",
+      "by": "terra-449-builder",
+      "action": "card.claim",
+      "ref": "c0yw55x3",
+      "note": ""
+    },
+    {
+      "at": "2026-07-10T17:31:53.394Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0yw55x3",
+      "note": "#5 Verify skill documents safe filtered preview, scoped bless, "
+    },
+    {
+      "at": "2026-07-10T17:31:53.249Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0yw55x3",
+      "note": "#4 JET_UPDATE_GOLDEN=1 updates only matching existing stdout/st"
+    },
+    {
+      "at": "2026-07-10T17:31:53.111Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0yw55x3",
+      "note": "#3 UPDATE_EXPECT=1 retains bless-all while UPDATE_EXPECT=<name>"
+    },
+    {
+      "at": "2026-07-10T17:31:52.962Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0yw55x3",
+      "note": "#2 UI snapshot runs collect all mismatches and UI/golden failur"
+    },
+    {
+      "at": "2026-07-10T17:31:52.804Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0yw55x3",
+      "note": "#1 JET_UI_FILTER and JET_GOLDEN_FILTER select canonical relativ"
+    },
+    {
+      "at": "2026-07-10T17:30:58.379Z",
+      "by": "terra-454-builder",
+      "action": "card.claim",
+      "ref": "c05hfl27",
+      "note": ""
+    },
+    {
+      "at": "2026-07-10T17:30:58.240Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c05hfl27",
+      "note": "#4 Focused Canvas golden and browser/scenario smoke tests pass "
+    },
+    {
+      "at": "2026-07-10T17:30:58.093Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c05hfl27",
+      "note": "#3 Every extracted JavaScript asset is individually syntax-chec"
+    },
+    {
+      "at": "2026-07-10T17:30:57.950Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c05hfl27",
+      "note": "#2 Extraction preserves assembled runtime behavior and ordering"
+    },
+    {
+      "at": "2026-07-10T17:30:57.800Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c05hfl27",
+      "note": "#1 Canvas runtime JavaScript is split into logically named real"
+    },
+    {
       "at": "2026-07-10T16:56:42.068Z",
       "by": "grok-verify",
       "action": "card.release",
@@ -25139,559 +25959,6 @@
       "action": "card.update",
       "ref": "c0e7rot4",
       "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T10:58:47.395Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0wetgi3",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T10:58:47.263Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c088jf0z",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T10:55:59.840Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c1nixrpd",
-      "note": "phase,assignee,logEntry"
-    },
-    {
-      "at": "2026-07-10T10:52:37.185Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c088jf0z",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-10T10:52:25.233Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c00uhxes",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T10:52:25.105Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "ccq07pav",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T10:52:24.970Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "cbq06v8j",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T10:52:24.829Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c2zj0p7p",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T10:52:24.694Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c2yj0nk5",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T10:52:24.563Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c2sj0bd9",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T10:52:24.424Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c17iww33",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T10:52:24.289Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "crivuqa",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T10:52:24.154Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c1iqde7",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T10:52:24.018Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c73xs2f",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T10:50:24.865Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0e7rot4",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-10T10:50:11.000Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-TWR-BOARD1",
-      "note": "Board view rebuilt for a 434-card project"
-    },
-    {
-      "at": "2026-07-10T10:50:10.920Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c0ceo8wd",
-      "note": "Tower: Board view for 434 cards"
-    },
-    {
-      "at": "2026-07-10T10:50:10.842Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-TWR-CRIT1",
-      "note": "Exit criteria live on the card and gate 'done'"
-    },
-    {
-      "at": "2026-07-10T10:50:10.761Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c09rh9pt",
-      "note": "Tower: exit criteria that gate done"
-    },
-    {
-      "at": "2026-07-10T10:50:10.686Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-TWR-BRIEF1",
-      "note": "How an agent gets its marching orders from Tower"
-    },
-    {
-      "at": "2026-07-10T10:50:10.606Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c077a4nu",
-      "note": "Tower: one-shot agent work packet"
-    },
-    {
-      "at": "2026-07-10T10:50:10.528Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-TWR-ARCHIVE1",
-      "note": "Where ratified decisions and done cards go to rest"
-    },
-    {
-      "at": "2026-07-10T10:50:10.450Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c04mnkv0",
-      "note": "Tower: archive finished board history"
-    },
-    {
-      "at": "2026-07-10T10:49:58.697Z",
-      "by": "claude-main",
-      "action": "question.add",
-      "ref": "q0q92or4",
-      "note": ""
-    },
-    {
-      "at": "2026-07-10T10:49:40.702Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0wetgi3",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-10T10:49:08.093Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-TWRGUARD1",
-      "note": "Does the board refuse rule-breaking writes, or only report them?"
-    },
-    {
-      "at": "2026-07-10T10:49:08.018Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-DEVTOOLS1",
-      "note": "Where maintainer helper commands live"
-    },
-    {
-      "at": "2026-07-10T10:49:07.941Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-CI3",
-      "note": "How much of the test suite CI runs, and when"
-    },
-    {
-      "at": "2026-07-10T10:49:07.855Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c0df169q",
-      "note": "security: rotate + untrack .tower/config.json secrets"
-    },
-    {
-      "at": "2026-07-10T10:49:07.775Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c0c39p53",
-      "note": "durability: docs repair, runbooks, memory-to-repo migration (W6)"
-    },
-    {
-      "at": "2026-07-10T10:49:07.695Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c0as0asq",
-      "note": "durability: tower enforcement gates (W5)"
-    },
-    {
-      "at": "2026-07-10T10:49:07.614Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c09ffy3w",
-      "note": "durability: tower brief + tower lint (W5 assists)"
-    },
-    {
-      "at": "2026-07-10T10:49:07.533Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c083j754",
-      "note": "durability: jetpack unwrap-to-diagnostic sweep (W4)"
-    },
-    {
-      "at": "2026-07-10T10:49:07.456Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c06tccyz",
-      "note": "durability: JIT lowering doc pass + TIR exhaustive dispatch (W4)"
-    },
-    {
-      "at": "2026-07-10T10:49:07.375Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c05hfl27",
-      "note": "durability: extract Canvas JS from js.rs (W4)"
-    },
-    {
-      "at": "2026-07-10T10:49:07.298Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c047jzdr",
-      "note": "durability: ice! macro + sema assert layer (W4)"
-    },
-    {
-      "at": "2026-07-10T10:49:07.219Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c02wa1dn",
-      "note": "durability: include!-splice to real modules (W4)"
-    },
-    {
-      "at": "2026-07-10T10:49:07.140Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c01lj8gw",
-      "note": "durability: batch codemod + dev-shell tools (W3)"
-    },
-    {
-      "at": "2026-07-10T10:49:07.060Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c009yxqf",
-      "note": "durability: maintainer devtools subcommands (W3)"
-    },
-    {
-      "at": "2026-07-10T10:49:06.977Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c0yw55x3",
-      "note": "durability: single-fixture filters + golden bless + diffs (W3)"
-    },
-    {
-      "at": "2026-07-10T10:49:06.897Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c0xkikie",
-      "note": "durability: formatter lossless corpus test (W2)"
-    },
-    {
-      "at": "2026-07-10T10:49:06.813Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c0w6wa07",
-      "note": "durability: invariant machine pins I1/I3/I6/I7 (W2)"
-    },
-    {
-      "at": "2026-07-10T10:49:06.734Z",
-      "by": "claude-main",
-      "action": "card.add",
-      "ref": "c0uvxow5",
-      "note": "durability: CI runs the full suite (W1)"
-    },
-    {
-      "at": "2026-07-10T10:46:32.931Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0wetgi3",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-10T10:45:25.358Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0e7rot4",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-10T10:44:13.596Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0wetgi3",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-10T10:44:05.263Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c088jf0z",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-10T10:41:55.741Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "caffiunify",
-      "note": "logEntry,blockedBy"
-    },
-    {
-      "at": "2026-07-10T10:41:50.513Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0ddul2b",
-      "note": "logEntry,blockedBy"
-    },
-    {
-      "at": "2026-07-10T10:40:34.981Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0wetgi3",
-      "note": "phase,assignee,logEntry"
-    },
-    {
-      "at": "2026-07-10T10:40:26.085Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c088jf0z",
-      "note": "phase,assignee,logEntry"
-    },
-    {
-      "at": "2026-07-10T10:40:17.079Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0e7rot4",
-      "note": "phase,assignee,logEntry"
-    },
-    {
-      "at": "2026-07-10T10:31:47.304Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": null,
-      "note": "docs migration: tools/Tower/docs -> docs (116 cards, 22 decisions, 3 questions)"
-    },
-    {
-      "at": "2026-07-10T10:27:34.046Z",
-      "by": "codex-main",
-      "action": "message.send",
-      "ref": "msg006ri3k",
-      "note": "→ owner: Ratification propagation complete: 44 decisions across 27 ca"
-    },
-    {
-      "at": "2026-07-10T10:26:51.599Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-JPK-BUILDSCRIPT1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-10T10:26:45.850Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "D-JPK-FRESHNESS1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-10T10:22:50.966Z",
-      "by": "tower",
-      "action": "message.send",
-      "ref": "msg10ykbwzp",
-      "note": "→ fable: [tower] 1 decision ratified: B-E7-BASELINE1→D — greenlit: #3"
-    },
-    {
-      "at": "2026-07-10T10:22:50.966Z",
-      "by": "tower",
-      "action": "message.send",
-      "ref": "msgzykbrlg",
-      "note": "→ claude: [tower] 1 decision ratified: B-E7-BASELINE1→D — greenlit: #3"
-    },
-    {
-      "at": "2026-07-10T10:22:50.966Z",
-      "by": "tower",
-      "action": "message.send",
-      "ref": "msgyykbl2k",
-      "note": "→ codex: [tower] 1 decision ratified: B-E7-BASELINE1→D — greenlit: #3"
-    },
-    {
-      "at": "2026-07-10T10:22:50.966Z",
-      "by": "tower",
-      "action": "message.send",
-      "ref": "msgxykbfuz",
-      "note": "→ jetos-agent: [tower] 1 decision ratified: B-E7-BASELINE1→D — greenlit: #3"
-    },
-    {
-      "at": "2026-07-10T10:22:50.966Z",
-      "by": "tower",
-      "action": "message.send",
-      "ref": "msgwykbaji",
-      "note": "→ codex-canvas: [tower] 1 decision ratified: B-E7-BASELINE1→D — greenlit: #3"
-    },
-    {
-      "at": "2026-07-10T10:22:50.966Z",
-      "by": "tower",
-      "action": "message.send",
-      "ref": "msgvykb512",
-      "note": "→ codex-jetos: [tower] 1 decision ratified: B-E7-BASELINE1→D — greenlit: #3"
-    },
-    {
-      "at": "2026-07-10T10:22:50.966Z",
-      "by": "tower",
-      "action": "message.send",
-      "ref": "msguykaz9g",
-      "note": "→ codex-main: [tower] 1 decision ratified: B-E7-BASELINE1→D — greenlit: #3"
-    },
-    {
-      "at": "2026-07-10T10:22:50.966Z",
-      "by": "tower",
-      "action": "message.send",
-      "ref": "msgtykaqn5",
-      "note": "→ codex-1: [tower] 1 decision ratified: B-E7-BASELINE1→D — greenlit: #3"
-    },
-    {
-      "at": "2026-07-10T10:22:50.966Z",
-      "by": "tower",
-      "action": "message.send",
-      "ref": "msgsyk9g5e",
-      "note": "→ claude-main: [tower] 1 decision ratified: B-E7-BASELINE1→D — greenlit: #3"
-    },
-    {
-      "at": "2026-07-10T10:21:20.906Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "B-E7-BASELINE1",
-      "note": "D"
-    },
-    {
-      "at": "2026-07-10T10:21:07.601Z",
-      "by": "owner",
-      "action": "card.activate",
-      "ref": "c0rb4k1d",
-      "note": ""
-    },
-    {
-      "at": "2026-07-10T10:18:34.937Z",
-      "by": "codex-main",
-      "action": "message.send",
-      "ref": "msg0carqjb",
-      "note": "→ owner: Answered open question on #413 and rebuilt B-E7-BASELINE1. R"
-    },
-    {
-      "at": "2026-07-10T10:18:24.633Z",
-      "by": "codex-main",
-      "action": "question.answer",
-      "ref": "qiwrjp7y",
-      "note": ""
-    },
-    {
-      "at": "2026-07-10T10:18:10.662Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c0gtqigv",
-      "note": "body,plan,logEntry"
-    },
-    {
-      "at": "2026-07-10T10:18:02.709Z",
-      "by": "codex-main",
-      "action": "decision.update",
-      "ref": "B-E7-BASELINE1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-10T10:14:52.020Z",
-      "by": "tower",
-      "action": "message.send",
-      "ref": "msgrxod7uj",
-      "note": "→ fable: [tower] 1 decision ratified: B-E7-DESKTOPNS1→E. Board is cur"
-    },
-    {
-      "at": "2026-07-10T10:14:52.020Z",
-      "by": "tower",
-      "action": "message.send",
-      "ref": "msgqxod2cy",
-      "note": "→ claude: [tower] 1 decision ratified: B-E7-DESKTOPNS1→E. Board is cur"
-    },
-    {
-      "at": "2026-07-10T10:14:52.020Z",
-      "by": "tower",
-      "action": "message.send",
-      "ref": "msgpxocx16",
-      "note": "→ codex: [tower] 1 decision ratified: B-E7-DESKTOPNS1→E. Board is cur"
-    },
-    {
-      "at": "2026-07-10T10:14:52.020Z",
-      "by": "tower",
-      "action": "message.send",
-      "ref": "msgoxocrss",
-      "note": "→ jetos-agent: [tower] 1 decision ratified: B-E7-DESKTOPNS1→E. Board is cur"
-    },
-    {
-      "at": "2026-07-10T10:14:52.020Z",
-      "by": "tower",
-      "action": "message.send",
-      "ref": "msgnxocli8",
-      "note": "→ codex-canvas: [tower] 1 decision ratified: B-E7-DESKTOPNS1→E. Board is cur"
-    },
-    {
-      "at": "2026-07-10T10:14:52.020Z",
-      "by": "tower",
-      "action": "message.send",
-      "ref": "msgmxocg8f",
-      "note": "→ codex-jetos: [tower] 1 decision ratified: B-E7-DESKTOPNS1→E. Board is cur"
-    },
-    {
-      "at": "2026-07-10T10:14:52.020Z",
-      "by": "tower",
-      "action": "message.send",
-      "ref": "msglxocakf",
-      "note": "→ codex-main: [tower] 1 decision ratified: B-E7-DESKTOPNS1→E. Board is cur"
-    },
-    {
-      "at": "2026-07-10T10:14:52.020Z",
-      "by": "tower",
-      "action": "message.send",
-      "ref": "msgkxoc395",
-      "note": "→ codex-1: [tower] 1 decision ratified: B-E7-DESKTOPNS1→E. Board is cur"
     }
   ],
   "nextNum": 368,
