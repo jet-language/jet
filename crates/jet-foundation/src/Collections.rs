@@ -23,6 +23,13 @@ pub const RESERVED_TYPES: &[&str] = &[
     // D-SOLVER-LIB1=A: `Solver` is the Core finite-solver handle. Reserving it
     // prevents a user type from being mistaken for the runtime solver handle.
     Syntax::SOLVER_TYPE,
+    Syntax::TYPE_BUILD_CONTEXT,
+    Syntax::TYPE_BUILD_PLAN,
+    Syntax::TYPE_BUILD_ACTION,
+    Syntax::TYPE_BUILD_TARGET,
+    Syntax::TYPE_BUILD_TOOLCHAIN,
+    Syntax::TYPE_BUILD_PROBE,
+    Syntax::TYPE_PROGRAM_INFO,
     // D-DYNARRAY1: `View<T>` is deliberately NOT reserved here (unlike `Set`/
     // `Deque`) — `View` is already a widely-used user type name across the
     // jetpack UI component kit (examples/features/ui/*.jet, crates/jet-driver/
@@ -106,6 +113,33 @@ pub fn builtin_method_return(
         Type::Named(n) if n == crate::Syntax::TYPE_DECIMAL => {
             crate::Numeric::decimal_method_return(method, arg_count)
         }
+        Type::Named(n) if n == Syntax::TYPE_BUILD_CONTEXT => {
+            build_context_method_return(method, arg_count)
+        }
+        Type::Named(n) if n == Syntax::TYPE_PROGRAM_INFO => match (method, arg_count) {
+            ("types", 0) => Some(Some(Type::List(Box::new(Type::Named(
+                Syntax::TYPE_TYPE_INFO.to_string(),
+            ))))),
+            ("functions", 0) => Some(Some(Type::List(Box::new(Type::Named(
+                "FunctionInfo".to_string(),
+            ))))),
+            ("packages", 0) => Some(Some(Type::List(Box::new(Type::Named(
+                "PackageInfo".to_string(),
+            ))))),
+            _ => None,
+        },
+        Type::Named(n) if n == Syntax::TYPE_TYPE_INFO => match (method, arg_count) {
+            ("implements" | "has_method", 1) => Some(Some(Type::Bool)),
+            _ => None,
+        },
+        Type::Named(n) if n == "FunctionInfo" => match (method, arg_count) {
+            ("reaches_panic", 0) => Some(Some(Type::Bool)),
+            _ => None,
+        },
+        Type::Named(n) if n == "EffectInfo" => match (method, arg_count) {
+            ("has", 1) => Some(Some(Type::Bool)),
+            _ => None,
+        },
         Type::Apply { name, args } if name == "Task" => task_method_return(args, method, arg_count),
         Type::Apply { name, args } if name == "Receiver" => {
             receiver_method_return(args, method, arg_count)
@@ -194,6 +228,38 @@ pub fn builtin_method_return(
         Type::Int | Type::Float | Type::Bool | Type::Char | Type::IntN { .. } | Type::Float32 => {
             builtin_static_return(recv_ty, method, arg_count)
         }
+        _ => None,
+    }
+}
+
+fn build_result(ok: &str) -> Option<Option<Type>> {
+    Some(Some(Type::Result {
+        ok: Box::new(Type::Named(ok.to_string())),
+        err: Box::new(Type::Named(Syntax::TYPE_ERROR.to_string())),
+    }))
+}
+
+fn build_context_method_return(method: &str, arg_count: usize) -> Option<Option<Type>> {
+    match (method, arg_count) {
+        ("generate", 2) => Some(Some(Type::Result {
+            ok: Box::new(Type::Named(Syntax::TYPE_VOID.to_string())),
+            err: Box::new(Type::Named(Syntax::TYPE_ERROR.to_string())),
+        })),
+        ("find", 1) => Some(Some(Type::List(Box::new(Type::String)))),
+        ("embed", 1) => Some(Some(Type::String)),
+        ("fetch", 2) => Some(Some(Type::Result {
+            ok: Box::new(Type::String),
+            err: Box::new(Type::Named(Syntax::TYPE_ERROR.to_string())),
+        })),
+        ("action", 5 | 7) => build_result(Syntax::TYPE_BUILD_ACTION),
+        ("add_executable" | "add_library" | "add_test" | "add_bench" | "add_asset_bundle"
+        | "add_doc" | "add_install" | "add_package" | "add_publish", 3) => {
+            build_result(Syntax::TYPE_BUILD_TARGET)
+        }
+        ("toolchain", 2) => build_result(Syntax::TYPE_BUILD_TOOLCHAIN),
+        ("probe", 3) => build_result(Syntax::TYPE_BUILD_PROBE),
+        ("error", 5) => Some(None),
+        ("plan", 0 | 1) => build_result(Syntax::TYPE_BUILD_PLAN),
         _ => None,
     }
 }
@@ -985,6 +1051,42 @@ pub fn builtin_method_mutates(recv_ty: &Type, method: &str) -> bool {
 /// Expected argument types for built-in methods (excluding receiver).
 pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type>> {
     match recv_ty {
+        Type::Named(n) if n == Syntax::TYPE_BUILD_CONTEXT => match method {
+            "generate" => Some(vec![Type::String, Type::String]),
+            "find" | "embed" => Some(vec![Type::String]),
+            "fetch" => Some(vec![Type::String, Type::String]),
+            "action" => Some(vec![
+                Type::String,
+                Type::List(Box::new(Type::String)),
+                Type::List(Box::new(Type::String)),
+                Type::List(Box::new(Type::String)),
+                Type::List(Box::new(Type::String)),
+                Type::Named(Syntax::TYPE_BUILD_TOOLCHAIN.to_string()),
+                Type::List(Box::new(Type::Named(Syntax::TYPE_BUILD_PROBE.to_string()))),
+            ]),
+            "add_executable" | "add_library" | "add_test" | "add_bench"
+            | "add_asset_bundle" | "add_doc" | "add_install" | "add_package"
+            | "add_publish" => Some(vec![
+                Type::String,
+                Type::List(Box::new(Type::String)),
+                Type::List(Box::new(Type::Named(Syntax::TYPE_BUILD_ACTION.to_string()))),
+            ]),
+            "toolchain" => Some(vec![Type::String, Type::String]),
+            "probe" => Some(vec![Type::String, Type::String, Type::String]),
+            "error" => Some(vec![
+                Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string()),
+                Type::String,
+                Type::String,
+                Type::String,
+                Type::String,
+            ]),
+            "plan" => Some(vec![Type::Named(Syntax::TYPE_BUILD_TARGET.to_string())]),
+            _ => None,
+        },
+        Type::Named(n) if n == Syntax::TYPE_PROGRAM_INFO => Some(vec![]),
+        Type::Named(n) if n == Syntax::TYPE_TYPE_INFO && matches!(method, "implements" | "has_method") => Some(vec![Type::String]),
+        Type::Named(n) if n == "FunctionInfo" && method == "reaches_panic" => Some(vec![]),
+        Type::Named(n) if n == "EffectInfo" && method == "has" => Some(vec![Type::String]),
         Type::List(inner) => match method {
             "push" | "contains" => Some(vec![(**inner).clone()]),
             "insert" => Some(vec![Type::Int, (**inner).clone()]),

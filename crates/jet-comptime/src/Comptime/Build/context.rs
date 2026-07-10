@@ -286,6 +286,44 @@ impl BuildContext {
         self.push_action(name, spec, None)
     }
 
+    /// D-BUILDGEN1: register one additive generated Jet module. Materializing
+    /// and re-checking it belongs to the driver; the graph stores source and
+    /// digest so cache/query/provenance use the same canonical value.
+    pub fn generate(
+        &mut self,
+        name: impl Into<String>,
+        path: impl Into<String>,
+        source: impl Into<String>,
+    ) -> Result<GeneratedModuleHandle, BuildError> {
+        let module = GeneratedModuleSpec::new(name, path, source);
+        validate_generated_module(&module)?;
+        if self.generated_modules.iter().any(|old| old.name == module.name) {
+            return Err(BuildError::DuplicateGeneratedModuleName(module.name));
+        }
+        if self
+            .generated_modules
+            .iter()
+            .any(|old| old.path == module.path)
+        {
+            return Err(BuildError::DuplicateGeneratedModulePath(
+                module.path.as_str().to_string(),
+            ));
+        }
+        let id = GeneratedModuleId(self.generated_modules.len());
+        self.generated_modules.push(BuildGeneratedModule {
+            id,
+            name: module.name,
+            path: module.path,
+            source_digest: ContentDigest::from_bytes(module.source.as_bytes()),
+            source: module.source,
+            plugin: None,
+        });
+        Ok(GeneratedModuleHandle {
+            id,
+            context: self.context,
+        })
+    }
+
     pub fn apply_wasm_component_plugin(
         &mut self,
         spec: WasmComponentPluginSpec,

@@ -898,7 +898,7 @@ fn project_file_kind_for_rel(rel: &str) -> &'static str {
 fn diagnostic_json(d: &Diagnostic) -> String {
     format!(
         "{{\"code\":{},\"what\":{},\"why\":{},\"fix\":{}}}",
-        json_str(d.code),
+        json_str(&d.code),
         json_str(&d.what),
         json_str(&d.why),
         json_str(&d.fix)

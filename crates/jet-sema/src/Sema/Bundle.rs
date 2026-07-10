@@ -1646,12 +1646,14 @@ pub(crate) fn check_bundle_opts(
     // Use a temporary to avoid simultaneous &mut borrows of `bundle`.
     let mut embed_inputs = std::mem::take(&mut bundle.comptime_inputs);
     let mut effect_summaries: HashMap<String, EffectSummary> = HashMap::new();
+    let mut module_effect_summaries: Vec<(String, HashMap<String, EffectSummary>)> = Vec::new();
     // D-METHODMACRO1=A: top-level function names whose address was taken
     // anywhere in the bundle, accumulated across every module below; the
     // `@InlineAlways` address-taken pass (E0918) runs after the loop, once
     // this set is complete across the whole bundle.
     let mut global_addr_taken: HashSet<String> = HashSet::new();
     for (idx, module) in bundle.modules.iter_mut().enumerate() {
+        let mut local_summaries = HashMap::new();
         diags.extend(check_module_bodies(
             module,
             idx,
@@ -1659,10 +1661,13 @@ pub(crate) fn check_bundle_opts(
             mode,
             freestanding,
             allow_impure,
-            &mut effect_summaries,
+            &mut local_summaries,
             &mut embed_inputs,
             &mut global_addr_taken,
         ));
+        apply_effect_via(&module.items, &mut local_summaries, &mut Vec::new());
+        effect_summaries.extend(local_summaries.clone());
+        module_effect_summaries.push((module.alias.clone(), local_summaries));
     }
     bundle.comptime_inputs = embed_inputs;
     // D-METHODMACRO1=A: E0918 (address-taken) needs every module's function
@@ -1769,13 +1774,52 @@ pub(crate) fn check_bundle_opts(
     }
     bundle.used_core = used_core;
     apply_helper_layer_inference(bundle, &states, &usage_spans, &mut diags);
+    let (public_summaries, public_solved) = qualified_effect_facts(&module_effect_summaries);
     (
         diags,
         super::Effects::SemIndexEffectFacts {
-            summaries: effect_summaries,
-            solved,
+            summaries: public_summaries,
+            solved: public_solved,
         },
     )
+}
+
+fn qualified_effect_facts(
+    modules: &[(String, HashMap<String, EffectSummary>)],
+) -> (HashMap<String, EffectSummary>, HashMap<String, EffectSet>) {
+    let mut locations = HashMap::<String, Vec<String>>::new();
+    let aliases = modules.iter().map(|(alias, _)| alias.as_str()).collect::<HashSet<_>>();
+    for (alias, summaries) in modules {
+        for key in summaries.keys() {
+            locations.entry(key.clone()).or_default().push(format!("{alias}::{key}"));
+        }
+    }
+    let mut qualified = HashMap::new();
+    for (alias, summaries) in modules {
+        for (key, summary) in summaries {
+            let mut summary = summary.clone();
+            summary.edges = summary.edges.iter().map(|edge| {
+                if edge == "__jet_panic__" { return edge.clone(); }
+                if summaries.contains_key(edge) { return format!("{alias}::{edge}"); }
+                if let Some((module, symbol)) = edge.split_once('.') {
+                    if aliases.contains(module) { return format!("{module}::{symbol}"); }
+                }
+                locations.get(edge).and_then(|values| (values.len() == 1).then(|| values[0].clone())).unwrap_or_else(|| edge.clone())
+            }).collect();
+            qualified.insert(format!("{alias}::{key}"), summary);
+        }
+    }
+    let mut solved = solve(&qualified);
+    for (short, values) in locations.iter().filter(|(_, values)| values.len() == 1) {
+        let qualified_key = &values[0];
+        if let Some(summary) = qualified.get(qualified_key).cloned() {
+            qualified.insert(short.clone(), summary);
+        }
+        if let Some(effects) = solved.get(qualified_key).cloned() {
+            solved.insert(short.clone(), effects);
+        }
+    }
+    (qualified, solved)
 }
 
 /// D-TAINT1: run the taint pass over one item's function/method bodies in the

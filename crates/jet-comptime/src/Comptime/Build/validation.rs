@@ -17,15 +17,7 @@ fn resolve_under(base: &Path, rel: &str) -> io::Result<PathBuf> {
 }
 
 fn cap_name(cap: &BuildCapability) -> String {
-    match cap {
-        BuildCapability::Fs => "Fs".to_string(),
-        BuildCapability::Exec => "Exec".to_string(),
-        BuildCapability::Net => "Net".to_string(),
-        BuildCapability::Env => "Env".to_string(),
-        BuildCapability::Toolchain => "Toolchain".to_string(),
-        BuildCapability::Cache => "Cache".to_string(),
-        BuildCapability::Custom(name) => name.clone(),
-    }
+    cap.name().to_string()
 }
 
 fn check_name(name: String, kind: NameKind) -> Result<String, BuildError> {

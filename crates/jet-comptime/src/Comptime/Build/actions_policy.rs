@@ -1,13 +1,4 @@
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum BuildCapability {
-    Fs,
-    Exec,
-    Net,
-    Env,
-    Toolchain,
-    Cache,
-    Custom(String),
-}
+pub type BuildCapability = crate::BuildEffect;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum BuildResourcePool {

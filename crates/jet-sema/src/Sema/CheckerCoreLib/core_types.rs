@@ -151,6 +151,10 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // (generic, see `is_core_generic` in CheckerCore.rs) and its plain
         // `MigrationStatus` field both need the bare-name gate here too.
         | "DecodeResult" | "MigrationStatus"
+        // D-BUILD*: selected-root build-program handles. No runtime values.
+        | "BuildContext" | "BuildPlan" | "BuildAction" | "BuildTarget"
+        | "BuildToolchain" | "BuildProbe" | "ProgramInfo" | "TypeInfo" | "SourceSpan"
+        | "PackageInfo" | "FunctionInfo" | "EffectInfo" | "MethodInfo" | "FieldInfo"
     ) || is_json_type_name(name)
         || is_json_error_type_name(name)
         || is_io_error_type_name(name)
@@ -158,6 +162,62 @@ pub(crate) fn core_type_known(name: &str) -> bool {
 }
 
 pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
+    if type_name == Syntax::TYPE_BUILD_CONTEXT && field == "program" {
+        return Some(Type::Named(Syntax::TYPE_PROGRAM_INFO.to_string()));
+    }
+    if type_name == Syntax::TYPE_TYPE_INFO {
+        return match field {
+            "name" | "module" | "identity" | "kind" => Some(Type::String),
+            "fields" => Some(Type::List(Box::new(Type::Named("FieldInfo".to_string())))),
+            "methods" => Some(Type::List(Box::new(Type::Named("MethodInfo".to_string())))),
+            "markers" | "implements" => Some(Type::List(Box::new(Type::String))),
+            "span" => Some(Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string())),
+            _ => None,
+        };
+    }
+    if type_name == "FunctionInfo" {
+        return match field {
+            "name" | "module" | "identity" => Some(Type::String),
+            "params" => Some(Type::List(Box::new(Type::String))),
+            "span" => Some(Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string())),
+            "effects" => Some(Type::Named("EffectInfo".to_string())),
+            "reaches_panic" => Some(Type::Bool),
+            _ => None,
+        };
+    }
+    if type_name == "PackageInfo" {
+        return match field {
+            "name" | "identity" => Some(Type::String),
+            "types" => Some(Type::List(Box::new(Type::Named(Syntax::TYPE_TYPE_INFO.to_string())))),
+            "functions" => Some(Type::List(Box::new(Type::Named("FunctionInfo".to_string())))),
+            _ => None,
+        };
+    }
+    if type_name == "EffectInfo" && field == "values" {
+        return Some(Type::List(Box::new(Type::String)));
+    }
+    if type_name == "MethodInfo" {
+        return match field {
+            "name" | "module" | "identity" | "return_type" | "signature" => Some(Type::String),
+            "params" | "markers" => Some(Type::List(Box::new(Type::String))),
+            "is_pub" => Some(Type::Bool),
+            _ => None,
+        };
+    }
+    if type_name == "FieldInfo" {
+        return match field {
+            "name" | "ty" => Some(Type::String),
+            "markers" => Some(Type::List(Box::new(Type::String))),
+            "is_pub" => Some(Type::Bool),
+            _ => None,
+        };
+    }
+    if type_name == Syntax::TYPE_SOURCE_SPAN {
+        return match field {
+            "start" | "end" => Some(Type::Int),
+            _ => None,
+        };
+    }
     if is_json_error_type_name(type_name) {
         return match field {
             "line" => Some(Type::Int),

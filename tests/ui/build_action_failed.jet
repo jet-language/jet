@@ -1,0 +1,11 @@
+// @programmable_build
+// @build_grants exec
+fn build(b: BuildContext) #(Exec) -> BuildPlan ? {
+    #Impure("run failing action fixture") {
+    action :: b.action("fail", [], ["never"], ["sh", "-c", "exit 7"], ["Exec"])?
+    app :: b.add_executable("app", ["build_action_failed.jet"], [action])?
+    return b.plan(app)
+    }
+    return b.plan()
+}
+fn run() {}

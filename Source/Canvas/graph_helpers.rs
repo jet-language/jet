@@ -559,7 +559,7 @@ fn diagnostic_payload_json(path: &Path, src: &str, d: &Diagnostic) -> String {
     let rendered = crate::render_diagnostics(&path.display().to_string(), src, std::slice::from_ref(d));
     format!(
         "{{\"code\":{},\"severity\":{},\"what\":{},\"why\":{},\"fix\":{},\"message\":{},\"rendered\":{},\"source_span\":{},\"source_path\":{}}}",
-        json_str(d.code),
+        json_str(&d.code),
         json_str(severity),
         json_str(&d.what),
         json_str(&d.why),

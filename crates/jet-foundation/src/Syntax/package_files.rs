@@ -461,6 +461,8 @@ pub const BUILD_FIELD_SMALL: &str = "small"; // D-BUILDPROFILE1
 pub const BUILD_FIELD_PANIC: &str = "panic"; // D-BUILDPROFILE1
 pub const BUILD_FIELD_FEATURES: &str = "features"; // D-BUILDPROFILE1
 pub const BUILD_FIELD_ENV: &str = "env"; // D-BUILDPROFILE1
+/// D-BUILDSCOPE1=A: standing programmable-build authority grant.
+pub const BUILD_FIELD_ALLOW: &str = "allow";
 
 /// D-BUILDPROFILE1: `panic:` values for `Build.{ panic: … }`.
 pub const BUILD_PANIC_ABORT: &str = "abort"; // D-BUILDPROFILE1
@@ -512,4 +514,3 @@ pub const IMPURE_BUILTINS: &[&str] = &[BUILTIN_PRINT, "eprint", BUILTIN_INPUT, "
 // `@Codable`/`@Encode`/`@Decode` as contract-plane capability promises;
 // `derive T.Wire { … }` bodies applied as `#[Wire]` remain `#` generation
 // machinery — the built-in/user line IS the plane line.
-

@@ -53,6 +53,8 @@ pub enum BuildError {
         actual: String,
     },
     EmptyGeneratedModuleField(String),
+    DuplicateGeneratedModuleName(String),
+    DuplicateGeneratedModulePath(String),
     TargetDependencyCycle,
     ActionDependencyCycle,
 }
@@ -88,6 +90,27 @@ fn canonical_action_key(
     }
     w.str("cache");
     encode_action_cache(&mut w, action.cache);
+    w.str("compiler-version");
+    w.str(env!("CARGO_PKG_VERSION"));
+    w.str("generated-modules");
+    let mut generated = plan.generated_modules.iter().collect::<Vec<_>>();
+    generated.sort_by(|a, b| a.path.cmp(&b.path));
+    for module in generated {
+        w.str(module.path.as_str());
+        w.str(module.source_digest.as_str());
+    }
+    w.str("target");
+    if let Some(target) = plan
+        .action_targets()
+        .get(&action.id)
+        .and_then(|id| plan.targets.get(id.0))
+    {
+        w.bool(true);
+        w.str(&target.name);
+        w.str(&format!("{:?}", target.kind));
+    } else {
+        w.bool(false);
+    }
     w.str("toolchain");
     encode_toolchain(&mut w, &plan.toolchains[action.toolchain.id.0]);
     w.str("probes");
@@ -134,6 +157,36 @@ fn canonical_action_key(
     ActionKey(format!("act-sha256:{}", SHA256::sha256_hex(&w.bytes)))
 }
 
+fn canonical_effective_action_key(
+    plan: &BuildPlan,
+    action: &BuildAction,
+    inputs: &[ActionInputSnapshot],
+    grants: &BTreeSet<BuildCapability>,
+    executable: &Path,
+    executable_digest: &ContentDigest,
+    probe_facts: &[BuildProbeFact],
+) -> ActionKey {
+    let base = canonical_action_key(plan, action, inputs);
+    let mut w = KeyWriter::new();
+    w.str("jet.effective-action-key.v1");
+    w.str(base.as_str());
+    w.str("effective-policy");
+    for grant in grants { encode_capability(&mut w, grant); }
+    w.str("resolved-executable");
+    w.str(&executable.display().to_string());
+    w.str(executable_digest.as_str());
+    w.str("actual-probe-facts");
+    for fact in probe_facts {
+        w.str(&fact.name);
+        w.bool(fact.success);
+        w.str(&fact.detail);
+        w.str(&format!("{:?}", fact.reproducibility));
+    }
+    w.str("compiler-identity");
+    w.str(concat!(env!("CARGO_PKG_NAME"), "@", env!("CARGO_PKG_VERSION")));
+    ActionKey(format!("act-sha256:{}", SHA256::sha256_hex(&w.bytes)))
+}
+
 fn encode_action_cache(w: &mut KeyWriter, cache: ActionCache) {
     match cache {
         ActionCache::Cached => w.str("cached"),
@@ -142,18 +195,7 @@ fn encode_action_cache(w: &mut KeyWriter, cache: ActionCache) {
 }
 
 fn encode_capability(w: &mut KeyWriter, cap: &BuildCapability) {
-    match cap {
-        BuildCapability::Fs => w.str("fs"),
-        BuildCapability::Exec => w.str("exec"),
-        BuildCapability::Net => w.str("net"),
-        BuildCapability::Env => w.str("env"),
-        BuildCapability::Toolchain => w.str("toolchain"),
-        BuildCapability::Cache => w.str("cache"),
-        BuildCapability::Custom(value) => {
-            w.str("custom");
-            w.str(value);
-        }
-    }
+    w.str(cap.flag());
 }
 
 fn encode_resource_pool(w: &mut KeyWriter, pool: &BuildResourcePool) {

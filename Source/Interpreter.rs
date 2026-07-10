@@ -619,7 +619,7 @@ pub fn run_checked(bundle: &ProgramBundle, try_anyway: bool) -> RunOutcome {
 /// run this at runtime via `jet dev`. Rewrap as the dev-loop's own E2201
 /// boundary diagnostic instead, preserving what construct tripped it.
 fn dev_boundary_from_comptime(d: Diagnostic) -> Diagnostic {
-    let detail = match d.code {
+    let detail = match d.code.as_str() {
         "E0956" => d
             .what
             .strip_suffix(" can't run at compile time yet")

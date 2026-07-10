@@ -272,6 +272,21 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
     },
     CommandSpec {
+        name: "graph",
+        summary: "print typed programmable-build graph (D-BUILDQUERY1)",
+        headline: false,
+    },
+    CommandSpec {
+        name: "query",
+        summary: "query typed facts; `jet query build <file>` inspects build graph",
+        headline: false,
+    },
+    CommandSpec {
+        name: "explain-build",
+        summary: "explain one build target, action, or file (D-BUILDQUERY1)",
+        headline: false,
+    },
+    CommandSpec {
         name: "codemod",
         summary: "dry-run, apply, or undo replayable semantic codemods",
         headline: false,
@@ -377,6 +392,17 @@ pub const FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--freestanding", help: "with build/run: no OS; rejects std-only APIs (E2-M15)" },
     // D-CTEFFECT1: comptime effect tier gate.
     FlagSpec { long: "--allow-impure", help: "with build/run: allow Tier-2 ambient comptime effects inside #Impure gates (D-CTEFFECT1)" },
+    // D-BUILDFLAGS1=A: per-effect grants for one programmable-build run.
+    FlagSpec { long: "--allow-exec", help: "with build: grant declared Exec actions for this run (D-BUILDFLAGS1)" },
+    FlagSpec { long: "--allow-fs", help: "with build: grant declared Fs actions for this run (D-BUILDFLAGS1)" },
+    FlagSpec { long: "--allow-net", help: "with build: grant declared Net actions for this run (D-BUILDFLAGS1)" },
+    FlagSpec { long: "--allow-env", help: "with build: grant declared Env actions for this run (D-BUILDFLAGS1)" },
+    FlagSpec { long: "--allow-io", help: "with build: grant declared Io actions for this run (D-BUILDFLAGS1)" },
+    FlagSpec { long: "--allow-db", help: "with build: grant declared Db actions for this run (D-BUILDFLAGS1)" },
+    FlagSpec { long: "--allow-time", help: "with build: grant declared Time actions for this run (D-BUILDFLAGS1)" },
+    FlagSpec { long: "--allow-rand", help: "with build: grant declared Rand actions for this run (D-BUILDFLAGS1)" },
+    FlagSpec { long: "--allow-log", help: "with build: grant declared Log actions for this run (D-BUILDFLAGS1)" },
+    FlagSpec { long: "--allow-gpu", help: "with build: grant declared Gpu actions for this run (D-BUILDFLAGS1)" },
     FlagSpec { long: "--target", help: "with build: cross-compile for a rustc target triple (E2-M15)" },
     FlagSpec {
         long: "--explain-partition",

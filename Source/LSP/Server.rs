@@ -294,12 +294,31 @@ fn handle_request(
         "typeHierarchy/supertypes" => type_hierarchy_supertypes_response(server, params, id),
         "typeHierarchy/subtypes" => type_hierarchy_subtypes_response(server, params, id),
         "workspace/executeCommand" => execute_command_response(server, params, id),
+        "jet/buildGraph" => build_graph_response(server, params, id),
         _ => Some(response(id, "null")),
     };
     if let Some(t0) = started {
         record_lsp_latency(method, t0.elapsed().as_micros());
     }
     out
+}
+
+fn build_graph_response(
+    server: &Server,
+    params: Option<&JsonValue>,
+    id: &JsonValue,
+) -> Option<String> {
+    let uri = params
+        .and_then(|params| json_get(params, "textDocument"))
+        .and_then(|document| json_get(document, "uri"))
+        .and_then(json_str)?;
+    let document = server.docs.get(uri)?;
+    let plan = match crate::Driver::query_build_plan_with_overlay(&document.path, &document.text) {
+        Ok(Some(plan)) => plan,
+        Ok(None) => return Some(response(id, "null")),
+        Err(_) => return Some(response(id, "null")),
+    };
+    Some(response(id, &crate::Driver::build_plan_json(&plan)))
 }
 
 /// c121 Step 5: append one `{"method":…,"us":…}` JSON line to
@@ -603,7 +622,7 @@ fn diagnostic_json(d: &Diagnostic, src: &str) -> String {
         r#"{{"range":{},"severity":{},"code":"{}","source":"jet","message":"{}"}}"#,
         range_json(range),
         severity,
-        json_escape(d.code),
+        json_escape(&d.code),
         json_escape(&d.what)
     )
 }

@@ -47,7 +47,8 @@ use super::RefSpec::{RefError, Source};
 use crate::Syntax;
 use Helpers::block_body;
 use ParseBlocks::{
-    parse_deps, parse_effects, parse_grants, parse_package, parse_packages, parse_trust_policy,
+    parse_build_allow, parse_deps, parse_effects, parse_grants, parse_package, parse_packages,
+    parse_trust_policy,
 };
 
 /// D-BUILDPROFILE1: optimization level for a named build profile. Stored in
@@ -223,6 +224,9 @@ pub struct PackManifest {
     /// D-BUILDPROFILE1: named build profiles from the `build { }` block, in
     /// declaration order. Empty when no `build: { … }` block is present.
     pub build_profiles: Vec<BuildProfileDef>,
+    /// D-CTEFFECT1: standing capabilities granted to this package's `fn build`.
+    /// Parsed from the exact `build: { allow: #(…) }` field.
+    pub build_allow: Vec<String>,
     /// D-EFFBUDGET1: whether an `effects: { … }` block is present at all. Its
     /// presence (even empty) turns on whole-graph enforcement; absence means
     /// report-only (the always-on summary still prints).
@@ -343,6 +347,10 @@ pub fn parse(text: &str) -> Result<PackManifest, ManifestError> {
         Some(body) => parse_build(&body)?,
         None => Vec::new(),
     };
+    let build_allow = match block_body(&text, Syntax::MANIFEST_BLOCK_BUILD, '{', '}') {
+        Some(body) => parse_build_allow(&body)?,
+        None => Vec::new(),
+    };
 
     // D-EFFBUDGET1: `effects: { allow: […], deny: […] }` turns on whole-graph
     // enforcement; absent entirely means report-only (no enforcement).
@@ -377,6 +385,7 @@ pub fn parse(text: &str) -> Result<PackManifest, ManifestError> {
         deps,
         packages,
         build_profiles,
+        build_allow,
         effects_enabled,
         effects_allow,
         effects_deny,

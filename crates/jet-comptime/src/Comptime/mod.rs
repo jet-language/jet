@@ -29,15 +29,84 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use crate::Diagnostics::Diagnostic;
-use crate::AST::{Expr, Func, StructDef};
+use crate::AST::{EnumDef, Expr, Func, StructDef};
 
 pub use Interpreter::{DebugHook, DevSink, REPL_FUEL_BUDGET};
 pub use Purity::walk_calls;
-pub use Reflect::build_struct_type_info;
+pub use Reflect::{build_program_info, build_struct_type_info, ProgramSemanticFacts};
 pub use Value::CtValue;
 
 use Interpreter::{Interp, DEV_FUEL_BUDGET, FUEL_BUDGET};
 use Purity::check_purity;
+
+#[derive(Debug, Clone)]
+pub struct ProgramBuildEvaluation {
+    pub plan: Build::BuildPlan,
+    pub comptime_inputs: Vec<crate::AST::ComptimeInput>,
+    pub diagnostics: Vec<Diagnostic>,
+}
+
+/// Run selected root `fn build` through same interpreter used by comptime and
+/// dev. Sema has already checked whole bundle; this stage constructs graph
+/// values only, never type-checks by execution.
+pub fn run_build_entry(
+    build: &Func,
+    funcs: &HashMap<String, &Func>,
+    base_dir: &Path,
+    program: &ProgramInfo,
+    program_value: CtValue,
+    package: &str,
+    allow_impure: bool,
+) -> Result<ProgramBuildEvaluation, Diagnostic> {
+    let context = Build::begin_program_build(package, program_value);
+    let mut interp = Interp {
+        funcs,
+        base_dir,
+        fuel: DEV_FUEL_BUDGET,
+        sink: None,
+        core_imports: &program.core_imports,
+        debugger: None,
+        depth: 0,
+        cur_func: "build".to_string(),
+        impure_depth: 0,
+        allow_impure,
+        repl_mode: false,
+        embed_inputs: Vec::new(),
+        emitted_fragments: Vec::new(),
+        globals: &program.globals,
+        methods: &program.methods,
+        structs: &program.structs,
+        computed_fields: &program.computed_fields,
+        distinct_ranges: &program.distinct_ranges,
+    };
+    let mut frame = HashMap::new();
+    frame.insert(build.params[0].name.clone(), context.clone());
+    let returned = match interp.call_func("build", build, frame) {
+        Ok(value) => value,
+        Err(error) => {
+            Build::abort_program_build(&context);
+            return Err(error);
+        }
+    };
+    if let CtValue::ResErr(error) = &returned {
+        Build::abort_program_build(&context);
+        return Err(Diagnostic::error(
+            "E3502",
+            format!("`fn build` returned an error: {}", error.jet_show()),
+            "the selected root build entry must finish graph construction before any action runs"
+                .to_string(),
+            "fix the failing build operation; use `jet explain-build` to inspect completed graph nodes"
+                .to_string(),
+            Some(build.name_span),
+        ));
+    }
+    let (plan, diagnostics) = Build::finish_program_build(&context, &returned)?;
+    Ok(ProgramBuildEvaluation {
+        plan,
+        comptime_inputs: interp.embed_inputs,
+        diagnostics,
+    })
+}
 
 // An empty core_imports map for paths that don't have `use` declarations.
 static EMPTY_IMPORTS: std::sync::OnceLock<HashMap<String, String>> = std::sync::OnceLock::new();
@@ -224,6 +293,7 @@ pub struct ProgramInfo<'a> {
     pub globals: HashMap<String, CtValue>,
     pub methods: HashMap<(String, String), &'a Func>,
     pub structs: HashMap<String, &'a StructDef>,
+    pub enums: HashMap<String, &'a EnumDef>,
     pub computed_fields: HashMap<(String, String), &'a Expr>,
     pub distinct_ranges: HashMap<String, Option<(i64, i64)>>,
     pub core_imports: HashMap<String, String>,
@@ -235,6 +305,7 @@ impl<'a> ProgramInfo<'a> {
             globals: HashMap::new(),
             methods: HashMap::new(),
             structs: HashMap::new(),
+            enums: HashMap::new(),
             computed_fields: HashMap::new(),
             distinct_ranges: HashMap::new(),
             core_imports: HashMap::new(),
