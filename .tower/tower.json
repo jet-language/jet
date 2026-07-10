@@ -3,8 +3,8 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 487,
-    "rev": 3125,
+    "nextNum": 488,
+    "rev": 3135,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -13730,49 +13730,55 @@
       "claimedAt": "2026-07-10T22:40:14.767Z"
     },
     {
-      "id": "c02ljg8z",
-      "num": 486,
-      "title": "marker-plane matrix retains retired maturity spelling",
-      "body": "The canonical syntax reconciliation test requires current D-MATURITY1 marker spellings #Experimental/#Tested/#Hardened, but docs/plans/epoch-3/marker-plane-source-of-truth-matrix-2026-07-07.md still lists old @Experimental/@Tested/@Hardened and claims # is retired. Update the durable marker-plane row to current law and live parser/formatter evidence; do not alter syntax.",
+      "id": "c06tyd7v",
+      "num": 487,
+      "title": "syntax reconciliation expected retired maturity markers",
+      "body": "The marker-plane matrix correctly records current D-MARKERMOVE1/D-MATURITY1 spellings @Experimental/@Tested/@Hardened and retired # forms, but tests/syntax_reconciliation.rs expected the retired # spellings. Reconcile the test with authoritative current law; no syntax/docs/product change. Supersedes mistaken #486, whose premise inverted current and retired forms.",
       "kind": "bug",
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "verify",
       "priority": "P0",
-      "plan": "Reconcile only the maturity-markers matrix row against crates/jet-foundation/src/Syntax.rs, parser, formatter, examples, and diagnostics. Run syntax_reconciliation and decisions tests. No syntax/code behavior change, no ballot.",
+      "plan": "Audit Syntax.rs, syntax-decisions, parser, formatter, executable example, and E0062 snapshots. Update only the stale test expectation. Run syntax_reconciliation and decisions; independent review; parent full suite.",
       "blockedBy": [],
-      "assignee": "terra-486-builder",
-      "log": [],
+      "assignee": "terra-487-builder",
+      "log": [
+        {
+          "at": "2026-07-10",
+          "by": "codex-main",
+          "text": "Commit a57e0d58 independently reviewed with no findings. Focused criteria verified; awaiting parent full-suite completion."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
-          "text": "Maturity marker-plane row lists #Experimental/#Tested/#Hardened and accurate live implementation/retirement evidence.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-10T22:49:05.054Z"
+          "text": "Reconciliation row expects current @Experimental/@Tested/@Hardened while retired # forms remain E0062 fixtures.",
+          "status": "verified",
+          "metBy": "terra-487-builder",
+          "verifiedBy": "sol-487-review",
+          "evidence": "Independent Sol audit confirmed @ is authoritative current law and # is retired E0062; no findings.",
+          "at": "2026-07-10T22:52:07.032Z"
         },
         {
           "n": 2,
-          "text": "syntax_reconciliation and decisions targets pass with no syntax behavior change.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-10T22:49:05.217Z"
+          "text": "syntax_reconciliation and decisions pass; authoritative docs/examples/snapshots remain unchanged.",
+          "status": "verified",
+          "metBy": "terra-487-builder",
+          "verifiedBy": "sol-487-review",
+          "evidence": "Independent reviewer reran both targets and confirmed no docs/product/snapshot changes.",
+          "at": "2026-07-10T22:52:07.335Z"
         }
       ],
       "refs": [
+        "tests/syntax_reconciliation.rs",
         "docs/plans/epoch-3/marker-plane-source-of-truth-matrix-2026-07-07.md",
-        "crates/jet-foundation/src/Syntax.rs",
-        "tests/syntax_reconciliation.rs"
+        "docs/spec/syntax-decisions.md"
       ],
       "needsAcceptance": false,
-      "created": "2026-07-10T22:48:58.916Z",
+      "created": "2026-07-10T22:51:51.137Z",
       "updated": "2026-07-10",
-      "claimedAt": "2026-07-10T22:49:05.374Z"
+      "claimedAt": "2026-07-10T22:52:06.727Z"
     }
   ],
   "decisions": [
@@ -24511,6 +24517,76 @@
   ],
   "events": [
     {
+      "at": "2026-07-10T22:52:07.493Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c06tyd7v",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-10T22:52:07.335Z",
+      "by": "sol-487-review",
+      "action": "card.criteria-verify",
+      "ref": "c06tyd7v",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-10T22:52:07.186Z",
+      "by": "terra-487-builder",
+      "action": "card.criteria-meet",
+      "ref": "c06tyd7v",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-10T22:52:07.032Z",
+      "by": "sol-487-review",
+      "action": "card.criteria-verify",
+      "ref": "c06tyd7v",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-10T22:52:06.875Z",
+      "by": "terra-487-builder",
+      "action": "card.criteria-meet",
+      "ref": "c06tyd7v",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-10T22:52:06.727Z",
+      "by": "terra-487-builder",
+      "action": "card.claim",
+      "ref": "c06tyd7v",
+      "note": ""
+    },
+    {
+      "at": "2026-07-10T22:52:06.571Z",
+      "by": "codex-main",
+      "action": "card.criteria-add",
+      "ref": "c06tyd7v",
+      "note": "#2 syntax_reconciliation and decisions pass; authoritative docs"
+    },
+    {
+      "at": "2026-07-10T22:52:06.415Z",
+      "by": "codex-main",
+      "action": "card.criteria-add",
+      "ref": "c06tyd7v",
+      "note": "#1 Reconciliation row expects current @Experimental/@Tested/@Ha"
+    },
+    {
+      "at": "2026-07-10T22:51:51.138Z",
+      "by": "codex-main",
+      "action": "card.add",
+      "ref": "c06tyd7v",
+      "note": "syntax reconciliation expected retired maturity markers"
+    },
+    {
+      "at": "2026-07-10T22:51:51.062Z",
+      "by": "codex-main",
+      "action": "card.delete",
+      "ref": "c02ljg8z",
+      "note": "marker-plane matrix retains retired maturity spelling"
+    },
+    {
       "at": "2026-07-10T22:49:05.374Z",
       "by": "terra-486-builder",
       "action": "card.claim",
@@ -27939,76 +28015,6 @@
       "action": "card.update",
       "ref": "c_audit_363_9n2bl3",
       "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:21:29.639Z",
-      "by": "grok-main",
-      "action": "card.update",
-      "ref": "c_audit_363_9n2bl3",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-10T16:21:29.526Z",
-      "by": "grok-main",
-      "action": "card.criteria-meet",
-      "ref": "c_audit_363_9n2bl3",
-      "note": "#5"
-    },
-    {
-      "at": "2026-07-10T16:21:29.423Z",
-      "by": "grok-main",
-      "action": "card.criteria-meet",
-      "ref": "c_audit_363_9n2bl3",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-10T16:21:29.322Z",
-      "by": "grok-main",
-      "action": "card.criteria-meet",
-      "ref": "c_audit_363_9n2bl3",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-10T16:21:29.218Z",
-      "by": "grok-main",
-      "action": "card.criteria-meet",
-      "ref": "c_audit_363_9n2bl3",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-10T16:01:09.544Z",
-      "by": "grok-main",
-      "action": "card.claim",
-      "ref": "c_audit_363_9n2bl3",
-      "note": ""
-    },
-    {
-      "at": "2026-07-10T16:00:04.370Z",
-      "by": "grok-main",
-      "action": "card.update",
-      "ref": "c_audit_363_9n2bl3",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-10T16:00:04.294Z",
-      "by": "grok-main",
-      "action": "card.criteria-meet",
-      "ref": "c_audit_363_9n2bl3",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-10T16:00:04.220Z",
-      "by": "grok-main",
-      "action": "card.criteria-add",
-      "ref": "c_audit_363_9n2bl3",
-      "note": "#5 First-boot Studio control center + Canvas deep-link (D-JOS-F"
-    },
-    {
-      "at": "2026-07-10T16:00:04.144Z",
-      "by": "grok-main",
-      "action": "card.criteria-add",
-      "ref": "c_audit_363_9n2bl3",
-      "note": "#4 Image variants only marked built after bootable smoke proof;"
     }
   ],
   "nextNum": 368,
