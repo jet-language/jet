@@ -5,6 +5,18 @@ process control, math, time, random numbers, JSON, tasks, and channels —
 enough to write real command-line tools. Every fallible call returns a
 `T ? E` value; nothing in Core panics on its own.
 
+<!-- Stable IDs bind these public Core declarations to reviewed capability depth. -->
+<!-- CAPABILITY_CLAIM: claim.core-foundation | Core foundations are reachable Jet software. -->
+<!-- CAPABILITY_CLAIM: claim.core-concurrency | Tasks and events share one runtime. -->
+<!-- CAPABILITY_CLAIM: claim.core-files-data | Files, paths, archives, compression, and DB APIs are production claims. -->
+<!-- CAPABILITY_CLAIM: claim.core-encoding-text | Codecs and text follow published standards. -->
+<!-- CAPABILITY_CLAIM: claim.core-network-http | Network and HTTP claims require live interoperability. -->
+<!-- CAPABILITY_CLAIM: claim.core-security | Security APIs require fail-closed entropy. -->
+<!-- CAPABILITY_CLAIM: claim.core-data-compute | Typed data claims require real documented semantics. -->
+<!-- CAPABILITY_CLAIM: claim.core-ui-web | UI and web share one typed component model. -->
+<!-- CAPABILITY_CLAIM: claim.game-product | Game claims require a playable runtime and editor. -->
+<!-- CAPABILITY_CLAIM: claim.plugin-ffi | Plugins and FFI use one typed interop structure. -->
+
 **How it works today:** Core modules are built into the compiler. Use them by
 name; the compiler type-checks your calls and generates only the helpers you
 actually use (see [Using modules](#using-modules) and [Pay for what you call](#pay-for-what-you-call)).

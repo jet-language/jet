@@ -7,8 +7,8 @@ are inventoried independently from their source registries by the same gate.
 
 | Claim ID | Public claim |
 | --- | --- |
-| `claim.syntax-law` | Ratified syntax has one machine-checked source of truth. |
-| `claim.examples-spec` | Feature examples are executable specifications with expected output. |
+| `claim.syntax-law` | Every current unbuilt syntax note has a machine-checked status-matrix row. |
+| `claim.examples-spec` | Every feature example has a declared expected-output artifact. |
 | `claim.native-language` | Jet compiles safe source to native programs with Jet-owned semantics. |
 | `claim.tier-parity` | AOT, dev/JIT, comptime, REPL, and web preserve one executable meaning. |
 | `claim.static-guarantees` | Refinements, contracts, information flow, budgets, and replay share one facts engine. |

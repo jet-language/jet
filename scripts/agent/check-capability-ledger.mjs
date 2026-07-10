@@ -13,6 +13,7 @@ const REPORT_PATH = join(ROOT, "docs/plans/epoch-3/capability-ledger-report.json
 const FIXTURES_PATH = join(ROOT, "tests/fixtures/capability-claims/hostile-cases.json");
 const DEFAULT_TOWER_PATH = join(ROOT, ".tower/tower.json");
 const EXPECTED_CLASSES = ["reserved", "facade", "partial", "implemented", "proven"];
+const PUBLIC_DECLARATION_FILES = ["README.md", "docs/reference/core-library.md", "Source/CLI.rs"];
 
 function readJson(path) {
   return JSON.parse(readFileSync(path, "utf8"));
@@ -41,6 +42,17 @@ function registryClaims() {
     if (match) claims.push(match[1]);
   }
   return claims;
+}
+
+function declarationClaims() {
+  const found = [];
+  for (const path of PUBLIC_DECLARATION_FILES) {
+    const text = readFileSync(join(ROOT, path), "utf8");
+    for (const match of text.matchAll(/CAPABILITY_CLAIM:\s*(claim\.[a-z0-9-]+)/g)) {
+      found.push(match[1]);
+    }
+  }
+  return found;
 }
 
 function cliCommands() {
@@ -72,6 +84,15 @@ function fileText(path, overrides) {
   return readFileSync(absolute, "utf8");
 }
 
+function decisiveContent(text, anchor) {
+  const matches = text
+    .split(/\r?\n/)
+    .filter((line) => line.includes(anchor))
+    .map((line) => line.trim().replace(/\s+/g, " "));
+  if (matches.length === 0) throw new Error("decisive anchor selected no normalized content");
+  return matches.join("\n");
+}
+
 function validateArtifact(artifact, ownerCard, overrides) {
   if (!["proof", "supporting", "gap"].includes(artifact.role)) {
     throw new Error(`invalid artifact role ${artifact.role}`);
@@ -92,18 +113,27 @@ function validateArtifact(artifact, ownerCard, overrides) {
     const where = artifact.kind === "file" ? artifact.path : `Tower #${ownerCard.num}.${artifact.field}`;
     throw new Error(`missing decisive anchor in ${where}: ${artifact.anchor}`);
   }
+  const digest = sha256(decisiveContent(text, artifact.anchor));
+  if (!artifact.contentDigest) throw new Error("artifact lacks normalized decisive content digest");
+  if (digest !== artifact.contentDigest) {
+    throw new Error(`decisive content digest mismatch: expected ${artifact.contentDigest}, got ${digest}`);
+  }
 }
 
-function validateCommand(command, proven) {
-  if (!Array.isArray(command) || command.length < 2 || command.some((part) => typeof part !== "string" || !part)) {
+function validateCommand(command, proven, claimId, laneId) {
+  if (!Array.isArray(command) || command.length !== 7 || command.some((part) => typeof part !== "string" || !part)) {
     throw new Error("acceptance command must be a non-empty argv array");
   }
-  if (!["cargo", "node"].includes(command[0])) throw new Error(`unsupported focused command ${command[0]}`);
-  if (command[0] === "cargo" && command[1] !== "test") throw new Error("focused cargo lane must run a test");
-  const testIndex = command.indexOf("--test");
-  if (proven && command[0] === "cargo" && testIndex >= 0) {
-    const testPath = join(ROOT, "tests", `${command[testIndex + 1]}.rs`);
+  if (command[0] !== "cargo" || command[1] !== "test" || command[2] !== "--test" || command[5] !== "--" || command[6] !== "--exact") {
+    throw new Error("acceptance command must name exact cargo test target and `--exact`");
+  }
+  if (proven) {
+    const testPath = join(ROOT, "tests", `${command[3]}.rs`);
     if (!existsSync(testPath)) throw new Error(`proven acceptance test does not exist: ${relative(ROOT, testPath)}`);
+    const marker = `CAPABILITY_CLAIM: ${claimId} / ${laneId}`;
+    if (!readFileSync(testPath, "utf8").includes(marker)) {
+      throw new Error(`acceptance command target lacks lane marker ${marker}`);
+    }
   }
 }
 
@@ -121,6 +151,10 @@ function validateManifest(manifest, board, options = {}) {
   const docsClaims = registryClaims();
   if (!sameSet([...claims.keys()], docsClaims)) {
     errors.push(`manifest: docs registry drift; manifest=${[...claims.keys()].sort().join(",")} docs=${docsClaims.sort().join(",")}`);
+  }
+  const declaredClaims = declarationClaims();
+  if (!sameSet([...claims.keys()], [...new Set(declaredClaims)])) {
+    errors.push(`manifest: designated public declarations have unowned or missing claim IDs; declarations=${[...new Set(declaredClaims)].sort().join(",")}`);
   }
 
   for (const [surface, owner] of Object.entries(manifest.cliOwnership ?? {})) {
@@ -165,7 +199,7 @@ function validateManifest(manifest, board, options = {}) {
         if (!/^[a-z0-9-]+$/.test(lane.id) || laneIds.has(lane.id)) throw new Error("invalid or duplicate lane id");
         laneIds.add(lane.id);
         if (!lane.why || lane.why.length < 30) throw new Error("lane lacks semantic relevance rationale");
-        validateCommand(lane.command, claim.class === "proven");
+        validateCommand(lane.command, claim.class === "proven", claim.id, lane.id);
         if (!Array.isArray(lane.artifacts) || lane.artifacts.length === 0) throw new Error("lane omitted decisive proof artifacts");
         for (const artifact of lane.artifacts) validateArtifact(artifact, ownerCard, options.fileOverrides);
         if (claim.class === "proven" && lane.artifacts.some((artifact) => artifact.role !== "proof")) {
@@ -204,11 +238,32 @@ function reportFor(manifest, board) {
             role: artifact.role,
             locator: artifact.kind === "file" ? artifact.path : `tower:${artifact.field}`,
             anchorDigest: sha256(artifact.anchor),
+            contentDigest: artifact.contentDigest,
           })),
         })),
       };
     }),
   };
+}
+
+function refreshDigests(towerPath) {
+  const manifest = readJson(MANIFEST_PATH);
+  const board = readJson(towerPath);
+  for (const claim of manifest.claims) {
+    const owner = board.cards.find((card) => card.id === claim.owner.cardId && card.num === claim.owner.num);
+    if (!owner) throw new Error(`${claim.id}: owner card missing while refreshing digests`);
+    for (const lane of claim.acceptanceLanes) {
+      for (const artifact of lane.artifacts) {
+        try {
+          const text = artifact.kind === "file" ? fileText(artifact.path) : towerText(owner, artifact.field);
+          artifact.contentDigest = sha256(decisiveContent(text, artifact.anchor));
+        } catch (error) {
+          throw new Error(`${claim.id}/${lane.id}: ${error.message}`);
+        }
+      }
+    }
+  }
+  writeFileSync(MANIFEST_PATH, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
 function validateCurrent(towerPath, writeReport = false) {
@@ -259,6 +314,9 @@ function hostileFixtures(towerPath) {
       case "unrelated-test":
         claim.acceptanceLanes[0].artifacts[0].path = "tests/cli.rs";
         break;
+      case "command-swap":
+        claim.acceptanceLanes[0].command = ["cargo", "test", "--test", "truthfulness", "every_feature_example_has_expected_output", "--", "--exact"];
+        break;
       case "deferred-as-proven":
         claim.class = "proven";
         claim.disposition = "shipped";
@@ -282,6 +340,12 @@ function hostileFixtures(towerPath) {
       case "tamper-proof": {
         const artifact = claim.acceptanceLanes[0].artifacts[0];
         overrides.set(artifact.path, fileText(artifact.path).replace(artifact.anchor, "removed claim anchor"));
+        break;
+      }
+      case "corrupt-preserving-anchor": {
+        const artifact = claim.acceptanceLanes[0].artifacts[0];
+        const text = fileText(artifact.path);
+        overrides.set(artifact.path, text.replace(artifact.anchor, `${artifact.anchor} SEMANTICS_CORRUPTED`));
         break;
       }
       default:
@@ -314,8 +378,11 @@ function main() {
     verifyFocused(boardPath);
   } else if (args.includes("--hostile-fixtures")) {
     hostileFixtures(boardPath);
+  } else if (args.includes("--refresh-digests")) {
+    refreshDigests(boardPath);
+    process.stdout.write(`refreshed normalized decisive-content digests in ${relative(ROOT, MANIFEST_PATH)}\n`);
   } else {
-    throw new Error("usage: check-capability-ledger.mjs --generate-report|--check|--verify-focused|--hostile-fixtures [--tower PATH]");
+    throw new Error("usage: check-capability-ledger.mjs --refresh-digests|--generate-report|--check|--verify-focused|--hostile-fixtures [--tower PATH]");
   }
 }
 
