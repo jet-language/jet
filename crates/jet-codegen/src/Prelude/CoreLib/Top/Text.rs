@@ -17,24 +17,28 @@ fn jet_std_path_extension(path: &String) -> String {
 }
 fn jet_std_path_normalize(path: &String) -> String {
     // Resolve `.` and `..` components without hitting the filesystem.
-    let mut parts: Vec<&str> = Vec::new();
-    let s = path.as_str();
-    let absolute = s.starts_with('/');
-    for seg in s.split('/') {
-        match seg {
-            "" | "." => {}
-            ".." => {
-                parts.pop();
+    let source = std::path::Path::new(path.as_str());
+    let rooted = source.has_root();
+    let mut normalized = std::path::PathBuf::new();
+    let mut normal_depth = 0usize;
+    for component in source.components() {
+        match component {
+            std::path::Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
+            std::path::Component::RootDir => normalized.push(component.as_os_str()),
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir if normal_depth > 0 => {
+                normalized.pop();
+                normal_depth -= 1;
             }
-            other => parts.push(other),
+            std::path::Component::ParentDir if !rooted => normalized.push(".."),
+            std::path::Component::ParentDir => {}
+            std::path::Component::Normal(part) => {
+                normalized.push(part);
+                normal_depth += 1;
+            }
         }
     }
-    let joined = parts.join("/");
-    if absolute {
-        format!("/{}", joined)
-    } else {
-        joined
-    }
+    normalized.to_string_lossy().into_owned()
 }
 
 // ── core.text.unicode helpers (D-TEXTUNICODE1) ───────────────────────────────
