@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 488,
-    "rev": 3156,
+    "rev": 3159,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -4968,7 +4968,7 @@
       "priority": "P1",
       "plan": "Acceptance: core.files/core.path must beat Python pathlib, Go os/filepath, and Rust std::fs for ordinary scripting/build-tool work, while preserving Jet's one-path, safe-default, audit-friendly model.\n\nCurrent facts found during plan pass:\n- docs/reference/core-library.md currently documents core.files as string-path helpers plus open/create/append streaming handles.\n- docs/spec/syntax-decisions.md records D-PATHFS1 typed Path (from/join/parent/extension/stem/write_atomic/walk) but still labels part of it unbuilt; code already contains Path TIR/prelude/sema hooks, so implementation must verify shipped behavior and fix docs drift.\n- D-FSWATCH1 is ratified as files.watch, with owner comment: include processes and ports now, not later. That requires a shared watch/event model, not only a filesystem helper.\n\nGates queued:\n- D-FSOPS1: exact deep filesystem/path operation surface and Path-vs-String model.\n- D-WATCH-SCOPE1: exact watch composition surface for files, process exit, and port readiness.\n\nImplementation plan after gates clear:\n1. Verification baseline: add/confirm focused tests for currently claimed Path API (Path.from, join, parent, extension, stem, write_atomic, walk), existing core.files helpers, and docs/API-freeze snapshots. Fix any docs/code mismatch before adding new surface.\n2. Data model: add typed Stat, FileKind, WalkEntry, TempFile/TempDir RAII handles, FileLock, WatchHandle, WatchEvent, WatchSet. Keep IOError product-copy shape; add diagnostics only for sema-visible misuse.\n3. Sema/API surface: register ratified functions/methods in CheckerCoreLib known-items, effect caps, target-profile availability, comptime impurity policy where relevant, and semantic-index/docs facts.\n4. Runtime/codegen: lower through TIR/prelude only; no codegen checks. Implement std-only filesystem ops first; platform-specific gaps become typed IOError variants or documented unsupported cases, never raw OS errors.\n5. Watch: implement debounced files.watch plus process/port watchers per ratified D-WATCH-SCOPE1. If a native OS watcher cannot be std-only on a platform, use the existing FFI-bridge dependency posture only after owner-approved dependency gate; otherwise ship a polling fallback only if the ballot allows it and report its fidelity in WatchEvent facts.\n6. Examples/goldens: publish_files.jet exercises create_dir_all, walk, stat, copy_dir, write_atomic, temp_dir cleanup; dev_runner_watch.jet exercises files/process/port watch without shell polling. Golden tests pin output; focused Rust tests cover edge cases.\n7. Docs: update docs/reference/core-library.md, docs/spec/spec.md effect table, syntax-decisions D-PATHFS1/D-FSOPS1/D-WATCH-SCOPE1 entries, and stdlib gap ledger (#310 if present).\n8. Verification: targeted tests for corelib/golden/dev/watch paths, then nix develop -c cargo build, hello.jet smoke, relevant examples, and final nix develop -c cargo test before closing.\n\nDevil-pass hardening:\n- Avoid two mechanisms: every string path entrypoint coerces to Path before audit/effects/codegen see it.\n- Avoid shell-shaped footguns: no blessed mkdir/cp/rm subprocess workaround remains in docs.\n- Avoid watch taxonomy sprawl: domain constructors return one shared event/watch abstraction.\n- Avoid silent platform drift: watch/stat/symlink fidelity is test-pinned or exposed as typed capability facts.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "terra-288-builder",
       "log": [
         {
           "at": "2026-07-09",
@@ -5003,9 +5003,29 @@
       "created": "2026-07-07T17:23:32.437Z",
       "updated": "2026-07-10",
       "workOrder": 25,
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Lexical Path normalization preserves excess leading parents, absolute roots, platform prefixes, and native separator semantics with Unix and Windows proof.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T23:08:47.437Z"
+        },
+        {
+          "n": 2,
+          "text": "write_atomic is collision-safe with RAII cleanup, file/parent durability, and atomic existing-target replacement on Unix and Windows.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T23:08:47.584Z"
+        }
+      ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [],
+      "claimedAt": "2026-07-10T23:08:47.732Z"
     },
     {
       "id": "c0n8old0",
@@ -24572,6 +24592,27 @@
   ],
   "events": [
     {
+      "at": "2026-07-10T23:08:47.732Z",
+      "by": "terra-288-builder",
+      "action": "card.claim",
+      "ref": "c0m9tjqj",
+      "note": ""
+    },
+    {
+      "at": "2026-07-10T23:08:47.584Z",
+      "by": "codex-main",
+      "action": "card.criteria-add",
+      "ref": "c0m9tjqj",
+      "note": "#2 write_atomic is collision-safe with RAII cleanup, file/paren"
+    },
+    {
+      "at": "2026-07-10T23:08:47.437Z",
+      "by": "codex-main",
+      "action": "card.criteria-add",
+      "ref": "c0m9tjqj",
+      "note": "#1 Lexical Path normalization preserves excess leading parents,"
+    },
+    {
       "at": "2026-07-10T23:08:19.959Z",
       "by": "codex-main",
       "action": "card.update",
@@ -28048,27 +28089,6 @@
       "by": "codex-orchestrator",
       "action": "card.update",
       "ref": "c0wx96s2",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.048Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0m9tjqj",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.048Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0qi7dc2",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-10T16:27:04.048Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c1cix784",
       "note": "workOrder"
     }
   ],
