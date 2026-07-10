@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 466,
-    "rev": 2602,
+    "rev": 2612,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -21946,12 +21946,17 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "building",
       "priority": "P1",
       "plan": "D-CI3=A ratified — full suite on every push, non-blocking flag, nightly deep lane. Steps:\n1. ci.yml: single lane running scripts/agent/verify-full.sh with JET_REQUIRE_RUSTC=1 (environment self-skips become failures) on every push; pushes flagged not blocked (per ratified text). Delete/fix the stale tools/Tower status step.\n2. Nightly lane: rotating-seed fuzz_sema N>=1000 + ungated-unsafe grep on fuzz programs + tools/perf/ci-perf-check.sh ratchet.\n3. release.yml added (versioning.md already references it — closes GAP-1 in tests/truthfulness.rs).\n4. Versioned scripts/githooks/ + core.hooksPath wired via flake shellHook; pre-push fast tier = doc-sync checks.\n5. NOTE: master currently red — 10 pre-existing failures tracked on #465 (canvas pattern-arm ×4, TUI reactive ×2, E9999/E1291 I4 debt, fuzz I2 violation, os_switch). First green CI run requires #465 fixed or those suites quarantined ON #465's terms; do not silently skip them here.\n6. Tests/verify: CI dry-run via act or a push to a scratch branch; confirm a seeded self-skip fails the run.\nExit: CI red iff verify-full.sh red; no silent self-skips; nightly lane live; fresh clone gets hooks from the dev shell.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "claude-446",
       "log": [
+        {
+          "at": "2026-07-10",
+          "by": "claude-446",
+          "text": "orchestrated build start"
+        },
         {
           "at": "2026-07-10",
           "by": "claude-main",
@@ -21960,7 +21965,8 @@
       ],
       "created": "2026-07-10T10:49:06.734Z",
       "updated": "2026-07-10",
-      "workOrder": 15
+      "workOrder": 15,
+      "claimedAt": "2026-07-10T12:33:21.249Z"
     },
     {
       "id": "c0w6wa07",
@@ -22025,12 +22031,17 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "building",
       "priority": "P1",
       "plan": "D-DEVTOOLS1=A ratified — everything under the existing hidden `jet devtools` namespace (pattern: devtools grammars). Steps:\n1. jet devtools reduce <file.jet> [--code EXXXX]: delta-debug minimizer; oracle = front-end accepts + rustc rejects (I2 repro) or diagnostic code match.\n2. jet devtools ice-report <file.jet>: bundle source + generated Rust + rustc stderr + jet/rustc versions into one attachable file.\n3. jet devtools new-example <topic>/<name> and new-ui <name>: scaffold example + expected/ pair, ui fixture + snapshot stub — matching golden/ui harness layout exactly.\n4. jet devtools check-fixture-paths: validate path-embedding fixtures against real files (the examples-move trap).\n5. jet devtools bless: wrapper over snapshot re-bless.\n6. All hidden from top-level jet help (same as grammars); registered in Source/CLI.rs COMMANDS.\n7. Tests per tool; reduce must demonstrably shrink a real ice_regressions case; verify skill gains one doc line per tool.\nExit: each tool tested + documented; reduce proven on a real ICE case; suite green.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "claude-450",
       "log": [
+        {
+          "at": "2026-07-10",
+          "by": "claude-450",
+          "text": "orchestrated build start (jet-impl agent)"
+        },
         {
           "at": "2026-07-10",
           "by": "claude-main",
@@ -22039,7 +22050,8 @@
       ],
       "created": "2026-07-10T10:49:07.060Z",
       "updated": "2026-07-10",
-      "workOrder": 16
+      "workOrder": 16,
+      "claimedAt": "2026-07-10T12:33:21.170Z"
     },
     {
       "id": "c01lj8gw",
@@ -22162,7 +22174,7 @@
       "priority": "P1",
       "plan": "1. store/cli: tower lint (rules above, --json), each rule its own function + test fixture. 2. --docs mode: scan docs/ballots + docs/plans for ratified decision ids (source: live store) and fail listing hits. 3. tower next --burndown: filter = (epoch e3 track epoch) + (track sidequest), agent lanes, workOrder order. 4. Tests per rule (clean fixture + seeded-violation fixture). 5. Doc lines in tower skill + AGENTS.md.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "claude-main",
       "log": [
         {
           "at": "2026-07-10",
@@ -22172,7 +22184,8 @@
       ],
       "created": "2026-07-10T10:49:07.613Z",
       "updated": "2026-07-10",
-      "workOrder": 14
+      "workOrder": 14,
+      "claimedAt": "2026-07-10T12:33:21.012Z"
     },
     {
       "id": "c0as0asq",
@@ -22250,7 +22263,7 @@
       "priority": "P1",
       "plan": "D-TWR-ARCHIVE1=B ratified (auto-retire split live/history) MODIFIED by owner comment: keep a walk-back buffer before anything retires, and done must be strictly tested (that half lands via #463/#458). Steps:\n1. store.mjs — .tower/history.json append-only ledger {decisions[], cards[], events[], each with retiredAt}. Written under the same cross-process lock; committed to git.\n2. Retire policy WITH BUFFER (owner comment): on every write, retire (a) decisions status=ratified whose ratifiedAt is older than config retireAfterDays (default 3) — inside the window they stay in tower.json, show in the UI 'recently decided' strip, and tower decision reopen works one-step; (b) cards phase=done older than the same buffer AND passing the #463 done-gate rules; their questions ride along; (c) events beyond the newest 500.\n3. Walk-back UX: Now view gets a collapsed 'Recently decided (N) — reversible for X days' strip listing buffered ratifications with one-tap Reopen. Reopen pulls it back to open and reverts the card advance.\n4. Merged reads: findCard/decision show/card show fall through to history transparently; tower archive restore <id> moves an item back to live (reopen for ratified decisions). Board Done counts read a per-epoch summary; full done lists lazy-load via GET /api/history?epoch=.\n5. CLI: tower archive status|show <id>|restore <id>. First write after upgrade migrates the existing 496 ratified decisions + 305 done cards (all outside any buffer) → tower.json ~0.5MB.\n6. Tests: buffer respected (nothing retires early), reopen-from-buffer, retire-after-buffer, merged reads, restore, migration on a live-shaped fixture, backups shrink.\n7. Docs: Tower README/AGENTS.md + tower-setup skill (retireAfterDays).\nExit: tower.json ≤ ~0.6MB after migration; every retired item still reachable by id; a ratification can be walked back within the buffer from phone UI; suite green.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "claude-main",
       "log": [
         {
           "at": "2026-07-10",
@@ -22265,7 +22278,8 @@
       ],
       "created": "2026-07-10T10:50:10.450Z",
       "updated": "2026-07-10",
-      "workOrder": 12
+      "workOrder": 12,
+      "claimedAt": "2026-07-10T12:33:20.853Z"
     },
     {
       "id": "c077a4nu",
@@ -22280,7 +22294,7 @@
       "priority": "P2",
       "plan": "D-TWR-BRIEF1=A ratified — one-shot work packet. Consolidates the brief half of #457 (that card narrows to lint; this card owns brief). Steps:\n1. CLI: tower brief [#N] [--agent me] [--json] [--no-claim]. No ref → pick via nextCards (workOrder order); claims for --agent unless --no-claim; already-claimed → error naming holder.\n2. Packet contents (nothing an agent must fetch elsewhere): card num/title/body/plan/phase/priority/workOrder; blockedBy with live blocker state; epoch + milestone (goal, criteria); card criteria[] state once #463 lands; every linked decision VERBATIM from live store — status, outcome, and the owner's ratification comment in full (kills the paraphrase-stale-ballot failure); open questions; refs[] — new optional card field of doc paths, plus paths auto-harvested from body/plan; 5-line rules footer (--by required, phase honesty, verify≠builder, expect-rev, handoff on release).\n3. HTTP GET /api/brief?card=&agent= returning the same JSON.\n4. Human render ≤ one screen; --json stable schema (documented in AGENTS.md API table).\n5. Tests: packet completeness incl. ratification comment (regression), claim/--no-claim/claimed-by-other, refs harvest, json schema snapshot.\n6. Docs/skills: tower skill session loop step 2 becomes 'tower brief'; Tower/AGENTS.md; sub-agent brief pattern = literally `tower brief '#N' --agent <me>`.\nExit (from #457, kept): brief output is sufficient to work a real card with no other reads — validated by running one card end-to-end from the packet alone; suite green.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "claude-main",
       "log": [
         {
           "at": "2026-07-10",
@@ -22295,7 +22309,8 @@
       ],
       "created": "2026-07-10T10:50:10.606Z",
       "updated": "2026-07-10",
-      "workOrder": 13
+      "workOrder": 13,
+      "claimedAt": "2026-07-10T12:33:20.930Z"
     },
     {
       "id": "c09rh9pt",
@@ -22306,12 +22321,17 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "building",
       "priority": "P1",
       "plan": "D-TWR-CRIT1=C ratified — criteria list enforced everywhere + acceptance ballots on flagged cards. Steps:\n1. store.mjs — card.criteria[]: {n, text, status open|met|verified, metBy, verifiedBy, evidence, at}. addCard/updateCard accept criteria; new mutations addCriterion/meetCriterion/verifyCriterion. Validation: verify rejected when verifiedBy === metBy or === assignee at meet time (E_CRITERIA_SELF).\n2. Done-gate (agent-hard, owner-soft per D-TWRGUARD1=C): updateCard to phase done with --by ≠ owner rejected (E_CRITERIA) while any criterion unverified — only for cards that HAVE criteria (legacy cards unaffected). Owner writes bypass.\n3. card.needsAcceptance flag (set at greenlight or any time by owner). On agent done-attempt with all criteria verified: auto-mint decision D-ACCEPT-<num> (options accept/bounce, body = per-criterion evidence summary), card stays verify; done only when owner ratifies accept; bounce comment reopens to building + log.\n4. CLI: tower card criteria '#N' --add \"…\" | --meet n --evidence \"…\" --by X | --verify n --evidence \"…\" --by Y. tower brief (#462) includes criteria state.\n5. UI: checklist w/ per-item state + evidence in card modal; acceptance ballots render in Now focus mode like any decision.\n6. Tests (Tower/test): gate refusal, verifier≠builder, owner bypass, flag→mint→accept, flag→mint→bounce-reopen, legacy cards unaffected.\n7. Docs: Tower/AGENTS.md, README, tower + tower-ballot skills.\nExit: all listed tests green; #458 gates can consume criteria[]; a flagged card demonstrably cannot reach done without an owner accept.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "claude-main",
       "log": [
+        {
+          "at": "2026-07-10",
+          "by": "claude-main",
+          "text": "orchestrated build start — Tower chain 1/6"
+        },
         {
           "at": "2026-07-10",
           "by": "claude-main",
@@ -22325,7 +22345,8 @@
       ],
       "created": "2026-07-10T10:50:10.760Z",
       "updated": "2026-07-10",
-      "workOrder": 10
+      "workOrder": 10,
+      "claimedAt": "2026-07-10T12:33:20.773Z"
     },
     {
       "id": "c0ceo8wd",
@@ -22340,7 +22361,7 @@
       "priority": "P2",
       "plan": "D-TWR-BOARD1=A ratified with comment: ADD a NEW page prototyping a hybrid of A (roadmap ledger) & B (ops table); DO NOT replace or change the current Board. Steps:\n1. New third tab 'Radar' (Now · Board · Radar; keyboard 3, ⌘K entry). Board view code untouched — zero diffs to viewBoard.\n2. Radar layout per epoch (active epochs only, current first): header row = name + progress bar + 30-day burndown sparkline (computed from events: card.update transitions to done, bucketed per day) + active/done counts; milestone bars with met/total and a stall badge when no progress event for 5+ days.\n3. Under each epoch header: the B half — dense sortable table of that epoch's ACTIVE cards (num, title, lane, priority, order, assignee, updated-age). Column-header sort; type-to-filter box; inline edits for lane-safe fields (priority, workOrder, assignee) via existing card/update API; row click opens the normal card modal.\n4. Done/frozen never render on Radar; per-epoch 'ledger' link shows done list (from tower.json now; switches to GET /api/history when #461 lands — soft dependency, not blocking).\n5. Server: burndown series computed in project() (store-side helper + unit test) so the client stays dumb.\n6. Tests: burndown/stall helper unit tests in Tower/test; existing suite green.\n7. Acceptance (owner comment = this is a prototype he wants to SEE): card flagged for owner acceptance — demo on his phone + desktop, he compares against untouched Board, then decides keep/iterate/drop via the acceptance ballot. Frontend acceptance = feature-by-feature vs this plan in his real browser, not pty tests.\nExit: Radar renders live board data with burndown + table hybrid; Board byte-identical in behavior; owner acceptance ballot answered.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "claude-main",
       "log": [
         {
           "at": "2026-07-10",
@@ -22355,7 +22376,8 @@
       ],
       "created": "2026-07-10T10:50:10.920Z",
       "updated": "2026-07-10",
-      "workOrder": 17
+      "workOrder": 17,
+      "claimedAt": "2026-07-10T12:33:21.093Z"
     },
     {
       "id": "c02kdm7a",
@@ -48862,6 +48884,76 @@
   ],
   "events": [
     {
+      "at": "2026-07-10T12:33:21.484Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c09rh9pt",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-10T12:33:21.406Z",
+      "by": "claude-446",
+      "action": "card.update",
+      "ref": "c0uvxow5",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-10T12:33:21.325Z",
+      "by": "claude-450",
+      "action": "card.update",
+      "ref": "c009yxqf",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-10T12:33:21.249Z",
+      "by": "claude-446",
+      "action": "card.claim",
+      "ref": "c0uvxow5",
+      "note": ""
+    },
+    {
+      "at": "2026-07-10T12:33:21.170Z",
+      "by": "claude-450",
+      "action": "card.claim",
+      "ref": "c009yxqf",
+      "note": ""
+    },
+    {
+      "at": "2026-07-10T12:33:21.093Z",
+      "by": "claude-main",
+      "action": "card.claim",
+      "ref": "c0ceo8wd",
+      "note": ""
+    },
+    {
+      "at": "2026-07-10T12:33:21.012Z",
+      "by": "claude-main",
+      "action": "card.claim",
+      "ref": "c09ffy3w",
+      "note": ""
+    },
+    {
+      "at": "2026-07-10T12:33:20.930Z",
+      "by": "claude-main",
+      "action": "card.claim",
+      "ref": "c077a4nu",
+      "note": ""
+    },
+    {
+      "at": "2026-07-10T12:33:20.853Z",
+      "by": "claude-main",
+      "action": "card.claim",
+      "ref": "c04mnkv0",
+      "note": ""
+    },
+    {
+      "at": "2026-07-10T12:33:20.774Z",
+      "by": "claude-main",
+      "action": "card.claim",
+      "ref": "c09rh9pt",
+      "note": ""
+    },
+    {
       "at": "2026-07-10T12:29:54.966Z",
       "by": "codex-orchestrator",
       "action": "card.update",
@@ -62790,76 +62882,6 @@
       "action": "decision.ratify",
       "ref": "D-FLAGSHIP2",
       "note": "A"
-    },
-    {
-      "at": "2026-07-07T00:10:31.133Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-FLAGSHIP1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-07T00:10:19.826Z",
-      "by": "owner",
-      "action": "card.add",
-      "ref": "c1dltjf5p",
-      "note": "New card"
-    },
-    {
-      "at": "2026-07-07T00:10:13.010Z",
-      "by": "owner",
-      "action": "decision.reopen",
-      "ref": "D-FLAGSHIP1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-07T00:10:11.156Z",
-      "by": "owner",
-      "action": "decision.reopen",
-      "ref": "D-FLAGSHIP2",
-      "note": ""
-    },
-    {
-      "at": "2026-07-07T00:10:09.216Z",
-      "by": "owner",
-      "action": "decision.reopen",
-      "ref": "D-FLAGSHIP3",
-      "note": ""
-    },
-    {
-      "at": "2026-07-07T00:10:08.065Z",
-      "by": "owner",
-      "action": "decision.reopen",
-      "ref": "D-FLAGSHIP4",
-      "note": ""
-    },
-    {
-      "at": "2026-07-07T00:10:07.134Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-FLAGSHIP4",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-07T00:10:05.997Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-FLAGSHIP4",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-07T00:09:54.955Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c123",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-07T00:09:46.931Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c123",
-      "note": "epoch"
     }
   ],
   "nextNum": 368,
