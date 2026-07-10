@@ -266,6 +266,51 @@ fn snapshot_codes() -> BTreeSet<String> {
     out
 }
 
+/// Diagnostic codes exercised by runtime diagnostic fixtures embedded in Rust
+/// tests. These are not `.jet` front-end snapshots: ModuleEval is reached via
+/// `env.jet`/`system.jet` evaluation and its tests call the production
+/// evaluator, then pin the returned code (and, for representative cases, the
+/// complete rendered diagnostic). Keep this parser deliberately narrow so an
+/// unrelated source mention cannot masquerade as coverage.
+fn runtime_fixture_codes() -> BTreeSet<String> {
+    let source = read(&root().join("crates/jetpack/src/ModuleEval/mod.rs"));
+    let mut out = BTreeSet::new();
+    for line in source.lines() {
+        let trimmed = line.trim();
+        let Some(tail) = trimmed
+            .strip_prefix("assert_eq!(err.code, \"")
+            .or_else(|| trimmed.strip_prefix("assert_eq!(diag.code, \""))
+        else {
+            continue;
+        };
+        let Some((code, suffix)) = tail.split_once('"') else {
+            continue;
+        };
+        if suffix.starts_with(");")
+            && code.len() == 5
+            && code.starts_with(['E', 'L'])
+            && code[1..].chars().all(|c| c.is_ascii_digit())
+        {
+            out.insert(code.to_string());
+        }
+    }
+    // REPL transcript tests execute the production interpreter. Count only
+    // explicit assertions for a fully rendered diagnostic header.
+    let repl = read(&root().join("tests/repl.rs"));
+    for code in extract_snapshot_codes(&repl) {
+        if repl.contains(&format!("contains(\"Error [{code}]:\")")) {
+            out.insert(code);
+        }
+    }
+    let cli = read(&root().join("tests/cli.rs"));
+    for code in extract_snapshot_codes(&cli) {
+        if cli.contains(&format!("contains(\"Error [{code}]:\")")) {
+            out.insert(code);
+        }
+    }
+    out
+}
+
 fn rendered_snapshot_texts() -> Vec<(PathBuf, String)> {
     let mut out = Vec::new();
     for dir in [
@@ -394,20 +439,11 @@ const UNTESTABLE_VIA_SNAPSHOT: &[&str] = &[
 /// The test still PASSES with these codes listed here, but a separate test
 /// (`acknowledged_coverage_gaps_are_expected`) verifies the list doesn't GROW silently.
 const ACKNOWLEDGED_COVERAGE_GAPS: &[&str] = &[
-    // Jetpack ModuleEval diagnostics (E0966–E0978):
-    // These fire only from `jet::Jetpack::ModuleEval::evaluate_env` / `evaluate_modules`,
-    // not from `jet check`/`jet build`/`jet run`. No unit tests exist for ModuleEval yet.
-    // TODO: add tests/module_eval.rs using jet::Jetpack::ModuleEval::evaluate_source().
-    "E0966", "E0967", "E0968", "E0969", "E0970", "E0971", "E0972", "E0973", "E0974", "E0975",
-    "E0976", "E0977", "E0978",
     // Environment-specific: require git-not-installed or a specific store condition.
     // These are integration-test scenarios that need CI matrix variations.
     "E1203", // git not installed (requires git to be absent from PATH)
     // Feature-staged: registered and spec'd, but the feature isn't wired up yet.
     "E1207", // registry dep not supported (registry resolver not yet implemented)
-    // REPL codes: tested in tests/repl.rs (E1802 is there; E1801 is not yet tested).
-    // TODO: add a repl test that hits the fuel cap.
-    "E1801",
     // E0916 is reserved for Debug auto-derive limits and documented as
     // "defined, not yet emitted"; the helper lives in Generics.rs before the
     // feature path is wired. Remove this once auto-derived Debug can actually
@@ -415,19 +451,10 @@ const ACKNOWLEDGED_COVERAGE_GAPS: &[&str] = &[
     "E0916",
     // E2202 (dev interpreter step budget) is covered by tests/dev.rs
     // (`infinite_loop_hits_e2202_fuel_stop` + the c77 battery boundary set).
-    // Cross-compilation: E3302 requires a target not in the test environment.
-    "E3302",
-    // Package build I/O: E3402 requires a sandboxed package build environment.
-    "E3402",
     // Doctor advisory: L2101 is in tests/cli/doctor_ok.txt but not in [L2101] format.
     // The doctor output renders it as "L2101: ..." not as "[L2101]".
     // TODO: update doctor output format to use [L2101] brackets, or add assertion in cli.rs.
     "L2101",
-    // `jet bind` header translation failure: E3208 requires a broken C header file passed
-    // to `jet bind`, which in turn requires bindgen/libclang available. Integration test
-    // needs a CI matrix with libclang installed. The eprintln! emission site is in CmdDevTools.rs.
-    // TODO: add tests/devtools.rs test with a bad header.
-    "E3208",
     // E0153: protocol expansion parse failure — internal compiler error path only
     // (D-PROTO1); no user-writable fixture triggers a failed fragment re-parse.
     "E0153",
@@ -658,6 +685,7 @@ fn diagnostics_registry_has_no_duplicate_code_rows() {
 fn every_emitted_code_has_snapshot() {
     let emitted = emitted_codes();
     let snaps = snapshot_codes();
+    let runtime = runtime_fixture_codes();
     let exclusions = all_exclusions();
     let diag_md = read(&root().join("docs/spec/diagnostics.md"));
     let acknowledged: BTreeSet<String> = ACKNOWLEDGED_COVERAGE_GAPS
@@ -670,6 +698,7 @@ fn every_emitted_code_has_snapshot() {
         .filter(|c| !exclusions.contains(*c))
         .filter(|c| !acknowledged.contains(*c))
         .filter(|c| !snaps.contains(*c))
+        .filter(|c| !runtime.contains(*c))
         .filter(|c| !is_retired(c, &diag_md))
         .cloned()
         .collect();
@@ -694,12 +723,16 @@ fn every_emitted_code_has_snapshot() {
 #[test]
 fn acknowledged_gaps_are_still_unresolved() {
     let snaps = snapshot_codes();
+    let runtime = runtime_fixture_codes();
     let diag_md = read(&root().join("docs/spec/diagnostics.md"));
 
     // Codes in the acknowledged list that now have snapshot coverage — time to remove them.
     let mut now_covered: Vec<String> = ACKNOWLEDGED_COVERAGE_GAPS
         .iter()
-        .filter(|c| snaps.contains(&c.to_string()) && !is_retired(c, &diag_md))
+        .filter(|c| {
+            (snaps.contains(&c.to_string()) || runtime.contains(&c.to_string()))
+                && !is_retired(c, &diag_md)
+        })
         .map(|s| s.to_string())
         .collect();
     now_covered.sort();

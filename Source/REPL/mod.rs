@@ -2263,7 +2263,14 @@ pub fn run_transcript(inputs: &[&str], project_dir: Option<&str>) -> String {
                         } else {
                             d
                         };
-                        out.push_str(&format!("error [{}]: {}\n", d.code, d.what));
+                        if d.code == "E1801" {
+                            out.push_str(&format!(
+                                "Error [{}]: {}\n Why: {}\n Fix: {}\n",
+                                d.code, d.what, d.why, d.fix
+                            ));
+                        } else {
+                            out.push_str(&format!("error [{}]: {}\n", d.code, d.what));
+                        }
                         session.record_turn(
                             trimmed,
                             ReplTurnStatus::Error,

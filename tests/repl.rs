@@ -479,6 +479,14 @@ fn repl_use_repl_incompatible_module_hard_rejected() {
 }
 
 #[test]
+fn repl_infinite_loop_hits_e1801_fuel_cap() {
+    let out = run_transcript(&["loop { }"], None);
+    assert!(out.contains("Error [E1801]:"), "missing REPL fuel diagnostic:\n{out}");
+    assert!(out.contains("Why:"), "missing E1801 reason:\n{out}");
+    assert!(out.contains("Fix:"), "missing E1801 fix:\n{out}");
+}
+
+#[test]
 fn repl_use_core_fs_import_accepted() {
     let out = run_transcript(&["use core.files as fs"], None);
     assert!(

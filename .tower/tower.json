@@ -3,8 +3,8 @@
     "version": 4,
     "project": "Jet",
     "currentEpoch": "e3",
-    "nextNum": 468,
-    "rev": 2935,
+    "nextNum": 469,
+    "rev": 2981,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -27,7 +27,7 @@
         "radar:e7"
       ]
     },
-    "digestCursor": "2026-07-10T19:07:30.188Z"
+    "digestCursor": "2026-07-10T20:44:53.204Z"
   },
   "epochs": [
     {
@@ -5163,10 +5163,15 @@
       "milestoneId": "e3-universal-product-parity",
       "phase": "ready",
       "priority": "P1",
-      "plan": "Plan built 2026-07-07 by codex-main.\n\nFocus: corelib audit: core.env + system facts — os info, signals, process identity\n\nCurrent law: Existing linked decisions: D-OSFACTS1=ratified/A. D-CORENS1 keeps all first-party modules under core.*; I6 forbids compiler deps; D-STDRUBRIC1 requires mechanical core API laws.\n\nBuild order: Audit current Core/API/prelude/docs/tests first; write failing UI/golden/unit fixtures; implement std-only or approved bridge code; update docs/reference and syntax-decisions when law changes; run targeted tests, then full nix develop -c cargo test before close.\n\nAcceptance: Examples/goldens or UI snapshots prove each shipped behavior; stdlib map records shipped/carded/declined rows; no rustc/user-hostile errors; no compiler external deps.\n\nDependencies/collisions: Respect neighboring core cards: io/args/process separate; text before regex; net/url before http; encoding before data/db; random never owns secrets.\n\nOwner gates: No open owner gate after existing ratification; raise a follow-up only if implementation needs new syntax/deps.",
+      "plan": "No owner gate: D-OSFACTS1=A fixes core.os.on_interrupt. Failing tests first. Replace one-thread-per-registration and non-Windows no-op with one process-lifetime dispatcher: additive ordered handlers, platform callback only increments an atomic counter, dispatcher drains events and invokes all handlers outside locks; registration acknowledged before return and one handler panic cannot kill later handlers. Unix keeps vetted signal FFI; Windows uses SetConsoleCtrlHandler for CTRL_C_EVENT under a vetted generated-runtime boundary. Unsupported targets fail honestly, never silently discard. Generated interrupt machinery strips entirely when unused. Add structural emission/stripping tests, real multi-handler lifecycle proof, native Windows console proof in CI, and process-lifetime docs. No external deps. Parent full suite.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-10",
+          "by": "codex-orchestrator",
+          "text": "Sol plan complete. Found second live bug: Unix multiple registrations compete and lose handlers. Cross-platform/lifecycle fix is ungated under D-OSFACTS1=A. Serialized until current #343 main-tree build checkpoints."
+        },
         {
           "at": "2026-07-09",
           "by": "codex-main",
@@ -5196,7 +5201,62 @@
       "created": "2026-07-07T17:23:32.693Z",
       "updated": "2026-07-10",
       "workOrder": 24,
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Windows console Ctrl-C invokes every registered core.os.on_interrupt handler through a real SetConsoleCtrlHandler runtime proof.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T20:44:20.460Z"
+        },
+        {
+          "n": 2,
+          "text": "Two or more registrations run additively in registration order for every observed interrupt; no event is stolen or handler lost, and registration is live when on_interrupt returns.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T20:44:20.614Z"
+        },
+        {
+          "n": 3,
+          "text": "OS callbacks perform only async-safe atomic notification; handler execution occurs on the dispatcher and one panicking handler cannot kill later handlers.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T20:44:20.761Z"
+        },
+        {
+          "n": 4,
+          "text": "Unsupported targets fail honestly; process-lifetime registration semantics are documented; data-only core.os facts remain portable.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T20:44:20.917Z"
+        },
+        {
+          "n": 5,
+          "text": "Programs not calling on_interrupt contain no interrupt FFI or unsafe runtime machinery; compiler dependencies remain unchanged.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T20:44:21.073Z"
+        },
+        {
+          "n": 6,
+          "text": "Focused jet-codegen, corelib lifecycle/stripping, native Windows, docs, example, golden, and diff checks pass.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T20:44:21.228Z"
+        }
+      ],
       "needsAcceptance": false,
       "refs": []
     },
@@ -7174,14 +7234,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-universal-product-parity",
-      "phase": "ready",
+      "phase": "building",
       "priority": "P1",
       "plan": "Plan built 2026-07-07 by codex-main.\n\nFocus: Language audit: add diagnostic voice and runtime-error ratchets\n\nCurrent law: Diagnostics contract: every user error has code/what/why/fix, no rustc/parser jargon.\n\nBuild order: Add targeted diagnostic voice/runtime-error ratchets over snapshots/constructors/prelude errors; convert HTTP duplicate route panic into Jet-owned diagnostic or fallible API.\n\nAcceptance: Tests fail on retired terminology/user-hostile copy; runtime user errors no longer panic raw Rust; snapshots updated intentionally.\n\nDependencies/collisions: Can follow #339 for terminology inventory.\n\nOwner gates: No gate now; diagnostic codes/text remain agent-owned if they obey docs/spec/diagnostics.md.",
-      "blockedBy": [
-        "c09h9vd4"
-      ],
-      "assignee": null,
+      "blockedBy": [],
+      "assignee": "luna-343-builder",
       "log": [
+        {
+          "at": "2026-07-10",
+          "by": "codex-orchestrator",
+          "text": "Archived blocker #339 is done; cleared stale blockedBy ref. Existing voice/runtime ratchets and E2804 behavior still present. Reconciliation builder closing reachable diagnostic allowlist debt with real snapshots, not exemptions."
+        },
         {
           "at": "2026-07-09",
           "by": "codex-main",
@@ -7211,9 +7274,47 @@
       "created": "2026-07-07T18:48:38.303Z",
       "updated": "2026-07-10",
       "workOrder": 8,
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "User-facing diagnostic snapshots and constructors reject retired terminology, raw backend/runtime voice, and implementation leakage without false-positive scanning internal comments or foreign formats.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T20:41:31.877Z"
+        },
+        {
+          "n": 2,
+          "text": "Every currently reachable emitted diagnostic code has a real UI, REPL, CLI, or runtime snapshot; any remaining coverage exclusion names a genuinely gated unreachable path and its activation gate.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T20:41:32.028Z"
+        },
+        {
+          "n": 3,
+          "text": "Duplicate HTTP routes fail through Jet-owned E2804 runtime reporting with source location; no raw panic E-code path exists in generated preludes.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T20:41:32.185Z"
+        },
+        {
+          "n": 4,
+          "text": "Focused diagnostics_coverage, diagnostic_snapshots, relevant module/REPL/CLI suites, exact E2804 TIR regression, and diff checks pass.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T20:41:32.347Z"
+        }
+      ],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [],
+      "claimedAt": "2026-07-10T20:41:12.567Z"
     },
     {
       "id": "c00uhxes",
@@ -9595,12 +9696,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-universal-product-parity",
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P0",
-      "plan": null,
+      "plan": "No owner gate: D-BIGINT1=A already fixes syntax/semantics. Failing tests first: add exact REPL BigInt constructor/operator/to_string transcripts and AOT-vs-interpreter differential coverage. Add a canonical machine-checked AOT surface inventory consumed by sema/interpreter classification; every direct builtin, static/value method, and Core call must be Supported or a named effect/native boundary, with zero unclassified pure operations. Implement a std-only foundation BigInt value (base-1e9 limbs) in CtValue and wire comptime arithmetic, comparison, display, REPL binding/render paths. Audit every inventory mismatch, not only BigInt; fix all effect-free gaps with transcript proof. E0956 remains only for genuinely impossible comptime constructs. Resolve the existing JIT bigint gap honestly before claiming R12. Focused foundation/comptime/codegen, repl, parity, dev differential, golden and UI tests; parent full suite. Collision: serialize against active #358 REPL and #125 JIT work.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-10",
+          "by": "codex-orchestrator",
+          "text": "Sol plan complete. No owner gate. Scope includes BigInt, generated AOT/interpreter inventory, every pure mismatch, and existing JIT gap; implementation serialized behind active REPL/JIT owners."
+        },
         {
           "at": "2026-07-10",
           "by": "owner",
@@ -9615,7 +9721,62 @@
       "created": "2026-07-09T18:04:14.604Z",
       "updated": "2026-07-10",
       "workOrder": 22,
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "REPL exact transcripts pass BigInt construction from Int and huge signed String plus add, subtract, multiply, negate, equality, inequality, and to_string with no E0956.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T20:30:07.572Z"
+        },
+        {
+          "n": 2,
+          "text": "The existing BigInt feature example produces byte-identical stdout through AOT and interpreter/dev execution.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T20:30:07.729Z"
+        },
+        {
+          "n": 3,
+          "text": "A canonical machine-checked inventory classifies 100 percent of AOT direct builtins, static methods, value methods, and Core calls, with zero unclassified effect-free entries.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T20:30:07.881Z"
+        },
+        {
+          "n": 4,
+          "text": "Every effect-free parity gap found by the inventory is implemented and has a named REPL transcript regression; effects use named boundaries rather than E0956.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T20:30:08.034Z"
+        },
+        {
+          "n": 5,
+          "text": "BigInt is supported by the JIT tier and removed from the committed JIT gap list, preserving the card R12 claim.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T20:30:08.187Z"
+        },
+        {
+          "n": 6,
+          "text": "No external compiler/comptime dependencies are added and focused foundation, comptime, codegen, REPL, parity, dev, golden, UI, and truthfulness tests pass.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T20:30:08.337Z"
+        }
+      ],
       "needsAcceptance": false,
       "refs": []
     },
@@ -12492,8 +12653,18 @@
       "priority": "P1",
       "plan": "No owner gate. Preserve D-CI3: every rustc availability guard in the eight named suites routes through tests/common::have_rustc, while actual rustc compilation commands remain direct. Add mod common where absent and a regression ratchet preventing direct availability probes from returning. Widen the versioned pre-push hook to run capability-ledger plus truthfulness, decisions, and diagnostics_coverage through the Nix shell; keep docs/plans/agent-durability.md accurate. Verify focused suite targets, hook behavior, and missing-rustc loud failure. Main tree collision: tests/archive.rs has a separate active #465 hunk; build isolated and merge only after review.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "terra-466-builder",
       "log": [
+        {
+          "at": "2026-07-10",
+          "by": "codex-orchestrator",
+          "text": "Reviewed implementation committed as a16429ed. Criteria 1-3 independently pass. Criterion 4 and card close await global truthfulness/full-suite recovery on active #465: only failure is unrelated claim.examples-spec capability-ledger digest drift."
+        },
+        {
+          "at": "2026-07-10",
+          "by": "codex-orchestrator",
+          "text": "Terra implementation complete: 26 probes migrated, regression ratchet added, pre-push widened, docs aligned. Focused ratchet/decisions/diagnostics and 8-suite compile pass. Criterion 4 held open: full truthfulness hits unrelated claim.examples-spec capability-ledger digest drift. Sol review running."
+        },
         {
           "at": "2026-07-10",
           "by": "codex-orchestrator",
@@ -12524,29 +12695,29 @@
         {
           "n": 1,
           "text": "With JET_REQUIRE_RUSTC=1, every rustc-dependent path in the eight named suites fails loudly when rustc is absent instead of silently skipping.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-10T20:20:30.675Z"
+          "status": "verified",
+          "metBy": "terra-466-builder",
+          "verifiedBy": "sol-466-review",
+          "evidence": "Sol verified all 8 suites route rustc-dependent guards through helper; archive/regex ordering prevents cargo short-circuit; forced missing-rustc exits loudly.",
+          "at": "2026-07-10T20:39:50.084Z"
         },
         {
           "n": 2,
           "text": "A repository ratchet rejects direct rustc availability probes in those suites while allowing actual rustc compilation commands.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-10T20:20:30.834Z"
+          "status": "verified",
+          "metBy": "terra-466-builder",
+          "verifiedBy": "sol-466-review",
+          "evidence": "Sol verified ratchet rejects direct probes and compound guard misordering while allowing genuine rustc compilation commands; focused ratchet passes.",
+          "at": "2026-07-10T20:39:50.245Z"
         },
         {
           "n": 3,
           "text": "The versioned pre-push hook runs the capability ledger plus truthfulness, decisions, and diagnostics_coverage checks, and propagates any failure.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-10T20:20:30.983Z"
+          "status": "verified",
+          "metBy": "terra-466-builder",
+          "verifiedBy": "sol-466-review",
+          "evidence": "Sol mocked hook execution: all four Nix gates run in order; injected exit 17 propagates and stops later gates; docs match.",
+          "at": "2026-07-10T20:39:50.389Z"
         },
         {
           "n": 4,
@@ -12566,7 +12737,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-10T15:43:20.062Z",
-      "updated": "2026-07-10"
+      "updated": "2026-07-10",
+      "claimedAt": "2026-07-10T20:31:21.700Z"
     },
     {
       "id": "c0t4root",
@@ -12574,6 +12746,84 @@
       "title": "jetpack: leases with executables unusable on macOS/Windows — create_exec_wrappers returns Err on non-Linux",
       "body": "Found during #465 burndown (jetpack-jail cluster). crates/jetpack/src/Store.rs:931-939: the #[cfg(not(target_os = \"linux\"))] create_exec_wrappers unconditionally returns Err whenever a lease contains executables, so snapshot_lease — mandatory for every consumer since #418 — fails at runtime on macOS/Windows for any package with a bin/. Distinct from the platform-lane COMPILE failures already tracked on #465 (deny(warnings) unused imports + E0277 in Store.rs:605): this is a runtime gap that survives the compile fix. Needs a real non-Linux exec-wrapper strategy (or explicitly documented platform contract), plus platform-lane test coverage. Also note tests/jetpack.rs parent_env_unchanged_after_run now asserts the Linux /proc/self/fd wrapper head — gate or branch that assertion when non-Linux wrappers land.",
       "kind": "bug",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "Ungated first: fix non-Linux empty/data-only leases to return no wrappers instead of unconditional error. Executable behavior is gated by D-JPK-EXECLEASE1. After owner outcome, implement the selected cross-platform contract behind one ExecWrapperStrategy: A protected native lease service with caller impersonation and protected PATH; B explicit weaker same-user race guarantee with loud audit warning; or C fail-closed non-Linux executable leases and narrowed tier-1 law. Preserve Linux mount backend. Add direct and nested-PATH hostile swap proofs, platform-specific runtime CI, exact Jet diagnostic/snapshot, and current-law docs. Serialize Store.rs/tests/jetpack.rs against #465.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-10",
+          "by": "codex-orchestrator",
+          "text": "Sol plan and ballot independently reviewed. Empty/data-only non-Linux bug is ungated. Executable guarantee has no design satisfying hostile-race safety, tier-1 macOS/Windows, and no-root/no-daemon simultaneously; owner choice required."
+        },
+        {
+          "at": "2026-07-10",
+          "by": "owner",
+          "text": "Activated into sidequest track"
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Data-only and empty-output leases succeed on Linux, macOS, and Windows; missing-output and integrity failure semantics remain fail-closed.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T20:38:18.676Z"
+        },
+        {
+          "n": 2,
+          "text": "Direct jetpack run and nested PATH execution through jet env obey the ratified platform guarantee under original-output rename, symlink, content, and directory swap attacks.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T20:38:18.828Z"
+        },
+        {
+          "n": 3,
+          "text": "The selected backend cannot leak service authority or mutable original package paths to children; capability absence and detected drift use registered Jet diagnostics with snapshots.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T20:38:18.982Z"
+        },
+        {
+          "n": 4,
+          "text": "Native Ubuntu, macOS, and Windows CI execute the runtime lease proof; static platform audit remains green.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T20:38:19.129Z"
+        },
+        {
+          "n": 5,
+          "text": "Syntax decisions, package-manager security contract, installer or platform law, and expert audit output docs exactly match the ratified outcome.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T20:38:19.279Z"
+        }
+      ],
+      "refs": [],
+      "needsAcceptance": false,
+      "created": "2026-07-10T18:57:34.825Z",
+      "updated": "2026-07-10"
+    },
+    {
+      "id": "c0vntq8c",
+      "num": 468,
+      "title": "jet CLI: shrink top-level verb surface — namespace the long tail",
+      "body": "jet's own top-level verb count (excluding the ~14 verbs that pure-forward to the jetpack engine via EngineDispatch) is ~45: help, doctor, completions, devtools, man, version, upgrade, explain, fmt, fetch, update, toolchain, init, lock, gc, publish, keygen, key backup, yank, vendor, schema, semindex, dossier, impact, graph/query/explain-build, codemod, expand, audit, sbom, bind, repl, dev, serve, debug, store verify/rollback/generations, eval, run, build, test, check, fix, new, emit, bench, lint, add, remove. Registry/signing ops (publish, keygen, key, yank, vendor — Source/CmdSupply.rs) and introspection ops (semindex, dossier, impact, graph, query, codemod, expand, audit, sbom) live directly in the Source/ root crate, not crates/jetpack — a verb-ownership question #367/D-PRODUCT-SPLIT1 (binary/crate ownership) did not address. jet ? (D-FE-HELP1, card #360) solves DISCOVERY of this surface with a palette; it does not address whether the surface itself should be narrower/grouped, matching the git porcelain/plumbing lesson (git ships ~30+ subcommands but only ~17 are used daily) and the uv/bun-era trend toward one lean unified CLI. This is a distinct owner-facing IA decision, separate from #360's UI archetype and #367's binary-ownership split.",
+      "kind": "task",
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
@@ -12592,7 +12842,7 @@
       "criteria": [],
       "refs": [],
       "needsAcceptance": false,
-      "created": "2026-07-10T18:57:34.825Z",
+      "created": "2026-07-10T20:44:32.133Z",
       "updated": "2026-07-10"
     }
   ],
@@ -21820,6 +22070,60 @@
       "created": "2026-07-10T19:06:06.978Z",
       "outcome": "B",
       "ratifiedAt": "2026-07-10"
+    },
+    {
+      "id": "D-JPK-EXECLEASE1",
+      "cardId": "c0t4root",
+      "group": "safety",
+      "title": "Cross-platform executable lease security",
+      "gist": "Which existing promise changes so executable packages can work safely on macOS and Windows.",
+      "explainer": "Jetpack verifies a package, copies its output into a lease snapshot, and must keep every executable name bound to those verified bytes while a child and its descendants run. Linux does this with a private read-only mount. An unprivileged macOS process has no equivalent immutable named PATH view; Windows file handles can block replacement of files but do not alone protect every descendant name lookup. Today the non-Linux backend returns an error for every lease, even data-only outputs; that empty-output bug is ungated and will be fixed. Executable outputs expose a real conflict among three ratified promises: hostile same-user swaps fail before handoff, Linux/macOS/Windows are tier-1 native, and Jetpack uses no root or daemon. No known design keeps all three. The owner must choose which promise changes.",
+      "story": "Mira uses one committed lockfile on Linux, macOS, and Windows. She runs a formatter directly and through jet env. Another same-user process swaps the original package path after verification. Jetpack must execute the verified bytes or refuse; it must never follow the replacement. Beginners need one ceremony-free workflow, while experts need exact audit proof of the native protection used.",
+      "inWild": "$ jetpack run tools:formatter -- src/\nformatted 18 files\n\n$ jet env\n[jet:dev] $ formatter --check src/\nchecked 18 files\n\n# A same-user process renames the verified output and replaces it with a malicious symlink tree.\n# Jetpack must execute the leased bytes or refuse, never follow the replacement.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Protected native lease service",
+          "detail": "Keep tier-1 usability and the hostile-race guarantee by narrowly amending the no-root/no-daemon law. Linux keeps its unprivileged private mount. This option also ratifies new macOS/Windows distribution-installer behavior: official Jet installers register a root-owned macOS LaunchDaemon or Windows LocalSystem service after one explicit admin approval; no new Jet command is added. The service independently re-verifies the locked digest and copies executables into an OS-protected lease directory the caller cannot rewrite. It authenticates the local caller, then impersonates that caller and launches the child under the caller UID/session/token with no root/SYSTEM privileges or inherited service handles. The child PATH puts protected lease bins first, followed by the caller's approved inherited/system PATH; privilege-sensitive service variables and handles are removed, and package executable names can resolve only through protected lease dirs. A jet env lease lives through the shell and all descendants, then deletes after the process tree exits. The service has no network access, never resolves packages, and fails closed if stopped, mismatched, or unverifiable. Ordinary run/env use remains ceremony-free and offline.",
+          "code": "# During the new official macOS/Windows installer flow ratified by A:\nInstall protected executable lease service? [yes/no] yes\ninstalled jet-lease-service 1.0.0\n\n$ jetpack run tools:formatter -- src/\nformatted 18 files\n\n$ jet env\n[jet:dev] $ formatter --check src/\nchecked 18 files\n[jet:dev] $ sh -c 'formatter --check tests/'\nchecked 7 files\n\n$ jetpack doctor\nexecutable leases  protected\nservice            1.0.0, toolchain-matched\nrequest identity   nate, authenticated\nchild identity     nate, no service privileges\nhandles/env        service authority removed\nPATH                protected lease bins, then approved caller/system bins\nnetwork             denied\nhandoff             root-protected verified lease\nsame-user redirect blocked\n\n$ jet env  # service stopped or version mismatched\nerror E1292: protected executable lease service is unavailable\nfix: repair the Jet installation; no child or shell was started"
+        },
+        {
+          "key": "B",
+          "name": "Relax the hostile same-user guarantee",
+          "detail": "Keep no-root/no-daemon and tier-1 usability, but explicitly weaken the security law on macOS and Windows. Jetpack uses a private snapshot, restrictive native handles where available, and digest validation immediately before launch. This catches corruption and non-racing swaps, but a hostile process running as the same user can race the final validation and a descendant PATH lookup; post-exit detection cannot undo executed code. Doctor and audit output name the weaker guarantee. This option is an intentional safety downgrade, not an equivalent backend.",
+          "code": "$ jetpack run tools:formatter -- src/\nwarning L1292: this host cannot exclude a same-user executable PATH race\nwhy: macos has no unprivileged immutable named PATH view\nfix: audit local same-user processes before running executable packages\nformatted 18 files\n\n$ jet env\nwarning L1292: commands in this environment have the weaker macos lease guarantee\n[jet:dev] $ sh -c 'formatter --check tests/'\nchecked 7 files  # a hostile same-user final-lookup race is not excluded\n\n$ jetpack doctor\nexecutable leases  guarded, weaker than linux\nsame-user redirect not excluded"
+        },
+        {
+          "key": "C",
+          "name": "Fail closed for non-Linux executables",
+          "detail": "Keep no-root/no-daemon and the full hostile-race guarantee. Fix data-only leases on every platform, but reject leases containing executables on macOS and Windows before any child starts. A new registered diagnostic explains that the platform cannot provide the required immutable handoff. This narrows D-JPK-PLATFORM1: macOS and Windows remain native for data libraries and non-executable package operations, but executable packages are Linux-only until an equally safe unprivileged primitive exists.",
+          "code": "$ jetpack run tools:formatter -- src/\nerror E1292: executable leases are unavailable on macos\nwhy: Jetpack cannot create an immutable PATH view without a protected service\nfix: run this executable package on Linux; mutable cache paths are never used\n\n$ jet env  # project declares formatter executable\nerror E1292: this environment needs an executable lease unavailable on macos\nno shell was started\n\n$ jetpack doctor\nexecutable leases  unavailable\npolicy             fail closed\n\n$ jetpack build data:unicode-tables\ncompleted  # data-only leases still work"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Nix",
+          "note": "Nix protects immutable store objects through privileged ownership and a daemon. Option A uses the same concrete authority boundary, but scopes it to verified executable handoff: no resolution, builds, cache networking, or general store ownership.",
+          "code": "$ nix-store --verify --check-contents\n# protected store paths remain outside user write authority"
+        },
+        {
+          "lang": "Linux mount namespaces",
+          "note": "Linux supplies a private read-only mount view inside an unprivileged user namespace. Jetpack already uses it to map stable PATH names to inherited descriptors.",
+          "code": "$ unshare --user --map-root-user --mount --propagation private ..."
+        },
+        {
+          "lang": "Windows file sharing",
+          "note": "CreateFile sharing flags can prevent replacement or deletion of opened executables, but a complete PATH solution must also protect directory/name resolution and child handoff.",
+          "code": "CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, ...)"
+        }
+      ],
+      "rec": "A",
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-07-10T20:38:19.591Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-10"
     }
   ],
   "questions": [
@@ -22622,6 +22926,321 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-10T20:44:47.406Z",
+      "by": "owner",
+      "action": "card.activate",
+      "ref": "c0vntq8c",
+      "note": ""
+    },
+    {
+      "at": "2026-07-10T20:44:43.057Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-JPK-EXECLEASE1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-10T20:44:32.133Z",
+      "by": "claude-main",
+      "action": "card.add",
+      "ref": "c0vntq8c",
+      "note": "jet CLI: shrink top-level verb surface — namespace the long tail"
+    },
+    {
+      "at": "2026-07-10T20:44:21.394Z",
+      "by": "codex-orchestrator",
+      "action": "card.release",
+      "ref": "c0qi7dc2",
+      "note": ""
+    },
+    {
+      "at": "2026-07-10T20:44:21.229Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0qi7dc2",
+      "note": "#6 Focused jet-codegen, corelib lifecycle/stripping, native Win"
+    },
+    {
+      "at": "2026-07-10T20:44:21.073Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0qi7dc2",
+      "note": "#5 Programs not calling on_interrupt contain no interrupt FFI o"
+    },
+    {
+      "at": "2026-07-10T20:44:20.917Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0qi7dc2",
+      "note": "#4 Unsupported targets fail honestly; process-lifetime registra"
+    },
+    {
+      "at": "2026-07-10T20:44:20.761Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0qi7dc2",
+      "note": "#3 OS callbacks perform only async-safe atomic notification; ha"
+    },
+    {
+      "at": "2026-07-10T20:44:20.614Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0qi7dc2",
+      "note": "#2 Two or more registrations run additively in registration ord"
+    },
+    {
+      "at": "2026-07-10T20:44:20.460Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0qi7dc2",
+      "note": "#1 Windows console Ctrl-C invokes every registered core.os.on_i"
+    },
+    {
+      "at": "2026-07-10T20:44:20.295Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0qi7dc2",
+      "note": "phase,plan,logEntry"
+    },
+    {
+      "at": "2026-07-10T20:42:32.757Z",
+      "by": "sol-292-planner",
+      "action": "card.claim",
+      "ref": "c0qi7dc2",
+      "note": ""
+    },
+    {
+      "at": "2026-07-10T20:41:32.348Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c07ydlbz",
+      "note": "#4 Focused diagnostics_coverage, diagnostic_snapshots, relevant"
+    },
+    {
+      "at": "2026-07-10T20:41:32.185Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c07ydlbz",
+      "note": "#3 Duplicate HTTP routes fail through Jet-owned E2804 runtime r"
+    },
+    {
+      "at": "2026-07-10T20:41:32.029Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c07ydlbz",
+      "note": "#2 Every currently reachable emitted diagnostic code has a real"
+    },
+    {
+      "at": "2026-07-10T20:41:31.877Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c07ydlbz",
+      "note": "#1 User-facing diagnostic snapshots and constructors reject ret"
+    },
+    {
+      "at": "2026-07-10T20:41:31.716Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c07ydlbz",
+      "note": "phase,logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-10T20:41:12.567Z",
+      "by": "luna-343-builder",
+      "action": "card.claim",
+      "ref": "c07ydlbz",
+      "note": ""
+    },
+    {
+      "at": "2026-07-10T20:39:50.389Z",
+      "by": "sol-466-review",
+      "action": "card.criteria-verify",
+      "ref": "c0onpgah",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-10T20:39:50.246Z",
+      "by": "sol-466-review",
+      "action": "card.criteria-verify",
+      "ref": "c0onpgah",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-10T20:39:50.085Z",
+      "by": "sol-466-review",
+      "action": "card.criteria-verify",
+      "ref": "c0onpgah",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-10T20:39:29.050Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0onpgah",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-10T20:38:19.591Z",
+      "by": "codex-orchestrator",
+      "action": "decision.add",
+      "ref": "D-JPK-EXECLEASE1",
+      "note": "Cross-platform executable lease security"
+    },
+    {
+      "at": "2026-07-10T20:38:19.434Z",
+      "by": "codex-orchestrator",
+      "action": "card.release",
+      "ref": "c0t4root",
+      "note": ""
+    },
+    {
+      "at": "2026-07-10T20:38:19.279Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0t4root",
+      "note": "#5 Syntax decisions, package-manager security contract, install"
+    },
+    {
+      "at": "2026-07-10T20:38:19.129Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0t4root",
+      "note": "#4 Native Ubuntu, macOS, and Windows CI execute the runtime lea"
+    },
+    {
+      "at": "2026-07-10T20:38:18.982Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0t4root",
+      "note": "#3 The selected backend cannot leak service authority or mutabl"
+    },
+    {
+      "at": "2026-07-10T20:38:18.829Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0t4root",
+      "note": "#2 Direct jetpack run and nested PATH execution through jet env"
+    },
+    {
+      "at": "2026-07-10T20:38:18.676Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0t4root",
+      "note": "#1 Data-only and empty-output leases succeed on Linux, macOS, a"
+    },
+    {
+      "at": "2026-07-10T20:38:18.520Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0t4root",
+      "note": "plan,logEntry"
+    },
+    {
+      "at": "2026-07-10T20:34:43.889Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0onpgah",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-10T20:34:43.732Z",
+      "by": "terra-466-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0onpgah",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-10T20:34:43.586Z",
+      "by": "terra-466-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0onpgah",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-10T20:34:43.416Z",
+      "by": "terra-466-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0onpgah",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-10T20:31:21.700Z",
+      "by": "terra-466-builder",
+      "action": "card.claim",
+      "ref": "c0onpgah",
+      "note": ""
+    },
+    {
+      "at": "2026-07-10T20:30:08.489Z",
+      "by": "codex-orchestrator",
+      "action": "card.release",
+      "ref": "c0rb4k1d",
+      "note": ""
+    },
+    {
+      "at": "2026-07-10T20:30:08.337Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0rb4k1d",
+      "note": "#6 No external compiler/comptime dependencies are added and foc"
+    },
+    {
+      "at": "2026-07-10T20:30:08.187Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0rb4k1d",
+      "note": "#5 BigInt is supported by the JIT tier and removed from the com"
+    },
+    {
+      "at": "2026-07-10T20:30:08.034Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0rb4k1d",
+      "note": "#4 Every effect-free parity gap found by the inventory is imple"
+    },
+    {
+      "at": "2026-07-10T20:30:07.881Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0rb4k1d",
+      "note": "#3 A canonical machine-checked inventory classifies 100 percent"
+    },
+    {
+      "at": "2026-07-10T20:30:07.729Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0rb4k1d",
+      "note": "#2 The existing BigInt feature example produces byte-identical "
+    },
+    {
+      "at": "2026-07-10T20:30:07.572Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0rb4k1d",
+      "note": "#1 REPL exact transcripts pass BigInt construction from Int and"
+    },
+    {
+      "at": "2026-07-10T20:30:07.416Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0rb4k1d",
+      "note": "phase,plan,logEntry"
+    },
+    {
+      "at": "2026-07-10T20:27:40.740Z",
+      "by": "sol-467-planner",
+      "action": "card.claim",
+      "ref": "c0t4root",
+      "note": ""
+    },
+    {
+      "at": "2026-07-10T20:27:40.655Z",
+      "by": "sol-392-planner",
+      "action": "card.claim",
+      "ref": "c0rb4k1d",
+      "note": ""
+    },
     {
       "at": "2026-07-10T20:21:00.250Z",
       "by": "codex-orchestrator",
@@ -25802,321 +26421,6 @@
     },
     {
       "at": "2026-07-10T12:22:39.581Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c1nixrpd",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T12:20:51.571Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c009yxqf",
-      "note": "phase,workOrder,plan,logEntry"
-    },
-    {
-      "at": "2026-07-10T12:20:51.488Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0uvxow5",
-      "note": "phase,workOrder,plan,logEntry"
-    },
-    {
-      "at": "2026-07-10T12:20:51.403Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c09ffy3w",
-      "note": "title,phase,workOrder,body,plan,logEntry"
-    },
-    {
-      "at": "2026-07-10T12:20:51.322Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0as0asq",
-      "note": "phase,workOrder,blockedBy,plan,logEntry"
-    },
-    {
-      "at": "2026-07-10T12:20:51.244Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0ceo8wd",
-      "note": "phase,workOrder,plan,logEntry"
-    },
-    {
-      "at": "2026-07-10T12:20:51.169Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c077a4nu",
-      "note": "phase,workOrder,plan,logEntry"
-    },
-    {
-      "at": "2026-07-10T12:20:51.090Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c04mnkv0",
-      "note": "phase,workOrder,plan,logEntry"
-    },
-    {
-      "at": "2026-07-10T12:20:51.007Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c09rh9pt",
-      "note": "phase,workOrder,plan,logEntry"
-    },
-    {
-      "at": "2026-07-10T12:18:47.067Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0e7rot4",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-10T12:18:20.358Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0wetgi3",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-10T12:16:07.582Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c1nixrpd",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-10T12:15:03.492Z",
-      "by": "owner",
-      "action": "card.activate",
-      "ref": "c02kdm7a",
-      "note": ""
-    },
-    {
-      "at": "2026-07-10T12:14:59.644Z",
-      "by": "owner",
-      "action": "card.activate",
-      "ref": "c0ceo8wd",
-      "note": ""
-    },
-    {
-      "at": "2026-07-10T12:14:59.137Z",
-      "by": "owner",
-      "action": "card.activate",
-      "ref": "c09rh9pt",
-      "note": ""
-    },
-    {
-      "at": "2026-07-10T12:14:58.592Z",
-      "by": "owner",
-      "action": "card.activate",
-      "ref": "c077a4nu",
-      "note": ""
-    },
-    {
-      "at": "2026-07-10T12:14:57.875Z",
-      "by": "owner",
-      "action": "card.activate",
-      "ref": "c04mnkv0",
-      "note": ""
-    },
-    {
-      "at": "2026-07-10T12:14:47.006Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0e7rot4",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T12:14:46.481Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-TWR-BOARD1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-10T12:14:00.414Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0wetgi3",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T12:12:55.379Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-TWR-CRIT1",
-      "note": "C"
-    },
-    {
-      "at": "2026-07-10T12:12:13.170Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-TWR-BRIEF1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-10T12:09:16.754Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c1nixrpd",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-10T12:09:16.619Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0wetgi3",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-10T12:09:16.474Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0e7rot4",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-10T12:09:10.333Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-TWR-ARCHIVE1",
-      "note": "B"
-    },
-    {
-      "at": "2026-07-10T12:04:11.833Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-TWRGUARD1",
-      "note": "C"
-    },
-    {
-      "at": "2026-07-10T12:03:49.820Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-DEVTOOLS1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-10T12:03:34.481Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-CI3",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-10T12:03:03.738Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0e7rot4",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-10T12:03:03.598Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c1nixrpd",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-10T12:03:03.457Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0wetgi3",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-10T11:59:07.370Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0e7rot4",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T11:56:52.163Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0wetgi3",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T11:53:30.732Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c1nixrpd",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-10T11:53:30.597Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0e7rot4",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-10T11:47:32.639Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0e7rot4",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-10T11:47:10.070Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c1nixrpd",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-10T11:47:09.931Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0wetgi3",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-10T11:43:15.205Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c088jf0z",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T11:43:07.583Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c088jf0z",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-10T11:41:27.040Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0wetgi3",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-10T11:36:14.872Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c1nixrpd",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T11:32:50.089Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0wetgi3",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T11:31:08.827Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c088jf0z",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T11:28:39.055Z",
       "by": "codex-orchestrator",
       "action": "card.update",
       "ref": "c1nixrpd",
