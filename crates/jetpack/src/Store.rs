@@ -19,8 +19,9 @@ use super::JSON::{self, Json};
 use crate::SHA256;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// The subdir of the resolved root that holds the content-addressed store.
@@ -104,6 +105,8 @@ pub struct StoreEntry {
     /// D-JPK-CACHE1=A: the A4 envelope — output hash, platform, signature slot,
     /// provenance. Empty for records written before the envelope existed.
     pub envelope: super::Envelope::Envelope,
+    /// JP0 cache identity. Legacy records have empty fields and can never hit.
+    pub cache_identity: CacheIdentity,
     /// Unix seconds when this hangar object was first realized.
     pub realized_at: u64,
     /// Unix seconds when Jetpack last reused/refreshed this object.
@@ -125,10 +128,29 @@ impl StoreEntry {
             ("platform", &self.envelope.platform),
             ("signature", &self.envelope.signature),
             ("provenance", &self.envelope.provenance),
+            ("source_fingerprint", &self.cache_identity.source_fingerprint),
+            ("recipe_fingerprint", &self.cache_identity.recipe_fingerprint),
+            ("policy_fingerprint", &self.cache_identity.policy_fingerprint),
+            ("identity_platform", &self.cache_identity.platform),
             ("realized_at", &realized_at),
             ("last_used_at", &last_used_at),
         ])
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct CacheIdentity {
+    pub source_fingerprint: String,
+    pub recipe_fingerprint: String,
+    pub policy_fingerprint: String,
+    pub platform: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CacheExpectation {
+    pub identity: CacheIdentity,
+    pub owned_output: Option<PathBuf>,
+    pub allow_unsigned_local: bool,
 }
 
 /// Build the store id for a realization — human-readable `<name>-<version>`
@@ -157,7 +179,31 @@ pub fn record(
     rlib: &str,
     envelope: &super::Envelope::Envelope,
 ) -> std::io::Result<StoreEntry> {
-    super::RuntimePolicy::with_lock(&roots.root, "hangar-record", || {
+    record_verified(
+        roots,
+        name,
+        version,
+        reference,
+        out,
+        bin,
+        rlib,
+        envelope,
+        &CacheIdentity::default(),
+    )
+}
+
+pub fn record_verified(
+    roots: &Roots,
+    name: &str,
+    version: &str,
+    reference: &str,
+    out: &str,
+    bin: &str,
+    rlib: &str,
+    envelope: &super::Envelope::Envelope,
+    cache_identity: &CacheIdentity,
+) -> std::io::Result<StoreEntry> {
+    super::RuntimePolicy::with_lock(&roots.root, "hangar", || {
         let id = entry_id(name, version, reference, out);
         let dir = roots.hangar_dir().join(&id);
         let now = now_secs();
@@ -171,6 +217,7 @@ pub fn record(
             bin: bin.to_string(),
             rlib: rlib.to_string(),
             envelope: envelope.clone(),
+            cache_identity: cache_identity.clone(),
             realized_at,
             last_used_at: now,
         };
@@ -193,6 +240,41 @@ fn pin_nix_gc_root(entry_dir: &Path, out: &str) -> std::io::Result<()> {
         return Ok(());
     }
     pin_nix_gc_root_with(entry_dir, out_path, Path::new("nix-store"))
+}
+
+/// Startup migration for records written before JP0. Every real Nix output is
+/// rooted before any command may consume or clean Hangar state.
+pub fn migrate_nix_gc_roots(roots: &Roots) -> std::io::Result<usize> {
+    migrate_nix_gc_roots_with(roots, Path::new("/nix/store"), Path::new("nix-store"))
+}
+
+fn migrate_nix_gc_roots_with(
+    roots: &Roots,
+    store_prefix: &Path,
+    nix_store: &Path,
+) -> std::io::Result<usize> {
+    super::RuntimePolicy::with_lock(&roots.root, "hangar", || {
+        let mut rooted = 0;
+        for entry in list(roots) {
+            let out = Path::new(&entry.out);
+            if !out.starts_with(store_prefix) || !out.exists() {
+                continue;
+            }
+            let entry_dir = roots.hangar_dir().join(&entry.id);
+            let root = entry_dir.join(NIX_GC_ROOT);
+            if root.exists()
+                && fs::canonicalize(&root).ok() == fs::canonicalize(out).ok()
+            {
+                continue;
+            }
+            if fs::symlink_metadata(&root).is_ok() {
+                fs::remove_file(&root)?;
+            }
+            pin_nix_gc_root_with(&entry_dir, out, nix_store)?;
+            rooted += 1;
+        }
+        Ok(rooted)
+    })
 }
 
 fn pin_nix_gc_root_with(entry_dir: &Path, out: &Path, nix_store: &Path) -> std::io::Result<()> {
@@ -242,6 +324,7 @@ pub fn list(roots: &Roots) -> Vec<StoreEntry> {
                 bin: parsed.bin,
                 rlib: parsed.rlib,
                 envelope: parsed.envelope,
+                cache_identity: parsed.cache_identity,
                 realized_at: parsed.realized_at.unwrap_or(0),
                 last_used_at: parsed.last_used_at.unwrap_or(0),
             });
@@ -262,17 +345,19 @@ pub fn find_by_reference(roots: &Roots, reference: &str) -> Option<StoreEntry> {
 }
 
 /// Proof attached to a cache reuse decision. Every field must pass; callers
-/// must treat a partial proof as a miss. Package signing is opt-in under
-/// D-PKGSIGN1, so an unsigned local artifact satisfies current signature
-/// policy. A non-empty signature is refused here until the cache trust layer
-/// can verify it against an approved key instead of trusting text in metadata.
+/// must treat a partial proof as a miss. An unsigned artifact is accepted only
+/// when the provider independently derives its exact Hangar-owned output. A
+/// signed artifact must verify against the configured cache public key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CacheVerification {
     pub output_exists: bool,
     pub output_digest: bool,
+    pub source: bool,
+    pub recipe: bool,
     pub platform: bool,
     pub policy: bool,
-    pub signature: bool,
+    pub signature_verified: bool,
+    pub unsigned_local_allowed: bool,
     pub closure: bool,
 }
 
@@ -280,9 +365,11 @@ impl CacheVerification {
     pub fn trusted(self) -> bool {
         self.output_exists
             && self.output_digest
+            && self.source
+            && self.recipe
             && self.platform
             && self.policy
-            && self.signature
+            && (self.signature_verified || self.unsigned_local_allowed)
             && self.closure
     }
 }
@@ -291,32 +378,155 @@ pub fn verify_cache_entry(
     roots: &Roots,
     entry: &StoreEntry,
     expected_reference: &str,
+    expectation: &CacheExpectation,
 ) -> CacheVerification {
     let out = Path::new(&entry.out);
     let output_exists = out.exists();
     let output_digest = output_exists
         && !entry.envelope.output_hash.is_empty()
-        && super::Envelope::output_hash_of(&entry.out) == entry.envelope.output_hash;
-    let platform = entry.envelope.platform == super::Envelope::host_platform();
-    let policy = entry.reference == expected_reference && !entry.envelope.provenance.is_empty();
-    let signature = entry.envelope.signature.is_empty();
+        && super::Envelope::try_output_hash_of(&entry.out)
+            .is_ok_and(|hash| hash == entry.envelope.output_hash);
+    let source = !expectation.identity.source_fingerprint.is_empty()
+        && entry.cache_identity.source_fingerprint == expectation.identity.source_fingerprint;
+    let recipe = !expectation.identity.recipe_fingerprint.is_empty()
+        && entry.cache_identity.recipe_fingerprint == expectation.identity.recipe_fingerprint;
+    let platform = entry.envelope.platform == expectation.identity.platform
+        && entry.cache_identity.platform == expectation.identity.platform;
+    let policy = entry.reference == expected_reference
+        && !entry.envelope.provenance.is_empty()
+        && !expectation.identity.policy_fingerprint.is_empty()
+        && entry.cache_identity.policy_fingerprint == expectation.identity.policy_fingerprint;
+    let signature_verified = !entry.envelope.signature.is_empty()
+        && verify_configured_signature(roots, entry, expectation);
+    let unsigned_local_allowed = entry.envelope.signature.is_empty()
+        && expectation.allow_unsigned_local
+        && expectation
+            .owned_output
+            .as_ref()
+            .is_some_and(|path| path == Path::new(&entry.out));
     let closure = output_exists && closure_is_reachable(roots, entry);
     CacheVerification {
         output_exists,
         output_digest,
+        source,
+        recipe,
         platform,
         policy,
-        signature,
+        signature_verified,
+        unsigned_local_allowed,
         closure,
     }
 }
 
-pub fn find_verified_by_reference(roots: &Roots, reference: &str) -> Option<StoreEntry> {
-    list(roots)
+pub struct VerifiedCacheHit {
+    pub entry: StoreEntry,
+    pub lease: CacheLease,
+}
+
+pub struct CacheLease {
+    _guard: super::RuntimePolicy::FileLock,
+}
+
+pub fn find_verified_by_reference(
+    roots: &Roots,
+    reference: &str,
+    expectation: &CacheExpectation,
+) -> std::io::Result<Option<VerifiedCacheHit>> {
+    let lease = super::RuntimePolicy::acquire_lock(&roots.root, "hangar")?;
+    let entry = list(roots)
         .into_iter()
         .filter(|entry| entry.reference == reference)
-        .filter(|entry| verify_cache_entry(roots, entry, reference).trusted())
-        .max_by_key(|entry| entry.last_used_at)
+        .filter(|entry| verify_cache_entry(roots, entry, reference, expectation).trusted())
+        .max_by_key(|entry| entry.last_used_at);
+    Ok(entry.map(|entry| VerifiedCacheHit {
+        entry,
+        lease: CacheLease { _guard: lease },
+    }))
+}
+
+fn verify_configured_signature(
+    roots: &Roots,
+    entry: &StoreEntry,
+    expectation: &CacheExpectation,
+) -> bool {
+    verify_configured_signature_with(roots, entry, expectation, verify_ed25519)
+}
+
+fn verify_configured_signature_with(
+    roots: &Roots,
+    entry: &StoreEntry,
+    expectation: &CacheExpectation,
+    verifier: impl FnOnce(&str, &str, &str) -> bool,
+) -> bool {
+    let Ok(public_key) = fs::read_to_string(roots.root.join("trust/cache.ed25519.pub")) else {
+        return false;
+    };
+    let signature = entry
+        .envelope
+        .signature
+        .strip_prefix("ed25519:")
+        .unwrap_or(&entry.envelope.signature);
+    verifier(
+        public_key.trim(),
+        &cache_signature_message(entry, expectation),
+        signature,
+    )
+}
+
+fn verify_ed25519(public_key: &str, message: &str, signature: &str) -> bool {
+    let Ok(link) = crate::FFI::build_bridge(
+        &[], false, false, false, false, true, false, false, false,
+    ) else {
+        return false;
+    };
+    let Some(helper) = link.helper_bin_path else {
+        return false;
+    };
+    let mut child = match Command::new(helper)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(_) => return false,
+    };
+    let request = format!(
+        "verify {} {} {}\n",
+        public_key,
+        hex_encode(message.as_bytes()),
+        signature
+    );
+    if child
+        .stdin
+        .take()
+        .is_none_or(|mut stdin| stdin.write_all(request.as_bytes()).is_err())
+    {
+        return false;
+    }
+    child.wait().is_ok_and(|status| status.success())
+}
+
+fn cache_signature_message(entry: &StoreEntry, expectation: &CacheExpectation) -> String {
+    format!(
+        "jet-cache-v1\nreference={}\nsource={}\nrecipe={}\npolicy={}\nplatform={}\noutput={}\n",
+        entry.reference,
+        expectation.identity.source_fingerprint,
+        expectation.identity.recipe_fingerprint,
+        expectation.identity.policy_fingerprint,
+        expectation.identity.platform,
+        entry.envelope.output_hash,
+    )
+}
+
+fn hex_encode(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        out.push(HEX[(byte >> 4) as usize] as char);
+        out.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    out
 }
 
 fn closure_is_reachable(roots: &Roots, entry: &StoreEntry) -> bool {
@@ -338,21 +548,47 @@ fn closure_is_reachable(roots: &Roots, entry: &StoreEntry) -> bool {
 /// Remove an invalid local cache candidate so provider realization cannot
 /// mistake the same tampered directory for a fresh hit. Never removes external
 /// outputs such as `/nix/store`; their provider must realize them again.
-pub fn discard_invalid_entry(roots: &Roots, entry: &StoreEntry) -> std::io::Result<()> {
-    let hangar = roots.hangar_dir();
-    let out = Path::new(&entry.out);
-    if out.starts_with(&hangar) && out != hangar.join(&entry.id) {
-        if out.is_dir() {
-            fs::remove_dir_all(out)?;
-        } else if out.exists() {
-            fs::remove_file(out)?;
+pub fn quarantine_invalid_entry(
+    roots: &Roots,
+    entry: &StoreEntry,
+    expectation: &CacheExpectation,
+) -> std::io::Result<()> {
+    super::RuntimePolicy::with_lock(&roots.root, "hangar", || {
+        let expected_id = entry_id(
+            &entry.name,
+            &entry.version,
+            &entry.reference,
+            &entry.out,
+        );
+        if entry.id != expected_id || Path::new(&entry.id).components().count() != 1 {
+            return Err(std::io::Error::other("invalid cache record identity"));
         }
-    }
-    let record = hangar.join(&entry.id);
-    if record.is_dir() {
-        fs::remove_dir_all(record)?;
-    }
-    Ok(())
+        let hangar = roots.hangar_dir();
+        let quarantine = hangar.join("quarantine");
+        fs::create_dir_all(&quarantine)?;
+        let stamp = now_secs();
+        let record = hangar.join(&entry.id);
+        if fs::symlink_metadata(&record).is_ok() {
+            fs::rename(&record, quarantine.join(format!("record-{}-{stamp}", entry.id)))?;
+        }
+        if let Some(owned) = &expectation.owned_output {
+            if fs::symlink_metadata(owned).is_ok() {
+                let canonical_hangar = fs::canonicalize(&hangar)?;
+                let canonical_owned = fs::canonicalize(owned)?;
+                if !owned.starts_with(&hangar) || !canonical_owned.starts_with(&canonical_hangar) {
+                    return Err(std::io::Error::other(
+                        "derived cache output escapes canonical Hangar root",
+                    ));
+                }
+                let name = owned
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .ok_or_else(|| std::io::Error::other("invalid owned output name"))?;
+                fs::rename(owned, quarantine.join(format!("output-{name}-{stamp}")))?;
+            }
+        }
+        Ok(())
+    })
 }
 
 /// One line of `jet hangar du` output: a realized object, its on-disk size, and
@@ -463,7 +699,7 @@ pub fn clean_plan(roots: &Roots) -> std::io::Result<CleanReport> {
 }
 
 pub fn clean(roots: &Roots) -> std::io::Result<CleanReport> {
-    super::RuntimePolicy::with_lock(&roots.root, "hangar-clean", || clean_unlocked(roots))
+    super::RuntimePolicy::with_lock(&roots.root, "hangar", || clean_unlocked(roots))
 }
 
 fn clean_unlocked(roots: &Roots) -> std::io::Result<CleanReport> {
@@ -499,7 +735,7 @@ fn clean_unlocked(roots: &Roots) -> std::io::Result<CleanReport> {
 }
 
 pub fn maybe_auto_clean(roots: &Roots) -> std::io::Result<Option<CleanReport>> {
-    super::RuntimePolicy::with_lock(&roots.root, "hangar-clean", || {
+    super::RuntimePolicy::with_lock(&roots.root, "hangar", || {
         let hangar = roots.hangar_dir();
         fs::create_dir_all(&hangar)?;
         let stamp = hangar.join(AUTO_CLEAN_STAMP);
@@ -672,6 +908,7 @@ struct ParsedMeta {
     bin: String,
     rlib: String,
     envelope: super::Envelope::Envelope,
+    cache_identity: CacheIdentity,
     realized_at: Option<u64>,
     last_used_at: Option<u64>,
 }
@@ -700,6 +937,12 @@ fn parse_meta(text: &str) -> Option<ParsedMeta> {
             platform: get("platform").unwrap_or_default(),
             signature: get("signature").unwrap_or_default(),
             provenance: get("provenance").unwrap_or_default(),
+        },
+        cache_identity: CacheIdentity {
+            source_fingerprint: get("source_fingerprint").unwrap_or_default(),
+            recipe_fingerprint: get("recipe_fingerprint").unwrap_or_default(),
+            policy_fingerprint: get("policy_fingerprint").unwrap_or_default(),
+            platform: get("identity_platform").unwrap_or_default(),
         },
         realized_at: get("realized_at").and_then(|s| s.parse().ok()),
         last_used_at: get("last_used_at").and_then(|s| s.parse().ok()),
@@ -786,6 +1029,29 @@ mod tests {
         (roots, g)
     }
 
+    fn test_identity() -> CacheIdentity {
+        CacheIdentity {
+            source_fingerprint: "source-v1".to_string(),
+            recipe_fingerprint: "recipe-v1".to_string(),
+            policy_fingerprint: "policy-v1".to_string(),
+            platform: super::super::Envelope::host_platform(),
+        }
+    }
+
+    fn test_expectation(out: &Path) -> CacheExpectation {
+        CacheExpectation {
+            identity: test_identity(),
+            owned_output: Some(out.to_path_buf()),
+            allow_unsigned_local: true,
+        }
+    }
+
+    fn verified(roots: &Roots, reference: &str, expectation: &CacheExpectation) -> bool {
+        find_verified_by_reference(roots, reference, expectation)
+            .unwrap()
+            .is_some()
+    }
+
     #[test]
     fn record_and_list_roundtrip() {
         let (roots, _g) = temp_roots();
@@ -863,7 +1129,7 @@ mod tests {
             "mine:demo",
             "core-source",
         );
-        record(
+        record_verified(
             &roots,
             "demo",
             "1.0",
@@ -872,15 +1138,21 @@ mod tests {
             "",
             "",
             &envelope,
+            &test_identity(),
         )
         .unwrap();
-        assert!(find_verified_by_reference(&roots, "mine:demo").is_some());
+        let expectation = test_expectation(&out);
+        let entry = find_by_reference(&roots, "mine:demo").unwrap();
+        let proof = verify_cache_entry(&roots, &entry, "mine:demo", &expectation);
+        assert!(!proof.signature_verified);
+        assert!(proof.unsigned_local_allowed);
+        assert!(verified(&roots, "mine:demo", &expectation));
 
         fs::write(out.join("payload"), "tampered").unwrap();
-        assert!(find_verified_by_reference(&roots, "mine:demo").is_none());
+        assert!(!verified(&roots, "mine:demo", &expectation));
 
         fs::remove_dir_all(&out).unwrap();
-        assert!(find_verified_by_reference(&roots, "mine:demo").is_none());
+        assert!(!verified(&roots, "mine:demo", &expectation));
     }
 
     #[test]
@@ -895,7 +1167,7 @@ mod tests {
             "core-source",
         );
         envelope.platform = "not-this-host".to_string();
-        record(
+        record_verified(
             &roots,
             "demo",
             "1.0",
@@ -904,13 +1176,15 @@ mod tests {
             "",
             "",
             &envelope,
+            &test_identity(),
         )
         .unwrap();
-        assert!(find_verified_by_reference(&roots, "mine:demo").is_none());
+        let mut expectation = test_expectation(&out);
+        assert!(!verified(&roots, "mine:demo", &expectation));
 
         envelope.platform = super::super::Envelope::host_platform();
         envelope.provenance.clear();
-        record(
+        record_verified(
             &roots,
             "demo",
             "1.0",
@@ -919,13 +1193,14 @@ mod tests {
             "",
             "",
             &envelope,
+            &test_identity(),
         )
         .unwrap();
-        assert!(find_verified_by_reference(&roots, "mine:demo").is_none());
+        assert!(!verified(&roots, "mine:demo", &expectation));
 
         envelope.provenance = "mine:demo via core-source".to_string();
         envelope.signature = "unverified-signature-text".to_string();
-        record(
+        record_verified(
             &roots,
             "demo",
             "1.0",
@@ -934,12 +1209,13 @@ mod tests {
             "",
             "",
             &envelope,
+            &test_identity(),
         )
         .unwrap();
-        assert!(find_verified_by_reference(&roots, "mine:demo").is_none());
+        assert!(!verified(&roots, "mine:demo", &expectation));
 
         envelope.signature.clear();
-        record(
+        record_verified(
             &roots,
             "demo",
             "1.0",
@@ -948,9 +1224,11 @@ mod tests {
             &out.join("missing-bin").to_string_lossy(),
             "",
             &envelope,
+            &test_identity(),
         )
         .unwrap();
-        assert!(find_verified_by_reference(&roots, "mine:demo").is_none());
+        expectation.owned_output = Some(out.clone());
+        assert!(!verified(&roots, "mine:demo", &expectation));
     }
 
     #[cfg(unix)]
@@ -971,6 +1249,180 @@ mod tests {
 
         pin_nix_gc_root_with(&entry, &out, &helper).unwrap();
         assert_eq!(fs::read_link(entry.join(NIX_GC_ROOT)).unwrap(), out);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn startup_migration_roots_existing_real_paths() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let (roots, _g) = temp_roots();
+        let prefix = roots.root.join("nix/store");
+        let out = prefix.join("abc-demo");
+        fs::create_dir_all(&out).unwrap();
+        fs::write(out.join("payload"), "demo").unwrap();
+        let envelope = super::super::Envelope::Envelope::for_output(
+            &out.to_string_lossy(),
+            "nixpkgs:demo",
+            "nix",
+        );
+        let entry = record(
+            &roots,
+            "demo",
+            "1.0",
+            "nixpkgs:demo",
+            &out.to_string_lossy(),
+            "",
+            "",
+            &envelope,
+        )
+        .unwrap();
+        let helper = roots.root.join("fake-nix-store-migrate");
+        fs::write(&helper, "#!/bin/sh\nln -s \"$5\" \"$2\"\n").unwrap();
+        let mut perms = fs::metadata(&helper).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&helper, perms).unwrap();
+
+        assert_eq!(migrate_nix_gc_roots_with(&roots, &prefix, &helper).unwrap(), 1);
+        let root = roots.hangar_dir().join(entry.id).join(NIX_GC_ROOT);
+        assert_eq!(fs::canonicalize(root).unwrap(), fs::canonicalize(out).unwrap());
+    }
+
+    #[test]
+    fn hostile_out_pointer_never_quarantines_another_object() {
+        let (roots, _g) = temp_roots();
+        let survivor = roots.hangar_dir().join("survivor-output");
+        let expected = roots.hangar_dir().join("expected-output");
+        fs::create_dir_all(&survivor).unwrap();
+        fs::create_dir_all(&expected).unwrap();
+        fs::write(survivor.join("keep"), "survivor").unwrap();
+        fs::write(expected.join("bad"), "candidate").unwrap();
+        let envelope = super::super::Envelope::Envelope::for_output(
+            &survivor.to_string_lossy(),
+            "mine:hostile",
+            "core-source",
+        );
+        let entry = record_verified(
+            &roots,
+            "hostile",
+            "1.0",
+            "mine:hostile",
+            &survivor.to_string_lossy(),
+            "",
+            "",
+            &envelope,
+            &test_identity(),
+        )
+        .unwrap();
+        let expectation = CacheExpectation {
+            identity: test_identity(),
+            owned_output: Some(expected.clone()),
+            allow_unsigned_local: true,
+        };
+
+        quarantine_invalid_entry(&roots, &entry, &expectation).unwrap();
+        assert_eq!(fs::read_to_string(survivor.join("keep")).unwrap(), "survivor");
+        assert!(!expected.exists());
+    }
+
+    #[test]
+    fn cache_lease_blocks_hangar_mutation_until_consumer_drop() {
+        let (roots, _g) = temp_roots();
+        let out = roots.root.join("leased-output");
+        fs::create_dir_all(&out).unwrap();
+        fs::write(out.join("payload"), "trusted").unwrap();
+        let envelope = super::super::Envelope::Envelope::for_output(
+            &out.to_string_lossy(),
+            "mine:leased",
+            "core-source",
+        );
+        record_verified(
+            &roots,
+            "leased",
+            "1.0",
+            "mine:leased",
+            &out.to_string_lossy(),
+            "",
+            "",
+            &envelope,
+            &test_identity(),
+        )
+        .unwrap();
+        let hit = find_verified_by_reference(
+            &roots,
+            "mine:leased",
+            &test_expectation(&out),
+        )
+        .unwrap()
+        .unwrap();
+        let root = roots.root.clone();
+        let marker = root.join("mutated");
+        let marker_thread = marker.clone();
+        let handle = std::thread::spawn(move || {
+            let _guard = super::super::RuntimePolicy::acquire_lock(&root, "hangar").unwrap();
+            fs::write(marker_thread, "after lease").unwrap();
+        });
+        std::thread::sleep(Duration::from_millis(60));
+        assert!(!marker.exists());
+        drop(hit);
+        handle.join().unwrap();
+        assert!(marker.exists());
+    }
+
+    #[test]
+    fn configured_key_is_required_before_signature_verifier_runs() {
+        let (roots, _g) = temp_roots();
+        let out = roots.root.join("signed-output");
+        fs::create_dir_all(&out).unwrap();
+        fs::write(out.join("payload"), "signed").unwrap();
+        let mut envelope = super::super::Envelope::Envelope::for_output(
+            &out.to_string_lossy(),
+            "cache:demo",
+            "remote-cache",
+        );
+        envelope.signature = "ed25519:abcd".to_string();
+        let entry = StoreEntry {
+            id: entry_id("demo", "1", "cache:demo", &out.to_string_lossy()),
+            name: "demo".to_string(),
+            version: "1".to_string(),
+            reference: "cache:demo".to_string(),
+            out: out.to_string_lossy().into_owned(),
+            bin: String::new(),
+            rlib: String::new(),
+            envelope,
+            cache_identity: test_identity(),
+            realized_at: 0,
+            last_used_at: 0,
+        };
+        let expectation = CacheExpectation {
+            identity: test_identity(),
+            owned_output: None,
+            allow_unsigned_local: false,
+        };
+        let mut called = false;
+        assert!(!verify_configured_signature_with(
+            &roots,
+            &entry,
+            &expectation,
+            |_, _, _| {
+                called = true;
+                true
+            }
+        ));
+        assert!(!called);
+
+        fs::create_dir_all(roots.root.join("trust")).unwrap();
+        fs::write(roots.root.join("trust/cache.ed25519.pub"), "public-key").unwrap();
+        assert!(verify_configured_signature_with(
+            &roots,
+            &entry,
+            &expectation,
+            |key, message, signature| {
+                key == "public-key"
+                    && message.contains("source=source-v1")
+                    && signature == "abcd"
+            }
+        ));
     }
 }
 

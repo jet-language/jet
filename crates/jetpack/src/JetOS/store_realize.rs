@@ -66,7 +66,7 @@ fn realize_ref(
         Ok(r) => {
             theme.row(&r.name, name_w, &r.version, r.source_state.label());
             theme.detail(&theme.gray(&r.out));
-            match Store::record(
+            match Store::record_verified(
                 roots,
                 &r.name,
                 &r.version,
@@ -75,6 +75,7 @@ fn realize_ref(
                 &r.bin,
                 &r.rlib,
                 &r.envelope,
+                &r.cache_identity,
             ) {
                 Ok(entry) => Some(entry),
                 Err(e) => {
@@ -123,7 +124,7 @@ fn try_realize_ref(
         .map_err(|e| format!("provider failed for `{}`: {e:?}", spec.raw))?;
     theme.row(&r.name, name_w, &r.version, r.source_state.label());
     theme.detail(&theme.gray(&r.out));
-    Store::record(
+    Store::record_verified(
         roots,
         &r.name,
         &r.version,
@@ -132,6 +133,7 @@ fn try_realize_ref(
         &r.bin,
         &r.rlib,
         &r.envelope,
+        &r.cache_identity,
     )
     .map_err(|e| format!("writing to the Jetpack store failed: {e}"))
 }

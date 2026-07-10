@@ -160,6 +160,18 @@ pub fn write_sandbox_policy(policy: SandboxPolicy) -> io::Result<PathBuf> {
     Ok(path)
 }
 
+/// Identity of artifact-producing policy JP0 can currently enforce. Invocation
+/// transport (`--offline`) is deliberately excluded: consuming identical local
+/// bytes offline must not invalidate them. Policy changes make prior records
+/// miss instead of silently crossing an authority boundary.
+pub fn cache_policy_fingerprint(_offline: bool) -> String {
+    let sandbox = match read_sandbox_policy() {
+        SandboxPolicy::AllowFallback => "sandbox=fallback",
+        SandboxPolicy::Require => "sandbox=require",
+    };
+    crate::SHA256::sha256_hex(format!("jp0-policy-v1\n{sandbox}\n").as_bytes())
+}
+
 pub fn detect_sandbox() -> SandboxStatus {
     match std::env::var("JETPACK_FAKE_SANDBOX").ok().as_deref() {
         Some("available") => {

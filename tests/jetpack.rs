@@ -826,6 +826,22 @@ module dev {
         ),
         "adapter output missing copied file: {entries:?}"
     );
+    let cached = jetpack()
+        .args(["build", "--no-color"])
+        .current_dir(&proj.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert!(
+        cached.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&cached.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&cached.stderr).contains("1 cached"),
+        "stderr: {}",
+        String::from_utf8_lossy(&cached.stderr)
+    );
 }
 
 #[test]
@@ -5821,6 +5837,10 @@ fn jet_build_never_reports_deleted_output_as_cached() {
     let entry = jetpack::Store::find_by_reference(&roots, "mine:hello").unwrap();
     fs::remove_dir_all(&entry.out).unwrap();
 
+    let rejected = run();
+    assert!(!rejected.status.success());
+    let rejected_stderr = String::from_utf8_lossy(&rejected.stderr);
+    assert!(rejected_stderr.contains("E2604"), "stderr: {rejected_stderr}");
     let rebuilt = run();
     assert!(rebuilt.status.success());
     let stderr = String::from_utf8_lossy(&rebuilt.stderr);
@@ -5851,6 +5871,10 @@ fn jet_build_never_reports_tampered_output_as_cached() {
     let entry = jetpack::Store::find_by_reference(&roots, "mine:hello").unwrap();
     fs::write(Path::new(&entry.out).join("bin/hello"), "tampered").unwrap();
 
+    let rejected = run();
+    assert!(!rejected.status.success());
+    let rejected_stderr = String::from_utf8_lossy(&rejected.stderr);
+    assert!(rejected_stderr.contains("E2604"), "stderr: {rejected_stderr}");
     let rebuilt = run();
     assert!(rebuilt.status.success());
     let stderr = String::from_utf8_lossy(&rebuilt.stderr);

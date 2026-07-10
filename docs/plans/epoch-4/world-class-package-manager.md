@@ -43,13 +43,13 @@ JP0 stop-line now enforces three truth boundaries:
   hits;
 - every existing Nix compatibility output recorded in Hangar gets a durable
   `nix-store --add-root --indirect` root protecting its transitive closure;
-- existing file outputs hash file bytes rather than path text, and sandbox
-  capability detection stays fallback until a child actually enters a jail.
+- canonical output archives hash node type, mode, bytes, symlink target, empty
+  directories, and hardlink identity; reject escapes, cycles, and special
+  files. Sandbox capability detection stays fallback until a child actually
+  enters a jail.
 
 Production blockers after that stop-line:
 
-- directory hashing omits executable bits, symlink targets, empty directories,
-  hardlink identity, extended attributes, and special-file policy;
 - recipes still execute as ordinary host processes; every platform reports
   fallback/unsandboxed until JP3 supplies an enforced jail;
 - native HTTP substitution/push, NAR/narinfo, mirrors, repair, remote builders,

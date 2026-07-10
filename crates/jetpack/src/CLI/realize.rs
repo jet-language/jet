@@ -20,7 +20,7 @@ fn realize_ref(
     name_w: usize,
 ) -> Option<(Store::StoreEntry, Provider::SourceState)> {
     match realize_ref_outcome(theme, roots, flags, table, spec, name_w, RowStyle::Ledger, None) {
-        RefOutcome::Realized(entry, state, _line) => Some((entry, state)),
+        RefOutcome::Realized(entry, state, _line, _lease) => Some((entry, state)),
         RefOutcome::NeedsNix(need) => {
             report_nix_bridge_required(theme, flags, &[need], &[]);
             None
@@ -49,7 +49,12 @@ enum RefOutcome {
     /// The realized entry, its source state, and the row text `Ledger`
     /// style would print (computed regardless of style, since it's cheap
     /// and `Silent` callers need it).
-    Realized(Store::StoreEntry, Provider::SourceState, String),
+    Realized(
+        Store::StoreEntry,
+        Provider::SourceState,
+        String,
+        Option<Store::CacheLease>,
+    ),
     NeedsNix(Provider::NixBridgeNeed),
     Failed,
 }
@@ -88,31 +93,82 @@ fn realize_ref_outcome(
     // store dir also seeds the U9 remote probe's source-cache lookup, so it is
     // resolved before the fixtures decision below.
     let store_dir = roots.hangar_dir();
+    let cache_fixtures = if flags.offline {
+        fixtures_for(flags)
+    } else {
+        flags.fixtures.clone()
+    };
+    let cache_ctx = Provider::Ctx {
+        fixtures: cache_fixtures.as_deref(),
+        store_dir: &store_dir,
+        offline: flags.offline,
+    };
     if let Some(candidate) = Store::find_by_reference(roots, &spec.raw) {
-        if let Some(entry) = Store::find_verified_by_reference(roots, &spec.raw) {
-            drop(spinner);
-            let line = theme.render_row(&entry.name, name_w, &entry.version, "cached");
-            match style {
-                RowStyle::Ledger => {
-                    theme.ok(&format!("{} {}", theme.bold(&entry.name), "cached"));
-                    theme.detail(&theme.gray(&entry.out));
+        if let Some(expectation) = Provider::cache_expectation(spec, table, &cache_ctx) {
+            match Store::find_verified_by_reference(roots, &spec.raw, &expectation) {
+                Ok(Some(hit)) => {
+                    drop(spinner);
+                    let entry = hit.entry;
+                    let line = theme.render_row(&entry.name, name_w, &entry.version, "cached");
+                    match style {
+                        RowStyle::Ledger => {
+                            theme.ok(&format!("{} {}", theme.bold(&entry.name), "cached"));
+                            theme.detail(&theme.gray(&entry.out));
+                        }
+                        RowStyle::Ready => theme.ready_row(&entry.name, name_w, &entry.version),
+                        RowStyle::Silent => {}
+                    }
+                    return RefOutcome::Realized(
+                        entry,
+                        Provider::SourceState::Cached,
+                        line,
+                        Some(hit.lease),
+                    );
                 }
-                RowStyle::Ready => theme.ready_row(&entry.name, name_w, &entry.version),
-                RowStyle::Silent => {}
+                Ok(None) => {
+                    let actual = super::Envelope::try_output_hash_of(&candidate.out)
+                        .unwrap_or_else(|error| error);
+                    if let Err(error) =
+                        Store::quarantine_invalid_entry(roots, &candidate, &expectation)
+                    {
+                        drop(spinner);
+                        theme.error_coded(
+                            "E2604",
+                            &format!(
+                                "Integrity check failed for `{}` `{}` — expected `{}`, got `{actual}`.",
+                                candidate.name, candidate.version, candidate.envelope.output_hash
+                            ),
+                            &format!("The cached artifact differs from its recorded identity and could not be quarantined: {error}"),
+                            "Re-run `jet fetch` after `jet clean`. If the problem persists, audit the source before rebuilding.",
+                        );
+                        return RefOutcome::Failed;
+                    }
+                    drop(spinner);
+                    theme.error_coded(
+                        "E2604",
+                        &format!(
+                            "Integrity check failed for `{}` `{}` — expected `{}`, got `{actual}`.",
+                            candidate.name, candidate.version, candidate.envelope.output_hash
+                        ),
+                        "The cached artifact differs from its recorded identity. Jetpack quarantined it instead of silently repairing or using it.",
+                        "Re-run `jet fetch` after `jet clean`. If the problem persists, audit the source before rebuilding.",
+                    );
+                    return RefOutcome::Failed;
+                }
+                Err(error) => {
+                    drop(spinner);
+                    theme.error_coded(
+                        "E2604",
+                        &format!(
+                            "Integrity check failed for `{}` `{}` — expected `{}`, got `verification unavailable`.",
+                            candidate.name, candidate.version, candidate.envelope.output_hash
+                        ),
+                        &format!("Jetpack could not lock the hangar for verification: {error}"),
+                        "Re-run `jet fetch` after `jet clean`. If the problem persists, audit the source before rebuilding.",
+                    );
+                    return RefOutcome::Failed;
+                }
             }
-            return RefOutcome::Realized(entry, Provider::SourceState::Cached, line);
-        }
-        if let Err(error) = Store::discard_invalid_entry(roots, &candidate) {
-            drop(spinner);
-            theme.error_coded(
-                "E2604",
-                &format!("integrity check failed for cached package `{}`", candidate.name),
-                &format!(
-                    "the cached output is invalid and Jetpack could not remove it safely: {error}"
-                ),
-                "fix permissions on the hangar, run `jet clean`, then rebuild the package.",
-            );
-            return RefOutcome::Failed;
         }
     }
     if flags.offline
@@ -195,7 +251,7 @@ fn realize_ref_outcome(
                 RowStyle::Silent => {}
             }
             let state = r.source_state;
-            match Store::record(
+            match Store::record_verified(
                 roots,
                 &r.name,
                 &r.version,
@@ -204,6 +260,7 @@ fn realize_ref_outcome(
                 &r.bin,
                 &r.rlib,
                 &r.envelope,
+                &r.cache_identity,
             ) {
                 Ok(entry) => Some((entry, state)),
                 Err(e) => {
@@ -216,7 +273,7 @@ fn realize_ref_outcome(
                 }
             }
             .map_or(RefOutcome::Failed, |(entry, state)| {
-                RefOutcome::Realized(entry, state, line)
+                RefOutcome::Realized(entry, state, line, None)
             })
         }
         Err(e) => {
@@ -296,7 +353,11 @@ fn realize_adapter(
     roots: &Roots,
     flags: &Flags,
     plan: &ModuleEval::AdapterPlan,
-) -> Option<(Store::StoreEntry, Provider::SourceState)> {
+) -> Option<(
+    Store::StoreEntry,
+    Provider::SourceState,
+    Option<Store::CacheLease>,
+)> {
     theme.status(&format!("adapting {} …", theme.bold(&plan.name)));
     let store_dir = roots.hangar_dir();
     let ctx = Provider::Ctx {
@@ -304,6 +365,67 @@ fn realize_adapter(
         store_dir: &store_dir,
         offline: flags.offline,
     };
+    let reference = format!("adapt:{}:{}", plan.name, plan.source);
+    let expectation = match Provider::adapter_cache_expectation(plan, &ctx) {
+        Ok(expectation) => expectation,
+        Err(error) => {
+            report_provider_error(theme, &error);
+            return None;
+        }
+    };
+    if let Some(candidate) = Store::find_by_reference(roots, &reference) {
+        match Store::find_verified_by_reference(roots, &reference, &expectation) {
+            Ok(Some(hit)) => {
+                theme.ok(&format!("{} cached", theme.bold(&hit.entry.name)));
+                theme.detail(&theme.gray(&hit.entry.out));
+                return Some((
+                    hit.entry,
+                    Provider::SourceState::Cached,
+                    Some(hit.lease),
+                ));
+            }
+            Ok(None) => {
+                let actual = super::Envelope::try_output_hash_of(&candidate.out)
+                    .unwrap_or_else(|error| error);
+                if let Err(error) =
+                    Store::quarantine_invalid_entry(roots, &candidate, &expectation)
+                {
+                    theme.error_coded(
+                        "E2604",
+                        &format!(
+                            "Integrity check failed for `{}` `{}` — expected `{}`, got `{actual}`.",
+                            candidate.name, candidate.version, candidate.envelope.output_hash
+                        ),
+                        &format!("The cached artifact differs from its recorded identity and could not be quarantined: {error}"),
+                        "Re-run `jet fetch` after `jet clean`. If the problem persists, audit the source before rebuilding.",
+                    );
+                    return None;
+                }
+                theme.error_coded(
+                    "E2604",
+                    &format!(
+                        "Integrity check failed for `{}` `{}` — expected `{}`, got `{actual}`.",
+                        candidate.name, candidate.version, candidate.envelope.output_hash
+                    ),
+                    "The cached artifact differs from its recorded identity. Jetpack quarantined it instead of using or silently repairing it.",
+                    "Re-run `jet fetch` to rebuild it. If the problem persists, audit the source before rebuilding.",
+                );
+                return None;
+            }
+            Err(error) => {
+                theme.error_coded(
+                    "E2604",
+                    &format!(
+                        "Integrity check failed for `{}` `{}` — expected `{}`, got `verification unavailable`.",
+                        candidate.name, candidate.version, candidate.envelope.output_hash
+                    ),
+                    &format!("Jetpack could not verify the cached artifact: {error}"),
+                    "Re-run the command after the current Jetpack operation finishes. If the problem persists, audit the cache root.",
+                );
+                return None;
+            }
+        }
+    }
     match Provider::realize_adapter(plan, &ctx) {
         Ok(r) => {
             theme.ok(&format!(
@@ -313,7 +435,7 @@ fn realize_adapter(
             ));
             theme.detail(&theme.gray(&r.out));
             let state = r.source_state;
-            match Store::record(
+            match Store::record_verified(
                 roots,
                 &r.name,
                 &r.version,
@@ -322,8 +444,9 @@ fn realize_adapter(
                 &r.bin,
                 &r.rlib,
                 &r.envelope,
+                &r.cache_identity,
             ) {
-                Ok(entry) => Some((entry, state)),
+                Ok(entry) => Some((entry, state, None)),
                 Err(e) => {
                     theme.error(
                         "could not record the adapted package",

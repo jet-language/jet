@@ -47,6 +47,8 @@ pub struct Env {
     pub label: String,
     pub prompt_path: PromptPathMode,
     pub prompt_strip: PromptStripMode,
+    /// Cache verification leases stay live through child process handoff.
+    pub cache_leases: Vec<super::Store::CacheLease>,
 }
 
 impl Env {
@@ -352,6 +354,7 @@ mod tests {
             label: Syntax::JETPACK_PROMPT_LABEL.to_string(),
             prompt_path: PromptPathMode::Short,
             prompt_strip: PromptStripMode::Off,
+            cache_leases: Vec::new(),
         }
     }
 

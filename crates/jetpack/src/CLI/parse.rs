@@ -183,6 +183,17 @@ pub fn main(args: Vec<String>) -> i32 {
     };
     let parsed = parse_args(rest);
     let theme = Theme::resolve(parsed.flags.no_color);
+    if let Err(error) = Store::migrate_nix_gc_roots(&Store::resolve()) {
+        theme.error_coded(
+            "E2604",
+            &format!(
+                "Integrity check failed for `Nix compatibility closure` `legacy` — expected `durable GC root`, got `{error}`."
+            ),
+            "An existing Nix-backed Hangar record is not protected from Nix garbage collection.",
+            "Restore access to `nix-store`, then rerun this command before using the package.",
+        );
+        return 2;
+    }
 
     match verb.as_str() {
         "run" => cmd_run(&theme, &parsed),

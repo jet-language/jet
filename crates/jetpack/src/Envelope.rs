@@ -10,6 +10,8 @@
 //! substituted one, so the resolver never has to care which path produced it.
 
 use crate::SHA256;
+use std::collections::BTreeMap;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 /// The A4 envelope. `Default` is the empty envelope (older records / providers
@@ -63,57 +65,132 @@ pub fn host_platform() -> String {
 /// paths retain the legacy text identity only so old fixture records remain
 /// readable; cache verification rejects a missing output before trusting it.
 pub fn output_hash_of(out: &str) -> String {
+    try_output_hash_of(out).unwrap_or_default()
+}
+
+/// Canonical archive digest. The byte stream records every node's relative
+/// path, type, mode, and type-specific payload. Symlinks are never followed
+/// while encoding and must resolve inside the root. Hardlink identity is
+/// explicit; unsupported special files fail closed.
+pub fn try_output_hash_of(out: &str) -> Result<String, String> {
     let p = Path::new(out);
-    if p.is_dir() {
-        format!("sha256-{}", tree_content_hash(p))
-    } else if p.is_symlink() {
-        let target = std::fs::read_link(p).unwrap_or_default();
-        let mut input = b"symlink\0".to_vec();
-        input.extend_from_slice(target.to_string_lossy().as_bytes());
-        format!("sha256-{}", SHA256::sha256_hex(&input))
-    } else if p.is_file() {
-        let bytes = std::fs::read(p).unwrap_or_default();
-        let mut input = b"file\0".to_vec();
-        input.extend_from_slice(&(bytes.len() as u64).to_be_bytes());
-        input.extend_from_slice(&bytes);
-        format!("sha256-{}", SHA256::sha256_hex(&input))
+    if !p.exists() && !p.is_symlink() {
+        return Err(format!("output `{out}` does not exist"));
+    }
+    if fs::symlink_metadata(p)
+        .map_err(|e| format!("cannot inspect `{out}`: {e}"))?
+        .file_type()
+        .is_symlink()
+    {
+        return Err(format!("output root `{out}` must not be a symlink"));
+    }
+    let root = fs::canonicalize(p).map_err(|e| format!("cannot resolve `{out}`: {e}"))?;
+    let mut archive = b"jet-hangar-archive-v1\0".to_vec();
+    let mut hardlinks = BTreeMap::new();
+    encode_node(&root, &root, Path::new(""), &mut archive, &mut hardlinks)?;
+    Ok(format!("sha256-{}", SHA256::sha256_hex(&archive)))
+}
+
+fn encode_node(
+    root: &Path,
+    path: &Path,
+    rel: &Path,
+    archive: &mut Vec<u8>,
+    hardlinks: &mut BTreeMap<(u64, u64), PathBuf>,
+) -> Result<(), String> {
+    let meta = fs::symlink_metadata(path)
+        .map_err(|e| format!("cannot inspect `{}`: {e}", path.display()))?;
+    let kind = meta.file_type();
+    let rel_bytes = path_bytes(rel);
+    if kind.is_dir() {
+        record_header(archive, b'D', &rel_bytes, mode_of(&meta));
+        let mut entries = fs::read_dir(path)
+            .map_err(|e| format!("cannot read `{}`: {e}", path.display()))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("cannot read `{}`: {e}", path.display()))?;
+        entries.sort_by_key(|entry| path_bytes(Path::new(&entry.file_name())));
+        for entry in entries {
+            let child_rel = rel.join(entry.file_name());
+            encode_node(root, &entry.path(), &child_rel, archive, hardlinks)?;
+        }
+    } else if kind.is_symlink() {
+        let target = fs::read_link(path)
+            .map_err(|e| format!("cannot read symlink `{}`: {e}", path.display()))?;
+        if target.is_absolute() {
+            return Err(format!("symlink `{}` escapes output root", path.display()));
+        }
+        let resolved = fs::canonicalize(path)
+            .map_err(|e| format!("symlink `{}` is dangling or cyclic: {e}", path.display()))?;
+        if !resolved.starts_with(root) {
+            return Err(format!("symlink `{}` escapes output root", path.display()));
+        }
+        record_header(archive, b'L', &rel_bytes, mode_of(&meta));
+        push_bytes(archive, &path_bytes(&target));
+    } else if kind.is_file() {
+        let key = file_identity(&meta);
+        if let Some(first) = key.and_then(|key| hardlinks.get(&key)) {
+            record_header(archive, b'H', &rel_bytes, mode_of(&meta));
+            push_bytes(archive, &path_bytes(first));
+            return Ok(());
+        }
+        if let Some(key) = key {
+            hardlinks.insert(key, rel.to_path_buf());
+        }
+        record_header(archive, b'F', &rel_bytes, mode_of(&meta));
+        let bytes = fs::read(path)
+            .map_err(|e| format!("cannot read `{}`: {e}", path.display()))?;
+        push_bytes(archive, &bytes);
     } else {
-        format!("sha256-{}", SHA256::sha256_hex(out.as_bytes()))
+        return Err(format!(
+            "unsupported special file in output: `{}`",
+            path.display()
+        ));
     }
+    Ok(())
 }
 
-/// A content fingerprint over a whole directory tree: every file's relative
-/// path, length, and bytes, in sorted order. Addresses *any* tree (unlike the
-/// `.jet`-only `SHA256::tree_hash`).
-pub fn tree_content_hash(root: &Path) -> String {
-    let mut files: Vec<PathBuf> = Vec::new();
-    collect_files(root, &mut files);
-    files.sort();
-    let mut input: Vec<u8> = Vec::new();
-    for path in &files {
-        let rel = path.strip_prefix(root).unwrap_or(path).to_string_lossy();
-        input.extend_from_slice(rel.as_bytes());
-        input.push(0);
-        if let Ok(bytes) = std::fs::read(path) {
-            input.extend_from_slice(&(bytes.len() as u64).to_be_bytes());
-            input.extend_from_slice(&bytes);
-        }
-    }
-    SHA256::sha256_hex(&input)
+fn record_header(out: &mut Vec<u8>, kind: u8, path: &[u8], mode: u32) {
+    out.push(kind);
+    push_bytes(out, path);
+    out.extend_from_slice(&mode.to_be_bytes());
 }
 
-fn collect_files(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(rd) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for entry in rd.flatten() {
-        let p = entry.path();
-        if p.is_dir() {
-            collect_files(&p, out);
-        } else {
-            out.push(p);
-        }
-    }
+fn push_bytes(out: &mut Vec<u8>, bytes: &[u8]) {
+    out.extend_from_slice(&(bytes.len() as u64).to_be_bytes());
+    out.extend_from_slice(bytes);
+}
+
+#[cfg(unix)]
+fn path_bytes(path: &Path) -> Vec<u8> {
+    use std::os::unix::ffi::OsStrExt as _;
+    path.as_os_str().as_bytes().to_vec()
+}
+
+#[cfg(not(unix))]
+fn path_bytes(path: &Path) -> Vec<u8> {
+    path.to_string_lossy().as_bytes().to_vec()
+}
+
+#[cfg(unix)]
+fn mode_of(meta: &fs::Metadata) -> u32 {
+    use std::os::unix::fs::MetadataExt as _;
+    meta.mode()
+}
+
+#[cfg(not(unix))]
+fn mode_of(meta: &fs::Metadata) -> u32 {
+    u32::from(meta.permissions().readonly())
+}
+
+#[cfg(unix)]
+fn file_identity(meta: &fs::Metadata) -> Option<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt as _;
+    (meta.nlink() > 1).then(|| (meta.dev(), meta.ino()))
+}
+
+#[cfg(not(unix))]
+fn file_identity(_meta: &fs::Metadata) -> Option<(u64, u64)> {
+    None
 }
 
 #[cfg(test)]
@@ -187,5 +264,77 @@ mod tests {
             "signature slot stays empty until #13"
         );
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn canonical_archive_covers_empty_directories() {
+        let dir = scratch("empty-dir");
+        fs::create_dir_all(dir.join("empty")).unwrap();
+        let with_empty = try_output_hash_of(&dir.to_string_lossy()).unwrap();
+        fs::remove_dir(dir.join("empty")).unwrap();
+        let without_empty = try_output_hash_of(&dir.to_string_lossy()).unwrap();
+        assert_ne!(with_empty, without_empty);
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn canonical_archive_covers_modes_and_hardlinks() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let dir = scratch("mode-hardlink");
+        let file = dir.join("file");
+        fs::write(&file, "same bytes").unwrap();
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o644)).unwrap();
+        let plain = try_output_hash_of(&dir.to_string_lossy()).unwrap();
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o755)).unwrap();
+        let executable = try_output_hash_of(&dir.to_string_lossy()).unwrap();
+        assert_ne!(plain, executable);
+
+        fs::hard_link(&file, dir.join("alias")).unwrap();
+        let hardlinked = try_output_hash_of(&dir.to_string_lossy()).unwrap();
+        fs::remove_file(dir.join("alias")).unwrap();
+        fs::copy(&file, dir.join("alias")).unwrap();
+        let copied = try_output_hash_of(&dir.to_string_lossy()).unwrap();
+        assert_ne!(hardlinked, copied);
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn canonical_archive_rejects_symlink_escape_cycle_and_special_file() {
+        use std::os::unix::fs::symlink;
+        use std::os::unix::net::UnixListener;
+
+        let dir = scratch("hostile-nodes");
+        let outside = dir.parent().unwrap().join("outside-cache-proof");
+        fs::write(&outside, "outside").unwrap();
+        symlink(&outside, dir.join("escape")).unwrap();
+        assert!(try_output_hash_of(&dir.to_string_lossy()).is_err());
+        fs::remove_file(dir.join("escape")).unwrap();
+
+        symlink("b", dir.join("a")).unwrap();
+        symlink("a", dir.join("b")).unwrap();
+        assert!(try_output_hash_of(&dir.to_string_lossy()).is_err());
+        fs::remove_file(dir.join("a")).unwrap();
+        fs::remove_file(dir.join("b")).unwrap();
+
+        let socket = UnixListener::bind(dir.join("socket")).unwrap();
+        assert!(try_output_hash_of(&dir.to_string_lossy()).is_err());
+        drop(socket);
+        fs::remove_dir_all(dir).ok();
+        fs::remove_file(outside).ok();
+    }
+
+    fn scratch(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "env-{tag}-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        dir
     }
 }
