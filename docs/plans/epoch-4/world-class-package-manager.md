@@ -38,15 +38,20 @@ Strong foundations already exist:
 JP0 stop-line now enforces three truth boundaries:
 
 - cache reuse verifies output existence, current canonical digest, platform,
-  exact source/provenance policy, signature policy, and closure reachability;
-  invalid Jet-owned candidates are removed and rebuilt instead of reported as
-  hits;
+  exact normalized source/manifest/recipe/toolchain policy, signature policy,
+  and canonical closure reachability through one realization boundary used by
+  CLI and JetOS. Invalid Jet-owned candidates are quarantined and E2604 stops
+  the command; repair is never silent. Unsigned reuse is limited to an exact
+  Hangar-owned local output. Signed imports fail closed until an immutable
+  in-process verifier ships. Nix compatibility outputs always re-enter Nix;
+  Jetpack does not claim an early cache hit from spelling-only identity;
 - every existing Nix compatibility output recorded in Hangar gets a durable
   `nix-store --add-root --indirect` root protecting its transitive closure;
 - canonical output archives hash node type, mode, bytes, symlink target, empty
-  directories, and hardlink identity; reject escapes, cycles, and special
-  files. Sandbox capability detection stays fallback until a child actually
-  enters a jail.
+  directories, and complete hardlink identity; reject outside aliases, escapes,
+  cycles, concurrent mutation, and special files. Local outputs are sealed
+  read-only, then revalidated before and after child consumption. Sandbox
+  capability detection stays fallback until a child actually enters a jail.
 
 Production blockers after that stop-line:
 

@@ -184,13 +184,19 @@ pub fn main(args: Vec<String>) -> i32 {
     let parsed = parse_args(rest);
     let theme = Theme::resolve(parsed.flags.no_color);
     if let Err(error) = Store::migrate_nix_gc_roots(&Store::resolve()) {
-        theme.error_coded(
-            "E2604",
-            &format!(
-                "Integrity check failed for `Nix compatibility closure` `legacy` — expected `durable GC root`, got `{error}`."
-            ),
-            "An existing Nix-backed Hangar record is not protected from Nix garbage collection.",
-            "Restore access to `nix-store`, then rerun this command before using the package.",
+        Store::report_integrity(
+            &theme,
+            &Store::IntegrityFailure {
+                package: "Nix compatibility closure".to_string(),
+                version: "legacy".to_string(),
+                expected: "durable GC root".to_string(),
+                actual: error.to_string(),
+                reason: "Nix GC-root migration".to_string(),
+                disposition: "Jetpack stopped before any package path could be consumed."
+                    .to_string(),
+                fix: "Restore access to `nix-store`, then rerun this command before using the package."
+                    .to_string(),
+            },
         );
         return 2;
     }

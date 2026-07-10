@@ -12,6 +12,7 @@
 use crate::SHA256;
 use std::collections::BTreeMap;
 use std::fs;
+use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
 /// The A4 envelope. `Default` is the empty envelope (older records / providers
@@ -88,7 +89,21 @@ pub fn try_output_hash_of(out: &str) -> Result<String, String> {
     let mut archive = b"jet-hangar-archive-v1\0".to_vec();
     let mut hardlinks = BTreeMap::new();
     encode_node(&root, &root, Path::new(""), &mut archive, &mut hardlinks)?;
+    for link in hardlinks.values() {
+        if link.seen != link.total {
+            return Err(format!(
+                "hardlink `{}` has {} link(s), but only {} are inside the output",
+                link.first.display(), link.total, link.seen
+            ));
+        }
+    }
     Ok(format!("sha256-{}", SHA256::sha256_hex(&archive)))
+}
+
+struct HardlinkState {
+    first: PathBuf,
+    seen: u64,
+    total: u64,
 }
 
 fn encode_node(
@@ -96,13 +111,19 @@ fn encode_node(
     path: &Path,
     rel: &Path,
     archive: &mut Vec<u8>,
-    hardlinks: &mut BTreeMap<(u64, u64), PathBuf>,
+    hardlinks: &mut BTreeMap<(u64, u64), HardlinkState>,
 ) -> Result<(), String> {
     let meta = fs::symlink_metadata(path)
         .map_err(|e| format!("cannot inspect `{}`: {e}", path.display()))?;
     let kind = meta.file_type();
     let rel_bytes = path_bytes(rel);
     if kind.is_dir() {
+        let before = directory_identity(&meta);
+        let resolved = fs::canonicalize(path)
+            .map_err(|e| format!("cannot resolve directory `{}`: {e}", path.display()))?;
+        if !resolved.starts_with(root) {
+            return Err(format!("directory `{}` escapes output root", path.display()));
+        }
         record_header(archive, b'D', &rel_bytes, mode_of(&meta));
         let mut entries = fs::read_dir(path)
             .map_err(|e| format!("cannot read `{}`: {e}", path.display()))?
@@ -112,6 +133,11 @@ fn encode_node(
         for entry in entries {
             let child_rel = rel.join(entry.file_name());
             encode_node(root, &entry.path(), &child_rel, archive, hardlinks)?;
+        }
+        let after = fs::symlink_metadata(path)
+            .map_err(|e| format!("directory `{}` changed while hashing: {e}", path.display()))?;
+        if before != directory_identity(&after) {
+            return Err(format!("directory `{}` changed while hashing", path.display()));
         }
     } else if kind.is_symlink() {
         let target = fs::read_link(path)
@@ -128,17 +154,24 @@ fn encode_node(
         push_bytes(archive, &path_bytes(&target));
     } else if kind.is_file() {
         let key = file_identity(&meta);
-        if let Some(first) = key.and_then(|key| hardlinks.get(&key)) {
+        if let Some(state) = key.and_then(|key| hardlinks.get_mut(&key)) {
+            state.seen += 1;
             record_header(archive, b'H', &rel_bytes, mode_of(&meta));
-            push_bytes(archive, &path_bytes(first));
+            push_bytes(archive, &path_bytes(&state.first));
             return Ok(());
         }
         if let Some(key) = key {
-            hardlinks.insert(key, rel.to_path_buf());
+            hardlinks.insert(
+                key,
+                HardlinkState {
+                    first: rel.to_path_buf(),
+                    seen: 1,
+                    total: link_count(&meta),
+                },
+            );
         }
         record_header(archive, b'F', &rel_bytes, mode_of(&meta));
-        let bytes = fs::read(path)
-            .map_err(|e| format!("cannot read `{}`: {e}", path.display()))?;
+        let bytes = read_file_stable(path, &meta)?;
         push_bytes(archive, &bytes);
     } else {
         return Err(format!(
@@ -147,6 +180,36 @@ fn encode_node(
         ));
     }
     Ok(())
+}
+
+fn read_file_stable(path: &Path, expected: &fs::Metadata) -> Result<Vec<u8>, String> {
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        const O_NOFOLLOW: i32 = 0x20000;
+        options.custom_flags(O_NOFOLLOW);
+    }
+    let mut file = options
+        .open(path)
+        .map_err(|e| format!("cannot open `{}` without following links: {e}", path.display()))?;
+    let before = file
+        .metadata()
+        .map_err(|e| format!("cannot inspect open file `{}`: {e}", path.display()))?;
+    if stable_file_identity(&before) != stable_file_identity(expected) {
+        return Err(format!("file `{}` changed before hashing", path.display()));
+    }
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes)
+        .map_err(|e| format!("cannot read `{}`: {e}", path.display()))?;
+    let after = file
+        .metadata()
+        .map_err(|e| format!("cannot re-inspect `{}`: {e}", path.display()))?;
+    if stable_file_identity(&before) != stable_file_identity(&after) {
+        return Err(format!("file `{}` changed while hashing", path.display()));
+    }
+    Ok(bytes)
 }
 
 fn record_header(out: &mut Vec<u8>, kind: u8, path: &[u8], mode: u32) {
@@ -186,6 +249,56 @@ fn mode_of(meta: &fs::Metadata) -> u32 {
 fn file_identity(meta: &fs::Metadata) -> Option<(u64, u64)> {
     use std::os::unix::fs::MetadataExt as _;
     (meta.nlink() > 1).then(|| (meta.dev(), meta.ino()))
+}
+
+#[cfg(unix)]
+fn link_count(meta: &fs::Metadata) -> u64 {
+    use std::os::unix::fs::MetadataExt as _;
+    meta.nlink()
+}
+
+#[cfg(not(unix))]
+fn link_count(_meta: &fs::Metadata) -> u64 {
+    1
+}
+
+#[cfg(unix)]
+fn directory_identity(meta: &fs::Metadata) -> (u64, u64) {
+    use std::os::unix::fs::MetadataExt as _;
+    (meta.dev(), meta.ino())
+}
+
+#[cfg(not(unix))]
+fn directory_identity(meta: &fs::Metadata) -> (u64, u64) {
+    (meta.len(), u64::from(meta.permissions().readonly()))
+}
+
+#[cfg(unix)]
+fn stable_file_identity(meta: &fs::Metadata) -> (u64, u64, u64, i64, i64, u32) {
+    use std::os::unix::fs::MetadataExt as _;
+    (
+        meta.dev(),
+        meta.ino(),
+        meta.len(),
+        meta.mtime(),
+        meta.mtime_nsec(),
+        meta.mode(),
+    )
+}
+
+#[cfg(not(unix))]
+fn stable_file_identity(meta: &fs::Metadata) -> (u64, u64, u64, i64, i64, u32) {
+    (
+        0,
+        0,
+        meta.len(),
+        meta.modified()
+            .ok()
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .map_or(0, |duration| duration.as_secs() as i64),
+        0,
+        u32::from(meta.permissions().readonly()),
+    )
 }
 
 #[cfg(not(unix))]
@@ -297,6 +410,23 @@ mod tests {
         fs::copy(&file, dir.join("alias")).unwrap();
         let copied = try_output_hash_of(&dir.to_string_lossy()).unwrap();
         assert_ne!(hardlinked, copied);
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn canonical_archive_rejects_hardlinks_outside_output() {
+        let dir = scratch("outside-hardlink");
+        let file = dir.join("payload");
+        let outside = dir.parent().unwrap().join(format!(
+            "outside-hardlink-{}",
+            std::process::id()
+        ));
+        fs::write(&file, "trusted").unwrap();
+        fs::hard_link(&file, &outside).unwrap();
+        let error = try_output_hash_of(&dir.to_string_lossy()).unwrap_err();
+        assert!(error.contains("only 1 are inside"), "{error}");
+        fs::remove_file(outside).ok();
         fs::remove_dir_all(dir).ok();
     }
 

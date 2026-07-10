@@ -120,8 +120,36 @@ impl Scratch {
 
 impl Drop for Scratch {
     fn drop(&mut self) {
+        make_tree_writable(&self.path);
         let _ = fs::remove_dir_all(&self.path);
     }
+}
+
+#[cfg(unix)]
+fn make_tree_writable(path: &Path) {
+    use std::os::unix::fs::PermissionsExt as _;
+    let Ok(meta) = fs::symlink_metadata(path) else {
+        return;
+    };
+    if meta.is_dir() {
+        for entry in fs::read_dir(path).unwrap() {
+            make_tree_writable(&entry.unwrap().path());
+        }
+    }
+    if !meta.file_type().is_symlink() {
+        let mode = if meta.is_dir() { 0o755 } else { meta.permissions().mode() | 0o600 };
+        fs::set_permissions(path, fs::Permissions::from_mode(mode)).unwrap();
+    }
+}
+
+#[cfg(not(unix))]
+fn make_tree_writable(path: &Path) {
+    let Ok(meta) = fs::metadata(path) else {
+        return;
+    };
+    let mut permissions = meta.permissions();
+    permissions.set_readonly(false);
+    fs::set_permissions(path, permissions).unwrap();
 }
 
 fn example_fixtures() -> PathBuf {
@@ -338,16 +366,27 @@ fn override_draft_writes_reviewed_workspace_policy_and_explains_it() {
 #[test]
 fn build_resolves_fixture_ref() {
     let root = Scratch::new("root");
-    let out = jetpack()
-        .args(["build", "nixpkgs:fastfetch", "--no-color", "--offline"])
-        .env("JETPACK_ROOT", &root.path)
-        .env("JETPACK_FIXTURES", example_fixtures())
-        .output()
-        .unwrap();
+    let run = || {
+        jetpack()
+            .args(["build", "nixpkgs:fastfetch", "--no-color", "--offline"])
+            .env("JETPACK_ROOT", &root.path)
+            .env("JETPACK_FIXTURES", example_fixtures())
+            .output()
+            .unwrap()
+    };
+    let out = run();
     assert!(out.status.success());
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("fastfetch"), "stderr: {stderr}");
     assert!(stderr.contains("/nix/store/"), "stderr: {stderr}");
+    let repeated = run();
+    assert!(repeated.status.success());
+    let repeated_stderr = String::from_utf8_lossy(&repeated.stderr);
+    assert!(!repeated_stderr.contains("E2604"), "stderr: {repeated_stderr}");
+    assert!(
+        repeated_stderr.contains("substituted"),
+        "Nix fixture must re-enter its provider, not claim a Jetpack cache hit: {repeated_stderr}"
+    );
 }
 
 #[test]
@@ -5818,6 +5857,40 @@ fn jet_build_reports_source_states() {
 }
 
 #[test]
+fn jet_build_rejects_cache_after_manifest_semantics_change() {
+    let (base, proj, root) = core_hello_project("truth-manifest-identity");
+    let manifest = base.join("jet-pkgs/pkg.jet");
+    fs::write(
+        &manifest,
+        "payload: { name: \"demo\", version: \"1.0.0\" }\npackages: { hello: executable }\n",
+    )
+    .unwrap();
+    let run = || {
+        jetpack()
+            .args(["build", "--no-color"])
+            .current_dir(&proj)
+            .env("JETPACK_ROOT", &root)
+            .env("PATH", "/usr/bin:/bin")
+            .output()
+            .unwrap()
+    };
+    assert!(run().status.success());
+    fs::write(
+        &manifest,
+        "payload: { name: \"demo\", version: \"2.0.0\" }\npackages: { hello: executable }\n",
+    )
+    .unwrap();
+    let rejected = run();
+    assert!(!rejected.status.success());
+    let stderr = String::from_utf8_lossy(&rejected.stderr);
+    assert!(stderr.contains("E2604"), "stderr: {stderr}");
+    assert!(
+        stderr.contains("recipe identity verification"),
+        "stderr: {stderr}"
+    );
+}
+
+#[test]
 fn jet_build_never_reports_deleted_output_as_cached() {
     let (_base, proj, root) = core_hello_project("truth-deleted-cache");
     let run = || {
@@ -5835,6 +5908,7 @@ fn jet_build_never_reports_deleted_output_as_cached() {
         dev_mode: false,
     };
     let entry = jetpack::Store::find_by_reference(&roots, "mine:hello").unwrap();
+    make_tree_writable(Path::new(&entry.out));
     fs::remove_dir_all(&entry.out).unwrap();
 
     let rejected = run();
@@ -5869,6 +5943,7 @@ fn jet_build_never_reports_tampered_output_as_cached() {
         dev_mode: false,
     };
     let entry = jetpack::Store::find_by_reference(&roots, "mine:hello").unwrap();
+    make_tree_writable(Path::new(&entry.out));
     fs::write(Path::new(&entry.out).join("bin/hello"), "tampered").unwrap();
 
     let rejected = run();

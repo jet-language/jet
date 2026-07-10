@@ -93,84 +93,6 @@ fn realize_ref_outcome(
     // store dir also seeds the U9 remote probe's source-cache lookup, so it is
     // resolved before the fixtures decision below.
     let store_dir = roots.hangar_dir();
-    let cache_fixtures = if flags.offline {
-        fixtures_for(flags)
-    } else {
-        flags.fixtures.clone()
-    };
-    let cache_ctx = Provider::Ctx {
-        fixtures: cache_fixtures.as_deref(),
-        store_dir: &store_dir,
-        offline: flags.offline,
-    };
-    if let Some(candidate) = Store::find_by_reference(roots, &spec.raw) {
-        if let Some(expectation) = Provider::cache_expectation(spec, table, &cache_ctx) {
-            match Store::find_verified_by_reference(roots, &spec.raw, &expectation) {
-                Ok(Some(hit)) => {
-                    drop(spinner);
-                    let entry = hit.entry;
-                    let line = theme.render_row(&entry.name, name_w, &entry.version, "cached");
-                    match style {
-                        RowStyle::Ledger => {
-                            theme.ok(&format!("{} {}", theme.bold(&entry.name), "cached"));
-                            theme.detail(&theme.gray(&entry.out));
-                        }
-                        RowStyle::Ready => theme.ready_row(&entry.name, name_w, &entry.version),
-                        RowStyle::Silent => {}
-                    }
-                    return RefOutcome::Realized(
-                        entry,
-                        Provider::SourceState::Cached,
-                        line,
-                        Some(hit.lease),
-                    );
-                }
-                Ok(None) => {
-                    let actual = super::Envelope::try_output_hash_of(&candidate.out)
-                        .unwrap_or_else(|error| error);
-                    if let Err(error) =
-                        Store::quarantine_invalid_entry(roots, &candidate, &expectation)
-                    {
-                        drop(spinner);
-                        theme.error_coded(
-                            "E2604",
-                            &format!(
-                                "Integrity check failed for `{}` `{}` — expected `{}`, got `{actual}`.",
-                                candidate.name, candidate.version, candidate.envelope.output_hash
-                            ),
-                            &format!("The cached artifact differs from its recorded identity and could not be quarantined: {error}"),
-                            "Re-run `jet fetch` after `jet clean`. If the problem persists, audit the source before rebuilding.",
-                        );
-                        return RefOutcome::Failed;
-                    }
-                    drop(spinner);
-                    theme.error_coded(
-                        "E2604",
-                        &format!(
-                            "Integrity check failed for `{}` `{}` — expected `{}`, got `{actual}`.",
-                            candidate.name, candidate.version, candidate.envelope.output_hash
-                        ),
-                        "The cached artifact differs from its recorded identity. Jetpack quarantined it instead of silently repairing or using it.",
-                        "Re-run `jet fetch` after `jet clean`. If the problem persists, audit the source before rebuilding.",
-                    );
-                    return RefOutcome::Failed;
-                }
-                Err(error) => {
-                    drop(spinner);
-                    theme.error_coded(
-                        "E2604",
-                        &format!(
-                            "Integrity check failed for `{}` `{}` — expected `{}`, got `verification unavailable`.",
-                            candidate.name, candidate.version, candidate.envelope.output_hash
-                        ),
-                        &format!("Jetpack could not lock the hangar for verification: {error}"),
-                        "Re-run `jet fetch` after `jet clean`. If the problem persists, audit the source before rebuilding.",
-                    );
-                    return RefOutcome::Failed;
-                }
-            }
-        }
-    }
     if flags.offline
         && Provider::uses_nix_provider(spec, table, flags.offline, &store_dir)
         && fixtures_for(flags).is_none()
@@ -221,62 +143,47 @@ fn realize_ref_outcome(
         offline: flags.offline,
     };
     let started = std::time::Instant::now();
-    let result = Provider::realize(spec, table, &ctx);
+    let result = Store::realize_verified(
+        roots,
+        &ctx,
+        Store::RealizeRequest::Package { spec, table },
+    );
     drop(spinner);
     match result {
-        Ok(r) => {
+        Ok(realized) => {
             // T4 (D-JPK-CACHE1): one ledger row per package — how it was
             // satisfied, and how long a from-source build took.
             let elapsed = started.elapsed();
-            let state = if r.source_state == Provider::SourceState::Built && elapsed.as_secs() >= 1
-            {
+            let state = if realized.source_state == Provider::SourceState::Built
+                && elapsed.as_secs() >= 1 {
                 format!("built {}", Output::human_duration(elapsed))
             } else {
-                r.source_state.label().to_string()
+                realized.source_state.label().to_string()
             };
             // Nix-provided packages often carry no version of their own; the
             // store path's `<hash>-<name>-<version>` basename usually does.
-            let version = if r.version.is_empty() {
-                version_from_out(&r.name, &r.out).unwrap_or_default()
+            let version = if realized.entry.version.is_empty() {
+                version_from_out(&realized.entry.name, &realized.entry.out).unwrap_or_default()
             } else {
-                r.version.clone()
+                realized.entry.version.clone()
             };
-            let line = theme.render_row(&r.name, name_w, &version, &state);
+            let line = theme.render_row(&realized.entry.name, name_w, &version, &state);
             match style {
                 RowStyle::Ledger => {
-                    theme.row(&r.name, name_w, &version, &state);
-                    theme.detail(&theme.gray(&r.out));
+                    theme.row(&realized.entry.name, name_w, &version, &state);
+                    theme.detail(&theme.gray(&realized.entry.out));
                 }
-                RowStyle::Ready => theme.ready_row(&r.name, name_w, &version),
+                RowStyle::Ready => theme.ready_row(&realized.entry.name, name_w, &version),
                 RowStyle::Silent => {}
             }
-            let state = r.source_state;
-            match Store::record_verified(
-                roots,
-                &r.name,
-                &r.version,
-                &r.reference,
-                &r.out,
-                &r.bin,
-                &r.rlib,
-                &r.envelope,
-                &r.cache_identity,
-            ) {
-                Ok(entry) => Some((entry, state)),
-                Err(e) => {
-                    theme.error(
-                        "could not record the package",
-                        &format!("writing to the Jetpack store failed: {e}"),
-                        "check permissions on the store root, or set JETPACK_ROOT.",
-                    );
-                    return RefOutcome::Failed;
-                }
-            }
-            .map_or(RefOutcome::Failed, |(entry, state)| {
-                RefOutcome::Realized(entry, state, line, None)
-            })
+            RefOutcome::Realized(
+                realized.entry,
+                realized.source_state,
+                line,
+                realized.lease,
+            )
         }
-        Err(e) => {
+        Err(Store::RealizeError::Provider(e)) => {
             if matches!(e, ProviderError::NixMissing) {
                 if let Some(need) =
                     Provider::needs_nix_bridge(spec, table, flags.offline, &store_dir)
@@ -285,6 +192,10 @@ fn realize_ref_outcome(
                 }
             }
             report_provider_error(theme, &e);
+            RefOutcome::Failed
+        }
+        Err(error) => {
+            report_realize_error(theme, &error);
             RefOutcome::Failed
         }
     }
@@ -365,105 +276,39 @@ fn realize_adapter(
         store_dir: &store_dir,
         offline: flags.offline,
     };
-    let reference = format!("adapt:{}:{}", plan.name, plan.source);
-    let expectation = match Provider::adapter_cache_expectation(plan, &ctx) {
-        Ok(expectation) => expectation,
-        Err(error) => {
-            report_provider_error(theme, &error);
-            return None;
-        }
-    };
-    if let Some(candidate) = Store::find_by_reference(roots, &reference) {
-        match Store::find_verified_by_reference(roots, &reference, &expectation) {
-            Ok(Some(hit)) => {
-                theme.ok(&format!("{} cached", theme.bold(&hit.entry.name)));
-                theme.detail(&theme.gray(&hit.entry.out));
-                return Some((
-                    hit.entry,
-                    Provider::SourceState::Cached,
-                    Some(hit.lease),
-                ));
-            }
-            Ok(None) => {
-                let actual = super::Envelope::try_output_hash_of(&candidate.out)
-                    .unwrap_or_else(|error| error);
-                if let Err(error) =
-                    Store::quarantine_invalid_entry(roots, &candidate, &expectation)
-                {
-                    theme.error_coded(
-                        "E2604",
-                        &format!(
-                            "Integrity check failed for `{}` `{}` — expected `{}`, got `{actual}`.",
-                            candidate.name, candidate.version, candidate.envelope.output_hash
-                        ),
-                        &format!("The cached artifact differs from its recorded identity and could not be quarantined: {error}"),
-                        "Re-run `jet fetch` after `jet clean`. If the problem persists, audit the source before rebuilding.",
-                    );
-                    return None;
-                }
-                theme.error_coded(
-                    "E2604",
-                    &format!(
-                        "Integrity check failed for `{}` `{}` — expected `{}`, got `{actual}`.",
-                        candidate.name, candidate.version, candidate.envelope.output_hash
-                    ),
-                    "The cached artifact differs from its recorded identity. Jetpack quarantined it instead of using or silently repairing it.",
-                    "Re-run `jet fetch` to rebuild it. If the problem persists, audit the source before rebuilding.",
-                );
-                return None;
-            }
-            Err(error) => {
-                theme.error_coded(
-                    "E2604",
-                    &format!(
-                        "Integrity check failed for `{}` `{}` — expected `{}`, got `verification unavailable`.",
-                        candidate.name, candidate.version, candidate.envelope.output_hash
-                    ),
-                    &format!("Jetpack could not verify the cached artifact: {error}"),
-                    "Re-run the command after the current Jetpack operation finishes. If the problem persists, audit the cache root.",
-                );
-                return None;
-            }
-        }
-    }
-    match Provider::realize_adapter(plan, &ctx) {
-        Ok(r) => {
+    match Store::realize_verified(roots, &ctx, Store::RealizeRequest::Adapter(plan)) {
+        Ok(realized) => {
             theme.ok(&format!(
                 "{} {}",
-                theme.bold(&r.name),
-                r.source_state.label()
+                theme.bold(&realized.entry.name),
+                realized.source_state.label()
             ));
-            theme.detail(&theme.gray(&r.out));
-            let state = r.source_state;
-            match Store::record_verified(
-                roots,
-                &r.name,
-                &r.version,
-                &r.reference,
-                &r.out,
-                &r.bin,
-                &r.rlib,
-                &r.envelope,
-                &r.cache_identity,
-            ) {
-                Ok(entry) => Some((entry, state, None)),
-                Err(e) => {
-                    theme.error(
-                        "could not record the adapted package",
-                        &format!("writing to the Jetpack store failed: {e}"),
-                        "check permissions on the store root, or set JETPACK_ROOT.",
-                    );
-                    None
-                }
-            }
+            theme.detail(&theme.gray(&realized.entry.out));
+            Some((realized.entry, realized.source_state, realized.lease))
         }
-        Err(e) => {
-            report_provider_error(theme, &e);
+        Err(Store::RealizeError::Provider(error)) => {
+            report_provider_error(theme, &error);
             if flags.shell_on_fail {
                 shell_on_failed_build(theme, roots, &plan.name);
             }
             None
         }
+        Err(error) => {
+            report_realize_error(theme, &error);
+            None
+        }
+    }
+}
+
+fn report_realize_error(theme: &Theme, error: &Store::RealizeError) {
+    match error {
+        Store::RealizeError::Integrity(failure) => Store::report_integrity(theme, failure),
+        Store::RealizeError::Store(error) => theme.error(
+            "could not update the Jetpack store",
+            &format!("the verified realization transaction failed: {error}"),
+            "check permissions on the store root, or set JETPACK_ROOT.",
+        ),
+        Store::RealizeError::Provider(error) => report_provider_error(theme, error),
     }
 }
 

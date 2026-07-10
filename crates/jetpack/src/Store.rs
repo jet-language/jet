@@ -19,9 +19,8 @@ use super::JSON::{self, Json};
 use crate::SHA256;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Command;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// The subdir of the resolved root that holds the content-addressed store.
@@ -50,6 +49,36 @@ impl Roots {
 /// GC roots). Never holds realized packages — those live in the shared hangar.
 pub fn managed_dir(project: &Path) -> PathBuf {
     project.join(crate::Syntax::SOURCE_ROOT_DIR)
+}
+
+/// Validate then seal a locally produced output before it becomes reusable.
+/// Files keep executable bits but lose all write bits; directories are sealed
+/// bottom-up. Canonical archive validation rejects external hardlinks first.
+pub fn seal_local_output(path: &Path) -> std::io::Result<()> {
+    super::Envelope::try_output_hash_of(&path.to_string_lossy())
+        .map_err(std::io::Error::other)?;
+    seal_node(path)
+}
+
+fn seal_node(path: &Path) -> std::io::Result<()> {
+    let meta = fs::symlink_metadata(path)?;
+    if meta.file_type().is_symlink() {
+        return Ok(());
+    }
+    if meta.is_dir() {
+        for entry in fs::read_dir(path)? {
+            seal_node(&entry?.path())?;
+        }
+    }
+    let mut permissions = meta.permissions();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        permissions.set_mode(permissions.mode() & !0o222);
+    }
+    #[cfg(not(unix))]
+    permissions.set_readonly(true);
+    fs::set_permissions(path, permissions)
 }
 
 /// The single unified lockfile path for `project` (`.jet/lock`, U2).
@@ -151,6 +180,67 @@ pub struct CacheExpectation {
     pub identity: CacheIdentity,
     pub owned_output: Option<PathBuf>,
     pub allow_unsigned_local: bool,
+}
+
+pub enum RealizeRequest<'a> {
+    Package {
+        spec: &'a super::RefSpec::RefSpec,
+        table: &'a super::RefSpec::SourceTable,
+    },
+    Adapter(&'a super::ModuleEval::AdapterPlan),
+}
+
+pub struct VerifiedRealization {
+    pub entry: StoreEntry,
+    pub source_state: super::Provider::SourceState,
+    pub lease: Option<CacheLease>,
+}
+
+#[derive(Debug)]
+pub enum RealizeError {
+    Provider(super::Provider::ProviderError),
+    Store(std::io::Error),
+    Integrity(IntegrityFailure),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IntegrityFailure {
+    pub package: String,
+    pub version: String,
+    pub expected: String,
+    pub actual: String,
+    pub reason: String,
+    pub disposition: String,
+    pub fix: String,
+}
+
+impl IntegrityFailure {
+    pub fn what(&self) -> String {
+        format!(
+            "Integrity check failed for `{}` `{}` — expected `{}`, got `{}`.",
+            self.package, self.version, self.expected, self.actual
+        )
+    }
+
+    pub fn why(&self) -> String {
+        format!(
+            "The cached artifact failed {}. {}",
+            self.reason, self.disposition
+        )
+    }
+
+    pub fn fix(&self) -> &str {
+        &self.fix
+    }
+}
+
+pub fn report_integrity(theme: &super::Output::Theme, failure: &IntegrityFailure) {
+    theme.error_coded(
+        "E2604",
+        &failure.what(),
+        &failure.why(),
+        failure.fix(),
+    );
 }
 
 /// Build the store id for a realization — human-readable `<name>-<version>`
@@ -425,6 +515,41 @@ pub struct VerifiedCacheHit {
 
 pub struct CacheLease {
     _guard: super::RuntimePolicy::FileLock,
+    _handles: Vec<fs::File>,
+    out: PathBuf,
+    expected_digest: String,
+    package: String,
+    version: String,
+}
+
+impl CacheLease {
+    /// Revalidate immediately before handing paths to a child consumer. The
+    /// archive reader uses no-follow handles and rejects concurrent mutation.
+    pub fn validate(&self) -> std::io::Result<()> {
+        let actual = super::Envelope::try_output_hash_of(&self.out.to_string_lossy())
+            .map_err(std::io::Error::other)?;
+        if actual != self.expected_digest {
+            return Err(std::io::Error::other(format!(
+                "leased output changed: expected {}, got {actual}",
+                self.expected_digest
+            )));
+        }
+        Ok(())
+    }
+
+    pub fn integrity_failure(&self) -> Option<IntegrityFailure> {
+        self.validate().err().map(|error| IntegrityFailure {
+            package: self.package.clone(),
+            version: self.version.clone(),
+            expected: self.expected_digest.clone(),
+            actual: error.to_string(),
+            reason: "race-safe pre-consumer revalidation".to_string(),
+            disposition: "Jetpack rejected it before handing any path to the consumer."
+                .to_string(),
+            fix: "Re-run `jet fetch` after `jet clean`. If the problem persists, audit the source before rebuilding."
+                .to_string(),
+        })
+    }
 }
 
 pub fn find_verified_by_reference(
@@ -438,20 +563,228 @@ pub fn find_verified_by_reference(
         .filter(|entry| entry.reference == reference)
         .filter(|entry| verify_cache_entry(roots, entry, reference, expectation).trusted())
         .max_by_key(|entry| entry.last_used_at);
-    Ok(entry.map(|entry| VerifiedCacheHit {
-        entry,
-        lease: CacheLease { _guard: lease },
+    let Some(entry) = entry else {
+        return Ok(None);
+    };
+    let handles = open_cache_handles(Path::new(&entry.out))?;
+    Ok(Some({
+        let out = PathBuf::from(&entry.out);
+        let expected_digest = entry.envelope.output_hash.clone();
+        let package = entry.name.clone();
+        let version = entry.version.clone();
+        VerifiedCacheHit {
+            entry,
+            lease: CacheLease {
+                _guard: lease,
+                _handles: handles,
+                out,
+                expected_digest,
+                package,
+                version,
+            },
+        }
     }))
 }
 
-fn verify_configured_signature(
-    roots: &Roots,
-    entry: &StoreEntry,
-    expectation: &CacheExpectation,
-) -> bool {
-    verify_configured_signature_with(roots, entry, expectation, verify_ed25519)
+fn open_cache_handles(root: &Path) -> std::io::Result<Vec<fs::File>> {
+    let mut handles = Vec::new();
+    open_cache_node(root, &mut handles)?;
+    Ok(handles)
 }
 
+fn open_cache_node(path: &Path, handles: &mut Vec<fs::File>) -> std::io::Result<()> {
+    let meta = fs::symlink_metadata(path)?;
+    if meta.file_type().is_symlink() {
+        return Ok(());
+    }
+    if meta.is_dir() {
+        for entry in fs::read_dir(path)? {
+            open_cache_node(&entry?.path(), handles)?;
+        }
+        return Ok(());
+    }
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        const O_NOFOLLOW: i32 = 0x20000;
+        options.custom_flags(O_NOFOLLOW);
+    }
+    let file = options.open(path)?;
+    let opened = file.metadata()?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt as _;
+        if (meta.dev(), meta.ino()) != (opened.dev(), opened.ino()) {
+            return Err(std::io::Error::other(format!(
+                "cache file changed while opening `{}`",
+                path.display()
+            )));
+        }
+    }
+    handles.push(file);
+    Ok(())
+}
+
+/// Single realization boundary for every product consumer. Cache reuse,
+/// quarantine, provider execution, and recording cannot be bypassed by CLI or
+/// JetOS callers.
+pub fn realize_verified(
+    roots: &Roots,
+    ctx: &super::Provider::Ctx<'_>,
+    request: RealizeRequest<'_>,
+) -> Result<VerifiedRealization, RealizeError> {
+    let (reference, expectation) = match request {
+        RealizeRequest::Package { spec, table } => (
+            spec.raw.clone(),
+            super::Provider::cache_expectation(spec, table, ctx),
+        ),
+        RealizeRequest::Adapter(plan) => (
+            format!("adapt:{}:{}", plan.name, plan.source),
+            Some(
+                super::Provider::adapter_cache_expectation(plan, ctx)
+                    .map_err(RealizeError::Provider)?,
+            ),
+        ),
+    };
+
+    if let (Some(candidate), Some(expectation)) =
+        (find_by_reference(roots, &reference), expectation.as_ref())
+    {
+        match find_verified_by_reference(roots, &reference, expectation)
+            .map_err(RealizeError::Store)?
+        {
+            Some(hit) => {
+                return Ok(VerifiedRealization {
+                    entry: hit.entry,
+                    source_state: super::Provider::SourceState::Cached,
+                    lease: Some(hit.lease),
+                });
+            }
+            None => {
+                let proof = verify_cache_entry(roots, &candidate, &reference, expectation);
+                let mut failure = integrity_failure(&candidate, expectation, proof);
+                if let Err(error) = quarantine_invalid_entry(roots, &candidate, expectation) {
+                    failure.actual = format!("{}; quarantine failed: {error}", failure.actual);
+                }
+                return Err(RealizeError::Integrity(failure));
+            }
+        }
+    }
+
+    let realized = match request {
+        RealizeRequest::Package { spec, table } => {
+            super::Provider::realize(spec, table, ctx).map_err(RealizeError::Provider)?
+        }
+        RealizeRequest::Adapter(plan) => {
+            super::Provider::realize_adapter(plan, ctx).map_err(RealizeError::Provider)?
+        }
+    };
+    let entry = record_verified(
+        roots,
+        &realized.name,
+        &realized.version,
+        &realized.reference,
+        &realized.out,
+        &realized.bin,
+        &realized.rlib,
+        &realized.envelope,
+        &realized.cache_identity,
+    )
+    .map_err(RealizeError::Store)?;
+    Ok(VerifiedRealization {
+        entry,
+        source_state: realized.source_state,
+        lease: None,
+    })
+}
+
+fn integrity_failure(
+    entry: &StoreEntry,
+    expectation: &CacheExpectation,
+    proof: CacheVerification,
+) -> IntegrityFailure {
+    let (reason, expected, actual) = if !proof.output_exists {
+        (
+            "output existence",
+            entry.envelope.output_hash.clone(),
+            "missing output".to_string(),
+        )
+    } else if !proof.output_digest {
+        (
+            "content digest verification",
+            entry.envelope.output_hash.clone(),
+            super::Envelope::try_output_hash_of(&entry.out)
+                .unwrap_or_else(|error| format!("unreadable output: {error}")),
+        )
+    } else if !proof.source {
+        (
+            "source identity verification",
+            expectation.identity.source_fingerprint.clone(),
+            entry.cache_identity.source_fingerprint.clone(),
+        )
+    } else if !proof.recipe {
+        (
+            "recipe identity verification",
+            expectation.identity.recipe_fingerprint.clone(),
+            entry.cache_identity.recipe_fingerprint.clone(),
+        )
+    } else if !proof.platform {
+        (
+            "platform verification",
+            expectation.identity.platform.clone(),
+            entry.cache_identity.platform.clone(),
+        )
+    } else if !proof.policy {
+        (
+            "policy identity verification",
+            expectation.identity.policy_fingerprint.clone(),
+            entry.cache_identity.policy_fingerprint.clone(),
+        )
+    } else if !proof.signature_verified && !proof.unsigned_local_allowed {
+        (
+            "signature verification",
+            "a trusted cache signature or an exact Hangar-owned local output".to_string(),
+            if entry.envelope.signature.is_empty() {
+                "unsigned non-local artifact".to_string()
+            } else {
+                "untrusted signature".to_string()
+            },
+        )
+    } else {
+        (
+            "closure containment verification",
+            "canonical closure members strictly below the output root".to_string(),
+            "closure member escaped or disappeared".to_string(),
+        )
+    };
+    IntegrityFailure {
+        package: entry.name.clone(),
+        version: entry.version.clone(),
+        expected,
+        actual,
+        reason: reason.to_string(),
+        disposition: "Jetpack quarantined it instead of using or silently repairing it."
+            .to_string(),
+        fix: "Re-run `jet fetch` after `jet clean`. If the problem persists, audit the source before rebuilding."
+            .to_string(),
+    }
+}
+
+fn verify_configured_signature(
+    _roots: &Roots,
+    _entry: &StoreEntry,
+    _expectation: &CacheExpectation,
+) -> bool {
+    // The generated crypto bridge lives in a user-writable build cache and is
+    // not an immutable trust root. Until Jetpack ships an in-process vetted
+    // verifier, signed cache imports fail closed. Never execute a mutable
+    // helper to decide whether mutable bytes are trusted.
+    false
+}
+
+#[cfg(test)]
 fn verify_configured_signature_with(
     roots: &Roots,
     entry: &StoreEntry,
@@ -473,40 +806,7 @@ fn verify_configured_signature_with(
     )
 }
 
-fn verify_ed25519(public_key: &str, message: &str, signature: &str) -> bool {
-    let Ok(link) = crate::FFI::build_bridge(
-        &[], false, false, false, false, true, false, false, false,
-    ) else {
-        return false;
-    };
-    let Some(helper) = link.helper_bin_path else {
-        return false;
-    };
-    let mut child = match Command::new(helper)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-    {
-        Ok(child) => child,
-        Err(_) => return false,
-    };
-    let request = format!(
-        "verify {} {} {}\n",
-        public_key,
-        hex_encode(message.as_bytes()),
-        signature
-    );
-    if child
-        .stdin
-        .take()
-        .is_none_or(|mut stdin| stdin.write_all(request.as_bytes()).is_err())
-    {
-        return false;
-    }
-    child.wait().is_ok_and(|status| status.success())
-}
-
+#[cfg(test)]
 fn cache_signature_message(entry: &StoreEntry, expectation: &CacheExpectation) -> String {
     format!(
         "jet-cache-v1\nreference={}\nsource={}\nrecipe={}\npolicy={}\nplatform={}\noutput={}\n",
@@ -519,16 +819,6 @@ fn cache_signature_message(entry: &StoreEntry, expectation: &CacheExpectation) -
     )
 }
 
-fn hex_encode(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        out.push(HEX[(byte >> 4) as usize] as char);
-        out.push(HEX[(byte & 0x0f) as usize] as char);
-    }
-    out
-}
-
 fn closure_is_reachable(roots: &Roots, entry: &StoreEntry) -> bool {
     let out = Path::new(&entry.out);
     if out.starts_with("/nix/store") {
@@ -536,12 +826,18 @@ fn closure_is_reachable(roots: &Roots, entry: &StoreEntry) -> bool {
         return root.exists()
             && fs::canonicalize(&root).ok() == fs::canonicalize(out).ok();
     }
+    let Ok(canonical_out) = fs::canonicalize(out) else {
+        return false;
+    };
     [&entry.bin, &entry.rlib].into_iter().all(|member| {
         if member.is_empty() {
             return true;
         }
         let member = Path::new(member);
-        member.exists() && member.starts_with(out)
+        let Ok(canonical_member) = fs::canonicalize(member) else {
+            return false;
+        };
+        canonical_member != canonical_out && canonical_member.starts_with(&canonical_out)
     })
 }
 
@@ -1231,6 +1527,42 @@ mod tests {
         assert!(!verified(&roots, "mine:demo", &expectation));
     }
 
+    #[test]
+    fn closure_rejects_parent_traversal_to_sibling() {
+        let (roots, _g) = temp_roots();
+        let out = roots.root.join("owned-output");
+        let sibling = roots.root.join("other");
+        fs::create_dir_all(&out).unwrap();
+        fs::create_dir_all(&sibling).unwrap();
+        fs::write(sibling.join("tool"), "outside").unwrap();
+        let envelope = super::super::Envelope::Envelope::for_output(
+            &out.to_string_lossy(),
+            "mine:escape",
+            "core-source",
+        );
+        let mut entry = record_verified(
+            &roots,
+            "escape",
+            "1",
+            "mine:escape",
+            &out.to_string_lossy(),
+            "",
+            "",
+            &envelope,
+            &test_identity(),
+        )
+        .unwrap();
+        entry.bin = out.join("../other").to_string_lossy().into_owned();
+        let proof = verify_cache_entry(
+            &roots,
+            &entry,
+            "mine:escape",
+            &test_expectation(&out),
+        );
+        assert!(!proof.closure);
+        assert!(!proof.trusted());
+    }
+
     #[cfg(unix)]
     #[test]
     fn nix_compat_output_gets_durable_gc_root() {
@@ -1364,6 +1696,9 @@ mod tests {
         });
         std::thread::sleep(Duration::from_millis(60));
         assert!(!marker.exists());
+        fs::write(out.join("payload"), "mutated outside cooperative lock").unwrap();
+        let failure = hit.lease.integrity_failure().unwrap();
+        assert_eq!(failure.reason, "race-safe pre-consumer revalidation");
         drop(hit);
         handle.join().unwrap();
         assert!(marker.exists());
@@ -1423,6 +1758,82 @@ mod tests {
                     && signature == "abcd"
             }
         ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn mutable_replaced_crypto_helper_is_never_a_trust_root() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let (roots, _g) = temp_roots();
+        let out = roots.root.join("signed-output-hostile");
+        fs::create_dir_all(&out).unwrap();
+        fs::write(out.join("payload"), "signed").unwrap();
+        fs::create_dir_all(roots.root.join("trust")).unwrap();
+        fs::write(roots.root.join("trust/cache.ed25519.pub"), "attacker-key").unwrap();
+        let marker = roots.root.join("helper-ran");
+        let helper = roots.root.join("trust/jet-crypto-helper");
+        fs::write(
+            &helper,
+            format!("#!/bin/sh\ntouch '{}'\nexit 0\n", marker.display()),
+        )
+        .unwrap();
+        fs::set_permissions(&helper, fs::Permissions::from_mode(0o755)).unwrap();
+        let mut envelope = super::super::Envelope::Envelope::for_output(
+            &out.to_string_lossy(),
+            "cache:hostile",
+            "remote-cache",
+        );
+        envelope.signature = "ed25519:forged".to_string();
+        let entry = StoreEntry {
+            id: entry_id("hostile", "1", "cache:hostile", &out.to_string_lossy()),
+            name: "hostile".to_string(),
+            version: "1".to_string(),
+            reference: "cache:hostile".to_string(),
+            out: out.to_string_lossy().into_owned(),
+            bin: String::new(),
+            rlib: String::new(),
+            envelope,
+            cache_identity: test_identity(),
+            realized_at: 0,
+            last_used_at: 0,
+        };
+        let expectation = CacheExpectation {
+            identity: test_identity(),
+            owned_output: None,
+            allow_unsigned_local: false,
+        };
+        let proof = verify_cache_entry(&roots, &entry, "cache:hostile", &expectation);
+        assert!(!proof.signature_verified);
+        assert!(!proof.trusted());
+        assert!(!marker.exists(), "mutable helper must never execute");
+    }
+
+    #[test]
+    fn e2604_reason_snapshot_is_exact() {
+        let failure = IntegrityFailure {
+            package: "demo".to_string(),
+            version: "1.2.3".to_string(),
+            expected: "sha256-good".to_string(),
+            actual: "sha256-bad".to_string(),
+            reason: "content digest verification".to_string(),
+            disposition: "Jetpack quarantined it instead of using or silently repairing it."
+                .to_string(),
+            fix: "Re-run `jet fetch` after `jet clean`. If the problem persists, audit the source before rebuilding."
+                .to_string(),
+        };
+        assert_eq!(
+            failure.what(),
+            "Integrity check failed for `demo` `1.2.3` — expected `sha256-good`, got `sha256-bad`."
+        );
+        assert_eq!(
+            failure.why(),
+            "The cached artifact failed content digest verification. Jetpack quarantined it instead of using or silently repairing it."
+        );
+        assert_eq!(
+            failure.fix(),
+            "Re-run `jet fetch` after `jet clean`. If the problem persists, audit the source before rebuilding."
+        );
     }
 }
 

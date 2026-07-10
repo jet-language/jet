@@ -50,22 +50,62 @@ fn cache_identity(source: &str, recipe: &str, ctx: &Ctx) -> super::Store::CacheI
     }
 }
 
-fn core_recipe_identity(src_dir: &Path, kind: PackageManifest::PackageKind) -> String {
-    if kind == PackageManifest::PackageKind::Library && src_dir.join("Cargo.toml").is_file() {
-        let toolchain = super::Toolchain::Toolchain::resolve();
-        format!(
-            "core-cargo-rlib-v1:{}:{}:{}",
-            toolchain.as_ref().map_or("missing", |tc| tc.id.as_str()),
-            toolchain
-                .as_ref()
-                .map_or("", |tc| tc.version.as_str()),
-            toolchain
-                .as_ref()
-                .map_or_else(String::new, |tc| tc.cargo.to_string_lossy().into_owned())
-        )
+fn core_recipe_identity(
+    src_dir: &Path,
+    package: &str,
+    manifest: Option<&PackageManifest::PackManifest>,
+    kind: PackageManifest::PackageKind,
+) -> String {
+    let toolchain = super::Toolchain::Toolchain::resolve();
+    let artifact = if kind == PackageManifest::PackageKind::Library
+        && src_dir.join("Cargo.toml").is_file()
+    {
+        "cargo-rlib"
+    } else if kind == PackageManifest::PackageKind::Library {
+        "jet-library-source"
     } else {
-        "core-source-v1".to_string()
+        "executable-tree"
+    };
+    let version = manifest.map_or("", |manifest| manifest.package.version.as_str());
+    let semantics = normalized_manifest_semantics(manifest);
+    format!(
+        "core-provider-recipe-v2\npackage={package}\nversion={version}\nkind={kind:?}\nartifact={artifact}\nmanifest={}\ntoolchain={}:{}:{}\n",
+        SHA256::sha256_hex(semantics.as_bytes()),
+        toolchain.as_ref().map_or("missing", |tc| tc.id.as_str()),
+        toolchain.as_ref().map_or("", |tc| tc.version.as_str()),
+        toolchain
+            .as_ref()
+            .map_or_else(String::new, |tc| tc.cargo.to_string_lossy().into_owned()),
+    )
+}
+
+fn normalized_manifest_semantics(
+    manifest: Option<&PackageManifest::PackManifest>,
+) -> String {
+    let Some(manifest) = manifest else {
+        return "manifest=absent".to_string();
+    };
+    let mut manifest = manifest.clone();
+    manifest.deps.sort_by(|a, b| a.name.cmp(&b.name));
+    manifest.packages.sort_by(|a, b| a.name.cmp(&b.name));
+    for package in &mut manifest.packages {
+        package.targets.sort_by_key(|target| format!("{target:?}"));
     }
+    manifest.build_profiles.sort_by(|a, b| a.name.cmp(&b.name));
+    manifest.grants.sort_by(|a, b| a.0.cmp(&b.0));
+    for (_, effects) in &mut manifest.grants {
+        effects.sort();
+    }
+    if let Some(effects) = &mut manifest.effects_allow {
+        effects.sort();
+    }
+    if let Some(effects) = &mut manifest.effects_deny {
+        effects.sort();
+    }
+    if let Some(policy) = &mut manifest.trust_policy {
+        policy.services.sort_by(|a, b| a.0.cmp(&b.0));
+    }
+    format!("{manifest:?}")
 }
 
 /// Independently derive every fact required to trust an existing cache record.
@@ -88,7 +128,12 @@ pub fn cache_expectation(
                 .as_ref()
                 .and_then(|manifest| manifest.package_kind(&spec.package))
                 .unwrap_or_else(|| infer_package_kind(&src_dir));
-            let recipe = core_recipe_identity(&src_dir, kind);
+            let recipe = core_recipe_identity(
+                &src_dir,
+                &spec.package,
+                manifest.as_ref(),
+                kind,
+            );
             let fp = tree_fingerprint(&src_dir);
             Some(super::Store::CacheExpectation {
                 identity: cache_identity(&source_fingerprint, &recipe, ctx),
@@ -99,15 +144,11 @@ pub fn cache_expectation(
                 allow_unsigned_local: true,
             })
         }
-        ProviderKind::Nix | ProviderKind::Infer => Some(super::Store::CacheExpectation {
-            identity: cache_identity(
-                &SHA256::sha256_hex(spec.raw.as_bytes()),
-                "nix-compat-v1",
-                ctx,
-            ),
-            owned_output: None,
-            allow_unsigned_local: false,
-        }),
+        // A spelling hash is not a locked source identity and Jetpack cannot
+        // independently re-verify Nix substituter trust evidence yet. Nix may
+        // realize from its own store, but Jetpack never reports that as an
+        // early cache hit.
+        ProviderKind::Nix | ProviderKind::Infer => None,
     }
 }
 
@@ -452,11 +493,19 @@ impl Provider for CoreProvider {
                 }
             }
         };
+        super::Store::seal_local_output(&out_dir).map_err(|error| {
+            ProviderError::CoreBuild(format!("could not seal package output: {error}"))
+        })?;
         let out = out_dir.to_string_lossy().into_owned();
         let envelope = super::Envelope::Envelope::for_output(&out, &spec.raw, recipe_id);
         let source_fingerprint = super::Envelope::try_output_hash_of(&src_dir.to_string_lossy())
             .map_err(ProviderError::CoreBuild)?;
-        let recipe_identity = core_recipe_identity(&src_dir, kind);
+        let recipe_identity = core_recipe_identity(
+            &src_dir,
+            &spec.package,
+            manifest.as_ref(),
+            kind,
+        );
         Ok(Realized {
             name: spec.package.clone(),
             version,
@@ -1325,6 +1374,8 @@ pub fn realize_adapter(plan: &AdapterPlan, ctx: &Ctx) -> Result<Realized, Provid
             )));
     }
     let _ = attempt.persist(ctx.store_dir);
+    super::Store::seal_local_output(&out_dir)
+        .map_err(|error| ProviderError::Adapter(format!("could not seal adapter output: {error}")))?;
     let out = out_dir.to_string_lossy().into_owned();
     let bin_dir = out_dir.join("bin");
     let bin = if bin_dir.is_dir() {

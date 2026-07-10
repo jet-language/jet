@@ -6,24 +6,34 @@ use std::path::Path;
 use std::process::Command;
 
 const MATRIX: &str = "docs/plans/epoch-4/truth-matrix.md";
+const AUDITED: &[u64] = &[
+    3, 5, 6, 13, 85, 90, 99, 139, 179, 185, 187, 188, 190, 191, 192, 193, 194,
+    195, 196, 197, 198, 199, 200, 201, 202, 203, 204, 205, 206, 207, 208, 214, 215,
+    229, 231, 232, 233, 234, 242, 330, 418,
+];
 
 #[test]
 fn truth_matrix_covers_every_done_epoch4_card() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let raw = std::fs::read_to_string(root.join(MATRIX)).unwrap();
     let rows = matrix_rows(&raw);
-    let cards = tower_cards(root);
+    let cards = tower_cards(&live_repo_root(root));
     let done = cards
         .iter()
         .filter(|(_, card)| card.epoch == "e4" && card.phase == "done")
         .map(|(num, _)| *num)
         .collect::<BTreeSet<_>>();
     let audited = rows.keys().copied().collect::<BTreeSet<_>>();
-    assert!(
-        done.is_subset(&audited),
-        "every live projected Tower E4 done card must have a truth row; missing {:?}",
-        done.difference(&audited).collect::<Vec<_>>()
-    );
+    let expected = AUDITED.iter().copied().collect::<BTreeSet<_>>();
+    assert_eq!(audited, expected, "truth matrix audited set drifted");
+    assert!(done.is_subset(&audited), "live E4 done cards missing from audit");
+    for reopened in [6, 330] {
+        assert_eq!(
+            cards.get(&reopened).map(|card| card.phase.as_str()),
+            Some("ready"),
+            "#{reopened} must remain reopened until its live successor lands"
+        );
+    }
 
     let allowed = [
         "live",
@@ -36,6 +46,7 @@ fn truth_matrix_covers_every_done_epoch4_card() {
         let card = cards.get(&num).unwrap_or_else(|| panic!("#{num}: card missing from Tower"));
         assert!(allowed.contains(&class.as_str()), "#{num}: bad class {class}");
         assert!(evidence.len() >= 8, "#{num}: evidence is not specific");
+        assert!(evidence_resolves(root, &evidence), "#{num}: evidence does not resolve: {evidence}");
         assert!(!boundary.trim().is_empty(), "#{num}: empty completion boundary");
         if num != 418 {
             assert!(!card.log_empty, "#{num}: done/reclassified claim has no Tower evidence log");
@@ -50,6 +61,28 @@ fn truth_matrix_covers_every_done_epoch4_card() {
             }), "#{num}: named successors are absent, done, or frozen: {successors:?}");
         }
     }
+}
+
+fn live_repo_root(root: &Path) -> std::path::PathBuf {
+    let output = Command::new("git")
+        .args(["rev-parse", "--path-format=absolute", "--git-common-dir"])
+        .current_dir(root)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "cannot locate live Git common dir");
+    let common = std::path::PathBuf::from(
+        String::from_utf8(output.stdout).unwrap().trim(),
+    );
+    common.parent().unwrap().to_path_buf()
+}
+
+fn evidence_resolves(root: &Path, evidence: &str) -> bool {
+    let paths = evidence
+        .split('`')
+        .enumerate()
+        .filter_map(|(index, token)| (index % 2 == 1).then_some(token))
+        .collect::<Vec<_>>();
+    !paths.is_empty() && paths.iter().all(|path| root.join(path).exists())
 }
 
 fn matrix_rows(raw: &str) -> BTreeMap<u64, (String, String, String)> {

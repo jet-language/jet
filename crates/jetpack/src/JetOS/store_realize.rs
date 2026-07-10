@@ -62,31 +62,24 @@ fn realize_ref(
         store_dir: &store_dir,
         offline: flags.offline,
     };
-    match Provider::realize(spec, table, &ctx) {
-        Ok(r) => {
-            theme.row(&r.name, name_w, &r.version, r.source_state.label());
-            theme.detail(&theme.gray(&r.out));
-            match Store::record_verified(
-                roots,
-                &r.name,
-                &r.version,
-                &r.reference,
-                &r.out,
-                &r.bin,
-                &r.rlib,
-                &r.envelope,
-                &r.cache_identity,
-            ) {
-                Ok(entry) => Some(entry),
-                Err(e) => {
-                    theme.error(
-                        "could not record the package",
-                        &format!("writing to the Jetpack store failed: {e}"),
-                        "check permissions on the store root, or set JETPACK_ROOT.",
-                    );
-                    None
-                }
-            }
+    match Store::realize_verified(
+        roots,
+        &ctx,
+        Store::RealizeRequest::Package { spec, table },
+    ) {
+        Ok(realized) => {
+            theme.row(
+                &realized.entry.name,
+                name_w,
+                &realized.entry.version,
+                realized.source_state.label(),
+            );
+            theme.detail(&theme.gray(&realized.entry.out));
+            Some(realized.entry)
+        }
+        Err(Store::RealizeError::Integrity(failure)) => {
+            Store::report_integrity(theme, &failure);
+            None
         }
         Err(e) => {
             theme.error(
@@ -120,20 +113,18 @@ fn try_realize_ref(
         store_dir: &store_dir,
         offline: flags.offline,
     };
-    let r = Provider::realize(spec, table, &ctx)
-        .map_err(|e| format!("provider failed for `{}`: {e:?}", spec.raw))?;
-    theme.row(&r.name, name_w, &r.version, r.source_state.label());
-    theme.detail(&theme.gray(&r.out));
-    Store::record_verified(
+    let realized = Store::realize_verified(
         roots,
-        &r.name,
-        &r.version,
-        &r.reference,
-        &r.out,
-        &r.bin,
-        &r.rlib,
-        &r.envelope,
-        &r.cache_identity,
+        &ctx,
+        Store::RealizeRequest::Package { spec, table },
     )
-    .map_err(|e| format!("writing to the Jetpack store failed: {e}"))
+    .map_err(|e| format!("verified realization failed for `{}`: {e:?}", spec.raw))?;
+    theme.row(
+        &realized.entry.name,
+        name_w,
+        &realized.entry.version,
+        realized.source_state.label(),
+    );
+    theme.detail(&theme.gray(&realized.entry.out));
+    Ok(realized.entry)
 }
