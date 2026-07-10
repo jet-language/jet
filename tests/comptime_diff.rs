@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 mod common;
-use common::{panic_message, test_worker_count};
+use common::{have_rustc, panic_message, test_worker_count};
 
 /// Expressions whose comptime and runtime evaluation must agree. Each is
 /// inlined verbatim on both sides, so it must be a self-contained
@@ -62,7 +62,7 @@ const CASES: &[&str] = &[
 
 #[test]
 fn comptime_matches_runtime() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = have_rustc();
     if !have_rustc {
         eprintln!("note: rustc not found; skipping comptime differential battery");
         return;
@@ -258,7 +258,7 @@ fn run() {
 }
 
 fn compile_and_run(src: &str) -> String {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = have_rustc();
     if !have_rustc {
         eprintln!("note: rustc not found; skipping comptime run fixture");
         return String::new();

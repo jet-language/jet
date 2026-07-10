@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Fast pre-push doc-sync tier (D-CI3). Cheap, no-cargo-build checks only —
-# the full suite runs in CI via scripts/agent/verify-full.sh. Wired by
+# Fast pre-push doc-sync tier (D-CI3). These focused tests may compile stale
+# targets; the full suite runs in CI via scripts/agent/verify-full.sh. Wired by
 # `git config core.hooksPath scripts/githooks` (see flake.nix shellHook).
 set -euo pipefail
 
@@ -8,9 +8,13 @@ repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo"
 
 echo "pre-push: capability-claim ledger check"
-if command -v node >/dev/null 2>&1; then
-  node scripts/agent/check-capability-ledger.mjs --check
-else
-  # host shells don't carry node; the dev shell does
-  nix develop -c node scripts/agent/check-capability-ledger.mjs --check
-fi
+nix develop -c node scripts/agent/check-capability-ledger.mjs --check
+
+echo "pre-push: truthfulness"
+nix develop -c cargo test --test truthfulness
+
+echo "pre-push: decisions"
+nix develop -c cargo test --test decisions
+
+echo "pre-push: diagnostics coverage"
+nix develop -c cargo test --test diagnostics_coverage

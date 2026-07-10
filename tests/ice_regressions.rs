@@ -21,6 +21,9 @@
 use std::fs;
 use std::process::Command;
 
+mod common;
+use common::have_rustc;
+
 /// Front-end-compile `src`, then (when rustc is present) build the generated
 /// Rust, asserting it is accepted. `name` only labels temp files / failures.
 /// Goes through `compile_with_path` (from a real temp file) so `use core.*`
@@ -39,7 +42,7 @@ fn assert_compiles(name: &str, src: &str) {
     });
     assert!(!out.rust.contains("unsafe"), "{name}: invariant I1");
 
-    if Command::new("rustc").arg("--version").output().is_err() {
+    if !have_rustc() {
         eprintln!("note: rustc not found; skipping build for {name}");
         return;
     }

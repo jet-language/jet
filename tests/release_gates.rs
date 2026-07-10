@@ -8,6 +8,9 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
+mod common;
+use common::have_rustc;
+
 fn jet_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_jet"))
 }
@@ -22,7 +25,7 @@ fn canon_compiles_and_runs() {
     let jet = jet_bin();
     assert!(jet.exists(), "build the jet binary first (cargo build)");
 
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = have_rustc();
     if !have_rustc {
         eprintln!("note: rustc not found; skipping canon golden run");
         return;
@@ -54,7 +57,7 @@ fn canon_compiles_and_runs() {
 #[test]
 fn small_profile_binary_is_smaller_than_default() {
     let jet = jet_bin();
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = have_rustc();
     if !have_rustc || !jet.exists() {
         eprintln!("note: skipping --small size test (need jet + rustc)");
         return;
@@ -123,7 +126,7 @@ fn small_profile_binary_is_smaller_than_default() {
 #[test]
 fn hello_world_small_binary_stays_under_budget() {
     let jet = jet_bin();
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = have_rustc();
     if !have_rustc || !jet.exists() {
         eprintln!("note: skipping hello size budget test (need jet + rustc)");
         return;
@@ -248,7 +251,7 @@ fn ga_milestone_features_front_end_clean() {
 #[test]
 fn ga_feature_size_budgets() {
     let jet = jet_bin();
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = have_rustc();
     if !have_rustc || !jet.exists() {
         eprintln!("note: skipping GA size budgets (need jet + rustc)");
         return;

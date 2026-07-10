@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 mod common;
-use common::{panic_message, test_worker_count, FfiBridgeLock};
+use common::{have_rustc, panic_message, test_worker_count, FfiBridgeLock};
 use jet::Interpreter::{dev_iteration, RunOutcome};
 use jet::JitBackend::{InterpreterBackend, JitBackend};
 use jet_jit::CraneliftBackend;
@@ -754,7 +754,7 @@ fn run_interpreter_battery_parallel(
 #[test]
 fn interpreter_matches_compiled_binary() {
     let _guard = dev_diff_lock().lock().unwrap();
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = have_rustc();
     if !have_rustc {
         eprintln!("note: rustc not found; skipping jet dev differential battery");
         return;
@@ -792,7 +792,7 @@ fn interpreter_matches_compiled_binary() {
 #[test]
 fn dev_default_matches_compiled_binary() {
     let _guard = dev_diff_lock().lock().unwrap();
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = have_rustc();
     if !have_rustc {
         eprintln!("note: rustc not found; skipping jet dev (default backend) differential battery");
         return;
@@ -1474,7 +1474,7 @@ fn cranelift_three_way_differential_battery() {
     if skip_if_cranelift_host_unsupported() {
         return;
     }
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = have_rustc();
     if !have_rustc {
         eprintln!("note: rustc not found; skipping three-way JIT differential battery");
         return;

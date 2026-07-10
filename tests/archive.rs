@@ -13,9 +13,11 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
+mod common;
+use common::have_rustc;
+
 fn have_toolchain() -> bool {
-    Command::new("cargo").arg("--version").output().is_ok()
-        && Command::new("rustc").arg("--version").output().is_ok()
+    have_rustc() && Command::new("cargo").arg("--version").output().is_ok()
 }
 
 /// Compile, FFI-link, and run an archive program; return stdout.

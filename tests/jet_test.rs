@@ -4,6 +4,9 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
+mod common;
+use common::have_rustc;
+
 fn jet_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_jet"))
 }
@@ -13,7 +16,7 @@ fn jet_test_example_output() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let jet = jet_bin();
     assert!(jet.exists(), "build the jet binary first (cargo build)");
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = have_rustc();
     if !have_rustc {
         eprintln!("note: rustc not found; skipping jet test integration");
         return;
@@ -44,7 +47,7 @@ fn jet_test_members_example_output() {
     // summary carries a skipped count.
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let jet = jet_bin();
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = have_rustc();
     if !have_rustc || !jet.exists() {
         return;
     }
@@ -71,7 +74,7 @@ fn jet_scope_expect_fail_passing_region_fails() {
     // D-DOTSCOPE1: an `.expect_fail` region that completes cleanly fails the test.
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let jet = jet_bin();
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = have_rustc();
     if !have_rustc || !jet.exists() {
         return;
     }
@@ -100,7 +103,7 @@ fn jet_scope_setup_failure_fails_test() {
     // D-DOTSCOPE1: a failure inside `.setup` fails the test on the normal path.
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let jet = jet_bin();
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = have_rustc();
     if !have_rustc || !jet.exists() {
         return;
     }
@@ -127,7 +130,7 @@ fn jet_scope_timeout_exceeded_fails() {
     // post-hoc — the region runs, then its elapsed time is checked.
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let jet = jet_bin();
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = have_rustc();
     if !have_rustc || !jet.exists() {
         return;
     }
@@ -156,7 +159,7 @@ fn jet_bench_example_regions() {
     // every name + the ns/iter and ops/sec labels appear.
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let jet = jet_bin();
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = have_rustc();
     if !have_rustc || !jet.exists() {
         eprintln!("note: rustc not found; skipping jet bench integration");
         return;
@@ -196,7 +199,7 @@ fn jet_bench_example_regions() {
 fn jet_test_fail_then_fixed() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let jet = jet_bin();
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = have_rustc();
     if !have_rustc || !jet.exists() {
         return;
     }
@@ -230,7 +233,7 @@ fn jet_property_test_passes() {
     // properties all hold, so every line passes and the run succeeds.
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let jet = jet_bin();
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = have_rustc();
     if !have_rustc || !jet.exists() {
         return;
     }
@@ -263,7 +266,7 @@ fn jet_property_test_shrinks_failure() {
     // fixture asserts `n < 50`; the runner must report the boundary value `50`.
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let jet = jet_bin();
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = have_rustc();
     if !have_rustc || !jet.exists() {
         return;
     }
@@ -323,7 +326,7 @@ fn jet_doctest_passes() {
     // `// =>` expectations all hold.
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let jet = jet_bin();
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = have_rustc();
     if !have_rustc || !jet.exists() {
         return;
     }
@@ -353,7 +356,7 @@ fn jet_doctest_mismatch_fires_e2901() {
     // and fails the run.
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let jet = jet_bin();
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = have_rustc();
     if !have_rustc || !jet.exists() {
         return;
     }
@@ -375,7 +378,7 @@ fn jet_test_coverage_reports_hit_and_miss() {
     // HIT and one MISS.
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let jet = jet_bin();
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = have_rustc();
     if !have_rustc || !jet.exists() {
         return;
     }
@@ -411,7 +414,7 @@ fn jet_bench_target_integration() {
     // its `#Bench` regions via the existing `jet bench` engine (no new mechanism).
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let jet = jet_bin();
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = have_rustc();
     if !have_rustc || !jet.exists() {
         eprintln!("note: rustc not found; skipping jet bench target integration");
         return;

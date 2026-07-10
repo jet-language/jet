@@ -5,6 +5,9 @@ use std::fs;
 
 use std::process::Command;
 
+mod common;
+use common::have_rustc;
+
 /// Compile, FFI-link, and run a regex program; return stdout.
 fn run_regex(src: &str) -> String {
     // Unique dir per call so concurrent regex tests never clobber one another's
@@ -63,8 +66,7 @@ fn run_regex(src: &str) -> String {
 }
 
 fn have_toolchain() -> bool {
-    Command::new("cargo").arg("--version").output().is_ok()
-        && Command::new("rustc").arg("--version").output().is_ok()
+    have_rustc() && Command::new("cargo").arg("--version").output().is_ok()
 }
 
 #[test]

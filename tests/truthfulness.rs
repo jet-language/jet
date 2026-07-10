@@ -15,6 +15,53 @@ fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
+#[test]
+fn rustc_availability_probes_use_common_helper() {
+    let root = root();
+    let suites = [
+        "tests/golden.rs",
+        "tests/release_gates.rs",
+        "tests/dev.rs",
+        "tests/archive.rs",
+        "tests/regex.rs",
+        "tests/ice_regressions.rs",
+        "tests/comptime_diff.rs",
+        "tests/jet_test.rs",
+    ];
+    let forbidden = [
+        "Command::new(\"rustc\").arg(\"--version\")",
+        "Command::new(\"rustc\").arg(\"-V\")",
+    ];
+    let mut violations = Vec::new();
+    for suite in suites {
+        let source = fs::read_to_string(root.join(suite)).unwrap();
+        for needle in forbidden {
+            if source.contains(needle) {
+                violations.push(format!("{suite}: direct `{needle}` availability probe"));
+            }
+        }
+        if matches!(suite, "tests/archive.rs" | "tests/regex.rs") {
+            let helper = source
+                .split("fn have_toolchain() -> bool {")
+                .nth(1)
+                .and_then(|tail| tail.split_once('}').map(|(body, _)| body))
+                .expect("have_toolchain helper");
+            let rustc_pos = helper.find("have_rustc()").expect("rustc gate");
+            let cargo_pos = helper.find("Command::new(\"cargo\")").expect("cargo probe");
+            if rustc_pos > cargo_pos {
+                violations.push(format!(
+                    "{suite}: have_rustc must run before the cargo probe so JET_REQUIRE_RUSTC=1 cannot short-circuit"
+                ));
+            }
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "rustc availability must use tests/common::have_rustc so JET_REQUIRE_RUSTC cannot be bypassed:\n{}",
+        violations.join("\n")
+    );
+}
+
 // ---------------------------------------------------------------------------
 // ACKNOWLEDGED gaps (pre-existing doc debt, not regressions)
 // ---------------------------------------------------------------------------

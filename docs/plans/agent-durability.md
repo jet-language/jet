@@ -33,8 +33,9 @@ merge red work with green CI.
   ungated-`unsafe` grep applied to fuzz-generated programs (I1 is currently
   checked on the examples corpus only, tests/golden.rs:228-252).
 - Versioned git hooks: `scripts/githooks/` + `core.hooksPath` set in the
-  flake shellHook (today the only hook is per-clone, unversioned). Pre-push
-  runs the fast doc-sync tier (truthfulness, decisions, diagnostics_coverage).
+  flake shellHook. Pre-push runs the capability-claim ledger and fast doc-sync
+  tier (`truthfulness`, `decisions`, `diagnostics_coverage`) through the Nix
+  dev shell; any failed gate stops the push.
 
 ## W2 — close the invariant enforcement holes
 

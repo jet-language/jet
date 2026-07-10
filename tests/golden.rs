@@ -14,7 +14,8 @@ use std::sync::{Arc, Mutex};
 
 mod common;
 use common::{
-    fixture_filter, fixture_matches, panic_message, test_worker_count, unified_diff, FfiBridgeLock,
+    fixture_filter, fixture_matches, have_rustc, panic_message, test_worker_count, unified_diff,
+    FfiBridgeLock,
 };
 
 #[derive(Clone)]
@@ -73,7 +74,7 @@ fn examples_compile_and_run() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let ex_dir = root.join("examples/features");
     let ext = jet::Syntax::FILE_EXT;
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = have_rustc();
     let have_cargo = Command::new("cargo").arg("--version").output().is_ok();
     // D-UIDEVSHELL1=A (c134 Phase 8): the native GTK4 example links `-lgtk-4`
     // via `pkg-config gtk4`. Only build+run it where gtk4 dev headers exist
