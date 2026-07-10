@@ -144,11 +144,41 @@ pub fn cache_expectation(
                 allow_unsigned_local: true,
             })
         }
-        // A spelling hash is not a locked source identity and Jetpack cannot
-        // independently re-verify Nix substituter trust evidence yet. Nix may
-        // realize from its own store, but Jetpack never reports that as an
-        // early cache hit.
-        ProviderKind::Nix | ProviderKind::Infer => None,
+        // D-JPK-OFFLINE2=B: a Nix ref may reuse a hangar copy offline, but only
+        // against a locked identity recorded in the project `.jet/lock` — a plain
+        // file read, zero live Nix/network. The identity reproduces exactly what
+        // the realize path recorded (content-hash source anchor + constant
+        // recipe/policy + host platform); `verify_cache_entry` then re-hashes the
+        // on-disk closure through the same proof gate core refs use. No lock / no
+        // entry → None, so offline keeps failing loudly (E1276), never serving a
+        // spelling-trusted stale copy (card #418).
+        ProviderKind::Nix => {
+            let project = ctx.project_dir?;
+            let (output, env) = super::Lock::nix_realization(project, &spec.raw)?;
+            if env.output_hash.is_empty() {
+                return None;
+            }
+            let platform = if env.platform.is_empty() {
+                super::Envelope::host_platform()
+            } else {
+                env.platform.clone()
+            };
+            Some(super::Store::CacheExpectation {
+                identity: super::Store::CacheIdentity {
+                    source_fingerprint: env.output_hash.clone(),
+                    recipe_fingerprint: SHA256::sha256_hex(NIX_RECIPE_ID.as_bytes()),
+                    policy_fingerprint: super::RuntimePolicy::cache_policy_fingerprint(
+                        ctx.offline,
+                    ),
+                    platform,
+                },
+                owned_output: Some(PathBuf::from(output)),
+                allow_unsigned_local: true,
+            })
+        }
+        // An inferred source realized offline defaults to nix with no lock-backed
+        // identity to match; no early cache path.
+        ProviderKind::Infer => None,
     }
 }
 
@@ -273,7 +303,17 @@ pub struct Ctx<'a> {
     pub fixtures: Option<&'a Path>,
     pub store_dir: &'a Path,
     pub offline: bool,
+    /// D-JPK-OFFLINE2=B: the project root whose `.jet/lock` records (on realize)
+    /// and matches (on offline reuse) a Nix-provider package's locked identity.
+    /// `None` for callers with no project context (JetOS realize, tests) — a Nix
+    /// realize then records no lock and gets no offline reuse.
+    pub project_dir: Option<&'a Path>,
 }
+
+/// D-JPK-OFFLINE2=B: the stable recipe id for a Nix-provider realization. Hashed
+/// into the cache identity's `recipe_fingerprint`, recomputed offline from this
+/// constant so a lock-backed reuse reproduces it without any Nix/network call.
+const NIX_RECIPE_ID: &str = "nix-compat-v1";
 
 /// Translate a Jetpack ref into the provider's flake ref. Users never type
 /// `#`; this is the single place `:` becomes the Nix selector. A named source
@@ -363,11 +403,33 @@ impl Provider for NixProvider {
             None => run_nix(spec, table)?,
         };
         let mut realized = parse_realization(spec, &stdout)?;
-        realized.cache_identity = cache_identity(
-            &SHA256::sha256_hex(spec.raw.as_bytes()),
-            "nix-compat-v1",
-            ctx,
-        );
+        // D-JPK-OFFLINE2=B: anchor the cache identity to the realized output's
+        // content hash (a locked identity, not the ref spelling — card #418) so a
+        // later offline reuse trusts re-hashed bytes, never text. `recipe`/
+        // `policy`/`platform` are reproducible offline from constants + host.
+        realized.cache_identity = super::Store::CacheIdentity {
+            source_fingerprint: realized.envelope.output_hash.clone(),
+            recipe_fingerprint: SHA256::sha256_hex(NIX_RECIPE_ID.as_bytes()),
+            policy_fingerprint: super::RuntimePolicy::cache_policy_fingerprint(ctx.offline),
+            platform: super::Envelope::host_platform(),
+        };
+        // Record the locked identity + closure envelope so an offline realize can
+        // reuse this hangar copy after the same proof gate core refs use.
+        if let Some(project) = ctx.project_dir {
+            super::Lock::record_nix_realization(
+                project,
+                &realized.name,
+                &realized.version,
+                &spec.raw,
+                &realized.out,
+                super::Lock::LockEnvelope {
+                    output_hash: realized.envelope.output_hash.clone(),
+                    platform: realized.envelope.platform.clone(),
+                    signature: realized.envelope.signature.clone(),
+                    provenance: realized.envelope.provenance.clone(),
+                },
+            );
+        }
         Ok(realized)
     }
 }
@@ -1810,6 +1872,7 @@ mod tests {
             fixtures: Some(&dir.join("definitely-not-here-xyz")),
             store_dir: &dir,
             offline: false,
+            project_dir: None,
         };
         match realize(&spec, &empty(), &ctx) {
             Err(ProviderError::FixtureMissing(_)) => {}
@@ -1839,6 +1902,7 @@ mod tests {
             fixtures: None,
             store_dir: &store,
             offline: false,
+            project_dir: None,
         };
         // Dispatch must select the core provider, and it must materialize the
         // tree into the store with a real bin dir — no nix involved.
@@ -1884,6 +1948,7 @@ mod tests {
             fixtures: None,
             store_dir: &store,
             offline: false,
+            project_dir: None,
         };
 
         let exe = realize(&classify_in("mine:hello", &table).unwrap(), &table, &ctx).unwrap();
@@ -1964,6 +2029,7 @@ mod tests {
             fixtures: None,
             store_dir: &store,
             offline: false,
+            project_dir: None,
         };
 
         let r = realize(&spec, &table, &ctx).unwrap();
@@ -2128,6 +2194,7 @@ mod tests {
             fixtures: None,
             store_dir: &store,
             offline: false,
+            project_dir: None,
         };
         let r = realize(&spec, &table, &ctx).unwrap();
         assert_eq!(r.name, "hello");
@@ -2175,6 +2242,7 @@ mod tests {
             fixtures: None,
             store_dir: &store,
             offline: false,
+            project_dir: None,
         };
         let r = realize(&spec, &table, &ctx).unwrap();
         assert_eq!(r.name, "hello");
@@ -2242,6 +2310,7 @@ mod tests {
             fixtures: None,
             store_dir: &store,
             offline: false,
+            project_dir: None,
         };
         realize(&spec, &table, &ctx).unwrap();
 
@@ -2295,6 +2364,7 @@ mod tests {
             fixtures: None,
             store_dir: &store,
             offline: false,
+            project_dir: None,
         };
         match realize(&spec, &table, &ctx) {
             Err(e) => assert_eq!(e.code(), Some("E1233"), "expected E1233, got {e:?}"),
@@ -2332,6 +2402,7 @@ mod tests {
             fixtures: None,
             store_dir: &store,
             offline: false,
+            project_dir: None,
         };
         let r = realize(&spec, &table, &ctx).unwrap();
         // The realized output carries a complete envelope.

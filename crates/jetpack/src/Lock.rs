@@ -94,6 +94,13 @@ pub enum LockSource {
     Root,
     Path(String),
     Git { url: String, selector: String },
+    /// D-JPK-OFFLINE2=B: a package realized through the Nix compatibility
+    /// provider. `reference` is the source ref it was realized from
+    /// (`nixpkgs:openssl`); `output` is the realized output path recorded so an
+    /// offline reuse can re-verify the on-disk closure against the package's
+    /// [`LockEnvelope`] `output_hash`. The ref spelling is a label only — trust
+    /// comes from the re-hashed closure, never the text.
+    Nix { reference: String, output: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -150,6 +157,11 @@ pub fn write(lock: &LockFile) -> String {
             LockSource::Git { url, selector } => {
                 format!("{{ git = \"{}\", {} }}", escape_str(url), selector)
             }
+            LockSource::Nix { reference, output } => format!(
+                "{{ nix = \"{}\", output = \"{}\" }}",
+                escape_str(reference),
+                escape_str(output)
+            ),
         };
         out.push_str(&format!("source = {}\n", source_str));
 
@@ -597,6 +609,10 @@ fn parse_source(s: &str) -> Result<LockSource, String> {
     if let Some(v) = kv_field(s, "path") {
         return Ok(LockSource::Path(v));
     }
+    if let Some(reference) = kv_field(s, "nix") {
+        let output = kv_field(s, "output").unwrap_or_default();
+        return Ok(LockSource::Nix { reference, output });
+    }
     if let Some(url) = kv_field(s, "git") {
         let selector = if let Some(t) = kv_field(s, "tag") {
             format!("tag = \"{}\"", t)
@@ -695,6 +711,86 @@ pub fn record_envelope(project_root: &Path, package_name: &str, envelope: LockEn
     };
     pkg.envelope = Some(envelope);
     let _ = std::fs::write(lock_path, write(&lock));
+}
+
+/// D-JPK-OFFLINE2=B: after a successful Nix-provider realize, record the locked
+/// source identity (the resolved ref + realized output path) and the produced
+/// output closure envelope into `.jet/lock`, creating the lock if the project
+/// has none (a bare `jetpack build nixpkgs:…` project may carry no manifest yet).
+/// This lock entry is the trust root a later offline realize matches before it
+/// may reuse the hangar copy: the recorded `output_hash` is re-verified against
+/// the on-disk closure, never the ref spelling (card #418). Upserts by package
+/// name so re-realizing the same package replaces its entry in place.
+pub fn record_nix_realization(
+    project_root: &Path,
+    name: &str,
+    version: &str,
+    reference: &str,
+    output: &str,
+    envelope: LockEnvelope,
+) {
+    let lock_path = project_root.join(Syntax::UNIFIED_LOCK_FILE);
+    let mut lock = std::fs::read_to_string(&lock_path)
+        .ok()
+        .and_then(|raw| parse(&raw).ok())
+        .unwrap_or_else(|| LockFile {
+            version: LOCK_VERSION,
+            packages: Vec::new(),
+            root_dependencies: Vec::new(),
+            workspace_members: Vec::new(),
+            comptime_inputs: Vec::new(),
+            toolchains: Vec::new(),
+            source_channels: Vec::new(),
+        });
+    lock.version = LOCK_VERSION;
+    let entry = LockedPackage {
+        name: name.to_string(),
+        version: version.to_string(),
+        source: LockSource::Nix {
+            reference: reference.to_string(),
+            output: output.to_string(),
+        },
+        locked: None,
+        fingerprint: String::new(),
+        content_hash: None,
+        dependencies: Vec::new(),
+        layer: None,
+        inferred_layer: None,
+        effects: Vec::new(),
+        effect_grants: Vec::new(),
+        envelope: Some(envelope),
+    };
+    if let Some(existing) = lock
+        .packages
+        .iter_mut()
+        .find(|p| p.name == name && matches!(&p.source, LockSource::Nix { .. }))
+    {
+        *existing = entry;
+    } else {
+        lock.packages.push(entry);
+    }
+    if let Some(parent) = lock_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(lock_path, write(&lock));
+}
+
+/// D-JPK-OFFLINE2=B: read the recorded Nix realization for `reference` from the
+/// project lock — the realized output path and its output envelope — so an
+/// offline realize can rebuild the cache expectation and re-verify the closure.
+/// `None` when the project has no lock or no matching Nix entry with an envelope.
+pub fn nix_realization(project_root: &Path, reference: &str) -> Option<(String, LockEnvelope)> {
+    let lock = load(project_root)?;
+    for pkg in lock.packages {
+        if let LockSource::Nix { reference: r, output } = pkg.source {
+            if r == reference {
+                if let Some(env) = pkg.envelope {
+                    return Some((output, env));
+                }
+            }
+        }
+    }
+    None
 }
 
 /// D-JPK-TOOLCHAIN1=A (#179): record (or replace) the project's pinned `jet`

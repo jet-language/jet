@@ -73,6 +73,7 @@ fn realize_into_hangar(
         fixtures: None,
         store_dir: &store_dir,
         offline: true,
+        project_dir: None,
     };
     Store::realize_verified(
         roots,

@@ -114,6 +114,7 @@ fn realize_ref(
         fixtures: fixtures.as_deref(),
         store_dir: &store_dir,
         offline: flags.offline,
+        project_dir: None,
     };
     match Store::realize_verified(
         roots,
@@ -166,6 +167,7 @@ fn try_realize_ref(
         fixtures: fixtures.as_deref(),
         store_dir: &store_dir,
         offline: flags.offline,
+        project_dir: None,
     };
     let realized = Store::realize_verified(
         roots,

@@ -54,9 +54,6 @@ fn write_runnable_fixture(fixtures: &Path, out_dir: &Path) {
 }
 
 #[test]
-#[ignore = "blocked on unratified D-JPK-OFFLINE2 (card #465): 90252e7b removed all \
-offline hangar reuse for nixpkgs refs; owner picks accept-carve-out vs verified reuse. \
-Un-ignore (option B) or rewrite to assert the refusal contract (option A) on ratification."]
 fn offline_build_and_run_use_hangar_cache_with_network_denied() {
     let project = Scratch::new("project");
     let root = Scratch::new("root");
@@ -124,6 +121,77 @@ fn offline_build_and_run_use_hangar_cache_with_network_denied() {
     assert!(
         stdout.contains("hello from offline cache"),
         "stdout: {stdout}"
+    );
+}
+
+/// D-JPK-OFFLINE2=B tamper gate: after a first build records the locked
+/// identity + closure digest, corrupting the realized closure on disk must make
+/// the offline reuse refuse loudly (integrity), naming the artifact — never
+/// silently serve the stale/mismatched copy (card #418 trust hole stays closed).
+#[test]
+fn offline_reuse_refuses_a_tampered_closure() {
+    let project = Scratch::new("tamper-project");
+    let root = Scratch::new("tamper-root");
+    let fixtures = Scratch::new("tamper-fixtures");
+    let out_dir = Scratch::new("tamper-out");
+    write_runnable_fixture(&fixtures.path, &out_dir.path);
+
+    let first = jetpack()
+        .args([
+            "build",
+            "nixpkgs:greet",
+            "--no-color",
+            "--offline",
+            "--fixtures",
+        ])
+        .arg(&fixtures.path)
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert!(
+        first.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+
+    // Corrupt the realized closure on disk (a partial GC / bit-rot / tamper
+    // stand-in): drop the executable the recorded digest covers.
+    let greet = out_dir
+        .path
+        .join("bin")
+        .join(if cfg!(windows) { "greet.bat" } else { "greet" });
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(
+            out_dir.path.join("bin"),
+            fs::Permissions::from_mode(0o755),
+        );
+    }
+    fs::remove_file(&greet).unwrap();
+
+    let second = jetpack()
+        .args(["build", "nixpkgs:greet", "--no-color", "--offline"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("JETPACK_DENY_NETWORK", "1")
+        .env_remove("JETPACK_FIXTURES")
+        .output()
+        .unwrap();
+    assert!(
+        !second.status.success(),
+        "a tampered closure must refuse, not serve stale; stderr: {}",
+        String::from_utf8_lossy(&second.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&second.stderr);
+    assert!(
+        stderr.contains("greet"),
+        "the refusal must name the artifact; stderr: {stderr}"
+    );
+    assert!(
+        !stderr.contains("hello from offline cache"),
+        "stale bytes must never be served; stderr: {stderr}"
     );
 }
 

@@ -93,10 +93,27 @@ fn realize_ref_outcome(
     // store dir also seeds the U9 remote probe's source-cache lookup, so it is
     // resolved before the fixtures decision below.
     let store_dir = roots.hangar_dir();
-    if flags.offline
-        && Provider::uses_nix_provider(spec, table, flags.offline, &store_dir)
+    let project_dir = std::env::current_dir().ok();
+    let uses_nix = Provider::uses_nix_provider(spec, table, flags.offline, &store_dir);
+    // D-JPK-OFFLINE2=B: an offline Nix ref with no fixtures may still reuse a
+    // hangar copy when the project lock records a matching realization whose
+    // closure re-verifies. `cache_expectation` reads only the committed `.jet/lock`
+    // (a plain file read — no Nix, no network), so `Some` here means a verified
+    // reuse is possible; `realize_verified` then serves it or refuses loudly
+    // (integrity) if the on-disk closure fails to re-hash — never a stale copy.
+    let offline_reuse_ok = flags.offline
+        && uses_nix
         && fixtures_for(flags).is_none()
-    {
+        && {
+            let probe = Provider::Ctx {
+                fixtures: None,
+                store_dir: &store_dir,
+                offline: flags.offline,
+                project_dir: project_dir.as_deref(),
+            };
+            Provider::cache_expectation(spec, table, &probe).is_some()
+        };
+    if flags.offline && uses_nix && fixtures_for(flags).is_none() && !offline_reuse_ok {
         drop(spinner);
         report_provider_error(
             theme,
@@ -107,7 +124,7 @@ fn realize_ref_outcome(
         );
         return RefOutcome::Failed;
     }
-    if !package_fixture_available(flags, spec) && !Provider::nix_on_path() {
+    if !package_fixture_available(flags, spec) && !Provider::nix_on_path() && !offline_reuse_ok {
         if let Some(need) = Provider::needs_nix_bridge(spec, table, flags.offline, &store_dir) {
             return RefOutcome::NeedsNix(need);
         }
@@ -117,30 +134,32 @@ fn realize_ref_outcome(
     // silently force fixture mode for an ordinary online run. The provider check
     // resolves an inferred `github@…` source's kind (U9) so a `core` source is
     // not mistakenly asked for nix fixtures.
-    let fixtures =
-        if flags.offline && Provider::uses_nix_provider(spec, table, flags.offline, &store_dir) {
-            let fx = fixtures_for(flags);
-            if fx.is_none() {
-                drop(spinner);
-                report_provider_error(
-                    theme,
-                    &ProviderError::Offline(format!(
-                        "`{}` is not in the hangar and --offline forbids fetching provider output",
-                        spec.raw
-                    )),
-                );
-                return RefOutcome::Failed;
-            }
-            fx
-        } else {
-            // `--fixtures <dir>` without `--offline` is still honored (explicit
-            // opt-in); the bare env var alone is not.
-            flags.fixtures.clone()
-        };
+    let fixtures = if flags.offline && uses_nix {
+        let fx = fixtures_for(flags);
+        if fx.is_none() && !offline_reuse_ok {
+            drop(spinner);
+            report_provider_error(
+                theme,
+                &ProviderError::Offline(format!(
+                    "`{}` is not in the hangar and --offline forbids fetching provider output",
+                    spec.raw
+                )),
+            );
+            return RefOutcome::Failed;
+        }
+        // `fx` may be `None` here only when `offline_reuse_ok` — the hangar copy
+        // is served from the lock-verified cache, no fixtures needed.
+        fx
+    } else {
+        // `--fixtures <dir>` without `--offline` is still honored (explicit
+        // opt-in); the bare env var alone is not.
+        flags.fixtures.clone()
+    };
     let ctx = Provider::Ctx {
         fixtures: fixtures.as_deref(),
         store_dir: &store_dir,
         offline: flags.offline,
+        project_dir: project_dir.as_deref(),
     };
     let started = std::time::Instant::now();
     let result = Store::realize_verified(
@@ -301,6 +320,7 @@ fn realize_adapter(
         fixtures: None,
         store_dir: &store_dir,
         offline: flags.offline,
+        project_dir: None,
     };
     match Store::realize_verified(roots, &ctx, Store::RealizeRequest::Adapter(plan)) {
         Ok(realized) => {

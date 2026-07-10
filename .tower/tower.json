@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 468,
-    "rev": 2924,
+    "rev": 2935,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -12418,6 +12418,16 @@
         {
           "at": "2026-07-10",
           "by": "claude-main",
+          "text": "Board-drift failure fixed: truthfulness::epoch3_capability_manifest_rejects_hostile_real_card_fixtures — hostile fixture real-card-fake-green targeted claim.static-guarantees/#25, which legitimately closed (claim now proven/shipped), so the fake-green mutation became a no-op. Repointed fixture to claim.proof-replay/#240 (reserved/open, card ready). Both capability-manifest tests green. Known trap: this fixture drifts whenever its target card closes for real — repoint to any still-open claim."
+        },
+        {
+          "at": "2026-07-10",
+          "by": "claude-main",
+          "text": "CI platform compile cluster: already fixed on master by Cursor commit e0d4abe4 (verified ancestor of HEAD; agent re-confirmed local build/test-compile green; cross-target verify remains CI's — no rustup targets in dev shell). One scoped cfg_attr(not(unix), allow(unused_mut)) in studio_transactions.rs accepted — binding-scoped, not a warnings blanket. Remaining on card: D-JPK-OFFLINE2=B slice (opus builder running), bwrap/build_entry GitHub-runner sandbox limitation (CI-infra, not local), then Sol verify-full."
+        },
+        {
+          "at": "2026-07-10",
+          "by": "claude-main",
           "text": "Canvas cluster closed, Sol re-ran: canvas 55/55, canvas_scenarios 28/28. Four distinct bugs: (1) dispatch-arm pin labels wrongly carried '== ' prefix + D-ENUMDOT1 leading dot (graph_projection.rs:753, new dispatch_arm_pattern_label); (2) Switch dispatch node missing add_pattern_arm affordance (graph_projection.rs:673); (3) apply_add_pattern_arm anchored inside reformatted else-body, splicing E0003-invalid source (edit_actions.rs:1005 — now anchors after last arm); (4) js/input-events.js right-click treated as drag-start, saving one node position and permanently disabling auto-reflow (nodes stranded off-canvas). Remaining open on card: CI platform compile fixes (agent running), D-JPK-OFFLINE2=B implementation, then verify-full."
         },
         {
@@ -12478,19 +12488,76 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "building",
       "priority": "P1",
-      "plan": null,
+      "plan": "No owner gate. Preserve D-CI3: every rustc availability guard in the eight named suites routes through tests/common::have_rustc, while actual rustc compilation commands remain direct. Add mod common where absent and a regression ratchet preventing direct availability probes from returning. Widen the versioned pre-push hook to run capability-ledger plus truthfulness, decisions, and diagnostics_coverage through the Nix shell; keep docs/plans/agent-durability.md accurate. Verify focused suite targets, hook behavior, and missing-rustc loud failure. Main tree collision: tests/archive.rs has a separate active #465 hunk; build isolated and merge only after review.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-10",
+          "by": "codex-orchestrator",
+          "text": "[handoff] Plan and 4 behavior criteria are recorded. Read-only inventory found 26 direct availability probes across 8 suites; widen pre-push, do not weaken docs. No owner gate. Resume only after owner explicitly permits codex/card-466 worktree, or after main tree is clean and #465 archive.rs changes land. Then Terra builds; separate reviewer verifies; parent runs broader gate."
+        },
+        {
+          "at": "2026-07-10",
+          "by": "codex-orchestrator",
+          "text": "Blocked before code: required isolated worktree creation was denied because AGENTS.md needs explicit owner approval. Main tree remains dirty with active #465 changes, including tests/archive.rs. Plan/criteria complete; no source edits made."
+        },
+        {
+          "at": "2026-07-10",
+          "by": "codex-orchestrator",
+          "text": "Criteria added; isolated Terra implementation starting. Targeted tests only; parent owns broader verification."
+        },
+        {
+          "at": "2026-07-10",
+          "by": "codex-orchestrator",
+          "text": "Plan vetted: 26 inline availability probes across 8 suites; widen hook per W1 instead of weakening durability contract. No owner gate. Isolate because active #465 edits tests/archive.rs in a separate hunk."
+        },
         {
           "at": "2026-07-10",
           "by": "owner",
           "text": "Activated into sidequest track"
         }
       ],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "With JET_REQUIRE_RUSTC=1, every rustc-dependent path in the eight named suites fails loudly when rustc is absent instead of silently skipping.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T20:20:30.675Z"
+        },
+        {
+          "n": 2,
+          "text": "A repository ratchet rejects direct rustc availability probes in those suites while allowing actual rustc compilation commands.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T20:20:30.834Z"
+        },
+        {
+          "n": 3,
+          "text": "The versioned pre-push hook runs the capability ledger plus truthfulness, decisions, and diagnostics_coverage checks, and propagates any failure.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T20:20:30.983Z"
+        },
+        {
+          "n": 4,
+          "text": "Focused tests for all touched suites and the three pre-push test targets pass in the Nix dev shell; durability documentation matches executable hook behavior.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-10T20:20:31.137Z"
+        }
+      ],
       "refs": [
         "tests/golden.rs",
         "tests/common/mod.rs",
@@ -22556,6 +22623,83 @@
   ],
   "events": [
     {
+      "at": "2026-07-10T20:21:00.250Z",
+      "by": "codex-orchestrator",
+      "action": "card.release",
+      "ref": "c0onpgah",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-10T20:21:00.170Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0onpgah",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-10T20:20:31.293Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0onpgah",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-10T20:20:31.137Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0onpgah",
+      "note": "#4 Focused tests for all touched suites and the three pre-push "
+    },
+    {
+      "at": "2026-07-10T20:20:30.983Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0onpgah",
+      "note": "#3 The versioned pre-push hook runs the capability ledger plus "
+    },
+    {
+      "at": "2026-07-10T20:20:30.835Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0onpgah",
+      "note": "#2 A repository ratchet rejects direct rustc availability probe"
+    },
+    {
+      "at": "2026-07-10T20:20:30.675Z",
+      "by": "codex-orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0onpgah",
+      "note": "#1 With JET_REQUIRE_RUSTC=1, every rustc-dependent path in the "
+    },
+    {
+      "at": "2026-07-10T20:20:22.760Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0onpgah",
+      "note": "phase,plan,logEntry"
+    },
+    {
+      "at": "2026-07-10T20:17:22.429Z",
+      "by": "luna-466-planner",
+      "action": "card.claim",
+      "ref": "c0onpgah",
+      "note": ""
+    },
+    {
+      "at": "2026-07-10T19:17:18.890Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c02kdm7a",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-10T19:14:34.029Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c02kdm7a",
+      "note": "logEntry"
+    },
+    {
       "at": "2026-07-10T19:11:03.350Z",
       "by": "claude-main",
       "action": "card.update",
@@ -25977,83 +26121,6 @@
       "action": "card.update",
       "ref": "c1nixrpd",
       "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T11:27:55.043Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c088jf0z",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T11:27:54.905Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0wetgi3",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T11:22:00.098Z",
-      "by": "codex-orchestrator",
-      "action": "card.release",
-      "ref": "c0yzg1yu",
-      "note": ""
-    },
-    {
-      "at": "2026-07-10T11:21:27.412Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0yzg1yu",
-      "note": "phase,logEntry,blockedBy"
-    },
-    {
-      "at": "2026-07-10T11:21:27.275Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c96",
-      "note": "phase,logEntry,blockedBy"
-    },
-    {
-      "at": "2026-07-10T11:20:21.663Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c088jf0z",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-10T11:18:15.141Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c1nixrpd",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-10T11:13:20.669Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c088jf0z",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-10T11:13:13.384Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c0wetgi3",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-10T11:11:07.419Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c1nixrpd",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-10T11:09:56.492Z",
-      "by": "codex-orchestrator",
-      "action": "card.update",
-      "ref": "c088jf0z",
-      "note": "logEntry"
     }
   ],
   "nextNum": 368,
