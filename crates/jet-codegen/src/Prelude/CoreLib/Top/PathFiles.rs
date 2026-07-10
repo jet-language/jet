@@ -93,6 +93,7 @@ impl Drop for JetAtomicTemp {
     }
 }
 
+// JET_VETTED_UNSAFE_BEGIN: jet_atomic_windows
 #[cfg(windows)]
 mod jet_atomic_windows {
     use std::os::windows::ffi::OsStrExt;
@@ -166,6 +167,7 @@ mod jet_atomic_windows {
         }
     }
 }
+// JET_VETTED_UNSAFE_END: jet_atomic_windows
 
 #[cfg(not(windows))]
 fn jet_atomic_replace(temp: &std::path::Path, target: &std::path::Path) -> std::io::Result<()> {

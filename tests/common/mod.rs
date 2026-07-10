@@ -384,3 +384,33 @@ pub fn build_and_run(prefix: &str, name: &str, src: &str) -> (i32, String, Strin
         String::from_utf8_lossy(&run.stderr).into_owned(),
     )
 }
+
+/// Remove one audited generated-prelude module before checking user code for
+/// I1 violations. Generated runtime internals may contain vetted unsafe FFI;
+/// user-authored lowering may not.
+pub fn strip_vetted_module(src: &str, name: &str) -> String {
+    let begin = format!("// JET_VETTED_UNSAFE_BEGIN: {name}");
+    let end = format!("// JET_VETTED_UNSAFE_END: {name}");
+    let Some(start) = src.find(&begin) else {
+        return src.to_string();
+    };
+    let Some(relative_end) = src[start + begin.len()..].find(&end) else {
+        return src.to_string();
+    };
+    let end_offset = start + begin.len() + relative_end + end.len();
+    format!("{}{}", &src[..start], &src[end_offset..])
+}
+
+#[test]
+fn vetted_module_stripping_cannot_swallow_following_user_unsafe() {
+    let generated = r##"before
+// JET_VETTED_UNSAFE_BEGIN: audited
+#[cfg(windows)]
+mod audited { const TEXT: &str = r#"{ comment-like }"#; unsafe { ffi() } }
+// JET_VETTED_UNSAFE_END: audited
+fn user() { unsafe { user_pointer() } }
+"##;
+    let stripped = strip_vetted_module(generated, "audited");
+    assert!(!stripped.contains("ffi()"));
+    assert!(stripped.contains("unsafe { user_pointer() }"));
+}

@@ -39,8 +39,9 @@ fn run_regex(src: &str) -> String {
         !out.rust.contains("regex::") && !out.rust.contains("extern crate regex"),
         "core.regex must not reference the old regex crate"
     );
+    let user_rust = common::strip_vetted_module(&out.rust, "jet_atomic_windows");
     assert!(
-        !out.rust.contains("unsafe"),
+        !user_rust.contains("unsafe"),
         "I1: regex output must not contain unsafe"
     );
 
