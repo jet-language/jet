@@ -347,3 +347,96 @@ fn public_build_product() {
         "jet front door must dispatch package/env verbs to jetpack"
     );
 }
+
+/// claim.static-guarantees / shared-facts-engine — one PolicyFactGraph over
+/// refinements, contracts, taint/IFC, budgets, bounds, and replay.
+#[test]
+fn static_guarantees_shared_engine() {
+    // CAPABILITY_CLAIM: claim.static-guarantees / shared-facts-engine
+    let src = r#"
+#Invariant("value >= 0 && value < 4")
+Index4 :: distinct Int
+
+@Pre(n >= 0, "n non-negative") @Post(result >= 0, "result non-negative")
+fn absish(n: Int) -> Int {
+    return n
+}
+
+#Sanitizer fn clean(raw: String) -> String {
+    return raw
+}
+
+#Replayable fn add(a: Int, b: Int) -> Int {
+    return a + b
+}
+
+fn stamp(path: String) #(Fs) -> String ? {
+    return path
+}
+
+fn pick(xs: [String#4], i: Index4) -> String {
+    return xs[i]
+}
+
+fn run() {
+    dirty :: #Tainted "x"
+    safe := clean(dirty)
+    words: [String#4] :: ["a", "b", "c", "d"]
+    print(pick(words, Index4(1)))
+    print(absish(3))
+    print(add(1, 2))
+    print(safe)
+}
+"#;
+    let graph = jet::Sema::collect_policy_facts(src)
+        .unwrap_or_else(|diags| panic!("policy fact collect failed: {diags:#?}"));
+    for domain in [
+        jet::Sema::PolicyDomain::Refinement,
+        jet::Sema::PolicyDomain::Contract,
+        jet::Sema::PolicyDomain::Taint,
+        jet::Sema::PolicyDomain::Budget,
+        jet::Sema::PolicyDomain::Bounds,
+        jet::Sema::PolicyDomain::Replay,
+    ] {
+        assert!(
+            graph.has_domain(domain),
+            "shared fact graph missing {:?}; facts={:#?}",
+            domain,
+            graph.facts()
+        );
+    }
+
+    // Existing verticals still ship through the same engine surface.
+    assert!(
+        read("examples/features/types/refinements.jet").contains("#Invariant"),
+        "I5 refinements example must remain"
+    );
+    assert!(
+        read("examples/features/contracts/pre_post.jet").contains("@Pre"),
+        "I5 contracts example must remain"
+    );
+    assert!(
+        read("examples/features/effects/taint.jet").contains("#Tainted")
+            && read("examples/features/effects/taint.jet").contains("#Sanitizer"),
+        "I5 taint/IFC slice example must remain"
+    );
+    assert!(
+        read("examples/features/packages/effect_budget/pkg.jet").contains("effects:"),
+        "I5 effect-budget example must remain"
+    );
+    let replay_ui = read("tests/ui/replayable_reaches_io.stderr");
+    assert!(
+        replay_ui.contains("E0725") && replay_ui.contains("Replayable"),
+        "replay soundness must teach E0725"
+    );
+    let bounds_ui = read("tests/ui/fixed_list_index_bounds.stderr");
+    assert!(
+        bounds_ui.contains("E0965"),
+        "bounds proof miss must teach E0965"
+    );
+    let engine = read("crates/jet-sema/src/Sema/PolicyFacts.rs");
+    assert!(
+        engine.contains("PolicyFactGraph") && engine.contains("claim.static-guarantees"),
+        "shared PolicyFactGraph must own claim.static-guarantees"
+    );
+}

@@ -847,6 +847,7 @@ mod Registration;
 pub mod Schema;
 mod SchemaMigration;
 mod ScopeMembers;
+mod PolicyFacts;
 mod State;
 mod Taint;
 mod WebPartition;
@@ -876,6 +877,10 @@ pub use Bundle::{
     check_bundle_with_effect_facts,
 };
 pub use Effects::{EffectSummary, SemIndexEffectFacts};
+pub use PolicyFacts::{
+    collect_policy_facts, collect_policy_facts_from_program, PolicyDomain, PolicyFact,
+    PolicyFactGraph,
+};
 // D-EFFBUDGET1: the closed effect vocabulary, exposed so jet-driver can
 // validate `pkg.jet` `effects:`/`grants:` manifest keys against it.
 // D-EFFTREE1: also export the tree helpers — jet-driver's EffectBudget and

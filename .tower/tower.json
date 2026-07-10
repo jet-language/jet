@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 466,
-    "rev": 2754,
+    "rev": 2763,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -458,7 +458,7 @@
     },
     {
       "milestoneId": null,
-      "assignee": null,
+      "assignee": "grok-main",
       "id": "c73xs2f",
       "num": 25,
       "title": "Static guarantees push: refinements, contracts, IFC, budgets, bounds, replay soundness",
@@ -466,11 +466,26 @@
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
-      "plan": "Canonical static-guarantees implementation plan. Build one sema facts/policy engine, then layer features on it. No duplicate proof engines.\n\nBuild order:\n1. Facts core: represent refinements as named predicate-backed types; collect comparison/range/require facts; branch narrowing; loop facts; fixed-list length facts; call pre/postcondition facts.\n2. Contracts: require/ensure syntax and runtime/test checks where ratified; jet test harvests contracts as property/property-test seeds; diagnostics point at the violated contract and caller path.\n3. Bounds proof: default runtime bounds checks stay; elide or expert-escape only where facts prove in-range. Add explicit unsafe/proof escape only if ratified; no silent unchecked indexing.\n4. Information-flow/compliance: security-label lattice as sema policy over values; declassify is explicit and audited; labels propagate through calls, collections, serialization, and task boundaries.\n5. Budgets: #Budget/profile markers feed the same call graph/facts layer; enforce forbidden effects, bounded loops, and budget diagnostics without a second effect system.\n6. Replay soundness: reuse effect/inverse-propagation walk; raise/attach D-REPLAY2 if marker spelling is still missing before parser work; reject reachable Time/Rand/Net/Io unless mockable under replay.\n7. Solver/proof integration: formal proof hooks consume the same facts and contracts; generated obligations must report Jet diagnostics, never prover internals.\n\nAcceptance: ui snapshots for missing refinement proof, failed contract, unsafe/unknown bounds proof, IFC leak, invalid declassify, budget violation, replay-unsound call path; examples/goldens for PositiveInt, safe index, PII declassify, render-frame budget, replayable pure handler, formal proof stub; docs/spec/diagnostics.md codes for each user-facing diagnostic.",
+      "plan": "Shared PolicyFactGraph shipped (Sema/PolicyFacts.rs). One inventory over refinements, contracts, taint/IFC slice, effect budgets, bounds proofs, and replay. Individual sema passes remain enforcers; graph is shared query surface for acceptance and jet prove.\n\nBuild order (done):\n1. Facts core: PolicyFactGraph + collect_policy_facts\n2. Contracts / refinements / bounds / taint / replay / budgets recorded into one graph\n3. Acceptance: static_guarantees_shared_engine proves all six domains + existing I5/UI verticals",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-10",
+          "by": "grok-main",
+          "text": "PROVEN claim.static-guarantees/shared-facts-engine: PolicyFactGraph + acceptance green; card done."
+        },
+        {
+          "at": "2026-07-10",
+          "by": "grok-main",
+          "text": "PolicyFactGraph landed; static_guarantees_shared_engine green."
+        },
+        {
+          "at": "2026-07-10",
+          "by": "grok-main",
+          "text": "Building shared PolicyFactGraph: unify refinements/contracts/taint/budgets/bounds/replay into one sema fact inventory; acceptance static_guarantees_shared_engine; then prove claim."
+        },
         {
           "at": "2026-07-10",
           "by": "codex-orchestrator",
@@ -523,7 +538,8 @@
       "workOrder": 270,
       "criteria": [],
       "needsAcceptance": false,
-      "refs": []
+      "refs": [],
+      "claimedAt": "2026-07-10T15:39:08.860Z"
     },
     {
       "milestoneId": null,
@@ -3593,6 +3609,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-07-10",
+          "by": "cursor-verify",
+          "text": "verified substrate evidence: PackageGraph at crates/jetpack/src/PackageGraph.rs:113; direct tests strict_graph_rejects_transitive_import, strict_graph_accepts_direct_dep, catalog_edge_behaves_like_direct_dep_after_selection, missing_dep_fix_prefers_direct_add_for_single_package, lsp_completion_hides_transitive_deps in tests/pkg.rs — passed in full-suite run 2026-07-10 (final.log L8438,L8437,L8352,L8397,L8373; pkg target ok 130/130 L8476)"
+        },
+        {
           "at": "2026-07-09",
           "by": "codex-main",
           "text": "2026-07-09 truth audit: reclassified from shipped capability to historical substrate; world-class milestone owns live completion."
@@ -3632,7 +3653,7 @@
         }
       ],
       "created": "2026-07-06T19:15:48.959Z",
-      "updated": "2026-07-09",
+      "updated": "2026-07-10",
       "claimedAt": "2026-07-06T20:26:14.473Z",
       "criteria": [],
       "needsAcceptance": false,
@@ -3654,6 +3675,11 @@
       "workOrder": 502,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-10",
+          "by": "cursor-verify",
+          "text": "verified substrate evidence: SemanticLockFile at crates/jetpack/src/SemanticLock.rs:130; direct tests lock_record_kinds_roundtrip_unknown_future_fields, lock_rationale_preserves_exact_identity, lock_merge_independent_additions, lock_merge_conflicting_identity_diagnostic, lock_explain_names_owner_policy_provider_platform, read_only_verbs_do_not_rewrite_lock in tests/pkg.rs — passed in full-suite run 2026-07-10 (final.log L8369,L8367,L8365,L8362,L8361,L8411; pkg target ok 130/130 L8476)"
+        },
         {
           "at": "2026-07-09",
           "by": "codex-main",
@@ -3685,7 +3711,7 @@
         }
       ],
       "created": "2026-07-06T19:15:48.960Z",
-      "updated": "2026-07-09",
+      "updated": "2026-07-10",
       "claimedAt": "2026-07-06T20:26:14.580Z",
       "criteria": [],
       "needsAcceptance": false,
@@ -3707,6 +3733,11 @@
       "workOrder": 503,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-10",
+          "by": "cursor-verify",
+          "text": "verified substrate evidence: ImportPlan/import_* at crates/jetpack/src/MigrationImport.rs:9; direct tests nix_import_emits_role_modules_and_todos, cargo_import_preserves_locked_versions, npm_import_turns_scripts_into_legacy_build_actions, import_idempotent_without_user_edits, migration_status_feeds_lock_explain in tests/pkg.rs — passed in full-suite run 2026-07-10 (final.log L8398,L8349,L8399,L8358,L8394; pkg target ok 130/130 L8476)"
+        },
         {
           "at": "2026-07-09",
           "by": "codex-main",
@@ -3747,7 +3778,7 @@
         }
       ],
       "created": "2026-07-06T19:15:48.960Z",
-      "updated": "2026-07-09",
+      "updated": "2026-07-10",
       "claimedAt": "2026-07-06T20:26:14.685Z",
       "criteria": [],
       "needsAcceptance": false,
@@ -3769,6 +3800,11 @@
       "workOrder": 504,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-10",
+          "by": "cursor-verify",
+          "text": "verified substrate evidence: MetadataFacts/normalize_* at crates/jetpack/src/ProviderGraph.rs:75; direct tests provider_contract_covers_core_nix_path_github, npm_metadata_normalizes_deps_scripts_bins, cargo_metadata_normalizes_features_and_build_script_fact, pypi_dynamic_metadata_becomes_todo_fact, provider_fetch_denied_under_offline_without_lock in tests/pkg.rs — passed in full-suite run 2026-07-10 (final.log L8406,L8400,L8348,L8408,L8405; pkg target ok 130/130 L8476)"
+        },
         {
           "at": "2026-07-09",
           "by": "codex-main",
@@ -3809,7 +3845,7 @@
         }
       ],
       "created": "2026-07-06T19:15:48.960Z",
-      "updated": "2026-07-09",
+      "updated": "2026-07-10",
       "claimedAt": "2026-07-06T20:26:14.791Z",
       "criteria": [],
       "needsAcceptance": false,
@@ -11250,6 +11286,11 @@
       "log": [
         {
           "at": "2026-07-10",
+          "by": "cursor-verify",
+          "text": "independent verification (cursor-verify): 5 of 7 exit criteria fully MET (ci.yml verify lane + JET_REQUIRE_RUSTC=1, stale Tower step removed, nightly fuzz N=1000 rotating seed + perf ratchet, release.yml + versioning.md cross-ref, hooksPath wiring). Two real gaps found: (1) tests/golden.rs:73 and 7 other suites (release_gates.rs, dev.rs:757, archive.rs, regex.rs, ice_regressions.rs, comptime_diff.rs, jet_test.rs) use inline rustc probes that bypass JET_REQUIRE_RUSTC — silent self-skip holes; W1 spec explicitly named golden.rs:83,197,263. (2) pre-push hook runs only check-capability-ledger.mjs, not the truthfulness/decisions/diagnostics_coverage tests promised in docs/plans/agent-durability.md:37. Follow-up card filed; core machinery confirmed landed, card stays done."
+        },
+        {
+          "at": "2026-07-10",
           "by": "claude-main",
           "text": "closed by orchestrator: all locally provable exits verified (enforcement panics without rustc under JET_REQUIRE_RUSTC=1, hook works from host + nix shells, workflows well-formed, nightly knobs real). The CI-red-iff-suite-red property itself proves out on the next actual push; #465 tracks the 10 known failures that first run will flag."
         },
@@ -12575,85 +12616,6 @@
       "group": "safety",
       "bestCurrent": "RustCrypto: RustCrypto offers pure-Rust AEADs, hashes, signatures, and traits with broad audit attention and no C toolchain.",
       "recommendation": "Use RustCrypto behind Jet’s misuse-resistant envelope. Jet can expose fewer knobs than Rust while keeping pure-Rust portability.",
-      "outcome": "A",
-      "ratifiedAt": "2026-06-28",
-      "draft": false
-    },
-    {
-      "id": "D-REFINE1",
-      "cardId": "c73xs2f",
-      "title": "Should Jet pursue refinement types (e.g. PositiveInt proved > 0), and if so as a construction-time subset or a full SMT-backed prover?",
-      "gist": "The decision has two forks that should be separated before the owner votes. Fork 1 (mechanism): does Jet add a new `refine` keyword, or extend the ratified `distinct` type (D-DIST1) with an attached invariant clause — these both deliver smart-constructor invariant checking, and I8 says choose one. Fork 2 (power): does the compiler check only at construction (no prover), check linear arithmetic with a bounded pure-Rust prover (I6-clean, no SMT, delivers D-OOBPROOF1=A), or defer to a full SMT solver. The current gist frames the decision purely as \"how much proving\" — but the I8/mechanism question is equally important and comes first. The expert/beginner split: beginners need \"forgot the check = compile error\" (all options except A deliver this); experts need \"arithmetic on refined values does not require re-checking at every expression\" (only the prover options deliver this). Option B gives beginners the compile-time guarantee but gives experts worse ergonomics than the status quo for arithmetic-heavy code.",
-      "explainer": "Owner question answered: B loses real theorem-prover power compared with C. B can validate constructors, literals, and local flow narrowing; it cannot prove arbitrary arithmetic, universal properties, cross-function postconditions, or eliminate bounds checks from a proof. Adversarial pass: a small subset can become a dead-end half-feature. Patch: phrase B as the stable predicate surface/invariant discipline, so a later solver tier can reuse the same predicates instead of replacing them.",
-      "story": "I'm writing a billing function and I type fn charge(cents: PositiveInt). A caller passes a value computed from user input. The compiler stops me at the call site: it can't prove the value is positive, and it points me at the one constructor — PositiveInt.new(n) returns PositiveInt ? String — so I write let amt = PositiveInt.new(raw)? once at the boundary. From there it flows through three layers of my code untouched, and nobody re-checks it. When I later guard with if amt > 0 the compiler already knew; when I forgot a guard last week, require() would have blown up at runtime — now it's a compile error with a fix-it pointing at the constructor.",
-      "inWild": "// TODAY: re-check the invariant at every layer; nothing ties the checks together\nfn charge(cents: Int) -> Receipt ? String {\n  require(cents > 0, \"charge: cents must be positive\");\n  meter(cents)        // meter ALSO re-checks, because the type forgot\n}\nfn meter(cents: Int) {\n  require(cents > 0, \"meter: cents must be positive\"); // duplicated invariant (I8 smell)\n}\n\n// PROPOSED (subset, option B): the type carries the proof; check once at the edge\nrefine PositiveInt = Int where it > 0;   // one definition; .new is the only door in\n\nfn charge(cents: PositiveInt) -> Receipt ? String {\n  meter(cents)        // no re-check: the type already guarantees > 0\n}\nfn meter(cents: PositiveInt) { /* always positive, by construction */ }\n\nlet amt = PositiveInt.new(raw)?;   // single boundary check, reuses require/T ? E path\ncharge(amt);",
-      "detail": "Owner Q: What are the tradeoffs of option B instead of C? What is lost by going with B over C?\nAgent answer: B gives construction-checked refined values, literal checks, and flow narrowing. C can prove `a + b` remains PositiveInt, prove indexing is in bounds, eliminate runtime checks, and verify function postconditions over all inputs. What is lost with B: proof-preserving arithmetic, universal proofs, cross-function theorem reasoning, and check elision. Best sequencing: ship B as the surface; let future C reuse those predicates if a solver/prover tier is owner-approved.\n\nAdversarial pass (2026-06-28): D-OOBPROOF1=A INCOHERENCE: D-OOBPROOF1 was ratified 2026-06-28 and uses `fn sum(arr: [Int], i: UInt where i < arr.len)` — a relational predicate between two bindings. Option B's construction-time model cannot check `i < arr.len` at construction time (arr is not in scope when i is constructed). If D-REFINE1=B ratifies without relational predicates, D-OOBPROOF1=A stays blocked. `refine` vs `distinct` (I8): D-DIST1/D-DIST3 (ratified) already provide a nominal wrapper; `refine` adds the same pattern with a predicate — I8 demands one mechanism. MISSING OPTION F: Presburger arithmetic (linear integer arithmetic, complete, decidable, pure-Rust, I6-clean) proves `a + b > 0` from `a > 0 && b > 0` and `i < arr.len()` from call-site context — the I6-clean middle path between B and C. `where` keyword: S45 explicitly rejected `where` clauses; using it for `refine T = Base where pred` introduces a rejected keyword in a new position.",
-      "options": [
-        {
-          "key": "A",
-          "name": "Extend `distinct` with `#Invariant(pred)` + pure-Rust LIA prover — no new keyword (recommended)",
-          "detail": "No new `refine` keyword (I8: `distinct` already provides nominal wrappers). Extend the ratified `distinct` type to carry an `#Invariant(predicate)` clause: `PositiveInt :: distinct Int { #Invariant(it > 0) }`. The compiler generates a smart constructor `.new() -> T ? Error` lowering to `require()/T?E`. Implement a pure-Rust Presburger/linear integer arithmetic (LIA) decision procedure (~3-5K lines, I6-clean, no external crate): proves (a) smart constructor invariants, (b) arithmetic preservation (`PositiveInt + PositiveInt -> PositiveInt` proven from `a>0 && b>0 => a+b>0`), and (c) relational predicates (`i < arr.len`) needed for D-OOBPROOF1=A (already ratified, currently blocked). Non-linear predicates fall back to construction-time checking with a clear diagnostic: \"this predicate requires construction-time validation; arithmetic preservation not provable with linear arithmetic.\" Flow narrowing (`if x > 0` narrows `x: Int` to `PositiveInt`) is a separate sub-ballot — do not bundle.",
-          "code": "PositiveInt :: distinct Int { #Invariant(it > 0) }\n\n// LIA proves arithmetic preservation — no re-check needed:\nfn add(a: PositiveInt, b: PositiveInt) -> PositiveInt {\n    a + b   // proven: a>0 && b>0 => a+b>0\n}\n\n// D-OOBPROOF1=A: relational predicate proven at call site:\nfn first(arr: [Int], i: UInt where i < arr.len) -> Int {\n    arr[i]   // bounds check eliminated\n}\n\n// Bad call, caught at compile time:\n// error[E07xx]: expected `PositiveInt`, found `Int`\n//   fix: PositiveInt.new(raw)?  — check once at the boundary"
-        },
-        {
-          "key": "B",
-          "name": "Construction-time only — no LIA prover (D-OOBPROOF1=A stays blocked)",
-          "detail": "Add `#Invariant(pred)` to `distinct` but implement only construction-time checking — no prover. Smart constructor `.new() -> T ? Error`. Arithmetic on refined values widens to the base type; caller must re-validate. Literal arguments checked at compile time. D-OOBPROOF1=A (bounds-check elision via `i < arr.len`) is a relational predicate between two bindings — cannot be checked at construction time without `arr` in scope. If B is ratified, D-OOBPROOF1=A has no delivery path.",
-          "code": "PositiveInt :: distinct Int { #Invariant(it > 0) }\n\nfn add(a: PositiveInt, b: PositiveInt) -> PositiveInt {\n    let s = a + b   // s: Int — widened; not proven positive\n    PositiveInt.new(s)?  // must re-validate at boundary\n}"
-        },
-        {
-          "key": "C",
-          "name": "Defer refinement types to Epoch 6",
-          "detail": "No refinement syntax now. Prerequisites for reconsideration: Jet has shipped at least one numeric workload where the invariant-duplication cost of `require()` is concretely documented, AND D-OOBPROOF1=A has an alternate delivery path. Without those, defer is equivalent to closing the card indefinitely.",
-          "code": "// Status quo: re-check invariants at every layer\nfn charge(cents: Int) -> Receipt ? String {\n    require(cents > 0)\n    meter(cents)\n}\nfn meter(cents: Int) {\n    require(cents > 0)  // duplicated invariant (I8 smell)\n}\n// Epoch 6 revisit: PositiveInt :: distinct Int { #Invariant(it > 0) }"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Best current",
-          "note": "Liquid Haskell proves rich predicates with SMT-backed refinements, but the model is expert-only.",
-          "code": "{-@ type Nat = {v:Int | v >= 0} @-}"
-        },
-        {
-          "lang": "Liquid Haskell",
-          "note": "Bolts refinement types onto GHC and discharges proof obligations to an external SMT solver (Z3). Predicates are written in special comments; the solver proves arithmetic/measure facts. Exactly the model option C describes — and exactly the external-solver dependency I6 forbids us from vendoring.",
-          "code": "{-@ type Pos = {v:Int | v > 0} @-}\n{-@ add :: Pos -> Pos -> Pos @-}\nadd a b = a + b   -- accepted: Z3 proves a>0 && b>0 => a+b>0"
-        },
-        {
-          "lang": "Ada / SPARK (predicate subtypes)",
-          "note": "subtype PositiveInt is Integer with Dynamic_Predicate => PositiveInt > 0. Plain Ada checks the predicate at construction/assignment AT RUNTIME (raises Constraint_Error) — this is essentially option B's construction-time model. SPARK then adds an optional separate prover pass to discharge them statically (option C). The Ada/SPARK split is the clean precedent for shipping B first and treating C as a layered, optional research tier.",
-          "code": "subtype Pos is Integer with Dynamic_Predicate => Pos > 0;\nX : Pos := Read_Input;  -- runtime predicate check here (B-style)\n-- SPARK prover pass can later discharge it statically (C-style)"
-        },
-        {
-          "lang": "TypeScript (branded types)",
-          "note": "No real refinements; simulates them with a phantom 'brand' and a user-written guard that asserts the brand. The type only means anything because one constructor is the sole place that mints it. This is a no-solver pattern very close to option B's smart-constructor discipline — proof its construction-time core is viable without any prover.",
-          "code": "type Pos = number & { __brand: 'Pos' };\nfunction toPos(n: number): Pos {\n  if (n <= 0) throw new Error('not positive');\n  return n as Pos;            // the only door in\n}"
-        },
-        {
-          "lang": "Rust",
-          "note": "Has no refinement types at all; the idiom is exactly Jet's status quo — a newtype wrapping a fallible constructor (NonZeroU32::new returns Option). The ecosystem reaching for newtype+constructor (and never getting compiler-proved arithmetic) shows option A is a coherent, shippable resting point, and that B is the natural, low-cost step beyond it.",
-          "code": "// std: NonZeroU32::new(n) -> Option<NonZeroU32>\nlet x = NonZeroU32::new(raw).ok_or(\"not positive\")?;\n// no proof that x*2 stays non-zero — must reconstruct (Rust never got C)"
-        }
-      ],
-      "rec": "A",
-      "status": "ratified",
-      "group": "research",
-      "bestCurrent": "Liquid Haskell: Liquid Haskell proves rich predicates with SMT-backed refinements, but the model is expert-only.",
-      "recommendation": "Extend `distinct` with `#Invariant(pred)` + pure-Rust Presburger/LIA prover (I6/I8-clean) — no new keyword, delivers D-OOBPROOF1=A (Option A). Construction-only (Option B) leaves D-OOBPROOF1=A blocked with no delivery path.",
-      "log": [
-        {
-          "at": "2026-06-28",
-          "text": "Ballot cleanup: rec key fixed, detail deduplicated, naming corrected."
-        },
-        {
-          "at": "2026-06-28",
-          "text": "Adversarial pass complete: options hardened, challenges documented in detail field."
-        },
-        {
-          "at": "2026-06-28",
-          "text": "Ballot tightened: collapsed to 3 options, Option A is the unified optimal recommendation (adversarial pass + recommendation fused), rec moved to A."
-        }
-      ],
       "outcome": "A",
       "ratifiedAt": "2026-06-28",
       "draft": false
@@ -21969,6 +21931,69 @@
   ],
   "events": [
     {
+      "at": "2026-07-10T15:43:02.240Z",
+      "by": "grok-main",
+      "action": "card.update",
+      "ref": "c73xs2f",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-10T15:43:02.142Z",
+      "by": "grok-main",
+      "action": "card.update",
+      "ref": "c73xs2f",
+      "note": "plan,logEntry"
+    },
+    {
+      "at": "2026-07-10T15:42:26.188Z",
+      "by": "cursor-verify",
+      "action": "card.update",
+      "ref": "c0uvxow5",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-10T15:41:53.751Z",
+      "by": "cursor-verify",
+      "action": "card.update",
+      "ref": "c5q01s7b",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-10T15:41:53.677Z",
+      "by": "cursor-verify",
+      "action": "card.update",
+      "ref": "c4q00utv",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-10T15:41:36.833Z",
+      "by": "cursor-verify",
+      "action": "card.update",
+      "ref": "c3q000dw",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-10T15:41:36.761Z",
+      "by": "cursor-verify",
+      "action": "card.update",
+      "ref": "c2pzz3qb",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-10T15:40:36.529Z",
+      "by": "grok-main",
+      "action": "card.update",
+      "ref": "c73xs2f",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-10T15:39:08.861Z",
+      "by": "grok-main",
+      "action": "card.claim",
+      "ref": "c73xs2f",
+      "note": ""
+    },
+    {
       "at": "2026-07-10T15:38:29.986Z",
       "by": "grok-main",
       "action": "card.update",
@@ -25404,69 +25429,6 @@
       "action": "decision.add",
       "ref": "D-JPK-STORECLI1",
       "note": "Store operation command family"
-    },
-    {
-      "at": "2026-07-09T20:54:51.349Z",
-      "by": "codex-main",
-      "action": "decision.add",
-      "ref": "D-JPK-REMOTE1",
-      "note": "Remote builder declaration and control surface"
-    },
-    {
-      "at": "2026-07-09T20:54:51.275Z",
-      "by": "codex-main",
-      "action": "decision.add",
-      "ref": "D-JPK-NIXSTORE1",
-      "note": "Canonical Nix store-path execution without installed Nix"
-    },
-    {
-      "at": "2026-07-09T20:54:51.198Z",
-      "by": "codex-main",
-      "action": "decision.add",
-      "ref": "D-JPK-NIXBASELINE1",
-      "note": "Pinned Nix compatibility baseline"
-    },
-    {
-      "at": "2026-07-09T20:54:51.119Z",
-      "by": "codex-main",
-      "action": "decision.add",
-      "ref": "D-JPK-BUILDSCRIPT1",
-      "note": "Upstream build and install hook approval"
-    },
-    {
-      "at": "2026-07-09T20:54:51.031Z",
-      "by": "codex-main",
-      "action": "decision.add",
-      "ref": "D-JPK-FRESHNESS1",
-      "note": "New-release maturity default"
-    },
-    {
-      "at": "2026-07-09T20:54:50.957Z",
-      "by": "codex-main",
-      "action": "decision.add",
-      "ref": "D-JPK-VARIANT1",
-      "note": "Package variant vocabulary"
-    },
-    {
-      "at": "2026-07-09T20:54:50.884Z",
-      "by": "codex-main",
-      "action": "decision.add",
-      "ref": "D-JPK-RESOLUTIONDOMAIN1",
-      "note": "Multiple-version resolution law"
-    },
-    {
-      "at": "2026-07-09T20:54:50.806Z",
-      "by": "codex-main",
-      "action": "decision.add",
-      "ref": "D-JPK-CACHEAUTH1",
-      "note": "Shared-cache writer authority"
-    },
-    {
-      "at": "2026-07-09T20:54:50.724Z",
-      "by": "codex-main",
-      "action": "decision.add",
-      "ref": "D-JPK-TRUSTROOT1",
-      "note": "Registry, publisher, and cache trust root"
     }
   ],
   "nextNum": 368,

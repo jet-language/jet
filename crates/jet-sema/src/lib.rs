@@ -9,3 +9,7 @@ pub use jet_parser::{
 };
 pub mod Sema;
 pub use Sema::{effect_key, SemIndexEffectFacts};
+pub use Sema::{
+    collect_policy_facts, collect_policy_facts_from_program, PolicyDomain, PolicyFact,
+    PolicyFactGraph,
+};
