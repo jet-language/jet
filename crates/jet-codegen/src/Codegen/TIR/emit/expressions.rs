@@ -2129,7 +2129,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     cx.root_prefix, closure
                 )
             }
-            TCoreClosureKind::UiReactiveRender { closure } => {
+            TCoreClosureKind::UiReactiveRender { closure, .. } => {
                 format!("{}jet_ui_reactive_render({})", cx.root_prefix, closure)
             }
         },

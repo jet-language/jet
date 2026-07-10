@@ -411,6 +411,7 @@ pub(crate) fn emit_tir_stmt(s: &TStmt, cx: &Cx, out: &mut String, indent: usize)
             var,
             var2,
             collection_str,
+            collection: _,
             method_kind,
             columnar,
             by_value,

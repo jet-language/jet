@@ -562,6 +562,30 @@ fn web_body_outside_tir_is_diagnostic() {
 }
 
 #[test]
+fn web_executable_emission_is_structurally_tir_only() {
+    let source = include_str!("../crates/jet-codegen/src/Codegen/Web.rs");
+    assert!(source.contains("tir: TIR::TFunc"), "web functions must retain lowered TFunc");
+    assert!(
+        source.contains("WebEmitResult<WebArtifacts>"),
+        "validator/emitter drift must return a structured data fact"
+    );
+    for forbidden in [
+        "body: Vec<Stmt>",
+        "fn js_emit_expr(expr: &Expr",
+        "fn wasm_emit_expr(expr: &Expr",
+        "wasm_default",
+        "\"undefined\".to_string()",
+        "unreachable!(",
+        "panic!(",
+    ] {
+        assert!(
+            !source.contains(forbidden),
+            "web executable emission regressed to AST/default fallback: {forbidden}"
+        );
+    }
+}
+
+#[test]
 fn web_hello_dom_shim_roundtrip() {
     if !have_tool("rustc") || !have_tool("node") {
         eprintln!("note: skipping web_build hello (need rustc + node)");

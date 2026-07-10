@@ -632,6 +632,8 @@ pub enum TStmt {
         var: String,
         var2: Option<String>,
         collection_str: String,
+        /// Target-neutral collection expression for non-Rust backends.
+        collection: TExpr,
         method_kind: Option<TForInMethod>,
         /// D-SOA1: the collection is a `#layout(columnar)` list — iterate via
         /// `({coll}).iter_aos()` (yields owned gathered `S`) instead of
@@ -1447,7 +1449,7 @@ pub enum TCoreClosureKind {
     /// D-REACT1=B: `reactive.effect(<lambda>)` → `{root}jet_std::jet_reactive_effect(<closure>)`.
     ReactiveEffect { closure: String },
     /// D-RENDERTGT2=A (c133 M2): reactive UI render loop through the backend seam.
-    UiReactiveRender { closure: String },
+    UiReactiveRender { closure: String, executable: Box<TLambda> },
 }
 
 /// c109 Phase 13: the two fn-typed-value forms (see `TExprKind::FnValue`).
@@ -1577,8 +1579,18 @@ pub struct TLambda {
     pub prep: String,
     pub params: Vec<String>,
     pub body: String,
+    /// Target-neutral executable body. Backends must consume this, never the
+    /// Rust-rendered `body` compatibility field.
+    pub executable: TLambdaBody,
+    /// Unmangled source parameter names for non-Rust targets.
+    pub source_params: Vec<String>,
     pub is_move: bool,
     pub boxed: bool,
+}
+
+pub enum TLambdaBody {
+    Expr(Box<TExpr>),
+    Block(Vec<TStmt>),
 }
 
 /// c109 Phase 8: the resolved error-conversion of a `?`, mirroring `AST::TryConvert`

@@ -946,7 +946,19 @@ fn compile_bundle_path_build_inner(
         false,
         active_os,
     );
-    let web = options.web_target.then(|| crate::Codegen::emit_web(&bundle, compile_mode, ffi.as_ref()));
+    let web = if options.web_target {
+        Some(crate::Codegen::emit_web(&bundle, compile_mode, ffi.as_ref()).map_err(|miss| {
+            vec![Diagnostic::error(
+                "E-WEB-TIR-UNSUPPORTED",
+                format!("web output cannot compile `{}` yet", miss.func_name),
+                "web emitter capability facts drifted after validation".to_string(),
+                "report this compiler bug with the named function".to_string(),
+                Some(miss.span),
+            )]
+        })?)
+    } else {
+        None
+    };
     let plugin = if options.plugin_target {
         let errors = crate::PluginExport::validate_export_surface(&bundle);
         if !errors.is_empty() { return Err(errors); }
@@ -1375,7 +1387,15 @@ fn compile_bundle_path_opts_full(
     }
     let rust = crate::Codegen::emit_bundle_dbg(&bundle, ffi.as_ref(), debug_linemap, active_os);
     let web = if web_target {
-        Some(crate::Codegen::emit_web(&bundle, mode, ffi.as_ref()))
+        Some(crate::Codegen::emit_web(&bundle, mode, ffi.as_ref()).map_err(|miss| {
+            vec![Diagnostic::error(
+                "E-WEB-TIR-UNSUPPORTED",
+                format!("web output cannot compile `{}` yet", miss.func_name),
+                "web emitter capability facts drifted after validation".to_string(),
+                "report this compiler bug with the named function".to_string(),
+                Some(miss.span),
+            )]
+        })?)
     } else {
         None
     };

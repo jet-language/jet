@@ -7,7 +7,7 @@ use super::{
 use crate::Diagnostics::Span;
 use crate::Sema::CompileMode;
 use crate::Syntax;
-use crate::AST::{Expr, FfiLink, Func, Item, ProgramBundle, Stmt, Type};
+use crate::AST::{FfiLink, Func, Item, ProgramBundle, Type};
 use jet_foundation::WebPartition::{WebBucket, WebPartitionMarker};
 
 /// Generated web backend artifacts (WASM Rust, JS loader/app, DOM shim, manifest).
@@ -40,34 +40,36 @@ pub struct WebTirUnsupported {
     pub span: Span,
 }
 
-#[derive(Clone)]
+pub type WebEmitResult<T> = Result<T, WebTirUnsupported>;
+
 struct FuncWeb {
     name: String,
     _key: String,
     bucket: WebBucket,
     marker: Option<WebPartitionMarker>,
+    span: Span,
     params: Vec<(String, Type)>,
     return_type: Option<Type>,
-    body: Vec<Stmt>,
+    tir: TIR::TFunc,
 }
 
 pub fn emit_web(
     bundle: &ProgramBundle,
     _mode: CompileMode,
     _link: Option<&FfiLink>,
-) -> WebArtifacts {
+) -> WebEmitResult<WebArtifacts> {
     let funcs = collect_web_funcs(bundle);
     let manifest_json = emit_manifest(bundle, &funcs);
-    let wasm_rust = emit_wasm_rust(bundle, &funcs);
-    let js_app = emit_js_app(bundle, &funcs);
-    WebArtifacts {
+    let wasm_rust = emit_wasm_rust(bundle, &funcs)?;
+    let js_app = emit_js_app(bundle, &funcs)?;
+    Ok(WebArtifacts {
         manifest_json,
         wasm_rust,
         js_app,
         dom_runtime: DOM_RUNTIME.to_string(),
         index_html: emit_index_html(),
         explicit_html_path: bundle.modules[bundle.entry].html_path.clone(),
-    }
+    })
 }
 
 /// D-WEBTIR1=A: every executable web body must pass through the same checked
@@ -90,18 +92,31 @@ pub fn validate_web_tir_support(
         populate_cx_from_bundle(&mut cx, bundle, i);
         register_foreign_enum_variants(&mut cx, bundle, i);
         update_cloneability_with_foreign_types(&mut cx, &module.items);
-        validate_web_items_tir(&module.items, &cx, &mut diags);
+        validate_web_items_tir(
+            &module.items,
+            &cx,
+            bundle.modules[bundle.entry].html_path.is_some(),
+            &mut diags,
+        );
     }
     diags
 }
 
-fn validate_web_items_tir(items: &[Item], cx: &Cx, diags: &mut Vec<WebTirUnsupported>) {
+fn validate_web_items_tir(
+    items: &[Item],
+    cx: &Cx,
+    explicit_html: bool,
+    diags: &mut Vec<WebTirUnsupported>,
+) {
     for item in items {
         match item {
-            Item::Func(f) => validate_web_func_tir(f, cx, diags),
+            Item::Func(f) => {
+                let emitted = f.web_marker.is_some() || (f.name == "run" && !explicit_html);
+                validate_web_func_tir(f, cx, emitted, diags);
+            }
             Item::CodeModule(cm) => {
                 if let Some(body) = &cm.body {
-                    validate_web_items_tir(body, cx, diags);
+                    validate_web_items_tir(body, cx, explicit_html, diags);
                 }
             }
             _ => {}
@@ -109,19 +124,68 @@ fn validate_web_items_tir(items: &[Item], cx: &Cx, diags: &mut Vec<WebTirUnsuppo
     }
 }
 
-fn validate_web_func_tir(f: &Func, cx: &Cx, diags: &mut Vec<WebTirUnsupported>) {
+fn validate_web_func_tir(
+    f: &Func,
+    cx: &Cx,
+    require_web_emit: bool,
+    diags: &mut Vec<WebTirUnsupported>,
+) {
     *cx.current_type_params.borrow_mut() = f.type_params.iter().map(|p| p.name.clone()).collect();
     let covered = f.pre.is_empty() && f.post.is_empty() && TIR::tir_covers(f, cx);
     if covered {
-        let _ = TIR::lower_func(f, cx);
+        let tir = TIR::lower_func(f, cx);
+        if !require_web_emit || web_stmts_supported(&tir.body) {
+            cx.current_type_params.borrow_mut().clear();
+            return;
+        }
         cx.current_type_params.borrow_mut().clear();
-        return;
+    } else {
+        cx.current_type_params.borrow_mut().clear();
     }
-    cx.current_type_params.borrow_mut().clear();
     diags.push(WebTirUnsupported {
         func_name: f.name.clone(),
         span: f.name_span,
     });
+}
+
+fn web_stmts_supported(stmts: &[TIR::TStmt]) -> bool {
+    stmts.iter().all(|stmt| match stmt {
+        TIR::TStmt::LineMarker(_) | TIR::TStmt::Return(None) => true,
+        TIR::TStmt::Let { init, .. } | TIR::TStmt::ExprStmt(init) | TIR::TStmt::Return(Some(init)) => web_expr_supported(init),
+        TIR::TStmt::Assign { value, .. } => web_expr_supported(value),
+        TIR::TStmt::If { cond: TIR::TIfCond::Plain(cond), then_body, else_body, .. } => web_expr_supported(cond) && web_stmts_supported(then_body) && else_body.as_deref().map(web_stmts_supported).unwrap_or(true),
+        TIR::TStmt::Range { start, end, step, body, .. } => web_expr_supported(start) && web_expr_supported(end) && step.as_ref().map(web_expr_supported).unwrap_or(true) && web_stmts_supported(body),
+        TIR::TStmt::ForIn { var2: None, collection, body, .. } => web_expr_supported(collection) && web_stmts_supported(body),
+        TIR::TStmt::Inline(body) | TIR::TStmt::Region(body) => web_stmts_supported(body),
+        _ => false,
+    })
+}
+
+fn web_lambda_supported(lam: &TIR::TLambda) -> bool {
+    match &lam.executable {
+        TIR::TLambdaBody::Expr(expr) => web_expr_supported(expr),
+        TIR::TLambdaBody::Block(body) => web_stmts_supported(body),
+    }
+}
+
+fn web_expr_supported(expr: &TIR::TExpr) -> bool {
+    use TIR::TExprKind as E;
+    match &expr.kind {
+        E::IntLit(..) | E::FloatLit(_) | E::BoolLit(_) | E::CharLit(_) | E::Local(_) | E::ConstInline(_) => true,
+        E::StrLit(parts) => parts.iter().all(|p| match p { TIR::TStrPart::Lit(_) => true, TIR::TStrPart::Interp(e, _) => web_expr_supported(e) }),
+        E::Binary { lhs, rhs, .. } => web_expr_supported(lhs) && web_expr_supported(rhs),
+        E::Unary { operand, .. } | E::Clone(operand) | E::MaterializeView(operand) | E::DistinctRaw(operand) | E::Print(operand) => web_expr_supported(operand),
+        E::Field { recv, .. } => web_expr_supported(recv),
+        E::StructLit { fields, .. } => fields.iter().all(|(_, e, _)| web_expr_supported(e)),
+        E::Call { args, .. } | E::MethodCall { args, .. } => args.iter().all(|a| web_expr_supported(&a.value)),
+        E::CoreCall { module, method, args } => web_core_arity(module, method) == Some(args.len()) && args.iter().all(web_expr_supported),
+        E::HandleMethod { recv, op, args } => matches!(op, TIR::THandleOp::UiBackendMethod { .. } | TIR::THandleOp::ReactiveGet | TIR::THandleOp::ReactiveSet) && web_expr_supported(recv) && args.iter().all(web_expr_supported),
+        E::NumericMethod { recv, op: TIR::TNumericOp::CastAs { .. } } => web_expr_supported(recv),
+        E::OrFallback { value, fallback: TIR::TOrFallback::Value(fallback), .. } => web_expr_supported(value) && web_expr_supported(fallback),
+        E::Lambda(lam) => web_lambda_supported(lam),
+        E::CoreClosureCall { kind: TIR::TCoreClosureKind::UiReactiveRender { executable, .. } } => web_lambda_supported(executable),
+        _ => false,
+    }
 }
 
 fn emit_index_html() -> String {
@@ -153,13 +217,25 @@ fn emit_index_html() -> String {
 
 fn collect_web_funcs(bundle: &ProgramBundle) -> Vec<FuncWeb> {
     let mut out = Vec::new();
-    for module in &bundle.modules {
+    let extern_funcs = bundle_extern_funcs(bundle);
+    for (i, module) in bundle.modules.iter().enumerate() {
+        let mut cx = build_cx_items(
+            &module.items,
+            &module.source,
+            &module.display,
+            None,
+            &extern_funcs,
+        );
+        populate_cx_from_bundle(&mut cx, bundle, i);
+        register_foreign_enum_variants(&mut cx, bundle, i);
+        update_cloneability_with_foreign_types(&mut cx, &module.items);
         collect_module_funcs(
             &module.items,
             module.web_target_ceiling,
             None,
             None,
             bundle,
+            &cx,
             &mut out,
         );
     }
@@ -172,6 +248,7 @@ fn collect_module_funcs(
     module_ceiling: Option<WebBucket>,
     module_prefix: Option<&str>,
     bundle: &ProgramBundle,
+    cx: &Cx,
     out: &mut Vec<FuncWeb>,
 ) {
     let ceiling = module_ceiling.or(file_ceiling);
@@ -193,13 +270,14 @@ fn collect_module_funcs(
                     _key: key,
                     bucket,
                     marker: f.web_marker,
+                    span: f.name_span,
                     params: f
                         .params
                         .iter()
                         .map(|p| (p.name.clone(), p.ty.clone()))
                         .collect(),
                     return_type: f.return_type.clone(),
-                    body: f.body.clone(),
+                    tir: TIR::lower_func(f, cx),
                 });
             }
             Item::CodeModule(cm) => {
@@ -211,6 +289,7 @@ fn collect_module_funcs(
                         mod_ceiling,
                         Some(&cm.name),
                         bundle,
+                        cx,
                         out,
                     );
                 }
@@ -386,7 +465,7 @@ fn js_abi_call_args(
     }
 }
 
-fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> String {
+fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<String> {
     let mut out = String::from(
         "// Generated by jet — wasm32-unknown-unknown module (D-WEBKIND1).\n\
          #![allow(unused)]\n\n",
@@ -397,19 +476,21 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> String {
         .collect();
     if wasm_funcs.is_empty() {
         out.push_str("#[no_mangle]\npub extern \"C\" fn jet_wasm_nop() {}\n");
-        return out;
+        return Ok(out);
     }
     for f in wasm_funcs {
         let export = f.marker == Some(WebPartitionMarker::WasmExport)
-            || (f.name == "run" && f.bucket == WebBucket::Wasm);
+            || (f.name == "run"
+                && f.bucket == WebBucket::Wasm
+                && bundle.modules[bundle.entry].html_path.is_none());
         if export {
-            emit_wasm_fn(bundle, f, export, &mut out);
+            emit_wasm_fn(bundle, f, export, &mut out)?;
         }
     }
-    out
+    Ok(out)
 }
 
-fn emit_wasm_fn(bundle: &ProgramBundle, f: &FuncWeb, export: bool, out: &mut String) {
+fn emit_wasm_fn(bundle: &ProgramBundle, f: &FuncWeb, export: bool, out: &mut String) -> WebEmitResult<()> {
     if export {
         out.push_str(&format!(
             "#[no_mangle]\npub extern \"C\" fn {}(",
@@ -421,7 +502,7 @@ fn emit_wasm_fn(bundle: &ProgramBundle, f: &FuncWeb, export: bool, out: &mut Str
     let flat = flatten_abi_params(bundle, &f.params);
     let params: Vec<String> = flat
         .iter()
-        .map(|(name, ty)| format!("{name}: {}", wasm_ty(ty)))
+        .map(|(name, ty)| format!("user_{name}: {}", wasm_ty(ty)))
         .collect();
     out.push_str(&params.join(", "));
     out.push(')');
@@ -429,14 +510,11 @@ fn emit_wasm_fn(bundle: &ProgramBundle, f: &FuncWeb, export: bool, out: &mut Str
         out.push_str(&format!(" -> {} ", wasm_ty(ret)));
     }
     out.push_str("{\n");
-    if let Some(ret) = &f.return_type {
-        if let Some(expr) = wasm_body_return(&f.body) {
-            out.push_str(&format!("    {}\n", wasm_emit_expr(expr)));
-        } else {
-            out.push_str(&format!("    {}\n", wasm_default(ret)));
-        }
+    if f.return_type.is_some() {
+        emit_wasm_body(&f.tir.body, out, 1).map_err(|()| web_emit_error(f))?;
     }
     out.push_str("}\n\n");
+    Ok(())
 }
 
 fn wasm_ty(ty: &Type) -> &'static str {
@@ -449,57 +527,45 @@ fn wasm_ty(ty: &Type) -> &'static str {
     }
 }
 
-fn wasm_default(ty: &Type) -> String {
-    match ty {
-        Type::Float | Type::Float32 => "0.0".to_string(),
-        Type::Bool => "false".to_string(),
-        _ => "0".to_string(),
-    }
-}
-
-fn wasm_body_return(body: &[Stmt]) -> Option<&Expr> {
-    for stmt in body.iter().rev() {
-        if let Stmt::Return(Some(expr), _) = stmt {
-            return Some(expr);
-        }
-    }
-    for stmt in body.iter().rev() {
+fn emit_wasm_body(body: &[TIR::TStmt], out: &mut String, indent: usize) -> Result<(), ()> {
+    let pad = "    ".repeat(indent);
+    for stmt in body {
         match stmt {
-            Stmt::Expr(e) => return Some(e),
-            Stmt::Val(b) => return Some(&b.init),
-            _ => {}
+            TIR::TStmt::Return(Some(expr)) => out.push_str(&format!("{pad}return {};\n", wasm_emit_expr(expr)?)),
+            TIR::TStmt::ExprStmt(expr) => out.push_str(&format!("{pad}{};\n", wasm_emit_expr(expr)?)),
+            TIR::TStmt::Let { name, init, .. } => out.push_str(&format!("{pad}let mut {name} = {};\n", wasm_emit_expr(init)?)),
+            TIR::TStmt::Assign { place, op, value, .. } => out.push_str(&format!("{pad}{place} {}= {};\n", op.as_ref().map(binop).unwrap_or(""), wasm_emit_expr(value)?)),
+            TIR::TStmt::LineMarker(_) => {}
+            _ => return Err(()),
         }
     }
-    None
+    Ok(())
 }
 
-fn wasm_emit_expr(expr: &Expr) -> String {
-    match expr {
-        Expr::Int(n, _, _) => n.to_string(),
-        Expr::Float(n, _, _) => n.to_string(),
-        Expr::Bool(b, _) => b.to_string(),
-        Expr::Ident(name, _) => name.clone(),
-        Expr::Binary(op, lhs, rhs, _) => format!(
+fn wasm_emit_expr(expr: &TIR::TExpr) -> Result<String, ()> {
+    Ok(match &expr.kind {
+        TIR::TExprKind::IntLit(n, _) => n.to_string(),
+        TIR::TExprKind::FloatLit(n) => n.to_string(),
+        TIR::TExprKind::BoolLit(b) => b.to_string(),
+        TIR::TExprKind::Local(name) => name.clone(),
+        TIR::TExprKind::Binary { op, lhs, rhs, .. } => format!(
             "({} {} {})",
-            wasm_emit_expr(lhs),
+            wasm_emit_expr(lhs)?,
             binop(op),
-            wasm_emit_expr(rhs)
+            wasm_emit_expr(rhs)?
         ),
-        Expr::Unary(op, inner, _) => format!("({}{})", unop(op), wasm_emit_expr(inner)),
-        Expr::Paren(inner, _) => wasm_emit_expr(inner),
-        Expr::Call(call) => {
-            if call.args.len() == 1 {
-                if call.name == "take" {
-                    return wasm_emit_expr(&call.args[0].expr);
-                }
-            }
-            "0".to_string()
-        }
-        _ => "0".to_string(),
-    }
+        TIR::TExprKind::Unary { op, operand } => format!("({}{})", unop(op), wasm_emit_expr(operand)?),
+        TIR::TExprKind::Clone(inner) => wasm_emit_expr(inner)?,
+        TIR::TExprKind::Call { name, args } => format!("{}({})", name, args.iter().map(|a| wasm_emit_expr(&a.value)).collect::<Result<Vec<_>, _>>()?.join(", ")),
+        _ => return Err(()),
+    })
 }
 
-fn emit_js_app(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> String {
+fn web_emit_error(f: &FuncWeb) -> WebTirUnsupported {
+    WebTirUnsupported { func_name: f.name.clone(), span: f.span }
+}
+
+fn emit_js_app(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<String> {
     let mut out = String::from(
         "// Generated by jet — web JS entry (D-WEBBACKEND1).\n\
          import * as jetDom from \"./jet_dom_runtime.js\";\n\n",
@@ -546,7 +612,7 @@ fn emit_js_app(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> String {
         .filter(|f| f.bucket == WebBucket::Js && f.name != "run")
         .collect();
     for f in &js_funcs {
-        emit_js_fn(f, &mut out, funcs);
+        emit_js_fn(f, &mut out, funcs)?;
     }
 
     if let Some(main_fn) = funcs.iter().find(|f| f.name == "run") {
@@ -557,11 +623,16 @@ fn emit_js_app(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> String {
                 json_quote("run")
             ));
             out.push_str("  try {\n");
-            emit_js_body(&main_fn.body, &mut out, funcs, 2);
+            emit_tir_js_body(&main_fn.tir.body, &mut out, funcs, 2)
+                .map_err(|()| web_emit_error(main_fn))?;
             out.push_str("  } finally {\n    jetDom.exitRenderScope();\n  }\n");
             out.push_str("}\n\n");
             out.push_str("const _isMain = typeof process !== \"undefined\" && process.argv[1]?.endsWith(\"app.js\");\n");
             out.push_str("if (_isMain) { jet_main(); }\n");
+        } else if bundle.modules[bundle.entry].html_path.is_some() {
+            // An explicit host page owns startup. A native-only `run` is not a
+            // browser entry and is deliberately absent from the web artifact.
+            out.push_str("// Explicit HTML owns startup; native `run` is not emitted.\n");
         } else {
             out.push_str("export async function jet_main() {\n");
             out.push_str("  const wasm = await loadWasm();\n");
@@ -571,10 +642,10 @@ fn emit_js_app(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> String {
     } else {
         out.push_str("export async function jet_main() {}\n");
     }
-    out
+    Ok(out)
 }
 
-fn emit_js_fn(f: &FuncWeb, out: &mut String, all: &[FuncWeb]) {
+fn emit_js_fn(f: &FuncWeb, out: &mut String, all: &[FuncWeb]) -> WebEmitResult<()> {
     // D-DOMGEN1=A (Phase 7 extension): every top-level #Js function is
     // exported, not just `main` — a hand-written host page (index.html) can
     // call any of them directly (e.g. a click handler invoking a Jet-compiled
@@ -604,14 +675,15 @@ fn emit_js_fn(f: &FuncWeb, out: &mut String, all: &[FuncWeb]) {
         json_quote(&f.name)
     ));
     out.push_str("  try {\n");
-    emit_js_body(&f.body, out, all, 2);
+    emit_tir_js_body(&f.tir.body, out, all, 2).map_err(|()| web_emit_error(f))?;
     if let Some(ret) = &f.return_type {
-        if !body_has_return(&f.body) {
+        if !f.tir.body.iter().any(|s| matches!(s, TIR::TStmt::Return(_))) {
             out.push_str(&format!("    return {};\n", js_default(ret)));
         }
     }
     out.push_str("  } finally {\n    jetDom.exitRenderScope();\n  }\n");
     out.push_str("}\n\n");
+    Ok(())
 }
 
 fn param_names(params: &[(String, Type)]) -> String {
@@ -620,10 +692,6 @@ fn param_names(params: &[(String, Type)]) -> String {
         .map(|(n, _)| n.clone())
         .collect::<Vec<_>>()
         .join(", ")
-}
-
-fn body_has_return(body: &[Stmt]) -> bool {
-    body.iter().any(|s| matches!(s, Stmt::Return(_, _)))
 }
 
 fn js_default(ty: &Type) -> &'static str {
@@ -635,431 +703,200 @@ fn js_default(ty: &Type) -> &'static str {
     }
 }
 
-fn emit_js_body(body: &[Stmt], out: &mut String, funcs: &[FuncWeb], indent: usize) {
+fn web_name(name: &str) -> &str {
+    name.strip_prefix("user_").unwrap_or(name)
+}
+
+fn web_place(name: &str) -> String {
+    let name = name.strip_prefix("(*").and_then(|s| s.strip_suffix(')')).unwrap_or(name);
+    if let Some(source) = name.strip_prefix("_jet_cap_user_") {
+        return source.to_string();
+    }
+    web_name(name).to_string()
+}
+fn emit_tir_js_body(body: &[TIR::TStmt], out: &mut String, funcs: &[FuncWeb], indent: usize) -> Result<(), ()> {
     let pad = "  ".repeat(indent);
     for stmt in body {
         match stmt {
-            Stmt::Expr(expr) => {
-                if let Some(line) = emit_js_stmt_expr(expr, funcs) {
-                    out.push_str(&format!("{pad}{line}\n"));
-                }
+            TIR::TStmt::LineMarker(_) => {}
+            TIR::TStmt::Let { name, init, .. } => out.push_str(&format!("{pad}let {} = {};\n", web_name(name), tir_js_expr(init, funcs)?)),
+            TIR::TStmt::Assign { place, op, value, .. } => {
+                let assign = op.as_ref().map(|o| format!("{}=", binop(o))).unwrap_or_else(|| "=".to_string());
+                out.push_str(&format!("{pad}{} {assign} {};\n", web_name(place), tir_js_expr(value, funcs)?));
             }
-            Stmt::Val(b) => {
-                let init = js_emit_expr(&b.init, funcs);
-                out.push_str(&format!("{pad}let {} = {init};\n", b.name));
-            }
-            Stmt::Return(Some(expr), _) => {
-                out.push_str(&format!("{pad}return {};\n", js_emit_expr(expr, funcs)));
-            }
-            Stmt::Return(None, _) => out.push_str(&format!("{pad}return;\n")),
-            Stmt::For {
-                var, kind, body, ..
-            } => match kind {
-                crate::AST::ForKind::Range { start, end, .. } => {
-                    out.push_str(&format!(
-                        "{pad}for (let {var} = {}; {var} < {}; {var}++) {{\n",
-                        js_emit_expr(start, funcs),
-                        js_emit_expr(end, funcs),
-                    ));
-                    emit_js_body(body, out, funcs, indent + 1);
-                    out.push_str(&format!("{pad}}}\n"));
-                }
-                crate::AST::ForKind::In { collection } => {
-                    out.push_str(&format!(
-                        "{pad}for (const {var} of {}) {{\n",
-                        js_emit_expr(collection, funcs)
-                    ));
-                    emit_js_body(body, out, funcs, indent + 1);
-                    out.push_str(&format!("{pad}}}\n"));
-                }
-            },
-            // D-DOMGEN1=A wiring: a plain local reassignment (`name = expr` /
-            // `name += expr`, S17) inside an `#Js` function body — needed for
-            // e.g. picking a color/label based on a condition without an
-            // if-expression. Only `LValue::Local` is handled; other targets
-            // (index/field assignment) stay unsupported in this narrow JS
-            // codegen subset, same as every other construct this file
-            // doesn't emit (see the module doc comment).
-            Stmt::Assign {
-                target: crate::AST::LValue::Local { name, .. },
-                op,
-                value,
-                ..
-            } => {
-                let js_op = match op {
-                    None => "=",
-                    Some(crate::AST::BinOp::Add) => "+=",
-                    Some(crate::AST::BinOp::Sub) => "-=",
-                    Some(crate::AST::BinOp::Mul) => "*=",
-                    Some(crate::AST::BinOp::Div) => "/=",
-                    _ => "=",
-                };
-                out.push_str(&format!(
-                    "{pad}{name} {js_op} {};\n",
-                    js_emit_expr(value, funcs)
-                ));
-            }
-            Stmt::If(if_stmt) => {
-                out.push_str(&format!(
-                    "{pad}if ({}) {{\n",
-                    js_emit_expr(&if_stmt.cond, funcs)
-                ));
-                emit_js_body(&if_stmt.then_body, out, funcs, indent + 1);
-                match &if_stmt.else_branch {
-                    Some(crate::AST::ElseBranch::Else(else_body)) => {
-                        out.push_str(&format!("{pad}}} else {{\n"));
-                        emit_js_body(else_body, out, funcs, indent + 1);
-                    }
-                    Some(crate::AST::ElseBranch::ElseIf(next)) => {
-                        out.push_str(&format!("{pad}}} else "));
-                        emit_js_body(&[Stmt::If(*next.clone())], out, funcs, indent);
-                        return;
-                    }
-                    None => {}
+            TIR::TStmt::Return(Some(expr)) => out.push_str(&format!("{pad}return {};\n", tir_js_expr(expr, funcs)?)),
+            TIR::TStmt::Return(None) => out.push_str(&format!("{pad}return;\n")),
+            TIR::TStmt::ExprStmt(expr) => out.push_str(&format!("{pad}{};\n", tir_js_expr(expr, funcs)?)),
+            TIR::TStmt::If { cond: TIR::TIfCond::Plain(cond), then_body, else_body, .. } => {
+                out.push_str(&format!("{pad}if ({}) {{\n", tir_js_expr(cond, funcs)?));
+                emit_tir_js_body(then_body, out, funcs, indent + 1)?;
+                if let Some(else_body) = else_body {
+                    out.push_str(&format!("{pad}}} else {{\n"));
+                    emit_tir_js_body(else_body, out, funcs, indent + 1)?;
                 }
                 out.push_str(&format!("{pad}}}\n"));
             }
-            _ => {}
-        }
-    }
-}
-
-fn emit_js_stmt_expr(expr: &Expr, funcs: &[FuncWeb]) -> Option<String> {
-    match expr {
-        Expr::Call(call) => {
-            if call.name == "print" && call.args.len() == 1 {
-                return Some(format!(
-                    "jetDom.print({});",
-                    js_emit_expr(&call.args[0].expr, funcs)
-                ));
+            TIR::TStmt::Range { var, start, end, step, body, .. } => {
+                let step = match step { Some(e) => tir_js_expr(e, funcs)?, None => "1".to_string() };
+                out.push_str(&format!("{pad}for (let {} = {}; {} <= {}; {} += {step}) {{\n", web_name(var), tir_js_expr(start, funcs)?, web_name(var), tir_js_expr(end, funcs)?, web_name(var)));
+                emit_tir_js_body(body, out, funcs, indent + 1)?;
+                out.push_str(&format!("{pad}}}\n"));
             }
-            js_emit_call_expr(call, funcs).map(|e| format!("{e};"))
-        }
-        Expr::MethodCall {
-            receiver,
-            method,
-            args,
-            ..
-        } => Some(format!(
-            "{};",
-            emit_js_method(receiver, method, args, funcs)
-        )),
-        _ => None,
-    }
-}
-
-fn ui_method_call(
-    receiver: &Expr,
-    method: &str,
-    args: &[crate::AST::CallArg],
-    funcs: &[FuncWeb],
-) -> Option<String> {
-    if let Expr::Ident(ns, _) = receiver {
-        if ns == "ui" {
-            return ui_dom_call(&format!("ui.{method}"), args, funcs);
-        }
-        if ns == "reactive" {
-            return reactive_dom_call(&format!("reactive.{method}"), args, funcs);
+            TIR::TStmt::ForIn { var, var2: None, collection, body, .. } => {
+                out.push_str(&format!("{pad}for (const {} of {}) {{\n", web_name(var), tir_js_expr(collection, funcs)?));
+                emit_tir_js_body(body, out, funcs, indent + 1)?;
+                out.push_str(&format!("{pad}}}\n"));
+            }
+            TIR::TStmt::Inline(inner) | TIR::TStmt::Region(inner) => emit_tir_js_body(inner, out, funcs, indent)?,
+            _ => return Err(()),
         }
     }
-    if let Some(path) = module_path_from_receiver(receiver) {
-        if path == "web" || path == "web.storage.local" || path == "web.storage.session" {
-            return web_dom_call(&path, method, args, funcs);
-        }
-    }
-    None
+    Ok(())
 }
 
-fn module_path_from_receiver(receiver: &Expr) -> Option<String> {
-    match receiver {
-        Expr::Ident(name, _) => Some(name.clone()),
-        Expr::Field(base, leaf, _) => {
-            let mut path = module_path_from_receiver(base)?;
-            path.push('.');
-            path.push_str(leaf);
-            Some(path)
-        }
-        _ => None,
-    }
+fn tir_call_args(args: &[TIR::TCallArg], funcs: &[FuncWeb]) -> Result<String, ()> {
+    Ok(args.iter().map(|a| tir_js_expr(&a.value, funcs)).collect::<Result<Vec<_>, _>>()?.join(", "))
 }
 
-fn web_dom_call(
-    path: &str,
-    method: &str,
-    args: &[crate::AST::CallArg],
-    funcs: &[FuncWeb],
-) -> Option<String> {
-    let a = |i: usize| {
-        args.get(i)
-            .map(|arg| js_emit_expr(&arg.expr, funcs))
-            .unwrap_or_else(|| "undefined".to_string())
-    };
-    let rendered = match (path, method) {
-        ("web", "on") => format!("jetDom.on({}, {}, {})", a(0), a(1), a(2)),
-        ("web", "value") => format!("jetDom.value({})", a(0)),
-        ("web.storage.local", "get") => format!("jetDom.storageGet(\"local\", {})", a(0)),
-        ("web.storage.session", "get") => {
-            format!("jetDom.storageGet(\"session\", {})", a(0))
-        }
-        ("web.storage.local", "set") => {
-            format!("jetDom.storageSet(\"local\", {}, {})", a(0), a(1))
-        }
-        ("web.storage.session", "set") => {
-            format!("jetDom.storageSet(\"session\", {}, {})", a(0), a(1))
-        }
-        ("web.storage.local", "remove") => {
-            format!("jetDom.storageRemove(\"local\", {})", a(0))
-        }
-        ("web.storage.session", "remove") => {
-            format!("jetDom.storageRemove(\"session\", {})", a(0))
-        }
-        ("web.storage.local", "clear") => "jetDom.storageClear(\"local\")".to_string(),
-        ("web.storage.session", "clear") => "jetDom.storageClear(\"session\")".to_string(),
-        _ => return None,
-    };
-    Some(rendered)
+fn tir_plain_args(args: &[TIR::TExpr], funcs: &[FuncWeb]) -> Result<Vec<String>, ()> {
+    args.iter().map(|a| tir_js_expr(a, funcs)).collect()
 }
 
-/// `reactive.signal(initial)` — the only `core.reactive` constructor this
-/// example needs; `derived`/`effect`/`computed` are out of scope for Phase 7.
-fn reactive_dom_call(
-    name: &str,
-    args: &[crate::AST::CallArg],
-    funcs: &[FuncWeb],
-) -> Option<String> {
-    let short = name.rsplit('.').next().unwrap_or(name);
-    let a = |i: usize| {
-        args.get(i)
-            .map(|arg| js_emit_expr(&arg.expr, funcs))
-            .unwrap_or_else(|| "undefined".to_string())
-    };
-    let rendered = match short {
-        "signal" => format!("jetDom.makeSignal({})", a(0)),
-        _ => return None,
-    };
-    Some(rendered)
-}
-
-fn emit_js_method(
-    receiver: &Expr,
-    method: &str,
-    args: &[crate::AST::CallArg],
-    funcs: &[FuncWeb],
-) -> String {
-    if let Some(dom) = ui_method_call(receiver, method, args, funcs) {
-        return dom;
-    }
-    let recv = js_emit_expr(receiver, funcs);
-    let arg_exprs: Vec<String> = args.iter().map(|a| js_emit_expr(&a.expr, funcs)).collect();
-    match (method, arg_exprs.len()) {
-        ("measure", 2) => format!("jetDom.measure({}, {})", arg_exprs[0], arg_exprs[1]),
-        ("layout", 2) => format!("jetDom.layout({recv}, {}, {})", arg_exprs[0], arg_exprs[1]),
-        ("paint", 1) => format!("jetDom.paint({recv}, {})", arg_exprs[0]),
-        ("commands", 0) => format!("jetDom.commands({recv})"),
-        ("on_event", 1) => format!("jetDom.onEvent({recv}, {})", arg_exprs[0]),
-        ("get", 0) => format!("{recv}.get()"),
-        ("set", 1) => format!("{recv}.set({})", arg_exprs[0]),
-        // D-UISHOWCASE1 (c134 Phase 8): numeric width conversions
-        // (`to_int`/`to_float`, TIR/subset.rs's `numeric_conv_target`) — JS
-        // has one `Number` type, so `to_float` is an identity passthrough and
-        // `to_int` truncates toward zero (`Math.trunc`, matching Rust `as
-        // i64`'s truncation, not `Math.floor`'s round-toward-negative-infinity).
-        ("to_float", 0) => recv,
-        ("to_int", 0) => format!("Math.trunc({recv})"),
-        // D-UISHOWCASE1 (c134 Phase 8) / D-CAP2 (D-MEM1/S4): sema used to silently
-        // insert a `.clone()` `MethodCall` around struct-literal field values that
-        // need Rust value-semantics copying (CheckerOwnership.rs/CheckerInfer).
-        // That AST shape no longer reaches here — the compiler's own duplication
-        // rewrites (and a user's explicit `copy x`) both build `Expr::Copy` now,
-        // handled as an identity passthrough in `js_emit_expr`. A user-written
-        // `.clone()` MethodCall is also gone (unrecognized method, sema-level);
-        // `method` here can no longer be `"clone"`.
-        _ => format!("/* {method} */ undefined"),
-    }
-}
-
-fn js_emit_expr(expr: &Expr, funcs: &[FuncWeb]) -> String {
-    match expr {
-        Expr::Int(n, _, _) => n.to_string(),
-        Expr::Float(n, _, _) => n.to_string(),
-        Expr::Bool(b, _) => b.to_string(),
-        Expr::Str(parts, _) => js_string_lit(parts),
-        Expr::Ident(name, _) => name.clone(),
-        Expr::Field(base, field, _) => format!("{}.{}", js_emit_expr(base, funcs), field),
-        Expr::Binary(op, lhs, rhs, _) => format!(
-            "({} {} {})",
-            js_emit_expr(lhs, funcs),
-            binop(op),
-            js_emit_expr(rhs, funcs)
-        ),
-        Expr::Unary(op, inner, _) => format!("({}{})", unop(op), js_emit_expr(inner, funcs)),
-        Expr::Paren(inner, _) => js_emit_expr(inner, funcs),
-        Expr::OrFallback {
-            value, fallback, ..
-        } => {
-            let rhs = match fallback {
-                crate::AST::OrFallback::Value(expr) => js_emit_expr(expr, funcs),
-                crate::AST::OrFallback::Return(Some(expr), _) => {
-                    format!("(() => {{ return {}; }})()", js_emit_expr(expr, funcs))
-                }
-                crate::AST::OrFallback::Return(None, _) => "undefined".to_string(),
-                crate::AST::OrFallback::Panic { args, .. } => {
-                    let msg = args
-                        .first()
-                        .map(|arg| js_emit_expr(&arg.expr, funcs))
-                        .unwrap_or_else(|| "\"fallback failed\"".to_string());
-                    format!("(() => {{ throw new Error(String({msg})); }})()")
-                }
-                crate::AST::OrFallback::Break(_) | crate::AST::OrFallback::Continue(_) => {
-                    "undefined".to_string()
-                }
-            };
-            format!("({} ?? {})", js_emit_expr(value, funcs), rhs)
+fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb]) -> Result<String, ()> {
+    use TIR::TExprKind as E;
+    Ok(match &expr.kind {
+        E::IntLit(n, _) => n.to_string(),
+        E::FloatLit(n) => n.to_string(),
+        E::BoolLit(b) => b.to_string(),
+        E::CharLit(c) => json_quote(&c.to_string()),
+        E::StrLit(parts) => tir_js_string(parts, funcs)?,
+        E::Local(name) => web_place(name),
+        E::ConstInline(value) => value.clone(),
+        E::Binary { op, lhs, rhs, .. } => format!("({} {} {})", tir_js_expr(lhs, funcs)?, binop(op), tir_js_expr(rhs, funcs)?),
+        E::Unary { op, operand } => format!("({}{})", unop(op), tir_js_expr(operand, funcs)?),
+        E::Clone(inner) | E::MaterializeView(inner) | E::DistinctRaw(inner) => tir_js_expr(inner, funcs)?,
+        E::Field { recv, field_rust, .. } => format!("{}.{}", tir_js_expr(recv, funcs)?, web_name(field_rust)),
+        E::StructLit { fields, .. } => format!("({{ {} }})", fields.iter().map(|(n, v, _)| Ok(format!("{}: {}", web_name(n), tir_js_expr(v, funcs)?))).collect::<Result<Vec<_>, ()>>()?.join(", ")),
+        E::Call { name, args } => {
+            let name = web_name(name);
+            let args = tir_call_args(args, funcs)?;
+            if name == "print" { format!("jetDom.print({args})") }
+            else if is_wasm_export(name, funcs) { format!("await bridge_{name}({args})") }
+            else { format!("{name}({args})") }
         }
-        Expr::Call(call) => {
-            js_emit_call_expr(call, funcs).unwrap_or_else(|| "undefined".to_string())
-        }
-        Expr::MethodCall {
-            receiver,
-            method,
-            args,
-            ..
-        } => emit_js_method(receiver, method, args, funcs),
-        Expr::Lambda(lam) => js_emit_lambda(lam, funcs),
-        // D-UISHOWCASE1 (c134 Phase 8, flagship showcase): dot-construction
-        // (`Type.{ field: expr, ... }` / `.{ ... }`) inside a `#Js` function
-        // body — a real, narrow gap (this file's module doc already flagged
-        // it as unconfirmed). JS has no struct nominal type, so a Jet struct
-        // literal is just a plain object literal keyed by field name; that's
-        // all a JS-bucketed consumer (`.field` access, already supported)
-        // ever needs. `EnumLit`/tagged-variant construction is intentionally
-        // NOT added here — this codegen has no pattern-matching (`Stmt::Switch`)
-        // support, so a JS-bucketed function can build plain structs but not
-        // enums it would need to later destructure; that stays a native-only
-        // mechanism until switch/pattern support is added to this backend.
-        Expr::StructLit { fields, .. } => {
-            let parts: Vec<String> = fields
-                .iter()
-                .map(|(name, _, expr)| format!("{name}: {}", js_emit_expr(expr, funcs)))
-                .collect();
-            format!("({{ {} }})", parts.join(", "))
-        }
-        // D-CAP2 (D-MEM1/S4): `copy x` — same reasoning as the retired
-        // sema-inserted `.clone()` MethodCall this replaces (see
-        // `emit_js_method`'s old `("clone", 0)` arm): JS objects/strings/
-        // numbers are copied-by-reference or by value naturally and nothing
-        // in this codegen subset mutates a struct's fields in place after
-        // construction, so `copy` is a safe identity passthrough here — no
-        // deep-copy needed. Falling through to `_ => "undefined"` here was
-        // exactly the D-UISHOWCASE1 bug that arm was added to fix.
-        Expr::Copy(inner, _) => js_emit_expr(inner, funcs),
-        _ => "undefined".to_string(),
-    }
-}
-
-/// Render a Jet lambda (`() => expr` or `() => { stmts }`) as a JS arrow
-/// function. Scoped to what `ui.reactive_render(() => { ... })` needs: a
-/// zero/narrow-arg closure whose block body is plain statements already
-/// covered by `emit_js_body` — no capture-list handling (JS closures capture
-/// lexically for free, unlike the Rust `take`-list machinery).
-fn js_emit_lambda(lam: &crate::AST::Lambda, funcs: &[FuncWeb]) -> String {
-    let params: Vec<String> = lam.params.iter().map(|p| p.name.clone()).collect();
-    let header = format!("({})", params.join(", "));
-    match &lam.body {
-        crate::AST::LambdaBody::Expr(e) => format!("{header} => ({})", js_emit_expr(e, funcs)),
-        crate::AST::LambdaBody::Block(stmts) => {
-            let mut body = String::new();
-            emit_js_body(stmts, &mut body, funcs, 1);
-            format!("{header} => {{\n{body}}}")
-        }
-    }
-}
-
-fn js_string_lit(parts: &[crate::AST::StrPart]) -> String {
-    if parts
-        .iter()
-        .any(|p| matches!(p, crate::AST::StrPart::Interp(_, _)))
-    {
-        let mut s = String::from("`");
-        for part in parts {
-            match part {
-                crate::AST::StrPart::Lit(t) => s.push_str(t),
-                crate::AST::StrPart::Interp(e, _) => {
-                    s.push_str("${");
-                    s.push_str(&js_emit_expr(e, &[]));
-                    s.push('}');
-                }
+        E::Print(value) => format!("jetDom.print({})", tir_js_expr(value, funcs)?),
+        E::MethodCall { recv, method_rust, args } => format!("{}.{}({})", tir_js_expr(recv, funcs)?, web_name(method_rust), tir_call_args(args, funcs)?),
+        E::CoreCall { module, method, args } => tir_core_call(module, method, args, funcs)?,
+        E::HandleMethod { recv, op: TIR::THandleOp::UiBackendMethod { method }, args } => {
+            let recv = tir_js_expr(recv, funcs)?;
+            let a = tir_plain_args(args, funcs)?;
+            match (method.as_str(), a.len()) {
+                ("measure", 2) => format!("jetDom.measure({}, {})", a[0], a[1]),
+                ("layout", 2) => format!("jetDom.layout({recv}, {}, {})", a[0], a[1]),
+                ("paint", 1) => format!("jetDom.paint({recv}, {})", a[0]),
+                ("commands", 0) => format!("jetDom.commands({recv})"),
+                ("on_event", 1) => format!("jetDom.onEvent({recv}, {})", a[0]),
+                _ => return Err(()),
             }
         }
-        s.push('`');
-        s
+        E::HandleMethod { recv, op: TIR::THandleOp::ReactiveGet, args } if args.is_empty() => format!("{}.get()", tir_js_expr(recv, funcs)?),
+        E::HandleMethod { recv, op: TIR::THandleOp::ReactiveSet, args } if args.len() == 1 => format!("{}.set({})", tir_js_expr(recv, funcs)?, tir_js_expr(&args[0], funcs)?),
+        E::NumericMethod { recv, op } => match op {
+            TIR::TNumericOp::CastAs { dst_rust } if dst_rust.contains("i") || dst_rust.contains("u") => format!("Math.trunc({})", tir_js_expr(recv, funcs)?),
+            TIR::TNumericOp::CastAs { .. } => tir_js_expr(recv, funcs)?,
+            _ => return Err(()),
+        },
+        E::OrFallback { value, fallback: TIR::TOrFallback::Value(fallback), .. } => format!("({} ?? {})", tir_js_expr(value, funcs)?, tir_js_expr(fallback, funcs)?),
+        E::Lambda(lam) => {
+            let params = lam.source_params.join(", ");
+            match &lam.executable {
+                TIR::TLambdaBody::Expr(body) => format!("({params}) => ({})", tir_js_expr(body, funcs)?),
+                TIR::TLambdaBody::Block(body) => { let mut rendered = String::new(); emit_tir_js_body(body, &mut rendered, funcs, 1)?; format!("({params}) => {{\n{rendered}}}") }
+            }
+        }
+        E::CoreClosureCall { kind: TIR::TCoreClosureKind::UiReactiveRender { executable, .. } } => format!("jetDom.reactiveRender({})", tir_js_lambda(executable, funcs)?),
+        _ => return Err(()),
+    })
+}
+
+fn tir_js_lambda(lam: &TIR::TLambda, funcs: &[FuncWeb]) -> Result<String, ()> {
+    let params = lam.source_params.join(", ");
+    match &lam.executable {
+        TIR::TLambdaBody::Expr(body) => Ok(format!("({params}) => ({})", tir_js_expr(body, funcs)?)),
+        TIR::TLambdaBody::Block(body) => {
+            let mut rendered = String::new();
+            emit_tir_js_body(body, &mut rendered, funcs, 1)?;
+            Ok(format!("({params}) => {{\n{rendered}}}"))
+        }
+    }
+}
+
+fn tir_js_string(parts: &[TIR::TStrPart], funcs: &[FuncWeb]) -> Result<String, ()> {
+    if parts.iter().any(|p| matches!(p, TIR::TStrPart::Interp(_, _))) {
+        let mut out = String::from("`");
+        for part in parts { match part { TIR::TStrPart::Lit(s) => out.push_str(s), TIR::TStrPart::Interp(e, _) => out.push_str(&format!("${{{}}}", tir_js_expr(e, funcs)?)) } }
+        out.push('`'); Ok(out)
     } else {
-        let mut lit = String::new();
-        for part in parts {
-            if let crate::AST::StrPart::Lit(t) = part {
-                lit.push_str(t);
-            }
-        }
-        json_quote(&lit)
+        Ok(json_quote(&parts.iter().filter_map(|p| if let TIR::TStrPart::Lit(s) = p { Some(s.as_str()) } else { None }).collect::<String>()))
     }
 }
 
-fn js_emit_call_expr(call: &crate::AST::Call, funcs: &[FuncWeb]) -> Option<String> {
-    if is_wasm_export(&call.name, funcs) {
-        let args: Vec<String> = call
-            .args
-            .iter()
-            .map(|a| js_emit_expr(&a.expr, funcs))
-            .collect();
-        return Some(format!("await bridge_{}({})", call.name, args.join(", ")));
+fn tir_core_call(module: &str, method: &str, args: &[TIR::TExpr], funcs: &[FuncWeb]) -> Result<String, ()> {
+    let a = tir_plain_args(args, funcs)?;
+    let module = module.strip_prefix("core.").unwrap_or(module);
+    let storage = if module.ends_with("storage.local") {
+        Some("local")
+    } else if module.ends_with("storage.session") {
+        Some("session")
+    } else {
+        None
+    };
+    let required = web_core_arity(module, method).ok_or(())?;
+    if a.len() != required {
+        return Err(());
     }
-    if let Some(dom) = ui_dom_call(&call.name, &call.args, funcs) {
-        return Some(dom);
+    let get = |i: usize| a[i].as_str();
+    if let Some(kind) = storage {
+        return Ok(match method {
+            "get" => format!("jetDom.storageGet(\"{kind}\", {})", get(0)),
+            "set" => format!("jetDom.storageSet(\"{kind}\", {}, {})", get(0), get(1)),
+            "remove" => format!("jetDom.storageRemove(\"{kind}\", {})", get(0)),
+            "clear" => format!("jetDom.storageClear(\"{kind}\")"),
+            _ => return Err(()),
+        });
     }
-    if call.name == "take" && call.args.len() == 1 {
-        return Some(js_emit_expr(&call.args[0].expr, funcs));
+    Ok(match method {
+        "null_backend" => "jetDom.createBackend()".to_string(),
+        "node" => format!("jetDom.makeNode({}, {}, {})", get(0), get(1), get(2)),
+        "node_color" => format!("jetDom.makeNode({}, {}, {}, {})", get(0), get(1), get(2), get(3)),
+        "constraint" => format!("jetDom.makeConstraint({}, {}, {}, {})", get(0), get(1), get(2), get(3)),
+        "rect" => format!("jetDom.makeRect({}, {}, {}, {})", get(0), get(1), get(2), get(3)),
+        "key_event" => format!("jetDom.makeKeyEvent({})", get(0)),
+        "signal" => format!("jetDom.makeSignal({})", get(0)),
+        "on" => format!("jetDom.on({}, {}, {})", get(0), get(1), get(2)),
+        "value" => format!("jetDom.value({})", get(0)),
+        _ => return Err(()),
+    })
+}
+
+fn web_core_arity(module: &str, method: &str) -> Option<usize> {
+    let module = module.strip_prefix("core.").unwrap_or(module);
+    let storage = module.ends_with("storage.local") || module.ends_with("storage.session");
+    match (storage, method) {
+        (true, "get" | "remove") => Some(1),
+        (true, "set") => Some(2),
+        (true, "clear") => Some(0),
+        (false, "null_backend") => Some(0),
+        (false, "node") => Some(3),
+        (false, "node_color" | "constraint" | "rect") => Some(4),
+        (false, "key_event" | "signal" | "value") => Some(1),
+        (false, "on") => Some(3),
+        _ => None,
     }
-    let args: Vec<String> = call
-        .args
-        .iter()
-        .map(|a| js_emit_expr(&a.expr, funcs))
-        .collect();
-    Some(format!("{}({})", call.name, args.join(", ")))
 }
 
 fn is_wasm_export(name: &str, funcs: &[FuncWeb]) -> bool {
-    funcs
-        .iter()
-        .any(|f| f.name == name && f.marker == Some(WebPartitionMarker::WasmExport))
-}
-
-fn ui_dom_call(name: &str, args: &[crate::AST::CallArg], funcs: &[FuncWeb]) -> Option<String> {
-    let short = name.rsplit('.').next().unwrap_or(name);
-    let a = |i: usize| {
-        args.get(i)
-            .map(|arg| js_emit_expr(&arg.expr, funcs))
-            .unwrap_or_else(|| "0".to_string())
-    };
-    let rendered = match short {
-        "null_backend" => "jetDom.createBackend()".to_string(),
-        "node" => format!("jetDom.makeNode({}, {}, {})", a(0), a(1), a(2)),
-        // D-STYLESHAPE1=A wiring: same shim function, explicit color arg.
-        "node_color" => format!("jetDom.makeNode({}, {}, {}, {})", a(0), a(1), a(2), a(3)),
-        "constraint" => format!(
-            "jetDom.makeConstraint({}, {}, {}, {})",
-            a(0),
-            a(1),
-            a(2),
-            a(3)
-        ),
-        "rect" => format!("jetDom.makeRect({}, {}, {}, {})", a(0), a(1), a(2), a(3)),
-        "key_event" => format!("jetDom.makeKeyEvent({})", a(0)),
-        // D-RENDERTGT2=A carried into JS (Phase 7): `ui.reactive_render(() => {...})`
-        // runs the closure now and re-runs it whenever a signal it reads changes.
-        "reactive_render" => format!("jetDom.reactiveRender({})", a(0)),
-        _ => return None,
-    };
-    Some(rendered)
+    funcs.iter().any(|f| f.name == name && f.marker == Some(WebPartitionMarker::WasmExport))
 }
 
 fn binop(op: &crate::AST::BinOp) -> &'static str {
@@ -1085,7 +922,6 @@ fn binop(op: &crate::AST::BinOp) -> &'static str {
         Or => "||",
     }
 }
-
 fn unop(op: &crate::AST::UnOp) -> &'static str {
     use crate::AST::UnOp::*;
     match op {

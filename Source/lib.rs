@@ -360,7 +360,13 @@ pub fn compile_web_with_path(src: &str, file: &str) -> Result<CompileOutput, Vec
         &bundle,
         Sema::CompileMode::Run,
         ffi.as_ref(),
-    ));
+    ).map_err(|miss| vec![Diagnostics::Diagnostic::error(
+        "E-WEB-TIR-UNSUPPORTED",
+        format!("web output cannot compile `{}` yet", miss.func_name),
+        "web emitter capability facts drifted after validation".to_string(),
+        "report this compiler bug with the named function".to_string(),
+        Some(miss.span),
+    )])?);
     let capabilities = Capabilities::from_sema(
         &bundle.used_core,
         bundle_uses_unsafe(&bundle),

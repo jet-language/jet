@@ -73,13 +73,16 @@ pub(crate) fn lower_lambda_expecting(
     // The body: an expression body lowers + emits directly; a block body lowers its
     // statements (on the lambda env) and emits a `{ … }` at indent 1 — byte-for-byte
     // `emit_lambda`'s `emit_stmts(…, 1, false)` then `format!("{{ {} }}", inner)`.
-    let body = match &lam.body {
-        LambdaBody::Expr(e) => emit_tir_expr(&lower_expr(e, cx, &mut lam_env), cx),
+    let (body, executable) = match &lam.body {
+        LambdaBody::Expr(e) => {
+            let lowered = lower_expr(e, cx, &mut lam_env);
+            (emit_tir_expr(&lowered, cx), TLambdaBody::Expr(Box::new(lowered)))
+        }
         LambdaBody::Block(stmts) => {
             let lowered = lower_stmts(stmts, cx, &mut lam_env);
             let mut inner = String::new();
             emit_tir_stmts(&lowered, cx, &mut inner, 1);
-            format!("{{ {} }}", inner)
+            (format!("{{ {} }}", inner), TLambdaBody::Block(lowered))
         }
     };
     // `move ` keyword: the AST emits it UNLESS the lambda is FnMut and does not escape.
@@ -88,6 +91,8 @@ pub(crate) fn lower_lambda_expecting(
         prep,
         params,
         body,
+        executable,
+        source_params: lam.params.iter().map(|p| p.name.clone()).collect(),
         is_move,
         boxed: lam.meta.escapes,
     }

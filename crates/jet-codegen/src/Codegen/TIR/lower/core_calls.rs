@@ -232,7 +232,8 @@ pub(crate) fn lower_core_closure_call(
         ("core.ui", "reactive_render") => {
             let lam = lam_at(0)?;
             let closure = render_lambda_str(lam, cx, env);
-            TCoreClosureKind::UiReactiveRender { closure }
+            let executable = Box::new(lower_lambda(lam, cx, env));
+            TCoreClosureKind::UiReactiveRender { closure, executable }
         }
         _ => return None,
     };

@@ -657,6 +657,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     var: var.clone(),
                     var2: var2.as_ref().map(|(n, _)| n.clone()),
                     collection_str,
+                    collection: lowered_coll,
                     method_kind,
                     columnar,
                     by_value,
