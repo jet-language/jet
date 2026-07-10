@@ -2522,6 +2522,82 @@ fn canvas_editor_shell_matches_round3_contract() {
 }
 
 #[test]
+fn canvas_javascript_assets_are_independently_syntax_checked_and_ordered() {
+    const ASSETS: &[&str] = &[
+        "runtime-state.js",
+        "editing-history.js",
+        "diagnostics-query.js",
+        "drawing-palette.js",
+        "project-navigation.js",
+        "graph-rendering.js",
+        "inspector-connections.js",
+        "input-events.js",
+        "transactions-catalog.js",
+        "bootstrap.js",
+    ];
+
+    let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let asset_dir = repo.join("Source/Canvas/js");
+    let mut discovered = fs::read_dir(&asset_dir)
+        .unwrap_or_else(|err| panic!("read {}: {err}", asset_dir.display()))
+        .filter_map(|entry| {
+            let path = entry.expect("read Canvas JS asset entry").path();
+            (path.extension().and_then(|ext| ext.to_str()) == Some("js"))
+                .then(|| path.file_name().unwrap().to_string_lossy().into_owned())
+        })
+        .collect::<Vec<_>>();
+    discovered.sort();
+    let mut expected = ASSETS
+        .iter()
+        .map(|asset| asset.to_string())
+        .collect::<Vec<_>>();
+    expected.sort();
+    assert_eq!(discovered, expected, "Canvas JS asset set drifted");
+
+    let runtime = jet::Canvas::canvas_js();
+    let mut previous_end = "(function () {\n".len();
+    assert!(runtime.starts_with("(function () {\n"), "{runtime}");
+    assert!(runtime.ends_with("})();\n"), "{runtime}");
+
+    for asset in ASSETS {
+        let path = asset_dir.join(asset);
+        let source = fs::read_to_string(&path)
+            .unwrap_or_else(|err| panic!("read {}: {err}", path.display()));
+        assert!(
+            source.starts_with("// ") || source.starts_with("\n// "),
+            "{} needs a section comment",
+            path.display()
+        );
+        let position = runtime[previous_end..]
+            .find(&source)
+            .map(|offset| previous_end + offset)
+            .unwrap_or_else(|| panic!("{} missing from assembled runtime", path.display()));
+        assert_eq!(
+            position, previous_end,
+            "{} is out of order or separated by untracked JavaScript",
+            path.display()
+        );
+        previous_end = position + source.len();
+
+        let output = Command::new("node")
+            .arg("--check")
+            .arg(&path)
+            .output()
+            .unwrap_or_else(|err| panic!("run node --check for {}: {err}", path.display()));
+        assert!(
+            output.status.success(),
+            "node --check failed for {}:\n{}",
+            path.display(),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    assert_eq!(previous_end + "})();\n".len(), runtime.len());
+    let glue = fs::read_to_string(repo.join("Source/Canvas/js.rs")).expect("read Canvas JS glue");
+    assert!(glue.lines().count() < 40, "js.rs must remain assembly glue");
+}
+
+#[test]
 fn canvas_debug_session_projects_runtime_overlay_to_source_spans() {
     let path = write_fixture("debug_overlay", CANVAS_DEBUG_FIXTURE);
     let src = fs::read_to_string(&path).unwrap();
