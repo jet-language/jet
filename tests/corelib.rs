@@ -198,6 +198,56 @@ fn run() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn core_os_interrupt_handlers_are_additive_and_ordered() {
+    use std::io::{BufRead, Read};
+    use std::process::Stdio;
+
+    let dir = std::env::temp_dir().join(format!("jet_corelib_interrupt_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let src = r#"
+use core.os as os
+use core.process as process
+
+fn run() {
+    os.on_interrupt(() => { print("first") })
+    os.on_interrupt(() => {
+        print("second")
+        process.exit(0)
+    })
+    print("ready")
+    loop { }
+}
+"#;
+    let out = compile_temp("os_interrupt_runtime.jet", src);
+    let rs = dir.join("main.rs");
+    let bin = dir.join("interrupt-runtime");
+    fs::write(&rs, out.rust).unwrap();
+    let rustc = Command::new("rustc")
+        .args(["--edition", "2021", rs.to_str().unwrap(), "-o", bin.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(rustc.status.success(), "rustc failed:\n{}", String::from_utf8_lossy(&rustc.stderr));
+
+    let mut child = Command::new(&bin)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdout = std::io::BufReader::new(child.stdout.take().unwrap());
+    let mut ready = String::new();
+    stdout.read_line(&mut ready).unwrap();
+    assert_eq!(ready, "ready\n", "registration was not ready before run continued");
+    unsafe extern "C" { fn kill(pid: i32, signal: i32) -> i32; }
+    assert_eq!(unsafe { kill(child.id() as i32, 2) }, 0);
+    let status = child.wait().unwrap();
+    let mut rest = String::new();
+    stdout.read_to_string(&mut rest).unwrap();
+    assert!(status.success(), "interrupt child failed: {status}");
+    assert_eq!(rest, "first\nsecond\n");
+}
+
 fn build_and_run(
     dir: &PathBuf,
     name: &str,

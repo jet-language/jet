@@ -566,6 +566,9 @@ mod jet_os_interrupt {
         extern "system" {
             fn SetConsoleCtrlHandler(handler: Handler, add: i32) -> i32;
         }
+        // A parent may have disabled Ctrl-C with the documented NULL handler;
+        // clear that inherited process flag before installing Jet's handler.
+        unsafe { SetConsoleCtrlHandler(None, 0) };
         let installed = unsafe { SetConsoleCtrlHandler(Some(windows_mark), 1) };
         if installed == 0 {
             Err("could not install the Windows console Ctrl-C handler".to_string())

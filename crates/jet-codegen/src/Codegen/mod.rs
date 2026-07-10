@@ -524,9 +524,9 @@ fn strip_unused_term_prelude(out: String) -> String {
     s
 }
 
-/// D-OSFACTS1: `core.os.on_interrupt` uses a small POSIX signal hook with
-/// vetted FFI `unsafe`. Keep ordinary programs `unsafe`-free by stripping that
-/// hook unless generated user code actually calls it.
+/// D-OSFACTS1: `core.os.on_interrupt` uses vetted Unix/Windows platform FFI.
+/// Keep ordinary programs `unsafe`-free by stripping the whole dispatcher
+/// unless generated user code actually calls it.
 fn strip_unused_os_signal_prelude(out: String) -> String {
     let prelude_end = [
         out.find("fn user_"),
@@ -541,19 +541,18 @@ fn strip_unused_os_signal_prelude(out: String) -> String {
         return out;
     }
 
-    let Some(os_mod) = out.find("mod jet_os_unix {") else {
+    let Some(block_start) = out.find("mod jet_os_interrupt {") else {
         return out;
     };
-    let block_start = out[..os_mod].rfind("#[cfg(unix)]").unwrap_or(os_mod);
-    let Some(non_unix_fn) = out.find("fn jet_std_os_on_interrupt") else {
-        return out;
-    };
-    let Some(non_unix_fn) = out[non_unix_fn + 1..].find("fn jet_std_os_on_interrupt").map(|i| i + non_unix_fn + 1) else {
+    let Some(wrapper_fn) = out[block_start..]
+        .find("fn jet_std_os_on_interrupt")
+        .map(|i| i + block_start)
+    else {
         return out;
     };
 
     let bytes = out.as_bytes();
-    let (mut depth, mut seen, mut i) = (0usize, false, non_unix_fn);
+    let (mut depth, mut seen, mut i) = (0usize, false, wrapper_fn);
     let mut end = out.len();
     while i < bytes.len() {
         match bytes[i] {
