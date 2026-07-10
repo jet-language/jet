@@ -399,9 +399,11 @@ package/environment/CLI program.
 ### UL13 — product boundaries and build graph
 
 - Reopen #367. Perform the ratified jet/jetpack/jetos crate and binary split;
-  ratchets alone do not satisfy the card.
-- Reopen #95/#224 where the public build graph, query, explanation, provenance,
-  cache, sandbox, and real `fn build()` path remain internal/model-only.
+  ratchets alone do not satisfy the card (`claim.product-boundaries`).
+- #95/#224 public build product shipped: root `fn build(b: BuildContext)`,
+  typed graph, `jet graph` / `jet query build` / `jet explain-build` provenance,
+  local action cache, sandboxed action execution, and jet→jetpack engine
+  dispatch (`claim.package-build` / `public-build-product`).
 - Root `jet` owns the language/dev loop, Jetpack owns packages/build/store/env,
   JetOS owns OS realization. Teaching shims preserve the ratified public UX.
 - One versioned protocol connects processes without importing product engines

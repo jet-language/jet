@@ -204,3 +204,146 @@ fn maturity_convention() {
         );
     }
 }
+
+/// claim.package-build / public-build-product — D-BUILDENTRY1 + D-BUILDQUERY1.
+#[test]
+fn public_build_product() {
+    // CAPABILITY_CLAIM: claim.package-build / public-build-product
+    let example = read("examples/features/tooling/programmable_build/main.jet");
+    assert!(
+        example.contains("fn build(b: BuildContext)")
+            && example.contains("b.generate")
+            && example.contains("b.add_executable")
+            && example.contains("b.plan"),
+        "I5 example must be a public root fn build graph"
+    );
+
+    let entry = root().join("examples/features/tooling/programmable_build/main.jet");
+    let compiled = jet::compile_programmable_build(entry.to_str().unwrap(), &[])
+        .unwrap_or_else(|diags| panic!("fn build path failed: {diags:#?}"));
+    assert!(
+        compiled.rust.contains("generated_build_message") && compiled.rust.contains("fn main"),
+        "programmable build must re-enter generated source into codegen"
+    );
+
+    // I5 golden: execute path materializes generated Jet, then rustc runs it.
+    let expected = read("examples/features/expected/tooling/programmable_build.out");
+    let dir = std::env::temp_dir();
+    let rs = dir.join(format!("jet_cap_build_{}.rs", std::process::id()));
+    let bin = dir.join(format!("jet_cap_build_{}", std::process::id()));
+    fs::write(&rs, &compiled.rust).expect("write generated rust");
+    let rustc = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&rs)
+        .arg("-o")
+        .arg(&bin)
+        .output()
+        .expect("rustc");
+    assert!(
+        rustc.status.success(),
+        "I2: rustc rejected programmable build codegen:\n{}",
+        String::from_utf8_lossy(&rustc.stderr)
+    );
+    let run = Command::new(&bin).output().expect("run programmable build bin");
+    assert!(
+        run.status.success(),
+        "programmable build binary failed:\n{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout).trim(),
+        expected.trim(),
+        "programmable_build golden mismatch"
+    );
+    let _ = fs::remove_file(&rs);
+    let _ = fs::remove_file(&bin);
+
+    let graph = Command::new(jet_bin())
+        .args(["graph", entry.to_str().unwrap(), "--json"])
+        .current_dir(root())
+        .output()
+        .expect("jet graph");
+    assert!(
+        graph.status.success(),
+        "jet graph failed:\n{}",
+        String::from_utf8_lossy(&graph.stderr)
+    );
+    let graph_json = String::from_utf8_lossy(&graph.stdout);
+    assert!(
+        graph_json.contains("programmable_build") && graph_json.contains("\"targets\""),
+        "jet graph must expose typed targets: {graph_json}"
+    );
+
+    let query = Command::new(jet_bin())
+        .args(["query", "build", entry.to_str().unwrap(), "--json"])
+        .current_dir(root())
+        .output()
+        .expect("jet query build");
+    assert!(
+        query.status.success(),
+        "jet query build failed:\n{}",
+        String::from_utf8_lossy(&query.stderr)
+    );
+    let query_json = String::from_utf8_lossy(&query.stdout);
+    assert!(
+        query_json.contains("programmable_build"),
+        "jet query build must share graph facts: {query_json}"
+    );
+
+    let explain = Command::new(jet_bin())
+        .args([
+            "explain-build",
+            "programmable_build",
+            entry.to_str().unwrap(),
+            "--json",
+        ])
+        .current_dir(root())
+        .output()
+        .expect("jet explain-build");
+    assert!(
+        explain.status.success(),
+        "jet explain-build failed:\n{}",
+        String::from_utf8_lossy(&explain.stderr)
+    );
+    let explain_json = String::from_utf8_lossy(&explain.stdout);
+    assert!(
+        explain_json.contains("\"provenance\"")
+            && (explain_json.contains("actions=") || explain_json.contains("sources=")),
+        "explain-build must emit provenance: {explain_json}"
+    );
+
+    let cli = read("Source/CLI.rs");
+    assert!(
+        cli.contains("name: \"graph\"")
+            && cli.contains("name: \"query\"")
+            && cli.contains("name: \"explain-build\"")
+            && cli.contains("claim.package-build"),
+        "public build query commands must be owned by claim.package-build"
+    );
+
+    let sandbox = read("tests/ui/build_action_failed.stderr");
+    assert!(
+        sandbox.contains("E3505") && sandbox.contains("build sandbox"),
+        "sandboxed action failure must teach E3505"
+    );
+    let build_entry = read("tests/build_entry.rs");
+    assert!(
+        build_entry.contains("sandbox_refuses_output_parent_symlink_escape")
+            && build_entry.contains("RestoredFromCache"),
+        "build_entry must prove sandbox confinement and action-cache restore"
+    );
+
+    let dispatch = read("Source/EngineDispatch.rs");
+    assert!(
+        dispatch.contains("D-JPK-DISPATCH1")
+            && dispatch.contains("find_engine_binary")
+            && dispatch.contains("jetpack"),
+        "product dispatch must exec jetpack engine verbs out-of-process"
+    );
+    let main = read("Source/main.rs");
+    assert!(
+        main.contains("EngineDispatch::dispatch")
+            && main.contains("JETPACK_BINARY_NAME"),
+        "jet front door must dispatch package/env verbs to jetpack"
+    );
+}

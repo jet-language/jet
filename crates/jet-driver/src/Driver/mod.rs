@@ -902,6 +902,31 @@ fn compile_bundle_path_build_inner(
         }
     }
 
+    // Static graph/query/explain (`execute: false`) must not codegen the
+    // pre-build entry: `fn run` may call generated symbols that only exist
+    // after materialization. CLI/LSP consumers only need `build.plan`.
+    if !options.execute {
+        if let Some(transaction) = filesystem_transaction.as_mut() {
+            transaction.commit();
+        }
+        return Ok(BuildCompileOutput {
+            compile: crate::CompileOutput {
+                rust: String::new(),
+                lints,
+                ffi: None,
+                clinks: Vec::new(),
+                capabilities: crate::Capabilities::default(),
+                comptime_inputs: std::mem::take(&mut bundle.comptime_inputs),
+                web: None,
+                web_partition_report: None,
+                plugin: None,
+                inferred_layer: bundle.inferred_layer,
+                layer_ceiling: bundle.layer_ceiling,
+            },
+            build: build_run,
+        });
+    }
+
     let ffi = crate::FFI::prepare(&bundle).map_err(|diags| diags)?;
     if options.web_target {
         let misses = crate::Codegen::validate_web_tir_support(&bundle, ffi.as_ref());
