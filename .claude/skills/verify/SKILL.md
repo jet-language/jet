@@ -45,6 +45,16 @@ description: Verify a Jet compiler/stdlib change end-to-end in THIS repo — the
   regions — golden.rs greps the substring, including comments.
 - Docs match behavior: spec.md + syntax-decisions.md status.
 
+## Maintainer devtools (`jet devtools`, hidden namespace, D-DEVTOOLS1=A)
+
+- `jet devtools grammars` — regenerate editor grammar GENERATED sections from `Syntax.rs`.
+- `jet devtools reduce <file.jet> [--code EXXXX]` — delta-debugging minimizer; default oracle is an I2 repro (front end accepts, rustc rejects); writes `<file>.reduced.<ext>`.
+- `jet devtools ice-report <file.jet>` — bundles source + generated Rust + rustc stderr + jet/rustc versions under `.jet/ice-report/<stem>-<ts>/` for a bug report.
+- `jet devtools new-example <topic>/<name>` — scaffolds a passing `examples/features/<topic>/<name>.jet` + `expected/<topic>/<name>.out` pair (I5 golden layout).
+- `jet devtools new-ui <name>` — scaffolds a self-consistent `tests/ui/<name>.jet` + `<name>.stderr` pair (I4 snapshot layout), pre-blessed against a real (generic) diagnostic.
+- `jet devtools check-fixture-paths` — greps `tests/**/*.rs` for hardcoded example/doc/fixture path literals and reports any that don't exist on disk.
+- `jet devtools bless [target...] [--dry-run]` — wraps `UPDATE_EXPECT=1 cargo test --test <target>` for every `UPDATE_EXPECT`-blessable test file (cli, cross, diagnostic_snapshots, diagnostics_coverage, release_gates); `--dry-run` previews without running.
+
 ## Traps
 
 - Moving/renaming examples breaks path-embedding fixtures (panic-span
