@@ -9,6 +9,27 @@ full expert control behind explicit opt-in. You write Jet; the compiler checks
 everything in plain language, then generates Rust for speed. No hidden `unsafe`,
 no exceptions, no hidden control flow.
 
+<!-- Stable IDs bind advertised claims to docs/spec/capability-claim-manifest.json. -->
+<!-- CAPABILITY_CLAIMS:BEGIN -->
+<!-- CAPABILITY_CLAIM: claim.syntax-law | Unbuilt syntax notes are machine inventoried. -->
+<!-- CAPABILITY_CLAIM: claim.examples-spec | Feature examples declare expected output artifacts. -->
+<!-- CAPABILITY_CLAIM: claim.native-language | Jet compiles safe source to native programs. -->
+<!-- CAPABILITY_CLAIM: claim.tier-parity | Execution tiers target one semantic meaning. -->
+<!-- CAPABILITY_CLAIM: claim.static-guarantees | Static guarantees share one facts model. -->
+<!-- CAPABILITY_CLAIM: claim.discard-control | Must-use discard is explicit and audited. -->
+<!-- CAPABILITY_CLAIM: claim.prelude-control | Prelude defaults and opt-out share one loader. -->
+<!-- CAPABILITY_CLAIM: claim.maturity-tags | Maturity is declared without runtime ambiguity. -->
+<!-- CAPABILITY_CLAIM: claim.generic-modules | Modules accept typed and value parameters. -->
+<!-- CAPABILITY_CLAIM: claim.metaprogramming | Generated source re-enters Jet semantics. -->
+<!-- CAPABILITY_CLAIM: claim.embedded | Target profiles produce embedded artifacts. -->
+<!-- CAPABILITY_CLAIM: claim.adaptive-runtime | Runtime policy consumes measured environment facts. -->
+<!-- CAPABILITY_CLAIM: claim.logic-programming | Jet exposes a bounded logic subset. -->
+<!-- CAPABILITY_CLAIM: claim.structural-merge | Programs merge by semantic identity. -->
+<!-- CAPABILITY_CLAIM: claim.proof-replay | Proof and replay share typed facts. -->
+<!-- CAPABILITY_CLAIM: claim.performance-budgets | Budgets enforce pinned expectations. -->
+<!-- CAPABILITY_CLAIM: claim.product-boundaries | jet, jetpack, and jetos have canonical owners. -->
+<!-- CAPABILITY_CLAIMS:END -->
+
 **Current status: Epoch 3** (Epoch 1 v1.0 + Epoch 2 GA are complete — see [roadmap](docs/spec/roadmap.md)).
 
 ## Quickstart

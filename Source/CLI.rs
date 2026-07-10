@@ -10,6 +10,14 @@
 //! It lives here so the generators, the greeting, and the typo-finder can never
 //! drift apart.
 
+// Stable IDs bind public command families to reviewed capability depth.
+// CAPABILITY_CLAIMS:BEGIN
+// CAPABILITY_CLAIM: claim.tooling-cli | One coherent beginner-first CLI.
+// CAPABILITY_CLAIM: claim.ide-debug | Editor and debugger consume shared semantic facts.
+// CAPABILITY_CLAIM: claim.format-test | Formatting and tests have deterministic workflows.
+// CAPABILITY_CLAIM: claim.package-build | Build/package/environment commands have canonical ownership.
+// CAPABILITY_CLAIMS:END
+
 use crate::Syntax::BINARY_NAME;
 
 /// One global flag that applies across commands.

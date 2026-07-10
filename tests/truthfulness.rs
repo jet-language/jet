@@ -9,6 +9,7 @@
 use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
+use std::process::Command;
 
 fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -206,6 +207,7 @@ fn readme_subcommands_exist_in_cli() {
 // ---------------------------------------------------------------------------
 #[test]
 fn every_feature_example_has_expected_output() {
+    // CAPABILITY_CLAIM: claim.examples-spec / expected-output-pairs
     let root = root();
     let ex_dir = root.join("examples/features");
     let expected_dir = ex_dir.join("expected");
@@ -390,7 +392,46 @@ fn compiler_seam_crates_have_only_path_dependencies() {
 }
 
 // ---------------------------------------------------------------------------
-// Check 9: Core spec files referenced by D-STDRUBRIC1 exist (c44)
+// Check 9: E3 capability claims stay bound to executable proof
+// ---------------------------------------------------------------------------
+#[test]
+fn epoch3_capability_manifest_is_current_and_owned() {
+    let root = root();
+    let output = Command::new("node")
+        .arg("scripts/agent/check-capability-ledger.mjs")
+        .arg("--check")
+        .current_dir(&root)
+        .output()
+        .expect("node must run the capability-ledger checker");
+
+    assert!(
+        output.status.success(),
+        "capability ledger rejected:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn epoch3_capability_manifest_rejects_hostile_real_card_fixtures() {
+    let root = root();
+    let output = Command::new("node")
+        .arg("scripts/agent/check-capability-ledger.mjs")
+        .arg("--hostile-fixtures")
+        .current_dir(&root)
+        .output()
+        .expect("node must run the capability-claim hostile fixtures");
+
+    assert!(
+        output.status.success(),
+        "capability-claim hostile fixtures failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Check 10: Core spec files referenced by D-STDRUBRIC1 exist (c44)
 // ---------------------------------------------------------------------------
 #[test]
 fn stdlib_api_laws_doc_exists() {
