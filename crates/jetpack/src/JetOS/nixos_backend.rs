@@ -1339,6 +1339,15 @@ fn require_report_live_desktop(report: &str) -> Result<(), String> {
     }
 }
 
+#[cfg(not(unix))]
+fn qmp_screendump_and_powerdown(sock_path: &Path, _screenshot: &Path) -> Result<(), String> {
+    Err(format!(
+        "QMP control socket `{}` needs Unix domain sockets, unavailable on this platform",
+        sock_path.display()
+    ))
+}
+
+#[cfg(unix)]
 fn qmp_screendump_and_powerdown(sock_path: &Path, screenshot: &Path) -> Result<(), String> {
     use std::io::{BufRead, BufReader, Write};
     use std::os::unix::net::UnixStream;

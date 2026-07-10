@@ -577,12 +577,12 @@ fn atomic_write_studio_source_if_revision(
         .unwrap_or("config.jet");
     let temp = parent.join(format!(".{name}.studio-{}.tmp", studio_unique_id()));
     let result = (|| {
-        let metadata = std::fs::metadata(path).map_err(|error| error.to_string())?;
         let mut options = std::fs::OpenOptions::new();
         options.write(true).create_new(true);
         #[cfg(unix)]
         {
             use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+            let metadata = std::fs::metadata(path).map_err(|error| error.to_string())?;
             options.mode(metadata.permissions().mode());
         }
         let mut file = options.open(&temp).map_err(|error| error.to_string())?;
@@ -1036,6 +1036,7 @@ fn create_studio_source_snapshot_platform(
     use std::io::Write;
     let parent = context.config.parent().unwrap_or_else(|| Path::new("."));
     let dir = parent.join(format!(".jetos-studio-snapshot-{}", studio_unique_id()));
+    #[cfg_attr(not(unix), allow(unused_mut))]
     let mut dir_builder = std::fs::DirBuilder::new();
     #[cfg(unix)]
     {

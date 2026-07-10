@@ -550,7 +550,10 @@ fn rewrite_store_symlinks(root: &Path, path: &Path, store: &Path) -> std::io::Re
             #[cfg(unix)]
             std::os::unix::fs::symlink(rewritten, path)?;
             #[cfg(not(unix))]
-            return Err(std::io::Error::other("store symlink rewriting needs Unix symlinks"));
+            {
+                let _ = rewritten;
+                return Err(std::io::Error::other("store symlink rewriting needs Unix symlinks"));
+            }
         }
         return Ok(());
     }

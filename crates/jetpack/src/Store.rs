@@ -20,7 +20,9 @@ use crate::SHA256;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::Command;
+#[cfg(target_os = "linux")]
+use std::process::{Child, Stdio};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// The subdir of the resolved root that holds the content-addressed store.
@@ -591,21 +593,21 @@ impl CacheLease {
         if name.contains(std::path::MAIN_SEPARATOR) {
             return None;
         }
-        self.executables
+        let (_, file) = self
+            .executables
             .iter()
-            .find(|(member, _)| member == name)
-            .map(|(_, file)| {
-                #[cfg(target_os = "linux")]
-                {
-                    use std::os::fd::AsRawFd as _;
-                    PathBuf::from(format!("/proc/self/fd/{}", file.as_raw_fd()))
-                }
-                #[cfg(not(target_os = "linux"))]
-                {
-                    let bin = self.bin_relative.as_ref()?;
-                    self.snapshot_root.join(bin).join(name)
-                }
-            })
+            .find(|(member, _)| member == name)?;
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::fd::AsRawFd as _;
+            Some(PathBuf::from(format!("/proc/self/fd/{}", file.as_raw_fd())))
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = file;
+            let bin = self.bin_relative.as_ref()?;
+            Some(self.snapshot_root.join(bin).join(name))
+        }
     }
 
     pub fn stable_path(&self, path: &str) -> std::io::Result<PathBuf> {
@@ -628,6 +630,8 @@ impl CacheLease {
                 use std::os::fd::AsRawFd as _;
                 return Ok(PathBuf::from(format!("/proc/self/fd/{}", file.as_raw_fd())));
             }
+            #[cfg(not(target_os = "linux"))]
+            let _ = file;
         }
         if relative.parent() == self.bin_relative.as_deref() {
             if let Some((_, file)) = self
@@ -640,6 +644,8 @@ impl CacheLease {
                     use std::os::fd::AsRawFd as _;
                     return Ok(PathBuf::from(format!("/proc/self/fd/{}", file.as_raw_fd())));
                 }
+                #[cfg(not(target_os = "linux"))]
+                let _ = file;
             }
         }
         Ok(self.snapshot_root.join(relative))
@@ -963,7 +969,10 @@ fn copy_snapshot_node(
         #[cfg(unix)]
         std::os::unix::fs::symlink(target, dst)?;
         #[cfg(not(unix))]
-        return Err(std::io::Error::other("cache symlink snapshots need platform support"));
+        {
+            let _ = target;
+            return Err(std::io::Error::other("cache symlink snapshots need platform support"));
+        }
     } else {
         return Err(std::io::Error::other("special file in cache snapshot"));
     }
