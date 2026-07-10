@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 482,
-    "rev": 3068,
+    "rev": 3086,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -1769,6 +1769,11 @@
       "plan": "JIT/AOT parity by construction. Canonical plan: docs/plans/epoch-3/jit-aot-parity.md. Orchestration: implementation agent must first read .agents/prompts/OrchestrationPrompt.md and run as that orchestrator. Owner direction 2026-07-06: Jet wins two fronts. AOT targets C/C++/Rust/Go/Zig/Odin territory with optimized native binaries and expert control; JIT/dev targets JS/TS/Python/data-analysis/web-dev loops with rapid design/test/refine. Every AOT-runnable program must run under jet dev in some backend path with identical stdout/stderr/exit/diagnostics/panics/side effects. Native JIT lowering is preferred for speed; transparent shared-runtime/platform/AOT-subprocess fallback is valid when resident JIT hosting is unsafe or incomplete. User never owns backend gaps. No parity ballots remain. Exit: dev_default_matches_compiled_binary covers stdout+stderr+exit for every example, gap manifest contains only transparent internal fallback reasons, no jit_covers whitelist remains, R12 documents two consumers/one IR, full suite + jet-verify green.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-10",
+          "by": "codex-main",
+          "text": "2026-07-10 parent full-suite rerun after #481: only tests/dev jit_try_compile_manifest_matches + jit_coverage_audit fail. Actual compile-covered set 46 vs manifest 45; sole new entry tooling/canvas_blueprint_demo; gaps 246. Canvas suites and #481 runtime paths green. This is global close blocker for #343/#466/#481."
+        },
         {
           "at": "2026-07-10",
           "by": "codex-orchestrator",
@@ -6336,12 +6341,17 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": null,
-      "phase": "deciding",
+      "phase": "ready",
       "priority": "P1",
       "plan": "Plan built 2026-07-07 by codex-main.\n\nFocus: jetos: options reference + search (search.nixos.org parity, typed)\n\nCurrent law: Ratified law: D-JPK-DISCOVER1 covers search/info/LSP; D-JPK-OSNS1/D-JOS-SYSTEMTREE1 define option namespaces.\n\nBuild order: Generate typed option index from declarations; expose search/info/LSP/Studio projections; include provenance, defaults, examples, and deprecation facts.\n\nAcceptance: Search returns exact option docs and source; tests ratchet index generation and query ranking; no hand-maintained stale index.\n\nDependencies/collisions: Depends on #262 module schema and #331 priority semantics for explain output.\n\nOwner gates: No gate if reusing `jet search`/`jet info`; ballot if adding a new public verb.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-10",
+          "by": "claude-main",
+          "text": "D-JOS-OPTIONSVERB1=B ratified and recorded in docs/spec/syntax-decisions.md. Ready to implement: reuse jet search/jet info, no new jet os options verb."
+        },
         {
           "at": "2026-07-10",
           "by": "claude-main",
@@ -6824,7 +6834,7 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "deciding",
+      "phase": "ready",
       "priority": "P1",
       "plan": "Plan refreshed 2026-07-07 by codex-main.\n\nRatified decisions:\n- D-JPK-OVERLAY1=A: Hybrid: workspace policy plus reusable overlay modules and CLI drafting. workspace.jet owns reviewed policy and named overlay sets. Per-package overlay modules can package reusable override logic, but they must materialize as typed workspace policy facts. CLI commands are allowed only as drafting tools that write source patches/policy, not hidden state.\n\nReady state: Owner gates clear; card is ready for implementation.\n\nPlan built 2026-07-07 by codex-main.\n\nFocus: jetpack: package overlays, per-package overrides, and source patches (nixpkgs overlay parity)\n\nCurrent law: Jetpack law: D-JPK provider/catalog/lock/replacement decisions are ratified, but overlay/override source syntax is not.\n\nBuild order: extend workspace/pkg parsing for typed override records; merge with provider authority graph; apply patches in sandboxed source realization; record explain facts for every override; add lock/provenance tests.\n\nAcceptance: Overlays/patches/channel overrides/unfree policy have tests, docs, examples, and `jet explain` output. No untyped fixpoint; no network outside ratified fetch phases.\n\nDependencies/collisions: Coordinates with #234 providers, #242 native replacements, #231 strict graph/catalogs, and #337 jetos fixture.",
       "blockedBy": [
@@ -6833,6 +6843,11 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-10",
+          "by": "claude-main",
+          "text": "D-JPK-PKGOVERRIDE1=B ratified and recorded in docs/spec/syntax-decisions.md. Ready to implement once blockers c0c7d9qt/c0mwowfx clear: keyed overrides: { pkg: .{ } } record, D-JOS-PRIORITY1 tiers reused for conflicts."
+        },
         {
           "at": "2026-07-10",
           "by": "codex-orchestrator",
@@ -12730,6 +12745,11 @@
       "log": [
         {
           "at": "2026-07-10",
+          "by": "codex-main",
+          "text": "2026-07-10 full-suite rerun with root .jet/lock isolated: Canvas contamination disappears (55/55 + scenarios 28/28 green). Only remaining failures are tests/dev JIT manifest/audit drift owned by #125: actual 46, expected 45, new tooling/canvas_blueprint_demo. Root lock restored byte-for-byte; no env.jet remains."
+        },
+        {
+          "at": "2026-07-10",
           "by": "codex-orchestrator",
           "text": "Burndown reran verify-full with root .jet temporarily removed/restored: previous 7 Canvas project failures disappear (55/55 + scenarios 28/28 green). Suite now stops only on #125 JIT manifest/audit drift: actual covered 46 vs expected 45. No #343/#466-caused failures observed."
         },
@@ -12984,12 +13004,17 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "deciding",
+      "phase": "ready",
       "priority": "P1",
       "plan": null,
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-10",
+          "by": "claude-main",
+          "text": "D-CLI-SURFACE1=B ratified (frequency rings) and recorded in docs/spec/syntax-decisions.md. Ready to implement: group jet long-tail verbs under registry/inspect/store/self; bare moved verb becomes teaching error, not alias. Syntax.rs/grammar + snapshots pending."
+        },
         {
           "at": "2026-07-10",
           "by": "owner",
@@ -13080,12 +13105,18 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": null,
-      "phase": "deciding",
+      "phase": "ready",
       "priority": "P1",
       "plan": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-10",
+          "by": "claude-main",
+          "text": "D-JOS-NETWORK1=B ratified and recorded in docs/spec/syntax-decisions.md. Ready to implement: inline net.* in system.<host>, reusable vpn.<name>/printing.<name> modules, net.firewall accepts typed Firewall.nftables family."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -13185,12 +13216,18 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": null,
-      "phase": "deciding",
+      "phase": "ready",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-10",
+          "by": "claude-main",
+          "text": "D-JOS-BACKUP1=C ratified and recorded in docs/spec/syntax-decisions.md. Ready to implement: extend workload.<name> backend enum with .Snapshot/.EncryptedRemote, restore via existing jet os rollback."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -13243,12 +13280,18 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "deciding",
+      "phase": "ready",
       "priority": "P1",
       "plan": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-10",
+          "by": "claude-main",
+          "text": "D-JPK-TASKRUN1=A ratified and recorded in docs/spec/syntax-decisions.md. Ready to implement: #Task fn marker, jetpack run <name> invocation. FLAG for implementer: ballot explainer noted #Task collides with concurrency Task<T>/D-TASKRUNTIME1 and offered aviation-family alternatives (#Command/#Verb/#Chore/etc) as a sub-pick the owner did not separately address when ratifying outcome A verbatim -- confirm the literal #Task spelling with the owner before landing if the collision reads as a real problem once implementation starts."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -13301,12 +13344,18 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "deciding",
+      "phase": "ready",
       "priority": "P1",
       "plan": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-10",
+          "by": "claude-main",
+          "text": "D-JPK-TOOLRUN1=A ratified and recorded in docs/spec/syntax-decisions.md. Ready to implement: unified jetpack tool run|install|list|uninstall over the D-JPK-PROFILE1 engine."
+        }
+      ],
       "criteria": [],
       "refs": [],
       "needsAcceptance": false,
@@ -13322,12 +13371,18 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "deciding",
+      "phase": "ready",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-10",
+          "by": "claude-main",
+          "text": "D-JPK-SELECTOR1=C ratified and recorded in docs/spec/syntax-decisions.md. Ready to implement: -p <member> + --affected[-since <ref>], no pattern DSL."
+        }
+      ],
       "criteria": [],
       "refs": [],
       "needsAcceptance": false,
@@ -13385,39 +13440,50 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "verify",
       "priority": "P0",
       "plan": "Add deterministic closed-channel select regression first. Update jet_scheduler_select to return Closed when every channel arm is closed and empty, both before initial park and after wake. Cover one closed receiver, multiple all-closed arms, mixed closed plus pending timer, cancellation precedence, and no busy-loop. Run focused jet-codegen scheduler tests and affected task/select integration tests; independent review required.",
       "blockedBy": [],
       "assignee": "terra-481-builder",
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-10",
+          "by": "codex-main",
+          "text": "Parent full-suite gate rerun with preexisting root .jet/lock temporarily isolated and restored. Canvas 55/55 and canvas_scenarios 28/28 green; #481 scheduler/corelib/tir paths green. Suite stops only at existing tests/dev JIT manifest drift: actual covered 46 vs expected 45, newly covered tooling/canvas_blueprint_demo. Card remains verify pending global #125/#465 repair."
+        },
+        {
+          "at": "2026-07-10",
+          "by": "codex-main",
+          "text": "Implementation commit d4a8bd48 independently reviewed with no findings. All three criteria met+verified. Awaiting parent full-suite gate before done."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "A select over one closed empty channel returns JetSelectOutcome::Closed without parking.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-10T21:27:58.982Z"
+          "status": "verified",
+          "metBy": "terra-481-builder",
+          "verifiedBy": "sol-481-review",
+          "evidence": "Independent Sol review confirmed immediate one-closed semantics and post-registration lost-wake protection; scheduler suite green.",
+          "at": "2026-07-10T21:41:52.568Z"
         },
         {
           "n": 2,
           "text": "Multiple all-closed empty channel arms return Closed; mixed timer/cancellation semantics retain documented precedence and do not busy-loop.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-10T21:27:59.140Z"
+          "status": "verified",
+          "metBy": "terra-481-builder",
+          "verifiedBy": "sol-481-review",
+          "evidence": "Independent review confirmed timer/cancel precedence, race-free Weak cancellation waiter, no lock inversion/busy-loop, and RAII cleanup.",
+          "at": "2026-07-10T21:41:52.872Z"
         },
         {
           "n": 3,
           "text": "Focused scheduler runtime and affected Jet task/select integration tests pass, including a deterministic timeout-bounded regression.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-10T21:27:59.291Z"
+          "status": "verified",
+          "metBy": "terra-481-builder",
+          "verifiedBy": "sol-481-review",
+          "evidence": "Independent reviewer reran 8 scheduler tests and exact tir integration; no findings.",
+          "at": "2026-07-10T21:41:53.160Z"
         }
       ],
       "refs": [
@@ -24165,6 +24231,132 @@
   ],
   "events": [
     {
+      "at": "2026-07-10T21:45:13.695Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c02kdm7a",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-10T21:45:13.541Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c2hizkhl",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-10T21:45:13.387Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c068vbs2",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-10T21:41:53.308Z",
+      "by": "codex-main",
+      "action": "card.update",
+      "ref": "c068vbs2",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-10T21:41:53.160Z",
+      "by": "sol-481-review",
+      "action": "card.criteria-verify",
+      "ref": "c068vbs2",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-10T21:41:53.015Z",
+      "by": "terra-481-builder",
+      "action": "card.criteria-meet",
+      "ref": "c068vbs2",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-10T21:41:52.872Z",
+      "by": "sol-481-review",
+      "action": "card.criteria-verify",
+      "ref": "c068vbs2",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-10T21:41:52.719Z",
+      "by": "terra-481-builder",
+      "action": "card.criteria-meet",
+      "ref": "c068vbs2",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-10T21:41:52.569Z",
+      "by": "sol-481-review",
+      "action": "card.criteria-verify",
+      "ref": "c068vbs2",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-10T21:41:52.418Z",
+      "by": "terra-481-builder",
+      "action": "card.criteria-meet",
+      "ref": "c068vbs2",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-10T21:30:00.935Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0om2gxe",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-10T21:30:00.852Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0yzg1yu",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-10T21:30:00.774Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0rfeel3",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-10T21:30:00.691Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0fchu51",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-10T21:30:00.610Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0qwckht",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-10T21:30:00.524Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0i0ho3h",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-10T21:30:00.443Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0pfsrnc",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-10T21:30:00.356Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0vntq8c",
+      "note": "phase,logEntry"
+    },
+    {
       "at": "2026-07-10T21:27:59.437Z",
       "by": "terra-481-builder",
       "action": "card.claim",
@@ -27537,132 +27729,6 @@
       "action": "card.criteria-meet",
       "ref": "crivuqa",
       "note": "#1"
-    },
-    {
-      "at": "2026-07-10T15:26:54.860Z",
-      "by": "claude-main",
-      "action": "card.criteria-add",
-      "ref": "crivuqa",
-      "note": "#1 Capability claim proven: cargo test --test capability_accept"
-    },
-    {
-      "at": "2026-07-10T15:26:54.781Z",
-      "by": "claude-main",
-      "action": "card.criteria-meet",
-      "ref": "c1iqde7",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-10T15:26:54.707Z",
-      "by": "claude-main",
-      "action": "card.criteria-add",
-      "ref": "c1iqde7",
-      "note": "#1 Capability claim proven: cargo test --test capability_accept"
-    },
-    {
-      "at": "2026-07-10T15:26:20.735Z",
-      "by": "cursor-verify",
-      "action": "card.update",
-      "ref": "c02kdm7a",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-10T15:03:48.460Z",
-      "by": "sync-fix",
-      "action": "card.update",
-      "ref": "c1nixrpd",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T15:03:48.389Z",
-      "by": "sync-fix",
-      "action": "card.update",
-      "ref": "c17iww33",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T15:03:48.309Z",
-      "by": "sync-fix",
-      "action": "card.update",
-      "ref": "crivuqa",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T15:03:48.233Z",
-      "by": "sync-fix",
-      "action": "card.update",
-      "ref": "c1iqde7",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T15:02:52.055Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0k81v26",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T15:02:51.980Z",
-      "by": "claude-main",
-      "action": "card.criteria-meet",
-      "ref": "c0k81v26",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-10T15:02:51.907Z",
-      "by": "claude-main",
-      "action": "card.criteria-meet",
-      "ref": "c0k81v26",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-10T15:02:51.833Z",
-      "by": "claude-main",
-      "action": "card.criteria-meet",
-      "ref": "c0k81v26",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-10T15:02:51.758Z",
-      "by": "claude-main",
-      "action": "card.criteria-add",
-      "ref": "c0k81v26",
-      "note": "#3 tests/fmt_project.rs + CLI completions/help green"
-    },
-    {
-      "at": "2026-07-10T15:02:51.686Z",
-      "by": "claude-main",
-      "action": "card.criteria-add",
-      "ref": "c0k81v26",
-      "note": "#2 Preflight zero-write on parse failure; ignore vendor/target/"
-    },
-    {
-      "at": "2026-07-10T15:02:51.618Z",
-      "by": "claude-main",
-      "action": "card.criteria-add",
-      "ref": "c0k81v26",
-      "note": "#1 D-FMTPROJECT1=D: discovery, --check/--diff/--changed/--json,"
-    },
-    {
-      "at": "2026-07-10T15:01:51.676Z",
-      "by": "jet-impl",
-      "action": "card.update",
-      "ref": "c0k81v26",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T14:51:07.687Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0k81v26",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-10T14:50:21.620Z",
-      "by": "claude-main",
-      "action": "card.claim",
-      "ref": "c0k81v26",
-      "note": ""
     }
   ],
   "nextNum": 368,
