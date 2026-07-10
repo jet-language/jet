@@ -2400,21 +2400,24 @@ fn os_build_realizes_selected_system_offline() {
     // fully offline (the packages come from a first-party `core` source repo, so
     // no nix). The store lives under a scratch JETPACK_ROOT.
     let root = Scratch::new("os-build-root");
-    let out = jet()
-        .args([
-            "os",
-            "build",
-            "halcyon",
-            "--name",
-            "fixture-source-built",
-            "--no-color",
-            "--offline",
-        ])
-        .current_dir(config_example_dir())
-        .env("JETPACK_ROOT", &root.path)
-        .env("PATH", "/usr/bin:/bin") // no nix on PATH
-        .output()
-        .unwrap();
+    let run = || {
+        jet()
+            .args([
+                "os",
+                "build",
+                "halcyon",
+                "--name",
+                "fixture-source-built",
+                "--no-color",
+                "--offline",
+            ])
+            .current_dir(config_example_dir())
+            .env("JETPACK_ROOT", &root.path)
+            .env("PATH", "/usr/bin:/bin") // no nix on PATH
+            .output()
+            .unwrap()
+    };
+    let out = run();
     assert!(
         out.status.success(),
         "stderr: {}",
@@ -2426,6 +2429,17 @@ fn os_build_realizes_selected_system_offline() {
     }
     assert!(stderr.contains("halcyon"), "stderr: {stderr}");
     assert!(stderr.contains("generation"), "stderr: {stderr}");
+    let cached = run();
+    assert!(
+        cached.status.success(),
+        "cached generation stderr: {}",
+        String::from_utf8_lossy(&cached.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&cached.stderr).contains("cached"),
+        "second generation must exercise leased cache paths: {}",
+        String::from_utf8_lossy(&cached.stderr)
+    );
     // A generation directory was assembled under the managed system store.
     assert!(
         root.join("systems").is_dir(),

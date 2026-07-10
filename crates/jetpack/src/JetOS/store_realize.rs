@@ -1,3 +1,43 @@
+struct RealizedPackage {
+    entry: Store::StoreEntry,
+    _lease: Option<Store::CacheLease>,
+    consumption_override: Option<PathBuf>,
+}
+
+impl std::ops::Deref for RealizedPackage {
+    type Target = Store::StoreEntry;
+
+    fn deref(&self) -> &Self::Target {
+        &self.entry
+    }
+}
+
+impl RealizedPackage {
+    fn from_verified(realized: Store::VerifiedRealization) -> Self {
+        Self {
+            entry: realized.entry,
+            _lease: realized.lease,
+            consumption_override: None,
+        }
+    }
+
+    fn consumption_path(&self, path: &str) -> std::io::Result<PathBuf> {
+        if let Some(root) = &self.consumption_override {
+            let relative = Path::new(path).strip_prefix(&self.entry.out).map_err(|_| {
+                std::io::Error::other("package member escapes realized output")
+            })?;
+            return Ok(root.join(relative));
+        }
+        self._lease
+            .as_ref()
+            .map_or_else(|| Ok(PathBuf::from(path)), |lease| lease.stable_path(path))
+    }
+
+    fn set_consumption_override(&mut self, path: PathBuf) {
+        self.consumption_override = Some(path);
+    }
+}
+
 fn first_party_package_ref(table: &RefSpec::SourceTable, package: &str) -> Option<String> {
     table
         .declarations()
@@ -48,7 +88,7 @@ fn realize_ref(
     table: &RefSpec::SourceTable,
     spec: &RefSpec::RefSpec,
     name_w: usize,
-) -> Option<Store::StoreEntry> {
+) -> Option<RealizedPackage> {
     theme.status(&format!("resolving {} ...", theme.bold(&spec.raw)));
     let store_dir = roots.hangar_dir();
     let fixtures =
@@ -75,7 +115,7 @@ fn realize_ref(
                 realized.source_state.label(),
             );
             theme.detail(&theme.gray(&realized.entry.out));
-            Some(realized.entry)
+            Some(RealizedPackage::from_verified(realized))
         }
         Err(Store::RealizeError::Integrity(failure)) => {
             Store::report_integrity(theme, &failure);
@@ -99,7 +139,7 @@ fn try_realize_ref(
     table: &RefSpec::SourceTable,
     spec: &RefSpec::RefSpec,
     name_w: usize,
-) -> Result<Store::StoreEntry, String> {
+) -> Result<RealizedPackage, String> {
     theme.status(&format!("resolving {} ...", theme.bold(&spec.raw)));
     let store_dir = roots.hangar_dir();
     let fixtures =
@@ -126,5 +166,5 @@ fn try_realize_ref(
         realized.source_state.label(),
     );
     theme.detail(&theme.gray(&realized.entry.out));
-    Ok(realized.entry)
+    Ok(RealizedPackage::from_verified(realized))
 }

@@ -132,7 +132,7 @@ fn core_provider_compiles_ring_package_to_rlib() {
         return;
     }
 
-    use jet::Jetpack::Provider::{self, Ctx};
+    use jet::Jetpack::Provider::Ctx;
     use jet::Jetpack::RefSpec::{classify_in, ProviderKind, SourceTable};
     use jet::Jetpack::Store::{self, Roots};
 
@@ -170,8 +170,16 @@ fn core_provider_compiles_ring_package_to_rlib() {
     };
 
     // Realize the ring package — CoreProvider should compile the Cargo.toml.
-    let r = Provider::realize(&spec, &table, &ctx)
-        .expect("CoreProvider should realize core.archive from source");
+    let r = Store::realize_verified(
+        &roots,
+        &ctx,
+        Store::RealizeRequest::Package {
+            spec: &spec,
+            table: &table,
+        },
+    )
+    .expect("verified realization should build core.archive from source")
+    .entry;
 
     assert_eq!(r.name, "archive", "realized name should be archive");
     assert!(r.bin.is_empty(), "library package must have no bin");
@@ -192,23 +200,6 @@ fn core_provider_compiles_ring_package_to_rlib() {
         r.rlib
     );
 
-    // Record in the hangar and verify the rlib survives the round-trip.
-    let entry = Store::record(
-        &roots,
-        &r.name,
-        &r.version,
-        &r.reference,
-        &r.out,
-        &r.bin,
-        &r.rlib,
-        &r.envelope,
-    )
-    .expect("recording ring package in hangar must succeed");
-
-    assert_eq!(
-        entry.rlib, r.rlib,
-        "rlib path must survive hangar round-trip"
-    );
     let listed = Store::list(&roots);
     let found = listed
         .iter()

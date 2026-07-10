@@ -17,7 +17,7 @@ fn generations_log() -> PathBuf {
 fn write_generation_files(
     dir: &Path,
     system: &SystemPlan,
-    realized: &[Store::StoreEntry],
+    realized: &[RealizedPackage],
     plan: &EnvPlan,
 ) -> std::io::Result<()> {
     fs::create_dir_all(dir)?;
@@ -96,7 +96,7 @@ fn write_generation_files(
 
 fn render_plan_json(
     system: &SystemPlan,
-    realized: &[Store::StoreEntry],
+    realized: &[RealizedPackage],
     prebuilt: Option<(&str, &str, &str)>,
 ) -> String {
     let (packages_json, services_json, options_json) = match prebuilt {
@@ -295,7 +295,7 @@ fn dir_size_bytes(path: &Path) -> u64 {
         .sum()
 }
 
-fn write_root_closure(dir: &Path, realized: &[Store::StoreEntry]) -> std::io::Result<()> {
+fn write_root_closure(dir: &Path, realized: &[RealizedPackage]) -> std::io::Result<()> {
     let sw_bin = dir.join("sw/bin");
     fs::create_dir_all(&sw_bin)?;
     let mut manifest = String::new();
@@ -308,7 +308,7 @@ fn write_root_closure(dir: &Path, realized: &[Store::StoreEntry]) -> std::io::Re
         if pkg.bin.is_empty() {
             continue;
         }
-        let bin = Path::new(&pkg.bin);
+        let bin = pkg.consumption_path(&pkg.bin)?;
         let Ok(entries) = fs::read_dir(bin) else {
             continue;
         };
@@ -327,8 +327,8 @@ fn write_root_closure(dir: &Path, realized: &[Store::StoreEntry]) -> std::io::Re
     fs::write(dir.join("sw/closure.txt"), manifest)
 }
 
-fn project_profile_dirs(dir: &Path, pkg: &Store::StoreEntry) -> std::io::Result<()> {
-    let out = Path::new(&pkg.out);
+fn project_profile_dirs(dir: &Path, pkg: &RealizedPackage) -> std::io::Result<()> {
+    let out = pkg.consumption_path(&pkg.out)?;
     if !out.is_dir() {
         return Ok(());
     }
@@ -400,15 +400,15 @@ fn ensure_profile_dir(dst: &Path) -> std::io::Result<()> {
 
 fn project_runtime_closure(
     dir: &Path,
-    pkg: &Store::StoreEntry,
+    pkg: &RealizedPackage,
     manifest: &mut String,
     projected_runtime: &mut BTreeSet<String>,
 ) -> std::io::Result<()> {
-    let out = Path::new(&pkg.out);
+    let out = pkg.consumption_path(&pkg.out)?;
     if !out.starts_with("/nix/store") {
         return Ok(());
     }
-    for path in nix_store_closure_paths(out)? {
+    for path in nix_store_closure_paths(&out)? {
         if !path.starts_with("/nix/store") {
             continue;
         }

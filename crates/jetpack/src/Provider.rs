@@ -1313,14 +1313,21 @@ pub fn needs_nix_bridge(
 
 /// Realize a ref through its provider. The resolver entry point: it never knows
 /// or cares which backend runs — that is the whole point of the boundary.
-pub fn realize(spec: &RefSpec, table: &SourceTable, ctx: &Ctx) -> Result<Realized, ProviderError> {
+pub(crate) fn realize(
+    spec: &RefSpec,
+    table: &SourceTable,
+    ctx: &Ctx,
+) -> Result<Realized, ProviderError> {
     let kind = resolve_kind(spec, table, ctx.offline, ctx.store_dir);
     provider_for(kind).realize(spec, table, ctx)
 }
 
 /// U20: realize an inline `Pkg.adapt(...)` plan into the same `Realized`
 /// boundary as provider-backed packages.
-pub fn realize_adapter(plan: &AdapterPlan, ctx: &Ctx) -> Result<Realized, ProviderError> {
+pub(crate) fn realize_adapter(
+    plan: &AdapterPlan,
+    ctx: &Ctx,
+) -> Result<Realized, ProviderError> {
     let source_ref = super::RefSpec::classify_provider_ref(&plan.source).map_err(|_| {
         ProviderError::Adapter(format!(
             "adapter source `{}` is not a provider ref",

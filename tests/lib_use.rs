@@ -10,7 +10,7 @@
 //! the way a user would, with `JETPACK_ROOT` pointed at a throwaway hangar so
 //! the compiler's loader finds the staged source.
 
-use jet::Jetpack::Provider::{self, Ctx};
+use jet::Jetpack::Provider::Ctx;
 use jet::Jetpack::RefSpec::{classify_in, ProviderKind, SourceTable};
 use jet::Jetpack::Store::{self, Roots};
 use std::fs;
@@ -70,18 +70,16 @@ fn realize_into_hangar(roots: &Roots, repo: &Path, pkg: &str) -> Store::StoreEnt
         store_dir: &store_dir,
         offline: true,
     };
-    let r = Provider::realize(&spec, &table, &ctx).expect("library realizes offline");
-    Store::record(
+    Store::realize_verified(
         roots,
-        &r.name,
-        &r.version,
-        &r.reference,
-        &r.out,
-        &r.bin,
-        &r.rlib,
-        &r.envelope,
+        &ctx,
+        Store::RealizeRequest::Package {
+            spec: &spec,
+            table: &table,
+        },
     )
-    .expect("records into hangar")
+    .expect("library realizes and records offline")
+    .entry
 }
 
 /// `use jsonutil;` resolves a realized library and `jsonutil.parse(...)` works.

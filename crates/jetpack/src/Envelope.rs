@@ -74,6 +74,13 @@ pub fn output_hash_of(out: &str) -> String {
 /// while encoding and must resolve inside the root. Hardlink identity is
 /// explicit; unsupported special files fail closed.
 pub fn try_output_hash_of(out: &str) -> Result<String, String> {
+    try_output_hash_of_with_hook(out, &mut |_, _| {})
+}
+
+fn try_output_hash_of_with_hook(
+    out: &str,
+    hook: &mut dyn FnMut(&Path, &'static str),
+) -> Result<String, String> {
     let p = Path::new(out);
     if !p.exists() && !p.is_symlink() {
         return Err(format!("output `{out}` does not exist"));
@@ -88,7 +95,14 @@ pub fn try_output_hash_of(out: &str) -> Result<String, String> {
     let root = fs::canonicalize(p).map_err(|e| format!("cannot resolve `{out}`: {e}"))?;
     let mut archive = b"jet-hangar-archive-v1\0".to_vec();
     let mut hardlinks = BTreeMap::new();
-    encode_node(&root, &root, Path::new(""), &mut archive, &mut hardlinks)?;
+    encode_node(
+        &root,
+        &root,
+        Path::new(""),
+        &mut archive,
+        &mut hardlinks,
+        hook,
+    )?;
     for link in hardlinks.values() {
         if link.seen != link.total {
             return Err(format!(
@@ -112,19 +126,22 @@ fn encode_node(
     rel: &Path,
     archive: &mut Vec<u8>,
     hardlinks: &mut BTreeMap<(u64, u64), HardlinkState>,
+    hook: &mut dyn FnMut(&Path, &'static str),
 ) -> Result<(), String> {
     let meta = fs::symlink_metadata(path)
         .map_err(|e| format!("cannot inspect `{}`: {e}", path.display()))?;
     let kind = meta.file_type();
     let rel_bytes = path_bytes(rel);
     if kind.is_dir() {
-        let before = directory_identity(&meta);
+        let before = stable_file_identity(&meta);
+        let before_entries = directory_snapshot(path)?;
         let resolved = fs::canonicalize(path)
             .map_err(|e| format!("cannot resolve directory `{}`: {e}", path.display()))?;
         if !resolved.starts_with(root) {
             return Err(format!("directory `{}` escapes output root", path.display()));
         }
         record_header(archive, b'D', &rel_bytes, mode_of(&meta));
+        hook(path, "directory-snapshotted");
         let mut entries = fs::read_dir(path)
             .map_err(|e| format!("cannot read `{}`: {e}", path.display()))?
             .collect::<Result<Vec<_>, _>>()
@@ -132,11 +149,19 @@ fn encode_node(
         entries.sort_by_key(|entry| path_bytes(Path::new(&entry.file_name())));
         for entry in entries {
             let child_rel = rel.join(entry.file_name());
-            encode_node(root, &entry.path(), &child_rel, archive, hardlinks)?;
+            encode_node(
+                root,
+                &entry.path(),
+                &child_rel,
+                archive,
+                hardlinks,
+                hook,
+            )?;
         }
         let after = fs::symlink_metadata(path)
             .map_err(|e| format!("directory `{}` changed while hashing: {e}", path.display()))?;
-        if before != directory_identity(&after) {
+        let after_entries = directory_snapshot(path)?;
+        if before != stable_file_identity(&after) || before_entries != after_entries {
             return Err(format!("directory `{}` changed while hashing", path.display()));
         }
     } else if kind.is_symlink() {
@@ -171,7 +196,7 @@ fn encode_node(
             );
         }
         record_header(archive, b'F', &rel_bytes, mode_of(&meta));
-        let bytes = read_file_stable(path, &meta)?;
+        let bytes = read_file_stable(path, &meta, hook)?;
         push_bytes(archive, &bytes);
     } else {
         return Err(format!(
@@ -182,7 +207,11 @@ fn encode_node(
     Ok(())
 }
 
-fn read_file_stable(path: &Path, expected: &fs::Metadata) -> Result<Vec<u8>, String> {
+fn read_file_stable(
+    path: &Path,
+    expected: &fs::Metadata,
+    hook: &mut dyn FnMut(&Path, &'static str),
+) -> Result<Vec<u8>, String> {
     let mut options = fs::OpenOptions::new();
     options.read(true);
     #[cfg(unix)]
@@ -200,6 +229,7 @@ fn read_file_stable(path: &Path, expected: &fs::Metadata) -> Result<Vec<u8>, Str
     if stable_file_identity(&before) != stable_file_identity(expected) {
         return Err(format!("file `{}` changed before hashing", path.display()));
     }
+    hook(path, "file-opened");
     let mut bytes = Vec::new();
     file.read_to_end(&mut bytes)
         .map_err(|e| format!("cannot read `{}`: {e}", path.display()))?;
@@ -210,6 +240,42 @@ fn read_file_stable(path: &Path, expected: &fs::Metadata) -> Result<Vec<u8>, Str
         return Err(format!("file `{}` changed while hashing", path.display()));
     }
     Ok(bytes)
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct DirectoryEntrySnapshot {
+    name: Vec<u8>,
+    kind: u8,
+    identity: StableIdentity,
+}
+
+fn directory_snapshot(path: &Path) -> Result<Vec<DirectoryEntrySnapshot>, String> {
+    let mut entries = fs::read_dir(path)
+        .map_err(|e| format!("cannot snapshot directory `{}`: {e}", path.display()))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("cannot snapshot directory `{}`: {e}", path.display()))?
+        .into_iter()
+        .map(|entry| {
+            let meta = fs::symlink_metadata(entry.path())
+                .map_err(|e| format!("cannot inspect `{}`: {e}", entry.path().display()))?;
+            let ty = meta.file_type();
+            Ok(DirectoryEntrySnapshot {
+                name: path_bytes(Path::new(&entry.file_name())),
+                kind: if ty.is_dir() {
+                    b'D'
+                } else if ty.is_file() {
+                    b'F'
+                } else if ty.is_symlink() {
+                    b'L'
+                } else {
+                    b'S'
+                },
+                identity: stable_file_identity(&meta),
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    entries.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(entries)
 }
 
 fn record_header(out: &mut Vec<u8>, kind: u8, path: &[u8], mode: u32) {
@@ -262,19 +328,10 @@ fn link_count(_meta: &fs::Metadata) -> u64 {
     1
 }
 
-#[cfg(unix)]
-fn directory_identity(meta: &fs::Metadata) -> (u64, u64) {
-    use std::os::unix::fs::MetadataExt as _;
-    (meta.dev(), meta.ino())
-}
-
-#[cfg(not(unix))]
-fn directory_identity(meta: &fs::Metadata) -> (u64, u64) {
-    (meta.len(), u64::from(meta.permissions().readonly()))
-}
+type StableIdentity = (u64, u64, u64, i64, i64, i64, i64, u32);
 
 #[cfg(unix)]
-fn stable_file_identity(meta: &fs::Metadata) -> (u64, u64, u64, i64, i64, u32) {
+fn stable_file_identity(meta: &fs::Metadata) -> StableIdentity {
     use std::os::unix::fs::MetadataExt as _;
     (
         meta.dev(),
@@ -282,12 +339,14 @@ fn stable_file_identity(meta: &fs::Metadata) -> (u64, u64, u64, i64, i64, u32) {
         meta.len(),
         meta.mtime(),
         meta.mtime_nsec(),
+        meta.ctime(),
+        meta.ctime_nsec(),
         meta.mode(),
     )
 }
 
 #[cfg(not(unix))]
-fn stable_file_identity(meta: &fs::Metadata) -> (u64, u64, u64, i64, i64, u32) {
+fn stable_file_identity(meta: &fs::Metadata) -> StableIdentity {
     (
         0,
         0,
@@ -296,6 +355,8 @@ fn stable_file_identity(meta: &fs::Metadata) -> (u64, u64, u64, i64, i64, u32) {
             .ok()
             .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
             .map_or(0, |duration| duration.as_secs() as i64),
+        0,
+        0,
         0,
         u32::from(meta.permissions().readonly()),
     )
@@ -427,6 +488,68 @@ mod tests {
         let error = try_output_hash_of(&dir.to_string_lossy()).unwrap_err();
         assert!(error.contains("only 1 are inside"), "{error}");
         fs::remove_file(outside).ok();
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn canonical_archive_rejects_concurrent_add_remove_and_replace() {
+        let dir = scratch("concurrent-directory");
+        let keep = dir.join("keep");
+        fs::write(&keep, "before").unwrap();
+        let mut changed = false;
+        let error = try_output_hash_of_with_hook(
+            &dir.to_string_lossy(),
+            &mut |path, stage| {
+                if !changed && path == dir && stage == "directory-snapshotted" {
+                    changed = true;
+                    let transient = dir.join("transient");
+                    fs::write(&transient, "added").unwrap();
+                    fs::remove_file(&transient).unwrap();
+                    let replacement = dir.join("replacement");
+                    fs::write(&replacement, "after!").unwrap();
+                    fs::rename(&replacement, &keep).unwrap();
+                }
+            },
+        )
+        .unwrap_err();
+        assert!(error.contains("changed while hashing"), "{error}");
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn canonical_archive_rejects_same_size_write_with_restored_mtime() {
+        use std::os::unix::fs::MetadataExt as _;
+        use std::process::Command;
+
+        let dir = scratch("restored-mtime");
+        let file = dir.join("payload");
+        let stamp = dir.join("stamp");
+        fs::write(&file, "AAAA").unwrap();
+        fs::write(&stamp, "stamp").unwrap();
+        Command::new("touch")
+            .args(["-r", stamp.to_str().unwrap(), file.to_str().unwrap()])
+            .status()
+            .unwrap();
+        let expected_mtime = fs::metadata(&file).unwrap().mtime_nsec();
+        let mut changed = false;
+        let error = try_output_hash_of_with_hook(
+            &dir.to_string_lossy(),
+            &mut |path, stage| {
+                if !changed && path == file && stage == "file-opened" {
+                    changed = true;
+                    fs::write(&file, "BBBB").unwrap();
+                    Command::new("touch")
+                        .args(["-r", stamp.to_str().unwrap(), file.to_str().unwrap()])
+                        .status()
+                        .unwrap();
+                    assert_eq!(fs::metadata(&file).unwrap().mtime_nsec(), expected_mtime);
+                }
+            },
+        )
+        .unwrap_err();
+        assert!(error.contains("changed while hashing"), "{error}");
         fs::remove_dir_all(dir).ok();
     }
 

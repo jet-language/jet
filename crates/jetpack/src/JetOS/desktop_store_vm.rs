@@ -364,7 +364,7 @@ fn write_desktop_breadth(dir: &Path, system: &SystemPlan) -> std::io::Result<()>
     )
 }
 
-fn write_store_cache_facts(dir: &Path, realized: &[Store::StoreEntry]) -> std::io::Result<()> {
+fn write_store_cache_facts(dir: &Path, realized: &[RealizedPackage]) -> std::io::Result<()> {
     let store_dir = dir.join("store");
     fs::create_dir_all(&store_dir)?;
     let entries = realized

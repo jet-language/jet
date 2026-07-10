@@ -1,7 +1,7 @@
 fn write_init_facts(
     dir: &Path,
     system: &SystemPlan,
-    realized: &[Store::StoreEntry],
+    realized: &[RealizedPackage],
 ) -> std::io::Result<()> {
     let init_dir = dir.join("init");
     fs::create_dir_all(&init_dir)?;
@@ -14,7 +14,12 @@ fn write_init_facts(
         let sbin = dir.join("sbin");
         fs::create_dir_all(&sbin)?;
         let init_path = boot_artifact(entry, &["bin/systemd", "lib/systemd/systemd", "sbin/init"])
-            .unwrap_or_else(|| Path::new(&entry.out).join("bin/systemd"));
+            .unwrap_or_else(|| {
+                entry
+                    .consumption_path(&entry.out)
+                    .unwrap_or_else(|_| PathBuf::from(&entry.out))
+                    .join("bin/systemd")
+            });
         link_or_copy_file(&init_path, &sbin.join("init"))?;
         write_systemd_unit_library(dir, entry, &default_target)?;
     }
@@ -33,7 +38,7 @@ fn write_init_facts(
 
 fn write_systemd_unit_library(
     dir: &Path,
-    entry: &Store::StoreEntry,
+    entry: &RealizedPackage,
     default_target: &str,
 ) -> std::io::Result<()> {
     let unit_roots = [

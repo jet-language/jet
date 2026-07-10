@@ -49,8 +49,12 @@ JP0 stop-line now enforces three truth boundaries:
   `nix-store --add-root --indirect` root protecting its transitive closure;
 - canonical output archives hash node type, mode, bytes, symlink target, empty
   directories, and complete hardlink identity; reject outside aliases, escapes,
-  cycles, concurrent mutation, and special files. Local outputs are sealed
-  read-only, then revalidated before and after child consumption. Sandbox
+  cycles, concurrent mutation, and special files. Directory snapshots bind
+  child names, types, metadata, and ctime before and after traversal. Local
+  outputs are sealed read-only; Linux consumers execute and copy through a
+  lease-owned inherited directory descriptor, so a same-UID rename/symlink
+  swap cannot redirect the path. JetOS retains those leases through kernel
+  validation, private generation-scratch builds, and closure copy. Sandbox
   capability detection stays fallback until a child actually enters a jail.
 
 Production blockers after that stop-line:

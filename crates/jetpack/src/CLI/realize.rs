@@ -151,6 +151,23 @@ fn realize_ref_outcome(
     drop(spinner);
     match result {
         Ok(realized) => {
+            let mut entry = realized.entry;
+            if let Some(lease) = realized.lease.as_ref() {
+                if !entry.bin.is_empty() {
+                    entry.bin = lease
+                        .stable_path(&entry.bin)
+                        .expect("verified bin path must map into its lease")
+                        .to_string_lossy()
+                        .into_owned();
+                }
+                if !entry.rlib.is_empty() {
+                    entry.rlib = lease
+                        .stable_path(&entry.rlib)
+                        .expect("verified rlib path must map into its lease")
+                        .to_string_lossy()
+                        .into_owned();
+                }
+            }
             // T4 (D-JPK-CACHE1): one ledger row per package — how it was
             // satisfied, and how long a from-source build took.
             let elapsed = started.elapsed();
@@ -162,22 +179,22 @@ fn realize_ref_outcome(
             };
             // Nix-provided packages often carry no version of their own; the
             // store path's `<hash>-<name>-<version>` basename usually does.
-            let version = if realized.entry.version.is_empty() {
-                version_from_out(&realized.entry.name, &realized.entry.out).unwrap_or_default()
+            let version = if entry.version.is_empty() {
+                version_from_out(&entry.name, &entry.out).unwrap_or_default()
             } else {
-                realized.entry.version.clone()
+                entry.version.clone()
             };
-            let line = theme.render_row(&realized.entry.name, name_w, &version, &state);
+            let line = theme.render_row(&entry.name, name_w, &version, &state);
             match style {
                 RowStyle::Ledger => {
-                    theme.row(&realized.entry.name, name_w, &version, &state);
-                    theme.detail(&theme.gray(&realized.entry.out));
+                    theme.row(&entry.name, name_w, &version, &state);
+                    theme.detail(&theme.gray(&entry.out));
                 }
-                RowStyle::Ready => theme.ready_row(&realized.entry.name, name_w, &version),
+                RowStyle::Ready => theme.ready_row(&entry.name, name_w, &version),
                 RowStyle::Silent => {}
             }
             RefOutcome::Realized(
-                realized.entry,
+                entry,
                 realized.source_state,
                 line,
                 realized.lease,
@@ -278,13 +295,23 @@ fn realize_adapter(
     };
     match Store::realize_verified(roots, &ctx, Store::RealizeRequest::Adapter(plan)) {
         Ok(realized) => {
+            let mut entry = realized.entry;
+            if let Some(lease) = realized.lease.as_ref() {
+                if !entry.bin.is_empty() {
+                    entry.bin = lease
+                        .stable_path(&entry.bin)
+                        .expect("verified bin path must map into its lease")
+                        .to_string_lossy()
+                        .into_owned();
+                }
+            }
             theme.ok(&format!(
                 "{} {}",
-                theme.bold(&realized.entry.name),
+                theme.bold(&entry.name),
                 realized.source_state.label()
             ));
-            theme.detail(&theme.gray(&realized.entry.out));
-            Some((realized.entry, realized.source_state, realized.lease))
+            theme.detail(&theme.gray(&entry.out));
+            Some((entry, realized.source_state, realized.lease))
         }
         Err(Store::RealizeError::Provider(error)) => {
             report_provider_error(theme, &error);

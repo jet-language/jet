@@ -436,7 +436,7 @@ fn clean_bool_json(value: &str) -> &'static str {
     }
 }
 
-fn render_proof(system: &SystemPlan, realized: &[Store::StoreEntry], plan: &EnvPlan) -> String {
+fn render_proof(system: &SystemPlan, realized: &[RealizedPackage], plan: &EnvPlan) -> String {
     let mut out = String::new();
     out.push_str(&format!("jetos proof for {}\n", system.name));
     out.push_str(&format!("target: {}\n", system.target));

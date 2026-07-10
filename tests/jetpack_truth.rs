@@ -63,6 +63,39 @@ fn truth_matrix_covers_every_done_epoch4_card() {
     }
 }
 
+#[test]
+fn provider_realization_has_one_production_callsite() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut violations = Vec::new();
+    collect_direct_provider_calls(&root.join("crates/jetpack/src"), &mut violations);
+    assert_eq!(
+        violations,
+        vec!["crates/jetpack/src/Store.rs".to_string()],
+        "Provider realization must remain private behind Store::realize_verified"
+    );
+}
+
+fn collect_direct_provider_calls(dir: &Path, found: &mut Vec<String>) {
+    for entry in std::fs::read_dir(dir).unwrap().flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_direct_provider_calls(&path, found);
+        } else if path.extension().and_then(|ext| ext.to_str()) == Some("rs") {
+            let source = std::fs::read_to_string(&path).unwrap();
+            if source.contains("Provider::realize(") || source.contains("Provider::realize_adapter(") {
+                found.push(
+                    path.strip_prefix(Path::new(env!("CARGO_MANIFEST_DIR")))
+                        .unwrap()
+                        .to_string_lossy()
+                        .into_owned(),
+                );
+            }
+        }
+    }
+    found.sort();
+    found.dedup();
+}
+
 fn live_repo_root(root: &Path) -> std::path::PathBuf {
     let output = Command::new("git")
         .args(["rev-parse", "--path-format=absolute", "--git-common-dir"])

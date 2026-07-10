@@ -1,19 +1,41 @@
 fn run_kernel_bootstrap_builder(
     theme: &Theme,
     boot: &BootProfile,
-    realized: &[Store::StoreEntry],
+    realized: &mut [RealizedPackage],
     use_host_defaults: bool,
+    generation_dir: &Path,
 ) -> bool {
     if boot.kernel != "CachyOS" {
         return true;
     }
-    let Some(entry) = cachyos_kernel_entry(realized) else {
+    let Some(index) = realized
+        .iter()
+        .position(|entry| entry.name == CACHYOS_KERNEL_PACKAGE)
+    else {
         return true;
     };
+    let entry = &realized[index];
     if missing_kernel_source_files(entry).is_some() {
         return true;
     }
-    let out = Path::new(&entry.out);
+    let source_out = match entry.consumption_path(&entry.out) {
+        Ok(path) => path,
+        Err(_) => return false,
+    };
+    let out = generation_dir.join("kernel-build").join(&entry.name);
+    if out.exists() {
+        let _ = fs::remove_dir_all(&out);
+    }
+    if let Err(error) = copy_profile_tree(&source_out, &out) {
+        theme.error_coded(
+            "E1286",
+            "jetos CachyOS source build failed",
+            &format!("copying the leased kernel package into generation scratch failed: {error}."),
+            "check the first-party cachyos-kernel source recipe and rerun `jet os build`.",
+        );
+        return false;
+    }
+    realized[index].set_consumption_override(out.clone());
     let script = out.join("source/build.sh");
     if !script.is_file() {
         return true;
@@ -29,7 +51,7 @@ fn run_kernel_bootstrap_builder(
         return false;
     }
     let output = Command::new(&script)
-        .current_dir(out)
+        .current_dir(&out)
         .env("PATH", jetos_bootstrap_path())
         .env("JETOS_KERNEL_OUT", out.join("boot"))
         .env("JETOS_KERNEL_SOURCE", out.join("source"))
@@ -141,7 +163,7 @@ fn first_existing_path(paths: &[&str]) -> Option<PathBuf> {
 fn validate_boot_payloads(
     theme: &Theme,
     boot: &BootProfile,
-    realized: &[Store::StoreEntry],
+    realized: &[RealizedPackage],
 ) -> bool {
     if boot.kernel == "CachyOS" {
         let Some(entry) = cachyos_kernel_entry(realized) else {
