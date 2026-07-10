@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 466,
-    "rev": 2566,
+    "rev": 2591,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -4472,6 +4472,16 @@
       "plan": "docs/plans/epoch-5/metaprogramming.md",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-10",
+          "by": "codex-orchestrator",
+          "text": "Architecture repair checkpoint: LSP jet/buildGraph request and shared Driver::query_build_plan landed; graph query no longer materializes generated files. Locked b.generate pre-write and action-output post-exec rollback gates green; native/cross/web/plugin/freestanding variants green. New find/embed acceptance exposed real gap: literal-only embed audit rejects b.embed(files[0]); fixing BuildContext-specific computed but find-locked path before final focused rerun/commit. No external gate."
+        },
+        {
+          "at": "2026-07-10",
+          "by": "codex-orchestrator",
+          "text": "Architecture gates green: per-call active #Impure enforcement; build_entry 12/12 before added mode/rollback cases; native/web/cross/freestanding/plugin staging 1/1; locked action-output rollback 1/1; package/workspace policy 1/1; generated pre-write drift 1/1; build_graph 22/22 including malformed digest and symlink-parent outside-write; UI snapshot update green. Full focused rerun, LSP graph audit, diff/commit remain."
+        },
         {
           "at": "2026-07-10",
           "by": "codex-orchestrator",
@@ -18691,6 +18701,21 @@
         {
           "at": "2026-07-10",
           "by": "codex-orchestrator",
+          "text": "Third repair checkpoint: Changesets now carry token/base revision with owner checks on status, stage, discard, and apply; per-source lock and CAS helper call sites added; proof plan-revision state scaffolded. Remaining: protected proof snapshot, generation source/plan proof binding, registry-owned controllers, and hostile multi-client/race tests. Uncommitted; no focused gate yet."
+        },
+        {
+          "at": "2026-07-10",
+          "by": "codex-orchestrator",
+          "text": "Third independent review REJECTED c77f5663. Critical: proof command can return latest generation artifacts without binding captured source/plan; predictable writable snapshot lacks post-child hash validation; Apply compare-then-rename is not CAS and may overwrite concurrent save. Major: proof/switch do not refresh live projection, registry owns renderer names but not controllers, and one global Changeset lacks client revision/token ownership. No merge. Repair requires source+plan-bound proof, protected snapshot with pre/post hash, serialized revision-checked Apply, action-triggered projection refresh, registry-owned controllers, and multi-client token isolation."
+        },
+        {
+          "at": "2026-07-10",
+          "by": "codex-orchestrator",
+          "text": "Second repair focused hostile gate green: exact transaction test passes in 37.82s, covering immutable proof/switch snapshot races, robust JSON escape/unicode round-trip, registry-owned live projection, and source-only apply/rollback. Exact projection/headless, build, diff audit, and commit remain."
+        },
+        {
+          "at": "2026-07-10",
+          "by": "codex-orchestrator",
           "text": "Second repair checkpoint: proof captures source plus SHA-256 before execution, runs against same-directory immutable snapshot, and binds only if source unchanged after. Switch requires exact source/hash and runs canonical switch against proved snapshot. Ad-hoc JSON field scanner being replaced with structured object decoder. Live renderer/controller and hostile tests remain; uncommitted."
         },
         {
@@ -20925,6 +20950,21 @@
         {
           "at": "2026-07-10",
           "by": "codex-orchestrator",
+          "text": "Fifth repair implementation checkpoint: object-lock/root-FD model replaced by per-realization sealed private snapshot lease. Every fresh/cache result receives a lease; snapshot digest must equal canonical envelope; nested files held by inheritable exact FDs; Shell resolves executables to file FDs. Lease holds no long lock and removes snapshot on drop. JetOS copies all required bytes into generation, leaving no lease/proc symlinks; test asserts post-process generation executable remains valid. Per-object lifetime locks removed. Remaining: compile repair, reverse-order two-process proof, provider visibility lockdown, focused gates."
+        },
+        {
+          "at": "2026-07-10",
+          "by": "codex-orchestrator",
+          "text": "Fifth independent security review REJECTED 959ea91e. P1: persistent generation symlinks to /proc/self/fd dangle or retarget after lease drop; per-object lifetime locks can deadlock across opposite multi-package order; public provider trait/backends/factory still permit direct bypass; root FD does not protect nested bin/tool replacement because consumers reopen live entries; fresh realizations return lease None and remain raceable. No merge. Repair must materialize generation-private copies, eliminate/order lifetime locks, privatize raw provider surface, hand consumers exact file FDs or immutable sealed copies, and lease fresh outputs."
+        },
+        {
+          "at": "2026-07-10",
+          "by": "codex-orchestrator",
+          "text": "Fourth repair focused gates green: Envelope hostile 10/10; Store hostile 15/15 including same-UID rename/symlink swap executing trusted original via inherited FD; live truth/provider-callsite guard 2/2; two-pass JetOS generation/cache lease 1/1; migrated archive and lib_use 1/1; cargo check -p jetpack green. Final diff/commit remains."
+        },
+        {
+          "at": "2026-07-10",
+          "by": "codex-orchestrator",
           "text": "Fourth repair checkpoint: archive pre/post snapshots exact child names/types/full metadata; file/dir identity includes ctime+nsec; hostile add/remove/replace and same-size restored-mtime cases added. CacheLease owns inheritable Linux directory FD and consumers use /proc/self/fd/N, defeating parent rename/symlink swaps. CLI consumes FD view; JetOS RealizedPackage holds lease through generation, mapping consumption paths and copying kernel package into generation-private scratch. Remaining: public test migration, visibility guard, compile repair, focused hostile gates."
         },
         {
@@ -21874,14 +21914,21 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P1",
-      "plan": "Gated by D-CI3 (suite depth/tiering). Ungated remainder: stale Tower path fix, JET_REQUIRE_RUSTC, perf wiring, release.yml.",
+      "plan": "D-CI3=A ratified — full suite on every push, non-blocking flag, nightly deep lane. Steps:\n1. ci.yml: single lane running scripts/agent/verify-full.sh with JET_REQUIRE_RUSTC=1 (environment self-skips become failures) on every push; pushes flagged not blocked (per ratified text). Delete/fix the stale tools/Tower status step.\n2. Nightly lane: rotating-seed fuzz_sema N>=1000 + ungated-unsafe grep on fuzz programs + tools/perf/ci-perf-check.sh ratchet.\n3. release.yml added (versioning.md already references it — closes GAP-1 in tests/truthfulness.rs).\n4. Versioned scripts/githooks/ + core.hooksPath wired via flake shellHook; pre-push fast tier = doc-sync checks.\n5. NOTE: master currently red — 10 pre-existing failures tracked on #465 (canvas pattern-arm ×4, TUI reactive ×2, E9999/E1291 I4 debt, fuzz I2 violation, os_switch). First green CI run requires #465 fixed or those suites quarantined ON #465's terms; do not silently skip them here.\n6. Tests/verify: CI dry-run via act or a push to a scratch branch; confirm a seeded self-skip fails the run.\nExit: CI red iff verify-full.sh red; no silent self-skips; nightly lane live; fresh clone gets hooks from the dev shell.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-10",
+          "by": "claude-main",
+          "text": "D-CI3=A ratified. Plan written; #465 (pre-existing red suites) named as the gating reality for the first green run. Ready to implement."
+        }
+      ],
       "created": "2026-07-10T10:49:06.734Z",
-      "updated": "2026-07-10"
+      "updated": "2026-07-10",
+      "workOrder": 15
     },
     {
       "id": "c0w6wa07",
@@ -21946,14 +21993,21 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P1",
-      "plan": "Gated by D-DEVTOOLS1 (where the maintainer surface lives). No code before ratification.",
+      "plan": "D-DEVTOOLS1=A ratified — everything under the existing hidden `jet devtools` namespace (pattern: devtools grammars). Steps:\n1. jet devtools reduce <file.jet> [--code EXXXX]: delta-debug minimizer; oracle = front-end accepts + rustc rejects (I2 repro) or diagnostic code match.\n2. jet devtools ice-report <file.jet>: bundle source + generated Rust + rustc stderr + jet/rustc versions into one attachable file.\n3. jet devtools new-example <topic>/<name> and new-ui <name>: scaffold example + expected/ pair, ui fixture + snapshot stub — matching golden/ui harness layout exactly.\n4. jet devtools check-fixture-paths: validate path-embedding fixtures against real files (the examples-move trap).\n5. jet devtools bless: wrapper over snapshot re-bless.\n6. All hidden from top-level jet help (same as grammars); registered in Source/CLI.rs COMMANDS.\n7. Tests per tool; reduce must demonstrably shrink a real ice_regressions case; verify skill gains one doc line per tool.\nExit: each tool tested + documented; reduce proven on a real ICE case; suite green.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-10",
+          "by": "claude-main",
+          "text": "D-DEVTOOLS1=A ratified. Plan written; ready to implement."
+        }
+      ],
       "created": "2026-07-10T10:49:07.060Z",
-      "updated": "2026-07-10"
+      "updated": "2026-07-10",
+      "workOrder": 16
     },
     {
       "id": "c01lj8gw",
@@ -22066,20 +22120,27 @@
     {
       "id": "c09ffy3w",
       "num": 457,
-      "title": "durability: tower brief + tower lint (W5 assists)",
-      "body": "Plan: docs/plans/agent-durability.md W5. Weak models must not reconstruct card context by hand, and hygiene rules need a sweeper. Additive commands — no workflow strictness change (that is D-TWRGUARD1 on its own card).\n\nScope: tower brief '#N' --for <agent> --json emitting one blob: card + checklist (once it exists) + LIVE linked decision text (kills the paraphrase-stale-ballot failure) + blockers + milestone/epoch criteria + new card refs[] field (doc pointers) + the agent's unread messages + open questions. tower lint: done cards without evidence, claimed-idle cards, missing --by attribution, ballot-field gaps; --docs mode fails when a ratified decision ID still appears in open-ballot docs. tower next --burndown encoding the two-section scope so it is not memorized prose.\n\nExit: brief output sufficient to work a card with no other reads (validated on a real card); lint runs clean on the live board or lists true findings; Tower/test coverage for both.",
+      "title": "durability: tower lint + next --burndown (W5 assists)",
+      "body": "Plan: docs/plans/agent-durability.md W5. Hygiene rules need a mechanical sweeper. (tower brief moved to #462, which carries ratified D-TWR-BRIEF1=A — this card no longer builds brief.)\n\nScope: tower lint — flags done cards without evidence, claimed-but-idle cards, writes missing --by attribution, ballot-field gaps on open decisions; --docs mode fails when a ratified decision ID still appears in an open-ballot doc. tower next --burndown encodes the two-section burndown scope (epoch e3 + sidequests in workOrder) so it is not memorized prose.\n\nExit: lint runs clean on the live board or lists true findings; --docs mode catches a seeded stale ID; burndown flag returns exactly the two-section queue; Tower/test coverage for both.",
       "kind": "task",
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
-      "plan": null,
+      "plan": "1. store/cli: tower lint (rules above, --json), each rule its own function + test fixture. 2. --docs mode: scan docs/ballots + docs/plans for ratified decision ids (source: live store) and fail listing hits. 3. tower next --burndown: filter = (epoch e3 track epoch) + (track sidequest), agent lanes, workOrder order. 4. Tests per rule (clean fixture + seeded-violation fixture). 5. Doc lines in tower skill + AGENTS.md.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-10",
+          "by": "claude-main",
+          "text": "Narrowed after D-TWR-BRIEF1=A ratified on #462: brief scope consolidated there, this card keeps lint + next --burndown. Plan written; ready."
+        }
+      ],
       "created": "2026-07-10T10:49:07.613Z",
-      "updated": "2026-07-10"
+      "updated": "2026-07-10",
+      "workOrder": 14
     },
     {
       "id": "c0as0asq",
@@ -22090,14 +22151,23 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P1",
-      "plan": "Gated by D-TWRGUARD1 (hard gates vs lint-only vs agent-hard/owner-soft). No code before ratification.",
-      "blockedBy": [],
+      "plan": "D-TWRGUARD1=C ratified — agent-hard, owner-soft. Criteria/checklist data model + done-gate + acceptance ballots are OWNED BY #463 (D-TWR-CRIT1=C); this card builds the rest of the guard family on top. All gates apply only when --by ≠ owner; owner writes bypass everything; every bypassing owner-quote is event-logged. Steps:\n1. store.mjs guard layer (single chokepoint in mutate path): (a) ballot-ready validation on decision add — gist/story/inWild/options[].code/rec required, --draft flag exempts and keeps it out of the owner queue; (b) ratify/activate rejected for agents unless --quote \"owner's words\" given (recorded in event log); (c) no agent writes to frozen or owner-lane cards; (d) release of a building card requires --handoff note; (e) card delete refuses to cascade away ratified decisions (they retire to history instead once #461 lands; until then delete is refused outright); (f) ratify outcome must match an option key; (g) blockedBy accepts decision ids.\n2. tower verdict '#N' --outcome \"...\" --by owner — mints an owner verdict as a ratified decision on the card and flips the card, so verdicts stop landing in logs (owner rule).\n3. Ratify hook: ratifying a syntax-group decision auto-appends the standard chores (Syntax.rs, syntax-decisions.md log, jet devtools grammars, re-bless) to the card's criteria (#463 model).\n4. Errors: E_GATE_* family, each with an actionable message naming the missing thing.\n5. Tests: one refusal + one acceptance test per gate; owner-bypass test per gate; migration clean on live-shaped fixture.\n6. Docs: Tower/AGENTS.md gate table; tower + tower-ballot skills.\nExit: every gate has paired refusal/acceptance tests; live board migrates clean; skills updated; suite green.",
+      "blockedBy": [
+        "c09rh9pt"
+      ],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-10",
+          "by": "claude-main",
+          "text": "D-TWRGUARD1=C ratified. Plan written; checklist model + done-gate split out to #463 (blockedBy set), this card owns the remaining agent-hard gates + tower verdict. Ready once #463 lands."
+        }
+      ],
       "created": "2026-07-10T10:49:07.695Z",
-      "updated": "2026-07-10"
+      "updated": "2026-07-10",
+      "workOrder": 11
     },
     {
       "id": "c0c39p53",
@@ -22144,14 +22214,26 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "triage",
+      "phase": "ready",
       "priority": "P1",
-      "plan": null,
+      "plan": "D-TWR-ARCHIVE1=B ratified (auto-retire split live/history) MODIFIED by owner comment: keep a walk-back buffer before anything retires, and done must be strictly tested (that half lands via #463/#458). Steps:\n1. store.mjs — .tower/history.json append-only ledger {decisions[], cards[], events[], each with retiredAt}. Written under the same cross-process lock; committed to git.\n2. Retire policy WITH BUFFER (owner comment): on every write, retire (a) decisions status=ratified whose ratifiedAt is older than config retireAfterDays (default 3) — inside the window they stay in tower.json, show in the UI 'recently decided' strip, and tower decision reopen works one-step; (b) cards phase=done older than the same buffer AND passing the #463 done-gate rules; their questions ride along; (c) events beyond the newest 500.\n3. Walk-back UX: Now view gets a collapsed 'Recently decided (N) — reversible for X days' strip listing buffered ratifications with one-tap Reopen. Reopen pulls it back to open and reverts the card advance.\n4. Merged reads: findCard/decision show/card show fall through to history transparently; tower archive restore <id> moves an item back to live (reopen for ratified decisions). Board Done counts read a per-epoch summary; full done lists lazy-load via GET /api/history?epoch=.\n5. CLI: tower archive status|show <id>|restore <id>. First write after upgrade migrates the existing 496 ratified decisions + 305 done cards (all outside any buffer) → tower.json ~0.5MB.\n6. Tests: buffer respected (nothing retires early), reopen-from-buffer, retire-after-buffer, merged reads, restore, migration on a live-shaped fixture, backups shrink.\n7. Docs: Tower README/AGENTS.md + tower-setup skill (retireAfterDays).\nExit: tower.json ≤ ~0.6MB after migration; every retired item still reachable by id; a ratification can be walked back within the buffer from phone UI; suite green.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-10",
+          "by": "claude-main",
+          "text": "D-TWR-ARCHIVE1=B ratified with comment. Plan honors both comment clauses: retire buffer w/ one-tap walk-back (steps 2-3); stricter done testing enforced by #463/#458 (linked). Ready to implement after #463 lands the done-gate it references."
+        },
+        {
+          "at": "2026-07-10",
+          "by": "owner",
+          "text": "Activated into sidequest track"
+        }
+      ],
       "created": "2026-07-10T10:50:10.450Z",
-      "updated": "2026-07-10"
+      "updated": "2026-07-10",
+      "workOrder": 12
     },
     {
       "id": "c077a4nu",
@@ -22162,14 +22244,26 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "triage",
+      "phase": "ready",
       "priority": "P2",
-      "plan": null,
+      "plan": "D-TWR-BRIEF1=A ratified — one-shot work packet. Consolidates the brief half of #457 (that card narrows to lint; this card owns brief). Steps:\n1. CLI: tower brief [#N] [--agent me] [--json] [--no-claim]. No ref → pick via nextCards (workOrder order); claims for --agent unless --no-claim; already-claimed → error naming holder.\n2. Packet contents (nothing an agent must fetch elsewhere): card num/title/body/plan/phase/priority/workOrder; blockedBy with live blocker state; epoch + milestone (goal, criteria); card criteria[] state once #463 lands; every linked decision VERBATIM from live store — status, outcome, and the owner's ratification comment in full (kills the paraphrase-stale-ballot failure); open questions; refs[] — new optional card field of doc paths, plus paths auto-harvested from body/plan; 5-line rules footer (--by required, phase honesty, verify≠builder, expect-rev, handoff on release).\n3. HTTP GET /api/brief?card=&agent= returning the same JSON.\n4. Human render ≤ one screen; --json stable schema (documented in AGENTS.md API table).\n5. Tests: packet completeness incl. ratification comment (regression), claim/--no-claim/claimed-by-other, refs harvest, json schema snapshot.\n6. Docs/skills: tower skill session loop step 2 becomes 'tower brief'; Tower/AGENTS.md; sub-agent brief pattern = literally `tower brief '#N' --agent <me>`.\nExit (from #457, kept): brief output is sufficient to work a real card with no other reads — validated by running one card end-to-end from the packet alone; suite green.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-10",
+          "by": "claude-main",
+          "text": "D-TWR-BRIEF1=A ratified. Plan written; brief scope consolidated here from #457 (which narrows to tower lint + next --burndown). Ready to implement; criteria block in packet activates when #463 lands."
+        },
+        {
+          "at": "2026-07-10",
+          "by": "owner",
+          "text": "Activated into sidequest track"
+        }
+      ],
       "created": "2026-07-10T10:50:10.606Z",
-      "updated": "2026-07-10"
+      "updated": "2026-07-10",
+      "workOrder": 13
     },
     {
       "id": "c09rh9pt",
@@ -22180,14 +22274,26 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "triage",
+      "phase": "ready",
       "priority": "P1",
-      "plan": null,
+      "plan": "D-TWR-CRIT1=C ratified — criteria list enforced everywhere + acceptance ballots on flagged cards. Steps:\n1. store.mjs — card.criteria[]: {n, text, status open|met|verified, metBy, verifiedBy, evidence, at}. addCard/updateCard accept criteria; new mutations addCriterion/meetCriterion/verifyCriterion. Validation: verify rejected when verifiedBy === metBy or === assignee at meet time (E_CRITERIA_SELF).\n2. Done-gate (agent-hard, owner-soft per D-TWRGUARD1=C): updateCard to phase done with --by ≠ owner rejected (E_CRITERIA) while any criterion unverified — only for cards that HAVE criteria (legacy cards unaffected). Owner writes bypass.\n3. card.needsAcceptance flag (set at greenlight or any time by owner). On agent done-attempt with all criteria verified: auto-mint decision D-ACCEPT-<num> (options accept/bounce, body = per-criterion evidence summary), card stays verify; done only when owner ratifies accept; bounce comment reopens to building + log.\n4. CLI: tower card criteria '#N' --add \"…\" | --meet n --evidence \"…\" --by X | --verify n --evidence \"…\" --by Y. tower brief (#462) includes criteria state.\n5. UI: checklist w/ per-item state + evidence in card modal; acceptance ballots render in Now focus mode like any decision.\n6. Tests (Tower/test): gate refusal, verifier≠builder, owner bypass, flag→mint→accept, flag→mint→bounce-reopen, legacy cards unaffected.\n7. Docs: Tower/AGENTS.md, README, tower + tower-ballot skills.\nExit: all listed tests green; #458 gates can consume criteria[]; a flagged card demonstrably cannot reach done without an owner accept.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-10",
+          "by": "claude-main",
+          "text": "D-TWR-CRIT1=C ratified. Plan written; also carries D-TWR-ARCHIVE1 comment 'enforce stricter done testing' — this card is that enforcement. Ready to implement."
+        },
+        {
+          "at": "2026-07-10",
+          "by": "owner",
+          "text": "Activated into sidequest track"
+        }
+      ],
       "created": "2026-07-10T10:50:10.760Z",
-      "updated": "2026-07-10"
+      "updated": "2026-07-10",
+      "workOrder": 10
     },
     {
       "id": "c0ceo8wd",
@@ -22198,14 +22304,26 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "triage",
+      "phase": "ready",
       "priority": "P2",
-      "plan": null,
+      "plan": "D-TWR-BOARD1=A ratified with comment: ADD a NEW page prototyping a hybrid of A (roadmap ledger) & B (ops table); DO NOT replace or change the current Board. Steps:\n1. New third tab 'Radar' (Now · Board · Radar; keyboard 3, ⌘K entry). Board view code untouched — zero diffs to viewBoard.\n2. Radar layout per epoch (active epochs only, current first): header row = name + progress bar + 30-day burndown sparkline (computed from events: card.update transitions to done, bucketed per day) + active/done counts; milestone bars with met/total and a stall badge when no progress event for 5+ days.\n3. Under each epoch header: the B half — dense sortable table of that epoch's ACTIVE cards (num, title, lane, priority, order, assignee, updated-age). Column-header sort; type-to-filter box; inline edits for lane-safe fields (priority, workOrder, assignee) via existing card/update API; row click opens the normal card modal.\n4. Done/frozen never render on Radar; per-epoch 'ledger' link shows done list (from tower.json now; switches to GET /api/history when #461 lands — soft dependency, not blocking).\n5. Server: burndown series computed in project() (store-side helper + unit test) so the client stays dumb.\n6. Tests: burndown/stall helper unit tests in Tower/test; existing suite green.\n7. Acceptance (owner comment = this is a prototype he wants to SEE): card flagged for owner acceptance — demo on his phone + desktop, he compares against untouched Board, then decides keep/iterate/drop via the acceptance ballot. Frontend acceptance = feature-by-feature vs this plan in his real browser, not pty tests.\nExit: Radar renders live board data with burndown + table hybrid; Board byte-identical in behavior; owner acceptance ballot answered.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-10",
+          "by": "claude-main",
+          "text": "D-TWR-BOARD1=A ratified with comment honored verbatim: new Radar tab prototypes the A+B hybrid, current Board untouched, owner reviews prototype before anything replaces anything. Ready to implement."
+        },
+        {
+          "at": "2026-07-10",
+          "by": "owner",
+          "text": "Activated into sidequest track"
+        }
+      ],
       "created": "2026-07-10T10:50:10.920Z",
-      "updated": "2026-07-10"
+      "updated": "2026-07-10",
+      "workOrder": 17
     },
     {
       "id": "c02kdm7a",
@@ -22216,12 +22334,18 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "triage",
+      "phase": "planning",
       "priority": "P0",
       "plan": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-10",
+          "by": "owner",
+          "text": "Activated into sidequest track"
+        }
+      ],
       "created": "2026-07-10T11:08:18.716Z",
       "updated": "2026-07-10"
     }
@@ -47277,8 +47401,11 @@
         }
       ],
       "rec": "A",
-      "status": "open",
-      "created": "2026-07-10T10:50:10.528Z"
+      "status": "ratified",
+      "created": "2026-07-10T10:50:10.528Z",
+      "outcome": "B",
+      "comment": "But enforce stricter \"done\" testing & keep a buffer of decisions made pre ratification so I can walk them back before ratification if needed",
+      "ratifiedAt": "2026-07-10"
     },
     {
       "id": "D-TWR-BRIEF1",
@@ -47318,8 +47445,10 @@
         }
       ],
       "rec": "A",
-      "status": "open",
-      "created": "2026-07-10T10:50:10.686Z"
+      "status": "ratified",
+      "created": "2026-07-10T10:50:10.686Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-10"
     },
     {
       "id": "D-TWR-CRIT1",
@@ -47359,8 +47488,10 @@
         }
       ],
       "rec": "C",
-      "status": "open",
-      "created": "2026-07-10T10:50:10.842Z"
+      "status": "ratified",
+      "created": "2026-07-10T10:50:10.842Z",
+      "outcome": "C",
+      "ratifiedAt": "2026-07-10"
     },
     {
       "id": "D-TWR-BOARD1",
@@ -47405,8 +47536,11 @@
         }
       ],
       "rec": "A",
-      "status": "open",
-      "created": "2026-07-10T10:50:11.000Z"
+      "status": "ratified",
+      "created": "2026-07-10T10:50:11.000Z",
+      "outcome": "A",
+      "comment": "YOU may add a NEW page showing me a prototype hybrid of A & B. DO NOT replace the current board, overall I like it how it is but im open to your idea with combining a and b",
+      "ratifiedAt": "2026-07-10"
     }
   ],
   "questions": [
@@ -48695,6 +48829,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-10T12:20:51.571Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c009yxqf",
+      "note": "phase,workOrder,plan,logEntry"
+    },
+    {
+      "at": "2026-07-10T12:20:51.488Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0uvxow5",
+      "note": "phase,workOrder,plan,logEntry"
+    },
+    {
+      "at": "2026-07-10T12:20:51.403Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c09ffy3w",
+      "note": "title,phase,workOrder,body,plan,logEntry"
+    },
+    {
+      "at": "2026-07-10T12:20:51.322Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0as0asq",
+      "note": "phase,workOrder,blockedBy,plan,logEntry"
+    },
+    {
+      "at": "2026-07-10T12:20:51.244Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c0ceo8wd",
+      "note": "phase,workOrder,plan,logEntry"
+    },
+    {
+      "at": "2026-07-10T12:20:51.169Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c077a4nu",
+      "note": "phase,workOrder,plan,logEntry"
+    },
+    {
+      "at": "2026-07-10T12:20:51.090Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c04mnkv0",
+      "note": "phase,workOrder,plan,logEntry"
+    },
+    {
+      "at": "2026-07-10T12:20:51.007Z",
+      "by": "claude-main",
+      "action": "card.update",
+      "ref": "c09rh9pt",
+      "note": "phase,workOrder,plan,logEntry"
+    },
+    {
+      "at": "2026-07-10T12:18:47.067Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0e7rot4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-10T12:18:20.358Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0wetgi3",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-10T12:16:07.582Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c1nixrpd",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-10T12:15:03.492Z",
+      "by": "owner",
+      "action": "card.activate",
+      "ref": "c02kdm7a",
+      "note": ""
+    },
+    {
+      "at": "2026-07-10T12:14:59.644Z",
+      "by": "owner",
+      "action": "card.activate",
+      "ref": "c0ceo8wd",
+      "note": ""
+    },
+    {
+      "at": "2026-07-10T12:14:59.137Z",
+      "by": "owner",
+      "action": "card.activate",
+      "ref": "c09rh9pt",
+      "note": ""
+    },
+    {
+      "at": "2026-07-10T12:14:58.592Z",
+      "by": "owner",
+      "action": "card.activate",
+      "ref": "c077a4nu",
+      "note": ""
+    },
+    {
+      "at": "2026-07-10T12:14:57.875Z",
+      "by": "owner",
+      "action": "card.activate",
+      "ref": "c04mnkv0",
+      "note": ""
+    },
+    {
+      "at": "2026-07-10T12:14:47.006Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0e7rot4",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-10T12:14:46.481Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-TWR-BOARD1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-10T12:14:00.414Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0wetgi3",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-10T12:12:55.379Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-TWR-CRIT1",
+      "note": "C"
+    },
+    {
+      "at": "2026-07-10T12:12:13.170Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-TWR-BRIEF1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-10T12:09:16.754Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c1nixrpd",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-10T12:09:16.619Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0wetgi3",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-10T12:09:16.474Z",
+      "by": "codex-orchestrator",
+      "action": "card.update",
+      "ref": "c0e7rot4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-10T12:09:10.333Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-TWR-ARCHIVE1",
+      "note": "B"
+    },
     {
       "at": "2026-07-10T12:04:11.833Z",
       "by": "owner",
@@ -62519,181 +62828,6 @@
       "action": "decision.ratify",
       "ref": "D-JPK-OSDISK1",
       "note": "C"
-    },
-    {
-      "at": "2026-07-07T00:06:19.031Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-JPK-OSBRAND1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-07T00:06:07.694Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-JPK-OSSECRET1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-07T00:05:16.135Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-JPK-OSINIT1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-07T00:04:29.718Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-JPK-OSNS1",
-      "note": "B"
-    },
-    {
-      "at": "2026-07-07T00:03:41.201Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-JPK-OSGEN1",
-      "note": "C"
-    },
-    {
-      "at": "2026-07-07T00:03:22.176Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-JPK-OSHOST1",
-      "note": "C"
-    },
-    {
-      "at": "2026-07-07T00:02:48.709Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-JPK-OSVERB1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-07T00:02:17.050Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-JPK-OSOPT1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-06T23:56:39.208Z",
-      "by": "codex-main",
-      "action": "decision.add",
-      "ref": "jetos-batch",
-      "note": "10 jetos unblock ballots raised for Epoch 7"
-    },
-    {
-      "at": "2026-07-06T23:48:32.458Z",
-      "by": "tower",
-      "action": "message.send",
-      "ref": "msg190cogpn",
-      "note": "→ codex-main: [tower] 2 decisions ratified: D-PROVENANCE1→B (\"Syntax is ve"
-    },
-    {
-      "at": "2026-07-06T23:48:32.458Z",
-      "by": "tower",
-      "action": "message.send",
-      "ref": "msg180cobdl",
-      "note": "→ codex-1: [tower] 2 decisions ratified: D-PROVENANCE1→B (\"Syntax is ve"
-    },
-    {
-      "at": "2026-07-06T23:48:32.458Z",
-      "by": "tower",
-      "action": "message.send",
-      "ref": "msg170cnv0p",
-      "note": "→ claude-main: [tower] 2 decisions ratified: D-PROVENANCE1→B (\"Syntax is ve"
-    },
-    {
-      "at": "2026-07-06T23:47:02.422Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-PROVENANCE1",
-      "note": "B"
-    },
-    {
-      "at": "2026-07-06T23:46:59.645Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-PROVENANCE1",
-      "note": "B"
-    },
-    {
-      "at": "2026-07-06T23:46:23.873Z",
-      "by": "owner",
-      "action": "decision.reopen",
-      "ref": "D-PROVENANCE1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-06T23:46:21.074Z",
-      "by": "owner",
-      "action": "decision.reopen",
-      "ref": "D-PROVENANCE1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-06T23:45:38.290Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c1qixxin",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-07-06T23:45:33.347Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c1gixeqd",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-07-06T23:45:24.527Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c1fixd1e",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-07-06T23:45:16.539Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "ceiv04h",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-07-06T23:44:59.939Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "ccq07pav",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-07-06T23:44:55.136Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "cbq06v8j",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-07-06T23:44:47.300Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c1pzxnsn",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-07-06T23:44:31.935Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c120",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-07-06T21:23:52.239Z",
-      "by": "codex-main",
-      "action": "card.update",
-      "ref": "c0yfycf0",
-      "note": "phase,logEntry"
     }
   ],
   "nextNum": 368,
