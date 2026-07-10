@@ -56,6 +56,16 @@ impl Env {
     pub fn composed_path(&self, base_path: &str) -> String {
         let mut seen = std::collections::BTreeSet::new();
         let mut parts: Vec<&str> = Vec::new();
+        for dir in self
+            .cache_leases
+            .iter()
+            .filter_map(|lease| lease.wrapper_dir())
+            .filter_map(|path| path.to_str())
+        {
+            if seen.insert(dir) {
+                parts.push(dir);
+            }
+        }
         for dir in &self.bin_dirs {
             if seen.insert(dir.as_str()) {
                 parts.push(dir);

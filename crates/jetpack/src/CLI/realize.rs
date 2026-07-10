@@ -53,7 +53,7 @@ enum RefOutcome {
         Store::StoreEntry,
         Provider::SourceState,
         String,
-        Option<Store::CacheLease>,
+        Store::CacheLease,
     ),
     NeedsNix(Provider::NixBridgeNeed),
     Failed,
@@ -151,31 +151,39 @@ fn realize_ref_outcome(
     drop(spinner);
     match result {
         Ok(realized) => {
-            let mut entry = realized.entry;
-            if let Some(lease) = realized.lease.as_ref() {
+            let (mut entry, source_state, lease) = realized.into_parts();
+            if style == RowStyle::Ready {
                 if !entry.bin.is_empty() {
-                    entry.bin = lease
-                        .stable_path(&entry.bin)
-                        .expect("verified bin path must map into its lease")
-                        .to_string_lossy()
-                        .into_owned();
+                    let path = match lease.stable_path(&entry.bin) {
+                        Ok(path) => path,
+                        Err(error) => {
+                            let failure = lease.consumption_failure(&error);
+                            Store::report_integrity(theme, &failure);
+                            return RefOutcome::Failed;
+                        }
+                    };
+                    entry.bin = path.to_string_lossy().into_owned();
                 }
                 if !entry.rlib.is_empty() {
-                    entry.rlib = lease
-                        .stable_path(&entry.rlib)
-                        .expect("verified rlib path must map into its lease")
-                        .to_string_lossy()
-                        .into_owned();
+                    let path = match lease.stable_path(&entry.rlib) {
+                        Ok(path) => path,
+                        Err(error) => {
+                            let failure = lease.consumption_failure(&error);
+                            Store::report_integrity(theme, &failure);
+                            return RefOutcome::Failed;
+                        }
+                    };
+                    entry.rlib = path.to_string_lossy().into_owned();
                 }
             }
             // T4 (D-JPK-CACHE1): one ledger row per package — how it was
             // satisfied, and how long a from-source build took.
             let elapsed = started.elapsed();
-            let state = if realized.source_state == Provider::SourceState::Built
+            let state = if source_state == Provider::SourceState::Built
                 && elapsed.as_secs() >= 1 {
                 format!("built {}", Output::human_duration(elapsed))
             } else {
-                realized.source_state.label().to_string()
+                source_state.label().to_string()
             };
             // Nix-provided packages often carry no version of their own; the
             // store path's `<hash>-<name>-<version>` basename usually does.
@@ -195,9 +203,9 @@ fn realize_ref_outcome(
             }
             RefOutcome::Realized(
                 entry,
-                realized.source_state,
+                source_state,
                 line,
-                realized.lease,
+                lease,
             )
         }
         Err(Store::RealizeError::Provider(e)) => {
@@ -281,10 +289,11 @@ fn realize_adapter(
     roots: &Roots,
     flags: &Flags,
     plan: &ModuleEval::AdapterPlan,
+    consume: bool,
 ) -> Option<(
     Store::StoreEntry,
     Provider::SourceState,
-    Option<Store::CacheLease>,
+    Store::CacheLease,
 )> {
     theme.status(&format!("adapting {} …", theme.bold(&plan.name)));
     let store_dir = roots.hangar_dir();
@@ -295,23 +304,27 @@ fn realize_adapter(
     };
     match Store::realize_verified(roots, &ctx, Store::RealizeRequest::Adapter(plan)) {
         Ok(realized) => {
-            let mut entry = realized.entry;
-            if let Some(lease) = realized.lease.as_ref() {
+            let (mut entry, source_state, lease) = realized.into_parts();
+            if consume {
                 if !entry.bin.is_empty() {
-                    entry.bin = lease
-                        .stable_path(&entry.bin)
-                        .expect("verified bin path must map into its lease")
-                        .to_string_lossy()
-                        .into_owned();
+                    let path = match lease.stable_path(&entry.bin) {
+                        Ok(path) => path,
+                        Err(error) => {
+                            let failure = lease.consumption_failure(&error);
+                            Store::report_integrity(theme, &failure);
+                            return None;
+                        }
+                    };
+                    entry.bin = path.to_string_lossy().into_owned();
                 }
             }
             theme.ok(&format!(
                 "{} {}",
                 theme.bold(&entry.name),
-                realized.source_state.label()
+                source_state.label()
             ));
             theme.detail(&theme.gray(&entry.out));
-            Some((entry, realized.source_state, realized.lease))
+            Some((entry, source_state, lease))
         }
         Err(Store::RealizeError::Provider(error)) => {
             report_provider_error(theme, &error);

@@ -168,7 +168,7 @@ fn compose_env(theme: &Theme, roots: &Roots, flags: &Flags, plan: &RunPlan) -> R
                     bin_dirs.push(entry.bin);
                 }
                 realized_refs.push(entry.reference);
-                cache_leases.extend(lease);
+                cache_leases.push(lease);
             }
             RefOutcome::NeedsNix(need) => holes.push(need),
             RefOutcome::Failed => failed = true,
@@ -184,13 +184,13 @@ fn compose_env(theme: &Theme, roots: &Roots, flags: &Flags, plan: &RunPlan) -> R
                 "adapter",
             );
         }
-        match realize_adapter(theme, roots, flags, adapter) {
+        match realize_adapter(theme, roots, flags, adapter, true) {
             Some((entry, _state, lease)) => {
                 if !entry.bin.is_empty() {
                     bin_dirs.push(entry.bin);
                 }
                 realized_refs.push(entry.reference);
-                cache_leases.extend(lease);
+                cache_leases.push(lease);
             }
             None => failed = true,
         }
@@ -387,7 +387,7 @@ fn cmd_build(theme: &Theme, parsed: &Parsed) -> i32 {
                 "adapter",
             );
         }
-        match realize_adapter(theme, &roots, &parsed.flags, adapter) {
+        match realize_adapter(theme, &roots, &parsed.flags, adapter, false) {
             Some((entry, state, _lease)) => {
                 realized_refs.push(entry.reference);
                 match state {

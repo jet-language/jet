@@ -191,9 +191,27 @@ pub enum RealizeRequest<'a> {
 }
 
 pub struct VerifiedRealization {
-    pub entry: StoreEntry,
-    pub source_state: super::Provider::SourceState,
-    pub lease: Option<CacheLease>,
+    entry: StoreEntry,
+    source_state: super::Provider::SourceState,
+    lease: CacheLease,
+}
+
+impl VerifiedRealization {
+    pub fn metadata(&self) -> &StoreEntry {
+        &self.entry
+    }
+
+    pub fn source_state(&self) -> super::Provider::SourceState {
+        self.source_state
+    }
+
+    pub fn consumption_status(&self) -> &ConsumptionStatus {
+        self.lease.status()
+    }
+
+    pub(crate) fn into_parts(self) -> (StoreEntry, super::Provider::SourceState, CacheLease) {
+        (self.entry, self.source_state, self.lease)
+    }
 }
 
 #[derive(Debug)]
@@ -521,10 +539,36 @@ pub struct CacheLease {
     expected_digest: String,
     package: String,
     version: String,
+    status: ConsumptionStatus,
+    wrapper_root: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConsumptionStatus {
+    Consumable,
+    NonConsumable { reason: String },
 }
 
 impl CacheLease {
+    pub fn status(&self) -> &ConsumptionStatus {
+        &self.status
+    }
+
+    pub fn wrapper_dir(&self) -> Option<&Path> {
+        self.wrapper_root.as_deref()
+    }
+
+    fn require_consumable(&self) -> std::io::Result<()> {
+        match &self.status {
+            ConsumptionStatus::Consumable => Ok(()),
+            ConsumptionStatus::NonConsumable { reason } => {
+                Err(std::io::Error::other(reason.clone()))
+            }
+        }
+    }
+
     pub fn executable(&self, name: &str) -> Option<PathBuf> {
+        self.require_consumable().ok()?;
         if name.contains(std::path::MAIN_SEPARATOR) {
             return None;
         }
@@ -549,6 +593,7 @@ impl CacheLease {
     }
 
     pub fn stable_path(&self, path: &str) -> std::io::Result<PathBuf> {
+        self.require_consumable()?;
         let relative = Path::new(path).strip_prefix(&self.out).map_err(|_| {
             std::io::Error::other(format!(
                 "consumer path `{path}` escapes leased output `{}`",
@@ -574,11 +619,7 @@ impl CacheLease {
     /// Revalidate immediately before handing paths to a child consumer. The
     /// archive reader uses no-follow handles and rejects concurrent mutation.
     pub fn validate(&self) -> std::io::Result<()> {
-        if self.expected_digest.is_empty() {
-            return Err(std::io::Error::other(
-                "realization has no canonical consumable output",
-            ));
-        }
+        self.require_consumable()?;
         let actual = super::Envelope::try_output_hash_of(&self.snapshot_root.to_string_lossy())
             .map_err(std::io::Error::other)?;
         if actual != self.expected_digest {
@@ -591,7 +632,13 @@ impl CacheLease {
     }
 
     pub fn integrity_failure(&self) -> Option<IntegrityFailure> {
-        self.validate().err().map(|error| IntegrityFailure {
+        self.validate()
+            .err()
+            .map(|error| self.consumption_failure(&error))
+    }
+
+    pub(crate) fn consumption_failure(&self, error: &std::io::Error) -> IntegrityFailure {
+        IntegrityFailure {
             package: self.package.clone(),
             version: self.version.clone(),
             expected: self.expected_digest.clone(),
@@ -601,7 +648,7 @@ impl CacheLease {
                 .to_string(),
             fix: "Re-run `jet fetch` after `jet clean`. If the problem persists, audit the source before rebuilding."
                 .to_string(),
-        })
+        }
     }
 }
 
@@ -609,6 +656,10 @@ impl Drop for CacheLease {
     fn drop(&mut self) {
         let _ = make_tree_writable_for_removal(&self.snapshot_root);
         let _ = fs::remove_dir_all(&self.snapshot_root);
+        if let Some(wrapper) = &self.wrapper_root {
+            let _ = make_tree_writable_for_removal(wrapper);
+            let _ = fs::remove_dir_all(wrapper);
+        }
     }
 }
 
@@ -656,6 +707,10 @@ fn snapshot_lease(roots: &Roots, entry: &StoreEntry) -> std::io::Result<CacheLea
             expected_digest: String::new(),
             package: entry.name.clone(),
             version: entry.version.clone(),
+            status: ConsumptionStatus::NonConsumable {
+                reason: "realization has no canonical consumable output".to_string(),
+            },
+            wrapper_root: None,
         });
     }
     let mut hardlinks = BTreeMap::new();
@@ -675,17 +730,50 @@ fn snapshot_lease(roots: &Roots, entry: &StoreEntry) -> std::io::Result<CacheLea
         .map_err(std::io::Error::other)?;
     let mut files = Vec::new();
     open_snapshot_files(&snapshot_root, &snapshot_root, &mut files)?;
+    let bin_relative = (!entry.bin.is_empty())
+        .then(|| Path::new(&entry.bin).strip_prefix(&entry.out).ok().map(PathBuf::from))
+        .flatten();
+    let wrapper_root = create_exec_wrappers(&snapshot_root, bin_relative.as_deref(), &files)?;
     Ok(CacheLease {
         files,
         out: PathBuf::from(&entry.out),
         snapshot_root,
-        bin_relative: (!entry.bin.is_empty())
-            .then(|| Path::new(&entry.bin).strip_prefix(&entry.out).ok().map(PathBuf::from))
-            .flatten(),
+        bin_relative,
         expected_digest: sealed_digest,
         package: entry.name.clone(),
         version: entry.version.clone(),
+        status: ConsumptionStatus::Consumable,
+        wrapper_root,
     })
+}
+
+fn create_exec_wrappers(
+    snapshot_root: &Path,
+    bin: Option<&Path>,
+    files: &[(PathBuf, fs::File)],
+) -> std::io::Result<Option<PathBuf>> {
+    let Some(bin) = bin else {
+        return Ok(None);
+    };
+    let wrapper = snapshot_root.with_extension("exec");
+    fs::create_dir_all(&wrapper)?;
+    for (member, file) in files.iter().filter(|(member, _)| member.parent() == Some(bin)) {
+        let Some(name) = member.file_name() else { continue };
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::fd::AsRawFd as _;
+            std::os::unix::fs::symlink(
+                format!("/proc/self/fd/{}", file.as_raw_fd()),
+                wrapper.join(name),
+            )?;
+        }
+        #[cfg(not(target_os = "linux"))]
+        fs::copy(snapshot_root.join(member), wrapper.join(name))?;
+    }
+    let mut permissions = fs::metadata(&wrapper)?.permissions();
+    permissions.set_readonly(true);
+    fs::set_permissions(&wrapper, permissions)?;
+    Ok(Some(wrapper))
 }
 
 fn copy_snapshot_node(
@@ -823,7 +911,7 @@ pub fn realize_verified(
                 return Ok(VerifiedRealization {
                     entry: hit.entry,
                     source_state: super::Provider::SourceState::Cached,
-                    lease: Some(hit.lease),
+                    lease: hit.lease,
                 });
             }
             None => {
@@ -861,7 +949,7 @@ pub fn realize_verified(
     Ok(VerifiedRealization {
         entry,
         source_state: realized.source_state,
-        lease: Some(lease),
+        lease,
     })
 }
 
@@ -1861,6 +1949,77 @@ mod tests {
         assert_eq!(fs::read_to_string(stable).unwrap(), "trusted");
     }
 
+    #[test]
+    fn realization_type_distinguishes_fresh_cached_and_missing_outputs() {
+        let (roots, _g) = temp_roots();
+        let out = roots.root.join("typed-output");
+        fs::create_dir_all(&out).unwrap();
+        fs::write(out.join("payload"), "trusted").unwrap();
+        let envelope = super::super::Envelope::Envelope::for_output(
+            &out.to_string_lossy(),
+            "mine:typed",
+            "core-source",
+        );
+        let entry = record_verified(
+            &roots,
+            "typed",
+            "1",
+            "mine:typed",
+            &out.to_string_lossy(),
+            "",
+            "",
+            &envelope,
+            &test_identity(),
+        )
+        .unwrap();
+
+        let fresh = VerifiedRealization {
+            lease: snapshot_lease(&roots, &entry).unwrap(),
+            entry: entry.clone(),
+            source_state: super::super::Provider::SourceState::Built,
+        };
+        assert_eq!(fresh.consumption_status(), &ConsumptionStatus::Consumable);
+        assert!(fresh
+            .lease
+            .stable_path(&out.join("payload").to_string_lossy())
+            .is_ok());
+
+        let hit = find_verified_by_reference(&roots, "mine:typed", &test_expectation(&out))
+            .unwrap()
+            .unwrap();
+        let cached = VerifiedRealization {
+            entry: hit.entry,
+            source_state: super::super::Provider::SourceState::Cached,
+            lease: hit.lease,
+        };
+        assert_eq!(cached.consumption_status(), &ConsumptionStatus::Consumable);
+
+        let missing_out = roots.root.join("missing-output");
+        let missing_entry = StoreEntry {
+            id: "missing-1-test".to_string(),
+            name: "missing".to_string(),
+            version: "1".to_string(),
+            reference: "mine:missing".to_string(),
+            out: missing_out.to_string_lossy().into_owned(),
+            bin: String::new(),
+            rlib: String::new(),
+            envelope: super::super::Envelope::Envelope::default(),
+            cache_identity: test_identity(),
+            realized_at: 0,
+            last_used_at: 0,
+        };
+        let missing = VerifiedRealization {
+            lease: snapshot_lease(&roots, &missing_entry).unwrap(),
+            entry: missing_entry,
+            source_state: super::super::Provider::SourceState::Built,
+        };
+        assert!(matches!(
+            missing.consumption_status(),
+            ConsumptionStatus::NonConsumable { .. }
+        ));
+        assert!(missing.lease.stable_path(&missing_out.to_string_lossy()).is_err());
+    }
+
     #[cfg(target_os = "linux")]
     #[test]
     fn leased_fd_view_executes_original_after_rename_symlink_swap() {
@@ -1920,6 +2079,19 @@ mod tests {
         let output = Command::new(&stable_tool).output().unwrap();
         assert!(output.status.success());
         assert_eq!(String::from_utf8(output.stdout).unwrap(), "trusted");
+        let nested = Command::new("/bin/sh")
+            .args(["-c", "exec tool"])
+            .env(
+                "PATH",
+                format!(
+                    "{}:/usr/bin:/bin",
+                    hit.lease.wrapper_dir().unwrap().display()
+                ),
+            )
+            .output()
+            .unwrap();
+        assert!(nested.status.success());
+        assert_eq!(String::from_utf8(nested.stdout).unwrap(), "trusted");
         assert_eq!(fs::read_to_string(out.join("bin/tool")).unwrap(), "#!/bin/sh\nprintf attacker");
     }
 

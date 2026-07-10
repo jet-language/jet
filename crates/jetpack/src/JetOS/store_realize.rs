@@ -1,6 +1,6 @@
 struct RealizedPackage {
     entry: Store::StoreEntry,
-    _lease: Option<Store::CacheLease>,
+    lease: Store::CacheLease,
     consumption_override: Option<PathBuf>,
 }
 
@@ -14,9 +14,10 @@ impl std::ops::Deref for RealizedPackage {
 
 impl RealizedPackage {
     fn from_verified(realized: Store::VerifiedRealization) -> Self {
+        let (entry, _source_state, lease) = realized.into_parts();
         Self {
-            entry: realized.entry,
-            _lease: realized.lease,
+            entry,
+            lease,
             consumption_override: None,
         }
     }
@@ -28,9 +29,7 @@ impl RealizedPackage {
             })?;
             return Ok(root.join(relative));
         }
-        self._lease
-            .as_ref()
-            .map_or_else(|| Ok(PathBuf::from(path)), |lease| lease.stable_path(path))
+        self.lease.stable_path(path)
     }
 
     fn set_consumption_override(&mut self, path: PathBuf) {
@@ -108,13 +107,14 @@ fn realize_ref(
         Store::RealizeRequest::Package { spec, table },
     ) {
         Ok(realized) => {
+            let entry = realized.metadata();
             theme.row(
-                &realized.entry.name,
+                &entry.name,
                 name_w,
-                &realized.entry.version,
-                realized.source_state.label(),
+                &entry.version,
+                realized.source_state().label(),
             );
-            theme.detail(&theme.gray(&realized.entry.out));
+            theme.detail(&theme.gray(&entry.out));
             Some(RealizedPackage::from_verified(realized))
         }
         Err(Store::RealizeError::Integrity(failure)) => {
@@ -159,12 +159,13 @@ fn try_realize_ref(
         Store::RealizeRequest::Package { spec, table },
     )
     .map_err(|e| format!("verified realization failed for `{}`: {e:?}", spec.raw))?;
+    let entry = realized.metadata();
     theme.row(
-        &realized.entry.name,
+        &entry.name,
         name_w,
-        &realized.entry.version,
-        realized.source_state.label(),
+        &entry.version,
+        realized.source_state().label(),
     );
-    theme.detail(&theme.gray(&realized.entry.out));
+    theme.detail(&theme.gray(&entry.out));
     Ok(RealizedPackage::from_verified(realized))
 }

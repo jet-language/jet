@@ -170,7 +170,7 @@ fn core_provider_compiles_ring_package_to_rlib() {
     };
 
     // Realize the ring package — CoreProvider should compile the Cargo.toml.
-    let r = Store::realize_verified(
+    let realized = Store::realize_verified(
         &roots,
         &ctx,
         Store::RealizeRequest::Package {
@@ -178,8 +178,8 @@ fn core_provider_compiles_ring_package_to_rlib() {
             table: &table,
         },
     )
-    .expect("verified realization should build core.archive from source")
-    .entry;
+    .expect("verified realization should build core.archive from source");
+    let r = realized.metadata();
 
     assert_eq!(r.name, "archive", "realized name should be archive");
     assert!(r.bin.is_empty(), "library package must have no bin");
