@@ -4,7 +4,7 @@
     "project": "Jet",
     "currentEpoch": "e3",
     "nextNum": 495,
-    "rev": 3502,
+    "rev": 3518,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -2044,6 +2044,11 @@
         {
           "at": "2026-07-11",
           "by": "fable-medium",
+          "text": "Audit-gap tranche merged (7af02c2e/751d096f/feffdce2 + merge). Gap2 FIXED: emitted programs shipped busy-poll fallback because native epoll/kqueue hid behind cargo feature jet_native_io that bare rustc never sets; emit now rewrites gate to target_os-only selection; golden I1 scan excises vetted jet:scheduler-native region; new tests/scheduler_native.rs (2/2). Gap3 FIXED: CI-safe 10k backpressure scale guard (fails on lost-wake/busy-wait/waiter-leak); exposed+fixed REAL lost-wake race in ParkSlot::wake (notify without mutex → park(None) slept forever); 100k targets: cargo test -p jet-codegen -- --ignored scale_100k_tasks_park_under_backpressure and --test corelib -- --ignored scheduler_spawn_100000_tasks_bench. Gap1: pause was real (test added); cancel now wakes parked waits via cancel-waiter registration in jet_scheduler_yield, both tiers (R12). GATE HIT: cancellation MODEL (cooperative vs preemptive-unwind-with-RAII) is unratified observable semantics — D-CANCELMODEL1 ballot being drafted on this card. Named remaining gap: IOCP still portable-poll fallback (no Windows lane). Parent re-ran scheduler_native 2/2, jet-codegen scheduler:: 11/12 (1 ignored=100k), golden concurrency 3/3, corelib 60/60."
+        },
+        {
+          "at": "2026-07-11",
+          "by": "fable-medium",
           "text": "Claimed by fable-medium. Worktree builder starting on 2026-07-09 audit-gap tranche: real pause/cancel semantics, native poller source in emitted programs, scale closure. IOCP (Windows-native) left as named gap pending a Windows execution lane."
         },
         {
@@ -2172,6 +2177,11 @@
       "plan": "D-METADERIVE1=A: implement user derive output as source fragments. Steps: (1) parser for `derive Trait for T { ... }`; (2) sema registers derive providers and enforces local-only orphan rule (trait or type local); (3) derive body runs at comptime with `T.reflect()` and `$name` splices; (4) emitted Jet text re-enters lexer/parser/sema per R11/D-CTCODEGEN1, never injects pre-parsed AST; (5) diagnostics for generated-fragment failure pin at the user `#[Trait]` trigger with optional generated context; (6) examples and goldens for a custom derive; (7) follow-up card for emit-template quoting, not a blocker.",
       "blockedBy": [],
       "log": [
+        {
+          "at": "2026-07-11",
+          "by": "fable-medium",
+          "text": "Tranche merged (768b23a5 + parent fix). DELIVERED: #[Default(expr)] now const-evaluated exactly on both tiers (new sema pass eval_default_markers, E2414 diagnostic + ui snapshot + docs row, example serde/codable_default with AOT/dev parity). Parent follow-up fix: pass originally gated on Codable derives, silently zeroing @Cli entry-arg defaults (golden cli/typed_entry_args caught it) — gate removed, all structs baked. GATE HIT (ballot-first): converting built-in Codable derives to R11 source re-entry needs unratified hand-writable Encode/Decode + DataTree Jet surface — D-SERDE2 ballot being drafted on this card. Cross-module Codable path bug (#4) fixed only by the gated half. docs/spec/architecture.md R11 claim about Codable is stale — correct when gate resolves."
+        },
         {
           "at": "2026-07-11",
           "by": "fable-medium",
@@ -7281,6 +7291,11 @@
         {
           "at": "2026-07-11",
           "by": "fable-medium",
+          "text": "Corpus tranche merged to master (c737dc22 + merge c6e82e99): 258 fixed cases, runner extensions (min-count gate, unaudited-unsafe scan, collect-all-failures). Parent re-ran sema_soundness on merged master: 7/7 ok. Criteria 1-4 marked met; criterion 5 (defect loop) remains open — one corpus-selection artifact found+dropped (error_context path-embedding, not a real divergence), no sema holes confirmed this tranche. Needs independent verifier for criteria 1-4."
+        },
+        {
+          "at": "2026-07-11",
+          "by": "fable-medium",
           "text": "Claimed by fable-medium (medium-workOrder burndown lane). Worktree builder started on corpus expansion tranche per codex-main 2026-07-11 scoping (criteria 1-4)."
         },
         {
@@ -7311,38 +7326,38 @@
         {
           "n": 1,
           "text": "A deterministic adversarial corpus covers ownership, concurrency/sendability, Unsafe/FFI provenance, generic substitution/defaults, comptime/runtime parity, and TIR lowering with valid, exact-invalid, and executable differential seeds; every failure persists a replayable minimized fixture.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-medium",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-11T10:13:19.985Z"
+          "evidence": "Corpus covers ownership/borrow/arena, sendability/task-detach, Unsafe+FFI provenance (E3202/03/04/06/07/11 + gated-unsafe examples + real strlen bridge), generics/traits/delegation/generic-modules, comptime/@Pure/effects, fan-out S75 + fixed lists S76, TIR/OS-target dispatch; valid+exact-invalid+executable differential seeds; failures replay via SEMA_SOUNDNESS_CASE=<path>.",
+          "at": "2026-07-11T11:32:21.053Z"
         },
         {
           "n": 2,
           "text": "Required CI runs at least 250 fixed cases with zero silent skips; invalid cases reject with pinned Jet diagnostics before rustc, accepted cases pass rustc, and raw rustc output never reaches users.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-medium",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-11T10:13:20.153Z"
+          "evidence": "full_corpus_meets_minimum_case_count hard-fails <250; passing at 258 fixed cases (92 invalid, 105 valid, 61 differential), zero skips (category tests assert non-empty); invalid cases pin exact Jet codes pre-rustc; valid cases must pass rustc; runner asserts raw rustc output never surfaces. cargo test --test sema_soundness: 7/7 ok (re-run by parent on merged master).",
+          "at": "2026-07-11T11:32:43.033Z"
         },
         {
           "n": 3,
           "text": "Safe generated user bodies contain no unaudited unsafe, classified structurally by provenance; FFI scalar/string/pointer/layout/interior-NUL/unsupported-target rows either execute a real bridge or produce a pinned Jet rejection.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-medium",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-11T10:13:20.321Z"
+          "evidence": "generated_rust_has_no_unaudited_unsafe green across all 166 valid+differential fixtures; vetted prelude stripped, 7 GATED_UNSAFE_STEMS mirror golden.rs I1 allowlist; FFI rows: scalar/string/pointer (E3202/E3203), layout (struct_needs_layout_c), interior-NUL (E3211), executing bridge (cffi_scalar_string_bridge). Note: no unsupported-target FFI diagnostic exists in spec — recorded as gap, not fabricated.",
+          "at": "2026-07-11T11:33:02.380Z"
         },
         {
           "n": 4,
           "text": "Deterministic accepted programs produce byte-identical stdout, stderr, exit, panic, and observable effects across AOT and default dev/interpreter; defaults and generic-module explicit-equivalent cases preserve behavior.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable-medium",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-11T10:13:20.485Z"
+          "evidence": "executable_corpus_matches_aot_and_default_dev green: AOT vs default-dev byte-identical stdout/stderr/exit across 61 differential cases incl. defaults (nonprimitive_default) and generic-module cases. Re-run by parent post-merge: ok (133s).",
+          "at": "2026-07-11T11:33:22.965Z"
         },
         {
           "n": 5,
@@ -12046,7 +12061,7 @@
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
-      "assignee": "terra-456-store-final",
+      "assignee": "terra-456-ratchet",
       "log": [
         {
           "at": "2026-07-11",
@@ -12155,12 +12170,21 @@
           "verifiedBy": "sol-456-nixos-review",
           "evidence": "Independent review confirmed unchanged aggregate sort/dedup/error path, exact fallback vector, unchanged Some mapping fields, accurate invariant, and no API/diagnostic drift.",
           "at": "2026-07-11T11:06:01.922Z"
+        },
+        {
+          "n": 12,
+          "text": "Store lease setup and snapshot traversal contain no production unwrap/expect: missing child pipes return exact existing io errors, and outside-root files/directories/symlinks fail before inspection, traversal, mutation, or collection.",
+          "status": "verified",
+          "metBy": "terra-456-store-final",
+          "verifiedBy": "sol-456-store-review",
+          "evidence": "Independent re-review proved containment precedes metadata/traversal/symlink/open, outside file/dir/symlink leave collection/data untouched, valid recursion/symlink ignore unchanged, and exact pipe errors preserved.",
+          "at": "2026-07-11T11:35:57.773Z"
         }
       ],
       "needsAcceptance": false,
       "refs": [],
       "workOrder": 93,
-      "claimedAt": "2026-07-11T11:26:45.488Z"
+      "claimedAt": "2026-07-11T11:36:07.852Z"
     },
     {
       "id": "c09ffy3w",
@@ -25526,6 +25550,115 @@
       "created": "2026-07-11T10:14:21.334Z",
       "outcome": "A",
       "ratifiedAt": "2026-07-11"
+    },
+    {
+      "id": "D-SERDE2",
+      "cardId": "c2nizvzp",
+      "group": "api",
+      "title": "Hand-writable Encode/Decode surface (and whether built-in derives re-enter through it)",
+      "gist": "Decide the Jet spelling a person writes to give a type its own wire form, and whether the built-in @Codable/@Encode/@Decode derives generate that same spelling (re-entering the front end, R11) or stay compiler-synthesized Rust that skips it.",
+      "explainer": "Today @Codable works by having the compiler write Rust `impl` blocks directly (crates/jet-codegen/src/Codegen/Items.rs::emit_struct_serde) over an internal value tree (jet_std::DataTree), using method names (jet_encode/jet_decode) the docs say `the user never types`. That is the one derive in the language that does NOT follow R11 (architecture.md rule: every build-time code-gen step emits Jet source that re-enters lexer/parser/sema like hand-written code). User-authored derives already follow R11 (D-METADERIVE1=A). This decision fixes (1) whether a person can hand-write a codec for a type the automatic field-walk can't express, and in what Jet syntax, and (2) whether the built-in derives become ordinary derives that emit that Jet source, closing the R11 gap. Note: architecture.md line 188 currently claims @Codable `already works this way` (re-enters); that line is stale and will be corrected to match whichever option is ratified. Ratifying this also fixes an adjacent live bug: the compiler-synthesized impls emit unqualified paths, so decode<T> across an imported module file fails today and only works in the entry file (memory: codable-derive-module-gap).",
+      "story": "Ada builds a signup service. Most of her types are plain records: she puts @Codable on `Signup` and `json.to_string(signup)` just works, no ceremony. But `email` is not a plain string — it is an `Email` type that must reject a malformed address on the way in, and should appear on the wire as a bare string \"ada@lovelace.org\", not as a nested object {\"value\": \"...\"}. The automatic field-walk cannot express either the flat wire shape or the validation. Ada needs a way to say, in Jet, `here is how an Email turns into data and back` — and she needs that hand-written codec to compose automatically when `Email` is a field of a derived `Signup`.",
+      "inWild": "@Codable\nstruct Signup {\n  name: String\n  email: Email        // a validated newtype, not a plain String\n}\n\nstruct Email { value: String }\n\n// Ada wants:\n//   json.to_string(Signup.{ name: \"Ada\", email: Email.{ value: \"ada@lovelace.org\" } })\n//   => {\"name\":\"Ada\",\"email\":\"ada@lovelace.org\"}     (email is a BARE string)\n//   json.decode<Signup>(\"{\\\"name\\\":\\\"Ada\\\",\\\"email\\\":\\\"nope\\\"}\")\n//   => Err: not a valid email: nope\n// The automatic @Codable field-walk would emit {\"value\":\"...\"} and never validate.\n// The open question: what does Ada write to override it, and do the built-in\n// derives generate that same thing under the hood?",
+      "detail": "Recommend A. It is the only option where there is exactly one mechanism (I8): a derive is just the compiler auto-writing the same `impl Encode`/`impl Decode` a person could write by hand, re-entering the front end exactly like a user derive (R11, matching the already-ratified D-METADERIVE1 shape). Beginner magic is untouched — @Codable stays zero-ceremony. The expert who needs a custom wire form or validation writes ordinary Jet that composes into any derived parent. B keeps R11 but leaves the hand path second-class (an ‘internals’ module you are steered away from), so the custom-codec story is a demotion rather than a feature and the surface splits in two. C permanently forks built-in derives (compiler-synthesized Rust) from user derives (R11 Jet source), records a standing carve-out in a core safety rule, and gives the expert no override at all — Ada would have to abandon the `Email` type. Effort is not a factor in this ranking.",
+      "options": [
+        {
+          "key": "A",
+          "name": "First-class Encode/Decode protocol; built-in derives emit it as Jet source (R11)",
+          "detail": "Ratify a user-facing `Encode`/`Decode` protocol: methods `encode(self) -> DataTree` and `decode(tree: DataTree) -> Result<T, DecodeError>`, with DataTree constructors (.Text/.Int/.Float/.Bool/.Null/.Array/.Object), the `?`-chaining accessors already listed in the spec (.text()/.int()/.field(name)/.at(i)), and `DecodeError { path, reason }`. A hand-written impl composes into any @Codable parent because both sides speak the same protocol. The built-in @Codable/@Encode/@Decode derives stop synthesizing Rust and instead generate this exact Jet source, which re-enters lexer→parser→sema like hand-written code — closing the R11 gap and, as a side effect, fixing the cross-module path bug (the generated source resolves names the same way user code does). One mechanism: the derive is the auto-written hand impl. This is the shape the spec already reserved for D-SERDE2 (`encode`/`decode` verbs over DataTree) and matches user derives (D-METADERIVE1).",
+          "code": "// Beginner: unchanged, zero ceremony.\n@Codable\nstruct Signup { name: String  email: Email }\n\n// Expert: give Email its own wire form + validation.\nstruct Email { value: String }\n\nimpl Encode for Email {\n  fn encode(self) -> DataTree {\n    DataTree.Text(self.value)          // bare string on the wire\n  }\n}\nimpl Decode for Email {\n  fn decode(tree: DataTree) -> Result<Email, DecodeError> {\n    let s = tree.text()?                // ?-chaining accessor\n    if not s.contains(\"@\") {\n      return Err(DecodeError.new(\"not a valid email: {s}\"))\n    }\n    Ok(Email.{ value: s })\n  }\n}\n\n// Composes automatically — Signup's DERIVED codec calls Email's HAND codec:\n// $ jet run signup.jet\n// {\"name\":\"Ada\",\"email\":\"ada@lovelace.org\"}\n// decode of {\"email\":\"nope\", ...} => Err: not a valid email: nope\n//\n// Under the hood the compiler now GENERATES the Signup impl as Jet source:\n//   impl Encode for Signup {\n//     fn encode(self) -> DataTree {\n//       DataTree.Object([(\"name\", self.name.encode()), (\"email\", self.email.encode())])\n//     }\n//   }\n// ...which re-enters sema exactly like Ada's Email impl (R11)."
+        },
+        {
+          "key": "B",
+          "name": "Blessed-but-internal encoding module; derives re-enter through it, hand-impl is unblessed",
+          "detail": "Ship the DataTree value tree and the Encode/Decode traits as an ordinary readable Jet module (`core.encoding.internals`), so the built-in derives can emit Jet source that re-enters against it (R11 honored). But the hand-impl path is documented as internal plumbing users are steered away from, not a taught first-class feature. A person CAN read the module and, in a pinch, write against it, but there is no blessed `impl Encode for T` ergonomics story — the intended answer to ‘I need a custom wire form’ stays ‘restructure your type so the field-walk fits’. Keeps the surface small by hiding the protocol, at the cost of leaving Ada's Email case awkward: she reaches into internals rather than using a taught mechanism, and the two surfaces (blessed derive vs unblessed internals) mean encode/decode is learned twice.",
+          "code": "// Beginner: unchanged.\n@Codable\nstruct Signup { name: String  email: Email }\n\n// Expert path exists but is 'internals' — not in the taught surface:\nuse core.encoding.internals.{ Encode, Decode, DataTree, DecodeError }\n\nimpl Encode for Email {   // legal, but documented as plumbing\n  fn encode(self) -> DataTree { DataTree.Text(self.value) }\n}\n// Guidance in the docs steers Ada AWAY from this toward reshaping Email\n// into a plain String field, or a @Codable struct with the wire she'll accept.\n//\n// $ jet run signup.jet\n// {\"name\":\"Ada\",\"email\":\"ada@lovelace.org\"}   // works if she uses internals\n// but the blessed answer is: don't — use a plain String and validate elsewhere."
+        },
+        {
+          "key": "C",
+          "name": "Keep built-in derives compiler-synthesized; record an R11 carve-out; fix only the path bug",
+          "detail": "Accept that the built-in @Codable/@Encode/@Decode derives stay compiler-written Rust over the internal DataTree, and record that as a ratified standing exception to R11 (built-in derives are exempt; user derives are not). No user-facing hand-codec surface ships this increment. Scope the work to fixing the cross-module path bug (qualify the emitted paths so decode<T> works outside the entry file). Ada gets no override: `Email` cannot choose its own wire form and cannot validate on decode through the codec — she must drop the `Email` type and use a plain String, validating by hand somewhere else. Permanently forks two derive machineries (built-in Rust-synth vs user-derive R11 source) and carves a hole in a core safety/trust rule.",
+          "code": "// Beginner: unchanged.\n@Codable\nstruct Signup { name: String  email: Email }\n\n// Expert: NO hand-codec surface. The field-walk is the only behavior:\n//   json.to_string(signup) => {\"name\":\"Ada\",\"email\":{\"value\":\"ada@lovelace.org\"}}\n//                                          ^^^^^^^ nested object, cannot override\n// To get a bare string + validation, Ada must abandon the type:\nstruct Signup { name: String  email: String }   // lost the Email type\n// ...and validate the address in application code, off the decode path.\n//\n// R11 records a permanent carve-out: built-in derives skip front-end re-entry."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust (serde)",
+          "note": "Derive and hand-impl are the SAME trait: #[derive(Serialize)] writes exactly the `impl Serialize` a person could write, and a hand impl composes anywhere the derive would. This is the A shape — one mechanism, derive == auto-written hand impl.",
+          "code": "// derive\n#[derive(Serialize, Deserialize)]\nstruct Signup { name: String, email: Email }\n// hand impl for the newtype, composes into Signup automatically\nimpl Serialize for Email {\n    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {\n        s.serialize_str(&self.0)\n    }\n}"
+        },
+        {
+          "lang": "Swift (Codable)",
+          "note": "Automatic conformance for plain types; override by writing encode(to:) / init(from:) on the same protocol. Custom and automatic are one mechanism and compose — again the A shape.",
+          "code": "struct Email: Codable {\n  let value: String\n  init(from d: Decoder) throws {\n    let s = try d.singleValueContainer().decode(String.self)\n    guard s.contains(\"@\") else { throw DecodingError... }\n    value = s\n  }\n  func encode(to e: Encoder) throws {\n    var c = e.singleValueContainer(); try c.encode(value)\n  }\n}"
+        },
+        {
+          "lang": "Go (encoding/json)",
+          "note": "A type overrides its wire form by implementing MarshalJSON/UnmarshalJSON; the struct walker calls into it automatically. Composition-by-interface, like A — but Go bolts custom codecs onto []byte rather than a typed value tree, which is the ergonomics A improves on with DataTree + typed accessors.",
+          "code": "func (e Email) MarshalJSON() ([]byte, error) {\n  return json.Marshal(e.value)   // bare string\n}\nfunc (e *Email) UnmarshalJSON(b []byte) error {\n  var s string; json.Unmarshal(b, &s)\n  if !strings.Contains(s, \"@\") { return fmt.Errorf(\"not a valid email: %s\", s) }\n  e.value = s; return nil\n}"
+        }
+      ],
+      "rec": "A",
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-11T11:37:43.806Z"
+    },
+    {
+      "id": "D-CANCELMODEL1",
+      "cardId": "c2iizmyx",
+      "group": "runtime",
+      "title": "Task cancellation model at wait points",
+      "gist": "When a task is cancelled (race loser, fail-fast sibling, or handle.cancel()), what happens the next time it hits a wait point (channel recv/send, sleep, task join, I/O): does the wait hand a sentinel back to the task body and let it keep running, or does the task stop right there and unwind — running its Drop-backed cleanup — the way a blown deadline (E3003) already does?",
+      "explainer": "Glossary (terms used below):\n- wait point / cancellation point: any place a task can park — channel recv()/send(), time.sleep(), task.wait()/join(), select, I/O. Pure CPU code between wait points never parks.\n- unwind: the task stops executing forward at the wait point and runs every value's Drop-backed cleanup on the way out (same machinery as a returned error or an E3003 deadline). No further body code runs.\n- Drop-backed cleanup: Jet has no `defer`; a value's close/release runs automatically when it leaves scope on ANY exit path (ratified, syntax-decisions.md line 858). Cleanup fires under all three options below — the question is only whether the code BETWEEN the wait point and scope exit runs.\n- sentinel: a stand-in return value meaning 'this wait was cancelled' — e.g. recv() returning None, send() returning false, sleep() returning early.\n\nWhat already shipped and is NOT reopened: the task/channel/taskgroup model (D-ASYNCRT1, D-NURSERY1, D-TASKSCOPE1), select (D-CONCSELECT1), race winner (D-RACEWIN1), combinators g.all/g.race/g.any (D-CONCCOMB1), and deadlines (D-DEADLINE1 / E3003). Cancel already wakes a parked task correctly — a task blocked in sleep or recv unblocks the instant it is cancelled. This ballot decides ONLY what the woken task does next.\n\nWhy it needs a decision now: today the two halves disagree. A blown deadline UNWINDS the task at its wait point and prints E3003 (see examples/features/concurrency/deadline_context.jet). But an explicit cancel is COOPERATIVE — the woken recv()/sleep() returns a sentinel and the task body keeps running until it decides to stop (or never does, if it has no wait point and no check). A deadline is just an ambient cancellation, so the same task can behave two different ways depending on WHY it was cancelled. That is observable, and it is cross-tier: interpreter, JIT, and AOT must agree (R12).",
+      "story": "Priya writes a price-quote service. A request fans out to three providers with g.race — first quote wins, losers are cancelled. One provider task, before it loses, has already opened a ledger handle and is parked in a 200ms wait. Priya expects: quote wins, the two losers stop and release their ledgers, done. What she must NOT get is a loser that, after being cancelled, wakes up and still commits a transfer to the ledger — a real side effect from a task the runtime told to stop. Whether that stray commit can happen is exactly this decision.",
+      "inWild": "// One program drives all three options. quote() wins the race instantly;\n// transfer() is cancelled while parked in sleep(200), AFTER it has opened a\n// ledger and BEFORE its commit. What the cancelled task does at that sleep\n// is the whole decision.\nuse core.tasks as tasks\nuse core.time as time\n\nfn transfer() -> Int {\n    ledger :: open_ledger()   // Drop-backed: prints \"ledger closed\" on ANY scope exit\n    time.sleep(200)           // <-- cancelled here: the race picks quote() first\n    ledger.commit()           // prints \"committed\" — a real, unwanted side effect\n    return 500\n}\n\nfn quote() -> Int {\n    return 7                  // returns immediately, wins the race\n}\n\nfn run() {\n    taskgroup g {\n        t :: g.task(() => transfer())\n        q :: g.task(() => quote())\n        winner :: g.race([t, q])   // quote wins; transfer is cancelled mid-sleep\n        print(\"winner: {winner}\")\n    }\n    print(\"group done\")\n}",
+      "detail": "Two-facet pass. Beginner: option A makes the footgun the default — every wait silently returns a sentinel, and if the beginner forgets to check it (or the code past the wait has no check), a cancelled task keeps doing work and commits Priya's stray transfer. That is leaked half-done work, which philosophy.md ranks safety above convenience against. Options B and C make cancel behave like the deadline the beginner already met (E3003): the task just stops at the next wait point and Drop closes the ledger — no sentinel to forget, no stray commit. Expert: all three keep an escape hatch — under A cooperative-continue IS the default; under B/C the shielded region (option C) is the explicit 'let this finish' opt-out for a genuine atomic section. Hybrid/I8: B and C use ONE cancellation mechanism (unwind at wait points, identical to deadlines) instead of two rules for two causes; C adds a scoped opt-out rather than a second system. Recommend C: B's safe, ceremony-free default plus the one control experts need for cleanup-critical sections, and it unifies explicit cancel with the already-shipped E3003 deadline unwind.\n\nHonest cost (behavior change to shipped goldens; difficulty is not an argument, disclosure is): B/C change tasks that are cancelled while still doing forward work. Re-bless expected: examples/features/concurrency/all_failfast.jet (the surviving g.all sibling currently runs to completion; under B/C it unwinds at its sleep) and task_controls.jet (t.cancel() after resume becomes an unwind at the next wait rather than a cooperative flag). race_cancel.jet is unaffected — its loser has no post-wait side effect. Touch points: recv/send/sleep/yield/select cancel handling in BOTH scheduler copies (crates/jet-codegen/src/scheduler.rs and Prelude/Scheduler.rs) and the g.all/race/any result path (JetSchedulerResult::Cancelled is already the wiring). New surface only under C: the shielded-region keyword — spelling is the owner's; candidates in the option.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Cooperative — wait returns a sentinel, the body finishes on its own terms (Go-style context)",
+          "detail": "A cancelled wait point returns a sentinel and control goes back to the task body: recv() -> None, send() -> false, sleep() returns early. The body decides what to do. Straight-line code with no check keeps running past the cancellation, so transfer() commits after it was cancelled. A task with no wait point and no explicit check is never stopped at all. This is the model that shipped for explicit cancel today; picking A keeps it and lives with the deadline/cancel split (E3003 still unwinds).",
+          "code": "// transfer()'s sleep(200) is cancelled -> returns early. The body has no\n// cancellation check, so it keeps going: commit() RUNS.\n//\n// prints (order between the two tasks may vary):\n//   winner: 7\n//   committed        <-- cancelled task still committed the ledger\n//   ledger closed\n//   group done\n//\n// To make it safe under A the author must hand-write the check on every path:\nfn transfer() -> Int {\n    ledger :: open_ledger()\n    time.sleep(200)\n    if tasks.cancelled() { return 0 }   // easy to forget; nothing enforces it\n    ledger.commit()\n    return 500\n}\n// with the check, prints:\n//   winner: 7\n//   ledger closed\n//   group done"
+        },
+        {
+          "key": "B",
+          "name": "Preemptive at the cancellation point — the task unwinds with Drop cleanup, exactly like a deadline (Trio/Kotlin-style)",
+          "detail": "A cancelled wait point does not return to the body — it unwinds the task then and there, running every Drop-backed cleanup on the way out, and the task's result becomes Cancelled. This is byte-for-byte how E3003 deadlines already behave (deadline_context.jet). The author writes plain straight-line code; no sentinel to check. commit() past the cancelled sleep never runs, so no stray side effect, and the ledger still closes.",
+          "code": "// transfer()'s sleep(200) is the cancellation point -> the task unwinds here.\n// commit() never runs; the ledger's Drop cleanup still fires.\nfn transfer() -> Int {\n    ledger :: open_ledger()\n    time.sleep(200)      // cancelled -> unwind (like E3003), commit() below is skipped\n    ledger.commit()\n    return 500\n}\n//\n// prints (order between the two tasks may vary):\n//   winner: 7\n//   ledger closed     <-- Drop still ran; no \"committed\" line\n//   group done\n//\n// same shape a deadline already produces today:\n//   Error [E3003]: deadline exceeded while waiting in time sleep"
+        },
+        {
+          "key": "C",
+          "name": "Preemptive by default, with an explicit shielded region for cleanup-critical sections (Trio shield / asyncio.shield / Kotlin NonCancellable)",
+          "detail": "Default is B: cancel unwinds at the next wait point, Drop cleans up. For the rare section that must finish once started — a two-phase commit, a flush, a lock handoff — the author wraps it in a shielded region: cancellation that arrives while inside is deferred until the region exits, so the wait points INSIDE it complete normally, then the task unwinds. One mechanism (unwind at wait points) with a scoped opt-out, not a second system. Recommended: safe default, and the one expert control real cleanup code needs. Shield keyword spelling is the owner's call — candidates below.",
+          "code": "// Default paths behave exactly like B. A shielded region is the opt-out for a\n// section that must complete atomically even under cancel:\nfn transfer() -> Int {\n    ledger :: open_ledger()\n    ledger.prepare()          // stage the transfer (may park; unwinds normally if cancelled)\n    #Shield {                 // once we start committing, finish it\n        ledger.write_row()    // wait point INSIDE shield: completes, does NOT unwind\n        ledger.write_row()\n        ledger.commit()       // prints \"committed\" atomically\n    }                         // cancel that arrived during the shield unwinds HERE\n    return 500\n}\n//\n// cancelled DURING sleep/prepare (outside shield) -> unwinds there, prints:\n//   winner: 7\n//   ledger closed\n//   group done\n// cancelled DURING the shielded commit -> commit finishes first, then unwinds:\n//   winner: 7\n//   committed\n//   ledger closed\n//   group done\n//\n// Shield keyword is a naming sub-choice, not a semantics one. Candidates in\n// Jet's sigil family (cf. #Context, #Unsafe): #Shield  #Shielded  #Atomic\n// #Uninterrupted  #Critical  #Hold  #NoCancel"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Go (context)",
+          "note": "Cooperative — this is option A. ctx.Done() is a channel; a cancelled goroutine keeps running until it checks it. Forgotten checks and work-after-cancel are a well-known Go footgun and the reason context threading is boilerplate.",
+          "code": "select {\ncase <-ctx.Done():\n    return ctx.Err()   // you must write this; nothing stops the goroutine otherwise\ncase v := <-work:\n    process(v)\n}"
+        },
+        {
+          "lang": "Trio (Python)",
+          "note": "Preemptive — options B and C. A checkpoint (its wait points) raises Cancelled and the task unwinds through context managers (its Drop equivalent). trio.CancelScope(shield=True) is exactly option C's shielded region.",
+          "code": "with trio.CancelScope(shield=True):\n    await ledger.commit()   # runs to completion even if the outer scope is cancelled"
+        },
+        {
+          "lang": "Kotlin coroutines",
+          "note": "Preemptive — B/C. Suspension points throw CancellationException, finally/use blocks run cleanup, and withContext(NonCancellable) { } is the shielded region.",
+          "code": "withContext(NonCancellable) {\n    ledger.commit()   // completes despite cancellation\n}"
+        },
+        {
+          "lang": "Python asyncio",
+          "note": "Preemptive — B/C. await points raise CancelledError; asyncio.shield(coro) protects a critical awaitable — option C's shield under a different name.",
+          "code": "await asyncio.shield(ledger.commit())"
+        }
+      ],
+      "rec": "C",
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-11T11:38:48.683Z"
     }
   ],
   "questions": [
@@ -26337,6 +26470,118 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-11T11:43:13.351Z",
+      "by": "fable-medium",
+      "action": "decision.update",
+      "ref": "D-CANCELMODEL1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-11T11:42:53.449Z",
+      "by": "fable-medium",
+      "action": "decision.update",
+      "ref": "D-SERDE2",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-07-11T11:38:48.683Z",
+      "by": "fable-ballot",
+      "action": "decision.add",
+      "ref": "D-CANCELMODEL1",
+      "note": "Task cancellation model at wait points (draft)"
+    },
+    {
+      "at": "2026-07-11T11:37:43.806Z",
+      "by": "fable-ballot",
+      "action": "decision.add",
+      "ref": "D-SERDE2",
+      "note": "Hand-writable Encode/Decode surface (and whether built-in derives re-enter through it) (draft)"
+    },
+    {
+      "at": "2026-07-11T11:36:07.852Z",
+      "by": "terra-456-ratchet",
+      "action": "card.claim",
+      "ref": "c083j754",
+      "note": ""
+    },
+    {
+      "at": "2026-07-11T11:35:57.944Z",
+      "by": "terra-456-store-final",
+      "action": "card.release",
+      "ref": "c083j754",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-11T11:35:57.773Z",
+      "by": "sol-456-store-review",
+      "action": "card.criteria-verify",
+      "ref": "c083j754",
+      "note": "#12"
+    },
+    {
+      "at": "2026-07-11T11:35:57.583Z",
+      "by": "terra-456-store-final",
+      "action": "card.criteria-meet",
+      "ref": "c083j754",
+      "note": "#12"
+    },
+    {
+      "at": "2026-07-11T11:35:57.392Z",
+      "by": "codex-main",
+      "action": "card.criteria-add",
+      "ref": "c083j754",
+      "note": "#12 Store lease setup and snapshot traversal contain no producti"
+    },
+    {
+      "at": "2026-07-11T11:34:38.826Z",
+      "by": "fable-medium",
+      "action": "card.update",
+      "ref": "c2iizmyx",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-11T11:34:19.675Z",
+      "by": "fable-medium",
+      "action": "card.update",
+      "ref": "c2nizvzp",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-11T11:33:59.965Z",
+      "by": "fable-medium",
+      "action": "card.update",
+      "ref": "c0ewbiud",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-11T11:33:22.965Z",
+      "by": "fable-medium",
+      "action": "card.criteria-meet",
+      "ref": "c0ewbiud",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-11T11:33:02.380Z",
+      "by": "fable-medium",
+      "action": "card.criteria-meet",
+      "ref": "c0ewbiud",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-11T11:32:43.034Z",
+      "by": "fable-medium",
+      "action": "card.criteria-meet",
+      "ref": "c0ewbiud",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-11T11:32:21.054Z",
+      "by": "fable-medium",
+      "action": "card.criteria-meet",
+      "ref": "c0ewbiud",
+      "note": "#1"
+    },
     {
       "at": "2026-07-11T11:26:45.489Z",
       "by": "terra-456-store-final",
@@ -29724,118 +29969,6 @@
       "action": "decision.ratify",
       "ref": "D-JOS-BACKUP1",
       "note": "C"
-    },
-    {
-      "at": "2026-07-10T21:22:44.109Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0i0ho3h",
-      "note": "#4 snapshots re-blessed"
-    },
-    {
-      "at": "2026-07-10T21:22:44.109Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0i0ho3h",
-      "note": "#3 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-07-10T21:22:44.109Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0i0ho3h",
-      "note": "#2 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-07-10T21:22:44.109Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0i0ho3h",
-      "note": "#1 Syntax.rs entry updated"
-    },
-    {
-      "at": "2026-07-10T21:22:30.810Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-JOS-APPMODULE1",
-      "note": "Per-app configuration syntax inside user.<name>"
-    },
-    {
-      "at": "2026-07-10T21:20:51.195Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-JPK-TOOLRUN1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-10T21:19:39.731Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-JPK-TASKRUN1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-10T21:19:39.731Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0qwckht",
-      "note": "#4 snapshots re-blessed"
-    },
-    {
-      "at": "2026-07-10T21:19:39.731Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0qwckht",
-      "note": "#3 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-07-10T21:19:39.731Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0qwckht",
-      "note": "#2 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-07-10T21:19:39.731Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0qwckht",
-      "note": "#1 Syntax.rs entry updated"
-    },
-    {
-      "at": "2026-07-10T21:19:07.574Z",
-      "by": "claude-main",
-      "action": "card.update",
-      "ref": "c0esko6c",
-      "note": "phase"
-    },
-    {
-      "at": "2026-07-10T21:19:01.899Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-JOS-APPSTORE1",
-      "note": "jetos beginner app store — pick the UX archetype"
-    },
-    {
-      "at": "2026-07-10T21:18:02.284Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-JOS-NETWORK1",
-      "note": "JetOS declarative networking surface (wifi / firewall / VPN / printing / bluetooth)"
-    },
-    {
-      "at": "2026-07-10T21:18:02.202Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-JOS-OPTIONSVERB1",
-      "note": "jetos options search: dedicated verb, extend jet search/info, or Studio-only"
-    },
-    {
-      "at": "2026-07-10T21:18:02.121Z",
-      "by": "claude-main",
-      "action": "decision.add",
-      "ref": "D-JPK-PKGOVERRIDE1",
-      "note": "Per-package override record inside an overlay block"
     }
   ],
   "nextNum": 368,

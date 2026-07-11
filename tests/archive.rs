@@ -41,7 +41,7 @@ fn run_archive(src: &str) -> String {
         )
     });
     assert!(out.ffi.is_some(), "core.archive must produce an FFI bridge");
-    let user_rust = common::strip_vetted_module(&out.rust, "jet_atomic_windows");
+    let user_rust = common::strip_scheduler_native(&common::strip_vetted_module(&out.rust, "jet_atomic_windows"));
     assert!(
         !user_rust.contains("unsafe"),
         "I1: archive output must not contain unsafe"

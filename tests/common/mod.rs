@@ -426,7 +426,8 @@ pub fn strip_vetted_prelude_modules(rust_code: &str) -> String {
     let s = strip_mod(&s, "jet_term_windows");
     let s = strip_mod(&s, "jet_os_unix");
     let s = strip_mod(&s, "jet_atomic_windows");
-    let mut s = strip_mod(&s, "jet_gtk");
+    let s = strip_mod(&s, "jet_gtk");
+    let mut s = strip_scheduler_native(&s);
     while s.contains("mod user___c_") {
         let before = s.clone();
         s = strip_mod(&s, "user___c_");
@@ -435,6 +436,22 @@ pub fn strip_vetted_prelude_modules(rust_code: &str) -> String {
         }
     }
     s
+}
+
+/// Remove the vetted `jet:scheduler-native` region (raw epoll/kqueue syscalls,
+/// the only `unsafe` in the emitted scheduler — Tower #126) before an I1 scan,
+/// exactly as `golden.rs::strip_vetted_prelude_modules` does.
+pub fn strip_scheduler_native(src: &str) -> String {
+    let begin = "// jet:scheduler-native-begin";
+    let end = "// jet:scheduler-native-end";
+    match (src.find(begin), src.find(end)) {
+        (Some(b), Some(e)) if e >= b => {
+            let mut s = src[..b].to_string();
+            s.push_str(&src[e + end.len()..]);
+            s
+        }
+        _ => src.to_string(),
+    }
 }
 
 /// Remove one audited generated-prelude module before checking user code for
