@@ -9,10 +9,11 @@ mod Types;
 
 pub use jet_sema::SemIndexEffectFacts;
 pub use Build::{
-    build_index, build_symbol_db, HoverEntry, InlayHint, SymDef, SymKind, SymRef, SymbolDB,
+    build_index, build_symbol_db, structural_nodes_from_parsed, HoverEntry, InlayHint, SymDef,
+    SymKind, SymRef, SymbolDB,
 };
 pub use Types::{
-    CallEdge, EffectFact, MemberFact, MemberKind, MemberOrigin, SemIndex, SourceSpan,
+    CallEdge, DefinitionAnchor, EffectFact, MemberFact, MemberKind, MemberOrigin, SemIndex, SourceSpan,
     StructuralAudit, StructuralNode, SymbolDef, SymbolKind, SymbolRef, TypeDossier,
     SCHEMA_VERSION,
 };

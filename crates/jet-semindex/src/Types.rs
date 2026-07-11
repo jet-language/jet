@@ -7,7 +7,7 @@ use jet_foundation::Diagnostics::Span;
 pub const SCHEMA_VERSION: u32 = 3;
 
 /// Byte span in a source file (same coordinates as diagnostics).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SourceSpan {
     pub start: usize,
     pub end: usize,
@@ -101,15 +101,26 @@ pub struct SymbolDef {
     pub kind: SymbolKind,
 }
 
+/// Immutable compiler definition anchor used by semantic refactors. Names are
+/// intentionally absent: spelling can change, while module, kind, and defining
+/// source span identify the declaration selected by name resolution.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct DefinitionAnchor {
+    pub module_path: String,
+    pub kind: String,
+    pub def_span: SourceSpan,
+}
+
 /// One use-site reference (identifier occurrence).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SymbolRef {
     pub name: String,
     pub module_path: String,
     pub scope_identity: Option<String>,
-    /// Compiler-resolved definition identity. `None` means unresolved or
-    /// ambiguous; semantic refactors must never fall back to spelling.
-    pub target_identity: Option<String>,
+    /// Definition selected during the compiler's lexical AST traversal.
+    /// `None` means unresolved or ambiguous; semantic refactors never fall
+    /// back to spelling.
+    pub target: Option<DefinitionAnchor>,
     pub span: SourceSpan,
 }
 
